@@ -1,0 +1,8 @@
+[package]
+name    = "dawn-ecs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dawn-core = { path = "../dawn-core" }
+hecs      = { workspace = true }

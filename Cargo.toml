@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "crates/dawn-core",
+    "crates/dawn-ecs",
+    "crates/dawn-event-store",
+    "crates/dawn-actor",
+    "crates/dawn-simulation",
+]
+resolver = "2"
+
+[workspace.dependencies]
+serde      = { version = "1", features = ["derive"] }
+thiserror  = "1"
+hecs       = "0.10"
+rand       = "0.8"
+tokio      = { version = "1", features = ["full"] }
+futures    = "0.3"

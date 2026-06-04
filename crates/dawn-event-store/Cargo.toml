@@ -1,0 +1,8 @@
+[package]
+name    = "dawn-event-store"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dawn-core = { path = "../dawn-core" }
+serde     = { workspace = true }

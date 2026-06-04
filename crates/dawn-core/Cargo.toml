@@ -1,0 +1,10 @@
+[package]
+name    = "dawn-core"
+version = "0.1.0"
+edition = "2021"
+
+# dawn-core must depend on nothing except serialization utilities.
+# Any addition here requires an ADR. See CLAUDE.md FBD-002.
+[dependencies]
+serde     = { workspace = true }
+thiserror = { workspace = true }
