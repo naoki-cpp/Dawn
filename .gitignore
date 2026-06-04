@@ -1,0 +1,31 @@
+# ── Rust / Cargo ─────────────────────────────────────────────────────────────
+/target/
+**/.DS_Store
+
+# ── Godot 4 ──────────────────────────────────────────────────────────────────
+client/.godot/
+client/android/
+client/ios/
+client/export/
+*.uid
+
+# Godot export templates（大容量・再ダウンロード可能）
+client/.godot/export_credentials
+
+# ── godot-rust / GDExtension ──────────────────────────────────────────────────
+client/gdextension/target/
+
+# ── IDE / Editor ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.iml
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+Thumbs.db
+Desktop.ini
+
+# ── 環境変数 / シークレット ───────────────────────────────────────────────────
+.env
+.env.local
+*.pem
+*.key
