@@ -1,20 +1,8 @@
-[gd_scene load_steps=6 format=3 uid="uid://main_scene"]
+[gd_scene load_steps=3 format=3 uid="uid://main_scene"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/connection.gd" id="2_conn"]
 [ext_resource type="Script" path="res://scripts/camera_controller.gd" id="3_cam"]
-
-[sub_resource type="TorusMesh" id="TorusMesh_marker"]
-inner_radius = 40.0
-outer_radius = 80.0
-rings = 16
-ring_segments = 16
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_marker"]
-albedo_color = Color(0.0, 1.0, 0.4, 1)
-emission_enabled = true
-emission = Color(0.0, 1.0, 0.4, 1)
-emission_energy_multiplier = 2.0
 
 [node name="Main" type="Node"]
 script = ExtResource("1_main")
@@ -40,11 +28,6 @@ shadow_enabled = true
 
 [node name="Ships" type="Node3D" parent="World"]
 
-[node name="MoveMarker" type="MeshInstance3D" parent="World"]
-visible = false
-mesh = SubResource("TorusMesh_marker")
-get_surface_override_material/0 = SubResource("StandardMaterial3D_marker")
-
 [node name="HUD" type="CanvasLayer" parent="."]
 
 [node name="StatsLabel" type="Label" parent="HUD"]
@@ -55,5 +38,5 @@ offset_left = -220.0
 offset_top = 10.0
 offset_right = -10.0
 offset_bottom = 110.0
-text = "CONNECTING...\nShips: 0\nTick: 0\nEvents: 0"
+text = "CONNECTING...\nShips: 0\nTick: 0\nSpeed: -"
 horizontal_alignment = 2

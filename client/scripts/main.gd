@@ -12,11 +12,10 @@ extends Node
 
 # ── ノード参照 ────────────────────────────────────────────────────────────────
 
-@onready var _connection  : Node    = $Connection
-@onready var _ships_root  : Node3D  = $World/Ships
-@onready var _stats_label : Label   = $HUD/StatsLabel
+@onready var _connection  : Node     = $Connection
+@onready var _ships_root  : Node3D   = $World/Ships
+@onready var _stats_label : Label    = $HUD/StatsLabel
 @onready var _camera      : Camera3D = $World/Camera3D
-@onready var _move_marker : Node3D  = $World/MoveMarker
 
 # ── 定数 ─────────────────────────────────────────────────────────────────────
 
@@ -103,8 +102,9 @@ func _on_double_click(screen_pos: Vector2) -> void:
 	var target: Vector3 = ship_server_pos + server_dir * 1_000_000.0
 	_connection.send_move_command(_player_ship_id, target)
 
-	## マーカー: 船から推力方向 500 Godot 単位先に表示（3D方向が分かりやすい）
-	_show_move_marker(ship_godot_pos + ray_dir * 500.0)
+	## 推力矢印をプレイヤー船に表示（ray_dir は Godot 座標系のまま渡す）
+	if _ships.has(_player_ship_id):
+		(_ships[_player_ship_id] as Node3D).call("set_thrust_direction", ray_dir)
 
 # ── イベントハンドラ ──────────────────────────────────────────────────────────
 
@@ -216,12 +216,3 @@ func _apply_player_material(ship: Node3D) -> void:
 	if hull != null:
 		hull.set_surface_override_material(0, _player_material)
 
-func _show_move_marker(world_pos: Vector3) -> void:
-	if _move_marker != null and is_instance_valid(_move_marker):
-		_move_marker.global_position = world_pos
-		_move_marker.visible = true
-		get_tree().create_timer(1.5).timeout.connect(
-			func() -> void:
-				if is_instance_valid(_move_marker):
-					_move_marker.visible = false
-		)
