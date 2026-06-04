@@ -157,38 +157,94 @@ Phase 6: スケール基盤
 
 ### ゲーム機能フェーズ（Bounded Context 拡張）
 
+クライアントはゲーム機能と**並行して開発する**。
+機能を実装するたびにクライアントで動作確認できる状態を維持する。
+
 ```
-Phase 7: Navigation Context
-          Warp（高速移動）/ Dock（停泊）/ Jump Gate
-          Ship Template の導入（データ駆動）
-          完了基準: Warpコマンドで目的地まで自律移動できる
+Phase 7: Navigation Context + Minimal Client（同時進行）
 
-Phase 8: Combat Context
-          武器 / ダメージ / Shield / Armor / Hull
-          ターゲティング / 射程管理
-          完了基準: Ship同士が戦闘し、どちらかがDestroyedになる
+  Phase 7-Server: Navigation Context（サーバー側）
+    Warp（高速移動）/ Dock（停泊）/ Jump Gate
+    Ship Template の導入（データ駆動 / TOML定義）
+    完了基準: Warpコマンドで目的地まで自律移動できる
 
-Phase 9: Resource Context
-          鉱石 / 採掘 / アスタロイドベルト
-          完了基準: Shipが資源を採掘してCargoに積める
+  Phase 7-Client: Godot 最小クライアント（クライアント側）
+    技術: Godot 4 + GDScript
+    gRPC でサーバーからイベントを受信
+    Ship を 3D 空間に表示・移動を反映
+    スカイボックス（宇宙背景）
+    完了基準: Godot 上で Ship が 3D 宇宙空間を動いているのが見える
 
-Phase 10: Economy Context
-           Market / Trade / Manufacturing
-           完了基準: プレイヤー間でアイテムを売買できる
+Phase 8: Combat Context + Combat View
 
-Phase 11: Client / Rendering
-           3Dクライアント接続
-           Client-Side Prediction + Reconciliation
-           完了基準: ブラウザまたはネイティブクライアントで3D表示できる
+  Phase 8-Server: Combat Context
+    武器 / ダメージ / Shield / Armor / Hull
+    ターゲティング / 射程管理
+    完了基準: Ship同士が戦闘し、どちらかがDestroyedになる
+
+  Phase 8-Client: 戦闘エフェクト
+    武器発射パーティクル / 爆発エフェクト
+    HUD（Shield/Armor/Hull ゲージ）
+    ターゲット表示
+    完了基準: 戦闘が 3D で視覚的に確認できる
+
+Phase 9: Resource Context + Mining View
+  採掘ビーム・資源オブジェクト表示
+  完了基準: 採掘動作が 3D で確認できる
+
+Phase 10: Economy Context + Market UI
+  市場画面 / 取引 UI
+  完了基準: ゲーム内でアイテムを売買できる
+
+Phase 11: Client 本格化（GDExtension 導入）
+  godot-rust (GDExtension) で Client-Side Prediction を Rust 実装
+  dawn-core の型を Godot へ直接公開
+  本格的な宇宙エフェクト（ネビュラ・レンズフレア・ワープトンネル）
+  完了基準: レイテンシを隠した滑らかな操作感が実現できる
+```
+
+### クライアント技術スタック（決定済み）
+
+```
+エンジン    : Godot 4
+ゲームロジック: GDScript（AI が主に書く）
+高性能処理  : godot-rust / GDExtension（Phase 11 以降）
+サーバー通信: gRPC（Phase 4 完了後） / In-Memory（Phase 7 開発時）
+型共有      : Phase 7-11: proto 変換 → Phase 11: GDExtension で直接共有
+
+→ 技術選択の根拠は ADR-0004 を参照
+```
+
+### リポジトリ構成（Phase 7-Client 追加時）
+
+```
+dawn/                       ← 既存 Cargo Workspace（サーバー）
+client/                     ← Godot プロジェクト（新規追加）
+  project.godot
+  scenes/
+    main.tscn
+    ship.tscn
+  scripts/
+    server_connection.gd    ← gRPC 受信
+    ship_controller.gd      ← Ship 表示・移動
+    skybox.gd
+  assets/
+    models/                 ← Ship 3D モデル（glTF）
+    shaders/                ← 宇宙エフェクト
+  gdextension/              ← Phase 11 以降
+    Cargo.toml              ← godot-rust
+    src/
+      lib.rs                ← dawn-core を import
 ```
 
 ### フェーズ横断の設計原則
 
 ```
-各Contextは独立したCrateとして追加する
-上位Contextは下位Contextに依存しない（Spatial ← Navigation ← Combat …）
-Anti-TiDiの制約（INV-TIDI）は全フェーズで維持する
-Event Sourcingの原則（INV-001〜006）は全フェーズで維持する
+各 Server Context は独立した Crate として追加する
+上位 Context は下位 Context に依存しない（Spatial ← Navigation ← Combat …）
+各 Server フェーズに対応する Client フェーズを必ず用意する
+Anti-TiDi の制約（INV-TIDI）は全フェーズで維持する
+Event Sourcing の原則（INV-001〜006）は全フェーズで維持する
 ```
 
 ---
