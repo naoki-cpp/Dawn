@@ -30,19 +30,20 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 ## 2. 現在地
 
 ```
-現在のフェーズ : Phase 3 — Event 永続化
+現在のフェーズ : Phase 4 — ゲーム開発ループ
 フェーズの状態 : 未着手
 ```
 
 ### 完了済みフェーズ
 
-- ✅ Phase 0 — 基盤確立（`cargo test --workspace` 49テスト全パス）
+- ✅ Phase 0 — 基盤確立（`cargo test --workspace` 73テスト全パス）
 - ✅ Phase 1 — Single Node シミュレーション検証（max 11,847 µs ≤ 16,000 µs 目標達成）
-- ✅ Phase 2 — In-Memory Multi-Node（3ノード 63,000イベント整合性 ✓、65テスト全パス）
+- ✅ Phase 2 — In-Memory Multi-Node（3ノード 63,000イベント整合性 ✓）
+- ✅ Phase 3 — Event 永続化（Snapshot + Replay 再起動後の状態完全復元 ✓）
 
 ### 次に着手すべきタスク
 
-**ファイルベース EventStore の実装（Append-only Log）**
+**Phase 4 前提作業: `ClientConnection` trait の定義 + `InProcessConnection` 実装**
 
 ---
 
@@ -117,17 +118,26 @@ expected   : 63,000 events  ✓ PASS（sleep・flush・バリアなし）
 
 ---
 
-## 6. Phase 3 — Event 永続化
+## 6. Phase 3 — Event 永続化 ✅
 
 **完了基準:** ノードを再起動した後、Snapshot + Event Replay によって
-シャットダウン直前の Ship 状態が完全に復元される
+シャットダウン直前の Ship 状態が完全に復元される → **達成**
 
-| タスク | 状態 | 依存 |
+| タスク | 状態 | 備考 |
 |---|---|---|
-| ファイルベース EventStore 実装 | ⬜ 未着手 | Phase 2 完了後 |
-| Snapshot 取得ロジック | ⬜ 未着手 | |
-| Snapshot からの State 復元 | ⬜ 未着手 | |
-| 再起動後の整合性テスト | ⬜ 未着手 | |
+| ファイルベース EventStore 実装 | ✅ 完了 | `FileEventStore`（length-prefix + postcard） |
+| Snapshot 取得ロジック | ✅ 完了 | `SimulationNode::take_snapshot()` |
+| Snapshot からの State 復元 | ✅ 完了 | `SimulationNode::restore_from()` |
+| 再起動後の整合性テスト | ✅ 完了 | tick / ship count / positions 全一致 |
+
+### 計測結果（記録）
+
+```
+100 ships × 10 ticks
+Session 1: Tick 5 でスナップショット（log_index=600）→ Tick 10 まで継続（1100 events）
+Session 2: restore_from() で復元 → tick / ship count / positions ✓ PASS
+テスト総数: 73/73
+```
 
 ---
 
