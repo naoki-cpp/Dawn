@@ -14,3 +14,9 @@ dawn-event-store = { path = "../dawn-event-store" }
 dawn-actor       = { path = "../dawn-actor" }
 rand             = { workspace = true, features = ["small_rng"] }
 tokio            = { workspace = true }
+postcard         = { workspace = true }
+serde            = { workspace = true }
+tempfile         = "3"
+
+[dev-dependencies]
+tempfile = "3"

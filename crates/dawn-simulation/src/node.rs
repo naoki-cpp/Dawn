@@ -1,18 +1,35 @@
 //! `SimulationNode` — the self-contained simulation unit for one Sector.
 //!
-//! Ties together `SimWorld` (ECS), `InMemoryEventStore`, and the
-//! `MovementSystem` into a runnable tick loop.
+//! # Generic over `S: EventStore`
 //!
-//! No networking.  No async.  No global state.
-//! This is the core that must work in isolation before any distribution layer
-//! is added — the entire rationale for this crate existing.
+//! `SimulationNode<S>` defaults to `SimulationNode<InMemoryEventStore>` so all
+//! existing call sites continue to compile unchanged.  Pass a `FileEventStore`
+//! to persist events to disk (Phase 3).
+//!
+//! # Snapshot / Restore (INV-002)
+//!
+//! ```text
+//! node.take_snapshot()           → StateSnapshot (ECS state at log_index N)
+//! SimulationNode::restore_from(store, &snapshot)
+//!     → reconstruct ECS from snapshot, replay events from log_index N onward
+//! ```
+
+use std::collections::HashMap;
 
 use dawn_core::{
-    events::ShipSpawned,
+    events::{ShipMoved, ShipSpawned},
     DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity,
 };
-use dawn_ecs::{systems::MovementSystem, SimWorld};
+use dawn_ecs::{
+    components::{PositionComp, VelocityComp},
+    systems::MovementSystem,
+    Entity, SimWorld,
+};
 use dawn_event_store::{store::EventStore, InMemoryEventStore};
+
+use crate::snapshot::{ShipSnapshot, StateSnapshot};
+
+// ── TickResult ────────────────────────────────────────────────────────────────
 
 /// Result returned after executing one tick.
 #[derive(Debug)]
@@ -25,31 +42,93 @@ pub struct TickResult {
     pub events        : Vec<DomainEvent>,
 }
 
-/// A single-Sector simulation node.
+// ── SimulationNode ────────────────────────────────────────────────────────────
+
+/// A single-Sector simulation node, generic over its event store.
 ///
-/// Owns the ECS world and event store for one Sector.
-/// Designed to run entirely without network communication.
-pub struct SimulationNode {
-    node_id      : NodeId,
-    sector_id    : SectorId,
-    bounds       : SectorBounds,
-    world        : SimWorld,
-    event_store  : InMemoryEventStore,
-    current_tick : Tick,
-    id_counter   : u64,
+/// The default store is `InMemoryEventStore`; use `FileEventStore` for
+/// persistent operation (Phase 3).
+pub struct SimulationNode<S = InMemoryEventStore>
+where
+    S: EventStore,
+{
+    node_id     : NodeId,
+    sector_id   : SectorId,
+    bounds      : SectorBounds,
+    world       : SimWorld,
+    event_store : S,
+    current_tick: Tick,
+    id_counter  : u64,
+    /// Maps `ShipId` → hecs `Entity` for O(1) position updates during replay.
+    ship_index  : HashMap<ShipId, Entity>,
 }
 
-impl SimulationNode {
+// ── Constructors ──────────────────────────────────────────────────────────────
+
+impl SimulationNode<InMemoryEventStore> {
+    /// Create a node backed by an in-memory event store (Phase 0–2 default).
     pub fn new(node_id: NodeId, sector_id: SectorId, bounds: SectorBounds) -> Self {
+        Self::with_store(node_id, sector_id, bounds, InMemoryEventStore::new())
+    }
+}
+
+impl<S: EventStore> SimulationNode<S> {
+    /// Create a node with a caller-supplied event store.
+    ///
+    /// Use this with `FileEventStore` for persistent operation.
+    pub fn with_store(
+        node_id  : NodeId,
+        sector_id: SectorId,
+        bounds   : SectorBounds,
+        store    : S,
+    ) -> Self {
         Self {
             node_id,
             sector_id,
             bounds,
-            world        : SimWorld::new(sector_id),
-            event_store  : InMemoryEventStore::new(),
-            current_tick : Tick::ZERO,
-            id_counter   : 0,
+            world       : SimWorld::new(sector_id),
+            event_store : store,
+            current_tick: Tick::ZERO,
+            id_counter  : 0,
+            ship_index  : HashMap::new(),
         }
+    }
+
+    /// Restore a node from a `StateSnapshot` and replay subsequent events.
+    ///
+    /// `store` must already contain all events (loaded from disk).
+    /// Events before `snapshot.log_index` are covered by the snapshot;
+    /// events from `snapshot.log_index` onward are replayed.
+    pub fn restore_from(store: S, snapshot: &StateSnapshot) -> Self {
+        let mut node = Self {
+            node_id     : snapshot.node_id,
+            sector_id   : snapshot.sector_id,
+            bounds      : snapshot.bounds,
+            world       : SimWorld::new(snapshot.sector_id),
+            event_store : store,
+            current_tick: snapshot.tick,
+            id_counter  : snapshot.id_counter,
+            ship_index  : HashMap::new(),
+        };
+
+        // Restore ECS state from snapshot.
+        for ship in &snapshot.ships {
+            node.insert_to_world(ship.ship_id, ship.position, ship.velocity);
+        }
+
+        // Replay events that occurred after the snapshot was taken.
+        // Collect first to avoid a simultaneous borrow of `node`.
+        let post_events: Vec<DomainEvent> = node
+            .event_store
+            .iter_from(snapshot.log_index)
+            .map(|r| r.event.clone())
+            .collect();
+
+        for event in &post_events {
+            node.apply_event(event);
+        }
+
+        node
     }
 
     // ── Identity ──────────────────────────────────────────────────────────────
@@ -57,17 +136,17 @@ impl SimulationNode {
     pub fn node_id(&self)    -> NodeId   { self.node_id }
     pub fn sector_id(&self)  -> SectorId { self.sector_id }
 
-    // ── Spawn / Despawn ───────────────────────────────────────────────────────
+    // ── Spawn ─────────────────────────────────────────────────────────────────
 
-    /// Spawn a Ship and append a `ShipSpawned` event.
+    /// Spawn a Ship, record it in the ECS, append a `ShipSpawned` event.
     ///
-    /// The `ShipId` is generated internally using the Node's counter.
-    /// See CLAUDE.md INV-004: IDs are never reused.
+    /// INV-004: the ID is generated from a monotonically increasing counter
+    /// combined with `NodeId`.  IDs are never reused.
     pub fn spawn_ship(&mut self, position: Position, velocity: Velocity) -> ShipId {
         let ship_id = ShipId::new(self.node_id, self.id_counter);
         self.id_counter += 1;
 
-        self.world.spawn_ship(ship_id, position, velocity);
+        self.insert_to_world(ship_id, position, velocity);
 
         self.event_store.append(DomainEvent::ShipSpawned(ShipSpawned {
             ship_id,
@@ -83,38 +162,106 @@ impl SimulationNode {
 
     /// Execute one simulation tick.
     ///
-    /// Processing order (see CLAUDE.md §6 — must not be reordered):
+    /// Processing order (CLAUDE.md §6 — must not be reordered):
     ///
     /// 1. Advance the logical tick counter.
-    /// 2. Run the Movement System (pure ECS computation).
-    /// 3. Append all produced events to the Event Store.
-    /// 4. Return a `TickResult`.
+    /// 2. Run the Movement System (ECS batch).
+    /// 3. Append produced events to the Event Store.
+    /// 4. Return a `TickResult` (events included for Actor-layer replication).
     pub fn tick(&mut self) -> TickResult {
-        // Step 1: advance tick.
         self.current_tick = self.current_tick.next();
         let tick = self.current_tick;
 
-        // Step 2: run systems.
         let events = MovementSystem::run(&mut self.world, &self.bounds, tick);
-
-        // Step 3: persist — all events are appended before any external
-        // notification would go out (CLAUDE.md §4, forbidden pattern 3).
-        let count = events.len();
+        let count  = events.len();
         self.event_store.append_batch(events.iter().cloned());
 
-        // Step 4: return result (events are returned for Actor-layer replication).
         TickResult { tick, events_emitted: count, events }
+    }
+
+    // ── Snapshot ──────────────────────────────────────────────────────────────
+
+    /// Capture the current ECS state as a `StateSnapshot`.
+    ///
+    /// The snapshot covers all events with `log_index < event_store.len()`.
+    /// Pair with the event log to reconstruct this exact state on restart.
+    pub fn take_snapshot(&self) -> StateSnapshot {
+        let ships: Vec<ShipSnapshot> = self
+            .ship_index
+            .iter()
+            .filter_map(|(&ship_id, &entity)| {
+                let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+                let vel = self.world.inner().get::<&VelocityComp>(entity).ok()?.0;
+                Some(ShipSnapshot { ship_id, position: pos, velocity: vel })
+            })
+            .collect();
+
+        StateSnapshot {
+            node_id   : self.node_id,
+            sector_id : self.sector_id,
+            bounds    : self.bounds,
+            log_index : self.event_store.len() as u64,
+            tick      : self.current_tick,
+            id_counter: self.id_counter,
+            ships,
+        }
     }
 
     // ── Observation ───────────────────────────────────────────────────────────
 
-    pub fn current_tick(&self)    -> Tick  { self.current_tick }
-    pub fn ship_count(&self)      -> usize { self.world.ship_count() }
+    pub fn current_tick(&self)      -> Tick  { self.current_tick }
+    pub fn ship_count(&self)        -> usize { self.world.ship_count() }
     pub fn total_event_count(&self) -> usize { self.event_store.len() }
+    pub fn event_store(&self)       -> &S    { &self.event_store }
 
-    /// Borrow the event store for inspection (tests, replay, snapshotting).
-    pub fn event_store(&self) -> &InMemoryEventStore {
-        &self.event_store
+    /// Look up the current position of a Ship by its ID.
+    pub fn get_ship_position(&self, ship_id: ShipId) -> Option<Position> {
+        let entity = self.ship_index.get(&ship_id)?;
+        self.world.inner().get::<&PositionComp>(*entity).ok().map(|c| c.0)
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    /// Add a Ship to the ECS World and record the entity in `ship_index`.
+    /// Does NOT append any event — used by `spawn_ship` and replay.
+    fn insert_to_world(&mut self, ship_id: ShipId, position: Position, velocity: Velocity) {
+        let entity = self.world.spawn_ship(ship_id, position, velocity);
+        self.ship_index.insert(ship_id, entity);
+    }
+
+    /// Apply a single domain event to the ECS World without appending it.
+    /// Used during `restore_from` to replay post-snapshot events.
+    fn apply_event(&mut self, event: &DomainEvent) {
+        match event {
+            DomainEvent::ShipSpawned(e) => {
+                if !self.ship_index.contains_key(&e.ship_id) {
+                    // Velocity is not stored in ShipSpawned; snapshot provides it.
+                    self.insert_to_world(e.ship_id, e.initial_position, Velocity::ZERO);
+                }
+                // Advance id_counter past any replayed ID to prevent future reuse.
+                let counter = e.ship_id.0.counter();
+                if counter >= self.id_counter {
+                    self.id_counter = counter + 1;
+                }
+            }
+
+            DomainEvent::ShipMoved(ShipMoved { ship_id, to, tick, .. }) => {
+                if let Some(&entity) = self.ship_index.get(ship_id) {
+                    if let Ok(mut pos) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+                        pos.0 = *to;
+                    }
+                }
+                if *tick > self.current_tick {
+                    self.current_tick = *tick;
+                }
+            }
+
+            DomainEvent::ShipDespawned(e) => {
+                if let Some(entity) = self.ship_index.remove(&e.ship_id) {
+                    self.world.despawn_ship(entity);
+                }
+            }
+        }
     }
 }
 
@@ -124,8 +271,9 @@ impl SimulationNode {
 mod tests {
     use super::*;
     use dawn_core::Velocity;
+    use dawn_event_store::FileEventStore;
 
-    fn node() -> SimulationNode {
+    fn mem_node() -> SimulationNode {
         SimulationNode::new(
             NodeId(0),
             SectorId(0),
@@ -133,11 +281,11 @@ mod tests {
         )
     }
 
-    // ── Ship lifecycle ───────────────────────────────────────────────────────
+    // ── Existing behaviour (unchanged) ───────────────────────────────────────
 
     #[test]
     fn spawning_a_ship_appends_a_ship_spawned_event() {
-        let mut node = node();
+        let mut node = mem_node();
         node.spawn_ship(Position::ORIGIN, Velocity::ZERO);
 
         assert_eq!(node.total_event_count(), 1);
@@ -149,17 +297,15 @@ mod tests {
 
     #[test]
     fn spawned_ships_receive_unique_ids() {
-        let mut node = node();
+        let mut node = mem_node();
         let id_a = node.spawn_ship(Position::ORIGIN, Velocity::ZERO);
         let id_b = node.spawn_ship(Position::ORIGIN, Velocity::ZERO);
         assert_ne!(id_a, id_b);
     }
 
-    // ── Tick behaviour ───────────────────────────────────────────────────────
-
     #[test]
     fn tick_advances_the_logical_tick_counter_by_one() {
-        let mut node = node();
+        let mut node = mem_node();
         assert_eq!(node.current_tick(), Tick::ZERO);
         node.tick();
         assert_eq!(node.current_tick(), Tick(1));
@@ -169,67 +315,132 @@ mod tests {
 
     #[test]
     fn each_moving_ship_produces_one_ship_moved_event_per_tick() {
-        let mut node = node();
+        let mut node = mem_node();
         node.spawn_ship(Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0));
         node.spawn_ship(Position::new(200.0, 100.0, 100.0), Velocity::new(0.0, 1.0, 0.0));
-
-        let result = node.tick();
-        assert_eq!(result.events_emitted, 2);
+        assert_eq!(node.tick().events_emitted, 2);
     }
 
     #[test]
     fn stationary_ships_produce_no_ship_moved_events() {
-        let mut node = node();
+        let mut node = mem_node();
         node.spawn_ship(Position::ORIGIN, Velocity::ZERO);
-        let result = node.tick();
-        assert_eq!(result.events_emitted, 0);
+        assert_eq!(node.tick().events_emitted, 0);
     }
 
     #[test]
     fn ship_moved_events_carry_the_current_tick_value() {
-        let mut node = node();
+        let mut node = mem_node();
         node.spawn_ship(Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0));
-        node.tick(); // tick becomes 1
-        node.tick(); // tick becomes 2
-
+        node.tick();
+        node.tick();
         let last = node.event_store().all_records().last().unwrap();
         assert_eq!(last.event.tick(), Tick(2));
     }
 
-    // ── INV-002: replay ──────────────────────────────────────────────────────
-
     #[test]
     fn total_event_count_grows_monotonically_across_ticks() {
-        let mut node = node();
+        let mut node = mem_node();
         node.spawn_ship(Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 1.0, 1.0));
         let mut last = node.total_event_count();
         for _ in 0..10 {
             node.tick();
-            assert!(
-                node.total_event_count() >= last,
-                "event count must never decrease"
-            );
+            assert!(node.total_event_count() >= last);
             last = node.total_event_count();
         }
     }
 
     #[test]
     fn replaying_events_reproduces_correct_spawn_count() {
-        let mut node = node();
+        let mut node = mem_node();
         for i in 0..5 {
-            node.spawn_ship(
-                Position::new(i as f32 * 100.0, 0.0, 0.0),
-                Velocity::new(1.0, 0.0, 0.0),
-            );
+            node.spawn_ship(Position::new(i as f32 * 100.0, 0.0, 0.0), Velocity::new(1.0, 0.0, 0.0));
         }
         node.tick();
-
-        let spawned = node
-            .event_store()
-            .iter_from(0)
+        let spawned = node.event_store().iter_from(0)
             .filter(|r| matches!(r.event, DomainEvent::ShipSpawned(_)))
             .count();
+        assert_eq!(spawned, 5);
+    }
 
-        assert_eq!(spawned, 5, "replay must recover the number of spawned ships");
+    // ── Snapshot ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn snapshot_records_correct_ship_count_and_tick() {
+        let mut node = mem_node();
+        for i in 0..3 {
+            node.spawn_ship(Position::new(i as f32 * 100.0, 0.0, 0.0), Velocity::new(1.0, 0.0, 0.0));
+        }
+        for _ in 0..5 { node.tick(); }
+
+        let snap = node.take_snapshot();
+        assert_eq!(snap.ships.len(), 3);
+        assert_eq!(snap.tick, Tick(5));
+        assert_eq!(snap.log_index, node.total_event_count() as u64);
+    }
+
+    // ── INV-002: restore ──────────────────────────────────────────────────────
+
+    #[test]
+    fn ecs_state_is_fully_restored_from_snapshot_and_event_replay_after_simulated_restart() {
+        let dir           = tempfile::tempdir().unwrap();
+        let event_path    = dir.path().join("events.log");
+        let snapshot_path = dir.path().join("snapshot.bin");
+
+        // ── Session 1: run, snapshot mid-way, continue, shut down ───────────
+        let ship_ids: Vec<ShipId>;
+        let final_tick: Tick;
+        let final_positions: Vec<Position>;
+        {
+            let store = FileEventStore::open(&event_path).unwrap();
+            let mut node = SimulationNode::with_store(
+                NodeId(0), SectorId(0),
+                SectorBounds::cube(SectorBounds::DEFAULT_SIZE),
+                store,
+            );
+
+            // Spawn 5 ships.
+            ship_ids = (0..5u64).map(|i| {
+                node.spawn_ship(
+                    Position::new(i as f32 * 100.0, 0.0, 0.0),
+                    Velocity::new(1.0 + i as f32, 0.0, 0.0),
+                )
+            }).collect();
+
+            // Run 5 ticks, then snapshot.
+            for _ in 0..5 { node.tick(); }
+            let snap = node.take_snapshot();
+            snap.save(&snapshot_path).unwrap();
+
+            // Run 3 more ticks before shutdown.
+            for _ in 0..3 { node.tick(); }
+
+            final_tick      = node.current_tick();
+            final_positions = ship_ids.iter()
+                .map(|id| node.get_ship_position(*id).unwrap())
+                .collect();
+        } // ← node drops here; FileEventStore flushes on drop via BufWriter
+
+        // ── Session 2: restart, restore, verify ─────────────────────────────
+        let snap   = StateSnapshot::load(&snapshot_path).unwrap();
+        let store2 = FileEventStore::open(&event_path).unwrap();
+        let node2  = SimulationNode::restore_from(store2, &snap);
+
+        assert_eq!(
+            node2.current_tick(), final_tick,
+            "tick must match after restore"
+        );
+        assert_eq!(
+            node2.ship_count(), ship_ids.len(),
+            "ship count must match after restore"
+        );
+        for (id, expected_pos) in ship_ids.iter().zip(final_positions.iter()) {
+            let restored_pos = node2.get_ship_position(*id)
+                .expect("ship must exist after restore");
+            assert_eq!(
+                restored_pos, *expected_pos,
+                "position of ship {} must match after restore", id
+            );
+        }
     }
 }

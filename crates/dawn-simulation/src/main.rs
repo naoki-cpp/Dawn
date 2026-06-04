@@ -10,6 +10,7 @@
 mod cluster;
 mod node;
 mod sector_simulator_actor;
+mod snapshot;
 mod spawner;
 
 use dawn_core::{NodeId, SectorBounds, SectorId};
@@ -18,6 +19,9 @@ use spawner::{generate_ships, SpawnConfig};
 use std::time::Instant;
 
 use cluster::MultiNodeCluster;
+use dawn_core::Position;
+use dawn_event_store::FileEventStore;
+use snapshot::StateSnapshot;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -35,6 +39,8 @@ async fn main() {
     run_phase1_benchmark();
     println!();
     run_phase2_demo().await;
+    println!();
+    run_phase3_demo();
 }
 
 // ── Phase 1: single-node benchmark ───────────────────────────────────────────
@@ -144,5 +150,87 @@ async fn run_phase2_demo() {
         else                      { "✗ FAIL — event loss detected" });
 
     cluster.shutdown().await;
+    println!("═══════════════════════════════════════════");
+}
+
+// ── Phase 3: Event 永続化デモ ─────────────────────────────────────────────────
+
+const P3_SHIPS : usize = 100;
+const P3_TICKS : usize = 10;
+
+fn run_phase3_demo() {
+    println!("═══════════════════════════════════════════");
+    println!("  Phase 3 — event persistence demo         ");
+    println!("═══════════════════════════════════════════");
+
+    let dir           = tempfile::tempdir().expect("failed to create temp dir");
+    let event_path    = dir.path().join("sector0_events.log");
+    let snapshot_path = dir.path().join("sector0_snapshot.bin");
+
+    println!("  log      : {}", event_path.display());
+    println!("  snapshot : {}", snapshot_path.display());
+    println!("  ships    : {P3_SHIPS}");
+    println!("  ticks    : {P3_TICKS}");
+    println!();
+
+    // ── Session 1 ────────────────────────────────────────────────────────────
+    let ship_ids: Vec<dawn_core::ShipId>;
+    let session1_tick: dawn_core::Tick;
+    let session1_positions: Vec<Position>;
+    {
+        let store = FileEventStore::open(&event_path)
+            .expect("failed to open event log");
+        let mut node = SimulationNode::with_store(
+            NodeId(0), SectorId(0),
+            SectorBounds::cube(SectorBounds::DEFAULT_SIZE),
+            store,
+        );
+
+        let config = SpawnConfig::default_for_node(NodeId(0));
+        let ships  = generate_ships(P3_SHIPS, &config, 0);
+        ship_ids   = ships.iter().map(|(id, ..)| *id).collect();
+
+        for (_, pos, vel) in ships {
+            node.spawn_ship(pos, vel);
+        }
+
+        // Run half the ticks, take snapshot.
+        for _ in 0..(P3_TICKS / 2) { node.tick(); }
+        let snap = node.take_snapshot();
+        snap.save(&snapshot_path).expect("failed to save snapshot");
+        println!("  [session 1] snapshot taken at tick {}  (log_index={})",
+            snap.tick.value(), snap.log_index);
+
+        // Run remaining ticks.
+        for _ in 0..(P3_TICKS - P3_TICKS / 2) { node.tick(); }
+
+        session1_tick      = node.current_tick();
+        session1_positions = ship_ids.iter()
+            .filter_map(|id| node.get_ship_position(*id))
+            .collect();
+        println!("  [session 1] final tick: {}  events: {}",
+            session1_tick.value(), node.total_event_count());
+    } // FileEventStore flushes here
+
+    // ── Session 2 (simulated restart) ────────────────────────────────────────
+    let snap   = StateSnapshot::load(&snapshot_path).expect("failed to load snapshot");
+    let store2 = FileEventStore::open(&event_path).expect("failed to reopen event log");
+    let node2  = SimulationNode::restore_from(store2, &snap);
+
+    let restored_positions: Vec<Position> = ship_ids.iter()
+        .filter_map(|id| node2.get_ship_position(*id))
+        .collect();
+
+    let tick_ok = node2.current_tick() == session1_tick;
+    let count_ok = node2.ship_count() == P3_SHIPS;
+    let pos_ok   = restored_positions == session1_positions;
+
+    println!("  [session 2] restored tick: {}  ships: {}",
+        node2.current_tick().value(), node2.ship_count());
+    println!();
+    println!("  ── consistency check ──");
+    println!("  tick match     : {}", if tick_ok   { "✓ PASS" } else { "✗ FAIL" });
+    println!("  ship count     : {}", if count_ok  { "✓ PASS" } else { "✗ FAIL" });
+    println!("  positions match: {}", if pos_ok    { "✓ PASS" } else { "✗ FAIL" });
     println!("═══════════════════════════════════════════");
 }

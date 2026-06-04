@@ -18,3 +18,5 @@ pub mod systems;
 pub mod world;
 
 pub use world::SimWorld;
+// Re-export so upper crates don't need a direct hecs dependency.
+pub use hecs::Entity;

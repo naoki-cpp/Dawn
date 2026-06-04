@@ -14,10 +14,12 @@
 //! - `InMemoryEventStore` — in-process store used by MVP and all tests.
 //! - `EventRecord` — a single entry in the log.
 
+pub mod file;
 pub mod memory;
 pub mod record;
 pub mod store;
 
+pub use file::FileEventStore;
 pub use memory::InMemoryEventStore;
 pub use record::EventRecord;
 pub use store::EventStore;
