@@ -30,7 +30,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 ## 2. 現在地
 
 ```
-現在のフェーズ : Phase 2 — In-Memory Multi-Node
+現在のフェーズ : Phase 3 — Event 永続化
 フェーズの状態 : 未着手
 ```
 
@@ -38,10 +38,11 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 - ✅ Phase 0 — 基盤確立（`cargo test --workspace` 49テスト全パス）
 - ✅ Phase 1 — Single Node シミュレーション検証（max 11,847 µs ≤ 16,000 µs 目標達成）
+- ✅ Phase 2 — In-Memory Multi-Node（3ノード 63,000イベント整合性 ✓、65テスト全パス）
 
 ### 次に着手すべきタスク
 
-**`dawn-actor` クレートの作成（tokio mpsc ベースの Actor 基盤）**
+**ファイルベース EventStore の実装（Append-only Log）**
 
 ---
 
@@ -93,25 +94,25 @@ total events      : 1,010,000（spawn 10,000 + move 1,000,000）
 
 ---
 
-## 5. Phase 2 — In-Memory Multi-Node
+## 5. Phase 2 — In-Memory Multi-Node ✅
 
 **完了基準:** 3 つの論理ノードが In-Memory Channel 経由でイベントを同期し、
-全ノードのイベントログが一致することをテストで確認する
+全ノードのイベントログが一致することをテストで確認する → **達成**
 
-| タスク | 状態 | 依存 |
+| タスク | 状態 | 備考 |
 |---|---|---|
-| `dawn-actor` クレート作成（Actor 基盤） | ⬜ 未着手 | Phase 1 完了後 |
-| `SectorSimulatorActor` 実装 | ⬜ 未着手 | |
-| `EventStoreActor` 実装 | ⬜ 未着手 | |
-| ノード間 In-Memory Channel 接続 | ⬜ 未着手 | |
-| 3 ノード整合性テスト | ⬜ 未着手 | |
+| `dawn-actor` クレート作成（Actor 基盤） | ✅ 完了 | EventStoreActor, ReplicationBus |
+| `SectorSimulatorActor` 実装 | ✅ 完了 | dawn-simulation 内 |
+| `EventStoreActor` 実装 | ✅ 完了 | |
+| ノード間 In-Memory Channel 接続 | ✅ 完了 | 単一チャンネル設計で決定論的 |
+| 3 ノード整合性テスト | ✅ 完了 | 65 テスト全パス |
 
-### Phase 2 の制約（変えない）
+### 整合性テスト結果（記録）
 
 ```
-通信: In-Memory Channel（tokio::mpsc）のみ
-ネットワーク: 引き続き不使用
-ノード数: 3 固定
+3 nodes × 1,000 ships × 20 ticks
+replicated : 63,000 events
+expected   : 63,000 events  ✓ PASS（sleep・flush・バリアなし）
 ```
 
 ---
