@@ -51,11 +51,11 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	_update_hud()
 
-func _unhandled_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
+	## _input はイベントが handled でも呼ばれる。
+	## カメラがドラッグ中の場合はダブルクリックを無視する。
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
-		## カメラのドラッグ判定は camera_controller 側で行う。
-		## ここではダブルクリック（左ボタン・非ドラッグ）のみ処理する。
 		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
 			_check_double_click(mb.position)
 
@@ -67,10 +67,11 @@ func _check_double_click(pos: Vector2) -> void:
 	var dp : float = pos.distance_to(_last_click_pos)
 
 	if dt < DOUBLE_CLICK_SEC and dp < DOUBLE_CLICK_PX:
-		## ドラッグ中のダブルクリックは無視
-		if not (_camera as Node).call("is_dragging") as bool:
+		## カメラドラッグ中のダブルクリックは無視
+		var cam_dragging: bool = (_camera as Node).call("is_dragging") as bool
+		if not cam_dragging:
 			_on_double_click(pos)
-		_last_click_time = -1.0  ## リセット（3回目を別のダブルクリックにしない）
+		_last_click_time = -1.0  ## リセット（3連打を2回目のダブルクリックにしない）
 	else:
 		_last_click_time = now
 		_last_click_pos  = pos
