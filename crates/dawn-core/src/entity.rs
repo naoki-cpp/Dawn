@@ -33,6 +33,11 @@ impl EntityId {
         self.0
     }
 
+    /// 生の u64 値から EntityId を復元する（ネットワーク受信時などに使用）。
+    pub fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
     pub fn node_id(self) -> NodeId {
         NodeId((self.0 >> 56) as u8)
     }

@@ -220,6 +220,41 @@ impl<S: EventStore> SimulationNode<S> {
         self.world.inner().get::<&PositionComp>(*entity).ok().map(|c| c.0)
     }
 
+    /// MoveCommand を処理する: 目標方向への Velocity を設定する。
+    ///
+    /// Velocity の大きさは固定 `speed`。目標に非常に近い場合は停止する。
+    /// これは Cycle 2 のシンプルな実装。将来は加速度モデルに移行できる。
+    pub fn apply_move_command(&mut self, ship_id: ShipId, target: Position, speed: f32) {
+        let entity = match self.ship_index.get(&ship_id) {
+            Some(&e) => e,
+            None     => return,
+        };
+        let pos = match self.world.inner().get::<&PositionComp>(entity).ok() {
+            Some(c) => c.0,
+            None    => return,
+        };
+
+        let dx = target.x - pos.x;
+        let dy = target.y - pos.y;
+        let dz = target.z - pos.z;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+
+        let vel = if dist < speed {
+            // 目標に到達: 停止
+            Velocity::ZERO
+        } else {
+            Velocity {
+                dx: dx / dist * speed,
+                dy: dy / dist * speed,
+                dz: dz / dist * speed,
+            }
+        };
+
+        if let Ok(mut vel_comp) = self.world.inner_mut().get::<&mut VelocityComp>(entity) {
+            vel_comp.0 = vel;
+        }
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /// Add a Ship to the ECS World and record the entity in `ship_index`.

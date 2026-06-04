@@ -24,7 +24,8 @@
 //! - Phase 5 で GrpcConnection に差し替える（Godot 側は変更しない）
 
 use dawn_actor::ClientConnection;
-use dawn_core::{DomainEvent, MoveCommand};
+use dawn_core::{EntityId, MoveCommand, Position, ShipId};
+use dawn_core::DomainEvent;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use std::net::SocketAddr;
@@ -62,6 +63,27 @@ struct PosJson {
     x: f32,
     y: f32,
     z: f32,
+}
+
+/// JSON テキストから MoveCommand をパースする。
+///
+/// 形式: `{"type":"MoveCommand","ship_id":123,"target":{"x":1.0,"y":0.0,"z":2.0}}`
+fn parse_move_command(line: &str) -> Option<MoveCommand> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    if v.get("type")?.as_str()? != "MoveCommand" {
+        return None;
+    }
+    let ship_id_raw: u64 = v.get("ship_id")?.as_u64()?;
+    let target = v.get("target")?;
+    let x = target.get("x")?.as_f64()? as f32;
+    let y = target.get("y")?.as_f64()? as f32;
+    let z = target.get("z")?.as_f64()? as f32;
+
+    let ship_id = ShipId(EntityId::from_raw(ship_id_raw));
+    Some(MoveCommand {
+        ship_id,
+        target_position: Position { x, y, z },
+    })
 }
 
 fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
@@ -170,12 +192,11 @@ impl WsServer {
         tokio::spawn(async move {
             while let Some(Ok(msg)) = ws_source.next().await {
                 if let Message::Text(text) = msg {
-                    // 改行区切りで複数コマンドが来る可能性を考慮
                     for line in text.lines() {
-                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                            if v.get("type").and_then(|t| t.as_str()) == Some("MoveCommand") {
-                                // MoveCommand のパース（Cycle 2 以降で本格利用）
-                                let _ = command_tx; // 将来使用
+                        if let Some(cmd) = parse_move_command(line) {
+                            // チャンネルが閉じていたら終了
+                            if command_tx.send(cmd).is_err() {
+                                return;
                             }
                         }
                     }

@@ -253,8 +253,9 @@ fn run_phase3_demo() {
 // Godot クライアントが ws://127.0.0.1:7878 に接続し、
 // DomainEvent を JSON で受け取って Ship を描画する。
 
-const P4_SHIPS  : usize = 200;
-const P4_TICK_MS: u64   = 100;  // 10 Tick/sec（Godot で視覚的に確認しやすい速度）
+const P4_SHIPS     : usize = 200;
+const P4_TICK_MS   : u64   = 100;    // 10 Tick/sec
+const P4_SHIP_SPEED: f32   = 150.0;  // プレイヤー船の移動速度（単位/tick）
 
 async fn run_phase4_server() {
     println!("═══════════════════════════════════════════");
@@ -310,6 +311,12 @@ async fn run_phase4_server() {
     );
     loop {
         interval.tick().await;
+
+        // MoveCommand をすべて処理してから Tick を実行する
+        while let Some(cmd) = conn.try_recv_command() {
+            node.apply_move_command(cmd.ship_id, cmd.target_position, P4_SHIP_SPEED);
+        }
+
         let result = node.tick();
 
         // 今回の Tick で生成されたイベントを送信
