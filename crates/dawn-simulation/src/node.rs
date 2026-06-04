@@ -172,7 +172,7 @@ impl<S: EventStore> SimulationNode<S> {
         self.current_tick = self.current_tick.next();
         let tick = self.current_tick;
 
-        let events = MovementSystem::run(&mut self.world, &self.bounds, tick);
+        let events = MovementSystem::run(&mut self.world, tick);
         let count  = events.len();
         self.event_store.append_batch(events.iter().cloned());
 

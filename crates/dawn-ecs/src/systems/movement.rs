@@ -1,15 +1,13 @@
 //! Movement system — acceleration-based space physics.
 //!
-//! # Physics model (Cycle 2+)
+//! # Physics model
 //!
 //! Every tick:
 //!   1. Apply thrust: `velocity += normalize(thrust) * thrust_magnitude`
 //!   2. Clamp speed:  `|velocity| > max_speed  →  scale down`
 //!   3. Apply velocity: `position += velocity`
-//!   4. Wall bounce: reflect velocity (and cancel thrust toward wall)
 //!
-//! NPC ships have `thrust_magnitude = 0.0` so they continue at constant
-//! velocity (unchanged from Phase 0–1 behaviour).
+//! No walls. Space is infinite. Ships drift forever unless thrust is applied.
 //!
 //! # Contract
 //!
@@ -21,13 +19,13 @@ use crate::{
     components::{PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp},
     SimWorld,
 };
-use dawn_core::{events::ShipMoved, DomainEvent, SectorBounds, Tick, Velocity};
+use dawn_core::{events::ShipMoved, DomainEvent, Tick, Velocity};
 
 pub struct MovementSystem;
 
 impl MovementSystem {
     /// Run one tick of movement for all ships and return `ShipMoved` events.
-    pub fn run(world: &mut SimWorld, bounds: &SectorBounds, tick: Tick) -> Vec<DomainEvent> {
+    pub fn run(world: &mut SimWorld, tick: Tick) -> Vec<DomainEvent> {
         let mut events = Vec::new();
 
         for (_entity, (id_comp, pos_comp, vel_comp, thrust_comp, stats_comp)) in world
@@ -44,10 +42,9 @@ impl MovementSystem {
 
             // ── 1. Apply thrust ───────────────────────────────────────────────
             if stats_comp.thrust_magnitude > 0.0 {
-                let t = thrust_comp.0;
+                let t   = thrust_comp.0;
                 let mag = magnitude(t);
                 if mag > f32::EPSILON {
-                    // Normalize thrust direction, scale by thrust_magnitude
                     let scale = stats_comp.thrust_magnitude / mag;
                     vel_comp.0.dx += t.dx * scale;
                     vel_comp.0.dy += t.dy * scale;
@@ -64,13 +61,10 @@ impl MovementSystem {
                 vel_comp.0.dz *= scale;
             }
 
-            // ── 3. Apply velocity to position ─────────────────────────────────
+            // ── 3. Apply velocity to position (no walls) ──────────────────────
             pos_comp.0.x += vel_comp.0.dx;
             pos_comp.0.y += vel_comp.0.dy;
             pos_comp.0.z += vel_comp.0.dz;
-
-            // ── 4. Elastic wall bounce ────────────────────────────────────────
-            bounds.clamp_and_reflect(&mut pos_comp.0, &mut vel_comp.0);
 
             let to = pos_comp.0;
 
@@ -91,8 +85,6 @@ impl MovementSystem {
     }
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 fn magnitude(v: Velocity) -> f32 {
     (v.dx * v.dx + v.dy * v.dy + v.dz * v.dz).sqrt()
 }
@@ -105,8 +97,6 @@ mod tests {
     use dawn_core::{NodeId, Position, SectorId, Velocity};
     use crate::components::ShipStatsComp;
 
-    fn bounds() -> SectorBounds { SectorBounds::cube(SectorBounds::DEFAULT_SIZE) }
-
     fn spawn(world: &mut SimWorld, i: u64, pos: Position, vel: Velocity) {
         let id = dawn_core::ShipId::new(NodeId(0), i);
         world.spawn_ship(id, pos, vel);
@@ -116,14 +106,14 @@ mod tests {
     fn ship_with_zero_velocity_produces_no_event() {
         let mut w = SimWorld::new(SectorId(0));
         spawn(&mut w, 1, Position::new(100.0, 100.0, 100.0), Velocity::ZERO);
-        assert!(MovementSystem::run(&mut w, &bounds(), Tick(1)).is_empty());
+        assert!(MovementSystem::run(&mut w, Tick(1)).is_empty());
     }
 
     #[test]
     fn ship_with_nonzero_velocity_produces_exactly_one_event_per_tick() {
         let mut w = SimWorld::new(SectorId(0));
         spawn(&mut w, 1, Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0));
-        assert_eq!(MovementSystem::run(&mut w, &bounds(), Tick(1)).len(), 1);
+        assert_eq!(MovementSystem::run(&mut w, Tick(1)).len(), 1);
     }
 
     #[test]
@@ -132,7 +122,7 @@ mod tests {
         let vel   = Velocity::new(5.0, -3.0, 1.0);
         let mut w = SimWorld::new(SectorId(0));
         spawn(&mut w, 1, start, vel);
-        let events = MovementSystem::run(&mut w, &bounds(), Tick(7));
+        let events = MovementSystem::run(&mut w, Tick(7));
         match &events[0] {
             DomainEvent::ShipMoved(e) => {
                 assert_eq!(e.from, start);
@@ -146,16 +136,17 @@ mod tests {
     }
 
     #[test]
-    fn ship_bounces_off_wall_and_velocity_is_reflected() {
+    fn ship_continues_past_old_sector_boundary_without_bouncing() {
+        // 旧設計では壁で跳ね返っていたが、宇宙は無限なのでそのまま通過する。
         let mut w = SimWorld::new(SectorId(0));
         spawn(
             &mut w, 1,
-            Position::new(SectorBounds::DEFAULT_SIZE - 1.0, 500.0, 500.0),
-            Velocity::new(5.0, 0.0, 0.0),
+            Position::new(9999.0, 0.0, 0.0),
+            Velocity::new(100.0, 0.0, 0.0),
         );
-        MovementSystem::run(&mut w, &bounds(), Tick(1));
+        MovementSystem::run(&mut w, Tick(1));
         for (_e, vel) in w.inner().query::<&VelocityComp>().iter() {
-            assert!(vel.0.dx < 0.0, "velocity should be reflected after wall bounce");
+            assert!(vel.0.dx > 0.0, "velocity must not be reversed — no walls in space");
         }
     }
 
@@ -165,58 +156,41 @@ mod tests {
         for i in 0..10 {
             spawn(&mut w, i, Position::new(i as f32 * 10.0, 0.0, 0.0), Velocity::new(1.0, 1.0, 0.0));
         }
-        assert_eq!(MovementSystem::run(&mut w, &bounds(), Tick(1)).len(), 10);
+        assert_eq!(MovementSystem::run(&mut w, Tick(1)).len(), 10);
     }
 
     #[test]
     fn ship_moved_event_tick_matches_the_tick_passed_to_run() {
         let mut w = SimWorld::new(SectorId(0));
         spawn(&mut w, 1, Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0));
-        let events = MovementSystem::run(&mut w, &bounds(), Tick(999));
-        assert_eq!(events[0].tick(), Tick(999));
+        assert_eq!(MovementSystem::run(&mut w, Tick(999))[0].tick(), Tick(999));
     }
 
-    // thrust が加速度として velocity に加算される
     #[test]
     fn thrust_accumulates_velocity_each_tick() {
-        let mut w = SimWorld::new(SectorId(0));
-        let id = dawn_core::ShipId::new(NodeId(0), 1);
+        let mut w  = SimWorld::new(SectorId(0));
+        let id     = dawn_core::ShipId::new(NodeId(0), 1);
         let entity = w.spawn_ship(id, Position::new(500.0, 500.0, 500.0), Velocity::ZERO);
-
-        // Set player stats and thrust toward +X
         w.set_ship_stats(entity, ShipStatsComp::PLAYER);
-        w.inner_mut()
-            .get::<&mut ThrustComp>(entity)
-            .unwrap()
-            .0 = Velocity::new(1.0, 0.0, 0.0); // thrust direction
-
-        MovementSystem::run(&mut w, &bounds(), Tick(1));
-
-        // After one tick, velocity.dx should equal thrust_magnitude
+        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().0 = Velocity::new(1.0, 0.0, 0.0);
+        MovementSystem::run(&mut w, Tick(1));
         let vel = *w.inner().get::<&VelocityComp>(entity).unwrap();
-        assert!(vel.0.dx > 0.0, "thrust should have added positive dx velocity");
+        assert!(vel.0.dx > 0.0);
         assert_eq!(vel.0.dy, 0.0);
         assert_eq!(vel.0.dz, 0.0);
     }
 
-    // velocity が max_speed を超えないよう clamp される
     #[test]
     fn velocity_is_clamped_to_max_speed() {
         let mut w  = SimWorld::new(SectorId(0));
         let id     = dawn_core::ShipId::new(NodeId(0), 1);
-        let entity = w.spawn_ship(
-            id,
-            Position::new(500.0, 500.0, 500.0),
-            Velocity::new(10000.0, 0.0, 0.0), // far above any max_speed
-        );
+        let entity = w.spawn_ship(id, Position::new(500.0, 500.0, 500.0),
+                                  Velocity::new(10000.0, 0.0, 0.0));
         w.set_ship_stats(entity, ShipStatsComp::PLAYER);
-
-        MovementSystem::run(&mut w, &bounds(), Tick(1));
-
+        MovementSystem::run(&mut w, Tick(1));
         let vel   = *w.inner().get::<&VelocityComp>(entity).unwrap();
         let stats = *w.inner().get::<&ShipStatsComp>(entity).unwrap();
-        let speed = (vel.0.dx * vel.0.dx + vel.0.dy * vel.0.dy + vel.0.dz * vel.0.dz).sqrt();
-        assert!(speed <= stats.max_speed + f32::EPSILON,
-            "speed {speed} must not exceed max_speed {}", stats.max_speed);
+        let speed = magnitude(vel.0);
+        assert!(speed <= stats.max_speed + f32::EPSILON);
     }
 }
