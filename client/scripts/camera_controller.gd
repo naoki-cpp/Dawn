@@ -1,42 +1,44 @@
 ## camera_controller.gd
 ##
-## プレイヤー船を追従するストラテジックカメラ。
+## プレイヤー船を追従する3Dオービットカメラ。
 ##
 ## 操作:
-##   左ボタンドラッグ : カメラを軌道回転（ターゲット中心）
+##   左ボタンドラッグ : カメラを軌道回転（上下左右、全方向）
 ##   マウスホイール   : ズームイン / ズームアウト
 ##
-## 設計:
-##   左ボタン押下は消費しない → main.gd がダブルクリックを検出できる。
-##   マウスが DRAG_THRESHOLD px 以上動いた時点でドラッグ開始と判定し、
-##   それ以降のモーションイベントのみ消費する。
+## 回転方式: クォータニオン（ジンバルロックなし）
+##   水平ドラッグ → ワールド Y 軸まわり yaw
+##   垂直ドラッグ → カメラのローカル右軸まわり pitch
+##   → 真上・真下・後ろからも見られる
 
 extends Camera3D
 
 # ── 設定 ─────────────────────────────────────────────────────────────────────
 
 @export var follow_speed   : float = 5.0
-@export var zoom_min       : float = 300.0
-@export var zoom_max       : float = 8000.0
-@export var zoom_step      : float = 250.0
-@export var orbit_speed    : float = 0.005
-@export var pitch_min_deg  : float = 10.0
-@export var pitch_max_deg  : float = 85.0
+@export var zoom_min       : float = 200.0
+@export var zoom_max       : float = 10000.0
+@export var zoom_step      : float = 300.0
+@export var orbit_speed    : float = 0.005  ## ドラッグ 1px あたりの回転量（rad）
 
-## ドラッグと判定する最小移動量（ピクセル）
-const DRAG_THRESHOLD : float = 6.0
+const DRAG_THRESHOLD : float = 6.0  ## ドラッグ判定の最小移動量（px）
 
 # ── 内部状態 ─────────────────────────────────────────────────────────────────
 
-var _target_node    : Node3D  = null
-var _target_pos     : Vector3 = Vector3.ZERO
-var _zoom_distance  : float   = 1800.0
-var _yaw            : float   = 0.0
-var _pitch          : float   = deg_to_rad(35.0)
+var _target_node   : Node3D    = null
+var _target_pos    : Vector3   = Vector3.ZERO
+var _zoom_distance : float     = 1800.0
 
-var _btn_down       : bool    = false   ## 左ボタンが押されているか
-var _drag_start     : Vector2 = Vector2.ZERO
-var _dragging       : bool    = false   ## 実際のドラッグジェスチャーが始まったか
+## カメラの向きをクォータニオンで管理
+## 初期値: 斜め上後ろから見る角度
+var _orbit_quat : Quaternion = (
+	Quaternion(Vector3.UP, 0.0) *
+	Quaternion(Vector3.RIGHT, -deg_to_rad(35.0))
+)
+
+var _btn_down    : bool    = false
+var _drag_start  : Vector2 = Vector2.ZERO
+var _dragging    : bool    = false
 
 # ── ライフサイクル ────────────────────────────────────────────────────────────
 
@@ -47,14 +49,17 @@ func _process(delta: float) -> void:
 	if _target_node != null and is_instance_valid(_target_node):
 		_target_pos = _target_node.global_position
 
-	var desired: Vector3 = _target_pos + _orbit_offset()
+	var desired : Vector3 = _target_pos + _orbit_offset()
 	global_position = global_position.lerp(desired, clampf(follow_speed * delta, 0.0, 1.0))
-	look_at(_target_pos, Vector3.UP)
+
+	## look_at の up ベクトルをクォータニオンから導く → ジンバルロックしない
+	var cam_up : Vector3 = (_orbit_quat * Vector3.UP).normalized()
+	look_at(_target_pos, cam_up)
 
 func _unhandled_input(event: InputEvent) -> void:
-	# ── ホイールズーム（イベント消費する）────────────────────────────────────
+	# ── ホイールズーム ─────────────────────────────────────────────────────────
 	if event is InputEventMouseButton:
-		var mb: InputEventMouseButton = event as InputEventMouseButton
+		var mb : InputEventMouseButton = event as InputEventMouseButton
 		if mb.pressed:
 			if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
 				_zoom_distance = maxf(_zoom_distance - zoom_step, zoom_min)
@@ -65,31 +70,26 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 
-		# 左ボタン押下: ドラッグ開始の準備のみ。イベントは消費しない。
+		# 左ボタン押下: ドラッグ開始の準備のみ（消費しない）
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
 				_btn_down   = true
 				_dragging   = false
 				_drag_start = mb.position
-				# ★ set_input_as_handled() を呼ばない → main.gd がクリックを検出できる
 			else:
 				_btn_down = false
 				_dragging = false
 
-	# ── ドラッグ判定とカメラ回転 ─────────────────────────────────────────────
+	# ── ドラッグで軌道回転 ─────────────────────────────────────────────────────
 	elif event is InputEventMouseMotion and _btn_down:
-		var mm: InputEventMouseMotion = event as InputEventMouseMotion
+		var mm : InputEventMouseMotion = event as InputEventMouseMotion
 
-		# 閾値を超えたらドラッグ開始
 		if not _dragging:
 			if mm.position.distance_to(_drag_start) >= DRAG_THRESHOLD:
 				_dragging = true
 
 		if _dragging:
-			_yaw   -= mm.relative.x * orbit_speed
-			_pitch  = clampf(_pitch - mm.relative.y * orbit_speed,
-			                 deg_to_rad(pitch_min_deg),
-			                 deg_to_rad(pitch_max_deg))
+			_apply_orbit(mm.relative.x, mm.relative.y)
 			get_viewport().set_input_as_handled()
 
 # ── 公開 API ──────────────────────────────────────────────────────────────────
@@ -97,17 +97,28 @@ func _unhandled_input(event: InputEvent) -> void:
 func set_target(node: Node3D) -> void:
 	_target_node = node
 	if node != null:
-		_target_pos    = node.global_position
+		_target_pos     = node.global_position
 		global_position = _target_pos + _orbit_offset()
 
-## ドラッグ中かどうか（main.gd がダブルクリックと区別するために使う）
 func is_dragging() -> bool:
 	return _dragging
 
 # ── 内部 ─────────────────────────────────────────────────────────────────────
 
+## クォータニオン軌道回転を適用する。
+## 水平: ワールド Y 軸まわり（宇宙感覚で水平に振れる）
+## 垂直: カメラの現在のローカル右軸まわり（上下に回れる）
+func _apply_orbit(dx: float, dy: float) -> void:
+	# yaw: ワールドY軸まわり
+	var yaw   : Quaternion = Quaternion(Vector3.UP, -dx * orbit_speed)
+
+	# pitch: カメラのローカル右軸まわり（ワールド空間に変換済み）
+	var cam_right : Vector3    = (_orbit_quat * Vector3.RIGHT).normalized()
+	var pitch     : Quaternion = Quaternion(cam_right, -dy * orbit_speed)
+
+	_orbit_quat = (pitch * yaw * _orbit_quat).normalized()
+
+## クォータニオンからカメラ位置のオフセットを計算する。
+## 基底: (0, 0, zoom) をクォータニオンで回転させた方向に配置。
 func _orbit_offset() -> Vector3:
-	var x: float = _zoom_distance * cos(_pitch) * sin(_yaw)
-	var y: float = _zoom_distance * sin(_pitch)
-	var z: float = _zoom_distance * cos(_pitch) * cos(_yaw)
-	return Vector3(x, y, z)
+	return _orbit_quat * Vector3(0.0, 0.0, _zoom_distance)
