@@ -82,29 +82,29 @@ func _on_double_click(screen_pos: Vector2) -> void:
 	if _player_ship_id < 0:
 		return
 
-	## プレイヤー船の現在 Y を取得してレイキャスト平面に使う
-	var player_y: float = 0.0
+	## カメラレイの方向 = そのまま推力方向として使う（3D対応）
+	var ray_dir: Vector3 = _camera.project_ray_normal(screen_pos)
+
+	## Godot 座標系 → サーバー座標系の方向変換（Z反転のみ。スケールは正規化されるので不要）
+	## Godot: (x, y, -z) = server (x, y, z) → 方向の場合: (dx, dy, -dz)
+	var server_dir: Vector3 = Vector3(ray_dir.x, ray_dir.y, -ray_dir.z)
+
+	## プレイヤー船のサーバー座標を推定（Godot 上の lerp 済み位置から逆算）
+	var ship_godot_pos: Vector3 = Vector3.ZERO
 	if _ships.has(_player_ship_id):
-		player_y = (_ships[_player_ship_id] as Node3D).global_position.y
-
-	var ray_origin : Vector3 = _camera.project_ray_origin(screen_pos)
-	var ray_dir    : Vector3 = _camera.project_ray_normal(screen_pos)
-
-	if absf(ray_dir.y) < 0.001:
-		return
-
-	## Y = player_y 平面との交点
-	var t        : float   = (player_y - ray_origin.y) / ray_dir.y
-	var world_pos: Vector3 = ray_origin + ray_dir * t
-
-	## Godot 座標 → サーバー座標
-	var server_pos: Vector3 = Vector3(
-		world_pos.x / WORLD_SCALE,
-		world_pos.y / WORLD_SCALE,
-		-world_pos.z / WORLD_SCALE,
+		ship_godot_pos = (_ships[_player_ship_id] as Node3D).global_position
+	var ship_server_pos: Vector3 = Vector3(
+		ship_godot_pos.x / WORLD_SCALE,
+		ship_godot_pos.y / WORLD_SCALE,
+		-ship_godot_pos.z / WORLD_SCALE,
 	)
-	_connection.send_move_command(_player_ship_id, server_pos)
-	_show_move_marker(world_pos)
+
+	## 目標を十分遠い点に設定 → サーバーは normalize(target - ship) ≈ server_dir として扱う
+	var target: Vector3 = ship_server_pos + server_dir * 1_000_000.0
+	_connection.send_move_command(_player_ship_id, target)
+
+	## マーカー: 船から推力方向 500 Godot 単位先に表示（3D方向が分かりやすい）
+	_show_move_marker(ship_godot_pos + ray_dir * 500.0)
 
 # ── イベントハンドラ ──────────────────────────────────────────────────────────
 
