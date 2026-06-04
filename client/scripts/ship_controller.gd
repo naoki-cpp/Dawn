@@ -7,61 +7,52 @@ extends Node3D
 # ── 設定 ─────────────────────────────────────────────────────────────────────
 
 const WORLD_SCALE   : float = 0.1
-const LERP_SPEED    : float = 12.0   ## 位置補間の速さ
-const VEL_VIS_SCALE : float = 3.0    ## 速度インジケーターの長さスケール
+const LERP_SPEED    : float = 8.0    ## 位置補間の速さ（delta 倍するので >1/delta でオーバーシュートに注意）
+const VEL_VIS_SCALE : float = 4.0    ## 速度インジケーターの長さスケール
 
 # ── 内部状態 ─────────────────────────────────────────────────────────────────
 
 var ship_id       : int     = 0
 var _target_pos   : Vector3 = Vector3.ZERO
-var _prev_target  : Vector3 = Vector3.ZERO   ## 1 tick 前のターゲット
-var _vel_estimate : Vector3 = Vector3.ZERO   ## 推定速度ベクトル（Godot 座標）
+var _vel_estimate : Vector3 = Vector3.ZERO   ## 推定速度ベクトル（Godot 座標/tick）
 var _is_init      : bool    = false
 var _is_player    : bool    = false
 
-# 速度インジケーター用 ImmediateMesh（プレイヤー船のみ）
-var _vel_mesh     : ImmediateMesh    = null
+# 速度インジケーター（プレイヤー船のみ）
+var _vel_mesh     : ImmediateMesh   = null
 var _vel_instance : MeshInstance3D  = null
-var _vel_material : StandardMaterial3D = null
 
 # ── ライフサイクル ────────────────────────────────────────────────────────────
 
 func _ready() -> void:
-	_target_pos  = position
-	_prev_target = position
+	_target_pos = position
 
 func _process(delta: float) -> void:
 	if not _is_init:
 		return
-	position = position.lerp(_target_pos, LERP_SPEED * delta)
-	if _is_player:
+	## clampf で補間係数を [0,1] に制限 → 低フレームレートでもオーバーシュートしない
+	position = position.lerp(_target_pos, clampf(LERP_SPEED * delta, 0.0, 1.0))
+	if _is_player and _vel_mesh != null:
 		_draw_velocity_indicator()
 
 # ── 公開 API ──────────────────────────────────────────────────────────────────
 
-## SpawnedEvent で Ship を初期化する。
 func initialize(id: int, server_pos: Vector3) -> void:
-	ship_id      = id
-	_target_pos  = _to_godot(server_pos)
-	_prev_target = _target_pos
-	position     = _target_pos
-	_is_init     = true
+	ship_id     = id
+	_target_pos = _to_godot(server_pos)
+	position    = _target_pos
+	_is_init    = true
 
-## ShipMoved イベントでターゲット座標を更新する。
-## 同時に速度を推定する（連続する ShipMoved の位置差分）。
 func update_target(server_pos: Vector3) -> void:
 	var new_target: Vector3 = _to_godot(server_pos)
-	_vel_estimate = new_target - _target_pos   ## Godot 座標での1 Tick 変位
-	_prev_target  = _target_pos
+	_vel_estimate = new_target - _target_pos
 	_target_pos   = new_target
 
-## プレイヤー船として指定する。速度インジケーターを有効化。
 func set_as_player() -> void:
 	_is_player = true
 	_setup_velocity_indicator()
 
-## 現在の推定速度（サーバー座標系 units/tick）を返す。
-## HUD 表示に使用する。
+## 現在の推定速度（サーバー座標系 units/tick）
 func get_speed_server() -> float:
 	return _vel_estimate.length() / WORLD_SCALE
 
@@ -72,44 +63,48 @@ func _setup_velocity_indicator() -> void:
 	_vel_instance = MeshInstance3D.new()
 	_vel_instance.mesh = _vel_mesh
 
-	_vel_material = StandardMaterial3D.new()
-	_vel_material.albedo_color               = Color(0.0, 1.0, 0.4, 1)
-	_vel_material.emission_enabled           = true
-	_vel_material.emission                   = Color(0.0, 1.0, 0.4, 1)
-	_vel_material.emission_energy_multiplier = 3.0
-	_vel_material.shading_mode               = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_vel_material.no_depth_test              = false
-	_vel_instance.set_surface_override_material(0, _vel_material)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color               = Color(0.0, 1.0, 0.4, 1.0)
+	mat.emission_enabled           = true
+	mat.emission                   = Color(0.0, 1.0, 0.4, 1.0)
+	mat.emission_energy_multiplier = 3.0
+	mat.shading_mode               = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = false   ## surface_set_color を使わないので false
+	mat.cull_mode                  = BaseMaterial3D.CULL_DISABLED
+	_vel_instance.set_surface_override_material(0, mat)
 
 	add_child(_vel_instance)
 
 func _draw_velocity_indicator() -> void:
-	if _vel_mesh == null:
-		return
-
 	_vel_mesh.clear_surfaces()
 
 	var speed: float = _vel_estimate.length()
-	if speed < 0.01:
+	if speed < 0.001:
 		return
 
-	## 速度ベクトルの長さを VEL_VIS_SCALE 倍して表示
-	var tip: Vector3 = _vel_estimate.normalized() * speed * VEL_VIS_SCALE
+	var dir: Vector3 = _vel_estimate / speed          ## 正規化（除算で NaN 回避）
+	var tip: Vector3 = dir * speed * VEL_VIS_SCALE    ## 先端位置
+
+	## 矢頭用の垂直ベクトルを求める（dir が UP と平行な場合は RIGHT を使う）
+	var ref_up: Vector3 = Vector3.UP
+	if absf(dir.dot(Vector3.UP)) > 0.9:
+		ref_up = Vector3.RIGHT
+	var perp: Vector3 = dir.cross(ref_up).normalized()
+
+	var arrow_len: float = minf(speed * VEL_VIS_SCALE * 0.2, 80.0)
 
 	_vel_mesh.surface_begin(Mesh.PRIMITIVE_LINES)
 
-	## 本線: 原点 → 先端
-	_vel_mesh.surface_set_color(Color(0.0, 1.0, 0.4, 1))
+	## 本線
 	_vel_mesh.surface_add_vertex(Vector3.ZERO)
 	_vel_mesh.surface_add_vertex(tip)
 
-	## 矢頭（3本の短い線）
-	var arrow_size: float = minf(speed * VEL_VIS_SCALE * 0.15, 60.0)
-	var perp1: Vector3 = _vel_estimate.cross(Vector3.UP).normalized() * arrow_size
-	var perp2: Vector3 = _vel_estimate.cross(perp1).normalized() * arrow_size
-	for p in [perp1, -perp1, perp2, -perp2]:
+	## 矢頭（4本）
+	for i in 4:
+		var angle: float = i * PI / 2.0
+		var wing: Vector3 = perp.rotated(dir, angle) * arrow_len
 		_vel_mesh.surface_add_vertex(tip)
-		_vel_mesh.surface_add_vertex(tip - _vel_estimate.normalized() * arrow_size * 2 + p)
+		_vel_mesh.surface_add_vertex(tip - dir * arrow_len * 2.0 + wing)
 
 	_vel_mesh.surface_end()
 

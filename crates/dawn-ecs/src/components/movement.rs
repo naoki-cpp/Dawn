@@ -37,8 +37,9 @@ impl ShipStatsComp {
     pub const NPC: Self = Self { max_speed: 400.0, thrust_magnitude: 0.0 };
 
     /// Default player ship stats.
-    /// thrust_magnitude: velocity added per tick when thrusting.
-    /// max_speed: hard cap on |velocity| (units/tick).
-    /// At 10 tick/sec: max_speed=1500 → 150 units/tick avg → crosses 10000-unit sector in ~67 ticks (6.7 sec).
-    pub const PLAYER: Self = Self { max_speed: 1500.0, thrust_magnitude: 60.0 };
+    ///
+    /// Sector size = 10,000 units.  At 10 tick/sec:
+    ///   max_speed=500  → Godot 50 u/tick  → crosses sector in 200 ticks (20 sec) — controllable
+    ///   thrust=40      → reaches max_speed in ~13 ticks (1.3 sec) — clearly felt
+    pub const PLAYER: Self = Self { max_speed: 500.0, thrust_magnitude: 40.0 };
 }
