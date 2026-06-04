@@ -7,9 +7,9 @@ extends Node
 
 # ── ノード参照 ────────────────────────────────────────────────────────────────
 
-@onready var _connection : Node    = $Connection
-@onready var _ships_root : Node3D  = $World/Ships
-@onready var _stats_label: Label   = $HUD/StatsLabel
+@onready var _connection  : Node    = $Connection
+@onready var _ships_root  : Node3D  = $World/Ships
+@onready var _stats_label : Label   = $HUD/StatsLabel
 
 # ── 定数 ─────────────────────────────────────────────────────────────────────
 
@@ -17,11 +17,10 @@ const SHIP_SCENE := preload("res://scenes/ship.tscn")
 
 # ── 内部状態 ─────────────────────────────────────────────────────────────────
 
-## ship_id(int) → ShipController ノード
-var _ships : Dictionary = {}
-
-var _event_count : int = 0
-var _current_tick: int = 0
+## ship_id(int) → Node3D (ShipController)
+var _ships        : Dictionary = {}
+var _event_count  : int = 0
+var _current_tick : int = 0
 
 # ── ライフサイクル ────────────────────────────────────────────────────────────
 
@@ -37,7 +36,7 @@ func _process(_delta: float) -> void:
 
 func _on_event_received(payload: Dictionary) -> void:
 	_event_count += 1
-	var event_type: String = payload.get("type", "")
+	var event_type: String = payload.get("type", "") as String
 
 	match event_type:
 		"ShipSpawned":
@@ -51,53 +50,53 @@ func _on_event_received(payload: Dictionary) -> void:
 
 func _on_connection_changed(connected: bool) -> void:
 	if not connected:
-		## 切断時は全 Ship を消去して再接続待ち
 		_clear_all_ships()
 
 # ── ドメインイベント処理 ──────────────────────────────────────────────────────
 
 func _handle_ship_spawned(p: Dictionary) -> void:
-	var ship_id : int = p.get("ship_id", 0)
+	var ship_id: int = p.get("ship_id", 0) as int
 	if _ships.has(ship_id):
-		return  ## 重複 spawn は無視
+		return
 
-	var pos_dict : Dictionary = p.get("position", {})
+	var pos_dict: Dictionary = p.get("position", {}) as Dictionary
 	var pos := Vector3(
-		float(pos_dict.get("x", 0.0)),
-		float(pos_dict.get("y", 0.0)),
-		float(pos_dict.get("z", 0.0)),
+		(pos_dict.get("x", 0.0) as float),
+		(pos_dict.get("y", 0.0) as float),
+		(pos_dict.get("z", 0.0) as float),
 	)
 
-	var ship : Node3D = SHIP_SCENE.instantiate()
+	var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
 	_ships_root.add_child(ship)
-	ship.get_script().call("initialize", ship_id, pos)  # ShipController.initialize()
+	ship.call("initialize", ship_id, pos)
 	ship.name = "Ship_%d" % ship_id
 	_ships[ship_id] = ship
 
 func _handle_ship_moved(p: Dictionary) -> void:
-	var ship_id : int = p.get("ship_id", 0)
-	var ship = _ships.get(ship_id)
-	if ship == null:
+	var ship_id: int = p.get("ship_id", 0) as int
+	if not _ships.has(ship_id):
 		return
+	var ship: Node3D = _ships[ship_id] as Node3D
 
-	var pos_dict : Dictionary = p.get("to", {})
+	var pos_dict: Dictionary = p.get("to", {}) as Dictionary
 	var pos := Vector3(
-		float(pos_dict.get("x", 0.0)),
-		float(pos_dict.get("y", 0.0)),
-		float(pos_dict.get("z", 0.0)),
+		(pos_dict.get("x", 0.0) as float),
+		(pos_dict.get("y", 0.0) as float),
+		(pos_dict.get("z", 0.0) as float),
 	)
-	ship.update_target(pos)
+	ship.call("update_target", pos)
 
-	var tick : int = p.get("tick", 0)
+	var tick: int = p.get("tick", 0) as int
 	if tick > _current_tick:
 		_current_tick = tick
 
 func _handle_ship_despawned(p: Dictionary) -> void:
-	var ship_id : int = p.get("ship_id", 0)
-	var ship = _ships.get(ship_id)
-	if ship != null:
-		ship.queue_free()
-		_ships.erase(ship_id)
+	var ship_id: int = p.get("ship_id", 0) as int
+	if not _ships.has(ship_id):
+		return
+	var ship: Node3D = _ships[ship_id] as Node3D
+	ship.queue_free()
+	_ships.erase(ship_id)
 
 # ── HUD 更新 ─────────────────────────────────────────────────────────────────
 
@@ -109,9 +108,9 @@ func _update_hud() -> void:
 # ── 内部ユーティリティ ────────────────────────────────────────────────────────
 
 func _clear_all_ships() -> void:
-	for ship in _ships.values():
-		if is_instance_valid(ship):
-			ship.queue_free()
+	for ship_node: Node3D in _ships.values():
+		if is_instance_valid(ship_node):
+			ship_node.queue_free()
 	_ships.clear()
 	_current_tick = 0
 	_event_count  = 0

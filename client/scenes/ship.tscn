@@ -1,4 +1,4 @@
-[gd_scene load_steps=5 format=3 uid="uid://ship_scene"]
+[gd_scene load_steps=3 format=3 uid="uid://ship_scene"]
 
 [ext_resource type="Script" path="res://scripts/ship_controller.gd" id="1_ship"]
 
@@ -15,11 +15,6 @@ roughness = 0.3
 emission_enabled = true
 emission = Color(0.1, 0.3, 0.8, 1)
 emission_energy_multiplier = 0.3
-
-[sub_resource type="OmniLight3D" id="OmniLight3D_engine"]
-light_color = Color(0.2, 0.5, 1.0, 1)
-light_energy = 2.0
-omni_range = 500.0
 
 [node name="Ship" type="Node3D"]
 script = ExtResource("1_ship")
