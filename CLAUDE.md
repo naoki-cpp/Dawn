@@ -4,7 +4,7 @@
 **唯一の権威ある運用規約**である。
 
 コードを書く前に必ずこのファイルを読むこと。
-設計判断の根拠は `docs/architecture/adr/` を参照すること。
+設計判断の根拠は `adr/` を参照すること。
 
 ---
 
@@ -205,12 +205,14 @@ dawn-core
     ├── dawn-ecs
     └── dawn-event-store
             ↑
-            ├── dawn-consensus
-            └── dawn-replication
-                        ↑
-                        └── dawn-sector-node  ← 実行バイナリ
-                                    ↑
-                                    └── dawn-simulation  ← テスト・負荷生成用
+            └── dawn-actor          ← Actor基盤（EventStoreActor, ReplicationBus）
+                    ↑
+                    └── dawn-simulation  ← 実行バイナリ・負荷生成
+
+# 将来追加予定（まだ存在しない）:
+#   dawn-actor ← dawn-consensus  （Raft）
+#   dawn-actor ← dawn-replication（Gossip + CRDT）
+#   上記 ← dawn-sector-node      （本番実行バイナリ）
 ```
 
 ### 依存の絶対ルール
@@ -244,16 +246,11 @@ cargo deny check bans
 cargo tree --duplicates
 ```
 
-### Proto クレートの特別ルール
+### Proto クレートの特別ルール（将来・未実装）
 
-`dawn-proto` は全クレートから依存されてよい（シリアライゼーション定義のみを含む）。
+`dawn-proto` は将来 Phase 4 で追加される予定。
+全クレートから依存されてよい（シリアライゼーション定義のみを含む）。
 ただし `dawn-proto` からドメインロジックへの依存は禁止する。
-
-```
-dawn-proto  ← シリアライゼーション定義のみ
-    ↑ (全クレートが依存してよい)
-    全クレート
-```
 
 ---
 
@@ -287,16 +284,17 @@ dawn-proto  ← シリアライゼーション定義のみ
     ▼
 [5] EventStore への Append（永続化）
     │  - ここで失敗した場合 ECS の変更をロールバックする
-    │  - fsync で durability を保証する
+    │  - 現在: InMemoryEventStore（Phase 3 でファイル永続化に移行）
+    │  - 将来: fsync で durability を保証する
     │
     ▼
 [6] Replication（ノード間伝播）
-    │  - Sector-local Move → Gossip で伝播（最終一貫性）
-    │  - Sector Transit    → Raft でコミット（強整合性）
+    │  - 現在: ReplicationBus（In-Memory Channel）で伝播
+    │  - 将来: Sector-local → Gossip / Sector Transit → Raft
     │
     ▼
 [7] Projection 更新（Readモデル）
-    　 - 必要な場合のみ
+    　 - 必要な場合のみ（将来実装）
 ```
 
 ### このフローから逸脱してはならない
@@ -401,15 +399,19 @@ pub type Tick = u64;
 ### Tick 内の処理順序
 
 ```
-1. TickStarted イベントを発行する
-2. 未処理の MoveCommand を全て収集する
-3. Movement System を実行する（ECS バッチ処理）
-4. 生成されたイベントを EventStore に Append する
-5. TickCompleted イベントを発行する
-6. Replication Actor に差分を通知する
+現在の実装（Phase 0〜2）:
+  1. Tick カウンタをインクリメント
+  2. Movement System を実行する（ECS バッチ処理）
+  3. 生成されたイベントを EventStore に Append する
+  4. ReplicationBus に差分を転送する       ← 必ず 3 の後
+  5. 呼び出し元へ TickSummary を返す       ← 必ず 4 の後
+
+将来の実装（Phase 2 以降で拡張）:
+  2' 未処理の MoveCommand キューを収集する（現在は Velocity 直接適用）
+  3' TickStarted / TickCompleted イベントを発行する（未実装）
 
 この順序を変えてはならない。
-特に「4 の前に 6」を行うことは禁止する（未コミットの状態を伝播させない）。
+特に「3 の前に 4」を行うことは禁止する（未コミットの状態を伝播させない）。
 ```
 
 ### Tick の実時間目標
@@ -511,14 +513,14 @@ pub struct ShipMoved {
 
 4. Replay 時に Upcaster を通して新形式に変換する
 
-5. docs/architecture/event-catalog.md を更新する
+5. docs/event-catalog.md を更新する
 
 6. 対応する ADR を作成する（既存 ADR の更新ではなく新規作成）
 ```
 
 ### Event Catalog との同期
 
-`docs/architecture/event-catalog.md` が Event の唯一の仕様書である。
+`docs/event-catalog.md` が Event の唯一の仕様書である。
 
 ```bash
 # Event定義とカタログの整合をCIで検証する
@@ -636,7 +638,7 @@ assert_eq!(pos, expected_position);
 ### イベントを追加・変更する場合の追加確認
 
 ```
-□ docs/architecture/event-catalog.md の更新を計画した
+□ docs/event-catalog.md の更新を計画した
 □ 新Eventは dawn-core/src/events.rs に追加した（他のCrateに追加していない）
 □ 新Eventに tick: Tick フィールドが含まれる（ShipMoveカテゴリのEvent）
 □ 新Eventのフィールドは全て Option ではなく必須フィールドで設計した
@@ -652,7 +654,7 @@ assert_eq!(pos, expected_position);
 □ 新Crateの Dependency DAG 上の位置を決定した
 □ 循環依存が発生しないことを確認した（cargo tree で検証）
 □ CLAUDE.md のセクション11（Crate別責務早見表）を更新した
-□ 対応するADRを docs/architecture/adr/ に作成した
+□ 対応するADRを adr/ に作成した
 ```
 
 ### テストの確認
@@ -787,13 +789,13 @@ CIが以下を検出した場合、PRを自動拒否する:
 ### FBD-008: MVP範囲外の実装
 
 ```
-以下のファイル・モジュールを作成してはならない:
-  src/combat/     ← 戦闘システム
-  src/economy/    ← 経済システム
-  src/character/  ← キャラクター育成
-  src/inventory/  ← インベントリ
-  src/ui/         ← UI
-  src/graphics/   ← グラフィックス
+以下のクレート・モジュールを作成してはならない:
+  crates/dawn-combat/    ← 戦闘システム
+  crates/dawn-economy/   ← 経済システム
+  crates/dawn-character/ ← キャラクター育成
+  crates/dawn-inventory/ ← インベントリ
+  crates/dawn-ui/        ← UI
+  crates/dawn-graphics/  ← グラフィックス
 
 これらのディレクトリが存在する場合、削除の提案を行うこと。
 ```
@@ -802,16 +804,24 @@ CIが以下を検出した場合、PRを自動拒否する:
 
 ## 11. Crate別責務早見表
 
+### 現在存在するクレート
+
 | Crate | 責務 | 依存してよいもの | 禁止 |
 |---|---|---|---|
-| `dawn-core` | ドメインモデル定義のみ。EntityId, Position, 全Event型, 全Command型 | serde, thiserror, uuid のみ | ネットワーク、ファイルI/O、非同期 |
-| `dawn-ecs` | ECS World の薄いラッパー。Component定義, System定義 | dawn-core, ECSライブラリ | ネットワーク、EventStore |
+| `dawn-core` | ドメインモデル定義のみ。EntityId, Position, 全Event型, 全Command型 | serde, thiserror のみ | ネットワーク、ファイルI/O、非同期 |
+| `dawn-ecs` | ECS World の薄いラッパー。Component定義, System定義 | dawn-core, hecs | ネットワーク、EventStore |
 | `dawn-event-store` | Event Log の永続化。Append, Read, Snapshot | dawn-core, serde | ネットワーク、ECS |
-| `dawn-consensus` | Raftの実装。Leader選出, Log Replication | dawn-event-store | ECS、Gossip |
-| `dawn-replication` | Gossip + CRDT。差分伝播, LWW-Register | dawn-event-store, dawn-consensus | ECS |
-| `dawn-proto` | protobuf定義と生成コード | prost, tonic | ドメインロジック |
-| `dawn-sector-node` | 実行バイナリ。Actorの配線と起動 | 上記全て | 単体ロジック（上位Crateに委譲） |
-| `dawn-simulation` | 負荷テストとダミー生成 | dawn-sector-node | 本番コードへの依存以外 |
+| `dawn-actor` | Actor基盤。EventStoreActor, ReplicationBus | dawn-core, dawn-event-store, tokio | dawn-ecs, dawn-simulation |
+| `dawn-simulation` | シミュレーション実行バイナリ。SectorSimulatorActor, MultiNodeCluster, 負荷生成 | 上記全て + rand | — |
+
+### 将来追加予定のクレート（まだ存在しない・実装しないこと）
+
+| Crate | 予定フェーズ | 責務（予定） |
+|---|---|---|
+| `dawn-consensus` | Phase 5 | Raft実装。Leader選出, Log Replication |
+| `dawn-replication` | Phase 6 | Gossip + CRDT。差分伝播, LWW-Register |
+| `dawn-proto` | Phase 4 | protobuf定義と生成コード |
+| `dawn-sector-node` | Phase 4 | 本番実行バイナリ。Actorの配線と起動 |
 
 ---
 
@@ -901,8 +911,8 @@ AIが陥りやすいアンチパターンとその修正方法を示す。
 ## 付録: 参照すべきドキュメント
 
 ```
-設計の根拠   : docs/architecture/adr/ 以下の各ADRファイル
-Eventの仕様  : docs/architecture/event-catalog.md
+設計の根拠   : adr/ 以下の各ADRファイル
+Eventの仕様  : docs/event-catalog.md
 Crate一覧    : Cargo.toml (workspace)
 型の定義     : dawn-core/src/ 以下
 ```
@@ -923,5 +933,5 @@ AIは CLAUDE.md を自律的に変更してはならない。
 ---
 
 *最終更新: 2026-06-04*
-*対応ADR: ADR-0001 〜 ADR-0015*
-*次回レビュー予定: Phase 1完了時*
+*対応ADR: ADR-0001 〜 ADR-0004*
+*次回レビュー予定: Phase 3完了時*
