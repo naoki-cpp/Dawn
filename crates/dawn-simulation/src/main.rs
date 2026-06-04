@@ -12,7 +12,9 @@ mod node;
 mod sector_simulator_actor;
 mod snapshot;
 mod spawner;
+mod ws_server;
 
+use dawn_actor::ClientConnection;
 use dawn_core::{NodeId, SectorBounds, SectorId};
 use node::SimulationNode;
 use spawner::{generate_ships, SpawnConfig};
@@ -22,6 +24,7 @@ use cluster::MultiNodeCluster;
 use dawn_core::Position;
 use dawn_event_store::FileEventStore;
 use snapshot::StateSnapshot;
+use ws_server::WsServer;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -36,6 +39,13 @@ const P2_TICKS : usize = 20;
 
 #[tokio::main]
 async fn main() {
+    // Phase 4 モード: --serve 引数があれば Godot 向け WebSocket サーバーを起動
+    let args: Vec<String> = std::env::args().collect();
+    if args.contains(&"--serve".to_string()) {
+        run_phase4_server().await;
+        return;
+    }
+
     run_phase1_benchmark();
     println!();
     run_phase2_demo().await;
@@ -233,4 +243,90 @@ fn run_phase3_demo() {
     println!("  ship count     : {}", if count_ok  { "✓ PASS" } else { "✗ FAIL" });
     println!("  positions match: {}", if pos_ok    { "✓ PASS" } else { "✗ FAIL" });
     println!("═══════════════════════════════════════════");
+}
+
+// ── Phase 4: Godot WebSocket サーバー ─────────────────────────────────────────
+//
+// 使い方:
+//   cargo run -p dawn-simulation --bin simulate --release -- --serve
+//
+// Godot クライアントが ws://127.0.0.1:7878 に接続し、
+// DomainEvent を JSON で受け取って Ship を描画する。
+
+const P4_SHIPS  : usize = 200;
+const P4_TICK_MS: u64   = 100;  // 10 Tick/sec（Godot で視覚的に確認しやすい速度）
+
+async fn run_phase4_server() {
+    println!("═══════════════════════════════════════════");
+    println!("  Phase 4 — Godot WebSocket server          ");
+    println!("═══════════════════════════════════════════");
+    println!("  ships    : {P4_SHIPS}");
+    println!("  tick rate: {} ms/tick  ({} tick/sec)",
+        P4_TICK_MS, 1000 / P4_TICK_MS);
+    println!();
+    println!("  Open Godot client and press Play (F5)");
+    println!("  Press Ctrl-C to stop");
+    println!();
+
+    // WebSocket サーバー起動
+    let server = WsServer::bind("127.0.0.1:7878").await
+        .expect("failed to bind WebSocket server");
+
+    // シミュレーションノード準備
+    let bounds = SectorBounds::cube(SectorBounds::DEFAULT_SIZE);
+    let mut node = SimulationNode::new(NodeId(0), SectorId(0), bounds);
+
+    let config = SpawnConfig::default_for_node(NodeId(0));
+    let ships  = generate_ships(P4_SHIPS, &config, 0);
+
+    println!("  [Server] spawning {P4_SHIPS} ships, waiting for Godot client...");
+
+    // クライアント接続待ち（ブロック）
+    let mut conn = server.accept().await
+        .expect("failed to accept WebSocket client");
+
+    println!("  [Server] Godot connected! Sending spawn events...");
+
+    // Ship を生成してイベントをバッファへ
+    for (_, pos, vel) in ships {
+        node.spawn_ship(pos, vel);
+    }
+
+    // Spawn イベントを全送信
+    let spawn_events: Vec<_> = {
+        use dawn_event_store::store::EventStore as _;
+        node.event_store().iter_from(0)
+            .map(|r| r.event.clone())
+            .collect()
+    };
+    conn.send_events(&spawn_events).expect("failed to send spawn events");
+    println!("  [Server] sent {} spawn events", spawn_events.len());
+    println!("  [Server] running tick loop at {} tick/sec...",
+        1000 / P4_TICK_MS);
+
+    // Tick ループ
+    let mut interval = tokio::time::interval(
+        std::time::Duration::from_millis(P4_TICK_MS)
+    );
+    loop {
+        interval.tick().await;
+        let result = node.tick();
+
+        // 今回の Tick で生成されたイベントを送信
+        let total = node.total_event_count();
+        let from  = (total - result.events_emitted) as u64;
+        let new_events: Vec<_> = {
+            use dawn_event_store::store::EventStore as _;
+            node.event_store().iter_from(from)
+                .map(|r| r.event.clone())
+                .collect()
+        };
+
+        if conn.send_events(&new_events).is_err() {
+            println!("  [Server] client disconnected, waiting for reconnect...");
+            conn = server.accept().await
+                .expect("failed to re-accept WebSocket client");
+            println!("  [Server] client reconnected");
+        }
+    }
 }

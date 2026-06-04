@@ -30,8 +30,8 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 ## 2. 現在地
 
 ```
-現在のフェーズ : Phase 4 — ゲーム開発ループ
-フェーズの状態 : 前提作業進行中
+現在のフェーズ : Phase 4 — ゲーム開発ループ  Cycle 1
+フェーズの状態 : 前提作業完了 / Cycle 1 開始
 ```
 
 ### 完了済みフェーズ
@@ -43,7 +43,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**Phase 4 前提作業: Godot 4 プロジェクト初期化（`client/` ディレクトリ）**
+**Phase 4 Cycle 1: Godot でプロジェクトを開き、Rust サーバーを起動して Ship を表示する**
 
 ---
 
@@ -163,7 +163,7 @@ Session 2: restore_from() で復元 → tick / ship count / positions ✓ PASS
 |---|---|---|
 | `ClientConnection` trait 定義 | ✅ 完了 | Event ストリーム + Command の2方向のみ（ADR-0005） |
 | `InProcessConnection` 実装 | ✅ 完了 | In-Memory Channel 直結（6テスト）|
-| Godot 4 プロジェクト初期化 | ⬜ 未着手 | `client/` ディレクトリ |
+| Godot 4 プロジェクト初期化 | ✅ 完了 | `client/` ディレクトリ + WebSocket サーバー |
 
 ### ClientConnection 抽象化
 

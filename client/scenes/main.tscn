@@ -1,0 +1,43 @@
+[gd_scene load_steps=3 format=3 uid="uid://main_scene"]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/connection.gd" id="2_conn"]
+
+[node name="Main" type="Node"]
+script = ExtResource("1_main")
+
+[node name="Connection" type="Node" parent="."]
+script = ExtResource("2_conn")
+
+[node name="World" type="Node3D" parent="."]
+
+[node name="Camera3D" type="Camera3D" parent="World"]
+transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 5000, 15000)
+projection = 0
+current = true
+fov = 60.0
+near = 10.0
+far = 100000.0
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="World"]
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 20000, 0)
+light_color = Color(0.9, 0.85, 0.75, 1)
+light_energy = 1.5
+shadow_enabled = true
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="World"]
+
+[node name="Ships" type="Node3D" parent="World"]
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="StatsLabel" type="Label" parent="HUD"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -200.0
+offset_top = 10.0
+offset_right = -10.0
+offset_bottom = 80.0
+text = "Ships: 0\nTick: 0\nEvents: 0"
+horizontal_alignment = 2
