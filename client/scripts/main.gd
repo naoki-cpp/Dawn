@@ -143,6 +143,7 @@ func _handle_ship_spawned(p: Dictionary) -> void:
 	if _player_ship_id < 0:
 		_player_ship_id = ship_id
 		_apply_player_material(ship)
+		ship.call("set_as_player")
 		_camera.call("set_target", ship)
 		## サーバーにプレイヤー船を通知（ORIGIN = set_player_ship シグナル）
 		_connection.send_move_command(ship_id, Vector3.ZERO)
@@ -180,9 +181,13 @@ func _handle_ship_despawned(p: Dictionary) -> void:
 
 func _update_hud() -> void:
 	var status: String = "ONLINE" if _connection.is_connected_to_server() else "CONNECTING..."
+	var speed_str: String = "-"
+	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
+		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
+		speed_str = "%d u/tick" % int(spd)
 	_stats_label.text = (
-		"%s\nShips: %d\nTick: %d\nEvents: %d\n\n[DoubleClick] Thrust"
-		% [status, _ships.size(), _current_tick, _event_count]
+		"%s\nShips: %d\nTick: %d\nSpeed: %s\n\n[DoubleClick] Thrust"
+		% [status, _ships.size(), _current_tick, speed_str]
 	)
 
 # ── 内部ユーティリティ ────────────────────────────────────────────────────────

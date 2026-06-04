@@ -33,9 +33,12 @@ pub struct ShipStatsComp {
 }
 
 impl ShipStatsComp {
-    /// Default NPC ship stats.
+    /// Default NPC ship stats — constant velocity, no thrust.
     pub const NPC: Self = Self { max_speed: 400.0, thrust_magnitude: 0.0 };
 
-    /// Default player ship stats — higher thrust and top speed.
-    pub const PLAYER: Self = Self { max_speed: 600.0, thrust_magnitude: 18.0 };
+    /// Default player ship stats.
+    /// thrust_magnitude: velocity added per tick when thrusting.
+    /// max_speed: hard cap on |velocity| (units/tick).
+    /// At 10 tick/sec: max_speed=1500 → 150 units/tick avg → crosses 10000-unit sector in ~67 ticks (6.7 sec).
+    pub const PLAYER: Self = Self { max_speed: 1500.0, thrust_magnitude: 60.0 };
 }
