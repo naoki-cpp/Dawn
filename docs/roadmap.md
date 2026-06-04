@@ -131,127 +131,171 @@ expected   : 63,000 events  ✓ PASS（sleep・flush・バリアなし）
 
 ---
 
-## 7. Phase 4 以降（方向性のみ）
+## 7. Phase 4 — Dummy Network + Godot 最小クライアント
 
-詳細設計は Phase 3 完了後に行う。現時点では方向性のみ記録する。
+**優先順位の根拠:** ゲーム体験を先に確立してからネットワークを実装する。
+本物のネットワーク（gRPC/QUIC）は高コストのため後回しにし、
+ダミー実装で Godot クライアントを動かしてゲームループをブラッシュアップする。
+ネットワーク化は `ClientConnection` trait の差し替えだけで完結するよう設計する。
+→ 詳細設計は ADR-0005 を参照
 
-### インフラ拡張フェーズ
+**完了基準:** Godot 上で Ship が 3D 宇宙空間を動いており、
+サーバーのイベントがリアルタイムに反映される
+
+| タスク | 状態 | 備考 |
+|---|---|---|
+| `ClientConnection` trait 定義 | ⬜ 未着手 | Event 配信 + Command 受付の2方向のみ |
+| `InProcessConnection` 実装 | ⬜ 未着手 | In-Memory Channel で直結（ダミー） |
+| Godot 4 プロジェクト初期化 | ⬜ 未着手 | `client/` ディレクトリ |
+| Ship を 3D 空間に表示 | ⬜ 未着手 | GDScript |
+| サーバーイベントを受信して位置反映 | ⬜ 未着手 | GDScript |
+| スカイボックス（宇宙背景） | ⬜ 未着手 | |
+
+### ClientConnection 抽象化の設計
 
 ```
-Phase 4: ネットワーク層（gRPC / QUIC）
-          In-Memory Channel を gRPC に置き換える
-          trait による抽象化で dawn-actor への変更を最小化する
-          完了基準: 別プロセスの3ノードが通信できる
+サーバー側                         クライアント側
+──────────────────────────────     ─────────────────
+ReplicationBus                     Godot シーン
+    ↓                                  ↑
+ClientConnection trait  ←←←←←←←←←←←←←←←
+    ├── InProcessConnection（Phase 4） ← チャンネル直結
+    └── GrpcConnection（Phase 6）      ← 本物のネットワーク
 
-Phase 5: 分散コンセンサス（Raft）
+Godot クライアントは trait に向かって書く。
+実装の差し替えで Godot 側のコードは変更不要。
+```
+
+**trait の責務はこの2方向のみ:**
+
+```
+サーバー → クライアント : DomainEvent のストリーム
+クライアント → サーバー : Command の送信
+```
+
+---
+
+## 8. Phase 5 — ゲーム体験
+
+**完了基準:** 「遊べる」と感じられる最小のゲームループが成立する
+
+| タスク | 状態 | 備考 |
+|---|---|---|
+| Navigation Context（Warp / Dock） | ⬜ 未着手 | Ship Template 導入も含む |
+| Godot 航行エフェクト（ワープ演出等） | ⬜ 未着手 | |
+| Combat Context 基礎（武器 / HP / 破壊） | ⬜ 未着手 | |
+| Godot 戦闘エフェクト / HUD | ⬜ 未着手 | |
+
+---
+
+## 9. Phase 6 — 本物のネットワーク
+
+**完了基準:** `InProcessConnection` を `GrpcConnection` に差し替え、
+別プロセスの Godot クライアントが接続できる。
+**Godot 側のコードは変更しない。**
+
+| タスク | 状態 | 備考 |
+|---|---|---|
+| `dawn-proto` クレート追加（protobuf定義） | ⬜ 未着手 | |
+| gRPC / QUIC サーバー実装 | ⬜ 未着手 | tonic |
+| `GrpcConnection` 実装 | ⬜ 未着手 | trait 差し替え |
+| Godot GDScript の接続先を切り替え | ⬜ 未着手 | 変更最小化 |
+| 別プロセス接続テスト | ⬜ 未着手 | |
+
+---
+
+## 10. Phase 7 以降（方向性のみ）
+
+詳細設計は Phase 6 完了後に行う。
+
+```
+Phase 7: 分散コンセンサス（Raft）
           Sector Transit の整合性保証
-          Leader 選出 / Log Replication
-          完了基準: ノード障害後にSector Transitが正しく完了する
+          完了基準: ノード障害後に Sector Transit が正しく完了する
 
-Phase 6: スケール基盤
-          Sector Population Cap の実装（Anti-TiDi）
-          Dynamic Sector Fission（負荷超過前の自動分割）
-          Spatial Index（近傍クエリ）
-          Interest Management（Bubble配信）
-          完了基準: 1 Sector 5,000 ships 上限でTick SLAを常に満たす
-```
+Phase 8: スケール基盤（Anti-TiDi）
+          Sector Population Cap / Dynamic Fission
+          Spatial Index / Interest Management
+          完了基準: 1 Sector 5,000 ships 上限で Tick SLA を常に満たす
 
-### ゲーム機能フェーズ（Bounded Context 拡張）
-
-クライアントはゲーム機能と**並行して開発する**。
-機能を実装するたびにクライアントで動作確認できる状態を維持する。
-
-```
-Phase 7: Navigation Context + Minimal Client（同時進行）
-
-  Phase 7-Server: Navigation Context（サーバー側）
-    Warp（高速移動）/ Dock（停泊）/ Jump Gate
-    Ship Template の導入（データ駆動 / TOML定義）
-    完了基準: Warpコマンドで目的地まで自律移動できる
-
-  Phase 7-Client: Godot 最小クライアント（クライアント側）
-    技術: Godot 4 + GDScript
-    gRPC でサーバーからイベントを受信
-    Ship を 3D 空間に表示・移動を反映
-    スカイボックス（宇宙背景）
-    完了基準: Godot 上で Ship が 3D 宇宙空間を動いているのが見える
-
-Phase 8: Combat Context + Combat View
-
-  Phase 8-Server: Combat Context
-    武器 / ダメージ / Shield / Armor / Hull
-    ターゲティング / 射程管理
-    完了基準: Ship同士が戦闘し、どちらかがDestroyedになる
-
-  Phase 8-Client: 戦闘エフェクト
-    武器発射パーティクル / 爆発エフェクト
-    HUD（Shield/Armor/Hull ゲージ）
-    ターゲット表示
-    完了基準: 戦闘が 3D で視覚的に確認できる
-
-Phase 9: Resource Context + Mining View
-  採掘ビーム・資源オブジェクト表示
-  完了基準: 採掘動作が 3D で確認できる
-
-Phase 10: Economy Context + Market UI
-  市場画面 / 取引 UI
-  完了基準: ゲーム内でアイテムを売買できる
-
-Phase 11: Client 本格化（GDExtension 導入）
-  godot-rust (GDExtension) で Client-Side Prediction を Rust 実装
-  dawn-core の型を Godot へ直接公開
-  本格的な宇宙エフェクト（ネビュラ・レンズフレア・ワープトンネル）
-  完了基準: レイテンシを隠した滑らかな操作感が実現できる
+Phase 9: Resource + Economy Context
+Phase 10: Client 本格化（GDExtension 導入）
+           godot-rust で Client-Side Prediction を Rust 実装
+           dawn-core 型を Godot へ直接公開
+           完了基準: レイテンシを隠した滑らかな操作感
 ```
 
 ### クライアント技術スタック（決定済み）
 
 ```
-エンジン    : Godot 4
+エンジン      : Godot 4
 ゲームロジック: GDScript（AI が主に書く）
-高性能処理  : godot-rust / GDExtension（Phase 11 以降）
-サーバー通信: gRPC（Phase 4 完了後） / In-Memory（Phase 7 開発時）
-型共有      : Phase 7-11: proto 変換 → Phase 11: GDExtension で直接共有
+高性能処理    : godot-rust / GDExtension（Phase 10 以降）
+サーバー通信  : InProcessConnection（Phase 4〜5）
+               → GrpcConnection（Phase 6〜）
+型共有        : Phase 4〜9: チャンネル / proto 変換
+               → Phase 10: GDExtension で dawn-core を直接 import
 
 → 技術選択の根拠は ADR-0004 を参照
 ```
 
-### リポジトリ構成（Phase 7-Client 追加時）
+### リポジトリ構成（Phase 4 で追加）
 
 ```
-dawn/                       ← 既存 Cargo Workspace（サーバー）
-client/                     ← Godot プロジェクト（新規追加）
+dawn/                        ← 既存 Cargo Workspace（サーバー）
+client/                      ← Godot 4 プロジェクト（Phase 4 で追加）
   project.godot
   scenes/
     main.tscn
     ship.tscn
   scripts/
-    server_connection.gd    ← gRPC 受信
-    ship_controller.gd      ← Ship 表示・移動
+    connection.gd            ← ClientConnection の GDScript ラッパー
+    ship_controller.gd       ← Ship 表示・移動
     skybox.gd
   assets/
-    models/                 ← Ship 3D モデル（glTF）
-    shaders/                ← 宇宙エフェクト
-  gdextension/              ← Phase 11 以降
-    Cargo.toml              ← godot-rust
+    models/                  ← Ship 3D モデル（glTF）
+    shaders/                 ← 宇宙エフェクト
+  gdextension/               ← Phase 10 以降
+    Cargo.toml               ← godot-rust
     src/
-      lib.rs                ← dawn-core を import
+      lib.rs                 ← dawn-core を import
 ```
 
 ### フェーズ横断の設計原則
 
 ```
+ClientConnection trait を正しく定義することがネットワーク差し替えの鍵
 各 Server Context は独立した Crate として追加する
 上位 Context は下位 Context に依存しない（Spatial ← Navigation ← Combat …）
-各 Server フェーズに対応する Client フェーズを必ず用意する
 Anti-TiDi の制約（INV-TIDI）は全フェーズで維持する
 Event Sourcing の原則（INV-001〜006）は全フェーズで維持する
 ```
 
 ---
 
-## 8. 廃止・変更された計画の記録
+## 11. 廃止・変更された計画の記録
 
-変更があった場合のみ追記する。
+### 2026-06-04: Phase 4〜11 の優先順位を変更
 
-現時点での変更履歴: **なし**
+**旧計画:**
+```
+Phase 4: ネットワーク層（gRPC/QUIC）
+Phase 5: Raft
+Phase 6: スケール基盤
+Phase 7: クライアント（Navigation + Godot最小クライアント）
+…
+```
+
+**新計画:**
+```
+Phase 4: Dummy Network + Godot 最小クライアント  ← 前倒し
+Phase 5: ゲーム体験（Navigation + Combat）
+Phase 6: 本物のネットワーク（gRPC/QUIC）        ← 後ろ倒し
+Phase 7: Raft
+…
+```
+
+**変更理由:**
+ゲーム体験の確立を優先する。本物のネットワーク実装は高コストのため、
+`ClientConnection` trait でダミー実装と差し替え可能な設計にしたうえで後回しにする。
+Godot クライアントは trait に向かって書くため、ネットワーク化時に変更不要。

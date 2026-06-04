@@ -142,7 +142,47 @@ Command と Event は別の型として完全に分離する。
 
 ---
 
-## 5-A. ゲーム化に向けた設計方向性（未実装・設計のみ）
+## 5-A. ClientConnection 抽象化（Phase 4 で実装）
+
+クライアント（Godot）とサーバー（Rust）の接続を trait で抽象化する。
+実装を差し替えることでネットワーク化時に Godot 側のコードを変更しない。
+
+```
+Phase 4（ダミー）:              Phase 6（本物）:
+  InProcessConnection             GrpcConnection
+  ↓ In-Memory Channel で直結      ↓ gRPC / QUIC
+
+  どちらも同じ ClientConnection trait を実装する
+```
+
+### trait の責務（この 2 方向のみ）
+
+```
+サーバー → クライアント : DomainEvent のストリーム配信
+クライアント → サーバー : Command の送信
+```
+
+これ以外の責務をこの trait に混入してはならない。
+接続状態管理・認証・再接続は上位レイヤーが担う。
+
+### データフロー（Phase 4 以降）
+
+```
+SectorSimulatorActor
+    ↓ events
+ReplicationBus
+    ↓
+ClientConnection（InProcess / Grpc）
+    ↓ DomainEvent stream
+Godot クライアント（GDScript）
+    ↑ Command
+```
+
+→ 詳細設計は ADR-0005 を参照（Phase 4 着手時に作成）
+
+---
+
+## 5-B. ゲーム化に向けた設計方向性（未実装・設計のみ）
 
 現在の技術基盤をEVEライクな3Dゲームに育てるために、
 以下の概念を**今から設計の前提として持つ**。実装はPhaseに従う。
