@@ -9,6 +9,7 @@ edition = "2021"
 dawn-core        = { path = "../dawn-core" }
 dawn-event-store = { path = "../dawn-event-store" }
 tokio            = { workspace = true }
+thiserror        = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true }

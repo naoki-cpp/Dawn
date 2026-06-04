@@ -31,7 +31,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ```
 現在のフェーズ : Phase 4 — ゲーム開発ループ
-フェーズの状態 : 未着手
+フェーズの状態 : 前提作業進行中
 ```
 
 ### 完了済みフェーズ
@@ -43,7 +43,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**Phase 4 前提作業: `ClientConnection` trait の定義 + `InProcessConnection` 実装**
+**Phase 4 前提作業: Godot 4 プロジェクト初期化（`client/` ディレクトリ）**
 
 ---
 
@@ -161,8 +161,8 @@ Session 2: restore_from() で復元 → tick / ship count / positions ✓ PASS
 
 | タスク | 状態 | 備考 |
 |---|---|---|
-| `ClientConnection` trait 定義 | ⬜ 未着手 | Event ストリーム + Command の2方向のみ |
-| `InProcessConnection` 実装 | ⬜ 未着手 | In-Memory Channel 直結（ダミー） |
+| `ClientConnection` trait 定義 | ✅ 完了 | Event ストリーム + Command の2方向のみ（ADR-0005） |
+| `InProcessConnection` 実装 | ✅ 完了 | In-Memory Channel 直結（6テスト）|
 | Godot 4 プロジェクト初期化 | ⬜ 未着手 | `client/` ディレクトリ |
 
 ### ClientConnection 抽象化
