@@ -131,64 +131,86 @@ expected   : 63,000 events  ✓ PASS（sleep・flush・バリアなし）
 
 ---
 
-## 7. Phase 4 — Dummy Network + Godot 最小クライアント
+## 7. Phase 4 — ゲーム開発ループ（反復開発）
 
-**優先順位の根拠:** ゲーム体験を先に確立してからネットワークを実装する。
-本物のネットワーク（gRPC/QUIC）は高コストのため後回しにし、
-ダミー実装で Godot クライアントを動かしてゲームループをブラッシュアップする。
-ネットワーク化は `ClientConnection` trait の差し替えだけで完結するよう設計する。
-→ 詳細設計は ADR-0005 を参照
+**構造:** ウォーターフォール的な「完了」を定めず、
+サーバー機能追加 → クライアントで確認 → フィードバック → 次の機能
+という短いサイクルを繰り返し、ゲームとして「満足できる」状態になったら Phase 5 へ進む。
 
-**完了基準:** Godot 上で Ship が 3D 宇宙空間を動いており、
-サーバーのイベントがリアルタイムに反映される
+**ネットワークはダミーのまま維持する。**
+本物のネットワーク（gRPC/QUIC）は Phase 5 で一括対応する。
+→ `ClientConnection` trait の差し替えだけで完結するよう設計する（ADR-0005）
+
+**Phase 4 卒業基準:**
+「ゲームとして遊べる・面白いと感じられる最小のループが成立している」
+（機能の完成度ではなく体験の納得感で判断する）
+
+---
+
+### Phase 4 前提作業（初回のみ・サイクル開始前）
 
 | タスク | 状態 | 備考 |
 |---|---|---|
-| `ClientConnection` trait 定義 | ⬜ 未着手 | Event 配信 + Command 受付の2方向のみ |
-| `InProcessConnection` 実装 | ⬜ 未着手 | In-Memory Channel で直結（ダミー） |
+| `ClientConnection` trait 定義 | ⬜ 未着手 | Event ストリーム + Command の2方向のみ |
+| `InProcessConnection` 実装 | ⬜ 未着手 | In-Memory Channel 直結（ダミー） |
 | Godot 4 プロジェクト初期化 | ⬜ 未着手 | `client/` ディレクトリ |
-| Ship を 3D 空間に表示 | ⬜ 未着手 | GDScript |
-| サーバーイベントを受信して位置反映 | ⬜ 未着手 | GDScript |
-| スカイボックス（宇宙背景） | ⬜ 未着手 | |
 
-### ClientConnection 抽象化の設計
+### ClientConnection 抽象化
 
 ```
-サーバー側                         クライアント側
-──────────────────────────────     ─────────────────
-ReplicationBus                     Godot シーン
-    ↓                                  ↑
-ClientConnection trait  ←←←←←←←←←←←←←←←
-    ├── InProcessConnection（Phase 4） ← チャンネル直結
-    └── GrpcConnection（Phase 6）      ← 本物のネットワーク
+サーバー側                       クライアント側
+────────────────────────         ─────────────────
+ReplicationBus                   Godot シーン
+    ↓                                ↑
+ClientConnection trait  ─────────────
+    ├── InProcessConnection  ← Phase 4（チャンネル直結）
+    └── GrpcConnection       ← Phase 5（本物のネットワーク）
 
-Godot クライアントは trait に向かって書く。
-実装の差し替えで Godot 側のコードは変更不要。
-```
-
-**trait の責務はこの2方向のみ:**
-
-```
-サーバー → クライアント : DomainEvent のストリーム
-クライアント → サーバー : Command の送信
+Godot は trait に向かって書く。
+差し替え時に Godot 側のコードは変更しない。
 ```
 
 ---
 
-## 8. Phase 5 — ゲーム体験
+### Cycle 1 — 宇宙に船を浮かべる
 
-**完了基準:** 「遊べる」と感じられる最小のゲームループが成立する
+```
+目標 : 宇宙空間で Ship が動いているのが見える
+Server: 現状のまま（InProcessConnection で接続するだけ）
+Client: Godot 初期化 / Ship を 3D 空間に表示 / スカイボックス
+確認  : 「宇宙に船がいる」という感覚があるか
+```
 
-| タスク | 状態 | 備考 |
-|---|---|---|
-| Navigation Context（Warp / Dock） | ⬜ 未着手 | Ship Template 導入も含む |
-| Godot 航行エフェクト（ワープ演出等） | ⬜ 未着手 | |
-| Combat Context 基礎（武器 / HP / 破壊） | ⬜ 未着手 | |
-| Godot 戦闘エフェクト / HUD | ⬜ 未着手 | |
+### Cycle 2 — 航行する
+
+```
+目標 : 宇宙空間を飛び回れる
+Server: Navigation Context（Warp / Dock / Ship Template）
+Client: ワープ演出 / カメラ追従 / 星系間移動の見た目
+確認  : 「宇宙の広さ」が感じられるか
+```
+
+### Cycle 3 — 戦う
+
+```
+目標 : 船同士が戦えて破壊される
+Server: Combat Context（武器 / ダメージ / HP / Destroyed）
+Client: 武器発射エフェクト / 爆発 / HUD（HP ゲージ）
+確認  : 「戦闘が面白い」という感覚があるか
+```
+
+### Cycle N — フィードバック次第で追加
+
+```
+採掘 / 資源 / 市場 / 陣営 / ...
+各サイクルの内容は直前の確認フィードバックに基づいて決める
+```
 
 ---
 
-## 9. Phase 6 — 本物のネットワーク
+## 8. Phase 5 — 本物のネットワーク
+
+**前提:** Phase 4 のゲーム体験が満足できる水準に達していること。
 
 **完了基準:** `InProcessConnection` を `GrpcConnection` に差し替え、
 別プロセスの Godot クライアントが接続できる。
@@ -196,10 +218,9 @@ Godot クライアントは trait に向かって書く。
 
 | タスク | 状態 | 備考 |
 |---|---|---|
-| `dawn-proto` クレート追加（protobuf定義） | ⬜ 未着手 | |
+| `dawn-proto` クレート追加（protobuf 定義） | ⬜ 未着手 | |
 | gRPC / QUIC サーバー実装 | ⬜ 未着手 | tonic |
-| `GrpcConnection` 実装 | ⬜ 未着手 | trait 差し替え |
-| Godot GDScript の接続先を切り替え | ⬜ 未着手 | 変更最小化 |
+| `GrpcConnection` 実装 | ⬜ 未着手 | trait 差し替えのみ |
 | 別プロセス接続テスト | ⬜ 未着手 | |
 
 ---
@@ -275,27 +296,20 @@ Event Sourcing の原則（INV-001〜006）は全フェーズで維持する
 
 ## 11. 廃止・変更された計画の記録
 
-### 2026-06-04: Phase 4〜11 の優先順位を変更
+### 2026-06-04: Phase 4〜11 の開発戦略を変更（2段階）
 
-**旧計画:**
-```
-Phase 4: ネットワーク層（gRPC/QUIC）
-Phase 5: Raft
-Phase 6: スケール基盤
-Phase 7: クライアント（Navigation + Godot最小クライアント）
-…
-```
+**変更 1 — クライアント優先（ネットワーク後回し）:**
 
-**新計画:**
-```
-Phase 4: Dummy Network + Godot 最小クライアント  ← 前倒し
-Phase 5: ゲーム体験（Navigation + Combat）
-Phase 6: 本物のネットワーク（gRPC/QUIC）        ← 後ろ倒し
-Phase 7: Raft
-…
-```
+旧: Phase 4 = gRPC/QUIC → Phase 7 = クライアント  
+新: Phase 4 = Godot + ダミーネットワーク → Phase 5 = 本物のネットワーク
 
-**変更理由:**
-ゲーム体験の確立を優先する。本物のネットワーク実装は高コストのため、
-`ClientConnection` trait でダミー実装と差し替え可能な設計にしたうえで後回しにする。
-Godot クライアントは trait に向かって書くため、ネットワーク化時に変更不要。
+理由: ゲーム体験を先に確立してからネットワーク化する。
+`ClientConnection` trait により差し替えコストを最小化。
+
+**変更 2 — Phase 4 と「ゲーム体験フェーズ」を反復ループに統合:**
+
+旧: Phase 4（クライアント起動）→ Phase 5（ゲーム体験）の順に完了  
+新: Phase 4 = 反復サイクル（Cycle 1〜N）をゲーム体験が満足できるまで繰り返す
+
+理由: サーバー機能追加 → クライアント確認 → フィードバック のループで
+品質を高める。フェーズの境界よりサイクルの反復を優先する。
