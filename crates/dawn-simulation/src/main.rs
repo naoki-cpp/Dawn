@@ -317,13 +317,9 @@ async fn run_phase4_server() {
                 dawn_core::MoveCommand { ship_id, target_position }
                     if target_position == dawn_core::Position::ORIGIN =>
                 {
-                    println!("  [Server] set_player_ship → ship_id={}", ship_id.raw());
                     node.set_player_ship(ship_id);
                 }
                 dawn_core::MoveCommand { ship_id, target_position } => {
-                    println!("  [Server] thrust → ship_id={} target=({:.0},{:.0},{:.0})",
-                        ship_id.raw(),
-                        target_position.x, target_position.y, target_position.z);
                     node.apply_move_command(ship_id, target_position);
                 }
             }

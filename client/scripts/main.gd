@@ -148,7 +148,6 @@ func _handle_ship_spawned(p: Dictionary) -> void:
 		_camera.call("set_target", ship)
 		## サーバーにプレイヤー船を通知（ORIGIN = set_player_ship シグナル）
 		_connection.send_move_command(ship_id, Vector3.ZERO)
-		print("[Main] player ship: %d" % ship_id)
 
 func _handle_ship_moved(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
@@ -215,4 +214,3 @@ func _apply_player_material(ship: Node3D) -> void:
 	var hull: MeshInstance3D = ship.get_node_or_null("Hull") as MeshInstance3D
 	if hull != null:
 		hull.set_surface_override_material(0, _player_material)
-
