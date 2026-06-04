@@ -126,15 +126,38 @@ Ship エンティティは必ず上記 3 Component を全て持つ。
 
 ### Ship が現在持たないもの（MVP 外）
 
-以下は将来のフェーズで検討するが、現在は存在しない。
+以下は将来のフェーズで追加するが、現在は存在しない。
 
 ```
-Hull（船体耐久度）    ← 戦闘システムが必要
-Cargo（積荷）        ← 経済システムが必要
-Name（船名）         ← UI が必要
-OwnerId（所有者）    ← キャラクターシステムが必要
+Hull（船体耐久度）    ← Combat Context
+Cargo（積荷）        ← Economy Context
+Name（船名）         ← UI / Social Context
+OwnerId（所有者）    ← Character Context
 TransitState        ← Sector Transit 実装時に追加
 ```
+
+### Ship Template（データ駆動設計・将来）
+
+EVE Online には数百種類の船体がある。
+各種類の「基本性能」をコードではなくデータとして管理する設計が必要。
+
+```
+ShipTemplate（不変・データファイル）   ShipInstance（可変・ECS）
+─────────────────────────────────    ──────────────────────────
+template_id: ShipTypeId              ship_id       : ShipId
+name        : "Rifter"               template_id   : ShipTypeId  ← 参照
+mass        : 1_067_000.0 kg         position      : Position
+max_speed   : 380.0 m/s              velocity      : Velocity
+turn_rate   : 3.28 deg/s             current_hp    : f32  （将来）
+base_hull_hp: 563.0                  …
+…
+```
+
+**設計原則：**
+- Template は起動時にファイル（TOML / JSON）から読み込む
+- Template はイミュータブル。変更はデプロイを伴う
+- ECS Component は Instance の状態のみを保持し、基本パラメータは Template を参照する
+- `ShipTypeId` は `dawn-core` に追加する（将来）
 
 ---
 

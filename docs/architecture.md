@@ -142,6 +142,92 @@ Command と Event は別の型として完全に分離する。
 
 ---
 
+## 5-A. ゲーム化に向けた設計方向性（未実装・設計のみ）
+
+現在の技術基盤をEVEライクな3Dゲームに育てるために、
+以下の概念を**今から設計の前提として持つ**。実装はPhaseに従う。
+
+### Interest Management（観測範囲）
+
+最重要。これなしでは実際のゲームにならない。
+
+```
+問題: 10万隻が存在する場合、全Eventを全クライアントに送ることは不可能
+解法: 各クライアントは「自分の周囲 R km 以内のエンティティ」の
+     Eventのみを受信する（Bubble / Area of Interest）
+
+              World
+           ┌──────────────┐
+           │  C           │
+           │     ┌──────┐ │
+           │  A  │[you] │ │  ← Bubble内のA,Bのみ受信
+           │     │  B   │ │     Cは受信しない
+           │     └──────┘ │
+           └──────────────┘
+```
+
+**設計への影響（将来）：**
+- Event は EventStore に書いた後、Bubble フィルタリングを経てクライアントへ配信する
+- Bubble の計算には空間インデックス（Sector内の3D近傍クエリ）が必要
+- クライアントが移動するにつれて Bubble が更新される
+
+### Projection / Read Model 層
+
+現在のCQRSはWrite側のみ設計済み。Read側を明示化する。
+
+```
+Write側（現在実装済み）:
+  Command → Validation → Event → EventStore
+
+Read側（将来実装）:
+  EventStore → Projection → Read Model
+                                ├── SpatialIndex（近傍クエリ）
+                                ├── ShipStateView（Ship現在状態）
+                                └── SectorOccupancyView（Sector人口）
+```
+
+Projectionは**EventのReplayで再構築できる**（INV-002の延長）。
+Read Modelが破損しても、EventLogから再生成できる。
+
+### クライアント接続モデル
+
+```
+Server（Authoritative）        Client（表示）
+─────────────────────          ──────────────
+真の状態を持つ                   表示用の状態を持つ
+     │                               │
+     │ ① Commandを受信               │ Client-Side Prediction
+     │ ② 検証・Event生成             │ （レイテンシを隠すための先読み）
+     │ ③ EventをClientへ配信    →    │ Reconciliation
+     │                               │ （Eventで先読みを補正）
+```
+
+ServerはAuthoritative（現在の設計のまま）。
+Clientは「仮の状態」を先行表示し、Serverからのイベントで補正する。
+
+### Bounded Context 拡張順序
+
+```
+現在実装済み:
+  Spatial + Movement
+
+推奨追加順序（依存関係による）:
+  Navigation  ← Warp / Dock（Movementの延長）
+      ↓
+  Combat      ← 武器 / ダメージ / Shield / Hull
+      ↓
+  Resource    ← 採掘 / 資源
+      ↓
+  Economy     ← Market / Trade / Manufacturing
+      ↓
+  Social      ← Corporation / Alliance / Chat
+
+原則: 上位ContextはSpatialを使うが、SpatialはContextを知らない
+     （依存は常に下向き）
+```
+
+---
+
 ## 6. 現在の制約（変更には ADR が必要）
 
 | 制約 | 理由 | 根拠 ADR |

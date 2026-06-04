@@ -61,6 +61,7 @@ MVP範囲外の機能追加を求められた場合、実装せずにその旨�
 原則3: 因果順序は論理Tick + NodeIdで決定する。物理時刻を使わない。
 原則4: Crate依存は一方向のみ。循環依存は設計の失敗を意味する。
 原則5: Actor間の通信はMailbox経由のみ。直接メソッド呼び出し禁止。
+原則6: Tickの論理速度は一定である。負荷超過はSector入場制限で対処し、Tickを遅らせない。
 ```
 
 ---
@@ -162,6 +163,35 @@ MVP範囲外の機能追加を求められた場合、実装せずにその旨�
 
 理由: Commandは拒否できる。Eventは既に起きた事実で拒否できない。
 同じ型で表現すると「まだ起きていないこと」と「起きたこと」の区別が失われる。
+
+### INV-TIDI: Tickの速度は常に一定である
+
+```
+違反例:
+  // 負荷が高いのでTickを遅らせる
+  if tick_elapsed > TARGET_MS {
+      self.time_dilation_factor = 0.1; // 10倍スロー
+  }
+
+  // Tickを遅延させて「待つ」
+  tokio::time::sleep(extra_delay).await;
+
+正しい実装:
+  // 負荷が高い → Sector入場を制限する（SpawnRejected）
+  if sector.population >= sector.population_cap * 0.95 {
+      return Err(CommandError::SectorAtCapacity);
+  }
+
+  // Tick SLA超過は「許容された動作」ではなく「異常」として記録する
+  if elapsed > TICK_BUDGET {
+      error!("Tick SLA violated: {}µs > {}µs", elapsed, TICK_BUDGET);
+      metrics.tick_sla_violation.inc();
+  }
+```
+
+理由: EVE OnlineのTime Dilation（TiDi）はプレイヤー体験を著しく悪化させる。
+負荷超過はTickを遅らせるのではなく、Sectorへの入場制限と動的分割で事前に対処する。
+→ 詳細設計は docs/tick-model.md §8 を参照。
 
 ---
 

@@ -54,8 +54,10 @@ Tick ループは制限なく実行される（できるだけ速く）。
 実装方法: tokio::time::interval による非同期タイマー（未実装）
 ```
 
-処理が 16 ms を超えた場合は Tick を遅延させる（スキップしない）。  
-EVE Online の "Time Dilation" に相当する概念として将来検討する。
+処理が 16 ms を超えた場合はシステム異常として記録する。
+Tick を遅延させることも、スキップすることも許容しない。
+→ 負荷超過は「Tick を遅らせる」のではなく「Sector への入場を制限する」ことで解決する。
+詳細は §8 を参照。
 
 ---
 
@@ -160,6 +162,102 @@ Step 5（Replication）は計測対象外（未実装のため）
 
 ```bash
 cargo run -p dawn-simulation --bin simulate --release
+```
+
+---
+
+## 8. 負荷制御設計（Anti-TiDi）
+
+### EVE Online の TiDi とその問題
+
+EVE Online は Sector（ソーラーシステム）の負荷が高くなると
+**Time Dilation（TiDi）** を発動し、シミュレーション速度を最大 10% まで低下させる。
+
+```
+EVE の TiDi:
+  通常: 1秒 = 1秒
+  TiDi: 1秒 = 10秒（10倍スロー）
+  効果: 処理が追いつかなくても「世界の時間を遅らせる」ことで整合性を維持
+  問題: プレイヤー体験が著しく悪化する（操作が効かない・戦闘が長時間化）
+        コミュニティから長年にわたり不評
+```
+
+### このシステムの方針：TiDi を発生させない
+
+TiDi は「過負荷になった後の救済措置」である。
+このシステムは **過負荷になる前に Sector への入場を制限する**ことで
+TiDi を構造的に発生させない。
+
+```
+EVE（事後対処）:  負荷超過 → TiDi で時間を遅らせる
+Dawn（事前規制）: 入場制限 → Sector は常に定員内 → Tick は常に 16ms 以内
+```
+
+### Sector Population Cap（入場制限）
+
+各 Sector はエンティティ数の上限（`population_cap`）を持つ。
+
+```
+population_cap : Sector が受け入れる Ship の最大数
+警告閾値       : population_cap × 0.8（80%）到達でアラート
+制限閾値       : population_cap × 0.95（95%）到達で SpawnCommand を拒否
+```
+
+**SpawnCommand のアドミッションコントロール:**
+
+```
+SpawnCommand 受信
+    │
+    ▼
+Sector の現在人口を確認
+    │
+    ├─ population < 制限閾値 → 通常処理
+    │
+    └─ population ≥ 制限閾値 → SpawnRejected { reason: SectorAtCapacity }
+                               （隣接 Sector への誘導情報を含める）
+```
+
+SpawnRejected はドメインイベントとして EventLog に記録する。
+「なぜその Sector が満員になったか」の履歴が残る。
+
+### Dynamic Sector Fission（動的分割）
+
+population_cap の 80% を超えたタイミングで Sector の分割を準備する。
+負荷が閾値を超える「前」に分割を開始することが重要。
+
+```
+[Sector A: 4,000/5,000 ships]  ← 80% アラート
+         │
+         │ Sector Fission 開始
+         ▼
+[Sector A1: 2,000 ships] + [Sector A2: 2,000 ships]
+```
+
+分割戦略：空間的中央分割（X 軸または Y 軸の中点で二分）。
+→ SectorTransit の設計と密接に関連する（ownership.md 参照）。
+
+### Tick SLA の強制
+
+Tick 処理時間が目標を超えた場合は「TiDi を発動する」のではなく
+「システム異常として記録し、アラートを発する」。
+
+```
+Tick 処理時間 ≤ 12ms : 正常
+Tick 処理時間 ≤ 16ms : 警告（warn! ログ）
+Tick 処理時間 > 16ms : 異常（error! ログ + メトリクス）
+                       → 根本原因の調査が必要
+                       → population_cap の見直しをトリガーする
+```
+
+Tick SLA 超過は「許容された動作」ではなく「修正が必要なバグ」として扱う。
+これが EVE の TiDi と根本的に異なる設計思想である。
+
+### 設計上の不変条件（追加）
+
+```
+INV-TIDI: Tick の論理速度は一定である。
+          「Tick を遅らせる」実装を追加してはならない。
+          負荷超過は Sector への入場制限で対処する。
 ```
 
 ---
