@@ -1,6 +1,6 @@
 //! `SimWorld` — the single owner of all ECS state within a Sector Node.
 
-use crate::components::{PositionComp, ShipIdComp, VelocityComp};
+use crate::components::{PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp};
 use dawn_core::{Position, SectorId, ShipId, Velocity};
 use hecs::Entity;
 
@@ -27,6 +27,9 @@ impl SimWorld {
 
     /// Spawn a Ship entity and return the ECS `Entity` handle.
     ///
+    /// All ships receive `ThrustComp::ZERO` and `ShipStatsComp::NPC` by default.
+    /// Use `set_ship_stats()` to override stats for the player ship.
+    ///
     /// The caller is responsible for ensuring `ship_id` is globally unique.
     /// See CLAUDE.md INV-004 and FBD-005.
     pub fn spawn_ship(
@@ -39,14 +42,23 @@ impl SimWorld {
             ShipIdComp(ship_id),
             PositionComp(position),
             VelocityComp(velocity),
+            ThrustComp(Velocity::ZERO),
+            ShipStatsComp::NPC,
         ))
+    }
+
+    /// Override the stats (max_speed, thrust_magnitude) for a specific ship.
+    ///
+    /// Used to designate the player ship with higher performance values.
+    pub fn set_ship_stats(&mut self, entity: Entity, stats: ShipStatsComp) {
+        if let Ok(mut comp) = self.inner.get::<&mut ShipStatsComp>(entity) {
+            *comp = stats;
+        }
     }
 
     /// Despawn a Ship entity.
     ///
     /// Returns `true` if the entity existed, `false` if it was already absent.
-    /// The caller must append a `ShipDespawned` event before or after calling
-    /// this — the ECS does not produce events.
     pub fn despawn_ship(&mut self, entity: Entity) -> bool {
         self.inner.despawn(entity).is_ok()
     }
@@ -74,54 +86,56 @@ mod tests {
     use super::*;
     use dawn_core::{NodeId, Position, SectorId, Velocity};
 
-    fn make_world() -> SimWorld {
-        SimWorld::new(SectorId(0))
-    }
-
-    fn make_ship_id(counter: u64) -> ShipId {
-        ShipId::new(NodeId(0), counter)
-    }
+    fn make_world() -> SimWorld { SimWorld::new(SectorId(0)) }
+    fn make_ship_id(c: u64) -> ShipId { ShipId::new(NodeId(0), c) }
 
     #[test]
     fn newly_created_world_contains_no_ships() {
-        let world = make_world();
-        assert_eq!(world.ship_count(), 0);
+        assert_eq!(make_world().ship_count(), 0);
     }
 
     #[test]
     fn spawned_ship_increments_ship_count() {
-        let mut world = make_world();
-        world.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
-        assert_eq!(world.ship_count(), 1);
+        let mut w = make_world();
+        w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
+        assert_eq!(w.ship_count(), 1);
     }
 
     #[test]
     fn despawned_ship_decrements_ship_count() {
-        let mut world = make_world();
-        let entity = world.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
-        assert!(world.despawn_ship(entity));
-        assert_eq!(world.ship_count(), 0);
+        let mut w = make_world();
+        let e = w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
+        assert!(w.despawn_ship(e));
+        assert_eq!(w.ship_count(), 0);
     }
 
     #[test]
     fn despawning_nonexistent_entity_returns_false() {
-        let mut world = make_world();
-        let entity = world.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
-        world.despawn_ship(entity);
-        assert!(!world.despawn_ship(entity), "second despawn must return false");
+        let mut w = make_world();
+        let e = w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
+        w.despawn_ship(e);
+        assert!(!w.despawn_ship(e));
     }
 
     #[test]
     fn spawned_ship_position_is_retrievable_via_inner_world() {
-        let mut world    = make_world();
-        let target_pos   = Position::new(1.0, 2.0, 3.0);
-        let _entity      = world.spawn_ship(make_ship_id(1), target_pos, Velocity::ZERO);
-
+        let mut w  = make_world();
+        let target = Position::new(1.0, 2.0, 3.0);
+        w.spawn_ship(make_ship_id(1), target, Velocity::ZERO);
         let mut found = false;
-        for (_e, pos) in world.inner().query::<&PositionComp>().iter() {
-            assert_eq!(pos.0, target_pos);
+        for (_e, pos) in w.inner().query::<&PositionComp>().iter() {
+            assert_eq!(pos.0, target);
             found = true;
         }
-        assert!(found, "expected one ship to be found");
+        assert!(found);
+    }
+
+    #[test]
+    fn ship_stats_can_be_overridden_for_player_ship() {
+        let mut w = make_world();
+        let e = w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
+        w.set_ship_stats(e, ShipStatsComp::PLAYER);
+        let stats = *w.inner().get::<&ShipStatsComp>(e).unwrap();
+        assert_eq!(stats.max_speed, ShipStatsComp::PLAYER.max_speed);
     }
 }

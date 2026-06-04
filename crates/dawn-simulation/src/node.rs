@@ -21,7 +21,7 @@ use dawn_core::{
     DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity,
 };
 use dawn_ecs::{
-    components::{PositionComp, VelocityComp},
+    components::{PositionComp, ShipStatsComp, ThrustComp, VelocityComp},
     systems::MovementSystem,
     Entity, SimWorld,
 };
@@ -220,11 +220,13 @@ impl<S: EventStore> SimulationNode<S> {
         self.world.inner().get::<&PositionComp>(*entity).ok().map(|c| c.0)
     }
 
-    /// MoveCommand を処理する: 目標方向への Velocity を設定する。
+    /// MoveCommand を処理する: 目標方向への Thrust ベクトルを設定する。
     ///
-    /// Velocity の大きさは固定 `speed`。目標に非常に近い場合は停止する。
-    /// これは Cycle 2 のシンプルな実装。将来は加速度モデルに移行できる。
-    pub fn apply_move_command(&mut self, ship_id: ShipId, target: Position, speed: f32) {
+    /// 毎 Tick、MovementSystem が `thrust_magnitude` の大きさで
+    /// この方向へ速度を加算する。`max_speed` を超えた分は clamp される。
+    ///
+    /// `target == current_position` の場合は thrust をゼロにして「停止推力」。
+    pub fn apply_move_command(&mut self, ship_id: ShipId, target: Position) {
         let entity = match self.ship_index.get(&ship_id) {
             Some(&e) => e,
             None     => return,
@@ -234,24 +236,30 @@ impl<S: EventStore> SimulationNode<S> {
             None    => return,
         };
 
-        let dx = target.x - pos.x;
-        let dy = target.y - pos.y;
-        let dz = target.z - pos.z;
+        let dx   = target.x - pos.x;
+        let dy   = target.y - pos.y;
+        let dz   = target.z - pos.z;
         let dist = (dx * dx + dy * dy + dz * dz).sqrt();
 
-        let vel = if dist < speed {
-            // 目標に到達: 停止
-            Velocity::ZERO
+        // Thrust 方向ベクトル（正規化済み）。目標が同じ点ならゼロ。
+        let thrust = if dist > f32::EPSILON {
+            Velocity { dx: dx / dist, dy: dy / dist, dz: dz / dist }
         } else {
-            Velocity {
-                dx: dx / dist * speed,
-                dy: dy / dist * speed,
-                dz: dz / dist * speed,
-            }
+            Velocity::ZERO
         };
 
-        if let Ok(mut vel_comp) = self.world.inner_mut().get::<&mut VelocityComp>(entity) {
-            vel_comp.0 = vel;
+        if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
+            t.0 = thrust;
+        }
+    }
+
+    /// プレイヤー船として指定し、PLAYER 性能値を設定する。
+    ///
+    /// Cycle 2: 最初に Spawn した船を Godot 側からこの API で指定する。
+    /// 将来: 装備ロードアウトで `ShipStatsComp` を書き換える。
+    pub fn set_player_ship(&mut self, ship_id: ShipId) {
+        if let Some(&entity) = self.ship_index.get(&ship_id) {
+            self.world.set_ship_stats(entity, ShipStatsComp::PLAYER);
         }
     }
 
