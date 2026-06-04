@@ -30,6 +30,7 @@ use tokio::sync::{mpsc, oneshot};
 ///
 /// Does not include the raw event list (those are forwarded to the bus).
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct TickSummary {
     pub tick          : Tick,
     pub events_emitted: usize,

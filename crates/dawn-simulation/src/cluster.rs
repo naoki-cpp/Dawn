@@ -81,6 +81,7 @@ impl MultiNodeCluster {
         stats
     }
 
+    #[allow(dead_code)]
     pub fn node_count(&self) -> usize {
         self.nodes.len()
     }
