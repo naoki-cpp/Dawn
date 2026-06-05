@@ -354,11 +354,14 @@ async fn run_phase4_server(ship_count: usize) {
             sessions.push(sess);
         }
 
+        // コマンド処理前のイベントストア位置を記録
+        // ModuleActivated 等のコマンド由来イベントも含めて送信するため
+        let events_before: u64 = node.total_event_count() as u64;
+
         // コマンド収集（所有権チェック付き）
         let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
-        let mut dead: Vec<usize> = Vec::new();
 
-        for (i, sess) in sessions.iter_mut().enumerate() {
+        for sess in sessions.iter_mut() {
             while let Some(cmd) = sess.try_recv_command() {
                 match cmd {
                     ClientCommand::Move(mv) => {
@@ -370,7 +373,6 @@ async fn run_phase4_server(ship_count: usize) {
                         }
                     }
                     ClientCommand::Activate(cmd) => {
-                        // 所有権チェックは activate_module_owned で行う
                         node.activate_module_owned(sess.player_id, cmd);
                     }
                     ClientCommand::Deactivate(cmd) => {
@@ -378,22 +380,19 @@ async fn run_phase4_server(ship_count: usize) {
                     }
                 }
             }
-            // 切断チェック: send_raw で ping 的に確認
-            // （実際の切断は send_events 失敗で検出）
-            let _ = i;
         }
 
         // Tick 実行
-        let result = node.tick_with_lock_commands(&lock_commands);
+        node.tick_with_lock_commands(&lock_commands);
 
-        // 全イベントをブロードキャスト
-        let events = &result.events;
-        sessions.retain(|sess| sess.send_events(events));
+        // コマンド由来イベント（ModuleActivated 等）＋ Tick イベントを全てブロードキャスト
+        let all_new_events: Vec<_> = {
+            use dawn_event_store::store::EventStore as _;
+            node.event_store().iter_from(events_before)
+                .map(|r| r.event.clone())
+                .collect()
+        };
+        sessions.retain(|sess| sess.send_events(&all_new_events));
 
-        // 切断したプレイヤーの情報をログ
-        if sessions.len() < dead.len() {
-            println!("  [Server] {} session(s) disconnected", dead.len() - sessions.len());
-        }
-        let _ = dead;
     }
 }

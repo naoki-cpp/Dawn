@@ -375,17 +375,17 @@ impl<S: EventStore> SimulationNode<S> {
             let _ = self.world.inner_mut().remove_one::<dawn_ecs::components::IsNpcComp>(entity);
         }
 
-        // Small Railgun I を自動装備
+        // 所有権を先に記録（fit_module が is_npc 判定に使うため必須）
+        self.player_ships.insert(player_id, ship_id);
+        self.ship_owners.insert(ship_id, player_id);
+
+        // Small Railgun I を自動装備（所有権登録後なので is_active=false になる）
         use dawn_core::{FitModuleCommand, SlotKind};
         self.fit_module(FitModuleCommand {
             ship_id,
             slot      : SlotKind::High,
             module_id : crate::modules::MODULE_RAILGUN_SMALL,
         });
-
-        // 所有権を記録
-        self.player_ships.insert(player_id, ship_id);
-        self.ship_owners.insert(ship_id, player_id);
 
         self.event_store.append(DomainEvent::ShipSpawned(ShipSpawned {
             ship_id,
