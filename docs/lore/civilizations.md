@@ -1,179 +1,179 @@
-# Civilizations
+# 文明
 
-## Overview
+## 概要
 
-The factions described here exist within a single cluster. They are not the only possible factions — every cluster's history is different, and the specific groups that emerged from the Unraveling depend on what survived and who was there. What is presented here is a representative cluster: one that has passed through the worst of the dark age and arrived at an unstable present where the balance of power is genuinely contested.
+ここで説明される派閥は、一つのクラスター内に存在する。これらが唯一の可能な派閥というわけではない——クラスターごとに歴史は異なり、Unraveling から生き残った具体的なグループは何が生き残り、誰がそこにいたかによって変わる。ここで提示されるのは代表的なクラスターだ——暗黒時代の最悪の時期を乗り越え、権力の均衡が真に争われている不安定な現在に至ったクラスター。
 
-These factions are not archetypes of good and evil. They are communities of people who made specific choices under specific pressures, and who have rationalized those choices into philosophies they believe. Any player should be able to look at any of them and find something worth believing in.
-
----
-
-## The Compact
-
-### Who They Are
-
-The Compact is the closest thing the cluster has to an inheritor of the pre-collapse order. Their founding population was the crew and passengers of a pre-collapse logistics administration hub — a station that managed supply routing for a significant portion of the cluster's pre-Unraveling economy. When the Severance came, they had warehouses full of records, personnel with administrative and technical training, and the habit of organizing things.
-
-They survived the dark age by being useful. They kept records. They mediated disputes. They maintained the station's manufacturing bay — imperfectly, but enough to produce components that other survivors needed. Over generations, "being organized" became identity: the Compact believes that civilization is not a destination but a practice, and that the practice must be maintained deliberately or it will be lost again.
-
-### Values
-
-The Compact values institutional continuity above almost everything else. They believe that the Unraveling happened because the systems holding civilization together were allowed to degrade — because no one was maintaining them actively, because everyone assumed someone else was in charge. Their answer is explicit governance: clear chains of responsibility, written agreements, auditable decisions.
-
-This makes them reliable partners and frustrating ones. They will honor a contract exactly as written. They will also cite clause 7, subsection 3 when you did not read clause 7, subsection 3.
-
-They are not democrats by instinct, though some of them are. They are proceduralists. The procedure is the thing.
-
-### Economic Model
-
-The Compact controls the largest functioning station in most clusters they inhabit. Their economic leverage comes from three sources:
-
-1. **Manufacturing capacity.** Their station's fabrication bays are old, partially understood, and still better than most alternatives. They produce components — not whole ships, usually, but the high-precision parts that everyone needs.
-
-2. **Archival access.** The Compact has invested more than any other faction in reading the old signal archive. They do not share everything they find. What they do share, they charge for.
-
-3. **Docking and services.** The station is the crossroads. Traffic pays. Disputes are adjudicated in Compact administrative courts, for a fee.
-
-### Military Doctrine
-
-The Compact does not fight unless it believes it can win decisively, and they are genuinely reluctant to fight at all — war is expensive, and the things that make them powerful (institutional knowledge, infrastructure, trained personnel) are hard to replace if destroyed.
-
-When they do fight, they fight with organized combined-arms groups: Frigates for screening and intelligence, Cruisers as the core combatants, Battleships held in reserve as deterrence and final resort. They invest heavily in defensive capability — staying power, repair capacity, the ability to outlast an aggressor until the aggressor's logistics fail.
-
-Their weakness is that decisive action is hard to get approved. By the time the procedure produces a decision, the situation may have changed.
-
-### Relationship to Technology
-
-The Compact maintains technology more than any other faction. They have technical guilds — structured knowledge-transmission programs that teach maintenance and repair. What they have not done is produce new knowledge. Their guilds teach what the manuals say. They are excellent at keeping things running. They are not good at understanding *why* things work.
-
-This creates a specific fragility: when something breaks in a way the manual does not address, they often do not know what to do. They paper over this with workarounds and emergency procedures that become standardized and eventually indistinguishable from proper technique.
-
-### Daily Life in the Compact
-
-Life under the Compact is organized in a way that many people find reassuring and some find suffocating. There are records for everything — births, deaths, property transfers, debts. The administrative apparatus is visible: signs, forms, uniforms, queues.
-
-There is also genuine safety in it. Compact stations are among the cleanest, best-maintained, and least violent places in the cluster. Medical care is available, if expensive. Disputes are resolved, if slowly. The bureaucracy creates friction, but it also creates predictability — which is, in a post-collapse world, not nothing.
-
-People who grow up in the Compact tend to be literate, procedurally-minded, and quietly proud of their ability to navigate a system that confuses outsiders. The ones who leave tend to leave because they find the procedures more important to the institution than the people the procedures are supposed to serve.
+これらの派閥は善と悪のアーキタイプではない。特定の圧力の下で特定の選択をし、その選択を自分たちが信じる哲学へと合理化したコミュニティだ。どのプレイヤーも、どの派閥を見ても、信じるに値するものを見つけられるべきだ。
 
 ---
 
-## The Vorath Collective
+## The Compact（コンパクト）
 
-### Who They Are
+### 彼らは誰か
 
-The Vorath Collective emerged from a very different experience of the Unraveling. Their founding communities were the outer-system workers — the people who had been doing the physical labor of maintaining Fold Transit beacons, fuel refineries, and deep-space infrastructure when the network began to collapse.
+The Compact は、クラスターにおいて崩壊前の秩序の継承者として最も近い存在だ。彼らの創設人口は、崩壊前の物流管理ハブ——Unraveling 前のクラスター経済の相当部分の物資経路を管理していたステーション——の乗員と乗客だった。Severance が来たとき、彼らは記録で満ちた倉庫と、管理・技術訓練を受けた人員と、物事を組織するという習慣を持っていた。
 
-These people had two things others did not: they were already comfortable operating in remote, resource-limited environments, and they had practical knowledge of how transit infrastructure actually worked — not at the administrative level, but at the hands-on level. When the Severance came, they did not have a station to retreat to. They had ships, they had skills, and they had each other.
+彼らは有用であることで暗黒時代を生き延びた。記録をつけた。紛争を調停した。ステーションの製造工場を維持した——不完全ではあったが、他の生存者が必要とするコンポーネントを生産するのに十分なほど。世代を経て、「組織化されている」ということがアイデンティティになった。The Compact は、文明とは目的地ではなく実践であり、意図的に維持しなければ再び失われると信じている。
 
-The Vorath Collective is the product of four hundred years of people who survived by being mobile, adaptable, and deeply suspicious of anyone who tried to tell them what to do from behind a desk.
+### 価値観
 
-### Values
+The Compact はほぼ何よりも制度的継続性を重んじる。彼らは、Unraveling が起きたのは文明を結びつけていたシステムが劣化を許されたからだと信じている——誰も積極的にそれらを維持していなかったから、全員が誰か他の者が責任を持っていると思っていたから。その答えが明示的な統治だ——明確な責任の連鎖、書面による合意、監査可能な決定。
 
-The Collective does not trust institutions. This is not ideology so much as memory — collective, transmitted memory of what institutions did to their ancestors when the network was collapsing. The people who made the routing decisions that destroyed the lanes were not the people who suffered for it. The managers were not on the scaffolding when the beacon went dark.
+これにより彼らは信頼できるパートナーであると同時に、苛立たしいパートナーにもなる。契約は書かれた通りに守る。しかし条項7、第3小節も引用する——あなたが第3小節を読んでいなくても。
 
-What the Vorath trust is demonstrated competence and reciprocal loyalty. Their social unit is the *band* — a group of 20–200 people who have chosen each other and who operate as a combined economic and military unit. Bands are voluntary and people can leave, but leaving is a serious social event with lasting consequences for reputation.
+彼らは本能的に民主主義者ではない——そうである者もいるが。彼らは手続き主義者だ。手続きそのものが重要なのだ。
 
-Across bands, the Collective maintains something like a parliament — the Muster — where band representatives meet periodically to coordinate, resolve disputes, and set shared policy. The Muster has no enforcement mechanism. Its decisions are followed because bands that ignore them lose standing and eventually access to Collective resources.
+### 経済モデル
 
-### Economic Model
+The Compact は、彼らが生息するほとんどのクラスターで最大の機能するステーションを支配している。その経済的影響力は三つの源泉から来る：
 
-The Vorath are the cluster's operational infrastructure. Where the Compact manufactures, the Vorath *move things*. They operate the fuel refinery chains. They run cargo between systems. They provide the skilled labor that maintains deep-space equipment nobody else wants to touch.
+1. **製造能力。** ステーションの製造ベイは古く、部分的にしか理解されておらず、それでもほとんどの代替品より優れている。コンポーネントを生産する——通常は船全体ではなく、誰もが必要とする高精度部品を。
 
-This gives them leverage that is easy to underestimate: they can, if they choose to coordinate, simply stop moving things. A blockade is not their primary tool — it is too blunt and creates enemies — but the threat of it shapes every negotiation.
+2. **アーカイブへのアクセス。** The Compact は他のどの派閥よりも古いシグナルアーカイブを読む投資をしてきた。見つけたものすべてを共有するわけではない。共有するものには対価を求める。
 
-They are also the cluster's best salvagers. Their understanding of pre-collapse infrastructure is practical and deep. They do not know the theory, but they know which procedures work and why, often at a level of granular detail that the Compact's manuals do not capture.
+3. **ドッキングとサービス。** ステーションは交差点だ。トラフィックは支払う。紛争は Compact 行政裁判所で裁定される——有料で。
 
-### Military Doctrine
+### 軍事ドクトリン
 
-The Vorath fight as they work: in small, coordinated groups that rely on superior knowledge of the environment. They prefer to engage on their terms — in complex terrain (asteroid fields, close-orbit approaches, debris rings), where their experience navigating tight spaces is an advantage.
+The Compact は決定的に勝てると信じないうちは戦わず、そもそも戦いを極めて嫌がる——戦争はコストがかかり、彼らを強くしているもの（制度的知識、インフラ、訓練された人員）は破壊されると取り替えが利かない。
 
-Their preferred combat profile is multiple small ships working in coordinated patterns. They do not favor pitched fleet battles, which reward the side with more and heavier ships. They favor attrition, harassment, and the careful application of force at points where the cost-to-damage ratio favors them.
+戦うときは、組織された複合部隊で戦う。スクリーニングと情報偵察のためのフリゲート、主力戦闘艦としてのクルーザー、抑止力と最後の手段として予備に保持されたバトルシップ。防御能力——持久力、修理能力、侵攻者の兵站が失敗するまで耐える能力——に大きく投資する。
 
-Vorath ships are typically heavily modified — often beyond recognition compared to their original configuration. Adaptation is a deep cultural value. A ship that has not been modified is a ship that has not been thought about.
+弱点は、決定的な行動を承認させるのが難しいことだ。手続きが決定を下すころには、状況が変わっているかもしれない。
 
-### Relationship to Technology
+### 技術との関係
 
-The Vorath have the deepest *practical* understanding of transit and propulsion technology of any faction. They do not have the theoretical framework — nobody does, fully — but they have centuries of accumulated operational experience translated into practice.
+The Compact はどの派閥よりも技術を維持している。彼らには技術ギルド——保守と修理を教える構造化された知識伝達プログラム——がある。行っていないのは新しい知識を生産することだ。ギルドはマニュアルに書かれていることを教える。彼らは物事を動かし続けることが得意だ。物事が*なぜ*機能するかを理解することは得意でない。
 
-What they lack is manufacturing depth. They can repair almost anything, but they are dependent on materials and components they cannot produce themselves. This is their strategic vulnerability, and they know it. Much of their diplomatic and economic activity is aimed at maintaining enough access to manufactured goods to keep their fleet operational.
+これは特定の脆弱性を生み出す。マニュアルが対処していない方法で何かが壊れたとき、彼らはしばしばどうすべきかわからない。回避策で糊塗し、それが緊急手順として標準化され、最終的に適切な技術と区別がつかなくなる。
 
-### Daily Life in the Collective
+### The Compact での日常生活
 
-Life in a Vorath band is close and physically demanding. Most bands operate from a ship or a small station rather than a planet, which means space is shared, privacy is earned by trust rather than walls, and everyone is visible to everyone else all the time.
+The Compact の下での生活は、多くの人が安心感を覚え、一部が息苦しいと感じる方法で組織されている。すべてに記録がある——出生、死亡、財産の移転、債務。行政装置は見えている——標識、書類、制服、列。
 
-This produces a culture that is bluntly honest, deeply loyal to people one knows personally, and capable of astonishing cruelty to those outside the bond. Hospitality between bands is formal and important — there are rituals for it that have survived four hundred years with remarkable consistency, because the social function they serve (establishing trust quickly between strangers) is as necessary now as it was in the dark age.
+しかしそこには真の安全もある。Compact のステーションはクラスター内で最も清潔で、よく整備され、暴力が少ない場所の一つだ。医療ケアは、高くはあるが受けられる。紛争は、遅くはあるが解決される。官僚制度は摩擦を生み出すが、予測可能性も生み出す——それは崩壊後の世界では、ないよりましどころではない。
 
-Children in the Collective grow up knowing how to maintain equipment before they know how to read. Reading comes later, taught by whoever in the band is good at it. There is not a standard curriculum; there is what the band needs.
-
----
-
-## The Remnant Adherents
-
-### Who They Are
-
-The Remnant Adherents are the cluster's inheritors of a specific pre-collapse institution: the scientific-religious order called the Signal Corps, which in the final decades before the Unraveling had become one of the few organizations with access to the full depth of the Weave's archive and operating protocols.
-
-The Signal Corps was not a government. It was a research and maintenance organization with quasi-religious overtones — its members took vows, wore identifying marks, and operated with a degree of self-governance that made them simultaneously valuable and politically independent. When the Severance came, the surviving Signal Corps members did what their training told them to do: they went to the nearest Weave nodes and started archiving what they could.
-
-What survived of the Signal Corps became the Remnant Adherents. They are defined by their dedication to the record — to preserving what the old civilization knew, reconstructing what was lost, and eventually, if possible, restoring something of what was.
-
-### Values
-
-The Adherents believe that the Unraveling was caused by forgetting — not forgetting in the simple sense, but the slow erosion of understanding that happens when institutions stop transmitting knowledge and start transmitting habit. Their vow is not religious in origin but has become so in practice: *nothing that was known will be lost on our watch.*
-
-This makes them archivists, educators, and occasionally insufferable idealists. They will teach anyone, regardless of faction. They will sell technical knowledge to enemies of each other. They believe that the diffusion of knowledge makes the whole cluster more resilient, and that resilience is worth more than any single political advantage.
-
-Where they become dangerous is in their relationship to the question: *what did the old civilization know that we should not rediscover?* Not everything in the archive is benign. Some of what the pre-collapse civilization built — weapons systems, population control mechanisms, social engineering tools — the Adherents have found and have had to decide what to do with. They have not always decided correctly.
-
-### Economic Model
-
-The Adherents operate on a combination of tuition, consultation fees, and the sale of archival access. They maintain what are effectively universities — not always physically, sometimes through traveling instructors — and their graduates hold positions of technical importance across all factions.
-
-This gives them influence that outlasts any particular political arrangement. An Adherent-trained engineer is an Adherent-trained engineer whether they work for the Compact or the Vorath. Loyalties are complicated.
-
-Their economic weakness is that they produce graduates, not goods. They are dependent on others for manufacturing and raw materials. Their leverage is soft: prestige, knowledge, and the fact that everyone's technical infrastructure has Adherent fingerprints on it.
-
-### Military Doctrine
-
-The Adherents do not have a standing military. What they have is an understanding of weapon systems that exceeds anyone else's, and a tradition of engineering ships for other factions that occasionally includes capabilities those factions did not specify.
-
-When they must fight — to protect a node, to prevent knowledge from being destroyed — they fight with precision. They know where the weak points are. They have access to technical systems others cannot operate. A small Adherent force in a crisis is often capable of outcomes disproportionate to its size, not because of raw firepower but because of knowledge.
-
-Their doctrine, to the extent they have one, is: survive long enough to make it not worth the attacker's while.
-
-### Relationship to Technology
-
-The Adherents understand technology at the deepest level currently available. They have recovered and reconstructed significant portions of pre-collapse engineering documentation. They can build things others cannot build. They understand why things work, not just how to make them work.
-
-What they cannot do is manufacture at scale. Their production is artisanal — individual engineers applying deep knowledge to individual problems. They produce the best modified components in the cluster; they produce them slowly and in small numbers.
-
-### Daily Life in the Adherents
-
-Life among the Adherents is intellectual and often isolated. Their primary communities are built around libraries and workshops — archive nodes, research stations, teaching halls. The social hierarchy is based on what you know and what you can demonstrate.
-
-They have a complicated relationship with the physical world. Many Adherents are technically brilliant and practically awkward — they understand the theory of, for example, how a Compact station's water recycling system works, but they have never maintained one and are aware that this matters. The ones who seek out operational experience alongside theoretical knowledge are considered the most valuable. They are also the rarest.
-
-Children raised in Adherent communities have access to education unmatched in the cluster and are often isolated from the practical realities that children in other factions take for granted. This produces graduates who know a great deal about the old world and sometimes struggle to navigate the new one.
+The Compact で育った人々は、識字能力があり、手続きに慣れ、部外者を混乱させるシステムを乗りこなす自分の能力を静かに誇りに思う傾向がある。去る者は、手続きが奉仕するはずの人々より制度にとって重要になっていることに気づいて去る傾向がある。
 
 ---
 
-## Relationships Between Factions
+## Vorath Collective（ヴォラス集合体）
 
-The three factions above are in permanent, complicated tension. None of them can achieve their goals without the others, and none of them fully trusts the others.
+### 彼らは誰か
 
-**Compact and Vorath:** A functional antagonism. The Compact needs the Vorath to move things; the Vorath need the Compact for manufactured components. They argue constantly about pricing, contracts, and the degree to which the Compact's administrative apparatus applies to Vorath bands operating in Compact-adjacent space. The argument is never resolved because resolution would remove the leverage both sides depend on.
+Vorath Collective は、Unraveling のまったく異なる経験から生まれた。その創設コミュニティは外縁部の作業員だった——ネットワークが崩壊し始めたとき、Fold Transit ビーコン、燃料精製所、深宇宙インフラの物理的な保守作業をしていた人々だ。
 
-**Compact and Adherents:** A wary alliance. The Compact values the Adherents' knowledge and employs many Adherent graduates. They distrust the Adherents' political independence and the fact that Adherent-trained engineers may have loyalties the Compact cannot audit. The Compact wants to fold the Adherents into their institutional structure; the Adherents want no part of that, because institutional capture is exactly how knowledge gets siloed and eventually lost.
+これらの人々は他の誰も持っていない二つのものを持っていた。遠隔の、資源が限られた環境での作業にすでに慣れていたこと、そしてトランジットインフラが実際にどう機能するかについての実践的な知識——管理レベルではなく、実地レベルでの知識。Severance が来たとき、彼らには退避するステーションがなかった。船があった、スキルがあった、そして互いがいた。
 
-**Vorath and Adherents:** A functional partnership that surprises outsiders. The Vorath's operational knowledge and the Adherents' archival knowledge are complementary in ways that make the combination extremely effective at solving problems neither could address alone. They collaborate frequently on recovery operations, salvage, and infrastructure repair. The Adherents trust the Vorath's demonstrated competence; the Vorath trust the Adherents' results. Neither fully understands the other's culture, but mutual respect goes a long way.
+Vorath Collective は、机の向こうから何をすべきか教えようとする者を深く疑いながら、機動的で、適応力があることで生き残った四百年間の産物だ。
+
+### 価値観
+
+Collective は制度を信頼しない。これはイデオロギーというより記憶だ——ネットワークが崩壊していたとき、制度が祖先に何をしたかという集合的な、伝承された記憶。航路を破壊した経路決定をした人々は、それによって苦しんだ人々ではなかった。管理者たちは、ビーコンが暗くなったときの足場の上にはいなかった。
+
+Vorath が信頼するのは実証された能力と相互忠誠だ。彼らの社会単位は*バンド*——互いを選び合い、複合的な経済的・軍事的単位として運営する二十〜二百人のグループ。バンドは自発的で、人々は離れることができるが、離れることは評判に長期的な影響をもたらす深刻な社会的出来事だ。
+
+バンドをまたいで、Collective はムスターと呼ばれる議会のようなものを維持している。バンドの代表者が定期的に集まり、調整し、紛争を解決し、共有政策を設定する。ムスターには強制メカニズムがない。その決定は、それを無視すると standing（信頼性）を失い、最終的には Collective の資源へのアクセスを失うため、バンドによって遵守される。
+
+### 経済モデル
+
+Vorath はクラスターの運用インフラだ。The Compact が製造するところで、Vorath は*物を動かす*。燃料精製チェーンを運営する。星系間で貨物を輸送する。他の誰も触れたくない深宇宙機器を維持する熟練労働者を提供する。
+
+これは過小評価しやすい影響力を与える。調整することを選べば、単純に物を動かすのをやめることができる。封鎖は主要なツールではない——それは鈍すぎて敵を作る——しかしその脅威はすべての交渉を形作る。
+
+彼らはまたクラスターの最良のサルベージ業者でもある。崩壊前のインフラに関する彼らの理解は実践的で深い。理論は知らないが、The Compact のマニュアルが捉えていないほどの粒度の細かさで、どの手順が機能し、なぜ機能するかを知っていることが多い。
+
+### 軍事ドクトリン
+
+Vorath は働くように戦う——環境に関する優れた知識に依存する小さく調整されたグループで。自分たちの条件で交戦することを好む——その経験が狭い場所の操縦に優位性をもたらす複雑な地形（小惑星帯、近軌道アプローチ、デブリリング）で。
+
+好む戦闘プロフィールは、調整されたパターンで動く複数の小さな船だ。より多くの重い船を持つ側が有利な正面決戦は好まない。費用対ダメージ比が自分たちに有利なポイントでの消耗戦、嫌がらせ、そして力の慎重な適用を好む。
+
+Vorath の船は通常、元の構成と比べて認識できないほど大規模に改造されている。適応は深い文化的価値だ。改造されていない船は、考えられていない船だ。
+
+### 技術との関係
+
+Vorath はどの派閥よりも深い*実践的な*トランジットと推進技術の理解を持っている。理論的フレームワークはない——誰も完全には持っていない——しかし実践に翻訳された何世紀もの運用経験の蓄積がある。
+
+欠けているのは製造の深さだ。ほぼ何でも修理できるが、自分たちで生産できない素材とコンポーネントに依存している。これが彼らの戦略的脆弱性であり、彼らはそれを知っている。外交・経済活動の多くは、艦隊を運用し続けるのに十分な製造品へのアクセスを維持することに向けられている。
+
+### Collective での日常生活
+
+Vorath バンドでの生活は密接で、身体的に要求が高い。ほとんどのバンドは惑星ではなく船や小さなステーションを拠点として運営しており、スペースは共有され、プライバシーは壁ではなく信頼によって得られ、全員が常に互いに見える。
+
+これにより、率直に誠実で、個人的に知っている人々に深く忠実で、絆の外の者に驚くべき残酷さを発揮できる文化が生まれる。バンド間のホスピタリティは形式的で重要だ——四百年間で驚くほど一貫して生き残った儀式がある。それは暗黒時代と同じように現在でも必要な社会的機能（見知らぬ者の間で素早く信頼を確立すること）に奉仕するからだ。
+
+Collective の子供たちは、読み書きを学ぶ前に機器の保守方法を知って育つ。読み書きは後で、バンドの中でそれが得意な人物によって教えられる。標準的なカリキュラムはない。バンドが必要とするものがある。
 
 ---
 
-## The Unaffiliated
+## Remnant Adherents（残存遵奉者団）
 
-Not everyone belongs to a faction. In any cluster, a significant portion of the population — perhaps a third — operates as independents, small traders, freelance salvagers, or communities too small or remote to have formal faction allegiance.
+### 彼らは誰か
 
-The factions have different relationships to the unaffiliated. The Compact views them as potential administrative subjects who have not yet been properly organized. The Vorath view them with sympathy — many Vorath ancestors were unaffiliated — and maintain recruitment pathways for capable independents. The Adherents view everyone as a potential student.
+Remnant Adherents は、崩壊前の特定の機関の継承者だ——Signal Corps（信号団）と呼ばれる科学的宗教的秩序で、Unraveling 前の最終的な数十年間に、Weave のアーカイブと運用プロトコルの完全な深さへのアクセスを持つ数少ない組織の一つとなっていた。
 
-For players, the unaffiliated space is often where the most interesting decisions happen. The factions have agendas. The unaffiliated have only the specific situation they are in.
+Signal Corps は政府ではなかった。それは準宗教的な色合いを持つ研究・保守組織だった——メンバーは誓いを立て、識別マークを身につけ、自分たちを価値ある存在でありながら政治的に独立した存在にする程度の自治を持って運営していた。Severance が来たとき、生き残った Signal Corps メンバーは訓練が命じることをした——最寄りの Weave ノードに行き、できる限りアーカイブした。
+
+Signal Corps の生き残りが Remnant Adherents になった。彼らは記録への献身によって定義される——古い文明が知っていたことを保存し、失われたものを再構築し、できれば、かつてあったものの何かを復元することへの献身。
+
+### 価値観
+
+Adherents は、Unraveling が忘却によって引き起こされたと信じている——単純な意味での忘却ではなく、制度が知識を伝達することをやめ、習慣を伝達し始めるときに起きる理解の緩やかな侵食。彼らの誓いは宗教的な起源を持たないが、実践においてそうなっている——*知られていたものは、我々の監視下では失われない。*
+
+これにより彼らはアーキビスト、教育者、そして時として我慢ならない理想主義者になる。派閥を問わず誰にでも教える。互いの敵に技術的知識を売る。知識の普及はクラスター全体をより強靭にし、強靭性はどんな単一の政治的優位性よりも価値があると信じている。
+
+彼らが危険になるのは、*旧文明が再発見すべきでない何かを知っていたか？*という問いとの関係においてだ。アーカイブにあるものすべてが無害というわけではない。崩壊前の文明が構築したもの——兵器システム、人口管理メカニズム、社会工学ツール——の一部を Adherents は見つけており、それをどうするかを決めなければならなかった。常に正しい決定をしたわけではない。
+
+### 経済モデル
+
+Adherents は授業料、コンサルタント料、そしてアーカイブアクセスの販売の組み合わせで運営される。彼らが維持するのは事実上の大学だ——常に物理的ではなく、時には移動する講師を通じて——そして彼らの卒業生はすべての派閥にわたる技術的に重要な職位を占める。
+
+これにより、特定の政治的取り決めを超えて存続する影響力が生まれる。Adherent 訓練のエンジニアは、The Compact のために働こうと Vorath のために働こうと、Adherent 訓練のエンジニアだ。忠誠心は複雑だ。
+
+彼らの経済的弱点は、製品ではなく卒業生を生産することだ。製造と原材料については他者に依存する。彼らの影響力はソフトだ——名声、知識、そして全員の技術インフラに Adherent の指紋が押されているという事実。
+
+### 軍事ドクトリン
+
+Adherents は常設軍を持たない。持っているのは、誰よりも優れた兵器システムの理解と、他の派閥のために船を設計する伝統——時には、それらの派閥が指定しなかった能力を含んで。
+
+戦わなければならないとき——ノードを守るため、知識が破壊されるのを防ぐため——精密に戦う。弱点がどこにあるかを知っている。他の者が操作できない技術システムへのアクセスがある。危機における小さな Adherent の部隊は、生の火力ではなく知識によって、規模に不釣り合いな結果をしばしば出すことができる。
+
+彼らのドクトリンは、それがある限りにおいては——攻撃者がやめる価値があると判断するまで生き残ることだ。
+
+### 技術との関係
+
+Adherents は現在利用できる最深レベルで技術を理解している。崩壊前の工学文書の相当部分を回復・再構築した。他者が作れないものを作ることができる。物事がどうすれば機能するかだけでなく、なぜ機能するかを理解している。
+
+できないのは規模での製造だ。彼らの生産は職人的だ——個別の問題に深い知識を適用する個々のエンジニア。クラスター内で最良の改造コンポーネントを生産する。ゆっくりと、少数だけ。
+
+### Adherents での日常生活
+
+Adherents の間の生活は知的で、しばしば孤立している。彼らの主要コミュニティは図書館と工房を中心に構築されている——アーカイブノード、研究ステーション、教授ホール。社会階層は、何を知っているか、何を実証できるかに基づく。
+
+彼らは物理世界と複雑な関係を持つ。多くの Adherents は技術的に卓越しているが実践的には不器用だ——例えば Compact ステーションの水リサイクルシステムがどう機能するかの理論を理解しているが、それを一度も維持したことがなく、それが重要だということを知っている。理論的知識と並行して運用経験を求める者は最も価値があると見なされる。彼らはまた最も稀でもある。
+
+Adherent コミュニティで育った子供たちはクラスターで比類なく教育にアクセスできるが、他の派閥の子供たちが当たり前としている実践的現実から孤立していることが多い。これにより、旧世界について多くを知っているが、新しい世界を生き抜くのに苦労することがある卒業生が生まれる。
+
+---
+
+## 派閥間の関係
+
+上記の三派閥は永続的で複雑な緊張関係にある。どれも他なしに目標を達成できず、どれも他を完全には信頼していない。
+
+**The Compact と Vorath：** 機能的な対立。The Compact は物を動かすために Vorath を必要とし、Vorath はコンポーネント製造品のために The Compact を必要とする。価格設定、契約、そして The Compact の行政装置が Compact 周辺の宙域で活動する Vorath バンドにどの程度適用されるかについて常に議論する。議論は解決されない——解決すると双方が依存する影響力が消えるからだ。
+
+**The Compact と Adherents：** 用心深い同盟。The Compact は Adherents の知識を重視し、多くの Adherent 卒業生を雇用する。Adherents の政治的独立性と、Adherent 訓練のエンジニアが The Compact が監査できない忠誠心を持つかもしれないという事実を不信感を持って見ている。The Compact は Adherents を自分たちの制度構造に取り込もうとする。Adherents はその一部になることを望まない——制度的取り込みは、知識がサイロ化されて最終的に失われる正確なメカニズムだからだ。
+
+**Vorath と Adherents：** 部外者を驚かせる機能的なパートナーシップ。Vorath の運用知識と Adherents のアーカイブ知識は、どちらか一方では対処できない問題を解決するのに非常に効果的な組み合わせだ。復旧作業、サルベージ、インフラ修理で頻繁に協力する。Adherents は Vorath の実証された能力を信頼し、Vorath は Adherents の成果を信頼する。どちらも相手の文化を完全に理解していないが、相互の尊重は大きな力を持つ。
+
+---
+
+## 無所属の人々
+
+誰もが派閥に属するわけではない。どのクラスターでも、人口のかなりの部分——おそらく三分の一——が独立した個人、小規模な商人、フリーランスのサルベージ業者、または正式な派閥への所属を持つには小さすぎる、あるいは遠すぎるコミュニティとして活動している。
+
+各派閥は無所属の人々と異なる関係を持つ。The Compact は彼らを、まだ適切に組織されていない潜在的な行政対象として見る。Vorath は彼らに共感を持つ——多くの Vorath の祖先は無所属だった——そして有能な独立者のための採用経路を維持する。Adherents は全員を潜在的な生徒として見る。
+
+プレイヤーにとって、無所属の空間はしばしば最も興味深い決断が起きる場所だ。派閥にはアジェンダがある。無所属の人々には、自分たちが置かれた具体的な状況だけがある。

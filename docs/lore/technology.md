@@ -1,199 +1,199 @@
-# Technology
+# 技術
 
-## Overview
+## 概要
 
-Technology in Dawn exists in three layers, and understanding the difference between layers is essential to understanding why the universe works the way it does.
+Dawnの技術は三つの層に存在し、その層の違いを理解することは、宇宙がなぜそのように機能するかを理解するために不可欠だ。
 
-**Layer 1 — Pre-collapse infrastructure:** Systems built during the Long Expansion to engineering standards that no one currently alive can replicate. Still functioning, partially. Maintained by people who understand the symptoms of failure without always understanding the cause.
+**Layer 1 — 崩壊前のインフラ：** Long Expansion 中に、現在生きている誰も再現できない工学基準で作られたシステム。まだ部分的に機能している。失敗の症状は理解しているが、常に原因を理解しているわけではない人々によって維持されている。
 
-**Layer 2 — Post-collapse reconstruction:** Things built or rebuilt after the Unraveling using approximations of old designs, degraded manufacturing capability, and improvised solutions. Functional, inferior, occasionally creative.
+**Layer 2 — 崩壊後の再建：** Unraveling 後に、旧設計の近似、低下した製造能力、そして即興的な解決策を使って作られ、あるいは再建されたもの。機能的で、劣っており、時として創造的だ。
 
-**Layer 3 — Emergent improvisation:** New techniques developed by people who were trying to solve a specific problem and stumbled on something that works. Not always understood; not always safe; occasionally brilliant.
+**Layer 3 — 創発的即興：** 特定の問題を解決しようとして、機能するものを偶然発見した人々によって開発された新技術。常に理解されているわけではない。常に安全とは限らない。時として卓越している。
 
-The distinction matters for every technical system in the game. A pre-collapse Frigate is better than a post-collapse one, but the post-collapse one can be modified. A pre-collapse weapon module is more powerful, but when it breaks, the repair requires knowledge most engineers do not have. A Layer 3 innovation might do something entirely unexpected.
-
----
-
-## Fold Transit
-
-### What It Is
-
-Fold Transit is the method by which ships move between star systems. It is not faster-than-light travel in the conventional sense. It does not accelerate a ship to superluminal speeds. Instead, it exploits a property of spacetime geometry that the pre-collapse engineers called *depth variance* — the observation that the metric of space is not uniform, and that at specific points in the geometry, it is possible to temporarily compress the effective distance between two locations.
-
-The mechanism is as follows: a Fold Drive creates a local field that aligns the ship's spatial reference frame with a pre-existing depth variance corridor. The corridor exists naturally; the drive does not create it. During alignment, the ship does not move in any intuitive sense — the space around it folds, bringing the destination closer, and the ship crosses a distance that is geometrically short even though it is astronomically long in uncompressed terms. The transition takes seconds to minutes, depending on corridor quality.
-
-### What It Requires
-
-**A stable corridor.** Depth variance corridors exist throughout space, but most are too unstable, too weak, or too poorly mapped to be useful. The Long Expansion was possible because the pre-collapse civilization spent centuries charting corridors and establishing the beacon infrastructure (the Weave) to maintain alignment windows.
-
-Within a cluster, the corridors between nearby systems are generally stable enough to transit without perfect beacon alignment, though accuracy degrades. Ships arrive within a navigational tolerance — usually within a few light-minutes of the target. This is manageable.
-
-Between clusters, the corridors are longer, and the alignment requirements are correspondingly more demanding. Without the Weave, the navigational tolerance for inter-cluster transit is catastrophic. Arrival within the target system is not guaranteed.
-
-**Trace Fuel.** The Fold Drive requires a refined material to operate. See §Trace Fuel below.
-
-**A functioning Fold Drive.** Fold Drives are among the most complex pieces of technology in active use. They are pre-collapse in design; post-collapse Fold Drives exist but are less reliable and less efficient. The Drive has several components that are essentially irreplaceable if damaged — the alignment coils, in particular, are manufactured to tolerances that require equipment nobody currently operates.
-
-### What It Produces in Society
-
-Fold Transit is the precondition for everything. Without it, each system is an island. With it, clusters are possible. The asymmetry between in-cluster and inter-cluster transit is the physical basis for the fragmentation of the universe: it is not that people cannot try to reach other clusters, it is that the cost in ships and lives is so high that nobody with alternatives attempts it.
-
-Within a cluster, control over transit corridor approaches is control over movement itself. A faction that can deny or tax transit through a key chokepoint has leverage over every other faction that needs to move goods, people, or ships.
+この区別はゲーム内のすべての技術システムに重要だ。崩壊前のフリゲートは崩壊後のものより優れているが、崩壊後のものは改造できる。崩壊前の武器モジュールはより強力だが、壊れたとき、修理にはほとんどのエンジニアが持っていない知識が必要だ。Layer 3 の革新は完全に予想外のことをするかもしれない。
 
 ---
 
-## Trace Fuel
+## Fold Transit（折畳航法）
 
-### What It Is
+### それが何か
 
-Trace Fuel is a refined isotope mixture required by Fold Drives. Its active component is a short-lived isotope that decays into an inert form within days of refinement, which means it cannot be stockpiled in large quantities and must be continuously produced.
+Fold Transit は船が星系間を移動する方法だ。従来の意味での光速より速い移動ではない。船を超光速に加速するわけではない。代わりに、崩壊前のエンジニアが*深度差異*（depth variance）と呼んだ時空幾何学の特性を利用する——空間のメトリクスは一様ではなく、幾何学の特定の点で、二つの場所の間の実効距離を一時的に圧縮することが可能だという観察。
 
-The feedstock for Trace Fuel is found in certain types of gas giant atmospheres and in the ejecta of specific stellar events. It is not rare, but it is not uniformly distributed. Some systems have abundant feedstock; others have none.
+メカニズムは以下の通りだ。Fold Drive は、既存の深度差異廊下と船の空間参照フレームを整合させる局所場を生成する。廊下は自然に存在する。ドライブはそれを作らない。整合中、船は直感的な意味では動かない——周囲の空間が折り畳まれ、目的地を近くに持ってきて、船は圧縮されていない距離では天文学的に遠くても幾何学的に短い距離を横断する。移行は廊下の質によって、秒から数分かかる。
 
-The refinement process requires specialized equipment. Pre-collapse Trace refineries were automated and highly efficient. Post-collapse refineries are less efficient and require more intensive maintenance, but they work.
+### 必要なもの
 
-### Economic and Strategic Consequences
+**安定した廊道。** 深度差異廊道は宇宙中に存在するが、ほとんどは不安定すぎ、弱すぎ、または十分にマッピングされておらず、実用にならない。Long Expansion が可能だったのは、崩壊前の文明が何世紀もかけて廊道をマッピングし、アライメントウィンドウを維持するためのビーコンインフラ（Weave）を確立したからだ。
 
-Because Trace Fuel cannot be stockpiled and must be produced continuously, control of production is a recurring leverage point rather than a one-time strategic acquisition. A faction that controls the primary Trace refinery in a cluster does not simply win and consolidate — it must continuously defend that position, because the leverage it provides is ongoing.
+クラスター内では、近くの星系間の廊道は一般的に、完璧なビーコン整合なしでも安全にトランジットできるほど安定している——ただし精度は低下する。船は目標の数光分以内に到着する。これは管理可能だ。
 
-Conversely, a faction that disrupts an opponent's Trace supply does not need to destroy anything permanently. Cutting production for a week is enough to ground a fleet. This makes Trace refineries a constant focus of both defense and sabotage operations.
+クラスター間では、廊道はより長く、整合要件はそれに応じてより厳しい。Weave なしでは、クラスター間トランジットの航行上の不確実性は壊滅的だ。目標星系内への到着は保証されない。
 
-The Vorath Collective operates most Trace refineries in clusters they inhabit. This is the practical basis of their leverage. They are not the most powerful faction militarily; they are the most powerful faction logistically, and in the long run, logistics wins.
+**Trace Fuel（痕跡燃料）。** Fold Drive の動作には精製された物質が必要だ。§Trace Fuel 参照。
 
-### Daily Life Consequence
+**機能する Fold Drive。** Fold Drive は現在使用中の最複雑な技術の一つだ。設計は崩壊前のもので、崩壊後の Fold Drive も存在するが、信頼性と効率が劣る。ドライブにはいくつかの本質的に取り替えが利かないコンポーネントがある——特に整合コイルは、現在誰も操作していない設備が必要な精度で製造されている。
 
-Ordinary people experience Trace Fuel as the cost embedded in the price of everything that came from another system. When Trace supply is tight, prices spike. When a refinery is contested, trade slows. The supply of Trace is abstract until it affects the cost of food, medicine, or the passage to visit family in another system.
+### 社会への影響
 
----
+Fold Transit はすべての前提条件だ。それなしでは、各星系は孤島だ。それがあればクラスターが可能になる。クラスター内とクラスター間のトランジットの非対称性が宇宙の断片化の物理的基盤だ——他のクラスターに到達しようとすることができないのではなく、船と命のコストが非常に高いため、代替手段がある者は誰も試みないのだ。
 
-## Ship Classification
-
-Ships are classified by hull size, which roughly correlates with capability, cost, and the manufacturing infrastructure required to produce them.
-
-### Frigate
-
-**Size:** 80–200 meters. Crew: 3–15 (some automated configurations run with 1).
-
-Frigates are the workhorses of the cluster. They are the smallest ships capable of independent Fold Transit, which makes them the minimum viable unit for interstellar operation. Pre-collapse Frigates were produced in enormous numbers; they are the most common ship type in any cluster. Post-collapse Frigate production is the most accessible, requiring the least specialized manufacturing infrastructure.
-
-Frigates trade durability and firepower for speed and operational flexibility. They can go places larger ships cannot, both physically (asteroid fields, close-orbit approaches) and politically (a single Frigate is not a threat; a fleet of Frigates is).
-
-Their role in faction militaries:
-- **Compact:** Scouting, patrol, screening heavier ships
-- **Vorath:** Primary combat and operations platform (their preference for Frigates is deep cultural)
-- **Adherents:** Research, archive access, diplomatic transport
-
-In terms of the three-layer HP system: Frigates have the thinnest armor and hull values but can be agile enough to avoid damage. Shield regeneration is their primary survivability tool in many builds.
-
-### Cruiser
-
-**Size:** 350–700 meters. Crew: 50–200.
-
-Cruisers represent the threshold at which a ship is no longer just a vehicle but a platform — something capable of sustained independent operation, significant weapons loadout, and meaningful manufacturing or repair capacity. A well-equipped Cruiser can serve as a mobile base.
-
-Pre-collapse Cruisers exist and are extremely valuable. Post-collapse Cruiser construction requires a level of manufacturing infrastructure that only a few factions can achieve, and the results are inferior to pre-collapse examples. The hull gap between a pre-collapse and post-collapse Cruiser is significant — old armor metallurgy is simply better.
-
-Cruisers are the primary fleet combatants in any sustained military engagement. They have enough staying power to execute complex tactics, enough firepower to threaten anything, and enough endurance to fight for extended periods.
-
-Their role:
-- **Compact:** Core of organized military formations
-- **Vorath:** Used when coordinated band action warrants it; often command ships for multi-ship operations
-- **Adherents:** Rare; used as mobile archive facilities and high-value asset transport
-
-### Battleship
-
-**Size:** 1,200–3,000 meters. Crew: 300–2,000.
-
-Battleships are not common. Pre-collapse Battleships exist in small numbers — they were never numerous even during the Long Expansion — and post-collapse Battleship construction is theoretically possible but has only been achieved twice in the history of any cluster, and both examples are regarded as significant political events.
-
-A Battleship is a statement. It requires enormous resources to construct, enormous resources to operate, and enormous resources to supply with Trace Fuel. A faction that fields a Battleship has made a choice about how to spend the cluster's wealth. Everyone else is aware of that choice and aware of what it means.
-
-In combat, Battleships dominate conventional engagements. They have layers of shielding, armor, and hull that smaller ships cannot meaningfully threaten in direct combat. Their weakness is that they are slow, expensive to operate, and represent a target that every faction's long-term planning is organized around defeating or capturing.
+クラスター内では、トランジット廊道アプローチの制御が移動そのものの制御だ。主要なチョークポイントを通るトランジットを拒否または課税できる派閥は、物、人、船を動かす必要があるすべての他の派閥に対して影響力を持つ。
 
 ---
 
-## Weapons Systems
+## Trace Fuel（痕跡燃料）
 
-### Kinetic Projectors
+### それが何か
 
-The most common weapons system across all ship classes. Kinetic projectors accelerate physical masses — slugs of dense material, ranging from a few grams to multi-kilogram projectiles — to significant fractions of a percent of lightspeed. Their mechanisms are well-understood, manufacturable with intermediate post-collapse capability, and reliable.
+Trace Fuel は Fold Drive が必要とする精製された同位体混合物だ。その活性成分は精製後数日以内に不活性な形に崩壊するため、大量に備蓄することができず、継続的に生産しなければならない。
 
-Kinetic damage interacts with HP layers predictably: it strips shields relatively slowly (shields are designed to dissipate kinetic energy) but is extremely effective against armor and hull once shields are down. Kinetic weapons are the standard for sustained engagement.
+Trace Fuel の原料は特定の種類のガス惑星の大気と特定の恒星イベントの放出物に見られる。稀ではないが、一様に分布しているわけでもない。一部の星系には豊富な原料がある。他の星系には何もない。
 
-Variants:
-- **Pulse projectors:** High rate of fire, lower individual impact. Effective at stripping shields.
-- **Mass drivers:** Slow rate of fire, massive individual projectile. Designed to punch through armor.
-- **Scatter arrays:** Short-range, multi-projectile. Extremely effective against Frigates in close quarters.
+精製プロセスには専門的な設備が必要だ。崩壊前の Trace 精製所は自動化されており、高効率だった。崩壊後の精製所は効率が低く、より集中的な保守が必要だが、機能する。
 
-### Plasma Discharge Systems
+### 経済的・戦略的帰結
 
-Pre-collapse-originated, less commonly manufactured post-collapse. Plasma discharge weapons ionize and accelerate a contained plasma bolt toward a target, where it transfers thermal and electromagnetic energy. They are effective against shields (thermal energy disperses quickly through shield material, degrading it faster than kinetics) and moderately effective against armor.
+Trace Fuel は備蓄できず、継続的に生産しなければならないため、生産の制御は一時的な戦略的獲得ではなく、繰り返し発生する影響力のポイントだ。クラスター内の主要な Trace 精製所を支配する派閥は、単純に勝利して統合するわけではない——その立場が提供する影響力は継続的なものであるため、継続的にその立場を守らなければならない。
 
-Plasma systems require more energy than kinetics and are harder to maintain. A well-maintained pre-collapse plasma weapon is more effective than a comparable kinetic weapon; a poorly-maintained one is a danger to its operator.
+逆に、相手の Trace 供給を妨害する派閥は何かを永続的に破壊する必要はない。一週間生産を止めれば艦隊を地上に留めるのに十分だ。これにより Trace 精製所は防衛と妨害活動の両方の継続的な焦点となる。
 
-### Electronic Warfare Systems
+Vorath Collective は彼らが生息するクラスターのほとんどの Trace 精製所を運営する。これが彼らの影響力の実際的な基盤だ。彼らは軍事的に最も強力な派閥ではない。彼らは兵站的に最も強力な派閥であり、長期的には兵站が勝つ。
 
-Not weapons in the conventional sense. EW systems affect the target's ability to function rather than its physical integrity. Categories include:
+### 日常生活への影響
 
-- **Fold Disruptors:** Prevent or degrade Fold Drive activation. A ship caught with its Fold Drive disrupted cannot escape by jumping. Pre-collapse designs exist; post-collapse implementations are less reliable.
-- **Sensor Dampeners:** Degrade targeting capability. Effective for reducing the accuracy of a heavier opponent.
-- **Signal Jammers:** Disrupt communication between ships in a formation. Particularly effective against faction fleets that rely on coordinated tactics.
-
-The Adherents have a disproportionate knowledge of EW systems. Their archive access gives them insight into pre-collapse EW technology that other factions have not recovered.
+一般市民は Trace Fuel を、他の星系から来たすべてのものの価格に組み込まれたコストとして体験する。Trace 供給が逼迫すると価格が跳ね上がる。精製所が争われると取引が遅くなる。Trace の供給は、食料、医薬品、あるいは別の星系の家族を訪ねるための通行料に影響するまで、抽象的なままだ。
 
 ---
 
-## The Shield, Armor, and Hull System
+## 船の分類
 
-All ships operate on a three-layer defensive structure. This is not a design choice — it is how ships were built during the Long Expansion, and the logic behind it has been partially reconstructed.
+船は船体サイズによって分類され、それはおおよそ能力、コスト、および製造に必要なインフラと相関する。
 
-### Shield
+### フリゲート
 
-The outermost layer. A projected energy field that deflects and absorbs incoming damage. Shields regenerate — slowly under normal conditions, faster with dedicated systems — because they are a dynamic field rather than a physical structure. A ship whose shields have been depleted is not destroyed, but it is vulnerable.
+**サイズ：** 八十〜二百メートル。乗員：三〜十五人（一部の自動化構成は一人で運航できる）。
 
-Shield effectiveness varies by type of attack:
-- Strong against electromagnetic (plasma-type) attacks
-- Moderate against kinetic
-- Weak against direct structural stress (certain specialized weapons)
+フリゲートはクラスターの主力だ。独立した Fold Transit が可能な最小の船であり、星間作戦の最低限の実行可能単位だ。崩壊前のフリゲートは膨大な数が生産された。どのクラスターでも最も一般的な船種だ。崩壊後のフリゲート生産は最もアクセスしやすく、最も専門化の少ない製造インフラを必要とする。
 
-### Armor
+フリゲートは耐久性と火力を速度と運用柔軟性のために犠牲にする。より大きな船が行けない場所に行ける——物理的に（小惑星帯、近軌道アプローチ）も政治的にも（単一のフリゲートは脅威ではない。フリゲートの艦隊はそうだ）。
 
-The structural reinforcement layer surrounding the hull. Physical material — specific alloy compositions that the pre-collapse civilization developed and that post-collapse metallurgy approximates with varying success. Armor does not regenerate naturally but can be repaired. Pre-collapse armor is better than post-collapse armor for the same mass.
+派閥軍における役割：
+- **The Compact：** 偵察、哨戒、重い船のスクリーニング
+- **Vorath：** 主力の戦闘・作戦プラットフォーム（フリゲートへの偏好は深い文化的なもの）
+- **Adherents：** 研究、アーカイブアクセス、外交輸送
 
-Armor is what keeps a ship functional after shields fail. A ship with intact armor can take significant damage and continue operating. Once armor begins to fail, the ship's systems start degrading.
+三層 HP システムの観点から：フリゲートは最も薄い装甲と船体の値を持つが、ダメージを回避できるほど機敏なものもある。多くのビルドで、シールド再生が主な生存能力ツールだ。
 
-### Hull
+### クルーザー
 
-The ship itself. At this level, structural integrity is compromised. Hull damage affects propulsion, weapons, sensors, and crew. A ship fighting at hull integrity is in serious trouble — not necessarily destroyed, but operating under severe constraint. Crew casualties begin here.
+**サイズ：** 三百五十〜七百メートル。乗員：五十〜二百人。
+
+クルーザーは、船がもはや単なる乗り物ではなくプラットフォームになる閾値を表す——持続的な独立作戦、重要な武器搭載量、そして意味のある製造または修理能力を持てるもの。十分に装備されたクルーザーは移動基地として機能できる。
+
+崩壊前のクルーザーは存在し、極めて価値がある。崩壊後のクルーザー建造は、一部の派閥しか達成できないレベルの製造インフラを必要とし、その結果は崩壊前の例より劣っている。崩壊前と崩壊後のクルーザーの船体の差は大きい——旧来の装甲冶金は単純に優れている。
+
+クルーザーはどんな持続的な軍事交戦でも主力艦隊の戦闘艦だ。複雑な戦術を実行するのに十分な持久力、あらゆるものを脅かすのに十分な火力、長時間戦い続けるのに十分な持続力がある。
+
+役割：
+- **The Compact：** 組織化された軍事編成の中核
+- **Vorath：** 調整されたバンドの行動が正当化するときに使用。多船作戦の指揮艦としてしばしば機能
+- **Adherents：** 稀。移動アーカイブ施設および高価値資産輸送として使用
+
+### バトルシップ
+
+**サイズ：** 千二百〜三千メートル。乗員：三百〜二千人。
+
+バトルシップは一般的ではない。崩壊前のバトルシップは少数存在する——Long Expansion 中でさえ決して多くなかった——そして崩壊後のバトルシップ建造は理論的には可能だが、どのクラスターの歴史でも二度しか達成されておらず、どちらの例も重大な政治的出来事とみなされている。
+
+バトルシップは声明だ。建造に膨大なリソース、運用に膨大なリソース、Trace Fuel の供給に膨大なリソースを必要とする。バトルシップを配備する派閥は、クラスターの富をどう使うかについて選択をした。他の全員がその選択とその意味を知っている。
+
+戦闘において、バトルシップは通常の交戦を支配する。小さな船が直接戦闘では意味のある脅威を与えられないシールド、装甲、船体の層を持つ。弱点は、遅く、運用コストが高く、すべての派閥の長期計画が打倒または鹵獲することを中心に組織された標的を代表することだ。
 
 ---
 
-## Energy Systems
+## 兵器システム
 
-### The Capacitor
+### 運動量投射機（Kinetic Projectors）
 
-All ship systems — weapons, shields, drives, EW modules — draw from a ship's Capacitor, an energy storage and distribution system that is charged by the ship's reactor. The Capacitor is not simply a battery; it is the management system that determines how energy is distributed under competing demands.
+すべての船クラスに共通する最も一般的な兵器システム。運動量投射機は物理的な質量——数グラムから複数キログラムの発射体まで、密度の高い素材の塊——を光速の数パーセントに加速する。そのメカニズムはよく理解されており、中程度の崩壊後の能力で製造可能で、信頼性が高い。
 
-Under normal operating conditions, the reactor continuously recharges the Capacitor, and the Capacitor supplies whatever systems are running. Under combat conditions, active weapons and shields can draw more power than the reactor can supply, forcing trade-offs: run shields at full and reduce weapons fire rate, or run weapons at maximum and let shields drain.
+運動量ダメージは HP 層と予測可能に相互作用する。シールドを比較的ゆっくりと剥ぎ取り（シールドは運動エネルギーを分散させるよう設計されている）、シールドが落ちると装甲と船体に対して非常に効果的だ。運動量兵器は持続的交戦の標準だ。
 
-Pre-collapse Capacitor systems are more efficient in every respect. Post-collapse Capacitor management systems are the subject of significant engineering effort among all factions.
+バリアント：
+- **パルス投射機：** 高発射レート、個々の衝撃は低い。シールドの剥ぎ取りに効果的。
+- **マスドライバー：** 低発射レート、巨大な個々の発射体。装甲を貫通するよう設計。
+- **散弾アレイ：** 短距離、多発射体。近接戦でのフリゲートに非常に効果的。
 
-### Reactor Types
+### プラズマ放電システム（Plasma Discharge Systems）
 
-The predominant reactor type in the cluster is the Contained Reaction Pile — a fission-based system that the pre-collapse civilization used because its fuel (processed heavy elements) is available in most systems. It is not the most efficient reactor type the old civilization used, but it is the one whose engineering is most widely understood post-collapse.
+崩壊前に起源を持ち、崩壊後はあまり製造されない。プラズマ放電兵器は封じ込めたプラズマボルトをイオン化して目標に向けて加速し、そこで熱エネルギーと電磁エネルギーを伝達する。シールドに対して効果的（熱エネルギーはシールド材料を通じて素早く分散し、運動量より速く劣化させる）で、装甲に対して中程度に効果的だ。
 
-Pre-collapse ships sometimes carry plasma fusion reactors, which are more efficient and produce more power for their mass. Post-collapse fusion reactor construction exists but is difficult. A ship with a functioning pre-collapse fusion reactor has a significant Capacitor advantage over equivalently-sized ships.
+プラズマシステムは運動量兵器より多くのエネルギーを必要とし、維持が難しい。よく整備された崩壊前のプラズマ兵器は同等の運動量兵器より効果的だが、整備が悪いと操作者にとって危険だ。
 
-A few pre-collapse ships carry a third type — documented in recovered archive fragments as *gradient reactors*, which appear to draw energy from the same depth variance geometry that Fold Transit exploits. These reactors have been found; they have not been replicated. The Adherents have at least one recovered example they have not fully explained.
+### 電子戦システム（Electronic Warfare Systems）
+
+従来の意味での兵器ではない。EW システムは物理的な完全性ではなく、目標の機能能力に影響を与える。カテゴリには：
+
+- **Fold ディスラプター：** Fold Drive の起動を防止または劣化させる。Fold Drive を妨害された船は、ジャンプで逃げることができない。崩壊前の設計が存在する。崩壊後の実装は信頼性が低い。
+- **センサーダンパー：** 目標捕捉能力を低下させる。より重い相手の精度を下げるのに効果的。
+- **シグナルジャマー：** 艦隊内の船間の通信を妨害する。協調戦術に依存する派閥艦隊に対して特に効果的。
+
+Adherents は EW システムについて不釣り合いな知識を持っている。彼らのアーカイブアクセスは、他の派閥が回復していない崩壊前の EW 技術についての洞察を与えてくれる。
 
 ---
 
-## The Fitting System
+## シールド・装甲・船体システム
 
-Ships carry weapon systems, defensive modules, utility systems, and specialized equipment in a structured layout called the fitting. This is not a post-collapse invention — it was standard pre-collapse design practice. Ships were built with defined mounting points (hard points) and equipment bays, so that operators could configure the ship for its mission.
+すべての船は三層の防御構造で動作する。これは設計上の選択ではない——Long Expansion 中に船がこのように作られており、その背後にある論理は部分的に再構築されている。
 
-Post-collapse, fitting has become the primary way that operational advantage is created. You cannot build a better ship from scratch in most cases. But you can fit an existing hull in ways that change its effective capability significantly. Fitting knowledge — knowing which combinations work, which create capacitor instability, which synergize — is a form of expertise that is practically valuable and socially significant.
+### シールド
 
-The Compact has catalogued and standardized fitting configurations for common mission types. The Vorath have evolved fitting practices through four hundred years of operational experience and will tell you the standard configurations are wrong. The Adherents have recovered theoretical frameworks for fitting design from the archive and are testing them against both Compact standards and Vorath practice. All three are partly right.
+最外層。入ってくるダメージを偏向・吸収する投射エネルギーフィールド。シールドは再生する——通常の条件下ではゆっくりと、専用システムがあればより速く——それが物理構造ではなく動的フィールドだからだ。シールドが枯渇した船は破壊されないが、脆弱だ。
 
-Active modules — weapons, shield boosters, electronic warfare — draw Capacitor power. Passive modules — reinforced bulkheads, enhanced armor plating — do not, but they take up space in equipment bays that active modules could occupy. Every fitting is a decision about what trade-off you are making, and there is no configuration that is universally optimal.
+シールドの有効性は攻撃のタイプによって異なる：
+- 電磁（プラズマ型）攻撃に対して強い
+- 運動量に対して中程度
+- 特定の特殊兵器による直接構造的ストレスに対して弱い
+
+### 装甲
+
+船体を囲む構造補強層。物理的な素材——崩壊前の文明が開発し、崩壊後の冶金学がさまざまな成功度で近似する特定の合金組成。装甲は自然には再生しないが修理できる。同じ質量に対して崩壊前の装甲は崩壊後のものより優れている。
+
+装甲はシールドが落ちた後も船を機能させ続けるものだ。装甲が intact の船はかなりのダメージを受けて動作し続けられる。装甲が劣化し始めると、船のシステムが低下し始める。
+
+### 船体
+
+船そのもの。この段階では構造的完全性が損なわれている。船体ダメージは推進力、兵器、センサー、乗員に影響する。船体完全性で戦っている船は深刻な問題を抱えている——必ずしも破壊されるわけではないが、深刻な制約のもとで動作している。乗員の死傷者はここから始まる。
+
+---
+
+## エネルギーシステム
+
+### コンデンサー（Capacitor）
+
+すべての船のシステム——兵器、シールド、ドライブ、EW モジュール——は、船のリアクターによって充電されるエネルギー貯蔵・分配システムであるコンデンサーから引き出す。コンデンサーは単純なバッテリーではない。競合する需要の下でエネルギーをどのように分配するかを決定する管理システムだ。
+
+通常の動作条件下では、リアクターはコンデンサーを継続的に充電し、コンデンサーは動作中のシステムに供給する。戦闘条件下では、アクティブな兵器とシールドがリアクターが供給できる以上の電力を引き出し、トレードオフを強いる。シールドをフルに動かして兵器の発射レートを下げるか、兵器を最大限に動かしてシールドを枯渇させるか。
+
+崩壊前のコンデンサーシステムはすべての面でより効率的だ。崩壊後のコンデンサー管理システムは、すべての派閥の間で重要なエンジニアリング努力の対象だ。
+
+### リアクタータイプ
+
+クラスターで主流のリアクタータイプは封じ込め反応炉（Contained Reaction Pile）だ——崩壊前の文明が使用したフィッション系システムで、その燃料（処理された重元素）がほとんどの星系で入手可能だからだ。旧文明が使用した最も効率的なリアクタータイプではないが、崩壊後に最も広く理解されているエンジニアリングを持つものだ。
+
+崩壊前の船は時として核融合リアクターを搭載しており、これはより効率的で質量あたりのパワーが多い。崩壊後の核融合リアクター建造は存在するが難しい。機能する崩壊前の核融合リアクターを持つ船は、同等サイズの船に対してコンデンサーの重要な優位性を持つ。
+
+一部の崩壊前の船は第三のタイプを搭載している——回収されたアーカイブの断片に*勾配リアクター*（gradient reactor）として文書化されており、Fold Transit が利用するのと同じ深度差異幾何学からエネルギーを引き出すように見える。これらのリアクターは発見されている。複製されていない。Adherents は完全に説明していない回収例を少なくとも一つ持っている。
+
+---
+
+## フィッティングシステム
+
+船は、フィッティングと呼ばれる構造化されたレイアウトで兵器システム、防御モジュール、ユーティリティシステム、および特殊設備を搭載する。これは崩壊後の発明ではない——崩壊前の標準的な設計慣行だった。船は定義されたマウントポイント（ハードポイント）と機器ベイを持って作られ、オペレーターがミッションに合わせて船を構成できるようにした。
+
+崩壊後、フィッティングは運用上の優位性が生み出される主要な方法になった。ほとんどの場合、より良い船をゼロから作ることはできない。しかし既存の船体を、その実効的な能力を大きく変える方法でフィットすることができる。フィッティングの知識——どの組み合わせが機能するか、どれがコンデンサーの不安定性を生み出すか、どれが相乗効果を持つか——は実際的に価値があり、社会的に重要な専門知識の形態だ。
+
+The Compact は一般的なミッションタイプのためのフィッティング構成をカタログ化し、標準化した。Vorath は四百年の運用経験を通じてフィッティング慣行を発展させ、標準構成が間違っていると言う。Adherents はアーカイブからフィッティング設計の理論的フレームワークを回収し、Compact 標準と Vorath 慣行の両方に対してテストしている。三者すべてが部分的に正しい。
+
+アクティブモジュール——兵器、シールドブースター、電子戦——はコンデンサー電力を消費する。パッシブモジュール——強化されたバルクヘッド、強化された装甲プレート——はしないが、アクティブモジュールが占有できる機器ベイのスペースを取る。すべてのフィッティングは、どのトレードオフをするかについての決断であり、普遍的に最適な構成は存在しない。

@@ -1,121 +1,121 @@
-# Lore Design Principles
+# ロア設計原則
 
-## Why This Document Exists
+## このドキュメントの目的
 
-Every piece of lore added to Dawn must answer to something higher than taste or mood. This document is that higher authority. It records the *reasons* behind lore decisions so that future contributors — human or AI — can evaluate new ideas without having to reverse-engineer the philosophy.
+Dawnに追加されるすべてのロアは、個人の趣味や気分よりも高い基準に従わなければならない。このドキュメントがその基準である。ロアに関する判断の根拠を記録することで、将来の貢献者——人間であれAIであれ——が既存の哲学を逆算することなく新しいアイデアを評価できるようにする。
 
-When a new lore element is proposed, check it against this document first. If it cannot answer the questions in §5, it does not belong here.
-
----
-
-## 1. Why Post-Collapse?
-
-### The Narrative Opportunity
-
-A living, intact civilization has answers. It has institutions, hierarchies, explanations, experts. Players in an intact civilization inherit a world that is already interpreted for them. There is less room for the player to *matter*.
-
-A post-collapse civilization has gaps. It has questions no one alive can answer. The wreckage of the old world is present, readable in fragments, but the people living in it are making do — using things they did not build, following customs they did not invent, fighting over things they only partially understand.
-
-This is where players have agency. Not because the game gives them power, but because the world *needs* people who are willing to act without certainty.
-
-### Specific Narrative Opportunities the Collapse Creates
-
-**Archaeology as gameplay.** Ancient infrastructure still functions. Abandoned stations, dormant relay networks, derelict ships with intact logs. Discovery is not just flavor — it changes what a player can do.
-
-**Legitimacy is contested.** In an intact civilization, power structures are settled. In a post-collapse world, every claim to authority — "we are the rightful heirs of the old civilization," "we are the only ones who understand this technology" — is a political position, not a fact. This creates natural conflict without requiring a designated villain.
-
-**Knowledge is asymmetric.** One cluster knows something another does not. Information — not just resources — is worth fighting over.
-
-**The moral weight of survival.** When civilization collapsed, people made choices. Some of those choices were heroic. Many were not. The descendants of survivors carry those histories, and those histories shape how they see strangers.
+新しいロア要素が提案されたときは、まずこのドキュメントと照らし合わせること。§5の問いに答えられないものは、このロアに属さない。
 
 ---
 
-## 2. How "Fragmented Universe" Supports the Architecture
+## 1. なぜ崩壊後の世界なのか
 
-Dawn is designed for player-hosted servers. Each server is a self-contained cluster — a pocket of populated star systems with no reliable communication to the outside.
+### 物語の可能性
 
-This is not a compromise. It is the premise.
+健全に機能している文明には答えがある。制度があり、階層があり、説明があり、専門家がいる。そのような文明の中にいるプレイヤーは、すでに解釈された世界を受け継ぐ。プレイヤーが*重要な存在になれる*余地は少ない。
 
-### The Lore Supports the Architecture
+崩壊後の文明には空白がある。生きている者には答えられない問いがある。旧世界の残骸は至る所に存在し、断片として読み解けるが、その中を生きる人々はなんとかやりくりしている——自分たちが作ったわけでもないものを使い、自分たちが発明したわけでもない慣習に従い、自分たちが完全には理解していないものをめぐって争っている。
 
-In-universe, faster-than-light communication was lost in the collapse. Clusters that survived became isolated not by choice but by physics. What players experience on one server is canonically happening in a different pocket of the same broken universe. Neither server knows the other exists. Neither is wrong.
+これがプレイヤーに主体性が生まれる場所だ。ゲームが力を与えるからではなく、世界が*不確かさの中で行動する意思を持つ人間を必要としている*からだ。
 
-This means:
-- There is no canonical "correct" state of the universe across servers
-- A player-run server is not a degraded experience — it *is* the experience, as the lore describes it
-- No server is authoritative over another; they are peers, just as the clusters are
+### 崩壊がもたらす具体的な物語の可能性
 
-### What This Means for World-Building
+**ゲームプレイとしての考古学。** 古代のインフラがいまも機能している。放棄されたステーション、眠っている中継ネットワーク、航行ログが残る廃船。発見はフレーバーにとどまらない——それはプレイヤーが何をできるかを変える。
 
-Every lore element must be true *within a cluster*. It must not require knowledge of other clusters to make sense. Factions, histories, technologies — all of it must function as a self-contained ecosystem.
+**正統性は争われている。** 健全な文明では権力構造は安定している。崩壊後の世界では、権威への主張——「我々は旧文明の正当な後継者だ」「この技術を理解できるのは我々だけだ」——はすべて政治的な立場であり、事実ではない。これにより、悪役を設定しなくても自然な対立が生まれる。
 
-References to "out there" should exist as rumor, myth, or dead signal — never as confirmed fact. The player should feel that their cluster is the whole world, and feel a specific kind of loneliness when they realize it might not be.
+**知識は非対称だ。** あるクラスターが知っていることを、別のクラスターは知らない。情報は——資源だけでなく——争う価値があるものだ。
 
----
-
-## 3. Themes That Run Through All Lore Decisions
-
-### Theme 1: Maintenance vs. Creation
-
-The people of the present can *maintain* things they did not build. They can keep a reactor running, fly a ship manufactured three hundred years ago, read an instruction manual written in a dialect no longer spoken. What they cannot do — or cannot do reliably — is build new things of the same quality.
-
-This creates a civilization that is simultaneously advanced and fragile. Technology is not magic. It is a set of skills, and the chain of transmission broke.
-
-Consequences:
-- Old ships are more valuable than new ones (new ships are built from salvage and approximation)
-- Knowledge of how something *actually works* is rare and socially powerful
-- Factions that control manufacturing infrastructure have leverage even if they are weak militarily
-
-### Theme 2: The Weight of the Record
-
-Because Dawn uses event sourcing, every action in the game is permanently recorded. The lore should reflect this: in-universe, the pre-collapse civilization was obsessed with logging. Everything was recorded — ship movements, resource transfers, communications, even personal medical data.
-
-The collapse did not destroy these records. It scattered them. Fragments survive: corrupted, partial, out of sequence. Reading the old record is possible; understanding it is not.
-
-This means the past is present but illegible. Players live in a world where the evidence of what came before is everywhere, but the context to interpret it is mostly gone.
-
-### Theme 3: The Legitimacy of Violence
-
-People in Dawn fight. The lore must answer: *why do people fight here, specifically?*
-
-The answer is not scarcity alone — scarcity creates pressure, but it does not determine who fights whom. The answer is that in a post-collapse world, the institutions that adjudicated conflict are gone. There is no neutral arbiter. There is no higher power. There are only agreements between groups, enforced by the credible threat of violence.
-
-Fighting is not the default. It is what happens when no other mechanism works. Good lore should make players feel the weight of that: the moment before a fight is not just tactical, it is political and moral.
-
-### Theme 4: Grim But Not Hopeless
-
-The setting is not nihilistic. People are still building things. They have children. They celebrate harvests and mourn the dead. The collapse was a catastrophe, but the people who survived it were not passive. They made choices that preserved *something*.
-
-The tone should feel like: *we lost a great deal, and we know it, and we are still here.* Not: *everything is ash and nothing matters.*
+**生存の道徳的重み。** 文明が崩壊したとき、人々は選択をした。その中には英雄的な選択もあったが、多くはそうではなかった。生存者の子孫はその歴史を受け継いでおり、その歴史が他者を見る目を形作っている。
 
 ---
 
-## 4. What Questions Every Lore Element Must Answer
+## 2. 「断片化した宇宙」がアーキテクチャをどう支えるか
 
-These five questions must be answerable for every significant concept introduced:
+DawnはプレイヤーがホストするサーバーのためにAしたデザインである。各サーバーは自己完結したクラスター——外部との信頼できる通信が存在しない、有人星系の一つの孤島だ。
 
-1. **What is its origin?** Where did this come from? Pre-collapse inheritance, post-collapse innovation, or something that emerged from the gap between them?
+これは妥協ではない。これが前提だ。
 
-2. **How did it change society?** Did it create new hierarchies, dissolve old ones, give some people leverage over others?
+### ロアはアーキテクチャを支える
 
-3. **How did it change economics?** What became more or less valuable? Who controls it? Who needs it?
+ユニバース内では、光速通信は崩壊の中で失われた。生き残ったクラスターは選択ではなく物理法則によって孤立した。あるサーバーでプレイヤーが体験することは、同じ壊れた宇宙の別の孤島で起きていることと解釈できる。どちらのサーバーも互いの存在を知らない。どちらも間違っていない。
 
-4. **How did it change warfare?** Did it change who fights, how they fight, what they fight over?
+これが意味するのは：
+- サーバーをまたいで「正しい」宇宙の状態は存在しない
+- プレイヤー運営のサーバーは劣化した体験ではない——ロアがそのように描く通り、*それが*体験そのものだ
+- どのサーバーも他より権威を持たない。クラスター同士が対等であるように、サーバー同士も対等だ
 
-5. **How did it change daily life?** What is it like to be an ordinary person in a world where this thing exists?
+### ワールドビルディングへの含意
 
-If a lore element cannot answer all five, it is either too small to be in the lore (it belongs in flavor text) or it is not fully developed yet.
+すべてのロア要素は*クラスターの内側で*真実でなければならない。意味をなすために他のクラスターの知識を必要としてはならない。派閥、歴史、技術——そのすべてが自己完結したエコシステムとして機能しなければならない。
+
+「外の世界」への言及は、噂、神話、または途絶えたシグナルとして存在すべきであり、確認された事実としてではない。プレイヤーは自分のクラスターが世界のすべてだと感じるべきだ——そして、そうではないかもしれないという特定の孤独感を感じるべきだ。
 
 ---
 
-## 5. What Lore Must Never Do
+## 3. すべてのロア判断を貫くテーマ
 
-- **Copy.** No EVE Online factions, no Warhammer 40K aesthetics, no Star Wars resonance. If a concept can be summarized as "it's like X from Y," it needs to be reworked until it cannot.
+### テーマ1：維持すること vs. 創造すること
 
-- **Assign permanent villainy.** No faction is purely evil. Every group in this universe has a reason for existing that makes sense from the inside. If a player wants to join a faction, they should be able to find something to believe in.
+現代の人々は自分たちが作ったわけではないものを*維持する*ことができる。三百年前に製造された船を飛ばし、もはや誰も話さない方言で書かれた取扱説明書を読むことができる。しかし彼らは——少なくとも確実には——同じ質の新しいものを作ることができない。
 
-- **Answer everything.** The collapse should have unanswered questions. The old civilization should have aspects that are still not understood. Mystery is a resource; spend it slowly.
+これにより、同時に高度でありながら脆弱な文明が生まれる。技術は魔法ではない。それは技術のセットであり、その伝達の連鎖が断ち切られた。
 
-- **Contradict the architecture.** Lore must not imply features the game does not have: no real-time communication across clusters, no universal trade markets, no permanent faction territory that a player-hosted server cannot contain. The lore is downstream of the technical reality.
+その結果：
+- 古い船は新しいものより価値がある（新しい船はサルベージと近似で作られる）
+- 何かが*実際にどう機能するか*という知識は希少で、社会的な権力を持つ
+- 製造インフラを支配する派閥は、軍事力が弱くても影響力を持つ
 
-- **Reward passivity.** Every lore-justified game mechanic must create decisions. A resource that just sits there and generates income is anti-thematic. Resources must be contested, defended, traded. See game-design.md §5.
+### テーマ2：記録の重み
+
+Dawnはイベントソーシングを使用しているため、ゲーム内のすべての行動は永久に記録される。ロアはこれを反映すべきだ——ユニバース内では、崩壊前の文明は記録に執着していた。すべてが記録された——船の動き、資源移転、通信、個人の医療データまでも。
+
+崩壊はこれらの記録を破壊しなかった。それを散らばらせた。断片が生き残っている——破損した、不完全な、順序が乱れた断片として。古い記録を読むことはできる。理解することはできない。
+
+つまり、過去は現在にあるが解読できない。プレイヤーは過去の証拠が至る所にある世界に生きているが、それを解釈する文脈はほとんど失われている。
+
+### テーマ3：暴力の正統性
+
+Dawnの人々は戦う。ロアはこれに答えなければならない——*なぜここで、特に、人々は戦うのか？*
+
+答えは希少性だけではない——希少性は圧力を生み出すが、誰が誰と戦うかは決定しない。答えは、崩壊後の世界では、紛争を調停していた制度が消えた、ということだ。中立的な仲裁者はいない。より高い権力はない。あるのは集団間の合意だけで、それは暴力の信頼できる脅威によって執行される。
+
+戦闘はデフォルトではない。それは他のメカニズムが機能しなくなったときに起きることだ。優れたロアはプレイヤーにその重みを感じさせるべきだ——戦いの直前は単なる戦術的な瞬間ではなく、政治的かつ道徳的な瞬間でもある。
+
+### テーマ4：厳しいが希望はある
+
+この設定はニヒリスティックではない。人々はまだものを作っている。子供を育て、収穫を祝い、死者を悼んでいる。崩壊は大惨事だったが、それを生き残った人々は受動的ではなかった。彼らは*何かを*保存するための選択をした。
+
+トーンはこのように感じられるべきだ——*多くを失った、それはわかっている、それでも我々はここにいる*。*すべては灰と化し、何も意味しない*ではなく。
+
+---
+
+## 4. すべてのロア要素が答えなければならない問い
+
+重要な概念が導入されるたびに、以下の五つの問いに答えられなければならない：
+
+1. **その起源は何か？** これはどこから来たのか。崩壊前の遺産か、崩壊後の革新か、それともその間の空白から生まれたものか？
+
+2. **それは社会をどう変えたか？** 新たな階層を作り出したか、古いものを解体したか、一部の人々に他者への影響力を与えたか？
+
+3. **それは経済をどう変えたか？** 何がより価値を持ち、何が価値を失ったか？誰がそれを管理し、誰がそれを必要としているか？
+
+4. **それは戦争をどう変えたか？** 誰が戦うか、どう戦うか、何をめぐって戦うかを変えたか？
+
+5. **それは日常生活をどう変えたか？** この存在が当たり前の世界で、一般市民の生活はどのようなものか？
+
+五つすべてに答えられないロア要素は、ロアに含めるには小さすぎる（フレーバーテキストに属する）か、まだ十分に開発されていないかのどちらかだ。
+
+---
+
+## 5. ロアが絶対にしてはならないこと
+
+- **コピーすること。** EVE Onlineの派閥も、Warhammer 40Kの美学も、スター・ウォーズの共鳴も禁止。「YのXに似ている」と要約できるコンセプトは、そう言えなくなるまで作り直す必要がある。
+
+- **永続的な悪役を設定すること。** どの派閥も純粋な悪ではない。このユニバースのすべてのグループは、内側から見て意味をなす存在理由を持っている。プレイヤーがどの派閥に加わっても、信じるに値するものを見つけられるべきだ。
+
+- **すべてに答えること。** 崩壊には未解決の問いがあるべきだ。旧文明にはまだ理解されていない側面があるべきだ。謎は資源だ。慎重に使うこと。
+
+- **アーキテクチャと矛盾すること。** ロアはゲームが持たない機能を示唆してはならない。クラスターをまたいだリアルタイム通信なし、普遍的な取引市場なし、プレイヤーホストのサーバーが収容できない永続的な派閥領土なし。ロアは技術的現実の下流にある。
+
+- **受動性を報いること。** ロアによって正当化されるすべてのゲームメカニクスは決断を生み出さなければならない。ただそこに置かれて収入を生み出す資源は、テーマに反する。資源は争われ、守られ、取引されなければならない。game-design.md §5を参照。

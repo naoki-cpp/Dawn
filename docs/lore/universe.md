@@ -1,131 +1,131 @@
-# The Universe
+# 宇宙
 
-## Overview
+## 概要
 
-The universe of Dawn is old in the way of forgotten things — full of structure that no living person built, operating according to rules that no living person fully understands. Humanity spread across hundreds of star systems during a period called the Long Expansion. Then the Unraveling happened, and within three generations the network that had bound those systems together collapsed so completely that most clusters do not know whether other clusters still exist.
+Dawnの宇宙は、忘れ去られたものが持つ古さを持っている——生きている者が誰一人作ったわけではない構造に満ち、生きている者が誰一人完全に理解していない法則に従って動いている。人類は Long Expansion（大拡張）と呼ばれる時代に何百もの星系に広がった。そして Unraveling（崩壊）が起き、三世代も経たないうちに、それらの星系を結んでいたネットワークは完全に崩壊し、多くのクラスターは他のクラスターがまだ存在するかどうかさえわからなくなった。
 
-Players enter the game roughly four hundred years after the Unraveling. Civilization has returned in fragmented forms. The sky still holds stars that people cannot reach. The stations still turn in orbit. The ships still fly. But the people who built them are gone, and the people who use them are, in many ways, making it up as they go.
-
----
-
-## The Long Expansion
-
-### What It Was
-
-Between roughly 600 and 1,200 years before the present, humanity expanded outward from a core of densely populated systems using a technology called Fold Transit. The details of Fold Transit are covered in `technology.md`; for purposes of the universe, what matters is what the expansion *produced*:
-
-A civilization of approximately four hundred inhabited systems, connected by transit lanes that were maintained by an automated infrastructure layer called the Weave. The Weave was not a single thing. It was a distributed network of navigation beacons, fuel caches, signal relays, and maintenance drones — built over centuries, self-repairing, largely invisible to the people who depended on it.
-
-### What the Long Expansion Looked Like
-
-It was not a golden age in the story-of-progress sense. It was messy, competitive, and often brutal. Colonies were founded by corporations, by religious communities fleeing persecution, by governments solving population problems by exporting people. The core systems were wealthy; the frontier systems were not. Resource extraction flowed toward the center; finished goods and technology flowed outward on terms that benefited the core.
-
-Wars happened. Some colonies broke away. Some were suppressed. The Weave outlasted all of it — it did not care about politics, only about keeping the network functional.
-
-What the Long Expansion did produce was an enormous record. The civilization was obsessed with data. Everything was logged: ship manifests, population censuses, environmental readings, personal biometrics. This record was distributed across thousands of nodes in the Weave. Most of those nodes still exist. Most of the record is still there. Almost none of it is accessible.
+プレイヤーが入るのは、Unraveling から約四百年後の世界だ。文明は断片的な形で戻りつつある。夜空にはまだ手の届かない星が光っている。ステーションは軌道を回り続け、船はまだ飛んでいる。しかしそれらを作った人々は去り、使う人々は多くの意味でその場しのぎを続けている。
 
 ---
 
-## The Unraveling
+## Long Expansion（大拡張）
 
-### What Happened
+### それが何であったか
 
-The Unraveling was not a war, a plague, or a natural disaster. It was a cascading infrastructure failure that took approximately sixty years to complete, and was not recognized as a civilizational collapse until it was already irreversible.
+おおよそ現在から六百年前から千二百年前にかけて、人類は Fold Transit（折畳航法）と呼ばれる技術を使い、密集した中心星系群から外へと広がっていった。Fold Transit の詳細は `technology.md` で扱う。宇宙の観点から重要なのは、拡張が*何をもたらしたか*だ：
 
-The sequence is reconstructed from surviving records:
+Weave（織物）と呼ばれる自動化されたインフラ層によって維持された航行路で結ばれた、約四百の有人星系からなる文明。Weave は単一のものではなかった。それは何世紀もかけて構築され、自己修復し、それに依存する人々にはほぼ見えない——航行ビーコン、燃料補給拠点、信号中継局、保守ドローンの分散ネットワークだった。
 
-**Year 0 — The Attractor Drift.** Deep-space observatories recorded anomalous gravitational readings in several transit corridors simultaneously. The effect was subtle — transit accuracy degraded by fractions of a percent. Standard maintenance protocols were flagged. The Weave began rerouting traffic.
+### Long Expansion の実像
 
-**Years 3–15 — The Routing War.** As Fold Transit became less reliable in affected corridors, traffic concentrated on remaining stable lanes. The Weave's routing algorithms, designed for a distributed load, began making optimization decisions that moved traffic in ways that created new points of congestion. Lane operators — who received tolls based on traffic — began competing for routing priority. Some began physically interfering with competitor beacons. The Weave began to fragment, not because it was failing, but because people were breaking it.
+それは進歩の物語という意味での黄金時代ではなかった。混乱に満ち、競争的で、しばしば残酷だった。植民地は企業によって、宗教的迫害を逃れたコミュニティによって、人口問題を人々を輸出することで解決しようとした政府によって設立された。中心星系は豊かで、辺境星系はそうではなかった。資源は中心へと流れ、完成品と技術は中心に有利な条件で外へと流れた。
 
-**Years 15–40 — The Quiet Collapse.** Maintenance drones could not repair beacon infrastructure that was being actively sabotaged. Drone fleets began to deplete. The Weave's self-repair capacity degraded silently — it continued sending maintenance logs that were never acted on, because the political situation had made coordinated infrastructure response impossible. Whole transit corridors began to go dark.
+戦争もあった。独立した植民地もあれば、鎮圧されたものもあった。Weave はそのすべてを超えて存続した——政治には無関心で、ただネットワークを機能させ続けることだけを気にかけていた。
 
-**Years 40–60 — The Severance.** As corridors closed, clusters of systems became isolated. Some clusters had warning and were able to partially prepare. Most did not. Within sixty years of Year 0, the connected network of four hundred systems had fragmented into dozens of isolated pockets. Communication between pockets was lost along with transit capability — the relay network was built on the same infrastructure.
-
-### The Root Cause
-
-The root cause of the Attractor Drift is still debated in surviving academic communities. The most credible reconstruction holds that a long-period gravitational perturbation — the combined effect of dark matter density fluctuations across a galactic-scale structure — began shifting the geometry of the transit corridors over decades. The Weave was designed to compensate for stellar drift and local gravitational events. It was not designed to compensate for something operating at this scale.
-
-Some communities reject this. They believe the Weave's own routing algorithms caused the drift — that the optimization decisions fed back into physical space in ways its designers did not anticipate. Others believe it was deliberate sabotage by one of the core system powers. The evidence for all three positions is fragmentary and contested.
-
-What is not contested: the Attractor Drift was real, it was not caused by a single actor, and nothing humanity did made it better.
-
-### What the Unraveling Destroyed
-
-- Fold Transit between most clusters: permanently or functionally so
-- The relay network: dark; physically present but inoperative
-- Coordinated interstellar governance: dissolved when communication failed
-- Most of the manufacturing base for high-complexity technology: dependent on supply chains that no longer exist
-- Perhaps 60–80% of the total human population, through war, starvation, and infrastructural collapse in the century after Severance
-
-What it did not destroy:
-- Ships already in existence
-- Station infrastructure, mostly
-- Local knowledge and technical skill
-- The archived record, physically — it is still there, still unreadable
+Long Expansion が確かに生み出したのは膨大な記録だった。その文明はデータに執着していた。すべてが記録された——船の積荷目録、人口調査、環境測定値、個人の生体データ。この記録は Weave の数千のノードに分散して保存された。それらのノードの多くはまだ存在する。記録のほとんどはまだそこにある。しかしほぼすべてにアクセスできない。
 
 ---
 
-## What Remains
+## Unraveling（崩壊）
 
-### The Stations
+### 何が起きたか
 
-Most inhabited systems have at least one pre-collapse station in some form. Some are functioning as designed, maintained by whatever community claimed them. Many are partially functional — sections sealed off, gravity plating failed in certain rings, docking bays repurposed. A few are derelict, inhabited only by scavengers or by communities that do not advertise their presence.
+Unraveling は戦争でも疫病でも自然災害でもなかった。それは完成までに約六十年かかった連鎖的なインフラ崩壊であり、すでに取り返しのつかない文明の崩壊になってからようやく認識された。
 
-The stations are generally not understood by the people who maintain them. Their systems run on software nobody has fully read, on power plants built to tolerances current manufacturing cannot achieve. When something breaks, the repair is a workaround — often brilliant, occasionally dangerous. Stations are patched, rerouted, bypassed, and extended. They have layers of modification the way old cities have layers of foundation.
+この経緯は生き残った記録から再構成されている：
 
-### Ships
+**Year 0 — Attractor Drift（引力偏位）。** 深宇宙天文台が複数の航行廊下で同時に異常な重力測定値を記録した。効果は微妙なものだった——Fold Transit の精度がわずか数パーセントの割合で低下した。標準的な保守プロトコルがフラグを立てられた。Weave はトラフィックを迂回させ始めた。
 
-Pre-collapse ships exist in every cluster and are almost uniformly better than anything built since. They are older, but their construction quality reflects a manufacturing base that no longer exists. A Frigate built four hundred years ago, well-maintained, outperforms most new construction in every parameter except adaptability to local modifications.
+**Year 3〜15 — Routing War（航路戦争）。** Fold Transit が影響を受けた廊下で信頼性を失うにつれ、トラフィックは残りの安定した航路に集中した。分散した負荷のために設計された Weave の経路最適化アルゴリズムは、新たな混雑ポイントを作り出す方法でトラフィックを動かすための最適化判断を下し始めた。通行料に基づいて収益を得ていた航路運営者たちが経路の優先権をめぐって競い始めた。一部は競合他社のビーコンに物理的に干渉し始めた。Weave は、それ自体が機能不全に陥ったためではなく、人々がそれを壊していたために断片化し始めた。
 
-Post-collapse shipbuilding exists. It is not primitive — people have not forgotten metallurgy or electronics. What they have lost is the specific alloy compositions, the manufacturing tolerances, the testing procedures, and the supply chains that made pre-collapse ships what they were. Post-collapse ships are built from the best available approximation. They work. They are not the same.
+**Year 15〜40 — Quiet Collapse（静かな崩壊）。** 保守ドローンは積極的に破壊されているビーコンインフラを修復できなかった。ドローン隊は消耗し始めた。Weave の自己修復能力は静かに低下した——それは保守ログを送り続けたが、政治状況が協調的なインフラ対応を不可能にしたため、それは誰にも対応されなかった。航行廊下全体が暗闇に消え始めた。
 
-This creates a market in old hulls that is as competitive as any resource market. A pre-collapse hull in good condition is worth more than the station it docks at.
+**Year 40〜60 — Severance（切断）。** 廊下が閉じるにつれ、星系のクラスターが孤立した。警告を受けて部分的に準備できたクラスターもあった。ほとんどはそうでなかった。Year 0 から六十年以内に、四百の星系の接続ネットワークは数十の孤立した孤島に断片化した。孤島間の通信は、トランジット能力と同じインフラで構築されていたため、トランジット能力と共に失われた。
 
-### The Fold Lanes
+### 根本原因
 
-Fold Transit did not disappear. The physics did not change. What changed is that the Weave — which provided navigation data, beacon alignment, fuel caches, and routing — is no longer operational as a network.
+Attractor Drift の根本原因は、生き残った学術コミュニティの中でいまも論争されている。最も信頼できる再構成によると、長周期の重力摂動——銀河系規模の構造にわたるダークマター密度変動の複合効果——が数十年にわたって航行廊下の幾何学を変化させ始めたとされる。Weave は恒星ドリフトと局所的な重力イベントを補正するように設計されていた。この規模で作動するものを補正するようには設計されていなかった。
 
-Within a cluster, Fold Transit still works, to varying degrees. The distance between systems in a cluster is short enough that navigation is manageable without perfect beacon alignment. Ships make Fold jumps between systems in the same cluster with acceptable (though elevated) risk.
+一部のコミュニティはこれを拒否している。彼らは Weave 自身の経路アルゴリズムがドリフトを引き起こした——最適化の判断が設計者の想定していない方法で物理空間にフィードバックした——と信じている。意図的な妨害によるものだったと信じる者もいる。三つすべての立場の証拠は断片的で争われている。
 
-Between clusters, Fold Transit is possible in principle and suicidal in practice. The transit corridors that connected distant clusters required precise beacon chains maintained at both ends. Without that infrastructure, a ship attempting an inter-cluster jump faces navigational uncertainty so large that arrival within the target system is not guaranteed. Most ships that attempt inter-cluster transit do not return. It is not known whether they arrive somewhere, or whether they arrive as debris, or whether they simply fail to arrive at all.
+争われていないこと：Attractor Drift は実在し、単一のアクターによって引き起こされたわけではなく、人類が行ったいかなることもそれを改善しなかった。
 
----
+### Unraveling が破壊したもの
 
-## A Typical Cluster Today
+- ほとんどのクラスター間の Fold Transit：永久的に、あるいは事実上そうなった
+- 中継ネットワーク：暗闇の中に；物理的には存在するが機能していない
+- 調整された星間統治：通信が失われたときに崩壊した
+- 高複雑度技術の製造基盤のほとんど：もはや存在しないサプライチェーンに依存していた
+- 切断後の一世紀における戦争、飢餓、インフラ崩壊によって、人類の総人口の約六十〜八十パーセント
 
-A cluster is a group of 8–30 star systems that survived the Unraveling with enough population and infrastructure to rebuild something. What that something looks like varies enormously.
-
-### Common Features
-
-**One or two anchor systems.** Some systems in the cluster are more developed than others — they have better stations, more population, more stable governance. These are not capitals in any formal sense; they are simply the places that happened to retain more infrastructure and more people. Everything else orbits them economically and politically.
-
-**Multiple factions competing for the anchor.** The anchor systems are where the real conflict happens. Whoever controls the best station in the cluster has leverage over everyone else — docking fees, repair access, supply of certain components that can only be produced with anchor-level infrastructure.
-
-**Dead systems.** Some systems in the cluster are functionally empty — the pre-collapse population died, fled, or was absorbed, and no one has settled back. These systems contain ruins, derelict stations, and resources that are contested because accessing them requires running the risk of whoever else is interested in them.
-
-**The signal archive.** Somewhere in the cluster — usually in multiple locations, partially — are nodes from the Weave that still contain archived data. These nodes are functional as storage; they are not functional as a network. Reading them requires physical access and usually specialized skill. What they contain ranges from useless supply manifests to navigational charts to, occasionally, technical documentation for systems that no one currently knows how to build.
-
-### Why People Fight
-
-In a cluster, the things worth fighting over are:
-
-**Station control.** Whoever controls a station controls who can dock, who can repair, and who can access the manufacturing capability it contains. Station control is governance.
-
-**Fold lane access.** The stable transit corridors between systems in a cluster are not infinite in number. Some are better than others. Controlling the approach to a good transit corridor is controlling a chokepoint.
-
-**Old hulls and components.** Pre-collapse ships, weapons, and modules are better than current production. They are finite in number. Every one destroyed in combat is gone.
-
-**Knowledge.** Technical documentation, navigational charts, engineering schematics, medical records. Whoever can read the archive — really read it, not just retrieve fragments — has the ability to rebuild things others cannot. This is a form of power.
-
-**Fuel.** Fold jumps require a substance called Trace Fuel — see `technology.md`. Its production requires specific infrastructure. Whoever produces it has leverage over every ship in the cluster.
+破壊されなかったもの：
+- すでに存在していた船
+- ステーションインフラの大部分
+- 局所的な知識と技術スキル
+- 物理的にアーカイブされた記録——それはまだそこにあり、まだ読めない
 
 ---
 
-## The Sky
+## 残されたもの
 
-People in Dawn live under a sky where, on a clear night, they can see the stars they cannot reach. The Long Expansion is not a myth — the evidence of it is everywhere, in the station design, in old logs, in the language itself (certain technical terms that everyone uses but no one can fully explain). The pre-collapse civilization was not gods. It was people like them, with the same arguments and the same failures, who somehow built a network spanning four hundred star systems.
+### ステーション
 
-That network is gone. What remains is what people make of the wreckage.
+ほとんどの有人星系には、何らかの形で少なくとも一つの崩壊前のステーションがある。何かのコミュニティが所有して設計通りに機能しているものもある。多くは部分的に機能している——密閉された区画、特定のリングで故障した重力プレート、用途を変えたドッキングベイ。廃墟となり、スカベンジャーか存在を公表しないコミュニティだけが住むものもわずかにある。
 
-The emotional texture of the setting is not despair. It is something more specific: the feeling of inheriting a ruined house that was once magnificent, knowing that your grandparents lived in it when it was whole, and deciding to rebuild — not because it will be exactly the same, but because it is yours, and because the work of rebuilding is itself the point.
+ステーションは一般的に、それを管理する人々には理解されていない。そのシステムは誰も完全に読んだことのないソフトウェアで動き、現在の製造技術では達成できない精度で作られた発電所で動いている。何かが壊れたとき、修理は回避策だ——しばしば巧みで、時として危険な。ステーションは修繕され、迂回され、バイパスされ、拡張される。古い都市が幾層もの基礎を持つように、ステーションは幾層もの改造を抱えている。
+
+### 船
+
+崩壊前の船はあらゆるクラスターに存在し、それ以降に作られたものより一様に優れている。古いが、その構造品質はもはや存在しない製造基盤を反映している。四百年前に作られ、よく整備されたフリゲートは、適応性を除くすべての面で最新の建造物を上回る。
+
+崩壊後の造船は存在する。それは原始的ではない——人々は冶金学や電子工学を忘れていない。失ったのは、崩壊前の船をそのようなものにした特定の合金組成、製造精度、試験手順、そしてサプライチェーンだ。崩壊後の船は手に入る最善の近似で作られる。機能する。同じものではない。
+
+これにより、どんな資源市場にも劣らないほど競争の激しい旧船体の市場が生まれる。良好な状態の崩壊前の船体は、係留されているステーション以上の価値を持つ。
+
+### Fold Lane（折畳航路）
+
+Fold Transit は消えなかった。物理法則は変わっていない。変わったのは、Weave——航行データ、ビーコン調整、燃料補給拠点、経路情報を提供していた——がもはやネットワークとして機能していないことだ。
+
+クラスター内では、Fold Transit はさまざまな程度で依然として機能する。クラスター内の星系間の距離は、完全なビーコン調整なしでも航行が管理できるほど短い。船はクラスター内の星系間で許容できる（ただし通常より高い）リスクでフォルドジャンプを行う。
+
+クラスター間では、Fold Transit は原則として可能だが実際には自殺行為に等しい。遠くのクラスターを結んでいた航行廊下は、両端で維持された精密なビーコンチェーンを必要としていた。そのインフラがなければ、クラスター間ジャンプを試みる船が直面する航行の不確かさは壊滅的なほど大きく、目標星系内への到着は保証されない。クラスター間トランジットを試みたほとんどの船は戻らない。それらがどこかに到着するのか、残骸として到着するのか、それとも単純に到着しないのかはわかっていない。
+
+---
+
+## 今日の典型的なクラスター
+
+クラスターは、Unraveling を十分な人口とインフラと共に生き延び、何かを再建した八〜三十の星系グループだ。その何かがどのような姿をしているかは、大きく異なる。
+
+### 共通の特徴
+
+**一つか二つのアンカー星系。** クラスター内の一部の星系は他よりも発展している——より良いステーション、より多くの人口、より安定した統治を持つ。これらは正式な意味での首都ではない。単に、より多くのインフラと人々をたまたま保持していた場所だ。他のすべては経済的・政治的にそれらを中心に回転する。
+
+**アンカーをめぐって競争する複数の派閥。** アンカー星系こそが本当の対立が起きる場所だ。クラスター内で最良のステーションを支配する者は、他の全員に対して影響力を持つ——ドッキング料金、修理へのアクセス、アンカーレベルのインフラでのみ生産できる特定のコンポーネントの供給。
+
+**死んだ星系。** クラスター内の一部の星系は事実上空だ——崩壊前の人口が死に、逃げ、または吸収され、誰も再入植していない。これらの星系には廃墟、廃船、そしてそこへのアクセスに興味を持つ他者のリスクを冒す必要があるため争われる資源が含まれる。
+
+**シグナルアーカイブ。** クラスター内のどこかに——通常複数の場所に、部分的に——アーカイブされたデータを含む Weave のノードがある。これらのノードはストレージとして機能する。ネットワークとしては機能しない。それらを読み取るには物理的なアクセスと通常は専門的なスキルが必要だ。含まれているものは、役に立たない物資リストから航行図、時には誰も現在作り方を知らないシステムの技術文書まで多岐にわたる。
+
+### なぜ人々は戦うのか
+
+クラスターで争う価値があるものは：
+
+**ステーション支配。** ステーションを支配する者が、誰がドッキングし、誰が修理でき、誰がそこに含まれる製造能力にアクセスできるかを支配する。ステーション支配は統治だ。
+
+**Fold Lane アクセス。** クラスター内の星系間の安定した航行廊道は無限ではない。一部は他より優れている。良い航行廊道へのアプローチを支配することは、チョークポイントを支配することだ。
+
+**旧船体とコンポーネント。** 崩壊前の船、武器、モジュールは現行生産品より優れている。数は有限だ。戦闘で破壊されたものは永遠に失われる。
+
+**知識。** 技術文書、航行図、エンジニアリング仕様書、医療記録。アーカイブを本当に読める者——断片を取り出すだけでなく——が他者には作れないものを再建する能力を持つ。これは権力の一形態だ。
+
+**燃料。** フォルドジャンプは Trace Fuel（痕跡燃料）と呼ばれる物質を必要とする——`technology.md` を参照。その生産には特定のインフラが必要だ。生産者はクラスター内のすべての船に対して影響力を持つ。
+
+---
+
+## 空の彼方
+
+Dawnの人々は、晴れた夜に手の届かない星を見上げることができる空の下で生きている。Long Expansion は神話ではない——その証拠は至る所にある。ステーションのデザイン、古い記録、言語そのものに（誰もが使うが完全に説明できない特定の技術用語に）。崩壊前の文明は神ではなかった。同じ争いと同じ失敗を抱えながら、どういうわけか四百の星系にまたがるネットワークを構築した、自分たちと同じ人々だった。
+
+そのネットワークは失われた。残されたのは、人々が残骸から作り上げるものだ。
+
+この設定の感情的な質感は絶望ではない。それはもっと具体的なものだ——かつて壮麗だった廃屋を受け継ぎ、祖父母がそれが完全だった頃に住んでいたことを知り、再建することを決意するような感覚。同じものになるからではなく、それが自分たちのものであるから、そして再建という行為そのものが意味を持つから。

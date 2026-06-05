@@ -1,177 +1,177 @@
-# Timeline
+# 年表
 
-## Notes on Dating
+## 年代表記についての注記
 
-Pre-collapse civilization used a coordinated dating system derived from a reference epoch at one of the core systems. That system is not definitively identified in surviving records. Post-collapse communities have developed their own dating systems — some counting from the Severance, some from the founding of their faction, some from local events.
+崩壊前の文明は、中心星系群の一つの参照紀元から導かれた統一的な年代表記システムを使用していた。そのシステムは生き残った記録の中で確定的に特定されていない。崩壊後のコミュニティは独自の年代表記システムを開発した——Severance から数えるもの、派閥の創設から数えるもの、地元のイベントから数えるものなど。
 
-In this document, years are given relative to the Severance (Year 0 of the Severance Calendar, or **YS 0**). Negative years are Before Severance (BS). All dates are approximate and reconstructed; primary sources for this period are fragmentary.
-
----
-
-## Pre-Collapse Era (Before Severance)
-
-### ~1,200 BS — First Fold Transit
-
-The first successful Fold Transit is recorded in archive fragments as a journey of less than one light-year, taking approximately four minutes of elapsed time on board the vessel. The vessel was automated. The technology required forty years of development from the theoretical paper that proposed depth variance as a navigable phenomenon.
-
-The names of the researchers are preserved in several fragments. They are not honored in current-day civilization — their connection to the present is too attenuated, the record too fragmented — but the Adherents maintain a small tradition of reading their names aloud on certain anniversaries.
-
-**Consequences:** Everything that follows is a consequence of this moment. Without Fold Transit, there is no Long Expansion, no Weave, no Unraveling. The transit corridors the old civilization opened are still there. The decisions about how to use them are still being made.
-
-### ~1,200–700 BS — The Long Expansion
-
-The systematic charting and colonization of depth variance corridors across a growing network of star systems. Not a smooth process: early colony ships failed at rates that would be considered catastrophic today. Corridor mapping was dangerous work. Several entire fleets were lost to navigational failures in the early centuries.
-
-The expansion was driven by multiple overlapping forces simultaneously — resource pressure in the core systems, political and religious conflicts that made emigration preferable to accommodation, economic models that required constant frontier expansion to function. Different waves of colonization reflected different sponsoring factions, and the cultural diversity of the resulting cluster is partly a reflection of which communities sent colony ships where.
-
-The Weave began as a practical necessity — navigational beacons to mark safe transit approaches — and grew organically into the self-maintaining infrastructure network that defined the late Long Expansion. By ~800 BS, the Weave was more complex than any individual organization fully understood.
-
-### ~700–100 BS — Late Expansion and Tension
-
-The Long Expansion slowed, not because available territory was exhausted, but because the frontier was farther and the cost of maintaining corridor routes was rising. The economic model that had driven the expansion began to strain under its own size.
-
-Several significant conflicts occurred in this period. Core systems attempted to restructure trade agreements with outer systems in ways the outer systems resisted. Two wars of separation produced independent clusters that were then reintegrated. The Signal Corps, which had become politically influential by virtue of its access to the Weave, was formally stripped of governance authority in several jurisdictions while retaining operational responsibility for the infrastructure — a compromise that satisfied no one.
-
-The Attractor Drift anomaly was first detected by a Signal Corps observatory at approximately **150 BS**. Internal records (recovered by the Adherents) show that it was flagged, discussed, and ultimately tabled pending further study. The further study was never formally begun.
-
-### ~100–0 BS — The Approach to Severance
-
-The period between first detection of the Attractor Drift and the Severance proper. Records are detailed on the technical progression and thin on the political.
-
-What is clear from the archive is that multiple parallel crises were occurring simultaneously:
-- Corridor degradation was measurable and accelerating
-- The routing conflicts that would destroy the Weave were already beginning
-- Several outer-system clusters were experiencing infrastructure deterioration independent of the Drift
-- The Signal Corps was issuing increasingly urgent warnings to governance bodies that were occupied with the economic and political consequences of the first two
-
-There is no record of a decision to do nothing. There are records of many decisions to do something, none of which was sufficient, and which were in several cases actively counterproductive. The cascade failure of the Weave was not the result of one wrong decision. It was the result of the system having no mechanism to act at the speed and coordination the crisis required.
+このドキュメントでは、年は Severance を基点とする（Severance Calendar の Year 0、略して **YS 0**）。負の年数は Before Severance（BS、切断前）を意味する。すべての日付は近似値であり再構成されたもの。この時代の一次資料は断片的だ。
 
 ---
 
-## The Unraveling (YS 0 — YS 60)
+## 崩壊前の時代（Severance 以前）
 
-### YS 0 — First Recorded Anomaly
+### ~1,200 BS — 最初の Fold Transit
 
-The Attractor Drift crosses a threshold where its effects on transit accuracy are operationally significant. Corridor owners begin filing variance reports. The Weave begins rerouting traffic. This is the conventional date for the beginning of the Severance Calendar — it is the point of no return, in retrospect, though this was not recognized at the time.
+最初の成功した Fold Transit は、アーカイブの断片に一光年未満の旅として記録されており、船内での経過時間はおよそ四分だった。船は無人だった。この技術は、深度差異を航行可能な現象として提唱した理論論文から四十年の開発を必要とした。
 
-### YS 3–15 — The Routing War
+研究者の名前はいくつかの断片に保存されている。現代の文明では称えられていない——彼らと現在の繋がりはあまりにも希薄で、記録はあまりにも断片的だ——しかし Adherents は特定の記念日に彼らの名前を声に出して読む小さな伝統を守っている。
 
-Described in detail in `universe.md`. The deliberate interference with beacon infrastructure by competing corridor operators is now regarded as the proximate cause of accelerated Weave degradation — the Drift made corridors unreliable; the Routing War made the maintenance response impossible.
+**帰結：** 後に続くすべてがこの瞬間の帰結だ。Fold Transit なしには、Long Expansion も、Weave も、Unraveling もない。旧文明が開いた航行廊道はまだそこにある。それをどう使うかについての決断はまだ下され続けている。
 
-**Year 8:** First complete loss of a transit corridor. The corridor collapses, not in the sense that it ceases to exist (depth variance geometry is not destroyed by human action) but in the sense that the beacon infrastructure required for safe transit is gone, and the accuracy without it is insufficient for commercial use. The systems on either side of the corridor are now connected only through alternate routes, of which there are few.
+### ~1,200〜700 BS — Long Expansion（大拡張）
 
-**Year 12:** A Signal Corps emergency council attempts to negotiate a temporary ceasefire in the Routing War, with the Weave's maintenance drones reassigned to priority corridors. The ceasefire holds for sixteen months. It fails when one of the major corridor operators — whose financial position had deteriorated significantly — resumes attacks.
+成長するネットワークをまたいで深度差異廊道を体系的にマッピングし、植民地化した時代。スムーズなプロセスではなかった。初期のコロニー船は今日では壊滅的とみなされるレートで失敗した。廊道のマッピングは危険な作業だった。初期の数世紀で複数の艦隊が航行上の失敗で失われた。
 
-### YS 15–40 — The Quiet Collapse
+拡張は複数の重なり合う力によって同時に推進された——中心星系における資源の圧力、移民を適応よりも好ましくした政治的・宗教的紛争、機能するために継続的な辺境拡大を必要とした経済モデル。植民地化の異なる波は異なるスポンサー派閥を反映しており、結果として生まれたクラスターの文化的多様性は、どのコミュニティがどこにコロニー船を送ったかを部分的に反映している。
 
-The rate of corridor loss accelerates. By Year 20, approximately 15% of Long Expansion transit routes are no longer reliably navigable. By Year 30, approximately 40%.
+Weave は実践的必要性として始まった——安全なトランジットアプローチをマークする航行ビーコン——そして Long Expansion 後期を定義した自己維持型インフラネットワークへと有機的に成長した。~800 BS までに、Weave はどの個々の組織も完全には理解できないほど複雑になっていた。
 
-This does not look, from inside the cluster, like the end of civilization. It looks like a supply chain crisis, an economic contraction, a political emergency. It looks like something that is going to be resolved. The people living through it have no way of knowing that the cascade is not recoverable.
+### ~700〜100 BS — 後期拡張と緊張
 
-**Year 22:** First significant food shortage in an outer-system cluster cut off from resupply. The response is inadequate. Mortality is significant.
+Long Expansion は、利用可能な領土が尽きたためではなく、辺境がより遠くなり、廊道ルートの維持コストが上昇したために減速した。拡張を推進してきた経済モデルは自身の規模の下でひずみ始めた。
 
-**Year 31:** The Signal Corps formally declares that the Weave cannot be restored to full functionality. This is the first official acknowledgment that the collapse is structural rather than acute. The declaration is not widely believed. The Signal Corps is accused of exaggerating to increase its political leverage.
+この時期にいくつかの重大な紛争が発生した。中心星系は外縁星系が抵抗した方法で貿易協定を再構築しようとした。二つの分離戦争が独立クラスターを生み出し、その後再統合された。Weave へのアクセスによって政治的に影響力を持っていた Signal Corps は、インフラへの運用責任を保ちながらいくつかの法域で統治権限を正式に剥奪された——誰も満足させない妥協。
 
-**Year 38:** The last fully-functional transit corridor connecting the future location of the primary cluster is closed. The systems that will become the cluster are now connected only to each other.
+Attractor Drift の異常は、Signal Corps の天文台によって約 **150 BS** に最初に検出された。内部記録（Adherents によって回収された）によると、それはフラグを立てられ、議論され、最終的にさらなる研究保留として棚上げされた。さらなる研究は正式には始まらなかった。
 
-### YS 40–60 — The Severance
+### ~100〜0 BS — Severance への接近
 
-The remaining transit routes between clusters close in a sequence that takes approximately twenty years. Some closures are sudden — the beacon infrastructure fails catastrophically. Others are slow — accuracy degrades until the risk of transit exceeds any plausible benefit.
+Attractor Drift の最初の検出から Severance 本体までの時期。記録は技術的進展については詳細で、政治については薄い。
 
-**Year 43:** Last confirmed transit between what will become the primary cluster and the nearest neighboring cluster. No subsequent transit has been confirmed.
+アーカイブから明らかなのは、複数の並行した危機が同時に進行していたことだ：
+- 廊道の劣化は測定可能で、加速していた
+- Weave を破壊することになる経路紛争はすでに始まっていた
+- いくつかの外縁系クラスターが Drift とは独立してインフラの劣化を経験していた
+- Signal Corps は、最初の二つの経済的・政治的帰結に占有されていた統治機関にますます緊急の警告を発していた
 
-**Year 55:** Last functioning inter-cluster relay beacon in the cluster's vicinity goes dark. Communication with other clusters — already reduced to fragments and time-delayed — ends completely.
-
-**Year 60:** By convention, the Severance is considered complete. Intra-cluster transit remains functional, degraded. Inter-cluster transit is not attempted by any ship in the historical record for the next three hundred years.
-
----
-
-## The Dark Age (YS 60 — YS 280)
-
-### Overview
-
-The two centuries following the Severance are the most poorly documented period in the cluster's history. The archive nodes that survive from this period contain far less data than either earlier or later periods — not because less happened, but because the systems for recording and transmitting information were degraded or destroyed.
-
-What is reconstructed from Adherent analysis and oral traditions:
-
-**Population collapse.** The cluster's population fell dramatically in the first century after Severance. Best estimates suggest 60–80% mortality over approximately three generations, primarily from three causes: supply chain disruption leading to food insecurity, conflict over the resources that remained, and the loss of medical and pharmaceutical supply chains. People died from infections that the pre-collapse civilization had eliminated. They died from injuries that pre-collapse medicine could have treated.
-
-**Infrastructure decay.** Station systems that required manufactured components began failing. Not catastrophically — most stations remained habitable in some form — but incrementally. Sections were sealed off. Systems were bypassed. The stations became smaller, in effective terms, than they had been, even though the physical structure remained.
-
-**The contraction of knowledge.** Formal knowledge transmission systems — schools, universities, technical training programs — collapsed with the institutions that maintained them. What survived was practical knowledge: how to do the things that were immediately necessary to survive. The deeper knowledge — why things worked, how to build new ones — was preserved only where the Signal Corps (contracting rapidly, losing members, scrambling to maintain its archives) could hold it.
-
-**The formation of bands.** The social unit that emerged from the dark age was small: 20–200 people who relied on each other for survival. These bands are the ancestors of the Vorath Collective. They were not the only social form — the proto-Compact organized around surviving station infrastructure, and proto-Adherent communities formed wherever Signal Corps members concentrated — but the band became the dominant post-collapse social structure because it was the right size for the problems people faced.
-
-### YS 120 — The First Dark Muster
-
-By tradition, the Vorath Collective traces its formal origin to what they call the First Dark Muster: a gathering of seventeen bands in a particular asteroid belt who coordinated to defend a Trace refinery from a larger force that was attempting to take it. They held the refinery. More importantly, the coordination worked — and they recognized that coordination across bands was possible and valuable.
-
-The First Dark Muster is not verifiable from archive data. Its date is traditional. What is verifiable is that band coordination structures were present in oral records by approximately this period, and that the Trace refinery in question was active throughout the dark age.
-
-### YS 200 — The Signal Compact
-
-The proto-Compact and proto-Adherent communities formalized a working relationship around this period: the station administrators who had maintained manufacturing capability would provide material support to the Signal Corps archivists who had maintained knowledge continuity. The exchange was practical before it was political.
-
-This relationship is the structural origin of both factions. They emerged from it with different emphases — the Compact institutionalized; the Adherents stayed independent — but the relationship also created the first sustained knowledge-transmission network in the post-Severance period. It is not romanticized in either faction's history, but it was significant.
+何もしないという決断の記録はない。何かをするという多くの決断の記録はあるが、そのいずれも十分ではなく、いくつかの場合には積極的に逆効果だった。Weave の連鎖的崩壊は一つの誤った決断の結果ではなかった。それは、システムが危機が必要とした速度と調整で行動するメカニズムを持っていなかった結果だった。
 
 ---
 
-## Re-Emergence (YS 280 — YS 500)
+## Unraveling（崩壊）（YS 0 — YS 60）
 
-### Overview
+### YS 0 — 最初の記録された異常
 
-The period of re-emergence is when the cluster began, slowly, to reconstitute something recognizable as civilization. Population stabilized and began to grow. Intra-cluster Fold Transit, which had been restricted to necessity throughout the dark age, became more routine as Trace production increased and navigation charts were reconstructed.
+Attractor Drift が、その効果がトランジット精度に運用上重要な影響を与える閾値を超える。廊道の所有者が変動報告の提出を始める。Weave がトラフィックの迂回を始める。これが Severance Calendar の始まりの慣例日だ——遡及的に見れば、当時は認識されていなかったが、これが引き返せない地点だ。
 
-**The critical development of this period is the resumption of formal knowledge transmission.** The Adherents began operating teaching programs. Compact-trained administrators began formalizing governance structures. Technical guilds appeared — at first informal, eventually institutionalized.
+### YS 3〜15 — Routing War（航路戦争）
 
-This period also sees the first inter-system conflicts that are political rather than purely survivalist: wars over station control, over Trace refinery access, over transit corridor approaches. The violence of the dark age had been chaotic and desperate. The violence of re-emergence was organized and strategic, which made it in some ways more dangerous.
+`universe.md` で詳述されている。競合する廊道運営者によるビーコンインフラへの意図的な干渉は、現在では Weave 劣化の加速の近因とみなされている——Drift が廊道を信頼性の低いものにした。Routing War が保守対応を不可能にした。
 
-### YS 310 — The First Induction Charter
+**Year 8：** 航行廊道の最初の完全な喪失。廊道は崩壊する——それが存在しなくなるという意味ではない（深度差異幾何学は人間の行動によって破壊されない）が、安全なトランジットに必要なビーコンインフラが失われ、それなしの精度は商業利用には不十分だ。廊道のどちら側の星系も、わずかな代替ルートを通じてのみ接続される。
 
-The earliest surviving written governance document in the cluster. Drafted by the Compact and signed by several bands that would later become core Vorath members, it established protocols for transit corridor access, Trace pricing, and dispute resolution. It is not a constitution — it is a commercial agreement — but it established the precedent that governance was possible across factional lines.
+**Year 12：** Signal Corps の緊急評議会が Routing War の一時停戦交渉を試み、Weave の保守ドローンを優先廊道に再配置する。停戦は十六ヶ月間維持された。財務状況が著しく悪化していた主要廊道運営者の一つが攻撃を再開したときに失敗した。
 
-The Induction Charter has been revised forty-seven times in the two hundred years since its drafting. It remains nominally active. Several of its original provisions have been amended to the point of reversal. The Compact cites it as the foundation of cluster governance; the Vorath cite it as evidence that agreements must be renegotiated when conditions change.
+### YS 15〜40 — Quiet Collapse（静かな崩壊）
 
-### YS 380 — The Second Archive Crisis
+廊道喪失の速度が加速する。Year 20 までに、Long Expansion のトランジットルートの約十五パーセントがもはや安全に航行できなくなっている。Year 30 までに、約四十パーセント。
 
-An Adherent recovery team accessing a major Weave node in a dead system discovered a sector of the archive containing technical documentation for the gradient reactor (see `technology.md`). They also discovered, in the same sector, documentation for a weapon system that, if the archive's specifications were accurate, could sterilize a planet.
+これはクラスターの内側からは文明の終わりのように見えない。サプライチェーンの危機、経済収縮、政治的緊急事態のように見える。解決されるつもりのものに見える。それを生きている人々には、連鎖が回復不可能だとわかる方法がなかった。
 
-The internal crisis this produced in the Adherent community was significant. Their vow was to preserve what was known. What they had found was knowledge they were not sure should be preserved in accessible form. The debate fractured the organization for approximately a decade.
+**Year 22：** 補給から遮断された外縁系クラスターで最初の重大な食料不足。対応は不十分だった。死亡率は重大だった。
 
-The resolution was the founding of the Deep Vault — a restricted archive within the Adherents that holds recovered documentation deemed too dangerous for open access. The existence of the Deep Vault is not a secret. Its contents are not shared. The principle that some knowledge requires restricted access is deeply controversial among the Adherents and has never been fully resolved.
+**Year 31：** Signal Corps が Weave を完全な機能に回復できないと正式に宣言する。これが崩壊が急性ではなく構造的だという最初の公式認識だ。宣言は広く信じられなかった。Signal Corps は政治的影響力を高めるために誇張していると非難された。
 
-### YS 450 — The Three-Faction Muster
+**Year 38：** 将来の主要クラスターの場所を接続する最後の完全機能する航行廊道が閉じる。クラスターになる星系はお互いにのみ接続されるようになる。
 
-The largest single political event in cluster history after the Severance. The Compact, the Vorath Collective, and the Adherent Remnant met — their leaders and representatives, over a period of three months — and produced the Cluster Framework: a mutual recognition agreement that acknowledged the legitimacy of each faction's core interests, established protocols for conflict resolution, and formalized the economic relationships that had grown up informally over the preceding century.
+### YS 40〜60 — The Severance（切断）
 
-The Cluster Framework did not end conflict. It has not been scrupulously honored by any party. But it established the political vocabulary that all three factions still use when they negotiate: it created the concept of *standing*, the formal acknowledgment that a faction's interests deserve consideration even when you disagree with them.
+クラスター間の残りのトランジットルートが約二十年かけて順次閉じる。一部の閉鎖は突然だ——ビーコンインフラが壊滅的に失敗する。他は遅い——精度が、トランジットのリスクがどんな考えられる利益も超えるまで劣化する。
 
----
+**Year 43：** 将来の主要クラスターと最寄りの隣接クラスターとの間で最後に確認されたトランジット。その後のトランジットは確認されていない。
 
-## Present Day (YS ~520)
+**Year 55：** クラスターの近辺で最後に機能していたクラスター間中継ビーコンが暗くなる。他のクラスターとの通信——すでに断片的で時間遅れのあるものに減っていた——が完全に終わる。
 
-Players enter the cluster at approximately Year 520 of the Severance Calendar. The situation:
-
-**Stability without resolution.** The three-faction order is functioning, in the sense that full-scale wars are not currently occurring. It is not stable in the sense that everyone is satisfied. The Compact is pushing to expand its administrative authority. The Vorath are resisting. The Adherents are nominally neutral and are negotiating separately with both.
-
-**The archive question.** Several major Weave nodes have been identified but not accessed. Who accesses them — and who owns what is found — is one of the live political disputes of the present day. All three factions have positioned assets near the most significant identified nodes.
-
-**The first new Battleship in two centuries.** The Compact has announced the completion of a post-collapse Battleship, the first in approximately two hundred years. The announcement alone has changed the strategic calculation of every faction in the cluster. It is not clear whether the ship is as capable as advertised.
-
-**The signal.** Approximately three years before the current day, a Vorath deep-range scout detected an anomalous signal at the edge of the cluster. Not a functioning relay — those have been dark for four centuries — but something that repeated with a pattern inconsistent with natural phenomena. The signal has not been decoded. Its origin has not been confirmed. All three factions are aware of it and none of them has publicly acknowledged it.
+**Year 60：** 慣例により、Severance は完了とみなされる。クラスター内トランジットは機能するが劣化している。クラスター間トランジットはその後三百年間の歴史的記録においていかなる船によっても試みられない。
 
 ---
 
-## Possible Futures (Open Questions)
+## 暗黒時代（YS 60 — YS 280）
 
-These are questions the lore does not answer. They are the space where player action and faction decision-making produce outcomes that are not predetermined.
+### 概観
 
-**Can inter-cluster transit be restored?** The depth variance corridors still exist. The Weave does not. Could a sufficiently advanced faction reconstruct the beacon infrastructure for even a single inter-cluster corridor? What would the political consequences of that be — would it open a connection to another cluster, or to a cluster that no longer has a living population?
+Severance 後の二世紀は、クラスターの歴史で最も記録が乏しい時代だ。この時代の生き残ったアーカイブノードは、それ以前またはそれ以降の時代よりもはるかに少ないデータを含んでいる——少ないことが起きたからではなく、情報を記録・伝達するシステムが劣化・破壊されたからだ。
 
-**What is the gradient reactor?** The Adherents have a recovered example. They do not fully understand it. If they do understand it — if they can replicate it — what does that do to the strategic balance? A faction with unlimited energy output can sustain shields, weapons, and drives at levels others cannot match.
+Adherent の分析と口承伝統から再構成されたもの：
 
-**What does the signal mean?** A repeating anomalous signal at the cluster's edge. It has been there for at least three years. Someone or something is generating it. The Vorath scout who found it has not found it again. A decision about whether to investigate, and at what cost, and who should control any information recovered, is a live political question.
+**人口の崩壊。** クラスターの人口は Severance 後の最初の一世紀で劇的に減少した。最善の推定では、主に三つの原因から約三世代にわたって六十〜八十パーセントの死亡率があった——食糧不安をもたらしたサプライチェーンの混乱、残った資源をめぐる紛争、そして医療・医薬品サプライチェーンの喪失。崩壊前の文明が排除した感染症で死者が出た。崩壊前の医療が治療できたはずの負傷で死者が出た。
 
-**What is in the Deep Vault?** The Adherents hold documentation they have not shared. Some of it, presumably, is dangerous. Some of it may be the key to solving problems the cluster currently cannot solve — medical, technical, navigational. The existence of restricted knowledge creates pressure: someone, eventually, will ask for access. What they ask for, and why, will matter.
+**インフラの劣化。** 製造されたコンポーネントを必要とするステーションシステムが故障し始めた。壊滅的にではない——ほとんどのステーションは何らかの形で住める状態のままだった——しかし段階的に。区画が密閉された。システムが迂回された。ステーションは物理的構造は残っていても、あった状態より実質的に小さくなった。
 
-**Can post-collapse manufacturing close the gap?** With sufficient Adherent technical knowledge and Compact manufacturing infrastructure and Vorath operational testing, is it possible to produce ships and equipment that approach pre-collapse quality? If so, the strategic meaning of old hulls changes. If not, the old hulls become more valuable every year, and whoever controls them controls the future.
+**知識の縮小。** 正式な知識伝達システム——学校、大学、技術訓練プログラム——がそれらを維持していた制度と共に崩壊した。生き残ったのは実践的な知識だった。即座に生き延びるために必要なことをする方法。より深い知識——なぜ機能するか、新しいものをどう作るか——は、Signal Corps（急速に縮小し、メンバーを失い、アーカイブを維持しようと奮闘していた）が保持できた場所にのみ保存された。
+
+**バンドの形成。** 暗黒時代から生まれた社会単位は小さかった——互いに生存のために頼り合った二十〜二百人のグループ。これらのバンドが Vorath Collective の祖先だ。唯一の社会形態ではなかった——原型 Compact は生き残ったステーションインフラを中心に組織され、Signal Corps メンバーが集中した場所には原型 Adherent コミュニティが形成された——しかしバンドは、直面している問題に適したサイズだったため、崩壊後の支配的な社会構造となった。
+
+### YS 120 — 最初の Dark Muster（暗黒ムスター）
+
+伝統により、Vorath Collective はその正式な起源を彼らが First Dark Muster（最初の暗黒ムスター）と呼ぶものにたどる。特定の小惑星帯での十七のバンドの集まりで、Trace 精製所を占領しようとするより大きな部隊から防衛するために協力した。精製所を保持した。さらに重要なことに、調整が機能した——そしてバンドをまたいだ調整が可能であり価値があることを認識した。
+
+First Dark Muster はアーカイブデータからは検証できない。その日付は伝統的なものだ。検証できるのは、バンドの調整構造がこの時期までの口承記録に存在し、問題の Trace 精製所が暗黒時代を通じて活動していたことだ。
+
+### YS 200 — Signal Compact（シグナル協定）
+
+原型 Compact と原型 Adherent のコミュニティがこの時期に実務的な関係を正式化した。製造能力を維持したステーション管理者が、知識の継続性を維持した Signal Corps のアーキビストに物質的サポートを提供する。交換は政治的になる前に実践的だった。
+
+この関係が両派閥の構造的起源だ。彼らは異なる強調点を持ってそれから生まれた——The Compact は制度化し、Adherents は独立したまま——しかしその関係は Severance 後の時代で最初の持続的な知識伝達ネットワークも作り出した。どちらの派閥の歴史でも美化されていないが、重要だった。
+
+---
+
+## 再興期（YS 280 — YS 500）
+
+### 概観
+
+再興期は、クラスターが文明として認識できるものを、ゆっくりと再構成し始めた時代だ。人口が安定し、成長し始めた。暗黒時代を通じて必要性から制限されていたクラスター内 Fold Transit が、Trace 生産が増加し航行図が再構築されるにつれてより日常的になった。
+
+**この時期の重大な発展は、正式な知識伝達の再開だ。** Adherents が教育プログラムを開始した。Compact 訓練の管理者が統治構造を正式化し始めた。技術ギルドが現れた——最初は非公式に、最終的に制度化された。
+
+この時期はまた、純粋に生存主義的ではなく政治的な最初の星系間紛争を見た。ステーション支配、Trace 精製所アクセス、航行廊道アプローチをめぐる戦争。暗黒時代の暴力は混乱し絶望的だった。再興期の暴力は組織的で戦略的だった——それにより、ある意味でより危険だった。
+
+### YS 310 — 最初の Induction Charter（加入憲章）
+
+クラスターで現存する最古の成文統治文書。The Compact によって起草され、後に Vorath のコアメンバーとなるいくつかのバンドによって署名され、航行廊道アクセス、Trace 価格設定、紛争解決のためのプロトコルを確立した。それは憲法ではない——商業契約だ——しかし派閥の境界を越えた統治が可能だという先例を確立した。
+
+Induction Charter は起草から二百年間で四十七回改訂された。名目上まだ有効だ。元の条項のいくつかは取り消しの段階まで修正された。The Compact はそれをクラスター統治の基盤として引用する。Vorath は条件が変わったときに合意を再交渉しなければならないという証拠として引用する。
+
+### YS 380 — 第二のアーカイブ危機
+
+死んだ星系の主要な Weave ノードにアクセスしていた Adherent の回収チームが、gradient reactor（勾配リアクター）の技術文書を含むアーカイブのセクターを発見した（`technology.md` 参照）。同じセクターで、アーカイブの仕様が正確なら惑星を不毛にできる兵器システムの文書も発見した。
+
+これが Adherent コミュニティで生み出した内部危機は重大だった。彼らの誓いは知られていたものを保存することだった。見つけたのは、アクセス可能な形で保存すべきかどうか確信が持てない知識だった。議論は約十年間、組織を分断した。
+
+解決策が Deep Vault（深部保管庫）の創設だった——公開アクセスには危険すぎると判断された回収文書を保持する Adherents 内の制限アーカイブ。Deep Vault の存在は秘密ではない。その内容は共有されない。一部の知識が制限されたアクセスを必要とするという原則は Adherents の間で深く論争されており、完全には解決されていない。
+
+### YS 450 — Three-Faction Muster（三派閥ムスター）
+
+Severance 後のクラスター史上最大の単一政治的出来事。The Compact、Vorath Collective、Remnant Adherents が——彼らのリーダーと代表者が、三ヶ月の期間にわたって——出会い、Cluster Framework（クラスター枠組み）を生み出した。各派閥のコア利益の正統性を認め、紛争解決のプロトコルを確立し、前世紀にわたって非公式に成長した経済関係を正式化した相互承認合意。
+
+Cluster Framework は紛争を終わらせなかった。どの当事者も厳格に遵守してきたわけではない。しかし三派閥すべてが交渉するときに現在でも使う政治的語彙を確立した——*standing*（信頼性・正統性）の概念を作り出した。それは、ある派閥の利益が、あなたがそれに同意しない場合でも考慮に値することの正式な承認だ。
+
+---
+
+## 現代（YS ~520）
+
+プレイヤーは Severance Calendar の約 Year 520 にクラスターに入る。状況：
+
+**解決なき安定。** 三派閥の秩序は機能している——全面戦争が現在起きていないという意味で。誰もが満足しているという意味で安定しているわけではない。The Compact は行政権限の拡大を推し進めている。Vorath は抵抗している。Adherents は名目上中立で、両方と別々に交渉している。
+
+**アーカイブ問題。** いくつかの主要な Weave ノードが特定されているがアクセスされていない。誰がアクセスするか——そして何が見つかったかを誰が所有するか——が現代の生きた政治的論争の一つだ。三派閥すべてが最も重要と特定されたノードの近くに資産を配置している。
+
+**二世紀ぶりの新しいバトルシップ。** The Compact が崩壊後のバトルシップの完成を発表した。約二百年ぶりのものだ。その発表だけでクラスターのすべての派閥の戦略的計算を変えた。その船が宣伝通りの能力を持つかどうかは明らかでない。
+
+**シグナル。** 現在から約三年前、Vorath の長距離偵察艦がクラスターの端で異常なシグナルを検出した。機能する中継局ではない——それらは四世紀間暗闇の中にある——しかし自然現象とは一致しないパターンで繰り返す何か。シグナルは解読されていない。その起源は確認されていない。三派閥すべてが知っており、公式に認めていない。
+
+---
+
+## 可能な未来（未解決の問い）
+
+以下はロアが答えない問いだ。それらはプレイヤーの行動と派閥の意思決定が予め定められていない結果を生み出す空間だ。
+
+**クラスター間トランジットは回復できるか？** 深度差異廊道はまだ存在する。Weave は存在しない。十分に進んだ派閥が、たった一つのクラスター間廊道のためにさえビーコンインフラを再構築できるだろうか？その政治的帰結は何か——別のクラスターへの繋がりを開くのか、それとも生き残った人口のないクラスターへの繋がりを開くのか？
+
+**gradient reactor とは何か？** Adherents は回収例を持つ。完全には理解していない。理解できれば——複製できれば——戦略的バランスはどう変わるか？無制限のエネルギー出力を持つ派閥は、他者が対応できないレベルでシールド、兵器、ドライブを維持できる。
+
+**シグナルは何を意味するか？** クラスターの端での繰り返す異常シグナル。少なくとも三年間そこにある。誰かあるいは何かがそれを生成している。それを発見した Vorath の偵察艦は再び見つけていない。調査するかどうかの決断、そしてどのコストで、誰が回収された情報を管理するべきかは、生きた政治的問題だ。
+
+**Deep Vault には何があるか？** Adherents は共有していない文書を保持している。その一部は、おそらく危険だ。その一部はクラスターが現在解決できない問題——医療、技術、航行——の鍵かもしれない。制限された知識の存在は圧力を生み出す。誰かがいつかアクセスを求めるだろう。何を求めるか、なぜ求めるかが重要だ。
+
+**崩壊後の製造はギャップを埋められるか？** Adherents の十分な技術知識と The Compact の製造インフラと Vorath の運用テストがあれば、崩壊前の品質に近づく船と機器を生産することは可能か？もしそうなら、旧船体の戦略的意味が変わる。そうでなければ、旧船体は年々より価値を持ち、それらを支配する者が未来を支配する。

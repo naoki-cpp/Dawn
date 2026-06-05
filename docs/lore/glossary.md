@@ -1,185 +1,185 @@
-# Glossary
+# 用語集
 
-Terms are listed alphabetically. Each entry includes: the in-universe name, a brief definition, what human need the term reflects, and where relevant, what the five-question test reveals about it.
-
----
-
-## Attractor Drift
-
-**Definition:** The large-scale gravitational perturbation that caused the Fold Transit corridors to degrade, initiating the Unraveling. Named after the "attractor" class of geometric anomalies in early depth variance theory. The mechanism involves dark matter density fluctuations operating at galactic-arm scale.
-
-**Why this term exists:** People needed a name for the thing that destroyed their civilization that was not a name for something a person did. "Attractor Drift" is a technical term — it implies a natural process, not a war crime. This is both accurate and politically convenient: it allows all parties to attribute the collapse to physics rather than to each other.
-
-The term is contested. Some communities use "the Sabotage" instead, asserting that the Routing War (not the Drift itself) was the proximate cause. Others use "the Forgetting," focusing on the institutional failures. What term a community uses reveals something about their theory of culpability.
+用語はアルファベット順に並んでいる。各項目には：ユニバース内の名称、簡潔な定義、その用語が反映する人間的ニーズ、そして関連する場合には五つの問いのテストが何を明らかにするかが含まれる。
 
 ---
 
-## Band
+## Attractor Drift（引力偏位）
 
-**Definition:** The primary social and operational unit of the Vorath Collective: a voluntary association of 20–200 people who share resources, decisions, and mutual defense. Bands are named, usually for a founding member, a place, or an event meaningful to their history.
+**定義：** Fold Transit の廊道を劣化させ、Unraveling を引き起こした大規模な重力摂動。初期の深度差異理論における「attractor」クラスの幾何学的異常にちなんで命名された。そのメカニズムは銀河腕規模で作動するダークマター密度変動を含む。
 
-**Why this term exists:** "Band" is a deliberate contrast to "fleet" (too military), "company" (too commercial), "family" (too biological). The term connotes something chosen and functional — people who are together because they are useful to each other and have chosen to remain so. The Vorath use it with pride. Others sometimes use it dismissively, which the Vorath have noted.
+**この用語が存在する理由：** 人々は自分たちの文明を破壊したものに対して、人間が行ったことの名前ではない名称を必要とした。「Attractor Drift」は技術用語だ——自然のプロセスを意味し、戦争犯罪ではない。これは正確であると同時に政治的に都合が良い。すべての当事者が崩壊を互いに対してではなく物理学に帰することを可能にする。
 
----
-
-## Capacitor
-
-**Definition:** The energy storage and distribution system aboard a ship, which buffers reactor output and supplies active modules. Capacitor capacity and recharge rate determine how long a ship can sustain weapons fire, active shielding, and other power-intensive operations simultaneously.
-
-**Why this term exists:** A ship is not simply a vehicle; it is an energy budget. The Capacitor is the term for the constraint that forces operational decisions. "Run the shields or run the weapons" is a Capacitor decision. The term is pre-collapse; its origin is in the engineering documentation of the first Fold Drive vessels, where energy management during transit was the primary engineering problem.
+この用語は争われている。「the Sabotage（妨害行為）」を代わりに使うコミュニティがある。Routing War（Drift 自体ではなく）が近因だったと主張する。「the Forgetting（忘却）」を使う者は、制度的失敗に焦点を当てる。どのコミュニティがどの用語を使うかは、彼らの責任の理論について何かを明らかにする。
 
 ---
 
-## Cluster
+## Band（バンド）
 
-**Definition:** A group of star systems close enough in astronomical terms to be connected by Fold Transit without requiring the full Weave beacon infrastructure. In practice: the self-contained pocket of inhabited space that constitutes a player server's universe.
+**定義：** Vorath Collective の主要な社会的・運用的単位。リソース、決定、相互防衛を共有する二十〜二百人の自発的な集合体。バンドには名前があり、通常は創設メンバー、場所、または彼らの歴史に意味のある出来事にちなむ。
 
-**Why this term exists:** During the Long Expansion, "cluster" was an informal term for a regional grouping of systems within the larger network. After the Severance, it became the primary term for the universe — not by renaming a concept but by the concept expanding to fill all available meaning. A cluster is no longer a subset of a larger network. It is, for all practical purposes, the entire world.
-
-The loneliness of that semantic shift is intentional. When someone says "the cluster," they mean everything.
+**この用語が存在する理由：** 「バンド」は「fleet（艦隊）」（軍事的すぎる）、「company（会社）」（商業的すぎる）、「family（家族）」（生物学的すぎる）との意図的な対比だ。この用語は選ばれた機能的なもの——互いに有用で、そうあり続けることを選んだ人々——を意味する。Vorath はこれを誇りをもって使う。他者は時として軽蔑的に使うが、Vorath はそれに気づいている。
 
 ---
 
-## Cluster Framework
+## Capacitor（コンデンサー）
 
-**Definition:** The mutual recognition agreement signed by the three major factions at the Three-Faction Muster (approximately YS 450), establishing political vocabulary, dispute resolution protocols, and the concept of factional standing. The framework has been revised repeatedly; its original provisions are a matter of historical dispute.
+**定義：** 船のリアクター出力をバッファし、アクティブモジュールに供給する、船上のエネルギー貯蔵・分配システム。コンデンサーの容量と充電速度が、兵器射撃、アクティブシールド、その他の電力集約的な動作を同時にどれだけ長く維持できるかを決定する。
 
-**Why this term exists:** Factions needed a way to negotiate that acknowledged the legitimacy of parties they did not like. "Framework" rather than "treaty" or "constitution" — the word choice was deliberate, according to archive records of the Muster proceedings. A framework implies structure without finality. It is designed to be revised. The Compact sees this as appropriate flexibility; the Vorath see it as evidence that nothing is truly settled.
-
----
-
-## Deep Vault
-
-**Definition:** The restricted archive maintained by the Adherents, containing recovered technical documentation deemed too dangerous for open access. Its existence is acknowledged; its contents are not discussed publicly by the Adherents.
-
-**Why this term exists:** The term encodes two concepts simultaneously: "deep" (below normal access, reserved, requiring effort to reach) and "vault" (protected, sealed, a place where things are kept specifically because they should not circulate freely). The tension in the term — archivists who archive things so they cannot be found — reflects the genuine moral crisis that produced the vault in the first place.
+**この用語が存在する理由：** 船は単なる乗り物ではない。エネルギー予算だ。コンデンサーは運用上の決定を強いる制約に対する用語だ。「シールドを動かすか兵器を動かすか」はコンデンサーの決断だ。この用語は崩壊前のもので、最初の Fold Drive 船の工学文書が起源だ。そこではトランジット中のエネルギー管理が主要な工学上の問題だった。
 
 ---
 
-## Depth Variance
+## Cluster（クラスター）
 
-**Definition:** The property of spacetime that makes Fold Transit possible. Space is not metrically uniform; at certain points, the effective distance between locations can be locally compressed, allowing transit that is short in geometric terms even over astronomical distances.
+**定義：** 完全な Weave ビーコンインフラなしに Fold Transit で接続できるほど天文学的に近い星系群。実際には：プレイヤーサーバーの宇宙を構成する、自己完結した有人宇宙の孤島。
 
-**Why this term exists:** The pre-collapse civilization needed a term for the phenomenon that was neither magical nor trivially mechanical. "Depth variance" describes what is actually happening — the metric "depth" of space varies — in a way that is technically accurate without implying full understanding. Current-day engineers use the term because it is in the documentation they inherited, most of whom have a functional rather than theoretical understanding of what it means.
+**この用語が存在する理由：** Long Expansion 中、「cluster」はより大きなネットワーク内の地域的な星系グループに対する非公式な用語だった。Severance 後、それは宇宙の主要な用語となった——概念の名称を変えたのではなく、概念がすべての利用可能な意味を満たすために拡大したのだ。クラスターはもはや大きなネットワークのサブセットではない。実際上、それが全世界だ。
 
----
-
-## Fitting
-
-**Definition:** The configuration of weapon systems, defensive modules, and utility equipment installed on a ship's mounting points and equipment bays. Also used as a verb: "to fit a ship" means to configure it for a specific role.
-
-**Why this term exists:** Ships cannot be built to specification in most post-collapse contexts. What can be changed is what the ship carries and how it is equipped. "Fitting" is the term for the primary form of ship customization available to most operators. The word carries connotations of craft and judgment — fitting is an activity that distinguishes skilled operators from inexperienced ones, and fitting decisions are consequential.
+この意味の変化に秘められた孤独感は意図的なものだ。誰かが「クラスター」と言うとき、それはすべてを意味する。
 
 ---
 
-## Fold Drive
+## Cluster Framework（クラスター枠組み）
 
-**Definition:** The ship-board system that executes Fold Transit. The Drive creates the local field necessary to align the ship's reference frame with a depth variance corridor. Pre-collapse Fold Drives are more reliable and efficient than post-collapse examples; the alignment coils in particular are manufactured to tolerances current post-collapse industry cannot achieve.
+**定義：** Three-Faction Muster（約 YS 450）で三大派閥によって署名された相互承認合意。政治的語彙、紛争解決プロトコル、そして派閥的 standing（信頼性・正統性）の概念を確立した。この枠組みは繰り返し改訂されており、元の条項は歴史的論争の対象だ。
 
-**Why this term exists:** "Fold" is the popular shorthand for the pre-collapse technical term, which translates approximately as "metric compression transit." The engineering documentation uses "fold" as a descriptive term for what happens to space during transit, and the informal usage became standard. When the pre-collapse civilization's documentation uses it, it is a metaphor. Current usage treats it as a literal description.
-
----
-
-## Fold Lane
-
-**Definition:** Informal term for a depth variance corridor that is sufficiently stable and well-mapped for routine transit use. Pre-collapse navigation charts identify hundreds of Fold Lanes; not all are currently safely navigable. The specific lanes currently usable within a cluster are a matter of ongoing survey and political contention.
-
-**Why this term exists:** "Lane" implies an established path — something that has been cleared, marked, and is maintained. The term is slightly aspirational: many Fold Lanes are not, in practice, maintained in the way the word implies. Using "lane" rather than "corridor" or "route" reflects an aspiration toward the pre-collapse standard of navigational safety that the current era does not fully meet.
+**この用語が存在する理由：** 派閥は、気に入らない当事者の正統性を認めた形で交渉する方法を必要としていた。「treaty（条約）」や「constitution（憲法）」ではなく「Framework（枠組み）」——この言葉の選択はムスターの議事録の記録によると意図的だった。枠組みは終了なしの構造を意味する。改訂されるよう設計されている。The Compact はこれを適切な柔軟性と見る。Vorath はこれを何も真に決着していないという証拠と見る。
 
 ---
 
-## The Gradient Reactor
+## Deep Vault（深部保管庫）
 
-**Definition:** A reactor type documented in Weave archive fragments that appears to generate energy from depth variance geometry rather than from fission or fusion. Working examples have been found in pre-collapse ships; none have been successfully replicated. The physical principles are not understood.
+**定義：** Adherents が維持する制限アーカイブで、公開アクセスには危険すぎると判断された回収技術文書を保持している。その存在は認められているが、その内容は Adherents によって公的に議論されていない。
 
-**Why this term exists:** "Gradient" refers to the depth variance gradient — the difference in metric depth that the reactor appears to exploit. The term is taken directly from the pre-collapse archive documentation. Current engineers use it because it is the term the documentation uses, without fully understanding what the gradient is or how exploiting it produces energy. The gap between using a term and understanding what it names is itself a characteristic feature of post-collapse technical culture.
-
----
-
-## HP Layers (Shield / Armor / Hull)
-
-**Definition:** The three-layer damage resistance structure common to all ship classes. Shield is the outermost active defensive layer; Armor is the structural reinforcement layer; Hull is the ship's physical integrity. Each layer has distinct properties regarding damage types, regeneration, and repairability.
-
-**Why this term exists:** The three-layer system is pre-collapse design, not post-collapse innovation. It was developed because single-layer defense systems were found to fail catastrophically under sustained fire, while a layered approach provided both more time to respond and more meaningful tactical decision-making about when and how to disengage. Post-collapse engineers inherited the system without always understanding its design philosophy; some have attempted to simplify it with poor results.
+**この用語が存在する理由：** この用語は二つの概念を同時に込める。「deep（深い）」（通常のアクセスより下、予約された、到達するのに努力を要する）と「vault（保管庫）」（保護された、密閉された、具体的に自由に流通すべきではないものが保持されている場所）。この用語の緊張——見つからないようにものをアーカイブするアーキビスト——は、最初に保管庫を生み出した真の道徳的危機を反映している。
 
 ---
 
-## Induction Charter
+## Depth Variance（深度差異）
 
-**Definition:** The earliest surviving written governance document in the cluster (approximately YS 310), originally a commercial agreement between the Compact and several Vorath bands governing transit access and Trace pricing. Has been revised forty-seven times. Remains nominally active.
+**定義：** Fold Transit を可能にする時空の特性。空間はメトリクス的に一様ではない。特定の点で、場所間の実効距離を局所的に圧縮できるため、天文学的な距離においても幾何学的に短いトランジットが可能になる。
 
-**Why this term exists:** "Induction" in the legal sense used here means the formal inclusion of a party into an agreed arrangement — you are inducted into the framework, as into a circle of mutual obligation. The choice of "charter" rather than "treaty" emphasized that this was a commercial instrument with governance implications, not a political treaty with commercial implications. The distinction mattered to the founding parties and has been argued about ever since.
-
----
-
-## Long Expansion, The
-
-**Definition:** The historical period from approximately 1,200 to 100 years Before Severance during which humanity systematically colonized depth variance corridors and established the Weave. Not a golden age; a period of competitive, often brutal growth that produced a civilization of approximately four hundred inhabited systems and the infrastructure to connect them.
-
-**Why this term exists:** "Long" emphasizes duration — this was not a rush or an explosion but a sustained process spanning centuries. "Expansion" is the term the pre-collapse civilization itself used, reflecting their self-image as a growing, outward-facing civilization. Current-day communities use the term with a range of emotional valences: pride, grief, ambivalence. The Long Expansion made the Unraveling possible.
+**この用語が存在する理由：** 崩壊前の文明は、魔法的でも凡庸に機械的でもない用語を必要としていた。「Depth variance（深度差異）」は実際に起きていること——空間のメトリクス的「深度」が変化する——を、完全な理解を示唆しない技術的に正確な方法で描写する。現代のエンジニアはそれが継承した文書に記載されているためこの用語を使う。ほとんどの者は、それが何を意味するかという理論的理解よりも機能的理解を持っている。
 
 ---
 
-## Muster
+## Fitting（フィッティング）
 
-**Definition (Vorath):** A periodic gathering of band representatives to coordinate, resolve disputes, and set shared policy. The Muster has no enforcement mechanism; its decisions are followed by bands that want to maintain standing in the Collective.
+**定義：** 船のマウントポイントと機器ベイに設置された兵器システム、防御モジュール、ユーティリティ機器の構成。動詞としても使われる。「船をフィットする」とは、特定の役割のために構成することを意味する。
 
-**Why this term exists:** "Muster" has pre-collapse military origins — a muster was a formal assembly and accounting of forces. The Vorath use it for civilian governance to emphasize that attendance and representation are a form of showing up: being counted, being present, being accountable. The implied militarism is not accidental; the Vorath view governance as requiring the same commitment as combat.
-
----
-
-## Remnant Adherents
-
-**Definition:** The faction descended from surviving Signal Corps personnel who chose to dedicate themselves to archiving, transmitting, and recovering pre-collapse knowledge. Characterized by their vow of record preservation, their educational programs, and the controversial Deep Vault.
-
-**Why this term exists:** "Remnant" acknowledges that the faction is a fragment of something larger — the Signal Corps was a significant pre-collapse institution; the Adherents are what survived of it. Using "Remnant" rather than rejecting it is a form of honesty the Adherents consider important: they are not the Signal Corps. They are the people who kept its most important work going. "Adherents" reflects their commitment to the vow — adherence to the principle of preservation above factional interest.
+**この用語が存在する理由：** ほとんどの崩壊後の文脈では、船を仕様から作ることはできない。変えられるのは船が搭載するものとどう装備されるかだ。「フィッティング」はほとんどのオペレーターが利用できる主要な船のカスタマイズの形態に対する用語だ。この言葉は職人技と判断の含意を持つ——フィッティングは熟練したオペレーターと未熟なオペレーターを区別する活動であり、フィッティングの決定は重大な影響を持つ。
 
 ---
 
-## Routing War
+## Fold Drive（フォルドドライブ）
 
-**Definition:** The period (approximately YS 3–15) during which competing corridor operators deliberately interfered with each other's navigation beacons, accelerating the degradation of the Weave and making coordinated maintenance response impossible. Considered by most historians the proximate cause of the Severance, as distinct from the Attractor Drift, which was the ultimate cause.
+**定義：** Fold Transit を実行する船上システム。ドライブは船の参照フレームを深度差異廊道と整合させるために必要な局所場を生成する。崩壊前の Fold Drive は崩壊後の例より信頼性が高く効率的で、特に整合コイルは崩壊後の産業が達成できない精度で製造されている。
 
-**Why this term exists:** Naming it a "war" is a retrospective political act. It was not recognized as a war at the time; it was characterized by perpetrators as commercial competition and by victims as sabotage. The term "Routing War" emerged in Compact administrative history as a way of assigning blame to specific parties rather than treating the Unraveling as a purely natural disaster. The Vorath typically use "the sabotage era" for the same period, which implies different conclusions about responsibility.
-
----
-
-## Sector
-
-**Definition (in-game technical term):** A discrete spatial volume managed by a single simulation node. A star system typically maps to one or more Sectors. Ships and entities exist within a Sector; transit between Sectors requires Fold Transit.
-
-**Why this term exists:** In the simulation architecture, a Sector is the unit of computational responsibility — one node, one Sector. In the lore, a Sector corresponds roughly to the navigable volume around a star. The term is consistent between the game's technical architecture and the in-universe geography, which is intentional: the fragmentation of the universe is both a narrative fact and a computational fact.
+**この用語が存在する理由：** 「Fold」は崩壊前の技術用語の通俗的な略語で、おおよそ「メトリクス圧縮トランジット」と訳される。工学文書はトランジット中に空間に起きることの描写的な用語として「fold（折り畳み）」を使い、その非公式な用法が標準となった。崩壊前の文明の文書がそれを使うとき、それはメタファーだ。現在の用法はそれを文字通りの描写として扱う。
 
 ---
 
-## Severance, The
+## Fold Lane（フォルドレーン）
 
-**Definition:** The completion of the Unraveling: the point at which inter-cluster Fold Transit became non-functional and communication between clusters was lost. Used as the Year 0 epoch for the Severance Calendar (YS). The date is approximate and its conventional placement (~YS 60 from the first Attractor Drift anomaly) is based on Adherent historical reconstruction.
+**定義：** 日常的なトランジット使用に十分なほど安定し、よくマッピングされた深度差異廊道に対する非公式な用語。崩壊前の航行図は何百もの Fold Lane を特定している。現在安全に航行できるものはすべてではない。クラスター内で現在使用可能な特定のレーンは、継続的な調査と政治的争いの問題だ。
 
-**Why this term exists:** "Severance" rather than "collapse" or "catastrophe" — the word was chosen by the founders of the Compact when they needed a term for the foundational event of the post-collapse world. "Severance" implies a cut, not a dissolution. The Compact's framing was that the connection was severed — not that civilization died — implying that reconnection was possible. The word is therefore implicitly optimistic, or at least not defeatist. Whether that framing is accurate is still contested.
-
----
-
-## Signal Corps
-
-**Definition:** The pre-collapse organization responsible for Weave maintenance, archive management, and navigational data. Held quasi-religious institutional culture and vows of record preservation. Most Signal Corps operations were destroyed or disbanded during the Unraveling; surviving personnel became the founding generation of the Remnant Adherents.
-
-**Why this term exists:** "Signal" referred to the Weave's relay and communication function — the Corps maintained the signals that connected the network. "Corps" indicated a disciplined organizational body with its own internal hierarchy. Post-collapse, "Signal Corps" exists only as a historical term; current practitioners call themselves Adherents or, more formally, Remnant Adherents, to acknowledge both the inheritance and the incompleteness.
+**この用語が存在する理由：** 「Lane（レーン）」は確立された経路——開かれ、マークされ、維持されている何か——を意味する。この用語はわずかに望ましい状態を表している。多くの Fold Lane は実際には、この言葉が意味するほどは維持されていない。「corridor（廊道）」や「route（ルート）」ではなく「lane」を使うことは、現在の時代が十分には満たしていない、崩壊前の航行安全基準への願望を反映している。
 
 ---
 
-## Trace Fuel
+## Gradient Reactor（勾配リアクター）
 
-**Definition:** The refined isotope mixture required by Fold Drives. Its active component decays within days of refinement, preventing stockpiling. Feedstock is extracted from specific gas giant atmospheres and stellar ejecta. Production requires specialized refinery infrastructure, primarily operated by the Vorath Collective.
+**定義：** Weave アーカイブの断片に記録されたリアクタータイプで、核融合や核分裂ではなく深度差異幾何学からエネルギーを生成するように見える。機能する例が崩壊前の船に見つかっている。正常に複製されたものはない。物理的原理は理解されていない。
 
-**Why this term exists:** "Trace" refers to the trace quantities of the specific heavy isotope in the raw feedstock — it must be refined out of enormous volumes of raw material to produce usable quantities. The name emphasizes scarcity and effort. Vorath refinery workers sometimes use the term "blood fuel" informally, acknowledging the political weight of controlling something everyone needs. This usage is considered inflammatory in Compact-mediated negotiations and is therefore used selectively.
+**この用語が存在する理由：** 「Gradient（勾配）」は、リアクターが利用するように見える深度差異勾配——メトリクス深度の差異——を指す。この用語は崩壊前のアーカイブ文書から直接取られている。現代のエンジニアは文書がその用語を使っているためそれを使い、勾配が何であるかやそれを利用することがなぜエネルギーを生み出すかを完全には理解していない。用語を使うこととそれが何を意味するかを理解することの間のギャップは、それ自体が崩壊後の技術文化の特徴的な側面だ。
 
 ---
 
-## The Weave
+## HP Layers（HPレイヤー）（Shield / Armor / Hull）
 
-**Definition:** The distributed network of navigation beacons, fuel caches, signal relays, and maintenance drones that made the Long Expansion possible and whose degradation caused the Unraveling. Physically, most Weave nodes still exist; operationally, the network is non-functional.
+**定義：** すべての船クラスに共通する三層のダメージ耐性構造。Shield（シールド）は最外層のアクティブ防御層。Armor（装甲）は構造補強層。Hull（船体）は船の物理的完全性。各層はダメージタイプ、再生、修理可能性について異なる特性を持つ。
 
-**Why this term exists:** "Weave" was the pre-collapse civilization's own term for the network. It was chosen deliberately: a weave is a structure where every thread depends on every other thread for the structure to hold. The metaphor was accurate. When threads began to be cut, the structure did not fail incrementally — it unraveled. The name, in retrospect, contained the warning its users did not heed.
+**この用語が存在する理由：** 三層システムは崩壊後の革新ではなく崩壊前の設計だ。単層防御システムが持続的な射撃下で壊滅的に失敗することが判明したため開発された。一方、層状のアプローチは対応するためのより多くの時間と、いつどのように交戦を中断するかについてのより意味のある戦術的意思決定の両方を提供した。崩壊後のエンジニアはその設計哲学を常に理解することなくシステムを継承した。一部はそれを単純化しようとして悪い結果をもたらした。
 
-Current-day communities refer to the Weave with a complex of emotions: grief, reverence, and in some cases the anger of people who were abandoned by the thing they depended on. Among the Adherents, "Weave" is sometimes used as shorthand for the entire pre-collapse civilization — "before the Weave fell" means "before everything changed."
+---
+
+## Induction Charter（加入憲章）
+
+**定義：** クラスターで現存する最古の成文統治文書（約 YS 310）。もともと The Compact とトランジットアクセスと Trace 価格設定を管理するいくつかの Vorath バンドとの商業協定。四十七回改訂されている。名目上まだ有効だ。
+
+**この用語が存在する理由：** ここで使われる法的な意味での「Induction（加入）」は、合意された取り決めへの当事者の正式な包含を意味する——相互義務の輪へと加入させられる。「treaty（条約）」ではなく「charter（憲章）」を選択したのは、これが政治的含意を持つ商業文書であり、商業的含意を持つ政治的条約ではないことを強調した。この区別は創設当事者にとって重要であり、それ以来ずっと議論されてきた。
+
+---
+
+## Long Expansion, The（大拡張）
+
+**定義：** Severance のおよそ千二百〜百年前に、人類が体系的に深度差異廊道を植民地化し、Weave を確立した歴史的時期。黄金時代ではなく、約四百の有人星系の文明とそれらを接続するインフラを生み出した競争的で、しばしば残酷な成長の時期。
+
+**この用語が存在する理由：** 「Long（大）」は持続時間を強調する——これは急いだものや爆発的なものではなく、何世紀にもわたる持続的なプロセスだった。「Expansion（拡張）」は崩壊前の文明自体が使った用語で、成長し、外向きに面した文明としての自己イメージを反映している。現代のコミュニティはさまざまな感情的価値でこの用語を使う——誇り、悲しみ、複雑な思い。Long Expansion は Unraveling を可能にした。
+
+---
+
+## Muster（ムスター）
+
+**定義（Vorath）：** バンドの代表者が調整し、紛争を解決し、共有政策を設定するための定期的な集まり。ムスターには強制メカニズムがない。その決定は、Collective の standing を維持したいバンドによって遵守される。
+
+**この用語が存在する理由：** 「Muster」は崩壊前の軍事的起源を持つ——ムスターとは部隊の正式な集合と点呼だった。Vorath はこれを民間統治に使い、出席と代表が一種の出席表明であることを強調する——数えられ、存在し、説明可能であること。暗示される軍国主義は偶然ではない。Vorath は統治が戦闘と同じコミットメントを必要とすると考える。
+
+---
+
+## Remnant Adherents（残存遵奉者団）
+
+**定義：** 崩壊前の知識をアーカイブし、伝達し、回収することに身を捧げた生き残りの Signal Corps 人員から派生した派閥。記録保存の誓い、教育プログラム、そして論争的な Deep Vault によって特徴づけられる。
+
+**この用語が存在する理由：** 「Remnant（残存）」は、派閥がより大きなものの断片であることを認める——Signal Corps は重要な崩壊前の機関だった。Adherents はそれの生き残りだ。「Remnant」を使い、それを拒否しないことは、Adherents が重要とする正直さの形態だ。彼らは Signal Corps ではない。彼らはその最も重要な業務を継続してきた人々だ。「Adherents（遵奉者）」は誓いへのコミットメントを反映している——派閥の利益を超えた保存の原則への遵守。
+
+---
+
+## Routing War（航路戦争）
+
+**定義：** 競合する廊道運営者が互いの航行ビーコンに意図的に干渉し、Weave の劣化を加速させ、協調した保守対応を不可能にした時期（約 YS 3〜15）。Attractor Drift が究極の原因であるのとは対照的に、ほとんどの歴史家が Severance の近因と見なす。
+
+**この用語が存在する理由：** これを「war（戦争）」と呼ぶことは遡及的な政治的行為だ。当時は戦争として認識されていなかった。加害者には商業的競争として特徴づけられ、被害者には妨害行為として特徴づけられた。「Routing War」という用語は、Compact の行政史において Unraveling を純粋な自然災害として扱うのではなく、特定の当事者に責任を帰すための方法として生まれた。Vorath は通常、同じ時期に「妨害時代」を使う。これは責任について異なる結論を暗示する。
+
+---
+
+## Sector（セクター）
+
+**定義（ゲーム内技術用語）：** 単一のシミュレーションノードによって管理される離散的な空間容積。星系は通常一つまたは複数の Sector にマッピングされる。船とエンティティは Sector 内に存在する。Sector 間のトランジットには Fold Transit が必要だ。
+
+**この用語が存在する理由：** シミュレーションアーキテクチャにおいて、Sector は計算責任の単位だ——一ノード、一 Sector。ロアにおいて、Sector は星の周囲の航行可能な容積とほぼ対応する。ゲームの技術アーキテクチャとユニバース内地理の間でこの用語が一致しているのは意図的だ。宇宙の断片化は物語的事実であると同時に計算的事実でもある。
+
+---
+
+## Severance, The（切断）
+
+**定義：** Unraveling の完成。クラスター間の Fold Transit が機能しなくなり、クラスター間の通信が失われた時点。Severance Calendar（YS）の Year 0 紀元として使われる。日付は近似値で、その慣例的な配置（最初の Attractor Drift 異常から約 YS 60）は Adherent の歴史的再構成に基づく。
+
+**この用語が存在する理由：** 「collapse（崩壊）」や「catastrophe（大惨事）」ではなく「Severance（切断）」——この言葉は崩壊後の世界の基本的な出来事のための用語が必要だったとき The Compact の創設者によって選ばれた。「Severance」は溶解ではなく切断を意味する。The Compact の構成は、繋がりは切断された——文明は死んでいない——であり、再接続が可能であることを意味している。この言葉はそれゆえ暗黙的に楽観的、あるいは少なくとも敗北主義的でない。そのフレーミングが正確かどうかはまだ争われている。
+
+---
+
+## Signal Corps（信号団）
+
+**定義：** Weave の保守、アーカイブ管理、航行データを担当した崩壊前の組織。準宗教的な制度文化と記録保存の誓いを保持していた。ほとんどの Signal Corps の活動は Unraveling 中に破壊されたか解散した。生き残った人員が Remnant Adherents の創設世代となった。
+
+**この用語が存在する理由：** 「Signal（信号）」は Weave の中継・通信機能——Corps がネットワークを接続していた信号——を指していた。「Corps」は独自の内部階層を持つ規律ある組織体を示した。崩壊後、「Signal Corps」は歴史用語としてのみ存在する。現在の実践者は自分たちを Adherents、あるいはより正式には Remnant Adherents と呼ぶ——継承と不完全性の両方を認めるために。
+
+---
+
+## Trace Fuel（痕跡燃料）
+
+**定義：** Fold Drive が必要とする精製された同位体混合物。その活性成分は精製後数日以内に崩壊するため、備蓄を防ぐ。原料は特定のガス惑星の大気と恒星放出物から抽出される。生産には専門的な精製所インフラが必要で、主に Vorath Collective によって運営される。
+
+**この用語が存在する理由：** 「Trace（痕跡）」は原料中の特定の重同位体の微量な量を指す——使用可能な量を生産するために膨大な量の原料から精製されなければならない。この名前は希少性と努力を強調する。Vorath の精製所作業員は時として非公式に「血の燃料」という用語を使う。誰もが必要とするものを支配することの政治的重みを認めている。この用法は Compact が調停する交渉では炎上させると見なされ、それゆえ選択的に使われる。
+
+---
+
+## The Weave（織物）
+
+**定義：** Long Expansion を可能にし、その劣化が Unraveling を引き起こした、航行ビーコン、燃料補給拠点、信号中継局、保守ドローンの分散ネットワーク。物理的には、ほとんどの Weave ノードはまだ存在する。運用上、ネットワークは機能していない。
+
+**この用語が存在する理由：** 「Weave」はネットワークに対する崩壊前の文明自身の用語だった。意図的に選ばれた。織物は、構造が保持されるためにすべての糸が他のすべての糸に依存する構造だ。メタファーは正確だった。糸が切られ始めると、構造は段階的に失敗しなかった——ほどけた（unraveled）。その名前は、その使用者が気づかなかった警告を含んでいた。
+
+現代のコミュニティは Weave を複雑な感情を持って言及する——悲しみ、崇敬、そして場合によっては依存していたものに見捨てられた人々の怒り。Adherents の間では、「Weave」は時として崩壊前の文明全体の略語として使われる——「Weave が崩壊する前」は「すべてが変わる前」を意味する。
