@@ -43,14 +43,18 @@
 実装対象:
   エンティティ  : Ship のみ
   コンポーネント: Position(x, y, z), Velocity, ThrustComp, ShipStatsComp,
-                  HullComp（HP/シールド）, FittingComp（装備スロット）
-  イベント      : ShipSpawned, ShipMoved, SectorTransit系,
-                  ShipFitted, WeaponFired, DamageTaken, ShipDestroyed
+                  HullComp（Shield/Armor/Hull 3層）, FittingComp（装備スロット）
+  船種          : ShipTypeDefinition（id, name, class, base_stats, slot_layout）
+  イベント      : ShipSpawned（ship_type_id 含む）, VelocityChanged, SectorTransit系,
+                  ShipFitted, WeaponFired, DamageTaken（3層 HP）, ShipDestroyed,
+                  ModuleActivated, ModuleDeactivated
   ノード構成    : 3ノード固定
 
-Phase 4 で追加承認済み:
-  Fitting システム（EVE Online 準拠のモジュール装備）  ← Cycle 3 前提
-  Combat システム（武器 / ダメージ / HP / 破壊）       ← Cycle 3
+Phase 4 以降で追加承認済み:
+  Fitting システム（EVE Online 準拠・Active/Passive モジュール）
+  Combat システム（武器 / ダメージ / HP 3層 / 破壊）
+  Lock-on システム（2フェーズ戦闘）
+  ShipType システム（船種・船クラス・スロットレイアウト）← 現在実装中
 
 実装しない（提案も拒否する）:
   課金 / キャラクター育成 / 市場 / チャット

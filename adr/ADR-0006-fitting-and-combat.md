@@ -73,18 +73,25 @@ pub struct FittingComp {
 
 // Fitting 結果として集計された最終 stat（dawn-ecs）
 // ShipStatsComp を拡張して stat 集計の出力先とする。
-// ベース値（装備なし時）は weapon_damage=0, weapon_range=0 とする。
-// 武器能力はモジュール装備によってのみ付与される。
+// ベース値は ShipTypeDefinition.base_stats から取得する（後述 §4）。
+// 武器能力はモジュール装備によってのみ付与される（ベースはゼロ）。
 pub struct ShipStatsComp {
-    // Phase 2 から存在するフィールド（変更しない）
     pub max_speed        : f32,
     pub thrust_magnitude : f32,
 
-    // Phase 4 Cycle 3 で追加（ベース値はゼロ）
-    pub max_hp           : f32,   // シールド + アーマー + ハル の合計
-    pub weapon_damage    : f32,   // 1 発あたりのダメージ（0 = 武器なし）
-    pub weapon_range     : f32,   // 有効射程（server units）
-    pub weapon_cooldown  : u64,   // 発射間隔（Tick 数）
+    // HP は Shield / Armor / Hull の 3 層（後述 §4 HP 3層化）
+    pub max_shield       : f32,
+    pub max_armor        : f32,
+    pub max_hull         : f32,
+
+    // 武器（モジュールのみで供給）
+    pub weapon_damage    : f32,
+    pub weapon_range     : f32,
+    pub weapon_cooldown  : u64,
+
+    // ロック
+    pub lock_time        : u64,
+    pub max_locks        : u32,
 }
 ```
 
@@ -396,6 +403,131 @@ CombatSystem::run:
 6. EventStore Append
 7. Replication
 ```
+
+---
+
+---
+
+### 4. ShipType システム（Option B 決定）
+
+#### 設計方針
+
+`ModuleDefinition` に対応する概念として `ShipTypeDefinition` を導入する。
+船 spawn 時に `ShipTypeId` を指定することで船種固有の base_stats が決まる。
+
+```rust
+// dawn-core/ship_type.rs
+
+pub struct ShipTypeId(pub u32);
+
+pub enum ShipClass { Frigate, Cruiser, Battleship }
+
+pub struct SlotLayout { pub high: u8, pub mid: u8, pub low: u8, pub rig: u8 }
+
+/// 装備なし時の船種固有ベーススタット。
+/// weapon_* は含まない（モジュール装備のみで供給）。
+pub struct ShipBaseStats {
+    pub max_speed        : f32,
+    pub thrust_magnitude : f32,
+    pub max_shield       : f32,   // HP 3層（後述）
+    pub max_armor        : f32,
+    pub max_hull         : f32,
+    pub lock_time        : u64,
+    pub max_locks        : u32,
+}
+
+pub struct ShipTypeDefinition {
+    pub id          : ShipTypeId,
+    pub name        : String,
+    pub class       : ShipClass,
+    pub base_stats  : ShipBaseStats,
+    pub slot_layout : SlotLayout,
+}
+```
+
+`ShipSpawned` イベントに `ship_type_id` を追加する：
+
+```rust
+pub struct ShipSpawned {
+    pub ship_id           : ShipId,
+    pub sector_id         : SectorId,
+    pub initial_position  : Position,
+    pub ship_type_id      : ShipTypeId,   // 追加
+    pub tick              : Tick,
+}
+```
+
+サーバー起動時に `register_ship_type()` で登録し、
+`spawn_ship(ship_type_id, pos, vel)` で参照する。
+
+#### base_stats の変更
+
+従来の `ShipStatsComp::NPC` / `ShipStatsComp::PLAYER` 定数は廃止。
+ベーススタットは `ShipTypeDefinition.base_stats` に移動する。
+
+```
+spawn_ship(ship_type_id, ...)
+    → シップタイプレジストリで ShipTypeDefinition を解決
+    → base_stats = def.base_stats を ShipStatsComp に設定
+    → base_stats_map に記録（Fitting の二重加算防止）
+```
+
+---
+
+### 5. HP 3層化（Shield / Armor / Hull）
+
+#### 設計方針
+
+単一の `max_hp` を Shield / Armor / Hull の 3 層に分割する。
+
+```
+ダメージ適用順序:
+  1. Shield が尽きるまで Shield から引く
+  2. Shield = 0 → Armor から引く
+  3. Armor = 0 → Hull から引く
+  4. Hull = 0 → ShipDestroyed
+```
+
+#### HullComp の変更
+
+```rust
+pub struct HullComp {
+    pub current_shield : f32,
+    pub current_armor  : f32,
+    pub current_hull   : f32,
+    pub is_destroyed   : bool,
+}
+```
+
+#### DamageTaken イベントの変更
+
+```rust
+pub struct DamageTaken {
+    pub ship_id        : ShipId,
+    pub damage         : f32,
+    pub current_shield : f32,
+    pub current_armor  : f32,
+    pub current_hull   : f32,
+    pub tick           : Tick,
+}
+```
+
+`current_hp: f32` → 3 フィールドに分割（スキーマ変更）。
+既存ログとの後方互換: `DamageTaken` は Phase 5 新規追加のため Upcaster 不要。
+
+#### StatDelta の変更
+
+```rust
+// 旧: max_hp_add
+// 新:
+pub max_shield_add : f32,   // シールド HP への加算
+pub max_armor_add  : f32,   // アーマー HP への加算
+pub max_hull_add   : f32,   // ハル HP への加算
+```
+
+モジュールを種別化：
+- `Shield Extender` → `max_shield_add`
+- `Armor Plate`     → `max_armor_add`
 
 ---
 

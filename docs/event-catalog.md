@@ -151,9 +151,11 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 | `ship_id` | `ShipId` | ✓ | 生成された Ship の一意な識別子 |
 | `sector_id` | `SectorId` | ✓ | 生成先の Sector |
 | `initial_position` | `Position` | ✓ | 生成時の座標 |
+| `ship_type_id` | `ShipTypeId` | ✓ | 船種 ID（`ShipTypeDefinition` レジストリで解決） |
 | `tick` | `Tick` | ✓ | 生成された Tick |
 
 **不変条件:** `ship_id` は世界全体で一意であり、再利用されない（INV-004）。
+`ship_type_id` を含めることで Replay 時に正確な base_stats が復元できる（INV-002）。
 
 ---
 
@@ -273,16 +275,19 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 ### `DamageTaken`
 
 **説明:** Ship がダメージを受け、HP が変化した。
+HP は Shield → Armor → Hull の順に消費される。
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `ship_id` | `ShipId` | ✓ | ダメージを受けた Ship |
-| `amount` | `f32` | ✓ | 受けたダメージ量 |
-| `current_hp` | `f32` | ✓ | ダメージ後の残 HP |
+| `damage` | `f32` | ✓ | 受けたダメージ量（適用前） |
+| `current_shield` | `f32` | ✓ | ダメージ後のシールド残量 |
+| `current_armor` | `f32` | ✓ | ダメージ後のアーマー残量 |
+| `current_hull` | `f32` | ✓ | ダメージ後のハル残量 |
 | `tick` | `Tick` | ✓ | ダメージを受けた Tick |
 
-**設計メモ:** `current_hp` を含めることで Replay 時に
-`HullComp.current_hp` を正確に復元できる（INV-002 準拠）。
+**設計メモ:** 3 フィールドを含めることで Replay 時に `HullComp` を正確に復元できる（INV-002 準拠）。
+旧フィールド `current_hp: f32` は HP 3層化に伴い廃止（ADR-0006 §5）。
 
 ---
 
