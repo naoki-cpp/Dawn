@@ -79,7 +79,11 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 
 | イベント名 | 説明 | 発行者 | ステータス |
 |---|---|---|---|
-| `ShipMoved` | Ship の位置が変化した | `MovementSystem::run()` | ✅ 実装済み |
+| `VelocityChanged` | Ship の速度が変化した | `MovementSystem::run()` | ⬜ 未実装（ADR-0008） |
+| `ShipMoved` | ~~Ship の位置が変化した~~ | `MovementSystem::run()` | **@deprecated** → `VelocityChanged` に移行 |
+
+> **注意（ADR-0008）:** `ShipMoved` は廃止予定。新規実装では `VelocityChanged` を使うこと。
+> 位置は派生状態であり、イベントに含めない。Replay は `VelocityChanged` + `position += velocity` で行う。
 
 ### 3.3 Fitting
 
@@ -153,7 +157,33 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 
 ---
 
-### `ShipMoved`
+### `VelocityChanged`
+
+**説明:** Ship の速度が変化した。`MovementSystem` が物理計算を行い、前 Tick から速度が変わった場合のみ発行する。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id`  | `ShipId`  | ✓ | 速度が変わった Ship |
+| `velocity` | `Velocity` | ✓ | 変化後の速度ベクトル（units/tick） |
+| `tick`     | `Tick`    | ✓ | 速度が確定した Tick |
+
+**不変条件:** `velocity` は前 Tick と異なる値でなければ発行しない（変化なしはイベントを出さない）。
+
+**Replay:** `VelocityChanged` を時系列に適用し、各 Tick で `position += velocity` を計算する。
+物理シミュレーションは不要。`position += velocity` は純粋な算術である。
+
+**設計根拠:** 位置は派生状態であり権威的イベントに含めない。
+物理入力（推力）もコマンドであり権威的イベントに含めない（ADR-0008）。
+
+---
+
+### `ShipMoved` *(deprecated)*
+
+**説明:** ~~Ship が 1 Tick 内に位置を変化させた。~~
+
+> **@deprecated:** `VelocityChanged` に移行する（ADR-0008）。
+> 既存のイベントログとの後方互換のため定義は残すが、新規発行は禁止。
+> Upcaster: `ShipMoved` → `VelocityChanged` で変換して Replay する。
 
 **説明:** Ship が 1 Tick 内に位置を変化させた。
 

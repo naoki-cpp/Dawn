@@ -1,168 +1,183 @@
 ---
 id      : ADR-0008
-title   : 船の移動をイベントログにどう記録するか
-status  : proposed
+title   : 移動イベントの権威的設計：VelocityChanged
+status  : accepted
 date    : 2026-06-05
 deciders: [human, ai-agent]
 related : ADR-0001（Event Sourcing）, ADR-0006（Fitting/Combat）
 ---
 
-# ADR-0008 — 船の移動をイベントログにどう記録するか
+# ADR-0008 — 移動イベントの権威的設計：VelocityChanged
 
 ## 背景
 
-現在の実装では、船が移動するたびに毎 Tick `ShipMoved` イベントを記録している。
-
-```rust
-pub struct ShipMoved {
-    pub ship_id : ShipId,
-    pub from    : Position,
-    pub to      : Position,
-    pub tick    : Tick,
-}
-```
-
-しかし `ShipMoved` は「物理計算の結果（導出値）」であり、
-「何が起きたか（原因・事実）」ではない。
+`ShipMoved`（毎 Tick の位置記録）と `ThrustApplied`（推力入力の記録）は
+いずれも Event Sourcing の原則と相容れない問題がある。
 
 ```
-原因: プレイヤーが推力方向を指定した
-結果: 毎 Tick、位置が物理法則に従って変化する
+ShipMoved    = 物理計算の結果（導出値）
+ThrustApplied = 物理計算の入力（コマンドに相当）
 
-現在はこの「結果」を記録している。
+いずれも「決定済みの事実」ではない。
 ```
 
-**問題点:**
-- 10,000 ships × 100 ticks = 1,000,000 events（ほぼ全てが導出可能な値）
-- 推力が変わらない限り、位置は数式で完全に求まる
-- Event Log の本来の役割（**因果の追跡**）から外れている
+さらに根本的な問題として「物理ルールのバージョン管理問題」がある。
+
+```
+ThrustApplied を記録した場合:
+  → Replay 時に推力計算ロジックを実行する必要がある
+  → 推力方程式が変更されると、過去ログから異なる位置が再計算される
+  → 実装の詳細（物理コード）に Replay の正確性が依存する
+
+これは数年後の Replay が保証できないことを意味する。
+```
 
 ---
 
-## 選択肢
+## 非交渉的な設計規則（本ドキュメントで確定する）
 
-### Option A: ThrustApplied のみ記録（原因だけ記録）
+### 原則
 
-```rust
-/// 推力方向が変わったときのみ発行する。
-/// 推力を持つ全ての Ship（NPC を含む）が対象。
-pub struct ThrustApplied {
-    pub ship_id   : ShipId,
-    pub direction : Velocity,  // 正規化済み単位ベクトル。ZERO = 推力なし
-    pub tick      : Tick,
-}
-```
+1. **位置（Position）は派生状態である。** イベントに含めない。
+2. **物理入力はコマンドである。** イベントに含めない。
+3. **イベントは「決定済みの事実」のみを表現する。**
+4. **Replay は物理シミュレーションを必要としない。**
+5. **Replay の正確性は実装詳細（物理コード）に依存してはならない。**
 
-`ShipMoved` は廃止。位置は Replay 時にシミュレーションで再計算する。
+### 禁止するイベント
 
 ```
-ログのサイズ: 推力が変わった回数のみ（大幅に削減）
+❌ ThrustApplied   { direction }   ← 物理入力
+❌ ForceApplied    { force }       ← 物理入力
+❌ ShipMoved       { from, to }    ← 物理計算の結果（導出値）
+```
+
+---
+
+## Decision: `VelocityChanged` が唯一の移動イベント
+
+### 設計
+
+```
+SetThrustCommand
+    ↓
+MovementSystem（物理計算）
+    ↓
+VelocityChanged  ← 物理計算の出力 = 決定済みの事実
+    ↓
+EventStore に記録
 
 Replay:
-  ThrustApplied の履歴 + 初期 Position + 物理ルール → 任意 Tick の位置
-  ※ 物理ルール（加速度計算）が決定論的であることが前提
-
-クライアント（Godot）:
-  位置は別途サーバーから通知が必要（ShipMoved に相当する projection を送信）
-  ただしこの projection はログには記録しない
+  VelocityChanged を順番に適用する
+      ↓
+  各 Tick で position += velocity を計算する
+      ↓
+  位置を再構築（物理シミュレーション不要）
 ```
 
-**メリット:**
-- Event Log が純粋な「原因の記録」になる
-- ログサイズが劇的に削減される
-- 「いつ誰が推力を変えたか」という因果が明確に追跡できる
+### イベント定義
 
-**デメリット:**
-- Replay に物理シミュレーションが必要
-- 物理ルール（MovementSystem）を変更すると、過去ログとの整合性が崩れる
-  → Upcaster の代わりに「物理バージョン」の管理が必要になる
-- Godot クライアント向けに別途 position ストリームを維持する必要がある
+```rust
+/// 船の速度が変化した。MovementSystem の計算結果として発行する。
+/// 速度が前 Tick と同じ場合は発行しない。
+pub struct VelocityChanged {
+    pub ship_id  : ShipId,
+    pub velocity : Velocity,   // 変化後の速度ベクトル（units/tick）
+    pub tick     : Tick,
+}
+```
+
+**なぜ `VelocityChanged` が「決定済みの事実」か:**
+- 物理計算の「結果」であり「入力」ではない
+- Replay 時に必要なのは「このベクトルで移動する」という事実だけ
+- 推力方程式が変わっても、記録済みの `VelocityChanged` の意味は変わらない
+
+### Replay の手順
+
+```
+1. VelocityChanged を時系列順に処理し、各 Tick 時点の velocity を確定する
+2. tick ごとに position += velocity を適用して位置を再構築する
+3. Snapshot がある場合は snapshot から始め、以降のイベントのみ処理する
+```
+
+`position += velocity` は物理ロジックではなく**純粋な算術**である。
+この式は変わらない。
 
 ---
 
-### Option B: Hybrid（ThrustApplied = canonical、ShipMoved = projection）
+## `ShipMoved` の廃止
+
+`ShipMoved` は `VelocityChanged` で置き換える。
 
 ```
-永続化する Event Log（唯一の真実）:
-  ThrustApplied { ship_id, direction, tick }  ← 原因のみ
-
-クライアント向けメッセージ（非永続、Projection）:
-  ShipMoved { ship_id, to, tick }  ← 物理計算結果、ログに書かない
+廃止: ShipMoved { ship_id, from, to, tick }
+導入: VelocityChanged { ship_id, velocity, tick }
 ```
 
-Projection はサーバーが毎 Tick 計算してクライアントに送信するが、
-EventStore には記録しない。
-
-```
-INV-002（Event Replay で完全復元）の扱い:
-  ログから再構築できるのは「推力の履歴」のみ。
-  正確な位置の復元には物理シミュレーションが必要。
-  → INV-002 の「完全再現」の定義を「物理シミュレーションを経た再現」と解釈する。
-```
-
-**メリット:**
-- Event Log は薄く・純粋
-- クライアントは引き続き位置更新を受け取れる（UI は変わらない）
-- 分散ノード間の同期は ThrustApplied の伝播だけでよい
-
-**デメリット:**
-- EventStore の「イベント」と「プロジェクション」を概念として明確に分離する必要がある
-- 物理ルール変更時の互換性問題は Option A と同様
+**移行方針（Event Schema Evolution Rules §7 準拠）:**
+- `ShipMoved` は @deprecated マークを付けて削除しない（既存ログの後方互換）
+- 新たな `ShipMoved` は発行しない
+- Replay 時: 旧ログの `ShipMoved` は Upcaster で `VelocityChanged` として扱う
 
 ---
 
-### Option C: 現状維持（ShipMoved を記録し続ける）
+## クライアント（Godot）への影響
+
+`ShipMoved`（絶対位置）の代わりに `VelocityChanged`（速度）を受け取る。
 
 ```
-変更なし。毎 Tick 全移動船の ShipMoved を記録する。
+クライアント側の位置更新:
+  VelocityChanged 受信 → ship.set_velocity(velocity)
+  各フレーム          → position += velocity * delta_sec * TICKS_PER_SEC
+
+メリット:
+  - 船の動きが滑らかになる（Tick 間補間が自然に正確になる）
+  - tick 境界での位置ジャンプがなくなる
 ```
 
-**メリット:**
-- 実装が最も簡単
-- Replay が単純（シミュレーション不要）
-- 物理ルールを変えても過去ログに影響しない
+---
 
-**デメリット:**
-- 「導出可能な値」を大量に記録し続ける
-- 因果追跡の観点から原則（CLAUDE.md §1）と乖離している
-- ログサイズが大きい（Phase 8 のスケールで問題になる可能性）
+## Snapshot の役割
+
+Snapshot には位置・速度・HP・LockState を含めてよい。
+ただし Snapshot は「Replay の高速化のための補助」であり、真実はイベントログである。
+
+```rust
+// Snapshot に含めてよいもの
+struct ShipSnapshot {
+    position   : Position,  // 派生状態だが Snapshot には含めてよい
+    velocity   : Velocity,
+    current_hp : f32,
+    // ...
+}
+```
 
 ---
 
-## トレードオフ整理
+## ログサイズの見積もり
 
-| 観点 | A（ThrustApplied のみ） | B（Hybrid） | C（現状維持） |
-|---|---|---|---|
-| ログの純粋性 | ✅ 原因のみ | ✅ 原因のみ | ❌ 導出値を含む |
-| ログサイズ | ✅ 最小 | ✅ 最小 | ❌ 大きい |
-| Replay の簡便さ | ❌ シミュレーション必要 | ❌ 同左 | ✅ 直接適用 |
-| 物理ルール変更耐性 | ❌ 互換性問題あり | ❌ 同左 | ✅ 影響なし |
-| クライアント実装 | △ projection 別管理 | ✅ 変更なし | ✅ 変更なし |
-| 因果追跡の明確さ | ✅ 明確 | ✅ 明確 | ❌ 結果のみ |
+```
+ShipMoved（旧）: 全移動船 × 全 Tick
+  例: 5,000 ships × 36,000 ticks/時間 = 1億8千万 events/時間
 
----
-
-## 未解決の設計問題（Option A / B 共通）
-
-**物理ルールのバージョン管理:**
-
-推力計算ロジックが変わると、過去の `ThrustApplied` イベントから位置を再計算したとき
-結果が変わってしまう。これは Event Sourcing における「Upcaster 問題の物理版」である。
-
-対処案:
-1. 物理ルールを不変にする（変更禁止）
-2. 物理バージョンを Event に含める
-3. `ShipMoved` は廃止せず「チェックポイント」として定期的に記録する
+VelocityChanged（新）: 速度が変化した時のみ
+  例: NPC（等速直線運動）は spawn 時に 1 回のみ
+      プレイヤー（加速中）はロック完了まで数 Tick
+  通常 >> 99% の削減
+```
 
 ---
 
-## 決定
+## 実装チェックリスト
 
-**未決定。** 以下の観点で判断を求める:
-
-1. Phase 8 のスケール（1 Sector 5,000 ships）でログサイズが問題になるか
-2. 物理ルールは将来変更する可能性があるか
-3. INV-002 の「完全再現」にシミュレーション実行を含めるか
+- [ ] `dawn-core`: `VelocityChanged` イベント追加
+- [ ] `dawn-core`: `ShipMoved` を @deprecated マーク
+- [ ] `dawn-core`: `ShipMoved` → `VelocityChanged` Upcaster 実装
+- [ ] `dawn-ecs/systems/movement.rs`: 速度が変化した場合のみ `VelocityChanged` を発行
+- [ ] `dawn-simulation/node.rs`: `apply_event` で `VelocityChanged` を処理
+- [ ] `dawn-simulation/ws_server.rs`: `VelocityChanged` を JSON で送信
+- [ ] `client/scripts/main.gd`: `VelocityChanged` ハンドラ追加
+- [ ] `client/scripts/ship_controller.gd`: フレームごとに velocity で位置更新
 
 ---
 
@@ -171,4 +186,4 @@ INV-002（Event Replay で完全復元）の扱い:
 - ADR-0001: Event Sourcing 基本原則
 - CLAUDE.md §1: 「Event が唯一の真実。State は派生物に過ぎない」
 - CLAUDE.md §2 INV-002: State は Event の Replay で完全再現できなければならない
-- docs/tick-model.md: Tick 処理順序と MovementSystem
+- CLAUDE.md §7: Event Schema Evolution Rules（`ShipMoved` の廃止手順）

@@ -77,7 +77,8 @@ Step 2: コマンドキューを処理する
 
 Step 3: Movement System を実行する（ECS バッチ処理）
          MovementSystem::run(&mut world, tick)
-         → 生成: Vec<ShipMoved>
+         → 生成: Vec<VelocityChanged>（速度が変化した船のみ）
+         ※ ShipMoved は @deprecated（ADR-0008）。位置は派生状態であり記録しない。
 
 Step 4: Lock System を実行する
          LockSystem::run(&mut world, tick, &lock_commands)

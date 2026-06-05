@@ -171,6 +171,30 @@ Phase 4 で追加承認済み:
 理由: Commandは拒否できる。Eventは既に起きた事実で拒否できない。
 同じ型で表現すると「まだ起きていないこと」と「起きたこと」の区別が失われる。
 
+### INV-MOVE: 移動イベントは速度の変化のみを記録する（ADR-0008）
+
+```
+違反例:
+  // 毎 Tick、位置を記録する
+  event_store.append(ShipMoved { from, to, tick });
+
+  // 物理入力を記録する
+  event_store.append(ThrustApplied { direction, tick });
+
+正しい実装:
+  // 速度が変化したときのみ記録する
+  if new_velocity != old_velocity {
+      event_store.append(VelocityChanged { ship_id, velocity: new_velocity, tick });
+  }
+```
+
+理由:
+  - 位置（Position）は派生状態である。イベントに含めない。
+  - 物理入力（推力）はコマンドに相当する。イベントに含めない。
+  - Replay は物理シミュレーションを必要としてはならない。
+  - 物理ロジックが将来変わっても、過去の VelocityChanged は正確に Replay できる。
+  - `position += velocity` は純粋な算術であり、物理ロジックではない。
+
 ### INV-TIDI: Tickの速度は常に一定である
 
 ```
