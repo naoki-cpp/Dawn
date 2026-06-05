@@ -10,6 +10,7 @@
 mod cluster;
 mod modules;
 mod node;
+mod ship_types;
 mod sector_simulator_actor;
 mod snapshot;
 mod spawner;
@@ -78,7 +79,7 @@ fn run_phase1_benchmark() {
 
     let t0 = Instant::now();
     for (_, pos, vel) in ships {
-        node.spawn_ship(pos, vel);
+        node.spawn_ship(dawn_core::ShipTypeId(1), pos, vel);
     }
     let spawn_ms = t0.elapsed().as_secs_f64() * 1_000.0;
 
@@ -208,7 +209,7 @@ fn run_phase3_demo() {
         ship_ids   = ships.iter().map(|(id, ..)| *id).collect();
 
         for (_, pos, vel) in ships {
-            node.spawn_ship(pos, vel);
+            node.spawn_ship(dawn_core::ShipTypeId(1), pos, vel);
         }
 
         // Run half the ticks, take snapshot.
@@ -288,12 +289,15 @@ async fn run_phase4_server(ship_count: usize) {
     for def in modules::all_modules() {
         node.register_module(def);
     }
+    for def in ship_types::all_ship_types() {
+        node.register_ship_type(def);
+    }
 
     // NPC 船を生成
     let config = SpawnConfig::default_for_node(NodeId(0));
     let ships  = generate_ships(ship_count, &config, 0);
     for (_, pos, vel) in ships {
-        let ship_id = node.spawn_ship(pos, vel);
+        let ship_id = node.spawn_ship(ship_types::SHIP_TYPE_NPC_FRIGATE, pos, vel);
         node.fit_module(dawn_core::FitModuleCommand {
             ship_id,
             slot      : dawn_core::SlotKind::High,

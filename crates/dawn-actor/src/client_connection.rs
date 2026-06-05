@@ -142,6 +142,7 @@ mod tests {
             ship_id          : ShipId(EntityId::new(NodeId(0), 1)),
             initial_position : Position { x: 1.0, y: 2.0, z: 3.0 },
             sector_id        : SectorId(0),
+            ship_type_id     : dawn_core::ShipTypeId(1),
             tick             : Tick::ZERO,
         })
     }

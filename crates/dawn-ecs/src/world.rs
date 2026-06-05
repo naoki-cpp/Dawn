@@ -46,10 +46,10 @@ impl SimWorld {
             ThrustComp(Velocity::ZERO),
             stats,
             FittingComp::empty(),
-            HullComp::new(stats.max_hp),
+            HullComp::new(stats.max_shield, stats.max_armor, stats.max_hull),
             WeaponComp::new(),
             LockComp::new(),
-            IsNpcComp,  // NPC として生成: 自動ロック有効
+            IsNpcComp,
         ))
     }
 

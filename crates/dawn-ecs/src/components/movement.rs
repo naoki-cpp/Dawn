@@ -2,86 +2,85 @@
 
 use dawn_core::{Position, Velocity};
 
-/// Current world-space position of a Ship.
 #[derive(Debug, Clone, Copy)]
 pub struct PositionComp(pub Position);
 
-/// Per-tick displacement vector.
-/// The movement system adds `ThrustComp` to this each tick,
-/// then clamps to `ShipStatsComp::max_speed`, then applies to `PositionComp`.
 #[derive(Debug, Clone, Copy)]
 pub struct VelocityComp(pub Velocity);
 
 /// Acceleration vector applied to velocity every tick.
-///
-/// Set by `MoveCommand` (double-click in Godot).
-/// Once set, the ship keeps accelerating in this direction until a new
-/// command changes it.  Set to `Velocity::ZERO` to stop thrusting.
 #[derive(Debug, Clone, Copy)]
 pub struct ThrustComp(pub Velocity);
 
 /// Configurable ship performance and combat stats.
 ///
-/// Base values are set at spawn time.
-/// When a Fitting is applied, `apply_fitting()` overwrites these with
-/// base + sum(module StatDelta).  Movement and Combat systems read from here.
+/// Base values come from `ShipTypeDefinition.base_stats` at spawn time.
+/// `apply_fitting()` overwrites these with base + Σ(active module StatDelta).
 #[derive(Debug, Clone, Copy)]
 pub struct ShipStatsComp {
     // ── Movement ──────────────────────────────────────────────────────────────
-    /// Maximum speed magnitude (units/tick).  Velocity is clamped to this.
     pub max_speed        : f32,
-    /// Thrust magnitude (units/tick²).  The direction comes from `ThrustComp`.
     pub thrust_magnitude : f32,
 
+    // ── HP（3層）─────────────────────────────────────────────────────────────
+    pub max_shield       : f32,
+    pub max_armor        : f32,
+    pub max_hull         : f32,
+
     // ── Combat ────────────────────────────────────────────────────────────────
-    /// Maximum HP (shield + armor + hull combined).
-    pub max_hp           : f32,
-    /// Damage dealt per weapon shot.
+    /// 武器ダメージ（0 = 武器なし。モジュールのみで供給）
     pub weapon_damage    : f32,
-    /// Effective weapon range (units).  Target must be within this distance.
     pub weapon_range     : f32,
-    /// Weapon reload time in ticks.  Ship cannot fire again until this many
-    /// ticks have elapsed since `last_fired_tick`.
     pub weapon_cooldown  : u64,
 
     // ── Lock-on ───────────────────────────────────────────────────────────────
-    /// Ticks required to complete a lock.  Reduced by sensor modules.
     pub lock_time        : u64,
-    /// Maximum number of simultaneously locked targets.
     pub max_locks        : u32,
 }
 
 impl ShipStatsComp {
-    /// Default NPC ship stats — constant velocity, no thrust, **no weapon**.
-    ///
-    /// weapon_damage = 0.0 means the ship cannot attack.
-    /// Weapons are added exclusively via Fitting modules (StatDelta).
+    /// テスト・フォールバック用 NPC デフォルト。
+    /// 本番コードは ShipTypeDefinition を使うこと。
     pub const NPC: Self = Self {
         max_speed        : 400.0,
         thrust_magnitude : 0.0,
-        max_hp           : 500.0,
-        weapon_damage    : 0.0,   // ← no weapon until a module is fitted
+        max_shield       : 200.0,
+        max_armor        : 150.0,
+        max_hull         : 150.0,
+        weapon_damage    : 0.0,
         weapon_range     : 0.0,
         weapon_cooldown  : 1,
-        lock_time        : 5,     // 5 ticks = 0.5 sec at 10 tick/sec
+        lock_time        : 5,
         max_locks        : 1,
     };
 
-    /// Default player ship stats.
-    ///
-    /// Sector size = 10,000 units.  At 10 tick/sec:
-    ///   max_speed=500  → crosses sector in 200 ticks (20 sec) — controllable
-    ///   thrust=40      → reaches max_speed in ~13 ticks (1.3 sec) — clearly felt
-    ///
-    /// **No weapon** until a weapon module is fitted via Fitting system.
+    /// テスト・フォールバック用プレイヤーデフォルト。
     pub const PLAYER: Self = Self {
         max_speed        : 500.0,
         thrust_magnitude : 40.0,
-        max_hp           : 1_000.0,
-        weapon_damage    : 0.0,   // ← no weapon until a module is fitted
+        max_shield       : 500.0,
+        max_armor        : 300.0,
+        max_hull         : 200.0,
+        weapon_damage    : 0.0,
         weapon_range     : 0.0,
         weapon_cooldown  : 1,
-        lock_time        : 3,     // player は少し速くロックできる
+        lock_time        : 3,
         max_locks        : 2,
     };
+
+    /// `ShipBaseStats` から `ShipStatsComp` を生成する（武器スタットはゼロ）。
+    pub fn from_base(base: &dawn_core::ShipBaseStats) -> Self {
+        Self {
+            max_speed        : base.max_speed,
+            thrust_magnitude : base.thrust_magnitude,
+            max_shield       : base.max_shield,
+            max_armor        : base.max_armor,
+            max_hull         : base.max_hull,
+            weapon_damage    : 0.0,
+            weapon_range     : 0.0,
+            weapon_cooldown  : 1,
+            lock_time        : base.lock_time,
+            max_locks        : base.max_locks,
+        }
+    }
 }

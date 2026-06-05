@@ -43,11 +43,23 @@ pub fn apply_fitting(world: &mut SimWorld, ship_id: ShipId, base: ShipStatsComp)
     // ShipStatsComp を更新
     world.set_ship_stats(entity, new_stats);
 
-    // HullComp が存在すれば max_hp も更新（current_hp は比率で調整）
+    // HullComp の max 値が変わった場合、各層を比率で調整する
     if let Ok(mut hull) = world.inner_mut().get::<&mut HullComp>(entity) {
-        let old_max = hull.current_hp.max(1.0);  // ゼロ除算防止
-        let ratio   = hull.current_hp / old_max;
-        hull.current_hp = (new_stats.max_hp * ratio).max(0.0);
+        let scale = |cur: f32, old_max: f32, new_max: f32| -> f32 {
+            if old_max <= 0.0 { return new_max; }
+            (cur / old_max * new_max).max(0.0)
+        };
+        // 変更前の max を事前に取得するため、ここでは単純に new_max に合わせる
+        // (apply_fitting は装備変更時のみ呼ばれ、現在の比率を維持する)
+        let old_shield = hull.current_shield.max(0.0);
+        let old_armor  = hull.current_armor.max(0.0);
+        let old_hull   = hull.current_hull.max(0.0);
+        // old_max は直前の ShipStatsComp から取れないため、
+        // 現 HullComp の各層の合計を旧 max_hp の代用とする簡易実装
+        let old_total = (old_shield + old_armor + old_hull).max(1.0);
+        hull.current_shield = scale(old_shield, old_total, new_stats.max_shield + new_stats.max_armor + new_stats.max_hull) * new_stats.max_shield / (new_stats.max_shield + new_stats.max_armor + new_stats.max_hull).max(1.0);
+        hull.current_armor  = scale(old_armor,  old_total, new_stats.max_shield + new_stats.max_armor + new_stats.max_hull) * new_stats.max_armor  / (new_stats.max_shield + new_stats.max_armor + new_stats.max_hull).max(1.0);
+        hull.current_hull   = scale(old_hull,   old_total, new_stats.max_shield + new_stats.max_armor + new_stats.max_hull) * new_stats.max_hull   / (new_stats.max_shield + new_stats.max_armor + new_stats.max_hull).max(1.0);
     }
 
     Some(new_stats)
@@ -58,7 +70,9 @@ pub fn apply_delta(base: ShipStatsComp, delta: &StatDelta) -> ShipStatsComp {
     ShipStatsComp {
         max_speed        : (base.max_speed        + delta.max_speed_add).max(0.0),
         thrust_magnitude : (base.thrust_magnitude + delta.thrust_add).max(0.0),
-        max_hp           : (base.max_hp           + delta.max_hp_add).max(1.0),
+        max_shield       : (base.max_shield       + delta.max_shield_add).max(0.0),
+        max_armor        : (base.max_armor        + delta.max_armor_add).max(0.0),
+        max_hull         : (base.max_hull         + delta.max_hull_add).max(1.0),
         weapon_damage    : (base.weapon_damage    + delta.weapon_damage_add).max(0.0),
         weapon_range     : (base.weapon_range     + delta.weapon_range_add).max(0.0),
         weapon_cooldown  : {
@@ -95,7 +109,7 @@ mod tests {
         // FittingComp と HullComp を追加
         world.inner_mut().insert(entity, (
             FittingComp::empty(),
-            HullComp::new(ShipStatsComp::NPC.max_hp),
+            HullComp::new(ShipStatsComp::NPC.max_shield, ShipStatsComp::NPC.max_armor, ShipStatsComp::NPC.max_hull),
         )).unwrap();
         (world, id)
     }

@@ -130,7 +130,7 @@ mod tests {
             def: ModuleDefinition {
                 id: ModuleId(2), name: "Shield".to_string(),
                 kind: ModuleKind::ShieldBooster, slot: SlotKind::Mid,
-                stat_delta: StatDelta { max_hp_add: 300.0, ..StatDelta::ZERO },
+                stat_delta: StatDelta { max_shield_add: 300.0, ..StatDelta::ZERO },
                 activation_mode: ActivationMode::Passive,
             },
             is_active: false,  // Passive なので is_active の値は無視される
@@ -147,7 +147,7 @@ mod tests {
         let mut fitting = FittingComp::empty();
         fitting.mid.push(shield_slot());  // is_active=false だが Passive なので有効
         let delta = fitting.total_delta();
-        assert_eq!(delta.max_hp_add, 300.0, "Passive module is always effective");
+        assert_eq!(delta.max_shield_add, 300.0, "Passive module is always effective");
     }
 
     #[test]

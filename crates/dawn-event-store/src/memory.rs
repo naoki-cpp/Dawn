@@ -77,6 +77,7 @@ mod tests {
             ship_id          : ship_id(ship_n),
             sector_id        : SectorId(0),
             initial_position : Position::ORIGIN,
+            ship_type_id     : dawn_core::ShipTypeId(1),
             tick             : Tick::ZERO,
         })
     }

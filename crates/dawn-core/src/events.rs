@@ -16,6 +16,7 @@
 //! 4. Write a unit test in this module.
 
 use crate::fitting::{FittingSnapshot, SlotKind, ModuleId};
+use crate::ship_type::ShipTypeId;
 use crate::{Position, SectorId, ShipId, Tick, Velocity};
 use serde::{Deserialize, Serialize};
 
@@ -115,6 +116,8 @@ pub struct ShipSpawned {
     pub ship_id          : ShipId,
     pub sector_id        : SectorId,
     pub initial_position : Position,
+    /// 船種 ID。Replay 時に base_stats を復元するために必須（INV-002）。
+    pub ship_type_id     : ShipTypeId,
     pub tick             : Tick,
 }
 
@@ -222,13 +225,18 @@ pub struct WeaponFired {
 
 // ── DamageTaken ───────────────────────────────────────────────────────────────
 
+/// HP は Shield → Armor → Hull の順に消費される。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DamageTaken {
-    pub ship_id    : ShipId,
-    pub amount     : f32,
-    /// HP after this damage event
-    pub current_hp : f32,
-    pub tick       : Tick,
+    pub ship_id        : ShipId,
+    pub damage         : f32,
+    /// ダメージ後のシールド残量
+    pub current_shield : f32,
+    /// ダメージ後のアーマー残量
+    pub current_armor  : f32,
+    /// ダメージ後のハル残量
+    pub current_hull   : f32,
+    pub tick           : Tick,
 }
 
 // ── ShipDestroyed ─────────────────────────────────────────────────────────────
@@ -266,6 +274,7 @@ mod tests {
             ship_id          : id,
             sector_id        : SectorId(0),
             initial_position : Position::ORIGIN,
+            ship_type_id     : crate::ship_type::ShipTypeId(1),
             tick             : Tick::ZERO,
         });
         assert_eq!(event.ship_id(), id);

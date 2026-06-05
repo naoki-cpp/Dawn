@@ -30,7 +30,7 @@ pub fn all_modules() -> Vec<ModuleDefinition> {
             id: MODULE_SHIELD_BASIC, name: "Basic Shield Extender".to_string(),
             kind: ModuleKind::ShieldBooster, slot: SlotKind::Mid,
             activation_mode: ActivationMode::Passive,
-            stat_delta: StatDelta { max_hp_add: 300.0, ..StatDelta::ZERO },
+            stat_delta: StatDelta { max_shield_add: 300.0, ..StatDelta::ZERO },
         },
 
         // ── アーマー（Low / Passive）─────────────────────────────────────────
@@ -38,7 +38,7 @@ pub fn all_modules() -> Vec<ModuleDefinition> {
             id: MODULE_ARMOR_BASIC, name: "Basic Armor Plate".to_string(),
             kind: ModuleKind::ArmorRepairer, slot: SlotKind::Low,
             activation_mode: ActivationMode::Passive,
-            stat_delta: StatDelta { max_hp_add: 200.0, ..StatDelta::ZERO },
+            stat_delta: StatDelta { max_armor_add: 200.0, ..StatDelta::ZERO },
         },
 
         // ── 推進（Mid / Active）──────────────────────────────────────────────

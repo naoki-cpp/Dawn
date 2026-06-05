@@ -78,8 +78,12 @@ pub struct StatDelta {
     pub max_speed_add        : f32,
     /// 推力への加算（units/tick²）
     pub thrust_add           : f32,
-    /// 最大 HP への加算
-    pub max_hp_add           : f32,
+    /// シールド最大 HP への加算
+    pub max_shield_add       : f32,
+    /// アーマー最大 HP への加算
+    pub max_armor_add        : f32,
+    /// ハル最大 HP への加算
+    pub max_hull_add         : f32,
     /// 武器ダメージへの加算
     pub weapon_damage_add    : f32,
     /// 武器射程への加算（units）
@@ -97,7 +101,9 @@ impl StatDelta {
     pub const ZERO: Self = Self {
         max_speed_add       : 0.0,
         thrust_add          : 0.0,
-        max_hp_add          : 0.0,
+        max_shield_add      : 0.0,
+        max_armor_add       : 0.0,
+        max_hull_add        : 0.0,
         weapon_damage_add   : 0.0,
         weapon_range_add    : 0.0,
         weapon_cooldown_add : 0,
@@ -105,12 +111,13 @@ impl StatDelta {
         max_locks_add       : 0,
     };
 
-    /// 差分を加算する。
     pub fn add(&self, other: &StatDelta) -> StatDelta {
         StatDelta {
             max_speed_add       : self.max_speed_add       + other.max_speed_add,
             thrust_add          : self.thrust_add          + other.thrust_add,
-            max_hp_add          : self.max_hp_add          + other.max_hp_add,
+            max_shield_add      : self.max_shield_add      + other.max_shield_add,
+            max_armor_add       : self.max_armor_add       + other.max_armor_add,
+            max_hull_add        : self.max_hull_add        + other.max_hull_add,
             weapon_damage_add   : self.weapon_damage_add   + other.weapon_damage_add,
             weapon_range_add    : self.weapon_range_add    + other.weapon_range_add,
             weapon_cooldown_add : self.weapon_cooldown_add + other.weapon_cooldown_add,
@@ -179,7 +186,9 @@ mod tests {
         let base = StatDelta {
             max_speed_add       : 10.0,
             thrust_add          : 5.0,
-            max_hp_add          : 100.0,
+            max_shield_add      : 50.0,
+            max_armor_add       : 30.0,
+            max_hull_add        : 20.0,
             weapon_damage_add   : 20.0,
             weapon_range_add    : 500.0,
             weapon_cooldown_add : -1,

@@ -40,7 +40,7 @@ enum EventJson {
     ShipSpawned      { ship_id: u64, position: PosJson, tick: u64 },
     VelocityChanged  { ship_id: u64, velocity: VelJson, tick: u64 },
     ShipDespawned    { ship_id: u64, tick: u64 },
-    DamageTaken   { ship_id: u64, amount: f32, current_hp: f32, tick: u64 },
+    DamageTaken   { ship_id: u64, damage: f32, current_shield: f32, current_armor: f32, current_hull: f32, tick: u64 },
     ShipDestroyed { ship_id: u64, killer_id: u64, tick: u64 },
     TargetLocked      { locker_id: u64, target_id: u64, tick: u64 },
     LockLost          { locker_id: u64, target_id: u64, tick: u64 },
@@ -75,8 +75,10 @@ fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
         },
         DomainEvent::DamageTaken(e) => EventJson::DamageTaken {
             ship_id   : e.ship_id.raw(),
-            amount    : e.amount,
-            current_hp: e.current_hp,
+            damage         : e.damage,
+            current_shield : e.current_shield,
+            current_armor  : e.current_armor,
+            current_hull   : e.current_hull,
             tick      : e.tick.value(),
         },
         DomainEvent::ShipDestroyed(e) => EventJson::ShipDestroyed {

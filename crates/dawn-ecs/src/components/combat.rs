@@ -2,27 +2,56 @@
 
 use dawn_core::{ShipId, Tick};
 
-/// Ship の現在 HP 状態。
+/// Ship の現在 HP 状態（Shield / Armor / Hull の 3 層）。
+///
+/// ダメージ適用順序: Shield → Armor → Hull
+/// Hull が 0 になると `is_destroyed = true`。
 #[derive(Debug, Clone, Copy)]
 pub struct HullComp {
-    pub current_hp   : f32,
-    pub is_destroyed : bool,
+    pub current_shield : f32,
+    pub current_armor  : f32,
+    pub current_hull   : f32,
+    pub is_destroyed   : bool,
 }
 
 impl HullComp {
-    /// 指定した最大 HP で初期化する。
-    pub fn new(max_hp: f32) -> Self {
-        Self { current_hp: max_hp, is_destroyed: false }
+    /// 初期 HP を 3 層で指定して初期化する。
+    pub fn new(max_shield: f32, max_armor: f32, max_hull: f32) -> Self {
+        Self {
+            current_shield : max_shield,
+            current_armor  : max_armor,
+            current_hull   : max_hull,
+            is_destroyed   : false,
+        }
     }
 
-    /// ダメージを適用する。HP が 0 以下になったら `is_destroyed` を立てる。
-    /// 返り値: 適用後の HP。
-    pub fn apply_damage(&mut self, amount: f32) -> f32 {
-        self.current_hp = (self.current_hp - amount).max(0.0);
-        if self.current_hp <= 0.0 {
+    /// ダメージを Shield → Armor → Hull の順に適用する。
+    /// 返り値: (current_shield, current_armor, current_hull)
+    pub fn apply_damage(&mut self, amount: f32) -> (f32, f32, f32) {
+        let mut remaining = amount;
+
+        // 1. Shield から引く
+        let shield_absorbed = remaining.min(self.current_shield);
+        self.current_shield -= shield_absorbed;
+        remaining -= shield_absorbed;
+
+        // 2. Armor から引く
+        if remaining > 0.0 {
+            let armor_absorbed = remaining.min(self.current_armor);
+            self.current_armor -= armor_absorbed;
+            remaining -= armor_absorbed;
+        }
+
+        // 3. Hull から引く
+        if remaining > 0.0 {
+            self.current_hull = (self.current_hull - remaining).max(0.0);
+        }
+
+        if self.current_hull <= 0.0 {
             self.is_destroyed = true;
         }
-        self.current_hp
+
+        (self.current_shield, self.current_armor, self.current_hull)
     }
 }
 
@@ -104,32 +133,52 @@ mod tests {
 
     #[test]
     fn hull_comp_initialized_with_full_hp() {
-        let hull = HullComp::new(1000.0);
-        assert_eq!(hull.current_hp, 1000.0);
+        let hull = HullComp::new(300.0, 200.0, 100.0);
+        assert_eq!(hull.current_shield, 300.0);
+        assert_eq!(hull.current_armor,  200.0);
+        assert_eq!(hull.current_hull,   100.0);
         assert!(!hull.is_destroyed);
     }
 
     #[test]
-    fn hull_comp_is_destroyed_when_hp_reaches_zero() {
-        let mut hull = HullComp::new(100.0);
+    fn damage_depletes_shield_first() {
+        let mut hull = HullComp::new(300.0, 200.0, 100.0);
         hull.apply_damage(100.0);
-        assert_eq!(hull.current_hp, 0.0);
+        assert_eq!(hull.current_shield, 200.0);
+        assert_eq!(hull.current_armor,  200.0);
+        assert_eq!(hull.current_hull,   100.0);
+        assert!(!hull.is_destroyed);
+    }
+
+    #[test]
+    fn damage_overflows_shield_into_armor() {
+        let mut hull = HullComp::new(100.0, 200.0, 100.0);
+        hull.apply_damage(150.0);
+        assert_eq!(hull.current_shield, 0.0);
+        assert_eq!(hull.current_armor,  150.0);
+        assert_eq!(hull.current_hull,   100.0);
+    }
+
+    #[test]
+    fn hull_comp_is_destroyed_when_hull_reaches_zero() {
+        let mut hull = HullComp::new(0.0, 0.0, 100.0);
+        hull.apply_damage(100.0);
+        assert_eq!(hull.current_hull, 0.0);
         assert!(hull.is_destroyed);
     }
 
     #[test]
     fn hull_comp_hp_does_not_go_below_zero() {
-        let mut hull = HullComp::new(50.0);
-        let hp = hull.apply_damage(200.0);
-        assert_eq!(hp, 0.0);
+        let mut hull = HullComp::new(0.0, 0.0, 50.0);
+        let (_, _, h) = hull.apply_damage(200.0);
+        assert_eq!(h, 0.0);
         assert!(hull.is_destroyed);
     }
 
     #[test]
     fn hull_comp_partial_damage_does_not_destroy_ship() {
-        let mut hull = HullComp::new(100.0);
-        hull.apply_damage(40.0);
-        assert_eq!(hull.current_hp, 60.0);
+        let mut hull = HullComp::new(200.0, 100.0, 100.0);
+        hull.apply_damage(150.0);
         assert!(!hull.is_destroyed);
     }
 

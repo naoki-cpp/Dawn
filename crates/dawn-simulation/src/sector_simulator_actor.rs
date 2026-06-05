@@ -121,7 +121,7 @@ impl SectorSimulatorActor {
                 }
 
                 SectorSimulatorMessage::SpawnShip { position, velocity, reply } => {
-                    let ship_id = self.node.spawn_ship(position, velocity);
+                    let ship_id = self.node.spawn_ship(dawn_core::ShipTypeId(1), position, velocity);
 
                     // Spawn appends to the internal log; flush those events.
                     self.flush_to_bus().await;
