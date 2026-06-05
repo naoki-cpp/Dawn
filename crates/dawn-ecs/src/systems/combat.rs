@@ -27,13 +27,14 @@ use dawn_core::{
 
 // スナップショット用内部型
 struct ShipSnapshot {
-    ship_id       : ShipId,
-    stats         : ShipStatsComp,
-    last_fired    : Tick,
-    current_hp    : f32,
-    is_dead       : bool,
-    /// Locked 状態のターゲット（LockComp から抽出）
-    locked_targets: Vec<ShipId>,
+    ship_id        : ShipId,
+    stats          : ShipStatsComp,
+    last_fired     : Tick,
+    current_shield : f32,
+    current_armor  : f32,
+    current_hull   : f32,
+    is_dead        : bool,
+    locked_targets : Vec<ShipId>,
 }
 
 /// Combat System の実行結果。
@@ -58,12 +59,14 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CombatResult {
             .iter()
         {
             v.push(ShipSnapshot {
-                ship_id       : id.0,
-                stats         : *stats,
-                last_fired    : weapon.last_fired_tick,
-                current_hp    : hull.current_hp,
-                is_dead       : hull.is_destroyed,
-                locked_targets: lock.locked_targets().collect(),
+                ship_id        : id.0,
+                stats          : *stats,
+                last_fired     : weapon.last_fired_tick,
+                current_shield : hull.current_shield,
+                current_armor  : hull.current_armor,
+                current_hull   : hull.current_hull,
+                is_dead        : hull.is_destroyed,
+                locked_targets : lock.locked_targets().collect(),
             });
         }
         v
@@ -103,14 +106,30 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CombatResult {
     // ── 3. ダメージ適用 ──────────────────────────────────────────────────────
 
     for (j, damage, attacker_id) in damage_accum {
-        ships[j].current_hp = (ships[j].current_hp - damage).max(0.0);
+        // Shield → Armor → Hull の順にダメージを適用
+        let mut remaining = damage;
+        let shield_absorbed = remaining.min(ships[j].current_shield);
+        ships[j].current_shield -= shield_absorbed;
+        remaining -= shield_absorbed;
+        if remaining > 0.0 {
+            let armor_absorbed = remaining.min(ships[j].current_armor);
+            ships[j].current_armor -= armor_absorbed;
+            remaining -= armor_absorbed;
+        }
+        if remaining > 0.0 {
+            ships[j].current_hull = (ships[j].current_hull - remaining).max(0.0);
+        }
+
         events.push(DomainEvent::DamageTaken(DamageTaken {
-            ship_id   : ships[j].ship_id,
-            amount    : damage,
-            current_hp: ships[j].current_hp,
+            ship_id        : ships[j].ship_id,
+            damage,
+            current_shield : ships[j].current_shield,
+            current_armor  : ships[j].current_armor,
+            current_hull   : ships[j].current_hull,
             tick,
         }));
-        if ships[j].current_hp <= 0.0 && !ships[j].is_dead {
+
+        if ships[j].current_hull <= 0.0 && !ships[j].is_dead {
             ships[j].is_dead = true;
             events.push(DomainEvent::ShipDestroyed(ShipDestroyed {
                 ship_id  : ships[j].ship_id,
@@ -133,15 +152,21 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CombatResult {
         }
     }
 
-    let hp_updates: Vec<(ShipId, f32, bool)> = ships.iter()
-        .map(|s| (s.ship_id, s.current_hp, s.is_dead))
+    let hp_updates: Vec<(ShipId, f32, f32, f32, bool)> = ships.iter()
+        .map(|s| (s.ship_id, s.current_shield, s.current_armor, s.current_hull, s.is_dead))
         .collect();
-    for (target_id, hp, dead) in hp_updates {
+    for (target_id, shield, armor, hull_hp, dead) in hp_updates {
         for (_, (id, hull)) in world
             .inner_mut()
             .query_mut::<(&ShipIdComp, &mut HullComp)>()
         {
-            if id.0 == target_id { hull.current_hp = hp; hull.is_destroyed = dead; break; }
+            if id.0 == target_id {
+                hull.current_shield = shield;
+                hull.current_armor  = armor;
+                hull.current_hull   = hull_hp;
+                hull.is_destroyed   = dead;
+                break;
+            }
         }
     }
 
