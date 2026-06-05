@@ -79,7 +79,7 @@ fn run_phase1_benchmark() {
 
     let t0 = Instant::now();
     for (_, pos, vel) in ships {
-        node.spawn_ship(dawn_core::ShipTypeId(1), pos, vel);
+        node.spawn_ship(ship_types::SHIP_TYPE_NPC_FRIGATE, pos, vel);
     }
     let spawn_ms = t0.elapsed().as_secs_f64() * 1_000.0;
 
@@ -209,7 +209,7 @@ fn run_phase3_demo() {
         ship_ids   = ships.iter().map(|(id, ..)| *id).collect();
 
         for (_, pos, vel) in ships {
-            node.spawn_ship(dawn_core::ShipTypeId(1), pos, vel);
+            node.spawn_ship(ship_types::SHIP_TYPE_NPC_FRIGATE, pos, vel);
         }
 
         // Run half the ticks, take snapshot.
