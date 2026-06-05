@@ -333,13 +333,14 @@ async fn run_phase4_server(ship_count: usize) {
 
         // 新規 TCP 接続 → ハンドシェイクタスクを spawn
         while let Ok((stream, addr)) = new_conn_rx.try_recv() {
-            let player_id     = node.next_player_id();
-            let ship_id       = node.spawn_player_ship(player_id);
-            let initial_state = node.build_initial_state_json();
-            let tx            = ready_sess_tx.clone();  // ループ外チャンネルをクローン
+            let player_id      = node.next_player_id();
+            let ship_id        = node.spawn_player_ship(player_id);
+            let initial_state  = node.build_initial_state_json();
+            let player_fitting = node.build_player_fitting_json(ship_id);
+            let tx             = ready_sess_tx.clone();
             tokio::spawn(async move {
                 match ws_server::WsServer::handshake(
-                    stream, addr, player_id, ship_id, &initial_state
+                    stream, addr, player_id, ship_id, &initial_state, player_fitting
                 ).await {
                     Ok(sess) => { let _ = tx.send(sess); }
                     Err(e)   => eprintln!("[Server] handshake failed: {e}"),

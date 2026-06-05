@@ -429,6 +429,41 @@ impl<S: EventStore> SimulationNode<S> {
         true
     }
 
+    /// プレイヤー船の Fitting 状態を PlayerFitting JSON として返す。
+    ///
+    /// 接続時に Welcome + InitialState の後に送信する。
+    /// フォーマット:
+    /// ```json
+    /// {"type":"PlayerFitting","modules":[
+    ///   {"slot":"High","index":0,"module_id":1,"name":"Small Railgun I","is_active":false}
+    /// ]}
+    /// ```
+    pub fn build_player_fitting_json(&self, ship_id: ShipId) -> Option<String> {
+        let entity = self.ship_index.get(&ship_id)?;
+        let fitting = self.world.inner().get::<&FittingComp>(*entity).ok()?;
+
+        let mut modules: Vec<serde_json::Value> = Vec::new();
+        let slot_names = [("High", &fitting.high), ("Mid", &fitting.mid),
+                          ("Low", &fitting.low), ("Rig", &fitting.rig)];
+        for (slot_name, slots) in &slot_names {
+            for (i, slot) in slots.iter().enumerate() {
+                modules.push(serde_json::json!({
+                    "slot"      : slot_name,
+                    "index"     : i,
+                    "module_id" : slot.def.id.0,
+                    "name"      : slot.def.name,
+                    "is_active" : slot.is_active,
+                    "is_active_module": matches!(slot.def.activation_mode, dawn_core::ActivationMode::Active),
+                }));
+            }
+        }
+
+        Some(serde_json::json!({
+            "type"   : "PlayerFitting",
+            "modules": modules,
+        }).to_string())
+    }
+
     /// 現在の全 Ship の状態を InitialState JSON として返す（接続時の同期用）。
     pub fn build_initial_state_json(&self) -> String {
         let ships: Vec<serde_json::Value> = self.ship_index.keys().filter_map(|&ship_id| {

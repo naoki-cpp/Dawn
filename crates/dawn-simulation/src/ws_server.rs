@@ -42,8 +42,10 @@ enum EventJson {
     ShipDespawned    { ship_id: u64, tick: u64 },
     DamageTaken   { ship_id: u64, amount: f32, current_hp: f32, tick: u64 },
     ShipDestroyed { ship_id: u64, killer_id: u64, tick: u64 },
-    TargetLocked  { locker_id: u64, target_id: u64, tick: u64 },
-    LockLost      { locker_id: u64, target_id: u64, tick: u64 },
+    TargetLocked      { locker_id: u64, target_id: u64, tick: u64 },
+    LockLost          { locker_id: u64, target_id: u64, tick: u64 },
+    ModuleActivated   { ship_id: u64, module_id: u32, slot: String, tick: u64 },
+    ModuleDeactivated { ship_id: u64, module_id: u32, slot: String, tick: u64 },
 }
 
 #[derive(Serialize, Clone, Copy)]
@@ -92,11 +94,21 @@ fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
             target_id : e.target_id.raw(),
             tick      : e.tick.value(),
         },
-        // 以下はクライアント側の状態管理に使わないためスキップ
-        DomainEvent::ShipFitted(_)         => return None,
-        DomainEvent::WeaponFired(_)        => return None,
-        DomainEvent::ModuleActivated(_)    => return None,
-        DomainEvent::ModuleDeactivated(_)  => return None,
+        DomainEvent::ModuleActivated(e) => EventJson::ModuleActivated {
+            ship_id  : e.ship_id.raw(),
+            module_id: e.module_id.0,
+            slot     : format!("{:?}", e.slot),
+            tick     : e.tick.value(),
+        },
+        DomainEvent::ModuleDeactivated(e) => EventJson::ModuleDeactivated {
+            ship_id  : e.ship_id.raw(),
+            module_id: e.module_id.0,
+            slot     : format!("{:?}", e.slot),
+            tick     : e.tick.value(),
+        },
+        // 以下はクライアント側の状態管理に使わない
+        DomainEvent::ShipFitted(_)  => return None,
+        DomainEvent::WeaponFired(_) => return None,
     };
     serde_json::to_string(&j).ok()
 }
@@ -256,11 +268,12 @@ impl WsServer {
     /// 3. Welcome + InitialState を送信
     /// 4. `PlayerSession` を返す
     pub async fn handshake(
-        stream       : TcpStream,
-        peer_addr    : SocketAddr,
-        player_id    : PlayerId,
-        ship_id      : ShipId,
-        initial_state: &str,
+        stream        : TcpStream,
+        peer_addr     : SocketAddr,
+        player_id     : PlayerId,
+        ship_id       : ShipId,
+        initial_state : &str,
+        player_fitting: Option<String>,
     ) -> anyhow::Result<PlayerSession> {
         let ws_stream = accept_async(stream).await?;
         println!("[WsServer] client connected: {peer_addr}");
@@ -299,6 +312,11 @@ impl WsServer {
 
         // InitialState を送信
         ws_sink.send(Message::Text((initial_state.to_string() + "\n").into())).await?;
+
+        // PlayerFitting を送信（プレイヤー自身の装備情報）
+        if let Some(fitting) = player_fitting {
+            ws_sink.send(Message::Text((fitting + "\n").into())).await?;
+        }
 
         // イベント送信タスク
         tokio::spawn(async move {

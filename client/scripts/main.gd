@@ -32,9 +32,13 @@ var _ships           : Dictionary = {}
 var _player_ship_id  : int        = -1
 var _event_count     : int        = 0
 var _current_tick    : int        = 0
-var _player_hp       : float      = -1.0   ## -1 = 未取得
-var _player_max_hp   : float      = 1000.0 ## ShipStatsComp::PLAYER.max_hp
-var _player_lock_target : int     = -1     ## 現在プレイヤーがロック中/ロック済みのターゲット
+var _player_hp          : float  = -1.0
+var _player_max_hp      : float  = 1000.0
+var _player_lock_target : int    = -1
+
+## モジュールスロット情報
+## [{slot, index, module_id, name, is_active, is_active_module}, ...]
+var _player_modules : Array = []
 
 ## ダブルクリック検出用
 var _last_click_time  : float  = -1.0
@@ -49,6 +53,9 @@ func _ready() -> void:
 	_connection.connection_changed.connect(_on_connection_changed)
 	_connection.welcomed.connect(_on_welcomed)
 	_connection.initial_state_received.connect(_on_initial_state)
+	_connection.player_fitting_received.connect(_on_player_fitting)
+	_connection.module_activated.connect(_on_module_activated)
+	_connection.module_deactivated.connect(_on_module_deactivated)
 	_build_player_material()
 	_setup_space_environment()
 	_update_hud()
@@ -57,6 +64,23 @@ func _process(_delta: float) -> void:
 	_update_hud()
 
 func _input(event: InputEvent) -> void:
+	## F1〜F8 でモジュールをオン/オフする
+	if event is InputEventKey and event.pressed and not event.echo:
+		var key: InputEventKey = event as InputEventKey
+		var f_index: int = -1
+		match key.keycode:
+			KEY_F1: f_index = 0
+			KEY_F2: f_index = 1
+			KEY_F3: f_index = 2
+			KEY_F4: f_index = 3
+			KEY_F5: f_index = 4
+			KEY_F6: f_index = 5
+			KEY_F7: f_index = 6
+			KEY_F8: f_index = 7
+		if f_index >= 0:
+			_toggle_module_by_index(f_index)
+			return
+
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
 		if mb.pressed:
@@ -209,6 +233,49 @@ func _on_initial_state(ships: Array) -> void:
 			_player_hp     = cur_hp
 			_set_as_player_ship(sid, ship)
 
+func _on_player_fitting(modules: Array) -> void:
+	_player_modules = modules
+
+func _on_module_activated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
+	if p_ship_id != _player_ship_id:
+		return
+	for m: Variant in _player_modules:
+		var mod_dict: Dictionary = m as Dictionary
+		if mod_dict.get("module_id", 0) as int == p_module_id:
+			mod_dict["is_active"] = true
+			break
+
+func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
+	if p_ship_id != _player_ship_id:
+		return
+	for m: Variant in _player_modules:
+		var mod_dict: Dictionary = m as Dictionary
+		if mod_dict.get("module_id", 0) as int == p_module_id:
+			mod_dict["is_active"] = false
+			break
+
+func _toggle_module_by_index(f_index: int) -> void:
+	if _player_ship_id < 0:
+		return
+	## F1〜F8 は High スロットの index 0〜7 に対応
+	var active_count: int = 0
+	for m: Variant in _player_modules:
+		var mod_dict: Dictionary = m as Dictionary
+		if mod_dict.get("slot", "") != "High":
+			continue
+		if mod_dict.get("is_active_module", false) as bool == false:
+			continue  ## Passive はスキップ
+		if active_count == f_index:
+			var mid : int    = mod_dict.get("module_id", 0)   as int
+			var slot: String = mod_dict.get("slot",      "")  as String
+			var currently_active: bool = mod_dict.get("is_active", false) as bool
+			if currently_active:
+				_connection.send_deactivate_module(_player_ship_id, mid, slot)
+			else:
+				_connection.send_activate_module(_player_ship_id, mid, slot)
+			return
+		active_count += 1
+
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 	_player_ship_id = p_ship_id
 	_player_hp      = _player_max_hp
@@ -338,9 +405,22 @@ func _update_hud() -> void:
 	else:
 		lock_str = "LOST"
 
+	## モジュールスロット（Active モジュールのみ F キーで表示）
+	var module_lines: String = ""
+	var f_idx: int = 1
+	for m: Variant in _player_modules:
+		var mod_dict: Dictionary = m as Dictionary
+		if not (mod_dict.get("is_active_module", false) as bool):
+			continue  ## Passive はスキップ
+		var name_str : String = mod_dict.get("name",      "?") as String
+		var is_on    : bool   = mod_dict.get("is_active", false) as bool
+		var state_str: String = "ON" if is_on else "OFF"
+		module_lines += "\n[F%d] %s: %s" % [f_idx, name_str, state_str]
+		f_idx += 1
+
 	_stats_label.text = (
-		"%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nLock: %s\n\n[DoubleClick] Thrust\n[RightClick] Lock"
-		% [status, _ships.size(), _current_tick, speed_str, hp_str, lock_str]
+		"%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nLock: %s%s\n\n[DoubleClick] Thrust\n[RightClick] Lock"
+		% [status, _ships.size(), _current_tick, speed_str, hp_str, lock_str, module_lines]
 	)
 
 # ── 内部ユーティリティ ────────────────────────────────────────────────────────
