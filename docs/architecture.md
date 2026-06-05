@@ -29,6 +29,7 @@ related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, roadm
 | `docs/ownership.md` | 誰が何を管理するか（所有権・状態遷移） |
 | `docs/tick-model.md` | いつ・どの順番で処理されるか |
 | `docs/roadmap.md` | 何を・どの順番で作るか |
+| `docs/game-design.md` | なぜその機能を作るか / EVE からの教訓・将来機能候補 |
 | `adr/` | なぜそう決めたか（変更不可の判断記録） |
 
 ---
