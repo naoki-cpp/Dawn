@@ -86,6 +86,8 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 | イベント名 | 説明 | 発行者 | ステータス |
 |---|---|---|---|
 | `ShipFitted` | Ship の装備スロットが変更された | `SimulationNode::fit_module()` | ✅ 実装済み |
+| `ModuleActivated` | Active モジュールがオンになった | `SimulationNode::activate_module()` | ⬜ 未実装 |
+| `ModuleDeactivated` | Active モジュールがオフになった | `SimulationNode::deactivate_module()` | ⬜ 未実装 |
 
 ### 3.4 Lock-on
 
@@ -128,6 +130,8 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 | `MoveCommand` | 推力方向を指定する | — | ✅ 実装済み |
 | `LockOnCommand` | ロックオン開始を要求する | `TargetLocked` | ✅ 実装済み |
 | `FitModuleCommand` | モジュールを装備する | `ShipFitted` | ✅ 実装済み |
+| `ActivateModuleCommand` | Active モジュールをオンにする | `ModuleActivated` | ⬜ 未実装 |
+| `DeactivateModuleCommand` | Active モジュールをオフにする | `ModuleDeactivated` | ⬜ 未実装 |
 | `AttackCommand` | 攻撃対象を指定する | `WeaponFired` | コマンド型定義済み・WsServer JSON パーサーは Phase 5 で追加 |
 
 ---
@@ -249,6 +253,37 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 
 **設計メモ:** `current_hp` を含めることで Replay 時に
 `HullComp.current_hp` を正確に復元できる（INV-002 準拠）。
+
+---
+
+### `ModuleActivated`
+
+**説明:** Active モジュールがオンになった。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id`   | `ShipId`  | ✓ | 操作した Ship |
+| `module_id` | `ModuleId` | ✓ | 対象モジュール |
+| `slot`      | `SlotKind` | ✓ | 装備スロット種別 |
+| `tick`      | `Tick`    | ✓ | 活性化した Tick |
+
+**設計メモ:** `is_active: true` という状態変化ではなく「オンにした」という事実として表現する。
+Replay 時は `FittedSlot.is_active = true` にセットし、`apply_fitting()` を再実行する。
+
+---
+
+### `ModuleDeactivated`
+
+**説明:** Active モジュールがオフになった。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id`   | `ShipId`  | ✓ | 操作した Ship |
+| `module_id` | `ModuleId` | ✓ | 対象モジュール |
+| `slot`      | `SlotKind` | ✓ | 装備スロット種別 |
+| `tick`      | `Tick`    | ✓ | 非活性化した Tick |
+
+**設計メモ:** `ModuleActivated` の対。Replay 時は `FittedSlot.is_active = false` にセットする。
 
 ---
 

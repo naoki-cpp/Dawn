@@ -938,6 +938,28 @@ AIが陥りやすいアンチパターンとその修正方法を示す。
   → ADR-0006 §1 参照
 ```
 
+### パターン8: 状態変化をイベントとして表現する
+
+```
+状況: モジュールのオン/オフを表すイベントに is_active フラグを持たせようとする
+
+違反コード:
+  ModuleToggled { ship_id, module_id, is_active: bool, tick }
+  // → is_active を見ないと何が起きたかわからない
+  // → 状態の記述であって「事実」ではない
+
+正しい実装:
+  ModuleActivated   { ship_id, module_id, slot, tick }  // オンにした
+  ModuleDeactivated { ship_id, module_id, slot, tick }  // オフにした
+  // → イベント名自体が「何が起きたか」を表す
+
+原則:
+  Event は既に起きた事実（INV-006）。
+  「状態がこうなった」ではなく「この動作が起きた」と命名する。
+  過去形・動詞（Activated, Fired, Destroyed）を使う。
+  is_*/has_* フラグをイベントのキーフィールドにしない。
+```
+
 ### パターン7: 特定座標を「シグナル」として流用する
 
 ```
@@ -982,6 +1004,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-05（Cycle 3 Lock-on / ClientCommand 対応）*
+*最終更新: 2026-06-05（Active/Passive モジュール設計追加）*
 *対応ADR: ADR-0001 〜 ADR-0007*
 *次回レビュー予定: Phase 4完了時（Cycle N 終了・Phase 5 移行前）*

@@ -1,6 +1,6 @@
 ---
 id      : ADR-0006
-title   : Fitting / Combat / Lock-on システムの設計
+title   : Fitting / Combat / Lock-on / Active モジュールシステムの設計
 status  : accepted
 date    : 2026-06-05
 updated : 2026-06-05
@@ -33,23 +33,42 @@ Phase 4 Cycle 3 として EVE Online 準拠の Fitting システムと
 // スロット種別（dawn-core）
 pub enum SlotKind { High, Mid, Low, Rig }
 
+// モジュールの活性化モード（dawn-core）
+pub enum ActivationMode {
+    /// 常時効果。装備するだけで StatDelta が適用される。
+    /// 例: Shield Extender, Armor Plate, Rig
+    Passive,
+    /// プレイヤーがオン/オフを切り替える。
+    /// オフ時は StatDelta が適用されない。武器はロック済みのときのみ発射する。
+    /// 例: Weapon/Turret, Afterburner, Shield Booster
+    Active,
+}
+
 // モジュール定義（dawn-core）
-// FittedModule という別型は作らず、ModuleDefinition を FittingComp に直接格納する。
-// ModuleDefinition がスロット・stat 差分・名前を一元管理するため冗長な型が不要。
 pub struct ModuleDefinition {
-    pub id         : ModuleId,
-    pub name       : String,
-    pub kind       : ModuleKind,
-    pub slot       : SlotKind,
-    pub stat_delta : StatDelta,
+    pub id              : ModuleId,
+    pub name            : String,
+    pub kind            : ModuleKind,
+    pub slot            : SlotKind,
+    pub stat_delta      : StatDelta,
+    pub activation_mode : ActivationMode,  // 追加
+}
+
+// 装備スロット 1 枠（モジュール定義 + 現在の活性化状態）
+pub struct FittedSlot {
+    pub def      : ModuleDefinition,
+    /// Active モジュールのみ有意。Passive は常に true 扱い。
+    /// true = オン（StatDelta 適用・武器は発射可能）
+    /// false = オフ（StatDelta 不適用・武器は発射しない）
+    pub is_active: bool,
 }
 
 // 船の装備スロット全体（dawn-ecs）
 pub struct FittingComp {
-    pub high : Vec<ModuleDefinition>,
-    pub mid  : Vec<ModuleDefinition>,
-    pub low  : Vec<ModuleDefinition>,
-    pub rig  : Vec<ModuleDefinition>,
+    pub high : Vec<FittedSlot>,
+    pub mid  : Vec<FittedSlot>,
+    pub low  : Vec<FittedSlot>,
+    pub rig  : Vec<FittedSlot>,
 }
 
 // Fitting 結果として集計された最終 stat（dawn-ecs）
@@ -73,10 +92,15 @@ pub struct ShipStatsComp {
 
 ```
 FittingComp（装備スロット）
-    ↓ apply_fitting(world, ship_id, base_stats) → stat_delta を合計
-ShipStatsComp（最終 stat）= base_stats + Σ(module.stat_delta)
+    ↓ apply_fitting(world, ship_id, base_stats)
+    ↓   Passive モジュール    : 常に stat_delta を加算
+    ↓   Active モジュール ON  : stat_delta を加算
+    ↓   Active モジュール OFF : stat_delta を加算しない
+ShipStatsComp（最終 stat）= base_stats + Σ(有効モジュールの stat_delta)
     ↓ Combat / Movement システムが参照
 ```
+
+Active モジュールのオン/オフが変わるたびに `apply_fitting()` を再実行する。
 
 #### base_stats の管理（二重加算防止）
 
@@ -129,6 +153,50 @@ pub struct ShipFitted {
 Replay 時は `FittingSnapshot` から `FittingComp` を復元し、`apply_fitting()` で
 `ShipStatsComp` を再計算する。stat をイベントに含める必要はなく、冗長になるため省略した。
 `FittingSnapshot` があれば INV-002（Event Replay で完全復元）は満たされる。
+
+#### Active モジュールの活性化イベント（dawn-core）
+
+モジュールのオン/オフは「起きた事実」としてイベントに記録する（INV-001 / INV-002）。
+
+```rust
+/// Active モジュールがオンになった。
+pub struct ModuleActivated {
+    pub ship_id   : ShipId,
+    pub module_id : ModuleId,
+    pub slot      : SlotKind,
+    pub tick      : Tick,
+}
+
+/// Active モジュールがオフになった。
+pub struct ModuleDeactivated {
+    pub ship_id   : ShipId,
+    pub module_id : ModuleId,
+    pub slot      : SlotKind,
+    pub tick      : Tick,
+}
+```
+
+**`is_active: bool` を 1 つのイベントにまとめない理由:**
+`is_active` は状態の記述であって事実ではない。
+「オンにした」「オフにした」という動作そのものをイベントとして表現することで、
+Replay 時も活性化の履歴が正確に再現される（Event Sourcing の原則）。
+
+#### コマンド（dawn-core）
+
+```rust
+pub struct ActivateModuleCommand   { pub ship_id: ShipId, pub module_id: ModuleId }
+pub struct DeactivateModuleCommand { pub ship_id: ShipId, pub module_id: ModuleId }
+```
+
+`ClientCommand` enum にも `Activate` / `Deactivate` variant を追加する。
+
+#### NPC と プレイヤーの挙動の違い
+
+| | NPC | プレイヤー |
+|---|---|---|
+| 武器モジュール装備直後 | `is_active = true`（自動オン） | `is_active = false`（手動でオン） |
+| ロックオン | 自動（`IsNpcComp` による） | 手動（`LockOnCommand`） |
+| 武器発射条件 | `is_active == true` && Locked | `is_active == true` && Locked |
 
 ---
 
@@ -354,7 +422,15 @@ CombatSystem::run:
 ### Fitting
 
 - [x] `dawn-core`: `ModuleId`, `ModuleKind`, `SlotKind`, `StatDelta`, `ModuleDefinition`, `FittingSnapshot` 型定義
+- [ ] `dawn-core`: `ActivationMode` を `ModuleDefinition` に追加（Passive / Active）
+- [ ] `dawn-ecs`: `FittingComp` を `Vec<FittedSlot>` に変更（`FittedSlot { def, is_active }`）
+- [ ] `dawn-ecs`: `apply_fitting()` で Active OFF モジュールの delta をスキップ
 - [x] `dawn-core`: `ShipFitted` イベント, `FitModuleCommand` コマンド
+- [ ] `dawn-core`: `ModuleActivated` / `ModuleDeactivated` イベント
+- [ ] `dawn-core`: `ActivateModuleCommand` / `DeactivateModuleCommand` コマンド
+- [ ] `dawn-actor`: `ClientCommand` に `Activate` / `Deactivate` variant 追加
+- [ ] `dawn-simulation`: NPC 武器モジュールを `is_active = true` で装備
+- [ ] `dawn-simulation`: CombatSystem を `is_active == true` の武器のみ発射に変更
 - [x] `dawn-ecs`: `FittingComp` コンポーネント
 - [x] `dawn-ecs`: `ShipStatsComp` に Combat フィールド追加（ベース値はゼロ）
 - [x] `dawn-ecs`: `apply_fitting()` / `apply_delta()` システム関数
