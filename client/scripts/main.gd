@@ -32,9 +32,14 @@ var _ships           : Dictionary = {}
 var _player_ship_id  : int        = -1
 var _event_count     : int        = 0
 var _current_tick    : int        = 0
-var _player_hp          : float  = -1.0
-var _player_max_hp      : float  = 1000.0
-var _player_lock_target : int    = -1
+## 3-layer HP tracking (Shield / Armor / Hull)
+var _player_shield     : float = -1.0
+var _player_armor      : float = -1.0
+var _player_hull       : float = -1.0
+var _player_max_shield : float = 500.0
+var _player_max_armor  : float = 300.0
+var _player_max_hull   : float = 200.0
+var _player_lock_target : int  = -1
 
 ## モジュールスロット情報
 ## [{slot, index, module_id, name, is_active, is_active_module}, ...]
@@ -229,8 +234,12 @@ func _on_initial_state(ships: Array) -> void:
 
 		## 自分の船かどうか確認
 		if sid == _connection.ship_id and _player_ship_id < 0:
-			_player_max_hp = max_hp
-			_player_hp     = cur_hp
+			_player_max_shield = d.get("max_shield",     500.0) as float
+			_player_max_armor  = d.get("max_armor",      300.0) as float
+			_player_max_hull   = d.get("max_hull",       200.0) as float
+			_player_shield     = d.get("current_shield", _player_max_shield) as float
+			_player_armor      = d.get("current_armor",  _player_max_armor)  as float
+			_player_hull       = d.get("current_hull",   _player_max_hull)   as float
 			_set_as_player_ship(sid, ship)
 
 func _on_player_fitting(modules: Array) -> void:
@@ -278,7 +287,6 @@ func _toggle_module_by_index(f_index: int) -> void:
 
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 	_player_ship_id = p_ship_id
-	_player_hp      = _player_max_hp
 	_apply_player_material(ship)
 	ship.call("set_as_player")
 	_camera.call("set_target", ship)
@@ -336,11 +344,11 @@ func _handle_ship_despawned(p: Dictionary) -> void:
 		_player_ship_id = -1
 
 func _handle_damage_taken(p: Dictionary) -> void:
-	var ship_id   : int   = p.get("ship_id",    0)   as int
-	var current_hp: float = p.get("current_hp", 0.0) as float
+	var ship_id: int = p.get("ship_id", 0) as int
 	if ship_id == _player_ship_id:
-		_player_hp = current_hp
-		## プレイヤーがダメージを受けたら赤フラッシュ
+		_player_shield = p.get("current_shield", 0.0) as float
+		_player_armor  = p.get("current_armor",  0.0) as float
+		_player_hull   = p.get("current_hull",   0.0) as float
 		if _ships.has(ship_id):
 			(_ships[ship_id] as Node3D).call("flash_damage")
 
@@ -354,7 +362,9 @@ func _handle_ship_destroyed(p: Dictionary) -> void:
 	ship.call("play_destroy_effect")
 	if ship_id == _player_ship_id:
 		_player_ship_id     = -1
-		_player_hp          = 0.0
+		_player_shield      = 0.0
+		_player_armor       = 0.0
+		_player_hull        = 0.0
 		_player_lock_target = -1
 	## 破壊されたターゲットをロック中だった場合はクリア
 	if ship_id == _player_lock_target:
@@ -392,10 +402,12 @@ func _update_hud() -> void:
 	var hp_str: String
 	if _player_ship_id < 0:
 		hp_str = "DESTROYED"
-	elif _player_hp < 0.0:
-		hp_str = "%.0f / %.0f" % [_player_max_hp, _player_max_hp]
+	elif _player_shield < 0.0:
+		hp_str = "SH %.0f  AR %.0f  HU %.0f" % [
+			_player_max_shield, _player_max_armor, _player_max_hull]
 	else:
-		hp_str = "%.0f / %.0f" % [_player_hp, _player_max_hp]
+		hp_str = "SH %.0f  AR %.0f  HU %.0f" % [
+			_player_shield, _player_armor, _player_hull]
 
 	var lock_str: String
 	if _player_lock_target < 0:
@@ -431,7 +443,9 @@ func _clear_all_ships() -> void:
 			ship_node.queue_free()
 	_ships.clear()
 	_player_ship_id     = -1
-	_player_hp          = -1.0
+	_player_shield      = -1.0
+	_player_armor       = -1.0
+	_player_hull        = -1.0
 	_player_lock_target = -1
 	_current_tick       = 0
 	_event_count        = 0
