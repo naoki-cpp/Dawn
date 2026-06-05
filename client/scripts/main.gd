@@ -32,6 +32,9 @@ var _ships           : Dictionary = {}
 var _player_ship_id  : int        = -1
 var _event_count     : int        = 0
 var _current_tick    : int        = 0
+var _player_hp       : float      = -1.0   ## -1 = 未取得
+var _player_max_hp   : float      = 1000.0 ## ShipStatsComp::PLAYER.max_hp
+var _player_lock_target : int     = -1     ## 現在プレイヤーがロック中/ロック済みのターゲット
 
 ## ダブルクリック検出用
 var _last_click_time  : float  = -1.0
@@ -45,18 +48,23 @@ func _ready() -> void:
 	_connection.event_received.connect(_on_event_received)
 	_connection.connection_changed.connect(_on_connection_changed)
 	_build_player_material()
+	_setup_space_environment()
 	_update_hud()
 
 func _process(_delta: float) -> void:
 	_update_hud()
 
 func _input(event: InputEvent) -> void:
-	## _input はイベントが handled でも呼ばれる。
-	## カメラがドラッグ中の場合はダブルクリックを無視する。
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
-		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-			_check_double_click(mb.position)
+		if mb.pressed:
+			match mb.button_index:
+				MOUSE_BUTTON_LEFT:
+					## ダブルクリック検出（カメラドラッグ中は無視）
+					_check_double_click(mb.position)
+				MOUSE_BUTTON_RIGHT:
+					## 右クリック → ロックオン対象を選択
+					_try_lock_on(mb.position)
 
 # ── ダブルクリック判定 ────────────────────────────────────────────────────────
 
@@ -74,6 +82,46 @@ func _check_double_click(pos: Vector2) -> void:
 	else:
 		_last_click_time = now
 		_last_click_pos  = pos
+
+# ── 右クリック → LockOnCommand ───────────────────────────────────────────────
+
+func _try_lock_on(screen_pos: Vector2) -> void:
+	if _player_ship_id < 0:
+		return
+
+	## レイキャストで画面上の点に対応する 3D 位置を取得
+	var from: Vector3 = _camera.project_ray_origin(screen_pos)
+	var dir : Vector3 = _camera.project_ray_normal(screen_pos)
+	var to  : Vector3 = from + dir * 100_000.0
+
+	## Ships 配下の全 Ship との交差判定
+	var closest_id    : int   = -1
+	var closest_dist  : float = 1e9
+
+	for ship_id: int in _ships:
+		var ship: Node3D = _ships[ship_id] as Node3D
+		if ship_id == _player_ship_id:
+			continue  # 自分自身はロック不可
+
+		## 点とレイの最近傍距離でヒット判定（半径 500 Godot units）
+		var p  : Vector3 = ship.global_position
+		var t  : float   = (p - from).dot(dir)
+		var closest_pt: Vector3 = from + dir * t
+		var dist: float = p.distance_to(closest_pt)
+		if dist < 500.0 and t > 0.0 and dist < closest_dist:
+			closest_dist = dist
+			closest_id   = ship_id
+
+	if closest_id >= 0:
+		## 前のロック対象をクリア
+		if _player_lock_target >= 0 and _ships.has(_player_lock_target):
+			(_ships[_player_lock_target] as Node3D).call("set_lock_state", "none")
+		_player_lock_target = closest_id
+		_connection.send_lock_on_command(_player_ship_id, closest_id)
+		## ロック中（Locking）状態をセット + フラッシュ
+		if _ships.has(closest_id):
+			(_ships[closest_id] as Node3D).call("set_lock_state", "locking")
+			(_ships[closest_id] as Node3D).call("flash_lock_indicator")
 
 # ── ダブルクリック → MoveCommand ──────────────────────────────────────────────
 
@@ -115,6 +163,10 @@ func _on_event_received(payload: Dictionary) -> void:
 		"ShipSpawned"   : _handle_ship_spawned(payload)
 		"ShipMoved"     : _handle_ship_moved(payload)
 		"ShipDespawned" : _handle_ship_despawned(payload)
+		"DamageTaken"   : _handle_damage_taken(payload)
+		"ShipDestroyed" : _handle_ship_destroyed(payload)
+		"TargetLocked"  : _handle_target_locked(payload)
+		"LockLost"      : _handle_lock_lost(payload)
 
 func _on_connection_changed(connected: bool) -> void:
 	if not connected:
@@ -143,6 +195,7 @@ func _handle_ship_spawned(p: Dictionary) -> void:
 	## 最初の Spawn をプレイヤー船に指定
 	if _player_ship_id < 0:
 		_player_ship_id = ship_id
+		_player_hp      = _player_max_hp  ## 初期 HP をセット
 		_apply_player_material(ship)
 		ship.call("set_as_player")
 		_camera.call("set_target", ship)
@@ -177,17 +230,79 @@ func _handle_ship_despawned(p: Dictionary) -> void:
 	if ship_id == _player_ship_id:
 		_player_ship_id = -1
 
+func _handle_damage_taken(p: Dictionary) -> void:
+	var ship_id   : int   = p.get("ship_id",    0)   as int
+	var current_hp: float = p.get("current_hp", 0.0) as float
+	if ship_id == _player_ship_id:
+		_player_hp = current_hp
+		## プレイヤーがダメージを受けたら赤フラッシュ
+		if _ships.has(ship_id):
+			(_ships[ship_id] as Node3D).call("flash_damage")
+
+func _handle_ship_destroyed(p: Dictionary) -> void:
+	var ship_id: int = p.get("ship_id", 0) as int
+	if not _ships.has(ship_id):
+		return
+	var ship: Node3D = _ships[ship_id] as Node3D
+	_ships.erase(ship_id)
+	## 破壊エフェクトを再生（queue_free は play_destroy_effect 内で行う）
+	ship.call("play_destroy_effect")
+	if ship_id == _player_ship_id:
+		_player_ship_id     = -1
+		_player_hp          = 0.0
+		_player_lock_target = -1
+	## 破壊されたターゲットをロック中だった場合はクリア
+	if ship_id == _player_lock_target:
+		_player_lock_target = -1
+
+func _handle_target_locked(p: Dictionary) -> void:
+	var locker_id: int = p.get("locker_id", 0) as int
+	var target_id: int = p.get("target_id", 0) as int
+	## プレイヤーがロック完了した場合
+	if locker_id == _player_ship_id:
+		_player_lock_target = target_id
+		if _ships.has(target_id):
+			(_ships[target_id] as Node3D).call("set_lock_state", "locked")
+	## 他の船からロックされた場合（視覚的に表示しない）
+
+func _handle_lock_lost(p: Dictionary) -> void:
+	var locker_id: int = p.get("locker_id", 0) as int
+	var target_id: int = p.get("target_id", 0) as int
+	if locker_id == _player_ship_id:
+		if _ships.has(target_id):
+			(_ships[target_id] as Node3D).call("set_lock_state", "none")
+		if target_id == _player_lock_target:
+			_player_lock_target = -1
+
 # ── HUD ───────────────────────────────────────────────────────────────────────
 
 func _update_hud() -> void:
 	var status: String = "ONLINE" if _connection.is_connected_to_server() else "CONNECTING..."
+
 	var speed_str: String = "-"
 	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
 		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
 		speed_str = "%d u/tick" % int(spd)
+
+	var hp_str: String
+	if _player_ship_id < 0:
+		hp_str = "DESTROYED"
+	elif _player_hp < 0.0:
+		hp_str = "%.0f / %.0f" % [_player_max_hp, _player_max_hp]
+	else:
+		hp_str = "%.0f / %.0f" % [_player_hp, _player_max_hp]
+
+	var lock_str: String
+	if _player_lock_target < 0:
+		lock_str = "-"
+	elif _ships.has(_player_lock_target):
+		lock_str = "→ #%d" % _player_lock_target
+	else:
+		lock_str = "LOST"
+
 	_stats_label.text = (
-		"%s\nShips: %d\nTick: %d\nSpeed: %s\n\n[DoubleClick] Thrust"
-		% [status, _ships.size(), _current_tick, speed_str]
+		"%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nLock: %s\n\n[DoubleClick] Thrust\n[RightClick] Lock"
+		% [status, _ships.size(), _current_tick, speed_str, hp_str, lock_str]
 	)
 
 # ── 内部ユーティリティ ────────────────────────────────────────────────────────
@@ -197,9 +312,38 @@ func _clear_all_ships() -> void:
 		if is_instance_valid(ship_node):
 			ship_node.queue_free()
 	_ships.clear()
-	_player_ship_id = -1
-	_current_tick   = 0
-	_event_count    = 0
+	_player_ship_id     = -1
+	_player_hp          = -1.0
+	_player_lock_target = -1
+	_current_tick       = 0
+	_event_count        = 0
+
+func _setup_space_environment() -> void:
+	## 宇宙スカイシェーダーを手続き的に構築する。
+	## WorldEnvironment ノードを動的生成するため .tscn の変更が不要。
+	var shader := load("res://shaders/space_sky.gdshader") as Shader
+	if shader == null:
+		push_warning("[Main] space_sky.gdshader が見つかりません")
+		return
+
+	var sky_mat := ShaderMaterial.new()
+	sky_mat.shader = shader
+
+	var sky := Sky.new()
+	sky.sky_material      = sky_mat
+	sky.process_mode      = Sky.PROCESS_MODE_REALTIME
+	sky.radiance_size     = Sky.RADIANCE_SIZE_256
+
+	var env := Environment.new()
+	env.background_mode   = Environment.BG_SKY
+	env.sky               = sky
+	env.ambient_light_source  = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy  = 0.05  ## 宇宙は暗い
+	env.tonemap_mode          = Environment.TONE_MAPPER_FILMIC
+
+	var world_env          := WorldEnvironment.new()
+	world_env.environment   = env
+	add_child(world_env)
 
 func _build_player_material() -> void:
 	_player_material = StandardMaterial3D.new()

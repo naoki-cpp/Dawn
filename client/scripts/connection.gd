@@ -68,6 +68,18 @@ func send_move_command(ship_id: int, target: Vector3) -> void:
 	}
 	_ws.send_text(JSON.stringify(payload) + "\n")
 
+## ロックオン要求を送信する。
+## ship_id: 自分の船, target_id: ロックしたい相手の船
+func send_lock_on_command(ship_id: int, target_id: int) -> void:
+	if not _connected:
+		return
+	var payload: Dictionary = {
+		"type":      "LockOnCommand",
+		"ship_id":   ship_id,
+		"target_id": target_id,
+	}
+	_ws.send_text(JSON.stringify(payload) + "\n")
+
 func is_connected_to_server() -> bool:
 	return _connected
 
