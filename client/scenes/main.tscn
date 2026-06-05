@@ -37,6 +37,6 @@ anchor_right = 1.0
 offset_left = -250.0
 offset_top = 10.0
 offset_right = -10.0
-offset_bottom = 200.0
+offset_bottom = 230.0
 text = "CONNECTING...\nShips: 0\nTick: 0\nSpeed: -"
 horizontal_alignment = 2
