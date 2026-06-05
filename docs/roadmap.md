@@ -163,9 +163,15 @@ Session 2: restore_from() で復元 → tick / ship count / positions ✓ PASS
 本物のネットワーク（gRPC/QUIC）は Phase 5 で一括対応する。
 → `ClientConnection` trait の差し替えだけで完結するよう設計する（ADR-0005）
 
-**Phase 4 卒業基準:**
-「ゲームとして遊べる・面白いと感じられる最小のループが成立している」
-（機能の完成度ではなく体験の納得感で判断する）
+**Phase 4 卒業基準（ADR-0007 §6 より）:**
+
+```
+□ 2クライアントが同時に接続できる
+□ 両クライアントの世界状態が同期している（ShipMoved が両方に届く）
+□ プレイヤーのロックオン操作が機能する
+□ 再接続後に InitialState で状態が復元される
+□ 基本的なゲームループ（移動・ロック・戦闘）でクラッシュしない
+```
 
 ---
 
@@ -238,10 +244,12 @@ Client: 左ダブルクリック → カメラレイ方向に推力ベクトル�
   ClientCommand 一般化（MoveCommand → ClientCommand enum）
     - ws_server.rs で MoveCommand / LockOnCommand 両方をパース
 
-Godot 側（未着手）:
-  HP ゲージ HUD（DamageTaken イベント受信）
-  破壊エフェクト（ShipDestroyed → パーティクル / queue_free）
-  ロック状態インジケーター（Locking 中 / Locked の視覚表示）
+Godot 側（実装済み・調整継続）:
+  HP ゲージ HUD（DamageTaken → _player_hp 更新・DESTROYED 表示）
+  破壊エフェクト（ShipDestroyed → 橙色膨張リング → queue_free）
+  ロック状態インジケーター（シアン枠線・点滅 / 常時点灯）
+  ダメージ被弾フラッシュ（赤フラッシュ）
+  宇宙背景（手続き生成スカイシェーダー・天の川帯）
 
 確認  : 「戦闘が面白い」という感覚があるか
 ```

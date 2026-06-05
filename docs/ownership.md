@@ -5,6 +5,19 @@ update   : Actor 構成が変わったとき / Sector 管理ルールが変わ�
 related  : entity-model.md, event-catalog.md, CLAUDE.md §5
 ---
 
+> **実装状況の注意**
+>
+> このドキュメントは将来フェーズを含む設計全体を記述している。
+> 現在（Phase 4）実装済みの範囲は **§1（所有権の概念）と §2（Ship の基本所有権）のみ**。
+>
+> | セクション | 内容 | 実装状況 |
+> |---|---|---|
+> | §1〜2 | Ship の所有権・基本状態遷移 | ✅ Phase 4 実装済み |
+> | §3 Sector Transit | Sector 間移動の排他制御 | ⬜ Phase 7（Raft 実装後） |
+> | §4 Node 障害時 | Raft フェイルオーバー | ⬜ Phase 7 |
+>
+> Phase 7 より前に §3 以降の内容を実装してはならない（CLAUDE.md FBD-006）。
+
 # Ownership Rules
 
 ## 1. 所有権とは何か

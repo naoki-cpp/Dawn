@@ -952,7 +952,7 @@ AIが陥りやすいアンチパターンとその修正方法を示す。
 
 現状:
   Phase 4 の暫定措置として許容している。
-  Phase 5 以降で専用 Command（例: SetPlayerShipCommand）に置き換える予定。
+  Phase 5 で Hello/Welcome ハンドシェイクに置き換える（ADR-0007 §2）。
   → この暫定ルールを拡張・踏襲しないこと。
 ```
 

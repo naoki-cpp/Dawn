@@ -1,7 +1,7 @@
 ---
 id      : ADR-0007
 title   : マルチプレイヤー対応設計（Phase 5）
-status  : proposed
+status  : accepted
 date    : 2026-06-05
 deciders: [human, ai-agent]
 related : ADR-0005（ClientConnection）, ADR-0006（Fitting/Combat）
@@ -12,124 +12,113 @@ related : ADR-0005（ClientConnection）, ADR-0006（Fitting/Combat）
 ## 背景
 
 Phase 4 の仕様チェック（2026-06-05）で、現在の実装がシングルプレイ専用に
-なっている箇所を特定した。
-
-Phase 5（本物のネットワーク）への移行前に、マルチプレイヤー対応の
-設計方針を決定しておく必要がある。
-
-### Phase 4 で判明したシングルプレイ専用の問題
-
-| 問題 | 箇所 | 深刻度 |
-|---|---|---|
-| WsServer が1クライアントのみ受け付ける | `ws_server.rs` `accept()` | 🔴 |
-| Ship 所有権の概念がない | `node.rs` `apply_move_command` | 🔴 |
-| ORIGIN 座標をプレイヤー指定シグナルに流用 | `main.rs` / `main.gd` | 🔴 |
-| セッション管理（PlayerId）がない | アーキテクチャ全体 | 🔴 |
-| AttackCommand の JSON パーサー未実装 | `ws_server.rs` | 🟡 |
-| コマンド認証なし | `node.rs` | 🟡 |
+なっている箇所を特定した。Phase 5 移行前に設計方針を確定する。
 
 ---
 
-## 決定
+## 決定一覧
 
-### 1. `PlayerId` 型の追加（`dawn-core`）
-
-```rust
-/// プレイヤーセッションを識別する ID。
-/// サーバーが接続時に採番する。セッション切断後も再利用しない（INV-004 と同原則）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct PlayerId(pub u64);
-```
-
-### 2. Ship 所有権の管理（`dawn-simulation`）
-
-```rust
-// SimulationNode に追加
-player_ships: HashMap<PlayerId, ShipId>,  // PlayerId → 所有する ShipId
-ship_owners : HashMap<ShipId, PlayerId>,  // 逆引き（ShipId → 所有者）
-```
-
-**所有権ルール:**
-- `spawn_player_ship(player_id, ...)` で専用の Ship を生成し、所有権を記録する
-- 所有権のない Ship（NPC）は誰も直接操作できない
-- 所有権のある Ship は所有者のみが操作できる
-
-### 3. コマンド処理での所有権検証
-
-```rust
-// 変更前（Phase 4）
-fn apply_move_command(&mut self, ship_id: ShipId, target: Position)
-
-// 変更後（Phase 5）
-fn apply_move_command(
-    &mut self,
-    player_id : PlayerId,   // コマンド送信者
-    ship_id   : ShipId,
-    target    : Position,
-) -> Result<(), CommandError> {
-    // 所有権チェック
-    if self.ship_owners.get(&ship_id) != Some(&player_id) {
-        return Err(CommandError::NotOwner);
-    }
-    // ...以降は現状と同じ
-}
-```
-
-同様に `fit_module`、`attack` も `PlayerId` を受け取る。
-
-### 4. ORIGIN シグナルの廃止と置き換え
-
-**廃止:** `MoveCommand { target_position: ORIGIN }` によるプレイヤー指定  
-**置き換え:** 接続ハンドシェイク時のセッション確立フローに統合する
+### 1. プロトコル：WebSocket を継続する
 
 ```
-接続フロー（Phase 5）:
-  1. クライアントが WebSocket / gRPC に接続する
-  2. サーバーが PlayerId を採番して返す
-  3. サーバーが専用の Ship を Spawn し、PlayerId と紐付ける
-  4. クライアントは採番された PlayerId を以後の全コマンドに含める
-  5. サーバーは PlayerId でコマンドを検証する
+決定: gRPC への移行を行わず、WebSocket + JSON を維持する。
+理由: 現在のボトルネックはトランスポート効率ではない。
+     Godot 側の変更コストを最小化する。
+     gRPC は Phase 9 以降（分散ノード間通信が必要になったとき）に再検討する。
 ```
 
-### 5. WsServer の多クライアント対応
+### 2. 接続ハンドシェイク：Hello / Welcome メッセージを導入する
 
-```rust
-// 変更前（Phase 4）
-let conn = server.accept().await;  // 1回のみ
-
-// 変更後（Phase 5）
-// accept ループで複数クライアントを並行管理
-tokio::spawn(async move {
-    loop {
-        let (conn, peer_addr) = server.accept().await?;
-        let player_id = session_manager.new_player();
-        spawn_player_handler(player_id, conn, node_tx.clone());
-    }
-});
-```
-
-`ClientConnection` trait のインターフェース自体は変更しない（ADR-0005 の方針を維持）。
-多クライアント管理は `ClientConnection` の上位層（main ループまたは Actor）が担う。
-
-### 6. イベント配信はブロードキャストのまま維持
+ORIGIN 座標シグナル（CLAUDE.md §12 パターン7）を廃止し、
+明示的なハンドシェイクに置き換える。
 
 ```
-全クライアントに全 DomainEvent を配信する（EVE Online と同じモデル）。
-
-根拠:
-  - Event Sourcing では「全員が同じイベントログを持つ」ことで世界が収束する
-  - Interest Management（近くのイベントのみ送る最適化）は Phase 8 で対応
-  - Phase 5 ではまず正しく動くことを優先する
+接続フロー:
+  1. クライアントが WebSocket に接続する
+  2. クライアントが Hello を送信する
+        {"type": "Hello"}
+  3. サーバーが PlayerId と ShipId を採番して Welcome を返す
+        {"type": "Welcome", "player_id": N, "ship_id": N}
+  4. サーバーが InitialState を送信する（§4 参照）
+  5. 以降、通常の Tick ループで DomainEvent を受信する
 ```
 
-### 7. `AttackCommand` の JSON パーサー追加（Phase 5 前に対応）
+### 3. PlayerId の管理：接続レイヤーで保持する（Option B）
 
-```rust
-// ws_server.rs に追加
-fn parse_attack_command(line: &str) -> Option<AttackCommand> { ... }
+```
+決定: ClientCommand に player_id フィールドを追加しない。
+     WsServer が「この接続 = この PlayerId」を管理し、
+     コマンドを受け取った時点で PlayerId を付与してサーバーに渡す。
 
-// JSON フォーマット
-// {"type":"AttackCommand","attacker_id":1,"target_id":2}
+理由: Godot 側のコマンド JSON を変更しなくてよい。
+     ClientCommand の型定義も変わらない。
+     ADR-0005 のインターフェースを維持できる。
+
+実装イメージ:
+  struct PlayerSession {
+      player_id : PlayerId,
+      ship_id   : ShipId,
+      conn      : WsClientConnection,
+  }
+
+  // コマンド受信時
+  while let Some(cmd) = session.conn.try_recv_command() {
+      match cmd {
+          ClientCommand::Move(mv) => {
+              // player_id で所有権を検証してから処理
+              node.apply_move_command(session.player_id, mv.ship_id, mv.target_position);
+          }
+          ClientCommand::LockOn(lo) => {
+              node.apply_lock_on(session.player_id, lo);
+          }
+      }
+  }
+```
+
+### 4. 初期状態同期：InitialState メッセージを導入する（Option B）
+
+```
+決定: DomainEvent とは別に InitialState メッセージを送信する。
+     イベントストリームとスナップショットを概念的に分離する。
+
+InitialState の内容:
+  {
+    "type": "InitialState",
+    "ships": [
+      {
+        "ship_id"   : N,
+        "position"  : {"x": F, "y": F, "z": F},
+        "max_hp"    : F,
+        "current_hp": F
+      },
+      ...
+    ]
+  }
+
+理由:
+  - 接続後に戦闘中の世界に入っても HP が正しく表示される
+  - DomainEvent のスキーマを変更しなくてよい（INV-002 / §7 を遵守）
+  - Replay とクライアント初期化を別の概念として明確に分離する
+```
+
+### 5. イベント配信：グローバルブロードキャストを維持する
+
+```
+決定: 全クライアントに全 DomainEvent を配信する（Phase 4 と同じ）。
+     Interest Management（近くのイベントのみ送る）は Phase 8 以降。
+理由: 正しく動くことを優先する。最適化は後から。
+```
+
+### 6. Phase 4 卒業基準
+
+Phase 5 着手は以下の条件を全て満たした時点とする。
+
+```
+□ 2クライアントが同時に接続できる
+□ 両クライアントの世界状態が同期している（ShipMoved が両方に届く）
+□ プレイヤーのロックオン操作が機能する
+□ 再接続後に InitialState で状態が復元される
+□ 基本的なゲームループ（移動・ロック・戦闘）でクラッシュしない
 ```
 
 ---
@@ -138,55 +127,50 @@ fn parse_attack_command(line: &str) -> Option<AttackCommand> { ... }
 
 ### サーバー側
 
-- [ ] `dawn-core`: `PlayerId` 型追加、`CommandError::NotOwner` 追加
-- [ ] `dawn-simulation/node.rs`: `player_ships`, `ship_owners` フィールド追加
-- [ ] `dawn-simulation/node.rs`: `spawn_player_ship(player_id, ...)` メソッド追加
-- [ ] `dawn-simulation/node.rs`: 全コマンド処理に `PlayerId` と所有権チェックを追加
-- [ ] `dawn-simulation/ws_server.rs`: `parse_attack_command` 追加
-- [ ] `dawn-simulation/ws_server.rs`: 多クライアント対応（accept ループ）
-- [ ] `dawn-simulation/main.rs`: ORIGIN シグナルを接続ハンドシェイクに置き換え
+- [ ] `dawn-core`: `PlayerId(u64)` 型追加
+- [ ] `dawn-core`: `CommandError::NotOwner` 追加
+- [ ] `dawn-simulation/node.rs`: `player_ships: HashMap<PlayerId, ShipId>` フィールド追加
+- [ ] `dawn-simulation/node.rs`: `spawn_player_ship(player_id)` メソッド追加
+- [ ] `dawn-simulation/node.rs`: 全コマンドに `PlayerId` + 所有権チェック追加
+- [ ] `dawn-simulation/ws_server.rs`: `Hello` メッセージのパース
+- [ ] `dawn-simulation/ws_server.rs`: `Welcome` メッセージの送信
+- [ ] `dawn-simulation/ws_server.rs`: `InitialState` メッセージの送信
+- [ ] `dawn-simulation/ws_server.rs`: `PlayerSession` 構造体でセッション管理
+- [ ] `dawn-simulation/ws_server.rs`: 複数クライアントの同時接続対応（accept ループ）
+- [ ] `dawn-simulation/main.rs`: ORIGIN シグナル処理を削除
+- [ ] `dawn-simulation/ws_server.rs`: `AttackCommand` JSON パーサー追加
+- [ ] 全テスト通過
 
 ### クライアント側（Godot）
 
-- [ ] `connection.gd`: 接続時のハンドシェイク（PlayerId 受け取り）を実装
-- [ ] `connection.gd`: 全コマンド送信に PlayerId を含める
-- [ ] `main.gd`: ORIGIN シグナル送信を削除し、ハンドシェイク完了後に自船を設定
-- [ ] `main.gd`: 右クリック → AttackCommand 送信
+- [ ] `connection.gd`: 接続後に `Hello` を自動送信
+- [ ] `connection.gd`: `Welcome` を受け取り `player_id` / `ship_id` を保持・シグナル発行
+- [ ] `connection.gd`: `InitialState` を受け取り各 Ship の HP を初期化
+- [ ] `main.gd`: ORIGIN シグナル送信を削除
+- [ ] `main.gd`: `Welcome` シグナルを受けてプレイヤー船を設定
 
 ---
 
-## 変更しない設計（Phase 5 でも維持）
+## 変更しない設計
 
 ```
 ClientConnection trait のインターフェース（ADR-0005）
   → send_events / try_recv_command の 2 方向構成はそのまま
 
-Event Sourcing の原則（INV-001〜006）
-  → 全クライアントに全 DomainEvent をブロードキャスト
+ClientCommand の型定義
+  → player_id を含まない（接続レイヤーで管理）
 
-ShipId のグローバル一意性（INV-004）
-  → PlayerId が増えても ShipId の採番ルールは変わらない
+DomainEvent のスキーマ
+  → InitialState は DomainEvent ではない（専用メッセージ）
 
-Tick の論理カウンタ（INV-005）
-  → クライアント数に関係なく Tick は単調増加
+イベント配信方式
+  → グローバルブロードキャスト（Interest Management は Phase 8）
 ```
-
----
-
-## 結果として生じる制約
-
-- Phase 5 では `PlayerId` を `MoveCommand` / `FitModuleCommand` / `AttackCommand` に追加するため、
-  既存コマンドのフィールドが変わる。
-  - `MoveCommand` は破壊的変更になるため **新型 `MoveCommandV2`** を定義するか、
-    または Phase 5 が greenfield な実装（ws_server.rs を GrpcConnection に完全置換）として
-    扱い、Phase 4 のプロトコルとの後方互換を捨てる。
-  - **Phase 4 の WebSocket プロトコルとの後方互換は不要**（Phase 5 でプロトコルごと置換するため）。
 
 ---
 
 ## 参照
 
 - ADR-0005: ClientConnection 抽象化
-- ADR-0006: Fitting / Combat 設計
-- CLAUDE.md §12 パターン7: ORIGIN 座標シグナル流用（暫定措置の記録）
-- EVE Online アーキテクチャ参考: Single Shard + ブロードキャスト配信
+- ADR-0006: Fitting / Combat / Lock-on 設計
+- CLAUDE.md §12 パターン7: ORIGIN 座標シグナル（廃止予定）

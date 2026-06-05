@@ -128,7 +128,7 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 | `MoveCommand` | 推力方向を指定する | — | ✅ 実装済み |
 | `LockOnCommand` | ロックオン開始を要求する | `TargetLocked` | ✅ 実装済み |
 | `FitModuleCommand` | モジュールを装備する | `ShipFitted` | ✅ 実装済み |
-| `AttackCommand` | 攻撃対象を指定する（将来） | `WeaponFired` | 型定義のみ（Phase 5） |
+| `AttackCommand` | 攻撃対象を指定する | `WeaponFired` | コマンド型定義済み・WsServer JSON パーサーは Phase 5 で追加 |
 
 ---
 
