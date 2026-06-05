@@ -15,6 +15,7 @@
 //! 3. Add a corresponding `Command` in `commands.rs` if applicable.
 //! 4. Write a unit test in this module.
 
+use crate::fitting::FittingSnapshot;
 use crate::{Position, SectorId, ShipId, Tick};
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +30,24 @@ pub enum DomainEvent {
 
     /// A Ship was permanently removed from the world.
     ShipDespawned(ShipDespawned),
+
+    /// A Ship's equipment loadout changed.
+    ShipFitted(ShipFitted),
+
+    /// A Ship completed locking onto a target.
+    TargetLocked(TargetLocked),
+
+    /// A lock was lost (target out of range or destroyed).
+    LockLost(LockLost),
+
+    /// A Ship fired its weapon at a target.
+    WeaponFired(WeaponFired),
+
+    /// A Ship took damage.
+    DamageTaken(DamageTaken),
+
+    /// A Ship was destroyed.
+    ShipDestroyed(ShipDestroyed),
 }
 
 impl DomainEvent {
@@ -38,6 +57,12 @@ impl DomainEvent {
             Self::ShipSpawned(e)   => e.ship_id,
             Self::ShipMoved(e)     => e.ship_id,
             Self::ShipDespawned(e) => e.ship_id,
+            Self::ShipFitted(e)    => e.ship_id,
+            Self::TargetLocked(e)  => e.locker_id,
+            Self::LockLost(e)      => e.locker_id,
+            Self::WeaponFired(e)   => e.attacker_id,
+            Self::DamageTaken(e)   => e.ship_id,
+            Self::ShipDestroyed(e) => e.ship_id,
         }
     }
 
@@ -48,6 +73,12 @@ impl DomainEvent {
             Self::ShipSpawned(e)   => e.tick,
             Self::ShipMoved(e)     => e.tick,
             Self::ShipDespawned(e) => e.tick,
+            Self::ShipFitted(e)    => e.tick,
+            Self::TargetLocked(e)  => e.tick,
+            Self::LockLost(e)      => e.tick,
+            Self::WeaponFired(e)   => e.tick,
+            Self::DamageTaken(e)   => e.tick,
+            Self::ShipDestroyed(e) => e.tick,
         }
     }
 }
@@ -81,6 +112,68 @@ pub struct ShipMoved {
 pub struct ShipDespawned {
     pub ship_id : ShipId,
     pub tick    : Tick,
+}
+
+// ── TargetLocked ─────────────────────────────────────────────────────────────
+
+/// ロック完了イベント。LockSystem がカウントダウンを完了したときに発行する。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TargetLocked {
+    pub locker_id : ShipId,
+    pub target_id : ShipId,
+    pub tick      : Tick,
+}
+
+// ── LockLost ─────────────────────────────────────────────────────────────────
+
+/// ロック消失イベント。ターゲットが射程外または撃沈されたときに発行する。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LockLost {
+    pub locker_id : ShipId,
+    pub target_id : ShipId,
+    pub tick      : Tick,
+}
+
+// ── ShipFitted ────────────────────────────────────────────────────────────────
+
+/// 装備スロット全体のスナップショットを含む。
+/// Event Replay 時に FittingComp を完全復元するために必要（INV-002）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShipFitted {
+    pub ship_id  : ShipId,
+    /// 変更後の装備全体スナップショット
+    pub fitting  : FittingSnapshot,
+    pub tick     : Tick,
+}
+
+// ── WeaponFired ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WeaponFired {
+    pub attacker_id : ShipId,
+    pub target_id   : ShipId,
+    pub damage      : f32,
+    pub tick        : Tick,
+}
+
+// ── DamageTaken ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DamageTaken {
+    pub ship_id    : ShipId,
+    pub amount     : f32,
+    /// HP after this damage event
+    pub current_hp : f32,
+    pub tick       : Tick,
+}
+
+// ── ShipDestroyed ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShipDestroyed {
+    pub ship_id   : ShipId,
+    pub killer_id : ShipId,
+    pub tick      : Tick,
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

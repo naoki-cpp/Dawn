@@ -12,15 +12,17 @@ pub mod commands;
 pub mod entity;
 pub mod error;
 pub mod events;
+pub mod fitting;
 pub mod position;
 pub mod sector;
 pub mod tick;
 
 // Re-export the most commonly used types at crate root for ergonomics.
-pub use commands::MoveCommand;
+pub use commands::{AttackCommand, FitModuleCommand, LockOnCommand, MoveCommand};
 pub use entity::{EntityId, NodeId, ShipId};
 pub use error::DawnError;
 pub use events::DomainEvent;
+pub use fitting::{FittingSnapshot, ModuleDefinition, ModuleId, ModuleKind, SlotKind, StatDelta};
 pub use position::{Position, Velocity};
 pub use sector::{SectorBounds, SectorId};
 pub use tick::Tick;

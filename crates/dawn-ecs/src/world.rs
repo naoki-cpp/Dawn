@@ -1,6 +1,6 @@
 //! `SimWorld` — the single owner of all ECS state within a Sector Node.
 
-use crate::components::{PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp};
+use crate::components::{FittingComp, HullComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp, WeaponComp};
 use dawn_core::{Position, SectorId, ShipId, Velocity};
 use hecs::Entity;
 
@@ -38,12 +38,17 @@ impl SimWorld {
         position: Position,
         velocity: Velocity,
     ) -> Entity {
+        let stats = ShipStatsComp::NPC;
         self.inner.spawn((
             ShipIdComp(ship_id),
             PositionComp(position),
             VelocityComp(velocity),
             ThrustComp(Velocity::ZERO),
-            ShipStatsComp::NPC,
+            stats,
+            FittingComp::empty(),
+            HullComp::new(stats.max_hp),
+            WeaponComp::new(),
+            LockComp::new(),
         ))
     }
 
