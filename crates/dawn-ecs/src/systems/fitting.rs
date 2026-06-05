@@ -41,25 +41,20 @@ pub fn apply_fitting(world: &mut SimWorld, ship_id: ShipId, base: ShipStatsComp)
     let new_stats = apply_delta(base, &delta);
 
     // ShipStatsComp を更新
+    // Read old max values BEFORE overwriting ShipStatsComp.
+    // Each HP layer is scaled independently by its own old/new max ratio.
+    let old_stats = world.inner().get::<&ShipStatsComp>(entity).ok().map(|s| *s).unwrap_or(new_stats);
+
     world.set_ship_stats(entity, new_stats);
 
-    // HullComp の max 値が変わった場合、各層を比率で調整する
     if let Ok(mut hull) = world.inner_mut().get::<&mut HullComp>(entity) {
-        let scale = |cur: f32, old_max: f32, new_max: f32| -> f32 {
-            if old_max <= 0.0 { return new_max; }
-            (cur / old_max * new_max).max(0.0)
+        let scale_layer = |cur: f32, old_max: f32, new_max: f32| -> f32 {
+            if old_max <= 0.0 { return new_max; }  // first fit: start at full HP
+            (cur / old_max * new_max).clamp(0.0, new_max)
         };
-        // 変更前の max を事前に取得するため、ここでは単純に new_max に合わせる
-        // (apply_fitting は装備変更時のみ呼ばれ、現在の比率を維持する)
-        let old_shield = hull.current_shield.max(0.0);
-        let old_armor  = hull.current_armor.max(0.0);
-        let old_hull   = hull.current_hull.max(0.0);
-        // old_max は直前の ShipStatsComp から取れないため、
-        // 現 HullComp の各層の合計を旧 max_hp の代用とする簡易実装
-        let old_total = (old_shield + old_armor + old_hull).max(1.0);
-        hull.current_shield = scale(old_shield, old_total, new_stats.max_shield + new_stats.max_armor + new_stats.max_hull) * new_stats.max_shield / (new_stats.max_shield + new_stats.max_armor + new_stats.max_hull).max(1.0);
-        hull.current_armor  = scale(old_armor,  old_total, new_stats.max_shield + new_stats.max_armor + new_stats.max_hull) * new_stats.max_armor  / (new_stats.max_shield + new_stats.max_armor + new_stats.max_hull).max(1.0);
-        hull.current_hull   = scale(old_hull,   old_total, new_stats.max_shield + new_stats.max_armor + new_stats.max_hull) * new_stats.max_hull   / (new_stats.max_shield + new_stats.max_armor + new_stats.max_hull).max(1.0);
+        hull.current_shield = scale_layer(hull.current_shield, old_stats.max_shield, new_stats.max_shield);
+        hull.current_armor  = scale_layer(hull.current_armor,  old_stats.max_armor,  new_stats.max_armor);
+        hull.current_hull   = scale_layer(hull.current_hull,   old_stats.max_hull,   new_stats.max_hull);
     }
 
     Some(new_stats)
