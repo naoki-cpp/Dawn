@@ -8,13 +8,14 @@
 //!   cargo run -p dawn-simulation --bin simulate --release
 
 mod cluster;
+mod modules;
 mod node;
 mod sector_simulator_actor;
 mod snapshot;
 mod spawner;
 mod ws_server;
 
-use dawn_actor::ClientConnection;
+use dawn_actor::{ClientCommand, ClientConnection};
 use dawn_core::{NodeId, SectorBounds, SectorId};
 use node::SimulationNode;
 use spawner::{generate_ships, SpawnConfig};
@@ -42,7 +43,12 @@ async fn main() {
     // Phase 4 モード: --serve 引数があれば Godot 向け WebSocket サーバーを起動
     let args: Vec<String> = std::env::args().collect();
     if args.contains(&"--serve".to_string()) {
-        run_phase4_server().await;
+        // --ships N で船の数を指定できる（省略時は P4_SHIPS_DEFAULT）
+        let ship_count = args.windows(2)
+            .find(|w| w[0] == "--ships")
+            .and_then(|w| w[1].parse::<usize>().ok())
+            .unwrap_or(P4_SHIPS_DEFAULT);
+        run_phase4_server(ship_count).await;
         return;
     }
 
@@ -253,14 +259,14 @@ fn run_phase3_demo() {
 // Godot クライアントが ws://127.0.0.1:7878 に接続し、
 // DomainEvent を JSON で受け取って Ship を描画する。
 
-const P4_SHIPS  : usize = 200;
-const P4_TICK_MS: u64   = 100;  // 10 Tick/sec
+const P4_SHIPS_DEFAULT : usize = 20;   // デフォルト20隻（--ships N で変更可）
+const P4_TICK_MS       : u64   = 100;  // 10 Tick/sec
 
-async fn run_phase4_server() {
+async fn run_phase4_server(ship_count: usize) {
     println!("═══════════════════════════════════════════");
     println!("  Phase 4 — Godot WebSocket server          ");
     println!("═══════════════════════════════════════════");
-    println!("  ships    : {P4_SHIPS}");
+    println!("  ships    : {ship_count}  (change with --ships N)");
     println!("  tick rate: {} ms/tick  ({} tick/sec)",
         P4_TICK_MS, 1000 / P4_TICK_MS);
     println!();
@@ -276,10 +282,15 @@ async fn run_phase4_server() {
     let bounds = SectorBounds::cube(SectorBounds::DEFAULT_SIZE);
     let mut node = SimulationNode::new(NodeId(0), SectorId(0), bounds);
 
-    let config = SpawnConfig::default_for_node(NodeId(0));
-    let ships  = generate_ships(P4_SHIPS, &config, 0);
+    // モジュール定義をレジストリに登録
+    for def in modules::all_modules() {
+        node.register_module(def);
+    }
 
-    println!("  [Server] spawning {P4_SHIPS} ships, waiting for Godot client...");
+    let config = SpawnConfig::default_for_node(NodeId(0));
+    let ships  = generate_ships(ship_count, &config, 0);
+
+    println!("  [Server] spawning {ship_count} ships, waiting for Godot client...");
 
     // クライアント接続待ち（ブロック）
     let mut conn = server.accept().await
@@ -287,9 +298,14 @@ async fn run_phase4_server() {
 
     println!("  [Server] Godot connected! Sending spawn events...");
 
-    // Ship を生成してイベントをバッファへ
+    // Ship を生成し、全艦に Small Railgun I を装備させる
     for (_, pos, vel) in ships {
-        node.spawn_ship(pos, vel);
+        let ship_id = node.spawn_ship(pos, vel);
+        node.fit_module(dawn_core::FitModuleCommand {
+            ship_id,
+            slot      : dawn_core::SlotKind::High,
+            module_id : modules::MODULE_RAILGUN_SMALL,
+        });
     }
 
     // Spawn イベントを全送信
@@ -311,21 +327,25 @@ async fn run_phase4_server() {
     loop {
         interval.tick().await;
 
-        // MoveCommand をすべて処理してから Tick を実行する
+        // コマンドを種別ごとに振り分ける
+        let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
         while let Some(cmd) = conn.try_recv_command() {
             match cmd {
-                dawn_core::MoveCommand { ship_id, target_position }
+                ClientCommand::Move(dawn_core::MoveCommand { ship_id, target_position })
                     if target_position == dawn_core::Position::ORIGIN =>
                 {
                     node.set_player_ship(ship_id);
                 }
-                dawn_core::MoveCommand { ship_id, target_position } => {
+                ClientCommand::Move(dawn_core::MoveCommand { ship_id, target_position }) => {
                     node.apply_move_command(ship_id, target_position);
+                }
+                ClientCommand::LockOn(lock_cmd) => {
+                    lock_commands.push(lock_cmd);
                 }
             }
         }
 
-        let result = node.tick();
+        let result = node.tick_with_lock_commands(&lock_commands);
 
         // 今回の Tick で生成されたイベントを送信
         let total = node.total_event_count();

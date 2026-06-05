@@ -23,8 +23,8 @@
 //! - MoveCommand の受信は今後の Cycle 2 以降で使用
 //! - Phase 5 で GrpcConnection に差し替える（Godot 側は変更しない）
 
-use dawn_actor::ClientConnection;
-use dawn_core::{EntityId, MoveCommand, Position, ShipId};
+use dawn_actor::{ClientCommand, ClientConnection};
+use dawn_core::{EntityId, LockOnCommand, MoveCommand, Position, ShipId};
 use dawn_core::DomainEvent;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
@@ -56,6 +56,27 @@ enum EventJson {
         ship_id: u64,
         tick   : u64,
     },
+    DamageTaken {
+        ship_id   : u64,
+        amount    : f32,
+        current_hp: f32,
+        tick      : u64,
+    },
+    ShipDestroyed {
+        ship_id  : u64,
+        killer_id: u64,
+        tick     : u64,
+    },
+    TargetLocked {
+        locker_id : u64,
+        target_id : u64,
+        tick      : u64,
+    },
+    LockLost {
+        locker_id : u64,
+        target_id : u64,
+        tick      : u64,
+    },
 }
 
 #[derive(Serialize, Clone, Copy)]
@@ -65,25 +86,35 @@ struct PosJson {
     z: f32,
 }
 
-/// JSON テキストから MoveCommand をパースする。
+/// JSON テキストから `ClientCommand` をパースする。
 ///
-/// 形式: `{"type":"MoveCommand","ship_id":123,"target":{"x":1.0,"y":0.0,"z":2.0}}`
-fn parse_move_command(line: &str) -> Option<MoveCommand> {
+/// 対応フォーマット:
+///   `{"type":"MoveCommand","ship_id":1,"target":{"x":1.0,"y":0.0,"z":2.0}}`
+///   `{"type":"LockOnCommand","ship_id":1,"target_id":5}`
+fn parse_client_command(line: &str) -> Option<ClientCommand> {
     let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    if v.get("type")?.as_str()? != "MoveCommand" {
-        return None;
+    match v.get("type")?.as_str()? {
+        "MoveCommand" => {
+            let ship_id_raw: u64 = v.get("ship_id")?.as_u64()?;
+            let target = v.get("target")?;
+            let x = target.get("x")?.as_f64()? as f32;
+            let y = target.get("y")?.as_f64()? as f32;
+            let z = target.get("z")?.as_f64()? as f32;
+            Some(ClientCommand::Move(MoveCommand {
+                ship_id         : ShipId(EntityId::from_raw(ship_id_raw)),
+                target_position : Position { x, y, z },
+            }))
+        }
+        "LockOnCommand" => {
+            let ship_id_raw    = v.get("ship_id")?.as_u64()?;
+            let target_id_raw  = v.get("target_id")?.as_u64()?;
+            Some(ClientCommand::LockOn(LockOnCommand {
+                ship_id   : ShipId(EntityId::from_raw(ship_id_raw)),
+                target_id : ShipId(EntityId::from_raw(target_id_raw)),
+            }))
+        }
+        _ => None,
     }
-    let ship_id_raw: u64 = v.get("ship_id")?.as_u64()?;
-    let target = v.get("target")?;
-    let x = target.get("x")?.as_f64()? as f32;
-    let y = target.get("y")?.as_f64()? as f32;
-    let z = target.get("z")?.as_f64()? as f32;
-
-    let ship_id = ShipId(EntityId::from_raw(ship_id_raw));
-    Some(MoveCommand {
-        ship_id,
-        target_position: Position { x, y, z },
-    })
 }
 
 fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
@@ -103,6 +134,30 @@ fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
             ship_id: e.ship_id.raw(),
             tick   : e.tick.value(),
         },
+        DomainEvent::DamageTaken(e) => EventJson::DamageTaken {
+            ship_id   : e.ship_id.raw(),
+            amount    : e.amount,
+            current_hp: e.current_hp,
+            tick      : e.tick.value(),
+        },
+        DomainEvent::ShipDestroyed(e) => EventJson::ShipDestroyed {
+            ship_id  : e.ship_id.raw(),
+            killer_id: e.killer_id.raw(),
+            tick     : e.tick.value(),
+        },
+        DomainEvent::TargetLocked(e) => EventJson::TargetLocked {
+            locker_id : e.locker_id.raw(),
+            target_id : e.target_id.raw(),
+            tick      : e.tick.value(),
+        },
+        DomainEvent::LockLost(e) => EventJson::LockLost {
+            locker_id : e.locker_id.raw(),
+            target_id : e.target_id.raw(),
+            tick      : e.tick.value(),
+        },
+        // Fitting / WeaponFired はクライアント側の状態管理に使わないためスキップ
+        DomainEvent::ShipFitted(_)  => return None,
+        DomainEvent::WeaponFired(_) => return None,
     };
     serde_json::to_string(&j).ok()
 }
@@ -115,7 +170,7 @@ fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
 /// `send_events()` は WebSocket のテキストフレームとして送信する。
 pub struct WsClientConnection {
     event_tx  : mpsc::UnboundedSender<String>,
-    command_rx: mpsc::UnboundedReceiver<MoveCommand>,
+    command_rx: mpsc::UnboundedReceiver<ClientCommand>,
 }
 
 impl ClientConnection for WsClientConnection {
@@ -130,7 +185,7 @@ impl ClientConnection for WsClientConnection {
         Ok(())
     }
 
-    fn try_recv_command(&mut self) -> Option<MoveCommand> {
+    fn try_recv_command(&mut self) -> Option<ClientCommand> {
         self.command_rx.try_recv().ok()
     }
 }
@@ -173,7 +228,7 @@ impl WsServer {
         println!("[WsServer] client connected: {peer_addr}");
 
         let (event_tx,   event_rx)   = mpsc::unbounded_channel::<String>();
-        let (command_tx, command_rx) = mpsc::unbounded_channel::<MoveCommand>();
+        let (command_tx, command_rx) = mpsc::unbounded_channel::<ClientCommand>();
 
         let (mut ws_sink, mut ws_source) = ws_stream.split();
 
@@ -193,8 +248,7 @@ impl WsServer {
             while let Some(Ok(msg)) = ws_source.next().await {
                 if let Message::Text(text) = msg {
                     for line in text.lines() {
-                        if let Some(cmd) = parse_move_command(line) {
-                            // チャンネルが閉じていたら終了
+                        if let Some(cmd) = parse_client_command(line) {
                             if command_tx.send(cmd).is_err() {
                                 return;
                             }

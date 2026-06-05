@@ -18,7 +18,7 @@ pub mod event_store_actor;
 pub mod replication_bus;
 
 pub use client_connection::{
-    ClientConnection, ConnectionError,
+    ClientCommand, ClientConnection, ConnectionError,
     InProcessClientEndpoint, InProcessConnection,
 };
 pub use event_store_actor::EventStoreHandle;
