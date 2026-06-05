@@ -15,7 +15,7 @@ related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, roadm
 ### AIエージェントへの注意
 
 - コードを書く前に **CLAUDE.md** を読むこと（不変条件・禁止事項を含む）
-- 設計判断の根拠は **adr/** を参照すること
+- 設計判断の根拠は **docs/adr/** を参照すること
 - 「何を実装すべきか」は **docs/roadmap.md** を参照すること
 
 ### ドキュメント責務早見表
@@ -30,7 +30,7 @@ related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, roadm
 | `docs/tick-model.md` | いつ・どの順番で処理されるか |
 | `docs/roadmap.md` | 何を・どの順番で作るか |
 | `docs/game-design.md` | なぜその機能を作るか / EVE からの教訓・将来機能候補 |
-| `adr/` | なぜそう決めたか（変更不可の判断記録） |
+| `docs/adr/` | なぜそう決めたか（変更不可の判断記録） |
 
 ---
 
@@ -55,7 +55,7 @@ EVE Online に着想を得た**研究用の分散シミュレーション基盤*
 ```
 
 現在の制約は「できないから」ではなく「今は必要ないから」である。
-→ 詳細は [ADR-0003](../adr/ADR-0003-local-first-development.md) を参照。
+→ 詳細は [ADR-0003](./adr/ADR-0003-local-first-development.md) を参照。
 
 ### 将来のスコープ（方向性のみ、未実装）
 
@@ -273,8 +273,8 @@ Clientは「仮の状態」を先行表示し、Serverからのイベントで�
 
 | 制約 | 理由 | 根拠 ADR |
 |---|---|---|
-| Single Process のみ | ドメインロジックの正しさを先に確立する | [ADR-0003](../adr/ADR-0003-local-first-development.md) |
-| ネットワーク不使用 | In-Memory Channel で十分な段階 | [ADR-0003](../adr/ADR-0003-local-first-development.md) |
+| Single Process のみ | ドメインロジックの正しさを先に確立する | [ADR-0003](./adr/ADR-0003-local-first-development.md) |
+| ネットワーク不使用 | In-Memory Channel で十分な段階 | [ADR-0003](./adr/ADR-0003-local-first-development.md) |
 | Ship / Position のみ | MVP スコープの制限 | [CLAUDE.md §1](../CLAUDE.md) |
 
 ---

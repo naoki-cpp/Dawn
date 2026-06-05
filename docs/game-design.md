@@ -2,7 +2,7 @@
 scope    : ゲームデザイン方針。EVE Online から学んだ教訓と、このプロジェクトへの応用
 audience : Human Developer / AI Agent
 update   : 新機能を設計するとき / フィードバックに基づいて方針を変えるとき
-related  : roadmap.md, CLAUDE.md §1, adr/ADR-0006
+related  : roadmap.md, CLAUDE.md §1, docs/adr/ADR-0006
 ---
 
 # Game Design

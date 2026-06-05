@@ -4,7 +4,7 @@
 **唯一の権威ある運用規約**である。
 
 コードを書く前に必ずこのファイルを読むこと。
-設計判断の根拠は `adr/` を参照すること。
+設計判断の根拠は `docs/adr/` を参照すること。
 
 ---
 
@@ -715,7 +715,7 @@ assert_eq!(pos, expected_position);
 □ 新Crateの Dependency DAG 上の位置を決定した
 □ 循環依存が発生しないことを確認した（cargo tree で検証）
 □ CLAUDE.md のセクション11（Crate別責務早見表）を更新した
-□ 対応するADRを adr/ に作成した
+□ 対応するADRを docs/adr/ に作成した
 ```
 
 ### テストの確認
@@ -1060,7 +1060,7 @@ AIが陥りやすいアンチパターンとその修正方法を示す。
 ## 付録: 参照すべきドキュメント
 
 ```
-設計の根拠   : adr/ 以下の各ADRファイル
+設計の根拠   : docs/adr/ 以下の各ADRファイル
 Eventの仕様  : docs/event-catalog.md
 Crate一覧    : Cargo.toml (workspace)
 型の定義     : dawn-core/src/ 以下
