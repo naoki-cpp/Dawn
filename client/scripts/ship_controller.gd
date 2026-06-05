@@ -53,7 +53,6 @@ var _lock_instance: MeshInstance3D = null
 # ── ライフサイクル ────────────────────────────────────────────────────────────
 
 func _ready() -> void:
-	_target_pos = position
 	## 全 Ship に枠線インジケーターを生成（非表示で待機）
 	_lock_instance = _make_line_indicator(Color(0.0, 1.0, 1.0))  ## シアン
 	_lock_mesh     = _lock_instance.mesh as ImmediateMesh

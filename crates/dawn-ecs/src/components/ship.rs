@@ -11,3 +11,10 @@ use dawn_core::ShipId;
 /// Every spawned Ship entity must carry exactly one `ShipIdComp`.
 #[derive(Debug, Clone, Copy)]
 pub struct ShipIdComp(pub ShipId);
+
+/// マーカーコンポーネント: NPC 船であることを示す。
+///
+/// NPC はロックオンを自動で行う。
+/// プレイヤー船にはこのコンポーネントを付けない（手動 LockOnCommand のみ）。
+#[derive(Debug, Clone, Copy)]
+pub struct IsNpcComp;

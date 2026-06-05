@@ -14,7 +14,7 @@
 //! - 返り値の events を EventStore に Append するのは呼び出し元の責務。
 
 use crate::{
-    components::{LockComp, LockEntry, LockState, PositionComp, ShipIdComp, ShipStatsComp},
+    components::{IsNpcComp, LockComp, LockEntry, LockState, PositionComp, ShipIdComp, ShipStatsComp},
     SimWorld,
 };
 use dawn_core::{
@@ -34,6 +34,7 @@ struct ShipSnap {
     pos      : Position,
     stats    : ShipStatsComp,
     lock_comp: LockComp,
+    is_npc   : bool,  // true = NPC（自動ロック有効）/ false = プレイヤー
 }
 
 /// 1 Tick 分のロック処理を実行する。
@@ -48,16 +49,18 @@ pub fn run(
 
     let mut ships: Vec<ShipSnap> = {
         let mut v = Vec::new();
-        for (_, (id, pos, stats, lock)) in world
+        for (entity, (id, pos, stats, lock)) in world
             .inner()
             .query::<(&ShipIdComp, &PositionComp, &ShipStatsComp, &LockComp)>()
             .iter()
         {
+            let is_npc = world.inner().get::<&IsNpcComp>(entity).is_ok();
             v.push(ShipSnap {
                 ship_id  : id.0,
                 pos      : pos.0,
                 stats    : *stats,
                 lock_comp: lock.clone(),
+                is_npc,
             });
         }
         v
@@ -132,8 +135,10 @@ pub fn run(
             });
         }
 
-        // NPC 自動ロック（武器あり + スロット空き）
-        if ships[i].stats.weapon_damage > 0.0
+        // NPC 自動ロック（NPC のみ + 武器あり + スロット空き）
+        // プレイヤー船は手動 LockOnCommand でのみロックする
+        if ships[i].is_npc
+            && ships[i].stats.weapon_damage > 0.0
             && ships[i].lock_comp.has_capacity(max_locks)
         {
             let origin = ships[i].pos;
