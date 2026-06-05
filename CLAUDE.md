@@ -37,21 +37,28 @@
 - イベントソーシングによる完全な因果追跡
 - CRDTとRaftの責務分離による高スループット同期
 
-### 現在のMVP範囲（これ以外は実装しない）
+### 現在のスコープ（Phase 4 Cycle 3 まで）
 
 ```
 実装対象:
   エンティティ  : Ship のみ
-  コンポーネント: Position(x, y, z) のみ
-  イベント      : ShipSpawned, ShipMoved, SectorTransit系 のみ
+  コンポーネント: Position(x, y, z), Velocity, ThrustComp, ShipStatsComp,
+                  HullComp（HP/シールド）, FittingComp（装備スロット）
+  イベント      : ShipSpawned, ShipMoved, SectorTransit系,
+                  ShipFitted, WeaponFired, DamageTaken, ShipDestroyed
   ノード構成    : 3ノード固定
 
+Phase 4 で追加承認済み:
+  Fitting システム（EVE Online 準拠のモジュール装備）  ← Cycle 3 前提
+  Combat システム（武器 / ダメージ / HP / 破壊）       ← Cycle 3
+
 実装しない（提案も拒否する）:
-  戦闘システム / 課金 / UI / グラフィックス
-  キャラクター育成 / インベントリ / チャット
+  課金 / キャラクター育成 / 市場 / チャット
+  グラフィックス専用エンジン / 物理エンジン外部依存
 ```
 
-MVP範囲外の機能追加を求められた場合、実装せずにその旨を伝えること。
+スコープ外の機能追加を求められた場合、実装せずにその旨を伝えること。
+スコープの拡張が必要な場合は ADR を作成して人間の承認を得ること。
 
 ### 絶対に変えてはならない設計原則
 
@@ -248,7 +255,7 @@ cargo tree --duplicates
 
 ### Proto クレートの特別ルール（将来・未実装）
 
-`dawn-proto` は将来 Phase 4 で追加される予定。
+`dawn-proto` は将来 Phase 5 で追加される予定。
 全クレートから依存されてよい（シリアライゼーション定義のみを含む）。
 ただし `dawn-proto` からドメインロジックへの依存は禁止する。
 
@@ -284,7 +291,7 @@ cargo tree --duplicates
     ▼
 [5] EventStore への Append（永続化）
     │  - ここで失敗した場合 ECS の変更をロールバックする
-    │  - 現在: InMemoryEventStore（Phase 3 でファイル永続化に移行）
+    │  - 現在: FileEventStore（Phase 3 で実装済み・length-prefix + postcard）
     │  - 将来: fsync で durability を保証する
     │
     ▼
@@ -399,19 +406,25 @@ pub type Tick = u64;
 ### Tick 内の処理順序
 
 ```
-現在の実装（Phase 0〜2）:
+現在の実装（Phase 4 Cycle 2 時点）:
   1. Tick カウンタをインクリメント
-  2. Movement System を実行する（ECS バッチ処理）
-  3. 生成されたイベントを EventStore に Append する
-  4. ReplicationBus に差分を転送する       ← 必ず 3 の後
-  5. 呼び出し元へ TickSummary を返す       ← 必ず 4 の後
+  2. MoveCommand キューを処理する（ThrustComp を更新）
+  3. Movement System を実行する（ECS バッチ処理）
+  4. 生成されたイベントを EventStore に Append する
+  5. ReplicationBus に差分を転送する       ← 必ず 4 の後
+  6. 呼び出し元へ TickResult を返す        ← 必ず 5 の後
 
-将来の実装（Phase 2 以降で拡張）:
-  2' 未処理の MoveCommand キューを収集する（現在は Velocity 直接適用）
-  3' TickStarted / TickCompleted イベントを発行する（未実装）
+Phase 4 Cycle 3 以降（Combat System 追加後）:
+  1. Tick カウンタをインクリメント
+  2. MoveCommand / AttackCommand キューを処理する
+  3. Movement System を実行する
+  4. Combat System を実行する              ← Movement の後
+  5. 生成されたイベントを EventStore に Append する
+  6. ReplicationBus に差分を転送する       ← 必ず 5 の後
+  7. 呼び出し元へ TickResult を返す
 
 この順序を変えてはならない。
-特に「3 の前に 4」を行うことは禁止する（未コミットの状態を伝播させない）。
+特に「5 の前に 6」を行うことは禁止する（未コミットの状態を伝播させない）。
 ```
 
 ### Tick の実時間目標
@@ -426,16 +439,14 @@ pub type Tick = u64;
 ### Tick とEventの対応
 
 ```
-各 ShipMoved Event は必ず発行時の Tick を含む:
+移動・戦闘など世界の変化を表す全 Event は必ず発行時の Tick を含む:
 
-ShipMoved {
-    ship_id : ShipId,
-    from    : Position,
-    to      : Position,
-    tick    : Tick,      // ← 必須。省略不可。
-}
+ShipMoved     { ship_id, from, to,           tick }  // ← 必須
+WeaponFired   { attacker_id, target_id, damage, tick }
+DamageTaken   { ship_id, amount, current_hp, tick }
+ShipDestroyed { ship_id, killer_id,          tick }
 
-Tick なしの ShipMoved は INV-005 違反として拒否する。
+Tick なしのイベントは INV-005 違反として拒否する。
 ```
 
 ---
@@ -631,7 +642,7 @@ assert_eq!(pos, expected_position);
 □ 変更するCrateを特定した
 □ そのCrateの責務を Crate別責務早見表（セクション11）で確認した
 □ 変更によって影響を受けるCrateを Dependency DAG（セクション3）で特定した
-□ 変更がMVP範囲内であることを確認した（セクション1）
+□ 変更が現在のスコープ内であることを確認した（セクション1）
 □ 変更が Architecture Invariants（セクション2）のいずれかを破らないことを確認した
 ```
 
@@ -790,12 +801,15 @@ CIが以下を検出した場合、PRを自動拒否する:
 
 ```
 以下のクレート・モジュールを作成してはならない:
-  crates/dawn-combat/    ← 戦闘システム
-  crates/dawn-economy/   ← 経済システム
+  crates/dawn-economy/   ← 経済システム（Phase 4 スコープ外）
   crates/dawn-character/ ← キャラクター育成
   crates/dawn-inventory/ ← インベントリ
-  crates/dawn-ui/        ← UI
-  crates/dawn-graphics/  ← グラフィックス
+  crates/dawn-ui/        ← UI 専用クレート
+  crates/dawn-graphics/  ← グラフィックス専用クレート
+
+Phase 4 Cycle 3 で承認済み（作成してよい）:
+  Combat / Fitting ロジックは dawn-ecs / dawn-core 内に実装する。
+  独立クレートに切り出す場合は ADR を作成して承認を得ること。
 
 これらのディレクトリが存在する場合、削除の提案を行うこと。
 ```
@@ -808,20 +822,20 @@ CIが以下を検出した場合、PRを自動拒否する:
 
 | Crate | 責務 | 依存してよいもの | 禁止 |
 |---|---|---|---|
-| `dawn-core` | ドメインモデル定義のみ。EntityId, Position, 全Event型, 全Command型 | serde, thiserror のみ | ネットワーク、ファイルI/O、非同期 |
-| `dawn-ecs` | ECS World の薄いラッパー。Component定義, System定義 | dawn-core, hecs | ネットワーク、EventStore |
-| `dawn-event-store` | Event Log の永続化。Append, Read, Snapshot | dawn-core, serde | ネットワーク、ECS |
-| `dawn-actor` | Actor基盤。EventStoreActor, ReplicationBus | dawn-core, dawn-event-store, tokio | dawn-ecs, dawn-simulation |
-| `dawn-simulation` | シミュレーション実行バイナリ。SectorSimulatorActor, MultiNodeCluster, 負荷生成 | 上記全て + rand | — |
+| `dawn-core` | ドメインモデル定義のみ。EntityId, Position, Fitting型, 全Event型, 全Command型 | serde, thiserror のみ | ネットワーク、ファイルI/O、非同期 |
+| `dawn-ecs` | ECS World の薄いラッパー。Component定義（Movement/Fitting/Combat）, System定義 | dawn-core, hecs | ネットワーク、EventStore |
+| `dawn-event-store` | Event Log の永続化。Append, Read, Snapshot（InMemory + File） | dawn-core, serde | ネットワーク、ECS |
+| `dawn-actor` | Actor基盤。EventStoreActor, ReplicationBus, ClientConnection trait | dawn-core, dawn-event-store, tokio | dawn-ecs, dawn-simulation |
+| `dawn-simulation` | 実行バイナリ。SimulationNode, MultiNodeCluster, WsServer（Godot WebSocket接続）, 負荷生成 | 上記全て + rand + tokio-tungstenite | — |
 
 ### 将来追加予定のクレート（まだ存在しない・実装しないこと）
 
 | Crate | 予定フェーズ | 責務（予定） |
 |---|---|---|
-| `dawn-consensus` | Phase 5 | Raft実装。Leader選出, Log Replication |
-| `dawn-replication` | Phase 6 | Gossip + CRDT。差分伝播, LWW-Register |
-| `dawn-proto` | Phase 4 | protobuf定義と生成コード |
-| `dawn-sector-node` | Phase 4 | 本番実行バイナリ。Actorの配線と起動 |
+| `dawn-consensus` | Phase 7 | Raft実装。Leader選出, Log Replication |
+| `dawn-replication` | Phase 8 | Gossip + CRDT。差分伝播, LWW-Register |
+| `dawn-proto` | Phase 5 | protobuf定義と生成コード |
+| `dawn-sector-node` | Phase 5 | 本番実行バイナリ。Actorの配線と起動 |
 
 ---
 
@@ -904,6 +918,42 @@ AIが陥りやすいアンチパターンとその修正方法を示す。
 対処:
   Sector Transit は必ず Raft を経由する。INV-003 を参照すること。
   レイテンシが問題なら Transit の頻度を下げる設計を検討する。
+  ※ Raft は Phase 7 で実装予定。現在（Phase 4）は単一Sectorで運用。
+```
+
+### パターン6: FittingSnapshot をイベントに含めず ID だけ記録する
+
+```
+状況: "モジュールIDだけ保存してレジストリで引けば十分" という判断で
+      ShipFitted イベントに ModuleId のリストだけを含めようとする
+
+違反の結果:
+  レジストリの内容が変わった場合（モジュールの stat が更新されるなど）、
+  過去の Event を Replay すると当時と異なる stat が再現される。
+  → INV-002 違反（Event Replay で世界が完全に再現されない）
+
+正しい実装:
+  ShipFitted イベントには FittingSnapshot（モジュール定義全体）を含める。
+  Replay はレジストリに依存せず、イベントの内容だけで完結しなければならない。
+  → ADR-0006 §1 参照
+```
+
+### パターン7: 特定座標を「シグナル」として流用する
+
+```
+状況（Phase 4 で採用した暫定実装）:
+  MoveCommand の target_position に Position::ORIGIN (0,0,0) を送ると
+  サーバーが「プレイヤー船に指定せよ」と解釈するという特殊ルールが存在する。
+
+なぜ危険か:
+  座標とシグナルが同一チャンネルで混在しており、
+  次の AI セッションが「MoveCommand は常に移動先」と誤読するリスクがある。
+  将来、原点付近でのプレイヤー操作と誤判定する可能性がある。
+
+現状:
+  Phase 4 の暫定措置として許容している。
+  Phase 5 以降で専用 Command（例: SetPlayerShipCommand）に置き換える予定。
+  → この暫定ルールを拡張・踏襲しないこと。
 ```
 
 ---
@@ -932,6 +982,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-04*
-*対応ADR: ADR-0001 〜 ADR-0004*
-*次回レビュー予定: Phase 3完了時*
+*最終更新: 2026-06-05（Cycle 3 Lock-on / ClientCommand 対応）*
+*対応ADR: ADR-0001 〜 ADR-0007*
+*次回レビュー予定: Phase 4完了時（Cycle N 終了・Phase 5 移行前）*

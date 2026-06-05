@@ -5,6 +5,18 @@ update   : フェーズ完了時 / タスクが完了するたびに更新する
 related  : architecture.md, CLAUDE.md §1
 ---
 
+> **CLAUDE.md レビュータイミング**
+> このファイルの各フェーズ完了マーク（✅）を更新するタイミングで
+> `CLAUDE.md` のレビューも実施すること。
+>
+> | タイミング | レビュー内容 |
+> |---|---|
+> | Phase 4 完了時（Phase 5 移行前） | スコープ・Crate表・Tick順序・パターン集を全面見直し |
+> | Phase 5 完了時 | ClientConnection 差し替え後の設計原則を更新。ADR-0007 実装チェックリストを消化してから着手すること |
+> | Phase 7 完了時 | Raft 導入後の INV-003 / INV-005 の具体例を更新 |
+>
+> CLAUDE.md フッターの `次回レビュー予定` と必ず一致させること。
+
 # Roadmap
 
 ## 1. このドキュメントの使い方
@@ -30,8 +42,8 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 ## 2. 現在地
 
 ```
-現在のフェーズ : Phase 4 — ゲーム開発ループ  Cycle 2
-フェーズの状態 : Cycle 1 完了 / Cycle 2 開始
+現在のフェーズ : Phase 4 — ゲーム開発ループ  Cycle N
+フェーズの状態 : Cycle 1〜3 完了 / 次サイクル未定
 ```
 
 ### 完了済みフェーズ
@@ -43,7 +55,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**Phase 4 Cycle 2: プレイヤーが操作できる Ship を追加し、航行できるようにする**
+**Cycle N: フィードバックに基づいて決定する**
 
 ---
 
@@ -182,30 +194,55 @@ Godot は trait に向かって書く。
 
 ---
 
-### Cycle 1 — 宇宙に船を浮かべる
+### Cycle 1 — 宇宙に船を浮かべる ✅
 
 ```
 目標 : 宇宙空間で Ship が動いているのが見える
-Server: 現状のまま（InProcessConnection で接続するだけ）
-Client: Godot 初期化 / Ship を 3D 空間に表示 / スカイボックス
-確認  : 「宇宙に船がいる」という感覚があるか
+Server: WsServer（WebSocket）/ 200 ships / 10 tick/sec
+Client: Godot 4 初期化 / Ship を 3D 空間に表示（六角柱 + OmniLight）
+確認  : 「宇宙に船がいる」という感覚 → 達成
 ```
 
-### Cycle 2 — 航行する
+### Cycle 2 — 航行する ✅
 
 ```
 目標 : 宇宙空間を飛び回れる
-Server: Navigation Context（Warp / Dock / Ship Template）
-Client: ワープ演出 / カメラ追従 / 星系間移動の見た目
-確認  : 「宇宙の広さ」が感じられるか
+Server: 加速度ベースの物理（ThrustComp + ShipStatsComp）
+        MoveCommand で ThrustComp を設定
+        速度上限（max_speed）・加速度（thrust_magnitude）をコンポーネント化
+        壁の削除（宇宙は無限）
+Client: 左ダブルクリック → カメラレイ方向に推力ベクトルを指定
+        クォータニオンオービットカメラ（上下左右全方向・ジンバルロックなし）
+        速度インジケーター（緑矢印）/ 推力インジケーター（橙矢印）
+        HUD（速度 / Tick / 接続状態）
+確認  : 「宇宙の広さ」「3D 方向への加速」が感じられる → 達成
 ```
 
-### Cycle 3 — 戦う
+### Cycle 3 — 戦う ✅
 
 ```
 目標 : 船同士が戦えて破壊される
-Server: Combat Context（武器 / ダメージ / HP / Destroyed）
-Client: 武器発射エフェクト / 爆発 / HUD（HP ゲージ）
+
+サーバー側（完了）:
+  Fitting システム（EVE Online 準拠）
+    - モジュール装備スロット（High / Mid / Low / Rig）
+    - StatDelta による stat 集計（base_stats + Σmodule.delta）
+    - 武器能力はモジュール装備でのみ付与（ベース値ゼロ）
+  Lock-on システム（2フェーズ戦闘）
+    - LockOnCommand → LockSystem でカウントダウン → TargetLocked
+    - NPC 自動ロック / プレイヤー右クリックロック
+    - lock_time / max_locks を ShipStatsComp で管理（モジュールで変更可能）
+  Combat システム
+    - Locked 状態のターゲットにのみ発射（ロックなし = 攻撃不可）
+    - WeaponFired / DamageTaken / ShipDestroyed イベント
+  ClientCommand 一般化（MoveCommand → ClientCommand enum）
+    - ws_server.rs で MoveCommand / LockOnCommand 両方をパース
+
+Godot 側（未着手）:
+  HP ゲージ HUD（DamageTaken イベント受信）
+  破壊エフェクト（ShipDestroyed → パーティクル / queue_free）
+  ロック状態インジケーター（Locking 中 / Locked の視覚表示）
+
 確認  : 「戦闘が面白い」という感覚があるか
 ```
 

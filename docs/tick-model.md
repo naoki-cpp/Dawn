@@ -66,23 +66,38 @@ Tick を遅延させることも、スキップすることも許容しない。
 **この順序は変更してはならない。** 変更には ADR が必要。
 
 ```
+現在の実装（Phase 4 Cycle 3）:
+
 Step 1: Tick カウンタをインクリメント
          current_tick = current_tick + 1
 
-Step 2: 未処理の Command を収集する
-         （現在: MovementSystem が直接 Velocity を使用するため省略可）
+Step 2: コマンドキューを処理する
+         MoveCommand   → ThrustComp を更新
+         LockOnCommand → LockSystem に渡す（次のステップで処理）
 
 Step 3: Movement System を実行する（ECS バッチ処理）
-         MovementSystem::run(&mut world, &bounds, tick)
+         MovementSystem::run(&mut world, tick)
+         → 生成: Vec<ShipMoved>
 
-Step 4: 生成されたイベントを EventStore に Append する
-         event_store.append_batch(events)
+Step 4: Lock System を実行する
+         LockSystem::run(&mut world, tick, &lock_commands)
+         → 生成: Vec<TargetLocked | LockLost>
+         ※ Movement の後に実行すること（位置確定後にロック判定）
 
-Step 5: （将来）Replication Actor に差分を通知する
-         replication_tx.send(delta)  ← Phase 2 以降
+Step 5: Combat System を実行する
+         CombatSystem::run(&mut world, tick)
+         → 生成: Vec<WeaponFired | DamageTaken | ShipDestroyed>
+         ※ Lock System の後に実行すること（Locked 状態を参照するため）
+         ※ 破壊された Ship は呼び出し元が ECS と ship_index から削除する
+
+Step 6: 全イベントを EventStore に Append する
+         event_store.append_batch(move_events + lock_events + combat_events)
+
+Step 7: Replication Actor に差分を通知する
+         replication_tx.send(delta)
 ```
 
-### Step 4 より前に Step 5 を実行してはならない理由
+### Step 6 より前に Step 7 を実行してはならない理由
 
 EventStore への Append が完了する前に他のノードへ伝播すると、
 受信側が「存在しないイベントを参照する」状態になる。  

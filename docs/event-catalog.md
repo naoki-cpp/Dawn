@@ -1,7 +1,7 @@
 ---
-scope    : 存在する全イベントの完全仕様。「何が起きうるか」の唯一の真実
+scope    : 存在する全イベントと全コマンドの完全仕様。「何が起きうるか」の唯一の真実
 audience : AI Agent / Human Developer
-update   : イベントを追加・変更するたびに必ず更新する
+update   : イベント / コマンドを追加・変更するたびに必ず更新する
 related  : entity-model.md, tick-model.md, CLAUDE.md §7
 ---
 
@@ -11,8 +11,9 @@ related  : entity-model.md, tick-model.md, CLAUDE.md §7
 
 ### コードとの同期ルール
 
-`dawn-core/src/events.rs` の定義とこのカタログは**常に一致していなければならない**。
-イベントを追加・変更した場合は、コードとカタログを同一 PR で更新すること。
+`dawn-core/src/events.rs` / `dawn-core/src/commands.rs` の定義と
+このカタログは**常に一致していなければならない**。
+イベント / コマンドを追加・変更した場合は、コードとカタログを同一 PR で更新すること。
 
 ### イベント追加の手順
 
@@ -34,7 +35,7 @@ related  : entity-model.md, tick-model.md, CLAUDE.md §7
 禁止: イベント名を変更する（代わりに V2 を新設する）
 ```
 
-破壊的変更が必要な場合は [Upcaster の手順](#5-upcasterカタログ) に従うこと。
+破壊的変更が必要な場合は [Upcaster の手順](#6-upcasterカタログ) に従うこと。
 
 ---
 
@@ -53,7 +54,7 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 
 ### 全イベントが持つ共通フィールド
 
-Movement 系イベントは必ず `tick: Tick` を持つ。
+全イベントは必ず `tick: Tick` を持つ。
 `tick` を省略したイベントは INV-005 違反として拒否する。
 
 ### Optional フィールドの方針
@@ -68,26 +69,47 @@ Movement 系イベントは必ず `tick: Tick` を持つ。
 
 ### 3.1 Ship ライフサイクル
 
-| イベント名 | 説明 | 発行者 |
-|---|---|---|
-| `ShipSpawned` | Ship が世界に出現した | `SimulationNode::spawn_ship()` |
-| `ShipDespawned` | Ship が世界から消えた | `SimulationNode`（未実装） |
+| イベント名 | 説明 | 発行者 | ステータス |
+|---|---|---|---|
+| `ShipSpawned` | Ship が世界に出現した | `SimulationNode::spawn_ship()` | ✅ 実装済み |
+| `ShipDespawned` | Ship が世界から消えた（手動） | `SimulationNode` | 型定義のみ |
+| `ShipDestroyed` | Ship が戦闘で破壊された | `CombatSystem` | ✅ 実装済み |
 
 ### 3.2 Movement
 
-| イベント名 | 説明 | 発行者 |
-|---|---|---|
-| `ShipMoved` | Ship の位置が変化した | `MovementSystem::run()` |
+| イベント名 | 説明 | 発行者 | ステータス |
+|---|---|---|---|
+| `ShipMoved` | Ship の位置が変化した | `MovementSystem::run()` | ✅ 実装済み |
 
-### 3.3 Sector Transit（将来予約）
+### 3.3 Fitting
+
+| イベント名 | 説明 | 発行者 | ステータス |
+|---|---|---|---|
+| `ShipFitted` | Ship の装備スロットが変更された | `SimulationNode::fit_module()` | ✅ 実装済み |
+
+### 3.4 Lock-on
+
+| イベント名 | 説明 | 発行者 | ステータス |
+|---|---|---|---|
+| `TargetLocked` | ロックオンが完了した | `LockSystem::run()` | ✅ 実装済み |
+| `LockLost` | ロックが消失した | `LockSystem::run()` | ✅ 実装済み |
+
+### 3.5 Combat
+
+| イベント名 | 説明 | 発行者 | ステータス |
+|---|---|---|---|
+| `WeaponFired` | 武器が発射された | `CombatSystem::run()` | ✅ 実装済み |
+| `DamageTaken` | Ship がダメージを受けた | `CombatSystem::run()` | ✅ 実装済み |
+
+### 3.6 Sector Transit（将来予約）
 
 | イベント名 | 説明 | ステータス |
 |---|---|---|
-| `SectorTransitRequested` | Sector 境界越えの要求 | 未実装 |
-| `SectorTransitCompleted` | Sector 境界越えの完了 | 未実装 |
-| `SectorTransitRejected` | Sector 境界越えの拒否 | 未実装 |
+| `SectorTransitRequested` | Sector 境界越えの要求 | 未実装（Phase 7） |
+| `SectorTransitCompleted` | Sector 境界越えの完了 | 未実装（Phase 7） |
+| `SectorTransitRejected` | Sector 境界越えの拒否 | 未実装（Phase 7） |
 
-### 3.4 System（将来予約）
+### 3.7 System（将来予約）
 
 | イベント名 | 説明 | ステータス |
 |---|---|---|
@@ -96,26 +118,34 @@ Movement 系イベントは必ず `tick: Tick` を持つ。
 
 ---
 
-## 4. イベント詳細仕様
+## 4. コマンド一覧
+
+コマンドは `dawn-core/src/commands.rs` で定義される。
+クライアントからサーバーへは `ClientCommand` enum（`dawn-actor`）でラップして送信する。
+
+| コマンド名 | 説明 | 対応イベント | ステータス |
+|---|---|---|---|
+| `MoveCommand` | 推力方向を指定する | — | ✅ 実装済み |
+| `LockOnCommand` | ロックオン開始を要求する | `TargetLocked` | ✅ 実装済み |
+| `FitModuleCommand` | モジュールを装備する | `ShipFitted` | ✅ 実装済み |
+| `AttackCommand` | 攻撃対象を指定する（将来） | `WeaponFired` | 型定義のみ（Phase 5） |
+
+---
+
+## 5. イベント詳細仕様
 
 ### `ShipSpawned`
 
 **説明:** Ship が Sector 内に生成された。
-
-**ペイロード:**
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `ship_id` | `ShipId` | ✓ | 生成された Ship の一意な識別子 |
 | `sector_id` | `SectorId` | ✓ | 生成先の Sector |
 | `initial_position` | `Position` | ✓ | 生成時の座標 |
-| `tick` | `Tick` | ✓ | 生成された Tick（Tick::ZERO を含む） |
+| `tick` | `Tick` | ✓ | 生成された Tick |
 
-**不変条件:**
-- `ship_id` は世界全体で一意であり、再利用されない（INV-004）
-- `initial_position` は `sector_id` の SectorBounds 内に収まる
-
-**発行条件:** `spawn_ship()` が呼ばれ、ECS に Entity が追加された後に発行する。
+**不変条件:** `ship_id` は世界全体で一意であり、再利用されない（INV-004）。
 
 ---
 
@@ -123,45 +153,120 @@ Movement 系イベントは必ず `tick: Tick` を持つ。
 
 **説明:** Ship が 1 Tick 内に位置を変化させた。
 
-**ペイロード:**
-
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | 移動した Ship の識別子 |
+| `ship_id` | `ShipId` | ✓ | 移動した Ship |
 | `from` | `Position` | ✓ | 移動前の座標 |
 | `to` | `Position` | ✓ | 移動後の座標 |
 | `tick` | `Tick` | ✓ | 移動が確定した Tick |
 
-**不変条件:**
-- `tick` は省略不可（INV-005）
-- `from != to`（位置が変化していない Ship はこのイベントを発行しない）
-- `to` は当該 Ship の Sector の SectorBounds 内に収まる
-
-**発行条件:** `MovementSystem::run()` が実行され、Ship の位置が実際に変化した場合のみ発行する。速度ゼロの Ship はイベントを発行しない。
+**不変条件:** `from != to`（位置変化なしの Ship はイベントを発行しない）。
 
 ---
 
 ### `ShipDespawned`
 
-**説明:** Ship が世界から永続的に取り除かれた。
-
-**ペイロード:**
+**説明:** Ship が世界から永続的に取り除かれた（手動削除）。
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | 消滅した Ship の識別子 |
+| `ship_id` | `ShipId` | ✓ | 消滅した Ship |
 | `tick` | `Tick` | ✓ | 消滅した Tick |
-
-**不変条件:**
-- `ship_id` は以降どのイベントにも登場しない（ID は再利用されない）
-
-**発行条件:** Ship が ECS World から除去される前に発行する（INV-002 保証のため）。
-
-**ステータス:** 現在未実装。型定義のみ存在する。
 
 ---
 
-## 5. Upcasterカタログ
+### `ShipFitted`
+
+**説明:** Ship の装備スロットが変更された。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | 装備を変更した Ship |
+| `fitting` | `FittingSnapshot` | ✓ | 変更後の全スロットのスナップショット（モジュール ID リスト） |
+| `tick` | `Tick` | ✓ | 装備変更が確定した Tick |
+
+**設計メモ:** `stats` フィールドは持たない。Replay 時は `FittingSnapshot` から
+`apply_fitting()` で再計算するため（INV-002 準拠）。
+
+---
+
+### `TargetLocked`
+
+**説明:** `LockSystem` のカウントダウンが完了し、ロックオンが確立した。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `locker_id` | `ShipId` | ✓ | ロックした Ship |
+| `target_id` | `ShipId` | ✓ | ロックされた Ship |
+| `tick` | `Tick` | ✓ | ロックが完了した Tick |
+
+**Replay:** `LockComp` の該当エントリを `Locked` 状態に更新する。
+
+---
+
+### `LockLost`
+
+**説明:** ロックが消失した。ターゲットが撃沈または射程外になった場合に発行する。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `locker_id` | `ShipId` | ✓ | ロックを失った Ship |
+| `target_id` | `ShipId` | ✓ | ロック対象だった Ship |
+| `tick` | `Tick` | ✓ | ロックが消失した Tick |
+
+**Replay:** `LockComp` から該当エントリを削除する。
+
+---
+
+### `WeaponFired`
+
+**説明:** Ship が武器を発射した。ダメージは同 Tick の `DamageTaken` で確認できる。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `attacker_id` | `ShipId` | ✓ | 発射した Ship |
+| `target_id` | `ShipId` | ✓ | 攻撃対象の Ship |
+| `damage` | `f32` | ✓ | 与えるダメージ量 |
+| `tick` | `Tick` | ✓ | 発射した Tick |
+
+**発行条件:** ターゲットが `LockComp` で `Locked` 状態であり、かつ
+`weapon_cooldown` が経過している場合のみ発行する。
+
+**Replay:** ECS 状態を変更しない（発射ログのみ）。
+
+---
+
+### `DamageTaken`
+
+**説明:** Ship がダメージを受け、HP が変化した。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | ダメージを受けた Ship |
+| `amount` | `f32` | ✓ | 受けたダメージ量 |
+| `current_hp` | `f32` | ✓ | ダメージ後の残 HP |
+| `tick` | `Tick` | ✓ | ダメージを受けた Tick |
+
+**設計メモ:** `current_hp` を含めることで Replay 時に
+`HullComp.current_hp` を正確に復元できる（INV-002 準拠）。
+
+---
+
+### `ShipDestroyed`
+
+**説明:** Ship が戦闘で HP ゼロになり破壊された。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | 破壊された Ship |
+| `killer_id` | `ShipId` | ✓ | 最後の一撃を与えた Ship |
+| `tick` | `Tick` | ✓ | 破壊された Tick |
+
+**Replay:** `ship_id` に対応する Entity を ECS と `ship_index` から削除する。
+
+---
+
+## 6. Upcasterカタログ
 
 破壊的変更があった場合にのみここに記録する。
 

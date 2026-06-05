@@ -27,16 +27,35 @@ Phase 5: GrpcConnection       — tonic による本物のネットワーク（�
 ## インターフェース設計
 
 ```rust
+/// クライアントからサーバーへ送信できる全コマンドの列挙。
+/// 新コマンドの追加 = この enum に variant を追加するだけ。
+/// ClientConnection trait 自体は変更しない。
+pub enum ClientCommand {
+    Move(MoveCommand),      // Cycle 2〜: 推力方向指定
+    LockOn(LockOnCommand),  // Cycle 3〜: ロックオン開始
+    // 将来: Attack(AttackCommand), Fit(FitModuleCommand), ...
+}
+
 pub trait ClientConnection: Send + 'static {
     /// サーバー → クライアント: DomainEvent のストリーム配信
     fn send_events(&self, events: &[DomainEvent]) -> Result<(), ConnectionError>;
 
     /// クライアント → サーバー: Command の受信（ノンブロッキング）
-    fn try_recv_command(&mut self) -> Option<MoveCommand>;
+    fn try_recv_command(&mut self) -> Option<ClientCommand>;
 }
 ```
 
 責務はこの **2 方向のみ** とする。
+
+### コマンド拡張の方針
+
+新しいコマンドを追加する場合は `ClientCommand` enum に variant を追加する。
+`ClientConnection` trait のシグネチャ自体は変更しない。
+
+変更が必要なのは以下の 3 箇所のみ:
+1. `dawn-core/src/commands.rs` に新しいコマンド型を定義する
+2. `dawn-actor/src/client_connection.rs` の `ClientCommand` に variant を追加する
+3. `ws_server.rs` の JSON パーサーと `main.rs` の振り分けを更新する
 
 ## 根拠
 
@@ -112,10 +131,24 @@ UnboundedChannel を選択した理由:
 - Phase 5 では `ClientConnection` の impl を差し替えるだけで完結する
 - Godot GDScript 側のコードは Phase 5 で変更しない
 
+## Phase 4 の既知の制限（Phase 5 で解決する）
+
+Phase 4 では以下を意図的に省略している。
+Phase 5 移行時には ADR-0007 に従って対応する。
+
+```
+- WsServer は1クライアントのみ受け付ける
+- Ship 所有権の検証なし（誰でも任意の Ship を操作できる）
+- セッション管理（PlayerId）なし
+- ORIGIN 座標をプレイヤー指定シグナルとして流用（暫定、CLAUDE.md §12 パターン7）
+- AttackCommand の JSON パーサー未実装
+```
+
 ## 参照
 
 - ADR-0003: Local-First Development Strategy
 - ADR-0004: Client Technology Selection (Godot 4)
+- ADR-0007: マルチプレイヤー対応設計（Phase 5）
 - CLAUDE.md FBD-002: dawn-core への外部依存禁止
 - CLAUDE.md FBD-004: Actor 間の直接メソッド呼び出し禁止
 - docs/architecture.md §5-A: ClientConnection の詳細
