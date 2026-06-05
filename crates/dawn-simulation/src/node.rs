@@ -450,6 +450,69 @@ impl<S: EventStore> SimulationNode<S> {
         }).to_string()
     }
 
+    // ── Module Activation ─────────────────────────────────────────────────────
+
+    /// Active モジュールをオンにする。
+    pub fn activate_module(&mut self, cmd: dawn_core::ActivateModuleCommand) -> bool {
+        self.set_module_active(cmd.ship_id, cmd.module_id, cmd.slot, true)
+    }
+
+    /// Active モジュールをオフにする。
+    pub fn deactivate_module(&mut self, cmd: dawn_core::DeactivateModuleCommand) -> bool {
+        self.set_module_active(cmd.ship_id, cmd.module_id, cmd.slot, false)
+    }
+
+    /// 所有権チェック付き activate。
+    pub fn activate_module_owned(&mut self, player_id: PlayerId, cmd: dawn_core::ActivateModuleCommand) -> bool {
+        if self.ship_owners.get(&cmd.ship_id) != Some(&player_id) { return false; }
+        self.activate_module(cmd)
+    }
+
+    /// 所有権チェック付き deactivate。
+    pub fn deactivate_module_owned(&mut self, player_id: PlayerId, cmd: dawn_core::DeactivateModuleCommand) -> bool {
+        if self.ship_owners.get(&cmd.ship_id) != Some(&player_id) { return false; }
+        self.deactivate_module(cmd)
+    }
+
+    fn set_module_active(
+        &mut self,
+        ship_id  : ShipId,
+        module_id: dawn_core::ModuleId,
+        slot     : dawn_core::SlotKind,
+        active   : bool,
+    ) -> bool {
+        use dawn_core::events::{ModuleActivated, ModuleDeactivated};
+        let entity = match self.ship_index.get(&ship_id).copied() {
+            Some(e) => e,
+            None    => return false,
+        };
+
+        // FittingComp のスロットで対象モジュールを探す
+        let found = self.world.inner_mut()
+            .get::<&mut FittingComp>(entity)
+            .ok()
+            .and_then(|mut f| f.find_slot_mut(module_id, slot).map(|s| {
+                s.is_active = active;
+                true
+            }))
+            .unwrap_or(false);
+
+        if !found { return false; }
+
+        // ShipStatsComp を再集計
+        let base = self.base_stats.get(&ship_id).copied().unwrap_or(ShipStatsComp::NPC);
+        apply_fitting(&mut self.world, ship_id, base);
+
+        // イベントを発行
+        let event = if active {
+            DomainEvent::ModuleActivated(ModuleActivated { ship_id, module_id, slot, tick: self.current_tick })
+        } else {
+            DomainEvent::ModuleDeactivated(ModuleDeactivated { ship_id, module_id, slot, tick: self.current_tick })
+        };
+        self.event_store.append(event);
+        true
+    }
+
     // ── Fitting ───────────────────────────────────────────────────────────────
 
     /// モジュール定義をレジストリに登録する。
@@ -479,8 +542,18 @@ impl<S: EventStore> SimulationNode<S> {
         };
 
         // スロットにモジュールを追加
+        // Active モジュールの初期状態:
+        //   NPC 船  → is_active = true（自動でオン）
+        //   プレイヤー船 → is_active = false（手動でオンにする）
+        use dawn_core::fitting::ActivationMode;
+        use dawn_ecs::components::FittedSlot;
+        let is_npc = self.ship_owners.get(&cmd.ship_id).is_none();
+        let is_active = match def.activation_mode {
+            ActivationMode::Passive => true,   // Passive は常にオン扱い
+            ActivationMode::Active  => is_npc, // NPC=true, Player=false
+        };
         if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(entity) {
-            fitting.slot_mut(cmd.slot).push(def);
+            fitting.slot_mut(cmd.slot).push(FittedSlot { def, is_active });
         } else {
             return false;
         }
@@ -608,6 +681,30 @@ impl<S: EventStore> SimulationNode<S> {
                         .copied()
                         .unwrap_or(ShipStatsComp::NPC);
                     let _ = self.world.inner_mut().insert_one(entity, fitting);
+                    apply_fitting(&mut self.world, e.ship_id, base);
+                }
+            }
+
+            DomainEvent::ModuleActivated(e) => {
+                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                    if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(entity) {
+                        if let Some(slot) = fitting.find_slot_mut(e.module_id, e.slot) {
+                            slot.is_active = true;
+                        }
+                    }
+                    let base = self.base_stats.get(&e.ship_id).copied().unwrap_or(ShipStatsComp::NPC);
+                    apply_fitting(&mut self.world, e.ship_id, base);
+                }
+            }
+
+            DomainEvent::ModuleDeactivated(e) => {
+                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                    if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(entity) {
+                        if let Some(slot) = fitting.find_slot_mut(e.module_id, e.slot) {
+                            slot.is_active = false;
+                        }
+                    }
+                    let base = self.base_stats.get(&e.ship_id).copied().unwrap_or(ShipStatsComp::NPC);
                     apply_fitting(&mut self.world, e.ship_id, base);
                 }
             }
@@ -873,11 +970,12 @@ mod tests {
         let ship_id = node.spawn_ship(Position::ORIGIN, Velocity::ZERO);
 
         let railgun = ModuleDefinition {
-            id        : ModuleId(1),
-            name      : "Test Railgun".to_string(),
-            kind      : ModuleKind::Weapon,
-            slot      : SlotKind::High,
-            stat_delta: StatDelta { weapon_damage_add: 25.0, weapon_range_add: 1000.0, ..StatDelta::ZERO },
+            id              : ModuleId(1),
+            name            : "Test Railgun".to_string(),
+            kind            : ModuleKind::Weapon,
+            slot            : SlotKind::High,
+            activation_mode : dawn_core::ActivationMode::Active,
+            stat_delta      : StatDelta { weapon_damage_add: 25.0, weapon_range_add: 1000.0, ..StatDelta::ZERO },
         };
         node.register_module(railgun);
 

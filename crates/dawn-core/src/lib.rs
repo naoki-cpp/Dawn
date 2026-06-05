@@ -19,12 +19,12 @@ pub mod sector;
 pub mod tick;
 
 // Re-export the most commonly used types at crate root for ergonomics.
-pub use commands::{AttackCommand, FitModuleCommand, LockOnCommand, MoveCommand};
+pub use commands::{ActivateModuleCommand, AttackCommand, DeactivateModuleCommand, FitModuleCommand, LockOnCommand, MoveCommand};
 pub use player::PlayerId;
 pub use entity::{EntityId, NodeId, ShipId};
 pub use error::DawnError;
 pub use events::DomainEvent;
-pub use fitting::{FittingSnapshot, ModuleDefinition, ModuleId, ModuleKind, SlotKind, StatDelta};
+pub use fitting::{ActivationMode, FittingSnapshot, ModuleDefinition, ModuleId, ModuleKind, SlotEntry, SlotKind, StatDelta};
 pub use position::{Position, Velocity};
 pub use sector::{SectorBounds, SectorId};
 pub use tick::Tick;

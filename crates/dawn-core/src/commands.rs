@@ -50,6 +50,22 @@ pub struct LockOnCommand {
     pub target_id : ShipId,
 }
 
+/// Request to activate an Active module.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActivateModuleCommand {
+    pub ship_id   : ShipId,
+    pub module_id : ModuleId,
+    pub slot      : SlotKind,
+}
+
+/// Request to deactivate an Active module.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DeactivateModuleCommand {
+    pub ship_id   : ShipId,
+    pub module_id : ModuleId,
+    pub slot      : SlotKind,
+}
+
 /// Request to attack another Ship.
 ///
 /// May be rejected if:

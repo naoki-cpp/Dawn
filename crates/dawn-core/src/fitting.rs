@@ -51,6 +51,21 @@ pub enum ModuleKind {
     Rig,
 }
 
+// ── 活性化モード ──────────────────────────────────────────────────────────────
+
+/// モジュールの活性化モード。
+///
+/// Passive: 装備するだけで StatDelta が常時適用される（Shield Extender など）。
+/// Active : プレイヤーがオン/オフを切り替える（Weapon, Afterburner など）。
+///          オフ時は StatDelta が適用されない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ActivationMode {
+    /// 常時効果。装備するだけで有効。
+    Passive,
+    /// オン/オフ切り替え可能。オフ時は効果なし。
+    Active,
+}
+
 // ── StatDelta ─────────────────────────────────────────────────────────────────
 
 /// 1枚のモジュールが ShipStats に加算する差分。
@@ -110,14 +125,24 @@ impl StatDelta {
 /// モジュール 1種類の定義（不変の設計図）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModuleDefinition {
-    pub id         : ModuleId,
-    pub name       : String,
-    pub kind       : ModuleKind,
-    pub slot       : SlotKind,
-    pub stat_delta : StatDelta,
+    pub id              : ModuleId,
+    pub name            : String,
+    pub kind            : ModuleKind,
+    pub slot            : SlotKind,
+    pub stat_delta      : StatDelta,
+    /// Passive = 常時効果 / Active = プレイヤーがオン/オフする
+    pub activation_mode : ActivationMode,
 }
 
 // ── FittingSnapshot ───────────────────────────────────────────────────────────
+
+/// スナップショット内の 1 スロット分のエントリ。
+/// `is_active` を含めることで Replay 時の活性化状態も復元できる（INV-002）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SlotEntry {
+    pub module_id : ModuleId,
+    pub is_active : bool,
+}
 
 /// 装備スロット全体のスナップショット。
 ///
@@ -125,10 +150,10 @@ pub struct ModuleDefinition {
 /// 完全に Fitting 状態が復元される（INV-002）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FittingSnapshot {
-    pub high : Vec<ModuleId>,
-    pub mid  : Vec<ModuleId>,
-    pub low  : Vec<ModuleId>,
-    pub rig  : Vec<ModuleId>,
+    pub high : Vec<SlotEntry>,
+    pub mid  : Vec<SlotEntry>,
+    pub low  : Vec<SlotEntry>,
+    pub rig  : Vec<SlotEntry>,
 }
 
 impl FittingSnapshot {
@@ -186,11 +211,12 @@ mod tests {
     #[test]
     fn module_definition_is_serializable_round_trip() {
         let def = ModuleDefinition {
-            id         : ModuleId(1),
-            name       : "150mm Railgun".to_string(),
-            kind       : ModuleKind::Weapon,
-            slot       : SlotKind::High,
-            stat_delta : StatDelta {
+            id              : ModuleId(1),
+            name            : "150mm Railgun".to_string(),
+            kind            : ModuleKind::Weapon,
+            slot            : SlotKind::High,
+            activation_mode : ActivationMode::Active,
+            stat_delta      : StatDelta {
                 weapon_damage_add   : 25.0,
                 weapon_range_add    : 800.0,
                 weapon_cooldown_add : 0,

@@ -15,8 +15,9 @@ mod snapshot;
 mod spawner;
 mod ws_server;
 
-use dawn_actor::{ClientCommand, ClientConnection};
+use dawn_actor::ClientCommand;
 use dawn_core::{NodeId, SectorBounds, SectorId};
+use tokio::sync::mpsc;
 use node::SimulationNode;
 use spawner::{generate_ships, SpawnConfig};
 use std::time::Instant;
@@ -251,22 +252,26 @@ fn run_phase3_demo() {
     println!("═══════════════════════════════════════════");
 }
 
-// ── Phase 4: Godot WebSocket サーバー ─────────────────────────────────────────
+// ── Phase 5: Godot WebSocket サーバー（マルチクライアント対応）──────────────
 //
 // 使い方:
 //   cargo run -p dawn-simulation --bin simulate --release -- --serve
+//   cargo run -p dawn-simulation --bin simulate --release -- --serve --ships 10
 //
-// Godot クライアントが ws://127.0.0.1:7878 に接続し、
-// DomainEvent を JSON で受け取って Ship を描画する。
+// 変更点 (ADR-0007):
+//   - Hello/Welcome ハンドシェイクで PlayerId を採番
+//   - InitialState で接続時の全 Ship 状態を送信
+//   - 複数クライアントの同時接続に対応
+//   - 所有権チェック: 自分の船だけ操作できる
 
-const P4_SHIPS_DEFAULT : usize = 20;   // デフォルト20隻（--ships N で変更可）
+const P4_SHIPS_DEFAULT : usize = 20;
 const P4_TICK_MS       : u64   = 100;  // 10 Tick/sec
 
 async fn run_phase4_server(ship_count: usize) {
     println!("═══════════════════════════════════════════");
-    println!("  Phase 4 — Godot WebSocket server          ");
+    println!("  Phase 5 — Godot WebSocket server          ");
     println!("═══════════════════════════════════════════");
-    println!("  ships    : {ship_count}  (change with --ships N)");
+    println!("  npc ships: {ship_count}  (change with --ships N)");
     println!("  tick rate: {} ms/tick  ({} tick/sec)",
         P4_TICK_MS, 1000 / P4_TICK_MS);
     println!();
@@ -274,31 +279,19 @@ async fn run_phase4_server(ship_count: usize) {
     println!("  Press Ctrl-C to stop");
     println!();
 
-    // WebSocket サーバー起動
     let server = WsServer::bind("127.0.0.1:7878").await
         .expect("failed to bind WebSocket server");
 
-    // シミュレーションノード準備
     let bounds = SectorBounds::cube(SectorBounds::DEFAULT_SIZE);
     let mut node = SimulationNode::new(NodeId(0), SectorId(0), bounds);
 
-    // モジュール定義をレジストリに登録
     for def in modules::all_modules() {
         node.register_module(def);
     }
 
+    // NPC 船を生成
     let config = SpawnConfig::default_for_node(NodeId(0));
     let ships  = generate_ships(ship_count, &config, 0);
-
-    println!("  [Server] spawning {ship_count} ships, waiting for Godot client...");
-
-    // クライアント接続待ち（ブロック）
-    let mut conn = server.accept().await
-        .expect("failed to accept WebSocket client");
-
-    println!("  [Server] Godot connected! Sending spawn events...");
-
-    // Ship を生成し、全艦に Small Railgun I を装備させる
     for (_, pos, vel) in ships {
         let ship_id = node.spawn_ship(pos, vel);
         node.fit_module(dawn_core::FitModuleCommand {
@@ -307,61 +300,99 @@ async fn run_phase4_server(ship_count: usize) {
             module_id : modules::MODULE_RAILGUN_SMALL,
         });
     }
+    println!("  [Server] {ship_count} NPC ships ready. Waiting for players...");
 
-    // Spawn イベントを全送信
-    let spawn_events: Vec<_> = {
-        use dawn_event_store::store::EventStore as _;
-        node.event_store().iter_from(0)
-            .map(|r| r.event.clone())
-            .collect()
-    };
-    conn.send_events(&spawn_events).expect("failed to send spawn events");
-    println!("  [Server] sent {} spawn events", spawn_events.len());
-    println!("  [Server] running tick loop at {} tick/sec...",
-        1000 / P4_TICK_MS);
+    // TCP 接続チャンネル（accept タスク → メインループ）
+    let (new_conn_tx, mut new_conn_rx) =
+        mpsc::unbounded_channel::<(tokio::net::TcpStream, std::net::SocketAddr)>();
 
-    // Tick ループ
+    // ハンドシェイク完了チャンネル（handshake タスク → メインループ）
+    // ループ外で生成することでドロップされず、ハンドシェイク完了後も受け取れる
+    let (ready_sess_tx, mut ready_sess_rx) =
+        mpsc::unbounded_channel::<ws_server::PlayerSession>();
+
+    // accept ループを別タスクで実行
+    let server_arc = std::sync::Arc::new(server);
+    let server_clone = server_arc.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Some((stream, addr)) = server_clone.try_accept_raw().await {
+                let _ = new_conn_tx.send((stream, addr));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    });
+
+    let mut sessions: Vec<ws_server::PlayerSession> = Vec::new();
     let mut interval = tokio::time::interval(
         std::time::Duration::from_millis(P4_TICK_MS)
     );
+
     loop {
         interval.tick().await;
 
-        // コマンドを種別ごとに振り分ける
+        // 新規 TCP 接続 → ハンドシェイクタスクを spawn
+        while let Ok((stream, addr)) = new_conn_rx.try_recv() {
+            let player_id     = node.next_player_id();
+            let ship_id       = node.spawn_player_ship(player_id);
+            let initial_state = node.build_initial_state_json();
+            let tx            = ready_sess_tx.clone();  // ループ外チャンネルをクローン
+            tokio::spawn(async move {
+                match ws_server::WsServer::handshake(
+                    stream, addr, player_id, ship_id, &initial_state
+                ).await {
+                    Ok(sess) => { let _ = tx.send(sess); }
+                    Err(e)   => eprintln!("[Server] handshake failed: {e}"),
+                }
+            });
+        }
+
+        // ハンドシェイク完了したセッションを sessions に追加
+        while let Ok(sess) = ready_sess_rx.try_recv() {
+            println!("  [Server] {} joined with ship #{}", sess.player_id, sess.ship_id.raw());
+            sessions.push(sess);
+        }
+
+        // コマンド収集（所有権チェック付き）
         let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
-        while let Some(cmd) = conn.try_recv_command() {
-            match cmd {
-                ClientCommand::Move(dawn_core::MoveCommand { ship_id, target_position })
-                    if target_position == dawn_core::Position::ORIGIN =>
-                {
-                    node.set_player_ship(ship_id);
-                }
-                ClientCommand::Move(dawn_core::MoveCommand { ship_id, target_position }) => {
-                    node.apply_move_command(ship_id, target_position);
-                }
-                ClientCommand::LockOn(lock_cmd) => {
-                    lock_commands.push(lock_cmd);
+        let mut dead: Vec<usize> = Vec::new();
+
+        for (i, sess) in sessions.iter_mut().enumerate() {
+            while let Some(cmd) = sess.try_recv_command() {
+                match cmd {
+                    ClientCommand::Move(mv) => {
+                        node.apply_move_command_owned(sess.player_id, mv.ship_id, mv.target_position);
+                    }
+                    ClientCommand::LockOn(lo) => {
+                        if node.apply_lock_on_owned(sess.player_id, lo.clone()) {
+                            lock_commands.push(lo);
+                        }
+                    }
+                    ClientCommand::Activate(cmd) => {
+                        // 所有権チェックは activate_module_owned で行う
+                        node.activate_module_owned(sess.player_id, cmd);
+                    }
+                    ClientCommand::Deactivate(cmd) => {
+                        node.deactivate_module_owned(sess.player_id, cmd);
+                    }
                 }
             }
+            // 切断チェック: send_raw で ping 的に確認
+            // （実際の切断は send_events 失敗で検出）
+            let _ = i;
         }
 
+        // Tick 実行
         let result = node.tick_with_lock_commands(&lock_commands);
 
-        // 今回の Tick で生成されたイベントを送信
-        let total = node.total_event_count();
-        let from  = (total - result.events_emitted) as u64;
-        let new_events: Vec<_> = {
-            use dawn_event_store::store::EventStore as _;
-            node.event_store().iter_from(from)
-                .map(|r| r.event.clone())
-                .collect()
-        };
+        // 全イベントをブロードキャスト
+        let events = &result.events;
+        sessions.retain(|sess| sess.send_events(events));
 
-        if conn.send_events(&new_events).is_err() {
-            println!("  [Server] client disconnected, waiting for reconnect...");
-            conn = server.accept().await
-                .expect("failed to re-accept WebSocket client");
-            println!("  [Server] client reconnected");
+        // 切断したプレイヤーの情報をログ
+        if sessions.len() < dead.len() {
+            println!("  [Server] {} session(s) disconnected", dead.len() - sessions.len());
         }
+        let _ = dead;
     }
 }

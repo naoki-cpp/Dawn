@@ -20,7 +20,7 @@
 //! ```
 
 use dawn_actor::{ClientCommand, ClientConnection};
-use dawn_core::{EntityId, LockOnCommand, MoveCommand, PlayerId, Position, ShipId};
+use dawn_core::{ActivateModuleCommand, DeactivateModuleCommand, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId, Position, ShipId, SlotKind};
 use dawn_core::DomainEvent;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
@@ -92,9 +92,11 @@ fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
             target_id : e.target_id.raw(),
             tick      : e.tick.value(),
         },
-        // Fitting / WeaponFired はクライアント側の状態管理に使わない
-        DomainEvent::ShipFitted(_)  => return None,
-        DomainEvent::WeaponFired(_) => return None,
+        // 以下はクライアント側の状態管理に使わないためスキップ
+        DomainEvent::ShipFitted(_)         => return None,
+        DomainEvent::WeaponFired(_)        => return None,
+        DomainEvent::ModuleActivated(_)    => return None,
+        DomainEvent::ModuleDeactivated(_)  => return None,
     };
     serde_json::to_string(&j).ok()
 }
@@ -124,7 +126,37 @@ fn parse_client_command(line: &str) -> Option<ClientCommand> {
                 target_id : ShipId(EntityId::from_raw(target_id_raw)),
             }))
         }
+        "ActivateModuleCommand" => {
+            let ship_id_raw   = v.get("ship_id")?.as_u64()?;
+            let module_id_raw = v.get("module_id")?.as_u64()? as u32;
+            let slot_str      = v.get("slot")?.as_str()?;
+            Some(ClientCommand::Activate(ActivateModuleCommand {
+                ship_id  : ShipId(EntityId::from_raw(ship_id_raw)),
+                module_id: ModuleId(module_id_raw),
+                slot     : parse_slot_kind(slot_str)?,
+            }))
+        }
+        "DeactivateModuleCommand" => {
+            let ship_id_raw   = v.get("ship_id")?.as_u64()?;
+            let module_id_raw = v.get("module_id")?.as_u64()? as u32;
+            let slot_str      = v.get("slot")?.as_str()?;
+            Some(ClientCommand::Deactivate(DeactivateModuleCommand {
+                ship_id  : ShipId(EntityId::from_raw(ship_id_raw)),
+                module_id: ModuleId(module_id_raw),
+                slot     : parse_slot_kind(slot_str)?,
+            }))
+        }
         _ => None,
+    }
+}
+
+fn parse_slot_kind(s: &str) -> Option<SlotKind> {
+    match s {
+        "High" => Some(SlotKind::High),
+        "Mid"  => Some(SlotKind::Mid),
+        "Low"  => Some(SlotKind::Low),
+        "Rig"  => Some(SlotKind::Rig),
+        _      => None,
     }
 }
 

@@ -81,8 +81,8 @@ pub fn apply_delta(base: ShipStatsComp, delta: &StatDelta) -> ShipStatsComp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::components::FittingComp;
-    use dawn_core::{NodeId, Position, ShipId, Velocity, fitting::{ModuleDefinition, ModuleId, ModuleKind, SlotKind, StatDelta}};
+    use crate::components::{FittedSlot, FittingComp};
+    use dawn_core::{NodeId, Position, ShipId, Velocity, fitting::{ActivationMode, ModuleDefinition, ModuleId, ModuleKind, SlotKind, StatDelta}};
     use crate::world::SimWorld;
     use dawn_core::SectorId;
 
@@ -116,12 +116,16 @@ mod tests {
         // 武器モジュールを装備
         let entity = world.inner().query::<&crate::components::ShipIdComp>().iter()
             .find(|(_, s)| s.0 == id).map(|(e, _)| e).unwrap();
-        let weapon_mod = ModuleDefinition {
-            id: ModuleId(1), name: "Railgun".to_string(),
-            kind: ModuleKind::Weapon, slot: SlotKind::High,
-            stat_delta: StatDelta { weapon_damage_add: 15.0, ..StatDelta::ZERO },
+        let weapon_slot = FittedSlot {
+            def: ModuleDefinition {
+                id: ModuleId(1), name: "Railgun".to_string(),
+                kind: ModuleKind::Weapon, slot: SlotKind::High,
+                stat_delta: StatDelta { weapon_damage_add: 15.0, ..StatDelta::ZERO },
+                activation_mode: ActivationMode::Active,
+            },
+            is_active: true,  // Active ON なので効果が適用される
         };
-        world.inner_mut().get::<&mut FittingComp>(entity).unwrap().high.push(weapon_mod);
+        world.inner_mut().get::<&mut FittingComp>(entity).unwrap().high.push(weapon_slot);
 
         let stats = apply_fitting(&mut world, id, ShipStatsComp::NPC).unwrap();
         assert_eq!(stats.weapon_damage, ShipStatsComp::NPC.weapon_damage + 15.0);

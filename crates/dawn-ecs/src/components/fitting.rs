@@ -1,22 +1,37 @@
 //! Fitting ECS components.
 
-use dawn_core::fitting::{FittingSnapshot, ModuleDefinition, ModuleId, SlotKind, StatDelta};
+use dawn_core::fitting::{ActivationMode, FittingSnapshot, ModuleDefinition, ModuleId, SlotEntry, SlotKind, StatDelta};
 use std::collections::HashMap;
+
+/// 装備スロット 1 枠（モジュール定義 + 活性化状態）。
+#[derive(Debug, Clone)]
+pub struct FittedSlot {
+    pub def      : ModuleDefinition,
+    /// Active モジュールのみ有意。Passive は常に有効扱い。
+    pub is_active: bool,
+}
+
+impl FittedSlot {
+    /// このスロットの効果が適用されるかどうか。
+    /// Passive は常に true。Active は `is_active` に従う。
+    pub fn is_effective(&self) -> bool {
+        match self.def.activation_mode {
+            ActivationMode::Passive => true,
+            ActivationMode::Active  => self.is_active,
+        }
+    }
+}
 
 /// Ship の装備スロット全体を保持するコンポーネント。
 ///
-/// 装備変更後は必ず `apply_fitting()` システムを呼び出し
+/// 装備変更または活性化状態変更後は必ず `apply_fitting()` を呼び出し
 /// `ShipStatsComp` を再集計すること。
-///
-/// # 設計メモ
-/// モジュール定義の解決（ID → 定義）は `SimulationNode.module_registry` が担う。
-/// `FittingComp` は装備内容（定義オブジェクト）のみを保持し、registry を持たない。
 #[derive(Debug, Clone)]
 pub struct FittingComp {
-    pub high : Vec<ModuleDefinition>,
-    pub mid  : Vec<ModuleDefinition>,
-    pub low  : Vec<ModuleDefinition>,
-    pub rig  : Vec<ModuleDefinition>,
+    pub high : Vec<FittedSlot>,
+    pub mid  : Vec<FittedSlot>,
+    pub low  : Vec<FittedSlot>,
+    pub rig  : Vec<FittedSlot>,
 }
 
 impl FittingComp {
@@ -30,17 +45,18 @@ impl FittingComp {
         }
     }
 
-    /// 全スロットの `StatDelta` を合計して返す。
+    /// 有効なスロット（Passive または Active ON）の `StatDelta` を合計して返す。
     pub fn total_delta(&self) -> StatDelta {
         self.high.iter()
             .chain(self.mid.iter())
             .chain(self.low.iter())
             .chain(self.rig.iter())
-            .fold(StatDelta::ZERO, |acc, m| acc.add(&m.stat_delta))
+            .filter(|slot| slot.is_effective())
+            .fold(StatDelta::ZERO, |acc, slot| acc.add(&slot.def.stat_delta))
     }
 
     /// スロットに対応する `Vec` への可変参照を返す。
-    pub fn slot_mut(&mut self, kind: SlotKind) -> &mut Vec<ModuleDefinition> {
+    pub fn slot_mut(&mut self, kind: SlotKind) -> &mut Vec<FittedSlot> {
         match kind {
             SlotKind::High => &mut self.high,
             SlotKind::Mid  => &mut self.mid,
@@ -49,26 +65,39 @@ impl FittingComp {
         }
     }
 
-    /// 現在の装備状態を `FittingSnapshot`（ID のみ）に変換する。
+    /// 指定 module_id を持つスロットの可変参照を返す。
+    pub fn find_slot_mut(&mut self, module_id: ModuleId, slot_kind: SlotKind) -> Option<&mut FittedSlot> {
+        self.slot_mut(slot_kind)
+            .iter_mut()
+            .find(|s| s.def.id == module_id)
+    }
+
+    /// 現在の装備状態を `FittingSnapshot` に変換する。
     /// `ShipFitted` イベントへの埋め込みに使用する。
     pub fn to_snapshot(&self) -> FittingSnapshot {
+        let to_entries = |slots: &[FittedSlot]| -> Vec<SlotEntry> {
+            slots.iter().map(|s| SlotEntry { module_id: s.def.id, is_active: s.is_active }).collect()
+        };
         FittingSnapshot {
-            high: self.high.iter().map(|m| m.id).collect(),
-            mid : self.mid.iter().map(|m| m.id).collect(),
-            low : self.low.iter().map(|m| m.id).collect(),
-            rig : self.rig.iter().map(|m| m.id).collect(),
+            high: to_entries(&self.high),
+            mid : to_entries(&self.mid),
+            low : to_entries(&self.low),
+            rig : to_entries(&self.rig),
         }
     }
 
     /// `FittingSnapshot` から `FittingComp` を復元する（Event Replay 用）。
-    ///
-    /// `registry` にモジュール定義が存在しない ID はスキップされる。
     pub fn from_snapshot(
         snapshot: &FittingSnapshot,
         registry: &HashMap<ModuleId, ModuleDefinition>,
     ) -> Self {
-        let resolve = |ids: &[ModuleId]| -> Vec<ModuleDefinition> {
-            ids.iter().filter_map(|id| registry.get(id).cloned()).collect()
+        let resolve = |entries: &[SlotEntry]| -> Vec<FittedSlot> {
+            entries.iter().filter_map(|e| {
+                registry.get(&e.module_id).map(|def| FittedSlot {
+                    def      : def.clone(),
+                    is_active: e.is_active,
+                })
+            }).collect()
         };
         Self {
             high: resolve(&snapshot.high),
@@ -82,25 +111,29 @@ impl FittingComp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::fitting::{ModuleKind, StatDelta};
+    use dawn_core::fitting::{ActivationMode, ModuleKind, StatDelta};
 
-    fn weapon_module() -> ModuleDefinition {
-        ModuleDefinition {
-            id        : ModuleId(1),
-            name      : "Small Railgun".to_string(),
-            kind      : ModuleKind::Weapon,
-            slot      : SlotKind::High,
-            stat_delta: StatDelta { weapon_damage_add: 20.0, weapon_range_add: 500.0, ..StatDelta::ZERO },
+    fn weapon_slot(active: bool) -> FittedSlot {
+        FittedSlot {
+            def: ModuleDefinition {
+                id: ModuleId(1), name: "Railgun".to_string(),
+                kind: ModuleKind::Weapon, slot: SlotKind::High,
+                stat_delta: StatDelta { weapon_damage_add: 25.0, ..StatDelta::ZERO },
+                activation_mode: ActivationMode::Active,
+            },
+            is_active: active,
         }
     }
 
-    fn shield_module() -> ModuleDefinition {
-        ModuleDefinition {
-            id        : ModuleId(2),
-            name      : "Shield Booster".to_string(),
-            kind      : ModuleKind::ShieldBooster,
-            slot      : SlotKind::Mid,
-            stat_delta: StatDelta { max_hp_add: 200.0, ..StatDelta::ZERO },
+    fn shield_slot() -> FittedSlot {
+        FittedSlot {
+            def: ModuleDefinition {
+                id: ModuleId(2), name: "Shield".to_string(),
+                kind: ModuleKind::ShieldBooster, slot: SlotKind::Mid,
+                stat_delta: StatDelta { max_hp_add: 300.0, ..StatDelta::ZERO },
+                activation_mode: ActivationMode::Passive,
+            },
+            is_active: false,  // Passive なので is_active の値は無視される
         }
     }
 
@@ -110,41 +143,51 @@ mod tests {
     }
 
     #[test]
-    fn total_delta_sums_all_slots_correctly() {
+    fn passive_module_always_applies_delta_regardless_of_is_active() {
         let mut fitting = FittingComp::empty();
-        fitting.high.push(weapon_module());
-        fitting.mid.push(shield_module());
+        fitting.mid.push(shield_slot());  // is_active=false だが Passive なので有効
         let delta = fitting.total_delta();
-        assert_eq!(delta.weapon_damage_add, 20.0);
-        assert_eq!(delta.weapon_range_add,  500.0);
-        assert_eq!(delta.max_hp_add,        200.0);
+        assert_eq!(delta.max_hp_add, 300.0, "Passive module is always effective");
     }
 
     #[test]
-    fn snapshot_round_trip_preserves_module_ids() {
+    fn active_module_on_applies_delta() {
         let mut fitting = FittingComp::empty();
-        fitting.high.push(weapon_module());
-        fitting.mid.push(shield_module());
-        let snap = fitting.to_snapshot();
-        assert_eq!(snap.high, vec![ModuleId(1)]);
-        assert_eq!(snap.mid,  vec![ModuleId(2)]);
-        assert!(snap.low.is_empty());
+        fitting.high.push(weapon_slot(true));
+        assert_eq!(fitting.total_delta().weapon_damage_add, 25.0);
     }
 
     #[test]
-    fn from_snapshot_restores_fitting_from_registry() {
+    fn active_module_off_does_not_apply_delta() {
+        let mut fitting = FittingComp::empty();
+        fitting.high.push(weapon_slot(false));
+        assert_eq!(fitting.total_delta().weapon_damage_add, 0.0,
+            "Active module OFF does not contribute to stats");
+    }
+
+    #[test]
+    fn snapshot_round_trip_preserves_module_id_and_activation_state() {
+        let mut fitting = FittingComp::empty();
+        fitting.high.push(weapon_slot(true));
+        fitting.mid.push(shield_slot());
+        let snap = fitting.to_snapshot();
+        assert_eq!(snap.high[0].module_id, ModuleId(1));
+        assert_eq!(snap.high[0].is_active, true);
+        assert_eq!(snap.mid[0].module_id, ModuleId(2));
+    }
+
+    #[test]
+    fn from_snapshot_restores_activation_state() {
         let mut registry = HashMap::new();
-        registry.insert(ModuleId(1), weapon_module());
-        registry.insert(ModuleId(2), shield_module());
+        let weapon_def = weapon_slot(false).def;
+        registry.insert(ModuleId(1), weapon_def);
+
         let snap = FittingSnapshot {
-            high: vec![ModuleId(1)],
-            mid : vec![ModuleId(2)],
-            low : vec![],
-            rig : vec![],
+            high: vec![SlotEntry { module_id: ModuleId(1), is_active: true }],
+            mid: vec![], low: vec![], rig: vec![],
         };
         let fitting = FittingComp::from_snapshot(&snap, &registry);
-        assert_eq!(fitting.high.len(), 1);
-        assert_eq!(fitting.mid.len(),  1);
-        assert_eq!(fitting.total_delta().weapon_damage_add, 20.0);
+        assert_eq!(fitting.high[0].is_active, true);
+        assert_eq!(fitting.total_delta().weapon_damage_add, 25.0);
     }
 }

@@ -15,7 +15,7 @@
 //! 3. Add a corresponding `Command` in `commands.rs` if applicable.
 //! 4. Write a unit test in this module.
 
-use crate::fitting::FittingSnapshot;
+use crate::fitting::{FittingSnapshot, SlotKind, ModuleId};
 use crate::{Position, SectorId, ShipId, Tick, Velocity};
 use serde::{Deserialize, Serialize};
 
@@ -45,6 +45,12 @@ pub enum DomainEvent {
     /// A Ship's equipment loadout changed.
     ShipFitted(ShipFitted),
 
+    /// An Active module was turned on.
+    ModuleActivated(ModuleActivated),
+
+    /// An Active module was turned off.
+    ModuleDeactivated(ModuleDeactivated),
+
     /// A Ship completed locking onto a target.
     TargetLocked(TargetLocked),
 
@@ -65,12 +71,14 @@ impl DomainEvent {
     /// The `ShipId` that this event relates to.
     pub fn ship_id(&self) -> ShipId {
         match self {
-            Self::ShipSpawned(e)      => e.ship_id,
-            Self::VelocityChanged(e)  => e.ship_id,
+            Self::ShipSpawned(e)        => e.ship_id,
+            Self::VelocityChanged(e)    => e.ship_id,
             #[allow(deprecated)]
-            Self::ShipMoved(e)        => e.ship_id,
-            Self::ShipDespawned(e)    => e.ship_id,
-            Self::ShipFitted(e)    => e.ship_id,
+            Self::ShipMoved(e)          => e.ship_id,
+            Self::ShipDespawned(e)      => e.ship_id,
+            Self::ShipFitted(e)         => e.ship_id,
+            Self::ModuleActivated(e)    => e.ship_id,
+            Self::ModuleDeactivated(e)  => e.ship_id,
             Self::TargetLocked(e)  => e.locker_id,
             Self::LockLost(e)      => e.locker_id,
             Self::WeaponFired(e)   => e.attacker_id,
@@ -83,12 +91,14 @@ impl DomainEvent {
     /// `Tick::ZERO` for creation events that precede the tick loop.
     pub fn tick(&self) -> Tick {
         match self {
-            Self::ShipSpawned(e)      => e.tick,
-            Self::VelocityChanged(e)  => e.tick,
+            Self::ShipSpawned(e)        => e.tick,
+            Self::VelocityChanged(e)    => e.tick,
             #[allow(deprecated)]
-            Self::ShipMoved(e)        => e.tick,
-            Self::ShipDespawned(e)    => e.tick,
-            Self::ShipFitted(e)    => e.tick,
+            Self::ShipMoved(e)          => e.tick,
+            Self::ShipDespawned(e)      => e.tick,
+            Self::ShipFitted(e)         => e.tick,
+            Self::ModuleActivated(e)    => e.tick,
+            Self::ModuleDeactivated(e)  => e.tick,
             Self::TargetLocked(e)  => e.tick,
             Self::LockLost(e)      => e.tick,
             Self::WeaponFired(e)   => e.tick,
@@ -146,6 +156,26 @@ pub struct ShipMoved {
 pub struct ShipDespawned {
     pub ship_id : ShipId,
     pub tick    : Tick,
+}
+
+// ── ModuleActivated / ModuleDeactivated ──────────────────────────────────────
+
+/// Active モジュールがオンになった（ADR-0006）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModuleActivated {
+    pub ship_id   : ShipId,
+    pub module_id : ModuleId,
+    pub slot      : SlotKind,
+    pub tick      : Tick,
+}
+
+/// Active モジュールがオフになった（ADR-0006）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModuleDeactivated {
+    pub ship_id   : ShipId,
+    pub module_id : ModuleId,
+    pub slot      : SlotKind,
+    pub tick      : Tick,
 }
 
 // ── TargetLocked ─────────────────────────────────────────────────────────────
