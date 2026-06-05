@@ -28,8 +28,8 @@ const LOCK_RING_RADIUS: float = 250.0
 # ── 内部状態 ─────────────────────────────────────────────────────────────────
 
 var ship_id       : int     = 0
-var _target_pos   : Vector3 = Vector3.ZERO
-var _vel_estimate : Vector3 = Vector3.ZERO
+var _velocity     : Vector3 = Vector3.ZERO  ## Godot 座標系の速度（VelocityChanged から）
+var _vel_estimate : Vector3 = Vector3.ZERO  ## 速度インジケーター用（互換）
 var _is_init      : bool    = false
 var _is_player    : bool    = false
 var _thrust_dir   : Vector3 = Vector3.ZERO
@@ -59,10 +59,16 @@ func _ready() -> void:
 	_lock_mesh     = _lock_instance.mesh as ImmediateMesh
 	_lock_instance.visible = false
 
+const TICKS_PER_SEC : float = 10.0  ## サーバーの Tick レート
+
 func _process(delta: float) -> void:
 	if not _is_init:
 		return
-	position = position.lerp(_target_pos, clampf(LERP_SPEED * delta, 0.0, 1.0))
+
+	## VelocityChanged (ADR-0008): フレームごとに velocity で位置を更新する
+	## Tick 間を補間するため、Tick 境界でのジャンプがなくなる
+	position += _velocity * delta * TICKS_PER_SEC
+	_vel_estimate = _velocity  ## 速度インジケーター用に同期
 
 	## プレイヤー船の矢印描画
 	if _is_player:
@@ -77,15 +83,20 @@ func _process(delta: float) -> void:
 # ── 公開 API ──────────────────────────────────────────────────────────────────
 
 func initialize(id: int, server_pos: Vector3) -> void:
-	ship_id     = id
-	_target_pos = _to_godot(server_pos)
-	position    = _target_pos
-	_is_init    = true
+	ship_id   = id
+	position  = _to_godot(server_pos)
+	_velocity = Vector3.ZERO
+	_is_init  = true
 
+## VelocityChanged イベントで速度を更新する（ADR-0008）。
+## server_vel はサーバー座標系の速度ベクトル（units/tick）。
+func set_velocity(server_vel: Vector3) -> void:
+	## サーバー座標系 → Godot 座標系（Z 反転・スケール変換）
+	_velocity = Vector3(server_vel.x, server_vel.y, -server_vel.z) * WORLD_SCALE
+
+## 後方互換のため残す（InitialState での位置設定に使う）。
 func update_target(server_pos: Vector3) -> void:
-	var new_target: Vector3 = _to_godot(server_pos)
-	_vel_estimate = new_target - _target_pos
-	_target_pos   = new_target
+	position = _to_godot(server_pos)
 
 func set_as_player() -> void:
 	_is_player    = true
@@ -98,7 +109,7 @@ func set_thrust_direction(godot_dir: Vector3) -> void:
 	_thrust_dir = godot_dir.normalized() if godot_dir.length_squared() > 0.0 else Vector3.ZERO
 
 func get_speed_server() -> float:
-	return _vel_estimate.length() / WORLD_SCALE
+	return _velocity.length() / WORLD_SCALE
 
 ## ロック状態を設定する。
 ## state: "none" / "locking" / "locked"

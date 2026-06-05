@@ -9,22 +9,30 @@
 //!
 //! No walls. Space is infinite. Ships drift forever unless thrust is applied.
 //!
+//! # Authoritative Event (ADR-0008)
+//!
+//! Emits `VelocityChanged` when velocity differs from the previous Tick.
+//! Ships with unchanged velocity emit no event.
+//! Position is derived state and is NOT recorded in any event.
+//!
 //! # Contract
 //!
 //! - Pure computation: no I/O, no global state.
 //! - The caller appends the returned events to the EventStore.
-//! - A ship that starts and ends at the same position emits no event.
 
 use crate::{
     components::{PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp},
     SimWorld,
 };
-use dawn_core::{events::ShipMoved, DomainEvent, Tick, Velocity};
+use dawn_core::{events::VelocityChanged, DomainEvent, Tick, Velocity};
 
 pub struct MovementSystem;
 
 impl MovementSystem {
-    /// Run one tick of movement for all ships and return `ShipMoved` events.
+    /// Run one tick of movement for all ships.
+    ///
+    /// Returns `VelocityChanged` events for ships whose velocity changed this tick.
+    /// Ships at rest or with unchanged velocity emit no event.
     pub fn run(world: &mut SimWorld, tick: Tick) -> Vec<DomainEvent> {
         let mut events = Vec::new();
 
@@ -38,7 +46,7 @@ impl MovementSystem {
                 &ShipStatsComp,
             )>()
         {
-            let from = pos_comp.0;
+            let old_velocity = vel_comp.0;
 
             // ── 1. Apply thrust ───────────────────────────────────────────────
             if stats_comp.thrust_magnitude > 0.0 {
@@ -61,21 +69,17 @@ impl MovementSystem {
                 vel_comp.0.dz *= scale;
             }
 
-            // ── 3. Apply velocity to position (no walls) ──────────────────────
+            // ── 3. Apply velocity to position ─────────────────────────────────
             pos_comp.0.x += vel_comp.0.dx;
             pos_comp.0.y += vel_comp.0.dy;
             pos_comp.0.z += vel_comp.0.dz;
 
-            let to = pos_comp.0;
-
-            if (to.x - from.x).abs() > f32::EPSILON
-                || (to.y - from.y).abs() > f32::EPSILON
-                || (to.z - from.z).abs() > f32::EPSILON
-            {
-                events.push(DomainEvent::ShipMoved(ShipMoved {
-                    ship_id: id_comp.0,
-                    from,
-                    to,
+            // ── 4. Emit VelocityChanged only when velocity actually changed ────
+            let new_velocity = vel_comp.0;
+            if velocity_changed(old_velocity, new_velocity) {
+                events.push(DomainEvent::VelocityChanged(VelocityChanged {
+                    ship_id : id_comp.0,
+                    velocity: new_velocity,
                     tick,
                 }));
             }
@@ -83,6 +87,13 @@ impl MovementSystem {
 
         events
     }
+}
+
+/// Returns true if velocity changed by more than float epsilon.
+fn velocity_changed(old: Velocity, new: Velocity) -> bool {
+    (new.dx - old.dx).abs() > f32::EPSILON
+        || (new.dy - old.dy).abs() > f32::EPSILON
+        || (new.dz - old.dz).abs() > f32::EPSILON
 }
 
 fn magnitude(v: Velocity) -> f32 {
@@ -94,8 +105,8 @@ fn magnitude(v: Velocity) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{NodeId, Position, SectorId, Velocity};
     use crate::components::ShipStatsComp;
+    use dawn_core::{NodeId, Position, SectorId, Velocity};
 
     fn spawn(world: &mut SimWorld, i: u64, pos: Position, vel: Velocity) {
         let id = dawn_core::ShipId::new(NodeId(0), i);
@@ -110,40 +121,61 @@ mod tests {
     }
 
     #[test]
-    fn ship_with_nonzero_velocity_produces_exactly_one_event_per_tick() {
+    fn ship_with_nonzero_velocity_produces_no_event_when_velocity_unchanged() {
+        // 等速直線運動: thrust=0, 速度変化なし → イベントなし
         let mut w = SimWorld::new(SectorId(0));
         spawn(&mut w, 1, Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0));
-        assert_eq!(MovementSystem::run(&mut w, Tick(1)).len(), 1);
+        // NPC (thrust_magnitude=0) は速度が変わらない
+        assert!(MovementSystem::run(&mut w, Tick(1)).is_empty(),
+            "等速直線運動では VelocityChanged は発行しない");
     }
 
     #[test]
-    fn ship_moved_event_carries_correct_from_and_to_positions() {
+    fn velocity_changed_event_emitted_when_thrust_changes_velocity() {
+        let mut w  = SimWorld::new(SectorId(0));
+        let id     = dawn_core::ShipId::new(NodeId(0), 1);
+        let entity = w.spawn_ship(id, Position::new(500.0, 500.0, 500.0), Velocity::ZERO);
+        w.set_ship_stats(entity, ShipStatsComp::PLAYER);
+        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().0 = Velocity::new(1.0, 0.0, 0.0);
+        let events = MovementSystem::run(&mut w, Tick(1));
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], DomainEvent::VelocityChanged(_)));
+    }
+
+    #[test]
+    fn velocity_changed_event_carries_new_velocity_and_tick() {
+        let mut w  = SimWorld::new(SectorId(0));
+        let id     = dawn_core::ShipId::new(NodeId(0), 1);
+        let entity = w.spawn_ship(id, Position::new(500.0, 500.0, 500.0), Velocity::ZERO);
+        w.set_ship_stats(entity, ShipStatsComp::PLAYER);
+        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().0 = Velocity::new(1.0, 0.0, 0.0);
+        let events = MovementSystem::run(&mut w, Tick(7));
+        if let DomainEvent::VelocityChanged(e) = &events[0] {
+            assert!(e.velocity.dx > 0.0, "velocity.dx should be positive after thrust");
+            assert_eq!(e.tick, Tick(7));
+        } else {
+            panic!("expected VelocityChanged");
+        }
+    }
+
+    #[test]
+    fn position_advances_by_velocity_each_tick() {
         let start = Position::new(100.0, 200.0, 300.0);
         let vel   = Velocity::new(5.0, -3.0, 1.0);
         let mut w = SimWorld::new(SectorId(0));
         spawn(&mut w, 1, start, vel);
-        let events = MovementSystem::run(&mut w, Tick(7));
-        match &events[0] {
-            DomainEvent::ShipMoved(e) => {
-                assert_eq!(e.from, start);
-                assert_eq!(e.to.x, start.x + vel.dx);
-                assert_eq!(e.to.y, start.y + vel.dy);
-                assert_eq!(e.to.z, start.z + vel.dz);
-                assert_eq!(e.tick, Tick(7));
-            }
-            other => panic!("expected ShipMoved, got {other:?}"),
+        MovementSystem::run(&mut w, Tick(1));
+        // position should have advanced by vel (NPC: no thrust, velocity unchanged)
+        for (_, pos) in w.inner().query::<&PositionComp>().iter() {
+            assert!((pos.0.x - (start.x + vel.dx)).abs() < f32::EPSILON);
+            assert!((pos.0.y - (start.y + vel.dy)).abs() < f32::EPSILON);
         }
     }
 
     #[test]
     fn ship_continues_past_old_sector_boundary_without_bouncing() {
-        // 旧設計では壁で跳ね返っていたが、宇宙は無限なのでそのまま通過する。
         let mut w = SimWorld::new(SectorId(0));
-        spawn(
-            &mut w, 1,
-            Position::new(9999.0, 0.0, 0.0),
-            Velocity::new(100.0, 0.0, 0.0),
-        );
+        spawn(&mut w, 1, Position::new(9999.0, 0.0, 0.0), Velocity::new(100.0, 0.0, 0.0));
         MovementSystem::run(&mut w, Tick(1));
         for (_e, vel) in w.inner().query::<&VelocityComp>().iter() {
             assert!(vel.0.dx > 0.0, "velocity must not be reversed — no walls in space");
@@ -151,18 +183,24 @@ mod tests {
     }
 
     #[test]
-    fn ten_ships_each_produce_one_event_per_tick() {
+    fn ten_ships_with_thrust_each_produce_one_event_per_tick() {
         let mut w = SimWorld::new(SectorId(0));
         for i in 0..10 {
-            spawn(&mut w, i, Position::new(i as f32 * 10.0, 0.0, 0.0), Velocity::new(1.0, 1.0, 0.0));
+            let id     = dawn_core::ShipId::new(NodeId(0), i);
+            let entity = w.spawn_ship(id, Position::new(i as f32 * 10.0, 0.0, 0.0), Velocity::ZERO);
+            w.set_ship_stats(entity, ShipStatsComp::PLAYER);
+            w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().0 = Velocity::new(1.0, 0.0, 0.0);
         }
         assert_eq!(MovementSystem::run(&mut w, Tick(1)).len(), 10);
     }
 
     #[test]
-    fn ship_moved_event_tick_matches_the_tick_passed_to_run() {
-        let mut w = SimWorld::new(SectorId(0));
-        spawn(&mut w, 1, Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0));
+    fn velocity_changed_event_tick_matches_the_tick_passed_to_run() {
+        let mut w  = SimWorld::new(SectorId(0));
+        let id     = dawn_core::ShipId::new(NodeId(0), 1);
+        let entity = w.spawn_ship(id, Position::new(100.0, 100.0, 100.0), Velocity::ZERO);
+        w.set_ship_stats(entity, ShipStatsComp::PLAYER);
+        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().0 = Velocity::new(1.0, 0.0, 0.0);
         assert_eq!(MovementSystem::run(&mut w, Tick(999))[0].tick(), Tick(999));
     }
 
@@ -190,7 +228,6 @@ mod tests {
         MovementSystem::run(&mut w, Tick(1));
         let vel   = *w.inner().get::<&VelocityComp>(entity).unwrap();
         let stats = *w.inner().get::<&ShipStatsComp>(entity).unwrap();
-        let speed = magnitude(vel.0);
-        assert!(speed <= stats.max_speed + f32::EPSILON);
+        assert!(magnitude(vel.0) <= stats.max_speed + f32::EPSILON);
     }
 }

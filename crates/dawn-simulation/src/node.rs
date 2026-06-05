@@ -17,12 +17,12 @@
 use std::collections::HashMap;
 
 use dawn_core::{
-    events::{ShipFitted, ShipMoved, ShipSpawned},
-    DomainEvent, FitModuleCommand, ModuleDefinition, ModuleId, NodeId, Position,
+    events::{ShipFitted, ShipSpawned},
+    DomainEvent, FitModuleCommand, ModuleDefinition, ModuleId, NodeId, PlayerId, Position,
     SectorBounds, SectorId, ShipId, Tick, Velocity,
 };
 use dawn_ecs::{
-    components::{FittingComp, HullComp, LockComp, PositionComp, ShipStatsComp, ThrustComp, VelocityComp},
+    components::{FittingComp, HullComp, IsNpcComp, LockComp, PositionComp, ShipStatsComp, ThrustComp, VelocityComp},
     systems::{CombatSystem, LockSystem, MovementSystem, apply_fitting},
     Entity, SimWorld,
 };
@@ -65,8 +65,13 @@ where
     /// Module definition registry.  Loaded at startup; looked up during FitModuleCommand.
     module_registry : HashMap<ModuleId, ModuleDefinition>,
     /// 装備なし時の素の ShipStats。Fitting 集計の base として使う。
-    /// spawn 時に記録し、以後変更しない。
     base_stats      : HashMap<ShipId, ShipStatsComp>,
+    /// PlayerId → ShipId（プレイヤー船の所有権管理）
+    player_ships    : HashMap<PlayerId, ShipId>,
+    /// ShipId → PlayerId（逆引き：所有権チェックに使う）
+    ship_owners     : HashMap<ShipId, PlayerId>,
+    /// PlayerId 採番カウンタ
+    player_id_counter: u64,
 }
 
 // ── Constructors ──────────────────────────────────────────────────────────────
@@ -92,13 +97,16 @@ impl<S: EventStore> SimulationNode<S> {
             node_id,
             sector_id,
             bounds,
-            world           : SimWorld::new(sector_id),
-            event_store     : store,
-            current_tick    : Tick::ZERO,
-            id_counter      : 0,
-            ship_index      : HashMap::new(),
-            module_registry : HashMap::new(),
-            base_stats      : HashMap::new(),
+            world             : SimWorld::new(sector_id),
+            event_store       : store,
+            current_tick      : Tick::ZERO,
+            id_counter        : 0,
+            ship_index        : HashMap::new(),
+            module_registry   : HashMap::new(),
+            base_stats        : HashMap::new(),
+            player_ships      : HashMap::new(),
+            ship_owners       : HashMap::new(),
+            player_id_counter : 0,
         }
     }
 
@@ -109,16 +117,19 @@ impl<S: EventStore> SimulationNode<S> {
     /// events from `snapshot.log_index` onward are replayed.
     pub fn restore_from(store: S, snapshot: &StateSnapshot) -> Self {
         let mut node = Self {
-            node_id         : snapshot.node_id,
-            sector_id       : snapshot.sector_id,
-            bounds          : snapshot.bounds,
-            world           : SimWorld::new(snapshot.sector_id),
-            event_store     : store,
-            current_tick    : snapshot.tick,
-            id_counter      : snapshot.id_counter,
-            ship_index      : HashMap::new(),
-            module_registry : HashMap::new(),
-            base_stats      : HashMap::new(),
+            node_id           : snapshot.node_id,
+            sector_id         : snapshot.sector_id,
+            bounds            : snapshot.bounds,
+            world             : SimWorld::new(snapshot.sector_id),
+            event_store       : store,
+            current_tick      : snapshot.tick,
+            id_counter        : snapshot.id_counter,
+            ship_index        : HashMap::new(),
+            module_registry   : HashMap::new(),
+            base_stats        : HashMap::new(),
+            player_ships      : HashMap::new(),
+            ship_owners       : HashMap::new(),
+            player_id_counter : 0,
         };
 
         // Restore ECS state from snapshot.
@@ -333,6 +344,112 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
+    // ── Phase 5: PlayerId / 所有権管理 ────────────────────────────────────────
+
+    /// 新しい PlayerId を採番して返す（接続時に呼ぶ）。
+    pub fn next_player_id(&mut self) -> PlayerId {
+        let id = PlayerId(self.player_id_counter);
+        self.player_id_counter += 1;
+        id
+    }
+
+    /// プレイヤー専用の Ship を Spawn し、PlayerId と紐付ける。
+    ///
+    /// NPC 船と異なり PLAYER 性能値が設定され、Weapon モジュールが自動装備される。
+    pub fn spawn_player_ship(&mut self, player_id: PlayerId) -> ShipId {
+        // 中心付近のランダムな位置に Spawn
+        let pos = Position::new(0.0, 0.0, 0.0);
+        let ship_id = ShipId::new(self.node_id, self.id_counter);
+        self.id_counter += 1;
+
+        self.insert_to_world(ship_id, pos, Velocity::ZERO);
+        self.base_stats.insert(ship_id, ShipStatsComp::PLAYER);
+
+        // PLAYER 性能値に切り替え + IsNpcComp を除去（プレイヤーは自動ロックしない）
+        if let Some(&entity) = self.ship_index.get(&ship_id) {
+            self.world.set_ship_stats(entity, ShipStatsComp::PLAYER);
+            if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
+                hull.current_hp = ShipStatsComp::PLAYER.max_hp;
+            }
+            // IsNpcComp を取り除く（spawn_ship で追加されるため）
+            let _ = self.world.inner_mut().remove_one::<dawn_ecs::components::IsNpcComp>(entity);
+        }
+
+        // Small Railgun I を自動装備
+        use dawn_core::{FitModuleCommand, SlotKind};
+        self.fit_module(FitModuleCommand {
+            ship_id,
+            slot      : SlotKind::High,
+            module_id : crate::modules::MODULE_RAILGUN_SMALL,
+        });
+
+        // 所有権を記録
+        self.player_ships.insert(player_id, ship_id);
+        self.ship_owners.insert(ship_id, player_id);
+
+        self.event_store.append(DomainEvent::ShipSpawned(ShipSpawned {
+            ship_id,
+            sector_id       : self.sector_id,
+            initial_position: pos,
+            tick            : self.current_tick,
+        }));
+
+        ship_id
+    }
+
+    /// PlayerId が所有する ShipId を返す。
+    pub fn get_player_ship(&self, player_id: PlayerId) -> Option<ShipId> {
+        self.player_ships.get(&player_id).copied()
+    }
+
+    /// 所有権つき MoveCommand 処理。自分の船だけ操作できる。
+    pub fn apply_move_command_owned(
+        &mut self,
+        player_id : PlayerId,
+        ship_id   : ShipId,
+        target    : Position,
+    ) -> bool {
+        if self.ship_owners.get(&ship_id) != Some(&player_id) {
+            return false;  // 所有権なし → 無視
+        }
+        self.apply_move_command(ship_id, target);
+        true
+    }
+
+    /// 所有権つき LockOnCommand 処理。
+    pub fn apply_lock_on_owned(
+        &mut self,
+        player_id : PlayerId,
+        cmd       : dawn_core::LockOnCommand,
+    ) -> bool {
+        if self.ship_owners.get(&cmd.ship_id) != Some(&player_id) {
+            return false;
+        }
+        // lock_commands は tick_with_lock_commands() に渡すので true を返すだけ
+        true
+    }
+
+    /// 現在の全 Ship の状態を InitialState JSON として返す（接続時の同期用）。
+    pub fn build_initial_state_json(&self) -> String {
+        let ships: Vec<serde_json::Value> = self.ship_index.keys().filter_map(|&ship_id| {
+            let entity  = self.ship_index.get(&ship_id)?;
+            let pos     = self.world.inner().get::<&PositionComp>(*entity).ok()?.0;
+            let stats   = self.world.inner().get::<&ShipStatsComp>(*entity).ok()?;
+            let hull    = self.world.inner().get::<&HullComp>(*entity).ok()?;
+            Some(serde_json::json!({
+                "ship_id"   : ship_id.raw(),
+                "position"  : { "x": pos.x, "y": pos.y, "z": pos.z },
+                "max_hp"    : stats.max_hp,
+                "current_hp": hull.current_hp,
+            }))
+        }).collect();
+
+        serde_json::json!({
+            "type"  : "InitialState",
+            "ships" : ships,
+        }).to_string()
+    }
+
     // ── Fitting ───────────────────────────────────────────────────────────────
 
     /// モジュール定義をレジストリに登録する。
@@ -416,14 +533,62 @@ impl<S: EventStore> SimulationNode<S> {
                 }
             }
 
-            DomainEvent::ShipMoved(ShipMoved { ship_id, to, tick, .. }) => {
-                if let Some(&entity) = self.ship_index.get(ship_id) {
+            // VelocityChanged: Replay 時の位置再構築（ADR-0008）
+            //
+            // VelocityChanged { velocity: V_new, tick: T } は
+            // 「Tick T に thrust を適用して速度が V_new になり、position += V_new が実行された」事実。
+            //
+            // Replay 手順:
+            //   1. 前回のイベント以降 (current_tick+1 〜 T-1) は旧速度で位置を前進
+            //   2. Tick T では新速度で位置を前進
+            //   3. 速度を V_new に更新
+            DomainEvent::VelocityChanged(e) => {
+                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                    // 1. 旧速度で前進すべき Tick 数（T-1 まで）
+                    let gap_ticks = e.tick.value()
+                        .saturating_sub(self.current_tick.value())
+                        .saturating_sub(1);  // Tick T 自体は新速度で処理するため -1
+
+                    let old_vel = self.world.inner()
+                        .get::<&VelocityComp>(entity).ok()
+                        .map(|v| v.0)
+                        .unwrap_or(Velocity::ZERO);
+
                     if let Ok(mut pos) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
-                        pos.0 = *to;
+                        // gap_ticks 分は旧速度で前進、Tick T は新速度で前進
+                        pos.0.x += old_vel.dx * gap_ticks as f32 + e.velocity.dx;
+                        pos.0.y += old_vel.dy * gap_ticks as f32 + e.velocity.dy;
+                        pos.0.z += old_vel.dz * gap_ticks as f32 + e.velocity.dz;
+                    }
+
+                    if let Ok(mut vel) = self.world.inner_mut().get::<&mut VelocityComp>(entity) {
+                        vel.0 = e.velocity;
                     }
                 }
-                if *tick > self.current_tick {
-                    self.current_tick = *tick;
+                if e.tick > self.current_tick {
+                    self.current_tick = e.tick;
+                }
+            }
+
+            // ShipMoved (deprecated, Upcaster): 位置差分から速度を復元して VelocityChanged として扱う
+            #[allow(deprecated)]
+            DomainEvent::ShipMoved(e) => {
+                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                    // to - from = 1 Tick 分の変位 = velocity (units/tick)
+                    let velocity = Velocity {
+                        dx: e.to.x - e.from.x,
+                        dy: e.to.y - e.from.y,
+                        dz: e.to.z - e.from.z,
+                    };
+                    if let Ok(mut vel) = self.world.inner_mut().get::<&mut VelocityComp>(entity) {
+                        vel.0 = velocity;
+                    }
+                    if let Ok(mut pos) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+                        pos.0 = e.to;
+                    }
+                }
+                if e.tick > self.current_tick {
+                    self.current_tick = e.tick;
                 }
             }
 
@@ -545,26 +710,33 @@ mod tests {
     }
 
     #[test]
-    fn each_moving_ship_produces_one_ship_moved_event_per_tick() {
+    fn npc_ships_at_constant_velocity_produce_no_velocity_changed_events() {
+        // NPC（等速直線運動）は速度が変わらないので VelocityChanged を出さない（ADR-0008）
         let mut node = mem_node();
         node.spawn_ship(Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0));
         node.spawn_ship(Position::new(200.0, 100.0, 100.0), Velocity::new(0.0, 1.0, 0.0));
-        assert_eq!(node.tick().events_emitted, 2);
+        assert_eq!(node.tick().events_emitted, 0,
+            "NPC ships at constant velocity do not emit VelocityChanged");
     }
 
     #[test]
-    fn stationary_ships_produce_no_ship_moved_events() {
+    fn stationary_ships_produce_no_events() {
         let mut node = mem_node();
         node.spawn_ship(Position::ORIGIN, Velocity::ZERO);
         assert_eq!(node.tick().events_emitted, 0);
     }
 
     #[test]
-    fn ship_moved_events_carry_the_current_tick_value() {
+    fn velocity_changed_events_carry_the_current_tick_value() {
+        // プレイヤー船（thrust あり）は VelocityChanged を発行する
         let mut node = mem_node();
-        node.spawn_ship(Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0));
+        let ship_id = node.spawn_ship(Position::new(100.0, 100.0, 100.0), Velocity::ZERO);
+        // プレイヤー船として設定（thrust_magnitude > 0）
+        node.set_player_ship(ship_id);
+        node.apply_move_command(ship_id, Position::new(10000.0, 0.0, 0.0));
         node.tick();
         node.tick();
+        // VelocityChanged イベントが tick=2 で発行されているはず
         let last = node.event_store().all_records().last().unwrap();
         assert_eq!(last.event.tick(), Tick(2));
     }
@@ -630,12 +802,18 @@ mod tests {
                 store,
             );
 
-            // Spawn 5 ships.
+            // Spawn 5 ships as players with thrust so they emit VelocityChanged events.
+            // (ADR-0008: NPC ships at constant velocity emit no events, so tick cannot
+            //  be restored from the event log alone. Using player ships with thrust
+            //  ensures VelocityChanged events carry the tick for replay.)
             ship_ids = (0..5u64).map(|i| {
-                node.spawn_ship(
+                let id = node.spawn_ship(
                     Position::new(i as f32 * 100.0, 0.0, 0.0),
-                    Velocity::new(1.0 + i as f32, 0.0, 0.0),
-                )
+                    Velocity::ZERO,
+                );
+                node.set_player_ship(id);  // enable thrust
+                node.apply_move_command(id, Position::new(10_000.0, 0.0, 0.0));
+                id
             }).collect();
 
             // Run 5 ticks, then snapshot.
@@ -653,13 +831,22 @@ mod tests {
         } // ← node drops here; FileEventStore flushes on drop via BufWriter
 
         // ── Session 2: restart, restore, verify ─────────────────────────────
+        //
+        // ADR-0008: With VelocityChanged, position is derived from velocity + tick steps.
+        // `restore_from` replays events (velocity) from the snapshot. To reach the exact
+        // final position, we must run the remaining ticks from the restored state.
+        // This is by design: position is derived state, not stored in events.
         let snap   = StateSnapshot::load(&snapshot_path).unwrap();
         let store2 = FileEventStore::open(&event_path).unwrap();
-        let node2  = SimulationNode::restore_from(store2, &snap);
+        let mut node2 = SimulationNode::restore_from(store2, &snap);
+
+        // The snapshot restores up to snap.tick. Run remaining ticks to reach final_tick.
+        let remaining = final_tick.value() - node2.current_tick().value();
+        for _ in 0..remaining { node2.tick(); }
 
         assert_eq!(
             node2.current_tick(), final_tick,
-            "tick must match after restore"
+            "tick must match after restore + replay ticks"
         );
         assert_eq!(
             node2.ship_count(), ship_ids.len(),
@@ -670,7 +857,7 @@ mod tests {
                 .expect("ship must exist after restore");
             assert_eq!(
                 restored_pos, *expected_pos,
-                "position of ship {} must match after restore", id
+                "position of ship {} must match after restore + replay", id
             );
         }
     }

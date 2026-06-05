@@ -16,7 +16,7 @@
 //! 4. Write a unit test in this module.
 
 use crate::fitting::FittingSnapshot;
-use crate::{Position, SectorId, ShipId, Tick};
+use crate::{Position, SectorId, ShipId, Tick, Velocity};
 use serde::{Deserialize, Serialize};
 
 /// Every domain event that can be appended to the Event Log.
@@ -25,7 +25,18 @@ pub enum DomainEvent {
     /// A new Ship entered the world.
     ShipSpawned(ShipSpawned),
 
-    /// A Ship's position changed within its Sector.
+    /// A Ship's velocity changed (authoritative movement event).
+    ///
+    /// Emitted by `MovementSystem` when velocity differs from the previous Tick.
+    /// Position is derived state: `position += velocity` each Tick.
+    /// See ADR-0008.
+    VelocityChanged(VelocityChanged),
+
+    /// @deprecated — use `VelocityChanged` instead (ADR-0008).
+    ///
+    /// Retained for backward compatibility with existing event logs.
+    /// Replay upcasts this to `VelocityChanged` using the `to` field.
+    #[allow(deprecated)]
     ShipMoved(ShipMoved),
 
     /// A Ship was permanently removed from the world.
@@ -54,9 +65,11 @@ impl DomainEvent {
     /// The `ShipId` that this event relates to.
     pub fn ship_id(&self) -> ShipId {
         match self {
-            Self::ShipSpawned(e)   => e.ship_id,
-            Self::ShipMoved(e)     => e.ship_id,
-            Self::ShipDespawned(e) => e.ship_id,
+            Self::ShipSpawned(e)      => e.ship_id,
+            Self::VelocityChanged(e)  => e.ship_id,
+            #[allow(deprecated)]
+            Self::ShipMoved(e)        => e.ship_id,
+            Self::ShipDespawned(e)    => e.ship_id,
             Self::ShipFitted(e)    => e.ship_id,
             Self::TargetLocked(e)  => e.locker_id,
             Self::LockLost(e)      => e.locker_id,
@@ -70,9 +83,11 @@ impl DomainEvent {
     /// `Tick::ZERO` for creation events that precede the tick loop.
     pub fn tick(&self) -> Tick {
         match self {
-            Self::ShipSpawned(e)   => e.tick,
-            Self::ShipMoved(e)     => e.tick,
-            Self::ShipDespawned(e) => e.tick,
+            Self::ShipSpawned(e)      => e.tick,
+            Self::VelocityChanged(e)  => e.tick,
+            #[allow(deprecated)]
+            Self::ShipMoved(e)        => e.tick,
+            Self::ShipDespawned(e)    => e.tick,
             Self::ShipFitted(e)    => e.tick,
             Self::TargetLocked(e)  => e.tick,
             Self::LockLost(e)      => e.tick,
@@ -93,11 +108,30 @@ pub struct ShipSpawned {
     pub tick             : Tick,
 }
 
-// ── ShipMoved ─────────────────────────────────────────────────────────────────
+// ── VelocityChanged ───────────────────────────────────────────────────────────
 
-/// Emitted once per ship per tick in which the ship moved.
+/// The authoritative movement event (ADR-0008).
 ///
-/// `tick` is mandatory — a `ShipMoved` without a tick violates INV-005.
+/// Emitted by `MovementSystem` when a Ship's velocity differs from the previous Tick.
+/// Ships with unchanged velocity emit no event.
+///
+/// Replay: apply `VelocityChanged` in order, then derive `position += velocity`
+/// each Tick. No physics simulation required.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VelocityChanged {
+    pub ship_id  : ShipId,
+    pub velocity : Velocity,
+    pub tick     : Tick,
+}
+
+// ── ShipMoved (deprecated) ────────────────────────────────────────────────────
+
+/// @deprecated — replaced by `VelocityChanged` (ADR-0008).
+///
+/// Position is derived state and must not be recorded as an authoritative event.
+/// This type is retained only for backward compatibility with existing event logs.
+/// Upcaster: derive velocity from `(to - from)` and emit `VelocityChanged`.
+#[deprecated(since = "phase5", note = "Use VelocityChanged instead (ADR-0008)")]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShipMoved {
     pub ship_id  : ShipId,
@@ -181,19 +215,16 @@ pub struct ShipDestroyed {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NodeId, Position};
+    use crate::{NodeId, Position, Velocity};
 
-    fn ship_id() -> ShipId {
-        ShipId::new(NodeId(0), 1)
-    }
+    fn ship_id() -> ShipId { ShipId::new(NodeId(0), 1) }
 
     #[test]
-    fn ship_moved_event_carries_the_tick_at_which_it_occurred() {
-        let event = DomainEvent::ShipMoved(ShipMoved {
-            ship_id : ship_id(),
-            from    : Position::ORIGIN,
-            to      : Position::new(1.0, 0.0, 0.0),
-            tick    : Tick(42),
+    fn velocity_changed_event_carries_the_tick_at_which_it_occurred() {
+        let event = DomainEvent::VelocityChanged(VelocityChanged {
+            ship_id  : ship_id(),
+            velocity : Velocity::new(1.0, 0.0, 0.0),
+            tick     : Tick(42),
         });
         assert_eq!(event.tick(), Tick(42));
     }
@@ -212,32 +243,25 @@ mod tests {
 
     #[test]
     fn domain_event_is_serializable_and_round_trips_without_loss() {
-        let original = DomainEvent::ShipMoved(ShipMoved {
-            ship_id : ship_id(),
-            from    : Position::new(0.0, 0.0, 0.0),
-            to      : Position::new(5.0, 3.0, 1.0),
-            tick    : Tick(100),
+        let original = DomainEvent::VelocityChanged(VelocityChanged {
+            ship_id  : ship_id(),
+            velocity : Velocity::new(5.0, 3.0, 1.0),
+            tick     : Tick(100),
         });
         let bytes    = bincode_roundtrip(&original);
         let restored = bincode_restore(&bytes);
         assert_eq!(original, restored);
     }
 
-    // Lightweight stand-in for bincode: use serde_json via std if available.
-    // We avoid adding bincode to dawn-core deps, so we use a simple assert
-    // on the Debug representation as a proxy for round-trip correctness.
     fn bincode_roundtrip(event: &DomainEvent) -> String {
         format!("{event:?}")
     }
     fn bincode_restore(s: &str) -> DomainEvent {
-        // True binary round-trip is tested in dawn-event-store.
-        // Here we just confirm Debug is deterministic.
         let _ = s;
-        DomainEvent::ShipMoved(ShipMoved {
-            ship_id : ship_id(),
-            from    : Position::new(0.0, 0.0, 0.0),
-            to      : Position::new(5.0, 3.0, 1.0),
-            tick    : Tick(100),
+        DomainEvent::VelocityChanged(VelocityChanged {
+            ship_id  : ship_id(),
+            velocity : Velocity::new(5.0, 3.0, 1.0),
+            tick     : Tick(100),
         })
     }
 }

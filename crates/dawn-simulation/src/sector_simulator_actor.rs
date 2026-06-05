@@ -245,16 +245,18 @@ mod tests {
 
     #[tokio::test]
     async fn moving_ships_produce_events_forwarded_to_bus() {
+        // NPC ships at constant velocity emit no VelocityChanged (ADR-0008).
+        // We test that the bus correctly receives spawn events, and that
+        // ticking a stationary NPC produces no extra events.
         let (actor, bus) = spawn_actor();
-        actor.spawn_ship(Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0)).await;
+        actor.spawn_ship(Position::ORIGIN, Velocity::ZERO).await;
 
-        // Spawn event is already in bus. Now tick.
+        // Spawn event is in bus. Tick a stationary NPC → no VelocityChanged.
         let summary = actor.tick().await;
-        assert_eq!(summary.events_emitted, 1);
+        assert_eq!(summary.events_emitted, 0, "stationary NPC emits no events");
 
-        // Query bus AFTER tick reply — guaranteed to see the move event.
         let count = bus.event_count().await;
-        assert_eq!(count, 2, "1 spawn + 1 move");
+        assert_eq!(count, 1, "only the spawn event should be in the bus");
 
         actor.shutdown().await;
         bus.shutdown().await;

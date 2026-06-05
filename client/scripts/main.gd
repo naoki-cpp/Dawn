@@ -47,6 +47,8 @@ const DOUBLE_CLICK_PX : float  = 10.0  ## この画素以内
 func _ready() -> void:
 	_connection.event_received.connect(_on_event_received)
 	_connection.connection_changed.connect(_on_connection_changed)
+	_connection.welcomed.connect(_on_welcomed)
+	_connection.initial_state_received.connect(_on_initial_state)
 	_build_player_material()
 	_setup_space_environment()
 	_update_hud()
@@ -160,9 +162,9 @@ func _on_event_received(payload: Dictionary) -> void:
 	_event_count += 1
 	var event_type: String = payload.get("type", "") as String
 	match event_type:
-		"ShipSpawned"   : _handle_ship_spawned(payload)
-		"ShipMoved"     : _handle_ship_moved(payload)
-		"ShipDespawned" : _handle_ship_despawned(payload)
+		"ShipSpawned"      : _handle_ship_spawned(payload)
+		"VelocityChanged"  : _handle_velocity_changed(payload)
+		"ShipDespawned"    : _handle_ship_despawned(payload)
 		"DamageTaken"   : _handle_damage_taken(payload)
 		"ShipDestroyed" : _handle_ship_destroyed(payload)
 		"TargetLocked"  : _handle_target_locked(payload)
@@ -171,6 +173,48 @@ func _on_event_received(payload: Dictionary) -> void:
 func _on_connection_changed(connected: bool) -> void:
 	if not connected:
 		_clear_all_ships()
+
+## Welcome 受信: player_id / ship_id を記録するだけ。
+## 船ノードの生成は直後の InitialState で行う。
+func _on_welcomed(_p_player_id: int, _p_ship_id: int) -> void:
+	pass  ## connection.gd の ship_id / player_id プロパティに値が入っている
+
+## InitialState 受信: 全船ノードをここで一括 spawn する。
+## Phase 5 では ShipSpawned イベントは送信されないためこちらが初期化を担う。
+func _on_initial_state(ships: Array) -> void:
+	_clear_all_ships()  ## 再接続時に備えてリセット
+
+	for ship_data: Variant in ships:
+		var d        : Dictionary = ship_data as Dictionary
+		var sid      : int        = d.get("ship_id",   0)   as int
+		var pos_dict : Dictionary = d.get("position",  {})  as Dictionary
+		var max_hp   : float      = d.get("max_hp",    1.0) as float
+		var cur_hp   : float      = d.get("current_hp",1.0) as float
+		var pos := Vector3(
+			(pos_dict.get("x", 0.0) as float),
+			(pos_dict.get("y", 0.0) as float),
+			(pos_dict.get("z", 0.0) as float),
+		)
+
+		## 船ノードを生成
+		var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
+		_ships_root.add_child(ship)
+		ship.call("initialize", sid, pos)
+		ship.name = "Ship_%d" % sid
+		_ships[sid] = ship
+
+		## 自分の船かどうか確認
+		if sid == _connection.ship_id and _player_ship_id < 0:
+			_player_max_hp = max_hp
+			_player_hp     = cur_hp
+			_set_as_player_ship(sid, ship)
+
+func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
+	_player_ship_id = p_ship_id
+	_player_hp      = _player_max_hp
+	_apply_player_material(ship)
+	ship.call("set_as_player")
+	_camera.call("set_target", ship)
 
 # ── ドメインイベント処理 ──────────────────────────────────────────────────────
 
@@ -192,29 +236,23 @@ func _handle_ship_spawned(p: Dictionary) -> void:
 	ship.name = "Ship_%d" % ship_id
 	_ships[ship_id] = ship
 
-	## 最初の Spawn をプレイヤー船に指定
-	if _player_ship_id < 0:
-		_player_ship_id = ship_id
-		_player_hp      = _player_max_hp  ## 初期 HP をセット
-		_apply_player_material(ship)
-		ship.call("set_as_player")
-		_camera.call("set_target", ship)
-		## サーバーにプレイヤー船を通知（ORIGIN = set_player_ship シグナル）
-		_connection.send_move_command(ship_id, Vector3.ZERO)
+	## Welcome で通知されたプレイヤー船 ID と一致すれば自分の船として設定
+	if ship_id == _connection.ship_id and _player_ship_id < 0:
+		_set_as_player_ship(ship_id, ship)
 
-func _handle_ship_moved(p: Dictionary) -> void:
-	var ship_id: int = p.get("ship_id", 0) as int
+func _handle_velocity_changed(p: Dictionary) -> void:
+	var ship_id : int = p.get("ship_id", 0) as int
 	if not _ships.has(ship_id):
 		return
-	var ship: Node3D = _ships[ship_id] as Node3D
 
-	var pos_dict: Dictionary = p.get("to", {}) as Dictionary
-	var pos := Vector3(
-		(pos_dict.get("x", 0.0) as float),
-		(pos_dict.get("y", 0.0) as float),
-		(pos_dict.get("z", 0.0) as float),
+	var vel_dict: Dictionary = p.get("velocity", {}) as Dictionary
+	## サーバー座標系 → Godot 座標系（Z 反転）
+	var server_vel := Vector3(
+		(vel_dict.get("dx", 0.0) as float),
+		(vel_dict.get("dy", 0.0) as float),
+		(vel_dict.get("dz", 0.0) as float),
 	)
-	ship.call("update_target", pos)
+	(_ships[ship_id] as Node3D).call("set_velocity", server_vel)
 
 	var tick: int = p.get("tick", 0) as int
 	if tick > _current_tick:

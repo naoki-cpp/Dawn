@@ -122,14 +122,15 @@ mod tests {
 
         let total = cluster.total_replicated_events().await;
 
-        // Each node: SHIPS spawns + SHIPS moves × TICKS
-        let per_node = SHIPS + SHIPS * TICKS;
+        // ADR-0008: NPC ships at constant velocity emit no VelocityChanged events.
+        // Each node: SHIPS spawns only (no VelocityChanged for constant-velocity NPCs).
+        let per_node = SHIPS;
         let expected = NODES * per_node;
 
         assert_eq!(
             total, expected,
             "expected {expected} events ({NODES} nodes × {per_node} each: \
-             {SHIPS} spawns + {SHIPS} moves × {TICKS} ticks)"
+             {SHIPS} spawns only — NPC ships at constant velocity emit no VelocityChanged)"
         );
 
         cluster.shutdown().await;
