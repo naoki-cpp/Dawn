@@ -474,6 +474,7 @@ impl<S: EventStore> SimulationNode<S> {
             let pos     = self.world.inner().get::<&PositionComp>(*entity).ok()?.0;
             let stats   = self.world.inner().get::<&ShipStatsComp>(*entity).ok()?;
             let hull    = self.world.inner().get::<&HullComp>(*entity).ok()?;
+            let is_player = self.ship_owners.contains_key(&ship_id);
             Some(serde_json::json!({
                 "ship_id"       : ship_id.raw(),
                 "position"      : { "x": pos.x, "y": pos.y, "z": pos.z },
@@ -483,6 +484,7 @@ impl<S: EventStore> SimulationNode<S> {
                 "current_shield": hull.current_shield,
                 "current_armor" : hull.current_armor,
                 "current_hull"  : hull.current_hull,
+                "is_player"     : is_player,
             }))
         }).collect();
 

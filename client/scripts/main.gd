@@ -44,6 +44,11 @@ var _player_lock_target : int  = -1
 ## Per-ship HP: { ship_id: {shield, armor, hull} }
 var _ship_hp : Dictionary = {}
 
+## Duel mode: opponent player ship IDs (populated from InitialState is_player flag)
+var _opponent_ship_ids : Array = []
+## Duel result overlay label (created dynamically)
+var _duel_result_label : Label = null
+
 ## モジュールスロット情報
 ## [{slot, index, module_id, name, is_active, is_active_module}, ...]
 var _player_modules : Array = []
@@ -66,6 +71,7 @@ func _ready() -> void:
 	_connection.module_deactivated.connect(_on_module_deactivated)
 	_build_player_material()
 	_setup_space_environment()
+	_build_duel_result_overlay()
 	_update_hud()
 
 func _process(_delta: float) -> void:
@@ -215,10 +221,12 @@ func _on_welcomed(_p_player_id: int, _p_ship_id: int) -> void:
 ## Phase 5 では ShipSpawned イベントは送信されないためこちらが初期化を担う。
 func _on_initial_state(ships: Array) -> void:
 	_clear_all_ships()  ## 再接続時に備えてリセット
+	_hide_duel_result()
 
 	for ship_data: Variant in ships:
 		var d        : Dictionary = ship_data as Dictionary
 		var sid      : int        = d.get("ship_id",   0)   as int
+		var is_player: bool       = d.get("is_player", false) as bool
 		var pos_dict : Dictionary = d.get("position",  {})  as Dictionary
 		var max_hp   : float      = d.get("max_hp",    1.0) as float
 		var cur_hp   : float      = d.get("current_hp",1.0) as float
@@ -250,6 +258,10 @@ func _on_initial_state(ships: Array) -> void:
 			_player_armor      = ar
 			_player_hull       = hu
 			_set_as_player_ship(sid, ship)
+		elif is_player:
+			## Other player ship = potential duel opponent
+			if sid not in _opponent_ship_ids:
+				_opponent_ship_ids.append(sid)
 
 func _on_player_fitting(modules: Array) -> void:
 	_player_modules = modules
@@ -381,6 +393,10 @@ func _handle_ship_destroyed(p: Dictionary) -> void:
 		_player_armor       = 0.0
 		_player_hull        = 0.0
 		_player_lock_target = -1
+		_show_duel_result(false)  ## DEFEAT
+	elif ship_id in _opponent_ship_ids:
+		_opponent_ship_ids.erase(ship_id)
+		_show_duel_result(true)   ## VICTORY
 	## 破壊されたターゲットをロック中だった場合はクリア
 	if ship_id == _player_lock_target:
 		_player_lock_target = -1
@@ -466,6 +482,7 @@ func _clear_all_ships() -> void:
 			ship_node.queue_free()
 	_ships.clear()
 	_ship_hp.clear()
+	_opponent_ship_ids.clear()
 	_player_ship_id     = -1
 	_player_shield      = -1.0
 	_player_armor       = -1.0
@@ -514,3 +531,35 @@ func _apply_player_material(ship: Node3D) -> void:
 	var hull: MeshInstance3D = ship.get_node_or_null("Hull") as MeshInstance3D
 	if hull != null:
 		hull.set_surface_override_material(0, _player_material)
+
+# ── デュエル結果オーバーレイ ──────────────────────────────────────────────────
+
+func _build_duel_result_overlay() -> void:
+	var canvas := CanvasLayer.new()
+	canvas.layer = 10
+	add_child(canvas)
+
+	_duel_result_label = Label.new()
+	_duel_result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_duel_result_label.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_duel_result_label.anchors_preset       = Control.PRESET_FULL_RECT
+	_duel_result_label.visible              = false
+
+	var font_size: int = 96
+	_duel_result_label.add_theme_font_size_override("font_size", font_size)
+	canvas.add_child(_duel_result_label)
+
+func _show_duel_result(victory: bool) -> void:
+	if _duel_result_label == null:
+		return
+	if victory:
+		_duel_result_label.text             = "VICTORY"
+		_duel_result_label.add_theme_color_override("font_color", Color(0.2, 1.0, 0.3))
+	else:
+		_duel_result_label.text             = "DEFEAT"
+		_duel_result_label.add_theme_color_override("font_color", Color(1.0, 0.2, 0.2))
+	_duel_result_label.visible = true
+
+func _hide_duel_result() -> void:
+	if _duel_result_label != null:
+		_duel_result_label.visible = false
