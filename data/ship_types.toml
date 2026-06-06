@@ -1,0 +1,149 @@
+# ============================================================
+# ship_types.toml — 船種バランスデータ
+#
+# サーバー起動時に読み込まれる。リビルド不要で調整可能。
+# ファイルが見つからない場合はハードコードのデフォルトにフォールバック。
+#
+# クラス: "Frigate" | "Cruiser" | "Battleship"
+# slot_layout: { high, mid, low, rig }
+# base_stats:
+#   max_speed        — 最大速度 (units/tick)
+#   thrust_magnitude — 加速度 (units/tick²)。0 = NPC等速
+#   max_shield       — シールド最大HP
+#   max_armor        — アーマー最大HP
+#   max_hull         — ハル最大HP
+#   lock_time        — ロック完了Tick数
+#   max_locks        — 同時ロック上限
+# ============================================================
+
+# ── NPC 船種 ─────────────────────────────────────────────────
+
+[[ship_types]]
+id    = 1
+name  = "NPC Frigate"
+class = "Frigate"
+
+[ship_types.slot_layout]
+high = 3
+mid  = 3
+low  = 2
+rig  = 3
+
+[ship_types.base_stats]
+max_speed        = 400.0
+thrust_magnitude = 0.0
+max_shield       = 200.0
+max_armor        = 150.0
+max_hull         = 150.0
+lock_time        = 5
+max_locks        = 1
+
+# ----
+
+[[ship_types]]
+id    = 3
+name  = "NPC Destroyer"
+class = "Frigate"
+
+[ship_types.slot_layout]
+high = 4
+mid  = 2
+low  = 2
+rig  = 3
+
+[ship_types.base_stats]
+max_speed        = 300.0
+thrust_magnitude = 0.0
+max_shield       = 350.0
+max_armor        = 300.0
+max_hull         = 200.0
+lock_time        = 4
+max_locks        = 2
+
+# ----
+
+[[ship_types]]
+id    = 4
+name  = "NPC Cruiser"
+class = "Cruiser"
+
+[ship_types.slot_layout]
+high = 5
+mid  = 4
+low  = 3
+rig  = 3
+
+[ship_types.base_stats]
+max_speed        = 200.0
+thrust_magnitude = 0.0
+max_shield       = 800.0
+max_armor        = 600.0
+max_hull         = 400.0
+lock_time        = 6
+max_locks        = 3
+
+# ── プレイヤー船種 ───────────────────────────────────────────
+
+[[ship_types]]
+id    = 2
+name  = "Player Frigate"
+class = "Frigate"
+
+[ship_types.slot_layout]
+high = 3
+mid  = 3
+low  = 2
+rig  = 3
+
+[ship_types.base_stats]
+max_speed        = 500.0
+thrust_magnitude = 40.0
+max_shield       = 500.0
+max_armor        = 300.0
+max_hull         = 200.0
+lock_time        = 3
+max_locks        = 2
+
+# ----
+
+[[ship_types]]
+id    = 5
+name  = "Player Destroyer"
+class = "Frigate"
+
+[ship_types.slot_layout]
+high = 4
+mid  = 3
+low  = 2
+rig  = 3
+
+[ship_types.base_stats]
+max_speed        = 380.0
+thrust_magnitude = 30.0
+max_shield       = 800.0
+max_armor        = 600.0
+max_hull         = 400.0
+lock_time        = 4
+max_locks        = 3
+
+# ----
+
+[[ship_types]]
+id    = 6
+name  = "Player Cruiser"
+class = "Cruiser"
+
+[ship_types.slot_layout]
+high = 5
+mid  = 4
+low  = 3
+rig  = 3
+
+[ship_types.base_stats]
+max_speed        = 250.0
+thrust_magnitude = 20.0
+max_shield       = 1500.0
+max_armor        = 1200.0
+max_hull         = 800.0
+lock_time        = 5
+max_locks        = 4

@@ -1,0 +1,162 @@
+# ============================================================
+# modules.toml — モジュールバランスデータ
+#
+# サーバー起動時に読み込まれる。リビルド不要で調整可能。
+#
+# kind: "Weapon" | "ShieldBooster" | "ArmorRepairer" | "Propulsion" | "Sensor" | "Rig"
+# slot: "High" | "Mid" | "Low" | "Rig"
+# activation_mode: "Active" | "Passive"
+#
+# stat_delta（省略したフィールドはすべて 0）:
+#   max_speed_add       — 最大速度加算
+#   thrust_add          — 推力加算
+#   max_shield_add      — シールドHP加算
+#   max_armor_add       — アーマーHP加算
+#   max_hull_add        — ハルHP加算
+#   weapon_damage_add   — 武器ダメージ加算
+#   weapon_range_add    — 武器射程加算 (units)
+#   weapon_cooldown_add — 武器クールダウン加算 (Tick, 負=短縮)
+#   lock_time_add       — ロック時間加算 (Tick, 負=短縮)
+#   max_locks_add       — 同時ロック上限加算
+# ============================================================
+
+# ── 武器（High / Active）────────────────────────────────────
+
+[[modules]]
+id              = 1
+name            = "Small Railgun I"
+kind            = "Weapon"
+slot            = "High"
+activation_mode = "Active"
+
+[modules.stat_delta]
+weapon_damage_add = 25.0
+weapon_range_add  = 1500.0
+
+# ----
+
+[[modules]]
+id              = 2
+name            = "Medium Railgun I"
+kind            = "Weapon"
+slot            = "High"
+activation_mode = "Active"
+
+[modules.stat_delta]
+weapon_damage_add   = 50.0
+weapon_range_add    = 2500.0
+weapon_cooldown_add = 4
+
+# ----
+
+[[modules]]
+id              = 7
+name            = "Heavy Railgun I"
+kind            = "Weapon"
+slot            = "High"
+activation_mode = "Active"
+
+[modules.stat_delta]
+weapon_damage_add   = 100.0
+weapon_range_add    = 4000.0
+weapon_cooldown_add = 8
+
+# ── シールド（Mid / Passive）────────────────────────────────
+
+[[modules]]
+id              = 3
+name            = "Basic Shield Extender"
+kind            = "ShieldBooster"
+slot            = "Mid"
+activation_mode = "Passive"
+
+[modules.stat_delta]
+max_shield_add = 300.0
+
+# ----
+
+[[modules]]
+id              = 8
+name            = "Large Shield Extender"
+kind            = "ShieldBooster"
+slot            = "Mid"
+activation_mode = "Passive"
+
+[modules.stat_delta]
+max_shield_add = 700.0
+
+# ── アーマー（Low / Passive）────────────────────────────────
+
+[[modules]]
+id              = 4
+name            = "Basic Armor Plate"
+kind            = "ArmorRepairer"
+slot            = "Low"
+activation_mode = "Passive"
+
+[modules.stat_delta]
+max_armor_add = 200.0
+
+# ----
+
+[[modules]]
+id              = 9
+name            = "Reinforced Armor Plate"
+kind            = "ArmorRepairer"
+slot            = "Low"
+activation_mode = "Passive"
+
+[modules.stat_delta]
+max_armor_add = 500.0
+
+# ── 推進（Mid / Active）─────────────────────────────────────
+
+[[modules]]
+id              = 5
+name            = "1MN Afterburner"
+kind            = "Propulsion"
+slot            = "Mid"
+activation_mode = "Active"
+
+[modules.stat_delta]
+max_speed_add = 150.0
+thrust_add    = 10.0
+
+# ----
+
+[[modules]]
+id              = 10
+name            = "10MN Afterburner"
+kind            = "Propulsion"
+slot            = "Mid"
+activation_mode = "Active"
+
+[modules.stat_delta]
+max_speed_add = 80.0
+thrust_add    = 5.0
+
+# ── センサー（Mid / Passive）────────────────────────────────
+
+[[modules]]
+id              = 6
+name            = "Sensor Booster I"
+kind            = "Sensor"
+slot            = "Mid"
+activation_mode = "Passive"
+
+[modules.stat_delta]
+lock_time_add = -2
+max_locks_add = 1
+
+# ----
+
+[[modules]]
+id              = 11
+name            = "Signal Amplifier"
+kind            = "Sensor"
+slot            = "Low"
+activation_mode = "Passive"
+
+[modules.stat_delta]
+lock_time_add = -1
+max_locks_add = 2

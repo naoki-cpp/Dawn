@@ -8,6 +8,7 @@
 //!   cargo run -p dawn-simulation --bin simulate --release
 
 mod cluster;
+mod data_loader;
 mod modules;
 mod node;
 mod ship_types;
@@ -286,10 +287,19 @@ async fn run_phase4_server(ship_count: usize) {
     let bounds = SectorBounds::cube(SectorBounds::DEFAULT_SIZE);
     let mut node = SimulationNode::new(NodeId(0), SectorId(0), bounds);
 
-    for def in modules::all_modules() {
+    let loaded_modules = data_loader::load_modules(
+        "data/modules.toml",
+        modules::all_modules(),
+    );
+    for def in loaded_modules {
         node.register_module(def);
     }
-    for def in ship_types::all_ship_types() {
+
+    let loaded_ship_types = data_loader::load_ship_types(
+        "data/ship_types.toml",
+        ship_types::all_ship_types(),
+    );
+    for def in loaded_ship_types {
         node.register_ship_type(def);
     }
 
@@ -382,6 +392,9 @@ async fn run_phase4_server(ship_count: usize) {
                     ClientCommand::Deactivate(cmd) => {
                         node.deactivate_module_owned(sess.player_id, cmd);
                     }
+                    // Combat is handled automatically by CombatSystem each tick.
+                    // AttackCommand is reserved for a future manual-fire mode.
+                    ClientCommand::Attack(_) => {}
                 }
             }
         }
