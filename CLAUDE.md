@@ -1,3 +1,9 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+---
+
 # CLAUDE.md — dawn プロジェクト AI開発ガイド
 
 このファイルはAIエージェントが本プロジェクトを安全に継続開発するための
@@ -5,6 +11,46 @@
 
 コードを書く前に必ずこのファイルを読むこと。
 設計判断の根拠は `docs/adr/` を参照すること。
+
+---
+
+## 0. 開発コマンド早見表
+
+```bash
+# ビルド
+cargo build --workspace
+cargo build --workspace --release
+
+# テスト
+cargo test --workspace                        # 全テスト
+cargo test -p dawn-core                       # 特定クレートのみ
+cargo test ship_moved_event                   # テスト名フィルタ
+
+# カバレッジ（要: cargo install cargo-llvm-cov）
+cargo llvm-cov --workspace --html
+
+# ベンチマーク
+cargo bench -p dawn-simulation
+
+# 依存チェック（循環・禁止依存の検出）
+cargo tree --duplicates
+# cargo deny check bans  # 要: cargo install cargo-deny
+
+# シミュレーション実行
+cargo run -p dawn-simulation --bin simulate                          # Phase 1-3 benchmark
+cargo run -p dawn-simulation --bin simulate --release -- --serve     # Phase 5 WebSocket server (Godot用)
+cargo run -p dawn-simulation --bin simulate --release -- --serve --ships 50  # 船数指定
+```
+
+**WebSocket サーバー起動後の接続先**: `ws://127.0.0.1:7878`
+
+# ゲームバランス調整（リビルド不要）
+# data/ ディレクトリの TOML を編集してサーバーを再起動するだけでよい
+# ファイルが見つからない場合は ship_types.rs / modules.rs のデフォルト値を使用
+data/ship_types.toml   # 船種定義（HP・速度・スロット数など）
+data/modules.toml      # モジュール定義（ダメージ・射程・StatDelta など）
+
+---
 
 ---
 
@@ -903,7 +949,7 @@ Phase 4 Cycle 3 で承認済み（作成してよい）:
 | `dawn-ecs` | ECS World の薄いラッパー。Component定義（Movement/Fitting/Combat）, System定義 | dawn-core, hecs | ネットワーク、EventStore |
 | `dawn-event-store` | Event Log の永続化。Append, Read, Snapshot（InMemory + File） | dawn-core, serde | ネットワーク、ECS |
 | `dawn-actor` | Actor基盤。EventStoreActor, ReplicationBus, ClientConnection trait | dawn-core, dawn-event-store, tokio | dawn-ecs, dawn-simulation |
-| `dawn-simulation` | 実行バイナリ。SimulationNode, MultiNodeCluster, WsServer（Godot WebSocket接続）, 負荷生成 | 上記全て + rand + tokio-tungstenite | — |
+| `dawn-simulation` | 実行バイナリ。SimulationNode, MultiNodeCluster, WsServer（Godot WebSocket接続）, 負荷生成, DataLoader（TOML読み込み） | 上記全て + rand + tokio-tungstenite + toml | — |
 
 ### 将来追加予定のクレート（まだ存在しない・実装しないこと）
 

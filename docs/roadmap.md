@@ -42,8 +42,8 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 ## 2. 現在地
 
 ```
-現在のフェーズ : Phase 5 — 本物のネットワーク
-フェーズの状態 : Phase 4 卒業確認済み / Phase 5 基盤実装済み / 残タスク対応中
+現在のフェーズ : Phase 6 — 次のゲームサイクル（フィードバック待ち）
+フェーズの状態 : Phase 5 完了
 ```
 
 ### 完了済みフェーズ
@@ -53,6 +53,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 - ✅ Phase 2 — In-Memory Multi-Node（3ノード 63,000イベント整合性 ✓）
 - ✅ Phase 3 — Event 永続化（Snapshot + Replay 再起動後の状態完全復元 ✓）
 - ✅ Phase 4 — ゲーム開発ループ（Cycle 1〜3 完了 / 卒業基準 5/5 達成）
+- ✅ Phase 5 — マルチプレイヤー基盤（ADR-0007 チェックリスト全完了 / 138テスト全パス）
 
 ### Phase 4 卒業記録（ADR-0007 §6）
 
@@ -64,9 +65,34 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 ✅ 基本的なゲームループでクラッシュしない
 ```
 
+### Phase 5 完了記録（ADR-0007 実装チェックリスト）
+
+```
+✅ dawn-core: PlayerId(u64) 型追加
+✅ dawn-core: DawnError::NotOwner 追加
+✅ dawn-simulation/node.rs: player_ships HashMap / spawn_player_ship / 全コマンド所有権チェック
+✅ dawn-simulation/ws_server.rs: Hello/Welcome/InitialState ハンドシェイク
+✅ dawn-simulation/ws_server.rs: PlayerSession 構造体 / 複数クライアント同時接続
+✅ dawn-simulation/ws_server.rs: AttackCommand JSON パーサー追加
+✅ dawn-simulation/main.rs: ORIGIN シグナル処理を削除
+✅ connection.gd: Hello 送信 / Welcome 受信 / InitialState 受信
+✅ main.gd: ORIGIN シグナル送信削除 / Welcome シグナル処理
+✅ 138テスト全パス
+```
+
 ### 次に着手すべきタスク
 
-**Phase 5 残タスク（ADR-0007 実装チェックリストより）**
+**Phase 6 主目標: 人間のプレイテストによるゲームループの検証**
+
+詳細は `docs/playtest-guide.md` を参照。
+
+Phase 7 着手前に以下を実装してプレイテストを実施すること:
+
+| 優先度 | タスク | 理由 |
+|---|---|---|
+| 必須 | リスポーン実装 | 死亡後に再参加できないとセッションが成立しない |
+| 必須 | セッションメトリクス出力 | 数値でバランスを判断できるようにする |
+| 推奨 | Capacitor 実装 | 「常時 ON で勝ち」問題の解消。フィッティング多様性の前提 |
 
 ---
 
@@ -276,6 +302,22 @@ Godot 側（実装済み）:
 確認  : 「戦闘が面白い」という感覚があるか → ✅ OK
 ```
 
+### Cycle 4 — 船種拡張とバランス外部化 ✅
+
+```
+目標: 船種を増やし、リビルドなしでバランス調整できる仕組みを導入する
+
+サーバー側（完了）:
+  data_loader（TOML ローダー）
+    - data/ship_types.toml: 船種バランスデータ（6種）
+    - data/modules.toml: モジュールデータ（11種）
+    - ファイル不在時は built-in デフォルトへフォールバック
+  新船種: NPC Destroyer / NPC Cruiser / Player Destroyer / Player Cruiser
+
+バランス調整サイクル:
+  data/*.toml を編集 → サーバー再起動のみ（リビルド不要）
+```
+
 ### Cycle N — フィードバック次第で追加
 
 ```
@@ -285,20 +327,22 @@ Godot 側（実装済み）:
 
 ---
 
-## 8. Phase 5 — 本物のネットワーク
+## 8. Phase 5 — マルチプレイヤー基盤 ✅
 
-**前提:** Phase 4 のゲーム体験が満足できる水準に達していること。
+**設計変更（ADR-0007）:** gRPC への移行は行わず WebSocket + JSON を維持する。
+Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討する。
 
-**完了基準:** `InProcessConnection` を `GrpcConnection` に差し替え、
-別プロセスの Godot クライアントが接続できる。
-**Godot 側のコードは変更しない。**
+**完了基準:** ADR-0007 実装チェックリスト全完了 → **達成**
 
 | タスク | 状態 | 備考 |
 |---|---|---|
-| `dawn-proto` クレート追加（protobuf 定義） | ⬜ 未着手 | |
-| gRPC / QUIC サーバー実装 | ⬜ 未着手 | tonic |
-| `GrpcConnection` 実装 | ⬜ 未着手 | trait 差し替えのみ |
-| 別プロセス接続テスト | ⬜ 未着手 | |
+| `PlayerId` 型 + `DawnError::NotOwner` | ✅ 完了 | |
+| `spawn_player_ship` + 全コマンド所有権チェック | ✅ 完了 | |
+| Hello / Welcome / InitialState ハンドシェイク | ✅ 完了 | ADR-0007 §2-4 |
+| PlayerSession / 複数クライアント同時接続 | ✅ 完了 | |
+| `AttackCommand` JSON パーサー | ✅ 完了 | 現在は自動戦闘が主体 |
+| Godot 側: Hello 送信 / Welcome 受信 | ✅ 完了 | |
+| 全テスト通過 | ✅ 完了 | 138テスト |
 
 ---
 
@@ -310,6 +354,7 @@ Godot 側（実装済み）:
 Phase 7: 分散コンセンサス（Raft）
           Sector Transit の整合性保証
           完了基準: ノード障害後に Sector Transit が正しく完了する
+          ★ ADR-0009（星系間ナビゲーション）はこのフェーズ完了後に実装する
 
 Phase 8: スケール基盤（Anti-TiDi）
           Sector Population Cap / Dynamic Fission
