@@ -23,7 +23,7 @@ use dawn_core::{
     SectorBounds, SectorId, ShipId, Tick, Velocity,
 };
 use dawn_ecs::{
-    components::{FittingComp, HullComp, IsNpcComp, LockComp, PositionComp, ShipStatsComp, ThrustComp, VelocityComp},
+    components::{FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp, ShipStatsComp, ThrustComp, VelocityComp},
     systems::{CombatSystem, LockSystem, MovementSystem, apply_fitting},
     Entity, SimWorld,
 };
@@ -222,14 +222,18 @@ impl<S: EventStore> SimulationNode<S> {
         // 5. Combat System
         let combat = CombatSystem(&mut self.world, tick);
 
-        // 破壊された Ship めEECS と ship_index から削除
+        // 破壊された Ship を ECS と ship_index から削除
+        // CLAUDE.md §6: Combat の後に Bot System を実行する
         for ship_id in &combat.destroyed {
             if let Some(entity) = self.ship_index.remove(ship_id) {
                 self.world.despawn_ship(entity);
             }
         }
 
-        // 6. EventStore に Append
+        // 6. Bot System — bots issue the same commands as human players
+        self.process_bots();
+
+        // 7. EventStore に Append
         let all_events: Vec<DomainEvent> = move_events.iter()
             .chain(lock.events.iter())
             .chain(combat.events.iter())
@@ -361,9 +365,14 @@ impl<S: EventStore> SimulationNode<S> {
         id
     }
 
+    /// Spawn a player ship at the default starting position.
     pub fn spawn_player_ship(&mut self, player_id: PlayerId) -> ShipId {
+        self.spawn_player_ship_at(player_id, Position::new(0.0, 0.0, 0.0))
+    }
+
+    /// Spawn a player ship at a specific position.
+    fn spawn_player_ship_at(&mut self, player_id: PlayerId, pos: Position) -> ShipId {
         use crate::ship_types::SHIP_TYPE_PLAYER_FRIGATE;
-        let pos     = Position::new(0.0, 0.0, 0.0);
         let ship_id = ShipId::new(self.node_id, self.id_counter);
         self.id_counter += 1;
 
@@ -380,11 +389,10 @@ impl<S: EventStore> SimulationNode<S> {
             if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
                 *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
             }
-            // IsNpcComp を除去（自動ロックしない）
-            let _ = self.world.inner_mut().remove_one::<dawn_ecs::components::IsNpcComp>(entity);
+            let _ = self.world.inner_mut().remove_one::<IsNpcComp>(entity);
         }
 
-        // 所有権を先に記録（fit_module の is_npc 判定のため必須）
+        // Record ownership before fit_module (needed for is_npc check).
         self.player_ships.insert(player_id, ship_id);
         self.ship_owners.insert(ship_id, player_id);
 
@@ -404,6 +412,124 @@ impl<S: EventStore> SimulationNode<S> {
         }));
 
         ship_id
+    }
+
+    /// Spawn a Bot ship at the given position.
+    ///
+    /// The Bot receives a real `PlayerId` and goes through the same player
+    /// command pipeline. `IsBotComp` marks it for `process_bots()` each tick.
+    pub fn spawn_bot_ship(&mut self, spawn_pos: Position) -> (PlayerId, ShipId) {
+        let player_id = self.next_player_id();
+        let ship_id   = self.spawn_player_ship_at(player_id, spawn_pos);
+        if let Some(&entity) = self.ship_index.get(&ship_id) {
+            let _ = self.world.inner_mut().insert_one(entity, IsBotComp);
+        }
+        (player_id, ship_id)
+    }
+
+    /// Run the Bot AI for all `IsBotComp` ships.
+    ///
+    /// Bots issue the exact same commands as a human player:
+    /// `MoveCommand`, `LockOnCommand`, `ActivateModuleCommand`.
+    /// Called each tick after Combat System.
+    pub fn process_bots(&mut self) {
+        // ── 1. Snapshot bot state (read-only pass) ────────────────────────────
+        struct BotState {
+            player_id     : PlayerId,
+            ship_id       : ShipId,
+            position      : Position,
+            weapon_range  : f32,
+            locked_targets: Vec<ShipId>,
+            modules       : Vec<(dawn_core::ModuleId, dawn_core::fitting::SlotKind)>,
+        }
+
+        let mut bots: Vec<BotState> = Vec::new();
+        for (&ship_id, &entity) in &self.ship_index {
+            if self.world.inner().get::<&IsBotComp>(entity).is_err() { continue }
+            let Some(&player_id) = self.ship_owners.get(&ship_id) else { continue };
+            let Ok(pos)   = self.world.inner().get::<&PositionComp>(entity) else { continue };
+            let Ok(stats) = self.world.inner().get::<&ShipStatsComp>(entity) else { continue };
+            let Ok(lock)  = self.world.inner().get::<&LockComp>(entity) else { continue };
+            let locked: Vec<ShipId> = lock.entries.iter()
+                .filter(|e| matches!(e.state, dawn_ecs::components::LockState::Locked))
+                .map(|e| e.target_id)
+                .collect();
+            let modules = self.world.inner()
+                .get::<&FittingComp>(entity)
+                .map(|f| {
+                    f.high.iter().chain(f.mid.iter()).chain(f.low.iter()).chain(f.rig.iter())
+                        .map(|s| (s.def.id, s.def.slot))
+                        .collect()
+                })
+                .unwrap_or_default();
+            bots.push(BotState {
+                player_id, ship_id,
+                position    : pos.0,
+                weapon_range: stats.weapon_range,
+                locked_targets: locked,
+                modules,
+            });
+        }
+
+        // ── 2. Snapshot human player target positions ─────────────────────────
+        struct TargetInfo { ship_id: ShipId, position: Position }
+        let mut targets: Vec<TargetInfo> = Vec::new();
+        for (&ship_id, &entity) in &self.ship_index {
+            if self.world.inner().get::<&IsBotComp>(entity).is_ok()  { continue }
+            if self.world.inner().get::<&IsNpcComp>(entity).is_ok()  { continue }
+            if !self.ship_owners.contains_key(&ship_id)              { continue }
+            let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { continue };
+            targets.push(TargetInfo { ship_id, position: pos.0 });
+        }
+
+        if targets.is_empty() { return; }
+
+        // ── 3. Issue commands (same pipeline as human player) ─────────────────
+        for bot in bots {
+            // Find closest human target.
+            let Some(target) = targets.iter().min_by(|a, b| {
+                bot.position.distance_squared(a.position)
+                    .partial_cmp(&bot.position.distance_squared(b.position))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }) else { continue };
+
+            let dist = bot.position.distance(target.position);
+
+            // Lock on if not already locked or locking.
+            let already_targeting = bot.locked_targets.contains(&target.ship_id);
+            if !already_targeting {
+                self.apply_lock_on_owned(bot.player_id, dawn_core::LockOnCommand {
+                    ship_id  : bot.ship_id,
+                    target_id: target.ship_id,
+                });
+            }
+
+            // Move: approach until within 75% of weapon range.
+            let engage_range = (bot.weapon_range * 0.75).max(500.0);
+            if dist > engage_range {
+                let dx = target.position.x - bot.position.x;
+                let dy = target.position.y - bot.position.y;
+                let dz = target.position.z - bot.position.z;
+                let len = (dx*dx + dy*dy + dz*dz).sqrt().max(1.0);
+                let thrust_target = Position::new(
+                    bot.position.x + dx / len * 1_000_000.0,
+                    bot.position.y + dy / len * 1_000_000.0,
+                    bot.position.z + dz / len * 1_000_000.0,
+                );
+                self.apply_move_command_owned(bot.player_id, bot.ship_id, thrust_target);
+            }
+
+            // Activate weapons once target is locked.
+            if already_targeting {
+                for (module_id, slot) in &bot.modules {
+                    self.activate_module_owned(bot.player_id, dawn_core::ActivateModuleCommand {
+                        ship_id  : bot.ship_id,
+                        module_id: *module_id,
+                        slot     : *slot,
+                    });
+                }
+            }
+        }
     }
 
     #[allow(dead_code)]

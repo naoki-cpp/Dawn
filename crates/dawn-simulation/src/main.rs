@@ -46,12 +46,16 @@ async fn main() {
     // Phase 4 モード: --serve 引数があれば Godot 向け WebSocket サーバーを起動
     let args: Vec<String> = std::env::args().collect();
     if args.contains(&"--serve".to_string()) {
-        // --ships N で船の数を指定できる（省略時は P4_SHIPS_DEFAULT）
-        let ship_count = args.windows(2)
-            .find(|w| w[0] == "--ships")
-            .and_then(|w| w[1].parse::<usize>().ok())
-            .unwrap_or(P4_SHIPS_DEFAULT);
-        run_phase4_server(ship_count).await;
+        // --duel: 1 human vs 1 Bot, no NPC ships
+        let duel_mode = args.contains(&"--duel".to_string());
+        // --ships N で NPC 数を指定（--duel 時は無視）
+        let ship_count = if duel_mode { 0 } else {
+            args.windows(2)
+                .find(|w| w[0] == "--ships")
+                .and_then(|w| w[1].parse::<usize>().ok())
+                .unwrap_or(P4_SHIPS_DEFAULT)
+        };
+        run_phase4_server(ship_count, duel_mode).await;
         return;
     }
 
@@ -269,11 +273,15 @@ fn run_phase3_demo() {
 const P4_SHIPS_DEFAULT : usize = 20;
 const P4_TICK_MS       : u64   = 100;  // 10 Tick/sec
 
-async fn run_phase4_server(ship_count: usize) {
+async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
     println!("═══════════════════════════════════════════");
     println!("  Phase 5 — Godot WebSocket server          ");
     println!("═══════════════════════════════════════════");
-    println!("  npc ships: {ship_count}  (change with --ships N)");
+    if duel_mode {
+        println!("  mode: DUEL (1 human vs 1 Bot, no NPC)");
+    } else {
+        println!("  npc ships: {ship_count}  (change with --ships N)");
+    }
     println!("  tick rate: {} ms/tick  ({} tick/sec)",
         P4_TICK_MS, 1000 / P4_TICK_MS);
     println!();
@@ -314,6 +322,13 @@ async fn run_phase4_server(ship_count: usize) {
             module_id : modules::MODULE_RAILGUN_SMALL,
         });
     }
+    // Duel mode: spawn 1 Bot opposite the player's default spawn position.
+    if duel_mode {
+        let bot_pos = Position::new(2000.0, 0.0, 2000.0);
+        let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
+        println!("  [Server] Duel mode: Bot ship #{} ready at {:?}", bot_ship_id.raw(), bot_pos);
+    }
+
     println!("  [Server] {ship_count} NPC ships ready. Waiting for players...");
 
     // TCP 接続チャンネル（accept タスク → メインループ）
