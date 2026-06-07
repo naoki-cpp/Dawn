@@ -46,21 +46,28 @@ pub enum ActivationMode {
 
 // モジュール定義（dawn-core）
 pub struct ModuleDefinition {
-    pub id              : ModuleId,
-    pub name            : String,
-    pub kind            : ModuleKind,
-    pub slot            : SlotKind,
-    pub stat_delta      : StatDelta,
-    pub activation_mode : ActivationMode,  // 追加
+    pub id                : ModuleId,
+    pub name              : String,
+    pub kind              : ModuleKind,
+    pub slot              : SlotKind,
+    pub stat_delta        : StatDelta,
+    pub activation_mode   : ActivationMode,
+    /// Capacitor consumed once at cycle start (GJ). 0 for Passive modules.
+    pub cap_cost_per_cycle: f32,
+    /// Duration of one activation cycle (ticks). 0 for Passive modules.
+    pub cycle_time_ticks  : u64,
 }
 
 // 装備スロット 1 枠（モジュール定義 + 現在の活性化状態）
 pub struct FittedSlot {
-    pub def      : ModuleDefinition,
-    /// Active モジュールのみ有意。Passive は常に true 扱い。
-    /// true = オン（StatDelta 適用・武器は発射可能）
-    /// false = オフ（StatDelta 不適用・武器は発射しない）
-    pub is_active: bool,
+    pub def            : ModuleDefinition,
+    /// Active modules only. true = ON (StatDelta applied, weapon fires).
+    /// false = OFF (StatDelta not applied, weapon silent).
+    pub is_active      : bool,
+    /// Ticks remaining in the current activation cycle.
+    /// 0 = cycle over → CapacitorSystem will try to start a new cycle next tick.
+    /// Not persisted in snapshots; resets to 0 on restart.
+    pub cycle_remaining: u64,
 }
 
 // 船の装備スロット全体（dawn-ecs）
@@ -76,22 +83,31 @@ pub struct FittingComp {
 // ベース値は ShipTypeDefinition.base_stats から取得する（後述 §4）。
 // 武器能力はモジュール装備によってのみ付与される（ベースはゼロ）。
 pub struct ShipStatsComp {
-    pub max_speed        : f32,
-    pub thrust_magnitude : f32,
+    pub max_speed            : f32,
+    pub thrust_magnitude     : f32,
 
-    // HP は Shield / Armor / Hull の 3 層（後述 §4 HP 3層化）
-    pub max_shield       : f32,
-    pub max_armor        : f32,
-    pub max_hull         : f32,
+    // HP: Shield / Armor / Hull 3層（§5 HP 3層化）
+    pub max_shield           : f32,
+    pub max_armor            : f32,
+    pub max_hull             : f32,
 
     // 武器（モジュールのみで供給）
-    pub weapon_damage    : f32,
-    pub weapon_range     : f32,
-    pub weapon_cooldown  : u64,
+    pub weapon_damage        : f32,
+    pub weapon_range         : f32,
+    pub weapon_cooldown      : u64,
 
     // ロック
-    pub lock_time        : u64,
-    pub max_locks        : u32,
+    pub lock_time            : u64,
+    pub max_locks            : u32,
+
+    // キャパシタ（Phase 6 追加）
+    pub cap_max              : f32,   // 最大容量 (GJ)
+    pub cap_recharge_per_tick: f32,   // 毎 Tick の回復量 (GJ/tick)
+}
+
+// キャパシタ現在値（live state、HullComp と同パターン）
+pub struct CapacitorComp {
+    pub current: f32,  // 現在のキャパシタ量 (GJ)
 }
 ```
 
@@ -256,18 +272,25 @@ pub struct ShipDestroyed {
 #### Combat System フロー（CLAUDE.md §6 Tick 処理順序に準拠）
 
 ```
-Phase 4 Cycle 3 以降の Tick 処理:
+Phase 6 以降の Tick 処理:
   1. Tick カウンタをインクリメント
-  2. MoveCommand / AttackCommand キューを処理する
+  2. コマンドキューを処理する（Move / LockOn / Activate / Deactivate）
   3. Movement System を実行する
-  4. Combat System を実行する              ← Movement の後
+  4. Capacitor System を実行する           ← Phase 6 追加（Movement の後）
+     a. 毎 Tick: cap を recharge_per_tick 分回復
+     b. Active-ON モジュールのサイクルを進行（cycle_remaining--）
+     c. cycle_remaining == 0 → 新サイクル開始: cap 消費
+     d. cap 不足 → 強制 OFF → ModuleDeactivated イベント生成
+  5. Lock System を実行する
+  6. Combat System を実行する              ← Lock System の後
      a. 射程内の敵を検索（O(n²)、Phase 8 で Spatial Index に移行）
      b. クールダウンが明けていれば WeaponFired を生成
      c. ターゲットの HullComp にダメージを適用し DamageTaken を生成
      d. HP ≤ 0 なら ShipDestroyed を生成し destroyed リストに積む
-  5. 全イベントを EventStore に Append
-  6. ReplicationBus に差分を転送
-  7. TickSummary を返す
+  7. Bot System を実行する                 ← Phase 6 追加（Combat の後）
+  8. 全イベントを EventStore に Append
+  9. ReplicationBus に差分を転送
+  10. TickSummary を返す
 ```
 
 呼び出し元（`SimulationNode::tick()`）が `CombatResult.destroyed` を受け取り
@@ -427,13 +450,16 @@ pub struct SlotLayout { pub high: u8, pub mid: u8, pub low: u8, pub rig: u8 }
 /// 装備なし時の船種固有ベーススタット。
 /// weapon_* は含まない（モジュール装備のみで供給）。
 pub struct ShipBaseStats {
-    pub max_speed        : f32,
-    pub thrust_magnitude : f32,
-    pub max_shield       : f32,   // HP 3層（後述）
-    pub max_armor        : f32,
-    pub max_hull         : f32,
-    pub lock_time        : u64,
-    pub max_locks        : u32,
+    pub max_speed            : f32,
+    pub thrust_magnitude     : f32,
+    pub max_shield           : f32,
+    pub max_armor            : f32,
+    pub max_hull             : f32,
+    pub lock_time            : u64,
+    pub max_locks            : u32,
+    // キャパシタ（Phase 6 追加）
+    pub cap_max              : f32,
+    pub cap_recharge_per_tick: f32,
 }
 
 pub struct ShipTypeDefinition {
@@ -554,35 +580,48 @@ pub max_hull_add   : f32,   // ハル HP への加算
 ### Fitting
 
 - [x] `dawn-core`: `ModuleId`, `ModuleKind`, `SlotKind`, `StatDelta`, `ModuleDefinition`, `FittingSnapshot` 型定義
-- [ ] `dawn-core`: `ActivationMode` を `ModuleDefinition` に追加（Passive / Active）
-- [ ] `dawn-ecs`: `FittingComp` を `Vec<FittedSlot>` に変更（`FittedSlot { def, is_active }`）
-- [ ] `dawn-ecs`: `apply_fitting()` で Active OFF モジュールの delta をスキップ
+- [x] `dawn-core`: `ActivationMode` を `ModuleDefinition` に追加（Passive / Active）
+- [x] `dawn-core`: `ModuleDefinition` に `cap_cost_per_cycle`, `cycle_time_ticks` 追加（Phase 6）
+- [x] `dawn-ecs`: `FittingComp`（`Vec<FittedSlot { def, is_active, cycle_remaining }>`）
+- [x] `dawn-ecs`: `apply_fitting()` で Active OFF モジュールの delta をスキップ
 - [x] `dawn-core`: `ShipFitted` イベント, `FitModuleCommand` コマンド
-- [ ] `dawn-core`: `ModuleActivated` / `ModuleDeactivated` イベント
-- [ ] `dawn-core`: `ActivateModuleCommand` / `DeactivateModuleCommand` コマンド
-- [ ] `dawn-actor`: `ClientCommand` に `Activate` / `Deactivate` variant 追加
-- [ ] `dawn-simulation`: NPC 武器モジュールを `is_active = true` で装備
-- [ ] `dawn-simulation`: CombatSystem を `is_active == true` の武器のみ発射に変更
+- [x] `dawn-core`: `ModuleActivated` / `ModuleDeactivated` イベント
+- [x] `dawn-core`: `ActivateModuleCommand` / `DeactivateModuleCommand` コマンド
+- [x] `dawn-actor`: `ClientCommand` に `Activate` / `Deactivate` variant 追加
+- [x] `dawn-simulation`: NPC 武器モジュールを `is_active = true` で装備
+- [x] `dawn-simulation`: CombatSystem を `is_active == true` の武器のみ発射に変更
 - [x] `dawn-ecs`: `FittingComp` コンポーネント
-- [x] `dawn-ecs`: `ShipStatsComp` に Combat フィールド追加（ベース値はゼロ）
-- [x] `dawn-ecs`: `apply_fitting()` / `apply_delta()` システム関数
+- [x] `dawn-ecs`: `ShipStatsComp` に Combat フィールド + cap フィールド追加
+- [x] `dawn-ecs`: `apply_fitting()` / `apply_delta()` システム関数（cap フィールド対応済み）
 - [x] `dawn-simulation`: `SimulationNode::register_module()` / `fit_module()` メソッド
 - [x] `dawn-simulation`: `base_stats` パターンで二重加算を防止
-- [x] `dawn-simulation`: `modules.rs` 標準モジュール定義カタログ
-- [x] 全テスト通過（114/114）
+- [x] `dawn-simulation`: `modules.rs` 標準モジュール定義カタログ（11種）
+- [x] `dawn-simulation`: `data/modules.toml` TOML 外部化（リビルド不要）
+
+### Capacitor System（Phase 6 追加）
+
+- [x] `dawn-core`: `StatDelta` に `cap_max_add`, `cap_recharge_add` 追加
+- [x] `dawn-core`: `ShipBaseStats` に `cap_max`, `cap_recharge_per_tick` 追加
+- [x] `dawn-ecs/components/movement.rs`: `ShipStatsComp` に `cap_max`, `cap_recharge_per_tick` 追加
+- [x] `dawn-ecs/components/combat.rs`: `CapacitorComp { current: f32 }` 追加
+- [x] `dawn-ecs/systems/capacitor.rs`: `CapacitorSystem::run()` — サイクルベース cap 管理
+- [x] `dawn-simulation/node.rs`: spawn 時に `CapacitorComp` 初期化
+- [x] `dawn-simulation/node.rs`: Tick ループに CapacitorSystem 追加（Movement → Cap → Lock → Combat）
+- [x] `data/ship_types.toml`: 全船種に cap フィールド追加
+- [x] `data/modules.toml`: Active モジュールに `cap_cost_per_cycle`, `cycle_time_ticks` 追加
+- [x] 全テスト通過（154/154）
 
 ### Combat
 
 - [x] `dawn-core`: `WeaponFired`, `DamageTaken`, `ShipDestroyed` イベント
-- [x] `dawn-core`: `AttackCommand` コマンド（WsServer での処理は Phase 5）
+- [x] `dawn-core`: `AttackCommand` コマンド
+- [x] `dawn-actor/ws_server.rs`: `AttackCommand` JSON パーサー実装済み（Phase 5）
 - [x] `dawn-ecs`: `HullComp`, `WeaponComp` コンポーネント
 - [x] `dawn-ecs`: `CombatSystem::run()` — 射程判定 / ダメージ / 破壊
-- [x] `dawn-simulation`: Tick 内に CombatSystem を組み込む（Movement の後）
+- [x] `dawn-simulation`: Tick 内に CombatSystem を組み込む（Lock の後）
 - [x] `dawn-simulation`: `DamageTaken` を Replay 時に HullComp へ反映（INV-002）
 - [x] `dawn-simulation`: 破壊 Ship を ECS と ship_index から自動削除
-- [ ] Godot: `AttackCommand` 送信（Phase 5）
-- [ ] Godot: HP ゲージ HUD / 破壊エフェクト（Cycle 3 クライアント実装）
-- [ ] 全テスト通過（Godot 側）
+- [x] Godot: HP ゲージ HUD / 破壊エフェクト / ロック枠線 / 被弾フラッシュ
 
 ### Lock-on
 
@@ -594,13 +633,12 @@ pub max_hull_add   : f32,   // ハル HP への加算
 - [x] `dawn-ecs/components/movement.rs`: `ShipStatsComp` に `lock_time`, `max_locks` 追加
 - [x] `dawn-ecs/systems/fitting.rs`: `apply_delta` に lock フィールドのクランプ追加
 - [x] `dawn-ecs/systems/lock.rs`: `LockSystem::run()` — カウントダウン / 自動ロック / プレイヤーコマンド処理
-- [x] `dawn-ecs/systems/combat.rs`: 最近傍自動攻撃 → LockComp の Locked ターゲットのみ発射に変更
+- [x] `dawn-ecs/systems/combat.rs`: LockComp の Locked ターゲットのみ発射
 - [x] `dawn-simulation/modules.rs`: `Sensor Booster I` 追加
-- [x] `dawn-simulation/node.rs`: `tick_with_lock_commands()`, `apply_event` で `TargetLocked` / `LockLost` Replay
-- [x] `dawn-actor/client_connection.rs`: `ClientCommand` enum 導入（`Move`, `LockOn`）
-- [x] `dawn-simulation/ws_server.rs`: `LockOnCommand` JSON パーサー追加
-- [x] `dawn-simulation/main.rs`: コマンドを種別振り分け
+- [x] `dawn-simulation/node.rs`: `tick_with_lock_commands()`, Replay 対応
+- [x] `dawn-actor/client_connection.rs`: `ClientCommand` enum（`Move`, `LockOn`, `Activate`, `Deactivate`, `Attack`）
+- [x] `dawn-simulation/ws_server.rs`: 全コマンド JSON パーサー
 - [x] `client/scripts/connection.gd`: `send_lock_on_command()` 追加
-- [x] `client/scripts/main.gd`: 右クリック → ロックオン処理
+- [x] `client/scripts/main.gd`: 右クリック → ロックオン / F1-F8 モジュール ON-OFF
 - [x] `client/scripts/ship_controller.gd`: `flash_lock_indicator()` 追加
-- [x] 全テスト通過（124/124）
+- [x] 全テスト通過（154/154）

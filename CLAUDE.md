@@ -50,6 +50,13 @@ cargo run -p dawn-simulation --bin simulate --release -- --serve --ships 50  # �
 data/ship_types.toml   # 船種定義（HP・速度・スロット数など）
 data/modules.toml      # モジュール定義（ダメージ・射程・StatDelta など）
 
+# コミット
+# → 規約: docs/commit-convention.md を参照すること（英語・Conventional Commits 準拠）
+# 例:
+#   feat(dawn-ecs): add CapacitorSystem with cycle-based cap drain
+#   fix(godot): correct cap bar percentage calculation
+#   docs(adr): update ADR-0006 checklist to reflect Phase 6 completion
+
 ---
 
 ---
@@ -480,25 +487,30 @@ pub type Tick = u64;
 ### Tick 内の処理順序
 
 ```
-現在の実装（Phase 4 Cycle 2 時点）:
+現在の実装（Phase 6 時点）:
   1. Tick カウンタをインクリメント
-  2. MoveCommand キューを処理する（ThrustComp を更新）
+  2. コマンドキューを処理する
+       MoveCommand              → ThrustComp を更新
+       LockOnCommand            → LockSystem に渡す
+       ActivateModuleCommand    → FittedSlot.is_active = true / apply_fitting()
+       DeactivateModuleCommand  → FittedSlot.is_active = false / apply_fitting()
   3. Movement System を実行する（ECS バッチ処理）
-  4. 生成されたイベントを EventStore に Append する
-  5. ReplicationBus に差分を転送する       ← 必ず 4 の後
-  6. 呼び出し元へ TickResult を返す        ← 必ず 5 の後
-
-Phase 4 Cycle 3 以降（Combat System 追加後）:
-  1. Tick カウンタをインクリメント
-  2. MoveCommand / AttackCommand キューを処理する
-  3. Movement System を実行する
-  4. Combat System を実行する              ← Movement の後
-  5. 生成されたイベントを EventStore に Append する
-  6. ReplicationBus に差分を転送する       ← 必ず 5 の後
-  7. 呼び出し元へ TickResult を返す
+  4. Capacitor System を実行する           ← Movement の後
+       毎 Tick: cap を recharge_per_tick 分回復
+       cycle_remaining == 0 → 新サイクル: cap 消費 / cap 不足 → 強制 OFF
+       cycle_remaining > 0  → デクリメント
+       → 生成: Vec<ModuleDeactivated>（cap 枯渇時のみ）
+  5. Lock System を実行する                ← Capacitor の後（位置確定後）
+  6. Combat System を実行する              ← Lock の後（Locked 状態を参照）
+  7. Bot System を実行する                 ← Combat の後（破壊判定済み後）
+       IsBotComp を持つ Ship のみ対象
+       apply_*_owned() でプレイヤーと同一パイプラインを使用
+  8. 生成されたイベントを EventStore に Append する
+  9. ReplicationBus に差分を転送する       ← 必ず 8 の後
+  10. 呼び出し元へ TickResult を返す
 
 この順序を変えてはならない。
-特に「5 の前に 6」を行うことは禁止する（未コミットの状態を伝播させない）。
+特に「8 の前に 9」を行うことは禁止する（未コミットの状態を伝播させない）。
 ```
 
 ### Tick の実時間目標
@@ -650,9 +662,11 @@ cargo run --bin check-event-catalog
   対象: 10,000エンティティの1Tick処理時間
 ```
 
-### コメントは英語で書く
+### コメントとコミットメッセージは英語で書く
 
-**すべてのコードコメントは英語で記述すること。**
+**すべてのコードコメントおよびコミットメッセージは英語で記述すること。**
+
+コミットメッセージの詳細規約: `docs/commit-convention.md` を参照。
 
 ```rust
 // Good
@@ -662,13 +676,23 @@ cargo run --bin check-event-catalog
 // 毎 Tick、推力ベクトルを速度に加算する。
 ```
 
+```
+# Good commit message
+feat(dawn-ecs): add CapacitorSystem with cycle-based cap drain
+
+# Bad — Japanese subject
+feat: キャパシタシステムを追加する
+```
+
 理由:
 - PowerShell など一部のツールが日本語ファイルを UTF-16 で上書きしてソースを破壊するリスクがある
-- ASCII のみのコメントはあらゆるツールチェーンで安全
+- ASCII のみのコメント・メッセージはあらゆるツールチェーンで安全
 - 国際的な可読性
+- `git log --oneline` やコードレビューツールでの文字化けを防ぐ
 
 **移行方針（段階的）:**
 - 新しく書くコードはすべて英語コメント
+- 新しいコミットはすべて英語メッセージ
 - 既存のファイルを変更するタイミングで、そのファイル内のコメントを英語に変換する
 - 一括変換は行わない
 

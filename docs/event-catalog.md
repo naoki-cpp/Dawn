@@ -90,8 +90,8 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 | イベント名 | 説明 | 発行者 | ステータス |
 |---|---|---|---|
 | `ShipFitted` | Ship の装備スロットが変更された | `SimulationNode::fit_module()` | ✅ 実装済み |
-| `ModuleActivated` | Active モジュールがオンになった | `SimulationNode::activate_module()` | ⬜ 未実装 |
-| `ModuleDeactivated` | Active モジュールがオフになった | `SimulationNode::deactivate_module()` | ⬜ 未実装 |
+| `ModuleActivated` | Active モジュールがオンになった | `SimulationNode::activate_module_owned()` | ✅ 実装済み |
+| `ModuleDeactivated` | Active モジュールがオフになった（手動 or cap 枯渇による強制 OFF） | `SimulationNode::deactivate_module_owned()` / `CapacitorSystem` | ✅ 実装済み |
 
 ### 3.4 Lock-on
 
@@ -134,9 +134,9 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 | `MoveCommand` | 推力方向を指定する | — | ✅ 実装済み |
 | `LockOnCommand` | ロックオン開始を要求する | `TargetLocked` | ✅ 実装済み |
 | `FitModuleCommand` | モジュールを装備する | `ShipFitted` | ✅ 実装済み |
-| `ActivateModuleCommand` | Active モジュールをオンにする | `ModuleActivated` | ⬜ 未実装 |
-| `DeactivateModuleCommand` | Active モジュールをオフにする | `ModuleDeactivated` | ⬜ 未実装 |
-| `AttackCommand` | 攻撃対象を指定する | `WeaponFired` | コマンド型定義済み・WsServer JSON パーサーは Phase 5 で追加 |
+| `ActivateModuleCommand` | Active モジュールをオンにする | `ModuleActivated` | ✅ 実装済み |
+| `DeactivateModuleCommand` | Active モジュールをオフにする | `ModuleDeactivated` | ✅ 実装済み |
+| `AttackCommand` | 攻撃対象を指定する | `WeaponFired` | ✅ 型定義・WsServer JSON パーサー実装済み（Phase 5）|
 
 ---
 

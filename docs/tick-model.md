@@ -47,14 +47,15 @@ Tick は「シミュレーションが何ステップ進んだか」を表す。
 Tick ループは制限なく実行される（できるだけ速く）。  
 1 Tick の処理時間はハードウェアとエンティティ数に依存する。
 
-### 将来（Phase 2 以降）: 固定間隔への移行
+### Phase 4 以降: 固定間隔実装済み
 
 ```
-目標間隔: 16 ms / Tick（60 Tick/秒）
-実装方法: tokio::time::interval による非同期タイマー（未実装）
+現在の目標間隔: 100 ms / Tick（10 Tick/秒）
+実装方法: tokio::time::interval による非同期タイマー（WsServer モードで動作中）
+将来の目標  : 16 ms / Tick（62.5 Tick/秒）— Phase 8 以降で再検討
 ```
 
-処理が 16 ms を超えた場合はシステム異常として記録する。
+処理が 100 ms を超えた場合はシステム異常として記録する。
 Tick を遅延させることも、スキップすることも許容しない。
 → 負荷超過は「Tick を遅らせる」のではなく「Sector への入場を制限する」ことで解決する。
 詳細は §8 を参照。
@@ -66,35 +67,54 @@ Tick を遅延させることも、スキップすることも許容しない。
 **この順序は変更してはならない。** 変更には ADR が必要。
 
 ```
-現在の実装（Phase 4 Cycle 3）:
+現在の実装（Phase 6 — Capacitor System / Bot System 追加済み）:
 
 Step 1: Tick カウンタをインクリメント
          current_tick = current_tick + 1
 
 Step 2: コマンドキューを処理する
-         MoveCommand   → ThrustComp を更新
-         LockOnCommand → LockSystem に渡す（次のステップで処理）
+         MoveCommand              → ThrustComp を更新
+         LockOnCommand            → LockSystem に渡す（次のステップで処理）
+         ActivateModuleCommand    → FittedSlot.is_active = true / apply_fitting()
+         DeactivateModuleCommand  → FittedSlot.is_active = false / apply_fitting()
 
 Step 3: Movement System を実行する（ECS バッチ処理）
          MovementSystem::run(&mut world, tick)
          → 生成: Vec<VelocityChanged>（速度が変化した船のみ）
          ※ ShipMoved は @deprecated（ADR-0008）。位置は派生状態であり記録しない。
 
-Step 4: Lock System を実行する
+Step 4: Capacitor System を実行する
+         CapacitorSystem::run(&mut world, tick)
+         → 毎 Tick: cap を cap_recharge_per_tick 分回復（cap_max でクランプ）
+         → サイクル開始時（cycle_remaining == 0）: cap_cost_per_cycle を消費し
+           cycle_remaining = cycle_time_ticks をセット
+         → 残りTick時: cycle_remaining を 1 デクリメント
+         → cap 不足でサイクル開始できない場合: モジュールを強制 OFF
+         → 生成: Vec<ModuleDeactivated>（cap 枯渇による強制 OFF）
+         ※ Movement の後、Lock の前に実行すること
+
+Step 5: Lock System を実行する
          LockSystem::run(&mut world, tick, &lock_commands)
          → 生成: Vec<TargetLocked | LockLost>
          ※ Movement の後に実行すること（位置確定後にロック判定）
 
-Step 5: Combat System を実行する
+Step 6: Combat System を実行する
          CombatSystem::run(&mut world, tick)
          → 生成: Vec<WeaponFired | DamageTaken | ShipDestroyed>
          ※ Lock System の後に実行すること（Locked 状態を参照するため）
          ※ 破壊された Ship は呼び出し元が ECS と ship_index から削除する
 
-Step 6: 全イベントを EventStore に Append する
-         event_store.append_batch(move_events + lock_events + combat_events)
+Step 7: Bot System を実行する（IsBotComp を持つ Ship のみ）
+         SimulationNode::process_bots()
+         → Bot が人間プレイヤーと同一のコマンドパイプラインでコマンドを生成・実行
+         → 生成イベントなし（コマンド実行の結果は次 Tick 以降のシステムで生成）
+         ※ Combat の後に実行すること（破壊判定が終わってから Bot AI を実行）
+         ※ Bot コマンドは apply_*_owned() メソッドを通じてプレイヤーと同一のパイプラインを使う
 
-Step 7: Replication Actor に差分を通知する
+Step 8: 全イベントを EventStore に Append する
+         event_store.append_batch(move_events + cap_events + lock_events + combat_events)
+
+Step 9: Replication Actor に差分を通知する
          replication_tx.send(delta)
 ```
 
