@@ -43,11 +43,6 @@ float hash1(vec3 p) {
 	return fract(p.x * p.y * p.z);
 }
 
-float hash1_2d(vec2 p) {
-	p  = fract(p * vec2(443.8975, 397.2973));
-	p += dot(p.yx, p.xy + 19.19);
-	return fract(p.x * p.y);
-}
 
 /// Smooth trilinear-interpolated 3-D noise in [0, 1].
 float snoise(vec3 p) {
@@ -158,9 +153,10 @@ void sky() {
 		vec2  p   = eq * scales[i];
 		vec2  pi  = floor(p);
 		vec2  pf  = fract(p);
-		// Use layer index as z so different layers never share hash.
-		float h   = hash1_2d(pi + vec2(float(i) * 137.1, float(i) * 251.3));
-		float thr = star_threshold + thresh_offset[i];
+		// Use layer index as z so different layers never share the same hash.
+		float layer_z = float(i) * 17.3;
+		float h       = hash1(vec3(pi, layer_z));
+		float thr     = star_threshold + thresh_offset[i];
 
 		if (h > thr) {
 			float t   = (h - thr) / (1.0 - thr);
@@ -172,7 +168,7 @@ void sky() {
 			float glow   = exp(-d * 34.0) * bri;
 
 			// Color temperature from a second independent hash.
-			float temp = hash1_2d(pi + vec2(7.3 + float(i), 2.1));
+			float temp = hash1(vec3(pi + vec2(73.1, 21.9), layer_z + 0.5));
 			vec3  star_col;
 			if (temp < 0.50) {
 				star_col = mix(vec3(0.60, 0.75, 1.00), vec3(0.95, 0.97, 1.00), temp * 2.0);
