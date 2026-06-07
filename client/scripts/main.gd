@@ -12,10 +12,12 @@ extends Node
 
 # ── ノード参照 ────────────────────────────────────────────────────────────────
 
-@onready var _connection  : Node     = $Connection
-@onready var _ships_root  : Node3D   = $World/Ships
-@onready var _stats_label : Label    = $HUD/StatsLabel
-@onready var _camera      : Camera3D = $World/Camera3D
+@onready var _connection  : Node        = $Connection
+@onready var _ships_root  : Node3D      = $World/Ships
+@onready var _stats_label : Label       = $HUD/StatsLabel
+@onready var _cap_label   : Label       = $HUD/CapLabel
+@onready var _cap_bar     : ProgressBar = $HUD/CapBar
+@onready var _camera      : Camera3D   = $World/Camera3D
 
 # ── 定数 ─────────────────────────────────────────────────────────────────────
 
@@ -81,6 +83,7 @@ func _ready() -> void:
 	_build_player_material()
 	_setup_space_environment()
 	_build_duel_result_overlay()
+	_setup_cap_bar()
 	_update_hud()
 
 func _process(_delta: float) -> void:
@@ -505,18 +508,17 @@ func _update_hud() -> void:
 		f_idx += 1
 
 	## Capacitor bar (client-side simulation).
-	var cap_str: String
 	if _cap_current < 0.0:
-		cap_str = "-"
+		_cap_bar.value  = 0.0
+		_cap_label.text = "CAP  -"
 	else:
 		var pct: float = (_cap_current / _cap_max * 100.0) if _cap_max > 0.0 else 0.0
-		var filled: int = int(pct / 10.0)  ## 0-10 blocks
-		var bar: String = "█".repeat(filled) + "░".repeat(10 - filled)
-		cap_str = "%s %d%%" % [bar, int(pct)]
+		_cap_bar.value  = pct
+		_cap_label.text = "CAP  %.0f / %.0f GJ" % [_cap_current, _cap_max]
 
 	_stats_label.text = (
-		"%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nCAP: %s\nLock: %s%s\n\n[DoubleClick] Thrust\n[RightClick] Lock"
-		% [status, _ships.size(), _current_tick, speed_str, hp_str, cap_str, lock_str, module_lines]
+		"%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nLock: %s%s\n\n[DoubleClick] Thrust\n[RightClick] Lock"
+		% [status, _ships.size(), _current_tick, speed_str, hp_str, lock_str, module_lines]
 	)
 
 # ── Capacitor client-side simulation ─────────────────────────────────────────
@@ -613,6 +615,24 @@ func _apply_player_material(ship: Node3D) -> void:
 		hull.set_surface_override_material(0, _player_material)
 
 # ── デュエル結果オーバーレイ ──────────────────────────────────────────────────
+
+func _setup_cap_bar() -> void:
+	## Style the fill portion of the capacitor bar (EVE-style blue).
+	var fill_style := StyleBoxFlat.new()
+	fill_style.bg_color = Color(0.1, 0.45, 0.9)
+	fill_style.set_corner_radius_all(3)
+	_cap_bar.add_theme_stylebox_override("fill", fill_style)
+
+	## Style the background (dark grey).
+	var bg_style := StyleBoxFlat.new()
+	bg_style.bg_color = Color(0.1, 0.1, 0.12)
+	bg_style.set_corner_radius_all(3)
+	_cap_bar.add_theme_stylebox_override("background", bg_style)
+
+	_cap_bar.min_value = 0.0
+	_cap_bar.max_value = 100.0
+	_cap_bar.value     = 100.0
+	_cap_label.text    = "CAP  -"
 
 func _build_duel_result_overlay() -> void:
 	var canvas := CanvasLayer.new()
