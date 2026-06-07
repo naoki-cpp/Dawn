@@ -302,10 +302,9 @@ INV-TIDI: Tick の論理速度は一定である。
 
 | フェーズ | 実装 | 実行モデル |
 |---|---|---|
-| Phase 0–1（現在） | `SimulationNode::tick()` | 同期・単純ループ |
-| Phase 2（予定） | `SectorSimulatorActor` | 非同期・tokio task |
-| Phase 3 以降（未定） | 固定間隔タイマー | tokio::time::interval |
+| Phase 0–1 | `SimulationNode::tick()` | 同期・単純ループ（ベンチマーク用） |
+| Phase 2 | `SectorSimulatorActor` | 非同期・tokio task |
+| Phase 4 以降（現在） | `run_phase4_server()` in `main.rs` | tokio::time::interval（100ms/tick） |
 
-`SimulationNode::tick()` は現在同期処理で実装されており、
-呼び出し元がループ速度をコントロールする。  
-非同期化は Phase 2 の Actor 導入時に対応する。
+Phase 4 以降は `tokio::time::interval` による固定間隔ループが実装済み。  
+`SimulationNode::tick_with_lock_commands()` は同期処理で、呼び出し元の interval が速度をコントロールする。
