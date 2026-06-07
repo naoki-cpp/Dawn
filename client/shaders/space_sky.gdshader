@@ -30,12 +30,23 @@ uniform vec3  milkyway_color    : source_color             = vec3(0.48, 0.58, 0.
 /// Deep-space ambient (keep very dark).
 uniform vec3  ambient_color     : source_color             = vec3(0.004, 0.003, 0.010);
 
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const float PI  = 3.14159265358979;
+const float TAU = 6.28318530717959;
+
 // ── Hash / Noise ──────────────────────────────────────────────────────────────
 
 float hash1(vec3 p) {
 	p  = fract(p * vec3(443.8975, 397.2973, 491.1871));
 	p += dot(p.zxy, p.yxz + 19.19);
 	return fract(p.x * p.y * p.z);
+}
+
+float hash1_2d(vec2 p) {
+	p  = fract(p * vec2(443.8975, 397.2973));
+	p += dot(p.yx, p.xy + 19.19);
+	return fract(p.x * p.y);
 }
 
 /// Smooth trilinear-interpolated 3-D noise in [0, 1].
@@ -115,19 +126,26 @@ void sky() {
 	float mw_var = snoise(dir * 5.0 + vec3(5.0, 0.0, 0.0)) * 0.5 + 0.5;
 	col += milkyway_color * band * (0.6 + 0.8 * mw_var);
 
-	// ── Stars — 6 layers from near to far ───────────────────────────────
+	// ── Stars — 6 layers in equirectangular (spherical UV) space ───────────
 	//
-	// Closer layers → larger cell scale → fewer but individually
-	// larger / brighter stars.  Farther layers → denser but dimmer.
-	float scales[6];
-	scales[0] =  60.0;
-	scales[1] = 110.0;
-	scales[2] = 190.0;
-	scales[3] = 300.0;
-	scales[4] = 440.0;
-	scales[5] = 620.0;
+	// Stars are placed on a 2D grid in (longitude, latitude) space so
+	// cells are uniform in angular size — no vertical column artifacts.
+	//
+	// eq.x = longitude  atan(z,x) / TAU     ∈ [-0.5, 0.5]
+	// eq.y = latitude   asin(y)   / PI      ∈ [-0.5, 0.5]
 
-	// Each successive layer has a lower effective threshold (more stars).
+	float eq_u = atan(dir.z, dir.x) / TAU;
+	float eq_v = asin(clamp(dir.y, -1.0, 1.0)) / PI;
+	vec2  eq   = vec2(eq_u, eq_v);
+
+	float scales[6];
+	scales[0] =  80.0;
+	scales[1] = 150.0;
+	scales[2] = 260.0;
+	scales[3] = 400.0;
+	scales[4] = 580.0;
+	scales[5] = 800.0;
+
 	float thresh_offset[6];
 	thresh_offset[0] =  0.000;
 	thresh_offset[1] = -0.010;
@@ -137,46 +155,43 @@ void sky() {
 	thresh_offset[5] = -0.032;
 
 	for (int i = 0; i < 6; i++) {
-		vec3  p   = dir * scales[i];
-		vec3  pi  = floor(p);
-		vec3  pf  = fract(p);
-		float h   = hash1(pi);
+		vec2  p   = eq * scales[i];
+		vec2  pi  = floor(p);
+		vec2  pf  = fract(p);
+		// Use layer index as z so different layers never share hash.
+		float h   = hash1_2d(pi + vec2(float(i) * 137.1, float(i) * 251.3));
 		float thr = star_threshold + thresh_offset[i];
 
 		if (h > thr) {
-			float t   = (h - thr) / (1.0 - thr);        // 0 → 1 within bright range
+			float t   = (h - thr) / (1.0 - thr);
 			float bri = pow(t, 1.4) * star_brightness;
-			bri      *= 1.0 - float(i) * 0.11;           // farther = dimmer
+			bri      *= 1.0 - float(i) * 0.11;   // farther = dimmer
 
-			vec2  offset = pf.xz - 0.5;
+			vec2  offset = pf - 0.5;
 			float d      = length(offset);
 			float glow   = exp(-d * 34.0) * bri;
 
-			// Color temperature: O/B blue-white → F/G yellow-white → M red-orange
-			float temp     = hash1(pi + vec3(7.3, 2.1, 4.8));
+			// Color temperature from a second independent hash.
+			float temp = hash1_2d(pi + vec2(7.3 + float(i), 2.1));
 			vec3  star_col;
 			if (temp < 0.50) {
-				// Hot: blue-white to white
 				star_col = mix(vec3(0.60, 0.75, 1.00), vec3(0.95, 0.97, 1.00), temp * 2.0);
 			} else if (temp < 0.80) {
-				// Medium: white to yellow-white
 				star_col = mix(vec3(0.95, 0.97, 1.00), vec3(1.00, 0.92, 0.72), (temp - 0.50) / 0.30);
 			} else {
-				// Cool: yellow-orange to red-orange (giants)
 				star_col = mix(vec3(1.00, 0.85, 0.55), vec3(1.00, 0.48, 0.22), (temp - 0.80) / 0.20);
 			}
 
 			col += glow * star_col;
 
-			// Brightest stars: soft bloom halo + 4-point diffraction spikes.
+			// Brightest stars: bloom halo + 4-point diffraction spikes.
 			if (t > 0.72 && i < 4) {
 				float bloom   = exp(-d * 9.0) * bri * 0.22;
 				col          += star_col * bloom;
 
-				// Diffraction spikes along the cell-space x and z axes.
 				float spike_x = exp(-abs(offset.x) * 90.0) * exp(-abs(offset.y) *  5.0);
-				float spike_z = exp(-abs(offset.y) * 90.0) * exp(-abs(offset.x) *  5.0);
-				col          += star_col * (spike_x + spike_z) * bri * 0.09;
+				float spike_y = exp(-abs(offset.y) * 90.0) * exp(-abs(offset.x) *  5.0);
+				col          += star_col * (spike_x + spike_y) * bri * 0.09;
 			}
 		}
 	}
