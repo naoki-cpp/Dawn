@@ -609,11 +609,13 @@ func _setup_space_environment() -> void:
 	## Bloom — makes ship emissions and bright stars glow cinematically.
 	env.glow_enabled       = true
 	env.glow_normalized    = false
-	env.glow_intensity     = 0.6
-	env.glow_bloom         = 0.08
+	env.glow_intensity     = 0.8
+	env.glow_bloom         = 0.10
 	env.glow_blend_mode    = Environment.GLOW_BLEND_MODE_SOFTLIGHT
-	env.glow_hdr_threshold = 0.8   ## Only very bright pixels glow
-	env.glow_hdr_scale     = 1.5
+	## Stars peak at ~1.5; engine glow emission is x12.
+	## Set threshold above star peak so only ship emissions trigger bloom.
+	env.glow_hdr_threshold = 2.0
+	env.glow_hdr_scale     = 1.0
 
 	var world_env         := WorldEnvironment.new()
 	world_env.environment  = env

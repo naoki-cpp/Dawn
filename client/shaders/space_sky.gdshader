@@ -21,7 +21,7 @@ shader_type sky;
 // ── Uniforms ─────────────────────────────────────────────────────────────────
 
 uniform float star_threshold    : hint_range(0.90, 0.999) = 0.955;
-uniform float star_brightness   : hint_range(0.5,  8.0)   = 2.8;
+uniform float star_brightness   : hint_range(0.5,  8.0)   = 1.5;
 uniform float nebula_strength   : hint_range(0.0,  1.0)   = 0.50;
 uniform float milkyway_strength : hint_range(0.0,  1.0)   = 0.20;
 uniform vec3  ambient_color     : source_color             = vec3(0.002, 0.002, 0.006);
@@ -250,7 +250,7 @@ void sky() {
 
 			vec2  offset = pf - 0.5;
 			float d      = length(offset);
-			float glow   = exp(-d * 36.0) * bri;
+			float glow   = exp(-d * 60.0) * bri;
 
 			// Star temperature from a second independent hash.
 			// Distribution weighted toward visible types (A/F/G dominate naked-eye view).
