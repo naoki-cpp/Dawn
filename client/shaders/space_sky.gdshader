@@ -30,12 +30,8 @@ uniform vec3  milkyway_color    : source_color             = vec3(0.48, 0.58, 0.
 /// Deep-space ambient (keep very dark).
 uniform vec3  ambient_color     : source_color             = vec3(0.004, 0.003, 0.010);
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const float PI  = 3.14159265358979;
-const float TAU = 6.28318530717959;
-
 // ── Hash / Noise ──────────────────────────────────────────────────────────────
+// Note: PI and TAU are Godot 4 built-in shader constants — do not redefine them.
 
 float hash1(vec3 p) {
 	p  = fract(p * vec3(443.8975, 397.2973, 491.1871));
