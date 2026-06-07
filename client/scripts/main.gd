@@ -50,8 +50,17 @@ var _opponent_ship_ids : Array = []
 var _duel_result_label : Label = null
 
 ## モジュールスロット情報
-## [{slot, index, module_id, name, is_active, is_active_module}, ...]
+## [{slot, index, module_id, name, is_active, is_active_module,
+##   cap_cost_per_cycle, cycle_time_ticks, cycle_remaining}, ...]
 var _player_modules : Array = []
+
+## Client-side capacitor simulation (mirrors server CapacitorSystem logic).
+## Populated from InitialState (cap_max, cap_recharge_per_tick) and
+## PlayerFitting (cap_cost_per_cycle, cycle_time_ticks per module).
+## Corrected by ModuleDeactivated events (cap-forced OFF).
+var _cap_current      : float = -1.0   ## -1 = not yet received
+var _cap_max          : float = 500.0
+var _cap_recharge     : float = 10.0   ## GJ per tick
 
 ## ダブルクリック検出用
 var _last_click_time  : float  = -1.0
@@ -257,6 +266,10 @@ func _on_initial_state(ships: Array) -> void:
 			_player_shield     = sh
 			_player_armor      = ar
 			_player_hull       = hu
+			## Initialize client-side capacitor simulation.
+			_cap_max      = d.get("cap_max",               500.0) as float
+			_cap_recharge = d.get("cap_recharge_per_tick",  10.0) as float
+			_cap_current  = _cap_max  ## Assume full cap on connect.
 			_set_as_player_ship(sid, ship)
 		elif is_player:
 			## Other player ship = potential duel opponent
@@ -264,6 +277,11 @@ func _on_initial_state(ships: Array) -> void:
 				_opponent_ship_ids.append(sid)
 
 func _on_player_fitting(modules: Array) -> void:
+	## Initialise cycle_remaining for client-side cap simulation.
+	for m: Variant in modules:
+		var mod_dict: Dictionary = m as Dictionary
+		mod_dict["cycle_remaining"] = 0
+		mod_dict["cap_forced_off"]  = false
 	_player_modules = modules
 
 func _on_module_activated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
@@ -272,7 +290,9 @@ func _on_module_activated(p_ship_id: int, p_module_id: int, _slot: String) -> vo
 	for m: Variant in _player_modules:
 		var mod_dict: Dictionary = m as Dictionary
 		if mod_dict.get("module_id", 0) as int == p_module_id:
-			mod_dict["is_active"] = true
+			mod_dict["is_active"]       = true
+			mod_dict["cap_forced_off"]  = false
+			mod_dict["cycle_remaining"] = 0  ## Next tick will start a fresh cycle.
 			break
 
 func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
@@ -281,8 +301,14 @@ func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> 
 	for m: Variant in _player_modules:
 		var mod_dict: Dictionary = m as Dictionary
 		if mod_dict.get("module_id", 0) as int == p_module_id:
-			mod_dict["is_active"] = false
+			var was_active: bool = mod_dict.get("is_active", false) as bool
+			mod_dict["is_active"]       = false
+			mod_dict["cycle_remaining"] = 0
+			## If it was ON, capacitor or player deactivated it.
+			if was_active:
+				mod_dict["cap_forced_off"] = true
 			break
+
 
 func _toggle_module_by_index(f_index: int) -> void:
 	if _player_ship_id < 0:
@@ -352,7 +378,9 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 
 	var tick: int = p.get("tick", 0) as int
 	if tick > _current_tick:
+		var ticks_elapsed: int = tick - _current_tick
 		_current_tick = tick
+		_simulate_cap(ticks_elapsed)
 
 func _handle_ship_despawned(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
@@ -456,23 +484,75 @@ func _update_hud() -> void:
 	else:
 		lock_str = "LOST"
 
-	## モジュールスロット（Active モジュールのみ F キーで表示）
+		## Active modules — show ON/OFF and cap-deprived state (F keys)
 	var module_lines: String = ""
 	var f_idx: int = 1
 	for m: Variant in _player_modules:
 		var mod_dict: Dictionary = m as Dictionary
 		if not (mod_dict.get("is_active_module", false) as bool):
-			continue  ## Passive はスキップ
-		var name_str : String = mod_dict.get("name",      "?") as String
-		var is_on    : bool   = mod_dict.get("is_active", false) as bool
-		var state_str: String = "ON" if is_on else "OFF"
+			continue  ## Skip Passive modules
+		var name_str  : String = mod_dict.get("name",         "?") as String
+		var is_on     : bool   = mod_dict.get("is_active",    false) as bool
+		var cap_forced: bool   = mod_dict.get("cap_forced_off", false) as bool
+		var state_str : String
+		if cap_forced:
+			state_str = "CAP!"   ## Force-deactivated by capacitor system
+		elif is_on:
+			state_str = "ON"
+		else:
+			state_str = "OFF"
 		module_lines += "\n[F%d] %s: %s" % [f_idx, name_str, state_str]
 		f_idx += 1
 
+	## Capacitor bar (client-side simulation).
+	var cap_str: String
+	if _cap_current < 0.0:
+		cap_str = "-"
+	else:
+		var pct: float = (_cap_current / _cap_max * 100.0) if _cap_max > 0.0 else 0.0
+		var filled: int = int(pct / 5.0)   ## 0-20 blocks
+		var bar: String = "█".repeat(filled) + "░".repeat(20 - filled)
+		cap_str = "%s %.0f/%.0f GJ" % [bar, _cap_current, _cap_max]
+
 	_stats_label.text = (
-		"%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nLock: %s%s\n\n[DoubleClick] Thrust\n[RightClick] Lock"
-		% [status, _ships.size(), _current_tick, speed_str, hp_str, lock_str, module_lines]
+		"%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nCAP: %s\nLock: %s%s\n\n[DoubleClick] Thrust\n[RightClick] Lock"
+		% [status, _ships.size(), _current_tick, speed_str, hp_str, cap_str, lock_str, module_lines]
 	)
+
+# ── Capacitor client-side simulation ─────────────────────────────────────────
+
+## Mirror of CapacitorSystem::run() — called once per tick elapsed.
+## Keeps cap display in sync without any extra server messages.
+func _simulate_cap(ticks: int) -> void:
+	if _cap_current < 0.0 or _player_ship_id < 0:
+		return
+
+	for _t: int in range(ticks):
+		## Recharge.
+		_cap_current = minf(_cap_current + _cap_recharge, _cap_max)
+
+		## Cycle logic for each active module.
+		for m: Variant in _player_modules:
+			var mod: Dictionary = m as Dictionary
+			if not (mod.get("is_active_module", false) as bool):
+				continue
+			if not (mod.get("is_active", false) as bool):
+				continue
+
+			var cycle_rem: int   = mod.get("cycle_remaining", 0) as int
+			var cost     : float = mod.get("cap_cost_per_cycle", 0.0) as float
+			var cycle_t  : int   = mod.get("cycle_time_ticks",  10)  as int
+
+			if cycle_rem == 0:
+				## Try to start new cycle.
+				if cost <= 0.0 or _cap_current >= cost:
+					_cap_current -= cost
+					mod["cycle_remaining"] = cycle_t
+				## If not enough cap, server will emit ModuleDeactivated — skip here.
+			else:
+				mod["cycle_remaining"] = cycle_rem - 1
+
+		_cap_current = maxf(_cap_current, 0.0)
 
 # ── 内部ユーティリティ ────────────────────────────────────────────────────────
 
