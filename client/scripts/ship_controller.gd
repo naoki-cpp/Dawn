@@ -58,25 +58,39 @@ func _ready() -> void:
 	_lock_mesh     = _lock_instance.mesh as ImmediateMesh
 	_lock_instance.visible = false
 
-const TICKS_PER_SEC : float = 10.0  ## サーバーの Tick レート
+const TICKS_PER_SEC    : float = 10.0  ## Server tick rate
+const ROT_THRESHOLD_SQ : float = 0.02  ## Min speed² before rotating (Godot units²/frame²)
+const ROT_SPEED        : float = 4.0   ## Slerp speed toward velocity direction
 
 func _process(delta: float) -> void:
 	if not _is_init:
 		return
 
-	## VelocityChanged (ADR-0008): フレームごとに velocity で位置を更新する
-	## Tick 間を補間するため、Tick 境界でのジャンプがなくなる
+	## VelocityChanged (ADR-0008): integrate velocity every frame to avoid
+	## visible position jumps at tick boundaries.
 	position += _velocity * delta * TICKS_PER_SEC
-	_vel_estimate = _velocity  ## 速度インジケーター用に同期
+	_vel_estimate = _velocity
 
-	## プレイヤー船の矢印描画
+	## Rotate the ship to face its velocity direction.
+	## The Hull mesh tip is in local -Z after its -90° X rotation, which
+	## aligns with Node3D.look_at() convention (-Z = forward).
+	if _velocity.length_squared() > ROT_THRESHOLD_SQ:
+		var vel_dir := _velocity.normalized()
+		var up      := Vector3.UP if absf(vel_dir.dot(Vector3.UP)) < 0.95 else Vector3.RIGHT
+		var target  := Basis.looking_at(vel_dir, up)
+		basis        = basis.slerp(target, minf(delta * ROT_SPEED, 1.0))
+
+	## Player indicators: transform world-space directions to local space
+	## so they draw correctly even after the root node has rotated.
 	if _is_player:
+		var inv := basis.transposed()  ## Inverse of an orthonormal basis
 		if _vel_mesh != null:
-			_draw_arrow(_vel_mesh, _vel_estimate, _vel_estimate.length() * VEL_VIS_SCALE)
+			var local_vel := inv * _vel_estimate
+			_draw_arrow(_vel_mesh, local_vel, local_vel.length() * VEL_VIS_SCALE)
 		if _thr_mesh != null:
-			_draw_arrow(_thr_mesh, _thrust_dir, THRUST_VIS_LEN if _thrust_dir.length_squared() > 0.0 else 0.0)
+			var local_thr := inv * _thrust_dir
+			_draw_arrow(_thr_mesh, local_thr, THRUST_VIS_LEN if _thrust_dir.length_squared() > 0.0 else 0.0)
 
-	## ロック枠線の更新
 	_update_lock_indicator(delta)
 
 # ── 公開 API ──────────────────────────────────────────────────────────────────
@@ -131,9 +145,12 @@ func play_destroy_effect() -> void:
 	var hull: MeshInstance3D = get_node_or_null("Hull") as MeshInstance3D
 	if hull != null:
 		hull.visible = false
-	var light: OmniLight3D = get_node_or_null("EngineGlow") as OmniLight3D
+	var light: OmniLight3D = get_node_or_null("EngineLight") as OmniLight3D
 	if light != null:
 		light.visible = false
+	var glow: MeshInstance3D = get_node_or_null("EngineGlow") as MeshInstance3D
+	if glow != null:
+		glow.visible = false
 	_lock_instance.visible = false
 
 	## 膨張するリングを描画しながらフェードアウト

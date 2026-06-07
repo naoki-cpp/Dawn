@@ -598,13 +598,22 @@ func _setup_space_environment() -> void:
 	sky.radiance_size = Sky.RADIANCE_SIZE_256
 
 	var env := Environment.new()
-	env.background_mode          = Environment.BG_SKY
-	env.sky                      = sky
-	env.ambient_light_source     = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy     = 0.03   ## Space is very dark
-	env.tonemap_mode             = Environment.TONE_MAPPER_FILMIC
-	env.tonemap_exposure         = 1.0
-	env.tonemap_white            = 6.0    ## Prevent star bloom clipping
+	env.background_mode      = Environment.BG_SKY
+	env.sky                  = sky
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy = 0.03   ## Space is very dark
+	env.tonemap_mode         = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure     = 1.0
+	env.tonemap_white        = 6.0    ## Prevent star bloom clipping
+
+	## Bloom — makes ship emissions and bright stars glow cinematically.
+	env.glow_enabled       = true
+	env.glow_normalized    = false
+	env.glow_intensity     = 0.9
+	env.glow_bloom         = 0.12
+	env.glow_blend_mode    = Environment.GLOW_BLEND_MODE_ADDITIVE
+	env.glow_hdr_threshold = 0.5
+	env.glow_hdr_scale     = 2.0
 
 	var world_env         := WorldEnvironment.new()
 	world_env.environment  = env

@@ -13,7 +13,6 @@
 //   Ambient   : near-black deep-space haze
 
 shader_type sky;
-render_mode use_half_res_pass;
 
 // ── Uniforms ─────────────────────────────────────────────────────────────────
 
