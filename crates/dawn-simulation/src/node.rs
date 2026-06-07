@@ -42,6 +42,8 @@ pub struct TickResult {
     pub events_emitted: usize,
     /// The actual events produced (used by Actor layer for replication).
     pub events        : Vec<DomainEvent>,
+    /// Ships whose active module was force-deactivated by cap shortage this tick.
+    pub cap_depletions: Vec<dawn_core::ShipId>,
 }
 
 // ── SimulationNode ────────────────────────────────────────────────────────────
@@ -255,7 +257,12 @@ impl<S: EventStore> SimulationNode<S> {
         let count = all_events.len();
         self.event_store.append_batch(all_events.iter().cloned());
 
-        TickResult { tick, events_emitted: count, events: all_events }
+        TickResult {
+            tick,
+            events_emitted: count,
+            events: all_events,
+            cap_depletions: cap.refitted.clone(),
+        }
     }
 
     // ── Snapshot ──────────────────────────────────────────────────────────────

@@ -18,10 +18,11 @@ mod spawner;
 mod ws_server;
 
 use dawn_actor::ClientCommand;
-use dawn_core::{NodeId, SectorBounds, SectorId};
+use dawn_core::{NodeId, SectorBounds, SectorId, ShipId};
 use tokio::sync::mpsc;
 use node::SimulationNode;
 use spawner::{generate_ships, SpawnConfig};
+use std::collections::HashMap;
 use std::time::Instant;
 
 use cluster::MultiNodeCluster;
@@ -271,6 +272,88 @@ fn run_phase3_demo() {
 //   - 所有権チェック: 自分の船だけ操作できる
 
 const P4_SHIPS_DEFAULT : usize = 20;
+
+// ── DuelMetrics ───────────────────────────────────────────────────────────────
+
+/// Per-ship statistics collected during a duel session.
+#[derive(Debug, Default)]
+struct ShipDuelStats {
+    cap_depletions: u32,
+}
+
+/// Session-level metrics for duel mode.
+/// Accumulated each tick; printed when ShipDestroyed fires.
+#[derive(Debug)]
+struct DuelMetrics {
+    start_tick       : u64,
+    /// ship_id → per-ship stats
+    stats            : HashMap<ShipId, ShipDuelStats>,
+    /// ShipId of the ship that was destroyed (if duel ended)
+    loser            : Option<ShipId>,
+    /// Tick on which the duel ended
+    end_tick         : Option<u64>,
+}
+
+impl DuelMetrics {
+    fn new(start_tick: u64) -> Self {
+        Self {
+            start_tick,
+            stats    : HashMap::new(),
+            loser    : None,
+            end_tick : None,
+        }
+    }
+
+    /// Record cap-forced deactivations for each ship this tick.
+    fn record_cap_depletions(&mut self, ship_ids: &[ShipId]) {
+        for &id in ship_ids {
+            self.stats.entry(id).or_default().cap_depletions += 1;
+        }
+    }
+
+    /// Record duel end.  `loser` is the ship that was destroyed.
+    fn record_end(&mut self, loser: ShipId, tick: u64) {
+        self.loser    = Some(loser);
+        self.end_tick = Some(tick);
+    }
+
+    /// Print a formatted summary to stdout.
+    fn print_summary(&self, player_ship_id: Option<ShipId>) {
+        let duration = self.end_tick.unwrap_or(self.start_tick) - self.start_tick;
+        let loser_id = self.loser.map(|id| id.raw()).unwrap_or(0);
+
+        println!();
+        println!("╔══════════════════════════════════════════╗");
+        println!("║           DUEL RESULT                    ║");
+        println!("╠══════════════════════════════════════════╣");
+
+        if let Some(loser) = self.loser {
+            let player_won = player_ship_id.map_or(false, |pid| pid != loser);
+            let result_str = if player_won { "PLAYER WIN" } else { "BOT WIN" };
+            println!("║  Result  : {:<31}║", result_str);
+        }
+
+        println!("║  Duration: {:<3} ticks                      ║", duration);
+        println!("╠══════════════════════════════════════════╣");
+        println!("║  Ship  │  Cap Depletions                  ║");
+        println!("║  ──────┼──────────────────────────────── ║");
+
+        let mut ids: Vec<ShipId> = self.stats.keys().cloned().collect();
+        ids.sort_by_key(|id| id.raw());
+        for id in &ids {
+            let s = &self.stats[id];
+            let label = if player_ship_id == Some(*id) { "Player" } else { "Bot   " };
+            println!("║  #{:<4} ({}) │  cap deplete ×{:<18}║",
+                id.raw(), label, s.cap_depletions);
+        }
+        if ids.is_empty() {
+            println!("║  (no data)                               ║");
+        }
+
+        println!("╚══════════════════════════════════════════╝");
+        println!();
+    }
+}
 const P4_TICK_MS       : u64   = 100;  // 10 Tick/sec
 
 async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
@@ -357,16 +440,29 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
         std::time::Duration::from_millis(P4_TICK_MS)
     );
 
+    // Duel mode: track session metrics (None until the player connects).
+    let mut duel_metrics  : Option<DuelMetrics> = None;
+    let mut player_ship_id: Option<ShipId>      = None;
+
     loop {
         interval.tick().await;
 
-        // 新規 TCP 接続 → ハンドシェイクタスクを spawn
+        // New TCP connection → spawn handshake task.
         while let Ok((stream, addr)) = new_conn_rx.try_recv() {
             let player_id      = node.next_player_id();
             let ship_id        = node.spawn_player_ship(player_id);
             let initial_state  = node.build_initial_state_json();
             let player_fitting = node.build_player_fitting_json(ship_id);
             let tx             = ready_sess_tx.clone();
+
+            // Duel mode: start metric collection when the first player connects.
+            if duel_mode && player_ship_id.is_none() {
+                player_ship_id = Some(ship_id);
+                let tick = node.current_tick().value();
+                duel_metrics = Some(DuelMetrics::new(tick));
+                println!("  [Duel] metrics collection started at tick {tick}");
+            }
+
             tokio::spawn(async move {
                 match ws_server::WsServer::handshake(
                     stream, addr, player_id, ship_id, &initial_state, player_fitting
@@ -377,17 +473,17 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
             });
         }
 
-        // ハンドシェイク完了したセッションを sessions に追加
+        // Add handshake-completed sessions.
         while let Ok(sess) = ready_sess_rx.try_recv() {
             println!("  [Server] {} joined with ship #{}", sess.player_id, sess.ship_id.raw());
             sessions.push(sess);
         }
 
-        // コマンド処理前のイベントストア位置を記録
-        // ModuleActivated 等のコマンド由来イベントも含めて送信するため
+        // Record event-store position before command processing so that
+        // command-driven events (ModuleActivated etc.) are also broadcast.
         let events_before: u64 = node.total_event_count() as u64;
 
-        // コマンド収集（所有権チェック付き）
+        // Collect commands (with ownership check).
         let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
 
         for sess in sessions.iter_mut() {
@@ -414,10 +510,26 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
             }
         }
 
-        // Tick 実行
-        node.tick_with_lock_commands(&lock_commands);
+        // Run one tick.
+        let tick_result = node.tick_with_lock_commands(&lock_commands);
 
-        // コマンド由来イベント（ModuleActivated 等）＋ Tick イベントを全てブロードキャスト
+        // Duel metrics: accumulate cap depletions and detect duel end.
+        if duel_mode {
+            if let Some(ref mut metrics) = duel_metrics {
+                metrics.record_cap_depletions(&tick_result.cap_depletions);
+
+                // Check for ShipDestroyed in this tick's events.
+                for event in &tick_result.events {
+                    if let dawn_core::DomainEvent::ShipDestroyed(e) = event {
+                        metrics.record_end(e.ship_id, tick_result.tick.value());
+                        metrics.print_summary(player_ship_id);
+                        // Continue running so the client can display the result.
+                    }
+                }
+            }
+        }
+
+        // Broadcast all new events (command-driven + tick) to all clients.
         let all_new_events: Vec<_> = {
             use dawn_event_store::store::EventStore as _;
             node.event_store().iter_from(events_before)
@@ -425,6 +537,5 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
                 .collect()
         };
         sessions.retain(|sess| sess.send_events(&all_new_events));
-
     }
 }
