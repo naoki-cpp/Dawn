@@ -83,7 +83,7 @@ mod tests {
         StateSnapshot {
             node_id   : NodeId(0),
             sector_id : dawn_core::SectorId(0),
-            bounds    : SectorBounds::cube(SectorBounds::DEFAULT_SIZE),
+            bounds    : SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             log_index : 42,
             tick      : Tick(10),
             id_counter: 5,

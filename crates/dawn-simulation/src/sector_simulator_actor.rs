@@ -208,7 +208,7 @@ mod tests {
         let handle = SectorSimulatorHandle::spawn(
             NodeId(0),
             SectorId(0),
-            SectorBounds::cube(SectorBounds::DEFAULT_SIZE),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             bus.event_sender(),
         );
         (handle, bus)

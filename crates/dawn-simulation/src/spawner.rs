@@ -23,7 +23,7 @@ impl SpawnConfig {
     pub fn default_for_node(node_id: NodeId) -> Self {
         Self {
             node_id,
-            bounds   : SectorBounds::cube(SectorBounds::DEFAULT_SIZE),
+            bounds   : SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             max_speed: 5.0,
             seed     : 0xDEAD_BEEF,
         }

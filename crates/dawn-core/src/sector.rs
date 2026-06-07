@@ -28,8 +28,13 @@ pub struct SectorBounds {
 }
 
 impl SectorBounds {
-    /// A default cubic sector of side 10,000 units starting at the origin.
-    pub const DEFAULT_SIZE: f32 = 10_000.0;
+    /// Half-extent of the default sector in each axis (units).
+    /// The sector spans `[-DEFAULT_HALF, +DEFAULT_HALF]` on all three axes,
+    /// giving a total side length of 2 * DEFAULT_HALF = 100,000 units.
+    pub const DEFAULT_HALF: f32 = 50_000.0;
+
+    /// Kept for compatibility; equals `DEFAULT_HALF * 2`.
+    pub const DEFAULT_SIZE: f32 = Self::DEFAULT_HALF * 2.0;
 
     pub fn new(min: Position, max: Position) -> Self {
         Self { min, max }
@@ -40,6 +45,17 @@ impl SectorBounds {
         Self {
             min: Position::ORIGIN,
             max: Position::new(size, size, size),
+        }
+    }
+
+    /// Create a cubic sector centred on `(0,0,0)` with half-extent `half`.
+    ///
+    /// Prefer this over `cube()` so that the spawn origin (0,0,0) sits in the
+    /// middle of the playfield rather than at a corner surrounded by walls.
+    pub fn centered(half: f32) -> Self {
+        Self {
+            min: Position::new(-half, -half, -half),
+            max: Position::new( half,  half,  half),
         }
     }
 
@@ -88,7 +104,7 @@ mod tests {
     use super::*;
 
     fn default_bounds() -> SectorBounds {
-        SectorBounds::cube(SectorBounds::DEFAULT_SIZE)
+        SectorBounds::centered(SectorBounds::DEFAULT_HALF)
     }
 
     #[test]
@@ -98,14 +114,15 @@ mod tests {
 
     #[test]
     fn position_beyond_max_is_outside_sector() {
-        let p = Position::new(10_001.0, 0.0, 0.0);
+        // DEFAULT_HALF = 50_000; anything beyond that is outside.
+        let p = Position::new(SectorBounds::DEFAULT_HALF + 1.0, 0.0, 0.0);
         assert!(!default_bounds().contains(p));
     }
 
     #[test]
     fn clamp_and_reflect_reverses_dx_when_x_exceeds_max() {
         let bounds = default_bounds();
-        let mut pos = Position::new(10_050.0, 500.0, 500.0);
+        let mut pos = Position::new(SectorBounds::DEFAULT_HALF + 50.0, 500.0, 500.0);
         let mut vel = Velocity::new(5.0, 0.0, 0.0);
 
         bounds.clamp_and_reflect(&mut pos, &mut vel);
@@ -117,7 +134,8 @@ mod tests {
     #[test]
     fn clamp_and_reflect_reverses_dx_when_x_is_below_min() {
         let bounds = default_bounds();
-        let mut pos = Position::new(-10.0, 500.0, 500.0);
+        // Sector min is -DEFAULT_HALF; go further negative to trigger the clamp.
+        let mut pos = Position::new(-(SectorBounds::DEFAULT_HALF + 10.0), 500.0, 500.0);
         let mut vel = Velocity::new(-5.0, 0.0, 0.0);
 
         bounds.clamp_and_reflect(&mut pos, &mut vel);

@@ -36,7 +36,7 @@ impl MultiNodeCluster {
             .map(|i| SectorSimulatorHandle::spawn(
                 NodeId(i),
                 SectorId(i),
-                SectorBounds::cube(SectorBounds::DEFAULT_SIZE),
+                SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 bus.event_sender(),
             ))
             .collect();

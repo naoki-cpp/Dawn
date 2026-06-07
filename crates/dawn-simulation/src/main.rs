@@ -76,7 +76,7 @@ fn run_phase1_benchmark() {
     println!("  ticks : {P1_TICKS}");
     println!();
 
-    let bounds = SectorBounds::cube(SectorBounds::DEFAULT_SIZE);
+    let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
     let mut node = SimulationNode::new(NodeId(0), SectorId(0), bounds);
 
     let config = SpawnConfig::default_for_node(NodeId(0));
@@ -205,7 +205,7 @@ fn run_phase3_demo() {
             .expect("failed to open event log");
         let mut node = SimulationNode::with_store(
             NodeId(0), SectorId(0),
-            SectorBounds::cube(SectorBounds::DEFAULT_SIZE),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             store,
         );
 
@@ -292,7 +292,7 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
     let server = WsServer::bind("127.0.0.1:7878").await
         .expect("failed to bind WebSocket server");
 
-    let bounds = SectorBounds::cube(SectorBounds::DEFAULT_SIZE);
+    let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
     let mut node = SimulationNode::new(NodeId(0), SectorId(0), bounds);
 
     let loaded_modules = data_loader::load_modules(
