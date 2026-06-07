@@ -21,7 +21,7 @@ shader_type sky;
 // ── Uniforms ─────────────────────────────────────────────────────────────────
 
 uniform float star_threshold    : hint_range(0.90, 0.999) = 0.955;
-uniform float star_brightness   : hint_range(0.5,  8.0)   = 4.0;
+uniform float star_brightness   : hint_range(0.5,  8.0)   = 2.8;
 uniform float nebula_strength   : hint_range(0.0,  1.0)   = 0.50;
 uniform float milkyway_strength : hint_range(0.0,  1.0)   = 0.20;
 uniform vec3  ambient_color     : source_color             = vec3(0.002, 0.002, 0.006);
@@ -270,13 +270,17 @@ void sky() {
 			vec3 star_col = spectral_color(temp);
 			col += glow * star_col;
 
-			// Brightest stars: bloom + 4-point diffraction spikes.
-			if (t > 0.70 && i < 4) {
-				float bloom   = exp(-d * 8.0) * bri * 0.25;
+			// Only the very brightest stars (top 15%) get diffraction spikes.
+			// Bloom is intentionally tight — Godot post-process glow handles
+			// the wider soft halo so we avoid double-blooming.
+			if (t > 0.85 && i < 3) {
+				// Tight bloom: sharp halo, not a large disc.
+				float bloom   = exp(-d * 22.0) * bri * 0.12;
 				col          += star_col * bloom;
-				float spike_x = exp(-abs(offset.x) * 85.0) * exp(-abs(offset.y) * 4.0);
-				float spike_y = exp(-abs(offset.y) * 85.0) * exp(-abs(offset.x) * 4.0);
-				col          += star_col * (spike_x + spike_y) * bri * 0.10;
+				// Short diffraction spikes (telescope cross pattern).
+				float spike_x = exp(-abs(offset.x) * 130.0) * exp(-abs(offset.y) * 6.0);
+				float spike_y = exp(-abs(offset.y) * 130.0) * exp(-abs(offset.x) * 6.0);
+				col          += star_col * (spike_x + spike_y) * bri * 0.055;
 			}
 		}
 	}
