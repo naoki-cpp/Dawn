@@ -30,22 +30,16 @@ shading_mode = 1
 [node name="Ship" type="Node3D"]
 script = ExtResource("1_ship")
 
-## Hull is rotated -90 degrees on X so the cone tip (local +Y) points in
-## the parent's local -Z direction (Godot's forward).  The root Node3D is
-## then rotated toward the velocity direction each frame so the ship
-## always faces the way it is flying.
 [node name="Hull" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0, 0)
 mesh = SubResource("CylinderMesh_hull")
 get_surface_override_material/0 = SubResource("StandardMaterial3D_hull")
 
-## Engine glow sphere — positioned at the tail (hull base = +Z in root space).
 [node name="EngineGlow" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 105)
 mesh = SubResource("SphereMesh_glow")
 get_surface_override_material/0 = SubResource("StandardMaterial3D_glow")
 
-## Point light at the engine nozzle.
 [node name="EngineLight" type="OmniLight3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 105)
 light_color = Color(0.3, 0.55, 1.0, 1)
