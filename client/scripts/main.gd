@@ -510,9 +510,9 @@ func _update_hud() -> void:
 		cap_str = "-"
 	else:
 		var pct: float = (_cap_current / _cap_max * 100.0) if _cap_max > 0.0 else 0.0
-		var filled: int = int(pct / 5.0)   ## 0-20 blocks
-		var bar: String = "█".repeat(filled) + "░".repeat(20 - filled)
-		cap_str = "%s %.0f/%.0f GJ" % [bar, _cap_current, _cap_max]
+		var filled: int = int(pct / 10.0)  ## 0-10 blocks
+		var bar: String = "█".repeat(filled) + "░".repeat(10 - filled)
+		cap_str = "%s %d%%" % [bar, int(pct)]
 
 	_stats_label.text = (
 		"%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nCAP: %s\nLock: %s%s\n\n[DoubleClick] Thrust\n[RightClick] Lock"
