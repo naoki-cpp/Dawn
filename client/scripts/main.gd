@@ -574,30 +574,40 @@ func _clear_all_ships() -> void:
 	_event_count        = 0
 
 func _setup_space_environment() -> void:
-	## 宇宙スカイシェーダーを手続き的に構築する。
-	## WorldEnvironment ノードを動的生成するため .tscn の変更が不要。
+	## Build the procedural space sky at runtime.
+	## WorldEnvironment is created dynamically — no .tscn changes needed.
 	var shader := load("res://shaders/space_sky.gdshader") as Shader
 	if shader == null:
-		push_warning("[Main] space_sky.gdshader が見つかりません")
+		push_warning("[Main] space_sky.gdshader not found")
 		return
 
 	var sky_mat := ShaderMaterial.new()
 	sky_mat.shader = shader
 
+	## Tweak nebula / star appearance here without editing the shader.
+	sky_mat.set_shader_parameter("star_threshold",    0.960)
+	sky_mat.set_shader_parameter("star_brightness",   3.5)
+	sky_mat.set_shader_parameter("nebula_strength",   0.40)
+	sky_mat.set_shader_parameter("milkyway_strength", 0.12)
+	sky_mat.set_shader_parameter("milkyway_color",    Color(0.48, 0.58, 0.90))
+	sky_mat.set_shader_parameter("ambient_color",     Color(0.004, 0.003, 0.010))
+
 	var sky := Sky.new()
-	sky.sky_material      = sky_mat
-	sky.process_mode      = Sky.PROCESS_MODE_REALTIME
-	sky.radiance_size     = Sky.RADIANCE_SIZE_256
+	sky.sky_material  = sky_mat
+	sky.process_mode  = Sky.PROCESS_MODE_REALTIME
+	sky.radiance_size = Sky.RADIANCE_SIZE_256
 
 	var env := Environment.new()
-	env.background_mode   = Environment.BG_SKY
-	env.sky               = sky
-	env.ambient_light_source  = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy  = 0.05  ## 宇宙は暗い
-	env.tonemap_mode          = Environment.TONE_MAPPER_FILMIC
+	env.background_mode          = Environment.BG_SKY
+	env.sky                      = sky
+	env.ambient_light_source     = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy     = 0.03   ## Space is very dark
+	env.tonemap_mode             = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure         = 1.0
+	env.tonemap_white            = 6.0    ## Prevent star bloom clipping
 
-	var world_env          := WorldEnvironment.new()
-	world_env.environment   = env
+	var world_env         := WorldEnvironment.new()
+	world_env.environment  = env
 	add_child(world_env)
 
 func _build_player_material() -> void:
