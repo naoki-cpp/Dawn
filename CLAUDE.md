@@ -90,24 +90,26 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
 - イベントソーシングによる完全な因果追跡
 - CRDTとRaftの責務分離による高スループット同期
 
-### 現在のスコープ（Phase 4 Cycle 3 まで）
+### 現在のスコープ（Phase 6 完了時点）
 
 ```
 実装対象:
   エンティティ  : Ship のみ
   コンポーネント: Position(x, y, z), Velocity, ThrustComp, ShipStatsComp,
-                  HullComp（Shield/Armor/Hull 3層）, FittingComp（装備スロット）
+                  HullComp（Shield/Armor/Hull 3層）, FittingComp（装備スロット）,
+                  CapacitorComp（現在 cap 量）
   船種          : ShipTypeDefinition（id, name, class, base_stats, slot_layout）
   イベント      : ShipSpawned（ship_type_id 含む）, VelocityChanged, SectorTransit系,
                   ShipFitted, WeaponFired, DamageTaken（3層 HP）, ShipDestroyed,
                   ModuleActivated, ModuleDeactivated
   ノード構成    : 3ノード固定
 
-Phase 4 以降で追加承認済み:
+Phase 4 以降で追加承認済み（全て実装済み）:
   Fitting システム（EVE Online 準拠・Active/Passive モジュール）
   Combat システム（武器 / ダメージ / HP 3層 / 破壊）
   Lock-on システム（2フェーズ戦闘）
-  ShipType システム（船種・船クラス・スロットレイアウト）← 現在実装中
+  ShipType システム（船種・船クラス・スロットレイアウト）
+  Capacitor システム（サイクルベース cap 管理・強制 OFF）
 
 実装しない（提案も拒否する）:
   課金 / キャラクター育成 / 市場 / チャット
@@ -1151,6 +1153,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-05（Active/Passive モジュール設計追加）*
-*対応ADR: ADR-0001 〜 ADR-0007*
-*次回レビュー予定: Phase 4完了時（Cycle N 終了・Phase 5 移行前）*
+*最終更新: 2026-06-07（Phase 6 完了・Capacitor システム反映）*
+*対応ADR: ADR-0001 〜 ADR-0010*
+*次回レビュー予定: Phase 7 着手前（ADR-0009 実装開始前）*
