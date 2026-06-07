@@ -79,7 +79,7 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 
 | イベント名 | 説明 | 発行者 | ステータス |
 |---|---|---|---|
-| `VelocityChanged` | Ship の速度が変化した | `MovementSystem::run()` | ⬜ 未実装（ADR-0008） |
+| `VelocityChanged` | Ship の速度が変化した | `MovementSystem::run()` | ✅ 実装済み（ADR-0008） |
 | `ShipMoved` | ~~Ship の位置が変化した~~ | `MovementSystem::run()` | **@deprecated** → `VelocityChanged` に移行 |
 
 > **注意（ADR-0008）:** `ShipMoved` は廃止予定。新規実装では `VelocityChanged` を使うこと。
