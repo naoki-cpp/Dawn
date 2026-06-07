@@ -3,17 +3,25 @@
 use dawn_core::fitting::{ActivationMode, FittingSnapshot, ModuleDefinition, ModuleId, SlotEntry, SlotKind, StatDelta};
 use std::collections::HashMap;
 
-/// 装備スロット 1 枠（モジュール定義 + 活性化状態）。
+/// One fitted slot (module definition + runtime activation state).
 #[derive(Debug, Clone)]
 pub struct FittedSlot {
     pub def      : ModuleDefinition,
-    /// Active モジュールのみ有意。Passive は常に有効扱い。
+    /// Active modules only.  Passive modules are always effective.
     pub is_active: bool,
+    /// Ticks remaining in the current activation cycle.
+    ///
+    /// `0`  — the cycle is over; the capacitor system will attempt to start a
+    ///         new cycle at the next tick (consuming `cap_cost_per_cycle`).
+    /// `>0` — counting down; no cap is consumed until this reaches 0.
+    ///
+    /// Always `0` for Passive modules (cycle concept does not apply).
+    pub cycle_remaining: u64,
 }
 
 impl FittedSlot {
-    /// このスロットの効果が適用されるかどうか。
-    /// Passive は常に true。Active は `is_active` に従う。
+    /// Whether this slot's effect is currently applied.
+    /// Passive modules are always effective; Active modules depend on `is_active`.
     pub fn is_effective(&self) -> bool {
         match self.def.activation_mode {
             ActivationMode::Passive => true,
@@ -94,8 +102,9 @@ impl FittingComp {
         let resolve = |entries: &[SlotEntry]| -> Vec<FittedSlot> {
             entries.iter().filter_map(|e| {
                 registry.get(&e.module_id).map(|def| FittedSlot {
-                    def      : def.clone(),
-                    is_active: e.is_active,
+                    def            : def.clone(),
+                    is_active      : e.is_active,
+                    cycle_remaining: 0,  // Cycle state is not persisted; reset to 0.
                 })
             }).collect()
         };
@@ -120,8 +129,11 @@ mod tests {
                 kind: ModuleKind::Weapon, slot: SlotKind::High,
                 stat_delta: StatDelta { weapon_damage_add: 25.0, ..StatDelta::ZERO },
                 activation_mode: ActivationMode::Active,
+                cap_cost_per_cycle: 60.0,
+                cycle_time_ticks  : 10,
             },
-            is_active: active,
+            is_active      : active,
+            cycle_remaining: 0,
         }
     }
 
@@ -132,8 +144,11 @@ mod tests {
                 kind: ModuleKind::ShieldBooster, slot: SlotKind::Mid,
                 stat_delta: StatDelta { max_shield_add: 300.0, ..StatDelta::ZERO },
                 activation_mode: ActivationMode::Passive,
+                cap_cost_per_cycle: 0.0,
+                cycle_time_ticks  : 0,
             },
-            is_active: false,  // Passive なので is_active の値は無視される
+            is_active      : false,  // Passive: is_active is ignored
+            cycle_remaining: 0,
         }
     }
 

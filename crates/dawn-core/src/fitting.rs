@@ -68,36 +68,40 @@ pub enum ActivationMode {
 
 // ── StatDelta ─────────────────────────────────────────────────────────────────
 
-/// 1枚のモジュールが ShipStats に加算する差分。
+/// Per-module stat additions applied to the base ship stats after fitting.
 ///
-/// 全スロットの `StatDelta` を合計したものが装備後の最終 stat になる。
-/// フィールドが `0.0` のものは変化なしを意味する。
+/// All fields default to zero (no change).  Positive values increase the stat;
+/// negative values decrease it (where the field is signed).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct StatDelta {
-    /// 最大速度への加算（units/tick）
+    /// Bonus to max speed (units/tick).
     pub max_speed_add        : f32,
-    /// 推力への加算（units/tick²）
+    /// Bonus to thrust acceleration (units/tick²).
     pub thrust_add           : f32,
-    /// シールド最大 HP への加算
+    /// Bonus to max Shield HP.
     pub max_shield_add       : f32,
-    /// アーマー最大 HP への加算
+    /// Bonus to max Armor HP.
     pub max_armor_add        : f32,
-    /// ハル最大 HP への加算
+    /// Bonus to max Hull HP.
     pub max_hull_add         : f32,
-    /// 武器ダメージへの加算
+    /// Bonus to weapon damage per shot.
     pub weapon_damage_add    : f32,
-    /// 武器射程への加算（units）
+    /// Bonus to weapon range (units).
     pub weapon_range_add     : f32,
-    /// 武器クールダウンへの加算（Tick 数、負の値で短縮）
+    /// Weapon cooldown adjustment (ticks; negative = shorter cooldown).
     pub weapon_cooldown_add  : i32,
-    /// ロック時間への加算（Tick 数、負の値で短縮）
+    /// Lock-on time adjustment (ticks; negative = faster lock).
     pub lock_time_add        : i32,
-    /// 同時ロック上限への加算（正の値で増加）
+    /// Simultaneous lock limit adjustment.
     pub max_locks_add        : i32,
+    /// Bonus to capacitor capacity (GJ).
+    pub cap_max_add          : f32,
+    /// Bonus to capacitor recharge rate (GJ/tick).
+    pub cap_recharge_add     : f32,
 }
 
 impl StatDelta {
-    /// 変化なし（デフォルト）
+    /// No change (all fields zero).
     pub const ZERO: Self = Self {
         max_speed_add       : 0.0,
         thrust_add          : 0.0,
@@ -109,6 +113,8 @@ impl StatDelta {
         weapon_cooldown_add : 0,
         lock_time_add       : 0,
         max_locks_add       : 0,
+        cap_max_add         : 0.0,
+        cap_recharge_add    : 0.0,
     };
 
     pub fn add(&self, other: &StatDelta) -> StatDelta {
@@ -123,13 +129,15 @@ impl StatDelta {
             weapon_cooldown_add : self.weapon_cooldown_add + other.weapon_cooldown_add,
             lock_time_add       : self.lock_time_add       + other.lock_time_add,
             max_locks_add       : self.max_locks_add       + other.max_locks_add,
+            cap_max_add         : self.cap_max_add         + other.cap_max_add,
+            cap_recharge_add    : self.cap_recharge_add    + other.cap_recharge_add,
         }
     }
 }
 
 // ── ModuleDefinition ──────────────────────────────────────────────────────────
 
-/// モジュール 1種類の定義（不変の設計図）。
+/// Immutable definition ("blueprint") for one module type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModuleDefinition {
     pub id              : ModuleId,
@@ -137,8 +145,14 @@ pub struct ModuleDefinition {
     pub kind            : ModuleKind,
     pub slot            : SlotKind,
     pub stat_delta      : StatDelta,
-    /// Passive = 常時効果 / Active = プレイヤーがオン/オフする
+    /// Passive = always effective / Active = toggled by player.
     pub activation_mode : ActivationMode,
+    /// Capacitor consumed once at the start of each activation cycle (GJ).
+    /// Zero for Passive modules.
+    pub cap_cost_per_cycle: f32,
+    /// Duration of one activation cycle (ticks).
+    /// Zero for Passive modules (cycle concept does not apply).
+    pub cycle_time_ticks  : u64,
 }
 
 // ── FittingSnapshot ───────────────────────────────────────────────────────────
@@ -194,6 +208,8 @@ mod tests {
             weapon_cooldown_add : -1,
             lock_time_add       : -1,
             max_locks_add       : 1,
+            cap_max_add         : 0.0,
+            cap_recharge_add    : 0.0,
         };
         let result = base.add(&StatDelta::ZERO);
         assert_eq!(result, base);
@@ -220,12 +236,14 @@ mod tests {
     #[test]
     fn module_definition_is_serializable_round_trip() {
         let def = ModuleDefinition {
-            id              : ModuleId(1),
-            name            : "150mm Railgun".to_string(),
-            kind            : ModuleKind::Weapon,
-            slot            : SlotKind::High,
-            activation_mode : ActivationMode::Active,
-            stat_delta      : StatDelta {
+            id                : ModuleId(1),
+            name              : "150mm Railgun".to_string(),
+            kind              : ModuleKind::Weapon,
+            slot              : SlotKind::High,
+            activation_mode   : ActivationMode::Active,
+            cap_cost_per_cycle: 60.0,
+            cycle_time_ticks  : 10,
+            stat_delta        : StatDelta {
                 weapon_damage_add   : 25.0,
                 weapon_range_add    : 800.0,
                 weapon_cooldown_add : 0,

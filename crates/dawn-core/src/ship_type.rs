@@ -48,29 +48,32 @@ impl SlotLayout {
 
 // ── ベーススタット ────────────────────────────────────────────────────────────
 
-/// 装備なし時の船種固有ベーススタット。
+/// Base stats for a ship type before any module fitting is applied.
 ///
-/// `ShipStatsComp` = `ShipBaseStats` + Σ(有効モジュールの `StatDelta`)。
+/// `ShipStatsComp` = `ShipBaseStats` + Σ(active module `StatDelta`).
 ///
-/// # 設計メモ
-/// weapon_* フィールドはここに含まない。
-/// 武器能力はモジュール装備によってのみ付与される（ベースはゼロ）。
+/// Weapon stats are intentionally absent — weapon capability is granted only
+/// through High-slot weapon modules (base value is zero).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ShipBaseStats {
-    /// 最大速度（units/tick）
-    pub max_speed        : f32,
-    /// 推力加速度（units/tick²）。0 = NPC（等速）
-    pub thrust_magnitude : f32,
-    /// シールド最大 HP
-    pub max_shield       : f32,
-    /// アーマー最大 HP
-    pub max_armor        : f32,
-    /// ハル（構造）最大 HP
-    pub max_hull         : f32,
-    /// ロック完了までの Tick 数
-    pub lock_time        : u64,
-    /// 同時ロック上限
-    pub max_locks        : u32,
+    /// Max speed (units/tick).
+    pub max_speed            : f32,
+    /// Thrust acceleration (units/tick²). Zero for NPC ships (constant velocity).
+    pub thrust_magnitude     : f32,
+    /// Max Shield HP.
+    pub max_shield           : f32,
+    /// Max Armor HP.
+    pub max_armor            : f32,
+    /// Max Hull HP.
+    pub max_hull             : f32,
+    /// Ticks required to complete a lock-on.
+    pub lock_time            : u64,
+    /// Maximum simultaneous lock targets.
+    pub max_locks            : u32,
+    /// Capacitor pool size (GJ).
+    pub cap_max              : f32,
+    /// Capacitor recovered per tick (GJ/tick).
+    pub cap_recharge_per_tick: f32,
 }
 
 // ── 船種定義 ──────────────────────────────────────────────────────────────────
@@ -99,13 +102,15 @@ mod tests {
             class      : ShipClass::Frigate,
             slot_layout: SlotLayout::FRIGATE,
             base_stats : ShipBaseStats {
-                max_speed        : 400.0,
-                thrust_magnitude : 0.0,
-                max_shield       : 200.0,
-                max_armor        : 150.0,
-                max_hull         : 150.0,
-                lock_time        : 5,
-                max_locks        : 1,
+                max_speed            : 400.0,
+                thrust_magnitude     : 0.0,
+                max_shield           : 200.0,
+                max_armor            : 150.0,
+                max_hull             : 150.0,
+                lock_time            : 5,
+                max_locks            : 1,
+                cap_max              : 300.0,
+                cap_recharge_per_tick: 6.0,
             },
         }
     }

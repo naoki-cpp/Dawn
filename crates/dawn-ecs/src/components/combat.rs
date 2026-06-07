@@ -2,6 +2,19 @@
 
 use dawn_core::{ShipId, Tick};
 
+// ── CapacitorComp ─────────────────────────────────────────────────────────────
+
+/// Live capacitor state for a ship.
+///
+/// The maximum and recharge rate are stored in `ShipStatsComp`; this component
+/// tracks only the current charge level so it can be modified each tick without
+/// touching the stat block.
+#[derive(Debug, Clone, Copy)]
+pub struct CapacitorComp {
+    /// Current capacitor charge (GJ).  Clamped to `[0, cap_max]` each tick.
+    pub current: f32,
+}
+
 /// Ship の現在 HP 状態（Shield / Armor / Hull の 3 層）。
 ///
 /// ダメージ適用順序: Shield → Armor → Hull

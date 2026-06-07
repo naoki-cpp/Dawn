@@ -60,28 +60,30 @@ pub fn apply_fitting(world: &mut SimWorld, ship_id: ShipId, base: ShipStatsComp)
     Some(new_stats)
 }
 
-/// `base` stats に `delta` を加算した新しい stats を返す。
+/// Apply `delta` on top of `base` and return the resulting stats.
 pub fn apply_delta(base: ShipStatsComp, delta: &StatDelta) -> ShipStatsComp {
     ShipStatsComp {
-        max_speed        : (base.max_speed        + delta.max_speed_add).max(0.0),
-        thrust_magnitude : (base.thrust_magnitude + delta.thrust_add).max(0.0),
-        max_shield       : (base.max_shield       + delta.max_shield_add).max(0.0),
-        max_armor        : (base.max_armor        + delta.max_armor_add).max(0.0),
-        max_hull         : (base.max_hull         + delta.max_hull_add).max(1.0),
-        weapon_damage    : (base.weapon_damage    + delta.weapon_damage_add).max(0.0),
-        weapon_range     : (base.weapon_range     + delta.weapon_range_add).max(0.0),
-        weapon_cooldown  : {
+        max_speed            : (base.max_speed            + delta.max_speed_add).max(0.0),
+        thrust_magnitude     : (base.thrust_magnitude     + delta.thrust_add).max(0.0),
+        max_shield           : (base.max_shield           + delta.max_shield_add).max(0.0),
+        max_armor            : (base.max_armor            + delta.max_armor_add).max(0.0),
+        max_hull             : (base.max_hull             + delta.max_hull_add).max(1.0),
+        weapon_damage        : (base.weapon_damage        + delta.weapon_damage_add).max(0.0),
+        weapon_range         : (base.weapon_range         + delta.weapon_range_add).max(0.0),
+        weapon_cooldown      : {
             let raw = base.weapon_cooldown as i64 + delta.weapon_cooldown_add as i64;
             raw.max(1) as u64
         },
-        lock_time        : {
+        lock_time            : {
             let raw = base.lock_time as i64 + delta.lock_time_add as i64;
-            raw.max(1) as u64  // 最低 1 Tick
+            raw.max(1) as u64
         },
-        max_locks        : {
+        max_locks            : {
             let raw = base.max_locks as i64 + delta.max_locks_add as i64;
-            raw.max(0) as u32  // 0 = ロック不可
+            raw.max(0) as u32
         },
+        cap_max              : (base.cap_max              + delta.cap_max_add).max(0.0),
+        cap_recharge_per_tick: (base.cap_recharge_per_tick + delta.cap_recharge_add).max(0.0),
     }
 }
 
@@ -130,9 +132,12 @@ mod tests {
                 id: ModuleId(1), name: "Railgun".to_string(),
                 kind: ModuleKind::Weapon, slot: SlotKind::High,
                 stat_delta: StatDelta { weapon_damage_add: 15.0, ..StatDelta::ZERO },
-                activation_mode: ActivationMode::Active,
+                activation_mode  : ActivationMode::Active,
+                cap_cost_per_cycle: 60.0,
+                cycle_time_ticks  : 10,
             },
-            is_active: true,  // Active ON なので効果が適用される
+            is_active      : true,
+            cycle_remaining: 0,
         };
         world.inner_mut().get::<&mut FittingComp>(entity).unwrap().high.push(weapon_slot);
 
