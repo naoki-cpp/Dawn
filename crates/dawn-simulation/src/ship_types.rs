@@ -16,13 +16,15 @@ pub fn all_ship_types() -> Vec<ShipTypeDefinition> {
             class      : ShipClass::Frigate,
             slot_layout: SlotLayout::FRIGATE,
             base_stats : ShipBaseStats {
-                max_speed        : 400.0,
-                thrust_magnitude : 0.0,   // NPC: 等速直線運動
-                max_shield       : 200.0,
-                max_armor        : 150.0,
-                max_hull         : 150.0,
-                lock_time        : 5,
-                max_locks        : 1,
+                max_speed            : 400.0,
+                thrust_magnitude     : 0.0,    // NPC: constant velocity
+                max_shield           : 200.0,
+                max_armor            : 150.0,
+                max_hull             : 150.0,
+                lock_time            : 5,
+                max_locks            : 1,
+                cap_max              : 300.0,
+                cap_recharge_per_tick: 6.0,    // 2 %/tick
             },
         },
         ShipTypeDefinition {
@@ -31,13 +33,15 @@ pub fn all_ship_types() -> Vec<ShipTypeDefinition> {
             class      : ShipClass::Frigate,
             slot_layout: SlotLayout::FRIGATE,
             base_stats : ShipBaseStats {
-                max_speed        : 500.0,
-                thrust_magnitude : 40.0,
-                max_shield       : 500.0,
-                max_armor        : 300.0,
-                max_hull         : 200.0,
-                lock_time        : 3,
-                max_locks        : 2,
+                max_speed            : 500.0,
+                thrust_magnitude     : 40.0,
+                max_shield           : 500.0,
+                max_armor            : 300.0,
+                max_hull             : 200.0,
+                lock_time            : 3,
+                max_locks            : 2,
+                cap_max              : 500.0,
+                cap_recharge_per_tick: 10.0,   // 2 %/tick
             },
         },
     ]

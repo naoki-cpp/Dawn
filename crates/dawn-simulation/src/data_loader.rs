@@ -42,14 +42,21 @@ struct SlotLayoutEntry {
 
 #[derive(Deserialize)]
 struct BaseStatsEntry {
-    max_speed        : f32,
-    thrust_magnitude : f32,
-    max_shield       : f32,
-    max_armor        : f32,
-    max_hull         : f32,
-    lock_time        : u64,
-    max_locks        : u32,
+    max_speed            : f32,
+    thrust_magnitude     : f32,
+    max_shield           : f32,
+    max_armor            : f32,
+    max_hull             : f32,
+    lock_time            : u64,
+    max_locks            : u32,
+    #[serde(default = "default_cap_max")]
+    cap_max              : f32,
+    #[serde(default = "default_cap_recharge")]
+    cap_recharge_per_tick: f32,
 }
+
+fn default_cap_max() -> f32 { 400.0 }
+fn default_cap_recharge() -> f32 { 8.0 }
 
 // ── TOML 中間型（modules.toml）───────────────────────────────────────────────
 
@@ -60,13 +67,17 @@ struct ModulesFile {
 
 #[derive(Deserialize)]
 struct ModuleEntry {
-    id              : u32,
-    name            : String,
-    kind            : String,
-    slot            : String,
-    activation_mode : String,
+    id               : u32,
+    name             : String,
+    kind             : String,
+    slot             : String,
+    activation_mode  : String,
     #[serde(default)]
-    stat_delta      : StatDeltaEntry,
+    cap_cost_per_cycle: f32,
+    #[serde(default)]
+    cycle_time_ticks : u64,
+    #[serde(default)]
+    stat_delta       : StatDeltaEntry,
 }
 
 #[derive(Deserialize, Default)]
@@ -81,6 +92,8 @@ struct StatDeltaEntry {
     #[serde(default)] weapon_cooldown_add : i32,
     #[serde(default)] lock_time_add       : i32,
     #[serde(default)] max_locks_add       : i32,
+    #[serde(default)] cap_max_add         : f32,
+    #[serde(default)] cap_recharge_add    : f32,
 }
 
 // ── 変換 ─────────────────────────────────────────────────────────────────────
@@ -132,25 +145,29 @@ fn entry_to_ship_type(e: ShipTypeEntry) -> ShipTypeDefinition {
             rig : e.slot_layout.rig,
         },
         base_stats : ShipBaseStats {
-            max_speed        : e.base_stats.max_speed,
-            thrust_magnitude : e.base_stats.thrust_magnitude,
-            max_shield       : e.base_stats.max_shield,
-            max_armor        : e.base_stats.max_armor,
-            max_hull         : e.base_stats.max_hull,
-            lock_time        : e.base_stats.lock_time,
-            max_locks        : e.base_stats.max_locks,
+            max_speed            : e.base_stats.max_speed,
+            thrust_magnitude     : e.base_stats.thrust_magnitude,
+            max_shield           : e.base_stats.max_shield,
+            max_armor            : e.base_stats.max_armor,
+            max_hull             : e.base_stats.max_hull,
+            lock_time            : e.base_stats.lock_time,
+            max_locks            : e.base_stats.max_locks,
+            cap_max              : e.base_stats.cap_max,
+            cap_recharge_per_tick: e.base_stats.cap_recharge_per_tick,
         },
     }
 }
 
 fn entry_to_module(e: ModuleEntry) -> ModuleDefinition {
     ModuleDefinition {
-        id             : ModuleId(e.id),
-        name           : e.name,
-        kind           : parse_module_kind(&e.kind),
-        slot           : parse_slot_kind(&e.slot),
-        activation_mode: parse_activation_mode(&e.activation_mode),
-        stat_delta     : StatDelta {
+        id                : ModuleId(e.id),
+        name              : e.name,
+        kind              : parse_module_kind(&e.kind),
+        slot              : parse_slot_kind(&e.slot),
+        activation_mode   : parse_activation_mode(&e.activation_mode),
+        cap_cost_per_cycle: e.cap_cost_per_cycle,
+        cycle_time_ticks  : e.cycle_time_ticks,
+        stat_delta        : StatDelta {
             max_speed_add       : e.stat_delta.max_speed_add,
             thrust_add          : e.stat_delta.thrust_add,
             max_shield_add      : e.stat_delta.max_shield_add,
@@ -161,6 +178,8 @@ fn entry_to_module(e: ModuleEntry) -> ModuleDefinition {
             weapon_cooldown_add : e.stat_delta.weapon_cooldown_add,
             lock_time_add       : e.stat_delta.lock_time_add,
             max_locks_add       : e.stat_delta.max_locks_add,
+            cap_max_add         : e.stat_delta.cap_max_add,
+            cap_recharge_add    : e.stat_delta.cap_recharge_add,
         },
     }
 }

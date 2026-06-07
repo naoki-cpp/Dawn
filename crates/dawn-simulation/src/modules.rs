@@ -11,49 +11,64 @@ pub const MODULE_SENSOR_BOOSTER : ModuleId = ModuleId(6);
 
 pub fn all_modules() -> Vec<ModuleDefinition> {
     vec![
-        // ── 武器（High / Active）────────────────────────────────────────────
+        // ── Weapons (High / Active) ──────────────────────────────────────────
+        // Frigate recharge 10 GJ/tick → 100 GJ per 10-tick cycle.
+        // Gun alone: 100 - 60 = +40/cycle (sustainable).
+        // Gun + AB:  100 - 60 - 80 = -40/cycle → drains in ~12 cycles (12 s).
         ModuleDefinition {
             id: MODULE_RAILGUN_SMALL, name: "Small Railgun I".to_string(),
             kind: ModuleKind::Weapon, slot: SlotKind::High,
             activation_mode: ActivationMode::Active,
+            cap_cost_per_cycle: 60.0,
+            cycle_time_ticks  : 10,
             stat_delta: StatDelta { weapon_damage_add: 25.0, weapon_range_add: 1_500.0, ..StatDelta::ZERO },
         },
         ModuleDefinition {
             id: MODULE_RAILGUN_MEDIUM, name: "Medium Railgun I".to_string(),
             kind: ModuleKind::Weapon, slot: SlotKind::High,
             activation_mode: ActivationMode::Active,
+            cap_cost_per_cycle: 100.0,
+            cycle_time_ticks  : 14,
             stat_delta: StatDelta { weapon_damage_add: 50.0, weapon_range_add: 2_500.0, weapon_cooldown_add: 4, ..StatDelta::ZERO },
         },
 
-        // ── シールド（Mid / Passive）─────────────────────────────────────────
+        // ── Shield (Mid / Passive) ───────────────────────────────────────────
         ModuleDefinition {
             id: MODULE_SHIELD_BASIC, name: "Basic Shield Extender".to_string(),
             kind: ModuleKind::ShieldBooster, slot: SlotKind::Mid,
             activation_mode: ActivationMode::Passive,
+            cap_cost_per_cycle: 0.0,
+            cycle_time_ticks  : 0,
             stat_delta: StatDelta { max_shield_add: 300.0, ..StatDelta::ZERO },
         },
 
-        // ── アーマー（Low / Passive）─────────────────────────────────────────
+        // ── Armor (Low / Passive) ────────────────────────────────────────────
         ModuleDefinition {
             id: MODULE_ARMOR_BASIC, name: "Basic Armor Plate".to_string(),
             kind: ModuleKind::ArmorRepairer, slot: SlotKind::Low,
             activation_mode: ActivationMode::Passive,
+            cap_cost_per_cycle: 0.0,
+            cycle_time_ticks  : 0,
             stat_delta: StatDelta { max_armor_add: 200.0, ..StatDelta::ZERO },
         },
 
-        // ── 推進（Mid / Active）──────────────────────────────────────────────
+        // ── Propulsion (Mid / Active) ────────────────────────────────────────
         ModuleDefinition {
             id: MODULE_AFTERBURNER, name: "1MN Afterburner".to_string(),
             kind: ModuleKind::Propulsion, slot: SlotKind::Mid,
             activation_mode: ActivationMode::Active,
+            cap_cost_per_cycle: 80.0,
+            cycle_time_ticks  : 10,
             stat_delta: StatDelta { max_speed_add: 150.0, thrust_add: 10.0, ..StatDelta::ZERO },
         },
 
-        // ── センサー（Mid / Passive）─────────────────────────────────────────
+        // ── Sensor (Mid / Passive) ───────────────────────────────────────────
         ModuleDefinition {
             id: MODULE_SENSOR_BOOSTER, name: "Sensor Booster I".to_string(),
             kind: ModuleKind::Sensor, slot: SlotKind::Mid,
             activation_mode: ActivationMode::Passive,
+            cap_cost_per_cycle: 0.0,
+            cycle_time_ticks  : 0,
             stat_delta: StatDelta { lock_time_add: -2, max_locks_add: 1, ..StatDelta::ZERO },
         },
     ]

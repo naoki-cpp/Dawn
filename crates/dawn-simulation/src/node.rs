@@ -1,4 +1,4 @@
-//! `SimulationNode`  Ethe self-contained simulation unit for one Sector.
+//! `SimulationNode` — the self-contained simulation unit for one Sector.
 //!
 //! # Generic over `S: EventStore`
 //!
@@ -9,9 +9,9 @@
 //! # Snapshot / Restore (INV-002)
 //!
 //! ```text
-//! node.take_snapshot()           ↁEStateSnapshot (ECS state at log_index N)
+//! node.take_snapshot()           -> StateSnapshot (ECS state at log_index N)
 //! SimulationNode::restore_from(store, &snapshot)
-//!     ↁEreconstruct ECS from snapshot, replay events from log_index N onward
+//!     -> reconstruct ECS from snapshot, replay events from log_index N onward
 //! ```
 
 use std::collections::HashMap;
@@ -23,8 +23,8 @@ use dawn_core::{
     SectorBounds, SectorId, ShipId, Tick, Velocity,
 };
 use dawn_ecs::{
-    components::{FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp, ShipStatsComp, ThrustComp, VelocityComp},
-    systems::{CombatSystem, LockSystem, MovementSystem, apply_fitting},
+    components::{CapacitorComp, FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp, ShipStatsComp, ThrustComp, VelocityComp},
+    systems::{CapacitorSystem, CombatSystem, LockSystem, MovementSystem, apply_fitting},
     Entity, SimWorld,
 };
 use dawn_event_store::{store::EventStore, InMemoryEventStore};
@@ -61,7 +61,7 @@ where
     event_store : S,
     current_tick: Tick,
     id_counter  : u64,
-    /// Maps `ShipId` ↁEhecs `Entity` for O(1) position updates during replay.
+    /// Maps `ShipId` to hecs `Entity` for O(1) position updates during replay.
     ship_index      : HashMap<ShipId, Entity>,
     /// Module definition registry.
     module_registry   : HashMap<ModuleId, ModuleDefinition>,
@@ -80,7 +80,7 @@ where
 // ── Constructors ──────────────────────────────────────────────────────────────
 
 impl SimulationNode<InMemoryEventStore> {
-    /// Create a node backed by an in-memory event store (Phase 0 E default).
+    /// Create a node backed by an in-memory event store (Phase 0 default).
     pub fn new(node_id: NodeId, sector_id: SectorId, bounds: SectorBounds) -> Self {
         Self::with_store(node_id, sector_id, bounds, InMemoryEventStore::new())
     }
@@ -175,12 +175,14 @@ impl<S: EventStore> SimulationNode<S> {
         self.insert_to_world(ship_id, position, velocity);
         self.base_stats.insert(ship_id, base);
 
-        // ECS の ShipStatsComp と HullComp めEbase に合わせて更新
+        // Update ShipStatsComp, HullComp, and CapacitorComp to match base stats.
         if let Some(&entity) = self.ship_index.get(&ship_id) {
             self.world.set_ship_stats(entity, base);
             if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
                 *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
             }
+            // Initialize capacitor to full.
+            let _ = self.world.inner_mut().insert_one(entity, CapacitorComp { current: base.cap_max });
         }
 
         self.event_store.append(DomainEvent::ShipSpawned(ShipSpawned {
@@ -216,10 +218,19 @@ impl<S: EventStore> SimulationNode<S> {
         // 3. Movement System
         let move_events = MovementSystem::run(&mut self.world, tick);
 
-        // 4. Lock System
+        // 4. Capacitor System — recharge and drain for active modules
+        let cap = CapacitorSystem(&mut self.world, tick);
+        // Re-apply fitting for any ship whose module was force-deactivated.
+        for ship_id in &cap.refitted {
+            if let Some(&base) = self.base_stats.get(ship_id) {
+                apply_fitting(&mut self.world, *ship_id, base);
+            }
+        }
+
+        // 5. Lock System
         let lock = LockSystem(&mut self.world, tick, lock_commands);
 
-        // 5. Combat System
+        // 6. Combat System
         let combat = CombatSystem(&mut self.world, tick);
 
         // 破壊された Ship を ECS と ship_index から削除
@@ -235,6 +246,7 @@ impl<S: EventStore> SimulationNode<S> {
 
         // 7. EventStore に Append
         let all_events: Vec<DomainEvent> = move_events.iter()
+            .chain(cap.events.iter())
             .chain(lock.events.iter())
             .chain(combat.events.iter())
             .cloned()
@@ -389,6 +401,7 @@ impl<S: EventStore> SimulationNode<S> {
             if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
                 *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
             }
+            let _ = self.world.inner_mut().insert_one(entity, CapacitorComp { current: base.cap_max });
             let _ = self.world.inner_mut().remove_one::<IsNpcComp>(entity);
         }
 
@@ -578,12 +591,14 @@ impl<S: EventStore> SimulationNode<S> {
         for (slot_name, slots) in &slot_names {
             for (i, slot) in slots.iter().enumerate() {
                 modules.push(serde_json::json!({
-                    "slot"      : slot_name,
-                    "index"     : i,
-                    "module_id" : slot.def.id.0,
-                    "name"      : slot.def.name,
-                    "is_active" : slot.is_active,
-                    "is_active_module": matches!(slot.def.activation_mode, dawn_core::ActivationMode::Active),
+                    "slot"             : slot_name,
+                    "index"            : i,
+                    "module_id"        : slot.def.id.0,
+                    "name"             : slot.def.name,
+                    "is_active"        : slot.is_active,
+                    "is_active_module" : matches!(slot.def.activation_mode, dawn_core::ActivationMode::Active),
+                    "cap_cost_per_cycle": slot.def.cap_cost_per_cycle,
+                    "cycle_time_ticks" : slot.def.cycle_time_ticks,
                 }));
             }
         }
@@ -602,15 +617,17 @@ impl<S: EventStore> SimulationNode<S> {
             let hull    = self.world.inner().get::<&HullComp>(*entity).ok()?;
             let is_player = self.ship_owners.contains_key(&ship_id);
             Some(serde_json::json!({
-                "ship_id"       : ship_id.raw(),
-                "position"      : { "x": pos.x, "y": pos.y, "z": pos.z },
-                "max_shield"    : stats.max_shield,
-                "max_armor"     : stats.max_armor,
-                "max_hull"      : stats.max_hull,
-                "current_shield": hull.current_shield,
-                "current_armor" : hull.current_armor,
-                "current_hull"  : hull.current_hull,
-                "is_player"     : is_player,
+                "ship_id"              : ship_id.raw(),
+                "position"             : { "x": pos.x, "y": pos.y, "z": pos.z },
+                "max_shield"           : stats.max_shield,
+                "max_armor"            : stats.max_armor,
+                "max_hull"             : stats.max_hull,
+                "current_shield"       : hull.current_shield,
+                "current_armor"        : hull.current_armor,
+                "current_hull"         : hull.current_hull,
+                "cap_max"              : stats.cap_max,
+                "cap_recharge_per_tick": stats.cap_recharge_per_tick,
+                "is_player"            : is_player,
             }))
         }).collect();
 
@@ -701,7 +718,7 @@ impl<S: EventStore> SimulationNode<S> {
             ActivationMode::Active  => is_npc,
         };
         if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(entity) {
-            fitting.slot_mut(cmd.slot).push(FittedSlot { def, is_active });
+            fitting.slot_mut(cmd.slot).push(FittedSlot { def, is_active, cycle_remaining: 0 });
         } else {
             return false;
         }
@@ -731,7 +748,7 @@ impl<S: EventStore> SimulationNode<S> {
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /// Add a Ship to the ECS World and record the entity in `ship_index`.
-    /// Does NOT append any event  Eused by `spawn_ship` and replay.
+    /// Does NOT append any event — used by `spawn_ship` and replay.
     fn insert_to_world(&mut self, ship_id: ShipId, position: Position, velocity: Velocity) {
         let entity = self.world.spawn_ship(ship_id, position, velocity);
         self.ship_index.insert(ship_id, entity);
@@ -840,7 +857,7 @@ impl<S: EventStore> SimulationNode<S> {
                 }
             }
 
-            // TargetLocked: LockComp エントリめELocked 状態に更新
+            // TargetLocked: LockComp エントリを Locked 状態に更新
             DomainEvent::TargetLocked(e) => {
                 use dawn_ecs::components::{LockEntry, LockState};
                 if let Some(&entity) = self.ship_index.get(&e.locker_id) {
@@ -901,7 +918,7 @@ mod tests {
         SimulationNode::new(
             NodeId(0),
             SectorId(0),
-            SectorBounds::cube(SectorBounds::DEFAULT_SIZE),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         )
     }
 
@@ -1022,7 +1039,7 @@ mod tests {
             let store = FileEventStore::open(&event_path).unwrap();
             let mut node = SimulationNode::with_store(
                 NodeId(0), SectorId(0),
-                SectorBounds::cube(SectorBounds::DEFAULT_SIZE),
+                SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 store,
             );
 
@@ -1053,7 +1070,7 @@ mod tests {
             final_positions = ship_ids.iter()
                 .map(|id| node.get_ship_position(*id).unwrap())
                 .collect();
-        } // ↁEnode drops here; FileEventStore flushes on drop via BufWriter
+        } // node drops here; FileEventStore flushes on drop via BufWriter
 
         // ── Session 2: restart, restore, verify ─────────────────────────────
         //
@@ -1096,12 +1113,14 @@ mod tests {
         let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
 
         let railgun = ModuleDefinition {
-            id              : ModuleId(1),
-            name            : "Test Railgun".to_string(),
-            kind            : ModuleKind::Weapon,
-            slot            : SlotKind::High,
-            activation_mode : dawn_core::ActivationMode::Active,
-            stat_delta      : StatDelta { weapon_damage_add: 25.0, weapon_range_add: 1000.0, ..StatDelta::ZERO },
+            id                : ModuleId(1),
+            name              : "Test Railgun".to_string(),
+            kind              : ModuleKind::Weapon,
+            slot              : SlotKind::High,
+            activation_mode   : dawn_core::ActivationMode::Active,
+            cap_cost_per_cycle: 60.0,
+            cycle_time_ticks  : 10,
+            stat_delta        : StatDelta { weapon_damage_add: 25.0, weapon_range_add: 1000.0, ..StatDelta::ZERO },
         };
         node.register_module(railgun);
 
