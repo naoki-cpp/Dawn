@@ -7,27 +7,31 @@
 # slot: "High" | "Mid" | "Low" | "Rig"
 # activation_mode: "Active" | "Passive"
 #
+# cap_cost_per_cycle — サイクル開始時に1回消費するキャパシタ量 (GJ)
+# cycle_time_ticks   — 1サイクルの長さ (Tick)。0 = Passive（適用なし）
+#
 # stat_delta（省略したフィールドはすべて 0）:
-#   max_speed_add       — 最大速度加算
-#   thrust_add          — 推力加算
-#   max_shield_add      — シールドHP加算
-#   max_armor_add       — アーマーHP加算
-#   max_hull_add        — ハルHP加算
-#   weapon_damage_add   — 武器ダメージ加算
-#   weapon_range_add    — 武器射程加算 (units)
-#   weapon_cooldown_add — 武器クールダウン加算 (Tick, 負=短縮)
-#   lock_time_add       — ロック時間加算 (Tick, 負=短縮)
-#   max_locks_add       — 同時ロック上限加算
+#   max_speed_add, thrust_add, max_shield_add, max_armor_add, max_hull_add
+#   weapon_damage_add, weapon_range_add, weapon_cooldown_add
+#   lock_time_add, max_locks_add
+#   cap_max_add, cap_recharge_add
+#
+# Cap バランスガイド（フリゲート: recharge 10 GJ/tick → 100 GJ/10tick）:
+#   Small Railgun (60 GJ/10tick):  gun alone → +40 GJ/cycle (持続可能)
+#   1MN AB       (80 GJ/10tick):  AB  alone → +20 GJ/cycle (持続可能)
+#   Gun + AB     (140 GJ/10tick): → -40 GJ/cycle (12サイクル≒120tick≈12秒で枯渇)
 # ============================================================
 
 # ── 武器（High / Active）────────────────────────────────────
 
 [[modules]]
-id              = 1
-name            = "Small Railgun I"
-kind            = "Weapon"
-slot            = "High"
-activation_mode = "Active"
+id                 = 1
+name               = "Small Railgun I"
+kind               = "Weapon"
+slot               = "High"
+activation_mode    = "Active"
+cap_cost_per_cycle = 60.0
+cycle_time_ticks   = 10
 
 [modules.stat_delta]
 weapon_damage_add = 25.0
@@ -36,11 +40,13 @@ weapon_range_add  = 1500.0
 # ----
 
 [[modules]]
-id              = 2
-name            = "Medium Railgun I"
-kind            = "Weapon"
-slot            = "High"
-activation_mode = "Active"
+id                 = 2
+name               = "Medium Railgun I"
+kind               = "Weapon"
+slot               = "High"
+activation_mode    = "Active"
+cap_cost_per_cycle = 100.0
+cycle_time_ticks   = 14
 
 [modules.stat_delta]
 weapon_damage_add   = 50.0
@@ -50,11 +56,13 @@ weapon_cooldown_add = 4
 # ----
 
 [[modules]]
-id              = 7
-name            = "Heavy Railgun I"
-kind            = "Weapon"
-slot            = "High"
-activation_mode = "Active"
+id                 = 7
+name               = "Heavy Railgun I"
+kind               = "Weapon"
+slot               = "High"
+activation_mode    = "Active"
+cap_cost_per_cycle = 160.0
+cycle_time_ticks   = 18
 
 [modules.stat_delta]
 weapon_damage_add   = 100.0
@@ -112,11 +120,13 @@ max_armor_add = 500.0
 # ── 推進（Mid / Active）─────────────────────────────────────
 
 [[modules]]
-id              = 5
-name            = "1MN Afterburner"
-kind            = "Propulsion"
-slot            = "Mid"
-activation_mode = "Active"
+id                 = 5
+name               = "1MN Afterburner"
+kind               = "Propulsion"
+slot               = "Mid"
+activation_mode    = "Active"
+cap_cost_per_cycle = 80.0
+cycle_time_ticks   = 10
 
 [modules.stat_delta]
 max_speed_add = 150.0
@@ -125,11 +135,13 @@ thrust_add    = 10.0
 # ----
 
 [[modules]]
-id              = 10
-name            = "10MN Afterburner"
-kind            = "Propulsion"
-slot            = "Mid"
-activation_mode = "Active"
+id                 = 10
+name               = "10MN Afterburner"
+kind               = "Propulsion"
+slot               = "Mid"
+activation_mode    = "Active"
+cap_cost_per_cycle = 150.0
+cycle_time_ticks   = 10
 
 [modules.stat_delta]
 max_speed_add = 80.0
