@@ -226,7 +226,7 @@ TiDi を構造的に発生させない。
 
 ```
 EVE（事後対処）:  負荷超過 → TiDi で時間を遅らせる
-Dawn（事前規制）: 入場制限 → Sector は常に定員内 → Tick は常に 16ms 以内
+Dawn（事前規制）: 入場制限 → Sector は常に定員内 → Tick は常に SLA（≤32ms）以内
 ```
 
 ### Sector Population Cap（入場制限）
@@ -279,8 +279,8 @@ Tick 処理時間が目標を超えた場合は「TiDi を発動する」ので�
 
 ```
 Tick 処理時間 ≤ 12ms : 正常
-Tick 処理時間 ≤ 16ms : 警告（warn! ログ）
-Tick 処理時間 > 16ms : 異常（error! ログ + メトリクス）
+Tick 処理時間 ≤ 32ms : 警告（warn! ログ）
+Tick 処理時間 > 32ms : 異常（error! ログ + メトリクス）
                        → 根本原因の調査が必要
                        → population_cap の見直しをトリガーする
 ```

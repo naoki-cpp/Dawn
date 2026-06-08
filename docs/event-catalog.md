@@ -91,7 +91,7 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 |---|---|---|---|
 | `ShipFitted` | Ship の装備スロットが変更された | `SimulationNode::fit_module()` | ✅ 実装済み |
 | `ModuleActivated` | Active モジュールがオンになった | `SimulationNode::activate_module_owned()` | ✅ 実装済み |
-| `ModuleDeactivated` | Active モジュールがオフになった（手動 or cap 枯渇による強制 OFF） | `SimulationNode::deactivate_module_owned()` / `CapacitorSystem` | ✅ 実装済み |
+| `ModuleDeactivated` | Active モジュールがオフになった（手動 or cap 枯渇による強制 OFF） | `SimulationNode::deactivate_module_owned()` / `CapacitorSystem` | ✅ 実装済み（cap 枯渇による強制 OFF は ADR-0011 参照） |
 
 ### 3.4 Lock-on
 

@@ -600,6 +600,8 @@ pub max_hull_add   : f32,   // ハル HP への加算
 
 ### Capacitor System（Phase 6 追加）
 
+> 設計判断（サイクルベース消費 / クライアント側シミュレーション）の詳細は ADR-0011 参照。
+
 - [x] `dawn-core`: `StatDelta` に `cap_max_add`, `cap_recharge_add` 追加
 - [x] `dawn-core`: `ShipBaseStats` に `cap_max`, `cap_recharge_per_tick` 追加
 - [x] `dawn-ecs/components/movement.rs`: `ShipStatsComp` に `cap_max`, `cap_recharge_per_tick` 追加
