@@ -317,6 +317,62 @@ impl DuelMetrics {
         self.end_tick = Some(tick);
     }
 
+    /// Write a JSON summary to `data/session_<wallclock>.json` for cross-session
+    /// balance analysis (playtest-guide.md §6 — `MetricsCollector` minimal version).
+    ///
+    /// Note: the wall-clock timestamp is used only for the filename / for
+    /// human-readable session bookkeeping. Causal ordering inside the
+    /// simulation continues to rely solely on the logical Tick (INV-005).
+    fn write_json_summary(&self, player_ship_id: Option<ShipId>) {
+        let duration = self.end_tick.unwrap_or(self.start_tick) - self.start_tick;
+
+        let ships: Vec<serde_json::Value> = {
+            let mut ids: Vec<ShipId> = self.stats.keys().cloned().collect();
+            ids.sort_by_key(|id| id.raw());
+            ids.iter().map(|id| {
+                let s = &self.stats[id];
+                serde_json::json!({
+                    "ship_id": id.raw(),
+                    "role": if player_ship_id == Some(*id) { "player" } else { "bot" },
+                    "cap_depletions": s.cap_depletions,
+                })
+            }).collect()
+        };
+
+        let result = self.loser.map(|loser| {
+            let player_won = player_ship_id.map_or(false, |pid| pid != loser);
+            if player_won { "player_win" } else { "bot_win" }
+        });
+
+        let summary = serde_json::json!({
+            "mode": "duel",
+            "start_tick": self.start_tick,
+            "end_tick": self.end_tick,
+            "duration_ticks": duration,
+            "result": result,
+            "loser_ship_id": self.loser.map(|id| id.raw()),
+            "ships": ships,
+        });
+
+        let wall_clock = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let dir = std::path::Path::new("data");
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            eprintln!("  [Duel] failed to create data/ directory: {e}");
+            return;
+        }
+        let path = dir.join(format!("session_duel_{wall_clock}.json"));
+        match serde_json::to_string_pretty(&summary) {
+            Ok(text) => match std::fs::write(&path, text) {
+                Ok(()) => println!("  [Duel] session summary written to {}", path.display()),
+                Err(e) => eprintln!("  [Duel] failed to write {}: {e}", path.display()),
+            },
+            Err(e) => eprintln!("  [Duel] failed to serialize summary: {e}"),
+        }
+    }
+
     /// Print a formatted summary to stdout.
     fn print_summary(&self, player_ship_id: Option<ShipId>) {
         let duration = self.end_tick.unwrap_or(self.start_tick) - self.start_tick;
@@ -523,6 +579,7 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
                     if let dawn_core::DomainEvent::ShipDestroyed(e) = event {
                         metrics.record_end(e.ship_id, tick_result.tick.value());
                         metrics.print_summary(player_ship_id);
+                        metrics.write_json_summary(player_ship_id);
                         // Continue running so the client can display the result.
                     }
                 }

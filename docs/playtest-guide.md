@@ -52,13 +52,15 @@ Phase 6 の主目標は「ゲームが実際に面白いか」を人間から検
   → ShipDestroyed 受信時に自分/相手の船かを判定して表示
   → main.gd の変更のみ
 
-[実装済み] デュエルメトリクスの stdout 出力
+[実装済み] デュエルメトリクスの stdout 出力 + JSON ファイル出力
   --duel モード限定。ShipDestroyed 発火時に以下をコンソールへ出力する:
     - 勝敗（Player Win / Bot Win）
     - 経過 Tick 数
     - 船ごとの cap 枯渇（強制 OFF）回数
-  ファイル出力・詳細集計（§6 の全メトリクス）は将来拡張予定。
-  → dawn-simulation/src/main.rs の DuelMetrics 参照
+  同時に `data/session_duel_<unix秒>.json` へ同内容を書き出す
+  （複数セッションを横断した集計・分析を可能にするため）。
+  詳細集計（§6 のロックオン/モジュール/フィッティングメトリクス）は将来拡張予定。
+  → dawn-simulation/src/main.rs の DuelMetrics::write_json_summary() 参照
 ```
 
 ---
