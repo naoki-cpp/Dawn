@@ -65,6 +65,11 @@ var _cap_current      : float = -1.0   ## -1 = not yet received
 var _cap_max          : float = 500.0
 var _cap_recharge     : float = 10.0   ## GJ per tick
 
+## Tactical overlay (range rings).
+var _tactical_overlay : Node3D = null  ## TacticalOverlay node, parented to player ship
+var _weapon_range     : float  = 0.0   ## optimal range (u), recalculated on fitting change
+var _weapon_falloff   : float  = 0.0   ## falloff range (u)
+
 ## ダブルクリック検出用
 var _last_click_time  : float  = -1.0
 var _last_click_pos   : Vector2 = Vector2.ZERO
@@ -106,6 +111,15 @@ func _input(event: InputEvent) -> void:
 			KEY_F8: f_index = 7
 		if f_index >= 0:
 			_toggle_module_by_index(f_index)
+			return
+		## S キー → StopCommand（加速度で減速停止）
+		if key.keycode == KEY_S and _player_ship_id >= 0:
+			_send_stop_command()
+			return
+		## Tab キー → タクティカルオーバーレイ表示切り替え
+		if key.keycode == KEY_TAB:
+			if _tactical_overlay != null:
+				(_tactical_overlay as Node3D).call("toggle_visible")
 			return
 
 	if event is InputEventMouseButton:
@@ -207,6 +221,16 @@ func _on_double_click(screen_pos: Vector2) -> void:
 	if _ships.has(_player_ship_id):
 		(_ships[_player_ship_id] as Node3D).call("set_thrust_direction", ray_dir)
 
+# ── S キー → StopCommand ─────────────────────────────────────────────────────
+
+func _send_stop_command() -> void:
+	if _player_ship_id < 0:
+		return
+	_connection.send_stop_command(_player_ship_id)
+	## Clear thrust arrow on player ship
+	if _ships.has(_player_ship_id):
+		(_ships[_player_ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
+
 # ── イベントハンドラ ──────────────────────────────────────────────────────────
 
 func _on_event_received(payload: Dictionary) -> void:
@@ -288,6 +312,34 @@ func _on_player_fitting(modules: Array) -> void:
 		mod_dict["cycle_remaining"] = 0
 		mod_dict["cap_forced_off"]  = false
 	_player_modules = modules
+	_recalc_weapon_range()
+
+func _recalc_weapon_range() -> void:
+	## Sum weapon_range_add and falloff_range_add from active Weapon modules.
+	var opt: float  = 0.0
+	var fall: float = 0.0
+	for m: Variant in _player_modules:
+		var mod_dict: Dictionary = m as Dictionary
+		if not (mod_dict.get("is_active", false) as bool):
+			continue
+		if mod_dict.get("kind", "") as String != "Weapon":
+			continue
+		var sd: Dictionary = mod_dict.get("stat_delta", {}) as Dictionary
+		opt  += sd.get("weapon_range_add",  0.0) as float
+		fall += sd.get("falloff_range_add", 0.0) as float
+	_weapon_range   = opt
+	_weapon_falloff = fall
+	_update_tactical_overlay()
+
+func _update_tactical_overlay() -> void:
+	if _tactical_overlay == null:
+		return
+	## Convert server units → Godot units before passing to the overlay.
+	## weapon_range/_falloff are in server coordinate units; the overlay lives
+	## in Godot world space which is scaled by WORLD_SCALE (0.1).
+	_tactical_overlay.call("set_ranges",
+		_weapon_range   * WORLD_SCALE,
+		_weapon_falloff * WORLD_SCALE)
 
 func _on_module_activated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
 	if p_ship_id != _player_ship_id:
@@ -299,6 +351,7 @@ func _on_module_activated(p_ship_id: int, p_module_id: int, _slot: String) -> vo
 			mod_dict["cap_forced_off"]  = false
 			mod_dict["cycle_remaining"] = 0  ## Next tick will start a fresh cycle.
 			break
+	_recalc_weapon_range()
 
 func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
 	if p_ship_id != _player_ship_id:
@@ -313,6 +366,7 @@ func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> 
 			if was_active:
 				mod_dict["cap_forced_off"] = true
 			break
+	_recalc_weapon_range()
 
 
 func _toggle_module_by_index(f_index: int) -> void:
@@ -342,6 +396,15 @@ func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 	_apply_player_material(ship)
 	ship.call("set_as_player")
 	_camera.call("set_target", ship)
+	## Attach tactical overlay to player ship so rings follow it automatically.
+	if _tactical_overlay != null:
+		_tactical_overlay.queue_free()
+	var overlay_script: GDScript = load("res://scripts/tactical_overlay.gd") as GDScript
+	if overlay_script != null:
+		_tactical_overlay = Node3D.new()
+		_tactical_overlay.set_script(overlay_script)
+		ship.add_child(_tactical_overlay)
+		_update_tactical_overlay()
 
 # ── ドメインイベント処理 ──────────────────────────────────────────────────────
 
@@ -408,8 +471,9 @@ func _handle_damage_taken(p: Dictionary) -> void:
 		_player_shield = sh
 		_player_armor  = ar
 		_player_hull   = hu
-		if _ships.has(ship_id):
-			(_ships[ship_id] as Node3D).call("flash_damage")
+	## Flash red on any ship that takes damage (visual hit feedback)
+	if _ships.has(ship_id):
+		(_ships[ship_id] as Node3D).call("flash_damage")
 
 func _handle_ship_destroyed(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
