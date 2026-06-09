@@ -7,6 +7,7 @@ use dawn_core::ship_type::{ShipBaseStats, ShipClass, ShipTypeDefinition, ShipTyp
 
 pub const SHIP_TYPE_NPC_FRIGATE    : ShipTypeId = ShipTypeId(1);
 pub const SHIP_TYPE_PLAYER_FRIGATE : ShipTypeId = ShipTypeId(2);
+pub const SHIP_TYPE_MAGPIE         : ShipTypeId = ShipTypeId(7);
 
 pub fn all_ship_types() -> Vec<ShipTypeDefinition> {
     vec![

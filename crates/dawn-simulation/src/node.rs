@@ -397,18 +397,18 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Spawn a player ship at a specific position.
     fn spawn_player_ship_at(&mut self, player_id: PlayerId, pos: Position) -> ShipId {
-        use crate::ship_types::SHIP_TYPE_PLAYER_FRIGATE;
+        use crate::ship_types::SHIP_TYPE_MAGPIE;
         let ship_id = ShipId::new(self.node_id, self.id_counter);
         self.id_counter += 1;
 
         let base = self.ship_type_registry
-            .get(&SHIP_TYPE_PLAYER_FRIGATE)
+            .get(&SHIP_TYPE_MAGPIE)
             .map(|def| ShipStatsComp::from_base(&def.base_stats))
             .unwrap_or(ShipStatsComp::PLAYER);
 
         self.insert_to_world(ship_id, pos, Velocity::ZERO);
         self.base_stats.insert(ship_id, base);
-        self.ship_type_ids.insert(ship_id, SHIP_TYPE_PLAYER_FRIGATE);
+        self.ship_type_ids.insert(ship_id, SHIP_TYPE_MAGPIE);
 
         if let Some(&entity) = self.ship_index.get(&ship_id) {
             self.world.set_ship_stats(entity, base);
@@ -434,7 +434,7 @@ impl<S: EventStore> SimulationNode<S> {
             ship_id,
             sector_id        : self.sector_id,
             initial_position : pos,
-            ship_type_id     : SHIP_TYPE_PLAYER_FRIGATE,
+            ship_type_id     : SHIP_TYPE_MAGPIE,
             tick             : self.current_tick,
         }));
 
