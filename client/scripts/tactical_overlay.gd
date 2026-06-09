@@ -1,5 +1,5 @@
 extends Node3D
-## Tactical overlay — EVE-style range rings drawn in the XZ plane.
+## Tactical overlay — EVE-style range rings drawn in the XY plane.
 ##
 ## Attach to a Node3D child of the player ship node (or update position each frame).
 ## Call set_ranges() whenever fitting changes.
@@ -64,7 +64,7 @@ func _draw_ring(mi: MeshInstance3D, radius: float, color: Color) -> void:
 
 	for i in range(SEGMENTS + 1):
 		var angle := (float(i) / float(SEGMENTS)) * TAU
-		im.surface_add_vertex(Vector3(cos(angle) * radius, 0.0, sin(angle) * radius))
+		im.surface_add_vertex(Vector3(cos(angle) * radius, sin(angle) * radius, 0.0))
 
 	im.surface_end()
 
