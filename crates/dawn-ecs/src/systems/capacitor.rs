@@ -25,7 +25,7 @@ use crate::{
 };
 use dawn_core::{
     events::ModuleDeactivated,
-    fitting::ActivationMode,
+    fitting::{ActivationMode, ModuleKind},
     DomainEvent, ShipId, Tick,
 };
 
@@ -37,6 +37,9 @@ pub struct CapacitorResult {
     /// Ships that had at least one module force-deactivated.
     /// The caller must call `apply_fitting()` on each to update `ShipStatsComp`.
     pub refitted: Vec<ShipId>,
+    /// Ships whose Weapon module started a new cycle this tick.
+    /// The Combat system uses this list to decide which ships fire.
+    pub weapon_cycles_started: Vec<ShipId>,
 }
 
 // ── Internal snapshot ─────────────────────────────────────────────────────────
@@ -44,6 +47,7 @@ pub struct CapacitorResult {
 struct SlotInfo {
     /// Flat index into high→mid→low→rig ordering.
     flat_idx        : usize,
+    kind            : ModuleKind,
     cap_cost        : f32,
     cycle_time      : u64,
     cycle_remaining : u64,
@@ -77,6 +81,7 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
                 .filter(|(_, slot)| slot.def.activation_mode == ActivationMode::Active)
                 .map(|(i, slot)| SlotInfo {
                     flat_idx        : i,
+                    kind            : slot.def.kind,
                     cap_cost        : slot.def.cap_cost_per_cycle,
                     cycle_time      : slot.def.cycle_time_ticks,
                     cycle_remaining : slot.cycle_remaining,
@@ -95,8 +100,9 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
         .collect();
 
     // ── 2. Compute new cap, cycle updates, and forced deactivations ───────────
-    let mut events  : Vec<DomainEvent> = Vec::new();
-    let mut refitted: Vec<ShipId>      = Vec::new();
+    let mut events               : Vec<DomainEvent> = Vec::new();
+    let mut refitted             : Vec<ShipId>      = Vec::new();
+    let mut weapon_cycles_started: Vec<ShipId>      = Vec::new();
 
     for snap in snaps {
         // Recharge first (every tick, before cycle logic).
@@ -104,6 +110,7 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
 
         let mut forced_off : Vec<usize> = Vec::new();
         let mut new_cycles : Vec<(usize, u64)> = Vec::new(); // (flat_idx, new remaining)
+        let mut weapon_fired = false;
 
         for slot in &snap.slots {
             if !slot.is_active {
@@ -116,6 +123,10 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
                     // Enough cap: consume and start cycle.
                     cap -= slot.cap_cost;
                     new_cycles.push((slot.flat_idx, slot.cycle_time.max(1)));
+                    // Record weapon cycle start so Combat system can fire.
+                    if slot.kind == ModuleKind::Weapon {
+                        weapon_fired = true;
+                    }
                 } else {
                     // Insufficient cap: force the module OFF.
                     forced_off.push(slot.flat_idx);
@@ -124,6 +135,10 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
                 // Cycle in progress: tick down.
                 new_cycles.push((slot.flat_idx, slot.cycle_remaining - 1));
             }
+        }
+
+        if weapon_fired {
+            weapon_cycles_started.push(snap.ship_id);
         }
 
         let new_cap = cap.max(0.0);
@@ -141,7 +156,7 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
         }
     }
 
-    CapacitorResult { events, refitted }
+    CapacitorResult { events, refitted, weapon_cycles_started }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

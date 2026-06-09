@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 dawn-core = { path = "../dawn-core" }
 hecs      = { workspace = true }
+rand      = { workspace = true }
