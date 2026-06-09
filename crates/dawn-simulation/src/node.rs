@@ -408,6 +408,7 @@ impl<S: EventStore> SimulationNode<S> {
 
         self.insert_to_world(ship_id, pos, Velocity::ZERO);
         self.base_stats.insert(ship_id, base);
+        self.ship_type_ids.insert(ship_id, SHIP_TYPE_PLAYER_FRIGATE);
 
         if let Some(&entity) = self.ship_index.get(&ship_id) {
             self.world.set_ship_stats(entity, base);
