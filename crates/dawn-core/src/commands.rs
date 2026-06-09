@@ -79,6 +79,15 @@ pub struct AttackCommand {
     pub target_id   : ShipId,
 }
 
+/// Decelerate a ship to zero using its own thrust.
+///
+/// The movement system applies thrust opposite to the current velocity each
+/// tick until the ship reaches zero speed. Cancels any active thrust direction.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StopCommand {
+    pub ship_id: ShipId,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

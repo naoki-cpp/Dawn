@@ -24,7 +24,7 @@
 //! `ClientConnection` trait 自体は変更しない。
 //! 新コマンドの追加 = `ClientCommand` に variant を追加するだけ。
 
-use dawn_core::{ActivateModuleCommand, AttackCommand, DeactivateModuleCommand, DomainEvent, LockOnCommand, MoveCommand};
+use dawn_core::{ActivateModuleCommand, AttackCommand, DeactivateModuleCommand, DomainEvent, LockOnCommand, MoveCommand, StopCommand};
 use tokio::sync::mpsc;
 
 // ── Error ─────────────────────────────────────────────────────────────────────
@@ -57,6 +57,8 @@ pub enum ClientCommand {
     Deactivate(DeactivateModuleCommand),
     /// ターゲットへの攻撃（将来の手動攻撃モード用、現在は自動戦闘が優先）
     Attack(AttackCommand),
+    /// 減速停止（thrust を逆方向に掛けて速度ゼロまで減速する）
+    Stop(StopCommand),
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────────

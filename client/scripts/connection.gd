@@ -119,6 +119,15 @@ func send_deactivate_module(p_ship_id: int, p_module_id: int, p_slot: String) ->
 		"slot"     : p_slot,
 	}) + "\n")
 
+## [S キー] 減速停止コマンド。サーバーが thrust を逆方向に掛けて速度ゼロまで減速する。
+func send_stop_command(p_ship_id: int) -> void:
+	if not _welcomed:
+		return
+	_ws.send_text(JSON.stringify({
+		"type"   : "StopCommand",
+		"ship_id": p_ship_id,
+	}) + "\n")
+
 func is_connected_to_server() -> bool:
 	return _connected and _welcomed
 

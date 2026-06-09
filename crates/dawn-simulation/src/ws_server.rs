@@ -20,7 +20,7 @@
 //! ```
 
 use dawn_actor::{ClientCommand, ClientConnection};
-use dawn_core::{ActivateModuleCommand, AttackCommand, DeactivateModuleCommand, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId, Position, ShipId, SlotKind};
+use dawn_core::{ActivateModuleCommand, AttackCommand, DeactivateModuleCommand, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId, Position, ShipId, SlotKind, StopCommand};
 use dawn_core::DomainEvent;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
@@ -166,6 +166,12 @@ fn parse_client_command(line: &str) -> Option<ClientCommand> {
             Some(ClientCommand::Attack(AttackCommand {
                 attacker_id: ShipId(EntityId::from_raw(attacker_id_raw)),
                 target_id  : ShipId(EntityId::from_raw(target_id_raw)),
+            }))
+        }
+        "StopCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            Some(ClientCommand::Stop(StopCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
             }))
         }
         _ => None,
