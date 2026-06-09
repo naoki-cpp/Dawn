@@ -53,10 +53,13 @@ struct BaseStatsEntry {
     cap_max              : f32,
     #[serde(default = "default_cap_recharge")]
     cap_recharge_per_tick: f32,
+    #[serde(default = "default_sig_radius")]
+    sig_radius           : f32,
 }
 
 fn default_cap_max() -> f32 { 400.0 }
 fn default_cap_recharge() -> f32 { 8.0 }
+fn default_sig_radius() -> f32 { 40.0 }
 
 // ── TOML 中間型（modules.toml）───────────────────────────────────────────────
 
@@ -89,6 +92,8 @@ struct StatDeltaEntry {
     #[serde(default)] max_hull_add        : f32,
     #[serde(default)] weapon_damage_add   : f32,
     #[serde(default)] weapon_range_add    : f32,
+    #[serde(default)] tracking_speed_add  : f32,
+    #[serde(default)] falloff_range_add   : f32,
     #[serde(default)] weapon_cooldown_add : i32,
     #[serde(default)] lock_time_add       : i32,
     #[serde(default)] max_locks_add       : i32,
@@ -154,6 +159,7 @@ fn entry_to_ship_type(e: ShipTypeEntry) -> ShipTypeDefinition {
             max_locks            : e.base_stats.max_locks,
             cap_max              : e.base_stats.cap_max,
             cap_recharge_per_tick: e.base_stats.cap_recharge_per_tick,
+            sig_radius           : e.base_stats.sig_radius,
         },
     }
 }
@@ -175,6 +181,8 @@ fn entry_to_module(e: ModuleEntry) -> ModuleDefinition {
             max_hull_add        : e.stat_delta.max_hull_add,
             weapon_damage_add   : e.stat_delta.weapon_damage_add,
             weapon_range_add    : e.stat_delta.weapon_range_add,
+            tracking_speed_add  : e.stat_delta.tracking_speed_add,
+            falloff_range_add   : e.stat_delta.falloff_range_add,
             weapon_cooldown_add : e.stat_delta.weapon_cooldown_add,
             lock_time_add       : e.stat_delta.lock_time_add,
             max_locks_add       : e.stat_delta.max_locks_add,

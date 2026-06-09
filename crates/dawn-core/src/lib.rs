@@ -20,7 +20,7 @@ pub mod ship_type;
 pub mod tick;
 
 // Re-export the most commonly used types at crate root for ergonomics.
-pub use commands::{ActivateModuleCommand, AttackCommand, DeactivateModuleCommand, FitModuleCommand, LockOnCommand, MoveCommand};
+pub use commands::{ActivateModuleCommand, AttackCommand, DeactivateModuleCommand, FitModuleCommand, LockOnCommand, MoveCommand, StopCommand};
 pub use player::PlayerId;
 pub use ship_type::{ShipBaseStats, ShipClass, ShipTypeDefinition, ShipTypeId, SlotLayout};
 pub use entity::{EntityId, NodeId, ShipId};

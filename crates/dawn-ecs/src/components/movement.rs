@@ -9,8 +9,20 @@ pub struct PositionComp(pub Position);
 pub struct VelocityComp(pub Velocity);
 
 /// Acceleration vector applied to velocity every tick.
+///
+/// When `is_braking` is true, the direction stored in the inner `Velocity` is
+/// ignored. The movement system instead applies thrust opposite to the current
+/// velocity, decelerating the ship until it stops.
 #[derive(Debug, Clone, Copy)]
-pub struct ThrustComp(pub Velocity);
+pub struct ThrustComp {
+    pub direction  : Velocity,
+    pub is_braking : bool,
+}
+
+impl ThrustComp {
+    /// No thrust, not braking.
+    pub const ZERO: Self = Self { direction: Velocity::ZERO, is_braking: false };
+}
 
 /// Runtime ship stats after applying all active module deltas.
 ///
@@ -30,8 +42,15 @@ pub struct ShipStatsComp {
     // ── Combat ────────────────────────────────────────────────────────────────
     /// Weapon damage per shot (0 = no weapon; supplied by modules only).
     pub weapon_damage        : f32,
+    /// Weapon optimal range (units). Full hit chance within this distance.
     pub weapon_range         : f32,
+    /// Turret tracking speed (rad/tick). Hit chance falls with high angular velocity.
+    pub weapon_tracking      : f32,
+    /// Weapon falloff range (units). Hit chance halves at optimal + falloff.
+    pub weapon_falloff       : f32,
     pub weapon_cooldown      : u64,
+    /// Signature radius. Larger = easier to track and hit.
+    pub sig_radius           : f32,
 
     // ── Lock-on ───────────────────────────────────────────────────────────────
     pub lock_time            : u64,
@@ -55,7 +74,10 @@ impl ShipStatsComp {
         max_hull             : 150.0,
         weapon_damage        : 0.0,
         weapon_range         : 0.0,
+        weapon_tracking      : 0.0,
+        weapon_falloff       : 0.0,
         weapon_cooldown      : 1,
+        sig_radius           : 40.0,
         lock_time            : 5,
         max_locks            : 1,
         cap_max              : 300.0,
@@ -71,7 +93,10 @@ impl ShipStatsComp {
         max_hull             : 200.0,
         weapon_damage        : 0.0,
         weapon_range         : 0.0,
+        weapon_tracking      : 0.0,
+        weapon_falloff       : 0.0,
         weapon_cooldown      : 1,
+        sig_radius           : 40.0,
         lock_time            : 3,
         max_locks            : 2,
         cap_max              : 500.0,
@@ -88,7 +113,10 @@ impl ShipStatsComp {
             max_hull             : base.max_hull,
             weapon_damage        : 0.0,
             weapon_range         : 0.0,
+            weapon_tracking      : 0.0,
+            weapon_falloff       : 0.0,
             weapon_cooldown      : 1,
+            sig_radius           : base.sig_radius,
             lock_time            : base.lock_time,
             max_locks            : base.max_locks,
             cap_max              : base.cap_max,

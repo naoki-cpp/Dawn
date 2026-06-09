@@ -42,7 +42,7 @@ impl MovementSystem {
                 &ShipIdComp,
                 &mut PositionComp,
                 &mut VelocityComp,
-                &ThrustComp,
+                &mut ThrustComp,
                 &ShipStatsComp,
             )>()
         {
@@ -50,13 +50,28 @@ impl MovementSystem {
 
             // ── 1. Apply thrust ───────────────────────────────────────────────
             if stats_comp.thrust_magnitude > 0.0 {
-                let t   = thrust_comp.0;
-                let mag = magnitude(t);
+                // Braking: thrust opposite to current velocity to decelerate.
+                let thrust_dir = if thrust_comp.is_braking {
+                    let v = vel_comp.0;
+                    let speed = magnitude(v);
+                    if speed > f32::EPSILON {
+                        Velocity { dx: -v.dx / speed, dy: -v.dy / speed, dz: -v.dz / speed }
+                    } else {
+                        // Already stopped — clear braking flag and zero velocity exactly.
+                        thrust_comp.is_braking = false;
+                        vel_comp.0 = Velocity::ZERO;
+                        Velocity::ZERO
+                    }
+                } else {
+                    thrust_comp.direction
+                };
+
+                let mag = magnitude(thrust_dir);
                 if mag > f32::EPSILON {
                     let scale = stats_comp.thrust_magnitude / mag;
-                    vel_comp.0.dx += t.dx * scale;
-                    vel_comp.0.dy += t.dy * scale;
-                    vel_comp.0.dz += t.dz * scale;
+                    vel_comp.0.dx += thrust_dir.dx * scale;
+                    vel_comp.0.dy += thrust_dir.dy * scale;
+                    vel_comp.0.dz += thrust_dir.dz * scale;
                 }
             }
 
@@ -67,6 +82,14 @@ impl MovementSystem {
                 vel_comp.0.dx *= scale;
                 vel_comp.0.dy *= scale;
                 vel_comp.0.dz *= scale;
+            }
+
+            // ── 2b. Braking overshoot guard ───────────────────────────────────
+            // If braking caused the ship to overshoot zero (velocity reversed),
+            // snap to exactly zero and stop braking.
+            if thrust_comp.is_braking && magnitude(vel_comp.0) < stats_comp.thrust_magnitude {
+                thrust_comp.is_braking = false;
+                vel_comp.0 = Velocity::ZERO;
             }
 
             // ── 3. Apply velocity to position ─────────────────────────────────
@@ -136,7 +159,7 @@ mod tests {
         let id     = dawn_core::ShipId::new(NodeId(0), 1);
         let entity = w.spawn_ship(id, Position::new(500.0, 500.0, 500.0), Velocity::ZERO);
         w.set_ship_stats(entity, ShipStatsComp::PLAYER);
-        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().0 = Velocity::new(1.0, 0.0, 0.0);
+        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().direction = Velocity::new(1.0, 0.0, 0.0);
         let events = MovementSystem::run(&mut w, Tick(1));
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], DomainEvent::VelocityChanged(_)));
@@ -148,7 +171,7 @@ mod tests {
         let id     = dawn_core::ShipId::new(NodeId(0), 1);
         let entity = w.spawn_ship(id, Position::new(500.0, 500.0, 500.0), Velocity::ZERO);
         w.set_ship_stats(entity, ShipStatsComp::PLAYER);
-        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().0 = Velocity::new(1.0, 0.0, 0.0);
+        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().direction = Velocity::new(1.0, 0.0, 0.0);
         let events = MovementSystem::run(&mut w, Tick(7));
         if let DomainEvent::VelocityChanged(e) = &events[0] {
             assert!(e.velocity.dx > 0.0, "velocity.dx should be positive after thrust");
@@ -189,7 +212,7 @@ mod tests {
             let id     = dawn_core::ShipId::new(NodeId(0), i);
             let entity = w.spawn_ship(id, Position::new(i as f32 * 10.0, 0.0, 0.0), Velocity::ZERO);
             w.set_ship_stats(entity, ShipStatsComp::PLAYER);
-            w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().0 = Velocity::new(1.0, 0.0, 0.0);
+            w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().direction = Velocity::new(1.0, 0.0, 0.0);
         }
         assert_eq!(MovementSystem::run(&mut w, Tick(1)).len(), 10);
     }
@@ -200,7 +223,7 @@ mod tests {
         let id     = dawn_core::ShipId::new(NodeId(0), 1);
         let entity = w.spawn_ship(id, Position::new(100.0, 100.0, 100.0), Velocity::ZERO);
         w.set_ship_stats(entity, ShipStatsComp::PLAYER);
-        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().0 = Velocity::new(1.0, 0.0, 0.0);
+        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().direction = Velocity::new(1.0, 0.0, 0.0);
         assert_eq!(MovementSystem::run(&mut w, Tick(999))[0].tick(), Tick(999));
     }
 
@@ -210,12 +233,43 @@ mod tests {
         let id     = dawn_core::ShipId::new(NodeId(0), 1);
         let entity = w.spawn_ship(id, Position::new(500.0, 500.0, 500.0), Velocity::ZERO);
         w.set_ship_stats(entity, ShipStatsComp::PLAYER);
-        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().0 = Velocity::new(1.0, 0.0, 0.0);
+        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().direction = Velocity::new(1.0, 0.0, 0.0);
         MovementSystem::run(&mut w, Tick(1));
         let vel = *w.inner().get::<&VelocityComp>(entity).unwrap();
         assert!(vel.0.dx > 0.0);
         assert_eq!(vel.0.dy, 0.0);
         assert_eq!(vel.0.dz, 0.0);
+    }
+
+    #[test]
+    fn braking_decelerates_ship_and_stops_without_overshoot() {
+        let mut w  = SimWorld::new(SectorId(0));
+        let id     = dawn_core::ShipId::new(NodeId(0), 1);
+        let entity = w.spawn_ship(id, Position::ORIGIN, Velocity::new(100.0, 0.0, 0.0));
+        w.set_ship_stats(entity, ShipStatsComp::PLAYER); // thrust_magnitude=40
+        // Engage braking
+        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().is_braking = true;
+
+        // Run until stopped (max ~3 ticks for 100 / 40 rounding up)
+        for _ in 0..10 { MovementSystem::run(&mut w, Tick(1)); }
+
+        let vel = *w.inner().get::<&VelocityComp>(entity).unwrap();
+        assert_eq!(vel.0, Velocity::ZERO, "ship must come to a complete stop");
+        let thrust = *w.inner().get::<&ThrustComp>(entity).unwrap();
+        assert!(!thrust.is_braking, "is_braking must be cleared once stopped");
+    }
+
+    #[test]
+    fn braking_emits_velocity_changed_events_until_stopped() {
+        let mut w  = SimWorld::new(SectorId(0));
+        let id     = dawn_core::ShipId::new(NodeId(0), 1);
+        let entity = w.spawn_ship(id, Position::ORIGIN, Velocity::new(200.0, 0.0, 0.0));
+        w.set_ship_stats(entity, ShipStatsComp::PLAYER);
+        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().is_braking = true;
+
+        // At least one tick must emit a VelocityChanged (deceleration happened)
+        let events = MovementSystem::run(&mut w, Tick(1));
+        assert!(!events.is_empty(), "first braking tick must emit VelocityChanged");
     }
 
     #[test]

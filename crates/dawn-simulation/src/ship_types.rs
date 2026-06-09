@@ -5,9 +5,8 @@
 
 use dawn_core::ship_type::{ShipBaseStats, ShipClass, ShipTypeDefinition, ShipTypeId, SlotLayout};
 
-pub const SHIP_TYPE_NPC_FRIGATE    : ShipTypeId = ShipTypeId(1);
-pub const SHIP_TYPE_PLAYER_FRIGATE : ShipTypeId = ShipTypeId(2);
-pub const SHIP_TYPE_MAGPIE         : ShipTypeId = ShipTypeId(7);
+pub const SHIP_TYPE_NPC_FRIGATE : ShipTypeId = ShipTypeId(1);
+pub const SHIP_TYPE_MAGPIE      : ShipTypeId = ShipTypeId(7);
 
 pub fn all_ship_types() -> Vec<ShipTypeDefinition> {
     vec![
@@ -26,23 +25,26 @@ pub fn all_ship_types() -> Vec<ShipTypeDefinition> {
                 max_locks            : 1,
                 cap_max              : 300.0,
                 cap_recharge_per_tick: 6.0,    // 2 %/tick
+                sig_radius           : 40.0,
             },
         },
+        // Voral Drift Tackler/Interceptor frigate
         ShipTypeDefinition {
-            id         : SHIP_TYPE_PLAYER_FRIGATE,
-            name       : "Player Frigate".to_string(),
+            id         : SHIP_TYPE_MAGPIE,
+            name       : "Magpie".to_string(),
             class      : ShipClass::Frigate,
-            slot_layout: SlotLayout::FRIGATE,
+            slot_layout: SlotLayout { high: 2, mid: 4, low: 2, rig: 3 },
             base_stats : ShipBaseStats {
-                max_speed            : 500.0,
-                thrust_magnitude     : 40.0,
-                max_shield           : 500.0,
-                max_armor            : 300.0,
-                max_hull             : 200.0,
-                lock_time            : 3,
+                max_speed            : 700.0,
+                thrust_magnitude     : 65.0,
+                max_shield           : 200.0,
+                max_armor            : 120.0,
+                max_hull             : 100.0,
+                lock_time            : 2,
                 max_locks            : 2,
-                cap_max              : 500.0,
-                cap_recharge_per_tick: 10.0,   // 2 %/tick
+                cap_max              : 350.0,
+                cap_recharge_per_tick: 8.0,
+                sig_radius           : 40.0,  // small fast frigate
             },
         },
     ]
@@ -67,11 +69,11 @@ mod tests {
     }
 
     #[test]
-    fn player_frigate_has_three_layer_hp() {
-        let player = all_ship_types().into_iter()
-            .find(|t| t.id == SHIP_TYPE_PLAYER_FRIGATE).unwrap();
-        assert!(player.base_stats.max_shield > 0.0);
-        assert!(player.base_stats.max_armor  > 0.0);
-        assert!(player.base_stats.max_hull   > 0.0);
+    fn magpie_has_three_layer_hp() {
+        let magpie = all_ship_types().into_iter()
+            .find(|t| t.id == SHIP_TYPE_MAGPIE).unwrap();
+        assert!(magpie.base_stats.max_shield > 0.0);
+        assert!(magpie.base_stats.max_armor  > 0.0);
+        assert!(magpie.base_stats.max_hull   > 0.0);
     }
 }

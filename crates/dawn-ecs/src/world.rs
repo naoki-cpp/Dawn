@@ -43,7 +43,7 @@ impl SimWorld {
             ShipIdComp(ship_id),
             PositionComp(position),
             VelocityComp(velocity),
-            ThrustComp(Velocity::ZERO),
+            ThrustComp::ZERO,
             stats,
             FittingComp::empty(),
             HullComp::new(stats.max_shield, stats.max_armor, stats.max_hull),

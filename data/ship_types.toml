@@ -48,6 +48,7 @@ lock_time             = 5
 max_locks             = 1
 cap_max               = 300.0
 cap_recharge_per_tick = 6.0    # 2%/tick: Small Railgun (12) > recharge → slow drain
+sig_radius            = 40.0   # standard frigate signature
 
 # ----
 
@@ -72,6 +73,7 @@ lock_time             = 4
 max_locks             = 2
 cap_max               = 400.0
 cap_recharge_per_tick = 10.0   # Medium Railgun (18) > recharge → slow drain
+sig_radius            = 60.0   # destroyer is slightly larger
 
 # ----
 
@@ -96,6 +98,7 @@ lock_time             = 6
 max_locks             = 3
 cap_max               = 800.0
 cap_recharge_per_tick = 18.0   # Medium Railgun (18) = recharge → exactly sustainable
+sig_radius            = 125.0  # cruiser: easy to track and hit
 
 # ── Voral Drift 船種 ─────────────────────────────────────────
 
@@ -121,32 +124,9 @@ max_locks             = 2
 cap_max               = 350.0
 cap_recharge_per_tick = 8.0    # AB (8) = 持続可能; + Small Railgun (12) = drain 12/tick
                                 # → 武装か推進かを常に選ぶ設計（タックラーらしいトレードオフ）
+sig_radius            = 35.0   # Magpie is nimble: slightly below standard frigate sig
 
 # ── プレイヤー船種 ───────────────────────────────────────────
-
-[[ship_types]]
-id    = 2
-name  = "Player Frigate"
-class = "Frigate"
-
-[ship_types.slot_layout]
-high = 3
-mid  = 3
-low  = 2
-rig  = 3
-
-[ship_types.base_stats]
-max_speed             = 500.0
-thrust_magnitude      = 40.0
-max_shield            = 500.0
-max_armor             = 300.0
-max_hull              = 200.0
-lock_time             = 3
-max_locks             = 2
-cap_max               = 500.0
-cap_recharge_per_tick = 10.0   # Gun (12) + AB (8) = 20 > 10 → slow drain; gun alone OK
-
-# ----
 
 [[ship_types]]
 id    = 5
@@ -169,6 +149,7 @@ lock_time             = 4
 max_locks             = 3
 cap_max               = 700.0
 cap_recharge_per_tick = 16.0   # Medium Railgun (18) > recharge → slow drain
+sig_radius            = 60.0
 
 # ----
 
@@ -193,3 +174,4 @@ lock_time             = 5
 max_locks             = 4
 cap_max               = 1200.0
 cap_recharge_per_tick = 22.0   # Heavy Railgun (28) > recharge → management needed
+sig_radius            = 125.0

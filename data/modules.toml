@@ -34,8 +34,13 @@ cap_cost_per_cycle = 60.0
 cycle_time_ticks   = 10
 
 [modules.stat_delta]
-weapon_damage_add = 25.0
-weapon_range_add  = 1500.0
+weapon_damage_add  = 25.0
+weapon_range_add   = 1500.0  # optimal range
+falloff_range_add  = 1000.0  # hit chance halves at 2500 u
+tracking_speed_add = 0.035   # rad/tick — hits a frigate (sig=40) orbiting at ~500u/tick at 1000u range
+                              # angular=0.5/1000=0.0005... actually: perp=500,d=1000 → ang=0.5
+                              # hit_chance = 0.5^((0.5/(0.035*40))^2) = 0.5^(0.357^2) ≈ 0.91 at 1000u
+                              # at 500u: ang=500/500=1.0 → 0.5^((1/(0.035*40))^2)=0.5^(0.714^2)≈0.70
 
 # ----
 
@@ -49,9 +54,10 @@ cap_cost_per_cycle = 100.0
 cycle_time_ticks   = 14
 
 [modules.stat_delta]
-weapon_damage_add   = 50.0
-weapon_range_add    = 2500.0
-weapon_cooldown_add = 4
+weapon_damage_add  = 50.0
+weapon_range_add   = 2500.0  # optimal range
+falloff_range_add  = 1500.0  # hit chance halves at 4000 u
+tracking_speed_add = 0.020   # rad/tick — slower tracking than Small, punishes fast frigates
 
 # ----
 
@@ -65,9 +71,10 @@ cap_cost_per_cycle = 160.0
 cycle_time_ticks   = 18
 
 [modules.stat_delta]
-weapon_damage_add   = 100.0
-weapon_range_add    = 4000.0
-weapon_cooldown_add = 8
+weapon_damage_add  = 100.0
+weapon_range_add   = 4000.0  # optimal range
+falloff_range_add  = 2000.0  # hit chance halves at 6000 u
+tracking_speed_add = 0.008   # rad/tick — very slow tracking; nearly misses frigates at close range
 
 # ── シールド（Mid / Passive）────────────────────────────────
 

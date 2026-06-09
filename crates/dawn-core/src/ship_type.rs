@@ -74,6 +74,9 @@ pub struct ShipBaseStats {
     pub cap_max              : f32,
     /// Capacitor recovered per tick (GJ/tick).
     pub cap_recharge_per_tick: f32,
+    /// Signature radius (arbitrary units). Larger values are easier to track.
+    /// Frigate ≈ 40, Cruiser ≈ 125, Battleship ≈ 360.
+    pub sig_radius            : f32,
 }
 
 // ── 船種定義 ──────────────────────────────────────────────────────────────────
@@ -111,6 +114,7 @@ mod tests {
                 max_locks            : 1,
                 cap_max              : 300.0,
                 cap_recharge_per_tick: 6.0,
+                sig_radius           : 40.0,
             },
         }
     }

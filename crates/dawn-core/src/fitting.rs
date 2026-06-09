@@ -86,8 +86,12 @@ pub struct StatDelta {
     pub max_hull_add         : f32,
     /// Bonus to weapon damage per shot.
     pub weapon_damage_add    : f32,
-    /// Bonus to weapon range (units).
+    /// Bonus to weapon optimal range (units).
     pub weapon_range_add     : f32,
+    /// Weapon tracking speed (rad/tick). Determines ability to hit fast-moving targets.
+    pub tracking_speed_add   : f32,
+    /// Weapon falloff range (units). Hit chance halves at optimal + falloff.
+    pub falloff_range_add    : f32,
     /// Weapon cooldown adjustment (ticks; negative = shorter cooldown).
     pub weapon_cooldown_add  : i32,
     /// Lock-on time adjustment (ticks; negative = faster lock).
@@ -110,6 +114,8 @@ impl StatDelta {
         max_hull_add        : 0.0,
         weapon_damage_add   : 0.0,
         weapon_range_add    : 0.0,
+        tracking_speed_add  : 0.0,
+        falloff_range_add   : 0.0,
         weapon_cooldown_add : 0,
         lock_time_add       : 0,
         max_locks_add       : 0,
@@ -126,6 +132,8 @@ impl StatDelta {
             max_hull_add        : self.max_hull_add        + other.max_hull_add,
             weapon_damage_add   : self.weapon_damage_add   + other.weapon_damage_add,
             weapon_range_add    : self.weapon_range_add    + other.weapon_range_add,
+            tracking_speed_add  : self.tracking_speed_add  + other.tracking_speed_add,
+            falloff_range_add   : self.falloff_range_add   + other.falloff_range_add,
             weapon_cooldown_add : self.weapon_cooldown_add + other.weapon_cooldown_add,
             lock_time_add       : self.lock_time_add       + other.lock_time_add,
             max_locks_add       : self.max_locks_add       + other.max_locks_add,
@@ -205,6 +213,8 @@ mod tests {
             max_hull_add        : 20.0,
             weapon_damage_add   : 20.0,
             weapon_range_add    : 500.0,
+            tracking_speed_add  : 0.0,
+            falloff_range_add   : 0.0,
             weapon_cooldown_add : -1,
             lock_time_add       : -1,
             max_locks_add       : 1,

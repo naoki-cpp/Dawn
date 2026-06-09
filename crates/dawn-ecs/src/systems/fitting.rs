@@ -70,6 +70,9 @@ pub fn apply_delta(base: ShipStatsComp, delta: &StatDelta) -> ShipStatsComp {
         max_hull             : (base.max_hull             + delta.max_hull_add).max(1.0),
         weapon_damage        : (base.weapon_damage        + delta.weapon_damage_add).max(0.0),
         weapon_range         : (base.weapon_range         + delta.weapon_range_add).max(0.0),
+        weapon_tracking      : (base.weapon_tracking      + delta.tracking_speed_add).max(0.0),
+        weapon_falloff       : (base.weapon_falloff       + delta.falloff_range_add).max(0.0),
+        sig_radius           : base.sig_radius,  // not affected by modules (yet)
         weapon_cooldown      : {
             let raw = base.weapon_cooldown as i64 + delta.weapon_cooldown_add as i64;
             raw.max(1) as u64

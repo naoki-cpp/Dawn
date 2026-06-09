@@ -137,6 +137,7 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 | `ActivateModuleCommand` | Active モジュールをオンにする | `ModuleActivated` | ✅ 実装済み |
 | `DeactivateModuleCommand` | Active モジュールをオフにする | `ModuleDeactivated` | ✅ 実装済み |
 | `AttackCommand` | 攻撃対象を指定する | `WeaponFired` | ✅ 型定義・WsServer JSON パーサー実装済み（Phase 5）|
+| `StopCommand` | 加速度を用いて速度をゼロに減速する | — | ✅ 実装済み（ADR-0012）|
 
 ---
 
@@ -256,19 +257,25 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 
 ### `WeaponFired`
 
-**説明:** Ship が武器を発射した。ダメージは同 Tick の `DamageTaken` で確認できる。
+**説明:** 武器が発射され、かつ命中した。ミス（命中率チェック失敗）の場合はイベントを発行しない。
+ダメージは同 Tick の `DamageTaken` で確認できる。
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
 | `attacker_id` | `ShipId` | ✓ | 発射した Ship |
 | `target_id` | `ShipId` | ✓ | 攻撃対象の Ship |
-| `damage` | `f32` | ✓ | 与えるダメージ量 |
+| `damage` | `f32` | ✓ | 実際に与えるダメージ量（基礎ダメージ × ランダム倍率 0.49〜1.49、1%確率で 3.0） |
 | `tick` | `Tick` | ✓ | 発射した Tick |
 
-**発行条件:** ターゲットが `LockComp` で `Locked` 状態であり、かつ
-`weapon_cooldown` が経過している場合のみ発行する。
+**発行条件（ADR-0012）:**
+1. ターゲットが `LockComp` で `Locked` 状態である
+2. Capacitor サイクルが開始された Tick である（`fire_triggers` に含まれる）
+3. 命中率チェックを通過した（`rand() < hit_chance`）
 
-**Replay:** ECS 状態を変更しない（発射ログのみ）。
+命中率 = `0.5 ^ ((angular / (tracking × sig))² + (max(0, dist − optimal) / falloff)²)`
+
+**Replay:** ECS 状態を変更しない（発射ログのみ）。`damage` フィールドに実際の値が記録されているため、
+Replay 時は乱数を再計算しない。
 
 ---
 
