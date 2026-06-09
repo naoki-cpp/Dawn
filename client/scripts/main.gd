@@ -30,8 +30,9 @@ var _player_material : StandardMaterial3D = null
 
 # ── 内部状態 ─────────────────────────────────────────────────────────────────
 
-var _ships           : Dictionary = {}
-var _player_ship_id  : int        = -1
+var _ships                 : Dictionary = {}
+var _player_ship_id        : int        = -1
+var _player_ship_type_name : String     = ""
 var _event_count     : int        = 0
 var _current_tick    : int        = 0
 ## 3-layer HP tracking (Shield / Armor / Hull)
@@ -273,6 +274,7 @@ func _on_initial_state(ships: Array) -> void:
 			_cap_max      = d.get("cap_max",               500.0) as float
 			_cap_recharge = d.get("cap_recharge_per_tick",  10.0) as float
 			_cap_current  = _cap_max  ## Assume full cap on connect.
+			_player_ship_type_name = d.get("ship_type_name", "") as String
 			_set_as_player_ship(sid, ship)
 		elif is_player:
 			## Other player ship = potential duel opponent
@@ -516,9 +518,13 @@ func _update_hud() -> void:
 		_cap_bar.value  = pct
 		_cap_label.text = "CAP  %.0f / %.0f GJ" % [_cap_current, _cap_max]
 
+	var ship_name_line: String = ""
+	if _player_ship_type_name != "":
+		ship_name_line = "\n" + _player_ship_type_name
+
 	_stats_label.text = (
-		"%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nLock: %s%s\n\n[DoubleClick] Thrust\n[RightClick] Lock"
-		% [status, _ships.size(), _current_tick, speed_str, hp_str, lock_str, module_lines]
+		"%s%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nLock: %s%s\n\n[DoubleClick] Thrust\n[RightClick] Lock"
+		% [status, ship_name_line, _ships.size(), _current_tick, speed_str, hp_str, lock_str, module_lines]
 	)
 
 # ── Capacitor client-side simulation ─────────────────────────────────────────

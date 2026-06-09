@@ -75,6 +75,8 @@ where
     player_ships       : HashMap<PlayerId, ShipId>,
     /// ShipId → PlayerId（逆引き）
     ship_owners        : HashMap<ShipId, PlayerId>,
+    /// ShipId → ShipTypeId（船種の逆引き・InitialState に ship_type_name を含めるために使用）
+    ship_type_ids      : HashMap<ShipId, ShipTypeId>,
     /// PlayerId 採番カウンタ
     player_id_counter  : u64,
 }
@@ -112,6 +114,7 @@ impl<S: EventStore> SimulationNode<S> {
             base_stats         : HashMap::new(),
             player_ships       : HashMap::new(),
             ship_owners        : HashMap::new(),
+            ship_type_ids      : HashMap::new(),
             player_id_counter  : 0,
         }
     }
@@ -131,6 +134,7 @@ impl<S: EventStore> SimulationNode<S> {
             base_stats         : HashMap::new(),
             player_ships       : HashMap::new(),
             ship_owners        : HashMap::new(),
+            ship_type_ids      : HashMap::new(),
             player_id_counter  : 0,
         };
 
@@ -176,6 +180,7 @@ impl<S: EventStore> SimulationNode<S> {
 
         self.insert_to_world(ship_id, position, velocity);
         self.base_stats.insert(ship_id, base);
+        self.ship_type_ids.insert(ship_id, ship_type_id);
 
         // Update ShipStatsComp, HullComp, and CapacitorComp to match base stats.
         if let Some(&entity) = self.ship_index.get(&ship_id) {
@@ -241,6 +246,7 @@ impl<S: EventStore> SimulationNode<S> {
             if let Some(entity) = self.ship_index.remove(ship_id) {
                 self.world.despawn_ship(entity);
             }
+            self.ship_type_ids.remove(ship_id);
         }
 
         // 6. Bot System — bots issue the same commands as human players
@@ -623,8 +629,13 @@ impl<S: EventStore> SimulationNode<S> {
             let stats   = self.world.inner().get::<&ShipStatsComp>(*entity).ok()?;
             let hull    = self.world.inner().get::<&HullComp>(*entity).ok()?;
             let is_player = self.ship_owners.contains_key(&ship_id);
+            let ship_type_name = self.ship_type_ids.get(&ship_id)
+                .and_then(|tid| self.ship_type_registry.get(tid))
+                .map(|def| def.name.as_str())
+                .unwrap_or("Unknown");
             Some(serde_json::json!({
                 "ship_id"              : ship_id.raw(),
+                "ship_type_name"       : ship_type_name,
                 "position"             : { "x": pos.x, "y": pos.y, "z": pos.z },
                 "max_shield"           : stats.max_shield,
                 "max_armor"            : stats.max_armor,
