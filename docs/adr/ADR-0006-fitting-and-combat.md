@@ -93,7 +93,9 @@ pub struct ShipStatsComp {
 
     // 武器（モジュールのみで供給）
     pub weapon_damage        : f32,
-    pub weapon_range         : f32,
+    pub weapon_range         : f32,    // 最適射程 (units)
+    pub weapon_tracking      : f32,    // タレット追跡速度 (rad/tick)  ← ADR-0012
+    pub weapon_falloff       : f32,    // フォールオフ射程 (units)     ← ADR-0012
     pub weapon_cooldown      : u64,
 
     // ロック
@@ -103,6 +105,9 @@ pub struct ShipStatsComp {
     // キャパシタ（Phase 6 追加）
     pub cap_max              : f32,   // 最大容量 (GJ)
     pub cap_recharge_per_tick: f32,   // 毎 Tick の回復量 (GJ/tick)
+
+    // シグネチャ（ADR-0012 追加）
+    pub sig_radius           : f32,   // 被追跡しやすさ。大型船ほど大きい
 }
 
 // キャパシタ現在値（live state、HullComp と同パターン）
@@ -228,16 +233,16 @@ pub struct DeactivateModuleCommand { pub ship_id: ShipId, pub module_id: ModuleI
 #### コンポーネント設計（dawn-ecs）
 
 ```rust
-// HP 状態
+// HP 状態（§5 の 3層 HP に更新済み）
 pub struct HullComp {
-    pub current_hp   : f32,
-    pub is_destroyed : bool,
+    pub current_shield : f32,
+    pub current_armor  : f32,
+    pub current_hull   : f32,
+    pub is_destroyed   : bool,
 }
 
-// 武器クールダウン追跡
-pub struct WeaponComp {
-    pub last_fired_tick : Tick,
-}
+// WeaponComp は Phase 6 で削除。
+// 武器発射タイミングは CapacitorSystem の weapon_cycles_started で管理する（ADR-0012）。
 ```
 
 #### Combat イベント（dawn-core）
@@ -250,11 +255,14 @@ pub struct WeaponFired {
     pub tick        : Tick,
 }
 
+// DamageTaken は §5 の 3層 HP に更新済み（current_hp → 3フィールド）
 pub struct DamageTaken {
-    pub ship_id    : ShipId,
-    pub amount     : f32,
-    pub current_hp : f32,   // Replay 時に HullComp を復元するために必要
-    pub tick       : Tick,
+    pub ship_id        : ShipId,
+    pub damage         : f32,
+    pub current_shield : f32,   // Replay 時に HullComp を正確に復元するために必要
+    pub current_armor  : f32,
+    pub current_hull   : f32,
+    pub tick           : Tick,
 }
 
 pub struct ShipDestroyed {
@@ -266,26 +274,30 @@ pub struct ShipDestroyed {
 
 #### DamageTaken の Replay 処理（INV-002）
 
-`apply_event` で `DamageTaken` を受け取ったとき `HullComp.current_hp` を
-`e.current_hp` で更新する。`WeaponFired` は ECS 状態を変えないためスキップする。
+`apply_event` で `DamageTaken` を受け取ったとき `HullComp` の
+`current_shield` / `current_armor` / `current_hull` を各フィールドで上書きする。
+`WeaponFired` は ECS 状態を変えないためスキップする。
 
 #### Combat System フロー（CLAUDE.md §6 Tick 処理順序に準拠）
 
 ```
 Phase 6 以降の Tick 処理:
   1. Tick カウンタをインクリメント
-  2. コマンドキューを処理する（Move / LockOn / Activate / Deactivate）
+  2. コマンドキューを処理する
+       Move / Stop / LockOn / Activate / Deactivate
   3. Movement System を実行する
   4. Capacitor System を実行する           ← Phase 6 追加（Movement の後）
      a. 毎 Tick: cap を recharge_per_tick 分回復
      b. Active-ON モジュールのサイクルを進行（cycle_remaining--）
      c. cycle_remaining == 0 → 新サイクル開始: cap 消費
+        武器モジュールの場合 weapon_cycles_started に ship_id を追加
      d. cap 不足 → 強制 OFF → ModuleDeactivated イベント生成
   5. Lock System を実行する
   6. Combat System を実行する              ← Lock System の後
-     a. 射程内の敵を検索（O(n²)、Phase 8 で Spatial Index に移行）
-     b. クールダウンが明けていれば WeaponFired を生成
-     c. ターゲットの HullComp にダメージを適用し DamageTaken を生成
+     a. weapon_cycles_started に含まれる Ship のみ発射判定（ADR-0012）
+     b. EVE 命中率式で hit_chance を計算し乱数ロール
+        hit_chance = 0.5^((angular/(tracking×sig))² + (max(0,d−opt)/falloff)²)
+     c. 命中した場合のみ DamageTaken を生成（ミスは WeaponFired を発行しない）
      d. HP ≤ 0 なら ShipDestroyed を生成し destroyed リストに積む
   7. Bot System を実行する                 ← Phase 6 追加（Combat の後）
   8. 全イベントを EventStore に Append
@@ -296,11 +308,10 @@ Phase 6 以降の Tick 処理:
 呼び出し元（`SimulationNode::tick()`）が `CombatResult.destroyed` を受け取り
 ECS と `ship_index` から Ship を削除する。
 
-#### プレイヤー操作（Phase 4 暫定）
+#### プレイヤー操作
 
-- NPC は自動で射程内の最近傍 Ship を攻撃する
-- プレイヤー操作による攻撃対象の指定は Phase 5 で実装（ADR-0007）
-- `AttackCommand` の WsServer JSON パーサーは未実装（Phase 5 で追加）
+- プレイヤーは右クリックでロックオン対象を指定し、武器を有効化すると自動発射する
+- `AttackCommand` は将来の手動発射モード用に型定義・JSON パーサーのみ実装済み
 
 ---
 
@@ -331,7 +342,8 @@ Phase 5 では `PlayerId` による所有権検証が加わる（ADR-0007 参照
 | イベント型（`ShipFitted`, `WeaponFired`, `DamageTaken`, `ShipDestroyed`） | `dawn-core/src/events.rs` |
 | コマンド型（`FitModuleCommand`, `AttackCommand`） | `dawn-core/src/commands.rs` |
 | `FittingComp` | `dawn-ecs/src/components/fitting.rs` |
-| `HullComp`, `WeaponComp` | `dawn-ecs/src/components/combat.rs` |
+| `HullComp` | `dawn-ecs/src/components/combat.rs` |
+| `LockComp`, `LockState`, `LockEntry` | `dawn-ecs/src/components/combat.rs` |
 | `ShipStatsComp` 拡張 | `dawn-ecs/src/components/movement.rs` |
 | `apply_fitting()`, `apply_delta()` | `dawn-ecs/src/systems/fitting.rs` |
 | `CombatSystem::run()` | `dawn-ecs/src/systems/combat.rs` |

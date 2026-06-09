@@ -492,7 +492,8 @@ pub type Tick = u64;
 現在の実装（Phase 6 時点）:
   1. Tick カウンタをインクリメント
   2. コマンドキューを処理する
-       MoveCommand              → ThrustComp を更新
+       MoveCommand              → ThrustComp.direction を更新（is_braking = false）
+       StopCommand              → ThrustComp.is_braking = true（逆推力で減速停止）
        LockOnCommand            → LockSystem に渡す
        ActivateModuleCommand    → FittedSlot.is_active = true / apply_fitting()
        DeactivateModuleCommand  → FittedSlot.is_active = false / apply_fitting()
@@ -501,9 +502,12 @@ pub type Tick = u64;
        毎 Tick: cap を recharge_per_tick 分回復
        cycle_remaining == 0 → 新サイクル: cap 消費 / cap 不足 → 強制 OFF
        cycle_remaining > 0  → デクリメント
+       武器モジュールのサイクル開始 → weapon_cycles_started に ship_id を追加
        → 生成: Vec<ModuleDeactivated>（cap 枯渇時のみ）
   5. Lock System を実行する                ← Capacitor の後（位置確定後）
   6. Combat System を実行する              ← Lock の後（Locked 状態を参照）
+       weapon_cycles_started に含まれる Ship のみ発射判定（ADR-0012）
+       EVE 命中率式: 0.5^((angular/(tracking×sig))² + (max(0,d−opt)/falloff)²)
   7. Bot System を実行する                 ← Combat の後（破壊判定済み後）
        IsBotComp を持つ Ship のみ対象
        apply_*_owned() でプレイヤーと同一パイプラインを使用
@@ -1153,6 +1157,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-07（Phase 6 完了・Capacitor システム反映）*
-*対応ADR: ADR-0001 〜 ADR-0010*
+*最終更新: 2026-06-10（Phase 6 完了・EVE命中率式 / タクティカルオーバーレイ / StopCommand / ボットAI反映）*
+*対応ADR: ADR-0001 〜 ADR-0013*
 *次回レビュー予定: Phase 7 着手前（ADR-0009 実装開始前）*

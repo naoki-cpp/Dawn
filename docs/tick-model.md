@@ -73,7 +73,8 @@ Step 1: Tick カウンタをインクリメント
          current_tick = current_tick + 1
 
 Step 2: コマンドキューを処理する
-         MoveCommand              → ThrustComp を更新
+         MoveCommand              → ThrustComp.direction を更新（is_braking = false）
+         StopCommand              → ThrustComp.is_braking = true（逆推力で減速）
          LockOnCommand            → LockSystem に渡す（次のステップで処理）
          ActivateModuleCommand    → FittedSlot.is_active = true / apply_fitting()
          DeactivateModuleCommand  → FittedSlot.is_active = false / apply_fitting()
@@ -99,7 +100,9 @@ Step 5: Lock System を実行する
          ※ Movement の後に実行すること（位置確定後にロック判定）
 
 Step 6: Combat System を実行する
-         CombatSystem::run(&mut world, tick)
+         CombatSystem::run(&mut world, tick, &cap.weapon_cycles_started)
+         → weapon_cycles_started に含まれる Ship のみ発射判定する（ADR-0012）
+         → EVE 命中率式: hit_chance = 0.5^((angular/(tracking×sig))² + (max(0,d−opt)/falloff)²)
          → 生成: Vec<WeaponFired | DamageTaken | ShipDestroyed>
          ※ Lock System の後に実行すること（Locked 状態を参照するため）
          ※ 破壊された Ship は呼び出し元が ECS と ship_index から削除する

@@ -137,7 +137,7 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 | `ActivateModuleCommand` | Active モジュールをオンにする | `ModuleActivated` | ✅ 実装済み |
 | `DeactivateModuleCommand` | Active モジュールをオフにする | `ModuleDeactivated` | ✅ 実装済み |
 | `AttackCommand` | 攻撃対象を指定する | `WeaponFired` | ✅ 型定義・WsServer JSON パーサー実装済み（Phase 5）|
-| `StopCommand` | 加速度を用いて速度をゼロに減速する | — | ✅ 実装済み（ADR-0012）|
+| `StopCommand` | 加速度を用いて速度をゼロに減速する | — | ✅ 実装済み |
 
 ---
 

@@ -54,7 +54,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 - ✅ Phase 3 — Event 永続化（Snapshot + Replay 再起動後の状態完全復元 ✓）
 - ✅ Phase 4 — ゲーム開発ループ（Cycle 1〜3 完了 / 卒業基準 5/5 達成）
 - ✅ Phase 5 — マルチプレイヤー基盤（ADR-0007 チェックリスト全完了 / 138テスト全パス）
-- ✅ Phase 6 — ゲームループ改善（Capacitor / Duel Metrics / cap バー / 154テスト全パス）
+- ✅ Phase 6 — ゲームループ改善（Capacitor / EVE命中率式 / タクティカルオーバーレイ / ボットAI / 154テスト全パス）
 
 ### Phase 4 卒業記録（ADR-0007 §6）
 
@@ -83,17 +83,21 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**Phase 6 主目標: 人間のプレイテストによるゲームループの検証**
+**Phase 6 完了。Phase 7（分散コンセンサス / Raft）に着手できる状態。**
 
-詳細は `docs/playtest-guide.md` を参照。
+Phase 7 着手前に実施が推奨されるプレイテストについては `docs/playtest-guide.md` を参照。
 
-Phase 7 着手前に以下を実装してプレイテストを実施すること:
+#### Phase 6 完了タスク一覧
 
 | 優先度 | タスク | 状況 | 理由 |
 |---|---|---|---|
 | ✅ 完了 | Capacitor 実装 | サイクルベース cap 管理まで完了（ADR-0011） | 「常時 ON で勝ち」問題の解消 |
 | ✅ 完了 | セッションメトリクス出力 | --duel モード限定で実装済み（勝敗・経過Tick・cap枯渇回数をstdout出力） | 数値でバランスを判断できるようにする |
 | ✅ 完了 | Godot: cap バー表示 | ProgressBar ウィジェット実装済み（青色バー + GJ表示） | cap 状態の視覚フィードバック |
+| ✅ 完了 | EVE 命中率式（ADR-0012） | tracking/falloff/sig_radius 追加。hit_chance = 0.5^(追跡項²+射程項²) | ポジション管理が実質的な意味を持つ |
+| ✅ 完了 | タクティカルオーバーレイ（ADR-0013） | Tab キーで射程リング（緑:最適/橙:フォールオフ）を表示 | 距離と射程の視覚的フィードバック |
+| ✅ 完了 | StopCommand（S キー） | 逆推力で減速停止。ボット AI にも使用 | 精密なポジション制御を可能にする |
+| ✅ 完了 | ボット AI 改善 | 射程内停止・ロックキュー・スポーン位置修正 | デュエルが成立するようにする |
 
 ---
 
@@ -375,8 +379,8 @@ Phase 10: Client 本格化（GDExtension 導入）
 エンジン      : Godot 4
 ゲームロジック: GDScript（AI が主に書く）
 高性能処理    : godot-rust / GDExtension（Phase 10 以降）
-サーバー通信  : InProcessConnection（Phase 4〜5）
-               → GrpcConnection（Phase 6〜）
+サーバー通信  : WebSocket + JSON（Phase 4〜6 で継続使用）
+               → gRPC への移行は Phase 9 以降で再検討（ADR-0007）
 型共有        : Phase 4〜9: チャンネル / proto 変換
                → Phase 10: GDExtension で dawn-core を直接 import
 
