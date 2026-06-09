@@ -545,73 +545,94 @@ Tick なしのイベントは INV-005 違反として拒否する。
 
 ## 7. Event Schema Evolution Rules
 
-### 基本原則
+### フェーズによる適用範囲
+
+このセクションのルールには **プレリリース（現在）** と **リリース以降** の 2 段階がある。
+
+```
+プレリリース（Phase 1〜リリース前）:
+  永続化されたイベントログを持つ外部ユーザーが存在しない。
+  → 破壊的変更（フィールド削除・型変更・イベント削除）を直接行ってよい。
+  → Upcaster・V2 命名・Deprecated マークは不要。
+  → ただし docs/event-catalog.md と CLAUDE.md は常に実態と合わせること。
+
+リリース以降（本番ログが存在する段階）:
+  外部ユーザーのイベントログが存在する。
+  → 既存フィールドの変更・削除は Upcaster なしに行ってはならない。
+  → 以下「リリース以降の制約」が完全に適用される。
+```
+
+**現在は Phase 6（プレリリース）。破壊的変更は許可されている。**
+
+---
+
+### リリース以降の基本原則
 
 **既存の Event フィールドを変更・削除してはならない。**
 **新しいフィールドの追加のみが許可される。**
 
-### 許可される変更
+### リリース以降に許可される変更
 
 ```rust
 // 変更前
-pub struct ShipMoved {
-    pub ship_id: ShipId,
-    pub from   : Position,
-    pub to     : Position,
-    pub tick   : Tick,
+pub struct WeaponFired {
+    pub ship_id  : ShipId,
+    pub target_id: ShipId,
+    pub damage   : f32,
+    pub tick     : Tick,
 }
 
 // 変更後: 新フィールドの追加は許可（必ず Option にする）
-pub struct ShipMoved {
-    pub ship_id : ShipId,
-    pub from    : Position,
-    pub to      : Position,
-    pub tick    : Tick,
-    pub velocity: Option<Velocity>,  // ← 新フィールドは Option<T> で追加
+pub struct WeaponFired {
+    pub ship_id  : ShipId,
+    pub target_id: ShipId,
+    pub damage   : f32,
+    pub tick     : Tick,
+    pub hit_chance: Option<f32>,  // ← 新フィールドは Option<T> で追加
 }
 ```
 
-### 禁止される変更
+### リリース以降に禁止される変更
 
 ```rust
 // 禁止1: フィールドの削除
-pub struct ShipMoved {
-    pub ship_id: ShipId,
-    // from を削除 ← 禁止。過去のEventのReplayでデシリアライズが失敗する
-    pub to  : Position,
-    pub tick: Tick,
+pub struct WeaponFired {
+    pub ship_id  : ShipId,
+    // target_id を削除 ← 禁止。過去のEventのReplayでデシリアライズが失敗する
+    pub damage   : f32,
+    pub tick     : Tick,
 }
 
 // 禁止2: フィールドの型変更
-pub struct ShipMoved {
-    pub ship_id: ShipId,
-    pub from   : (f32, f32, f32), // Position → tuple に変更 ← 禁止
-    pub to     : Position,
-    pub tick   : Tick,
+pub struct WeaponFired {
+    pub ship_id  : ShipId,
+    pub target_id: u64,   // ShipId → u64 に変更 ← 禁止
+    pub damage   : f32,
+    pub tick     : Tick,
 }
 
 // 禁止3: フィールド名の変更（シリアライゼーションのキーが変わる）
-pub struct ShipMoved {
-    pub ship_id    : ShipId,
-    pub origin     : Position, // from → origin に変更 ← 禁止
-    pub destination: Position, // to → destination に変更 ← 禁止
+pub struct WeaponFired {
+    pub attacker_id: ShipId,  // ship_id → attacker_id に変更 ← 禁止
+    pub target_id  : ShipId,
+    pub damage     : f32,
     pub tick       : Tick,
 }
 ```
 
-### Event に破壊的変更が必要な場合の手順
+### リリース以降に破壊的変更が必要な場合の手順
 
 ```
 1. 新しい Event を別名で定義する
-   例: ShipMoved → ShipMovedV2
+   例: WeaponFired → WeaponFiredV2
 
 2. 古い Event を Deprecated としてマークする（削除しない）
-   /// @deprecated ShipMovedV2 を使用すること
-   pub struct ShipMoved { ... }
+   /// @deprecated WeaponFiredV2 を使用すること
+   pub struct WeaponFired { ... }
 
 3. Upcaster を実装する
-   impl Upcaster for ShipMoved {
-       fn upcast(self) -> ShipMovedV2 { ... }
+   impl Upcaster for WeaponFired {
+       fn upcast(self) -> WeaponFiredV2 { ... }
    }
 
 4. Replay 時に Upcaster を通して新形式に変換する
@@ -624,6 +645,7 @@ pub struct ShipMoved {
 ### Event Catalog との同期
 
 `docs/event-catalog.md` が Event の唯一の仕様書である。
+フェーズにかかわらず、コードの変更と同時に更新すること。
 
 ```bash
 # Event定義とカタログの整合をCIで検証する
@@ -781,7 +803,9 @@ assert_eq!(pos, expected_position);
 □ 新Eventのフィールドは全て Option ではなく必須フィールドで設計した
   （Optional フィールドは後から追加、最初から Optional にしない）
 □ 対応する Command が dawn-core/src/commands.rs に存在する
-□ Upcaster が必要かどうかを確認した（既存Eventの変更の場合）
+□ 既存 Event を変更する場合: リリース済みか確認した
+  - プレリリース（現在）→ 破壊的変更を直接行ってよい（Upcaster 不要）
+  - リリース以降       → §7「リリース以降に破壊的変更が必要な場合の手順」に従う
 ```
 
 ### 新しいCrateを追加する場合の追加確認
