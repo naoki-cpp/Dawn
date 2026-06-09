@@ -80,10 +80,6 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 | イベント名 | 説明 | 発行者 | ステータス |
 |---|---|---|---|
 | `VelocityChanged` | Ship の速度が変化した | `MovementSystem::run()` | ✅ 実装済み（ADR-0008） |
-| `ShipMoved` | ~~Ship の位置が変化した~~ | `MovementSystem::run()` | **@deprecated** → `VelocityChanged` に移行 |
-
-> **注意（ADR-0008）:** `ShipMoved` は廃止予定。新規実装では `VelocityChanged` を使うこと。
-> 位置は派生状態であり、イベントに含めない。Replay は `VelocityChanged` + `position += velocity` で行う。
 
 ### 3.3 Fitting
 
@@ -177,27 +173,6 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 
 **設計根拠:** 位置は派生状態であり権威的イベントに含めない。
 物理入力（推力）もコマンドであり権威的イベントに含めない（ADR-0008）。
-
----
-
-### `ShipMoved` *(deprecated)*
-
-**説明:** ~~Ship が 1 Tick 内に位置を変化させた。~~
-
-> **@deprecated:** `VelocityChanged` に移行する（ADR-0008）。
-> 既存のイベントログとの後方互換のため定義は残すが、新規発行は禁止。
-> Upcaster: `ShipMoved` → `VelocityChanged` で変換して Replay する。
-
-**説明:** Ship が 1 Tick 内に位置を変化させた。
-
-| フィールド | 型 | 必須 | 説明 |
-|---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | 移動した Ship |
-| `from` | `Position` | ✓ | 移動前の座標 |
-| `to` | `Position` | ✓ | 移動後の座標 |
-| `tick` | `Tick` | ✓ | 移動が確定した Tick |
-
-**不変条件:** `from != to`（位置変化なしの Ship はイベントを発行しない）。
 
 ---
 

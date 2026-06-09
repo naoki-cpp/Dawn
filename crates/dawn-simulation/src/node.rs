@@ -38,7 +38,7 @@ use crate::snapshot::{ShipSnapshot, StateSnapshot};
 pub struct TickResult {
     /// The tick that was just completed.
     pub tick          : Tick,
-    /// Number of `ShipMoved` events emitted this tick.
+    /// Number of events emitted this tick.
     pub events_emitted: usize,
     /// The actual events produced (used by Actor layer for replication).
     pub events        : Vec<DomainEvent>,
@@ -886,26 +886,6 @@ impl<S: EventStore> SimulationNode<S> {
                     }
                     if let Ok(mut vel) = self.world.inner_mut().get::<&mut VelocityComp>(entity) {
                         vel.0 = e.velocity;
-                    }
-                }
-                if e.tick > self.current_tick {
-                    self.current_tick = e.tick;
-                }
-            }
-
-            #[allow(deprecated)]
-            DomainEvent::ShipMoved(e) => {
-                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
-                    let velocity = Velocity {
-                        dx: e.to.x - e.from.x,
-                        dy: e.to.y - e.from.y,
-                        dz: e.to.z - e.from.z,
-                    };
-                    if let Ok(mut vel) = self.world.inner_mut().get::<&mut VelocityComp>(entity) {
-                        vel.0 = velocity;
-                    }
-                    if let Ok(mut pos) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
-                        pos.0 = e.to;
                     }
                 }
                 if e.tick > self.current_tick {

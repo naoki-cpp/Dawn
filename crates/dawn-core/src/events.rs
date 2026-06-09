@@ -33,13 +33,6 @@ pub enum DomainEvent {
     /// See ADR-0008.
     VelocityChanged(VelocityChanged),
 
-    /// @deprecated — use `VelocityChanged` instead (ADR-0008).
-    ///
-    /// Retained for backward compatibility with existing event logs.
-    /// Replay upcasts this to `VelocityChanged` using the `to` field.
-    #[allow(deprecated)]
-    ShipMoved(ShipMoved),
-
     /// A Ship was permanently removed from the world.
     ShipDespawned(ShipDespawned),
 
@@ -74,8 +67,6 @@ impl DomainEvent {
         match self {
             Self::ShipSpawned(e)        => e.ship_id,
             Self::VelocityChanged(e)    => e.ship_id,
-            #[allow(deprecated)]
-            Self::ShipMoved(e)          => e.ship_id,
             Self::ShipDespawned(e)      => e.ship_id,
             Self::ShipFitted(e)         => e.ship_id,
             Self::ModuleActivated(e)    => e.ship_id,
@@ -94,8 +85,6 @@ impl DomainEvent {
         match self {
             Self::ShipSpawned(e)        => e.tick,
             Self::VelocityChanged(e)    => e.tick,
-            #[allow(deprecated)]
-            Self::ShipMoved(e)          => e.tick,
             Self::ShipDespawned(e)      => e.tick,
             Self::ShipFitted(e)         => e.tick,
             Self::ModuleActivated(e)    => e.tick,
@@ -134,22 +123,6 @@ pub struct ShipSpawned {
 pub struct VelocityChanged {
     pub ship_id  : ShipId,
     pub velocity : Velocity,
-    pub tick     : Tick,
-}
-
-// ── ShipMoved (deprecated) ────────────────────────────────────────────────────
-
-/// @deprecated — replaced by `VelocityChanged` (ADR-0008).
-///
-/// Position is derived state and must not be recorded as an authoritative event.
-/// This type is retained only for backward compatibility with existing event logs.
-/// Upcaster: derive velocity from `(to - from)` and emit `VelocityChanged`.
-#[deprecated(since = "phase5", note = "Use VelocityChanged instead (ADR-0008)")]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ShipMoved {
-    pub ship_id  : ShipId,
-    pub from     : Position,
-    pub to       : Position,
     pub tick     : Tick,
 }
 

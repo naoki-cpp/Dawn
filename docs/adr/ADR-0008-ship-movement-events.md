@@ -114,16 +114,15 @@ pub struct VelocityChanged {
 導入: VelocityChanged { ship_id, velocity, tick }
 ```
 
-**移行方針（Event Schema Evolution Rules §7 準拠）:**
-- `ShipMoved` は @deprecated マークを付けて削除しない（既存ログの後方互換）
-- 新たな `ShipMoved` は発行しない
-- Replay 時: 旧ログの `ShipMoved` は Upcaster で `VelocityChanged` として扱う
+**移行結果（完了）:**
+- `ShipMoved` はコードベースから完全に削除した（新規プロジェクトのため既存ログはない）
+- `VelocityChanged` のみを使用する
 
 ---
 
 ## クライアント（Godot）への影響
 
-`ShipMoved`（絶対位置）の代わりに `VelocityChanged`（速度）を受け取る。
+`VelocityChanged`（速度）を受け取る。`ShipMoved` は削除済み。
 
 ```
 クライアント側の位置更新:
@@ -170,14 +169,13 @@ VelocityChanged（新）: 速度が変化した時のみ
 
 ## 実装チェックリスト
 
-- [ ] `dawn-core`: `VelocityChanged` イベント追加
-- [ ] `dawn-core`: `ShipMoved` を @deprecated マーク
-- [ ] `dawn-core`: `ShipMoved` → `VelocityChanged` Upcaster 実装
-- [ ] `dawn-ecs/systems/movement.rs`: 速度が変化した場合のみ `VelocityChanged` を発行
-- [ ] `dawn-simulation/node.rs`: `apply_event` で `VelocityChanged` を処理
-- [ ] `dawn-simulation/ws_server.rs`: `VelocityChanged` を JSON で送信
-- [ ] `client/scripts/main.gd`: `VelocityChanged` ハンドラ追加
-- [ ] `client/scripts/ship_controller.gd`: フレームごとに velocity で位置更新
+- [x] `dawn-core`: `VelocityChanged` イベント追加
+- [x] `dawn-core`: `ShipMoved` を削除（新規プロジェクトのため Upcaster 不要）
+- [x] `dawn-ecs/systems/movement.rs`: 速度が変化した場合のみ `VelocityChanged` を発行
+- [x] `dawn-simulation/node.rs`: `apply_event` で `VelocityChanged` を処理
+- [x] `dawn-simulation/ws_server.rs`: `VelocityChanged` を JSON で送信
+- [x] `client/scripts/main.gd`: `VelocityChanged` ハンドラ追加
+- [x] `client/scripts/ship_controller.gd`: フレームごとに velocity で位置更新
 
 ---
 

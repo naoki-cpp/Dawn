@@ -109,15 +109,14 @@ impl ReplicationBusHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{events::ShipMoved, NodeId, Position, ShipId, Tick};
+    use dawn_core::{events::VelocityChanged, NodeId, ShipId, Tick, Velocity};
 
     fn events(count: usize) -> Vec<DomainEvent> {
         (0..count)
-            .map(|i| DomainEvent::ShipMoved(ShipMoved {
-                ship_id: ShipId::new(NodeId(0), i as u64),
-                from   : Position::ORIGIN,
-                to     : Position::new(1.0, 0.0, 0.0),
-                tick   : Tick(1),
+            .map(|i| DomainEvent::VelocityChanged(VelocityChanged {
+                ship_id : ShipId::new(NodeId(0), i as u64),
+                velocity: Velocity::new(1.0, 0.0, 0.0),
+                tick    : Tick(1),
             }))
             .collect()
     }

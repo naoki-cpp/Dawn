@@ -82,7 +82,6 @@ Step 2: コマンドキューを処理する
 Step 3: Movement System を実行する（ECS バッチ処理）
          MovementSystem::run(&mut world, tick)
          → 生成: Vec<VelocityChanged>（速度が変化した船のみ）
-         ※ ShipMoved は @deprecated（ADR-0008）。位置は派生状態であり記録しない。
 
 Step 4: Capacitor System を実行する
          CapacitorSystem::run(&mut world, tick)
@@ -131,14 +130,16 @@ EventStore への Append が完了する前に他のノードへ伝播すると�
 
 ## 4. Tick とイベントの対応規則
 
-### ShipMoved への tick フィールド必須化
+### tick フィールドの必須化
+
+すべてのドメインイベントは `tick: Tick` フィールドを含む（INV-005）。
 
 ```rust
 // 正しい: tick を含む
-ShipMoved { ship_id, from, to, tick: Tick(42) }
+VelocityChanged { ship_id, velocity, tick: Tick(42) }
 
 // 禁止: tick を省略（INV-005 違反）
-ShipMoved { ship_id, from, to }  // コンパイルエラーになる設計にする
+VelocityChanged { ship_id, velocity }  // コンパイルエラーになる設計にする
 ```
 
 `tick` フィールドを省略できない理由:  

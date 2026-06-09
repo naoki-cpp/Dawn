@@ -55,8 +55,8 @@ impl EventStore for InMemoryEventStore {
 mod tests {
     use super::*;
     use dawn_core::{
-        events::{ShipMoved, ShipSpawned},
-        NodeId, Position, SectorId, ShipId, Tick,
+        events::{ShipSpawned, VelocityChanged},
+        NodeId, Position, SectorId, ShipId, Tick, Velocity,
     };
 
     fn ship_id(n: u64) -> ShipId {
@@ -64,11 +64,10 @@ mod tests {
     }
 
     fn moved_event(ship_n: u64, tick: u64) -> DomainEvent {
-        DomainEvent::ShipMoved(ShipMoved {
-            ship_id: ship_id(ship_n),
-            from   : Position::ORIGIN,
-            to     : Position::new(1.0, 0.0, 0.0),
-            tick   : Tick(tick),
+        DomainEvent::VelocityChanged(VelocityChanged {
+            ship_id : ship_id(ship_n),
+            velocity: Velocity::new(1.0, 0.0, 0.0),
+            tick    : Tick(tick),
         })
     }
 

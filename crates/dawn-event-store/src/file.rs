@@ -133,16 +133,15 @@ impl EventStore for FileEventStore {
 mod tests {
     use super::*;
     use dawn_core::{
-        events::ShipMoved,
-        NodeId, Position, ShipId, Tick,
+        events::VelocityChanged,
+        NodeId, ShipId, Tick, Velocity,
     };
 
     fn moved_event(n: u64, tick: u64) -> DomainEvent {
-        DomainEvent::ShipMoved(ShipMoved {
-            ship_id: ShipId::new(NodeId(0), n),
-            from   : Position::ORIGIN,
-            to     : Position::new(1.0, 0.0, 0.0),
-            tick   : Tick(tick),
+        DomainEvent::VelocityChanged(VelocityChanged {
+            ship_id : ShipId::new(NodeId(0), n),
+            velocity: Velocity::new(1.0, 0.0, 0.0),
+            tick    : Tick(tick),
         })
     }
 

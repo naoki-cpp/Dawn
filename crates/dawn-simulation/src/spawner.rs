@@ -99,7 +99,7 @@ mod tests {
         for (_, _, vel) in &ships {
             assert!(
                 vel.speed() > 0.0,
-                "every dummy ship must move so that ShipMoved events are produced"
+                "every dummy ship must have non-zero velocity so VelocityChanged events are produced"
             );
         }
     }

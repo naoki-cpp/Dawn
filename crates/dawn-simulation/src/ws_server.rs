@@ -66,9 +66,6 @@ fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
             velocity: VelJson { dx: e.velocity.dx, dy: e.velocity.dy, dz: e.velocity.dz },
             tick    : e.tick.value(),
         },
-        // ShipMoved は deprecated（ADR-0008）。既存ログの Replay 用に受け取るが Godot には送らない。
-        #[allow(deprecated)]
-        DomainEvent::ShipMoved(_) => return None,
         DomainEvent::ShipDespawned(e) => EventJson::ShipDespawned {
             ship_id: e.ship_id.raw(),
             tick   : e.tick.value(),

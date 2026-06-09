@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// One logical time step within a Sector Node.
 ///
 /// - Comparable only within the same Sector (cross-Sector ordering uses VectorClock).
-/// - Every `ShipMoved` event must carry the `Tick` at which it occurred.
+/// - Every movement event (`VelocityChanged`) must carry the `Tick` at which it occurred.
 /// - Never derived from `std::time::SystemTime`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Tick(pub u64);

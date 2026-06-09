@@ -83,7 +83,7 @@ struct ShipId(EntityId);
 | `dy` | `f32` | Y 軸方向の変位 |
 | `dz` | `f32` | Z 軸方向の変位 |
 
-`Velocity::ZERO` は速度ゼロを表す定数。速度ゼロの Ship は `ShipMoved` を発行しない。
+`Velocity::ZERO` は速度ゼロを表す定数。速度ゼロの Ship は `VelocityChanged` を発行しない。
 
 ### SectorBounds
 
