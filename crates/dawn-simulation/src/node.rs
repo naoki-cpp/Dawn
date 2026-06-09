@@ -79,6 +79,12 @@ where
     ship_type_ids      : HashMap<ShipId, ShipTypeId>,
     /// PlayerId 採番カウンタ
     player_id_counter  : u64,
+    /// Lock-on commands queued by the bot AI during `process_bots()`.
+    ///
+    /// Bot AI runs after the LockSystem each tick.  These commands are held
+    /// here and injected into the LockSystem at the start of the NEXT tick,
+    /// ensuring they are processed exactly like human-issued lock commands.
+    pending_bot_lock_commands: Vec<dawn_core::LockOnCommand>,
 }
 
 // ── Constructors ──────────────────────────────────────────────────────────────
@@ -114,8 +120,9 @@ impl<S: EventStore> SimulationNode<S> {
             base_stats         : HashMap::new(),
             player_ships       : HashMap::new(),
             ship_owners        : HashMap::new(),
-            ship_type_ids      : HashMap::new(),
-            player_id_counter  : 0,
+            ship_type_ids             : HashMap::new(),
+            player_id_counter         : 0,
+            pending_bot_lock_commands : Vec::new(),
         }
     }
 
@@ -134,8 +141,9 @@ impl<S: EventStore> SimulationNode<S> {
             base_stats         : HashMap::new(),
             player_ships       : HashMap::new(),
             ship_owners        : HashMap::new(),
-            ship_type_ids      : HashMap::new(),
-            player_id_counter  : 0,
+            ship_type_ids             : HashMap::new(),
+            player_id_counter         : 0,
+            pending_bot_lock_commands : Vec::new(),
         };
 
         // Restore ECS state from snapshot.
@@ -227,6 +235,10 @@ impl<S: EventStore> SimulationNode<S> {
 
         // 4. Capacitor System — recharge and drain for active modules
         let cap = CapacitorSystem(&mut self.world, tick);
+
+        // Drain pending bot lock commands and merge with human-issued ones.
+        let bot_locks: Vec<dawn_core::LockOnCommand> =
+            std::mem::take(&mut self.pending_bot_lock_commands);
         // Re-apply fitting for any ship whose module was force-deactivated.
         for ship_id in &cap.refitted {
             if let Some(&base) = self.base_stats.get(ship_id) {
@@ -234,11 +246,15 @@ impl<S: EventStore> SimulationNode<S> {
             }
         }
 
-        // 5. Lock System
-        let lock = LockSystem(&mut self.world, tick, lock_commands);
+        // 5. Lock System — merge human commands with queued bot commands
+        let merged_locks: Vec<dawn_core::LockOnCommand> = bot_locks
+            .into_iter()
+            .chain(lock_commands.iter().cloned())
+            .collect();
+        let lock = LockSystem(&mut self.world, tick, &merged_locks);
 
-        // 6. Combat System
-        let combat = CombatSystem(&mut self.world, tick);
+        // 6. Combat System — fire only when the capacitor weapon cycle started this tick
+        let combat = CombatSystem(&mut self.world, tick, &cap.weapon_cycles_started);
 
         // 破壊された Ship を ECS と ship_index から削除
         // CLAUDE.md §6: Combat の後に Bot System を実行する
@@ -348,15 +364,40 @@ impl<S: EventStore> SimulationNode<S> {
         let dz   = target.z - pos.z;
         let dist = (dx * dx + dy * dy + dz * dz).sqrt();
 
-        let thrust = if dist > f32::EPSILON {
+        let dir = if dist > f32::EPSILON {
             Velocity { dx: dx / dist, dy: dy / dist, dz: dz / dist }
         } else {
             Velocity::ZERO
         };
 
         if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
-            t.0 = thrust;
+            t.direction  = dir;
+            t.is_braking = false;
         }
+    }
+
+    /// Begin decelerating the ship toward zero velocity using its thrust.
+    ///
+    /// The movement system applies thrust opposite to velocity each tick until
+    /// the ship stops. Cancels any active thrust direction.
+    pub fn apply_stop_command(&mut self, ship_id: ShipId) {
+        let entity = match self.ship_index.get(&ship_id) {
+            Some(&e) => e,
+            None     => return,
+        };
+        if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
+            t.direction  = Velocity::ZERO;
+            t.is_braking = true;
+        }
+    }
+
+    /// `apply_stop_command` wrapped with ownership check.
+    pub fn apply_stop_command_owned(&mut self, player_id: PlayerId, ship_id: ShipId) -> bool {
+        if self.ship_owners.get(&ship_id) != Some(&player_id) {
+            return false;
+        }
+        self.apply_stop_command(ship_id);
+        true
     }
 
     /// プレイヤー船として指定し、PLAYER 性能値を設定する。
@@ -396,6 +437,10 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Spawn a player ship at a specific position.
+    pub fn spawn_player_ship_at_pub(&mut self, player_id: PlayerId, pos: Position) -> ShipId {
+        self.spawn_player_ship_at(player_id, pos)
+    }
+
     fn spawn_player_ship_at(&mut self, player_id: PlayerId, pos: Position) -> ShipId {
         use crate::ship_types::SHIP_TYPE_MAGPIE;
         let ship_id = ShipId::new(self.node_id, self.id_counter);
@@ -525,13 +570,18 @@ impl<S: EventStore> SimulationNode<S> {
             // Lock on if not already locked or locking.
             let already_targeting = bot.locked_targets.contains(&target.ship_id);
             if !already_targeting {
-                self.apply_lock_on_owned(bot.player_id, dawn_core::LockOnCommand {
+                // Queue lock command for the NEXT tick's LockSystem.
+                // (LockSystem already ran this tick before process_bots.)
+                self.pending_bot_lock_commands.push(dawn_core::LockOnCommand {
                     ship_id  : bot.ship_id,
                     target_id: target.ship_id,
                 });
             }
 
-            // Move: approach until within 75% of weapon range.
+            // Move: approach until within 75% of weapon range, then brake to stop.
+            // Stopping within engage range keeps transversal velocity near zero so
+            // that the player's turrets can easily track back — and the bot's shots
+            // also benefit from a stable firing platform.
             let engage_range = (bot.weapon_range * 0.75).max(500.0);
             if dist > engage_range {
                 let dx = target.position.x - bot.position.x;
@@ -544,6 +594,9 @@ impl<S: EventStore> SimulationNode<S> {
                     bot.position.z + dz / len * 1_000_000.0,
                 );
                 self.apply_move_command_owned(bot.player_id, bot.ship_id, thrust_target);
+            } else {
+                // Within engage range: brake to stop so turrets have a clean shot.
+                self.apply_stop_command_owned(bot.player_id, bot.ship_id);
             }
 
             // Activate weapons once target is locked.
@@ -604,15 +657,27 @@ impl<S: EventStore> SimulationNode<S> {
                           ("Low", &fitting.low), ("Rig", &fitting.rig)];
         for (slot_name, slots) in &slot_names {
             for (i, slot) in slots.iter().enumerate() {
+                let d = &slot.def.stat_delta;
                 modules.push(serde_json::json!({
                     "slot"             : slot_name,
                     "index"            : i,
                     "module_id"        : slot.def.id.0,
                     "name"             : slot.def.name,
+                    "kind"             : format!("{:?}", slot.def.kind),
                     "is_active"        : slot.is_active,
                     "is_active_module" : matches!(slot.def.activation_mode, dawn_core::ActivationMode::Active),
                     "cap_cost_per_cycle": slot.def.cap_cost_per_cycle,
                     "cycle_time_ticks" : slot.def.cycle_time_ticks,
+                    "stat_delta": {
+                        "weapon_damage_add"   : d.weapon_damage_add,
+                        "weapon_range_add"    : d.weapon_range_add,
+                        "falloff_range_add"   : d.falloff_range_add,
+                        "tracking_speed_add"  : d.tracking_speed_add,
+                        "max_speed_add"       : d.max_speed_add,
+                        "max_shield_add"      : d.max_shield_add,
+                        "max_armor_add"       : d.max_armor_add,
+                        "max_hull_add"        : d.max_hull_add,
+                    },
                 }));
             }
         }
@@ -688,6 +753,17 @@ impl<S: EventStore> SimulationNode<S> {
             Some(e) => e,
             None    => return false,
         };
+
+        // Return early if the module is already in the requested state —
+        // avoids emitting duplicate ModuleActivated/Deactivated events every tick.
+        let already_in_state = self.world.inner()
+            .get::<&FittingComp>(entity)
+            .ok()
+            .and_then(|f| f.high.iter().chain(f.mid.iter()).chain(f.low.iter()).chain(f.rig.iter())
+                .find(|s| s.def.id == module_id && s.def.slot == slot)
+                .map(|s| s.is_active == active))
+            .unwrap_or(false);
+        if already_in_state { return true; }
 
         let found = self.world.inner_mut()
             .get::<&mut FittingComp>(entity)
@@ -1153,6 +1229,60 @@ mod tests {
         let stats_after_second = node.get_ship_stats(ship_id).unwrap();
         assert_eq!(stats_after_second.weapon_damage, 50.0,
             "2個装備後は base(0) + 2×delta(25) = 50（二重加算なら75になる）");
+    }
+
+    // ── Full pipeline: player fires at bot ───────────────────────────────────
+
+    /// Helper: build a SimulationNode with modules and Magpie ship type registered.
+    fn node_with_modules() -> SimulationNode {
+        use crate::{modules, ship_types};
+        let mut node = mem_node();
+        for def in modules::all_modules() {
+            node.register_module(def);
+        }
+        for def in ship_types::all_ship_types() {
+            node.register_ship_type(def);
+        }
+        node
+    }
+
+    #[test]
+    fn player_weapon_deals_damage_to_bot_after_lock_and_activation() {
+        use dawn_core::{LockOnCommand, ActivateModuleCommand, SlotKind, ModuleId};
+
+        let mut node = node_with_modules();
+
+        // Spawn bot within weapon range (1500 u optimal, bot at 500 u).
+        let bot_pos = Position::new(500.0, 0.0, 0.0);
+        let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
+
+        // Spawn player at origin.
+        let player_id = node.next_player_id();
+        let player_ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+
+        // Player locks on bot.
+        let lock_cmd = LockOnCommand { ship_id: player_ship_id, target_id: bot_ship_id };
+
+        // Player activates weapon (F1 equivalent).
+        assert!(node.activate_module_owned(player_id, ActivateModuleCommand {
+            ship_id  : player_ship_id,
+            module_id: ModuleId(1),  // Small Railgun I
+            slot     : SlotKind::High,
+        }), "activate_module_owned should return true for player's own ship");
+
+        // Run 25 ticks — enough for lock (2 ticks) + first weapon cycle (10 ticks)
+        // + a few more cycles to guarantee a hit even with RNG variance.
+        let mut damage_events = 0;
+        for _ in 0..25 {
+            let result = node.tick_with_lock_commands(&[lock_cmd.clone()]);
+            damage_events += result.events.iter()
+                .filter(|e| matches!(e, DomainEvent::DamageTaken(d) if d.ship_id == bot_ship_id))
+                .count();
+        }
+
+        assert!(damage_events > 0,
+            "player should have dealt at least 1 DamageTaken to bot within 25 ticks \
+             (lock_time=2, cycle_time=10, bot within optimal range → hit_chance=1.0)");
     }
 
     #[test]

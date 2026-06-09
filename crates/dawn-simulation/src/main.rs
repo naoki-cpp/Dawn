@@ -463,7 +463,7 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
     }
     // Duel mode: spawn 1 Bot opposite the player's default spawn position.
     if duel_mode {
-        let bot_pos = Position::new(2000.0, 0.0, 2000.0);
+        let bot_pos = Position::new(1200.0, 0.0, 0.0);
         let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
         println!("  [Server] Duel mode: Bot ship #{} ready at {:?}", bot_ship_id.raw(), bot_pos);
     }
@@ -562,6 +562,9 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
                     // Combat is handled automatically by CombatSystem each tick.
                     // AttackCommand is reserved for a future manual-fire mode.
                     ClientCommand::Attack(_) => {}
+                    ClientCommand::Stop(s) => {
+                        node.apply_stop_command_owned(sess.player_id, s.ship_id);
+                    }
                 }
             }
         }
