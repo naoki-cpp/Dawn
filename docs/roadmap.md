@@ -209,7 +209,7 @@ Session 2: restore_from() で復元 → tick / ship count / positions ✓ PASS
 
 ```
 □ 2クライアントが同時に接続できる
-□ 両クライアントの世界状態が同期している（ShipMoved が両方に届く）
+□ 両クライアントの世界状態が同期している（VelocityChanged が両方に届く）
 □ プレイヤーのロックオン操作が機能する
 □ 再接続後に InitialState で状態が復元される
 □ 基本的なゲームループ（移動・ロック・戦闘）でクラッシュしない

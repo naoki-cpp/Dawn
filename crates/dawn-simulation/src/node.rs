@@ -265,10 +265,10 @@ impl<S: EventStore> SimulationNode<S> {
             self.ship_type_ids.remove(ship_id);
         }
 
-        // 6. Bot System — bots issue the same commands as human players
+        // 7. Bot System — bots issue the same commands as human players
         self.process_bots();
 
-        // 7. EventStore に Append
+        // 8. EventStore に Append
         let all_events: Vec<DomainEvent> = move_events.iter()
             .chain(cap.events.iter())
             .chain(lock.events.iter())

@@ -24,7 +24,7 @@ cargo build --workspace --release
 # テスト
 cargo test --workspace                        # 全テスト
 cargo test -p dawn-core                       # 特定クレートのみ
-cargo test ship_moved_event                   # テスト名フィルタ
+cargo test velocity_changed                   # テスト名フィルタ
 
 # カバレッジ（要: cargo install cargo-llvm-cov）
 cargo llvm-cov --workspace --html

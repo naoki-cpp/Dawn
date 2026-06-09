@@ -127,27 +127,27 @@ Phase 5 着手は以下の条件を全て満たした時点とする。
 
 ### サーバー側
 
-- [ ] `dawn-core`: `PlayerId(u64)` 型追加
-- [ ] `dawn-core`: `CommandError::NotOwner` 追加
-- [ ] `dawn-simulation/node.rs`: `player_ships: HashMap<PlayerId, ShipId>` フィールド追加
-- [ ] `dawn-simulation/node.rs`: `spawn_player_ship(player_id)` メソッド追加
-- [ ] `dawn-simulation/node.rs`: 全コマンドに `PlayerId` + 所有権チェック追加
-- [ ] `dawn-simulation/ws_server.rs`: `Hello` メッセージのパース
-- [ ] `dawn-simulation/ws_server.rs`: `Welcome` メッセージの送信
-- [ ] `dawn-simulation/ws_server.rs`: `InitialState` メッセージの送信
-- [ ] `dawn-simulation/ws_server.rs`: `PlayerSession` 構造体でセッション管理
-- [ ] `dawn-simulation/ws_server.rs`: 複数クライアントの同時接続対応（accept ループ）
-- [ ] `dawn-simulation/main.rs`: ORIGIN シグナル処理を削除
-- [ ] `dawn-simulation/ws_server.rs`: `AttackCommand` JSON パーサー追加
-- [ ] 全テスト通過
+- [x] `dawn-core`: `PlayerId(u64)` 型追加
+- [x] `dawn-core`: `CommandError::NotOwner` 追加
+- [x] `dawn-simulation/node.rs`: `player_ships: HashMap<PlayerId, ShipId>` フィールド追加
+- [x] `dawn-simulation/node.rs`: `spawn_player_ship(player_id)` メソッド追加
+- [x] `dawn-simulation/node.rs`: 全コマンドに `PlayerId` + 所有権チェック追加
+- [x] `dawn-simulation/ws_server.rs`: `Hello` メッセージのパース
+- [x] `dawn-simulation/ws_server.rs`: `Welcome` メッセージの送信
+- [x] `dawn-simulation/ws_server.rs`: `InitialState` メッセージの送信
+- [x] `dawn-simulation/ws_server.rs`: `PlayerSession` 構造体でセッション管理
+- [x] `dawn-simulation/ws_server.rs`: 複数クライアントの同時接続対応（accept ループ）
+- [x] `dawn-simulation/main.rs`: ORIGIN シグナル処理を削除
+- [x] `dawn-simulation/ws_server.rs`: `AttackCommand` JSON パーサー追加
+- [x] 全テスト通過（138テスト）
 
 ### クライアント側（Godot）
 
-- [ ] `connection.gd`: 接続後に `Hello` を自動送信
-- [ ] `connection.gd`: `Welcome` を受け取り `player_id` / `ship_id` を保持・シグナル発行
-- [ ] `connection.gd`: `InitialState` を受け取り各 Ship の HP を初期化
-- [ ] `main.gd`: ORIGIN シグナル送信を削除
-- [ ] `main.gd`: `Welcome` シグナルを受けてプレイヤー船を設定
+- [x] `connection.gd`: 接続後に `Hello` を自動送信
+- [x] `connection.gd`: `Welcome` を受け取り `player_id` / `ship_id` を保持・シグナル発行
+- [x] `connection.gd`: `InitialState` を受け取り各 Ship の HP を初期化
+- [x] `main.gd`: ORIGIN シグナル送信を削除
+- [x] `main.gd`: `Welcome` シグナルを受けてプレイヤー船を設定
 
 ---
 

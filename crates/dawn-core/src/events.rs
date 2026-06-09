@@ -5,8 +5,8 @@
 //! - Events are **never** modified or deleted after being appended.  (INV-001)
 //! - Every movement event carries a `tick`.  (INV-005, CLAUDE.md §6)
 //! - Adding a new variant is permitted.
-//! - Removing or renaming a variant requires an Upcaster and a new ADR.
-//!   (See CLAUDE.md §7)
+//! - Removing or renaming a variant: pre-release → direct deletion is fine;
+//!   post-release → Upcaster + new ADR required.  (See CLAUDE.md §7)
 //!
 //! # Adding a new event
 //!
