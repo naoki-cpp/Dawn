@@ -16,11 +16,24 @@ var _mesh_falloff : MeshInstance3D
 
 
 func _ready() -> void:
+	## Ignore the parent ship's rotation: the rings must stay fixed to the
+	## world XY plane regardless of how the ship is oriented.
+	top_level = true
+	rotation  = Vector3.ZERO
+
 	_mesh_optimal = _make_ring_mesh_instance()
 	_mesh_falloff = _make_ring_mesh_instance()
 	add_child(_mesh_optimal)
 	add_child(_mesh_falloff)
 	_redraw()
+
+
+func _process(_delta: float) -> void:
+	## Follow the parent ship's position only (top_level skips parent transform).
+	var parent := get_parent()
+	if parent is Node3D:
+		global_position = (parent as Node3D).global_position
+	rotation = Vector3.ZERO
 
 
 func set_ranges(optimal: float, falloff: float) -> void:
