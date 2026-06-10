@@ -372,12 +372,10 @@ func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> 
 func _toggle_module_by_index(f_index: int) -> void:
 	if _player_ship_id < 0:
 		return
-	## F1〜F8 は High スロットの index 0〜7 に対応
+	## F1〜F8 は Active モジュール（High/Mid 等）の index 0〜7 に対応
 	var active_count: int = 0
 	for m: Variant in _player_modules:
 		var mod_dict: Dictionary = m as Dictionary
-		if mod_dict.get("slot", "") != "High":
-			continue
 		if mod_dict.get("is_active_module", false) as bool == false:
 			continue  ## Passive はスキップ
 		if active_count == f_index:

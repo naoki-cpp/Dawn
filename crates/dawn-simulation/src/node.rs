@@ -474,6 +474,11 @@ impl<S: EventStore> SimulationNode<S> {
             slot      : SlotKind::High,
             module_id : crate::modules::MODULE_RAILGUN_SMALL,
         });
+        self.fit_module(FitModuleCommand {
+            ship_id,
+            slot      : SlotKind::Mid,
+            module_id : crate::modules::MODULE_AFTERBURNER,
+        });
 
         self.event_store.append(DomainEvent::ShipSpawned(ShipSpawned {
             ship_id,
