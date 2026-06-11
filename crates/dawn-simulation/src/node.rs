@@ -10,7 +10,7 @@
 //!
 //! ```text
 //! node.take_snapshot()           -> StateSnapshot (ECS state at log_index N)
-//! SimulationNode::restore_from(store, &snapshot)
+//! SimulationNode::restore_from(store, &snapshot, &modules, &ship_types)
 //!     -> reconstruct ECS from snapshot, replay events from log_index N onward
 //! ```
 
