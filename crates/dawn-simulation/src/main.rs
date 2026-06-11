@@ -163,12 +163,17 @@ async fn run_phase2_demo() {
     println!();
 
     // Replication consistency check.
+    //
+    // ADR-0008: ships only emit a VelocityChanged event when their velocity
+    // changes. These NPC ships spawn at a constant velocity and never
+    // change it, so the only events are the P2_SHIPS ShipSpawned events
+    // per node — not one event per ship per tick.
     let replicated = cluster.total_replicated_events().await;
-    let expected   = P2_NODES * (P2_SHIPS + P2_SHIPS * P2_TICKS);
+    let expected   = P2_NODES * P2_SHIPS;
 
     println!("  ── replication bus ──");
     println!("  replicated : {replicated}");
-    println!("  expected   : {expected}");
+    println!("  expected   : {expected}  (ShipSpawned only; NPC velocity never changes — ADR-0008)");
     println!("  consistency: {}",
         if replicated == expected { "✓ PASS — all events from all nodes reached the bus" }
         else                      { "✗ FAIL — event loss detected" });
@@ -239,7 +244,14 @@ fn run_phase3_demo() {
     // ── Session 2 (simulated restart) ────────────────────────────────────────
     let snap   = StateSnapshot::load(&snapshot_path).expect("failed to load snapshot");
     let store2 = FileEventStore::open(&event_path).expect("failed to reopen event log");
-    let node2  = SimulationNode::restore_from(store2, &snap, &[], &[]);
+    let mut node2 = SimulationNode::restore_from(store2, &snap, &[], &[]);
+
+    // ADR-0008: these NPC ships move at a constant velocity and never emit
+    // VelocityChanged, so there is nothing to replay past the snapshot's
+    // log_index. `restore_from` leaves the node at the snapshot tick; run
+    // the remaining ticks (same as session 1 did) to reach session1_tick.
+    let remaining = session1_tick.value().saturating_sub(node2.current_tick().value());
+    for _ in 0..remaining { node2.tick(); }
 
     let restored_positions: Vec<Position> = ship_ids.iter()
         .filter_map(|id| node2.get_ship_position(*id))
