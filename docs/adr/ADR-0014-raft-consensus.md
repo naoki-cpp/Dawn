@@ -155,13 +155,11 @@ pub struct SectorTransitAborted {
 }
 ```
 
-命名の補足 — `Aborted` であり `Rejected` ではない:
-docs/event-catalog.md §3.6 は将来予約として `SectorTransitRejected` を
-予約していたが、バリデーション段階の拒否はイベントではなく
+命名規則 — `Rejected` イベントは存在しない:
+バリデーション段階の拒否（Ship 不在・Transit 中など）はイベントではなく
 `CommandRejected` の返却で表現する（CLAUDE.md §4 / INV-006）。
 イベントになるのは `Requested` がコミットされた**後**の中断のみであり、
-これを `SectorTransitAborted` と命名する。カタログの予約は本 ADR の
-承認をもって `Aborted` にリネームする。
+これを `SectorTransitAborted` と命名する。
 
 `tick` フィールドの解釈 — Sector 間の順序は Raft Log Index が保証する:
 Tick は同一 Sector 内でのみ比較可能である（CLAUDE.md §6）。
@@ -169,8 +167,7 @@ Transit イベントは 2 つの Sector をまたぐため、**各ノードは�
 ローカル Tick を刻んで自分の EventStore に Append する**
 （同一 Transit でもノードごとに tick 値は異なってよい）。
 Sector 間の因果順序（Requested → Completed の順など）は
-Raft Log Index が全ノードで一意に定めるため、VectorClock の導入は
-Phase 7 では不要であり先送りする。
+Raft Log Index が全ノードで一意に定めるため、VectorClock は導入しない。
 
 対応する Command（dawn-core/src/commands.rs）:
 
@@ -243,6 +240,10 @@ Step 10 : RaftActor に TickElapsed を送る（新規ステップ・最後）
 
 Step 1〜7（既存のシミュレーション処理）と Step 8〜9（Append → Replication）
 の順序関係は一切変更しない。
+
+---
+
+## 却下した代替案
 
 ### 案A: openraft / raft-rs の採用
 
