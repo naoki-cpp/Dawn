@@ -132,7 +132,7 @@ name               = "1MN Afterburner"
 kind               = "Propulsion"
 slot               = "Mid"
 activation_mode    = "Active"
-cap_cost_per_cycle = 80.0
+cap_cost_per_cycle = 100.0  # 10 GJ/tick — must exceed Magpie's 8 GJ/tick recharge
 cycle_time_ticks   = 10
 
 [modules.stat_delta]

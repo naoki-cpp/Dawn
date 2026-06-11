@@ -57,7 +57,7 @@ pub fn all_modules() -> Vec<ModuleDefinition> {
             id: MODULE_AFTERBURNER, name: "1MN Afterburner".to_string(),
             kind: ModuleKind::Propulsion, slot: SlotKind::Mid,
             activation_mode: ActivationMode::Active,
-            cap_cost_per_cycle: 80.0,
+            cap_cost_per_cycle: 100.0, // 10 GJ/tick — must exceed Magpie's 8 GJ/tick recharge
             cycle_time_ticks  : 10,
             stat_delta: StatDelta { max_speed_add: 150.0, thrust_add: 10.0, ..StatDelta::ZERO },
         },
