@@ -15,6 +15,7 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 | [ADR-0001](ADR-0001-event-sourcing.md) | Event Sourcing の採用 | Accepted |
 | [ADR-0002](ADR-0002-actor-model.md) | Actor モデルによるノード内並行制御 | Accepted |
 | [ADR-0003](ADR-0003-local-first-development.md) | Local-First Development（段階的分散化） | Accepted |
+| [ADR-0014](ADR-0014-raft-consensus.md) | 分散コンセンサス — Raft による Sector Transit の整合性保証 | Proposed |
 
 ### Client / 通信
 
