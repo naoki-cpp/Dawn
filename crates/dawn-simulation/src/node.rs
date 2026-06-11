@@ -517,7 +517,7 @@ impl<S: EventStore> SimulationNode<S> {
             position      : Position,
             weapon_range  : f32,
             locked_targets: Vec<ShipId>,
-            modules       : Vec<(dawn_core::ModuleId, dawn_core::fitting::SlotKind)>,
+            weapon_modules: Vec<(dawn_core::ModuleId, dawn_core::fitting::SlotKind)>,
         }
 
         let mut bots: Vec<BotState> = Vec::new();
@@ -531,10 +531,14 @@ impl<S: EventStore> SimulationNode<S> {
                 .filter(|e| matches!(e.state, dawn_ecs::components::LockState::Locked))
                 .map(|e| e.target_id)
                 .collect();
-            let modules = self.world.inner()
+            // Bots only auto-activate Weapon modules. Other Active modules
+            // (e.g. Afterburner) would drain the capacitor pointlessly while
+            // the bot is braking to hold its firing position.
+            let weapon_modules = self.world.inner()
                 .get::<&FittingComp>(entity)
                 .map(|f| {
                     f.high.iter().chain(f.mid.iter()).chain(f.low.iter()).chain(f.rig.iter())
+                        .filter(|s| s.def.kind == dawn_core::fitting::ModuleKind::Weapon)
                         .map(|s| (s.def.id, s.def.slot))
                         .collect()
                 })
@@ -544,7 +548,7 @@ impl<S: EventStore> SimulationNode<S> {
                 position    : pos.0,
                 weapon_range: stats.weapon_range,
                 locked_targets: locked,
-                modules,
+                weapon_modules,
             });
         }
 
@@ -606,7 +610,7 @@ impl<S: EventStore> SimulationNode<S> {
 
             // Activate weapons once target is locked.
             if already_targeting {
-                for (module_id, slot) in &bot.modules {
+                for (module_id, slot) in &bot.weapon_modules {
                     self.activate_module_owned(bot.player_id, dawn_core::ActivateModuleCommand {
                         ship_id  : bot.ship_id,
                         module_id: *module_id,
