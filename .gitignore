@@ -29,3 +29,6 @@ Desktop.ini
 .env.local
 *.pem
 *.key
+
+# ── Playtest session logs (generated at runtime) ──────────────────────────────
+data/session_*.json
