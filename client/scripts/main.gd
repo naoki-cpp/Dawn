@@ -23,6 +23,9 @@ extends Node
 
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
 const WORLD_SCALE : float = 0.1   ## サーバー座標 ↔ Godot 座標の変換係数
+## Display units: 1 server unit = 1 m. Server runs at 10 ticks/sec, so
+## speed in m/s = (units/tick) × TICKS_PER_SECOND. Distances shown in km.
+const TICKS_PER_SECOND : float = 10.0
 
 # ── マテリアル ────────────────────────────────────────────────────────────────
 
@@ -523,7 +526,8 @@ func _update_hud() -> void:
 	var speed_str: String = "-"
 	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
 		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
-		speed_str = "%d u/tick" % int(spd)
+		## 1 server unit = 1 m, tick = 100 ms → m/s = u/tick × 10
+		speed_str = "%d m/s" % int(spd * TICKS_PER_SECOND)
 
 	var hp_str: String
 	if _player_ship_id < 0:
@@ -540,6 +544,12 @@ func _update_hud() -> void:
 		lock_str = "-"
 	elif _ships.has(_player_lock_target):
 		lock_str = "→ #%d" % _player_lock_target
+		## Distance to target in km (1 server unit = 1 m).
+		if _player_ship_id >= 0 and _ships.has(_player_ship_id):
+			var p_node: Node3D = _ships[_player_ship_id] as Node3D
+			var t_node: Node3D = _ships[_player_lock_target] as Node3D
+			var dist_m: float = p_node.global_position.distance_to(t_node.global_position) / WORLD_SCALE
+			lock_str += "  %.1f km" % (dist_m / 1000.0)
 		## Show target HP if available
 		if _ship_hp.has(_player_lock_target):
 			var t: Dictionary = _ship_hp[_player_lock_target] as Dictionary

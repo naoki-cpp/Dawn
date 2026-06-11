@@ -262,7 +262,7 @@ func _make_line_indicator(color: Color) -> MeshInstance3D:
 	mat.shading_mode               = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.vertex_color_use_as_albedo = false
 	mat.cull_mode                  = BaseMaterial3D.CULL_DISABLED
-	inst.set_surface_override_material(0, mat)
+	inst.material_override = mat
 	add_child(inst)
 	return inst
 
