@@ -77,7 +77,7 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 | イベント名 | 説明 | 発行者 | ステータス |
 |---|---|---|---|
 | `ShipSpawned` | Ship が世界に出現した | `SimulationNode::spawn_ship()` | ✅ 実装済み |
-| `ShipDespawned` | Ship が世界から消えた（手動） | `SimulationNode` | 型定義のみ |
+| `ShipDespawned` | Ship が世界から消えた（手動） | `SimulationNode` | 型定義のみ（発行箇所なし・Replay 対応あり） |
 | `ShipDestroyed` | Ship が戦闘で破壊された | `CombatSystem` | ✅ 実装済み |
 
 ### 3.2 Movement
@@ -112,9 +112,12 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 
 | イベント名 | 説明 | ステータス |
 |---|---|---|
-| `SectorTransitRequested` | Sector 境界越えの要求 | 未実装（Phase 7） |
-| `SectorTransitCompleted` | Sector 境界越えの完了 | 未実装（Phase 7） |
-| `SectorTransitRejected` | Sector 境界越えの拒否 | 未実装（Phase 7） |
+| `SectorTransitRequested` | Sector Transit が Raft で合意された（所有権は from のまま） | 未実装（Phase 7・ADR-0014） |
+| `SectorTransitCompleted` | Sector Transit が完了した（所有権が to に移った） | 未実装（Phase 7・ADR-0014） |
+| `SectorTransitAborted` | Transit が中断された（所有権は from に残る） | 未実装（Phase 7・ADR-0014） |
+
+バリデーション段階の拒否はイベントではなく `CommandRejected` の返却で
+表現する（INV-006）。`SectorTransitRejected` というイベントは定義しない。
 
 ### 3.7 System（将来予約）
 
@@ -274,7 +277,6 @@ HP は Shield → Armor → Hull の順に消費される。
 | `tick` | `Tick` | ✓ | ダメージを受けた Tick |
 
 **設計メモ:** 3 フィールドを含めることで Replay 時に `HullComp` を正確に復元できる（INV-002 準拠）。
-旧フィールド `current_hp: f32` は HP 3層化に伴い廃止（ADR-0006 §5）。
 
 ---
 

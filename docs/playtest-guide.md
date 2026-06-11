@@ -273,11 +273,11 @@ total_events_per_tick       — Tick あたりのイベント数（負荷確認�
   → F1〜F8 のキーバインドに気づいていない可能性。チュートリアルを強化する。
 
 [危険] 全プレイヤーのフィッティングが同一（fitting_diversity_index = 1）
-  → 最適解が 1 つしかない。Capacitor 実装を検討する。
+  → 最適解が 1 つしかない。モジュール / 船種バランス（data/*.toml）を見直す。
 
 [警告] active_module_on_rate > 95%
   → 全モジュールを常時 ON にしている。「ON にし続ければ勝ち」になっている。
-  → Capacitor 実装の必要性を示す最も強いシグナル。
+  → cap コスト（cap_cost_per_cycle）が軽すぎる。data/modules.toml を見直す。
 
 [警告] 振り返りで「装備を変えたい」という回答が 0
   → フィッティングが意思決定の要素になっていない。

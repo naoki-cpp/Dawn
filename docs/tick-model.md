@@ -42,12 +42,12 @@ Tick は「シミュレーションが何ステップ進んだか」を表す。
 
 ## 2. Tick と物理時刻の関係
 
-### 現在（Phase 0–1）: 制限なし
+### ベンチマーク実行（`simulate` バイナリ）: 制限なし
 
 Tick ループは制限なく実行される（できるだけ速く）。  
 1 Tick の処理時間はハードウェアとエンティティ数に依存する。
 
-### Phase 4 以降: 固定間隔実装済み
+### サーバー実行（`--serve`）: 固定間隔
 
 ```
 現在の目標間隔: 100 ms / Tick（10 Tick/秒）
@@ -120,7 +120,7 @@ Step 9: Replication Actor に差分を通知する
          replication_tx.send(delta)
 ```
 
-### Step 6 より前に Step 7 を実行してはならない理由
+### Step 8 より前に Step 9 を実行してはならない理由
 
 EventStore への Append が完了する前に他のノードへ伝播すると、
 受信側が「存在しないイベントを参照する」状態になる。  
@@ -169,13 +169,8 @@ tick なしでは Event の因果順序が不明になり、リプレイ時の�
 
 ### ノード再起動後の Tick の扱い
 
-```
-現在（Phase 0–1）: プロセス終了で Tick がリセットされる
-将来（Phase 3 以降）: Snapshot から Tick 値を復元し継続する
-```
-
-Snapshot 実装前は、再起動後の Tick 継続性は保証されない。  
-これは現在のフェーズでは許容される。
+`StateSnapshot` が `tick` を保持し、`SimulationNode::restore_from` が
+復元する（Phase 3 で実装済み）。再起動後も Tick は継続する。
 
 ---
 
@@ -195,7 +190,7 @@ Snapshot 実装前は、再起動後の Tick 継続性は保証されない。
 計測開始: Tick カウンタのインクリメント直前
 計測終了: EventStore::append_batch() の完了直後
 
-Step 5（Replication）は計測対象外（未実装のため）
+Step 9（Replication）は計測対象外（非同期伝播のため）
 ```
 
 ### ベンチマーク実行方法
@@ -203,6 +198,19 @@ Step 5（Replication）は計測対象外（未実装のため）
 ```bash
 cargo run -p dawn-simulation --bin simulate --release
 ```
+
+---
+
+## 7. Tick ループの実装責任
+
+| フェーズ | 実装 | 実行モデル |
+|---|---|---|
+| Phase 0–1 | `SimulationNode::tick()` | 同期・単純ループ（ベンチマーク用） |
+| Phase 2 | `SectorSimulatorActor` | 非同期・tokio task |
+| Phase 4 以降（現在） | `run_phase4_server()` in `main.rs` | tokio::time::interval（100ms/tick） |
+
+Phase 4 以降は `tokio::time::interval` による固定間隔ループが実装済み。  
+`SimulationNode::tick_with_lock_commands()` は同期処理で、呼び出し元の interval が速度をコントロールする。
 
 ---
 
@@ -299,16 +307,3 @@ INV-TIDI: Tick の論理速度は一定である。
           「Tick を遅らせる」実装を追加してはならない。
           負荷超過は Sector への入場制限で対処する。
 ```
-
----
-
-## 7. Tick ループの実装責任
-
-| フェーズ | 実装 | 実行モデル |
-|---|---|---|
-| Phase 0–1 | `SimulationNode::tick()` | 同期・単純ループ（ベンチマーク用） |
-| Phase 2 | `SectorSimulatorActor` | 非同期・tokio task |
-| Phase 4 以降（現在） | `run_phase4_server()` in `main.rs` | tokio::time::interval（100ms/tick） |
-
-Phase 4 以降は `tokio::time::interval` による固定間隔ループが実装済み。  
-`SimulationNode::tick_with_lock_commands()` は同期処理で、呼び出し元の interval が速度をコントロールする。
