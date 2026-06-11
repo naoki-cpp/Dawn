@@ -125,12 +125,9 @@ JumpCommand 受信
   → Godot へブロードキャスト
 ```
 
-Transit 中の状態管理（INV-003）は Phase 7（Raft 実装後）で強化する。
-
-#### 将来（Phase 7: Raft 導入後）
-
-Sector 間遷移を Raft 経由にして排他制御する。
-それまでは単一プロセスの原子性に頼る。
+上記フローは Raft 導入後の設計スケッチである。
+Sector 間遷移は Raft 経由で排他制御し（INV-003）、
+Transit 中の状態管理もその時点で詳細化する。
 
 ### 6. 星系マップ（静的定義）
 
@@ -223,6 +220,7 @@ Event Sourcing と相性が悪い。「移動アニメーション」はクラ�
   - `JumpGateUsed` イベント Append
   - 別星系なら `StarSystemChanged` イベント Append
 - [ ] `src/ws_server.rs` に `JumpGateUsed`, `StarSystemChanged` の EventJson 追加
+- [ ] `src/ws_server.rs` に `JumpCommand` の JSON パーサー追加
 - [ ] `src/main.rs` に `ClientCommand::Jump` のマッチアーム追加
 - [ ] 統合テスト: ジャンプ後に Ship が宛先 Sector に存在すること
 
@@ -232,7 +230,6 @@ Event Sourcing と相性が悪い。「移動アニメーション」はクラ�
 
 ### Godot（client/）
 
-- [ ] `ws_server.rs` の `JumpCommand` JSON パーサー追加
 - [ ] `connection.gd` に `jump_gate_used` シグナル追加
 - [ ] `main.gd` の `_on_jump_gate_used` で Ship 位置を `entry_pos` に更新
 - [ ] `main.gd` のジャンプコマンド送信（ゲート近接時に UI を表示し確定）
