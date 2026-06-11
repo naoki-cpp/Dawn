@@ -29,7 +29,7 @@ Phase 4 の仕様チェック（2026-06-05）で、現在の実装がシング�
 
 ### 2. 接続ハンドシェイク：Hello / Welcome メッセージを導入する
 
-ORIGIN 座標シグナル（CLAUDE.md §12 パターン7）を廃止し、
+ORIGIN 座標シグナル（Phase 4 の暫定実装）を廃止し、
 明示的なハンドシェイクに置き換える。
 
 ```
@@ -173,4 +173,4 @@ DomainEvent のスキーマ
 
 - ADR-0005: ClientConnection 抽象化
 - ADR-0006: Fitting / Combat / Lock-on 設計
-- CLAUDE.md §12 パターン7: ORIGIN 座標シグナル（廃止予定）
+- ORIGIN 座標シグナル: Phase 4 の暫定実装（本 ADR の実装により廃止済み）

@@ -140,7 +140,7 @@ Phase 5 移行時には ADR-0007 に従って対応する。
 - WsServer は1クライアントのみ受け付ける
 - Ship 所有権の検証なし（誰でも任意の Ship を操作できる）
 - セッション管理（PlayerId）なし
-- ORIGIN 座標をプレイヤー指定シグナルとして流用（暫定、CLAUDE.md §12 パターン7）
+- ORIGIN 座標をプレイヤー指定シグナルとして流用（暫定。Phase 5 / ADR-0007 で廃止済み）
 - AttackCommand の JSON パーサー未実装
 ```
 
