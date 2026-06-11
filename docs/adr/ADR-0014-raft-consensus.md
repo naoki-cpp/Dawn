@@ -2,7 +2,7 @@
 id      : ADR-0014
 title   : 分散コンセンサス — Raft による Sector Transit の整合性保証
 status  : proposed
-date    : 2026-06-11
+date    : 2026-06-12
 deciders: [human, ai-agent]
 related : ADR-0001（Event Sourcing）, ADR-0002（Actor モデル）,
           ADR-0003（Local-First）, ADR-0009（星系間ナビゲーション・deferred）,
@@ -34,6 +34,18 @@ Sector Transit は「Ship の所有権を Sector A から Sector B へ移す」�
 ---
 
 ## 決定
+
+### 0. ADR-0003 の制約解除
+
+ADR-0003（Local-First）は「分散コンセンサスなし（Raft 不使用）」を意図的制約として
+列挙し、解除には新しい ADR と人間の承認を要求している。
+**本 ADR はこの制約のうち「Raft 不使用」のみを解除する。**
+以下の制約は引き続き維持される:
+
+```
+維持: Single Process / ネットワーク通信なし / コンテナなし /
+      ノード間通信は In-Memory Channel のみ / CRDT なし（Phase 8）
+```
 
 ### 1. Raft の適用範囲 — 制御プレーンのみ
 
@@ -143,6 +155,23 @@ pub struct SectorTransitAborted {
 }
 ```
 
+命名の補足 — `Aborted` であり `Rejected` ではない:
+docs/event-catalog.md §3.6 は将来予約として `SectorTransitRejected` を
+予約していたが、バリデーション段階の拒否はイベントではなく
+`CommandRejected` の返却で表現する（CLAUDE.md §4 / INV-006）。
+イベントになるのは `Requested` がコミットされた**後**の中断のみであり、
+これを `SectorTransitAborted` と命名する。カタログの予約は本 ADR の
+承認をもって `Aborted` にリネームする。
+
+`tick` フィールドの解釈 — Sector 間の順序は Raft Log Index が保証する:
+Tick は同一 Sector 内でのみ比較可能である（CLAUDE.md §6）。
+Transit イベントは 2 つの Sector をまたぐため、**各ノードは自分の
+ローカル Tick を刻んで自分の EventStore に Append する**
+（同一 Transit でもノードごとに tick 値は異なってよい）。
+Sector 間の因果順序（Requested → Completed の順など）は
+Raft Log Index が全ノードで一意に定めるため、VectorClock の導入は
+Phase 7 では不要であり先送りする。
+
 対応する Command（dawn-core/src/commands.rs）:
 
 ```rust
@@ -188,9 +217,32 @@ pub trait RaftTransport: Send + Sync {
 ノード障害は「該当ノードの RaftActor へのメッセージを遮断する」ことで
 シミュレートする（テスト用 `PartitionableTransport`）。
 
----
+### 7. Tick 処理順序への組み込み
 
-## 却下した代替案
+tick-model.md §3 の処理順序は「変更には ADR が必要」と定められている。
+本 ADR は以下の変更を承認する（Phase 7 適用時に tick-model.md / CLAUDE.md §6
+を更新すること）。
+
+```
+Step 2  : コマンドキューを処理する
+          TransitCommand → バリデーション後、RaftActor へ TransitProposal を
+          提出する（この時点ではイベントを発行しない。提案は非同期に
+          コミットされる）
+          Transit 中の Ship への Move / Despawn / 二重 Transit は拒否
+
+Step 7.5: コミット済み Raft エントリを適用する（新規ステップ・Bot の後）
+          RaftActor から受信したコミット済みエントリを ECS に適用し、
+          SectorTransitRequested / Completed / Aborted イベントを生成する
+          - from ノード: Completed 適用時に Ship を自 ECS から削除
+          - to   ノード: Completed 適用時に Ship を entry_pos に追加
+          ※ Step 8（Append）の前に行うこと — 同 Tick の Append に含めるため
+
+Step 10 : RaftActor に TickElapsed を送る（新規ステップ・最後）
+          election timeout / heartbeat タイマーを 1 Tick 進める
+```
+
+Step 1〜7（既存のシミュレーション処理）と Step 8〜9（Append → Replication）
+の順序関係は一切変更しない。
 
 ### 案A: openraft / raft-rs の採用
 
@@ -239,7 +291,10 @@ Tick 駆動タイマー（決定 5）と整合しない。
 - [ ] `src/events.rs` に `SectorTransitRequested` / `Completed` / `Aborted` 追加
 - [ ] `src/commands.rs` に `TransitCommand` 追加
 - [ ] 各型に単体テスト追加
-- [ ] `docs/event-catalog.md` 更新
+- [ ] `docs/event-catalog.md` 更新（§3.6 の予約 `SectorTransitRejected` を
+      `SectorTransitAborted` にリネームし、実装済みへ移行）
+- [ ] `docs/tick-model.md` §3 / CLAUDE.md §6 に Step 7.5 / Step 10 を追記
+      （CLAUDE.md は人間の承認を得て）
 
 ### dawn-consensus（新規クレート）
 
