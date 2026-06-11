@@ -42,21 +42,10 @@ snapshot 保存・復元・イベント再生のラウンドトリップが完�
 
 ## 既知の問題（Phase 6 時点・基準値とは別件）
 
-ベンチマークバイナリの判定ロジック自体に陳腐化があり、以下の FAIL は
-基準値の異常ではなく判定側の問題である（変更前コミット 2be8491 でも同様に FAIL）。
-
 1. **Phase 1 SLA FAIL**: 10,000 隻で mean 87 ms（目標 16 ms）。
    Phase 6 で Capacitor / Lock / Combat / Bot システムが追加され
    Tick が重くなったため。10,000 隻の SLA 達成は Phase 8（Anti-TiDi /
    Spatial Index）のスコープであり、現時点では未達で想定どおり。
-2. **Phase 2 consistency FAIL**: 期待値計算（expected 63,000）が
-   現在のイベント発行モデル（ADR-0008: VelocityChanged のみ）に
-   追従しておらず、毎 Tick イベント前提の古い式のまま。
-3. **Phase 3 tick/position FAIL**: デモは等速 NPC のみを使うため
-   snapshot 以降にイベントが発行されず（ADR-0008 設計どおり）、
-   restore 後に残り Tick を回さない判定ロジックでは一致しない。
-   正しい検証は node.rs の INV-002 テスト
-   `ecs_state_is_fully_restored_from_snapshot_and_event_replay_after_simulated_restart`
-   が担っている。
 
-→ 2 と 3 は判定ロジックの修正候補（別タスク）。
+Phase 2 / Phase 3 の判定ロジックの陳腐化（ADR-0008 以前の毎 Tick
+イベント前提）は commit 4408ca8 で修正済み。両方とも PASS する。
