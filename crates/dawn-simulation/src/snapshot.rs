@@ -17,17 +17,35 @@
 
 use std::{fs, io, path::Path};
 
-use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
+use dawn_core::{
+    fitting::FittingSnapshot, NodeId, Position, SectorBounds, SectorId, ShipId, ShipTypeId,
+    Tick, Velocity,
+};
 use serde::{Deserialize, Serialize};
 
 // ── Ship-level snapshot ───────────────────────────────────────────────────────
 
 /// State of a single Ship at the time of the snapshot.
+///
+/// Captures everything needed to reconstruct the Ship's ECS components
+/// (`PositionComp`, `VelocityComp`, `ShipStatsComp`, `HullComp`,
+/// `CapacitorComp`, `FittingComp`) without replaying events from the
+/// beginning of the log (INV-002).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShipSnapshot {
-    pub ship_id : ShipId,
-    pub position: Position,
-    pub velocity: Velocity,
+    pub ship_id     : ShipId,
+    pub ship_type_id: ShipTypeId,
+    pub position    : Position,
+    pub velocity    : Velocity,
+    /// `HullComp` at the time of the snapshot (Shield / Armor / Hull layers).
+    pub current_shield: f32,
+    pub current_armor : f32,
+    pub current_hull  : f32,
+    pub is_destroyed  : bool,
+    /// `CapacitorComp.current`, if the ship has a capacitor.
+    pub capacitor   : Option<f32>,
+    /// Fitted modules (High/Mid/Low/Rig) and their on/off state.
+    pub fitting     : FittingSnapshot,
 }
 
 // ── Node-level snapshot ───────────────────────────────────────────────────────
@@ -89,9 +107,16 @@ mod tests {
             id_counter: 5,
             ships     : vec![
                 ShipSnapshot {
-                    ship_id : ShipId::new(NodeId(0), 0),
-                    position: Position::new(100.0, 200.0, 300.0),
-                    velocity: dawn_core::Velocity::new(1.0, 0.0, 0.0),
+                    ship_id       : ShipId::new(NodeId(0), 0),
+                    ship_type_id  : ShipTypeId(1),
+                    position      : Position::new(100.0, 200.0, 300.0),
+                    velocity      : dawn_core::Velocity::new(1.0, 0.0, 0.0),
+                    current_shield: 50.0,
+                    current_armor : 60.0,
+                    current_hull  : 70.0,
+                    is_destroyed  : false,
+                    capacitor     : Some(250.0),
+                    fitting       : FittingSnapshot::empty(),
                 },
             ],
         }

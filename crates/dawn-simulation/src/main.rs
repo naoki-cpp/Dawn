@@ -239,7 +239,7 @@ fn run_phase3_demo() {
     // ── Session 2 (simulated restart) ────────────────────────────────────────
     let snap   = StateSnapshot::load(&snapshot_path).expect("failed to load snapshot");
     let store2 = FileEventStore::open(&event_path).expect("failed to reopen event log");
-    let node2  = SimulationNode::restore_from(store2, &snap);
+    let node2  = SimulationNode::restore_from(store2, &snap, &[], &[]);
 
     let restored_positions: Vec<Position> = ship_ids.iter()
         .filter_map(|id| node2.get_ship_position(*id))

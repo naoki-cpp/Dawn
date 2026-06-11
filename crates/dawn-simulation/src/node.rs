@@ -126,7 +126,20 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    pub fn restore_from(store: S, snapshot: &StateSnapshot) -> Self {
+    /// Restore a node from a `StateSnapshot` plus the events appended since.
+    ///
+    /// `modules` and `ship_types` are the same data-driven definitions the
+    /// node was originally configured with (e.g. `modules::all_modules()` /
+    /// `ship_types::all_ship_types()`). They are needed to resolve
+    /// `FittingSnapshot` entries back into `FittedSlot`s and to recompute
+    /// `base_stats` for `apply_fitting` (INV-002: snapshot + registries +
+    /// log replay must fully reproduce the pre-shutdown ECS state).
+    pub fn restore_from(
+        store     : S,
+        snapshot  : &StateSnapshot,
+        modules   : &[ModuleDefinition],
+        ship_types: &[ShipTypeDefinition],
+    ) -> Self {
         let mut node = Self {
             node_id            : snapshot.node_id,
             sector_id          : snapshot.sector_id,
@@ -146,9 +159,43 @@ impl<S: EventStore> SimulationNode<S> {
             pending_bot_lock_commands : Vec::new(),
         };
 
+        for def in modules {
+            node.register_module(def.clone());
+        }
+        for def in ship_types {
+            node.register_ship_type(def.clone());
+        }
+
         // Restore ECS state from snapshot.
         for ship in &snapshot.ships {
             node.insert_to_world(ship.ship_id, ship.position, ship.velocity);
+            node.ship_type_ids.insert(ship.ship_id, ship.ship_type_id);
+
+            let base = node.ship_type_registry.get(&ship.ship_type_id)
+                .map(|def| ShipStatsComp::from_base(&def.base_stats))
+                .unwrap_or(ShipStatsComp::NPC);
+            node.base_stats.insert(ship.ship_id, base);
+
+            if let Some(&entity) = node.ship_index.get(&ship.ship_id) {
+                node.world.set_ship_stats(entity, base);
+
+                let fitting = FittingComp::from_snapshot(&ship.fitting, &node.module_registry);
+                let _ = node.world.inner_mut().insert_one(entity, fitting);
+
+                // apply_fitting recomputes ShipStatsComp and rescales HullComp;
+                // restore the exact HP layers from the snapshot afterwards.
+                apply_fitting(&mut node.world, ship.ship_id, base);
+                if let Ok(mut hull) = node.world.inner_mut().get::<&mut HullComp>(entity) {
+                    hull.current_shield = ship.current_shield;
+                    hull.current_armor  = ship.current_armor;
+                    hull.current_hull   = ship.current_hull;
+                    hull.is_destroyed   = ship.is_destroyed;
+                }
+
+                if let Some(cap) = ship.capacitor {
+                    let _ = node.world.inner_mut().insert_one(entity, CapacitorComp { current: cap });
+                }
+            }
         }
 
         // Replay events that occurred after the snapshot was taken.
@@ -298,9 +345,26 @@ impl<S: EventStore> SimulationNode<S> {
             .ship_index
             .iter()
             .filter_map(|(&ship_id, &entity)| {
-                let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
-                let vel = self.world.inner().get::<&VelocityComp>(entity).ok()?.0;
-                Some(ShipSnapshot { ship_id, position: pos, velocity: vel })
+                let pos  = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+                let vel  = self.world.inner().get::<&VelocityComp>(entity).ok()?.0;
+                let hull = self.world.inner().get::<&HullComp>(entity).ok()?;
+                let capacitor = self.world.inner().get::<&CapacitorComp>(entity).ok().map(|c| c.current);
+                let fitting = self.world.inner().get::<&FittingComp>(entity)
+                    .map(|f| f.to_snapshot())
+                    .unwrap_or_else(|_| dawn_core::fitting::FittingSnapshot::empty());
+                let ship_type_id = self.ship_type_ids.get(&ship_id).copied().unwrap_or(ShipTypeId(0));
+                Some(ShipSnapshot {
+                    ship_id,
+                    ship_type_id,
+                    position      : pos,
+                    velocity      : vel,
+                    current_shield: hull.current_shield,
+                    current_armor : hull.current_armor,
+                    current_hull  : hull.current_hull,
+                    is_destroyed  : hull.is_destroyed,
+                    capacitor,
+                    fitting,
+                })
             })
             .collect();
 
@@ -347,6 +411,29 @@ impl<S: EventStore> SimulationNode<S> {
     #[cfg(test)]
     pub fn apply_event_pub(&mut self, event: DomainEvent) {
         self.apply_event(&event);
+    }
+
+    /// Look up the current `CapacitorComp.current` of a Ship by its ID.
+    #[cfg(test)]
+    pub fn get_ship_capacitor(&self, ship_id: ShipId) -> Option<f32> {
+        let entity = self.ship_index.get(&ship_id)?;
+        self.world.inner().get::<&CapacitorComp>(*entity).ok().map(|c| c.current)
+    }
+
+    /// `(ModuleId, is_active)` for every fitted module on a Ship, across all slots.
+    #[cfg(test)]
+    pub fn get_fitted_module_ids(&self, ship_id: ShipId) -> Vec<(ModuleId, bool)> {
+        let entity = match self.ship_index.get(&ship_id) {
+            Some(&e) => e,
+            None => return Vec::new(),
+        };
+        self.world.inner().get::<&FittingComp>(entity)
+            .map(|f| {
+                f.high.iter().chain(f.mid.iter()).chain(f.low.iter()).chain(f.rig.iter())
+                    .map(|s| (s.def.id, s.is_active))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn apply_move_command(&mut self, ship_id: ShipId, target: Position) {
@@ -1164,7 +1251,7 @@ mod tests {
         // This is by design: position is derived state, not stored in events.
         let snap   = StateSnapshot::load(&snapshot_path).unwrap();
         let store2 = FileEventStore::open(&event_path).unwrap();
-        let mut node2 = SimulationNode::restore_from(store2, &snap);
+        let mut node2 = SimulationNode::restore_from(store2, &snap, &[], &[]);
 
         // The snapshot restores up to snap.tick. Run remaining ticks to reach final_tick.
         let remaining = final_tick.value() - node2.current_tick().value();
@@ -1186,6 +1273,82 @@ mod tests {
                 "position of ship {} must match after restore + replay", id
             );
         }
+    }
+
+    #[test]
+    fn hull_capacitor_and_fitting_state_are_restored_from_snapshot() {
+        use crate::{modules, ship_types};
+        use dawn_core::events::DamageTaken;
+        use dawn_core::fitting::{FittingSnapshot, SlotEntry};
+        use dawn_core::events::ShipFitted;
+
+        let dir           = tempfile::tempdir().unwrap();
+        let event_path    = dir.path().join("events.log");
+        let snapshot_path = dir.path().join("snapshot.bin");
+
+        let ship_id: ShipId;
+        {
+            let store = FileEventStore::open(&event_path).unwrap();
+            let mut node = SimulationNode::with_store(
+                NodeId(0), SectorId(0),
+                SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                store,
+            );
+            for def in modules::all_modules() {
+                node.register_module(def);
+            }
+            for def in ship_types::all_ship_types() {
+                node.register_ship_type(def);
+            }
+
+            ship_id = node.spawn_ship(ship_types::SHIP_TYPE_MAGPIE, Position::ORIGIN, Velocity::ZERO);
+
+            // Take damage: HullComp now has non-default current_* values.
+            node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
+                ship_id,
+                damage         : 50.0,
+                current_shield : 30.0,
+                current_armor  : 90.0,
+                current_hull   : 100.0,
+                tick           : Tick(1),
+            }));
+
+            // Fit the Afterburner and switch it on, so FittingComp restore
+            // must reproduce both the fitted module and its active state.
+            node.apply_event_pub(DomainEvent::ShipFitted(ShipFitted {
+                ship_id,
+                fitting: FittingSnapshot {
+                    high: vec![],
+                    mid : vec![SlotEntry { module_id: modules::MODULE_AFTERBURNER, is_active: true }],
+                    low : vec![],
+                    rig : vec![],
+                },
+                tick: Tick(1),
+            }));
+
+            let snap = node.take_snapshot();
+            snap.save(&snapshot_path).unwrap();
+        } // node drops; FileEventStore flushes via BufWriter
+
+        let snap   = StateSnapshot::load(&snapshot_path).unwrap();
+        let store2 = FileEventStore::open(&event_path).unwrap();
+        let node2  = SimulationNode::restore_from(
+            store2, &snap,
+            &modules::all_modules(),
+            &ship_types::all_ship_types(),
+        );
+
+        let hp = node2.get_ship_hp(ship_id).unwrap();
+        assert_eq!(hp, 30.0 + 90.0 + 100.0, "Hull HP layers must survive restore");
+
+        let cap = node2.get_ship_capacitor(ship_id)
+            .expect("capacitor must be restored");
+        assert_eq!(cap, node2.get_ship_stats(ship_id).unwrap().cap_max,
+            "capacitor must be restored to its snapshot value");
+
+        let fitted = node2.get_fitted_module_ids(ship_id);
+        assert!(fitted.contains(&(modules::MODULE_AFTERBURNER, true)),
+            "Afterburner must remain fitted and active after restore, got {:?}", fitted);
     }
 
     #[test]
@@ -1276,8 +1439,6 @@ mod tests {
 
     #[test]
     fn damage_taken_event_is_replayed_to_restore_current_hp() {
-        use dawn_core::events::DamageTaken;
-
         let mut node = mem_node();
         let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
 
