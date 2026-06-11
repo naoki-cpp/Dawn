@@ -96,8 +96,7 @@ Sector の空間的範囲を表す軸平行バウンディングボックス（A
 
 **デフォルト値:** `SectorBounds::centered(DEFAULT_HALF)` — 原点中心・一辺 100,000（DEFAULT_HALF = 50,000）の立方体  
 **境界越え時の挙動:** Tick ループでは境界判定を行わない（Phase 4 Cycle 2 で壁を削除 — 宇宙は無限）。
-`SectorBounds` は現在スポーン位置の生成範囲としてのみ使用する。
-（`clamp_and_bounce` 相当のメソッドは dawn-core に残っているが Movement System からは呼ばれない）  
+`SectorBounds` は現在スポーン位置の生成範囲としてのみ使用する。  
 
 ### Tick
 
@@ -204,7 +203,7 @@ Ship を空間的に分割して管理する単位。
 
 **現在の制約:**
 - Sector 数は固定（MVP: 3）
-- Sector のサイズは固定（一辺 DEFAULT_SIZE = 100,000、原点中心）
+- Sector のサイズは固定（一辺 100,000 = DEFAULT_HALF × 2、原点中心）
 - 動的分割・統合は未実装
 
 ---
