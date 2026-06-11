@@ -49,9 +49,10 @@ EVE Online に着想を得た**研究用の分散シミュレーション基盤*
 
 ```
 動作環境 : Single Process
-通信手段 : In-Memory Channel のみ
+ノード間通信 : In-Memory Channel のみ（物理分散なし）
+クライアント接続 : WebSocket + JSON（Godot ⇔ WsServer、ADR-0007）
 ノード   : 論理的な概念として存在（物理分散なし）
-ネットワーク: 不使用（gRPC / QUIC / Raft / CRDT は将来フェーズ）
+ノード間ネットワーク: 不使用（gRPC / QUIC / Raft / CRDT は将来フェーズ）
 ```
 
 現在の制約は「できないから」ではなく「今は必要ないから」である。
@@ -77,7 +78,8 @@ EVE Online に着想を得た**研究用の分散シミュレーション基盤*
 | `dawn-core` | ライブラリ | 純粋ドメインモデル定義。外部依存ゼロ |
 | `dawn-ecs` | ライブラリ | ECS World ラッパー。Component / System 定義 |
 | `dawn-event-store` | ライブラリ | Append-only Event Log の永続化 |
-| `dawn-simulation` | バイナリ | 全体を結合するシミュレーション実行基盤 |
+| `dawn-actor` | ライブラリ | Actor 基盤（EventStoreActor / ReplicationBus / ClientConnection trait） |
+| `dawn-simulation` | バイナリ | 全体を結合するシミュレーション実行基盤・WsServer（Godot 接続） |
 
 ### 依存 DAG
 
@@ -86,8 +88,10 @@ dawn-core
     ↑
     ├── dawn-ecs
     └── dawn-event-store
-                ↑
-                └── dawn-simulation  (バイナリ)
+            ↑
+            └── dawn-actor
+                    ↑
+                    └── dawn-simulation  (バイナリ)
 ```
 
 依存は**下から上への一方向のみ**。逆方向・循環は設計の失敗を意味する。
@@ -149,11 +153,14 @@ Command と Event は別の型として完全に分離する。
 実装を差し替えることでネットワーク化時に Godot 側のコードを変更しない。
 
 ```
-Phase 4（ダミー）:              Phase 6（本物）:
-  InProcessConnection             GrpcConnection
-  ↓ In-Memory Channel で直結      ↓ gRPC / QUIC
+Phase 4（テスト用）:            Phase 5 以降（現在）:
+  InProcessConnection             WsClientConnection
+  ↓ In-Memory Channel で直結      ↓ WebSocket + JSON（ADR-0007）
 
   どちらも同じ ClientConnection trait を実装する
+
+※ gRPC への移行は行わないことを ADR-0007 で決定済み。
+  再検討するとしても Phase 9 以降（分散ノード間通信が必要になったとき）。
 ```
 
 ### trait の責務（この 2 方向のみ）
@@ -173,13 +180,13 @@ SectorSimulatorActor
     ↓ events
 ReplicationBus
     ↓
-ClientConnection（InProcess / Grpc）
+ClientConnection（InProcess / WebSocket）
     ↓ DomainEvent stream
 Godot クライアント（GDScript）
     ↑ Command
 ```
 
-→ 詳細設計は ADR-0005 を参照（Phase 4 着手時に作成）
+→ 詳細設計は ADR-0005（trait）/ ADR-0007（WebSocket セッション）を参照
 
 ---
 
@@ -274,8 +281,8 @@ Clientは「仮の状態」を先行表示し、Serverからのイベントで�
 | 制約 | 理由 | 根拠 ADR |
 |---|---|---|
 | Single Process のみ | ドメインロジックの正しさを先に確立する | [ADR-0003](./adr/ADR-0003-local-first-development.md) |
-| ネットワーク不使用 | In-Memory Channel で十分な段階 | [ADR-0003](./adr/ADR-0003-local-first-development.md) |
-| Ship / Position のみ | MVP スコープの制限 | [CLAUDE.md §1](../CLAUDE.md) |
+| ノード間ネットワーク不使用 | In-Memory Channel で十分な段階 | [ADR-0003](./adr/ADR-0003-local-first-development.md) |
+| エンティティは Ship のみ（Fitting / Combat / Capacitor 含む） | MVP スコープの制限 | [CLAUDE.md §1](../CLAUDE.md) |
 
 ---
 

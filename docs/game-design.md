@@ -308,20 +308,20 @@ signature から外し、表現可能な側面（フィッティングの改造�
 
 ### 🔴 近い将来（ゲームバランスの核）
 
-#### Capacitor（エネルギー管理）
+#### Capacitor（エネルギー管理）— ✅ Phase 6 で実装済み（ADR-0011）
 
-Active モジュールが Cap を消費する。Cap が切れると武器が使えなくなる。
+Active モジュールが Cap を消費する。Cap が切れるとモジュールが強制 OFF になる。
 「全モジュールを常時 ON にすれば勝ち」にならないバランス調整機能。
 
 ```
-設計イメージ:
-  ShipStatsComp.max_cap, current_cap
-  StatDelta.cap_usage_add（各モジュールの Cap 消費）
-  Cap は毎 Tick わずかに回復する
-  Cap = 0 → Active モジュールを起動できない
+実装（ADR-0011）:
+  CapacitorComp.current / ShipStatsComp.cap_max, cap_recharge_per_tick
+  ModuleDefinition.cap_cost_per_cycle, cycle_time_ticks（サイクルベース消費）
+  Cap は毎 Tick 回復する
+  サイクル開始時に cap 不足 → モジュールを強制 OFF（ModuleDeactivated）
 ```
 
-#### Shield リチャージ（非対称 HP 回復）
+#### Shield リチャージ（非対称 HP 回復）— ⬜ 未実装
 
 Shield は時間で回復する（Armor / Hull は回復しない）。
 この非対称性が「今逃げるか、押し切るか」の判断を生む。

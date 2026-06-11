@@ -8,13 +8,14 @@ related  : entity-model.md, event-catalog.md, CLAUDE.md §5
 > **実装状況の注意**
 >
 > このドキュメントは将来フェーズを含む設計全体を記述している。
-> 現在（Phase 4）実装済みの範囲は **§1（所有権の概念）と §2（Ship の基本所有権）のみ**。
+> 現在（Phase 6 完了時点）実装済みの範囲は以下のとおり。
 >
 > | セクション | 内容 | 実装状況 |
 > |---|---|---|
-> | §1〜2 | Ship の所有権・基本状態遷移 | ✅ Phase 4 実装済み |
-> | §3 Sector Transit | Sector 間移動の排他制御 | ⬜ Phase 7（Raft 実装後） |
-> | §4 Node 障害時 | Raft フェイルオーバー | ⬜ Phase 7 |
+> | §1〜2 | Ship の所有権・基本状態遷移 | ✅ 実装済み |
+> | §2 Sector Transit / §3 Node 障害時 | Sector 間移動の排他制御・Raft フェイルオーバー | ⬜ Phase 7（Raft 実装後） |
+> | §4 Actor の所有権 | Actor 間のデータ分離 | ✅ Phase 2 実装済み |
+> | §5 ID 生成 | NodeId + 単調増加カウンタ | ✅ 実装済み |
 >
 > Phase 7 より前に §3 以降の内容を実装してはならない（CLAUDE.md FBD-006）。
 
@@ -130,17 +131,16 @@ Transit 中の Ship に対して以下の操作を受理してはならない。
 
 ## 4. Actor の所有権
 
-Actor モデルは Phase 2 以降で導入する。現在（Phase 0–1）は不要。  
-設計の方向性のみ記録する。
+Actor モデルは Phase 2 で導入済み（`dawn-actor` クレート、ADR-0002）。
 
-### Actor と担当データの対応（Phase 2 以降）
+### Actor と担当データの対応
 
-| Actor | 所有するデータ | 受け付けるメッセージ（予定） |
+| Actor | 所有するデータ | 受け付けるメッセージ |
 |---|---|---|
 | `SectorSimulatorActor` | ECS World（該当 Sector 分） | `Tick`, `MoveCommand`, `SpawnShip` |
 | `EventStoreActor` | Event Log（該当 Sector 分） | `Append`, `IterFrom` |
 
-### Actor 間データ共有の禁止ルール（Phase 2 以降）
+### Actor 間データ共有の禁止ルール
 
 ```
 禁止: Arc<Mutex<T>> でデータを共有する

@@ -66,6 +66,20 @@
 - キーバインドが `client/scripts/main.gd` の実装と一致しているか
 - 存在しない機能が記載されていないか・実装済みの機能が未記載でないか
 
+### Step 7: 設計ドキュメント群の照合
+
+`docs/architecture.md` / `docs/entity-model.md` / `docs/ownership.md` /
+`docs/game-design.md` を読み、実装状況の記述が実態と合っているか確認する。
+
+確認項目:
+- architecture.md: クレート一覧・依存 DAG に全クレートが載っているか
+  （`ls crates/` と照合）。通信方式の記述が ADR-0007 と矛盾していないか
+- entity-model.md: ECS Component 一覧が `dawn-ecs/src/components/` と一致しているか。
+  「将来」「未実装」と書かれた項目が実装済みになっていないか
+- ownership.md: 冒頭の実装状況テーブルとフェーズ表記が現在のフェーズと合っているか
+- game-design.md: §4「将来検討する機能」に実装済みの機能が残っていないか
+  （実装済みなら ✅ + 対応 ADR を明記する）
+
 ---
 
 ## 報告フォーマット

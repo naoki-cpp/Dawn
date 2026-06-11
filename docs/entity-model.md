@@ -94,8 +94,10 @@ Sector の空間的範囲を表す軸平行バウンディングボックス（A
 | `min` | `Position` | 範囲の最小座標（原点側） |
 | `max` | `Position` | 範囲の最大座標 |
 
-**デフォルト値:** `SectorBounds::cube(10_000.0)` — 一辺 10,000 の立方体  
-**境界越え時の挙動:** 速度の該当軸を反転（弾性壁バウンス）  
+**デフォルト値:** `SectorBounds::centered(DEFAULT_HALF)` — 原点中心・一辺 100,000（DEFAULT_HALF = 50,000）の立方体  
+**境界越え時の挙動:** Tick ループでは境界判定を行わない（Phase 4 Cycle 2 で壁を削除 — 宇宙は無限）。
+`SectorBounds` は現在スポーン位置の生成範囲としてのみ使用する。
+（`clamp_and_bounce` 相当のメソッドは dawn-core に残っているが Movement System からは呼ばれない）  
 
 ### Tick
 
@@ -113,51 +115,65 @@ Sector の空間的範囲を表す軸平行バウンディングボックス（A
 
 現在の MVP における唯一のエンティティ種別。
 
-### ECS Component 一覧
+### ECS Component 一覧（Phase 6 時点）
 
-| Component | フィールド | 説明 |
-|---|---|---|
-| `ShipIdComp` | `ShipId` | hecs Entity と domain ShipId の対応付け |
-| `PositionComp` | `Position` | 現在の世界座標 |
-| `VelocityComp` | `Velocity` | 1 Tick あたりの変位 |
-
-Ship エンティティは必ず上記 3 Component を全て持つ。
+`SimWorld::spawn_ship()` は以下の Component を全て持つ Ship を生成する。
 一部だけを持つ不完全な Ship Entity を生成してはならない。
+
+| Component | 説明 |
+|---|---|
+| `ShipIdComp` | hecs Entity と domain ShipId の対応付け |
+| `PositionComp` | 現在の世界座標 |
+| `VelocityComp` | 1 Tick あたりの変位 |
+| `ThrustComp` | 推力方向・ブレーキ状態（MoveCommand / StopCommand で更新） |
+| `ShipStatsComp` | 集計済み stats（base_stats + Σmodule.delta、apply_fitting() が更新） |
+| `FittingComp` | 装備スロット（High / Mid / Low / Rig の `FittedSlot` リスト） |
+| `HullComp` | 3層 HP（Shield / Armor / Hull） |
+| `WeaponComp` | 武器サイクル状態 |
+| `LockComp` | ロックオン状態（ターゲットごとの `LockState`） |
+| `IsNpcComp` | NPC マーカー（プレイヤー船は spawn 後に remove される） |
+
+追加で条件付きで付与される Component:
+
+| Component | 条件 |
+|---|---|
+| `CapacitorComp` | プレイヤー船・ボット船（cap 管理対象） |
+| `IsBotComp` | ボット船（`process_bots()` の対象マーカー） |
 
 ### Ship が現在持たないもの（MVP 外）
 
 以下は将来のフェーズで追加するが、現在は存在しない。
 
 ```
-Hull（船体耐久度）    ← Combat Context
 Cargo（積荷）        ← Economy Context
 Name（船名）         ← UI / Social Context
-OwnerId（所有者）    ← Character Context
-TransitState        ← Sector Transit 実装時に追加
+TransitState        ← Sector Transit 実装時（Phase 7）に追加
 ```
 
-### Ship Template（データ駆動設計・将来）
+※ 所有者（PlayerId）は ECS Component ではなく
+  `SimulationNode` の `ship_owners: HashMap<ShipId, PlayerId>` で管理する。
 
-EVE Online には数百種類の船体がある。
-各種類の「基本性能」をコードではなくデータとして管理する設計が必要。
+### Ship Template（データ駆動設計・実装済み）
+
+各船種の「基本性能」はコードではなくデータとして管理する。
+Phase 4 Cycle 4 で `ShipTypeDefinition` + TOML 外部化として実装済み。
 
 ```
-ShipTemplate（不変・データファイル）   ShipInstance（可変・ECS）
+ShipTypeDefinition（不変・データ）     ShipInstance（可変・ECS）
 ─────────────────────────────────    ──────────────────────────
-template_id: ShipTypeId              ship_id       : ShipId
-name        : "Rifter"               template_id   : ShipTypeId  ← 参照
-mass        : 1_067_000.0 kg         position      : Position
-max_speed   : 380.0 m/s              velocity      : Velocity
-turn_rate   : 3.28 deg/s             current_hp    : f32  （将来）
-base_hull_hp: 563.0                  …
-…
+id          : ShipTypeId             ship_id       : ShipId
+name        : "Magpie"               （ship_type_ids: ShipId → ShipTypeId
+class       : ShipClass                は SimulationNode 側で管理）
+slot_layout : SlotLayout             position      : Position
+base_stats  : ShipBaseStats          velocity      : Velocity
+                                     HullComp / CapacitorComp …
 ```
 
-**設計原則：**
-- Template は起動時にファイル（TOML / JSON）から読み込む
-- Template はイミュータブル。変更はデプロイを伴う
-- ECS Component は Instance の状態のみを保持し、基本パラメータは Template を参照する
-- `ShipTypeId` は `dawn-core` に追加する（将来）
+**実装の現状：**
+- `data/ship_types.toml` から起動時に読み込む（DataLoader）
+- ファイル不在時は `ship_types.rs` の built-in デフォルトへフォールバック
+- 定義はイミュータブル。バランス調整は TOML 編集 + サーバー再起動（リビルド不要）
+- `ShipTypeId` は `dawn-core` に定義済み。`ShipSpawned` イベントに含まれる
 
 ---
 
@@ -188,7 +204,7 @@ Ship を空間的に分割して管理する単位。
 
 **現在の制約:**
 - Sector 数は固定（MVP: 3）
-- Sector のサイズは固定（DEFAULT_SIZE = 10,000）
+- Sector のサイズは固定（一辺 DEFAULT_SIZE = 100,000、原点中心）
 - 動的分割・統合は未実装
 
 ---
