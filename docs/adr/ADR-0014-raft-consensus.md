@@ -1,7 +1,7 @@
 ---
 id      : ADR-0014
 title   : 分散コンセンサス — Raft による Sector Transit の整合性保証
-status  : proposed
+status  : accepted
 date    : 2026-06-12
 deciders: [human, ai-agent]
 related : ADR-0001（Event Sourcing）, ADR-0002（Actor モデル）,

@@ -42,8 +42,8 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 ## 2. 現在地
 
 ```
-現在のフェーズ : Phase 6 — 完了（Phase 7 着手可能）
-フェーズの状態 : Phase 6 完了（Capacitor / Duel Metrics / cap バー 全タスク完了）
+現在のフェーズ : Phase 7 — 分散コンセンサス（Raft）着手（ADR-0014 accepted）
+フェーズの状態 : 設計完了・実装未着手（タスク分解は §9 を参照）
 ```
 
 ### 完了済みフェーズ
@@ -83,7 +83,8 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**Phase 6 完了。Phase 7（分散コンセンサス / Raft）に着手できる状態。**
+**Phase 6 完了。Phase 7（分散コンセンサス / Raft）に着手する。**
+設計は ADR-0014（accepted）。タスク分解は §9 を参照。
 
 Phase 7 着手前に実施が推奨されるプレイテストについては `docs/playtest-guide.md` を参照。
 
@@ -351,16 +352,32 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 
 ---
 
-## 10. Phase 7 以降（方向性のみ）
+## 9. Phase 7 — 分散コンセンサス（Raft）（着手中）
 
-詳細設計は Phase 6 完了後に行う。
+設計: [ADR-0014](./adr/ADR-0014-raft-consensus.md)（accepted）
+完了基準: ノード障害後に Sector Transit が正しく完了する
+★ ADR-0009（星系間ナビゲーション）はこのフェーズ完了後に実装する
+
+実装順序（ADR-0014 実装チェックリストに基づく）:
+
+| # | タスク | クレート | 状態 |
+|---|---|---|---|
+| 1 | `SectorTransitRequested` / `Completed` / `Aborted` イベント + `TransitCommand` | dawn-core | ⬜ |
+| 2 | 状態機械（Follower / Candidate / Leader）+ 単体テスト | dawn-consensus（新規） | ⬜ |
+| 3 | RequestVote / AppendEntries 処理 + Tick 駆動タイマー | dawn-consensus | ⬜ |
+| 4 | `RaftActor`（Mailbox 経由）+ `RaftTransport` / `PartitionableTransport` | dawn-consensus | ⬜ |
+| 5 | `TransitState` コンポーネント + Transit 中の操作拒否 | dawn-ecs | ⬜ |
+| 6 | `SimulationNode` の Transit 処理（Step 7.5 / Step 10 組み込み） | dawn-simulation | ⬜ |
+| 7 | `MultiNodeCluster` への RaftActor 配線 | dawn-simulation | ⬜ |
+| 8 | シナリオテスト（正常系 / リーダー障害 / スプリットブレイン不在 / INV-002 Replay） | dawn-simulation | ⬜ |
+| 9 | Transit レイテンシのベンチマーク（benchmark-baseline.md 追記） | dawn-simulation | ⬜ |
+| 10 | ドキュメント更新（event-catalog / tick-model / CLAUDE.md ※要人間承認） | docs | ⬜ |
+
+---
+
+## 10. Phase 8 以降（方向性のみ）
 
 ```
-Phase 7: 分散コンセンサス（Raft）
-          Sector Transit の整合性保証
-          完了基準: ノード障害後に Sector Transit が正しく完了する
-          ★ ADR-0009（星系間ナビゲーション）はこのフェーズ完了後に実装する
-
 Phase 8: スケール基盤（Anti-TiDi）
           Sector Population Cap / Dynamic Fission
           Spatial Index / Interest Management
