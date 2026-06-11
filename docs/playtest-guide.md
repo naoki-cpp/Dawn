@@ -44,9 +44,9 @@ Phase 6 の主目標は「ゲームが実際に面白いか」を人間から検
 ### デュエルモードの前提条件
 
 ```
-[必須] InitialState にプレイヤー船識別フラグ（is_player）を追加
-  → Godot が「相手プレイヤーの船」と NPC を区別するために必要
-  → ws_server.rs の InitialState JSON に is_player: bool を追加するだけ
+[実装済み] InitialState にプレイヤー船識別フラグ（is_player）
+  → Godot が「相手プレイヤーの船」と NPC を区別するために使用
+  → node.rs の build_initial_state_json() が is_player を出力する
 
 [必須] Godot に勝敗画面を追加
   → ShipDestroyed 受信時に自分/相手の船かを判定して表示
