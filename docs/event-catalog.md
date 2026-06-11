@@ -108,16 +108,19 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 | `WeaponFired` | 武器が発射された | `CombatSystem::run()` | ✅ 実装済み |
 | `DamageTaken` | Ship がダメージを受けた | `CombatSystem::run()` | ✅ 実装済み |
 
-### 3.6 Sector Transit（将来予約）
+### 3.6 Sector Transit（ADR-0014）
 
-| イベント名 | 説明 | ステータス |
-|---|---|---|
-| `SectorTransitRequested` | Sector Transit が Raft で合意された（所有権は from のまま） | 未実装（Phase 7・ADR-0014） |
-| `SectorTransitCompleted` | Sector Transit が完了した（所有権が to に移った） | 未実装（Phase 7・ADR-0014） |
-| `SectorTransitAborted` | Transit が中断された（所有権は from に残る） | 未実装（Phase 7・ADR-0014） |
+| イベント名 | 説明 | 発行者 | ステータス |
+|---|---|---|---|
+| `SectorTransitRequested` | Sector Transit が Raft で合意された（所有権は from のまま） | （Phase 7・未配線） | 型定義のみ |
+| `SectorTransitCompleted` | Sector Transit が完了した（所有権が to に移った） | （Phase 7・未配線） | 型定義のみ |
+| `SectorTransitAborted` | Transit が中断された（所有権は from に残る） | （Phase 7・未配線） | 型定義のみ |
 
 バリデーション段階の拒否はイベントではなく `CommandRejected` の返却で
 表現する（INV-006）。`SectorTransitRejected` というイベントは定義しない。
+
+`TransitCommand { ship_id, to }` が対応する Command（dawn-core/src/commands.rs）。
+発行経路（RaftActor → SimulationNode の Step 7.5/10）は Phase 7 の後続タスクで実装する。
 
 ### 3.7 System（将来予約）
 

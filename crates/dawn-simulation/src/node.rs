@@ -1073,6 +1073,12 @@ impl<S: EventStore> SimulationNode<S> {
                     self.world.despawn_ship(entity);
                 }
             }
+
+            // Sector Transit (ADR-0014): TransitState component and ownership
+            // transfer are added in a later Phase 7 task.
+            DomainEvent::SectorTransitRequested(_)
+            | DomainEvent::SectorTransitCompleted(_)
+            | DomainEvent::SectorTransitAborted(_) => {}
         }
     }
 }

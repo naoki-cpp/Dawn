@@ -59,6 +59,16 @@ pub enum DomainEvent {
 
     /// A Ship was destroyed.
     ShipDestroyed(ShipDestroyed),
+
+    /// A Sector Transit was committed by Raft (ownership remains with `from`
+    /// until `SectorTransitCompleted`). See ADR-0014.
+    SectorTransitRequested(SectorTransitRequested),
+
+    /// A Sector Transit completed; ownership moved from `from` to `to`.
+    SectorTransitCompleted(SectorTransitCompleted),
+
+    /// A committed Sector Transit was aborted; ownership remains with `from`.
+    SectorTransitAborted(SectorTransitAborted),
 }
 
 impl DomainEvent {
@@ -76,6 +86,9 @@ impl DomainEvent {
             Self::WeaponFired(e)   => e.attacker_id,
             Self::DamageTaken(e)   => e.ship_id,
             Self::ShipDestroyed(e) => e.ship_id,
+            Self::SectorTransitRequested(e) => e.ship_id,
+            Self::SectorTransitCompleted(e) => e.ship_id,
+            Self::SectorTransitAborted(e)   => e.ship_id,
         }
     }
 
@@ -94,6 +107,9 @@ impl DomainEvent {
             Self::WeaponFired(e)   => e.tick,
             Self::DamageTaken(e)   => e.tick,
             Self::ShipDestroyed(e) => e.tick,
+            Self::SectorTransitRequested(e) => e.tick,
+            Self::SectorTransitCompleted(e) => e.tick,
+            Self::SectorTransitAborted(e)   => e.tick,
         }
     }
 }
@@ -221,6 +237,43 @@ pub struct ShipDestroyed {
     pub tick      : Tick,
 }
 
+// ── Sector Transit (ADR-0014) ───────────────────────────────────────────────────
+
+/// A Sector Transit was committed by Raft. Ownership of `ship_id` remains
+/// with `from` until `SectorTransitCompleted` is appended.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SectorTransitRequested {
+    pub ship_id : ShipId,
+    pub from    : SectorId,
+    pub to      : SectorId,
+    pub tick    : Tick,
+}
+
+/// A Sector Transit completed; ownership of `ship_id` moved from `from` to `to`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SectorTransitCompleted {
+    pub ship_id  : ShipId,
+    pub from     : SectorId,
+    pub to       : SectorId,
+    pub entry_pos: Position,
+    pub velocity : Velocity,
+    pub tick     : Tick,
+}
+
+/// A committed Sector Transit was aborted after `SectorTransitRequested`.
+/// Ownership of `ship_id` remains with `from`.
+///
+/// Pre-commit rejections (Ship not found, already in transit, etc.) are
+/// expressed as `CommandRejected`, not as an event (INV-006). This event
+/// only covers an abort *after* the transit was committed by Raft.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SectorTransitAborted {
+    pub ship_id: ShipId,
+    pub from   : SectorId,
+    pub to     : SectorId,
+    pub tick   : Tick,
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -263,6 +316,52 @@ mod tests {
         let bytes    = bincode_roundtrip(&original);
         let restored = bincode_restore(&bytes);
         assert_eq!(original, restored);
+    }
+
+    #[test]
+    fn sector_transit_requested_event_carries_ship_id_and_tick() {
+        let id = ship_id();
+        let event = DomainEvent::SectorTransitRequested(SectorTransitRequested {
+            ship_id: id,
+            from   : SectorId(0),
+            to     : SectorId(1),
+            tick   : Tick(7),
+        });
+        assert_eq!(event.ship_id(), id);
+        assert_eq!(event.tick(), Tick(7));
+    }
+
+    #[test]
+    fn sector_transit_completed_event_carries_entry_position_and_velocity() {
+        let id = ship_id();
+        let event = DomainEvent::SectorTransitCompleted(SectorTransitCompleted {
+            ship_id  : id,
+            from     : SectorId(0),
+            to       : SectorId(1),
+            entry_pos: Position::new(100.0, 0.0, 0.0),
+            velocity : Velocity::new(1.0, 0.0, 0.0),
+            tick     : Tick(8),
+        });
+        match event {
+            DomainEvent::SectorTransitCompleted(e) => {
+                assert_eq!(e.entry_pos, Position::new(100.0, 0.0, 0.0));
+                assert_eq!(e.to, SectorId(1));
+            }
+            _ => panic!("expected SectorTransitCompleted"),
+        }
+    }
+
+    #[test]
+    fn sector_transit_aborted_event_keeps_ownership_with_from_sector() {
+        let id = ship_id();
+        let event = DomainEvent::SectorTransitAborted(SectorTransitAborted {
+            ship_id: id,
+            from   : SectorId(0),
+            to     : SectorId(1),
+            tick   : Tick(9),
+        });
+        assert_eq!(event.ship_id(), id);
+        assert_eq!(event.tick(), Tick(9));
     }
 
     fn bincode_roundtrip(event: &DomainEvent) -> String {

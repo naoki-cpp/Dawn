@@ -289,11 +289,11 @@ Tick 駆動タイマー（決定 5）と整合しない。
 
 ### dawn-core
 
-- [ ] `src/events.rs` に `SectorTransitRequested` / `Completed` / `Aborted` 追加
-- [ ] `src/commands.rs` に `TransitCommand` 追加
-- [ ] 各型に単体テスト追加
-- [ ] `docs/event-catalog.md` 更新（§3.6 の予約 `SectorTransitRejected` を
-      `SectorTransitAborted` にリネームし、実装済みへ移行）
+- [x] `src/events.rs` に `SectorTransitRequested` / `Completed` / `Aborted` 追加
+- [x] `src/commands.rs` に `TransitCommand` 追加
+- [x] 各型に単体テスト追加
+- [x] `docs/event-catalog.md` 更新（§3.6 の予約 `SectorTransitRejected` を
+      `SectorTransitAborted` にリネームし、型定義済みへ移行）
 - [ ] `docs/tick-model.md` §3 / CLAUDE.md §6 に Step 7.5 / Step 10 を追記
       （CLAUDE.md は人間の承認を得て）
 

@@ -4,7 +4,7 @@
 //! The system validates a Command before producing an Event.  (INV-006)
 
 use crate::fitting::{ModuleId, SlotKind};
-use crate::{Position, ShipId};
+use crate::{Position, SectorId, ShipId};
 use serde::{Deserialize, Serialize};
 
 /// Request to move a Ship to `target_position` within its current Sector.
@@ -88,6 +88,21 @@ pub struct StopCommand {
     pub ship_id: ShipId,
 }
 
+/// Request to transit a Ship from its current Sector to `to`.
+///
+/// Submitted to the Raft consensus layer as a `TransitProposal` (ADR-0014).
+/// No event is appended until the proposal is committed.
+///
+/// May be rejected if:
+/// - The Ship does not exist.
+/// - The Ship is already in transit (`TransitState::InTransit`).
+/// - `to` is not adjacent to the Ship's current Sector.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransitCommand {
+    pub ship_id: ShipId,
+    pub to     : SectorId,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +132,12 @@ mod tests {
     fn attack_command_identifies_attacker_and_target() {
         let cmd = AttackCommand { attacker_id: ship_id(1), target_id: ship_id(2) };
         assert_ne!(cmd.attacker_id, cmd.target_id);
+    }
+
+    #[test]
+    fn transit_command_carries_ship_id_and_destination_sector() {
+        let cmd = TransitCommand { ship_id: ship_id(1), to: SectorId(2) };
+        assert_eq!(cmd.ship_id, ship_id(1));
+        assert_eq!(cmd.to, SectorId(2));
     }
 }

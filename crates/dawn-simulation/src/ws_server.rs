@@ -108,6 +108,10 @@ fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
         // 以下はクライアント側の状態管理に使わない
         DomainEvent::ShipFitted(_)  => return None,
         DomainEvent::WeaponFired(_) => return None,
+        // Sector Transit はノード内部の所有権イベント。クライアントへは配信しない（ADR-0014）。
+        DomainEvent::SectorTransitRequested(_) => return None,
+        DomainEvent::SectorTransitCompleted(_) => return None,
+        DomainEvent::SectorTransitAborted(_)   => return None,
     };
     serde_json::to_string(&j).ok()
 }
