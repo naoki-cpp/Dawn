@@ -1780,4 +1780,36 @@ mod tests {
         assert_eq!(restored.ship_count(), 1);
         assert_eq!(restored.get_ship_position(ship_id), Some(entry_pos));
     }
+
+    /// ADR-0014 Task 9: measures the cost of a single Sector Transit
+    /// (propose + export + import), excluding Raft commit latency.
+    ///
+    /// Ignored by default (it's a benchmark, not a correctness check).
+    /// Run with: `cargo test -p dawn-simulation --release transit_latency_benchmark -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn transit_latency_benchmark() {
+        use std::time::Instant;
+
+        const ITERATIONS: u32 = 1_000;
+        let mut total = std::time::Duration::ZERO;
+
+        for i in 0..ITERATIONS {
+            let mut from_node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+            let mut to_node   = SimulationNode::new(NodeId(1), SectorId(1), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+            let ship_id = from_node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0));
+            let entry_pos = Position::new(500.0, 0.0, 0.0);
+
+            let start = Instant::now();
+            from_node.propose_transit(dawn_core::commands::TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+            let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
+            to_node.import_transit(&snapshot, SectorId(0), entry_pos);
+            total += start.elapsed();
+
+            let _ = i;
+        }
+
+        let avg = total / ITERATIONS;
+        println!("transit (propose+export+import) avg over {ITERATIONS} iterations: {avg:?}");
+    }
 }

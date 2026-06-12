@@ -320,7 +320,7 @@ Tick 駆動タイマー（決定 5）と整合しない。
   - [x] スプリットブレイン不在: いかなる時点でも所有 Sector は高々 1 つ /
         到達可能なノード間でLeaderは高々 1 つ
   - [x] INV-002: Transit 後の状態がSnapshot + Log Replayで完全再現される
-- [ ] ベンチマーク: Transit 1 回のレイテンシ（docs/benchmark-baseline.md に追記）
+- [x] ベンチマーク: Transit 1 回のレイテンシ（docs/benchmark-baseline.md に追記）
 
 ---
 

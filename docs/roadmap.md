@@ -370,7 +370,7 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 | 6 | `SimulationNode` の Transit 処理（Step 7.5 / Step 10 組み込み） | dawn-simulation | ✅ |
 | 7 | `MultiNodeCluster` への RaftActor 配線 | dawn-simulation | ✅ |
 | 8 | シナリオテスト（正常系 / リーダー障害 / スプリットブレイン不在 / INV-002 Replay） | dawn-simulation | ✅ |
-| 9 | Transit レイテンシのベンチマーク（benchmark-baseline.md 追記） | dawn-simulation | ⬜ |
+| 9 | Transit レイテンシのベンチマーク（benchmark-baseline.md 追記） | dawn-simulation | ✅ |
 | 10 | ドキュメント更新（event-catalog / tick-model / CLAUDE.md ※要人間承認） | docs | ⬜ |
 
 ---

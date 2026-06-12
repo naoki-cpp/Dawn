@@ -40,6 +40,23 @@ Raft（Phase 7）等の導入によるオーバーヘッドを定量比較する
 
 snapshot 保存・復元・イベント再生のラウンドトリップが完走することを確認。
 
+## Phase 7（ADR-0014 Raft Consensus）
+
+計測コマンド: `cargo test -p dawn-simulation --release transit_latency_benchmark -- --ignored --nocapture`
+
+### Sector Transit レイテンシ（ローカル ECS 操作のみ）
+
+| 指標 | 値 |
+|---|---|
+| propose_transit + export_transit + import_transit (avg, 1,000 iterations) | 10.664 µs |
+
+注: この値は `SimulationNode` 上の ECS 操作（TransitState 設定 /
+Snapshot 抽出 / ECS への復元）のみのコストであり、Raft Log への
+Proposal がコミットされるまでのレイテンシ（election/heartbeat の
+Tick 駆動タイマー、INV-005）は含まれない。Raft 経由のコミットレイテンシは
+`heartbeat_interval`（cluster.rs では 3 ticks）のオーダーで決まり、
+ECS 操作コスト自体は無視できるほど小さい。
+
 ## 既知の問題（Phase 6 時点・基準値とは別件）
 
 1. **Phase 1 SLA FAIL**: 10,000 隻で mean 87 ms（目標 16 ms）。
