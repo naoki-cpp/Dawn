@@ -58,6 +58,11 @@ async fn main() {
                 .and_then(|w| w[1].parse::<usize>().ok())
                 .unwrap_or(P4_SHIPS_DEFAULT)
         };
+        // --cluster: 3-node Raft cluster so Jump Gates work (ADR-0009)
+        if args.contains(&"--cluster".to_string()) {
+            run_cluster_server(ship_count).await;
+            return;
+        }
         run_phase4_server(ship_count, duel_mode).await;
         return;
     }
@@ -732,6 +737,224 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
                 .map(|r| r.event.clone())
                 .collect()
         };
+        sessions.retain(|sess| sess.send_events(&all_new_events));
+    }
+}
+
+// ── Phase 7.5: --serve --cluster (Jump Gates over Raft, ADR-0009) ─────────────
+
+/// Godot WebSocket server backed by a 3-node Raft cluster, one node per
+/// Sector (0/1/2), so `JumpCommand` runs the full ADR-0009 pipeline:
+/// validation → `TransitOp::Request` on the Raft Log → Step 7.5 apply →
+/// `JumpGateUsed` / `StarSystemChanged` broadcast to the client.
+///
+/// Differences from `run_phase4_server`:
+/// - 3 `SimulationNode`s ticked in lockstep, each with its own `RaftActor`
+///   (in-process transport, same wiring as `MultiNodeCluster`).
+/// - Player commands are routed to the node that currently owns the
+///   player's ship; ownership follows `JumpGateUsed` events.
+/// - Players spawn near Gate 0 (Sector 0 → Sector 1) so the jump can be
+///   tried immediately.
+async fn run_cluster_server(ship_count: usize) {
+    use dawn_core::{DomainEvent, PlayerId};
+    use dawn_event_store::store::EventStore as _;
+    use transit::TransitOp;
+
+    const SECTORS: usize = 3;
+    /// In range of Gate 0 (position x=49,000, activation_radius 2,000).
+    const PLAYER_SPAWN: Position = Position { x: 47_500.0, y: 0.0, z: 0.0 };
+
+    println!("═══════════════════════════════════════════");
+    println!("  Phase 7.5 — Raft cluster WebSocket server ");
+    println!("═══════════════════════════════════════════");
+    println!("  sectors  : {SECTORS} (one Raft node each)");
+    println!("  npc ships: {ship_count} in Sector 0  (change with --ships N)");
+    println!("  tick rate: {} ms/tick  ({} tick/sec)", P4_TICK_MS, 1000 / P4_TICK_MS);
+    println!("  jump     : press J near a gate (player spawns near Gate 0)");
+    println!();
+    println!("  Open Godot client and press Play (F5)");
+    println!("  Press Ctrl-C to stop");
+    println!();
+
+    let server = WsServer::bind("127.0.0.1:7878").await
+        .expect("failed to bind WebSocket server");
+
+    // One SimulationNode + RaftActor per Sector (ADR-0014 wiring).
+    let ids: Vec<NodeId> = (0..SECTORS as u8).map(NodeId).collect();
+    let (endpoints, _partitioned) = cluster::spawn_raft_actors(&ids);
+    let (rafts, mut committed_rxs): (Vec<_>, Vec<_>) = endpoints.into_iter().unzip();
+
+    let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
+    let mut nodes: Vec<SimulationNode> = ids.iter().map(|&id| {
+        let mut node = SimulationNode::new(id, SectorId(id.0), bounds);
+        for def in data_loader::load_modules("data/modules.toml", modules::all_modules()) {
+            node.register_module(def);
+        }
+        for def in data_loader::load_ship_types("data/ship_types.toml", ship_types::all_ship_types()) {
+            node.register_ship_type(def);
+        }
+        node
+    }).collect();
+
+    // NPC ships live in Sector 0 only.
+    let config = SpawnConfig::default_for_node(NodeId(0));
+    for (_, pos, vel) in generate_ships(ship_count, &config, 0) {
+        let ship_id = nodes[0].spawn_ship(ship_types::SHIP_TYPE_NPC_FRIGATE, pos, vel);
+        nodes[0].fit_module(dawn_core::FitModuleCommand {
+            ship_id,
+            slot      : dawn_core::SlotKind::High,
+            module_id : modules::MODULE_RAILGUN_SMALL,
+        });
+    }
+
+    // Warm up: tick until a Raft leader is elected so early Jump proposals
+    // are not dropped (election timeout is at most 20 ticks).
+    for _ in 0..30 {
+        for i in 0..SECTORS {
+            transit::apply_committed_raft_entries(&mut nodes[i], &rafts[i], &mut committed_rxs[i]);
+            nodes[i].tick();
+            rafts[i].tick();
+        }
+    }
+    println!("  [Server] Raft warm-up complete. Waiting for players...");
+
+    let (new_conn_tx, mut new_conn_rx) =
+        mpsc::unbounded_channel::<(tokio::net::TcpStream, std::net::SocketAddr)>();
+    let (ready_sess_tx, mut ready_sess_rx) =
+        mpsc::unbounded_channel::<ws_server::PlayerSession>();
+
+    let server_arc = std::sync::Arc::new(server);
+    let server_clone = server_arc.clone();
+    tokio::spawn(async move {
+        loop {
+            if let Some((stream, addr)) = server_clone.try_accept_raw().await {
+                let _ = new_conn_tx.send((stream, addr));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    });
+
+    let mut sessions: Vec<ws_server::PlayerSession> = Vec::new();
+    // Which Sector currently owns each player's ship (updated on JumpGateUsed).
+    let mut player_sector: HashMap<PlayerId, usize> = HashMap::new();
+    let mut ship_player  : HashMap<ShipId, PlayerId> = HashMap::new();
+
+    let mut interval = tokio::time::interval(
+        std::time::Duration::from_millis(P4_TICK_MS)
+    );
+
+    loop {
+        interval.tick().await;
+
+        // New TCP connection → spawn player in Sector 0 near Gate 0.
+        while let Ok((stream, addr)) = new_conn_rx.try_recv() {
+            let player_id      = nodes[0].next_player_id();
+            let ship_id        = nodes[0].spawn_player_ship_at_pub(player_id, PLAYER_SPAWN);
+            let initial_state  = nodes[0].build_initial_state_json();
+            let player_fitting = nodes[0].build_player_fitting_json(ship_id);
+            let tx             = ready_sess_tx.clone();
+            player_sector.insert(player_id, 0);
+            ship_player.insert(ship_id, player_id);
+
+            tokio::spawn(async move {
+                match ws_server::WsServer::handshake(
+                    stream, addr, player_id, ship_id, &initial_state, player_fitting
+                ).await {
+                    Ok(sess) => { let _ = tx.send(sess); }
+                    Err(e)   => eprintln!("[Server] handshake failed: {e}"),
+                }
+            });
+        }
+
+        while let Ok(sess) = ready_sess_rx.try_recv() {
+            println!("  [Server] {} joined with ship #{}", sess.player_id, sess.ship_id.raw());
+            sessions.push(sess);
+        }
+
+        // Record per-node event-store positions before command processing so
+        // command-driven events (ModuleActivated etc.) are also broadcast.
+        let events_before: Vec<u64> =
+            nodes.iter().map(|n| n.total_event_count() as u64).collect();
+
+        // Collect commands, routed to the node that owns the player's ship.
+        let mut lock_commands: Vec<Vec<dawn_core::LockOnCommand>> =
+            vec![Vec::new(); SECTORS];
+
+        for sess in sessions.iter_mut() {
+            let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
+            while let Some(cmd) = sess.try_recv_command() {
+                match cmd {
+                    ClientCommand::Move(mv) => {
+                        nodes[sector].apply_move_command_owned(sess.player_id, mv.ship_id, mv.target_position);
+                    }
+                    ClientCommand::LockOn(lo) => {
+                        if nodes[sector].apply_lock_on_owned(sess.player_id, lo.clone()) {
+                            lock_commands[sector].push(lo);
+                        }
+                    }
+                    ClientCommand::Activate(cmd) => {
+                        nodes[sector].activate_module_owned(sess.player_id, cmd);
+                    }
+                    ClientCommand::Deactivate(cmd) => {
+                        nodes[sector].deactivate_module_owned(sess.player_id, cmd);
+                    }
+                    ClientCommand::Attack(_) => {}
+                    ClientCommand::Stop(s) => {
+                        nodes[sector].apply_stop_command_owned(sess.player_id, s.ship_id);
+                    }
+                    // ADR-0009: validate up front, then propose to the Raft
+                    // Log; the move happens once the entry commits (Step 7.5).
+                    ClientCommand::Jump(j) => {
+                        let accepted = j.ship_id == sess.ship_id
+                            && nodes[sector].can_propose_jump(j.ship_id, j.gate_id);
+                        if accepted {
+                            let to = nodes[sector].jump_gate(j.gate_id)
+                                .expect("can_propose_jump confirmed gate exists")
+                                .to_sector;
+                            rafts[sector].propose(
+                                TransitOp::Request { ship_id: j.ship_id, to, gate_id: Some(j.gate_id) }.encode(),
+                            );
+                            println!("  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
+                                j.ship_id.raw(), j.gate_id.0, sector, to.0);
+                        } else {
+                            eprintln!("[Server] JumpCommand rejected (ship #{} gate #{})",
+                                j.ship_id.raw(), j.gate_id.0);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Tick every node: Step 7.5 (apply committed Raft entries) →
+        // simulation step → Step 10 (advance Raft timers).
+        for i in 0..SECTORS {
+            transit::apply_committed_raft_entries(&mut nodes[i], &rafts[i], &mut committed_rxs[i]);
+            nodes[i].tick_with_lock_commands(&lock_commands[i]);
+            rafts[i].tick();
+        }
+
+        // Collect new events from every node for broadcast.
+        let mut all_new_events = Vec::new();
+        for (i, node) in nodes.iter().enumerate() {
+            all_new_events.extend(
+                node.event_store().iter_from(events_before[i]).map(|r| r.event.clone()),
+            );
+        }
+
+        // Ownership handoff: a player ship completed a jump → the
+        // destination node adopts it and future commands route there.
+        for event in &all_new_events {
+            if let DomainEvent::JumpGateUsed(e) = event {
+                if let Some(&player_id) = ship_player.get(&e.ship_id) {
+                    let dest = e.to_sector.0 as usize;
+                    nodes[dest].adopt_player_ship(e.ship_id, player_id);
+                    player_sector.insert(player_id, dest);
+                    println!("  [Server] {player_id:?} ship #{} now owned by Sector {dest}",
+                        e.ship_id.raw());
+                }
+            }
+        }
+
         sessions.retain(|sess| sess.send_events(&all_new_events));
     }
 }

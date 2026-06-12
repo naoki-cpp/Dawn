@@ -80,10 +80,14 @@ const DOUBLE_CLICK_SEC: float  = 0.4   ## この秒数以内の2回クリック�
 const DOUBLE_CLICK_PX : float  = 10.0  ## この画素以内
 
 ## Jump Gate navigation (ADR-0009).
-## Static map data mirroring dawn-simulation/src/star_map.rs — the gates
-## reachable from Sector 0 (Alpha), which is the only Sector `--serve` runs.
+## Static map data mirroring dawn-simulation/src/star_map.rs.
+## Gate positions are per-sector coordinates; only gates whose `from_system`
+## matches the player's current system are considered for proximity.
 const JUMP_GATES := [
-	{"gate_id": 0, "position": Vector3(49_000.0, 0.0, 0.0), "activation_radius": 2_000.0, "to_system": "Beta"},
+	{"gate_id": 0, "from_system": "Alpha", "position": Vector3(49_000.0, 0.0, 0.0), "activation_radius": 2_000.0, "to_system": "Beta"},
+	{"gate_id": 1, "from_system": "Beta", "position": Vector3(-49_000.0, 0.0, 0.0), "activation_radius": 2_000.0, "to_system": "Alpha"},
+	{"gate_id": 2, "from_system": "Beta", "position": Vector3(49_000.0, 0.0, 0.0), "activation_radius": 2_000.0, "to_system": "Gamma"},
+	{"gate_id": 3, "from_system": "Gamma", "position": Vector3(-49_000.0, 0.0, 0.0), "activation_radius": 2_000.0, "to_system": "Beta"},
 ]
 const STAR_SYSTEM_NAMES := ["Alpha", "Beta", "Gamma"]
 
@@ -125,6 +129,8 @@ func _update_gate_proximity() -> void:
 	var ship_pos: Vector3 = (_ships[_player_ship_id] as Node3D).global_position / WORLD_SCALE
 	for gate: Variant in JUMP_GATES:
 		var g: Dictionary = gate as Dictionary
+		if (g.get("from_system", "") as String) != _current_system_name:
+			continue
 		var gate_pos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
 		if ship_pos.distance_to(gate_pos) <= (g.get("activation_radius", 0.0) as float):
 			_nearby_gate_id = g.get("gate_id", -1) as int

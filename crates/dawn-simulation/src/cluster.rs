@@ -21,6 +21,58 @@ use dawn_core::{NodeId, SectorBounds, SectorId};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+// ── Raft wiring ───────────────────────────────────────────────────────────────
+
+/// One node's Raft endpoints produced by [`spawn_raft_actors`]:
+/// the proposal/timer handle and the committed-entries channel consumed at
+/// Tick Step 7.5.
+pub(crate) type RaftEndpoint = (RaftActorHandle, tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>);
+
+/// Spawn one `RaftActor` per `NodeId`, fully wired to its peers via
+/// `PartitionableTransport` over in-process mpsc channels (ADR-0014).
+///
+/// Returns the per-node endpoints (in `ids` order) and the shared
+/// fault-injection partition set. Election timeout = 10 + jitter(0..10)
+/// ticks, heartbeat every 3 ticks; timers advance once per simulation Tick
+/// (Step 10).
+pub(crate) fn spawn_raft_actors(
+    ids: &[NodeId],
+) -> (Vec<RaftEndpoint>, Arc<Mutex<HashSet<NodeId>>>) {
+    // One mailbox per RaftActor, addressed by NodeId.
+    let mut raft_txs = HashMap::new();
+    let mut raft_rxs = HashMap::new();
+    for &id in ids {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        raft_txs.insert(id, tx);
+        raft_rxs.insert(id, rx);
+    }
+
+    let partitioned = PartitionableTransport::new_partition_set();
+    let mut rng = rand::thread_rng();
+
+    let endpoints = ids.iter().map(|&id| {
+        let peers: Vec<NodeId> = ids.iter().copied().filter(|&p| p != id).collect();
+
+        let peer_txs: HashMap<NodeId, _> = raft_txs.iter()
+            .filter(|&(&p, _)| p != id)
+            .map(|(&p, tx)| (p, tx.clone()))
+            .collect();
+        let transport: Arc<dyn RaftTransport> = Arc::new(PartitionableTransport::new(
+            id,
+            InProcessTransport::new(peer_txs),
+            partitioned.clone(),
+        ));
+
+        let state = RaftState::new_randomized(id, peers.clone(), 10, 10, 3, &mut rng);
+        let raft_rx = raft_rxs.remove(&id).unwrap();
+        let (committed_tx, committed_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(RaftActor::new(state, peers, transport, raft_rx, committed_tx).run());
+        (RaftActorHandle::new(raft_txs[&id].clone()), committed_rx)
+    }).collect();
+
+    (endpoints, partitioned)
+}
+
 // ── Cluster ───────────────────────────────────────────────────────────────────
 
 pub struct MultiNodeCluster {
@@ -43,38 +95,9 @@ impl MultiNodeCluster {
         let bus = ReplicationBusHandle::spawn();
         let ids: Vec<NodeId> = (0..node_count as u8).map(NodeId).collect();
 
-        // One mailbox per RaftActor, addressed by NodeId.
-        let mut raft_txs = HashMap::new();
-        let mut raft_rxs = HashMap::new();
-        for &id in &ids {
-            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-            raft_txs.insert(id, tx);
-            raft_rxs.insert(id, rx);
-        }
+        let (endpoints, partitioned) = spawn_raft_actors(&ids);
 
-        let partitioned = PartitionableTransport::new_partition_set();
-        let mut rng = rand::thread_rng();
-
-        let nodes = ids.iter().map(|&id| {
-            let peers: Vec<NodeId> = ids.iter().copied().filter(|&p| p != id).collect();
-
-            let peer_txs: HashMap<NodeId, _> = raft_txs.iter()
-                .filter(|&(&p, _)| p != id)
-                .map(|(&p, tx)| (p, tx.clone()))
-                .collect();
-            let transport: Arc<dyn RaftTransport> = Arc::new(PartitionableTransport::new(
-                id,
-                InProcessTransport::new(peer_txs),
-                partitioned.clone(),
-            ));
-
-            // election_timeout = 10 + jitter(0..10) ticks, heartbeat every 3 ticks.
-            let state = RaftState::new_randomized(id, peers.clone(), 10, 10, 3, &mut rng);
-            let raft_rx = raft_rxs.remove(&id).unwrap();
-            let (committed_tx, committed_rx) = tokio::sync::mpsc::unbounded_channel();
-            tokio::spawn(RaftActor::new(state, peers, transport, raft_rx, committed_tx).run());
-            let raft = RaftActorHandle::new(raft_txs[&id].clone());
-
+        let nodes = ids.iter().zip(endpoints).map(|(&id, (raft, committed_rx))| {
             SectorSimulatorHandle::spawn(
                 id,
                 SectorId(id.0),

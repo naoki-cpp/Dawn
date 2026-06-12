@@ -736,6 +736,26 @@ impl<S: EventStore> SimulationNode<S> {
         ship_id
     }
 
+    /// Register `player_id` as the owner of a ship already present in this
+    /// node's ECS — the ownership handoff after a Sector Transit moved a
+    /// player's ship into this Sector (ADR-0009 / ADR-0014).
+    ///
+    /// `import_transit` restores the ship's state but ownership
+    /// (`ship_owners`) is node-local and is NOT part of `ShipSnapshot`;
+    /// the serving layer calls this on the destination node so the player's
+    /// `*_owned` commands keep working after the jump.
+    ///
+    /// Returns `false` (and registers nothing) if the ship is not in this
+    /// node's ECS.
+    pub fn adopt_player_ship(&mut self, ship_id: ShipId, player_id: PlayerId) -> bool {
+        if !self.ship_index.contains_key(&ship_id) {
+            return false;
+        }
+        self.player_ships.insert(player_id, ship_id);
+        self.ship_owners.insert(ship_id, player_id);
+        true
+    }
+
     /// Spawn a Bot ship at the given position.
     ///
     /// The Bot receives a real `PlayerId` and goes through the same player
@@ -1454,6 +1474,32 @@ mod tests {
             }
             other => panic!("expected SectorTransitCompleted, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn adopted_player_ship_accepts_owned_commands_on_the_destination_node() {
+        let mut from_node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+        let mut to_node   = SimulationNode::new(NodeId(1), SectorId(1), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+
+        let player_id = from_node.next_player_id();
+        let ship_id   = from_node.spawn_player_ship(player_id);
+        from_node.propose_transit(dawn_core::commands::TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+        let snapshot = from_node.export_transit(ship_id, Position::ORIGIN).unwrap();
+        to_node.import_transit(&snapshot, SectorId(0), Position::ORIGIN);
+
+        // Before the handoff, the destination node rejects owned commands.
+        assert!(!to_node.apply_stop_command_owned(player_id, ship_id));
+
+        assert!(to_node.adopt_player_ship(ship_id, player_id));
+        assert!(to_node.apply_stop_command_owned(player_id, ship_id));
+    }
+
+    #[test]
+    fn adopt_player_ship_returns_false_for_ship_not_in_this_node() {
+        let mut node = mem_node();
+        let unknown = dawn_core::ShipId::new(NodeId(99), 0);
+        assert!(!node.adopt_player_ship(unknown, dawn_core::PlayerId(0)));
+        assert!(!node.apply_stop_command_owned(dawn_core::PlayerId(0), unknown));
     }
 
     #[test]

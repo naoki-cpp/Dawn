@@ -119,40 +119,14 @@ impl SectorSimulatorActor {
 
     /// Step 7.5 (ADR-0014 §7): apply committed Raft Log entries to the ECS.
     ///
-    /// `Request`: if this node owns the Ship, mark it `InTransit` (appends
-    /// `SectorTransitRequested`), export its state, and propose the
-    /// follow-up `Commit` op carrying the snapshot.
-    /// `Commit`: if this node is the destination Sector, import the Ship at
-    /// `entry_pos` (appends `SectorTransitCompleted`).
+    /// Delegates to [`crate::transit::apply_committed_raft_entries`], which
+    /// is shared with the `--serve --cluster` loop.
     fn apply_committed_raft_entries(&mut self) {
-        while let Ok(payload) = self.raft_committed_rx.try_recv() {
-            let Some(op) = TransitOp::decode(&payload) else { continue };
-            match op {
-                TransitOp::Request { ship_id, to, gate_id } => {
-                    let cmd = dawn_core::commands::TransitCommand { ship_id, to };
-                    if self.node.propose_transit(cmd).is_ok() {
-                        // This node owned the Ship: hand its state to the
-                        // destination through a second Raft round.
-                        let entry_pos = Position::ORIGIN;
-                        if let Some(ship) = self.node.export_transit(ship_id, entry_pos) {
-                            let from = self.node.sector_id();
-                            self.raft.propose(
-                                TransitOp::Commit { ship, from, to, entry_pos, gate_id }.encode(),
-                            );
-                        }
-                    }
-                }
-                TransitOp::Commit { ship, from, to, entry_pos, gate_id } => {
-                    if to == self.node.sector_id() {
-                        let ship_id = ship.ship_id;
-                        self.node.import_transit(&ship, from, entry_pos);
-                        if let Some(gate_id) = gate_id {
-                            self.node.append_jump_events(ship_id, gate_id, from, to, entry_pos);
-                        }
-                    }
-                }
-            }
-        }
+        crate::transit::apply_committed_raft_entries(
+            &mut self.node,
+            &self.raft,
+            &mut self.raft_committed_rx,
+        );
     }
 
     /// Forward any un-replicated events from the node's local log to the bus.

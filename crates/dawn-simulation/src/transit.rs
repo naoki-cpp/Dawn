@@ -10,9 +10,13 @@
 //! - `Commit`: the destination (to) node imports the Ship at `entry_pos`
 //!   and appends `SectorTransitCompleted`. Other nodes ignore it.
 
+use crate::node::SimulationNode;
 use crate::snapshot::ShipSnapshot;
+use dawn_consensus::RaftActorHandle;
 use dawn_core::{JumpGateId, Position, SectorId, ShipId};
+use dawn_event_store::store::EventStore;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 
 /// A Sector Transit proposal as it travels through the Raft Log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +53,52 @@ impl TransitOp {
     /// proposal types share the same log).
     pub fn decode(payload: &[u8]) -> Option<Self> {
         postcard::from_bytes(payload).ok()
+    }
+}
+
+/// Tick Step 7.5 (ADR-0014 §7): apply committed Raft Log entries to a node.
+///
+/// `Request`: if `node` owns the Ship, mark it `InTransit` (appends
+/// `SectorTransitRequested`), export its state, and propose the follow-up
+/// `Commit` op carrying the snapshot.
+/// `Commit`: if `node` is the destination Sector, import the Ship at
+/// `entry_pos` (appends `SectorTransitCompleted`), plus `JumpGateUsed` /
+/// `StarSystemChanged` when the Transit came through a Jump Gate (ADR-0009).
+///
+/// Shared by `SectorSimulatorActor` and the `--serve --cluster` loop so the
+/// Step 7.5 semantics cannot drift between the two call sites.
+pub(crate) fn apply_committed_raft_entries<S: EventStore>(
+    node        : &mut SimulationNode<S>,
+    raft        : &RaftActorHandle,
+    committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
+) {
+    while let Ok(payload) = committed_rx.try_recv() {
+        let Some(op) = TransitOp::decode(&payload) else { continue };
+        match op {
+            TransitOp::Request { ship_id, to, gate_id } => {
+                let cmd = dawn_core::commands::TransitCommand { ship_id, to };
+                if node.propose_transit(cmd).is_ok() {
+                    // This node owned the Ship: hand its state to the
+                    // destination through a second Raft round.
+                    let entry_pos = Position::ORIGIN;
+                    if let Some(ship) = node.export_transit(ship_id, entry_pos) {
+                        let from = node.sector_id();
+                        raft.propose(
+                            TransitOp::Commit { ship, from, to, entry_pos, gate_id }.encode(),
+                        );
+                    }
+                }
+            }
+            TransitOp::Commit { ship, from, to, entry_pos, gate_id } => {
+                if to == node.sector_id() {
+                    let ship_id = ship.ship_id;
+                    node.import_transit(&ship, from, entry_pos);
+                    if let Some(gate_id) = gate_id {
+                        node.append_jump_events(ship_id, gate_id, from, to, entry_pos);
+                    }
+                }
+            }
+        }
     }
 }
 
