@@ -294,8 +294,8 @@ Tick 駆動タイマー（決定 5）と整合しない。
 - [x] 各型に単体テスト追加
 - [x] `docs/event-catalog.md` 更新（§3.6 の予約 `SectorTransitRejected` を
       `SectorTransitAborted` にリネームし、型定義済みへ移行）
-- [ ] `docs/tick-model.md` §3 / CLAUDE.md §6 に Step 7.5 / Step 10 を追記
-      （CLAUDE.md は人間の承認を得て）
+- [x] `docs/tick-model.md` §3 に Step 7.5（承認済み・未実装）/ Step 10 を追記
+- [ ] CLAUDE.md §6 に Step 10 を追記（人間の承認を得て）
 
 ### dawn-consensus（新規クレート）
 

@@ -112,15 +112,19 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 
 | イベント名 | 説明 | 発行者 | ステータス |
 |---|---|---|---|
-| `SectorTransitRequested` | Sector Transit が Raft で合意された（所有権は from のまま） | （Phase 7・未配線） | 型定義のみ |
-| `SectorTransitCompleted` | Sector Transit が完了した（所有権が to に移った） | （Phase 7・未配線） | 型定義のみ |
-| `SectorTransitAborted` | Transit が中断された（所有権は from に残る） | （Phase 7・未配線） | 型定義のみ |
+| `SectorTransitRequested` | Sector Transit が提案された（所有権は from のまま） | `SimulationNode::propose_transit()` | ✅ 実装済み |
+| `SectorTransitCompleted` | Sector Transit が完了した（所有権が to に移った） | `SimulationNode::export_transit()` / `import_transit()`（from / to 双方が自ログに Append） | ✅ 実装済み |
+| `SectorTransitAborted` | Transit が中断された（所有権は from に残る） | （宛先ノード障害時・未配線） | 型定義のみ |
 
 バリデーション段階の拒否はイベントではなく `CommandRejected` の返却で
 表現する（INV-006）。`SectorTransitRejected` というイベントは定義しない。
+`propose_transit` は Ship 不在 / 既に Transit 中の場合 `Err` を返し、
+イベントを発行しない。
 
 `TransitCommand { ship_id, to }` が対応する Command（dawn-core/src/commands.rs）。
-発行経路（RaftActor → SimulationNode の Step 7.5/10）は Phase 7 の後続タスクで実装する。
+Raft（`dawn-consensus`）によるリーダー選出・タイマー駆動は `MultiNodeCluster`
+に配線済み。Transit Proposal の Raft Log 経由コミット（Tick Step 7.5 への
+組み込み）は Phase 7 の後続タスク。
 
 ### 3.7 System（将来予約）
 

@@ -67,7 +67,7 @@ Tick を遅延させることも、スキップすることも許容しない。
 **この順序は変更してはならない。** 変更には ADR が必要。
 
 ```
-現在の実装（Phase 6 — Capacitor System / Bot System 追加済み）:
+現在の実装（Phase 7 — Raft タイマー駆動 Step 10 追加済み・ADR-0014）:
 
 Step 1: Tick カウンタをインクリメント
          current_tick = current_tick + 1
@@ -78,6 +78,8 @@ Step 2: コマンドキューを処理する
          LockOnCommand            → LockSystem に渡す（次のステップで処理）
          ActivateModuleCommand    → FittedSlot.is_active = true / apply_fitting()
          DeactivateModuleCommand  → FittedSlot.is_active = false / apply_fitting()
+         ※ Transit 中（TransitState::InTransit）の Ship への Move / Stop /
+           二重 Transit は拒否する（ADR-0014 / CLAUDE.md §5）
 
 Step 3: Movement System を実行する（ECS バッチ処理）
          MovementSystem::run(&mut world, tick)
@@ -118,6 +120,19 @@ Step 8: 全イベントを EventStore に Append する
 
 Step 9: Replication Actor に差分を通知する
          replication_tx.send(delta)
+
+Step 10: RaftActor に TickElapsed を送る（ADR-0014）
+         raft.tick()
+         → election timeout / heartbeat タイマーを 1 Tick 進める（INV-005 / FBD-003）
+         ※ 実装箇所は SectorSimulatorActor の Tick ハンドラ（Step 9 の後・reply の前）
+
+承認済み・未実装（ADR-0014 §7）:
+
+Step 7.5: コミット済み Raft エントリを適用する（Bot の後・Append の前）
+         RaftActor から受信したコミット済み Transit Proposal を ECS に適用し、
+         SectorTransitRequested / Completed / Aborted イベントを生成する
+         ※ 現在は SimulationNode::propose_transit / export_transit /
+           import_transit を呼び出し元が直接実行する形で実装されている
 ```
 
 ### Step 8 より前に Step 9 を実行してはならない理由
