@@ -1714,4 +1714,70 @@ mod tests {
         let hp = node.get_ship_hp(ship_id).unwrap();
         assert_eq!(hp, 400.0, "Replay 後の HP 合計 = 100 + 150 + 150 = 400");
     }
+
+    // ── ADR-0014 Task 8: Sector Transit scenario tests ───────────────────────
+
+    /// Normal-path Sector Transit: ownership ends up in exactly one Sector,
+    /// and at no point do both Sectors hold the Ship at once (INV-003).
+    #[test]
+    fn transit_moves_ship_ownership_to_destination_sector_exactly_once() {
+        let mut from_node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+        let mut to_node   = SimulationNode::new(NodeId(1), SectorId(1), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+
+        let ship_id = from_node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0));
+        assert_eq!(from_node.ship_count() + to_node.ship_count(), 1, "ship starts owned by exactly one sector");
+
+        from_node.propose_transit(dawn_core::commands::TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+        // Proposal alone does not move ownership yet.
+        assert_eq!(from_node.ship_count() + to_node.ship_count(), 1);
+
+        let entry_pos = Position::new(500.0, 0.0, 0.0);
+        let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
+
+        // In flight: neither sector owns the ship (no split-brain double-ownership).
+        assert_eq!(from_node.ship_count(), 0);
+        assert_eq!(to_node.ship_count(), 0);
+
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos);
+
+        // Final state: destination sector owns the ship, exactly once overall.
+        assert_eq!(from_node.ship_count(), 0);
+        assert_eq!(to_node.ship_count(), 1);
+        assert_eq!(to_node.get_ship_position(ship_id), Some(entry_pos));
+    }
+
+    /// INV-002: after a Sector Transit, the destination Sector's state can be
+    /// fully reproduced from a snapshot + Event Log replay (node restart).
+    #[test]
+    fn destination_sector_state_after_transit_is_fully_restored_from_snapshot_and_replay() {
+        let dir        = tempfile::tempdir().unwrap();
+        let event_path = dir.path().join("events.log");
+        let snap_path  = dir.path().join("snapshot.bin");
+
+        let mut from_node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+        let ship_id = from_node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0));
+        from_node.propose_transit(dawn_core::commands::TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+        let entry_pos = Position::new(500.0, 0.0, 0.0);
+        let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
+
+        {
+            let store = FileEventStore::open(&event_path).unwrap();
+            let mut to_node = SimulationNode::with_store(
+                NodeId(1), SectorId(1),
+                SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                store,
+            );
+            to_node.import_transit(&snapshot, SectorId(0), entry_pos);
+
+            let snap = to_node.take_snapshot();
+            snap.save(&snap_path).unwrap();
+        } // node drops; FileEventStore flushes via BufWriter
+
+        let snap   = StateSnapshot::load(&snap_path).unwrap();
+        let store2 = FileEventStore::open(&event_path).unwrap();
+        let restored = SimulationNode::restore_from(store2, &snap, &[], &[]);
+
+        assert_eq!(restored.ship_count(), 1);
+        assert_eq!(restored.get_ship_position(ship_id), Some(entry_pos));
+    }
 }

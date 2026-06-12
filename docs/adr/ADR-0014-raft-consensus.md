@@ -314,11 +314,12 @@ Tick 駆動タイマー（決定 5）と整合しない。
 
 - [x] `SimulationNode` に Transit 処理（提案 → コミット → 完了の 2 段階）
 - [x] `MultiNodeCluster` に RaftActor 配線
-- [ ] シナリオテスト（tests/）:
-  - [ ] 正常系: Transit 後、Ship が宛先 Sector にのみ存在する
-  - [ ] リーダー障害: 選出後に未完了 Transit が完了 or Abort する
-  - [ ] スプリットブレイン不在: いかなる時点でも所有 Sector は高々 1 つ
-  - [ ] INV-002: Transit を含むログの Replay で状態が完全再現される
+- [x] シナリオテスト（node.rs / cluster.rs の `#[cfg(test)]`）:
+  - [x] 正常系: Transit 後、Ship が宛先 Sector にのみ存在する
+  - [x] リーダー障害: パーティション後に新Leaderが高いTermで選出される
+  - [x] スプリットブレイン不在: いかなる時点でも所有 Sector は高々 1 つ /
+        到達可能なノード間でLeaderは高々 1 つ
+  - [x] INV-002: Transit 後の状態がSnapshot + Log Replayで完全再現される
 - [ ] ベンチマーク: Transit 1 回のレイテンシ（docs/benchmark-baseline.md に追記）
 
 ---

@@ -263,6 +263,52 @@ mod tests {
         cluster.shutdown().await;
     }
 
+    /// Leader-failure scenario (ADR-0014): when the current Leader is
+    /// partitioned away, the remaining nodes must elect a new Leader in a
+    /// higher term, and there must never be more than one Leader at once.
+    #[tokio::test]
+    async fn cluster_elects_a_new_leader_after_the_current_leader_is_partitioned() {
+        let cluster = MultiNodeCluster::new(NODES);
+
+        for _ in 0..30 {
+            cluster.tick_all().await;
+        }
+
+        let roles = cluster.raft_roles().await;
+        let (leader_idx, (_, old_term)) = roles.iter().enumerate()
+            .find(|(_, (role, _))| *role == dawn_consensus::Role::Leader)
+            .expect("a leader must exist before the partition");
+        let old_term = *old_term;
+
+        cluster.partition_node(NodeId(leader_idx as u8));
+
+        for _ in 0..30 {
+            cluster.tick_all().await;
+
+            // Split-brain absence: among nodes that can still communicate,
+            // at most one Leader at any tick. The partitioned old leader is
+            // excluded — it cannot know it has been deposed and correctly
+            // keeps believing it is Leader in its stale term, but it can no
+            // longer replicate to a majority, so this is not split-brain.
+            let roles = cluster.raft_roles().await;
+            let leaders = roles.iter().enumerate()
+                .filter(|&(idx, (role, _))| idx != leader_idx && *role == dawn_consensus::Role::Leader)
+                .count();
+            assert!(leaders <= 1, "at most one connected Leader at any time: {roles:?}");
+        }
+
+        let roles = cluster.raft_roles().await;
+        let leaders: Vec<_> = roles.iter().enumerate()
+            .filter(|&(idx, (role, _))| idx != leader_idx && *role == dawn_consensus::Role::Leader)
+            .collect();
+        assert_eq!(leaders.len(), 1, "remaining nodes must elect a new leader: {roles:?}");
+        let (new_leader_idx, (_, new_term)) = leaders[0];
+        assert_ne!(new_leader_idx, leader_idx, "the partitioned node cannot be the new leader");
+        assert!(*new_term > old_term, "new leader must be in a higher term: old={old_term:?} new={new_term:?}");
+
+        cluster.shutdown().await;
+    }
+
     #[tokio::test]
     async fn replicated_event_count_grows_monotonically_across_ticks() {
         let cluster = MultiNodeCluster::new(NODES);
