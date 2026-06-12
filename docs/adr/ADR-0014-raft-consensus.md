@@ -295,7 +295,7 @@ Tick 駆動タイマー（決定 5）と整合しない。
 - [x] `docs/event-catalog.md` 更新（§3.6 の予約 `SectorTransitRejected` を
       `SectorTransitAborted` にリネームし、型定義済みへ移行）
 - [x] `docs/tick-model.md` §3 に Step 7.5（承認済み・未実装）/ Step 10 を追記
-- [ ] CLAUDE.md §6 に Step 10 を追記（人間の承認を得て）
+- [x] CLAUDE.md §6 に Step 10 を追記（人間の承認を得て）
 
 ### dawn-consensus（新規クレート）
 
@@ -304,7 +304,7 @@ Tick 駆動タイマー（決定 5）と整合しない。
 - [x] Tick 駆動 election timeout / heartbeat
 - [x] `RaftActor`（Mailbox 経由・FBD-004 準拠）
 - [x] `RaftTransport` trait + In-Process 実装 + `PartitionableTransport`
-- [ ] CLAUDE.md §11 の Crate 表更新（人間の承認を得て）
+- [x] CLAUDE.md §11 の Crate 表更新（人間の承認を得て）
 
 ### dawn-ecs
 

@@ -90,14 +90,14 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
 - イベントソーシングによる完全な因果追跡
 - CRDTとRaftの責務分離による高スループット同期
 
-### 現在のスコープ（Phase 6 完了時点）
+### 現在のスコープ（Phase 7 実装中）
 
 ```
 実装対象:
   エンティティ  : Ship のみ
   コンポーネント: Position(x, y, z), Velocity, ThrustComp, ShipStatsComp,
                   HullComp（Shield/Armor/Hull 3層）, FittingComp（装備スロット）,
-                  CapacitorComp（現在 cap 量）
+                  CapacitorComp（現在 cap 量）, TransitComp（Transit 状態）
   船種          : ShipTypeDefinition（id, name, class, base_stats, slot_layout）
   イベント      : ShipSpawned（ship_type_id 含む）, VelocityChanged, SectorTransit系,
                   ShipFitted, WeaponFired, DamageTaken（3層 HP）, ShipDestroyed,
@@ -110,6 +110,10 @@ Phase 4 以降で追加承認済み（全て実装済み）:
   Lock-on システム（2フェーズ戦闘）
   ShipType システム（船種・船クラス・スロットレイアウト）
   Capacitor システム（サイクルベース cap 管理・強制 OFF）
+
+Phase 7 で追加承認済み（ADR-0014・実装中）:
+  Raft コンセンサス（dawn-consensus: Leader 選出 / RaftActor / 障害注入）
+  Sector Transit（propose / export / import・Raft Log 経由コミットは未配線）
 
 実装しない（提案も拒否する）:
   課金 / キャラクター育成 / 市場 / チャット
@@ -293,14 +297,15 @@ Phase 4 以降で追加承認済み（全て実装済み）:
 dawn-core
     ↑ (依存してよい)
     ├── dawn-ecs
+    ├── dawn-consensus      ← Raft（ADR-0014: state machine, RaftActor, RaftTransport）
     └── dawn-event-store
             ↑
             └── dawn-actor          ← Actor基盤（EventStoreActor, ReplicationBus）
                     ↑
                     └── dawn-simulation  ← 実行バイナリ・負荷生成
+                        （dawn-consensus にも依存する）
 
 # 将来追加予定（まだ存在しない）:
-#   dawn-actor ← dawn-consensus  （Raft）
 #   dawn-actor ← dawn-replication（Gossip + CRDT）
 #   上記 ← dawn-sector-node      （本番実行バイナリ）
 ```
@@ -489,7 +494,7 @@ pub type Tick = u64;
 ### Tick 内の処理順序
 
 ```
-現在の実装（Phase 6 時点）:
+現在の実装（Phase 7 実装中・ADR-0014）:
   1. Tick カウンタをインクリメント
   2. コマンドキューを処理する
        MoveCommand              → ThrustComp.direction を更新（is_braking = false）
@@ -497,6 +502,8 @@ pub type Tick = u64;
        LockOnCommand            → LockSystem に渡す
        ActivateModuleCommand    → FittedSlot.is_active = true / apply_fitting()
        DeactivateModuleCommand  → FittedSlot.is_active = false / apply_fitting()
+       ※ Transit 中（TransitState::InTransit）の Ship への Move / Stop /
+         二重 Transit は拒否する（ADR-0014 / §5）
   3. Movement System を実行する（ECS バッチ処理）
   4. Capacitor System を実行する           ← Movement の後
        毎 Tick: cap を recharge_per_tick 分回復
@@ -513,7 +520,9 @@ pub type Tick = u64;
        apply_*_owned() でプレイヤーと同一パイプラインを使用
   8. 生成されたイベントを EventStore に Append する
   9. ReplicationBus に差分を転送する       ← 必ず 8 の後
-  10. 呼び出し元へ TickResult を返す
+  10. RaftActor に TickElapsed を送る       ← election/heartbeat タイマーを
+       1 Tick 進める（ADR-0014・INV-005/FBD-003。SectorSimulatorActor 内）
+  11. 呼び出し元へ TickResult を返す
 
 この順序を変えてはならない。
 特に「8 の前に 9」を行うことは禁止する（未コミットの状態を伝播させない）。
@@ -1002,14 +1011,14 @@ Phase 4 Cycle 3 で承認済み（作成してよい）:
 | `dawn-core` | ドメインモデル定義のみ。EntityId, Position, Fitting型, 全Event型, 全Command型 | serde, thiserror のみ | ネットワーク、ファイルI/O、非同期 |
 | `dawn-ecs` | ECS World の薄いラッパー。Component定義（Movement/Fitting/Combat）, System定義 | dawn-core, hecs | ネットワーク、EventStore |
 | `dawn-event-store` | Event Log の永続化。Append, Read, Snapshot（InMemory + File） | dawn-core, serde | ネットワーク、ECS |
+| `dawn-consensus` | Raft実装（ADR-0014）。Leader選出, RaftActor, RaftTransport（In-Process）, PartitionableTransport | dawn-core, serde, rand, tokio | ネットワーク、ECS、EventStore |
 | `dawn-actor` | Actor基盤。EventStoreActor, ReplicationBus, ClientConnection trait | dawn-core, dawn-event-store, tokio | dawn-ecs, dawn-simulation |
-| `dawn-simulation` | 実行バイナリ。SimulationNode, MultiNodeCluster, WsServer（Godot WebSocket接続）, 負荷生成, DataLoader（TOML読み込み） | 上記全て + rand + tokio-tungstenite + toml | — |
+| `dawn-simulation` | 実行バイナリ。SimulationNode, MultiNodeCluster（RaftActor 配線含む）, WsServer（Godot WebSocket接続）, 負荷生成, DataLoader（TOML読み込み） | 上記全て + rand + tokio-tungstenite + toml | — |
 
 ### 将来追加予定のクレート（まだ存在しない・実装しないこと）
 
 | Crate | 予定フェーズ | 責務（予定） |
 |---|---|---|
-| `dawn-consensus` | Phase 7 | Raft実装。Leader選出, Log Replication |
 | `dawn-replication` | Phase 8 | Gossip + CRDT。差分伝播, LWW-Register |
 | `dawn-proto` | Phase 5 | protobuf定義と生成コード |
 | `dawn-sector-node` | Phase 5 | 本番実行バイナリ。Actorの配線と起動 |
@@ -1163,6 +1172,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-12（ADR-0014 起草に伴うドキュメント整合性チェック）*
+*最終更新: 2026-06-12（ADR-0014 Phase 7 実装反映: dawn-consensus / Step 10 / TransitComp）*
 *対応ADR: ADR-0001 〜 ADR-0014*
 *次回レビュー予定: Phase 7 完了時（ADR-0009 実装開始前）*
