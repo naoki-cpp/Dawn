@@ -42,11 +42,15 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 ## 2. 現在地
 
 ```
-現在のフェーズ : Phase 7.5 — ADR-0009（星系間ナビゲーション）実装中
-フェーズの状態 : サーバー側完了（241テスト）— dawn-core 型定義、Jump Raft
-                パイプライン（star_map / TransitOp gate_id / Step 7.5）、
-                ClientCommand::Jump、ws_server の EventJson + JSON パーサー。
-                残タスク: Godot クライアント（connection.gd / main.gd）への配線
+現在のフェーズ : Phase 7.5 完了 — ADR-0009（星系間ナビゲーション）実装完了
+フェーズの状態 : サーバー側 + Godot クライアント配線完了（241テスト）
+                — dawn-core 型定義、Jump Raft パイプライン
+                （star_map / TransitOp gate_id / Step 7.5）、
+                ClientCommand::Jump、ws_server の EventJson + JSON パーサー、
+                connection.gd の send_jump_command、main.gd の
+                JumpGateUsed / StarSystemChanged 処理（瞬間移動・HUD通知・J キー）。
+                次のフェーズ: Phase 8（Anti-TiDi / スケール基盤）着手。
+                Sector キャパシティの悪用対策は docs/game-design.md §8 を参照。
 ```
 
 ### 完了済みフェーズ
@@ -59,6 +63,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 - ✅ Phase 5 — マルチプレイヤー基盤（ADR-0007 チェックリスト全完了 / 138テスト全パス）
 - ✅ Phase 6 — ゲームループ改善（Capacitor / EVE命中率式 / タクティカルオーバーレイ / ボットAI / 154テスト全パス）
 - ✅ Phase 7 — 分散コンセンサス（Raft / ADR-0014 / リーダー障害中の Transit 完遂を検証 / 223テスト全パス）
+- ✅ Phase 7.5 — 星系間ナビゲーション（ADR-0009 / Jump Gate Raft パイプライン + Godot クライアント配線 / 241テスト全パス）
 
 ### Phase 4 卒業記録（ADR-0007 §6）
 
@@ -87,10 +92,10 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**Phase 6 完了。Phase 7（分散コンセンサス / Raft）に着手する。**
-設計は ADR-0014（accepted）。タスク分解は §9 を参照。
-
-Phase 7 着手前に実施が推奨されるプレイテストについては `docs/playtest-guide.md` を参照。
+**Phase 7.5（ADR-0009）完了。Phase 8（Anti-TiDi / スケール基盤）に着手する。**
+方向性は §10、Sector キャパシティの悪用対策は docs/game-design.md §8 を参照。
+Phase 8 着手前に CLAUDE.md フッターの「次回レビュー予定」
+（ADR-0009 完了時のレビュー）を人間承認のうえ実施すること。
 
 #### Phase 6 完了タスク一覧
 

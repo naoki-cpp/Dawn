@@ -126,7 +126,7 @@ Transit Proposal（`TransitOp::Request` / `Commit`）は Raft Log を経由し�
 コミットされ、各ノードが Tick Step 7.5（`apply_committed_raft_entries`）で
 ECS に適用したうえで上記イベントを自分の EventStore に Append する。
 
-### 3.7 Jump Gate Navigation（ADR-0009・実装中）
+### 3.7 Jump Gate Navigation（ADR-0009・実装完了）
 
 | イベント名 | 説明 | 発行者 | ステータス |
 |---|---|---|---|
@@ -142,8 +142,10 @@ Step 7.5 で destination ノードが `SectorTransitCompleted` に加えて
 
 静的トポロジー（3 星系・4 ジャンプゲート）は `dawn-simulation/src/star_map.rs`
 に定義する。`ws_server.rs` は両イベントを EventJson としてクライアントに配信し、
-`JumpCommand` の JSON パーサーも実装済み。Godot クライアント側の配線のみ未実装
-（ADR-0009 実装チェックリスト参照）。
+`JumpCommand` の JSON パーサーも実装済み。Godot クライアント側
+（`connection.gd` の `send_jump_command`、`main.gd` の
+`_handle_jump_gate_used` / `_handle_star_system_changed`）も実装済み
+（ADR-0009 実装チェックリスト全完了）。
 
 ### 3.8 System（将来予約）
 
