@@ -134,7 +134,7 @@ mod tests {
         let transport = PartitionableTransport::new(node(0), inner, partitioned.clone());
 
         PartitionableTransport::partition(&partitioned, node(1));
-        transport.send(node(1), RaftMessage::AppendEntries(AppendEntries { term: Term(1), leader_id: node(0) }));
+        transport.send(node(1), RaftMessage::AppendEntries(AppendEntries::heartbeat(Term(1), node(0))));
 
         assert!(rx.try_recv().is_err(), "partitioned node should not receive message");
     }
@@ -152,7 +152,7 @@ mod tests {
         PartitionableTransport::partition(&partitioned, node(1));
         PartitionableTransport::heal(&partitioned, node(1));
 
-        let msg = RaftMessage::AppendEntries(AppendEntries { term: Term(1), leader_id: node(0) });
+        let msg = RaftMessage::AppendEntries(AppendEntries::heartbeat(Term(1), node(0)));
         transport.send(node(1), msg.clone());
 
         let received = rx.try_recv().unwrap();
@@ -170,7 +170,7 @@ mod tests {
         let transport = PartitionableTransport::new(node(0), inner, partitioned.clone());
 
         PartitionableTransport::partition(&partitioned, node(0));
-        transport.send(node(1), RaftMessage::AppendEntries(AppendEntries { term: Term(1), leader_id: node(0) }));
+        transport.send(node(1), RaftMessage::AppendEntries(AppendEntries::heartbeat(Term(1), node(0))));
 
         assert!(rx.try_recv().is_err(), "partitioned sender's messages should be dropped");
     }

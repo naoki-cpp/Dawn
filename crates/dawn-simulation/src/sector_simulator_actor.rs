@@ -19,6 +19,7 @@
 //! ```
 
 use crate::node::{SimulationNode, TickResult};
+use crate::transit::TransitOp;
 use dawn_actor::BusMessage;
 use dawn_consensus::{RaftActorHandle, Role, Term};
 use dawn_event_store::store::EventStore as _;
@@ -65,6 +66,16 @@ enum SectorSimulatorMessage {
     GetRaftRole {
         reply: oneshot::Sender<(Role, Term)>,
     },
+    /// Request a Sector Transit for `ship_id` (ADR-0014).
+    ///
+    /// Validated locally, then proposed to the Raft Log; the actual state
+    /// change happens only when the committed proposal is applied at
+    /// Step 7.5. `reply` is `false` if the command was rejected up front.
+    Transit {
+        ship_id: ShipId,
+        to     : SectorId,
+        reply  : oneshot::Sender<bool>,
+    },
     Shutdown,
 }
 
@@ -79,6 +90,9 @@ struct SectorSimulatorActor {
     last_replicated : u64,
     /// Handle to this node's RaftActor (ADR-0014).
     raft            : RaftActorHandle,
+    /// Committed Raft Log payloads from this node's RaftActor, applied at
+    /// Step 7.5 each Tick (ADR-0014 §7).
+    raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
 }
 
 impl SectorSimulatorActor {
@@ -87,8 +101,43 @@ impl SectorSimulatorActor {
         node  : SimulationNode,
         bus_tx: mpsc::Sender<BusMessage>,
         raft  : RaftActorHandle,
+        raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     ) -> Self {
-        Self { rx, node, bus_tx, last_replicated: 0, raft }
+        Self { rx, node, bus_tx, last_replicated: 0, raft, raft_committed_rx }
+    }
+
+    /// Step 7.5 (ADR-0014 §7): apply committed Raft Log entries to the ECS.
+    ///
+    /// `Request`: if this node owns the Ship, mark it `InTransit` (appends
+    /// `SectorTransitRequested`), export its state, and propose the
+    /// follow-up `Commit` op carrying the snapshot.
+    /// `Commit`: if this node is the destination Sector, import the Ship at
+    /// `entry_pos` (appends `SectorTransitCompleted`).
+    fn apply_committed_raft_entries(&mut self) {
+        while let Ok(payload) = self.raft_committed_rx.try_recv() {
+            let Some(op) = TransitOp::decode(&payload) else { continue };
+            match op {
+                TransitOp::Request { ship_id, to } => {
+                    let cmd = dawn_core::commands::TransitCommand { ship_id, to };
+                    if self.node.propose_transit(cmd).is_ok() {
+                        // This node owned the Ship: hand its state to the
+                        // destination through a second Raft round.
+                        let entry_pos = Position::ORIGIN;
+                        if let Some(ship) = self.node.export_transit(ship_id, entry_pos) {
+                            let from = self.node.sector_id();
+                            self.raft.propose(
+                                TransitOp::Commit { ship, from, to, entry_pos }.encode(),
+                            );
+                        }
+                    }
+                }
+                TransitOp::Commit { ship, from, to, entry_pos } => {
+                    if to == self.node.sector_id() {
+                        self.node.import_transit(&ship, from, entry_pos);
+                    }
+                }
+            }
+        }
     }
 
     /// Forward any un-replicated events from the node's local log to the bus.
@@ -110,6 +159,11 @@ impl SectorSimulatorActor {
         while let Some(msg) = self.rx.recv().await {
             match msg {
                 SectorSimulatorMessage::Tick { reply } => {
+                    // Step 7.5 (ADR-0014): apply committed Raft entries.
+                    // Applied before the simulation step so the resulting
+                    // events are flushed to the bus in the same Tick.
+                    self.apply_committed_raft_entries();
+
                     let result: TickResult = self.node.tick();
                     let summary = TickSummary {
                         tick          : result.tick,
@@ -117,12 +171,9 @@ impl SectorSimulatorActor {
                     };
 
                     // Step 2: replicate BEFORE replying (ordering contract).
-                    if !result.events.is_empty() {
-                        self.last_replicated += result.events.len() as u64;
-                        let _ = self.bus_tx
-                            .send(BusMessage::Events(result.events))
-                            .await;
-                    }
+                    // flush_to_bus covers both the Step 7.5 Transit events
+                    // and the events emitted by the simulation step.
+                    self.flush_to_bus().await;
 
                     // Step 10: advance this node's Raft election/heartbeat
                     // timers by one logical Tick (INV-005 / FBD-003).
@@ -156,6 +207,17 @@ impl SectorSimulatorActor {
                     let _ = reply.send((role, term));
                 }
 
+                SectorSimulatorMessage::Transit { ship_id, to, reply } => {
+                    // Up-front validation only (INV-006: rejection produces
+                    // no event). The ECS is untouched until the proposal
+                    // commits and is applied at Step 7.5.
+                    let accepted = self.node.can_propose_transit(ship_id);
+                    if accepted {
+                        self.raft.propose(TransitOp::Request { ship_id, to }.encode());
+                    }
+                    let _ = reply.send(accepted);
+                }
+
                 SectorSimulatorMessage::Shutdown => break,
             }
         }
@@ -175,17 +237,19 @@ impl SectorSimulatorHandle {
     ///
     /// `bus` provides the replication channel.  Pass `bus.event_sender()` here.
     /// `raft` is this node's `RaftActorHandle` (ADR-0014), already wired to
-    /// its peers via `RaftTransport`.
+    /// its peers via `RaftTransport`. `raft_committed_rx` is the matching
+    /// committed-entries channel from the same `RaftActor`.
     pub fn spawn(
         node_id  : NodeId,
         sector_id: SectorId,
         bounds   : SectorBounds,
         bus_tx   : mpsc::Sender<BusMessage>,
         raft     : RaftActorHandle,
+        raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(256);
         let node = SimulationNode::new(node_id, sector_id, bounds);
-        tokio::spawn(SectorSimulatorActor::new(rx, node, bus_tx, raft).run());
+        tokio::spawn(SectorSimulatorActor::new(rx, node, bus_tx, raft, raft_committed_rx).run());
         Self { tx }
     }
 
@@ -206,6 +270,16 @@ impl SectorSimulatorHandle {
     pub async fn get_stats(&self) -> NodeStats {
         let (tx, rx) = oneshot::channel();
         self.tx.send(SectorSimulatorMessage::GetStats { reply: tx }).await
+            .expect("SectorSimulatorActor is no longer running");
+        rx.await.expect("SectorSimulatorActor dropped reply sender")
+    }
+
+    /// Request a Sector Transit (ADR-0014). Returns `false` if rejected up
+    /// front (unknown Ship / already in transit). Acceptance only means the
+    /// proposal was submitted to Raft; the move happens once it commits.
+    pub async fn transit(&self, ship_id: ShipId, to: SectorId) -> bool {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(SectorSimulatorMessage::Transit { ship_id, to, reply: tx }).await
             .expect("SectorSimulatorActor is no longer running");
         rx.await.expect("SectorSimulatorActor dropped reply sender")
     }
@@ -236,11 +310,12 @@ mod tests {
 
         // Single-node Raft cluster: no peers, transport delivers nowhere.
         let (raft_tx, raft_rx) = mpsc::unbounded_channel();
+        let (committed_tx, committed_rx) = mpsc::unbounded_channel();
         let transport = std::sync::Arc::new(dawn_consensus::InProcessTransport::new(
             std::collections::HashMap::new(),
         ));
         let state = dawn_consensus::RaftState::new(NodeId(0), vec![], 10, 2);
-        tokio::spawn(dawn_consensus::RaftActor::new(state, vec![], transport, raft_rx).run());
+        tokio::spawn(dawn_consensus::RaftActor::new(state, vec![], transport, raft_rx, committed_tx).run());
         let raft = RaftActorHandle::new(raft_tx);
 
         let handle = SectorSimulatorHandle::spawn(
@@ -249,6 +324,7 @@ mod tests {
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             bus.event_sender(),
             raft,
+            committed_rx,
         );
         (handle, bus)
     }

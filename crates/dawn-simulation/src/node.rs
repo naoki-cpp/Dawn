@@ -239,10 +239,9 @@ impl<S: EventStore> SimulationNode<S> {
     /// `SectorTransitRequested` event (ownership stays with this Sector).
     /// On failure, no event is appended (CommandRejected per INV-006).
     ///
-    /// NOTE: in the current single-node implementation this is treated as
-    /// already committed. Once `RaftActor` is wired in (Task 7), this step
-    /// will only submit the proposal — the event is appended in Step 7.5
-    /// once the Raft log entry commits.
+    /// In the Raft pipeline (ADR-0014) this is invoked when a committed
+    /// `TransitOp::Request` is applied at Step 7.5 — never directly from a
+    /// client command.
     pub fn propose_transit(&mut self, cmd: dawn_core::commands::TransitCommand) -> Result<(), dawn_core::DawnError> {
         let &entity = self.ship_index.get(&cmd.ship_id)
             .ok_or(dawn_core::DawnError::ShipNotFound(cmd.ship_id))?;
@@ -261,6 +260,15 @@ impl<S: EventStore> SimulationNode<S> {
         }));
 
         Ok(())
+    }
+
+    /// Whether a `TransitCommand` for `ship_id` would currently be accepted
+    /// (Ship exists and is not already in transit). Used to reject commands
+    /// up front, before proposing to the Raft Log (INV-006).
+    pub fn can_propose_transit(&self, ship_id: ShipId) -> bool {
+        self.ship_index
+            .get(&ship_id)
+            .is_some_and(|&entity| !self.world.transit_state(entity).is_in_transit())
     }
 
     /// Complete an outgoing Sector Transit: remove the Ship from this node's

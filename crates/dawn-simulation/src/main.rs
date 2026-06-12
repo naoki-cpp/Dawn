@@ -15,6 +15,7 @@ mod ship_types;
 mod sector_simulator_actor;
 mod snapshot;
 mod spawner;
+mod transit;
 mod ws_server;
 
 use dawn_actor::ClientCommand;

@@ -122,9 +122,9 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 イベントを発行しない。
 
 `TransitCommand { ship_id, to }` が対応する Command（dawn-core/src/commands.rs）。
-Raft（`dawn-consensus`）によるリーダー選出・タイマー駆動は `MultiNodeCluster`
-に配線済み。Transit Proposal の Raft Log 経由コミット（Tick Step 7.5 への
-組み込み）は Phase 7 の後続タスク。
+Transit Proposal（`TransitOp::Request` / `Commit`）は Raft Log を経由して
+コミットされ、各ノードが Tick Step 7.5（`apply_committed_raft_entries`）で
+ECS に適用したうえで上記イベントを自分の EventStore に Append する。
 
 ### 3.7 System（将来予約）
 

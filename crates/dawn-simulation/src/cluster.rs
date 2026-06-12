@@ -71,7 +71,8 @@ impl MultiNodeCluster {
             // election_timeout = 10 + jitter(0..10) ticks, heartbeat every 3 ticks.
             let state = RaftState::new_randomized(id, peers.clone(), 10, 10, 3, &mut rng);
             let raft_rx = raft_rxs.remove(&id).unwrap();
-            tokio::spawn(RaftActor::new(state, peers, transport, raft_rx).run());
+            let (committed_tx, committed_rx) = tokio::sync::mpsc::unbounded_channel();
+            tokio::spawn(RaftActor::new(state, peers, transport, raft_rx, committed_tx).run());
             let raft = RaftActorHandle::new(raft_txs[&id].clone());
 
             SectorSimulatorHandle::spawn(
@@ -80,6 +81,7 @@ impl MultiNodeCluster {
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 bus.event_sender(),
                 raft,
+                committed_rx,
             )
         }).collect();
 
@@ -259,6 +261,58 @@ mod tests {
 
         let terms: std::collections::HashSet<_> = roles.iter().map(|(_, term)| *term).collect();
         assert_eq!(terms.len(), 1, "all nodes should agree on the term: {roles:?}");
+
+        cluster.shutdown().await;
+    }
+
+    /// Full Raft Transit pipeline (ADR-0014 §3): a TransitCommand on the
+    /// owning node travels through the Raft Log (Request → commit →
+    /// export → Commit → commit → import) and the Ship ends up owned by
+    /// the destination Sector only.
+    #[tokio::test]
+    async fn committed_transit_moves_ship_across_sectors_through_the_raft_log() {
+        use dawn_core::{Position, Velocity};
+
+        let cluster = MultiNodeCluster::new(NODES);
+
+        // Elect a leader first so proposals are not dropped.
+        for _ in 0..30 {
+            cluster.tick_all().await;
+        }
+
+        let ship_id = cluster.nodes[0]
+            .spawn_ship(Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0))
+            .await;
+
+        let accepted = cluster.nodes[0].transit(ship_id, SectorId(1)).await;
+        assert!(accepted, "transit command must pass up-front validation");
+
+        // Two Raft rounds (Request, then Commit with the exported state)
+        // ride on heartbeats every 3 ticks; 30 ticks is ample.
+        for _ in 0..30 {
+            cluster.tick_all().await;
+        }
+
+        let stats = cluster.get_all_stats().await;
+        assert_eq!(stats[0].ship_count, 0, "origin sector must no longer own the ship");
+        assert_eq!(stats[1].ship_count, 1, "destination sector must own the ship");
+        assert_eq!(stats[2].ship_count, 0, "third sector must be unaffected");
+
+        cluster.shutdown().await;
+    }
+
+    /// A Transit command for a ship already in transit is rejected up front
+    /// and never reaches the Raft Log (INV-006).
+    #[tokio::test]
+    async fn transit_command_for_unknown_ship_is_rejected_without_proposing() {
+        let cluster = MultiNodeCluster::new(NODES);
+        for _ in 0..30 {
+            cluster.tick_all().await;
+        }
+
+        let bogus = dawn_core::ShipId::new(NodeId(9), 999);
+        let accepted = cluster.nodes[0].transit(bogus, SectorId(1)).await;
+        assert!(!accepted, "unknown ship must be rejected up front");
 
         cluster.shutdown().await;
     }

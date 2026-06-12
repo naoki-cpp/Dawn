@@ -14,5 +14,5 @@ pub mod transport;
 
 pub use actor::{RaftActor, RaftActorHandle, RaftActorMessage};
 pub use rpc::{AppendEntries, AppendEntriesResponse, RaftMessage, RequestVote, RequestVoteResponse};
-pub use state::{Role, RaftState, TickEffect, Term};
+pub use state::{LogEntry, Role, RaftState, TickEffect, Term};
 pub use transport::{InProcessTransport, PartitionableTransport, RaftTransport};

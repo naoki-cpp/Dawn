@@ -10,7 +10,7 @@
 
 use dawn_core::NodeId;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Raft term number. Monotonically increasing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash, Serialize, Deserialize)]
@@ -22,6 +22,19 @@ impl Term {
     pub fn next(self) -> Self {
         Self(self.0 + 1)
     }
+}
+
+/// One entry in the Raft Log (ADR-0014 §3).
+///
+/// The payload is an opaque byte string: `dawn-consensus` knows nothing
+/// about domain types. Callers (dawn-simulation) serialize their own
+/// proposal type (e.g. a Transit proposal) into it. The Raft Log holds
+/// Commands (proposals), never Events (INV-006) — committed proposals are
+/// turned into Events by the caller and appended to its EventStore.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogEntry {
+    pub term   : Term,
+    pub payload: Vec<u8>,
 }
 
 /// The role a node currently plays in the Raft cluster.
@@ -66,6 +79,25 @@ pub struct RaftState {
 
     /// Votes received in the current term (Candidate only). Includes self.
     votes_received: HashSet<NodeId>,
+
+    /// The Raft Log (ADR-0014 §3). Append-only except for the standard Raft
+    /// conflict-truncation on followers, which only ever removes
+    /// *uncommitted* entries.
+    pub(crate) log: Vec<LogEntry>,
+
+    /// Number of log entries known to be committed (replicated on a
+    /// majority). Entries `log[..commit_index]` are committed.
+    pub(crate) commit_index: u64,
+
+    /// Leader only: for each peer, the index of the next entry to send.
+    pub(crate) next_index: HashMap<NodeId, u64>,
+
+    /// Leader only: for each peer, the highest entry index known replicated.
+    pub(crate) match_index: HashMap<NodeId, u64>,
+
+    /// The leader this node currently recognizes (learned from
+    /// AppendEntries). Used to forward proposals from non-leader nodes.
+    pub leader_id: Option<NodeId>,
 }
 
 impl RaftState {
@@ -88,6 +120,11 @@ impl RaftState {
             heartbeat_elapsed: 0,
             heartbeat_interval,
             votes_received: HashSet::new(),
+            log: Vec::new(),
+            commit_index: 0,
+            next_index: HashMap::new(),
+            match_index: HashMap::new(),
+            leader_id: None,
         }
     }
 
@@ -146,6 +183,9 @@ impl RaftState {
     }
 
     /// Transition to Candidate: increment term, vote for self, reset election timer.
+    ///
+    /// In a single-node cluster the self-vote already constitutes a
+    /// majority, so the node becomes Leader immediately.
     fn become_candidate(&mut self) {
         self.role = Role::Candidate;
         self.current_term = self.current_term.next();
@@ -153,6 +193,9 @@ impl RaftState {
         self.votes_received.clear();
         self.votes_received.insert(self.node_id);
         self.election_elapsed = 0;
+        if self.votes_received.len() >= self.majority() {
+            self.become_leader();
+        }
     }
 
     /// Transition to Follower for `term`. Used when a higher term is observed
@@ -163,6 +206,7 @@ impl RaftState {
         self.voted_for = None;
         self.votes_received.clear();
         self.election_elapsed = 0;
+        self.leader_id = None;
     }
 
     /// Transition to Leader. Only valid from Candidate after winning a
@@ -171,6 +215,11 @@ impl RaftState {
         self.role = Role::Leader;
         self.heartbeat_elapsed = 0;
         self.votes_received.clear();
+        self.leader_id = Some(self.node_id);
+        // Standard Raft leader-volatile-state initialization.
+        let last = self.log.len() as u64;
+        self.next_index = self.peers.iter().map(|&p| (p, last)).collect();
+        self.match_index = self.peers.iter().map(|&p| (p, 0)).collect();
     }
 
     /// Record a vote received from `voter` for the current term.
@@ -188,6 +237,85 @@ impl RaftState {
             return true;
         }
         false
+    }
+
+    // ── Log replication (ADR-0014 §3) ─────────────────────────────────────────
+
+    /// Append a proposal to the Raft Log. Leader only.
+    ///
+    /// Returns `true` if the entry was appended; `false` if this node is not
+    /// the Leader (the caller should forward the proposal to `leader_id`).
+    pub fn propose(&mut self, payload: Vec<u8>) -> bool {
+        if self.role != Role::Leader {
+            return false;
+        }
+        self.log.push(LogEntry { term: self.current_term, payload });
+        // A lone-node "cluster" (no peers) commits immediately.
+        self.recompute_commit_index();
+        true
+    }
+
+    /// Number of committed log entries.
+    pub fn commit_index(&self) -> u64 {
+        self.commit_index
+    }
+
+    /// The committed entries in `[from..commit_index)`, for the caller to
+    /// apply to its own state machine.
+    pub fn committed_from(&self, from: u64) -> &[LogEntry] {
+        &self.log[from as usize..self.commit_index as usize]
+    }
+
+    /// Leader only: the log suffix to send to `peer`, as
+    /// `(prev_log_index, prev_log_term, entries)`.
+    pub fn entries_for(&self, peer: NodeId) -> (u64, Term, Vec<LogEntry>) {
+        let next = self.next_index.get(&peer).copied().unwrap_or(self.log.len() as u64);
+        let prev_term = if next == 0 {
+            Term::ZERO
+        } else {
+            self.log[next as usize - 1].term
+        };
+        (next, prev_term, self.log[next as usize..].to_vec())
+    }
+
+    /// Leader only: record a successful replication response from `peer`
+    /// reporting its log length, then advance `commit_index` if a majority
+    /// has replicated further. Returns `true` if `commit_index` advanced.
+    pub fn record_replication(&mut self, peer: NodeId, peer_match: u64) -> bool {
+        if self.role != Role::Leader {
+            return false;
+        }
+        self.match_index.insert(peer, peer_match);
+        self.next_index.insert(peer, peer_match);
+        self.recompute_commit_index()
+    }
+
+    /// Leader only: a peer rejected AppendEntries due to log inconsistency.
+    /// Back up `next_index` so the next heartbeat retries from earlier.
+    pub fn record_rejection(&mut self, peer: NodeId, peer_log_len: u64) {
+        if self.role != Role::Leader {
+            return;
+        }
+        let next = self.next_index.entry(peer).or_insert(0);
+        *next = (*next).saturating_sub(1).min(peer_log_len);
+    }
+
+    /// Advance `commit_index` to the highest index replicated on a majority,
+    /// restricted to entries of the current term (Raft Figure 8 safety rule).
+    fn recompute_commit_index(&mut self) -> bool {
+        let mut matches: Vec<u64> = self.match_index.values().copied().collect();
+        matches.push(self.log.len() as u64); // self
+        matches.sort_unstable_by(|a, b| b.cmp(a));
+        let majority_match = matches[self.majority() - 1];
+
+        if majority_match > self.commit_index
+            && self.log[majority_match as usize - 1].term == self.current_term
+        {
+            self.commit_index = majority_match;
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -330,5 +458,116 @@ mod tests {
     fn term_next_increments_by_one() {
         assert_eq!(Term::ZERO.next(), Term(1));
         assert_eq!(Term(5).next(), Term(6));
+    }
+
+    // ── Log replication (ADR-0014 §3) ─────────────────────────────────────────
+
+    fn make_leader(state: &mut RaftState) {
+        for _ in 0..5 {
+            state.on_tick();
+        }
+        let term = state.current_term;
+        state.record_vote(node(1), term);
+        assert_eq!(state.role, Role::Leader);
+    }
+
+    #[test]
+    fn propose_is_rejected_when_node_is_not_leader() {
+        let mut state = three_node_cluster();
+        assert!(!state.propose(b"p".to_vec()));
+        assert_eq!(state.commit_index(), 0);
+    }
+
+    #[test]
+    fn leader_appends_proposal_to_its_log_without_committing_until_majority() {
+        let mut state = three_node_cluster();
+        make_leader(&mut state);
+        assert!(state.propose(b"p1".to_vec()));
+        // 3-node cluster: self alone is not a majority.
+        assert_eq!(state.commit_index(), 0);
+    }
+
+    #[test]
+    fn commit_index_advances_once_a_majority_has_replicated() {
+        let mut state = three_node_cluster();
+        make_leader(&mut state);
+        state.propose(b"p1".to_vec());
+
+        let advanced = state.record_replication(node(1), 1);
+        assert!(advanced, "self + one peer = majority of 3");
+        assert_eq!(state.commit_index(), 1);
+        assert_eq!(state.committed_from(0).len(), 1);
+        assert_eq!(state.committed_from(0)[0].payload, b"p1");
+    }
+
+    #[test]
+    fn lone_node_with_no_peers_commits_its_own_proposal_immediately() {
+        let mut state = RaftState::new(node(0), vec![], 5, 1);
+        for _ in 0..5 {
+            state.on_tick();
+        }
+        // Single-node cluster: the self-vote is a majority, so the node
+        // becomes Leader at election timeout and commits without peers.
+        assert_eq!(state.role, Role::Leader);
+        assert!(state.propose(b"p".to_vec()));
+        assert_eq!(state.commit_index(), 1);
+    }
+
+    #[test]
+    fn entries_for_returns_the_suffix_a_peer_is_missing() {
+        let mut state = three_node_cluster();
+        make_leader(&mut state);
+        state.propose(b"p1".to_vec());
+        state.propose(b"p2".to_vec());
+
+        let (prev, prev_term, entries) = state.entries_for(node(1));
+        assert_eq!(prev, 0, "fresh peer starts from the beginning");
+        assert_eq!(prev_term, Term::ZERO);
+        assert_eq!(entries.len(), 2);
+
+        state.record_replication(node(1), 2);
+        let (prev, _, entries) = state.entries_for(node(1));
+        assert_eq!(prev, 2);
+        assert!(entries.is_empty(), "up-to-date peer gets a pure heartbeat");
+    }
+
+    #[test]
+    fn record_rejection_backs_off_next_index_for_the_peer() {
+        let mut state = three_node_cluster();
+        make_leader(&mut state);
+        state.propose(b"p1".to_vec());
+        state.propose(b"p2".to_vec());
+        state.record_replication(node(1), 2);
+
+        state.record_rejection(node(1), 0);
+        let (prev, _, entries) = state.entries_for(node(1));
+        assert_eq!(prev, 0, "next_index backed off to the peer's log length");
+        assert_eq!(entries.len(), 2);
+    }
+
+    #[test]
+    fn commit_is_restricted_to_entries_of_the_current_term() {
+        let mut state = three_node_cluster();
+        make_leader(&mut state);
+        state.propose(b"old".to_vec());
+
+        // A new term begins (e.g. re-election) before the entry replicates.
+        let new_term = state.current_term.next().next();
+        state.become_follower(new_term);
+        for _ in 0..5 {
+            state.on_tick();
+        }
+        state.record_vote(node(1), state.current_term);
+        assert_eq!(state.role, Role::Leader);
+
+        // The old-term entry alone must not commit even with majority match
+        // (Raft Figure 8 safety rule)...
+        assert!(!state.record_replication(node(1), 1));
+        assert_eq!(state.commit_index(), 0);
+
+        // ...but committing a current-term entry commits everything before it.
+        state.propose(b"new".to_vec());
+        assert!(state.record_replication(node(1), 2));
+        assert_eq!(state.commit_index(), 2);
     }
 }

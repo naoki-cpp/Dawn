@@ -126,13 +126,14 @@ Step 10: RaftActor に TickElapsed を送る（ADR-0014）
          → election timeout / heartbeat タイマーを 1 Tick 進める（INV-005 / FBD-003）
          ※ 実装箇所は SectorSimulatorActor の Tick ハンドラ（Step 9 の後・reply の前）
 
-承認済み・未実装（ADR-0014 §7）:
-
-Step 7.5: コミット済み Raft エントリを適用する（Bot の後・Append の前）
-         RaftActor から受信したコミット済み Transit Proposal を ECS に適用し、
-         SectorTransitRequested / Completed / Aborted イベントを生成する
-         ※ 現在は SimulationNode::propose_transit / export_transit /
-           import_transit を呼び出し元が直接実行する形で実装されている
+Step 7.5: コミット済み Raft エントリを適用する（ADR-0014 §7）
+         SectorSimulatorActor::apply_committed_raft_entries()
+         → コミット済み TransitOp を ECS に適用する:
+           TransitOp::Request → 所有ノード: InTransit 化 + SectorTransitRequested を
+             Append、Ship 状態を export して TransitOp::Commit を Raft に提案
+           TransitOp::Commit  → 宛先ノード: entry_pos に import + SectorTransitCompleted
+         ※ 実装箇所は SectorSimulatorActor の Tick ハンドラ冒頭（Step 1 の前）。
+           生成イベントは同 Tick の flush で ReplicationBus に伝播する。
 ```
 
 ### Step 8 より前に Step 9 を実行してはならない理由

@@ -1,11 +1,11 @@
 //! RequestVote / AppendEntries message types and their effect on
 //! [`RaftState`].
 //!
-//! Message handling here only concerns the *election* aspects of Raft
-//! (term/role transitions, vote granting, leader recognition). Log entry
-//! replication payloads are added when `log.rs` is introduced.
+//! Covers both the election aspects of Raft (term/role transitions, vote
+//! granting, leader recognition) and log replication (entry append with
+//! consistency check, commit index propagation).
 
-use crate::state::{RaftState, Role, Term};
+use crate::state::{LogEntry, RaftState, Role, Term};
 use dawn_core::NodeId;
 use serde::{Deserialize, Serialize};
 
@@ -26,20 +26,46 @@ pub struct RequestVoteResponse {
 
 /// A heartbeat / log-replication message sent by the Leader.
 ///
-/// `entries` is left empty for pure heartbeats. Log entry payloads are
-/// added when `log.rs` is introduced.
+/// `entries` is empty for pure heartbeats. `prev_log_index` is the number
+/// of log entries the recipient is assumed to already hold before
+/// `entries`; `prev_log_term` is the term of the last of those entries
+/// (`Term::ZERO` when `prev_log_index == 0`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppendEntries {
-    pub term     : Term,
-    pub leader_id: NodeId,
+    pub term          : Term,
+    pub leader_id     : NodeId,
+    pub prev_log_index: u64,
+    pub prev_log_term : Term,
+    pub entries       : Vec<LogEntry>,
+    pub leader_commit : u64,
+}
+
+impl AppendEntries {
+    /// An empty heartbeat carrying no entries and no commit information.
+    pub fn heartbeat(term: Term, leader_id: NodeId) -> Self {
+        Self {
+            term,
+            leader_id,
+            prev_log_index: 0,
+            prev_log_term : Term::ZERO,
+            entries       : Vec::new(),
+            leader_commit : 0,
+        }
+    }
 }
 
 /// A follower's response to [`AppendEntries`].
+///
+/// On success, `match_index` is the follower's log length after appending
+/// (everything up to it matches the leader). On failure it is the
+/// follower's current log length, as a hint for the leader's `next_index`
+/// back-off.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppendEntriesResponse {
-    pub term     : Term,
-    pub success  : bool,
-    pub responder: NodeId,
+    pub term       : Term,
+    pub success    : bool,
+    pub responder  : NodeId,
+    pub match_index: u64,
 }
 
 /// Messages exchanged between `RaftActor`s via `RaftTransport`.
@@ -49,6 +75,9 @@ pub enum RaftMessage {
     RequestVoteResponse(RequestVoteResponse),
     AppendEntries(AppendEntries),
     AppendEntriesResponse(AppendEntriesResponse),
+    /// A proposal forwarded from a non-leader node to the Leader
+    /// (ADR-0014 §3 [1]). The payload is the caller's serialized proposal.
+    ProposeForward { payload: Vec<u8> },
 }
 
 impl RaftState {
@@ -84,16 +113,18 @@ impl RaftState {
 
     /// Handle an incoming [`AppendEntries`] RPC (heartbeat or log replication).
     ///
-    /// Rejects if `req.term < self.current_term`. Otherwise recognizes
-    /// `req.leader_id` as the current leader: steps down to Follower (if
-    /// Candidate/Leader or a higher term is observed) and resets the
-    /// election timer.
+    /// Rejects if `req.term < self.current_term` or if this node's log does
+    /// not contain an entry matching `prev_log_index`/`prev_log_term`.
+    /// Otherwise recognizes `req.leader_id` as the current leader, appends
+    /// `req.entries` (truncating any conflicting uncommitted suffix), and
+    /// advances `commit_index` up to `min(leader_commit, log.len())`.
     pub fn handle_append_entries(&mut self, req: &AppendEntries) -> AppendEntriesResponse {
         if req.term < self.current_term {
             return AppendEntriesResponse {
                 term: self.current_term,
                 success: false,
                 responder: self.node_id,
+                match_index: self.log.len() as u64,
             };
         }
 
@@ -101,11 +132,44 @@ impl RaftState {
             self.become_follower(req.term);
         }
         self.reset_election_timer();
+        self.leader_id = Some(req.leader_id);
+
+        // Log consistency check (Raft §5.3).
+        let prev = req.prev_log_index as usize;
+        let log_matches = prev == 0
+            || (self.log.len() >= prev && self.log[prev - 1].term == req.prev_log_term);
+        if !log_matches {
+            return AppendEntriesResponse {
+                term: self.current_term,
+                success: false,
+                responder: self.node_id,
+                match_index: self.log.len().min(prev.saturating_sub(1)) as u64,
+            };
+        }
+
+        // Append entries, truncating any conflicting (uncommitted) suffix.
+        for (i, entry) in req.entries.iter().enumerate() {
+            let idx = prev + i;
+            if idx < self.log.len() {
+                if self.log[idx].term != entry.term {
+                    self.log.truncate(idx);
+                    self.log.push(entry.clone());
+                }
+            } else {
+                self.log.push(entry.clone());
+            }
+        }
+
+        let match_index = (prev + req.entries.len()) as u64;
+        if req.leader_commit > self.commit_index {
+            self.commit_index = req.leader_commit.min(self.log.len() as u64);
+        }
 
         AppendEntriesResponse {
             term: self.current_term,
             success: true,
             responder: self.node_id,
+            match_index,
         }
     }
 }
@@ -183,7 +247,7 @@ mod tests {
         let mut state = three_node_cluster();
         state.become_follower(Term(1));
 
-        let resp = state.handle_append_entries(&AppendEntries { term: Term(1), leader_id: node(1) });
+        let resp = state.handle_append_entries(&AppendEntries::heartbeat(Term(1), node(1)));
         assert!(resp.success);
         assert_eq!(resp.term, Term(1));
     }
@@ -193,7 +257,7 @@ mod tests {
         let mut state = three_node_cluster();
         state.become_follower(Term(5));
 
-        let resp = state.handle_append_entries(&AppendEntries { term: Term(3), leader_id: node(1) });
+        let resp = state.handle_append_entries(&AppendEntries::heartbeat(Term(3), node(1)));
         assert!(!resp.success);
         assert_eq!(resp.term, Term(5));
         assert_eq!(state.current_term, Term(5));
@@ -208,7 +272,7 @@ mod tests {
         assert_eq!(state.role, Role::Candidate);
         let term = state.current_term;
 
-        let resp = state.handle_append_entries(&AppendEntries { term, leader_id: node(1) });
+        let resp = state.handle_append_entries(&AppendEntries::heartbeat(term, node(1)));
         assert!(resp.success);
         assert_eq!(state.role, Role::Follower);
     }
@@ -223,7 +287,7 @@ mod tests {
         state.record_vote(node(1), term);
         assert_eq!(state.role, Role::Leader);
 
-        let resp = state.handle_append_entries(&AppendEntries { term: term.next(), leader_id: node(1) });
+        let resp = state.handle_append_entries(&AppendEntries::heartbeat(term.next(), node(1)));
         assert!(resp.success);
         assert_eq!(state.role, Role::Follower);
         assert_eq!(state.current_term, term.next());
@@ -236,7 +300,7 @@ mod tests {
         for _ in 0..4 {
             assert!(state.on_tick().is_empty());
         }
-        state.handle_append_entries(&AppendEntries { term: Term(1), leader_id: node(1) });
+        state.handle_append_entries(&AppendEntries::heartbeat(Term(1), node(1)));
 
         for _ in 0..4 {
             let effects = state.on_tick();
@@ -272,7 +336,7 @@ mod tests {
         let effects = n0.on_tick();
         assert_eq!(effects, vec![TickEffect::SendHeartbeat { term }]);
 
-        let hb = AppendEntries { term, leader_id: node(0) };
+        let hb = AppendEntries::heartbeat(term, node(0));
         assert!(n1.handle_append_entries(&hb).success);
         assert!(n2.handle_append_entries(&hb).success);
     }
