@@ -90,7 +90,7 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
 - イベントソーシングによる完全な因果追跡
 - CRDTとRaftの責務分離による高スループット同期
 
-### 現在のスコープ（Phase 7 実装中）
+### 現在のスコープ（Phase 7 完了）
 
 ```
 実装対象:
@@ -111,9 +111,9 @@ Phase 4 以降で追加承認済み（全て実装済み）:
   ShipType システム（船種・船クラス・スロットレイアウト）
   Capacitor システム（サイクルベース cap 管理・強制 OFF）
 
-Phase 7 で追加承認済み（ADR-0014・実装中）:
-  Raft コンセンサス（dawn-consensus: Leader 選出 / RaftActor / 障害注入）
-  Sector Transit（propose / export / import・Raft Log 経由コミットは未配線）
+Phase 7 で追加承認済み（ADR-0014・実装済み）:
+  Raft コンセンサス（dawn-consensus: Leader 選出 / Log Replication / RaftActor / 障害注入）
+  Sector Transit（TransitCommand → Raft Log コミット → Step 7.5 適用の全経路配線済み）
 
 実装しない（提案も拒否する）:
   課金 / キャラクター育成 / 市場 / チャット
@@ -179,9 +179,13 @@ Phase 7 で追加承認済み（ADR-0014・実装中）:
   // SectorAのActorがSectorBのEntityを直接操作する
   sector_b_actor.move_ship(ship_id, new_pos)
 
-正しい実装:
-  // SectorTransitイベントを経由する
-  event_store.append(SectorTransitRequested { ship_id, from: A, to: B })
+正しい実装（Phase 7 / ADR-0014 で実装済み）:
+  // バリデーション後、Raft Log に TransitOp を提案する
+  if node.can_propose_transit(ship_id) {
+      raft.propose(TransitOp::Request { ship_id, to }.encode());
+  }
+  // コミット済みエントリは Tick Step 7.5（apply_committed_raft_entries）で
+  // 適用され、SectorTransitRequested / Completed が EventStore に Append される
 ```
 
 理由: Sector境界を越える操作がRaftを経由しないと整合性が壊れる。
@@ -494,7 +498,7 @@ pub type Tick = u64;
 ### Tick 内の処理順序
 
 ```
-現在の実装（Phase 7 実装中・ADR-0014）:
+現在の実装（Phase 7 完了・ADR-0014）:
   1. Tick カウンタをインクリメント
   2. コマンドキューを処理する
        MoveCommand              → ThrustComp.direction を更新（is_braking = false）
@@ -1104,7 +1108,7 @@ AIが陥りやすいアンチパターンとその修正方法を示す。
 対処:
   Sector Transit は必ず Raft を経由する。INV-003 を参照すること。
   レイテンシが問題なら Transit の頻度を下げる設計を検討する。
-  ※ Raft は Phase 7 で実装予定。現在（Phase 4）は単一Sectorで運用。
+  ※ Raft は Phase 7（ADR-0014）で実装済み。Transit は Raft Log 経由で動作する。
 ```
 
 ### パターン6: FittingSnapshot をイベントに含めず ID だけ記録する
@@ -1172,6 +1176,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-12（ADR-0014 Phase 7 実装反映: dawn-consensus / Step 10 / TransitComp）*
+*最終更新: 2026-06-12（Phase 7 完了レビュー: Raft Log 配線完了 / INV-003 具体例更新、人間承認済み）*
 *対応ADR: ADR-0001 〜 ADR-0014*
-*次回レビュー予定: Phase 7 完了時（ADR-0009 実装開始前）*
+*次回レビュー予定: ADR-0009（星系間ナビゲーション）完了時*
