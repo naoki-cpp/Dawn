@@ -61,11 +61,122 @@ async fn main() {
         return;
     }
 
+    // Phase 7 mode: --raft-demo runs an observable 3-node Raft Transit demo
+    // (leader election, Transit through the Raft Log, leader failover).
+    if args.contains(&"--raft-demo".to_string()) {
+        run_raft_demo().await;
+        return;
+    }
+
     run_phase1_benchmark();
     println!();
     run_phase2_demo().await;
     println!();
     run_phase3_demo();
+}
+
+// ── Phase 7: Raft Transit demo ───────────────────────────────────────────────
+
+/// Observable walkthrough of the Phase 7 pipeline (ADR-0014):
+/// leader election → Transit through the Raft Log → leader failover →
+/// Transit completing under a partitioned old leader → partition heal.
+async fn run_raft_demo() {
+    use cluster::MultiNodeCluster;
+    use dawn_consensus::Role;
+    use dawn_core::{NodeId, Position, SectorId, Velocity};
+
+    const NODES: usize = 3;
+
+    fn print_roles(label: &str, roles: &[(Role, dawn_consensus::Term)]) {
+        print!("  [{label}] roles:");
+        for (i, (role, term)) in roles.iter().enumerate() {
+            print!("  node{i}={role:?}(t{})", term.0);
+        }
+        println!();
+    }
+
+    async fn print_stats(cluster: &MultiNodeCluster) {
+        let stats = cluster.get_all_stats().await;
+        print!("  ships per sector:");
+        for (i, s) in stats.iter().enumerate() {
+            print!("  S{i}={}", s.ship_count);
+        }
+        println!();
+    }
+
+    async fn tick_n(cluster: &MultiNodeCluster, n: usize) {
+        for _ in 0..n {
+            cluster.tick_all().await;
+        }
+    }
+
+    async fn leader_index(cluster: &MultiNodeCluster, exclude: Option<usize>) -> Option<usize> {
+        cluster.raft_roles().await.iter().enumerate()
+            .find(|&(i, (role, _))| *role == Role::Leader && Some(i) != exclude)
+            .map(|(i, _)| i)
+    }
+
+    println!("═══════════════════════════════════════════");
+    println!("  Phase 7 — Raft Transit demo (ADR-0014)   ");
+    println!("═══════════════════════════════════════════");
+
+    let cluster = MultiNodeCluster::new(NODES);
+
+    // Act 1: leader election.
+    println!("\n── Act 1: leader election ──");
+    tick_n(&cluster, 30).await;
+    let roles = cluster.raft_roles().await;
+    print_roles("after 30 ticks", &roles);
+    let leader = leader_index(&cluster, None).await.expect("a leader must be elected");
+    println!("  → node{leader} is the Leader");
+
+    // Act 2: a Transit through the Raft Log.
+    println!("\n── Act 2: Sector Transit through the Raft Log ──");
+    let ship = cluster.nodes()[0]
+        .spawn_ship(Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0))
+        .await;
+    println!("  spawned {ship:?} in Sector 0");
+    print_stats(&cluster).await;
+    let accepted = cluster.nodes()[0].transit(ship, SectorId(1)).await;
+    println!("  TransitCommand(S0 → S1) accepted: {accepted}");
+    tick_n(&cluster, 30).await;
+    println!("  after 30 ticks (Request + Commit rounds on the Raft Log):");
+    print_stats(&cluster).await;
+
+    // Act 3: partition the leader; the survivors elect a new one.
+    println!("\n── Act 3: leader failure ──");
+    println!("  partitioning node{leader} (current Leader) ...");
+    cluster.partition_node(NodeId(leader as u8));
+    tick_n(&cluster, 30).await;
+    let roles = cluster.raft_roles().await;
+    print_roles("after 30 ticks", &roles);
+    let new_leader = leader_index(&cluster, Some(leader)).await
+        .expect("survivors must elect a new leader");
+    println!("  → node{new_leader} is the new Leader (node{leader} is isolated)");
+
+    // Act 4: a Transit proposed while the old leader is down still completes.
+    println!("\n── Act 4: Transit during node failure ──");
+    let owner = new_leader;
+    let dest = (0..NODES).find(|&i| i != leader && i != owner).unwrap();
+    let ship2 = cluster.nodes()[owner]
+        .spawn_ship(Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0))
+        .await;
+    println!("  spawned {ship2:?} in Sector {owner}");
+    let accepted = cluster.nodes()[owner].transit(ship2, SectorId(dest as u8)).await;
+    println!("  TransitCommand(S{owner} → S{dest}) accepted: {accepted}");
+    tick_n(&cluster, 40).await;
+    println!("  after 40 ticks:");
+    print_stats(&cluster).await;
+
+    // Act 5: heal the partition; the old leader rejoins as Follower.
+    println!("\n── Act 5: partition heal ──");
+    cluster.heal_node(NodeId(leader as u8));
+    tick_n(&cluster, 30).await;
+    let roles = cluster.raft_roles().await;
+    print_roles("after heal + 30 ticks", &roles);
+
+    cluster.shutdown().await;
+    println!("\n  demo complete.");
 }
 
 // ── Phase 1: single-node benchmark ───────────────────────────────────────────

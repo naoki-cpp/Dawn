@@ -152,6 +152,12 @@ impl MultiNodeCluster {
         self.nodes.len()
     }
 
+    /// Per-node actor handles, in `NodeId` order (used by the `--raft-demo`
+    /// binary mode to address individual nodes).
+    pub fn nodes(&self) -> &[SectorSimulatorHandle] {
+        &self.nodes
+    }
+
     pub async fn shutdown(self) {
         for node in &self.nodes {
             node.shutdown().await;
@@ -173,6 +179,13 @@ mod tests {
 
     fn config() -> SpawnConfig {
         SpawnConfig::default_for_node(NodeId(0))
+    }
+
+    #[tokio::test]
+    async fn nodes_accessor_exposes_one_handle_per_node_in_id_order() {
+        let cluster = MultiNodeCluster::new(NODES);
+        assert_eq!(cluster.nodes().len(), NODES);
+        cluster.shutdown().await;
     }
 
     // ── Phase 2 completion test ───────────────────────────────────────────────
