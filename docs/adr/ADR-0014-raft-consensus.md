@@ -227,19 +227,25 @@ Step 2  : コマンドキューを処理する
           コミットされる）
           Transit 中の Ship への Move / Despawn / 二重 Transit は拒否
 
-Step 7.5: コミット済み Raft エントリを適用する（新規ステップ・Bot の後）
+Step 7.5: コミット済み Raft エントリを適用する（新規ステップ）
           RaftActor から受信したコミット済みエントリを ECS に適用し、
           SectorTransitRequested / Completed / Aborted イベントを生成する
           - from ノード: Completed 適用時に Ship を自 ECS から削除
           - to   ノード: Completed 適用時に Ship を entry_pos に追加
           ※ Step 8（Append）の前に行うこと — 同 Tick の Append に含めるため
+          ※ 実装上は Tick ハンドラ冒頭（Step 1 の前）で実行する
+            （SectorSimulatorActor::apply_committed_raft_entries()）。
+            前 Tick までにコミットされたエントリを今 Tick の Step 1〜9 へ
+            確実に反映させるための配置であり、上記の論理的位置
+            （Step 8 の前）という制約とは矛盾しない。
 
 Step 10 : RaftActor に TickElapsed を送る（新規ステップ・最後）
           election timeout / heartbeat タイマーを 1 Tick 進める
 ```
 
 Step 1〜7（既存のシミュレーション処理）と Step 8〜9（Append → Replication）
-の順序関係は一切変更しない。
+の順序関係は一切変更しない。Step 7.5 はその前段（Tick ハンドラ冒頭）で
+コミット済みエントリを取り込む。
 
 ---
 
@@ -294,7 +300,7 @@ Tick 駆動タイマー（決定 5）と整合しない。
 - [x] 各型に単体テスト追加
 - [x] `docs/event-catalog.md` 更新（§3.6 の予約 `SectorTransitRejected` を
       `SectorTransitAborted` にリネームし、型定義済みへ移行）
-- [x] `docs/tick-model.md` §3 に Step 7.5（承認済み・未実装）/ Step 10 を追記
+- [x] `docs/tick-model.md` §3 に Step 7.5（実装済み・Tick ハンドラ冒頭）/ Step 10 を追記
 - [x] CLAUDE.md §6 に Step 10 を追記（人間の承認を得て）
 
 ### dawn-consensus（新規クレート）
