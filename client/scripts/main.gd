@@ -79,6 +79,19 @@ var _last_click_pos   : Vector2 = Vector2.ZERO
 const DOUBLE_CLICK_SEC: float  = 0.4   ## この秒数以内の2回クリックをダブルクリックと判定
 const DOUBLE_CLICK_PX : float  = 10.0  ## この画素以内
 
+## Jump Gate navigation (ADR-0009).
+## Static map data mirroring dawn-simulation/src/star_map.rs — the gates
+## reachable from Sector 0 (Alpha), which is the only Sector `--serve` runs.
+const JUMP_GATES := [
+	{"gate_id": 0, "position": Vector3(49_000.0, 0.0, 0.0), "activation_radius": 2_000.0, "to_system": "Beta"},
+]
+const STAR_SYSTEM_NAMES := ["Alpha", "Beta", "Gamma"]
+
+var _current_system_name: String = "Alpha"
+var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
+var _jump_notice         : String = ""
+var _jump_notice_timer   : float  = 0.0
+
 # ── ライフサイクル ────────────────────────────────────────────────────────────
 
 func _ready() -> void:
@@ -95,8 +108,27 @@ func _ready() -> void:
 	_setup_cap_bar()
 	_update_hud()
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_update_gate_proximity()
+	if _jump_notice_timer > 0.0:
+		_jump_notice_timer -= delta
+		if _jump_notice_timer <= 0.0:
+			_jump_notice = ""
 	_update_hud()
+
+## Tracks whether the player ship is within activation range of a Jump Gate
+## (ADR-0009). Distance is computed in server units (Godot units / WORLD_SCALE).
+func _update_gate_proximity() -> void:
+	_nearby_gate_id = -1
+	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
+		return
+	var ship_pos: Vector3 = (_ships[_player_ship_id] as Node3D).global_position / WORLD_SCALE
+	for gate: Variant in JUMP_GATES:
+		var g: Dictionary = gate as Dictionary
+		var gate_pos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
+		if ship_pos.distance_to(gate_pos) <= (g.get("activation_radius", 0.0) as float):
+			_nearby_gate_id = g.get("gate_id", -1) as int
+			return
 
 func _input(event: InputEvent) -> void:
 	## F1〜F8 でモジュールをオン/オフする
@@ -118,6 +150,10 @@ func _input(event: InputEvent) -> void:
 		## S キー → StopCommand（加速度で減速停止）
 		if key.keycode == KEY_S and _player_ship_id >= 0:
 			_send_stop_command()
+			return
+		## J キー → JumpCommand（ジャンプゲート近接時のみ有効・ADR-0009）
+		if key.keycode == KEY_J and _player_ship_id >= 0 and _nearby_gate_id >= 0:
+			_connection.send_jump_command(_player_ship_id, _nearby_gate_id)
 			return
 		## Tab キー → タクティカルオーバーレイ表示切り替え
 		if key.keycode == KEY_TAB:
@@ -247,6 +283,37 @@ func _on_event_received(payload: Dictionary) -> void:
 		"ShipDestroyed" : _handle_ship_destroyed(payload)
 		"TargetLocked"  : _handle_target_locked(payload)
 		"LockLost"      : _handle_lock_lost(payload)
+		"JumpGateUsed"      : _handle_jump_gate_used(payload)
+		"StarSystemChanged" : _handle_star_system_changed(payload)
+
+# ── ジャンプゲート（ADR-0009）─────────────────────────────────────────────────
+
+## Ship がジャンプゲートを通過した — entry_pos へ瞬間移動する。
+func _handle_jump_gate_used(p: Dictionary) -> void:
+	var ship_id: int = p.get("ship_id", 0) as int
+	if not _ships.has(ship_id):
+		return
+	var pos_dict: Dictionary = p.get("entry_pos", {}) as Dictionary
+	var entry_pos := Vector3(
+		pos_dict.get("x", 0.0) as float,
+		pos_dict.get("y", 0.0) as float,
+		pos_dict.get("z", 0.0) as float,
+	)
+	(_ships[ship_id] as Node3D).call("update_target", entry_pos)
+	if ship_id == _player_ship_id:
+		(_ships[ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
+		_jump_notice       = "Jumped via Gate #%d" % (p.get("gate_id", 0) as int)
+		_jump_notice_timer = 3.0
+
+## Ship が別の星系に移動した — HUD に通知を表示する。
+func _handle_star_system_changed(p: Dictionary) -> void:
+	var ship_id: int = p.get("ship_id", 0) as int
+	var to_system: int = p.get("to_system", 0) as int
+	var to_name: String = STAR_SYSTEM_NAMES[to_system] if to_system < STAR_SYSTEM_NAMES.size() else "System %d" % to_system
+	if ship_id == _player_ship_id:
+		_current_system_name = to_name
+		_jump_notice         = "Entered %s system" % to_name
+		_jump_notice_timer   = 3.0
 
 func _on_connection_changed(connected: bool) -> void:
 	if not connected:
@@ -594,9 +661,16 @@ func _update_hud() -> void:
 	if _player_ship_type_name != "":
 		ship_name_line = "\n" + _player_ship_type_name
 
+	var system_line: String = "\nSystem: %s" % _current_system_name
+	var jump_line  : String = ""
+	if _nearby_gate_id >= 0:
+		jump_line = "\n[J] Jump Gate #%d" % _nearby_gate_id
+	if _jump_notice != "":
+		jump_line += "\n" + _jump_notice
+
 	_stats_label.text = (
-		"%s%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nLock: %s%s\n\n[DoubleClick] Thrust\n[RightClick] Lock"
-		% [status, ship_name_line, _ships.size(), _current_tick, speed_str, hp_str, lock_str, module_lines]
+		"%s%s%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nLock: %s%s\n\n[DoubleClick] Thrust\n[RightClick] Lock%s"
+		% [status, ship_name_line, system_line, _ships.size(), _current_tick, speed_str, hp_str, lock_str, module_lines, jump_line]
 	)
 
 # ── Capacitor client-side simulation ─────────────────────────────────────────

@@ -128,6 +128,16 @@ func send_stop_command(p_ship_id: int) -> void:
 		"ship_id": p_ship_id,
 	}) + "\n")
 
+## ジャンプゲート経由の Sector 移動を要求する（ADR-0009）。
+func send_jump_command(p_ship_id: int, p_gate_id: int) -> void:
+	if not _welcomed:
+		return
+	_ws.send_text(JSON.stringify({
+		"type"   : "JumpCommand",
+		"ship_id": p_ship_id,
+		"gate_id": p_gate_id,
+	}) + "\n")
+
 func is_connected_to_server() -> bool:
 	return _connected and _welcomed
 

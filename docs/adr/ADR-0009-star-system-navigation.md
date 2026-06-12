@@ -252,14 +252,14 @@ Event Sourcing と相性が悪い。「移動アニメーション」はクラ�
 
 ### Godot（client/）
 
-- [ ] `connection.gd` に `jump_gate_used` シグナル追加
-- [ ] `main.gd` の `_on_jump_gate_used` で Ship 位置を `entry_pos` に更新
-- [ ] `main.gd` のジャンプコマンド送信（ゲート近接時に UI を表示し確定）
+- [x] `connection.gd` に `send_jump_command` 追加（`jump_gate_used` / `star_system_changed` は既存の `event_received` 経由で main.gd が処理）
+- [x] `main.gd` の `_handle_jump_gate_used` で Ship 位置を `entry_pos` に更新
+- [x] `main.gd` のジャンプコマンド送信（ゲート近接時に HUD 表示、`J` キーで確定）
 
 ### docs
 
-- [ ] `docs/event-catalog.md` に `JumpGateUsed`, `StarSystemChanged` を追記
-- [ ] `docs/roadmap.md` を更新
+- [x] `docs/event-catalog.md` に `JumpGateUsed`, `StarSystemChanged` を追記
+- [x] `docs/roadmap.md` を更新
 
 ---
 
