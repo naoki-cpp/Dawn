@@ -1,6 +1,6 @@
 //! `SimWorld` — the single owner of all ECS state within a Sector Node.
 
-use crate::components::{FittingComp, HullComp, IsNpcComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp, WeaponComp};
+use crate::components::{FittingComp, HullComp, IsNpcComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, TransitComp, TransitState, VelocityComp, WeaponComp};
 use dawn_core::{Position, SectorId, ShipId, Velocity};
 use hecs::Entity;
 
@@ -50,7 +50,25 @@ impl SimWorld {
             WeaponComp::new(),
             LockComp::new(),
             IsNpcComp,
+            TransitComp::default(),
         ))
+    }
+
+    /// Current Sector Transit state of a Ship (ADR-0014).
+    ///
+    /// Returns `TransitState::None` if the entity has no `TransitComp`
+    /// (should not happen for ships spawned via `spawn_ship`).
+    pub fn transit_state(&self, entity: Entity) -> TransitState {
+        self.inner.get::<&TransitComp>(entity)
+            .map(|c| c.0)
+            .unwrap_or_default()
+    }
+
+    /// Set the Sector Transit state of a Ship.
+    pub fn set_transit_state(&mut self, entity: Entity, state: TransitState) {
+        if let Ok(mut comp) = self.inner.get::<&mut TransitComp>(entity) {
+            comp.0 = state;
+        }
     }
 
     /// Override the stats (max_speed, thrust_magnitude) for a specific ship.
@@ -134,6 +152,21 @@ mod tests {
             found = true;
         }
         assert!(found);
+    }
+
+    #[test]
+    fn spawned_ship_starts_with_no_transit_in_progress() {
+        let mut w = make_world();
+        let e = w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
+        assert_eq!(w.transit_state(e), TransitState::None);
+    }
+
+    #[test]
+    fn set_transit_state_marks_ship_in_transit_to_destination_sector() {
+        let mut w = make_world();
+        let e = w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
+        w.set_transit_state(e, TransitState::InTransit { to: SectorId(2) });
+        assert_eq!(w.transit_state(e), TransitState::InTransit { to: SectorId(2) });
     }
 
     #[test]

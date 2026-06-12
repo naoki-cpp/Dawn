@@ -308,7 +308,7 @@ Tick 駆動タイマー（決定 5）と整合しない。
 
 ### dawn-ecs
 
-- [ ] `TransitState` コンポーネント（None / InTransit）+ Transit 中の操作拒否
+- [x] `TransitState` コンポーネント（None / InTransit）+ Transit 中の操作拒否
 
 ### dawn-simulation
 

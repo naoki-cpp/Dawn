@@ -441,6 +441,9 @@ impl<S: EventStore> SimulationNode<S> {
             Some(&e) => e,
             None     => return,
         };
+        if self.world.transit_state(entity).is_in_transit() {
+            return;
+        }
         let pos = match self.world.inner().get::<&PositionComp>(entity).ok() {
             Some(c) => c.0,
             None    => return,
@@ -472,6 +475,9 @@ impl<S: EventStore> SimulationNode<S> {
             Some(&e) => e,
             None     => return,
         };
+        if self.world.transit_state(entity).is_in_transit() {
+            return;
+        }
         if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
             t.direction  = Velocity::ZERO;
             t.is_braking = true;
@@ -1157,6 +1163,38 @@ mod tests {
         node.tick();
         let last = node.event_store().all_records().last().unwrap();
         assert_eq!(last.event.tick(), Tick(2));
+    }
+
+    #[test]
+    fn move_command_is_ignored_while_ship_is_in_transit() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        node.set_player_ship(ship_id);
+
+        let entity = *node.ship_index.get(&ship_id).unwrap();
+        node.world.set_transit_state(entity, dawn_ecs::TransitState::InTransit { to: SectorId(1) });
+
+        node.apply_move_command(ship_id, Position::new(10000.0, 0.0, 0.0));
+        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        assert_eq!(thrust.direction, Velocity::ZERO, "move command must be rejected while in transit");
+    }
+
+    #[test]
+    fn stop_command_is_ignored_while_ship_is_in_transit() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(100.0, 100.0, 100.0), Velocity::ZERO);
+        node.set_player_ship(ship_id);
+        node.apply_move_command(ship_id, Position::new(10000.0, 0.0, 0.0));
+
+        let entity = *node.ship_index.get(&ship_id).unwrap();
+        let direction_before = node.world.inner().get::<&ThrustComp>(entity).unwrap().direction;
+
+        node.world.set_transit_state(entity, dawn_ecs::TransitState::InTransit { to: SectorId(1) });
+        node.apply_stop_command(ship_id);
+
+        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        assert_eq!(thrust.direction, direction_before, "stop command must be rejected while in transit");
+        assert!(!thrust.is_braking, "is_braking must not be set while in transit");
     }
 
     #[test]
