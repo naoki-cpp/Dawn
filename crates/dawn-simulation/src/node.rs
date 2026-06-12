@@ -168,34 +168,7 @@ impl<S: EventStore> SimulationNode<S> {
 
         // Restore ECS state from snapshot.
         for ship in &snapshot.ships {
-            node.insert_to_world(ship.ship_id, ship.position, ship.velocity);
-            node.ship_type_ids.insert(ship.ship_id, ship.ship_type_id);
-
-            let base = node.ship_type_registry.get(&ship.ship_type_id)
-                .map(|def| ShipStatsComp::from_base(&def.base_stats))
-                .unwrap_or(ShipStatsComp::NPC);
-            node.base_stats.insert(ship.ship_id, base);
-
-            if let Some(&entity) = node.ship_index.get(&ship.ship_id) {
-                node.world.set_ship_stats(entity, base);
-
-                let fitting = FittingComp::from_snapshot(&ship.fitting, &node.module_registry);
-                let _ = node.world.inner_mut().insert_one(entity, fitting);
-
-                // apply_fitting recomputes ShipStatsComp and rescales HullComp;
-                // restore the exact HP layers from the snapshot afterwards.
-                apply_fitting(&mut node.world, ship.ship_id, base);
-                if let Ok(mut hull) = node.world.inner_mut().get::<&mut HullComp>(entity) {
-                    hull.current_shield = ship.current_shield;
-                    hull.current_armor  = ship.current_armor;
-                    hull.current_hull   = ship.current_hull;
-                    hull.is_destroyed   = ship.is_destroyed;
-                }
-
-                if let Some(cap) = ship.capacitor {
-                    let _ = node.world.inner_mut().insert_one(entity, CapacitorComp { current: cap });
-                }
-            }
+            node.restore_ship_from_snapshot(ship);
         }
 
         // Replay events that occurred after the snapshot was taken.
@@ -256,6 +229,115 @@ impl<S: EventStore> SimulationNode<S> {
         }));
 
         ship_id
+    }
+
+    // ── Sector Transit (ADR-0014) ────────────────────────────────────────────
+
+    /// Validate and begin a Sector Transit (CLAUDE.md §4 Step 2).
+    ///
+    /// On success, marks the Ship `TransitState::InTransit` and appends a
+    /// `SectorTransitRequested` event (ownership stays with this Sector).
+    /// On failure, no event is appended (CommandRejected per INV-006).
+    ///
+    /// NOTE: in the current single-node implementation this is treated as
+    /// already committed. Once `RaftActor` is wired in (Task 7), this step
+    /// will only submit the proposal — the event is appended in Step 7.5
+    /// once the Raft log entry commits.
+    pub fn propose_transit(&mut self, cmd: dawn_core::commands::TransitCommand) -> Result<(), dawn_core::DawnError> {
+        let &entity = self.ship_index.get(&cmd.ship_id)
+            .ok_or(dawn_core::DawnError::ShipNotFound(cmd.ship_id))?;
+
+        if self.world.transit_state(entity).is_in_transit() {
+            return Err(dawn_core::DawnError::ShipInTransit(cmd.ship_id));
+        }
+
+        self.world.set_transit_state(entity, dawn_ecs::TransitState::InTransit { to: cmd.to });
+
+        self.event_store.append(DomainEvent::SectorTransitRequested(dawn_core::events::SectorTransitRequested {
+            ship_id: cmd.ship_id,
+            from   : self.sector_id,
+            to     : cmd.to,
+            tick   : self.current_tick,
+        }));
+
+        Ok(())
+    }
+
+    /// Complete an outgoing Sector Transit: remove the Ship from this node's
+    /// ECS and return a snapshot for the destination node to import.
+    ///
+    /// Appends `SectorTransitCompleted` from this (the `from`) Sector's
+    /// perspective. Returns `None` if `ship_id` is unknown or not currently
+    /// `InTransit`.
+    pub fn export_transit(&mut self, ship_id: ShipId, entry_pos: Position) -> Option<ShipSnapshot> {
+        let &entity = self.ship_index.get(&ship_id)?;
+        let to = match self.world.transit_state(entity) {
+            dawn_ecs::TransitState::InTransit { to } => to,
+            dawn_ecs::TransitState::None => return None,
+        };
+
+        let pos  = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+        let vel  = self.world.inner().get::<&VelocityComp>(entity).ok()?.0;
+        let (current_shield, current_armor, current_hull, is_destroyed) = {
+            let hull = self.world.inner().get::<&HullComp>(entity).ok()?;
+            (hull.current_shield, hull.current_armor, hull.current_hull, hull.is_destroyed)
+        };
+        let capacitor = self.world.inner().get::<&CapacitorComp>(entity).ok().map(|c| c.current);
+        let fitting = self.world.inner().get::<&FittingComp>(entity)
+            .map(|f| f.to_snapshot())
+            .unwrap_or_else(|_| dawn_core::fitting::FittingSnapshot::empty());
+        let ship_type_id = self.ship_type_ids.get(&ship_id).copied().unwrap_or(ShipTypeId(0));
+
+        let snapshot = ShipSnapshot {
+            ship_id,
+            ship_type_id,
+            position: pos,
+            velocity: vel,
+            current_shield,
+            current_armor,
+            current_hull,
+            is_destroyed,
+            capacitor,
+            fitting,
+        };
+
+        self.ship_index.remove(&ship_id);
+        self.world.despawn_ship(entity);
+        self.ship_type_ids.remove(&ship_id);
+        self.base_stats.remove(&ship_id);
+
+        self.event_store.append(DomainEvent::SectorTransitCompleted(dawn_core::events::SectorTransitCompleted {
+            ship_id,
+            from     : self.sector_id,
+            to,
+            entry_pos: entry_pos,
+            velocity : vel,
+            tick     : self.current_tick,
+        }));
+
+        Some(snapshot)
+    }
+
+    /// Complete an incoming Sector Transit: restore `ship` (exported from the
+    /// `from` Sector via [`export_transit`]) into this node's ECS at
+    /// `entry_pos`, preserving its `ShipId` (INV-004 — no ID reuse, the same
+    /// Ship simply changes Sector ownership).
+    ///
+    /// Appends `SectorTransitCompleted` from this (the `to`) Sector's
+    /// perspective.
+    pub fn import_transit(&mut self, ship: &ShipSnapshot, from: SectorId, entry_pos: Position) {
+        let mut ship = ship.clone();
+        ship.position = entry_pos;
+        self.restore_ship_from_snapshot(&ship);
+
+        self.event_store.append(DomainEvent::SectorTransitCompleted(dawn_core::events::SectorTransitCompleted {
+            ship_id  : ship.ship_id,
+            from,
+            to       : self.sector_id,
+            entry_pos,
+            velocity : ship.velocity,
+            tick     : self.current_tick,
+        }));
     }
 
     // ── Tick ──────────────────────────────────────────────────────────────────
@@ -951,6 +1033,40 @@ impl<S: EventStore> SimulationNode<S> {
         self.ship_index.insert(ship_id, entity);
     }
 
+    /// Reconstruct a Ship's full ECS state (stats, hull, capacitor, fitting)
+    /// from a [`ShipSnapshot`]. Used by `from_snapshot` (node restart) and
+    /// `import_transit` (Sector Transit, ADR-0014). Does NOT append any event.
+    fn restore_ship_from_snapshot(&mut self, ship: &ShipSnapshot) {
+        self.insert_to_world(ship.ship_id, ship.position, ship.velocity);
+        self.ship_type_ids.insert(ship.ship_id, ship.ship_type_id);
+
+        let base = self.ship_type_registry.get(&ship.ship_type_id)
+            .map(|def| ShipStatsComp::from_base(&def.base_stats))
+            .unwrap_or(ShipStatsComp::NPC);
+        self.base_stats.insert(ship.ship_id, base);
+
+        if let Some(&entity) = self.ship_index.get(&ship.ship_id) {
+            self.world.set_ship_stats(entity, base);
+
+            let fitting = FittingComp::from_snapshot(&ship.fitting, &self.module_registry);
+            let _ = self.world.inner_mut().insert_one(entity, fitting);
+
+            // apply_fitting recomputes ShipStatsComp and rescales HullComp;
+            // restore the exact HP layers from the snapshot afterwards.
+            apply_fitting(&mut self.world, ship.ship_id, base);
+            if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
+                hull.current_shield = ship.current_shield;
+                hull.current_armor  = ship.current_armor;
+                hull.current_hull   = ship.current_hull;
+                hull.is_destroyed   = ship.is_destroyed;
+            }
+
+            if let Some(cap) = ship.capacitor {
+                let _ = self.world.inner_mut().insert_one(entity, CapacitorComp { current: cap });
+            }
+        }
+    }
+
     /// Apply a single domain event to the ECS World without appending it.
     /// Used during `restore_from` to replay post-snapshot events.
     fn apply_event(&mut self, event: &DomainEvent) {
@@ -1163,6 +1279,106 @@ mod tests {
         node.tick();
         let last = node.event_store().all_records().last().unwrap();
         assert_eq!(last.event.tick(), Tick(2));
+    }
+
+    #[test]
+    fn propose_transit_marks_ship_in_transit_and_appends_requested_event() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+
+        node.propose_transit(dawn_core::commands::TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+
+        let entity = *node.ship_index.get(&ship_id).unwrap();
+        assert_eq!(node.world.transit_state(entity), dawn_ecs::TransitState::InTransit { to: SectorId(1) });
+
+        let last = node.event_store().all_records().last().unwrap();
+        match &last.event {
+            DomainEvent::SectorTransitRequested(e) => {
+                assert_eq!(e.ship_id, ship_id);
+                assert_eq!(e.from, node.sector_id());
+                assert_eq!(e.to, SectorId(1));
+            }
+            other => panic!("expected SectorTransitRequested, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn propose_transit_is_rejected_when_ship_is_already_in_transit() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        node.propose_transit(dawn_core::commands::TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+
+        let err = node.propose_transit(dawn_core::commands::TransitCommand { ship_id, to: SectorId(2) }).unwrap_err();
+        assert!(matches!(err, dawn_core::DawnError::ShipInTransit(id) if id == ship_id));
+    }
+
+    #[test]
+    fn propose_transit_is_rejected_for_unknown_ship() {
+        let mut node = mem_node();
+        let unknown = dawn_core::ShipId::new(NodeId(99), 0);
+        let err = node.propose_transit(dawn_core::commands::TransitCommand { ship_id: unknown, to: SectorId(1) }).unwrap_err();
+        assert!(matches!(err, dawn_core::DawnError::ShipNotFound(id) if id == unknown));
+    }
+
+    #[test]
+    fn export_transit_removes_ship_and_appends_completed_event() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0));
+        node.propose_transit(dawn_core::commands::TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+
+        let entry_pos = Position::new(500.0, 0.0, 0.0);
+        let snapshot = node.export_transit(ship_id, entry_pos).expect("ship should export");
+        assert_eq!(snapshot.ship_id, ship_id);
+
+        assert!(node.ship_index.get(&ship_id).is_none(), "ship must leave the from-sector ECS");
+        assert_eq!(node.ship_count(), 0);
+
+        let last = node.event_store().all_records().last().unwrap();
+        match &last.event {
+            DomainEvent::SectorTransitCompleted(e) => {
+                assert_eq!(e.ship_id, ship_id);
+                assert_eq!(e.from, node.sector_id());
+                assert_eq!(e.to, SectorId(1));
+                assert_eq!(e.entry_pos, entry_pos);
+            }
+            other => panic!("expected SectorTransitCompleted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn export_transit_returns_none_for_ship_not_in_transit() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        assert!(node.export_transit(ship_id, Position::ORIGIN).is_none());
+        assert_eq!(node.ship_count(), 1, "ship must remain when not in transit");
+    }
+
+    #[test]
+    fn import_transit_restores_ship_with_same_id_at_entry_position_and_appends_completed_event() {
+        let mut from_node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+        let mut to_node   = SimulationNode::new(NodeId(1), SectorId(1), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+
+        let ship_id = from_node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0));
+        from_node.propose_transit(dawn_core::commands::TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+
+        let entry_pos = Position::new(500.0, 0.0, 0.0);
+        let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
+
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos);
+
+        assert_eq!(to_node.ship_count(), 1);
+        assert_eq!(to_node.get_ship_position(ship_id), Some(entry_pos));
+
+        let last = to_node.event_store().all_records().last().unwrap();
+        match &last.event {
+            DomainEvent::SectorTransitCompleted(e) => {
+                assert_eq!(e.ship_id, ship_id);
+                assert_eq!(e.from, SectorId(0));
+                assert_eq!(e.to, SectorId(1));
+                assert_eq!(e.entry_pos, entry_pos);
+            }
+            other => panic!("expected SectorTransitCompleted, got {other:?}"),
+        }
     }
 
     #[test]

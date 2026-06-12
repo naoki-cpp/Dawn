@@ -312,7 +312,7 @@ Tick 駆動タイマー（決定 5）と整合しない。
 
 ### dawn-simulation
 
-- [ ] `SimulationNode` に Transit 処理（提案 → コミット → 完了の 2 段階）
+- [x] `SimulationNode` に Transit 処理（提案 → コミット → 完了の 2 段階）
 - [ ] `MultiNodeCluster` に RaftActor 配線
 - [ ] シナリオテスト（tests/）:
   - [ ] 正常系: Transit 後、Ship が宛先 Sector にのみ存在する
