@@ -8,16 +8,16 @@ related  : entity-model.md, event-catalog.md, CLAUDE.md §5
 > **実装状況の注意**
 >
 > このドキュメントは将来フェーズを含む設計全体を記述している。
-> 現在（Phase 6 完了時点）実装済みの範囲は以下のとおり。
+> 現在（Phase 7 完了時点）実装済みの範囲は以下のとおり。
 >
 > | セクション | 内容 | 実装状況 |
 > |---|---|---|
 > | §1〜2 | Ship の所有権・基本状態遷移 | ✅ 実装済み |
-> | §2 Sector Transit / §3 Node 障害時 | Sector 間移動の排他制御・Raft フェイルオーバー | ⬜ Phase 7（Raft 実装後） |
+> | §2 Sector Transit / §3 Node 障害時 | Sector 間移動の排他制御・Raft フェイルオーバー | ✅ Phase 7 実装済み（ADR-0014） |
 > | §4 Actor の所有権 | Actor 間のデータ分離 | ✅ Phase 2 実装済み |
 > | §5 ID 生成 | NodeId + 単調増加カウンタ | ✅ 実装済み |
 >
-> Phase 7 より前に §3 以降の内容を実装してはならない（CLAUDE.md FBD-006）。
+> Sector Transit は必ず Raft を経由すること（CLAUDE.md FBD-006）。
 
 # Ownership Rules
 

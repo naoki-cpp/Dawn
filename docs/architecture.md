@@ -78,6 +78,7 @@ EVE Online に着想を得た**研究用の分散シミュレーション基盤*
 | `dawn-core` | ライブラリ | 純粋ドメインモデル定義。外部依存ゼロ |
 | `dawn-ecs` | ライブラリ | ECS World ラッパー。Component / System 定義 |
 | `dawn-event-store` | ライブラリ | Append-only Event Log の永続化 |
+| `dawn-consensus` | ライブラリ | Raft 実装（Leader 選出 / Log Replication / RaftActor、ADR-0014） |
 | `dawn-actor` | ライブラリ | Actor 基盤（EventStoreActor / ReplicationBus / ClientConnection trait） |
 | `dawn-simulation` | バイナリ | 全体を結合するシミュレーション実行基盤・WsServer（Godot 接続） |
 
@@ -87,11 +88,12 @@ EVE Online に着想を得た**研究用の分散シミュレーション基盤*
 dawn-core
     ↑
     ├── dawn-ecs
+    ├── dawn-consensus
     └── dawn-event-store
             ↑
             └── dawn-actor
                     ↑
-                    └── dawn-simulation  (バイナリ)
+                    └── dawn-simulation  (バイナリ・dawn-consensus にも依存)
 ```
 
 依存は**下から上への一方向のみ**。逆方向・循環は設計の失敗を意味する。

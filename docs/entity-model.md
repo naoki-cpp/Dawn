@@ -131,6 +131,7 @@ Sector の空間的範囲を表す軸平行バウンディングボックス（A
 | `WeaponComp` | 武器サイクル状態 |
 | `LockComp` | ロックオン状態（ターゲットごとの `LockState`） |
 | `IsNpcComp` | NPC マーカー（プレイヤー船は spawn 後に remove される） |
+| `TransitComp` | Sector Transit 状態（`None` / `InTransit`、ADR-0014） |
 
 追加で条件付きで付与される Component:
 
@@ -146,8 +147,9 @@ Sector の空間的範囲を表す軸平行バウンディングボックス（A
 ```
 Cargo（積荷）        ← Economy Context
 Name（船名）         ← UI / Social Context
-TransitState        ← Sector Transit 実装時（Phase 7）に追加
 ```
+
+※ `TransitState`（`TransitComp`）は Phase 7（ADR-0014）で実装済み（上表参照）。
 
 ※ 所有者（PlayerId）は ECS Component ではなく
   `SimulationNode` の `ship_owners: HashMap<ShipId, PlayerId>` で管理する。

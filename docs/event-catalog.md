@@ -149,6 +149,7 @@ ECS に適用したうえで上記イベントを自分の EventStore に Append
 | `DeactivateModuleCommand` | Active モジュールをオフにする | `ModuleDeactivated` | ✅ 実装済み |
 | `AttackCommand` | 攻撃対象を指定する | `WeaponFired` | ✅ 型定義・WsServer JSON パーサー実装済み（Phase 5）|
 | `StopCommand` | 加速度を用いて速度をゼロに減速する | — | ✅ 実装済み |
+| `TransitCommand` | Sector Transit を要求する（Raft 経由・ADR-0014） | `SectorTransitRequested` / `Completed` | ✅ 実装済み |
 
 ---
 
@@ -329,6 +330,54 @@ Replay 時は `FittedSlot.is_active = true` にセットし、`apply_fitting()` 
 | `tick` | `Tick` | ✓ | 破壊された Tick |
 
 **Replay:** `ship_id` に対応する Entity を ECS と `ship_index` から削除する。
+
+---
+
+### `SectorTransitRequested`
+
+**説明:** Sector Transit が Raft でコミットされた。所有権は `SectorTransitCompleted` まで `from` に残る（ADR-0014）。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | Transit する Ship |
+| `from` | `SectorId` | ✓ | 現在の所有 Sector |
+| `to` | `SectorId` | ✓ | 宛先 Sector |
+| `tick` | `Tick` | ✓ | コミットが適用された Tick |
+
+**Replay:** `TransitComp` を `InTransit { to }` に更新する。
+
+---
+
+### `SectorTransitCompleted`
+
+**説明:** Sector Transit が完了し、所有権が `from` から `to` に移った。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | Transit した Ship |
+| `from` | `SectorId` | ✓ | 元の所有 Sector |
+| `to` | `SectorId` | ✓ | 新しい所有 Sector |
+| `entry_pos` | `Position` | ✓ | 宛先 Sector での入場座標 |
+| `velocity` | `Velocity` | ✓ | 入場時の速度（INV-002: Replay で完全復元するため必須） |
+| `tick` | `Tick` | ✓ | 完了した Tick |
+
+**Replay:** from ノードでは Ship を ECS から削除、to ノードでは `entry_pos` / `velocity` で Ship を追加する。
+
+---
+
+### `SectorTransitAborted`
+
+**説明:** コミット済み Transit が中断された。所有権は `from` に残る。
+バリデーション段階の拒否は `CommandRejected` で表現し、本イベントは発行しない（INV-006）。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | Transit を中断した Ship |
+| `from` | `SectorId` | ✓ | 所有 Sector（変わらない） |
+| `to` | `SectorId` | ✓ | 中断された宛先 Sector |
+| `tick` | `Tick` | ✓ | 中断が確定した Tick |
+
+**ステータス:** 型定義のみ（宛先ノード障害時の発行は未配線）。
 
 ---
 
