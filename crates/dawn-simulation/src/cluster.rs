@@ -363,6 +363,60 @@ mod tests {
         cluster.shutdown().await;
     }
 
+    /// Phase 7 completion criterion (ADR-0014 §3 / roadmap.md §10): a Sector
+    /// Transit proposed while the old Leader is partitioned away still
+    /// completes once the remaining nodes elect a new Leader.
+    #[tokio::test]
+    async fn transit_completes_after_a_new_leader_is_elected_during_node_failure() {
+        use dawn_core::{Position, Velocity};
+
+        let cluster = MultiNodeCluster::new(NODES);
+
+        // Elect the first Leader.
+        for _ in 0..30 {
+            cluster.tick_all().await;
+        }
+        let roles = cluster.raft_roles().await;
+        let (old_leader_idx, _) = roles.iter().enumerate()
+            .find(|(_, (role, _))| *role == dawn_consensus::Role::Leader)
+            .expect("a leader must exist before the partition");
+
+        // Take the old Leader down before any Transit is proposed.
+        cluster.partition_node(NodeId(old_leader_idx as u8));
+
+        // Elect a new Leader among the remaining nodes.
+        for _ in 0..30 {
+            cluster.tick_all().await;
+        }
+        let roles = cluster.raft_roles().await;
+        let (new_leader_idx, _) = roles.iter().enumerate()
+            .find(|&(idx, (role, _))| idx != old_leader_idx && *role == dawn_consensus::Role::Leader)
+            .expect("a new leader must be elected after the partition");
+
+        // Propose a Transit owned by the new Leader's sector, away from the
+        // partitioned node's sector (which can no longer import).
+        let owner_idx = new_leader_idx;
+        let dest_idx = (0..NODES).find(|&i| i != old_leader_idx && i != owner_idx)
+            .expect("a third sector must exist for the destination");
+
+        let ship_id = cluster.nodes[owner_idx]
+            .spawn_ship(Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0))
+            .await;
+        let accepted = cluster.nodes[owner_idx].transit(ship_id, SectorId(dest_idx as u8)).await;
+        assert!(accepted, "transit command must pass up-front validation");
+
+        for _ in 0..40 {
+            cluster.tick_all().await;
+        }
+
+        let stats = cluster.get_all_stats().await;
+        assert_eq!(stats[owner_idx].ship_count, 0, "origin sector must no longer own the ship");
+        assert_eq!(stats[dest_idx].ship_count, 1, "destination sector must own the ship");
+        assert_eq!(stats[old_leader_idx].ship_count, 0, "the partitioned sector must be unaffected");
+
+        cluster.shutdown().await;
+    }
+
     #[tokio::test]
     async fn replicated_event_count_grows_monotonically_across_ticks() {
         let cluster = MultiNodeCluster::new(NODES);

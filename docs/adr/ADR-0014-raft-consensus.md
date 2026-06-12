@@ -326,6 +326,8 @@ Tick 駆動タイマー（決定 5）と整合しない。
   - [x] スプリットブレイン不在: いかなる時点でも所有 Sector は高々 1 つ /
         到達可能なノード間でLeaderは高々 1 つ
   - [x] INV-002: Transit 後の状態がSnapshot + Log Replayで完全再現される
+  - [x] 完了基準そのもの: 旧Leaderの障害中に提案されたTransitが、
+        新Leader選出後に完遂する（`transit_completes_after_a_new_leader_is_elected_during_node_failure`）
 - [x] ベンチマーク: Transit 1 回のレイテンシ（docs/benchmark-baseline.md に追記）
 
 ---
