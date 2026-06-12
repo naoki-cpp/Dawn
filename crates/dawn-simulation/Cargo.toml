@@ -12,6 +12,7 @@ dawn-core        = { path = "../dawn-core" }
 dawn-ecs         = { path = "../dawn-ecs" }
 dawn-event-store = { path = "../dawn-event-store" }
 dawn-actor       = { path = "../dawn-actor" }
+dawn-consensus   = { path = "../dawn-consensus" }
 rand             = { workspace = true, features = ["small_rng"] }
 tokio            = { workspace = true }
 postcard         = { workspace = true }

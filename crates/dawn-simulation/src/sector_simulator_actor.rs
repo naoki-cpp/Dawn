@@ -20,6 +20,7 @@
 
 use crate::node::{SimulationNode, TickResult};
 use dawn_actor::BusMessage;
+use dawn_consensus::{RaftActorHandle, Role, Term};
 use dawn_event_store::store::EventStore as _;
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
 use tokio::sync::{mpsc, oneshot};
@@ -60,6 +61,10 @@ enum SectorSimulatorMessage {
     GetStats {
         reply: oneshot::Sender<NodeStats>,
     },
+    /// Query this node's Raft role/term (ADR-0014, for tests/observability).
+    GetRaftRole {
+        reply: oneshot::Sender<(Role, Term)>,
+    },
     Shutdown,
 }
 
@@ -72,6 +77,8 @@ struct SectorSimulatorActor {
     /// Index of the next event in the node's log that has not yet been
     /// forwarded to the ReplicationBus.
     last_replicated : u64,
+    /// Handle to this node's RaftActor (ADR-0014).
+    raft            : RaftActorHandle,
 }
 
 impl SectorSimulatorActor {
@@ -79,8 +86,9 @@ impl SectorSimulatorActor {
         rx    : mpsc::Receiver<SectorSimulatorMessage>,
         node  : SimulationNode,
         bus_tx: mpsc::Sender<BusMessage>,
+        raft  : RaftActorHandle,
     ) -> Self {
-        Self { rx, node, bus_tx, last_replicated: 0 }
+        Self { rx, node, bus_tx, last_replicated: 0, raft }
     }
 
     /// Forward any un-replicated events from the node's local log to the bus.
@@ -116,6 +124,10 @@ impl SectorSimulatorActor {
                             .await;
                     }
 
+                    // Step 10: advance this node's Raft election/heartbeat
+                    // timers by one logical Tick (INV-005 / FBD-003).
+                    self.raft.tick();
+
                     // Step 3: reply to caller.
                     let _ = reply.send(summary);
                 }
@@ -139,6 +151,11 @@ impl SectorSimulatorActor {
                     });
                 }
 
+                SectorSimulatorMessage::GetRaftRole { reply } => {
+                    let (role, term) = self.raft.role().await;
+                    let _ = reply.send((role, term));
+                }
+
                 SectorSimulatorMessage::Shutdown => break,
             }
         }
@@ -157,15 +174,18 @@ impl SectorSimulatorHandle {
     /// Spawn a `SectorSimulatorActor` and return a handle.
     ///
     /// `bus` provides the replication channel.  Pass `bus.event_sender()` here.
+    /// `raft` is this node's `RaftActorHandle` (ADR-0014), already wired to
+    /// its peers via `RaftTransport`.
     pub fn spawn(
         node_id  : NodeId,
         sector_id: SectorId,
         bounds   : SectorBounds,
         bus_tx   : mpsc::Sender<BusMessage>,
+        raft     : RaftActorHandle,
     ) -> Self {
         let (tx, rx) = mpsc::channel(256);
         let node = SimulationNode::new(node_id, sector_id, bounds);
-        tokio::spawn(SectorSimulatorActor::new(rx, node, bus_tx).run());
+        tokio::spawn(SectorSimulatorActor::new(rx, node, bus_tx, raft).run());
         Self { tx }
     }
 
@@ -190,6 +210,14 @@ impl SectorSimulatorHandle {
         rx.await.expect("SectorSimulatorActor dropped reply sender")
     }
 
+    /// Current Raft role/term of this node (ADR-0014).
+    pub async fn raft_role(&self) -> (Role, Term) {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(SectorSimulatorMessage::GetRaftRole { reply: tx }).await
+            .expect("SectorSimulatorActor is no longer running");
+        rx.await.expect("SectorSimulatorActor dropped reply sender")
+    }
+
     pub async fn shutdown(&self) {
         let _ = self.tx.send(SectorSimulatorMessage::Shutdown).await;
     }
@@ -204,12 +232,23 @@ mod tests {
     use dawn_core::{SectorBounds, Velocity};
 
     fn spawn_actor() -> (SectorSimulatorHandle, dawn_actor::ReplicationBusHandle) {
-        let bus    = dawn_actor::ReplicationBusHandle::spawn();
+        let bus = dawn_actor::ReplicationBusHandle::spawn();
+
+        // Single-node Raft cluster: no peers, transport delivers nowhere.
+        let (raft_tx, raft_rx) = mpsc::unbounded_channel();
+        let transport = std::sync::Arc::new(dawn_consensus::InProcessTransport::new(
+            std::collections::HashMap::new(),
+        ));
+        let state = dawn_consensus::RaftState::new(NodeId(0), vec![], 10, 2);
+        tokio::spawn(dawn_consensus::RaftActor::new(state, vec![], transport, raft_rx).run());
+        let raft = RaftActorHandle::new(raft_tx);
+
         let handle = SectorSimulatorHandle::spawn(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             bus.event_sender(),
+            raft,
         );
         (handle, bus)
     }

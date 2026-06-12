@@ -156,6 +156,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dawn-actor",
+ "dawn-consensus",
  "dawn-core",
  "dawn-ecs",
  "dawn-event-store",

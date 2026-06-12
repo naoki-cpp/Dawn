@@ -16,13 +16,18 @@
 use crate::sector_simulator_actor::{NodeStats, SectorSimulatorHandle, TickSummary};
 use crate::spawner::{generate_ships, SpawnConfig};
 use dawn_actor::ReplicationBusHandle;
+use dawn_consensus::{InProcessTransport, PartitionableTransport, RaftActor, RaftActorHandle, RaftState, RaftTransport, Role, Term};
 use dawn_core::{NodeId, SectorBounds, SectorId};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 // ── Cluster ───────────────────────────────────────────────────────────────────
 
 pub struct MultiNodeCluster {
-    nodes: Vec<SectorSimulatorHandle>,
-    bus  : ReplicationBusHandle,
+    nodes      : Vec<SectorSimulatorHandle>,
+    bus        : ReplicationBusHandle,
+    /// Shared fault-injection set for the cluster's Raft transports (ADR-0014).
+    partitioned: Arc<Mutex<HashSet<NodeId>>>,
 }
 
 impl MultiNodeCluster {
@@ -30,17 +35,76 @@ impl MultiNodeCluster {
     ///
     /// Each node is assigned `SectorId(i)` and `NodeId(i)`.
     /// All nodes share the same `SectorBounds`.
+    ///
+    /// Each node also gets a `RaftActor` (ADR-0014), wired to its peers via
+    /// `PartitionableTransport` over in-process mpsc channels. Election
+    /// timeout/heartbeat timers advance once per simulation Tick (Step 10).
     pub fn new(node_count: usize) -> Self {
-        let bus   = ReplicationBusHandle::spawn();
-        let nodes = (0..node_count as u8)
-            .map(|i| SectorSimulatorHandle::spawn(
-                NodeId(i),
-                SectorId(i),
+        let bus = ReplicationBusHandle::spawn();
+        let ids: Vec<NodeId> = (0..node_count as u8).map(NodeId).collect();
+
+        // One mailbox per RaftActor, addressed by NodeId.
+        let mut raft_txs = HashMap::new();
+        let mut raft_rxs = HashMap::new();
+        for &id in &ids {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            raft_txs.insert(id, tx);
+            raft_rxs.insert(id, rx);
+        }
+
+        let partitioned = PartitionableTransport::new_partition_set();
+        let mut rng = rand::thread_rng();
+
+        let nodes = ids.iter().map(|&id| {
+            let peers: Vec<NodeId> = ids.iter().copied().filter(|&p| p != id).collect();
+
+            let peer_txs: HashMap<NodeId, _> = raft_txs.iter()
+                .filter(|&(&p, _)| p != id)
+                .map(|(&p, tx)| (p, tx.clone()))
+                .collect();
+            let transport: Arc<dyn RaftTransport> = Arc::new(PartitionableTransport::new(
+                id,
+                InProcessTransport::new(peer_txs),
+                partitioned.clone(),
+            ));
+
+            // election_timeout = 10 + jitter(0..10) ticks, heartbeat every 3 ticks.
+            let state = RaftState::new_randomized(id, peers.clone(), 10, 10, 3, &mut rng);
+            let raft_rx = raft_rxs.remove(&id).unwrap();
+            tokio::spawn(RaftActor::new(state, peers, transport, raft_rx).run());
+            let raft = RaftActorHandle::new(raft_txs[&id].clone());
+
+            SectorSimulatorHandle::spawn(
+                id,
+                SectorId(id.0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 bus.event_sender(),
-            ))
-            .collect();
-        Self { nodes, bus }
+                raft,
+            )
+        }).collect();
+
+        Self { nodes, bus, partitioned }
+    }
+
+    /// Cut `node` off from the rest of the cluster's Raft messages
+    /// (ADR-0014 fault injection — simulates a node failure for election
+    /// timeout/leader-failover testing).
+    pub fn partition_node(&self, node: NodeId) {
+        PartitionableTransport::partition(&self.partitioned, node);
+    }
+
+    /// Restore `node`'s Raft connectivity.
+    pub fn heal_node(&self, node: NodeId) {
+        PartitionableTransport::heal(&self.partitioned, node);
+    }
+
+    /// Current Raft role/term of every node, in node order.
+    pub async fn raft_roles(&self) -> Vec<(Role, Term)> {
+        let mut roles = Vec::with_capacity(self.nodes.len());
+        for node in &self.nodes {
+            roles.push(node.raft_role().await);
+        }
+        roles
     }
 
     /// Spawn `count` ships on every node using the given config.
@@ -174,6 +238,27 @@ mod tests {
                 TICKS,
             );
         }
+
+        cluster.shutdown().await;
+    }
+
+    // ── Raft wiring (ADR-0014) ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn ticking_the_cluster_eventually_elects_exactly_one_leader() {
+        let cluster = MultiNodeCluster::new(NODES);
+
+        // election_timeout is at most 10 + 10 = 20 ticks; give it ample margin.
+        for _ in 0..30 {
+            cluster.tick_all().await;
+        }
+
+        let roles = cluster.raft_roles().await;
+        let leaders = roles.iter().filter(|(role, _)| *role == dawn_consensus::Role::Leader).count();
+        assert_eq!(leaders, 1, "exactly one node should be Leader after enough ticks: {roles:?}");
+
+        let terms: std::collections::HashSet<_> = roles.iter().map(|(_, term)| *term).collect();
+        assert_eq!(terms.len(), 1, "all nodes should agree on the term: {roles:?}");
 
         cluster.shutdown().await;
     }
