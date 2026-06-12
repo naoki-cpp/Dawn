@@ -320,7 +320,7 @@ mod tests {
     /// export -> Commit -> commit -> import).
     #[tokio::test]
     async fn committed_jump_moves_ship_to_gates_destination_sector() {
-        use dawn_core::{JumpGateId, Position, Velocity};
+        use dawn_core::{JumpGateId, Velocity};
 
         let cluster = MultiNodeCluster::new(NODES);
 

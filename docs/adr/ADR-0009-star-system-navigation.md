@@ -239,14 +239,16 @@ Event Sourcing と相性が悪い。「移動アニメーション」はクラ�
   - Sector 遷移は既存の `TransitOp` Raft パイプライン経由（`gate_id: Option<JumpGateId>` を追加）
   - `JumpGateUsed` イベント Append（`append_jump_events`、Step 7.5）
   - 別星系なら `StarSystemChanged` イベント Append（`append_jump_events`）
-- [ ] `src/ws_server.rs` に `JumpGateUsed`, `StarSystemChanged` の EventJson 追加
-- [ ] `src/ws_server.rs` に `JumpCommand` の JSON パーサー追加
-- [ ] `src/main.rs` に `ClientCommand::Jump` のマッチアーム追加
+- [x] `src/ws_server.rs` に `JumpGateUsed`, `StarSystemChanged` の EventJson 追加
+- [x] `src/ws_server.rs` に `JumpCommand` の JSON パーサー追加
+- [x] `src/main.rs` に `ClientCommand::Jump` のマッチアーム追加
+  （`--serve` は単一 Sector ノードのため Raft なしの遷移は行わず無視する。
+  FBD-006 参照。フル経路は `MultiNodeCluster` の統合テストで検証済み）
 - [x] 統合テスト: ジャンプ後に Ship が宛先 Sector に存在すること（`committed_jump_moves_ship_to_gates_destination_sector`）
 
 ### dawn-actor
 
-- [ ] `ClientCommand` に `Jump(JumpCommand)` variant 追加
+- [x] `ClientCommand` に `Jump(JumpCommand)` variant 追加
 
 ### Godot（client/）
 

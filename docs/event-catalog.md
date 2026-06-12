@@ -141,7 +141,8 @@ Step 7.5 で destination ノードが `SectorTransitCompleted` に加えて
 `StarSystemChanged` も Append する（`SimulationNode::append_jump_events`）。
 
 静的トポロジー（3 星系・4 ジャンプゲート）は `dawn-simulation/src/star_map.rs`
-に定義する。`ws_server.rs` / `main.rs` / Godot クライアントへの配線は未実装
+に定義する。`ws_server.rs` は両イベントを EventJson としてクライアントに配信し、
+`JumpCommand` の JSON パーサーも実装済み。Godot クライアント側の配線のみ未実装
 （ADR-0009 実装チェックリスト参照）。
 
 ### 3.8 System（将来予約）

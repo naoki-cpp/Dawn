@@ -24,7 +24,7 @@
 //! `ClientConnection` trait 自体は変更しない。
 //! 新コマンドの追加 = `ClientCommand` に variant を追加するだけ。
 
-use dawn_core::{ActivateModuleCommand, AttackCommand, DeactivateModuleCommand, DomainEvent, LockOnCommand, MoveCommand, StopCommand};
+use dawn_core::{ActivateModuleCommand, AttackCommand, DeactivateModuleCommand, DomainEvent, JumpCommand, LockOnCommand, MoveCommand, StopCommand};
 use tokio::sync::mpsc;
 
 // ── Error ─────────────────────────────────────────────────────────────────────
@@ -59,6 +59,8 @@ pub enum ClientCommand {
     Attack(AttackCommand),
     /// 減速停止（thrust を逆方向に掛けて速度ゼロまで減速する）
     Stop(StopCommand),
+    /// ジャンプゲート経由の Sector 移動（ADR-0009）
+    Jump(JumpCommand),
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
@@ -197,6 +199,17 @@ mod tests {
         client.command_tx.send(make_lock_on_command()).unwrap();
         assert!(matches!(server.try_recv_command().unwrap(), ClientCommand::Move(_)));
         assert!(matches!(server.try_recv_command().unwrap(), ClientCommand::LockOn(_)));
+    }
+
+    #[test]
+    fn jump_command_is_received_by_server_connection() {
+        let (mut server, client) = InProcessConnection::pair();
+        client.command_tx.send(ClientCommand::Jump(dawn_core::JumpCommand {
+            ship_id: ShipId(EntityId::new(NodeId(0), 1)),
+            gate_id: dawn_core::JumpGateId(0),
+        })).unwrap();
+        let cmd = server.try_recv_command().expect("command should be available");
+        assert!(matches!(cmd, ClientCommand::Jump(_)));
     }
 
     #[test]

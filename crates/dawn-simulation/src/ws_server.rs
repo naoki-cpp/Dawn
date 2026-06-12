@@ -46,6 +46,8 @@ enum EventJson {
     LockLost          { locker_id: u64, target_id: u64, tick: u64 },
     ModuleActivated   { ship_id: u64, module_id: u32, slot: String, tick: u64 },
     ModuleDeactivated { ship_id: u64, module_id: u32, slot: String, tick: u64 },
+    JumpGateUsed      { ship_id: u64, gate_id: u32, from_sector: u8, to_sector: u8, entry_pos: PosJson, tick: u64 },
+    StarSystemChanged { ship_id: u64, from_system: u32, to_system: u32, tick: u64 },
 }
 
 #[derive(Serialize, Clone, Copy)]
@@ -112,10 +114,22 @@ fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
         DomainEvent::SectorTransitRequested(_) => return None,
         DomainEvent::SectorTransitCompleted(_) => return None,
         DomainEvent::SectorTransitAborted(_)   => return None,
-        // Jump Gate Navigation (ADR-0009): EventJson variant added when the
-        // Jump pipeline is wired into ws_server.
-        DomainEvent::JumpGateUsed(_)      => return None,
-        DomainEvent::StarSystemChanged(_) => return None,
+        // Jump Gate Navigation (ADR-0009): Godot uses these to teleport the
+        // ship to entry_pos and switch the star-system backdrop.
+        DomainEvent::JumpGateUsed(e) => EventJson::JumpGateUsed {
+            ship_id    : e.ship_id.raw(),
+            gate_id    : e.gate_id.0,
+            from_sector: e.from_sector.0,
+            to_sector  : e.to_sector.0,
+            entry_pos  : PosJson { x: e.entry_pos.x, y: e.entry_pos.y, z: e.entry_pos.z },
+            tick       : e.tick.value(),
+        },
+        DomainEvent::StarSystemChanged(e) => EventJson::StarSystemChanged {
+            ship_id    : e.ship_id.raw(),
+            from_system: e.from_system.0,
+            to_system  : e.to_system.0,
+            tick       : e.tick.value(),
+        },
     };
     serde_json::to_string(&j).ok()
 }
@@ -177,6 +191,14 @@ fn parse_client_command(line: &str) -> Option<ClientCommand> {
             let ship_id_raw = v.get("ship_id")?.as_u64()?;
             Some(ClientCommand::Stop(StopCommand {
                 ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+            }))
+        }
+        "JumpCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            let gate_id_raw = v.get("gate_id")?.as_u64()? as u32;
+            Some(ClientCommand::Jump(dawn_core::JumpCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                gate_id: dawn_core::JumpGateId(gate_id_raw),
             }))
         }
         _ => None,
@@ -403,5 +425,64 @@ impl WsServer {
         });
 
         Ok(WsClientConnection { event_tx, command_rx })
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dawn_core::{JumpGateId, NodeId, SectorId, StarSystemId, Tick};
+
+    #[test]
+    fn jump_command_json_is_parsed_into_client_command_jump() {
+        let line = r#"{"type":"JumpCommand","ship_id":42,"gate_id":2}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::Jump(c) => {
+                assert_eq!(c.ship_id.raw(), 42);
+                assert_eq!(c.gate_id, JumpGateId(2));
+            }
+            other => panic!("expected Jump, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn jump_command_without_gate_id_is_rejected() {
+        let line = r#"{"type":"JumpCommand","ship_id":42}"#;
+        assert!(parse_client_command(line).is_none());
+    }
+
+    #[test]
+    fn jump_gate_used_event_is_serialized_with_entry_pos_for_godot() {
+        let event = DomainEvent::JumpGateUsed(dawn_core::events::JumpGateUsed {
+            ship_id    : ShipId(EntityId::new(NodeId(0), 1)),
+            gate_id    : JumpGateId(0),
+            from_sector: SectorId(0),
+            to_sector  : SectorId(1),
+            entry_pos  : Position::new(1.0, 2.0, 3.0),
+            tick       : Tick(5),
+        });
+        let json = domain_event_to_json(&event).expect("must serialize");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "JumpGateUsed");
+        assert_eq!(v["to_sector"], 1);
+        assert_eq!(v["entry_pos"]["x"].as_f64().unwrap() as f32, 1.0);
+    }
+
+    #[test]
+    fn star_system_changed_event_is_serialized_with_from_and_to_systems() {
+        let event = DomainEvent::StarSystemChanged(dawn_core::events::StarSystemChanged {
+            ship_id    : ShipId(EntityId::new(NodeId(0), 1)),
+            from_system: StarSystemId(0),
+            to_system  : StarSystemId(1),
+            tick       : Tick(5),
+        });
+        let json = domain_event_to_json(&event).expect("must serialize");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "StarSystemChanged");
+        assert_eq!(v["from_system"], 0);
+        assert_eq!(v["to_system"], 1);
     }
 }
