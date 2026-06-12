@@ -17,10 +17,12 @@ pub mod player;
 pub mod position;
 pub mod sector;
 pub mod ship_type;
+pub mod star_system;
 pub mod tick;
 
 // Re-export the most commonly used types at crate root for ergonomics.
-pub use commands::{ActivateModuleCommand, AttackCommand, DeactivateModuleCommand, FitModuleCommand, LockOnCommand, MoveCommand, StopCommand};
+pub use commands::{ActivateModuleCommand, AttackCommand, DeactivateModuleCommand, FitModuleCommand, JumpCommand, LockOnCommand, MoveCommand, StopCommand};
+pub use star_system::{JumpGateDef, JumpGateId, StarSystemDef, StarSystemId};
 pub use player::PlayerId;
 pub use ship_type::{ShipBaseStats, ShipClass, ShipTypeDefinition, ShipTypeId, SlotLayout};
 pub use entity::{EntityId, NodeId, ShipId};

@@ -126,7 +126,19 @@ Transit Proposal（`TransitOp::Request` / `Commit`）は Raft Log を経由し�
 コミットされ、各ノードが Tick Step 7.5（`apply_committed_raft_entries`）で
 ECS に適用したうえで上記イベントを自分の EventStore に Append する。
 
-### 3.7 System（将来予約）
+### 3.7 Jump Gate Navigation（ADR-0009・着手中）
+
+| イベント名 | 説明 | 発行者 | ステータス |
+|---|---|---|---|
+| `JumpGateUsed` | Ship がジャンプゲートを使って別 Sector に移動した | （未配線・dawn-core 型定義のみ） | 型定義のみ |
+| `StarSystemChanged` | Ship が別の星系に移動した（`JumpGateUsed` と同時） | （未配線・dawn-core 型定義のみ） | 型定義のみ |
+
+`JumpCommand { ship_id, gate_id }` が対応する Command。
+`TransitCommand` と同じ Raft Log 経路（ADR-0014）でコミットし、
+Step 7.5 適用時に `SectorTransitCompleted` に加えて発行する設計
+（ADR-0009 着手時補足を参照）。dawn-simulation 側のパイプライン配線は未実装。
+
+### 3.8 System（将来予約）
 
 | イベント名 | 説明 | ステータス |
 |---|---|---|

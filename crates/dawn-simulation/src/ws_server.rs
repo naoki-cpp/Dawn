@@ -112,6 +112,10 @@ fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
         DomainEvent::SectorTransitRequested(_) => return None,
         DomainEvent::SectorTransitCompleted(_) => return None,
         DomainEvent::SectorTransitAborted(_)   => return None,
+        // Jump Gate Navigation (ADR-0009): EventJson variant added when the
+        // Jump pipeline is wired into ws_server.
+        DomainEvent::JumpGateUsed(_)      => return None,
+        DomainEvent::StarSystemChanged(_) => return None,
     };
     serde_json::to_string(&j).ok()
 }

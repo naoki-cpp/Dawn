@@ -1209,6 +1209,11 @@ impl<S: EventStore> SimulationNode<S> {
             DomainEvent::SectorTransitRequested(_)
             | DomainEvent::SectorTransitCompleted(_)
             | DomainEvent::SectorTransitAborted(_) => {}
+
+            // Jump Gate Navigation (ADR-0009): Sector/StarSystem transfer on
+            // Replay is added when the Jump pipeline is wired in dawn-simulation.
+            DomainEvent::JumpGateUsed(_)
+            | DomainEvent::StarSystemChanged(_) => {}
         }
     }
 }

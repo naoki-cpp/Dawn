@@ -1,11 +1,31 @@
 ---
 id      : ADR-0009
 title   : 星系間ナビゲーション — StarSystem / JumpGate 設計
-status  : deferred
+status  : accepted
 date    : 2026-06-06
 deciders: [human, ai-agent]
-related : ADR-0001（Event Sourcing）, ADR-0003（Local-First）, CLAUDE.md §5（Entity Ownership）
+related : ADR-0001（Event Sourcing）, ADR-0003（Local-First）, ADR-0014（Raft Consensus）, CLAUDE.md §5（Entity Ownership）
 ---
+
+> **着手時の補足（2026-06-12・Phase 7 完了後）**
+>
+> 本 ADR は Phase 7（ADR-0014: Raft Log によるリーダー選出 / Sector Transit）の
+> 完成を前提として `deferred` から `accepted` に変更し、実装を開始する。
+>
+> §5「実装方針」で「Raft 導入後の設計スケッチ」としていた部分を確定する:
+>
+> - `JumpCommand` は `TransitCommand` と同じ経路（バリデーション →
+>   `RaftActor::propose` → Raft Log コミット → Tick Step 7.5
+>   `apply_committed_raft_entries`）で Sector 変更を行う。
+> - `TransitOp::Request` / `Commit` のペイロードに「ゲート経由か否か」を
+>   表す情報（`Option<JumpGateId>`）を含め、コミット適用時に
+>   `SectorTransitCompleted` に加えて `JumpGateUsed` を Append する。
+>   （`JumpGateUsed` は `SectorTransitCompleted` を置き換えるものではなく、
+>   「どう移動したか」を記録する追加イベント）
+> - `to_sector` が別 `StarSystemId` に属する場合のみ `StarSystemChanged` も
+>   同 Tick で Append する。
+> - スコープ制約の「追加しない: Raft 経由の排他制御（Phase 7 以降）」は
+>   Phase 7 完了により解消された — Raft 経由が前提になる。
 
 # ADR-0009 — 星系間ナビゲーション
 
@@ -204,11 +224,11 @@ Event Sourcing と相性が悪い。「移動アニメーション」はクラ�
 
 ### dawn-core
 
-- [ ] `src/star_system.rs` 追加（`StarSystemId`, `JumpGateId`, `StarSystemDef`, `JumpGateDef`）
-- [ ] `src/events.rs` に `JumpGateUsed`, `StarSystemChanged` 追加
-- [ ] `src/commands.rs` に `JumpCommand` 追加
-- [ ] `src/lib.rs` に re-export 追加
-- [ ] 各型に単体テスト追加
+- [x] `src/star_system.rs` 追加（`StarSystemId`, `JumpGateId`, `StarSystemDef`, `JumpGateDef`）
+- [x] `src/events.rs` に `JumpGateUsed`, `StarSystemChanged` 追加
+- [x] `src/commands.rs` に `JumpCommand` 追加
+- [x] `src/lib.rs` に re-export 追加
+- [x] 各型に単体テスト追加
 
 ### dawn-simulation
 

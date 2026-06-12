@@ -4,6 +4,7 @@
 //! The system validates a Command before producing an Event.  (INV-006)
 
 use crate::fitting::{ModuleId, SlotKind};
+use crate::star_system::JumpGateId;
 use crate::{Position, SectorId, ShipId};
 use serde::{Deserialize, Serialize};
 
@@ -103,6 +104,23 @@ pub struct TransitCommand {
     pub to     : SectorId,
 }
 
+/// Request to use a Jump Gate to move a Ship to its destination Sector
+/// (ADR-0009).
+///
+/// Like `TransitCommand`, the actual Sector change is committed via the
+/// Raft consensus layer (ADR-0014 / INV-003); this command only carries
+/// the player's intent.
+///
+/// May be rejected if:
+/// - The Ship does not exist.
+/// - The Ship is not within the gate's `activation_radius`.
+/// - The Ship is already in transit (`TransitState::InTransit`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JumpCommand {
+    pub ship_id: ShipId,
+    pub gate_id: JumpGateId,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,5 +157,12 @@ mod tests {
         let cmd = TransitCommand { ship_id: ship_id(1), to: SectorId(2) };
         assert_eq!(cmd.ship_id, ship_id(1));
         assert_eq!(cmd.to, SectorId(2));
+    }
+
+    #[test]
+    fn jump_command_carries_ship_id_and_gate_id() {
+        let cmd = JumpCommand { ship_id: ship_id(1), gate_id: crate::star_system::JumpGateId(0) };
+        assert_eq!(cmd.ship_id, ship_id(1));
+        assert_eq!(cmd.gate_id, crate::star_system::JumpGateId(0));
     }
 }

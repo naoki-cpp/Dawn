@@ -17,6 +17,7 @@
 
 use crate::fitting::{FittingSnapshot, SlotKind, ModuleId};
 use crate::ship_type::ShipTypeId;
+use crate::star_system::{JumpGateId, StarSystemId};
 use crate::{Position, SectorId, ShipId, Tick, Velocity};
 use serde::{Deserialize, Serialize};
 
@@ -69,6 +70,14 @@ pub enum DomainEvent {
 
     /// A committed Sector Transit was aborted; ownership remains with `from`.
     SectorTransitAborted(SectorTransitAborted),
+
+    /// A Ship used a Jump Gate to move to another Sector. See ADR-0009.
+    JumpGateUsed(JumpGateUsed),
+
+    /// A Ship moved to another Star System (emitted alongside
+    /// `JumpGateUsed` when the destination Sector belongs to a different
+    /// Star System). See ADR-0009.
+    StarSystemChanged(StarSystemChanged),
 }
 
 impl DomainEvent {
@@ -89,6 +98,8 @@ impl DomainEvent {
             Self::SectorTransitRequested(e) => e.ship_id,
             Self::SectorTransitCompleted(e) => e.ship_id,
             Self::SectorTransitAborted(e)   => e.ship_id,
+            Self::JumpGateUsed(e)           => e.ship_id,
+            Self::StarSystemChanged(e)      => e.ship_id,
         }
     }
 
@@ -110,6 +121,8 @@ impl DomainEvent {
             Self::SectorTransitRequested(e) => e.tick,
             Self::SectorTransitCompleted(e) => e.tick,
             Self::SectorTransitAborted(e)   => e.tick,
+            Self::JumpGateUsed(e)           => e.tick,
+            Self::StarSystemChanged(e)      => e.tick,
         }
     }
 }
@@ -274,6 +287,34 @@ pub struct SectorTransitAborted {
     pub tick   : Tick,
 }
 
+// ── Jump Gate Navigation (ADR-0009) ─────────────────────────────────────────────
+
+/// A Ship used a Jump Gate to move to another Sector.
+///
+/// Like `SectorTransitCompleted`, this is the authoritative record of the
+/// Sector change; `entry_pos` is required so Replay can place the Ship in
+/// the destination Sector without re-running gate-proximity checks.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JumpGateUsed {
+    pub ship_id    : ShipId,
+    pub gate_id    : JumpGateId,
+    pub from_sector: SectorId,
+    pub to_sector  : SectorId,
+    pub entry_pos  : Position,
+    pub tick       : Tick,
+}
+
+/// A Ship moved to another Star System. Emitted alongside `JumpGateUsed`
+/// only when `to_sector` belongs to a different `StarSystemId` than
+/// `from_sector`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StarSystemChanged {
+    pub ship_id    : ShipId,
+    pub from_system: StarSystemId,
+    pub to_system  : StarSystemId,
+    pub tick       : Tick,
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -362,6 +403,38 @@ mod tests {
         });
         assert_eq!(event.ship_id(), id);
         assert_eq!(event.tick(), Tick(9));
+    }
+
+    #[test]
+    fn jump_gate_used_event_carries_destination_sector_and_entry_position() {
+        let id = ship_id();
+        let event = DomainEvent::JumpGateUsed(JumpGateUsed {
+            ship_id    : id,
+            gate_id    : crate::star_system::JumpGateId(0),
+            from_sector: SectorId(0),
+            to_sector  : SectorId(1),
+            entry_pos  : Position::new(0.0, 0.0, 0.0),
+            tick       : Tick(10),
+        });
+        assert_eq!(event.ship_id(), id);
+        assert_eq!(event.tick(), Tick(10));
+        match event {
+            DomainEvent::JumpGateUsed(e) => assert_eq!(e.to_sector, SectorId(1)),
+            _ => panic!("expected JumpGateUsed"),
+        }
+    }
+
+    #[test]
+    fn star_system_changed_event_carries_from_and_to_systems() {
+        let id = ship_id();
+        let event = DomainEvent::StarSystemChanged(StarSystemChanged {
+            ship_id    : id,
+            from_system: crate::star_system::StarSystemId(0),
+            to_system  : crate::star_system::StarSystemId(1),
+            tick       : Tick(11),
+        });
+        assert_eq!(event.ship_id(), id);
+        assert_eq!(event.tick(), Tick(11));
     }
 
     fn bincode_roundtrip(event: &DomainEvent) -> String {
