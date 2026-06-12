@@ -40,6 +40,7 @@ cargo tree --duplicates
 cargo run -p dawn-simulation --bin simulate                          # Phase 1-3 benchmark
 cargo run -p dawn-simulation --bin simulate --release -- --serve     # Phase 5 WebSocket server (Godot用)
 cargo run -p dawn-simulation --bin simulate --release -- --serve --ships 50  # 船数指定
+cargo run -p dawn-simulation --bin simulate -- --raft-demo            # Phase 7 Raft Transit デモ（ADR-0014）
 ```
 
 **WebSocket サーバー起動後の接続先**: `ws://127.0.0.1:7878`
