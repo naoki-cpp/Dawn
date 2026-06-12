@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use dawn_core::{
     events::{ShipFitted, ShipSpawned},
     ship_type::{ShipTypeDefinition, ShipTypeId},
-    DomainEvent, FitModuleCommand, ModuleDefinition, ModuleId, NodeId, PlayerId, Position,
+    DomainEvent, FitModuleCommand, JumpGateDef, JumpGateId, ModuleDefinition, ModuleId, NodeId, PlayerId, Position,
     SectorBounds, SectorId, ShipId, Tick, Velocity,
 };
 use dawn_ecs::{
@@ -85,6 +85,8 @@ where
     /// here and injected into the LockSystem at the start of the NEXT tick,
     /// ensuring they are processed exactly like human-issued lock commands.
     pending_bot_lock_commands: Vec<dawn_core::LockOnCommand>,
+    /// Jump Gates whose `from_sector` is this node's Sector (ADR-0009).
+    jump_gates: HashMap<JumpGateId, JumpGateDef>,
 }
 
 // ── Constructors ──────────────────────────────────────────────────────────────
@@ -123,6 +125,10 @@ impl<S: EventStore> SimulationNode<S> {
             ship_type_ids             : HashMap::new(),
             player_id_counter         : 0,
             pending_bot_lock_commands : Vec::new(),
+            jump_gates                : crate::star_map::gates_in_sector(sector_id)
+                .into_iter()
+                .map(|g| (g.id, g))
+                .collect(),
         }
     }
 
@@ -157,6 +163,10 @@ impl<S: EventStore> SimulationNode<S> {
             ship_type_ids             : HashMap::new(),
             player_id_counter         : 0,
             pending_bot_lock_commands : Vec::new(),
+            jump_gates                : crate::star_map::gates_in_sector(snapshot.sector_id)
+                .into_iter()
+                .map(|g| (g.id, g))
+                .collect(),
         };
 
         for def in modules {
@@ -269,6 +279,58 @@ impl<S: EventStore> SimulationNode<S> {
         self.ship_index
             .get(&ship_id)
             .is_some_and(|&entity| !self.world.transit_state(entity).is_in_transit())
+    }
+
+    // ── Jump Gate Navigation (ADR-0009) ──────────────────────────────────────
+
+    /// Look up a Jump Gate originating in this Sector by `gate_id`.
+    pub fn jump_gate(&self, gate_id: JumpGateId) -> Option<&JumpGateDef> {
+        self.jump_gates.get(&gate_id)
+    }
+
+    /// Whether a `JumpCommand` for `ship_id` via `gate_id` would currently be
+    /// accepted: the Ship exists, is not already in transit, the gate
+    /// originates in this Sector, and the Ship is within its
+    /// `activation_radius`. Used to reject commands up front, before
+    /// proposing to the Raft Log (INV-006).
+    pub fn can_propose_jump(&self, ship_id: ShipId, gate_id: JumpGateId) -> bool {
+        let Some(&entity) = self.ship_index.get(&ship_id) else { return false };
+        if self.world.transit_state(entity).is_in_transit() {
+            return false;
+        }
+        let Some(gate) = self.jump_gates.get(&gate_id) else { return false };
+        let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
+        gate.is_in_range(pos.0)
+    }
+
+    /// Append `JumpGateUsed` (and `StarSystemChanged` if the destination
+    /// Sector belongs to a different Star System) for a Ship that just
+    /// completed a Jump-Gate Transit (ADR-0009).
+    ///
+    /// Called from Step 7.5 on the destination node, after
+    /// [`import_transit`](Self::import_transit) appends
+    /// `SectorTransitCompleted` — `JumpGateUsed` records *how* the Ship
+    /// moved, in addition to (not instead of) `SectorTransitCompleted`.
+    pub fn append_jump_events(&mut self, ship_id: ShipId, gate_id: JumpGateId, from: SectorId, to: SectorId, entry_pos: Position) {
+        self.event_store.append(DomainEvent::JumpGateUsed(dawn_core::events::JumpGateUsed {
+            ship_id,
+            gate_id,
+            from_sector: from,
+            to_sector  : to,
+            entry_pos,
+            tick       : self.current_tick,
+        }));
+
+        let from_system = crate::star_map::system_for_sector(from);
+        let to_system   = crate::star_map::system_for_sector(to);
+        if from_system != to_system {
+            self.event_store.append(DomainEvent::StarSystemChanged(dawn_core::events::StarSystemChanged {
+                ship_id,
+                from_system,
+                to_system,
+                tick: self.current_tick,
+            }));
+        }
     }
 
     /// Complete an outgoing Sector Transit: remove the Ship from this node's

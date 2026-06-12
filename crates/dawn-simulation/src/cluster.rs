@@ -314,6 +314,68 @@ mod tests {
         cluster.shutdown().await;
     }
 
+    /// Full Jump Gate pipeline (ADR-0009): a Ship within a Jump Gate's
+    /// `activation_radius` can jump through it, and the resulting Transit
+    /// rides the same Raft pipeline as `transit()` (Request -> commit ->
+    /// export -> Commit -> commit -> import).
+    #[tokio::test]
+    async fn committed_jump_moves_ship_to_gates_destination_sector() {
+        use dawn_core::{JumpGateId, Position, Velocity};
+
+        let cluster = MultiNodeCluster::new(NODES);
+
+        // Elect a leader first so proposals are not dropped.
+        for _ in 0..30 {
+            cluster.tick_all().await;
+        }
+
+        // Gate 0 (Sector 0 -> Sector 1) sits near Sector 0's +X edge.
+        let gate = crate::star_map::all_gates()
+            .into_iter()
+            .find(|g| g.id == JumpGateId(0))
+            .expect("gate 0 must exist");
+        assert_eq!(gate.from_sector, SectorId(0));
+        assert_eq!(gate.to_sector, SectorId(1));
+
+        let ship_id = cluster.nodes[0]
+            .spawn_ship(gate.position, Velocity::new(0.0, 0.0, 0.0))
+            .await;
+
+        let accepted = cluster.nodes[0].jump(ship_id, gate.id).await;
+        assert!(accepted, "jump command must pass up-front validation");
+
+        for _ in 0..30 {
+            cluster.tick_all().await;
+        }
+
+        let stats = cluster.get_all_stats().await;
+        assert_eq!(stats[0].ship_count, 0, "origin sector must no longer own the ship");
+        assert_eq!(stats[1].ship_count, 1, "destination sector must own the ship");
+
+        cluster.shutdown().await;
+    }
+
+    /// A Jump command for a ship outside the gate's activation_radius is
+    /// rejected up front and never reaches the Raft Log (INV-006).
+    #[tokio::test]
+    async fn jump_command_for_ship_out_of_gate_range_is_rejected_without_proposing() {
+        use dawn_core::{JumpGateId, Position, Velocity};
+
+        let cluster = MultiNodeCluster::new(NODES);
+        for _ in 0..30 {
+            cluster.tick_all().await;
+        }
+
+        let ship_id = cluster.nodes[0]
+            .spawn_ship(Position::ORIGIN, Velocity::new(0.0, 0.0, 0.0))
+            .await;
+
+        let accepted = cluster.nodes[0].jump(ship_id, JumpGateId(0)).await;
+        assert!(!accepted, "ship far from the gate must be rejected up front");
+
+        cluster.shutdown().await;
+    }
+
     /// A Transit command for a ship already in transit is rejected up front
     /// and never reaches the Raft Log (INV-006).
     #[tokio::test]

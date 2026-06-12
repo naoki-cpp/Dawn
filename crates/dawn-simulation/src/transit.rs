@@ -11,16 +11,21 @@
 //!   and appends `SectorTransitCompleted`. Other nodes ignore it.
 
 use crate::snapshot::ShipSnapshot;
-use dawn_core::{Position, SectorId, ShipId};
+use dawn_core::{JumpGateId, Position, SectorId, ShipId};
 use serde::{Deserialize, Serialize};
 
 /// A Sector Transit proposal as it travels through the Raft Log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransitOp {
     /// Stage 1: a node requests moving `ship_id` to Sector `to`.
+    ///
+    /// `gate_id` is `Some` when this Transit was initiated via a Jump Gate
+    /// (ADR-0009); `Commit` carries the same value so Step 7.5 can append
+    /// `JumpGateUsed` on the destination node.
     Request {
         ship_id: ShipId,
         to     : SectorId,
+        gate_id: Option<JumpGateId>,
     },
     /// Stage 2: the from-node ships the exported state to the to-node.
     Commit {
@@ -28,6 +33,7 @@ pub enum TransitOp {
         from     : SectorId,
         to       : SectorId,
         entry_pos: Position,
+        gate_id  : Option<JumpGateId>,
     },
 }
 
@@ -57,12 +63,30 @@ mod tests {
         let op = TransitOp::Request {
             ship_id: ShipId::new(NodeId(0), 42),
             to     : SectorId(1),
+            gate_id: None,
         };
         let decoded = TransitOp::decode(&op.encode()).expect("decode must succeed");
         match decoded {
-            TransitOp::Request { ship_id, to } => {
+            TransitOp::Request { ship_id, to, gate_id } => {
                 assert_eq!(ship_id, ShipId::new(NodeId(0), 42));
                 assert_eq!(to, SectorId(1));
+                assert_eq!(gate_id, None);
+            }
+            other => panic!("expected Request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn request_op_round_trips_with_jump_gate_id() {
+        let op = TransitOp::Request {
+            ship_id: ShipId::new(NodeId(0), 42),
+            to     : SectorId(1),
+            gate_id: Some(dawn_core::JumpGateId(0)),
+        };
+        let decoded = TransitOp::decode(&op.encode()).expect("decode must succeed");
+        match decoded {
+            TransitOp::Request { gate_id, .. } => {
+                assert_eq!(gate_id, Some(dawn_core::JumpGateId(0)));
             }
             other => panic!("expected Request, got {other:?}"),
         }
@@ -86,15 +110,17 @@ mod tests {
             from     : SectorId(0),
             to       : SectorId(1),
             entry_pos: Position::new(500.0, 0.0, 0.0),
+            gate_id  : None,
         };
         let decoded = TransitOp::decode(&op.encode()).expect("decode must succeed");
         match decoded {
-            TransitOp::Commit { ship, from, to, entry_pos } => {
+            TransitOp::Commit { ship, from, to, entry_pos, gate_id } => {
                 assert_eq!(ship.ship_id, ShipId::new(NodeId(0), 7));
                 assert_eq!(ship.capacitor, Some(50.0));
                 assert_eq!(from, SectorId(0));
                 assert_eq!(to, SectorId(1));
                 assert_eq!(entry_pos, Position::new(500.0, 0.0, 0.0));
+                assert_eq!(gate_id, None);
             }
             other => panic!("expected Commit, got {other:?}"),
         }

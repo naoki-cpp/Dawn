@@ -43,8 +43,10 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ```
 現在のフェーズ : Phase 7.5 — ADR-0009（星系間ナビゲーション）実装中
-フェーズの状態 : dawn-core 型定義・イベント・コマンド完了（230テスト）。
-                dawn-simulation の Jump パイプライン配線（star_map / apply_jump_command）が次タスク
+フェーズの状態 : dawn-core 型定義・イベント・コマンド + dawn-simulation の
+                Jump パイプライン（star_map / TransitOp gate_id / Step 7.5
+                JumpGateUsed・StarSystemChanged）完了（236テスト）。
+                残タスク: ws_server.rs / main.rs / Godot クライアントへの配線
 ```
 
 ### 完了済みフェーズ

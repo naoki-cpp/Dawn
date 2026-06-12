@@ -76,6 +76,17 @@ enum SectorSimulatorMessage {
         to     : SectorId,
         reply  : oneshot::Sender<bool>,
     },
+    /// Request a Jump-Gate Transit for `ship_id` via `gate_id` (ADR-0009).
+    ///
+    /// Validated locally (Ship in range of the gate, not already in
+    /// transit), then proposed to the Raft Log via the same `TransitOp`
+    /// pipeline as [`SectorSimulatorMessage::Transit`]. `reply` is `false`
+    /// if the command was rejected up front.
+    Jump {
+        ship_id: ShipId,
+        gate_id: dawn_core::JumpGateId,
+        reply  : oneshot::Sender<bool>,
+    },
     Shutdown,
 }
 
@@ -117,7 +128,7 @@ impl SectorSimulatorActor {
         while let Ok(payload) = self.raft_committed_rx.try_recv() {
             let Some(op) = TransitOp::decode(&payload) else { continue };
             match op {
-                TransitOp::Request { ship_id, to } => {
+                TransitOp::Request { ship_id, to, gate_id } => {
                     let cmd = dawn_core::commands::TransitCommand { ship_id, to };
                     if self.node.propose_transit(cmd).is_ok() {
                         // This node owned the Ship: hand its state to the
@@ -126,14 +137,18 @@ impl SectorSimulatorActor {
                         if let Some(ship) = self.node.export_transit(ship_id, entry_pos) {
                             let from = self.node.sector_id();
                             self.raft.propose(
-                                TransitOp::Commit { ship, from, to, entry_pos }.encode(),
+                                TransitOp::Commit { ship, from, to, entry_pos, gate_id }.encode(),
                             );
                         }
                     }
                 }
-                TransitOp::Commit { ship, from, to, entry_pos } => {
+                TransitOp::Commit { ship, from, to, entry_pos, gate_id } => {
                     if to == self.node.sector_id() {
+                        let ship_id = ship.ship_id;
                         self.node.import_transit(&ship, from, entry_pos);
+                        if let Some(gate_id) = gate_id {
+                            self.node.append_jump_events(ship_id, gate_id, from, to, entry_pos);
+                        }
                     }
                 }
             }
@@ -213,7 +228,21 @@ impl SectorSimulatorActor {
                     // commits and is applied at Step 7.5.
                     let accepted = self.node.can_propose_transit(ship_id);
                     if accepted {
-                        self.raft.propose(TransitOp::Request { ship_id, to }.encode());
+                        self.raft.propose(TransitOp::Request { ship_id, to, gate_id: None }.encode());
+                    }
+                    let _ = reply.send(accepted);
+                }
+
+                SectorSimulatorMessage::Jump { ship_id, gate_id, reply } => {
+                    // Up-front validation only (INV-006): Ship must exist,
+                    // not be in transit, and be within the gate's
+                    // activation_radius (ADR-0009).
+                    let accepted = self.node.can_propose_jump(ship_id, gate_id);
+                    if accepted {
+                        let to = self.node.jump_gate(gate_id)
+                            .expect("can_propose_jump confirmed gate exists")
+                            .to_sector;
+                        self.raft.propose(TransitOp::Request { ship_id, to, gate_id: Some(gate_id) }.encode());
                     }
                     let _ = reply.send(accepted);
                 }
@@ -280,6 +309,17 @@ impl SectorSimulatorHandle {
     pub async fn transit(&self, ship_id: ShipId, to: SectorId) -> bool {
         let (tx, rx) = oneshot::channel();
         self.tx.send(SectorSimulatorMessage::Transit { ship_id, to, reply: tx }).await
+            .expect("SectorSimulatorActor is no longer running");
+        rx.await.expect("SectorSimulatorActor dropped reply sender")
+    }
+
+    /// Request a Jump-Gate Transit (ADR-0009). Returns `false` if rejected
+    /// up front (unknown Ship, already in transit, unknown gate, or Ship
+    /// out of range). Acceptance only means the proposal was submitted to
+    /// Raft; the move happens once it commits.
+    pub async fn jump(&self, ship_id: ShipId, gate_id: dawn_core::JumpGateId) -> bool {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(SectorSimulatorMessage::Jump { ship_id, gate_id, reply: tx }).await
             .expect("SectorSimulatorActor is no longer running");
         rx.await.expect("SectorSimulatorActor dropped reply sender")
     }

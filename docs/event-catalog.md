@@ -126,17 +126,23 @@ Transit Proposal（`TransitOp::Request` / `Commit`）は Raft Log を経由し�
 コミットされ、各ノードが Tick Step 7.5（`apply_committed_raft_entries`）で
 ECS に適用したうえで上記イベントを自分の EventStore に Append する。
 
-### 3.7 Jump Gate Navigation（ADR-0009・着手中）
+### 3.7 Jump Gate Navigation（ADR-0009・実装中）
 
 | イベント名 | 説明 | 発行者 | ステータス |
 |---|---|---|---|
-| `JumpGateUsed` | Ship がジャンプゲートを使って別 Sector に移動した | （未配線・dawn-core 型定義のみ） | 型定義のみ |
-| `StarSystemChanged` | Ship が別の星系に移動した（`JumpGateUsed` と同時） | （未配線・dawn-core 型定義のみ） | 型定義のみ |
+| `JumpGateUsed` | Ship がジャンプゲートを使って別 Sector に移動した | `SectorSimulatorActor`（Step 7.5、destination ノード） | ✅ 実装済み（Raft パイプライン） |
+| `StarSystemChanged` | Ship が別の星系に移動した（`JumpGateUsed` と同時） | `SectorSimulatorActor`（Step 7.5、destination ノード） | ✅ 実装済み（Raft パイプライン） |
 
 `JumpCommand { ship_id, gate_id }` が対応する Command。
-`TransitCommand` と同じ Raft Log 経路（ADR-0014）でコミットし、
-Step 7.5 適用時に `SectorTransitCompleted` に加えて発行する設計
-（ADR-0009 着手時補足を参照）。dawn-simulation 側のパイプライン配線は未実装。
+`TransitCommand` と同じ Raft Log 経路（ADR-0014）でコミットする。
+`TransitOp::Request`/`Commit` は `gate_id: Option<JumpGateId>` を持ち、
+Step 7.5 で destination ノードが `SectorTransitCompleted` に加えて
+`JumpGateUsed` を Append し、`from`/`to` の `StarSystemId` が異なる場合は
+`StarSystemChanged` も Append する（`SimulationNode::append_jump_events`）。
+
+静的トポロジー（3 星系・4 ジャンプゲート）は `dawn-simulation/src/star_map.rs`
+に定義する。`ws_server.rs` / `main.rs` / Godot クライアントへの配線は未実装
+（ADR-0009 実装チェックリスト参照）。
 
 ### 3.8 System（将来予約）
 

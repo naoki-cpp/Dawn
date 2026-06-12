@@ -232,17 +232,17 @@ Event Sourcing と相性が悪い。「移動アニメーション」はクラ�
 
 ### dawn-simulation
 
-- [ ] `src/star_map.rs` 追加（初期 3 星系トポロジーの静的定義）
-- [ ] `src/node.rs` に `jump_gates: HashMap<JumpGateId, JumpGateDef>` フィールド追加
-- [ ] `src/node.rs` に `apply_jump_command(player_id, cmd)` 実装
-  - Ship が gate_activation_radius 内にいるか確認
-  - ECS 上の Sector 遷移
-  - `JumpGateUsed` イベント Append
-  - 別星系なら `StarSystemChanged` イベント Append
+- [x] `src/star_map.rs` 追加（初期 3 星系トポロジーの静的定義）
+- [x] `src/node.rs` に `jump_gates: HashMap<JumpGateId, JumpGateDef>` フィールド追加
+- [x] `src/node.rs` に `can_propose_jump` / `append_jump_events` 実装
+  - Ship が gate_activation_radius 内にいるか確認（`can_propose_jump`）
+  - Sector 遷移は既存の `TransitOp` Raft パイプライン経由（`gate_id: Option<JumpGateId>` を追加）
+  - `JumpGateUsed` イベント Append（`append_jump_events`、Step 7.5）
+  - 別星系なら `StarSystemChanged` イベント Append（`append_jump_events`）
 - [ ] `src/ws_server.rs` に `JumpGateUsed`, `StarSystemChanged` の EventJson 追加
 - [ ] `src/ws_server.rs` に `JumpCommand` の JSON パーサー追加
 - [ ] `src/main.rs` に `ClientCommand::Jump` のマッチアーム追加
-- [ ] 統合テスト: ジャンプ後に Ship が宛先 Sector に存在すること
+- [x] 統合テスト: ジャンプ後に Ship が宛先 Sector に存在すること（`committed_jump_moves_ship_to_gates_destination_sector`）
 
 ### dawn-actor
 
