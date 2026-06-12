@@ -299,7 +299,7 @@ Tick 駆動タイマー（決定 5）と整合しない。
 
 ### dawn-consensus（新規クレート）
 
-- [ ] 状態機械（Follower / Candidate / Leader）+ 単体テスト
+- [x] 状態機械（Follower / Candidate / Leader）+ 単体テスト
 - [ ] RequestVote / AppendEntries の処理 + 単体テスト
 - [ ] Tick 駆動 election timeout / heartbeat
 - [ ] `RaftActor`（Mailbox 経由・FBD-004 準拠）

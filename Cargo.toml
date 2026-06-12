@@ -4,6 +4,7 @@ members = [
     "crates/dawn-ecs",
     "crates/dawn-event-store",
     "crates/dawn-actor",
+    "crates/dawn-consensus",
     "crates/dawn-simulation",
 ]
 resolver = "2"

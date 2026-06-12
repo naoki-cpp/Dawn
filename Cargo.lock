@@ -114,6 +114,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dawn-consensus"
+version = "0.1.0"
+dependencies = [
+ "dawn-core",
+ "rand",
+ "serde",
+]
+
+[[package]]
 name = "dawn-core"
 version = "0.1.0"
 dependencies = [
