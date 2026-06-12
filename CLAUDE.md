@@ -91,7 +91,7 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
 - イベントソーシングによる完全な因果追跡
 - CRDTとRaftの責務分離による高スループット同期
 
-### 現在のスコープ（Phase 7 完了）
+### 現在のスコープ（Phase 7.5 完了）
 
 ```
 実装対象:
@@ -115,6 +115,11 @@ Phase 4 以降で追加承認済み（全て実装済み）:
 Phase 7 で追加承認済み（ADR-0014・実装済み）:
   Raft コンセンサス（dawn-consensus: Leader 選出 / Log Replication / RaftActor / 障害注入）
   Sector Transit（TransitCommand → Raft Log コミット → Step 7.5 適用の全経路配線済み）
+
+Phase 7.5 で追加承認済み（ADR-0009・実装済み）:
+  星系間ナビゲーション（StarSystemId / JumpGateId / StarSystemDef / JumpGateDef,
+  JumpCommand, JumpGateUsed / StarSystemChanged イベント,
+  star_map.rs 静的トポロジー, Godot クライアント配線（J キー）まで完了）
 
 実装しない（提案も拒否する）:
   課金 / キャラクター育成 / 市場 / チャット
@@ -507,8 +512,10 @@ pub type Tick = u64;
        LockOnCommand            → LockSystem に渡す
        ActivateModuleCommand    → FittedSlot.is_active = true / apply_fitting()
        DeactivateModuleCommand  → FittedSlot.is_active = false / apply_fitting()
+       JumpCommand              → can_propose_jump() 検証後、TransitOp::Request
+                                  （gate_id 付き）を Raft に提案（ADR-0009）
        ※ Transit 中（TransitState::InTransit）の Ship への Move / Stop /
-         二重 Transit は拒否する（ADR-0014 / §5）
+         二重 Transit / Jump は拒否する（ADR-0014 / §5）
   3. Movement System を実行する（ECS バッチ処理）
   4. Capacitor System を実行する           ← Movement の後
        毎 Tick: cap を recharge_per_tick 分回復
@@ -1177,6 +1184,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-12（Phase 7 完了レビュー: Raft Log 配線完了 / INV-003 具体例更新、人間承認済み）*
+*最終更新: 2026-06-12（ADR-0009 完了レビュー: スコープに星系間ナビゲーション追加 / Tick Step 2 に JumpCommand 追加、人間承認済み）*
 *対応ADR: ADR-0001 〜 ADR-0014*
-*次回レビュー予定: ADR-0009（星系間ナビゲーション）完了時*
+*次回レビュー予定: Phase 8（Anti-TiDi / スケール基盤）設計 ADR 作成時*
