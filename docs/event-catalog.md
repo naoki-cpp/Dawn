@@ -171,6 +171,7 @@ Step 7.5 で destination ノードが `SectorTransitCompleted` に加えて
 | `AttackCommand` | 攻撃対象を指定する | `WeaponFired` | ✅ 型定義・WsServer JSON パーサー実装済み（Phase 5）|
 | `StopCommand` | 加速度を用いて速度をゼロに減速する | — | ✅ 実装済み |
 | `TransitCommand` | Sector Transit を要求する（Raft 経由・ADR-0014） | `SectorTransitRequested` / `Completed` | ✅ 実装済み |
+| `JumpCommand` | ジャンプゲート経由で別 Sector に移動する（Raft 経由・ADR-0009） | `JumpGateUsed`（+ 別星系なら `StarSystemChanged`） | ✅ 実装済み |
 
 ---
 
@@ -399,6 +400,42 @@ Replay 時は `FittedSlot.is_active = true` にセットし、`apply_fitting()` 
 | `tick` | `Tick` | ✓ | 中断が確定した Tick |
 
 **ステータス:** 型定義のみ（宛先ノード障害時の発行は未配線）。
+
+---
+
+### JumpGateUsed
+
+Ship がジャンプゲートを通過し、別 Sector に移動した（ADR-0009）。
+`SectorTransitCompleted` を置き換えるものではなく、
+「どう移動したか」を記録する追加イベント（同 Tick で両方 Append される）。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | ゲートを使用した Ship |
+| `gate_id` | `JumpGateId` | ✓ | 使用したジャンプゲート |
+| `from_sector` | `SectorId` | ✓ | 元の Sector |
+| `to_sector` | `SectorId` | ✓ | 宛先 Sector |
+| `entry_pos` | `Position` | ✓ | 宛先 Sector の出現座標 |
+| `tick` | `Tick` | ✓ | ゲート通過が確定した Tick |
+
+**ステータス:** ✅ 実装済み（Step 7.5 `append_jump_events`）。
+
+---
+
+### StarSystemChanged
+
+Ship が別の星系に移動した（ADR-0009）。
+`JumpGateUsed` と同 Tick で発行される（宛先 Sector が別 `StarSystemId` に
+属する場合のみ）。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | 星系を移動した Ship |
+| `from_system` | `StarSystemId` | ✓ | 元の星系 |
+| `to_system` | `StarSystemId` | ✓ | 宛先の星系 |
+| `tick` | `Tick` | ✓ | 移動が確定した Tick |
+
+**ステータス:** ✅ 実装済み（Step 7.5 `append_jump_events`）。
 
 ---
 

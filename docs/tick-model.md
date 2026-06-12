@@ -78,8 +78,10 @@ Step 2: コマンドキューを処理する
          LockOnCommand            → LockSystem に渡す（次のステップで処理）
          ActivateModuleCommand    → FittedSlot.is_active = true / apply_fitting()
          DeactivateModuleCommand  → FittedSlot.is_active = false / apply_fitting()
+         JumpCommand              → can_propose_jump() 検証後、TransitOp::Request
+                                    （gate_id 付き）を Raft に提案（ADR-0009）
          ※ Transit 中（TransitState::InTransit）の Ship への Move / Stop /
-           二重 Transit は拒否する（ADR-0014 / CLAUDE.md §5）
+           二重 Transit / Jump は拒否する（ADR-0014 / CLAUDE.md §5）
 
 Step 3: Movement System を実行する（ECS バッチ処理）
          MovementSystem::run(&mut world, tick)
@@ -132,6 +134,9 @@ Step 7.5: コミット済み Raft エントリを適用する（ADR-0014 §7）
            TransitOp::Request → 所有ノード: InTransit 化 + SectorTransitRequested を
              Append、Ship 状態を export して TransitOp::Commit を Raft に提案
            TransitOp::Commit  → 宛先ノード: entry_pos に import + SectorTransitCompleted
+             gate_id が Some の場合はさらに JumpGateUsed を Append し、
+             from/to の StarSystemId が異なる場合は StarSystemChanged も
+             Append する（ADR-0009 / SimulationNode::append_jump_events）
          ※ 実装箇所は SectorSimulatorActor の Tick ハンドラ冒頭（Step 1 の前）。
            生成イベントは同 Tick の flush で ReplicationBus に伝播する。
 ```

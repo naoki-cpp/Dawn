@@ -260,10 +260,9 @@ Clientは「仮の状態」を先行表示し、Serverからのイベントで�
 ```
 現在実装済み:
   Spatial + Movement + Combat（Fitting / Lock-on / Capacitor 含む）
+  Navigation（Jump Gate / 星系間移動、ADR-0009・Phase 7.5 実装済み）
 
 推奨追加順序（依存関係による）:
-  Navigation  ← Jump Gate / 星系間移動（ADR-0009、Phase 7 完了後）
-      ↓
   Resource    ← 資源（放置型採掘は FBD-009 で禁止。争奪型のみ検討）
       ↓
   Economy     ← Market / Trade / Manufacturing

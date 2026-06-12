@@ -114,7 +114,7 @@ Sector の空間的範囲を表す軸平行バウンディングボックス（A
 
 現在の MVP における唯一のエンティティ種別。
 
-### ECS Component 一覧（Phase 6 時点）
+### ECS Component 一覧（Phase 7 時点）
 
 `SimWorld::spawn_ship()` は以下の Component を全て持つ Ship を生成する。
 一部だけを持つ不完全な Ship Entity を生成してはならない。
