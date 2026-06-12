@@ -391,7 +391,21 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 Phase 8: スケール基盤（Anti-TiDi）
           Sector Population Cap / Dynamic Fission
           Spatial Index / Interest Management
+          Simulation LoD（忠実度の階層化、docs/game-design.md §8 層1）
+          dawn-proto（シリアライゼーション） + dawn-replication（Gossip + CRDT）
+          dawn-sector-node（本番実行バイナリ・物理ノード間ネットワーク通信）
           完了基準: 1 Sector 5,000 ships 上限で Tick SLA を常に満たす
+
+          ★ 実機検証（任意・推奨）:
+            上記ネットワークトランスポート実装後、Raspberry Pi クラスタ
+            （Pi 4/5 推奨。Zero 2 W は aarch64 ビルド可だが 512MB RAM が
+            制約になるため数百隻規模に縮小して検証）で 3 ノードを
+            物理的に分離して動作確認する。
+            目的: 実ネットワーク遅延・分断条件下での Raft / Gossip 挙動を
+            シミュレーションではなく実機で検証する（このプロジェクトの
+            「研究基盤」としての性質に合致する）。
+            検証項目: ノード間通信の到達性、ネットワーク分断時の
+            Raft フェイルオーバー、低スペック環境での Tick SLA。
 
 Phase 9: Resource + Economy Context
 Phase 10: Client 本格化（GDExtension 導入）
