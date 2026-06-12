@@ -120,6 +120,7 @@ dependencies = [
  "dawn-core",
  "rand",
  "serde",
+ "tokio",
 ]
 
 [[package]]

@@ -7,3 +7,4 @@ edition = "2021"
 dawn-core = { path = "../dawn-core" }
 serde     = { workspace = true }
 rand      = { workspace = true }
+tokio     = { workspace = true }
