@@ -7,6 +7,8 @@
 //! Timers are driven by logical Tick counts, never physical time
 //! (INV-005, FBD-003).
 
+pub mod rpc;
 pub mod state;
 
+pub use rpc::{AppendEntries, AppendEntriesResponse, RaftMessage, RequestVote, RequestVoteResponse};
 pub use state::{Role, RaftState, TickEffect, Term};

@@ -9,10 +9,11 @@
 //! `rpc.rs`.
 
 use dawn_core::NodeId;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 /// Raft term number. Monotonically increasing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash, Serialize, Deserialize)]
 pub struct Term(pub u64);
 
 impl Term {
@@ -88,6 +89,23 @@ impl RaftState {
             heartbeat_interval,
             votes_received: HashSet::new(),
         }
+    }
+
+    /// Like [`Self::new`], but the election timeout is randomized as
+    /// `base + rng.gen_range(0..jitter)` ticks (ADR-0014 §5).
+    ///
+    /// Randomizing the timeout per node avoids repeated split votes when
+    /// multiple Followers time out simultaneously.
+    pub fn new_randomized(
+        node_id: NodeId,
+        peers: Vec<NodeId>,
+        base_election_timeout: u64,
+        jitter: u64,
+        heartbeat_interval: u64,
+        rng: &mut impl rand::Rng,
+    ) -> Self {
+        let election_timeout = base_election_timeout + rng.gen_range(0..jitter.max(1));
+        Self::new(node_id, peers, election_timeout, heartbeat_interval)
     }
 
     /// Number of nodes required for a majority, including self.
@@ -288,6 +306,24 @@ mod tests {
         }
         let effects = state.on_tick();
         assert_eq!(effects, vec![TickEffect::StartElection { term: Term(6) }]);
+    }
+
+    #[test]
+    fn randomized_election_timeout_falls_within_base_plus_jitter_range() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..50 {
+            let mut state = RaftState::new_randomized(node(0), vec![node(1), node(2)], 10, 5, 1, &mut rng);
+            // election_timeout is private; observe it indirectly via on_tick.
+            let mut ticks = 0;
+            loop {
+                let effects = state.on_tick();
+                ticks += 1;
+                if !effects.is_empty() {
+                    break;
+                }
+            }
+            assert!((10..15).contains(&ticks), "ticks={ticks} out of [10,15)");
+        }
     }
 
     #[test]

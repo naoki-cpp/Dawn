@@ -300,8 +300,8 @@ Tick 駆動タイマー（決定 5）と整合しない。
 ### dawn-consensus（新規クレート）
 
 - [x] 状態機械（Follower / Candidate / Leader）+ 単体テスト
-- [ ] RequestVote / AppendEntries の処理 + 単体テスト
-- [ ] Tick 駆動 election timeout / heartbeat
+- [x] RequestVote / AppendEntries の処理 + 単体テスト
+- [x] Tick 駆動 election timeout / heartbeat
 - [ ] `RaftActor`（Mailbox 経由・FBD-004 準拠）
 - [ ] `RaftTransport` trait + In-Process 実装 + `PartitionableTransport`
 - [ ] CLAUDE.md §11 の Crate 表更新（人間の承認を得て）

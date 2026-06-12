@@ -364,7 +364,7 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 |---|---|---|---|
 | 1 | `SectorTransitRequested` / `Completed` / `Aborted` イベント + `TransitCommand` | dawn-core | ✅ |
 | 2 | 状態機械（Follower / Candidate / Leader）+ 単体テスト | dawn-consensus（新規） | ✅ |
-| 3 | RequestVote / AppendEntries 処理 + Tick 駆動タイマー | dawn-consensus | ⬜ |
+| 3 | RequestVote / AppendEntries 処理 + Tick 駆動タイマー | dawn-consensus | ✅ |
 | 4 | `RaftActor`（Mailbox 経由）+ `RaftTransport` / `PartitionableTransport` | dawn-consensus | ⬜ |
 | 5 | `TransitState` コンポーネント + Transit 中の操作拒否 | dawn-ecs | ⬜ |
 | 6 | `SimulationNode` の Transit 処理（Step 7.5 / Step 10 組み込み） | dawn-simulation | ⬜ |
