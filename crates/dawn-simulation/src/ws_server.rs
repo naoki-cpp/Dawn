@@ -20,7 +20,7 @@
 //! ```
 
 use dawn_actor::{ClientCommand, ClientConnection};
-use dawn_core::{ActivateModuleCommand, AttackCommand, DeactivateModuleCommand, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId, Position, ShipId, SlotKind, StopCommand};
+use dawn_core::{ActivateModuleCommand, ApproachCommand, AttackCommand, DeactivateModuleCommand, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId, Position, ShipId, SlotKind, StopCommand};
 use dawn_core::DomainEvent;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
@@ -199,6 +199,14 @@ fn parse_client_command(line: &str) -> Option<ClientCommand> {
             Some(ClientCommand::Jump(dawn_core::JumpCommand {
                 ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
                 gate_id: dawn_core::JumpGateId(gate_id_raw),
+            }))
+        }
+        "ApproachCommand" => {
+            let ship_id_raw   = v.get("ship_id")?.as_u64()?;
+            let target_id_raw = v.get("target_id")?.as_u64()?;
+            Some(ClientCommand::Approach(ApproachCommand {
+                ship_id  : ShipId(EntityId::from_raw(ship_id_raw)),
+                target_id: ShipId(EntityId::from_raw(target_id_raw)),
             }))
         }
         _ => None,
@@ -451,6 +459,25 @@ mod tests {
     #[test]
     fn jump_command_without_gate_id_is_rejected() {
         let line = r#"{"type":"JumpCommand","ship_id":42}"#;
+        assert!(parse_client_command(line).is_none());
+    }
+
+    #[test]
+    fn approach_command_json_is_parsed_into_client_command_approach() {
+        let line = r#"{"type":"ApproachCommand","ship_id":7,"target_id":13}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::Approach(c) => {
+                assert_eq!(c.ship_id.raw(), 7);
+                assert_eq!(c.target_id.raw(), 13);
+            }
+            other => panic!("expected Approach, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn approach_command_without_target_id_is_rejected() {
+        let line = r#"{"type":"ApproachCommand","ship_id":7}"#;
         assert!(parse_client_command(line).is_none());
     }
 

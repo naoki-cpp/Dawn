@@ -1,6 +1,20 @@
 //! Movement-related ECS components.
 
-use dawn_core::{Position, Velocity};
+use dawn_core::{Position, ShipId, Velocity};
+
+/// Persistent "approach" steering target (semi-automatic piloting, ADR-0015).
+///
+/// While a ship carries this component, the node's `process_approach()` step
+/// re-aims `ThrustComp` at `target`'s latest position every tick (before the
+/// Movement System integrates position), braking once the ship arrives.
+///
+/// Like `ThrustComp`, this is derived steering intent — it is NOT persisted in
+/// `ShipSnapshot` and never produces its own event (the resulting velocity
+/// change is recorded by `VelocityChanged`, ADR-0008).
+#[derive(Debug, Clone, Copy)]
+pub struct ApproachComp {
+    pub target: ShipId,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct PositionComp(pub Position);

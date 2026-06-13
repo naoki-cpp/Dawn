@@ -47,6 +47,8 @@ var _player_max_shield : float = 500.0
 var _player_max_armor  : float = 300.0
 var _player_max_hull   : float = 200.0
 var _player_lock_target : int  = -1
+## Approach target selected by left-clicking a ship (ADR-0015). -1 = none.
+var _selected_target_id : int  = -1
 
 ## Per-ship HP: { ship_id: {shield, armor, hull} }
 var _ship_hp : Dictionary = {}
@@ -204,6 +206,10 @@ func _input(event: InputEvent) -> void:
 		if key.keycode == KEY_J and _player_ship_id >= 0 and _nearby_gate_id >= 0:
 			_connection.send_jump_command(_player_ship_id, _nearby_gate_id)
 			return
+		## A キー → ApproachCommand（選択した船へ自動接近・ADR-0015）
+		if key.keycode == KEY_A and _player_ship_id >= 0 and _selected_target_id >= 0:
+			_connection.send_approach_command(_player_ship_id, _selected_target_id)
+			return
 		## Tab キー → タクティカルオーバーレイ表示切り替え
 		if key.keycode == KEY_TAB:
 			if _tactical_overlay != null:
@@ -215,8 +221,13 @@ func _input(event: InputEvent) -> void:
 		if mb.pressed:
 			match mb.button_index:
 				MOUSE_BUTTON_LEFT:
-					## ダブルクリック検出（カメラドラッグ中は無視）
-					_check_double_click(mb.position)
+					## 左クリックが船に当たれば接近対象として選択（ADR-0015）。
+					## 当たらなければ従来どおりダブルクリック移動を判定する。
+					var hit_id: int = _pick_ship_at(mb.position)
+					if hit_id >= 0:
+						_select_approach_target(hit_id)
+					else:
+						_check_double_click(mb.position)
 				MOUSE_BUTTON_RIGHT:
 					## 右クリック → ロックオン対象を選択
 					_try_lock_on(mb.position)
@@ -238,35 +249,43 @@ func _check_double_click(pos: Vector2) -> void:
 		_last_click_time = now
 		_last_click_pos  = pos
 
-# ── 右クリック → LockOnCommand ───────────────────────────────────────────────
+# ── 船のピック（クリック位置 → 最寄りの船 ID）────────────────────────────────
 
-func _try_lock_on(screen_pos: Vector2) -> void:
+## Returns the ship_id whose node is closest to the click ray (within 500
+## Godot units), excluding the player's own ship. -1 if nothing is hit.
+func _pick_ship_at(screen_pos: Vector2) -> int:
 	if _player_ship_id < 0:
-		return
-
-	## レイキャストで画面上の点に対応する 3D 位置を取得
+		return -1
 	var from: Vector3 = _camera.project_ray_origin(screen_pos)
 	var dir : Vector3 = _camera.project_ray_normal(screen_pos)
-	var to  : Vector3 = from + dir * 100_000.0
-
-	## Ships 配下の全 Ship との交差判定
-	var closest_id    : int   = -1
-	var closest_dist  : float = 1e9
-
+	var closest_id  : int   = -1
+	var closest_dist: float = 1e9
 	for ship_id: int in _ships:
-		var ship: Node3D = _ships[ship_id] as Node3D
 		if ship_id == _player_ship_id:
-			continue  # 自分自身はロック不可
-
-		## 点とレイの最近傍距離でヒット判定（半径 500 Godot units）
-		var p  : Vector3 = ship.global_position
+			continue
+		var p  : Vector3 = (_ships[ship_id] as Node3D).global_position
 		var t  : float   = (p - from).dot(dir)
 		var closest_pt: Vector3 = from + dir * t
 		var dist: float = p.distance_to(closest_pt)
 		if dist < 500.0 and t > 0.0 and dist < closest_dist:
 			closest_dist = dist
 			closest_id   = ship_id
+	return closest_id
 
+# ── 左クリック → 接近対象の選択（ADR-0015）──────────────────────────────────
+
+## Select a ship as the Approach target. Press A to start approaching it.
+func _select_approach_target(target_id: int) -> void:
+	_selected_target_id = target_id
+	_update_hud()
+
+# ── 右クリック → LockOnCommand ───────────────────────────────────────────────
+
+func _try_lock_on(screen_pos: Vector2) -> void:
+	if _player_ship_id < 0:
+		return
+
+	var closest_id: int = _pick_ship_at(screen_pos)
 	if closest_id >= 0:
 		## 前のロック対象をクリア
 		if _player_lock_target >= 0 and _ships.has(_player_lock_target):
@@ -575,6 +594,8 @@ func _handle_ship_despawned(p: Dictionary) -> void:
 	var ship: Node3D = _ships[ship_id] as Node3D
 	ship.queue_free()
 	_ships.erase(ship_id)
+	if ship_id == _selected_target_id:
+		_selected_target_id = -1
 	if ship_id == _player_ship_id:
 		_player_ship_id = -1
 
@@ -600,6 +621,8 @@ func _handle_ship_destroyed(p: Dictionary) -> void:
 	var ship: Node3D = _ships[ship_id] as Node3D
 	_ships.erase(ship_id)
 	_ship_hp.erase(ship_id)
+	if ship_id == _selected_target_id:
+		_selected_target_id = -1
 	## Play destruction effect (queue_free happens inside play_destroy_effect)
 	ship.call("play_destroy_effect")
 	if ship_id == _player_ship_id:
@@ -718,9 +741,14 @@ func _update_hud() -> void:
 	if _jump_notice != "":
 		jump_line += "\n" + _jump_notice
 
+	## Approach target selection (ADR-0015).
+	var approach_line: String = ""
+	if _selected_target_id >= 0:
+		approach_line = "\n[A] Approach #%d" % _selected_target_id
+
 	_stats_label.text = (
-		"%s%s%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nLock: %s%s\n\n[DoubleClick] Thrust\n[RightClick] Lock%s"
-		% [status, ship_name_line, system_line, _ships.size(), _current_tick, speed_str, hp_str, lock_str, module_lines, jump_line]
+		"%s%s%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nLock: %s%s%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
+		% [status, ship_name_line, system_line, _ships.size(), _current_tick, speed_str, hp_str, lock_str, approach_line, module_lines, jump_line]
 	)
 
 # ── Capacitor client-side simulation ─────────────────────────────────────────
@@ -772,6 +800,7 @@ func _clear_all_ships() -> void:
 	_player_armor       = -1.0
 	_player_hull        = -1.0
 	_player_lock_target = -1
+	_selected_target_id = -1
 	_current_tick       = 0
 	_event_count        = 0
 

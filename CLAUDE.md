@@ -98,7 +98,8 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
   エンティティ  : Ship のみ
   コンポーネント: Position(x, y, z), Velocity, ThrustComp, ShipStatsComp,
                   HullComp（Shield/Armor/Hull 3層）, FittingComp（装備スロット）,
-                  CapacitorComp（現在 cap 量）, TransitComp（Transit 状態）
+                  CapacitorComp（現在 cap 量）, TransitComp（Transit 状態）,
+                  ApproachComp（接近対象・半自動操船 / ADR-0015）
   船種          : ShipTypeDefinition（id, name, class, base_stats, slot_layout）
   イベント      : ShipSpawned（ship_type_id 含む）, VelocityChanged, SectorTransit系,
                   ShipFitted, WeaponFired, DamageTaken（3層 HP）, ShipDestroyed,
@@ -120,6 +121,11 @@ Phase 7.5 で追加承認済み（ADR-0009・実装済み）:
   星系間ナビゲーション（StarSystemId / JumpGateId / StarSystemDef / JumpGateDef,
   JumpCommand, JumpGateUsed / StarSystemChanged イベント,
   star_map.rs 静的トポロジー, Godot クライアント配線（J キー）まで完了）
+
+Phase 7.5 で追加承認済み（ADR-0015・実装済み）:
+  アプローチ（半自動操船・ApproachComp / ApproachCommand,
+  Tick Step 2.5 process_approach, Move/Stop で解除, 新イベントなし,
+  Godot クライアント配線（クリック選択 + A キー）まで完了）
 
 実装しない（提案も拒否する）:
   課金 / キャラクター育成 / 市場 / チャット
@@ -514,8 +520,14 @@ pub type Tick = u64;
        DeactivateModuleCommand  → FittedSlot.is_active = false / apply_fitting()
        JumpCommand              → can_propose_jump() 検証後、TransitOp::Request
                                   （gate_id 付き）を Raft に提案（ADR-0009）
+       ApproachCommand          → ApproachComp を付与（半自動操船 / ADR-0015）
+                                  Move / Stop で解除
        ※ Transit 中（TransitState::InTransit）の Ship への Move / Stop /
-         二重 Transit / Jump は拒否する（ADR-0014 / §5）
+         二重 Transit / Jump / Approach は拒否する（ADR-0014 / §5）
+  2.5 Approach System を実行する            ← Movement の前（ADR-0015）
+       ApproachComp を持つ Ship のみ対象。対象の最新位置へ thrust を向け直す。
+       一定距離まで詰めたら is_braking = true で停止保持。
+       対象が消失したら ApproachComp を除去し is_braking = true でブレーキ。
   3. Movement System を実行する（ECS バッチ処理）
   4. Capacitor System を実行する           ← Movement の後
        毎 Tick: cap を recharge_per_tick 分回復
@@ -1184,6 +1196,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-12（ADR-0009 完了レビュー: スコープに星系間ナビゲーション追加 / Tick Step 2 に JumpCommand 追加、人間承認済み）*
-*対応ADR: ADR-0001 〜 ADR-0014*
+*最終更新: 2026-06-13（ADR-0015: アプローチ（半自動操船）追加 — スコープに ApproachComp/ApproachCommand / Tick Step 2.5 process_approach、人間承認済み）*
+*対応ADR: ADR-0001 〜 ADR-0015*
 *次回レビュー予定: Phase 8（Anti-TiDi / スケール基盤）設計 ADR 作成時*

@@ -24,7 +24,7 @@
 //! `ClientConnection` trait 自体は変更しない。
 //! 新コマンドの追加 = `ClientCommand` に variant を追加するだけ。
 
-use dawn_core::{ActivateModuleCommand, AttackCommand, DeactivateModuleCommand, DomainEvent, JumpCommand, LockOnCommand, MoveCommand, StopCommand};
+use dawn_core::{ActivateModuleCommand, ApproachCommand, AttackCommand, DeactivateModuleCommand, DomainEvent, JumpCommand, LockOnCommand, MoveCommand, StopCommand};
 use tokio::sync::mpsc;
 
 // ── Error ─────────────────────────────────────────────────────────────────────
@@ -61,6 +61,8 @@ pub enum ClientCommand {
     Stop(StopCommand),
     /// ジャンプゲート経由の Sector 移動（ADR-0009）
     Jump(JumpCommand),
+    /// 半自動操船: 選択した船へ自動接近する（ADR-0015）
+    Approach(ApproachCommand),
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────────

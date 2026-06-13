@@ -695,6 +695,10 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
                     ClientCommand::Stop(s) => {
                         node.apply_stop_command_owned(sess.player_id, s.ship_id);
                     }
+                    // Approach: semi-automatic piloting toward a chosen ship (ADR-0015).
+                    ClientCommand::Approach(a) => {
+                        node.apply_approach_command_owned(sess.player_id, a);
+                    }
                     // Jump Gate Transit requires the Raft pipeline (FBD-006);
                     // the --serve demo runs a single Sector-0 node without a
                     // cluster, so Jump commands are ignored here. The full
@@ -901,6 +905,10 @@ async fn run_cluster_server(ship_count: usize) {
                     ClientCommand::Attack(_) => {}
                     ClientCommand::Stop(s) => {
                         nodes[sector].apply_stop_command_owned(sess.player_id, s.ship_id);
+                    }
+                    // Approach: semi-automatic piloting toward a chosen ship (ADR-0015).
+                    ClientCommand::Approach(a) => {
+                        nodes[sector].apply_approach_command_owned(sess.player_id, a);
                     }
                     // ADR-0009: validate up front, then propose to the Raft
                     // Log; the move happens once the entry commits (Step 7.5).

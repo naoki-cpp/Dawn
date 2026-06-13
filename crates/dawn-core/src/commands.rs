@@ -39,6 +39,23 @@ pub struct FitModuleCommand {
     pub module_id : ModuleId,
 }
 
+/// Request to begin approaching another Ship (semi-automatic piloting).
+///
+/// Unlike `MoveCommand` (a one-shot thrust direction), an accepted approach
+/// is a persistent steering mode: each tick the movement pipeline re-aims
+/// thrust at the target's latest position until the ship arrives, the target
+/// disappears, or a `MoveCommand` / `StopCommand` cancels it (ADR-0015).
+///
+/// May be rejected if:
+/// - Either Ship does not exist.
+/// - The approaching Ship is currently in transit between Sectors.
+/// - `target_id` is the approaching Ship itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ApproachCommand {
+    pub ship_id   : ShipId,
+    pub target_id : ShipId,
+}
+
 /// Request to begin locking onto a target.
 ///
 /// May be rejected if:
@@ -144,6 +161,14 @@ mod tests {
         };
         assert_eq!(cmd.slot, SlotKind::High);
         assert_eq!(cmd.module_id, ModuleId(42));
+    }
+
+    #[test]
+    fn approach_command_carries_ship_id_and_target_id() {
+        let cmd = ApproachCommand { ship_id: ship_id(1), target_id: ship_id(2) };
+        assert_eq!(cmd.ship_id, ship_id(1));
+        assert_eq!(cmd.target_id, ship_id(2));
+        assert_ne!(cmd.ship_id, cmd.target_id);
     }
 
     #[test]
