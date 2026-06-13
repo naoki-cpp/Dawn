@@ -21,7 +21,7 @@ pub fn all_modules() -> Vec<ModuleDefinition> {
             activation_mode: ActivationMode::Active,
             cap_cost_per_cycle: 60.0,
             cycle_time_ticks  : 10,
-            stat_delta: StatDelta { weapon_damage_add: 25.0, weapon_range_add: 1_500.0, ..StatDelta::ZERO },
+            stat_delta: StatDelta { weapon_damage_add: 25.0, weapon_range_add: 3_000.0, falloff_range_add: 2_000.0, tracking_speed_add: 0.035, ..StatDelta::ZERO },
         },
         ModuleDefinition {
             id: MODULE_RAILGUN_MEDIUM, name: "Medium Railgun I".to_string(),

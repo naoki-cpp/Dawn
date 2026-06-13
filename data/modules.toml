@@ -35,8 +35,8 @@ cycle_time_ticks   = 10
 
 [modules.stat_delta]
 weapon_damage_add  = 25.0
-weapon_range_add   = 1500.0  # optimal range
-falloff_range_add  = 1000.0  # hit chance halves at 2500 u
+weapon_range_add   = 3000.0  # optimal range (2x extended range)
+falloff_range_add  = 2000.0  # hit chance halves at 5000 u
 tracking_speed_add = 0.035   # rad/tick — hits a frigate (sig=40) orbiting at ~500u/tick at 1000u range
                               # angular=0.5/1000=0.0005... actually: perp=500,d=1000 → ang=0.5
                               # hit_chance = 0.5^((0.5/(0.035*40))^2) = 0.5^(0.357^2) ≈ 0.91 at 1000u
