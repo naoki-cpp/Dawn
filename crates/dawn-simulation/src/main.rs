@@ -46,12 +46,12 @@ const P2_TICKS : usize = 20;
 
 #[tokio::main]
 async fn main() {
-    // Phase 4 モード: --serve 引数があれば Godot 向け WebSocket サーバーを起動
+    // Phase 4 mode: with --serve, start the Godot-facing WebSocket server
     let args: Vec<String> = std::env::args().collect();
     if args.contains(&"--serve".to_string()) {
         // --duel: 1 human vs 1 Bot, no NPC ships
         let duel_mode = args.contains(&"--duel".to_string());
-        // --ships N で NPC 数を指定（--duel 時は無視）
+        // --ships N sets the NPC count (ignored in --duel mode)
         let ship_count = if duel_mode { 0 } else {
             args.windows(2)
                 .find(|w| w[0] == "--ships")
@@ -300,7 +300,7 @@ async fn run_phase2_demo() {
     println!("═══════════════════════════════════════════");
 }
 
-// ── Phase 3: Event 永続化デモ ─────────────────────────────────────────────────
+// ── Phase 3: Event persistence demo ───────────────────────────────────────────
 
 const P3_SHIPS : usize = 100;
 const P3_TICKS : usize = 10;
@@ -389,17 +389,17 @@ fn run_phase3_demo() {
     println!("═══════════════════════════════════════════");
 }
 
-// ── Phase 5: Godot WebSocket サーバー（マルチクライアント対応）──────────────
+// ── Phase 5: Godot WebSocket server (multi-client) ─────────────────────────────
 //
-// 使い方:
+// Usage:
 //   cargo run -p dawn-simulation --bin simulate --release -- --serve
 //   cargo run -p dawn-simulation --bin simulate --release -- --serve --ships 10
 //
-// 変更点 (ADR-0007):
-//   - Hello/Welcome ハンドシェイクで PlayerId を採番
-//   - InitialState で接続時の全 Ship 状態を送信
-//   - 複数クライアントの同時接続に対応
-//   - 所有権チェック: 自分の船だけ操作できる
+// Changes (ADR-0007):
+//   - Assign a PlayerId during the Hello/Welcome handshake
+//   - Send all Ship state on connect via InitialState
+//   - Support multiple simultaneous client connections
+//   - Ownership check: a player can only control their own ship
 
 const P4_SHIPS_DEFAULT : usize = 20;
 
@@ -506,7 +506,6 @@ impl DuelMetrics {
     /// Print a formatted summary to stdout.
     fn print_summary(&self, player_ship_id: Option<ShipId>) {
         let duration = self.end_tick.unwrap_or(self.start_tick) - self.start_tick;
-        let loser_id = self.loser.map(|id| id.raw()).unwrap_or(0);
 
         println!();
         println!("╔══════════════════════════════════════════╗");
@@ -541,6 +540,42 @@ impl DuelMetrics {
     }
 }
 const P4_TICK_MS       : u64   = 100;  // 10 Tick/sec
+
+/// Apply a player command that behaves identically in the single-node
+/// (`--serve`) and clustered (`--serve --cluster`) servers — every command
+/// except `Jump`, whose handling differs (ignored vs. proposed to Raft).
+///
+/// Accepted `LockOn` commands are pushed to `lock_commands` for the tick's
+/// Lock System. When `cmd` is a `Jump`, it is returned to the caller so each
+/// server can route it appropriately instead of being handled here.
+fn apply_common_command(
+    node         : &mut SimulationNode,
+    player_id    : dawn_core::PlayerId,
+    cmd          : ClientCommand,
+    lock_commands: &mut Vec<dawn_core::LockOnCommand>,
+) -> Option<dawn_core::JumpCommand> {
+    match cmd {
+        ClientCommand::Move(mv) => {
+            node.apply_move_command_owned(player_id, mv.ship_id, mv.target_position);
+        }
+        ClientCommand::LockOn(lo) => {
+            if node.apply_lock_on_owned(player_id, lo.clone()) {
+                lock_commands.push(lo);
+            }
+        }
+        ClientCommand::Activate(c)   => { node.activate_module_owned(player_id, c); }
+        ClientCommand::Deactivate(c) => { node.deactivate_module_owned(player_id, c); }
+        // Combat is automatic (CombatSystem each tick); AttackCommand is
+        // reserved for a future manual-fire mode.
+        ClientCommand::Attack(_) => {}
+        ClientCommand::Stop(s) => { node.apply_stop_command_owned(player_id, s.ship_id); }
+        // Approach: semi-automatic piloting toward a chosen ship/gate (ADR-0015).
+        ClientCommand::Approach(a) => { node.apply_approach_command_owned(player_id, a); }
+        // Jump differs per server: hand it back to the caller.
+        ClientCommand::Jump(j) => return Some(j),
+    }
+    None
+}
 
 async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
     println!("═══════════════════════════════════════════");
@@ -580,7 +615,7 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
         node.register_ship_type(def);
     }
 
-    // NPC 船を生成
+    // Generate NPC ships
     let config = SpawnConfig::default_for_node(NodeId(0));
     let ships  = generate_ships(ship_count, &config, 0);
     for (_, pos, vel) in ships {
@@ -600,16 +635,16 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
 
     println!("  [Server] {ship_count} NPC ships ready. Waiting for players...");
 
-    // TCP 接続チャンネル（accept タスク → メインループ）
+    // TCP connection channel (accept task -> main loop)
     let (new_conn_tx, mut new_conn_rx) =
         mpsc::unbounded_channel::<(tokio::net::TcpStream, std::net::SocketAddr)>();
 
-    // ハンドシェイク完了チャンネル（handshake タスク → メインループ）
-    // ループ外で生成することでドロップされず、ハンドシェイク完了後も受け取れる
+    // Handshake-completed channel (handshake task -> main loop)
+    // Created outside the loop so it isn't dropped and still receives after handshakes complete
     let (ready_sess_tx, mut ready_sess_rx) =
         mpsc::unbounded_channel::<ws_server::PlayerSession>();
 
-    // accept ループを別タスクで実行
+    // Run the accept loop in a separate task
     let server_arc = std::sync::Arc::new(server);
     let server_clone = server_arc.clone();
     tokio::spawn(async move {
@@ -674,42 +709,16 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
 
         for sess in sessions.iter_mut() {
             while let Some(cmd) = sess.try_recv_command() {
-                match cmd {
-                    ClientCommand::Move(mv) => {
-                        node.apply_move_command_owned(sess.player_id, mv.ship_id, mv.target_position);
-                    }
-                    ClientCommand::LockOn(lo) => {
-                        if node.apply_lock_on_owned(sess.player_id, lo.clone()) {
-                            lock_commands.push(lo);
-                        }
-                    }
-                    ClientCommand::Activate(cmd) => {
-                        node.activate_module_owned(sess.player_id, cmd);
-                    }
-                    ClientCommand::Deactivate(cmd) => {
-                        node.deactivate_module_owned(sess.player_id, cmd);
-                    }
-                    // Combat is handled automatically by CombatSystem each tick.
-                    // AttackCommand is reserved for a future manual-fire mode.
-                    ClientCommand::Attack(_) => {}
-                    ClientCommand::Stop(s) => {
-                        node.apply_stop_command_owned(sess.player_id, s.ship_id);
-                    }
-                    // Approach: semi-automatic piloting toward a chosen ship (ADR-0015).
-                    ClientCommand::Approach(a) => {
-                        node.apply_approach_command_owned(sess.player_id, a);
-                    }
+                if let Some(j) = apply_common_command(&mut node, sess.player_id, cmd, &mut lock_commands) {
                     // Jump Gate Transit requires the Raft pipeline (FBD-006);
                     // the --serve demo runs a single Sector-0 node without a
                     // cluster, so Jump commands are ignored here. The full
-                    // pipeline is exercised by MultiNodeCluster (ADR-0009).
-                    ClientCommand::Jump(j) => {
-                        eprintln!(
-                            "[Server] JumpCommand ignored (ship #{} gate #{}): \
-                             --serve runs a single-sector node without Raft",
-                            j.ship_id.raw(), j.gate_id.0
-                        );
-                    }
+                    // pipeline is exercised by --serve --cluster (ADR-0009).
+                    eprintln!(
+                        "[Server] JumpCommand ignored (ship #{} gate #{}): \
+                         --serve runs a single-sector node without Raft",
+                        j.ship_id.raw(), j.gate_id.0
+                    );
                 }
             }
         }
@@ -887,48 +896,24 @@ async fn run_cluster_server(ship_count: usize) {
         for sess in sessions.iter_mut() {
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
             while let Some(cmd) = sess.try_recv_command() {
-                match cmd {
-                    ClientCommand::Move(mv) => {
-                        nodes[sector].apply_move_command_owned(sess.player_id, mv.ship_id, mv.target_position);
-                    }
-                    ClientCommand::LockOn(lo) => {
-                        if nodes[sector].apply_lock_on_owned(sess.player_id, lo.clone()) {
-                            lock_commands[sector].push(lo);
-                        }
-                    }
-                    ClientCommand::Activate(cmd) => {
-                        nodes[sector].activate_module_owned(sess.player_id, cmd);
-                    }
-                    ClientCommand::Deactivate(cmd) => {
-                        nodes[sector].deactivate_module_owned(sess.player_id, cmd);
-                    }
-                    ClientCommand::Attack(_) => {}
-                    ClientCommand::Stop(s) => {
-                        nodes[sector].apply_stop_command_owned(sess.player_id, s.ship_id);
-                    }
-                    // Approach: semi-automatic piloting toward a chosen ship (ADR-0015).
-                    ClientCommand::Approach(a) => {
-                        nodes[sector].apply_approach_command_owned(sess.player_id, a);
-                    }
-                    // ADR-0009: validate up front, then propose to the Raft
-                    // Log; the move happens once the entry commits (Step 7.5).
-                    ClientCommand::Jump(j) => {
-                        let accepted = j.ship_id == sess.ship_id
-                            && nodes[sector].can_propose_jump(j.ship_id, j.gate_id);
-                        if accepted {
-                            let to = nodes[sector].jump_gate(j.gate_id)
-                                .expect("can_propose_jump confirmed gate exists")
-                                .to_sector;
-                            rafts[sector].propose(
-                                TransitOp::Request { ship_id: j.ship_id, to, gate_id: Some(j.gate_id) }.encode(),
-                            );
-                            println!("  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
-                                j.ship_id.raw(), j.gate_id.0, sector, to.0);
-                        } else {
-                            eprintln!("[Server] JumpCommand rejected (ship #{} gate #{})",
-                                j.ship_id.raw(), j.gate_id.0);
-                        }
-                    }
+                let Some(j) = apply_common_command(&mut nodes[sector], sess.player_id, cmd, &mut lock_commands[sector])
+                else { continue };
+                // ADR-0009: validate up front, then propose to the Raft Log;
+                // the move happens once the entry commits (Step 7.5).
+                let accepted = j.ship_id == sess.ship_id
+                    && nodes[sector].can_propose_jump(j.ship_id, j.gate_id);
+                if accepted {
+                    let to = nodes[sector].jump_gate(j.gate_id)
+                        .expect("can_propose_jump confirmed gate exists")
+                        .to_sector;
+                    rafts[sector].propose(
+                        TransitOp::Request { ship_id: j.ship_id, to, gate_id: Some(j.gate_id) }.encode(),
+                    );
+                    println!("  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
+                        j.ship_id.raw(), j.gate_id.0, sector, to.0);
+                } else {
+                    eprintln!("[Server] JumpCommand rejected (ship #{} gate #{})",
+                        j.ship_id.raw(), j.gate_id.0);
                 }
             }
         }
