@@ -49,6 +49,9 @@ var _player_max_hull   : float = 200.0
 var _player_lock_target : int  = -1
 ## Approach target selected by left-clicking a ship (ADR-0015). -1 = none.
 var _selected_target_id : int  = -1
+## Approach target selected by left-clicking a Jump Gate (ADR-0015). -1 = none.
+## Mutually exclusive with _selected_target_id.
+var _selected_gate_id   : int  = -1
 
 ## Per-ship HP: { ship_id: {shield, armor, hull} }
 var _ship_hp : Dictionary = {}
@@ -206,10 +209,14 @@ func _input(event: InputEvent) -> void:
 		if key.keycode == KEY_J and _player_ship_id >= 0 and _nearby_gate_id >= 0:
 			_connection.send_jump_command(_player_ship_id, _nearby_gate_id)
 			return
-		## A キー → ApproachCommand（選択した船へ自動接近・ADR-0015）
-		if key.keycode == KEY_A and _player_ship_id >= 0 and _selected_target_id >= 0:
-			_connection.send_approach_command(_player_ship_id, _selected_target_id)
-			return
+		## A キー → ApproachCommand（選択した船 / ゲートへ自動接近・ADR-0015）
+		if key.keycode == KEY_A and _player_ship_id >= 0:
+			if _selected_gate_id >= 0:
+				_connection.send_approach_gate_command(_player_ship_id, _selected_gate_id)
+				return
+			if _selected_target_id >= 0:
+				_connection.send_approach_command(_player_ship_id, _selected_target_id)
+				return
 		## Tab キー → タクティカルオーバーレイ表示切り替え
 		if key.keycode == KEY_TAB:
 			if _tactical_overlay != null:
@@ -221,11 +228,14 @@ func _input(event: InputEvent) -> void:
 		if mb.pressed:
 			match mb.button_index:
 				MOUSE_BUTTON_LEFT:
-					## 左クリックが船に当たれば接近対象として選択（ADR-0015）。
-					## 当たらなければ従来どおりダブルクリック移動を判定する。
-					var hit_id: int = _pick_ship_at(mb.position)
-					if hit_id >= 0:
-						_select_approach_target(hit_id)
+					## 左クリックが船 / ゲートに当たれば接近対象として選択（ADR-0015）。
+					## どちらにも当たらなければダブルクリック移動を判定する。
+					var hit_ship: int = _pick_ship_at(mb.position)
+					var hit_gate: int = _pick_gate_at(mb.position)
+					if hit_ship >= 0:
+						_select_approach_target(hit_ship)
+					elif hit_gate >= 0:
+						_select_approach_gate(hit_gate)
 					else:
 						_check_double_click(mb.position)
 				MOUSE_BUTTON_RIGHT:
@@ -277,6 +287,38 @@ func _pick_ship_at(screen_pos: Vector2) -> int:
 ## Select a ship as the Approach target. Press A to start approaching it.
 func _select_approach_target(target_id: int) -> void:
 	_selected_target_id = target_id
+	_selected_gate_id   = -1
+	_update_hud()
+
+## Returns the gate_id of the Jump Gate (in the current system) whose marker
+## is closest to the click ray, or -1. Gates are large objects, so the pick
+## radius is wider than for ships.
+func _pick_gate_at(screen_pos: Vector2) -> int:
+	if _player_ship_id < 0:
+		return -1
+	var from: Vector3 = _camera.project_ray_origin(screen_pos)
+	var dir : Vector3 = _camera.project_ray_normal(screen_pos)
+	var closest_id  : int   = -1
+	var closest_dist: float = 1e9
+	for gate: Variant in JUMP_GATES:
+		var g: Dictionary = gate as Dictionary
+		if (g.get("from_system", "") as String) != _current_system_name:
+			continue
+		var gpos_server: Vector3 = g.get("position", Vector3.ZERO) as Vector3
+		## サーバー座標 → Godot 座標（Z 反転・スケール）
+		var p: Vector3 = Vector3(gpos_server.x, gpos_server.y, -gpos_server.z) * WORLD_SCALE
+		var t: float   = (p - from).dot(dir)
+		var closest_pt: Vector3 = from + dir * t
+		var dist: float = p.distance_to(closest_pt)
+		if dist < 800.0 and t > 0.0 and dist < closest_dist:
+			closest_dist = dist
+			closest_id   = g.get("gate_id", -1) as int
+	return closest_id
+
+## Select a Jump Gate as the Approach target. Press A to fly into its range.
+func _select_approach_gate(gate_id: int) -> void:
+	_selected_gate_id   = gate_id
+	_selected_target_id = -1
 	_update_hud()
 
 # ── 右クリック → LockOnCommand ───────────────────────────────────────────────
@@ -743,7 +785,9 @@ func _update_hud() -> void:
 
 	## Approach target selection (ADR-0015).
 	var approach_line: String = ""
-	if _selected_target_id >= 0:
+	if _selected_gate_id >= 0:
+		approach_line = "\n[A] Approach Gate #%d" % _selected_gate_id
+	elif _selected_target_id >= 0:
 		approach_line = "\n[A] Approach #%d" % _selected_target_id
 
 	_stats_label.text = (
@@ -801,6 +845,7 @@ func _clear_all_ships() -> void:
 	_player_hull        = -1.0
 	_player_lock_target = -1
 	_selected_target_id = -1
+	_selected_gate_id   = -1
 	_current_tick       = 0
 	_event_count        = 0
 

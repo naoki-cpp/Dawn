@@ -20,7 +20,7 @@
 //! ```
 
 use dawn_actor::{ClientCommand, ClientConnection};
-use dawn_core::{ActivateModuleCommand, ApproachCommand, AttackCommand, DeactivateModuleCommand, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId, Position, ShipId, SlotKind, StopCommand};
+use dawn_core::{ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand, DeactivateModuleCommand, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId, Position, ShipId, SlotKind, StopCommand};
 use dawn_core::DomainEvent;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
@@ -202,11 +202,17 @@ fn parse_client_command(line: &str) -> Option<ClientCommand> {
             }))
         }
         "ApproachCommand" => {
-            let ship_id_raw   = v.get("ship_id")?.as_u64()?;
-            let target_id_raw = v.get("target_id")?.as_u64()?;
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            // gate_id selects a Jump Gate target; otherwise target_id is a Ship.
+            let target = if let Some(gate) = v.get("gate_id").and_then(|g| g.as_u64()) {
+                ApproachTarget::Gate(dawn_core::JumpGateId(gate as u32))
+            } else {
+                let target_id_raw = v.get("target_id")?.as_u64()?;
+                ApproachTarget::Ship(ShipId(EntityId::from_raw(target_id_raw)))
+            };
             Some(ClientCommand::Approach(ApproachCommand {
-                ship_id  : ShipId(EntityId::from_raw(ship_id_raw)),
-                target_id: ShipId(EntityId::from_raw(target_id_raw)),
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                target,
             }))
         }
         _ => None,
@@ -463,20 +469,33 @@ mod tests {
     }
 
     #[test]
-    fn approach_command_json_is_parsed_into_client_command_approach() {
+    fn approach_command_with_target_id_is_parsed_as_a_ship_target() {
         let line = r#"{"type":"ApproachCommand","ship_id":7,"target_id":13}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             ClientCommand::Approach(c) => {
                 assert_eq!(c.ship_id.raw(), 7);
-                assert_eq!(c.target_id.raw(), 13);
+                assert_eq!(c.target, ApproachTarget::Ship(ShipId(EntityId::from_raw(13))));
             }
             other => panic!("expected Approach, got {other:?}"),
         }
     }
 
     #[test]
-    fn approach_command_without_target_id_is_rejected() {
+    fn approach_command_with_gate_id_is_parsed_as_a_gate_target() {
+        let line = r#"{"type":"ApproachCommand","ship_id":7,"gate_id":2}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::Approach(c) => {
+                assert_eq!(c.ship_id.raw(), 7);
+                assert_eq!(c.target, ApproachTarget::Gate(JumpGateId(2)));
+            }
+            other => panic!("expected Approach, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn approach_command_without_a_target_is_rejected() {
         let line = r#"{"type":"ApproachCommand","ship_id":7}"#;
         assert!(parse_client_command(line).is_none());
     }

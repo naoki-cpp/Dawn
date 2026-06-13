@@ -39,7 +39,18 @@ pub struct FitModuleCommand {
     pub module_id : ModuleId,
 }
 
-/// Request to begin approaching another Ship (semi-automatic piloting).
+/// What an approaching Ship is steering toward (ADR-0015).
+///
+/// A `Ship` target is dynamic (its position is read from the ECS each tick);
+/// a `Gate` target is a static Jump Gate position, letting players fly back
+/// into a gate's `activation_radius` to jump.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum ApproachTarget {
+    Ship(ShipId),
+    Gate(JumpGateId),
+}
+
+/// Request to begin approaching a Ship or a Jump Gate (semi-automatic piloting).
 ///
 /// Unlike `MoveCommand` (a one-shot thrust direction), an accepted approach
 /// is a persistent steering mode: each tick the movement pipeline re-aims
@@ -47,13 +58,13 @@ pub struct FitModuleCommand {
 /// disappears, or a `MoveCommand` / `StopCommand` cancels it (ADR-0015).
 ///
 /// May be rejected if:
-/// - Either Ship does not exist.
-/// - The approaching Ship is currently in transit between Sectors.
-/// - `target_id` is the approaching Ship itself.
+/// - The approaching Ship does not exist or is in transit between Sectors.
+/// - A `Ship` target does not exist or is the approaching Ship itself.
+/// - A `Gate` target does not originate in the Ship's current Sector.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ApproachCommand {
-    pub ship_id   : ShipId,
-    pub target_id : ShipId,
+    pub ship_id : ShipId,
+    pub target  : ApproachTarget,
 }
 
 /// Request to begin locking onto a target.
@@ -164,11 +175,16 @@ mod tests {
     }
 
     #[test]
-    fn approach_command_carries_ship_id_and_target_id() {
-        let cmd = ApproachCommand { ship_id: ship_id(1), target_id: ship_id(2) };
+    fn approach_command_can_target_a_ship() {
+        let cmd = ApproachCommand { ship_id: ship_id(1), target: ApproachTarget::Ship(ship_id(2)) };
         assert_eq!(cmd.ship_id, ship_id(1));
-        assert_eq!(cmd.target_id, ship_id(2));
-        assert_ne!(cmd.ship_id, cmd.target_id);
+        assert_eq!(cmd.target, ApproachTarget::Ship(ship_id(2)));
+    }
+
+    #[test]
+    fn approach_command_can_target_a_jump_gate() {
+        let cmd = ApproachCommand { ship_id: ship_id(1), target: ApproachTarget::Gate(crate::star_system::JumpGateId(3)) };
+        assert_eq!(cmd.target, ApproachTarget::Gate(crate::star_system::JumpGateId(3)));
     }
 
     #[test]

@@ -33,26 +33,37 @@ EVE Online の "Approach"（対象に自動で接近し続ける）に相当す�
 同一の振る舞いを、プレイヤーに開放するものである。
 
 ```
-ApproachCommand { ship_id, target_id }
+ApproachCommand { ship_id, target }
   → ApproachComp { target } を ship に付与
   → 毎 Tick process_approach() が対象方向へ thrust を更新
-  → 一定距離（ARRIVAL_RADIUS）まで詰めたら is_braking = true で停止
+  → 一定距離（到着半径）まで詰めたら is_braking = true で停止
 ```
+
+対象（`ApproachTarget`）は **Ship または Jump Gate** を取れる:
+
+- `Ship(ShipId)`  : 対象船の最新位置へ接近。到着半径 500u。対象消失で解除＋ブレーキ。
+- `Gate(JumpGateId)`: ジャンプゲートの静的座標へ接近。到着半径 = ゲートの
+  `activation_radius × 0.8`（射程内で停止し、ジャンプ可能になる）。
+  ゲートが自 Sector に属さない場合はコマンドを拒否する。
 
 ### 2. 新規型定義
 
 ```rust
 // dawn-core/src/commands.rs
+pub enum ApproachTarget {
+    Ship(ShipId),
+    Gate(JumpGateId),
+}
 pub struct ApproachCommand {
-    pub ship_id  : ShipId,
-    pub target_id: ShipId,
+    pub ship_id: ShipId,
+    pub target : ApproachTarget,
 }
 
 // dawn-ecs/src/components/movement.rs
 /// Persistent "approach" steering target. While present, the node's
 /// process_approach() step recomputes ThrustComp toward the target each tick.
 pub struct ApproachComp {
-    pub target: ShipId,
+    pub target: ApproachTarget,
 }
 ```
 
@@ -93,8 +104,9 @@ Movement System から自然に発行される。**Approach 専用のイベン�
 
 ### 6. 対象の選択はクライアント側で行う
 
-ロックオンとは独立に、プレイヤーが**クリックで選択した船**を対象にする。
-クライアントは選択中の `target_id` を保持し、A キーで `ApproachCommand` を送る。
+ロックオンとは独立に、プレイヤーが**クリックで選択した船またはゲート**を対象にする。
+クライアントは選択中の対象（船 ID / ゲート ID・排他）を保持し、A キーで
+`ApproachCommand` を送る（船は `target_id`、ゲートは `gate_id` を JSON に含める）。
 サーバーは所有権（`ship_owners`）を確認してから `ApproachComp` を付与する。
 
 ---

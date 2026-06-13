@@ -148,6 +148,16 @@ func send_approach_command(p_ship_id: int, p_target_id: int) -> void:
 		"target_id": p_target_id,
 	}) + "\n")
 
+## [A キー] ジャンプゲートへアプローチ（半自動操船）。射程内まで自動接近する（ADR-0015）。
+func send_approach_gate_command(p_ship_id: int, p_gate_id: int) -> void:
+	if not _welcomed:
+		return
+	_ws.send_text(JSON.stringify({
+		"type"   : "ApproachCommand",
+		"ship_id": p_ship_id,
+		"gate_id": p_gate_id,
+	}) + "\n")
+
 func is_connected_to_server() -> bool:
 	return _connected and _welcomed
 

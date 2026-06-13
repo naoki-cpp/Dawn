@@ -541,9 +541,9 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn total_event_count(&self) -> usize { self.event_store.len() }
     pub fn event_store(&self)       -> &S    { &self.event_store }
 
-    /// Whether a Ship currently has an active approach target (ADR-0015).
+    /// The Ship's current approach target, if any (ADR-0015).
     #[cfg(test)]
-    pub fn approach_target(&self, ship_id: ShipId) -> Option<ShipId> {
+    pub fn approach_target(&self, ship_id: ShipId) -> Option<dawn_core::ApproachTarget> {
         let entity = self.ship_index.get(&ship_id)?;
         self.world.inner().get::<&ApproachComp>(*entity).ok().map(|a| a.target)
     }
@@ -929,27 +929,34 @@ impl<S: EventStore> SimulationNode<S> {
         true
     }
 
-    /// Begin approaching `target_id` (semi-automatic piloting, ADR-0015).
+    /// Begin approaching a Ship or a Jump Gate (semi-automatic piloting, ADR-0015).
     ///
     /// Attaches an `ApproachComp` so `process_approach()` re-aims thrust at the
     /// target each tick. Rejected (returns `false`, no component attached) if
-    /// the ship is unknown, in transit, the target is unknown, or the target is
-    /// the ship itself.
-    pub fn apply_approach_command(&mut self, ship_id: ShipId, target_id: ShipId) -> bool {
-        if ship_id == target_id {
-            return false;
-        }
+    /// the ship is unknown or in transit, a `Ship` target is unknown or the
+    /// ship itself, or a `Gate` target does not originate in this Sector.
+    pub fn apply_approach_command(&mut self, ship_id: ShipId, target: dawn_core::ApproachTarget) -> bool {
+        use dawn_core::ApproachTarget;
         let &entity = match self.ship_index.get(&ship_id) {
             Some(e) => e,
             None    => return false,
         };
-        if !self.ship_index.contains_key(&target_id) {
-            return false;
-        }
         if self.world.transit_state(entity).is_in_transit() {
             return false;
         }
-        let _ = self.world.inner_mut().insert_one(entity, ApproachComp { target: target_id });
+        match target {
+            ApproachTarget::Ship(target_id) => {
+                if ship_id == target_id || !self.ship_index.contains_key(&target_id) {
+                    return false;
+                }
+            }
+            ApproachTarget::Gate(gate_id) => {
+                if self.jump_gate(gate_id).is_none() {
+                    return false;
+                }
+            }
+        }
+        let _ = self.world.inner_mut().insert_one(entity, ApproachComp { target });
         true
     }
 
@@ -962,7 +969,7 @@ impl<S: EventStore> SimulationNode<S> {
         if self.ship_owners.get(&cmd.ship_id) != Some(&player_id) {
             return false;
         }
-        self.apply_approach_command(cmd.ship_id, cmd.target_id)
+        self.apply_approach_command(cmd.ship_id, cmd.target)
     }
 
     /// Approach System (ADR-0015 §3): for every ship carrying an `ApproachComp`,
@@ -974,28 +981,38 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// Removes the component (and brakes) if the target no longer exists.
     pub fn process_approach(&mut self) {
-        /// Stop and hold once within this distance of the target (units).
-        const ARRIVAL_RADIUS: f32 = 500.0;
+        use dawn_core::ApproachTarget;
+        /// Stop and hold once within this distance of a Ship target (units).
+        const SHIP_ARRIVAL_RADIUS: f32 = 500.0;
 
-        // Read-only pass: collect (entity, ship position, target position?).
-        struct Step { entity: Entity, ship_id: ShipId, target: ShipId, arrived: bool, reached_target: Option<Position> }
+        // Read-only pass: resolve each approacher's target position + arrival
+        // distance. `reached_target == None` means the target is gone.
+        struct Step { entity: Entity, arrived: bool, reached_target: Option<Position> }
         let mut steps: Vec<Step> = Vec::new();
-        for (&ship_id, &entity) in &self.ship_index {
-            let Ok(approach) = self.world.inner().get::<&ApproachComp>(entity) else { continue };
-            let target_id = approach.target;
+        for (&_ship_id, &entity) in &self.ship_index {
+            let target = match self.world.inner().get::<&ApproachComp>(entity) {
+                Ok(a)  => a.target,
+                Err(_) => continue,
+            };
             let Ok(ship_pos) = self.world.inner().get::<&PositionComp>(entity) else { continue };
             let ship_pos = ship_pos.0;
-            let target_pos = self.ship_index.get(&target_id)
-                .and_then(|&te| self.world.inner().get::<&PositionComp>(te).ok().map(|p| p.0));
-            match target_pos {
-                Some(tp) => {
-                    let arrived = ship_pos.distance(tp) <= ARRIVAL_RADIUS;
-                    steps.push(Step { entity, ship_id, target: target_id, arrived, reached_target: Some(tp) });
+
+            // (target position, arrival radius)
+            let resolved: Option<(Position, f32)> = match target {
+                ApproachTarget::Ship(target_id) => self.ship_index.get(&target_id)
+                    .and_then(|&te| self.world.inner().get::<&PositionComp>(te).ok().map(|p| (p.0, SHIP_ARRIVAL_RADIUS))),
+                // Stop comfortably inside the gate's activation radius so the
+                // jump prompt becomes available on arrival (ADR-0015).
+                ApproachTarget::Gate(gate_id) => self.jump_gate(gate_id)
+                    .map(|g| (g.position, g.activation_radius * 0.8)),
+            };
+
+            match resolved {
+                Some((tp, arrival)) => {
+                    let arrived = ship_pos.distance(tp) <= arrival;
+                    steps.push(Step { entity, arrived, reached_target: Some(tp) });
                 }
-                None => {
-                    // Target gone: drop approach and brake (ADR-0015 §4).
-                    steps.push(Step { entity, ship_id, target: target_id, arrived: false, reached_target: None });
-                }
+                None => steps.push(Step { entity, arrived: false, reached_target: None }),
             }
         }
 
@@ -1003,18 +1020,20 @@ impl<S: EventStore> SimulationNode<S> {
         for step in steps {
             match step.reached_target {
                 None => {
+                    // Target gone: drop approach and brake (ADR-0015 §4).
                     let _ = self.world.inner_mut().remove_one::<ApproachComp>(step.entity);
                     if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(step.entity) {
                         t.direction  = Velocity::ZERO;
                         t.is_braking = true;
                     }
                 }
-                Some(tp) if step.arrived => {
+                Some(_) if step.arrived => {
+                    // Arrived: hold position, keep ApproachComp so the ship
+                    // resumes if a Ship target drifts back out of range.
                     if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(step.entity) {
                         t.direction  = Velocity::ZERO;
                         t.is_braking = true;
                     }
-                    let _ = (tp, step.ship_id, step.target); // arrived: hold position, keep ApproachComp
                 }
                 Some(tp) => {
                     let ship_pos = match self.world.inner().get::<&PositionComp>(step.entity).ok() {
@@ -1636,8 +1655,8 @@ mod tests {
         let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
 
-        assert!(node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target_id: target }));
-        assert_eq!(node.approach_target(chaser), Some(target));
+        assert!(node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) }));
+        assert_eq!(node.approach_target(chaser), Some(dawn_core::ApproachTarget::Ship(target)));
     }
 
     #[test]
@@ -1647,7 +1666,7 @@ mod tests {
         let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
 
         let stranger = node.next_player_id();
-        assert!(!node.apply_approach_command_owned(stranger, dawn_core::ApproachCommand { ship_id: chaser, target_id: target }));
+        assert!(!node.apply_approach_command_owned(stranger, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) }));
         assert_eq!(node.approach_target(chaser), None);
     }
 
@@ -1656,7 +1675,7 @@ mod tests {
         let mut node = mem_node();
         let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
-        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target_id: target });
+        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) });
 
         let entity = *node.ship_index.get(&chaser).unwrap();
         node.process_approach();
@@ -1670,7 +1689,7 @@ mod tests {
         let mut node = mem_node();
         let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
-        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target_id: target });
+        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) });
 
         let start = node.get_ship_position(chaser).unwrap().distance(Position::new(10_000.0, 0.0, 0.0));
         for _ in 0..30 { node.tick(); }
@@ -1683,8 +1702,8 @@ mod tests {
         let mut node = mem_node();
         let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
-        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target_id: target });
-        assert_eq!(node.approach_target(chaser), Some(target));
+        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) });
+        assert_eq!(node.approach_target(chaser), Some(dawn_core::ApproachTarget::Ship(target)));
 
         node.apply_move_command(chaser, Position::new(-10_000.0, 0.0, 0.0));
         assert_eq!(node.approach_target(chaser), None, "manual move must cancel approach");
@@ -1695,7 +1714,7 @@ mod tests {
         let mut node = mem_node();
         let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
-        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target_id: target });
+        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) });
 
         node.apply_stop_command(chaser);
         assert_eq!(node.approach_target(chaser), None, "stop must cancel approach");
@@ -1706,7 +1725,7 @@ mod tests {
         let mut node = mem_node();
         let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
-        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target_id: target });
+        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) });
 
         // Remove the target from the ECS, then run the approach step.
         let target_entity = node.ship_index.remove(&target).unwrap();
@@ -1722,7 +1741,40 @@ mod tests {
     fn approach_command_is_rejected_when_target_is_self() {
         let mut node = mem_node();
         let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        assert!(!node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target_id: chaser }));
+        assert!(!node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(chaser) }));
+        assert_eq!(node.approach_target(chaser), None);
+    }
+
+    #[test]
+    fn approaching_a_jump_gate_steers_the_ship_toward_the_gate_and_into_range() {
+        // Sector 0 owns Gate 0 (position near +X edge). Start at the origin.
+        let mut node = mem_node();
+        let gate = node.jump_gate(dawn_core::JumpGateId(0)).expect("Sector 0 has Gate 0").clone();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+
+        assert!(node.apply_approach_command_owned(player, dawn_core::ApproachCommand {
+            ship_id: chaser,
+            target : dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(0)),
+        }));
+        assert_eq!(node.approach_target(chaser), Some(dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(0))));
+
+        let start = node.get_ship_position(chaser).unwrap().distance(gate.position);
+        for _ in 0..400 { node.tick(); }
+        let end = node.get_ship_position(chaser).unwrap().distance(gate.position);
+        assert!(end < start, "ship should close on the gate: {start} -> {end}");
+        assert!(node.can_propose_jump(chaser, dawn_core::JumpGateId(0)),
+            "after approaching, the ship should be within the gate's activation radius");
+    }
+
+    #[test]
+    fn approach_command_is_rejected_for_a_gate_not_in_this_sector() {
+        // Gate 1 originates in Sector 1, so a Sector-0 node does not know it.
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(!node.apply_approach_command_owned(player, dawn_core::ApproachCommand {
+            ship_id: chaser,
+            target : dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(1)),
+        }));
         assert_eq!(node.approach_target(chaser), None);
     }
 
