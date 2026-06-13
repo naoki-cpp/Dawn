@@ -612,21 +612,34 @@ impl<S: EventStore> SimulationNode<S> {
             Some(c) => c.0,
             None    => return,
         };
+        self.steer_thrust_toward(entity, pos, target);
+    }
 
-        let dx   = target.x - pos.x;
-        let dy   = target.y - pos.y;
-        let dz   = target.z - pos.z;
+    /// Point `entity`'s thrust at `to` from `from` (unit direction, not braking).
+    /// Zero thrust if already at the target. Shared by `apply_move_command` and
+    /// the Approach System (ADR-0015) so the steering math lives in one place.
+    fn steer_thrust_toward(&mut self, entity: Entity, from: Position, to: Position) {
+        let dx   = to.x - from.x;
+        let dy   = to.y - from.y;
+        let dz   = to.z - from.z;
         let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-
         let dir = if dist > f32::EPSILON {
             Velocity { dx: dx / dist, dy: dy / dist, dz: dz / dist }
         } else {
             Velocity::ZERO
         };
-
         if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
             t.direction  = dir;
             t.is_braking = false;
+        }
+    }
+
+    /// Set `entity`'s thrust to braking (decelerate toward zero velocity).
+    /// Shared by `apply_stop_command` and the Approach System (ADR-0015).
+    fn brake_thrust(&mut self, entity: Entity) {
+        if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
+            t.direction  = Velocity::ZERO;
+            t.is_braking = true;
         }
     }
 
@@ -644,10 +657,7 @@ impl<S: EventStore> SimulationNode<S> {
         }
         // Stopping cancels any active approach (ADR-0015 §4).
         let _ = self.world.inner_mut().remove_one::<ApproachComp>(entity);
-        if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
-            t.direction  = Velocity::ZERO;
-            t.is_braking = true;
-        }
+        self.brake_thrust(entity);
     }
 
     /// `apply_stop_command` wrapped with ownership check.
@@ -985,19 +995,17 @@ impl<S: EventStore> SimulationNode<S> {
         /// Stop and hold once within this distance of a Ship target (units).
         const SHIP_ARRIVAL_RADIUS: f32 = 500.0;
 
-        // Read-only pass: resolve each approacher's target position + arrival
-        // distance. `reached_target == None` means the target is gone.
-        struct Step { entity: Entity, arrived: bool, reached_target: Option<Position> }
-        let mut steps: Vec<Step> = Vec::new();
-        for (&_ship_id, &entity) in &self.ship_index {
-            let target = match self.world.inner().get::<&ApproachComp>(entity) {
-                Ok(a)  => a.target,
-                Err(_) => continue,
-            };
-            let Ok(ship_pos) = self.world.inner().get::<&PositionComp>(entity) else { continue };
-            let ship_pos = ship_pos.0;
+        // Collect approachers up front (entity, target, current position) so the
+        // ECS query borrow is released before the mutable write pass below.
+        let approachers: Vec<(Entity, ApproachTarget, Position)> = self.world.inner()
+            .query::<(&ApproachComp, &PositionComp)>()
+            .iter()
+            .map(|(entity, (approach, pos))| (entity, approach.target, pos.0))
+            .collect();
 
-            // (target position, arrival radius)
+        for (entity, target, ship_pos) in approachers {
+            // Resolve the target's current position and the arrival distance.
+            // `None` means the target no longer exists.
             let resolved: Option<(Position, f32)> = match target {
                 ApproachTarget::Ship(target_id) => self.ship_index.get(&target_id)
                     .and_then(|&te| self.world.inner().get::<&PositionComp>(te).ok().map(|p| (p.0, SHIP_ARRIVAL_RADIUS))),
@@ -1008,47 +1016,16 @@ impl<S: EventStore> SimulationNode<S> {
             };
 
             match resolved {
-                Some((tp, arrival)) => {
-                    let arrived = ship_pos.distance(tp) <= arrival;
-                    steps.push(Step { entity, arrived, reached_target: Some(tp) });
-                }
-                None => steps.push(Step { entity, arrived: false, reached_target: None }),
-            }
-        }
-
-        // Write pass.
-        for step in steps {
-            match step.reached_target {
+                // Target gone: drop the approach and brake (ADR-0015 §4).
                 None => {
-                    // Target gone: drop approach and brake (ADR-0015 §4).
-                    let _ = self.world.inner_mut().remove_one::<ApproachComp>(step.entity);
-                    if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(step.entity) {
-                        t.direction  = Velocity::ZERO;
-                        t.is_braking = true;
-                    }
+                    let _ = self.world.inner_mut().remove_one::<ApproachComp>(entity);
+                    self.brake_thrust(entity);
                 }
-                Some(_) if step.arrived => {
-                    // Arrived: hold position, keep ApproachComp so the ship
-                    // resumes if a Ship target drifts back out of range.
-                    if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(step.entity) {
-                        t.direction  = Velocity::ZERO;
-                        t.is_braking = true;
-                    }
-                }
-                Some(tp) => {
-                    let ship_pos = match self.world.inner().get::<&PositionComp>(step.entity).ok() {
-                        Some(c) => c.0,
-                        None    => continue,
-                    };
-                    let dx = tp.x - ship_pos.x;
-                    let dy = tp.y - ship_pos.y;
-                    let dz = tp.z - ship_pos.z;
-                    let len = (dx*dx + dy*dy + dz*dz).sqrt().max(f32::EPSILON);
-                    if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(step.entity) {
-                        t.direction  = Velocity { dx: dx/len, dy: dy/len, dz: dz/len };
-                        t.is_braking = false;
-                    }
-                }
+                // Arrived: hold position, keep ApproachComp so the ship resumes
+                // if a Ship target later drifts back out of range.
+                Some((tp, arrival)) if ship_pos.distance(tp) <= arrival => self.brake_thrust(entity),
+                // Still closing: steer toward the target's latest position.
+                Some((tp, _)) => self.steer_thrust_toward(entity, ship_pos, tp),
             }
         }
     }
