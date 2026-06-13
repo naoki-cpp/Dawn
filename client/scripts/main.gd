@@ -228,36 +228,41 @@ func _input(event: InputEvent) -> void:
 		if mb.pressed:
 			match mb.button_index:
 				MOUSE_BUTTON_LEFT:
-					## 左クリックが船 / ゲートに当たれば接近対象として選択（ADR-0015）。
-					## どちらにも当たらなければダブルクリック移動を判定する。
-					var hit_ship: int = _pick_ship_at(mb.position)
-					var hit_gate: int = _pick_gate_at(mb.position)
-					if hit_ship >= 0:
-						_select_approach_target(hit_ship)
-					elif hit_gate >= 0:
-						_select_approach_gate(hit_gate)
-					else:
-						_check_double_click(mb.position)
+					## Double-click steering takes priority and must work even when a
+					## ship or gate is under the cursor (e.g. at spawn next to Gate 0).
+					## Only a click that is NOT a double-click selects an approach target.
+					if not _check_double_click(mb.position):
+						var hit_ship: int = _pick_ship_at(mb.position)
+						if hit_ship >= 0:
+							_select_approach_target(hit_ship)
+						else:
+							var hit_gate: int = _pick_gate_at(mb.position)
+							if hit_gate >= 0:
+								_select_approach_gate(hit_gate)
 				MOUSE_BUTTON_RIGHT:
 					## 右クリック → ロックオン対象を選択
 					_try_lock_on(mb.position)
 
 # ── ダブルクリック判定 ────────────────────────────────────────────────────────
 
-func _check_double_click(pos: Vector2) -> void:
+## Returns true when this click was consumed as a double-click (a move was
+## issued, or suppressed only because the camera was dragging). The caller
+## then skips approach-target selection so steering always wins.
+func _check_double_click(pos: Vector2) -> bool:
 	var now: float = Time.get_ticks_msec() / 1000.0
 	var dt : float = now - _last_click_time
 	var dp : float = pos.distance_to(_last_click_pos)
 
 	if dt < DOUBLE_CLICK_SEC and dp < DOUBLE_CLICK_PX:
-		## カメラドラッグ中のダブルクリックは無視
+		## Ignore a double-click made while dragging the camera.
 		var cam_dragging: bool = (_camera as Node).call("is_dragging") as bool
 		if not cam_dragging:
 			_on_double_click(pos)
-		_last_click_time = -1.0  ## リセット（3連打を2回目のダブルクリックにしない）
-	else:
-		_last_click_time = now
-		_last_click_pos  = pos
+		_last_click_time = -1.0  ## reset so a triple-click is not a 2nd double-click
+		return true
+	_last_click_time = now
+	_last_click_pos  = pos
+	return false
 
 # ── 船のピック（クリック位置 → 最寄りの船 ID）────────────────────────────────
 
@@ -310,7 +315,7 @@ func _pick_gate_at(screen_pos: Vector2) -> int:
 		var t: float   = (p - from).dot(dir)
 		var closest_pt: Vector3 = from + dir * t
 		var dist: float = p.distance_to(closest_pt)
-		if dist < 800.0 and t > 0.0 and dist < closest_dist:
+		if dist < 300.0 and t > 0.0 and dist < closest_dist:
 			closest_dist = dist
 			closest_id   = g.get("gate_id", -1) as int
 	return closest_id
