@@ -14,6 +14,7 @@ extends Node
 
 @onready var _connection  : Node        = $Connection
 @onready var _ships_root  : Node3D      = $World/Ships
+@onready var _gates_root  : Node3D      = $World/Gates
 @onready var _stats_label : Label       = $HUD/StatsLabel
 @onready var _cap_label   : Label       = $HUD/CapLabel
 @onready var _cap_bar     : ProgressBar = $HUD/CapBar
@@ -111,6 +112,7 @@ func _ready() -> void:
 	_build_duel_result_overlay()
 	_setup_cap_bar()
 	_update_hud()
+	_spawn_gate_markers()
 
 func _process(delta: float) -> void:
 	_update_gate_proximity()
@@ -119,6 +121,47 @@ func _process(delta: float) -> void:
 		if _jump_notice_timer <= 0.0:
 			_jump_notice = ""
 	_update_hud()
+
+## Spawns a visual marker for every Jump Gate in the player's current Star
+## System (ADR-0009). Re-run on Star System change to swap markers.
+func _spawn_gate_markers() -> void:
+	for child: Node in _gates_root.get_children():
+		child.queue_free()
+
+	for gate: Variant in JUMP_GATES:
+		var g: Dictionary = gate as Dictionary
+		if (g.get("from_system", "") as String) != _current_system_name:
+			continue
+		var gate_pos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
+		var radius  : float   = g.get("activation_radius", 0.0) as float
+
+		var marker: Node3D = Node3D.new()
+		marker.position = Vector3(gate_pos.x, gate_pos.y, -gate_pos.z) * WORLD_SCALE
+		_gates_root.add_child(marker)
+
+		var ring: MeshInstance3D = MeshInstance3D.new()
+		var torus: TorusMesh = TorusMesh.new()
+		torus.inner_radius = radius * WORLD_SCALE * 0.85
+		torus.outer_radius = radius * WORLD_SCALE
+		var mat: StandardMaterial3D = StandardMaterial3D.new()
+		mat.albedo_color    = Color(0.2, 0.8, 1.0, 0.35)
+		mat.emission_enabled = true
+		mat.emission        = Color(0.2, 0.8, 1.0)
+		mat.emission_energy_multiplier = 1.5
+		mat.transparency    = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.shading_mode    = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ring.mesh     = torus
+		ring.material_override = mat
+		ring.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+		marker.add_child(ring)
+
+		var label: Label3D = Label3D.new()
+		label.text             = "Gate #%d -> %s" % [g.get("gate_id", -1) as int, g.get("to_system", "") as String]
+		label.position         = Vector3(0.0, radius * WORLD_SCALE * 0.3, 0.0)
+		label.billboard        = BaseMaterial3D.BILLBOARD_ENABLED
+		label.no_depth_test    = true
+		label.modulate         = Color(0.2, 0.8, 1.0)
+		marker.add_child(label)
 
 ## Tracks whether the player ship is within activation range of a Jump Gate
 ## (ADR-0009). Distance is computed in server units (Godot units / WORLD_SCALE).
@@ -320,6 +363,7 @@ func _handle_star_system_changed(p: Dictionary) -> void:
 		_current_system_name = to_name
 		_jump_notice         = "Entered %s system" % to_name
 		_jump_notice_timer   = 3.0
+		_spawn_gate_markers()
 
 func _on_connection_changed(connected: bool) -> void:
 	if not connected:

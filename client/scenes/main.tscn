@@ -28,6 +28,8 @@ shadow_enabled = true
 
 [node name="Ships" type="Node3D" parent="World"]
 
+[node name="Gates" type="Node3D" parent="World"]
+
 [node name="HUD" type="CanvasLayer" parent="."]
 
 [node name="StatsLabel" type="Label" parent="HUD"]

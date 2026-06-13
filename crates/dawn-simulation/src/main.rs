@@ -933,28 +933,50 @@ async fn run_cluster_server(ship_count: usize) {
             rafts[i].tick();
         }
 
-        // Collect new events from every node for broadcast.
-        let mut all_new_events = Vec::new();
-        for (i, node) in nodes.iter().enumerate() {
-            all_new_events.extend(
-                node.event_store().iter_from(events_before[i]).map(|r| r.event.clone()),
-            );
-        }
+        // Collect new events per Sector so each client only sees the Sector
+        // its ship is currently in — Sectors are independent worlds and a
+        // player in Sector 1 must not receive Sector 0's NPC events.
+        let events_by_sector: Vec<Vec<DomainEvent>> = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, node)| {
+                node.event_store().iter_from(events_before[i]).map(|r| r.event.clone()).collect()
+            })
+            .collect();
 
-        // Ownership handoff: a player ship completed a jump → the
-        // destination node adopts it and future commands route there.
-        for event in &all_new_events {
-            if let DomainEvent::JumpGateUsed(e) = event {
-                if let Some(&player_id) = ship_player.get(&e.ship_id) {
-                    let dest = e.to_sector.0 as usize;
-                    nodes[dest].adopt_player_ship(e.ship_id, player_id);
-                    player_sector.insert(player_id, dest);
-                    println!("  [Server] {player_id:?} ship #{} now owned by Sector {dest}",
-                        e.ship_id.raw());
+        // Ownership handoff: a player ship completed a jump → the destination
+        // node adopts it, future commands route there, and we remember to
+        // resend that Sector's InitialState below.
+        let mut jumped_players: Vec<(PlayerId, usize)> = Vec::new();
+        for sector_events in &events_by_sector {
+            for event in sector_events {
+                if let DomainEvent::JumpGateUsed(e) = event {
+                    if let Some(&player_id) = ship_player.get(&e.ship_id) {
+                        let dest = e.to_sector.0 as usize;
+                        nodes[dest].adopt_player_ship(e.ship_id, player_id);
+                        player_sector.insert(player_id, dest);
+                        jumped_players.push((player_id, dest));
+                        println!("  [Server] {player_id:?} ship #{} now owned by Sector {dest}",
+                            e.ship_id.raw());
+                    }
                 }
             }
         }
 
-        sessions.retain(|sess| sess.send_events(&all_new_events));
+        // Send each session only the events from the Sector it now occupies.
+        sessions.retain(|sess| {
+            let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
+            sess.send_events(&events_by_sector[sector])
+        });
+
+        // Resend InitialState to players that just jumped so the client clears
+        // the old Sector's ships (and its stale lock) and rebuilds from the
+        // destination Sector. `_on_initial_state` resets `_player_lock_target`.
+        for (player_id, dest) in jumped_players {
+            let initial_state = nodes[dest].build_initial_state_json();
+            if let Some(sess) = sessions.iter().find(|s| s.player_id == player_id) {
+                sess.conn.send_raw(&initial_state);
+            }
+        }
     }
 }

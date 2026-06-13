@@ -11,6 +11,7 @@
 //!   and appends `SectorTransitCompleted`. Other nodes ignore it.
 
 use crate::node::SimulationNode;
+use crate::star_map;
 use crate::snapshot::ShipSnapshot;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{JumpGateId, Position, SectorId, ShipId};
@@ -80,7 +81,18 @@ pub(crate) fn apply_committed_raft_entries<S: EventStore>(
                 if node.propose_transit(cmd).is_ok() {
                     // This node owned the Ship: hand its state to the
                     // destination through a second Raft round.
-                    let entry_pos = Position::ORIGIN;
+                    //
+                    // For Jump Gate transits, spawn the Ship near the gate in
+                    // the destination Sector that leads back to `from`, so
+                    // the player can immediately jump back (ADR-0009).
+                    let entry_pos = gate_id
+                        .and_then(|_| {
+                            star_map::gates_in_sector(to)
+                                .into_iter()
+                                .find(|g| g.to_sector == node.sector_id())
+                                .map(|g| g.position)
+                        })
+                        .unwrap_or(Position::ORIGIN);
                     if let Some(ship) = node.export_transit(ship_id, entry_pos) {
                         let from = node.sector_id();
                         raft.propose(
