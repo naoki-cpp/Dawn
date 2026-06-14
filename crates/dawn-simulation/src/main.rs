@@ -54,19 +54,22 @@ async fn main() {
     if args.contains(&"--serve".to_string()) {
         // --duel: 1 human vs 1 Bot, no NPC ships
         let duel_mode = args.contains(&"--duel".to_string());
+        let usize_arg = |name: &str| args.windows(2)
+            .find(|w| w[0] == name)
+            .and_then(|w| w[1].parse::<usize>().ok());
         // --ships N sets the NPC count (ignored in --duel mode)
         let ship_count = if duel_mode { 0 } else {
-            args.windows(2)
-                .find(|w| w[0] == "--ships")
-                .and_then(|w| w[1].parse::<usize>().ok())
-                .unwrap_or(P4_SHIPS_DEFAULT)
+            usize_arg("--ships").unwrap_or(P4_SHIPS_DEFAULT)
         };
+        // --pop-cap N sets the per-Sector population backstop (ADR-0018, last
+        // resort); set it low to observe new connections being refused.
+        let pop_cap = usize_arg("--pop-cap").unwrap_or(node::POPULATION_CAP);
         // --cluster: 3-node Raft cluster so Jump Gates work (ADR-0009)
         if args.contains(&"--cluster".to_string()) {
-            run_cluster_server(ship_count).await;
+            run_cluster_server(ship_count, pop_cap).await;
             return;
         }
-        run_phase4_server(ship_count, duel_mode).await;
+        run_phase4_server(ship_count, duel_mode, pop_cap).await;
         return;
     }
 
@@ -713,7 +716,7 @@ fn deliver_aoi_frame(
     sess.send_events(&visible_events)
 }
 
-async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
+async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_cap: usize) {
     println!("═══════════════════════════════════════════");
     println!("  Phase 5 — Godot WebSocket server          ");
     println!("═══════════════════════════════════════════");
@@ -734,6 +737,7 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
 
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
     let mut node = SimulationNode::new(NodeId(0), SectorId(0), bounds);
+    node.set_population_cap(pop_cap);
 
     let loaded_modules = data_loader::load_modules(
         "data/modules.toml",
@@ -813,6 +817,15 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
 
         // New TCP connection → spawn handshake task.
         while let Ok((stream, addr)) = new_conn_rx.try_recv() {
+            // Population backstop (ADR-0018, last resort): refuse new entrants
+            // when the Sector is already at its ship-count cap. Set far above
+            // the TiDi budget, so split/LoD/local-TiDi engage well before this.
+            if node.at_population_cap() {
+                eprintln!("[Server] connection from {addr} refused: Sector at population cap ({} ships)",
+                    node.ship_count());
+                drop(stream);
+                continue;
+            }
             let player_id      = node.next_player_id();
             let ship_id        = node.spawn_player_ship(player_id);
             // AoI: send only the ships in the new player's 27-cell neighborhood
@@ -950,7 +963,7 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
 ///   player's ship; ownership follows `JumpGateUsed` events.
 /// - Players spawn near Gate 0 (Sector 0 → Sector 1) so the jump can be
 ///   tried immediately.
-async fn run_cluster_server(ship_count: usize) {
+async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     use dawn_core::{DomainEvent, PlayerId};
     use dawn_event_store::store::EventStore as _;
     use transit::TransitOp;
@@ -982,6 +995,7 @@ async fn run_cluster_server(ship_count: usize) {
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
     let mut nodes: Vec<SimulationNode> = ids.iter().map(|&id| {
         let mut node = SimulationNode::new(id, SectorId(id.0), bounds);
+        node.set_population_cap(pop_cap);
         for def in data_loader::load_modules("data/modules.toml", modules::all_modules()) {
             node.register_module(def);
         }
@@ -1045,6 +1059,14 @@ async fn run_cluster_server(ship_count: usize) {
 
         // New TCP connection → spawn player in Sector 0 near Gate 0.
         while let Ok((stream, addr)) = new_conn_rx.try_recv() {
+            // Population backstop (ADR-0018, last resort): refuse new entrants
+            // when Sector 0 is already at its ship-count cap.
+            if nodes[0].at_population_cap() {
+                eprintln!("[Server] connection from {addr} refused: Sector 0 at population cap ({} ships)",
+                    nodes[0].ship_count());
+                drop(stream);
+                continue;
+            }
             let player_id      = nodes[0].next_player_id();
             let ship_id        = nodes[0].spawn_player_ship_at_pub(player_id, PLAYER_SPAWN);
             // AoI: scope the connect-time state to the player's 27-cell neighborhood (ADR-0019).

@@ -31,6 +31,11 @@ use dawn_event_store::{store::EventStore, InMemoryEventStore};
 
 use crate::snapshot::{ShipSnapshot, StateSnapshot};
 
+/// Per-Sector population backstop (ADR-0018 final resort). Set far above the
+/// TiDi budget so dynamic split / LoD / local TiDi all engage first; only
+/// extreme density ever reaches this admission limit.
+pub const POPULATION_CAP: usize = 100_000;
+
 // ── TickResult ────────────────────────────────────────────────────────────────
 
 /// Result returned after executing one tick.
@@ -87,6 +92,9 @@ where
     pending_bot_lock_commands: Vec<dawn_core::LockOnCommand>,
     /// Jump Gates whose `from_sector` is this node's Sector (ADR-0009).
     jump_gates: HashMap<JumpGateId, JumpGateDef>,
+    /// Per-Sector population backstop (ADR-0018). Defaults to [`POPULATION_CAP`];
+    /// tunable via [`Self::set_population_cap`].
+    population_cap: usize,
 }
 
 // ── Constructors ──────────────────────────────────────────────────────────────
@@ -129,6 +137,7 @@ impl<S: EventStore> SimulationNode<S> {
                 .into_iter()
                 .map(|g| (g.id, g))
                 .collect(),
+            population_cap            : POPULATION_CAP,
         }
     }
 
@@ -167,6 +176,7 @@ impl<S: EventStore> SimulationNode<S> {
                 .into_iter()
                 .map(|g| (g.id, g))
                 .collect(),
+            population_cap            : POPULATION_CAP,
         };
 
         for def in modules {
@@ -194,6 +204,28 @@ impl<S: EventStore> SimulationNode<S> {
         }
 
         node
+    }
+
+    // ── Population backstop (ADR-0018) ──────────────────────────────────────────
+
+    /// Whether the Sector is at its population backstop and should refuse new
+    /// entrants. Last resort in the degradation hierarchy (ADR-0018): dynamic
+    /// split, LoD, and local TiDi all engage before this admission limit.
+    ///
+    /// Keyed off the raw ship count, the same unit the TiDi budget uses
+    /// (`DilationController`). An earlier "effective population" that excluded
+    /// idle ships was dropped: by INV-MOVE a constant-velocity ship emits no
+    /// events yet is fully present and bandwidth-bearing, so "no recent events"
+    /// is not a sound idle signal. Reducing the cost of idle ships belongs in
+    /// LoD (8B-3) as lowered fidelity, not in a count that pretends they are
+    /// absent.
+    pub fn at_population_cap(&self) -> bool {
+        self.ship_count() >= self.population_cap
+    }
+
+    /// Override the per-Sector population backstop (default [`POPULATION_CAP`]).
+    pub fn set_population_cap(&mut self, cap: usize) {
+        self.population_cap = cap;
     }
 
     // ── Identity ──────────────────────────────────────────────────────────────
@@ -2486,5 +2518,46 @@ mod tests {
         let node = mem_node();
         let unknown = ShipId::new(NodeId(9), 999);
         assert!(node.aoi_enter_json(unknown).is_none());
+    }
+
+    // ── Population backstop (ADR-0018 / 8B-1) ────────────────────────────────
+
+    #[test]
+    fn at_population_cap_is_true_only_when_ship_count_reaches_the_cap() {
+        let mut node = mem_node();
+        node.set_population_cap(2);
+        assert!(!node.at_population_cap());
+        node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        assert!(!node.at_population_cap());
+        node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(100.0, 0.0, 0.0), Velocity::ZERO);
+        assert_eq!(node.ship_count(), 2);
+        assert!(node.at_population_cap());
+    }
+
+    #[test]
+    fn a_constant_velocity_ship_still_counts_against_the_population_cap() {
+        // It emits no events (INV-MOVE) yet is present and bandwidth-bearing,
+        // so the raw-count backstop must keep counting it across ticks.
+        let mut node = mem_node();
+        node.set_population_cap(1);
+        node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::new(50.0, 0.0, 0.0));
+        assert!(node.at_population_cap());
+        for _ in 0..500 { node.tick(); }
+        assert!(node.at_population_cap());
+    }
+
+    #[test]
+    fn destroying_a_ship_frees_capacity_against_the_population_cap() {
+        let mut node = mem_node();
+        node.set_population_cap(1);
+        let sid = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        assert!(node.at_population_cap());
+        // Despawn drops the ship from the world, lowering the count.
+        node.apply_event_pub(DomainEvent::ShipDespawned(dawn_core::events::ShipDespawned {
+            ship_id: sid,
+            tick   : Tick::ZERO,
+        }));
+        assert_eq!(node.ship_count(), 0);
+        assert!(!node.at_population_cap());
     }
 }

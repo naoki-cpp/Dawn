@@ -427,7 +427,7 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 
 | # | タスク | 備考 | 状態 |
 |---|---|---|---|
-| 1 | Sector Population Cap（**最終バックストップに格下げ**） | game-design.md §8 | ⬜ |
+| 1 | Sector Population Cap（**最終バックストップに格下げ**） | game-design.md §8 | ✅ 生 `ship_count()` ベース: `at_population_cap()` = `ship_count() >= population_cap`。TiDi 予算と同じ単位（生カウント）。`--pop-cap N` で Sector 毎に可変、両 serve ループで新規入場を拒否・3 テスト。当初の「アクティブ船除外（実効人口）」案は撤回 — INV-MOVE により等速船はイベントを出さず「無イベント = idle」が不成立（放置船を安くするのは数の除外でなく LoD=8B-3 の忠実度低下で表現する） |
 | 2 | Dynamic Sector Fission（分離可能負荷の第1手） | tick-model.md §8 | ⬜ |
 | 3 | Simulation LoD（忠実度の階層化・更新間引き） | game-design.md §8 層1 | ⬜ |
 | 4 | 局所 TiDi: dilation = 実時間ペーシングのみ・論理 Tick の処理内容は不変（テスト） | INV-005 と無関係 | ✅ `dilation.rs::DilationController`（判定は論理コスト=ship_count、物理時刻不使用・決定的）。単一 `--serve` ループに実配線（sleep のみ伸ばす） |
