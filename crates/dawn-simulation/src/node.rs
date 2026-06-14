@@ -708,6 +708,10 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Mark a ship as a player ship and apply the PLAYER stat profile.
+    ///
+    /// Test-only setup helper; the serve path adopts player ships via
+    /// `adopt_player_ship`.
+    #[cfg(test)]
     pub fn set_player_ship(&mut self, ship_id: ShipId) {
         if let Some(&entity) = self.ship_index.get(&ship_id) {
             self.base_stats.insert(ship_id, ShipStatsComp::PLAYER);

@@ -78,10 +78,13 @@ enum SectorSimulatorMessage {
     },
     /// Request a Jump-Gate Transit for `ship_id` via `gate_id` (ADR-0009).
     ///
-    /// Validated locally (Ship in range of the gate, not already in
+    /// Test-only: the production `--serve --cluster` loop routes jumps
+    /// through the direct `SimulationNode` path in `main.rs`, not this
+    /// actor. Validated locally (Ship in range of the gate, not already in
     /// transit), then proposed to the Raft Log via the same `TransitOp`
     /// pipeline as [`SectorSimulatorMessage::Transit`]. `reply` is `false`
     /// if the command was rejected up front.
+    #[cfg(test)]
     Jump {
         ship_id: ShipId,
         gate_id: dawn_core::JumpGateId,
@@ -207,6 +210,7 @@ impl SectorSimulatorActor {
                     let _ = reply.send(accepted);
                 }
 
+                #[cfg(test)]
                 SectorSimulatorMessage::Jump { ship_id, gate_id, reply } => {
                     // Up-front validation only (INV-006): Ship must exist,
                     // not be in transit, and be within the gate's
@@ -287,10 +291,12 @@ impl SectorSimulatorHandle {
         rx.await.expect("SectorSimulatorActor dropped reply sender")
     }
 
-    /// Request a Jump-Gate Transit (ADR-0009). Returns `false` if rejected
-    /// up front (unknown Ship, already in transit, unknown gate, or Ship
-    /// out of range). Acceptance only means the proposal was submitted to
-    /// Raft; the move happens once it commits.
+    /// Request a Jump-Gate Transit (ADR-0009). Test-only (see
+    /// [`SectorSimulatorMessage::Jump`]). Returns `false` if rejected up
+    /// front (unknown Ship, already in transit, unknown gate, or Ship out of
+    /// range). Acceptance only means the proposal was submitted to Raft; the
+    /// move happens once it commits.
+    #[cfg(test)]
     pub async fn jump(&self, ship_id: ShipId, gate_id: dawn_core::JumpGateId) -> bool {
         let (tx, rx) = oneshot::channel();
         self.tx.send(SectorSimulatorMessage::Jump { ship_id, gate_id, reply: tx }).await
