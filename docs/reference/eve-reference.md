@@ -89,11 +89,14 @@ EVE のキャパシタ回復は**非線形**。現在の充電量に依存し、
 - **Stackless Python**: tasklet（軽量マイクロスレッド）で大量同時接続を捌く。
   ただし1ノードは単一スレッド = 1コアしか使えない（→ 過密時の限界）。
 
-### Time Dilation (TiDi) — dawn が**意図的に採用しない**もの
+### Time Dilation (TiDi) — dawn は**境界つき局所的最終手段として採用**（ADR-0018）
 - 大規模戦闘でサーバが過負荷になると**ゲーム内時間を最大 5% まで引き延ばす**（tick 0.1Hz まで低下）。
-  負荷が捌けると 30% 程度まで回復。
-- **dawn の立場**: INV-TiDi / CLAUDE.md §2 で明確に否定。Tick の論理速度は一定に保ち、
-  過負荷は **Sector 入場制限（SpawnRejected）+ 動的分割**で事前対処する。TiDi は体験を損なう設計。
+  負荷が捌けると 30% 程度まで回復。EVE は各ノード = 1 Python コアのため**早期かつ広域**に発動する。
+- **dawn の立場（ADR-0018 で改訂）**: 当初は「意図的に不採用」だったが、単一密戦闘は分割不能で
+  その場合の手段が入場制限のみになると「クライマックスから締め出す」＝ EVE より悪い体験になりうる（§11.1）。
+  改めて、過負荷は **分割 → LoD → 局所 TiDi → 入場制限** の順で対処する。TiDi は
+  **(a) 局所 (b) 観測可能 (c) 非破壊 (d) 自動回復 (e) 後置** の 5 条件つき最終手段として許可。
+  差別化は「TiDi が無い」ではなく「**閾値が EVE より桁違いに高く、出ても局所・短時間・自動回復**」。
 
 出典: [EVE Online Architecture – HighScalability](https://highscalability.com/eve-online-architecture/),
 [Introducing TiDi](https://www.eveonline.com/news/view/introducing-time-dilation-tidi),
@@ -163,7 +166,7 @@ EVE のキャパシタ回復は**非線形**。現在の充電量に依存し、
 | Wrecking shot(確定300%) | 🚫 不採用 | 運任せの分散は意図的判断を増やさない |
 | キャパシタ非線形回復 | ❌ 線形 recharge | サイクル制消費+強制OFFのみ採用 |
 | Single Shard / Sol ノード | ◐ 研究テーマ | 3ノード固定・Sector→Node マッピング |
-| Time Dilation | 🚫 意図的に不採用 | INV-TiDi: 入場制限で対処 |
+| Time Dilation | ◐ 局所的最終手段で採用（ADR-0018） | INV-TiDi: 分割→LoD→局所 TiDi→入場制限。閾値を桁違いに高く |
 | Stargate ジャンプ(燃料0) | ✅ JumpGate / Transit (ADR-0009) | 燃料コスト無し（Frontier の固定ゲート相当） |
 | 船ジャンプドライブ(燃料比例) | ❌ 未導入 | Frontier 固有。採用は要 ADR |
 | 恒星熱による移動制限 | ❌ 未導入 | 「意図的判断を増やす制約」の候補 |
@@ -173,7 +176,7 @@ EVE のキャパシタ回復は**非線形**。現在の充電量に依存し、
 
 ---
 
-## 6. コミュニティの声 — テーマ別 良/悪（実証データ）
+## 6. コミュニティの声 — テーマ別 良/悪（フォーラム観測データ・傾向）
 
 EVE 公式フォーラム / EVE Frontier 公式 docs / EVE University Wiki の公開議論
 **18,149 文書**（forums 18,094 / wiki 17 / frontier 38）を収集し、テーマ分類 + 語彙
@@ -191,9 +194,9 @@ EVE 公式フォーラム / EVE Frontier 公式 docs / EVE University Wiki の�
 |--:|---|--:|---|---|
 | **46%** | sovereignty | 701 | "グラインド化した支配"への最も明確な不満 | スコープ外で正解。グラインド設計を避ける |
 | 41% | frontier_survival | 258 | ⚠️ 大半は EVE 側の誤検出（§6.3 参照） | データ薄。判断保留 |
-| 40% | progression_skills | 589 | スキル制＋課金育成への不満 | スコープ外で正解（**FBD-009 裏付け**） |
-| 39% | economy_market | 2539 | AFK 採掘/ratting＝"退屈なグラインド"批判 | スコープ外で正解（**FBD-009 裏付け**） |
-| 38% | performance_tidi | 312 | TiDi/lag は一様に負の体験 | **INV-TiDi（不採用）を補強** |
+| 40% | progression_skills | 589 | スキル制＋課金育成への不満 | 観測はスコープ判断と整合（**FBD-009 と整合・実証ではない/11.5**） |
+| 39% | economy_market | 2539 | AFK 採掘/ratting＝"退屈なグラインド"批判 | 観測はスコープ判断と整合（**FBD-009 と整合・実証ではない/11.5**） |
+| 38% | performance_tidi | 312 | TiDi/lag は一様に負の体験 | **TiDi 閾値を桁違いに高く・局所/短時間に（ADR-0018）** |
 | 37% | ui_ux_npe | 859 | 退屈な序盤が新規を AFK へ追いやる | 操船 UX を "判断のある体験"に |
 | 37% | capacitor | 607 | cap 戦＝緊張ある駆け引きとして機能 | サイクル消費＋強制 OFF は妥当 |
 | 36% | tank_ehp | 1724 | 小さな数値調整で艦の人気が変わる | データ駆動(TOML)バランスは妥当 |
@@ -255,7 +258,7 @@ EVE 公式フォーラム / EVE Frontier 公式 docs / EVE University Wiki の�
   「Frontier の survival 設計の良し悪しは、現状の収集データでは判定できない」。採用検討時は
   Reddit r/evefrontier などの community ソースを別途集める必要がある。
 
-> **総括**: dawn の既存方針（**TiDi 不採用 / 採掘・スキル育成・課金成長を入れない /
+> **総括**: dawn の既存方針（**TiDi を局所的最終手段に限定（ADR-0018）/ 採掘・スキル育成・課金成長を入れない /
 > 戦闘は適用と cap の駆け引きを核にする / 移動とバランスは能動的判断とデータ駆動で扱う**）は、
 > 18k 文書のコミュニティ不満傾向と強く整合する。最大の教訓は「退屈なグラインドを作らない」。
 > 一方 Frontier 固有要素（燃料/恒星熱/Web3）の賛否は**データ不足で判定保留**。
@@ -413,3 +416,298 @@ Fuel を消費**、という循環。
 
 > いずれも挙動変更につき、着手は ADR 起票 → 人間承認（CLAUDE.md §1/§7）。本ファイルは
 > 「外部ゲームの事実と示唆の記録」であって仕様ではない。
+
+---
+
+## 8. 分散アーキテクチャの実例 — EVE のノード/グリッド/スケール（dawn の本丸）
+
+ADR-0016 で柱① **「TiDi の無い大規模リアルタイム戦闘」** を筆頭に据えた。これは dawn の
+分散基盤そのものが売りになるという主張であり、**EVE がどこで詰まり、何で凌いでいるか**を
+正確に知ることが最重要になる。ここが「EVE を超える」の技術的な主戦場。
+
+### 8.1 EVE のスケール戦略（7 つの常套手段 + 1 つの驚き）
+
+1. **Do Nothing** — 多くの負荷スパイクは放っておけば収まる。
+2. **Run It Hot** — ノードは常時 100% CPU で回す（コスト最適）。
+3. **Sharding by Solar System** — 世界をソーラーシステム単位で分割。1 ノードに複数システム。
+4. **Live Node Migration** — 過負荷時、**小さな戦闘を別マシンへ移し**、大戦闘に資源を空ける
+   （移動中プレイヤーは一時切断、移動後は快適に）。
+5. **Supernodes / Reinforced Node** — 予告された大戦闘用に、**該当システムを専用ノードへ手動割当**
+   （他プロセスと競合させず全リソースを与える）。Reserve node を確保して TiDi を回避/緩和。
+6. **Throttle Expensive Operations** — セッション変更（システム遷移・艦変更・fleet 参加）は
+   **最大 10 秒に 1 回**に制限。数百のスキルを再計算する高コスト処理だから。
+7. **Brain-in-a-Box** — セッション変更のたびにスキル/艦性能を再計算せず、専用ノードが
+   事前計算して **1 回の更新にまとめて送る**。fleet 移動時の負荷を激減。
+8. **（驚きの一手）Time Dilation** — 過負荷時に**ゲーム内時間を引き延ばす**。lag/desync の
+   代わりに全員一律で遅くし、整合性と公平性を保つ。← dawn は **局所・最終手段として採用**（ADR-0018）。
+   EVE との差は「全 Sector 一律・早期発動」ではなく「当該 Sector 局所・高閾値・自動回復・観測可能」。
+
+### 8.2 EVE の構造的限界（dawn が突くべき弱点）
+
+- **1 ノード = 1 CPU コアの単一スレッド（Stackless Python）**。約 5000+ システムを ~170 ノードに
+  マップし、低負荷システムは相乗り・過密システム（Jita）は単独・市場も単独。
+  **個々のシステムは 1 コアの天井に当たり続ける**——20 年解けていない根本制約。
+- **Static Cluster Premapper**: 起動時に各システムの負荷フィンガープリントを推定して割当。
+  **コンステレーション（隣接システム群）は同一ノードに置きたがり**、最適ノードより 20% 重い
+  程度なら近接性を優先する（局所性 > 完全な負荷分散）。
+- **Node Death**: あるノードが落ちると、そのノード上の**複数システムが巻き添え**で停止し、
+  プレイヤーが切断される。単一スレッド/単一プロセスの脆さがそのまま障害単位になる。
+- **Interest 更新間隔**: 物理 + interest graph の更新に間隔があり、高速艦が「滑らかに近づく」
+  のではなく**突然出現**する。Bracket（クライアントのアイコン）は大規模戦で**サーバ側負荷**を生む。
+  グリッドは概ね **250km 以内**のオブジェクトを同一グリッドに保つ。
+
+### 8.3 dawn への含意（Phase 8 / 柱① の設計指針）
+
+| EVE の手法/限界 | dawn の立場・打ち手 |
+|---|---|
+| 1 ノード=1 コア単一スレッド（解けない天井） | **Rust + Sector 単位 ECS は 1 ノードで複数コアを使える**。EVE が 20 年逃れられない制約を構造的に回避——**最大の優位**。 |
+| Time Dilation（過負荷を時間で吸収） | **局所的最終手段で採用（ADR-0018）**。通常は一定、分割不能な密戦闘超過時のみ当該 Sector を局所 dilate（観測可能・自動回復）。 |
+| Reinforced Node を**手動・事前**割当 | dawn の主張は **動的・自動の Sector 分割 + 入場制限**。EVE が人手で凌ぐところを自動化するのが研究の核（§ tick-model §8）。 |
+| Node Death でシステムごと巻き添え切断 | **Raft フェイルオーバー + Event 再生（INV-002）**で復旧可能にする。「ノード死＝世界の喪失」を「ノード死＝再選出して再生」に変える。**売りになる差別化**。 |
+| Premapper の**局所性優先**（近接システムを同居） | dawn の Sector→Node 割当も**近接 Sector を同居**させると Transit（Raft）コストが下がる。動的分割の指針。 |
+| Throttle / Brain-in-a-Box（セッション変更が高コスト） | dawn の Transit/Jump も**ハンドオフを軽く**保つ。派生状態（fitting stat 等）は**再計算せずスナップショットで渡す**。dawn は既に Event↔派生状態を分離しており整合。 |
+| Interest 更新間隔・Bracket のサーバ負荷 | dawn の次の課題は **Area-of-Interest**。各クライアントは自分の「グリッド」だけ受け取り、更新頻度を可変にする。現状の Sector 単位フィルタ（fb2a484）を **Sector 内のグリッド単位 AoI** に細分するのが大規模戦の帯域レバー。 |
+
+> **総括**: 「EVE を超える」の技術的な核は 3 点に集約される。
+> ① **マルチコア/ノード**（Rust）で EVE の単一スレッド天井を超える、
+> ② **動的・自動の Sector 分割 + LoD**で過負荷を捌き、捌けない単一密戦闘のみ局所 TiDi に逃がす（ADR-0018・INV-TiDi）、
+> ③ **Raft + Event 再生**で Node Death を復旧可能にする。
+> いずれも dawn の既存設計（Sector/Node・Raft・イベントソーシング）の延長線上にある。
+> Phase 8（Anti-TiDi / スケール基盤）の ADR でこれらを具体化する。
+
+出典:
+[EVE Online Architecture（HighScalability）](https://highscalability.com/eve-online-architecture/),
+[7 Sensible and 1 Surprising Way EVE Scales](https://highscalability.com/7-sensible-and-1-really-surprising-way-eve-online-scales-to/),
+[Tranquility Tech IV（ノード/RAM 構成）](https://www.eveonline.com/news/view/tranquility-tech-iv),
+[Brain in a Box（mass test）](https://www.eveonline.com/news/view/final-mass-test-for-brain-in-a-box-on-october-27-dont-miss-it),
+[My node was equipped with the following…（reinforced node）](https://www.eveonline.com/news/view/my-node-was-equipped-with-the-following...),
+[Grid Sizes & You](https://www.eveonline.com/news/view/grid-sizes-you),
+[Building a Balanced Universe（premapper）](https://www.eveonline.com/news/view/building-a-balanced-universe)
+
+---
+
+## 9. 一次技術資料（CCP 講演 / devblog / 論文）と読み筋
+
+Fanfest / GDC の CCP 技術講演・devblog・学術論文。**dawn の Phase 8 設計の直接の根拠**になる。
+最重要の発見: **CCP 自身が「単一スレッド・モノリシックなノードが限界」と公言し、外部エンジン
+（Hadean）で空間分割の分散シミュレーションに賭けた**こと。dawn はその答えを最初から設計に
+内蔵している。
+
+### 9.1 CCP の一次技術資料（注釈つき）
+
+- **EVE: Aether Wars（GDC 2019・Hadean "Aether Engine"）** 〔最重要〕
+  EVE 資産 + Hadean のクラウド分散エンジンで **10,000 隻の戦闘**を狙った技術デモ。
+  CCP の言葉: 「*the core of New Eden is still full-mesh nodes in a super-computing cluster,
+  where each node is a **monolithic single-threaded application***」。
+  → **CCP 自身が単一スレッド・モノリシックノードを限界と認め、空間分割の分散シミュレーション
+  （まさに dawn の Sector 分割）に賭けた**。dawn の命題が当事者によって裏書きされている。
+  違いは「EVE は後付けで外注、dawn は最初からそう作る」。
+
+  **結果（その後・2019〜）**:
+  - GDC19: **14,274 クライアント接続 / ピーク ~10,412（人間 3,852 + Bot）/ 88,988 隻撃沈 /
+    1,470 万発**を 1 インスタンスで処理。Gamescom: 88 か国 4,369 人。Fanfest（Phase III）:
+    PlayFab 認証で **30,000 人同時サインオン**のストレステストを通過。
+  - **ただし 30Hz の tick rate を一貫して維持できなかった**（ログイン認証も初回 30 分遅延）。
+    → **「正しいアーキテクチャでも、大規模で tick を一定に保つのは本当に難しい」**という
+    率直な教訓。dawn の INV-TiDi（論理 Tick 一定）は容易ではなく、dawn の中核的挑戦そのもの。
+  - **CCP は Aether Wars を製品化せず、Phase III 後に終了**（"research initiative"）。
+    **ライブ EVE（Tranquility）には統合されず、TQ は今も単一スレッド・モノリシックノードのまま。**
+    Hadean は以後 Minecraft / metaverse 方面へ。
+  → 含意は二重: ①「正しい設計は実証済み（PoC は成功）」が、②「EVE は実証しても本番に載せ替え
+    られなかった」。**dawn の勝ち筋は "最初から本番がその設計" であること**（後付け移行の
+    巨大コストを負わない）。同時に①の tick-rate 課題は dawn が正面から解くべき本丸。
+- **CarbonIO & BlueNet（ネットワーク技術 devblog）** 〔最重要〕
+  「*Stackless Python can only execute as fast as your fastest CPU core*」— **GIL のせいで
+  マルチコアが効かない**。大規模戦は単一コア能力を超える。そこで CarbonIO（GIL 外の
+  マルチスレッド通信エンジン）と BlueNet（C++ が Python を完全バイパスしてノード間ルーティング）
+  を **C++ で書いて GIL を回避**した。
+  → dawn が **Rust（GIL 無し・ネイティブにマルチコア）**を選んでいることは、EVE が後から
+  C++ で部分的に逃げた制約を**最初から負わない**ことを意味する。§8.3 ①の一次的裏付け。
+- **Stackless Python in EVE（Kristján Valur Jónsson）** — tasklet（軽量マイクロスレッド）で
+  大量同時接続を捌くモデル。dawn の Actor/Mailbox（tokio task）と発想は近いが、GIL が無い分
+  dawn は真の並列を取れる。
+- **Tranquility Tech IV（ハードウェア devblog）** — ~170 ノードで全システムを simulate、
+  Jita 単独・The Forge 市場単独、1 マシン 13 ノード・512GB（ノード平均 ~39GB）。
+  → 「過密拠点は専用ノード」という運用知見。dawn の動的 Sector 分割の現実的な目安。
+- **Brain in a Box（devblog）** — セッション変更時のスキル/艦再計算が高コスト。事前計算して
+  1 更新で送る。→ dawn の Transit/Jump ハンドオフは派生状態をスナップショットで渡し、
+  再計算を避ける（§8.3）。
+
+### 9.2 学術論文・実戦データ
+
+- **"Monitoring and Analyzing Performance of Networked Virtual Environments: The Case of EVE"
+  （IEEE）** — EVE を題材にした NVE 性能測定。分散プラットフォームへの移行を扱う。
+- **"Avatar Mobility in Networked Virtual Environments"（arXiv:0807.2328）** —
+  **3 か月・約 3 億回の移動 / 70 万アカウント**を分析し、**イベントに対応した人口スパイクを
+  予測**できると示す。→ dawn の **動的 Sector 分割は「予測して事前分割」できる**という
+  学術的裏付け（EVE の手動 Reinforced Node を自動化する根拠）。
+- **Battle of B-R5RB / Asakai（実戦データ）** — 1 システムに最大 **2,670 人同時 / 延べ 7,548
+  キャラ**。TiDi 下で 21 時間。→ dawn が「TiDi 無しでこの規模」を目標値にする際の比較基準。
+
+### 9.3 読み筋（総括）
+
+> EVE の 20 年の技術史は、**「単一スレッド・モノリシックなソーラーシステムノード」という
+> 原罪を、TiDi / Reinforced Node / CarbonIO / BlueNet / Brain-in-a-Box / Aether Wars と
+> 次々に"回避策"で凌いできた歴史**である。CCP 自身が Aether Wars で根本再設計の必要を認めた。
+>
+> dawn は、その回避策の積み重ねが指し示す終着点 — **GIL の無い言語（Rust）/ 空間分割
+> （Sector）/ コンセンサス（Raft）/ イベントソーシング（再生可能な状態）** — を**最初から
+> 設計に内蔵**している。「EVE を超える」は奇策ではなく、**EVE が後付けで目指した先を最初から
+> 正しく作る**ことに等しい。Phase 8 ADR はこの §8/§9 を根拠に書く。
+>
+> **ただし誠実な留保**: Aether Wars は「正しい設計でも大規模で **tick rate を一定に保つのは
+> 難しい**」ことも示した（30Hz を一貫維持できなかった）。dawn の INV-TiDi（論理 Tick 一定）は
+> アーキテクチャを選べば自動で得られるものではなく、**dawn が正面から実証すべき本丸の難所**。
+> 「アーキテクチャは正しい」と「一定 tick を実際に守れる」は別問題であり、後者こそが
+> dawn の研究価値の中心になる。
+
+出典:
+[EVE: Aether Wars（tech demo）](https://www.eveonline.com/news/view/introducing-a-new-tech-demo-eve-aether-wars),
+[CarbonIO and BlueNet](https://www.eveonline.com/news/view/carbonio-and-bluenet-next-level-network-technology-1),
+[Stackless Python in EVE（Jónsson slides）](https://www.slideshare.net/Arbow/stackless-python-in-eve),
+[Devblog: Tranquility Tech IV](https://forums.eveonline.com/t/devblog-tranquility-tech-iv/398191),
+[Avatar Mobility in NVEs（arXiv:0807.2328）](https://arxiv.org/pdf/0807.2328),
+[Monitoring & Analyzing Performance of NVEs: EVE（IEEE）](https://ieeexplore.ieee.org/document/1364600/),
+[Battle of B-R5RB（Wikipedia）](https://en.wikipedia.org/wiki/Battle_of_B-R5RB)
+
+---
+
+## 10. 大規模分散シミュレーション基盤の比較（dawn の Sector 分割の設計参考）
+
+§8/§9 は EVE 単体の話。ここでは **EVE 以外の分散シミュレーション基盤**と**空間分割の手法**を
+並べ、dawn の動的 Sector 分割（Phase 8）が**どの戦略を採り / どの罠を避けるべきか**を定める。
+最大の教訓は **SpatialOS（Improbable）の顛末** — 「何でも分散」は統合コストで死ぬ。
+
+### 10.1 空間分割の手法カタログ
+
+| 手法 | 概要 | 採用例 | dawn 適性 |
+|---|---|---|---|
+| 静的ゾーニング | 固定境界でゾーン分割 | EVE（system=node）/ 旧来 MMO | 現 dawn（3ノード固定）。出発点として堅い |
+| Grid / Quadtree / Octree | 空間を再帰細分し負荷で分割 | **Aether Engine = octree** | 動的分割の候補。ただし粒度は Sector で十分 |
+| Voronoi | 分割ノードを動かして負荷均衡 | 研究 | 過剰。Sector 粒度には重い |
+| Q+Rtree 等ハイブリッド | quasi-static な物体を最適化 | 研究 | 当面不要 |
+
+**境界の扱い**が要点: 「**grey area / mirroring**」（境界付近を両サーバが部分所有しデータをミラー）は
+ハンドオフを滑らかにするが、**サーバコードを著しく複雑化し同期問題を増やす**（一次資料の指摘）。
+
+> dawn の立場: **grey area を採らない。** INV-003（Sector 境界を越える操作は Raft 経由）を守れば、
+> 境界の二重所有による同期バグを**構造的に排除**できる。代償はハンドオフのレイテンシだが、
+> dawn は Transit 頻度を下げる設計（CLAUDE.md パターン5）でこれを吸収する。
+
+### 10.2 既存基盤の比較
+
+| 基盤 | 空間分割 | 局所性 | 顛末・教訓 |
+|---|---|---|---|
+| **EVE / Tranquility** | 静的（system=node, premapper） | constellation 同居 | 単一スレッド天井 → TiDi。20 年解けず（§8/§9） |
+| **Aether Engine（Hadean）** | octree・コア/マシン跨ぎ動的 | あり | PoC は 14k 接続成功も**製品化されず**。一定 tick が課題（§9） |
+| **SpatialOS（Improbable）** | 動的・worker 分散 | locality of reference | **Worlds Adrift 閉鎖(2019)。過大なサーバオーバヘッド/ネット障害頻発/統合に既存バックエンド全書き換え/運用スキル希少/Unity にブロックされ開発中タイトル全滅**。"distributed-everything" の代償 |
+| **dawn** | Sector（現 静的3ノード → 動的分割は Phase 8） | 近接 Sector 同居（§8.3） | これから。粗粒度 + Raft(transit のみ) で中庸を狙う |
+
+### 10.3 dawn への設計示唆（Sector 分割の指針）
+
+1. **粗粒度を保つ（最重要）。** SpatialOS の死因は「全エンティティを分散管理」した統合コスト。
+   dawn は **Sector 単位の粗い分散 + Raft は transit だけ**を維持する。個々のエンティティを
+   分散トランザクションに乗せない。これは既に dawn の設計（INV-003 / Raft は境界越えのみ）。
+2. **動的分割は octree より "Sector 再割当" で十分。** EVE premapper の「負荷フィンガープリント
+   + 局所性」+ arXiv:0807.2328 の「スパイク予測」を組み合わせ、**Sector を予測的に別ノードへ
+   migrate / split** する（EVE の手動 Live Node Migration / Reinforced Node の**自動版**）。
+   空間を octree で連続再分割するより、**意味境界（Sector）で切る**方が実装も整合も楽。
+3. **境界ミラーリングを避ける。** §10.1 のとおり grey area は同期バグの温床。Raft ハンドオフを
+   明示的な所有権移転に保つ（INV-003 / FBD-006）。
+4. **始めは静的でよい。** 動的分割は Phase 8。早すぎる分散は SpatialOS の轍。まず固定 Sector で
+   ゲーム（戦闘の深み）を成立させ、スケールは後段で。
+
+> **総括（3 つの道）**: **SpatialOS は「分散を全部やる」で統合コストに殺され、EVE は「分散を避ける
+> （単一スレッド）」で TiDi に縛られた。** dawn の勝ち筋はその中間 — **粗粒度の Sector 分散 +
+> イベントソーシング + Raft（transit のみ）**。奇しくもこれは現行 dawn の設計そのものであり、
+> §8〜§10 は「この中庸路線が正しい」ことを外部事例から裏付けている。Phase 8 はこの粒度を
+> 崩さずに動的化することに集中する。
+
+出典:
+[Aether Engine（Minecraft 採用・octree/動的負荷分散）](https://www.pcgamer.com/minecraft-is-using-a-spatial-simulation-engine-to-make-larger-and-more-immersive-experiences/),
+[Hadean × Minecraft（Medium）](https://medium.com/@hadeaninc/opening-up-new-possibilities-with-minecraft-45aa6a29e78),
+[Worlds Adrift（SpatialOS・閉鎖 / Wikipedia）](https://en.wikipedia.org/wiki/Worlds_Adrift),
+[Unity blocks Improbable's SpatialOS（MCV）](https://mcvuk.com/development-news/unity-blocks-improbables-spatial-os-all-live-and-in-development-games-affected/),
+[Overcoming the Limits of Scale in Virtual Worlds（Delphi）](https://members.delphidigital.io/reports/overcoming-the-limits-of-scale-in-virtual-worlds),
+[A Dynamic Load Balancing for MMO Game Server（Springer）](https://link.springer.com/chapter/10.1007/11872320_29),
+[Load balancing for MMOGs（GameDev.net・境界 grey area 議論）](https://www.gamedev.net/forums/topic/433915-load-balancing-for-mmogs/)
+
+---
+
+## 11. 批判的検討 — dawn 設計へのリスクと反論
+
+§6〜§10 は dawn の設計を肯定する材料に偏っていた（確証バイアス）。ここでは**逆向き**に、
+dawn 自身の設計が抱える未解決問題・誇張・前提の弱さを列挙する。**「EVE を超えられるか」という
+実現可能性は本プロジェクトの関心外（ビジョンは方向性）なので扱わない**。対象は
+「dawn の技術設計と意思決定の土台が健全か」に限る。
+
+### 11.1 アンチ TiDi（INV-TiDi）には分割できない本丸ケースが残る 〔重大〕
+
+- **単一の密な戦闘は原理的に分割できない。** 全対全で相互作用する 1 つの大戦闘（B-R5RB 型）を
+  ノード跨ぎにすると、毎 Tick ノード間で全状態を同期する必要が生じ、それは Raft/イベント処理の
+  遅い経路そのもの。**dawn の動的 Sector 分割は、最も必要な「ザ・大規模戦」でこそ効かない。**
+- dawn の答えは入場制限（SpawnRejected）= **「この戦闘に入れない」**。EVE が TiDi を選んだのは
+  「目当てのコンテンツから締め出す方が残酷」と判断したから。**入場制限 vs 時間引き延ばしは
+  どちらが良いか自明でなく、dawn は後者を一方的に劣ると断じている。** §6 の不満データには
+  「参加できないこと」への不満も含まれる。
+- ~~**未解決**~~ → **ADR-0018 で対応**。INV-TiDi を反転し、単一密戦闘では入場制限を最後に下げ、
+  局所 TiDi（全員残る）を優先する劣化ヒエラルキー（分割→LoD→局所 TiDi→入場制限）を採用した。
+  「締め出すより全員が少し遅い方が良い」という本批判の指摘を設計に取り込んだ。
+  残る課題（差分 TiDi の越境因果）は ADR-0018 の未解決論点として明記。
+
+### 11.2 イベントソーシングの内部矛盾（不変条件どうしが衝突する）〔重大〕
+
+- **FBD-001（truncate 禁止）+ INV-001（append-only）+ INV-002（ログから完全再生）は、
+  長寿命シャードで永続的に両立しない。** ログは無限増加し、再生は非現実的な時間になる
+  （EVE の「システムロードに 19 分」が示唆）。
+- 通常の解はスナップショット + ログ切り詰めだが、それは **FBD-001 と正面衝突**する。dawn は
+  スナップショットを持つが、「切り捨て禁止のまま完全再生を保証する」運用方針が未定義。
+- **そもそも EVE はシミュレーションをイベントソースしていない**（現在状態を DB 保持）。
+  リアルタイム Tick で毎秒大量イベントを追記し続ける設計は異例で、書き込み増幅が重い。
+  → ~~**要 ADR**~~ → **ADR-0017 で対応**: 2層ログ（ホット=圧縮可 / コールド=永久 append-only）を導入し、
+  INV-002 を「最新の検証済みスナップショット + 末尾から再生可能」に改訂。FBD-001 は trait 上維持
+  （圧縮はセグメント移送で履歴を破壊しない）。
+
+### 11.3 Raft を Transit のホットパスに置く代償 〔中〕
+
+- 全 Sector 越え移動が Raft コミット（リーダー経由・ネットワーク往復）を通る。**頻繁な境界越えで
+  リーダーが律速**し、移動ごとに遅延が乗る。
+- dawn の緩和策「Transit 頻度を下げる」（CLAUDE.md パターン5）は、**アーキテクチャがゲーム設計を
+  制約している**ことの裏返し。流動的移動や「境界を跨ぐ戦闘」がやりにくく、柱①
+  「大規模リアルタイム戦闘」と緊張関係にある。
+- 軽減はあるが（Sector を粗く / 近接同居 / バッチコミット）、**「境界をまたぐ戦闘」は本質的に苦手**
+  という性質は残る。→ **ADR-0017 §5 で方針決定**: 単一 Raft グループを意図的に維持（マルチ Raft は
+  メンテナンス不能として却下）。脱出路（境界ごとマルチグループ Raft）は記述のみ・事前構築しない。
+  唯一の単純な備えはバッチ提案だが、実測で fleet-jump 遅延が問題化してから入れる。
+
+### 11.4 マルチコア/Rust の優位は限定的（§8/§9 の表現を割り引く）〔訂正〕
+
+- §8.3①・§9 で「Rust が単一スレッド天井を超える / 最大の優位」と書いたが、これは **GIL の天井に
+  限った話**。EVE の真のボトルネックは**アルゴリズム的（密グリッドの全対全 O(n²)）**で、
+  言語では消えない。**2,670 隻グリッドの O(n²) は Rust でも同じ。**
+- マルチコアが効くのは「独立した多数の小戦闘」であって「1 つの大戦闘」ではない。
+  **優位が要るその瞬間（大戦闘）に優位が薄れる。** §8/§9 の競争的トーンは割り引いて読むこと。
+- 残る真の優位は「多数の中小戦闘を 1 ノードで並列に捌ける」点であり、これは依然有効だが、
+  EVE を象徴する「単一巨大戦闘」を解くものではない。
+
+### 11.5 実証データ（§6）の選択バイアス 〔中〕
+
+- **フォーラム投稿者 ≠ 課金者/中央値プレイヤー。** 声の大きいベテランの不満であり、
+  「何が売れ・何が定着するか」ではない。「グラインドは嫌われる」と言うが、**グラインド重の
+  ゲームが収益上位を占める**現実と整合しない（生存者/選択バイアス）。
+- **進行(progression) ≠ グラインド。** EVE の長期育成は強力な**リテンション**装置
+  （サンクコスト・アイデンティティ）。FBD-009 の絶対禁止は健全な進行まで捨て、
+  **「グラインドゼロ＝リテンションゼロ」**になりうる。§6 は FBD-009 を裏付けると結論したが、
+  それは **既存の制約に合う引用を選んだ**面がある（分析側の確証バイアス）。
+- 含意: FBD-009 は「ポリシー判断」として尊重するが、「§6 が実証した」と強弁しないこと。
+
+### まとめ（誠実な総括）
+
+> §8〜§10 の「中庸路線が正しい」という結論には、**11.1（密戦闘は分割不能）と 11.4（O(n²) は
+> 言語で消えない）という強い反論が成立する**。より正確な総括は:
+> **「dawn の分散設計は *多数の独立した中小戦闘* には効くが、*EVE を象徴する単一巨大戦闘* には
+> EVE と同じ壁に当たる。アンチ TiDi の優位は限定的で、密戦闘での体験設計（締め出し or 上限）は
+> 未解決。」**
+> さらに 11.2（イベントソーシングの不変条件衝突）は **dawn 内部の実装可能性に関わる穴**で、
+> Phase 8 より前に ADR で塞ぐ必要がある。§6 の実証は FBD-009 の十分条件ではない（11.5）。
+> これらは「方向性としての EVE 超え」を否定しないが、**設計の弱点として明記しておくべき**。
