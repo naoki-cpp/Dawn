@@ -7,6 +7,9 @@
 //!   cargo run -p dawn-simulation --bin simulate
 //!   cargo run -p dawn-simulation --bin simulate --release
 
+// Wired into ws_server in 8C-3/8C-4 (ADR-0019); unused until then.
+#[allow(dead_code)]
+mod aoi;
 mod checkpoint;
 mod cluster;
 mod data_loader;
