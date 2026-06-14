@@ -2011,6 +2011,69 @@ mod tests {
         );
     }
 
+    /// INV-002 / ADR-0017 (8A-4) — operational recovery does NOT require genesis
+    /// replay. After compacting the hot log behind the snapshot (so the genesis
+    /// events live only in the cold archive), reopening + restoring from the
+    /// snapshot still reproduces the live state.
+    #[test]
+    fn recovery_does_not_require_genesis_replay_after_compaction() {
+        use dawn_event_store::FileEventStore;
+
+        let dir  = tempfile::tempdir().unwrap();
+        let hot  = dir.path().join("events.log");
+        let cold = dir.path().join("cold.log");
+
+        let snap;
+        let live_final;
+        {
+            let store = FileEventStore::open(&hot).unwrap();
+            let mut node = SimulationNode::with_store(
+                NodeId(0), SectorId(0),
+                SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                store,
+            );
+            // Constant velocity, no move command → no transient thrust intent.
+            for i in 0..3u64 {
+                node.spawn_ship(
+                    dawn_core::ShipTypeId(1),
+                    Position::new(i as f32 * 100.0, 0.0, 0.0),
+                    Velocity::new(40.0, -15.0, 0.0),
+                );
+            }
+            for _ in 0..8 { node.tick(); }
+            snap = node.take_snapshot();        // tick 8
+            for _ in 0..4 { node.tick(); }
+            live_final = node.take_snapshot();  // tick 12
+        } // node dropped; hot file flushed
+
+        // Out-of-band compaction archives the events behind the snapshot, so they
+        // are removed from the hot log (they survive only in the cold archive).
+        {
+            let mut store = FileEventStore::open(&hot).unwrap();
+            store.compact(snap.log_index, &cold).unwrap();
+            assert_eq!(store.base_index(), snap.log_index);
+            assert_eq!(
+                store.records_on_disk(), 0,
+                "events behind the snapshot are archived, not in the hot log"
+            );
+        }
+
+        // Restart: reopen the compacted hot log and recover. iter_from(snap.log_index)
+        // touches only the (empty) hot tail — no genesis replay is possible or needed.
+        let store2 = FileEventStore::open(&hot).unwrap();
+        assert_eq!(store2.base_index(), snap.log_index, "hot log holds no genesis events");
+        let mut restored = SimulationNode::restore_from(store2, &snap, &[], &[]);
+        assert_eq!(restored.current_tick(), snap.tick);
+        for _ in 0..4 { restored.tick(); }
+        let restored_final = restored.take_snapshot();
+
+        assert_eq!(
+            postcard::to_stdvec(&live_final).unwrap(),
+            postcard::to_stdvec(&restored_final).unwrap(),
+            "recovery from snapshot + bounded hot tail (no genesis) must match live"
+        );
+    }
+
     #[test]
     fn hull_capacitor_and_fitting_state_are_restored_from_snapshot() {
         use crate::{modules, ship_types};

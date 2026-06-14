@@ -94,11 +94,12 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**次の単一タスク: Phase 8A-4 — failover / 再起動が創世記 replay を要求しないテスト（ADR-0014 連携）。**
-（8A-1/8A-2/8A-3/8A-5 完了: スナップショット検証 2 テスト + take_snapshot 正準ソート、
-FileEventStore の 2 層ログ（base_index ヘッダ）+ `compact()`（コールドアーカイブ + 原子的 swap）+ 4 テスト。
-全 workspace グリーン。残り 8A: 4=failover テスト、6=docs 反映、7=圧縮の自動トリガ・オーケストレーション。）
-理由: 圧縮の機構が揃ったので、復旧経路が創世記 replay に依存しないことをテストで固める。
+**次の単一タスク: Phase 8A-6 — event-catalog.md / architecture.md に 2 層ログを反映（docs）。**
+（8A-1〜8A-5 完了: スナップショット検証 2 テスト + take_snapshot 正準ソート、FileEventStore の
+2 層ログ（base_index ヘッダ）+ `compact()`（コールドアーカイブ + 原子的 swap）+ 4 テスト、
+圧縮後 reopen + restore で「創世記 replay 不要」を実証する failover テスト。全 workspace グリーン。
+残り 8A: 6=docs 反映、7=圧縮の自動トリガ・オーケストレーション。）
+理由: 機構とテストが揃ったので docs を実態に合わせ、その後 8A-7（実運用で圧縮を走らせる）へ。
 設計トラックとして §8C-1（空間索引 + AoI の新規 ADR 起票）は並行可。
 Phase 8 全体のタスク内訳は §10 を参照。
 CLAUDE.md フッターの「次回レビュー予定」は 2026-06-14 に
@@ -415,7 +416,7 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 | 1 | **スナップショット検証テスト**: ① round-trip（snapshot→restore→snapshot バイト一致）② snapshot + 末尾 Tick == live（cap/hull 含む） | dawn-simulation | ✅ take_snapshot 正準ソート + 2テスト |
 | 2 | ホットログのセグメント化（base_index ヘッダ）+ `compact()` 機構 | dawn-event-store | ✅ FileEventStore.compact + 4テスト |
 | 3 | コールドアーカイブ書き出し（append-only）+ 原子的 swap（write-new-then-swap） | dawn-event-store | ✅ compact() 内で実装（header に base を埋め rename 一発で原子的） |
-| 4 | failover / 再起動が創世記 replay を要求しないテスト（ADR-0014 連携） | dawn-simulation | ⬜ |
+| 4 | failover / 再起動が創世記 replay を要求しないテスト（ADR-0014 連携） | dawn-simulation | ✅ 圧縮後 reopen + restore テスト |
 | 5 | snapshot.rs のドキュメントコメントを改訂後 INV-002 に更新 | dawn-simulation | ✅（228f244） |
 | 6 | event-catalog.md / architecture.md に2層ログを反映 | docs | ⬜ |
 | 7 | 圧縮の自動トリガ（ノードのスナップショット周期 → `compact()` 呼び出しのオーケストレーション） | dawn-simulation | ⬜ |
