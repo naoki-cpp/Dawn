@@ -11,11 +11,21 @@
 //!    - Events at `log_index` and beyond are replayed on top.
 //! 4. The restored node is equivalent to the node at shutdown.
 //!
-//! # Snapshot does NOT replace the Event Log
+//! # Snapshot is the authoritative durable checkpoint (ADR-0017 / INV-002)
 //!
-//! The Event Log remains the single source of truth (INV-001).
-//! A snapshot is a performance optimisation — if it is lost or corrupt,
-//! the full state can always be recovered by replaying from log index 0.
+//! The Event Log stays append-only (INV-001) and is the history / propagation /
+//! snapshot-source. But the snapshot — not genesis replay — is what operational
+//! recovery and failover (ADR-0014) rely on: load the latest snapshot, then
+//! catch up the tail of events.
+//!
+//! Derived / transient state (position, capacitor, lock countdowns) is persisted
+//! in the snapshot. It is a per-tick pure function (position = velocity integral,
+//! cap = recharge) and is NOT event-sourced, so it cannot be rebuilt from events
+//! alone — it is restored from the snapshot and recomputed as the sim runs forward.
+//!
+//! Genesis (index 0) reconstruction is off-path (audit / disaster only): apply
+//! events to rebuild authoritative state, then let transient state recompute. No
+//! operational path depends on it.
 
 use std::{fs, io, path::Path};
 

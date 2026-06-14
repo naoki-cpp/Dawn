@@ -102,7 +102,10 @@ AI エージェントが機能を拡張する際、新しい Projection（Read �
 
 ```
 - EventStore に update / delete / truncate メソッドを追加してはならない（CLAUDE.md FBD-001）
-- 全ての State 変更は Event として記録されなければならない（INV-002）
+- 全ての**権威ある** State 変更は Event として記録する（INV-002）
+  ※ ADR-0017 で精緻化: 派生・transient 状態（位置・capacitor 等）はイベント化せず
+    スナップショットに永続化する。スナップショットが権威ある永続チェックポイントであり、
+    運用復旧はスナップショット + 末尾 catch-up で行う（genesis 完全 replay は経路外）。
 - Event スキーマの後方互換性は event-catalog.md のルールで管理する
 ```
 
@@ -111,4 +114,5 @@ AI エージェントが機能を拡張する際、新しい Projection（Read �
 ## 今後の再評価トリガー
 
 - Event Log のサイズが Snapshot でも管理できないほど膨大になった場合
+  → **ADR-0017 で対応**（2層ログ: ホットログ圧縮 + コールドアーカイブ）
 - Event スキーマの後方互換性管理コストが開発速度を著しく下げた場合
