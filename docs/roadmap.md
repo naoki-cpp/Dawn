@@ -484,7 +484,7 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 | # | タスク | 備考 | 状態 |
 |---|---|---|---|
 | 1 | ~~dawn-proto（protobuf）~~ → **不採用**。ワイヤ = postcard+serde 再利用 + 最小の版付きフレーミング（長さ前置・種別タグ・版ハンドシェイク）を transport 層に置く | CLAUDE.md §3 参照。理由: Rust↔Rust・多言語不要・スキーマ進化は §7 で規律化済み。protobuf は型の二重定義のみ生む | ✅ 方針確定（不採用） |
-| 2 | dawn-replication（追記ログのゴシップ配布 + アンチエントロピー + スナップショット転送） | 新規クレート・ADR-0021（単一所有のため競合解決 CRDT/LWW は不要） | ⬜ |
+| 2 | dawn-replication（追記ログのゴシップ配布 + アンチエントロピー + スナップショット転送） | 新規クレート・ADR-0021（単一所有のため競合解決 CRDT/LWW は不要）。**この着手時に `dawn-actor` を整理**: 暫定スタンドインの `ReplicationBus` を dawn-replication へ移動（or 削除）し、残る `dawn-actor` は純粋なクライアント転送境界（`ClientConnection`）に縮小・必要ならリネーム（`dawn-sector-node` が転送境界を再利用するため dawn-simulation へは畳まない） | ⬜ |
 | 3 | ネットワーク `RaftTransport` 実装（`InProcessTransport` の差し替え。静的 config のピア表） | trait は既存（transport.rs）。TLS 可能な選択（TCP+rustls / QUIC）にし後付けを塞がない | ⬜ |
 | 4 | dawn-sector-node（本番実行バイナリ・上記 transport + ゴシップの配線・静的 config 起動） | 新規クレート | ⬜ |
 | 5 | （任意・推奨）Raspberry Pi クラスタ実機検証 | 下記 ★ 参照 | ⬜ |
