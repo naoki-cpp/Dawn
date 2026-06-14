@@ -38,8 +38,9 @@ related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, roadm
 
 ### 目的
 
-EVE Online に着想を得た**研究用の分散シミュレーション基盤**。
-ゲームを作ることが目的ではない。以下の技術的命題を実証するためのプラットフォームである。
+EVE Online を**超えるゲーム**を作ることが目的（ADR-0016）。
+分散シミュレーション基盤はその**実現手段**であり、かつ EVE が TiDi で諦めた領域を突く**競争優位**である。
+基盤は以下の技術的命題を体現する。
 
 - Single Shard における数万エンティティのリアルタイム同期
 - Event Sourcing による完全な因果追跡と世界の再現性
