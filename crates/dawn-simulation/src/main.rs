@@ -9,6 +9,7 @@
 
 mod aoi;
 mod checkpoint;
+mod dilation;
 mod cluster;
 mod data_loader;
 mod modules;
@@ -638,6 +639,10 @@ impl DuelMetrics {
     }
 }
 const P4_TICK_MS       : u64   = 100;  // 10 Tick/sec
+/// Local Time Dilation budget (ADR-0018): logical cost (ship count) a single
+/// Sector handles per tick before dilation engages. Set far above normal load —
+/// the anti-TiDi threshold is intentionally very high (only extreme density).
+const TIDI_BUDGET      : f64   = 50_000.0;
 
 /// Apply a player command that behaves identically in the single-node
 /// (`--serve`) and clustered (`--serve --cluster`) servers — every command
@@ -765,6 +770,10 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
     // Duel mode: track session metrics (None until the player connects).
     let mut duel_metrics  : Option<DuelMetrics> = None;
     let mut player_ship_id: Option<ShipId>      = None;
+    // Local Time Dilation (ADR-0018). One Sector here, so dilation is inherently
+    // local. The budget is set far above normal load (anti-TiDi threshold), so it
+    // only engages under extreme density and auto-recovers.
+    let mut tidi = dilation::DilationController::new(TIDI_BUDGET);
 
     loop {
         interval.tick().await;
@@ -891,6 +900,24 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
         });
         // Drop AoI state for sessions that disconnected this tick.
         prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
+
+        // Local Time Dilation (ADR-0018): the decision uses a logical cost
+        // (ship count), never wall-clock, and only stretches real time — the
+        // tick above already ran unchanged. Engage/recover is logged for SLA.
+        let was_dilated = tidi.is_dilated();
+        let prior_active = tidi.active_ticks();
+        tidi.update(node.ship_count() as f64);
+        if tidi.is_dilated() {
+            if !was_dilated {
+                println!("[TiDi] dilation engaged: factor={:.2} (cost {} > budget {TIDI_BUDGET:.0})",
+                    tidi.dilation(), node.ship_count());
+            }
+            let extra = tidi.paced_tick_ms(P4_TICK_MS as f64) - P4_TICK_MS as f64;
+            tokio::time::sleep(std::time::Duration::from_millis(extra as u64)).await;
+        } else if was_dilated {
+            println!("[TiDi] dilation recovered to real-time after {prior_active} ticks (cost {} <= budget {TIDI_BUDGET:.0})",
+                node.ship_count());
+        }
     }
 }
 

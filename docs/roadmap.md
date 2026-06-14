@@ -94,7 +94,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**Phase 8A / 8C-1〜4・8C-6 完了（AoI 静的セル + 27 セル可視 + Enter/Leave + per-event フィルタ + `--aoi-bench` 実証）。8C-5（lock の 27 セル候補載せ替え・副次）は任意。次の単一タスク候補: 8C-5（任意）か Phase 8B（ADR-0018 TiDi 実装）か Phase 8D（分散インフラ）。**
+**Phase 8A / 8C（8C-5 任意除き）/ 8B 局所 TiDi コア（8B-4/5/7・6 一部）完了。次の単一タスク候補: 8B-3（Simulation LoD）か 8B-2（Dynamic Sector Fission・クラスタ per-Sector ペーシングの前提）か 8B-1（Population Cap・最終バックストップ）。8B-8（差分 TiDi 越境）は別 ADR。**
 （8A-1〜8A-7 全完了: スナップショット検証 2 テスト + take_snapshot 正準ソート、FileEventStore の
 2 層ログ（base_index ヘッダ）+ `compact()`（コールドアーカイブ + 原子的 swap）+ 4 テスト、
 圧縮後 reopen + restore で「創世記 replay 不要」を実証する failover テスト、
@@ -430,10 +430,10 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 | 1 | Sector Population Cap（**最終バックストップに格下げ**） | game-design.md §8 | ⬜ |
 | 2 | Dynamic Sector Fission（分離可能負荷の第1手） | tick-model.md §8 | ⬜ |
 | 3 | Simulation LoD（忠実度の階層化・更新間引き） | game-design.md §8 層1 | ⬜ |
-| 4 | 局所 TiDi: dilation = 実時間ペーシングのみ・論理 Tick の処理内容は不変（テスト） | INV-005 と無関係 | ⬜ |
-| 5 | dilation が当該 Sector 局所であること（隣接へ伝播しない）のテスト | INV-TiDi (a) | ⬜ |
-| 6 | SLA イベント / メトリクス（dilation 係数・継続時間の記録） | INV-TiDi (b) 観測可能 | ⬜ |
-| 7 | 負荷減での自動回復（係数 → 1.0）のテスト | INV-TiDi (d) | ⬜ |
+| 4 | 局所 TiDi: dilation = 実時間ペーシングのみ・論理 Tick の処理内容は不変（テスト） | INV-005 と無関係 | ✅ `dilation.rs::DilationController`（判定は論理コスト=ship_count、物理時刻不使用・決定的）。単一 `--serve` ループに実配線（sleep のみ伸ばす） |
+| 5 | dilation が当該 Sector 局所であること（隣接へ伝播しない）のテスト | INV-TiDi (a) | ✅ コントローラは状態共有なし・per-Sector（`dilation_in_one_sector_does_not_affect_another`）。クラスタ（多 Sector lockstep）への per-Sector ペーシングは独立ループ化（8B-2 連動）が必要・未 |
+| 6 | SLA イベント / メトリクス（dilation 係数・継続時間の記録） | INV-TiDi (b) 観測可能 | 🔶 `active_ticks`（継続 Tick）+ 係数・engage/recover ログ。構造化 SLA イベント化は未 |
+| 7 | 負荷減での自動回復（係数 → 1.0）のテスト | INV-TiDi (d) | ✅ `auto_recovers_to_real_time_when_load_drops` |
 | 8 | 差分 TiDi の越境因果ルールを実装 ADR で詰める | ADR-0018 未解決論点 | ⬜ |
 
 ### 8C. AoI 静的セルグリッド（ADR-0019）— TiDi 閾値を上げる本体
