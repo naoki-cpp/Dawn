@@ -416,11 +416,17 @@ cargo deny check bans
 cargo tree --duplicates
 ```
 
-### Proto クレートの特別ルール（将来・未実装）
+### ワイヤ形式は postcard + serde を再利用する（`dawn-proto` / protobuf は採らない）
 
-`dawn-proto` は将来 Phase 5 で追加される予定。
-全クレートから依存されてよい（シリアライゼーション定義のみを含む）。
-ただし `dawn-proto` からドメインロジックへの依存は禁止する。
+旧計画の `dawn-proto`（protobuf 定義クレート）は**採用しない**。理由:
+ノード間は Rust↔Rust（多言語不要）、クライアント境界は既に JSON/WebSocket（ADR-0007）、
+スキーマ進化は §7 のドメイン規律（Option 追加 / V2 / upcaster + event-catalog）で形式非依存に扱える。
+既に postcard + serde が全イベント型・Raft メッセージ・スナップショットに効いており、ネットワーク層も
+これを再利用する。protobuf は全型の二重定義 + ビルドステップを生むだけで見返りが乏しい。
+
+唯一の小さな実需＝ワイヤのフレーミング/バージョニング（長さ前置・メッセージ種別タグ・プロトコル版
+ハンドシェイク）は transport 層の小モジュールで賄う。混在バージョンのローリングアップグレードを
+将来要件にする場合のみ、タグベースの進化可能形式を個別 ADR で再検討する。
 
 ---
 
@@ -1120,9 +1126,8 @@ Combat / Fitting ロジックは引き続き dawn-ecs / dawn-core 内に実装�
 
 | Crate | 予定フェーズ | 責務（予定） |
 |---|---|---|
-| `dawn-replication` | Phase 8 | 追記ログのゴシップ配布（ADR-0021）。差分伝播 + アンチエントロピー + スナップショット転送（競合解決 CRDT/LWW は単一所有のため不要） |
-| `dawn-proto` | Phase 5 | protobuf定義と生成コード |
-| `dawn-sector-node` | Phase 5 | 本番実行バイナリ。Actorの配線と起動 |
+| `dawn-replication` | Phase 8D | 追記ログのゴシップ配布（ADR-0021）。差分伝播 + アンチエントロピー + スナップショット転送（競合解決 CRDT/LWW は単一所有のため不要） |
+| `dawn-sector-node` | Phase 8D | 本番実行バイナリ。Actorの配線と起動、ネットワーク RaftTransport + ゴシップの配線。ワイヤ = postcard 再利用（protobuf/`dawn-proto` は不採用・§3 参照） |
 
 ---
 
@@ -1273,6 +1278,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-15（ADR-0021 承認に伴う文言修正 — §1/§3/§8/§11 の「CRDT」を「追記ログのゴシップ配布」へ。Sector-local 複製は単一所有のため競合解決 CRDT/LWW を要さない。CLAUDE.md 不変条件の改訂は伴わない。人間承認済み。直前の更新: 8B-1 `--pop-cap` 追記）*
+*最終更新: 2026-06-15（8D レビューの結論を §3/§11 の計画記述に反映 — `dawn-proto`/protobuf を不採用とし、ワイヤは postcard+serde 再利用に確定。あわせて ADR-0021 の「CRDT→追記ログのゴシップ配布」文言修正済み。いずれも計画記述の更新で CLAUDE.md 不変条件の改訂は伴わない。人間承認済み）*
 *対応ADR: ADR-0001 〜 ADR-0021（ADR-0020 Simulation LoD は deferred）*
 *次回レビュー予定: Phase 8D（分散インフラ）設計時 / 戦闘の深み（ADR-0016 §5）着手時*

@@ -99,7 +99,8 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 8B-8 越境 TiDi / 8B-6 SLA イベント化）は独立 ADR か 8D 連動で後続。
 
 **次の自然な前進先（いずれか）**:
-- **8D 分散インフラ（物理ノード分散）** — dawn-proto / dawn-replication / dawn-sector-node。
+- **8D 分散インフラ（物理ノード分散）** — dawn-replication / ネットワーク RaftTransport / dawn-sector-node
+  （ワイヤ = postcard 再利用、`dawn-proto`/protobuf は不採用）。第1次は静的 3 ノード + LAN 平文の最小スライス（§10 の 8D 表参照）。
   8B-2（Fission）はこれと本質的に対なので、8D 着手時にまとめて設計するのが自然。
 - **戦闘の深み（ADR-0016 §5）** — Tackle → Signature Resolution → Orbit/Keep at Range → Logistics。
   柱②④（グラインドゼロの深い戦闘 / 実損ある危険な宇宙）を厚くする方向。
@@ -475,12 +476,27 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 
 ### 8D. 分散インフラ（物理ノード）
 
+> **第1次 8D マイルストンは意図的に最小化する**（8D レビュー 2026-06-15 の結論）。
+> 「巨大基盤の一括建設」ではなく「実機で検証できる薄いスライス」を先に通す:
+> **静的 3 ノード config + postcard ワイヤ + ネットワーク RaftTransport + ログ配布ゴシップ（ADR-0021）+ LAN 平文
+> → Pi 実機で Raft/Gossip を検証**。下記の defer 項目はトリガー付きで後続。
+
 | # | タスク | 備考 | 状態 |
 |---|---|---|---|
-| 1 | dawn-proto（シリアライゼーション定義） | 新規クレート（個別 ADR + DAG 位置確定） | ⬜ |
+| 1 | ~~dawn-proto（protobuf）~~ → **不採用**。ワイヤ = postcard+serde 再利用 + 最小の版付きフレーミング（長さ前置・種別タグ・版ハンドシェイク）を transport 層に置く | CLAUDE.md §3 参照。理由: Rust↔Rust・多言語不要・スキーマ進化は §7 で規律化済み。protobuf は型の二重定義のみ生む | ✅ 方針確定（不採用） |
 | 2 | dawn-replication（追記ログのゴシップ配布 + アンチエントロピー + スナップショット転送） | 新規クレート・ADR-0021（単一所有のため競合解決 CRDT/LWW は不要） | ⬜ |
-| 3 | dawn-sector-node（本番実行バイナリ・ノード間ネットワーク通信） | 新規クレート | ⬜ |
-| 4 | （任意・推奨）Raspberry Pi クラスタ実機検証 | 下記 ★ 参照 | ⬜ |
+| 3 | ネットワーク `RaftTransport` 実装（`InProcessTransport` の差し替え。静的 config のピア表） | trait は既存（transport.rs）。TLS 可能な選択（TCP+rustls / QUIC）にし後付けを塞がない | ⬜ |
+| 4 | dawn-sector-node（本番実行バイナリ・上記 transport + ゴシップの配線・静的 config 起動） | 新規クレート | ⬜ |
+| 5 | （任意・推奨）Raspberry Pi クラスタ実機検証 | 下記 ★ 参照 | ⬜ |
+
+**defer（トリガー付き・第1次マイルストン外）:**
+
+| 項目 | トリガー（いつ着手するか） |
+|---|---|
+| Raft ログ圧縮 + **InstallSnapshot RPC** | Raft ログ（transit 専用で小・成長は遅い）の無限成長が問題化、または圧縮導入で base_index 前を捨て遅延 follower が AppendEntries で追えなくなったら（ADR-0017 圧縮と対の completeness 項目） |
+| メンバーシップ変更（Raft ConfChange） | ノード入替・スケール・**8B-2 Fission（動的トポロジ）** が要るとき |
+| 動的ノード発見 | 弾力クラスタにするとき（固定 3 ノードは静的 config で足りる） |
+| TLS / 認証 | インターネット公開時（LAN の Pi 検証は平文で可）。transport を TLS 可能にしておけば後付け可 |
 
 ★ 実機検証（任意・推奨）: ネットワークトランスポート実装後、Raspberry Pi クラスタ
 （Pi 4/5 推奨。Zero 2 W は aarch64 ビルド可だが 512MB RAM が制約のため数百隻規模に縮小）で

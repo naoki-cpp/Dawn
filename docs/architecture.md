@@ -62,8 +62,8 @@ EVE Online を**超えるゲーム**を作ることが目的（ADR-0016）。
 ### 将来のスコープ（方向性のみ、未実装）
 
 - 物理的に分離したノードへの分散
-- ネットワーク層（gRPC / QUIC）
-- 分散コンセンサス（Raft）
+- ネットワーク層（TCP+rustls / QUIC。ワイヤ = postcard 再利用、gRPC/protobuf は不採用）
+- 分散コンセンサス（Raft。ネットワーク RaftTransport + Raft ログ圧縮 + InstallSnapshot）
 - 追記ログのゴシップ配布による最終一貫性（ADR-0021。単一所有のため競合解決 CRDT は不要）
 
 **将来のスコープを前提にしたコードを現在のフェーズで書かないこと。**
