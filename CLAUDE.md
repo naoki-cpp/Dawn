@@ -42,6 +42,7 @@ cargo run -p dawn-simulation --bin simulate --release -- --serve     # Phase 5 W
 cargo run -p dawn-simulation --bin simulate --release -- --serve --ships 50  # 船数指定
 cargo run -p dawn-simulation --bin simulate --release -- --serve --cluster   # 3ノード Raft クラスタ（Jump Gate 有効・ADR-0009/0014。--ships N も可）
 cargo run -p dawn-simulation --bin simulate --release -- --serve --duel       # 1 human vs 1 Bot（NPC なし・デュエル計測）
+cargo run -p dawn-simulation --bin simulate --release -- --serve --pop-cap 100 # Sector 人口バックストップを可変化（ADR-0018・8B-1。--cluster と併用可）
 cargo run -p dawn-simulation --bin simulate -- --raft-demo            # Phase 7 Raft Transit デモ（ADR-0014）
 cargo run -p dawn-simulation --bin simulate --release -- --aoi-bench  # AoI スケーリングベンチ（ADR-0019）
 ```
@@ -1272,6 +1273,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-15（ADR-0019 起票・承認に伴うフッター更新のみ — AoI 静的セルグリッド 3×3×3。CLAUDE.md 不変条件の改訂は伴わない。人間承認済み）*
+*最終更新: 2026-06-15（8B-1 Sector 人口バックストップ実装に伴う §0 コマンド表更新のみ — `--pop-cap N` 追記。生 `ship_count()` ベースの最終バックストップ / ADR-0018。CLAUDE.md 不変条件の改訂は伴わない。人間承認済み）*
 *対応ADR: ADR-0001 〜 ADR-0019*
 *次回レビュー予定: Phase 8C 実装（AoI 配線 8C-3〜6）/ Phase 8B（Anti-TiDi / TiDi 実装）設計時*
