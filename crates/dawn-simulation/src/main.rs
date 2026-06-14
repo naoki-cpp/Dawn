@@ -76,6 +76,13 @@ async fn main() {
         return;
     }
 
+    // AoI scaling benchmark (ADR-0019): show the static cell grid keeps the
+    // per-tick interest cost and delivery volume bounded as ships/players grow.
+    if args.contains(&"--aoi-bench".to_string()) {
+        run_aoi_benchmark();
+        return;
+    }
+
     run_phase1_benchmark();
     println!();
     run_phase2_demo().await;
@@ -399,6 +406,79 @@ fn run_phase3_demo() {
     println!("  tick match     : {}", if tick_ok   { "✓ PASS" } else { "✗ FAIL" });
     println!("  ship count     : {}", if count_ok  { "✓ PASS" } else { "✗ FAIL" });
     println!("  positions match: {}", if pos_ok    { "✓ PASS" } else { "✗ FAIL" });
+    println!("═══════════════════════════════════════════");
+}
+
+// ── AoI scaling benchmark (ADR-0019, 8C-6) ────────────────────────────────────
+
+/// Demonstrate that the static cell grid raises the single-Sector capacity:
+/// the per-tick interest cost (grid build + one neighbor query per observer)
+/// and the delivery volume stay bounded by *local* density, not the global
+/// ship count — whereas the no-AoI baseline grows as p·n (→ O(n²) when p≈n).
+fn run_aoi_benchmark() {
+    use dawn_core::{NodeId, Position, ShipId};
+    use std::time::Instant;
+
+    println!("═══════════════════════════════════════════");
+    println!("  AoI scaling benchmark (ADR-0019)         ");
+    println!("═══════════════════════════════════════════");
+    let half = SectorBounds::DEFAULT_HALF;
+    let span = 2.0 * half;
+    println!("  sector : {span:.0}^3 units   cell: {AOI_CELL_SIZE:.0}   (10% of ships are observers)");
+    println!();
+    println!("  {:>7} {:>6} | {:>11} {:>11} | {:>10} {:>9} | {:>9}",
+        "ships", "obs", "AoI build", "AoI query", "naive scan", "speedup", "vol cut");
+
+    // Same cube cell as the live grid; observer visibility is the 3×3×3 box.
+    let cell_of = |p: Position| -> (i32, i32, i32) {
+        ((p.x / AOI_CELL_SIZE).floor() as i32,
+         (p.y / AOI_CELL_SIZE).floor() as i32,
+         (p.z / AOI_CELL_SIZE).floor() as i32)
+    };
+
+    for &n in &[1_000usize, 5_000, 10_000, 20_000] {
+        // Deterministic pseudo-uniform spread across the sector.
+        let ships: Vec<(ShipId, Position)> = (0..n).map(|i| {
+            let h = |k: usize| ((i.wrapping_mul(k)) % 100_000) as f32 - half;
+            (ShipId::new(NodeId(0), i as u64),
+             Position::new(h(2_654_435_761), h(40_503), h(2_246_822_519)))
+        }).collect();
+        let observers: Vec<Position> = ships.iter().step_by(10).map(|(_, p)| *p).collect();
+        let p = observers.len();
+
+        // AoI: build one grid, then one neighbor query per observer.
+        let t = Instant::now();
+        let grid = aoi::CellGrid::build(AOI_CELL_SIZE, ships.iter().copied());
+        let build = t.elapsed();
+        let t = Instant::now();
+        let mut aoi_vol = 0usize;
+        for o in &observers { aoi_vol += grid.neighbors_of(*o).len(); }
+        let query = t.elapsed();
+
+        // Naive (no grid): every observer tests every ship for the same 3×3×3 box.
+        let t = Instant::now();
+        let mut naive_vol = 0usize;
+        for o in &observers {
+            let (ox, oy, oz) = cell_of(*o);
+            for (_, sp) in &ships {
+                let (sx, sy, sz) = cell_of(*sp);
+                if (sx - ox).abs() <= 1 && (sy - oy).abs() <= 1 && (sz - oz).abs() <= 1 {
+                    naive_vol += 1;
+                }
+            }
+        }
+        let scan = t.elapsed();
+        assert_eq!(aoi_vol, naive_vol, "grid and scan must agree on the visible set");
+
+        let no_aoi_vol = p * n; // baseline: every observer receives every ship
+        let speedup = scan.as_secs_f64() / query.as_secs_f64().max(1e-9);
+        let vol_cut = no_aoi_vol as f64 / aoi_vol.max(1) as f64;
+        println!("  {n:>7} {p:>6} | {:>11?} {:>11?} | {:>10?} {:>8.1}x | {:>8.1}x",
+            build, query, scan, speedup, vol_cut);
+    }
+    println!();
+    println!("  AoI query time tracks local density (k), not n; the no-AoI volume");
+    println!("  grows as p·n. This is the lever that raises the TiDi threshold (ADR-0018).");
     println!("═══════════════════════════════════════════");
 }
 

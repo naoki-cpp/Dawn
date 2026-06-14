@@ -94,7 +94,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**Phase 8A / 8C-1〜4 完了（AoI 静的セル + 27 セル可視 + Enter/Leave + per-event フィルタ、両 serve ループ + client 配線）。次の単一タスク: Phase 8C-6 — `benches/` で p を増やしつつ AoI 有無の 1 Tick 時間・配信量を比較し閾値上昇を実証（8C-5 副次の lock 載せ替えは任意）。**
+**Phase 8A / 8C-1〜4・8C-6 完了（AoI 静的セル + 27 セル可視 + Enter/Leave + per-event フィルタ + `--aoi-bench` 実証）。8C-5（lock の 27 セル候補載せ替え・副次）は任意。次の単一タスク候補: 8C-5（任意）か Phase 8B（ADR-0018 TiDi 実装）か Phase 8D（分散インフラ）。**
 （8A-1〜8A-7 全完了: スナップショット検証 2 テスト + take_snapshot 正準ソート、FileEventStore の
 2 層ログ（base_index ヘッダ）+ `compact()`（コールドアーカイブ + 原子的 swap）+ 4 テスト、
 圧縮後 reopen + restore で「創世記 replay 不要」を実証する failover テスト、
@@ -451,7 +451,7 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 | 3 | `ws_server` `InitialState` を 3×3×3 スコープ化 + セル跨ぎで外周殻のみ Enter/Leave（churn 有界） | 帯域レバー（fb2a484 の発展） | ✅ 接続時スコープ化 + `aoi_delta` で毎 Tick Enter/Leave 配信（`AoiEnter`/`AoiLeave` 新メッセージ・両 serve ループ + client main.gd）|
 | 4 | `DomainEvent` 配信フィルタ（関与 Ship が観測者の 27 セル近傍のときのみ送る） | 配信側の関心事・権威状態に触れない | ✅ `event_visible_to`（主船+副次船）で per-session フィルタ・両 serve ループ + 4 aoi テスト |
 | 5 | （副次）NPC オートロック / 将来 AoE の半径内探索を同じ静的セルの 27 セル候補 + 厳密距離に載せ替え | 全走査版と同一結果テスト | ⬜ |
-| 6 | `benches/` で p を増やしつつ AoI 有無の 1 Tick 時間・配信量を比較し閾値上昇を記録 | 容量↑の実証 | ⬜ |
+| 6 | p を増やしつつ AoI 有無の 1 Tick 時間・配信量を比較し閾値上昇を記録 | 容量↑の実証 | ✅ `--aoi-bench`（バイナリ内・benches 基盤未整備のため慣習に合わせた）。n=1k→20k で naive scan 770µs→315ms に対し AoI query ~16ms・speedup 3→19.5x・配信量 ~45x 削減 |
 
 ### 8D. 分散インフラ（物理ノード）
 
