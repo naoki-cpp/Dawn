@@ -526,7 +526,8 @@ impl<S: EventStore> SimulationNode<S> {
         // Canonical ordering: a snapshot of a given state must serialise
         // identically regardless of HashMap iteration order, so it can be
         // byte-compared (INV-002: verifiable snapshot / round-trip).
-        ships.sort_by_key(|s| (s.ship_id.0.node_id().0, s.ship_id.0.counter()));
+        // `ShipId: Ord` is canonical id order (node_id then counter).
+        ships.sort_by_key(|s| s.ship_id);
 
         StateSnapshot {
             node_id   : self.node_id,
@@ -1921,9 +1922,7 @@ mod tests {
         use crate::{modules, ship_types};
         use dawn_event_store::InMemoryEventStore;
 
-        let mut node = mem_node();
-        for def in ship_types::all_ship_types() { node.register_ship_type(def); }
-        for def in modules::all_modules()       { node.register_module(def); }
+        let mut node = node_with_modules();
 
         // Real ship type → carries a capacitor; thrust makes the state non-trivial.
         for i in 0..4u64 {
@@ -1970,9 +1969,7 @@ mod tests {
         use crate::{modules, ship_types};
         use dawn_event_store::InMemoryEventStore;
 
-        let mut live = mem_node();
-        for def in ship_types::all_ship_types() { live.register_ship_type(def); }
-        for def in modules::all_modules()       { live.register_module(def); }
+        let mut live = node_with_modules();
 
         for i in 0..3u64 {
             live.spawn_ship(

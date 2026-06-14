@@ -15,7 +15,11 @@ use serde::{Deserialize, Serialize};
 /// Globally unique, non-reusable identifier for any entity in the world.
 ///
 /// Layout: `[node_id: 8 bits | counter: 56 bits]`
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// `Ord` is the canonical id order: because `node_id` occupies the high bits,
+/// comparing the packed `u64` orders by `node_id` first, then `counter`. Use it
+/// for any determinism need (e.g. byte-stable snapshots, INV-002).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct EntityId(u64);
 
 impl EntityId {
@@ -56,7 +60,7 @@ impl std::fmt::Display for EntityId {
 // ── ShipId ───────────────────────────────────────────────────────────────────
 
 /// Typed wrapper that distinguishes a Ship entity from any future entity type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ShipId(pub EntityId);
 
 impl ShipId {
@@ -120,5 +124,17 @@ mod tests {
         let id = EntityId::new(NodeId(255), max_counter);
         assert_eq!(id.counter(), max_counter);
         assert_eq!(id.node_id(), NodeId(255));
+    }
+
+    #[test]
+    fn entity_id_ordering_is_node_id_dominant_then_counter() {
+        // A lower node_id sorts first even with a much larger counter.
+        let a = EntityId::new(NodeId(0), 1_000_000);
+        let b = EntityId::new(NodeId(1), 0);
+        assert!(a < b);
+        // Within the same node, the lower counter sorts first.
+        let c = EntityId::new(NodeId(3), 5);
+        let d = EntityId::new(NodeId(3), 6);
+        assert!(c < d);
     }
 }
