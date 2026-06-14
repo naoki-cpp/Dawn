@@ -375,7 +375,7 @@ dawn-core
     ├── dawn-consensus      ← Raft（ADR-0014: state machine, RaftActor, RaftTransport）
     └── dawn-event-store
             ↑
-            └── dawn-actor          ← Actor基盤（EventStoreActor, ReplicationBus）
+            └── dawn-actor          ← Actor基盤（ReplicationBus, ClientConnection）
                     ↑
                     └── dawn-simulation  ← 実行バイナリ・負荷生成
                         （dawn-consensus にも依存する）
@@ -1119,7 +1119,7 @@ Combat / Fitting ロジックは引き続き dawn-ecs / dawn-core 内に実装�
 | `dawn-ecs` | ECS World の薄いラッパー。Component定義（Movement/Fitting/Combat）, System定義 | dawn-core, hecs | ネットワーク、EventStore |
 | `dawn-event-store` | Event Log の永続化。Append, Read, Snapshot（InMemory + File） | dawn-core, serde | ネットワーク、ECS |
 | `dawn-consensus` | Raft実装（ADR-0014）。Leader選出, RaftActor, RaftTransport（In-Process）, PartitionableTransport | dawn-core, serde, rand, tokio | ネットワーク、ECS、EventStore |
-| `dawn-actor` | Actor基盤。EventStoreActor, ReplicationBus, ClientConnection trait | dawn-core, dawn-event-store, tokio | dawn-ecs, dawn-simulation |
+| `dawn-actor` | Actor基盤。ReplicationBus（マルチノード収束テスト用スタンドイン）, ClientConnection trait（+ InProcessConnection / WsClientConnection 実装） | dawn-core, dawn-event-store, tokio | dawn-ecs, dawn-simulation |
 | `dawn-simulation` | 実行バイナリ。SimulationNode, MultiNodeCluster（RaftActor 配線含む）, WsServer（Godot WebSocket接続）, 負荷生成, DataLoader（TOML読み込み） | 上記全て + rand + tokio-tungstenite + toml | — |
 
 ### 将来追加予定のクレート（まだ存在しない・実装しないこと）

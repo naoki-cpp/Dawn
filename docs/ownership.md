@@ -137,8 +137,10 @@ Actor モデルは Phase 2 で導入済み（`dawn-actor` クレート、ADR-000
 
 | Actor | 所有するデータ | 受け付けるメッセージ |
 |---|---|---|
-| `SectorSimulatorActor` | ECS World（該当 Sector 分） | `Tick`, `MoveCommand`, `SpawnShip` |
-| `EventStoreActor` | Event Log（該当 Sector 分） | `Append`, `IterFrom` |
+| `SectorSimulatorActor` | ECS World + Event Log（該当 Sector 分） | `Tick`, `MoveCommand`, `SpawnShip`, `Transit` |
+
+> Event Log は `SimulationNode` が直接所有する（専用の EventStore アクターは持たない）。
+> Phase 2 にあった `EventStoreActor` は wire されないまま残っていたため削除した。
 
 ### Actor 間データ共有の禁止ルール
 

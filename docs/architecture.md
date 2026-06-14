@@ -80,7 +80,7 @@ EVE Online を**超えるゲーム**を作ることが目的（ADR-0016）。
 | `dawn-ecs` | ライブラリ | ECS World ラッパー。Component / System 定義 |
 | `dawn-event-store` | ライブラリ | 2 層 Event Log（ホットログ＋コールドアーカイブ）の永続化・圧縮（ADR-0017） |
 | `dawn-consensus` | ライブラリ | Raft 実装（Leader 選出 / Log Replication / RaftActor、ADR-0014） |
-| `dawn-actor` | ライブラリ | Actor 基盤（EventStoreActor / ReplicationBus / ClientConnection trait） |
+| `dawn-actor` | ライブラリ | Actor 基盤（ReplicationBus / ClientConnection trait） |
 | `dawn-simulation` | バイナリ | 全体を結合するシミュレーション実行基盤・WsServer（Godot 接続） |
 
 ### 依存 DAG

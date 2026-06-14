@@ -121,6 +121,11 @@ SectorSimulatorActor : ECS World の所有と Tick 実行
 EventStoreActor      : Event Log への Append
 ```
 
+> 補足（後日）: `EventStoreActor` は実装されたが wire されないまま残っていたため削除した。
+> Event Log は `SimulationNode` が直接所有する（専用アクターを介さない）。
+> `SectorSimulatorActor` は実装済みだが、現行の serve 経路は同期 `SimulationNode` を
+> 直接駆動しており、当該アクターはテスト／デモ用ハーネスとして残っている。
+
 ---
 
 ## 今後の再評価トリガー
