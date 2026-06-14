@@ -78,7 +78,7 @@ EVE Online を**超えるゲーム**を作ることが目的（ADR-0016）。
 |---|---|---|
 | `dawn-core` | ライブラリ | 純粋ドメインモデル定義。外部依存ゼロ |
 | `dawn-ecs` | ライブラリ | ECS World ラッパー。Component / System 定義 |
-| `dawn-event-store` | ライブラリ | Append-only Event Log の永続化 |
+| `dawn-event-store` | ライブラリ | 2 層 Event Log（ホットログ＋コールドアーカイブ）の永続化・圧縮（ADR-0017） |
 | `dawn-consensus` | ライブラリ | Raft 実装（Leader 選出 / Log Replication / RaftActor、ADR-0014） |
 | `dawn-actor` | ライブラリ | Actor 基盤（EventStoreActor / ReplicationBus / ClientConnection trait） |
 | `dawn-simulation` | バイナリ | 全体を結合するシミュレーション実行基盤・WsServer（Godot 接続） |
@@ -273,6 +273,49 @@ Clientは「仮の状態」を先行表示し、Serverからのイベントで�
 原則: 上位ContextはSpatialを使うが、SpatialはContextを知らない
      （依存は常に下向き）
 ```
+
+---
+
+## 5-C. 永続化と復旧モデル（2 層ログ・ADR-0017）
+
+Event Log は**ホットログ**と**コールドアーカイブ**の 2 層で構成する。
+EventStore trait は引き続き append-only（FBD-001。truncate / delete / rewrite は存在しない）。
+
+```
+                       Append
+                         │
+                         ▼
+   ┌──────────────────── Hot Log ───────────────────┐
+   │  [8B base_index header][len|payload]...          │  ← 有界。最新セグメントのみ保持
+   └──────────────────────────────────────────────────┘
+                         │ compact(boundary)         ← 検証済みスナップショット背後の
+                         │  (segment migration)        セグメントだけを移送
+                         ▼
+   ┌────────────── Cold Archive ─────────────────────┐
+   │  append-only forever（監査・災害復旧。運用ホットパス外）│
+   └──────────────────────────────────────────────────┘
+```
+
+**スナップショットが権威ある永続チェックポイント**（INV-002 改訂）。
+クラッシュ復旧・failover（ADR-0014）は次の経路で行う:
+
+```
+復旧 = 検証済みスナップショット + それ以降のホットログ末尾の catch-up
+```
+
+- 運用ホットパスで要る replay は「末尾の catch-up」のみ。
+  創世記（log index 0）からの完全 replay は**経路外**（監査・災害復旧専用）。
+- 位置・capacitor・lock カウントダウン・thrust intent などの派生・transient 状態は
+  **スナップショットに永続化する**（イベントには記録しない）。復旧後は live の Tick で再計算される。
+- 圧縮はセグメント移送であってイベントの破壊ではない。ホットログのファイル先頭に
+  `base_index`（records[0] の global log index）を持ち、原子的 rename で切り替える。
+  コールド追記 → ホット swap の順で行うため、いかなる時点でもイベントは失われない。
+- スナップショットは検証可能でなければならない:
+  ① snapshot → restore → snapshot がバイト一致（round-trip）
+  ② snapshot + 末尾 Tick の再実行 == その時点の live 状態
+
+→ 詳細は [ADR-0017](./adr/ADR-0017-snapshot-compaction.md) / [CLAUDE.md §2 INV-002](../CLAUDE.md) を参照。
+Read Model（§5-B）の off-path 再構築とは別物である（あちらは監査経路の任意再生）。
 
 ---
 
