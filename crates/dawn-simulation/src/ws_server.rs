@@ -1,22 +1,22 @@
-//! # WebSocket Server — Phase 5 マルチクライアント対応
+//! # WebSocket Server — Phase 5 multi-client support
 //!
-//! ## 設計 (ADR-0005, ADR-0007)
+//! ## Design (ADR-0005, ADR-0007)
 //!
-//! Phase 5 の変更点:
-//!   - Hello/Welcome ハンドシェイクで PlayerId を採番・通知
-//!   - InitialState で接続時の全 Ship 状態を送信
-//!   - PlayerSession で接続 ↔ PlayerId を管理
-//!   - 複数クライアントの同時接続に対応
-//!   - 所有権チェック: 自分の船だけ操作できる
+//! Phase 5 changes:
+//!   - Hello/Welcome handshake assigns and announces a PlayerId
+//!   - InitialState sends the visible Ship state on connect
+//!   - PlayerSession maps a connection to its PlayerId
+//!   - Multiple clients can connect concurrently
+//!   - Ownership check: a player may only command its own ship
 //!
-//! ## プロトコル
+//! ## Protocol
 //!
 //! ```text
 //! Client → Server:  {"type":"Hello"}
 //! Server → Client:  {"type":"Welcome","player_id":N,"ship_id":N}
 //! Server → Client:  {"type":"InitialState","ships":[...]}
-//! Server → Client:  DomainEvent JSON（改行区切りストリーム）
-//! Client → Server:  ClientCommand JSON（MoveCommand / LockOnCommand）
+//! Server → Client:  DomainEvent JSON (newline-delimited stream)
+//! Client → Server:  ClientCommand JSON (MoveCommand / LockOnCommand)
 //! ```
 
 use dawn_actor::{ClientCommand, ClientConnection};
@@ -32,7 +32,7 @@ use tokio::{
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
-// ── JSON 表現（サーバー → クライアント）───────────────────────────────────────
+// ── JSON representation (server → client) ─────────────────────────────────────
 
 #[derive(Serialize)]
 #[serde(tag = "type")]
@@ -56,16 +56,24 @@ struct PosJson { x: f32, y: f32, z: f32 }
 #[derive(Serialize, Clone, Copy)]
 struct VelJson { dx: f32, dy: f32, dz: f32 }
 
+impl From<Position> for PosJson {
+    fn from(p: Position) -> Self { Self { x: p.x, y: p.y, z: p.z } }
+}
+
+impl From<dawn_core::Velocity> for VelJson {
+    fn from(v: dawn_core::Velocity) -> Self { Self { dx: v.dx, dy: v.dy, dz: v.dz } }
+}
+
 fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
     let j = match event {
         DomainEvent::ShipSpawned(e) => EventJson::ShipSpawned {
             ship_id : e.ship_id.raw(),
-            position: PosJson { x: e.initial_position.x, y: e.initial_position.y, z: e.initial_position.z },
+            position: e.initial_position.into(),
             tick    : e.tick.value(),
         },
         DomainEvent::VelocityChanged(e) => EventJson::VelocityChanged {
             ship_id : e.ship_id.raw(),
-            velocity: VelJson { dx: e.velocity.dx, dy: e.velocity.dy, dz: e.velocity.dz },
+            velocity: e.velocity.into(),
             tick    : e.tick.value(),
         },
         DomainEvent::ShipDespawned(e) => EventJson::ShipDespawned {
@@ -107,10 +115,10 @@ fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
             slot     : format!("{:?}", e.slot),
             tick     : e.tick.value(),
         },
-        // 以下はクライアント側の状態管理に使わない
+        // The following are not used by client-side state management.
         DomainEvent::ShipFitted(_)  => return None,
         DomainEvent::WeaponFired(_) => return None,
-        // Sector Transit はノード内部の所有権イベント。クライアントへは配信しない（ADR-0014）。
+        // Sector Transit is an internal node-ownership event; not sent to clients (ADR-0014).
         DomainEvent::SectorTransitRequested(_) => return None,
         DomainEvent::SectorTransitCompleted(_) => return None,
         DomainEvent::SectorTransitAborted(_)   => return None,
@@ -121,7 +129,7 @@ fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
             gate_id    : e.gate_id.0,
             from_sector: e.from_sector.0,
             to_sector  : e.to_sector.0,
-            entry_pos  : PosJson { x: e.entry_pos.x, y: e.entry_pos.y, z: e.entry_pos.z },
+            entry_pos  : e.entry_pos.into(),
             tick       : e.tick.value(),
         },
         DomainEvent::StarSystemChanged(e) => EventJson::StarSystemChanged {
@@ -134,7 +142,7 @@ fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
     serde_json::to_string(&j).ok()
 }
 
-// ── コマンドパーサー（クライアント → サーバー）─────────────────────────────────
+// ── Command parser (client → server) ──────────────────────────────────────────
 
 fn parse_client_command(line: &str) -> Option<ClientCommand> {
     let v: serde_json::Value = serde_json::from_str(line).ok()?;
@@ -237,7 +245,7 @@ pub struct WsClientConnection {
 }
 
 impl WsClientConnection {
-    /// 生文字列（Welcome / InitialState など）を直接送信する。
+    /// Send a raw string directly (Welcome / InitialState etc.).
     pub fn send_raw(&self, msg: &str) -> bool {
         self.event_tx.send(msg.to_string() + "\n").is_ok()
     }
@@ -262,7 +270,7 @@ impl ClientConnection for WsClientConnection {
 
 // ── PlayerSession ─────────────────────────────────────────────────────────────
 
-/// 1 プレイヤー接続を表す。PlayerId・ShipId・コネクションを保持する。
+/// One player connection: holds its PlayerId, ShipId, and connection.
 pub struct PlayerSession {
     pub player_id : PlayerId,
     pub ship_id   : ShipId,
@@ -270,13 +278,12 @@ pub struct PlayerSession {
 }
 
 impl PlayerSession {
-    /// イベントをこのクライアントに送信する。
-    /// 送信失敗（切断）の場合は false を返す。
+    /// Send events to this client. Returns false on send failure (disconnect).
     pub fn send_events(&self, events: &[DomainEvent]) -> bool {
         self.conn.send_events(events).is_ok()
     }
 
-    /// コマンドを1件取り出す。
+    /// Pull one pending command, if any.
     pub fn try_recv_command(&mut self) -> Option<ClientCommand> {
         self.conn.try_recv_command()
     }
@@ -295,21 +302,8 @@ impl WsServer {
         Ok(Self { listener })
     }
 
-    /// ブロッキングで1クライアントを受け付け `WsClientConnection` を返す。
-    ///
-    /// Phase 4 後方互換用（Phase 5 では `try_accept_raw` を使う）。
-    pub async fn accept(&self) -> anyhow::Result<WsClientConnection> {
-        loop {
-            let (stream, peer_addr) = self.listener.accept().await?;
-            match Self::make_connection(stream, peer_addr).await {
-                Ok(conn) => return Ok(conn),
-                Err(e)   => eprintln!("[WsServer] handshake failed ({peer_addr}): {e}"),
-            }
-        }
-    }
-
-    /// ノンブロッキングで新しい接続を試みる。
-    /// 接続がなければ `None` を即座に返す。
+    /// Try to accept a new connection without blocking; returns `None` at once
+    /// if none is pending.
     pub async fn try_accept_raw(&self) -> Option<(TcpStream, SocketAddr)> {
         timeout(Duration::from_millis(0), self.listener.accept())
             .await
@@ -317,13 +311,13 @@ impl WsServer {
             .and_then(|r| r.ok())
     }
 
-    /// Hello/Welcome ハンドシェイクを実行し `PlayerSession` を返す。
+    /// Run the Hello/Welcome handshake and return a `PlayerSession`.
     ///
-    /// # 流れ
-    /// 1. WebSocket アップグレード
-    /// 2. Hello メッセージ待ち（1秒でタイムアウト）
-    /// 3. Welcome + InitialState を送信
-    /// 4. `PlayerSession` を返す
+    /// # Flow
+    /// 1. WebSocket upgrade
+    /// 2. Wait for the Hello message (3s timeout)
+    /// 3. Send Welcome + InitialState
+    /// 4. Return the `PlayerSession`
     pub async fn handshake(
         stream        : TcpStream,
         peer_addr     : SocketAddr,
@@ -340,7 +334,7 @@ impl WsServer {
 
         let (mut ws_sink, mut ws_source) = ws_stream.split();
 
-        // Hello を待つ（タイムアウト 3 秒）
+        // Wait for Hello (3s timeout).
         let hello_result = timeout(Duration::from_secs(3), async {
             while let Some(Ok(msg)) = ws_source.next().await {
                 if let Message::Text(text) = msg {
@@ -360,22 +354,22 @@ impl WsServer {
             _ => anyhow::bail!("Hello timeout or not received from {peer_addr}"),
         }
 
-        // Welcome を送信
+        // Send Welcome.
         let welcome = format!(
             "{{\"type\":\"Welcome\",\"player_id\":{},\"ship_id\":{}}}\n",
             player_id.raw(), ship_id.raw()
         );
         ws_sink.send(Message::Text(welcome.into())).await?;
 
-        // InitialState を送信
+        // Send InitialState.
         ws_sink.send(Message::Text((initial_state.to_string() + "\n").into())).await?;
 
-        // PlayerFitting を送信（プレイヤー自身の装備情報）
+        // Send PlayerFitting (the player's own loadout).
         if let Some(fitting) = player_fitting {
             ws_sink.send(Message::Text((fitting + "\n").into())).await?;
         }
 
-        // イベント送信タスク
+        // Event-send task.
         tokio::spawn(async move {
             let mut rx = event_rx;
             while let Some(msg) = rx.recv().await {
@@ -386,7 +380,7 @@ impl WsServer {
             let _ = ws_sink.close().await;
         });
 
-        // コマンド受信タスク
+        // Command-receive task.
         tokio::spawn(async move {
             while let Some(Ok(msg)) = ws_source.next().await {
                 if let Message::Text(text) = msg {
@@ -403,42 +397,6 @@ impl WsServer {
         let conn = WsClientConnection { event_tx, command_rx };
         println!("[WsServer] {peer_addr} handshake complete: {player_id} ship={}", ship_id.raw());
         Ok(PlayerSession { player_id, ship_id, conn })
-    }
-
-    async fn make_connection(
-        stream   : TcpStream,
-        peer_addr: SocketAddr,
-    ) -> anyhow::Result<WsClientConnection> {
-        let ws_stream = accept_async(stream).await?;
-        println!("[WsServer] client connected: {peer_addr}");
-
-        let (event_tx,   event_rx)   = mpsc::unbounded_channel::<String>();
-        let (command_tx, command_rx) = mpsc::unbounded_channel::<ClientCommand>();
-
-        let (mut ws_sink, mut ws_source) = ws_stream.split();
-
-        tokio::spawn(async move {
-            let mut rx = event_rx;
-            while let Some(msg) = rx.recv().await {
-                if ws_sink.send(Message::Text(msg.into())).await.is_err() { break; }
-            }
-            let _ = ws_sink.close().await;
-        });
-
-        tokio::spawn(async move {
-            while let Some(Ok(msg)) = ws_source.next().await {
-                if let Message::Text(text) = msg {
-                    for line in text.lines() {
-                        if let Some(cmd) = parse_client_command(line) {
-                            if command_tx.send(cmd).is_err() { return; }
-                        }
-                    }
-                }
-            }
-            println!("[WsServer] client {peer_addr} disconnected");
-        });
-
-        Ok(WsClientConnection { event_tx, command_rx })
     }
 }
 
