@@ -49,7 +49,9 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
                 ClientCommand::Jump、ws_server の EventJson + JSON パーサー、
                 connection.gd の send_jump_command、main.gd の
                 JumpGateUsed / StarSystemChanged 処理（瞬間移動・HUD通知・J キー）。
-                次のフェーズ: Phase 8（Anti-TiDi / スケール基盤）着手。
+                次のフェーズ: Phase 8（スケール基盤 / 持続性）着手。
+                2026-06-14 の設計変更（ADR-0017 スナップショット圧縮 / ADR-0018 局所 TiDi /
+                マルチ Raft 却下）を Phase 8 タスクに反映済み（§10）。
                 Sector キャパシティの悪用対策は docs/game-design.md §8 を参照。
 ```
 
@@ -92,10 +94,12 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**Phase 7.5（ADR-0009）完了。Phase 8（Anti-TiDi / スケール基盤）に着手する。**
-方向性は §10、Sector キャパシティの悪用対策は docs/game-design.md §8 を参照。
-Phase 8 着手前に CLAUDE.md フッターの「次回レビュー予定」
-（ADR-0009 完了時のレビュー）を人間承認のうえ実施すること。
+**次の単一タスク: Phase 8A-1 — スナップショット検証テスト `snapshot(T) == replay(0..T)`（ADR-0017）。**
+理由: イベントソーシングの正しさ/運用性の前提（failover が創世記 replay を要求しない）であり、
+スケール作業より先に固める。設計トラックとして §8C-1（空間索引 + AoI の新規 ADR 起票）は並行可。
+Phase 8 全体のタスク内訳は §10 を参照。
+CLAUDE.md フッターの「次回レビュー予定」は 2026-06-14 に
+「空間索引 + AoI ADR 起票時」へ更新済み（ADR-0017/0018 適用に伴う）。
 
 #### Phase 6 完了タスク一覧
 
@@ -385,29 +389,83 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 
 ---
 
-## 10. Phase 8 以降（方向性のみ）
+## 10. Phase 8 — スケール基盤 / 持続性（ADR-0017 / ADR-0018）
+
+> 本フェーズは 2026-06-14 の設計変更を反映して詳細化した（旧版は「方向性のみ」だった）。
+> 対応 ADR は **方針確定済み・コード実装は本フェーズで行う**。
+> 関連: ADR-0017（スナップショット圧縮・2層ログ）, ADR-0018（局所 TiDi）, docs/tick-model.md §8,
+> docs/game-design.md §8, docs/reference/eve-reference.md §8–§11。
+
+**完了基準（ADR-0018 で更新。旧「5,000 ships 上限で常に SLA」は撤回）:**
+
+- 通常負荷では論理 Tick が一定で SLA（≤32ms）を満たす。
+- 空間的に分離可能な負荷は動的分割で**劣化ゼロ**に捌ける。
+- 分割不能な単一密戦闘がノード容量を超えたら、当該 Sector **局所**の TiDi で graceful に劣化し、
+  dilation 係数を SLA メトリクスに記録、負荷減で 1.0 に**自動回復**する（イベントの並べ替え・欠落なし）。
+- 入場制限は**最終バックストップ**としてのみ発動する。
+- **創世記 replay なし**で failover / 再起動できる（最新スナップショット + 末尾 replay）。
+
+### 8A. イベントログの持続性（ADR-0017）— 最優先（正しさ / 運用性）
+
+| # | タスク | クレート | 状態 |
+|---|---|---|---|
+| 1 | **スナップショット検証テスト `snapshot(T) == replay(0..T)`（ビット等価）** | dawn-simulation | ⬜ |
+| 2 | ホットログのセグメント化 + 圧縮トリガ（検証済みスナップショット背後のみ） | dawn-event-store | ⬜ |
+| 3 | コールドアーカイブ書き出し（append-only / 圧縮）+ 原子的 swap（write-new-then-swap・冪等） | dawn-event-store | ⬜ |
+| 4 | failover / 再起動が創世記 replay を要求しないテスト（ADR-0014 連携） | dawn-simulation | ⬜ |
+| 5 | snapshot.rs のドキュメントコメントを改訂後 INV-002 に更新 | dawn-simulation | ⬜ |
+| 6 | event-catalog.md / architecture.md に2層ログを反映 | docs | ⬜ |
+
+### 8B. 負荷制御 / Anti-TiDi（ADR-0018 + 既存方針）
+
+| # | タスク | 備考 | 状態 |
+|---|---|---|---|
+| 1 | Sector Population Cap（**最終バックストップに格下げ**） | game-design.md §8 | ⬜ |
+| 2 | Dynamic Sector Fission（分離可能負荷の第1手） | tick-model.md §8 | ⬜ |
+| 3 | Simulation LoD（忠実度の階層化・更新間引き） | game-design.md §8 層1 | ⬜ |
+| 4 | 局所 TiDi: dilation = 実時間ペーシングのみ・論理 Tick の処理内容は不変（テスト） | INV-005 と無関係 | ⬜ |
+| 5 | dilation が当該 Sector 局所であること（隣接へ伝播しない）のテスト | INV-TiDi (a) | ⬜ |
+| 6 | SLA イベント / メトリクス（dilation 係数・継続時間の記録） | INV-TiDi (b) 観測可能 | ⬜ |
+| 7 | 負荷減での自動回復（係数 → 1.0）のテスト | INV-TiDi (d) | ⬜ |
+| 8 | 差分 TiDi の越境因果ルールを実装 ADR で詰める | ADR-0018 未解決論点 | ⬜ |
+
+### 8C. 空間索引 + AoI（新規 ADR が必要）— TiDi 閾値を上げる本体
+
+> 8C が効くほど 8B-4〜7（TiDi 発動）が稀になる。両者は連動する。
+
+| # | タスク | 備考 | 状態 |
+|---|---|---|---|
+| 1 | **新規 ADR 起票**（空間索引 grid/quadtree + Area-of-Interest） | CLAUDE.md「次回レビュー予定」 | ⬜ |
+| 2 | Sector 内 空間索引（近傍クエリ O(n²) → O(n·k)） | ターゲティング / AoE / 衝突 | ⬜ |
+| 3 | ロックグラフ + 空間索引で全ペア走査を排除 | 密戦闘の天井↑ | ⬜ |
+| 4 | AoI: クライアントは relevant 半径内のみ受信（Sector 単位 → グリッド単位へ細分） | 帯域レバー（fb2a484 の発展） | ⬜ |
+
+### 8D. 分散インフラ（物理ノード）
+
+| # | タスク | 備考 | 状態 |
+|---|---|---|---|
+| 1 | dawn-proto（シリアライゼーション定義） | 新規クレート（個別 ADR + DAG 位置確定） | ⬜ |
+| 2 | dawn-replication（Gossip + CRDT / LWW-Register） | 新規クレート | ⬜ |
+| 3 | dawn-sector-node（本番実行バイナリ・ノード間ネットワーク通信） | 新規クレート | ⬜ |
+| 4 | （任意・推奨）Raspberry Pi クラスタ実機検証 | 下記 ★ 参照 | ⬜ |
+
+★ 実機検証（任意・推奨）: ネットワークトランスポート実装後、Raspberry Pi クラスタ
+（Pi 4/5 推奨。Zero 2 W は aarch64 ビルド可だが 512MB RAM が制約のため数百隻規模に縮小）で
+3 ノードを物理的に分離して動作確認する。目的: 実ネットワーク遅延・分断条件下での Raft / Gossip
+挙動を実機で検証する（dawn の競争優位＝分散基盤の本番妥当性を確かめる / ADR-0016）。
+検証項目: ノード間通信の到達性、ネットワーク分断時の Raft フェイルオーバー、低スペック環境での Tick SLA。
+
+### 8E. Transit consensus（ADR-0017 §5 で方針決定済み）
+
+| # | タスク | 備考 | 状態 |
+|---|---|---|---|
+| 1 | 単一 Raft グループを維持（実装変更なし） | マルチ Raft はメンテ不能として却下 | ✅ 方針確定 |
+| 2 | バッチ提案（fleet jump = N 隻を 1 エントリに束ねる） | fleet-jump レイテンシが実測で問題化したら着手 | ⬜ 保留 |
+
+### Phase 9 以降（方向性のみ）
 
 ```
-Phase 8: スケール基盤（Anti-TiDi）
-          Sector Population Cap / Dynamic Fission
-          Spatial Index / Interest Management
-          Simulation LoD（忠実度の階層化、docs/game-design.md §8 層1）
-          dawn-proto（シリアライゼーション） + dawn-replication（Gossip + CRDT）
-          dawn-sector-node（本番実行バイナリ・物理ノード間ネットワーク通信）
-          完了基準: 1 Sector 5,000 ships 上限で Tick SLA を常に満たす
-
-          ★ 実機検証（任意・推奨）:
-            上記ネットワークトランスポート実装後、Raspberry Pi クラスタ
-            （Pi 4/5 推奨。Zero 2 W は aarch64 ビルド可だが 512MB RAM が
-            制約になるため数百隻規模に縮小して検証）で 3 ノードを
-            物理的に分離して動作確認する。
-            目的: 実ネットワーク遅延・分断条件下での Raft / Gossip 挙動を
-            シミュレーションではなく実機で検証する（dawn の競争優位＝
-            分散基盤の本番妥当性を確かめる / ADR-0016）。
-            検証項目: ノード間通信の到達性、ネットワーク分断時の
-            Raft フェイルオーバー、低スペック環境での Tick SLA。
-
-Phase 9: Resource + Economy Context
+Phase 9 : Resource + Economy Context（dawn-economy / FBD-008 撤廃により ADR で解禁）
 Phase 10: Client 本格化（GDExtension 導入）
            godot-rust で Client-Side Prediction を Rust 実装
            dawn-core 型を Godot へ直接公開
@@ -463,6 +521,32 @@ Event Sourcing の原則（INV-001〜006）は全フェーズで維持する
 ---
 
 ## 11. 廃止・変更された計画の記録
+
+### 2026-06-14: Phase 8 の前提を 3 つの設計判断で変更（ADR-0016/0017/0018）
+
+**変更 1 — 絶対アンチ TiDi を撤回（ADR-0018）:**
+
+旧: Phase 8 完了基準「1 Sector 5,000 ships 上限で Tick SLA を常に満たす」＝
+TiDi を一切出さず入場制限で事前規制する。
+新: 単一密戦闘は分割不能なため入場制限だけだと「クライマックスから締め出す」＝ EVE より悪い体験に
+なりうる。過負荷は **分割 → LoD → 局所 TiDi → 入場制限** の順で対処し、TiDi は局所・観測可能・
+非破壊・自動回復・後置の境界つき最終手段として採用する。完了基準も置換（§10）。
+
+理由: eve-reference §11.1 の批判。TiDi は INV-005 を壊さない（論理 Tick は単調・決定的のまま）ため
+採用はクリーン。差別化は「TiDi が無い」ではなく「閾値が桁違いに高く局所・短時間・自動回復」。
+
+**変更 2 — スナップショット圧縮・2層ログを Phase 8 に追加（ADR-0017）:**
+
+旧: スナップショットは最適化に過ぎず、ログは index 0 から常に replay 可能（無限成長を許容）。
+新: FBD-001 + INV-001 + INV-002 は長寿命シャードで両立しないため、2層ログ（圧縮可能なホットログ +
+永久 append-only のコールドアーカイブ）を導入。INV-002 を「検証済みスナップショット + 末尾 replay」に
+改訂。failover が創世記 replay を要求しない前提に。Phase 8A として最優先で実装する。
+
+**変更 3 — マルチ Raft でのコンセンサス・スケールを却下（ADR-0017 §5）:**
+
+旧（検討案 D）: 境界ごとのマルチグループ Raft で transit をスケール。
+新: メンテナンス不能な複雑さ（クロスグループ 2PC 等）のため却下。単一 Raft グループを意図的に維持。
+唯一の単純な備えはバッチ提案で、fleet-jump レイテンシが実測で問題化してから着手（§10 8E）。
 
 ### 2026-06-04: Phase 4〜11 の開発戦略を変更（2段階）
 
