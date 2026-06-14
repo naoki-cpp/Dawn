@@ -114,6 +114,26 @@ pub(crate) fn apply_committed_raft_entries<S: EventStore>(
     }
 }
 
+/// Advance one cluster node by one logical Tick in the canonical step order
+/// (ADR-0014): Step 7.5 (apply committed Raft entries) → simulation tick →
+/// Step 10 (advance this node's Raft election/heartbeat timers).
+///
+/// Shared by the `--serve --cluster` warm-up and main loops so the per-node
+/// step order has a single source of truth. The actor path
+/// (`SectorSimulatorActor`) keeps its own variant because it interleaves a
+/// ReplicationBus flush (Step 9) between the tick and the Raft timer step.
+pub(crate) fn step_cluster_node<S: EventStore>(
+    node         : &mut SimulationNode<S>,
+    raft         : &RaftActorHandle,
+    committed_rx : &mut mpsc::UnboundedReceiver<Vec<u8>>,
+    lock_commands: &[dawn_core::LockOnCommand],
+) -> crate::node::TickResult {
+    apply_committed_raft_entries(node, raft, committed_rx);
+    let result = node.tick_with_lock_commands(lock_commands);
+    raft.tick();
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

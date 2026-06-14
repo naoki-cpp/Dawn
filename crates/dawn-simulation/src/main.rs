@@ -716,6 +716,36 @@ fn deliver_aoi_frame(
     sess.send_events(&visible_events)
 }
 
+/// Build a `SimulationNode` wired the way every serve loop needs it: the
+/// population backstop set (ADR-0018) and the module / ship-type registries
+/// loaded from `data/*.toml` (falling back to the built-in defaults). Shared
+/// by `run_phase4_server` and `run_cluster_server` so the wiring cannot drift.
+fn build_serve_node(id: NodeId, sector: SectorId, bounds: SectorBounds, pop_cap: usize) -> SimulationNode {
+    let mut node = SimulationNode::new(id, sector, bounds);
+    node.set_population_cap(pop_cap);
+    for def in data_loader::load_modules("data/modules.toml", modules::all_modules()) {
+        node.register_module(def);
+    }
+    for def in data_loader::load_ship_types("data/ship_types.toml", ship_types::all_ship_types()) {
+        node.register_ship_type(def);
+    }
+    node
+}
+
+/// Spawn `ship_count` NPC frigates into `node`, each fitted with a small
+/// railgun. Shared by `run_phase4_server` and `run_cluster_server`.
+fn spawn_npc_frigates(node: &mut SimulationNode, ship_count: usize) {
+    let config = SpawnConfig::default_for_node(NodeId(0));
+    for (_, pos, vel) in generate_ships(ship_count, &config, 0) {
+        let ship_id = node.spawn_ship(ship_types::SHIP_TYPE_NPC_FRIGATE, pos, vel);
+        node.fit_module(dawn_core::FitModuleCommand {
+            ship_id,
+            slot      : dawn_core::SlotKind::High,
+            module_id : modules::MODULE_RAILGUN_SMALL,
+        });
+    }
+}
+
 async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_cap: usize) {
     println!("═══════════════════════════════════════════");
     println!("  Phase 5 — Godot WebSocket server          ");
@@ -736,36 +766,10 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_cap: usize) {
         .expect("failed to bind WebSocket server");
 
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
-    let mut node = SimulationNode::new(NodeId(0), SectorId(0), bounds);
-    node.set_population_cap(pop_cap);
-
-    let loaded_modules = data_loader::load_modules(
-        "data/modules.toml",
-        modules::all_modules(),
-    );
-    for def in loaded_modules {
-        node.register_module(def);
-    }
-
-    let loaded_ship_types = data_loader::load_ship_types(
-        "data/ship_types.toml",
-        ship_types::all_ship_types(),
-    );
-    for def in loaded_ship_types {
-        node.register_ship_type(def);
-    }
+    let mut node = build_serve_node(NodeId(0), SectorId(0), bounds, pop_cap);
 
     // Generate NPC ships
-    let config = SpawnConfig::default_for_node(NodeId(0));
-    let ships  = generate_ships(ship_count, &config, 0);
-    for (_, pos, vel) in ships {
-        let ship_id = node.spawn_ship(ship_types::SHIP_TYPE_NPC_FRIGATE, pos, vel);
-        node.fit_module(dawn_core::FitModuleCommand {
-            ship_id,
-            slot      : dawn_core::SlotKind::High,
-            module_id : modules::MODULE_RAILGUN_SMALL,
-        });
-    }
+    spawn_npc_frigates(&mut node, ship_count);
     // Duel mode: spawn 1 Bot opposite the player's default spawn position.
     if duel_mode {
         let bot_pos = Position::new(1200.0, 0.0, 0.0);
@@ -993,36 +997,18 @@ async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     let (rafts, mut committed_rxs): (Vec<_>, Vec<_>) = endpoints.into_iter().unzip();
 
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
-    let mut nodes: Vec<SimulationNode> = ids.iter().map(|&id| {
-        let mut node = SimulationNode::new(id, SectorId(id.0), bounds);
-        node.set_population_cap(pop_cap);
-        for def in data_loader::load_modules("data/modules.toml", modules::all_modules()) {
-            node.register_module(def);
-        }
-        for def in data_loader::load_ship_types("data/ship_types.toml", ship_types::all_ship_types()) {
-            node.register_ship_type(def);
-        }
-        node
-    }).collect();
+    let mut nodes: Vec<SimulationNode> = ids.iter()
+        .map(|&id| build_serve_node(id, SectorId(id.0), bounds, pop_cap))
+        .collect();
 
     // NPC ships live in Sector 0 only.
-    let config = SpawnConfig::default_for_node(NodeId(0));
-    for (_, pos, vel) in generate_ships(ship_count, &config, 0) {
-        let ship_id = nodes[0].spawn_ship(ship_types::SHIP_TYPE_NPC_FRIGATE, pos, vel);
-        nodes[0].fit_module(dawn_core::FitModuleCommand {
-            ship_id,
-            slot      : dawn_core::SlotKind::High,
-            module_id : modules::MODULE_RAILGUN_SMALL,
-        });
-    }
+    spawn_npc_frigates(&mut nodes[0], ship_count);
 
     // Warm up: tick until a Raft leader is elected so early Jump proposals
     // are not dropped (election timeout is at most 20 ticks).
     for _ in 0..30 {
         for i in 0..SECTORS {
-            transit::apply_committed_raft_entries(&mut nodes[i], &rafts[i], &mut committed_rxs[i]);
-            nodes[i].tick();
-            rafts[i].tick();
+            transit::step_cluster_node(&mut nodes[i], &rafts[i], &mut committed_rxs[i], &[]);
         }
     }
     println!("  [Server] Raft warm-up complete. Waiting for players...");
@@ -1133,12 +1119,9 @@ async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             }
         }
 
-        // Tick every node: Step 7.5 (apply committed Raft entries) →
-        // simulation step → Step 10 (advance Raft timers).
+        // Tick every node in the canonical step order (Step 7.5 → sim → Step 10).
         for i in 0..SECTORS {
-            transit::apply_committed_raft_entries(&mut nodes[i], &rafts[i], &mut committed_rxs[i]);
-            nodes[i].tick_with_lock_commands(&lock_commands[i]);
-            rafts[i].tick();
+            transit::step_cluster_node(&mut nodes[i], &rafts[i], &mut committed_rxs[i], &lock_commands[i]);
         }
 
         // Collect new events per Sector so each client only sees the Sector
