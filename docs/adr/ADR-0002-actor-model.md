@@ -1,12 +1,12 @@
-# ADR-0002: Actor モデルによるノード内並行制御
-
-| 項目 | 内容 |
-|---|---|
-| ステータス | Accepted |
-| 日付 | 2026-06-04 |
-| 決定者 | アーキテクト |
-
 ---
+id      : ADR-0002
+title   : Actor モデルによるノード内並行制御
+status  : accepted
+date    : 2026-06-04
+deciders: [human, ai-agent]
+---
+
+# ADR-0002 — Actor モデルによるノード内並行制御
 
 ## コンテキスト
 

@@ -3,8 +3,8 @@ id      : ADR-0013
 title   : タクティカルオーバーレイ（射程リング）
 status  : accepted
 date    : 2026-06-09
-authors : human + AI
-related : ADR-0006（フィッティング）、ADR-0012（タレット追跡）
+deciders: [human, ai-agent]
+related : ADR-0006（フィッティング）, ADR-0012（タレット追跡）
 ---
 
 # ADR-0013 — タクティカルオーバーレイ（射程リング）

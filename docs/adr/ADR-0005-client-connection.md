@@ -6,7 +6,7 @@ date    : 2026-06-05
 deciders: [human, ai-agent]
 ---
 
-# ADR-0005: ClientConnection — サーバー／クライアント通信の抽象化
+# ADR-0005 — ClientConnection: サーバー／クライアント通信の抽象化
 
 ## 状況
 

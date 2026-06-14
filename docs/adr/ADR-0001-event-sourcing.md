@@ -1,12 +1,12 @@
-# ADR-0001: Event Sourcing の採用
-
-| 項目 | 内容 |
-|---|---|
-| ステータス | Accepted |
-| 日付 | 2026-06-04 |
-| 決定者 | アーキテクト |
-
 ---
+id      : ADR-0001
+title   : Event Sourcing の採用
+status  : accepted
+date    : 2026-06-04
+deciders: [human, ai-agent]
+---
+
+# ADR-0001 — Event Sourcing の採用
 
 ## コンテキスト
 

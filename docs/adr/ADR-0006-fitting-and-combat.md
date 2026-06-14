@@ -3,8 +3,7 @@ id      : ADR-0006
 title   : Fitting / Combat / Lock-on / Active モジュールシステムの設計
 status  : accepted
 date    : 2026-06-05
-updated : 2026-06-05
-authors : human + AI
+deciders: [human, ai-agent]
 related : ADR-0001（Event Sourcing）, ADR-0002（Actor Model）, ADR-0005（ClientCommand）, ADR-0007（マルチプレイヤー）
 ---
 

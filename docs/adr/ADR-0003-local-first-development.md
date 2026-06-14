@@ -1,12 +1,12 @@
-# ADR-0003: Local-First Development（段階的分散化）
-
-| 項目 | 内容 |
-|---|---|
-| ステータス | Accepted |
-| 日付 | 2026-06-04 |
-| 決定者 | アーキテクト |
-
 ---
+id      : ADR-0003
+title   : Local-First Development（段階的分散化）
+status  : accepted
+date    : 2026-06-04
+deciders: [human, ai-agent]
+---
+
+# ADR-0003 — Local-First Development（段階的分散化）
 
 ## コンテキスト
 

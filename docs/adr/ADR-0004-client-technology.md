@@ -1,12 +1,12 @@
-# ADR-0004: クライアント技術選択（Godot 4 + godot-rust）
-
-| 項目 | 内容 |
-|---|---|
-| ステータス | Accepted |
-| 日付 | 2026-06-04 |
-| 決定者 | アーキテクト |
-
 ---
+id      : ADR-0004
+title   : クライアント技術選択（Godot 4 + godot-rust）
+status  : accepted
+date    : 2026-06-04
+deciders: [human, ai-agent]
+---
+
+# ADR-0004 — クライアント技術選択（Godot 4 + godot-rust）
 
 ## コンテキスト
 

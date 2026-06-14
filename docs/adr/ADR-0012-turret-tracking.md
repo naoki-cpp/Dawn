@@ -3,8 +3,8 @@ id      : ADR-0012
 title   : タレット追跡メカニズム
 status  : accepted
 date    : 2026-06-09
-authors : human + AI
-related : ADR-0006（フィッティング / 戦闘）、ADR-0011（キャパシタ）
+deciders: [human, ai-agent]
+related : ADR-0006（フィッティング / 戦闘）, ADR-0011（キャパシタ）
 ---
 
 # ADR-0012 — タレット追跡メカニズム
