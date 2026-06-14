@@ -680,6 +680,39 @@ fn apply_common_command(
     None
 }
 
+/// Push one Area-of-Interest frame to a session (ADR-0019): `AoiEnter` for ships
+/// that just became visible, `AoiLeave` for ships that left, then the new domain
+/// events that concern a currently-visible ship. `prev` is updated to `curr` in
+/// place. Returns `false` if any send fails (the caller drops the session, which
+/// also clears its stale `prev`). Shared by the single-node and clustered loops.
+fn deliver_aoi_frame(
+    sess      : &mut ws_server::PlayerSession,
+    node      : &SimulationNode,
+    curr      : Vec<ShipId>,
+    prev      : &mut Vec<ShipId>,
+    new_events: &[dawn_core::DomainEvent],
+) -> bool {
+    let (entered, left) = aoi::aoi_delta(prev, &curr);
+    *prev = curr.clone();
+
+    // Tell the client about ships entering / leaving its neighborhood.
+    for id in entered.iter().filter(|&&id| id != sess.ship_id) {
+        if let Some(msg) = node.aoi_enter_json(*id) {
+            if !sess.conn.send_raw(&msg) { return false; }
+        }
+    }
+    for id in left.iter().filter(|&&id| id != sess.ship_id) {
+        if !sess.conn.send_raw(&aoi::aoi_leave_json(*id)) { return false; }
+    }
+
+    // Deliver only events concerning a currently-visible ship.
+    let visible_events: Vec<_> = new_events.iter()
+        .filter(|e| aoi::event_visible_to(e, &curr))
+        .cloned()
+        .collect();
+    sess.send_events(&visible_events)
+}
+
 async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
     println!("═══════════════════════════════════════════");
     println!("  Phase 5 — Godot WebSocket server          ");
@@ -878,25 +911,7 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
                 .map(|pos| grid.neighbors_of(pos))
                 .unwrap_or_default();
             let prev = prev_visible.entry(sess.player_id).or_default();
-            let (entered, left) = aoi::aoi_delta(prev, &curr);
-            *prev = curr.clone();
-
-            // Tell the client about ships entering / leaving its neighborhood.
-            for id in entered.iter().filter(|&&id| id != sess.ship_id) {
-                if let Some(msg) = node.aoi_enter_json(*id) {
-                    if !sess.conn.send_raw(&msg) { return false; }
-                }
-            }
-            for id in left.iter().filter(|&&id| id != sess.ship_id) {
-                if !sess.conn.send_raw(&aoi::aoi_leave_json(*id)) { return false; }
-            }
-
-            // Deliver only events concerning a currently-visible ship.
-            let visible_events: Vec<_> = all_new_events.iter()
-                .filter(|e| aoi::event_visible_to(e, &curr))
-                .cloned()
-                .collect();
-            sess.send_events(&visible_events)
+            deliver_aoi_frame(sess, &node, curr, prev, &all_new_events)
         });
         // Drop AoI state for sessions that disconnected this tick.
         prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
@@ -1156,23 +1171,7 @@ async fn run_cluster_server(ship_count: usize) {
             }
 
             let prev = prev_visible.entry(sess.player_id).or_default();
-            let (entered, left) = aoi::aoi_delta(prev, &curr);
-            *prev = curr.clone();
-
-            for id in entered.iter().filter(|&&id| id != sess.ship_id) {
-                if let Some(msg) = nodes[sector].aoi_enter_json(*id) {
-                    if !sess.conn.send_raw(&msg) { return false; }
-                }
-            }
-            for id in left.iter().filter(|&&id| id != sess.ship_id) {
-                if !sess.conn.send_raw(&aoi::aoi_leave_json(*id)) { return false; }
-            }
-
-            let visible_events: Vec<_> = events_by_sector[sector].iter()
-                .filter(|e| aoi::event_visible_to(e, &curr))
-                .cloned()
-                .collect();
-            sess.send_events(&visible_events)
+            deliver_aoi_frame(sess, &nodes[sector], curr, prev, &events_by_sector[sector])
         });
         prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
 
