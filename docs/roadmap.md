@@ -94,7 +94,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**Phase 8A / 8C（8C-5 任意除き）/ 8B 局所 TiDi コア（8B-4/5/7・6 一部）完了。次の単一タスク候補: 8B-3（Simulation LoD）か 8B-2（Dynamic Sector Fission・クラスタ per-Sector ペーシングの前提）か 8B-1（Population Cap・最終バックストップ）。8B-8（差分 TiDi 越境）は別 ADR。**
+**Phase 8A / 8C（8C-5 任意除き）/ 8B 局所 TiDi コア（8B-4/5/7・6 一部）・8B-1（Population Cap・生カウント）完了。8B-3（Simulation LoD）は ADR-0020 で deferred（計算メリット未実証）。次の単一タスク候補: 8B-2（Dynamic Sector Fission・クラスタ per-Sector ペーシングの前提）。8B-8（差分 TiDi 越境）は別 ADR で 8B-2 に依存。**
 （8A-1〜8A-7 全完了: スナップショット検証 2 テスト + take_snapshot 正準ソート、FileEventStore の
 2 層ログ（base_index ヘッダ）+ `compact()`（コールドアーカイブ + 原子的 swap）+ 4 テスト、
 圧縮後 reopen + restore で「創世記 replay 不要」を実証する failover テスト、
@@ -429,7 +429,7 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 |---|---|---|---|
 | 1 | Sector Population Cap（**最終バックストップに格下げ**） | game-design.md §8 | ✅ 生 `ship_count()` ベース: `at_population_cap()` = `ship_count() >= population_cap`。TiDi 予算と同じ単位（生カウント）。`--pop-cap N` で Sector 毎に可変、両 serve ループで新規入場を拒否・3 テスト。当初の「アクティブ船除外（実効人口）」案は撤回 — INV-MOVE により等速船はイベントを出さず「無イベント = idle」が不成立（放置船を安くするのは数の除外でなく LoD=8B-3 の忠実度低下で表現する） |
 | 2 | Dynamic Sector Fission（分離可能負荷の第1手） | tick-model.md §8 | ⬜ |
-| 3 | Simulation LoD（忠実度の階層化・更新間引き） | game-design.md §8 層1 | ⬜ |
+| 3 | Simulation LoD（忠実度の階層化・更新間引き） | game-design.md §8 層1 / ADR-0020 | ⏸️ **deferred**（ADR-0020）。設計は完了（近似ゼロの 2 段階・交差閉包）だが、着手前のコストモデルで計算メリットが未実証と判明。サーバ計算は O(n²) でなく小定数の O(n)（ADR-0019）で、LoD が削るのは c·(n−k) のみ。再開は go/no-go スパイク（idle 反復が Tick 予算の有意割合か）次第 |
 | 4 | 局所 TiDi: dilation = 実時間ペーシングのみ・論理 Tick の処理内容は不変（テスト） | INV-005 と無関係 | ✅ `dilation.rs::DilationController`（判定は論理コスト=ship_count、物理時刻不使用・決定的）。単一 `--serve` ループに実配線（sleep のみ伸ばす） |
 | 5 | dilation が当該 Sector 局所であること（隣接へ伝播しない）のテスト | INV-TiDi (a) | ✅ コントローラは状態共有なし・per-Sector（`dilation_in_one_sector_does_not_affect_another`）。クラスタ（多 Sector lockstep）への per-Sector ペーシングは独立ループ化（8B-2 連動）が必要・未 |
 | 6 | SLA イベント / メトリクス（dilation 係数・継続時間の記録） | INV-TiDi (b) 観測可能 | 🔶 `active_ticks`（継続 Tick）+ 係数・engage/recover ログ。構造化 SLA イベント化は未 |
