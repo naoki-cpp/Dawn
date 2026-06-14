@@ -97,7 +97,7 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
 
 - Single Shardの分散シミュレーション
 - イベントソーシングによる完全な因果追跡
-- CRDTとRaftの責務分離による高スループット同期
+- 追記ログのゴシップ配布とRaftの責務分離による高スループット同期（ADR-0021。Sector-local は単一所有のため競合解決 CRDT を要さず、追記ログのゴシップ配布で収束する。Raft は Sector 越え transit 専用）
 - アンチ TiDi（INV-TiDi）— TiDi 閾値を EVE より桁違いに高く保ち、出ても局所・短時間・自動回復に抑える（ADR-0018）
 
 **4本の柱（EVE を超える差別化 / ADR-0016）**:
@@ -381,7 +381,7 @@ dawn-core
                         （dawn-consensus にも依存する）
 
 # 将来追加予定（まだ存在しない）:
-#   dawn-actor ← dawn-replication（Gossip + CRDT）
+#   dawn-actor ← dawn-replication（追記ログのゴシップ配布・ADR-0021）
 #   上記 ← dawn-sector-node      （本番実行バイナリ）
 ```
 
@@ -770,7 +770,7 @@ cargo run --bin check-event-catalog
 
 ```
 単体テスト: 各 .rs ファイル末尾の #[cfg(test)] ブロック
-  対象: Pure Function, ドメインロジック, CRDT のマージ操作
+  対象: Pure Function, ドメインロジック, ゴシップ適用の冪等性（ADR-0021）
 
 統合テスト: tests/integration/ 以下
   対象: EventStore の永続化・復元, Snapshot のラウンドトリップ
@@ -1120,7 +1120,7 @@ Combat / Fitting ロジックは引き続き dawn-ecs / dawn-core 内に実装�
 
 | Crate | 予定フェーズ | 責務（予定） |
 |---|---|---|
-| `dawn-replication` | Phase 8 | Gossip + CRDT。差分伝播, LWW-Register |
+| `dawn-replication` | Phase 8 | 追記ログのゴシップ配布（ADR-0021）。差分伝播 + アンチエントロピー + スナップショット転送（競合解決 CRDT/LWW は単一所有のため不要） |
 | `dawn-proto` | Phase 5 | protobuf定義と生成コード |
 | `dawn-sector-node` | Phase 5 | 本番実行バイナリ。Actorの配線と起動 |
 
@@ -1273,6 +1273,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-15（8B-1 Sector 人口バックストップ実装に伴う §0 コマンド表更新のみ — `--pop-cap N` 追記。生 `ship_count()` ベースの最終バックストップ / ADR-0018。CLAUDE.md 不変条件の改訂は伴わない。人間承認済み）*
-*対応ADR: ADR-0001 〜 ADR-0019*
-*次回レビュー予定: Phase 8C 実装（AoI 配線 8C-3〜6）/ Phase 8B（Anti-TiDi / TiDi 実装）設計時*
+*最終更新: 2026-06-15（ADR-0021 承認に伴う文言修正 — §1/§3/§8/§11 の「CRDT」を「追記ログのゴシップ配布」へ。Sector-local 複製は単一所有のため競合解決 CRDT/LWW を要さない。CLAUDE.md 不変条件の改訂は伴わない。人間承認済み。直前の更新: 8B-1 `--pop-cap` 追記）*
+*対応ADR: ADR-0001 〜 ADR-0021（ADR-0020 Simulation LoD は deferred）*
+*次回レビュー予定: Phase 8D（分散インフラ）設計時 / 戦闘の深み（ADR-0016 §5）着手時*

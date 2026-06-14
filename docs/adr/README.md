@@ -21,6 +21,7 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 | [ADR-0018](ADR-0018-tidi-graceful-degradation.md) | Time Dilation を境界つき局所的最終手段として採用（INV-TiDi 改訂） | Accepted |
 | [ADR-0019](ADR-0019-spatial-index-and-aoi.md) | AoI のための静的セルグリッド（3×3×3 隣接可視） | Accepted |
 | [ADR-0020](ADR-0020-simulation-lod.md) | Simulation LoD — 非交戦エンティティの休眠化（近似ゼロ・交差閉包） | Deferred |
+| [ADR-0021](ADR-0021-sector-local-replication.md) | Sector-local 複製は単一所有 + 追記ログのゴシップ配布（CRDT/LWW は採らない） | Accepted |
 
 ### Client / 通信
 

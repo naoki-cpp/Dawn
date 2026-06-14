@@ -478,7 +478,7 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 | # | タスク | 備考 | 状態 |
 |---|---|---|---|
 | 1 | dawn-proto（シリアライゼーション定義） | 新規クレート（個別 ADR + DAG 位置確定） | ⬜ |
-| 2 | dawn-replication（Gossip + CRDT / LWW-Register） | 新規クレート | ⬜ |
+| 2 | dawn-replication（追記ログのゴシップ配布 + アンチエントロピー + スナップショット転送） | 新規クレート・ADR-0021（単一所有のため競合解決 CRDT/LWW は不要） | ⬜ |
 | 3 | dawn-sector-node（本番実行バイナリ・ノード間ネットワーク通信） | 新規クレート | ⬜ |
 | 4 | （任意・推奨）Raspberry Pi クラスタ実機検証 | 下記 ★ 参照 | ⬜ |
 
