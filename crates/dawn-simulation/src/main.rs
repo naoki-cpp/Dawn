@@ -1193,3 +1193,112 @@ async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         }
     }
 }
+
+#[cfg(test)]
+mod serve_pipeline_tests {
+    use super::*;
+    use dawn_actor::{ClientCommand, ClientConnection, InProcessConnection};
+    use dawn_core::{DomainEvent, MoveCommand, NodeId, Position, SectorBounds, SectorId};
+    use dawn_event_store::store::EventStore as _;
+
+    /// A player's `Move`, delivered over a `ClientConnection`, is applied to the
+    /// owning node and the resulting `VelocityChanged` is delivered back over the
+    /// same connection. Exercises the command → tick → event serve pipeline
+    /// through the `dyn ClientConnection` seam (ADR-0005) with no socket — the
+    /// in-process path the WebSocket loop mirrors.
+    #[test]
+    fn player_move_over_connection_is_applied_and_velocity_event_flows_back() {
+        let bounds   = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
+        let mut node = build_serve_node(NodeId(0), SectorId(0), bounds, node::POPULATION_CAP);
+
+        let player_id = node.next_player_id();
+        let ship_id   = node.spawn_player_ship_at_pub(player_id, Position::new(0.0, 0.0, 0.0));
+
+        let (mut server, client) = InProcessConnection::pair();
+
+        // Client requests thrust toward +X.
+        client.command_tx.send(ClientCommand::Move(MoveCommand {
+            ship_id,
+            target_position: Position::new(1_000.0, 0.0, 0.0),
+        })).expect("server connection is alive");
+
+        // Server side: drain and apply commands purely through the trait object.
+        let conn: &mut dyn ClientConnection = &mut server;
+        let mut lock_commands = Vec::new();
+        let before = node.total_event_count() as u64;
+        while let Some(cmd) = conn.try_recv_command() {
+            apply_common_command(&mut node, player_id, cmd, &mut lock_commands);
+        }
+
+        node.tick_with_lock_commands(&lock_commands);
+
+        // Deliver the tick's new events back over the connection.
+        let new_events: Vec<DomainEvent> = node
+            .event_store()
+            .iter_from(before)
+            .map(|r| r.event.clone())
+            .collect();
+        conn.send_events(&new_events).expect("client endpoint is alive");
+
+        // Client observes a VelocityChanged for its own ship.
+        let mut client = client;
+        let mut saw_velocity_changed = false;
+        while let Ok(ev) = client.event_rx.try_recv() {
+            if let DomainEvent::VelocityChanged(vc) = ev {
+                if vc.ship_id == ship_id {
+                    saw_velocity_changed = true;
+                }
+            }
+        }
+        assert!(
+            saw_velocity_changed,
+            "client must receive a VelocityChanged for the ship it moved"
+        );
+    }
+
+    /// A command for a ship the player does not own is rejected by the pipeline:
+    /// no `VelocityChanged` reaches the client. Guards the ownership check in
+    /// `apply_common_command` → `apply_move_command_owned` (CLAUDE.md §5).
+    #[test]
+    fn move_for_unowned_ship_produces_no_event_over_connection() {
+        let bounds   = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
+        let mut node = build_serve_node(NodeId(0), SectorId(0), bounds, node::POPULATION_CAP);
+
+        let player_id = node.next_player_id();
+        let _own_ship = node.spawn_player_ship_at_pub(player_id, Position::new(0.0, 0.0, 0.0));
+        // A second player's ship the first player must not be able to drive.
+        let other_id   = node.next_player_id();
+        let other_ship = node.spawn_player_ship_at_pub(other_id, Position::new(500.0, 0.0, 0.0));
+
+        let (mut server, client) = InProcessConnection::pair();
+        client.command_tx.send(ClientCommand::Move(MoveCommand {
+            ship_id: other_ship,
+            target_position: Position::new(1_000.0, 0.0, 0.0),
+        })).expect("server connection is alive");
+
+        let conn: &mut dyn ClientConnection = &mut server;
+        let mut lock_commands = Vec::new();
+        let before = node.total_event_count() as u64;
+        while let Some(cmd) = conn.try_recv_command() {
+            apply_common_command(&mut node, player_id, cmd, &mut lock_commands);
+        }
+        node.tick_with_lock_commands(&lock_commands);
+
+        let new_events: Vec<DomainEvent> = node
+            .event_store()
+            .iter_from(before)
+            .map(|r| r.event.clone())
+            .collect();
+        conn.send_events(&new_events).expect("client endpoint is alive");
+
+        let mut client = client;
+        while let Ok(ev) = client.event_rx.try_recv() {
+            if let DomainEvent::VelocityChanged(vc) = ev {
+                assert_ne!(
+                    vc.ship_id, other_ship,
+                    "a player must not be able to move a ship it does not own"
+                );
+            }
+        }
+    }
+}
