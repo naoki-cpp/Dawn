@@ -69,15 +69,15 @@ where
     module_registry   : HashMap<ModuleId, ModuleDefinition>,
     /// Ship type definition registry.
     ship_type_registry: HashMap<ShipTypeId, ShipTypeDefinition>,
-    /// 装備なし時の素の ShipStats。Fitting 集計の base として使う。
+    /// Bare ShipStats without fitting. Used as the base for fitting aggregation.
     base_stats         : HashMap<ShipId, ShipStatsComp>,
-    /// PlayerId → ShipId（プレイヤー船の所有権管理）
+    /// PlayerId -> ShipId (player ship ownership).
     player_ships       : HashMap<PlayerId, ShipId>,
-    /// ShipId → PlayerId（逆引き）
+    /// ShipId -> PlayerId (reverse lookup).
     ship_owners        : HashMap<ShipId, PlayerId>,
-    /// ShipId → ShipTypeId（船種の逆引き・InitialState に ship_type_name を含めるために使用）
+    /// ShipId -> ShipTypeId (reverse lookup; used to include ship_type_name in InitialState).
     ship_type_ids      : HashMap<ShipId, ShipTypeId>,
-    /// PlayerId 採番カウンタ
+    /// PlayerId allocation counter.
     player_id_counter  : u64,
     /// Lock-on commands queued by the bot AI during `process_bots()`.
     ///
@@ -458,8 +458,8 @@ impl<S: EventStore> SimulationNode<S> {
         // 6. Combat System — fire only when the capacitor weapon cycle started this tick
         let combat = CombatSystem(&mut self.world, tick, &cap.weapon_cycles_started);
 
-        // 破壊された Ship を ECS と ship_index から削除
-        // CLAUDE.md §6: Combat の後に Bot System を実行する
+        // Remove destroyed ships from the ECS and ship_index.
+        // CLAUDE.md §6: run the Bot System after Combat.
         for ship_id in &combat.destroyed {
             if let Some(entity) = self.ship_index.remove(ship_id) {
                 self.world.despawn_ship(entity);
@@ -470,7 +470,7 @@ impl<S: EventStore> SimulationNode<S> {
         // 7. Bot System — bots issue the same commands as human players
         self.process_bots();
 
-        // 8. EventStore に Append
+        // 8. Append to the EventStore
         let all_events: Vec<DomainEvent> = move_events.iter()
             .chain(cap.events.iter())
             .chain(lock.events.iter())
@@ -575,7 +575,7 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|c| c.current_shield + c.current_armor + c.current_hull)
     }
 
-    /// `apply_event` のテスト用公開ラッパー。
+    /// Public test wrapper for `apply_event`.
     #[cfg(test)]
     pub fn apply_event_pub(&mut self, event: DomainEvent) {
         self.apply_event(&event);
@@ -675,7 +675,7 @@ impl<S: EventStore> SimulationNode<S> {
         true
     }
 
-    /// プレイヤー船として指定し、PLAYER 性能値を設定する。
+    /// Mark a ship as a player ship and apply the PLAYER stat profile.
     pub fn set_player_ship(&mut self, ship_id: ShipId) {
         if let Some(&entity) = self.ship_index.get(&ship_id) {
             self.base_stats.insert(ship_id, ShipStatsComp::PLAYER);
@@ -698,7 +698,7 @@ impl<S: EventStore> SimulationNode<S> {
         self.ship_type_registry.insert(def.id, def);
     }
 
-    // ── Phase 5: PlayerId / 所有権管理 ────────────────────────────────────────
+    // ── Phase 5: PlayerId / ownership management ─────────────────────────────
 
     pub fn next_player_id(&mut self) -> PlayerId {
         let id = PlayerId(self.player_id_counter);
@@ -1036,8 +1036,9 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    /// プレイヤー船の Fitting 状態を PlayerFitting JSON として返す。    ///
-    /// 接続時に Welcome + InitialState の後に送信する、E    /// フォーマッチE
+    /// Return the player ship's fitting state as a PlayerFitting JSON message.
+    ///
+    /// Sent after Welcome + InitialState on connect. Format:
     /// ```json
     /// {"type":"PlayerFitting","modules":[
     ///   {"slot":"High","index":0,"module_id":1,"name":"Small Railgun I","is_active":false}
@@ -1268,7 +1269,7 @@ impl<S: EventStore> SimulationNode<S> {
 
         apply_fitting(&mut self.world, cmd.ship_id, base);
 
-        // ShipFitted イベントを Append
+        // Append the ShipFitted event
         let snapshot = self.world.inner()
             .get::<&FittingComp>(entity)
             .map(|f| f.to_snapshot())
@@ -1409,7 +1410,7 @@ impl<S: EventStore> SimulationNode<S> {
                 }
             }
 
-            // TargetLocked: LockComp エントリを Locked 状態に更新
+            // TargetLocked: set the LockComp entry to the Locked state
             DomainEvent::TargetLocked(e) => {
                 use dawn_ecs::components::{LockEntry, LockState};
                 if let Some(&entity) = self.ship_index.get(&e.locker_id) {
@@ -1425,7 +1426,7 @@ impl<S: EventStore> SimulationNode<S> {
                 }
             }
 
-            // LockLost: LockComp からエントリを削除
+            // LockLost: remove the entry from LockComp
             DomainEvent::LockLost(e) => {
                 if let Some(&entity) = self.ship_index.get(&e.locker_id) {
                     if let Ok(mut lock) = self.world.inner_mut().get::<&mut LockComp>(entity) {
@@ -2463,5 +2464,27 @@ mod tests {
         let full: serde_json::Value =
             serde_json::from_str(&node.build_initial_state_json()).unwrap();
         assert_eq!(full["ships"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn aoi_enter_json_wraps_the_ship_state_for_a_known_ship() {
+        let mut node = mem_node();
+        let sid = node.spawn_ship(
+            crate::ship_types::SHIP_TYPE_NPC_FRIGATE,
+            Position::new(1.0, 2.0, 3.0),
+            Velocity::ZERO,
+        );
+        let json = node.aoi_enter_json(sid).expect("known ship yields a message");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "AoiEnter");
+        assert_eq!(v["ship"]["ship_id"].as_u64().unwrap(), sid.raw());
+        assert_eq!(v["ship"]["position"]["x"].as_f64().unwrap() as f32, 1.0);
+    }
+
+    #[test]
+    fn aoi_enter_json_is_none_for_an_unknown_ship() {
+        let node = mem_node();
+        let unknown = ShipId::new(NodeId(9), 999);
+        assert!(node.aoi_enter_json(unknown).is_none());
     }
 }
