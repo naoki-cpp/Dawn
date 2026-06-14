@@ -7,6 +7,7 @@
 //!   cargo run -p dawn-simulation --bin simulate
 //!   cargo run -p dawn-simulation --bin simulate --release
 
+mod checkpoint;
 mod cluster;
 mod data_loader;
 mod modules;
@@ -313,9 +314,11 @@ fn run_phase3_demo() {
     let dir           = tempfile::tempdir().expect("failed to create temp dir");
     let event_path    = dir.path().join("sector0_events.log");
     let snapshot_path = dir.path().join("sector0_snapshot.bin");
+    let cold_path     = dir.path().join("sector0_cold.log");
 
     println!("  log      : {}", event_path.display());
     println!("  snapshot : {}", snapshot_path.display());
+    println!("  cold     : {}", cold_path.display());
     println!("  ships    : {P3_SHIPS}");
     println!("  ticks    : {P3_TICKS}");
     println!();
@@ -341,15 +344,24 @@ fn run_phase3_demo() {
             node.spawn_ship(ship_types::SHIP_TYPE_NPC_FRIGATE, pos, vel);
         }
 
-        // Run half the ticks, take snapshot.
-        for _ in 0..(P3_TICKS / 2) { node.tick(); }
-        let snap = node.take_snapshot();
-        snap.save(&snapshot_path).expect("failed to save snapshot");
-        println!("  [session 1] snapshot taken at tick {}  (log_index={})",
-            snap.tick.value(), snap.log_index);
+        // ADR-0017 8A-7: drive snapshotting + hot-log compaction on a fixed
+        // logical-tick cadence. The scheduler saves the authoritative snapshot
+        // and compacts the hot log behind it (prefix → cold archive).
+        let mut scheduler = checkpoint::CheckpointScheduler::new(checkpoint::CheckpointConfig {
+            interval_ticks: (P3_TICKS / 2) as u64,
+            snapshot_path : snapshot_path.clone(),
+            cold_path     : cold_path.clone(),
+        });
 
-        // Run remaining ticks.
-        for _ in 0..(P3_TICKS - P3_TICKS / 2) { node.tick(); }
+        for _ in 0..P3_TICKS {
+            node.tick();
+            if let Some(snap) = scheduler.maybe_checkpoint(&mut node).expect("checkpoint failed") {
+                println!(
+                    "  [session 1] checkpoint at tick {}  (log_index={}, hot_base={})",
+                    snap.tick.value(), snap.log_index, node.event_store().base_index(),
+                );
+            }
+        }
 
         session1_tick      = node.current_tick();
         session1_positions = ship_ids.iter()

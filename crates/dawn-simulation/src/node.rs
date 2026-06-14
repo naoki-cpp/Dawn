@@ -1421,6 +1421,32 @@ impl<S: EventStore> SimulationNode<S> {
     }
 }
 
+// ── Checkpointing (ADR-0017 8A-7) ─────────────────────────────────────────────
+
+impl SimulationNode<dawn_event_store::FileEventStore> {
+    /// Take a snapshot, persist it durably, then compact the hot log behind it.
+    ///
+    /// This is the operational checkpoint of ADR-0017: after it returns, recovery
+    /// only needs `snapshot_path` + the post-snapshot tail of the hot log; the
+    /// prefix it covers lives in the append-only cold archive at `cold_path`.
+    ///
+    /// Ordering is load-bearing for crash safety: the snapshot is saved **before**
+    /// the hot log is compacted. A crash between the two leaves the snapshot
+    /// written and the hot log untouched (a redundant but safe state). Compacting
+    /// first could strand a snapshot whose `log_index` is older than the new
+    /// `base_index`, which would make `iter_from` silently skip events.
+    pub fn checkpoint(
+        &mut self,
+        snapshot_path: impl AsRef<std::path::Path>,
+        cold_path: impl AsRef<std::path::Path>,
+    ) -> std::io::Result<StateSnapshot> {
+        let snapshot = self.take_snapshot();
+        snapshot.save(&snapshot_path)?;
+        self.event_store.compact(snapshot.log_index, cold_path)?;
+        Ok(snapshot)
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
