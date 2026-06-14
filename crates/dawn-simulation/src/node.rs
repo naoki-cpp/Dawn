@@ -1096,36 +1096,50 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Serialise the given ships into an `InitialState` message.
     fn initial_state_json(&self, ship_ids: impl Iterator<Item = ShipId>) -> String {
-        let ships: Vec<serde_json::Value> = ship_ids.filter_map(|ship_id| {
-            let entity  = self.ship_index.get(&ship_id)?;
-            let pos     = self.world.inner().get::<&PositionComp>(*entity).ok()?.0;
-            let stats   = self.world.inner().get::<&ShipStatsComp>(*entity).ok()?;
-            let hull    = self.world.inner().get::<&HullComp>(*entity).ok()?;
-            let is_player = self.ship_owners.contains_key(&ship_id);
-            let ship_type_name = self.ship_type_ids.get(&ship_id)
-                .and_then(|tid| self.ship_type_registry.get(tid))
-                .map(|def| def.name.as_str())
-                .unwrap_or("Unknown");
-            Some(serde_json::json!({
-                "ship_id"              : ship_id.raw(),
-                "ship_type_name"       : ship_type_name,
-                "position"             : { "x": pos.x, "y": pos.y, "z": pos.z },
-                "max_shield"           : stats.max_shield,
-                "max_armor"            : stats.max_armor,
-                "max_hull"             : stats.max_hull,
-                "current_shield"       : hull.current_shield,
-                "current_armor"        : hull.current_armor,
-                "current_hull"         : hull.current_hull,
-                "cap_max"              : stats.cap_max,
-                "cap_recharge_per_tick": stats.cap_recharge_per_tick,
-                "is_player"            : is_player,
-            }))
-        }).collect();
+        let ships: Vec<serde_json::Value> =
+            ship_ids.filter_map(|ship_id| self.ship_state_json(ship_id)).collect();
 
         serde_json::json!({
             "type"  : "InitialState",
             "ships" : ships,
         }).to_string()
+    }
+
+    /// Per-ship state object (position, stats, hull, ownership). Shared by
+    /// `InitialState` and `AoiEnter` (ADR-0019). `None` if the ship is gone.
+    pub fn ship_state_json(&self, ship_id: ShipId) -> Option<serde_json::Value> {
+        let entity  = self.ship_index.get(&ship_id)?;
+        let pos     = self.world.inner().get::<&PositionComp>(*entity).ok()?.0;
+        let stats   = self.world.inner().get::<&ShipStatsComp>(*entity).ok()?;
+        let hull    = self.world.inner().get::<&HullComp>(*entity).ok()?;
+        let is_player = self.ship_owners.contains_key(&ship_id);
+        let ship_type_name = self.ship_type_ids.get(&ship_id)
+            .and_then(|tid| self.ship_type_registry.get(tid))
+            .map(|def| def.name.as_str())
+            .unwrap_or("Unknown");
+        Some(serde_json::json!({
+            "ship_id"              : ship_id.raw(),
+            "ship_type_name"       : ship_type_name,
+            "position"             : { "x": pos.x, "y": pos.y, "z": pos.z },
+            "max_shield"           : stats.max_shield,
+            "max_armor"            : stats.max_armor,
+            "max_hull"             : stats.max_hull,
+            "current_shield"       : hull.current_shield,
+            "current_armor"        : hull.current_armor,
+            "current_hull"         : hull.current_hull,
+            "cap_max"              : stats.cap_max,
+            "cap_recharge_per_tick": stats.cap_recharge_per_tick,
+            "is_player"            : is_player,
+        }))
+    }
+
+    /// `AoiEnter` control message for a ship that just entered an observer's
+    /// neighborhood (ADR-0019). `None` if the ship is gone. The matching
+    /// `AoiLeave` is a free function ([`crate::aoi::aoi_leave_json`]) since it
+    /// needs no node state.
+    pub fn aoi_enter_json(&self, ship_id: ShipId) -> Option<String> {
+        let ship = self.ship_state_json(ship_id)?;
+        Some(serde_json::json!({ "type": "AoiEnter", "ship": ship }).to_string())
     }
 
     // ── Area of Interest (ADR-0019) ────────────────────────────────────────────

@@ -675,6 +675,9 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
     });
 
     let mut sessions: Vec<ws_server::PlayerSession> = Vec::new();
+    // AoI: each session's last-known visible set (ADR-0019), for enter/leave diffs.
+    let mut prev_visible: std::collections::HashMap<dawn_core::PlayerId, Vec<dawn_core::ShipId>> =
+        std::collections::HashMap::new();
     let mut interval = tokio::time::interval(
         std::time::Duration::from_millis(P4_TICK_MS)
     );
@@ -720,6 +723,12 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
         // Add handshake-completed sessions.
         while let Ok(sess) = ready_sess_rx.try_recv() {
             println!("  [Server] {} joined with ship #{}", sess.player_id, sess.ship_id.raw());
+            // Seed the AoI baseline with the set already sent in InitialState, so
+            // the first tick's enter/leave diff does not re-send those ships.
+            let seed = node.get_ship_position(sess.ship_id)
+                .map(|pos| node.ships_visible_to(pos, AOI_CELL_SIZE))
+                .unwrap_or_default();
+            prev_visible.insert(sess.player_id, seed);
             sessions.push(sess);
         }
 
@@ -766,14 +775,42 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
             }
         }
 
-        // Broadcast all new events (command-driven + tick) to all clients.
+        // Broadcast new events (command-driven + tick) to clients, filtered by
+        // each session's Area of Interest (ADR-0019).
         let all_new_events: Vec<_> = {
             use dawn_event_store::store::EventStore as _;
             node.event_store().iter_from(events_before)
                 .map(|r| r.event.clone())
                 .collect()
         };
-        sessions.retain(|sess| sess.send_events(&all_new_events));
+        let grid = aoi::CellGrid::build(AOI_CELL_SIZE, node.ship_positions());
+        sessions.retain_mut(|sess| {
+            let curr = node.get_ship_position(sess.ship_id)
+                .map(|pos| grid.neighbors_of(pos))
+                .unwrap_or_default();
+            let prev = prev_visible.entry(sess.player_id).or_default();
+            let (entered, left) = aoi::aoi_delta(prev, &curr);
+            *prev = curr.clone();
+
+            // Tell the client about ships entering / leaving its neighborhood.
+            for id in entered.iter().filter(|&&id| id != sess.ship_id) {
+                if let Some(msg) = node.aoi_enter_json(*id) {
+                    if !sess.conn.send_raw(&msg) { return false; }
+                }
+            }
+            for id in left.iter().filter(|&&id| id != sess.ship_id) {
+                if !sess.conn.send_raw(&aoi::aoi_leave_json(*id)) { return false; }
+            }
+
+            // Deliver only events concerning a currently-visible ship.
+            let visible_events: Vec<_> = all_new_events.iter()
+                .filter(|e| aoi::event_visible_to(e, &curr))
+                .cloned()
+                .collect();
+            sess.send_events(&visible_events)
+        });
+        // Drop AoI state for sessions that disconnected this tick.
+        prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
     }
 }
 
@@ -874,6 +911,8 @@ async fn run_cluster_server(ship_count: usize) {
     // Which Sector currently owns each player's ship (updated on JumpGateUsed).
     let mut player_sector: HashMap<PlayerId, usize> = HashMap::new();
     let mut ship_player  : HashMap<ShipId, PlayerId> = HashMap::new();
+    // AoI: each session's last-known visible set (ADR-0019), for enter/leave diffs.
+    let mut prev_visible : HashMap<PlayerId, Vec<ShipId>> = HashMap::new();
 
     let mut interval = tokio::time::interval(
         std::time::Duration::from_millis(P4_TICK_MS)
@@ -908,6 +947,11 @@ async fn run_cluster_server(ship_count: usize) {
 
         while let Ok(sess) = ready_sess_rx.try_recv() {
             println!("  [Server] {} joined with ship #{}", sess.player_id, sess.ship_id.raw());
+            // Seed the AoI baseline (sector 0) with the InitialState set.
+            let seed = nodes[0].get_ship_position(sess.ship_id)
+                .map(|pos| nodes[0].ships_visible_to(pos, AOI_CELL_SIZE))
+                .unwrap_or_default();
+            prev_visible.insert(sess.player_id, seed);
             sessions.push(sess);
         }
 
@@ -983,18 +1027,56 @@ async fn run_cluster_server(ship_count: usize) {
             }
         }
 
-        // Send each session only the events from the Sector it now occupies.
-        sessions.retain(|sess| {
-            let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
-            sess.send_events(&events_by_sector[sector])
-        });
+        // Send each session only the events from the Sector it occupies, further
+        // filtered by its Area of Interest (ADR-0019). One grid per Sector.
+        let grids: Vec<aoi::CellGrid> = nodes.iter()
+            .map(|n| aoi::CellGrid::build(AOI_CELL_SIZE, n.ship_positions()))
+            .collect();
+        let jumped_ids: std::collections::HashSet<PlayerId> =
+            jumped_players.iter().map(|(p, _)| *p).collect();
 
-        // Resend InitialState to players that just jumped so the client clears
-        // the old Sector's ships (and its stale lock) and rebuilds from the
-        // destination Sector. `_on_initial_state` resets `_player_lock_target`.
+        sessions.retain_mut(|sess| {
+            let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
+            let curr = nodes[sector].get_ship_position(sess.ship_id)
+                .map(|pos| grids[sector].neighbors_of(pos))
+                .unwrap_or_default();
+
+            // A player that just jumped gets a fresh scoped InitialState below;
+            // reset its AoI baseline and skip enter/leave this tick.
+            if jumped_ids.contains(&sess.player_id) {
+                prev_visible.insert(sess.player_id, curr);
+                return true;
+            }
+
+            let prev = prev_visible.entry(sess.player_id).or_default();
+            let (entered, left) = aoi::aoi_delta(prev, &curr);
+            *prev = curr.clone();
+
+            for id in entered.iter().filter(|&&id| id != sess.ship_id) {
+                if let Some(msg) = nodes[sector].aoi_enter_json(*id) {
+                    if !sess.conn.send_raw(&msg) { return false; }
+                }
+            }
+            for id in left.iter().filter(|&&id| id != sess.ship_id) {
+                if !sess.conn.send_raw(&aoi::aoi_leave_json(*id)) { return false; }
+            }
+
+            let visible_events: Vec<_> = events_by_sector[sector].iter()
+                .filter(|e| aoi::event_visible_to(e, &curr))
+                .cloned()
+                .collect();
+            sess.send_events(&visible_events)
+        });
+        prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
+
+        // Resend scoped InitialState to players that just jumped so the client
+        // clears the old Sector's ships (and its stale lock) and rebuilds from
+        // the destination Sector. `_on_initial_state` resets `_player_lock_target`.
         for (player_id, dest) in jumped_players {
-            let initial_state = nodes[dest].build_initial_state_json();
             if let Some(sess) = sessions.iter().find(|s| s.player_id == player_id) {
+                let initial_state = nodes[dest].get_ship_position(sess.ship_id)
+                    .map(|pos| nodes[dest].build_initial_state_json_for(pos, AOI_CELL_SIZE))
+                    .unwrap_or_else(|| nodes[dest].build_initial_state_json());
                 sess.conn.send_raw(&initial_state);
             }
         }

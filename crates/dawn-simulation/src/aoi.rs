@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 
-use dawn_core::{Position, ShipId};
+use dawn_core::{DomainEvent, Position, ShipId};
 
 /// Integer 3-D cell coordinate.
 pub type Cell = (i32, i32, i32);
@@ -74,6 +74,53 @@ impl CellGrid {
         out.sort_unstable();
         out
     }
+}
+
+/// Diff a previous visible set against the current one (both must be
+/// `ShipId`-sorted, as returned by [`CellGrid::neighbors_of`]). Returns
+/// `(entered, left)`: ships now visible that were not before, and ships no
+/// longer visible. Both outputs stay `ShipId`-sorted. Used to emit `AoiEnter` /
+/// `AoiLeave` to a client as it moves (ADR-0019).
+pub fn aoi_delta(prev: &[ShipId], curr: &[ShipId]) -> (Vec<ShipId>, Vec<ShipId>) {
+    let entered = curr.iter().filter(|id| prev.binary_search(id).is_err()).copied().collect();
+    let left    = prev.iter().filter(|id| curr.binary_search(id).is_err()).copied().collect();
+    (entered, left)
+}
+
+/// The ships an event concerns — the actors a client must already know about for
+/// the event to make sense. Primary ship plus any secondary participant
+/// (attacker/target, killer). Used to decide whether to deliver an event to an
+/// observer whose visible set is `visible` (ADR-0019).
+pub fn event_concerns_ships(event: &DomainEvent) -> Vec<ShipId> {
+    let mut ids = vec![event.ship_id()];
+    let secondary = match event {
+        DomainEvent::ShipDestroyed(e) => Some(e.killer_id),
+        DomainEvent::TargetLocked(e)  => Some(e.target_id),
+        DomainEvent::LockLost(e)      => Some(e.target_id),
+        DomainEvent::WeaponFired(e)   => Some(e.target_id),
+        _ => None,
+    };
+    if let Some(s) = secondary {
+        if s != ids[0] {
+            ids.push(s);
+        }
+    }
+    ids
+}
+
+/// Whether `event` should be delivered to an observer whose visible set is
+/// `visible` (`ShipId`-sorted): true if any concerned ship is visible.
+pub fn event_visible_to(event: &DomainEvent, visible: &[ShipId]) -> bool {
+    event_concerns_ships(event)
+        .iter()
+        .any(|id| visible.binary_search(id).is_ok())
+}
+
+/// `AoiLeave` control message for a ship that left an observer's neighborhood
+/// (ADR-0019). The matching `AoiEnter` needs node state, so it lives on the node
+/// ([`crate::node::SimulationNode::aoi_enter_json`]).
+pub fn aoi_leave_json(ship_id: ShipId) -> String {
+    serde_json::json!({ "type": "AoiLeave", "ship_id": ship_id.raw() }).to_string()
 }
 
 /// Map a position to its integer cell via floor division (handles negatives:
@@ -149,5 +196,51 @@ mod tests {
     fn an_empty_grid_yields_no_neighbors() {
         let grid = CellGrid::build(100.0, std::iter::empty());
         assert!(grid.neighbors_of(Position::ORIGIN).is_empty());
+    }
+
+    // ── AoI delta / event visibility ─────────────────────────────────────────
+
+    #[test]
+    fn aoi_delta_reports_entered_and_left_ships() {
+        let prev = vec![ship(1), ship(2), ship(3)];
+        let curr = vec![ship(2), ship(3), ship(5)];   // 1 left, 5 entered
+        let (entered, left) = aoi_delta(&prev, &curr);
+        assert_eq!(entered, vec![ship(5)]);
+        assert_eq!(left, vec![ship(1)]);
+    }
+
+    #[test]
+    fn aoi_delta_is_empty_when_the_visible_set_is_unchanged() {
+        let set = vec![ship(1), ship(4)];
+        let (entered, left) = aoi_delta(&set, &set);
+        assert!(entered.is_empty() && left.is_empty());
+    }
+
+    #[test]
+    fn an_event_is_visible_when_a_concerned_ship_is_in_the_set() {
+        use dawn_core::events::WeaponFired;
+        use dawn_core::Tick;
+        // Attacker not visible, target visible → still delivered.
+        let event = DomainEvent::WeaponFired(WeaponFired {
+            attacker_id: ship(99),
+            target_id  : ship(2),
+            damage     : 10.0,
+            tick       : Tick(1),
+        });
+        let visible = vec![ship(1), ship(2), ship(3)];
+        assert!(event_visible_to(&event, &visible));
+    }
+
+    #[test]
+    fn an_event_is_hidden_when_no_concerned_ship_is_in_the_set() {
+        use dawn_core::events::VelocityChanged;
+        use dawn_core::{Tick, Velocity};
+        let event = DomainEvent::VelocityChanged(VelocityChanged {
+            ship_id : ship(99),
+            velocity: Velocity::ZERO,
+            tick    : Tick(1),
+        });
+        let visible = vec![ship(1), ship(2)];
+        assert!(!event_visible_to(&event, &visible));
     }
 }

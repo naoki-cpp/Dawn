@@ -400,6 +400,8 @@ func _on_event_received(payload: Dictionary) -> void:
 		"LockLost"      : _handle_lock_lost(payload)
 		"JumpGateUsed"      : _handle_jump_gate_used(payload)
 		"StarSystemChanged" : _handle_star_system_changed(payload)
+		"AoiEnter"          : _handle_aoi_enter(payload)
+		"AoiLeave"          : _handle_aoi_leave(payload)
 
 # ── ジャンプゲート（ADR-0009）─────────────────────────────────────────────────
 
@@ -447,49 +449,71 @@ func _on_initial_state(ships: Array) -> void:
 	_hide_duel_result()
 
 	for ship_data: Variant in ships:
-		var d        : Dictionary = ship_data as Dictionary
-		var sid      : int        = d.get("ship_id",   0)   as int
-		var is_player: bool       = d.get("is_player", false) as bool
-		var pos_dict : Dictionary = d.get("position",  {})  as Dictionary
-		var max_hp   : float      = d.get("max_hp",    1.0) as float
-		var cur_hp   : float      = d.get("current_hp",1.0) as float
-		var pos := Vector3(
-			(pos_dict.get("x", 0.0) as float),
-			(pos_dict.get("y", 0.0) as float),
-			(pos_dict.get("z", 0.0) as float),
-		)
+		_spawn_ship_from_data(ship_data as Dictionary)
 
-		## 船ノードを生成
-		var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
-		_ships_root.add_child(ship)
-		ship.call("initialize", sid, pos)
-		ship.name = "Ship_%d" % sid
-		_ships[sid] = ship
+## Materialize one ship node from a ship-state dict. Shared by InitialState and
+## AoiEnter (ADR-0019). Skips ships already present.
+func _spawn_ship_from_data(d: Dictionary) -> void:
+	var sid      : int        = d.get("ship_id",   0)   as int
+	if _ships.has(sid):
+		return
+	var is_player: bool       = d.get("is_player", false) as bool
+	var pos_dict : Dictionary = d.get("position",  {})  as Dictionary
+	var pos := Vector3(
+		(pos_dict.get("x", 0.0) as float),
+		(pos_dict.get("y", 0.0) as float),
+		(pos_dict.get("z", 0.0) as float),
+	)
 
-		## 自分の船かどうか確認
-		## Record HP for every ship
-		var sh: float = d.get("current_shield", d.get("max_shield", 200.0) as float) as float
-		var ar: float = d.get("current_armor",  d.get("max_armor",  150.0) as float) as float
-		var hu: float = d.get("current_hull",   d.get("max_hull",   150.0) as float) as float
-		_ship_hp[sid] = { "shield": sh, "armor": ar, "hull": hu }
+	## 船ノードを生成
+	var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
+	_ships_root.add_child(ship)
+	ship.call("initialize", sid, pos)
+	ship.name = "Ship_%d" % sid
+	_ships[sid] = ship
 
-		if sid == _connection.ship_id and _player_ship_id < 0:
-			_player_max_shield = d.get("max_shield", 500.0) as float
-			_player_max_armor  = d.get("max_armor",  300.0) as float
-			_player_max_hull   = d.get("max_hull",   200.0) as float
-			_player_shield     = sh
-			_player_armor      = ar
-			_player_hull       = hu
-			## Initialize client-side capacitor simulation.
-			_cap_max      = d.get("cap_max",               500.0) as float
-			_cap_recharge = d.get("cap_recharge_per_tick",  10.0) as float
-			_cap_current  = _cap_max  ## Assume full cap on connect.
-			_player_ship_type_name = d.get("ship_type_name", "") as String
-			_set_as_player_ship(sid, ship)
-		elif is_player:
-			## Other player ship = potential duel opponent
-			if sid not in _opponent_ship_ids:
-				_opponent_ship_ids.append(sid)
+	## 自分の船かどうか確認
+	## Record HP for every ship
+	var sh: float = d.get("current_shield", d.get("max_shield", 200.0) as float) as float
+	var ar: float = d.get("current_armor",  d.get("max_armor",  150.0) as float) as float
+	var hu: float = d.get("current_hull",   d.get("max_hull",   150.0) as float) as float
+	_ship_hp[sid] = { "shield": sh, "armor": ar, "hull": hu }
+
+	if sid == _connection.ship_id and _player_ship_id < 0:
+		_player_max_shield = d.get("max_shield", 500.0) as float
+		_player_max_armor  = d.get("max_armor",  300.0) as float
+		_player_max_hull   = d.get("max_hull",   200.0) as float
+		_player_shield     = sh
+		_player_armor      = ar
+		_player_hull       = hu
+		## Initialize client-side capacitor simulation.
+		_cap_max      = d.get("cap_max",               500.0) as float
+		_cap_recharge = d.get("cap_recharge_per_tick",  10.0) as float
+		_cap_current  = _cap_max  ## Assume full cap on connect.
+		_player_ship_type_name = d.get("ship_type_name", "") as String
+		_set_as_player_ship(sid, ship)
+	elif is_player:
+		## Other player ship = potential duel opponent
+		if sid not in _opponent_ship_ids:
+			_opponent_ship_ids.append(sid)
+
+## AoI: a ship entered the player's neighborhood — materialize it (ADR-0019).
+func _handle_aoi_enter(p: Dictionary) -> void:
+	var ship: Dictionary = p.get("ship", {}) as Dictionary
+	if not ship.is_empty():
+		_spawn_ship_from_data(ship)
+
+## AoI: a ship left the player's neighborhood — remove it locally with no death
+## effect (it is still alive elsewhere, just out of view / ADR-0019).
+func _handle_aoi_leave(p: Dictionary) -> void:
+	var sid: int = p.get("ship_id", 0) as int
+	if not _ships.has(sid):
+		return
+	(_ships[sid] as Node3D).queue_free()
+	_ships.erase(sid)
+	_ship_hp.erase(sid)
+	if sid == _selected_target_id:
+		_selected_target_id = -1
 
 func _on_player_fitting(modules: Array) -> void:
 	## Initialise cycle_remaining for client-side cap simulation.
