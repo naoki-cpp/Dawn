@@ -1083,8 +1083,20 @@ impl<S: EventStore> SimulationNode<S> {
         }).to_string())
     }
 
+    /// Full-world `InitialState` (every ship). Used for non-AoI callers.
     pub fn build_initial_state_json(&self) -> String {
-        let ships: Vec<serde_json::Value> = self.ship_index.keys().filter_map(|&ship_id| {
+        self.initial_state_json(self.ship_index.keys().copied())
+    }
+
+    /// `InitialState` scoped to an observer's Area of Interest: only ships in the
+    /// 27-cell neighborhood of `observer_pos` (ADR-0019).
+    pub fn build_initial_state_json_for(&self, observer_pos: Position, cell_size: f32) -> String {
+        self.initial_state_json(self.ships_visible_to(observer_pos, cell_size).into_iter())
+    }
+
+    /// Serialise the given ships into an `InitialState` message.
+    fn initial_state_json(&self, ship_ids: impl Iterator<Item = ShipId>) -> String {
+        let ships: Vec<serde_json::Value> = ship_ids.filter_map(|ship_id| {
             let entity  = self.ship_index.get(&ship_id)?;
             let pos     = self.world.inner().get::<&PositionComp>(*entity).ok()?.0;
             let stats   = self.world.inner().get::<&ShipStatsComp>(*entity).ok()?;
@@ -1114,6 +1126,28 @@ impl<S: EventStore> SimulationNode<S> {
             "type"  : "InitialState",
             "ships" : ships,
         }).to_string()
+    }
+
+    // ── Area of Interest (ADR-0019) ────────────────────────────────────────────
+
+    /// `(ShipId, Position)` for every ship currently in the world — the input to
+    /// the AoI cell grid. Iteration order is unspecified, but `CellGrid` sorts
+    /// each bucket, so query results are deterministic regardless.
+    pub fn ship_positions(&self) -> Vec<(ShipId, Position)> {
+        self.ship_index.iter().filter_map(|(&id, &entity)| {
+            let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+            Some((id, pos))
+        }).collect()
+    }
+
+    /// ShipIds visible to an observer at `observer_pos`: those in the 27-cell
+    /// neighborhood of its cell (ADR-0019). Returned in `ShipId` order.
+    ///
+    /// Builds the grid from a single position pass; the serve loop can instead
+    /// build one [`crate::aoi::CellGrid`] per tick and query it per session.
+    pub fn ships_visible_to(&self, observer_pos: Position, cell_size: f32) -> Vec<ShipId> {
+        crate::aoi::CellGrid::build(cell_size, self.ship_positions())
+            .neighbors_of(observer_pos)
     }
 
     // ── Module Activation ─────────────────────────────────────────────────────
@@ -2376,5 +2410,44 @@ mod tests {
 
         let avg = total / ITERATIONS;
         println!("transit (propose+export+import) avg over {ITERATIONS} iterations: {avg:?}");
+    }
+
+    // ── Area of Interest (ADR-0019) ────────────────────────────────────────────
+
+    #[test]
+    fn ships_visible_to_an_observer_are_only_those_in_the_27_cell_neighborhood() {
+        let mut node = mem_node();
+        let cell = 1_000.0;
+        // Observer at origin (cell 0,0,0).
+        let observer = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
+        // Adjacent cell (1,0,0) — within the 3×3×3 neighborhood.
+        let near = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::new(1_500.0, 0.0, 0.0), Velocity::ZERO);
+        // Two cells away (2,0,0) — outside the neighborhood.
+        let far = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::new(2_500.0, 0.0, 0.0), Velocity::ZERO);
+
+        let visible = node.ships_visible_to(Position::ORIGIN, cell);
+        assert!(visible.contains(&observer), "observer's own cell is visible");
+        assert!(visible.contains(&near), "adjacent-cell ship is visible");
+        assert!(!visible.contains(&far), "two-cells-away ship is not visible");
+    }
+
+    #[test]
+    fn scoped_initial_state_excludes_ships_outside_the_observer_neighborhood() {
+        let mut node = mem_node();
+        let cell = 1_000.0;
+        let _observer = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
+        let far = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::new(9_000.0, 0.0, 0.0), Velocity::ZERO);
+
+        let json = node.build_initial_state_json_for(Position::ORIGIN, cell);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let ids: Vec<u64> = v["ships"].as_array().unwrap().iter()
+            .map(|s| s["ship_id"].as_u64().unwrap())
+            .collect();
+        assert!(ids.contains(&_observer.raw()), "observer is in its own scoped state");
+        assert!(!ids.contains(&far.raw()), "distant ship is excluded from scoped InitialState");
+        // The full-world InitialState still includes the distant ship.
+        let full: serde_json::Value =
+            serde_json::from_str(&node.build_initial_state_json()).unwrap();
+        assert_eq!(full["ships"].as_array().unwrap().len(), 2);
     }
 }

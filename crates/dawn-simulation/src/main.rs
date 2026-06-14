@@ -7,8 +7,6 @@
 //!   cargo run -p dawn-simulation --bin simulate
 //!   cargo run -p dawn-simulation --bin simulate --release
 
-// Wired into ws_server in 8C-3/8C-4 (ADR-0019); unused until then.
-#[allow(dead_code)]
 mod aoi;
 mod checkpoint;
 mod cluster;
@@ -404,6 +402,11 @@ fn run_phase3_demo() {
     println!("═══════════════════════════════════════════");
 }
 
+/// AoI cell edge length (ADR-0019). The sector spans 100,000 units; a 10,000
+/// cell gives a 3×3×3 interest region ~15,000 units from the observer, well
+/// inside the sector and far larger than weapon ranges. Tuned in benches later.
+const AOI_CELL_SIZE: f32 = 10_000.0;
+
 // ── Phase 5: Godot WebSocket server (multi-client) ─────────────────────────────
 //
 // Usage:
@@ -687,7 +690,12 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool) {
         while let Ok((stream, addr)) = new_conn_rx.try_recv() {
             let player_id      = node.next_player_id();
             let ship_id        = node.spawn_player_ship(player_id);
-            let initial_state  = node.build_initial_state_json();
+            // AoI: send only the ships in the new player's 27-cell neighborhood
+            // (ADR-0019). Falls back to full state if the position is unavailable.
+            let initial_state  = match node.get_ship_position(ship_id) {
+                Some(pos) => node.build_initial_state_json_for(pos, AOI_CELL_SIZE),
+                None      => node.build_initial_state_json(),
+            };
             let player_fitting = node.build_player_fitting_json(ship_id);
             let tx             = ready_sess_tx.clone();
 
@@ -878,7 +886,11 @@ async fn run_cluster_server(ship_count: usize) {
         while let Ok((stream, addr)) = new_conn_rx.try_recv() {
             let player_id      = nodes[0].next_player_id();
             let ship_id        = nodes[0].spawn_player_ship_at_pub(player_id, PLAYER_SPAWN);
-            let initial_state  = nodes[0].build_initial_state_json();
+            // AoI: scope the connect-time state to the player's 27-cell neighborhood (ADR-0019).
+            let initial_state  = match nodes[0].get_ship_position(ship_id) {
+                Some(pos) => nodes[0].build_initial_state_json_for(pos, AOI_CELL_SIZE),
+                None      => nodes[0].build_initial_state_json(),
+            };
             let player_fitting = nodes[0].build_player_fitting_json(ship_id);
             let tx             = ready_sess_tx.clone();
             player_sector.insert(player_id, 0);
