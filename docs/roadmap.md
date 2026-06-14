@@ -42,16 +42,15 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 ## 2. 現在地
 
 ```
-現在のフェーズ : Phase 7.5 完了 — ADR-0009（星系間ナビゲーション）実装完了
-フェーズの状態 : サーバー側 + Godot クライアント配線完了（241テスト）
-                — dawn-core 型定義、Jump Raft パイプライン
-                （star_map / TransitOp gate_id / Step 7.5）、
-                ClientCommand::Jump、ws_server の EventJson + JSON パーサー、
-                connection.gd の send_jump_command、main.gd の
-                JumpGateUsed / StarSystemChanged 処理（瞬間移動・HUD通知・J キー）。
-                次のフェーズ: Phase 8（スケール基盤 / 持続性）着手。
-                2026-06-14 の設計変更（ADR-0017 スナップショット圧縮 / ADR-0018 局所 TiDi /
-                マルチ Raft 却下）を Phase 8 タスクに反映済み（§10）。
+現在のフェーズ : Phase 8A / 8C / 8B 一区切り（2026-06-15）— スケール基盤の中核が稼働
+フェーズの状態 : 全 workspace グリーン。
+                - 8A（durability）: 2 層ログ + snapshot 圧縮 + CheckpointScheduler（ADR-0017）
+                - 8C（AoI）: 静的セルグリッド 3×3×3 + Enter/Leave 差分配信 + イベントフィルタ（ADR-0019）
+                - 8B（一区切り）: 局所 TiDi コア（決定論的・非破壊・自動回復）+ 入場バックストップ
+                  （生カウント・--pop-cap）。柱①の主要レバーが単一 Sector 内で出揃った（ADR-0018）。
+                残り 8B（Fission / LoD=ADR-0020 deferred / 越境 TiDi / SLA イベント化）は
+                独立 ADR か 8D 連動で後続（§10「Phase 8B 一区切り」ボックス参照）。
+                次の前進先: 8D（物理ノード分散）か 戦闘の深み（ADR-0016 §5: Tackle 〜 Logistics）。
                 Sector キャパシティの悪用対策は docs/game-design.md §8 を参照。
 ```
 
@@ -94,18 +93,18 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**Phase 8A / 8C（8C-5 任意除き）/ 8B 局所 TiDi コア（8B-4/5/7・6 一部）・8B-1（Population Cap・生カウント）完了。8B-3（Simulation LoD）は ADR-0020 で deferred（計算メリット未実証）。次の単一タスク候補: 8B-2（Dynamic Sector Fission・クラスタ per-Sector ペーシングの前提）。8B-8（差分 TiDi 越境）は別 ADR で 8B-2 に依存。**
-（8A-1〜8A-7 全完了: スナップショット検証 2 テスト + take_snapshot 正準ソート、FileEventStore の
-2 層ログ（base_index ヘッダ）+ `compact()`（コールドアーカイブ + 原子的 swap）+ 4 テスト、
-圧縮後 reopen + restore で「創世記 replay 不要」を実証する failover テスト、
-event-catalog.md / architecture.md に 2 層ログ・スナップショット権威・復旧モデルを反映、
-`SimulationNode::checkpoint()` + `CheckpointScheduler`（論理 Tick 周期で snapshot→save→compact）+
-Phase 3 デモへの実配線 + 3 テスト。全 workspace グリーン。）
-理由: 8A（durability）完了。8C-1（ADR-0019 起票・人間承認済み 2026-06-15）で AoI 設計を確定し、
-真の O(n²) は配信側 AoI のみ・解は静的セル + 3×3×3（3D で 27 セル）と整理した。次は 8C-2 から実装に入る
-（並行で 8B の TiDi 実装も可）。Phase 8 全体のタスク内訳は §10 を参照。
-CLAUDE.md フッターの「次回レビュー予定」は 2026-06-14 に
-「空間索引 + AoI ADR 起票時」へ更新済み（ADR-0017/0018 適用に伴う）。
+**Phase 8A（durability）/ 8C（AoI・8C-5 任意除き）/ 8B（一区切り）完了。**
+8B は局所 TiDi コア（8B-4/5/7）+ 入場バックストップ（8B-1）で柱①の主要レバーが揃ったため一区切りとした
+（詳細は §10 の「Phase 8B 一区切り」ボックス参照）。残り（8B-2 Fission / 8B-3 LoD=ADR-0020 deferred /
+8B-8 越境 TiDi / 8B-6 SLA イベント化）は独立 ADR か 8D 連動で後続。
+
+**次の自然な前進先（いずれか）**:
+- **8D 分散インフラ（物理ノード分散）** — dawn-proto / dawn-replication / dawn-sector-node。
+  8B-2（Fission）はこれと本質的に対なので、8D 着手時にまとめて設計するのが自然。
+- **戦闘の深み（ADR-0016 §5）** — Tackle → Signature Resolution → Orbit/Keep at Range → Logistics。
+  柱②④（グラインドゼロの深い戦闘 / 実損ある危険な宇宙）を厚くする方向。
+
+Phase 8 全体のタスク内訳は §10 を参照。
 
 #### Phase 6 完了タスク一覧
 
@@ -435,6 +434,27 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 | 6 | SLA イベント / メトリクス（dilation 係数・継続時間の記録） | INV-TiDi (b) 観測可能 | 🔶 `active_ticks`（継続 Tick）+ 係数・engage/recover ログ。構造化 SLA イベント化は未 |
 | 7 | 負荷減での自動回復（係数 → 1.0）のテスト | INV-TiDi (d) | ✅ `auto_recovers_to_real_time_when_load_drops` |
 | 8 | 差分 TiDi の越境因果ルールを実装 ADR で詰める | ADR-0018 未解決論点 | ⬜ |
+
+> **Phase 8B 一区切り（2026-06-15）**
+>
+> **達成**: 過負荷対応ヒエラルキー（ADR-0018）の中核が機能する状態になった。
+> - **局所 TiDi コア（8B-4/5/7）** ✅ — 決定論的に発動（論理コスト基準・非破壊・自動回復）。単一密戦闘の安全網。
+> - **入場バックストップ（8B-1）** ✅ — 生カウントの最終手段。
+> - **容量レバー（8C / AoI）** ✅ — 真の O(n²)（配信側）を解消し TiDi 閾値を押し上げ。
+>
+> これで**柱①（TiDi 閾値が桁違いに高い大規模リアルタイム戦闘 / ADR-0016）の主要レバーは単一 Sector 内で出揃った**。
+> 単一密戦闘＝クライマックスは「AoI で容量↑ → それでも超えたら局所 TiDi で全員が少し遅い → 極端時のみ入場制限」で一貫して捌ける。
+>
+> **意図的に open のまま残す項目（柱①をブロックしない）**:
+> - **8B-3 Simulation LoD** ⏸️ deferred（ADR-0020）— 計算メリット未実証。再開は go/no-go スパイク次第。
+> - **8B-2 Dynamic Sector Fission** ⬜ — 要 ADR。密戦闘には効かず**空間分離可能な負荷**（複数戦線・広域経済）向け。
+>   物理ノード分散（**8D**）と本質的に対であり、8D 着手時にまとめて設計するのが自然。クラスタ per-Sector ペーシング（8B-5 残り）の前提でもある。
+> - **8B-8 差分 TiDi 越境** ⬜ — 別 ADR・8B-2 に依存。多 Sector の差分 dilation が前提。
+> - **8B-6 構造化 SLA イベント** 🔶 — 係数・継続 Tick・engage/recover ログは実装済み。イベント化は小さな磨き込みで後回し可。
+>
+> **結論**: 密戦闘（柱①）の主要レバーが揃ったので Phase 8B を一区切りとする。残り（Fission / 越境 TiDi / SLA イベント化）は
+> それぞれ独立 ADR・または 8D（分散インフラ）と連動して着手する。次の自然な前進先は **8D（物理ノード分散）** か
+> **戦闘の深み（ADR-0016 §5: Tackle → Signature → Orbit/Keep at Range → Logistics）**。
 
 ### 8C. AoI 静的セルグリッド（ADR-0019）— TiDi 閾値を上げる本体
 
