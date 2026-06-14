@@ -94,11 +94,11 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
 - Single Shardの分散シミュレーション
 - イベントソーシングによる完全な因果追跡
 - CRDTとRaftの責務分離による高スループット同期
-- アンチ TiDi（INV-TiDi）— 大規模戦闘でも論理 Tick を一定に保つ
+- アンチ TiDi（INV-TiDi）— TiDi 閾値を EVE より桁違いに高く保ち、出ても局所・短時間・自動回復に抑える（ADR-0018）
 
 **4本の柱（EVE を超える差別化 / ADR-0016）**:
 
-1. **TiDi の無い大規模リアルタイム戦闘** — 分散基盤を武器に「多数が遅延なく戦う」を実現する。
+1. **TiDi 閾値が桁違いに高い大規模リアルタイム戦闘** — 分散基盤を武器に「多数が遅延なく戦う」を実現する。TiDi が出ても局所・短時間・自動回復に抑える（ADR-0018）。
 2. **グラインドゼロの深い戦闘** — 退屈なグラインドを排し、意図的判断だけで構成する。
 3. **プレイヤー主導の世界** — プレイヤーが構造物・防衛・領域・経済を作る（非 Web3）。
 4. **実損のある危険な宇宙** — 撃沈＝実損、Tackle で逃がさない非対称リスクを核に据える。
@@ -167,7 +167,7 @@ Orbit/Keep at Range → Logistics → 資源シンク。受動採取は採らな
 原則3: 因果順序は論理Tick + NodeIdで決定する。物理時刻を使わない。
 原則4: Crate依存は一方向のみ。循環依存は設計の失敗を意味する。
 原則5: Actor間の通信はMailbox経由のみ。直接メソッド呼び出し禁止。
-原則6: Tickの論理速度は一定である。負荷超過はSector入場制限で対処し、Tickを遅らせない。
+原則6: Tickの論理速度は通常一定。過負荷は 分割 → LoD → 局所 TiDi → 入場制限 の順で対処する（ADR-0018）。単一密戦闘では締め出すより全員が少し遅い方を優先する。
 ```
 
 ---
@@ -192,21 +192,30 @@ Orbit/Keep at Range → Logistics → 資源シンク。受動採取は採らな
 理由: 過去のEventを変更できると世界の再現性が破壊される。
 バグ修正は新しいEventを追加することで表現する。
 
-### INV-002: StateはEventのReplayで完全に再現できなければならない
+### INV-002: State はスナップショット + 末尾イベントの Replay で完全に再現できなければならない（ADR-0017 改訂）
 
 ```
 検証方法:
   1. ノードをシャットダウンする
   2. In-Memory状態を破棄する
-  3. Event LogのみからStateを再構築する
+  3. (最新の検証済みスナップショット) + (それ以降のホットログのイベント) から
+     State を再構築する
   4. シャットダウン直前の状態と一致することを確認する
 
 これが成立しない実装は INV-002 違反である。
 ```
 
+不変条件（ADR-0017 / 2層ログ）:
+- スナップショットは検証可能でなければならない: snapshot(T) == replay(events[0..T])（ビット等価）
+- 創世記（log index 0）からの完全 replay は、コールドアーカイブ + replay により
+  常に可能でなければならない（ただし経路外。通常運用・failover の依存先ではない）
+- ホットログは検証済みスナップショットの背後を圧縮して有界に保つ。
+  圧縮はセグメント移送であり、イベントの破壊ではない（FBD-001 維持）
+
 具体的な違反:
-- Stateのみに存在する情報（Event Logに対応するEventがない）
-- EventのPayloadに後から追加されたフィールドがReplay時にデフォルト値になる
+- State のみに存在する情報（ホットログにもスナップショットにも対応がない）
+- Event の Payload に後から追加されたフィールドが Replay 時にデフォルト値になる
+- スナップショットが replay と一致しない（検証不能なスナップショット）
 
 ### INV-003: Sector-local操作はSector境界を越えない
 
@@ -298,33 +307,47 @@ Orbit/Keep at Range → Logistics → 資源シンク。受動採取は採らな
   - 物理ロジックが将来変わっても、過去の VelocityChanged は正確に Replay できる。
   - `position += velocity` は純粋な算術であり、物理ロジックではない。
 
-### INV-TIDI: Tickの速度は常に一定である
+### INV-TiDi: 論理 Tick 速度は通常一定。TiDi は境界つき局所的最終手段（ADR-0018 改訂）
 
 ```
-違反例:
-  // 負荷が高いのでTickを遅らせる
-  if tick_elapsed > TARGET_MS {
-      self.time_dilation_factor = 0.1; // 10倍スロー
-  }
+方針:
+  論理 Tick 速度は通常負荷下では一定に保つ。
+  過負荷は「分割 → LoD → 局所 TiDi → 入場制限」の順で対処する。
+  単一密戦闘では入場制限が最後（締め出すより全員が少し遅い方を優先）。
 
-  // Tickを遅延させて「待つ」
-  tokio::time::sleep(extra_delay).await;
+Time Dilation（論理 Tick の単調性・決定性を保ったまま、実時間ペースのみを落とす）は、
+分割不能な単一ホットスポットがノード容量を超えた場合に限り、次をすべて満たすときのみ許可:
+  (a) 局所性   : dilation は当該 Sector に限定。隣接へ伝播させない。
+  (b) 観測可能 : dilation 係数・継続時間を SLA イベント / メトリクスに記録する。
+  (c) 非破壊   : イベントの並べ替え・欠落・結果変化を起こさない（純粋な実時間ペーシング）。
+  (d) 自動回復 : 負荷が引いたら係数を 1.0 へ戻す。
+  (e) 発動順序 : 分割・LoD の後。入場制限は TiDi でも保ちきれない極端時のみの最終バックストップ。
+
+違反例:
+  // 全 Sector を一律に dilate する（EVE 型・局所性 (a) 違反）
+  for sector in all_sectors { sector.dilation = 0.1; }
+
+  // dilation でイベントを間引く / 並べ替える（決定性破壊・(c) 違反）
+  if dilated { drop_events(non_critical); }
+
+  // 物理時刻で dilation を判定する（INV-005 違反。判定は論理 Tick の処理予算超過で行う）
+  if SystemTime::now() - tick_start > budget { ... }   // ← 物理時刻は使わない
 
 正しい実装:
-  // 負荷が高い → Sector入場を制限する（SpawnRejected）
-  if sector.population >= sector.population_cap * 0.95 {
-      return Err(CommandError::SectorAtCapacity);
-  }
-
-  // Tick SLA超過は「許容された動作」ではなく「異常」として記録する
-  if elapsed > TICK_BUDGET {
-      error!("Tick SLA violated: {}µs > {}µs", elapsed, TICK_BUDGET);
-      metrics.tick_sla_violation.inc();
+  // 局所・観測可能・非破壊・自動回復
+  if sector.tick_cost > sector.budget && !sector.splittable() {
+      sector.dilation = (sector.budget / sector.tick_cost).max(MIN_DILATION);
+      metrics.tidi_active.set(sector.id, sector.dilation);   // (b)
+  } else if sector.dilation < 1.0 && sector.tick_cost <= sector.budget {
+      sector.dilation = 1.0;                                  // (d) 自動回復
   }
 ```
 
-理由: EVE OnlineのTime Dilation（TiDi）はプレイヤー体験を著しく悪化させる。
-負荷超過はTickを遅らせるのではなく、Sectorへの入場制限と動的分割で事前に対処する。
+理由: 単一密戦闘は分割不能。旧「絶対アンチ TiDi」は手段が入場制限のみになり、
+クライマックスから締め出す＝EVE の TiDi より悪い体験になりうる（eve-reference §11.1）。
+TiDi は論理 Tick の決定性を壊さない（INV-005 と無関係・純粋な実時間ペーシング）ため、
+局所・観測可能・非破壊・自動回復・後置の条件下でのみ最終手段として許可する。
+差別化は「TiDi が無い」ではなく「閾値が EVE より桁違いに高く、出ても局所・短時間・自動回復」。
 → 詳細設計は docs/tick-model.md §8 を参照。
 
 ---
@@ -912,6 +935,11 @@ fn truncate(&self, from_index: u64) -> Result<()>;
 fn rewrite(&self, index: u64, event: Event) -> Result<()>;
 ```
 
+> 注記（ADR-0017）: ログの圧縮はこれらの禁止メソッドでは**行わない**。
+> 圧縮は trait の外側の運用プロセス（検証済みスナップショット背後のセグメントを
+> コールドアーカイブへ移送し、ホットログを write-new-then-swap で原子的に切り替える）として
+> 実装する。セグメント内のイベントは決して書き換えない。`EventStore` trait は append-only のまま。
+
 ### FBD-002: dawn-core への外部依存の追加
 
 ```toml
@@ -1007,7 +1035,8 @@ CIが以下を検出した場合、PRを自動拒否する:
 ### FBD-009: スキルポイント育成 / 受動成長 / AFK 採掘の実装
 
 > ゲーム化（ADR-0016）後も **維持** する。反グラインドは "EVE を超える" ための核であり、
-> §6 の実証データ（18k 文書）でも最も嫌われた要素群である。
+> §6 の観測（18k 文書・フォーラム傾向）でも最も嫌われた要素群として現れた
+> （フォーラム声は実証ではない — 選択バイアスに留意・eve-reference §11.5）。
 
 ```
 【スキルポイント / 受動成長】
@@ -1232,6 +1261,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-14（ADR-0016: プロジェクト再定義 — 「EVE を超えるゲーム」をゴールに。§1 本質/スコープ改訂、§10 FBD-008 撤廃 / FBD-009 維持・明確化、人間承認済み）*
-*対応ADR: ADR-0001 〜 ADR-0016*
-*次回レビュー予定: 近期戦闘 ADR（Tackle）起票時 / Phase 8（Anti-TiDi / スケール基盤）設計時*
+*最終更新: 2026-06-14（ADR-0018: TiDi を境界つき局所的最終手段として採用。§1 原則6/柱①/競争優位・§2 INV-TiDi 改訂、人間承認済み）*
+*対応ADR: ADR-0001 〜 ADR-0018*
+*次回レビュー予定: 空間索引 + AoI ADR（TiDi 閾値↑）起票時 / Phase 8（Anti-TiDi / スケール基盤）設計時*

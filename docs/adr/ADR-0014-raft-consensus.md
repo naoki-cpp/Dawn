@@ -63,7 +63,7 @@ Raft を経由しない（データプレーン）:
 ```
 
 理由: Raft のスループットはリーダーの fsync + 過半数 ACK に律速される。
-毎 Tick 数千イベントを Raft に流すと Tick SLA（INV-TIDI）を破壊する。
+毎 Tick 数千イベントを Raft に流すと Tick SLA（INV-TiDi）を破壊する。
 これは本プロジェクトの中心仮説「CRDT と Raft の責務分離による高スループット同期」
 （CLAUDE.md §1）そのものである。
 

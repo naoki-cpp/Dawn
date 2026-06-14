@@ -456,7 +456,7 @@ client/                      ← Godot 4 プロジェクト（Phase 4 で追加�
 ClientConnection trait を正しく定義することがネットワーク差し替えの鍵
 各 Server Context は独立した Crate として追加する
 上位 Context は下位 Context に依存しない（Spatial ← Navigation ← Combat …）
-Anti-TiDi の制約（INV-TIDI）は全フェーズで維持する
+Anti-TiDi 優先の方針（INV-TiDi 改訂・ADR-0018: TiDi は局所的最終手段）は全フェーズで維持する
 Event Sourcing の原則（INV-001〜006）は全フェーズで維持する
 ```
 

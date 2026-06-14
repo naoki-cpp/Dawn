@@ -235,7 +235,7 @@ Phase 4 以降は `tokio::time::interval` による固定間隔ループが実�
 
 ---
 
-## 8. 負荷制御設計（Anti-TiDi）
+## 8. 負荷制御設計（Anti-TiDi 優先・TiDi は局所的最終手段）
 
 ### EVE Online の TiDi とその問題
 
@@ -251,20 +251,27 @@ EVE の TiDi:
         コミュニティから長年にわたり不評
 ```
 
-### このシステムの方針：TiDi を発生させない
+### このシステムの方針：TiDi を「稀」にし、出ても局所・短時間に抑える（ADR-0018）
 
-TiDi は「過負荷になった後の救済措置」である。
-このシステムは **過負荷になる前に Sector への入場を制限する**ことで
-TiDi を構造的に発生させない。
+旧方針は「TiDi を一切発生させない（入場制限で事前規制）」だった。
+しかし **単一密戦闘は原理的に分割不能** で、その場合の手段が入場制限のみになると
+「クライマックスの戦いから締め出す」＝ EVE の TiDi より悪い体験になりうる（eve-reference §11.1）。
 
-```
-EVE（事後対処）:  負荷超過 → TiDi で時間を遅らせる
-Dawn（事前規制）: 入場制限 → Sector は常に定員内 → Tick は常に SLA（≤32ms）以内
-```
+ADR-0018 で方針を改める。**過負荷は負荷の性質に応じた劣化ヒエラルキーで対処する。**
 
-### Sector Population Cap（入場制限）
+| 状況 | 第1手 | 第2手 | 最終バックストップ |
+|---|---|---|---|
+| 空間的に分離可能 | 動的 Sector 分割（劣化ゼロ） | — | — |
+| 単一密戦闘 | LoD（遠方/非戦闘の更新間引き） | 局所 TiDi（全員残る） | 入場制限 |
+
+EVE との差別化は「TiDi が無い」ではなく、**TiDi 閾値が桁違いに高い
+（Rust + マルチコア + 空間索引/AoI）/ 出ても当該 Sector 局所 / 短時間 / 自動回復 / 観測可能** であること。
+
+### Sector Population Cap（入場制限 = 最終バックストップ）
 
 各 Sector はエンティティ数の上限（`population_cap`）を持つ。
+ADR-0018 以降、入場制限は主要手段ではなく **最終バックストップ** に位置づけが下がる
+（単一密戦闘では LoD・局所 TiDi を先に試し、それでも遅延が許容域を超える極端時のみ入場を絞る）。
 
 ```
 population_cap : Sector が受け入れる Ship の最大数
@@ -305,26 +312,46 @@ population_cap の 80% を超えたタイミングで Sector の分割を準備�
 分割戦略：空間的中央分割（X 軸または Y 軸の中点で二分）。
 → SectorTransit の設計と密接に関連する（ownership.md 参照）。
 
-### Tick SLA の強制
+### Local Time Dilation（局所 TiDi = 単一密戦闘の安全網）
 
-Tick 処理時間が目標を超えた場合は「TiDi を発動する」のではなく
-「システム異常として記録し、アラートを発する」。
+分割不能な単一ホットスポットがノード容量を超えたら、当該 Sector に限り TiDi を発動する。
+INV-TiDi の 5 条件（局所 / 観測可能 / 非破壊 / 自動回復 / 分割・LoD の後）を満たすこと。
+
+```
+dilation の決定（実時間ペーシングのみ。論理 Tick の処理内容は不変）:
+  if sector.tick_cost > sector.budget && !sector.splittable() {
+      sector.dilation = (sector.budget / sector.tick_cost).max(MIN_DILATION);
+      metrics.tidi_active.set(sector.id, sector.dilation);   // 観測可能性
+  } else if sector.dilation < 1.0 && sector.tick_cost <= sector.budget {
+      sector.dilation = 1.0;                                  // 自動回復
+  }
+```
+
+TiDi は論理 Tick の決定性を壊さない（INV-005 と無関係）。
+イベントの並べ替え・欠落・結果変化を起こしてはならない（純粋な実時間ペーシング）。
+
+### Tick SLA の監視と対処ヒエラルキー
+
+Tick 処理時間が目標を超えた場合、黙って遅らせず、記録したうえでヒエラルキーで対処する。
 
 ```
 Tick 処理時間 ≤ 12ms : 正常
 Tick 処理時間 ≤ 32ms : 警告（warn! ログ）
-Tick 処理時間 > 32ms : 異常（error! ログ + メトリクス）
-                       → 根本原因の調査が必要
-                       → population_cap の見直しをトリガーする
+Tick 処理時間 > 32ms : 記録（error! ログ + メトリクス）し、順に対処:
+                       1. 分割可能か？   → 可能なら動的分割（劣化ゼロ）
+                       2. 単一密戦闘か？ → LoD → 局所 TiDi（観測可能に発動）
+                       3. それでも遅延が許容域外の極端時 → 入場制限（最終バックストップ）
 ```
 
-Tick SLA 超過は「許容された動作」ではなく「修正が必要なバグ」として扱う。
-これが EVE の TiDi と根本的に異なる設計思想である。
+「黙って Tick を遅らせる」ことは禁止 — dilation は常に観測可能でなければならない。
+これが EVE のグローバル TiDi と異なる点である（dawn は局所・観測可能・自動回復）。
 
-### 設計上の不変条件（追加）
+### 設計上の不変条件（INV-TiDi 改訂・ADR-0018）
 
 ```
-INV-TIDI: Tick の論理速度は一定である。
-          「Tick を遅らせる」実装を追加してはならない。
-          負荷超過は Sector への入場制限で対処する。
+INV-TiDi: 論理 Tick 速度は通常一定。
+          Time Dilation は分割不能な単一ホットスポット超過時に限り、
+          (a) 局所 (b) 観測可能 (c) 非破壊 (d) 自動回復 (e) 分割/LoD の後
+          を満たす境界つき最終手段としてのみ許可する。
+          （正規定義は CLAUDE.md §2 INV-TiDi）
 ```

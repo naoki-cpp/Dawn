@@ -16,6 +16,9 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 | [ADR-0002](ADR-0002-actor-model.md) | Actor モデルによるノード内並行制御 | Accepted |
 | [ADR-0003](ADR-0003-local-first-development.md) | Local-First Development（段階的分散化） | Accepted |
 | [ADR-0014](ADR-0014-raft-consensus.md) | 分散コンセンサス — Raft による Sector Transit の整合性保証 | Accepted |
+| [ADR-0016](ADR-0016-game-vision.md) | プロジェクトの再定義 — 「EVE を超えるゲーム」をゴールに据える | Accepted |
+| [ADR-0017](ADR-0017-snapshot-compaction.md) | イベントログのスナップショット圧縮と2層ログ（INV-002 改訂） | Accepted |
+| [ADR-0018](ADR-0018-tidi-graceful-degradation.md) | Time Dilation を境界つき局所的最終手段として採用（INV-TiDi 改訂） | Accepted |
 
 ### Client / 通信
 
