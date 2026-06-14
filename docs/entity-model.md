@@ -139,6 +139,7 @@ Sector の空間的範囲を表す軸平行バウンディングボックス（A
 |---|---|
 | `CapacitorComp` | プレイヤー船・ボット船（cap 管理対象） |
 | `IsBotComp` | ボット船（`process_bots()` の対象マーカー） |
+| `ApproachComp` | アプローチ中（対象 Ship / Jump Gate へ半自動接近・Move / Stop で除去・ADR-0015） |
 
 ### Ship が現在持たないもの（MVP 外）
 

@@ -190,6 +190,7 @@ Step 7.5 で destination ノードが `SectorTransitCompleted` に加えて
 | `DeactivateModuleCommand` | Active モジュールをオフにする | `ModuleDeactivated` | ✅ 実装済み |
 | `AttackCommand` | 攻撃対象を指定する | `WeaponFired` | ✅ 型定義・WsServer JSON パーサー実装済み（Phase 5）|
 | `StopCommand` | 加速度を用いて速度をゼロに減速する | — | ✅ 実装済み |
+| `ApproachCommand` | 対象（Ship / Jump Gate）へ半自動接近する（Move / Stop で解除・ADR-0015） | —（新イベントなし） | ✅ 実装済み |
 | `TransitCommand` | Sector Transit を要求する（Raft 経由・ADR-0014） | `SectorTransitRequested` / `Completed` | ✅ 実装済み |
 | `JumpCommand` | ジャンプゲート経由で別 Sector に移動する（Raft 経由・ADR-0009） | `JumpGateUsed`（+ 別星系なら `StarSystemChanged`） | ✅ 実装済み |
 

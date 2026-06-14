@@ -34,7 +34,8 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 | ADR | タイトル | ステータス |
 |---|---|---|
 | [ADR-0008](ADR-0008-ship-movement-events.md) | 移動イベントの権威的設計：VelocityChanged | Accepted |
-| [ADR-0009](ADR-0009-star-system-navigation.md) | 星系間ナビゲーション — StarSystem / JumpGate 設計 | Deferred |
+| [ADR-0009](ADR-0009-star-system-navigation.md) | 星系間ナビゲーション — StarSystem / JumpGate 設計 | Accepted |
+| [ADR-0015](ADR-0015-approach-piloting.md) | アプローチ（半自動操船） | Accepted |
 
 ### Combat / Fitting
 
