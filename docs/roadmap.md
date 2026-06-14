@@ -94,9 +94,11 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**次の単一タスク: Phase 8A-1 — スナップショット検証テスト（round-trip バイト一致 + snapshot+末尾==live / ADR-0017）。**
-理由: イベントソーシングの正しさ/運用性の前提（failover が創世記 replay を要求しない）であり、
-スケール作業より先に固める。設計トラックとして §8C-1（空間索引 + AoI の新規 ADR 起票）は並行可。
+**次の単一タスク: Phase 8A-2 — ホットログのセグメント化 + 圧縮トリガ（検証済みスナップショット背後 / ADR-0017）。**
+（8A-1 スナップショット検証テストは完了: take_snapshot を正準ソートし、① round-trip バイト一致 ②
+snapshot + 末尾 Tick == live の 2 テストを追加・全 workspace グリーン。）
+理由: 8A-1 でスナップショットの検証可能性が固まったので、次は有界ホットログの本体（圧縮）に進む。
+設計トラックとして §8C-1（空間索引 + AoI の新規 ADR 起票）は並行可。
 Phase 8 全体のタスク内訳は §10 を参照。
 CLAUDE.md フッターの「次回レビュー予定」は 2026-06-14 に
 「空間索引 + AoI ADR 起票時」へ更新済み（ADR-0017/0018 適用に伴う）。
@@ -409,7 +411,7 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 
 | # | タスク | クレート | 状態 |
 |---|---|---|---|
-| 1 | **スナップショット検証テスト**: ① round-trip（snapshot→restore→snapshot バイト一致）② snapshot + 末尾 Tick == live（cap/hull 含む） | dawn-simulation | ⬜ |
+| 1 | **スナップショット検証テスト**: ① round-trip（snapshot→restore→snapshot バイト一致）② snapshot + 末尾 Tick == live（cap/hull 含む） | dawn-simulation | ✅ take_snapshot 正準ソート + 2テスト |
 | 2 | ホットログのセグメント化 + 圧縮トリガ（検証済みスナップショット背後のみ） | dawn-event-store | ⬜ |
 | 3 | コールドアーカイブ書き出し（append-only / 圧縮）+ 原子的 swap（write-new-then-swap・冪等） | dawn-event-store | ⬜ |
 | 4 | failover / 再起動が創世記 replay を要求しないテスト（ADR-0014 連携） | dawn-simulation | ⬜ |

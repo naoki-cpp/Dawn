@@ -175,7 +175,7 @@ CLAUDE.md §10 には「圧縮はセグメント移送として ADR-0017 が規�
 - [x] 本 ADR を人間が承認する（status: proposed → accepted・2026-06-14）
 - [x] CLAUDE.md §2 INV-002 を改訂（人間承認のうえ適用・2026-06-14）
 - [x] CLAUDE.md §10 FBD-001 に圧縮の注記を追加（人間承認のうえ適用・2026-06-14）
-- [ ] スナップショット検証テスト: ① round-trip（snapshot→restore→snapshot バイト一致）② snapshot + 末尾 Tick == live（cap/hull 含む。INV-002 改訂の検証）
+- [x] スナップショット検証テスト: ① round-trip（snapshot→restore→snapshot バイト一致）② snapshot + 末尾 Tick == live（cap/hull 含む。INV-002 改訂の検証）— take_snapshot を正準ソートし 2 テスト追加（2026-06-14）
 - [ ] コールドアーカイブ書き出し（append-only / 圧縮）+ 原子的 swap の実装とテスト
 - [ ] failover が創世記 replay を要求しないことのテスト（ADR-0014 連携）
 - [ ] snapshot.rs のドキュメントコメントを改訂後 INV-002 に更新

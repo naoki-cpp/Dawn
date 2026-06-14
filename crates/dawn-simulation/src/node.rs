@@ -496,7 +496,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// The snapshot covers all events with `log_index < event_store.len()`.
     /// Pair with the event log to reconstruct this exact state on restart.
     pub fn take_snapshot(&self) -> StateSnapshot {
-        let ships: Vec<ShipSnapshot> = self
+        let mut ships: Vec<ShipSnapshot> = self
             .ship_index
             .iter()
             .filter_map(|(&ship_id, &entity)| {
@@ -522,6 +522,11 @@ impl<S: EventStore> SimulationNode<S> {
                 })
             })
             .collect();
+
+        // Canonical ordering: a snapshot of a given state must serialise
+        // identically regardless of HashMap iteration order, so it can be
+        // byte-compared (INV-002: verifiable snapshot / round-trip).
+        ships.sort_by_key(|s| (s.ship_id.0.node_id().0, s.ship_id.0.counter()));
 
         StateSnapshot {
             node_id   : self.node_id,
@@ -1907,6 +1912,106 @@ mod tests {
                 "position of ship {} must match after restore + replay", id
             );
         }
+    }
+
+    /// INV-002 / ADR-0017 (8A-1) — a snapshot is a *verifiable* checkpoint:
+    /// restoring it and snapshotting again yields a byte-identical snapshot.
+    #[test]
+    fn snapshot_round_trips_through_restore_byte_for_byte() {
+        use crate::{modules, ship_types};
+        use dawn_event_store::InMemoryEventStore;
+
+        let mut node = mem_node();
+        for def in ship_types::all_ship_types() { node.register_ship_type(def); }
+        for def in modules::all_modules()       { node.register_module(def); }
+
+        // Real ship type → carries a capacitor; thrust makes the state non-trivial.
+        for i in 0..4u64 {
+            let id = node.spawn_ship(
+                dawn_core::ShipTypeId(1),
+                Position::new(i as f32 * 50.0, 0.0, 0.0),
+                Velocity::ZERO,
+            );
+            node.set_player_ship(id);
+            node.apply_move_command(id, Position::new(9_000.0, 1_000.0, 0.0));
+        }
+        for _ in 0..6 { node.tick(); }
+
+        let snap1 = node.take_snapshot();
+
+        // Rebuild purely from the snapshot: store2 carries the same events, so the
+        // snapshot's log_index lines up and the replay tail is empty.
+        let mut store2 = InMemoryEventStore::new();
+        for rec in node.event_store().all_records() {
+            store2.append(rec.event.clone());
+        }
+        let node2 = SimulationNode::restore_from(
+            store2, &snap1, &modules::all_modules(), &ship_types::all_ship_types(),
+        );
+        let snap2 = node2.take_snapshot();
+
+        assert_eq!(
+            postcard::to_stdvec(&snap1).unwrap(),
+            postcard::to_stdvec(&snap2).unwrap(),
+            "snapshot must round-trip through restore byte-for-byte (INV-002 verifiable snapshot)"
+        );
+    }
+
+    /// INV-002 / ADR-0017 (8A-1) — snapshot + re-running the tail ticks reproduces
+    /// the live state, *including* transient derived state (capacitor) that is not
+    /// event-sourced.
+    ///
+    /// Ships are spawned with a constant velocity and NO move command, so there is
+    /// no thrust *intent* (which is transient and not snapshotted). Both the live
+    /// and the restored node therefore coast identically, isolating the property
+    /// under test: state the snapshot captures + deterministic forward simulation.
+    #[test]
+    fn snapshot_plus_tail_tick_reexecution_matches_live_including_capacitor() {
+        use crate::{modules, ship_types};
+        use dawn_event_store::InMemoryEventStore;
+
+        let mut live = mem_node();
+        for def in ship_types::all_ship_types() { live.register_ship_type(def); }
+        for def in modules::all_modules()       { live.register_module(def); }
+
+        for i in 0..3u64 {
+            live.spawn_ship(
+                dawn_core::ShipTypeId(1),
+                Position::new(i as f32 * 100.0, 0.0, 0.0),
+                Velocity::new(120.0, -40.0, 0.0),
+            );
+        }
+
+        // Coast for a while (constant velocity → no thrust intent involved), snapshot.
+        for _ in 0..12 { live.tick(); }
+        let snap = live.take_snapshot();
+        let events_up_to_snapshot: Vec<_> = live
+            .event_store()
+            .all_records()
+            .iter()
+            .take(snap.log_index as usize)
+            .map(|r| r.event.clone())
+            .collect();
+
+        // Continue live for the tail.
+        for _ in 0..4 { live.tick(); }
+        let live_final = live.take_snapshot();
+
+        // Restore from the snapshot ONLY (store carries just the pre-snapshot
+        // events, so restore_from applies no tail), then re-run the tail ticks.
+        let mut store2 = InMemoryEventStore::new();
+        for e in events_up_to_snapshot { store2.append(e); }
+        let mut restored = SimulationNode::restore_from(
+            store2, &snap, &modules::all_modules(), &ship_types::all_ship_types(),
+        );
+        for _ in 0..4 { restored.tick(); }
+        let restored_final = restored.take_snapshot();
+
+        assert_eq!(
+            postcard::to_stdvec(&live_final).unwrap(),
+            postcard::to_stdvec(&restored_final).unwrap(),
+            "snapshot + tail tick re-execution must match live, including capacitor"
+        );
     }
 
     #[test]
