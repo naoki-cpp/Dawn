@@ -187,7 +187,7 @@ base_stats  : ShipBaseStats          velocity      : Velocity
 | 属性 | 現在の実装 | 将来の実装 |
 |---|---|---|
 | 実体 | In-Process な論理識別子 | 独立したプロセス / マシン |
-| 通信 | In-Memory Channel | gRPC / QUIC |
+| 通信 | In-Memory Channel | ノード間: ネットワーク RaftTransport + ゴシップ（ワイヤ = postcard 再利用）。クライアント境界: WebSocket（ADR-0007）。gRPC/protobuf は不採用 |
 | 障害 | 発生しない | Node Crash / Network Partition |
 
 Node の物理的実装が変わっても、`NodeId` の役割（ID 発行の単位）は変わらない。

@@ -8,6 +8,13 @@ deciders: [human, ai-agent]
 
 # ADR-0005 — ClientConnection: サーバー／クライアント通信の抽象化
 
+> **更新（ADR-0007 で supersede）**: 本 ADR は当初クライアント転送を Phase 5 で
+> `GrpcConnection`（tonic）に差し替える計画だったが、ADR-0007 で **WebSocket + JSON を
+> 維持**する決定に変わった。本番実装は `WsClientConnection`（`ws_server.rs`）であり、
+> `GrpcConnection`/tonic は実装されない（gRPC は Phase 9 以降に再検討）。
+> trait 抽象（`ClientConnection` の 2 方向）と「dawn-actor に置く」判断は有効。
+> 以下本文中の `GrpcConnection`/「Phase 5 = 本物のネットワーク」は歴史的記述として残す。
+
 ## 状況
 
 Phase 4 でゲームクライアント（Godot 4）をサーバーの `SectorSimulatorActor` に接続する必要がある。

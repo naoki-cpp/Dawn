@@ -253,12 +253,15 @@ Session 2: restore_from() で復元 → tick / ship count / positions ✓ PASS
 ReplicationBus                   Godot シーン
     ↓                                ↑
 ClientConnection trait  ─────────────
-    ├── InProcessConnection  ← Phase 4（チャンネル直結）
-    └── GrpcConnection       ← Phase 5（本物のネットワーク）
+    ├── InProcessConnection  ← テスト用（チャンネル直結）
+    └── WsClientConnection   ← 本番（WebSocket・ADR-0007）
 
 Godot は trait に向かって書く。
 差し替え時に Godot 側のコードは変更しない。
 ```
+
+> 注: 当初計画の `GrpcConnection`（Phase 5）は ADR-0007 で不採用。本番転送は
+> WebSocket（`WsClientConnection`）。gRPC は Phase 9 以降に再検討。
 
 ---
 

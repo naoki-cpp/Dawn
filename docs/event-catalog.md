@@ -150,8 +150,8 @@ ECS に適用したうえで上記イベントを自分の EventStore に Append
 
 | イベント名 | 説明 | 発行者 | ステータス |
 |---|---|---|---|
-| `JumpGateUsed` | Ship がジャンプゲートを使って別 Sector に移動した | `SectorSimulatorActor`（Step 7.5、destination ノード） | ✅ 実装済み（Raft パイプライン） |
-| `StarSystemChanged` | Ship が別の星系に移動した（`JumpGateUsed` と同時） | `SectorSimulatorActor`（Step 7.5、destination ノード） | ✅ 実装済み（Raft パイプライン） |
+| `JumpGateUsed` | Ship がジャンプゲートを使って別 Sector に移動した | `SimulationNode::append_jump_events`（Step 7.5・destination ノード） | ✅ 実装済み（Raft パイプライン） |
+| `StarSystemChanged` | Ship が別の星系に移動した（`JumpGateUsed` と同時） | `SimulationNode::append_jump_events`（Step 7.5・destination ノード） | ✅ 実装済み（Raft パイプライン） |
 
 `JumpCommand { ship_id, gate_id }` が対応する Command。
 `TransitCommand` と同じ Raft Log 経路（ADR-0014）でコミットする。

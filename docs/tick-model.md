@@ -56,8 +56,9 @@ Tick ループは制限なく実行される（できるだけ速く）。
 ```
 
 処理が 100 ms を超えた場合はシステム異常として記録する。
-Tick を遅延させることも、スキップすることも許容しない。
-→ 負荷超過は「Tick を遅らせる」のではなく「Sector への入場を制限する」ことで解決する。
+論理 Tick の単調性・決定性は常に保つ（イベントの並べ替え・欠落・スキップは不可）。
+→ 過負荷は「分割 → LoD → 局所 TiDi → 入場制限」の順で対処する（ADR-0018）。
+局所 TiDi は論理 Tick の決定性を壊さず実時間ペースのみを落とす最終手段。
 詳細は §8 を参照。
 
 ---
@@ -80,8 +81,17 @@ Step 2: コマンドキューを処理する
          DeactivateModuleCommand  → FittedSlot.is_active = false / apply_fitting()
          JumpCommand              → can_propose_jump() 検証後、TransitOp::Request
                                     （gate_id 付き）を Raft に提案（ADR-0009）
+         ApproachCommand          → ApproachComp を付与（対象 Ship / Jump Gate へ
+                                    半自動接近・Move / Stop で解除・ADR-0015）
          ※ Transit 中（TransitState::InTransit）の Ship への Move / Stop /
-           二重 Transit / Jump は拒否する（ADR-0014 / CLAUDE.md §5）
+           二重 Transit / Jump / Approach は拒否する（ADR-0014 / CLAUDE.md §5）
+
+Step 2.5: Approach System を実行する（Movement の前・ADR-0015）
+         SimulationNode::process_approach()
+         → ApproachComp を持つ Ship のみ対象。対象（Ship / Jump Gate）の位置へ
+           thrust を向け直し、到着半径まで詰めたら is_braking = true で停止保持。
+           Ship 対象が消失したら ApproachComp を除去して is_braking = true。
+         → 生成イベントなし（次 Tick 以降の Movement が VelocityChanged を出す）
 
 Step 3: Movement System を実行する（ECS バッチ処理）
          MovementSystem::run(&mut world, tick)
@@ -126,10 +136,12 @@ Step 9: Replication Actor に差分を通知する
 Step 10: RaftActor に TickElapsed を送る（ADR-0014）
          raft.tick()
          → election timeout / heartbeat タイマーを 1 Tick 進める（INV-005 / FBD-003）
-         ※ 実装箇所は SectorSimulatorActor の Tick ハンドラ（Step 9 の後・reply の前）
+         ※ serve は `transit::step_cluster_node`（7.5 apply → node.tick → raft.tick）
+           が `run_cluster_server` 内で実行。actor 経路（テスト/デモ）は
+           SectorSimulatorActor の Tick ハンドラで Step 9 flush を挟んで実行する。
 
 Step 7.5: コミット済み Raft エントリを適用する（ADR-0014 §7）
-         SectorSimulatorActor::apply_committed_raft_entries()
+         transit::apply_committed_raft_entries()（serve と actor で共有）
          → コミット済み TransitOp を ECS に適用する:
            TransitOp::Request → 所有ノード: InTransit 化 + SectorTransitRequested を
              Append、Ship 状態を export して TransitOp::Commit を Raft に提案
@@ -137,8 +149,8 @@ Step 7.5: コミット済み Raft エントリを適用する（ADR-0014 §7）
              gate_id が Some の場合はさらに JumpGateUsed を Append し、
              from/to の StarSystemId が異なる場合は StarSystemChanged も
              Append する（ADR-0009 / SimulationNode::append_jump_events）
-         ※ 実装箇所は SectorSimulatorActor の Tick ハンドラ冒頭（Step 1 の前）。
-           生成イベントは同 Tick の flush で ReplicationBus に伝播する。
+         ※ node.tick（Step 1）の前に実行する。actor 経路では生成イベントを
+           同 Tick の flush で ReplicationBus に伝播する。
 ```
 
 ### Step 8 より前に Step 9 を実行してはならない理由
@@ -228,7 +240,7 @@ cargo run -p dawn-simulation --bin simulate --release
 |---|---|---|
 | Phase 0–1 | `SimulationNode::tick()` | 同期・単純ループ（ベンチマーク用） |
 | Phase 2 | `SectorSimulatorActor` | 非同期・tokio task |
-| Phase 4 以降（現在） | `run_phase4_server()` in `main.rs` | tokio::time::interval（100ms/tick） |
+| Phase 4 以降（現在） | `run_phase4_server()`（単一ノード）/ `run_cluster_server()`（3ノード Raft・Phase 7.5）in `main.rs` | tokio::time::interval（100ms/tick） |
 
 Phase 4 以降は `tokio::time::interval` による固定間隔ループが実装済み。  
 `SimulationNode::tick_with_lock_commands()` は同期処理で、呼び出し元の interval が速度をコントロールする。
