@@ -29,8 +29,10 @@ use dawn_core::{
 };
 use rand::Rng;
 
-// スナップショット用内部型
+// Internal snapshot type. `entity` is captured so write-back is O(1) per ship
+// instead of a full-world scan (ADR-0019: server compute stays O(n)).
 struct ShipSnapshot {
+    entity         : hecs::Entity,
     ship_id        : ShipId,
     stats          : ShipStatsComp,
     position       : Position,
@@ -60,12 +62,13 @@ pub fn run(world: &mut SimWorld, tick: Tick, fire_triggers: &[ShipId]) -> Combat
 
     let mut ships: Vec<ShipSnapshot> = {
         let mut v = Vec::new();
-        for (_, (id, stats, pos, vel, hull, lock)) in world
+        for (entity, (id, stats, pos, vel, hull, lock)) in world
             .inner()
             .query::<(&ShipIdComp, &ShipStatsComp, &PositionComp, &VelocityComp, &HullComp, &LockComp)>()
             .iter()
         {
             v.push(ShipSnapshot {
+                entity,
                 ship_id        : id.0,
                 stats          : *stats,
                 position       : pos.0,
@@ -124,9 +127,13 @@ pub fn run(world: &mut SimWorld, tick: Tick, fire_triggers: &[ShipId]) -> Combat
         damage_accum.push((j, damage, ships[i].ship_id));
     }
 
-    // ── 3. ダメージ適用 ──────────────────────────────────────────────────────
+    // ── 3. Apply damage ──────────────────────────────────────────────────────
+
+    // Indices of ships whose HP/destroyed flag changed this tick (write-back set).
+    let mut changed: Vec<usize> = Vec::new();
 
     for (j, damage, attacker_id) in damage_accum {
+        changed.push(j);
         let mut remaining = damage;
         let shield_absorbed = remaining.min(ships[j].current_shield);
         ships[j].current_shield -= shield_absorbed;
@@ -160,23 +167,17 @@ pub fn run(world: &mut SimWorld, tick: Tick, fire_triggers: &[ShipId]) -> Combat
         }
     }
 
-    // ── 4. ECS へ書き戻し ────────────────────────────────────────────────────
+    // ── 4. Write back to ECS (only ships that took damage this tick) ─────────
 
-    let hp_updates: Vec<(ShipId, f32, f32, f32, bool)> = ships.iter()
-        .map(|s| (s.ship_id, s.current_shield, s.current_armor, s.current_hull, s.is_dead))
-        .collect();
-    for (target_id, shield, armor, hull_hp, dead) in hp_updates {
-        for (_, (id, hull)) in world
-            .inner_mut()
-            .query_mut::<(&ShipIdComp, &mut HullComp)>()
-        {
-            if id.0 == target_id {
-                hull.current_shield = shield;
-                hull.current_armor  = armor;
-                hull.current_hull   = hull_hp;
-                hull.is_destroyed   = dead;
-                break;
-            }
+    changed.sort_unstable();
+    changed.dedup();
+    for j in changed {
+        let s = &ships[j];
+        if let Ok(mut hull) = world.inner_mut().get::<&mut HullComp>(s.entity) {
+            hull.current_shield = s.current_shield;
+            hull.current_armor  = s.current_armor;
+            hull.current_hull   = s.current_hull;
+            hull.is_destroyed   = s.is_dead;
         }
     }
 
@@ -347,6 +348,7 @@ mod tests {
         stats : ShipStatsComp,
     ) -> ShipSnapshot {
         ShipSnapshot {
+            entity         : hecs::Entity::DANGLING,
             ship_id        : id,
             stats,
             position       : pos,

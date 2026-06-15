@@ -55,6 +55,7 @@ struct SlotInfo {
 }
 
 struct ShipSnap {
+    entity      : hecs::Entity,
     ship_id     : ShipId,
     cap_current : f32,
     cap_max     : f32,
@@ -71,7 +72,7 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
         .inner()
         .query::<(&ShipIdComp, &CapacitorComp, &ShipStatsComp, &FittingComp)>()
         .iter()
-        .map(|(_, (sid, cap, stats, fit))| {
+        .map(|(entity, (sid, cap, stats, fit))| {
             let slots: Vec<SlotInfo> = fit
                 .high.iter()
                 .chain(fit.mid.iter())
@@ -90,6 +91,7 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
                 .collect();
 
             ShipSnap {
+                entity,
                 ship_id     : sid.0,
                 cap_current : cap.current,
                 cap_max     : stats.cap_max,
@@ -144,14 +146,14 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
         let new_cap = cap.max(0.0);
 
         // Write cap back to ECS.
-        apply_cap(world, snap.ship_id, new_cap);
+        apply_cap(world, snap.entity, new_cap);
 
         // Write cycle_remaining updates back to ECS.
-        update_cycles(world, snap.ship_id, &new_cycles);
+        update_cycles(world, snap.entity, &new_cycles);
 
         // Force-deactivate modules and emit events.
         if !forced_off.is_empty() {
-            deactivate_modules(world, snap.ship_id, &forced_off, tick, &mut events);
+            deactivate_modules(world, snap.entity, snap.ship_id, &forced_off, tick, &mut events);
             refitted.push(snap.ship_id);
         }
     }
@@ -161,30 +163,16 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn apply_cap(world: &mut SimWorld, ship_id: ShipId, new_cap: f32) {
-    for (_, (sid, cap)) in world
-        .inner_mut()
-        .query_mut::<(&ShipIdComp, &mut CapacitorComp)>()
-    {
-        if sid.0 == ship_id {
-            cap.current = new_cap;
-            return;
-        }
+fn apply_cap(world: &mut SimWorld, entity: hecs::Entity, new_cap: f32) {
+    if let Ok(mut cap) = world.inner_mut().get::<&mut CapacitorComp>(entity) {
+        cap.current = new_cap;
     }
 }
 
-fn update_cycles(world: &mut SimWorld, ship_id: ShipId, updates: &[(usize, u64)]) {
+fn update_cycles(world: &mut SimWorld, entity: hecs::Entity, updates: &[(usize, u64)]) {
     if updates.is_empty() {
         return;
     }
-
-    let entity = world
-        .inner()
-        .query::<&ShipIdComp>()
-        .iter()
-        .find(|(_, sid)| sid.0 == ship_id)
-        .map(|(e, _)| e);
-    let Some(entity) = entity else { return };
 
     let Ok(mut fitting) = world.inner_mut().get::<&mut FittingComp>(entity) else { return };
 
@@ -210,19 +198,12 @@ fn update_cycles(world: &mut SimWorld, ship_id: ShipId, updates: &[(usize, u64)]
 
 fn deactivate_modules(
     world        : &mut SimWorld,
+    entity       : hecs::Entity,
     ship_id      : ShipId,
     flat_indices : &[usize],
     tick         : Tick,
     events       : &mut Vec<DomainEvent>,
 ) {
-    let entity = world
-        .inner()
-        .query::<&ShipIdComp>()
-        .iter()
-        .find(|(_, sid)| sid.0 == ship_id)
-        .map(|(e, _)| e);
-    let Some(entity) = entity else { return };
-
     let Ok(mut fitting) = world.inner_mut().get::<&mut FittingComp>(entity) else { return };
 
     let high_len = fitting.high.len();
