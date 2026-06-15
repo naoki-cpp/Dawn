@@ -28,7 +28,7 @@
 //! variant to `ClientCommand` (then update the ws_server.rs JSON parser and
 //! the main.rs dispatch).
 
-use dawn_core::{ActivateModuleCommand, ApproachCommand, AttackCommand, DeactivateModuleCommand, DomainEvent, JumpCommand, LockOnCommand, MoveCommand, StopCommand};
+use dawn_core::{ActivateModuleCommand, ApproachCommand, AttackCommand, DeactivateModuleCommand, DomainEvent, JumpCommand, LockOnCommand, MoveCommand, StopCommand, WarpCommand};
 use tokio::sync::mpsc;
 
 // ── Error ─────────────────────────────────────────────────────────────────────
@@ -67,6 +67,8 @@ pub enum ClientCommand {
     Jump(JumpCommand),
     /// Semi-automatic piloting: approach a selected ship/gate (ADR-0015).
     Approach(ApproachCommand),
+    /// Intra-Sector warp toward a Jump Gate (short-range Fold, ADR-0022).
+    Warp(WarpCommand),
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────────

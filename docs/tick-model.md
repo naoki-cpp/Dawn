@@ -83,8 +83,11 @@ Step 2: コマンドキューを処理する
                                     （gate_id 付き）を Raft に提案（ADR-0009）
          ApproachCommand          → ApproachComp を付与（対象 Ship / Jump Gate へ
                                     半自動接近・Move / Stop で解除・ADR-0015）
+         WarpCommand              → can_propose_warp() 検証後 WarpComp を付与
+                                    （intra-Sector 短距離 Fold = ワープ・ADR-0022。
+                                    Move / Stop は align 中のみ解除・warping は無視）
          ※ Transit 中（TransitState::InTransit）の Ship への Move / Stop /
-           二重 Transit / Jump / Approach は拒否する（ADR-0014 / CLAUDE.md §5）
+           二重 Transit / Jump / Approach / Warp は拒否する（ADR-0014 / CLAUDE.md §5）
 
 Step 2.5: Approach System を実行する（Movement の前・ADR-0015）
          SimulationNode::process_approach()
@@ -93,7 +96,15 @@ Step 2.5: Approach System を実行する（Movement の前・ADR-0015）
            Ship 対象が消失したら ApproachComp を除去して is_braking = true。
          → 生成イベントなし（次 Tick 以降の Movement が VelocityChanged を出す）
 
-Step 3: Movement System を実行する（ECS バッチ処理）
+Step 2.6: Warp System を実行する（Approach の後・Movement の前・ADR-0022）
+         SimulationNode::process_warp(tick)
+         → WarpComp を持つ Ship のみ対象。Aligning は remaining を減らす（中断可・Tackle 窓）。
+           0 で Warping へ遷移し warp 速度で gate へ直進、activation_radius×0.8 で着地・停止。
+           gate 消失時は WarpComp を除去してブレーキ。
+         → warping 中の船は Step 3 の Movement がスキップ（warp 速度をクランプしない）。
+           生成イベント: VelocityChanged（warp の移動を記録・新イベント型なし）
+
+Step 3: Movement System を実行する（ECS バッチ処理・warping 中の船はスキップ）
          MovementSystem::run(&mut world, tick)
          → 生成: Vec<VelocityChanged>（速度が変化した船のみ）
 

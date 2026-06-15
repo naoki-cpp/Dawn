@@ -204,19 +204,20 @@ Approach（ADR-0015）と同じ UX 系統。プレイヤーがクリックで選
 
 ## 実装チェックリスト
 
-- [ ] `WarpCommand` を dawn-core に追加（+ test）
-- [ ] `WarpComp` / `WarpPhase` を dawn-ecs に追加
-- [ ] `process_warp()`（systems/warp.rs）を実装（align countdown / warping 着地・到着停止）（+ tests）
-- [ ] Movement System が warping 船をスキップ（+ test）
-- [ ] `can_propose_warp`（距離・セクター・InTransit・重複検証）を node.rs に追加（+ test）
-- [ ] `apply_warp_command_owned`（所有権チェック付き）を追加（+ test）
-- [ ] tick の Step 2.6 として process_warp を配線
-- [ ] `apply_move_command` / `apply_stop_command` で align フェーズの WarpComp を解除（warping は不可）（+ test）
-- [ ] warping 中の Move/Stop/二重 warp 拒否（+ test）
-- [ ] `ClientCommand::Warp` を dawn-actor に追加 + ws_server パース（+ test）
-- [ ] run_cluster_server / run_phase4_server でディスパッチ
-- [ ] クライアント: ゲート選択 + W キー（+ 任意の warp HUD）
-- [ ] CLAUDE.md §1/§6 の更新（人間承認のうえ）
+- [x] `WarpCommand` を dawn-core に追加（+ test）
+- [x] `WarpComp` / `WarpPhase` を dawn-ecs に追加
+- [x] `process_warp()` を実装（align countdown / warping 着地・到着停止）（+ tests）。
+      gate 位置参照のため `systems/warp.rs` ではなく node.rs に配置（process_approach に倣う）
+- [x] Movement System が warping 船をスキップ（+ test）
+- [x] `can_propose_warp`（距離・セクター・InTransit・重複検証）を node.rs に追加（+ test）
+- [x] `apply_warp_command_owned`（所有権チェック付き）を追加（+ test）
+- [x] tick の Step 2.6 として process_warp を配線
+- [x] `apply_move_command` / `apply_stop_command` で align フェーズの WarpComp を解除（warping は不可）（+ test）
+- [x] warping 中の Move/Stop/二重 warp 拒否（+ test）
+- [x] `ClientCommand::Warp` を dawn-actor に追加 + ws_server パース（+ test）
+- [x] run_cluster_server / run_phase4_server でディスパッチ（共有 `dispatch_client_command`）
+- [x] クライアント: ゲート選択 + W キー（main.gd / connection.gd）
+- [x] CLAUDE.md §1/§6 の更新（人間承認のうえ）+ tick-model / roadmap / playtest-guide / glossary
 
 ---
 

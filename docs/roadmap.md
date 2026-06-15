@@ -102,8 +102,12 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 - **8D 分散インフラ（物理ノード分散）** — dawn-replication / ネットワーク RaftTransport / dawn-sector-node
   （ワイヤ = postcard 再利用、`dawn-proto`/protobuf は不採用）。第1次は静的 3 ノード + LAN 平文の最小スライス（§10 の 8D 表参照）。
   8B-2（Fission）はこれと本質的に対なので、8D 着手時にまとめて設計するのが自然。
-- **戦闘の深み（ADR-0016 §5）** — Tackle → Signature Resolution → Orbit/Keep at Range → Logistics。
-  柱②④（グラインドゼロの深い戦闘 / 実損ある危険な宇宙）を厚くする方向。
+- **戦闘の深み（ADR-0016 §5）** — Warp（✅ ADR-0022 実装済み）→ Tackle → Signature Resolution →
+  Orbit/Keep at Range → Logistics。柱②④（グラインドゼロの深い戦闘 / 実損ある危険な宇宙）を厚くする方向。
+  - ✅ **Warp（intra-Sector 短距離 Fold = ワープ・ADR-0022）** — 「逃がさない」の前提となる高速離脱。
+    align/warping 2 フェーズ・Tick Step 2.6・W キー配線済み。これで Tackle（次）が意味を持つ。
+  - ⬜ **Tackle（Fold Disruptor・lore 既出）** — tackled 時に Warp / Jump / Transit を Validation で拒否
+    （Fold Drive 起動阻害で両離脱を一括封鎖）。次の ADR-0023。
 
 Phase 8 全体のタスク内訳は §10 を参照。
 

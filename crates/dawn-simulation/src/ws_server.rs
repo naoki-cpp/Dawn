@@ -223,6 +223,14 @@ fn parse_client_command(line: &str) -> Option<ClientCommand> {
                 target,
             }))
         }
+        "WarpCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            let gate_id_raw = v.get("gate_id")?.as_u64()? as u32;
+            Some(ClientCommand::Warp(dawn_core::WarpCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                gate_id: dawn_core::JumpGateId(gate_id_raw),
+            }))
+        }
         _ => None,
     }
 }
@@ -423,6 +431,25 @@ mod tests {
     #[test]
     fn jump_command_without_gate_id_is_rejected() {
         let line = r#"{"type":"JumpCommand","ship_id":42}"#;
+        assert!(parse_client_command(line).is_none());
+    }
+
+    #[test]
+    fn warp_command_json_is_parsed_into_client_command_warp() {
+        let line = r#"{"type":"WarpCommand","ship_id":42,"gate_id":2}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::Warp(c) => {
+                assert_eq!(c.ship_id.raw(), 42);
+                assert_eq!(c.gate_id, JumpGateId(2));
+            }
+            other => panic!("expected Warp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn warp_command_without_gate_id_is_rejected() {
+        let line = r#"{"type":"WarpCommand","ship_id":42}"#;
         assert!(parse_client_command(line).is_none());
     }
 

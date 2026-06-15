@@ -158,6 +158,16 @@ func send_approach_gate_command(p_ship_id: int, p_gate_id: int) -> void:
 		"gate_id": p_gate_id,
 	}) + "\n")
 
+## [W キー] ワープ（短距離 Fold）。選択したゲートへ高速移動する（ADR-0022）。
+func send_warp_command(p_ship_id: int, p_gate_id: int) -> void:
+	if not _welcomed:
+		return
+	_ws.send_text(JSON.stringify({
+		"type"   : "WarpCommand",
+		"ship_id": p_ship_id,
+		"gate_id": p_gate_id,
+	}) + "\n")
+
 func is_connected_to_server() -> bool:
 	return _connected and _welcomed
 

@@ -217,6 +217,10 @@ func _input(event: InputEvent) -> void:
 			if _selected_target_id >= 0:
 				_connection.send_approach_command(_player_ship_id, _selected_target_id)
 				return
+		## W キー → WarpCommand（選択したゲートへ短距離 Fold = ワープ・ADR-0022）
+		if key.keycode == KEY_W and _player_ship_id >= 0 and _selected_gate_id >= 0:
+			_connection.send_warp_command(_player_ship_id, _selected_gate_id)
+			return
 		## Tab キー → タクティカルオーバーレイ表示切り替え
 		if key.keycode == KEY_TAB:
 			if _tactical_overlay != null:

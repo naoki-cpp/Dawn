@@ -677,6 +677,8 @@ fn apply_common_command(
         ClientCommand::Stop(s) => { node.apply_stop_command_owned(player_id, s.ship_id); }
         // Approach: semi-automatic piloting toward a chosen ship/gate (ADR-0015).
         ClientCommand::Approach(a) => { node.apply_approach_command_owned(player_id, a); }
+        // Warp: intra-Sector short-range Fold toward a gate (ADR-0022).
+        ClientCommand::Warp(w) => { node.apply_warp_command_owned(player_id, w); }
         // Jump differs per server: hand it back to the caller.
         ClientCommand::Jump(j) => return Some(j),
     }

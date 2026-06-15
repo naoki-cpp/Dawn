@@ -118,7 +118,8 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
   コンポーネント: Position(x, y, z), Velocity, ThrustComp, ShipStatsComp,
                   HullComp（Shield/Armor/Hull 3層）, FittingComp（装備スロット）,
                   CapacitorComp（現在 cap 量）, TransitComp（Transit 状態）,
-                  ApproachComp（接近対象 Ship/Gate・半自動操船 / ADR-0015）
+                  ApproachComp（接近対象 Ship/Gate・半自動操船 / ADR-0015）,
+                  WarpComp（intra-Sector ワープ = 短距離 Fold・align/warping / ADR-0022）
   船種          : ShipTypeDefinition（id, name, class, base_stats, slot_layout）
   イベント      : ShipSpawned（ship_type_id 含む）, VelocityChanged, SectorTransit系,
                   ShipFitted, WeaponFired, DamageTaken（3層 HP）, ShipDestroyed,
@@ -146,6 +147,12 @@ Phase 7.5 で追加承認済み（ADR-0015・実装済み）:
   対象は Ship または Jump Gate（ゲートは activation_radius 内で停止）,
   Tick Step 2.5 process_approach, Move/Stop で解除, 新イベントなし,
   Godot クライアント配線（クリックで船 / ゲート選択 + A キー）まで完了）
+
+戦闘の深み（ADR-0016 §5）で追加承認済み（ADR-0022・実装済み）:
+  intra-Sector ワープ（短距離 Fold = 「逃がさない」の前提・WarpCommand / WarpComp /
+  WarpPhase::Aligning|Warping, Tick Step 2.6 process_warp, can_propose_warp 検証,
+  Move/Stop は align 中のみ解除（warping は committed）, 新イベントなし（VelocityChanged で記録）,
+  Godot クライアント配線（ゲート選択 + W キー）まで完了。lore: 短距離 Fold = ワープ）
 
 実装しない（提案も拒否する / 反グラインドの核 — FBD-009）:
   スキルポイント制 / 時間経過・課金による受動成長（= キャラクター育成）
@@ -587,13 +594,20 @@ pub type Tick = u64;
                                   （gate_id 付き）を Raft に提案（ADR-0009）
        ApproachCommand          → ApproachComp を付与（半自動操船 / ADR-0015）
                                   対象は Ship または Jump Gate。Move / Stop で解除
+       WarpCommand              → can_propose_warp() 検証後 WarpComp を付与
+                                  （intra-Sector 短距離 Fold = ワープ / ADR-0022）
+                                  Move / Stop は align 中なら解除・warping 中は無視
        ※ Transit 中（TransitState::InTransit）の Ship への Move / Stop /
-         二重 Transit / Jump / Approach は拒否する（ADR-0014 / §5）
+         二重 Transit / Jump / Approach / Warp は拒否する（ADR-0014 / §5）
   2.5 Approach System を実行する            ← Movement の前（ADR-0015）
        ApproachComp を持つ Ship のみ対象。対象（Ship / Jump Gate）の位置へ
        thrust を向け直す。到着半径まで詰めたら is_braking = true で停止保持。
        Ship 対象が消失したら ApproachComp を除去し is_braking = true でブレーキ。
-  3. Movement System を実行する（ECS バッチ処理）
+  2.6 Warp System を実行する                ← Approach の後・Movement の前（ADR-0022）
+       WarpComp を持つ Ship のみ対象。Aligning は remaining を減らす（中断可・Tackle 窓）。
+       0 で Warping へ遷移し warp 速度で gate へ直進、activation_radius×0.8 で着地・停止。
+       warping 中の船は Movement がスキップ（warp 速度をクランプしない）。VelocityChanged を発行。
+  3. Movement System を実行する（ECS バッチ処理・warping 中の船はスキップ）
   4. Capacitor System を実行する           ← Movement の後
        毎 Tick: cap を recharge_per_tick 分回復
        cycle_remaining == 0 → 新サイクル: cap 消費 / cap 不足 → 強制 OFF
