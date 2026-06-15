@@ -28,8 +28,10 @@ pub struct LockResult {
     pub events: Vec<DomainEvent>,
 }
 
-// スナップショット用内部型
+// Internal snapshot type. `entity` is captured so write-back is O(1) per ship
+// instead of a full-world scan (ADR-0019: server compute stays O(n)).
 struct ShipSnap {
+    entity   : hecs::Entity,
     ship_id  : ShipId,
     pos      : Position,
     stats    : ShipStatsComp,
@@ -56,6 +58,7 @@ pub fn run(
         {
             let is_npc = world.inner().get::<&IsNpcComp>(entity).is_ok();
             v.push(ShipSnap {
+                entity,
                 ship_id  : id.0,
                 pos      : pos.0,
                 stats    : *stats,
@@ -178,21 +181,11 @@ pub fn run(
         }
     }
 
-    // ── 3. ECS へ書き戻し ────────────────────────────────────────────────────
+    // ── 3. Write back to ECS (O(1) per ship via captured entity handle) ──────
 
-    let updates: Vec<(ShipId, LockComp)> = ships.into_iter()
-        .map(|s| (s.ship_id, s.lock_comp))
-        .collect();
-
-    for (target_id, new_lock) in updates {
-        for (_, (id, lock)) in world
-            .inner_mut()
-            .query_mut::<(&ShipIdComp, &mut LockComp)>()
-        {
-            if id.0 == target_id {
-                *lock = new_lock;
-                break;
-            }
+    for s in ships {
+        if let Ok(mut lock) = world.inner_mut().get::<&mut LockComp>(s.entity) {
+            *lock = s.lock_comp;
         }
     }
 
