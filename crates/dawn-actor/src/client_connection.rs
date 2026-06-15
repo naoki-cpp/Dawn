@@ -1,13 +1,13 @@
-//! # ClientConnection — サーバー／クライアント通信の抽象境界
+//! # ClientConnection — server/client communication boundary
 //!
-//! ## 設計方針 (ADR-0005)
+//! ## Design (ADR-0005)
 //!
-//! この trait は **2 方向のみ** を定義する:
+//! The trait defines exactly **two directions**:
 //!
 //! ```text
-//! サーバー側                      クライアント側
+//! Server side                     Client side
 //! ─────────────────────────       ──────────────────
-//! SectorSimulatorActor            Godot シーン / テスト
+//! serve loop (WsServer)           Godot scene / tests
 //!     │  send_events()                ↑  recv_event()
 //!     │                              │
 //!     └─── ClientConnection ─────────┘
@@ -15,94 +15,100 @@
 //!              └──────── ←  command_tx.send()
 //! ```
 //!
-//! Phase 4: `InProcessConnection` (tokio::mpsc チャンネル直結)
-//! Phase 5: `GrpcConnection`     (tonic による本物のネットワーク)
+//! Implementations:
+//! - `WsClientConnection` (ws_server.rs) — the production WebSocket transport
+//!   (ADR-0007; gRPC/protobuf was not adopted).
+//! - `InProcessConnection` (below) — an in-memory `tokio::mpsc` pair used by
+//!   tests to drive the serve pipeline without a socket.
 //!
-//! ## ClientCommand の拡張方針
+//! ## Extending ClientCommand
 //!
-//! クライアントから送信できるコマンドは `ClientCommand` enum に追加する。
-//! `ClientConnection` trait 自体は変更しない。
-//! 新コマンドの追加 = `ClientCommand` に variant を追加するだけ。
+//! Commands the client may send are variants of the `ClientCommand` enum; the
+//! `ClientConnection` trait itself does not change. Adding a command = add a
+//! variant to `ClientCommand` (then update the ws_server.rs JSON parser and
+//! the main.rs dispatch).
 
 use dawn_core::{ActivateModuleCommand, ApproachCommand, AttackCommand, DeactivateModuleCommand, DomainEvent, JumpCommand, LockOnCommand, MoveCommand, StopCommand};
 use tokio::sync::mpsc;
 
 // ── Error ─────────────────────────────────────────────────────────────────────
 
-/// `ClientConnection` の操作で発生しうるエラー。
+/// Errors that a `ClientConnection` operation can produce.
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectionError {
-    /// 接続先（クライアント）が既に切断されている。
+    /// The peer (client) is already disconnected.
     #[error("client disconnected")]
     Disconnected,
 }
 
 // ── ClientCommand ─────────────────────────────────────────────────────────────
 
-/// クライアントからサーバーへ送信できる全コマンドの列挙。
+/// All commands a client may send to the server.
 ///
-/// 新コマンドを追加する場合はここに variant を追加し、
-/// `ws_server.rs` の JSON パーサーと `main.rs` の振り分けを更新する。
-///
-/// `ClientConnection::try_recv_command()` が返す型。
+/// To add a command, add a variant here and update the `ws_server.rs` JSON
+/// parser and the `main.rs` dispatch. This is the type returned by
+/// `ClientConnection::try_recv_command()`.
 #[derive(Debug, Clone)]
 pub enum ClientCommand {
-    /// 推力方向の指定（Cycle 2〜）
+    /// Set thrust direction.
     Move(MoveCommand),
-    /// ロックオン開始（Cycle 3〜）
+    /// Begin locking a target.
     LockOn(LockOnCommand),
-    /// Active モジュールをオンにする
+    /// Turn an active module on.
     Activate(ActivateModuleCommand),
-    /// Active モジュールをオフにする
+    /// Turn an active module off.
     Deactivate(DeactivateModuleCommand),
-    /// ターゲットへの攻撃（将来の手動攻撃モード用、現在は自動戦闘が優先）
+    /// Attack a target (reserved for a future manual-fire mode; combat is
+    /// currently automatic each tick).
     Attack(AttackCommand),
-    /// 減速停止（thrust を逆方向に掛けて速度ゼロまで減速する）
+    /// Decelerate to a stop (applies reverse thrust until velocity is zero).
     Stop(StopCommand),
-    /// ジャンプゲート経由の Sector 移動（ADR-0009）
+    /// Cross a Sector boundary via a Jump Gate (ADR-0009).
     Jump(JumpCommand),
-    /// 半自動操船: 選択した船へ自動接近する（ADR-0015）
+    /// Semi-automatic piloting: approach a selected ship/gate (ADR-0015).
     Approach(ApproachCommand),
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
 
-/// サーバー側から見たクライアント接続の抽象。
+/// A client connection as seen from the server side.
 ///
-/// # 実装ルール
+/// # Implementation rules
 ///
-/// - `send_events` は非ブロッキングで完了すること（`Err` でバックプレッシャーを表現）。
-/// - `try_recv_command` はノンブロッキングであること（コマンドがなければ `None`）。
-/// - 実装は `Send + 'static` を満たすこと（Actor スレッドをまたいで移動するため）。
+/// - `send_events` must complete without blocking (`Err` signals back-pressure
+///   / disconnection).
+/// - `try_recv_command` must be non-blocking (`None` when no command is ready).
+/// - Implementations must be `Send + 'static` (they move across actor threads).
 pub trait ClientConnection: Send + 'static {
-    /// サーバーからクライアントへイベントを送信する。
+    /// Send events from the server to the client.
     fn send_events(&self, events: &[DomainEvent]) -> Result<(), ConnectionError>;
 
-    /// クライアントから届いたコマンドを 1 件ノンブロッキングで取り出す。
+    /// Take one pending command from the client, non-blocking.
     fn try_recv_command(&mut self) -> Option<ClientCommand>;
 }
 
 // ── InProcessConnection ───────────────────────────────────────────────────────
 
-/// In-Process 実装。tokio unbounded channel で直結する。
+/// In-process implementation backed by `tokio` unbounded channels.
 ///
-/// Phase 4 専用。本番ネットワークは `GrpcConnection`（Phase 5）で実装する。
+/// Used by tests to drive the serve pipeline without a socket; the production
+/// transport is `WsClientConnection` (ws_server.rs, ADR-0007).
 ///
-/// ## 使い方
+/// ## Usage
 ///
 /// ```rust
 /// use dawn_actor::client_connection::{InProcessConnection, InProcessClientEndpoint};
 ///
 /// let (server_side, client_side) = InProcessConnection::pair();
-/// // server_side → SectorSimulatorActor に渡す
-/// // client_side → Godot / テストコードに渡す
+/// // server_side → drive from the serve loop (drain commands, send events)
+/// // client_side → test code (send commands, observe events)
 /// ```
 pub struct InProcessConnection {
     event_tx   : mpsc::UnboundedSender<DomainEvent>,
     command_rx : mpsc::UnboundedReceiver<ClientCommand>,
 }
 
-/// クライアント側のエンドポイント。
+/// The client-side endpoint of an [`InProcessConnection`].
 pub struct InProcessClientEndpoint {
     pub event_rx   : mpsc::UnboundedReceiver<DomainEvent>,
     pub command_tx : mpsc::UnboundedSender<ClientCommand>,
