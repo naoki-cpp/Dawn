@@ -27,9 +27,11 @@ pub struct ApproachComp {
 /// `VelocityChanged`, ADR-0008).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WarpPhase {
-    /// Spin-up; `remaining` ticks until warp engages. Interruptible by
-    /// Move/Stop and (ADR-0023) tackle.
-    Aligning { remaining: u64 },
+    /// Aligning: the ship points at the target and accelerates; warp engages
+    /// once it is moving at ≥ 75% of max speed toward the gate (EVE-style
+    /// alignment, ADR-0022). Align time therefore emerges from ship agility.
+    /// Interruptible by Move/Stop and (ADR-0023) tackle.
+    Aligning,
     /// Committed; flying to the gate at warp speed. Not interruptible.
     Warping,
 }

@@ -98,8 +98,9 @@ Step 2.5: Approach System を実行する（Movement の前・ADR-0015）
 
 Step 2.6: Warp System を実行する（Approach の後・Movement の前・ADR-0022）
          SimulationNode::process_warp(tick)
-         → WarpComp を持つ Ship のみ対象。Aligning は remaining を減らす（中断可・Tackle 窓）。
-           0 で Warping へ遷移し warp 速度で gate へ直進、activation_radius×0.8 で着地・停止。
+         → WarpComp を持つ Ship のみ対象。Aligning は gate へ加速し、ゲート方向の速度が
+           max_speed × 75% に達したら Warping へ遷移（EVE 準拠・整列時間は機動性次第・中断可・Tackle 窓）。
+           Warping は warp 速度で gate へ直進し残距離比例で減速、activation_radius×0.8 内で停止。
            gate 消失時は WarpComp を除去してブレーキ。
          → warping 中の船は Step 3 の Movement がスキップ（warp 速度をクランプしない）。
            生成イベント: VelocityChanged（warp の移動を記録・新イベント型なし）

@@ -24,6 +24,7 @@ extends Node
 
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
 const WORLD_SCALE : float = 0.1   ## サーバー座標 ↔ Godot 座標の変換係数
+const MIN_WARP_DISTANCE : float = 3000.0  ## サーバー単位。これ未満のゲートにはワープ不可（ADR-0022）
 ## Display units: 1 server unit = 1 m. Server runs at 10 ticks/sec, so
 ## speed in m/s = (units/tick) × TICKS_PER_SECOND. Distances shown in km.
 const TICKS_PER_SECOND : float = 10.0
@@ -329,6 +330,21 @@ func _select_approach_gate(gate_id: int) -> void:
 	_selected_gate_id   = gate_id
 	_selected_target_id = -1
 	_update_hud()
+
+## Server-unit distance from the player ship to the selected gate, or -1 if
+## there is no player ship or no selected gate (ADR-0022 warp gating / HUD).
+func _selected_gate_distance() -> float:
+	if _selected_gate_id < 0 or _player_ship_id < 0 or not _ships.has(_player_ship_id):
+		return -1.0
+	var ship_pos: Vector3 = (_ships[_player_ship_id] as Node3D).global_position / WORLD_SCALE
+	for gate: Variant in JUMP_GATES:
+		var g: Dictionary = gate as Dictionary
+		if (g.get("gate_id", -1) as int) != _selected_gate_id:
+			continue
+		var gpos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
+		## Godot Z は反転しているが、距離計算はサーバー座標系で行う。
+		return Vector3(ship_pos.x, ship_pos.y, -ship_pos.z).distance_to(gpos)
+	return -1.0
 
 # ── 右クリック → LockOnCommand ───────────────────────────────────────────────
 
@@ -816,10 +832,16 @@ func _update_hud() -> void:
 	if _jump_notice != "":
 		jump_line += "\n" + _jump_notice
 
-	## Approach target selection (ADR-0015).
+	## Approach / warp target selection (ADR-0015 / ADR-0022).
 	var approach_line: String = ""
 	if _selected_gate_id >= 0:
 		approach_line = "\n[A] Approach Gate #%d" % _selected_gate_id
+		## Warp is only valid beyond the minimum warp distance (ADR-0022).
+		var gate_dist: float = _selected_gate_distance()
+		if gate_dist >= MIN_WARP_DISTANCE:
+			approach_line += "  [W] Warp"
+		elif gate_dist >= 0.0:
+			approach_line += "  [W] too close to warp"
 	elif _selected_target_id >= 0:
 		approach_line = "\n[A] Approach #%d" % _selected_target_id
 

@@ -604,8 +604,9 @@ pub type Tick = u64;
        thrust を向け直す。到着半径まで詰めたら is_braking = true で停止保持。
        Ship 対象が消失したら ApproachComp を除去し is_braking = true でブレーキ。
   2.6 Warp System を実行する                ← Approach の後・Movement の前（ADR-0022）
-       WarpComp を持つ Ship のみ対象。Aligning は remaining を減らす（中断可・Tackle 窓）。
-       0 で Warping へ遷移し warp 速度で gate へ直進、activation_radius×0.8 で着地・停止。
+       WarpComp を持つ Ship のみ対象。Aligning は gate へ加速し、ゲート方向の速度が
+       max_speed×75% に達したら Warping へ遷移（EVE 準拠・整列時間は機動性次第。中断可・Tackle 窓）。
+       Warping は warp 速度で gate へ直進、残距離比例で減速し activation_radius×0.8 内で停止。
        warping 中の船は Movement がスキップ（warp 速度をクランプしない）。VelocityChanged を発行。
   3. Movement System を実行する（ECS バッチ処理・warping 中の船はスキップ）
   4. Capacitor System を実行する           ← Movement の後

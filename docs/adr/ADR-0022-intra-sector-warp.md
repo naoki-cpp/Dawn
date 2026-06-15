@@ -57,17 +57,21 @@ dawn の lore は移動を **Fold（折畳）** で統一している:
 
 ```
 WarpCommand { ship_id, gate_id }
-  → WarpComp { gate_id, phase: Align { remaining: ALIGN_TICKS } } を付与
+  → WarpComp { gate_id, phase: Aligning } を付与
   ── 毎 Tick process_warp() がフェーズを進める ──
-  [Align]    remaining を 1 ずつ減らす。まだ warp に入っていない。
+  [Aligning] thrust を gate へ向け、加速する（sublight・Movement が積分）。
+             ゲート方向の速度成分が max_speed × 75% に達したら Warping へ遷移。
+             → 整列時間は船の機動性（thrust / max_speed）から自然に決まる（EVE 準拠）。
              → Move/Stop で中断可。Tackle（ADR-0023）はここでのみ阻害できる。
-  [Warping]  remaining == 0 で遷移。velocity = unit(gate - pos) * WARP_SPEED。
-             → コミット済み。Move/Stop は無効（InTransit と同じ拒否）。
-             → 到着半径内に入ったら velocity = ZERO・WarpComp 除去で終了。
+  [Warping]  velocity = unit(gate - pos) × warp 速度。コミット済み。
+             → Move/Stop は無効（InTransit と同じ拒否）。
+             → 到着半径へ近づくと残距離比例で減速、半径内で velocity = ZERO・WarpComp 除去。
 ```
 
 この 2 フェーズ分離が本 ADR の核である。**中断・Tackle 阻害は align フェーズにのみ作用し、
 warping に入ったら終点までライドする**（EVE: warp 突入後は tackle 不可・自分でも止まれない）。
+整列条件は **EVE 準拠の「max_speed の 75% までターゲット方向へ加速」**（eve-reference §7.4.1 /
+movement_nav §238-241「align time は戦術軸」）。固定タイマーではなく船の機動性から整列時間が出る。
 
 | フェーズ | Move/Stop | Tackle（ADR-0023） |
 |---|---|---|
@@ -175,10 +179,15 @@ Approach（ADR-0015）と同じ UX 系統。プレイヤーがクリックで選
 
 | 定数 | 役割 | 初期値（暫定） |
 |---|---|---|
-| `ALIGN_TICKS` | align フェーズ長（= Tackle 窓） | 30 tick |
-| `WARP_SPEED` | warp 中の速度（>> max_speed） | 5000 u/tick |
+| `WARP_ALIGN_FRACTION` | 整列完了＝この割合 × max_speed までゲート方向へ加速（EVE 準拠） | 0.75 |
+| `WARP_SPEED` | warp 巡航速度（>> max_speed） | 5000 u/tick |
+| `WARP_DECEL_RATE` | 到着前の減速ランプ（速度 ≤ 残距離 × これ） | 0.4 |
+| `WARP_EXIT_SPEED` | これ以下で warp を終了・停止 | 250 u/tick |
 | `MIN_WARP_DISTANCE` | warp 可能な最小距離（150km 相当） | 3000 u |
-| 到着半径 | warping 終了距離 | gate.activation_radius |
+| `WARP_ARRIVAL_FACTOR` | 到着半径 = gate.activation_radius × これ | 0.8 |
+
+整列時間は固定でなく **船の機動性（thrust_magnitude / max_speed）** から決まる（EVE の align time）。
+機動の鈍い船ほど整列が長く、Tackle 窓が長い。
 
 初期値はプレイテストで調整する（ship_types.toml と同様にデータ化可能だが、slice 1 は定数で可）。
 
@@ -232,6 +241,10 @@ Approach（ADR-0015）と同じ UX 系統。プレイヤーがクリックで選
   これを救うには専用イベントが要り、上記理由で不採用。よって warp も velocity 経由で表現する。
 - **align フェーズを省く（即 warp）**: Tackle（ADR-0023）が作用する窓が消え、戦術的緊張が
   生まれない。align = Tackle 窓が本機能の眼目なので必須。
+- **align を固定タイマー（ALIGN_TICKS）にする**: 実装初版はこれだったが、EVE の align は
+  「75% max speed までターゲット方向へ加速」で、整列時間が船の機動性から出るのが戦術の核
+  （eve-reference movement_nav §238-241「align time は戦術軸」）。固定タイマーは機動性差を消すため
+  却下し、75% 整列に置換した。
 - **warp 中も中断可能にする**: EVE の「warp 突入後はコミット」を壊し、Tackle の意味
   （align で捕まえる skill）を薄める。warping は committed とする。
 - **対象を任意座標 / 敵船に開放**: EVE でも直接敵船 warp は不可（ブックマーク / フリート要）。

@@ -486,10 +486,12 @@ fn run_aoi_benchmark() {
     println!("═══════════════════════════════════════════");
 }
 
-/// AoI cell edge length (ADR-0019). The sector spans 100,000 units; a 10,000
-/// cell gives a 3×3×3 interest region ~15,000 units from the observer, well
-/// inside the sector and far larger than weapon ranges. Tuned in benches later.
-const AOI_CELL_SIZE: f32 = 10_000.0;
+/// AoI cell edge length (ADR-0019). The sector spans 100,000 units; a 30,000
+/// cell gives a 3×3×3 interest region reaching ~30,000–60,000 units from the
+/// observer, so most of the sector (including a gate ~49,000 away across a
+/// warp) is visible while still culling the far extremes. This is a scalability
+/// knob: shrink it for dense large-scale tests. Tuned in benches later.
+const AOI_CELL_SIZE: f32 = 30_000.0;
 
 // ── Phase 5: Godot WebSocket server (multi-client) ─────────────────────────────
 //
@@ -967,16 +969,18 @@ async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_cap: usize) {
 ///   (in-process transport, same wiring as `MultiNodeCluster`).
 /// - Player commands are routed to the node that currently owns the
 ///   player's ship; ownership follows `JumpGateUsed` events.
-/// - Players spawn near Gate 0 (Sector 0 → Sector 1) so the jump can be
-///   tried immediately.
+/// - Players spawn at the Sector origin, far from Gate 0, so the intended
+///   travel loop is demonstrable: warp (W) or approach (A) to the gate, then
+///   jump (J) once in range (ADR-0022).
 async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     use dawn_core::{DomainEvent, PlayerId};
     use dawn_event_store::store::EventStore as _;
     use transit::TransitOp;
 
     const SECTORS: usize = 3;
-    /// In range of Gate 0 (position x=49,000, activation_radius 2,000).
-    const PLAYER_SPAWN: Position = Position { x: 47_500.0, y: 0.0, z: 0.0 };
+    /// Sector origin: ~49,000u from Gate 0 (x=49,000), well beyond the 3,000u
+    /// warp minimum, so warp/approach to the gate both work (ADR-0022).
+    const PLAYER_SPAWN: Position = Position { x: 0.0, y: 0.0, z: 0.0 };
 
     println!("═══════════════════════════════════════════");
     println!("  Phase 7.5 — Raft cluster WebSocket server ");
@@ -984,7 +988,8 @@ async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     println!("  sectors  : {SECTORS} (one Raft node each)");
     println!("  npc ships: {ship_count} in Sector 0  (change with --ships N)");
     println!("  tick rate: {} ms/tick  ({} tick/sec)", P4_TICK_MS, 1000 / P4_TICK_MS);
-    println!("  jump     : press J near a gate (player spawns near Gate 0)");
+    println!("  travel   : select Gate 0 (click its ring), press W to warp (or A to approach),");
+    println!("             then J to jump once in range (player spawns at the Sector origin)");
     println!();
     println!("  Open Godot client and press Play (F5)");
     println!("  Press Ctrl-C to stop");
@@ -1141,17 +1146,31 @@ async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         // node adopts it, future commands route there, and we remember to
         // resend that Sector's InitialState below.
         let mut jumped_players: Vec<(PlayerId, usize)> = Vec::new();
+        // JumpGateUsed / StarSystemChanged for the jumping ship's own player,
+        // collected here because jumped sessions skip deliver_aoi_frame below
+        // (their old Sector's AoI is no longer relevant) and would otherwise
+        // never receive these events — leaving the client's system display stale.
+        let mut jump_own_events: HashMap<PlayerId, Vec<DomainEvent>> = HashMap::new();
         for sector_events in &events_by_sector {
             for event in sector_events {
-                if let DomainEvent::JumpGateUsed(e) = event {
-                    if let Some(&player_id) = ship_player.get(&e.ship_id) {
-                        let dest = e.to_sector.0 as usize;
-                        nodes[dest].adopt_player_ship(e.ship_id, player_id);
-                        player_sector.insert(player_id, dest);
-                        jumped_players.push((player_id, dest));
-                        println!("  [Server] {player_id:?} ship #{} now owned by Sector {dest}",
-                            e.ship_id.raw());
+                match event {
+                    DomainEvent::JumpGateUsed(e) => {
+                        if let Some(&player_id) = ship_player.get(&e.ship_id) {
+                            let dest = e.to_sector.0 as usize;
+                            nodes[dest].adopt_player_ship(e.ship_id, player_id);
+                            player_sector.insert(player_id, dest);
+                            jumped_players.push((player_id, dest));
+                            jump_own_events.entry(player_id).or_default().push(event.clone());
+                            println!("  [Server] {player_id:?} ship #{} now owned by Sector {dest}",
+                                e.ship_id.raw());
+                        }
                     }
+                    DomainEvent::StarSystemChanged(e) => {
+                        if let Some(&player_id) = ship_player.get(&e.ship_id) {
+                            jump_own_events.entry(player_id).or_default().push(event.clone());
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -1187,6 +1206,9 @@ async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         // the destination Sector. `_on_initial_state` resets `_player_lock_target`.
         for (player_id, dest) in jumped_players {
             if let Some(sess) = sessions.iter().find(|s| s.player_id == player_id) {
+                if let Some(events) = jump_own_events.get(&player_id) {
+                    sess.send_events(events);
+                }
                 let initial_state = nodes[dest].get_ship_position(sess.ship_id)
                     .map(|pos| nodes[dest].build_initial_state_json_for(pos, AOI_CELL_SIZE))
                     .unwrap_or_else(|| nodes[dest].build_initial_state_json());
