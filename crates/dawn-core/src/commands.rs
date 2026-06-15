@@ -149,6 +149,23 @@ pub struct JumpCommand {
     pub gate_id: JumpGateId,
 }
 
+/// Request to warp a Ship toward a Jump Gate within its current Sector
+/// (intra-Sector short-range Fold, ADR-0022; colloquially "warp").
+///
+/// An accepted warp is a persistent two-phase steering mode (`WarpComp`):
+/// an interruptible alignment phase, then a committed warping phase that
+/// flies the ship to the gate's `activation_radius` at warp speed.
+///
+/// May be rejected (`can_propose_warp`) if:
+/// - The Ship does not exist, is in transit, or is already warping.
+/// - The gate does not originate in the Ship's current Sector.
+/// - The gate is closer than the minimum warp distance (use approach instead).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WarpCommand {
+    pub ship_id: ShipId,
+    pub gate_id: JumpGateId,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,5 +222,12 @@ mod tests {
         let cmd = JumpCommand { ship_id: ship_id(1), gate_id: crate::star_system::JumpGateId(0) };
         assert_eq!(cmd.ship_id, ship_id(1));
         assert_eq!(cmd.gate_id, crate::star_system::JumpGateId(0));
+    }
+
+    #[test]
+    fn warp_command_carries_ship_id_and_gate_id() {
+        let cmd = WarpCommand { ship_id: ship_id(1), gate_id: crate::star_system::JumpGateId(2) };
+        assert_eq!(cmd.ship_id, ship_id(1));
+        assert_eq!(cmd.gate_id, crate::star_system::JumpGateId(2));
     }
 }

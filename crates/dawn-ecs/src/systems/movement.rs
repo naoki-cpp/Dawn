@@ -21,7 +21,7 @@
 //! - The caller appends the returned events to the EventStore.
 
 use crate::{
-    components::{PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp},
+    components::{PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp, WarpComp},
     SimWorld,
 };
 use dawn_core::{events::VelocityChanged, DomainEvent, Tick, Velocity};
@@ -36,7 +36,7 @@ impl MovementSystem {
     pub fn run(world: &mut SimWorld, tick: Tick) -> Vec<DomainEvent> {
         let mut events = Vec::new();
 
-        for (_entity, (id_comp, pos_comp, vel_comp, thrust_comp, stats_comp)) in world
+        for (_entity, (id_comp, pos_comp, vel_comp, thrust_comp, stats_comp, warp_comp)) in world
             .inner_mut()
             .query_mut::<(
                 &ShipIdComp,
@@ -44,8 +44,16 @@ impl MovementSystem {
                 &mut VelocityComp,
                 &mut ThrustComp,
                 &ShipStatsComp,
+                Option<&WarpComp>,
             )>()
         {
+            // Ships in the committed warping phase are controlled by
+            // process_warp (position/velocity/clamp/events); skip them here
+            // so warp speed is not clamped to sublight max_speed (ADR-0022 §6).
+            if warp_comp.is_some_and(|w| w.is_warping()) {
+                continue;
+            }
+
             let old_velocity = vel_comp.0;
 
             // ── 1. Apply thrust ───────────────────────────────────────────────
@@ -151,6 +159,30 @@ mod tests {
         // NPC (thrust_magnitude=0) は速度が変わらない
         assert!(MovementSystem::run(&mut w, Tick(1)).is_empty(),
             "等速直線運動では VelocityChanged は発行しない");
+    }
+
+    #[test]
+    fn warping_ship_is_skipped_by_movement_so_warp_speed_is_not_clamped() {
+        use crate::components::{WarpComp, WarpPhase};
+        let mut w  = SimWorld::new(SectorId(0));
+        let id     = dawn_core::ShipId::new(NodeId(0), 1);
+        // Warp velocity far above max_speed; movement must NOT clamp or integrate it.
+        let warp_vel = Velocity::new(5000.0, 0.0, 0.0);
+        let entity = w.spawn_ship(id, Position::ORIGIN, warp_vel);
+        w.set_ship_stats(entity, ShipStatsComp::PLAYER); // max_speed << 5000
+        w.inner_mut().insert_one(entity, WarpComp {
+            gate_id: dawn_core::JumpGateId(0),
+            phase  : WarpPhase::Warping,
+        }).unwrap();
+
+        let events = MovementSystem::run(&mut w, Tick(1));
+
+        // Movement emitted nothing and left position/velocity untouched (process_warp owns it).
+        assert!(events.is_empty(), "movement must not touch a warping ship");
+        let pos = w.inner().get::<&PositionComp>(entity).unwrap().0;
+        assert_eq!(pos, Position::ORIGIN, "movement must not integrate a warping ship");
+        let vel = w.inner().get::<&VelocityComp>(entity).unwrap().0;
+        assert_eq!(vel, warp_vel, "movement must not clamp warp speed");
     }
 
     #[test]

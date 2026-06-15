@@ -23,7 +23,7 @@ use dawn_core::{
     SectorBounds, SectorId, ShipId, Tick, Velocity,
 };
 use dawn_ecs::{
-    components::{ApproachComp, CapacitorComp, FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp, ShipStatsComp, ThrustComp, VelocityComp},
+    components::{ApproachComp, CapacitorComp, FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp, WarpComp, WarpPhase},
     systems::{CapacitorSystem, CombatSystem, LockSystem, MovementSystem, apply_fitting},
     Entity, SimWorld,
 };
@@ -35,6 +35,20 @@ use crate::snapshot::{ShipSnapshot, StateSnapshot};
 /// TiDi budget so dynamic split / LoD / local TiDi all engage first; only
 /// extreme density ever reaches this admission limit.
 pub const POPULATION_CAP: usize = 100_000;
+
+// ── Warp tuning (short-range Fold, ADR-0022 §9) ─────────────────────────────────
+
+/// Alignment phase length before warp engages (ticks). This is the tackle
+/// window (ADR-0023): a ship can be stopped or held only while aligning.
+const ALIGN_TICKS: u64 = 30;
+/// Warp travel speed (units/tick), far above any sublight `max_speed`.
+const WARP_SPEED: f32 = 5000.0;
+/// Minimum distance to a gate for warp to be allowed (units). Closer than this,
+/// the `WarpCommand` is rejected and the player should approach instead.
+const MIN_WARP_DISTANCE: f32 = 3000.0;
+/// Stop this far inside the gate's activation radius on arrival, so the jump
+/// prompt is available immediately (mirrors approach, ADR-0015).
+const WARP_ARRIVAL_FACTOR: f32 = 0.8;
 
 // ── TickResult ────────────────────────────────────────────────────────────────
 
@@ -335,6 +349,27 @@ impl<S: EventStore> SimulationNode<S> {
         gate.is_in_range(pos.0)
     }
 
+    // ── Intra-Sector Warp (short-range Fold, ADR-0022) ───────────────────────
+
+    /// Whether a `WarpCommand` for `ship_id` toward `gate_id` would currently be
+    /// accepted (INV-006 Validation, before attaching `WarpComp`):
+    /// the Ship exists, is not in transit, is not already warping, the gate
+    /// originates in this Sector, and the gate is at least `MIN_WARP_DISTANCE`
+    /// away (closer than that → use approach instead). The tackle check
+    /// (ADR-0023) will be added here.
+    pub fn can_propose_warp(&self, ship_id: ShipId, gate_id: JumpGateId) -> bool {
+        let Some(&entity) = self.ship_index.get(&ship_id) else { return false };
+        if self.world.transit_state(entity).is_in_transit() {
+            return false;
+        }
+        if self.world.inner().get::<&WarpComp>(entity).is_ok() {
+            return false; // already aligning or warping
+        }
+        let Some(gate) = self.jump_gates.get(&gate_id) else { return false };
+        let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
+        pos.0.distance(gate.position) >= MIN_WARP_DISTANCE
+    }
+
     /// Append `JumpGateUsed` (and `StarSystemChanged` if the destination
     /// Sector belongs to a different Star System) for a Ship that just
     /// completed a Jump-Gate Transit (ADR-0009).
@@ -464,7 +499,10 @@ impl<S: EventStore> SimulationNode<S> {
         // 2.5 Approach System — re-aim thrust at approach targets (ADR-0015)
         self.process_approach();
 
-        // 3. Movement System
+        // 2.6 Warp System — advance intra-Sector warps (short-range Fold, ADR-0022)
+        let warp_events = self.process_warp(tick);
+
+        // 3. Movement System (skips ships in the committed warping phase)
         let move_events = MovementSystem::run(&mut self.world, tick);
 
         // 4. Capacitor System — recharge and drain for active modules
@@ -503,7 +541,8 @@ impl<S: EventStore> SimulationNode<S> {
         self.process_bots();
 
         // 8. Append to the EventStore
-        let all_events: Vec<DomainEvent> = move_events.iter()
+        let all_events: Vec<DomainEvent> = warp_events.iter()
+            .chain(move_events.iter())
             .chain(cap.events.iter())
             .chain(lock.events.iter())
             .chain(combat.events.iter())
@@ -586,6 +625,13 @@ impl<S: EventStore> SimulationNode<S> {
         self.world.inner().get::<&ApproachComp>(*entity).ok().map(|a| a.target)
     }
 
+    /// The Ship's current warp phase, if it is warping (ADR-0022).
+    #[cfg(test)]
+    pub fn warp_phase(&self, ship_id: ShipId) -> Option<WarpPhase> {
+        let entity = self.ship_index.get(&ship_id)?;
+        self.world.inner().get::<&WarpComp>(*entity).ok().map(|w| w.phase)
+    }
+
     /// Look up the current position of a Ship by its ID.
     pub fn get_ship_position(&self, ship_id: ShipId) -> Option<Position> {
         let entity = self.ship_index.get(&ship_id)?;
@@ -644,6 +690,12 @@ impl<S: EventStore> SimulationNode<S> {
         if self.world.transit_state(entity).is_in_transit() {
             return;
         }
+        // A committed warp cannot be interrupted; an aligning warp is cancelled
+        // (ADR-0022 §7).
+        if self.is_warping(entity) {
+            return;
+        }
+        let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
         // Manual thrust overrides any active approach (ADR-0015 §4).
         let _ = self.world.inner_mut().remove_one::<ApproachComp>(entity);
         let pos = match self.world.inner().get::<&PositionComp>(entity).ok() {
@@ -651,6 +703,12 @@ impl<S: EventStore> SimulationNode<S> {
             None    => return,
         };
         self.steer_thrust_toward(entity, pos, target);
+    }
+
+    /// True if the ship is in the committed warping phase (ADR-0022): its warp
+    /// cannot be interrupted by Move/Stop. Aligning or absent warp → false.
+    fn is_warping(&self, entity: Entity) -> bool {
+        self.world.inner().get::<&WarpComp>(entity).map(|w| w.is_warping()).unwrap_or(false)
     }
 
     /// Point `entity`'s thrust at `to` from `from` (unit direction, not braking).
@@ -693,6 +751,12 @@ impl<S: EventStore> SimulationNode<S> {
         if self.world.transit_state(entity).is_in_transit() {
             return;
         }
+        // A committed warp cannot be interrupted; an aligning warp is cancelled
+        // (ADR-0022 §7).
+        if self.is_warping(entity) {
+            return;
+        }
+        let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
         // Stopping cancels any active approach (ADR-0015 §4).
         let _ = self.world.inner_mut().remove_one::<ApproachComp>(entity);
         self.brake_thrust(entity);
@@ -1018,6 +1082,147 @@ impl<S: EventStore> SimulationNode<S> {
             return false;
         }
         self.apply_approach_command(cmd.ship_id, cmd.target)
+    }
+
+    /// Begin an intra-Sector warp toward a Jump Gate (short-range Fold, ADR-0022).
+    ///
+    /// Attaches a `WarpComp` in the `Aligning` phase if `can_propose_warp`
+    /// accepts the request; `process_warp()` then advances the alignment and,
+    /// once aligned, flies the ship to the gate at warp speed. Returns `false`
+    /// (no component attached) on rejection.
+    pub fn apply_warp_command(&mut self, ship_id: ShipId, gate_id: JumpGateId) -> bool {
+        if !self.can_propose_warp(ship_id, gate_id) {
+            return false;
+        }
+        let &entity = match self.ship_index.get(&ship_id) {
+            Some(e) => e,
+            None    => return false,
+        };
+        let _ = self.world.inner_mut().insert_one(entity, WarpComp {
+            gate_id,
+            phase: WarpPhase::Aligning { remaining: ALIGN_TICKS },
+        });
+        true
+    }
+
+    /// `apply_warp_command` wrapped with an ownership check.
+    pub fn apply_warp_command_owned(
+        &mut self,
+        player_id : PlayerId,
+        cmd       : dawn_core::WarpCommand,
+    ) -> bool {
+        if self.ship_owners.get(&cmd.ship_id) != Some(&player_id) {
+            return false;
+        }
+        self.apply_warp_command(cmd.ship_id, cmd.gate_id)
+    }
+
+    /// Warp System (ADR-0022 §6): advance every ship carrying a `WarpComp`.
+    ///
+    /// Runs each tick as Step 2.6 (after Approach, before Movement). The
+    /// `Aligning` phase counts down (interruptible by Move/Stop); on reaching
+    /// zero it engages `Warping`, and warping ships fly straight to the gate at
+    /// `WARP_SPEED`, dropping inside its activation radius and stopping. Warping
+    /// ships are skipped by the Movement System, so this method owns their
+    /// position, velocity, and `VelocityChanged` events. Returns those events.
+    pub fn process_warp(&mut self, tick: Tick) -> Vec<DomainEvent> {
+        // Collect warpers up front so the ECS query borrow is released before
+        // the mutable write pass below.
+        let warpers: Vec<(Entity, ShipId, WarpComp, Position, Velocity)> = self.world.inner()
+            .query::<(&ShipIdComp, &WarpComp, &PositionComp, &VelocityComp)>()
+            .iter()
+            .map(|(e, (id, w, p, v))| (e, id.0, *w, p.0, v.0))
+            .collect();
+
+        let mut events = Vec::new();
+
+        for (entity, ship_id, warp, pos, vel) in warpers {
+            // Resolve the destination gate; if it vanished, cancel and brake.
+            let Some((gate_pos, arrival)) = self.jump_gate(warp.gate_id)
+                .map(|g| (g.position, g.activation_radius * WARP_ARRIVAL_FACTOR))
+            else {
+                let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
+                self.brake_thrust(entity);
+                continue;
+            };
+
+            match warp.phase {
+                // Still aligning: count down. The ship keeps its current motion
+                // (Movement handles it); warp has not engaged yet.
+                WarpPhase::Aligning { remaining } if remaining > 1 => {
+                    self.set_warp_phase(entity, WarpPhase::Aligning { remaining: remaining - 1 });
+                }
+                // Alignment complete or already warping: fly toward the gate.
+                WarpPhase::Aligning { .. } | WarpPhase::Warping => {
+                    self.set_warp_phase(entity, WarpPhase::Warping);
+                    if let Some(ev) = self.warp_step(entity, ship_id, pos, vel, gate_pos, arrival, tick) {
+                        events.push(ev);
+                    }
+                }
+            }
+        }
+
+        events
+    }
+
+    /// One warping-phase step: move `entity` toward `gate_pos` at `WARP_SPEED`,
+    /// stopping inside `arrival`. Returns a `VelocityChanged` if velocity moved.
+    fn warp_step(
+        &mut self,
+        entity  : Entity,
+        ship_id : ShipId,
+        pos     : Position,
+        old_vel : Velocity,
+        gate_pos: Position,
+        arrival : f32,
+        tick    : Tick,
+    ) -> Option<DomainEvent> {
+        let dist = pos.distance(gate_pos);
+        let (new_pos, new_vel, arrived) = if dist <= arrival {
+            // Already inside the arrival ring: stop and hold at the gate.
+            (pos, Velocity::ZERO, true)
+        } else {
+            // Step toward the gate without overshooting the arrival ring.
+            let step = WARP_SPEED.min(dist - arrival);
+            let inv  = step / dist;
+            let v = Velocity {
+                dx: (gate_pos.x - pos.x) * inv,
+                dy: (gate_pos.y - pos.y) * inv,
+                dz: (gate_pos.z - pos.z) * inv,
+            };
+            let p = Position { x: pos.x + v.dx, y: pos.y + v.dy, z: pos.z + v.dz };
+            (p, v, false)
+        };
+
+        if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) { p.0 = new_pos; }
+        if let Ok(mut v) = self.world.inner_mut().get::<&mut VelocityComp>(entity) { v.0 = new_vel; }
+
+        if arrived {
+            // Warp complete: drop the component and clear thrust so the ship
+            // sits at the gate (ready to jump). Movement resumes next tick.
+            let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
+            if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
+                t.direction  = Velocity::ZERO;
+                t.is_braking = false;
+            }
+        }
+
+        // Emit VelocityChanged only when velocity actually changed (INV-MOVE).
+        let changed = (new_vel.dx - old_vel.dx).abs() > f32::EPSILON
+            || (new_vel.dy - old_vel.dy).abs() > f32::EPSILON
+            || (new_vel.dz - old_vel.dz).abs() > f32::EPSILON;
+        changed.then(|| DomainEvent::VelocityChanged(dawn_core::events::VelocityChanged {
+            ship_id,
+            velocity: new_vel,
+            tick,
+        }))
+    }
+
+    /// Overwrite the phase of a ship's `WarpComp` (no-op if absent).
+    fn set_warp_phase(&mut self, entity: Entity, phase: WarpPhase) {
+        if let Ok(mut w) = self.world.inner_mut().get::<&mut WarpComp>(entity) {
+            w.phase = phase;
+        }
     }
 
     /// Approach System (ADR-0015 §3): for every ship carrying an `ApproachComp`,
@@ -1866,6 +2071,80 @@ mod tests {
             target : dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(1)),
         }));
         assert_eq!(node.approach_target(chaser), None);
+    }
+
+    // ── Warp (short-range Fold, ADR-0022) ────────────────────────────────────
+
+    #[test]
+    fn warp_is_rejected_when_the_gate_is_closer_than_the_minimum_warp_distance() {
+        // Spawn right on top of Gate 0: too close to warp, must approach instead.
+        let mut node = mem_node();
+        let gate = node.jump_gate(dawn_core::JumpGateId(0)).unwrap().clone();
+        let (player, ship) = spawn_owned_player_at(&mut node, gate.position);
+        assert!(!node.can_propose_warp(ship, dawn_core::JumpGateId(0)));
+        assert!(!node.apply_warp_command_owned(player, dawn_core::WarpCommand {
+            ship_id: ship, gate_id: dawn_core::JumpGateId(0),
+        }));
+        assert_eq!(node.warp_phase(ship), None);
+    }
+
+    #[test]
+    fn warp_is_rejected_for_a_gate_not_in_this_sector() {
+        // Gate 1 originates in Sector 1; a Sector-0 node does not know it.
+        let mut node = mem_node();
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(!node.apply_warp_command_owned(player, dawn_core::WarpCommand {
+            ship_id: ship, gate_id: dawn_core::JumpGateId(1),
+        }));
+        assert_eq!(node.warp_phase(ship), None);
+    }
+
+    #[test]
+    fn warp_holds_position_during_alignment_then_flies_into_gate_range_and_completes() {
+        let mut node = mem_node();
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(node.apply_warp_command_owned(player, dawn_core::WarpCommand {
+            ship_id: ship, gate_id: dawn_core::JumpGateId(0),
+        }));
+
+        // During alignment the ship has not engaged warp: it stays put.
+        node.tick();
+        assert!(matches!(node.warp_phase(ship), Some(WarpPhase::Aligning { .. })));
+        assert_eq!(node.get_ship_position(ship).unwrap(), Position::ORIGIN,
+            "an aligning ship does not move at warp speed yet");
+
+        // Run well past alignment + warp travel; the ship arrives and stops.
+        for _ in 0..60 { node.tick(); }
+        assert_eq!(node.warp_phase(ship), None, "warp completes and the component is removed");
+        assert!(node.can_propose_jump(ship, dawn_core::JumpGateId(0)),
+            "warp drops the ship inside the gate's activation radius");
+    }
+
+    #[test]
+    fn a_move_command_cancels_an_aligning_warp() {
+        let mut node = mem_node();
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, gate_id: dawn_core::JumpGateId(0) });
+        node.tick(); // still aligning
+        assert!(matches!(node.warp_phase(ship), Some(WarpPhase::Aligning { .. })));
+
+        node.apply_move_command(ship, Position::new(0.0, 1000.0, 0.0));
+        assert_eq!(node.warp_phase(ship), None, "a move during alignment cancels the warp");
+    }
+
+    #[test]
+    fn a_move_command_is_ignored_during_the_committed_warping_phase() {
+        let mut node = mem_node();
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, gate_id: dawn_core::JumpGateId(0) });
+        // Tick past alignment (ALIGN_TICKS = 30) so the warp is committed but
+        // far from arrival (49000u at WARP_SPEED takes ~10 more ticks).
+        for _ in 0..31 { node.tick(); }
+        assert_eq!(node.warp_phase(ship), Some(WarpPhase::Warping), "warp should be committed");
+
+        node.apply_move_command(ship, Position::new(0.0, 1000.0, 0.0));
+        assert_eq!(node.warp_phase(ship), Some(WarpPhase::Warping),
+            "a committed warp cannot be interrupted by a move command");
     }
 
     #[test]

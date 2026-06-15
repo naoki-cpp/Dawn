@@ -1,6 +1,6 @@
 //! Movement-related ECS components.
 
-use dawn_core::{ApproachTarget, Position, Velocity};
+use dawn_core::{ApproachTarget, JumpGateId, Position, Velocity};
 
 /// Persistent "approach" steering target (semi-automatic piloting, ADR-0015).
 ///
@@ -15,6 +15,37 @@ use dawn_core::{ApproachTarget, Position, Velocity};
 #[derive(Debug, Clone, Copy)]
 pub struct ApproachComp {
     pub target: ApproachTarget,
+}
+
+/// Two-phase intra-Sector warp state (short-range Fold, ADR-0022).
+///
+/// `Aligning` is the interruptible spin-up (the tackle window, ADR-0023);
+/// `Warping` is committed — the node's `process_warp()` step controls the
+/// ship's position/velocity at warp speed and the Movement System skips it.
+/// Like `ApproachComp`, this is derived steering state: NOT persisted in
+/// `ShipSnapshot` and never its own event (motion is recorded by
+/// `VelocityChanged`, ADR-0008).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WarpPhase {
+    /// Spin-up; `remaining` ticks until warp engages. Interruptible by
+    /// Move/Stop and (ADR-0023) tackle.
+    Aligning { remaining: u64 },
+    /// Committed; flying to the gate at warp speed. Not interruptible.
+    Warping,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct WarpComp {
+    pub gate_id: JumpGateId,
+    pub phase  : WarpPhase,
+}
+
+impl WarpComp {
+    /// Whether the ship is in the committed warping phase (Movement skips it,
+    /// Move/Stop/二重 warp are rejected).
+    pub fn is_warping(&self) -> bool {
+        matches!(self.phase, WarpPhase::Warping)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
