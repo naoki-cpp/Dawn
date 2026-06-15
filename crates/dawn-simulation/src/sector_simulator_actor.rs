@@ -31,8 +31,11 @@ use tokio::sync::{mpsc, oneshot};
 /// Summary returned to the caller after a tick completes.
 ///
 /// Does not include the raw event list (those are forwarded to the bus).
+///
+/// Read by the actor tests; the demo callers of `tick`/`tick_all` ignore it,
+/// hence the non-test `dead_code` allowance.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct TickSummary {
     pub tick          : Tick,
     pub events_emitted: usize,

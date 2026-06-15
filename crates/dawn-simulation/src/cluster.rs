@@ -170,11 +170,6 @@ impl MultiNodeCluster {
         stats
     }
 
-    #[allow(dead_code)]
-    pub fn node_count(&self) -> usize {
-        self.nodes.len()
-    }
-
     /// Per-node actor handles, in `NodeId` order (used by the `--raft-demo`
     /// binary mode to address individual nodes).
     pub fn nodes(&self) -> &[SectorSimulatorHandle] {

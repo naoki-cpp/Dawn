@@ -592,15 +592,15 @@ impl<S: EventStore> SimulationNode<S> {
         self.world.inner().get::<&PositionComp>(*entity).ok().map(|c| c.0)
     }
 
-    /// Look up the current `ShipStatsComp` of a Ship by its ID.
-    #[allow(dead_code)]
+    /// Look up the current `ShipStatsComp` of a Ship by its ID. Test-only.
+    #[cfg(test)]
     pub fn get_ship_stats(&self, ship_id: ShipId) -> Option<ShipStatsComp> {
         let entity = self.ship_index.get(&ship_id)?;
         self.world.inner().get::<&ShipStatsComp>(*entity).ok().map(|c| *c)
     }
 
-    /// Look up the current HP of a Ship by its ID.
-    #[allow(dead_code)]
+    /// Look up the current HP of a Ship by its ID. Test-only.
+    #[cfg(test)]
     pub fn get_ship_hp(&self, ship_id: ShipId) -> Option<f32> {
         let entity = self.ship_index.get(&ship_id)?;
         self.world.inner().get::<&HullComp>(*entity).ok()
@@ -952,10 +952,6 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn get_player_ship(&self, player_id: PlayerId) -> Option<ShipId> {
-        self.player_ships.get(&player_id).copied()
-    }
 
     pub fn apply_move_command_owned(
         &mut self,
