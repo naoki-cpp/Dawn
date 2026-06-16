@@ -119,6 +119,14 @@ Step 4: Capacitor System を実行する
          → 生成: Vec<ModuleDeactivated>（cap 枯渇による強制 OFF）
          ※ Movement の後、Lock の前に実行すること
 
+Step 4.5: Tackle System を実行する（Capacitor の後・Lock の前・ADR-0024）
+         SimulationNode::process_tackle(tick)
+         → アクティブな Tackle モジュール（ModuleKind::Tackle、cap ON）を持つ Ship のみ対象。
+           ロック済みターゲットが tackle_range 以内にいれば TackledComp に tackler を追加。
+           射程外・ロック消失・tackler 破壊の場合は tackler を除去して TackleReleased を発行。
+           TackledComp を持つ Ship は can_propose_warp / can_propose_jump が false を返す。
+         → 生成: Vec<TackleApplied | TackleReleased>
+
 Step 5: Lock System を実行する
          LockSystem::run(&mut world, tick, &lock_commands)
          → 生成: Vec<TargetLocked | LockLost>

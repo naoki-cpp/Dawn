@@ -65,6 +65,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 - ✅ Phase 6 — ゲームループ改善（Capacitor / EVE命中率式 / タクティカルオーバーレイ / ボットAI / 154テスト全パス）
 - ✅ Phase 7 — 分散コンセンサス（Raft / ADR-0014 / リーダー障害中の Transit 完遂を検証 / 223テスト全パス）
 - ✅ Phase 7.5 — 星系間ナビゲーション（ADR-0009 / Jump Gate Raft パイプライン + Godot クライアント配線 / 241テスト全パス）
+- ✅ 戦闘の深み — Warp（ADR-0022）/ Propulsion Physics（ADR-0023）/ Tackle（ADR-0024）実装済み（312テスト全パス）
 
 ### Phase 4 卒業記録（ADR-0007 §6）
 
@@ -111,8 +112,9 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
     mass_add）。MovementSystem を exponential approach モデルに置換済み。
     おまけ: J キー（JumpCommand）が gate 射程外のとき auto-warp-then-jump を自動実行
     （WarpComp::auto_jump フラグ + pending_auto_jumps キュー）。
-  - ⬜ **Tackle（Fold Disruptor・lore 既出）** — tackled 時に Warp / Jump / Transit を Validation で拒否
-    （Fold Drive 起動阻害で両離脱を一括封鎖）。次の ADR-0024。
+  - ✅ **Tackle（Fold Disruptor・ADR-0024 実装済み）** — TackledComp / process_tackle（Step 4.5）/
+    TackleApplied・TackleReleased イベント / can_propose_warp・can_propose_jump 拒否 /
+    スナップショット永続化 / data/modules.toml Fold Disruptor I（id=12）配線済み。
 
 Phase 8 全体のタスク内訳は §10 を参照。
 
