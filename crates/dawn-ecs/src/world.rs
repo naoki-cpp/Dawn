@@ -101,6 +101,15 @@ impl SimWorld {
     pub fn inner_mut(&mut self) -> &mut hecs::World {
         &mut self.inner
     }
+
+    /// Whether `entity` is currently tackled (has a non-empty `TackledComp`).
+    ///
+    /// Used by `can_propose_warp` and `can_propose_jump` to reject commands from
+    /// tackled ships (ADR-0024). Single query point so future tackle-type
+    /// discrimination (disruptor vs scrambler) is added here only.
+    pub fn is_tackled(&self, entity: Entity) -> bool {
+        self.inner.get::<&crate::components::TackledComp>(entity).is_ok()
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

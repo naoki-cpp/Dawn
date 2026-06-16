@@ -374,10 +374,7 @@ impl<S: EventStore> SimulationNode<S> {
         if self.world.transit_state(entity).is_in_transit() {
             return false;
         }
-        // Tackled ships cannot jump (ADR-0024).
-        if self.world.inner().get::<&TackledComp>(entity).is_ok() {
-            return false;
-        }
+        if self.world.is_tackled(entity) { return false; }
         let Some(gate) = self.jump_gates.get(&gate_id) else { return false };
         let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
         gate.is_in_range(pos.0)
@@ -398,10 +395,7 @@ impl<S: EventStore> SimulationNode<S> {
         if self.world.inner().get::<&WarpComp>(entity).is_ok() {
             return false; // already aligning or warping
         }
-        // Tackled ships cannot warp (ADR-0024).
-        if self.world.inner().get::<&TackledComp>(entity).is_ok() {
-            return false;
-        }
+        if self.world.is_tackled(entity) { return false; }
         let Some(gate) = self.jump_gates.get(&gate_id) else { return false };
         let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
         pos.0.distance(gate.position) >= MIN_WARP_DISTANCE
@@ -1212,9 +1206,7 @@ impl<S: EventStore> SimulationNode<S> {
 
             // Tackle interrupts the aligning phase (ADR-0024): a tackled ship
             // cannot enter warp. Cancel and brake; the Warping phase is committed.
-            if warp.phase == WarpPhase::Aligning
-                && self.world.inner().get::<&TackledComp>(entity).is_ok()
-            {
+            if warp.phase == WarpPhase::Aligning && self.world.is_tackled(entity) {
                 let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
                 self.brake_thrust(entity);
                 continue;
@@ -1364,134 +1356,91 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Tackle System — Step 4.5 (after Capacitor, before Lock). ADR-0024.
     ///
-    /// For each ship that has at least one active Tackle module with a nonzero
-    /// `tackle_range`, check whether its locked targets are within that range.
-    /// - Enter into `TackledComp` if the target is in range and a lock exists.
-    /// - Remove from `TackledComp` if the tackler no longer has a lock on it,
-    ///   the target is out of range, or the tackler itself is destroyed.
-    ///
-    /// Also cleans up `TackledComp` for ships whose tacklers have been destroyed
-    /// (so tackle state always reflects live entities).
+    /// Computes the desired tackle state from active Fold Disruptors + locked
+    /// targets in range, diffs against the current `TackledComp` state, emits
+    /// `TackleApplied`/`TackleReleased` events for changes, and updates the ECS.
     pub fn process_tackle(&mut self, tick: Tick) -> Vec<DomainEvent> {
+        use dawn_core::events::{TackleApplied, TackleReleased};
         use dawn_core::fitting::ModuleKind;
-        use dawn_ecs::systems::TackleResult;
+        use std::collections::HashMap;
 
-        // Collect (tackler_id, entity, tackle_range, locked_targets, position)
-        // from all ships that have at least one active Tackle module.
-        let tacklers: Vec<(ShipId, Entity, f32, Vec<ShipId>, Position)> = self
-            .ship_index
-            .iter()
+        // Collect ships with at least one active Tackle module.
+        let tacklers: Vec<(ShipId, f32, Vec<ShipId>, Position)> = self.ship_index.iter()
             .filter_map(|(&ship_id, &entity)| {
                 let stats = self.world.inner().get::<&ShipStatsComp>(entity).ok()?;
                 if stats.tackle_range <= 0.0 { return None; }
-                // Only if the module is actually active (cap could have killed it).
                 let fitting = self.world.inner().get::<&FittingComp>(entity).ok()?;
-                let has_active_tackle = fitting.high.iter()
-                    .chain(fitting.mid.iter())
-                    .chain(fitting.low.iter())
-                    .chain(fitting.rig.iter())
-                    .any(|s| s.def.kind == ModuleKind::Tackle && s.is_effective());
-                if !has_active_tackle { return None; }
+                if !fitting.has_active_module_of_kind(ModuleKind::Tackle) { return None; }
                 let lock = self.world.inner().get::<&LockComp>(entity).ok()?;
                 let locked: Vec<ShipId> = lock.locked_targets().collect();
+                if locked.is_empty() { return None; }
                 let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
-                Some((ship_id, entity, stats.tackle_range, locked, pos))
+                Some((ship_id, stats.tackle_range, locked, pos))
             })
             .collect();
 
-        let mut result = TackleResult::new();
-
-        // Compute which (target, tackler) pairs are in range this tick.
-        let mut active_tackles: Vec<(ShipId, ShipId)> = Vec::new(); // (target, tackler)
-        for (tackler_id, _, tackle_range, locked_targets, tackler_pos) in &tacklers {
-            for &target_id in locked_targets {
+        // desired[target] = Vec of tacklers currently in range and holding a lock.
+        let mut desired: HashMap<ShipId, Vec<ShipId>> = HashMap::new();
+        for (tackler_id, range, locked, tackler_pos) in &tacklers {
+            for &target_id in locked {
                 if let Some(&te) = self.ship_index.get(&target_id) {
                     if let Ok(tp) = self.world.inner().get::<&PositionComp>(te) {
-                        if tackler_pos.distance(tp.0) <= *tackle_range {
-                            active_tackles.push((target_id, *tackler_id));
+                        if tackler_pos.distance(tp.0) <= *range {
+                            desired.entry(target_id).or_default().push(*tackler_id);
                         }
                     }
                 }
             }
         }
 
-        // Collect live tacklers set for cleanup.
-        let live_tackler_ids: std::collections::HashSet<ShipId> =
-            tacklers.iter().map(|(id, _, _, _, _)| *id).collect();
-
-        // Collect all ships that currently have TackledComp.
-        let currently_tackled: Vec<(ShipId, Entity, Vec<ShipId>)> = self
-            .ship_index
-            .iter()
+        // Snapshot current tackle state — single ECS scan.
+        let current: Vec<(ShipId, Entity, Vec<ShipId>)> = self.ship_index.iter()
             .filter_map(|(&sid, &entity)| {
-                let tackled = self.world.inner().get::<&TackledComp>(entity).ok()?;
-                Some((sid, entity, tackled.tacklers.clone()))
+                let t = self.world.inner().get::<&TackledComp>(entity).ok()?;
+                Some((sid, entity, t.tacklers.clone()))
             })
             .collect();
+        let current_ids: std::collections::HashSet<ShipId> =
+            current.iter().map(|(s, _, _)| *s).collect();
 
-        // Pass 1: remove stale tacklers from existing TackledComps.
-        for (target_id, entity, old_tacklers) in currently_tackled {
-            let entity = entity; // copy (Entity: Copy)
-            let stale: Vec<ShipId> = old_tacklers.iter()
-                .filter(|&&tid| {
-                    !live_tackler_ids.contains(&tid)
-                        || !active_tackles.contains(&(target_id, tid))
-                })
-                .copied()
-                .collect();
+        let mut events: Vec<DomainEvent> = Vec::new();
 
-            for tid in stale {
-                result.push_released(target_id, tid, tick);
+        // Update existing TackledComps: emit diffs, then write new list.
+        for (target_id, entity, old_tacklers) in current {
+            let new_tacklers = desired.get(&target_id).cloned().unwrap_or_default();
+
+            for &tid in &old_tacklers {
+                if !new_tacklers.contains(&tid) {
+                    events.push(DomainEvent::TackleReleased(TackleReleased { ship_id: target_id, by: tid, tick }));
+                }
+            }
+            for &tid in &new_tacklers {
+                if !old_tacklers.contains(&tid) {
+                    events.push(DomainEvent::TackleApplied(TackleApplied { ship_id: target_id, by: tid, tick }));
+                }
             }
 
-            // Apply releases to the component.
-            let should_remove = {
-                if let Ok(mut tackled) = self.world.inner_mut().get::<&mut TackledComp>(entity) {
-                    tackled.tacklers.retain(|tid| active_tackles.contains(&(target_id, *tid)));
-                    tackled.tacklers.is_empty()
-                } else { false }
-            };
-            if should_remove {
+            if new_tacklers.is_empty() {
                 let _ = self.world.inner_mut().remove_one::<TackledComp>(entity);
-            }
-        }
-
-        // Pass 2: add new tacklers.
-        let already_tackled_now: Vec<(ShipId, Entity, Vec<ShipId>)> = self
-            .ship_index
-            .iter()
-            .filter_map(|(&sid, &entity)| {
-                let tackled = self.world.inner().get::<&TackledComp>(entity).ok()?;
-                Some((sid, entity, tackled.tacklers.clone()))
-            })
-            .collect();
-
-        for (target_id, tackler_id) in &active_tackles {
-            let already = already_tackled_now.iter()
-                .find(|(sid, _, _)| sid == target_id)
-                .map(|(_, _, tacklers)| tacklers.contains(tackler_id))
-                .unwrap_or(false);
-
-            if !already {
-                result.push_applied(*target_id, *tackler_id, tick);
-
-                if let Some(&entity) = self.ship_index.get(target_id) {
-                    let has_comp = {
-                        if let Ok(mut tackled) = self.world.inner_mut().get::<&mut TackledComp>(entity) {
-                            if !tackled.tacklers.contains(tackler_id) {
-                                tackled.tacklers.push(*tackler_id);
-                            }
-                            true
-                        } else { false }
-                    };
-                    if !has_comp {
-                        let _ = self.world.inner_mut().insert_one(entity, TackledComp { tacklers: vec![*tackler_id] });
-                    }
+            } else {
+                if let Ok(mut tackled) = self.world.inner_mut().get::<&mut TackledComp>(entity) {
+                    tackled.tacklers = new_tacklers;
                 }
             }
         }
 
-        result.events
+        // Insert TackledComp for ships newly entering tackled state.
+        for (&target_id, new_tacklers) in &desired {
+            if current_ids.contains(&target_id) { continue; }
+            for &tid in new_tacklers {
+                events.push(DomainEvent::TackleApplied(TackleApplied { ship_id: target_id, by: tid, tick }));
+            }
+            if let Some(&entity) = self.ship_index.get(&target_id) {
+                let _ = self.world.inner_mut().insert_one(entity, TackledComp { tacklers: new_tacklers.clone() });
+            }
+        }
+
+        events
     }
 
     /// Return the player ship's fitting state as a PlayerFitting JSON message.

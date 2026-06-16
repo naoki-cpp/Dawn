@@ -53,6 +53,16 @@ impl FittingComp {
         }
     }
 
+    /// Returns true if any effective slot has the given module kind.
+    /// Used by the Tackle System to check for active Fold Disruptors (ADR-0024).
+    pub fn has_active_module_of_kind(&self, kind: dawn_core::fitting::ModuleKind) -> bool {
+        self.high.iter()
+            .chain(self.mid.iter())
+            .chain(self.low.iter())
+            .chain(self.rig.iter())
+            .any(|s| s.def.kind == kind && s.is_effective())
+    }
+
     /// 有効なスロット（Passive または Active ON）の `StatDelta` を合計して返す。
     pub fn total_delta(&self) -> StatDelta {
         self.high.iter()
