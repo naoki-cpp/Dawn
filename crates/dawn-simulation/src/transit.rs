@@ -188,6 +188,7 @@ mod tests {
                 is_destroyed  : false,
                 capacitor     : Some(50.0),
                 fitting       : FittingSnapshot::empty(),
+                tackled_by    : vec![],
             },
             from     : SectorId(0),
             to       : SectorId(1),

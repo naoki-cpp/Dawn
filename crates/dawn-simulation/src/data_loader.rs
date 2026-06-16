@@ -101,6 +101,7 @@ struct StatDeltaEntry {
     #[serde(default)] max_locks_add       : i32,
     #[serde(default)] cap_max_add         : f32,
     #[serde(default)] cap_recharge_add    : f32,
+    #[serde(default)] tackle_range_add    : f32,
 }
 
 // ── 変換 ─────────────────────────────────────────────────────────────────────
@@ -129,6 +130,7 @@ fn parse_module_kind(s: &str) -> ModuleKind {
         "Propulsion"     => ModuleKind::Propulsion,
         "Sensor"         => ModuleKind::Sensor,
         "Rig"            => ModuleKind::Rig,
+        "Tackle"         => ModuleKind::Tackle,
         _                => ModuleKind::Weapon,
     }
 }
@@ -191,6 +193,7 @@ fn entry_to_module(e: ModuleEntry) -> ModuleDefinition {
             max_locks_add       : e.stat_delta.max_locks_add,
             cap_max_add         : e.stat_delta.cap_max_add,
             cap_recharge_add    : e.stat_delta.cap_recharge_add,
+            tackle_range_add    : e.stat_delta.tackle_range_add,
         },
     }
 }

@@ -8,6 +8,7 @@ pub const MODULE_SHIELD_BASIC   : ModuleId = ModuleId(3);
 pub const MODULE_ARMOR_BASIC    : ModuleId = ModuleId(4);
 pub const MODULE_AFTERBURNER    : ModuleId = ModuleId(5);
 pub const MODULE_SENSOR_BOOSTER : ModuleId = ModuleId(6);
+pub const MODULE_FOLD_DISRUPTOR : ModuleId = ModuleId(12);
 
 pub fn all_modules() -> Vec<ModuleDefinition> {
     vec![
@@ -70,6 +71,16 @@ pub fn all_modules() -> Vec<ModuleDefinition> {
             cap_cost_per_cycle: 0.0,
             cycle_time_ticks  : 0,
             stat_delta: StatDelta { lock_time_add: -2, max_locks_add: 1, ..StatDelta::ZERO },
+        },
+
+        // ── Tackle (Mid / Active) — ADR-0024 ────────────────────────────────
+        ModuleDefinition {
+            id: MODULE_FOLD_DISRUPTOR, name: "Fold Disruptor I".to_string(),
+            kind: ModuleKind::Tackle, slot: SlotKind::Mid,
+            activation_mode: ActivationMode::Active,
+            cap_cost_per_cycle: 30.0,
+            cycle_time_ticks  : 10,
+            stat_delta: StatDelta { tackle_range_add: 20_000.0, ..StatDelta::ZERO },
         },
     ]
 }

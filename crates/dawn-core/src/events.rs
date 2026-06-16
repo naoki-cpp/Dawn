@@ -78,6 +78,16 @@ pub enum DomainEvent {
     /// `JumpGateUsed` when the destination Sector belongs to a different
     /// Star System). See ADR-0009.
     StarSystemChanged(StarSystemChanged),
+
+    /// A Fold Disruptor locked onto a target ship, preventing warp and jump.
+    /// Emitted when a tackle module becomes effective (in range + locked).
+    /// See ADR-0024.
+    TackleApplied(TackleApplied),
+
+    /// A tackle effect ended (module off, out of range, tackler destroyed, or
+    /// lock lost). The tackled ship may still be tackled by other ships.
+    /// See ADR-0024.
+    TackleReleased(TackleReleased),
 }
 
 impl DomainEvent {
@@ -90,16 +100,18 @@ impl DomainEvent {
             Self::ShipFitted(e)         => e.ship_id,
             Self::ModuleActivated(e)    => e.ship_id,
             Self::ModuleDeactivated(e)  => e.ship_id,
-            Self::TargetLocked(e)  => e.locker_id,
-            Self::LockLost(e)      => e.locker_id,
-            Self::WeaponFired(e)   => e.attacker_id,
-            Self::DamageTaken(e)   => e.ship_id,
-            Self::ShipDestroyed(e) => e.ship_id,
+            Self::TargetLocked(e)       => e.locker_id,
+            Self::LockLost(e)           => e.locker_id,
+            Self::WeaponFired(e)        => e.attacker_id,
+            Self::DamageTaken(e)        => e.ship_id,
+            Self::ShipDestroyed(e)      => e.ship_id,
             Self::SectorTransitRequested(e) => e.ship_id,
             Self::SectorTransitCompleted(e) => e.ship_id,
             Self::SectorTransitAborted(e)   => e.ship_id,
             Self::JumpGateUsed(e)           => e.ship_id,
             Self::StarSystemChanged(e)      => e.ship_id,
+            Self::TackleApplied(e)          => e.ship_id,
+            Self::TackleReleased(e)         => e.ship_id,
         }
     }
 
@@ -113,16 +125,18 @@ impl DomainEvent {
             Self::ShipFitted(e)         => e.tick,
             Self::ModuleActivated(e)    => e.tick,
             Self::ModuleDeactivated(e)  => e.tick,
-            Self::TargetLocked(e)  => e.tick,
-            Self::LockLost(e)      => e.tick,
-            Self::WeaponFired(e)   => e.tick,
-            Self::DamageTaken(e)   => e.tick,
-            Self::ShipDestroyed(e) => e.tick,
+            Self::TargetLocked(e)       => e.tick,
+            Self::LockLost(e)           => e.tick,
+            Self::WeaponFired(e)        => e.tick,
+            Self::DamageTaken(e)        => e.tick,
+            Self::ShipDestroyed(e)      => e.tick,
             Self::SectorTransitRequested(e) => e.tick,
             Self::SectorTransitCompleted(e) => e.tick,
             Self::SectorTransitAborted(e)   => e.tick,
             Self::JumpGateUsed(e)           => e.tick,
             Self::StarSystemChanged(e)      => e.tick,
+            Self::TackleApplied(e)          => e.tick,
+            Self::TackleReleased(e)         => e.tick,
         }
     }
 }
@@ -313,6 +327,36 @@ pub struct StarSystemChanged {
     pub from_system: StarSystemId,
     pub to_system  : StarSystemId,
     pub tick       : Tick,
+}
+
+// ── Tackle (ADR-0024) ─────────────────────────────────────────────────────────
+
+/// A Fold Disruptor module began tackling a target ship.
+///
+/// Emitted when a Tackle module is active, the tackler has a lock on `ship_id`,
+/// and `ship_id` is within `tackle_range`. The tackled ship cannot warp or jump
+/// while at least one TackleApplied without a matching TackleReleased is active.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TackleApplied {
+    /// Ship that is now tackled.
+    pub ship_id : ShipId,
+    /// Ship applying the tackle.
+    pub by      : ShipId,
+    pub tick    : Tick,
+}
+
+/// A tackle effect on a ship ended.
+///
+/// Emitted when a Tackle module is deactivated, the lock on `ship_id` is lost,
+/// the tackler moves out of range, or the tackler is destroyed.
+/// The tackled ship may still be tackled by other ships.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TackleReleased {
+    /// Ship that was tackled.
+    pub ship_id : ShipId,
+    /// Ship that released (or lost) the tackle.
+    pub by      : ShipId,
+    pub tick    : Tick,
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

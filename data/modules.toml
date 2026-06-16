@@ -3,7 +3,7 @@
 #
 # Loaded at server startup. No rebuild needed to adjust values.
 #
-# kind: "Weapon" | "ShieldBooster" | "ArmorRepairer" | "Propulsion" | "Sensor" | "Rig"
+# kind: "Weapon" | "ShieldBooster" | "ArmorRepairer" | "Propulsion" | "Sensor" | "Rig" | "Tackle"
 # slot: "High" | "Mid" | "Low" | "Rig"
 # activation_mode: "Active" | "Passive"
 #
@@ -197,3 +197,19 @@ activation_mode = "Passive"
 [modules.stat_delta]
 lock_time_add = -1
 max_locks_add = 2
+
+# ── Tackle (Mid / Active) ────────────────────────────────────
+
+[[modules]]
+id                 = 12
+name               = "Fold Disruptor I"
+kind               = "Tackle"
+slot               = "Mid"
+activation_mode    = "Active"
+cap_cost_per_cycle = 30.0   # 3 GJ/tick — low drain; requires only a lock, not sustained fire
+cycle_time_ticks   = 10
+
+[modules.stat_delta]
+# Adds 20,000 units (20 km) of tackle range when active (ADR-0024).
+# Target must be locked and within range to be held.
+tackle_range_add = 20000.0

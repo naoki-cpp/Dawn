@@ -53,6 +53,17 @@ impl WarpComp {
     }
 }
 
+/// Ships currently tackling this ship (ADR-0024).
+///
+/// A ship is tackled while this component exists and `tacklers` is non-empty.
+/// Tackled ships cannot warp or jump. Unlike `WarpComp`/`ApproachComp`, this
+/// IS persisted in `ShipSnapshot` because losing tackle state on restart would
+/// allow the tackled ship to escape.
+#[derive(Debug, Clone)]
+pub struct TackledComp {
+    pub tacklers: Vec<dawn_core::ShipId>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct PositionComp(pub Position);
 
@@ -118,6 +129,11 @@ pub struct ShipStatsComp {
     pub cap_max              : f32,
     /// Capacitor regenerated per tick (GJ/tick).
     pub cap_recharge_per_tick: f32,
+
+    // ── Tackle ────────────────────────────────────────────────────────────────
+    /// Effective tackle range (units) after summing active Tackle module deltas.
+    /// Zero means this ship has no tackle capability (ADR-0024).
+    pub tackle_range         : f32,
 }
 
 impl ShipStatsComp {
@@ -140,6 +156,7 @@ impl ShipStatsComp {
         max_locks            : 1,
         cap_max              : 300.0,
         cap_recharge_per_tick: 6.0,
+        tackle_range         : 0.0,
     };
 
     /// Fallback player default (tests and missing ship-type registry).
@@ -160,6 +177,7 @@ impl ShipStatsComp {
         max_locks            : 2,
         cap_max              : 500.0,
         cap_recharge_per_tick: 10.0,
+        tackle_range         : 0.0,
     };
 
     /// Build from `ShipBaseStats` (weapon stats start at zero).
@@ -182,6 +200,7 @@ impl ShipStatsComp {
             max_locks            : base.max_locks,
             cap_max              : base.cap_max,
             cap_recharge_per_tick: base.cap_recharge_per_tick,
+            tackle_range         : 0.0,
         }
     }
 }

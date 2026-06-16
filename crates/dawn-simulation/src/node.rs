@@ -23,7 +23,7 @@ use dawn_core::{
     SectorBounds, SectorId, ShipId, Tick, Velocity,
 };
 use dawn_ecs::{
-    components::{ApproachComp, CapacitorComp, FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp, WarpComp, WarpPhase},
+    components::{ApproachComp, CapacitorComp, FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, TackledComp, ThrustComp, VelocityComp, WarpComp, WarpPhase},
     systems::{CapacitorSystem, CombatSystem, LockSystem, MovementSystem, apply_fitting},
     Entity, SimWorld,
 };
@@ -374,6 +374,10 @@ impl<S: EventStore> SimulationNode<S> {
         if self.world.transit_state(entity).is_in_transit() {
             return false;
         }
+        // Tackled ships cannot jump (ADR-0024).
+        if self.world.inner().get::<&TackledComp>(entity).is_ok() {
+            return false;
+        }
         let Some(gate) = self.jump_gates.get(&gate_id) else { return false };
         let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
         gate.is_in_range(pos.0)
@@ -383,10 +387,9 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Whether a `WarpCommand` for `ship_id` toward `gate_id` would currently be
     /// accepted (INV-006 Validation, before attaching `WarpComp`):
-    /// the Ship exists, is not in transit, is not already warping, the gate
-    /// originates in this Sector, and the gate is at least `MIN_WARP_DISTANCE`
-    /// away (closer than that → use approach instead). The tackle check
-    /// (ADR-0023) will be added here.
+    /// the Ship exists, is not in transit, is not already warping, not tackled,
+    /// the gate originates in this Sector, and the gate is at least
+    /// `MIN_WARP_DISTANCE` away (closer than that → use approach instead).
     pub fn can_propose_warp(&self, ship_id: ShipId, gate_id: JumpGateId) -> bool {
         let Some(&entity) = self.ship_index.get(&ship_id) else { return false };
         if self.world.transit_state(entity).is_in_transit() {
@@ -394,6 +397,10 @@ impl<S: EventStore> SimulationNode<S> {
         }
         if self.world.inner().get::<&WarpComp>(entity).is_ok() {
             return false; // already aligning or warping
+        }
+        // Tackled ships cannot warp (ADR-0024).
+        if self.world.inner().get::<&TackledComp>(entity).is_ok() {
+            return false;
         }
         let Some(gate) = self.jump_gates.get(&gate_id) else { return false };
         let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
@@ -455,6 +462,8 @@ impl<S: EventStore> SimulationNode<S> {
             .unwrap_or_else(|_| dawn_core::fitting::FittingSnapshot::empty());
         let ship_type_id = self.ship_type_ids.get(&ship_id).copied().unwrap_or(ShipTypeId(0));
 
+        // Tackle state is not transferred on sector transit (tacklers are in this
+        // sector; they lose the tackle as the ship leaves).
         let snapshot = ShipSnapshot {
             ship_id,
             ship_type_id,
@@ -466,6 +475,7 @@ impl<S: EventStore> SimulationNode<S> {
             is_destroyed,
             capacitor,
             fitting,
+            tackled_by: Vec::new(),
         };
 
         self.ship_index.remove(&ship_id);
@@ -548,6 +558,9 @@ impl<S: EventStore> SimulationNode<S> {
             }
         }
 
+        // 4.5 Tackle System — update TackledComp for active Tackle modules (ADR-0024)
+        let tackle_events = self.process_tackle(tick);
+
         // 5. Lock System — merge human commands with queued bot commands
         let merged_locks: Vec<dawn_core::LockOnCommand> = bot_locks
             .into_iter()
@@ -578,6 +591,7 @@ impl<S: EventStore> SimulationNode<S> {
         let all_events: Vec<DomainEvent> = warp_events.iter()
             .chain(move_events.iter())
             .chain(cap.events.iter())
+            .chain(tackle_events.iter())
             .chain(lock.events.iter())
             .chain(combat.events.iter())
             .cloned()
@@ -612,6 +626,9 @@ impl<S: EventStore> SimulationNode<S> {
                 let fitting = self.world.inner().get::<&FittingComp>(entity)
                     .map(|f| f.to_snapshot())
                     .unwrap_or_else(|_| dawn_core::fitting::FittingSnapshot::empty());
+                let tackled_by = self.world.inner().get::<&TackledComp>(entity)
+                    .map(|t| t.tacklers.clone())
+                    .unwrap_or_default();
                 let ship_type_id = self.ship_type_ids.get(&ship_id).copied().unwrap_or(ShipTypeId(0));
                 Some(ShipSnapshot {
                     ship_id,
@@ -624,6 +641,7 @@ impl<S: EventStore> SimulationNode<S> {
                     is_destroyed  : hull.is_destroyed,
                     capacitor,
                     fitting,
+                    tackled_by,
                 })
             })
             .collect();
@@ -1192,6 +1210,16 @@ impl<S: EventStore> SimulationNode<S> {
                 continue;
             };
 
+            // Tackle interrupts the aligning phase (ADR-0024): a tackled ship
+            // cannot enter warp. Cancel and brake; the Warping phase is committed.
+            if warp.phase == WarpPhase::Aligning
+                && self.world.inner().get::<&TackledComp>(entity).is_ok()
+            {
+                let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
+                self.brake_thrust(entity);
+                continue;
+            }
+
             // Engage warp once aligned: moving at ≥ 75% of max speed toward the
             // gate. While not yet aligned, keep steering/accelerating at it.
             let aligned = max_speed > f32::EPSILON
@@ -1332,6 +1360,138 @@ impl<S: EventStore> SimulationNode<S> {
                 Some((tp, _)) => self.steer_thrust_toward(entity, ship_pos, tp),
             }
         }
+    }
+
+    /// Tackle System — Step 4.5 (after Capacitor, before Lock). ADR-0024.
+    ///
+    /// For each ship that has at least one active Tackle module with a nonzero
+    /// `tackle_range`, check whether its locked targets are within that range.
+    /// - Enter into `TackledComp` if the target is in range and a lock exists.
+    /// - Remove from `TackledComp` if the tackler no longer has a lock on it,
+    ///   the target is out of range, or the tackler itself is destroyed.
+    ///
+    /// Also cleans up `TackledComp` for ships whose tacklers have been destroyed
+    /// (so tackle state always reflects live entities).
+    pub fn process_tackle(&mut self, tick: Tick) -> Vec<DomainEvent> {
+        use dawn_core::fitting::ModuleKind;
+        use dawn_ecs::systems::TackleResult;
+
+        // Collect (tackler_id, entity, tackle_range, locked_targets, position)
+        // from all ships that have at least one active Tackle module.
+        let tacklers: Vec<(ShipId, Entity, f32, Vec<ShipId>, Position)> = self
+            .ship_index
+            .iter()
+            .filter_map(|(&ship_id, &entity)| {
+                let stats = self.world.inner().get::<&ShipStatsComp>(entity).ok()?;
+                if stats.tackle_range <= 0.0 { return None; }
+                // Only if the module is actually active (cap could have killed it).
+                let fitting = self.world.inner().get::<&FittingComp>(entity).ok()?;
+                let has_active_tackle = fitting.high.iter()
+                    .chain(fitting.mid.iter())
+                    .chain(fitting.low.iter())
+                    .chain(fitting.rig.iter())
+                    .any(|s| s.def.kind == ModuleKind::Tackle && s.is_effective());
+                if !has_active_tackle { return None; }
+                let lock = self.world.inner().get::<&LockComp>(entity).ok()?;
+                let locked: Vec<ShipId> = lock.locked_targets().collect();
+                let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+                Some((ship_id, entity, stats.tackle_range, locked, pos))
+            })
+            .collect();
+
+        let mut result = TackleResult::new();
+
+        // Compute which (target, tackler) pairs are in range this tick.
+        let mut active_tackles: Vec<(ShipId, ShipId)> = Vec::new(); // (target, tackler)
+        for (tackler_id, _, tackle_range, locked_targets, tackler_pos) in &tacklers {
+            for &target_id in locked_targets {
+                if let Some(&te) = self.ship_index.get(&target_id) {
+                    if let Ok(tp) = self.world.inner().get::<&PositionComp>(te) {
+                        if tackler_pos.distance(tp.0) <= *tackle_range {
+                            active_tackles.push((target_id, *tackler_id));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Collect live tacklers set for cleanup.
+        let live_tackler_ids: std::collections::HashSet<ShipId> =
+            tacklers.iter().map(|(id, _, _, _, _)| *id).collect();
+
+        // Collect all ships that currently have TackledComp.
+        let currently_tackled: Vec<(ShipId, Entity, Vec<ShipId>)> = self
+            .ship_index
+            .iter()
+            .filter_map(|(&sid, &entity)| {
+                let tackled = self.world.inner().get::<&TackledComp>(entity).ok()?;
+                Some((sid, entity, tackled.tacklers.clone()))
+            })
+            .collect();
+
+        // Pass 1: remove stale tacklers from existing TackledComps.
+        for (target_id, entity, old_tacklers) in currently_tackled {
+            let entity = entity; // copy (Entity: Copy)
+            let stale: Vec<ShipId> = old_tacklers.iter()
+                .filter(|&&tid| {
+                    !live_tackler_ids.contains(&tid)
+                        || !active_tackles.contains(&(target_id, tid))
+                })
+                .copied()
+                .collect();
+
+            for tid in stale {
+                result.push_released(target_id, tid, tick);
+            }
+
+            // Apply releases to the component.
+            let should_remove = {
+                if let Ok(mut tackled) = self.world.inner_mut().get::<&mut TackledComp>(entity) {
+                    tackled.tacklers.retain(|tid| active_tackles.contains(&(target_id, *tid)));
+                    tackled.tacklers.is_empty()
+                } else { false }
+            };
+            if should_remove {
+                let _ = self.world.inner_mut().remove_one::<TackledComp>(entity);
+            }
+        }
+
+        // Pass 2: add new tacklers.
+        let already_tackled_now: Vec<(ShipId, Entity, Vec<ShipId>)> = self
+            .ship_index
+            .iter()
+            .filter_map(|(&sid, &entity)| {
+                let tackled = self.world.inner().get::<&TackledComp>(entity).ok()?;
+                Some((sid, entity, tackled.tacklers.clone()))
+            })
+            .collect();
+
+        for (target_id, tackler_id) in &active_tackles {
+            let already = already_tackled_now.iter()
+                .find(|(sid, _, _)| sid == target_id)
+                .map(|(_, _, tacklers)| tacklers.contains(tackler_id))
+                .unwrap_or(false);
+
+            if !already {
+                result.push_applied(*target_id, *tackler_id, tick);
+
+                if let Some(&entity) = self.ship_index.get(target_id) {
+                    let has_comp = {
+                        if let Ok(mut tackled) = self.world.inner_mut().get::<&mut TackledComp>(entity) {
+                            if !tackled.tacklers.contains(tackler_id) {
+                                tackled.tacklers.push(*tackler_id);
+                            }
+                            true
+                        } else { false }
+                    };
+                    if !has_comp {
+                        let _ = self.world.inner_mut().insert_one(entity, TackledComp { tacklers: vec![*tackler_id] });
+                    }
+                }
+            }
+        }
+
+        result.events
     }
 
     /// Return the player ship's fitting state as a PlayerFitting JSON message.
@@ -1623,6 +1783,10 @@ impl<S: EventStore> SimulationNode<S> {
             if let Some(cap) = ship.capacitor {
                 let _ = self.world.inner_mut().insert_one(entity, CapacitorComp { current: cap });
             }
+
+            if !ship.tackled_by.is_empty() {
+                let _ = self.world.inner_mut().insert_one(entity, TackledComp { tacklers: ship.tackled_by.clone() });
+            }
         }
     }
 
@@ -1775,6 +1939,38 @@ impl<S: EventStore> SimulationNode<S> {
             // Replay is added when the Jump pipeline is wired in dawn-simulation.
             DomainEvent::JumpGateUsed(_)
             | DomainEvent::StarSystemChanged(_) => {}
+
+            // Tackle (ADR-0024): TackledComp is managed live; on replay, apply
+            // the same add/remove logic to keep the component consistent.
+            DomainEvent::TackleApplied(e) => {
+                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                    let has_comp = {
+                        if let Ok(mut tackled) = self.world.inner_mut().get::<&mut TackledComp>(entity) {
+                            if !tackled.tacklers.contains(&e.by) {
+                                tackled.tacklers.push(e.by);
+                            }
+                            true
+                        } else { false }
+                    };
+                    if !has_comp {
+                        let _ = self.world.inner_mut().insert_one(entity, TackledComp { tacklers: vec![e.by] });
+                    }
+                }
+            }
+
+            DomainEvent::TackleReleased(e) => {
+                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                    let should_remove = {
+                        if let Ok(mut tackled) = self.world.inner_mut().get::<&mut TackledComp>(entity) {
+                            tackled.tacklers.retain(|&id| id != e.by);
+                            tackled.tacklers.is_empty()
+                        } else { false }
+                    };
+                    if should_remove {
+                        let _ = self.world.inner_mut().remove_one::<TackledComp>(entity);
+                    }
+                }
+            }
         }
     }
 }
@@ -2994,5 +3190,151 @@ mod tests {
         }));
         assert_eq!(node.ship_count(), 0);
         assert!(!node.at_population_cap());
+    }
+
+    // ── Tackle System (ADR-0024) ──────────────────────────────────────────────
+
+    fn fit_fold_disruptor(node: &mut SimulationNode, ship_id: ShipId) {
+        use dawn_core::{FitModuleCommand, SlotKind};
+        use crate::modules::MODULE_FOLD_DISRUPTOR;
+        node.fit_module(FitModuleCommand {
+            ship_id,
+            slot     : SlotKind::Mid,
+            module_id: MODULE_FOLD_DISRUPTOR,
+        });
+    }
+
+    #[test]
+    fn tackled_ship_cannot_warp() {
+        use dawn_core::{LockOnCommand, ActivateModuleCommand, SlotKind};
+        use crate::modules::MODULE_FOLD_DISRUPTOR;
+
+        let mut node = node_with_modules();
+
+        // Spawn two ships near each other (within 20 km tackle range).
+        let ship_a = {
+            let id = node.next_player_id();
+            node.spawn_player_ship_at_pub(id, Position::new(0.0, 0.0, 0.0))
+        };
+        let ship_b = {
+            let id = node.next_player_id();
+            node.spawn_player_ship_at_pub(id, Position::new(1000.0, 0.0, 0.0))
+        };
+
+        // Ship A fits and activates the Fold Disruptor.
+        fit_fold_disruptor(&mut node, ship_a);
+        let owner_a = node.ship_owners.get(&ship_a).copied().unwrap();
+        node.activate_module_owned(owner_a, ActivateModuleCommand {
+            ship_id  : ship_a,
+            module_id: MODULE_FOLD_DISRUPTOR,
+            slot     : SlotKind::Mid,
+        });
+
+        // Ship A locks Ship B.
+        let lock_cmd = LockOnCommand { ship_id: ship_a, target_id: ship_b };
+
+        // Run until lock resolves and tackle applies (lock_time is at least 1 tick).
+        for _ in 0..10 {
+            node.tick_with_lock_commands(&[lock_cmd.clone()]);
+        }
+
+        // Ship B should now be tackled → warp must be denied.
+        let gate_id = node.jump_gates.keys().next().copied().unwrap();
+        assert!(!node.can_propose_warp(ship_b, gate_id),
+            "tackled ship must not be allowed to warp");
+        assert!(!node.can_propose_jump(ship_b, gate_id),
+            "tackled ship must not be allowed to jump");
+    }
+
+    #[test]
+    fn tackle_releases_when_tackler_dies() {
+        use dawn_core::{LockOnCommand, ActivateModuleCommand, SlotKind};
+        use crate::modules::MODULE_FOLD_DISRUPTOR;
+
+        let mut node = node_with_modules();
+
+        let ship_a = {
+            let id = node.next_player_id();
+            node.spawn_player_ship_at_pub(id, Position::new(0.0, 0.0, 0.0))
+        };
+        let ship_b = {
+            let id = node.next_player_id();
+            node.spawn_player_ship_at_pub(id, Position::new(1000.0, 0.0, 0.0))
+        };
+
+        fit_fold_disruptor(&mut node, ship_a);
+        let owner_a = node.ship_owners.get(&ship_a).copied().unwrap();
+        node.activate_module_owned(owner_a, ActivateModuleCommand {
+            ship_id  : ship_a,
+            module_id: MODULE_FOLD_DISRUPTOR,
+            slot     : SlotKind::Mid,
+        });
+
+        let lock_cmd = LockOnCommand { ship_id: ship_a, target_id: ship_b };
+        for _ in 0..10 {
+            node.tick_with_lock_commands(&[lock_cmd.clone()]);
+        }
+
+        let gate_id = node.jump_gates.keys().next().copied().unwrap();
+        assert!(!node.can_propose_warp(ship_b, gate_id), "should be tackled first");
+
+        // Destroy the tackler: it should no longer appear in live_tackler_ids
+        // → tackle releases on the next process_tackle call.
+        node.apply_event_pub(DomainEvent::ShipDestroyed(dawn_core::events::ShipDestroyed {
+            ship_id  : ship_a,
+            killer_id: ship_b,
+            tick     : node.current_tick(),
+        }));
+        node.tick_with_lock_commands(&[]);
+
+        assert!(node.can_propose_warp(ship_b, gate_id),
+            "tackle should release when the tackler ship is destroyed");
+    }
+
+    #[test]
+    fn tackle_snapshot_round_trip_preserves_tackle_state() {
+        use dawn_core::{LockOnCommand, ActivateModuleCommand, SlotKind};
+        use crate::modules::MODULE_FOLD_DISRUPTOR;
+
+        let mut node = node_with_modules();
+
+        let ship_a = {
+            let id = node.next_player_id();
+            node.spawn_player_ship_at_pub(id, Position::new(0.0, 0.0, 0.0))
+        };
+        let ship_b = {
+            let id = node.next_player_id();
+            node.spawn_player_ship_at_pub(id, Position::new(1000.0, 0.0, 0.0))
+        };
+
+        fit_fold_disruptor(&mut node, ship_a);
+        let owner_a = node.ship_owners.get(&ship_a).copied().unwrap();
+        node.activate_module_owned(owner_a, ActivateModuleCommand {
+            ship_id  : ship_a,
+            module_id: MODULE_FOLD_DISRUPTOR,
+            slot     : SlotKind::Mid,
+        });
+
+        let lock_cmd = LockOnCommand { ship_id: ship_a, target_id: ship_b };
+        for _ in 0..10 {
+            node.tick_with_lock_commands(&[lock_cmd.clone()]);
+        }
+
+        let gate_id = node.jump_gates.keys().next().copied().unwrap();
+        assert!(!node.can_propose_warp(ship_b, gate_id), "should be tackled before snapshot");
+
+        // Take snapshot and verify the tackled_by field is populated.
+        let snapshot = node.take_snapshot();
+        let ship_b_snap = snapshot.ships.iter().find(|s| s.ship_id == ship_b).unwrap();
+        assert!(ship_b_snap.tackled_by.contains(&ship_a),
+            "snapshot must record the tackler");
+
+        // Restore and verify tackle is still in effect.
+        let store2 = dawn_event_store::InMemoryEventStore::new();
+        let modules: Vec<_> = crate::modules::all_modules();
+        let ship_types: Vec<_> = crate::ship_types::all_ship_types();
+        let node2 = SimulationNode::restore_from(store2, &snapshot, &modules, &ship_types);
+        assert!(!node2.can_propose_warp(ship_b, gate_id),
+            "restored node must still prevent tackled ship from warping");
     }
 }

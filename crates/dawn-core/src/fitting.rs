@@ -49,6 +49,9 @@ pub enum ModuleKind {
     Sensor,
     /// リグ（Rig スロット）
     Rig,
+    /// Fold Disruptor — prevents tackled ship from warping or jumping (ADR-0024).
+    /// High slot, active. tackle_range_add in StatDelta determines effective range.
+    Tackle,
 }
 
 // ── 活性化モード ──────────────────────────────────────────────────────────────
@@ -108,6 +111,9 @@ pub struct StatDelta {
     pub cap_max_add          : f32,
     /// Bonus to capacitor recharge rate (GJ/tick).
     pub cap_recharge_add     : f32,
+    /// Tackle range added by this module (units). 0 = no tackle capability.
+    /// Summed across all active Tackle modules (ADR-0024).
+    pub tackle_range_add     : f32,
 }
 
 impl StatDelta {
@@ -127,6 +133,7 @@ impl StatDelta {
         max_locks_add       : 0,
         cap_max_add         : 0.0,
         cap_recharge_add    : 0.0,
+        tackle_range_add    : 0.0,
     };
 
     /// Combine two deltas. Additive fields sum; speed_multiplier multiplies.
@@ -148,6 +155,7 @@ impl StatDelta {
             max_locks_add       : self.max_locks_add       + other.max_locks_add,
             cap_max_add         : self.cap_max_add         + other.cap_max_add,
             cap_recharge_add    : self.cap_recharge_add    + other.cap_recharge_add,
+            tackle_range_add    : self.tackle_range_add    + other.tackle_range_add,
         }
     }
 }
@@ -229,6 +237,7 @@ mod tests {
             max_locks_add       : 1,
             cap_max_add         : 0.0,
             cap_recharge_add    : 0.0,
+            tackle_range_add    : 0.0,
         };
         let result = base.add(&StatDelta::ZERO);
         assert_eq!(result, base);

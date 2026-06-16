@@ -116,8 +116,10 @@ fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
             tick     : e.tick.value(),
         },
         // The following are not used by client-side state management.
-        DomainEvent::ShipFitted(_)  => return None,
-        DomainEvent::WeaponFired(_) => return None,
+        DomainEvent::ShipFitted(_)       => return None,
+        DomainEvent::WeaponFired(_)      => return None,
+        DomainEvent::TackleApplied(_)    => return None,
+        DomainEvent::TackleReleased(_)   => return None,
         // Sector Transit is an internal node-ownership event; not sent to clients (ADR-0014).
         DomainEvent::SectorTransitRequested(_) => return None,
         DomainEvent::SectorTransitCompleted(_) => return None,

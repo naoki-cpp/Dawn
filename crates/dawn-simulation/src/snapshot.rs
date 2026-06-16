@@ -58,6 +58,10 @@ pub struct ShipSnapshot {
     pub capacitor   : Option<f32>,
     /// Fitted modules (High/Mid/Low/Rig) and their on/off state.
     pub fitting     : FittingSnapshot,
+    /// Ships currently tackling this ship (ADR-0024). Persisted so tackle
+    /// state is not lost on restart (which would allow escape).
+    #[serde(default)]
+    pub tackled_by  : Vec<dawn_core::ShipId>,
 }
 
 // ── Node-level snapshot ───────────────────────────────────────────────────────
@@ -129,6 +133,7 @@ mod tests {
                     is_destroyed  : false,
                     capacitor     : Some(250.0),
                     fitting       : FittingSnapshot::empty(),
+                    tackled_by    : vec![],
                 },
             ],
         }
