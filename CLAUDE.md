@@ -628,6 +628,12 @@ pub type Tick = u64;
        cycle_remaining > 0  → デクリメント
        武器モジュールのサイクル開始 → weapon_cycles_started に ship_id を追加
        → 生成: Vec<ModuleDeactivated>（cap 枯渇時のみ）
+  4.5 Tackle System を実行する            ← Capacitor の後・Lock の前（ADR-0024）
+       アクティブな Tackle モジュール（ModuleKind::Tackle、cap ON）を持つ Ship のみ tackler。
+       ロック済みターゲットが tackle_range 以内にいれば TackledComp に tackler を追加。
+       射程外・ロック消失・tackler 破壊の場合は tackler を除去して TackleReleased を発行。
+       TackledComp を持つ Ship は can_propose_warp / can_propose_jump が false を返す。
+       → 生成: Vec<TackleApplied | TackleReleased>（process_tackle() — HashMap desired-state diff）
   5. Lock System を実行する                ← Capacitor の後（位置確定後）
   6. Combat System を実行する              ← Lock の後（Locked 状態を参照）
        weapon_cycles_started に含まれる Ship のみ発射判定（ADR-0012）
