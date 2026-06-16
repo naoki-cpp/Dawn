@@ -1,16 +1,16 @@
 ## main.gd
 ##
-## メインシーンのルートスクリプト。
+## Root script for the main scene.
 ##
 ## Cycle 2:
-##   - 左ドラッグ中はカメラ回転（クリックと区別）
-##   - 左ダブルクリック → MoveCommand（加速度ベクトルを設定）
-##   - 最初の Ship をプレイヤー船に指定 → set_player_ship シグナルをサーバーへ送信
-##   - プレイヤー船はオレンジ色で表示
+##   - Left-drag rotates camera (distinguished from click)
+##   - Left double-click -> MoveCommand (set acceleration vector)
+##   - Designate first Ship as player ship -> send set_player_ship signal to server
+##   - Player ship rendered in orange
 
 extends Node
 
-# ── ノード参照 ────────────────────────────────────────────────────────────────
+# -- Node references ----------------------------------------------------------
 
 @onready var _connection  : Node        = $Connection
 @onready var _ships_root  : Node3D      = $World/Ships
@@ -20,20 +20,20 @@ extends Node
 @onready var _cap_bar     : ProgressBar = $HUD/CapBar
 @onready var _camera      : Camera3D   = $World/Camera3D
 
-# ── 定数 ─────────────────────────────────────────────────────────────────────
+# -- Constants ----------------------------------------------------------------
 
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
-const WORLD_SCALE : float = 0.1   ## サーバー座標 ↔ Godot 座標の変換係数
-const MIN_WARP_DISTANCE : float = 3000.0  ## サーバー単位。これ未満のゲートにはワープ不可（ADR-0022）
-## Display units: 1 server unit = 1 m. Server runs at 10 ticks/sec, so
-## speed in m/s = (units/tick) × TICKS_PER_SECOND. Distances shown in km.
-const TICKS_PER_SECOND : float = 10.0
+const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor
+const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is rejected for gates closer than this (ADR-0022).
+## Unit-to-meter scale: displayed m/s = (units/tick) * METERS_PER_UNIT.
+## Change this one constant to rescale all displayed speeds and distances.
+const METERS_PER_UNIT : float = 1.0
 
-# ── マテリアル ────────────────────────────────────────────────────────────────
+# -- Materials ----------------------------------------------------------------
 
 var _player_material : StandardMaterial3D = null
 
-# ── 内部状態 ─────────────────────────────────────────────────────────────────
+# -- Internal state -----------------------------------------------------------
 
 var _ships                 : Dictionary = {}
 var _player_ship_id        : int        = -1
@@ -62,7 +62,7 @@ var _opponent_ship_ids : Array = []
 ## Duel result overlay label (created dynamically)
 var _duel_result_label : Label = null
 
-## モジュールスロット情報
+## Module slot info
 ## [{slot, index, module_id, name, is_active, is_active_module,
 ##   cap_cost_per_cycle, cycle_time_ticks, cycle_remaining}, ...]
 var _player_modules : Array = []
@@ -80,11 +80,11 @@ var _tactical_overlay : Node3D = null  ## TacticalOverlay node, parented to play
 var _weapon_range     : float  = 0.0   ## optimal range (u), recalculated on fitting change
 var _weapon_falloff   : float  = 0.0   ## falloff range (u)
 
-## ダブルクリック検出用
+## Double-click detection
 var _last_click_time  : float  = -1.0
 var _last_click_pos   : Vector2 = Vector2.ZERO
-const DOUBLE_CLICK_SEC: float  = 0.4   ## この秒数以内の2回クリックをダブルクリックと判定
-const DOUBLE_CLICK_PX : float  = 10.0  ## この画素以内
+const DOUBLE_CLICK_SEC: float  = 0.4   ## Two clicks within this many seconds count as a double-click
+const DOUBLE_CLICK_PX : float  = 10.0  ## Within this many screen pixels
 
 ## Jump Gate navigation (ADR-0009).
 ## Static map data mirroring dawn-simulation/src/star_map.rs.
@@ -98,12 +98,20 @@ const JUMP_GATES := [
 ]
 const STAR_SYSTEM_NAMES := ["Alpha", "Beta", "Gamma"]
 
-var _current_system_name: String = "Alpha"
+var _current_system_name : String = "Alpha"
 var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
 var _jump_notice         : String = ""
 var _jump_notice_timer   : float  = 0.0
+## Pre-computed warp arrival position in server coords.
+## Set at WarpCommand/auto-warp time (ship position is known then); cleared on arrival.
+## Using a pre-computed position avoids relying on the dead-reckoned position (which
+## drifts significantly at warp speed) to determine the snap direction on arrival.
+var _player_warp_snap_pos : Vector3 = Vector3.INF
+## Was the player ship at warp speed last VelocityChanged? Used to detect arrival.
+var _player_was_warping   : bool    = false
+const WARP_SPEED_THRESHOLD : float = 1000.0  ## Server units/tick: above this = warping
 
-# ── ライフサイクル ────────────────────────────────────────────────────────────
+# -- Lifecycle ----------------------------------------------------------------
 
 func _ready() -> void:
 	_connection.event_received.connect(_on_event_received)
@@ -186,7 +194,7 @@ func _update_gate_proximity() -> void:
 			return
 
 func _input(event: InputEvent) -> void:
-	## F1〜F8 でモジュールをオン/オフする
+	## F1-F8 toggle modules on/off
 	if event is InputEventKey and event.pressed and not event.echo:
 		var key: InputEventKey = event as InputEventKey
 		var f_index: int = -1
@@ -202,15 +210,24 @@ func _input(event: InputEvent) -> void:
 		if f_index >= 0:
 			_toggle_module_by_index(f_index)
 			return
-		## S キー → StopCommand（加速度で減速停止）
+		## S key -> StopCommand (decelerate to stop using thrust)
 		if key.keycode == KEY_S and _player_ship_id >= 0:
 			_send_stop_command()
 			return
-		## J キー → JumpCommand（ジャンプゲート近接時のみ有効・ADR-0009）
-		if key.keycode == KEY_J and _player_ship_id >= 0 and _nearby_gate_id >= 0:
-			_connection.send_jump_command(_player_ship_id, _nearby_gate_id)
+		## J key -> JumpCommand.
+		## If already in range, jump immediately. If a gate is selected but out of
+		## range, send JumpCommand anyway -- the server will auto-warp first (ADR-0022).
+		if key.keycode == KEY_J and _player_ship_id >= 0:
+			## Explicit gate selection takes priority over proximity detection.
+			## If no gate is selected, fall back to the gate in range.
+			var jump_gate: int = _selected_gate_id if _selected_gate_id >= 0 else _nearby_gate_id
+			if jump_gate >= 0:
+				_connection.send_jump_command(_player_ship_id, jump_gate)
+				if jump_gate != _nearby_gate_id:
+					## Selected gate is out of range: server auto-warps first.
+					_player_warp_snap_pos = _compute_warp_snap_pos(jump_gate)
 			return
-		## A キー → ApproachCommand（選択した船 / ゲートへ自動接近・ADR-0015）
+		## A key -> ApproachCommand (auto-approach selected ship/gate, ADR-0015)
 		if key.keycode == KEY_A and _player_ship_id >= 0:
 			if _selected_gate_id >= 0:
 				_connection.send_approach_gate_command(_player_ship_id, _selected_gate_id)
@@ -218,11 +235,12 @@ func _input(event: InputEvent) -> void:
 			if _selected_target_id >= 0:
 				_connection.send_approach_command(_player_ship_id, _selected_target_id)
 				return
-		## W キー → WarpCommand（選択したゲートへ短距離 Fold = ワープ・ADR-0022）
+		## W key -> WarpCommand (short-range Fold to selected gate, ADR-0022)
 		if key.keycode == KEY_W and _player_ship_id >= 0 and _selected_gate_id >= 0:
 			_connection.send_warp_command(_player_ship_id, _selected_gate_id)
+			_player_warp_snap_pos = _compute_warp_snap_pos(_selected_gate_id)
 			return
-		## Tab キー → タクティカルオーバーレイ表示切り替え
+		## Tab key -> toggle tactical overlay visibility
 		if key.keycode == KEY_TAB:
 			if _tactical_overlay != null:
 				(_tactical_overlay as Node3D).call("toggle_visible")
@@ -245,10 +263,10 @@ func _input(event: InputEvent) -> void:
 							if hit_gate >= 0:
 								_select_approach_gate(hit_gate)
 				MOUSE_BUTTON_RIGHT:
-					## 右クリック → ロックオン対象を選択
+					## Right-click -> select lock-on target
 					_try_lock_on(mb.position)
 
-# ── ダブルクリック判定 ────────────────────────────────────────────────────────
+# -- Double-click detection ---------------------------------------------------
 
 ## Returns true when this click was consumed as a double-click (a move was
 ## issued, or suppressed only because the camera was dragging). The caller
@@ -269,7 +287,7 @@ func _check_double_click(pos: Vector2) -> bool:
 	_last_click_pos  = pos
 	return false
 
-# ── 船のピック（クリック位置 → 最寄りの船 ID）────────────────────────────────
+# -- Ship picking (screen position -> nearest ship ID) ------------------------
 
 ## Returns the ship_id whose node is closest to the click ray (within 500
 ## Godot units), excluding the player's own ship. -1 if nothing is hit.
@@ -292,7 +310,7 @@ func _pick_ship_at(screen_pos: Vector2) -> int:
 			closest_id   = ship_id
 	return closest_id
 
-# ── 左クリック → 接近対象の選択（ADR-0015）──────────────────────────────────
+# -- Left-click -> select approach target (ADR-0015) -------------------------
 
 ## Select a ship as the Approach target. Press A to start approaching it.
 func _select_approach_target(target_id: int) -> void:
@@ -315,7 +333,7 @@ func _pick_gate_at(screen_pos: Vector2) -> int:
 		if (g.get("from_system", "") as String) != _current_system_name:
 			continue
 		var gpos_server: Vector3 = g.get("position", Vector3.ZERO) as Vector3
-		## サーバー座標 → Godot 座標（Z 反転・スケール）
+		## Server coords -> Godot coords (Z flip + scale)
 		var p: Vector3 = Vector3(gpos_server.x, gpos_server.y, -gpos_server.z) * WORLD_SCALE
 		var t: float   = (p - from).dot(dir)
 		var closest_pt: Vector3 = from + dir * t
@@ -342,11 +360,11 @@ func _selected_gate_distance() -> float:
 		if (g.get("gate_id", -1) as int) != _selected_gate_id:
 			continue
 		var gpos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
-		## Godot Z は反転しているが、距離計算はサーバー座標系で行う。
+		## Godot Z is flipped; compute distance in server coordinate space.
 		return Vector3(ship_pos.x, ship_pos.y, -ship_pos.z).distance_to(gpos)
 	return -1.0
 
-# ── 右クリック → LockOnCommand ───────────────────────────────────────────────
+# -- Right-click -> LockOnCommand ---------------------------------------------
 
 func _try_lock_on(screen_pos: Vector2) -> void:
 	if _player_ship_id < 0:
@@ -354,30 +372,30 @@ func _try_lock_on(screen_pos: Vector2) -> void:
 
 	var closest_id: int = _pick_ship_at(screen_pos)
 	if closest_id >= 0:
-		## 前のロック対象をクリア
+		## Clear previous lock target
 		if _player_lock_target >= 0 and _ships.has(_player_lock_target):
 			(_ships[_player_lock_target] as Node3D).call("set_lock_state", "none")
 		_player_lock_target = closest_id
 		_connection.send_lock_on_command(_player_ship_id, closest_id)
-		## ロック中（Locking）状態をセット + フラッシュ
+		## Set Locking state and flash indicator
 		if _ships.has(closest_id):
 			(_ships[closest_id] as Node3D).call("set_lock_state", "locking")
 			(_ships[closest_id] as Node3D).call("flash_lock_indicator")
 
-# ── ダブルクリック → MoveCommand ──────────────────────────────────────────────
+# -- Double-click -> MoveCommand ----------------------------------------------
 
 func _on_double_click(screen_pos: Vector2) -> void:
 	if _player_ship_id < 0:
 		return
 
-	## カメラレイの方向 = そのまま推力方向として使う（3D対応）
+	## Camera ray direction used directly as thrust direction (3D)
 	var ray_dir: Vector3 = _camera.project_ray_normal(screen_pos)
 
-	## Godot 座標系 → サーバー座標系の方向変換（Z反転のみ。スケールは正規化されるので不要）
-	## Godot: (x, y, -z) = server (x, y, z) → 方向の場合: (dx, dy, -dz)
+	## Direction transform from Godot to server space (Z flip only; scale cancels on normalize)
+	## Godot (x, y, -z) == server (x, y, z); for directions: (dx, dy, -dz)
 	var server_dir: Vector3 = Vector3(ray_dir.x, ray_dir.y, -ray_dir.z)
 
-	## プレイヤー船のサーバー座標を推定（Godot 上の lerp 済み位置から逆算）
+	## Estimate player ship position in server space (back-calculated from lerped Godot position)
 	var ship_godot_pos: Vector3 = Vector3.ZERO
 	if _ships.has(_player_ship_id):
 		ship_godot_pos = (_ships[_player_ship_id] as Node3D).global_position
@@ -387,15 +405,15 @@ func _on_double_click(screen_pos: Vector2) -> void:
 		-ship_godot_pos.z / WORLD_SCALE,
 	)
 
-	## 目標を十分遠い点に設定 → サーバーは normalize(target - ship) ≈ server_dir として扱う
+	## Set target far away so server treats normalize(target - ship) as server_dir
 	var target: Vector3 = ship_server_pos + server_dir * 1_000_000.0
 	_connection.send_move_command(_player_ship_id, target)
 
-	## 推力矢印をプレイヤー船に表示（ray_dir は Godot 座標系のまま渡す）
+	## Show thrust arrow on player ship (ray_dir stays in Godot space)
 	if _ships.has(_player_ship_id):
 		(_ships[_player_ship_id] as Node3D).call("set_thrust_direction", ray_dir)
 
-# ── S キー → StopCommand ─────────────────────────────────────────────────────
+# -- S key -> StopCommand -----------------------------------------------------
 
 func _send_stop_command() -> void:
 	if _player_ship_id < 0:
@@ -405,7 +423,7 @@ func _send_stop_command() -> void:
 	if _ships.has(_player_ship_id):
 		(_ships[_player_ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
 
-# ── イベントハンドラ ──────────────────────────────────────────────────────────
+# -- Event handlers -----------------------------------------------------------
 
 func _on_event_received(payload: Dictionary) -> void:
 	_event_count += 1
@@ -423,9 +441,9 @@ func _on_event_received(payload: Dictionary) -> void:
 		"AoiEnter"          : _handle_aoi_enter(payload)
 		"AoiLeave"          : _handle_aoi_leave(payload)
 
-# ── ジャンプゲート（ADR-0009）─────────────────────────────────────────────────
+# -- Jump Gate (ADR-0009) -----------------------------------------------------
 
-## Ship がジャンプゲートを通過した — entry_pos へ瞬間移動する。
+## Ship passed through a Jump Gate -- teleport to entry_pos.
 func _handle_jump_gate_used(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	if not _ships.has(ship_id):
@@ -442,7 +460,7 @@ func _handle_jump_gate_used(p: Dictionary) -> void:
 		_jump_notice       = "Jumped via Gate #%d" % (p.get("gate_id", 0) as int)
 		_jump_notice_timer = 3.0
 
-## Ship が別の星系に移動した — HUD に通知を表示する。
+## Ship moved to a different star system -- show HUD notification.
 func _handle_star_system_changed(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	var to_system: int = p.get("to_system", 0) as int
@@ -457,15 +475,15 @@ func _on_connection_changed(connected: bool) -> void:
 	if not connected:
 		_clear_all_ships()
 
-## Welcome 受信: player_id / ship_id を記録するだけ。
-## 船ノードの生成は直後の InitialState で行う。
+## Welcome received: just record player_id / ship_id.
+## Ship nodes are spawned by the subsequent InitialState.
 func _on_welcomed(_p_player_id: int, _p_ship_id: int) -> void:
-	pass  ## connection.gd の ship_id / player_id プロパティに値が入っている
+	pass  ## connection.gd ship_id / player_id properties are already populated
 
-## InitialState 受信: 全船ノードをここで一括 spawn する。
-## Phase 5 では ShipSpawned イベントは送信されないためこちらが初期化を担う。
+## InitialState received: spawn all ship nodes in one pass.
+## ShipSpawned events are not sent in Phase 5; InitialState handles initialization.
 func _on_initial_state(ships: Array) -> void:
-	_clear_all_ships()  ## 再接続時に備えてリセット
+	_clear_all_ships()  ## Reset on reconnect
 	_hide_duel_result()
 
 	for ship_data: Variant in ships:
@@ -485,14 +503,13 @@ func _spawn_ship_from_data(d: Dictionary) -> void:
 		(pos_dict.get("z", 0.0) as float),
 	)
 
-	## 船ノードを生成
+	## Instantiate ship node
 	var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
 	_ships_root.add_child(ship)
 	ship.call("initialize", sid, pos)
 	ship.name = "Ship_%d" % sid
 	_ships[sid] = ship
 
-	## 自分の船かどうか確認
 	## Record HP for every ship
 	var sh: float = d.get("current_shield", d.get("max_shield", 200.0) as float) as float
 	var ar: float = d.get("current_armor",  d.get("max_armor",  150.0) as float) as float
@@ -517,13 +534,13 @@ func _spawn_ship_from_data(d: Dictionary) -> void:
 		if sid not in _opponent_ship_ids:
 			_opponent_ship_ids.append(sid)
 
-## AoI: a ship entered the player's neighborhood — materialize it (ADR-0019).
+## AoI: a ship entered the player's neighborhood -- materialize it (ADR-0019).
 func _handle_aoi_enter(p: Dictionary) -> void:
 	var ship: Dictionary = p.get("ship", {}) as Dictionary
 	if not ship.is_empty():
 		_spawn_ship_from_data(ship)
 
-## AoI: a ship left the player's neighborhood — remove it locally with no death
+## AoI: a ship left the player's neighborhood -- remove it locally with no death
 ## effect (it is still alive elsewhere, just out of view / ADR-0019).
 func _handle_aoi_leave(p: Dictionary) -> void:
 	var sid: int = p.get("ship_id", 0) as int
@@ -564,7 +581,7 @@ func _recalc_weapon_range() -> void:
 func _update_tactical_overlay() -> void:
 	if _tactical_overlay == null:
 		return
-	## Convert server units → Godot units before passing to the overlay.
+	## Convert server units -> Godot units before passing to the overlay.
 	## weapon_range/_falloff are in server coordinate units; the overlay lives
 	## in Godot world space which is scaled by WORLD_SCALE (0.1).
 	_tactical_overlay.call("set_ranges",
@@ -602,12 +619,12 @@ func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> 
 func _toggle_module_by_index(f_index: int) -> void:
 	if _player_ship_id < 0:
 		return
-	## F1〜F8 は Active モジュール（High/Mid 等）の index 0〜7 に対応
+	## F1-F8 map to active module indices 0-7 (High/Mid slots)
 	var active_count: int = 0
 	for m: Variant in _player_modules:
 		var mod_dict: Dictionary = m as Dictionary
 		if mod_dict.get("is_active_module", false) as bool == false:
-			continue  ## Passive はスキップ
+			continue  ## Skip Passive modules
 		if active_count == f_index:
 			var mid : int    = mod_dict.get("module_id", 0)   as int
 			var slot: String = mod_dict.get("slot",      "")  as String
@@ -634,7 +651,7 @@ func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 		ship.add_child(_tactical_overlay)
 		_update_tactical_overlay()
 
-# ── ドメインイベント処理 ──────────────────────────────────────────────────────
+# -- Domain event handlers ----------------------------------------------------
 
 func _handle_ship_spawned(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
@@ -654,7 +671,7 @@ func _handle_ship_spawned(p: Dictionary) -> void:
 	ship.name = "Ship_%d" % ship_id
 	_ships[ship_id] = ship
 
-	## Welcome で通知されたプレイヤー船 ID と一致すれば自分の船として設定
+	## If this ship matches the player_id from Welcome, set it as the player ship
 	if ship_id == _connection.ship_id and _player_ship_id < 0:
 		_set_as_player_ship(ship_id, ship)
 
@@ -664,7 +681,6 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 		return
 
 	var vel_dict: Dictionary = p.get("velocity", {}) as Dictionary
-	## サーバー座標系 → Godot 座標系（Z 反転）
 	var server_vel := Vector3(
 		(vel_dict.get("dx", 0.0) as float),
 		(vel_dict.get("dy", 0.0) as float),
@@ -672,11 +688,44 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 	)
 	(_ships[ship_id] as Node3D).call("set_velocity", server_vel)
 
+	## Detect warp arrival and snap position to correct dead-reckoning drift.
+	## Warp speed (~5000 u/tick) accumulates large position errors; snap the
+	## Godot node to the pre-computed arrival position (set at warp-start time).
+	if ship_id == _player_ship_id and _player_warp_snap_pos != Vector3.INF:
+		var speed: float = server_vel.length()
+		if _player_was_warping and speed < 1.0:
+			(_ships[ship_id] as Node3D).call("update_target", _player_warp_snap_pos)
+			_player_warp_snap_pos = Vector3.INF
+		_player_was_warping = speed >= WARP_SPEED_THRESHOLD
+
 	var tick: int = p.get("tick", 0) as int
 	if tick > _current_tick:
 		var ticks_elapsed: int = tick - _current_tick
 		_current_tick = tick
 		_simulate_cap(ticks_elapsed)
+
+## Pre-compute the warp arrival position in server coords at command-send time.
+## Uses the ship's actual position (known at command time, not drifted) to
+## determine the approach direction, then places the snap point at 75% of the
+## gate's activation radius — safely within jump range (activation_radius = 2000).
+func _compute_warp_snap_pos(gate_id: int) -> Vector3:
+	if not _ships.has(_player_ship_id):
+		return Vector3.INF
+	var target_gate: Dictionary = {}
+	for g: Variant in JUMP_GATES:
+		if (g as Dictionary).get("gate_id", -1) as int == gate_id:
+			target_gate = g as Dictionary
+			break
+	if target_gate.is_empty():
+		return Vector3.INF
+	var gate_pos    : Vector3 = target_gate.get("position", Vector3.ZERO) as Vector3
+	var activation_r: float   = target_gate.get("activation_radius", 2000.0) as float
+	var ship_node   : Node3D  = _ships[_player_ship_id] as Node3D
+	var gdot        : Vector3 = ship_node.global_position
+	var ship_server_pos := Vector3(gdot.x / WORLD_SCALE, gdot.y / WORLD_SCALE, -gdot.z / WORLD_SCALE)
+	var dir: Vector3 = ship_server_pos - gate_pos
+	dir = dir.normalized() if dir.length() > 0.001 else Vector3(-1.0, 0.0, 0.0)
+	return gate_pos + dir * activation_r * 0.75
 
 func _handle_ship_despawned(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
@@ -726,19 +775,19 @@ func _handle_ship_destroyed(p: Dictionary) -> void:
 	elif ship_id in _opponent_ship_ids:
 		_opponent_ship_ids.erase(ship_id)
 		_show_duel_result(true)   ## VICTORY
-	## 破壊されたターゲットをロック中だった場合はクリア
+	## Clear lock target if it was just destroyed
 	if ship_id == _player_lock_target:
 		_player_lock_target = -1
 
 func _handle_target_locked(p: Dictionary) -> void:
 	var locker_id: int = p.get("locker_id", 0) as int
 	var target_id: int = p.get("target_id", 0) as int
-	## プレイヤーがロック完了した場合
+	## Player completed a lock
 	if locker_id == _player_ship_id:
 		_player_lock_target = target_id
 		if _ships.has(target_id):
 			(_ships[target_id] as Node3D).call("set_lock_state", "locked")
-	## 他の船からロックされた場合（視覚的に表示しない）
+	## Locked by another ship (no visual indicator)
 
 func _handle_lock_lost(p: Dictionary) -> void:
 	var locker_id: int = p.get("locker_id", 0) as int
@@ -749,7 +798,7 @@ func _handle_lock_lost(p: Dictionary) -> void:
 		if target_id == _player_lock_target:
 			_player_lock_target = -1
 
-# ── HUD ───────────────────────────────────────────────────────────────────────
+# -- HUD ----------------------------------------------------------------------
 
 func _update_hud() -> void:
 	var status: String = "ONLINE" if _connection.is_connected_to_server() else "CONNECTING..."
@@ -757,8 +806,7 @@ func _update_hud() -> void:
 	var speed_str: String = "-"
 	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
 		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
-		## 1 server unit = 1 m, tick = 100 ms → m/s = u/tick × 10
-		speed_str = "%d m/s" % int(spd * TICKS_PER_SECOND)
+		speed_str = "%d m/s" % int(spd * METERS_PER_UNIT)
 
 	var hp_str: String
 	if _player_ship_id < 0:
@@ -774,13 +822,13 @@ func _update_hud() -> void:
 	if _player_lock_target < 0:
 		lock_str = "-"
 	elif _ships.has(_player_lock_target):
-		lock_str = "→ #%d" % _player_lock_target
-		## Distance to target in km (1 server unit = 1 m).
+		lock_str = "-> #%d" % _player_lock_target
+		## Distance to target in km.
 		if _player_ship_id >= 0 and _ships.has(_player_ship_id):
 			var p_node: Node3D = _ships[_player_ship_id] as Node3D
 			var t_node: Node3D = _ships[_player_lock_target] as Node3D
 			var dist_m: float = p_node.global_position.distance_to(t_node.global_position) / WORLD_SCALE
-			lock_str += "  %.1f km" % (dist_m / 1000.0)
+			lock_str += "  %.1f km" % (dist_m * METERS_PER_UNIT / 1000.0)
 		## Show target HP if available
 		if _ship_hp.has(_player_lock_target):
 			var t: Dictionary = _ship_hp[_player_lock_target] as Dictionary
@@ -792,7 +840,7 @@ func _update_hud() -> void:
 	else:
 		lock_str = "LOST"
 
-		## Active modules — show ON/OFF and cap-deprived state (F keys)
+		## Active modules -- show ON/OFF and cap-deprived state (F keys)
 	var module_lines: String = ""
 	var f_idx: int = 1
 	for m: Variant in _player_modules:
@@ -839,7 +887,7 @@ func _update_hud() -> void:
 		## Warp is only valid beyond the minimum warp distance (ADR-0022).
 		var gate_dist: float = _selected_gate_distance()
 		if gate_dist >= MIN_WARP_DISTANCE:
-			approach_line += "  [W] Warp"
+			approach_line += "  [W] Warp  [J] Warp+Jump"
 		elif gate_dist >= 0.0:
 			approach_line += "  [W] too close to warp"
 	elif _selected_target_id >= 0:
@@ -850,9 +898,9 @@ func _update_hud() -> void:
 		% [status, ship_name_line, system_line, _ships.size(), _current_tick, speed_str, hp_str, lock_str, approach_line, module_lines, jump_line]
 	)
 
-# ── Capacitor client-side simulation ─────────────────────────────────────────
+# -- Capacitor client-side simulation -----------------------------------------
 
-## Mirror of CapacitorSystem::run() — called once per tick elapsed.
+## Mirror of CapacitorSystem::run() -- called once per tick elapsed.
 ## Keeps cap display in sync without any extra server messages.
 func _simulate_cap(ticks: int) -> void:
 	if _cap_current < 0.0 or _player_ship_id < 0:
@@ -879,13 +927,13 @@ func _simulate_cap(ticks: int) -> void:
 				if cost <= 0.0 or _cap_current >= cost:
 					_cap_current -= cost
 					mod["cycle_remaining"] = cycle_t
-				## If not enough cap, server will emit ModuleDeactivated — skip here.
+				## If not enough cap, server will emit ModuleDeactivated -- skip here.
 			else:
 				mod["cycle_remaining"] = cycle_rem - 1
 
 		_cap_current = maxf(_cap_current, 0.0)
 
-# ── 内部ユーティリティ ────────────────────────────────────────────────────────
+# -- Internal utilities -------------------------------------------------------
 
 func _clear_all_ships() -> void:
 	for ship_node: Node3D in _ships.values():
@@ -906,7 +954,7 @@ func _clear_all_ships() -> void:
 
 func _setup_space_environment() -> void:
 	## Build the procedural space sky at runtime.
-	## WorldEnvironment is created dynamically — no .tscn changes needed.
+	## WorldEnvironment is created dynamically -- no .tscn changes needed.
 	var shader := load("res://shaders/space_sky.gdshader") as Shader
 	if shader == null:
 		push_warning("[Main] space_sky.gdshader not found")
@@ -937,7 +985,7 @@ func _setup_space_environment() -> void:
 	env.tonemap_exposure     = 1.0
 	env.tonemap_white        = 6.0    ## Prevent star bloom clipping
 
-	## Bloom — makes ship emissions and bright stars glow cinematically.
+	## Bloom -- makes ship emissions and bright stars glow cinematically.
 	env.glow_enabled       = true
 	env.glow_normalized    = false
 	env.glow_intensity     = 0.8
@@ -966,7 +1014,7 @@ func _apply_player_material(ship: Node3D) -> void:
 	if hull != null:
 		hull.set_surface_override_material(0, _player_material)
 
-# ── デュエル結果オーバーレイ ──────────────────────────────────────────────────
+# -- Duel result overlay ------------------------------------------------------
 
 func _setup_cap_bar() -> void:
 	## Style the fill portion of the capacitor bar (EVE-style blue).
