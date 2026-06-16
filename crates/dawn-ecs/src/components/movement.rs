@@ -38,8 +38,11 @@ pub enum WarpPhase {
 
 #[derive(Debug, Clone, Copy)]
 pub struct WarpComp {
-    pub gate_id: JumpGateId,
-    pub phase  : WarpPhase,
+    pub gate_id  : JumpGateId,
+    pub phase    : WarpPhase,
+    /// When true, automatically propose a Jump once warp completes and the ship
+    /// arrives within the gate's activation radius.
+    pub auto_jump: bool,
 }
 
 impl WarpComp {

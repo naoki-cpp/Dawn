@@ -132,6 +132,11 @@ where
     /// Per-Sector population backstop (ADR-0018). Defaults to [`POPULATION_CAP`];
     /// tunable via [`Self::set_population_cap`].
     population_cap: usize,
+    /// Auto-jump triggers accumulated during `process_warp()` for ships that
+    /// completed a warp with `WarpComp::auto_jump = true`. Drained by the
+    /// caller after each tick so the jump can be proposed to the Raft Log
+    /// (or handled however the server path requires).
+    pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
 }
 
 // ── Constructors ──────────────────────────────────────────────────────────────
@@ -175,6 +180,7 @@ impl<S: EventStore> SimulationNode<S> {
                 .map(|g| (g.id, g))
                 .collect(),
             population_cap            : POPULATION_CAP,
+            pending_auto_jumps        : Vec::new(),
         }
     }
 
@@ -214,6 +220,7 @@ impl<S: EventStore> SimulationNode<S> {
                 .map(|g| (g.id, g))
                 .collect(),
             population_cap            : POPULATION_CAP,
+            pending_auto_jumps        : Vec::new(),
         };
 
         for def in modules {
@@ -1117,7 +1124,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// accepts the request; `process_warp()` then advances the alignment and,
     /// once aligned, flies the ship to the gate at warp speed. Returns `false`
     /// (no component attached) on rejection.
-    pub fn apply_warp_command(&mut self, ship_id: ShipId, gate_id: JumpGateId) -> bool {
+    pub fn apply_warp_command(&mut self, ship_id: ShipId, gate_id: JumpGateId, auto_jump: bool) -> bool {
         if !self.can_propose_warp(ship_id, gate_id) {
             return false;
         }
@@ -1128,6 +1135,7 @@ impl<S: EventStore> SimulationNode<S> {
         let _ = self.world.inner_mut().insert_one(entity, WarpComp {
             gate_id,
             phase: WarpPhase::Aligning,
+            auto_jump,
         });
         true
     }
@@ -1141,7 +1149,16 @@ impl<S: EventStore> SimulationNode<S> {
         if self.ship_owners.get(&cmd.ship_id) != Some(&player_id) {
             return false;
         }
-        self.apply_warp_command(cmd.ship_id, cmd.gate_id)
+        self.apply_warp_command(cmd.ship_id, cmd.gate_id, false)
+    }
+
+    /// Drain auto-jump triggers accumulated during `process_warp()`.
+    ///
+    /// The caller (server loop) is responsible for proposing each returned
+    /// `(ship_id, gate_id)` pair to the Raft Log (cluster mode) or ignoring it
+    /// (single-node mode where Jump is not supported).
+    pub fn drain_pending_auto_jumps(&mut self) -> Vec<(ShipId, JumpGateId)> {
+        std::mem::take(&mut self.pending_auto_jumps)
     }
 
     /// Warp System (ADR-0022 §6): advance every ship carrying a `WarpComp`.
@@ -1187,7 +1204,7 @@ impl<S: EventStore> SimulationNode<S> {
                 // Aligned (engage warp) or already warping: fly toward the gate.
                 WarpPhase::Aligning | WarpPhase::Warping => {
                     self.set_warp_phase(entity, WarpPhase::Warping);
-                    if let Some(ev) = self.warp_step(entity, ship_id, pos, vel, gate_pos, arrival, tick) {
+                    if let Some(ev) = self.warp_step(entity, ship_id, pos, vel, gate_pos, arrival, warp.auto_jump, tick) {
                         events.push(ev);
                     }
                 }
@@ -1201,13 +1218,14 @@ impl<S: EventStore> SimulationNode<S> {
     /// stopping inside `arrival`. Returns a `VelocityChanged` if velocity moved.
     fn warp_step(
         &mut self,
-        entity  : Entity,
-        ship_id : ShipId,
-        pos     : Position,
-        old_vel : Velocity,
-        gate_pos: Position,
-        arrival : f32,
-        tick    : Tick,
+        entity   : Entity,
+        ship_id  : ShipId,
+        pos      : Position,
+        old_vel  : Velocity,
+        gate_pos : Position,
+        arrival  : f32,
+        auto_jump: bool,
+        tick     : Tick,
     ) -> Option<DomainEvent> {
         let dist      = pos.distance(gate_pos);
         let remaining = dist - arrival;
@@ -1236,10 +1254,17 @@ impl<S: EventStore> SimulationNode<S> {
         if arrived {
             // Warp complete: drop the component and clear thrust so the ship
             // sits at the gate (ready to jump). Movement resumes next tick.
+            let gate_id = self.world.inner().get::<&WarpComp>(entity).ok().map(|w| w.gate_id);
             let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
             if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
                 t.direction  = Velocity::ZERO;
                 t.is_braking = false;
+            }
+            // Queue auto-jump for the caller to propose after the tick.
+            if auto_jump {
+                if let Some(gid) = gate_id {
+                    self.pending_auto_jumps.push((ship_id, gid));
+                }
             }
         }
 
@@ -2245,6 +2270,37 @@ mod tests {
         node.apply_move_command(ship, Position::new(0.0, 1000.0, 0.0));
         assert_eq!(node.warp_phase(ship), Some(WarpPhase::Warping),
             "a committed warp cannot be interrupted by a move command");
+    }
+
+    #[test]
+    fn auto_jump_is_queued_in_pending_list_when_warp_completes_with_auto_jump_true() {
+        let mut node = mem_node();
+        let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(node.apply_warp_command(ship, dawn_core::JumpGateId(0), true));
+
+        // Run until warp completes.
+        for _ in 0..100 { node.tick(); }
+        assert_eq!(node.warp_phase(ship), None, "warp must complete");
+        assert!(node.can_propose_jump(ship, dawn_core::JumpGateId(0)),
+            "ship must be within gate range after warp");
+
+        let pending = node.drain_pending_auto_jumps();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0], (ship, dawn_core::JumpGateId(0)));
+
+        // Draining twice returns nothing.
+        assert!(node.drain_pending_auto_jumps().is_empty());
+    }
+
+    #[test]
+    fn normal_warp_without_auto_jump_does_not_queue_pending_jump() {
+        let mut node = mem_node();
+        let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(node.apply_warp_command(ship, dawn_core::JumpGateId(0), false));
+
+        for _ in 0..100 { node.tick(); }
+        assert_eq!(node.warp_phase(ship), None);
+        assert!(node.drain_pending_auto_jumps().is_empty());
     }
 
     #[test]

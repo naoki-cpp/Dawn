@@ -164,8 +164,9 @@ mod tests {
         let entity = w.spawn_ship(id, Position::ORIGIN, warp_vel);
         w.set_ship_stats(entity, ShipStatsComp::PLAYER);
         w.inner_mut().insert_one(entity, WarpComp {
-            gate_id: dawn_core::JumpGateId(0),
-            phase  : WarpPhase::Warping,
+            gate_id  : dawn_core::JumpGateId(0),
+            phase    : WarpPhase::Warping,
+            auto_jump: false,
         }).unwrap();
 
         let events = MovementSystem::run(&mut w, Tick(1));

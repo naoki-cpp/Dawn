@@ -1131,9 +1131,9 @@ async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 else { continue };
                 // ADR-0009: validate up front, then propose to the Raft Log;
                 // the move happens once the entry commits (Step 7.5).
-                let accepted = j.ship_id == sess.ship_id
-                    && nodes[sector].can_propose_jump(j.ship_id, j.gate_id);
-                if accepted {
+                let ship_owned = j.ship_id == sess.ship_id;
+                let in_range   = ship_owned && nodes[sector].can_propose_jump(j.ship_id, j.gate_id);
+                if in_range {
                     let to = nodes[sector].jump_gate(j.gate_id)
                         .expect("can_propose_jump confirmed gate exists")
                         .to_sector;
@@ -1142,6 +1142,11 @@ async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     );
                     println!("  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
                         j.ship_id.raw(), j.gate_id.0, sector, to.0);
+                } else if ship_owned && nodes[sector].apply_warp_command(j.ship_id, j.gate_id, true) {
+                    // Ship is out of range: warp to the gate first; the node will
+                    // queue a pending_auto_jump once warp completes (ADR-0022).
+                    println!("  [Server] Jump: ship #{} out of range — auto-warp to gate #{} started",
+                        j.ship_id.raw(), j.gate_id.0);
                 } else {
                     eprintln!("[Server] JumpCommand rejected (ship #{} gate #{})",
                         j.ship_id.raw(), j.gate_id.0);
@@ -1152,6 +1157,22 @@ async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         // Tick every node in the canonical step order (Step 7.5 → sim → Step 10).
         for i in 0..SECTORS {
             transit::step_cluster_node(&mut nodes[i], &rafts[i], &mut committed_rxs[i], &lock_commands[i]);
+        }
+
+        // Propose auto-jumps triggered by warp completion this tick.
+        for i in 0..SECTORS {
+            for (ship_id, gate_id) in nodes[i].drain_pending_auto_jumps() {
+                if nodes[i].can_propose_jump(ship_id, gate_id) {
+                    let to = nodes[i].jump_gate(gate_id)
+                        .expect("gate must exist if can_propose_jump passed")
+                        .to_sector;
+                    rafts[i].propose(
+                        TransitOp::Request { ship_id, to, gate_id: Some(gate_id) }.encode(),
+                    );
+                    println!("  [Server] Auto-jump proposed: ship #{} gate #{} (S{} → S{})",
+                        ship_id.raw(), gate_id.0, i, to.0);
+                }
+            }
         }
 
         // Collect new events per Sector so each client only sees the Sector
