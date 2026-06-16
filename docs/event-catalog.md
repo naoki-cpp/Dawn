@@ -167,7 +167,20 @@ Step 7.5 で destination ノードが `SectorTransitCompleted` に加えて
 `_handle_jump_gate_used` / `_handle_star_system_changed`）も実装済み
 （ADR-0009 実装チェックリスト全完了）。
 
-### 3.8 System（将来予約）
+### 3.8 Tackle（ADR-0024）
+
+| イベント名 | 説明 | 発行者 | ステータス |
+|---|---|---|---|
+| `TackleApplied` | Fold Disruptor がターゲットに有効化された（射程内 + ロック済み） | `SimulationNode::process_tackle()`（Step 4.5） | ✅ 実装済み |
+| `TackleReleased` | Tackle 効果が終了した（モジュール OFF / 射程外 / tackler 破壊） | `SimulationNode::process_tackle()`（Step 4.5） | ✅ 実装済み |
+
+tackled 状態の間、Ship は `can_propose_warp()` / `can_propose_jump()` が false を返すため
+ワープ・ジャンプを実行できない。`TackledComp` はスナップショットに永続化される（INV-002）。
+
+`TackleApplied` のない `TackleReleased` は発行しない（必ず 1:1 対応）。
+同一ターゲットに複数の tackler がいる場合は tackler ごとにペアを発行する。
+
+### 3.9 System（将来予約）
 
 | イベント名 | 説明 | ステータス |
 |---|---|---|
@@ -192,7 +205,8 @@ Step 7.5 で destination ノードが `SectorTransitCompleted` に加えて
 | `StopCommand` | 加速度を用いて速度をゼロに減速する | — | ✅ 実装済み |
 | `ApproachCommand` | 対象（Ship / Jump Gate）へ半自動接近する（Move / Stop で解除・ADR-0015） | —（新イベントなし） | ✅ 実装済み |
 | `TransitCommand` | Sector Transit を要求する（Raft 経由・ADR-0014） | `SectorTransitRequested` / `Completed` | ✅ 実装済み |
-| `JumpCommand` | ジャンプゲート経由で別 Sector に移動する（Raft 経由・ADR-0009） | `JumpGateUsed`（+ 別星系なら `StarSystemChanged`） | ✅ 実装済み |
+| `JumpCommand` | ジャンプゲート経由で別 Sector に移動する（Raft 経由・ADR-0009）。射程外の場合は自動ワープ後にジャンプ（auto-warp-then-jump / ADR-0023） | `JumpGateUsed`（+ 別星系なら `StarSystemChanged`） | ✅ 実装済み |
+| `WarpCommand` | 同一セクター内の Jump Gate へワープする（align → warping 2 フェーズ / ADR-0022） | —（新イベントなし。移動は `VelocityChanged` で記録） | ✅ 実装済み |
 
 ---
 
@@ -457,6 +471,36 @@ Ship が別の星系に移動した（ADR-0009）。
 | `tick` | `Tick` | ✓ | 移動が確定した Tick |
 
 **ステータス:** ✅ 実装済み（Step 7.5 `append_jump_events`）。
+
+---
+
+### `TackleApplied`
+
+**説明:** Fold Disruptor モジュールがターゲット Ship に有効化された（射程内 + ロック済み）。
+tackled Ship はワープ・ジャンプが禁止される（ADR-0024）。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | tackled された Ship |
+| `by` | `ShipId` | ✓ | tackle を行った Ship（tackler） |
+| `tick` | `Tick` | ✓ | tackle が有効化された Tick |
+
+**Replay:** `ship_id` の `TackledComp.tacklers` に `by` を追加する。
+
+---
+
+### `TackleReleased`
+
+**説明:** `TackleApplied` の対。tackle 効果が終了した（モジュール OFF / 射程外 / tackler 破壊 / ロック消失）。
+他の tackler が残っている場合 Ship は依然として tackled 状態が継続する。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | tackle から解放された（or 解放待ち）Ship |
+| `by` | `ShipId` | ✓ | tackle を解除した（or 失った）Ship |
+| `tick` | `Tick` | ✓ | 解除された Tick |
+
+**Replay:** `ship_id` の `TackledComp.tacklers` から `by` を削除する。空になれば `TackledComp` を除去する。
 
 ---
 

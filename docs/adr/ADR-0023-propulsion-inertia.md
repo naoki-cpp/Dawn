@@ -1,7 +1,7 @@
 ---
 id      : ADR-0023
 title   : Propulsion Physics — Inertia Model / Afterburner Modules
-status  : proposed
+status  : accepted
 date    : 2026-06-16
 deciders: [human, ai-agent]
 related : ADR-0006（Fitting System）, ADR-0008（INV-MOVE）, ADR-0016 §5（戦闘の深み）,
@@ -286,17 +286,16 @@ align time の計算式 `1.386 × τ` が成立しなくなる。
 
 ## 実装チェックリスト
 
-- [ ] `dawn-core/src/ship_type.rs`: `ShipBaseStats` に `base_max_speed`, `mass`, `inertia_modifier` 追加、`thrust_magnitude` 削除
-- [ ] `dawn-core/src/events.rs` / `modules.rs`: `StatDelta` に `speed_multiplier`, `mass_add` 追加
-- [ ] `dawn-ecs/src/components/movement.rs`: `ShipStatsComp` を更新（`tau_ticks` 追加、`thrust_magnitude` 削除）
-- [ ] `dawn-ecs/src/systems/fitting.rs`: `apply_fitting()` で `tau_ticks`, `max_speed` を再計算
-- [ ] `dawn-ecs/src/systems/movement.rs`: 指数接近モデルに変更、speed clamp 削除
-- [ ] `data/ship_types.toml`: Magpie に `mass`, `inertia_modifier` 追加、`thrust_magnitude` 削除
-- [ ] `data/modules.toml`: AB 各サイズに `speed_multiplier`, `mass_add` 追加
-- [ ] `crates/dawn-simulation/src/node.rs`: `ShipStatsComp::PLAYER/NPC` fallback 定数を更新
-- [ ] `client/scripts/main.gd`: align time / speed 表示の更新（必要であれば）
-- [ ] `docs/event-catalog.md`: StatDelta フィールド更新
-- [ ] CLAUDE.md §1 Scope に `inertia_modifier`, `mass` を追記
-- [ ] 全テストがゼロエラーで通過すること（`cargo test --workspace`）
-- [ ] `ShipStatsComp::from_base()` テストで `tau_ticks` が正しく計算されることを確認
-- [ ] MovementSystem テストで指数接近モデルの align time が理論値 `1.386 × τ_ticks` と一致することを確認
+- [x] `dawn-core/src/ship_type.rs`: `ShipBaseStats` に `base_max_speed`, `mass`, `inertia_modifier` 追加、`thrust_magnitude` 削除
+- [x] `dawn-core/src/fitting.rs`: `StatDelta` に `speed_multiplier`, `mass_add` 追加
+- [x] `dawn-ecs/src/components/movement.rs`: `ShipStatsComp` を更新（`tau_ticks` 追加、`thrust_magnitude` 削除）
+- [x] `dawn-ecs/src/systems/fitting.rs`: `apply_fitting()` で `tau_ticks`, `max_speed` を再計算
+- [x] `dawn-ecs/src/systems/movement.rs`: 指数接近モデルに変更、speed clamp 削除
+- [x] `data/ship_types.toml`: Magpie に `mass`, `inertia_modifier` 追加、`thrust_magnitude` 削除
+- [x] `data/modules.toml`: AB 各サイズに `speed_multiplier`, `mass_add` 追加
+- [x] `crates/dawn-simulation/src/node.rs`: `ShipStatsComp::PLAYER/NPC` fallback 定数を更新
+- [x] `client/scripts/main.gd`: align time / speed 表示の更新（不要と判断 — 既存 HUD と互換）
+- [x] CLAUDE.md §1 Scope に `inertia_modifier`, `mass` を追記（ADR-0023 実装反映として同期済み）
+- [x] 全テストがゼロエラーで通過すること（`cargo test --workspace`）
+- [x] `ShipStatsComp::from_base()` テストで `tau_ticks` が正しく計算されることを確認
+- [x] MovementSystem テストで指数接近モデルの align time が理論値 `1.386 × τ_ticks` と一致することを確認

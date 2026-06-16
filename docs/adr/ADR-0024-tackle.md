@@ -143,13 +143,13 @@ pub struct ShipStatsComp {
 
 ```toml
 [[modules]]
-id              = "fold_disruptor_i"
-name            = "Fold Disruptor I"
-kind            = "Tackle"
-slot            = "High"
-activation_mode = "Active"
-cap_per_cycle   = 5.0
-cycle_ticks     = 5
+id                 = 12
+name               = "Fold Disruptor I"
+kind               = "Tackle"
+slot               = "Mid"
+activation_mode    = "Active"
+cap_cost_per_cycle = 30.0
+cycle_time_ticks   = 10
 [modules.stat_delta]
 tackle_range_add = 20000.0
 ```
@@ -174,24 +174,24 @@ tackle_range_add = 20000.0
 
 ## 実装チェックリスト
 
-- [ ] `StatDelta` に `tackle_range_add: f32` 追加（dawn-core）
-- [ ] `ModuleKind::Tackle` 追加（dawn-core）
-- [ ] `ShipStatsComp` に `tackle_range: f32` 追加（dawn-ecs）
-- [ ] `apply_fitting()` で `tackle_range` を集計（dawn-ecs）
-- [ ] `TackledComp { tacklers: Vec<ShipId> }` 追加（dawn-ecs）
-- [ ] `SimWorld::is_tackled()` ヘルパー追加（dawn-ecs）
-- [ ] `TackleApplied` / `TackleReleased` イベント追加（dawn-core）
-- [ ] `DomainEvent` enum に追加（dawn-core）
-- [ ] `ShipSnapshot` に `tacklers: Vec<ShipId>` 追加（dawn-simulation）
-- [ ] `take_snapshot()` / `restore_from()` で TackledComp を永続化（dawn-simulation）
-- [ ] `TackleSystem` 実装（dawn-ecs / dawn-simulation、Step 4.5）
-- [ ] `can_propose_warp()` / `can_propose_jump()` に is_tackled チェック追加（dawn-simulation）
-- [ ] `propose_transit()` に is_tackled チェック追加（dawn-simulation）
-- [ ] ShipDestroyed 時の tackle 解除処理（dawn-simulation）
-- [ ] `data/modules.toml` に `fold_disruptor_i` 追加
-- [ ] `docs/event-catalog.md` を更新
-- [ ] テスト: tackled 中は warp/jump が拒否される
-- [ ] テスト: tackler が死亡したら tackle 解除
-- [ ] テスト: 射程外に出たら tackle 解除
-- [ ] テスト: 複数 tackler のうち 1 人が解除しても残りが有効なら tackled 継続
-- [ ] テスト: スナップショット round-trip で TackledComp が保持される
+- [x] `StatDelta` に `tackle_range_add: f32` 追加（dawn-core）
+- [x] `ModuleKind::Tackle` 追加（dawn-core）
+- [x] `ShipStatsComp` に `tackle_range: f32` 追加（dawn-ecs）
+- [x] `apply_fitting()` で `tackle_range` を集計（dawn-ecs）
+- [x] `TackledComp { tacklers: Vec<ShipId> }` 追加（dawn-ecs）
+- [x] `SimWorld::is_tackled()` ヘルパー追加（dawn-ecs）
+- [x] `TackleApplied` / `TackleReleased` イベント追加（dawn-core）
+- [x] `DomainEvent` enum に追加（dawn-core）
+- [x] `ShipSnapshot` に `tackled_by: Vec<ShipId>` 追加（dawn-simulation、フィールド名 `tackled_by`）
+- [x] `take_snapshot()` / `restore_ship_from_snapshot()` で TackledComp を永続化（dawn-simulation）
+- [x] `process_tackle()` 実装（dawn-simulation、Step 4.5 — HashMap desired-state diff、単一 ECS スキャン）
+- [x] `can_propose_warp()` / `can_propose_jump()` に is_tackled チェック追加（dawn-simulation）
+- [ ] `propose_transit()` に is_tackled チェック追加（未実装 — Raft 経由の Transit は can_propose_jump で upstream 拒否済みのため実害なし。別途検討）
+- [x] ShipDestroyed 時の tackle 解除処理（`apply_event` で TackleApplied/TackleReleased を処理）
+- [x] `data/modules.toml` に `Fold Disruptor I`（id=12）追加
+- [x] `docs/event-catalog.md` を更新（TackleApplied / TackleReleased 追記）
+- [x] テスト: tackled 中は warp/jump が拒否される（`tackled_ship_cannot_warp`）
+- [x] テスト: tackler が死亡したら tackle 解除（`tackle_releases_when_tackler_dies`）
+- [ ] テスト: 射程外に出たら tackle 解除（未実装）
+- [ ] テスト: 複数 tackler のうち 1 人が解除しても残りが有効なら tackled 継続（未実装）
+- [x] テスト: スナップショット round-trip で TackledComp が保持される（`tackle_snapshot_round_trip_preserves_tackle_state`）
