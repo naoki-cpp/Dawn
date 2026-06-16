@@ -551,13 +551,17 @@ impl<S: EventStore> SimulationNode<S> {
         // 6. Combat System — fire only when the capacitor weapon cycle started this tick
         let combat = CombatSystem(&mut self.world, tick, &cap.weapon_cycles_started);
 
-        // Remove destroyed ships from the ECS and ship_index.
+        // Remove destroyed ships from the ECS and all lookup maps.
         // CLAUDE.md §6: run the Bot System after Combat.
         for ship_id in &combat.destroyed {
             if let Some(entity) = self.ship_index.remove(ship_id) {
                 self.world.despawn_ship(entity);
             }
             self.ship_type_ids.remove(ship_id);
+            self.base_stats.remove(ship_id);
+            if let Some(player_id) = self.ship_owners.remove(ship_id) {
+                self.player_ships.remove(&player_id);
+            }
         }
 
         // 7. Bot System — bots issue the same commands as human players
@@ -1645,6 +1649,11 @@ impl<S: EventStore> SimulationNode<S> {
                 if let Some(entity) = self.ship_index.remove(&e.ship_id) {
                     self.world.despawn_ship(entity);
                 }
+                self.ship_type_ids.remove(&e.ship_id);
+                self.base_stats.remove(&e.ship_id);
+                if let Some(player_id) = self.ship_owners.remove(&e.ship_id) {
+                    self.player_ships.remove(&player_id);
+                }
             }
 
             DomainEvent::ShipFitted(e) => {
@@ -1723,6 +1732,11 @@ impl<S: EventStore> SimulationNode<S> {
             DomainEvent::ShipDestroyed(e) => {
                 if let Some(entity) = self.ship_index.remove(&e.ship_id) {
                     self.world.despawn_ship(entity);
+                }
+                self.ship_type_ids.remove(&e.ship_id);
+                self.base_stats.remove(&e.ship_id);
+                if let Some(player_id) = self.ship_owners.remove(&e.ship_id) {
+                    self.player_ships.remove(&player_id);
                 }
             }
 
