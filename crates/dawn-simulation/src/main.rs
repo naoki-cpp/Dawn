@@ -699,7 +699,19 @@ fn deliver_aoi_frame(
     prev      : &mut Vec<ShipId>,
     new_events: &[dawn_core::DomainEvent],
 ) -> bool {
-    let (entered, left) = aoi::aoi_delta(prev, &curr);
+    // Ships that have a ShipDestroyed event this tick must NOT receive an
+    // AoiLeave — the client's _handle_ship_destroyed already removes them,
+    // plays the explosion, and clears the lock target. Sending AoiLeave first
+    // would remove the ship from _ships before ShipDestroyed arrives, making
+    // the destruction handler a no-op (early return on `!_ships.has(id)`).
+    let destroyed_this_tick: std::collections::HashSet<ShipId> = new_events.iter()
+        .filter_map(|e| {
+            if let dawn_core::DomainEvent::ShipDestroyed(d) = e { Some(d.ship_id) } else { None }
+        })
+        .collect();
+
+    let old_prev = prev.clone();
+    let (entered, left) = aoi::aoi_delta(&old_prev, &curr);
     *prev = curr.clone();
 
     // Tell the client about ships entering / leaving its neighborhood.
@@ -708,13 +720,24 @@ fn deliver_aoi_frame(
             if !sess.conn.send_raw(&msg) { return false; }
         }
     }
-    for id in left.iter().filter(|&&id| id != sess.ship_id) {
+    // Skip AoiLeave for destroyed ships — ShipDestroyed handles client removal.
+    for id in left.iter().filter(|&&id| id != sess.ship_id && !destroyed_this_tick.contains(&id)) {
         if !sess.conn.send_raw(&aoi::aoi_leave_json(*id)) { return false; }
     }
 
     // Deliver only events concerning a currently-visible ship.
+    // For ShipDestroyed, use the pre-tick visible set (old_prev) so the event
+    // reaches the client even though the ship was removed from the grid this tick.
     let visible_events: Vec<_> = new_events.iter()
-        .filter(|e| aoi::event_visible_to(e, &curr))
+        .filter(|e| {
+            if let dawn_core::DomainEvent::ShipDestroyed(d) = e {
+                // Was the destroyed ship (or its killer) visible before this tick?
+                return old_prev.binary_search(&d.ship_id).is_ok()
+                    || old_prev.binary_search(&d.killer_id).is_ok()
+                    || aoi::event_visible_to(e, &curr);
+            }
+            aoi::event_visible_to(e, &curr)
+        })
         .cloned()
         .collect();
     sess.send_events(&visible_events)
