@@ -106,8 +106,13 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
   Orbit/Keep at Range → Logistics。柱②④（グラインドゼロの深い戦闘 / 実損ある危険な宇宙）を厚くする方向。
   - ✅ **Warp（intra-Sector 短距離 Fold = ワープ・ADR-0022）** — 「逃がさない」の前提となる高速離脱。
     align/warping 2 フェーズ・Tick Step 2.6・W キー配線済み。これで Tackle（次）が意味を持つ。
+  - ✅ **Propulsion Physics — 慣性モデル（ADR-0023）** — EVE 式指数接近による align time・
+    mass + inertia_modifier パラメータ化・Afterburner 対応の StatDelta 拡張（speed_multiplier /
+    mass_add）。MovementSystem を exponential approach モデルに置換済み。
+    おまけ: J キー（JumpCommand）が gate 射程外のとき auto-warp-then-jump を自動実行
+    （WarpComp::auto_jump フラグ + pending_auto_jumps キュー）。
   - ⬜ **Tackle（Fold Disruptor・lore 既出）** — tackled 時に Warp / Jump / Transit を Validation で拒否
-    （Fold Drive 起動阻害で両離脱を一括封鎖）。次の ADR-0023。
+    （Fold Drive 起動阻害で両離脱を一括封鎖）。次の ADR-0024。
 
 Phase 8 全体のタスク内訳は §10 を参照。
 

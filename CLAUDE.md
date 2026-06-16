@@ -154,6 +154,15 @@ Phase 7.5 で追加承認済み（ADR-0015・実装済み）:
   Move/Stop は align 中のみ解除（warping は committed）, 新イベントなし（VelocityChanged で記録）,
   Godot クライアント配線（ゲート選択 + W キー）まで完了。lore: 短距離 Fold = ワープ）
 
+戦闘の深み（ADR-0016 §5）で追加承認済み（ADR-0023・実装済み）:
+  Propulsion Physics — 慣性モデル（EVE 式指数接近。ShipBaseStats の thrust_magnitude 廃止→
+  mass / inertia_modifier 導入。MovementSystem を exponential approach モデルに置換。
+  Afterburner 対応の StatDelta 拡張: speed_multiplier / mass_add。
+  WarpComp に auto_jump: bool フラグ追加。JumpCommand が gate 射程外の場合は
+  apply_warp_command(auto_jump=true) でワープ開始 → ワープ完了時に pending_auto_jumps へ push →
+  drain_pending_auto_jumps() でサーバーが Raft へ Transit 提案（auto-warp-then-jump）。
+  Godot クライアント配線（J キー優先順位修正・ワープ到着スナップ）まで完了）
+
 実装しない（提案も拒否する / 反グラインドの核 — FBD-009）:
   スキルポイント制 / 時間経過・課金による受動成長（= キャラクター育成）
   AFK 採掘（放置で進む採取・意図的判断を伴わない作業）
@@ -597,6 +606,8 @@ pub type Tick = u64;
        WarpCommand              → can_propose_warp() 検証後 WarpComp を付与
                                   （intra-Sector 短距離 Fold = ワープ / ADR-0022）
                                   Move / Stop は align 中なら解除・warping 中は無視
+       JumpCommand（射程外）    → apply_warp_command(auto_jump=true) で WarpComp 付与
+                                  （射程内なら即 Raft 提案。auto-warp-then-jump / ADR-0023）
        ※ Transit 中（TransitState::InTransit）の Ship への Move / Stop /
          二重 Transit / Jump / Approach / Warp は拒否する（ADR-0014 / §5）
   2.5 Approach System を実行する            ← Movement の前（ADR-0015）
@@ -608,6 +619,8 @@ pub type Tick = u64;
        max_speed×75% に達したら Warping へ遷移（EVE 準拠・整列時間は機動性次第。中断可・Tackle 窓）。
        Warping は warp 速度で gate へ直進、残距離比例で減速し activation_radius×0.8 内で停止。
        warping 中の船は Movement がスキップ（warp 速度をクランプしない）。VelocityChanged を発行。
+       auto_jump=true の場合、到着時に (ship_id, gate_id) を pending_auto_jumps へ push。
+       呼び出し元は drain_pending_auto_jumps() でキューを取り出し Raft へ提案する（ADR-0023）。
   3. Movement System を実行する（ECS バッチ処理・warping 中の船はスキップ）
   4. Capacitor System を実行する           ← Movement の後
        毎 Tick: cap を recharge_per_tick 分回復
@@ -1293,6 +1306,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-15（8D レビューの結論を §3/§11 の計画記述に反映 — `dawn-proto`/protobuf を不採用とし、ワイヤは postcard+serde 再利用に確定。あわせて ADR-0021 の「CRDT→追記ログのゴシップ配布」文言修正済み。いずれも計画記述の更新で CLAUDE.md 不変条件の改訂は伴わない。人間承認済み）*
-*対応ADR: ADR-0001 〜 ADR-0021（ADR-0020 Simulation LoD は deferred）*
-*次回レビュー予定: Phase 8D（分散インフラ）設計時 / 戦闘の深み（ADR-0016 §5）着手時*
+*最終更新: 2026-06-16（ADR-0023 Propulsion Physics 実装反映 — §1 スコープ追記・§6 Tick 処理順序に JumpCommand 射程外ルートと Step 2.6 auto_jump 動作を追記。roadmap.md の Tackle 次 ADR 番号を 0024 に修正。人間承認済み）*
+*対応ADR: ADR-0001 〜 ADR-0023（ADR-0020 Simulation LoD は deferred）*
+*次回レビュー予定: Phase 8D（分散インフラ）設計時 / Tackle（ADR-0024）着手時*
