@@ -71,7 +71,7 @@ impl SimWorld {
         }
     }
 
-    /// Override the stats (max_speed, thrust_magnitude) for a specific ship.
+    /// Override the stats (max_speed, mass, inertia_modifier, etc.) for a specific ship.
     ///
     /// Used to designate the player ship with higher performance values.
     pub fn set_ship_stats(&mut self, entity: Entity, stats: ShipStatsComp) {

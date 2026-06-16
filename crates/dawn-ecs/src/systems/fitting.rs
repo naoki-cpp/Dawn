@@ -1,70 +1,108 @@
-//! Fitting system — FittingComp の StatDelta を ShipStatsComp に集計する。
+//! Fitting system — aggregates FittingComp StatDeltas into ShipStatsComp.
 //!
-//! # 呼び出しタイミング
-//! `FitModuleCommand` を処理した直後に `apply_fitting()` を呼び出すこと。
-//! Tick ループ内では呼ばない（装備変更はイベント駆動）。
+//! # Propulsion model (ADR-0023)
+//!
+//! Two propulsion fields are handled specially and NOT through the simple
+//! additive delta path:
+//!
+//! - `mass`:      base.mass + Σ(ALL slots' mass_add)   — passive, always applied
+//! - `max_speed`: base.max_speed × Π(effective slots' speed_multiplier)
+//!
+//! All other fields use the standard additive delta from effective slots only.
 
 use crate::components::{FittingComp, HullComp, ShipStatsComp};
 use crate::world::SimWorld;
 use dawn_core::{ShipId, fitting::StatDelta};
 
-/// 指定した Ship の `FittingComp` から `ShipStatsComp` を再集計する。
+/// Converts (mass_kg × inertia_modifier) to τ in ticks.
+/// Tuned so that a Magpie (mass=12M kg, inertia=0.3) yields τ ≈ 36 ticks
+/// → align time ≈ 50 ticks ≈ 5 seconds at 10 ticks/s (ADR-0023 §5).
+pub const MASS_SCALE: f32 = 100_000.0;
+
+/// Recompute `ShipStatsComp` for `ship_id` from its current `FittingComp`.
 ///
-/// # ベース stats
-/// 装備なしの base として `ShipStatsComp::NPC` または `PLAYER` を渡す。
-/// モジュールの delta をその上に加算する。
-///
-/// # 戻り値
-/// 集計後の `ShipStatsComp`（ECS への反映済み）。
-/// Ship が存在しない場合は `None`。
+/// Must be called after any fitting change (module fit / activate / deactivate).
+/// Returns the new stats, or `None` if the ship does not exist.
 pub fn apply_fitting(world: &mut SimWorld, ship_id: ShipId, base: ShipStatsComp) -> Option<ShipStatsComp> {
-    // Ship entity を検索
     let entity = {
         let mut found = None;
         for (e, id) in world.inner().query::<&crate::components::ShipIdComp>().iter() {
-            if id.0 == ship_id {
-                found = Some(e);
-                break;
-            }
+            if id.0 == ship_id { found = Some(e); break; }
         }
         found?
     };
 
-    // FittingComp の delta を集計
+    // ── Propulsion stats (ADR-0023 special cases) ─────────────────────────────
+
+    let (total_mass_add, speed_mult) = world
+        .inner()
+        .get::<&FittingComp>(entity)
+        .map(|f| {
+            // mass_add: passive — sum from ALL slots regardless of is_effective().
+            let mass_add: f32 = f.high.iter()
+                .chain(f.mid.iter())
+                .chain(f.low.iter())
+                .chain(f.rig.iter())
+                .map(|s| s.def.stat_delta.mass_add)
+                .sum();
+
+            // speed_multiplier: product of EFFECTIVE slots only (AB must be ON).
+            let speed_mult: f32 = f.high.iter()
+                .chain(f.mid.iter())
+                .chain(f.low.iter())
+                .chain(f.rig.iter())
+                .filter(|s| s.is_effective())
+                .map(|s| s.def.stat_delta.speed_multiplier)
+                .product();
+
+            (mass_add, speed_mult)
+        })
+        .unwrap_or((0.0, 1.0));
+
+    // ── Additive delta from effective slots (standard fields) ─────────────────
+
     let delta: StatDelta = world
         .inner()
         .get::<&FittingComp>(entity)
         .map(|f| f.total_delta())
         .unwrap_or(StatDelta::ZERO);
 
-    // base + delta → 新しい stats
-    let new_stats = apply_delta(base, &delta);
+    // ── Build new stats ───────────────────────────────────────────────────────
 
-    // ShipStatsComp を更新
-    // Read old max values BEFORE overwriting ShipStatsComp.
-    // Each HP layer is scaled independently by its own old/new max ratio.
-    let old_stats = world.inner().get::<&ShipStatsComp>(entity).ok().map(|s| *s).unwrap_or(new_stats);
+    let old_stats = world.inner().get::<&ShipStatsComp>(entity).ok().map(|s| *s).unwrap_or(base);
+    let mut new_stats = apply_delta(base, &delta);
+
+    // Override propulsion fields with correctly computed values.
+    new_stats.max_speed = (base.max_speed * speed_mult).max(0.0);
+    new_stats.mass      = base.mass + total_mass_add;
+    // inertia_modifier comes from the hull; no module changes it yet.
+    new_stats.inertia_modifier = base.inertia_modifier;
 
     world.set_ship_stats(entity, new_stats);
 
+    // Scale current HP proportionally when max HP changes.
     if let Ok(mut hull) = world.inner_mut().get::<&mut HullComp>(entity) {
-        let scale_layer = |cur: f32, old_max: f32, new_max: f32| -> f32 {
-            if old_max <= 0.0 { return new_max; }  // first fit: start at full HP
+        let scale = |cur: f32, old_max: f32, new_max: f32| -> f32 {
+            if old_max <= 0.0 { return new_max; }
             (cur / old_max * new_max).clamp(0.0, new_max)
         };
-        hull.current_shield = scale_layer(hull.current_shield, old_stats.max_shield, new_stats.max_shield);
-        hull.current_armor  = scale_layer(hull.current_armor,  old_stats.max_armor,  new_stats.max_armor);
-        hull.current_hull   = scale_layer(hull.current_hull,   old_stats.max_hull,   new_stats.max_hull);
+        hull.current_shield = scale(hull.current_shield, old_stats.max_shield, new_stats.max_shield);
+        hull.current_armor  = scale(hull.current_armor,  old_stats.max_armor,  new_stats.max_armor);
+        hull.current_hull   = scale(hull.current_hull,   old_stats.max_hull,   new_stats.max_hull);
     }
 
     Some(new_stats)
 }
 
-/// Apply `delta` on top of `base` and return the resulting stats.
+/// Apply additive `delta` on top of `base`. Propulsion fields (max_speed, mass,
+/// inertia_modifier) are handled by `apply_fitting()` and left at base values here.
 pub fn apply_delta(base: ShipStatsComp, delta: &StatDelta) -> ShipStatsComp {
     ShipStatsComp {
-        max_speed            : (base.max_speed            + delta.max_speed_add).max(0.0),
-        thrust_magnitude     : (base.thrust_magnitude     + delta.thrust_add).max(0.0),
+        // Propulsion — caller overrides these; keep base values as placeholder.
+        max_speed            : base.max_speed,
+        mass                 : base.mass,
+        inertia_modifier     : base.inertia_modifier,
+
         max_shield           : (base.max_shield           + delta.max_shield_add).max(0.0),
         max_armor            : (base.max_armor            + delta.max_armor_add).max(0.0),
         max_hull             : (base.max_hull             + delta.max_hull_add).max(1.0),
@@ -72,7 +110,7 @@ pub fn apply_delta(base: ShipStatsComp, delta: &StatDelta) -> ShipStatsComp {
         weapon_range         : (base.weapon_range         + delta.weapon_range_add).max(0.0),
         weapon_tracking      : (base.weapon_tracking      + delta.tracking_speed_add).max(0.0),
         weapon_falloff       : (base.weapon_falloff       + delta.falloff_range_add).max(0.0),
-        sig_radius           : base.sig_radius,  // not affected by modules (yet)
+        sig_radius           : base.sig_radius,
         weapon_cooldown      : {
             let raw = base.weapon_cooldown as i64 + delta.weapon_cooldown_add as i64;
             raw.max(1) as u64
@@ -106,7 +144,6 @@ mod tests {
         let mut world = SimWorld::new(SectorId(0));
         let id = ship_id();
         let entity = world.spawn_ship(id, Position::ORIGIN, Velocity::ZERO);
-        // FittingComp と HullComp を追加
         world.inner_mut().insert(entity, (
             FittingComp::empty(),
             HullComp::new(ShipStatsComp::NPC.max_shield, ShipStatsComp::NPC.max_armor, ShipStatsComp::NPC.max_hull),
@@ -126,8 +163,6 @@ mod tests {
     #[test]
     fn apply_fitting_adds_weapon_module_damage_to_base_stats() {
         let (mut world, id) = make_world_with_ship();
-
-        // 武器モジュールを装備
         let entity = world.inner().query::<&crate::components::ShipIdComp>().iter()
             .find(|(_, s)| s.0 == id).map(|(e, _)| e).unwrap();
         let weapon_slot = FittedSlot {
@@ -143,29 +178,94 @@ mod tests {
             cycle_remaining: 0,
         };
         world.inner_mut().get::<&mut FittingComp>(entity).unwrap().high.push(weapon_slot);
-
         let stats = apply_fitting(&mut world, id, ShipStatsComp::NPC).unwrap();
         assert_eq!(stats.weapon_damage, ShipStatsComp::NPC.weapon_damage + 15.0);
     }
 
     #[test]
+    fn active_afterburner_multiplies_max_speed() {
+        let (mut world, id) = make_world_with_ship();
+        let entity = world.inner().query::<&crate::components::ShipIdComp>().iter()
+            .find(|(_, s)| s.0 == id).map(|(e, _)| e).unwrap();
+        let ab_slot = FittedSlot {
+            def: ModuleDefinition {
+                id: ModuleId(5), name: "1MN AB".to_string(),
+                kind: ModuleKind::Propulsion, slot: SlotKind::Mid,
+                stat_delta: StatDelta { speed_multiplier: 2.35, ..StatDelta::ZERO },
+                activation_mode  : ActivationMode::Active,
+                cap_cost_per_cycle: 100.0,
+                cycle_time_ticks  : 10,
+            },
+            is_active      : true,
+            cycle_remaining: 0,
+        };
+        world.inner_mut().get::<&mut FittingComp>(entity).unwrap().mid.push(ab_slot);
+        let stats = apply_fitting(&mut world, id, ShipStatsComp::NPC).unwrap();
+        let expected = ShipStatsComp::NPC.max_speed * 2.35;
+        assert!((stats.max_speed - expected).abs() < 0.01,
+            "AB ON: expected max_speed={expected}, got {}", stats.max_speed);
+    }
+
+    #[test]
+    fn inactive_afterburner_does_not_affect_max_speed() {
+        let (mut world, id) = make_world_with_ship();
+        let entity = world.inner().query::<&crate::components::ShipIdComp>().iter()
+            .find(|(_, s)| s.0 == id).map(|(e, _)| e).unwrap();
+        let ab_slot = FittedSlot {
+            def: ModuleDefinition {
+                id: ModuleId(5), name: "1MN AB".to_string(),
+                kind: ModuleKind::Propulsion, slot: SlotKind::Mid,
+                stat_delta: StatDelta { speed_multiplier: 2.35, ..StatDelta::ZERO },
+                activation_mode  : ActivationMode::Active,
+                cap_cost_per_cycle: 100.0,
+                cycle_time_ticks  : 10,
+            },
+            is_active      : false,  // OFF
+            cycle_remaining: 0,
+        };
+        world.inner_mut().get::<&mut FittingComp>(entity).unwrap().mid.push(ab_slot);
+        let stats = apply_fitting(&mut world, id, ShipStatsComp::NPC).unwrap();
+        assert!((stats.max_speed - ShipStatsComp::NPC.max_speed).abs() < 0.01,
+            "AB OFF: max_speed must not change");
+    }
+
+    #[test]
+    fn mass_add_is_always_applied_regardless_of_module_active_state() {
+        let (mut world, id) = make_world_with_ship();
+        let entity = world.inner().query::<&crate::components::ShipIdComp>().iter()
+            .find(|(_, s)| s.0 == id).map(|(e, _)| e).unwrap();
+        let oaab = FittedSlot {
+            def: ModuleDefinition {
+                id: ModuleId(10), name: "10MN AB".to_string(),
+                kind: ModuleKind::Propulsion, slot: SlotKind::Mid,
+                stat_delta: StatDelta { speed_multiplier: 2.35, mass_add: 8_000_000.0, ..StatDelta::ZERO },
+                activation_mode  : ActivationMode::Active,
+                cap_cost_per_cycle: 150.0,
+                cycle_time_ticks  : 10,
+            },
+            is_active      : false,  // OFF — but mass_add must still apply
+            cycle_remaining: 0,
+        };
+        world.inner_mut().get::<&mut FittingComp>(entity).unwrap().mid.push(oaab);
+        let stats = apply_fitting(&mut world, id, ShipStatsComp::NPC).unwrap();
+        let expected_mass = ShipStatsComp::NPC.mass + 8_000_000.0;
+        assert!((stats.mass - expected_mass).abs() < 1.0,
+            "mass_add must apply even when module is OFF; expected={expected_mass}, got={}", stats.mass);
+    }
+
+    #[test]
     fn apply_delta_clamps_weapon_cooldown_to_minimum_one_tick() {
-        let base = ShipStatsComp::NPC;  // cooldown = 5
+        let base = ShipStatsComp::NPC;
         let delta = StatDelta { weapon_cooldown_add: -100, ..StatDelta::ZERO };
         let result = apply_delta(base, &delta);
         assert_eq!(result.weapon_cooldown, 1);
     }
 
     #[test]
-    fn apply_delta_does_not_allow_negative_speed_or_damage() {
+    fn apply_delta_does_not_allow_negative_damage() {
         let base = ShipStatsComp::NPC;
-        let delta = StatDelta {
-            max_speed_add     : -9999.0,
-            weapon_damage_add : -9999.0,
-            ..StatDelta::ZERO
-        };
+        let delta = StatDelta { weapon_damage_add: -9999.0, ..StatDelta::ZERO };
         let result = apply_delta(base, &delta);
-        assert_eq!(result.max_speed, 0.0);
         assert_eq!(result.weapon_damage, 0.0);
     }
 

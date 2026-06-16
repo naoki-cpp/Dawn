@@ -59,7 +59,7 @@ pub fn all_modules() -> Vec<ModuleDefinition> {
             activation_mode: ActivationMode::Active,
             cap_cost_per_cycle: 100.0, // 10 GJ/tick — must exceed Magpie's 8 GJ/tick recharge
             cycle_time_ticks  : 10,
-            stat_delta: StatDelta { max_speed_add: 150.0, thrust_add: 10.0, ..StatDelta::ZERO },
+            stat_delta: StatDelta { speed_multiplier: 2.35, ..StatDelta::ZERO },
         },
 
         // ── Sensor (Mid / Passive) ───────────────────────────────────────────

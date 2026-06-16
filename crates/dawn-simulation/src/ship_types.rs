@@ -17,14 +17,15 @@ pub fn all_ship_types() -> Vec<ShipTypeDefinition> {
             slot_layout: SlotLayout::FRIGATE,
             base_stats : ShipBaseStats {
                 max_speed            : 400.0,
-                thrust_magnitude     : 0.0,    // NPC: constant velocity
+                mass                 : 1_500_000.0,
+                inertia_modifier     : 0.4,
                 max_shield           : 200.0,
                 max_armor            : 150.0,
                 max_hull             : 150.0,
                 lock_time            : 5,
                 max_locks            : 1,
                 cap_max              : 300.0,
-                cap_recharge_per_tick: 6.0,    // 2 %/tick
+                cap_recharge_per_tick: 6.0,
                 sig_radius           : 40.0,
             },
         },
@@ -35,8 +36,9 @@ pub fn all_ship_types() -> Vec<ShipTypeDefinition> {
             class      : ShipClass::Frigate,
             slot_layout: SlotLayout { high: 2, mid: 4, low: 2, rig: 3 },
             base_stats : ShipBaseStats {
-                max_speed            : 700.0,
-                thrust_magnitude     : 65.0,
+                max_speed            : 400.0,
+                mass                 : 12_000_000.0,
+                inertia_modifier     : 0.3,
                 max_shield           : 200.0,
                 max_armor            : 120.0,
                 max_hull             : 100.0,
@@ -44,7 +46,7 @@ pub fn all_ship_types() -> Vec<ShipTypeDefinition> {
                 max_locks            : 2,
                 cap_max              : 350.0,
                 cap_recharge_per_tick: 8.0,
-                sig_radius           : 40.0,  // small fast frigate
+                sig_radius           : 35.0,
             },
         },
     ]
@@ -62,10 +64,11 @@ mod tests {
     }
 
     #[test]
-    fn npc_frigate_has_zero_thrust() {
+    fn npc_frigate_has_positive_mass_and_inertia() {
         let npc = all_ship_types().into_iter()
             .find(|t| t.id == SHIP_TYPE_NPC_FRIGATE).unwrap();
-        assert_eq!(npc.base_stats.thrust_magnitude, 0.0);
+        assert!(npc.base_stats.mass > 0.0);
+        assert!(npc.base_stats.inertia_modifier > 0.0);
     }
 
     #[test]

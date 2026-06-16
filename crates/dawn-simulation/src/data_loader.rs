@@ -43,7 +43,8 @@ struct SlotLayoutEntry {
 #[derive(Deserialize)]
 struct BaseStatsEntry {
     max_speed            : f32,
-    thrust_magnitude     : f32,
+    mass                 : f32,
+    inertia_modifier     : f32,
     max_shield           : f32,
     max_armor            : f32,
     max_hull             : f32,
@@ -60,6 +61,7 @@ struct BaseStatsEntry {
 fn default_cap_max() -> f32 { 400.0 }
 fn default_cap_recharge() -> f32 { 8.0 }
 fn default_sig_radius() -> f32 { 40.0 }
+fn default_speed_multiplier() -> f32 { 1.0 }
 
 // ── TOML 中間型（modules.toml）───────────────────────────────────────────────
 
@@ -85,8 +87,8 @@ struct ModuleEntry {
 
 #[derive(Deserialize, Default)]
 struct StatDeltaEntry {
-    #[serde(default)] max_speed_add       : f32,
-    #[serde(default)] thrust_add          : f32,
+    #[serde(default = "default_speed_multiplier")] speed_multiplier : f32,
+    #[serde(default)] mass_add            : f32,
     #[serde(default)] max_shield_add      : f32,
     #[serde(default)] max_armor_add       : f32,
     #[serde(default)] max_hull_add        : f32,
@@ -151,7 +153,8 @@ fn entry_to_ship_type(e: ShipTypeEntry) -> ShipTypeDefinition {
         },
         base_stats : ShipBaseStats {
             max_speed            : e.base_stats.max_speed,
-            thrust_magnitude     : e.base_stats.thrust_magnitude,
+            mass                 : e.base_stats.mass,
+            inertia_modifier     : e.base_stats.inertia_modifier,
             max_shield           : e.base_stats.max_shield,
             max_armor            : e.base_stats.max_armor,
             max_hull             : e.base_stats.max_hull,
@@ -174,8 +177,8 @@ fn entry_to_module(e: ModuleEntry) -> ModuleDefinition {
         cap_cost_per_cycle: e.cap_cost_per_cycle,
         cycle_time_ticks  : e.cycle_time_ticks,
         stat_delta        : StatDelta {
-            max_speed_add       : e.stat_delta.max_speed_add,
-            thrust_add          : e.stat_delta.thrust_add,
+            speed_multiplier    : e.stat_delta.speed_multiplier,
+            mass_add            : e.stat_delta.mass_add,
             max_shield_add      : e.stat_delta.max_shield_add,
             max_armor_add       : e.stat_delta.max_armor_add,
             max_hull_add        : e.stat_delta.max_hull_add,
@@ -268,7 +271,8 @@ rig  = 3
 
 [ship_types.base_stats]
 max_speed        = 400.0
-thrust_magnitude = 0.0
+mass             = 1500000.0
+inertia_modifier = 0.4
 max_shield       = 200.0
 max_armor        = 150.0
 max_hull         = 150.0

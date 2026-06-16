@@ -1,28 +1,40 @@
 # ============================================================
-# modules.toml — モジュールバランスデータ
+# modules.toml — module balance data
 #
-# サーバー起動時に読み込まれる。リビルド不要で調整可能。
+# Loaded at server startup. No rebuild needed to adjust values.
 #
 # kind: "Weapon" | "ShieldBooster" | "ArmorRepairer" | "Propulsion" | "Sensor" | "Rig"
 # slot: "High" | "Mid" | "Low" | "Rig"
 # activation_mode: "Active" | "Passive"
 #
-# cap_cost_per_cycle — サイクル開始時に1回消費するキャパシタ量 (GJ)
-# cycle_time_ticks   — 1サイクルの長さ (Tick)。0 = Passive（適用なし）
+# cap_cost_per_cycle — capacitor consumed at the start of each cycle (GJ)
+# cycle_time_ticks   — ticks per cycle. 0 = Passive (not used)
 #
-# stat_delta（省略したフィールドはすべて 0）:
-#   max_speed_add, thrust_add, max_shield_add, max_armor_add, max_hull_add
+# stat_delta (omitted fields default to 0 / identity):
+#   speed_multiplier   — multiplicative max-speed bonus (default 1.0).
+#                        Applied ONLY when module is active (AB / MWD).
+#   mass_add           — hull mass increase (kg, default 0).
+#                        Applied PASSIVELY from ALL fitted slots even when OFF.
+#                        Oversized AB trade-off: huge mass_add = sluggish align always.
+#   max_shield_add, max_armor_add, max_hull_add
 #   weapon_damage_add, weapon_range_add, weapon_cooldown_add
+#   tracking_speed_add, falloff_range_add
 #   lock_time_add, max_locks_add
 #   cap_max_add, cap_recharge_add
 #
-# Cap バランスガイド（フリゲート: recharge 10 GJ/tick → 100 GJ/10tick）:
-#   Small Railgun (60 GJ/10tick):  gun alone → +40 GJ/cycle (持続可能)
-#   1MN AB       (80 GJ/10tick):  AB  alone → +20 GJ/cycle (持続可能)
-#   Gun + AB     (140 GJ/10tick): → -40 GJ/cycle (12サイクル≒120tick≈12秒で枯渇)
+# Cap balance guide (Magpie: recharge 8 GJ/tick → 80 GJ/10 ticks):
+#   Small Railgun (60 GJ/10 ticks):  gun alone  → +20 GJ surplus (sustainable)
+#   1MN AB       (100 GJ/10 ticks): AB alone    → −20 GJ deficit (drains slowly)
+#   Gun + AB     (160 GJ/10 ticks): →            −80 GJ/cycle (cap dry in ~37 ticks ≈ 3.7 s)
+#
+# Propulsion formula (ADR-0023):
+#   τ = (hull_mass + Σ mass_add) × inertia_modifier / MASS_SCALE
+#   α = 1 − exp(−1 / τ)     per-tick smoothing factor
+#   Vmax = base_max_speed × Π(active speed_multiplier)
+#   align_ticks ≈ 1.386 × τ
 # ============================================================
 
-# ── 武器（High / Active）────────────────────────────────────
+# ── Weapons (High / Active) ──────────────────────────────────
 
 [[modules]]
 id                 = 1
@@ -35,12 +47,9 @@ cycle_time_ticks   = 10
 
 [modules.stat_delta]
 weapon_damage_add  = 25.0
-weapon_range_add   = 3000.0  # optimal range (2x extended range)
-falloff_range_add  = 2000.0  # hit chance halves at 5000 u
-tracking_speed_add = 0.035   # rad/tick — hits a frigate (sig=40) orbiting at ~500u/tick at 1000u range
-                              # angular=0.5/1000=0.0005... actually: perp=500,d=1000 → ang=0.5
-                              # hit_chance = 0.5^((0.5/(0.035*40))^2) = 0.5^(0.357^2) ≈ 0.91 at 1000u
-                              # at 500u: ang=500/500=1.0 → 0.5^((1/(0.035*40))^2)=0.5^(0.714^2)≈0.70
+weapon_range_add   = 3000.0  # optimal range
+falloff_range_add  = 2000.0  # hit chance halves at optimal + falloff
+tracking_speed_add = 0.035   # rad/tick
 
 # ----
 
@@ -55,9 +64,9 @@ cycle_time_ticks   = 14
 
 [modules.stat_delta]
 weapon_damage_add  = 50.0
-weapon_range_add   = 2500.0  # optimal range
-falloff_range_add  = 1500.0  # hit chance halves at 4000 u
-tracking_speed_add = 0.020   # rad/tick — slower tracking than Small, punishes fast frigates
+weapon_range_add   = 2500.0
+falloff_range_add  = 1500.0
+tracking_speed_add = 0.020
 
 # ----
 
@@ -72,11 +81,11 @@ cycle_time_ticks   = 18
 
 [modules.stat_delta]
 weapon_damage_add  = 100.0
-weapon_range_add   = 4000.0  # optimal range
-falloff_range_add  = 2000.0  # hit chance halves at 6000 u
-tracking_speed_add = 0.008   # rad/tick — very slow tracking; nearly misses frigates at close range
+weapon_range_add   = 4000.0
+falloff_range_add  = 2000.0
+tracking_speed_add = 0.008
 
-# ── シールド（Mid / Passive）────────────────────────────────
+# ── Shield (Mid / Passive) ───────────────────────────────────
 
 [[modules]]
 id              = 3
@@ -100,7 +109,7 @@ activation_mode = "Passive"
 [modules.stat_delta]
 max_shield_add = 700.0
 
-# ── アーマー（Low / Passive）────────────────────────────────
+# ── Armor (Low / Passive) ────────────────────────────────────
 
 [[modules]]
 id              = 4
@@ -124,7 +133,7 @@ activation_mode = "Passive"
 [modules.stat_delta]
 max_armor_add = 500.0
 
-# ── 推進（Mid / Active）─────────────────────────────────────
+# ── Propulsion (Mid / Active) ────────────────────────────────
 
 [[modules]]
 id                 = 5
@@ -132,12 +141,15 @@ name               = "1MN Afterburner"
 kind               = "Propulsion"
 slot               = "Mid"
 activation_mode    = "Active"
-cap_cost_per_cycle = 100.0  # 10 GJ/tick — must exceed Magpie's 8 GJ/tick recharge
+cap_cost_per_cycle = 100.0  # 10 GJ/tick — drains Magpie (8 GJ/tick recharge) when on
 cycle_time_ticks   = 10
 
 [modules.stat_delta]
-max_speed_add = 150.0
-thrust_add    = 10.0
+# When ON:  Vmax = base_max_speed × 2.35 (frigate 400 → 940 u/tick)
+# mass_add: 0 — standard size AB adds no extra hull mass.
+#           Align time is unchanged from hull mass × inertia alone.
+speed_multiplier = 2.35
+mass_add         = 0.0
 
 # ----
 
@@ -151,10 +163,16 @@ cap_cost_per_cycle = 150.0
 cycle_time_ticks   = 10
 
 [modules.stat_delta]
-max_speed_add = 80.0
-thrust_add    = 5.0
+# Oversized AB trade-off (ADR-0023):
+#   When ON:  Vmax = base_max_speed × 2.35 (same multiplier — speed when burning is great)
+#   PASSIVE:  mass_add = 8,000,000 kg — even when OFF the AB is physically bolted on.
+#             Magpie hull 12M + 8M = 20M total → τ = 20M × 0.3 / 100_000 = 60 ticks
+#             → align ≈ 83 ticks ≈ 8.3 s (nearly 3× longer than bare hull's 5 s).
+#   Trade-off: devastating speed when ON; terrible agility always.
+speed_multiplier = 2.35
+mass_add         = 8_000_000.0
 
-# ── センサー（Mid / Passive）────────────────────────────────
+# ── Sensors (Mid / Passive) ──────────────────────────────────
 
 [[modules]]
 id              = 6

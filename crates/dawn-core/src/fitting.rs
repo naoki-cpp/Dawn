@@ -70,14 +70,20 @@ pub enum ActivationMode {
 
 /// Per-module stat additions applied to the base ship stats after fitting.
 ///
-/// All fields default to zero (no change).  Positive values increase the stat;
-/// negative values decrease it (where the field is signed).
+/// All fields default to zero / one (no change).  Positive additive values
+/// increase the stat; negative decrease it (where the field is signed).
+/// Multiplicative fields (`speed_multiplier`) default to 1.0 and are combined
+/// via multiplication across all effective slots.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct StatDelta {
-    /// Bonus to max speed (units/tick).
-    pub max_speed_add        : f32,
-    /// Bonus to thrust acceleration (units/tick²).
-    pub thrust_add           : f32,
+    /// Multiplicative speed bonus applied when this module is active (default 1.0).
+    /// EVE formula: Vmax = Vbase * (1 + Vbonus * Thrust/Mass) simplified to a
+    /// single multiplier. 1MN AB ≈ 2.35, MWD ≈ 6.0.
+    pub speed_multiplier     : f32,
+    /// Mass added to the ship when fitted (kg). Passive — always applied
+    /// regardless of active/inactive state. Increases τ → longer align time.
+    /// This is what makes oversized ABs a meaningful trade-off (ADR-0023).
+    pub mass_add             : f32,
     /// Bonus to max Shield HP.
     pub max_shield_add       : f32,
     /// Bonus to max Armor HP.
@@ -105,10 +111,10 @@ pub struct StatDelta {
 }
 
 impl StatDelta {
-    /// No change (all fields zero).
+    /// No change: additive fields zero, multiplicative fields 1.0.
     pub const ZERO: Self = Self {
-        max_speed_add       : 0.0,
-        thrust_add          : 0.0,
+        speed_multiplier    : 1.0,
+        mass_add            : 0.0,
         max_shield_add      : 0.0,
         max_armor_add       : 0.0,
         max_hull_add        : 0.0,
@@ -123,10 +129,13 @@ impl StatDelta {
         cap_recharge_add    : 0.0,
     };
 
+    /// Combine two deltas. Additive fields sum; speed_multiplier multiplies.
+    /// mass_add is summed here for completeness (apply_fitting overrides with
+    /// the all-slots sum to implement passive behaviour).
     pub fn add(&self, other: &StatDelta) -> StatDelta {
         StatDelta {
-            max_speed_add       : self.max_speed_add       + other.max_speed_add,
-            thrust_add          : self.thrust_add          + other.thrust_add,
+            speed_multiplier    : self.speed_multiplier    * other.speed_multiplier,
+            mass_add            : self.mass_add            + other.mass_add,
             max_shield_add      : self.max_shield_add      + other.max_shield_add,
             max_armor_add       : self.max_armor_add       + other.max_armor_add,
             max_hull_add        : self.max_hull_add        + other.max_hull_add,
@@ -206,8 +215,8 @@ mod tests {
     #[test]
     fn stat_delta_zero_has_no_effect_on_addition() {
         let base = StatDelta {
-            max_speed_add       : 10.0,
-            thrust_add          : 5.0,
+            speed_multiplier    : 2.35,
+            mass_add            : 8_000_000.0,
             max_shield_add      : 50.0,
             max_armor_add       : 30.0,
             max_hull_add        : 20.0,
@@ -227,10 +236,10 @@ mod tests {
 
     #[test]
     fn stat_delta_accumulates_correctly_across_multiple_modules() {
-        let module_a = StatDelta { max_speed_add: 50.0, weapon_damage_add: 10.0, ..StatDelta::ZERO };
-        let module_b = StatDelta { max_speed_add: 30.0, weapon_damage_add:  5.0, ..StatDelta::ZERO };
+        let module_a = StatDelta { speed_multiplier: 2.35, weapon_damage_add: 10.0, ..StatDelta::ZERO };
+        let module_b = StatDelta { speed_multiplier: 1.5,  weapon_damage_add:  5.0, ..StatDelta::ZERO };
         let total = module_a.add(&module_b);
-        assert_eq!(total.max_speed_add, 80.0);
+        assert!((total.speed_multiplier - 2.35 * 1.5).abs() < 0.001);
         assert_eq!(total.weapon_damage_add, 15.0);
     }
 

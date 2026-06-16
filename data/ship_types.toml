@@ -1,31 +1,31 @@
 # ============================================================
-# ship_types.toml — 船種バランスデータ
+# ship_types.toml — ship balance data
 #
-# サーバー起動時に読み込まれる。リビルド不要で調整可能。
-# ファイルが見つからない場合はハードコードのデフォルトにフォールバック。
+# Loaded at server startup. No rebuild needed to adjust values.
+# Falls back to hardcoded defaults if file is missing.
 #
-# クラス: "Frigate" | "Cruiser" | "Battleship"
+# class: "Frigate" | "Cruiser" | "Battleship"
 # slot_layout: { high, mid, low, rig }
 # base_stats:
-#   max_speed             — 最大速度 (units/tick)
-#   thrust_magnitude      — 加速度 (units/tick²)。0 = NPC等速
-#   max_shield            — シールド最大HP
-#   max_armor             — アーマー最大HP
-#   max_hull              — ハル最大HP
-#   lock_time             — ロック完了Tick数
-#   max_locks             — 同時ロック上限
-#   cap_max               — キャパシタ容量 (GJ)
-#   cap_recharge_per_tick — キャパシタ回復量 (GJ/tick)
+#   max_speed             — base max speed without modules (units/tick)
+#   mass                  — hull mass (kg). Affects Vmax formula and align time.
+#   inertia_modifier      — controls align time only (lower = more agile).
+#                           align_time_ticks ≈ 1.386 × mass × inertia / MASS_SCALE
+#                           MASS_SCALE = 100_000
+#   max_shield / max_armor / max_hull — HP layers
+#   lock_time             — ticks to complete lock-on
+#   max_locks             — simultaneous lock limit
+#   cap_max               — capacitor pool (GJ)
+#   cap_recharge_per_tick — capacitor recovery (GJ/tick)
+#   sig_radius            — signature radius (units). Larger = easier to hit.
 #
-# Cap バランスガイド:
-#   フリゲート: Small Railgun (12) + AB (8) = 20/tick → recharge 10 → slow drain
-#               Small Railgun alone (12) → recharge 10 → slow drain
-#               どちらかを切る判断が必要
-#   クルーザー: Medium Railgun (18) alone → recharge 18 → 持続可能
-#               + AB (16) → drain → 管理が必要
+# Align time guide (τ = mass × inertia / 100_000, align ≈ 1.386τ ticks):
+#   Magpie  mass=12M inertia=0.3 → τ=36  → align≈50tick≈5s
+#   Frigate mass=1.5M inertia=0.4 → τ=6  → align≈8tick≈0.8s
+#   Cruiser mass=30M inertia=0.25 → τ=75 → align≈104tick≈10.4s
 # ============================================================
 
-# ── NPC 船種 ─────────────────────────────────────────────────
+# ── NPC ship types ───────────────────────────────────────────
 
 [[ship_types]]
 id    = 1
@@ -40,15 +40,16 @@ rig  = 3
 
 [ship_types.base_stats]
 max_speed             = 400.0
-thrust_magnitude      = 0.0
+mass                  = 1_500_000.0   # τ=6 tick, align≈0.8s
+inertia_modifier      = 0.4
 max_shield            = 200.0
 max_armor             = 150.0
 max_hull              = 150.0
 lock_time             = 5
 max_locks             = 1
 cap_max               = 300.0
-cap_recharge_per_tick = 6.0    # 2%/tick: Small Railgun (12) > recharge → slow drain
-sig_radius            = 40.0   # standard frigate signature
+cap_recharge_per_tick = 6.0
+sig_radius            = 40.0
 
 # ----
 
@@ -65,15 +66,16 @@ rig  = 3
 
 [ship_types.base_stats]
 max_speed             = 300.0
-thrust_magnitude      = 0.0
+mass                  = 2_500_000.0   # τ=10 tick, align≈1.4s
+inertia_modifier      = 0.4
 max_shield            = 350.0
 max_armor             = 300.0
 max_hull              = 200.0
 lock_time             = 4
 max_locks             = 2
 cap_max               = 400.0
-cap_recharge_per_tick = 10.0   # Medium Railgun (18) > recharge → slow drain
-sig_radius            = 60.0   # destroyer is slightly larger
+cap_recharge_per_tick = 10.0
+sig_radius            = 60.0
 
 # ----
 
@@ -90,17 +92,18 @@ rig  = 3
 
 [ship_types.base_stats]
 max_speed             = 200.0
-thrust_magnitude      = 0.0
+mass                  = 15_000_000.0  # τ=37.5 tick, align≈5.2s
+inertia_modifier      = 0.25
 max_shield            = 800.0
 max_armor             = 600.0
 max_hull              = 400.0
 lock_time             = 6
 max_locks             = 3
 cap_max               = 800.0
-cap_recharge_per_tick = 18.0   # Medium Railgun (18) = recharge → exactly sustainable
-sig_radius            = 125.0  # cruiser: easy to track and hit
+cap_recharge_per_tick = 18.0
+sig_radius            = 125.0
 
-# ── Voral Drift 船種 ─────────────────────────────────────────
+# ── Voral Drift ship types ───────────────────────────────────
 
 [[ship_types]]
 id    = 7
@@ -108,25 +111,26 @@ name  = "Magpie"
 class = "Frigate"
 
 [ship_types.slot_layout]
-high = 2   # 小型武装 1 門 + ユーティリティ
-mid  = 4   # AB + Fold ディスラプター + Web + 予備
+high = 2   # small weapon + utility
+mid  = 4   # AB + Fold Disruptor + Web + spare
 low  = 2
 rig  = 3
 
 [ship_types.base_stats]
-max_speed             = 700.0  # クラスター最速フリゲート：タックラーの本分
-thrust_magnitude      = 65.0   # 高い加速度。逃げ・追いの判断が常に求められる
-max_shield            = 200.0  # シールドは薄い。被弾前に動け、がコンセプト
+max_speed             = 400.0          # fastest frigate in the cluster: tackler's role
+mass                  = 12_000_000.0  # τ=36 tick → align≈5s. Sluggish for its size.
+inertia_modifier      = 0.3            # Oversized AB mass penalty hurts here.
+max_shield            = 200.0          # thin shield: move before taking hits
 max_armor             = 120.0
 max_hull              = 100.0
-lock_time             = 2      # 素早いロック。ターゲット切り替えが得意
+lock_time             = 2              # fast lock: good at switching targets
 max_locks             = 2
 cap_max               = 350.0
-cap_recharge_per_tick = 8.0    # AB (8) = 持続可能; + Small Railgun (12) = drain 12/tick
-                                # → 武装か推進かを常に選ぶ設計（タックラーらしいトレードオフ）
-sig_radius            = 35.0   # Magpie is nimble: slightly below standard frigate sig
+cap_recharge_per_tick = 8.0            # AB (100 GJ / 10 tick = 10/tick) > recharge → drain
+                                        # gun alone (60 GJ / 10 tick = 6/tick) → sustainable
+sig_radius            = 35.0
 
-# ── プレイヤー船種 ───────────────────────────────────────────
+# ── Player ship types ────────────────────────────────────────
 
 [[ship_types]]
 id    = 5
@@ -141,14 +145,15 @@ rig  = 3
 
 [ship_types.base_stats]
 max_speed             = 380.0
-thrust_magnitude      = 30.0
+mass                  = 2_800_000.0   # τ=11.2 tick, align≈1.6s
+inertia_modifier      = 0.4
 max_shield            = 800.0
 max_armor             = 600.0
 max_hull              = 400.0
 lock_time             = 4
 max_locks             = 3
 cap_max               = 700.0
-cap_recharge_per_tick = 16.0   # Medium Railgun (18) > recharge → slow drain
+cap_recharge_per_tick = 16.0
 sig_radius            = 60.0
 
 # ----
@@ -166,12 +171,13 @@ rig  = 3
 
 [ship_types.base_stats]
 max_speed             = 250.0
-thrust_magnitude      = 20.0
+mass                  = 30_000_000.0  # τ=75 tick, align≈10.4s
+inertia_modifier      = 0.25
 max_shield            = 1500.0
 max_armor             = 1200.0
 max_hull              = 800.0
 lock_time             = 5
 max_locks             = 4
 cap_max               = 1200.0
-cap_recharge_per_tick = 22.0   # Heavy Railgun (28) > recharge → management needed
+cap_recharge_per_tick = 22.0
 sig_radius            = 125.0

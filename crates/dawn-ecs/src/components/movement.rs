@@ -72,15 +72,21 @@ impl ThrustComp {
     pub const ZERO: Self = Self { direction: Velocity::ZERO, is_braking: false };
 }
 
-/// Runtime ship stats after applying all active module deltas.
+/// Runtime ship stats after applying all active module deltas (ADR-0023).
 ///
-/// Base values come from `ShipTypeDefinition.base_stats` at spawn time.
-/// `apply_fitting()` overwrites these with base + Σ(active module StatDelta).
+/// `max_speed`       = base_max_speed × Π(active speed_multipliers)
+/// `mass`            = hull_mass + Σ(ALL fitted mass_add)  [passive — always]
+/// τ (align time)    = mass × inertia_modifier / MASS_SCALE  [computed in MovementSystem]
 #[derive(Debug, Clone, Copy)]
 pub struct ShipStatsComp {
-    // ── Movement ──────────────────────────────────────────────────────────────
+    // ── Movement (ADR-0023) ───────────────────────────────────────────────────
+    /// Effective max speed (units/tick) after active propulsion modules.
     pub max_speed            : f32,
-    pub thrust_magnitude     : f32,
+    /// Total mass including all fitted modules (kg). Always includes mass_add
+    /// from all slots regardless of active/inactive state (passive behaviour).
+    pub mass                 : f32,
+    /// Inertia modifier (dimensionless). Controls align time; lower = more agile.
+    pub inertia_modifier     : f32,
 
     // ── HP (3-layer) ──────────────────────────────────────────────────────────
     pub max_shield           : f32,
@@ -116,7 +122,8 @@ impl ShipStatsComp {
     /// Production code must use ShipTypeDefinition instead.
     pub const NPC: Self = Self {
         max_speed            : 400.0,
-        thrust_magnitude     : 0.0,
+        mass                 : 12_000_000.0,
+        inertia_modifier     : 0.3,
         max_shield           : 200.0,
         max_armor            : 150.0,
         max_hull             : 150.0,
@@ -129,13 +136,14 @@ impl ShipStatsComp {
         lock_time            : 5,
         max_locks            : 1,
         cap_max              : 300.0,
-        cap_recharge_per_tick: 6.0,   // 2 %/tick → full in 50 ticks (5 s)
+        cap_recharge_per_tick: 6.0,
     };
 
     /// Fallback player default (tests and missing ship-type registry).
     pub const PLAYER: Self = Self {
         max_speed            : 500.0,
-        thrust_magnitude     : 40.0,
+        mass                 : 10_000_000.0,
+        inertia_modifier     : 0.3,
         max_shield           : 500.0,
         max_armor            : 300.0,
         max_hull             : 200.0,
@@ -148,14 +156,16 @@ impl ShipStatsComp {
         lock_time            : 3,
         max_locks            : 2,
         cap_max              : 500.0,
-        cap_recharge_per_tick: 10.0,  // 2 %/tick → full in 50 ticks (5 s)
+        cap_recharge_per_tick: 10.0,
     };
 
     /// Build from `ShipBaseStats` (weapon stats start at zero).
+    /// `apply_fitting()` will overwrite max_speed and mass after modules are applied.
     pub fn from_base(base: &dawn_core::ShipBaseStats) -> Self {
         Self {
             max_speed            : base.max_speed,
-            thrust_magnitude     : base.thrust_magnitude,
+            mass                 : base.mass,
+            inertia_modifier     : base.inertia_modifier,
             max_shield           : base.max_shield,
             max_armor            : base.max_armor,
             max_hull             : base.max_hull,

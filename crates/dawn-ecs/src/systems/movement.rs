@@ -1,38 +1,43 @@
-//! Movement system — acceleration-based space physics.
+//! Movement system — EVE-style exponential-approach space physics (ADR-0023).
 //!
 //! # Physics model
 //!
-//! Every tick:
-//!   1. Apply thrust: `velocity += normalize(thrust) * thrust_magnitude`
-//!   2. Clamp speed:  `|velocity| > max_speed  →  scale down`
-//!   3. Apply velocity: `position += velocity`
+//! Every tick the ship's velocity moves toward `v_target` by a fraction α:
 //!
-//! No walls. Space is infinite. Ships drift forever unless thrust is applied.
+//!   τ        = mass × inertia_modifier / MASS_SCALE   (time constant in ticks)
+//!   α        = 1 − exp(−1 / τ)                        (convergence per tick)
+//!   v(t+1)   = v(t) + (v_target − v(t)) × α
 //!
-//! # Authoritative Event (ADR-0008)
+//! When thrusting:  v_target = normalize(thrust_dir) × max_speed
+//! When braking:    v_target = ZERO
+//! When coasting:   thrust_dir = ZERO  →  v_target = v(t)  →  Δv = 0  (inertial)
 //!
-//! Emits `VelocityChanged` when velocity differs from the previous Tick.
-//! Ships with unchanged velocity emit no event.
-//! Position is derived state and is NOT recorded in any event.
+//! No explicit speed clamp is needed: the approach can never exceed v_target.
 //!
-//! # Contract
+//! # Align time (EVE-compatible, ADR-0022 / ADR-0023)
 //!
-//! - Pure computation: no I/O, no global state.
-//! - The caller appends the returned events to the EventStore.
+//! Warp engages when speed_toward(gate) ≥ max_speed × 0.75.
+//! Time to reach 75% of max_speed = −ln(0.25) × τ ≈ 1.386 × τ ticks.
+//! τ is controlled by mass × inertia_modifier, which emerges from the hull and
+//! fitted modules (including passive mass_add from oversized ABs — ADR-0023).
+//!
+//! # Authoritative Event (ADR-0008 / INV-MOVE)
+//!
+//! Emits `VelocityChanged` only when velocity actually differs from the previous tick.
 
 use crate::{
     components::{PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp, WarpComp},
     SimWorld,
 };
 use dawn_core::{events::VelocityChanged, DomainEvent, Tick, Velocity};
+use crate::systems::fitting::MASS_SCALE;
 
 pub struct MovementSystem;
 
 impl MovementSystem {
-    /// Run one tick of movement for all ships.
+    /// Run one tick of movement for all non-warping ships.
     ///
-    /// Returns `VelocityChanged` events for ships whose velocity changed this tick.
-    /// Ships at rest or with unchanged velocity emit no event.
+    /// Returns `VelocityChanged` events for ships whose velocity changed.
     pub fn run(world: &mut SimWorld, tick: Tick) -> Vec<DomainEvent> {
         let mut events = Vec::new();
 
@@ -47,70 +52,61 @@ impl MovementSystem {
                 Option<&WarpComp>,
             )>()
         {
-            // Ships in the committed warping phase are controlled by
-            // process_warp (position/velocity/clamp/events); skip them here
-            // so warp speed is not clamped to sublight max_speed (ADR-0022 §6).
+            // Ships in the committed warping phase are owned by process_warp;
+            // skip them so warp speed is not clamped (ADR-0022 §6).
             if warp_comp.is_some_and(|w| w.is_warping()) {
                 continue;
             }
 
             let old_velocity = vel_comp.0;
 
-            // ── 1. Apply thrust ───────────────────────────────────────────────
-            if stats_comp.thrust_magnitude > 0.0 {
-                // Braking: thrust opposite to current velocity to decelerate.
-                let thrust_dir = if thrust_comp.is_braking {
-                    let v = vel_comp.0;
-                    let speed = magnitude(v);
-                    if speed > f32::EPSILON {
-                        Velocity { dx: -v.dx / speed, dy: -v.dy / speed, dz: -v.dz / speed }
-                    } else {
-                        // Already stopped — clear braking flag and zero velocity exactly.
-                        thrust_comp.is_braking = false;
-                        vel_comp.0 = Velocity::ZERO;
-                        Velocity::ZERO
+            // ── Compute τ and α ───────────────────────────────────────────────
+            let tau = (stats_comp.mass * stats_comp.inertia_modifier / MASS_SCALE).max(f32::EPSILON);
+            let alpha = 1.0_f32 - (-1.0 / tau).exp();
+
+            // ── Determine v_target ────────────────────────────────────────────
+            let v_target = if thrust_comp.is_braking {
+                // Braking: approach zero (same τ as acceleration — EVE-faithful).
+                Velocity::ZERO
+            } else {
+                let mag = magnitude(thrust_comp.direction);
+                if mag > f32::EPSILON {
+                    // Thrusting: approach max_speed in the given direction.
+                    let scale = stats_comp.max_speed / mag;
+                    Velocity {
+                        dx: thrust_comp.direction.dx * scale,
+                        dy: thrust_comp.direction.dy * scale,
+                        dz: thrust_comp.direction.dz * scale,
                     }
                 } else {
-                    thrust_comp.direction
-                };
-
-                let mag = magnitude(thrust_dir);
-                if mag > f32::EPSILON {
-                    let scale = stats_comp.thrust_magnitude / mag;
-                    vel_comp.0.dx += thrust_dir.dx * scale;
-                    vel_comp.0.dy += thrust_dir.dy * scale;
-                    vel_comp.0.dz += thrust_dir.dz * scale;
+                    // Coasting: v_target = current velocity → no change (inertial flight).
+                    vel_comp.0
                 }
-            }
+            };
 
-            // ── 2. Clamp to max_speed ─────────────────────────────────────────
-            let speed = magnitude(vel_comp.0);
-            if speed > stats_comp.max_speed && speed > f32::EPSILON {
-                let scale = stats_comp.max_speed / speed;
-                vel_comp.0.dx *= scale;
-                vel_comp.0.dy *= scale;
-                vel_comp.0.dz *= scale;
-            }
+            // ── Exponential approach ──────────────────────────────────────────
+            vel_comp.0.dx += (v_target.dx - vel_comp.0.dx) * alpha;
+            vel_comp.0.dy += (v_target.dy - vel_comp.0.dy) * alpha;
+            vel_comp.0.dz += (v_target.dz - vel_comp.0.dz) * alpha;
 
-            // ── 2b. Braking overshoot guard ───────────────────────────────────
-            // If braking caused the ship to overshoot zero (velocity reversed),
-            // snap to exactly zero and stop braking.
-            if thrust_comp.is_braking && magnitude(vel_comp.0) < stats_comp.thrust_magnitude {
-                thrust_comp.is_braking = false;
+            // ── Braking stop guard ────────────────────────────────────────────
+            // Snap to exactly zero once the ship is slow enough that it would
+            // oscillate forever around zero due to floating-point rounding.
+            if thrust_comp.is_braking && magnitude(vel_comp.0) < 0.001 {
                 vel_comp.0 = Velocity::ZERO;
+                thrust_comp.is_braking = false;
             }
 
-            // ── 3. Apply velocity to position ─────────────────────────────────
+            // ── Integrate position ────────────────────────────────────────────
             pos_comp.0.x += vel_comp.0.dx;
             pos_comp.0.y += vel_comp.0.dy;
             pos_comp.0.z += vel_comp.0.dz;
 
-            // ── 4. Emit VelocityChanged only when velocity actually changed ────
-            let new_velocity = vel_comp.0;
-            if velocity_changed(old_velocity, new_velocity) {
+            // ── Emit VelocityChanged only when velocity actually changed ───────
+            if velocity_changed(old_velocity, vel_comp.0) {
                 events.push(DomainEvent::VelocityChanged(VelocityChanged {
                     ship_id : id_comp.0,
-                    velocity: new_velocity,
+                    velocity: vel_comp.0,
                     tick,
                 }));
             }
@@ -120,7 +116,6 @@ impl MovementSystem {
     }
 }
 
-/// Returns true if velocity changed by more than float epsilon.
 fn velocity_changed(old: Velocity, new: Velocity) -> bool {
     (new.dx - old.dx).abs() > f32::EPSILON
         || (new.dy - old.dy).abs() > f32::EPSILON
@@ -152,13 +147,12 @@ mod tests {
     }
 
     #[test]
-    fn ship_with_nonzero_velocity_produces_no_event_when_velocity_unchanged() {
-        // 等速直線運動: thrust=0, 速度変化なし → イベントなし
+    fn ship_with_nonzero_velocity_coasts_without_event() {
+        // Constant-velocity coasting: no thrust, velocity unchanged → no event.
         let mut w = SimWorld::new(SectorId(0));
         spawn(&mut w, 1, Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0));
-        // NPC (thrust_magnitude=0) は速度が変わらない
-        assert!(MovementSystem::run(&mut w, Tick(1)).is_empty(),
-            "等速直線運動では VelocityChanged は発行しない");
+        // NPC has no thrust direction set, so v_target = v → Δv = 0.
+        assert!(MovementSystem::run(&mut w, Tick(1)).is_empty());
     }
 
     #[test]
@@ -166,18 +160,15 @@ mod tests {
         use crate::components::{WarpComp, WarpPhase};
         let mut w  = SimWorld::new(SectorId(0));
         let id     = dawn_core::ShipId::new(NodeId(0), 1);
-        // Warp velocity far above max_speed; movement must NOT clamp or integrate it.
         let warp_vel = Velocity::new(5000.0, 0.0, 0.0);
         let entity = w.spawn_ship(id, Position::ORIGIN, warp_vel);
-        w.set_ship_stats(entity, ShipStatsComp::PLAYER); // max_speed << 5000
+        w.set_ship_stats(entity, ShipStatsComp::PLAYER);
         w.inner_mut().insert_one(entity, WarpComp {
             gate_id: dawn_core::JumpGateId(0),
             phase  : WarpPhase::Warping,
         }).unwrap();
 
         let events = MovementSystem::run(&mut w, Tick(1));
-
-        // Movement emitted nothing and left position/velocity untouched (process_warp owns it).
         assert!(events.is_empty(), "movement must not touch a warping ship");
         let pos = w.inner().get::<&PositionComp>(entity).unwrap().0;
         assert_eq!(pos, Position::ORIGIN, "movement must not integrate a warping ship");
@@ -206,7 +197,7 @@ mod tests {
         w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().direction = Velocity::new(1.0, 0.0, 0.0);
         let events = MovementSystem::run(&mut w, Tick(7));
         if let DomainEvent::VelocityChanged(e) = &events[0] {
-            assert!(e.velocity.dx > 0.0, "velocity.dx should be positive after thrust");
+            assert!(e.velocity.dx > 0.0);
             assert_eq!(e.tick, Tick(7));
         } else {
             panic!("expected VelocityChanged");
@@ -220,10 +211,9 @@ mod tests {
         let mut w = SimWorld::new(SectorId(0));
         spawn(&mut w, 1, start, vel);
         MovementSystem::run(&mut w, Tick(1));
-        // position should have advanced by vel (NPC: no thrust, velocity unchanged)
         for (_, pos) in w.inner().query::<&PositionComp>().iter() {
-            assert!((pos.0.x - (start.x + vel.dx)).abs() < f32::EPSILON);
-            assert!((pos.0.y - (start.y + vel.dy)).abs() < f32::EPSILON);
+            assert!((pos.0.x - (start.x + vel.dx)).abs() < 0.001);
+            assert!((pos.0.y - (start.y + vel.dy)).abs() < 0.001);
         }
     }
 
@@ -260,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn thrust_accumulates_velocity_each_tick() {
+    fn thrust_accumulates_velocity_toward_max_speed_exponentially() {
         let mut w  = SimWorld::new(SectorId(0));
         let id     = dawn_core::ShipId::new(NodeId(0), 1);
         let entity = w.spawn_ship(id, Position::new(500.0, 500.0, 500.0), Velocity::ZERO);
@@ -271,6 +261,8 @@ mod tests {
         assert!(vel.0.dx > 0.0);
         assert_eq!(vel.0.dy, 0.0);
         assert_eq!(vel.0.dz, 0.0);
+        // Must not exceed max_speed immediately.
+        assert!(vel.0.dx <= ShipStatsComp::PLAYER.max_speed + f32::EPSILON);
     }
 
     #[test]
@@ -278,12 +270,10 @@ mod tests {
         let mut w  = SimWorld::new(SectorId(0));
         let id     = dawn_core::ShipId::new(NodeId(0), 1);
         let entity = w.spawn_ship(id, Position::ORIGIN, Velocity::new(100.0, 0.0, 0.0));
-        w.set_ship_stats(entity, ShipStatsComp::PLAYER); // thrust_magnitude=40
-        // Engage braking
+        w.set_ship_stats(entity, ShipStatsComp::PLAYER);
         w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().is_braking = true;
 
-        // Run until stopped (max ~3 ticks for 100 / 40 rounding up)
-        for _ in 0..10 { MovementSystem::run(&mut w, Tick(1)); }
+        for _ in 0..500 { MovementSystem::run(&mut w, Tick(1)); }
 
         let vel = *w.inner().get::<&VelocityComp>(entity).unwrap();
         assert_eq!(vel.0, Velocity::ZERO, "ship must come to a complete stop");
@@ -298,22 +288,54 @@ mod tests {
         let entity = w.spawn_ship(id, Position::ORIGIN, Velocity::new(200.0, 0.0, 0.0));
         w.set_ship_stats(entity, ShipStatsComp::PLAYER);
         w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().is_braking = true;
-
-        // At least one tick must emit a VelocityChanged (deceleration happened)
         let events = MovementSystem::run(&mut w, Tick(1));
         assert!(!events.is_empty(), "first braking tick must emit VelocityChanged");
     }
 
+    /// Verify that align time (ticks to reach 75% of max_speed) ≈ 1.386 × τ_ticks.
     #[test]
-    fn velocity_is_clamped_to_max_speed() {
+    fn align_time_matches_eve_formula_1386_times_tau() {
         let mut w  = SimWorld::new(SectorId(0));
         let id     = dawn_core::ShipId::new(NodeId(0), 1);
-        let entity = w.spawn_ship(id, Position::new(500.0, 500.0, 500.0),
-                                  Velocity::new(10000.0, 0.0, 0.0));
+        let entity = w.spawn_ship(id, Position::ORIGIN, Velocity::ZERO);
+        // Use PLAYER stats: mass=10M, inertia=0.3 → τ = 10M*0.3/100_000 = 30 ticks.
         w.set_ship_stats(entity, ShipStatsComp::PLAYER);
-        MovementSystem::run(&mut w, Tick(1));
+        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().direction = Velocity::new(1.0, 0.0, 0.0);
+
+        let tau_ticks = ShipStatsComp::PLAYER.mass * ShipStatsComp::PLAYER.inertia_modifier / MASS_SCALE;
+        let expected_align = (-0.25_f32.ln() * tau_ticks).ceil() as u32;
+        let threshold = ShipStatsComp::PLAYER.max_speed * 0.75;
+
+        let mut actual_align = 0u32;
+        for t in 1..=500 {
+            MovementSystem::run(&mut w, Tick(t as u64));
+            let vel = w.inner().get::<&VelocityComp>(entity).unwrap().0;
+            if vel.dx >= threshold {
+                actual_align = t;
+                break;
+            }
+        }
+        assert!(actual_align > 0, "ship never reached 75% of max_speed");
+        // Allow ±2 ticks tolerance for discrete-time approximation.
+        assert!(
+            actual_align.abs_diff(expected_align) <= 2,
+            "align_time actual={actual_align} expected≈{expected_align} (τ={tau_ticks:.1})"
+        );
+    }
+
+    #[test]
+    fn velocity_never_exceeds_max_speed() {
+        let mut w  = SimWorld::new(SectorId(0));
+        let id     = dawn_core::ShipId::new(NodeId(0), 1);
+        let entity = w.spawn_ship(id, Position::new(500.0, 500.0, 500.0), Velocity::ZERO);
+        w.set_ship_stats(entity, ShipStatsComp::PLAYER);
+        w.inner_mut().get::<&mut ThrustComp>(entity).unwrap().direction = Velocity::new(1.0, 0.0, 0.0);
+        for t in 1..=200 {
+            MovementSystem::run(&mut w, Tick(t));
+        }
         let vel   = *w.inner().get::<&VelocityComp>(entity).unwrap();
         let stats = *w.inner().get::<&ShipStatsComp>(entity).unwrap();
-        assert!(magnitude(vel.0) <= stats.max_speed + f32::EPSILON);
+        assert!(magnitude(vel.0) <= stats.max_speed + 0.001,
+            "speed {} exceeds max_speed {}", magnitude(vel.0), stats.max_speed);
     }
 }

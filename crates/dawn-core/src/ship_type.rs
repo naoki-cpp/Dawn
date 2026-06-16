@@ -56,10 +56,15 @@ impl SlotLayout {
 /// through High-slot weapon modules (base value is zero).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ShipBaseStats {
-    /// Max speed (units/tick).
+    /// Base max speed without any modules (units/tick). AB/MWD multiply this
+    /// via StatDelta.speed_multiplier to produce the effective max speed.
     pub max_speed            : f32,
-    /// Thrust acceleration (units/tick²). Zero for NPC ships (constant velocity).
-    pub thrust_magnitude     : f32,
+    /// Hull mass (kg). Together with inertia_modifier determines τ (time
+    /// constant for velocity changes) and therefore align time (ADR-0023).
+    pub mass                 : f32,
+    /// Inertia modifier (dimensionless). Lower = more agile. Controls only
+    /// align time; has no direct effect on max speed.
+    pub inertia_modifier     : f32,
     /// Max Shield HP.
     pub max_shield           : f32,
     /// Max Armor HP.
@@ -106,7 +111,8 @@ mod tests {
             slot_layout: SlotLayout::FRIGATE,
             base_stats : ShipBaseStats {
                 max_speed            : 400.0,
-                thrust_magnitude     : 0.0,
+                mass                 : 1_500_000.0,
+                inertia_modifier     : 0.4,
                 max_shield           : 200.0,
                 max_armor            : 150.0,
                 max_hull             : 150.0,

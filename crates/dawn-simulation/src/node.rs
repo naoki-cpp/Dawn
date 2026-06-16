@@ -1338,7 +1338,8 @@ impl<S: EventStore> SimulationNode<S> {
                         "weapon_range_add"    : d.weapon_range_add,
                         "falloff_range_add"   : d.falloff_range_add,
                         "tracking_speed_add"  : d.tracking_speed_add,
-                        "max_speed_add"       : d.max_speed_add,
+                        "speed_multiplier"    : d.speed_multiplier,
+                        "mass_add"            : d.mass_add,
                         "max_shield_add"      : d.max_shield_add,
                         "max_armor_add"       : d.max_armor_add,
                         "max_hull_add"        : d.max_hull_add,
@@ -2155,24 +2156,24 @@ mod tests {
 
     #[test]
     fn warp_align_time_emerges_from_ship_agility() {
-        // A sluggish ship (low thrust) takes longer to reach 75% max speed and
-        // thus to engage warp than the default player ship — EVE-style align.
-        fn ticks_to_engage(thrust: f32) -> u32 {
+        // A sluggish ship (high mass) takes longer to reach 75% max speed and
+        // thus to engage warp than an agile ship — EVE-style align (ADR-0023).
+        fn ticks_to_engage(mass: f32) -> u32 {
             let mut node = mem_node();
             let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
             let entity = *node.ship_index.get(&ship).unwrap();
             let mut stats = *node.world.inner().get::<&ShipStatsComp>(entity).unwrap();
-            stats.thrust_magnitude = thrust;
+            stats.mass = mass;
             node.world.set_ship_stats(entity, stats);
             node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, gate_id: dawn_core::JumpGateId(0) });
-            for t in 1..=200u32 {
+            for t in 1..=500u32 {
                 node.tick();
                 if node.warp_phase(ship) == Some(WarpPhase::Warping) { return t; }
             }
             u32::MAX
         }
-        assert!(ticks_to_engage(20.0) > ticks_to_engage(80.0),
-            "a less agile ship spends longer aligning (a longer tackle window)");
+        assert!(ticks_to_engage(50_000_000.0) > ticks_to_engage(1_000_000.0),
+            "a heavier ship spends longer aligning (a longer tackle window)");
     }
 
     #[test]
@@ -2219,8 +2220,9 @@ mod tests {
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, gate_id: dawn_core::JumpGateId(0) });
         // Tick until the warp engages (just past alignment); it is then far from
-        // arrival, so it stays committed.
-        for _ in 0..40 {
+        // arrival, so it stays committed. Player ship: mass=10M, inertia=0.3
+        // → τ=30 ticks → align ≈ 42 ticks, so allow up to 100.
+        for _ in 0..100 {
             node.tick();
             if node.warp_phase(ship) == Some(WarpPhase::Warping) { break; }
         }
