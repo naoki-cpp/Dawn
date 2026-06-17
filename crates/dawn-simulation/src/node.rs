@@ -1029,12 +1029,15 @@ impl<S: EventStore> SimulationNode<S> {
             .collect();
 
         for bot in bots {
-            // Below 30% HP the bot attempts to warp to the nearest gate and
+            // Below 50% HP the bot attempts to warp to the nearest gate and
             // escape. `apply_warp_command` calls `can_propose_warp` internally,
             // which returns false when the bot is tackled — the player's Fold
             // Disruptor creates that condition. While fleeing the bot stops
             // fighting so the player must hold tackle to finish the kill.
-            if bot.hp_fraction < 0.30 {
+            //
+            // 50% (not 30%) gives the Magpie's ~50-tick align time enough HP
+            // headroom to complete the warp before dying.
+            if bot.hp_fraction < 0.50 {
                 if let Some(&(gate_id, _)) = gates.iter().min_by(|a, b| {
                     bot.position.distance_squared(a.1)
                         .partial_cmp(&bot.position.distance_squared(b.1))
