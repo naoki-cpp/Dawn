@@ -3335,4 +3335,89 @@ mod tests {
         assert!(!node2.can_propose_warp(ship_b, gate_id),
             "restored node must still prevent tackled ship from warping");
     }
+
+    #[test]
+    fn bot_starts_aligning_when_hp_drops_below_50_percent() {
+        use dawn_core::events::DamageTaken;
+
+        let mut node = node_with_modules();
+
+        // Bot at (1200, 0, 0) — far from gate at ~49000 so MIN_WARP_DISTANCE passes.
+        let bot_pos = Position::new(1200.0, 0.0, 0.0);
+        let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
+
+        // Player at origin — required so process_bots has a target and doesn't early-return.
+        let player_id = node.next_player_id();
+        let _ = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+
+        // Magpie max HP: shield=200, armor=120, hull=100, total=420.
+        // Deal 215 damage → shield=0, armor=105, hull=100 → 205/420 ≈ 48.8% < 50%.
+        node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
+            ship_id        : bot_ship_id,
+            damage         : 215.0,
+            current_shield : 0.0,
+            current_armor  : 105.0,
+            current_hull   : 100.0,
+            tick           : Tick(1),
+        }));
+
+        // One tick: process_bots detects hp_fraction < 0.50, calls apply_warp_command.
+        node.tick();
+
+        assert!(
+            matches!(node.warp_phase(bot_ship_id), Some(WarpPhase::Aligning)),
+            "bot should be in WarpPhase::Aligning after hp drops below 50%"
+        );
+    }
+
+    #[test]
+    fn tackled_bot_cannot_warp_but_keeps_fighting() {
+        use dawn_core::{LockOnCommand, ActivateModuleCommand, SlotKind, events::DamageTaken};
+        use crate::modules::MODULE_FOLD_DISRUPTOR;
+
+        let mut node = node_with_modules();
+
+        // Bot close to player so tackle range is satisfied.
+        let bot_pos = Position::new(1000.0, 0.0, 0.0);
+        let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
+
+        let player_id = node.next_player_id();
+        let player_ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+
+        fit_fold_disruptor(&mut node, player_ship_id);
+
+        // Activate disruptor and lock bot.
+        node.activate_module_owned(player_id, ActivateModuleCommand {
+            ship_id  : player_ship_id,
+            module_id: MODULE_FOLD_DISRUPTOR,
+            slot     : SlotKind::Mid,
+        });
+        let lock_cmd = LockOnCommand { ship_id: player_ship_id, target_id: bot_ship_id };
+        // Run enough ticks for lock to resolve (lock_time=2) and tackle to apply.
+        for _ in 0..5 {
+            node.tick_with_lock_commands(&[lock_cmd.clone()]);
+        }
+
+        // Confirm bot is tackled.
+        let gate_id = node.jump_gates.keys().next().copied().unwrap();
+        assert!(!node.can_propose_warp(bot_ship_id, gate_id), "bot should be tackled");
+
+        // Damage bot below 50% HP.
+        node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
+            ship_id        : bot_ship_id,
+            damage         : 215.0,
+            current_shield : 0.0,
+            current_armor  : 105.0,
+            current_hull   : 100.0,
+            tick           : Tick(10),
+        }));
+
+        node.tick_with_lock_commands(&[lock_cmd.clone()]);
+
+        // Tackle blocks warp — bot must NOT have WarpComp.
+        assert!(
+            node.warp_phase(bot_ship_id).is_none(),
+            "tackled bot should not enter warp"
+        );
+    }
 }
