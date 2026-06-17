@@ -966,6 +966,8 @@ impl<S: EventStore> SimulationNode<S> {
             weapon_modules: Vec<(dawn_core::ModuleId, dawn_core::fitting::SlotKind)>,
             // HP fraction for flee decision (current / max across all three layers).
             hp_fraction   : f32,
+            // True if WarpComp is already attached (alignment or warping in progress).
+            is_warping    : bool,
         }
 
         let mut bots: Vec<BotState> = Vec::new();
@@ -998,6 +1000,7 @@ impl<S: EventStore> SimulationNode<S> {
             } else {
                 1.0
             };
+            let is_warping = self.world.inner().get::<&WarpComp>(entity).is_ok();
             bots.push(BotState {
                 player_id, ship_id,
                 position    : pos.0,
@@ -1005,6 +1008,7 @@ impl<S: EventStore> SimulationNode<S> {
                 locked_targets: locked,
                 weapon_modules,
                 hp_fraction,
+                is_warping,
             });
         }
 
@@ -1029,24 +1033,28 @@ impl<S: EventStore> SimulationNode<S> {
             .collect();
 
         for bot in bots {
-            // Below 50% HP the bot attempts to warp to the nearest gate and
-            // escape. `apply_warp_command` calls `can_propose_warp` internally,
-            // which returns false when the bot is tackled — the player's Fold
-            // Disruptor creates that condition. While fleeing the bot stops
-            // fighting so the player must hold tackle to finish the kill.
-            //
-            // 50% (not 30%) gives the Magpie's ~50-tick align time enough HP
-            // headroom to complete the warp before dying.
+            // Below 50% HP the bot attempts to warp to the nearest gate.
+            // If warp succeeds (or is already in progress), pause combat AI —
+            // the bot is committed to fleeing.
+            // If warp is blocked by tackle, keep fighting; the tackle is what
+            // holds the bot here and the player must sustain it to finish the kill.
             if bot.hp_fraction < 0.50 {
-                if let Some(&(gate_id, _)) = gates.iter().min_by(|a, b| {
+                if bot.is_warping {
+                    continue; // alignment/warp in progress — skip combat AI
+                }
+                let warp_started = if let Some(&(gate_id, _)) = gates.iter().min_by(|a, b| {
                     bot.position.distance_squared(a.1)
                         .partial_cmp(&bot.position.distance_squared(b.1))
                         .unwrap_or(std::cmp::Ordering::Equal)
                 }) {
-                    // auto_jump=false: bot just wants to warp away, not jump sectors.
-                    self.apply_warp_command(bot.ship_id, gate_id, false);
+                    self.apply_warp_command(bot.ship_id, gate_id, false)
+                } else {
+                    false
+                };
+                if warp_started {
+                    continue; // just attached WarpComp — skip combat AI this tick
                 }
-                continue; // skip combat AI while fleeing
+                // Warp blocked (tackled or no gate) — fall through to combat AI.
             }
 
             // Find closest human target.
