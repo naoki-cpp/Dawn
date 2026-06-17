@@ -900,6 +900,11 @@ impl<S: EventStore> SimulationNode<S> {
             slot      : SlotKind::Mid,
             module_id : crate::modules::MODULE_AFTERBURNER,
         });
+        self.fit_module(FitModuleCommand {
+            ship_id,
+            slot      : SlotKind::Mid,
+            module_id : crate::modules::MODULE_FOLD_DISRUPTOR,
+        });
 
         self.event_store.append(DomainEvent::ShipSpawned(ShipSpawned {
             ship_id,
@@ -959,6 +964,8 @@ impl<S: EventStore> SimulationNode<S> {
             weapon_range  : f32,
             locked_targets: Vec<ShipId>,
             weapon_modules: Vec<(dawn_core::ModuleId, dawn_core::fitting::SlotKind)>,
+            // HP fraction for flee decision (current / max across all three layers).
+            hp_fraction   : f32,
         }
 
         let mut bots: Vec<BotState> = Vec::new();
@@ -984,12 +991,20 @@ impl<S: EventStore> SimulationNode<S> {
                         .collect()
                 })
                 .unwrap_or_default();
+            let hp_fraction = if let Ok(hull) = self.world.inner().get::<&HullComp>(entity) {
+                let max_hp = stats.max_shield + stats.max_armor + stats.max_hull;
+                let cur_hp = hull.current_shield + hull.current_armor + hull.current_hull;
+                if max_hp > 0.0 { cur_hp / max_hp } else { 1.0 }
+            } else {
+                1.0
+            };
             bots.push(BotState {
                 player_id, ship_id,
                 position    : pos.0,
                 weapon_range: stats.weapon_range,
                 locked_targets: locked,
                 weapon_modules,
+                hp_fraction,
             });
         }
 
@@ -1007,7 +1022,30 @@ impl<S: EventStore> SimulationNode<S> {
         if targets.is_empty() { return; }
 
         // ── 3. Issue commands (same pipeline as human player) ─────────────────
+        // Collect gate list once — shared by all bots this tick.
+        let gates: Vec<(dawn_core::JumpGateId, Position)> = self.jump_gates
+            .iter()
+            .map(|(&id, def)| (id, def.position))
+            .collect();
+
         for bot in bots {
+            // Below 30% HP the bot attempts to warp to the nearest gate and
+            // escape. `apply_warp_command` calls `can_propose_warp` internally,
+            // which returns false when the bot is tackled — the player's Fold
+            // Disruptor creates that condition. While fleeing the bot stops
+            // fighting so the player must hold tackle to finish the kill.
+            if bot.hp_fraction < 0.30 {
+                if let Some(&(gate_id, _)) = gates.iter().min_by(|a, b| {
+                    bot.position.distance_squared(a.1)
+                        .partial_cmp(&bot.position.distance_squared(b.1))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                }) {
+                    // auto_jump=false: bot just wants to warp away, not jump sectors.
+                    self.apply_warp_command(bot.ship_id, gate_id, false);
+                }
+                continue; // skip combat AI while fleeing
+            }
+
             // Find closest human target.
             let Some(target) = targets.iter().min_by(|a, b| {
                 bot.position.distance_squared(a.position)
