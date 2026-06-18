@@ -110,7 +110,7 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
 > 設計の中心的な問い（docs/game-design.md）は不変:
 > 「その機能はプレイヤーが意図的な判断を下す機会を増やすか？」
 
-### 現在のスコープ（Phase 7.5 完了）
+### 現在のスコープ（Phase 8A/8B/8C 完了・ADR-0025 実装済み）
 
 ```
 実装対象:
@@ -162,6 +162,18 @@ Phase 7.5 で追加承認済み（ADR-0015・実装済み）:
   apply_warp_command(auto_jump=true) でワープ開始 → ワープ完了時に pending_auto_jumps へ push →
   drain_pending_auto_jumps() でサーバーが Raft へ Transit 提案（auto-warp-then-jump）。
   Godot クライアント配線（J キー優先順位修正・ワープ到着スナップ）まで完了）
+
+戦闘の深み（ADR-0016 §5）で追加承認済み（ADR-0024・実装済み）:
+  Tackle — Fold Disruptor モジュール（TackledComp / TackleApplied / TackleReleased イベント,
+  ModuleKind::Tackle, Tick Step 4.5 process_tackle, can_propose_warp / can_propose_jump 拒否,
+  スナップショット永続化（INV-002）, data/modules.toml Fold Disruptor I（id=12）配線済み）
+
+追加承認済み（ADR-0025・実装済み）:
+  天体（恒星・惑星）— CelestialBodyId / CelestialBodyKind / CelestialBodyDef,
+  WarpTarget::Body 対応（BODY_WARP_ARRIVAL_FACTOR = 1.5）, celestial_bodies_in_sector(),
+  静的マップデータ（3星系 × 恒星1 + 惑星1, 1 unit = 10,000 km → 1 AU ≈ 15,000 units）,
+  space_sky.gdshader 太陽ディスク・sun_direction uniform,
+  Godot クライアント配線（天体クリック選択 + W キー天体ワープ / sun_direction 毎フレーム更新）まで完了）
 
 実装しない（提案も拒否する / 反グラインドの核 — FBD-009）:
   スキルポイント制 / 時間経過・課金による受動成長（= キャラクター育成）
@@ -1312,6 +1324,6 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-16（ADR-0023 Propulsion Physics 実装反映 — §1 スコープ追記・§6 Tick 処理順序に JumpCommand 射程外ルートと Step 2.6 auto_jump 動作を追記。roadmap.md の Tackle 次 ADR 番号を 0024 に修正。人間承認済み）*
-*対応ADR: ADR-0001 〜 ADR-0023（ADR-0020 Simulation LoD は deferred）*
-*次回レビュー予定: Phase 8D（分散インフラ）設計時 / Tackle（ADR-0024）着手時*
+*最終更新: 2026-06-18（ADR-0024 Tackle / ADR-0025 天体 実装反映 — §1 スコープに ADR-0024/0025 追記・フェーズ表記更新。人間承認済み）*
+*対応ADR: ADR-0001 〜 ADR-0025（ADR-0020 Simulation LoD は deferred）*
+*次回レビュー予定: Phase 8D（分散インフラ）設計時 / Signature Resolution 着手時*
