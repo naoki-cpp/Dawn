@@ -65,7 +65,8 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 - ✅ Phase 6 — ゲームループ改善（Capacitor / EVE命中率式 / タクティカルオーバーレイ / ボットAI / 154テスト全パス）
 - ✅ Phase 7 — 分散コンセンサス（Raft / ADR-0014 / リーダー障害中の Transit 完遂を検証 / 223テスト全パス）
 - ✅ Phase 7.5 — 星系間ナビゲーション（ADR-0009 / Jump Gate Raft パイプライン + Godot クライアント配線 / 241テスト全パス）
-- ✅ 戦闘の深み — Warp（ADR-0022）/ Propulsion Physics（ADR-0023）/ Tackle（ADR-0024）実装済み（312テスト全パス）
+- ✅ 戦闘の深み — Warp（ADR-0022）/ Propulsion Physics（ADR-0023）/ Tackle（ADR-0024）実装済み（316テスト全パス）
+- ✅ 天体（ADR-0025）— 恒星・惑星を静的天体として追加。WarpTarget::Body 対応、sun_direction シェーダー、Godot クライアント配線（W キー / クリック選択）まで完了。（316テスト全パス）
 
 ### Phase 4 卒業記録（ADR-0007 §6）
 

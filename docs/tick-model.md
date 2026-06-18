@@ -96,12 +96,15 @@ Step 2.5: Approach System を実行する（Movement の前・ADR-0015）
            Ship 対象が消失したら ApproachComp を除去して is_braking = true。
          → 生成イベントなし（次 Tick 以降の Movement が VelocityChanged を出す）
 
-Step 2.6: Warp System を実行する（Approach の後・Movement の前・ADR-0022）
+Step 2.6: Warp System を実行する（Approach の後・Movement の前・ADR-0022 / ADR-0025）
          SimulationNode::process_warp(tick)
-         → WarpComp を持つ Ship のみ対象。Aligning は gate へ加速し、ゲート方向の速度が
+         → WarpComp を持つ Ship のみ対象。Aligning はターゲット方向へ加速し、ターゲット方向の速度が
            max_speed × 75% に達したら Warping へ遷移（EVE 準拠・整列時間は機動性次第・中断可・Tackle 窓）。
-           Warping は warp 速度で gate へ直進し残距離比例で減速、activation_radius×0.8 内で停止。
-           gate 消失時は WarpComp を除去してブレーキ。
+           Warping はターゲットへ直進し残距離比例で減速して以下の地点で停止:
+             Gate  ターゲット: activation_radius × 0.8 以内（ADR-0022）
+             Body  ターゲット: body.radius × 1.5 以内（ADR-0025 BODY_WARP_ARRIVAL_FACTOR）
+           到達不能時（ターゲット消失等）は WarpComp を除去してブレーキ。
+           auto_jump = true の Gate ターゲットは到着後に pending_auto_jumps へ push（ADR-0023）。
          → warping 中の船は Step 3 の Movement がスキップ（warp 速度をクランプしない）。
            生成イベント: VelocityChanged（warp の移動を記録・新イベント型なし）
 
