@@ -750,6 +750,8 @@ fn deliver_aoi_frame(
 fn build_serve_node(id: NodeId, sector: SectorId, bounds: SectorBounds, pop_cap: usize) -> SimulationNode {
     let mut node = SimulationNode::new(id, sector, bounds);
     node.set_population_cap(pop_cap);
+    let star_map = data_loader::load_star_map("data/star_map.toml", crate::star_map::StarMap::builtin());
+    node.set_star_map(std::sync::Arc::new(star_map));
     for def in data_loader::load_modules("data/modules.toml", modules::all_modules()) {
         node.register_module(def);
     }
@@ -1142,7 +1144,7 @@ async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     );
                     println!("  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
                         j.ship_id.raw(), j.gate_id.0, sector, to.0);
-                } else if ship_owned && nodes[sector].apply_warp_command(j.ship_id, j.gate_id, true) {
+                } else if ship_owned && nodes[sector].apply_warp_command(j.ship_id, dawn_core::WarpTarget::Gate(j.gate_id), true) {
                     // Ship is out of range: warp to the gate first; the node will
                     // queue a pending_auto_jump once warp completes (ADR-0022).
                     println!("  [Server] Jump: ship #{} out of range — auto-warp to gate #{} started",

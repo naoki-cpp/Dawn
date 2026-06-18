@@ -15,12 +15,14 @@
 //! ```
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use dawn_core::{
     events::{ShipFitted, ShipSpawned},
     ship_type::{ShipTypeDefinition, ShipTypeId},
-    DomainEvent, FitModuleCommand, JumpGateDef, JumpGateId, ModuleDefinition, ModuleId, NodeId, PlayerId, Position,
-    SectorBounds, SectorId, ShipId, Tick, Velocity,
+    CelestialBodyDef, CelestialBodyId, DomainEvent, FitModuleCommand, JumpGateDef, JumpGateId,
+    ModuleDefinition, ModuleId, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId,
+    Tick, Velocity, WarpTarget,
 };
 use dawn_ecs::{
     components::{ApproachComp, CapacitorComp, FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, TackledComp, ThrustComp, VelocityComp, WarpComp, WarpPhase},
@@ -58,6 +60,9 @@ const MIN_WARP_DISTANCE: f32 = 3000.0;
 /// Stop this far inside the gate's activation radius on arrival, so the jump
 /// prompt is available immediately (mirrors approach, ADR-0015).
 const WARP_ARRIVAL_FACTOR: f32 = 0.8;
+/// Warp to a celestial body: arrive at this multiple of the body's radius from
+/// its centre (ADR-0025). 1.5 = orbit insertion outside the body surface.
+const BODY_WARP_ARRIVAL_FACTOR: f32 = 1.5;
 
 /// Component of `vel` directed from `pos` toward `target` (units/tick). Negative
 /// when moving away. Zero when `pos == target`. Used for EVE-style 75% warp
@@ -127,8 +132,13 @@ where
     /// here and injected into the LockSystem at the start of the NEXT tick,
     /// ensuring they are processed exactly like human-issued lock commands.
     pending_bot_lock_commands: Vec<dawn_core::LockOnCommand>,
+    /// Full navigation topology (star systems, gates, bodies). Loaded from
+    /// `data/star_map.toml`; falls back to [`StarMap::builtin`] if absent.
+    star_map: Arc<crate::star_map::StarMap>,
     /// Jump Gates whose `from_sector` is this node's Sector (ADR-0009).
     jump_gates: HashMap<JumpGateId, JumpGateDef>,
+    /// Celestial bodies (stars, planets) in this node's Sector (ADR-0025).
+    celestial_bodies: HashMap<CelestialBodyId, CelestialBodyDef>,
     /// Per-Sector population backstop (ADR-0018). Defaults to [`POPULATION_CAP`];
     /// tunable via [`Self::set_population_cap`].
     population_cap: usize,
@@ -175,9 +185,16 @@ impl<S: EventStore> SimulationNode<S> {
             ship_type_ids             : HashMap::new(),
             player_id_counter         : 0,
             pending_bot_lock_commands : Vec::new(),
-            jump_gates                : crate::star_map::gates_in_sector(sector_id)
+            star_map                  : Arc::new(crate::star_map::StarMap::builtin()),
+            jump_gates                : crate::star_map::StarMap::builtin()
+                .gates_in_sector(sector_id)
                 .into_iter()
                 .map(|g| (g.id, g))
+                .collect(),
+            celestial_bodies          : crate::star_map::StarMap::builtin()
+                .bodies_in_sector(sector_id)
+                .into_iter()
+                .map(|b| (b.id, b))
                 .collect(),
             population_cap            : POPULATION_CAP,
             pending_auto_jumps        : Vec::new(),
@@ -215,9 +232,16 @@ impl<S: EventStore> SimulationNode<S> {
             ship_type_ids             : HashMap::new(),
             player_id_counter         : 0,
             pending_bot_lock_commands : Vec::new(),
-            jump_gates                : crate::star_map::gates_in_sector(snapshot.sector_id)
+            star_map                  : Arc::new(crate::star_map::StarMap::builtin()),
+            jump_gates                : crate::star_map::StarMap::builtin()
+                .gates_in_sector(snapshot.sector_id)
                 .into_iter()
                 .map(|g| (g.id, g))
+                .collect(),
+            celestial_bodies          : crate::star_map::StarMap::builtin()
+                .bodies_in_sector(snapshot.sector_id)
+                .into_iter()
+                .map(|b| (b.id, b))
                 .collect(),
             population_cap            : POPULATION_CAP,
             pending_auto_jumps        : Vec::new(),
@@ -271,6 +295,18 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn set_population_cap(&mut self, cap: usize) {
         self.population_cap = cap;
     }
+
+    /// Replace the navigation topology.  Updates `jump_gates` and
+    /// `celestial_bodies` for this node's Sector immediately.
+    pub fn set_star_map(&mut self, map: Arc<crate::star_map::StarMap>) {
+        let sid = self.sector_id;
+        self.jump_gates = map.gates_in_sector(sid).into_iter().map(|g| (g.id, g)).collect();
+        self.celestial_bodies = map.bodies_in_sector(sid).into_iter().map(|b| (b.id, b)).collect();
+        self.star_map = map;
+    }
+
+    /// Read access to the navigation topology.
+    pub fn star_map(&self) -> &crate::star_map::StarMap { &self.star_map }
 
     // ── Identity ──────────────────────────────────────────────────────────────
 
@@ -382,12 +418,12 @@ impl<S: EventStore> SimulationNode<S> {
 
     // ── Intra-Sector Warp (short-range Fold, ADR-0022) ───────────────────────
 
-    /// Whether a `WarpCommand` for `ship_id` toward `gate_id` would currently be
+    /// Whether a `WarpCommand` for `ship_id` toward `target` would currently be
     /// accepted (INV-006 Validation, before attaching `WarpComp`):
     /// the Ship exists, is not in transit, is not already warping, not tackled,
-    /// the gate originates in this Sector, and the gate is at least
-    /// `MIN_WARP_DISTANCE` away (closer than that → use approach instead).
-    pub fn can_propose_warp(&self, ship_id: ShipId, gate_id: JumpGateId) -> bool {
+    /// the target belongs to this Sector, and is at least
+    /// `MIN_WARP_DISTANCE` away (closer → use approach instead).
+    pub fn can_propose_warp(&self, ship_id: ShipId, target: WarpTarget) -> bool {
         let Some(&entity) = self.ship_index.get(&ship_id) else { return false };
         if self.world.transit_state(entity).is_in_transit() {
             return false;
@@ -396,9 +432,17 @@ impl<S: EventStore> SimulationNode<S> {
             return false; // already aligning or warping
         }
         if self.world.is_tackled(entity) { return false; }
-        let Some(gate) = self.jump_gates.get(&gate_id) else { return false };
         let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
-        pos.0.distance(gate.position) >= MIN_WARP_DISTANCE
+        match target {
+            WarpTarget::Gate(gate_id) => {
+                let Some(gate) = self.jump_gates.get(&gate_id) else { return false };
+                pos.0.distance(gate.position) >= MIN_WARP_DISTANCE
+            }
+            WarpTarget::Body(body_id) => {
+                let Some(body) = self.celestial_bodies.get(&body_id) else { return false };
+                pos.0.distance(body.position) >= MIN_WARP_DISTANCE
+            }
+        }
     }
 
     /// Append `JumpGateUsed` (and `StarSystemChanged` if the destination
@@ -419,8 +463,8 @@ impl<S: EventStore> SimulationNode<S> {
             tick       : self.current_tick,
         }));
 
-        let from_system = crate::star_map::system_for_sector(from);
-        let to_system   = crate::star_map::system_for_sector(to);
+        let from_system = self.star_map.system_for_sector(from);
+        let to_system   = self.star_map.system_for_sector(to);
         if from_system != to_system {
             self.event_store.append(DomainEvent::StarSystemChanged(dawn_core::events::StarSystemChanged {
                 ship_id,
@@ -1047,7 +1091,7 @@ impl<S: EventStore> SimulationNode<S> {
                         .partial_cmp(&bot.position.distance_squared(b.1))
                         .unwrap_or(std::cmp::Ordering::Equal)
                 }) {
-                    self.apply_warp_command(bot.ship_id, gate_id, false)
+                    self.apply_warp_command(bot.ship_id, WarpTarget::Gate(gate_id), false)
                 } else {
                     false
                 };
@@ -1185,8 +1229,8 @@ impl<S: EventStore> SimulationNode<S> {
     /// accepts the request; `process_warp()` then advances the alignment and,
     /// once aligned, flies the ship to the gate at warp speed. Returns `false`
     /// (no component attached) on rejection.
-    pub fn apply_warp_command(&mut self, ship_id: ShipId, gate_id: JumpGateId, auto_jump: bool) -> bool {
-        if !self.can_propose_warp(ship_id, gate_id) {
+    pub fn apply_warp_command(&mut self, ship_id: ShipId, target: WarpTarget, auto_jump: bool) -> bool {
+        if !self.can_propose_warp(ship_id, target) {
             return false;
         }
         let &entity = match self.ship_index.get(&ship_id) {
@@ -1194,7 +1238,7 @@ impl<S: EventStore> SimulationNode<S> {
             None    => return false,
         };
         let _ = self.world.inner_mut().insert_one(entity, WarpComp {
-            gate_id,
+            target,
             phase: WarpPhase::Aligning,
             auto_jump,
         });
@@ -1210,7 +1254,7 @@ impl<S: EventStore> SimulationNode<S> {
         if self.ship_owners.get(&cmd.ship_id) != Some(&player_id) {
             return false;
         }
-        self.apply_warp_command(cmd.ship_id, cmd.gate_id, false)
+        self.apply_warp_command(cmd.ship_id, cmd.target, false)
     }
 
     /// Drain auto-jump triggers accumulated during `process_warp()`.
@@ -1244,10 +1288,15 @@ impl<S: EventStore> SimulationNode<S> {
         let mut events = Vec::new();
 
         for (entity, ship_id, warp, pos, vel, max_speed) in warpers {
-            // Resolve the destination gate; if it vanished, cancel and brake.
-            let Some((gate_pos, arrival)) = self.jump_gate(warp.gate_id)
-                .map(|g| (g.position, g.activation_radius * WARP_ARRIVAL_FACTOR))
-            else {
+            // Resolve destination and arrival distance from WarpTarget.
+            let resolved = match warp.target {
+                WarpTarget::Gate(gate_id) => self.jump_gate(gate_id)
+                    .map(|g| (g.position, g.activation_radius * WARP_ARRIVAL_FACTOR, warp.auto_jump.then_some(gate_id))),
+                WarpTarget::Body(body_id) => self.celestial_bodies.get(&body_id)
+                    .map(|b| (b.position, b.radius * BODY_WARP_ARRIVAL_FACTOR, None)),
+            };
+            let Some((dest_pos, arrival, auto_jump_gate)) = resolved else {
+                // Target vanished — cancel and brake.
                 let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
                 self.brake_thrust(entity);
                 continue;
@@ -1262,18 +1311,18 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             // Engage warp once aligned: moving at ≥ 75% of max speed toward the
-            // gate. While not yet aligned, keep steering/accelerating at it.
+            // destination. While not yet aligned, keep steering/accelerating at it.
             let aligned = max_speed > f32::EPSILON
-                && speed_toward(vel, pos, gate_pos) >= WARP_ALIGN_FRACTION * max_speed;
+                && speed_toward(vel, pos, dest_pos) >= WARP_ALIGN_FRACTION * max_speed;
 
             match warp.phase {
                 WarpPhase::Aligning if !aligned => {
-                    self.steer_thrust_toward(entity, pos, gate_pos);
+                    self.steer_thrust_toward(entity, pos, dest_pos);
                 }
-                // Aligned (engage warp) or already warping: fly toward the gate.
+                // Aligned (engage warp) or already warping: fly toward the destination.
                 WarpPhase::Aligning | WarpPhase::Warping => {
                     self.set_warp_phase(entity, WarpPhase::Warping);
-                    if let Some(ev) = self.warp_step(entity, ship_id, pos, vel, gate_pos, arrival, warp.auto_jump, tick) {
+                    if let Some(ev) = self.warp_step(entity, ship_id, pos, vel, dest_pos, arrival, auto_jump_gate, tick) {
                         events.push(ev);
                     }
                 }
@@ -1283,35 +1332,36 @@ impl<S: EventStore> SimulationNode<S> {
         events
     }
 
-    /// One warping-phase step: move `entity` toward `gate_pos` at `WARP_SPEED`,
+    /// One warping-phase step: move `entity` toward `dest_pos` at `WARP_SPEED`,
     /// stopping inside `arrival`. Returns a `VelocityChanged` if velocity moved.
+    /// `auto_jump_gate`: if `Some(gate_id)`, queue an auto-jump on arrival.
     fn warp_step(
         &mut self,
-        entity   : Entity,
-        ship_id  : ShipId,
-        pos      : Position,
-        old_vel  : Velocity,
-        gate_pos : Position,
-        arrival  : f32,
-        auto_jump: bool,
-        tick     : Tick,
+        entity          : Entity,
+        ship_id         : ShipId,
+        pos             : Position,
+        old_vel         : Velocity,
+        dest_pos        : Position,
+        arrival         : f32,
+        auto_jump_gate  : Option<JumpGateId>,
+        tick            : Tick,
     ) -> Option<DomainEvent> {
-        let dist      = pos.distance(gate_pos);
+        let dist      = pos.distance(dest_pos);
         let remaining = dist - arrival;
         let (new_pos, new_vel, arrived) = if remaining <= WARP_EXIT_SPEED {
             // Close enough (inside the arrival ring or one slow step away):
-            // settle and stop. Still well within the gate's activation radius.
+            // settle and stop.
             (pos, Velocity::ZERO, true)
         } else {
             // Ease in: cap speed by remaining distance so the ship decelerates
-            // smoothly toward the gate instead of stopping dead (ADR-0022 §9).
+            // smoothly instead of stopping dead (ADR-0022 §9).
             let speed = (remaining * WARP_DECEL_RATE).clamp(WARP_EXIT_SPEED, WARP_SPEED);
             let step  = speed.min(remaining);
             let inv   = step / dist;
             let v = Velocity {
-                dx: (gate_pos.x - pos.x) * inv,
-                dy: (gate_pos.y - pos.y) * inv,
-                dz: (gate_pos.z - pos.z) * inv,
+                dx: (dest_pos.x - pos.x) * inv,
+                dy: (dest_pos.y - pos.y) * inv,
+                dz: (dest_pos.z - pos.z) * inv,
             };
             let p = Position { x: pos.x + v.dx, y: pos.y + v.dy, z: pos.z + v.dz };
             (p, v, false)
@@ -1321,19 +1371,15 @@ impl<S: EventStore> SimulationNode<S> {
         if let Ok(mut v) = self.world.inner_mut().get::<&mut VelocityComp>(entity) { v.0 = new_vel; }
 
         if arrived {
-            // Warp complete: drop the component and clear thrust so the ship
-            // sits at the gate (ready to jump). Movement resumes next tick.
-            let gate_id = self.world.inner().get::<&WarpComp>(entity).ok().map(|w| w.gate_id);
+            // Warp complete: drop the component and clear thrust. Movement resumes next tick.
             let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
             if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
                 t.direction  = Velocity::ZERO;
                 t.is_braking = false;
             }
-            // Queue auto-jump for the caller to propose after the tick.
-            if auto_jump {
-                if let Some(gid) = gate_id {
-                    self.pending_auto_jumps.push((ship_id, gid));
-                }
+            // Queue auto-jump for Gate targets (ADR-0023).
+            if let Some(gid) = auto_jump_gate {
+                self.pending_auto_jumps.push((ship_id, gid));
             }
         }
 
@@ -1557,9 +1603,24 @@ impl<S: EventStore> SimulationNode<S> {
         let ships: Vec<serde_json::Value> =
             ship_ids.filter_map(|ship_id| self.ship_state_json(ship_id)).collect();
 
+        let bodies: Vec<serde_json::Value> = self.celestial_bodies.values().map(|b| {
+            serde_json::json!({
+                "id"           : b.id.0,
+                "kind"         : match b.kind {
+                    dawn_core::CelestialBodyKind::Star   => "Star",
+                    dawn_core::CelestialBodyKind::Planet => "Planet",
+                },
+                "name"         : b.name,
+                "position"     : { "x": b.position.x, "y": b.position.y, "z": b.position.z },
+                "radius"       : b.radius,
+                "spectral_type": b.spectral_type,
+            })
+        }).collect();
+
         serde_json::json!({
-            "type"  : "InitialState",
-            "ships" : ships,
+            "type"             : "InitialState",
+            "ships"            : ships,
+            "celestial_bodies" : bodies,
         }).to_string()
     }
 
@@ -2347,9 +2408,9 @@ mod tests {
         let mut node = mem_node();
         let gate = node.jump_gate(dawn_core::JumpGateId(0)).unwrap().clone();
         let (player, ship) = spawn_owned_player_at(&mut node, gate.position);
-        assert!(!node.can_propose_warp(ship, dawn_core::JumpGateId(0)));
+        assert!(!node.can_propose_warp(ship, dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0))));
         assert!(!node.apply_warp_command_owned(player, dawn_core::WarpCommand {
-            ship_id: ship, gate_id: dawn_core::JumpGateId(0),
+            ship_id: ship, target: dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)),
         }));
         assert_eq!(node.warp_phase(ship), None);
     }
@@ -2360,7 +2421,7 @@ mod tests {
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         assert!(!node.apply_warp_command_owned(player, dawn_core::WarpCommand {
-            ship_id: ship, gate_id: dawn_core::JumpGateId(1),
+            ship_id: ship, target: dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(1)),
         }));
         assert_eq!(node.warp_phase(ship), None);
     }
@@ -2370,7 +2431,7 @@ mod tests {
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         assert!(node.apply_warp_command_owned(player, dawn_core::WarpCommand {
-            ship_id: ship, gate_id: dawn_core::JumpGateId(0),
+            ship_id: ship, target: dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)),
         }));
 
         // During alignment the ship accelerates toward the gate under thrust
@@ -2398,7 +2459,7 @@ mod tests {
             let mut stats = *node.world.inner().get::<&ShipStatsComp>(entity).unwrap();
             stats.mass = mass;
             node.world.set_ship_stats(entity, stats);
-            node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, gate_id: dawn_core::JumpGateId(0) });
+            node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, target: dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)) });
             for t in 1..=500u32 {
                 node.tick();
                 if node.warp_phase(ship) == Some(WarpPhase::Warping) { return t; }
@@ -2413,7 +2474,7 @@ mod tests {
     fn warp_decelerates_smoothly_near_the_gate_instead_of_stopping_dead() {
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, gate_id: dawn_core::JumpGateId(0) });
+        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, target: dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)) });
 
         // Track warp speed each tick. A cliff stop would jump straight from
         // cruise (~WARP_SPEED) to zero; a smooth ramp produces intermediate
@@ -2439,7 +2500,7 @@ mod tests {
     fn a_move_command_cancels_an_aligning_warp() {
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, gate_id: dawn_core::JumpGateId(0) });
+        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, target: dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)) });
         node.tick(); // still aligning (one tick is far from 75% max speed)
         assert_eq!(node.warp_phase(ship), Some(WarpPhase::Aligning));
 
@@ -2451,7 +2512,7 @@ mod tests {
     fn a_move_command_is_ignored_during_the_committed_warping_phase() {
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, gate_id: dawn_core::JumpGateId(0) });
+        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, target: dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)) });
         // Tick until the warp engages (just past alignment); it is then far from
         // arrival, so it stays committed. Player ship: mass=10M, inertia=0.3
         // → τ=30 ticks → align ≈ 42 ticks, so allow up to 100.
@@ -2470,7 +2531,7 @@ mod tests {
     fn auto_jump_is_queued_in_pending_list_when_warp_completes_with_auto_jump_true() {
         let mut node = mem_node();
         let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        assert!(node.apply_warp_command(ship, dawn_core::JumpGateId(0), true));
+        assert!(node.apply_warp_command(ship, dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)), true));
 
         // Run until warp completes.
         for _ in 0..100 { node.tick(); }
@@ -2490,7 +2551,7 @@ mod tests {
     fn normal_warp_without_auto_jump_does_not_queue_pending_jump() {
         let mut node = mem_node();
         let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        assert!(node.apply_warp_command(ship, dawn_core::JumpGateId(0), false));
+        assert!(node.apply_warp_command(ship, dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)), false));
 
         for _ in 0..100 { node.tick(); }
         assert_eq!(node.warp_phase(ship), None);
@@ -3238,7 +3299,7 @@ mod tests {
 
         // Ship B should now be tackled → warp must be denied.
         let gate_id = node.jump_gates.keys().next().copied().unwrap();
-        assert!(!node.can_propose_warp(ship_b, gate_id),
+        assert!(!node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)),
             "tackled ship must not be allowed to warp");
         assert!(!node.can_propose_jump(ship_b, gate_id),
             "tackled ship must not be allowed to jump");
@@ -3274,7 +3335,7 @@ mod tests {
         }
 
         let gate_id = node.jump_gates.keys().next().copied().unwrap();
-        assert!(!node.can_propose_warp(ship_b, gate_id), "should be tackled first");
+        assert!(!node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)), "should be tackled first");
 
         // Destroy the tackler: it should no longer appear in live_tackler_ids
         // → tackle releases on the next process_tackle call.
@@ -3285,7 +3346,7 @@ mod tests {
         }));
         node.tick_with_lock_commands(&[]);
 
-        assert!(node.can_propose_warp(ship_b, gate_id),
+        assert!(node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)),
             "tackle should release when the tackler ship is destroyed");
     }
 
@@ -3319,7 +3380,7 @@ mod tests {
         }
 
         let gate_id = node.jump_gates.keys().next().copied().unwrap();
-        assert!(!node.can_propose_warp(ship_b, gate_id), "should be tackled before snapshot");
+        assert!(!node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)), "should be tackled before snapshot");
 
         // Take snapshot and verify the tackled_by field is populated.
         let snapshot = node.take_snapshot();
@@ -3332,7 +3393,7 @@ mod tests {
         let modules: Vec<_> = crate::modules::all_modules();
         let ship_types: Vec<_> = crate::ship_types::all_ship_types();
         let node2 = SimulationNode::restore_from(store2, &snapshot, &modules, &ship_types);
-        assert!(!node2.can_propose_warp(ship_b, gate_id),
+        assert!(!node2.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)),
             "restored node must still prevent tackled ship from warping");
     }
 
@@ -3400,7 +3461,7 @@ mod tests {
 
         // Confirm bot is tackled.
         let gate_id = node.jump_gates.keys().next().copied().unwrap();
-        assert!(!node.can_propose_warp(bot_ship_id, gate_id), "bot should be tackled");
+        assert!(!node.can_propose_warp(bot_ship_id, dawn_core::WarpTarget::Gate(gate_id)), "bot should be tackled");
 
         // Damage bot below 50% HP.
         node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
@@ -3419,5 +3480,61 @@ mod tests {
             node.warp_phase(bot_ship_id).is_none(),
             "tackled bot should not enter warp"
         );
+    }
+
+    // -- Celestial body warp (ADR-0025) -----------------------------------------
+
+    #[test]
+    fn warp_to_body_reaches_arrival_distance_of_radius_times_1_5() {
+        let mut node = mem_node();
+        let (player, ship_id) = spawn_owned_player_at(&mut node, Position::new(0.0, 0.0, 0.0));
+
+        // Sector 0 (Alpha) body_id=1 is "Forge" at x=22_000, radius=3_500.
+        let body_id = dawn_core::CelestialBodyId(1);
+        let ok = node.apply_warp_command_owned(player, dawn_core::WarpCommand {
+            ship_id: ship_id, target: WarpTarget::Body(body_id),
+        });
+        assert!(ok, "warp to body should be accepted");
+        assert!(node.warp_phase(ship_id).is_some(), "ship should have WarpComp");
+
+        // Run ticks until warp completes.
+        for _ in 0..5_000 {
+            node.tick();
+            if node.warp_phase(ship_id).is_none() {
+                break;
+            }
+        }
+        assert!(node.warp_phase(ship_id).is_none(), "warp should have completed");
+
+        // Ship should be within radius * 1.5 of the body centre.
+        let body = crate::star_map::StarMap::builtin()
+            .bodies_in_sector(SectorId(0))
+            .into_iter()
+            .find(|b| b.id == body_id)
+            .unwrap();
+        let ship_pos = node.ship_positions()
+            .into_iter()
+            .find(|(id, _)| *id == ship_id)
+            .map(|(_, p)| p)
+            .expect("ship exists");
+        let dx = ship_pos.x - body.position.x;
+        let dy = ship_pos.y - body.position.y;
+        let dz = ship_pos.z - body.position.z;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+        let arrival_max = body.radius * 1.5 * 1.05; // 5% tolerance
+        assert!(
+            dist <= arrival_max,
+            "ship distance {:.0} should be within {:.0} of body centre",
+            dist, arrival_max,
+        );
+    }
+
+    #[test]
+    fn warp_to_body_is_rejected_for_body_not_in_this_sector() {
+        let mut node = mem_node();
+        let ship_id  = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(0.0, 0.0, 0.0), Velocity::ZERO);
+        // body_id=2 is in Sector 1 (Beta), not Sector 0.
+        let ok = node.apply_warp_command(ship_id, WarpTarget::Body(dawn_core::CelestialBodyId(2)), false);
+        assert!(!ok, "warp to body in another sector should be rejected");
     }
 }

@@ -11,7 +11,6 @@
 //!   and appends `SectorTransitCompleted`. Other nodes ignore it.
 
 use crate::node::SimulationNode;
-use crate::star_map;
 use crate::snapshot::ShipSnapshot;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{JumpGateId, Position, SectorId, ShipId};
@@ -87,7 +86,7 @@ pub(crate) fn apply_committed_raft_entries<S: EventStore>(
                     // the player can immediately jump back (ADR-0009).
                     let entry_pos = gate_id
                         .and_then(|_| {
-                            star_map::gates_in_sector(to)
+                            node.star_map().gates_in_sector(to)
                                 .into_iter()
                                 .find(|g| g.to_sector == node.sector_id())
                                 .map(|g| g.position)

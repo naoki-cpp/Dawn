@@ -348,7 +348,7 @@ mod tests {
         }
 
         // Gate 0 (Sector 0 -> Sector 1) sits near Sector 0's +X edge.
-        let gate = crate::star_map::all_gates()
+        let gate = crate::star_map::StarMap::builtin().gates
             .into_iter()
             .find(|g| g.id == JumpGateId(0))
             .expect("gate 0 must exist");
