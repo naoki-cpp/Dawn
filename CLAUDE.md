@@ -126,54 +126,19 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
                   ModuleActivated, ModuleDeactivated
   ノード構成    : 3ノード固定
 
-Phase 4 以降で追加承認済み（全て実装済み）:
-  Fitting システム（EVE Online 準拠・Active/Passive モジュール）
-  Combat システム（武器 / ダメージ / HP 3層 / 破壊）
-  Lock-on システム（2フェーズ戦闘）
-  ShipType システム（船種・船クラス・スロットレイアウト）
-  Capacitor システム（サイクルベース cap 管理・強制 OFF）
+追加承認済み機能（全て実装済み・詳細は各 ADR / docs を参照）:
+  ADR-0006  Fitting / Combat / Lock-on（EVE 準拠 Active/Passive・2フェーズ戦闘・HP 3層）
+  ADR-0011  Capacitor（サイクルベース cap 管理・cap 枯渇で強制 OFF）
+  ADR-0014  Raft コンセンサス + Sector Transit（dawn-consensus・Step 7.5 適用）
+  ADR-0009  星系間ナビゲーション（JumpCommand / JumpGateUsed / StarSystemChanged・J キー）
+  ADR-0015  Approach（半自動操船・対象 Ship/Gate・Step 2.5・Move/Stop で解除・A キー）
+  ADR-0022  intra-Sector Warp（短距離 Fold・align/warping 2フェーズ・Step 2.6・W キー）
+  ADR-0023  Propulsion 慣性モデル（mass/inertia_modifier・指数接近・auto-warp-then-jump）
+  ADR-0024  Tackle（Fold Disruptor・TackledComp・Step 4.5・warp/jump 拒否・snapshot 永続化）
+  ADR-0025  天体（恒星・惑星・WarpTarget::Body・sun_direction シェーダー・天体ワープ）
 
-Phase 7 で追加承認済み（ADR-0014・実装済み）:
-  Raft コンセンサス（dawn-consensus: Leader 選出 / Log Replication / RaftActor / 障害注入）
-  Sector Transit（TransitCommand → Raft Log コミット → Step 7.5 適用の全経路配線済み）
-
-Phase 7.5 で追加承認済み（ADR-0009・実装済み）:
-  星系間ナビゲーション（StarSystemId / JumpGateId / StarSystemDef / JumpGateDef,
-  JumpCommand, JumpGateUsed / StarSystemChanged イベント,
-  star_map.rs 静的トポロジー, Godot クライアント配線（J キー）まで完了）
-
-Phase 7.5 で追加承認済み（ADR-0015・実装済み）:
-  アプローチ（半自動操船・ApproachComp / ApproachCommand / ApproachTarget,
-  対象は Ship または Jump Gate（ゲートは activation_radius 内で停止）,
-  Tick Step 2.5 process_approach, Move/Stop で解除, 新イベントなし,
-  Godot クライアント配線（クリックで船 / ゲート選択 + A キー）まで完了）
-
-戦闘の深み（ADR-0016 §5）で追加承認済み（ADR-0022・実装済み）:
-  intra-Sector ワープ（短距離 Fold = 「逃がさない」の前提・WarpCommand / WarpComp /
-  WarpPhase::Aligning|Warping, Tick Step 2.6 process_warp, can_propose_warp 検証,
-  Move/Stop は align 中のみ解除（warping は committed）, 新イベントなし（VelocityChanged で記録）,
-  Godot クライアント配線（ゲート選択 + W キー）まで完了。lore: 短距離 Fold = ワープ）
-
-戦闘の深み（ADR-0016 §5）で追加承認済み（ADR-0023・実装済み）:
-  Propulsion Physics — 慣性モデル（EVE 式指数接近。ShipBaseStats の thrust_magnitude 廃止→
-  mass / inertia_modifier 導入。MovementSystem を exponential approach モデルに置換。
-  Afterburner 対応の StatDelta 拡張: speed_multiplier / mass_add。
-  WarpComp に auto_jump: bool フラグ追加。JumpCommand が gate 射程外の場合は
-  apply_warp_command(auto_jump=true) でワープ開始 → ワープ完了時に pending_auto_jumps へ push →
-  drain_pending_auto_jumps() でサーバーが Raft へ Transit 提案（auto-warp-then-jump）。
-  Godot クライアント配線（J キー優先順位修正・ワープ到着スナップ）まで完了）
-
-戦闘の深み（ADR-0016 §5）で追加承認済み（ADR-0024・実装済み）:
-  Tackle — Fold Disruptor モジュール（TackledComp / TackleApplied / TackleReleased イベント,
-  ModuleKind::Tackle, Tick Step 4.5 process_tackle, can_propose_warp / can_propose_jump 拒否,
-  スナップショット永続化（INV-002）, data/modules.toml Fold Disruptor I（id=12）配線済み）
-
-追加承認済み（ADR-0025・実装済み）:
-  天体（恒星・惑星）— CelestialBodyId / CelestialBodyKind / CelestialBodyDef,
-  WarpTarget::Body 対応（BODY_WARP_ARRIVAL_FACTOR = 1.5）, celestial_bodies_in_sector(),
-  静的マップデータ（3星系 × 恒星1 + 惑星1, 1 unit = 10,000 km → 1 AU ≈ 15,000 units）,
-  space_sky.gdshader 太陽ディスク・sun_direction uniform,
-  Godot クライアント配線（天体クリック選択 + W キー天体ワープ / sun_direction 毎フレーム更新）まで完了）
+  ※ 各機能が触る型・イベント・Tick ステップの正確な仕様は対応 ADR と
+    docs/event-catalog.md / docs/tick-model.md を一次情報とする（ここでは重複させない）。
 
 実装しない（提案も拒否する / 反グラインドの核 — FBD-009）:
   スキルポイント制 / 時間経過・課金による受動成長（= キャラクター育成）
@@ -602,66 +567,30 @@ pub type Tick = u64;
 
 ### Tick 内の処理順序
 
-```
-現在の実装（Phase 7 完了・ADR-0014）:
-  1. Tick カウンタをインクリメント
-  2. コマンドキューを処理する
-       MoveCommand              → ThrustComp.direction を更新（is_braking = false）
-       StopCommand              → ThrustComp.is_braking = true（逆推力で減速停止）
-       LockOnCommand            → LockSystem に渡す
-       ActivateModuleCommand    → FittedSlot.is_active = true / apply_fitting()
-       DeactivateModuleCommand  → FittedSlot.is_active = false / apply_fitting()
-       JumpCommand              → can_propose_jump() 検証後、TransitOp::Request
-                                  （gate_id 付き）を Raft に提案（ADR-0009）
-       ApproachCommand          → ApproachComp を付与（半自動操船 / ADR-0015）
-                                  対象は Ship または Jump Gate。Move / Stop で解除
-       WarpCommand              → can_propose_warp() 検証後 WarpComp を付与
-                                  （intra-Sector 短距離 Fold = ワープ / ADR-0022）
-                                  Move / Stop は align 中なら解除・warping 中は無視
-       JumpCommand（射程外）    → apply_warp_command(auto_jump=true) で WarpComp 付与
-                                  （射程内なら即 Raft 提案。auto-warp-then-jump / ADR-0023）
-       ※ Transit 中（TransitState::InTransit）の Ship への Move / Stop /
-         二重 Transit / Jump / Approach / Warp は拒否する（ADR-0014 / §5）
-  2.5 Approach System を実行する            ← Movement の前（ADR-0015）
-       ApproachComp を持つ Ship のみ対象。対象（Ship / Jump Gate）の位置へ
-       thrust を向け直す。到着半径まで詰めたら is_braking = true で停止保持。
-       Ship 対象が消失したら ApproachComp を除去し is_braking = true でブレーキ。
-  2.6 Warp System を実行する                ← Approach の後・Movement の前（ADR-0022）
-       WarpComp を持つ Ship のみ対象。Aligning は gate へ加速し、ゲート方向の速度が
-       max_speed×75% に達したら Warping へ遷移（EVE 準拠・整列時間は機動性次第。中断可・Tackle 窓）。
-       Warping は warp 速度で gate へ直進、残距離比例で減速し activation_radius×0.8 内で停止。
-       warping 中の船は Movement がスキップ（warp 速度をクランプしない）。VelocityChanged を発行。
-       auto_jump=true の場合、到着時に (ship_id, gate_id) を pending_auto_jumps へ push。
-       呼び出し元は drain_pending_auto_jumps() でキューを取り出し Raft へ提案する（ADR-0023）。
-  3. Movement System を実行する（ECS バッチ処理・warping 中の船はスキップ）
-  4. Capacitor System を実行する           ← Movement の後
-       毎 Tick: cap を recharge_per_tick 分回復
-       cycle_remaining == 0 → 新サイクル: cap 消費 / cap 不足 → 強制 OFF
-       cycle_remaining > 0  → デクリメント
-       武器モジュールのサイクル開始 → weapon_cycles_started に ship_id を追加
-       → 生成: Vec<ModuleDeactivated>（cap 枯渇時のみ）
-  4.5 Tackle System を実行する            ← Capacitor の後・Lock の前（ADR-0024）
-       アクティブな Tackle モジュール（ModuleKind::Tackle、cap ON）を持つ Ship のみ tackler。
-       ロック済みターゲットが tackle_range 以内にいれば TackledComp に tackler を追加。
-       射程外・ロック消失・tackler 破壊の場合は tackler を除去して TackleReleased を発行。
-       TackledComp を持つ Ship は can_propose_warp / can_propose_jump が false を返す。
-       → 生成: Vec<TackleApplied | TackleReleased>（process_tackle() — HashMap desired-state diff）
-  5. Lock System を実行する                ← Capacitor の後（位置確定後）
-  6. Combat System を実行する              ← Lock の後（Locked 状態を参照）
-       weapon_cycles_started に含まれる Ship のみ発射判定（ADR-0012）
-       EVE 命中率式: 0.5^((angular/(tracking×sig))² + (max(0,d−opt)/falloff)²)
-  7. Bot System を実行する                 ← Combat の後（破壊判定済み後）
-       IsBotComp を持つ Ship のみ対象
-       apply_*_owned() でプレイヤーと同一パイプラインを使用
-  8. 生成されたイベントを EventStore に Append する
-  9. ReplicationBus に差分を転送する       ← 必ず 8 の後
-  10. RaftActor に TickElapsed を送る       ← election/heartbeat タイマーを
-       1 Tick 進める（ADR-0014・INV-005/FBD-003。SectorSimulatorActor 内）
-  11. 呼び出し元へ TickResult を返す
+**規範的定義（各ステップの詳細処理・生成イベント）は docs/tick-model.md §3 を一次情報とする。**
+ここでは順序と「越えてはならない境界」だけを示す。
 
-この順序を変えてはならない。
-特に「8 の前に 9」を行うことは禁止する（未コミットの状態を伝播させない）。
 ```
+  1.   Tick カウンタをインクリメント
+  2.   コマンドキューを処理（Move/Stop/Lock/Activate/Deactivate/Jump/Approach/Warp）
+       ※ Transit 中（InTransit）の Ship への Move/Stop/二重 Transit/Jump/Approach/Warp は拒否（§5）
+       ※ Jump/Warp は can_propose_jump()/can_propose_warp() 検証を通すこと
+  2.5  Approach System  ← Movement の前（ADR-0015）
+  2.6  Warp System      ← Approach の後・Movement の前（ADR-0022/0023/0025）
+  3.   Movement System  （warping 中の船はスキップ）
+  4.   Capacitor System ← Movement の後・Lock の前
+  4.5  Tackle System    ← Capacitor の後・Lock の前（ADR-0024）
+  5.   Lock System      ← 位置確定後（Movement の後）
+  6.   Combat System    ← Lock の後（Locked 状態を参照）
+  7.   Bot System       ← Combat の後（破壊判定済み後）
+  8.   生成イベントを EventStore に Append
+  9.   ReplicationBus に差分を転送  ← 必ず 8 の後
+  10.  RaftActor に TickElapsed（ADR-0014・INV-005/FBD-003）
+  11.  TickResult を返す
+```
+
+この順序を変えてはならない（変更には ADR が必要）。
+特に「8 の前に 9」を行うことは禁止する（未コミットの状態を伝播させない）。
 
 ### Tick の実時間目標
 
@@ -1324,6 +1253,7 @@ AIは CLAUDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-18（ADR-0024 Tackle / ADR-0025 天体 実装反映 — §1 スコープに ADR-0024/0025 追記・フェーズ表記更新。人間承認済み）*
+*最終更新: 2026-06-19（肥大化解消 — §1 スコープの ADR ごと実装メモを ADR 参照テーブルに圧縮、§6 Tick 処理順序を docs/tick-model.md §3 へ委譲（順序と境界のみ残置）。不変条件・禁止事項の文言は不変。人間承認済み）*
+*前回更新: 2026-06-18（ADR-0024 Tackle / ADR-0025 天体 実装反映）*
 *対応ADR: ADR-0001 〜 ADR-0025（ADR-0020 Simulation LoD は deferred）*
 *次回レビュー予定: Phase 8D（分散インフラ）設計時 / Signature Resolution 着手時*
