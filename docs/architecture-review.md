@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : CLAUDE.md §11, docs/architecture.md
-date     : 2026-06-19（Phase 6 完了後に更新）
+date     : 2026-06-19（Phase 5 / Phase 6 完了後に更新）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -15,16 +15,16 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ## 現状評価
 
-**総合: B**
+**総合: B+**
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
-| クレート構成 | A− | DAG が設計通り。dawn-sector 新設でゲームロジックが分離された |
-| ファイルサイズ | C+ | node/mod.rs 2,396行・serve.rs 899行が残存課題 |
+| クレート構成 | A− | DAG が設計通り。dawn-sector 新設でゲームロジックが分離された（ADR-0026） |
+| ファイルサイズ | B− | serve.rs / data_loader.rs を分割済み。残る課題は node/mod.rs 2,396行のみ |
 | 型設計 | B+ | SectorMap・ShipRegistry 抽出で SimulationNode のフィールド数が適正化 |
-| 重複 | B+ | `_owned` 4ペアは3行ラッパー（ロジック重複ゼロ）で許容。実質的な重複なし |
+| 重複 | A− | `_owned` 4ペアは3行ラッパーで許容。P6-1 で system 間のクエリ手書きも解消 |
 | Rust固有 | B+ | Box\<dyn\> ゼロ・Mutex 最小。clone は許容範囲 |
-| AI開発由来 | B | 命名汚染なし。node/mod.rs・serve.rs の「残りもの置き場」化が懸念 |
+| AI開発由来 | B+ | 命名汚染なし。「残りもの置き場」は node/mod.rs を残すのみ |
 
 ---
 
@@ -34,30 +34,41 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-sector/src/node/mod.rs` | 2,396 | 🟡 改善中（2,868 → 2,396; P4-1/P4-2 完了）|
+| `crates/dawn-sector/src/node/mod.rs` | 2,396 | 🟡 残存課題（テスト ~1,400行 + 未抽出責務）|
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 394 | 🟢 P4-2 で新設 |
 | `crates/dawn-sector/src/node/navigation.rs` | 301 | 🟢 |
 | `crates/dawn-sector/src/node/commands.rs` | 262 | 🟢 |
 | `crates/dawn-sector/src/star_map.rs` | 262 | 🟢 |
 | `crates/dawn-sector/src/aoi.rs` | 246 | 🟢 |
 | `crates/dawn-sector/src/transit.rs` | 215 | 🟢 |
-| `crates/dawn-sector/src/node/serialization.rs` | 158 | 🟢 |
 | `crates/dawn-sector/src/persistence/snapshot.rs` | 168 | 🟢 |
+| `crates/dawn-sector/src/dilation.rs` | 160 | 🟢 |
+| `crates/dawn-sector/src/node/serialization.rs` | 158 | 🟢 |
 | `crates/dawn-sector/src/persistence/checkpoint.rs` | 156 | 🟢 |
+| `crates/dawn-sector/src/modules.rs` | 137 | 🟢 |
+| `crates/dawn-sector/src/spawner.rs` | 127 | 🟢 |
 | `crates/dawn-sector/src/node/tick.rs` | 91 | 🟢 P4-1 で新設 |
+| `crates/dawn-sector/src/ship_types.rs` | 82 | 🟢 |
+| `crates/dawn-sector/src/node/ship_registry.rs` | 33 | 🟢 P3-1 |
+| `crates/dawn-sector/src/node/sector_map.rs` | 25 | 🟢 P3-1 |
 
 ### dawn-simulation（配線・起動）
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-simulation/src/serve.rs` | 899 | 🟡 2モード（single/cluster）混在 → P5-1 で分割予定 |
-| `crates/dawn-simulation/src/cluster.rs` | 528 | 🟢 |
-| `crates/dawn-simulation/src/data_loader.rs` | 479 | 🟡 3種ローダー混在 → P5-2 で分割予定 |
+| `crates/dawn-simulation/src/cluster.rs` | 528 | 🟢 Raft クラスター配線 |
 | `crates/dawn-simulation/src/sector_simulator_actor.rs` | 421 | 🟢 |
 | `crates/dawn-simulation/src/bench.rs` | 411 | 🟢 |
+| `crates/dawn-simulation/src/serve/mod.rs` | 382 | 🟢 P5-1 共通ヘルパー |
 | `crates/dawn-simulation/src/protocol.rs` | 309 | 🟢 |
+| `crates/dawn-simulation/src/serve/cluster.rs` | 241 | 🟢 P5-1 |
 | `crates/dawn-simulation/src/ws_server.rs` | 199 | 🟢 |
+| `crates/dawn-simulation/src/data_loader/modules.rs` | 190 | 🟢 P5-2 |
+| `crates/dawn-simulation/src/serve/single.rs` | 177 | 🟢 P5-1 |
+| `crates/dawn-simulation/src/data_loader/ship_types.rs` | 174 | 🟢 P5-2 |
+| `crates/dawn-simulation/src/data_loader/star_map.rs` | 98 | 🟢 P5-2 |
 | `crates/dawn-simulation/src/main.rs` | 63 | 🟢 |
+| `crates/dawn-simulation/src/data_loader/mod.rs` | 12 | 🟢 P5-2 pub use |
 
 ### その他クレート
 
@@ -69,6 +80,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-ecs/src/systems/combat.rs` | 431 | 🟢 |
 | `crates/dawn-consensus/src/actor.rs` | 430 | 🟢 |
 | `crates/dawn-ecs/src/systems/capacitor.rs` | 414 | 🟢 |
+| `crates/dawn-ecs/src/world.rs` | 252 | 🟢 P6-1 クエリヘルパー追加 |
 
 ---
 
@@ -83,7 +95,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ### High
 
-#### H-1: `node/mod.rs` 2,396行（残存 god file、改善中）
+#### H-1: `node/mod.rs` 2,396行（唯一残存する god file）
 
 P4-1/P4-2 で tick.rs・spawner_logic.rs を分離し 472行削減（2,868→2,396）。
 ただし以下の責務がまだ混在している:
@@ -100,35 +112,20 @@ P4-1/P4-2 で tick.rs・spawner_logic.rs を分離し 472行削減（2,868→2,3
   - テストコード（~1,400行 ≒ ファイルの過半）
 ```
 
-テストの分離（L-1）と、残存責務の tackle.rs / snapshot.rs 等への分割（将来 P4-4 以降）が候補。
+最も効果が大きいのはテストの分離（L-1・~1,400行）。
+次いで残存責務の `tackle.rs` / `snapshot_io.rs` 等への分割。
 
 ---
 
 ### Medium
-
-#### M-1: `serve.rs` 899行（2サーバーモードの混在）
-
-```
-run_phase4_server()   — シングルノード WebSocket ループ（~220行）
-run_cluster_server()  — Raft クラスター WebSocket ループ（~370行）
-apply_common_command()— 共通コマンド処理（~36行）
-deliver_aoi_frame()   — AoI 配信（~55行）
-build_serve_node()    — ノード初期化（~16行）
-spawn_npc_frigates()  — NPC スポーン（~14行）
-```
-
-2つのサーバーモードが同一ファイルに同居。どちらかを変更するたびに全体を把握する必要がある。
-
-#### M-2: `data_loader.rs` 479行（3種ローダー混在）
-
-`load_ship_types()` / `load_modules()` / `load_star_map()` と各中間型が同一ファイルに混在。
-今後データ種が増えるほど肥大する。
 
 #### M-3: `sector_simulator_actor.rs` と `SimulationNode` の密結合
 
 `SectorSimulatorActor` は `SimulationNode` の公開メソッドをほぼ全て呼ぶ薄いラッパー。
 `SimulationNode` の変更が即 Actor に波及する。
 将来の `dawn-replication`（Phase 8D）配線を入れる際に複雑化する。
+
+> M-1（serve.rs 分割）・M-2（data_loader.rs 分割）は P5-1 / P5-2 で解消済み。
 
 ---
 
@@ -138,20 +135,7 @@ spawn_npc_frigates()  — NPC スポーン（~14行）
 
 テストが実装ファイルに直接書かれているため、テストだけ読みたいときに実装が邪魔になる。
 `tests/` ディレクトリへの分離は Rust の `#[cfg(test)]` モデル上任意だが、
-このファイルサイズでは分離した方が可読性が上がる。
-
-#### L-2: コンポーネント snapshot ループの重複（combat / capacitor / lock）
-
-```rust
-// dawn-ecs の combat.rs, capacitor.rs, lock.rs でほぼ同じパターン
-let ships: Vec<_> = world.inner()
-    .query::<(&ShipIdComp, &ShipStatsComp, &PositionComp, ...)>()
-    .iter()
-    .map(|(e, (id, stats, pos, ...))| ...)
-    .collect();
-```
-
-`SimWorld` に `query_ships()` ヘルパーがないため各 system が手書き。
+このファイルサイズでは分離した方が可読性が上がる。H-1 解消の主役。
 
 #### L-3: `star_system.rs`（dawn-core）と `star_map.rs`（dawn-sector）の命名が紛らわしい
 
@@ -161,6 +145,8 @@ dawn-sector/src/star_map.rs     — インスタンスデータ（StarMap struct
 ```
 
 型とデータの区別が名前から読み取りにくい。
+
+> L-2（system 間の snapshot ループ重複）は P6-1（`SimWorld` クエリヘルパー）で解消済み。
 
 ---
 
@@ -179,18 +165,41 @@ dawn-sector/src/star_map.rs     — インスタンスデータ（StarMap struct
 | P4-1 tick.rs 抽出 | 2026-06-19 | tick() / tick_with_lock_commands() を node/tick.rs へ（91行）|
 | P4-2 spawner_logic.rs 抽出 | 2026-06-19 | spawn/bot メソッド群を node/spawner_logic.rs へ（394行）。node/mod.rs 2,868→2,396行 |
 | P4-3 `_owned` 統合 | — | スキップ: `_owned` は3行ラッパーでロジック重複ゼロ。統合コストが効果を上回る |
-| P5-1 serve.rs 分割 | 2026-06-19 | serve/mod.rs・single.rs・cluster.rs の3ファイルに分割 |
-| P5-2 data_loader.rs 分割 | 2026-06-19 | data_loader/{mod,ship_types,modules,star_map}.rs に分割 |
-| P6-1 `SimWorld` クエリヘルパー追加 | 2026-06-19 | `find_entity` / `query` / `get` / `get_mut` を追加。combat/capacitor/lock/fitting の `inner()` 脱出を削減 |
+| P5-1 serve.rs 分割 | 2026-06-19 | serve/{mod,single,cluster}.rs の3ファイルに分割（899行 → 382/177/241）|
+| P5-2 data_loader.rs 分割 | 2026-06-19 | data_loader/{mod,ship_types,modules,star_map}.rs に分割（479行 → 12/174/190/98）|
+| P6-1 `SimWorld` クエリヘルパー追加 | 2026-06-19 | `find_entity` / `query` / `get` / `get_mut` を追加。combat/capacitor/lock/fitting の `inner()` 脱出を削減（L-2 解消）|
 
 ---
 
-### Phase 6 — dawn-ecs のヘルパー整備（完了）
+### Phase 7 — node/mod.rs の最終分割（次の優先項目）
 
-`SimWorld` に `find_entity` / `query` / `get` / `get_mut` を追加し、
-combat / capacitor / lock / fitting から `inner()` / `inner_mut()` 直接呼び出しを削減した。
-`fitting.rs` の entity 検索ブロック（4行×4箇所）が `find_entity(id)?` 1行に整理された。
-日本語コメントをタッチしたファイル内で英語に変換した。
+唯一残る god file（H-1）への対処。優先度順:
+
+**P7-1: テストモジュールの分離（L-1・最大の効果）**
+
+`node/mod.rs` の `#[cfg(test)]` ブロック（~1,400行）を `tests/` 統合テスト、または
+`node/tests.rs` サブモジュールへ移す。これだけで実装本体は ~1,000行に縮む。
+
+**P7-2: 残存責務の抽出**
+
+```
+node/
+  tackle.rs    — process_tackle（~80行）
+  snapshot_io.rs — take_snapshot / restore_from_snapshot（~100行）
+  lock.rs      — Lock-on ロジック（~100行）
+```
+
+`export_transit` / `import_transit` / `propose_transit` は既存の `transit.rs`
+（dawn-sector トップレベル）との責務整理が必要なため、分割前に置き場を確定する。
+
+---
+
+### Phase 8 — 配線層の整理（Phase 8D と連動）
+
+**M-3: `SectorSimulatorActor` の依存縮小**
+
+`dawn-replication`（ADR-0021・Phase 8D）着手時に `SimulationNode` との
+インターフェースを見直す。単独で着手するより 8D 設計とまとめるのが自然。
 
 ---
 
