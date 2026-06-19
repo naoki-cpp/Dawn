@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : CLAUDE.md §11, docs/architecture.md
-date     : 2026-06-19（Phase 5 / Phase 6 完了後に更新）
+date     : 2026-06-19（8D-2c / TcpReplicationTransport 完了後に更新）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -15,16 +15,16 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ## 現状評価
 
-**総合: B+**
+**総合: A−**
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
-| クレート構成 | A− | DAG が設計通り。dawn-sector 新設でゲームロジックが分離された（ADR-0026） |
-| ファイルサイズ | B− | serve.rs / data_loader.rs を分割済み。残る課題は node/mod.rs 2,396行のみ |
+| クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027） |
+| ファイルサイズ | B+ | serve.rs / data_loader.rs / node補助責務を分割済み。残る最大ファイルは node/mod.rs 1,545行 |
 | 型設計 | B+ | SectorMap・ShipRegistry 抽出で SimulationNode のフィールド数が適正化 |
 | 重複 | A− | `_owned` 4ペアは3行ラッパーで許容。P6-1 で system 間のクエリ手書きも解消 |
-| Rust固有 | B+ | Box\<dyn\> ゼロ・Mutex 最小。clone は許容範囲 |
-| AI開発由来 | B+ | 命名汚染なし。「残りもの置き場」は node/mod.rs を残すのみ |
+| Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。TCP transport も trait 境界内に収まる |
+| AI開発由来 | B+ | 命名汚染なし。残る密結合は `SectorSimulatorActor` と `SimulationNode` 境界 |
 
 ---
 
@@ -34,7 +34,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-sector/src/node/mod.rs` | 2,396 | 🟡 残存課題（テスト ~1,400行 + 未抽出責務）|
+| `crates/dawn-sector/src/node/mod.rs` | 1,545 | 🟡 残存課題（テスト ~980行 + Transit公開メソッド群）|
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 394 | 🟢 P4-2 で新設 |
 | `crates/dawn-sector/src/node/navigation.rs` | 301 | 🟢 |
 | `crates/dawn-sector/src/node/commands.rs` | 262 | 🟢 |
@@ -57,7 +57,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | ファイル | 行数 | 判定 |
 |---|---|---|
 | `crates/dawn-simulation/src/cluster.rs` | 528 | 🟢 Raft クラスター配線 |
-| `crates/dawn-simulation/src/sector_simulator_actor.rs` | 421 | 🟢 |
+| `crates/dawn-simulation/src/sector_simulator_actor.rs` | 423 | 🟡 M-3 |
 | `crates/dawn-simulation/src/bench.rs` | 411 | 🟢 |
 | `crates/dawn-simulation/src/serve/mod.rs` | 382 | 🟢 P5-1 共通ヘルパー |
 | `crates/dawn-simulation/src/protocol.rs` | 309 | 🟢 |
@@ -77,10 +77,14 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-consensus/src/state.rs` | 573 | 🟡 許容範囲（Raft 実装の核）|
 | `crates/dawn-core/src/events.rs` | 495 | 🟢 |
 | `crates/dawn-event-store/src/file.rs` | 431 | 🟢 |
-| `crates/dawn-ecs/src/systems/combat.rs` | 431 | 🟢 |
+| `crates/dawn-ecs/src/systems/combat.rs` | 430 | 🟢 |
 | `crates/dawn-consensus/src/actor.rs` | 430 | 🟢 |
-| `crates/dawn-ecs/src/systems/capacitor.rs` | 414 | 🟢 |
+| `crates/dawn-ecs/src/systems/capacitor.rs` | 412 | 🟢 |
+| `crates/dawn-replication/src/tcp.rs` | 263 | 🟢 8D-2c |
 | `crates/dawn-ecs/src/world.rs` | 252 | 🟢 P6-1 クエリヘルパー追加 |
+| `crates/dawn-replication/src/anti_entropy.rs` | 211 | 🟢 8D-2b |
+| `crates/dawn-replication/src/bus.rs` | 188 | 🟢 8D-2a |
+| `crates/dawn-replication/src/lib.rs` | 68 | 🟢 8D-2a/2b/2c public API |
 
 ---
 
@@ -95,25 +99,22 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ### High
 
-#### H-1: `node/mod.rs` 2,396行（唯一残存する god file）
+#### H-1: `node/mod.rs` 1,545行（唯一残る大きい実装ファイル）
 
-P4-1/P4-2 で tick.rs・spawner_logic.rs を分離し 472行削減（2,868→2,396）。
-ただし以下の責務がまだ混在している:
+P4-1/P4-2 と後続分割で、`tick.rs` / `spawner_logic.rs` / `tackle.rs` /
+`snapshot_io.rs` / `apply_event.rs` などは分離済み。
+現在の `node/mod.rs` は実装本体が約560行、テストが約980行で、以前の god file 状態からはかなり改善した。
+ただし以下はまだ同居している:
 
 ```
 現在 node/mod.rs が抱えているもの:
-  - SimulationNode struct 定義と定数（適切）
-  - export_transit / import_transit / propose_transit（~100行）
-  - process_tackle（~80行）
-  - Lock-on ロジック（~100行）
-  - take_snapshot / restore_from_snapshot（~100行）
-  - AoI 関連ヘルパー（~50行）
-  - apply_event（~80行）
-  - テストコード（~1,400行 ≒ ファイルの過半）
+  - SimulationNode struct 定義・constructor・基本 accessor（適切）
+  - propose_transit / export_transit / import_transit / jump/warp提案ヘルパー
+  - cfg(test) ブロック（約980行、ファイルの過半）
 ```
 
-最も効果が大きいのはテストの分離（L-1・~1,400行）。
-次いで残存責務の `tackle.rs` / `snapshot_io.rs` 等への分割。
+最も効果が大きいのはテストの分離（L-1・約980行）。
+Transit系公開メソッドは `dawn-sector/src/transit.rs` の型定義と責務境界を見直してから移す。
 
 ---
 
@@ -123,7 +124,8 @@ P4-1/P4-2 で tick.rs・spawner_logic.rs を分離し 472行削減（2,868→2,3
 
 `SectorSimulatorActor` は `SimulationNode` の公開メソッドをほぼ全て呼ぶ薄いラッパー。
 `SimulationNode` の変更が即 Actor に波及する。
-将来の `dawn-replication`（Phase 8D）配線を入れる際に複雑化する。
+8D-2a/2b/2c で `dawn-replication` 配線が入り、イベント flush 境界と TCP transport 境界は明確になった。
+ただし `SimulationNode` の公開メソッド変更が Actor に波及しやすい構造は残る。
 
 > M-1（serve.rs 分割）・M-2（data_loader.rs 分割）は P5-1 / P5-2 で解消済み。
 
@@ -131,11 +133,11 @@ P4-1/P4-2 で tick.rs・spawner_logic.rs を分離し 472行削減（2,868→2,3
 
 ### Low
 
-#### L-1: `node/mod.rs` のテストコード（~1,400行）が実装と混在
+#### L-1: `node/mod.rs` のテストコード（約980行）が実装と混在
 
 テストが実装ファイルに直接書かれているため、テストだけ読みたいときに実装が邪魔になる。
 `tests/` ディレクトリへの分離は Rust の `#[cfg(test)]` モデル上任意だが、
-このファイルサイズでは分離した方が可読性が上がる。H-1 解消の主役。
+現状でも許容可能。ただし次に `node/mod.rs` を触るなら、先に分離した方がレビューしやすい。
 
 #### L-3: `star_system.rs`（dawn-core）と `star_map.rs`（dawn-sector）の命名が紛らわしい
 
@@ -168,29 +170,32 @@ dawn-sector/src/star_map.rs     — インスタンスデータ（StarMap struct
 | P5-1 serve.rs 分割 | 2026-06-19 | serve/{mod,single,cluster}.rs の3ファイルに分割（899行 → 382/177/241）|
 | P5-2 data_loader.rs 分割 | 2026-06-19 | data_loader/{mod,ship_types,modules,star_map}.rs に分割（479行 → 12/174/190/98）|
 | P6-1 `SimWorld` クエリヘルパー追加 | 2026-06-19 | `find_entity` / `query` / `get` / `get_mut` を追加。combat/capacitor/lock/fitting の `inner()` 脱出を削減（L-2 解消）|
+| P7-pre node補助責務抽出 | 2026-06-19 | `tackle.rs` / `snapshot_io.rs` / `apply_event.rs` を分離。node/mod.rs は 1,545行へ縮小 |
+| 8D-2a dawn-replication 基盤 | 2026-06-19 | `InMemoryReplicationBus` / `ReplicationTransport` を dawn-replication へ移動 |
+| 8D-2b AntiEntropy | 2026-06-19 | log index gap 検出・重複/overlap 判定・`iter_from` suffix 応答 |
+| 8D-2c TcpReplicationTransport | 2026-06-19 | 4-byte length prefix + postcard / LAN plaintext TCP transport |
 
 ---
 
-### Phase 7 — node/mod.rs の最終分割（次の優先項目）
+### Phase 7 — node/mod.rs の仕上げ分割（任意だが効果あり）
 
-唯一残る god file（H-1）への対処。優先度順:
+唯一残る大きい実装ファイル（H-1）への対処。優先度順:
 
 **P7-1: テストモジュールの分離（L-1・最大の効果）**
 
-`node/mod.rs` の `#[cfg(test)]` ブロック（~1,400行）を `tests/` 統合テスト、または
-`node/tests.rs` サブモジュールへ移す。これだけで実装本体は ~1,000行に縮む。
+`node/mod.rs` の `#[cfg(test)]` ブロック（約980行）を `tests/` 統合テスト、または
+`node/tests.rs` サブモジュールへ移す。実装本体は約560行まで見通しが良くなる。
 
 **P7-2: 残存責務の抽出**
 
 ```
 node/
-  tackle.rs    — process_tackle（~80行）
-  snapshot_io.rs — take_snapshot / restore_from_snapshot（~100行）
-  lock.rs      — Lock-on ロジック（~100行）
+  transit_flow.rs  — propose_transit / export_transit / import_transit
+  node/tests.rs    — node/mod.rs 内の cfg(test) ブロック
 ```
 
-`export_transit` / `import_transit` / `propose_transit` は既存の `transit.rs`
-（dawn-sector トップレベル）との責務整理が必要なため、分割前に置き場を確定する。
+`transit.rs` は現状 TransitOp / ShipSnapshot 系の型・wire helper を持つ。
+`SimulationNode` の状態操作まで同居させるか、`node/transit_flow.rs` として node 配下に残すかを先に決める。
 
 ---
 
@@ -198,8 +203,9 @@ node/
 
 **M-3: `SectorSimulatorActor` の依存縮小**
 
-`dawn-replication`（ADR-0021・Phase 8D）着手時に `SimulationNode` との
-インターフェースを見直す。単独で着手するより 8D 設計とまとめるのが自然。
+`dawn-replication`（ADR-0021/0027・Phase 8D）は 8D-2a/2b/2c まで着手済み。
+次に `dawn-sector-node` / `SnapshotTransfer` へ進む前に、`SectorSimulatorActor`
+が必要とする `SimulationNode` 操作を明示的な薄い境界へ寄せるかを再評価する。
 
 ---
 
@@ -210,4 +216,4 @@ node/
 - `dawn-ecs` systems（combat / movement / lock / capacitor）— 凝集度高・純粋関数的
 - `dawn-consensus`（Raft 合意層）— 正しいアルゴリズム、変更リスク高
 - `dawn-core` / `dawn-event-store`（Event sourcing 基盤）— 設計の核、INV-001 維持
-- `dawn-actor`（Actor 基盤）— 将来の `dawn-replication` と接続予定
+- `dawn-actor`（ClientConnection 境界）— replication 責務は `dawn-replication` へ移動済み

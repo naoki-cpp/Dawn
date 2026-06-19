@@ -1096,6 +1096,7 @@ Combat / Fitting ロジックは引き続き dawn-ecs / dawn-core 内に実装�
 | `dawn-event-store` | Event Log の永続化。Append, Read, Snapshot（InMemory + File） | dawn-core, serde | ネットワーク、ECS |
 | `dawn-consensus` | Raft実装（ADR-0014）。Leader選出, RaftActor, RaftTransport（In-Process）, PartitionableTransport | dawn-core, serde, rand, tokio | ネットワーク、ECS、EventStore |
 | `dawn-actor` | クライアント転送境界。ClientConnection trait（+ InProcessConnection / WsClientConnection 実装） | dawn-core, tokio | dawn-ecs, dawn-simulation |
+| `dawn-replication` | 追記ログのゴシップ配布境界。8D-2a: InMemoryReplicationBus + ReplicationTransport。8D-2b: AntiEntropy（gap 検出・重複/overlap 判定・`iter_from` suffix 応答）。8D-2c: TcpReplicationTransport（4-byte length prefix + postcard / LAN plaintext） | dawn-core, dawn-event-store, serde, postcard, tokio, thiserror | dawn-ecs, dawn-sector, dawn-consensus, dawn-simulation |
 | `dawn-sector` | Sector単位のゲームロジック。SimulationNode（Tick実装・コマンド処理・Transit・Warp・Bot AI・AoI）, SpawnConfig, StarMap, StateSnapshot, CheckpointScheduler, TiDi計算（ADR-0026） | dawn-core, dawn-ecs, dawn-event-store, dawn-consensus, serde, postcard, tokio | ネットワークI/O、WebSocket、ファイルI/O直接 |
 | `dawn-simulation` | 実行バイナリ・配線のみ。MultiNodeCluster（RaftActor 配線含む）, WsServer（Godot WebSocket接続）, 負荷生成, DataLoader（TOML読み込み） | 上記全て + dawn-sector + rand + tokio-tungstenite + toml | ゲームロジックの直接実装 |
 
@@ -1103,7 +1104,6 @@ Combat / Fitting ロジックは引き続き dawn-ecs / dawn-core 内に実装�
 
 | Crate | 予定フェーズ | 責務（予定） |
 |---|---|---|
-| `dawn-replication` | Phase 8D | 追記ログのゴシップ配布（ADR-0021）。8D-2a として InMemoryReplicationBus + ReplicationTransport を実装済み。後続でアンチエントロピー + スナップショット転送（競合解決 CRDT/LWW は単一所有のため不要） |
 | `dawn-sector-node` | Phase 8D | 本番実行バイナリ。dawn-sector に依存し、Actorの配線と起動、ネットワーク RaftTransport + ゴシップの配線。ワイヤ = postcard 再利用（protobuf/`dawn-proto` は不採用・§3 参照） |
 
 ---

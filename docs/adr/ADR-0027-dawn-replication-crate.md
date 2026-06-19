@@ -161,7 +161,7 @@ thiserror        = "1"
 - [x] `ReplicationTransport` trait + `InMemoryReplicationBus` を実装
 - [x] `dawn-actor` から `ReplicationBus` を削除し、`dawn-simulation` を差し替え
 - [x] `AntiEntropy`（iter_from ベース）を実装しテストを書く
-- [ ] `TcpReplicationTransport`（LAN plaintext）を実装
+- [x] `TcpReplicationTransport`（LAN plaintext）を実装
 - [ ] `SnapshotTransfer` を実装しテストを書く
 - [x] `cargo test --workspace` がゼロエラーで通過する
 - [x] AI_DEVELOPMENT_GUIDE.md §3（Dependency DAG）§11（Crate 別責務早見表）を更新する

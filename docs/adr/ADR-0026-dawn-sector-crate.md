@@ -45,6 +45,7 @@ dawn-core
     └── dawn-event-store
             ↑
             ├── dawn-actor
+            ├── dawn-replication
             └── dawn-sector          ← NEW: ゲームロジック専用
                     ↑
                     └── dawn-simulation  ← 配線・起動のみ
