@@ -110,6 +110,38 @@ impl SimWorld {
     pub fn is_tackled(&self, entity: Entity) -> bool {
         self.inner.get::<&crate::components::TackledComp>(entity).is_ok()
     }
+
+    /// Look up the ECS `Entity` handle for a given `ShipId`.
+    ///
+    /// Returns `None` if no ship with that ID exists in the world.
+    /// O(n) linear scan — call once per operation, not per tick.
+    pub fn find_entity(&self, ship_id: ShipId) -> Option<Entity> {
+        self.inner.query::<&ShipIdComp>().iter()
+            .find(|(_, id)| id.0 == ship_id)
+            .map(|(e, _)| e)
+    }
+
+    /// Run a read-only ECS query over all entities.
+    ///
+    /// Prefer this over `inner()` for query access; it avoids exposing the raw
+    /// `hecs::World` and keeps the API surface contained.
+    pub fn query<Q: hecs::Query>(&self) -> hecs::QueryBorrow<'_, Q> {
+        self.inner.query::<Q>()
+    }
+
+    /// Read a single component from an entity.
+    ///
+    /// Returns `None` if the entity does not exist or lacks the component.
+    pub fn get<C: hecs::Component>(&self, entity: Entity) -> Option<hecs::Ref<'_, C>> {
+        self.inner.get::<&C>(entity).ok()
+    }
+
+    /// Mutably access a single component on an entity.
+    ///
+    /// Returns `None` if the entity does not exist or lacks the component.
+    pub fn get_mut<C: hecs::Component>(&mut self, entity: Entity) -> Option<hecs::RefMut<'_, C>> {
+        self.inner.get::<&mut C>(entity).ok()
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -176,6 +208,37 @@ mod tests {
         let e = w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
         w.set_transit_state(e, TransitState::InTransit { to: SectorId(2) });
         assert_eq!(w.transit_state(e), TransitState::InTransit { to: SectorId(2) });
+    }
+
+    #[test]
+    fn find_entity_returns_entity_for_known_ship_id() {
+        let mut w = make_world();
+        let id = make_ship_id(1);
+        w.spawn_ship(id, Position::ORIGIN, Velocity::ZERO);
+        assert!(w.find_entity(id).is_some());
+    }
+
+    #[test]
+    fn find_entity_returns_none_for_unknown_ship_id() {
+        let w = make_world();
+        assert!(w.find_entity(make_ship_id(99)).is_none());
+    }
+
+    #[test]
+    fn get_returns_component_for_existing_entity() {
+        let mut w = make_world();
+        let e = w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
+        assert!(w.get::<ShipStatsComp>(e).is_some());
+    }
+
+    #[test]
+    fn get_mut_allows_mutating_component() {
+        let mut w = make_world();
+        let e = w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
+        if let Some(mut stats) = w.get_mut::<ShipStatsComp>(e) {
+            stats.max_speed = 9999.0;
+        }
+        assert_eq!(w.get::<ShipStatsComp>(e).unwrap().max_speed, 9999.0);
     }
 
     #[test]

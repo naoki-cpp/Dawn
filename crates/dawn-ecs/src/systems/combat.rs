@@ -61,7 +61,6 @@ pub fn run(world: &mut SimWorld, tick: Tick, fire_triggers: &[ShipId]) -> Combat
     // ── 1. 全 Ship をスナップショット ────────────────────────────────────────
 
     let mut ships: Vec<ShipSnapshot> = world
-        .inner()
         .query::<(&ShipIdComp, &ShipStatsComp, &PositionComp, &VelocityComp, &HullComp, &LockComp)>()
         .iter()
         .map(|(entity, (id, stats, pos, vel, hull, lock))| ShipSnapshot {
@@ -168,7 +167,7 @@ pub fn run(world: &mut SimWorld, tick: Tick, fire_triggers: &[ShipId]) -> Combat
     changed.dedup();
     for j in changed {
         let s = &ships[j];
-        if let Ok(mut hull) = world.inner_mut().get::<&mut HullComp>(s.entity) {
+        if let Some(mut hull) = world.get_mut::<HullComp>(s.entity) {
             hull.current_shield = s.current_shield;
             hull.current_armor  = s.current_armor;
             hull.current_hull   = s.current_hull;
@@ -276,8 +275,8 @@ mod tests {
         let ea = world.spawn_ship(ship_id(1), Position::ORIGIN, Velocity::ZERO);
         world.spawn_ship(ship_id(2), Position::new(100.0, 0.0, 0.0), Velocity::ZERO);
         world.set_ship_stats(ea, armed_stats(damage));
-        // ship_id(1) のロックを Locked 状態にセット
-        if let Ok(mut lock) = world.inner_mut().get::<&mut LockComp>(ea) {
+        // Set ship_id(1) lock to Locked state.
+        if let Some(mut lock) = world.get_mut::<LockComp>(ea) {
             lock.entries.push(LockEntry { target_id: ship_id(2), state: LockState::Locked });
         }
         world
@@ -298,10 +297,10 @@ mod tests {
         let ea = world.spawn_ship(ship_id(1), Position::ORIGIN, Velocity::ZERO);
         world.spawn_ship(ship_id(2), Position::new(100.0, 0.0, 0.0), Velocity::ZERO);
         world.set_ship_stats(ea, armed_stats(25.0));
-        // LockComp は空のまま
+        // LockComp starts empty.
         let triggers = [ship_id(1)];
         let result = run(&mut world, Tick(1), &triggers);
-        assert!(result.events.is_empty(), "ロックなしでは発射しない");
+        assert!(result.events.is_empty(), "no fire without lock");
     }
 
     #[test]
@@ -320,7 +319,7 @@ mod tests {
         // ship_id(1) is NOT in fire_triggers this tick
         let result = run(&mut world, Tick(1), &[]);
         let fired = result.events.iter().filter(|e| matches!(e, DomainEvent::WeaponFired(_))).count();
-        assert_eq!(fired, 0, "fire_triggers にない場合は発射しない");
+        assert_eq!(fired, 0, "no fire when ship is absent from fire_triggers");
     }
 
     #[test]

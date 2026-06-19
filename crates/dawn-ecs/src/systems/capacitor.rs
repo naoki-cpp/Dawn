@@ -69,7 +69,6 @@ struct ShipSnap {
 pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
     // ── 1. Read-only snapshot ─────────────────────────────────────────────────
     let snaps: Vec<ShipSnap> = world
-        .inner()
         .query::<(&ShipIdComp, &CapacitorComp, &ShipStatsComp, &FittingComp)>()
         .iter()
         .map(|(entity, (sid, cap, stats, fit))| {
@@ -164,7 +163,7 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn apply_cap(world: &mut SimWorld, entity: hecs::Entity, new_cap: f32) {
-    if let Ok(mut cap) = world.inner_mut().get::<&mut CapacitorComp>(entity) {
+    if let Some(mut cap) = world.get_mut::<CapacitorComp>(entity) {
         cap.current = new_cap;
     }
 }
@@ -174,7 +173,7 @@ fn update_cycles(world: &mut SimWorld, entity: hecs::Entity, updates: &[(usize, 
         return;
     }
 
-    let Ok(mut fitting) = world.inner_mut().get::<&mut FittingComp>(entity) else { return };
+    let Some(mut fitting) = world.get_mut::<FittingComp>(entity) else { return };
 
     let high_len = fitting.high.len();
     let mid_len  = fitting.mid.len();
@@ -204,7 +203,7 @@ fn deactivate_modules(
     tick         : Tick,
     events       : &mut Vec<DomainEvent>,
 ) {
-    let Ok(mut fitting) = world.inner_mut().get::<&mut FittingComp>(entity) else { return };
+    let Some(mut fitting) = world.get_mut::<FittingComp>(entity) else { return };
 
     let high_len = fitting.high.len();
     let mid_len  = fitting.mid.len();
@@ -289,7 +288,7 @@ mod tests {
 
     fn read_cap(world: &SimWorld) -> f32 {
         let id = test_ship_id();
-        world.inner().query::<(&ShipIdComp, &CapacitorComp)>().iter()
+        world.query::<(&ShipIdComp, &CapacitorComp)>().iter()
             .find(|(_, (sid, _))| sid.0 == id)
             .map(|(_, (_, cap))| cap.current)
             .expect("ship not found")
@@ -297,9 +296,8 @@ mod tests {
 
     fn read_cycle(world: &SimWorld) -> u64 {
         let id = test_ship_id();
-        let entity = world.inner().query::<&ShipIdComp>().iter()
-            .find(|(_, sid)| sid.0 == id).map(|(e, _)| e).expect("ship not found");
-        world.inner().get::<&FittingComp>(entity).unwrap().high[0].cycle_remaining
+        let entity = world.find_entity(id).expect("ship not found");
+        world.get::<FittingComp>(entity).unwrap().high[0].cycle_remaining
     }
 
     // ── Recharge ──────────────────────────────────────────────────────────────

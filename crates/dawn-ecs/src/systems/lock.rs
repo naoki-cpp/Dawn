@@ -50,7 +50,6 @@ pub fn run(
     // ── 1. 全 Ship をスナップショット ────────────────────────────────────────
 
     let mut ships: Vec<ShipSnap> = world
-        .inner()
         .query::<(&ShipIdComp, &PositionComp, &ShipStatsComp, &LockComp, Option<&IsNpcComp>)>()
         .iter()
         .map(|(entity, (id, pos, stats, lock, npc))| ShipSnap {
@@ -178,7 +177,7 @@ pub fn run(
     // ── 3. Write back to ECS (O(1) per ship via captured entity handle) ──────
 
     for s in ships {
-        if let Ok(mut lock) = world.inner_mut().get::<&mut LockComp>(s.entity) {
+        if let Some(mut lock) = world.get_mut::<LockComp>(s.entity) {
             *lock = s.lock_comp;
         }
     }
@@ -219,20 +218,18 @@ mod tests {
     fn npc_auto_lock_starts_when_target_is_in_range() {
         let mut world = setup(Position::ORIGIN, Position::new(500.0, 0.0, 0.0), armed_stats());
         run(&mut world, Tick(1), &[]);
-        let any_locking = world.inner()
-            .query::<&LockComp>().iter()
+        let any_locking = world.query::<&LockComp>().iter()
             .any(|(_, l)| !l.entries.is_empty());
-        assert!(any_locking, "射程内なら Locking エントリが作成される");
+        assert!(any_locking, "locking entry created when target is in range");
     }
 
     #[test]
     fn no_auto_lock_when_target_is_out_of_range() {
         let mut world = setup(Position::ORIGIN, Position::new(10_000.0, 0.0, 0.0), armed_stats());
         run(&mut world, Tick(1), &[]);
-        let any_locking = world.inner()
-            .query::<&LockComp>().iter()
+        let any_locking = world.query::<&LockComp>().iter()
             .any(|(_, l)| !l.entries.is_empty());
-        assert!(!any_locking, "射程外では自動ロックしない");
+        assert!(!any_locking, "no auto-lock when target is out of range");
     }
 
     #[test]
@@ -242,7 +239,7 @@ mod tests {
         run(&mut world, Tick(2), &[]);
         let r3 = run(&mut world, Tick(3), &[]);
         let count = r3.events.iter().filter(|e| matches!(e, DomainEvent::TargetLocked(_))).count();
-        assert!(count >= 1, "lock_time=3 Tick 後に TargetLocked が発行される");
+        assert!(count >= 1, "TargetLocked emitted after lock_time=3 ticks");
     }
 
     #[test]
@@ -252,15 +249,13 @@ mod tests {
         run(&mut world, Tick(2), &[]);
         run(&mut world, Tick(3), &[]);  // Locked になる
 
-        // ターゲットを ECS から削除
-        let entity = world.inner()
-            .query::<&ShipIdComp>().iter()
-            .find(|(_, s)| s.0 == ship_id(2)).map(|(e, _)| e).unwrap();
+        // Remove target from ECS.
+        let entity = world.find_entity(ship_id(2)).unwrap();
         world.despawn_ship(entity);
 
         let r = run(&mut world, Tick(4), &[]);
         let lost = r.events.iter().filter(|e| matches!(e, DomainEvent::LockLost(_))).count();
-        assert!(lost >= 1, "ターゲット消滅時に LockLost が発行される");
+        assert!(lost >= 1, "LockLost emitted when target is despawned");
     }
 
     #[test]
@@ -270,10 +265,9 @@ mod tests {
         let mut world = setup(Position::ORIGIN, Position::new(500.0, 0.0, 0.0), unarmed);
         let cmd = LockOnCommand { ship_id: ship_id(1), target_id: ship_id(2) };
         run(&mut world, Tick(1), &[cmd]);
-        let lock_started = world.inner()
-            .query::<(&ShipIdComp, &LockComp)>().iter()
+        let lock_started = world.query::<(&ShipIdComp, &LockComp)>().iter()
             .any(|(_, (id, l))| id.0 == ship_id(1) && !l.entries.is_empty());
-        assert!(lock_started, "LockOnCommand でロック開始される");
+        assert!(lock_started, "lock initiated by LockOnCommand");
     }
 
     #[test]
@@ -292,11 +286,10 @@ mod tests {
         ];
         run(&mut world, Tick(1), &cmds);
 
-        let lock_count = world.inner()
-            .query::<(&ShipIdComp, &LockComp)>().iter()
+        let lock_count = world.query::<(&ShipIdComp, &LockComp)>().iter()
             .find(|(_, (id, _))| id.0 == ship_id(1))
             .map(|(_, (_, l))| l.entries.len())
             .unwrap_or(0);
-        assert_eq!(lock_count, 1, "max_locks=1 なら同時に1つまでしかロックできない");
+        assert_eq!(lock_count, 1, "max_locks=1 allows only one simultaneous lock");
     }
 }

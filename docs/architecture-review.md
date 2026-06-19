@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : CLAUDE.md §11, docs/architecture.md
-date     : 2026-06-19（Phase 4 完了後に更新）
+date     : 2026-06-19（Phase 6 完了後に更新）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -179,39 +179,18 @@ dawn-sector/src/star_map.rs     — インスタンスデータ（StarMap struct
 | P4-1 tick.rs 抽出 | 2026-06-19 | tick() / tick_with_lock_commands() を node/tick.rs へ（91行）|
 | P4-2 spawner_logic.rs 抽出 | 2026-06-19 | spawn/bot メソッド群を node/spawner_logic.rs へ（394行）。node/mod.rs 2,868→2,396行 |
 | P4-3 `_owned` 統合 | — | スキップ: `_owned` は3行ラッパーでロジック重複ゼロ。統合コストが効果を上回る |
+| P5-1 serve.rs 分割 | 2026-06-19 | serve/mod.rs・single.rs・cluster.rs の3ファイルに分割 |
+| P5-2 data_loader.rs 分割 | 2026-06-19 | data_loader/{mod,ship_types,modules,star_map}.rs に分割 |
+| P6-1 `SimWorld` クエリヘルパー追加 | 2026-06-19 | `find_entity` / `query` / `get` / `get_mut` を追加。combat/capacitor/lock/fitting の `inner()` 脱出を削減 |
 
 ---
 
-### Phase 5 — dawn-simulation の整理（次の優先項目）
+### Phase 6 — dawn-ecs のヘルパー整備（完了）
 
-**P5-1: serve.rs をモード別に分割**
-
-```
-dawn-simulation/src/
-  serve/
-    mod.rs      — 共通ヘルパー（build_serve_node / spawn_npc_frigates / AOI_CELL_SIZE）
-    single.rs   — run_phase4_server()
-    cluster.rs  — run_cluster_server()
-```
-
-**P5-2: data_loader.rs をサブモジュール分割**
-
-```
-dawn-simulation/src/data_loader/
-  mod.rs        — pub use
-  ship_types.rs — ShipTypeEntry + load_ship_types()
-  modules.rs    — ModuleEntry + load_modules()
-  star_map.rs   — StarMapFile + load_star_map()
-```
-
----
-
-### Phase 6 — dawn-ecs のヘルパー整備
-
-**P6-1: `SimWorld::query_ships()` ヘルパー追加**
-
-combat / capacitor / lock 各 system の snapshot ループを共通化。
-各 system で 20〜30行削減。`dawn-ecs` 単独で完結する変更。
+`SimWorld` に `find_entity` / `query` / `get` / `get_mut` を追加し、
+combat / capacitor / lock / fitting から `inner()` / `inner_mut()` 直接呼び出しを削減した。
+`fitting.rs` の entity 検索ブロック（4行×4箇所）が `find_entity(id)?` 1行に整理された。
+日本語コメントをタッチしたファイル内で英語に変換した。
 
 ---
 

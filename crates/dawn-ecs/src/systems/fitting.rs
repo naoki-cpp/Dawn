@@ -24,19 +24,12 @@ pub const MASS_SCALE: f32 = 100_000.0;
 /// Must be called after any fitting change (module fit / activate / deactivate).
 /// Returns the new stats, or `None` if the ship does not exist.
 pub fn apply_fitting(world: &mut SimWorld, ship_id: ShipId, base: ShipStatsComp) -> Option<ShipStatsComp> {
-    let entity = {
-        let mut found = None;
-        for (e, id) in world.inner().query::<&crate::components::ShipIdComp>().iter() {
-            if id.0 == ship_id { found = Some(e); break; }
-        }
-        found?
-    };
+    let entity = world.find_entity(ship_id)?;
 
     // ── Propulsion stats (ADR-0023 special cases) ─────────────────────────────
 
     let (total_mass_add, speed_mult) = world
-        .inner()
-        .get::<&FittingComp>(entity)
+        .get::<FittingComp>(entity)
         .map(|f| {
             // mass_add: passive — sum from ALL slots regardless of is_effective().
             let mass_add: f32 = f.high.iter()
@@ -62,14 +55,13 @@ pub fn apply_fitting(world: &mut SimWorld, ship_id: ShipId, base: ShipStatsComp)
     // ── Additive delta from effective slots (standard fields) ─────────────────
 
     let delta: StatDelta = world
-        .inner()
-        .get::<&FittingComp>(entity)
+        .get::<FittingComp>(entity)
         .map(|f| f.total_delta())
         .unwrap_or(StatDelta::ZERO);
 
     // ── Build new stats ───────────────────────────────────────────────────────
 
-    let old_stats = world.inner().get::<&ShipStatsComp>(entity).ok().map(|s| *s).unwrap_or(base);
+    let old_stats = world.get::<ShipStatsComp>(entity).map(|s| *s).unwrap_or(base);
     let mut new_stats = apply_delta(base, &delta);
 
     // Override propulsion fields with correctly computed values.
@@ -81,7 +73,7 @@ pub fn apply_fitting(world: &mut SimWorld, ship_id: ShipId, base: ShipStatsComp)
     world.set_ship_stats(entity, new_stats);
 
     // Scale current HP proportionally when max HP changes.
-    if let Ok(mut hull) = world.inner_mut().get::<&mut HullComp>(entity) {
+    if let Some(mut hull) = world.get_mut::<HullComp>(entity) {
         let scale = |cur: f32, old_max: f32, new_max: f32| -> f32 {
             if old_max <= 0.0 { return new_max; }
             (cur / old_max * new_max).clamp(0.0, new_max)
@@ -144,11 +136,7 @@ mod tests {
     fn make_world_with_ship() -> (SimWorld, ShipId) {
         let mut world = SimWorld::new(SectorId(0));
         let id = ship_id();
-        let entity = world.spawn_ship(id, Position::ORIGIN, Velocity::ZERO);
-        world.inner_mut().insert(entity, (
-            FittingComp::empty(),
-            HullComp::new(ShipStatsComp::NPC.max_shield, ShipStatsComp::NPC.max_armor, ShipStatsComp::NPC.max_hull),
-        )).unwrap();
+        world.spawn_ship(id, Position::ORIGIN, Velocity::ZERO);
         (world, id)
     }
 
@@ -164,8 +152,7 @@ mod tests {
     #[test]
     fn apply_fitting_adds_weapon_module_damage_to_base_stats() {
         let (mut world, id) = make_world_with_ship();
-        let entity = world.inner().query::<&crate::components::ShipIdComp>().iter()
-            .find(|(_, s)| s.0 == id).map(|(e, _)| e).unwrap();
+        let entity = world.find_entity(id).unwrap();
         let weapon_slot = FittedSlot {
             def: ModuleDefinition {
                 id: ModuleId(1), name: "Railgun".to_string(),
@@ -178,7 +165,7 @@ mod tests {
             is_active      : true,
             cycle_remaining: 0,
         };
-        world.inner_mut().get::<&mut FittingComp>(entity).unwrap().high.push(weapon_slot);
+        world.get_mut::<FittingComp>(entity).unwrap().high.push(weapon_slot);
         let stats = apply_fitting(&mut world, id, ShipStatsComp::NPC).unwrap();
         assert_eq!(stats.weapon_damage, ShipStatsComp::NPC.weapon_damage + 15.0);
     }
@@ -186,8 +173,7 @@ mod tests {
     #[test]
     fn active_afterburner_multiplies_max_speed() {
         let (mut world, id) = make_world_with_ship();
-        let entity = world.inner().query::<&crate::components::ShipIdComp>().iter()
-            .find(|(_, s)| s.0 == id).map(|(e, _)| e).unwrap();
+        let entity = world.find_entity(id).unwrap();
         let ab_slot = FittedSlot {
             def: ModuleDefinition {
                 id: ModuleId(5), name: "1MN AB".to_string(),
@@ -200,7 +186,7 @@ mod tests {
             is_active      : true,
             cycle_remaining: 0,
         };
-        world.inner_mut().get::<&mut FittingComp>(entity).unwrap().mid.push(ab_slot);
+        world.get_mut::<FittingComp>(entity).unwrap().mid.push(ab_slot);
         let stats = apply_fitting(&mut world, id, ShipStatsComp::NPC).unwrap();
         let expected = ShipStatsComp::NPC.max_speed * 2.35;
         assert!((stats.max_speed - expected).abs() < 0.01,
@@ -210,8 +196,7 @@ mod tests {
     #[test]
     fn inactive_afterburner_does_not_affect_max_speed() {
         let (mut world, id) = make_world_with_ship();
-        let entity = world.inner().query::<&crate::components::ShipIdComp>().iter()
-            .find(|(_, s)| s.0 == id).map(|(e, _)| e).unwrap();
+        let entity = world.find_entity(id).unwrap();
         let ab_slot = FittedSlot {
             def: ModuleDefinition {
                 id: ModuleId(5), name: "1MN AB".to_string(),
@@ -224,7 +209,7 @@ mod tests {
             is_active      : false,  // OFF
             cycle_remaining: 0,
         };
-        world.inner_mut().get::<&mut FittingComp>(entity).unwrap().mid.push(ab_slot);
+        world.get_mut::<FittingComp>(entity).unwrap().mid.push(ab_slot);
         let stats = apply_fitting(&mut world, id, ShipStatsComp::NPC).unwrap();
         assert!((stats.max_speed - ShipStatsComp::NPC.max_speed).abs() < 0.01,
             "AB OFF: max_speed must not change");
@@ -233,8 +218,7 @@ mod tests {
     #[test]
     fn mass_add_is_always_applied_regardless_of_module_active_state() {
         let (mut world, id) = make_world_with_ship();
-        let entity = world.inner().query::<&crate::components::ShipIdComp>().iter()
-            .find(|(_, s)| s.0 == id).map(|(e, _)| e).unwrap();
+        let entity = world.find_entity(id).unwrap();
         let oaab = FittedSlot {
             def: ModuleDefinition {
                 id: ModuleId(10), name: "10MN AB".to_string(),
@@ -247,7 +231,7 @@ mod tests {
             is_active      : false,  // OFF — but mass_add must still apply
             cycle_remaining: 0,
         };
-        world.inner_mut().get::<&mut FittingComp>(entity).unwrap().mid.push(oaab);
+        world.get_mut::<FittingComp>(entity).unwrap().mid.push(oaab);
         let stats = apply_fitting(&mut world, id, ShipStatsComp::NPC).unwrap();
         let expected_mass = ShipStatsComp::NPC.mass + 8_000_000.0;
         assert!((stats.mass - expected_mass).abs() < 1.0,
