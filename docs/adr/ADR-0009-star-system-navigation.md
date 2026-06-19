@@ -232,7 +232,7 @@ Event Sourcing と相性が悪い。「移動アニメーション」はクラ�
 
 ### dawn-simulation
 
-- [x] `src/star_map.rs` 追加（初期 3 星系トポロジーの静的定義）
+- [x] `src/galaxy.rs` 追加（星系トポロジー定義と TOML schema parser）
 - [x] `src/node.rs` に `jump_gates: HashMap<JumpGateId, JumpGateDef>` フィールド追加
 - [x] `src/node.rs` に `can_propose_jump` / `append_jump_events` 実装
   - Ship が gate_activation_radius 内にいるか確認（`can_propose_jump`）

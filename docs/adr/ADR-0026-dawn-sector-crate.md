@@ -64,7 +64,7 @@ Sector 単位のゲームシミュレーションロジック。
 | `src/spawner.rs` | Ship 生成・despawn |
 | `src/aoi.rs` | Area of Interest（CellGrid）|
 | `src/dilation.rs` | TiDi 計算ロジック |
-| `src/star_map.rs` | 星系トポロジーデータ（StarMap・builtin()）|
+| `src/galaxy.rs` | 星系トポロジーデータ（Galaxy）と TOML schema parser |
 | `src/persistence/` | StateSnapshot・CheckpointScheduler |
 
 **dawn-simulation に残すもの（配線・起動）:**
@@ -122,7 +122,7 @@ Phase 3（P3-1/P3-2）で実施済みの方向。サブモジュール化はで�
 - [x] `crates/dawn-sector/` ディレクトリ・`Cargo.toml` 作成
 - [x] workspace `Cargo.toml` に `dawn-sector` を追加
 - [x] `dawn-simulation/src/node/` → `dawn-sector/src/node/` へ移管
-- [x] `transit.rs` / `spawner.rs` / `aoi.rs` / `dilation.rs` / `star_map.rs` / `persistence/` / `modules.rs` / `ship_types.rs` を移管
+- [x] `transit.rs` / `spawner.rs` / `aoi.rs` / `dilation.rs` / `galaxy.rs` / `persistence/` / `modules.rs` / `ship_types.rs` を移管
 - [x] `dawn-simulation/Cargo.toml` に `dawn-sector` 依存を追加
 - [x] `dawn-simulation` 内の `use crate::` を `use dawn_sector::` に変換
 - [x] `cargo build --workspace` 成功確認

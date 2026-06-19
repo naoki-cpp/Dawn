@@ -160,7 +160,7 @@ Step 7.5 で destination ノードが `SectorTransitCompleted` に加えて
 `JumpGateUsed` を Append し、`from`/`to` の `StarSystemId` が異なる場合は
 `StarSystemChanged` も Append する（`SimulationNode::append_jump_events`）。
 
-静的トポロジー（3 星系・4 ジャンプゲート）は `dawn-sector/src/star_map.rs`
+静的トポロジー（3 星系・4 ジャンプゲート）は `dawn-sector/src/galaxy.rs`
 に定義する（ADR-0026）。`protocol.rs` の `domain_event_to_json` が両イベントを JSON としてクライアントに配信し、
 `JumpCommand` の JSON パーサーも `protocol.rs` に実装済み。Godot クライアント側
 （`connection.gd` の `send_jump_command`、`main.gd` の

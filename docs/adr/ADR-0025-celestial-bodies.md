@@ -32,6 +32,7 @@ pub enum CelestialBodyKind { Star, Planet }
 
 pub struct CelestialBodyDef {
     pub id           : CelestialBodyId,
+    pub sector       : SectorId,
     pub kind         : CelestialBodyKind,
     pub name         : String,
     pub position     : Position,
@@ -51,7 +52,7 @@ pub enum WarpTarget {
 `WarpCommand.target: WarpTarget` が旧 `gate_id: JumpGateId` を置き換える。  
 `WarpComp.target: WarpTarget` が旧 `WarpComp.gate_id` を置き換える。
 
-### 2. 静的マップデータ（dawn-simulation/star_map.rs）
+### 2. 静的マップデータ（dawn-sector/galaxy.rs + data/star_map*.toml）
 
 `celestial_bodies_in_sector(sector_id)` がそのセクターの天体一覧を返す。  
 初期トポロジー（3星系 × 恒星1 + 惑星1）：
@@ -68,6 +69,7 @@ pub enum WarpTarget {
 | Gamma  | Bastion（惑星）   | 金星軌道（0.72 AU）| (10 000, 0, −4 000)   | 3 000  | —          |
 
 `CelestialBodyId` は全セクターにわたってグローバルに一意（Alpha: 0-1、Beta: 2-3、Gamma: 4-5）。
+`CelestialBodyDef.sector` が所属 Sector を明示するため、天体 ID の割り当て規約に依存しない。
 
 ### 3. 天体へのワープ（dawn-simulation）
 
@@ -121,9 +123,10 @@ uniform vec3  sun_color;      // スペクトル型に対応した色
 
 - [x] ADR 承認
 - [x] `CelestialBodyId / Kind / Def`、`WarpTarget` を dawn-core に追加
+- [x] `CelestialBodyDef.sector` で天体の Sector 帰属を明示
 - [x] `WarpCommand.target: WarpTarget` を dawn-core に追加
 - [x] `WarpComp.target: WarpTarget` を dawn-ecs に追加
-- [x] `celestial_bodies_in_sector()` を dawn-simulation/star_map.rs に追加
+- [x] `Galaxy::bodies_in_sector()` を dawn-sector/galaxy.rs に追加
 - [x] `SimulationNode.celestial_bodies` + ワープロジック更新を node.rs に追加
 - [x] `InitialState` に `celestial_bodies` 配列を含める
 - [x] ws_server.rs で WarpCommand の `target` フィールドをパース（旧 `gate_id` も受理）

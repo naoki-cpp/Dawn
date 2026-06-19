@@ -39,7 +39,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 485 | 🟢 P4-2 + P7-1（実装 394行 + bot テスト 91行） |
 | `crates/dawn-sector/src/node/transit_flow.rs` | 402 | 🟢 P7-1（実装 + 近接テスト） |
 | `crates/dawn-sector/src/node/commands.rs` | 342 | 🟢 P7-1（実装 262行 + fitting/combat テスト 80行） |
-| `crates/dawn-sector/src/galaxy.rs` | 262 | 🟢 |
+| `crates/dawn-sector/src/galaxy.rs` | 203 | 🟢 TOML schema parser 統合 |
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 391 | 🟢 P7-pre |
 | `crates/dawn-sector/src/node/apply_event.rs` | 226 | 🟢 P7-pre |
 | `crates/dawn-sector/src/node/tackle.rs` | 204 | 🟢 P7-pre |
@@ -63,16 +63,15 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-simulation/src/cluster.rs` | 528 | 🟢 Raft クラスター配線 |
 | `crates/dawn-simulation/src/sector_simulator_actor.rs` | 423 | 🟡 M-3 |
 | `crates/dawn-simulation/src/bench.rs` | 411 | 🟢 |
-| `crates/dawn-simulation/src/serve/mod.rs` | 382 | 🟢 P5-1 共通ヘルパー |
+| `crates/dawn-simulation/src/serve/mod.rs` | 402 | 🟢 P5-1 共通ヘルパー |
 | `crates/dawn-simulation/src/protocol.rs` | 309 | 🟢 |
 | `crates/dawn-simulation/src/serve/cluster.rs` | 241 | 🟢 P5-1 |
 | `crates/dawn-simulation/src/ws_server.rs` | 199 | 🟢 |
 | `crates/dawn-simulation/src/data_loader/modules.rs` | 190 | 🟢 P5-2 |
 | `crates/dawn-simulation/src/serve/single.rs` | 177 | 🟢 P5-1 |
 | `crates/dawn-simulation/src/data_loader/ship_types.rs` | 174 | 🟢 P5-2 |
-| `crates/dawn-simulation/src/data_loader/star_map.rs` | 98 | 🟢 P5-2 |
 | `crates/dawn-simulation/src/main.rs` | 63 | 🟢 |
-| `crates/dawn-simulation/src/data_loader/mod.rs` | 12 | 🟢 P5-2 pub use |
+| `crates/dawn-simulation/src/data_loader/mod.rs` | 9 | 🟢 P5-2 |
 
 ### その他クレート
 
@@ -86,9 +85,9 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-ecs/src/systems/capacitor.rs` | 412 | 🟢 |
 | `crates/dawn-consensus/src/rpc.rs` | 343 | 🟢 Raft RPC 型定義 |
 | `crates/dawn-consensus/src/tcp_transport.rs` | 330 | 🟢 8D-3 TcpRaftTransport |
-| `crates/dawn-sector-node/src/main.rs` | 329 | 🟢 8D-4 本番バイナリ（TCP 配線・WS・Jump Redirect） |
+| `crates/dawn-sector-node/src/main.rs` | 337 | 🟢 8D-4 本番バイナリ（TCP 配線・WS・Jump Redirect）|
 | `crates/dawn-sector-node/src/protocol.rs` | 243 | 🟢 8D-4 WS プロトコル |
-| `crates/dawn-sector-node/src/data_loader.rs` | 238 | 🟢 8D-4 TOML ローダー |
+| `crates/dawn-sector-node/src/data_loader.rs` | 178 | 🟢 8D-4 module/ship type TOML ローダー |
 | `crates/dawn-replication/src/tcp.rs` | 263 | 🟢 8D-2c |
 | `crates/dawn-core/src/navigation.rs` | 121 | 🟢 ナビゲーション型定義（star_system.rs より改名）|
 | `crates/dawn-sector-node/src/ws_server.rs` | 153 | 🟢 8D-4 WebSocket サーバー |
@@ -142,6 +141,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | navigation.rs / galaxy.rs リネーム | 2026-06-19 | `star_system.rs` → `navigation.rs`（dawn-core）、`star_map.rs`/`StarMap` → `galaxy.rs`/`Galaxy`（dawn-sector）。L-3 解消 |
 | P7-2 jump/warp validation 移動 | 2026-06-20 | `can_propose_jump` / `can_propose_warp` を `node/mod.rs` → `node/navigation.rs` へ移動。mod.rs 514行に縮小。Phase 7 完了 |
 | AoI テストを serialization.rs へ移動 | 2026-06-20 | `ships_visible_to` / `aoi_enter_json` のテストを実装と同じファイルへ。L-1 解消 |
+| P9-2 CelestialBodyDef sector 帰属 | 2026-06-20 | `CelestialBodyDef.sector` を追加し、`Galaxy::bodies_in_sector` の ID 割り当て近似を削除 |
 
 ---
 
@@ -177,15 +177,12 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 着手条件: 8D-5 実機検証の完了後（分散配線で境界の揺れが確定してから）
 
-#### P9-2: `CelestialBodyDef` へのセクター帰属フィールド追加（任意）
+#### P9-2: `CelestialBodyDef` へのセクター帰属フィールド追加（完了）
 
-`galaxy.rs:95-99` の `system_contains_body` が index 割り当て規約に依存している。
-`CelestialBodyDef`（`dawn-core`）に `sector: SectorId` フィールドを追加すれば
-近似ロジックが消え、TOML ローダーも簡潔になる。
-
-波及: `dawn-core`・`dawn-sector`・`dawn-simulation`・`dawn-sector-node` の
-`CelestialBodyDef` 生成箇所すべて（`data/star_map.toml` スキーマ変更も伴う）。
-型設計観点で B+ → A− の改善につながるが、変更コストは中程度。
+`CelestialBodyDef.sector` を追加し、`Galaxy::bodies_in_sector` は ID 割り当て規約ではなく
+明示フィールドで絞り込むようになった。`data/star_map.toml` / `data/star_map.demo.toml`
+も `sector` フィールドを持つ。
+型設計の残り違和感は解消済み。
 
 ---
 
