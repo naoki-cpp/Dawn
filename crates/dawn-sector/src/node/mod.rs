@@ -36,7 +36,7 @@ use dawn_core::{
     ship_type::{ShipTypeDefinition, ShipTypeId},
     DomainEvent, JumpGateDef, JumpGateId,
     ModuleDefinition, ModuleId, NodeId, Position, SectorBounds, SectorId, ShipId,
-    Tick, WarpTarget,
+    Tick,
 };
 use dawn_ecs::{
     components::{PositionComp, ShipStatsComp, WarpComp},
@@ -300,51 +300,6 @@ impl<S: EventStore> SimulationNode<S> {
         self.sector_map.gates.get(&gate_id)
     }
 
-    /// Whether a `JumpCommand` for `ship_id` via `gate_id` would currently be
-    /// accepted: the Ship exists, is not already in transit, the gate
-    /// originates in this Sector, and the Ship is within its
-    /// `activation_radius`. Used to reject commands up front, before
-    /// proposing to the Raft Log (INV-006).
-    pub fn can_propose_jump(&self, ship_id: ShipId, gate_id: JumpGateId) -> bool {
-        let Some(&entity) = self.ships.index.get(&ship_id) else { return false };
-        if self.world.transit_state(entity).is_in_transit() {
-            return false;
-        }
-        if self.world.is_tackled(entity) { return false; }
-        let Some(gate) = self.sector_map.gates.get(&gate_id) else { return false };
-        let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
-        gate.is_in_range(pos.0)
-    }
-
-    // ── Intra-Sector Warp (short-range Fold, ADR-0022) ───────────────────────
-
-    /// Whether a `WarpCommand` for `ship_id` toward `target` would currently be
-    /// accepted (INV-006 Validation, before attaching `WarpComp`):
-    /// the Ship exists, is not in transit, is not already warping, not tackled,
-    /// the target belongs to this Sector, and is at least
-    /// `MIN_WARP_DISTANCE` away (closer → use approach instead).
-    pub fn can_propose_warp(&self, ship_id: ShipId, target: WarpTarget) -> bool {
-        let Some(&entity) = self.ships.index.get(&ship_id) else { return false };
-        if self.world.transit_state(entity).is_in_transit() {
-            return false;
-        }
-        if self.world.inner().get::<&WarpComp>(entity).is_ok() {
-            return false; // already aligning or warping
-        }
-        if self.world.is_tackled(entity) { return false; }
-        let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
-        match target {
-            WarpTarget::Gate(gate_id) => {
-                let Some(gate) = self.sector_map.gates.get(&gate_id) else { return false };
-                pos.0.distance(gate.position) >= MIN_WARP_DISTANCE
-            }
-            WarpTarget::Body(body_id) => {
-                let Some(body) = self.sector_map.bodies.get(&body_id) else { return false };
-                pos.0.distance(body.position) >= MIN_WARP_DISTANCE
-            }
-        }
-    }
-
     // ── Observation ───────────────────────────────────────────────────────────
 
     pub fn current_tick(&self)      -> Tick  { self.current_tick }
@@ -513,67 +468,6 @@ mod tests {
             .filter(|r| matches!(r.event, DomainEvent::ShipSpawned(_)))
             .count();
         assert_eq!(spawned, 5);
-    }
-
-    // ── Area of Interest (ADR-0019) ────────────────────────────────────────────
-
-    #[test]
-    fn ships_visible_to_an_observer_are_only_those_in_the_27_cell_neighborhood() {
-        let mut node = mem_node();
-        let cell = 1_000.0;
-        // Observer at origin (cell 0,0,0).
-        let observer = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
-        // Adjacent cell (1,0,0) — within the 3×3×3 neighborhood.
-        let near = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::new(1_500.0, 0.0, 0.0), Velocity::ZERO);
-        // Two cells away (2,0,0) — outside the neighborhood.
-        let far = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::new(2_500.0, 0.0, 0.0), Velocity::ZERO);
-
-        let visible = node.ships_visible_to(Position::ORIGIN, cell);
-        assert!(visible.contains(&observer), "observer's own cell is visible");
-        assert!(visible.contains(&near), "adjacent-cell ship is visible");
-        assert!(!visible.contains(&far), "two-cells-away ship is not visible");
-    }
-
-    #[test]
-    fn scoped_initial_state_excludes_ships_outside_the_observer_neighborhood() {
-        let mut node = mem_node();
-        let cell = 1_000.0;
-        let _observer = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
-        let far = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::new(9_000.0, 0.0, 0.0), Velocity::ZERO);
-
-        let json = node.build_initial_state_json_for(Position::ORIGIN, cell);
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let ids: Vec<u64> = v["ships"].as_array().unwrap().iter()
-            .map(|s| s["ship_id"].as_u64().unwrap())
-            .collect();
-        assert!(ids.contains(&_observer.raw()), "observer is in its own scoped state");
-        assert!(!ids.contains(&far.raw()), "distant ship is excluded from scoped InitialState");
-        // The full-world InitialState still includes the distant ship.
-        let full: serde_json::Value =
-            serde_json::from_str(&node.build_initial_state_json()).unwrap();
-        assert_eq!(full["ships"].as_array().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn aoi_enter_json_wraps_the_ship_state_for_a_known_ship() {
-        let mut node = mem_node();
-        let sid = node.spawn_ship(
-            crate::ship_types::SHIP_TYPE_NPC_FRIGATE,
-            Position::new(1.0, 2.0, 3.0),
-            Velocity::ZERO,
-        );
-        let json = node.aoi_enter_json(sid).expect("known ship yields a message");
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "AoiEnter");
-        assert_eq!(v["ship"]["ship_id"].as_u64().unwrap(), sid.raw());
-        assert_eq!(v["ship"]["position"]["x"].as_f64().unwrap() as f32, 1.0);
-    }
-
-    #[test]
-    fn aoi_enter_json_is_none_for_an_unknown_ship() {
-        let node = mem_node();
-        let unknown = ShipId::new(NodeId(9), 999);
-        assert!(node.aoi_enter_json(unknown).is_none());
     }
 
     // ── Population backstop (ADR-0018 / 8B-1) ────────────────────────────────

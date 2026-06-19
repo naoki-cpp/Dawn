@@ -2,6 +2,7 @@
 //!
 //! # Contents
 //!
+//! - `can_propose_jump`  / `can_propose_warp`                  — pre-Raft validation (INV-006)
 //! - `apply_approach_command` / `apply_approach_command_owned` — attach `ApproachComp`
 //! - `apply_warp_command`     / `apply_warp_command_owned`     — attach `WarpComp`
 //! - `drain_pending_auto_jumps`                                — drain the auto-jump queue
@@ -298,6 +299,45 @@ pub(super) fn speed_toward(vel: Velocity, pos: Position, target: Position) -> f3
     let dist = (dx * dx + dy * dy + dz * dz).sqrt();
     if dist < f32::EPSILON { return 0.0; }
     (vel.dx * dx + vel.dy * dy + vel.dz * dz) / dist
+}
+
+// ── Pre-Raft validation (INV-006) ────────────────────────────────────────────
+
+impl<S: EventStore> SimulationNode<S> {
+    /// Whether a `JumpCommand` for `ship_id` via `gate_id` would currently be
+    /// accepted: the Ship exists, is not already in transit, the gate
+    /// originates in this Sector, and the Ship is within its `activation_radius`.
+    /// Used to reject commands up front, before proposing to the Raft Log (INV-006).
+    pub fn can_propose_jump(&self, ship_id: ShipId, gate_id: JumpGateId) -> bool {
+        let Some(&entity) = self.ships.index.get(&ship_id) else { return false };
+        if self.world.transit_state(entity).is_in_transit() { return false; }
+        if self.world.is_tackled(entity) { return false; }
+        let Some(gate) = self.sector_map.gates.get(&gate_id) else { return false };
+        let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
+        gate.is_in_range(pos.0)
+    }
+
+    /// Whether a `WarpCommand` for `ship_id` toward `target` would currently be
+    /// accepted (INV-006 Validation, before attaching `WarpComp`):
+    /// the Ship exists, is not in transit, is not already warping, not tackled,
+    /// the target belongs to this Sector, and is at least `MIN_WARP_DISTANCE` away.
+    pub fn can_propose_warp(&self, ship_id: ShipId, target: WarpTarget) -> bool {
+        let Some(&entity) = self.ships.index.get(&ship_id) else { return false };
+        if self.world.transit_state(entity).is_in_transit() { return false; }
+        if self.world.inner().get::<&WarpComp>(entity).is_ok() { return false; }
+        if self.world.is_tackled(entity) { return false; }
+        let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
+        match target {
+            WarpTarget::Gate(gate_id) => {
+                let Some(gate) = self.sector_map.gates.get(&gate_id) else { return false };
+                pos.0.distance(gate.position) >= super::MIN_WARP_DISTANCE
+            }
+            WarpTarget::Body(body_id) => {
+                let Some(body) = self.sector_map.bodies.get(&body_id) else { return false };
+                pos.0.distance(body.position) >= super::MIN_WARP_DISTANCE
+            }
+        }
+    }
 }
 
 #[cfg(test)]
