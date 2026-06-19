@@ -60,7 +60,7 @@ Phase 6 の主目標は「ゲームが実際に面白いか」を人間から検
   同時に `data/session_duel_<unix秒>.json` へ同内容を書き出す
   （複数セッションを横断した集計・分析を可能にするため）。
   詳細集計（§6 のロックオン/モジュール/フィッティングメトリクス）は将来拡張予定。
-  → dawn-simulation/src/main.rs の DuelMetrics::write_json_summary() 参照
+  → dawn-simulation/src/serve/mod.rs の DuelMetrics::write_json_summary() 参照
 ```
 
 ---

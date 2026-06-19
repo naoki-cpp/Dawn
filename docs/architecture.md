@@ -81,7 +81,8 @@ EVE Online を**超えるゲーム**を作ることが目的（ADR-0016）。
 | `dawn-event-store` | ライブラリ | 2 層 Event Log（ホットログ＋コールドアーカイブ）の永続化・圧縮（ADR-0017） |
 | `dawn-consensus` | ライブラリ | Raft 実装（Leader 選出 / Log Replication / RaftActor、ADR-0014） |
 | `dawn-actor` | ライブラリ | Actor 基盤（ReplicationBus / ClientConnection trait） |
-| `dawn-simulation` | バイナリ | 全体を結合するシミュレーション実行基盤・WsServer（Godot 接続） |
+| `dawn-sector` | ライブラリ | Sector 単位のゲームロジック（SimulationNode・Tick・Transit・Warp・Bot AI・AoI・Snapshot、ADR-0026） |
+| `dawn-simulation` | バイナリ | 配線・起動のみ。WsServer（Godot 接続）・Raft クラスター配線・負荷生成・TOML ローダー |
 
 ### 依存 DAG
 
@@ -92,9 +93,10 @@ dawn-core
     ├── dawn-consensus
     └── dawn-event-store
             ↑
-            └── dawn-actor
+            ├── dawn-actor
+            └── dawn-sector          ← ゲームロジック（dawn-ecs / dawn-consensus にも依存・ADR-0026）
                     ↑
-                    └── dawn-simulation  (バイナリ・dawn-consensus にも依存)
+                    └── dawn-simulation  (バイナリ・dawn-actor / dawn-consensus にも依存)
 ```
 
 依存は**下から上への一方向のみ**。逆方向・循環は設計の失敗を意味する。

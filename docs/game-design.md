@@ -382,10 +382,12 @@ EM / Thermal / Kinetic / Explosive の 4 タイプと、各 HP 層への耐性�
 
 ### 🟢 遠い将来（EVE らしさの完成）
 
-- **Warp**: `WarpStarted / WarpFinished` イベント（ADR-0008 で例示済み）
-- **Drone**: 船から展開する無人機
-- **Logi（修理支援）**: 他の船の Shield を修復するモジュール
-- **Tackler（足止め）**: 速度・ワープを阻害するモジュール（Web / Scram）
+- **Warp**: ✅ 実装済み（ADR-0022 intra-Sector Warp）。align → warping 2 フェーズ・W キー。
+  移動は `VelocityChanged` で記録し専用イベントは設けない（ADR-0008 の方針）。
+- **Tackler（足止め）**: ✅ 実装済み（ADR-0024 Fold Disruptor）。`TackledComp` / `TackleApplied` /
+  `TackleReleased`・ワープ / ジャンプ拒否。Web（速度低下）系はまだ未実装。
+- **Drone**: 船から展開する無人機 — ⬜ 未実装
+- **Logi（修理支援）**: 他の船の Shield を修復するモジュール — ⬜ 未実装
 
 ---
 
