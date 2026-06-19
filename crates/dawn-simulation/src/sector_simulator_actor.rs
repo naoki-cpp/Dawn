@@ -18,8 +18,8 @@
 //! already in the bus channel ahead of any subsequent query.
 //! ```
 
-use crate::node::{SimulationNode, TickResult};
-use crate::transit::TransitOp;
+use dawn_sector::node::{SimulationNode, TickResult};
+use dawn_sector::transit::TransitOp;
 use dawn_actor::BusMessage;
 use dawn_consensus::{RaftActorHandle, Role, Term};
 use dawn_event_store::store::EventStore as _;
@@ -125,10 +125,10 @@ impl SectorSimulatorActor {
 
     /// Step 7.5 (ADR-0014 §7): apply committed Raft Log entries to the ECS.
     ///
-    /// Delegates to [`crate::transit::apply_committed_raft_entries`], which
+    /// Delegates to [`dawn_sector::transit::apply_committed_raft_entries`], which
     /// is shared with the `--serve --cluster` loop.
     fn apply_committed_raft_entries(&mut self) {
-        crate::transit::apply_committed_raft_entries(
+        dawn_sector::transit::apply_committed_raft_entries(
             &mut self.node,
             &self.raft,
             &mut self.raft_committed_rx,

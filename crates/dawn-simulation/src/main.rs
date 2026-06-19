@@ -7,21 +7,12 @@
 //!   cargo run -p dawn-simulation --bin simulate
 //!   cargo run -p dawn-simulation --bin simulate --release
 
-mod aoi;
 mod bench;
 mod cluster;
 mod data_loader;
-mod dilation;
-mod modules;
-mod node;
-mod persistence;
 mod protocol;
 mod serve;
-mod ship_types;
 mod sector_simulator_actor;
-mod spawner;
-mod star_map;
-mod transit;
 mod ws_server;
 
 #[tokio::main]
@@ -40,7 +31,7 @@ async fn main() {
         };
         // --pop-cap N sets the per-Sector population backstop (ADR-0018, last
         // resort); set it low to observe new connections being refused.
-        let pop_cap = usize_arg("--pop-cap").unwrap_or(node::POPULATION_CAP);
+        let pop_cap = usize_arg("--pop-cap").unwrap_or(dawn_sector::node::POPULATION_CAP);
         // --cluster: 3-node Raft cluster so Jump Gates work (ADR-0009)
         if args.contains(&"--cluster".to_string()) {
             serve::run_cluster_server(ship_count, pop_cap).await;

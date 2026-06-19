@@ -1,10 +1,10 @@
 //! Benchmark and demo functions (Phases 1–3, AoI, Raft demo).
 
-use crate::node::SimulationNode;
+use dawn_sector::node::SimulationNode;
 use crate::cluster::MultiNodeCluster;
-use crate::spawner::{generate_ships, SpawnConfig};
-use crate::{persistence, ship_types, aoi};
-use crate::persistence::StateSnapshot;
+use dawn_sector::spawner::{generate_ships, SpawnConfig};
+use dawn_sector::{persistence, ship_types, aoi};
+use dawn_sector::persistence::StateSnapshot;
 use crate::serve::AOI_CELL_SIZE;
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, Velocity};
 use dawn_event_store::FileEventStore;

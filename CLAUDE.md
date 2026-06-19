@@ -368,10 +368,11 @@ dawn-core
     ├── dawn-consensus      ← Raft（ADR-0014: state machine, RaftActor, RaftTransport）
     └── dawn-event-store
             ↑
-            └── dawn-actor          ← Actor基盤（ReplicationBus, ClientConnection）
-                    ↑
-                    └── dawn-simulation  ← 実行バイナリ・負荷生成
-                        （dawn-consensus にも依存する）
+            ├── dawn-actor          ← Actor基盤（ReplicationBus, ClientConnection）
+            └── dawn-sector         ← ゲームロジック（ADR-0026: SimulationNode・Warp・Transit・AoI）
+                    ↑                  （dawn-ecs, dawn-consensus にも依存する）
+                    └── dawn-simulation  ← 実行バイナリ・配線・負荷生成
+                        （dawn-actor, dawn-consensus にも依存する）
 
 # 将来追加予定（まだ存在しない）:
 #   dawn-actor ← dawn-replication（追記ログのゴシップ配布・ADR-0021）
@@ -1095,14 +1096,15 @@ Combat / Fitting ロジックは引き続き dawn-ecs / dawn-core 内に実装�
 | `dawn-event-store` | Event Log の永続化。Append, Read, Snapshot（InMemory + File） | dawn-core, serde | ネットワーク、ECS |
 | `dawn-consensus` | Raft実装（ADR-0014）。Leader選出, RaftActor, RaftTransport（In-Process）, PartitionableTransport | dawn-core, serde, rand, tokio | ネットワーク、ECS、EventStore |
 | `dawn-actor` | Actor基盤。ReplicationBus（マルチノード収束テスト用スタンドイン）, ClientConnection trait（+ InProcessConnection / WsClientConnection 実装） | dawn-core, dawn-event-store, tokio | dawn-ecs, dawn-simulation |
-| `dawn-simulation` | 実行バイナリ。SimulationNode, MultiNodeCluster（RaftActor 配線含む）, WsServer（Godot WebSocket接続）, 負荷生成, DataLoader（TOML読み込み） | 上記全て + rand + tokio-tungstenite + toml | — |
+| `dawn-sector` | Sector単位のゲームロジック。SimulationNode（Tick実装・コマンド処理・Transit・Warp・Bot AI・AoI）, SpawnConfig, StarMap, StateSnapshot, CheckpointScheduler, TiDi計算（ADR-0026） | dawn-core, dawn-ecs, dawn-event-store, dawn-consensus, serde, postcard, tokio | ネットワークI/O、WebSocket、ファイルI/O直接 |
+| `dawn-simulation` | 実行バイナリ・配線のみ。MultiNodeCluster（RaftActor 配線含む）, WsServer（Godot WebSocket接続）, 負荷生成, DataLoader（TOML読み込み） | 上記全て + dawn-sector + rand + tokio-tungstenite + toml | ゲームロジックの直接実装 |
 
 ### 将来追加予定のクレート（まだ存在しない・実装しないこと）
 
 | Crate | 予定フェーズ | 責務（予定） |
 |---|---|---|
 | `dawn-replication` | Phase 8D | 追記ログのゴシップ配布（ADR-0021）。差分伝播 + アンチエントロピー + スナップショット転送（競合解決 CRDT/LWW は単一所有のため不要） |
-| `dawn-sector-node` | Phase 8D | 本番実行バイナリ。Actorの配線と起動、ネットワーク RaftTransport + ゴシップの配線。ワイヤ = postcard 再利用（protobuf/`dawn-proto` は不採用・§3 参照） |
+| `dawn-sector-node` | Phase 8D | 本番実行バイナリ。dawn-sector に依存し、Actorの配線と起動、ネットワーク RaftTransport + ゴシップの配線。ワイヤ = postcard 再利用（protobuf/`dawn-proto` は不採用・§3 参照） |
 
 ---
 

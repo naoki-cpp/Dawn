@@ -52,7 +52,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ### Critical
 
-#### C-1: `SimulationNode` god object（node.rs 3,103行）
+#### C-1: `SimulationNode` god object（node.rs 3,103行）✅ 根本対処済み（ADR-0026）
 
 構造体フィールド 17個、公開メソッド ~65個、概念ドメイン 7以上。
 

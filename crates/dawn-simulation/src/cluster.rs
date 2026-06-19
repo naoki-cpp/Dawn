@@ -14,7 +14,7 @@
 //! No sleep, no flush, no barrier is required.
 
 use crate::sector_simulator_actor::{NodeStats, SectorSimulatorHandle, TickSummary};
-use crate::spawner::{generate_ships, SpawnConfig};
+use dawn_sector::spawner::{generate_ships, SpawnConfig};
 use dawn_actor::ReplicationBusHandle;
 use dawn_consensus::{InProcessTransport, PartitionableTransport, RaftActor, RaftActorHandle, RaftState, RaftTransport, Role, Term};
 use dawn_core::{NodeId, SectorBounds, SectorId};
@@ -348,7 +348,7 @@ mod tests {
         }
 
         // Gate 0 (Sector 0 -> Sector 1) sits near Sector 0's +X edge.
-        let gate = crate::star_map::StarMap::builtin().gates
+        let gate = dawn_sector::star_map::StarMap::builtin().gates
             .into_iter()
             .find(|g| g.id == JumpGateId(0))
             .expect("gate 0 must exist");

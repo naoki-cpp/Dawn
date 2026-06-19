@@ -67,7 +67,7 @@ impl TransitOp {
 ///
 /// Shared by `SectorSimulatorActor` and the `--serve --cluster` loop so the
 /// Step 7.5 semantics cannot drift between the two call sites.
-pub(crate) fn apply_committed_raft_entries<S: EventStore>(
+pub fn apply_committed_raft_entries<S: EventStore>(
     node        : &mut SimulationNode<S>,
     raft        : &RaftActorHandle,
     committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
@@ -121,7 +121,7 @@ pub(crate) fn apply_committed_raft_entries<S: EventStore>(
 /// step order has a single source of truth. The actor path
 /// (`SectorSimulatorActor`) keeps its own variant because it interleaves a
 /// ReplicationBus flush (Step 9) between the tick and the Raft timer step.
-pub(crate) fn step_cluster_node<S: EventStore>(
+pub fn step_cluster_node<S: EventStore>(
     node         : &mut SimulationNode<S>,
     raft         : &RaftActorHandle,
     committed_rx : &mut mpsc::UnboundedReceiver<Vec<u8>>,

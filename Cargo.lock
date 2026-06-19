@@ -151,6 +151,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "dawn-sector"
+version = "0.1.0"
+dependencies = [
+ "dawn-consensus",
+ "dawn-core",
+ "dawn-ecs",
+ "dawn-event-store",
+ "postcard",
+ "rand",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "dawn-simulation"
 version = "0.1.0"
 dependencies = [
@@ -160,6 +176,7 @@ dependencies = [
  "dawn-core",
  "dawn-ecs",
  "dawn-event-store",
+ "dawn-sector",
  "futures-util",
  "postcard",
  "rand",

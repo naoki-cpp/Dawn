@@ -118,15 +118,15 @@ Actor 基盤とドメインロジックが混在し、将来の `dawn-replicatio
 
 ## 実装チェックリスト
 
-- [ ] `crates/dawn-sector/` ディレクトリ・`Cargo.toml` 作成
-- [ ] workspace `Cargo.toml` に `dawn-sector` を追加
-- [ ] `dawn-simulation/src/node/` → `dawn-sector/src/node/` へ移管
-- [ ] `transit.rs` / `spawner.rs` / `aoi.rs` / `dilation.rs` / `star_map.rs` / `persistence/` を移管
-- [ ] `dawn-simulation/Cargo.toml` に `dawn-sector` 依存を追加
-- [ ] `dawn-simulation` 内の `use crate::` を `use dawn_sector::` に変換
-- [ ] `cargo build --workspace` 成功確認
-- [ ] `cargo test --workspace` 全通過確認
-- [ ] CLAUDE.md §3（Dependency DAG）・§11（Crate別責務早見表）を更新
+- [x] `crates/dawn-sector/` ディレクトリ・`Cargo.toml` 作成
+- [x] workspace `Cargo.toml` に `dawn-sector` を追加
+- [x] `dawn-simulation/src/node/` → `dawn-sector/src/node/` へ移管
+- [x] `transit.rs` / `spawner.rs` / `aoi.rs` / `dilation.rs` / `star_map.rs` / `persistence/` / `modules.rs` / `ship_types.rs` を移管
+- [x] `dawn-simulation/Cargo.toml` に `dawn-sector` 依存を追加
+- [x] `dawn-simulation` 内の `use crate::` を `use dawn_sector::` に変換
+- [x] `cargo build --workspace` 成功確認
+- [x] `cargo test --workspace` 全通過確認
+- [x] CLAUDE.md §3（Dependency DAG）・§11（Crate別責務早見表）を更新
 - [ ] `docs/architecture-review.md` を更新（C-1 の根本対処として記録）
 
 ## 期待効果

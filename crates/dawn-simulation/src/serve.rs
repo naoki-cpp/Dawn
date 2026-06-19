@@ -1,8 +1,9 @@
 //! Serve-loop functions: single-node and Raft-cluster WebSocket servers.
 
-use crate::{aoi, cluster, data_loader, dilation, modules, ship_types, transit, ws_server};
-use crate::node::SimulationNode;
-use crate::spawner::{generate_ships, SpawnConfig};
+use crate::{cluster, data_loader, ws_server};
+use dawn_sector::{aoi, dilation, modules, ship_types, transit};
+use dawn_sector::node::SimulationNode;
+use dawn_sector::spawner::{generate_ships, SpawnConfig};
 use dawn_actor::ClientCommand;
 use dawn_core::{
     DomainEvent, NodeId, PlayerId, Position,
@@ -270,7 +271,7 @@ pub(crate) fn deliver_aoi_frame(
 pub(crate) fn build_serve_node(id: NodeId, sector: SectorId, bounds: SectorBounds, pop_cap: usize) -> SimulationNode {
     let mut node = SimulationNode::new(id, sector, bounds);
     node.set_population_cap(pop_cap);
-    let star_map = data_loader::load_star_map("data/star_map.toml", crate::star_map::StarMap::builtin());
+    let star_map = data_loader::load_star_map("data/star_map.toml", dawn_sector::star_map::StarMap::builtin());
     node.set_star_map(std::sync::Arc::new(star_map));
     for def in data_loader::load_modules("data/modules.toml", modules::all_modules()) {
         node.register_module(def);
@@ -790,7 +791,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
 #[cfg(test)]
 mod serve_pipeline_tests {
     use super::*;
-    use crate::node;
+    use dawn_sector::node;
     use dawn_actor::{ClientCommand, ClientConnection, InProcessConnection};
     use dawn_core::{DomainEvent, MoveCommand, NodeId, Position, SectorBounds, SectorId};
     use dawn_event_store::store::EventStore as _;
