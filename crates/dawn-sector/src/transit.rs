@@ -120,7 +120,7 @@ pub fn apply_committed_raft_entries<S: EventStore>(
 /// Shared by the `--serve --cluster` warm-up and main loops so the per-node
 /// step order has a single source of truth. The actor path
 /// (`SectorSimulatorActor`) keeps its own variant because it interleaves a
-/// ReplicationBus flush (Step 9) between the tick and the Raft timer step.
+/// replication flush (Step 9) between the tick and the Raft timer step.
 pub fn step_cluster_node<S: EventStore>(
     node         : &mut SimulationNode<S>,
     raft         : &RaftActorHandle,

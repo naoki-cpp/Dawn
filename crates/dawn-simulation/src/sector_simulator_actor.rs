@@ -2,7 +2,7 @@
 //!
 //! Provides an async, message-passing interface to the synchronous
 //! `SimulationNode`.  After each state-changing operation, new events are
-//! forwarded to the `ReplicationBus` *before* the reply is sent to the caller.
+//! forwarded to `dawn-replication` *before* the reply is sent to the caller.
 //! This ordering guarantee makes multi-node consistency tests deterministic
 //! without sleeps or explicit flush operations.
 //!
@@ -11,7 +11,7 @@
 //! ```text
 //! Actor loop:
 //!   1. Execute operation (tick / spawn_ship)
-//!   2. Send new events to ReplicationBus  ← must happen FIRST
+//!   2. Send new events to dawn-replication  ← must happen FIRST
 //!   3. Send reply to caller               ← happens AFTER
 //!
 //! Consequence: by the time the caller's .await returns, all events are
@@ -20,7 +20,7 @@
 
 use dawn_sector::node::{SimulationNode, TickResult};
 use dawn_sector::transit::TransitOp;
-use dawn_replication::BusMessage;
+use dawn_replication::{BusMessage, LogBatch};
 use dawn_consensus::{RaftActorHandle, Role, Term};
 use dawn_event_store::store::EventStore as _;
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
@@ -103,7 +103,7 @@ struct SectorSimulatorActor {
     node            : SimulationNode,
     bus_tx          : mpsc::Sender<BusMessage>,
     /// Index of the next event in the node's log that has not yet been
-    /// forwarded to the ReplicationBus.
+    /// forwarded to the replication bus.
     last_replicated : u64,
     /// Handle to this node's RaftActor (ADR-0014).
     raft            : RaftActorHandle,
@@ -144,9 +144,11 @@ impl SectorSimulatorActor {
             .collect();
 
         if !new_events.is_empty() {
-            self.last_replicated += new_events.len() as u64;
+            let event_count = new_events.len() as u64;
+            let batch = LogBatch::new(self.node.sector_id(), self.last_replicated, new_events);
+            self.last_replicated += event_count;
             // Ignore send error — bus may have been shut down in tests.
-            let _ = self.bus_tx.send(BusMessage::Events(new_events)).await;
+            let _ = self.bus_tx.send(BusMessage::Batch(batch)).await;
         }
     }
 

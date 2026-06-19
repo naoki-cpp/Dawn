@@ -6,10 +6,9 @@ edition = "2021"
 # dawn-actor must not depend on dawn-ecs or dawn-simulation.
 # It provides Actor infrastructure used by upper layers.
 [dependencies]
-dawn-core        = { path = "../dawn-core" }
-dawn-event-store = { path = "../dawn-event-store" }
-tokio            = { workspace = true }
-thiserror        = { workspace = true }
+dawn-core = { path = "../dawn-core" }
+tokio     = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true }

@@ -107,7 +107,6 @@ name = "dawn-actor"
 version = "0.1.0"
 dependencies = [
  "dawn-core",
- "dawn-event-store",
  "futures",
  "thiserror 1.0.69",
  "tokio",
@@ -156,6 +155,7 @@ version = "0.1.0"
 dependencies = [
  "dawn-core",
  "dawn-event-store",
+ "serde",
  "thiserror 1.0.69",
  "tokio",
 ]

@@ -1,11 +1,11 @@
-//! `MultiNodeCluster` — orchestrates N `SectorSimulatorActor`s + one `ReplicationBus`.
+//! `MultiNodeCluster` — orchestrates N `SectorSimulatorActor`s + one `InMemoryReplicationBus`.
 //!
 //! This is the Phase 2 completion test harness.
 //!
 //! # Consistency model
 //!
 //! Each node has its own ECS World and local EventStore.
-//! After every tick, events are forwarded to the shared `ReplicationBus`
+//! After every tick, events are forwarded to the shared `InMemoryReplicationBus`
 //! *before* the tick reply is returned to the caller.
 //!
 //! Because `tick_all()` awaits all nodes sequentially (or via join), and
@@ -154,7 +154,7 @@ impl MultiNodeCluster {
         results
     }
 
-    /// Total events accumulated in the `ReplicationBus`.
+    /// Total events accumulated in the `InMemoryReplicationBus`.
     ///
     /// Deterministic: all events sent before this call are counted.
     pub async fn total_replicated_events(&self) -> usize {

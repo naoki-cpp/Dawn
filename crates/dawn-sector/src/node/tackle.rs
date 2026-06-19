@@ -99,7 +99,7 @@ impl<S: EventStore> SimulationNode<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick};
+    use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId};
 
     fn node_with_modules() -> SimulationNode {
         use crate::{modules, ship_types};

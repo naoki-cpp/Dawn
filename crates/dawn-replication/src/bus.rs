@@ -4,22 +4,22 @@
 //!
 //! All Sector nodes share a single channel (`BusMessage`).
 //! Events and queries are ordered through this channel so that
-//! `event_count()` reflects every `Events` message sent before it — no
+//! `event_count()` reflects every `Batch` message sent before it — no
 //! sleep or explicit flush needed in tests.
 //!
 //! When `TcpReplicationTransport` (8D-2c) is ready, callers switch to that
 //! implementation behind the same logical interface.
 
-use dawn_core::DomainEvent;
+use crate::{LogBatch, ReplicationTransport};
 use dawn_event_store::{store::EventStore, InMemoryEventStore};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 // ── Message type ──────────────────────────────────────────────────────────────
 
 /// Messages routed through the bus channel.
 pub enum BusMessage {
-    /// A batch of domain events from one Sector node.
-    Events(Vec<DomainEvent>),
+    /// A batch of domain events from one Sector node's append-only log.
+    Batch(LogBatch),
     /// Query: total event count accumulated so far.
     EventCount { reply: oneshot::Sender<usize> },
     /// Shut down the bus actor cleanly.
@@ -29,20 +29,22 @@ pub enum BusMessage {
 // ── Actor ─────────────────────────────────────────────────────────────────────
 
 struct BusActor {
-    rx   : mpsc::Receiver<BusMessage>,
-    store: InMemoryEventStore,
+    rx          : mpsc::Receiver<BusMessage>,
+    broadcast_tx: broadcast::Sender<LogBatch>,
+    store       : InMemoryEventStore,
 }
 
 impl BusActor {
-    fn new(rx: mpsc::Receiver<BusMessage>) -> Self {
-        Self { rx, store: InMemoryEventStore::new() }
+    fn new(rx: mpsc::Receiver<BusMessage>, broadcast_tx: broadcast::Sender<LogBatch>) -> Self {
+        Self { rx, broadcast_tx, store: InMemoryEventStore::new() }
     }
 
     async fn run(mut self) {
         while let Some(msg) = self.rx.recv().await {
             match msg {
-                BusMessage::Events(events) => {
-                    self.store.append_batch(events);
+                BusMessage::Batch(batch) => {
+                    self.store.append_batch(batch.events.iter().cloned());
+                    let _ = self.broadcast_tx.send(batch);
                 }
                 BusMessage::EventCount { reply } => {
                     let _ = reply.send(self.store.len());
@@ -60,15 +62,17 @@ impl BusActor {
 /// Drop-in replacement for the removed `dawn_actor::ReplicationBusHandle`.
 #[derive(Clone)]
 pub struct InMemoryReplicationBus {
-    tx: mpsc::Sender<BusMessage>,
+    tx          : mpsc::Sender<BusMessage>,
+    broadcast_tx: broadcast::Sender<LogBatch>,
 }
 
 impl InMemoryReplicationBus {
     /// Spawn a new bus actor and return a handle.
     pub fn spawn() -> Self {
         let (tx, rx) = mpsc::channel(10_000);
-        tokio::spawn(BusActor::new(rx).run());
-        Self { tx }
+        let (broadcast_tx, _) = broadcast::channel(10_000);
+        tokio::spawn(BusActor::new(rx, broadcast_tx.clone()).run());
+        Self { tx, broadcast_tx }
     }
 
     /// Returns a `Sender` for Sector actors to forward their event batches.
@@ -78,7 +82,7 @@ impl InMemoryReplicationBus {
 
     /// Total events accumulated since startup.
     ///
-    /// Consistent with all `Events` messages sent before this call because
+    /// Consistent with all `Batch` messages sent before this call because
     /// they share the same channel.
     pub async fn event_count(&self) -> usize {
         let (tx, rx) = oneshot::channel();
@@ -92,16 +96,37 @@ impl InMemoryReplicationBus {
     }
 }
 
+impl ReplicationTransport for InMemoryReplicationBus {
+    fn broadcast(&self, batch: LogBatch) {
+        let _ = self.tx.try_send(BusMessage::Batch(batch));
+    }
+
+    fn subscribe(&self) -> broadcast::Receiver<LogBatch> {
+        self.broadcast_tx.subscribe()
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{events::VelocityChanged, NodeId, ShipId, Tick, Velocity};
+    use dawn_core::{events::VelocityChanged, NodeId, SectorId, ShipId, Tick, Velocity};
 
-    fn make_events(count: usize) -> Vec<DomainEvent> {
+    fn make_batch(sector_id: SectorId, from_index: u64, count: usize) -> LogBatch {
+        let events = (0..count)
+            .map(|i| dawn_core::DomainEvent::VelocityChanged(VelocityChanged {
+                ship_id : ShipId::new(NodeId(0), i as u64),
+                velocity: Velocity::new(1.0, 0.0, 0.0),
+                tick    : Tick(1),
+            }))
+            .collect();
+        LogBatch::new(sector_id, from_index, events)
+    }
+
+    fn make_events(count: usize) -> Vec<dawn_core::DomainEvent> {
         (0..count)
-            .map(|i| DomainEvent::VelocityChanged(VelocityChanged {
+            .map(|i| dawn_core::DomainEvent::VelocityChanged(VelocityChanged {
                 ship_id : ShipId::new(NodeId(0), i as u64),
                 velocity: Velocity::new(1.0, 0.0, 0.0),
                 tick    : Tick(1),
@@ -121,8 +146,8 @@ mod tests {
         let bus = InMemoryReplicationBus::spawn();
         let sender = bus.event_sender();
 
-        sender.send(BusMessage::Events(make_events(5))).await.unwrap();
-        sender.send(BusMessage::Events(make_events(3))).await.unwrap();
+        sender.send(BusMessage::Batch(LogBatch::new(SectorId(0), 0, make_events(5)))).await.unwrap();
+        sender.send(BusMessage::Batch(LogBatch::new(SectorId(0), 5, make_events(3)))).await.unwrap();
 
         assert_eq!(bus.event_count().await, 8);
         bus.shutdown().await;
@@ -137,12 +162,27 @@ mod tests {
         let s3 = bus.event_sender();
 
         tokio::join!(
-            async { s1.send(BusMessage::Events(make_events(10))).await.unwrap() },
-            async { s2.send(BusMessage::Events(make_events(10))).await.unwrap() },
-            async { s3.send(BusMessage::Events(make_events(10))).await.unwrap() },
+            async { s1.send(BusMessage::Batch(LogBatch::new(SectorId(0),  0, make_events(10)))).await.unwrap() },
+            async { s2.send(BusMessage::Batch(LogBatch::new(SectorId(1), 10, make_events(10)))).await.unwrap() },
+            async { s3.send(BusMessage::Batch(LogBatch::new(SectorId(2), 20, make_events(10)))).await.unwrap() },
         );
 
         assert_eq!(bus.event_count().await, 30);
+        bus.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn subscribers_receive_log_batches_with_sector_and_index() {
+        let bus = InMemoryReplicationBus::spawn();
+        let mut rx = bus.subscribe();
+        let batch = make_batch(SectorId(7), 42, 2);
+
+        bus.broadcast(batch.clone());
+
+        let received = rx.recv().await.unwrap();
+        assert_eq!(received, batch);
+        assert_eq!(received.next_index(), 44);
+
         bus.shutdown().await;
     }
 }
