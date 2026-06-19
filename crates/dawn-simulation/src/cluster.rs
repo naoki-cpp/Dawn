@@ -348,7 +348,7 @@ mod tests {
         }
 
         // Gate 0 (Sector 0 -> Sector 1) sits near Sector 0's +X edge.
-        let gate = dawn_sector::star_map::StarMap::builtin().gates
+        let gate = dawn_sector::galaxy::Galaxy::builtin().gates
             .into_iter()
             .find(|g| g.id == JumpGateId(0))
             .expect("gate 0 must exist");

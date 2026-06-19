@@ -78,8 +78,8 @@ impl<S: EventStore> SimulationNode<S> {
             tick       : self.current_tick,
         }));
 
-        let from_system = self.sector_map.star_map.system_for_sector(from);
-        let to_system   = self.sector_map.star_map.system_for_sector(to);
+        let from_system = self.sector_map.galaxy.system_for_sector(from);
+        let to_system   = self.sector_map.galaxy.system_for_sector(to);
         if from_system != to_system {
             self.event_store.append(DomainEvent::StarSystemChanged(StarSystemChanged {
                 ship_id,

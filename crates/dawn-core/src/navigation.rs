@@ -1,4 +1,5 @@
-//! Star System / Jump Gate / Celestial Body static map data (ADR-0009, ADR-0025).
+//! Navigation domain types — star systems, jump gates, celestial bodies,
+//! and warp targets (ADR-0009, ADR-0025).
 //!
 //! These types describe the *static* navigation topology. They are not ECS
 //! entities and are not persisted as events.

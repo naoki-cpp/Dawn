@@ -8,7 +8,7 @@ use dawn_core::{
     CelestialBodyDef, CelestialBodyId, CelestialBodyKind, JumpGateDef, JumpGateId,
     Position, SectorId, StarSystemDef, StarSystemId,
 };
-use dawn_sector::{modules, ship_types, star_map::StarMap};
+use dawn_sector::{modules, ship_types, galaxy::Galaxy};
 use serde::Deserialize;
 
 // ── Modules ───────────────────────────────────────────────────────────────────
@@ -207,8 +207,8 @@ fn parse_body_kind(s: &str) -> CelestialBodyKind {
     match s { "Star" => CelestialBodyKind::Star, _ => CelestialBodyKind::Planet }
 }
 
-pub fn load_star_map(path: &str) -> StarMap {
-    let fallback = StarMap::builtin();
+pub fn load_star_map(path: &str) -> Galaxy {
+    let fallback = Galaxy::builtin();
     let content = match std::fs::read_to_string(path) {
         Ok(s)  => s,
         Err(e) => { eprintln!("[DataLoader] '{}' not found ({}), using built-in star map.", path, e); return fallback; }
@@ -231,7 +231,7 @@ pub fn load_star_map(path: &str) -> StarMap {
             }).collect::<Vec<_>>();
             println!("[DataLoader] loaded star map from '{}': {} systems, {} gates, {} bodies.",
                 path, systems.len(), gates.len(), bodies.len());
-            StarMap::new(systems, gates, bodies)
+            Galaxy::new(systems, gates, bodies)
         }
         Err(e) => { eprintln!("[DataLoader] parse error in '{}': {}, using built-in star map.", path, e); fallback }
     }

@@ -17,7 +17,7 @@
 
 use crate::fitting::{FittingSnapshot, SlotKind, ModuleId};
 use crate::ship_type::ShipTypeId;
-use crate::star_system::{JumpGateId, StarSystemId};
+use crate::navigation::{JumpGateId, StarSystemId};
 use crate::{Position, SectorId, ShipId, Tick, Velocity};
 use serde::{Deserialize, Serialize};
 
@@ -454,7 +454,7 @@ mod tests {
         let id = ship_id();
         let event = DomainEvent::JumpGateUsed(JumpGateUsed {
             ship_id    : id,
-            gate_id    : crate::star_system::JumpGateId(0),
+            gate_id    : crate::navigation::JumpGateId(0),
             from_sector: SectorId(0),
             to_sector  : SectorId(1),
             entry_pos  : Position::new(0.0, 0.0, 0.0),
@@ -473,8 +473,8 @@ mod tests {
         let id = ship_id();
         let event = DomainEvent::StarSystemChanged(StarSystemChanged {
             ship_id    : id,
-            from_system: crate::star_system::StarSystemId(0),
-            to_system  : crate::star_system::StarSystemId(1),
+            from_system: crate::navigation::StarSystemId(0),
+            to_system  : crate::navigation::StarSystemId(1),
             tick       : Tick(11),
         });
         assert_eq!(event.ship_id(), id);

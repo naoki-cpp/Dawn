@@ -5,5 +5,5 @@ pub mod node;
 pub mod persistence;
 pub mod ship_types;
 pub mod spawner;
-pub mod star_map;
+pub mod galaxy;
 pub mod transit;

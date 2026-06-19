@@ -4,7 +4,7 @@
 //! The system validates a Command before producing an Event.  (INV-006)
 
 use crate::fitting::{ModuleId, SlotKind};
-use crate::star_system::{JumpGateId, WarpTarget};
+use crate::navigation::{JumpGateId, WarpTarget};
 use crate::{Position, SectorId, ShipId};
 use serde::{Deserialize, Serialize};
 
@@ -201,8 +201,8 @@ mod tests {
 
     #[test]
     fn approach_command_can_target_a_jump_gate() {
-        let cmd = ApproachCommand { ship_id: ship_id(1), target: ApproachTarget::Gate(crate::star_system::JumpGateId(3)) };
-        assert_eq!(cmd.target, ApproachTarget::Gate(crate::star_system::JumpGateId(3)));
+        let cmd = ApproachCommand { ship_id: ship_id(1), target: ApproachTarget::Gate(crate::navigation::JumpGateId(3)) };
+        assert_eq!(cmd.target, ApproachTarget::Gate(crate::navigation::JumpGateId(3)));
     }
 
     #[test]
@@ -220,14 +220,14 @@ mod tests {
 
     #[test]
     fn jump_command_carries_ship_id_and_gate_id() {
-        let cmd = JumpCommand { ship_id: ship_id(1), gate_id: crate::star_system::JumpGateId(0) };
+        let cmd = JumpCommand { ship_id: ship_id(1), gate_id: crate::navigation::JumpGateId(0) };
         assert_eq!(cmd.ship_id, ship_id(1));
-        assert_eq!(cmd.gate_id, crate::star_system::JumpGateId(0));
+        assert_eq!(cmd.gate_id, crate::navigation::JumpGateId(0));
     }
 
     #[test]
     fn warp_command_carries_ship_id_and_target() {
-        use crate::star_system::{JumpGateId, WarpTarget};
+        use crate::navigation::{JumpGateId, WarpTarget};
         let cmd = WarpCommand { ship_id: ship_id(1), target: WarpTarget::Gate(JumpGateId(2)) };
         assert_eq!(cmd.ship_id, ship_id(1));
         assert_eq!(cmd.target, WarpTarget::Gate(JumpGateId(2)));

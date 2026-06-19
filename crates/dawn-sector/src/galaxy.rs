@@ -1,26 +1,26 @@
 //! Static Star System / Jump Gate / Celestial Body map data (ADR-0009, ADR-0025).
 //!
 //! Runtime topology is loaded from `data/star_map.toml` when the server starts.
-//! If the file is absent, `StarMap::builtin()` provides the hardcoded defaults.
+//! If the file is absent, `Galaxy::builtin()` provides the hardcoded defaults.
 //!
 //! The free functions (`star_systems()`, `all_gates()`, etc.) are thin wrappers
-//! over `StarMap::builtin()` kept for backward compatibility in tests.
+//! over `Galaxy::builtin()` kept for backward compatibility in tests.
 
 use dawn_core::{CelestialBodyDef, CelestialBodyId, CelestialBodyKind, JumpGateDef, JumpGateId, Position, SectorBounds, SectorId, StarSystemDef, StarSystemId};
 
-// ── StarMap ───────────────────────────────────────────────────────────────────
+// ── Galaxy ───────────────────────────────────────────────────────────────────
 
 /// The complete navigation topology: star systems, jump gates, and celestial
 /// bodies.  Loaded from `data/star_map.toml` at server startup; falls back to
-/// [`StarMap::builtin`] if the file is absent.
+/// [`Galaxy::builtin`] if the file is absent.
 #[derive(Debug, Clone)]
-pub struct StarMap {
+pub struct Galaxy {
     pub systems: Vec<StarSystemDef>,
     pub gates  : Vec<JumpGateDef>,
     pub bodies : Vec<CelestialBodyDef>,
 }
 
-impl StarMap {
+impl Galaxy {
     /// Construct from explicitly provided data (used by `DataLoader`).
     pub fn new(systems: Vec<StarSystemDef>, gates: Vec<JumpGateDef>, bodies: Vec<CelestialBodyDef>) -> Self {
         Self { systems, gates, bodies }
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn each_sector_in_initial_topology_belongs_to_a_distinct_star_system() {
-        let map = StarMap::builtin();
+        let map = Galaxy::builtin();
         assert_eq!(map.system_for_sector(SectorId(0)), StarSystemId(0));
         assert_eq!(map.system_for_sector(SectorId(1)), StarSystemId(1));
         assert_eq!(map.system_for_sector(SectorId(2)), StarSystemId(2));
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn gates_in_sector_returns_only_gates_originating_in_that_sector() {
-        let map   = StarMap::builtin();
+        let map   = Galaxy::builtin();
         let gates = map.gates_in_sector(SectorId(1));
         assert_eq!(gates.len(), 2);
         assert!(gates.iter().all(|g| g.from_sector == SectorId(1)));
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn all_gates_are_within_sector_bounds_and_have_positive_activation_radius() {
-        let map    = StarMap::builtin();
+        let map    = Galaxy::builtin();
         let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
         for gate in &map.gates {
             assert!(bounds.contains(gate.position), "gate {:?} position out of bounds", gate.id);
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn bodies_in_sector_returns_star_and_planet_for_each_builtin_sector() {
-        let map = StarMap::builtin();
+        let map = Galaxy::builtin();
         for sid in [SectorId(0), SectorId(1), SectorId(2)] {
             let bodies = map.bodies_in_sector(sid);
             assert_eq!(bodies.len(), 2, "sector {:?} should have 2 bodies", sid);

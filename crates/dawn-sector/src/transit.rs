@@ -86,7 +86,7 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                     // the player can immediately jump back (ADR-0009).
                     let entry_pos = gate_id
                         .and_then(|_| {
-                            node.star_map().gates_in_sector(to)
+                            node.galaxy().gates_in_sector(to)
                                 .into_iter()
                                 .find(|g| g.to_sector == node.sector_id())
                                 .map(|g| g.position)

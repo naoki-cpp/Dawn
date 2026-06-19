@@ -267,7 +267,7 @@ fn build_node(cfg: &config::NodeConfig, node_id: NodeId, sector_id: SectorId, bo
     let mut node = SimulationNode::new(node_id, sector_id, bounds);
     node.set_population_cap(cfg.pop_cap);
     let star_map = data_loader::load_star_map("data/star_map.toml");
-    node.set_star_map(Arc::new(star_map));
+    node.set_galaxy(Arc::new(star_map));
     for def in data_loader::load_modules("data/modules.toml") {
         node.register_module(def);
     }

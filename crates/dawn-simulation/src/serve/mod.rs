@@ -250,8 +250,8 @@ pub(crate) fn deliver_aoi_frame(
 pub(crate) fn build_serve_node(id: NodeId, sector: SectorId, bounds: SectorBounds, pop_cap: usize) -> SimulationNode {
     let mut node = SimulationNode::new(id, sector, bounds);
     node.set_population_cap(pop_cap);
-    let star_map = data_loader::load_star_map("data/star_map.toml", dawn_sector::star_map::StarMap::builtin());
-    node.set_star_map(std::sync::Arc::new(star_map));
+    let star_map = data_loader::load_star_map("data/star_map.toml", dawn_sector::galaxy::Galaxy::builtin());
+    node.set_galaxy(std::sync::Arc::new(star_map));
     for def in data_loader::load_modules("data/modules.toml", modules::all_modules()) {
         node.register_module(def);
     }

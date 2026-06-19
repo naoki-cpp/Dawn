@@ -175,11 +175,11 @@ impl<S: EventStore> SimulationNode<S> {
             player_id_counter : 0,
             pending_bot_lock_commands: Vec::new(),
             sector_map        : {
-                let sm = Arc::new(crate::star_map::StarMap::builtin());
+                let sm = Arc::new(crate::galaxy::Galaxy::builtin());
                 SectorMap {
                     gates  : sm.gates_in_sector(sector_id).into_iter().map(|g| (g.id, g)).collect(),
                     bodies : sm.bodies_in_sector(sector_id).into_iter().map(|b| (b.id, b)).collect(),
-                    star_map: sm,
+                    galaxy: sm,
                 }
             },
             population_cap    : POPULATION_CAP,
@@ -216,11 +216,11 @@ impl<S: EventStore> SimulationNode<S> {
             player_id_counter  : 0,
             pending_bot_lock_commands: Vec::new(),
             sector_map         : {
-                let sm = Arc::new(crate::star_map::StarMap::builtin());
+                let sm = Arc::new(crate::galaxy::Galaxy::builtin());
                 SectorMap {
                     gates  : sm.gates_in_sector(snapshot.sector_id).into_iter().map(|g| (g.id, g)).collect(),
                     bodies : sm.bodies_in_sector(snapshot.sector_id).into_iter().map(|b| (b.id, b)).collect(),
-                    star_map: sm,
+                    galaxy: sm,
                 }
             },
             population_cap    : POPULATION_CAP,
@@ -278,15 +278,15 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Replace the navigation topology.  Updates `jump_gates` and
     /// `celestial_bodies` for this node's Sector immediately.
-    pub fn set_star_map(&mut self, map: Arc<crate::star_map::StarMap>) {
+    pub fn set_galaxy(&mut self, map: Arc<crate::galaxy::Galaxy>) {
         let sid = self.sector_id;
         self.sector_map.gates = map.gates_in_sector(sid).into_iter().map(|g| (g.id, g)).collect();
         self.sector_map.bodies = map.bodies_in_sector(sid).into_iter().map(|b| (b.id, b)).collect();
-        self.sector_map.star_map = map;
+        self.sector_map.galaxy = map;
     }
 
     /// Read access to the navigation topology.
-    pub fn star_map(&self) -> &crate::star_map::StarMap { &self.sector_map.star_map }
+    pub fn galaxy(&self) -> &crate::galaxy::Galaxy { &self.sector_map.galaxy }
 
     // ── Identity ──────────────────────────────────────────────────────────────
 

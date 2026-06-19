@@ -72,7 +72,7 @@ fn entry_to_body(e: CelestialBodyEntry) -> CelestialBodyDef {
 
 /// Load the star map from a TOML file. Falls back to `fallback` if the file
 /// is absent or cannot be parsed.
-pub fn load_star_map(path: &str, fallback: dawn_sector::star_map::StarMap) -> dawn_sector::star_map::StarMap {
+pub fn load_star_map(path: &str, fallback: dawn_sector::galaxy::Galaxy) -> dawn_sector::galaxy::Galaxy {
     let content = match std::fs::read_to_string(path) {
         Ok(s)  => s,
         Err(e) => {
@@ -88,7 +88,7 @@ pub fn load_star_map(path: &str, fallback: dawn_sector::star_map::StarMap) -> da
             let bodies  = f.celestial_bodies.into_iter().map(entry_to_body).collect::<Vec<_>>();
             println!("[DataLoader] loaded star map from '{}': {} systems, {} gates, {} bodies.",
                 path, systems.len(), gates.len(), bodies.len());
-            dawn_sector::star_map::StarMap::new(systems, gates, bodies)
+            dawn_sector::galaxy::Galaxy::new(systems, gates, bodies)
         }
         Err(e) => {
             eprintln!("[DataLoader] parse error in '{}': {}, using built-in star map.", path, e);
