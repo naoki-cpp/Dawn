@@ -15,6 +15,7 @@ extends Node
 @onready var _connection  : Node        = $Connection
 @onready var _ships_root  : Node3D      = $World/Ships
 @onready var _gates_root  : Node3D      = $World/Gates
+@onready var _bodies_root : Node3D      = $World/Bodies
 @onready var _stats_label : Label       = $HUD/StatsLabel
 @onready var _cap_label   : Label       = $HUD/CapLabel
 @onready var _cap_bar     : ProgressBar = $HUD/CapBar
@@ -98,8 +99,29 @@ const JUMP_GATES := [
 ]
 const STAR_SYSTEM_NAMES := ["Alpha", "Beta", "Gamma"]
 
+## Celestial bodies per star system (ADR-0025). Mirrors star_map.rs.
+## spectral_type: 0=O(blue) … 0.6=G(yellow/Sun) … 1=M(red). Planets use 0.
+## Scale: 1 unit = 10,000 km  →  1 AU ≈ 15,000 units.
+## Forge: Earth orbit (1.0 AU), Haven: Mars orbit (1.52 AU), Bastion: Venus orbit (0.72 AU).
+const CELESTIAL_BODIES := {
+	"Alpha": [
+		{"body_id": 0, "kind": "Star",   "name": "Helios",  "position": Vector3(0.0,       0.0, 0.0),     "radius": 15_000.0, "spectral_type": 0.60},
+		{"body_id": 1, "kind": "Planet", "name": "Forge",   "position": Vector3(15_000.0,  0.0, 0.0),     "radius":  3_500.0, "spectral_type": 0.0},
+	],
+	"Beta": [
+		{"body_id": 2, "kind": "Star",   "name": "Aegis",   "position": Vector3(0.0,       0.0, 0.0),     "radius": 12_000.0, "spectral_type": 0.30},
+		{"body_id": 3, "kind": "Planet", "name": "Haven",   "position": Vector3(-21_600.0, 0.0, 7_200.0), "radius":  4_500.0, "spectral_type": 0.0},
+	],
+	"Gamma": [
+		{"body_id": 4, "kind": "Star",   "name": "Crimson", "position": Vector3(0.0,       0.0, 0.0),     "radius": 18_000.0, "spectral_type": 0.85},
+		{"body_id": 5, "kind": "Planet", "name": "Bastion", "position": Vector3(10_000.0,  0.0, -4_000.0),"radius":  3_000.0, "spectral_type": 0.0},
+	],
+}
+
 var _current_system_name : String = "Alpha"
 var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
+var _selected_body_id    : int    = -1  ## -1 = no body selected
+var _sky_mat             : ShaderMaterial = null  ## reference kept for sun_direction updates
 var _jump_notice         : String = ""
 var _jump_notice_timer   : float  = 0.0
 ## Pre-computed warp arrival position in server coords.
@@ -127,9 +149,11 @@ func _ready() -> void:
 	_setup_cap_bar()
 	_update_hud()
 	_spawn_gate_markers()
+	_spawn_body_markers()
 
 func _process(delta: float) -> void:
 	_update_gate_proximity()
+	_update_sun_direction()
 	if _jump_notice_timer > 0.0:
 		_jump_notice_timer -= delta
 		if _jump_notice_timer <= 0.0:
@@ -176,6 +200,134 @@ func _spawn_gate_markers() -> void:
 		label.no_depth_test    = true
 		label.modulate         = Color(0.2, 0.8, 1.0)
 		marker.add_child(label)
+
+## Spawn visual nodes for all celestial bodies in the current star system
+## (stars + planets, ADR-0025). Re-called on system change.
+func _spawn_body_markers() -> void:
+	if _bodies_root == null:
+		return
+	for child: Node in _bodies_root.get_children():
+		child.queue_free()
+	_selected_body_id = -1
+
+	var bodies: Array = CELESTIAL_BODIES.get(_current_system_name, []) as Array
+	for entry: Variant in bodies:
+		var b: Dictionary = entry as Dictionary
+		var b_id    : int     = b.get("body_id",      -1) as int
+		var kind    : String  = b.get("kind",          "") as String
+		var name_str: String  = b.get("name",          "") as String
+		var b_pos   : Vector3 = b.get("position", Vector3.ZERO) as Vector3
+		var radius  : float   = b.get("radius",       1.0) as float
+		var spec    : float   = b.get("spectral_type", 0.0) as float
+
+		## Convert server coords → Godot (note -Z inversion).
+		var godot_pos : Vector3 = Vector3(b_pos.x, b_pos.y, -b_pos.z) * WORLD_SCALE
+
+		var marker: Node3D = Node3D.new()
+		marker.position = godot_pos
+		marker.set_meta("body_id",   b_id)
+		marker.set_meta("body_kind", kind)
+		marker.set_meta("body_pos",  b_pos)  ## server coords, kept for sun direction
+		_bodies_root.add_child(marker)
+
+		## Visual sphere.
+		var mesh_inst: MeshInstance3D = MeshInstance3D.new()
+		var sphere: SphereMesh = SphereMesh.new()
+		if kind == "Star":
+			## Stars: bright emissive sphere, visual radius = 5% of logical radius.
+			sphere.radius = radius * WORLD_SCALE * 0.05
+			sphere.height = sphere.radius * 2.0
+			var star_col: Color = _spectral_color(spec)
+			var mat: StandardMaterial3D = StandardMaterial3D.new()
+			mat.albedo_color              = star_col
+			mat.emission_enabled          = true
+			mat.emission                  = star_col
+			mat.emission_energy_multiplier = 8.0
+			mat.shading_mode              = BaseMaterial3D.SHADING_MODE_UNSHADED
+			mesh_inst.material_override   = mat
+		else:
+			## Planets: solid matte sphere, visual radius = 8% of logical radius.
+			sphere.radius = radius * WORLD_SCALE * 0.08
+			sphere.height = sphere.radius * 2.0
+			var mat: StandardMaterial3D = StandardMaterial3D.new()
+			mat.albedo_color = Color(0.45, 0.50, 0.60)
+			mat.roughness    = 0.85
+			mat.metallic     = 0.1
+			mesh_inst.material_override = mat
+		mesh_inst.mesh = sphere
+		marker.add_child(mesh_inst)
+
+		## Name label.
+		var label: Label3D = Label3D.new()
+		label.text        = name_str
+		label.position    = Vector3(0.0, sphere.radius * 1.4, 0.0)
+		label.billboard   = BaseMaterial3D.BILLBOARD_ENABLED
+		label.no_depth_test = true
+		label.modulate    = Color(1.0, 0.9, 0.6) if kind == "Star" else Color(0.7, 0.8, 1.0)
+		marker.add_child(label)
+
+## Returns a linear-light RGB colour for a blackbody spectral type [0..1].
+## Mirrors spectral_color() in space_sky.gdshader.
+func _spectral_color(t: float) -> Color:
+	var r: float; var g: float; var b: float
+	if t < 0.10:
+		r = lerp(0.55, 0.65, t / 0.10);        g = lerp(0.65, 0.76, t / 0.10);        b = 1.00
+	elif t < 0.25:
+		r = lerp(0.65, 0.88, (t-0.10)/0.15);   g = lerp(0.76, 0.93, (t-0.10)/0.15);   b = 1.00
+	elif t < 0.40:
+		r = lerp(0.88, 1.00, (t-0.25)/0.15);   g = lerp(0.93, 0.99, (t-0.25)/0.15);   b = lerp(1.00, 0.94, (t-0.25)/0.15)
+	elif t < 0.55:
+		r = 1.00;                               g = lerp(0.99, 0.95, (t-0.40)/0.15);   b = lerp(0.94, 0.82, (t-0.40)/0.15)
+	elif t < 0.68:
+		r = 1.00;                               g = lerp(0.95, 0.85, (t-0.55)/0.13);   b = lerp(0.82, 0.58, (t-0.55)/0.13)
+	elif t < 0.83:
+		r = 1.00;                               g = lerp(0.85, 0.64, (t-0.68)/0.15);   b = lerp(0.58, 0.32, (t-0.68)/0.15)
+	else:
+		r = 1.00;                               g = lerp(0.64, 0.40, (t-0.83)/0.17);   b = lerp(0.32, 0.18, (t-0.83)/0.17)
+	return Color(r, g, b)
+
+## Update the sky shader's sun_direction each frame so the star appears in the
+## correct direction relative to the player ship (ADR-0025).
+func _update_sun_direction() -> void:
+	if _sky_mat == null or _player_ship_id < 0 or not _ships.has(_player_ship_id):
+		return
+	var bodies: Array = CELESTIAL_BODIES.get(_current_system_name, []) as Array
+	var star_pos: Vector3 = Vector3.ZERO
+	var found: bool = false
+	for entry: Variant in bodies:
+		var b: Dictionary = entry as Dictionary
+		if (b.get("kind", "") as String) == "Star":
+			star_pos = b.get("position", Vector3.ZERO) as Vector3
+			found    = true
+			break
+	if not found:
+		_sky_mat.set_shader_parameter("sun_active", 0.0)
+		return
+
+	## Player position in server units (undo WORLD_SCALE + Z inversion).
+	var ship_node   : Node3D = _ships[_player_ship_id] as Node3D
+	var ship_godot  : Vector3 = ship_node.global_position
+	var ship_server : Vector3 = Vector3(ship_godot.x, ship_godot.y, -ship_godot.z) / WORLD_SCALE
+
+	## Direction from ship toward star in server coords; map to Godot world space.
+	var diff : Vector3 = star_pos - ship_server
+	if diff.length_squared() < 1.0:
+		_sky_mat.set_shader_parameter("sun_active", 0.0)
+		return
+	## Apply same coord mapping (Z inversion) so shader direction matches world.
+	var godot_dir : Vector3 = Vector3(diff.x, diff.y, -diff.z).normalized()
+	_sky_mat.set_shader_parameter("sun_direction", godot_dir)
+	_sky_mat.set_shader_parameter("sun_active",    1.0)
+
+	## Sun colour from the star's spectral type.
+	var spec: float = 0.60
+	for entry: Variant in bodies:
+		var b: Dictionary = entry as Dictionary
+		if (b.get("kind", "") as String) == "Star":
+			spec = b.get("spectral_type", 0.60) as float
+			break
+	var sun_col: Color = _spectral_color(spec)
+	_sky_mat.set_shader_parameter("sun_color", Vector3(sun_col.r, sun_col.g, sun_col.b))
 
 ## Tracks whether the player ship is within activation range of a Jump Gate
 ## (ADR-0009). Distance is computed in server units (Godot units / WORLD_SCALE).
@@ -235,11 +387,16 @@ func _input(event: InputEvent) -> void:
 			if _selected_target_id >= 0:
 				_connection.send_approach_command(_player_ship_id, _selected_target_id)
 				return
-		## W key -> WarpCommand (short-range Fold to selected gate, ADR-0022)
-		if key.keycode == KEY_W and _player_ship_id >= 0 and _selected_gate_id >= 0:
-			_connection.send_warp_command(_player_ship_id, _selected_gate_id)
-			_player_warp_snap_pos = _compute_warp_snap_pos(_selected_gate_id)
-			return
+		## W key -> WarpCommand (short-range Fold to selected gate or body, ADR-0022/ADR-0025)
+		if key.keycode == KEY_W and _player_ship_id >= 0:
+			if _selected_gate_id >= 0:
+				_connection.send_warp_command(_player_ship_id, _selected_gate_id)
+				_player_warp_snap_pos = _compute_warp_snap_pos(_selected_gate_id)
+				return
+			if _selected_body_id >= 0:
+				_connection.send_warp_to_body_command(_player_ship_id, _selected_body_id)
+				_player_warp_snap_pos = _compute_body_warp_snap_pos(_selected_body_id)
+				return
 		## Tab key -> toggle tactical overlay visibility
 		if key.keycode == KEY_TAB:
 			if _tactical_overlay != null:
@@ -262,6 +419,10 @@ func _input(event: InputEvent) -> void:
 							var hit_gate: int = _pick_gate_at(mb.position)
 							if hit_gate >= 0:
 								_select_approach_gate(hit_gate)
+							else:
+								var hit_body: int = _pick_body_at(mb.position)
+								if hit_body >= 0:
+									_select_body(hit_body)
 				MOUSE_BUTTON_RIGHT:
 					## Right-click -> select lock-on target
 					_try_lock_on(mb.position)
@@ -346,6 +507,42 @@ func _pick_gate_at(screen_pos: Vector2) -> int:
 ## Select a Jump Gate as the Approach target. Press A to fly into its range.
 func _select_approach_gate(gate_id: int) -> void:
 	_selected_gate_id   = gate_id
+	_selected_target_id = -1
+	_selected_body_id   = -1
+	_update_hud()
+
+## Returns the body_id of the celestial body closest to the click ray, or -1.
+func _pick_body_at(screen_pos: Vector2) -> int:
+	if _player_ship_id < 0:
+		return -1
+	var from: Vector3 = _camera.project_ray_origin(screen_pos)
+	var dir : Vector3 = _camera.project_ray_normal(screen_pos)
+	var closest_id  : int   = -1
+	var closest_dist: float = 1e9
+	for marker: Node in _bodies_root.get_children():
+		if not marker.has_meta("body_id"):
+			continue
+		var p    : Vector3 = (marker as Node3D).global_position
+		var t    : float   = (p - from).dot(dir)
+		var dist : float   = p.distance_to(from + dir * t)
+		## Pick radius scales with logical body radius (bodies are large objects).
+		var b_radius: float = 0.0
+		var system_bodies: Array = CELESTIAL_BODIES.get(_current_system_name, []) as Array
+		for entry: Variant in system_bodies:
+			var b: Dictionary = entry as Dictionary
+			if (b.get("body_id", -1) as int) == (marker.get_meta("body_id") as int):
+				b_radius = (b.get("radius", 1.0) as float) * WORLD_SCALE * 0.15
+				break
+		var pick_radius: float = maxf(b_radius, 400.0)
+		if dist < pick_radius and t > 0.0 and dist < closest_dist:
+			closest_dist = dist
+			closest_id   = marker.get_meta("body_id") as int
+	return closest_id
+
+## Select a celestial body. Press W to warp to it.
+func _select_body(body_id: int) -> void:
+	_selected_body_id   = body_id
+	_selected_gate_id   = -1
 	_selected_target_id = -1
 	_update_hud()
 
@@ -469,7 +666,10 @@ func _handle_star_system_changed(p: Dictionary) -> void:
 		_current_system_name = to_name
 		_jump_notice         = "Entered %s system" % to_name
 		_jump_notice_timer   = 3.0
+		_selected_gate_id    = -1
+		_selected_body_id    = -1
 		_spawn_gate_markers()
+		_spawn_body_markers()
 
 func _on_connection_changed(connected: bool) -> void:
 	if not connected:
@@ -727,6 +927,31 @@ func _compute_warp_snap_pos(gate_id: int) -> Vector3:
 	dir = dir.normalized() if dir.length() > 0.001 else Vector3(-1.0, 0.0, 0.0)
 	return gate_pos + dir * activation_r * 0.75
 
+## Pre-compute the warp arrival position for a celestial body in server coords.
+## Arrival is at body.radius * 1.5 from centre (BODY_WARP_ARRIVAL_FACTOR, ADR-0025).
+func _compute_body_warp_snap_pos(body_id: int) -> Vector3:
+	if not _ships.has(_player_ship_id):
+		return Vector3.INF
+	var system_bodies: Array = CELESTIAL_BODIES.get(_current_system_name, []) as Array
+	var body_pos   : Vector3 = Vector3.ZERO
+	var body_radius: float   = 1.0
+	var found: bool          = false
+	for entry: Variant in system_bodies:
+		var b: Dictionary = entry as Dictionary
+		if (b.get("body_id", -1) as int) == body_id:
+			body_pos    = b.get("position", Vector3.ZERO) as Vector3
+			body_radius = b.get("radius", 1.0) as float
+			found = true
+			break
+	if not found:
+		return Vector3.INF
+	var ship_node: Node3D  = _ships[_player_ship_id] as Node3D
+	var gdot      : Vector3 = ship_node.global_position
+	var ship_server := Vector3(gdot.x / WORLD_SCALE, gdot.y / WORLD_SCALE, -gdot.z / WORLD_SCALE)
+	var dir: Vector3 = ship_server - body_pos
+	dir = dir.normalized() if dir.length() > 0.001 else Vector3(-1.0, 0.0, 0.0)
+	return body_pos + dir * body_radius * 1.5
+
 func _handle_ship_despawned(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	if not _ships.has(ship_id):
@@ -880,7 +1105,7 @@ func _update_hud() -> void:
 	if _jump_notice != "":
 		jump_line += "\n" + _jump_notice
 
-	## Approach / warp target selection (ADR-0015 / ADR-0022).
+	## Approach / warp target selection (ADR-0015 / ADR-0022 / ADR-0025).
 	var approach_line: String = ""
 	if _selected_gate_id >= 0:
 		approach_line = "\n[A] Approach Gate #%d" % _selected_gate_id
@@ -890,6 +1115,15 @@ func _update_hud() -> void:
 			approach_line += "  [W] Warp  [J] Warp+Jump"
 		elif gate_dist >= 0.0:
 			approach_line += "  [W] too close to warp"
+	elif _selected_body_id >= 0:
+		## Look up body name for HUD.
+		var body_name: String = "Body #%d" % _selected_body_id
+		for entry: Variant in (CELESTIAL_BODIES.get(_current_system_name, []) as Array):
+			var b: Dictionary = entry as Dictionary
+			if (b.get("body_id", -1) as int) == _selected_body_id:
+				body_name = b.get("name", body_name) as String
+				break
+		approach_line = "\n[W] Warp to %s" % body_name
 	elif _selected_target_id >= 0:
 		approach_line = "\n[A] Approach #%d" % _selected_target_id
 
@@ -949,6 +1183,7 @@ func _clear_all_ships() -> void:
 	_player_lock_target = -1
 	_selected_target_id = -1
 	_selected_gate_id   = -1
+	_selected_body_id   = -1
 	_current_tick       = 0
 	_event_count        = 0
 
@@ -962,6 +1197,7 @@ func _setup_space_environment() -> void:
 
 	var sky_mat := ShaderMaterial.new()
 	sky_mat.shader = shader
+	_sky_mat = sky_mat
 
 	## Tweak nebula / star appearance here without editing the shader.
 	sky_mat.set_shader_parameter("star_threshold",    0.960)

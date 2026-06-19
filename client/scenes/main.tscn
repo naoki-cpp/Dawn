@@ -30,6 +30,8 @@ shadow_enabled = true
 
 [node name="Gates" type="Node3D" parent="World"]
 
+[node name="Bodies" type="Node3D" parent="World"]
+
 [node name="HUD" type="CanvasLayer" parent="."]
 
 [node name="StatsLabel" type="Label" parent="HUD"]

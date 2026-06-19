@@ -26,6 +26,14 @@ uniform float nebula_strength   : hint_range(0.0,  1.0)   = 0.50;
 uniform float milkyway_strength : hint_range(0.0,  1.0)   = 0.20;
 uniform vec3  ambient_color     : source_color             = vec3(0.002, 0.002, 0.006);
 
+// ── Local star (ADR-0025) ─────────────────────────────────────────────────────
+// sun_direction: normalised world-space direction from ship toward the star.
+// sun_active: 0=no star data yet, 1=render sun.
+// sun_color: spectral blackbody colour of the local star.
+uniform vec3  sun_direction : source_color = vec3(1.0, 0.0, 0.0);
+uniform float sun_active               = 0.0;
+uniform vec3  sun_color : source_color = vec3(1.00, 0.95, 0.80);
+
 // ── Hash / Noise ──────────────────────────────────────────────────────────────
 // Note: PI and TAU are Godot 4 built-in shader constants.
 
@@ -283,6 +291,27 @@ void sky() {
 				col          += star_col * (spike_x + spike_y) * bri * 0.055;
 			}
 		}
+	}
+
+	// ── Local star disc + corona (ADR-0025) ──────────────────────────────
+	if (sun_active > 0.5) {
+		vec3 sun_dir = normalize(sun_direction);
+		float cos_angle = dot(dir, sun_dir);
+
+		// Sharp disc: angular radius ~1.5° (cos(1.5°) ≈ 0.9997)
+		float disc_edge = 0.9997;
+		if (cos_angle > disc_edge) {
+			float t = (cos_angle - disc_edge) / (1.0 - disc_edge);
+			col += sun_color * 12.0 * t * t;
+		}
+
+		// Inner corona (bright halo ≈ 3°)
+		float corona_k = max(0.0, cos_angle - 0.97);
+		col += sun_color * 2.5 * corona_k * corona_k * 800.0;
+
+		// Outer glow (soft haze ≈ 15°)
+		float glow_k = max(0.0, cos_angle);
+		col += sun_color * pow(glow_k, 64.0) * 0.6;
 	}
 
 	col = max(col, vec3(0.0));
