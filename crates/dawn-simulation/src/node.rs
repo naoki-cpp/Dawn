@@ -852,11 +852,16 @@ impl<S: EventStore> SimulationNode<S> {
         self.brake_thrust(entity);
     }
 
+    /// Returns `true` if `player_id` owns `ship_id`.
+    ///
+    /// Used by `_owned` command variants and external player-command dispatch.
+    pub fn owns_ship(&self, player_id: PlayerId, ship_id: ShipId) -> bool {
+        self.ship_owners.get(&ship_id) == Some(&player_id)
+    }
+
     /// `apply_stop_command` wrapped with ownership check.
     pub fn apply_stop_command_owned(&mut self, player_id: PlayerId, ship_id: ShipId) -> bool {
-        if self.ship_owners.get(&ship_id) != Some(&player_id) {
-            return false;
-        }
+        if !self.owns_ship(player_id, ship_id) { return false; }
         self.apply_stop_command(ship_id);
         true
     }
@@ -1162,21 +1167,8 @@ impl<S: EventStore> SimulationNode<S> {
         ship_id   : ShipId,
         target    : Position,
     ) -> bool {
-        if self.ship_owners.get(&ship_id) != Some(&player_id) {
-            return false;
-        }
+        if !self.owns_ship(player_id, ship_id) { return false; }
         self.apply_move_command(ship_id, target);
-        true
-    }
-
-    pub fn apply_lock_on_owned(
-        &mut self,
-        player_id : PlayerId,
-        cmd       : dawn_core::LockOnCommand,
-    ) -> bool {
-        if self.ship_owners.get(&cmd.ship_id) != Some(&player_id) {
-            return false;
-        }
         true
     }
 
@@ -1217,9 +1209,7 @@ impl<S: EventStore> SimulationNode<S> {
         player_id : PlayerId,
         cmd       : dawn_core::ApproachCommand,
     ) -> bool {
-        if self.ship_owners.get(&cmd.ship_id) != Some(&player_id) {
-            return false;
-        }
+        if !self.owns_ship(player_id, cmd.ship_id) { return false; }
         self.apply_approach_command(cmd.ship_id, cmd.target)
     }
 
@@ -1251,9 +1241,7 @@ impl<S: EventStore> SimulationNode<S> {
         player_id : PlayerId,
         cmd       : dawn_core::WarpCommand,
     ) -> bool {
-        if self.ship_owners.get(&cmd.ship_id) != Some(&player_id) {
-            return false;
-        }
+        if !self.owns_ship(player_id, cmd.ship_id) { return false; }
         self.apply_warp_command(cmd.ship_id, cmd.target, false)
     }
 
@@ -1694,12 +1682,12 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     pub fn activate_module_owned(&mut self, player_id: PlayerId, cmd: dawn_core::ActivateModuleCommand) -> bool {
-        if self.ship_owners.get(&cmd.ship_id) != Some(&player_id) { return false; }
+        if !self.owns_ship(player_id, cmd.ship_id) { return false; }
         self.activate_module(cmd)
     }
 
     pub fn deactivate_module_owned(&mut self, player_id: PlayerId, cmd: dawn_core::DeactivateModuleCommand) -> bool {
-        if self.ship_owners.get(&cmd.ship_id) != Some(&player_id) { return false; }
+        if !self.owns_ship(player_id, cmd.ship_id) { return false; }
         self.deactivate_module(cmd)
     }
 

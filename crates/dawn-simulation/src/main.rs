@@ -667,7 +667,7 @@ fn apply_common_command(
             node.apply_move_command_owned(player_id, mv.ship_id, mv.target_position);
         }
         ClientCommand::LockOn(lo) => {
-            if node.apply_lock_on_owned(player_id, lo.clone()) {
+            if node.owns_ship(player_id, lo.ship_id) {
                 lock_commands.push(lo);
             }
         }
