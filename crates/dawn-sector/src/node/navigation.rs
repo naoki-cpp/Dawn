@@ -299,3 +299,341 @@ pub(super) fn speed_toward(vel: Velocity, pos: Position, target: Position) -> f3
     if dist < f32::EPSILON { return 0.0; }
     (vel.dx * dx + vel.dy * dy + vel.dz * dz) / dist
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, Velocity, WarpTarget};
+    use dawn_ecs::components::{ThrustComp, VelocityComp, WarpPhase, ShipStatsComp};
+
+    fn mem_node() -> SimulationNode {
+        SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF))
+    }
+
+    fn spawn_owned_player_at(node: &mut SimulationNode, pos: Position) -> (PlayerId, ShipId) {
+        let player_id = node.next_player_id();
+        let ship_id   = node.spawn_player_ship_at_pub(player_id, pos);
+        (player_id, ship_id)
+    }
+
+    // ── Approach (ADR-0015) ──────────────────────────────────────────────
+
+    #[test]
+    fn approach_command_attaches_an_approach_target_to_the_owned_ship() {
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
+
+        assert!(node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) }));
+        assert_eq!(node.approach_target(chaser), Some(dawn_core::ApproachTarget::Ship(target)));
+    }
+
+    #[test]
+    fn approach_command_is_rejected_for_a_ship_the_player_does_not_own() {
+        let mut node = mem_node();
+        let (_owner, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
+
+        let stranger = node.next_player_id();
+        assert!(!node.apply_approach_command_owned(stranger, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) }));
+        assert_eq!(node.approach_target(chaser), None);
+    }
+
+    #[test]
+    fn approaching_ship_steers_thrust_toward_its_target_each_tick() {
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
+        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) });
+
+        let entity = *node.ships.index.get(&chaser).unwrap();
+        node.process_approach();
+        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        assert!(thrust.direction.dx > 0.9, "thrust should point toward +X target, got {:?}", thrust.direction);
+        assert!(!thrust.is_braking);
+    }
+
+    #[test]
+    fn approaching_ship_closes_distance_to_its_target_over_several_ticks() {
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
+        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) });
+
+        let start = node.get_ship_position(chaser).unwrap().distance(Position::new(10_000.0, 0.0, 0.0));
+        for _ in 0..30 { node.tick(); }
+        let end = node.get_ship_position(chaser).unwrap().distance(Position::new(10_000.0, 0.0, 0.0));
+        assert!(end < start, "approaching ship should reduce distance: {start} -> {end}");
+    }
+
+    #[test]
+    fn move_command_cancels_an_active_approach() {
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
+        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) });
+        assert_eq!(node.approach_target(chaser), Some(dawn_core::ApproachTarget::Ship(target)));
+
+        node.apply_move_command(chaser, Position::new(-10_000.0, 0.0, 0.0));
+        assert_eq!(node.approach_target(chaser), None, "manual move must cancel approach");
+    }
+
+    #[test]
+    fn stop_command_cancels_an_active_approach() {
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
+        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) });
+
+        node.apply_stop_command(chaser);
+        assert_eq!(node.approach_target(chaser), None, "stop must cancel approach");
+    }
+
+    #[test]
+    fn approach_is_dropped_and_ship_brakes_when_the_target_disappears() {
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
+        node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) });
+
+        let target_entity = node.ships.index.remove(&target).unwrap();
+        node.world.despawn_ship(target_entity);
+
+        node.process_approach();
+        assert_eq!(node.approach_target(chaser), None, "approach must drop when target is gone");
+        let entity = *node.ships.index.get(&chaser).unwrap();
+        assert!(node.world.inner().get::<&ThrustComp>(entity).unwrap().is_braking, "ship should brake when target vanishes");
+    }
+
+    #[test]
+    fn approach_command_is_rejected_when_target_is_self() {
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(!node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(chaser) }));
+        assert_eq!(node.approach_target(chaser), None);
+    }
+
+    #[test]
+    fn approaching_a_jump_gate_steers_the_ship_toward_the_gate_and_into_range() {
+        let mut node = mem_node();
+        let gate = node.jump_gate(dawn_core::JumpGateId(0)).expect("Sector 0 has Gate 0").clone();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+
+        assert!(node.apply_approach_command_owned(player, dawn_core::ApproachCommand {
+            ship_id: chaser,
+            target : dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(0)),
+        }));
+        assert_eq!(node.approach_target(chaser), Some(dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(0))));
+
+        let start = node.get_ship_position(chaser).unwrap().distance(gate.position);
+        for _ in 0..400 { node.tick(); }
+        let end = node.get_ship_position(chaser).unwrap().distance(gate.position);
+        assert!(end < start, "ship should close on the gate: {start} -> {end}");
+        assert!(node.can_propose_jump(chaser, dawn_core::JumpGateId(0)),
+            "after approaching, the ship should be within the gate's activation radius");
+    }
+
+    #[test]
+    fn approach_command_is_rejected_for_a_gate_not_in_this_sector() {
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(!node.apply_approach_command_owned(player, dawn_core::ApproachCommand {
+            ship_id: chaser,
+            target : dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(1)),
+        }));
+        assert_eq!(node.approach_target(chaser), None);
+    }
+
+    // ── Warp (short-range Fold, ADR-0022) ────────────────────────────────
+
+    #[test]
+    fn warp_is_rejected_when_the_gate_is_closer_than_the_minimum_warp_distance() {
+        let mut node = mem_node();
+        let gate = node.jump_gate(dawn_core::JumpGateId(0)).unwrap().clone();
+        let (player, ship) = spawn_owned_player_at(&mut node, gate.position);
+        assert!(!node.can_propose_warp(ship, WarpTarget::Gate(dawn_core::JumpGateId(0))));
+        assert!(!node.apply_warp_command_owned(player, dawn_core::WarpCommand {
+            ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+        }));
+        assert_eq!(node.warp_phase(ship), None);
+    }
+
+    #[test]
+    fn warp_is_rejected_for_a_gate_not_in_this_sector() {
+        let mut node = mem_node();
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(!node.apply_warp_command_owned(player, dawn_core::WarpCommand {
+            ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(1)),
+        }));
+        assert_eq!(node.warp_phase(ship), None);
+    }
+
+    #[test]
+    fn warp_aligns_by_accelerating_then_flies_into_gate_range_and_completes() {
+        let mut node = mem_node();
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(node.apply_warp_command_owned(player, dawn_core::WarpCommand {
+            ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+        }));
+
+        node.tick();
+        assert_eq!(node.warp_phase(ship), Some(WarpPhase::Aligning));
+        assert!(node.get_ship_position(ship).unwrap().x < 100.0,
+            "an aligning ship accelerates sublight, far short of warp speed");
+
+        for _ in 0..80 { node.tick(); }
+        assert_eq!(node.warp_phase(ship), None, "warp completes and the component is removed");
+        assert!(node.can_propose_jump(ship, dawn_core::JumpGateId(0)),
+            "warp drops the ship inside the gate's activation radius");
+    }
+
+    #[test]
+    fn warp_align_time_emerges_from_ship_agility() {
+        fn ticks_to_engage(mass: f32) -> u32 {
+            let mut node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+            let player_id = node.next_player_id();
+            let ship = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+            let entity = *node.ships.index.get(&ship).unwrap();
+            let mut stats = *node.world.inner().get::<&ShipStatsComp>(entity).unwrap();
+            stats.mass = mass;
+            node.world.set_ship_stats(entity, stats);
+            node.apply_warp_command_owned(player_id, dawn_core::WarpCommand { ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)) });
+            for t in 1..=500u32 {
+                node.tick();
+                if node.warp_phase(ship) == Some(WarpPhase::Warping) { return t; }
+            }
+            u32::MAX
+        }
+        assert!(ticks_to_engage(50_000_000.0) > ticks_to_engage(1_000_000.0),
+            "a heavier ship spends longer aligning (a longer tackle window)");
+    }
+
+    #[test]
+    fn warp_decelerates_smoothly_near_the_gate_instead_of_stopping_dead() {
+        let mut node = mem_node();
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)) });
+
+        let entity = *node.ships.index.get(&ship).unwrap();
+        let mut saw_decel_step = false;
+        for _ in 0..100 {
+            node.tick();
+            let warping = node.warp_phase(ship) == Some(WarpPhase::Warping);
+            let v = node.world.inner().get::<&VelocityComp>(entity).unwrap().0;
+            let speed = (v.dx * v.dx + v.dy * v.dy + v.dz * v.dz).sqrt();
+            if warping && speed > f32::EPSILON && speed < WARP_SPEED * 0.9 {
+                saw_decel_step = true;
+            }
+            if node.warp_phase(ship).is_none() { break; }
+        }
+        assert!(saw_decel_step, "warp must ramp down through intermediate speeds, not stop dead");
+        assert_eq!(node.warp_phase(ship), None, "warp should have completed");
+    }
+
+    #[test]
+    fn a_move_command_cancels_an_aligning_warp() {
+        let mut node = mem_node();
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)) });
+        node.tick();
+        assert_eq!(node.warp_phase(ship), Some(WarpPhase::Aligning));
+
+        node.apply_move_command(ship, Position::new(0.0, 1000.0, 0.0));
+        assert_eq!(node.warp_phase(ship), None, "a move during alignment cancels the warp");
+    }
+
+    #[test]
+    fn a_move_command_is_ignored_during_the_committed_warping_phase() {
+        let mut node = mem_node();
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)) });
+        for _ in 0..100 {
+            node.tick();
+            if node.warp_phase(ship) == Some(WarpPhase::Warping) { break; }
+        }
+        assert_eq!(node.warp_phase(ship), Some(WarpPhase::Warping), "warp should be committed");
+
+        node.apply_move_command(ship, Position::new(0.0, 1000.0, 0.0));
+        assert_eq!(node.warp_phase(ship), Some(WarpPhase::Warping),
+            "a committed warp cannot be interrupted by a move command");
+    }
+
+    #[test]
+    fn auto_jump_is_queued_in_pending_list_when_warp_completes_with_auto_jump_true() {
+        let mut node = mem_node();
+        let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(node.apply_warp_command(ship, WarpTarget::Gate(dawn_core::JumpGateId(0)), true));
+
+        for _ in 0..100 { node.tick(); }
+        assert_eq!(node.warp_phase(ship), None, "warp must complete");
+        assert!(node.can_propose_jump(ship, dawn_core::JumpGateId(0)),
+            "ship must be within gate range after warp");
+
+        let pending = node.drain_pending_auto_jumps();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0], (ship, dawn_core::JumpGateId(0)));
+
+        assert!(node.drain_pending_auto_jumps().is_empty());
+    }
+
+    #[test]
+    fn normal_warp_without_auto_jump_does_not_queue_pending_jump() {
+        let mut node = mem_node();
+        let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(node.apply_warp_command(ship, WarpTarget::Gate(dawn_core::JumpGateId(0)), false));
+
+        for _ in 0..100 { node.tick(); }
+        assert_eq!(node.warp_phase(ship), None);
+        assert!(node.drain_pending_auto_jumps().is_empty());
+    }
+
+    // ── Celestial body warp (ADR-0025) ───────────────────────────────────
+
+    #[test]
+    fn warp_to_body_reaches_arrival_distance_of_radius_times_1_5() {
+        let mut node = mem_node();
+        let (player, ship_id) = spawn_owned_player_at(&mut node, Position::new(0.0, 0.0, 0.0));
+
+        let body_id = dawn_core::CelestialBodyId(1);
+        let ok = node.apply_warp_command_owned(player, dawn_core::WarpCommand {
+            ship_id: ship_id, target: WarpTarget::Body(body_id),
+        });
+        assert!(ok, "warp to body should be accepted");
+        assert!(node.warp_phase(ship_id).is_some(), "ship should have WarpComp");
+
+        for _ in 0..5_000 {
+            node.tick();
+            if node.warp_phase(ship_id).is_none() { break; }
+        }
+        assert!(node.warp_phase(ship_id).is_none(), "warp should have completed");
+
+        let body = crate::star_map::StarMap::builtin()
+            .bodies_in_sector(SectorId(0))
+            .into_iter()
+            .find(|b| b.id == body_id)
+            .unwrap();
+        let ship_pos = node.ship_positions()
+            .into_iter()
+            .find(|(id, _)| *id == ship_id)
+            .map(|(_, p)| p)
+            .expect("ship exists");
+        let dx = ship_pos.x - body.position.x;
+        let dy = ship_pos.y - body.position.y;
+        let dz = ship_pos.z - body.position.z;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+        let arrival_max = body.radius * 1.5 * 1.05;
+        assert!(
+            dist <= arrival_max,
+            "ship distance {:.0} should be within {:.0} of body centre",
+            dist, arrival_max,
+        );
+    }
+
+    #[test]
+    fn warp_to_body_is_rejected_for_body_not_in_this_sector() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(0.0, 0.0, 0.0), Velocity::ZERO);
+        let ok = node.apply_warp_command(ship_id, WarpTarget::Body(dawn_core::CelestialBodyId(2)), false);
+        assert!(!ok, "warp to body in another sector should be rejected");
+    }
+}

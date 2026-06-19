@@ -392,3 +392,94 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dawn_core::{NodeId, Position, SectorBounds, SectorId, Tick, DomainEvent};
+    use dawn_ecs::components::WarpPhase;
+
+    fn node_with_modules() -> SimulationNode {
+        use crate::{modules, ship_types};
+        let mut node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+        for def in modules::all_modules() { node.register_module(def); }
+        for def in ship_types::all_ship_types() { node.register_ship_type(def); }
+        node
+    }
+
+    #[test]
+    fn bot_starts_aligning_when_hp_drops_below_50_percent() {
+        use dawn_core::events::DamageTaken;
+
+        let mut node = node_with_modules();
+
+        let bot_pos = Position::new(1200.0, 0.0, 0.0);
+        let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
+
+        let player_id = node.next_player_id();
+        let _ = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+
+        // Magpie max HP: shield=200, armor=120, hull=100, total=420.
+        // Deal 215 → shield=0, armor=105, hull=100 → 205/420 ≈ 48.8% < 50%.
+        node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
+            ship_id        : bot_ship_id,
+            damage         : 215.0,
+            current_shield : 0.0,
+            current_armor  : 105.0,
+            current_hull   : 100.0,
+            tick           : Tick(1),
+        }));
+
+        node.tick();
+
+        assert!(
+            matches!(node.warp_phase(bot_ship_id), Some(WarpPhase::Aligning)),
+            "bot should be in WarpPhase::Aligning after hp drops below 50%"
+        );
+    }
+
+    #[test]
+    fn tackled_bot_cannot_warp_but_keeps_fighting() {
+        use dawn_core::{FitModuleCommand, LockOnCommand, ActivateModuleCommand, SlotKind, events::DamageTaken};
+        use crate::modules::MODULE_FOLD_DISRUPTOR;
+
+        let mut node = node_with_modules();
+
+        let bot_pos = Position::new(1000.0, 0.0, 0.0);
+        let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
+
+        let player_id = node.next_player_id();
+        let player_ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+
+        node.fit_module(FitModuleCommand { ship_id: player_ship_id, slot: SlotKind::Mid, module_id: MODULE_FOLD_DISRUPTOR });
+
+        node.activate_module_owned(player_id, ActivateModuleCommand {
+            ship_id  : player_ship_id,
+            module_id: MODULE_FOLD_DISRUPTOR,
+            slot     : SlotKind::Mid,
+        });
+        let lock_cmd = LockOnCommand { ship_id: player_ship_id, target_id: bot_ship_id };
+        for _ in 0..5 {
+            node.tick_with_lock_commands(&[lock_cmd.clone()]);
+        }
+
+        let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
+        assert!(!node.can_propose_warp(bot_ship_id, dawn_core::WarpTarget::Gate(gate_id)), "bot should be tackled");
+
+        node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
+            ship_id        : bot_ship_id,
+            damage         : 215.0,
+            current_shield : 0.0,
+            current_armor  : 105.0,
+            current_hull   : 100.0,
+            tick           : Tick(10),
+        }));
+
+        node.tick_with_lock_commands(&[lock_cmd.clone()]);
+
+        assert!(
+            node.warp_phase(bot_ship_id).is_none(),
+            "tackled bot should not enter warp"
+        );
+    }
+}

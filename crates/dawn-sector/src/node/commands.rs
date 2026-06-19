@@ -260,3 +260,83 @@ impl<S: EventStore> SimulationNode<S> {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dawn_core::{NodeId, Position, SectorBounds, SectorId, Velocity, DomainEvent};
+
+    fn mem_node() -> SimulationNode {
+        SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF))
+    }
+
+    fn node_with_modules() -> SimulationNode {
+        use crate::{modules, ship_types};
+        let mut node = mem_node();
+        for def in modules::all_modules() { node.register_module(def); }
+        for def in ship_types::all_ship_types() { node.register_ship_type(def); }
+        node
+    }
+
+    #[test]
+    fn fitting_same_module_twice_does_not_double_count_stats() {
+        use dawn_core::{FitModuleCommand, ModuleId, SlotKind};
+        use dawn_core::fitting::{ModuleDefinition, ModuleKind, StatDelta};
+
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+
+        let railgun = ModuleDefinition {
+            id                : ModuleId(1),
+            name              : "Test Railgun".to_string(),
+            kind              : ModuleKind::Weapon,
+            slot              : SlotKind::High,
+            activation_mode   : dawn_core::ActivationMode::Active,
+            cap_cost_per_cycle: 60.0,
+            cycle_time_ticks  : 10,
+            stat_delta        : StatDelta { weapon_damage_add: 25.0, weapon_range_add: 1000.0, ..StatDelta::ZERO },
+        };
+        node.register_module(railgun);
+
+        node.fit_module(FitModuleCommand { ship_id, slot: SlotKind::High, module_id: ModuleId(1) });
+        let stats_after_first = node.get_ship_stats(ship_id).unwrap();
+        assert_eq!(stats_after_first.weapon_damage, 25.0, "1 module: base(0) + delta(25) = 25");
+
+        node.fit_module(FitModuleCommand { ship_id, slot: SlotKind::High, module_id: ModuleId(1) });
+        let stats_after_second = node.get_ship_stats(ship_id).unwrap();
+        assert_eq!(stats_after_second.weapon_damage, 50.0,
+            "2 modules: base(0) + 2×delta(25) = 50 (not 75 from double-counting)");
+    }
+
+    #[test]
+    fn player_weapon_deals_damage_to_bot_after_lock_and_activation() {
+        use dawn_core::{LockOnCommand, ActivateModuleCommand, SlotKind, ModuleId};
+
+        let mut node = node_with_modules();
+
+        let bot_pos = Position::new(500.0, 0.0, 0.0);
+        let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
+
+        let player_id = node.next_player_id();
+        let player_ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+
+        let lock_cmd = LockOnCommand { ship_id: player_ship_id, target_id: bot_ship_id };
+
+        assert!(node.activate_module_owned(player_id, ActivateModuleCommand {
+            ship_id  : player_ship_id,
+            module_id: ModuleId(1),
+            slot     : SlotKind::High,
+        }), "activate_module_owned should return true for player's own ship");
+
+        let mut damage_events = 0;
+        for _ in 0..25 {
+            let result = node.tick_with_lock_commands(&[lock_cmd.clone()]);
+            damage_events += result.events.iter()
+                .filter(|e| matches!(e, DomainEvent::DamageTaken(d) if d.ship_id == bot_ship_id))
+                .count();
+        }
+
+        assert!(damage_events > 0,
+            "player should have dealt at least 1 DamageTaken to bot within 25 ticks");
+    }
+}

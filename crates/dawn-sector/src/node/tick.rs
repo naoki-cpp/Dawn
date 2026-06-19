@@ -89,3 +89,51 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dawn_core::{NodeId, Position, SectorBounds, SectorId, Tick, Velocity};
+
+    fn mem_node() -> SimulationNode {
+        SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF))
+    }
+
+    #[test]
+    fn tick_advances_the_logical_tick_counter_by_one() {
+        let mut node = mem_node();
+        assert_eq!(node.current_tick(), Tick::ZERO);
+        node.tick();
+        assert_eq!(node.current_tick(), Tick(1));
+        node.tick();
+        assert_eq!(node.current_tick(), Tick(2));
+    }
+
+    #[test]
+    fn npc_ships_at_constant_velocity_produce_no_velocity_changed_events() {
+        let mut node = mem_node();
+        node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0));
+        node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(200.0, 100.0, 100.0), Velocity::new(0.0, 1.0, 0.0));
+        assert_eq!(node.tick().events_emitted, 0,
+            "NPC ships at constant velocity do not emit VelocityChanged");
+    }
+
+    #[test]
+    fn stationary_ships_produce_no_events() {
+        let mut node = mem_node();
+        node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        assert_eq!(node.tick().events_emitted, 0);
+    }
+
+    #[test]
+    fn velocity_changed_events_carry_the_current_tick_value() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(100.0, 100.0, 100.0), Velocity::ZERO);
+        node.set_player_ship(ship_id);
+        node.apply_move_command(ship_id, Position::new(10000.0, 0.0, 0.0));
+        node.tick();
+        node.tick();
+        let last = node.event_store().all_records().last().unwrap();
+        assert_eq!(last.event.tick(), Tick(2));
+    }
+}
