@@ -117,8 +117,10 @@ name = "dawn-consensus"
 version = "0.1.0"
 dependencies = [
  "dawn-core",
+ "postcard",
  "rand",
  "serde",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -175,6 +177,26 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "dawn-sector-node"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dawn-actor",
+ "dawn-consensus",
+ "dawn-core",
+ "dawn-event-store",
+ "dawn-replication",
+ "dawn-sector",
+ "futures-util",
+ "rand",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "toml",
 ]
 
 [[package]]

@@ -17,12 +17,14 @@
 //! - `TcpReplicationTransport`: LAN plaintext transport using length-prefixed
 //!   postcard frames.
 //!
-//! ## Planned (8D-2d)
+//! ## (8D-2d)
 //!
-//! - `SnapshotTransfer`: catch up far-behind replicas via snapshot.
+//! - `SnapshotTransfer`: catch up far-behind replicas via snapshot (raw-bytes
+//!   TCP transfer; caller handles postcard serialisation).
 
 pub mod anti_entropy;
 pub mod bus;
+pub mod snapshot;
 pub mod tcp;
 
 use dawn_core::{DomainEvent, SectorId};
@@ -31,6 +33,7 @@ use tokio::sync::broadcast;
 
 pub use anti_entropy::{AntiEntropy, BatchApplyPlan, MissingLogRequest};
 pub use bus::{BusMessage, InMemoryReplicationBus};
+pub use snapshot::SnapshotTransfer;
 pub use tcp::{TcpReplicationError, TcpReplicationTransport};
 
 /// A single gossip payload from a Sector owner's append-only log.
