@@ -80,7 +80,8 @@ EVE Online を**超えるゲーム**を作ることが目的（ADR-0016）。
 | `dawn-ecs` | ライブラリ | ECS World ラッパー。Component / System 定義 |
 | `dawn-event-store` | ライブラリ | 2 層 Event Log（ホットログ＋コールドアーカイブ）の永続化・圧縮（ADR-0017） |
 | `dawn-consensus` | ライブラリ | Raft 実装（Leader 選出 / Log Replication / RaftActor、ADR-0014） |
-| `dawn-actor` | ライブラリ | Actor 基盤（ReplicationBus / ClientConnection trait） |
+| `dawn-actor` | ライブラリ | クライアント転送境界（ClientConnection trait） |
+| `dawn-replication` | ライブラリ | 追記ログのゴシップ配布境界（InMemoryReplicationBus / ReplicationTransport、ADR-0021/0027） |
 | `dawn-sector` | ライブラリ | Sector 単位のゲームロジック（SimulationNode・Tick・Transit・Warp・Bot AI・AoI・Snapshot、ADR-0026） |
 | `dawn-simulation` | バイナリ | 配線・起動のみ。WsServer（Godot 接続）・Raft クラスター配線・負荷生成・TOML ローダー |
 
@@ -94,6 +95,7 @@ dawn-core
     └── dawn-event-store
             ↑
             ├── dawn-actor
+            ├── dawn-replication
             └── dawn-sector          ← ゲームロジック（dawn-ecs / dawn-consensus にも依存・ADR-0026）
                     ↑
                     └── dawn-simulation  (バイナリ・dawn-actor / dawn-consensus にも依存)
@@ -183,7 +185,7 @@ Phase 4（テスト用）:            Phase 5 以降（現在）:
 ```
 SectorSimulatorActor
     ↓ events
-ReplicationBus
+dawn-replication::InMemoryReplicationBus
     ↓
 ClientConnection（InProcess / WebSocket）
     ↓ DomainEvent stream

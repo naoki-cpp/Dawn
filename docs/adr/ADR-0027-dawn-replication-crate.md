@@ -156,15 +156,15 @@ thiserror        = "1"
 
 ## 実装チェックリスト
 
-- [ ] 人間が本 ADR を承認する（proposed → accepted）
-- [ ] `crates/dawn-replication/` を新設（Cargo.toml + src/lib.rs）
-- [ ] `ReplicationTransport` trait + `InMemoryReplicationBus` を実装
-- [ ] `dawn-actor` から `ReplicationBus` を削除し、`dawn-simulation` を差し替え
-- [ ] `AntiEntropy`（iter_from ベース）を実装しテストを書く
+- [x] 人間が本 ADR を承認する（proposed → accepted）
+- [x] `crates/dawn-replication/` を新設（Cargo.toml + src/lib.rs）
+- [x] `ReplicationTransport` trait + `InMemoryReplicationBus` を実装
+- [x] `dawn-actor` から `ReplicationBus` を削除し、`dawn-simulation` を差し替え
+- [x] `AntiEntropy`（iter_from ベース）を実装しテストを書く
 - [ ] `TcpReplicationTransport`（LAN plaintext）を実装
 - [ ] `SnapshotTransfer` を実装しテストを書く
-- [ ] `cargo test --workspace` がゼロエラーで通過する
-- [ ] CLAUDE.md §3（Dependency DAG）§11（Crate 別責務早見表）を更新する
+- [x] `cargo test --workspace` がゼロエラーで通過する
+- [x] AI_DEVELOPMENT_GUIDE.md §3（Dependency DAG）§11（Crate 別責務早見表）を更新する
 - [ ] architecture-review.md のファイルサイズ一覧を更新する
 
 ---

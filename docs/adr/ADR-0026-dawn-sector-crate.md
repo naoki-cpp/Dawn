@@ -113,8 +113,8 @@ Phase 3（P3-1/P3-2）で実施済みの方向。サブモジュール化はで�
 
 ### C: dawn-actor にゲームロジックを移す
 
-`dawn-actor` は Actor 基盤（ReplicationBus・ClientConnection）。ゲームロジックを入れると
-Actor 基盤とドメインロジックが混在し、将来の `dawn-replication` 分離が困難になる。不採用。
+`dawn-actor` はクライアント転送境界（ClientConnection）。ゲームロジックを入れると
+転送境界とドメインロジックが混在し、`dawn-replication` との責務分離が崩れる。不採用。
 
 ## 実装チェックリスト
 

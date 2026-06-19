@@ -17,7 +17,7 @@ Phase 6 までのシミュレーションは以下の状態にある。
 
 - 3 ノード構成（`MultiNodeCluster`）は存在するが、各ノードは独立した Sector を
   シミュレートしているだけで、ノード間の合意は存在しない。
-- イベント伝播は `ReplicationBus`（In-Memory broadcast channel）による
+- イベント伝播は `dawn-replication::InMemoryReplicationBus`（In-Memory broadcast channel）による
   ベストエフォート転送のみ。
 - `SectorTransitRequested` / `SectorTransitCompleted` イベントは
   CLAUDE.md のスコープに記載されているが、**まだ実装されていない**。
@@ -59,7 +59,7 @@ Raft を経由する（制御プレーン）:
 
 Raft を経由しない（データプレーン）:
   - VelocityChanged / WeaponFired / DamageTaken 等の Sector-local イベント
-    → 現行どおり ReplicationBus（Phase 8 で Gossip + CRDT に置換予定）
+    → 現行は dawn-replication::InMemoryReplicationBus。Phase 8D 後続で TCP gossip に置換予定（CRDT/LWW は ADR-0021 により不採用）
 ```
 
 理由: Raft のスループットはリーダーの fsync + 過半数 ACK に律速される。
@@ -285,7 +285,7 @@ Tick 駆動タイマー（決定 5）と整合しない。
 追加しない:
   - Membership Change / Log Compaction
   - 実ネットワーク（Phase 5 の WebSocket は Godot 用であり Raft とは別）
-  - Gossip + CRDT（Phase 8 / dawn-replication）
+  - Sector-local log gossip（Phase 8D / dawn-replication。CRDT/LWW は ADR-0021 により不採用）
   - JumpGate / StarSystem（ADR-0009、Phase 7 完了後）
 ```
 

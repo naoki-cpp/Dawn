@@ -173,7 +173,7 @@ Step 7.5: コミット済み Raft エントリを適用する（ADR-0014 §7）
              from/to の StarSystemId が異なる場合は StarSystemChanged も
              Append する（ADR-0009 / SimulationNode::append_jump_events）
          ※ node.tick（Step 1）の前に実行する。actor 経路では生成イベントを
-           同 Tick の flush で ReplicationBus に伝播する。
+           同 Tick の flush で dawn-replication transport に伝播する。
 ```
 
 ### Step 8 より前に Step 9 を実行してはならない理由
