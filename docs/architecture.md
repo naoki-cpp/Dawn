@@ -46,27 +46,25 @@ EVE Online を**超えるゲーム**を作ることが目的（ADR-0016）。
 - Event Sourcing による完全な因果追跡と世界の再現性
 - Actor モデルと ECS の責務分離による高スループット処理
 
-### 現在のスコープ（Local-First Phase）
+### 現在のスコープ（Phase 8D — TCP 分散配線完了）
 
 ```
-動作環境 : Single Process
-ノード間通信 : In-Memory Channel のみ（物理分散なし）
+動作環境 : 複数プロセス（`dawn-sector-node` / `dawn-simulation` どちらも可）
+ノード間通信 : TCP（TcpRaftTransport / TcpReplicationTransport、8D-3/2c）
 クライアント接続 : WebSocket + JSON（Godot ⇔ WsServer、ADR-0007）
-ノード   : 論理的な概念として存在（物理分散なし）
-ノード間ネットワーク: 不使用（Raft は In-Process 実装済み / ADR-0014。ネットワーク Raft・ゴシップ配布は将来フェーズ）
+ノード   : 物理プロセスとして存在（`sector-node config/node-N.toml`）
+ノード間ネットワーク: TCP LAN plaintext（8D マイルストーン。TLS は次フェーズ）
 ```
 
-現在の制約は「できないから」ではなく「今は必要ないから」である。
-→ 詳細は [ADR-0003](./adr/ADR-0003-local-first-development.md) を参照。
+→ 詳細は [ADR-0003](./adr/ADR-0003-local-first-development.md) / [ADR-0027](./adr/ADR-0027-dawn-replication-crate.md) を参照。
 
 ### 将来のスコープ（方向性のみ、未実装）
 
-- 物理的に分離したノードへの分散
-- ネットワーク層（TCP+rustls / QUIC。ワイヤ = postcard 再利用、gRPC/protobuf は不採用）
-- 分散コンセンサス（Raft。ネットワーク RaftTransport + Raft ログ圧縮 + InstallSnapshot）
-- 追記ログのゴシップ配布による最終一貫性（ADR-0021。単一所有のため競合解決 CRDT は不要）
+- Raspberry Pi クラスタ実機検証（8D-5）
+- TLS / QUIC 化（8E 以降）
+- Raft ログ圧縮 + InstallSnapshot（snapshot + tail catch-up は SnapshotTransfer で基盤整備済み）
 
-**将来のスコープを前提にしたコードを現在のフェーズで書かないこと。**
+**現在のフェーズを超えたコードを先行実装しないこと。**
 
 ---
 
@@ -81,9 +79,10 @@ EVE Online を**超えるゲーム**を作ることが目的（ADR-0016）。
 | `dawn-event-store` | ライブラリ | 2 層 Event Log（ホットログ＋コールドアーカイブ）の永続化・圧縮（ADR-0017） |
 | `dawn-consensus` | ライブラリ | Raft 実装（Leader 選出 / Log Replication / RaftActor、ADR-0014） |
 | `dawn-actor` | ライブラリ | クライアント転送境界（ClientConnection trait） |
-| `dawn-replication` | ライブラリ | 追記ログのゴシップ配布境界（InMemoryReplicationBus / ReplicationTransport、ADR-0021/0027） |
+| `dawn-replication` | ライブラリ | 追記ログのゴシップ配布境界（InMemoryReplicationBus / ReplicationTransport / AntiEntropy / TcpReplicationTransport / SnapshotTransfer、ADR-0021/0027） |
 | `dawn-sector` | ライブラリ | Sector 単位のゲームロジック（SimulationNode・Tick・Transit・Warp・Bot AI・AoI・Snapshot、ADR-0026） |
 | `dawn-simulation` | バイナリ | 配線・起動のみ。WsServer（Godot 接続）・Raft クラスター配線・負荷生成・TOML ローダー |
+| `dawn-sector-node` | バイナリ | 本番実行バイナリ（8D-4）。TcpRaftTransport + TcpReplicationTransport を TOML 静的 config で配線。3 プロセスで 3 セクタクラスタ |
 
 ### 依存 DAG
 
@@ -98,7 +97,8 @@ dawn-core
             ├── dawn-replication
             └── dawn-sector          ← ゲームロジック（dawn-ecs / dawn-consensus にも依存・ADR-0026）
                     ↑
-                    └── dawn-simulation  (バイナリ・dawn-actor / dawn-consensus にも依存)
+                    ├── dawn-simulation     (バイナリ・dawn-actor / dawn-consensus にも依存)
+                    └── dawn-sector-node    (本番バイナリ・dawn-consensus / dawn-replication にも依存・8D-4)
 ```
 
 依存は**下から上への一方向のみ**。逆方向・循環は設計の失敗を意味する。

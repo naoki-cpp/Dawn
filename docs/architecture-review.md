@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : CLAUDE.md §11, docs/architecture.md
-date     : 2026-06-19（8D-2c / P7-1 Transit flow 完了後に更新）
+date     : 2026-06-19（8D-2d / 8D-3 / 8D-4 完了後に更新）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -81,11 +81,14 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-ecs/src/systems/combat.rs` | 430 | 🟢 |
 | `crates/dawn-consensus/src/actor.rs` | 430 | 🟢 |
 | `crates/dawn-ecs/src/systems/capacitor.rs` | 412 | 🟢 |
+| `crates/dawn-consensus/src/tcp_transport.rs` | 330 | 🟢 8D-3 TcpRaftTransport |
+| `crates/dawn-sector-node/src/main.rs` | 329 | 🟢 8D-4 本番バイナリ（TCP 配線・WS・Jump Redirect） |
 | `crates/dawn-replication/src/tcp.rs` | 263 | 🟢 8D-2c |
 | `crates/dawn-ecs/src/world.rs` | 252 | 🟢 P6-1 クエリヘルパー追加 |
 | `crates/dawn-replication/src/anti_entropy.rs` | 211 | 🟢 8D-2b |
 | `crates/dawn-replication/src/bus.rs` | 188 | 🟢 8D-2a |
-| `crates/dawn-replication/src/lib.rs` | 68 | 🟢 8D-2a/2b/2c public API |
+| `crates/dawn-replication/src/snapshot.rs` | 164 | 🟢 8D-2d SnapshotTransfer（ジェネリック / 256 MiB cap） |
+| `crates/dawn-replication/src/lib.rs` | 71 | 🟢 8D-2a/2b/2c/2d public API |
 
 ---
 
@@ -193,24 +196,23 @@ node/
 
 ---
 
-### Phase 8 — 物理ノード分散の配線（Phase 8D）
+### Phase 8 — 物理ノード分散の配線（Phase 8D 完了）
 
-`dawn-replication`（ADR-0021/0027・Phase 8D）は 8D-2a/2b/2c まで完了済み。
+`dawn-replication`（ADR-0021/0027・Phase 8D）は全ステップ完了済み。
 
 完了済み:
 
 - 8D-2a: `InMemoryReplicationBus` / `ReplicationTransport` を `dawn-replication` へ移動
 - 8D-2b: `AntiEntropy`（gap 検出・重複/overlap 判定・`iter_from` suffix 応答）
 - 8D-2c: `TcpReplicationTransport`（4-byte length prefix + postcard / LAN plaintext）
+- 8D-2d: `SnapshotTransfer`（`Serialize+DeserializeOwned` ジェネリック / 256 MiB cap）
+- 8D-3: `TcpRaftTransport`（per-peer 自動再接続 / accept ループ / postcard framing）
+- 8D-4: `dawn-sector-node` 本番バイナリ（TOML 静的 config / 3 ノードクラスタ / Jump Redirect）
 
 次の自然な前進先:
 
-1. **8D-2d: `SnapshotTransfer`**
-   遅れた複製が `base_index` より前を要求した場合、ADR-0017 の snapshot + tail catch-up で追いつく経路を実装する。
-2. **`dawn-sector-node` の最小バイナリ**
-   物理ノード上で `dawn-sector` / `dawn-consensus` / `dawn-replication` を配線する。第1次は静的 3 ノード + LAN 平文で十分。
-3. **`SectorSimulatorActor` の境界再評価**
-   物理ノード配線で必要になった場合のみ、`SimulationNode` 操作を薄い port に寄せる。現時点では先行リファクタとしては必須ではない。
+- **8D-5: Raspberry Pi 実機検証**（3 物理ノード / LAN 平文）
+- **`SectorSimulatorActor` の境界再評価**（物理ノード配線で必要になった場合のみ）
 
 採らない方針も維持する:
 
