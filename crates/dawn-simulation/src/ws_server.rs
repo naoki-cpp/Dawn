@@ -21,7 +21,7 @@
 
 use crate::protocol::{domain_event_to_json, parse_client_command};
 use dawn_actor::{ClientCommand, ClientConnection};
-use dawn_core::{DomainEvent, EntityId, PlayerId, Position, ShipId};
+use dawn_core::{DomainEvent, PlayerId, ShipId};
 use futures_util::{SinkExt, StreamExt};
 use std::net::SocketAddr;
 use tokio::{
