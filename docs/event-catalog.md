@@ -161,8 +161,8 @@ Step 7.5 で destination ノードが `SectorTransitCompleted` に加えて
 `StarSystemChanged` も Append する（`SimulationNode::append_jump_events`）。
 
 静的トポロジー（3 星系・4 ジャンプゲート）は `dawn-simulation/src/star_map.rs`
-に定義する。`ws_server.rs` は両イベントを EventJson としてクライアントに配信し、
-`JumpCommand` の JSON パーサーも実装済み。Godot クライアント側
+に定義する。`protocol.rs` の `domain_event_to_json` が両イベントを JSON としてクライアントに配信し、
+`JumpCommand` の JSON パーサーも `protocol.rs` に実装済み。Godot クライアント側
 （`connection.gd` の `send_jump_command`、`main.gd` の
 `_handle_jump_gate_used` / `_handle_star_system_changed`）も実装済み
 （ADR-0009 実装チェックリスト全完了）。
@@ -206,7 +206,7 @@ tackled 状態の間、Ship は `can_propose_warp()` / `can_propose_jump()` が 
 | `ApproachCommand` | 対象（Ship / Jump Gate）へ半自動接近する（Move / Stop で解除・ADR-0015） | —（新イベントなし） | ✅ 実装済み |
 | `TransitCommand` | Sector Transit を要求する（Raft 経由・ADR-0014） | `SectorTransitRequested` / `Completed` | ✅ 実装済み |
 | `JumpCommand` | ジャンプゲート経由で別 Sector に移動する（Raft 経由・ADR-0009）。射程外の場合は自動ワープ後にジャンプ（auto-warp-then-jump / ADR-0023） | `JumpGateUsed`（+ 別星系なら `StarSystemChanged`） | ✅ 実装済み |
-| `WarpCommand` | 同一セクター内の Jump Gate へワープする（align → warping 2 フェーズ / ADR-0022） | —（新イベントなし。移動は `VelocityChanged` で記録） | ✅ 実装済み |
+| `WarpCommand` | 同一セクター内の Jump Gate または天体（恒星・惑星）へワープする（`WarpTarget::Gate` / `Body`・align → warping 2 フェーズ / ADR-0022 / ADR-0025） | —（新イベントなし。移動は `VelocityChanged` で記録） | ✅ 実装済み |
 
 ---
 

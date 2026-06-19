@@ -108,7 +108,7 @@ uniform vec3  sun_color;      // スペクトル型に対応した色
 {"type":"WarpCommand","ship_id":1,"target":{"Body":1}}
 ```
 
-旧形式 `{"gate_id":N}` も後方互換として受け付ける（ws_server.rs）。
+旧形式 `{"gate_id":N}` も後方互換として受け付ける（`protocol.rs` の `parse_client_command`）。
 
 ## 影響
 
