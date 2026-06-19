@@ -11,8 +11,10 @@ pub mod actor;
 pub mod rpc;
 pub mod state;
 pub mod transport;
+pub mod tcp_transport;
 
 pub use actor::{RaftActor, RaftActorHandle, RaftActorMessage};
 pub use rpc::{AppendEntries, AppendEntriesResponse, RaftMessage, RequestVote, RequestVoteResponse};
 pub use state::{LogEntry, Role, RaftState, TickEffect, Term};
 pub use transport::{InProcessTransport, PartitionableTransport, RaftTransport};
+pub use tcp_transport::{TcpRaftTransport, TcpRaftError};
