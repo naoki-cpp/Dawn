@@ -20,7 +20,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | 観点 | 評価 | 理由 |
 |---|---|---|
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027） |
-| ファイルサイズ | B+ | serve.rs / data_loader.rs / node補助責務を分割済み。残る最大ファイルは node/mod.rs 1,545行 |
+| ファイルサイズ | B+ | serve.rs / data_loader.rs / node補助責務を分割済み。残る最大ファイルは node/mod.rs 1,182行 |
 | 型設計 | B+ | SectorMap・ShipRegistry 抽出で SimulationNode のフィールド数が適正化 |
 | 重複 | A− | `_owned` 4ペアは3行ラッパーで許容。P6-1 で system 間のクエリ手書きも解消 |
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。TCP transport も trait 境界内に収まる |
@@ -34,7 +34,8 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-sector/src/node/mod.rs` | 1,545 | 🟡 残存課題（テスト ~980行 + Transit公開メソッド群）|
+| `crates/dawn-sector/src/node/mod.rs` | 1,182 | 🟡 残存課題（テスト ~760行。実装本体はかなり薄い）|
+| `crates/dawn-sector/src/node/transit_flow.rs` | 402 | 🟢 P7-1（実装 + 近接テスト） |
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 394 | 🟢 P4-2 で新設 |
 | `crates/dawn-sector/src/node/navigation.rs` | 301 | 🟢 |
 | `crates/dawn-sector/src/node/commands.rs` | 262 | 🟢 |
@@ -99,22 +100,22 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ### High
 
-#### H-1: `node/mod.rs` 1,545行（唯一残る大きい実装ファイル）
+#### H-1: `node/mod.rs` 1,182行（大きいが、主因は同居テスト）
 
 P4-1/P4-2 と後続分割で、`tick.rs` / `spawner_logic.rs` / `tackle.rs` /
-`snapshot_io.rs` / `apply_event.rs` などは分離済み。
-現在の `node/mod.rs` は実装本体が約560行、テストが約980行で、以前の god file 状態からはかなり改善した。
+`snapshot_io.rs` / `apply_event.rs` / `transit_flow.rs` などは分離済み。
+現在の `node/mod.rs` は実装本体が約420行、テストが約760行で、以前の god file 状態からはかなり改善した。
 ただし以下はまだ同居している:
 
 ```
 現在 node/mod.rs が抱えているもの:
   - SimulationNode struct 定義・constructor・基本 accessor（適切）
-  - propose_transit / export_transit / import_transit / jump/warp提案ヘルパー
-  - cfg(test) ブロック（約980行、ファイルの過半）
+  - jump/warp提案ヘルパー
+  - cfg(test) ブロック（約760行、ファイルの過半）
 ```
 
-最も効果が大きいのはテストの分離（L-1・約980行）。
-Transit系公開メソッドは `dawn-sector/src/transit.rs` の型定義と責務境界を見直してから移す。
+テストは実装と同じファイルに置く方針を優先するため、残行数だけを理由に分離しない。
+次に切るなら jump/warp 提案ヘルパーを `node/navigation.rs` へ寄せるかを検討する。
 
 ---
 
@@ -133,11 +134,11 @@ Transit系公開メソッドは `dawn-sector/src/transit.rs` の型定義と責�
 
 ### Low
 
-#### L-1: `node/mod.rs` のテストコード（約980行）が実装と混在
+#### L-1: `node/mod.rs` のテストコード（約760行）が実装と混在
 
-テストが実装ファイルに直接書かれているため、テストだけ読みたいときに実装が邪魔になる。
-`tests/` ディレクトリへの分離は Rust の `#[cfg(test)]` モデル上任意だが、
-現状でも許容可能。ただし次に `node/mod.rs` を触るなら、先に分離した方がレビューしやすい。
+Rust のユニットテストは実装と同じファイルに置くことで、private helper の検証や
+実装意図の近接性を保ちやすい。現状の `cfg(test)` ブロックは大きいが、設計上は許容する。
+テスト分離は「テストだけを頻繁に読む/編集する」痛みが強くなった時点で再検討する。
 
 #### L-3: `star_system.rs`（dawn-core）と `star_map.rs`（dawn-sector）の命名が紛らわしい
 
@@ -171,31 +172,27 @@ dawn-sector/src/star_map.rs     — インスタンスデータ（StarMap struct
 | P5-2 data_loader.rs 分割 | 2026-06-19 | data_loader/{mod,ship_types,modules,star_map}.rs に分割（479行 → 12/174/190/98）|
 | P6-1 `SimWorld` クエリヘルパー追加 | 2026-06-19 | `find_entity` / `query` / `get` / `get_mut` を追加。combat/capacitor/lock/fitting の `inner()` 脱出を削減（L-2 解消）|
 | P7-pre node補助責務抽出 | 2026-06-19 | `tackle.rs` / `snapshot_io.rs` / `apply_event.rs` を分離。node/mod.rs は 1,545行へ縮小 |
+| P7-1 Transit flow 境界整理 | 2026-06-19 | `node/transit_flow.rs` を新設。`propose_transit` / `export_transit` / `import_transit` / jump event 追記と対応テストを移動 |
 | 8D-2a dawn-replication 基盤 | 2026-06-19 | `InMemoryReplicationBus` / `ReplicationTransport` を dawn-replication へ移動 |
 | 8D-2b AntiEntropy | 2026-06-19 | log index gap 検出・重複/overlap 判定・`iter_from` suffix 応答 |
 | 8D-2c TcpReplicationTransport | 2026-06-19 | 4-byte length prefix + postcard / LAN plaintext TCP transport |
 
 ---
 
-### Phase 7 — node/mod.rs の仕上げ分割（任意だが効果あり）
+### Phase 7 — node/mod.rs の仕上げ分割（任意・必要時）
 
 唯一残る大きい実装ファイル（H-1）への対処。優先度順:
 
-**P7-1: テストモジュールの分離（L-1・最大の効果）**
-
-`node/mod.rs` の `#[cfg(test)]` ブロック（約980行）を `tests/` 統合テスト、または
-`node/tests.rs` サブモジュールへ移す。実装本体は約560行まで見通しが良くなる。
-
-**P7-2: 残存責務の抽出**
+**P7-2: Jump / Warp proposal helper の置き場を再評価**
 
 ```
 node/
-  transit_flow.rs  — propose_transit / export_transit / import_transit
-  node/tests.rs    — node/mod.rs 内の cfg(test) ブロック
+  navigation.rs  — can_propose_jump / can_propose_warp も寄せるか検討
+  tests.rs       — 必要になった場合のみ cfg(test) ブロックを分離
 ```
 
-`transit.rs` は現状 TransitOp / ShipSnapshot 系の型・wire helper を持つ。
-`SimulationNode` の状態操作まで同居させるか、`node/transit_flow.rs` として node 配下に残すかを先に決める。
+テストは実装と同じファイルに置く方針を優先する。
+分離はファイルサイズそのものではなく、テスト編集の摩擦が実害になった場合に限る。
 
 ---
 
