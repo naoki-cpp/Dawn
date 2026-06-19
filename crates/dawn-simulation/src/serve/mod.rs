@@ -24,7 +24,7 @@ pub(crate) const AOI_CELL_SIZE: f32 = 30_000.0;
 pub(crate) const P4_SHIPS_DEFAULT: usize = 20;
 
 pub(crate) const P4_TICK_MS: u64 = 100; // 10 Tick/sec
-pub(crate) const PRODUCTION_STAR_MAP_PATH: &str = "data/star_map.toml";
+pub(crate) const PRODUCTION_GALAXY_PATH: &str = "data/galaxy.toml";
 
 /// Local Time Dilation budget (ADR-0018): logical cost (ship count) a single
 /// Sector handles per tick before dilation engages.
@@ -251,7 +251,7 @@ pub(crate) fn deliver_aoi_frame(
 pub(crate) fn build_serve_node(id: NodeId, sector: SectorId, bounds: SectorBounds, pop_cap: usize) -> SimulationNode {
     let mut node = SimulationNode::new(id, sector, bounds);
     node.set_population_cap(pop_cap);
-    let star_map = load_required_galaxy(PRODUCTION_STAR_MAP_PATH);
+    let star_map = load_required_galaxy(PRODUCTION_GALAXY_PATH);
     node.set_galaxy(std::sync::Arc::new(star_map));
     register_data_driven_definitions(&mut node);
     node
@@ -268,9 +268,9 @@ fn register_data_driven_definitions(node: &mut SimulationNode) {
 
 fn load_required_galaxy(path: &str) -> Galaxy {
     let content = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to read production star map '{path}': {e}"));
+        .unwrap_or_else(|e| panic!("failed to read production galaxy map '{path}': {e}"));
     Galaxy::from_toml_str(&content)
-        .unwrap_or_else(|e| panic!("failed to parse production star map '{path}': {e}"))
+        .unwrap_or_else(|e| panic!("failed to parse production galaxy map '{path}': {e}"))
 }
 
 /// Spawn `ship_count` NPC frigates into `node`, each fitted with a small railgun.

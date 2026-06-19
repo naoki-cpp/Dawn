@@ -30,7 +30,7 @@ use tokio::sync::mpsc;
 
 const AOI_CELL_SIZE: f32 = 30_000.0;
 const TICK_MS      : u64 = 100;
-const PRODUCTION_STAR_MAP_PATH: &str = "data/star_map.toml";
+const PRODUCTION_GALAXY_PATH: &str = "data/galaxy.toml";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -267,7 +267,7 @@ async fn main() -> anyhow::Result<()> {
 fn build_node(cfg: &config::NodeConfig, node_id: NodeId, sector_id: SectorId, bounds: SectorBounds) -> SimulationNode {
     let mut node = SimulationNode::new(node_id, sector_id, bounds);
     node.set_population_cap(cfg.pop_cap);
-    let star_map = load_required_galaxy(PRODUCTION_STAR_MAP_PATH);
+    let star_map = load_required_galaxy(PRODUCTION_GALAXY_PATH);
     node.set_galaxy(Arc::new(star_map));
     for def in data_loader::load_modules("data/modules.toml") {
         node.register_module(def);
@@ -280,9 +280,9 @@ fn build_node(cfg: &config::NodeConfig, node_id: NodeId, sector_id: SectorId, bo
 
 fn load_required_galaxy(path: &str) -> Galaxy {
     let content = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to read production star map '{path}': {e}"));
+        .unwrap_or_else(|e| panic!("failed to read production galaxy map '{path}': {e}"));
     Galaxy::from_toml_str(&content)
-        .unwrap_or_else(|e| panic!("failed to parse production star map '{path}': {e}"))
+        .unwrap_or_else(|e| panic!("failed to parse production galaxy map '{path}': {e}"))
 }
 
 fn spawn_npcs(node: &mut SimulationNode, count: usize) {

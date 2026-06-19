@@ -180,7 +180,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 #### P9-2: `CelestialBodyDef` へのセクター帰属フィールド追加（完了）
 
 `CelestialBodyDef.sector` を追加し、`Galaxy::bodies_in_sector` は ID 割り当て規約ではなく
-明示フィールドで絞り込むようになった。`data/star_map.toml` / `data/star_map.demo.toml`
+明示フィールドで絞り込むようになった。`data/galaxy.toml` / `data/galaxy.demo.toml`
 も `sector` フィールドを持つ。
 型設計の残り違和感は解消済み。
 

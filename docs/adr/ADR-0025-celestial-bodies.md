@@ -52,7 +52,7 @@ pub enum WarpTarget {
 `WarpCommand.target: WarpTarget` が旧 `gate_id: JumpGateId` を置き換える。  
 `WarpComp.target: WarpTarget` が旧 `WarpComp.gate_id` を置き換える。
 
-### 2. 静的マップデータ（dawn-sector/galaxy.rs + data/star_map*.toml）
+### 2. 静的マップデータ（dawn-sector/galaxy.rs + data/galaxy*.toml）
 
 `celestial_bodies_in_sector(sector_id)` がそのセクターの天体一覧を返す。  
 初期トポロジー（3星系 × 恒星1 + 惑星1）：

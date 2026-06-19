@@ -1,7 +1,7 @@
 //! Static Star System / Jump Gate / Celestial Body map data (ADR-0009, ADR-0025).
 //!
-//! Production servers load `data/star_map.toml` at startup. Tests and demos use
-//! the embedded `data/star_map.demo.toml` fixture via [`Galaxy::demo`].
+//! Production servers load `data/galaxy.toml` at startup. Tests and demos use
+//! the embedded `data/galaxy.demo.toml` fixture via [`Galaxy::demo`].
 
 use dawn_core::{
     CelestialBodyDef, CelestialBodyId, CelestialBodyKind, JumpGateDef, JumpGateId,
@@ -39,8 +39,8 @@ impl Galaxy {
 
     /// Demo topology used by tests, benchmarks, and in-memory demos.
     pub fn demo() -> Self {
-        Self::from_toml_str(include_str!("../../../data/star_map.demo.toml"))
-            .expect("embedded demo star map must parse")
+        Self::from_toml_str(include_str!("../../../data/galaxy.demo.toml"))
+            .expect("embedded demo galaxy map must parse")
     }
 
     /// Gates whose `from_sector` matches `sector`.
