@@ -20,7 +20,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | 観点 | 評価 | 理由 |
 |---|---|---|
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027） |
-| ファイルサイズ | A− | P7-1 テスト移動で node/mod.rs 620行に縮小。全ファイル 700行以下 |
+| ファイルサイズ | A− | P7-1/P7-2 + AoI テスト移動で node/mod.rs 514行に縮小。全ファイル 700行以下 |
 | 型設計 | B+ | SectorMap・ShipRegistry 抽出で SimulationNode のフィールド数が適正化 |
 | 重複 | A− | `_owned` 4ペアは3行ラッパーで許容。P6-1 で system 間のクエリ手書きも解消 |
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。TCP transport も trait 境界内に収まる |
@@ -102,31 +102,6 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ## 問題一覧
 
-### Critical
-
-現在 Critical な問題はない。
-前回 C-1 だった god object 問題はクレート分離（ADR-0026）で根本対処済み。
-
----
-
-### High
-
-#### H-1: `node/mod.rs` ~~1,182行~~ → 620行（P7-1 テスト移動で解消）
-
-P7-1 でテストを各実装ファイルへ移動した結果、620行に縮小。現在の内訳:
-
-```
-現在 node/mod.rs が抱えているもの:
-  - SimulationNode struct 定義・constructor・基本 accessor（適切）
-  - jump/warp提案ヘルパー
-  - cfg(test) ブロック（~200行: spawn/transit/AoI テスト）
-```
-
-テストは実装と同じファイルに移動済み（tick.rs/navigation.rs/commands.rs/spawner_logic.rs）。
-残る ~200行のテストは struct 定義・constructor を直接テストするため mod.rs に残すのが適切。
-
----
-
 ### Medium
 
 #### M-3: `sector_simulator_actor.rs` と `SimulationNode` の密結合
@@ -135,30 +110,6 @@ P7-1 でテストを各実装ファイルへ移動した結果、620行に縮小
 `SimulationNode` の変更が即 Actor に波及する。
 8D-2a/2b/2c で `dawn-replication` 配線が入り、イベント flush 境界と TCP transport 境界は明確になった。
 ただし `SimulationNode` の公開メソッド変更が Actor に波及しやすい構造は残る。
-
-> M-1（serve.rs 分割）・M-2（data_loader.rs 分割）は P5-1 / P5-2 で解消済み。
-
----
-
-### Low
-
-#### L-1: `node/mod.rs` のテストコード（約760行）が実装と混在
-
-Rust のユニットテストは実装と同じファイルに置くことで、private helper の検証や
-実装意図の近接性を保ちやすい。現状の `cfg(test)` ブロックは大きいが、設計上は許容する。
-テスト分離は「テストだけを頻繁に読む/編集する」痛みが強くなった時点で再検討する。
-
-#### ~~L-3~~: `star_system.rs` / `star_map.rs` の命名（解消済み）
-
-`star_system.rs`（dawn-core）と `star_map.rs`（dawn-sector）の命名が紛らわしいという問題は
-2026-06-19 のリネームで解消済み。
-
-```
-dawn-core/src/navigation.rs     — 型定義（StarSystemDef, JumpGateDef, CelestialBodyDef 等）
-dawn-sector/src/galaxy.rs       — インスタンスデータ（Galaxy struct, builtin()）
-```
-
-> L-2（system 間の snapshot ループ重複）は P6-1（`SimWorld` クエリヘルパー）で解消済み。
 
 ---
 
@@ -189,21 +140,8 @@ dawn-sector/src/galaxy.rs       — インスタンスデータ（Galaxy struct,
 | 8D-3 TcpRaftTransport | 2026-06-19 | per-peer 自動再接続 / accept ループ / postcard framing |
 | 8D-4 dawn-sector-node | 2026-06-19 | 本番バイナリ（TOML 静的 config / 3 ノードクラスタ / Jump Redirect）|
 | navigation.rs / galaxy.rs リネーム | 2026-06-19 | `star_system.rs` → `navigation.rs`（dawn-core）、`star_map.rs`/`StarMap` → `galaxy.rs`/`Galaxy`（dawn-sector）。L-3 解消 |
-| P7-2 jump/warp validation 移動 | 2026-06-19 | `can_propose_jump` / `can_propose_warp` を `node/mod.rs` → `node/navigation.rs` へ移動。mod.rs 620→575行 |
-
----
-
-### Phase 7 — node/mod.rs の仕上げ分割（任意・必要時）
-
-唯一残る大きい実装ファイル（H-1）への対処。優先度順:
-
-**P7-2: Jump / Warp proposal helper の移動（完了）**
-
-`can_propose_jump` / `can_propose_warp` を `node/mod.rs` から `node/navigation.rs` へ移動。
-ナビゲーション関連の validation・適用・tick 処理がすべて `navigation.rs` に集約された。
-`mod.rs` は 620 → 575 行に縮小。
-
-Phase 7 はすべて完了。
+| P7-2 jump/warp validation 移動 | 2026-06-20 | `can_propose_jump` / `can_propose_warp` を `node/mod.rs` → `node/navigation.rs` へ移動。mod.rs 514行に縮小。Phase 7 完了 |
+| AoI テストを serialization.rs へ移動 | 2026-06-20 | `ships_visible_to` / `aoi_enter_json` のテストを実装と同じファイルへ。L-1 解消 |
 
 ---
 

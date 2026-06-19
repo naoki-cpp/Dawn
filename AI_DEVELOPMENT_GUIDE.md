@@ -1091,12 +1091,12 @@ Combat / Fitting ロジックは引き続き dawn-ecs / dawn-core 内に実装�
 | Crate | 責務 | 依存してよいもの | 禁止 |
 |---|---|---|---|
 | `dawn-core` | ドメインモデル定義のみ。EntityId, Position, Fitting型, 全Event型, 全Command型 | serde, thiserror のみ | ネットワーク、ファイルI/O、非同期 |
-| `dawn-ecs` | ECS World の薄いラッパー。Component定義（Movement/Fitting/Combat）, System定義 | dawn-core, hecs | ネットワーク、EventStore |
+| `dawn-ecs` | ECS World の薄いラッパー。Component定義（Movement/Fitting/Combat）, System定義。**分類軸**: トポロジー（セクター・ゲート）を知らない。DomainEvent を `Vec` で返すが Event Store には書かない（書くのは dawn-sector の責務） | dawn-core, hecs | ネットワーク、EventStore |
 | `dawn-event-store` | Event Log の永続化。Append, Read, Snapshot（InMemory + File） | dawn-core, serde | ネットワーク、ECS |
 | `dawn-consensus` | Raft実装（ADR-0014）。Leader選出, RaftActor, RaftTransport（In-Process / TCP）, TcpRaftTransport（8D-3: 4-byte LE + postcard / LAN plaintext / per-peer 自動再接続） | dawn-core, serde, rand, tokio, postcard, thiserror | ネットワーク、ECS、EventStore |
 | `dawn-actor` | クライアント転送境界。ClientConnection trait（+ InProcessConnection / WsClientConnection 実装） | dawn-core, tokio | dawn-ecs, dawn-simulation |
 | `dawn-replication` | 追記ログのゴシップ配布境界。8D-2a: InMemoryReplicationBus + ReplicationTransport。8D-2b: AntiEntropy（gap 検出・重複/overlap 判定・`iter_from` suffix 応答）。8D-2c: TcpReplicationTransport（4-byte length prefix + postcard / LAN plaintext）。8D-2d: SnapshotTransfer（Serialize+DeserializeOwned ジェネリック / 256 MiB cap） | dawn-core, dawn-event-store, serde, postcard, tokio, thiserror | dawn-ecs, dawn-sector, dawn-consensus, dawn-simulation |
-| `dawn-sector` | Sector単位のゲームロジック。SimulationNode（Tick実装・コマンド処理・Transit・Warp・Bot AI・AoI）, SpawnConfig, StarMap, StateSnapshot, CheckpointScheduler, TiDi計算（ADR-0026） | dawn-core, dawn-ecs, dawn-event-store, dawn-consensus, serde, postcard, tokio | ネットワークI/O、WebSocket、ファイルI/O直接 |
+| `dawn-sector` | Sector単位のゲームロジック。SimulationNode（Tick実装・コマンド処理・Transit・Warp・Bot AI・AoI）, SpawnConfig, Galaxy, StateSnapshot, CheckpointScheduler, TiDi計算（ADR-0026）。**分類軸**: トポロジー（セクター・ゲート）を知る。Event Store への書き込みまで責任を持つ。dawn-ecs の systems を呼び出し、返ってきた `Vec<DomainEvent>` を store に記録する | dawn-core, dawn-ecs, dawn-event-store, dawn-consensus, serde, postcard, tokio | ネットワークI/O、WebSocket、ファイルI/O直接 |
 | `dawn-simulation` | 実行バイナリ・配線のみ。MultiNodeCluster（RaftActor 配線含む）, WsServer（Godot WebSocket接続）, 負荷生成, DataLoader（TOML読み込み） | 上記全て + dawn-sector + rand + tokio-tungstenite + toml | ゲームロジックの直接実装 |
 | `dawn-sector-node` | 本番実行バイナリ（8D-4）。TcpRaftTransport + TcpReplicationTransport を TOML 静的 config で配線。3 プロセスで 3 セクタクラスタ。Jump 時は Redirect JSON でクライアントを宛先 WS へ誘導 | dawn-core, dawn-sector, dawn-consensus, dawn-replication, dawn-actor, serde, serde_json, tokio, tokio-tungstenite, toml, anyhow, rand | ゲームロジックの直接実装 |
 
