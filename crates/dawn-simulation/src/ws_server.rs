@@ -227,10 +227,23 @@ fn parse_client_command(line: &str) -> Option<ClientCommand> {
         }
         "WarpCommand" => {
             let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let gate_id_raw = v.get("gate_id")?.as_u64()? as u32;
+            // Accept {"target":{"Gate":2}} or legacy {"gate_id":2}.
+            let target = if let Some(t) = v.get("target") {
+                if let Some(gate_val) = t.get("Gate").and_then(|g| g.as_u64()) {
+                    dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(gate_val as u32))
+                } else if let Some(body_val) = t.get("Body").and_then(|b| b.as_u64()) {
+                    dawn_core::WarpTarget::Body(dawn_core::CelestialBodyId(body_val as u32))
+                } else {
+                    return None;
+                }
+            } else {
+                // Legacy wire format: {"gate_id": N}
+                let gate_id_raw = v.get("gate_id")?.as_u64()? as u32;
+                dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(gate_id_raw))
+            };
             Some(ClientCommand::Warp(dawn_core::WarpCommand {
                 ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
-                gate_id: dawn_core::JumpGateId(gate_id_raw),
+                target,
             }))
         }
         _ => None,
@@ -438,12 +451,31 @@ mod tests {
 
     #[test]
     fn warp_command_json_is_parsed_into_client_command_warp() {
+        // Legacy wire format (gate_id key)
         let line = r#"{"type":"WarpCommand","ship_id":42,"gate_id":2}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             ClientCommand::Warp(c) => {
                 assert_eq!(c.ship_id.raw(), 42);
-                assert_eq!(c.gate_id, JumpGateId(2));
+                assert_eq!(c.target, dawn_core::WarpTarget::Gate(JumpGateId(2)));
+            }
+            other => panic!("expected Warp, got {other:?}"),
+        }
+        // New wire format (target key with Gate variant)
+        let line2 = r#"{"type":"WarpCommand","ship_id":42,"target":{"Gate":2}}"#;
+        let cmd2 = parse_client_command(line2).expect("must parse");
+        match cmd2 {
+            ClientCommand::Warp(c) => {
+                assert_eq!(c.target, dawn_core::WarpTarget::Gate(JumpGateId(2)));
+            }
+            other => panic!("expected Warp, got {other:?}"),
+        }
+        // Body target
+        let line3 = r#"{"type":"WarpCommand","ship_id":42,"target":{"Body":1}}"#;
+        let cmd3 = parse_client_command(line3).expect("must parse");
+        match cmd3 {
+            ClientCommand::Warp(c) => {
+                assert_eq!(c.target, dawn_core::WarpTarget::Body(dawn_core::CelestialBodyId(1)));
             }
             other => panic!("expected Warp, got {other:?}"),
         }
