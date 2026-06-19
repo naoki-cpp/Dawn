@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : CLAUDE.md §11, docs/architecture.md
-date     : 2026-06-19（ADR-0026 実装後に全面改訂）
+date     : 2026-06-19（Phase 4 完了後に更新）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -20,11 +20,11 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | 観点 | 評価 | 理由 |
 |---|---|---|
 | クレート構成 | A− | DAG が設計通り。dawn-sector 新設でゲームロジックが分離された |
-| ファイルサイズ | C | node/mod.rs 2,868行が唯一の重大問題 |
+| ファイルサイズ | C+ | node/mod.rs 2,396行・serve.rs 899行が残存課題 |
 | 型設計 | B+ | SectorMap・ShipRegistry 抽出で SimulationNode のフィールド数が適正化 |
-| 重複 | C | `_owned` 系メソッドの二重化（4ペア）が残存 |
+| 重複 | B+ | `_owned` 4ペアは3行ラッパー（ロジック重複ゼロ）で許容。実質的な重複なし |
 | Rust固有 | B+ | Box\<dyn\> ゼロ・Mutex 最小。clone は許容範囲 |
-| AI開発由来 | B | 命名汚染なし。node/mod.rs の「残りもの置き場」化が唯一の懸念 |
+| AI開発由来 | B | 命名汚染なし。node/mod.rs・serve.rs の「残りもの置き場」化が懸念 |
 
 ---
 
@@ -34,7 +34,8 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-sector/src/node/mod.rs` | 2,868 | 🔴 要分割（唯一の残存 god file）|
+| `crates/dawn-sector/src/node/mod.rs` | 2,396 | 🟡 改善中（2,868 → 2,396; P4-1/P4-2 完了）|
+| `crates/dawn-sector/src/node/spawner_logic.rs` | 394 | 🟢 P4-2 で新設 |
 | `crates/dawn-sector/src/node/navigation.rs` | 301 | 🟢 |
 | `crates/dawn-sector/src/node/commands.rs` | 262 | 🟢 |
 | `crates/dawn-sector/src/star_map.rs` | 262 | 🟢 |
@@ -43,14 +44,15 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector/src/node/serialization.rs` | 158 | 🟢 |
 | `crates/dawn-sector/src/persistence/snapshot.rs` | 168 | 🟢 |
 | `crates/dawn-sector/src/persistence/checkpoint.rs` | 156 | 🟢 |
+| `crates/dawn-sector/src/node/tick.rs` | 91 | 🟢 P4-1 で新設 |
 
 ### dawn-simulation（配線・起動）
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-simulation/src/serve.rs` | 899 | 🟡 2モード（single/cluster）混在 |
+| `crates/dawn-simulation/src/serve.rs` | 899 | 🟡 2モード（single/cluster）混在 → P5-1 で分割予定 |
 | `crates/dawn-simulation/src/cluster.rs` | 528 | 🟢 |
-| `crates/dawn-simulation/src/data_loader.rs` | 479 | 🟡 3種ローダー混在 |
+| `crates/dawn-simulation/src/data_loader.rs` | 479 | 🟡 3種ローダー混在 → P5-2 で分割予定 |
 | `crates/dawn-simulation/src/sector_simulator_actor.rs` | 421 | 🟢 |
 | `crates/dawn-simulation/src/bench.rs` | 411 | 🟢 |
 | `crates/dawn-simulation/src/protocol.rs` | 309 | 🟢 |
@@ -81,43 +83,24 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ### High
 
-#### H-1: `node/mod.rs` 2,868行（dawn-sector 内の残存 god file）
+#### H-1: `node/mod.rs` 2,396行（残存 god file、改善中）
 
-クレート境界は正しくなった（ADR-0026）が、ファイル内の責務分離が不完全。
-`node/mod.rs` が「残りもの置き場」になっており、以下の責務が混在している:
+P4-1/P4-2 で tick.rs・spawner_logic.rs を分離し 472行削減（2,868→2,396）。
+ただし以下の責務がまだ混在している:
 
 ```
 現在 node/mod.rs が抱えているもの:
   - SimulationNode struct 定義と定数（適切）
-  - tick() 実装・Tick Step 1〜10（~200行）
-  - spawn_ship / despawn_ship（~80行）
   - export_transit / import_transit / propose_transit（~100行）
-  - Bot AI（process_bots / bot steering）（~150行）
+  - process_tackle（~80行）
   - Lock-on ロジック（~100行）
   - take_snapshot / restore_from_snapshot（~100行）
   - AoI 関連ヘルパー（~50行）
-  - テストコード（~1,400行 ≒ ファイルの半分）
+  - apply_event（~80行）
+  - テストコード（~1,400行 ≒ ファイルの過半）
 ```
 
-次の機能追加（Signature Resolution・Logistics）のたびにここが肥大し続ける。
-
-#### H-2: `_owned` / 直接呼び出しの二重化（4ペア）
-
-```rust
-// commands.rs
-pub fn apply_move_command(&mut self, ship_id, target)
-pub fn apply_move_command_owned(&mut self, player_id, ship_id, target)
-pub fn apply_stop_command(&mut self, ship_id)
-pub fn apply_stop_command_owned(&mut self, player_id, ship_id)
-
-// navigation.rs
-pub fn apply_approach_command(&mut self, ship_id, target)
-pub fn apply_approach_command_owned(&mut self, player_id, cmd)
-pub fn apply_warp_command(&mut self, ship_id, target, auto_jump)
-pub fn apply_warp_command_owned(&mut self, player_id, cmd)
-```
-
-認証チェック 1行のみ違い、本体は同一。バグ修正時に片方を忘れるリスク。
+テストの分離（L-1）と、残存責務の tackle.rs / snapshot.rs 等への分割（将来 P4-4 以降）が候補。
 
 ---
 
@@ -193,42 +176,13 @@ dawn-sector/src/star_map.rs     — インスタンスデータ（StarMap struct
 | P3-1 SectorMap / ShipRegistry 抽出 | 2026-06-19 | SimulationNode フィールド 17→12 |
 | P3-2 persistence/ サブモジュール | 2026-06-19 | snapshot.rs + checkpoint.rs を persistence/ 下に統合 |
 | ADR-0026 dawn-sector 新設 | 2026-06-19 | ゲームロジックを dawn-simulation から完全分離 |
+| P4-1 tick.rs 抽出 | 2026-06-19 | tick() / tick_with_lock_commands() を node/tick.rs へ（91行）|
+| P4-2 spawner_logic.rs 抽出 | 2026-06-19 | spawn/bot メソッド群を node/spawner_logic.rs へ（394行）。node/mod.rs 2,868→2,396行 |
+| P4-3 `_owned` 統合 | — | スキップ: `_owned` は3行ラッパーでロジック重複ゼロ。統合コストが効果を上回る |
 
 ---
 
-### Phase 4 — node/mod.rs の責務分散（次の優先項目）
-
-**P4-1: tick.rs 抽出**
-
-```
-dawn-sector/src/node/
-  tick.rs   — tick() 実装・Tick Step 1〜10（~200行）
-```
-
-最も独立性が高く、テストが豊富。低リスクで ~200行削減。
-
-**P4-2: spawner_logic.rs 抽出**
-
-```
-dawn-sector/src/node/
-  spawner_logic.rs  — spawn_ship / despawn_ship / adopt_player_ship（~80行）
-```
-
-既存の `spawner.rs`（SpawnConfig）との名前混在に注意。
-
-**P4-3: `_owned` メソッド統合**
-
-```rust
-// Before: 4 ペア × 2 = 8 メソッド
-// After: auth: Option<PlayerId> を追加して統合
-pub fn apply_move_command(&mut self, ship_id, target, auth: Option<PlayerId>) -> bool
-```
-
-影響範囲: commands.rs / navigation.rs + 呼び出し元（serve.rs / sector_simulator_actor.rs）。
-
----
-
-### Phase 5 — dawn-simulation の整理
+### Phase 5 — dawn-simulation の整理（次の優先項目）
 
 **P5-1: serve.rs をモード別に分割**
 
