@@ -1112,9 +1112,9 @@ func _update_hud() -> void:
 		## Warp is only valid beyond the minimum warp distance (ADR-0022).
 		var gate_dist: float = _selected_gate_distance()
 		if gate_dist >= MIN_WARP_DISTANCE:
-			approach_line += "  [W] Warp  [J] Warp+Jump"
+			approach_line += "\n[W] Warp  [J] Warp+Jump"
 		elif gate_dist >= 0.0:
-			approach_line += "  [W] too close to warp"
+			approach_line += "\n[W] too close to warp"
 	elif _selected_body_id >= 0:
 		## Look up body name for HUD.
 		var body_name: String = "Body #%d" % _selected_body_id
