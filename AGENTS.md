@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 This file delegates to the shared AI development guide for this repository.
 
