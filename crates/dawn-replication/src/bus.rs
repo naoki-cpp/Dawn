@@ -7,8 +7,8 @@
 //! `event_count()` reflects every `Batch` message sent before it — no
 //! sleep or explicit flush needed in tests.
 //!
-//! When `TcpReplicationTransport` (8D-2c) is ready, callers switch to that
-//! implementation behind the same logical interface.
+//! TCP gossip callers can switch to `TcpReplicationTransport` behind the same
+//! logical interface.
 
 use crate::{LogBatch, ReplicationTransport};
 use dawn_event_store::{store::EventStore, InMemoryEventStore};

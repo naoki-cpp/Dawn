@@ -155,6 +155,7 @@ version = "0.1.0"
 dependencies = [
  "dawn-core",
  "dawn-event-store",
+ "postcard",
  "serde",
  "thiserror 1.0.69",
  "tokio",

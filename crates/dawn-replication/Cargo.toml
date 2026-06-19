@@ -11,6 +11,7 @@ edition = "2021"
 dawn-core        = { path = "../dawn-core" }
 dawn-event-store = { path = "../dawn-event-store" }
 serde            = { workspace = true }
+postcard         = { workspace = true }
 tokio            = { workspace = true }
 thiserror        = { workspace = true }
 

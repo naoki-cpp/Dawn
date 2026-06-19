@@ -2,26 +2,28 @@
 //!
 //! Sector-local event log replication (ADR-0021, ADR-0027).
 //!
-//! Strategy: gossip-based append-log shipping (not CRDT / LWW).
-//! Single-ownership means no concurrent writes, so conflict-free merge is
-//! unnecessary. Events are idempotent (INV-004) and ordered by logical tick
-//! (INV-005), so delivering them in any order converges to the same state.
+//! Strategy: gossip-based append-log shipping, not CRDT / LWW. Single ownership
+//! means there are no concurrent writes to merge. Events are idempotent
+//! (INV-004) and ordered by logical tick (INV-005), so receivers can detect
+//! duplicate, overlapping, or missing log ranges by index.
 //!
-//! ## Current scope (8D-2a)
+//! ## Current scope (8D-2a / 8D-2b / 8D-2c)
 //!
-//! - `LogBatch` — the unit of sector-local append-log shipping.
-//! - `ReplicationTransport` trait — wire-format-agnostic interface.
-//! - `InMemoryReplicationBus` — single-process implementation used by tests
-//!   and the existing multi-node bench. This replaces `dawn_actor::ReplicationBus`.
+//! - `LogBatch`: the unit of sector-local append-log shipping.
+//! - `ReplicationTransport`: wire-format-agnostic transport interface.
+//! - `InMemoryReplicationBus`: single-process implementation for tests and the
+//!   existing multi-node bench. This replaces `dawn_actor::ReplicationBus`.
+//! - `AntiEntropy`: request missing events by log index range.
+//! - `TcpReplicationTransport`: LAN plaintext transport using length-prefixed
+//!   postcard frames.
 //!
-//! ## Planned (8D-2b / 8D-2c / 8D-2d)
+//! ## Planned (8D-2d)
 //!
-//! - `AntiEntropy` — request missing events by log index range.
-//! - `TcpReplicationTransport` — LAN plaintext, postcard wire format.
-//! - `SnapshotTransfer` — catch up far-behind replicas via snapshot.
+//! - `SnapshotTransfer`: catch up far-behind replicas via snapshot.
 
 pub mod anti_entropy;
 pub mod bus;
+pub mod tcp;
 
 use dawn_core::{DomainEvent, SectorId};
 use serde::{Deserialize, Serialize};
@@ -29,6 +31,7 @@ use tokio::sync::broadcast;
 
 pub use anti_entropy::{AntiEntropy, BatchApplyPlan, MissingLogRequest};
 pub use bus::{BusMessage, InMemoryReplicationBus};
+pub use tcp::{TcpReplicationError, TcpReplicationTransport};
 
 /// A single gossip payload from a Sector owner's append-only log.
 ///
@@ -54,7 +57,7 @@ impl LogBatch {
 
 /// Wire-format-agnostic replication transport.
 ///
-/// TCP gossip (8D-2c) will implement this same interface with length-prefixed
+/// TCP gossip (8D-2c) implements this same interface with length-prefixed
 /// postcard frames; the in-memory implementation keeps tests single-process.
 pub trait ReplicationTransport: Send + Sync {
     /// Send a batch of events to interested peers.
