@@ -14,12 +14,15 @@
 //!     -> reconstruct ECS from snapshot, replay events from log_index N onward
 //! ```
 
+mod apply_event;
 mod commands;
 mod navigation;
 mod sector_map;
 mod serialization;
 mod ship_registry;
+mod snapshot_io;
 mod spawner_logic;
+mod tackle;
 mod tick;
 
 use sector_map::SectorMap;
@@ -32,12 +35,11 @@ use dawn_core::{
     ship_type::{ShipTypeDefinition, ShipTypeId},
     DomainEvent, JumpGateDef, JumpGateId,
     ModuleDefinition, ModuleId, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId,
-    Tick, Velocity, WarpTarget,
+    Tick, WarpTarget,
 };
 use dawn_ecs::{
-    components::{CapacitorComp, FittingComp, HullComp, LockComp, PositionComp, ShipStatsComp, TackledComp, VelocityComp, WarpComp},
-    systems::apply_fitting,
-    Entity, SimWorld,
+    components::{CapacitorComp, FittingComp, HullComp, PositionComp, ShipStatsComp, VelocityComp, WarpComp},
+    SimWorld,
 };
 use dawn_event_store::{store::EventStore, InMemoryEventStore};
 
@@ -489,61 +491,6 @@ impl<S: EventStore> SimulationNode<S> {
         }));
     }
 
-    // ── Snapshot ──────────────────────────────────────────────────────────────
-
-    /// Capture the current ECS state as a `StateSnapshot`.
-    ///
-    /// The snapshot covers all events with `log_index < event_store.len()`.
-    /// Pair with the event log to reconstruct this exact state on restart.
-    pub fn take_snapshot(&self) -> StateSnapshot {
-        let mut ships: Vec<ShipSnapshot> = self
-            .ships.index
-            .iter()
-            .filter_map(|(&ship_id, &entity)| {
-                let pos  = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
-                let vel  = self.world.inner().get::<&VelocityComp>(entity).ok()?.0;
-                let hull = self.world.inner().get::<&HullComp>(entity).ok()?;
-                let capacitor = self.world.inner().get::<&CapacitorComp>(entity).ok().map(|c| c.current);
-                let fitting = self.world.inner().get::<&FittingComp>(entity)
-                    .map(|f| f.to_snapshot())
-                    .unwrap_or_else(|_| dawn_core::fitting::FittingSnapshot::empty());
-                let tackled_by = self.world.inner().get::<&TackledComp>(entity)
-                    .map(|t| t.tacklers.clone())
-                    .unwrap_or_default();
-                let ship_type_id = self.ships.type_ids.get(&ship_id).copied().unwrap_or(ShipTypeId(0));
-                Some(ShipSnapshot {
-                    ship_id,
-                    ship_type_id,
-                    position      : pos,
-                    velocity      : vel,
-                    current_shield: hull.current_shield,
-                    current_armor : hull.current_armor,
-                    current_hull  : hull.current_hull,
-                    is_destroyed  : hull.is_destroyed,
-                    capacitor,
-                    fitting,
-                    tackled_by,
-                })
-            })
-            .collect();
-
-        // Canonical ordering: a snapshot of a given state must serialise
-        // identically regardless of HashMap iteration order, so it can be
-        // byte-compared (INV-002: verifiable snapshot / round-trip).
-        // `ShipId: Ord` is canonical id order (node_id then counter).
-        ships.sort_by_key(|s| s.ship_id);
-
-        StateSnapshot {
-            node_id   : self.node_id,
-            sector_id : self.sector_id,
-            bounds    : self.bounds,
-            log_index : self.event_store.len() as u64,
-            tick      : self.current_tick,
-            id_counter: self.id_counter,
-            ships,
-        }
-    }
-
     // ── Observation ───────────────────────────────────────────────────────────
 
     pub fn current_tick(&self)      -> Tick  { self.current_tick }
@@ -586,12 +533,6 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|c| c.current_shield + c.current_armor + c.current_hull)
     }
 
-    /// Public test wrapper for `apply_event`.
-    #[cfg(test)]
-    pub fn apply_event_pub(&mut self, event: DomainEvent) {
-        self.apply_event(&event);
-    }
-
     /// Look up the current `CapacitorComp.current` of a Ship by its ID.
     #[cfg(test)]
     pub fn get_ship_capacitor(&self, ship_id: ShipId) -> Option<f32> {
@@ -615,304 +556,6 @@ impl<S: EventStore> SimulationNode<S> {
             .unwrap_or_default()
     }
 
-    /// Tackle System — Step 4.5 (after Capacitor, before Lock). ADR-0024.
-    ///
-    /// Computes the desired tackle state from active Fold Disruptors + locked
-    /// targets in range, diffs against the current `TackledComp` state, emits
-    /// `TackleApplied`/`TackleReleased` events for changes, and updates the ECS.
-    pub fn process_tackle(&mut self, tick: Tick) -> Vec<DomainEvent> {
-        use dawn_core::events::{TackleApplied, TackleReleased};
-        use dawn_core::fitting::ModuleKind;
-        use std::collections::HashMap;
-
-        // Collect ships with at least one active Tackle module.
-        let tacklers: Vec<(ShipId, f32, Vec<ShipId>, Position)> = self.ships.index.iter()
-            .filter_map(|(&ship_id, &entity)| {
-                let stats = self.world.inner().get::<&ShipStatsComp>(entity).ok()?;
-                if stats.tackle_range <= 0.0 { return None; }
-                let fitting = self.world.inner().get::<&FittingComp>(entity).ok()?;
-                if !fitting.has_active_module_of_kind(ModuleKind::Tackle) { return None; }
-                let lock = self.world.inner().get::<&LockComp>(entity).ok()?;
-                let locked: Vec<ShipId> = lock.locked_targets().collect();
-                if locked.is_empty() { return None; }
-                let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
-                Some((ship_id, stats.tackle_range, locked, pos))
-            })
-            .collect();
-
-        // desired[target] = Vec of tacklers currently in range and holding a lock.
-        let mut desired: HashMap<ShipId, Vec<ShipId>> = HashMap::new();
-        for (tackler_id, range, locked, tackler_pos) in &tacklers {
-            for &target_id in locked {
-                if let Some(&te) = self.ships.index.get(&target_id) {
-                    if let Ok(tp) = self.world.inner().get::<&PositionComp>(te) {
-                        if tackler_pos.distance(tp.0) <= *range {
-                            desired.entry(target_id).or_default().push(*tackler_id);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Snapshot current tackle state — single ECS scan.
-        let current: Vec<(ShipId, Entity, Vec<ShipId>)> = self.ships.index.iter()
-            .filter_map(|(&sid, &entity)| {
-                let t = self.world.inner().get::<&TackledComp>(entity).ok()?;
-                Some((sid, entity, t.tacklers.clone()))
-            })
-            .collect();
-        let current_ids: std::collections::HashSet<ShipId> =
-            current.iter().map(|(s, _, _)| *s).collect();
-
-        let mut events: Vec<DomainEvent> = Vec::new();
-
-        // Update existing TackledComps: emit diffs, then write new list.
-        for (target_id, entity, old_tacklers) in current {
-            let new_tacklers = desired.get(&target_id).cloned().unwrap_or_default();
-
-            for &tid in &old_tacklers {
-                if !new_tacklers.contains(&tid) {
-                    events.push(DomainEvent::TackleReleased(TackleReleased { ship_id: target_id, by: tid, tick }));
-                }
-            }
-            for &tid in &new_tacklers {
-                if !old_tacklers.contains(&tid) {
-                    events.push(DomainEvent::TackleApplied(TackleApplied { ship_id: target_id, by: tid, tick }));
-                }
-            }
-
-            if new_tacklers.is_empty() {
-                let _ = self.world.inner_mut().remove_one::<TackledComp>(entity);
-            } else {
-                if let Ok(mut tackled) = self.world.inner_mut().get::<&mut TackledComp>(entity) {
-                    tackled.tacklers = new_tacklers;
-                }
-            }
-        }
-
-        // Insert TackledComp for ships newly entering tackled state.
-        for (&target_id, new_tacklers) in &desired {
-            if current_ids.contains(&target_id) { continue; }
-            for &tid in new_tacklers {
-                events.push(DomainEvent::TackleApplied(TackleApplied { ship_id: target_id, by: tid, tick }));
-            }
-            if let Some(&entity) = self.ships.index.get(&target_id) {
-                let _ = self.world.inner_mut().insert_one(entity, TackledComp { tacklers: new_tacklers.clone() });
-            }
-        }
-
-        events
-    }
-
-    /// Apply a single domain event to the ECS World without appending it.
-    /// Used during `restore_from` to replay post-snapshot events.
-    fn apply_event(&mut self, event: &DomainEvent) {
-        match event {
-            DomainEvent::ShipSpawned(e) => {
-                if !self.ships.index.contains_key(&e.ship_id) {
-                    self.insert_to_world(e.ship_id, e.initial_position, Velocity::ZERO);
-                    // Restore base_stats from ship type registry
-                    let base = self.ship_type_registry
-                        .get(&e.ship_type_id)
-                        .map(|def| ShipStatsComp::from_base(&def.base_stats))
-                        .unwrap_or(ShipStatsComp::NPC);
-                    self.base_stats.insert(e.ship_id, base);
-                    if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                        self.world.set_ship_stats(entity, base);
-                        if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
-                            *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
-                        }
-                    }
-                }
-                let counter = e.ship_id.0.counter();
-                if counter >= self.id_counter {
-                    self.id_counter = counter + 1;
-                }
-            }
-
-            DomainEvent::VelocityChanged(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    let gap_ticks = e.tick.value().saturating_sub(self.current_tick.value()).saturating_sub(1);
-                    let old_vel = self.world.inner().get::<&VelocityComp>(entity).ok().map(|v| v.0).unwrap_or(Velocity::ZERO);
-                    if let Ok(mut pos) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
-                        pos.0.x += old_vel.dx * gap_ticks as f32 + e.velocity.dx;
-                        pos.0.y += old_vel.dy * gap_ticks as f32 + e.velocity.dy;
-                        pos.0.z += old_vel.dz * gap_ticks as f32 + e.velocity.dz;
-                    }
-                    if let Ok(mut vel) = self.world.inner_mut().get::<&mut VelocityComp>(entity) {
-                        vel.0 = e.velocity;
-                    }
-                }
-                if e.tick > self.current_tick {
-                    self.current_tick = e.tick;
-                }
-            }
-
-            DomainEvent::ShipDespawned(e) => {
-                if let Some(entity) = self.ships.index.remove(&e.ship_id) {
-                    self.world.despawn_ship(entity);
-                }
-                self.ships.type_ids.remove(&e.ship_id);
-                self.base_stats.remove(&e.ship_id);
-                if let Some(player_id) = self.ships.owners.remove(&e.ship_id) {
-                    self.ships.by_player.remove(&player_id);
-                }
-            }
-
-            DomainEvent::ShipFitted(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    let fitting = FittingComp::from_snapshot(&e.fitting, &self.module_registry);
-                    let base = self.base_stats.get(&e.ship_id).copied().unwrap_or(ShipStatsComp::NPC);
-                    let _ = self.world.inner_mut().insert_one(entity, fitting);
-                    apply_fitting(&mut self.world, e.ship_id, base);
-                }
-            }
-
-            DomainEvent::ModuleActivated(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(entity) {
-                        if let Some(slot) = fitting.find_slot_mut(e.module_id, e.slot) {
-                            slot.is_active = true;
-                        }
-                    }
-                    let base = self.base_stats.get(&e.ship_id).copied().unwrap_or(ShipStatsComp::NPC);
-                    apply_fitting(&mut self.world, e.ship_id, base);
-                }
-            }
-
-            DomainEvent::ModuleDeactivated(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(entity) {
-                        if let Some(slot) = fitting.find_slot_mut(e.module_id, e.slot) {
-                            slot.is_active = false;
-                        }
-                    }
-                    let base = self.base_stats.get(&e.ship_id).copied().unwrap_or(ShipStatsComp::NPC);
-                    apply_fitting(&mut self.world, e.ship_id, base);
-                }
-            }
-
-            // TargetLocked: set the LockComp entry to the Locked state
-            DomainEvent::TargetLocked(e) => {
-                use dawn_ecs::components::{LockEntry, LockState};
-                if let Some(&entity) = self.ships.index.get(&e.locker_id) {
-                    if let Ok(mut lock) = self.world.inner_mut().get::<&mut LockComp>(entity) {
-                        if let Some(entry) = lock.entries.iter_mut()
-                            .find(|en| en.target_id == e.target_id)
-                        {
-                            entry.state = LockState::Locked;
-                        } else {
-                            lock.entries.push(LockEntry { target_id: e.target_id, state: LockState::Locked });
-                        }
-                    }
-                }
-            }
-
-            // LockLost: remove the entry from LockComp
-            DomainEvent::LockLost(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.locker_id) {
-                    if let Ok(mut lock) = self.world.inner_mut().get::<&mut LockComp>(entity) {
-                        lock.entries.retain(|en| en.target_id != e.target_id);
-                    }
-                }
-            }
-
-            DomainEvent::WeaponFired(_) => {}
-
-            DomainEvent::DamageTaken(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
-                        hull.current_shield = e.current_shield;
-                        hull.current_armor  = e.current_armor;
-                        hull.current_hull   = e.current_hull;
-                        if e.current_hull <= 0.0 {
-                            hull.is_destroyed = true;
-                        }
-                    }
-                }
-            }
-
-            DomainEvent::ShipDestroyed(e) => {
-                if let Some(entity) = self.ships.index.remove(&e.ship_id) {
-                    self.world.despawn_ship(entity);
-                }
-                self.ships.type_ids.remove(&e.ship_id);
-                self.base_stats.remove(&e.ship_id);
-                if let Some(player_id) = self.ships.owners.remove(&e.ship_id) {
-                    self.ships.by_player.remove(&player_id);
-                }
-            }
-
-            // Sector Transit (ADR-0014): TransitState component and ownership
-            // transfer are added in a later Phase 7 task.
-            DomainEvent::SectorTransitRequested(_)
-            | DomainEvent::SectorTransitCompleted(_)
-            | DomainEvent::SectorTransitAborted(_) => {}
-
-            // Jump Gate Navigation (ADR-0009): Sector/StarSystem transfer on
-            // Replay is added when the Jump pipeline is wired in dawn-simulation.
-            DomainEvent::JumpGateUsed(_)
-            | DomainEvent::StarSystemChanged(_) => {}
-
-            // Tackle (ADR-0024): TackledComp is managed live; on replay, apply
-            // the same add/remove logic to keep the component consistent.
-            DomainEvent::TackleApplied(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    let has_comp = {
-                        if let Ok(mut tackled) = self.world.inner_mut().get::<&mut TackledComp>(entity) {
-                            if !tackled.tacklers.contains(&e.by) {
-                                tackled.tacklers.push(e.by);
-                            }
-                            true
-                        } else { false }
-                    };
-                    if !has_comp {
-                        let _ = self.world.inner_mut().insert_one(entity, TackledComp { tacklers: vec![e.by] });
-                    }
-                }
-            }
-
-            DomainEvent::TackleReleased(e) => {
-                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    let should_remove = {
-                        if let Ok(mut tackled) = self.world.inner_mut().get::<&mut TackledComp>(entity) {
-                            tackled.tacklers.retain(|&id| id != e.by);
-                            tackled.tacklers.is_empty()
-                        } else { false }
-                    };
-                    if should_remove {
-                        let _ = self.world.inner_mut().remove_one::<TackledComp>(entity);
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── Checkpointing (ADR-0017 8A-7) ─────────────────────────────────────────────
-
-impl SimulationNode<dawn_event_store::FileEventStore> {
-    /// Take a snapshot, persist it durably, then compact the hot log behind it.
-    ///
-    /// This is the operational checkpoint of ADR-0017: after it returns, recovery
-    /// only needs `snapshot_path` + the post-snapshot tail of the hot log; the
-    /// prefix it covers lives in the append-only cold archive at `cold_path`.
-    ///
-    /// Ordering is load-bearing for crash safety: the snapshot is saved **before**
-    /// the hot log is compacted. A crash between the two leaves the snapshot
-    /// written and the hot log untouched (a redundant but safe state). Compacting
-    /// first could strand a snapshot whose `log_index` is older than the new
-    /// `base_index`, which would make `iter_from` silently skip events.
-    pub fn checkpoint(
-        &mut self,
-        snapshot_path: impl AsRef<std::path::Path>,
-        cold_path: impl AsRef<std::path::Path>,
-    ) -> std::io::Result<StateSnapshot> {
-        let snapshot = self.take_snapshot();
-        snapshot.save(&snapshot_path)?;
-        self.event_store.compact(snapshot.log_index, cold_path)?;
-        Ok(snapshot)
-    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
