@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : CLAUDE.md §11, docs/architecture.md
-date     : 2026-06-19（8D-2c / TcpReplicationTransport 完了後に更新）
+date     : 2026-06-19（8D-2c / P7-1 Transit flow 完了後に更新）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -20,7 +20,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | 観点 | 評価 | 理由 |
 |---|---|---|
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027） |
-| ファイルサイズ | B+ | serve.rs / data_loader.rs / node補助責務を分割済み。残る最大ファイルは node/mod.rs 1,182行 |
+| ファイルサイズ | A− | P7-1 テスト移動で node/mod.rs 620行に縮小。全ファイル 700行以下 |
 | 型設計 | B+ | SectorMap・ShipRegistry 抽出で SimulationNode のフィールド数が適正化 |
 | 重複 | A− | `_owned` 4ペアは3行ラッパーで許容。P6-1 で system 間のクエリ手書きも解消 |
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。TCP transport も trait 境界内に収まる |
@@ -34,11 +34,11 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-sector/src/node/mod.rs` | 1,182 | 🟡 残存課題（テスト ~760行。実装本体はかなり薄い）|
+| `crates/dawn-sector/src/node/mod.rs` | 620 | 🟢 P7-1 テスト移動後。実装本体 ~420行 + spawn/transit/AoI テスト ~200行 |
+| `crates/dawn-sector/src/node/navigation.rs` | 639 | 🟢 P7-1（実装 301行 + approach/warp テスト 338行） |
+| `crates/dawn-sector/src/node/spawner_logic.rs` | 485 | 🟢 P4-2 + P7-1（実装 394行 + bot テスト 91行） |
 | `crates/dawn-sector/src/node/transit_flow.rs` | 402 | 🟢 P7-1（実装 + 近接テスト） |
-| `crates/dawn-sector/src/node/spawner_logic.rs` | 394 | 🟢 P4-2 で新設 |
-| `crates/dawn-sector/src/node/navigation.rs` | 301 | 🟢 |
-| `crates/dawn-sector/src/node/commands.rs` | 262 | 🟢 |
+| `crates/dawn-sector/src/node/commands.rs` | 342 | 🟢 P7-1（実装 262行 + fitting/combat テスト 80行） |
 | `crates/dawn-sector/src/star_map.rs` | 262 | 🟢 |
 | `crates/dawn-sector/src/aoi.rs` | 246 | 🟢 |
 | `crates/dawn-sector/src/transit.rs` | 215 | 🟢 |
@@ -48,7 +48,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector/src/persistence/checkpoint.rs` | 156 | 🟢 |
 | `crates/dawn-sector/src/modules.rs` | 137 | 🟢 |
 | `crates/dawn-sector/src/spawner.rs` | 127 | 🟢 |
-| `crates/dawn-sector/src/node/tick.rs` | 91 | 🟢 P4-1 で新設 |
+| `crates/dawn-sector/src/node/tick.rs` | 139 | 🟢 P4-1 + P7-1（実装 91行 + tick テスト 48行） |
 | `crates/dawn-sector/src/ship_types.rs` | 82 | 🟢 |
 | `crates/dawn-sector/src/node/ship_registry.rs` | 33 | 🟢 P3-1 |
 | `crates/dawn-sector/src/node/sector_map.rs` | 25 | 🟢 P3-1 |
@@ -100,22 +100,19 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ### High
 
-#### H-1: `node/mod.rs` 1,182行（大きいが、主因は同居テスト）
+#### H-1: `node/mod.rs` ~~1,182行~~ → 620行（P7-1 テスト移動で解消）
 
-P4-1/P4-2 と後続分割で、`tick.rs` / `spawner_logic.rs` / `tackle.rs` /
-`snapshot_io.rs` / `apply_event.rs` / `transit_flow.rs` などは分離済み。
-現在の `node/mod.rs` は実装本体が約420行、テストが約760行で、以前の god file 状態からはかなり改善した。
-ただし以下はまだ同居している:
+P7-1 でテストを各実装ファイルへ移動した結果、620行に縮小。現在の内訳:
 
 ```
 現在 node/mod.rs が抱えているもの:
   - SimulationNode struct 定義・constructor・基本 accessor（適切）
   - jump/warp提案ヘルパー
-  - cfg(test) ブロック（約760行、ファイルの過半）
+  - cfg(test) ブロック（~200行: spawn/transit/AoI テスト）
 ```
 
-テストは実装と同じファイルに置く方針を優先するため、残行数だけを理由に分離しない。
-次に切るなら jump/warp 提案ヘルパーを `node/navigation.rs` へ寄せるかを検討する。
+テストは実装と同じファイルに移動済み（tick.rs/navigation.rs/commands.rs/spawner_logic.rs）。
+残る ~200行のテストは struct 定義・constructor を直接テストするため mod.rs に残すのが適切。
 
 ---
 
@@ -196,13 +193,30 @@ node/
 
 ---
 
-### Phase 8 — 配線層の整理（Phase 8D と連動）
+### Phase 8 — 物理ノード分散の配線（Phase 8D）
 
-**M-3: `SectorSimulatorActor` の依存縮小**
+`dawn-replication`（ADR-0021/0027・Phase 8D）は 8D-2a/2b/2c まで完了済み。
 
-`dawn-replication`（ADR-0021/0027・Phase 8D）は 8D-2a/2b/2c まで着手済み。
-次に `dawn-sector-node` / `SnapshotTransfer` へ進む前に、`SectorSimulatorActor`
-が必要とする `SimulationNode` 操作を明示的な薄い境界へ寄せるかを再評価する。
+完了済み:
+
+- 8D-2a: `InMemoryReplicationBus` / `ReplicationTransport` を `dawn-replication` へ移動
+- 8D-2b: `AntiEntropy`（gap 検出・重複/overlap 判定・`iter_from` suffix 応答）
+- 8D-2c: `TcpReplicationTransport`（4-byte length prefix + postcard / LAN plaintext）
+
+次の自然な前進先:
+
+1. **8D-2d: `SnapshotTransfer`**
+   遅れた複製が `base_index` より前を要求した場合、ADR-0017 の snapshot + tail catch-up で追いつく経路を実装する。
+2. **`dawn-sector-node` の最小バイナリ**
+   物理ノード上で `dawn-sector` / `dawn-consensus` / `dawn-replication` を配線する。第1次は静的 3 ノード + LAN 平文で十分。
+3. **`SectorSimulatorActor` の境界再評価**
+   物理ノード配線で必要になった場合のみ、`SimulationNode` 操作を薄い port に寄せる。現時点では先行リファクタとしては必須ではない。
+
+採らない方針も維持する:
+
+- CRDT / LWW-Register は採らない（単一所有 + append-only log gossip）
+- protobuf / `dawn-proto` は採らない（wire は postcard 再利用）
+- TLS / 認証は第1次 LAN 検証では扱わない
 
 ---
 

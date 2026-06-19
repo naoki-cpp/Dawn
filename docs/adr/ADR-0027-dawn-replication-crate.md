@@ -165,7 +165,7 @@ thiserror        = "1"
 - [ ] `SnapshotTransfer` を実装しテストを書く
 - [x] `cargo test --workspace` がゼロエラーで通過する
 - [x] AI_DEVELOPMENT_GUIDE.md §3（Dependency DAG）§11（Crate 別責務早見表）を更新する
-- [ ] architecture-review.md のファイルサイズ一覧を更新する
+- [x] architecture-review.md のファイルサイズ一覧を更新する（P7-1 テスト移動後の実数値に修正）
 
 ---
 

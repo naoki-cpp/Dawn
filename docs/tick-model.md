@@ -151,7 +151,7 @@ Step 7: Bot System を実行する（IsBotComp を持つ Ship のみ）
          ※ Bot コマンドは apply_*_owned() メソッドを通じてプレイヤーと同一のパイプラインを使う
 
 Step 8: 全イベントを EventStore に Append する
-         event_store.append_batch(move_events + cap_events + lock_events + combat_events)
+         event_store.append_batch(warp_events + move_events + cap_events + tackle_events + lock_events + combat_events)
 
 Step 9: Replication Actor に差分を通知する
          replication_tx.send(delta)

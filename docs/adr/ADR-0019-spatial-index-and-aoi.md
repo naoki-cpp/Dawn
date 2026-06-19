@@ -152,8 +152,8 @@ AoI（静的セルでも真円でも）が効くのは**空間的に散らばっ
       バイナリサブコマンド（benches 基盤が未整備で `aoi` がバイナリ内モジュールのため、Phase 1/3 と同じ
       バイナリ内ベンチ慣習に合わせた）。n=1k→20k で naive scan 770µs→315ms に対し AoI query ~16ms、
       速度比 3→19.5x、配信量 ~45x 削減（2026-06-15）
-- [ ] docs 反映: architecture.md §5-B（設計→実装済みへ）/ event-catalog.md（AoI は配信フィルタで
-      新イベント無しの旨）
+- [x] docs 反映: architecture.md §5-B（設計→実装済みへ）/ event-catalog.md §3.10（AoI は配信フィルタで
+      新イベント無しの旨・AoiEnter/Leave は WebSocket 配信メッセージであり EventStore に Append されない）
 
 ---
 

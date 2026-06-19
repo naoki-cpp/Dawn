@@ -123,9 +123,9 @@ docs/reference/eve-reference.md は「外部ゲームの事実と示唆の記録
 - [x] 本 ADR を人間が承認する（status: proposed → accepted・2026-06-14）
 - [x] CLAUDE.md §1 を再定義（人間承認のうえ適用・2026-06-14）
 - [x] CLAUDE.md §10 FBD-008 撤廃 / FBD-009 明確化（人間承認のうえ適用・2026-06-14）
-- [ ] docs/reference/eve-reference.md（観測データ）をコミット
-- [ ] docs/roadmap.md にゲーム化フェーズを追記
-- [ ] 近期戦闘 ADR を順次起票（Tackle を最初に）
+- [x] docs/reference/eve-reference.md（観測データ）をコミット
+- [x] docs/roadmap.md にゲーム化フェーズを追記（Phase 9 以降の方向性・§10 表）
+- [x] 近期戦闘 ADR を順次起票（ADR-0022 Warp / ADR-0023 Propulsion / ADR-0024 Tackle / ADR-0025 Celestial Bodies）
 
 ---
 

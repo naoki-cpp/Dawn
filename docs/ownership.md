@@ -59,26 +59,26 @@ Ship は必ず 1 つの Sector に所有される。
       ▼
 [Sector A が所有]  ←──────────────────────────┐
       │                                        │
-      │ SectorTransitRequested（未実装）         │
+      │ SectorTransitRequested                  │
       ▼                                        │
 [Transit 中]                                   │
   所有権: Sector A のまま維持                   │
       │                                        │
-      │ SectorTransitCompleted（未実装）         │
+      │ SectorTransitCompleted                  │
       ▼                                        │
 [Sector B が所有] ──────────────────────────────┘
       │
-      │ ShipDespawned（未実装）
+      │ ShipDespawned
       ▼
 [存在しない]
 ```
 
-**Transit 中の状態について（未実装、設計のみ）:**  
+**Transit 中の状態について:**  
 Sector 間の移動中は所有権が宙に浮いた状態になるが、
 論理的には「元の Sector がまだ所有している」とみなす。
 これにより、Transit 完了前に別の操作が割り込むことを防ぐ。
 
-### Transit 中の操作制限（未実装）
+### Transit 中の操作制限
 
 Transit 中の Ship に対して以下の操作を受理してはならない。
 

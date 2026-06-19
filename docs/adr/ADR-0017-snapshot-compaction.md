@@ -180,7 +180,7 @@ CLAUDE.md §10 には「圧縮はセグメント移送として ADR-0017 が規�
 - [x] 圧縮の自動トリガ（ノードのスナップショット周期 → `compact()` 呼び出し）のオーケストレーション — `SimulationNode::checkpoint()`（snapshot→save→compact、save 先行でクラッシュ安全）+ `CheckpointScheduler`（論理 Tick 周期で駆動 / `checkpoint.rs`）+ Phase 3 デモへ実配線 + 3 テスト（2026-06-14）
 - [x] failover が創世記 replay を要求しないことのテスト（ADR-0014 連携）— 圧縮後 reopen + restore で実証（2026-06-14）
 - [x] snapshot.rs のドキュメントコメントを改訂後 INV-002 に更新（2026-06-14）
-- [ ] docs/event-catalog.md / docs/architecture.md に2層ログを反映
+- [x] docs/event-catalog.md / docs/architecture.md に2層ログを反映（event-catalog §2 / architecture §5-C に ADR-0017 参照付きで記載済み）
 
 ---
 

@@ -187,6 +187,19 @@ tackled 状態の間、Ship は `can_propose_warp()` / `can_propose_jump()` が 
 | `TickStarted` | Tick の開始 | 未実装 |
 | `TickCompleted` | Tick の完了 | 未実装 |
 
+### 3.10 AoI（Area of Interest）配信フィルタ（ADR-0019）
+
+AoI の実装は **新しいドメインイベントを持たない**。
+`DomainEvent` の配信時に観測者の 27 セル近傍フィルタを適用することで実現する。
+
+| メッセージ | 説明 | ステータス |
+|---|---|---|
+| `AoiEnter` | Ship が観測者の観測範囲に入った（WebSocket 配信メッセージ・ドメインイベントではない） | ✅ 実装済み（8C・ADR-0019） |
+| `AoiLeave` | Ship が観測者の観測範囲から出た（同上） | ✅ 実装済み（8C・ADR-0019） |
+
+`AoiEnter` / `AoiLeave` は EventStore に Append されない（ドメインイベントではなく配信制御メッセージ）。
+Replay には影響せず、`InitialState` + `DomainEvent` フィルタリングで AoI 整合性を保つ。
+
 ---
 
 ## 4. コマンド一覧
