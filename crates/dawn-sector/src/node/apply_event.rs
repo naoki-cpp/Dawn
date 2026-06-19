@@ -196,3 +196,31 @@ impl<S: EventStore> SimulationNode<S> {
         self.apply_event(&event);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, Tick, Velocity};
+
+    fn mem_node() -> SimulationNode {
+        SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF))
+    }
+
+    #[test]
+    fn damage_taken_event_is_replayed_to_restore_current_hp() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+
+        node.apply_event_pub(DomainEvent::DamageTaken(dawn_core::events::DamageTaken {
+            ship_id,
+            damage         : 100.0,
+            current_shield : 100.0,
+            current_armor  : 150.0,
+            current_hull   : 150.0,
+            tick           : Tick(1),
+        }));
+
+        let hp = node.get_ship_hp(ship_id).unwrap();
+        assert_eq!(hp, 400.0, "HP total after replay = 100 + 150 + 150 = 400");
+    }
+}

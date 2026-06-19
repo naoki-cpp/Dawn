@@ -95,3 +95,110 @@ impl<S: EventStore> SimulationNode<S> {
         events
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick};
+
+    fn node_with_modules() -> SimulationNode {
+        use crate::{modules, ship_types};
+        let mut node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+        for def in modules::all_modules() { node.register_module(def); }
+        for def in ship_types::all_ship_types() { node.register_ship_type(def); }
+        node
+    }
+
+    fn fit_fold_disruptor(node: &mut SimulationNode, ship_id: ShipId) {
+        use dawn_core::{FitModuleCommand, SlotKind};
+        use crate::modules::MODULE_FOLD_DISRUPTOR;
+        node.fit_module(FitModuleCommand { ship_id, slot: SlotKind::Mid, module_id: MODULE_FOLD_DISRUPTOR });
+    }
+
+    #[test]
+    fn tackled_ship_cannot_warp() {
+        use dawn_core::{LockOnCommand, ActivateModuleCommand, SlotKind};
+        use crate::modules::MODULE_FOLD_DISRUPTOR;
+
+        let mut node = node_with_modules();
+
+        let ship_a = { let id = node.next_player_id(); node.spawn_player_ship_at_pub(id, Position::new(0.0, 0.0, 0.0)) };
+        let ship_b = { let id = node.next_player_id(); node.spawn_player_ship_at_pub(id, Position::new(1000.0, 0.0, 0.0)) };
+
+        fit_fold_disruptor(&mut node, ship_a);
+        let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
+        node.activate_module_owned(owner_a, ActivateModuleCommand { ship_id: ship_a, module_id: MODULE_FOLD_DISRUPTOR, slot: SlotKind::Mid });
+
+        let lock_cmd = LockOnCommand { ship_id: ship_a, target_id: ship_b };
+        for _ in 0..10 { node.tick_with_lock_commands(&[lock_cmd.clone()]); }
+
+        let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
+        assert!(!node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)),
+            "tackled ship must not be allowed to warp");
+        assert!(!node.can_propose_jump(ship_b, gate_id),
+            "tackled ship must not be allowed to jump");
+    }
+
+    #[test]
+    fn tackle_releases_when_tackler_dies() {
+        use dawn_core::{LockOnCommand, ActivateModuleCommand, DomainEvent, SlotKind};
+        use crate::modules::MODULE_FOLD_DISRUPTOR;
+
+        let mut node = node_with_modules();
+
+        let ship_a = { let id = node.next_player_id(); node.spawn_player_ship_at_pub(id, Position::new(0.0, 0.0, 0.0)) };
+        let ship_b = { let id = node.next_player_id(); node.spawn_player_ship_at_pub(id, Position::new(1000.0, 0.0, 0.0)) };
+
+        fit_fold_disruptor(&mut node, ship_a);
+        let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
+        node.activate_module_owned(owner_a, ActivateModuleCommand { ship_id: ship_a, module_id: MODULE_FOLD_DISRUPTOR, slot: SlotKind::Mid });
+
+        let lock_cmd = LockOnCommand { ship_id: ship_a, target_id: ship_b };
+        for _ in 0..10 { node.tick_with_lock_commands(&[lock_cmd.clone()]); }
+
+        let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
+        assert!(!node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)), "should be tackled first");
+
+        node.apply_event_pub(DomainEvent::ShipDestroyed(dawn_core::events::ShipDestroyed {
+            ship_id  : ship_a,
+            killer_id: ship_b,
+            tick     : node.current_tick(),
+        }));
+        node.tick_with_lock_commands(&[]);
+
+        assert!(node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)),
+            "tackle should release when the tackler ship is destroyed");
+    }
+
+    #[test]
+    fn tackle_snapshot_round_trip_preserves_tackle_state() {
+        use dawn_core::{LockOnCommand, ActivateModuleCommand, SlotKind};
+        use crate::modules::MODULE_FOLD_DISRUPTOR;
+
+        let mut node = node_with_modules();
+
+        let ship_a = { let id = node.next_player_id(); node.spawn_player_ship_at_pub(id, Position::new(0.0, 0.0, 0.0)) };
+        let ship_b = { let id = node.next_player_id(); node.spawn_player_ship_at_pub(id, Position::new(1000.0, 0.0, 0.0)) };
+
+        fit_fold_disruptor(&mut node, ship_a);
+        let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
+        node.activate_module_owned(owner_a, ActivateModuleCommand { ship_id: ship_a, module_id: MODULE_FOLD_DISRUPTOR, slot: SlotKind::Mid });
+
+        let lock_cmd = LockOnCommand { ship_id: ship_a, target_id: ship_b };
+        for _ in 0..10 { node.tick_with_lock_commands(&[lock_cmd.clone()]); }
+
+        let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
+        assert!(!node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)), "should be tackled before snapshot");
+
+        let snapshot = node.take_snapshot();
+        let ship_b_snap = snapshot.ships.iter().find(|s| s.ship_id == ship_b).unwrap();
+        assert!(ship_b_snap.tackled_by.contains(&ship_a), "snapshot must record the tackler");
+
+        let store2 = dawn_event_store::InMemoryEventStore::new();
+        let modules: Vec<_> = crate::modules::all_modules();
+        let ship_types: Vec<_> = crate::ship_types::all_ship_types();
+        let node2 = SimulationNode::restore_from(store2, &snapshot, &modules, &ship_types);
+        assert!(!node2.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)),
+            "restored node must still prevent tackled ship from warping");
+    }
+}
