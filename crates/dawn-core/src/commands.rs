@@ -4,7 +4,7 @@
 //! The system validates a Command before producing an Event.  (INV-006)
 
 use crate::fitting::{ModuleId, SlotKind};
-use crate::star_system::JumpGateId;
+use crate::star_system::{JumpGateId, WarpTarget};
 use crate::{Position, SectorId, ShipId};
 use serde::{Deserialize, Serialize};
 
@@ -149,21 +149,22 @@ pub struct JumpCommand {
     pub gate_id: JumpGateId,
 }
 
-/// Request to warp a Ship toward a Jump Gate within its current Sector
-/// (intra-Sector short-range Fold, ADR-0022; colloquially "warp").
+/// Request to warp a Ship toward a Jump Gate or a celestial body within its
+/// current Sector (intra-Sector short-range Fold, ADR-0022/ADR-0025).
 ///
 /// An accepted warp is a persistent two-phase steering mode (`WarpComp`):
-/// an interruptible alignment phase, then a committed warping phase that
-/// flies the ship to the gate's `activation_radius` at warp speed.
+/// an interruptible alignment phase, then a committed warping phase.
+/// For Gate targets, the ship stops inside the gate's `activation_radius`.
+/// For Body targets, the ship stops at `body.radius * 1.5` from the centre.
 ///
 /// May be rejected (`can_propose_warp`) if:
 /// - The Ship does not exist, is in transit, or is already warping.
-/// - The gate does not originate in the Ship's current Sector.
-/// - The gate is closer than the minimum warp distance (use approach instead).
+/// - The target does not belong to the Ship's current Sector.
+/// - The target is closer than the minimum warp distance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WarpCommand {
     pub ship_id: ShipId,
-    pub gate_id: JumpGateId,
+    pub target : WarpTarget,
 }
 
 #[cfg(test)]
@@ -225,9 +226,10 @@ mod tests {
     }
 
     #[test]
-    fn warp_command_carries_ship_id_and_gate_id() {
-        let cmd = WarpCommand { ship_id: ship_id(1), gate_id: crate::star_system::JumpGateId(2) };
+    fn warp_command_carries_ship_id_and_target() {
+        use crate::star_system::{JumpGateId, WarpTarget};
+        let cmd = WarpCommand { ship_id: ship_id(1), target: WarpTarget::Gate(JumpGateId(2)) };
         assert_eq!(cmd.ship_id, ship_id(1));
-        assert_eq!(cmd.gate_id, crate::star_system::JumpGateId(2));
+        assert_eq!(cmd.target, WarpTarget::Gate(JumpGateId(2)));
     }
 }

@@ -1,13 +1,46 @@
-//! Star System / Jump Gate static map data (ADR-0009).
+//! Star System / Jump Gate / Celestial Body static map data (ADR-0009, ADR-0025).
 //!
-//! `StarSystemDef` and `JumpGateDef` describe the *static* navigation
-//! topology. They are not ECS entities (CLAUDE.md §1 scope: Ship only) and
-//! are not persisted as events — only the *fact* that a Ship used a gate
-//! (`JumpGateUsed`) is an event.
+//! These types describe the *static* navigation topology. They are not ECS
+//! entities and are not persisted as events.
 
 use crate::position::Position;
 use crate::sector::SectorId;
 use serde::{Deserialize, Serialize};
+
+// ── CelestialBodyId / Kind / Def ─────────────────────────────────────────────
+
+/// Identifies a star, planet, or other celestial body within a Sector (ADR-0025).
+/// Values are globally unique across all Sectors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CelestialBodyId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum CelestialBodyKind {
+    Star,
+    Planet,
+}
+
+/// Static definition of a celestial body (ADR-0025).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CelestialBodyDef {
+    pub id           : CelestialBodyId,
+    pub kind         : CelestialBodyKind,
+    pub name         : String,
+    pub position     : Position,
+    /// Logical radius (units). Warp arrival stops at `radius * 1.5` from centre.
+    pub radius       : f32,
+    /// Blackbody spectral type [0=O/blue, 0.6=G/Sun-yellow, 1=M/red]. Planets: 0.0.
+    pub spectral_type: f32,
+}
+
+// ── WarpTarget ───────────────────────────────────────────────────────────────
+
+/// The destination of a `WarpCommand` (ADR-0025).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum WarpTarget {
+    Gate(JumpGateId),
+    Body(CelestialBodyId),
+}
 
 // ── StarSystemId ─────────────────────────────────────────────────────────────
 
