@@ -151,6 +151,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dawn-replication"
+version = "0.1.0"
+dependencies = [
+ "dawn-core",
+ "dawn-event-store",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "dawn-sector"
 version = "0.1.0"
 dependencies = [
@@ -176,6 +186,7 @@ dependencies = [
  "dawn-core",
  "dawn-ecs",
  "dawn-event-store",
+ "dawn-replication",
  "dawn-sector",
  "futures-util",
  "postcard",

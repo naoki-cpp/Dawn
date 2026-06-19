@@ -15,7 +15,7 @@
 
 use crate::sector_simulator_actor::{NodeStats, SectorSimulatorHandle, TickSummary};
 use dawn_sector::spawner::{generate_ships, SpawnConfig};
-use dawn_actor::ReplicationBusHandle;
+use dawn_replication::InMemoryReplicationBus;
 use dawn_consensus::{InProcessTransport, PartitionableTransport, RaftActor, RaftActorHandle, RaftState, RaftTransport, Role, Term};
 use dawn_core::{NodeId, SectorBounds, SectorId};
 use std::collections::{HashMap, HashSet};
@@ -77,7 +77,7 @@ pub(crate) fn spawn_raft_actors(
 
 pub struct MultiNodeCluster {
     nodes      : Vec<SectorSimulatorHandle>,
-    bus        : ReplicationBusHandle,
+    bus        : InMemoryReplicationBus,
     /// Shared fault-injection set for the cluster's Raft transports (ADR-0014).
     partitioned: Arc<Mutex<HashSet<NodeId>>>,
 }
@@ -92,7 +92,7 @@ impl MultiNodeCluster {
     /// `PartitionableTransport` over in-process mpsc channels. Election
     /// timeout/heartbeat timers advance once per simulation Tick (Step 10).
     pub fn new(node_count: usize) -> Self {
-        let bus = ReplicationBusHandle::spawn();
+        let bus = InMemoryReplicationBus::spawn();
         let ids: Vec<NodeId> = (0..node_count as u8).map(NodeId).collect();
 
         let (endpoints, partitioned) = spawn_raft_actors(&ids);

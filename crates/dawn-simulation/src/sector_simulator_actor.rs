@@ -20,7 +20,7 @@
 
 use dawn_sector::node::{SimulationNode, TickResult};
 use dawn_sector::transit::TransitOp;
-use dawn_actor::BusMessage;
+use dawn_replication::BusMessage;
 use dawn_consensus::{RaftActorHandle, Role, Term};
 use dawn_event_store::store::EventStore as _;
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
@@ -325,11 +325,11 @@ impl SectorSimulatorHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_actor::ReplicationBusHandle;
+    use dawn_replication::InMemoryReplicationBus;
     use dawn_core::{SectorBounds, Velocity};
 
-    fn spawn_actor() -> (SectorSimulatorHandle, dawn_actor::ReplicationBusHandle) {
-        let bus = dawn_actor::ReplicationBusHandle::spawn();
+    fn spawn_actor() -> (SectorSimulatorHandle, InMemoryReplicationBus) {
+        let bus = InMemoryReplicationBus::spawn();
 
         // Single-node Raft cluster: no peers, transport delivers nowhere.
         let (raft_tx, raft_rx) = mpsc::unbounded_channel();

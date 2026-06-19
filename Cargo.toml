@@ -5,6 +5,7 @@ members = [
     "crates/dawn-event-store",
     "crates/dawn-actor",
     "crates/dawn-consensus",
+    "crates/dawn-replication",
     "crates/dawn-sector",
     "crates/dawn-simulation",
 ]

@@ -1,0 +1,16 @@
+[package]
+name    = "dawn-replication"
+version = "0.1.0"
+edition = "2021"
+
+# Dependency DAG (ADR-0027):
+#   dawn-core, dawn-event-store → dawn-replication → dawn-sector, dawn-simulation
+#
+# Forbidden: dawn-ecs, dawn-sector, dawn-consensus, dawn-simulation
+[dependencies]
+dawn-core        = { path = "../dawn-core" }
+dawn-event-store = { path = "../dawn-event-store" }
+tokio            = { workspace = true }
+thiserror        = { workspace = true }
+
+[dev-dependencies]

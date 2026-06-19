@@ -14,10 +14,8 @@
 //! dawn-actor must never depend on dawn-ecs or dawn-simulation.
 
 pub mod client_connection;
-pub mod replication_bus;
 
 pub use client_connection::{
     ClientCommand, ClientConnection, ConnectionError,
     InProcessClientEndpoint, InProcessConnection,
 };
-pub use replication_bus::{BusMessage, ReplicationBusHandle};

@@ -34,7 +34,7 @@ use std::sync::Arc;
 use dawn_core::{
     ship_type::{ShipTypeDefinition, ShipTypeId},
     DomainEvent, JumpGateDef, JumpGateId,
-    ModuleDefinition, ModuleId, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId,
+    ModuleDefinition, ModuleId, NodeId, Position, SectorBounds, SectorId, ShipId,
     Tick, WarpTarget,
 };
 use dawn_ecs::{
@@ -563,7 +563,7 @@ impl<S: EventStore> SimulationNode<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::Velocity;
+    use dawn_core::{PlayerId, Velocity};
     use dawn_ecs::components::{ThrustComp, WarpPhase};
     use dawn_event_store::FileEventStore;
 
