@@ -156,3 +156,63 @@ impl<S: EventStore> SimulationNode<S> {
             .neighbors_of(observer_pos)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dawn_core::{NodeId, SectorBounds, SectorId, Velocity};
+
+    fn mem_node() -> SimulationNode {
+        SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF))
+    }
+
+    #[test]
+    fn ships_visible_to_an_observer_are_only_those_in_the_27_cell_neighborhood() {
+        let mut node = mem_node();
+        let cell = 1_000.0;
+        let observer = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
+        let near = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::new(1_500.0, 0.0, 0.0), Velocity::ZERO);
+        let far  = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::new(2_500.0, 0.0, 0.0), Velocity::ZERO);
+
+        let visible = node.ships_visible_to(Position::ORIGIN, cell);
+        assert!(visible.contains(&observer), "observer's own cell is visible");
+        assert!(visible.contains(&near),     "adjacent-cell ship is visible");
+        assert!(!visible.contains(&far),     "two-cells-away ship is not visible");
+    }
+
+    #[test]
+    fn scoped_initial_state_excludes_ships_outside_the_observer_neighborhood() {
+        let mut node = mem_node();
+        let cell = 1_000.0;
+        let observer = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
+        let far      = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::new(9_000.0, 0.0, 0.0), Velocity::ZERO);
+
+        let json = node.build_initial_state_json_for(Position::ORIGIN, cell);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let ids: Vec<u64> = v["ships"].as_array().unwrap().iter()
+            .map(|s| s["ship_id"].as_u64().unwrap())
+            .collect();
+        assert!(ids.contains(&observer.raw()), "observer is in its own scoped state");
+        assert!(!ids.contains(&far.raw()),     "distant ship is excluded from scoped InitialState");
+        let full: serde_json::Value = serde_json::from_str(&node.build_initial_state_json()).unwrap();
+        assert_eq!(full["ships"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn aoi_enter_json_wraps_the_ship_state_for_a_known_ship() {
+        let mut node = mem_node();
+        let sid = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::new(1.0, 2.0, 3.0), Velocity::ZERO);
+        let json = node.aoi_enter_json(sid).expect("known ship yields a message");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "AoiEnter");
+        assert_eq!(v["ship"]["ship_id"].as_u64().unwrap(), sid.raw());
+        assert_eq!(v["ship"]["position"]["x"].as_f64().unwrap() as f32, 1.0);
+    }
+
+    #[test]
+    fn aoi_enter_json_is_none_for_an_unknown_ship() {
+        let node = mem_node();
+        let unknown = ShipId::new(NodeId(9), 999);
+        assert!(node.aoi_enter_json(unknown).is_none());
+    }
+}
