@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : CLAUDE.md §11, docs/architecture.md
-date     : 2026-06-19（8D-2d / 8D-3 / 8D-4 完了後に更新）
+date     : 2026-06-19（8D-2d / 8D-3 / 8D-4 完了後 + navigation.rs / galaxy.rs リネーム後に更新）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -34,12 +34,15 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-sector/src/node/mod.rs` | 620 | 🟢 P7-1 テスト移動後。実装本体 ~420行 + spawn/transit/AoI テスト ~200行 |
-| `crates/dawn-sector/src/node/navigation.rs` | 639 | 🟢 P7-1（実装 301行 + approach/warp テスト 338行） |
+| `crates/dawn-sector/src/node/mod.rs` | 575 | 🟢 P7-2 jump/warp validation 移動後 |
+| `crates/dawn-sector/src/node/navigation.rs` | 679 | 🟢 P7-2（validation + 実装 + approach/warp テスト） |
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 485 | 🟢 P4-2 + P7-1（実装 394行 + bot テスト 91行） |
 | `crates/dawn-sector/src/node/transit_flow.rs` | 402 | 🟢 P7-1（実装 + 近接テスト） |
 | `crates/dawn-sector/src/node/commands.rs` | 342 | 🟢 P7-1（実装 262行 + fitting/combat テスト 80行） |
-| `crates/dawn-sector/src/star_map.rs` | 262 | 🟢 |
+| `crates/dawn-sector/src/galaxy.rs` | 262 | 🟢 |
+| `crates/dawn-sector/src/node/snapshot_io.rs` | 391 | 🟢 P7-pre |
+| `crates/dawn-sector/src/node/apply_event.rs` | 226 | 🟢 P7-pre |
+| `crates/dawn-sector/src/node/tackle.rs` | 204 | 🟢 P7-pre |
 | `crates/dawn-sector/src/aoi.rs` | 246 | 🟢 |
 | `crates/dawn-sector/src/transit.rs` | 215 | 🟢 |
 | `crates/dawn-sector/src/persistence/snapshot.rs` | 168 | 🟢 |
@@ -81,9 +84,14 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-ecs/src/systems/combat.rs` | 430 | 🟢 |
 | `crates/dawn-consensus/src/actor.rs` | 430 | 🟢 |
 | `crates/dawn-ecs/src/systems/capacitor.rs` | 412 | 🟢 |
+| `crates/dawn-consensus/src/rpc.rs` | 343 | 🟢 Raft RPC 型定義 |
 | `crates/dawn-consensus/src/tcp_transport.rs` | 330 | 🟢 8D-3 TcpRaftTransport |
 | `crates/dawn-sector-node/src/main.rs` | 329 | 🟢 8D-4 本番バイナリ（TCP 配線・WS・Jump Redirect） |
+| `crates/dawn-sector-node/src/protocol.rs` | 243 | 🟢 8D-4 WS プロトコル |
+| `crates/dawn-sector-node/src/data_loader.rs` | 238 | 🟢 8D-4 TOML ローダー |
 | `crates/dawn-replication/src/tcp.rs` | 263 | 🟢 8D-2c |
+| `crates/dawn-core/src/navigation.rs` | 121 | 🟢 ナビゲーション型定義（star_system.rs より改名）|
+| `crates/dawn-sector-node/src/ws_server.rs` | 153 | 🟢 8D-4 WebSocket サーバー |
 | `crates/dawn-ecs/src/world.rs` | 252 | 🟢 P6-1 クエリヘルパー追加 |
 | `crates/dawn-replication/src/anti_entropy.rs` | 211 | 🟢 8D-2b |
 | `crates/dawn-replication/src/bus.rs` | 188 | 🟢 8D-2a |
@@ -140,14 +148,15 @@ Rust のユニットテストは実装と同じファイルに置くことで、
 実装意図の近接性を保ちやすい。現状の `cfg(test)` ブロックは大きいが、設計上は許容する。
 テスト分離は「テストだけを頻繁に読む/編集する」痛みが強くなった時点で再検討する。
 
-#### L-3: `star_system.rs`（dawn-core）と `star_map.rs`（dawn-sector）の命名が紛らわしい
+#### ~~L-3~~: `star_system.rs` / `star_map.rs` の命名（解消済み）
+
+`star_system.rs`（dawn-core）と `star_map.rs`（dawn-sector）の命名が紛らわしいという問題は
+2026-06-19 のリネームで解消済み。
 
 ```
-dawn-core/src/star_system.rs    — 型定義（StarSystemDef, JumpGateDef 等）
-dawn-sector/src/star_map.rs     — インスタンスデータ（StarMap struct, builtin()）
+dawn-core/src/navigation.rs     — 型定義（StarSystemDef, JumpGateDef, CelestialBodyDef 等）
+dawn-sector/src/galaxy.rs       — インスタンスデータ（Galaxy struct, builtin()）
 ```
-
-型とデータの区別が名前から読み取りにくい。
 
 > L-2（system 間の snapshot ループ重複）は P6-1（`SimWorld` クエリヘルパー）で解消済み。
 
@@ -176,6 +185,11 @@ dawn-sector/src/star_map.rs     — インスタンスデータ（StarMap struct
 | 8D-2a dawn-replication 基盤 | 2026-06-19 | `InMemoryReplicationBus` / `ReplicationTransport` を dawn-replication へ移動 |
 | 8D-2b AntiEntropy | 2026-06-19 | log index gap 検出・重複/overlap 判定・`iter_from` suffix 応答 |
 | 8D-2c TcpReplicationTransport | 2026-06-19 | 4-byte length prefix + postcard / LAN plaintext TCP transport |
+| 8D-2d SnapshotTransfer | 2026-06-19 | `Serialize+DeserializeOwned` ジェネリック / 256 MiB cap |
+| 8D-3 TcpRaftTransport | 2026-06-19 | per-peer 自動再接続 / accept ループ / postcard framing |
+| 8D-4 dawn-sector-node | 2026-06-19 | 本番バイナリ（TOML 静的 config / 3 ノードクラスタ / Jump Redirect）|
+| navigation.rs / galaxy.rs リネーム | 2026-06-19 | `star_system.rs` → `navigation.rs`（dawn-core）、`star_map.rs`/`StarMap` → `galaxy.rs`/`Galaxy`（dawn-sector）。L-3 解消 |
+| P7-2 jump/warp validation 移動 | 2026-06-19 | `can_propose_jump` / `can_propose_warp` を `node/mod.rs` → `node/navigation.rs` へ移動。mod.rs 620→575行 |
 
 ---
 
@@ -183,16 +197,13 @@ dawn-sector/src/star_map.rs     — インスタンスデータ（StarMap struct
 
 唯一残る大きい実装ファイル（H-1）への対処。優先度順:
 
-**P7-2: Jump / Warp proposal helper の置き場を再評価**
+**P7-2: Jump / Warp proposal helper の移動（完了）**
 
-```
-node/
-  navigation.rs  — can_propose_jump / can_propose_warp も寄せるか検討
-  tests.rs       — 必要になった場合のみ cfg(test) ブロックを分離
-```
+`can_propose_jump` / `can_propose_warp` を `node/mod.rs` から `node/navigation.rs` へ移動。
+ナビゲーション関連の validation・適用・tick 処理がすべて `navigation.rs` に集約された。
+`mod.rs` は 620 → 575 行に縮小。
 
-テストは実装と同じファイルに置く方針を優先する。
-分離はファイルサイズそのものではなく、テスト編集の摩擦が実害になった場合に限る。
+Phase 7 はすべて完了。
 
 ---
 
@@ -200,25 +211,43 @@ node/
 
 `dawn-replication`（ADR-0021/0027・Phase 8D）は全ステップ完了済み。
 
-完了済み:
-
-- 8D-2a: `InMemoryReplicationBus` / `ReplicationTransport` を `dawn-replication` へ移動
-- 8D-2b: `AntiEntropy`（gap 検出・重複/overlap 判定・`iter_from` suffix 応答）
-- 8D-2c: `TcpReplicationTransport`（4-byte length prefix + postcard / LAN plaintext）
-- 8D-2d: `SnapshotTransfer`（`Serialize+DeserializeOwned` ジェネリック / 256 MiB cap）
-- 8D-3: `TcpRaftTransport`（per-peer 自動再接続 / accept ループ / postcard framing）
-- 8D-4: `dawn-sector-node` 本番バイナリ（TOML 静的 config / 3 ノードクラスタ / Jump Redirect）
-
 次の自然な前進先:
 
 - **8D-5: Raspberry Pi 実機検証**（3 物理ノード / LAN 平文）
-- **`SectorSimulatorActor` の境界再評価**（物理ノード配線で必要になった場合のみ）
 
 採らない方針も維持する:
 
 - CRDT / LWW-Register は採らない（単一所有 + append-only log gossip）
 - protobuf / `dawn-proto` は採らない（wire は postcard 再利用）
 - TLS / 認証は第1次 LAN 検証では扱わない
+
+---
+
+### Phase 9 — 評価 A への引き上げ
+
+現在の総合評価は **A−**。A に上げるための残タスク（優先度順）:
+
+#### P9-1: M-3 解消 — `SectorSimulatorActor` / `SimulationNode` 境界の明確化
+
+`SectorSimulatorActor`（423行）は `SimulationNode` の公開メソッドをほぼ全て呼ぶ薄いラッパーで、
+`SimulationNode` の変更が即 Actor に波及する。
+
+方針:
+- `SimulationNode` の外部インタフェースをコマンド/応答の enum に絞り込む
+- Actor は「何を呼ぶか」ではなく「何を送るか」に依存する形に変える
+- ADR を起票して境界を明文化する
+
+着手条件: 8D-5 実機検証の完了後（分散配線で境界の揺れが確定してから）
+
+#### P9-2: `CelestialBodyDef` へのセクター帰属フィールド追加（任意）
+
+`galaxy.rs:95-99` の `system_contains_body` が index 割り当て規約に依存している。
+`CelestialBodyDef`（`dawn-core`）に `sector: SectorId` フィールドを追加すれば
+近似ロジックが消え、TOML ローダーも簡潔になる。
+
+波及: `dawn-core`・`dawn-sector`・`dawn-simulation`・`dawn-sector-node` の
+`CelestialBodyDef` 生成箇所すべて（`data/star_map.toml` スキーマ変更も伴う）。
+型設計観点で B+ → A− の改善につながるが、変更コストは中程度。
 
 ---
 
