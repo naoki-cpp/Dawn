@@ -49,25 +49,19 @@ pub fn run(
 ) -> LockResult {
     // ── 1. 全 Ship をスナップショット ────────────────────────────────────────
 
-    let mut ships: Vec<ShipSnap> = {
-        let mut v = Vec::new();
-        for (entity, (id, pos, stats, lock)) in world
-            .inner()
-            .query::<(&ShipIdComp, &PositionComp, &ShipStatsComp, &LockComp)>()
-            .iter()
-        {
-            let is_npc = world.inner().get::<&IsNpcComp>(entity).is_ok();
-            v.push(ShipSnap {
-                entity,
-                ship_id  : id.0,
-                pos      : pos.0,
-                stats    : *stats,
-                lock_comp: lock.clone(),
-                is_npc,
-            });
-        }
-        v
-    };
+    let mut ships: Vec<ShipSnap> = world
+        .inner()
+        .query::<(&ShipIdComp, &PositionComp, &ShipStatsComp, &LockComp, Option<&IsNpcComp>)>()
+        .iter()
+        .map(|(entity, (id, pos, stats, lock, npc))| ShipSnap {
+            entity,
+            ship_id  : id.0,
+            pos      : pos.0,
+            stats    : *stats,
+            lock_comp: lock.clone(),
+            is_npc   : npc.is_some(),
+        })
+        .collect();
 
     let alive: HashSet<ShipId> = ships.iter().map(|s| s.ship_id).collect();
     let mut events: Vec<DomainEvent> = Vec::new();

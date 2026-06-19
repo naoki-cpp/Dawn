@@ -60,28 +60,23 @@ pub struct CombatResult {
 pub fn run(world: &mut SimWorld, tick: Tick, fire_triggers: &[ShipId]) -> CombatResult {
     // ── 1. 全 Ship をスナップショット ────────────────────────────────────────
 
-    let mut ships: Vec<ShipSnapshot> = {
-        let mut v = Vec::new();
-        for (entity, (id, stats, pos, vel, hull, lock)) in world
-            .inner()
-            .query::<(&ShipIdComp, &ShipStatsComp, &PositionComp, &VelocityComp, &HullComp, &LockComp)>()
-            .iter()
-        {
-            v.push(ShipSnapshot {
-                entity,
-                ship_id        : id.0,
-                stats          : *stats,
-                position       : pos.0,
-                velocity       : vel.0,
-                current_shield : hull.current_shield,
-                current_armor  : hull.current_armor,
-                current_hull   : hull.current_hull,
-                is_dead        : hull.is_destroyed,
-                locked_targets : lock.locked_targets().collect(),
-            });
-        }
-        v
-    };
+    let mut ships: Vec<ShipSnapshot> = world
+        .inner()
+        .query::<(&ShipIdComp, &ShipStatsComp, &PositionComp, &VelocityComp, &HullComp, &LockComp)>()
+        .iter()
+        .map(|(entity, (id, stats, pos, vel, hull, lock))| ShipSnapshot {
+            entity,
+            ship_id        : id.0,
+            stats          : *stats,
+            position       : pos.0,
+            velocity       : vel.0,
+            current_shield : hull.current_shield,
+            current_armor  : hull.current_armor,
+            current_hull   : hull.current_hull,
+            is_dead        : hull.is_destroyed,
+            locked_targets : lock.locked_targets().collect(),
+        })
+        .collect();
 
     // ── 2. ロック済みターゲットへ発射・命中判定 ──────────────────────────────
 
