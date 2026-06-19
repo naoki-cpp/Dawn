@@ -1,6 +1,6 @@
 //! Movement-related ECS components.
 
-use dawn_core::{ApproachTarget, JumpGateId, Position, Velocity};
+use dawn_core::{ApproachTarget, Position, Velocity, WarpTarget};
 
 /// Persistent "approach" steering target (semi-automatic piloting, ADR-0015).
 ///
@@ -38,10 +38,10 @@ pub enum WarpPhase {
 
 #[derive(Debug, Clone, Copy)]
 pub struct WarpComp {
-    pub gate_id  : JumpGateId,
+    pub target   : WarpTarget,
     pub phase    : WarpPhase,
-    /// When true, automatically propose a Jump once warp completes and the ship
-    /// arrives within the gate's activation radius.
+    /// When true and `target` is `Gate`, automatically propose a Jump once warp
+    /// completes and the ship arrives within the gate's activation radius.
     pub auto_jump: bool,
 }
 
