@@ -8,6 +8,7 @@ members = [
     "crates/dawn-replication",
     "crates/dawn-sector",
     "crates/dawn-simulation",
+    "crates/dawn-sector-node",
 ]
 resolver = "2"
 

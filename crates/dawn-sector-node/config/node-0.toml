@@ -1,0 +1,22 @@
+# dawn-sector-node configuration — Node 0 (Sector 0)
+# Usage: sector-node config/node-0.toml
+
+node_id    = 0
+sector_id  = 0
+ws_addr    = "0.0.0.0:7878"    # Godot clients connect here
+raft_addr  = "0.0.0.0:7900"    # Raft RPC (TcpRaftTransport)
+repl_addr  = "0.0.0.0:7910"    # Log replication gossip (TcpReplicationTransport)
+npc_ships  = 20
+pop_cap    = 500
+
+[[peers]]
+node_id   = 1
+raft_addr = "127.0.0.1:7901"
+repl_addr = "127.0.0.1:7911"
+ws_addr   = "127.0.0.1:7879"
+
+[[peers]]
+node_id   = 2
+raft_addr = "127.0.0.1:7902"
+repl_addr = "127.0.0.1:7912"
+ws_addr   = "127.0.0.1:7880"

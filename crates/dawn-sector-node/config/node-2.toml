@@ -1,0 +1,22 @@
+# dawn-sector-node configuration — Node 2 (Sector 2)
+# Usage: sector-node config/node-2.toml
+
+node_id    = 2
+sector_id  = 2
+ws_addr    = "0.0.0.0:7880"
+raft_addr  = "0.0.0.0:7902"
+repl_addr  = "0.0.0.0:7912"
+npc_ships  = 0
+pop_cap    = 500
+
+[[peers]]
+node_id   = 0
+raft_addr = "127.0.0.1:7900"
+repl_addr = "127.0.0.1:7910"
+ws_addr   = "127.0.0.1:7878"
+
+[[peers]]
+node_id   = 1
+raft_addr = "127.0.0.1:7901"
+repl_addr = "127.0.0.1:7911"
+ws_addr   = "127.0.0.1:7879"
