@@ -39,13 +39,13 @@ use dawn_core::{
     Tick,
 };
 use dawn_ecs::{
-    components::{PositionComp, ShipStatsComp, WarpComp},
+    components::{PositionComp, ShipStatsComp},
     SimWorld,
 };
 use dawn_event_store::{store::EventStore, InMemoryEventStore};
 
 #[cfg(test)]
-use dawn_ecs::components::{CapacitorComp, FittingComp, HullComp};
+use dawn_ecs::components::{CapacitorComp, FittingComp, HullComp, WarpComp};
 
 use crate::persistence::StateSnapshot;
 
@@ -54,11 +54,11 @@ use crate::persistence::StateSnapshot;
 /// extreme density ever reaches this admission limit.
 pub const POPULATION_CAP: usize = 100_000;
 
-// ── Warp tuning (short-range Fold, ADR-0022 §9) ─────────────────────────────────
+// -- Warp tuning (short-range Fold, ADR-0022 section 9) ---------------------
 
 /// Warp engages once the ship is moving at this fraction of its max speed
 /// toward the gate (EVE-style 75% alignment, ADR-0022). Align time therefore
-/// emerges from ship agility (thrust / max_speed) — the tackle window
+/// emerges from ship agility (thrust / max_speed) - the tackle window
 /// (ADR-0023) is longer for sluggish ships.
 const WARP_ALIGN_FRACTION: f32 = 0.75;
 /// Warp cruise speed (units/tick), far above any sublight `max_speed`.
@@ -81,7 +81,7 @@ const WARP_ARRIVAL_FACTOR: f32 = 0.8;
 const BODY_WARP_ARRIVAL_FACTOR: f32 = 1.5;
 
 
-// ── TickResult ────────────────────────────────────────────────────────────────
+// -- TickResult --------------------------------------------------------------
 
 /// Result returned after executing one tick.
 #[derive(Debug)]
@@ -96,7 +96,7 @@ pub struct TickResult {
     pub cap_depletions: Vec<dawn_core::ShipId>,
 }
 
-// ── SimulationNode ────────────────────────────────────────────────────────────
+// -- SimulationNode ----------------------------------------------------------
 
 /// A single-Sector simulation node, generic over its event store.
 ///
@@ -141,7 +141,7 @@ where
     pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
 }
 
-// ── Constructors ──────────────────────────────────────────────────────────────
+// -- Constructors ------------------------------------------------------------
 
 impl SimulationNode<InMemoryEventStore> {
     /// Create a node backed by an in-memory event store (Phase 0 default).
@@ -175,7 +175,7 @@ impl<S: EventStore> SimulationNode<S> {
             player_id_counter : 0,
             pending_bot_lock_commands: Vec::new(),
             sector_map        : {
-                let sm = Arc::new(crate::galaxy::Galaxy::builtin());
+                let sm = Arc::new(crate::galaxy::Galaxy::demo());
                 SectorMap {
                     gates  : sm.gates_in_sector(sector_id).into_iter().map(|g| (g.id, g)).collect(),
                     bodies : sm.bodies_in_sector(sector_id).into_iter().map(|b| (b.id, b)).collect(),
@@ -216,7 +216,7 @@ impl<S: EventStore> SimulationNode<S> {
             player_id_counter  : 0,
             pending_bot_lock_commands: Vec::new(),
             sector_map         : {
-                let sm = Arc::new(crate::galaxy::Galaxy::builtin());
+                let sm = Arc::new(crate::galaxy::Galaxy::demo());
                 SectorMap {
                     gates  : sm.gates_in_sector(snapshot.sector_id).into_iter().map(|g| (g.id, g)).collect(),
                     bodies : sm.bodies_in_sector(snapshot.sector_id).into_iter().map(|b| (b.id, b)).collect(),
@@ -254,7 +254,7 @@ impl<S: EventStore> SimulationNode<S> {
         node
     }
 
-    // ── Population backstop (ADR-0018) ──────────────────────────────────────────
+    // -- Population backstop (ADR-0018) --------------------------------------
 
     /// Whether the Sector is at its population backstop and should refuse new
     /// entrants. Last resort in the degradation hierarchy (ADR-0018): dynamic
@@ -288,19 +288,19 @@ impl<S: EventStore> SimulationNode<S> {
     /// Read access to the navigation topology.
     pub fn galaxy(&self) -> &crate::galaxy::Galaxy { &self.sector_map.galaxy }
 
-    // ── Identity ──────────────────────────────────────────────────────────────
+    // -- Identity ------------------------------------------------------------
 
     pub fn node_id(&self)    -> NodeId   { self.node_id }
     pub fn sector_id(&self)  -> SectorId { self.sector_id }
 
-    // ── Jump Gate Navigation (ADR-0009) ──────────────────────────────────────
+    // -- Jump Gate Navigation (ADR-0009) -------------------------------------
 
     /// Look up a Jump Gate originating in this Sector by `gate_id`.
     pub fn jump_gate(&self, gate_id: JumpGateId) -> Option<&JumpGateDef> {
         self.sector_map.gates.get(&gate_id)
     }
 
-    // ── Observation ───────────────────────────────────────────────────────────
+    // -- Observation ---------------------------------------------------------
 
     pub fn current_tick(&self)      -> Tick  { self.current_tick }
     pub fn ship_count(&self)        -> usize { self.world.ship_count() }
@@ -367,12 +367,12 @@ impl<S: EventStore> SimulationNode<S> {
 
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// -- Tests -------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{PlayerId, Velocity};
+    use dawn_core::Velocity;
     use dawn_ecs::components::ThrustComp;
 
     fn mem_node() -> SimulationNode {
@@ -383,7 +383,7 @@ mod tests {
         )
     }
 
-    // ── Existing behaviour (unchanged) ───────────────────────────────────────
+    // -- Existing behaviour (unchanged) --------------------------------------
 
     #[test]
     fn spawning_a_ship_appends_a_ship_spawned_event() {
@@ -470,7 +470,7 @@ mod tests {
         assert_eq!(spawned, 5);
     }
 
-    // ── Population backstop (ADR-0018 / 8B-1) ────────────────────────────────
+    // -- Population backstop (ADR-0018 / 8B-1) -------------------------------
 
     #[test]
     fn at_population_cap_is_true_only_when_ship_count_reaches_the_cap() {

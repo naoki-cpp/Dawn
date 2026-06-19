@@ -647,7 +647,7 @@ mod tests {
         }
         assert!(node.warp_phase(ship_id).is_none(), "warp should have completed");
 
-        let body = crate::galaxy::Galaxy::builtin()
+        let body = crate::galaxy::Galaxy::demo()
             .bodies_in_sector(SectorId(0))
             .into_iter()
             .find(|b| b.id == body_id)

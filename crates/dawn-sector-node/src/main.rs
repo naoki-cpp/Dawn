@@ -21,7 +21,7 @@ use dawn_consensus::{RaftActor, RaftActorHandle, RaftActorMessage, RaftState, Tc
 use dawn_core::{DomainEvent, FitModuleCommand, NodeId, SectorBounds, SectorId, ShipId, SlotKind, WarpTarget};
 use dawn_event_store::store::EventStore as _;
 use dawn_replication::{LogBatch, ReplicationTransport, TcpReplicationTransport};
-use dawn_sector::{aoi, modules, ship_types, spawner::{generate_ships, SpawnConfig}, transit};
+use dawn_sector::{aoi, galaxy::Galaxy, modules, ship_types, spawner::{generate_ships, SpawnConfig}, transit};
 use dawn_sector::node::SimulationNode;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -30,6 +30,7 @@ use tokio::sync::mpsc;
 
 const AOI_CELL_SIZE: f32 = 30_000.0;
 const TICK_MS      : u64 = 100;
+const PRODUCTION_STAR_MAP_PATH: &str = "data/star_map.toml";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -266,7 +267,7 @@ async fn main() -> anyhow::Result<()> {
 fn build_node(cfg: &config::NodeConfig, node_id: NodeId, sector_id: SectorId, bounds: SectorBounds) -> SimulationNode {
     let mut node = SimulationNode::new(node_id, sector_id, bounds);
     node.set_population_cap(cfg.pop_cap);
-    let star_map = data_loader::load_star_map("data/star_map.toml");
+    let star_map = load_required_galaxy(PRODUCTION_STAR_MAP_PATH);
     node.set_galaxy(Arc::new(star_map));
     for def in data_loader::load_modules("data/modules.toml") {
         node.register_module(def);
@@ -275,6 +276,13 @@ fn build_node(cfg: &config::NodeConfig, node_id: NodeId, sector_id: SectorId, bo
         node.register_ship_type(def);
     }
     node
+}
+
+fn load_required_galaxy(path: &str) -> Galaxy {
+    let content = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("failed to read production star map '{path}': {e}"));
+    Galaxy::from_toml_str(&content)
+        .unwrap_or_else(|e| panic!("failed to parse production star map '{path}': {e}"))
 }
 
 fn spawn_npcs(node: &mut SimulationNode, count: usize) {

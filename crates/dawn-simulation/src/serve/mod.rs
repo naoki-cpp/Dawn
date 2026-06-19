@@ -7,7 +7,7 @@ pub(crate) use cluster::run_cluster_server;
 pub(crate) use single::run_phase4_server;
 
 use crate::{data_loader, ws_server};
-use dawn_sector::{aoi, modules, ship_types};
+use dawn_sector::{aoi, galaxy::Galaxy, modules, ship_types};
 use dawn_sector::node::SimulationNode;
 use dawn_sector::spawner::{generate_ships, SpawnConfig};
 use dawn_core::{NodeId, SectorBounds, SectorId, ShipId};
@@ -24,6 +24,7 @@ pub(crate) const AOI_CELL_SIZE: f32 = 30_000.0;
 pub(crate) const P4_SHIPS_DEFAULT: usize = 20;
 
 pub(crate) const P4_TICK_MS: u64 = 100; // 10 Tick/sec
+pub(crate) const PRODUCTION_STAR_MAP_PATH: &str = "data/star_map.toml";
 
 /// Local Time Dilation budget (ADR-0018): logical cost (ship count) a single
 /// Sector handles per tick before dilation engages.
@@ -250,15 +251,26 @@ pub(crate) fn deliver_aoi_frame(
 pub(crate) fn build_serve_node(id: NodeId, sector: SectorId, bounds: SectorBounds, pop_cap: usize) -> SimulationNode {
     let mut node = SimulationNode::new(id, sector, bounds);
     node.set_population_cap(pop_cap);
-    let star_map = data_loader::load_star_map("data/star_map.toml", dawn_sector::galaxy::Galaxy::builtin());
+    let star_map = load_required_galaxy(PRODUCTION_STAR_MAP_PATH);
     node.set_galaxy(std::sync::Arc::new(star_map));
+    register_data_driven_definitions(&mut node);
+    node
+}
+
+fn register_data_driven_definitions(node: &mut SimulationNode) {
     for def in data_loader::load_modules("data/modules.toml", modules::all_modules()) {
         node.register_module(def);
     }
     for def in data_loader::load_ship_types("data/ship_types.toml", ship_types::all_ship_types()) {
         node.register_ship_type(def);
     }
-    node
+}
+
+fn load_required_galaxy(path: &str) -> Galaxy {
+    let content = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("failed to read production star map '{path}': {e}"));
+    Galaxy::from_toml_str(&content)
+        .unwrap_or_else(|e| panic!("failed to parse production star map '{path}': {e}"))
 }
 
 /// Spawn `ship_count` NPC frigates into `node`, each fitted with a small railgun.
@@ -285,6 +297,14 @@ mod serve_pipeline_tests {
     use dawn_core::{DomainEvent, MoveCommand, NodeId, Position, SectorBounds, SectorId};
     use dawn_event_store::store::EventStore as _;
 
+    fn build_test_node(id: NodeId, sector: SectorId, bounds: SectorBounds, pop_cap: usize) -> SimulationNode {
+        let mut node = SimulationNode::new(id, sector, bounds);
+        node.set_population_cap(pop_cap);
+        node.set_galaxy(std::sync::Arc::new(Galaxy::demo()));
+        register_data_driven_definitions(&mut node);
+        node
+    }
+
     /// A player's `Move`, delivered over a `ClientConnection`, is applied to the
     /// owning node and the resulting `VelocityChanged` is delivered back over the
     /// same connection. Exercises the command → tick → event serve pipeline
@@ -292,7 +312,7 @@ mod serve_pipeline_tests {
     #[test]
     fn player_move_over_connection_is_applied_and_velocity_event_flows_back() {
         let bounds   = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
-        let mut node = build_serve_node(NodeId(0), SectorId(0), bounds, node::POPULATION_CAP);
+        let mut node = build_test_node(NodeId(0), SectorId(0), bounds, node::POPULATION_CAP);
 
         let player_id = node.next_player_id();
         let ship_id   = node.spawn_player_ship_at_pub(player_id, Position::new(0.0, 0.0, 0.0));
@@ -341,7 +361,7 @@ mod serve_pipeline_tests {
     #[test]
     fn move_for_unowned_ship_produces_no_event_over_connection() {
         let bounds   = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
-        let mut node = build_serve_node(NodeId(0), SectorId(0), bounds, node::POPULATION_CAP);
+        let mut node = build_test_node(NodeId(0), SectorId(0), bounds, node::POPULATION_CAP);
 
         let player_id = node.next_player_id();
         let _own_ship = node.spawn_player_ship_at_pub(player_id, Position::new(0.0, 0.0, 0.0));

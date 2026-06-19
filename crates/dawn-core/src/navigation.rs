@@ -1,4 +1,4 @@
-//! Navigation domain types — star systems, jump gates, celestial bodies,
+//! Navigation domain types: star systems, jump gates, celestial bodies,
 //! and warp targets (ADR-0009, ADR-0025).
 //!
 //! These types describe the *static* navigation topology. They are not ECS
@@ -8,7 +8,7 @@ use crate::position::Position;
 use crate::sector::SectorId;
 use serde::{Deserialize, Serialize};
 
-// ── CelestialBodyId / Kind / Def ─────────────────────────────────────────────
+// -- CelestialBodyId / Kind / Def -------------------------------------------
 
 /// Identifies a star, planet, or other celestial body within a Sector (ADR-0025).
 /// Values are globally unique across all Sectors.
@@ -25,6 +25,7 @@ pub enum CelestialBodyKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CelestialBodyDef {
     pub id           : CelestialBodyId,
+    pub sector       : SectorId,
     pub kind         : CelestialBodyKind,
     pub name         : String,
     pub position     : Position,
@@ -34,7 +35,7 @@ pub struct CelestialBodyDef {
     pub spectral_type: f32,
 }
 
-// ── WarpTarget ───────────────────────────────────────────────────────────────
+// -- WarpTarget --------------------------------------------------------------
 
 /// The destination of a `WarpCommand` (ADR-0025).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -43,7 +44,7 @@ pub enum WarpTarget {
     Body(CelestialBodyId),
 }
 
-// ── StarSystemId ─────────────────────────────────────────────────────────────
+// -- StarSystemId ------------------------------------------------------------
 
 /// Identifies a Star System (a group of one or more Sectors).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -57,7 +58,7 @@ pub struct StarSystemDef {
     pub sectors : Vec<SectorId>,
 }
 
-// ── JumpGateId ───────────────────────────────────────────────────────────────
+// -- JumpGateId --------------------------------------------------------------
 
 /// Identifies a Jump Gate (a fixed navigation point within a Sector).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -81,7 +82,7 @@ impl JumpGateDef {
     }
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// -- Tests -------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
