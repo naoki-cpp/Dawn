@@ -14,6 +14,7 @@ mod cluster;
 mod data_loader;
 mod modules;
 mod node;
+mod protocol;
 mod ship_types;
 mod sector_simulator_actor;
 mod snapshot;
