@@ -19,6 +19,7 @@ client/gdextension/target/
 .vscode/
 .idea/
 *.iml
+.claude/settings.local.json
 
 # ── OS ───────────────────────────────────────────────────────────────────────
 Thumbs.db
