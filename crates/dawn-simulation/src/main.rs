@@ -9,17 +9,16 @@
 
 mod aoi;
 mod bench;
-mod checkpoint;
 mod cluster;
 mod data_loader;
 mod dilation;
 mod modules;
 mod node;
+mod persistence;
 mod protocol;
 mod serve;
 mod ship_types;
 mod sector_simulator_actor;
-mod snapshot;
 mod spawner;
 mod star_map;
 mod transit;

@@ -16,7 +16,12 @@
 
 mod commands;
 mod navigation;
+mod sector_map;
 mod serialization;
+mod ship_registry;
+
+use sector_map::SectorMap;
+use ship_registry::ShipRegistry;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,7 +29,7 @@ use std::sync::Arc;
 use dawn_core::{
     events::ShipSpawned,
     ship_type::{ShipTypeDefinition, ShipTypeId},
-    CelestialBodyDef, CelestialBodyId, DomainEvent, FitModuleCommand, JumpGateDef, JumpGateId,
+    DomainEvent, FitModuleCommand, JumpGateDef, JumpGateId,
     ModuleDefinition, ModuleId, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId,
     Tick, Velocity, WarpTarget,
 };
@@ -35,7 +40,7 @@ use dawn_ecs::{
 };
 use dawn_event_store::{store::EventStore, InMemoryEventStore};
 
-use crate::snapshot::{ShipSnapshot, StateSnapshot};
+use crate::persistence::{ShipSnapshot, StateSnapshot};
 
 /// Per-Sector population backstop (ADR-0018 final resort). Set far above the
 /// TiDi budget so dynamic split / LoD / local TiDi all engage first; only
@@ -101,20 +106,14 @@ where
     event_store : S,
     current_tick: Tick,
     id_counter  : u64,
-    /// Maps `ShipId` to hecs `Entity` for O(1) position updates during replay.
-    ship_index      : HashMap<ShipId, Entity>,
+    /// Ship identity and ownership maps (entity index, type ids, player ownership).
+    ships: ShipRegistry,
     /// Module definition registry.
     module_registry   : HashMap<ModuleId, ModuleDefinition>,
     /// Ship type definition registry.
     ship_type_registry: HashMap<ShipTypeId, ShipTypeDefinition>,
     /// Bare ShipStats without fitting. Used as the base for fitting aggregation.
     base_stats         : HashMap<ShipId, ShipStatsComp>,
-    /// PlayerId -> ShipId (player ship ownership).
-    player_ships       : HashMap<PlayerId, ShipId>,
-    /// ShipId -> PlayerId (reverse lookup).
-    ship_owners        : HashMap<ShipId, PlayerId>,
-    /// ShipId -> ShipTypeId (reverse lookup; used to include ship_type_name in InitialState).
-    ship_type_ids      : HashMap<ShipId, ShipTypeId>,
     /// PlayerId allocation counter.
     player_id_counter  : u64,
     /// Lock-on commands queued by the bot AI during `process_bots()`.
@@ -123,13 +122,8 @@ where
     /// here and injected into the LockSystem at the start of the NEXT tick,
     /// ensuring they are processed exactly like human-issued lock commands.
     pending_bot_lock_commands: Vec<dawn_core::LockOnCommand>,
-    /// Full navigation topology (star systems, gates, bodies). Loaded from
-    /// `data/star_map.toml`; falls back to [`StarMap::builtin`] if absent.
-    star_map: Arc<crate::star_map::StarMap>,
-    /// Jump Gates whose `from_sector` is this node's Sector (ADR-0009).
-    jump_gates: HashMap<JumpGateId, JumpGateDef>,
-    /// Celestial bodies (stars, planets) in this node's Sector (ADR-0025).
-    celestial_bodies: HashMap<CelestialBodyId, CelestialBodyDef>,
+    /// Static navigation topology for this Sector (gates, bodies, star map).
+    sector_map: SectorMap,
     /// Per-Sector population backstop (ADR-0018). Defaults to [`POPULATION_CAP`];
     /// tunable via [`Self::set_population_cap`].
     population_cap: usize,
@@ -167,28 +161,22 @@ impl<S: EventStore> SimulationNode<S> {
             event_store       : store,
             current_tick      : Tick::ZERO,
             id_counter        : 0,
-            ship_index         : HashMap::new(),
-            module_registry    : HashMap::new(),
-            ship_type_registry : HashMap::new(),
-            base_stats         : HashMap::new(),
-            player_ships       : HashMap::new(),
-            ship_owners        : HashMap::new(),
-            ship_type_ids             : HashMap::new(),
-            player_id_counter         : 0,
-            pending_bot_lock_commands : Vec::new(),
-            star_map                  : Arc::new(crate::star_map::StarMap::builtin()),
-            jump_gates                : crate::star_map::StarMap::builtin()
-                .gates_in_sector(sector_id)
-                .into_iter()
-                .map(|g| (g.id, g))
-                .collect(),
-            celestial_bodies          : crate::star_map::StarMap::builtin()
-                .bodies_in_sector(sector_id)
-                .into_iter()
-                .map(|b| (b.id, b))
-                .collect(),
-            population_cap            : POPULATION_CAP,
-            pending_auto_jumps        : Vec::new(),
+            ships             : ShipRegistry::new(),
+            module_registry   : HashMap::new(),
+            ship_type_registry: HashMap::new(),
+            base_stats        : HashMap::new(),
+            player_id_counter : 0,
+            pending_bot_lock_commands: Vec::new(),
+            sector_map        : {
+                let sm = Arc::new(crate::star_map::StarMap::builtin());
+                SectorMap {
+                    gates  : sm.gates_in_sector(sector_id).into_iter().map(|g| (g.id, g)).collect(),
+                    bodies : sm.bodies_in_sector(sector_id).into_iter().map(|b| (b.id, b)).collect(),
+                    star_map: sm,
+                }
+            },
+            population_cap    : POPULATION_CAP,
+            pending_auto_jumps: Vec::new(),
         }
     }
 
@@ -214,28 +202,22 @@ impl<S: EventStore> SimulationNode<S> {
             event_store        : store,
             current_tick       : snapshot.tick,
             id_counter         : snapshot.id_counter,
-            ship_index         : HashMap::new(),
+            ships              : ShipRegistry::new(),
             module_registry    : HashMap::new(),
             ship_type_registry : HashMap::new(),
             base_stats         : HashMap::new(),
-            player_ships       : HashMap::new(),
-            ship_owners        : HashMap::new(),
-            ship_type_ids             : HashMap::new(),
-            player_id_counter         : 0,
-            pending_bot_lock_commands : Vec::new(),
-            star_map                  : Arc::new(crate::star_map::StarMap::builtin()),
-            jump_gates                : crate::star_map::StarMap::builtin()
-                .gates_in_sector(snapshot.sector_id)
-                .into_iter()
-                .map(|g| (g.id, g))
-                .collect(),
-            celestial_bodies          : crate::star_map::StarMap::builtin()
-                .bodies_in_sector(snapshot.sector_id)
-                .into_iter()
-                .map(|b| (b.id, b))
-                .collect(),
-            population_cap            : POPULATION_CAP,
-            pending_auto_jumps        : Vec::new(),
+            player_id_counter  : 0,
+            pending_bot_lock_commands: Vec::new(),
+            sector_map         : {
+                let sm = Arc::new(crate::star_map::StarMap::builtin());
+                SectorMap {
+                    gates  : sm.gates_in_sector(snapshot.sector_id).into_iter().map(|g| (g.id, g)).collect(),
+                    bodies : sm.bodies_in_sector(snapshot.sector_id).into_iter().map(|b| (b.id, b)).collect(),
+                    star_map: sm,
+                }
+            },
+            population_cap    : POPULATION_CAP,
+            pending_auto_jumps: Vec::new(),
         };
 
         for def in modules {
@@ -291,13 +273,13 @@ impl<S: EventStore> SimulationNode<S> {
     /// `celestial_bodies` for this node's Sector immediately.
     pub fn set_star_map(&mut self, map: Arc<crate::star_map::StarMap>) {
         let sid = self.sector_id;
-        self.jump_gates = map.gates_in_sector(sid).into_iter().map(|g| (g.id, g)).collect();
-        self.celestial_bodies = map.bodies_in_sector(sid).into_iter().map(|b| (b.id, b)).collect();
-        self.star_map = map;
+        self.sector_map.gates = map.gates_in_sector(sid).into_iter().map(|g| (g.id, g)).collect();
+        self.sector_map.bodies = map.bodies_in_sector(sid).into_iter().map(|b| (b.id, b)).collect();
+        self.sector_map.star_map = map;
     }
 
     /// Read access to the navigation topology.
-    pub fn star_map(&self) -> &crate::star_map::StarMap { &self.star_map }
+    pub fn star_map(&self) -> &crate::star_map::StarMap { &self.sector_map.star_map }
 
     // ── Identity ──────────────────────────────────────────────────────────────
 
@@ -321,10 +303,10 @@ impl<S: EventStore> SimulationNode<S> {
 
         self.insert_to_world(ship_id, position, velocity);
         self.base_stats.insert(ship_id, base);
-        self.ship_type_ids.insert(ship_id, ship_type_id);
+        self.ships.type_ids.insert(ship_id, ship_type_id);
 
         // Update ShipStatsComp, HullComp, and CapacitorComp to match base stats.
-        if let Some(&entity) = self.ship_index.get(&ship_id) {
+        if let Some(&entity) = self.ships.index.get(&ship_id) {
             self.world.set_ship_stats(entity, base);
             if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
                 *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
@@ -356,7 +338,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// `TransitOp::Request` is applied at Step 7.5 — never directly from a
     /// client command.
     pub fn propose_transit(&mut self, cmd: dawn_core::commands::TransitCommand) -> Result<(), dawn_core::DawnError> {
-        let &entity = self.ship_index.get(&cmd.ship_id)
+        let &entity = self.ships.index.get(&cmd.ship_id)
             .ok_or(dawn_core::DawnError::ShipNotFound(cmd.ship_id))?;
 
         if self.world.transit_state(entity).is_in_transit() {
@@ -379,7 +361,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// (Ship exists and is not already in transit). Used to reject commands
     /// up front, before proposing to the Raft Log (INV-006).
     pub fn can_propose_transit(&self, ship_id: ShipId) -> bool {
-        self.ship_index
+        self.ships.index
             .get(&ship_id)
             .is_some_and(|&entity| !self.world.transit_state(entity).is_in_transit())
     }
@@ -388,7 +370,7 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Look up a Jump Gate originating in this Sector by `gate_id`.
     pub fn jump_gate(&self, gate_id: JumpGateId) -> Option<&JumpGateDef> {
-        self.jump_gates.get(&gate_id)
+        self.sector_map.gates.get(&gate_id)
     }
 
     /// Whether a `JumpCommand` for `ship_id` via `gate_id` would currently be
@@ -397,12 +379,12 @@ impl<S: EventStore> SimulationNode<S> {
     /// `activation_radius`. Used to reject commands up front, before
     /// proposing to the Raft Log (INV-006).
     pub fn can_propose_jump(&self, ship_id: ShipId, gate_id: JumpGateId) -> bool {
-        let Some(&entity) = self.ship_index.get(&ship_id) else { return false };
+        let Some(&entity) = self.ships.index.get(&ship_id) else { return false };
         if self.world.transit_state(entity).is_in_transit() {
             return false;
         }
         if self.world.is_tackled(entity) { return false; }
-        let Some(gate) = self.jump_gates.get(&gate_id) else { return false };
+        let Some(gate) = self.sector_map.gates.get(&gate_id) else { return false };
         let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
         gate.is_in_range(pos.0)
     }
@@ -415,7 +397,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// the target belongs to this Sector, and is at least
     /// `MIN_WARP_DISTANCE` away (closer → use approach instead).
     pub fn can_propose_warp(&self, ship_id: ShipId, target: WarpTarget) -> bool {
-        let Some(&entity) = self.ship_index.get(&ship_id) else { return false };
+        let Some(&entity) = self.ships.index.get(&ship_id) else { return false };
         if self.world.transit_state(entity).is_in_transit() {
             return false;
         }
@@ -426,11 +408,11 @@ impl<S: EventStore> SimulationNode<S> {
         let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
         match target {
             WarpTarget::Gate(gate_id) => {
-                let Some(gate) = self.jump_gates.get(&gate_id) else { return false };
+                let Some(gate) = self.sector_map.gates.get(&gate_id) else { return false };
                 pos.0.distance(gate.position) >= MIN_WARP_DISTANCE
             }
             WarpTarget::Body(body_id) => {
-                let Some(body) = self.celestial_bodies.get(&body_id) else { return false };
+                let Some(body) = self.sector_map.bodies.get(&body_id) else { return false };
                 pos.0.distance(body.position) >= MIN_WARP_DISTANCE
             }
         }
@@ -454,8 +436,8 @@ impl<S: EventStore> SimulationNode<S> {
             tick       : self.current_tick,
         }));
 
-        let from_system = self.star_map.system_for_sector(from);
-        let to_system   = self.star_map.system_for_sector(to);
+        let from_system = self.sector_map.star_map.system_for_sector(from);
+        let to_system   = self.sector_map.star_map.system_for_sector(to);
         if from_system != to_system {
             self.event_store.append(DomainEvent::StarSystemChanged(dawn_core::events::StarSystemChanged {
                 ship_id,
@@ -473,7 +455,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// perspective. Returns `None` if `ship_id` is unknown or not currently
     /// `InTransit`.
     pub fn export_transit(&mut self, ship_id: ShipId, entry_pos: Position) -> Option<ShipSnapshot> {
-        let &entity = self.ship_index.get(&ship_id)?;
+        let &entity = self.ships.index.get(&ship_id)?;
         let to = match self.world.transit_state(entity) {
             dawn_ecs::TransitState::InTransit { to } => to,
             dawn_ecs::TransitState::None => return None,
@@ -489,7 +471,7 @@ impl<S: EventStore> SimulationNode<S> {
         let fitting = self.world.inner().get::<&FittingComp>(entity)
             .map(|f| f.to_snapshot())
             .unwrap_or_else(|_| dawn_core::fitting::FittingSnapshot::empty());
-        let ship_type_id = self.ship_type_ids.get(&ship_id).copied().unwrap_or(ShipTypeId(0));
+        let ship_type_id = self.ships.type_ids.get(&ship_id).copied().unwrap_or(ShipTypeId(0));
 
         // Tackle state is not transferred on sector transit (tacklers are in this
         // sector; they lose the tackle as the ship leaves).
@@ -507,9 +489,9 @@ impl<S: EventStore> SimulationNode<S> {
             tackled_by: Vec::new(),
         };
 
-        self.ship_index.remove(&ship_id);
+        self.ships.index.remove(&ship_id);
         self.world.despawn_ship(entity);
-        self.ship_type_ids.remove(&ship_id);
+        self.ships.type_ids.remove(&ship_id);
         self.base_stats.remove(&ship_id);
 
         self.event_store.append(DomainEvent::SectorTransitCompleted(dawn_core::events::SectorTransitCompleted {
@@ -603,13 +585,13 @@ impl<S: EventStore> SimulationNode<S> {
         // Remove destroyed ships from the ECS and all lookup maps.
         // CLAUDE.md §6: run the Bot System after Combat.
         for ship_id in &combat.destroyed {
-            if let Some(entity) = self.ship_index.remove(ship_id) {
+            if let Some(entity) = self.ships.index.remove(ship_id) {
                 self.world.despawn_ship(entity);
             }
-            self.ship_type_ids.remove(ship_id);
+            self.ships.type_ids.remove(ship_id);
             self.base_stats.remove(ship_id);
-            if let Some(player_id) = self.ship_owners.remove(ship_id) {
-                self.player_ships.remove(&player_id);
+            if let Some(player_id) = self.ships.owners.remove(ship_id) {
+                self.ships.by_player.remove(&player_id);
             }
         }
 
@@ -645,7 +627,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Pair with the event log to reconstruct this exact state on restart.
     pub fn take_snapshot(&self) -> StateSnapshot {
         let mut ships: Vec<ShipSnapshot> = self
-            .ship_index
+            .ships.index
             .iter()
             .filter_map(|(&ship_id, &entity)| {
                 let pos  = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
@@ -658,7 +640,7 @@ impl<S: EventStore> SimulationNode<S> {
                 let tackled_by = self.world.inner().get::<&TackledComp>(entity)
                     .map(|t| t.tacklers.clone())
                     .unwrap_or_default();
-                let ship_type_id = self.ship_type_ids.get(&ship_id).copied().unwrap_or(ShipTypeId(0));
+                let ship_type_id = self.ships.type_ids.get(&ship_id).copied().unwrap_or(ShipTypeId(0));
                 Some(ShipSnapshot {
                     ship_id,
                     ship_type_id,
@@ -702,34 +684,34 @@ impl<S: EventStore> SimulationNode<S> {
     /// The Ship's current approach target, if any (ADR-0015).
     #[cfg(test)]
     pub fn approach_target(&self, ship_id: ShipId) -> Option<dawn_core::ApproachTarget> {
-        let entity = self.ship_index.get(&ship_id)?;
+        let entity = self.ships.index.get(&ship_id)?;
         self.world.inner().get::<&dawn_ecs::components::ApproachComp>(*entity).ok().map(|a| a.target)
     }
 
     /// The Ship's current warp phase, if it is warping (ADR-0022).
     #[cfg(test)]
     pub fn warp_phase(&self, ship_id: ShipId) -> Option<dawn_ecs::components::WarpPhase> {
-        let entity = self.ship_index.get(&ship_id)?;
+        let entity = self.ships.index.get(&ship_id)?;
         self.world.inner().get::<&WarpComp>(*entity).ok().map(|w| w.phase)
     }
 
     /// Look up the current position of a Ship by its ID.
     pub fn get_ship_position(&self, ship_id: ShipId) -> Option<Position> {
-        let entity = self.ship_index.get(&ship_id)?;
+        let entity = self.ships.index.get(&ship_id)?;
         self.world.inner().get::<&PositionComp>(*entity).ok().map(|c| c.0)
     }
 
     /// Look up the current `ShipStatsComp` of a Ship by its ID. Test-only.
     #[cfg(test)]
     pub fn get_ship_stats(&self, ship_id: ShipId) -> Option<ShipStatsComp> {
-        let entity = self.ship_index.get(&ship_id)?;
+        let entity = self.ships.index.get(&ship_id)?;
         self.world.inner().get::<&ShipStatsComp>(*entity).ok().map(|c| *c)
     }
 
     /// Look up the current HP of a Ship by its ID. Test-only.
     #[cfg(test)]
     pub fn get_ship_hp(&self, ship_id: ShipId) -> Option<f32> {
-        let entity = self.ship_index.get(&ship_id)?;
+        let entity = self.ships.index.get(&ship_id)?;
         self.world.inner().get::<&HullComp>(*entity).ok()
             .map(|c| c.current_shield + c.current_armor + c.current_hull)
     }
@@ -743,14 +725,14 @@ impl<S: EventStore> SimulationNode<S> {
     /// Look up the current `CapacitorComp.current` of a Ship by its ID.
     #[cfg(test)]
     pub fn get_ship_capacitor(&self, ship_id: ShipId) -> Option<f32> {
-        let entity = self.ship_index.get(&ship_id)?;
+        let entity = self.ships.index.get(&ship_id)?;
         self.world.inner().get::<&CapacitorComp>(*entity).ok().map(|c| c.current)
     }
 
     /// `(ModuleId, is_active)` for every fitted module on a Ship, across all slots.
     #[cfg(test)]
     pub fn get_fitted_module_ids(&self, ship_id: ShipId) -> Vec<(ModuleId, bool)> {
-        let entity = match self.ship_index.get(&ship_id) {
+        let entity = match self.ships.index.get(&ship_id) {
             Some(&e) => e,
             None => return Vec::new(),
         };
@@ -769,7 +751,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// `adopt_player_ship`.
     #[cfg(test)]
     pub fn set_player_ship(&mut self, ship_id: ShipId) {
-        if let Some(&entity) = self.ship_index.get(&ship_id) {
+        if let Some(&entity) = self.ships.index.get(&ship_id) {
             self.base_stats.insert(ship_id, ShipStatsComp::PLAYER);
             self.world.set_ship_stats(entity, ShipStatsComp::PLAYER);
             if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
@@ -820,9 +802,9 @@ impl<S: EventStore> SimulationNode<S> {
 
         self.insert_to_world(ship_id, pos, Velocity::ZERO);
         self.base_stats.insert(ship_id, base);
-        self.ship_type_ids.insert(ship_id, SHIP_TYPE_MAGPIE);
+        self.ships.type_ids.insert(ship_id, SHIP_TYPE_MAGPIE);
 
-        if let Some(&entity) = self.ship_index.get(&ship_id) {
+        if let Some(&entity) = self.ships.index.get(&ship_id) {
             self.world.set_ship_stats(entity, base);
             if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
                 *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
@@ -832,8 +814,8 @@ impl<S: EventStore> SimulationNode<S> {
         }
 
         // Record ownership before fit_module (needed for is_npc check).
-        self.player_ships.insert(player_id, ship_id);
-        self.ship_owners.insert(ship_id, player_id);
+        self.ships.by_player.insert(player_id, ship_id);
+        self.ships.owners.insert(ship_id, player_id);
 
         use dawn_core::SlotKind;
         self.fit_module(FitModuleCommand {
@@ -875,11 +857,11 @@ impl<S: EventStore> SimulationNode<S> {
     /// Returns `false` (and registers nothing) if the ship is not in this
     /// node's ECS.
     pub fn adopt_player_ship(&mut self, ship_id: ShipId, player_id: PlayerId) -> bool {
-        if !self.ship_index.contains_key(&ship_id) {
+        if !self.ships.index.contains_key(&ship_id) {
             return false;
         }
-        self.player_ships.insert(player_id, ship_id);
-        self.ship_owners.insert(ship_id, player_id);
+        self.ships.by_player.insert(player_id, ship_id);
+        self.ships.owners.insert(ship_id, player_id);
         true
     }
 
@@ -890,7 +872,7 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn spawn_bot_ship(&mut self, spawn_pos: Position) -> (PlayerId, ShipId) {
         let player_id = self.next_player_id();
         let ship_id   = self.spawn_player_ship_at(player_id, spawn_pos);
-        if let Some(&entity) = self.ship_index.get(&ship_id) {
+        if let Some(&entity) = self.ships.index.get(&ship_id) {
             let _ = self.world.inner_mut().insert_one(entity, IsBotComp);
         }
         (player_id, ship_id)
@@ -917,9 +899,9 @@ impl<S: EventStore> SimulationNode<S> {
         }
 
         let mut bots: Vec<BotState> = Vec::new();
-        for (&ship_id, &entity) in &self.ship_index {
+        for (&ship_id, &entity) in &self.ships.index {
             if self.world.inner().get::<&IsBotComp>(entity).is_err() { continue }
-            let Some(&player_id) = self.ship_owners.get(&ship_id) else { continue };
+            let Some(&player_id) = self.ships.owners.get(&ship_id) else { continue };
             let Ok(pos)   = self.world.inner().get::<&PositionComp>(entity) else { continue };
             let Ok(stats) = self.world.inner().get::<&ShipStatsComp>(entity) else { continue };
             let Ok(lock)  = self.world.inner().get::<&LockComp>(entity) else { continue };
@@ -961,10 +943,10 @@ impl<S: EventStore> SimulationNode<S> {
         // ── 2. Snapshot human player target positions ─────────────────────────
         struct TargetInfo { ship_id: ShipId, position: Position }
         let mut targets: Vec<TargetInfo> = Vec::new();
-        for (&ship_id, &entity) in &self.ship_index {
+        for (&ship_id, &entity) in &self.ships.index {
             if self.world.inner().get::<&IsBotComp>(entity).is_ok()  { continue }
             if self.world.inner().get::<&IsNpcComp>(entity).is_ok()  { continue }
-            if !self.ship_owners.contains_key(&ship_id)              { continue }
+            if !self.ships.owners.contains_key(&ship_id)              { continue }
             let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { continue };
             targets.push(TargetInfo { ship_id, position: pos.0 });
         }
@@ -973,7 +955,7 @@ impl<S: EventStore> SimulationNode<S> {
 
         // ── 3. Issue commands (same pipeline as human player) ─────────────────
         // Collect gate list once — shared by all bots this tick.
-        let gates: Vec<(dawn_core::JumpGateId, Position)> = self.jump_gates
+        let gates: Vec<(dawn_core::JumpGateId, Position)> = self.sector_map.gates
             .iter()
             .map(|(&id, def)| (id, def.position))
             .collect();
@@ -1069,7 +1051,7 @@ impl<S: EventStore> SimulationNode<S> {
         use std::collections::HashMap;
 
         // Collect ships with at least one active Tackle module.
-        let tacklers: Vec<(ShipId, f32, Vec<ShipId>, Position)> = self.ship_index.iter()
+        let tacklers: Vec<(ShipId, f32, Vec<ShipId>, Position)> = self.ships.index.iter()
             .filter_map(|(&ship_id, &entity)| {
                 let stats = self.world.inner().get::<&ShipStatsComp>(entity).ok()?;
                 if stats.tackle_range <= 0.0 { return None; }
@@ -1087,7 +1069,7 @@ impl<S: EventStore> SimulationNode<S> {
         let mut desired: HashMap<ShipId, Vec<ShipId>> = HashMap::new();
         for (tackler_id, range, locked, tackler_pos) in &tacklers {
             for &target_id in locked {
-                if let Some(&te) = self.ship_index.get(&target_id) {
+                if let Some(&te) = self.ships.index.get(&target_id) {
                     if let Ok(tp) = self.world.inner().get::<&PositionComp>(te) {
                         if tackler_pos.distance(tp.0) <= *range {
                             desired.entry(target_id).or_default().push(*tackler_id);
@@ -1098,7 +1080,7 @@ impl<S: EventStore> SimulationNode<S> {
         }
 
         // Snapshot current tackle state — single ECS scan.
-        let current: Vec<(ShipId, Entity, Vec<ShipId>)> = self.ship_index.iter()
+        let current: Vec<(ShipId, Entity, Vec<ShipId>)> = self.ships.index.iter()
             .filter_map(|(&sid, &entity)| {
                 let t = self.world.inner().get::<&TackledComp>(entity).ok()?;
                 Some((sid, entity, t.tacklers.clone()))
@@ -1139,7 +1121,7 @@ impl<S: EventStore> SimulationNode<S> {
             for &tid in new_tacklers {
                 events.push(DomainEvent::TackleApplied(TackleApplied { ship_id: target_id, by: tid, tick }));
             }
-            if let Some(&entity) = self.ship_index.get(&target_id) {
+            if let Some(&entity) = self.ships.index.get(&target_id) {
                 let _ = self.world.inner_mut().insert_one(entity, TackledComp { tacklers: new_tacklers.clone() });
             }
         }
@@ -1153,7 +1135,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Does NOT append any event — used by `spawn_ship` and replay.
     fn insert_to_world(&mut self, ship_id: ShipId, position: Position, velocity: Velocity) {
         let entity = self.world.spawn_ship(ship_id, position, velocity);
-        self.ship_index.insert(ship_id, entity);
+        self.ships.index.insert(ship_id, entity);
     }
 
     /// Reconstruct a Ship's full ECS state (stats, hull, capacitor, fitting)
@@ -1161,14 +1143,14 @@ impl<S: EventStore> SimulationNode<S> {
     /// `import_transit` (Sector Transit, ADR-0014). Does NOT append any event.
     fn restore_ship_from_snapshot(&mut self, ship: &ShipSnapshot) {
         self.insert_to_world(ship.ship_id, ship.position, ship.velocity);
-        self.ship_type_ids.insert(ship.ship_id, ship.ship_type_id);
+        self.ships.type_ids.insert(ship.ship_id, ship.ship_type_id);
 
         let base = self.ship_type_registry.get(&ship.ship_type_id)
             .map(|def| ShipStatsComp::from_base(&def.base_stats))
             .unwrap_or(ShipStatsComp::NPC);
         self.base_stats.insert(ship.ship_id, base);
 
-        if let Some(&entity) = self.ship_index.get(&ship.ship_id) {
+        if let Some(&entity) = self.ships.index.get(&ship.ship_id) {
             self.world.set_ship_stats(entity, base);
 
             let fitting = FittingComp::from_snapshot(&ship.fitting, &self.module_registry);
@@ -1199,7 +1181,7 @@ impl<S: EventStore> SimulationNode<S> {
     fn apply_event(&mut self, event: &DomainEvent) {
         match event {
             DomainEvent::ShipSpawned(e) => {
-                if !self.ship_index.contains_key(&e.ship_id) {
+                if !self.ships.index.contains_key(&e.ship_id) {
                     self.insert_to_world(e.ship_id, e.initial_position, Velocity::ZERO);
                     // Restore base_stats from ship type registry
                     let base = self.ship_type_registry
@@ -1207,7 +1189,7 @@ impl<S: EventStore> SimulationNode<S> {
                         .map(|def| ShipStatsComp::from_base(&def.base_stats))
                         .unwrap_or(ShipStatsComp::NPC);
                     self.base_stats.insert(e.ship_id, base);
-                    if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                    if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                         self.world.set_ship_stats(entity, base);
                         if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
                             *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
@@ -1221,7 +1203,7 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             DomainEvent::VelocityChanged(e) => {
-                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     let gap_ticks = e.tick.value().saturating_sub(self.current_tick.value()).saturating_sub(1);
                     let old_vel = self.world.inner().get::<&VelocityComp>(entity).ok().map(|v| v.0).unwrap_or(Velocity::ZERO);
                     if let Ok(mut pos) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
@@ -1239,18 +1221,18 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             DomainEvent::ShipDespawned(e) => {
-                if let Some(entity) = self.ship_index.remove(&e.ship_id) {
+                if let Some(entity) = self.ships.index.remove(&e.ship_id) {
                     self.world.despawn_ship(entity);
                 }
-                self.ship_type_ids.remove(&e.ship_id);
+                self.ships.type_ids.remove(&e.ship_id);
                 self.base_stats.remove(&e.ship_id);
-                if let Some(player_id) = self.ship_owners.remove(&e.ship_id) {
-                    self.player_ships.remove(&player_id);
+                if let Some(player_id) = self.ships.owners.remove(&e.ship_id) {
+                    self.ships.by_player.remove(&player_id);
                 }
             }
 
             DomainEvent::ShipFitted(e) => {
-                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     let fitting = FittingComp::from_snapshot(&e.fitting, &self.module_registry);
                     let base = self.base_stats.get(&e.ship_id).copied().unwrap_or(ShipStatsComp::NPC);
                     let _ = self.world.inner_mut().insert_one(entity, fitting);
@@ -1259,7 +1241,7 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             DomainEvent::ModuleActivated(e) => {
-                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(entity) {
                         if let Some(slot) = fitting.find_slot_mut(e.module_id, e.slot) {
                             slot.is_active = true;
@@ -1271,7 +1253,7 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             DomainEvent::ModuleDeactivated(e) => {
-                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(entity) {
                         if let Some(slot) = fitting.find_slot_mut(e.module_id, e.slot) {
                             slot.is_active = false;
@@ -1285,7 +1267,7 @@ impl<S: EventStore> SimulationNode<S> {
             // TargetLocked: set the LockComp entry to the Locked state
             DomainEvent::TargetLocked(e) => {
                 use dawn_ecs::components::{LockEntry, LockState};
-                if let Some(&entity) = self.ship_index.get(&e.locker_id) {
+                if let Some(&entity) = self.ships.index.get(&e.locker_id) {
                     if let Ok(mut lock) = self.world.inner_mut().get::<&mut LockComp>(entity) {
                         if let Some(entry) = lock.entries.iter_mut()
                             .find(|en| en.target_id == e.target_id)
@@ -1300,7 +1282,7 @@ impl<S: EventStore> SimulationNode<S> {
 
             // LockLost: remove the entry from LockComp
             DomainEvent::LockLost(e) => {
-                if let Some(&entity) = self.ship_index.get(&e.locker_id) {
+                if let Some(&entity) = self.ships.index.get(&e.locker_id) {
                     if let Ok(mut lock) = self.world.inner_mut().get::<&mut LockComp>(entity) {
                         lock.entries.retain(|en| en.target_id != e.target_id);
                     }
@@ -1310,7 +1292,7 @@ impl<S: EventStore> SimulationNode<S> {
             DomainEvent::WeaponFired(_) => {}
 
             DomainEvent::DamageTaken(e) => {
-                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
                         hull.current_shield = e.current_shield;
                         hull.current_armor  = e.current_armor;
@@ -1323,13 +1305,13 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             DomainEvent::ShipDestroyed(e) => {
-                if let Some(entity) = self.ship_index.remove(&e.ship_id) {
+                if let Some(entity) = self.ships.index.remove(&e.ship_id) {
                     self.world.despawn_ship(entity);
                 }
-                self.ship_type_ids.remove(&e.ship_id);
+                self.ships.type_ids.remove(&e.ship_id);
                 self.base_stats.remove(&e.ship_id);
-                if let Some(player_id) = self.ship_owners.remove(&e.ship_id) {
-                    self.player_ships.remove(&player_id);
+                if let Some(player_id) = self.ships.owners.remove(&e.ship_id) {
+                    self.ships.by_player.remove(&player_id);
                 }
             }
 
@@ -1347,7 +1329,7 @@ impl<S: EventStore> SimulationNode<S> {
             // Tackle (ADR-0024): TackledComp is managed live; on replay, apply
             // the same add/remove logic to keep the component consistent.
             DomainEvent::TackleApplied(e) => {
-                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     let has_comp = {
                         if let Ok(mut tackled) = self.world.inner_mut().get::<&mut TackledComp>(entity) {
                             if !tackled.tacklers.contains(&e.by) {
@@ -1363,7 +1345,7 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             DomainEvent::TackleReleased(e) => {
-                if let Some(&entity) = self.ship_index.get(&e.ship_id) {
+                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     let should_remove = {
                         if let Ok(mut tackled) = self.world.inner_mut().get::<&mut TackledComp>(entity) {
                             tackled.tacklers.retain(|&id| id != e.by);
@@ -1489,7 +1471,7 @@ mod tests {
 
         node.propose_transit(dawn_core::commands::TransitCommand { ship_id, to: SectorId(1) }).unwrap();
 
-        let entity = *node.ship_index.get(&ship_id).unwrap();
+        let entity = *node.ships.index.get(&ship_id).unwrap();
         assert_eq!(node.world.transit_state(entity), dawn_ecs::TransitState::InTransit { to: SectorId(1) });
 
         let last = node.event_store().all_records().last().unwrap();
@@ -1531,7 +1513,7 @@ mod tests {
         let snapshot = node.export_transit(ship_id, entry_pos).expect("ship should export");
         assert_eq!(snapshot.ship_id, ship_id);
 
-        assert!(node.ship_index.get(&ship_id).is_none(), "ship must leave the from-sector ECS");
+        assert!(node.ships.index.get(&ship_id).is_none(), "ship must leave the from-sector ECS");
         assert_eq!(node.ship_count(), 0);
 
         let last = node.event_store().all_records().last().unwrap();
@@ -1645,7 +1627,7 @@ mod tests {
         let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(10_000.0, 0.0, 0.0), Velocity::ZERO);
         node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) });
 
-        let entity = *node.ship_index.get(&chaser).unwrap();
+        let entity = *node.ships.index.get(&chaser).unwrap();
         node.process_approach();
         let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
         assert!(thrust.direction.dx > 0.9, "thrust should point toward +X target, got {:?}", thrust.direction);
@@ -1696,12 +1678,12 @@ mod tests {
         node.apply_approach_command_owned(player, dawn_core::ApproachCommand { ship_id: chaser, target: dawn_core::ApproachTarget::Ship(target) });
 
         // Remove the target from the ECS, then run the approach step.
-        let target_entity = node.ship_index.remove(&target).unwrap();
+        let target_entity = node.ships.index.remove(&target).unwrap();
         node.world.despawn_ship(target_entity);
 
         node.process_approach();
         assert_eq!(node.approach_target(chaser), None, "approach must drop when target is gone");
-        let entity = *node.ship_index.get(&chaser).unwrap();
+        let entity = *node.ships.index.get(&chaser).unwrap();
         assert!(node.world.inner().get::<&ThrustComp>(entity).unwrap().is_braking, "ship should brake when target vanishes");
     }
 
@@ -1801,7 +1783,7 @@ mod tests {
         fn ticks_to_engage(mass: f32) -> u32 {
             let mut node = mem_node();
             let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-            let entity = *node.ship_index.get(&ship).unwrap();
+            let entity = *node.ships.index.get(&ship).unwrap();
             let mut stats = *node.world.inner().get::<&ShipStatsComp>(entity).unwrap();
             stats.mass = mass;
             node.world.set_ship_stats(entity, stats);
@@ -1825,7 +1807,7 @@ mod tests {
         // Track warp speed each tick. A cliff stop would jump straight from
         // cruise (~WARP_SPEED) to zero; a smooth ramp produces intermediate
         // steps well below cruise before stopping.
-        let entity = *node.ship_index.get(&ship).unwrap();
+        let entity = *node.ships.index.get(&ship).unwrap();
         let mut saw_decel_step = false;
         for _ in 0..100 {
             node.tick();
@@ -1910,7 +1892,7 @@ mod tests {
         let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
         node.set_player_ship(ship_id);
 
-        let entity = *node.ship_index.get(&ship_id).unwrap();
+        let entity = *node.ships.index.get(&ship_id).unwrap();
         node.world.set_transit_state(entity, dawn_ecs::TransitState::InTransit { to: SectorId(1) });
 
         node.apply_move_command(ship_id, Position::new(10000.0, 0.0, 0.0));
@@ -1925,7 +1907,7 @@ mod tests {
         node.set_player_ship(ship_id);
         node.apply_move_command(ship_id, Position::new(10000.0, 0.0, 0.0));
 
-        let entity = *node.ship_index.get(&ship_id).unwrap();
+        let entity = *node.ships.index.get(&ship_id).unwrap();
         let direction_before = node.world.inner().get::<&ThrustComp>(entity).unwrap().direction;
 
         node.world.set_transit_state(entity, dawn_ecs::TransitState::InTransit { to: SectorId(1) });
@@ -2628,7 +2610,7 @@ mod tests {
 
         // Ship A fits and activates the Fold Disruptor.
         fit_fold_disruptor(&mut node, ship_a);
-        let owner_a = node.ship_owners.get(&ship_a).copied().unwrap();
+        let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
         node.activate_module_owned(owner_a, ActivateModuleCommand {
             ship_id  : ship_a,
             module_id: MODULE_FOLD_DISRUPTOR,
@@ -2644,7 +2626,7 @@ mod tests {
         }
 
         // Ship B should now be tackled → warp must be denied.
-        let gate_id = node.jump_gates.keys().next().copied().unwrap();
+        let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
         assert!(!node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)),
             "tackled ship must not be allowed to warp");
         assert!(!node.can_propose_jump(ship_b, gate_id),
@@ -2668,7 +2650,7 @@ mod tests {
         };
 
         fit_fold_disruptor(&mut node, ship_a);
-        let owner_a = node.ship_owners.get(&ship_a).copied().unwrap();
+        let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
         node.activate_module_owned(owner_a, ActivateModuleCommand {
             ship_id  : ship_a,
             module_id: MODULE_FOLD_DISRUPTOR,
@@ -2680,7 +2662,7 @@ mod tests {
             node.tick_with_lock_commands(&[lock_cmd.clone()]);
         }
 
-        let gate_id = node.jump_gates.keys().next().copied().unwrap();
+        let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
         assert!(!node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)), "should be tackled first");
 
         // Destroy the tackler: it should no longer appear in live_tackler_ids
@@ -2713,7 +2695,7 @@ mod tests {
         };
 
         fit_fold_disruptor(&mut node, ship_a);
-        let owner_a = node.ship_owners.get(&ship_a).copied().unwrap();
+        let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
         node.activate_module_owned(owner_a, ActivateModuleCommand {
             ship_id  : ship_a,
             module_id: MODULE_FOLD_DISRUPTOR,
@@ -2725,7 +2707,7 @@ mod tests {
             node.tick_with_lock_commands(&[lock_cmd.clone()]);
         }
 
-        let gate_id = node.jump_gates.keys().next().copied().unwrap();
+        let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
         assert!(!node.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)), "should be tackled before snapshot");
 
         // Take snapshot and verify the tackled_by field is populated.
@@ -2806,7 +2788,7 @@ mod tests {
         }
 
         // Confirm bot is tackled.
-        let gate_id = node.jump_gates.keys().next().copied().unwrap();
+        let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
         assert!(!node.can_propose_warp(bot_ship_id, dawn_core::WarpTarget::Gate(gate_id)), "bot should be tackled");
 
         // Damage bot below 50% HP.

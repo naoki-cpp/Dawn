@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use dawn_event_store::FileEventStore;
 
 use crate::node::SimulationNode;
-use crate::snapshot::StateSnapshot;
+use super::snapshot::StateSnapshot;
 
 /// Where checkpoints are written and how often.
 #[derive(Debug, Clone)]

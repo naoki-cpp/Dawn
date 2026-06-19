@@ -20,7 +20,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// ]}
     /// ```
     pub fn build_player_fitting_json(&self, ship_id: ShipId) -> Option<String> {
-        let entity = self.ship_index.get(&ship_id)?;
+        let entity = self.ships.index.get(&ship_id)?;
         let fitting = self.world.inner().get::<&FittingComp>(*entity).ok()?;
 
         let mut modules: Vec<serde_json::Value> = Vec::new();
@@ -62,7 +62,7 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Full-world `InitialState` (every ship). Used for non-AoI callers.
     pub fn build_initial_state_json(&self) -> String {
-        self.initial_state_json(self.ship_index.keys().copied())
+        self.initial_state_json(self.ships.index.keys().copied())
     }
 
     /// `InitialState` scoped to an observer's Area of Interest: only ships in the
@@ -76,7 +76,7 @@ impl<S: EventStore> SimulationNode<S> {
         let ships: Vec<serde_json::Value> =
             ship_ids.filter_map(|ship_id| self.ship_state_json(ship_id)).collect();
 
-        let bodies: Vec<serde_json::Value> = self.celestial_bodies.values().map(|b| {
+        let bodies: Vec<serde_json::Value> = self.sector_map.bodies.values().map(|b| {
             serde_json::json!({
                 "id"           : b.id.0,
                 "kind"         : match b.kind {
@@ -100,12 +100,12 @@ impl<S: EventStore> SimulationNode<S> {
     /// Per-ship state object (position, stats, hull, ownership). Shared by
     /// `InitialState` and `AoiEnter` (ADR-0019). `None` if the ship is gone.
     pub fn ship_state_json(&self, ship_id: ShipId) -> Option<serde_json::Value> {
-        let entity  = self.ship_index.get(&ship_id)?;
+        let entity  = self.ships.index.get(&ship_id)?;
         let pos     = self.world.inner().get::<&PositionComp>(*entity).ok()?.0;
         let stats   = self.world.inner().get::<&ShipStatsComp>(*entity).ok()?;
         let hull    = self.world.inner().get::<&HullComp>(*entity).ok()?;
-        let is_player = self.ship_owners.contains_key(&ship_id);
-        let ship_type_name = self.ship_type_ids.get(&ship_id)
+        let is_player = self.ships.owners.contains_key(&ship_id);
+        let ship_type_name = self.ships.type_ids.get(&ship_id)
             .and_then(|tid| self.ship_type_registry.get(tid))
             .map(|def| def.name.as_str())
             .unwrap_or("Unknown");
@@ -140,7 +140,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// the AoI cell grid. Iteration order is unspecified, but `CellGrid` sorts
     /// each bucket, so query results are deterministic regardless.
     pub fn ship_positions(&self) -> Vec<(ShipId, Position)> {
-        self.ship_index.iter().filter_map(|(&id, &entity)| {
+        self.ships.index.iter().filter_map(|(&id, &entity)| {
             let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
             Some((id, pos))
         }).collect()

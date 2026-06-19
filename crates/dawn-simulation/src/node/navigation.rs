@@ -31,7 +31,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// ship itself, or a `Gate` target does not originate in this Sector.
     pub fn apply_approach_command(&mut self, ship_id: ShipId, target: dawn_core::ApproachTarget) -> bool {
         use dawn_core::ApproachTarget;
-        let &entity = match self.ship_index.get(&ship_id) {
+        let &entity = match self.ships.index.get(&ship_id) {
             Some(e) => e,
             None    => return false,
         };
@@ -40,7 +40,7 @@ impl<S: EventStore> SimulationNode<S> {
         }
         match target {
             ApproachTarget::Ship(target_id) => {
-                if ship_id == target_id || !self.ship_index.contains_key(&target_id) {
+                if ship_id == target_id || !self.ships.index.contains_key(&target_id) {
                     return false;
                 }
             }
@@ -74,7 +74,7 @@ impl<S: EventStore> SimulationNode<S> {
         if !self.can_propose_warp(ship_id, target) {
             return false;
         }
-        let &entity = match self.ship_index.get(&ship_id) {
+        let &entity = match self.ships.index.get(&ship_id) {
             Some(e) => e,
             None    => return false,
         };
@@ -131,7 +131,7 @@ impl<S: EventStore> SimulationNode<S> {
             let resolved = match warp.target {
                 WarpTarget::Gate(gate_id) => self.jump_gate(gate_id)
                     .map(|g| (g.position, g.activation_radius * WARP_ARRIVAL_FACTOR, warp.auto_jump.then_some(gate_id))),
-                WarpTarget::Body(body_id) => self.celestial_bodies.get(&body_id)
+                WarpTarget::Body(body_id) => self.sector_map.bodies.get(&body_id)
                     .map(|b| (b.position, b.radius * BODY_WARP_ARRIVAL_FACTOR, None)),
             };
             let Some((dest_pos, arrival, auto_jump_gate)) = resolved else {
@@ -265,7 +265,7 @@ impl<S: EventStore> SimulationNode<S> {
             // Resolve the target's current position and the arrival distance.
             // `None` means the target no longer exists.
             let resolved: Option<(Position, f32)> = match target {
-                ApproachTarget::Ship(target_id) => self.ship_index.get(&target_id)
+                ApproachTarget::Ship(target_id) => self.ships.index.get(&target_id)
                     .and_then(|&te| self.world.inner().get::<&PositionComp>(te).ok().map(|p| (p.0, SHIP_ARRIVAL_RADIUS))),
                 // Stop comfortably inside the gate's activation radius so the
                 // jump prompt becomes available on arrival (ADR-0015).

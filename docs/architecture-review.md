@@ -255,9 +255,9 @@ src/
 
 ---
 
-### Phase 3 — 高リスク・将来への投資
+### Phase 3 — 高リスク・将来への投資 ✅ 完了 (2026-06-19)
 
-**P3-1: `SimulationNode` の責務分離（本格リファクタ）**
+**P3-1: `SimulationNode` の責務分離（本格リファクタ）** ✅
 
 Phase 2 のサブモジュール化後に型分離を実施:
 
@@ -278,7 +278,7 @@ pub struct ShipRegistry {
 
 `SimulationNode` はこれらを保持するオーナーとして残り、サイズは現在の 1/3 程度に。
 
-**P3-2: snapshot / checkpoint 統合**
+**P3-2: snapshot / checkpoint 統合** ✅
 
 ```
 src/persistence/

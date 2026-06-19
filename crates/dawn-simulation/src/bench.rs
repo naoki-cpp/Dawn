@@ -3,8 +3,8 @@
 use crate::node::SimulationNode;
 use crate::cluster::MultiNodeCluster;
 use crate::spawner::{generate_ships, SpawnConfig};
-use crate::{checkpoint, ship_types, aoi};
-use crate::snapshot::StateSnapshot;
+use crate::{persistence, ship_types, aoi};
+use crate::persistence::StateSnapshot;
 use crate::serve::AOI_CELL_SIZE;
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, Velocity};
 use dawn_event_store::FileEventStore;
@@ -284,7 +284,7 @@ pub(crate) fn run_phase3_demo() {
         // ADR-0017 8A-7: drive snapshotting + hot-log compaction on a fixed
         // logical-tick cadence. The scheduler saves the authoritative snapshot
         // and compacts the hot log behind it (prefix → cold archive).
-        let mut scheduler = checkpoint::CheckpointScheduler::new(checkpoint::CheckpointConfig {
+        let mut scheduler = persistence::CheckpointScheduler::new(persistence::CheckpointConfig {
             interval_ticks: (P3_TICKS / 2) as u64,
             snapshot_path : snapshot_path.clone(),
             cold_path     : cold_path.clone(),

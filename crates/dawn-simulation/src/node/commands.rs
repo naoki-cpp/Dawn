@@ -35,7 +35,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Steer `ship_id` toward `target`. Cancels any active warp/approach.
     /// No-op if the ship is unknown, in transit, or in committed warp.
     pub fn apply_move_command(&mut self, ship_id: ShipId, target: Position) {
-        let entity = match self.ship_index.get(&ship_id) {
+        let entity = match self.ships.index.get(&ship_id) {
             Some(&e) => e,
             None     => return,
         };
@@ -74,7 +74,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// The movement system applies thrust opposite to velocity each tick until
     /// the ship stops. Cancels any active thrust direction.
     pub fn apply_stop_command(&mut self, ship_id: ShipId) {
-        let entity = match self.ship_index.get(&ship_id) {
+        let entity = match self.ships.index.get(&ship_id) {
             Some(&e) => e,
             None     => return,
         };
@@ -96,7 +96,7 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// Used by `_owned` command variants and external player-command dispatch.
     pub fn owns_ship(&self, player_id: PlayerId, ship_id: ShipId) -> bool {
-        self.ship_owners.get(&ship_id) == Some(&player_id)
+        self.ships.owners.get(&ship_id) == Some(&player_id)
     }
 
     /// `apply_stop_command` wrapped with ownership check.
@@ -170,7 +170,7 @@ impl<S: EventStore> SimulationNode<S> {
         active   : bool,
     ) -> bool {
         use dawn_core::events::{ModuleActivated, ModuleDeactivated};
-        let entity = match self.ship_index.get(&ship_id).copied() {
+        let entity = match self.ships.index.get(&ship_id).copied() {
             Some(e) => e,
             None    => return false,
         };
@@ -221,13 +221,13 @@ impl<S: EventStore> SimulationNode<S> {
             Some(d) => d,
             None    => return false,
         };
-        let entity = match self.ship_index.get(&cmd.ship_id).copied() {
+        let entity = match self.ships.index.get(&cmd.ship_id).copied() {
             Some(e) => e,
             None    => return false,
         };
 
         use dawn_core::fitting::ActivationMode;
-        let is_npc = self.ship_owners.get(&cmd.ship_id).is_none();
+        let is_npc = self.ships.owners.get(&cmd.ship_id).is_none();
         let is_active = match def.activation_mode {
             ActivationMode::Passive => true,
             ActivationMode::Active  => is_npc,

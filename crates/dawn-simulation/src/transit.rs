@@ -11,7 +11,7 @@
 //!   and appends `SectorTransitCompleted`. Other nodes ignore it.
 
 use crate::node::SimulationNode;
-use crate::snapshot::ShipSnapshot;
+use crate::persistence::ShipSnapshot;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{JumpGateId, Position, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
