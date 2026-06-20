@@ -22,7 +22,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027） |
 | ファイルサイズ | A− | P7-1/P7-2 + AoI テスト移動で node/mod.rs 514行に縮小。全ファイル 700行以下 |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。近似ロジック解消 |
-| 重複 | A− | `_owned` 4ペアは3行ラッパーで許容。P6-1 で system 間のクエリ手書きも解消 |
+| 重複 | B+ | `_owned` ラッパーは許容だが、WS 境界（ws_server / protocol）が dawn-simulation と dawn-sector-node で重複（M-4）|
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。TCP transport も trait 境界内に収まる |
 | AI開発由来 | B+ | 命名汚染なし。残る密結合は `SectorSimulatorActor` と `SimulationNode` 境界 |
 
@@ -109,6 +109,52 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 `SimulationNode` の変更が即 Actor に波及する。
 8D-2a/2b/2c で `dawn-replication` 配線が入り、イベント flush 境界と TCP transport 境界は明確になった。
 ただし `SimulationNode` の公開メソッド変更が Actor に波及しやすい構造は残る。
+
+#### M-4: クライアント配線層が `dawn-simulation` と `dawn-sector-node` で丸ごと重複
+
+`dawn-sector-node` の WS/プロトコル/データロード層は `dawn-simulation` の**手動コピー**で、
+3ファイルすべてが冒頭コメントで「Adapted from …」と明記している。
+`protocol.rs` には「**kept in sync manually**」とまで書かれており、保守負債が明示されている。
+
+```
+dawn-simulation/src/ws_server.rs       (199) ┐ WsClientConnection / WsServer /
+dawn-sector-node/src/ws_server.rs      (153) ┘ PlayerSession がほぼ同一
+dawn-simulation/src/protocol.rs        (309) ┐ parse_client_command / parse_slot_kind /
+dawn-sector-node/src/protocol.rs       (243) ┘ domain_event_to_json / JSON DTO が共通
+dawn-simulation/src/data_loader/*.rs   (約470)┐ load_modules / load_ship_types /
+dawn-sector-node/src/data_loader.rs    (178) ┘ parse_* が共通
+```
+
+`dawn-actor/src/client_connection.rs` のドキュメントコメントが `WsClientConnection (ws_server.rs)`
+を参照しており、**本来の置き場が `dawn-actor` であることを示唆**している。
+
+現状の整合性: 調査時点では `domain_event_to_json` が両者とも同じ 18 種の `DomainEvent` を
+カバーし、`speed_multiplier` 等のデフォルトも一致しており**機能ドリフトは無い**。
+ただしこれは手動同期に依存しており、19 個目のイベントを追加して片方しか更新しないと
+**一方の経路のクライアントだけ無言で取りこぼす**潜在バグになる。
+
+方針案:
+- `WsClientConnection` / `WsServer` / `PlayerSession` を `dawn-actor` へ移動
+  （`dawn-actor` に `tokio-tungstenite` 依存を追加。両クレートが既に `dawn-actor` 依存）
+- `parse_client_command` / `domain_event_to_json` と JSON DTO、TOML ローダーを共通モジュールへ集約
+- `redirect_json`（Jump Redirect）のような片側固有関数は呼び出し側クレートに残す
+
+#### M-5（機能ギャップ）: 受信した replication batch が適用されていない
+
+`dawn-sector-node/src/main.rs` の tick ループは、peer から受信した `LogBatch` を
+ログ出力するだけで **node 状態に適用していない**。送信側（`repl_transport.broadcast`）は
+動作しているが、受信側が破棄しているため隣接セクター間の状態複製が実際には成立しない。
+
+```rust
+while let Ok(batch) = repl_rx.try_recv() {
+    // Full anti-entropy apply is 8D-2d scope; log for observability.
+    eprintln!("[Node] recv repl batch ...");   // ← 適用していない
+}
+```
+
+コメントは「8D-2d scope」とするが 8D-2d（SnapshotTransfer）は完了済みで、この適用処理とは別物。
+コメントが誤解を招く。8D-5 実機検証の前に「受信 batch を `apply_event` 経由で適用する」
+配線が必要か、それとも第1次検証では single-sector に限定するかを判断すべき。
 
 ---
 
