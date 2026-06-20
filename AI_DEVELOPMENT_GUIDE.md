@@ -1095,7 +1095,7 @@ Combat / Fitting ロジックは引き続き dawn-ecs / dawn-core 内に実装�
 | `dawn-event-store` | Event Log の永続化。Append, Read, Snapshot（InMemory + File） | dawn-core, serde | ネットワーク、ECS |
 | `dawn-consensus` | Raft実装（ADR-0014）。Leader選出, RaftActor, RaftTransport（In-Process / TCP）, TcpRaftTransport（8D-3: 4-byte LE + postcard / LAN plaintext / per-peer 自動再接続） | dawn-core, serde, rand, tokio, postcard, thiserror | ネットワーク、ECS、EventStore |
 | `dawn-actor` | クライアント転送境界。ClientConnection trait（+ InProcessConnection / WsClientConnection 実装） | dawn-core, tokio | dawn-ecs, dawn-simulation |
-| `dawn-replication` | 追記ログのゴシップ配布境界。8D-2a: InMemoryReplicationBus + ReplicationTransport。8D-2b: AntiEntropy（gap 検出・重複/overlap 判定・`iter_from` suffix 応答）。8D-2c: TcpReplicationTransport（4-byte length prefix + postcard / LAN plaintext）。8D-2d: SnapshotTransfer（Serialize+DeserializeOwned ジェネリック / 256 MiB cap） | dawn-core, dawn-event-store, serde, postcard, tokio, thiserror | dawn-ecs, dawn-sector, dawn-consensus, dawn-simulation |
+| `dawn-replication` | 追記ログのゴシップ配布境界。8D-2a: InMemoryReplicationBus + ReplicationTransport。8D-2b: AntiEntropy（gap 検出・重複/overlap 判定・`iter_from` suffix 応答）。8D-2c: TcpReplicationTransport（4-byte length prefix + postcard / LAN plaintext）。8D-2d: SnapshotTransfer（Serialize+DeserializeOwned ジェネリック / 256 MiB cap）。消費側: ReplicaSet（peer セクターごとに gap 検出・冪等・順序保持で複製ログを保持・M-5） | dawn-core, dawn-event-store, serde, postcard, tokio, thiserror | dawn-ecs, dawn-sector, dawn-consensus, dawn-simulation |
 | `dawn-sector` | Sector単位のゲームロジック。SimulationNode（Tick実装・コマンド処理・Transit・Warp・Bot AI・AoI）, SpawnConfig, Galaxy, StateSnapshot, CheckpointScheduler, TiDi計算（ADR-0026）。**分類軸**: トポロジー（セクター・ゲート）を知る。Event Store への書き込みまで責任を持つ。dawn-ecs の systems を呼び出し、返ってきた `Vec<DomainEvent>` を store に記録する | dawn-core, dawn-ecs, dawn-event-store, dawn-consensus, serde, postcard, tokio | ネットワークI/O、WebSocket、ファイルI/O直接 |
 | `dawn-simulation` | 実行バイナリ・配線のみ。MultiNodeCluster（RaftActor 配線含む）, WsServer（Godot WebSocket接続）, 負荷生成, DataLoader（TOML読み込み） | 上記全て + dawn-sector + rand + tokio-tungstenite + toml | ゲームロジックの直接実装 |
 | `dawn-sector-node` | 本番実行バイナリ（8D-4）。TcpRaftTransport + TcpReplicationTransport を TOML 静的 config で配線。3 プロセスで 3 セクタクラスタ。Jump 時は Redirect JSON でクライアントを宛先 WS へ誘導 | dawn-core, dawn-sector, dawn-consensus, dawn-replication, dawn-actor, serde, serde_json, tokio, tokio-tungstenite, toml, anyhow, rand | ゲームロジックの直接実装 |
@@ -1251,5 +1251,5 @@ AIは AI_DEVELOPMENT_GUIDE.md を自律的に変更してはならない。
 
 *最終更新: 2026-06-19（肥大化解消 — §1 スコープの ADR ごと実装メモを ADR 参照テーブルに圧縮、§6 Tick 処理順序を docs/tick-model.md §3 へ委譲（順序と境界のみ残置）。不変条件・禁止事項の文言は不変。人間承認済み）*
 *前回更新: 2026-06-18（ADR-0024 Tackle / ADR-0025 天体 実装反映）*
-*対応ADR: ADR-0001 〜 ADR-0025（ADR-0020 Simulation LoD は deferred）*
+*対応ADR: ADR-0001 〜 ADR-0027（ADR-0020 Simulation LoD は deferred）*
 *次回レビュー予定: Phase 8D（分散インフラ）設計時 / Signature Resolution 着手時*
