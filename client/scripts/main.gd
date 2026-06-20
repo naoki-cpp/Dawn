@@ -170,11 +170,22 @@ func _process(delta: float) -> void:
 			_jump_notice = ""
 	_update_hud()
 
+## Converts a server-space position (Y-up, +Z) into Godot world space (Y-up,
+## -Z), applying WORLD_SCALE. Shared by gate/body marker spawning and gate
+## picking, which all place a Node3D at a server-given position.
+func _server_to_godot_pos(p: Vector3) -> Vector3:
+	return Vector3(p.x, p.y, -p.z) * WORLD_SCALE
+
+## Frees every child of `root`. Shared by gate/body marker respawning, which
+## both rebuild their marker set from scratch on each call.
+func _clear_children(root: Node) -> void:
+	for child: Node in root.get_children():
+		child.queue_free()
+
 ## Spawns a visual marker for every Jump Gate in the player's current Star
 ## System (ADR-0009). Re-run on Star System change to swap markers.
 func _spawn_gate_markers() -> void:
-	for child: Node in _gates_root.get_children():
-		child.queue_free()
+	_clear_children(_gates_root)
 
 	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
@@ -182,7 +193,7 @@ func _spawn_gate_markers() -> void:
 		var radius  : float   = g.get("activation_radius", 0.0) as float
 
 		var marker: Node3D = Node3D.new()
-		marker.position = Vector3(gate_pos.x, gate_pos.y, -gate_pos.z) * WORLD_SCALE
+		marker.position = _server_to_godot_pos(gate_pos)
 		_gates_root.add_child(marker)
 
 		var ring: MeshInstance3D = MeshInstance3D.new()
@@ -214,8 +225,7 @@ func _spawn_gate_markers() -> void:
 func _spawn_body_markers() -> void:
 	if _bodies_root == null:
 		return
-	for child: Node in _bodies_root.get_children():
-		child.queue_free()
+	_clear_children(_bodies_root)
 	_selected_body_id = -1
 
 	for entry: Variant in _bodies:
@@ -227,8 +237,7 @@ func _spawn_body_markers() -> void:
 		var radius  : float   = b.get("radius",       1.0) as float
 		var spec    : float   = b.get("spectral_type", 0.0) as float
 
-		## Convert server coords → Godot (note -Z inversion).
-		var godot_pos : Vector3 = Vector3(b_pos.x, b_pos.y, -b_pos.z) * WORLD_SCALE
+		var godot_pos : Vector3 = _server_to_godot_pos(b_pos)
 
 		var marker: Node3D = Node3D.new()
 		marker.position = godot_pos
@@ -461,6 +470,14 @@ func _check_double_click(pos: Vector2) -> bool:
 
 # -- Ship picking (screen position -> nearest ship ID) ------------------------
 
+## Perpendicular distance from world point `p` to the ray (`from`, `dir`),
+## packed as (dist, t) — `t` is the ray parameter at the closest approach
+## (t <= 0 means `p` is behind the camera). Shared by ship/gate/body picking,
+## which otherwise only differ in candidate source and pick radius.
+func _ray_point_distance(from: Vector3, dir: Vector3, p: Vector3) -> Vector2:
+	var t: float = (p - from).dot(dir)
+	return Vector2(p.distance_to(from + dir * t), t)
+
 ## Returns the ship_id whose node is closest to the click ray (within 500
 ## Godot units), excluding the player's own ship. -1 if nothing is hit.
 func _pick_ship_at(screen_pos: Vector2) -> int:
@@ -473,12 +490,10 @@ func _pick_ship_at(screen_pos: Vector2) -> int:
 	for ship_id: int in _ships:
 		if ship_id == _player_ship_id:
 			continue
-		var p  : Vector3 = (_ships[ship_id] as Node3D).global_position
-		var t  : float   = (p - from).dot(dir)
-		var closest_pt: Vector3 = from + dir * t
-		var dist: float = p.distance_to(closest_pt)
-		if dist < 500.0 and t > 0.0 and dist < closest_dist:
-			closest_dist = dist
+		var p     : Vector3 = (_ships[ship_id] as Node3D).global_position
+		var dt    : Vector2 = _ray_point_distance(from, dir, p)
+		if dt.x < 500.0 and dt.y > 0.0 and dt.x < closest_dist:
+			closest_dist = dt.x
 			closest_id   = ship_id
 	return closest_id
 
@@ -501,15 +516,11 @@ func _pick_gate_at(screen_pos: Vector2) -> int:
 	var closest_id  : int   = -1
 	var closest_dist: float = 1e9
 	for gate: Variant in _gates:
-		var g: Dictionary = gate as Dictionary
-		var gpos_server: Vector3 = g.get("position", Vector3.ZERO) as Vector3
-		## Server coords -> Godot coords (Z flip + scale)
-		var p: Vector3 = Vector3(gpos_server.x, gpos_server.y, -gpos_server.z) * WORLD_SCALE
-		var t: float   = (p - from).dot(dir)
-		var closest_pt: Vector3 = from + dir * t
-		var dist: float = p.distance_to(closest_pt)
-		if dist < 300.0 and t > 0.0 and dist < closest_dist:
-			closest_dist = dist
+		var g  : Dictionary = gate as Dictionary
+		var p  : Vector3 = _server_to_godot_pos(g.get("position", Vector3.ZERO) as Vector3)
+		var dt : Vector2 = _ray_point_distance(from, dir, p)
+		if dt.x < 300.0 and dt.y > 0.0 and dt.x < closest_dist:
+			closest_dist = dt.x
 			closest_id   = g.get("gate_id", -1) as int
 	return closest_id
 
@@ -531,9 +542,8 @@ func _pick_body_at(screen_pos: Vector2) -> int:
 	for marker: Node in _bodies_root.get_children():
 		if not marker.has_meta("body_id"):
 			continue
-		var p    : Vector3 = (marker as Node3D).global_position
-		var t    : float   = (p - from).dot(dir)
-		var dist : float   = p.distance_to(from + dir * t)
+		var p  : Vector3 = (marker as Node3D).global_position
+		var dt : Vector2 = _ray_point_distance(from, dir, p)
 		## Pick radius scales with logical body radius (bodies are large objects).
 		var b_radius: float = 0.0
 		for entry: Variant in _bodies:
@@ -542,8 +552,8 @@ func _pick_body_at(screen_pos: Vector2) -> int:
 				b_radius = (b.get("radius", 1.0) as float) * WORLD_SCALE * 0.15
 				break
 		var pick_radius: float = maxf(b_radius, 400.0)
-		if dist < pick_radius and t > 0.0 and dist < closest_dist:
-			closest_dist = dist
+		if dt.x < pick_radius and dt.y > 0.0 and dt.x < closest_dist:
+			closest_dist = dt.x
 			closest_id   = marker.get_meta("body_id") as int
 	return closest_id
 
