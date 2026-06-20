@@ -22,7 +22,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027） |
 | ファイルサイズ | A− | P7-1/P7-2 + AoI テスト移動で node/mod.rs 514行に縮小。全ファイル 700行以下 |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。近似ロジック解消 |
-| 重複 | A− | WS 境界（ws_server / protocol）を dawn-actor へ集約（M-4 解消）。残るは data_loader 重複のみ |
+| 重複 | B+ | WS 境界は dawn-actor へ集約（M-4 解消）。ただし両バイナリ間にアプリ層グルーの重複が残る（M-6: data_loader / deliver_aoi_frame / spawn_npcs）|
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。TCP transport も trait 境界内に収まる |
 | AI開発由来 | A− | 命名汚染なし。残る `SectorSimulatorActor` の密結合（M-3）は本番パス外の in-process 専用で実害小 |
 
@@ -137,9 +137,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 - 両バイナリは重複ファイルを削除し `use dawn_actor::{protocol, ws_server}` に切替
 - 不要になった依存（`tokio-tungstenite` / `futures-util` ほか）を両 Cargo.toml から除去
 
-残課題: `data_loader`（`load_modules` / `load_ship_types`）の重複は未解消。
-ファイル I/O を伴うためファイル I/O 禁止の `dawn-core` / `dawn-sector` にも、転送境界の
-`dawn-actor` にも意味的に合わず、置き場の判断（新規 `dawn-data` クレート等）が要る。別途検討。
+残課題は M-6 に集約（`data_loader` 以外にも `deliver_aoi_frame` / `spawn_npcs` が重複）。
 
 #### ~~M-5~~（機能ギャップ）: 受信 replication batch が消費されていない（解消済み）
 
@@ -157,6 +155,35 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 `ReplicaSet` は順序付き追記ログを保持するところまでで、これは将来の read / failover 経路が
 消費する前提データである。誤解を招く「8D-2d scope」コメントも除去した。
+
+#### M-6: `dawn-sector-node` が `dawn-simulation` の serve 層をフォークしている
+
+M-4（WS 境界）解消後も、両バイナリの「アプリケーション層」グルーが重複している:
+
+| 重複 | dawn-simulation | dawn-sector-node | 備考 |
+|---|---|---|---|
+| `data_loader`（`load_modules` / `load_ship_types` / `parse_*`） | `data_loader/*.rs`（実装 ~280行）| `data_loader.rs`（178行）| TOML ローダー |
+| `deliver_aoi_frame`（AoI フレーム配信） | `serve/mod.rs:207` | `main.rs:338` | **実質同一**（~40行）|
+| `spawn_npcs` / `spawn_npc_frigates` | `serve/mod.rs:278` | `main.rs:325` | **実質同一**（~12行）|
+
+根本原因: **`dawn-actor`（転送境界）と `dawn-sector`（ゲームロジック）の両方に依存する
+共有ライブラリが存在しない**。両方に依存するのは2バイナリだけなので、両者を組み合わせる
+グルー（セッション AoI 配信・NPC スポーン・データロード・serve ループ）は共有の置き場がなく、
+各バイナリにコピーされる。8D-4 で `dawn-sector-node` を `dawn-simulation` の serve 経路から
+コピーして作ったことで顕在化した。
+
+これは M-4 で `data_loader` を `dawn-actor` に置けなかった理由（I/O 禁止）と同根で、
+個別ファイルの置き場問題ではなく**共有アプリ層クレートの欠如**である。
+
+方針案（要 ADR・新規クレート）:
+- `dawn-server`（仮称）を新設し、`dawn-actor` + `dawn-sector` + `dawn-replication` +
+  `dawn-consensus` に依存させる。`build_serve_node` / `spawn_npcs` / `deliver_aoi_frame` /
+  `apply_common_command` / `data_loader` と、可能なら共有 tick/session ループを集約
+- 2バイナリは引数解析・config 読込・配線のみの薄い entry point に縮小
+- in-process 用（`MultiNodeCluster`）と本番用（`dawn-sector-node`）の差分のみ各々に残す
+
+優先度: 中。data_loader/deliver_aoi_frame の手動同期ドリフトが実害化する前に着手したいが、
+新規クレート追加のため ADR 承認が前提。
 
 ---
 
