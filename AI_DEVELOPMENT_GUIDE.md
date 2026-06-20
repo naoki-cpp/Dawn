@@ -885,16 +885,36 @@ assert_eq!(pos, expected_position);
 「Godot エディタで何を確認したか」を PR 説明に明記する（実機検証ができないAIセッションの
 場合は、その旨と推奨される手動確認手順を明記する）。
 
-CLI 実行（CI / ローカル、Godot バイナリが必要）:
+**Godot バイナリの取得**: リポジトリには Godot 本体を含めない（uv/pyenv 的に、
+`.godot-version` でバージョンを pin し、各マシンが個別に取得する）。
 
 ```bash
-GODOT_BIN=/path/to/godot client/addons/gdUnit4/runtest.sh -a client/test
+scripts/setup-godot.sh             # .godot-version の指定版を .tools/godot/ に取得・SHA512検証
+# Windows PowerShell:
+scripts/setup-godot.ps1
 ```
 
-> **既知の制約**: この開発環境には Godot バイナリが無く、AI セッション単独では
-> 上記コマンドを実行してテストの green/red を確認できない。テストコードはロジックの
-> 手計算に基づいて書くが、実際の実行確認はユーザーが Godot エディタまたは CLI で
-> 行う必要がある。
+CLI 実行（取得した Godot バイナリで GdUnit4 を走らせる。作業ディレクトリは `client/`）:
+
+```bash
+cd client
+GODOT_BIN="$(../scripts/setup-godot.sh --print)"
+bash addons/gdUnit4/runtest.sh --godot_binary "$GODOT_BIN" -a test
+```
+
+> **既知の互換性問題（GdUnit4 v6.1.3 × Godot 4.6系）**: GdUnit4 v6.1.3
+> （AssetLib 配布版）は Godot 4.6 の破壊的変更（`FileAccess.get_as_text()` の
+> `skip_cr` 引数削除、`debug/gdscript/warnings/exclude_addons` 設定の廃止。
+> upstream issue GD-1004、master では修正済みだが本タグには未反映）に未対応で、
+> そのままでは CLI 実行が失敗する。`client/addons/` は `.gitignore` 対象（各マシン
+> ローカルインストール）なので、AssetLib でインストールした直後に以下の2点を
+> **ローカルで手動パッチする**こと（再インストール時は再適用が必要）:
+>   - `addons/gdUnit4/src/core/GdUnitFileAccess.gd:199`:
+>     `file.get_as_text(true)` → `file.get_as_text()`
+>   - `addons/gdUnit4/plugin.gd:17`:
+>     `ProjectSettings.get_setting("debug/gdscript/warnings/exclude_addons")` に
+>     第2引数 `false`（デフォルト値）を追加
+> 次に GdUnit4 が 4.6 対応版をリリースしたら、このパッチは不要になる。
 
 ---
 

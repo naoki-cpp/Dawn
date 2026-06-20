@@ -65,25 +65,28 @@ func test_spectral_color_is_continuous_across_the_010_segment_boundary() -> void
 # -- _compute_warp_snap_pos_core ------------------------------------------------
 
 func test_warp_snap_pos_core_places_arrival_point_toward_the_ship_from_the_target() -> void:
-	var ship := Node3D.new()
+	## global_position only resolves correctly once the node is inside the
+	## scene tree (Node3D.get_global_transform() returns identity otherwise) --
+	## add_child() puts it under this test suite, which the runner keeps in tree.
+	var ship: Node3D = auto_free(Node3D.new())
+	add_child(ship)
 	ship.global_position = Vector3(100.0, 0.0, 0.0)  ## Godot coords; server pos = (1000,0,0) at WORLD_SCALE=0.1
 	_main._ships = {1: ship}
 	_main._player_ship_id = 1
 
 	var result: Vector3 = _main._compute_warp_snap_pos_core(Vector3.ZERO, 2000.0, 0.75)
 	assert_vector(result).is_equal_approx(Vector3(1500.0, 0.0, 0.0), Vector3(0.01, 0.01, 0.01))
-	ship.free()
 
 
 func test_warp_snap_pos_core_falls_back_to_a_fixed_direction_when_ship_is_at_the_target() -> void:
-	var ship := Node3D.new()
+	var ship: Node3D = auto_free(Node3D.new())
+	add_child(ship)
 	ship.global_position = Vector3(50.0, 0.0, 0.0)  ## server pos = (500,0,0), same as target below
 	_main._ships = {1: ship}
 	_main._player_ship_id = 1
 
 	var result: Vector3 = _main._compute_warp_snap_pos_core(Vector3(500.0, 0.0, 0.0), 2000.0, 0.75)
 	assert_vector(result).is_equal_approx(Vector3(-1000.0, 0.0, 0.0), Vector3(0.01, 0.01, 0.01))
-	ship.free()
 
 
 func test_warp_snap_pos_core_returns_inf_when_player_ship_is_unknown() -> void:
