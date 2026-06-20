@@ -231,23 +231,33 @@ M-4（WS 境界）解消後も、両バイナリの「アプリケーション�
 | P9-2 CelestialBodyDef sector 帰属 | 2026-06-20 | `CelestialBodyDef.sector` を追加し、`Galaxy::bodies_in_sector` の ID 割り当て近似を削除 |
 | 8D-5 観測ログ仕込み | 2026-06-20 | Raft role 遷移 / TCP 再接続 / tick オーバーランを stderr 出力（実機検証で症状を切り分けるため）。`docs/8d5-hardware-notes.md` 追加・localhost 3 プロセス検証済み |
 | M-5 replication 消費側 | 2026-06-20 | `dawn-replication::ReplicaSet` 新設。受信 `LogBatch` を peer セクターごとに gap 検出・冪等・順序保持で複製ログに取り込む（ライブ world 適用 / failover は範囲外）|
-| M-4 WS 境界の集約 | 2026-06-20 | `ws_server` / `protocol` を `dawn-actor` へ移動し dawn-simulation / dawn-sector-node の手動コピーを解消（506行削除）。`bind` を `ToSocketAddrs` ジェネリック化・不要依存を除去。残: data_loader 重複 |
+| M-4 WS 境界の集約 | 2026-06-20 | `ws_server` / `protocol` を `dawn-actor` へ移動し dawn-simulation / dawn-sector-node の手動コピーを解消（506行削除）。`bind` を `ToSocketAddrs` ジェネリック化・不要依存を除去 |
+
+> Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消は
+> すべて完了。コードベースの品質リファクタは一区切り。
+
+### 未完了・保留
+
+残るのは以下のみ。いずれも本番品質には直結せず、意識的に「今はやらない」と判断した項目。
+
+| 項目 | 種別 | 状態・理由 |
+|---|---|---|
+| 8D-5 Raspberry Pi 実機検証 | 機能・外部依存待ち | ハードウェア未購入。観測ログ・config・localhost 検証は済み（完了済み参照）。Pi 入手後に着手 |
+| M-3 `SectorSimulatorActor` 密結合 | 品質・保留 | 本番パス外（in-process テスト/ベンチ専用）。P9-1 撤回。優先度低 |
+| M-6 アプリ層グルー重複（`data_loader` / `deliver_aoi_frame` / `spawn_npcs`） | 品質・許容 | ~230行・低ドリフト。新規クレートは過剰と判断。再評価トリガー付き |
+
+採らない方針（恒久）:
+
+- CRDT / LWW-Register は採らない（単一所有 + append-only log gossip）
+- protobuf / `dawn-proto` は採らない（wire は postcard 再利用）
+- TLS / 認証は第1次 LAN 検証では扱わない
 
 ---
 
 ### Phase 8 — 物理ノード分散の配線（Phase 8D 完了）
 
-`dawn-replication`（ADR-0021/0027・Phase 8D）は全ステップ完了済み。
-
-次の自然な前進先:
-
-- **8D-5: Raspberry Pi 実機検証**（3 物理ノード / LAN 平文）
-
-採らない方針も維持する:
-
-- CRDT / LWW-Register は採らない（単一所有 + append-only log gossip）
-- protobuf / `dawn-proto` は採らない（wire は postcard 再利用）
-- TLS / 認証は第1次 LAN 検証では扱わない
+`dawn-replication`（ADR-0021/0027・Phase 8D）は 8D-2〜8D-4 を完了済み。
+残る 8D-5（Raspberry Pi 実機検証）は上の「未完了・保留」を参照。
 
 ---
 
