@@ -24,7 +24,7 @@ date     : 2026-06-20（C-1 完了後に更新）
 | 重複 | A− | マーカー生成・ピッキング・ワープ着地点計算の同型ロジックは解消済み（C-2） |
 | 結合度 | B− | signal 経由の `connection.gd` ↔ `main.gd` 結合は良好。`@onready` のシーンツリー直パス参照と modules dict のキー前提は脆い（C-3/C-4、保留） |
 | デッドコード | A | 残骸なし。コメントは ADR 参照付きで現状と一致 |
-| テストカバレッジ | B | 新設4クラスは GdUnit4 で計55ケース実行確認済み。`main.gd` 本体（HUD構築呼び出し・マウス入力・イベント dispatch）は未テスト——シーンツリー/ネットワーク依存のため |
+| テストカバレッジ | B | 新設4クラス + main.gd残存ロジックの一部（モジュールdeactivate判定など）を GdUnit4 で計58ケース実行確認済み。HUD構築呼び出し・マウス入力・イベント dispatch本体は未テスト——シーンツリー/ネットワーク依存のため |
 | サーバー側との対比 | — | サーバー側はクレート分割（A−）、クライアントはファイル分割（B+）。テストカバレッジは依然サーバー側（カバレッジ80%要件）が厚い |
 
 サーバー側が長期にわたる分割リファクタ（Phase 2〜9）を経て A− に達したのに対し、
@@ -37,7 +37,7 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `client/scripts/main.gd` | 1084 | 🟡 オーケストレーション層（入力ルーティング・イベント dispatch・spawning・状態保持）に縮小。god object ではなくなったが、まだ最大ファイル |
+| `client/scripts/main.gd` | 1094 | 🟡 オーケストレーション層（入力ルーティング・イベント dispatch・spawning・状態保持）に縮小。god object ではなくなったが、まだ最大ファイル |
 | `client/scripts/hud_manager.gd` | 474 | 🟢 C-1で新設。HUD全パネルの構築・更新を持つ stateless static class |
 | `client/scripts/ship_controller.gd` | 272 | 🟢 単一船の視覚表現に専念。結合なし |
 | `client/scripts/connection.gd` | 245 | 🟢 WebSocket I/O とシグナル発行のみ。教科書的な境界 |
@@ -47,14 +47,15 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/ship_picking.gd` | 90 | 🟢 C-1で新設。船/ゲート/天体ピッキング3関数 |
 | `client/scripts/input_decoder.gd` | 85 | 🟢 C-1で新設。キー入力→アクション決定の純粋関数 |
 
-合計 2,613 行のうち `main.gd` が41%を占める（C-1着手前69%から大幅低下）。
+合計 2,623 行のうち `main.gd` が42%を占める（C-1着手前69%から大幅低下）。
 新設4ファイル（795行）はいずれも stateless static class で、main.gd の状態や
 シーンツリーへの直接依存を持たない。
 
-（`client/test/*.gd`（main_test.gd 68行 + ship_picking_test.gd 109行 +
+（`client/test/*.gd`（main_test.gd 108行 + ship_picking_test.gd 109行 +
 navigation_marker_renderer_test.gd 112行 + input_decoder_test.gd 108行 +
-hud_manager_test.gd 190行、合計587行）は別カウント。新設4クラスの全staticメソッドを
-GdUnit4でテスト済み〔計55ケース、全件PASS〕。§「テストカバレッジ」参照）
+hud_manager_test.gd 190行、合計627行）は別カウント。新設4クラスの全staticメソッド +
+main.gd残存ロジックの回帰テストをGdUnit4でテスト済み〔計58ケース、全件PASS〕。
+§「テストカバレッジ」参照）
 
 ---
 
@@ -74,7 +75,7 @@ GdUnit4でテスト済み〔計55ケース、全件PASS〕。§「テストカ�
 | 789–908 | ワープ着地点計算（ゲート/天体） | 🟢 共通コア `_compute_warp_snap_pos_core` に抽出済み（C-2）。GdUnit4 テスト済み |
 | 909–970 | HUD更新ディスパッチ（`HudManager` 呼び出し） | 🟢 値の整形（速度文字列・距離文字列等）のみ main.gd 側、Control構築・描画は `HudManager` |
 | 971–1003 | クライアント側カプ再現シミュレーション | 🟢 サーバーの `CapacitorSystem` を正しく模倣 |
-| 1004–1084 | 状態クリア・空間環境構築・プレイヤーマテリアル | 🟢 |
+| 1004–1094 | 状態クリア・空間環境構築・プレイヤーマテリアル | 🟢 |
 
 ---
 
@@ -110,16 +111,16 @@ Control サブツリーを構築して参照 Dictionary を返すビルダー形
 "$GODOT_BIN" --headless --editor --quit-after 3 --path client
 ```
 
-### テストカバレッジ（C-1 完了時点）
+### テストカバレッジ（C-1 完了時点 + 以降の回帰テスト追加）
 
 | テストファイル | 対象 | ケース数 |
 |---|---|---|
-| `main_test.gd` | main.gd 残存純粋関数 | 4 |
+| `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 7 |
 | `ship_picking_test.gd` | `ShipPicking` | 8 |
 | `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer` | 8 |
 | `input_decoder_test.gd` | `InputDecoder` | 15 |
 | `hud_manager_test.gd` | `HudManager` | 20 |
-| **合計** | | **55**（全件PASS、orphan node 0） |
+| **合計** | | **58**（全件PASS、orphan node 0） |
 
 テスト導入で見つかった不具合・定着した手順（詳細: `AI_DEVELOPMENT_GUIDE.md` §8）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる

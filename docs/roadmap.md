@@ -67,6 +67,11 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 - ✅ Phase 7.5 — 星系間ナビゲーション（ADR-0009 / Jump Gate Raft パイプライン + Godot クライアント配線 / 241テスト全パス）
 - ✅ 戦闘の深み — Warp（ADR-0022）/ Propulsion Physics（ADR-0023）/ Tackle（ADR-0024）実装済み（316テスト全パス）
 - ✅ 天体（ADR-0025）— 恒星・惑星を静的天体として追加。WarpTarget::Body 対応、sun_direction シェーダー、Godot クライアント配線（W キー / クリック選択）まで完了。（316テスト全パス）
+- ✅ Godot クライアント構造リファクタ + テスト基盤（2026-06-21）— `main.gd` の god object を
+  `HudManager`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder` の4クラスへ分割
+  （1661→1094行）。`scripts/setup-godot.*` で pin 済み Godot CLI を取得し GdUnit4 を導入、
+  計58ケースを実行確認（詳細: `docs/architecture-review-client.md`）。モジュール
+  ON/OFF→CAP!誤表示のバグ修正も含む。Rust側は343テスト全パス
 
 ### Phase 4 卒業記録（ADR-0007 §6）
 
