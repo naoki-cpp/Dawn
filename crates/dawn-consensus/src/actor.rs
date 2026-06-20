@@ -66,6 +66,7 @@ impl RaftActor {
     /// received or the mailbox is closed.
     pub async fn run(mut self) {
         while let Some(msg) = self.rx.recv().await {
+            let role_before = self.state.role.clone();
             match msg {
                 RaftActorMessage::Raft(raft_msg) => self.handle_raft_message(raft_msg),
                 RaftActorMessage::TickElapsed => self.handle_tick(),
@@ -74,6 +75,16 @@ impl RaftActor {
                     let _ = reply.send((self.state.role.clone(), self.state.current_term));
                 }
                 RaftActorMessage::Shutdown => break,
+            }
+            // Surfaces every role transition (election won/lost, step-down on
+            // higher term) for 8D-5 field observability — these are the
+            // events most likely to reveal where physical-node latency or
+            // packet loss breaks the SimulationNode/Actor boundary (P9-1).
+            if self.state.role != role_before {
+                eprintln!(
+                    "[Raft node={:?}] {:?} → {:?} (term={:?})",
+                    self.state.node_id, role_before, self.state.role, self.state.current_term
+                );
             }
         }
     }

@@ -128,6 +128,7 @@ where
 /// Maintains a persistent TCP connection to `peer_addr`, draining `rx`.
 /// Reconnects automatically when the connection drops.
 async fn outbound_loop(peer_addr: SocketAddr, mut rx: mpsc::UnboundedReceiver<RaftMessage>) {
+    let mut reconnects: u64 = 0;
     loop {
         match TcpStream::connect(peer_addr).await {
             Ok(stream) => {
@@ -136,10 +137,16 @@ async fn outbound_loop(peer_addr: SocketAddr, mut rx: mpsc::UnboundedReceiver<Ra
                 if closed {
                     return; // sender side dropped → shutdown
                 }
-                // Connection dropped; reconnect after a short delay.
+                // Connection dropped; reconnect after a short delay. Logged
+                // for 8D-5 field observability — reconnect frequency on
+                // physical WiFi/USB links is a direct signal of link quality.
+                reconnects += 1;
+                eprintln!("[RaftTransport] {peer_addr} dropped, reconnecting (attempt #{reconnects})");
                 sleep(RECONNECT_DELAY).await;
             }
-            Err(_) => {
+            Err(e) => {
+                reconnects += 1;
+                eprintln!("[RaftTransport] {peer_addr} connect failed: {e} (attempt #{reconnects})");
                 sleep(RECONNECT_DELAY).await;
             }
         }

@@ -133,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         interval.tick().await;
+        let tick_started = std::time::Instant::now();
 
         // Accept new TCP connections → spawn handshake task.
         while let Ok((stream, addr)) = new_conn_rx.try_recv() {
@@ -259,6 +260,15 @@ async fn main() -> anyhow::Result<()> {
             deliver_aoi_frame(sess, &node, curr, prev, &new_events)
         });
         prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
+
+        // Field observability for 8D-5: a tick that overruns its own period
+        // means TCP/WS I/O (Raft, replication, or session delivery) is
+        // blocking the simulation loop — the first symptom of WiFi/USB
+        // link strain on physical nodes.
+        let elapsed = tick_started.elapsed();
+        if elapsed.as_millis() as u64 > TICK_MS {
+            eprintln!("[Node] tick overrun: {elapsed:?} (budget {TICK_MS}ms)");
+        }
     }
 }
 
