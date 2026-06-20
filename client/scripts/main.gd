@@ -191,6 +191,20 @@ func _spawn_body_markers() -> void:
 	_selected_body_id = -1
 	NavigationMarkerRenderer.spawn_body_markers(_bodies_root, _bodies, WORLD_SCALE, _server_to_godot_pos)
 
+## Star data positions (galaxy.toml) sit a few ship-travel-distances away
+## (e.g. 0 to ~30,000 units), so as the ship moves across a system the angle
+## to the star changes enough to visibly drift -- wrong for something meant
+## to read as a fixed background light source. Push the direction calculation
+## out to an effectively-infinite distance (the player's whole travel range
+## becomes a negligible fraction of it) so the sun direction stays visually
+## fixed, without touching the star body's actual gameplay position (still
+## used as-is by warp/navigation code elsewhere).
+const SUN_EFFECTIVE_DISTANCE : float = 50_000_000.0
+## Arbitrary fixed unit vector the star is pushed along for the calculation
+## above. Only its direction matters (not tied to gameplay), so any constant
+## works; picked off-axis so the sun isn't perfectly aligned with a world axis.
+const SUN_FAR_DIRECTION : Vector3 = Vector3(0.62, 0.31, 0.72)
+
 ## Update the sky shader's sun_direction each frame so the star appears in the
 ## correct direction relative to the player ship (ADR-0025).
 func _update_sun_direction() -> void:
@@ -214,8 +228,10 @@ func _update_sun_direction() -> void:
 	var ship_godot  : Vector3 = ship_node.global_position
 	var ship_server : Vector3 = Vector3(ship_godot.x, ship_godot.y, -ship_godot.z) / WORLD_SCALE
 
-	## Direction from ship toward star in server coords; map to Godot world space.
-	var diff : Vector3 = star_pos - ship_server
+	## Direction from ship toward the star's effective (pushed-out) position in
+	## server coords; map to Godot world space. See SUN_EFFECTIVE_DISTANCE.
+	var effective_star_pos : Vector3 = star_pos + SUN_FAR_DIRECTION.normalized() * SUN_EFFECTIVE_DISTANCE
+	var diff : Vector3 = effective_star_pos - ship_server
 	if diff.length_squared() < 1.0:
 		_sky_mat.set_shader_parameter("sun_active", 0.0)
 		return
