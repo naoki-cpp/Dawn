@@ -22,6 +22,8 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 | [ADR-0019](ADR-0019-spatial-index-and-aoi.md) | AoI のための静的セルグリッド（3×3×3 隣接可視） | Accepted |
 | [ADR-0020](ADR-0020-simulation-lod.md) | Simulation LoD — 非交戦エンティティの休眠化（近似ゼロ・交差閉包） | Deferred |
 | [ADR-0021](ADR-0021-sector-local-replication.md) | Sector-local 複製は単一所有 + 追記ログのゴシップ配布（CRDT/LWW は採らない） | Accepted |
+| [ADR-0026](ADR-0026-dawn-sector-crate.md) | dawn-sector クレートの新設（ゲームロジックを dawn-simulation から分離） | Accepted |
+| [ADR-0027](ADR-0027-dawn-replication-crate.md) | dawn-replication クレートの新設（ゴシップ配布 + アンチエントロピー + スナップショット転送） | Accepted |
 
 ### Client / 通信
 

@@ -22,7 +22,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027） |
 | ファイルサイズ | A− | P7-1/P7-2 + AoI テスト移動で node/mod.rs 514行に縮小。全ファイル 700行以下 |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。近似ロジック解消 |
-| 重複 | B+ | WS 境界は dawn-actor へ集約（M-4 解消）。ただし両バイナリ間にアプリ層グルーの重複が残る（M-6: data_loader / deliver_aoi_frame / spawn_npcs）|
+| 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。残る両バイナリ間グルー重複（M-6）は ~230行・低ドリフトで許容判断（新規クレートは過剰）|
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。TCP transport も trait 境界内に収まる |
 | AI開発由来 | A− | 命名汚染なし。残る `SectorSimulatorActor` の密結合（M-3）は本番パス外の in-process 専用で実害小 |
 
@@ -156,7 +156,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 `ReplicaSet` は順序付き追記ログを保持するところまでで、これは将来の read / failover 経路が
 消費する前提データである。誤解を招く「8D-2d scope」コメントも除去した。
 
-#### M-6: `dawn-sector-node` が `dawn-simulation` の serve 層をフォークしている
+#### M-6（許容）: `dawn-sector-node` が `dawn-simulation` の serve 層をフォークしている
 
 M-4（WS 境界）解消後も、両バイナリの「アプリケーション層」グルーが重複している:
 
@@ -175,15 +175,27 @@ M-4（WS 境界）解消後も、両バイナリの「アプリケーション�
 これは M-4 で `data_loader` を `dawn-actor` に置けなかった理由（I/O 禁止）と同根で、
 個別ファイルの置き場問題ではなく**共有アプリ層クレートの欠如**である。
 
-方針案（要 ADR・新規クレート）:
-- `dawn-server`（仮称）を新設し、`dawn-actor` + `dawn-sector` + `dawn-replication` +
-  `dawn-consensus` に依存させる。`build_serve_node` / `spawn_npcs` / `deliver_aoi_frame` /
-  `apply_common_command` / `data_loader` と、可能なら共有 tick/session ループを集約
-- 2バイナリは引数解析・config 読込・配線のみの薄い entry point に縮小
-- in-process 用（`MultiNodeCluster`）と本番用（`dawn-sector-node`）の差分のみ各々に残す
+#### 判断: 当面は許容する（新規クレートは作らない）
 
-優先度: 中。data_loader/deliver_aoi_frame の手動同期ドリフトが実害化する前に着手したいが、
-新規クレート追加のため ADR 承認が前提。
+`dawn-server`（仮称）共有クレートを新設する案もあるが、文書全体に照らして
+**過剰**と判断し採らない。理由:
+
+- **ガイド §「新Crate追加チェック」第1項目**「既存Crateの責務分割で対応できないことを確認」を
+  満たさない。両バイナリの差は process モデル（N-in-1 vs 1-per-process）と
+  **transport の選択だけ**で、その transport は既に trait 抽象化済み
+  （`RaftTransport` / `ReplicationTransport`）。重複はこの2バイナリ構成の副産物で、
+  クレート新設は不均衡。
+- **8D 最小化方針**（roadmap「巨大基盤の一括建設をしない・薄いスライス」）に逆行する。
+- **前例との整合**: `dawn-proto` は「見返りが乏しい」と却下、P4-3 は `_owned` 統合を
+  「統合コストが効果を上回る」とスキップ。~230行の安定したグルーの重複も同じ費用対効果で許容が妥当。
+- **ドリフトの実害が小さい**: M-4 で直した `protocol`（18 variant・変更頻度高）と違い、
+  `data_loader` / `deliver_aoi_frame` は変更頻度が低く無言バグ化のリスクは限定的。
+
+再評価トリガー（このいずれかが起きたら設計し直す）:
+- `data_loader` / `deliver_aoi_frame` が実際にドリフトしてバグを生んだとき
+- 3つ目の serve バイナリが必要になったとき
+- 2バイナリの process モデル差を解消し1バイナリ化できる見込みが立ったとき
+  （その場合は新規クレートではなくバイナリ統合を優先検討する）
 
 ---
 
