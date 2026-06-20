@@ -22,8 +22,13 @@ const LERP_SPEED      : float = 8.0
 const VEL_VIS_SCALE   : float = 4.0
 const THRUST_VIS_LEN  : float = 350.0
 
-## ロック枠線のサイズ（Godot units）
+## ロック枠線のサイズ（Godot units、破壊エフェクトの膨張リング起点に使用）
 const LOCK_RING_RADIUS: float = 250.0
+
+## ロック中/ロック完了インジケーターの画面上サイズ。navigation_marker_renderer.gd
+## の惑星選択リング（RETICLE_PIXEL_SIZE）と揃える -- 同じ「選択/状態インジケーター」
+## なので見た目・距離耐性も揃える（BillboardRing 経由で fixed_size ビルボード化）。
+const LOCK_RING_PIXEL_SIZE: float = 0.003
 
 # ── 内部状態 ─────────────────────────────────────────────────────────────────
 
@@ -46,16 +51,15 @@ var _vel_instance : MeshInstance3D = null
 var _thr_mesh     : ImmediateMesh  = null
 var _thr_instance : MeshInstance3D = null
 
-# ロック枠線（シアン）
-var _lock_mesh    : ImmediateMesh  = null
-var _lock_instance: MeshInstance3D = null
+# ロック枠線（シアン、fixed_size ビルボード -- BillboardRing 参照）
+var _lock_instance: Sprite3D = null
 
 # ── ライフサイクル ────────────────────────────────────────────────────────────
 
 func _ready() -> void:
 	## 全 Ship に枠線インジケーターを生成（非表示で待機）
-	_lock_instance = _make_line_indicator(Color(0.0, 1.0, 1.0))  ## シアン
-	_lock_mesh     = _lock_instance.mesh as ImmediateMesh
+	_lock_instance = BillboardRing.build(Color(0.0, 1.0, 1.0), LOCK_RING_PIXEL_SIZE)  ## シアン
+	add_child(_lock_instance)
 	_lock_instance.visible = false
 
 const TICKS_PER_SEC    : float = 10.0  ## Server tick rate
@@ -129,6 +133,8 @@ func get_speed_server() -> float:
 func set_lock_state(state: String) -> void:
 	_lock_state   = state
 	_lock_blink_t = 0.0
+	if _lock_instance != null:
+		_lock_instance.modulate.a = 1.0  ## reset breathing alpha from a previous "locked" phase
 	_lock_instance.visible = (state != "none")
 
 ## ロックオン選択時に一瞬白く光らせる（視覚フィードバック）。
@@ -176,7 +182,7 @@ func play_destroy_effect() -> void:
 # ── ロック枠線の更新 ──────────────────────────────────────────────────────────
 
 func _update_lock_indicator(delta: float) -> void:
-	if _lock_state == "none" or _lock_mesh == null:
+	if _lock_state == "none" or _lock_instance == null:
 		return
 
 	_lock_blink_t += delta
@@ -184,15 +190,10 @@ func _update_lock_indicator(delta: float) -> void:
 	if _lock_state == "locking":
 		## 点滅: 0.4 秒周期
 		_lock_instance.visible = (fmod(_lock_blink_t, 0.4) < 0.2)
-		_draw_ring(_lock_mesh, LOCK_RING_RADIUS)
 	elif _lock_state == "locked":
-		## 常時点灯
+		## 常時点灯 + ブリージング（じんわり明滅、alpha で表現）
 		_lock_instance.visible = true
-		## ブリージング（じんわり明滅）
-		var mat: StandardMaterial3D = _lock_instance.get_surface_override_material(0) as StandardMaterial3D
-		if mat != null:
-			mat.emission_energy_multiplier = 2.0 + sin(_lock_blink_t * 3.0) * 1.0
-		_draw_ring(_lock_mesh, LOCK_RING_RADIUS)
+		_lock_instance.modulate.a = clampf(0.55 + sin(_lock_blink_t * 3.0) * 0.45, 0.0, 1.0)
 
 # ── ハルフラッシュ共通処理 ───────────────────────────────────────────────────
 

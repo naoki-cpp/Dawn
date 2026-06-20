@@ -24,7 +24,7 @@ date     : 2026-06-20（C-1 完了後に更新）
 | 重複 | A− | マーカー生成・ピッキング・ワープ着地点計算の同型ロジックは解消済み（C-2） |
 | 結合度 | B− | signal 経由の `connection.gd` ↔ `main.gd` 結合は良好。`@onready` のシーンツリー直パス参照と modules dict のキー前提は脆い（C-3/C-4、保留） |
 | デッドコード | A | 残骸なし。コメントは ADR 参照付きで現状と一致 |
-| テストカバレッジ | B | 新設4クラス + main.gd残存ロジックの一部（モジュールdeactivate判定など）を GdUnit4 で計63ケース実行確認済み。HUD構築呼び出し・マウス入力・イベント dispatch本体は未テスト——シーンツリー/ネットワーク依存のため |
+| テストカバレッジ | B | 新設5クラス + main.gd残存ロジックの一部（モジュールdeactivate判定など）を GdUnit4 で計66ケース実行確認済み。HUD構築呼び出し・マウス入力・イベント dispatch本体は未テスト——シーンツリー/ネットワーク依存のため |
 | サーバー側との対比 | — | サーバー側はクレート分割（A−）、クライアントはファイル分割（B+）。テストカバレッジは依然サーバー側（カバレッジ80%要件）が厚い |
 
 サーバー側が長期にわたる分割リファクタ（Phase 2〜9）を経て A− に達したのに対し、
@@ -39,23 +39,24 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 |---|---|---|
 | `client/scripts/main.gd` | 1094 | 🟡 オーケストレーション層（入力ルーティング・イベント dispatch・spawning・状態保持）に縮小。god object ではなくなったが、まだ最大ファイル |
 | `client/scripts/hud_manager.gd` | 474 | 🟢 C-1で新設。HUD全パネルの構築・更新を持つ stateless static class |
-| `client/scripts/ship_controller.gd` | 272 | 🟢 単一船の視覚表現に専念。結合なし |
+| `client/scripts/ship_controller.gd` | 273 | 🟢 単一船の視覚表現に専念。ロックオン枠が `BillboardRing` 経由の fixed_size ビルボードに変更（2026-06-21）——`navigation_marker_renderer.gd` の惑星選択リングと共通化 |
 | `client/scripts/connection.gd` | 245 | 🟢 WebSocket I/O とシグナル発行のみ。教科書的な境界 |
-| `client/scripts/navigation_marker_renderer.gd` | 192 | 🟢 C-1で新設。ゲート/惑星マーカー生成 + スペクトル色 + 惑星の固定画面サイズ選択リング（恒星の実体メッシュは2026-06-21に撤廃） |
+| `client/scripts/navigation_marker_renderer.gd` | 161 | 🟢 C-1で新設。ゲート/惑星マーカー生成 + スペクトル色（恒星の実体メッシュは2026-06-21に撤廃）。選択リングの生成は `billboard_ring.gd` へ移動 |
 | `client/scripts/camera_controller.gd` | 124 | 🟢 自己完結したオービットカメラ |
+| `client/scripts/billboard_ring.gd` | 65 | 🟢 2026-06-21新設。固定画面サイズの選択リング billboard を生成する共通 stateless static class。`navigation_marker_renderer.gd`（惑星）と `ship_controller.gd`（ロックオン枠）が共有 |
 | `client/scripts/tactical_overlay.gd` | 93 | 🟢 射程リング描画のみ |
 | `client/scripts/ship_picking.gd` | 100 | 🟢 C-1で新設。船/ゲート/天体ピッキング3関数（天体は画面空間ピッキングに変更、2026-06-21） |
 | `client/scripts/input_decoder.gd` | 85 | 🟢 C-1で新設。キー入力→アクション決定の純粋関数 |
 
-合計 2,679 行のうち `main.gd` が41%を占める（C-1着手前69%から大幅低下）。
-新設4ファイル（795行）はいずれも stateless static class で、main.gd の状態や
+合計 2,714 行のうち `main.gd` が40%を占める（C-1着手前69%から大幅低下）。
+新設5ファイル（860行）はいずれも stateless static class で、main.gd の状態や
 シーンツリーへの直接依存を持たない。
 
 （`client/test/*.gd`（main_test.gd 108行 + ship_picking_test.gd 138行 +
 navigation_marker_renderer_test.gd 140行 + input_decoder_test.gd 108行 +
-hud_manager_test.gd 190行、合計684行）は別カウント。新設4クラスの全staticメソッド +
-main.gd残存ロジックの回帰テストをGdUnit4でテスト済み〔計63ケース、全件PASS〕。
-§「テストカバレッジ」参照）
+hud_manager_test.gd 190行 + billboard_ring_test.gd 32行、合計716行）は別カウント。
+新設5クラスの全staticメソッド + main.gd残存ロジックの回帰テストをGdUnit4でテスト済み
+〔計66ケース、全件PASS〕。§「テストカバレッジ」参照）
 
 ---
 
@@ -120,7 +121,8 @@ Control サブツリーを構築して参照 Dictionary を返すビルダー形
 | `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer`（選択リング含む） | 10 |
 | `input_decoder_test.gd` | `InputDecoder` | 15 |
 | `hud_manager_test.gd` | `HudManager` | 20 |
-| **合計** | | **63**（全件PASS、orphan node 0） |
+| `billboard_ring_test.gd` | `BillboardRing` | 3 |
+| **合計** | | **66**（全件PASS、orphan node 0） |
 
 テスト導入で見つかった不具合・定着した手順（詳細: `AI_DEVELOPMENT_GUIDE.md` §8）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる
@@ -173,12 +175,17 @@ C-1/C-2 は解消済み（上記「問題一覧」参照）。残るは C-3/C-4 
 ## 触らない箇所（安定・枯れている）
 
 - `connection.gd` — WebSocket I/O とシグナル発行のみ。ドメインロジックなし。教科書的な境界
-- `ship_controller.gd` — 単一船の視覚表現に専念。他システムへの結合なし
+- `ship_controller.gd` — 単一船の視覚表現に専念。ロックオン枠の生成だけ `BillboardRing`
+  に依存するようになったが（2026-06-21）、それ以外は他システムへの結合なし
 - `camera_controller.gd` — 自己完結したオービットカメラ。依存はターゲットノード参照のみ
+- `billboard_ring.gd` — 2026-06-21新設。固定画面サイズの選択リングを生成する
+  stateless static class。GdUnit4 テスト付き。`navigation_marker_renderer.gd`（惑星）と
+  `ship_controller.gd`（ロックオン枠）が共有——同種の「選択/状態インジケーター」表現を
+  1ヶ所にまとめることで、距離耐性や見た目の一貫性を保証する
 - `tactical_overlay.gd` — 射程リング描画のみ。受け取った値を描くだけで状態を持たない
 - `ship_picking.gd` / `navigation_marker_renderer.gd` / `input_decoder.gd` /
   `hud_manager.gd` — C-1 で新設した stateless static class 群。いずれも GdUnit4
   テスト付きで挙動が固定されている。他クラスへの依存はメソッド引数経由のみ
-  （Camera3D・候補データ・Callable・refs Dictionary）で、main.tscn のノード構成
+  （Camera3D・候補データ・Callable・refs Dictionary・`BillboardRing`）で、main.tscn のノード構成
   変更の影響を受けない
 - `main.gd` のイベント dispatch 層（455–788行） — 個々のハンドラは narrow で ADR 参照付き
