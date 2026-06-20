@@ -24,7 +24,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。近似ロジック解消 |
 | 重複 | A− | WS 境界（ws_server / protocol）を dawn-actor へ集約（M-4 解消）。残るは data_loader 重複のみ |
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。TCP transport も trait 境界内に収まる |
-| AI開発由来 | B+ | 命名汚染なし。残る密結合は `SectorSimulatorActor` と `SimulationNode` 境界 |
+| AI開発由来 | A− | 命名汚染なし。残る `SectorSimulatorActor` の密結合（M-3）は本番パス外の in-process 専用で実害小 |
 
 ---
 
@@ -103,12 +103,24 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ### Medium
 
-#### M-3: `sector_simulator_actor.rs` と `SimulationNode` の密結合
+#### M-3（優先度低・本番パス外）: `sector_simulator_actor.rs` と `SimulationNode` の密結合
 
-`SectorSimulatorActor` は `SimulationNode` の公開メソッドをほぼ全て呼ぶ薄いラッパー。
+`SectorSimulatorActor` は `SimulationNode` の公開メソッドをほぼ全て呼ぶ薄いラッパーで、
 `SimulationNode` の変更が即 Actor に波及する。
-8D-2a/2b/2c で `dawn-replication` 配線が入り、イベント flush 境界と TCP transport 境界は明確になった。
-ただし `SimulationNode` の公開メソッド変更が Actor に波及しやすい構造は残る。
+
+**ただし本番パス外。** `SectorSimulatorActor` を使うのは `MultiNodeCluster`
+（dawn-simulation のインプロセス・テスト/ベンチ用クラスタ）のみ。本番バイナリ
+`dawn-sector-node` は 8D-4 で独自の main ループを持ち、この Actor を使わない。
+
+このため当初の「8D-5 実機検証で境界の揺れが確定してから着手」という前提は無効化した
+（8D-5 が動かすのは dawn-sector-node であり、この Actor を一切経由しない）。
+加えて各ハンドラ（Tick / SpawnShip / Transit / Jump …）は「メッセージ → node メソッド → 返信」の
+薄いアダプタで、sync な node を async メッセージングへ繋ぐ Actor の性質上ある程度は本質的。
+コマンド/応答 enum 化しても本番価値は薄く、インプロセス・クラスタテストを壊すリスクが上回る。
+
+優先度を下げて保留する。再評価のトリガー: `SectorSimulatorActor` の main ループと
+`dawn-sector-node` の main ループの重複（両者とも tick + Raft + replication を駆動）が
+保守上の実害になったとき、または in-process クラスタを本番に近づける必要が出たとき。
 
 #### M-4（一部解消）: クライアント配線層が `dawn-simulation` と `dawn-sector-node` で重複
 
@@ -202,19 +214,19 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ### Phase 9 — 評価 A への引き上げ
 
-現在の総合評価は **A−**。A に上げるための残タスク（優先度順）:
+現在の総合評価は **A−**。
 
-#### P9-1: M-3 解消 — `SectorSimulatorActor` / `SimulationNode` 境界の明確化
+#### ~~P9-1: M-3 解消~~（撤回・保留）
 
-`SectorSimulatorActor`（423行）は `SimulationNode` の公開メソッドをほぼ全て呼ぶ薄いラッパーで、
-`SimulationNode` の変更が即 Actor に波及する。
+当初は「`SectorSimulatorActor` / `SimulationNode` 境界をコマンド/応答 enum で疎結合化し、
+8D-5 実機検証の完了後に着手」としていたが、前提が崩れたため撤回する。
 
-方針:
-- `SimulationNode` の外部インタフェースをコマンド/応答の enum に絞り込む
-- Actor は「何を呼ぶか」ではなく「何を送るか」に依存する形に変える
-- ADR を起票して境界を明文化する
+`SectorSimulatorActor` は本番パス外（インプロセス・テスト/ベンチ専用）で、本番バイナリ
+`dawn-sector-node` は 8D-4 で独自 main ループに移行しこの Actor を使わない（M-3 参照）。
+8D-5 はこの境界を経由しないため「実機検証後に着手」という条件は無意味。優先度を下げて保留する。
 
-着手条件: 8D-5 実機検証の完了後（分散配線で境界の揺れが確定してから）
+A 評価への残りの実質的な観点は **重複**（data_loader の重複・M-4 残課題）と
+**密結合**（M-3・本番パス外で低優先）のみで、いずれも本番品質には直結しない。
 
 #### P9-2: `CelestialBodyDef` へのセクター帰属フィールド追加（完了）
 
