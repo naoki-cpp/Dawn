@@ -38,6 +38,10 @@ var _target_dist_label : Label       = null
 var _target_bar_shield : ProgressBar = null
 var _target_bar_armor  : ProgressBar = null
 var _target_bar_hull   : ProgressBar = null
+## Bottom-center module bar. One slot per active module, in F-key order.
+## Each entry: {panel, style, name, state, module_index}.
+var _module_bar   : HBoxContainer = null
+var _module_slots : Array         = []
 
 # -- Constants ----------------------------------------------------------------
 
@@ -167,6 +171,7 @@ func _ready() -> void:
 	_build_status_panel()
 	_build_ship_status_panel()
 	_build_target_panel()
+	_build_module_bar()
 	_update_hud()
 	_spawn_gate_markers()
 	_spawn_body_markers()
@@ -426,6 +431,12 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
 		if mb.pressed:
+			## A click on a module slot toggles it; it is never a world click.
+			var slot_index: int = _module_slot_at(mb.position)
+			if slot_index >= 0:
+				if mb.button_index == MOUSE_BUTTON_LEFT:
+					_toggle_module_by_index(slot_index)
+				return
 			match mb.button_index:
 				MOUSE_BUTTON_LEFT:
 					## Double-click steering takes priority and must work even when a
@@ -786,6 +797,7 @@ func _on_player_fitting(modules: Array) -> void:
 		mod_dict["cycle_remaining"] = 0
 		mod_dict["cap_forced_off"]  = false
 	_player_modules = modules
+	_rebuild_module_bar()
 	_recalc_weapon_range()
 
 func _recalc_weapon_range() -> void:
@@ -1060,26 +1072,7 @@ func _update_hud() -> void:
 	_update_status_panel()
 	_update_ship_status_panel()
 	_update_target_panel()
-
-	## Active modules -- show ON/OFF and cap-deprived state (F keys)
-	var module_lines: String = ""
-	var f_idx: int = 1
-	for m: Variant in _player_modules:
-		var mod_dict: Dictionary = m as Dictionary
-		if not (mod_dict.get("is_active_module", false) as bool):
-			continue  ## Skip Passive modules
-		var name_str  : String = mod_dict.get("name",         "?") as String
-		var is_on     : bool   = mod_dict.get("is_active",    false) as bool
-		var cap_forced: bool   = mod_dict.get("cap_forced_off", false) as bool
-		var state_str : String
-		if cap_forced:
-			state_str = "CAP!"   ## Force-deactivated by capacitor system
-		elif is_on:
-			state_str = "ON"
-		else:
-			state_str = "OFF"
-		module_lines += "\n[F%d] %s: %s" % [f_idx, name_str, state_str]
-		f_idx += 1
+	_update_module_bar()
 
 	var jump_line  : String = ""
 	if _nearby_gate_id >= 0:
@@ -1110,8 +1103,8 @@ func _update_hud() -> void:
 		approach_line = "\n[A] Approach #%d" % _selected_target_id
 
 	_stats_label.text = (
-		"Ships: %d\nTick: %d%s%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
-		% [_ships.size(), _current_tick, approach_line, module_lines, jump_line]
+		"Ships: %d\nTick: %d%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
+		% [_ships.size(), _current_tick, approach_line, jump_line]
 	)
 
 # -- Capacitor client-side simulation -----------------------------------------
@@ -1240,6 +1233,11 @@ const _COLOR_ARMOR  := Color(0.88, 0.63, 0.19)  ## amber
 const _COLOR_HULL   := Color(0.82, 0.29, 0.29)  ## red
 const _COLOR_CAP    := Color(0.17, 0.66, 0.54)  ## teal
 
+## Module slot state colours (border + state label).
+const _MODULE_ON  := Color(0.30, 0.75, 0.45)  ## active
+const _MODULE_OFF := Color(0.45, 0.50, 0.60)  ## inactive
+const _MODULE_CAP := Color(0.85, 0.35, 0.35)  ## cap-forced off
+
 ## Shared semi-transparent dark background for HUD panels, so text stays legible
 ## over bright stars / nebula. Panels are display-only -- mouse input passes
 ## through to the 3D viewport (clicks are handled in _input, not via Controls).
@@ -1358,6 +1356,82 @@ func _build_target_panel() -> void:
 	vb.add_child(_target_bar_shield)
 	vb.add_child(_target_bar_armor)
 	vb.add_child(_target_bar_hull)
+
+## Bottom-center module bar. The container is built once; the slots are
+## (re)populated from the fitting in _rebuild_module_bar(). A CenterContainer
+## keeps the row centered regardless of how many modules are fitted.
+func _build_module_bar() -> void:
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	center.offset_top = -60.0
+	center.offset_bottom = -8.0
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(center)
+
+	_module_bar = HBoxContainer.new()
+	_module_bar.add_theme_constant_override("separation", 5)
+	_module_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.add_child(_module_bar)
+
+## Rebuild the slot boxes from the current fitting. One slot per *active*
+## module (passive modules have no F-key), in declaration order.
+func _rebuild_module_bar() -> void:
+	if _module_bar == null:
+		return
+	for child: Node in _module_bar.get_children():
+		child.queue_free()
+	_module_slots.clear()
+
+	var f_number: int = 1
+	for i: int in range(_player_modules.size()):
+		var mod_dict: Dictionary = _player_modules[i] as Dictionary
+		if not (mod_dict.get("is_active_module", false) as bool):
+			continue  ## Skip Passive modules
+		var slot: Dictionary = _make_module_slot(f_number, mod_dict.get("name", "?") as String)
+		slot["module_index"] = i
+		_module_bar.add_child(slot["panel"])
+		_module_slots.append(slot)
+		f_number += 1
+
+## Build one slot box (F-number / name / state). Returns {panel, style, name,
+## state, module_index} so _update_module_bar() can refresh it each frame.
+func _make_module_slot(f_number: int, mod_name: String) -> Dictionary:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.03, 0.05, 0.09, 0.78)
+	style.set_corner_radius_all(5)
+	style.set_border_width_all(1)
+	style.border_color = _MODULE_OFF
+
+	var panel := Panel.new()
+	panel.custom_minimum_size = Vector2(66.0, 46.0)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_theme_stylebox_override("panel", style)
+
+	var vb := VBoxContainer.new()
+	vb.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vb.offset_left = 3.0; vb.offset_top = 2.0; vb.offset_right = -3.0; vb.offset_bottom = -2.0
+	vb.add_theme_constant_override("separation", 0)
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(vb)
+
+	var f_lbl := _make_hud_label(9, Color(0.45, 0.52, 0.63))
+	f_lbl.text = "F%d" % f_number
+	f_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(f_lbl)
+
+	var name_lbl := _make_hud_label(9, Color(0.85, 0.89, 0.95))
+	name_lbl.text = mod_name
+	name_lbl.clip_text = true
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	name_lbl.size_flags_vertical  = Control.SIZE_EXPAND_FILL
+	vb.add_child(name_lbl)
+
+	var state_lbl := _make_hud_label(9, _MODULE_OFF)
+	state_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(state_lbl)
+
+	return {"panel": panel, "style": style, "name": name_lbl, "state": state_lbl, "module_index": -1}
 
 ## Build a label/bar/value row. Returns {row, bar, value} so the caller can
 ## update the bar and the numeric readout each frame.
@@ -1498,6 +1572,35 @@ func _update_target_panel() -> void:
 ## Set a number-less mini bar to a cur/max fill percentage.
 func _set_mini_bar(bar: ProgressBar, cur: float, mx: float) -> void:
 	bar.value = clampf((cur / mx * 100.0) if mx > 0.0 else 0.0, 0.0, 100.0)
+
+## Refresh each module slot's state text + border colour (ON / OFF / CAP!).
+func _update_module_bar() -> void:
+	for slot: Dictionary in _module_slots:
+		var idx: int = slot["module_index"]
+		if idx < 0 or idx >= _player_modules.size():
+			continue
+		var mod_dict: Dictionary = _player_modules[idx] as Dictionary
+		var col: Color
+		var txt: String
+		if mod_dict.get("cap_forced_off", false) as bool:
+			col = _MODULE_CAP;  txt = "CAP!"
+		elif mod_dict.get("is_active", false) as bool:
+			col = _MODULE_ON;   txt = "ON"
+		else:
+			col = _MODULE_OFF;  txt = "OFF"
+		var state_lbl: Label = slot["state"]
+		state_lbl.text = txt
+		state_lbl.add_theme_color_override("font_color", col)
+		(slot["style"] as StyleBoxFlat).border_color = col
+
+## Returns the F-key index (0-based) of the module slot under a screen position,
+## or -1. Used so a click on the bar toggles the module instead of the world.
+func _module_slot_at(pos: Vector2) -> int:
+	for i: int in range(_module_slots.size()):
+		var panel: Panel = _module_slots[i]["panel"]
+		if panel.get_global_rect().has_point(pos):
+			return i
+	return -1
 
 # -- Duel result overlay ------------------------------------------------------
 
