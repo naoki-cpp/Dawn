@@ -260,4 +260,24 @@ mod tests {
         let received = rx.recv().await.unwrap();
         assert_eq!(received, batch);
     }
+
+    #[tokio::test]
+    async fn a_batch_received_over_the_wire_is_ingested_into_a_replica() {
+        // End-to-end consumer side (M-5): owner broadcasts, peer receives over
+        // TCP and feeds the batch into its ReplicaSet, which retains the log.
+        let owner = TcpReplicationTransport::bind("127.0.0.1:0").await.unwrap();
+        let peer  = TcpReplicationTransport::bind("127.0.0.1:0").await.unwrap();
+        let mut rx = peer.subscribe();
+        owner.connect_peer(peer.local_addr()).await.unwrap();
+
+        let mut replicas = crate::ReplicaSet::new(1024);
+
+        owner.broadcast(make_batch(SectorId(1), 0, 3));
+        let batch = rx.recv().await.unwrap();
+        assert_eq!(
+            replicas.ingest(&batch),
+            crate::Ingest::Applied { sector_id: SectorId(1), applied: 3, next_index: 3 },
+        );
+        assert_eq!(replicas.replicated_len(SectorId(1)), 3);
+    }
 }

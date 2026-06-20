@@ -139,22 +139,22 @@ dawn-sector-node/src/data_loader.rs    (178) ┘ parse_* が共通
 - `parse_client_command` / `domain_event_to_json` と JSON DTO、TOML ローダーを共通モジュールへ集約
 - `redirect_json`（Jump Redirect）のような片側固有関数は呼び出し側クレートに残す
 
-#### M-5（機能ギャップ）: 受信した replication batch が適用されていない
+#### ~~M-5~~（機能ギャップ）: 受信 replication batch が消費されていない（解消済み）
 
-`dawn-sector-node/src/main.rs` の tick ループは、peer から受信した `LogBatch` を
-ログ出力するだけで **node 状態に適用していない**。送信側（`repl_transport.broadcast`）は
-動作しているが、受信側が破棄しているため隣接セクター間の状態複製が実際には成立しない。
+以前は `dawn-sector-node` の tick ループが受信 `LogBatch` をログ出力するだけで破棄しており、
+ゴシップが「送るだけ」で複製の消費側が未実装だった。
 
-```rust
-while let Ok(batch) = repl_rx.try_recv() {
-    // Full anti-entropy apply is 8D-2d scope; log for observability.
-    eprintln!("[Node] recv repl batch ...");   // ← 適用していない
-}
-```
+解消（2026-06-20）: `dawn-replication` に **`ReplicaSet`** を新設し、受信ループに配線した。
+既存の `AntiEntropy::plan_batch` を使い、peer セクターごとに **gap 検出・冪等・順序保持**で
+追記ログの複製を保持する（ADR-0021 のログシッピング消費側）。
 
-コメントは「8D-2d scope」とするが 8D-2d（SnapshotTransfer）は完了済みで、この適用処理とは別物。
-コメントが誤解を招く。8D-5 実機検証の前に「受信 batch を `apply_event` 経由で適用する」
-配線が必要か、それとも第1次検証では single-sector に限定するかを判断すべき。
+意図的に範囲外とした2点（別機能・別設計が必要）:
+- 複製イベントをライブ `SimulationNode` world へ適用すること
+  （別セクター座標の艦が自セクターの AoI/衝突を壊すため）
+- failover takeover（複製を所有へ昇格）
+
+`ReplicaSet` は順序付き追記ログを保持するところまでで、これは将来の read / failover 経路が
+消費する前提データである。誤解を招く「8D-2d scope」コメントも除去した。
 
 ---
 

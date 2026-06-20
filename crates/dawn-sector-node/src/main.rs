@@ -20,7 +20,7 @@ mod ws_server;
 use dawn_consensus::{RaftActor, RaftActorHandle, RaftActorMessage, RaftState, TcpRaftTransport};
 use dawn_core::{DomainEvent, FitModuleCommand, NodeId, SectorBounds, SectorId, ShipId, SlotKind, WarpTarget};
 use dawn_event_store::store::EventStore as _;
-use dawn_replication::{LogBatch, ReplicationTransport, TcpReplicationTransport};
+use dawn_replication::{Ingest, LogBatch, ReplicaSet, ReplicationTransport, TcpReplicationTransport};
 use dawn_sector::{aoi, galaxy::Galaxy, modules, ship_types, spawner::{generate_ships, SpawnConfig}, transit};
 use dawn_sector::node::SimulationNode;
 use std::collections::HashMap;
@@ -30,6 +30,8 @@ use tokio::sync::mpsc;
 
 const AOI_CELL_SIZE: f32 = 30_000.0;
 const TICK_MS      : u64 = 100;
+/// Cap on the suffix length an anti-entropy gap request may ask for.
+const MAX_REPL_SUFFIX: usize = 4096;
 const PRODUCTION_GALAXY_PATH: &str = "data/galaxy.toml";
 
 #[tokio::main]
@@ -94,6 +96,10 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     let mut repl_rx = repl_transport.subscribe();
+    // Consumer side of log-shipping gossip: holds a gap-checked, idempotent
+    // replica of each peer Sector's log (ADR-0021). Held but not yet applied
+    // to a live world — see the drain loop below.
+    let mut replicas = ReplicaSet::new(MAX_REPL_SUFFIX);
 
     // ── WebSocket server ──────────────────────────────────────────────────────
 
@@ -168,10 +174,29 @@ async fn main() -> anyhow::Result<()> {
             sessions.push(sess);
         }
 
-        // Drain incoming replication batches from peers.
+        // Drain incoming replication batches from peers into the per-Sector
+        // replica (gap-checked, idempotent). This is log-shipping's consumer
+        // side (ADR-0021): the replica retains each peer Sector's ordered log.
+        // Applying those events to a live world (and failover takeover) is a
+        // separate feature — see ReplicaSet docs.
         while let Ok(batch) = repl_rx.try_recv() {
-            // Full anti-entropy apply is 8D-2d scope; log for observability.
-            eprintln!("[Node] recv repl batch sector={:?} n={}", batch.sector_id, batch.events.len());
+            match replicas.ingest(&batch) {
+                Ingest::Applied { sector_id, applied, next_index } => {
+                    if applied > 0 {
+                        eprintln!("[Repl] sector={sector_id:?} +{applied} → next_index={next_index}");
+                    }
+                }
+                Ingest::Duplicate => {} // idempotent drop; nothing to do
+                Ingest::Gap(req) => {
+                    // The owner's prefix is missing; a future SnapshotTransfer /
+                    // anti-entropy request path (ADR-0017) will fill it. Log so
+                    // physical-node packet loss shows up during 8D-5.
+                    eprintln!(
+                        "[Repl] sector={:?} gap: expected from_index={}, awaiting catch-up",
+                        req.sector_id, req.from_index
+                    );
+                }
+            }
         }
 
         let event_cursor = node.total_event_count() as u64;

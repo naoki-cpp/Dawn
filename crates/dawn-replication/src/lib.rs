@@ -21,9 +21,15 @@
 //!
 //! - `SnapshotTransfer`: catch up far-behind replicas via snapshot (raw-bytes
 //!   TCP transfer; caller handles postcard serialisation).
+//!
+//! ## Consumer side
+//!
+//! - `ReplicaSet`: holds a gap-checked, idempotent, ordered replica of each
+//!   foreign Sector's log, fed by gossiped `LogBatch`es via `AntiEntropy`.
 
 pub mod anti_entropy;
 pub mod bus;
+pub mod replica;
 pub mod snapshot;
 pub mod tcp;
 
@@ -33,6 +39,7 @@ use tokio::sync::broadcast;
 
 pub use anti_entropy::{AntiEntropy, BatchApplyPlan, MissingLogRequest};
 pub use bus::{BusMessage, InMemoryReplicationBus};
+pub use replica::{Ingest, ReplicaSet};
 pub use snapshot::SnapshotTransfer;
 pub use tcp::{TcpReplicationError, TcpReplicationTransport};
 
