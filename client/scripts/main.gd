@@ -251,62 +251,39 @@ func _update_gate_proximity() -> void:
 			return
 
 func _input(event: InputEvent) -> void:
-	## F1-F8 toggle modules on/off
+	## Keyboard shortcuts: InputDecoder decides what the keypress means
+	## (architecture-review-client.md C-1); this just performs the side
+	## effects (network sends, warp-snap-pos / overlay state writes).
 	if event is InputEventKey and event.pressed and not event.echo:
 		var key: InputEventKey = event as InputEventKey
-		var f_index: int = -1
-		match key.keycode:
-			KEY_F1: f_index = 0
-			KEY_F2: f_index = 1
-			KEY_F3: f_index = 2
-			KEY_F4: f_index = 3
-			KEY_F5: f_index = 4
-			KEY_F6: f_index = 5
-			KEY_F7: f_index = 6
-			KEY_F8: f_index = 7
-		if f_index >= 0:
-			_toggle_module_by_index(f_index)
-			return
-		## S key -> StopCommand (decelerate to stop using thrust)
-		if key.keycode == KEY_S and _player_ship_id >= 0:
-			_send_stop_command()
-			return
-		## J key -> JumpCommand.
-		## If already in range, jump immediately. If a gate is selected but out of
-		## range, send JumpCommand anyway -- the server will auto-warp first (ADR-0022).
-		if key.keycode == KEY_J and _player_ship_id >= 0:
-			## Explicit gate selection takes priority over proximity detection.
-			## If no gate is selected, fall back to the gate in range.
-			var jump_gate: int = _selected_gate_id if _selected_gate_id >= 0 else _nearby_gate_id
-			if jump_gate >= 0:
+		var action: Dictionary = InputDecoder.decode_key(
+			key.keycode, _player_ship_id,
+			_selected_gate_id, _selected_target_id, _selected_body_id, _nearby_gate_id)
+		match action.get("kind", "none") as String:
+			"toggle_module":
+				_toggle_module_by_index(action.module_index as int)
+			"stop":
+				_send_stop_command()
+			"jump":
+				var jump_gate: int = action.gate_id as int
 				_connection.send_jump_command(_player_ship_id, jump_gate)
 				if jump_gate != _nearby_gate_id:
 					## Selected gate is out of range: server auto-warps first.
 					_player_warp_snap_pos = _compute_warp_snap_pos(jump_gate)
-			return
-		## A key -> ApproachCommand (auto-approach selected ship/gate, ADR-0015)
-		if key.keycode == KEY_A and _player_ship_id >= 0:
-			if _selected_gate_id >= 0:
-				_connection.send_approach_gate_command(_player_ship_id, _selected_gate_id)
-				return
-			if _selected_target_id >= 0:
-				_connection.send_approach_command(_player_ship_id, _selected_target_id)
-				return
-		## W key -> WarpCommand (short-range Fold to selected gate or body, ADR-0022/ADR-0025)
-		if key.keycode == KEY_W and _player_ship_id >= 0:
-			if _selected_gate_id >= 0:
-				_connection.send_warp_command(_player_ship_id, _selected_gate_id)
-				_player_warp_snap_pos = _compute_warp_snap_pos(_selected_gate_id)
-				return
-			if _selected_body_id >= 0:
-				_connection.send_warp_to_body_command(_player_ship_id, _selected_body_id)
-				_player_warp_snap_pos = _compute_body_warp_snap_pos(_selected_body_id)
-				return
-		## Tab key -> toggle tactical overlay visibility
-		if key.keycode == KEY_TAB:
-			if _tactical_overlay != null:
-				(_tactical_overlay as Node3D).call("toggle_visible")
-			return
+			"approach_gate":
+				_connection.send_approach_gate_command(_player_ship_id, action.gate_id as int)
+			"approach_ship":
+				_connection.send_approach_command(_player_ship_id, action.ship_id as int)
+			"warp_to_gate":
+				_connection.send_warp_command(_player_ship_id, action.gate_id as int)
+				_player_warp_snap_pos = _compute_warp_snap_pos(action.gate_id as int)
+			"warp_to_body":
+				_connection.send_warp_to_body_command(_player_ship_id, action.body_id as int)
+				_player_warp_snap_pos = _compute_body_warp_snap_pos(action.body_id as int)
+			"toggle_tactical_overlay":
+				if _tactical_overlay != null:
+					(_tactical_overlay as Node3D).call("toggle_visible")
+		return
 
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
