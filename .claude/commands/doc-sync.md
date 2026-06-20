@@ -76,7 +76,7 @@ Grep で `実装チェックリスト` を含むファイルを特定してか�
 確認項目:
 - architecture.md: クレート一覧・依存 DAG に全クレートが載っているか
   （`ls crates/` と照合）。通信方式の記述が ADR-0007 と矛盾していないか
-- architecture-review.md: ファイルサイズ一覧の行数が実際のファイルと一致しているか
+- architecture-review-server.md / architecture-review-client.md: ファイルサイズ一覧の行数が実際のファイルと一致しているか
   （`wc -l` で主要ファイルを照合。リファクタ後に stale になりやすい）
 - entity-model.md: ECS Component 一覧が `dawn-ecs/src/components/` と一致しているか。
   「将来」「未実装」と書かれた項目が実装済みになっていないか

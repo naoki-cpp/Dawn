@@ -2,13 +2,13 @@
 scope    : Godot クライアント（client/scripts/）の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : クライアント側で大規模リファクタ実施後 / 新スクリプト追加時
-related  : docs/architecture-review.md（サーバー側）, docs/architecture.md, docs/playtest-guide.md
+related  : docs/architecture-review-server.md（サーバー側）, docs/architecture.md, docs/playtest-guide.md
 date     : 2026-06-20
 ---
 
 # Architecture Review — Dawn Client (Godot)
 
-サーバー側 [architecture-review.md](./architecture-review.md) のクライアント版。
+サーバー側 [architecture-review-server.md](./architecture-review-server.md) のクライアント版。
 **分析のみ。コード変更はロードマップに従い段階的に実施すること。**
 
 ---

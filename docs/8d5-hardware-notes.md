@@ -2,7 +2,7 @@
 scope    : 8D-5 Raspberry Pi 実機検証ハードウェアメモ
 audience : Human Developer / AI Agent
 status   : planning; hardware not purchased
-related  : docs/architecture-review.md Phase 8 / docs/roadmap.md Phase 8D
+related  : docs/architecture-review-server.md Phase 8 / docs/roadmap.md Phase 8D
 date     : 2026-06-20
 ---
 
