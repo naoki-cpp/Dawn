@@ -73,9 +73,9 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Default player spawn point: 2x the demo galaxy's Alpha star (Helios)
-    /// radius (15_000 units) along +X, clear of the star body itself and
-    /// short of Gate 0's activation radius (49_000 ± 2_000) so a fresh spawn
-    /// doesn't start already inside the star or already in jump range.
+    /// radius (15_000 units) along +X, clear of the star body itself and far
+    /// short of Gate 0 (490_000 units) so a fresh spawn doesn't start already
+    /// inside the star or already in jump range.
     pub const DEFAULT_PLAYER_SPAWN: Position = Position { x: 30_000.0, y: 0.0, z: 0.0 };
 
     /// Spawn a player ship at the default starting position.
