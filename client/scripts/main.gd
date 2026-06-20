@@ -48,6 +48,11 @@ var _module_slots : Array         = []
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
 const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor
 const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is rejected for gates closer than this (ADR-0022).
+## Warp arrival distance from target centre, as a multiple of the target's own
+## radius (gate activation_radius / body radius). Gates arrive closer in (well
+## inside jump range); bodies arrive further out (outside the visual sphere).
+const GATE_WARP_ARRIVAL_FACTOR : float = 0.75
+const BODY_WARP_ARRIVAL_FACTOR : float = 1.5
 ## Unit-to-meter scale: displayed m/s = (units/tick) * METERS_PER_UNIT.
 ## Change this one constant to rescale all displayed speeds and distances.
 const METERS_PER_UNIT : float = 1.0
@@ -955,13 +960,24 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 		_current_tick = tick
 		_simulate_cap(ticks_elapsed)
 
-## Pre-compute the warp arrival position in server coords at command-send time.
-## Uses the ship's actual position (known at command time, not drifted) to
-## determine the approach direction, then places the snap point at 75% of the
-## gate's activation radius — safely within jump range (activation_radius = 2000).
-func _compute_warp_snap_pos(gate_id: int) -> Vector3:
+## Shared core for gate/body warp arrival pre-computation. Uses the ship's
+## actual position (known at command-send time, not drifted) to determine the
+## approach direction, then places the snap point at `arrival_factor * radius`
+## from the target's centre (ADR-0022/0025).
+func _compute_warp_snap_pos_core(target_pos: Vector3, radius: float, arrival_factor: float) -> Vector3:
 	if not _ships.has(_player_ship_id):
 		return Vector3.INF
+	var ship_node: Node3D  = _ships[_player_ship_id] as Node3D
+	var gdot     : Vector3 = ship_node.global_position
+	var ship_server_pos := Vector3(gdot.x / WORLD_SCALE, gdot.y / WORLD_SCALE, -gdot.z / WORLD_SCALE)
+	var dir: Vector3 = ship_server_pos - target_pos
+	dir = dir.normalized() if dir.length() > 0.001 else Vector3(-1.0, 0.0, 0.0)
+	return target_pos + dir * radius * arrival_factor
+
+## Pre-compute the warp arrival position in server coords for a Jump Gate.
+## Arrives at GATE_WARP_ARRIVAL_FACTOR of the gate's activation radius —
+## safely within jump range (activation_radius = 2000).
+func _compute_warp_snap_pos(gate_id: int) -> Vector3:
 	var target_gate: Dictionary = {}
 	for g: Variant in _gates:
 		if (g as Dictionary).get("gate_id", -1) as int == gate_id:
@@ -971,18 +987,12 @@ func _compute_warp_snap_pos(gate_id: int) -> Vector3:
 		return Vector3.INF
 	var gate_pos    : Vector3 = target_gate.get("position", Vector3.ZERO) as Vector3
 	var activation_r: float   = target_gate.get("activation_radius", 2000.0) as float
-	var ship_node   : Node3D  = _ships[_player_ship_id] as Node3D
-	var gdot        : Vector3 = ship_node.global_position
-	var ship_server_pos := Vector3(gdot.x / WORLD_SCALE, gdot.y / WORLD_SCALE, -gdot.z / WORLD_SCALE)
-	var dir: Vector3 = ship_server_pos - gate_pos
-	dir = dir.normalized() if dir.length() > 0.001 else Vector3(-1.0, 0.0, 0.0)
-	return gate_pos + dir * activation_r * 0.75
+	return _compute_warp_snap_pos_core(gate_pos, activation_r, GATE_WARP_ARRIVAL_FACTOR)
 
 ## Pre-compute the warp arrival position for a celestial body in server coords.
-## Arrival is at body.radius * 1.5 from centre (BODY_WARP_ARRIVAL_FACTOR, ADR-0025).
+## Arrives at BODY_WARP_ARRIVAL_FACTOR of the body's radius from its centre
+## (ADR-0025).
 func _compute_body_warp_snap_pos(body_id: int) -> Vector3:
-	if not _ships.has(_player_ship_id):
-		return Vector3.INF
 	var body_pos   : Vector3 = Vector3.ZERO
 	var body_radius: float   = 1.0
 	var found: bool          = false
@@ -995,12 +1005,7 @@ func _compute_body_warp_snap_pos(body_id: int) -> Vector3:
 			break
 	if not found:
 		return Vector3.INF
-	var ship_node: Node3D  = _ships[_player_ship_id] as Node3D
-	var gdot      : Vector3 = ship_node.global_position
-	var ship_server := Vector3(gdot.x / WORLD_SCALE, gdot.y / WORLD_SCALE, -gdot.z / WORLD_SCALE)
-	var dir: Vector3 = ship_server - body_pos
-	dir = dir.normalized() if dir.length() > 0.001 else Vector3(-1.0, 0.0, 0.0)
-	return body_pos + dir * body_radius * 1.5
+	return _compute_warp_snap_pos_core(body_pos, body_radius, BODY_WARP_ARRIVAL_FACTOR)
 
 func _handle_ship_despawned(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
