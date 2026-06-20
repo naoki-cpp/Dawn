@@ -80,110 +80,54 @@ GdUnit4でテスト済み〔計55ケース、全件PASS〕。§「テストカ�
 
 ## 問題一覧
 
-### 解消済み
+### 解消済み（要約）
 
-#### C-1: `main.gd` の責務過多（god object） — 完了（2026-06-20）
+| ID | 内容 | 解消内容 |
+|---|---|---|
+| C-1 | `main.gd` god object（13以上の異種責務） | 4クラスに分割抽出（下表）。main.gd 1661→1084行（-35%）。挙動変更なし |
+| C-2 | マーカー生成/ピッキング/ワープ着地点計算の同型ロジック2重実装 | 各組の「文字通り同一」な部分のみ named helper に抽出（後にC-1で各クラスへ移動）。挙動変更なし |
 
-13以上の異種責務（入力・HUD構築・メッセージ取り込み・マーカー生成・ピッキング・
-ワープ座標計算・カプ再現・環境構築・デュエルUI）が単一クラスに集約していた問題。
-サーバー側で Phase 2〜7 を通じて解消した「肥大化した `node/mod.rs`」と同種の問題。
+C-1 の抽出先（実施順）:
 
-抽出結果（実施順）:
+| 抽出先 | 内容 | 規模 |
+|---|---|---|
+| `ship_picking.gd`（`ShipPicking`） | 船/ゲート/天体ピッキング3関数 | 90行 |
+| `navigation_marker_renderer.gd`（`NavigationMarkerRenderer`） | ゲート/天体マーカー生成 + `spectral_color` | 146行 |
+| `input_decoder.gd`（`InputDecoder`） | キー入力→アクション決定（F1–F8/S/J/A/W/Tab のみ。マウス処理は意図的に除外※） | 85行 |
+| `hud_manager.gd`（`HudManager`） | HUD全パネル（status/ship status/target/module bar/duel overlay）の構築・更新 | 474行 |
 
-| 抽出先 | 元の対象行（抽出前） | 規模 | 形態 |
-|---|---|---|---|
-| `ship_picking.gd`（`ShipPicking`） | 船/ゲート/天体ピッキング3関数 | 90行 | stateless static class |
-| `navigation_marker_renderer.gd`（`NavigationMarkerRenderer`） | ゲート/天体マーカー生成 + `spectral_color` | 146行 | stateless static class |
-| `input_decoder.gd`（`InputDecoder`） | キー入力→アクション決定（F1–F8/S/J/A/W/Tab、**スコープ縮小**：マウス処理は除外） | 85行 | stateless static class |
-| `hud_manager.gd`（`HudManager`） | HUD全パネル（status/ship status/target/module bar/duel overlay）の構築・更新 | 474行 | stateless static class（refs Dictionary を main.gd が保持） |
+いずれも stateless static class（GdUnit4テスト付き）。`HudManager` のみ build_* が
+Control サブツリーを構築して参照 Dictionary を返すビルダー形式（main.gd がノード
+所有権を持ち続ける）で、他3クラスは「呼び出し側がデータを渡し、計算/構築だけする」形。
 
-4回の抽出を通して `main.gd` は **1661 → 1084 行（-577行、-35%）**。
-全抽出で挙動・外部から見える振る舞いは変更していない。
+※ マウス入力（ダブルクリック判定・HUD連動・ピッキング選択）は状態・依存が絡み
+「入力→決定」の純粋形に切り出せないため main.gd に残置。詳細は採らない方針を参照。
 
-**`HudManager` の設計**: build_* 系メソッドは Control サブツリーを構築して
-参照の Dictionary（例: `{conn_dot, conn_label, name_label, info_label}`）を返す。
-main.gd はその Dictionary を自身のメンバ変数（`_status_panel_refs` 等）に保持し、
-毎フレームの update_* 呼び出しに渡す。`HudManager` 自身は状態を持たず、
-Control ノードの所有権は常に main.gd 側にある——他の3クラスと同じ
-「呼び出し側がデータを渡し、クラスは計算/構築だけする」設計を、ノードを返す
-ビルダーパターンに拡張したもの。
-
-**マウス入力ハンドラを抽出しなかった理由**（`InputHandler` のスコープ縮小）:
-マウスクリック側（`_check_double_click` のタイマー状態・カメラドラッグ判定・
-`_module_slot_at` という `HudManager` の関数への依存・ピッキング結果からの選択状態
-書き込み）はキーボード側と違って「入力 → 決定」のみに切り出せる純粋な形をしていない。
-無理に抽出するとインターフェースが main.gd の状態をそのまま受け渡すだけの薄皮一枚に
-なり、実質的な結合は変わらず複雑さだけが増す（Altitude 原則: 場当たり的な分割では
-なく本質的な責務境界で分ける）。`HudManager` 抽出が完了して `_module_slot_at` は
-`HudManager.module_slot_at()` を main.gd から呼ぶだけの形になったが、ダブルクリック
-タイマー状態とカメラドラッグ判定は依然 main.gd 固有の処理であり、再評価の結論は
-「現状維持」。
-
-**`class_name` 抽出の手順上の注意**: 新しい `class_name` を追加した直後は、Godot が
-プロジェクトを一度スキャンするまでグローバル識別子として認識されない
-（`Identifier "X" not declared in the current scope` で CLI テストが失敗する）。
-4回の抽出すべてで再現したので、`class_name` を追加するたびに必ず発生するものとして
-手順化済み。`scripts/setup-godot.*` で取得した Godot バイナリで以下を一度実行して
-キャッシュを再構築すること:
+**運用上の注意**: `class_name` を新規追加した直後は Godot がプロジェクトを
+スキャンするまでグローバル識別子として認識されない（CLI テストが
+`Identifier "X" not declared` で失敗する）。`class_name` 抽出のたびに発生する。
 ```bash
 "$GODOT_BIN" --headless --editor --quit-after 3 --path client
 ```
 
-#### C-2: 同型ロジックの2重実装（3箇所） — 解消済み（2026-06-20）
-
-- ~~**マーカー生成**: `_spawn_gate_markers()` と `_spawn_body_markers()` は
-  「子ノードクリア → 配列ループ → Node3D生成 → メッシュ/Label3D付与」の同一パターン。~~
-  → 「子ノードクリア」を `_clear_children(root)` に、「サーバー座標 → Godot 座標変換」を
-  `_server_to_godot_pos(p)` に抽出。メッシュ/Label3D の生成自体はゲート（トーラス）と
-  天体（恒星/惑星で分岐するスフィア）で構造が異なるため統合せず、文字通り同一だった
-  2箇所のみを共通化した（後に `navigation_marker_renderer.gd` へ移動、C-1）。
-- ~~**ピッキング**: `_pick_ship_at()` / `_pick_gate_at()` / `_pick_body_at()` は
-  「カメラレイ取得 → 対象配列ループ → レイ距離判定 → 最近接を返す」の同一パターン。~~
-  → レイと点の距離計算を `_ray_point_distance()` に抽出し、3関数すべてで使用
-  （後に `ship_picking.gd` へ移動、C-1）。候補データの取得方法・pick radius の
-  計算は関数ごとに異なるため、ループ構造自体は統合せず数式部分のみ共通化した。
-- ~~**ワープ着地点計算**: `_compute_warp_snap_pos()`（ゲート向け）と
-  `_compute_body_warp_snap_pos()`（天体向け）は同一パターンの重複。~~
-  → 方向ベクトル計算＋オフセット適用の共通部分を `_compute_warp_snap_pos_core()` に
-  抽出し、係数も `GATE_WARP_ARRIVAL_FACTOR` / `BODY_WARP_ARRIVAL_FACTOR` として
-  named constant 化した（main.gd に残置——ワープ計算は HUD 表示にも使うため）。
-
-3件とも挙動・公開シグネチャは変更なし。Callable/lambda ベースの汎用ヘルパー化
-（候補データ + 取得関数を渡す形）は当時 Godot エディタでの動作確認ができず見送ったが、
-**`scripts/setup-godot.(sh|ps1)` で pin 済み Godot バイナリをローカル取得し GdUnit4 を
-実際に CLI 実行できるようになった**ので、この制約は解消済み。実際、`ship_picking.gd`
-の `pick_gate_at()` は座標変換用の `Callable`（`main.gd` の named method
-`_server_to_godot_pos` を値として渡す）を受け取る形にしている——インラインの
-マルチラインラムダではなく既存メソッド参照を渡す形なら構文リスクが小さいことを確認できた。
-
-### テストカバレッジ（2026-06-20、C-1 完了時点）
+### テストカバレッジ（C-1 完了時点）
 
 | テストファイル | 対象 | ケース数 |
 |---|---|---|
-| `main_test.gd` | main.gd に残る純粋関数（`_server_to_godot_pos` / `_compute_warp_snap_pos_core`） | 4 |
-| `ship_picking_test.gd` | `ShipPicking`（レイ距離・船/ゲート/天体ピッキング） | 8 |
-| `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer`（スペクトル色・マーカー生成） | 8 |
-| `input_decoder_test.gd` | `InputDecoder.decode_key()`（F1–F8/S/J/A/W/Tab の優先順位・ガード） | 15 |
-| `hud_manager_test.gd` | `HudManager`（バー計算・パネル更新分岐・モジュールバー・デュエルオーバーレイ） | 20 |
+| `main_test.gd` | main.gd 残存純粋関数 | 4 |
+| `ship_picking_test.gd` | `ShipPicking` | 8 |
+| `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer` | 8 |
+| `input_decoder_test.gd` | `InputDecoder` | 15 |
+| `hud_manager_test.gd` | `HudManager` | 20 |
+| **合計** | | **55**（全件PASS、orphan node 0） |
 
-**合計55ケース**、pin 済み Godot で実行確認済み（全件PASS、orphan node 0）。
+テスト導入で見つかった不具合・定着した手順（詳細: `AI_DEVELOPMENT_GUIDE.md` §8）:
+- `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる
+- `class_name` 新規追加直後はキャッシュ未更新で全件失敗する（上記コマンドで解消）
+- `add_child()` しない Control ノードは `auto_free()` で明示的に解放する（orphan node 検出）
 
-テスト実行中に実際の不具合・ハマりどころを複数発見している（「Godot エディタなしでは
-検証できない」という旧来の想定が剥がれたことで初めて見つかった類）:
-- `main_test.gd` 初回実行時: テストの `Node3D` をシーンツリーに追加し忘れ、
-  `global_position` が `(0,0,0)` 固定で読めてしまい1件が偶然PASSしていた。
-- `class_name` を新規追加した直後（4クラスすべてで再現）: Godot のグローバル
-  クラスキャッシュが未更新で `Identifier "X" not declared` と全件失敗——上記
-  「`class_name` 抽出の手順上の注意」を参照。
-- `hud_manager_test.gd` 初回実行時: `make_stat_bar()`/`make_mini_bar()` が返す
-  Control ノードをどこにも `add_child()` せず放置していたテストが、Godot の
-  orphan node 検出（`exit code 101`）に引っかかった。シーンに追加しないノードは
-  `auto_free()` で明示的に解放する必要がある。
-
-`main.gd` に残るマウス入力処理・イベント dispatch・spawning はテストよりも視覚的な
-確認（クリック判定のズレ・HUDレイアウト崩れなど）が主な検証手段になる領域——
-ネットワーク接続・実際のシーンインスタンス化が絡むため、ユニットテストの投資対効果が
-他の4クラスより低い。
+`main.gd` に残るマウス入力処理・イベント dispatch・spawning は、ネットワーク接続や
+シーンインスタンス化が絡むためテストよりも視覚的な確認が主な検証手段になる領域。
 
 ### Medium（保留）
 
@@ -206,26 +150,12 @@ silent に値が欠落する（GDScript の `Dictionary.get()` はデフォル�
 
 ## 改善ロードマップ
 
-### 完了
-
-| 項目 | 完了日 | 内容 |
-|---|---|---|
-| C-1 `main.gd` 分割 | 2026-06-20 | `ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder`（キーボードのみ） / `HudManager` の4クラスを抽出。main.gd 1661→1084行（-35%）。マウス入力処理は意図的に残置（理由は上記） |
-| C-2 重複ロジックの共通化 | 2026-06-20 | マーカー生成・ピッキング・ワープ着地点計算の同型ロジックを named helper に抽出 |
-
-### 保留
-
-| 項目 | 種別 | 状態・理由 |
-|---|---|---|
-| C-3 シーンツリー直パス参照 | 品質・保留 | 実害小。ノード構成変更が発生したときに合わせて対応すれば十分 |
-| C-4 PlayerFitting スキーマ検証 | 品質・保留 | 現状ドリフトなし。サーバー側 JSON 形式を変更する ADR が出たときに合わせて対応 |
-
-### 次の前進先（このレビューの範囲外）
+C-1/C-2 は解消済み（上記「問題一覧」参照）。残るは C-3/C-4 の保留のみ——
+いずれも実害が小さく、トリガー（ノード構成変更 / サーバーJSON形式変更のADR）が
+発生したときに対応すれば十分。
 
 `main.gd` の god object 問題は解消したため、クライアント側の次の課題は構造リファクタ
-ではなく機能側（戦闘の深み、ADR-0016 §5）か、保留中の C-3/C-4 のトリガー待ちが妥当。
-強引に main.gd をさらに細分化する（例: マウス入力処理を無理に抽出する）ことは
-「採らない方針」として明記する。
+ではなく機能側（戦闘の深み、ADR-0016 §5）か、C-3/C-4 のトリガー待ちが妥当。
 
 ### 採らない方針
 
