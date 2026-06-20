@@ -76,6 +76,15 @@ position      = [15000.0, 0.0, 0.0]  # 1.0 AU
 radius        = 3500.0
 spectral_type = 0.0
 
+[[celestial_bodies]]
+id            = 6
+sector        = 0
+kind          = "Planet"
+name          = "Meridian"
+position      = [20700.0, 0.0, 17400.0]  # ~1.8 AU
+radius        = 4000.0
+spectral_type = 0.0
+
 # Sector 1 (Beta)
 [[celestial_bodies]]
 id            = 2

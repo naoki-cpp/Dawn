@@ -239,7 +239,7 @@ mod tests {
         assert_eq!(gates[0]["gate_id"].as_u64().unwrap(), 0);
         assert_eq!(gates[0]["to_system_name"], "Beta", "gate 0 leads to Beta");
 
-        assert_eq!(v["celestial_bodies"].as_array().unwrap().len(), 2, "Helios + Forge");
+        assert_eq!(v["celestial_bodies"].as_array().unwrap().len(), 3, "Helios + Forge + Meridian");
     }
 
     #[test]

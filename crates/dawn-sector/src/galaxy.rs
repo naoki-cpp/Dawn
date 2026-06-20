@@ -186,15 +186,17 @@ mod tests {
         let map = Galaxy::demo();
         assert_eq!(map.systems.len(), 3);
         assert_eq!(map.gates.len(), 4);
-        assert_eq!(map.bodies.len(), 6);
+        assert_eq!(map.bodies.len(), 7);
     }
 
     #[test]
     fn bodies_in_sector_returns_star_and_planet_for_each_builtin_sector() {
         let map = Galaxy::demo();
-        for sid in [SectorId(0), SectorId(1), SectorId(2)] {
+        // Sector 0 (Alpha) has an extra planet (Meridian) alongside Helios + Forge.
+        let expected_counts = [(SectorId(0), 3), (SectorId(1), 2), (SectorId(2), 2)];
+        for (sid, expected) in expected_counts {
             let bodies = map.bodies_in_sector(sid);
-            assert_eq!(bodies.len(), 2, "sector {:?} should have 2 bodies", sid);
+            assert_eq!(bodies.len(), expected, "sector {:?} should have {} bodies", sid, expected);
             assert!(bodies.iter().all(|b| b.sector == sid), "body assigned to wrong sector");
             assert!(bodies.iter().any(|b| b.kind == CelestialBodyKind::Star),  "no star in {:?}", sid);
             assert!(bodies.iter().any(|b| b.kind == CelestialBodyKind::Planet), "no planet in {:?}", sid);

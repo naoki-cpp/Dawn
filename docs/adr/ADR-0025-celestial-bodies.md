@@ -55,7 +55,7 @@ pub enum WarpTarget {
 ### 2. 静的マップデータ（dawn-sector/galaxy.rs + data/galaxy*.toml）
 
 `celestial_bodies_in_sector(sector_id)` がそのセクターの天体一覧を返す。  
-初期トポロジー（3星系 × 恒星1 + 惑星1）：
+初期トポロジー（Alpha は恒星1 + 惑星2、Beta/Gamma は恒星1 + 惑星1）：
 
 スケール：**1 unit = 10,000 km → 1 AU ≈ 15,000 units**（ゲート位置 49,000 units ≈ 3.3 AU = 小惑星帯外縁）
 
@@ -63,12 +63,13 @@ pub enum WarpTarget {
 |--------|------------------|-------------------|------------------------|--------|------------|
 | Alpha  | Helios（G型恒星） | —                 | (0, 0, 0)              | 15 000 | 0.60       |
 | Alpha  | Forge（惑星）     | 地球軌道（1.0 AU）| (15 000, 0, 0)         | 3 500  | —          |
+| Alpha  | Meridian（惑星）  | 1.8 AU            | (20 700, 0, 17 400)    | 4 000  | —          |
 | Beta   | Aegis（A型恒星）  | —                 | (0, 0, 0)              | 12 000 | 0.30       |
 | Beta   | Haven（惑星）     | 火星軌道（1.52 AU）| (−21 600, 0, 7 200)   | 4 500  | —          |
 | Gamma  | Crimson（K型恒星）| —                 | (0, 0, 0)              | 18 000 | 0.85       |
 | Gamma  | Bastion（惑星）   | 金星軌道（0.72 AU）| (10 000, 0, −4 000)   | 3 000  | —          |
 
-`CelestialBodyId` は全セクターにわたってグローバルに一意（Alpha: 0-1、Beta: 2-3、Gamma: 4-5）。
+`CelestialBodyId` は全セクターにわたってグローバルに一意（Alpha: 0, 1, 6、Beta: 2-3、Gamma: 4-5）。
 `CelestialBodyDef.sector` が所属 Sector を明示するため、天体 ID の割り当て規約に依存しない。
 
 ### 3. 天体へのワープ（dawn-simulation）
