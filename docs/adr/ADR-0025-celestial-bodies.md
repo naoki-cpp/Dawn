@@ -75,7 +75,7 @@ pub enum WarpTarget {
 
 `can_propose_warp` と `apply_warp_command` が `WarpTarget` を受け取る。
 
-- `Gate` ターゲット：従来どおり `activation_radius × 0.8` で停止。
+- `Gate` ターゲット：従来どおり `activation_radius × 0.75` で停止。
 - `Body` ターゲット：`body.radius × 1.5` の地点で停止（`BODY_WARP_ARRIVAL_FACTOR = 1.5`）。
 
 `auto_jump` は `Gate` ターゲット専用。`Body` ターゲットでは無視する。
