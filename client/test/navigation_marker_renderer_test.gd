@@ -120,3 +120,21 @@ func test_spawn_body_markers_produces_no_markers_when_only_a_star_is_present() -
 	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
 
 	assert_int(bodies_root.get_child_count()).is_equal(0)
+
+
+func test_spawn_body_markers_adds_a_fixed_size_selection_reticle_to_each_planet() -> void:
+	## Pairs with ShipPicking.pick_body_at's screen-space picking: a planet
+	## should stay equally easy to click regardless of distance, which needs
+	## a reticle that renders at a constant screen size (fixed_size).
+	var bodies_root: Node3D = auto_free(Node3D.new())
+	var bodies: Array = [
+		{"body_id": 2, "kind": "Planet", "name": "Forge", "position": Vector3(500.0, 0.0, 0.0), "radius": 200.0, "spectral_type": 0.0},
+	]
+
+	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
+
+	var marker: Node3D = bodies_root.get_child(0) as Node3D
+	var reticle: Sprite3D = marker.get_child(2) as Sprite3D  ## index 0=mesh, 1=label, 2=reticle
+	assert_object(reticle).is_not_null()
+	assert_bool(reticle.fixed_size).is_true()
+	assert_object(reticle.texture).is_not_null()

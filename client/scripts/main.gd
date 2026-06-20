@@ -370,11 +370,12 @@ func _select_approach_gate(gate_id: int) -> void:
 	_selected_body_id   = -1
 	_update_hud()
 
-## Returns the body_id of the celestial body closest to the click ray, or -1.
+## Returns the body_id of the celestial body marker closest to the click
+## position on screen, or -1.
 func _pick_body_at(screen_pos: Vector2) -> int:
 	if _player_ship_id < 0:
 		return -1
-	return ShipPicking.pick_body_at(_camera, screen_pos, _bodies_root, _bodies, WORLD_SCALE)
+	return ShipPicking.pick_body_at(_camera, screen_pos, _bodies_root)
 
 ## Select a celestial body. Press W to warp to it.
 func _select_body(body_id: int) -> void:

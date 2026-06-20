@@ -24,7 +24,7 @@ date     : 2026-06-20（C-1 完了後に更新）
 | 重複 | A− | マーカー生成・ピッキング・ワープ着地点計算の同型ロジックは解消済み（C-2） |
 | 結合度 | B− | signal 経由の `connection.gd` ↔ `main.gd` 結合は良好。`@onready` のシーンツリー直パス参照と modules dict のキー前提は脆い（C-3/C-4、保留） |
 | デッドコード | A | 残骸なし。コメントは ADR 参照付きで現状と一致 |
-| テストカバレッジ | B | 新設4クラス + main.gd残存ロジックの一部（モジュールdeactivate判定など）を GdUnit4 で計59ケース実行確認済み。HUD構築呼び出し・マウス入力・イベント dispatch本体は未テスト——シーンツリー/ネットワーク依存のため |
+| テストカバレッジ | B | 新設4クラス + main.gd残存ロジックの一部（モジュールdeactivate判定など）を GdUnit4 で計63ケース実行確認済み。HUD構築呼び出し・マウス入力・イベント dispatch本体は未テスト——シーンツリー/ネットワーク依存のため |
 | サーバー側との対比 | — | サーバー側はクレート分割（A−）、クライアントはファイル分割（B+）。テストカバレッジは依然サーバー側（カバレッジ80%要件）が厚い |
 
 サーバー側が長期にわたる分割リファクタ（Phase 2〜9）を経て A− に達したのに対し、
@@ -41,20 +41,20 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/hud_manager.gd` | 474 | 🟢 C-1で新設。HUD全パネルの構築・更新を持つ stateless static class |
 | `client/scripts/ship_controller.gd` | 272 | 🟢 単一船の視覚表現に専念。結合なし |
 | `client/scripts/connection.gd` | 245 | 🟢 WebSocket I/O とシグナル発行のみ。教科書的な境界 |
-| `client/scripts/navigation_marker_renderer.gd` | 145 | 🟢 C-1で新設。ゲート/惑星マーカー生成 + スペクトル色（恒星の実体メッシュは2026-06-21に撤廃） |
+| `client/scripts/navigation_marker_renderer.gd` | 192 | 🟢 C-1で新設。ゲート/惑星マーカー生成 + スペクトル色 + 惑星の固定画面サイズ選択リング（恒星の実体メッシュは2026-06-21に撤廃） |
 | `client/scripts/camera_controller.gd` | 124 | 🟢 自己完結したオービットカメラ |
 | `client/scripts/tactical_overlay.gd` | 93 | 🟢 射程リング描画のみ |
-| `client/scripts/ship_picking.gd` | 90 | 🟢 C-1で新設。船/ゲート/天体ピッキング3関数 |
+| `client/scripts/ship_picking.gd` | 100 | 🟢 C-1で新設。船/ゲート/天体ピッキング3関数（天体は画面空間ピッキングに変更、2026-06-21） |
 | `client/scripts/input_decoder.gd` | 85 | 🟢 C-1で新設。キー入力→アクション決定の純粋関数 |
 
-合計 2,622 行のうち `main.gd` が42%を占める（C-1着手前69%から大幅低下）。
+合計 2,679 行のうち `main.gd` が41%を占める（C-1着手前69%から大幅低下）。
 新設4ファイル（795行）はいずれも stateless static class で、main.gd の状態や
 シーンツリーへの直接依存を持たない。
 
-（`client/test/*.gd`（main_test.gd 108行 + ship_picking_test.gd 109行 +
-navigation_marker_renderer_test.gd 122行 + input_decoder_test.gd 108行 +
-hud_manager_test.gd 190行、合計637行）は別カウント。新設4クラスの全staticメソッド +
-main.gd残存ロジックの回帰テストをGdUnit4でテスト済み〔計59ケース、全件PASS〕。
+（`client/test/*.gd`（main_test.gd 108行 + ship_picking_test.gd 138行 +
+navigation_marker_renderer_test.gd 140行 + input_decoder_test.gd 108行 +
+hud_manager_test.gd 190行、合計684行）は別カウント。新設4クラスの全staticメソッド +
+main.gd残存ロジックの回帰テストをGdUnit4でテスト済み〔計63ケース、全件PASS〕。
 §「テストカバレッジ」参照）
 
 ---
@@ -92,8 +92,8 @@ C-1 の抽出先（実施順）:
 
 | 抽出先 | 内容 | 規模 |
 |---|---|---|
-| `ship_picking.gd`（`ShipPicking`） | 船/ゲート/天体ピッキング3関数 | 90行 |
-| `navigation_marker_renderer.gd`（`NavigationMarkerRenderer`） | ゲート/惑星マーカー生成 + `spectral_color` | 145行 |
+| `ship_picking.gd`（`ShipPicking`） | 船/ゲート/天体ピッキング3関数（天体は画面空間ピッキング） | 100行 |
+| `navigation_marker_renderer.gd`（`NavigationMarkerRenderer`） | ゲート/惑星マーカー生成 + `spectral_color` + 惑星の固定画面サイズ選択リング | 192行 |
 | `input_decoder.gd`（`InputDecoder`） | キー入力→アクション決定（F1–F8/S/J/A/W/Tab のみ。マウス処理は意図的に除外※） | 85行 |
 | `hud_manager.gd`（`HudManager`） | HUD全パネル（status/ship status/target/module bar/duel overlay）の構築・更新 | 474行 |
 
@@ -116,11 +116,11 @@ Control サブツリーを構築して参照 Dictionary を返すビルダー形
 | テストファイル | 対象 | ケース数 |
 |---|---|---|
 | `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 7 |
-| `ship_picking_test.gd` | `ShipPicking` | 8 |
-| `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer` | 9 |
+| `ship_picking_test.gd` | `ShipPicking`（画面空間ピッキング含む） | 11 |
+| `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer`（選択リング含む） | 10 |
 | `input_decoder_test.gd` | `InputDecoder` | 15 |
 | `hud_manager_test.gd` | `HudManager` | 20 |
-| **合計** | | **59**（全件PASS、orphan node 0） |
+| **合計** | | **63**（全件PASS、orphan node 0） |
 
 テスト導入で見つかった不具合・定着した手順（詳細: `AI_DEVELOPMENT_GUIDE.md` §8）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる

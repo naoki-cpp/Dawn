@@ -79,9 +79,25 @@ func test_pick_gate_at_returns_the_gate_whose_converted_position_is_on_the_ray()
 	assert_int(picked).is_equal(3)
 
 
+# -- screen_point_distance ---------------------------------------------------------
+
+func test_screen_point_distance_is_near_zero_for_a_point_dead_ahead() -> void:
+	var camera: Camera3D = _make_camera()
+	var dt: Vector2 = ShipPicking.screen_point_distance(camera, _screen_center(), Vector3.ZERO)
+	assert_float(dt.x).is_less(1.0)
+	assert_float(dt.y).is_greater(0.0)
+
+
+func test_screen_point_distance_reports_negative_front_when_point_is_behind_the_camera() -> void:
+	var camera: Camera3D = _make_camera()
+	## Camera is at z=10 looking down -Z; z=20 is behind it.
+	var dt: Vector2 = ShipPicking.screen_point_distance(camera, _screen_center(), Vector3(0.0, 0.0, 20.0))
+	assert_float(dt.y).is_less(0.0)
+
+
 # -- pick_body_at -----------------------------------------------------------------
 
-func test_pick_body_at_returns_the_body_whose_marker_is_on_the_ray() -> void:
+func test_pick_body_at_returns_the_body_whose_marker_is_on_screen_at_the_click() -> void:
 	var camera: Camera3D = _make_camera()
 	var bodies_root: Node = auto_free(Node.new())
 	add_child(bodies_root)
@@ -91,8 +107,7 @@ func test_pick_body_at_returns_the_body_whose_marker_is_on_the_ray() -> void:
 	bodies_root.add_child(marker)
 	marker.global_position = Vector3.ZERO
 
-	var bodies: Array = [{"body_id": 9, "radius": 100.0}]
-	var picked: int = ShipPicking.pick_body_at(camera, _screen_center(), bodies_root, bodies, 0.1)
+	var picked: int = ShipPicking.pick_body_at(camera, _screen_center(), bodies_root)
 	assert_int(picked).is_equal(9)
 
 
@@ -103,7 +118,21 @@ func test_pick_body_at_ignores_children_without_a_body_id_meta() -> void:
 
 	var decoy := Node3D.new()
 	bodies_root.add_child(decoy)
-	decoy.global_position = Vector3.ZERO  ## on the ray, but has no body_id meta
+	decoy.global_position = Vector3.ZERO  ## on screen, but has no body_id meta
 
-	var picked: int = ShipPicking.pick_body_at(camera, _screen_center(), bodies_root, [], 0.1)
+	var picked: int = ShipPicking.pick_body_at(camera, _screen_center(), bodies_root)
+	assert_int(picked).is_equal(-1)
+
+
+func test_pick_body_at_returns_minus_one_when_marker_is_behind_the_camera() -> void:
+	var camera: Camera3D = _make_camera()
+	var bodies_root: Node = auto_free(Node.new())
+	add_child(bodies_root)
+
+	var marker := Node3D.new()
+	marker.set_meta("body_id", 9)
+	bodies_root.add_child(marker)
+	marker.global_position = Vector3(0.0, 0.0, 20.0)  ## behind the camera at z=10
+
+	var picked: int = ShipPicking.pick_body_at(camera, _screen_center(), bodies_root)
 	assert_int(picked).is_equal(-1)

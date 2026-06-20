@@ -13,12 +13,54 @@ const GATE_RING_INNER_RATIO    : float = 0.85
 const GATE_LABEL_HEIGHT_RATIO  : float = 0.3
 const PLANET_VISUAL_RADIUS_RATIO: float = 0.08
 
+## Selection reticle: a fixed-screen-size ring billboard so every planet is
+## equally easy to click regardless of distance (pairs with
+## ShipPicking.pick_body_at's screen-space picking). fixed_size makes
+## Sprite3D render at the same apparent size no matter how far the camera is.
+const RETICLE_TEXTURE_PX : int   = 64
+const RETICLE_PIXEL_SIZE : float = 0.018
+const RETICLE_COLOR      : Color = Color(0.4, 0.85, 1.0, 0.85)
+
+static var _reticle_texture: ImageTexture = null
+
 
 ## Frees every child of `root`. Shared by gate/body marker respawning, which
 ## both rebuild their marker set from scratch on each call.
 static func clear_children(root: Node) -> void:
 	for child: Node in root.get_children():
 		child.queue_free()
+
+
+## Procedurally builds (and caches) a ring texture for the selection
+## reticle. No external image asset, consistent with the rest of the
+## client's procedural visuals (e.g. space_sky.gdshader).
+static func _get_reticle_texture() -> ImageTexture:
+	if _reticle_texture != null:
+		return _reticle_texture
+	var size: int = RETICLE_TEXTURE_PX
+	var img: Image = Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var center  : Vector2 = Vector2(size, size) * 0.5
+	var outer_r : float   = size * 0.46
+	var inner_r : float   = size * 0.36
+	for y: int in range(size):
+		for x: int in range(size):
+			var d: float = Vector2(x + 0.5, y + 0.5).distance_to(center)
+			var a: float = 1.0 if (d <= outer_r and d >= inner_r) else 0.0
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, a))
+	_reticle_texture = ImageTexture.create_from_image(img)
+	return _reticle_texture
+
+
+## Builds the fixed-screen-size selection ring for one planet marker.
+static func _make_selection_reticle() -> Sprite3D:
+	var reticle := Sprite3D.new()
+	reticle.texture      = _get_reticle_texture()
+	reticle.fixed_size    = true
+	reticle.pixel_size    = RETICLE_PIXEL_SIZE
+	reticle.billboard     = BaseMaterial3D.BILLBOARD_ENABLED
+	reticle.no_depth_test = true
+	reticle.modulate      = RETICLE_COLOR
+	return reticle
 
 
 ## Returns a linear-light RGB colour for a blackbody spectral type [0..1].
@@ -143,3 +185,8 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		label.no_depth_test = true
 		label.modulate    = Color(0.7, 0.8, 1.0)
 		marker.add_child(label)
+
+		## Selection reticle: always the same screen size, so the planet stays
+		## easy to click regardless of distance (pairs with
+		## ShipPicking.pick_body_at's screen-space picking).
+		marker.add_child(_make_selection_reticle())
