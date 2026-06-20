@@ -469,33 +469,17 @@ func _check_double_click(pos: Vector2) -> bool:
 	return false
 
 # -- Ship picking (screen position -> nearest ship ID) ------------------------
+#
+# Picking math lives in ship_picking.gd (ShipPicking, architecture-review-
+# client.md C-1) -- main.gd only supplies the live candidate data.
 
-## Perpendicular distance from world point `p` to the ray (`from`, `dir`),
-## packed as (dist, t) — `t` is the ray parameter at the closest approach
-## (t <= 0 means `p` is behind the camera). Shared by ship/gate/body picking,
-## which otherwise only differ in candidate source and pick radius.
-func _ray_point_distance(from: Vector3, dir: Vector3, p: Vector3) -> Vector2:
-	var t: float = (p - from).dot(dir)
-	return Vector2(p.distance_to(from + dir * t), t)
-
-## Returns the ship_id whose node is closest to the click ray (within 500
-## Godot units), excluding the player's own ship. -1 if nothing is hit.
+## Returns the ship_id whose node is closest to the click ray (within
+## ShipPicking.PICK_RADIUS_SHIP Godot units), excluding the player's own
+## ship. -1 if nothing is hit.
 func _pick_ship_at(screen_pos: Vector2) -> int:
 	if _player_ship_id < 0:
 		return -1
-	var from: Vector3 = _camera.project_ray_origin(screen_pos)
-	var dir : Vector3 = _camera.project_ray_normal(screen_pos)
-	var closest_id  : int   = -1
-	var closest_dist: float = 1e9
-	for ship_id: int in _ships:
-		if ship_id == _player_ship_id:
-			continue
-		var p     : Vector3 = (_ships[ship_id] as Node3D).global_position
-		var dt    : Vector2 = _ray_point_distance(from, dir, p)
-		if dt.x < 500.0 and dt.y > 0.0 and dt.x < closest_dist:
-			closest_dist = dt.x
-			closest_id   = ship_id
-	return closest_id
+	return ShipPicking.pick_ship_at(_camera, screen_pos, _ships, _player_ship_id)
 
 # -- Left-click -> select approach target (ADR-0015) -------------------------
 
@@ -511,18 +495,7 @@ func _select_approach_target(target_id: int) -> void:
 func _pick_gate_at(screen_pos: Vector2) -> int:
 	if _player_ship_id < 0:
 		return -1
-	var from: Vector3 = _camera.project_ray_origin(screen_pos)
-	var dir : Vector3 = _camera.project_ray_normal(screen_pos)
-	var closest_id  : int   = -1
-	var closest_dist: float = 1e9
-	for gate: Variant in _gates:
-		var g  : Dictionary = gate as Dictionary
-		var p  : Vector3 = _server_to_godot_pos(g.get("position", Vector3.ZERO) as Vector3)
-		var dt : Vector2 = _ray_point_distance(from, dir, p)
-		if dt.x < 300.0 and dt.y > 0.0 and dt.x < closest_dist:
-			closest_dist = dt.x
-			closest_id   = g.get("gate_id", -1) as int
-	return closest_id
+	return ShipPicking.pick_gate_at(_camera, screen_pos, _gates, _server_to_godot_pos)
 
 ## Select a Jump Gate as the Approach target. Press A to fly into its range.
 func _select_approach_gate(gate_id: int) -> void:
@@ -535,27 +508,7 @@ func _select_approach_gate(gate_id: int) -> void:
 func _pick_body_at(screen_pos: Vector2) -> int:
 	if _player_ship_id < 0:
 		return -1
-	var from: Vector3 = _camera.project_ray_origin(screen_pos)
-	var dir : Vector3 = _camera.project_ray_normal(screen_pos)
-	var closest_id  : int   = -1
-	var closest_dist: float = 1e9
-	for marker: Node in _bodies_root.get_children():
-		if not marker.has_meta("body_id"):
-			continue
-		var p  : Vector3 = (marker as Node3D).global_position
-		var dt : Vector2 = _ray_point_distance(from, dir, p)
-		## Pick radius scales with logical body radius (bodies are large objects).
-		var b_radius: float = 0.0
-		for entry: Variant in _bodies:
-			var b: Dictionary = entry as Dictionary
-			if (b.get("body_id", -1) as int) == (marker.get_meta("body_id") as int):
-				b_radius = (b.get("radius", 1.0) as float) * WORLD_SCALE * 0.15
-				break
-		var pick_radius: float = maxf(b_radius, 400.0)
-		if dt.x < pick_radius and dt.y > 0.0 and dt.x < closest_dist:
-			closest_dist = dt.x
-			closest_id   = marker.get_meta("body_id") as int
-	return closest_id
+	return ShipPicking.pick_body_at(_camera, screen_pos, _bodies_root, _bodies, WORLD_SCALE)
 
 ## Select a celestial body. Press W to warp to it.
 func _select_body(body_id: int) -> void:

@@ -1,11 +1,12 @@
 ## main_test.gd
 ##
 ## Unit tests for the pure-math helpers in main.gd: coordinate conversion,
-## ray/point picking distance, warp-snap-pos core, and spectral colour.
-## These are the only parts of main.gd testable without a running scene
-## tree -- HUD construction, input routing, and marker spawning depend on
-## @onready scene paths and Node3D state and need the Godot editor to
-## verify (see docs/architecture-review-client.md C-1).
+## warp-snap-pos core, and spectral colour. These are the only parts of
+## main.gd testable without a running scene tree -- HUD construction, input
+## routing, and marker spawning depend on @onready scene paths and Node3D
+## state and need the Godot editor to verify (see
+## docs/architecture-review-client.md C-1). Picking math now lives in
+## ship_picking.gd; see client/test/ship_picking_test.gd.
 extends GdUnitTestSuite
 
 const __source: String = "res://scripts/main.gd"
@@ -29,18 +30,6 @@ func after_test() -> void:
 func test_server_to_godot_pos_flips_z_and_scales() -> void:
 	var result: Vector3 = _main._server_to_godot_pos(Vector3(100.0, 20.0, 300.0))
 	assert_vector(result).is_equal_approx(Vector3(10.0, 2.0, -30.0), Vector3(0.0001, 0.0001, 0.0001))
-
-
-# -- _ray_point_distance -------------------------------------------------------
-
-func test_ray_point_distance_returns_perpendicular_distance_and_ray_parameter() -> void:
-	var result: Vector2 = _main._ray_point_distance(Vector3.ZERO, Vector3(1.0, 0.0, 0.0), Vector3(5.0, 3.0, 0.0))
-	assert_vector(result).is_equal_approx(Vector2(3.0, 5.0), Vector2(0.0001, 0.0001))
-
-
-func test_ray_point_distance_reports_negative_t_when_point_is_behind_the_ray_origin() -> void:
-	var result: Vector2 = _main._ray_point_distance(Vector3.ZERO, Vector3(1.0, 0.0, 0.0), Vector3(-5.0, 0.0, 0.0))
-	assert_float(result.y).is_less(0.0)
 
 
 # -- _spectral_color ------------------------------------------------------------
