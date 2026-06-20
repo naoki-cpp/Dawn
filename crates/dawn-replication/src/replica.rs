@@ -1,4 +1,4 @@
-//! Receiver side of log-shipping gossip (ADR-0021 §決定 1, 8D-2b).
+//! Receiver side of log-shipping gossip (ADR-0021 decision 1, 8D-2b).
 //!
 //! [`ReplicaSet`] is the consumer half of the gossip the owner broadcasts via
 //! [`crate::ReplicationTransport::broadcast`]. For each *foreign* Sector it
@@ -8,8 +8,9 @@
 //!
 //! ## Scope
 //!
-//! This realizes the safe, append-only core of ADR-0021: "所有ノードの追記
-//! ログを他ノードへ配り、論理時刻順に適用する". It deliberately stops there.
+//! This realizes the safe, append-only core of ADR-0021: "ship the owner
+//! node's append-only log to other nodes and apply it in logical-tick order".
+//! It deliberately stops there.
 //! It does **not**:
 //! - apply foreign events into a live `SimulationNode` world — those events
 //!   carry another Sector's coordinates and would corrupt the owner's AoI and
