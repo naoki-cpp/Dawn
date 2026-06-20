@@ -35,17 +35,19 @@ date     : 2026-06-20（GdUnit4 + pinned Godot CLI 導入後に更新）
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `client/scripts/main.gd` | 1614 | 🔴 god object。C-1着手で1件抽出済みだが残り12責務超が同居 |
+| `client/scripts/main.gd` | 1505 | 🔴 god object。C-1着手で2件抽出済みだが残り10責務超が同居 |
 | `client/scripts/ship_controller.gd` | 272 | 🟢 単一船の視覚表現に専念。結合なし |
 | `client/scripts/connection.gd` | 245 | 🟢 WebSocket I/O とシグナル発行のみ。教科書的な境界 |
 | `client/scripts/camera_controller.gd` | 124 | 🟢 自己完結したオービットカメラ |
+| `client/scripts/navigation_marker_renderer.gd` | 146 | 🟢 C-1で新設。`main.gd` からゲート/天体マーカー生成 + スペクトル色を抽出した stateless static class |
 | `client/scripts/ship_picking.gd` | 90 | 🟢 C-1で新設。`main.gd` からピッキング3関数を抽出した stateless static class |
 | `client/scripts/tactical_overlay.gd` | 93 | 🟢 射程リング描画のみ |
 
-合計 2,438 行のうち `main.gd` が66%を占める（抽出前69%から低下）。他5ファイルは合計824行で粒度・責務とも妥当。
-（`client/test/*.gd`（main_test.gd 86行 + ship_picking_test.gd 109行）は別カウント。
-シーンツリー無依存な純粋関数群と `ShipPicking` の全staticメソッドをGdUnit4でテスト済み
-〔計15ケース〕。§「テストカバレッジ」参照）
+合計 2,475 行のうち `main.gd` が61%を占める（抽出前69%から低下）。他6ファイルは合計970行で粒度・責務とも妥当。
+（`client/test/*.gd`（main_test.gd 68行 + ship_picking_test.gd 109行 +
+navigation_marker_renderer_test.gd 112行）は別カウント。シーンツリー無依存な純粋関数群、
+`ShipPicking`、`NavigationMarkerRenderer` の全staticメソッドをGdUnit4でテスト済み
+〔計20ケース〕。§「テストカバレッジ」参照）
 
 ---
 
@@ -56,17 +58,17 @@ date     : 2026-06-20（GdUnit4 + pinned Godot CLI 導入後に更新）
 | 1–44 | ノード参照（`@onready`）・HUD パネル変数宣言 | 🟢 |
 | 46–144 | 定数・内部状態（船/HP/モジュール/ゲート・天体配列/選択状態） | 🟡 ドメインごとに分類はされているが量が多い |
 | 146–172 | `_ready()` / `_process()` | 🟡 `_process()` がカプ再現・近接判定・太陽方向・HUD更新の集約呼び出し点になっている |
-| 173–300 | ゲート/天体マーカー生成 + スペクトル色テーブル | 🟢 共通部分（座標変換・子ノードクリア）は `_server_to_godot_pos`/`_clear_children` に抽出済み（C-2解消）。メッシュ生成自体は構造が異なるため未統合 |
-| 302–360 | 太陽方向シェーダー更新・ゲート近接判定 | 🟢 |
-| 362–420 | `_input()`（F1–F8 / S / J / A / W / Tab / クリック） | 🟡 60行の一枚岩 match。UI状態更新とコマンド送信が混在 |
-| 471–530 | ダブルクリック判定・船/ゲート/天体ピッキング・選択 | 🟢 **C-1着手**: ピッキング3関数の本体を `ship_picking.gd`（`ShipPicking` class）へ移動済み。main.gd 側は候補データを渡すだけの薄いラッパー |
-| 532–595 | ロックオン・移動・停止コマンド送信 | 🟢 |
-| 597–918 | サーバーイベント dispatch（jump/system change/AoI/fitting/destroyed等） | 🟢 個々のハンドラは narrow |
-| 920–971 | ワープ着地点計算（ゲート/天体） | 🟢 共通コア `_compute_warp_snap_pos_core` に抽出済み（C-2解消）。GdUnit4 テスト済み。係数は `GATE_WARP_ARRIVAL_FACTOR`/`BODY_WARP_ARRIVAL_FACTOR` で命名済み |
-| 1050–1123 | HUD更新ディスパッチ + クライアント側カプ再現シミュレーション | 🟢 サーバーの `CapacitorSystem` を正しく模倣 |
-| 1126–1205 | 状態クリア・空間環境構築・プレイヤーマテリアル | 🟢 |
-| 1207–1583 | HUDパネル構築・更新（約377行・全体の23%） | 🔴 単独で `HudManager` 相当の規模。フレーム毎更新ロジックも同居 |
-| 1586–1614 | デュエル結果オーバーレイ | 🟢 |
+| 173–197 | ゲート/天体マーカー生成（呼び出しのみ） | 🟢 **C-1着手**: 本体を `navigation_marker_renderer.gd`（`NavigationMarkerRenderer` class）へ移動済み。main.gd 側は候補データを渡すだけの薄いラッパー |
+| 198–252 | 太陽方向シェーダー更新・ゲート近接判定 | 🟢 `NavigationMarkerRenderer.spectral_color()` を利用 |
+| 253–311 | `_input()`（F1–F8 / S / J / A / W / Tab / クリック） | 🟡 60行の一枚岩 match。UI状態更新とコマンド送信が混在 |
+| 362–420 | ダブルクリック判定・船/ゲート/天体ピッキング・選択 | 🟢 **C-1着手**: ピッキング3関数の本体を `ship_picking.gd`（`ShipPicking` class）へ移動済み。main.gd 側は候補データを渡すだけの薄いラッパー |
+| 422–485 | ロックオン・移動・停止コマンド送信 | 🟢 |
+| 487–808 | サーバーイベント dispatch（jump/system change/AoI/fitting/destroyed等） | 🟢 個々のハンドラは narrow |
+| 810–861 | ワープ着地点計算（ゲート/天体） | 🟢 共通コア `_compute_warp_snap_pos_core` に抽出済み（C-2解消）。GdUnit4 テスト済み。係数は `GATE_WARP_ARRIVAL_FACTOR`/`BODY_WARP_ARRIVAL_FACTOR` で命名済み |
+| 941–1014 | HUD更新ディスパッチ + クライアント側カプ再現シミュレーション | 🟢 サーバーの `CapacitorSystem` を正しく模倣 |
+| 1017–1096 | 状態クリア・空間環境構築・プレイヤーマテリアル | 🟢 |
+| 1098–1474 | HUDパネル構築・更新（約377行・全体の25%） | 🔴 単独で `HudManager` 相当の規模。フレーム毎更新ロジックも同居 |
+| 1477–1505 | デュエル結果オーバーレイ | 🟢 |
 
 ---
 
@@ -85,14 +87,14 @@ date     : 2026-06-20（GdUnit4 + pinned Godot CLI 導入後に更新）
 
 | 抽出候補 | 対象行 | 規模 | 状態 |
 |---|---|---|---|
-| `HudManager`（HUD構築・更新を専有） | 1207–1583 + `_update_hud()` | ~380行 | 未着手 |
-| `NavigationMarkerRenderer`（ゲート/天体マーカー生成） | 173–300 | ~125行 | 未着手 |
+| `HudManager`（HUD構築・更新を専有） | 1098–1474 + `_update_hud()` | ~380行 | 未着手 |
+| ~~`NavigationMarkerRenderer`（ゲート/天体マーカー生成）~~ | ~~173–300~~ | ~~~125行~~ | **完了** → `client/scripts/navigation_marker_renderer.gd`（`NavigationMarkerRenderer` class, static methods）に抽出。`_spectral_color` も移動（太陽方向更新からも参照）。`client/test/navigation_marker_renderer_test.gd` で8ケースを Godot CLI 実行確認済み |
 | ~~`ShipPickingSystem`（船/ゲート/天体ピッキング統合）~~ | ~~477–558~~ | ~~~80行~~ | **完了** → `client/scripts/ship_picking.gd`（`ShipPicking` class, static methods）に抽出。`client/test/ship_picking_test.gd` で8ケースを Godot CLI 実行確認済み |
-| `InputHandler`（キー/マウス入力ルーティング） | 362–420 + ダブルクリック判定 | ~80行 | 未着手 |
+| `InputHandler`（キー/マウス入力ルーティング） | 253–311 + ダブルクリック判定 | ~80行 | 未着手 |
 
-`ShipPickingSystem` 抽出で `main.gd` は 1661→1614 行（-47行）。残り3件を抽出すると
-`main.gd` は ~700行（イベント dispatch + spawning + 状態保持のオーケストレーション層）
-まで縮小できる見込み。
+`ShipPickingSystem` + `NavigationMarkerRenderer` 抽出で `main.gd` は 1661→1505 行（-156行）。
+残り2件（`InputHandler` / `HudManager`）を抽出すると `main.gd` は ~700行（イベント
+dispatch + spawning + 状態保持のオーケストレーション層）まで縮小できる見込み。
 
 **`class_name` 抽出の手順上の注意**: 新しい `class_name` を追加した直後は、Godot が
 プロジェクトを一度スキャンするまでグローバル識別子として認識されない
@@ -138,27 +140,34 @@ date     : 2026-06-20（GdUnit4 + pinned Godot CLI 導入後に更新）
 
 ### テストカバレッジ（2026-06-20 追加・更新）
 
-`client/test/main_test.gd` が `main.gd` のシーンツリー無依存な純粋関数 3個
-（`_server_to_godot_pos` / `_spectral_color` / `_compute_warp_snap_pos_core`）を
-計7ケースでカバー。`client/test/ship_picking_test.gd` が C-1 で抽出した
-`ShipPicking`（`ray_point_distance` / `pick_ship_at` / `pick_gate_at` /
-`pick_body_at`）を計8ケースでカバー。両方とも pin 済み Godot で実行確認済み
-（計15ケース全件PASS）。
+- `client/test/main_test.gd` — `main.gd` に残るシーンツリー無依存な純粋関数2個
+  （`_server_to_godot_pos` / `_compute_warp_snap_pos_core`）を計4ケースでカバー。
+- `client/test/ship_picking_test.gd` — `ShipPicking`（`ray_point_distance` /
+  `pick_ship_at` / `pick_gate_at` / `pick_body_at`）を計8ケースでカバー。
+  実際の `Camera3D` をシーンツリーに置いてレイキャストを検証。
+- `client/test/navigation_marker_renderer_test.gd` — `NavigationMarkerRenderer`
+  （`spectral_color` / `clear_children` / `spawn_gate_markers` /
+  `spawn_body_markers`）を計8ケースでカバー。マーカー生成は子ノード数・ローカル
+  座標・meta タグ・ラベル文字列で検証——`global_position` 不要なので
+  シーンツリーに追加しなくてもテストできる。
 
-テスト実行中に実際の不具合を2回発見・修正している:
+3ファイル合計20ケース、pin 済み Godot で実行確認済み（全件PASS）。
+
+テスト実行中に実際の不具合・ハマりどころを発見している:
 - `main_test.gd` 初回実行時: テストの `Node3D` をシーンツリーに追加し忘れ、
   `global_position` が `(0,0,0)` 固定で読めてしまい1件が偶然PASSしていた。
-- `ship_picking_test.gd` 初回実行時: `class_name ShipPicking` を追加した直後は
-  Godot のグローバルクラスキャッシュが未更新で `Identifier "ShipPicking" not
-  declared` と全件失敗——上記「`class_name` 抽出の手順上の注意」を参照。
+- `ship_picking_test.gd` / `navigation_marker_renderer_test.gd` 初回実行時: 新規
+  `class_name` を追加した直後は Godot のグローバルクラスキャッシュが未更新で
+  `Identifier "X" not declared` と全件失敗——上記「`class_name` 抽出の手順上の
+  注意」を参照。`class_name` 抽出のたびに再発するので毎回キャッシュ再構築が必要。
 
 いずれも「Godot エディタなしでは検証できない」という旧来の想定が剥がれたことで
 初めて見つかった類の不具合。詳細: `AI_DEVELOPMENT_GUIDE.md` §8。
 
-マーカー生成のループ構造自体（C-1 で抽出予定の `NavigationMarkerRenderer`）は
-今のところテスト対象外——シーンツリー・Node3D に依存し `ShipPicking` 同様の
-パターンでテスト可能なはずだが、未着手。`HudManager`/`InputHandler` はテスト
-よりも視覚的な確認（HUD レイアウト崩れなど）が主な検証手段になる領域。
+`HudManager`/`InputHandler` はテストよりも視覚的な確認（HUD レイアウト崩れなど）
+が主な検証手段になる領域——とはいえ `InputHandler` のキー→コマンド送信の
+マッピング自体は `_connection.send_*` をモック/スパイ可能なら純粋ロジックとして
+テストできる見込みで、抽出時に再検討する。
 
 #### C-3: シーンツリー直パス参照の脆さ
 
@@ -183,7 +192,7 @@ silent に値が欠落する（GDScript の `Dictionary.get()` はデフォル�
 
 | 項目 | 種別 | 状態・理由 |
 |---|---|---|
-| C-1 `main.gd` 分割（HudManager 等の抽出） | 構造 | **進行中**。`ShipPickingSystem`（→`ship_picking.gd`）抽出が完了（2026-06-20、テスト8件付き）。残り `NavigationMarkerRenderer` / `InputHandler` / `HudManager` は未着手。GDScript の構文・実行エラーは pin 済み Godot CLI + GdUnit4 で検証可能になったが、HUD の見た目・レイアウト崩れなど視覚的な確認は依然エディタが必要 |
+| C-1 `main.gd` 分割（HudManager 等の抽出） | 構造 | **進行中（2/4完了）**。`ShipPickingSystem`（→`ship_picking.gd`）・`NavigationMarkerRenderer`（→`navigation_marker_renderer.gd`）抽出完了（2026-06-20、テスト16件付き）。残り `InputHandler` / `HudManager` は未着手。GDScript の構文・実行エラーは pin 済み Godot CLI + GdUnit4 で検証可能になったが、HUD の見た目・レイアウト崩れなど視覚的な確認は依然エディタが必要 |
 | C-2 重複ロジックの共通化（マーカー/ピッキング/ワープ座標） | 品質 | **解消済み（2026-06-20）**。3件とも「文字通り同一」な計算式（座標変換・子ノードクリア・レイ距離・方向ベクトル）のみを named helper に抽出。ループ構造やメッシュ生成は個別性を残した |
 | C-3 シーンツリー直パス参照 | 品質・保留 | 実害小。ノード構成変更が発生したときに合わせて対応すれば十分 |
 | C-4 PlayerFitting スキーマ検証 | 品質・保留 | 現状ドリフトなし。サーバー側 JSON 形式を変更する ADR が出たときに合わせて対応 |
@@ -206,6 +215,9 @@ silent に値が欠落する（GDScript の `Dictionary.get()` はデフォル�
 - `ship_picking.gd` — C-1 で新設した stateless static class。GdUnit4 テスト付きで
   挙動が固定されている。他クラスへの依存はメソッド引数経由のみ（Camera3D・候補データ・
   Callable）で、Godot のシーン構成変更の影響を受けない
+- `navigation_marker_renderer.gd` — C-1 で新設した stateless static class。同上。
+  メッシュ/Label3D 生成は main.tscn の `Gates`/`Bodies` ノード構成に依存しないため
+  シーン変更の影響を受けない
 - `tactical_overlay.gd` — 射程リング描画のみ。受け取った値を描くだけで状態を持たない
-- `main.gd` のイベント dispatch 層（597–918行） — 個々のハンドラは narrow で ADR 参照付き。
+- `main.gd` のイベント dispatch 層（487–808行） — 個々のハンドラは narrow で ADR 参照付き。
   ここは god object 化した `main.gd` の中で唯一、責務分離が既にできている部分

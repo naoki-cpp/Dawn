@@ -1,0 +1,112 @@
+## navigation_marker_renderer_test.gd
+##
+## Unit tests for navigation_marker_renderer.gd's spectral colour and gate/
+## body marker construction. Marker tests check structure (child count,
+## local position, meta tags, label text) rather than global_position, so
+## they don't need the markers added to a live scene tree.
+extends GdUnitTestSuite
+
+const __source: String = "res://scripts/navigation_marker_renderer.gd"
+
+
+## Mirrors main.gd's _server_to_godot_pos at world_scale=0.1.
+func _to_godot_pos(p: Vector3) -> Vector3:
+	return Vector3(p.x, p.y, -p.z) * 0.1
+
+
+# -- spectral_color ---------------------------------------------------------------
+
+func test_spectral_color_at_t_zero_is_coolest_blue() -> void:
+	var c: Color = NavigationMarkerRenderer.spectral_color(0.0)
+	assert_vector(Vector3(c.r, c.g, c.b)).is_equal_approx(Vector3(0.55, 0.65, 1.00), Vector3(0.0001, 0.0001, 0.0001))
+
+
+func test_spectral_color_at_t_one_is_warmest_red() -> void:
+	var c: Color = NavigationMarkerRenderer.spectral_color(1.0)
+	assert_vector(Vector3(c.r, c.g, c.b)).is_equal_approx(Vector3(1.00, 0.40, 0.18), Vector3(0.0001, 0.0001, 0.0001))
+
+
+func test_spectral_color_is_continuous_across_the_010_segment_boundary() -> void:
+	var just_below: Color = NavigationMarkerRenderer.spectral_color(0.0999)
+	var at_boundary: Color = NavigationMarkerRenderer.spectral_color(0.10)
+	assert_vector(Vector3(just_below.r, just_below.g, just_below.b)) \
+		.is_equal_approx(Vector3(at_boundary.r, at_boundary.g, at_boundary.b), Vector3(0.002, 0.002, 0.002))
+
+
+# -- clear_children ---------------------------------------------------------------
+
+func test_clear_children_removes_all_existing_children() -> void:
+	var root: Node = auto_free(Node.new())
+	root.add_child(Node.new())
+	root.add_child(Node.new())
+
+	NavigationMarkerRenderer.clear_children(root)
+	await get_tree().process_frame  ## queue_free() is deferred to end of frame
+
+	assert_int(root.get_child_count()).is_equal(0)
+
+
+# -- spawn_gate_markers -------------------------------------------------------------
+
+func test_spawn_gate_markers_builds_one_marker_per_gate_with_position_and_label() -> void:
+	var gates_root: Node3D = auto_free(Node3D.new())
+	var gates: Array = [
+		{"gate_id": 5, "position": Vector3(10.0, 0.0, 20.0), "activation_radius": 2000.0, "to_system_name": "Beta"},
+	]
+
+	NavigationMarkerRenderer.spawn_gate_markers(gates_root, gates, 0.1, _to_godot_pos)
+
+	assert_int(gates_root.get_child_count()).is_equal(1)
+	var marker: Node3D = gates_root.get_child(0) as Node3D
+	assert_vector(marker.position).is_equal_approx(Vector3(1.0, 0.0, -2.0), Vector3(0.0001, 0.0001, 0.0001))
+
+	var label: Label3D = marker.get_child(1) as Label3D
+	assert_str(label.text).is_equal("Gate #5 -> Beta")
+
+
+func test_spawn_gate_markers_builds_one_marker_per_array_entry() -> void:
+	var gates_root: Node3D = auto_free(Node3D.new())
+	var gates: Array = [
+		{"gate_id": 0, "position": Vector3.ZERO, "activation_radius": 2000.0, "to_system_name": "Alpha"},
+		{"gate_id": 1, "position": Vector3(100.0, 0.0, 0.0), "activation_radius": 1500.0, "to_system_name": "Gamma"},
+	]
+
+	NavigationMarkerRenderer.spawn_gate_markers(gates_root, gates, 0.1, _to_godot_pos)
+
+	assert_int(gates_root.get_child_count()).is_equal(2)
+
+
+# -- spawn_body_markers -------------------------------------------------------------
+
+func test_spawn_body_markers_tags_star_and_planet_markers_with_body_meta() -> void:
+	var bodies_root: Node3D = auto_free(Node3D.new())
+	var bodies: Array = [
+		{"body_id": 1, "kind": "Star", "name": "Helios", "position": Vector3.ZERO, "radius": 1000.0, "spectral_type": 0.5},
+		{"body_id": 2, "kind": "Planet", "name": "Forge", "position": Vector3(500.0, 0.0, 0.0), "radius": 200.0, "spectral_type": 0.0},
+	]
+
+	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
+
+	assert_int(bodies_root.get_child_count()).is_equal(2)
+
+	var star_marker: Node3D = bodies_root.get_child(0) as Node3D
+	assert_int(star_marker.get_meta("body_id") as int).is_equal(1)
+	assert_str(star_marker.get_meta("body_kind") as String).is_equal("Star")
+	assert_vector(star_marker.get_meta("body_pos") as Vector3).is_equal(Vector3.ZERO)
+
+	var planet_marker: Node3D = bodies_root.get_child(1) as Node3D
+	assert_int(planet_marker.get_meta("body_id") as int).is_equal(2)
+	assert_str(planet_marker.get_meta("body_kind") as String).is_equal("Planet")
+
+
+func test_spawn_body_markers_uses_the_body_name_as_the_label_text() -> void:
+	var bodies_root: Node3D = auto_free(Node3D.new())
+	var bodies: Array = [
+		{"body_id": 1, "kind": "Star", "name": "Helios", "position": Vector3.ZERO, "radius": 1000.0, "spectral_type": 0.5},
+	]
+
+	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
+
+	var marker: Node3D = bodies_root.get_child(0) as Node3D
+	var label: Label3D = marker.get_child(1) as Label3D  ## index 0 = mesh, index 1 = label
+	assert_str(label.text).is_equal("Helios")

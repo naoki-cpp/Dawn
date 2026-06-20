@@ -1,12 +1,13 @@
 ## main_test.gd
 ##
-## Unit tests for the pure-math helpers in main.gd: coordinate conversion,
-## warp-snap-pos core, and spectral colour. These are the only parts of
-## main.gd testable without a running scene tree -- HUD construction, input
-## routing, and marker spawning depend on @onready scene paths and Node3D
-## state and need the Godot editor to verify (see
-## docs/architecture-review-client.md C-1). Picking math now lives in
-## ship_picking.gd; see client/test/ship_picking_test.gd.
+## Unit tests for the pure-math helpers still in main.gd: coordinate
+## conversion and warp-snap-pos core. These are the only parts of main.gd
+## testable without a running scene tree -- HUD construction and input
+## routing depend on @onready scene paths and need the Godot editor to
+## verify (see docs/architecture-review-client.md C-1). Picking math lives
+## in ship_picking.gd (client/test/ship_picking_test.gd); marker spawning
+## and spectral colour live in navigation_marker_renderer.gd
+## (client/test/navigation_marker_renderer_test.gd).
 extends GdUnitTestSuite
 
 const __source: String = "res://scripts/main.gd"
@@ -30,25 +31,6 @@ func after_test() -> void:
 func test_server_to_godot_pos_flips_z_and_scales() -> void:
 	var result: Vector3 = _main._server_to_godot_pos(Vector3(100.0, 20.0, 300.0))
 	assert_vector(result).is_equal_approx(Vector3(10.0, 2.0, -30.0), Vector3(0.0001, 0.0001, 0.0001))
-
-
-# -- _spectral_color ------------------------------------------------------------
-
-func test_spectral_color_at_t_zero_is_coolest_blue() -> void:
-	var c: Color = _main._spectral_color(0.0)
-	assert_vector(Vector3(c.r, c.g, c.b)).is_equal_approx(Vector3(0.55, 0.65, 1.00), Vector3(0.0001, 0.0001, 0.0001))
-
-
-func test_spectral_color_at_t_one_is_warmest_red() -> void:
-	var c: Color = _main._spectral_color(1.0)
-	assert_vector(Vector3(c.r, c.g, c.b)).is_equal_approx(Vector3(1.00, 0.40, 0.18), Vector3(0.0001, 0.0001, 0.0001))
-
-
-func test_spectral_color_is_continuous_across_the_010_segment_boundary() -> void:
-	var just_below: Color = _main._spectral_color(0.0999)
-	var at_boundary: Color = _main._spectral_color(0.10)
-	assert_vector(Vector3(just_below.r, just_below.g, just_below.b)) \
-		.is_equal_approx(Vector3(at_boundary.r, at_boundary.g, at_boundary.b), Vector3(0.002, 0.002, 0.002))
 
 
 # -- _compute_warp_snap_pos_core ------------------------------------------------

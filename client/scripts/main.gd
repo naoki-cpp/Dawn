@@ -176,131 +176,22 @@ func _process(delta: float) -> void:
 func _server_to_godot_pos(p: Vector3) -> Vector3:
 	return Vector3(p.x, p.y, -p.z) * WORLD_SCALE
 
-## Frees every child of `root`. Shared by gate/body marker respawning, which
-## both rebuild their marker set from scratch on each call.
-func _clear_children(root: Node) -> void:
-	for child: Node in root.get_children():
-		child.queue_free()
+## Gate/body marker spawning lives in navigation_marker_renderer.gd
+## (NavigationMarkerRenderer, architecture-review-client.md C-1) -- main.gd
+## only owns the live data and non-rendering state (_selected_body_id reset).
 
 ## Spawns a visual marker for every Jump Gate in the player's current Star
 ## System (ADR-0009). Re-run on Star System change to swap markers.
 func _spawn_gate_markers() -> void:
-	_clear_children(_gates_root)
-
-	for gate: Variant in _gates:
-		var g: Dictionary = gate as Dictionary
-		var gate_pos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
-		var radius  : float   = g.get("activation_radius", 0.0) as float
-
-		var marker: Node3D = Node3D.new()
-		marker.position = _server_to_godot_pos(gate_pos)
-		_gates_root.add_child(marker)
-
-		var ring: MeshInstance3D = MeshInstance3D.new()
-		var torus: TorusMesh = TorusMesh.new()
-		torus.inner_radius = radius * WORLD_SCALE * 0.85
-		torus.outer_radius = radius * WORLD_SCALE
-		var mat: StandardMaterial3D = StandardMaterial3D.new()
-		mat.albedo_color    = Color(0.2, 0.8, 1.0, 0.35)
-		mat.emission_enabled = true
-		mat.emission        = Color(0.2, 0.8, 1.0)
-		mat.emission_energy_multiplier = 1.5
-		mat.transparency    = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.shading_mode    = BaseMaterial3D.SHADING_MODE_UNSHADED
-		ring.mesh     = torus
-		ring.material_override = mat
-		ring.rotation_degrees = Vector3(90.0, 0.0, 0.0)
-		marker.add_child(ring)
-
-		var label: Label3D = Label3D.new()
-		label.text             = "Gate #%d -> %s" % [g.get("gate_id", -1) as int, g.get("to_system_name", "") as String]
-		label.position         = Vector3(0.0, radius * WORLD_SCALE * 0.3, 0.0)
-		label.billboard        = BaseMaterial3D.BILLBOARD_ENABLED
-		label.no_depth_test    = true
-		label.modulate         = Color(0.2, 0.8, 1.0)
-		marker.add_child(label)
+	NavigationMarkerRenderer.spawn_gate_markers(_gates_root, _gates, WORLD_SCALE, _server_to_godot_pos)
 
 ## Spawn visual nodes for all celestial bodies in the current star system
 ## (stars + planets, ADR-0025). Re-called on system change.
 func _spawn_body_markers() -> void:
 	if _bodies_root == null:
 		return
-	_clear_children(_bodies_root)
 	_selected_body_id = -1
-
-	for entry: Variant in _bodies:
-		var b: Dictionary = entry as Dictionary
-		var b_id    : int     = b.get("body_id",      -1) as int
-		var kind    : String  = b.get("kind",          "") as String
-		var name_str: String  = b.get("name",          "") as String
-		var b_pos   : Vector3 = b.get("position", Vector3.ZERO) as Vector3
-		var radius  : float   = b.get("radius",       1.0) as float
-		var spec    : float   = b.get("spectral_type", 0.0) as float
-
-		var godot_pos : Vector3 = _server_to_godot_pos(b_pos)
-
-		var marker: Node3D = Node3D.new()
-		marker.position = godot_pos
-		marker.set_meta("body_id",   b_id)
-		marker.set_meta("body_kind", kind)
-		marker.set_meta("body_pos",  b_pos)  ## server coords, kept for sun direction
-		_bodies_root.add_child(marker)
-
-		## Visual sphere.
-		var mesh_inst: MeshInstance3D = MeshInstance3D.new()
-		var sphere: SphereMesh = SphereMesh.new()
-		if kind == "Star":
-			## Stars: bright emissive sphere, visual radius = 5% of logical radius.
-			sphere.radius = radius * WORLD_SCALE * 0.05
-			sphere.height = sphere.radius * 2.0
-			var star_col: Color = _spectral_color(spec)
-			var mat: StandardMaterial3D = StandardMaterial3D.new()
-			mat.albedo_color              = star_col
-			mat.emission_enabled          = true
-			mat.emission                  = star_col
-			mat.emission_energy_multiplier = 8.0
-			mat.shading_mode              = BaseMaterial3D.SHADING_MODE_UNSHADED
-			mesh_inst.material_override   = mat
-		else:
-			## Planets: solid matte sphere, visual radius = 8% of logical radius.
-			sphere.radius = radius * WORLD_SCALE * 0.08
-			sphere.height = sphere.radius * 2.0
-			var mat: StandardMaterial3D = StandardMaterial3D.new()
-			mat.albedo_color = Color(0.45, 0.50, 0.60)
-			mat.roughness    = 0.85
-			mat.metallic     = 0.1
-			mesh_inst.material_override = mat
-		mesh_inst.mesh = sphere
-		marker.add_child(mesh_inst)
-
-		## Name label.
-		var label: Label3D = Label3D.new()
-		label.text        = name_str
-		label.position    = Vector3(0.0, sphere.radius * 1.4, 0.0)
-		label.billboard   = BaseMaterial3D.BILLBOARD_ENABLED
-		label.no_depth_test = true
-		label.modulate    = Color(1.0, 0.9, 0.6) if kind == "Star" else Color(0.7, 0.8, 1.0)
-		marker.add_child(label)
-
-## Returns a linear-light RGB colour for a blackbody spectral type [0..1].
-## Mirrors spectral_color() in space_sky.gdshader.
-func _spectral_color(t: float) -> Color:
-	var r: float; var g: float; var b: float
-	if t < 0.10:
-		r = lerp(0.55, 0.65, t / 0.10);        g = lerp(0.65, 0.76, t / 0.10);        b = 1.00
-	elif t < 0.25:
-		r = lerp(0.65, 0.88, (t-0.10)/0.15);   g = lerp(0.76, 0.93, (t-0.10)/0.15);   b = 1.00
-	elif t < 0.40:
-		r = lerp(0.88, 1.00, (t-0.25)/0.15);   g = lerp(0.93, 0.99, (t-0.25)/0.15);   b = lerp(1.00, 0.94, (t-0.25)/0.15)
-	elif t < 0.55:
-		r = 1.00;                               g = lerp(0.99, 0.95, (t-0.40)/0.15);   b = lerp(0.94, 0.82, (t-0.40)/0.15)
-	elif t < 0.68:
-		r = 1.00;                               g = lerp(0.95, 0.85, (t-0.55)/0.13);   b = lerp(0.82, 0.58, (t-0.55)/0.13)
-	elif t < 0.83:
-		r = 1.00;                               g = lerp(0.85, 0.64, (t-0.68)/0.15);   b = lerp(0.58, 0.32, (t-0.68)/0.15)
-	else:
-		r = 1.00;                               g = lerp(0.64, 0.40, (t-0.83)/0.17);   b = lerp(0.32, 0.18, (t-0.83)/0.17)
-	return Color(r, g, b)
+	NavigationMarkerRenderer.spawn_body_markers(_bodies_root, _bodies, WORLD_SCALE, _server_to_godot_pos)
 
 ## Update the sky shader's sun_direction each frame so the star appears in the
 ## correct direction relative to the player ship (ADR-0025).
@@ -342,7 +233,7 @@ func _update_sun_direction() -> void:
 		if (b.get("kind", "") as String) == "Star":
 			spec = b.get("spectral_type", 0.60) as float
 			break
-	var sun_col: Color = _spectral_color(spec)
+	var sun_col: Color = NavigationMarkerRenderer.spectral_color(spec)
 	_sky_mat.set_shader_parameter("sun_color", Vector3(sun_col.r, sun_col.g, sun_col.b))
 
 ## Tracks whether the player ship is within activation range of a Jump Gate
