@@ -18,8 +18,8 @@ const PLANET_VISUAL_RADIUS_RATIO: float = 0.08
 ## ShipPicking.pick_body_at's screen-space picking). fixed_size makes
 ## Sprite3D render at the same apparent size no matter how far the camera is.
 const RETICLE_TEXTURE_PX : int   = 64
-const RETICLE_PIXEL_SIZE : float = 0.018
-const RETICLE_COLOR      : Color = Color(0.4, 0.85, 1.0, 0.85)
+const RETICLE_PIXEL_SIZE : float = 0.006
+const RETICLE_COLOR      : Color = Color(1.0, 1.0, 1.0, 0.85)
 
 static var _reticle_texture: ImageTexture = null
 
