@@ -10,10 +10,18 @@
 //!
 //! ## Crates that may depend on dawn-actor
 //!
-//! dawn-simulation (and future dawn-sector-node).
+//! dawn-simulation and dawn-sector-node.
 //! dawn-actor must never depend on dawn-ecs or dawn-simulation.
+//!
+//! ## Client transport
+//!
+//! `protocol` (DomainEvent <-> JSON <-> ClientCommand) and `ws_server`
+//! (`WsServer` / `WsClientConnection` / `PlayerSession`) are the production
+//! WebSocket transport, shared by both binaries (previously duplicated).
 
 pub mod client_connection;
+pub mod protocol;
+pub mod ws_server;
 
 pub use client_connection::{
     ClientCommand, ClientConnection, ConnectionError,

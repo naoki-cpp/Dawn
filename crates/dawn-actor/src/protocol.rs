@@ -1,15 +1,17 @@
 //! Wire protocol translation between DomainEvents / ClientCommands and JSON.
 //!
-//! This module is the only place that knows both the Rust domain types and the
-//! JSON keys the Godot client expects. Keeping it separate from ws_server.rs
-//! means WebSocket transport logic never needs to change when the JSON schema
-//! evolves, and vice versa.
+//! This module is the single place that knows both the Rust domain types and
+//! the JSON keys the Godot client expects. Keeping it separate from
+//! `ws_server.rs` means WebSocket transport logic never changes when the JSON
+//! schema evolves, and vice versa. Both binaries (`dawn-simulation`,
+//! `dawn-sector-node`) share this one definition (previously duplicated).
 //!
 //! # Responsibilities
-//! - [`domain_event_to_json`]: DomainEvent → newline-delimited JSON string (server → client).
+//! - [`domain_event_to_json`]: DomainEvent → newline-delimited JSON (server → client).
+//! - [`redirect_json`]: tell a client to reconnect to another node's WS (multi-node jump).
 //! - [`parse_client_command`]: JSON line → ClientCommand (client → server).
 
-use dawn_actor::ClientCommand;
+use crate::ClientCommand;
 use dawn_core::{
     ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand,
     DeactivateModuleCommand, DomainEvent, EntityId, LockOnCommand, ModuleId,
@@ -33,10 +35,13 @@ enum EventJson {
     ModuleDeactivated{ ship_id: u64, module_id: u32, slot: String, tick: u64 },
     JumpGateUsed     { ship_id: u64, gate_id: u32, from_sector: u8, to_sector: u8, entry_pos: PosJson, tick: u64 },
     StarSystemChanged{ ship_id: u64, from_system: u32, to_system: u32, tick: u64 },
+    // Sent when the player's ship jumps to a sector owned by a different
+    // physical node (dawn-sector-node multi-node clusters only).
+    Redirect         { ws_addr: String },
 }
 
 #[derive(Serialize, Clone, Copy)]
-pub(crate) struct PosJson { pub x: f32, pub y: f32, pub z: f32 }
+pub struct PosJson { pub x: f32, pub y: f32, pub z: f32 }
 
 #[derive(Serialize, Clone, Copy)]
 struct VelJson { dx: f32, dy: f32, dz: f32 }
@@ -44,14 +49,14 @@ struct VelJson { dx: f32, dy: f32, dz: f32 }
 impl From<Position> for PosJson {
     fn from(p: Position) -> Self { Self { x: p.x, y: p.y, z: p.z } }
 }
-
 impl From<dawn_core::Velocity> for VelJson {
     fn from(v: dawn_core::Velocity) -> Self { Self { dx: v.dx, dy: v.dy, dz: v.dz } }
 }
 
-/// Serialize a [`DomainEvent`] to the JSON string the Godot client expects.
-/// Returns `None` for events that are not sent to clients (e.g. transit internals).
-pub(crate) fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
+/// Serialize a [`DomainEvent`] to the JSON line the Godot client expects.
+/// Returns `None` for internal events that are not forwarded to clients
+/// (transit internals, combat bookkeeping).
+pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
     let j = match event {
         DomainEvent::ShipSpawned(e) => EventJson::ShipSpawned {
             ship_id : e.ship_id.raw(),
@@ -102,14 +107,6 @@ pub(crate) fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
             slot     : format!("{:?}", e.slot),
             tick     : e.tick.value(),
         },
-        // Not sent to clients — internal node-ownership events (ADR-0014).
-        DomainEvent::ShipFitted(_)             => return None,
-        DomainEvent::WeaponFired(_)            => return None,
-        DomainEvent::TackleApplied(_)          => return None,
-        DomainEvent::TackleReleased(_)         => return None,
-        DomainEvent::SectorTransitRequested(_) => return None,
-        DomainEvent::SectorTransitCompleted(_) => return None,
-        DomainEvent::SectorTransitAborted(_)   => return None,
         // Jump Gate Navigation (ADR-0009): Godot uses these to teleport the
         // ship to entry_pos and switch the star-system backdrop.
         DomainEvent::JumpGateUsed(e) => EventJson::JumpGateUsed {
@@ -126,15 +123,30 @@ pub(crate) fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
             to_system  : e.to_system.0,
             tick       : e.tick.value(),
         },
+        // Internal node-ownership / combat events — not forwarded to clients.
+        DomainEvent::ShipFitted(_)             => return None,
+        DomainEvent::WeaponFired(_)            => return None,
+        DomainEvent::TackleApplied(_)          => return None,
+        DomainEvent::TackleReleased(_)         => return None,
+        DomainEvent::SectorTransitRequested(_) => return None,
+        DomainEvent::SectorTransitCompleted(_) => return None,
+        DomainEvent::SectorTransitAborted(_)   => return None,
     };
     serde_json::to_string(&j).ok()
+}
+
+/// Build a `{"type":"Redirect","ws_addr":"..."}` JSON line for a client whose
+/// ship just jumped to a sector owned by a different physical node.
+pub fn redirect_json(ws_addr: std::net::SocketAddr) -> String {
+    let j = EventJson::Redirect { ws_addr: ws_addr.to_string() };
+    serde_json::to_string(&j).unwrap_or_default()
 }
 
 // ── Input parser (client → server) ───────────────────────────────────────────
 
 /// Parse a newline-terminated JSON line from the Godot client into a
 /// [`ClientCommand`]. Returns `None` for unknown or malformed messages.
-pub(crate) fn parse_client_command(line: &str) -> Option<ClientCommand> {
+pub fn parse_client_command(line: &str) -> Option<ClientCommand> {
     let v: serde_json::Value = serde_json::from_str(line).ok()?;
     match v.get("type")?.as_str()? {
         "MoveCommand" => {
@@ -215,7 +227,7 @@ pub(crate) fn parse_client_command(line: &str) -> Option<ClientCommand> {
         }
         "WarpCommand" => {
             let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            // Accept {"target":{"Gate":2}} or legacy {"gate_id":2}.
+            // Accept {"target":{"Gate":2}} / {"target":{"Body":1}} or legacy {"gate_id":2}.
             let target = if let Some(t) = v.get("target") {
                 if let Some(gate_val) = t.get("Gate").and_then(|g| g.as_u64()) {
                     dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(gate_val as u32))
@@ -305,5 +317,14 @@ mod tests {
     fn unknown_command_type_returns_none() {
         let line = r#"{"type":"UnknownCommand","ship_id":1}"#;
         assert!(parse_client_command(line).is_none());
+    }
+
+    #[test]
+    fn redirect_json_carries_the_target_ws_addr() {
+        let addr: std::net::SocketAddr = "127.0.0.1:7880".parse().unwrap();
+        let json = redirect_json(addr);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "Redirect");
+        assert_eq!(v["ws_addr"], "127.0.0.1:7880");
     }
 }

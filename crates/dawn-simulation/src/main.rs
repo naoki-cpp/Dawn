@@ -10,10 +10,12 @@
 mod bench;
 mod cluster;
 mod data_loader;
-mod protocol;
 mod serve;
 mod sector_simulator_actor;
-mod ws_server;
+
+// Client transport (WsServer) is shared via dawn-actor; bring the module into
+// crate scope so existing `crate::ws_server` paths keep resolving.
+use dawn_actor::ws_server;
 
 #[tokio::main]
 async fn main() {

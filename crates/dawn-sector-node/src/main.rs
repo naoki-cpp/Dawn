@@ -14,9 +14,11 @@
 
 mod config;
 mod data_loader;
-mod protocol;
-mod ws_server;
 
+// Client transport (WsServer) and wire protocol (incl. redirect_json) are
+// shared via dawn-actor; bring the modules into crate scope so existing
+// `ws_server::` / `protocol::` paths keep resolving.
+use dawn_actor::{protocol, ws_server};
 use dawn_consensus::{RaftActor, RaftActorHandle, RaftActorMessage, RaftState, TcpRaftTransport};
 use dawn_core::{DomainEvent, FitModuleCommand, NodeId, SectorBounds, SectorId, ShipId, SlotKind, WarpTarget};
 use dawn_event_store::store::EventStore as _;

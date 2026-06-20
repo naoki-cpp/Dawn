@@ -106,10 +106,15 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 name = "dawn-actor"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "dawn-core",
  "futures",
+ "futures-util",
+ "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
@@ -191,12 +196,9 @@ dependencies = [
  "dawn-event-store",
  "dawn-replication",
  "dawn-sector",
- "futures-util",
  "rand",
  "serde",
- "serde_json",
  "tokio",
- "tokio-tungstenite",
  "toml",
 ]
 
@@ -204,7 +206,6 @@ dependencies = [
 name = "dawn-simulation"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "dawn-actor",
  "dawn-consensus",
  "dawn-core",
@@ -212,14 +213,12 @@ dependencies = [
  "dawn-event-store",
  "dawn-replication",
  "dawn-sector",
- "futures-util",
  "postcard",
  "rand",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
- "tokio-tungstenite",
  "toml",
 ]
 

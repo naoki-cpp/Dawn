@@ -22,7 +22,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027） |
 | ファイルサイズ | A− | P7-1/P7-2 + AoI テスト移動で node/mod.rs 514行に縮小。全ファイル 700行以下 |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。近似ロジック解消 |
-| 重複 | B+ | `_owned` ラッパーは許容だが、WS 境界（ws_server / protocol）が dawn-simulation と dawn-sector-node で重複（M-4）|
+| 重複 | A− | WS 境界（ws_server / protocol）を dawn-actor へ集約（M-4 解消）。残るは data_loader 重複のみ |
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。TCP transport も trait 境界内に収まる |
 | AI開発由来 | B+ | 命名汚染なし。残る密結合は `SectorSimulatorActor` と `SimulationNode` 境界 |
 
@@ -110,34 +110,24 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 8D-2a/2b/2c で `dawn-replication` 配線が入り、イベント flush 境界と TCP transport 境界は明確になった。
 ただし `SimulationNode` の公開メソッド変更が Actor に波及しやすい構造は残る。
 
-#### M-4: クライアント配線層が `dawn-simulation` と `dawn-sector-node` で丸ごと重複
+#### M-4（一部解消）: クライアント配線層が `dawn-simulation` と `dawn-sector-node` で重複
 
-`dawn-sector-node` の WS/プロトコル/データロード層は `dawn-simulation` の**手動コピー**で、
-3ファイルすべてが冒頭コメントで「Adapted from …」と明記している。
-`protocol.rs` には「**kept in sync manually**」とまで書かれており、保守負債が明示されている。
+以前は `dawn-sector-node` の WS/プロトコル/データロード層が `dawn-simulation` の手動コピーで、
+3ファイルすべてが「Adapted from …」「kept in sync manually」と保守負債を明記していた。
 
-```
-dawn-simulation/src/ws_server.rs       (199) ┐ WsClientConnection / WsServer /
-dawn-sector-node/src/ws_server.rs      (153) ┘ PlayerSession がほぼ同一
-dawn-simulation/src/protocol.rs        (309) ┐ parse_client_command / parse_slot_kind /
-dawn-sector-node/src/protocol.rs       (243) ┘ domain_event_to_json / JSON DTO が共通
-dawn-simulation/src/data_loader/*.rs   (約470)┐ load_modules / load_ship_types /
-dawn-sector-node/src/data_loader.rs    (178) ┘ parse_* が共通
-```
+解消（2026-06-20）: **`ws_server` と `protocol` を `dawn-actor` へ集約**した。
+`dawn-actor/src/client_connection.rs` のドキュメントが既に `WsClientConnection (ws_server.rs)`
+を「本番 WebSocket transport」と記述しており、移動は設計意図の実現（charter 変更ではない）。
 
-`dawn-actor/src/client_connection.rs` のドキュメントコメントが `WsClientConnection (ws_server.rs)`
-を参照しており、**本来の置き場が `dawn-actor` であることを示唆**している。
+- `WsServer` / `WsClientConnection` / `PlayerSession` → `dawn-actor::ws_server`
+  （`bind` を `ToSocketAddrs + Display` でジェネリック化し両呼び出し元に対応）
+- `parse_client_command` / `domain_event_to_json` / JSON DTO / `redirect_json` → `dawn-actor::protocol`
+- 両バイナリは重複ファイルを削除し `use dawn_actor::{protocol, ws_server}` に切替
+- 不要になった依存（`tokio-tungstenite` / `futures-util` ほか）を両 Cargo.toml から除去
 
-現状の整合性: 調査時点では `domain_event_to_json` が両者とも同じ 18 種の `DomainEvent` を
-カバーし、`speed_multiplier` 等のデフォルトも一致しており**機能ドリフトは無い**。
-ただしこれは手動同期に依存しており、19 個目のイベントを追加して片方しか更新しないと
-**一方の経路のクライアントだけ無言で取りこぼす**潜在バグになる。
-
-方針案:
-- `WsClientConnection` / `WsServer` / `PlayerSession` を `dawn-actor` へ移動
-  （`dawn-actor` に `tokio-tungstenite` 依存を追加。両クレートが既に `dawn-actor` 依存）
-- `parse_client_command` / `domain_event_to_json` と JSON DTO、TOML ローダーを共通モジュールへ集約
-- `redirect_json`（Jump Redirect）のような片側固有関数は呼び出し側クレートに残す
+残課題: `data_loader`（`load_modules` / `load_ship_types`）の重複は未解消。
+ファイル I/O を伴うためファイル I/O 禁止の `dawn-core` / `dawn-sector` にも、転送境界の
+`dawn-actor` にも意味的に合わず、置き場の判断（新規 `dawn-data` クレート等）が要る。別途検討。
 
 #### ~~M-5~~（機能ギャップ）: 受信 replication batch が消費されていない（解消済み）
 
