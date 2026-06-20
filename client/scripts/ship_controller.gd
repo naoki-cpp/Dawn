@@ -28,7 +28,7 @@ const LOCK_RING_RADIUS: float = 250.0
 ## ロック中/ロック完了インジケーターの画面上サイズ。navigation_marker_renderer.gd
 ## の惑星選択リング（RETICLE_PIXEL_SIZE）と揃える -- 同じ「選択/状態インジケーター」
 ## なので見た目・距離耐性も揃える（BillboardRing 経由で fixed_size ビルボード化）。
-const LOCK_RING_PIXEL_SIZE: float = 0.003
+const LOCK_RING_PIXEL_SIZE: float = 0.0015
 
 # ── 内部状態 ─────────────────────────────────────────────────────────────────
 

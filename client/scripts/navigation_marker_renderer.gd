@@ -18,10 +18,11 @@ const PLANET_VISUAL_RADIUS_RATIO: float = 0.08
 ## ShipPicking.pick_body_at's screen-space picking). Built via
 ## BillboardRing, shared with ship_controller.gd's lock-on ring -- both are
 ## the same kind of "this is selected/selectable" indicator and should
-## behave the same way. Sized against the smallest existing HUD elements
-## (hud_manager.gd's conn_dot is 8x8px, module-slot font is 9px) so it reads
-## as a small UI indicator, not a large 3D-world decoration.
-const RETICLE_PIXEL_SIZE : float = 0.003
+## behave the same way. Sized smaller than the smallest existing HUD elements
+## (hud_manager.gd's conn_dot is 8x8px, module-slot font is 9px) since this
+## marker sits in 3D space rather than screen space and otherwise reads as
+## too large against the ship/planet geometry around it.
+const RETICLE_PIXEL_SIZE : float = 0.0015
 const RETICLE_COLOR      : Color = Color(1.0, 1.0, 1.0, 0.85)
 
 
