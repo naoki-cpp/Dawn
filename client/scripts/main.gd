@@ -20,24 +20,15 @@ extends Node
 @onready var _hud         : CanvasLayer = $HUD
 @onready var _camera      : Camera3D   = $World/Camera3D
 
-# -- HUD panels (built programmatically in _ready) ----------------------------
-## Top-left status panel.
-var _conn_dot          : ColorRect = null
-var _status_conn_label : Label     = null
-var _status_name_label : Label     = null
-var _status_info_label : Label     = null
-## Bottom-left ship-status panel. Each entry: {row, bar, value}.
-var _bar_shield : Dictionary = {}
-var _bar_armor  : Dictionary = {}
-var _bar_hull   : Dictionary = {}
-var _bar_cap    : Dictionary = {}
+# -- HUD panels (built by HudManager in _ready, architecture-review-client.md C-1) --
+## Top-left status panel. {conn_dot, conn_label, name_label, info_label}.
+var _status_panel_refs : Dictionary = {}
+## Bottom-left ship-status panel. {bar_shield, bar_armor, bar_hull, bar_cap},
+## each itself {row, bar, value}.
+var _ship_status_refs : Dictionary = {}
 ## Top-center target panel (visible only while a lock target is held).
-var _target_panel      : Panel       = null
-var _target_name_label : Label       = null
-var _target_dist_label : Label       = null
-var _target_bar_shield : ProgressBar = null
-var _target_bar_armor  : ProgressBar = null
-var _target_bar_hull   : ProgressBar = null
+## {panel, name_label, dist_label, bar_shield, bar_armor, bar_hull}.
+var _target_panel_refs : Dictionary = {}
 ## Bottom-center module bar. One slot per active module, in F-key order.
 ## Each entry: {panel, style, name, state, module_index}.
 var _module_bar   : HBoxContainer = null
@@ -153,11 +144,11 @@ func _ready() -> void:
 	_connection.module_deactivated.connect(_on_module_deactivated)
 	_build_player_material()
 	_setup_space_environment()
-	_build_duel_result_overlay()
-	_build_status_panel()
-	_build_ship_status_panel()
-	_build_target_panel()
-	_build_module_bar()
+	_duel_result_label = HudManager.build_duel_result_overlay(self)
+	_status_panel_refs = HudManager.build_status_panel(_hud)
+	_ship_status_refs  = HudManager.build_ship_status_panel(_hud)
+	_target_panel_refs = HudManager.build_target_panel(_hud)
+	_module_bar = HudManager.build_module_bar(_hud)
 	_update_hud()
 	## Gate / body markers are spawned from the server's InitialState, not here.
 
@@ -289,7 +280,7 @@ func _input(event: InputEvent) -> void:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
 		if mb.pressed:
 			## A click on a module slot toggles it; it is never a world click.
-			var slot_index: int = _module_slot_at(mb.position)
+			var slot_index: int = HudManager.module_slot_at(_module_slots, mb.position)
 			if slot_index >= 0:
 				if mb.button_index == MOUSE_BUTTON_LEFT:
 					_toggle_module_by_index(slot_index)
@@ -524,7 +515,7 @@ func _on_welcomed(_p_player_id: int, _p_ship_id: int) -> void:
 ## InitialState handles initialization.
 func _on_initial_state(state: Dictionary) -> void:
 	_clear_all_ships()  ## Reset on reconnect
-	_hide_duel_result()
+	HudManager.hide_duel_result(_duel_result_label)
 	_ingest_star_map(state)
 
 	for ship_data: Variant in (state.get("ships", []) as Array):
@@ -645,7 +636,7 @@ func _on_player_fitting(modules: Array) -> void:
 		mod_dict["cycle_remaining"] = 0
 		mod_dict["cap_forced_off"]  = false
 	_player_modules = modules
-	_rebuild_module_bar()
+	_module_slots = HudManager.rebuild_module_bar(_module_bar, _player_modules)
 	_recalc_weapon_range()
 
 func _recalc_weapon_range() -> void:
@@ -886,10 +877,10 @@ func _handle_ship_destroyed(p: Dictionary) -> void:
 		_player_armor       = 0.0
 		_player_hull        = 0.0
 		_player_lock_target = -1
-		_show_duel_result(false)  ## DEFEAT
+		HudManager.show_duel_result(_duel_result_label, false)  ## DEFEAT
 	elif ship_id in _opponent_ship_ids:
 		_opponent_ship_ids.erase(ship_id)
-		_show_duel_result(true)   ## VICTORY
+		HudManager.show_duel_result(_duel_result_label, true)   ## VICTORY
 	## Clear lock target if it was just destroyed
 	if ship_id == _player_lock_target:
 		_player_lock_target = -1
@@ -916,10 +907,29 @@ func _handle_lock_lost(p: Dictionary) -> void:
 # -- HUD ----------------------------------------------------------------------
 
 func _update_hud() -> void:
-	_update_status_panel()
-	_update_ship_status_panel()
-	_update_target_panel()
-	_update_module_bar()
+	var speed_str: String = "-"
+	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
+		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
+		speed_str = "%d m/s" % int(spd * METERS_PER_UNIT)
+	HudManager.update_status_panel(
+		_status_panel_refs, _connection.is_connected_to_server(),
+		_player_ship_type_name, _current_system_name, speed_str)
+
+	HudManager.update_ship_status_panel(
+		_ship_status_refs, _player_ship_id,
+		_player_shield, _player_max_shield, _player_armor, _player_max_armor, _player_hull, _player_max_hull,
+		_cap_current, _cap_max)
+
+	var target_known: bool = _ships.has(_player_lock_target)
+	var dist_text: String = "—"
+	if target_known and _player_ship_id >= 0 and _ships.has(_player_ship_id):
+		var dist_m: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
+			(_ships[_player_lock_target] as Node3D).global_position) / WORLD_SCALE
+		dist_text = "%.1f km" % (dist_m * METERS_PER_UNIT / 1000.0)
+	var target_hp: Dictionary = _ship_hp.get(_player_lock_target, {}) as Dictionary
+	HudManager.update_target_panel(_target_panel_refs, _player_lock_target, target_known, dist_text, target_hp)
+
+	HudManager.update_module_bar(_module_slots, _player_modules)
 
 	var jump_line  : String = ""
 	if _nearby_gate_id >= 0:
@@ -1072,411 +1082,3 @@ func _apply_player_material(ship: Node3D) -> void:
 	if hull != null:
 		hull.set_surface_override_material(0, _player_material)
 
-# -- HUD panels (status + ship status) ----------------------------------------
-
-## Layer colours for the three HP bands and the capacitor (EVE convention).
-const _COLOR_SHIELD := Color(0.29, 0.56, 0.85)  ## blue
-const _COLOR_ARMOR  := Color(0.88, 0.63, 0.19)  ## amber
-const _COLOR_HULL   := Color(0.82, 0.29, 0.29)  ## red
-const _COLOR_CAP    := Color(0.17, 0.66, 0.54)  ## teal
-
-## Module slot state colours (border + state label).
-const _MODULE_ON  := Color(0.30, 0.75, 0.45)  ## active
-const _MODULE_OFF := Color(0.45, 0.50, 0.60)  ## inactive
-const _MODULE_CAP := Color(0.85, 0.35, 0.35)  ## cap-forced off
-
-## Shared semi-transparent dark background for HUD panels, so text stays legible
-## over bright stars / nebula. Panels are display-only -- mouse input passes
-## through to the 3D viewport (clicks are handled in _input, not via Controls).
-func _hud_box_style(border_color: Color = Color(0.47, 0.59, 0.78, 0.28)) -> StyleBoxFlat:
-	var box := StyleBoxFlat.new()
-	box.bg_color = Color(0.03, 0.05, 0.09, 0.72)
-	box.set_corner_radius_all(6)
-	box.set_border_width_all(1)
-	box.border_color = border_color
-	return box
-
-## Top-left status panel: connection dot + ship name + "System X · N m/s".
-func _build_status_panel() -> void:
-	var panel := Panel.new()
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_theme_stylebox_override("panel", _hud_box_style())
-	panel.offset_left = 10.0;  panel.offset_top    = 10.0
-	panel.offset_right = 232.0; panel.offset_bottom = 78.0
-	_hud.add_child(panel)
-
-	var vb := VBoxContainer.new()
-	vb.set_anchors_preset(Control.PRESET_FULL_RECT)
-	vb.offset_left = 9.0; vb.offset_top = 6.0; vb.offset_right = -9.0; vb.offset_bottom = -6.0
-	vb.add_theme_constant_override("separation", 2)
-	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(vb)
-
-	var conn_row := HBoxContainer.new()
-	conn_row.add_theme_constant_override("separation", 6)
-	conn_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_conn_dot = ColorRect.new()
-	_conn_dot.custom_minimum_size = Vector2(8.0, 8.0)
-	_conn_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_conn_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	conn_row.add_child(_conn_dot)
-	_status_conn_label = _make_hud_label(11, Color(0.62, 0.69, 0.80))
-	conn_row.add_child(_status_conn_label)
-	vb.add_child(conn_row)
-
-	_status_name_label = _make_hud_label(13, Color(1.0, 0.62, 0.25))
-	vb.add_child(_status_name_label)
-	_status_info_label = _make_hud_label(11, Color(0.62, 0.69, 0.80))
-	vb.add_child(_status_info_label)
-
-## Bottom-left ship-status panel: Shield / Armor / Hull bars + capacitor bar.
-func _build_ship_status_panel() -> void:
-	var panel := Panel.new()
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_theme_stylebox_override("panel", _hud_box_style())
-	## Pinned to the bottom-left corner with a 10px margin.
-	panel.anchor_top = 1.0; panel.anchor_bottom = 1.0
-	panel.offset_left = 10.0; panel.offset_right = 225.0
-	panel.offset_top = -122.0; panel.offset_bottom = -10.0
-	_hud.add_child(panel)
-
-	var vb := VBoxContainer.new()
-	vb.set_anchors_preset(Control.PRESET_FULL_RECT)
-	vb.offset_left = 9.0; vb.offset_top = 7.0; vb.offset_right = -9.0; vb.offset_bottom = -7.0
-	vb.add_theme_constant_override("separation", 3)
-	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(vb)
-
-	var header := _make_hud_label(10, Color(0.54, 0.63, 0.76))
-	header.text = "HULL INTEGRITY"
-	vb.add_child(header)
-
-	_bar_shield = _make_stat_bar("SH", _COLOR_SHIELD)
-	_bar_armor  = _make_stat_bar("AR", _COLOR_ARMOR)
-	_bar_hull   = _make_stat_bar("HU", _COLOR_HULL)
-	vb.add_child(_bar_shield["row"])
-	vb.add_child(_bar_armor["row"])
-	vb.add_child(_bar_hull["row"])
-
-	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(0.0, 2.0)
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	vb.add_child(spacer)
-
-	_bar_cap = _make_stat_bar("CAP", _COLOR_CAP)
-	vb.add_child(_bar_cap["row"])
-
-## Top-center target panel: shown only while a lock target is held. Uses the
-## same blue/amber/red colour coding as the self panel, but in compact bars
-## with no numeric readout (you mainly watch these deplete in a fight).
-func _build_target_panel() -> void:
-	var panel := Panel.new()
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_theme_stylebox_override("panel", _hud_box_style(Color(0.82, 0.35, 0.35, 0.55)))
-	panel.anchor_left = 0.5; panel.anchor_right = 0.5
-	panel.offset_left = -110.0; panel.offset_right = 110.0
-	panel.offset_top = 10.0; panel.offset_bottom = 70.0
-	panel.visible = false
-	_hud.add_child(panel)
-	_target_panel = panel
-
-	var vb := VBoxContainer.new()
-	vb.set_anchors_preset(Control.PRESET_FULL_RECT)
-	vb.offset_left = 9.0; vb.offset_top = 6.0; vb.offset_right = -9.0; vb.offset_bottom = -6.0
-	vb.add_theme_constant_override("separation", 3)
-	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(vb)
-
-	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 6)
-	header.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_target_name_label = _make_hud_label(11, Color(0.90, 0.47, 0.47))
-	_target_name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(_target_name_label)
-	_target_dist_label = _make_hud_label(11, Color(0.82, 0.87, 0.94))
-	header.add_child(_target_dist_label)
-	vb.add_child(header)
-
-	_target_bar_shield = _make_mini_bar(_COLOR_SHIELD)
-	_target_bar_armor  = _make_mini_bar(_COLOR_ARMOR)
-	_target_bar_hull   = _make_mini_bar(_COLOR_HULL)
-	vb.add_child(_target_bar_shield)
-	vb.add_child(_target_bar_armor)
-	vb.add_child(_target_bar_hull)
-
-## Bottom-center module bar. The container is built once; the slots are
-## (re)populated from the fitting in _rebuild_module_bar(). A CenterContainer
-## keeps the row centered regardless of how many modules are fitted.
-func _build_module_bar() -> void:
-	var center := CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	center.offset_top = -60.0
-	center.offset_bottom = -8.0
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_hud.add_child(center)
-
-	_module_bar = HBoxContainer.new()
-	_module_bar.add_theme_constant_override("separation", 5)
-	_module_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	center.add_child(_module_bar)
-
-## Rebuild the slot boxes from the current fitting. One slot per *active*
-## module (passive modules have no F-key), in declaration order.
-func _rebuild_module_bar() -> void:
-	if _module_bar == null:
-		return
-	for child: Node in _module_bar.get_children():
-		child.queue_free()
-	_module_slots.clear()
-
-	var f_number: int = 1
-	for i: int in range(_player_modules.size()):
-		var mod_dict: Dictionary = _player_modules[i] as Dictionary
-		if not (mod_dict.get("is_active_module", false) as bool):
-			continue  ## Skip Passive modules
-		var slot: Dictionary = _make_module_slot(f_number, mod_dict.get("name", "?") as String)
-		slot["module_index"] = i
-		_module_bar.add_child(slot["panel"])
-		_module_slots.append(slot)
-		f_number += 1
-
-## Build one slot box (F-number / name / state). Returns {panel, style, name,
-## state, module_index} so _update_module_bar() can refresh it each frame.
-func _make_module_slot(f_number: int, mod_name: String) -> Dictionary:
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.03, 0.05, 0.09, 0.78)
-	style.set_corner_radius_all(5)
-	style.set_border_width_all(1)
-	style.border_color = _MODULE_OFF
-
-	var panel := Panel.new()
-	panel.custom_minimum_size = Vector2(66.0, 46.0)
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_theme_stylebox_override("panel", style)
-
-	var vb := VBoxContainer.new()
-	vb.set_anchors_preset(Control.PRESET_FULL_RECT)
-	vb.offset_left = 3.0; vb.offset_top = 2.0; vb.offset_right = -3.0; vb.offset_bottom = -2.0
-	vb.add_theme_constant_override("separation", 0)
-	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(vb)
-
-	var f_lbl := _make_hud_label(9, Color(0.45, 0.52, 0.63))
-	f_lbl.text = "F%d" % f_number
-	f_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vb.add_child(f_lbl)
-
-	var name_lbl := _make_hud_label(9, Color(0.85, 0.89, 0.95))
-	name_lbl.text = mod_name
-	name_lbl.clip_text = true
-	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	name_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	name_lbl.size_flags_vertical  = Control.SIZE_EXPAND_FILL
-	vb.add_child(name_lbl)
-
-	var state_lbl := _make_hud_label(9, _MODULE_OFF)
-	state_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vb.add_child(state_lbl)
-
-	return {"panel": panel, "style": style, "name": name_lbl, "state": state_lbl, "module_index": -1}
-
-## Build a label/bar/value row. Returns {row, bar, value} so the caller can
-## update the bar and the numeric readout each frame.
-func _make_stat_bar(label_text: String, fill_color: Color) -> Dictionary:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 6)
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	var name_lbl := _make_hud_label(11, fill_color.lightened(0.2))
-	name_lbl.text = label_text
-	name_lbl.custom_minimum_size = Vector2(30.0, 0.0)
-	row.add_child(name_lbl)
-
-	var bar := ProgressBar.new()
-	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.size_flags_vertical   = Control.SIZE_SHRINK_CENTER
-	bar.custom_minimum_size = Vector2(0.0, 9.0)
-	bar.show_percentage = false
-	bar.min_value = 0.0
-	bar.max_value = 100.0
-	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_style_bar(bar, fill_color)
-	row.add_child(bar)
-
-	var val_lbl := _make_hud_label(11, Color(0.82, 0.87, 0.94))
-	val_lbl.custom_minimum_size = Vector2(92.0, 0.0)
-	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	row.add_child(val_lbl)
-
-	return {"row": row, "bar": bar, "value": val_lbl}
-
-## A compact, label-less, number-less HP bar for the target panel.
-func _make_mini_bar(fill_color: Color) -> ProgressBar:
-	var bar := ProgressBar.new()
-	bar.custom_minimum_size = Vector2(0.0, 6.0)
-	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.show_percentage = false
-	bar.min_value = 0.0
-	bar.max_value = 100.0
-	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_style_bar(bar, fill_color)
-	return bar
-
-## Apply the dark-track / coloured-fill styleboxes to a progress bar.
-func _style_bar(bar: ProgressBar, fill_color: Color) -> void:
-	var fill := StyleBoxFlat.new()
-	fill.bg_color = fill_color
-	fill.set_corner_radius_all(2)
-	bar.add_theme_stylebox_override("fill", fill)
-
-	var bg := StyleBoxFlat.new()
-	bg.bg_color = Color(0.08, 0.09, 0.12)
-	bg.set_corner_radius_all(2)
-	bar.add_theme_stylebox_override("background", bg)
-
-func _make_hud_label(font_size: int, color: Color) -> Label:
-	var lbl := Label.new()
-	lbl.add_theme_font_size_override("font_size", font_size)
-	lbl.add_theme_color_override("font_color", color)
-	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	return lbl
-
-# -- HUD panel updates --------------------------------------------------------
-
-func _update_status_panel() -> void:
-	var connected: bool = _connection.is_connected_to_server()
-	_conn_dot.color = Color(0.25, 0.75, 0.42) if connected else Color(0.92, 0.66, 0.26)
-	_status_conn_label.text = "ONLINE" if connected else "CONNECTING..."
-	_status_name_label.text = _player_ship_type_name if _player_ship_type_name != "" else "—"
-
-	var speed_str: String = "-"
-	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
-		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
-		speed_str = "%d m/s" % int(spd * METERS_PER_UNIT)
-	_status_info_label.text = "System %s · %s" % [_current_system_name, speed_str]
-
-## Drive the Shield / Armor / Hull bars and the capacitor bar from current state.
-func _update_ship_status_panel() -> void:
-	if _player_ship_id < 0:
-		## Destroyed: empty bars, flag the hull row.
-		_set_stat_bar(_bar_shield, 0.0, _player_max_shield)
-		_set_stat_bar(_bar_armor,  0.0, _player_max_armor)
-		_set_stat_bar(_bar_hull,   0.0, _player_max_hull)
-		(_bar_hull["value"] as Label).text = "DESTROYED"
-	elif _player_shield < 0.0:
-		## State not yet received: assume full.
-		_set_stat_bar(_bar_shield, _player_max_shield, _player_max_shield)
-		_set_stat_bar(_bar_armor,  _player_max_armor,  _player_max_armor)
-		_set_stat_bar(_bar_hull,   _player_max_hull,   _player_max_hull)
-	else:
-		_set_stat_bar(_bar_shield, _player_shield, _player_max_shield)
-		_set_stat_bar(_bar_armor,  _player_armor,  _player_max_armor)
-		_set_stat_bar(_bar_hull,   _player_hull,   _player_max_hull)
-
-	if _cap_current < 0.0:
-		(_bar_cap["bar"] as ProgressBar).value = 0.0
-		(_bar_cap["value"] as Label).text = "-"
-	else:
-		_set_stat_bar(_bar_cap, _cap_current, _cap_max)
-
-## Set a {bar, value} pair to cur/max: fill percentage + "cur / max" readout.
-func _set_stat_bar(entry: Dictionary, cur: float, mx: float) -> void:
-	var pct: float = (cur / mx * 100.0) if mx > 0.0 else 0.0
-	(entry["bar"] as ProgressBar).value = clampf(pct, 0.0, 100.0)
-	(entry["value"] as Label).text = "%d / %d" % [int(round(cur)), int(round(mx))]
-
-## Show / hide and populate the top-center target panel from the lock target.
-func _update_target_panel() -> void:
-	if _player_lock_target < 0:
-		_target_panel.visible = false
-		return
-	_target_panel.visible = true
-	_target_name_label.text = "◎ TARGET #%d" % _player_lock_target
-
-	if not _ships.has(_player_lock_target):
-		## Target left the area but the lock has not been cleared yet.
-		_target_dist_label.text = "SIGNAL LOST"
-		_set_mini_bar(_target_bar_shield, 0.0, 1.0)
-		_set_mini_bar(_target_bar_armor,  0.0, 1.0)
-		_set_mini_bar(_target_bar_hull,   0.0, 1.0)
-		return
-
-	## Distance in km.
-	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
-		var dist_m: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
-			(_ships[_player_lock_target] as Node3D).global_position) / WORLD_SCALE
-		_target_dist_label.text = "%.1f km" % (dist_m * METERS_PER_UNIT / 1000.0)
-	else:
-		_target_dist_label.text = "—"
-
-	## HP bars, relative to the target's own maxima (recorded at spawn).
-	if _ship_hp.has(_player_lock_target):
-		var t: Dictionary = _ship_hp[_player_lock_target] as Dictionary
-		_set_mini_bar(_target_bar_shield, t.get("shield", 0.0) as float, t.get("max_shield", 1.0) as float)
-		_set_mini_bar(_target_bar_armor,  t.get("armor",  0.0) as float, t.get("max_armor",  1.0) as float)
-		_set_mini_bar(_target_bar_hull,   t.get("hull",   0.0) as float, t.get("max_hull",   1.0) as float)
-
-## Set a number-less mini bar to a cur/max fill percentage.
-func _set_mini_bar(bar: ProgressBar, cur: float, mx: float) -> void:
-	bar.value = clampf((cur / mx * 100.0) if mx > 0.0 else 0.0, 0.0, 100.0)
-
-## Refresh each module slot's state text + border colour (ON / OFF / CAP!).
-func _update_module_bar() -> void:
-	for slot: Dictionary in _module_slots:
-		var idx: int = slot["module_index"]
-		if idx < 0 or idx >= _player_modules.size():
-			continue
-		var mod_dict: Dictionary = _player_modules[idx] as Dictionary
-		var col: Color
-		var txt: String
-		if mod_dict.get("cap_forced_off", false) as bool:
-			col = _MODULE_CAP;  txt = "CAP!"
-		elif mod_dict.get("is_active", false) as bool:
-			col = _MODULE_ON;   txt = "ON"
-		else:
-			col = _MODULE_OFF;  txt = "OFF"
-		var state_lbl: Label = slot["state"]
-		state_lbl.text = txt
-		state_lbl.add_theme_color_override("font_color", col)
-		(slot["style"] as StyleBoxFlat).border_color = col
-
-## Returns the F-key index (0-based) of the module slot under a screen position,
-## or -1. Used so a click on the bar toggles the module instead of the world.
-func _module_slot_at(pos: Vector2) -> int:
-	for i: int in range(_module_slots.size()):
-		var panel: Panel = _module_slots[i]["panel"]
-		if panel.get_global_rect().has_point(pos):
-			return i
-	return -1
-
-# -- Duel result overlay ------------------------------------------------------
-
-func _build_duel_result_overlay() -> void:
-	var canvas := CanvasLayer.new()
-	canvas.layer = 10
-	add_child(canvas)
-
-	_duel_result_label = Label.new()
-	_duel_result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_duel_result_label.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	_duel_result_label.anchors_preset       = Control.PRESET_FULL_RECT
-	_duel_result_label.visible              = false
-
-	var font_size: int = 96
-	_duel_result_label.add_theme_font_size_override("font_size", font_size)
-	canvas.add_child(_duel_result_label)
-
-func _show_duel_result(victory: bool) -> void:
-	if _duel_result_label == null:
-		return
-	if victory:
-		_duel_result_label.text             = "VICTORY"
-		_duel_result_label.add_theme_color_override("font_color", Color(0.2, 1.0, 0.3))
-	else:
-		_duel_result_label.text             = "DEFEAT"
-		_duel_result_label.add_theme_color_override("font_color", Color(1.0, 0.2, 0.2))
-	_duel_result_label.visible = true
-
-func _hide_duel_result() -> void:
-	if _duel_result_label != null:
-		_duel_result_label.visible = false
