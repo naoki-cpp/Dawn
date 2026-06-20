@@ -18,7 +18,7 @@ const PICK_RADIUS_GATE: float = 300.0
 ## since apparent screen size -- not world distance -- determines whether
 ## the click lands within this many pixels of the marker. See
 ## screen_point_distance().
-const PICK_RADIUS_BODY_PX: float = 28.0
+const PICK_RADIUS_BODY_PX: float = 16.0
 
 
 ## Perpendicular distance from world point `p` to the ray (`from`, `dir`),

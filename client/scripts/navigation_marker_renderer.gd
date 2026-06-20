@@ -17,8 +17,11 @@ const PLANET_VISUAL_RADIUS_RATIO: float = 0.08
 ## equally easy to click regardless of distance (pairs with
 ## ShipPicking.pick_body_at's screen-space picking). fixed_size makes
 ## Sprite3D render at the same apparent size no matter how far the camera is.
+## Sized against the smallest existing HUD elements (hud_manager.gd's
+## conn_dot is 8x8px, module-slot font is 9px) so the reticle reads as a
+## small UI indicator, not a large 3D-world decoration.
 const RETICLE_TEXTURE_PX : int   = 64
-const RETICLE_PIXEL_SIZE : float = 0.006
+const RETICLE_PIXEL_SIZE : float = 0.003
 const RETICLE_COLOR      : Color = Color(1.0, 1.0, 1.0, 0.85)
 
 static var _reticle_texture: ImageTexture = null
