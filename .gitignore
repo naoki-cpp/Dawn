@@ -15,6 +15,10 @@ client/.godot/export_credentials
 # ── godot-rust / GDExtension ──────────────────────────────────────────────────
 client/gdextension/target/
 
+# Editor addons are installed per-machine via the Godot AssetLib, not vendored
+# (e.g. GdUnit4 -- see AI_DEVELOPMENT_GUIDE.md §8 for the testing policy).
+client/addons/
+
 # ── IDE / Editor ─────────────────────────────────────────────────────────────
 .vscode/
 .idea/

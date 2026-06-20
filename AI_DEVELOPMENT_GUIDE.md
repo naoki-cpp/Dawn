@@ -850,6 +850,52 @@ let pos = reply_rx.await?;
 assert_eq!(pos, expected_position);
 ```
 
+### Godot クライアントのテスト方針（GdUnit4）
+
+**`client/scripts/` を変更するときは、可能な範囲でテストを伴わせること。**
+テストフレームワークは [GdUnit4](https://github.com/MikeSchulze/gdUnit4)。
+`client/addons/` は `.gitignore` 対象（各開発者が Godot エディタの AssetLib から
+個別にインストールする想定）なので、**初回はエディタの AssetLib タブで
+「GdUnit4」を検索してインストールし、`project.godot` の Plugins でこのアドオンを
+有効化**すること（`enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg")`
+は既にコミット済み。アドオン本体だけが各マシンでの個別インストール対象）。
+テストは `client/test/` 以下に `<対象ファイル>_test.gd` として置く（例: `client/test/main_test.gd`）。
+
+クライアント側はサーバー側（Rustクレート）と違い**全コードをテストできるわけではない**。
+判断基準は以下の通り:
+
+```
+テスト可能（シーンツリー無依存の純粋関数・ロジック）:
+  - 座標変換、レイ/距離計算、配列・辞書を入出力とする計算
+  - 例: _server_to_godot_pos() / _ray_point_distance() / _spectral_color() /
+        _compute_warp_snap_pos_core()（client/test/main_test.gd 参照）
+  - スクリプトを .new() でシーンツリーに追加せずインスタンス化すれば _ready() は
+    呼ばれないため、@onready 変数を使わない関数なら安全にテストできる
+
+テスト不能・対象外（Godot エディタでの目視確認に委ねる）:
+  - HUD構築・更新、入力ハンドリング、マーカー（ノード）生成、ピッキングのループ自体
+  - @onready のシーンツリー直パス参照に依存する処理
+  - WebSocket 通信（connection.gd の実接続部分）
+  → これらは docs/architecture-review-client.md の C-1/C-3 で「Godot エディタでの
+    動作確認が必要」と明記した領域と一致する
+```
+
+**新しい純粋関数を `main.gd` 等に追加・抽出するときは、テストも同じ変更に含めること。**
+逆に、シーンツリー依存のロジックを変更したときは、テストを書けない代わりに
+「Godot エディタで何を確認したか」を PR 説明に明記する（実機検証ができないAIセッションの
+場合は、その旨と推奨される手動確認手順を明記する）。
+
+CLI 実行（CI / ローカル、Godot バイナリが必要）:
+
+```bash
+GODOT_BIN=/path/to/godot client/addons/gdUnit4/runtest.sh -a client/test
+```
+
+> **既知の制約**: この開発環境には Godot バイナリが無く、AI セッション単独では
+> 上記コマンドを実行してテストの green/red を確認できない。テストコードはロジックの
+> 手計算に基づいて書くが、実際の実行確認はユーザーが Godot エディタまたは CLI で
+> 行う必要がある。
+
 ---
 
 ## 9. AI Change Checklist
@@ -898,6 +944,10 @@ assert_eq!(pos, expected_position);
 □ テスト関数名が「何が保証されるか」を説明している
 □ cargo test --workspace がゼロエラーで通過することを確認した
 □ 変更したADRが存在する場合、そのADRに記載された不変条件のテストが存在する
+□ client/scripts/ を変更した場合: シーンツリー無依存の純粋関数なら
+  client/test/ にGdUnit4テストを追加した（§8「Godot クライアントのテスト方針」参照）
+□ client/scripts/ のシーンツリー依存部分を変更した場合: テストの代わりに
+  Godot エディタでの確認内容（または確認できなかった旨）をPR説明に明記した
 ```
 
 ### PR説明の確認
