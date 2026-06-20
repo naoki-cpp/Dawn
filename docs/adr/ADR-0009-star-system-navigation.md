@@ -56,8 +56,12 @@ StarSystem（星系）
 
 ### 2. 新規型定義（dawn-core）
 
+> **更新（2026-06-20 リネーム）**: 本セクションの `star_system.rs` は後に
+> `dawn-core/src/navigation.rs` へ改名された（型名は不変。ファイル名のみ）。
+> 以下のコードブロックは当時のパスを歴史記録として残す。
+
 ```rust
-// dawn-core/src/star_system.rs
+// dawn-core/src/star_system.rs（現 navigation.rs）
 
 /// 星系の識別子。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

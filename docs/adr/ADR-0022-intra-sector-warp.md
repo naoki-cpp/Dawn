@@ -186,8 +186,13 @@ Approach（ADR-0015）と同じ UX 系統。プレイヤーがクリックで選
 | `MIN_WARP_DISTANCE` | warp 可能な最小距離（150km 相当） | 3000 u |
 | `WARP_ARRIVAL_FACTOR` | 到着半径 = gate.activation_radius × これ | 0.8 |
 
-整列時間は固定でなく **船の機動性（thrust_magnitude / max_speed）** から決まる（EVE の align time）。
+整列時間は固定でなく **船の機動性** から決まる（EVE の align time）。
 機動の鈍い船ほど整列が長く、Tackle 窓が長い。
+
+> **更新（ADR-0023 で supersede）**: 本 ADR は機動性を `thrust_magnitude / max_speed`
+> で表現していたが、ADR-0023（Propulsion Inertia）が `thrust_magnitude` を廃止し
+> `mass` / `inertia_modifier` / `base_max_speed` の慣性モデルへ置き換えた。整列時間は
+> 現在この新モデル（`tau_ticks`）から導出される。
 
 初期値はプレイテストで調整する（ship_types.toml と同様にデータ化可能だが、slice 1 は定数で可）。
 

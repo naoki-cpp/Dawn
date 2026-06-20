@@ -28,6 +28,11 @@ Phase 4 Cycle 3 として EVE Online 準拠の Fitting システムと
 
 #### コンポーネント設計（dawn-ecs）
 
+> **更新（ADR-0023 で supersede）**: 以下の `ShipStatsComp` / `ShipBaseStats` の
+> `thrust_magnitude` フィールドは ADR-0023（Propulsion Inertia）で廃止され、
+> `mass` / `inertia_modifier` / `base_max_speed` / `tau_ticks` の慣性モデルに
+> 置き換わった。以下は当時の定義を歴史記録として残す。
+
 ```rust
 // スロット種別（dawn-core）
 pub enum SlotKind { High, Mid, Low, Rig }
