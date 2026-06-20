@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : CLAUDE.md §11, docs/architecture.md
-date     : 2026-06-19（8D-2d / 8D-3 / 8D-4 完了後 + navigation.rs / galaxy.rs リネーム後に更新）
+date     : 2026-06-20（P9-2 完了後に更新）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -21,7 +21,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 |---|---|---|
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027） |
 | ファイルサイズ | A− | P7-1/P7-2 + AoI テスト移動で node/mod.rs 514行に縮小。全ファイル 700行以下 |
-| 型設計 | B+ | SectorMap・ShipRegistry 抽出で SimulationNode のフィールド数が適正化 |
+| 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。近似ロジック解消 |
 | 重複 | A− | `_owned` 4ペアは3行ラッパーで許容。P6-1 で system 間のクエリ手書きも解消 |
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。TCP transport も trait 境界内に収まる |
 | AI開発由来 | B+ | 命名汚染なし。残る密結合は `SectorSimulatorActor` と `SimulationNode` 境界 |
