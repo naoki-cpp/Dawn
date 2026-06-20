@@ -86,6 +86,13 @@ var _duel_result_label : Label = null
 ##   cap_cost_per_cycle, cycle_time_ticks, cycle_remaining}, ...]
 var _player_modules : Array = []
 
+## module_id set for which we just sent DeactivateModuleCommand ourselves.
+## ModuleDeactivated carries no reason field (ADR-0006), so this is how the
+## client tells "player turned it off" apart from "capacitor forced it off"
+## -- otherwise every manual OFF gets mislabelled as a cap-out (CAP! instead
+## of OFF in the module bar).
+var _pending_manual_deactivations : Dictionary = {}
+
 ## Client-side capacitor simulation (mirrors server CapacitorSystem logic).
 ## Populated from InitialState (cap_max, cap_recharge_per_tick) and
 ## PlayerFitting (cap_cost_per_cycle, cycle_time_ticks per module).
@@ -681,15 +688,17 @@ func _on_module_activated(p_ship_id: int, p_module_id: int, _slot: String) -> vo
 func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
 	if p_ship_id != _player_ship_id:
 		return
+	## ModuleDeactivated carries no reason field, so distinguish "player
+	## turned it off" (we just sent DeactivateModuleCommand for this
+	## module_id) from "capacitor forced it off" (unsolicited) here.
+	var was_manual: bool = _pending_manual_deactivations.has(p_module_id)
+	_pending_manual_deactivations.erase(p_module_id)
 	for m: Variant in _player_modules:
 		var mod_dict: Dictionary = m as Dictionary
 		if mod_dict.get("module_id", 0) as int == p_module_id:
-			var was_active: bool = mod_dict.get("is_active", false) as bool
 			mod_dict["is_active"]       = false
 			mod_dict["cycle_remaining"] = 0
-			## If it was ON, capacitor or player deactivated it.
-			if was_active:
-				mod_dict["cap_forced_off"] = true
+			mod_dict["cap_forced_off"]  = not was_manual
 			break
 	_recalc_weapon_range()
 
@@ -708,6 +717,7 @@ func _toggle_module_by_index(f_index: int) -> void:
 			var slot: String = mod_dict.get("slot",      "")  as String
 			var currently_active: bool = mod_dict.get("is_active", false) as bool
 			if currently_active:
+				_pending_manual_deactivations[mid] = true
 				_connection.send_deactivate_module(_player_ship_id, mid, slot)
 			else:
 				_connection.send_activate_module(_player_ship_id, mid, slot)
@@ -1018,6 +1028,7 @@ func _clear_all_ships() -> void:
 	_selected_body_id   = -1
 	_current_tick       = 0
 	_event_count        = 0
+	_pending_manual_deactivations.clear()
 
 func _setup_space_environment() -> void:
 	## Build the procedural space sky at runtime.
@@ -1081,4 +1092,3 @@ func _apply_player_material(ship: Node3D) -> void:
 	var hull: MeshInstance3D = ship.get_node_or_null("Hull") as MeshInstance3D
 	if hull != null:
 		hull.set_surface_override_material(0, _player_material)
-

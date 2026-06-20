@@ -66,3 +66,43 @@ func test_warp_snap_pos_core_returns_inf_when_player_ship_is_unknown() -> void:
 
 	var result: Vector3 = _main._compute_warp_snap_pos_core(Vector3.ZERO, 2000.0, 0.75)
 	assert_vector(result).is_equal(Vector3.INF)
+
+
+# -- _on_module_deactivated (manual OFF vs capacitor-forced OFF) ---------------------
+#
+# ModuleDeactivated carries no reason field (ADR-0006), so the client must
+# track its own DeactivateModuleCommand sends to tell "player turned it off"
+# apart from "capacitor forced it off" (regression: toggling a module on
+# then off was showing CAP! instead of OFF).
+
+func test_module_deactivated_after_a_manual_toggle_does_not_flag_cap_forced_off() -> void:
+	_main._player_ship_id = 1
+	_main._player_modules = [{"module_id": 5, "is_active": true, "cap_forced_off": false}]
+	_main._pending_manual_deactivations = {5: true}  ## set by _toggle_module_by_index
+
+	_main._on_module_deactivated(1, 5, "High")
+
+	var mod_dict: Dictionary = _main._player_modules[0]
+	assert_bool(mod_dict["is_active"] as bool).is_false()
+	assert_bool(mod_dict["cap_forced_off"] as bool).is_false()
+
+
+func test_module_deactivated_without_a_pending_manual_request_flags_cap_forced_off() -> void:
+	_main._player_ship_id = 1
+	_main._player_modules = [{"module_id": 5, "is_active": true, "cap_forced_off": false}]
+	## No entry in _pending_manual_deactivations -- the server deactivated it unprompted.
+
+	_main._on_module_deactivated(1, 5, "High")
+
+	var mod_dict: Dictionary = _main._player_modules[0]
+	assert_bool(mod_dict["cap_forced_off"] as bool).is_true()
+
+
+func test_module_deactivated_clears_the_pending_flag_so_it_does_not_leak_to_the_next_event() -> void:
+	_main._player_ship_id = 1
+	_main._player_modules = [{"module_id": 5, "is_active": true, "cap_forced_off": false}]
+	_main._pending_manual_deactivations = {5: true}
+
+	_main._on_module_deactivated(1, 5, "High")
+
+	assert_bool(_main._pending_manual_deactivations.has(5)).is_false()
