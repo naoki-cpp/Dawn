@@ -17,9 +17,20 @@ extends Node
 @onready var _gates_root  : Node3D      = $World/Gates
 @onready var _bodies_root : Node3D      = $World/Bodies
 @onready var _stats_label : Label       = $HUD/StatsLabel
-@onready var _cap_label   : Label       = $HUD/CapLabel
-@onready var _cap_bar     : ProgressBar = $HUD/CapBar
+@onready var _hud         : CanvasLayer = $HUD
 @onready var _camera      : Camera3D   = $World/Camera3D
+
+# -- HUD panels (built programmatically in _ready) ----------------------------
+## Top-left status panel.
+var _conn_dot          : ColorRect = null
+var _status_conn_label : Label     = null
+var _status_name_label : Label     = null
+var _status_info_label : Label     = null
+## Bottom-left ship-status panel. Each entry: {row, bar, value}.
+var _bar_shield : Dictionary = {}
+var _bar_armor  : Dictionary = {}
+var _bar_hull   : Dictionary = {}
+var _bar_cap    : Dictionary = {}
 
 # -- Constants ----------------------------------------------------------------
 
@@ -146,7 +157,8 @@ func _ready() -> void:
 	_build_player_material()
 	_setup_space_environment()
 	_build_duel_result_overlay()
-	_setup_cap_bar()
+	_build_status_panel()
+	_build_ship_status_panel()
 	_update_hud()
 	_spawn_gate_markers()
 	_spawn_body_markers()
@@ -1026,22 +1038,8 @@ func _handle_lock_lost(p: Dictionary) -> void:
 # -- HUD ----------------------------------------------------------------------
 
 func _update_hud() -> void:
-	var status: String = "ONLINE" if _connection.is_connected_to_server() else "CONNECTING..."
-
-	var speed_str: String = "-"
-	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
-		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
-		speed_str = "%d m/s" % int(spd * METERS_PER_UNIT)
-
-	var hp_str: String
-	if _player_ship_id < 0:
-		hp_str = "DESTROYED"
-	elif _player_shield < 0.0:
-		hp_str = "SH %.0f  AR %.0f  HU %.0f" % [
-			_player_max_shield, _player_max_armor, _player_max_hull]
-	else:
-		hp_str = "SH %.0f  AR %.0f  HU %.0f" % [
-			_player_shield, _player_armor, _player_hull]
+	_update_status_panel()
+	_update_ship_status_panel()
 
 	var lock_str: String
 	if _player_lock_target < 0:
@@ -1054,10 +1052,11 @@ func _update_hud() -> void:
 			var t_node: Node3D = _ships[_player_lock_target] as Node3D
 			var dist_m: float = p_node.global_position.distance_to(t_node.global_position) / WORLD_SCALE
 			lock_str += "  %.1f km" % (dist_m * METERS_PER_UNIT / 1000.0)
-		## Show target HP if available
+		## Show target HP if available. Keep it on its own line -- combined with
+		## the distance the single line overflows the right-aligned StatsLabel.
 		if _ship_hp.has(_player_lock_target):
 			var t: Dictionary = _ship_hp[_player_lock_target] as Dictionary
-			lock_str += "  SH %.0f  AR %.0f  HU %.0f" % [
+			lock_str += "\nSH %.0f  AR %.0f  HU %.0f" % [
 				t.get("shield", 0.0) as float,
 				t.get("armor",  0.0) as float,
 				t.get("hull",   0.0) as float,
@@ -1085,20 +1084,6 @@ func _update_hud() -> void:
 		module_lines += "\n[F%d] %s: %s" % [f_idx, name_str, state_str]
 		f_idx += 1
 
-	## Capacitor bar (client-side simulation).
-	if _cap_current < 0.0:
-		_cap_bar.value  = 0.0
-		_cap_label.text = "CAP  -"
-	else:
-		var pct: float = (_cap_current / _cap_max * 100.0) if _cap_max > 0.0 else 0.0
-		_cap_bar.value  = pct
-		_cap_label.text = "CAP  %.0f / %.0f GJ" % [_cap_current, _cap_max]
-
-	var ship_name_line: String = ""
-	if _player_ship_type_name != "":
-		ship_name_line = "\n" + _player_ship_type_name
-
-	var system_line: String = "\nSystem: %s" % _current_system_name
 	var jump_line  : String = ""
 	if _nearby_gate_id >= 0:
 		jump_line = "\n[J] Jump Gate #%d" % _nearby_gate_id
@@ -1128,8 +1113,8 @@ func _update_hud() -> void:
 		approach_line = "\n[A] Approach #%d" % _selected_target_id
 
 	_stats_label.text = (
-		"%s%s%s\nShips: %d\nTick: %d\nSpeed: %s\nHP: %s\nLock: %s%s%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
-		% [status, ship_name_line, system_line, _ships.size(), _current_tick, speed_str, hp_str, lock_str, approach_line, module_lines, jump_line]
+		"Ships: %d\nTick: %d\nLock: %s%s%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
+		% [_ships.size(), _current_tick, lock_str, approach_line, module_lines, jump_line]
 	)
 
 # -- Capacitor client-side simulation -----------------------------------------
@@ -1250,25 +1235,189 @@ func _apply_player_material(ship: Node3D) -> void:
 	if hull != null:
 		hull.set_surface_override_material(0, _player_material)
 
+# -- HUD panels (status + ship status) ----------------------------------------
+
+## Layer colours for the three HP bands and the capacitor (EVE convention).
+const _COLOR_SHIELD := Color(0.29, 0.56, 0.85)  ## blue
+const _COLOR_ARMOR  := Color(0.88, 0.63, 0.19)  ## amber
+const _COLOR_HULL   := Color(0.82, 0.29, 0.29)  ## red
+const _COLOR_CAP    := Color(0.17, 0.66, 0.54)  ## teal
+
+## Shared semi-transparent dark background for HUD panels, so text stays legible
+## over bright stars / nebula. Panels are display-only -- mouse input passes
+## through to the 3D viewport (clicks are handled in _input, not via Controls).
+func _hud_box_style() -> StyleBoxFlat:
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color(0.03, 0.05, 0.09, 0.72)
+	box.set_corner_radius_all(6)
+	box.set_border_width_all(1)
+	box.border_color = Color(0.47, 0.59, 0.78, 0.28)
+	return box
+
+## Top-left status panel: connection dot + ship name + "System X · N m/s".
+func _build_status_panel() -> void:
+	var panel := Panel.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_theme_stylebox_override("panel", _hud_box_style())
+	panel.offset_left = 10.0;  panel.offset_top    = 10.0
+	panel.offset_right = 232.0; panel.offset_bottom = 78.0
+	_hud.add_child(panel)
+
+	var vb := VBoxContainer.new()
+	vb.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vb.offset_left = 9.0; vb.offset_top = 6.0; vb.offset_right = -9.0; vb.offset_bottom = -6.0
+	vb.add_theme_constant_override("separation", 2)
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(vb)
+
+	var conn_row := HBoxContainer.new()
+	conn_row.add_theme_constant_override("separation", 6)
+	conn_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_conn_dot = ColorRect.new()
+	_conn_dot.custom_minimum_size = Vector2(8.0, 8.0)
+	_conn_dot.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_conn_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	conn_row.add_child(_conn_dot)
+	_status_conn_label = _make_hud_label(11, Color(0.62, 0.69, 0.80))
+	conn_row.add_child(_status_conn_label)
+	vb.add_child(conn_row)
+
+	_status_name_label = _make_hud_label(13, Color(1.0, 0.62, 0.25))
+	vb.add_child(_status_name_label)
+	_status_info_label = _make_hud_label(11, Color(0.62, 0.69, 0.80))
+	vb.add_child(_status_info_label)
+
+## Bottom-left ship-status panel: Shield / Armor / Hull bars + capacitor bar.
+func _build_ship_status_panel() -> void:
+	var panel := Panel.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_theme_stylebox_override("panel", _hud_box_style())
+	## Pinned to the bottom-left corner with a 10px margin.
+	panel.anchor_top = 1.0; panel.anchor_bottom = 1.0
+	panel.offset_left = 10.0; panel.offset_right = 225.0
+	panel.offset_top = -122.0; panel.offset_bottom = -10.0
+	_hud.add_child(panel)
+
+	var vb := VBoxContainer.new()
+	vb.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vb.offset_left = 9.0; vb.offset_top = 7.0; vb.offset_right = -9.0; vb.offset_bottom = -7.0
+	vb.add_theme_constant_override("separation", 3)
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(vb)
+
+	var header := _make_hud_label(10, Color(0.54, 0.63, 0.76))
+	header.text = "HULL INTEGRITY"
+	vb.add_child(header)
+
+	_bar_shield = _make_stat_bar("SH", _COLOR_SHIELD)
+	_bar_armor  = _make_stat_bar("AR", _COLOR_ARMOR)
+	_bar_hull   = _make_stat_bar("HU", _COLOR_HULL)
+	vb.add_child(_bar_shield["row"])
+	vb.add_child(_bar_armor["row"])
+	vb.add_child(_bar_hull["row"])
+
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0.0, 2.0)
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.add_child(spacer)
+
+	_bar_cap = _make_stat_bar("CAP", _COLOR_CAP)
+	vb.add_child(_bar_cap["row"])
+
+## Build a label/bar/value row. Returns {row, bar, value} so the caller can
+## update the bar and the numeric readout each frame.
+func _make_stat_bar(label_text: String, fill_color: Color) -> Dictionary:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var name_lbl := _make_hud_label(11, fill_color.lightened(0.2))
+	name_lbl.text = label_text
+	name_lbl.custom_minimum_size = Vector2(30.0, 0.0)
+	row.add_child(name_lbl)
+
+	var bar := ProgressBar.new()
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.size_flags_vertical   = Control.SIZE_SHRINK_CENTER
+	bar.custom_minimum_size = Vector2(0.0, 9.0)
+	bar.show_percentage = false
+	bar.min_value = 0.0
+	bar.max_value = 100.0
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_style_bar(bar, fill_color)
+	row.add_child(bar)
+
+	var val_lbl := _make_hud_label(11, Color(0.82, 0.87, 0.94))
+	val_lbl.custom_minimum_size = Vector2(92.0, 0.0)
+	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(val_lbl)
+
+	return {"row": row, "bar": bar, "value": val_lbl}
+
+## Apply the dark-track / coloured-fill styleboxes to a progress bar.
+func _style_bar(bar: ProgressBar, fill_color: Color) -> void:
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = fill_color
+	fill.set_corner_radius_all(2)
+	bar.add_theme_stylebox_override("fill", fill)
+
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0.08, 0.09, 0.12)
+	bg.set_corner_radius_all(2)
+	bar.add_theme_stylebox_override("background", bg)
+
+func _make_hud_label(font_size: int, color: Color) -> Label:
+	var lbl := Label.new()
+	lbl.add_theme_font_size_override("font_size", font_size)
+	lbl.add_theme_color_override("font_color", color)
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return lbl
+
+# -- HUD panel updates --------------------------------------------------------
+
+func _update_status_panel() -> void:
+	var connected: bool = _connection.is_connected_to_server()
+	_conn_dot.color = Color(0.25, 0.75, 0.42) if connected else Color(0.92, 0.66, 0.26)
+	_status_conn_label.text = "ONLINE" if connected else "CONNECTING..."
+	_status_name_label.text = _player_ship_type_name if _player_ship_type_name != "" else "—"
+
+	var speed_str: String = "-"
+	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
+		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
+		speed_str = "%d m/s" % int(spd * METERS_PER_UNIT)
+	_status_info_label.text = "System %s · %s" % [_current_system_name, speed_str]
+
+## Drive the Shield / Armor / Hull bars and the capacitor bar from current state.
+func _update_ship_status_panel() -> void:
+	if _player_ship_id < 0:
+		## Destroyed: empty bars, flag the hull row.
+		_set_stat_bar(_bar_shield, 0.0, _player_max_shield)
+		_set_stat_bar(_bar_armor,  0.0, _player_max_armor)
+		_set_stat_bar(_bar_hull,   0.0, _player_max_hull)
+		(_bar_hull["value"] as Label).text = "DESTROYED"
+	elif _player_shield < 0.0:
+		## State not yet received: assume full.
+		_set_stat_bar(_bar_shield, _player_max_shield, _player_max_shield)
+		_set_stat_bar(_bar_armor,  _player_max_armor,  _player_max_armor)
+		_set_stat_bar(_bar_hull,   _player_max_hull,   _player_max_hull)
+	else:
+		_set_stat_bar(_bar_shield, _player_shield, _player_max_shield)
+		_set_stat_bar(_bar_armor,  _player_armor,  _player_max_armor)
+		_set_stat_bar(_bar_hull,   _player_hull,   _player_max_hull)
+
+	if _cap_current < 0.0:
+		(_bar_cap["bar"] as ProgressBar).value = 0.0
+		(_bar_cap["value"] as Label).text = "-"
+	else:
+		_set_stat_bar(_bar_cap, _cap_current, _cap_max)
+
+## Set a {bar, value} pair to cur/max: fill percentage + "cur / max" readout.
+func _set_stat_bar(entry: Dictionary, cur: float, mx: float) -> void:
+	var pct: float = (cur / mx * 100.0) if mx > 0.0 else 0.0
+	(entry["bar"] as ProgressBar).value = clampf(pct, 0.0, 100.0)
+	(entry["value"] as Label).text = "%d / %d" % [int(round(cur)), int(round(mx))]
+
 # -- Duel result overlay ------------------------------------------------------
-
-func _setup_cap_bar() -> void:
-	## Style the fill portion of the capacitor bar (EVE-style blue).
-	var fill_style := StyleBoxFlat.new()
-	fill_style.bg_color = Color(0.1, 0.45, 0.9)
-	fill_style.set_corner_radius_all(3)
-	_cap_bar.add_theme_stylebox_override("fill", fill_style)
-
-	## Style the background (dark grey).
-	var bg_style := StyleBoxFlat.new()
-	bg_style.bg_color = Color(0.1, 0.1, 0.12)
-	bg_style.set_corner_radius_all(3)
-	_cap_bar.add_theme_stylebox_override("background", bg_style)
-
-	_cap_bar.min_value = 0.0
-	_cap_bar.max_value = 100.0
-	_cap_bar.value     = 100.0
-	_cap_label.text    = "CAP  -"
 
 func _build_duel_result_overlay() -> void:
 	var canvas := CanvasLayer.new()
