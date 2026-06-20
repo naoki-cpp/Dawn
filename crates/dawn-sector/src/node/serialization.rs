@@ -90,9 +90,35 @@ impl<S: EventStore> SimulationNode<S> {
             })
         }).collect();
 
+        // Navigation topology (ADR-0009/0025). The client renders gates/bodies
+        // and resolves system names from this instead of holding a hard-coded
+        // copy of the galaxy. Gates and bodies are already scoped to this Sector.
+        let galaxy = &self.sector_map.galaxy;
+        let system_name_of = |sector| galaxy
+            .system_for_sector_opt(sector)
+            .and_then(|sys_id| galaxy.systems.iter().find(|s| s.id == sys_id))
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        let systems: Vec<serde_json::Value> = galaxy.systems.iter()
+            .map(|s| serde_json::json!({ "id": s.id.0, "name": s.name }))
+            .collect();
+
+        let gates: Vec<serde_json::Value> = self.sector_map.gates.values().map(|g| {
+            serde_json::json!({
+                "gate_id"          : g.id.0,
+                "position"         : { "x": g.position.x, "y": g.position.y, "z": g.position.z },
+                "activation_radius": g.activation_radius,
+                "to_system_name"   : system_name_of(g.to_sector),
+            })
+        }).collect();
+
         serde_json::json!({
             "type"             : "InitialState",
             "ships"            : ships,
+            "system_name"      : system_name_of(self.sector_id),
+            "systems"          : systems,
+            "jump_gates"       : gates,
             "celestial_bodies" : bodies,
         }).to_string()
     }
@@ -196,6 +222,24 @@ mod tests {
         assert!(!ids.contains(&far.raw()),     "distant ship is excluded from scoped InitialState");
         let full: serde_json::Value = serde_json::from_str(&node.build_initial_state_json()).unwrap();
         assert_eq!(full["ships"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn initial_state_carries_the_sector_navigation_map() {
+        // mem_node() serves Sector 0, which the demo galaxy maps to "Alpha".
+        let node = mem_node();
+        let v: serde_json::Value =
+            serde_json::from_str(&node.build_initial_state_json()).unwrap();
+
+        assert_eq!(v["system_name"], "Alpha");
+        assert_eq!(v["systems"].as_array().unwrap().len(), 3, "all star systems are listed");
+
+        let gates = v["jump_gates"].as_array().unwrap();
+        assert_eq!(gates.len(), 1, "Sector 0 has exactly one gate");
+        assert_eq!(gates[0]["gate_id"].as_u64().unwrap(), 0);
+        assert_eq!(gates[0]["to_system_name"], "Beta", "gate 0 leads to Beta");
+
+        assert_eq!(v["celestial_bodies"].as_array().unwrap().len(), 2, "Helios + Forge");
     }
 
     #[test]

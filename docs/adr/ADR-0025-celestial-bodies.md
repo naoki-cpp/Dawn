@@ -97,6 +97,13 @@ uniform vec3  sun_color;      // スペクトル型に対応した色
 ### 5. Godot クライアント（main.gd）
 
 - `CELESTIAL_BODIES` 定数がサーバー側のトポロジーをミラーする。
+  > **[Superseded]** この `CELESTIAL_BODIES`（および `JUMP_GATES`/`STAR_SYSTEM_NAMES`）の
+  > クライアント定数によるミラー方式は撤廃された。現在は `InitialState` メッセージが
+  > `systems`/`jump_gates`/`celestial_bodies` を都度サーバーから送信し、`main.gd` は
+  > それを `_gates`/`_bodies`/`_system_names` に取り込む（ハードコードなし）。
+  > 詳細は `crates/dawn-sector/src/node/serialization.rs` の `initial_state_json()` と
+  > `client/scripts/main.gd` の `_ingest_star_map()` を参照。本 ADR の元の決定事項
+  > （ワープ機構・WarpCommand 等）はこの変更の影響を受けない。
 - 接続時・星系変更時に天体ノード（MeshInstance3D）をワールド座標に配置し、星系遷移時に再生成する。
 - 恒星：小さい発光スフィア（視覚半径 ≈ `radius × WORLD_SCALE × 0.05`）。スペクトル型に合わせたブルーム発光。
 - 惑星：サーフェスマテリアルのスフィア（視覚半径 ≈ `radius × WORLD_SCALE × 0.08`）。

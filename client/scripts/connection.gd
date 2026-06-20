@@ -20,8 +20,8 @@ signal event_received(payload: Dictionary)
 signal connection_changed(connected: bool)
 ## Welcome 受信時: player_id と ship_id を通知
 signal welcomed(player_id: int, ship_id: int)
-## InitialState 受信時: ships 配列を通知
-signal initial_state_received(ships: Array)
+## On InitialState: notifies the full payload (ships + navigation map)
+signal initial_state_received(state: Dictionary)
 ## PlayerFitting 受信時: モジュール配列を通知
 signal player_fitting_received(modules: Array)
 ## ModuleActivated 受信時
@@ -226,7 +226,7 @@ func _handle_message(payload: Dictionary) -> void:
 		"InitialState":
 			var ships: Array = payload.get("ships", []) as Array
 			print("[Connection] InitialState: %d ships" % ships.size())
-			initial_state_received.emit(ships)
+			initial_state_received.emit(payload)
 		"PlayerFitting":
 			var modules: Array = payload.get("modules", []) as Array
 			print("[Connection] PlayerFitting: %d modules" % modules.size())

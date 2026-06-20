@@ -109,36 +109,17 @@ var _last_click_pos   : Vector2 = Vector2.ZERO
 const DOUBLE_CLICK_SEC: float  = 0.4   ## Two clicks within this many seconds count as a double-click
 const DOUBLE_CLICK_PX : float  = 10.0  ## Within this many screen pixels
 
-## Jump Gate navigation (ADR-0009).
-## Static map data mirroring dawn-simulation/src/star_map.rs.
-## Gate positions are per-sector coordinates; only gates whose `from_system`
-## matches the player's current system are considered for proximity.
-const JUMP_GATES := [
-	{"gate_id": 0, "from_system": "Alpha", "position": Vector3(49_000.0, 0.0, 0.0), "activation_radius": 2_000.0, "to_system": "Beta"},
-	{"gate_id": 1, "from_system": "Beta", "position": Vector3(-49_000.0, 0.0, 0.0), "activation_radius": 2_000.0, "to_system": "Alpha"},
-	{"gate_id": 2, "from_system": "Beta", "position": Vector3(49_000.0, 0.0, 0.0), "activation_radius": 2_000.0, "to_system": "Gamma"},
-	{"gate_id": 3, "from_system": "Gamma", "position": Vector3(-49_000.0, 0.0, 0.0), "activation_radius": 2_000.0, "to_system": "Beta"},
-]
-const STAR_SYSTEM_NAMES := ["Alpha", "Beta", "Gamma"]
-
-## Celestial bodies per star system (ADR-0025). Mirrors star_map.rs.
-## spectral_type: 0=O(blue) … 0.6=G(yellow/Sun) … 1=M(red). Planets use 0.
-## Scale: 1 unit = 10,000 km  →  1 AU ≈ 15,000 units.
-## Forge: Earth orbit (1.0 AU), Haven: Mars orbit (1.52 AU), Bastion: Venus orbit (0.72 AU).
-const CELESTIAL_BODIES := {
-	"Alpha": [
-		{"body_id": 0, "kind": "Star",   "name": "Helios",  "position": Vector3(0.0,       0.0, 0.0),     "radius": 15_000.0, "spectral_type": 0.60},
-		{"body_id": 1, "kind": "Planet", "name": "Forge",   "position": Vector3(15_000.0,  0.0, 0.0),     "radius":  3_500.0, "spectral_type": 0.0},
-	],
-	"Beta": [
-		{"body_id": 2, "kind": "Star",   "name": "Aegis",   "position": Vector3(0.0,       0.0, 0.0),     "radius": 12_000.0, "spectral_type": 0.30},
-		{"body_id": 3, "kind": "Planet", "name": "Haven",   "position": Vector3(-21_600.0, 0.0, 7_200.0), "radius":  4_500.0, "spectral_type": 0.0},
-	],
-	"Gamma": [
-		{"body_id": 4, "kind": "Star",   "name": "Crimson", "position": Vector3(0.0,       0.0, 0.0),     "radius": 18_000.0, "spectral_type": 0.85},
-		{"body_id": 5, "kind": "Planet", "name": "Bastion", "position": Vector3(10_000.0,  0.0, -4_000.0),"radius":  3_000.0, "spectral_type": 0.0},
-	],
-}
+## Navigation map for the *current* Sector, received from the server in the
+## InitialState message (ADR-0009/0025). No longer hard-coded: the server owns
+## the galaxy (data/galaxy.toml) and is the single source of truth.
+##   _gates : [{gate_id:int, position:Vector3 (server coords),
+##             activation_radius:float, to_system_name:String}]
+##   _bodies: [{body_id:int, kind:String, name:String,
+##             position:Vector3 (server coords), radius:float, spectral_type:float}]
+var _gates        : Array      = []
+var _bodies       : Array      = []
+## Star System id -> name, used to resolve StarSystemChanged events.
+var _system_names : Dictionary = {}
 
 var _current_system_name : String = "Alpha"
 var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
@@ -173,8 +154,7 @@ func _ready() -> void:
 	_build_target_panel()
 	_build_module_bar()
 	_update_hud()
-	_spawn_gate_markers()
-	_spawn_body_markers()
+	## Gate / body markers are spawned from the server's InitialState, not here.
 
 func _process(delta: float) -> void:
 	_update_gate_proximity()
@@ -191,10 +171,8 @@ func _spawn_gate_markers() -> void:
 	for child: Node in _gates_root.get_children():
 		child.queue_free()
 
-	for gate: Variant in JUMP_GATES:
+	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
-		if (g.get("from_system", "") as String) != _current_system_name:
-			continue
 		var gate_pos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
 		var radius  : float   = g.get("activation_radius", 0.0) as float
 
@@ -219,7 +197,7 @@ func _spawn_gate_markers() -> void:
 		marker.add_child(ring)
 
 		var label: Label3D = Label3D.new()
-		label.text             = "Gate #%d -> %s" % [g.get("gate_id", -1) as int, g.get("to_system", "") as String]
+		label.text             = "Gate #%d -> %s" % [g.get("gate_id", -1) as int, g.get("to_system_name", "") as String]
 		label.position         = Vector3(0.0, radius * WORLD_SCALE * 0.3, 0.0)
 		label.billboard        = BaseMaterial3D.BILLBOARD_ENABLED
 		label.no_depth_test    = true
@@ -235,8 +213,7 @@ func _spawn_body_markers() -> void:
 		child.queue_free()
 	_selected_body_id = -1
 
-	var bodies: Array = CELESTIAL_BODIES.get(_current_system_name, []) as Array
-	for entry: Variant in bodies:
+	for entry: Variant in _bodies:
 		var b: Dictionary = entry as Dictionary
 		var b_id    : int     = b.get("body_id",      -1) as int
 		var kind    : String  = b.get("kind",          "") as String
@@ -316,7 +293,7 @@ func _spectral_color(t: float) -> Color:
 func _update_sun_direction() -> void:
 	if _sky_mat == null or _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return
-	var bodies: Array = CELESTIAL_BODIES.get(_current_system_name, []) as Array
+	var bodies: Array = _bodies
 	var star_pos: Vector3 = Vector3.ZERO
 	var found: bool = false
 	for entry: Variant in bodies:
@@ -361,10 +338,8 @@ func _update_gate_proximity() -> void:
 	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return
 	var ship_pos: Vector3 = (_ships[_player_ship_id] as Node3D).global_position / WORLD_SCALE
-	for gate: Variant in JUMP_GATES:
+	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
-		if (g.get("from_system", "") as String) != _current_system_name:
-			continue
 		var gate_pos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
 		if ship_pos.distance_to(gate_pos) <= (g.get("activation_radius", 0.0) as float):
 			_nearby_gate_id = g.get("gate_id", -1) as int
@@ -520,10 +495,8 @@ func _pick_gate_at(screen_pos: Vector2) -> int:
 	var dir : Vector3 = _camera.project_ray_normal(screen_pos)
 	var closest_id  : int   = -1
 	var closest_dist: float = 1e9
-	for gate: Variant in JUMP_GATES:
+	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
-		if (g.get("from_system", "") as String) != _current_system_name:
-			continue
 		var gpos_server: Vector3 = g.get("position", Vector3.ZERO) as Vector3
 		## Server coords -> Godot coords (Z flip + scale)
 		var p: Vector3 = Vector3(gpos_server.x, gpos_server.y, -gpos_server.z) * WORLD_SCALE
@@ -558,8 +531,7 @@ func _pick_body_at(screen_pos: Vector2) -> int:
 		var dist : float   = p.distance_to(from + dir * t)
 		## Pick radius scales with logical body radius (bodies are large objects).
 		var b_radius: float = 0.0
-		var system_bodies: Array = CELESTIAL_BODIES.get(_current_system_name, []) as Array
-		for entry: Variant in system_bodies:
+		for entry: Variant in _bodies:
 			var b: Dictionary = entry as Dictionary
 			if (b.get("body_id", -1) as int) == (marker.get_meta("body_id") as int):
 				b_radius = (b.get("radius", 1.0) as float) * WORLD_SCALE * 0.15
@@ -583,7 +555,7 @@ func _selected_gate_distance() -> float:
 	if _selected_gate_id < 0 or _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return -1.0
 	var ship_pos: Vector3 = (_ships[_player_ship_id] as Node3D).global_position / WORLD_SCALE
-	for gate: Variant in JUMP_GATES:
+	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
 		if (g.get("gate_id", -1) as int) != _selected_gate_id:
 			continue
@@ -692,15 +664,15 @@ func _handle_jump_gate_used(p: Dictionary) -> void:
 func _handle_star_system_changed(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	var to_system: int = p.get("to_system", 0) as int
-	var to_name: String = STAR_SYSTEM_NAMES[to_system] if to_system < STAR_SYSTEM_NAMES.size() else "System %d" % to_system
+	var to_name: String = _system_names.get(to_system, "System %d" % to_system) as String
 	if ship_id == _player_ship_id:
 		_current_system_name = to_name
 		_jump_notice         = "Entered %s system" % to_name
 		_jump_notice_timer   = 3.0
 		_selected_gate_id    = -1
 		_selected_body_id    = -1
-		_spawn_gate_markers()
-		_spawn_body_markers()
+		## Gate / body markers refresh from the next InitialState (sent when the
+		## client reconnects to the destination node after the Redirect).
 
 func _on_connection_changed(connected: bool) -> void:
 	if not connected:
@@ -711,14 +683,54 @@ func _on_connection_changed(connected: bool) -> void:
 func _on_welcomed(_p_player_id: int, _p_ship_id: int) -> void:
 	pass  ## connection.gd ship_id / player_id properties are already populated
 
-## InitialState received: spawn all ship nodes in one pass.
-## ShipSpawned events are not sent in Phase 5; InitialState handles initialization.
-func _on_initial_state(ships: Array) -> void:
+## InitialState received: ingest the Sector's navigation map, then spawn all
+## ship nodes in one pass. ShipSpawned events are not sent in Phase 5;
+## InitialState handles initialization.
+func _on_initial_state(state: Dictionary) -> void:
 	_clear_all_ships()  ## Reset on reconnect
 	_hide_duel_result()
+	_ingest_star_map(state)
 
-	for ship_data: Variant in ships:
+	for ship_data: Variant in (state.get("ships", []) as Array):
 		_spawn_ship_from_data(ship_data as Dictionary)
+
+## Store the server-provided navigation map (system names, this Sector's gates
+## and bodies) and rebuild the gate / body markers from it. This replaces the
+## previously hard-coded JUMP_GATES / CELESTIAL_BODIES / STAR_SYSTEM_NAMES.
+func _ingest_star_map(state: Dictionary) -> void:
+	_current_system_name = state.get("system_name", _current_system_name) as String
+
+	_system_names.clear()
+	for entry: Variant in (state.get("systems", []) as Array):
+		var s: Dictionary = entry as Dictionary
+		_system_names[s.get("id", -1) as int] = s.get("name", "") as String
+
+	_gates.clear()
+	for entry: Variant in (state.get("jump_gates", []) as Array):
+		var g: Dictionary = entry as Dictionary
+		var gp: Dictionary = g.get("position", {}) as Dictionary
+		_gates.append({
+			"gate_id"          : g.get("gate_id", -1) as int,
+			"position"         : Vector3(gp.get("x", 0.0) as float, gp.get("y", 0.0) as float, gp.get("z", 0.0) as float),
+			"activation_radius": g.get("activation_radius", 0.0) as float,
+			"to_system_name"   : g.get("to_system_name", "") as String,
+		})
+
+	_bodies.clear()
+	for entry: Variant in (state.get("celestial_bodies", []) as Array):
+		var b: Dictionary = entry as Dictionary
+		var bp: Dictionary = b.get("position", {}) as Dictionary
+		_bodies.append({
+			"body_id"      : b.get("id", -1) as int,
+			"kind"         : b.get("kind", "") as String,
+			"name"         : b.get("name", "") as String,
+			"position"     : Vector3(bp.get("x", 0.0) as float, bp.get("y", 0.0) as float, bp.get("z", 0.0) as float),
+			"radius"       : b.get("radius", 1.0) as float,
+			"spectral_type": b.get("spectral_type", 0.0) as float,
+		})
+
+	_spawn_gate_markers()
+	_spawn_body_markers()
 
 ## Materialize one ship node from a ship-state dict. Shared by InitialState and
 ## AoiEnter (ADR-0019). Skips ships already present.
@@ -951,7 +963,7 @@ func _compute_warp_snap_pos(gate_id: int) -> Vector3:
 	if not _ships.has(_player_ship_id):
 		return Vector3.INF
 	var target_gate: Dictionary = {}
-	for g: Variant in JUMP_GATES:
+	for g: Variant in _gates:
 		if (g as Dictionary).get("gate_id", -1) as int == gate_id:
 			target_gate = g as Dictionary
 			break
@@ -971,11 +983,10 @@ func _compute_warp_snap_pos(gate_id: int) -> Vector3:
 func _compute_body_warp_snap_pos(body_id: int) -> Vector3:
 	if not _ships.has(_player_ship_id):
 		return Vector3.INF
-	var system_bodies: Array = CELESTIAL_BODIES.get(_current_system_name, []) as Array
 	var body_pos   : Vector3 = Vector3.ZERO
 	var body_radius: float   = 1.0
 	var found: bool          = false
-	for entry: Variant in system_bodies:
+	for entry: Variant in _bodies:
 		var b: Dictionary = entry as Dictionary
 		if (b.get("body_id", -1) as int) == body_id:
 			body_pos    = b.get("position", Vector3.ZERO) as Vector3
@@ -1093,7 +1104,7 @@ func _update_hud() -> void:
 	elif _selected_body_id >= 0:
 		## Look up body name for HUD.
 		var body_name: String = "Body #%d" % _selected_body_id
-		for entry: Variant in (CELESTIAL_BODIES.get(_current_system_name, []) as Array):
+		for entry: Variant in _bodies:
 			var b: Dictionary = entry as Dictionary
 			if (b.get("body_id", -1) as int) == _selected_body_id:
 				body_name = b.get("name", body_name) as String
