@@ -11,7 +11,6 @@ extends RefCounted
 
 const GATE_RING_INNER_RATIO    : float = 0.85
 const GATE_LABEL_HEIGHT_RATIO  : float = 0.3
-const STAR_VISUAL_RADIUS_RATIO : float = 0.05
 const PLANET_VISUAL_RADIUS_RATIO: float = 0.08
 
 
@@ -85,20 +84,33 @@ static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: fl
 		marker.add_child(label)
 
 
-## Spawn visual nodes for all celestial bodies in the current star system
-## (stars + planets, ADR-0025). Re-called on system change. `to_godot_pos`
-## converts a server-space position into Godot world space.
+## Spawn visual nodes for celestial bodies in the current star system
+## (planets only, ADR-0025 §5 superseded for stars -- see note below).
+## Re-called on system change. `to_godot_pos` converts a server-space
+## position into Godot world space.
+##
+## Stars get no marker/mesh here: the sky shader (space_sky.gdshader) already
+## draws the local star as a direction-based disc/corona/glow (main.gd's
+## _update_sun_direction), which is correct for something effectively at
+## infinite distance for skybox purposes. Layering a *finite-distance* 3D
+## mesh sphere on top of that direction-only disc caused a visible mismatch:
+## the mesh has real parallax as the ship moves/orbits, the skybox disc does
+## not, so the two drifted apart depending on viewing angle. Keeping only the
+## skybox representation removes the duplicate and the seam, at the cost of
+## the star no longer being a clickable warp target (planets are unaffected).
 static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: float, to_godot_pos: Callable) -> void:
 	clear_children(bodies_root)
 
 	for entry: Variant in bodies:
 		var b: Dictionary = entry as Dictionary
+		if (b.get("kind", "") as String) == "Star":
+			continue
+
 		var b_id    : int     = b.get("body_id",      -1) as int
 		var kind    : String  = b.get("kind",          "") as String
 		var name_str: String  = b.get("name",          "") as String
 		var b_pos   : Vector3 = b.get("position", Vector3.ZERO) as Vector3
 		var radius  : float   = b.get("radius",       1.0) as float
-		var spec    : float   = b.get("spectral_type", 0.0) as float
 
 		var godot_pos: Vector3 = to_godot_pos.call(b_pos) as Vector3
 
@@ -109,30 +121,17 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		marker.set_meta("body_pos",  b_pos)  ## server coords, kept for sun direction
 		bodies_root.add_child(marker)
 
-		## Visual sphere.
+		## Visual sphere. Planets: solid matte sphere, visual radius = 8% of
+		## logical radius.
 		var mesh_inst: MeshInstance3D = MeshInstance3D.new()
 		var sphere: SphereMesh = SphereMesh.new()
-		if kind == "Star":
-			## Stars: bright emissive sphere, visual radius = 5% of logical radius.
-			sphere.radius = radius * world_scale * STAR_VISUAL_RADIUS_RATIO
-			sphere.height = sphere.radius * 2.0
-			var star_col: Color = spectral_color(spec)
-			var mat: StandardMaterial3D = StandardMaterial3D.new()
-			mat.albedo_color              = star_col
-			mat.emission_enabled          = true
-			mat.emission                  = star_col
-			mat.emission_energy_multiplier = 8.0
-			mat.shading_mode              = BaseMaterial3D.SHADING_MODE_UNSHADED
-			mesh_inst.material_override   = mat
-		else:
-			## Planets: solid matte sphere, visual radius = 8% of logical radius.
-			sphere.radius = radius * world_scale * PLANET_VISUAL_RADIUS_RATIO
-			sphere.height = sphere.radius * 2.0
-			var mat: StandardMaterial3D = StandardMaterial3D.new()
-			mat.albedo_color = Color(0.45, 0.50, 0.60)
-			mat.roughness    = 0.85
-			mat.metallic     = 0.1
-			mesh_inst.material_override = mat
+		sphere.radius = radius * world_scale * PLANET_VISUAL_RADIUS_RATIO
+		sphere.height = sphere.radius * 2.0
+		var mat: StandardMaterial3D = StandardMaterial3D.new()
+		mat.albedo_color = Color(0.45, 0.50, 0.60)
+		mat.roughness    = 0.85
+		mat.metallic     = 0.1
+		mesh_inst.material_override = mat
 		mesh_inst.mesh = sphere
 		marker.add_child(mesh_inst)
 
@@ -142,5 +141,5 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		label.position    = Vector3(0.0, sphere.radius * 1.4, 0.0)
 		label.billboard   = BaseMaterial3D.BILLBOARD_ENABLED
 		label.no_depth_test = true
-		label.modulate    = Color(1.0, 0.9, 0.6) if kind == "Star" else Color(0.7, 0.8, 1.0)
+		label.modulate    = Color(0.7, 0.8, 1.0)
 		marker.add_child(label)

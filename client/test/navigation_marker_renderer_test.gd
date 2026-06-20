@@ -78,7 +78,11 @@ func test_spawn_gate_markers_builds_one_marker_per_array_entry() -> void:
 
 # -- spawn_body_markers -------------------------------------------------------------
 
-func test_spawn_body_markers_tags_star_and_planet_markers_with_body_meta() -> void:
+func test_spawn_body_markers_skips_stars_and_only_tags_planet_markers() -> void:
+	## Stars get no marker: the sky shader draws the local star as a
+	## direction-based disc (main.gd's _update_sun_direction), and layering a
+	## finite-distance mesh on top caused a visible parallax mismatch as the
+	## ship moved. See the doc comment on spawn_body_markers().
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	var bodies: Array = [
 		{"body_id": 1, "kind": "Star", "name": "Helios", "position": Vector3.ZERO, "radius": 1000.0, "spectral_type": 0.5},
@@ -87,14 +91,9 @@ func test_spawn_body_markers_tags_star_and_planet_markers_with_body_meta() -> vo
 
 	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
 
-	assert_int(bodies_root.get_child_count()).is_equal(2)
+	assert_int(bodies_root.get_child_count()).is_equal(1)
 
-	var star_marker: Node3D = bodies_root.get_child(0) as Node3D
-	assert_int(star_marker.get_meta("body_id") as int).is_equal(1)
-	assert_str(star_marker.get_meta("body_kind") as String).is_equal("Star")
-	assert_vector(star_marker.get_meta("body_pos") as Vector3).is_equal(Vector3.ZERO)
-
-	var planet_marker: Node3D = bodies_root.get_child(1) as Node3D
+	var planet_marker: Node3D = bodies_root.get_child(0) as Node3D
 	assert_int(planet_marker.get_meta("body_id") as int).is_equal(2)
 	assert_str(planet_marker.get_meta("body_kind") as String).is_equal("Planet")
 
@@ -102,11 +101,22 @@ func test_spawn_body_markers_tags_star_and_planet_markers_with_body_meta() -> vo
 func test_spawn_body_markers_uses_the_body_name_as_the_label_text() -> void:
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	var bodies: Array = [
-		{"body_id": 1, "kind": "Star", "name": "Helios", "position": Vector3.ZERO, "radius": 1000.0, "spectral_type": 0.5},
+		{"body_id": 2, "kind": "Planet", "name": "Forge", "position": Vector3(500.0, 0.0, 0.0), "radius": 200.0, "spectral_type": 0.0},
 	]
 
 	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
 
 	var marker: Node3D = bodies_root.get_child(0) as Node3D
 	var label: Label3D = marker.get_child(1) as Label3D  ## index 0 = mesh, index 1 = label
-	assert_str(label.text).is_equal("Helios")
+	assert_str(label.text).is_equal("Forge")
+
+
+func test_spawn_body_markers_produces_no_markers_when_only_a_star_is_present() -> void:
+	var bodies_root: Node3D = auto_free(Node3D.new())
+	var bodies: Array = [
+		{"body_id": 1, "kind": "Star", "name": "Helios", "position": Vector3.ZERO, "radius": 1000.0, "spectral_type": 0.5},
+	]
+
+	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
+
+	assert_int(bodies_root.get_child_count()).is_equal(0)

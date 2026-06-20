@@ -151,7 +151,10 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
             let player_id     = node.next_player_id();
-            let ship_id       = node.spawn_player_ship_at_pub(player_id, dawn_core::Position::ORIGIN);
+            // Spawn 2x the Alpha star radius from Sector origin (matches
+            // SimulationNode::DEFAULT_PLAYER_SPAWN) -- the star itself sits at
+            // the origin, so spawning there put the player inside it.
+            let ship_id       = node.spawn_player_ship_at_pub(player_id, dawn_core::Position::new(30_000.0, 0.0, 0.0));
             let initial_state = node.get_ship_position(ship_id)
                 .map(|pos| node.build_initial_state_json_for(pos, AOI_CELL_SIZE))
                 .unwrap_or_else(|| node.build_initial_state_json());
