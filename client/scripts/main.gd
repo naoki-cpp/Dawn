@@ -31,6 +31,13 @@ var _bar_shield : Dictionary = {}
 var _bar_armor  : Dictionary = {}
 var _bar_hull   : Dictionary = {}
 var _bar_cap    : Dictionary = {}
+## Top-center target panel (visible only while a lock target is held).
+var _target_panel      : Panel       = null
+var _target_name_label : Label       = null
+var _target_dist_label : Label       = null
+var _target_bar_shield : ProgressBar = null
+var _target_bar_armor  : ProgressBar = null
+var _target_bar_hull   : ProgressBar = null
 
 # -- Constants ----------------------------------------------------------------
 
@@ -159,6 +166,7 @@ func _ready() -> void:
 	_build_duel_result_overlay()
 	_build_status_panel()
 	_build_ship_status_panel()
+	_build_target_panel()
 	_update_hud()
 	_spawn_gate_markers()
 	_spawn_body_markers()
@@ -722,11 +730,18 @@ func _spawn_ship_from_data(d: Dictionary) -> void:
 	ship.name = "Ship_%d" % sid
 	_ships[sid] = ship
 
-	## Record HP for every ship
-	var sh: float = d.get("current_shield", d.get("max_shield", 200.0) as float) as float
-	var ar: float = d.get("current_armor",  d.get("max_armor",  150.0) as float) as float
-	var hu: float = d.get("current_hull",   d.get("max_hull",   150.0) as float) as float
-	_ship_hp[sid] = { "shield": sh, "armor": ar, "hull": hu }
+	## Record HP (current + max) for every ship. The target panel needs each
+	## ship's own maxima to render fill percentages.
+	var msh: float = d.get("max_shield", 200.0) as float
+	var mar: float = d.get("max_armor",  150.0) as float
+	var mhu: float = d.get("max_hull",   150.0) as float
+	var sh: float = d.get("current_shield", msh) as float
+	var ar: float = d.get("current_armor",  mar) as float
+	var hu: float = d.get("current_hull",   mhu) as float
+	_ship_hp[sid] = {
+		"shield": sh, "armor": ar, "hull": hu,
+		"max_shield": msh, "max_armor": mar, "max_hull": mhu,
+	}
 
 	if sid == _connection.ship_id and _player_ship_id < 0:
 		_player_max_shield = d.get("max_shield", 500.0) as float
@@ -981,8 +996,12 @@ func _handle_damage_taken(p: Dictionary) -> void:
 	var sh     : float = p.get("current_shield", 0.0) as float
 	var ar     : float = p.get("current_armor",  0.0) as float
 	var hu     : float = p.get("current_hull",   0.0) as float
-	## Update HP for all ships
-	_ship_hp[ship_id] = { "shield": sh, "armor": ar, "hull": hu }
+	## Update current HP in place so the maxima recorded at spawn survive.
+	var entry: Dictionary = _ship_hp.get(ship_id, {}) as Dictionary
+	entry["shield"] = sh
+	entry["armor"]  = ar
+	entry["hull"]   = hu
+	_ship_hp[ship_id] = entry
 	if ship_id == _player_ship_id:
 		_player_shield = sh
 		_player_armor  = ar
@@ -1040,31 +1059,9 @@ func _handle_lock_lost(p: Dictionary) -> void:
 func _update_hud() -> void:
 	_update_status_panel()
 	_update_ship_status_panel()
+	_update_target_panel()
 
-	var lock_str: String
-	if _player_lock_target < 0:
-		lock_str = "-"
-	elif _ships.has(_player_lock_target):
-		lock_str = "-> #%d" % _player_lock_target
-		## Distance to target in km.
-		if _player_ship_id >= 0 and _ships.has(_player_ship_id):
-			var p_node: Node3D = _ships[_player_ship_id] as Node3D
-			var t_node: Node3D = _ships[_player_lock_target] as Node3D
-			var dist_m: float = p_node.global_position.distance_to(t_node.global_position) / WORLD_SCALE
-			lock_str += "  %.1f km" % (dist_m * METERS_PER_UNIT / 1000.0)
-		## Show target HP if available. Keep it on its own line -- combined with
-		## the distance the single line overflows the right-aligned StatsLabel.
-		if _ship_hp.has(_player_lock_target):
-			var t: Dictionary = _ship_hp[_player_lock_target] as Dictionary
-			lock_str += "\nSH %.0f  AR %.0f  HU %.0f" % [
-				t.get("shield", 0.0) as float,
-				t.get("armor",  0.0) as float,
-				t.get("hull",   0.0) as float,
-			]
-	else:
-		lock_str = "LOST"
-
-		## Active modules -- show ON/OFF and cap-deprived state (F keys)
+	## Active modules -- show ON/OFF and cap-deprived state (F keys)
 	var module_lines: String = ""
 	var f_idx: int = 1
 	for m: Variant in _player_modules:
@@ -1113,8 +1110,8 @@ func _update_hud() -> void:
 		approach_line = "\n[A] Approach #%d" % _selected_target_id
 
 	_stats_label.text = (
-		"Ships: %d\nTick: %d\nLock: %s%s%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
-		% [_ships.size(), _current_tick, lock_str, approach_line, module_lines, jump_line]
+		"Ships: %d\nTick: %d%s%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
+		% [_ships.size(), _current_tick, approach_line, module_lines, jump_line]
 	)
 
 # -- Capacitor client-side simulation -----------------------------------------
@@ -1246,12 +1243,12 @@ const _COLOR_CAP    := Color(0.17, 0.66, 0.54)  ## teal
 ## Shared semi-transparent dark background for HUD panels, so text stays legible
 ## over bright stars / nebula. Panels are display-only -- mouse input passes
 ## through to the 3D viewport (clicks are handled in _input, not via Controls).
-func _hud_box_style() -> StyleBoxFlat:
+func _hud_box_style(border_color: Color = Color(0.47, 0.59, 0.78, 0.28)) -> StyleBoxFlat:
 	var box := StyleBoxFlat.new()
 	box.bg_color = Color(0.03, 0.05, 0.09, 0.72)
 	box.set_corner_radius_all(6)
 	box.set_border_width_all(1)
-	box.border_color = Color(0.47, 0.59, 0.78, 0.28)
+	box.border_color = border_color
 	return box
 
 ## Top-left status panel: connection dot + ship name + "System X · N m/s".
@@ -1324,6 +1321,44 @@ func _build_ship_status_panel() -> void:
 	_bar_cap = _make_stat_bar("CAP", _COLOR_CAP)
 	vb.add_child(_bar_cap["row"])
 
+## Top-center target panel: shown only while a lock target is held. Uses the
+## same blue/amber/red colour coding as the self panel, but in compact bars
+## with no numeric readout (you mainly watch these deplete in a fight).
+func _build_target_panel() -> void:
+	var panel := Panel.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_theme_stylebox_override("panel", _hud_box_style(Color(0.82, 0.35, 0.35, 0.55)))
+	panel.anchor_left = 0.5; panel.anchor_right = 0.5
+	panel.offset_left = -110.0; panel.offset_right = 110.0
+	panel.offset_top = 10.0; panel.offset_bottom = 70.0
+	panel.visible = false
+	_hud.add_child(panel)
+	_target_panel = panel
+
+	var vb := VBoxContainer.new()
+	vb.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vb.offset_left = 9.0; vb.offset_top = 6.0; vb.offset_right = -9.0; vb.offset_bottom = -6.0
+	vb.add_theme_constant_override("separation", 3)
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(vb)
+
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 6)
+	header.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_target_name_label = _make_hud_label(11, Color(0.90, 0.47, 0.47))
+	_target_name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(_target_name_label)
+	_target_dist_label = _make_hud_label(11, Color(0.82, 0.87, 0.94))
+	header.add_child(_target_dist_label)
+	vb.add_child(header)
+
+	_target_bar_shield = _make_mini_bar(_COLOR_SHIELD)
+	_target_bar_armor  = _make_mini_bar(_COLOR_ARMOR)
+	_target_bar_hull   = _make_mini_bar(_COLOR_HULL)
+	vb.add_child(_target_bar_shield)
+	vb.add_child(_target_bar_armor)
+	vb.add_child(_target_bar_hull)
+
 ## Build a label/bar/value row. Returns {row, bar, value} so the caller can
 ## update the bar and the numeric readout each frame.
 func _make_stat_bar(label_text: String, fill_color: Color) -> Dictionary:
@@ -1353,6 +1388,18 @@ func _make_stat_bar(label_text: String, fill_color: Color) -> Dictionary:
 	row.add_child(val_lbl)
 
 	return {"row": row, "bar": bar, "value": val_lbl}
+
+## A compact, label-less, number-less HP bar for the target panel.
+func _make_mini_bar(fill_color: Color) -> ProgressBar:
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size = Vector2(0.0, 6.0)
+	bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.show_percentage = false
+	bar.min_value = 0.0
+	bar.max_value = 100.0
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_style_bar(bar, fill_color)
+	return bar
 
 ## Apply the dark-track / coloured-fill styleboxes to a progress bar.
 func _style_bar(bar: ProgressBar, fill_color: Color) -> void:
@@ -1416,6 +1463,41 @@ func _set_stat_bar(entry: Dictionary, cur: float, mx: float) -> void:
 	var pct: float = (cur / mx * 100.0) if mx > 0.0 else 0.0
 	(entry["bar"] as ProgressBar).value = clampf(pct, 0.0, 100.0)
 	(entry["value"] as Label).text = "%d / %d" % [int(round(cur)), int(round(mx))]
+
+## Show / hide and populate the top-center target panel from the lock target.
+func _update_target_panel() -> void:
+	if _player_lock_target < 0:
+		_target_panel.visible = false
+		return
+	_target_panel.visible = true
+	_target_name_label.text = "◎ TARGET #%d" % _player_lock_target
+
+	if not _ships.has(_player_lock_target):
+		## Target left the area but the lock has not been cleared yet.
+		_target_dist_label.text = "SIGNAL LOST"
+		_set_mini_bar(_target_bar_shield, 0.0, 1.0)
+		_set_mini_bar(_target_bar_armor,  0.0, 1.0)
+		_set_mini_bar(_target_bar_hull,   0.0, 1.0)
+		return
+
+	## Distance in km.
+	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
+		var dist_m: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
+			(_ships[_player_lock_target] as Node3D).global_position) / WORLD_SCALE
+		_target_dist_label.text = "%.1f km" % (dist_m * METERS_PER_UNIT / 1000.0)
+	else:
+		_target_dist_label.text = "—"
+
+	## HP bars, relative to the target's own maxima (recorded at spawn).
+	if _ship_hp.has(_player_lock_target):
+		var t: Dictionary = _ship_hp[_player_lock_target] as Dictionary
+		_set_mini_bar(_target_bar_shield, t.get("shield", 0.0) as float, t.get("max_shield", 1.0) as float)
+		_set_mini_bar(_target_bar_armor,  t.get("armor",  0.0) as float, t.get("max_armor",  1.0) as float)
+		_set_mini_bar(_target_bar_hull,   t.get("hull",   0.0) as float, t.get("max_hull",   1.0) as float)
+
+## Set a number-less mini bar to a cur/max fill percentage.
+func _set_mini_bar(bar: ProgressBar, cur: float, mx: float) -> void:
+	bar.value = clampf((cur / mx * 100.0) if mx > 0.0 else 0.0, 0.0, 100.0)
 
 # -- Duel result overlay ------------------------------------------------------
 
