@@ -127,7 +127,12 @@ impl<S: EventStore> SimulationNode<S> {
     /// `InitialState` and `AoiEnter` (ADR-0019). `None` if the ship is gone.
     pub fn ship_state_json(&self, ship_id: ShipId) -> Option<serde_json::Value> {
         let entity  = self.ships.index.get(&ship_id)?;
-        let pos     = self.world.inner().get::<&PositionComp>(*entity).ok()?.0;
+        // Send the ABSOLUTE position (anchor + offset, f64), not the raw
+        // anchor-relative offset (ADR-0029). After a warp rebase the offset is
+        // body-relative, so a client that read it as absolute would misplace the
+        // ship near the origin. The client renders absolute coords via its
+        // floating origin.
+        let pos     = self.ship_absolute(ship_id)?;
         let stats   = self.world.inner().get::<&ShipStatsComp>(*entity).ok()?;
         let hull    = self.world.inner().get::<&HullComp>(*entity).ok()?;
         let is_player = self.ships.owners.contains_key(&ship_id);
@@ -138,7 +143,7 @@ impl<S: EventStore> SimulationNode<S> {
         Some(serde_json::json!({
             "ship_id"              : ship_id.raw(),
             "ship_type_name"       : ship_type_name,
-            "position"             : { "x": pos.x, "y": pos.y, "z": pos.z },
+            "position"             : { "x": pos[0], "y": pos[1], "z": pos[2] },
             "max_shield"           : stats.max_shield,
             "max_armor"            : stats.max_armor,
             "max_hull"             : stats.max_hull,
