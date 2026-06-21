@@ -243,7 +243,32 @@ pub(crate) fn deliver_aoi_frame(
         })
         .cloned()
         .collect();
-    sess.send_events(&visible_events)
+    if !sess.send_events(&visible_events) {
+        return false;
+    }
+
+    // A warp arrival rebases the ship onto the destination body anchor (ADR-0029).
+    // The client's dead-reckoned position drifts badly across a true-AU warp, and
+    // its pre-computed Godot snap point is stale once the floating origin moved.
+    // So push the authoritative ABSOLUTE arrival position as a PositionSnap; the
+    // client snaps using its current origin.
+    for e in new_events {
+        if let dawn_core::DomainEvent::AnchorRebased(r) = e {
+            let relevant = r.ship_id == sess.ship_id || curr.binary_search(&r.ship_id).is_ok();
+            if relevant {
+                if let Some(abs) = node.ship_absolute(r.ship_id) {
+                    let msg = format!(
+                        "{{\"type\":\"PositionSnap\",\"ship_id\":{},\"position\":{{\"x\":{},\"y\":{},\"z\":{}}}}}",
+                        r.ship_id.raw(), abs[0], abs[1], abs[2]
+                    );
+                    if !sess.conn.send_raw(&msg) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    true
 }
 
 /// Build a `SimulationNode` wired the way every serve loop needs it.

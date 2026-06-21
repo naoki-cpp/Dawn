@@ -566,6 +566,29 @@ func _on_event_received(payload: Dictionary) -> void:
 		"StarSystemChanged" : _handle_star_system_changed(payload)
 		"AoiEnter"          : _handle_aoi_enter(payload)
 		"AoiLeave"          : _handle_aoi_leave(payload)
+		"PositionSnap"      : _handle_position_snap(payload)
+
+# -- Position snap (ADR-0029) -------------------------------------------------
+
+## Authoritative absolute-position snap (server → client), e.g. on warp arrival
+## after an anchor rebase. The client maps the server-absolute position through
+## the CURRENT floating origin and snaps the ship there, correcting the large
+## dead-reckoning drift a true-AU warp accumulates. Supersedes the client's
+## pre-computed (and now origin-stale) warp snap for body warps.
+func _handle_position_snap(p: Dictionary) -> void:
+	var ship_id: int = p.get("ship_id", 0) as int
+	if not _ships.has(ship_id):
+		return
+	var pos_dict: Dictionary = p.get("position", {}) as Dictionary
+	var server_pos := Vector3(
+		pos_dict.get("x", 0.0) as float,
+		pos_dict.get("y", 0.0) as float,
+		pos_dict.get("z", 0.0) as float)
+	(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(server_pos)
+	if ship_id == _player_ship_id:
+		# Cancel the client-side warp snap so it doesn't fire a stale position.
+		_player_warp_snap_pos = Vector3.INF
+		_player_was_warping = false
 
 # -- Jump Gate (ADR-0009) -----------------------------------------------------
 
