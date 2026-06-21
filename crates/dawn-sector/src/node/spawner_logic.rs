@@ -336,6 +336,13 @@ impl<S: EventStore> SimulationNode<S> {
     pub(super) fn insert_to_world(&mut self, ship_id: ShipId, position: Position, velocity: Velocity) {
         let entity = self.world.spawn_ship(ship_id, position, velocity);
         self.ships.index.insert(ship_id, entity);
+        // ADR-0029 step 2: anchor every ship on its Sector's origin (the star).
+        // Semantic no-op while bodies sit in the star-origin frame (the star is
+        // at the origin, so the position offset equals the absolute position).
+        let anchor = crate::anchor::AnchorTable::from_galaxy(&self.sector_map.galaxy)
+            .sector_origin_anchor(self.sector_id)
+            .unwrap_or(dawn_core::AnchorId(0));
+        self.world.set_ship_anchor(entity, anchor);
     }
 
     /// Reconstruct a Ship's full ECS state (stats, hull, capacitor, fitting)
@@ -411,6 +418,15 @@ mod tests {
         for def in modules::all_modules() { node.register_module(def); }
         for def in ship_types::all_ship_types() { node.register_ship_type(def); }
         node
+    }
+
+    #[test]
+    fn spawned_ship_is_anchored_on_the_sector_star() {
+        // ADR-0029 step 2: ships anchor on their Sector's origin (the star).
+        // Sector 0's star is Helios (CelestialBodyId 0 -> AnchorId 0).
+        let mut node = node_with_modules();
+        let ship = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(30_000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
+        assert_eq!(node.get_ship_anchor(ship), Some(dawn_core::AnchorId(0)));
     }
 
     #[test]

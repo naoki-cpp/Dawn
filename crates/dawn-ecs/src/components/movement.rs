@@ -1,6 +1,6 @@
 //! Movement-related ECS components.
 
-use dawn_core::{ApproachTarget, Position, Velocity, WarpTarget};
+use dawn_core::{AnchorId, ApproachTarget, Position, Velocity, WarpTarget};
 
 /// Persistent "approach" steering target (semi-automatic piloting, ADR-0015).
 ///
@@ -74,6 +74,15 @@ pub struct TackledComp {
 
 #[derive(Debug, Clone, Copy)]
 pub struct PositionComp(pub Position);
+
+/// The coordinate anchor a ship's [`PositionComp`] offset is relative to
+/// (ADR-0029). The ship's absolute position is `anchor_abs(f64) + offset`,
+/// where `anchor_abs` comes from the static `AnchorTable`. While all bodies
+/// sit in the star-origin frame and ships anchor on the star (at the origin),
+/// the offset equals the absolute position — so introducing this component is
+/// a semantic no-op until anchors diverge at warp arrival (ADR-0029 §4 step 4).
+#[derive(Debug, Clone, Copy)]
+pub struct AnchorComp(pub AnchorId);
 
 #[derive(Debug, Clone, Copy)]
 pub struct VelocityComp(pub Velocity);

@@ -327,6 +327,12 @@ impl<S: EventStore> SimulationNode<S> {
         self.world.inner().get::<&PositionComp>(*entity).ok().map(|c| c.0)
     }
 
+    /// The coordinate anchor a Ship's position is relative to (ADR-0029).
+    pub fn get_ship_anchor(&self, ship_id: ShipId) -> Option<dawn_core::AnchorId> {
+        let entity = self.ships.index.get(&ship_id)?;
+        self.world.ship_anchor(*entity)
+    }
+
     /// Look up the current `ShipStatsComp` of a Ship by its ID. Test-only.
     #[cfg(test)]
     pub fn get_ship_stats(&self, ship_id: ShipId) -> Option<ShipStatsComp> {
