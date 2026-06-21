@@ -85,8 +85,16 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
   - **距離計算をすべてアンカー対応に**: Combat（`anchor_abs` マップ注入）/ approach / tackle / bot steering
     （`entity_absolute`）。frame 不変量（差分・相対速度）を絶対位置で計算。
 - ✅ **Step 8（部分）** スナップショットに `anchor` を永続化（リベース済み船の復元で絶対位置を保つ）。スキーマ bump。
-- ⬜ **Step 5** galaxy 実 AU 化 ＋ combat/warp の f64 差分精緻化（圧縮スケールは f32 で正しいが、真 AU では
-  combat 距離と warp 道中を f64 にする必要がある）。
+- 🔶 **Step 5a（combat）** combat 距離を f64 差分で計算（実装済み・圧縮では無影響）。
+- ⬜ **Step 5b（実 AU 起動・結合フェーズ）** 以下は密結合で、ゲーム感のプレイテスト反復を要する：
+  > **発見（5a 実装中）**：`CelestialBodyDef.position` は f32 `Position`。実 AU（7.5×10¹¹）を f32 で持つと
+  > その時点で ~65km 誤差が乗り、`AnchorTable`（f64）も f32 body 位置から構築するため誤差を継承する。
+  > ゆえに実 AU 化は係数変更では足りず、**アンカー源データを f64 に**する必要がある。
+  1. **アンカー絶対位置を源データから f64 に**（galaxy ローダ／`CelestialBodyDef` を f64 化、または AU 値を
+     保持して `AU_M` を f64 で乗算。`AnchorTable` は f32 body 位置を経由しない）。
+  2. **ワープ到着を f64 化**（`AnchorRebased` offset を f64 arrival から算出。道中 f32 は不可視で可）。
+  3. **`WARP_SPEED` 再調整**（7.5e11 ÷ 1e4 = 7500万 tick の非現実的ワープ時間を回避。スパイクは 3e9）。
+  4. **クライアント浮動原点（step 6）が前提**（無いと実 AU の描画が破綻）。
 - ⬜ **Step 6** クライアント浮動原点（`_server_to_godot_pos` 改修・`AnchorRebased` クライアント対応・遠方ビルボード）。
 - ⬜ **Step 7** HUD 実値変換（m/s・AU 単一モジュール）。
 
