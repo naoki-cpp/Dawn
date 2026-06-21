@@ -61,15 +61,15 @@ pub const POPULATION_CAP: usize = 100_000;
 /// emerges from ship agility (thrust / max_speed) - the tackle window
 /// (ADR-0023) is longer for sluggish ships.
 const WARP_ALIGN_FRACTION: f32 = 0.75;
-/// Warp cruise speed (units/tick), far above any sublight `max_speed`.
+/// Reference warp speed (units/tick), far above any sublight `max_speed`. Used
+/// to derive the warp's duration: `total_ticks = max(WARP_MIN_TICKS,
+/// ceil(warp_distance / WARP_SPEED))`. Warp then follows a smoothstep ease
+/// along the start→arrival segment (ADR-0022 amendment), so this is the rough
+/// peak speed, not a constant velocity.
 const WARP_SPEED: f32 = 5000.0;
-/// Deceleration ramp: while approaching the arrival ring the warp speed is
-/// capped at `remaining_distance * WARP_DECEL_RATE`, so the ship eases in
-/// instead of stopping dead (EVE-like warp deceleration). Decel begins at
-/// `WARP_SPEED / WARP_DECEL_RATE` units of remaining distance.
-const WARP_DECEL_RATE: f32 = 0.4;
-/// Speed (units/tick) at or below which the warp settles and stops.
-const WARP_EXIT_SPEED: f32 = 250.0;
+/// Floor on warp duration (ticks) so even a short warp reads as a warp rather
+/// than a blink. At 10 tick/s this is ~2 s.
+const WARP_MIN_TICKS: u32 = 20;
 /// Minimum distance to a gate for warp to be allowed (units). Closer than this,
 /// the `WarpCommand` is rejected and the player should approach instead.
 const MIN_WARP_DISTANCE: f32 = 3000.0;

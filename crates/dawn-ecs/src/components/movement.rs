@@ -43,6 +43,14 @@ pub struct WarpComp {
     /// When true and `target` is `Gate`, automatically propose a Jump once warp
     /// completes and the ship arrives within the gate's activation radius.
     pub auto_jump: bool,
+    /// Parametric warp plan (ADR-0022 amendment, 2026-06-21). Warp walks the
+    /// segment from `warp_start` to the arrival point over `warp_total` ticks
+    /// (smoothstep eased), reaching the destination exactly. These are
+    /// meaningful only while `phase == Warping`; the `Aligning` phase leaves
+    /// them at their engage-time defaults (start = ORIGIN, total/elapsed = 0).
+    pub warp_start  : Position,
+    pub warp_total  : u32,
+    pub warp_elapsed: u32,
 }
 
 impl WarpComp {

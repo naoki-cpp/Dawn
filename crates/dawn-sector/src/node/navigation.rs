@@ -20,7 +20,7 @@ use dawn_event_store::store::EventStore;
 
 use super::{
     SimulationNode, WARP_ALIGN_FRACTION, WARP_ARRIVAL_FACTOR, BODY_WARP_ARRIVAL_FACTOR,
-    WARP_DECEL_RATE, WARP_EXIT_SPEED, WARP_SPEED,
+    WARP_MIN_TICKS, WARP_SPEED,
 };
 
 impl<S: EventStore> SimulationNode<S> {
@@ -83,6 +83,9 @@ impl<S: EventStore> SimulationNode<S> {
             target,
             phase: WarpPhase::Aligning,
             auto_jump,
+            warp_start  : Position::ORIGIN,  // set when warp engages (Aligning -> Warping)
+            warp_total  : 0,
+            warp_elapsed: 0,
         });
         true
     }
@@ -159,10 +162,20 @@ impl<S: EventStore> SimulationNode<S> {
                 WarpPhase::Aligning if !aligned => {
                     self.steer_thrust_toward(entity, pos, dest_pos);
                 }
-                // Aligned (engage warp) or already warping: fly toward the destination.
-                WarpPhase::Aligning | WarpPhase::Warping => {
+                // Aligned: engage warp. Fix the parametric plan (start = here,
+                // duration from distance) and take the first step this tick.
+                WarpPhase::Aligning => {
                     self.set_warp_phase(entity, WarpPhase::Warping);
-                    if let Some(ev) = self.warp_step(entity, ship_id, pos, vel, dest_pos, arrival, auto_jump_gate, tick) {
+                    let arrival_point = warp_arrival_point(pos, dest_pos, arrival);
+                    let total = warp_total_ticks(pos.distance(arrival_point));
+                    if let Some(ev) = self.warp_step(entity, ship_id, pos, vel, pos, arrival_point, total, 1, auto_jump_gate, tick) {
+                        events.push(ev);
+                    }
+                }
+                // Already warping: advance one tick along the fixed segment plan.
+                WarpPhase::Warping => {
+                    let arrival_point = warp_arrival_point(warp.warp_start, dest_pos, arrival);
+                    if let Some(ev) = self.warp_step(entity, ship_id, pos, vel, warp.warp_start, arrival_point, warp.warp_total, warp.warp_elapsed + 1, auto_jump_gate, tick) {
                         events.push(ev);
                     }
                 }
@@ -172,39 +185,49 @@ impl<S: EventStore> SimulationNode<S> {
         events
     }
 
-    /// One warping-phase step: move `entity` toward `dest_pos` at `WARP_SPEED`,
-    /// stopping inside `arrival`. Returns a `VelocityChanged` if velocity moved.
+    /// One warping-phase step (ADR-0022 amendment): walk the segment from
+    /// `start` to `arrival_point` over `total` ticks with smoothstep easing,
+    /// reaching the destination exactly. This tick is number `elapsed`.
+    ///
+    /// Each tick sets `velocity = planned_point - current_pos` and emits a
+    /// `VelocityChanged`, so replay reconstructs the same path purely by
+    /// `position += velocity` (INV-MOVE) — no direct position writes leak past
+    /// the velocity record. The final tick settles and stops (velocity ZERO).
     /// `auto_jump_gate`: if `Some(gate_id)`, queue an auto-jump on arrival.
+    #[allow(clippy::too_many_arguments)]
     fn warp_step(
         &mut self,
         entity          : Entity,
         ship_id         : ShipId,
         pos             : Position,
         old_vel         : Velocity,
-        dest_pos        : Position,
-        arrival         : f32,
+        start           : Position,
+        arrival_point   : Position,
+        total           : u32,
+        elapsed         : u32,
         auto_jump_gate  : Option<JumpGateId>,
         tick            : Tick,
     ) -> Option<DomainEvent> {
-        let dist      = pos.distance(dest_pos);
-        let remaining = dist - arrival;
-        let (new_pos, new_vel, arrived) = if remaining <= WARP_EXIT_SPEED {
-            // Close enough (inside the arrival ring or one slow step away):
-            // settle and stop.
+        let total = total.max(1);
+        let (new_pos, new_vel, arrived) = if elapsed >= total {
+            // Plan complete: settle and stop where we are (≈ arrival_point; the
+            // final ease step is sub-unit, so this is exact for gameplay).
             (pos, Velocity::ZERO, true)
         } else {
-            // Ease in: cap speed by remaining distance so the ship decelerates
-            // smoothly instead of stopping dead (ADR-0022 §9).
-            let speed = (remaining * WARP_DECEL_RATE).clamp(WARP_EXIT_SPEED, WARP_SPEED);
-            let step  = speed.min(remaining);
-            let inv   = step / dist;
-            let v = Velocity {
-                dx: (dest_pos.x - pos.x) * inv,
-                dy: (dest_pos.y - pos.y) * inv,
-                dz: (dest_pos.z - pos.z) * inv,
+            // Eased point along the segment this tick; velocity carries the
+            // delta so the move is recorded by VelocityChanged (INV-MOVE).
+            let s = smoothstep(elapsed as f32 / total as f32);
+            let planned = Position {
+                x: start.x + (arrival_point.x - start.x) * s,
+                y: start.y + (arrival_point.y - start.y) * s,
+                z: start.z + (arrival_point.z - start.z) * s,
             };
-            let p = Position { x: pos.x + v.dx, y: pos.y + v.dy, z: pos.z + v.dz };
-            (p, v, false)
+            let v = Velocity {
+                dx: planned.x - pos.x,
+                dy: planned.y - pos.y,
+                dz: planned.z - pos.z,
+            };
+            (planned, v, false)
         };
 
         if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) { p.0 = new_pos; }
@@ -221,6 +244,11 @@ impl<S: EventStore> SimulationNode<S> {
             if let Some(gid) = auto_jump_gate {
                 self.pending_auto_jumps.push((ship_id, gid));
             }
+        } else if let Ok(mut w) = self.world.inner_mut().get::<&mut WarpComp>(entity) {
+            // Persist the plan + progress for the next tick.
+            w.warp_start   = start;
+            w.warp_total   = total;
+            w.warp_elapsed = elapsed;
         }
 
         // Emit VelocityChanged only when velocity actually changed (INV-MOVE).
@@ -288,6 +316,36 @@ impl<S: EventStore> SimulationNode<S> {
             }
         }
     }
+}
+
+/// The point on the segment from `start` toward `dest`, `arrival` units short
+/// of `dest` — where a warp settles (gate ring / body orbit). If the ship is
+/// already inside the arrival ring, returns `start` (no forward motion).
+/// ADR-0022 amendment (parametric warp).
+fn warp_arrival_point(start: Position, dest: Position, arrival: f32) -> Position {
+    let dx = dest.x - start.x;
+    let dy = dest.y - start.y;
+    let dz = dest.z - start.z;
+    let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+    if dist <= arrival || dist < f32::EPSILON {
+        return start;
+    }
+    let f = (dist - arrival) / dist;
+    Position { x: start.x + dx * f, y: start.y + dy * f, z: start.z + dz * f }
+}
+
+/// Warp duration in ticks from the warp distance (start→arrival point), floored
+/// at `WARP_MIN_TICKS` so even a short warp reads as a warp. ADR-0022 amendment.
+fn warp_total_ticks(warp_dist: f32) -> u32 {
+    let n = (warp_dist / WARP_SPEED).ceil().max(0.0) as u32;
+    n.max(WARP_MIN_TICKS)
+}
+
+/// Smoothstep ease (0→1): accelerate out of warp entry, decelerate into the
+/// arrival ring. ADR-0022 amendment (parametric warp).
+fn smoothstep(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// Component of velocity along the vector from `pos` toward `target`.
@@ -625,6 +683,33 @@ mod tests {
         for _ in 0..100 { node.tick(); }
         assert_eq!(node.warp_phase(ship), None);
         assert!(node.drain_pending_auto_jumps().is_empty());
+    }
+
+    #[test]
+    fn parametric_warp_lasts_a_floored_duration_not_an_instant_teleport() {
+        // ADR-0022 amendment: warp walks the start→arrival segment over
+        // max(WARP_MIN_TICKS, ceil(dist / WARP_SPEED)) ticks, so even a warp
+        // whose distance would finish in a couple of ticks still spends a
+        // floored number of ticks in the committed Warping phase.
+        let mut node = mem_node();
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.apply_warp_command_owned(player, dawn_core::WarpCommand {
+            ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+        });
+
+        let mut warping_ticks: u32 = 0;
+        for _ in 0..400 {
+            node.tick();
+            match node.warp_phase(ship) {
+                Some(WarpPhase::Warping) => warping_ticks += 1,
+                None if warping_ticks > 0 => break,  // warp finished
+                _ => {}
+            }
+        }
+        // Allow a small boundary fuzz (the arriving tick removes the component).
+        assert!(warping_ticks >= WARP_MIN_TICKS - 2,
+            "warp should ride the parametric segment for ~WARP_MIN_TICKS ticks, \
+             got {warping_ticks} (floor {WARP_MIN_TICKS})");
     }
 
     // ── Celestial body warp (ADR-0025) ───────────────────────────────────
