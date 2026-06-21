@@ -98,8 +98,13 @@ movement_nav §238-241「align time は戦術軸」）。固定タイマーで�
 > **不変部分**: align フェーズ（Tackle 窓）・`MIN_WARP_DISTANCE`・warping 中の Move/Stop 拒否・
 > 「warping は committed」は**変更しない**。改訂は align 後の Warping 区間の動かし方のみ。
 >
-> **未確定**: 所要 tick の算出式（距離 ÷ 基準 warp 速度 か、固定 duration か）。`WARP_DECEL_RATE`/
-> `WARP_EXIT_SPEED` は媒介変数式では ease 曲線（加減速カーブ）に置き換わる。実装時に確定。
+> **実装（2026-06-21）**: 所要 tick = `max(WARP_MIN_TICKS, ceil(warp_distance / WARP_SPEED))`
+> （`WARP_MIN_TICKS = 20` ≈ 2s の下限。短距離 warp も「瞬間移動」にならない）。ease は smoothstep
+> （`t²(3−2t)`）で加減速。`WARP_DECEL_RATE`/`WARP_EXIT_SPEED` は廃止し、減速は ease 曲線が担う。
+> 着地は「elapsed ≥ total で現在位置に settle（velocity=ZERO）」＝ ease 終端の最終ステップが
+> 微小なので arrival_point と sub-unit 一致。実装は `crates/dawn-sector/src/node/navigation.rs`
+> の `warp_step` / `warp_arrival_point` / `warp_total_ticks` / `smoothstep`。`WarpComp` に
+> `warp_start`/`warp_total`/`warp_elapsed`（非永続）を追加。移動感の最終調整は要プレイテスト。
 
 | フェーズ | Move/Stop | Tackle（ADR-0023） |
 |---|---|---|

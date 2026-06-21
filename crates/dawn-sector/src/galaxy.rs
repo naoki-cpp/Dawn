@@ -21,6 +21,15 @@ pub struct Galaxy {
     pub bodies : Vec<CelestialBodyDef>,
 }
 
+/// Game units per astronomical unit. Celestial body orbits are authored in AU
+/// in `data/galaxy*.toml` (human-meaningful, astronomical) and converted to
+/// units at load time by this factor. The factor is a deliberate gameplay
+/// COMPRESSION (a real AU is ~1.5e11 m, far beyond f32 precision); it is chosen
+/// so a system spans a comfortable, f32-safe range and orbits sit well clear of
+/// the star's exaggerated visual radius. Body `radius` and gate `position` stay
+/// in units (they are not orbital distances). See ADR-0025 / ADR-0028.
+pub const UNITS_PER_AU: f32 = 200_000.0;
+
 impl Galaxy {
     /// Construct from explicitly provided data (used by `DataLoader`).
     pub fn new(systems: Vec<StarSystemDef>, gates: Vec<JumpGateDef>, bodies: Vec<CelestialBodyDef>) -> Self {
@@ -120,7 +129,9 @@ struct CelestialBodyEntry {
     sector       : u8,
     kind         : String,
     name         : String,
+    /// Orbit position in AU (converted to units by `UNITS_PER_AU` on load).
     position     : [f32; 3],
+    /// Visual radius in units (exaggerated for gameplay; not an AU distance).
     radius       : f32,
     #[serde(default)] spectral_type: f32,
 }
@@ -148,12 +159,17 @@ fn entry_to_gate(e: JumpGateEntry) -> JumpGateDef {
 }
 
 fn entry_to_body(e: CelestialBodyEntry) -> CelestialBodyDef {
+    // `position` is authored in AU; convert to game units (see UNITS_PER_AU).
     CelestialBodyDef {
         id           : CelestialBodyId(e.id),
         sector       : SectorId(e.sector),
         kind         : parse_body_kind(&e.kind),
         name         : e.name,
-        position     : Position::new(e.position[0], e.position[1], e.position[2]),
+        position     : Position::new(
+            e.position[0] * UNITS_PER_AU,
+            e.position[1] * UNITS_PER_AU,
+            e.position[2] * UNITS_PER_AU,
+        ),
         radius       : e.radius,
         spectral_type: e.spectral_type,
     }
@@ -187,6 +203,20 @@ mod tests {
         assert_eq!(map.systems.len(), 3);
         assert_eq!(map.gates.len(), 4);
         assert_eq!(map.bodies.len(), 7);
+    }
+
+    #[test]
+    fn celestial_body_positions_are_converted_from_au_to_units() {
+        let map = Galaxy::demo();
+        // Forge (id 1) is authored at [0.8, 0.0, 0.5] AU in galaxy.demo.toml;
+        // the loader scales it by UNITS_PER_AU into game units.
+        let forge = map.bodies.iter().find(|b| b.id == CelestialBodyId(1)).expect("Forge exists");
+        assert!((forge.position.x - 0.8 * UNITS_PER_AU).abs() < 1.0, "x = {}", forge.position.x);
+        assert_eq!(forge.position.y, 0.0);
+        assert!((forge.position.z - 0.5 * UNITS_PER_AU).abs() < 1.0, "z = {}", forge.position.z);
+        // Stars at [0,0,0] AU stay at the origin (0 * factor = 0).
+        let helios = map.bodies.iter().find(|b| b.id == CelestialBodyId(0)).expect("Helios exists");
+        assert_eq!(helios.position, Position::ORIGIN);
     }
 
     #[test]

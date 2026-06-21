@@ -11,7 +11,7 @@ extends RefCounted
 
 const GATE_RING_INNER_RATIO    : float = 0.85
 const GATE_LABEL_HEIGHT_RATIO  : float = 0.3
-const PLANET_VISUAL_RADIUS_RATIO: float = 0.08
+const PLANET_VISUAL_RADIUS_RATIO: float = 0.5
 
 ## Selection reticle: a fixed-screen-size ring billboard so every planet is
 ## equally easy to click regardless of distance (pairs with

@@ -347,6 +347,29 @@ population_cap の 80% を超えたタイミングで Sector の分割を準備�
 分割戦略：空間的中央分割（X 軸または Y 軸の中点で二分）。
 → SectorTransit の設計と密接に関連する（ownership.md 参照）。
 
+### Sector 境界をまたぐ操作（Fission の継続課題・集約）
+
+Fission は空間を平面で二分するので、その境界をまたぐ操作をどう扱うかが論点になる。
+方針は確立済みだが、in-flight な操作の詳細は Fission 着手時（roadmap 8B-2・要 ADR）に詰める。
+本節は各所（ADR-0018 / ADR-0020 / eve-reference §11 / ADR-0022）に散在する関連検討を集約する。
+
+**原則**:
+- 境界越えは必ず **SectorTransit（Raft・所有権移転）** を通る（INV-003）。grey area / 境界二重所有は不採用（ADR-0017 §5）。
+- 越境因果は **論理 Tick で同期**し、実時間ペースの差は表示層が吸収する（INV-005 / ADR-0018「差分 TiDi の越境因果」）。
+- Fission は **空間的に分離可能な負荷**（複数戦線・広域経済）専用で、**単一密戦闘は分割しない**（全員が同一近傍に入るため効かない・ADR-0020 §背景 / eve-reference §11.1）。よって Fission の境界は **低相互作用の場所** に引かれる。
+
+**操作種別ごとの扱いと難易度**:
+
+| 操作 | 扱い | 状態 |
+|---|---|---|
+| 離散的な通過（船が境界を横切る） | SectorTransit が `entry_pos` + `velocity` を引き渡し（ADR-0014） | 実装済み |
+| in-flight な Warp が境界をまたぐ | 各セクターが自分の区間を **媒介変数 warp** で局所計算（入口→終点を境界でクリップ）。transit が「warp 終点 + committed」を運び、受け側は Align を飛ばして継続。位置は各区間とも VelocityChanged で記録（INV-MOVE 維持） | 未実装・Fission 時に設計（[ADR-0022](adr/ADR-0022-intra-sector-warp.md) 媒介変数改訂が土台） |
+| 越境戦闘（境界をまたいで相互作用） | 毎 Tick 両セクターの状態同期を要する本丸の難所。Fission は分離可能負荷専用なので**境界では起きない前提**。単一密戦闘がノード容量を超えたら割らず **局所 TiDi** へ逃がす | 原理的に困難 → 分割回避（局所 TiDi）で対処（ADR-0018 / eve-reference §11.1, §11.3） |
+
+要するに：**Fission の境界は「分離可能＝低相互作用」の場所に引くので、またぐのは主に通過と warp。通過は解決済み、warp は媒介変数 warp を土台に Fission 時に設計、密な越境戦闘は「そもそも割らない（局所 TiDi）」で回避する。**
+
+関連: [ADR-0018](adr/ADR-0018-tidi-graceful-degradation.md)（越境因果）, [ADR-0020](adr/ADR-0020-simulation-lod.md)（Fission は密戦闘に効かない）, [ADR-0022](adr/ADR-0022-intra-sector-warp.md)（媒介変数 warp）, [roadmap.md](roadmap.md) §10（8B-2 Fission / 8B-8 越境 TiDi）, [eve-reference.md](reference/eve-reference.md) §11.1/§11.3。
+
 ### Local Time Dilation（局所 TiDi = 単一密戦闘の安全網）
 
 分割不能な単一ホットスポットがノード容量を超えたら、当該 Sector に限り TiDi を発動する。
