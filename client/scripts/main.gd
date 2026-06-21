@@ -161,6 +161,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_maybe_rebase_origin()
+	_update_body_markers()
 	_update_gate_proximity()
 	_update_sun_direction()
 	if _jump_notice_timer > 0.0:
@@ -200,6 +201,35 @@ func _godot_to_server_pos(g: Vector3) -> Vector3:
 		g.x / WORLD_SCALE + _origin_server.x,
 		g.y / WORLD_SCALE + _origin_server.y,
 		-g.z / WORLD_SCALE + _origin_server.z)
+
+## Distance (Godot units) at which a celestial body marker is clamped toward the
+## player so it stays inside the camera's far plane (scenes/main.tscn far=100000).
+## At true-AU a planet is ~10^11 m -> ~10^10 Godot units, far beyond far plane, so
+## without this it would never render. The marker is drawn at the body's true
+## *bearing* but a fixed near distance (spike S5: distant bodies are billboards/
+## markers, not meshes at their real position). As the player warps in and the
+## true distance drops below the clamp, the marker glides to its real position.
+const BODY_MARKER_CLAMP_DISTANCE : float = 30_000.0
+
+## Re-place every celestial-body marker each frame at the body's true bearing
+## from the player, clamped to BODY_MARKER_CLAMP_DISTANCE when it is farther than
+## that. Keeps planets visible at true-AU (ADR-0029 step 6). The marker stores
+## its server position in the "body_pos" meta (NavigationMarkerRenderer).
+func _update_body_markers() -> void:
+	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
+		return
+	var player_godot: Vector3 = (_ships[_player_ship_id] as Node3D).global_position
+	for c: Node in _bodies_root.get_children():
+		var marker: Node3D = c as Node3D
+		if not marker.has_meta("body_pos"):
+			continue
+		var body_godot: Vector3 = _server_to_godot_pos(marker.get_meta("body_pos") as Vector3)
+		var delta: Vector3 = body_godot - player_godot
+		var dist: float = delta.length()
+		if dist > BODY_MARKER_CLAMP_DISTANCE:
+			marker.global_position = player_godot + delta / dist * BODY_MARKER_CLAMP_DISTANCE
+		else:
+			marker.global_position = body_godot
 
 ## Rebase the floating origin to the player when it drifts past the threshold,
 ## shifting every world node by the same delta so the move is invisible (the
