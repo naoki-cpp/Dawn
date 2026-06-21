@@ -26,10 +26,12 @@ impl<S: EventStore> SimulationNode<S> {
                     .map(|t| t.tacklers.clone())
                     .unwrap_or_default();
                 let ship_type_id = self.ships.type_ids.get(&ship_id).copied().unwrap_or(dawn_core::ShipTypeId(0));
+                let anchor = self.world.ship_anchor(entity).unwrap_or_default();
                 Some(ShipSnapshot {
                     ship_id,
                     ship_type_id,
                     position      : pos,
+                    anchor,
                     velocity      : vel,
                     current_shield: hull.current_shield,
                     current_armor : hull.current_armor,

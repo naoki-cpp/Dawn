@@ -355,6 +355,12 @@ impl<S: EventStore> SimulationNode<S> {
         use dawn_ecs::components::{FittingComp, TackledComp};
         self.insert_to_world(ship.ship_id, ship.position, ship.velocity);
         self.ships.type_ids.insert(ship.ship_id, ship.ship_type_id);
+        // Restore the coordinate anchor (ADR-0029): insert_to_world defaults to
+        // the Sector-origin anchor, but a rebased ship's `position` offset is
+        // relative to its saved anchor, so restore that to keep absolute position.
+        if let Some(&entity) = self.ships.index.get(&ship.ship_id) {
+            self.world.set_ship_anchor(entity, ship.anchor);
+        }
 
         let base = self.ship_type_registry.get(&ship.ship_type_id)
             .map(|def| ShipStatsComp::from_base(&def.base_stats))
@@ -453,6 +459,33 @@ mod tests {
         let after = node.ship_absolute(ship).unwrap();
         let err = ((before[0]-after[0]).powi(2) + (before[1]-after[1]).powi(2) + (before[2]-after[2]).powi(2)).sqrt();
         assert!(err < 1.0, "rebase changed absolute position by {err} m");
+    }
+
+    #[test]
+    fn snapshot_restore_preserves_a_rebased_ships_anchor_and_absolute_position() {
+        use dawn_core::{AnchorId, events::AnchorRebased};
+        use dawn_event_store::InMemoryEventStore;
+        let mut node = node_with_modules();
+        let ship = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(160_000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
+        // Rebase onto Forge (AnchorId 1), preserving absolute position.
+        let world = node.ship_absolute(ship).unwrap();
+        let forge = node.anchor_table().abs(AnchorId(1)).unwrap();
+        let off = Position::new((world[0]-forge[0]) as f32, (world[1]-forge[1]) as f32, (world[2]-forge[2]) as f32);
+        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased { ship_id: ship, anchor: AnchorId(1), offset: off, tick: Tick(1) }));
+        let before = node.ship_absolute(ship).unwrap();
+
+        let snap = node.take_snapshot();
+        assert_eq!(snap.ships.iter().find(|s| s.ship_id == ship).unwrap().anchor, AnchorId(1),
+            "snapshot must capture the rebased anchor");
+
+        let node2 = SimulationNode::restore_from(
+            InMemoryEventStore::new(), &snap,
+            &crate::modules::all_modules(), &crate::ship_types::all_ship_types(),
+        );
+        assert_eq!(node2.get_ship_anchor(ship), Some(AnchorId(1)), "restore must keep the anchor");
+        let after = node2.ship_absolute(ship).unwrap();
+        let err = ((before[0]-after[0]).powi(2)+(before[1]-after[1]).powi(2)+(before[2]-after[2]).powi(2)).sqrt();
+        assert!(err < 1.0, "restore moved absolute position by {err} m");
     }
 
     #[test]

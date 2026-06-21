@@ -48,6 +48,10 @@ pub struct ShipSnapshot {
     pub ship_id     : ShipId,
     pub ship_type_id: ShipTypeId,
     pub position    : Position,
+    /// Coordinate anchor the `position` offset is relative to (ADR-0029).
+    /// Defaults to the Sector-origin anchor (id 0) for pre-anchor snapshots.
+    #[serde(default)]
+    pub anchor      : dawn_core::AnchorId,
     pub velocity    : Velocity,
     /// `HullComp` at the time of the snapshot (Shield / Armor / Hull layers).
     pub current_shield: f32,
@@ -126,6 +130,7 @@ mod tests {
                     ship_id       : ShipId::new(NodeId(0), 0),
                     ship_type_id  : ShipTypeId(1),
                     position      : Position::new(100.0, 200.0, 300.0),
+                    anchor        : dawn_core::AnchorId(0),
                     velocity      : dawn_core::Velocity::new(1.0, 0.0, 0.0),
                     current_shield: 50.0,
                     current_armor : 60.0,

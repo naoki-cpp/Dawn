@@ -44,7 +44,7 @@ pub struct CelestialBodyDef {
 /// `anchor_abs(f64) + offset`. Keeping the offset small (the ship stays near
 /// its anchor) preserves f32 precision even when the anchor sits at a true
 /// astronomical distance from the Sector origin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct AnchorId(pub u32);
 
 impl From<CelestialBodyId> for AnchorId {
