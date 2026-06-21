@@ -82,7 +82,7 @@ id            = 1
 sector        = 0
 kind          = "Planet"
 name          = "Forge"
-position      = [15000.0, 0.0, 0.0]  # ~1.0 AU (flavor)
+position      = [25000.0, 0.0, 15000.0]  # inner, +X/+Z, ~1.9x the star radius out
 radius        = 3500.0
 spectral_type = 0.0
 
@@ -91,7 +91,7 @@ id            = 6
 sector        = 0
 kind          = "Planet"
 name          = "Meridian"
-position      = [20700.0, 0.0, 17400.0]  # ~1.8 AU (flavor)
+position      = [-20000.0, 0.0, -38000.0]  # outer, opposite side of the star from Forge
 radius        = 4000.0
 spectral_type = 0.0
 
