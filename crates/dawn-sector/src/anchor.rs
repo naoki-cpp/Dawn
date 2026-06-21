@@ -161,14 +161,31 @@ mod tests {
         let t = table();
         let star = AnchorId(0); // Helios at origin
         let planet = AnchorId(1); // Forge
-        // A ship 1000 m from the star, re-expressed relative to Forge, must
-        // keep the same absolute position.
+        // Rebasing across a FAR anchor (star <-> Forge ~1 AU) is inherently
+        // f32-lossy: the offset on the far side is ~10^11 m, whose f32 ulp is
+        // ~16 km. This is exactly why anchors must stay local and real warps
+        // rebase via the f64 arrival point (rebase_arrival_event), not via
+        // AnchorTable::rebase. Here we only assert the loss is bounded by the
+        // f32 ulp at that magnitude (ADR-0029).
         let offset = Position::new(1000.0, 0.0, 0.0);
         let world_before = t.absolute(star, offset).unwrap();
         let new_off = t.rebase(star, offset, planet).unwrap();
         let world_after = t.absolute(planet, new_off).unwrap();
         let err = sq_dist(world_before, world_after).sqrt();
-        assert!(err < 1.0, "rebase moved the ship by {err} m");
+        assert!(err < 30_000.0, "rebase error {err} m exceeds the f32 ulp bound at ~1 AU");
+    }
+
+    #[test]
+    fn absolute_compose_is_exact_for_a_near_anchor_offset() {
+        // The precise, realistic operation: a ship near an anchor (small offset)
+        // composes to an exact absolute position in f64, even though the anchor
+        // itself is at true-AU distance (ADR-0029).
+        let t = table();
+        let forge_abs = t.abs(AnchorId(1)).unwrap();
+        let off = Position::new(2000.0, 0.0, -1500.0);
+        let abs = t.absolute(AnchorId(1), off).unwrap();
+        assert!((abs[0] - (forge_abs[0] + 2000.0)).abs() < 1e-3);
+        assert!((abs[2] - (forge_abs[2] - 1500.0)).abs() < 1e-3);
     }
 
     #[test]
@@ -177,7 +194,10 @@ mod tests {
         let t = AnchorTable::from_galaxy(&g);
         let helios = g.bodies.iter().find(|b| b.id == CelestialBodyId(0)).unwrap();
         let forge = g.bodies.iter().find(|b| b.id == CelestialBodyId(1)).unwrap();
-        let expected = helios.position.distance(forge.position) as f64;
+        // Expected from the f64 anchor source (positions are ~10^11 m, where the
+        // f32 `position` distance would be ~km off).
+        let d_abs = [helios.abs_m[0] - forge.abs_m[0], helios.abs_m[1] - forge.abs_m[1], helios.abs_m[2] - forge.abs_m[2]];
+        let expected = (d_abs[0] * d_abs[0] + d_abs[1] * d_abs[1] + d_abs[2] * d_abs[2]).sqrt();
         // Two ships at their anchors' origins (zero offset).
         let d = t
             .distance((AnchorId(0), Position::ORIGIN), (AnchorId(1), Position::ORIGIN))

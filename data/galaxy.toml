@@ -1,19 +1,17 @@
 # Production Star System / Jump Gate / Celestial Body topology
 #
-# Scale: 1 unit = 1 m. Intra-system distances are gameplay-COMPRESSED (NOT real
-# astronomical scale) but kept "wide": planets at ~10^5 units and gates at the
-# edge (~600,000) so a body's bearing barely shifts during sublight travel,
-# which reads as distance. All within the Sector volume (±700,000 units, see
-# SectorBounds::DEFAULT_HALF) and well inside f32 precision -- ADR-0028 chose
-# f32 + per-sector local frames over i64/f64 (f32 is fine to ~10^7 units; i64
-# is only for true AU). You cross the system by Warp, not sublight (as in EVE).
+# Scale: 1 unit = 1 m, at TRUE astronomical scale (ADR-0029). Celestial body
+# `position` is authored in AU and converted to metres at load by
+# UNITS_PER_AU = 1.495978707e11 (a real AU), so planets sit at ~10^11 m. At that
+# distance sublight (~hundreds of m/s) cannot cross the system -- you travel by
+# Warp (as in EVE). Precision is kept by method B: a ship holds an anchor
+# (nearest body) + a small f32 offset, so local combat near a body stays exact
+# even though the absolute coordinate is ~10^11 m (which f32 alone cannot hold).
 #
-# Celestial body `position` is authored in AU (astronomical units) and converted
-# to game units at load time by UNITS_PER_AU = 30,000 (see galaxy.rs). This is a
-# gameplay COMPRESSION, not real scale (a real AU is ~1.5e11 m). Gate `position`
-# and body `radius` stay in units -- gates are sector-edge infrastructure and
-# radii are exaggerated for visibility. Travel time is set by Warp duration
-# (ADR-0022 parametric warp), not by inflating distance.
+# Gate `position` and body `radius` stay in metres (gates are infrastructure,
+# radii are exaggerated for visibility). Warp duration is derived from the real
+# distance and WARP_SPEED (ADR-0022 parametric warp). The client renders with a
+# floating origin (ADR-0029 step 6) so distant objects don't break f32.
 #
 # Edit this file and restart the server to change the layout (no recompile needed).
 

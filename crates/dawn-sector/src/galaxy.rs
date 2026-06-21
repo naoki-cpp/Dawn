@@ -21,14 +21,15 @@ pub struct Galaxy {
     pub bodies : Vec<CelestialBodyDef>,
 }
 
-/// Game units per astronomical unit. Celestial body orbits are authored in AU
-/// in `data/galaxy*.toml` (human-meaningful, astronomical) and converted to
-/// units at load time by this factor. The factor is a deliberate gameplay
-/// COMPRESSION (a real AU is ~1.5e11 m, far beyond f32 precision); it is chosen
-/// so a system spans a comfortable, f32-safe range and orbits sit well clear of
-/// the star's exaggerated visual radius. Body `radius` and gate `position` stay
-/// in units (they are not orbital distances). See ADR-0025 / ADR-0028.
-pub const UNITS_PER_AU: f32 = 200_000.0;
+/// Metres per astronomical unit — the TRUE astronomical scale (ADR-0029).
+/// Celestial body orbits are authored in AU in `data/galaxy*.toml` and converted
+/// to metres at load time by this factor (1 unit = 1 m). This is f64 so the
+/// resulting anchor positions (`CelestialBodyDef.abs_m`) are precise at ~10^11 m,
+/// where f32 would lose ~tens of km. Bodies sit at real AU and are reachable only
+/// by Warp (method B: ships hold an anchor-relative f32 offset, so local combat
+/// stays precise). Body `radius` and gate `position` stay in metres (they are
+/// not orbital distances). See ADR-0029 (supersedes the compressed UNITS_PER_AU).
+pub const UNITS_PER_AU: f64 = 1.495_978_707e11;
 
 impl Galaxy {
     /// Construct from explicitly provided data (used by `DataLoader`).
@@ -129,8 +130,9 @@ struct CelestialBodyEntry {
     sector       : u8,
     kind         : String,
     name         : String,
-    /// Orbit position in AU (converted to units by `UNITS_PER_AU` on load).
-    position     : [f32; 3],
+    /// Orbit position in AU (converted to metres by `UNITS_PER_AU` on load).
+    /// Parsed as f64 so the authoring precision survives at true-AU scale.
+    position     : [f64; 3],
     /// Visual radius in units (exaggerated for gameplay; not an AU distance).
     radius       : f32,
     #[serde(default)] spectral_type: f32,
@@ -163,11 +165,11 @@ fn entry_to_body(e: CelestialBodyEntry) -> CelestialBodyDef {
     // `abs_m` is the same conversion done in f64 — the authoritative anchor
     // source that stays precise at true-AU scale (ADR-0029). At compressed scale
     // it equals `position` numerically.
-    let factor = UNITS_PER_AU as f64;
+    let factor = UNITS_PER_AU;
     let abs_m = [
-        e.position[0] as f64 * factor,
-        e.position[1] as f64 * factor,
-        e.position[2] as f64 * factor,
+        e.position[0] * factor,
+        e.position[1] * factor,
+        e.position[2] * factor,
     ];
     CelestialBodyDef {
         id           : CelestialBodyId(e.id),
@@ -215,11 +217,14 @@ mod tests {
     fn celestial_body_positions_are_converted_from_au_to_units() {
         let map = Galaxy::demo();
         // Forge (id 1) is authored at [0.8, 0.0, 0.5] AU in galaxy.demo.toml;
-        // the loader scales it by UNITS_PER_AU into game units.
+        // the loader scales it by UNITS_PER_AU into metres. The f64 anchor source
+        // (abs_m) is exact; the f32 `position` is only ulp-precise at ~10^11 m
+        // (~16 km), which is why anchors use abs_m, not position (ADR-0029).
         let forge = map.bodies.iter().find(|b| b.id == CelestialBodyId(1)).expect("Forge exists");
-        assert!((forge.position.x - 0.8 * UNITS_PER_AU).abs() < 1.0, "x = {}", forge.position.x);
+        assert_eq!(forge.abs_m[0], 0.8 * UNITS_PER_AU);
+        assert_eq!(forge.abs_m[2], 0.5 * UNITS_PER_AU);
+        assert!((forge.position.x as f64 - 0.8 * UNITS_PER_AU).abs() < 20_000.0, "x = {}", forge.position.x);
         assert_eq!(forge.position.y, 0.0);
-        assert!((forge.position.z - 0.5 * UNITS_PER_AU).abs() < 1.0, "z = {}", forge.position.z);
         // Stars at [0,0,0] AU stay at the origin (0 * factor = 0).
         let helios = map.bodies.iter().find(|b| b.id == CelestialBodyId(0)).expect("Helios exists");
         assert_eq!(helios.position, Position::ORIGIN);
