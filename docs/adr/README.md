@@ -24,6 +24,7 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 | [ADR-0021](ADR-0021-sector-local-replication.md) | Sector-local 複製は単一所有 + 追記ログのゴシップ配布（CRDT/LWW は採らない） | Accepted |
 | [ADR-0026](ADR-0026-dawn-sector-crate.md) | dawn-sector クレートの新設（ゲームロジックを dawn-simulation から分離） | Accepted |
 | [ADR-0027](ADR-0027-dawn-replication-crate.md) | dawn-replication クレートの新設（ゴシップ配布 + アンチエントロピー + スナップショット転送） | Accepted |
+| [ADR-0028](ADR-0028-large-world-coordinates.md) | 大規模座標系 — i64 固定小数点グローバル + f32 ローカルリベース（現方針: f32+圧縮を維持） | Deferred |
 
 ### Client / 通信
 

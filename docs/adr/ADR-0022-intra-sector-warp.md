@@ -73,6 +73,34 @@ warping に入ったら終点までライドする**（EVE: warp 突入後は ta
 整列条件は **EVE 準拠の「max_speed の 75% までターゲット方向へ加速」**（eve-reference §7.4.1 /
 movement_nav §238-241「align time は戦術軸」）。固定タイマーではなく船の機動性から整列時間が出る。
 
+> **[改訂]**（2026-06-21）— **Warping を「速度を決める」式から「始点〜終点の線分を分割して走る」
+> 媒介変数式へ変更する**（ADR-0028 の座標スケール検討から派生）。
+>
+> **動機**: 旧 Warping は `velocity = unit(dir) × clamp(残距離×WARP_DECEL_RATE, WARP_EXIT_SPEED,
+> WARP_SPEED)` の**減速ランプ＋しきい値スナップ**で、(a) 到着が近似（exit speed 以下でスナップ）、
+> (b) 大座標では `pos += 小速度` が桁落ちする、という弱点があった。媒介変数式は**到着を厳密**にし、
+> 減速スナップ hack を消す。
+>
+> **方式**: 突入時に始点 `start` と終点 `dest` を固定し、計画曲線 `p(t)=start+ease(t)(dest−start)`,
+> t:0→1 上を歩く。**所要 tick 数 N は距離から算出**（"遠いほど時間がかかる"・EVE の AU/s 一定に相当）。
+>
+> **INV-MOVE との整合（重要）**: 本 ADR §5 のとおり位置は `VelocityChanged` 経由でのみ再生される。
+> よって媒介変数も**「各 Tick の速度 = 次の計画点 − 現在位置」**として表現し、VelocityChanged を発行する
+> （位置直接更新はしない＝§却下案「位置直接更新」を破らない）。最終 Tick の速度を
+> `dest − pos_now` にすれば**ちょうど終点に着地**し、その後 velocity=ZERO・WarpComp 除去。
+> 再生は従来どおり `pos += velocity` の積分で同じ軌道を再現する。
+>
+> **精度の範囲**: 圧縮スケール（ADR-0028 採用方針・≤10⁶〜10⁷ units）では到着が事実上厳密になる。
+> 真の AU 級の大座標で「厳密到着」を保証するには、`JumpGateUsed.entry_pos` と同型の
+> **着地点を運ぶイベント**（例 `WarpCompleted { arrival_pos }`）が要る——これは ADR-0028（Deferred）
+> の大座標化と同時に検討する。現方針（圧縮）では新イベント不要。
+>
+> **不変部分**: align フェーズ（Tackle 窓）・`MIN_WARP_DISTANCE`・warping 中の Move/Stop 拒否・
+> 「warping は committed」は**変更しない**。改訂は align 後の Warping 区間の動かし方のみ。
+>
+> **未確定**: 所要 tick の算出式（距離 ÷ 基準 warp 速度 か、固定 duration か）。`WARP_DECEL_RATE`/
+> `WARP_EXIT_SPEED` は媒介変数式では ease 曲線（加減速カーブ）に置き換わる。実装時に確定。
+
 | フェーズ | Move/Stop | Tackle（ADR-0023） |
 |---|---|---|
 | Align（`ALIGN_TICKS`） | 中断可 → WarpComp 除去 | 有効（warp 突入を阻止 = コミット確定） |

@@ -484,6 +484,39 @@ ADR-0016 で柱① **「TiDi の無い大規模リアルタイム戦闘」** を
 [Grid Sizes & You](https://www.eveonline.com/news/view/grid-sizes-you),
 [Building a Balanced Universe（premapper）](https://www.eveonline.com/news/view/building-a-balanced-universe)
 
+### 8.4 座標系の精度と原点（dawn ADR-0028 の一次根拠）
+
+CCP 公式の Map Data ドキュメントが EVE の座標系を明記している。dawn の大規模座標系
+（ADR-0028）の直接の比較対象。
+
+- **単位**: `1.0 = 1 メートル`（宇宙・星系の両座標系で統一）。
+- **数値型**: **f64（double precision）**。「32-bit 浮動小数点では、恒星間（大）と惑星間（小）の
+  スケールを**合成**すると精度が足りない」と明言。
+- **星系ローカル原点**: 各星系が独立した座標系を持ち、**原点は恒星（恒星の座標は常に [0,0,0]、
+  SDE/ESI に明示値を持たない）**。惑星は恒星からの相対位置で与えられる。
+- **グローバル合成**: 惑星の宇宙座標 = 星系位置 + 惑星ローカル位置。宇宙系は左手系・星系は
+  右手系のため **X 軸を符号反転**して合成する。
+- **クライアント描画**: 「64-bit が使えない場面（3D 描画等）では **Floating Origin** で精度問題を
+  緩和できる」と明記。
+
+> **dawn への含意（ADR-0028 / 調査 2026-06-21）**: dawn は EVE と **(a) 1 unit = 1 m、
+> (b) 恒星を原点とする星系ローカル系、(c) クライアント側 Floating Origin** で一致する。
+> EVE が f64 を要るのは「**1 星系内に恒星〜外縁惑星を真の AU（1.5×10¹¹ m）で置く**」からだが、
+> **dawn は星系内距離を圧縮**するためその条件が発生せず、**f32 を維持**できる（≤10⁶〜10⁷ units で
+> ulp ≤ 1 m）。当初は決定論（INV-002/Raft）を根拠に **i64 固定小数点**を提案したが、調査で
+> **dawn の決定論は「イベントが権威結果を運び、複製・再生は再計算せず適用」する設計で既に解決済み**
+> と判明（戦闘 RNG は `thread_rng()`＝非決定論でも、結果が `DamageTaken` 等でイベント化される）。
+> 再生で再計算される量は位置積分のみで、スナップショットで窓も有界。よって **i64 は Deferred**、
+> 現方針は **f32 + Sector ローカル圧縮**（[ADR-0028](../adr/ADR-0028-large-world-coordinates.md)）。
+> なお EVE が f64 で足りるのは「**星系ごと単一権威サーバで再生・ノード間一致が不要**」だからで、
+> これは dawn の決定論要件とは別問題。本件の副産物として、ADR-0025 の「1 unit = 1,000 km」表記が
+> 誤りで、戦闘データの `1 unit = 1 m` が正しかったことも確認された。
+
+出典:
+[Map Data — EVE Developer Documentation（CCP公式）](https://developers.eveonline.com/docs/guides/map-data/),
+[EVE Online coordinate system — GameDev.net](https://www.gamedev.net/forums/topic/619254-eve-online-coordinate-system/),
+[Double-precision floating-point format — Wikipedia](https://en.wikipedia.org/wiki/Double-precision_floating-point_format)
+
 ---
 
 ## 9. 一次技術資料（CCP 講演 / devblog / 論文）と読み筋
