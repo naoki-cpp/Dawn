@@ -49,8 +49,9 @@ impl<S: EventStore> SimulationNode<S> {
             .collect();
         let lock = LockSystem(&mut self.world, tick, &merged_locks);
 
-        // 6. Combat System — fire only when the capacitor weapon cycle started this tick
-        let combat = CombatSystem(&mut self.world, tick, &cap.weapon_cycles_started);
+        // 6. Combat System — fire only when the capacitor weapon cycle started this tick.
+        // Pass the anchor table so distances resolve across anchors (ADR-0029).
+        let combat = CombatSystem(&mut self.world, tick, &cap.weapon_cycles_started, self.anchor_table.abs_map());
 
         // Remove destroyed ships from the ECS and all lookup maps.
         // CLAUDE.md §6: run the Bot System after Combat.

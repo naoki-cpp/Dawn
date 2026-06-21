@@ -47,6 +47,13 @@ impl AnchorTable {
         self.abs.get(&anchor).copied()
     }
 
+    /// The full anchor → absolute-position map (Sector-local, metres). Passed to
+    /// the Combat System so it can resolve ships' absolute positions across
+    /// different anchors (ADR-0029 step 3).
+    pub fn abs_map(&self) -> &HashMap<AnchorId, [f64; 3]> {
+        &self.abs
+    }
+
     /// Absolute position of a ship given its anchor and f32 offset.
     /// `anchor_abs + offset`, computed in f64.
     pub fn absolute(&self, anchor: AnchorId, offset: Position) -> Option<[f64; 3]> {
