@@ -160,6 +160,7 @@ func _ready() -> void:
 	## Gate / body markers are spawned from the server's InitialState, not here.
 
 func _process(delta: float) -> void:
+	_maybe_rebase_origin()
 	_update_gate_proximity()
 	_update_sun_direction()
 	if _jump_notice_timer > 0.0:
@@ -168,11 +169,55 @@ func _process(delta: float) -> void:
 			_jump_notice = ""
 	_update_hud()
 
+## Floating origin (ADR-0029 step 6): the server-space point currently mapped to
+## the Godot world origin. It follows the player so render coordinates stay small
+## (and f32-precise) even at true-AU distances. At the compressed scale the whole
+## system fits inside ORIGIN_REBASE_THRESHOLD, so the origin never leaves [0,0,0]
+## and every transform below is identical to the pre-floating-origin behaviour.
+var _origin_server : Vector3 = Vector3.ZERO
+## Rebase the origin once the player drifts this far (server units) from it.
+## Larger than the compressed system (±700k) so it is dormant until real-AU.
+const ORIGIN_REBASE_THRESHOLD : float = 1_000_000.0
+
 ## Converts a server-space position (Y-up, +Z) into Godot world space (Y-up,
-## -Z), applying WORLD_SCALE. Shared by gate/body marker spawning and gate
-## picking, which all place a Node3D at a server-given position.
+## -Z), relative to the floating origin and scaled by WORLD_SCALE. Shared by
+## gate/body marker spawning and gate picking, which all place a Node3D at a
+## server-given position.
 func _server_to_godot_pos(p: Vector3) -> Vector3:
-	return Vector3(p.x, p.y, -p.z) * WORLD_SCALE
+	return FloatingOrigin.to_godot(p, _origin_server, WORLD_SCALE)
+
+## Inverse of _server_to_godot_pos: Godot world space back to server space,
+## undoing the floating-origin offset, WORLD_SCALE, and Z inversion.
+##
+## NOTE (ADR-0029 activation): some gameplay code elsewhere still reads
+## `global_position / WORLD_SCALE` directly. Those are correct while the origin
+## is [0,0,0] (compressed scale). Distance computations between two such points
+## are origin-invariant, but any that compare an absolute reconstructed position
+## against server-absolute data (gate/body positions) must route through this
+## helper when the origin starts moving at real-AU.
+func _godot_to_server_pos(g: Vector3) -> Vector3:
+	return Vector3(
+		g.x / WORLD_SCALE + _origin_server.x,
+		g.y / WORLD_SCALE + _origin_server.y,
+		-g.z / WORLD_SCALE + _origin_server.z)
+
+## Rebase the floating origin to the player when it drifts past the threshold,
+## shifting every world node by the same delta so the move is invisible (the
+## spike's C2-2 property). Dormant at compressed scale (threshold never reached).
+func _maybe_rebase_origin() -> void:
+	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
+		return
+	var player_server: Vector3 = _godot_to_server_pos((_ships[_player_ship_id] as Node3D).global_position)
+	if not FloatingOrigin.should_rebase(player_server, _origin_server, ORIGIN_REBASE_THRESHOLD):
+		return
+	var shift: Vector3 = FloatingOrigin.rebase_shift(_origin_server, player_server, WORLD_SCALE)
+	_origin_server = player_server
+	for id: int in _ships:
+		(_ships[id] as Node3D).position += shift
+	for c: Node in _gates_root.get_children():
+		(c as Node3D).position += shift
+	for c: Node in _bodies_root.get_children():
+		(c as Node3D).position += shift
 
 ## Gate/body marker spawning lives in navigation_marker_renderer.gd
 ## (NavigationMarkerRenderer, architecture-review-client.md C-1) -- main.gd
