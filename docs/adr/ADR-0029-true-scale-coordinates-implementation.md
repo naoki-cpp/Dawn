@@ -79,15 +79,20 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
 - ✅ **Step 1** `AnchorId`（dawn-core）+ `AnchorTable`（dawn-sector、f64 絶対位置・rebase/distance/nearest）。純加算 no-op。
 - ✅ **Step 2** 船に `AnchorComp`（`insert_to_world` で恒星アンカーを設定）。恒星=原点ゆえ offset==絶対の no-op。
   スナップショットには未保存（恒星アンカーは sector_id から導出可・分岐は Step 4 から）。
-- ⬜ **Step 3+4（次・一体）** アンカー対応の絶対位置/距離 ＋ ワープのアンカー空間 f64 評価＋到着リベース
-  （`AnchorRebased` 権威イベント追加・apply/replay 対応・snapshot スキーマ更新）。
-  > **注意（レビュー時の論点）**：Step 4 で初めてアンカーが分岐するため、combat / bots / approach / AoI の
-  > 距離計算をすべてアンカー対応にする必要がある（惑星基準オフセットと恒星基準オフセットを直接比較しない）。
-  > 侵襲的かつ回帰リスクが高い。ここは土台レビュー後に着手する。
-- ⬜ **Step 5** galaxy 実 AU 化　⬜ **Step 6** クライアント浮動原点　⬜ **Step 7** HUD 実値変換　⬜ **Step 8** スキーマ版・テスト更新
+- ✅ **Step 3+4** アンカー対応の絶対位置/距離 ＋ ワープ到着リベース（`AnchorRebased` 権威イベント・apply/replay）。
+  - `AnchorRebased` イベント（dawn-core）＋ apply_event 対応。
+  - ワープ到着で Body アンカーへリベース（`rebase_arrival_event`）。warp 元も `dest_in_ship_frame` でアンカー対応。
+  - **距離計算をすべてアンカー対応に**: Combat（`anchor_abs` マップ注入）/ approach / tackle / bot steering
+    （`entity_absolute`）。frame 不変量（差分・相対速度）を絶対位置で計算。
+- ✅ **Step 8（部分）** スナップショットに `anchor` を永続化（リベース済み船の復元で絶対位置を保つ）。スキーマ bump。
+- ⬜ **Step 5** galaxy 実 AU 化 ＋ combat/warp の f64 差分精緻化（圧縮スケールは f32 で正しいが、真 AU では
+  combat 距離と warp 道中を f64 にする必要がある）。
+- ⬜ **Step 6** クライアント浮動原点（`_server_to_godot_pos` 改修・`AnchorRebased` クライアント対応・遠方ビルボード）。
+- ⬜ **Step 7** HUD 実値変換（m/s・AU 単一モジュール）。
 
-> 本 PR は **Step 1-2（アンカー型・船付与・テーブル）までの土台**をレビュー対象とする。挙動変化を伴う
-> Step 3 以降はレビュー後に継続実装する（スパイク `spike_true_scale`/`spike_floating_origin*` の破棄もその時）。
+> **現状（PR #2）**：サーバ側は**圧縮スケールで完全に正しく・全テスト緑**。アンカー機構・ワープリベース・
+> 全距離消費者のアンカー対応・スナップショット永続化まで完了。残りは実 AU 化（f64 精緻化）とクライアント。
+> スパイク `spike_true_scale`/`spike_floating_origin*` の破棄は実 AU 化（Step 5-6）完了時に行う。
 
 ## 5. テスト戦略
 
