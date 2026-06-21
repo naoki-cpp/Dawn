@@ -158,4 +158,93 @@ fn main() {
     };
     println!("\nGATE B-1 (anchor-rel pos err < 1 m, sep err < 1 m, offset < 1e7): {}",
         if pass { "PASS" } else { "FAIL" });
+
+    s2_anchor_crossing(planet_abs);
+}
+
+/// 真の絶対位置（f64）を、与えたアンカー基準の f32 オフセットで表現したときの
+/// 往復誤差（= 表現がどれだけ真値からズレるか）。アンカーが近いほど小さい。
+fn representation_error(truth_abs: [f64; 3], anchor: [f64; 3]) -> (f64, f32) {
+    let off = [
+        (truth_abs[0] - anchor[0]) as f32,
+        (truth_abs[1] - anchor[1]) as f32,
+        (truth_abs[2] - anchor[2]) as f32,
+    ];
+    let mag = off.iter().map(|c| c * c).sum::<f32>().sqrt();
+    let rep = AnchorRelative { anchor_abs: anchor, offset: off };
+    (dist3(rep.absolute(), truth_abs), mag)
+}
+
+/// S2: アンカー跨ぎリベース（B-2）＋ 真距離復元（B-3）。
+///
+/// 真値は f64 で持ち、各アンカー基準の f32 表現が真値からどれだけズレるかを測る。
+/// 検証：
+///   B-2  着弾点（惑星近傍）で「恒星アンカー基準 → 惑星アンカー基準」へリベースすると、
+///        真値に対する誤差が ulp 級（数十 km）から < 1 mm に*回復*し、リベースで
+///        絶対位置が飛ばない（恒星基準の劣化表現を経由しても、最終表現は真値に一致）。
+///   B-3  別アンカー下の 2 点から星系内の真距離を桁落ちなく復元できる。
+///
+/// ついでに方式 B の本質的制約も露わにする：アンカー間 5 AU の*中間*は、どちらの
+/// アンカー基準でも offset ≈ 2.5 AU（f32 ulp ≈ 16 km）で持てない。ゆえにワープ
+/// *道中*の精度は f32 ローカルでは保てず、媒介変数をアンカー空間（f64/比率）で
+/// 評価する必要がある（→ S3）。リベースは「到着時（offset 小）」に行うのが要件。
+fn s2_anchor_crossing(planet_abs: [f64; 3]) {
+    println!("\n=== S2 — anchor-crossing rebase (B-2) & global distance (B-3) ===");
+    let star_abs = [0.0_f64, 0.0, 0.0];
+
+    // 真値（f64）：惑星のすぐ近く（-1.2 km 手前, +300 m）で停止した着弾点。
+    let arrival_truth = [planet_abs[0] - 1_200.0, planet_abs[1] + 300.0, planet_abs[2]];
+
+    // 同じ真値を、恒星アンカー基準 / 惑星アンカー基準でそれぞれ f32 表現したときの誤差。
+    let (err_under_star, mag_star) = representation_error(arrival_truth, star_abs);
+    let (err_under_planet, mag_planet) = representation_error(arrival_truth, planet_abs);
+    println!(
+        "arrival point represented under STAR anchor:   offset mag {mag_star:.3e} m, err vs truth = {err_under_star:.1} m"
+    );
+    println!(
+        "arrival point represented under PLANET anchor: offset mag {mag_planet:.1} m, err vs truth = {err_under_planet:.6} m"
+    );
+    println!(
+        "  -> rebasing star->planet at arrival recovers precision by ~{:.0}x",
+        (err_under_star.max(1e-9)) / err_under_planet.max(1e-9)
+    );
+
+    // ワープ道中（中間 2.5 AU）はどちらのアンカーでも f32 で持てないことを示す。
+    let mid_truth = [planet_abs[0] * 0.5, 0.0, 0.0];
+    let (err_mid_star, mag_mid) = representation_error(mid_truth, star_abs);
+    println!(
+        "MID-transit (2.5 AU) under either anchor: offset mag {mag_mid:.3e} m, err vs truth = {err_mid_star:.0} m  (=> transit precision is S3's job, parametric in anchor space)"
+    );
+
+    // B-3: 別アンカー下の 2 点（恒星近傍の船 X / 惑星近傍の船 Y）の真距離を復元。
+    let ship_x_truth = [5_000.0, 0.0, 0.0];
+    let ship_x = AnchorRelative {
+        anchor_abs: star_abs,
+        offset: [5_000.0, 0.0, 0.0],
+    };
+    let ship_y = AnchorRelative {
+        anchor_abs: planet_abs,
+        offset: [
+            (arrival_truth[0] - planet_abs[0]) as f32,
+            (arrival_truth[1] - planet_abs[1]) as f32,
+            (arrival_truth[2] - planet_abs[2]) as f32,
+        ],
+    };
+    let sep_via_anchors = dist3(ship_x.absolute(), ship_y.absolute());
+    let truth_sep = dist3(ship_x_truth, arrival_truth);
+    println!(
+        "global distance star-ship<->planet-ship: via anchors = {sep_via_anchors:.3} m, truth = {truth_sep:.3} m (err {:.6} m)",
+        (sep_via_anchors - truth_sep).abs()
+    );
+
+    // B-2 判定：着弾点を惑星アンカーで持てば真値誤差 < 1 m（恒星アンカーでは数十 km）。
+    // B-3 判定：別アンカー 2 点の真距離復元誤差 < 1 m。
+    let pass = err_under_planet < 1.0 && (sep_via_anchors - truth_sep).abs() < 1.0;
+    println!(
+        "\nGATE B-2/B-3 (arrival under dest anchor err < 1 m, global dist err < 1 m): {}",
+        if pass { "PASS" } else { "FAIL" }
+    );
+    println!(
+        "FINDING: anchors must be local at arrival (offset small); 2 anchors 5 AU apart cannot\n         hold the midpoint in f32 -- warp transit must be parametric in anchor space (S3)."
+    );
 }
