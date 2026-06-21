@@ -66,7 +66,7 @@ const WARP_ALIGN_FRACTION: f32 = 0.75;
 /// ceil(warp_distance / WARP_SPEED))`. Warp then follows a smoothstep ease
 /// along the start→arrival segment (ADR-0022 amendment), so this is the rough
 /// peak speed, not a constant velocity.
-const WARP_SPEED: f32 = 5000.0;
+const WARP_SPEED: f32 = 10_000.0;
 /// Floor on warp duration (ticks) so even a short warp reads as a warp rather
 /// than a blink. At 10 tick/s this is ~2 s.
 const WARP_MIN_TICKS: u32 = 20;

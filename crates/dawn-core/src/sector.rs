@@ -30,8 +30,13 @@ pub struct SectorBounds {
 impl SectorBounds {
     /// Half-extent of the default sector in each axis (units).
     /// The sector spans `[-DEFAULT_HALF, +DEFAULT_HALF]` on all three axes,
-    /// giving a total side length of 2 * DEFAULT_HALF = 100,000 units.
-    pub const DEFAULT_HALF: f32 = 50_000.0;
+    /// giving a total side length of 2 * DEFAULT_HALF = 1,400,000 units. Sized
+    /// to contain a "wide" star system (planets at ~10^5 units, gates at the
+    /// edge ~600,000) so bodies sit far enough that their bearing barely shifts
+    /// during sublight travel — which reads as distance (f32-safe; see ADR-0028:
+    /// f32 to ~10^7 units, i64 only for true AU). Bounds are soft (spawn-
+    /// placement range only; space is unbounded since Phase 4).
+    pub const DEFAULT_HALF: f32 = 700_000.0;
 
     pub fn new(min: Position, max: Position) -> Self {
         Self { min, max }

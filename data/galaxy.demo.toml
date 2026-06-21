@@ -1,11 +1,12 @@
 # Demo Star System / Jump Gate / Celestial Body topology
 #
 # Scale: 1 unit = 1 m. Intra-system distances are gameplay-COMPRESSED (NOT real
-# astronomical scale) and kept within the Sector volume (±50,000 units, see
-# SectorBounds::DEFAULT_HALF) so f32 positions stay precise -- ADR-0028 chose
-# f32 + per-sector local frames over i64/f64, since a "large world" is many
-# Sectors (an integer index), not large coordinates. A system spans ~100 km of
-# playable space and you cross it by Warp, not sublight cruise (as in EVE).
+# astronomical scale) but kept "wide": planets at ~10^5 units and gates at the
+# edge (~600,000) so a body's bearing barely shifts during sublight travel,
+# which reads as distance. All within the Sector volume (±700,000 units, see
+# SectorBounds::DEFAULT_HALF) and well inside f32 precision -- ADR-0028 chose
+# f32 + per-sector local frames over i64/f64 (f32 is fine to ~10^7 units; i64
+# is only for true AU). You cross the system by Warp, not sublight (as in EVE).
 #
 # Celestial body `position` is authored in AU (astronomical units) and converted
 # to game units at load time by UNITS_PER_AU = 30,000 (see galaxy.rs). This is a
@@ -35,35 +36,35 @@ sectors = [2]
 
 # -- Jump Gates ---------------------------------------------------------------
 # Topology: Alpha (Sector 0) <-> Beta (Sector 1) <-> Gamma (Sector 2)
-# Gates sit near the Sector edge (~49,000, just inside ±50,000) -- the boundary
-# you cross to the next Sector.
+# Gates sit near the Sector edge (~600,000, just inside ±700,000) -- the
+# boundary you cross to the next Sector.
 
 [[jump_gates]]
 id                = 0
 from_sector       = 0
 to_sector         = 1
-position          = [49000.0, 0.0, 0.0]   # Alpha +X edge -> Beta
+position          = [600000.0, 0.0, 0.0]   # Alpha +X edge -> Beta
 activation_radius = 2000.0
 
 [[jump_gates]]
 id                = 1
 from_sector       = 1
 to_sector         = 0
-position          = [-49000.0, 0.0, 0.0]  # Beta -X edge -> Alpha
+position          = [-600000.0, 0.0, 0.0]  # Beta -X edge -> Alpha
 activation_radius = 2000.0
 
 [[jump_gates]]
 id                = 2
 from_sector       = 1
 to_sector         = 2
-position          = [49000.0, 0.0, 0.0]   # Beta +X edge -> Gamma
+position          = [600000.0, 0.0, 0.0]   # Beta +X edge -> Gamma
 activation_radius = 2000.0
 
 [[jump_gates]]
 id                = 3
 from_sector       = 2
 to_sector         = 1
-position          = [-49000.0, 0.0, 0.0]  # Gamma -X edge -> Beta
+position          = [-600000.0, 0.0, 0.0]  # Gamma -X edge -> Beta
 activation_radius = 2000.0
 
 # -- Celestial Bodies ---------------------------------------------------------

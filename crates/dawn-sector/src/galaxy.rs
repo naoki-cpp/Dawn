@@ -28,7 +28,7 @@ pub struct Galaxy {
 /// so a system spans a comfortable, f32-safe range and orbits sit well clear of
 /// the star's exaggerated visual radius. Body `radius` and gate `position` stay
 /// in units (they are not orbital distances). See ADR-0025 / ADR-0028.
-pub const UNITS_PER_AU: f32 = 30_000.0;
+pub const UNITS_PER_AU: f32 = 200_000.0;
 
 impl Galaxy {
     /// Construct from explicitly provided data (used by `DataLoader`).
