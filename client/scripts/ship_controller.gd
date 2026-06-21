@@ -65,15 +65,27 @@ func _ready() -> void:
 const TICKS_PER_SEC    : float = 10.0  ## Server tick rate
 const ROT_THRESHOLD_SQ : float = 0.02  ## Min speed² before rotating (Godot units²/frame²)
 const ROT_SPEED        : float = 4.0   ## Slerp speed toward velocity direction
+## Cap on the VISUAL integration speed (Godot units/tick). A true-AU warp runs at
+## ~10^8 Godot units/tick; integrating that literally flings the ship past the
+## far plane and jitters in f32 (motion sickness). We instead streak forward at a
+## bounded, renderable speed and let the authoritative PositionSnap (ADR-0029)
+## place the ship at the real arrival point. The true speed is still shown on the
+## HUD (get_speed_server uses the uncapped _velocity).
+const VISUAL_SPEED_CAP : float = 2_000.0
 
 func _process(delta: float) -> void:
 	if not _is_init:
 		return
 
 	## VelocityChanged (ADR-0008): integrate velocity every frame to avoid
-	## visible position jumps at tick boundaries.
-	position += _velocity * delta * TICKS_PER_SEC
-	_vel_estimate = _velocity
+	## visible position jumps at tick boundaries. Cap the visual speed so a warp
+	## streaks smoothly instead of flinging the ship to f32-jitter territory.
+	var integ_vel := _velocity
+	var spd := _velocity.length()
+	if spd > VISUAL_SPEED_CAP:
+		integ_vel = _velocity / spd * VISUAL_SPEED_CAP
+	position += integ_vel * delta * TICKS_PER_SEC
+	_vel_estimate = integ_vel
 
 	## Rotate the ship to face its velocity direction.
 	## The Hull mesh tip is in local -Z after its -90° X rotation, which

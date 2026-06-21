@@ -589,6 +589,11 @@ func _handle_position_snap(p: Dictionary) -> void:
 		# Cancel the client-side warp snap so it doesn't fire a stale position.
 		_player_warp_snap_pos = Vector3.INF
 		_player_was_warping = false
+		# The snap may have placed the player far from the current origin (a warp
+		# crossed ~1 AU). Rebase the floating origin immediately so the ship and
+		# the destination markers render near the Godot origin this same frame
+		# (otherwise the ship lands beyond the camera far plane for one frame).
+		_maybe_rebase_origin()
 
 # -- Jump Gate (ADR-0009) -----------------------------------------------------
 
