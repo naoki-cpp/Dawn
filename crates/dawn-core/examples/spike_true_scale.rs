@@ -160,6 +160,63 @@ fn main() {
         if pass { "PASS" } else { "FAIL" });
 
     s2_anchor_crossing(planet_abs);
+    s3_anchor_space_warp(planet_abs);
+}
+
+/// S3: ワープのアンカー間移動（媒介変数・厳密到着）。
+///
+/// S2 の知見：道中（2.5 AU）は f32 ローカルで持てない。ゆえにワープ中の権威位置は
+/// *アンカー空間 f64* で媒介変数評価する（ADR-0022 の smoothstep / floored duration /
+/// exact-arrival をそのまま流用）。各 tick で「最寄りアンカー＋f32 オフセット」へ射影して
+/// クライアントへ渡す想定だが、本ステップでは到着の厳密性と道中の桁落ち非発生を確認する。
+///
+/// 検証：恒星近傍 (+8 km) から惑星近傍 (-1.2 km 手前) へワープ。到着点が計画到着点に
+///       厳密一致（< 1 mm）し、道中の各 tick 位置が f64 媒介で滑らか（ulp 落ちなし）。
+fn s3_anchor_space_warp(planet_abs: [f64; 3]) {
+    println!("\n=== S3 — anchor-space parametric warp (exact arrival) ===");
+    const WARP_SPEED_MPS: f64 = 3.0e9; // スパイク用の見かけワープ速度（m/s）
+    const MIN_TICKS: u32 = 20;
+
+    let start = [8_000.0_f64, 0.0, 0.0]; // 恒星近傍
+    let arrival = [planet_abs[0] - 1_200.0, planet_abs[1] + 300.0, planet_abs[2]]; // 惑星近傍
+
+    let warp_dist = dist3(start, arrival);
+    let total = ((warp_dist / WARP_SPEED_MPS).ceil().max(0.0) as u32).max(MIN_TICKS);
+    println!("warp distance = {warp_dist:.3e} m, floored duration = {total} ticks");
+
+    let smoothstep = |t: f64| t * t * (3.0 - 2.0 * t);
+
+    // 道中を f64 媒介で歩く。各 tick の位置と、前 tick からの変位が単調・連続かを見る。
+    let mut prev = start;
+    let mut min_step = f64::INFINITY;
+    let mut max_step = 0.0_f64;
+    let mut pos = start;
+    for elapsed in 1..=total {
+        let t = smoothstep(elapsed as f64 / total as f64);
+        pos = [
+            start[0] + (arrival[0] - start[0]) * t,
+            start[1] + (arrival[1] - start[1]) * t,
+            start[2] + (arrival[2] - start[2]) * t,
+        ];
+        let step = dist3(prev, pos);
+        min_step = min_step.min(step);
+        max_step = max_step.max(step);
+        prev = pos;
+    }
+
+    let arrival_err = dist3(pos, arrival);
+    println!("per-tick step: min {min_step:.3e} m, max {max_step:.3e} m (smoothstep ease: small at ends, large mid)");
+    println!("final position vs planned arrival: err = {arrival_err:.6} m");
+
+    // 到着点を惑星アンカーの f32 オフセットで持てるか（S2 の到着リベース）。
+    let (arr_repr_err, arr_off_mag) = representation_error(arrival, planet_abs);
+    println!("arrival held under planet anchor: offset mag {arr_off_mag:.1} m, repr err {arr_repr_err:.6} m");
+
+    let pass = arrival_err < 1e-3 && arr_repr_err < 1.0;
+    println!(
+        "\nGATE S3 (exact arrival < 1 mm, arrival representable under dest anchor < 1 m): {}",
+        if pass { "PASS" } else { "FAIL" }
+    );
 }
 
 /// 真の絶対位置（f64）を、与えたアンカー基準の f32 オフセットで表現したときの
