@@ -170,6 +170,7 @@ mod tests {
             warp_start  : Position::ORIGIN,
             warp_total  : 1,
             warp_elapsed: 0,
+            warp_arrival_abs: [0.0, 0.0, 0.0],
         }).unwrap();
 
         let events = MovementSystem::run(&mut w, Tick(1));

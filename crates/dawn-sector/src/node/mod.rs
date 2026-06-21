@@ -370,6 +370,19 @@ impl<S: EventStore> SimulationNode<S> {
         )
     }
 
+    /// Absolute position (Sector-frame, metres, f64) of a ship entity given its
+    /// raw offset, composing its anchor (ADR-0029). Used by warp arrival math
+    /// that must stay precise at true-AU distances.
+    pub(super) fn entity_absolute_f64(&self, entity: Entity, offset: Position) -> [f64; 3] {
+        let Some(anchor) = self.world.ship_anchor(entity) else {
+            return [offset.x as f64, offset.y as f64, offset.z as f64];
+        };
+        let Some(a) = self.anchor_table.abs(anchor) else {
+            return [offset.x as f64, offset.y as f64, offset.z as f64];
+        };
+        [a[0] + offset.x as f64, a[1] + offset.y as f64, a[2] + offset.z as f64]
+    }
+
     /// True distance (metres) between two Ships, composing each ship's anchor
     /// and offset in f64 so the result is correct even if the two ships are
     /// anchored on different bodies (ADR-0029 step 3 / spike B-3).

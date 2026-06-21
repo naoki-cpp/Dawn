@@ -51,6 +51,11 @@ pub struct WarpComp {
     pub warp_start  : Position,
     pub warp_total  : u32,
     pub warp_elapsed: u32,
+    /// Exact arrival point in absolute (Sector-frame) metres, f64 (ADR-0029).
+    /// Set at engage for Body warps from the f64 anchor source so the arrival
+    /// rebase is precise at true-AU distances (the f32 `PositionComp` near a
+    /// 7.5e11 anchor would be ~65 km coarse). `[0,0,0]` for Gate warps (no rebase).
+    pub warp_arrival_abs: [f64; 3],
 }
 
 impl WarpComp {
