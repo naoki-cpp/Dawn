@@ -187,6 +187,21 @@ impl<S: EventStore> SimulationNode<S> {
                     }
                 }
             }
+
+            DomainEvent::AnchorRebased(e) => {
+                // Frame rebase (ADR-0029): set anchor + position offset directly.
+                // Absolute position is unchanged; this only updates the
+                // (anchor, offset) representation so replay stays consistent.
+                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+                    self.world.set_ship_anchor(entity, e.anchor);
+                    if let Ok(mut pos) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+                        pos.0 = e.offset;
+                    }
+                }
+                if e.tick > self.current_tick {
+                    self.current_tick = e.tick;
+                }
+            }
         }
     }
 

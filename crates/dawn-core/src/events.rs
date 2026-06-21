@@ -17,7 +17,7 @@
 
 use crate::fitting::{FittingSnapshot, SlotKind, ModuleId};
 use crate::ship_type::ShipTypeId;
-use crate::navigation::{JumpGateId, StarSystemId};
+use crate::navigation::{AnchorId, JumpGateId, StarSystemId};
 use crate::{Position, SectorId, ShipId, Tick, Velocity};
 use serde::{Deserialize, Serialize};
 
@@ -88,6 +88,16 @@ pub enum DomainEvent {
     /// lock lost). The tackled ship may still be tackled by other ships.
     /// See ADR-0024.
     TackleReleased(TackleReleased),
+
+    /// A Ship's coordinate anchor changed (ADR-0029). The ship's absolute
+    /// position is unchanged; only its `(anchor, offset)` representation is
+    /// rebased — e.g. on warp arrival, from the Sector-origin anchor to the
+    /// destination body's anchor. Authoritative: carries the post-rebase
+    /// `anchor` and `offset` so replay reproduces the representation exactly
+    /// (the offset change is discontinuous and not via `VelocityChanged`, so it
+    /// must be recorded as its own fact — INV-MOVE is about velocity-driven
+    /// motion, a frame rebase keeps the same absolute position).
+    AnchorRebased(AnchorRebased),
 }
 
 impl DomainEvent {
@@ -112,6 +122,7 @@ impl DomainEvent {
             Self::StarSystemChanged(e)      => e.ship_id,
             Self::TackleApplied(e)          => e.ship_id,
             Self::TackleReleased(e)         => e.ship_id,
+            Self::AnchorRebased(e)          => e.ship_id,
         }
     }
 
@@ -137,6 +148,7 @@ impl DomainEvent {
             Self::StarSystemChanged(e)      => e.tick,
             Self::TackleApplied(e)          => e.tick,
             Self::TackleReleased(e)         => e.tick,
+            Self::AnchorRebased(e)          => e.tick,
         }
     }
 }
@@ -167,6 +179,22 @@ pub struct VelocityChanged {
     pub ship_id  : ShipId,
     pub velocity : Velocity,
     pub tick     : Tick,
+}
+
+// ── AnchorRebased ─────────────────────────────────────────────────────────────
+
+/// A Ship's coordinate anchor changed (ADR-0029). Authoritative: the absolute
+/// position is unchanged; `anchor`/`offset` are the post-rebase representation.
+///
+/// Replay: on apply, set the ship's anchor and position offset directly (the
+/// rebase is a discontinuous frame change, not velocity-driven motion).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnchorRebased {
+    pub ship_id: ShipId,
+    pub anchor : AnchorId,
+    /// New position offset, relative to `anchor` (metres).
+    pub offset : Position,
+    pub tick   : Tick,
 }
 
 // ── ShipDespawned ─────────────────────────────────────────────────────────────
@@ -376,6 +404,18 @@ mod tests {
             tick     : Tick(42),
         });
         assert_eq!(event.tick(), Tick(42));
+    }
+
+    #[test]
+    fn anchor_rebased_event_carries_ship_anchor_and_tick() {
+        let event = DomainEvent::AnchorRebased(AnchorRebased {
+            ship_id: ship_id(),
+            anchor : crate::AnchorId(3),
+            offset : Position::new(10.0, 0.0, -5.0),
+            tick   : Tick(7),
+        });
+        assert_eq!(event.ship_id(), ship_id());
+        assert_eq!(event.tick(), Tick(7));
     }
 
     #[test]

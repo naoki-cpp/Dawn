@@ -131,6 +131,9 @@ where
     pending_bot_lock_commands: Vec<dawn_core::LockOnCommand>,
     /// Static navigation topology for this Sector (gates, bodies, star map).
     sector_map: SectorMap,
+    /// Per-body coordinate anchors (ADR-0029): absolute Sector-local positions
+    /// in f64, derived from `sector_map.galaxy`. Rebuilt on `set_galaxy`.
+    anchor_table: crate::anchor::AnchorTable,
     /// Per-Sector population backstop (ADR-0018). Defaults to [`POPULATION_CAP`];
     /// tunable via [`Self::set_population_cap`].
     population_cap: usize,
@@ -182,6 +185,7 @@ impl<S: EventStore> SimulationNode<S> {
                     galaxy: sm,
                 }
             },
+            anchor_table      : crate::anchor::AnchorTable::from_galaxy(&crate::galaxy::Galaxy::demo()),
             population_cap    : POPULATION_CAP,
             pending_auto_jumps: Vec::new(),
         }
@@ -223,6 +227,7 @@ impl<S: EventStore> SimulationNode<S> {
                     galaxy: sm,
                 }
             },
+            anchor_table       : crate::anchor::AnchorTable::from_galaxy(&crate::galaxy::Galaxy::demo()),
             population_cap    : POPULATION_CAP,
             pending_auto_jumps: Vec::new(),
         };
@@ -282,6 +287,7 @@ impl<S: EventStore> SimulationNode<S> {
         let sid = self.sector_id;
         self.sector_map.gates = map.gates_in_sector(sid).into_iter().map(|g| (g.id, g)).collect();
         self.sector_map.bodies = map.bodies_in_sector(sid).into_iter().map(|b| (b.id, b)).collect();
+        self.anchor_table = crate::anchor::AnchorTable::from_galaxy(&map);
         self.sector_map.galaxy = map;
     }
 
@@ -331,6 +337,34 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn get_ship_anchor(&self, ship_id: ShipId) -> Option<dawn_core::AnchorId> {
         let entity = self.ships.index.get(&ship_id)?;
         self.world.ship_anchor(*entity)
+    }
+
+    /// Read access to this node's per-body anchor table (ADR-0029).
+    pub fn anchor_table(&self) -> &crate::anchor::AnchorTable { &self.anchor_table }
+
+    /// A Ship's absolute position in the Sector-local frame (metres, f64),
+    /// composing its anchor's absolute position with its f32 offset (ADR-0029).
+    /// Falls back to treating the raw offset as absolute if the anchor is
+    /// unknown (pre-anchor data / tests).
+    pub fn ship_absolute(&self, ship_id: ShipId) -> Option<[f64; 3]> {
+        let entity = *self.ships.index.get(&ship_id)?;
+        let offset = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+        match self.world.ship_anchor(entity) {
+            Some(anchor) => self.anchor_table
+                .absolute(anchor, offset)
+                .or(Some([offset.x as f64, offset.y as f64, offset.z as f64])),
+            None => Some([offset.x as f64, offset.y as f64, offset.z as f64]),
+        }
+    }
+
+    /// True distance (metres) between two Ships, composing each ship's anchor
+    /// and offset in f64 so the result is correct even if the two ships are
+    /// anchored on different bodies (ADR-0029 step 3 / spike B-3).
+    pub fn ship_distance(&self, a: ShipId, b: ShipId) -> Option<f64> {
+        let pa = self.ship_absolute(a)?;
+        let pb = self.ship_absolute(b)?;
+        let d = [pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]];
+        Some((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt())
     }
 
     /// Look up the current `ShipStatsComp` of a Ship by its ID. Test-only.

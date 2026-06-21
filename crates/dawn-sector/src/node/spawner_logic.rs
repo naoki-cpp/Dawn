@@ -339,7 +339,7 @@ impl<S: EventStore> SimulationNode<S> {
         // ADR-0029 step 2: anchor every ship on its Sector's origin (the star).
         // Semantic no-op while bodies sit in the star-origin frame (the star is
         // at the origin, so the position offset equals the absolute position).
-        let anchor = crate::anchor::AnchorTable::from_galaxy(&self.sector_map.galaxy)
+        let anchor = self.anchor_table
             .sector_origin_anchor(self.sector_id)
             .unwrap_or(dawn_core::AnchorId(0));
         self.world.set_ship_anchor(entity, anchor);
@@ -427,6 +427,48 @@ mod tests {
         let mut node = node_with_modules();
         let ship = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(30_000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
         assert_eq!(node.get_ship_anchor(ship), Some(dawn_core::AnchorId(0)));
+    }
+
+    #[test]
+    fn anchor_rebased_preserves_absolute_position_and_updates_anchor() {
+        use dawn_core::{AnchorId, events::AnchorRebased};
+        let mut node = node_with_modules();
+        // Spawn near the star (Helios, AnchorId 0). Absolute == offset here.
+        let ship = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(160_000.0, 0.0, 100_000.0), dawn_core::Velocity::ZERO);
+        let before = node.ship_absolute(ship).unwrap();
+        // Rebase to Forge (AnchorId 1). New offset = world - Forge_abs.
+        let forge_abs = node.anchor_table().abs(AnchorId(1)).unwrap();
+        let new_off = Position::new(
+            (before[0] - forge_abs[0]) as f32,
+            (before[1] - forge_abs[1]) as f32,
+            (before[2] - forge_abs[2]) as f32,
+        );
+        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased {
+            ship_id: ship, anchor: AnchorId(1), offset: new_off, tick: Tick(1),
+        }));
+        assert_eq!(node.get_ship_anchor(ship), Some(AnchorId(1)));
+        let after = node.ship_absolute(ship).unwrap();
+        let err = ((before[0]-after[0]).powi(2) + (before[1]-after[1]).powi(2) + (before[2]-after[2]).powi(2)).sqrt();
+        assert!(err < 1.0, "rebase changed absolute position by {err} m");
+    }
+
+    #[test]
+    fn ship_distance_is_correct_across_different_anchors() {
+        use dawn_core::{AnchorId, events::AnchorRebased};
+        let mut node = node_with_modules();
+        let a = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(1000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
+        let b = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(2000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
+        let expected = node.ship_distance(a, b).unwrap(); // both on star anchor
+        // Rebase b onto Forge while preserving its absolute position.
+        let world_b = node.ship_absolute(b).unwrap();
+        let forge_abs = node.anchor_table().abs(AnchorId(1)).unwrap();
+        let off_b = Position::new(
+            (world_b[0]-forge_abs[0]) as f32, (world_b[1]-forge_abs[1]) as f32, (world_b[2]-forge_abs[2]) as f32);
+        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased {
+            ship_id: b, anchor: AnchorId(1), offset: off_b, tick: Tick(1),
+        }));
+        let after = node.ship_distance(a, b).unwrap();
+        assert!((after - expected).abs() < 1.0, "cross-anchor distance {after} != {expected}");
     }
 
     #[test]

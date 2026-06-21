@@ -131,6 +131,11 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
         DomainEvent::SectorTransitRequested(_) => return None,
         DomainEvent::SectorTransitCompleted(_) => return None,
         DomainEvent::SectorTransitAborted(_)   => return None,
+        // ADR-0029: a coordinate rebase keeps the absolute position unchanged
+        // and velocity is frame-invariant, so a client that integrates
+        // VelocityChanged stays consistent without seeing the rebase. Client
+        // anchor handling (floating origin, fresh InitialState) lands in step 6.
+        DomainEvent::AnchorRebased(_)          => return None,
     };
     serde_json::to_string(&j).ok()
 }
