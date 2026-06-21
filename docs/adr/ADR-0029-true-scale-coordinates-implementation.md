@@ -74,6 +74,21 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
 
 > 各段は前段の上に乗る小スライス。1〜3 は意味的 no-op（リファクタ）で安全に入れ、4 以降で挙動が変わる。
 
+### 実装進捗（PR #2・`spike/true-scale-coords`）
+
+- ✅ **Step 1** `AnchorId`（dawn-core）+ `AnchorTable`（dawn-sector、f64 絶対位置・rebase/distance/nearest）。純加算 no-op。
+- ✅ **Step 2** 船に `AnchorComp`（`insert_to_world` で恒星アンカーを設定）。恒星=原点ゆえ offset==絶対の no-op。
+  スナップショットには未保存（恒星アンカーは sector_id から導出可・分岐は Step 4 から）。
+- ⬜ **Step 3+4（次・一体）** アンカー対応の絶対位置/距離 ＋ ワープのアンカー空間 f64 評価＋到着リベース
+  （`AnchorRebased` 権威イベント追加・apply/replay 対応・snapshot スキーマ更新）。
+  > **注意（レビュー時の論点）**：Step 4 で初めてアンカーが分岐するため、combat / bots / approach / AoI の
+  > 距離計算をすべてアンカー対応にする必要がある（惑星基準オフセットと恒星基準オフセットを直接比較しない）。
+  > 侵襲的かつ回帰リスクが高い。ここは土台レビュー後に着手する。
+- ⬜ **Step 5** galaxy 実 AU 化　⬜ **Step 6** クライアント浮動原点　⬜ **Step 7** HUD 実値変換　⬜ **Step 8** スキーマ版・テスト更新
+
+> 本 PR は **Step 1-2（アンカー型・船付与・テーブル）までの土台**をレビュー対象とする。挙動変化を伴う
+> Step 3 以降はレビュー後に継続実装する（スパイク `spike_true_scale`/`spike_floating_origin*` の破棄もその時）。
+
 ## 5. テスト戦略
 
 - **決定論**：replay が再計算するのは f32 オフセット積分のみ（現行と同型）。`AnchorRebased` は権威イベントで
