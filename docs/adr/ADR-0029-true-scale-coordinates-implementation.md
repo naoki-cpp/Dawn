@@ -86,7 +86,12 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
     （`entity_absolute`）。frame 不変量（差分・相対速度）を絶対位置で計算。
 - ✅ **Step 8（部分）** スナップショットに `anchor` を永続化（リベース済み船の復元で絶対位置を保つ）。スキーマ bump。
 - 🔶 **Step 5a（combat）** combat 距離を f64 差分で計算（実装済み・圧縮では無影響）。
-- ⬜ **Step 5b（実 AU 起動・結合フェーズ）** 以下は密結合で、ゲーム感のプレイテスト反復を要する：
+- 🔶 **Step 5b（サーバ側 f64 prep 完了・前方互換）** 実 AU でも精密に動くサーバ側準備を完了（圧縮では挙動不変）：
+  - `CelestialBodyDef.abs_m: [f64;3]`（f64 アンカー源）＋ `AnchorTable` がそれを使用。
+  - combat 距離を f64 差分で計算。
+  - ワープ到着を f64（`WarpComp.warp_arrival_abs` ＋ `entity_absolute_f64`）で算出し精密リベース。
+  - **残りの実 AU「起動」は client（step 6）が前提**で、データ flip ＋ `WARP_SPEED` 再調整 ＋ プレイテストを伴う。
+- ⬜ **Step 5b 起動（要 client・プレイテスト）** 以下は密結合で、ゲーム感のプレイテスト反復を要する：
   > **発見（5a 実装中）**：`CelestialBodyDef.position` は f32 `Position`。実 AU（7.5×10¹¹）を f32 で持つと
   > その時点で ~65km 誤差が乗り、`AnchorTable`（f64）も f32 body 位置から構築するため誤差を継承する。
   > ゆえに実 AU 化は係数変更では足りず、**アンカー源データを f64 に**する必要がある。
