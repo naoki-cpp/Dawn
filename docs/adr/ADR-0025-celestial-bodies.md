@@ -73,6 +73,12 @@ pub enum WarpTarget {
 > Warp の所要時間（[ADR-0022](ADR-0022-intra-sector-warp.md) 媒介変数改訂）で調整する。
 > 真の AU を 1 星系に置く大座標化は [ADR-0028](ADR-0028-large-world-coordinates.md)（Deferred）。
 > ※ 具体的な圧縮値への data/galaxy*.toml 再調整（8abbe3f の 10× 見直しを含む）は別途実施。
+>
+> **[改訂]** (2026-06-21・後) 天体の `position` は **AU で記述**し、読込時に
+> `UNITS_PER_AU = 30,000`（`crates/dawn-sector/src/galaxy.rs`）で units へ換算する方式にした
+> （設計者が AU で軌道を考えられる）。ゲート `position` と天体 `radius` は units のまま
+> （ゲートは Sector 縁のインフラ、radius は誇張視覚値）。上表の units 値は当時のスナップショットで、
+> 現行の権威値は data/galaxy*.toml の AU 記述を参照。
 
 | 星系   | 天体               | 軌道              | 位置                     | 半径   | スペクトル型 |
 |--------|------------------|-------------------|--------------------------|--------|------------|
