@@ -466,7 +466,7 @@ mod tests {
         assert_eq!(node.approach_target(chaser), Some(dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(0))));
 
         let start = node.get_ship_position(chaser).unwrap().distance(gate.position);
-        for _ in 0..3_000 { node.tick(); }
+        for _ in 0..400 { node.tick(); }
         let end = node.get_ship_position(chaser).unwrap().distance(gate.position);
         assert!(end < start, "ship should close on the gate: {start} -> {end}");
         assert!(node.can_propose_jump(chaser, dawn_core::JumpGateId(0)),
@@ -521,7 +521,7 @@ mod tests {
         assert!(node.get_ship_position(ship).unwrap().x < 100.0,
             "an aligning ship accelerates sublight, far short of warp speed");
 
-        for _ in 0..150 { node.tick(); }
+        for _ in 0..80 { node.tick(); }
         assert_eq!(node.warp_phase(ship), None, "warp completes and the component is removed");
         assert!(node.can_propose_jump(ship, dawn_core::JumpGateId(0)),
             "warp drops the ship inside the gate's activation radius");
@@ -556,7 +556,7 @@ mod tests {
 
         let entity = *node.ships.index.get(&ship).unwrap();
         let mut saw_decel_step = false;
-        for _ in 0..150 {
+        for _ in 0..100 {
             node.tick();
             let warping = node.warp_phase(ship) == Some(WarpPhase::Warping);
             let v = node.world.inner().get::<&VelocityComp>(entity).unwrap().0;
@@ -604,7 +604,7 @@ mod tests {
         let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         assert!(node.apply_warp_command(ship, WarpTarget::Gate(dawn_core::JumpGateId(0)), true));
 
-        for _ in 0..150 { node.tick(); }
+        for _ in 0..100 { node.tick(); }
         assert_eq!(node.warp_phase(ship), None, "warp must complete");
         assert!(node.can_propose_jump(ship, dawn_core::JumpGateId(0)),
             "ship must be within gate range after warp");
@@ -622,7 +622,7 @@ mod tests {
         let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         assert!(node.apply_warp_command(ship, WarpTarget::Gate(dawn_core::JumpGateId(0)), false));
 
-        for _ in 0..150 { node.tick(); }
+        for _ in 0..100 { node.tick(); }
         assert_eq!(node.warp_phase(ship), None);
         assert!(node.drain_pending_auto_jumps().is_empty());
     }

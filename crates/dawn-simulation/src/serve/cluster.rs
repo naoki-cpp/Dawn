@@ -15,8 +15,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     const SECTORS: usize = 3;
     /// 2x the Alpha star (Helios) radius from Sector origin (matches
     /// SimulationNode::DEFAULT_PLAYER_SPAWN): clear of the star body itself,
-    /// far short of Gate 0 (490,000 units), and well beyond the 3,000u warp
-    /// minimum, so warp/approach to the gate both work (ADR-0022).
+    /// short of Gate 0 (49,000 units, near the Sector edge), and well beyond
+    /// the 3,000u warp minimum, so warp/approach to the gate both work (ADR-0022).
     const PLAYER_SPAWN: Position = Position { x: 30_000.0, y: 0.0, z: 0.0 };
 
     println!("═══════════════════════════════════════════");

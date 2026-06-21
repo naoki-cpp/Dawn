@@ -1,14 +1,15 @@
 # Demo Star System / Jump Gate / Celestial Body topology
 #
-# Scale: 1 unit = 1,000 km  ->  1 AU ~= 150,000 units
-# Jump Gates sit at ~490,000 units (~3.3 AU, outer asteroid belt).
+# Scale: 1 unit = 1 m. Intra-system distances are gameplay-COMPRESSED (NOT real
+# astronomical scale) and kept within the Sector volume (±50,000 units, see
+# SectorBounds::DEFAULT_HALF) so f32 positions stay precise -- ADR-0028 chose
+# f32 + per-sector local frames over i64/f64, since a "large world" is many
+# Sectors (an integer index), not large coordinates. A system spans ~100 km of
+# playable space and you cross it by Warp, not sublight cruise (as in EVE).
 #
-# Body radii are NOT to this scale (e.g. Helios at 15,000 units would be a
-# tiny dot at system scale) -- they're sized up for visibility/gameplay, the
-# same way EVE Online and most space games render celestial bodies far larger
-# than their orbits would imply. Only orbital/gate *positions* use the scale
-# above, so travel time stays meaningful (warp at 5,000 units/tick takes
-# several seconds to cross a system instead of being instant).
+# Body radii are exaggerated for visibility/gameplay, not to scale. The "AU"
+# labels below are loose flavor, not literal astronomical units. Travel time is
+# set by Warp duration (ADR-0022 parametric warp), not by inflating distance.
 #
 # Edit this file and restart the server to change the layout (no recompile needed).
 
@@ -31,33 +32,35 @@ sectors = [2]
 
 # -- Jump Gates ---------------------------------------------------------------
 # Topology: Alpha (Sector 0) <-> Beta (Sector 1) <-> Gamma (Sector 2)
+# Gates sit near the Sector edge (~49,000, just inside ±50,000) -- the boundary
+# you cross to the next Sector.
 
 [[jump_gates]]
 id                = 0
 from_sector       = 0
 to_sector         = 1
-position          = [490000.0, 0.0, 0.0]   # Alpha +X edge -> Beta
+position          = [49000.0, 0.0, 0.0]   # Alpha +X edge -> Beta
 activation_radius = 2000.0
 
 [[jump_gates]]
 id                = 1
 from_sector       = 1
 to_sector         = 0
-position          = [-490000.0, 0.0, 0.0]  # Beta -X edge -> Alpha
+position          = [-49000.0, 0.0, 0.0]  # Beta -X edge -> Alpha
 activation_radius = 2000.0
 
 [[jump_gates]]
 id                = 2
 from_sector       = 1
 to_sector         = 2
-position          = [490000.0, 0.0, 0.0]   # Beta +X edge -> Gamma
+position          = [49000.0, 0.0, 0.0]   # Beta +X edge -> Gamma
 activation_radius = 2000.0
 
 [[jump_gates]]
 id                = 3
 from_sector       = 2
 to_sector         = 1
-position          = [-490000.0, 0.0, 0.0]  # Gamma -X edge -> Beta
+position          = [-49000.0, 0.0, 0.0]  # Gamma -X edge -> Beta
 activation_radius = 2000.0
 
 # -- Celestial Bodies ---------------------------------------------------------
@@ -79,7 +82,7 @@ id            = 1
 sector        = 0
 kind          = "Planet"
 name          = "Forge"
-position      = [150000.0, 0.0, 0.0]  # 1.0 AU
+position      = [15000.0, 0.0, 0.0]  # ~1.0 AU (flavor)
 radius        = 3500.0
 spectral_type = 0.0
 
@@ -88,7 +91,7 @@ id            = 6
 sector        = 0
 kind          = "Planet"
 name          = "Meridian"
-position      = [207000.0, 0.0, 174000.0]  # ~1.8 AU
+position      = [20700.0, 0.0, 17400.0]  # ~1.8 AU (flavor)
 radius        = 4000.0
 spectral_type = 0.0
 
@@ -107,7 +110,7 @@ id            = 3
 sector        = 1
 kind          = "Planet"
 name          = "Haven"
-position      = [-216000.0, 0.0, 72000.0]  # ~1.52 AU (Mars orbit)
+position      = [-21600.0, 0.0, 7200.0]  # ~1.52 AU (flavor, Mars-ish)
 radius        = 4500.0
 spectral_type = 0.0
 
@@ -126,6 +129,6 @@ id            = 5
 sector        = 2
 kind          = "Planet"
 name          = "Bastion"
-position      = [100000.0, 0.0, -40000.0]  # ~0.72 AU (Venus orbit)
+position      = [10000.0, 0.0, -4000.0]  # ~0.72 AU (flavor, Venus-ish)
 radius        = 3000.0
 spectral_type = 0.0
