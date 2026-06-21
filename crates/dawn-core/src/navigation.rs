@@ -35,6 +35,24 @@ pub struct CelestialBodyDef {
     pub spectral_type: f32,
 }
 
+// -- AnchorId ----------------------------------------------------------------
+
+/// Identifies a coordinate *anchor* — a celestial body that serves as a local
+/// origin for ship positions (ADR-0029). Anchors are per-body (§2), so an
+/// `AnchorId` is one-to-one with a [`CelestialBodyId`]: a ship's authoritative
+/// position is `(anchor, f32 offset)` and its absolute position is
+/// `anchor_abs(f64) + offset`. Keeping the offset small (the ship stays near
+/// its anchor) preserves f32 precision even when the anchor sits at a true
+/// astronomical distance from the Sector origin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct AnchorId(pub u32);
+
+impl From<CelestialBodyId> for AnchorId {
+    fn from(b: CelestialBodyId) -> Self {
+        AnchorId(b.0)
+    }
+}
+
 // -- WarpTarget --------------------------------------------------------------
 
 /// The destination of a `WarpCommand` (ADR-0025).
