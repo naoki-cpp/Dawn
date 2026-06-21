@@ -161,6 +161,56 @@ fn main() {
 
     s2_anchor_crossing(planet_abs);
     s3_anchor_space_warp(planet_abs);
+    s6_display_units();
+}
+
+/// S6: 実値表示変換を 1 箇所に集約（要求 3：「300 m/s」「5.0 AU」を人間が読める実値で）。
+///
+/// 内部表現は m（距離）・m/tick（速度）。HUD は m/s・AU。変換はこのモジュールだけで閉じる
+/// （他所で生の係数を散らさない）。本実装では `display` モジュール 1 つに集約する想定。
+mod display {
+    pub const AU_M: f64 = 1.495_978_707e11;
+    pub const TICKS_PER_SEC: f64 = 10.0; // dawn の論理 Tick レート（10 tick/s）
+
+    /// 速度：内部 m/tick → 表示 m/s。
+    pub fn speed_mps(m_per_tick: f64) -> f64 {
+        m_per_tick * TICKS_PER_SEC
+    }
+    /// 距離：内部 m → 表示 AU。
+    pub fn dist_au(m: f64) -> f64 {
+        m / AU_M
+    }
+    /// 表示文字列（HUD が呼ぶ唯一の入口）。
+    pub fn fmt_speed(m_per_tick: f64) -> String {
+        format!("{:.0} m/s", speed_mps(m_per_tick))
+    }
+    pub fn fmt_dist(m: f64) -> String {
+        let au = dist_au(m);
+        if au >= 0.01 {
+            format!("{au:.2} AU")
+        } else if m >= 1000.0 {
+            format!("{:.0} km", m / 1000.0)
+        } else {
+            format!("{m:.0} m")
+        }
+    }
+}
+
+fn s6_display_units() {
+    println!("\n=== S6 — real-value HUD conversion (single site) ===");
+    // 例：船速 30 m/tick（= 300 m/s）、惑星まで 5 AU、僚機まで 200 m。
+    println!("ship speed : {}", display::fmt_speed(30.0));
+    println!("to planet  : {}", display::fmt_dist(5.0 * display::AU_M));
+    println!("to wingman : {}", display::fmt_dist(200.0));
+
+    // 往復一致（実値↔内部）を確認：表示 300 m/s は内部 30 m/tick に戻る。
+    let back_mps = display::speed_mps(30.0);
+    let back_au = display::dist_au(5.0 * display::AU_M);
+    let pass = (back_mps - 300.0).abs() < 1e-9 && (back_au - 5.0).abs() < 1e-9;
+    println!(
+        "\nGATE S6 (300 m/s & 5.0 AU recovered via single display module): {}",
+        if pass { "PASS" } else { "FAIL" }
+    );
 }
 
 /// S3: ワープのアンカー間移動（媒介変数・厳密到着）。
