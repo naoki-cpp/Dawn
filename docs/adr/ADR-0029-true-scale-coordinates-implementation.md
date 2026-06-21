@@ -1,7 +1,7 @@
 ---
 id      : ADR-0029
 title   : 真スケール座標の実装 — アンカー相対 f32（サーバ B）＋ 浮動原点（クライアント C2）
-status  : proposed
+status  : accepted
 date    : 2026-06-21
 deciders: [human, ai-agent]
 related : ADR-0028（大規模座標系・方式比較・スパイク GO 判定）, ADR-0001（Event Sourcing）,
@@ -12,7 +12,8 @@ related : ADR-0028（大規模座標系・方式比較・スパイク GO 判定�
 
 # ADR-0029 — 真スケール座標の実装（サーバ B ＋ クライアント C2）
 
-> **ステータス: Proposed。** ADR-0028 のスパイク（`spike/true-scale-coords`・S1〜S6 全 PASS）で
+> **ステータス: Accepted（2026-06-21・人間承認）。** アンカー粒度は §2 のとおり「天体単位」で確定。
+> ADR-0028 のスパイク（`spike/true-scale-coords`・S1〜S6 全 PASS）で
 > 方式 **B（サーバ・アンカー相対 f32 ＋ ワープはアンカー空間 f64）＋ C2（クライアント・浮動原点／
 > 標準 Godot ビルド）** の feasibility が確証された。本 ADR はその**実装方針**（移行手順・スキーマ・
 > テスト戦略・アンカー粒度）を定める。ADR-0028 は「何を選ぶか（比較・GO）」、本 ADR は「どう作るか」。

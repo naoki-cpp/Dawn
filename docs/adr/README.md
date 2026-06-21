@@ -25,7 +25,7 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 | [ADR-0026](ADR-0026-dawn-sector-crate.md) | dawn-sector クレートの新設（ゲームロジックを dawn-simulation から分離） | Accepted |
 | [ADR-0027](ADR-0027-dawn-replication-crate.md) | dawn-replication クレートの新設（ゴシップ配布 + アンチエントロピー + スナップショット転送） | Accepted |
 | [ADR-0028](ADR-0028-large-world-coordinates.md) | 大規模座標系 — 真スケール座標の方式比較（スパイク GO：B＋C2） | Proposed |
-| [ADR-0029](ADR-0029-true-scale-coordinates-implementation.md) | 真スケール座標の実装 — アンカー相対 f32（サーバ B）＋ 浮動原点（クライアント C2） | Proposed |
+| [ADR-0029](ADR-0029-true-scale-coordinates-implementation.md) | 真スケール座標の実装 — アンカー相対 f32（サーバ B）＋ 浮動原点（クライアント C2） | Accepted |
 
 ### Client / 通信
 
