@@ -36,7 +36,11 @@ struct ShipSnapshot {
     entity         : hecs::Entity,
     ship_id        : ShipId,
     stats          : ShipStatsComp,
-    position       : Position,
+    /// Absolute (Sector-frame) position in metres, kept as f64 so the pairwise
+    /// difference between nearby ships stays precise even when anchors sit at
+    /// true astronomical distances (ADR-0029). Differences are cast to f32 for
+    /// the hit-chance math (the delta is small for ships in weapon range).
+    abs            : [f64; 3],
     velocity       : Velocity,
     current_shield : f32,
     current_armor  : f32,
@@ -53,17 +57,13 @@ pub struct CombatResult {
     pub destroyed : Vec<ShipId>,
 }
 
-/// A ship's absolute position = its anchor's absolute position + its offset
-/// (ADR-0029). Falls back to the raw offset if the anchor is unknown (tests /
-/// pre-anchor data). Composed in f64, returned as f32 (compressed-scale safe).
-fn absolute_position(offset: Position, anchor: AnchorId, anchor_abs: &HashMap<AnchorId, [f64; 3]>) -> Position {
+/// A ship's absolute position (Sector-frame, metres, f64) = its anchor's
+/// absolute position + its offset (ADR-0029). Falls back to the raw offset if
+/// the anchor is unknown (tests / pre-anchor data).
+fn absolute_position(offset: Position, anchor: AnchorId, anchor_abs: &HashMap<AnchorId, [f64; 3]>) -> [f64; 3] {
     match anchor_abs.get(&anchor) {
-        Some(a) => Position::new(
-            (a[0] + offset.x as f64) as f32,
-            (a[1] + offset.y as f64) as f32,
-            (a[2] + offset.z as f64) as f32,
-        ),
-        None => offset,
+        Some(a) => [a[0] + offset.x as f64, a[1] + offset.y as f64, a[2] + offset.z as f64],
+        None    => [offset.x as f64, offset.y as f64, offset.z as f64],
     }
 }
 
@@ -93,7 +93,7 @@ pub fn run(
             entity,
             ship_id        : id.0,
             stats          : *stats,
-            position       : absolute_position(pos.0, anchor.0, anchor_abs),
+            abs            : absolute_position(pos.0, anchor.0, anchor_abs),
             velocity       : vel.0,
             current_shield : hull.current_shield,
             current_armor  : hull.current_armor,
@@ -219,9 +219,11 @@ pub fn run(
 /// - opt = weapon optimal range
 /// - falloff = weapon falloff range (hit chance halves at opt+falloff)
 fn calc_hit_chance(attacker: &ShipSnapshot, target: &ShipSnapshot) -> f32 {
-    let dx = target.position.x - attacker.position.x;
-    let dy = target.position.y - attacker.position.y;
-    let dz = target.position.z - attacker.position.z;
+    // Compute the separation in f64 (absolutes may be astronomically large) then
+    // cast the small in-range delta to f32 for the tracking/range math.
+    let dx = (target.abs[0] - attacker.abs[0]) as f32;
+    let dy = (target.abs[1] - attacker.abs[1]) as f32;
+    let dz = (target.abs[2] - attacker.abs[2]) as f32;
     let dist = (dx * dx + dy * dy + dz * dz).sqrt();
 
     // Avoid division by zero when ships overlap
@@ -371,7 +373,7 @@ mod tests {
             entity         : hecs::Entity::DANGLING,
             ship_id        : id,
             stats,
-            position       : pos,
+            abs            : [pos.x as f64, pos.y as f64, pos.z as f64],
             velocity       : vel,
             current_shield : 100.0,
             current_armor  : 100.0,
