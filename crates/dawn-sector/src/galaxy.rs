@@ -160,16 +160,22 @@ fn entry_to_gate(e: JumpGateEntry) -> JumpGateDef {
 
 fn entry_to_body(e: CelestialBodyEntry) -> CelestialBodyDef {
     // `position` is authored in AU; convert to game units (see UNITS_PER_AU).
+    // `abs_m` is the same conversion done in f64 — the authoritative anchor
+    // source that stays precise at true-AU scale (ADR-0029). At compressed scale
+    // it equals `position` numerically.
+    let factor = UNITS_PER_AU as f64;
+    let abs_m = [
+        e.position[0] as f64 * factor,
+        e.position[1] as f64 * factor,
+        e.position[2] as f64 * factor,
+    ];
     CelestialBodyDef {
         id           : CelestialBodyId(e.id),
         sector       : SectorId(e.sector),
         kind         : parse_body_kind(&e.kind),
         name         : e.name,
-        position     : Position::new(
-            e.position[0] * UNITS_PER_AU,
-            e.position[1] * UNITS_PER_AU,
-            e.position[2] * UNITS_PER_AU,
-        ),
+        position     : Position::new(abs_m[0] as f32, abs_m[1] as f32, abs_m[2] as f32),
+        abs_m,
         radius       : e.radius,
         spectral_type: e.spectral_type,
     }

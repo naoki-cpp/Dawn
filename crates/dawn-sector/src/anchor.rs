@@ -35,7 +35,9 @@ impl AnchorTable {
         let mut sector = HashMap::new();
         for b in &galaxy.bodies {
             let id = AnchorId::from(b.id);
-            abs.insert(id, [b.position.x as f64, b.position.y as f64, b.position.z as f64]);
+            // Use the f64 anchor source (ADR-0029), not the f32 `position`, so
+            // anchors stay precise at true-AU distances.
+            abs.insert(id, b.abs_m);
             sector.insert(id, b.sector);
         }
         Self { abs, sector }
@@ -132,6 +134,19 @@ mod tests {
         for b in &g.bodies {
             assert!(t.abs(AnchorId::from(b.id)).is_some(), "missing anchor for {:?}", b.id);
         }
+    }
+
+    #[test]
+    fn anchor_abs_comes_from_the_f64_source_not_the_f32_position() {
+        // The anchor table must use CelestialBodyDef.abs_m (f64), which stays
+        // precise where the f32 `position` would not (ADR-0029). Forge is
+        // authored at 0.8 AU; its anchor x must match the f64 computation
+        // (0.8 * UNITS_PER_AU) exactly, and equal abs_m, not the f32 position.
+        let g = Galaxy::demo();
+        let t = AnchorTable::from_galaxy(&g);
+        let forge = g.bodies.iter().find(|b| b.id == CelestialBodyId(1)).unwrap();
+        let anchor_abs = t.abs(AnchorId(1)).unwrap();
+        assert_eq!(anchor_abs, forge.abs_m, "anchor must use the f64 abs_m source");
     }
 
     #[test]

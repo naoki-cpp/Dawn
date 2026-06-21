@@ -29,6 +29,11 @@ pub struct CelestialBodyDef {
     pub kind         : CelestialBodyKind,
     pub name         : String,
     pub position     : Position,
+    /// Absolute position in metres as f64 — the authoritative anchor source
+    /// (ADR-0029). Equals `position` numerically at compressed scale, but stays
+    /// precise at true-AU distances where the f32 `position` would lose ~tens of
+    /// km. `AnchorTable` is built from this, not from `position`.
+    pub abs_m        : [f64; 3],
     /// Logical radius (units). Warp arrival stops at `radius * 1.5` from centre.
     pub radius       : f32,
     /// Blackbody spectral type [0=O/blue, 0.6=G/Sun-yellow, 1=M/red]. Planets: 0.0.
