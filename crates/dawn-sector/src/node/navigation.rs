@@ -10,7 +10,7 @@
 //! - `process_warp`      — Warp System    (Step 2.6, ADR-0022/0023/0025)
 
 use dawn_core::{
-    DomainEvent, JumpGateId, PlayerId, Position, ShipId, Tick, Velocity, WarpTarget,
+    AnchorId, DomainEvent, JumpGateId, PlayerId, Position, ShipId, Tick, Velocity, WarpTarget,
 };
 use dawn_ecs::{
     components::{ApproachComp, PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp, WarpComp, WarpPhase},
@@ -131,19 +131,26 @@ impl<S: EventStore> SimulationNode<S> {
         let mut events = Vec::new();
 
         for (entity, ship_id, warp, pos, vel, max_speed) in warpers {
-            // Resolve destination and arrival distance from WarpTarget.
+            // Resolve destination, arrival distance, auto-jump gate, and the
+            // destination anchor (Body warps rebase onto that body on arrival,
+            // ADR-0029; Gate warps stay on the current anchor).
             let resolved = match warp.target {
                 WarpTarget::Gate(gate_id) => self.jump_gate(gate_id)
-                    .map(|g| (g.position, g.activation_radius * WARP_ARRIVAL_FACTOR, warp.auto_jump.then_some(gate_id))),
+                    .map(|g| (g.position, g.activation_radius * WARP_ARRIVAL_FACTOR, warp.auto_jump.then_some(gate_id), None)),
                 WarpTarget::Body(body_id) => self.sector_map.bodies.get(&body_id)
-                    .map(|b| (b.position, b.radius * BODY_WARP_ARRIVAL_FACTOR, None)),
+                    .map(|b| (b.position, b.radius * BODY_WARP_ARRIVAL_FACTOR, None, Some(AnchorId::from(body_id)))),
             };
-            let Some((dest_pos, arrival, auto_jump_gate)) = resolved else {
+            let Some((dest_world, arrival, auto_jump_gate, dest_anchor)) = resolved else {
                 // Target vanished — cancel and brake.
                 let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
                 self.brake_thrust(entity);
                 continue;
             };
+            // Body/gate positions are Sector-frame (== absolute). Express the
+            // destination in the ship's CURRENT anchor frame so the parametric
+            // walk (pos/vel are anchor-relative) is consistent even if the ship
+            // is anchored on a body (ADR-0029). No-op while anchored on the star.
+            let dest_pos = self.dest_in_ship_frame(entity, dest_world);
 
             // Tackle interrupts the aligning phase (ADR-0024): a tackled ship
             // cannot enter warp. Cancel and brake; the Warping phase is committed.
@@ -168,16 +175,12 @@ impl<S: EventStore> SimulationNode<S> {
                     self.set_warp_phase(entity, WarpPhase::Warping);
                     let arrival_point = warp_arrival_point(pos, dest_pos, arrival);
                     let total = warp_total_ticks(pos.distance(arrival_point));
-                    if let Some(ev) = self.warp_step(entity, ship_id, pos, vel, pos, arrival_point, total, 1, auto_jump_gate, tick) {
-                        events.push(ev);
-                    }
+                    self.warp_step(entity, ship_id, pos, vel, pos, arrival_point, total, 1, auto_jump_gate, dest_anchor, tick, &mut events);
                 }
                 // Already warping: advance one tick along the fixed segment plan.
                 WarpPhase::Warping => {
                     let arrival_point = warp_arrival_point(warp.warp_start, dest_pos, arrival);
-                    if let Some(ev) = self.warp_step(entity, ship_id, pos, vel, warp.warp_start, arrival_point, warp.warp_total, warp.warp_elapsed + 1, auto_jump_gate, tick) {
-                        events.push(ev);
-                    }
+                    self.warp_step(entity, ship_id, pos, vel, warp.warp_start, arrival_point, warp.warp_total, warp.warp_elapsed + 1, auto_jump_gate, dest_anchor, tick, &mut events);
                 }
             }
         }
@@ -206,8 +209,10 @@ impl<S: EventStore> SimulationNode<S> {
         total           : u32,
         elapsed         : u32,
         auto_jump_gate  : Option<JumpGateId>,
+        dest_anchor     : Option<AnchorId>,
         tick            : Tick,
-    ) -> Option<DomainEvent> {
+        events          : &mut Vec<DomainEvent>,
+    ) {
         let total = total.max(1);
         let (new_pos, new_vel, arrived) = if elapsed > total {
             // One tick past the final step: settle and stop. The move tick at
@@ -258,11 +263,69 @@ impl<S: EventStore> SimulationNode<S> {
         let changed = (new_vel.dx - old_vel.dx).abs() > f32::EPSILON
             || (new_vel.dy - old_vel.dy).abs() > f32::EPSILON
             || (new_vel.dz - old_vel.dz).abs() > f32::EPSILON;
-        changed.then(|| DomainEvent::VelocityChanged(dawn_core::events::VelocityChanged {
+        if changed {
+            events.push(DomainEvent::VelocityChanged(dawn_core::events::VelocityChanged {
+                ship_id,
+                velocity: new_vel,
+                tick,
+            }));
+        }
+
+        // On Body arrival, rebase the ship onto the destination body's anchor
+        // (ADR-0029 step 4): keep the absolute position, re-express the offset
+        // relative to the new anchor so subsequent local f32 motion near the
+        // body stays precise at true-AU distances.
+        if arrived {
+            if let Some(to) = dest_anchor {
+                if let Some(ev) = self.rebase_arrival_event(entity, ship_id, to, tick) {
+                    events.push(ev);
+                }
+            }
+        }
+    }
+
+    /// Compute and apply a coordinate rebase for a ship that just arrived at a
+    /// body anchor (ADR-0029). Re-expresses the ship's current absolute position
+    /// relative to `to`, writes the new anchor + offset, and returns the
+    /// authoritative `AnchorRebased` event. Returns `None` if either the current
+    /// or destination anchor is unknown (leaves the ship on its old anchor).
+    fn rebase_arrival_event(&mut self, entity: Entity, ship_id: ShipId, to: AnchorId, tick: Tick) -> Option<DomainEvent> {
+        let cur_anchor = self.world.ship_anchor(entity)?;
+        if cur_anchor == to {
+            return None;
+        }
+        let offset = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+        let world = self.anchor_table.absolute(cur_anchor, offset)?;
+        let to_abs = self.anchor_table.abs(to)?;
+        let new_off = Position::new(
+            (world[0] - to_abs[0]) as f32,
+            (world[1] - to_abs[1]) as f32,
+            (world[2] - to_abs[2]) as f32,
+        );
+        self.world.set_ship_anchor(entity, to);
+        if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+            p.0 = new_off;
+        }
+        Some(DomainEvent::AnchorRebased(dawn_core::events::AnchorRebased {
             ship_id,
-            velocity: new_vel,
+            anchor: to,
+            offset: new_off,
             tick,
         }))
+    }
+
+    /// Convert a Sector-frame (absolute) destination position into the ship's
+    /// current anchor frame, so warp math stays in the same frame as the ship's
+    /// anchor-relative `PositionComp` (ADR-0029). Falls back to the raw position
+    /// if the anchor is unknown (no-op while anchored on the star at the origin).
+    fn dest_in_ship_frame(&self, entity: Entity, dest_world: Position) -> Position {
+        let Some(anchor) = self.world.ship_anchor(entity) else { return dest_world };
+        let Some(a) = self.anchor_table.abs(anchor) else { return dest_world };
+        Position::new(
+            dest_world.x - a[0] as f32,
+            dest_world.y - a[1] as f32,
+            dest_world.z - a[2] as f32,
+        )
     }
 
     /// Overwrite the phase of a ship's `WarpComp` (no-op if absent).
@@ -739,20 +802,22 @@ mod tests {
         }
         assert!(node.warp_phase(ship_id).is_none(), "warp should have completed");
 
+        // ADR-0029 step 4: arriving at a Body rebases the ship onto that body's anchor.
+        assert_eq!(node.get_ship_anchor(ship_id), Some(dawn_core::AnchorId::from(body_id)),
+            "warp-to-body should rebase the ship onto the body anchor");
+
         let body = crate::galaxy::Galaxy::demo()
             .bodies_in_sector(SectorId(0))
             .into_iter()
             .find(|b| b.id == body_id)
             .unwrap();
-        let ship_pos = node.ship_positions()
-            .into_iter()
-            .find(|(id, _)| *id == ship_id)
-            .map(|(_, p)| p)
-            .expect("ship exists");
-        let dx = ship_pos.x - body.position.x;
-        let dy = ship_pos.y - body.position.y;
-        let dz = ship_pos.z - body.position.z;
-        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+        // After a Body warp the ship is rebased onto the body's anchor (ADR-0029),
+        // so its raw PositionComp is now body-relative. Compare in absolute terms.
+        let ship_abs = node.ship_absolute(ship_id).expect("ship exists");
+        let dx = ship_abs[0] - body.position.x as f64;
+        let dy = ship_abs[1] - body.position.y as f64;
+        let dz = ship_abs[2] - body.position.z as f64;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt() as f32;
         let arrival_max = body.radius * 1.5 * 1.05;
         assert!(
             dist <= arrival_max,
