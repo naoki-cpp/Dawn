@@ -356,12 +356,17 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|(entity, (approach, pos))| (entity, approach.target, pos.0))
             .collect();
 
-        for (entity, target, ship_pos) in approachers {
+        for (entity, target, ship_offset) in approachers {
+            // Work in absolute (Sector-frame) coordinates so distance/steering
+            // are correct even if approacher and target sit on different anchors
+            // (ADR-0029). Gate positions are already Sector-frame.
+            let ship_pos = self.entity_absolute(entity, ship_offset);
             // Resolve the target's current position and the arrival distance.
             // `None` means the target no longer exists.
             let resolved: Option<(Position, f32)> = match target {
-                ApproachTarget::Ship(target_id) => self.ships.index.get(&target_id)
-                    .and_then(|&te| self.world.inner().get::<&PositionComp>(te).ok().map(|p| (p.0, SHIP_ARRIVAL_RADIUS))),
+                ApproachTarget::Ship(target_id) => self.ships.index.get(&target_id).copied()
+                    .and_then(|te| self.world.inner().get::<&PositionComp>(te).ok().map(|p| (te, p.0)))
+                    .map(|(te, off)| (self.entity_absolute(te, off), SHIP_ARRIVAL_RADIUS)),
                 // Stop comfortably inside the gate's activation radius so the
                 // jump prompt becomes available on arrival (ADR-0015).
                 ApproachTarget::Gate(gate_id) => self.jump_gate(gate_id)

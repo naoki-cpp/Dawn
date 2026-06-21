@@ -40,7 +40,7 @@ use dawn_core::{
 };
 use dawn_ecs::{
     components::{PositionComp, ShipStatsComp},
-    SimWorld,
+    Entity, SimWorld,
 };
 use dawn_event_store::{store::EventStore, InMemoryEventStore};
 
@@ -355,6 +355,19 @@ impl<S: EventStore> SimulationNode<S> {
                 .or(Some([offset.x as f64, offset.y as f64, offset.z as f64])),
             None => Some([offset.x as f64, offset.y as f64, offset.z as f64]),
         }
+    }
+
+    /// Absolute position (Sector-frame) of a ship entity given its raw offset,
+    /// composing its anchor (ADR-0029). f32 result (compressed-scale safe).
+    /// Used by steering/AI code so positions across anchors are comparable.
+    pub(super) fn entity_absolute(&self, entity: Entity, offset: Position) -> Position {
+        let Some(anchor) = self.world.ship_anchor(entity) else { return offset };
+        let Some(a) = self.anchor_table.abs(anchor) else { return offset };
+        Position::new(
+            (a[0] + offset.x as f64) as f32,
+            (a[1] + offset.y as f64) as f32,
+            (a[2] + offset.z as f64) as f32,
+        )
     }
 
     /// True distance (metres) between two Ships, composing each ship's anchor

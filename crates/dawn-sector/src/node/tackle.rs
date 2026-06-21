@@ -26,7 +26,10 @@ impl<S: EventStore> SimulationNode<S> {
                 let lock = self.world.inner().get::<&LockComp>(entity).ok()?;
                 let locked: Vec<ShipId> = lock.locked_targets().collect();
                 if locked.is_empty() { return None; }
-                let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+                // Absolute (Sector-frame) position so range checks are correct
+                // across anchors (ADR-0029).
+                let off = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+                let pos = self.entity_absolute(entity, off);
                 Some((ship_id, stats.tackle_range, locked, pos))
             })
             .collect();
@@ -37,7 +40,8 @@ impl<S: EventStore> SimulationNode<S> {
             for &target_id in locked {
                 if let Some(&te) = self.ships.index.get(&target_id) {
                     if let Ok(tp) = self.world.inner().get::<&PositionComp>(te) {
-                        if tackler_pos.distance(tp.0) <= *range {
+                        let target_abs = self.entity_absolute(te, tp.0);
+                        if tackler_pos.distance(target_abs) <= *range {
                             desired.entry(target_id).or_default().push(*tackler_id);
                         }
                     }

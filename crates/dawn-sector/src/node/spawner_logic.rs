@@ -224,7 +224,9 @@ impl<S: EventStore> SimulationNode<S> {
             let is_warping = self.world.inner().get::<&WarpComp>(entity).is_ok();
             bots.push(BotState {
                 player_id, ship_id,
-                position    : pos.0,
+                // Absolute (Sector-frame) position so distance/steering toward a
+                // target on a different anchor is correct (ADR-0029).
+                position    : self.entity_absolute(entity, pos.0),
                 weapon_range: stats.weapon_range,
                 locked_targets: locked,
                 weapon_modules,
@@ -241,7 +243,8 @@ impl<S: EventStore> SimulationNode<S> {
             if self.world.inner().get::<&IsNpcComp>(entity).is_ok()  { continue }
             if !self.ships.owners.contains_key(&ship_id)              { continue }
             let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { continue };
-            targets.push(TargetInfo { ship_id, position: pos.0 });
+            let abs = self.entity_absolute(entity, pos.0);
+            targets.push(TargetInfo { ship_id, position: abs });
         }
 
         if targets.is_empty() { return; }
