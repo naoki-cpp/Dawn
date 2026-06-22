@@ -39,11 +39,6 @@ var _module_slots : Array         = []
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
 const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor
 const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is rejected for gates closer than this (ADR-0022).
-## Warp arrival distance from target centre, as a multiple of the target's own
-## radius (gate activation_radius / body radius). Gates arrive closer in (well
-## inside jump range); bodies arrive further out (outside the visual sphere).
-const GATE_WARP_ARRIVAL_FACTOR : float = 0.75
-const BODY_WARP_ARRIVAL_FACTOR : float = 1.5
 ## Unit-to-meter scale: displayed m/s = (units/tick) * METERS_PER_UNIT.
 ## Change this one constant to rescale all displayed speeds and distances.
 const METERS_PER_UNIT : float = 1.0
@@ -130,14 +125,10 @@ var _selected_body_id    : int    = -1  ## -1 = no body selected
 var _sky_mat             : ShaderMaterial = null  ## reference kept for sun_direction updates
 var _jump_notice         : String = ""
 var _jump_notice_timer   : float  = 0.0
-## Pre-computed warp arrival position in server coords.
-## Set at WarpCommand/auto-warp time (ship position is known then); cleared on arrival.
-## Using a pre-computed position avoids relying on the dead-reckoned position (which
-## drifts significantly at warp speed) to determine the snap direction on arrival.
-var _player_warp_snap_pos : Vector3 = Vector3.INF
-## Was the player ship at warp speed last VelocityChanged? Used to detect arrival.
-var _player_was_warping   : bool    = false
-const WARP_SPEED_THRESHOLD : float = 1000.0  ## Server units/tick: above this = warping
+## Warp arrival is handled authoritatively by the server (ADR-0029 warp-arrival
+## authority): on every warp completion the server sends a PositionSnap, which
+## _handle_position_snap applies. The client no longer pre-computes an arrival
+## point or detects arrival from the velocity dropping.
 
 # -- Lifecycle ----------------------------------------------------------------
 
@@ -355,19 +346,14 @@ func _input(event: InputEvent) -> void:
 			"jump":
 				var jump_gate: int = action.gate_id as int
 				_connection.send_jump_command(_player_ship_id, jump_gate)
-				if jump_gate != _nearby_gate_id:
-					## Selected gate is out of range: server auto-warps first.
-					_player_warp_snap_pos = _compute_warp_snap_pos(jump_gate)
 			"approach_gate":
 				_connection.send_approach_gate_command(_player_ship_id, action.gate_id as int)
 			"approach_ship":
 				_connection.send_approach_command(_player_ship_id, action.ship_id as int)
 			"warp_to_gate":
 				_connection.send_warp_command(_player_ship_id, action.gate_id as int)
-				_player_warp_snap_pos = _compute_warp_snap_pos(action.gate_id as int)
 			"warp_to_body":
 				_connection.send_warp_to_body_command(_player_ship_id, action.body_id as int)
-				_player_warp_snap_pos = _compute_body_warp_snap_pos(action.body_id as int)
 			"toggle_tactical_overlay":
 				if _tactical_overlay != null:
 					(_tactical_overlay as Node3D).call("toggle_visible")
@@ -587,9 +573,6 @@ func _handle_position_snap(p: Dictionary) -> void:
 		var pg: Vector3 = (_ships[ship_id] as Node3D).global_position
 		var new_origin: Vector3 = server_pos - _world.dir_to_server(pg)
 		_apply_origin_rebase(new_origin, true)
-		# Cancel the client-side warp snap so it doesn't fire a stale position.
-		_player_warp_snap_pos = Vector3.INF
-		_player_was_warping = false
 	else:
 		(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(server_pos)
 
@@ -894,15 +877,8 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 	)
 	(_ships[ship_id] as Node3D).call("set_velocity", server_vel)
 
-	## Detect warp arrival and snap position to correct dead-reckoning drift.
-	## Warp speed (~5000 u/tick) accumulates large position errors; snap the
-	## Godot node to the pre-computed arrival position (set at warp-start time).
-	if ship_id == _player_ship_id and _player_warp_snap_pos != Vector3.INF:
-		var speed: float = server_vel.length()
-		if _player_was_warping and speed < 1.0:
-			(_ships[ship_id] as Node3D).call("update_target", _world.to_godot(_player_warp_snap_pos))
-			_player_warp_snap_pos = Vector3.INF
-		_player_was_warping = speed >= WARP_SPEED_THRESHOLD
+	## Warp arrival is corrected by the server's PositionSnap (ADR-0029), not by
+	## client-side dead-reckoning detection.
 
 	var tick: int = p.get("tick", 0) as int
 	if tick > _current_tick:
@@ -910,51 +886,6 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 		_current_tick = tick
 		_simulate_cap(ticks_elapsed)
 
-## Shared core for gate/body warp arrival pre-computation. Uses the ship's
-## actual position (known at command-send time, not drifted) to determine the
-## approach direction, then places the snap point at `arrival_factor * radius`
-## from the target's centre (ADR-0022/0025).
-func _compute_warp_snap_pos_core(target_pos: Vector3, radius: float, arrival_factor: float) -> Vector3:
-	if not _ships.has(_player_ship_id):
-		return Vector3.INF
-	var ship_node: Node3D  = _ships[_player_ship_id] as Node3D
-	var ship_server_pos: Vector3 = _world.to_server(ship_node.global_position)
-	var dir: Vector3 = ship_server_pos - target_pos
-	dir = dir.normalized() if dir.length() > 0.001 else Vector3(-1.0, 0.0, 0.0)
-	return target_pos + dir * radius * arrival_factor
-
-## Pre-compute the warp arrival position in server coords for a Jump Gate.
-## Arrives at GATE_WARP_ARRIVAL_FACTOR of the gate's activation radius —
-## safely within jump range (activation_radius = 2000).
-func _compute_warp_snap_pos(gate_id: int) -> Vector3:
-	var target_gate: Dictionary = {}
-	for g: Variant in _gates:
-		if (g as Dictionary).get("gate_id", -1) as int == gate_id:
-			target_gate = g as Dictionary
-			break
-	if target_gate.is_empty():
-		return Vector3.INF
-	var gate_pos    : Vector3 = target_gate.get("position", Vector3.ZERO) as Vector3
-	var activation_r: float   = target_gate.get("activation_radius", 2000.0) as float
-	return _compute_warp_snap_pos_core(gate_pos, activation_r, GATE_WARP_ARRIVAL_FACTOR)
-
-## Pre-compute the warp arrival position for a celestial body in server coords.
-## Arrives at BODY_WARP_ARRIVAL_FACTOR of the body's radius from its centre
-## (ADR-0025).
-func _compute_body_warp_snap_pos(body_id: int) -> Vector3:
-	var body_pos   : Vector3 = Vector3.ZERO
-	var body_radius: float   = 1.0
-	var found: bool          = false
-	for entry: Variant in _bodies:
-		var b: Dictionary = entry as Dictionary
-		if (b.get("body_id", -1) as int) == body_id:
-			body_pos    = b.get("position", Vector3.ZERO) as Vector3
-			body_radius = b.get("radius", 1.0) as float
-			found = true
-			break
-	if not found:
-		return Vector3.INF
-	return _compute_warp_snap_pos_core(body_pos, body_radius, BODY_WARP_ARRIVAL_FACTOR)
 
 func _handle_ship_despawned(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int

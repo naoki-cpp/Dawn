@@ -270,6 +270,7 @@ async fn main() -> anyhow::Result<()> {
 
         // AoI delivery and session management.
         let grid = aoi::CellGrid::build(AOI_CELL_SIZE, node.ship_absolute_positions());
+        let warp_arrivals = node.drain_completed_warps();
 
         sessions.retain_mut(|sess| {
             // Player's ship jumped to another node → Redirect and drop session.
@@ -287,7 +288,7 @@ async fn main() -> anyhow::Result<()> {
                 .map(|pos| grid.neighbors_of(pos))
                 .unwrap_or_default();
             let prev = prev_visible.entry(sess.player_id).or_default();
-            deliver_aoi_frame(sess, &node, curr, prev, &new_events)
+            deliver_aoi_frame(sess, &node, curr, prev, &new_events, &warp_arrivals)
         });
         prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
 
@@ -339,11 +340,12 @@ fn spawn_npcs(node: &mut SimulationNode, count: usize) {
 
 /// Deliver one AoI frame to a session. Returns `false` when the connection dropped.
 fn deliver_aoi_frame(
-    sess      : &mut ws_server::PlayerSession,
-    node      : &SimulationNode,
-    curr      : Vec<ShipId>,
-    prev      : &mut Vec<ShipId>,
-    new_events: &[DomainEvent],
+    sess         : &mut ws_server::PlayerSession,
+    node         : &SimulationNode,
+    curr         : Vec<ShipId>,
+    prev         : &mut Vec<ShipId>,
+    new_events   : &[DomainEvent],
+    warp_arrivals: &[ShipId],
 ) -> bool {
     let destroyed_this_tick: std::collections::HashSet<ShipId> = new_events.iter()
         .filter_map(|e| if let DomainEvent::ShipDestroyed(d) = e { Some(d.ship_id) } else { None })
@@ -373,5 +375,22 @@ fn deliver_aoi_frame(
         })
         .cloned()
         .collect();
-    sess.send_events(&visible_events)
+    if !sess.send_events(&visible_events) {
+        return false;
+    }
+
+    // Warp-arrival authority (ADR-0029): snap each ship that finished a warp this
+    // tick to its authoritative absolute position, for the owner/visible observers.
+    for &sid in warp_arrivals {
+        if sid == sess.ship_id || curr.binary_search(&sid).is_ok() {
+            if let Some(abs) = node.ship_absolute(sid) {
+                let msg = format!(
+                    "{{\"type\":\"PositionSnap\",\"ship_id\":{},\"position\":{{\"x\":{},\"y\":{},\"z\":{}}}}}",
+                    sid.raw(), abs[0], abs[1], abs[2]
+                );
+                if !sess.conn.send_raw(&msg) { return false; }
+            }
+        }
+    }
+    true
 }

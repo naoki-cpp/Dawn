@@ -170,6 +170,11 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             }
         }
 
+        // Drain each sector's warp arrivals (ADR-0029 warp-arrival authority) so
+        // the per-session deliver loop below can snap each owner/observer.
+        let warp_arrivals_by_sector: Vec<Vec<ShipId>> =
+            (0..SECTORS).map(|i| nodes[i].drain_completed_warps()).collect();
+
         let events_by_sector: Vec<Vec<DomainEvent>> = nodes
             .iter()
             .enumerate()
@@ -223,7 +228,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             }
 
             let prev = prev_visible.entry(sess.player_id).or_default();
-            deliver_aoi_frame(sess, &nodes[sector], curr, prev, &events_by_sector[sector])
+            deliver_aoi_frame(sess, &nodes[sector], curr, prev, &events_by_sector[sector], &warp_arrivals_by_sector[sector])
         });
         prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
 

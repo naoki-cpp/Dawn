@@ -110,6 +110,14 @@ impl<S: EventStore> SimulationNode<S> {
         std::mem::take(&mut self.pending_auto_jumps)
     }
 
+    /// Drain the ships that finished a warp this tick (ADR-0029 warp-arrival
+    /// authority). The serve loop sends each one's owner an authoritative
+    /// `PositionSnap` so the client's capped warp-visual lands on the true
+    /// arrival point. Transient / non-persisted (cleared every tick).
+    pub fn drain_completed_warps(&mut self) -> Vec<ShipId> {
+        std::mem::take(&mut self.completed_warps)
+    }
+
     /// Warp System (ADR-0022 §6): advance every ship carrying a `WarpComp`.
     ///
     /// Runs each tick as Step 2.6 (after Approach, before Movement). The
@@ -260,6 +268,10 @@ impl<S: EventStore> SimulationNode<S> {
             if let Some(gid) = auto_jump_gate {
                 self.pending_auto_jumps.push((ship_id, gid));
             }
+            // Authoritative arrival: the serve loop sends the owner a PositionSnap
+            // so its capped warp-visual dead-reckoning is corrected, regardless of
+            // whether the arrival rebased the anchor (ADR-0029 warp-arrival authority).
+            self.completed_warps.push(ship_id);
         } else if let Ok(mut w) = self.world.inner_mut().get::<&mut WarpComp>(entity) {
             // Persist the plan + progress for the next tick.
             w.warp_start   = start;
@@ -829,6 +841,29 @@ mod tests {
         assert!(warping_ticks >= WARP_MIN_TICKS - 2,
             "warp should ride the parametric segment for ~WARP_MIN_TICKS ticks, \
              got {warping_ticks} (floor {WARP_MIN_TICKS})");
+    }
+
+    // ── Warp-arrival authority (ADR-0029) ────────────────────────────────
+
+    #[test]
+    fn finishing_a_warp_surfaces_the_ship_in_drain_completed_warps() {
+        // The serve loop drains this to send an authoritative PositionSnap. It
+        // must fire for a *gate* warp too (no anchor change), which is exactly
+        // the case the old AnchorRebased-only snap missed.
+        let mut node = mem_node();
+        let (player, ship_id) = spawn_owned_player_at(&mut node, Position::new(0.0, 0.0, 0.0));
+        assert!(node.apply_warp_command_owned(player, dawn_core::WarpCommand {
+            ship_id, target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+        }));
+
+        let mut arrived = false;
+        for _ in 0..5_000 {
+            node.tick();
+            if node.drain_completed_warps().contains(&ship_id) { arrived = true; break; }
+        }
+        assert!(arrived, "a completed gate warp must surface in drain_completed_warps");
+        // Drained: it is a per-tick transient, not re-reported.
+        assert!(node.drain_completed_warps().is_empty(), "completed warps drain once");
     }
 
     // ── Celestial body warp (ADR-0025) ───────────────────────────────────

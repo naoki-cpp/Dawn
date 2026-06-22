@@ -150,12 +150,13 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
                 .collect()
         };
         let grid = aoi::CellGrid::build(AOI_CELL_SIZE, node.ship_absolute_positions());
+        let warp_arrivals = node.drain_completed_warps();
         sessions.retain_mut(|sess| {
             let curr = node.ship_absolute_pos(sess.ship_id)
                 .map(|pos| grid.neighbors_of(pos))
                 .unwrap_or_default();
             let prev = prev_visible.entry(sess.player_id).or_default();
-            deliver_aoi_frame(sess, &node, curr, prev, &all_new_events)
+            deliver_aoi_frame(sess, &node, curr, prev, &all_new_events, &warp_arrivals)
         });
         prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
 

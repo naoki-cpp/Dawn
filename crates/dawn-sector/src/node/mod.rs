@@ -145,6 +145,13 @@ where
     /// caller after each tick so the jump can be proposed to the Raft Log
     /// (or handled however the server path requires).
     pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
+    /// Ships that finished a warp this tick (ADR-0029 warp-arrival authority).
+    /// Transient and non-persisted (like `pending_auto_jumps`): the serve loop
+    /// drains it each tick and sends the owner an authoritative `PositionSnap`,
+    /// correcting the client's capped warp-visual dead-reckoning. Independent of
+    /// whether the arrival changed the ship's anchor, so it covers every warp
+    /// (gate / body / same-anchor) with one mechanism.
+    completed_warps: Vec<ShipId>,
 }
 
 // -- Constructors ------------------------------------------------------------
@@ -191,6 +198,7 @@ impl<S: EventStore> SimulationNode<S> {
             anchor_table      : crate::anchor::AnchorTable::from_galaxy(&crate::galaxy::Galaxy::demo()),
             population_cap    : POPULATION_CAP,
             pending_auto_jumps: Vec::new(),
+            completed_warps   : Vec::new(),
         }
     }
 
@@ -233,6 +241,7 @@ impl<S: EventStore> SimulationNode<S> {
             anchor_table       : crate::anchor::AnchorTable::from_galaxy(&crate::galaxy::Galaxy::demo()),
             population_cap    : POPULATION_CAP,
             pending_auto_jumps: Vec::new(),
+            completed_warps   : Vec::new(),
         };
 
         for def in modules {

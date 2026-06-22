@@ -108,16 +108,20 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
 
 圧縮では顕在化しないが、スケール値を上げた瞬間に効くもの。真スケール再活性化の前に潰す。
 
-- ⬜ **ワープ到着権威化**：Gate ワープ・同一アンカー内ワープでは `AnchorRebased` が出ず `PositionSnap` も飛ばないため、
-  client の `_player_warp_snap_pos` 事前計算（バンドエイド）に依存が残る。server 側「ワープ完了時に常に権威スナップ」へ
-  一本化し client 事前計算を撤去する。**方式未決**（全到着で最寄り再アンカー／`WarpCompleted` 新設／serve 層で warp 状態追跡）。
+- ✅ **ワープ到着権威化**：方式は**ドメインイベントを増やさない transient 到着リスト**を採用（`completed_warps: Vec<ShipId>`、
+  `pending_auto_jumps` と同型・非永続）。`warp_step` の到着時に push、`drain_completed_warps()` を3つの serve ループ
+  （single／cluster／dawn-sector-node）が drain し、`deliver_aoi_frame` が**到着のたびに**所有者／可視オブザーバへ
+  権威的 `PositionSnap`（`ship_absolute` f64）を送る。アンカー変化に依存していた旧 `AnchorRebased`→`PositionSnap`
+  分岐を撤去し単一機構に統一（Gate ワープ・同一アンカー内ワープもカバー）。client は `_player_warp_snap_pos` 事前計算・
+  速度到着検知・`_compute_warp_snap_pos*`・関連定数を撤去し `PositionSnap` 一本に（`VISUAL_SPEED_CAP` は維持）。
+  node テスト（Gate ワープが `drain_completed_warps` に出る）追加。**要プレイテスト**（圧縮スケールで実機確認）。
 - ⬜ **ゲート座標の再オーサリング**：精度（f64 化）は済。残るは配置値（現状 600,000 units 固定で `UNITS_PER_AU` 非連動）を
   真 AU 向けに `UNITS_PER_AU` 連動でセクター縁へ置き直す（精度ではなく座標値の設計）。
-- ⬜ **ゲートワープの到着ジオメトリが f32 のまま（R1 の積み残し）**：R1 は `can_propose_jump`／`can_propose_warp` を
-  f64 化したが、warp **実行**側（`process_warp` のゲート分岐）は `g.position`（f32）を `dest_in_ship_frame` に渡し
-  `dest_anchor=None`・`warp_arrival_abs=[0,0,0]` のまま。Body ワープは f64 到着＋最寄りアンカーへリベースするのに対し、
-  ゲートワープは到着点が f32 由来（真 AU で ~16 km 粗い・到着後も恒星アンカーのまま）。**ワープ到着権威化と束ねて、
-  ゲート到着にも f64 到着点＋最寄りアンカーへのリベースを入れる**のが筋（propose と execution の f64/f32 不整合を解消）。
+- ⬜ **ゲートワープの到着ジオメトリが f32 のまま（R1 の積み残し・真 AU 限定）**：到着**権威化**自体は上記で解決
+  （client は server の `PositionSnap` で正しく着地）。残るは server 側の到着**座標精度**：`process_warp` のゲート分岐は
+  `g.position`（f32）を `dest_in_ship_frame` に渡し `dest_anchor=None`・`warp_arrival_abs=[0,0,0]` のまま。Body ワープが
+  f64 到着＋最寄りアンカーへリベースするのに対し、ゲート到着点は f32 由来（真 AU で ~16 km 粗い・到着後も恒星アンカー）。
+  → 再活性化時に**ゲート到着も f64 到着点＋最寄りアンカーへのリベース**を入れる（Body と対称化）。
 - ✅ **AoI を f64 化**：`CellGrid` を f32 `Position` から `[f64;3]` 絶対座標に変更（セル binning を f64 floor 除算に）。
   `ship_absolute_positions`／`ship_absolute_pos`／`ships_visible_to`／`build_initial_state_json_for` も f64 化し、
   真 AU で異アンカー近傍のセル境界が ~16 km ぶれる問題を解消（1 AU の境界を 200 m 跨ぐ船が隣接セルに正しく入る
