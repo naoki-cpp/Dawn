@@ -590,21 +590,25 @@ func _handle_position_snap(p: Dictionary) -> void:
 		pos_dict.get("y", 0.0) as float,
 		pos_dict.get("z", 0.0) as float)
 	if ship_id == _player_ship_id:
-		# A warp can cross ~1 AU, so rather than fling the player to a far Godot
-		# coord (and drag the camera with it), rebase the floating origin ONTO the
-		# arrival: the player sits at the new origin (~0, where the camera already
-		# is), and only the *other* world nodes shift by the rebase delta. The
-		# camera is left untouched so it just lerps the small remaining gap instead
-		# of swinging. Markers re-place themselves in _update_body_markers.
-		var shift: Vector3 = FloatingOrigin.rebase_shift(_origin_server, server_pos, WORLD_SCALE)
-		_origin_server = server_pos
+		# A warp crosses ~1 AU but the player's visual ship lagged behind (its
+		# warp speed was capped). Correcting that by moving the ship would make
+		# the camera pan/swing. Instead, keep the ship (and camera) exactly where
+		# they are on screen and re-define the floating origin so that this same
+		# Godot position now represents the authoritative arrival `server_pos`.
+		# Only the *other* world nodes shift; markers re-place in _update_body_markers.
+		var pg: Vector3 = (_ships[ship_id] as Node3D).global_position
+		var new_origin := Vector3(
+			server_pos.x - pg.x / WORLD_SCALE,
+			server_pos.y - pg.y / WORLD_SCALE,
+			server_pos.z + pg.z / WORLD_SCALE)
+		var shift: Vector3 = FloatingOrigin.rebase_shift(_origin_server, new_origin, WORLD_SCALE)
+		_origin_server = new_origin
 		for id: int in _ships:
 			if id == _player_ship_id:
 				continue
 			(_ships[id] as Node3D).position += shift
 		for c: Node in _gates_root.get_children():
 			(c as Node3D).position += shift
-		(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(server_pos)
 		# Cancel the client-side warp snap so it doesn't fire a stale position.
 		_player_warp_snap_pos = Vector3.INF
 		_player_was_warping = false
