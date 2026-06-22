@@ -202,19 +202,18 @@ func _godot_to_server_pos(g: Vector3) -> Vector3:
 		g.y / WORLD_SCALE + _origin_server.y,
 		-g.z / WORLD_SCALE + _origin_server.z)
 
-## Fixed distance (Godot units) at which celestial bodies are drawn — always, as
-## a background layer at their true *bearing* from the player (ADR-0029 step 6,
-## spike S5: distant bodies are direction billboards, like the star/sun shader,
-## not meshes at their real ~10^11 m position which would be culled by the far
-## plane and pop in/out). Kept comfortably inside the camera far plane (100000).
-## Always clamping (vs switching to the real position up close) means a body
-## never jumps as you warp toward it — it stays a steady background marker.
+## Distance (Godot units) past which a celestial body marker is clamped toward
+## the player so it stays inside the camera far plane (true-AU only). At the
+## current compressed scale all bodies sit well inside this, so the marker is
+## drawn at its real position (no clamping). When true scale is reactivated the
+## clamp keeps far bodies visible as background markers (spike S5). Kept inside
+## the camera far plane (scenes/main.tscn far=100000).
 const BODY_MARKER_CLAMP_DISTANCE : float = 30_000.0
 
 ## Re-place every celestial-body marker each frame at the body's true bearing
-## from the player, at the fixed background distance, so planets are always
-## visible regardless of their true AU distance. The marker stores its server
-## position in the "body_pos" meta (NavigationMarkerRenderer).
+## from the player, clamped to BODY_MARKER_CLAMP_DISTANCE only when farther than
+## that (a no-op at compressed scale). The marker stores its server position in
+## the "body_pos" meta (NavigationMarkerRenderer).
 func _update_body_markers() -> void:
 	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return
@@ -226,9 +225,10 @@ func _update_body_markers() -> void:
 		var body_godot: Vector3 = _server_to_godot_pos(marker.get_meta("body_pos") as Vector3)
 		var delta: Vector3 = body_godot - player_godot
 		var dist: float = delta.length()
-		# Always draw at the fixed background distance along the true bearing.
-		if dist > 0.001:
+		if dist > BODY_MARKER_CLAMP_DISTANCE:
 			marker.global_position = player_godot + delta / dist * BODY_MARKER_CLAMP_DISTANCE
+		else:
+			marker.global_position = body_godot
 
 ## Rebase the floating origin to the player when it drifts past the threshold,
 ## shifting every world node by the same delta so the move is invisible (the

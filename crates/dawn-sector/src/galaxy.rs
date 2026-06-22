@@ -21,15 +21,18 @@ pub struct Galaxy {
     pub bodies : Vec<CelestialBodyDef>,
 }
 
-/// Metres per astronomical unit — the TRUE astronomical scale (ADR-0029).
-/// Celestial body orbits are authored in AU in `data/galaxy*.toml` and converted
-/// to metres at load time by this factor (1 unit = 1 m). This is f64 so the
-/// resulting anchor positions (`CelestialBodyDef.abs_m`) are precise at ~10^11 m,
-/// where f32 would lose ~tens of km. Bodies sit at real AU and are reachable only
-/// by Warp (method B: ships hold an anchor-relative f32 offset, so local combat
-/// stays precise). Body `radius` and gate `position` stay in metres (they are
-/// not orbital distances). See ADR-0029 (supersedes the compressed UNITS_PER_AU).
-pub const UNITS_PER_AU: f64 = 1.495_978_707e11;
+/// Game units per astronomical unit. Celestial body orbits are authored in AU in
+/// `data/galaxy*.toml` and converted to units at load (1 unit = 1 m). Kept f64 so
+/// the anchor source (`CelestialBodyDef.abs_m`) stays precise — this is forward-
+/// compatible with the true-AU value (1.495978707e11).
+///
+/// **Currently COMPRESSED** (200,000): the real-AU activation was reverted to a
+/// compressed base per the ADR-0029 review (finish anchor assignment + AoI +
+/// client coordinate redesign before reactivating). The architecture (anchors,
+/// rebase, f64 source) stays; only the scale value and the client band-aids were
+/// rolled back. To reactivate true scale, set this to 1.495978707e11 and retune
+/// WARP_SPEED (see node/mod.rs).
+pub const UNITS_PER_AU: f64 = 200_000.0;
 
 impl Galaxy {
     /// Construct from explicitly provided data (used by `DataLoader`).
@@ -223,7 +226,9 @@ mod tests {
         let forge = map.bodies.iter().find(|b| b.id == CelestialBodyId(1)).expect("Forge exists");
         assert_eq!(forge.abs_m[0], 0.8 * UNITS_PER_AU);
         assert_eq!(forge.abs_m[2], 0.5 * UNITS_PER_AU);
-        assert!((forge.position.x as f64 - 0.8 * UNITS_PER_AU).abs() < 20_000.0, "x = {}", forge.position.x);
+        // At the compressed scale the f32 `position` matches abs_m closely; at
+        // true AU it would be ~16 km coarse, which is why anchors use abs_m.
+        assert!((forge.position.x as f64 - 0.8 * UNITS_PER_AU).abs() < 1.0, "x = {}", forge.position.x);
         assert_eq!(forge.position.y, 0.0);
         // Stars at [0,0,0] AU stay at the origin (0 * factor = 0).
         let helios = map.bodies.iter().find(|b| b.id == CelestialBodyId(0)).expect("Helios exists");

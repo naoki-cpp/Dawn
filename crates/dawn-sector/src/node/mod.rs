@@ -66,11 +66,10 @@ const WARP_ALIGN_FRACTION: f32 = 0.75;
 /// ceil(warp_distance / WARP_SPEED))`. Warp then follows a smoothstep ease
 /// along the start→arrival segment (ADR-0022 amendment), so this is the rough
 /// peak speed, not a constant velocity.
-// True-AU scale (ADR-0029): bodies sit at ~10^11 m, so warp speed must be ~10^9
-// m/tick for an interplanetary warp to last a sane number of ticks (e.g. a
-// ~1.2e11 m hop ≈ 120 ticks ≈ 12 s at 10 tick/s). Gates stay near the star and
-// floor to WARP_MIN_TICKS. Still far above any sublight max_speed.
-const WARP_SPEED: f32 = 1_000_000_000.0;
+// Reference warp speed (units/tick), far above any sublight max_speed. Reverted
+// to the COMPRESSED value (10,000) per the ADR-0029 review; at true AU this must
+// be ~1e9 (a ~1.2e11 m hop ≈ 120 ticks) — retune when reactivating true scale.
+const WARP_SPEED: f32 = 10_000.0;
 /// Floor on warp duration (ticks) so even a short warp reads as a warp rather
 /// than a blink. At 10 tick/s this is ~2 s.
 const WARP_MIN_TICKS: u32 = 20;

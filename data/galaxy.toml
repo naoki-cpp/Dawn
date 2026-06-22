@@ -1,17 +1,14 @@
 # Production Star System / Jump Gate / Celestial Body topology
 #
-# Scale: 1 unit = 1 m, at TRUE astronomical scale (ADR-0029). Celestial body
-# `position` is authored in AU and converted to metres at load by
-# UNITS_PER_AU = 1.495978707e11 (a real AU), so planets sit at ~10^11 m. At that
-# distance sublight (~hundreds of m/s) cannot cross the system -- you travel by
-# Warp (as in EVE). Precision is kept by method B: a ship holds an anchor
-# (nearest body) + a small f32 offset, so local combat near a body stays exact
-# even though the absolute coordinate is ~10^11 m (which f32 alone cannot hold).
+# Scale: 1 unit = 1 m. Intra-system distances are currently gameplay-COMPRESSED
+# (UNITS_PER_AU = 200,000, not a real AU): the real-AU activation was reverted to a
+# compressed base per the ADR-0029 review (finish anchor assignment + AoI + client
+# coordinate redesign before reactivating). The anchor architecture stays.
 #
-# Gate `position` and body `radius` stay in metres (gates are infrastructure,
-# radii are exaggerated for visibility). Warp duration is derived from the real
-# distance and WARP_SPEED (ADR-0022 parametric warp). The client renders with a
-# floating origin (ADR-0029 step 6) so distant objects don't break f32.
+# Celestial body `position` is authored in AU and converted at load by
+# UNITS_PER_AU (galaxy.rs). Gate `position` and body `radius` stay in units. Travel
+# time is set by Warp duration (ADR-0022 parametric warp). To reactivate true scale,
+# set UNITS_PER_AU to 1.495978707e11 and retune WARP_SPEED.
 #
 # Edit this file and restart the server to change the layout (no recompile needed).
 
