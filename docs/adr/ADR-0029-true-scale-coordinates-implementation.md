@@ -74,143 +74,56 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
 
 > 各段は前段の上に乗る小スライス。1〜3 は意味的 no-op（リファクタ）で安全に入れ、4 以降で挙動が変わる。
 
-### 実装進捗（PR #2・`spike/true-scale-coords`）
+### 実装状況（PR #2・`spike/true-scale-coords`）
 
-- ✅ **Step 1** `AnchorId`（dawn-core）+ `AnchorTable`（dawn-sector、f64 絶対位置・rebase/distance/nearest）。純加算 no-op。
-- ✅ **Step 2** 船に `AnchorComp`（`insert_to_world` で恒星アンカーを設定）。恒星=原点ゆえ offset==絶対の no-op。
-  スナップショットには未保存（恒星アンカーは sector_id から導出可・分岐は Step 4 から）。
-- ✅ **Step 3+4** アンカー対応の絶対位置/距離 ＋ ワープ到着リベース（`AnchorRebased` 権威イベント・apply/replay）。
-  - `AnchorRebased` イベント（dawn-core）＋ apply_event 対応。
-  - ワープ到着で Body アンカーへリベース（`rebase_arrival_event`）。warp 元も `dest_in_ship_frame` でアンカー対応。
-  - **距離計算をすべてアンカー対応に**: Combat（`anchor_abs` マップ注入）/ approach / tackle / bot steering
-    （`entity_absolute`）。frame 不変量（差分・相対速度）を絶対位置で計算。
-- ✅ **Step 8（部分）** スナップショットに `anchor` を永続化（リベース済み船の復元で絶対位置を保つ）。スキーマ bump。
-- 🔶 **Step 5a（combat）** combat 距離を f64 差分で計算（実装済み・圧縮では無影響）。
-- 🔶 **Step 5b（サーバ側 f64 prep 完了・前方互換）** 実 AU でも精密に動くサーバ側準備を完了（圧縮では挙動不変）：
-  - `CelestialBodyDef.abs_m: [f64;3]`（f64 アンカー源）＋ `AnchorTable` がそれを使用。
-  - combat 距離を f64 差分で計算。
-  - ワープ到着を f64（`WarpComp.warp_arrival_abs` ＋ `entity_absolute_f64`）で算出し精密リベース。
-  - **残りの実 AU「起動」は client（step 6）が前提**で、データ flip ＋ `WARP_SPEED` 再調整 ＋ プレイテストを伴う。
-- ⬜ **Step 5b 起動（要 client・プレイテスト）** 以下は密結合で、ゲーム感のプレイテスト反復を要する：
-  > **発見（5a 実装中）**：`CelestialBodyDef.position` は f32 `Position`。実 AU（7.5×10¹¹）を f32 で持つと
-  > その時点で ~65km 誤差が乗り、`AnchorTable`（f64）も f32 body 位置から構築するため誤差を継承する。
-  > ゆえに実 AU 化は係数変更では足りず、**アンカー源データを f64 に**する必要がある。
-  1. **アンカー絶対位置を源データから f64 に**（galaxy ローダ／`CelestialBodyDef` を f64 化、または AU 値を
-     保持して `AU_M` を f64 で乗算。`AnchorTable` は f32 body 位置を経由しない）。
-  2. **ワープ到着を f64 化**（`AnchorRebased` offset を f64 arrival から算出。道中 f32 は不可視で可）。
-  3. **`WARP_SPEED` 再調整**（7.5e11 ÷ 1e4 = 7500万 tick の非現実的ワープ時間を回避。スパイクは 3e9）。
-  4. **クライアント浮動原点（step 6）が前提**（無いと実 AU の描画が破綻）。
-- 🔶 **Step 6（配線済み・休眠）** クライアント浮動原点（`FloatingOrigin` ヘルパー＋ GdUnit4 3 テスト）。
-  `_server_to_godot_pos` が原点相対化、`_maybe_rebase_origin` が全ノードをシフト。閾値 1e6 で圧縮スケールでは
-  原点 [0,0,0] のまま発火せず＝挙動不変（前方互換）。実 AU 起動時に逆変換サイトの origin 対応＋Z 整理が要る（注記済み）。
-- 🔶 **Step 7（速度は達成済み）** HUD の速度は既に実値表示（`METERS_PER_UNIT = 1.0` という単一定数 ＋
-  `"%d m/s"`）。距離/AU 表示の consumer は現状の HUD に無いため、AU フォーマッタは実 AU 起動時に
-  距離表示を足すときに同じ単一箇所へ追加する（YAGNI のため先行実装しない）。
+サーバ側のアンカー機構は**圧縮スケールで完全動作・全テスト緑**。実 AU 起動までプレイテストしたが、
+シニアレビューで構造的負債が判明したため**実 AU 起動は revert し、土台を固める方針**に切替えた（経緯は後述）。
+現在は圧縮ベースで動作し、再活性化前にやるべき残課題のみを残す。
 
-> **現状（PR #2）**：サーバ側は**圧縮スケールで完全に正しく・全テスト緑**。アンカー機構・ワープリベース・
-> 全距離消費者のアンカー対応・スナップショット永続化まで完了。さらに実 AU 起動（データ flip ＋ クライアント
-> 浮動原点 ＋ プレイテスト修正）まで実施したが、下記レビューで構造的負債が判明した。
+| Step | 内容 | 状況 |
+|---|---|---|
+| 1 | `AnchorId`（dawn-core）+ `AnchorTable`（f64 絶対位置・rebase/distance/nearest） | ✅ |
+| 2 | 船に `AnchorComp`。spawn は**最寄り天体**にアンカー（`set_spawn_anchor`・決定論的・replay 一致） | ✅ |
+| 3 | 絶対位置/距離をアンカー対応に。サーバの絶対位置アクセサ群（`entity_abs_pos`／`entity_absolute_f64`／`ship_distance`／`ship_absolute`）に一元化し、combat／approach／tackle／bot／navigation／AoI を同一フレームへ | ✅ |
+| 4 | ワープ到着で Body アンカーへリベース（`AnchorRebased` 権威イベント・apply/replay）。`WarpComp.warp_arrival_abs`＋`entity_absolute_f64` で f64 精密到着 | ✅ |
+| — | AoI を絶対位置ベースに（`ship_absolute_positions`／両 serve ループ／InitialState scoping／jump 再送） | ✅ |
+| 6 | クライアント浮動原点を単一 `WorldSpace`（`client/scripts/world_space.gd`）に集約。server↔Godot 変換を `to_godot`/`to_server`/`dir_*` 経由に統一し、原点が動くと前進/逆変換が食い違う潜在バグを排除。リベース2系統を `_apply_origin_rebase` に統合。`floating_origin.gd` 削除・`world_space_test.gd` 追加 | ✅ |
+| 7 | HUD 速度は既に実値表示（`METERS_PER_UNIT=1.0` の単一定数）。AU 距離フォーマッタは consumer が出た時に同一箇所へ足す（YAGNI） | ✅(速度) |
+| 8 | スナップショットに `anchor` を永続化（リベース済み船の絶対位置を復元）。スキーマ bump | ✅ |
 
-### レビュー結果と評価（2026-06-22・シニアアーキテクト観点）
+**ゲートの f64 化（R1）**：`JumpGateDef.abs_m: [f64;3]` を追加し、`is_in_range_abs`／`distance_abs` で
+`can_propose_jump`／`can_propose_warp`（ゲート・天体の両分岐）を f64 比較に載せ替え（真 AU でも範囲判定が粗くならない）。
 
-実 AU 起動までプレイテストした上でのレビュー。**総評：中核設計（方式B）は健全だが、土台の一部が未完で、
-その上にクライアントの応急処置が積み上がっている。この状態で main にマージすべきでない。**
+**テストガード**：warp→`AnchorRebased`→snapshot/restore で絶対位置が完全一致する決定論テスト（`snapshot_io.rs`）、
+真 AU 距離の異アンカー2船で f64 合成の間合いが sub-mm の精度テスト（`anchor.rs`）、ゲートの真 AU 範囲判定テスト
+（`navigation.rs`）、`WorldSpace` の相互逆変換テスト（`world_space_test.gd`）。
 
-**健全な点**：方式Bの判断と決定論の扱い（f64 を静的定数＋権威イベント発行に限局、replay は f32 オフセット
-積分のみ）。段階移行の規律（Step 1-2 を no-op で導入）。ADR/スパイクの記録。
+> **レビューで revert した経緯（2026-06-22）**：実 AU 起動までプレイテストした上でのシニアレビューで、土台の一部が
+> 未完のままクライアントに応急処置が積み上がっていることが判明（アンカー割当が「常に恒星」で `nearest_body` で
+> ない／AoI がアンカー非対応／クライアント座標処理が応急処置の堆積／距離計算が全消費者に散在）。中核設計（方式B・
+> 決定論の扱い）は健全と確認した上で、**実 AU 起動を revert → 上記 #1〜#4・#6 のサーバ/クライアント土台を先に
+> 完成**させる方針に切替えた。これらは圧縮では no-op、真 AU で load-bearing。
 
-**構造的な懸念（重大度順）**：
-1. **アンカー割当が「常に恒星」で `nearest_body` でない【最重要】**。`insert_to_world` は全船を
-   `sector_origin_anchor` に固定し、分岐は warp 到着リベースのみ。実 AU では恒星から離れて spawn した船・
-   惑星近傍の NPC が巨大な恒星相対 f32 オフセット（~10¹¹）を持ち**精度崩壊**。方式Bの前提「船はアンカー近傍に
-   留まる」をコードが保証していない（`nearest_anchor()` は実装済みだが spawn で未使用）。
-2. **AoI が完全にアンカー非対応【機能欠落】**。`ships_visible_to`/`CellGrid`/`event_visible_to` は生の
-   `PositionComp` オフセットで動作。リベース後、恒星アンカー船と惑星アンカー船の可視性・イベント配信が壊れる。
-   真スケールの中核価値（広い宇宙の局所戦闘）が AoI 非対応では成立しない。
-3. **クライアント座標処理が応急処置の堆積【保守性】**。`_maybe_rebase_origin` / `VISUAL_SPEED_CAP` /
-   `PositionSnap` での原点再定義 / カメラ手動シフト / 背景マーカー常時クランプ / 旧 `_player_warp_snap_pos`
-   残存 — プレイテストのバグ修正で反応的に積み上がった相互依存の特殊ケース群。一貫した設計（描画空間マネージャ /
-   ワープ視覚ステートマシン）が無く、次に触ると壊れる。
-4. **アンカー対応距離が全消費者に散らばる【設計の臭い】**。combat は `anchor_abs: HashMap` 注入（アンカー概念が
-   anchor 非依存のはずの dawn-ecs に漏出）、approach/tackle/bots は `entity_absolute`。「ワールド絶対位置」を
-   一元提供する抽象が無く各システムが個別に再導出。あるべき姿は「tick 開始時に絶対位置を1回解決」。
+### 再活性化前の残課題
 
-**中程度の負債**：クライアントは絶対位置を f32(Vector3) でパース→遠方船/マーカーが ~8km 粗い（自機フレームしか
-浮動原点で守られない）。ゲート配置が実 AU 化で破綻（惑星 1.2e11 m に対しゲート 600km＝恒星脇）。ワープ到着の
-二重機構（旧 snap / 新 PositionSnap）。実 AU での replay-after-warp 決定論テストが無い。スパイクコード残存。
+圧縮では顕在化しないが、スケール値を上げた瞬間に効くもの。真スケール再活性化の前に潰す。
 
-**推奨アクション（優先度順）と進捗**：
-1. ✅ **アンカー割当を完成**（懸念#1）— `set_spawn_anchor` で spawn を最寄り天体にアンカー（決定論的・replay 一致）。
-   compressed では恒星が最寄りなので no-op、真 AU で load-bearing。
-2. ✅ **AoI を絶対位置ベースに**（懸念#2）— `ship_absolute_positions`/`ship_absolute_pos`、両 serve ループ・
-   InitialState scoping・jump 再送をすべて絶対位置に。クロスアンカー可視性テスト追加。
-3. 🔶 **「ワールド絶対位置」の一元抽象**（懸念#4）— `entity_abs_pos`/`ship_distance_to_point`/
-   `ship_absolute*` を単一アクセサ群として整備し、navigation のゲート/ワープ判定もこれに載せ替え。
-   残：combat が `anchor_abs: HashMap` を受ける形（dawn-ecs の境界として許容範囲だが要記録）。
-4. 🔶 **クライアント座標処理を再設計**（懸念#3）— 浮動原点を単一の `WorldSpace`（`client/scripts/world_space.gd`）
-   に集約し、main.gd の散在していた逆変換（`global_position / WORLD_SCALE` ＋手書き Z 反転を各所に複製）を
-   すべて `to_godot`/`to_server`/`dir_to_*` 経由に統一。これにより原点が動いた瞬間に前進/逆変換が食い違う潜在
-   バグ（compressed では原点 0 のため顕在化せず、真 AU で load-bearing）を解消。リベース処理（閾値超え・
-   PositionSnap）も単一プリミティブ `_apply_origin_rebase` に統合。ship_controller は座標を Godot 空間で受け取る
-   形にして原点非依存化（重複変換を削除）。旧 `floating_origin.gd` を削除し `world_space_test.gd`（相互逆変換の
-   不変条件テスト含む）を追加。全 73 クライアントテスト緑。
-   残：ワープ到着の権威化（client の `_player_warp_snap_pos` 事前計算と server の PositionSnap 二重機構の一本化）は
-   server 側の「ワープ完了時に常に PositionSnap」変更を要するため #5 と合わせて実施。VISUAL_SPEED_CAP は維持。
-5. 🔶 仕上げ。
-   - ✅ **スパイク破棄**：`spike_true_scale.rs`／`spike_floating_origin.gd`／同テストを削除（設計知見は本 ADR と
-     各 production ファイルの doc コメントに吸収済み）。
-   - ✅ **replay 決定論テスト**：warp-to-body が `AnchorRebased` を発行 → snapshot＋restore でアンカーと
-     **絶対位置**が完全一致することを検証（`snapshot_io.rs` の新スキーマ INV-002 テスト。アンカーを落とすと
-     船が天体の絶対位置ぶん飛ぶ退行を捕捉）。
-   - ✅ **到着/間合い精度テスト**：真 AU 距離の異アンカー2船を小オフセットで配置し、f64 合成の間合いが
-     sub-mm 精度であることを検証（`anchor.rs`。compressed/real トグルに依存せず常時ガード。spike S1–S2 の恒久化）。
-   - ⬜ **ワープ到着権威化**：client の `_player_warp_snap_pos` 事前計算と server の `PositionSnap`（現状 `AnchorRebased`
-     時のみ）の二重機構を一本化。server 側「ワープ完了時に常に PositionSnap」へ変更し client 事前計算を撤去する。
-   - 🔶 **ゲート配置の再設計**：精度面（f64 源・範囲/ワープ判定の f64 化）は R1 で完了。残るは真 AU 向けの
-     **座標値の再オーサリング**（ゲートを `UNITS_PER_AU` 連動でセクター縁に置く）。
+- ⬜ **ワープ到着権威化**：Gate ワープ・同一アンカー内ワープでは `AnchorRebased` が出ず `PositionSnap` も飛ばないため、
+  client の `_player_warp_snap_pos` 事前計算（バンドエイド）に依存が残る。server 側「ワープ完了時に常に権威スナップ」へ
+  一本化し client 事前計算を撤去する。**方式未決**（全到着で最寄り再アンカー／`WarpCompleted` 新設／serve 層で warp 状態追跡）。
+- ⬜ **ゲート座標の再オーサリング**：精度（f64 化）は済。残るは配置値（現状 600,000 units 固定で `UNITS_PER_AU` 非連動）を
+  真 AU 向けに `UNITS_PER_AU` 連動でセクター縁へ置き直す（精度ではなく座標値の設計）。
+- ⬜ **AoI 厳密段の f64 化**：`ship_absolute_positions`/`CellGrid` は f32 絶対座標。27 セルの粗フィルタは可だが、
+  「候補＋厳密距離」の厳密段では f64 `ship_distance` を使う（真 AU で異アンカー近傍境界が ~16 km ぶれるため）。
+- ⬜ **アンカー欠落の検知**：「アンカー不明時に生オフセットへフォールバック」の暗黙分岐（combat `absolute_position`／
+  spawner `set_spawn_anchor`／`dest_in_ship_frame`／`entity_abs_pos`）を `debug_assert!`／ログ化して黙殺しない。
+- ⬜ **視覚定数の再調整**：`VISUAL_SPEED_CAP`／`SUN_EFFECTIVE_DISTANCE`／`BODY_MARKER_CLAMP_DISTANCE` は `WORLD_SCALE`
+  と暗黙連動。`WARP_SPEED` と共に再活性化時にまとめて再調整。
+- 📝 **記録のみ（許容）**：combat が `anchor_abs: HashMap` を受ける形（dawn-ecs へアンカー概念がやや漏出。純データの
+  参照渡し・毎 tick clone なしで許容範囲）。将来 dawn-ecs を独立利用する場合の結合点。
 
-**進め方の決定（実施中）**：基盤（Step 1〜5b prep）を残し、実 AU の起動は revert して compressed base に。
-サーバ側のアンカー分岐対応（#1#2#4 のサーバ部分）は**完了**。クライアント座標抽象（#3）も**完了**（ワープ到着権威化のみ #5 へ）。
-残りは仕上げ（#5）で、これを終えてから真スケールを再活性化（`UNITS_PER_AU` ＋ `WARP_SPEED` の変更）する。
-
-### コードレビュー所見（2026-06-22・実装後の通し review）
-
-ブランチ `spike/true-scale-coords`（vs main、約 +1,640 行）を通してレビューした結果。実装品質は高く
-（アンカー合成は f64、replay は f32 オフセット積分のみ、doc コメントが厚い）、決定論・精度はテストで担保
-されている。一方、**compressed では no-op だが真 AU 再活性化時に load-bearing になる**未解決点を以下に記録する。
-いずれも「今は動くが、スケール値を上げた瞬間に顕在化する」性質で、再活性化前に潰すべき。
-
-- **R1（高）✅ 解消**：~~ゲートに f64 アンカー源がない~~ → `JumpGateDef.abs_m: [f64;3]` を追加（天体と同型）。
-  ローダ（`entry_to_gate`）が toml を f64 でパースし `abs_m` を権威源、`position` をその f32 ビューとする。
-  `is_in_range_abs`／`distance_abs` を新設し、`can_propose_jump`／`can_propose_warp`（ゲート・天体の両分岐）を
-  `entity_absolute_f64` × f64 源の比較に載せ替え。真 AU でも範囲判定が ~16 km 粗くならない。
-  真 AU での 1 AU ゲートに対する 40 m/60 m 判定テストを `navigation.rs` に追加。
-  残：ゲートの**配置値**自体（現状 600,000 units 固定で `UNITS_PER_AU` 非連動）の真 AU 向け再オーサリングは
-  「ゲート配置の再設計」として未了（精度ではなく座標値の設計問題）。
-
-- **R2（中）AoI グリッドが f32 絶対座標**：`ship_absolute_positions`／`entity_abs_pos` は `Position`（f32）を返し、
-  `CellGrid` も f32。27 セルの粗フィルタとしては許容だが、§5 が想定する「候補＋厳密距離」の厳密段では
-  f64 の `ship_distance` を使うこと（真 AU で異アンカー間の近傍境界が ~16 km ぶれるため）。現状は粗フィルタのみ。
-
-- **R3（中）「アンカー不明時に生オフセットへフォールバック」の暗黙分岐**が各所にある：combat `absolute_position`、
-  spawner `set_spawn_anchor`、`dest_in_ship_frame`、`entity_abs_pos`。compressed では到達しないが、真 AU で
-  万一アンカー表に欠落があると**誤ったフレームの座標を黙って返す**（距離が天体の絶対位置ぶんずれる）。
-  再活性化時は `debug_assert!`／ログで欠落を検知できるようにする（黙殺しない）。
-
-- **R4（中・既知）ワープ到着権威化の二重機構**：Gate ワープ・同一アンカー内ワープでは `AnchorRebased` が出ず
-  `PositionSnap` も飛ばないため、client の `_player_warp_snap_pos` 事前計算（バンドエイド）に依存が残る。
-  → #5 の方式決定（全到着で再アンカー／`WarpCompleted` 新設／serve 層追跡）待ち。
-
-- **R5（低）combat の anchor_abs: `HashMap` 受け渡し**：dawn-ecs が座標アンカーの存在を知る形になっており、
-  レイヤ境界としてはやや漏れている。許容範囲（純データの参照渡し・毎 tick clone なし）だが、将来 dawn-ecs を
-  独立利用する場合の結合点として記録。
-
-- **R6（低）`VISUAL_SPEED_CAP`・`SUN_EFFECTIVE_DISTANCE`・`BODY_MARKER_CLAMP_DISTANCE` などの視覚定数**は
-  `WORLD_SCALE` と暗黙に連動するマジック値。真 AU 再活性化時にまとめて再調整が要る（`WARP_SPEED` と同様）。
-
-**良かった点**：`WorldSpace` への一元化で client の前進/逆変換が相互逆として担保された（R 系の client 版バグを構造的に排除）。
-サーバの絶対位置アクセサ群（`entity_abs_pos`／`ship_distance`／`ship_absolute`）で combat・approach・bot・navigation・AoI が
-同一フレームに揃った。決定論テスト（warp→AnchorRebased→snapshot/restore）と真 AU 精度テストが恒久ガードとして入った。
+**真スケール再活性化の手順**（上記残課題を消化後）：`galaxy.rs` の `UNITS_PER_AU` を `1.495978707e11` に、
+`WARP_SPEED` を再調整し、データ flip ＋ プレイテストで詰める。
 
 ## 5. テスト戦略
 
@@ -258,9 +171,9 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
 
 ## 7. 影響
 
-- 型は `Position` を維持（再解釈）＋ `AnchorId`/`AnchorTable`/`AnchorRebased` を追加。スキーマ版が上がる。
+- 型は `Position` を維持（再解釈）＋ `AnchorId`/`AnchorTable`/`AnchorRebased`＋ゲート/天体の `abs_m` を追加。スキーマ版が上がる。
 - ADR-0025（天体スケール）・ADR-0022（ワープ）・ADR-0019（AoI）に追補が要る。
-- スパイクコード（`spike_true_scale` / `spike_floating_origin*`）は本 ADR 受理後に破棄する。
+- スパイクコード（`spike_true_scale` / `spike_floating_origin*`）は破棄済み（設計知見は本 ADR と各 production の doc コメントへ吸収）。
 
 ## 8. 代替案（却下）
 
