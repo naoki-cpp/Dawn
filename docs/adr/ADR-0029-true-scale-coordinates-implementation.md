@@ -113,6 +113,11 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
   一本化し client 事前計算を撤去する。**方式未決**（全到着で最寄り再アンカー／`WarpCompleted` 新設／serve 層で warp 状態追跡）。
 - ⬜ **ゲート座標の再オーサリング**：精度（f64 化）は済。残るは配置値（現状 600,000 units 固定で `UNITS_PER_AU` 非連動）を
   真 AU 向けに `UNITS_PER_AU` 連動でセクター縁へ置き直す（精度ではなく座標値の設計）。
+- ⬜ **ゲートワープの到着ジオメトリが f32 のまま（R1 の積み残し）**：R1 は `can_propose_jump`／`can_propose_warp` を
+  f64 化したが、warp **実行**側（`process_warp` のゲート分岐）は `g.position`（f32）を `dest_in_ship_frame` に渡し
+  `dest_anchor=None`・`warp_arrival_abs=[0,0,0]` のまま。Body ワープは f64 到着＋最寄りアンカーへリベースするのに対し、
+  ゲートワープは到着点が f32 由来（真 AU で ~16 km 粗い・到着後も恒星アンカーのまま）。**ワープ到着権威化と束ねて、
+  ゲート到着にも f64 到着点＋最寄りアンカーへのリベースを入れる**のが筋（propose と execution の f64/f32 不整合を解消）。
 - ✅ **AoI を f64 化**：`CellGrid` を f32 `Position` から `[f64;3]` 絶対座標に変更（セル binning を f64 floor 除算に）。
   `ship_absolute_positions`／`ship_absolute_pos`／`ships_visible_to`／`build_initial_state_json_for` も f64 化し、
   真 AU で異アンカー近傍のセル境界が ~16 km ぶれる問題を解消（1 AU の境界を 200 m 跨ぐ船が隣接セルに正しく入る
@@ -130,6 +135,26 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
 
 **真スケール再活性化の手順**（上記残課題を消化後）：`galaxy.rs` の `UNITS_PER_AU` を `1.495978707e11` に、
 `WARP_SPEED` を再調整し、データ flip ＋ プレイテストで詰める。
+
+### 通し review #2（2026-06-22・R1–R3 修正後）
+
+R1（ゲート f64 源）・R3（アンカー欠落 assert）・R2（AoI f64 化）を入れた後の再レビュー。
+
+**総評：圧縮ベースの土台は一貫して健全になった。** サーバ側のクロスアンカー境界（spawn／AoI／combat／距離／
+ゲート range）はすべて f64 で合成され、決定論テスト・精度テスト・`debug_assert` でガードされている。R2 の作業中に
+`dawn-sector-node` の AoI 漏れ（生オフセット）という**既存バグも一掃**できた。圧縮スケールでの自己整合性・マージ
+可能性は高い。残る負債は明確に「真 AU 起動でのみ効く」ものに収斂した。
+
+**残る所見（すべて再活性化ゲート・新規の致命傷なし）**：
+- **(中) propose は f64／execution は f32**（上記残課題に追加済み）：ゲートワープ到着が f32 のまま。R1 の自然な続き。
+- **(低) InitialState のワイヤで body／gate 位置が f32**：船は f64 absolute を送るが天体・ゲートは f32 view。クライアントは
+  これらをマーカー／ビルボード（距離クランプ）で描くため実害は小さいが、船と天体でワイヤ精度が非対称なのは記録しておく。
+- **(低) assert スタイルが2系統**：node 側は `debug_assert_missing_anchor` ヘルパー、combat 側はインライン。クレート境界
+  （dawn-ecs→dawn-sector を呼べない）ゆえ意図的だが、同一概念が2形になっている。
+- **(低) `ship_absolute_pos` が `ship_absolute` の薄いラッパ**：観測者位置用に名前を残したが実体は重複。再活性化時に一本化可。
+
+**マージ判断**：圧縮スケールの土台（#1–#4・#6・R1–R3）は一貫して緑で、main へ載せる価値がある状態。残課題は
+真 AU 起動と束ねるべきもの（ワープ到着権威化＋ゲート到着 f64＋座標再オーサリング＋視覚定数）に整理済み。
 
 ## 5. テスト戦略
 
