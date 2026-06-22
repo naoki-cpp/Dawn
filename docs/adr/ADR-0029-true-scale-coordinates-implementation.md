@@ -115,8 +115,10 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
   真 AU 向けに `UNITS_PER_AU` 連動でセクター縁へ置き直す（精度ではなく座標値の設計）。
 - ⬜ **AoI 厳密段の f64 化**：`ship_absolute_positions`/`CellGrid` は f32 絶対座標。27 セルの粗フィルタは可だが、
   「候補＋厳密距離」の厳密段では f64 `ship_distance` を使う（真 AU で異アンカー近傍境界が ~16 km ぶれるため）。
-- ⬜ **アンカー欠落の検知**：「アンカー不明時に生オフセットへフォールバック」の暗黙分岐（combat `absolute_position`／
-  spawner `set_spawn_anchor`／`dest_in_ship_frame`／`entity_abs_pos`）を `debug_assert!`／ログ化して黙殺しない。
+- ✅ **アンカー欠落の検知**：「アンカー不明時に生オフセットへフォールバック」の暗黙分岐に `debug_assert!` を追加
+  （`node/mod.rs` の `debug_assert_missing_anchor` ヘルパー＋ combat はテストが空マップを渡すため populated 時のみ）。
+  populated な `AnchorTable` にアンカーが無い＝データ整合性バグを debug ビルドで顕在化。release は安全網のフォールバック維持。
+  ※「`AnchorComp` 自体が無い」ケースは spawn で必ず付与されるため構造的に発生しない（assert 対象外）。
 - ⬜ **視覚定数の再調整**：`VISUAL_SPEED_CAP`／`SUN_EFFECTIVE_DISTANCE`／`BODY_MARKER_CLAMP_DISTANCE` は `WORLD_SCALE`
   と暗黙連動。`WARP_SPEED` と共に再活性化時にまとめて再調整。
 - 📝 **記録のみ（許容）**：combat が `anchor_abs: HashMap` を受ける形（dawn-ecs へアンカー概念がやや漏出。純データの

@@ -63,7 +63,18 @@ pub struct CombatResult {
 fn absolute_position(offset: Position, anchor: AnchorId, anchor_abs: &HashMap<AnchorId, [f64; 3]>) -> [f64; 3] {
     match anchor_abs.get(&anchor) {
         Some(a) => [a[0] + offset.x as f64, a[1] + offset.y as f64, a[2] + offset.z as f64],
-        None    => [offset.x as f64, offset.y as f64, offset.z as f64],
+        None    => {
+            // ADR-0029 R3: an anchor missing from a *populated* table is a data
+            // bug — at true AU it silently misplaces the ship by the body's
+            // absolute position. Tests pass an empty map on purpose (offset == the
+            // absolute), so only assert when the caller actually provided a table.
+            debug_assert!(
+                anchor_abs.is_empty(),
+                "combat: ship anchored on {anchor:?} absent from a populated anchor table \
+                 — distance fell back to the raw offset (wrong frame at true AU)"
+            );
+            [offset.x as f64, offset.y as f64, offset.z as f64]
+        }
     }
 }
 

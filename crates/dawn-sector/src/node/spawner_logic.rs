@@ -371,7 +371,10 @@ impl<S: EventStore> SimulationNode<S> {
             .unwrap_or(dawn_core::AnchorId(0));
         let offset = match self.anchor_table.abs(anchor) {
             Some(a) => Position::new((world[0] - a[0]) as f32, (world[1] - a[1]) as f32, (world[2] - a[2]) as f32),
-            None    => abs_pos,
+            None    => {
+                super::debug_assert_missing_anchor(anchor, "set_spawn_anchor");
+                abs_pos
+            }
         };
         self.world.set_ship_anchor(entity, anchor);
         if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) {

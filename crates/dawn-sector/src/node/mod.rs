@@ -355,7 +355,10 @@ impl<S: EventStore> SimulationNode<S> {
         match self.world.ship_anchor(entity) {
             Some(anchor) => self.anchor_table
                 .absolute(anchor, offset)
-                .or(Some([offset.x as f64, offset.y as f64, offset.z as f64])),
+                .or_else(|| {
+                    debug_assert_missing_anchor(anchor, "ship_absolute");
+                    Some([offset.x as f64, offset.y as f64, offset.z as f64])
+                }),
             None => Some([offset.x as f64, offset.y as f64, offset.z as f64]),
         }
     }
@@ -365,7 +368,10 @@ impl<S: EventStore> SimulationNode<S> {
     /// Used by steering/AI code so positions across anchors are comparable.
     pub(super) fn entity_absolute(&self, entity: Entity, offset: Position) -> Position {
         let Some(anchor) = self.world.ship_anchor(entity) else { return offset };
-        let Some(a) = self.anchor_table.abs(anchor) else { return offset };
+        let Some(a) = self.anchor_table.abs(anchor) else {
+            debug_assert_missing_anchor(anchor, "entity_absolute");
+            return offset;
+        };
         Position::new(
             (a[0] + offset.x as f64) as f32,
             (a[1] + offset.y as f64) as f32,
@@ -391,6 +397,7 @@ impl<S: EventStore> SimulationNode<S> {
             return [offset.x as f64, offset.y as f64, offset.z as f64];
         };
         let Some(a) = self.anchor_table.abs(anchor) else {
+            debug_assert_missing_anchor(anchor, "entity_absolute_f64");
             return [offset.x as f64, offset.y as f64, offset.z as f64];
         };
         [a[0] + offset.x as f64, a[1] + offset.y as f64, a[2] + offset.z as f64]
@@ -452,6 +459,24 @@ impl<S: EventStore> SimulationNode<S> {
             .unwrap_or_default()
     }
 
+}
+
+/// Fire in debug builds when a ship's `AnchorComp` points at an `AnchorId` that
+/// the `AnchorTable` doesn't know (ADR-0029 R3). The absolute-position accessors
+/// fall back to treating the raw offset as absolute, which is only correct at the
+/// Sector origin — at true-AU scale a missing anchor silently misplaces the ship
+/// by the body's absolute position (~10^11 m). This can't happen for node-spawned
+/// ships (every spawn anchors on a real table entry), so a miss means a data /
+/// galaxy-table integrity bug; surface it loudly instead of returning a wrong
+/// frame. Release builds keep the silent fallback as a safety net.
+#[inline]
+#[allow(clippy::assertions_on_constants)]
+fn debug_assert_missing_anchor(anchor: dawn_core::AnchorId, site: &str) {
+    debug_assert!(
+        false,
+        "{site}: ship anchored on {anchor:?} which is absent from the AnchorTable \
+         — absolute position fell back to the raw offset (wrong frame at true AU)"
+    );
 }
 
 // -- Tests -------------------------------------------------------------------

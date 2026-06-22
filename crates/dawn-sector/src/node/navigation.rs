@@ -352,7 +352,10 @@ impl<S: EventStore> SimulationNode<S> {
     /// if the anchor is unknown (no-op while anchored on the star at the origin).
     fn dest_in_ship_frame(&self, entity: Entity, dest_world: Position) -> Position {
         let Some(anchor) = self.world.ship_anchor(entity) else { return dest_world };
-        let Some(a) = self.anchor_table.abs(anchor) else { return dest_world };
+        let Some(a) = self.anchor_table.abs(anchor) else {
+            super::debug_assert_missing_anchor(anchor, "dest_in_ship_frame");
+            return dest_world;
+        };
         Position::new(
             dest_world.x - a[0] as f32,
             dest_world.y - a[1] as f32,
