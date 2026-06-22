@@ -147,13 +147,20 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
 3. 🔶 **「ワールド絶対位置」の一元抽象**（懸念#4）— `entity_abs_pos`/`ship_distance_to_point`/
    `ship_absolute*` を単一アクセサ群として整備し、navigation のゲート/ワープ判定もこれに載せ替え。
    残：combat が `anchor_abs: HashMap` を受ける形（dawn-ecs の境界として許容範囲だが要記録）。
-4. ⬜ **クライアント座標処理を再設計**（懸念#3）— 原点・ワープ視覚・マーカーを一貫した1抽象に集約。
-   現状の応急処置（PositionSnap 到着・速度キャップ・カメラシフト）は compressed では休眠中。真 AU 再活性化前に再設計する。
-5. ⬜ スパイク破棄・テスト強化（replay 決定論・到着精度）・ゲート配置の再設計。
+4. 🔶 **クライアント座標処理を再設計**（懸念#3）— 浮動原点を単一の `WorldSpace`（`client/scripts/world_space.gd`）
+   に集約し、main.gd の散在していた逆変換（`global_position / WORLD_SCALE` ＋手書き Z 反転を各所に複製）を
+   すべて `to_godot`/`to_server`/`dir_to_*` 経由に統一。これにより原点が動いた瞬間に前進/逆変換が食い違う潜在
+   バグ（compressed では原点 0 のため顕在化せず、真 AU で load-bearing）を解消。リベース処理（閾値超え・
+   PositionSnap）も単一プリミティブ `_apply_origin_rebase` に統合。ship_controller は座標を Godot 空間で受け取る
+   形にして原点非依存化（重複変換を削除）。旧 `floating_origin.gd` を削除し `world_space_test.gd`（相互逆変換の
+   不変条件テスト含む）を追加。全 73 クライアントテスト緑。
+   残：ワープ到着の権威化（client の `_player_warp_snap_pos` 事前計算と server の PositionSnap 二重機構の一本化）は
+   server 側の「ワープ完了時に常に PositionSnap」変更を要するため #5 と合わせて実施。VISUAL_SPEED_CAP は維持。
+5. ⬜ スパイク破棄・テスト強化（replay 決定論・到着精度）・ゲート配置の再設計・ワープ到着権威化。
 
 **進め方の決定（実施中）**：基盤（Step 1〜5b prep）を残し、実 AU の起動は revert して compressed base に。
-サーバ側のアンカー分岐対応（#1#2#4 のサーバ部分）は**完了**。残りはクライアント再設計（#3）と仕上げ（#5）で、
-これらを終えてから真スケールを再活性化（`UNITS_PER_AU` ＋ `WARP_SPEED` の変更）する。
+サーバ側のアンカー分岐対応（#1#2#4 のサーバ部分）は**完了**。クライアント座標抽象（#3）も**完了**（ワープ到着権威化のみ #5 へ）。
+残りは仕上げ（#5）で、これを終えてから真スケールを再活性化（`UNITS_PER_AU` ＋ `WARP_SPEED` の変更）する。
 
 ## 5. テスト戦略
 

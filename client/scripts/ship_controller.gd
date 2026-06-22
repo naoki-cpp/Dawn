@@ -111,9 +111,11 @@ func _process(delta: float) -> void:
 
 # ── 公開 API ──────────────────────────────────────────────────────────────────
 
-func initialize(id: int, server_pos: Vector3) -> void:
+## godot_pos is already in Godot world space (main.gd's WorldSpace converts at
+## the boundary, applying the floating origin). Ship nodes stay origin-agnostic.
+func initialize(id: int, godot_pos: Vector3) -> void:
 	ship_id   = id
-	position  = _to_godot(server_pos)
+	position  = godot_pos
 	_velocity = Vector3.ZERO
 	_is_init  = true
 
@@ -123,9 +125,10 @@ func set_velocity(server_vel: Vector3) -> void:
 	## サーバー座標系 → Godot 座標系（Z 反転・スケール変換）
 	_velocity = Vector3(server_vel.x, server_vel.y, -server_vel.z) * WORLD_SCALE
 
-## 後方互換のため残す（InitialState での位置設定に使う）。
-func update_target(server_pos: Vector3) -> void:
-	position = _to_godot(server_pos)
+## Snap the ship to a Godot-space position (jump-gate teleport, warp-arrival
+## snap). main.gd converts from server space via its WorldSpace before calling.
+func update_target(godot_pos: Vector3) -> void:
+	position = godot_pos
 
 func set_as_player() -> void:
 	_is_player    = true
@@ -278,8 +281,3 @@ func _make_line_indicator(color: Color) -> MeshInstance3D:
 	inst.material_override = mat
 	add_child(inst)
 	return inst
-
-# ── 座標変換 ─────────────────────────────────────────────────────────────────
-
-static func _to_godot(v: Vector3) -> Vector3:
-	return Vector3(v.x, v.y, -v.z) * WORLD_SCALE

@@ -170,37 +170,19 @@ func _process(delta: float) -> void:
 			_jump_notice = ""
 	_update_hud()
 
-## Floating origin (ADR-0029 step 6): the server-space point currently mapped to
-## the Godot world origin. It follows the player so render coordinates stay small
-## (and f32-precise) even at true-AU distances. At the compressed scale the whole
-## system fits inside ORIGIN_REBASE_THRESHOLD, so the origin never leaves [0,0,0]
-## and every transform below is identical to the pre-floating-origin behaviour.
-var _origin_server : Vector3 = Vector3.ZERO
-## Rebase the origin once the player drifts this far (server units) from it.
-## Larger than the compressed system (±700k) so it is dormant until real-AU.
-const ORIGIN_REBASE_THRESHOLD : float = 1_000_000.0
+## The client's single coordinate authority (ADR-0029 #3): owns the floating
+## origin and is the only place server<->Godot conversions happen. Preloaded
+## (not referenced by global class_name) so headless tests that load main.gd
+## resolve it without the editor's script-class cache.
+const WorldSpace = preload("res://scripts/world_space.gd")
+var _world := WorldSpace.new()
 
 ## Converts a server-space position (Y-up, +Z) into Godot world space (Y-up,
 ## -Z), relative to the floating origin and scaled by WORLD_SCALE. Shared by
 ## gate/body marker spawning and gate picking, which all place a Node3D at a
-## server-given position.
+## server-given position. Thin wrapper so it can be passed as a Callable.
 func _server_to_godot_pos(p: Vector3) -> Vector3:
-	return FloatingOrigin.to_godot(p, _origin_server, WORLD_SCALE)
-
-## Inverse of _server_to_godot_pos: Godot world space back to server space,
-## undoing the floating-origin offset, WORLD_SCALE, and Z inversion.
-##
-## NOTE (ADR-0029 activation): some gameplay code elsewhere still reads
-## `global_position / WORLD_SCALE` directly. Those are correct while the origin
-## is [0,0,0] (compressed scale). Distance computations between two such points
-## are origin-invariant, but any that compare an absolute reconstructed position
-## against server-absolute data (gate/body positions) must route through this
-## helper when the origin starts moving at real-AU.
-func _godot_to_server_pos(g: Vector3) -> Vector3:
-	return Vector3(
-		g.x / WORLD_SCALE + _origin_server.x,
-		g.y / WORLD_SCALE + _origin_server.y,
-		-g.z / WORLD_SCALE + _origin_server.z)
+	return _world.to_godot(p)
 
 ## Distance (Godot units) past which a celestial body marker is clamped toward
 ## the player so it stays inside the camera far plane (true-AU only). At the
@@ -230,26 +212,40 @@ func _update_body_markers() -> void:
 		else:
 			marker.global_position = body_godot
 
-## Rebase the floating origin to the player when it drifts past the threshold,
-## shifting every world node by the same delta so the move is invisible (the
-## spike's C2-2 property). Dormant at compressed scale (threshold never reached).
+## Rebase the floating origin to the player when it drifts past the threshold so
+## render coordinates stay small. Dormant at compressed scale (threshold never
+## reached). The player moves to the new origin (render ~0), so it is shifted
+## along with everything else and the camera follows.
 func _maybe_rebase_origin() -> void:
 	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return
-	var player_server: Vector3 = _godot_to_server_pos((_ships[_player_ship_id] as Node3D).global_position)
-	if not FloatingOrigin.should_rebase(player_server, _origin_server, ORIGIN_REBASE_THRESHOLD):
+	var player_server: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
+	if not _world.should_rebase(player_server):
 		return
-	var shift: Vector3 = FloatingOrigin.rebase_shift(_origin_server, player_server, WORLD_SCALE)
-	_origin_server = player_server
+	_apply_origin_rebase(player_server, false)
+
+## Move the floating origin to `new_origin` and shift every world node that holds
+## a fixed Godot position by the same delta, so the move is invisible (the spike's
+## C2-2 property). The single primitive behind both threshold rebases (origin
+## follows player) and authoritative position snaps (origin re-anchored to keep
+## the player on-screen, `keep_player_fixed`).
+##
+## Body markers are intentionally not shifted here: _update_body_markers re-places
+## them from their server position against the new origin every frame, so shifting
+## them now would be dead work.
+func _apply_origin_rebase(new_origin: Vector3, keep_player_fixed: bool) -> void:
+	var shift: Vector3 = _world.rebase_to(new_origin)
 	for id: int in _ships:
+		if keep_player_fixed and id == _player_ship_id:
+			continue
 		(_ships[id] as Node3D).position += shift
 	for c: Node in _gates_root.get_children():
 		(c as Node3D).position += shift
-	for c: Node in _bodies_root.get_children():
-		(c as Node3D).position += shift
-	# Shift the camera by the same delta so its follow-lerp/look_at don't swing
-	# for a frame (it follows the ship by world position, not as a child).
-	if _camera != null:
+	# When the player ship moved with the origin, shift the camera by the same
+	# delta so its follow-lerp/look_at don't swing for a frame (it follows the
+	# ship by world position, not as a child). When the player is held fixed on
+	# screen the camera must stay put too.
+	if not keep_player_fixed and _camera != null:
 		_camera.global_position += shift
 		_camera.call("on_origin_rebased", shift)
 
@@ -302,10 +298,9 @@ func _update_sun_direction() -> void:
 		_sky_mat.set_shader_parameter("sun_active", 0.0)
 		return
 
-	## Player position in server units (undo WORLD_SCALE + Z inversion).
+	## Player position in server space.
 	var ship_node   : Node3D = _ships[_player_ship_id] as Node3D
-	var ship_godot  : Vector3 = ship_node.global_position
-	var ship_server : Vector3 = Vector3(ship_godot.x, ship_godot.y, -ship_godot.z) / WORLD_SCALE
+	var ship_server : Vector3 = _world.to_server(ship_node.global_position)
 
 	## Direction from ship toward the star's effective (pushed-out) position in
 	## server coords; map to Godot world space. See SUN_EFFECTIVE_DISTANCE.
@@ -314,8 +309,8 @@ func _update_sun_direction() -> void:
 	if diff.length_squared() < 1.0:
 		_sky_mat.set_shader_parameter("sun_active", 0.0)
 		return
-	## Apply same coord mapping (Z inversion) so shader direction matches world.
-	var godot_dir : Vector3 = Vector3(diff.x, diff.y, -diff.z).normalized()
+	## Map the server-space direction to Godot world space (scale cancels on normalize).
+	var godot_dir : Vector3 = _world.dir_to_godot(diff).normalized()
 	_sky_mat.set_shader_parameter("sun_direction", godot_dir)
 	_sky_mat.set_shader_parameter("sun_active",    1.0)
 
@@ -335,7 +330,7 @@ func _update_gate_proximity() -> void:
 	_nearby_gate_id = -1
 	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return
-	var ship_pos: Vector3 = (_ships[_player_ship_id] as Node3D).global_position / WORLD_SCALE
+	var ship_pos: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
 	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
 		var gate_pos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
@@ -484,14 +479,13 @@ func _select_body(body_id: int) -> void:
 func _selected_gate_distance() -> float:
 	if _selected_gate_id < 0 or _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return -1.0
-	var ship_pos: Vector3 = (_ships[_player_ship_id] as Node3D).global_position / WORLD_SCALE
+	var ship_server: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
 	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
 		if (g.get("gate_id", -1) as int) != _selected_gate_id:
 			continue
 		var gpos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
-		## Godot Z is flipped; compute distance in server coordinate space.
-		return Vector3(ship_pos.x, ship_pos.y, -ship_pos.z).distance_to(gpos)
+		return ship_server.distance_to(gpos)
 	return -1.0
 
 # -- Right-click -> LockOnCommand ---------------------------------------------
@@ -521,19 +515,14 @@ func _on_double_click(screen_pos: Vector2) -> void:
 	## Camera ray direction used directly as thrust direction (3D)
 	var ray_dir: Vector3 = _camera.project_ray_normal(screen_pos)
 
-	## Direction transform from Godot to server space (Z flip only; scale cancels on normalize)
-	## Godot (x, y, -z) == server (x, y, z); for directions: (dx, dy, -dz)
-	var server_dir: Vector3 = Vector3(ray_dir.x, ray_dir.y, -ray_dir.z)
+	## Camera ray direction in server space (the server only uses its bearing:
+	## it normalizes target - ship, so the scale factor is irrelevant).
+	var server_dir: Vector3 = _world.dir_to_server(ray_dir)
 
 	## Estimate player ship position in server space (back-calculated from lerped Godot position)
-	var ship_godot_pos: Vector3 = Vector3.ZERO
+	var ship_server_pos: Vector3 = Vector3.ZERO
 	if _ships.has(_player_ship_id):
-		ship_godot_pos = (_ships[_player_ship_id] as Node3D).global_position
-	var ship_server_pos: Vector3 = Vector3(
-		ship_godot_pos.x / WORLD_SCALE,
-		ship_godot_pos.y / WORLD_SCALE,
-		-ship_godot_pos.z / WORLD_SCALE,
-	)
+		ship_server_pos = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
 
 	## Set target far away so server treats normalize(target - ship) as server_dir
 	var target: Vector3 = ship_server_pos + server_dir * 1_000_000.0
@@ -592,22 +581,12 @@ func _handle_position_snap(p: Dictionary) -> void:
 		# A warp crosses ~1 AU but the player's visual ship lagged behind (its
 		# warp speed was capped). Correcting that by moving the ship would make
 		# the camera pan/swing. Instead, keep the ship (and camera) exactly where
-		# they are on screen and re-define the floating origin so that this same
-		# Godot position now represents the authoritative arrival `server_pos`.
-		# Only the *other* world nodes shift; markers re-place in _update_body_markers.
+		# they are on screen and re-anchor the floating origin so that this same
+		# Godot position now represents the authoritative arrival `server_pos`:
+		# new_origin = server_pos - (ship's server-space offset from the origin).
 		var pg: Vector3 = (_ships[ship_id] as Node3D).global_position
-		var new_origin := Vector3(
-			server_pos.x - pg.x / WORLD_SCALE,
-			server_pos.y - pg.y / WORLD_SCALE,
-			server_pos.z + pg.z / WORLD_SCALE)
-		var shift: Vector3 = FloatingOrigin.rebase_shift(_origin_server, new_origin, WORLD_SCALE)
-		_origin_server = new_origin
-		for id: int in _ships:
-			if id == _player_ship_id:
-				continue
-			(_ships[id] as Node3D).position += shift
-		for c: Node in _gates_root.get_children():
-			(c as Node3D).position += shift
+		var new_origin: Vector3 = server_pos - _world.dir_to_server(pg)
+		_apply_origin_rebase(new_origin, true)
 		# Cancel the client-side warp snap so it doesn't fire a stale position.
 		_player_warp_snap_pos = Vector3.INF
 		_player_was_warping = false
@@ -627,7 +606,7 @@ func _handle_jump_gate_used(p: Dictionary) -> void:
 		pos_dict.get("y", 0.0) as float,
 		pos_dict.get("z", 0.0) as float,
 	)
-	(_ships[ship_id] as Node3D).call("update_target", entry_pos)
+	(_ships[ship_id] as Node3D).call("update_target", _world.to_godot(entry_pos))
 	if ship_id == _player_ship_id:
 		(_ships[ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
 		_jump_notice       = "Jumped via Gate #%d" % (p.get("gate_id", 0) as int)
@@ -722,7 +701,7 @@ func _spawn_ship_from_data(d: Dictionary) -> void:
 	## Instantiate ship node
 	var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
 	_ships_root.add_child(ship)
-	ship.call("initialize", sid, pos)
+	ship.call("initialize", sid, _world.to_godot(pos))
 	ship.name = "Ship_%d" % sid
 	_ships[sid] = ship
 
@@ -894,7 +873,7 @@ func _handle_ship_spawned(p: Dictionary) -> void:
 
 	var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
 	_ships_root.add_child(ship)
-	ship.call("initialize", ship_id, pos)
+	ship.call("initialize", ship_id, _world.to_godot(pos))
 	ship.name = "Ship_%d" % ship_id
 	_ships[ship_id] = ship
 
@@ -921,7 +900,7 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 	if ship_id == _player_ship_id and _player_warp_snap_pos != Vector3.INF:
 		var speed: float = server_vel.length()
 		if _player_was_warping and speed < 1.0:
-			(_ships[ship_id] as Node3D).call("update_target", _player_warp_snap_pos)
+			(_ships[ship_id] as Node3D).call("update_target", _world.to_godot(_player_warp_snap_pos))
 			_player_warp_snap_pos = Vector3.INF
 		_player_was_warping = speed >= WARP_SPEED_THRESHOLD
 
@@ -939,8 +918,7 @@ func _compute_warp_snap_pos_core(target_pos: Vector3, radius: float, arrival_fac
 	if not _ships.has(_player_ship_id):
 		return Vector3.INF
 	var ship_node: Node3D  = _ships[_player_ship_id] as Node3D
-	var gdot     : Vector3 = ship_node.global_position
-	var ship_server_pos := Vector3(gdot.x / WORLD_SCALE, gdot.y / WORLD_SCALE, -gdot.z / WORLD_SCALE)
+	var ship_server_pos: Vector3 = _world.to_server(ship_node.global_position)
 	var dir: Vector3 = ship_server_pos - target_pos
 	dir = dir.normalized() if dir.length() > 0.001 else Vector3(-1.0, 0.0, 0.0)
 	return target_pos + dir * radius * arrival_factor
