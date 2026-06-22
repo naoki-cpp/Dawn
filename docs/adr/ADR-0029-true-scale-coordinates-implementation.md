@@ -172,6 +172,42 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
 サーバ側のアンカー分岐対応（#1#2#4 のサーバ部分）は**完了**。クライアント座標抽象（#3）も**完了**（ワープ到着権威化のみ #5 へ）。
 残りは仕上げ（#5）で、これを終えてから真スケールを再活性化（`UNITS_PER_AU` ＋ `WARP_SPEED` の変更）する。
 
+### コードレビュー所見（2026-06-22・実装後の通し review）
+
+ブランチ `spike/true-scale-coords`（vs main、約 +1,640 行）を通してレビューした結果。実装品質は高く
+（アンカー合成は f64、replay は f32 オフセット積分のみ、doc コメントが厚い）、決定論・精度はテストで担保
+されている。一方、**compressed では no-op だが真 AU 再活性化時に load-bearing になる**未解決点を以下に記録する。
+いずれも「今は動くが、スケール値を上げた瞬間に顕在化する」性質で、再活性化前に潰すべき。
+
+- **R1（高）ゲートに f64 アンカー源がない**：天体は `CelestialBodyDef.abs_m: [f64;3]` を持つが、
+  `JumpGateDef.position` は f32 のまま。`is_in_range` も `can_propose_warp` のゲート分岐も f32 同士で比較する。
+  真 AU ではゲート絶対座標が ~16 km 粗く、ジャンプ範囲判定・ゲートワープ到着がその精度に劣化する。
+  → #5「ゲート配置の再設計」で `abs_m` 相当をゲートにも持たせ、判定を f64 化する（天体と同型）。
+
+- **R2（中）AoI グリッドが f32 絶対座標**：`ship_absolute_positions`／`entity_abs_pos` は `Position`（f32）を返し、
+  `CellGrid` も f32。27 セルの粗フィルタとしては許容だが、§5 が想定する「候補＋厳密距離」の厳密段では
+  f64 の `ship_distance` を使うこと（真 AU で異アンカー間の近傍境界が ~16 km ぶれるため）。現状は粗フィルタのみ。
+
+- **R3（中）「アンカー不明時に生オフセットへフォールバック」の暗黙分岐**が各所にある：combat `absolute_position`、
+  spawner `set_spawn_anchor`、`dest_in_ship_frame`、`entity_abs_pos`。compressed では到達しないが、真 AU で
+  万一アンカー表に欠落があると**誤ったフレームの座標を黙って返す**（距離が天体の絶対位置ぶんずれる）。
+  再活性化時は `debug_assert!`／ログで欠落を検知できるようにする（黙殺しない）。
+
+- **R4（中・既知）ワープ到着権威化の二重機構**：Gate ワープ・同一アンカー内ワープでは `AnchorRebased` が出ず
+  `PositionSnap` も飛ばないため、client の `_player_warp_snap_pos` 事前計算（バンドエイド）に依存が残る。
+  → #5 の方式決定（全到着で再アンカー／`WarpCompleted` 新設／serve 層追跡）待ち。
+
+- **R5（低）combat の anchor_abs: `HashMap` 受け渡し**：dawn-ecs が座標アンカーの存在を知る形になっており、
+  レイヤ境界としてはやや漏れている。許容範囲（純データの参照渡し・毎 tick clone なし）だが、将来 dawn-ecs を
+  独立利用する場合の結合点として記録。
+
+- **R6（低）`VISUAL_SPEED_CAP`・`SUN_EFFECTIVE_DISTANCE`・`BODY_MARKER_CLAMP_DISTANCE` などの視覚定数**は
+  `WORLD_SCALE` と暗黙に連動するマジック値。真 AU 再活性化時にまとめて再調整が要る（`WARP_SPEED` と同様）。
+
+**良かった点**：`WorldSpace` への一元化で client の前進/逆変換が相互逆として担保された（R 系の client 版バグを構造的に排除）。
+サーバの絶対位置アクセサ群（`entity_abs_pos`／`ship_distance`／`ship_absolute`）で combat・approach・bot・navigation・AoI が
+同一フレームに揃った。決定論テスト（warp→AnchorRebased→snapshot/restore）と真 AU 精度テストが恒久ガードとして入った。
+
 ## 5. テスト戦略
 
 - **決定論**：replay が再計算するのは f32 オフセット積分のみ（現行と同型）。`AnchorRebased` は権威イベントで
