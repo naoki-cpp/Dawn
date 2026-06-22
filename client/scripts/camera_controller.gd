@@ -100,6 +100,13 @@ func set_target(node: Node3D) -> void:
 		_target_pos     = node.global_position
 		global_position = _target_pos + _orbit_offset()
 
+## Called by main.gd when the floating origin rebases (ADR-0029): the whole world
+## (including the follow target) shifted by `shift`, so shift the cached target
+## too. main.gd already shifted our global_position, so the orbit offset and
+## look_at stay continuous and the view doesn't swing for a frame.
+func on_origin_rebased(shift: Vector3) -> void:
+	_target_pos += shift
+
 func is_dragging() -> bool:
 	return _dragging
 

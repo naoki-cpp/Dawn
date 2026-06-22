@@ -248,6 +248,11 @@ func _maybe_rebase_origin() -> void:
 		(c as Node3D).position += shift
 	for c: Node in _bodies_root.get_children():
 		(c as Node3D).position += shift
+	# Shift the camera by the same delta so its follow-lerp/look_at don't swing
+	# for a frame (it follows the ship by world position, not as a child).
+	if _camera != null:
+		_camera.global_position += shift
+		_camera.call("on_origin_rebased", shift)
 
 ## Gate/body marker spawning lives in navigation_marker_renderer.gd
 ## (NavigationMarkerRenderer, architecture-review-client.md C-1) -- main.gd
