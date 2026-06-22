@@ -113,8 +113,12 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
   一本化し client 事前計算を撤去する。**方式未決**（全到着で最寄り再アンカー／`WarpCompleted` 新設／serve 層で warp 状態追跡）。
 - ⬜ **ゲート座標の再オーサリング**：精度（f64 化）は済。残るは配置値（現状 600,000 units 固定で `UNITS_PER_AU` 非連動）を
   真 AU 向けに `UNITS_PER_AU` 連動でセクター縁へ置き直す（精度ではなく座標値の設計）。
-- ⬜ **AoI 厳密段の f64 化**：`ship_absolute_positions`/`CellGrid` は f32 絶対座標。27 セルの粗フィルタは可だが、
-  「候補＋厳密距離」の厳密段では f64 `ship_distance` を使う（真 AU で異アンカー近傍境界が ~16 km ぶれるため）。
+- ✅ **AoI を f64 化**：`CellGrid` を f32 `Position` から `[f64;3]` 絶対座標に変更（セル binning を f64 floor 除算に）。
+  `ship_absolute_positions`／`ship_absolute_pos`／`ships_visible_to`／`build_initial_state_json_for` も f64 化し、
+  真 AU で異アンカー近傍のセル境界が ~16 km ぶれる問題を解消（1 AU の境界を 200 m 跨ぐ船が隣接セルに正しく入る
+  テストを追加）。**副次**：`dawn-sector-node` の serve ループが #2 の絶対化から漏れて生オフセットで AoI していた
+  のを絶対 f64 に修正。未使用化した `ship_positions`（生オフセット・footgun）を削除。
+  ※当初想定の「粗フィルタ＋厳密距離段」ではなく「グリッド自体を f64 化」が正攻法だった（厳密段は現状不要）。
 - ✅ **アンカー欠落の検知**：「アンカー不明時に生オフセットへフォールバック」の暗黙分岐に `debug_assert!` を追加
   （`node/mod.rs` の `debug_assert_missing_anchor` ヘルパー＋ combat はテストが空マップを渡すため populated 時のみ）。
   populated な `AnchorTable` にアンカーが無い＝データ整合性バグを debug ビルドで顕在化。release は安全網のフォールバック維持。

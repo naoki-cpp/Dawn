@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 
-use dawn_core::{DomainEvent, Position, ShipId};
+use dawn_core::{DomainEvent, ShipId};
 
 /// Integer 3-D cell coordinate.
 pub type Cell = (i32, i32, i32);
@@ -36,11 +36,14 @@ impl CellGrid {
         Self { cell_size, cells: BTreeMap::new() }
     }
 
-    /// Build a grid from `(ShipId, Position)` pairs. Each bucket is sorted by
-    /// `ShipId` so neighborhood enumeration is deterministic.
+    /// Build a grid from `(ShipId, absolute position)` pairs. Positions are
+    /// absolute (Sector-frame, metres) **f64** so the cell binning stays precise
+    /// at true-AU distances — an f32 absolute near a 1e11 m anchor has a ~16 km
+    /// ulp, which would fuzz the cell boundary (ADR-0029 R2). Each bucket is
+    /// sorted by `ShipId` so neighborhood enumeration is deterministic.
     pub fn build(
         cell_size: f32,
-        ships: impl IntoIterator<Item = (ShipId, Position)>,
+        ships: impl IntoIterator<Item = (ShipId, [f64; 3])>,
     ) -> Self {
         let mut grid = Self::new(cell_size);
         for (id, pos) in ships {
@@ -52,14 +55,14 @@ impl CellGrid {
         grid
     }
 
-    /// The cell a position maps to (floor division on every axis).
-    pub fn cell_of(&self, pos: Position) -> Cell {
+    /// The cell an absolute position maps to (floor division on every axis).
+    pub fn cell_of(&self, pos: [f64; 3]) -> Cell {
         grid_cell(self.cell_size, pos)
     }
 
     /// All `ShipId`s in the 3×3×3 neighborhood centered on `pos`'s cell, in
     /// `ShipId` order. Includes ships in the same cell as `pos`.
-    pub fn neighbors_of(&self, pos: Position) -> Vec<ShipId> {
+    pub fn neighbors_of(&self, pos: [f64; 3]) -> Vec<ShipId> {
         let (cx, cy, cz) = self.cell_of(pos);
         let mut out = Vec::new();
         for dx in -1..=1 {
@@ -123,13 +126,15 @@ pub fn aoi_leave_json(ship_id: ShipId) -> String {
     serde_json::json!({ "type": "AoiLeave", "ship_id": ship_id.raw() }).to_string()
 }
 
-/// Map a position to its integer cell via floor division (handles negatives:
-/// `-0.1` with size 100 → cell -1, not 0).
-fn grid_cell(cell_size: f32, pos: Position) -> Cell {
+/// Map an absolute (f64) position to its integer cell via floor division
+/// (handles negatives: `-0.1` with size 100 → cell -1, not 0). The division is
+/// done in f64 so a ship near a true-AU anchor lands in the right cell.
+fn grid_cell(cell_size: f32, pos: [f64; 3]) -> Cell {
+    let size = cell_size as f64;
     (
-        (pos.x / cell_size).floor() as i32,
-        (pos.y / cell_size).floor() as i32,
-        (pos.z / cell_size).floor() as i32,
+        (pos[0] / size).floor() as i32,
+        (pos[1] / size).floor() as i32,
+        (pos[2] / size).floor() as i32,
     )
 }
 
@@ -145,37 +150,51 @@ mod tests {
     #[test]
     fn cell_assignment_uses_floor_division_including_negatives() {
         let grid = CellGrid::new(100.0);
-        assert_eq!(grid.cell_of(Position::new(0.0, 0.0, 0.0)), (0, 0, 0));
-        assert_eq!(grid.cell_of(Position::new(150.0, 250.0, 50.0)), (1, 2, 0));
+        assert_eq!(grid.cell_of([0.0, 0.0, 0.0]), (0, 0, 0));
+        assert_eq!(grid.cell_of([150.0, 250.0, 50.0]), (1, 2, 0));
         // Negative coordinates floor toward minus infinity, not toward zero.
-        assert_eq!(grid.cell_of(Position::new(-0.1, -100.0, -100.1)), (-1, -1, -2));
+        assert_eq!(grid.cell_of([-0.1, -100.0, -100.1]), (-1, -1, -2));
     }
 
     #[test]
     fn a_cell_boundary_position_belongs_to_the_higher_cell() {
         let grid = CellGrid::new(100.0);
         // Exactly on the boundary (x = 100) floors into cell 1, deterministically.
-        assert_eq!(grid.cell_of(Position::new(100.0, 0.0, 0.0)), (1, 0, 0));
+        assert_eq!(grid.cell_of([100.0, 0.0, 0.0]), (1, 0, 0));
+    }
+
+    #[test]
+    fn cell_binning_is_precise_at_true_au_where_f32_would_fuzz_the_boundary() {
+        // Two ships 200 m apart straddling a cell boundary, sitting ~1 AU out.
+        // In f64 they bin into adjacent cells (correct); cast through f32 first
+        // (~16 km ulp at 1e11) they would collapse into the same coordinate and
+        // mis-bin (ADR-0029 R2).
+        const AU_M: f64 = 1.495978707e11;
+        let grid = CellGrid::new(10_000.0);
+        let boundary = (AU_M / 10_000.0).floor() * 10_000.0; // exact cell edge
+        let lo = grid.cell_of([boundary - 100.0, 0.0, 0.0]);
+        let hi = grid.cell_of([boundary + 100.0, 0.0, 0.0]);
+        assert_eq!(hi.0, lo.0 + 1, "200 m across a cell edge at 1 AU must bin into adjacent cells");
     }
 
     #[test]
     fn neighborhood_includes_same_cell_and_axis_adjacent_cells() {
         // center cell (0,0,0); one ship in it, one in an adjacent cell.
         let grid = CellGrid::build(100.0, [
-            (ship(1), Position::new(10.0, 10.0, 10.0)),    // cell (0,0,0)
-            (ship(2), Position::new(110.0, 10.0, 10.0)),   // cell (1,0,0) — adjacent
+            (ship(1), [10.0, 10.0, 10.0]),    // cell (0,0,0)
+            (ship(2), [110.0, 10.0, 10.0]),   // cell (1,0,0) — adjacent
         ]);
-        let n = grid.neighbors_of(Position::new(50.0, 50.0, 50.0));
+        let n = grid.neighbors_of([50.0, 50.0, 50.0]);
         assert_eq!(n, vec![ship(1), ship(2)]);
     }
 
     #[test]
     fn ships_two_cells_away_are_excluded() {
         let grid = CellGrid::build(100.0, [
-            (ship(1), Position::new(50.0, 50.0, 50.0)),    // cell (0,0,0)
-            (ship(2), Position::new(250.0, 50.0, 50.0)),   // cell (2,0,0) — 2 cells away
+            (ship(1), [50.0, 50.0, 50.0]),    // cell (0,0,0)
+            (ship(2), [250.0, 50.0, 50.0]),   // cell (2,0,0) — 2 cells away
         ]);
-        let n = grid.neighbors_of(Position::new(50.0, 50.0, 50.0));
+        let n = grid.neighbors_of([50.0, 50.0, 50.0]);
         assert_eq!(n, vec![ship(1)]);
     }
 
@@ -183,19 +202,19 @@ mod tests {
     fn enumeration_is_sorted_by_ship_id_regardless_of_insertion_order() {
         // Insert out of order and across several cells; result must be ShipId-sorted.
         let grid = CellGrid::build(100.0, [
-            (ship(9), Position::new(10.0, 10.0, 10.0)),    // (0,0,0)
-            (ship(3), Position::new(110.0, 10.0, 10.0)),   // (1,0,0)
-            (ship(5), Position::new(10.0, 110.0, 10.0)),   // (0,1,0)
-            (ship(1), Position::new(10.0, 10.0, 10.0)),    // (0,0,0)
+            (ship(9), [10.0, 10.0, 10.0]),    // (0,0,0)
+            (ship(3), [110.0, 10.0, 10.0]),   // (1,0,0)
+            (ship(5), [10.0, 110.0, 10.0]),   // (0,1,0)
+            (ship(1), [10.0, 10.0, 10.0]),    // (0,0,0)
         ]);
-        let n = grid.neighbors_of(Position::new(50.0, 50.0, 50.0));
+        let n = grid.neighbors_of([50.0, 50.0, 50.0]);
         assert_eq!(n, vec![ship(1), ship(3), ship(5), ship(9)]);
     }
 
     #[test]
     fn an_empty_grid_yields_no_neighbors() {
         let grid = CellGrid::build(100.0, std::iter::empty());
-        assert!(grid.neighbors_of(Position::ORIGIN).is_empty());
+        assert!(grid.neighbors_of([0.0, 0.0, 0.0]).is_empty());
     }
 
     // ── AoI delta / event visibility ─────────────────────────────────────────

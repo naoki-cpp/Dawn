@@ -155,7 +155,7 @@ async fn main() -> anyhow::Result<()> {
             // SimulationNode::DEFAULT_PLAYER_SPAWN) -- the star itself sits at
             // the origin, so spawning there put the player inside it.
             let ship_id       = node.spawn_player_ship_at_pub(player_id, dawn_core::Position::new(30_000.0, 0.0, 0.0));
-            let initial_state = node.get_ship_position(ship_id)
+            let initial_state = node.ship_absolute_pos(ship_id)
                 .map(|pos| node.build_initial_state_json_for(pos, AOI_CELL_SIZE))
                 .unwrap_or_else(|| node.build_initial_state_json());
             let player_fitting = node.build_player_fitting_json(ship_id);
@@ -172,7 +172,7 @@ async fn main() -> anyhow::Result<()> {
         // Promote completed handshakes to active sessions.
         while let Ok(sess) = ready_sess_rx.try_recv() {
             println!("[Node] {:?} joined with ship #{}", sess.player_id, sess.ship_id.raw());
-            let seed = node.get_ship_position(sess.ship_id)
+            let seed = node.ship_absolute_pos(sess.ship_id)
                 .map(|pos| node.ships_visible_to(pos, AOI_CELL_SIZE))
                 .unwrap_or_default();
             prev_visible.insert(sess.player_id, seed);
@@ -269,7 +269,7 @@ async fn main() -> anyhow::Result<()> {
             .collect();
 
         // AoI delivery and session management.
-        let grid = aoi::CellGrid::build(AOI_CELL_SIZE, node.ship_positions());
+        let grid = aoi::CellGrid::build(AOI_CELL_SIZE, node.ship_absolute_positions());
 
         sessions.retain_mut(|sess| {
             // Player's ship jumped to another node → Redirect and drop session.
@@ -283,7 +283,7 @@ async fn main() -> anyhow::Result<()> {
                 return false;
             }
 
-            let curr = node.get_ship_position(sess.ship_id)
+            let curr = node.ship_absolute_pos(sess.ship_id)
                 .map(|pos| grid.neighbors_of(pos))
                 .unwrap_or_default();
             let prev = prev_visible.entry(sess.player_id).or_default();

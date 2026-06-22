@@ -376,11 +376,14 @@ pub(crate) fn run_aoi_benchmark() {
 
         // AoI: build one grid, then one neighbor query per observer.
         let t = Instant::now();
-        let grid = aoi::CellGrid::build(AOI_CELL_SIZE, ships.iter().copied());
+        let grid = aoi::CellGrid::build(
+            AOI_CELL_SIZE,
+            ships.iter().map(|(id, p)| (*id, [p.x as f64, p.y as f64, p.z as f64])),
+        );
         let build = t.elapsed();
         let t = Instant::now();
         let mut aoi_vol = 0usize;
-        for o in &observers { aoi_vol += grid.neighbors_of(*o).len(); }
+        for o in &observers { aoi_vol += grid.neighbors_of([o.x as f64, o.y as f64, o.z as f64]).len(); }
         let query = t.elapsed();
 
         // Naive (no grid): every observer tests every ship for the same 3×3×3 box.

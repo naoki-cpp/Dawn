@@ -389,6 +389,15 @@ impl<S: EventStore> SimulationNode<S> {
         self.entity_absolute(entity, off)
     }
 
+    /// Absolute (Sector-frame, metres, f64) position of a ship entity, composing
+    /// its anchor with its current `PositionComp` offset (ADR-0029). The f64
+    /// counterpart of [`Self::entity_abs_pos`] — the AoI grid input that stays
+    /// precise at true-AU distances (R2).
+    pub(super) fn entity_abs_pos_f64(&self, entity: Entity) -> [f64; 3] {
+        let off = self.world.inner().get::<&PositionComp>(entity).ok().map(|p| p.0).unwrap_or(Position::ORIGIN);
+        self.entity_absolute_f64(entity, off)
+    }
+
     /// Absolute position (Sector-frame, metres, f64) of a ship entity given its
     /// raw offset, composing its anchor (ADR-0029). Used by warp arrival math
     /// that must stay precise at true-AU distances.
