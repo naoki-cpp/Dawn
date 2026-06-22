@@ -93,15 +93,37 @@ pub struct JumpGateDef {
     pub id               : JumpGateId,
     pub from_sector      : SectorId,
     pub position         : Position,
+    /// Absolute gate position in metres as f64 — the authoritative source for
+    /// range/warp checks (ADR-0029 review R1). Equals `position` numerically at
+    /// compressed scale, but stays precise at true-AU distances where the f32
+    /// `position` is ~tens of km coarse (one f32 ulp at ~10^11 m). Gates are
+    /// Sector-frame fixtures, so this *is* their absolute position.
+    pub abs_m            : [f64; 3],
     pub to_sector        : SectorId,
     /// A Ship within this distance of `position` may use the gate.
     pub activation_radius: f32,
 }
 
 impl JumpGateDef {
-    /// Whether `ship_pos` is close enough to this gate to use it.
+    /// Whether `ship_pos` is close enough to this gate to use it. f32 path kept
+    /// for tests / compressed-scale callers; gameplay routes through
+    /// [`Self::is_in_range_abs`] so the check stays precise at true AU.
     pub fn is_in_range(&self, ship_pos: Position) -> bool {
         ship_pos.distance(self.position) <= self.activation_radius
+    }
+
+    /// Whether an absolute (Sector-frame, f64) ship position is within range.
+    /// The precise path: composes the separation in f64 against the f64 gate
+    /// source, so it does not lose the ~16 km of f32 ulp at true-AU distances
+    /// (ADR-0029 R1).
+    pub fn is_in_range_abs(&self, ship_abs: [f64; 3]) -> bool {
+        self.distance_abs(ship_abs) <= self.activation_radius as f64
+    }
+
+    /// True distance (metres, f64) from an absolute ship position to this gate.
+    pub fn distance_abs(&self, ship_abs: [f64; 3]) -> f64 {
+        let d = [ship_abs[0] - self.abs_m[0], ship_abs[1] - self.abs_m[1], ship_abs[2] - self.abs_m[2]];
+        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
     }
 }
 
@@ -116,9 +138,26 @@ mod tests {
             id               : JumpGateId(0),
             from_sector      : SectorId(0),
             position         : Position::new(100.0, 0.0, 0.0),
+            abs_m            : [100.0, 0.0, 0.0],
             to_sector        : SectorId(1),
             activation_radius: 50.0,
         }
+    }
+
+    #[test]
+    fn is_in_range_abs_is_precise_at_true_au() {
+        // A gate authored ~1 AU out (where f32 ulp is ~16 km): the f64 path
+        // resolves a ship 40 m inside the 50 m ring correctly, which the f32
+        // `position` could not distinguish (ADR-0029 R1).
+        const AU_M: f64 = 1.495978707e11;
+        let g = JumpGateDef {
+            id: JumpGateId(0), from_sector: SectorId(0),
+            position: Position::new(AU_M as f32, 0.0, 0.0),
+            abs_m: [AU_M, 0.0, 0.0], to_sector: SectorId(1),
+            activation_radius: 50.0,
+        };
+        assert!(g.is_in_range_abs([AU_M + 40.0, 0.0, 0.0]), "40 m out is within the 50 m ring");
+        assert!(!g.is_in_range_abs([AU_M + 60.0, 0.0, 0.0]), "60 m out is beyond the ring");
     }
 
     #[test]

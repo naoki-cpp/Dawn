@@ -123,7 +123,9 @@ struct JumpGateEntry {
     id               : u32,
     from_sector      : u8,
     to_sector        : u8,
-    position         : [f32; 3],
+    /// Gate position in metres (Sector-frame). Parsed as f64 so the authoring
+    /// precision survives at true-AU scale — the f64 `abs_m` source (ADR-0029 R1).
+    position         : [f64; 3],
     activation_radius: f32,
 }
 
@@ -154,10 +156,14 @@ fn entry_to_system(e: StarSystemEntry) -> StarSystemDef {
 }
 
 fn entry_to_gate(e: JumpGateEntry) -> JumpGateDef {
+    // `abs_m` is the authoritative f64 gate position; `position` is its f32 view
+    // (coarse at true AU, fine at compressed scale) — ADR-0029 R1.
+    let abs_m = e.position;
     JumpGateDef {
         id               : JumpGateId(e.id),
         from_sector      : SectorId(e.from_sector),
-        position         : Position::new(e.position[0], e.position[1], e.position[2]),
+        position         : Position::new(abs_m[0] as f32, abs_m[1] as f32, abs_m[2] as f32),
+        abs_m,
         to_sector        : SectorId(e.to_sector),
         activation_radius: e.activation_radius,
     }

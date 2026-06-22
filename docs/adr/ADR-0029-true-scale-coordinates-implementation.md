@@ -166,7 +166,8 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
      sub-mm 精度であることを検証（`anchor.rs`。compressed/real トグルに依存せず常時ガード。spike S1–S2 の恒久化）。
    - ⬜ **ワープ到着権威化**：client の `_player_warp_snap_pos` 事前計算と server の `PositionSnap`（現状 `AnchorRebased`
      時のみ）の二重機構を一本化。server 側「ワープ完了時に常に PositionSnap」へ変更し client 事前計算を撤去する。
-   - ⬜ **ゲート配置の再設計**：真 AU でのゲート絶対座標・到着間合いの再検討。
+   - 🔶 **ゲート配置の再設計**：精度面（f64 源・範囲/ワープ判定の f64 化）は R1 で完了。残るは真 AU 向けの
+     **座標値の再オーサリング**（ゲートを `UNITS_PER_AU` 連動でセクター縁に置く）。
 
 **進め方の決定（実施中）**：基盤（Step 1〜5b prep）を残し、実 AU の起動は revert して compressed base に。
 サーバ側のアンカー分岐対応（#1#2#4 のサーバ部分）は**完了**。クライアント座標抽象（#3）も**完了**（ワープ到着権威化のみ #5 へ）。
@@ -179,10 +180,13 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
 されている。一方、**compressed では no-op だが真 AU 再活性化時に load-bearing になる**未解決点を以下に記録する。
 いずれも「今は動くが、スケール値を上げた瞬間に顕在化する」性質で、再活性化前に潰すべき。
 
-- **R1（高）ゲートに f64 アンカー源がない**：天体は `CelestialBodyDef.abs_m: [f64;3]` を持つが、
-  `JumpGateDef.position` は f32 のまま。`is_in_range` も `can_propose_warp` のゲート分岐も f32 同士で比較する。
-  真 AU ではゲート絶対座標が ~16 km 粗く、ジャンプ範囲判定・ゲートワープ到着がその精度に劣化する。
-  → #5「ゲート配置の再設計」で `abs_m` 相当をゲートにも持たせ、判定を f64 化する（天体と同型）。
+- **R1（高）✅ 解消**：~~ゲートに f64 アンカー源がない~~ → `JumpGateDef.abs_m: [f64;3]` を追加（天体と同型）。
+  ローダ（`entry_to_gate`）が toml を f64 でパースし `abs_m` を権威源、`position` をその f32 ビューとする。
+  `is_in_range_abs`／`distance_abs` を新設し、`can_propose_jump`／`can_propose_warp`（ゲート・天体の両分岐）を
+  `entity_absolute_f64` × f64 源の比較に載せ替え。真 AU でも範囲判定が ~16 km 粗くならない。
+  真 AU での 1 AU ゲートに対する 40 m/60 m 判定テストを `navigation.rs` に追加。
+  残：ゲートの**配置値**自体（現状 600,000 units 固定で `UNITS_PER_AU` 非連動）の真 AU 向け再オーサリングは
+  「ゲート配置の再設計」として未了（精度ではなく座標値の設計問題）。
 
 - **R2（中）AoI グリッドが f32 絶対座標**：`ship_absolute_positions`／`entity_abs_pos` は `Position`（f32）を返し、
   `CellGrid` も f32。27 セルの粗フィルタとしては許容だが、§5 が想定する「候補＋厳密距離」の厳密段では

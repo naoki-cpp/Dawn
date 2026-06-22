@@ -474,9 +474,11 @@ impl<S: EventStore> SimulationNode<S> {
         if self.world.transit_state(entity).is_in_transit() { return false; }
         if self.world.is_tackled(entity) { return false; }
         let Some(gate) = self.sector_map.gates.get(&gate_id) else { return false };
-        // Compare in absolute (Sector-frame) coords: the gate position is
-        // Sector-frame, the ship offset is anchor-relative (ADR-0029 review #4).
-        gate.is_in_range(self.entity_abs_pos(entity))
+        // Compare in absolute (Sector-frame) f64 coords: the gate's f64 `abs_m` is
+        // Sector-frame, the ship offset is anchor-relative. f64 keeps the check
+        // precise at true-AU distances (ADR-0029 review R1 / #4).
+        let offset = self.world.inner().get::<&PositionComp>(entity).map(|p| p.0).unwrap_or(Position::ORIGIN);
+        gate.is_in_range_abs(self.entity_absolute_f64(entity, offset))
     }
 
     /// Whether a `WarpCommand` for `ship_id` toward `target` would currently be
@@ -488,17 +490,21 @@ impl<S: EventStore> SimulationNode<S> {
         if self.world.transit_state(entity).is_in_transit() { return false; }
         if self.world.inner().get::<&WarpComp>(entity).is_ok() { return false; }
         if self.world.is_tackled(entity) { return false; }
-        // Absolute (Sector-frame) ship position vs Sector-frame gate/body
-        // (ADR-0029 review #4 — never compare a raw anchor offset to absolute data).
-        let ship_pos = self.entity_abs_pos(entity);
+        // Absolute (Sector-frame) f64 ship position vs the f64 gate/body source
+        // (ADR-0029 R1 / #4 — never compare a raw anchor offset to absolute data,
+        // and keep the distance precise at true-AU scale).
+        let offset   = self.world.inner().get::<&PositionComp>(entity).map(|p| p.0).unwrap_or(Position::ORIGIN);
+        let ship_abs = self.entity_absolute_f64(entity, offset);
+        let min      = super::MIN_WARP_DISTANCE as f64;
         match target {
             WarpTarget::Gate(gate_id) => {
                 let Some(gate) = self.sector_map.gates.get(&gate_id) else { return false };
-                ship_pos.distance(gate.position) >= super::MIN_WARP_DISTANCE
+                gate.distance_abs(ship_abs) >= min
             }
             WarpTarget::Body(body_id) => {
                 let Some(body) = self.sector_map.bodies.get(&body_id) else { return false };
-                ship_pos.distance(body.position) >= super::MIN_WARP_DISTANCE
+                let d = [ship_abs[0] - body.abs_m[0], ship_abs[1] - body.abs_m[1], ship_abs[2] - body.abs_m[2]];
+                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() >= min
             }
         }
     }
