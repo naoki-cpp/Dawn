@@ -79,7 +79,7 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
             }
             let player_id      = node.next_player_id();
             let ship_id        = node.spawn_player_ship(player_id);
-            let initial_state  = match node.get_ship_position(ship_id) {
+            let initial_state  = match node.ship_absolute_pos(ship_id) {
                 Some(pos) => node.build_initial_state_json_for(pos, AOI_CELL_SIZE),
                 None      => node.build_initial_state_json(),
             };
@@ -105,7 +105,7 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
 
         while let Ok(sess) = ready_sess_rx.try_recv() {
             println!("  [Server] {} joined with ship #{}", sess.player_id, sess.ship_id.raw());
-            let seed = node.get_ship_position(sess.ship_id)
+            let seed = node.ship_absolute_pos(sess.ship_id)
                 .map(|pos| node.ships_visible_to(pos, AOI_CELL_SIZE))
                 .unwrap_or_default();
             prev_visible.insert(sess.player_id, seed);
@@ -149,9 +149,9 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
                 .map(|r| r.event.clone())
                 .collect()
         };
-        let grid = aoi::CellGrid::build(AOI_CELL_SIZE, node.ship_positions());
+        let grid = aoi::CellGrid::build(AOI_CELL_SIZE, node.ship_absolute_positions());
         sessions.retain_mut(|sess| {
-            let curr = node.get_ship_position(sess.ship_id)
+            let curr = node.ship_absolute_pos(sess.ship_id)
                 .map(|pos| grid.neighbors_of(pos))
                 .unwrap_or_default();
             let prev = prev_visible.entry(sess.player_id).or_default();

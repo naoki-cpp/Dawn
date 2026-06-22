@@ -167,9 +167,10 @@ impl<S: EventStore> SimulationNode<S> {
 
     // ── Area of Interest (ADR-0019) ────────────────────────────────────────────
 
-    /// `(ShipId, Position)` for every ship currently in the world — the input to
-    /// the AoI cell grid. Iteration order is unspecified, but `CellGrid` sorts
-    /// each bucket, so query results are deterministic regardless.
+    /// `(ShipId, Position)` for every ship currently in the world, as raw
+    /// anchor-relative offsets. Internal use only — for AoI / cross-ship geometry
+    /// use [`Self::ship_absolute_positions`] (offsets are not comparable across
+    /// different anchors, ADR-0029).
     pub fn ship_positions(&self) -> Vec<(ShipId, Position)> {
         self.ships.index.iter().filter_map(|(&id, &entity)| {
             let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
@@ -177,14 +178,28 @@ impl<S: EventStore> SimulationNode<S> {
         }).collect()
     }
 
-    /// ShipIds visible to an observer at `observer_pos`: those in the 27-cell
-    /// neighborhood of its cell (ADR-0019). Returned in `ShipId` order.
-    ///
-    /// Builds the grid from a single position pass; the serve loop can instead
-    /// build one [`crate::aoi::CellGrid`] per tick and query it per session.
-    pub fn ships_visible_to(&self, observer_pos: Position, cell_size: f32) -> Vec<ShipId> {
-        crate::aoi::CellGrid::build(cell_size, self.ship_positions())
-            .neighbors_of(observer_pos)
+    /// `(ShipId, absolute Position)` for every ship — the input to the AoI cell
+    /// grid (ADR-0029 review #2). Each position composes the ship's anchor + its
+    /// offset, so ships on different anchors are placed in the same Sector-frame
+    /// grid. `CellGrid` sorts each bucket, so query results are deterministic.
+    pub fn ship_absolute_positions(&self) -> Vec<(ShipId, Position)> {
+        self.ships.index.iter().map(|(&id, &entity)| (id, self.entity_abs_pos(entity))).collect()
+    }
+
+    /// Absolute (Sector-frame) position of a ship by id, or `None` if unknown.
+    /// The observer position to pass to AoI queries (ADR-0029 review #2).
+    pub fn ship_absolute_pos(&self, ship_id: ShipId) -> Option<Position> {
+        let &entity = self.ships.index.get(&ship_id)?;
+        Some(self.entity_abs_pos(entity))
+    }
+
+    /// ShipIds visible to an observer at `observer_abs` (an ABSOLUTE Sector-frame
+    /// position): those in the 27-cell neighborhood of its cell (ADR-0019).
+    /// Returned in `ShipId` order. The grid is built from absolute positions so
+    /// it is correct across anchors (ADR-0029 review #2).
+    pub fn ships_visible_to(&self, observer_abs: Position, cell_size: f32) -> Vec<ShipId> {
+        crate::aoi::CellGrid::build(cell_size, self.ship_absolute_positions())
+            .neighbors_of(observer_abs)
     }
 }
 
@@ -209,6 +224,28 @@ mod tests {
         assert!(visible.contains(&observer), "observer's own cell is visible");
         assert!(visible.contains(&near),     "adjacent-cell ship is visible");
         assert!(!visible.contains(&far),     "two-cells-away ship is not visible");
+    }
+
+    #[test]
+    fn aoi_is_computed_in_absolute_coords_across_anchors() {
+        // ADR-0029 review #2: two ships at the same absolute point are mutually
+        // visible even when anchored on different bodies. A star-anchored ship at
+        // the origin and a Forge-anchored ship whose offset places it back at the
+        // origin must land in the same AoI cell.
+        use dawn_core::{AnchorId, DomainEvent, events::AnchorRebased, Tick};
+        let mut node = mem_node();
+        let cell = 1_000.0;
+        let a = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
+        let b = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
+        // Rebase b onto Forge with an offset that returns it to absolute origin.
+        let forge = node.anchor_table().abs(AnchorId(1)).unwrap();
+        let off = Position::new(-forge[0] as f32, -forge[1] as f32, -forge[2] as f32);
+        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased { ship_id: b, anchor: AnchorId(1), offset: off, tick: Tick(1) }));
+        // Sanity: raw offsets differ wildly, but absolute positions coincide.
+        assert_eq!(node.get_ship_anchor(b), Some(AnchorId(1)));
+        let visible = node.ships_visible_to(Position::ORIGIN, cell);
+        assert!(visible.contains(&a) && visible.contains(&b),
+            "both ships share the origin cell in absolute coords despite different anchors");
     }
 
     #[test]

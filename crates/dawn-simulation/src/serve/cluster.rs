@@ -91,7 +91,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             }
             let player_id      = nodes[0].next_player_id();
             let ship_id        = nodes[0].spawn_player_ship_at_pub(player_id, PLAYER_SPAWN);
-            let initial_state  = match nodes[0].get_ship_position(ship_id) {
+            let initial_state  = match nodes[0].ship_absolute_pos(ship_id) {
                 Some(pos) => nodes[0].build_initial_state_json_for(pos, AOI_CELL_SIZE),
                 None      => nodes[0].build_initial_state_json(),
             };
@@ -112,7 +112,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
 
         while let Ok(sess) = ready_sess_rx.try_recv() {
             println!("  [Server] {} joined with ship #{}", sess.player_id, sess.ship_id.raw());
-            let seed = nodes[0].get_ship_position(sess.ship_id)
+            let seed = nodes[0].ship_absolute_pos(sess.ship_id)
                 .map(|pos| nodes[0].ships_visible_to(pos, AOI_CELL_SIZE))
                 .unwrap_or_default();
             prev_visible.insert(sess.player_id, seed);
@@ -206,14 +206,14 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         }
 
         let grids: Vec<aoi::CellGrid> = nodes.iter()
-            .map(|n| aoi::CellGrid::build(AOI_CELL_SIZE, n.ship_positions()))
+            .map(|n| aoi::CellGrid::build(AOI_CELL_SIZE, n.ship_absolute_positions()))
             .collect();
         let jumped_ids: std::collections::HashSet<PlayerId> =
             jumped_players.iter().map(|(p, _)| *p).collect();
 
         sessions.retain_mut(|sess| {
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
-            let curr = nodes[sector].get_ship_position(sess.ship_id)
+            let curr = nodes[sector].ship_absolute_pos(sess.ship_id)
                 .map(|pos| grids[sector].neighbors_of(pos))
                 .unwrap_or_default();
 
@@ -233,7 +233,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 if let Some(events) = jump_own_events.get(&player_id) {
                     sess.send_events(events);
                 }
-                let initial_state = nodes[dest].get_ship_position(sess.ship_id)
+                let initial_state = nodes[dest].ship_absolute_pos(sess.ship_id)
                     .map(|pos| nodes[dest].build_initial_state_json_for(pos, AOI_CELL_SIZE))
                     .unwrap_or_else(|| nodes[dest].build_initial_state_json());
                 sess.conn.send_raw(&initial_state);
