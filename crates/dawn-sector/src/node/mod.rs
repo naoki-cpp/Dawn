@@ -373,6 +373,16 @@ impl<S: EventStore> SimulationNode<S> {
         )
     }
 
+    /// Absolute (Sector-frame) position of a ship entity, composing its anchor
+    /// with its current `PositionComp` offset (ADR-0029). The single accessor any
+    /// gameplay code should use to compare a ship against Sector-frame data
+    /// (gates, bodies, other ships) — never read the raw anchor-relative offset
+    /// for cross-anchor geometry.
+    pub(super) fn entity_abs_pos(&self, entity: Entity) -> Position {
+        let off = self.world.inner().get::<&PositionComp>(entity).ok().map(|p| p.0).unwrap_or(Position::ORIGIN);
+        self.entity_absolute(entity, off)
+    }
+
     /// Absolute position (Sector-frame, metres, f64) of a ship entity given its
     /// raw offset, composing its anchor (ADR-0029). Used by warp arrival math
     /// that must stay precise at true-AU distances.
@@ -384,6 +394,14 @@ impl<S: EventStore> SimulationNode<S> {
             return [offset.x as f64, offset.y as f64, offset.z as f64];
         };
         [a[0] + offset.x as f64, a[1] + offset.y as f64, a[2] + offset.z as f64]
+    }
+
+    /// Distance from a Ship to a Sector-frame point (a gate/body position),
+    /// composing the ship's anchor (ADR-0029). The accessor gameplay/tests use
+    /// instead of comparing a raw offset to absolute data.
+    pub fn ship_distance_to_point(&self, ship_id: ShipId, point: Position) -> Option<f32> {
+        let entity = *self.ships.index.get(&ship_id)?;
+        Some(self.entity_abs_pos(entity).distance(point))
     }
 
     /// True distance (metres) between two Ships, composing each ship's anchor

@@ -474,8 +474,9 @@ impl<S: EventStore> SimulationNode<S> {
         if self.world.transit_state(entity).is_in_transit() { return false; }
         if self.world.is_tackled(entity) { return false; }
         let Some(gate) = self.sector_map.gates.get(&gate_id) else { return false };
-        let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
-        gate.is_in_range(pos.0)
+        // Compare in absolute (Sector-frame) coords: the gate position is
+        // Sector-frame, the ship offset is anchor-relative (ADR-0029 review #4).
+        gate.is_in_range(self.entity_abs_pos(entity))
     }
 
     /// Whether a `WarpCommand` for `ship_id` toward `target` would currently be
@@ -487,15 +488,17 @@ impl<S: EventStore> SimulationNode<S> {
         if self.world.transit_state(entity).is_in_transit() { return false; }
         if self.world.inner().get::<&WarpComp>(entity).is_ok() { return false; }
         if self.world.is_tackled(entity) { return false; }
-        let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { return false };
+        // Absolute (Sector-frame) ship position vs Sector-frame gate/body
+        // (ADR-0029 review #4 — never compare a raw anchor offset to absolute data).
+        let ship_pos = self.entity_abs_pos(entity);
         match target {
             WarpTarget::Gate(gate_id) => {
                 let Some(gate) = self.sector_map.gates.get(&gate_id) else { return false };
-                pos.0.distance(gate.position) >= super::MIN_WARP_DISTANCE
+                ship_pos.distance(gate.position) >= super::MIN_WARP_DISTANCE
             }
             WarpTarget::Body(body_id) => {
                 let Some(body) = self.sector_map.bodies.get(&body_id) else { return false };
-                pos.0.distance(body.position) >= super::MIN_WARP_DISTANCE
+                ship_pos.distance(body.position) >= super::MIN_WARP_DISTANCE
             }
         }
     }
@@ -630,9 +633,9 @@ mod tests {
         }));
         assert_eq!(node.approach_target(chaser), Some(dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(0))));
 
-        let start = node.get_ship_position(chaser).unwrap().distance(gate.position);
+        let start = node.ship_distance_to_point(chaser, gate.position).unwrap();
         for _ in 0..600 { node.tick(); }
-        let end = node.get_ship_position(chaser).unwrap().distance(gate.position);
+        let end = node.ship_distance_to_point(chaser, gate.position).unwrap();
         assert!(end < start, "ship should close on the gate: {start} -> {end}");
         assert!(node.can_propose_jump(chaser, dawn_core::JumpGateId(0)),
             "after approaching, the ship should be within the gate's activation radius");

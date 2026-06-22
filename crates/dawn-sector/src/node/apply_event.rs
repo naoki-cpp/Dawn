@@ -13,6 +13,9 @@ impl<S: EventStore> SimulationNode<S> {
             DomainEvent::ShipSpawned(e) => {
                 if !self.ships.index.contains_key(&e.ship_id) {
                     self.insert_to_world(e.ship_id, e.initial_position, Velocity::ZERO);
+                    // ADR-0029 review #1: anchor on the nearest body (deterministic
+                    // — same initial_position reproduces the same anchor on replay).
+                    self.set_spawn_anchor(e.ship_id, e.initial_position);
                     // Restore base_stats from ship type registry
                     let base = self.ship_type_registry
                         .get(&e.ship_type_id)
