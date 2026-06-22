@@ -589,16 +589,27 @@ func _handle_position_snap(p: Dictionary) -> void:
 		pos_dict.get("x", 0.0) as float,
 		pos_dict.get("y", 0.0) as float,
 		pos_dict.get("z", 0.0) as float)
-	(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(server_pos)
 	if ship_id == _player_ship_id:
+		# A warp can cross ~1 AU, so rather than fling the player to a far Godot
+		# coord (and drag the camera with it), rebase the floating origin ONTO the
+		# arrival: the player sits at the new origin (~0, where the camera already
+		# is), and only the *other* world nodes shift by the rebase delta. The
+		# camera is left untouched so it just lerps the small remaining gap instead
+		# of swinging. Markers re-place themselves in _update_body_markers.
+		var shift: Vector3 = FloatingOrigin.rebase_shift(_origin_server, server_pos, WORLD_SCALE)
+		_origin_server = server_pos
+		for id: int in _ships:
+			if id == _player_ship_id:
+				continue
+			(_ships[id] as Node3D).position += shift
+		for c: Node in _gates_root.get_children():
+			(c as Node3D).position += shift
+		(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(server_pos)
 		# Cancel the client-side warp snap so it doesn't fire a stale position.
 		_player_warp_snap_pos = Vector3.INF
 		_player_was_warping = false
-		# The snap may have placed the player far from the current origin (a warp
-		# crossed ~1 AU). Rebase the floating origin immediately so the ship and
-		# the destination markers render near the Godot origin this same frame
-		# (otherwise the ship lands beyond the camera far plane for one frame).
-		_maybe_rebase_origin()
+	else:
+		(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(server_pos)
 
 # -- Jump Gate (ADR-0009) -----------------------------------------------------
 
