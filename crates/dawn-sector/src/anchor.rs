@@ -188,6 +188,45 @@ mod tests {
         assert!((abs[2] - (forge_abs[2] - 1500.0)).abs() < 1e-3);
     }
 
+    /// ADR-0029 / spike S1–S2 (now permanent): the whole point of method B is
+    /// that two ships near two *different* anchors that sit at true astronomical
+    /// distances still get a sub-millimetre-accurate separation, because the
+    /// composition happens in f64. This is independent of the compressed/real
+    /// galaxy scale toggle — it builds anchors at real AU directly — so it keeps
+    /// guarding the precision guarantee even while the live galaxy runs
+    /// compressed. A naive f32 distance at 1 AU loses ~16 km (one f32 ulp).
+    #[test]
+    fn cross_anchor_distance_is_sub_mm_accurate_at_true_au() {
+        const AU_M: f64 = 1.495978707e11;
+        // Two anchors ~4.2 AU apart (Earth-ish and Jupiter-ish along x), in two
+        // sectors' worth of magnitude — well into f32's lossy regime.
+        let mut abs = HashMap::new();
+        abs.insert(AnchorId(10), [1.0 * AU_M, 0.0, 0.0]);
+        abs.insert(AnchorId(11), [5.2 * AU_M, 3.0e10, -2.0e10]);
+        let mut sector = HashMap::new();
+        sector.insert(AnchorId(10), SectorId(0));
+        sector.insert(AnchorId(11), SectorId(0));
+        let t = AnchorTable { abs, sector };
+
+        // Small, ship-scale offsets near each anchor (metres).
+        let off_a = Position::new(1234.0, -567.0, 89.0);
+        let off_b = Position::new(-4321.0, 765.0, -98.0);
+
+        // Analytic separation from the same f64 components.
+        let pa = t.absolute(AnchorId(10), off_a).unwrap();
+        let pb = t.absolute(AnchorId(11), off_b).unwrap();
+        let expected = sq_dist(pa, pb).sqrt();
+
+        let d = t.distance((AnchorId(10), off_a), (AnchorId(11), off_b)).unwrap();
+        assert!((d - expected).abs() < 1e-3, "cross-anchor distance off by {} m at true AU", (d - expected).abs());
+
+        // And the offsets themselves survive the compose to sub-mm (the property
+        // f32-at-absolute would destroy): recover off_a from the composed point.
+        let recovered_x = pa[0] - 1.0 * AU_M;
+        assert!((recovered_x - off_a.x as f64).abs() < 1e-3,
+            "near-anchor offset lost precision: {} vs {}", recovered_x, off_a.x);
+    }
+
     #[test]
     fn distance_across_anchors_matches_body_separation() {
         let g = Galaxy::demo();

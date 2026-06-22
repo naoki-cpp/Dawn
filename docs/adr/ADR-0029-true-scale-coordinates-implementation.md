@@ -156,7 +156,17 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
    不変条件テスト含む）を追加。全 73 クライアントテスト緑。
    残：ワープ到着の権威化（client の `_player_warp_snap_pos` 事前計算と server の PositionSnap 二重機構の一本化）は
    server 側の「ワープ完了時に常に PositionSnap」変更を要するため #5 と合わせて実施。VISUAL_SPEED_CAP は維持。
-5. ⬜ スパイク破棄・テスト強化（replay 決定論・到着精度）・ゲート配置の再設計・ワープ到着権威化。
+5. 🔶 仕上げ。
+   - ✅ **スパイク破棄**：`spike_true_scale.rs`／`spike_floating_origin.gd`／同テストを削除（設計知見は本 ADR と
+     各 production ファイルの doc コメントに吸収済み）。
+   - ✅ **replay 決定論テスト**：warp-to-body が `AnchorRebased` を発行 → snapshot＋restore でアンカーと
+     **絶対位置**が完全一致することを検証（`snapshot_io.rs` の新スキーマ INV-002 テスト。アンカーを落とすと
+     船が天体の絶対位置ぶん飛ぶ退行を捕捉）。
+   - ✅ **到着/間合い精度テスト**：真 AU 距離の異アンカー2船を小オフセットで配置し、f64 合成の間合いが
+     sub-mm 精度であることを検証（`anchor.rs`。compressed/real トグルに依存せず常時ガード。spike S1–S2 の恒久化）。
+   - ⬜ **ワープ到着権威化**：client の `_player_warp_snap_pos` 事前計算と server の `PositionSnap`（現状 `AnchorRebased`
+     時のみ）の二重機構を一本化。server 側「ワープ完了時に常に PositionSnap」へ変更し client 事前計算を撤去する。
+   - ⬜ **ゲート配置の再設計**：真 AU でのゲート絶対座標・到着間合いの再検討。
 
 **進め方の決定（実施中）**：基盤（Step 1〜5b prep）を残し、実 AU の起動は revert して compressed base に。
 サーバ側のアンカー分岐対応（#1#2#4 のサーバ部分）は**完了**。クライアント座標抽象（#3）も**完了**（ワープ到着権威化のみ #5 へ）。
