@@ -1,13 +1,15 @@
 # Production Star System / Jump Gate / Celestial Body topology
 #
 # Scale: 1 unit = 1 m. Intra-system distances are currently gameplay-COMPRESSED
-# (UNITS_PER_AU = 200,000, not a real AU): the real-AU activation was reverted to a
-# compressed base per the ADR-0029 review (finish anchor assignment + AoI + client
-# coordinate redesign before reactivating). The anchor architecture stays.
+# (UNITS_PER_AU = 200,000, not a real AU): a true-AU trial (2026-06-23) found
+# that gates have no body near them in this topology (~2.26 AU to the nearest),
+# so "rebase onto nearest anchor" doesn't keep the offset small there. Reverted
+# pending a decision (ADR-0029 residual). The anchor architecture stays.
 #
-# Celestial body `position` is authored in AU and converted at load by
-# UNITS_PER_AU (galaxy.rs). Gate `position` and body `radius` stay in units. Travel
-# time is set by Warp duration (ADR-0022 parametric warp). To reactivate true scale,
+# Celestial body `position` and Gate `position` are both authored in AU and
+# converted to units at load by UNITS_PER_AU (galaxy.rs); body/gate `radius`
+# and `activation_radius` stay in units (visual size, not AU-coupled). Travel
+# time is set by Warp duration (ADR-0022 parametric warp). To retry true scale,
 # set UNITS_PER_AU to 1.495978707e11 and retune WARP_SPEED.
 #
 # Edit this file and restart the server to change the layout (no recompile needed).

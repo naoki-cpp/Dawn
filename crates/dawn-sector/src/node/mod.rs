@@ -66,9 +66,11 @@ const WARP_ALIGN_FRACTION: f32 = 0.75;
 /// ceil(warp_distance / WARP_SPEED))`. Warp then follows a smoothstep ease
 /// along the start→arrival segment (ADR-0022 amendment), so this is the rough
 /// peak speed, not a constant velocity.
-// Reference warp speed (units/tick), far above any sublight max_speed. Reverted
-// to the COMPRESSED value (10,000) per the ADR-0029 review; at true AU this must
-// be ~1e9 (a ~1.2e11 m hop ≈ 120 ticks) — retune when reactivating true scale.
+///
+// Reverted alongside galaxy::UNITS_PER_AU (see its doc comment) after a
+// true-AU trial surfaced a gate-anchor gap. At true AU this should be scaled
+// by the same factor as UNITS_PER_AU (~×747,989.35 → ~7.48e9) so warp tick
+// counts stay unchanged — retune together when retrying the reactivation.
 const WARP_SPEED: f32 = 10_000.0;
 /// Floor on warp duration (ticks) so even a short warp reads as a warp rather
 /// than a blink. At 10 tick/s this is ~2 s.

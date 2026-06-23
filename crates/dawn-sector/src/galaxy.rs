@@ -26,12 +26,14 @@ pub struct Galaxy {
 /// the anchor source (`CelestialBodyDef.abs_m`) stays precise — this is forward-
 /// compatible with the true-AU value (1.495978707e11).
 ///
-/// **Currently COMPRESSED** (200,000): the real-AU activation was reverted to a
-/// compressed base per the ADR-0029 review (finish anchor assignment + AoI +
-/// client coordinate redesign before reactivating). The architecture (anchors,
-/// rebase, f64 source) stays; only the scale value and the client band-aids were
-/// rolled back. To reactivate true scale, set this to 1.495978707e11 and retune
-/// WARP_SPEED (see node/mod.rs).
+/// **Currently COMPRESSED** (200,000): a true-AU trial (2026-06-23) surfaced a
+/// new structural gap — gates have no anchor of their own (§2: anchors are
+/// per-body) and the demo topology has no body near the gates (~2.26 AU from
+/// the nearest), so "rebase onto the nearest anchor" does not actually keep
+/// the offset small there; arrival precision and several gate-approach tests
+/// broke. Reverted pending a decision (move gates near a body / give gates
+/// their own anchor / etc. — see ADR-0029 residual). To retry, set this to
+/// 1.495978707e11 and retune WARP_SPEED (see node/mod.rs).
 pub const UNITS_PER_AU: f64 = 200_000.0;
 
 impl Galaxy {
