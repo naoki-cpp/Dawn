@@ -15,6 +15,7 @@
 //! ```
 
 mod apply_event;
+mod approach;
 mod commands;
 mod navigation;
 mod sector_map;
@@ -25,6 +26,7 @@ mod spawner_logic;
 mod tackle;
 mod tick;
 mod transit_flow;
+mod warp;
 
 use sector_map::SectorMap;
 use ship_registry::ShipRegistry;
