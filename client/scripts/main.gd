@@ -154,7 +154,25 @@ var _jump_notice_timer   : float  = 0.0
 
 # -- Lifecycle ----------------------------------------------------------------
 
+## Fail fast if main.tscn's node layout drifts from the `@onready` paths above
+## (architecture-review-client.md C-3): a missing node currently surfaces as a
+## confusing null-deref deep inside whichever method touches it first. Checking
+## all of them up front turns that into one clear, actionable error at startup.
+func _assert_scene_tree_refs() -> void:
+	var missing: Array[String] = []
+	if _connection   == null: missing.append("Connection ($Connection)")
+	if _ships_root   == null: missing.append("Ships root ($World/Ships)")
+	if _gates_root   == null: missing.append("Gates root ($World/Gates)")
+	if _bodies_root  == null: missing.append("Bodies root ($World/Bodies)")
+	if _stats_label  == null: missing.append("Stats label ($HUD/StatsLabel)")
+	if _hud          == null: missing.append("HUD ($HUD)")
+	if _camera       == null: missing.append("Camera ($World/Camera3D)")
+	if _warp_tunnel  == null: missing.append("Warp tunnel ($HUD/WarpTunnel)")
+	if not missing.is_empty():
+		push_error("main.tscn is missing expected node(s): %s. Check the scene tree against the @onready paths in main.gd." % ", ".join(missing))
+
 func _ready() -> void:
+	_assert_scene_tree_refs()
 	_connection.event_received.connect(_on_event_received)
 	_connection.connection_changed.connect(_on_connection_changed)
 	_connection.welcomed.connect(_on_welcomed)
