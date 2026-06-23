@@ -205,11 +205,12 @@ pub(crate) fn apply_common_command(
 /// events that concern a currently-visible ship. `prev` is updated to `curr` in
 /// place. Returns `false` if any send fails (the caller drops the session).
 pub(crate) fn deliver_aoi_frame(
-    sess      : &mut ws_server::PlayerSession,
-    node      : &SimulationNode,
-    curr      : Vec<ShipId>,
-    prev      : &mut Vec<ShipId>,
-    new_events: &[dawn_core::DomainEvent],
+    sess         : &mut ws_server::PlayerSession,
+    node         : &SimulationNode,
+    curr         : Vec<ShipId>,
+    prev         : &mut Vec<ShipId>,
+    new_events   : &[dawn_core::DomainEvent],
+    warp_arrivals: &[ShipId],
 ) -> bool {
     // Ships that have a ShipDestroyed event this tick must NOT receive an
     // AoiLeave — the client's _handle_ship_destroyed already removes them.
@@ -243,7 +244,33 @@ pub(crate) fn deliver_aoi_frame(
         })
         .cloned()
         .collect();
-    sess.send_events(&visible_events)
+    if !sess.send_events(&visible_events) {
+        return false;
+    }
+
+    // Warp-arrival authority (ADR-0029): a warp ends with the client's visual
+    // ship lagging behind (its warp speed is capped to a renderable value), and
+    // for a true-AU warp the dead-reckoned position drifts badly. The server is
+    // authoritative, so for every ship that finished a warp this tick, push its
+    // absolute arrival position as a `PositionSnap` to each session that can see
+    // it (its owner, or an observer with it in view). This is the single arrival
+    // mechanism — it fires whether or not the arrival rebased the anchor, which
+    // is why the client no longer needs its own pre-computed warp snap.
+    for &sid in warp_arrivals {
+        let relevant = sid == sess.ship_id || curr.binary_search(&sid).is_ok();
+        if relevant {
+            if let Some(abs) = node.ship_absolute(sid) {
+                let msg = format!(
+                    "{{\"type\":\"PositionSnap\",\"ship_id\":{},\"position\":{{\"x\":{},\"y\":{},\"z\":{}}}}}",
+                    sid.raw(), abs[0], abs[1], abs[2]
+                );
+                if !sess.conn.send_raw(&msg) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 /// Build a `SimulationNode` wired the way every serve loop needs it.

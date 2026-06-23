@@ -13,6 +13,9 @@ impl<S: EventStore> SimulationNode<S> {
             DomainEvent::ShipSpawned(e) => {
                 if !self.ships.index.contains_key(&e.ship_id) {
                     self.insert_to_world(e.ship_id, e.initial_position, Velocity::ZERO);
+                    // ADR-0029 review #1: anchor on the nearest body (deterministic
+                    // — same initial_position reproduces the same anchor on replay).
+                    self.set_spawn_anchor(e.ship_id, e.initial_position);
                     // Restore base_stats from ship type registry
                     let base = self.ship_type_registry
                         .get(&e.ship_type_id)
@@ -185,6 +188,21 @@ impl<S: EventStore> SimulationNode<S> {
                     if should_remove {
                         let _ = self.world.inner_mut().remove_one::<TackledComp>(entity);
                     }
+                }
+            }
+
+            DomainEvent::AnchorRebased(e) => {
+                // Frame rebase (ADR-0029): set anchor + position offset directly.
+                // Absolute position is unchanged; this only updates the
+                // (anchor, offset) representation so replay stays consistent.
+                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+                    self.world.set_ship_anchor(entity, e.anchor);
+                    if let Ok(mut pos) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+                        pos.0 = e.offset;
+                    }
+                }
+                if e.tick > self.current_tick {
+                    self.current_tick = e.tick;
                 }
             }
         }

@@ -1,19 +1,16 @@
 # Demo Star System / Jump Gate / Celestial Body topology
 #
-# Scale: 1 unit = 1 m. Intra-system distances are gameplay-COMPRESSED (NOT real
-# astronomical scale) but kept "wide": planets at ~10^5 units and gates at the
-# edge (~600,000) so a body's bearing barely shifts during sublight travel,
-# which reads as distance. All within the Sector volume (±700,000 units, see
-# SectorBounds::DEFAULT_HALF) and well inside f32 precision -- ADR-0028 chose
-# f32 + per-sector local frames over i64/f64 (f32 is fine to ~10^7 units; i64
-# is only for true AU). You cross the system by Warp, not sublight (as in EVE).
+# Scale: 1 unit = 1 m. Intra-system distances are currently gameplay-COMPRESSED
+# (UNITS_PER_AU = 200,000, not a real AU): a true-AU trial (2026-06-23) found
+# that gates have no body near them in this topology (~2.26 AU to the nearest),
+# so "rebase onto nearest anchor" doesn't keep the offset small there. Reverted
+# pending a decision (ADR-0029 residual). The anchor architecture stays.
 #
-# Celestial body `position` is authored in AU (astronomical units) and converted
-# to game units at load time by UNITS_PER_AU = 30,000 (see galaxy.rs). This is a
-# gameplay COMPRESSION, not real scale (a real AU is ~1.5e11 m). Gate `position`
-# and body `radius` stay in units -- gates are sector-edge infrastructure and
-# radii are exaggerated for visibility. Travel time is set by Warp duration
-# (ADR-0022 parametric warp), not by inflating distance.
+# Celestial body `position` and Gate `position` are both authored in AU and
+# converted to units at load by UNITS_PER_AU (galaxy.rs); body/gate `radius`
+# and `activation_radius` stay in units (visual size, not AU-coupled). Travel
+# time is set by Warp duration (ADR-0022 parametric warp). To retry true scale,
+# set UNITS_PER_AU to 1.495978707e11 and retune WARP_SPEED.
 #
 # Edit this file and restart the server to change the layout (no recompile needed).
 
@@ -36,35 +33,43 @@ sectors = [2]
 
 # -- Jump Gates ---------------------------------------------------------------
 # Topology: Alpha (Sector 0) <-> Beta (Sector 1) <-> Gamma (Sector 2)
-# Gates sit near the Sector edge (~600,000, just inside ±700,000) -- the
-# boundary you cross to the next Sector.
+# Gates sit just off whichever body anchors that side of the route (each
+# offset ~0.028 AU from its anchor body, in a distinct direction per gate so
+# the two gates sharing a sector don't collide), authored in AU like celestial
+# bodies (ADR-0029 residual). A 2026-06-23 true-AU trial found that the old
+# "gates float ~3 AU out, no body nearby" layout breaks "rebase onto the
+# nearest anchor" -- the nearest body was still ~2.26 AU away, which is itself
+# too far for the offset to stay f32-precise. Placing gates near a body keeps
+# the post-rebase offset small (the whole point of an anchor) once true AU
+# reactivates; at the current compressed scale this is a pure repositioning
+# (no precision difference, since everything is f32-fine either way).
 
 [[jump_gates]]
 id                = 0
 from_sector       = 0
 to_sector         = 1
-position          = [600000.0, 0.0, 0.0]   # Alpha +X edge -> Beta
+position          = [-0.72, 0.0, -1.32]   # Alpha: just off Meridian -> Beta
 activation_radius = 2000.0
 
 [[jump_gates]]
 id                = 1
 from_sector       = 1
 to_sector         = 0
-position          = [-600000.0, 0.0, 0.0]  # Beta -X edge -> Alpha
+position          = [-0.74, 0.0, 0.26]    # Beta: just off Haven -> Alpha
 activation_radius = 2000.0
 
 [[jump_gates]]
 id                = 2
 from_sector       = 1
 to_sector         = 2
-position          = [600000.0, 0.0, 0.0]   # Beta +X edge -> Gamma
+position          = [-0.70, 0.0, 0.22]    # Beta: just off Haven (other side) -> Gamma
 activation_radius = 2000.0
 
 [[jump_gates]]
 id                = 3
 from_sector       = 2
 to_sector         = 1
-position          = [-600000.0, 0.0, 0.0]  # Gamma -X edge -> Beta
+position          = [0.72, 0.0, -0.58]    # Gamma: just off Bastion -> Beta
 activation_radius = 2000.0
 
 # -- Celestial Bodies ---------------------------------------------------------

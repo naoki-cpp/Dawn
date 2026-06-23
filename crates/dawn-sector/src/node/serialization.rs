@@ -4,8 +4,8 @@
 //! expects live here, keeping the core simulation logic in `mod.rs` separate
 //! from the presentation layer.
 
-use dawn_core::{CelestialBodyKind, Position, ShipId};
-use dawn_ecs::components::{FittingComp, HullComp, PositionComp, ShipStatsComp};
+use dawn_core::{CelestialBodyKind, ShipId};
+use dawn_ecs::components::{FittingComp, HullComp, ShipStatsComp};
 use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
@@ -67,8 +67,8 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// `InitialState` scoped to an observer's Area of Interest: only ships in the
     /// 27-cell neighborhood of `observer_pos` (ADR-0019).
-    pub fn build_initial_state_json_for(&self, observer_pos: Position, cell_size: f32) -> String {
-        self.initial_state_json(self.ships_visible_to(observer_pos, cell_size).into_iter())
+    pub fn build_initial_state_json_for(&self, observer_abs: [f64; 3], cell_size: f32) -> String {
+        self.initial_state_json(self.ships_visible_to(observer_abs, cell_size).into_iter())
     }
 
     /// Serialise the given ships into an `InitialState` message.
@@ -127,7 +127,12 @@ impl<S: EventStore> SimulationNode<S> {
     /// `InitialState` and `AoiEnter` (ADR-0019). `None` if the ship is gone.
     pub fn ship_state_json(&self, ship_id: ShipId) -> Option<serde_json::Value> {
         let entity  = self.ships.index.get(&ship_id)?;
-        let pos     = self.world.inner().get::<&PositionComp>(*entity).ok()?.0;
+        // Send the ABSOLUTE position (anchor + offset, f64), not the raw
+        // anchor-relative offset (ADR-0029). After a warp rebase the offset is
+        // body-relative, so a client that read it as absolute would misplace the
+        // ship near the origin. The client renders absolute coords via its
+        // floating origin.
+        let pos     = self.ship_absolute(ship_id)?;
         let stats   = self.world.inner().get::<&ShipStatsComp>(*entity).ok()?;
         let hull    = self.world.inner().get::<&HullComp>(*entity).ok()?;
         let is_player = self.ships.owners.contains_key(&ship_id);
@@ -138,7 +143,7 @@ impl<S: EventStore> SimulationNode<S> {
         Some(serde_json::json!({
             "ship_id"              : ship_id.raw(),
             "ship_type_name"       : ship_type_name,
-            "position"             : { "x": pos.x, "y": pos.y, "z": pos.z },
+            "position"             : { "x": pos[0], "y": pos[1], "z": pos[2] },
             "max_shield"           : stats.max_shield,
             "max_armor"            : stats.max_armor,
             "max_hull"             : stats.max_hull,
@@ -162,31 +167,36 @@ impl<S: EventStore> SimulationNode<S> {
 
     // ── Area of Interest (ADR-0019) ────────────────────────────────────────────
 
-    /// `(ShipId, Position)` for every ship currently in the world — the input to
-    /// the AoI cell grid. Iteration order is unspecified, but `CellGrid` sorts
-    /// each bucket, so query results are deterministic regardless.
-    pub fn ship_positions(&self) -> Vec<(ShipId, Position)> {
-        self.ships.index.iter().filter_map(|(&id, &entity)| {
-            let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
-            Some((id, pos))
-        }).collect()
+    /// `(ShipId, absolute position f64)` for every ship — the input to the AoI
+    /// cell grid (ADR-0029 review #2 / R2). Each position composes the ship's
+    /// anchor + offset in f64, so ships on different anchors are placed in the
+    /// same Sector-frame grid *and* the binning stays precise at true-AU
+    /// distances (an f32 absolute would have a ~16 km ulp). `CellGrid` sorts each
+    /// bucket, so query results are deterministic.
+    pub fn ship_absolute_positions(&self) -> Vec<(ShipId, [f64; 3])> {
+        self.ships.index.iter().map(|(&id, &entity)| (id, self.entity_abs_pos_f64(entity))).collect()
     }
 
-    /// ShipIds visible to an observer at `observer_pos`: those in the 27-cell
-    /// neighborhood of its cell (ADR-0019). Returned in `ShipId` order.
-    ///
-    /// Builds the grid from a single position pass; the serve loop can instead
-    /// build one [`crate::aoi::CellGrid`] per tick and query it per session.
-    pub fn ships_visible_to(&self, observer_pos: Position, cell_size: f32) -> Vec<ShipId> {
-        crate::aoi::CellGrid::build(cell_size, self.ship_positions())
-            .neighbors_of(observer_pos)
+    /// Absolute (Sector-frame, f64) position of a ship by id, or `None` if
+    /// unknown. The observer position to pass to AoI queries (ADR-0029 R2).
+    pub fn ship_absolute_pos(&self, ship_id: ShipId) -> Option<[f64; 3]> {
+        self.ship_absolute(ship_id)
+    }
+
+    /// ShipIds visible to an observer at `observer_abs` (an ABSOLUTE Sector-frame
+    /// f64 position): those in the 27-cell neighborhood of its cell (ADR-0019).
+    /// Returned in `ShipId` order. The grid is built from absolute f64 positions
+    /// so it is correct across anchors and precise at true AU (ADR-0029 R2).
+    pub fn ships_visible_to(&self, observer_abs: [f64; 3], cell_size: f32) -> Vec<ShipId> {
+        crate::aoi::CellGrid::build(cell_size, self.ship_absolute_positions())
+            .neighbors_of(observer_abs)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{NodeId, SectorBounds, SectorId, Velocity};
+    use dawn_core::{NodeId, Position, SectorBounds, SectorId, Velocity};
 
     fn mem_node() -> SimulationNode {
         SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF))
@@ -200,10 +210,38 @@ mod tests {
         let near = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::new(1_500.0, 0.0, 0.0), Velocity::ZERO);
         let far  = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::new(2_500.0, 0.0, 0.0), Velocity::ZERO);
 
-        let visible = node.ships_visible_to(Position::ORIGIN, cell);
+        let visible = node.ships_visible_to([0.0, 0.0, 0.0], cell);
         assert!(visible.contains(&observer), "observer's own cell is visible");
         assert!(visible.contains(&near),     "adjacent-cell ship is visible");
         assert!(!visible.contains(&far),     "two-cells-away ship is not visible");
+    }
+
+    #[test]
+    fn aoi_is_computed_in_absolute_coords_across_anchors() {
+        // ADR-0029 review #2: two ships at the same absolute point are mutually
+        // visible even when anchored on different bodies. A star-anchored ship at
+        // the origin and a Forge-anchored ship whose offset places it back at the
+        // origin must land in the same AoI cell.
+        use dawn_core::{AnchorId, DomainEvent, events::AnchorRebased, Tick};
+        let mut node = mem_node();
+        // Forcing b's offset to exactly cancel Forge's own (true-AU-scale)
+        // absolute position is itself an unrealistic, maximally-imprecise case
+        // (an offset is only meant to be small, ADR-0029 §2) -- real gameplay
+        // never produces an offset this large. The cell is sized to absorb that
+        // f32 ulp (a few km at this magnitude) rather than expecting the exact
+        // 1-km binning a realistic small offset would get.
+        let cell = 50_000.0;
+        let a = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
+        let b = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
+        // Rebase b onto Forge with an offset that returns it to absolute origin.
+        let forge = node.anchor_table().abs(AnchorId(1)).unwrap();
+        let off = Position::new(-forge[0] as f32, -forge[1] as f32, -forge[2] as f32);
+        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased { ship_id: b, anchor: AnchorId(1), offset: off, tick: Tick(1) }));
+        // Sanity: raw offsets differ wildly, but absolute positions coincide.
+        assert_eq!(node.get_ship_anchor(b), Some(AnchorId(1)));
+        let visible = node.ships_visible_to([0.0, 0.0, 0.0], cell);
+        assert!(visible.contains(&a) && visible.contains(&b),
+            "both ships share the origin cell in absolute coords despite different anchors");
     }
 
     #[test]
@@ -213,7 +251,7 @@ mod tests {
         let observer = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
         let far      = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::new(9_000.0, 0.0, 0.0), Velocity::ZERO);
 
-        let json = node.build_initial_state_json_for(Position::ORIGIN, cell);
+        let json = node.build_initial_state_json_for([0.0, 0.0, 0.0], cell);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let ids: Vec<u64> = v["ships"].as_array().unwrap().iter()
             .map(|s| s["ship_id"].as_u64().unwrap())

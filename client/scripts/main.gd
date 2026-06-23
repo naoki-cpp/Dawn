@@ -12,13 +12,14 @@ extends Node
 
 # -- Node references ----------------------------------------------------------
 
-@onready var _connection  : Node        = $Connection
-@onready var _ships_root  : Node3D      = $World/Ships
-@onready var _gates_root  : Node3D      = $World/Gates
-@onready var _bodies_root : Node3D      = $World/Bodies
-@onready var _stats_label : Label       = $HUD/StatsLabel
-@onready var _hud         : CanvasLayer = $HUD
-@onready var _camera      : Camera3D   = $World/Camera3D
+@onready var _connection   : Node        = $Connection
+@onready var _ships_root   : Node3D      = $World/Ships
+@onready var _gates_root   : Node3D      = $World/Gates
+@onready var _bodies_root  : Node3D      = $World/Bodies
+@onready var _stats_label  : Label       = $HUD/StatsLabel
+@onready var _hud          : CanvasLayer = $HUD
+@onready var _camera       : Camera3D    = $World/Camera3D
+@onready var _warp_tunnel  : ColorRect   = $HUD/WarpTunnel
 
 # -- HUD panels (built by HudManager in _ready, architecture-review-client.md C-1) --
 ## Top-left status panel. {conn_dot, conn_label, name_label, info_label}.
@@ -39,14 +40,30 @@ var _module_slots : Array         = []
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
 const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor
 const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is rejected for gates closer than this (ADR-0022).
-## Warp arrival distance from target centre, as a multiple of the target's own
-## radius (gate activation_radius / body radius). Gates arrive closer in (well
-## inside jump range); bodies arrive further out (outside the visual sphere).
-const GATE_WARP_ARRIVAL_FACTOR : float = 0.75
-const BODY_WARP_ARRIVAL_FACTOR : float = 1.5
-## Unit-to-meter scale: displayed m/s = (units/tick) * METERS_PER_UNIT.
-## Change this one constant to rescale all displayed speeds and distances.
+## Unit-to-metre scale: real metres = (units/tick or units) * METERS_PER_UNIT,
+## fed into UnitFormat for display (m/s, km/s, AU/s, ... -- whichever reads
+## best at the given magnitude). Change this one constant to rescale all
+## displayed speeds and distances.
 const METERS_PER_UNIT : float = 1.0
+
+## Must match ship_controller.gd's VISUAL_SPEED_CAP (Godot units/tick): the
+## warp-tunnel overlay (ADR-0029 lore pass) fades in once the player's ship is
+## moving faster than the speed ship_controller can render as literal motion,
+## and fades out once it drops back under it -- the same threshold that makes
+## OTHER ships hide entirely (ship_controller.gd), just shown as an overlay
+## here since the camera can't lose track of the locally piloted ship.
+const WARP_TUNNEL_THRESHOLD : float = 2_000.0
+## How fast the overlay's intensity eases toward its target each second (an
+## exponential approach, not a hard cut) -- this *is* the "natural before/after"
+## the tunnel transition reads as, since the true server speed jumps across the
+## threshold in a single tick.
+const WARP_TUNNEL_FADE_RATE : float = 3.0
+## Camera FOV pulls wide while in the tunnel for an extra sense of speed, then
+## eases back. Purely cosmetic.
+const WARP_TUNNEL_FOV_BOOST : float = 15.0
+
+var _warp_tunnel_amount : float = 0.0
+var _camera_base_fov    : float = 60.0
 
 # -- Materials ----------------------------------------------------------------
 
@@ -130,14 +147,10 @@ var _selected_body_id    : int    = -1  ## -1 = no body selected
 var _sky_mat             : ShaderMaterial = null  ## reference kept for sun_direction updates
 var _jump_notice         : String = ""
 var _jump_notice_timer   : float  = 0.0
-## Pre-computed warp arrival position in server coords.
-## Set at WarpCommand/auto-warp time (ship position is known then); cleared on arrival.
-## Using a pre-computed position avoids relying on the dead-reckoned position (which
-## drifts significantly at warp speed) to determine the snap direction on arrival.
-var _player_warp_snap_pos : Vector3 = Vector3.INF
-## Was the player ship at warp speed last VelocityChanged? Used to detect arrival.
-var _player_was_warping   : bool    = false
-const WARP_SPEED_THRESHOLD : float = 1000.0  ## Server units/tick: above this = warping
+## Warp arrival is handled authoritatively by the server (ADR-0029 warp-arrival
+## authority): on every warp completion the server sends a PositionSnap, which
+## _handle_position_snap applies. The client no longer pre-computes an arrival
+## point or detects arrival from the velocity dropping.
 
 # -- Lifecycle ----------------------------------------------------------------
 
@@ -156,23 +169,144 @@ func _ready() -> void:
 	_ship_status_refs  = HudManager.build_ship_status_panel(_hud)
 	_target_panel_refs = HudManager.build_target_panel(_hud)
 	_module_bar = HudManager.build_module_bar(_hud)
+	_camera_base_fov = _camera.fov
 	_update_hud()
 	## Gate / body markers are spawned from the server's InitialState, not here.
 
 func _process(delta: float) -> void:
+	_maybe_rebase_origin()
+	_update_body_markers()
+	_update_gate_markers()
 	_update_gate_proximity()
 	_update_sun_direction()
+	_update_warp_tunnel_effect(delta)
 	if _jump_notice_timer > 0.0:
 		_jump_notice_timer -= delta
 		if _jump_notice_timer <= 0.0:
 			_jump_notice = ""
 	_update_hud()
 
+## The client's single coordinate authority (ADR-0029 #3): owns the floating
+## origin and is the only place server<->Godot conversions happen. Preloaded
+## (not referenced by global class_name) so headless tests that load main.gd
+## resolve it without the editor's script-class cache.
+const WorldSpace = preload("res://scripts/world_space.gd")
+var _world := WorldSpace.new()
+
+## Real-unit (m/s, km/s, AU/s, ...) display formatting (ADR-0029 §1.5: single
+## conversion module). Static methods only -- preloaded rather than referenced
+## by global class_name for the same headless-test-cache reason as WorldSpace.
+const UnitFormat = preload("res://scripts/unit_format.gd")
+
 ## Converts a server-space position (Y-up, +Z) into Godot world space (Y-up,
-## -Z), applying WORLD_SCALE. Shared by gate/body marker spawning and gate
-## picking, which all place a Node3D at a server-given position.
+## -Z), relative to the floating origin and scaled by WORLD_SCALE. Shared by
+## gate/body marker spawning and gate picking, which all place a Node3D at a
+## server-given position. Thin wrapper so it can be passed as a Callable.
 func _server_to_godot_pos(p: Vector3) -> Vector3:
-	return Vector3(p.x, p.y, -p.z) * WORLD_SCALE
+	return _world.to_godot(p)
+
+## Distance (Godot units) past which a celestial-body or jump-gate marker is
+## clamped toward the player so it stays inside the camera far plane (true-AU
+## only). At the current compressed scale everything sits well inside this, so
+## markers draw at their real position (no clamping). At true AU this keeps
+## far bodies/gates visible as background bearing markers (spike S5) instead of
+## falling outside the far plane (scenes/main.tscn far=100000) and vanishing.
+const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
+
+## Re-place every celestial-body marker each frame at the body's true bearing
+## from the player, clamped to NAV_MARKER_CLAMP_DISTANCE only when farther than
+## that (a no-op at compressed scale). The marker stores its server position in
+## the "body_pos" meta (NavigationMarkerRenderer).
+func _update_body_markers() -> void:
+	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
+		return
+	var player_godot: Vector3 = (_ships[_player_ship_id] as Node3D).global_position
+	for c: Node in _bodies_root.get_children():
+		var marker: Node3D = c as Node3D
+		if not marker.has_meta("body_pos"):
+			continue
+		var body_godot: Vector3 = _server_to_godot_pos(marker.get_meta("body_pos") as Vector3)
+		var delta: Vector3 = body_godot - player_godot
+		var dist: float = delta.length()
+		if dist > NAV_MARKER_CLAMP_DISTANCE:
+			marker.global_position = player_godot + delta / dist * NAV_MARKER_CLAMP_DISTANCE
+		else:
+			marker.global_position = body_godot
+
+## Same as _update_body_markers, for Jump Gate markers (requested after the
+## true-AU reactivation: a gate can now sit AU-scale away from the player, so
+## without this it renders outside the far plane and is effectively invisible
+## -- the same problem bodies had before NAV_MARKER_CLAMP_DISTANCE existed).
+## The marker stores its server position in the "gate_id"/"gate_pos" meta
+## (NavigationMarkerRenderer); _pick_gate_at picks against the resulting
+## (possibly clamped) global_position, so clicks land on what's on screen.
+func _update_gate_markers() -> void:
+	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
+		return
+	var player_godot: Vector3 = (_ships[_player_ship_id] as Node3D).global_position
+	for c: Node in _gates_root.get_children():
+		var marker: Node3D = c as Node3D
+		if not marker.has_meta("gate_pos"):
+			continue
+		var gate_godot: Vector3 = _server_to_godot_pos(marker.get_meta("gate_pos") as Vector3)
+		var delta: Vector3 = gate_godot - player_godot
+		var dist: float = delta.length()
+		if dist > NAV_MARKER_CLAMP_DISTANCE:
+			marker.global_position = player_godot + delta / dist * NAV_MARKER_CLAMP_DISTANCE
+		else:
+			marker.global_position = gate_godot
+
+## Fade the full-screen warp-tunnel overlay in/out based on the player's own
+## ship speed (ADR-0029 lore pass, 2026-06-23). ship_controller.gd hides OTHER
+## ships entirely once they cross VISUAL_SPEED_CAP (the speed it can no longer
+## render as literal motion without f32 jitter); the camera can't lose track of
+## the LOCALLY piloted ship the same way, so this overlay covers the same
+## "moving too fast to render" stretch instead. The exponential ease (not a
+## hard cut) is what makes the tunnel's entry/exit read as a transition rather
+## than a flash -- the underlying speed crosses the threshold in a single tick.
+func _update_warp_tunnel_effect(delta: float) -> void:
+	var target := 0.0
+	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
+		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_godot") as float
+		target = 1.0 if spd > WARP_TUNNEL_THRESHOLD else 0.0
+	_warp_tunnel_amount = lerpf(_warp_tunnel_amount, target, clampf(delta * WARP_TUNNEL_FADE_RATE, 0.0, 1.0))
+	_warp_tunnel.call("set_intensity", _warp_tunnel_amount)
+	_camera.fov = _camera_base_fov + WARP_TUNNEL_FOV_BOOST * _warp_tunnel_amount
+
+## Rebase the floating origin to the player when it drifts past the threshold so
+## render coordinates stay small. Dormant at compressed scale (threshold never
+## reached). The player moves to the new origin (render ~0), so it is shifted
+## along with everything else and the camera follows.
+func _maybe_rebase_origin() -> void:
+	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
+		return
+	var player_server: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
+	if not _world.should_rebase(player_server):
+		return
+	_apply_origin_rebase(player_server, false)
+
+## Move the floating origin to `new_origin` and shift every world node that holds
+## a fixed Godot position by the same delta, so the move is invisible (the spike's
+## C2-2 property). The single primitive behind both threshold rebases (origin
+## follows player) and authoritative position snaps (origin re-anchored to keep
+## the player on-screen, `keep_player_fixed`).
+##
+## Body and gate markers are intentionally not shifted here: _update_body_markers
+## / _update_gate_markers re-place them from their server position against the
+## new origin every frame, so shifting them now would be dead work.
+func _apply_origin_rebase(new_origin: Vector3, keep_player_fixed: bool) -> void:
+	var shift: Vector3 = _world.rebase_to(new_origin)
+	for id: int in _ships:
+		if keep_player_fixed and id == _player_ship_id:
+			continue
+		(_ships[id] as Node3D).position += shift
+	# When the player ship moved with the origin, shift the camera by the same
+	# delta so its follow-lerp/look_at don't swing for a frame (it follows the
+	# ship by world position, not as a child). When the player is held fixed on
+	# screen the camera must stay put too.
+	if not keep_player_fixed and _camera != null:
+		_camera.global_position += shift
+		_camera.call("on_origin_rebased", shift)
 
 ## Gate/body marker spawning lives in navigation_marker_renderer.gd
 ## (NavigationMarkerRenderer, architecture-review-client.md C-1) -- main.gd
@@ -223,10 +357,9 @@ func _update_sun_direction() -> void:
 		_sky_mat.set_shader_parameter("sun_active", 0.0)
 		return
 
-	## Player position in server units (undo WORLD_SCALE + Z inversion).
+	## Player position in server space.
 	var ship_node   : Node3D = _ships[_player_ship_id] as Node3D
-	var ship_godot  : Vector3 = ship_node.global_position
-	var ship_server : Vector3 = Vector3(ship_godot.x, ship_godot.y, -ship_godot.z) / WORLD_SCALE
+	var ship_server : Vector3 = _world.to_server(ship_node.global_position)
 
 	## Direction from ship toward the star's effective (pushed-out) position in
 	## server coords; map to Godot world space. See SUN_EFFECTIVE_DISTANCE.
@@ -235,8 +368,8 @@ func _update_sun_direction() -> void:
 	if diff.length_squared() < 1.0:
 		_sky_mat.set_shader_parameter("sun_active", 0.0)
 		return
-	## Apply same coord mapping (Z inversion) so shader direction matches world.
-	var godot_dir : Vector3 = Vector3(diff.x, diff.y, -diff.z).normalized()
+	## Map the server-space direction to Godot world space (scale cancels on normalize).
+	var godot_dir : Vector3 = _world.dir_to_godot(diff).normalized()
 	_sky_mat.set_shader_parameter("sun_direction", godot_dir)
 	_sky_mat.set_shader_parameter("sun_active",    1.0)
 
@@ -256,7 +389,7 @@ func _update_gate_proximity() -> void:
 	_nearby_gate_id = -1
 	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return
-	var ship_pos: Vector3 = (_ships[_player_ship_id] as Node3D).global_position / WORLD_SCALE
+	var ship_pos: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
 	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
 		var gate_pos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
@@ -281,19 +414,14 @@ func _input(event: InputEvent) -> void:
 			"jump":
 				var jump_gate: int = action.gate_id as int
 				_connection.send_jump_command(_player_ship_id, jump_gate)
-				if jump_gate != _nearby_gate_id:
-					## Selected gate is out of range: server auto-warps first.
-					_player_warp_snap_pos = _compute_warp_snap_pos(jump_gate)
 			"approach_gate":
 				_connection.send_approach_gate_command(_player_ship_id, action.gate_id as int)
 			"approach_ship":
 				_connection.send_approach_command(_player_ship_id, action.ship_id as int)
 			"warp_to_gate":
 				_connection.send_warp_command(_player_ship_id, action.gate_id as int)
-				_player_warp_snap_pos = _compute_warp_snap_pos(action.gate_id as int)
 			"warp_to_body":
 				_connection.send_warp_to_body_command(_player_ship_id, action.body_id as int)
-				_player_warp_snap_pos = _compute_body_warp_snap_pos(action.body_id as int)
 			"toggle_tactical_overlay":
 				if _tactical_overlay != null:
 					(_tactical_overlay as Node3D).call("toggle_visible")
@@ -377,7 +505,7 @@ func _select_approach_target(target_id: int) -> void:
 func _pick_gate_at(screen_pos: Vector2) -> int:
 	if _player_ship_id < 0:
 		return -1
-	return ShipPicking.pick_gate_at(_camera, screen_pos, _gates, _server_to_godot_pos)
+	return ShipPicking.pick_gate_at(_camera, screen_pos, _gates_root)
 
 ## Select a Jump Gate as the Approach target. Press A to fly into its range.
 func _select_approach_gate(gate_id: int) -> void:
@@ -405,14 +533,13 @@ func _select_body(body_id: int) -> void:
 func _selected_gate_distance() -> float:
 	if _selected_gate_id < 0 or _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return -1.0
-	var ship_pos: Vector3 = (_ships[_player_ship_id] as Node3D).global_position / WORLD_SCALE
+	var ship_server: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
 	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
 		if (g.get("gate_id", -1) as int) != _selected_gate_id:
 			continue
 		var gpos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
-		## Godot Z is flipped; compute distance in server coordinate space.
-		return Vector3(ship_pos.x, ship_pos.y, -ship_pos.z).distance_to(gpos)
+		return ship_server.distance_to(gpos)
 	return -1.0
 
 # -- Right-click -> LockOnCommand ---------------------------------------------
@@ -442,19 +569,14 @@ func _on_double_click(screen_pos: Vector2) -> void:
 	## Camera ray direction used directly as thrust direction (3D)
 	var ray_dir: Vector3 = _camera.project_ray_normal(screen_pos)
 
-	## Direction transform from Godot to server space (Z flip only; scale cancels on normalize)
-	## Godot (x, y, -z) == server (x, y, z); for directions: (dx, dy, -dz)
-	var server_dir: Vector3 = Vector3(ray_dir.x, ray_dir.y, -ray_dir.z)
+	## Camera ray direction in server space (the server only uses its bearing:
+	## it normalizes target - ship, so the scale factor is irrelevant).
+	var server_dir: Vector3 = _world.dir_to_server(ray_dir)
 
 	## Estimate player ship position in server space (back-calculated from lerped Godot position)
-	var ship_godot_pos: Vector3 = Vector3.ZERO
+	var ship_server_pos: Vector3 = Vector3.ZERO
 	if _ships.has(_player_ship_id):
-		ship_godot_pos = (_ships[_player_ship_id] as Node3D).global_position
-	var ship_server_pos: Vector3 = Vector3(
-		ship_godot_pos.x / WORLD_SCALE,
-		ship_godot_pos.y / WORLD_SCALE,
-		-ship_godot_pos.z / WORLD_SCALE,
-	)
+		ship_server_pos = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
 
 	## Set target far away so server treats normalize(target - ship) as server_dir
 	var target: Vector3 = ship_server_pos + server_dir * 1_000_000.0
@@ -491,6 +613,36 @@ func _on_event_received(payload: Dictionary) -> void:
 		"StarSystemChanged" : _handle_star_system_changed(payload)
 		"AoiEnter"          : _handle_aoi_enter(payload)
 		"AoiLeave"          : _handle_aoi_leave(payload)
+		"PositionSnap"      : _handle_position_snap(payload)
+
+# -- Position snap (ADR-0029) -------------------------------------------------
+
+## Authoritative absolute-position snap (server → client), e.g. on warp arrival
+## after an anchor rebase. The client maps the server-absolute position through
+## the CURRENT floating origin and snaps the ship there, correcting the large
+## dead-reckoning drift a true-AU warp accumulates. Supersedes the client's
+## pre-computed (and now origin-stale) warp snap for body warps.
+func _handle_position_snap(p: Dictionary) -> void:
+	var ship_id: int = p.get("ship_id", 0) as int
+	if not _ships.has(ship_id):
+		return
+	var pos_dict: Dictionary = p.get("position", {}) as Dictionary
+	var server_pos := Vector3(
+		pos_dict.get("x", 0.0) as float,
+		pos_dict.get("y", 0.0) as float,
+		pos_dict.get("z", 0.0) as float)
+	if ship_id == _player_ship_id:
+		# A warp crosses ~1 AU but the player's visual ship lagged behind (its
+		# warp speed was capped). Correcting that by moving the ship would make
+		# the camera pan/swing. Instead, keep the ship (and camera) exactly where
+		# they are on screen and re-anchor the floating origin so that this same
+		# Godot position now represents the authoritative arrival `server_pos`:
+		# new_origin = server_pos - (ship's server-space offset from the origin).
+		var pg: Vector3 = (_ships[ship_id] as Node3D).global_position
+		var new_origin: Vector3 = server_pos - _world.dir_to_server(pg)
+		_apply_origin_rebase(new_origin, true)
+	else:
+		(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(server_pos)
 
 # -- Jump Gate (ADR-0009) -----------------------------------------------------
 
@@ -505,7 +657,7 @@ func _handle_jump_gate_used(p: Dictionary) -> void:
 		pos_dict.get("y", 0.0) as float,
 		pos_dict.get("z", 0.0) as float,
 	)
-	(_ships[ship_id] as Node3D).call("update_target", entry_pos)
+	(_ships[ship_id] as Node3D).call("update_target", _world.to_godot(entry_pos))
 	if ship_id == _player_ship_id:
 		(_ships[ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
 		_jump_notice       = "Jumped via Gate #%d" % (p.get("gate_id", 0) as int)
@@ -600,7 +752,7 @@ func _spawn_ship_from_data(d: Dictionary) -> void:
 	## Instantiate ship node
 	var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
 	_ships_root.add_child(ship)
-	ship.call("initialize", sid, pos)
+	ship.call("initialize", sid, _world.to_godot(pos))
 	ship.name = "Ship_%d" % sid
 	_ships[sid] = ship
 
@@ -772,7 +924,7 @@ func _handle_ship_spawned(p: Dictionary) -> void:
 
 	var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
 	_ships_root.add_child(ship)
-	ship.call("initialize", ship_id, pos)
+	ship.call("initialize", ship_id, _world.to_godot(pos))
 	ship.name = "Ship_%d" % ship_id
 	_ships[ship_id] = ship
 
@@ -793,15 +945,8 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 	)
 	(_ships[ship_id] as Node3D).call("set_velocity", server_vel)
 
-	## Detect warp arrival and snap position to correct dead-reckoning drift.
-	## Warp speed (~5000 u/tick) accumulates large position errors; snap the
-	## Godot node to the pre-computed arrival position (set at warp-start time).
-	if ship_id == _player_ship_id and _player_warp_snap_pos != Vector3.INF:
-		var speed: float = server_vel.length()
-		if _player_was_warping and speed < 1.0:
-			(_ships[ship_id] as Node3D).call("update_target", _player_warp_snap_pos)
-			_player_warp_snap_pos = Vector3.INF
-		_player_was_warping = speed >= WARP_SPEED_THRESHOLD
+	## Warp arrival is corrected by the server's PositionSnap (ADR-0029), not by
+	## client-side dead-reckoning detection.
 
 	var tick: int = p.get("tick", 0) as int
 	if tick > _current_tick:
@@ -809,52 +954,6 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 		_current_tick = tick
 		_simulate_cap(ticks_elapsed)
 
-## Shared core for gate/body warp arrival pre-computation. Uses the ship's
-## actual position (known at command-send time, not drifted) to determine the
-## approach direction, then places the snap point at `arrival_factor * radius`
-## from the target's centre (ADR-0022/0025).
-func _compute_warp_snap_pos_core(target_pos: Vector3, radius: float, arrival_factor: float) -> Vector3:
-	if not _ships.has(_player_ship_id):
-		return Vector3.INF
-	var ship_node: Node3D  = _ships[_player_ship_id] as Node3D
-	var gdot     : Vector3 = ship_node.global_position
-	var ship_server_pos := Vector3(gdot.x / WORLD_SCALE, gdot.y / WORLD_SCALE, -gdot.z / WORLD_SCALE)
-	var dir: Vector3 = ship_server_pos - target_pos
-	dir = dir.normalized() if dir.length() > 0.001 else Vector3(-1.0, 0.0, 0.0)
-	return target_pos + dir * radius * arrival_factor
-
-## Pre-compute the warp arrival position in server coords for a Jump Gate.
-## Arrives at GATE_WARP_ARRIVAL_FACTOR of the gate's activation radius —
-## safely within jump range (activation_radius = 2000).
-func _compute_warp_snap_pos(gate_id: int) -> Vector3:
-	var target_gate: Dictionary = {}
-	for g: Variant in _gates:
-		if (g as Dictionary).get("gate_id", -1) as int == gate_id:
-			target_gate = g as Dictionary
-			break
-	if target_gate.is_empty():
-		return Vector3.INF
-	var gate_pos    : Vector3 = target_gate.get("position", Vector3.ZERO) as Vector3
-	var activation_r: float   = target_gate.get("activation_radius", 2000.0) as float
-	return _compute_warp_snap_pos_core(gate_pos, activation_r, GATE_WARP_ARRIVAL_FACTOR)
-
-## Pre-compute the warp arrival position for a celestial body in server coords.
-## Arrives at BODY_WARP_ARRIVAL_FACTOR of the body's radius from its centre
-## (ADR-0025).
-func _compute_body_warp_snap_pos(body_id: int) -> Vector3:
-	var body_pos   : Vector3 = Vector3.ZERO
-	var body_radius: float   = 1.0
-	var found: bool          = false
-	for entry: Variant in _bodies:
-		var b: Dictionary = entry as Dictionary
-		if (b.get("body_id", -1) as int) == body_id:
-			body_pos    = b.get("position", Vector3.ZERO) as Vector3
-			body_radius = b.get("radius", 1.0) as float
-			found = true
-			break
-	if not found:
-		return Vector3.INF
-	return _compute_warp_snap_pos_core(body_pos, body_radius, BODY_WARP_ARRIVAL_FACTOR)
 
 func _handle_ship_despawned(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
@@ -937,7 +1036,7 @@ func _update_hud() -> void:
 	var speed_str: String = "-"
 	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
 		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
-		speed_str = "%d m/s" % int(spd * METERS_PER_UNIT)
+		speed_str = UnitFormat.format_speed(spd * METERS_PER_UNIT)
 	HudManager.update_status_panel(
 		_status_panel_refs, _connection.is_connected_to_server(),
 		_player_ship_type_name, _current_system_name, speed_str)
@@ -952,7 +1051,7 @@ func _update_hud() -> void:
 	if target_known and _player_ship_id >= 0 and _ships.has(_player_ship_id):
 		var dist_m: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
 			(_ships[_player_lock_target] as Node3D).global_position) / WORLD_SCALE
-		dist_text = "%.1f km" % (dist_m * METERS_PER_UNIT / 1000.0)
+		dist_text = UnitFormat.format_distance(dist_m * METERS_PER_UNIT)
 	var target_hp: Dictionary = _ship_hp.get(_player_lock_target, {}) as Dictionary
 	HudManager.update_target_panel(_target_panel_refs, _player_lock_target, target_known, dist_text, target_hp)
 

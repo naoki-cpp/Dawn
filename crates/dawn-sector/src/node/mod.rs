@@ -40,7 +40,7 @@ use dawn_core::{
 };
 use dawn_ecs::{
     components::{PositionComp, ShipStatsComp},
-    SimWorld,
+    Entity, SimWorld,
 };
 use dawn_event_store::{store::EventStore, InMemoryEventStore};
 
@@ -66,7 +66,12 @@ const WARP_ALIGN_FRACTION: f32 = 0.75;
 /// ceil(warp_distance / WARP_SPEED))`. Warp then follows a smoothstep ease
 /// along the start→arrival segment (ADR-0022 amendment), so this is the rough
 /// peak speed, not a constant velocity.
-const WARP_SPEED: f32 = 10_000.0;
+///
+/// Scaled by the same factor as `UNITS_PER_AU`'s true-AU reactivation
+/// (galaxy::UNITS_PER_AU went from 200,000 to 1.495978707e11, a ×747,989.35
+/// jump), so every warp's tick count — and therefore its felt duration —
+/// is unchanged from the compressed scale (ADR-0029 true-AU reactivation).
+const WARP_SPEED: f32 = 7_479_893_535.0;
 /// Floor on warp duration (ticks) so even a short warp reads as a warp rather
 /// than a blink. At 10 tick/s this is ~2 s.
 const WARP_MIN_TICKS: u32 = 20;
@@ -131,6 +136,9 @@ where
     pending_bot_lock_commands: Vec<dawn_core::LockOnCommand>,
     /// Static navigation topology for this Sector (gates, bodies, star map).
     sector_map: SectorMap,
+    /// Per-body coordinate anchors (ADR-0029): absolute Sector-local positions
+    /// in f64, derived from `sector_map.galaxy`. Rebuilt on `set_galaxy`.
+    anchor_table: crate::anchor::AnchorTable,
     /// Per-Sector population backstop (ADR-0018). Defaults to [`POPULATION_CAP`];
     /// tunable via [`Self::set_population_cap`].
     population_cap: usize,
@@ -139,6 +147,13 @@ where
     /// caller after each tick so the jump can be proposed to the Raft Log
     /// (or handled however the server path requires).
     pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
+    /// Ships that finished a warp this tick (ADR-0029 warp-arrival authority).
+    /// Transient and non-persisted (like `pending_auto_jumps`): the serve loop
+    /// drains it each tick and sends the owner an authoritative `PositionSnap`,
+    /// correcting the client's capped warp-visual dead-reckoning. Independent of
+    /// whether the arrival changed the ship's anchor, so it covers every warp
+    /// (gate / body / same-anchor) with one mechanism.
+    completed_warps: Vec<ShipId>,
 }
 
 // -- Constructors ------------------------------------------------------------
@@ -182,8 +197,10 @@ impl<S: EventStore> SimulationNode<S> {
                     galaxy: sm,
                 }
             },
+            anchor_table      : crate::anchor::AnchorTable::from_galaxy(&crate::galaxy::Galaxy::demo()),
             population_cap    : POPULATION_CAP,
             pending_auto_jumps: Vec::new(),
+            completed_warps   : Vec::new(),
         }
     }
 
@@ -223,8 +240,10 @@ impl<S: EventStore> SimulationNode<S> {
                     galaxy: sm,
                 }
             },
+            anchor_table       : crate::anchor::AnchorTable::from_galaxy(&crate::galaxy::Galaxy::demo()),
             population_cap    : POPULATION_CAP,
             pending_auto_jumps: Vec::new(),
+            completed_warps   : Vec::new(),
         };
 
         for def in modules {
@@ -282,6 +301,7 @@ impl<S: EventStore> SimulationNode<S> {
         let sid = self.sector_id;
         self.sector_map.gates = map.gates_in_sector(sid).into_iter().map(|g| (g.id, g)).collect();
         self.sector_map.bodies = map.bodies_in_sector(sid).into_iter().map(|b| (b.id, b)).collect();
+        self.anchor_table = crate::anchor::AnchorTable::from_galaxy(&map);
         self.sector_map.galaxy = map;
     }
 
@@ -327,6 +347,100 @@ impl<S: EventStore> SimulationNode<S> {
         self.world.inner().get::<&PositionComp>(*entity).ok().map(|c| c.0)
     }
 
+    /// The coordinate anchor a Ship's position is relative to (ADR-0029).
+    pub fn get_ship_anchor(&self, ship_id: ShipId) -> Option<dawn_core::AnchorId> {
+        let entity = self.ships.index.get(&ship_id)?;
+        self.world.ship_anchor(*entity)
+    }
+
+    /// Read access to this node's per-body anchor table (ADR-0029).
+    pub fn anchor_table(&self) -> &crate::anchor::AnchorTable { &self.anchor_table }
+
+    /// A Ship's absolute position in the Sector-local frame (metres, f64),
+    /// composing its anchor's absolute position with its f32 offset (ADR-0029).
+    /// Falls back to treating the raw offset as absolute if the anchor is
+    /// unknown (pre-anchor data / tests).
+    pub fn ship_absolute(&self, ship_id: ShipId) -> Option<[f64; 3]> {
+        let entity = *self.ships.index.get(&ship_id)?;
+        let offset = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+        match self.world.ship_anchor(entity) {
+            Some(anchor) => self.anchor_table
+                .absolute(anchor, offset)
+                .or_else(|| {
+                    debug_assert_missing_anchor(anchor, "ship_absolute");
+                    Some([offset.x as f64, offset.y as f64, offset.z as f64])
+                }),
+            None => Some([offset.x as f64, offset.y as f64, offset.z as f64]),
+        }
+    }
+
+    /// Absolute position (Sector-frame) of a ship entity given its raw offset,
+    /// composing its anchor (ADR-0029). f32 result (compressed-scale safe).
+    /// Used by steering/AI code so positions across anchors are comparable.
+    pub(super) fn entity_absolute(&self, entity: Entity, offset: Position) -> Position {
+        let Some(anchor) = self.world.ship_anchor(entity) else { return offset };
+        let Some(a) = self.anchor_table.abs(anchor) else {
+            debug_assert_missing_anchor(anchor, "entity_absolute");
+            return offset;
+        };
+        Position::new(
+            (a[0] + offset.x as f64) as f32,
+            (a[1] + offset.y as f64) as f32,
+            (a[2] + offset.z as f64) as f32,
+        )
+    }
+
+    /// Absolute (Sector-frame) position of a ship entity, composing its anchor
+    /// with its current `PositionComp` offset (ADR-0029). The single accessor any
+    /// gameplay code should use to compare a ship against Sector-frame data
+    /// (gates, bodies, other ships) — never read the raw anchor-relative offset
+    /// for cross-anchor geometry.
+    pub(super) fn entity_abs_pos(&self, entity: Entity) -> Position {
+        let off = self.world.inner().get::<&PositionComp>(entity).ok().map(|p| p.0).unwrap_or(Position::ORIGIN);
+        self.entity_absolute(entity, off)
+    }
+
+    /// Absolute (Sector-frame, metres, f64) position of a ship entity, composing
+    /// its anchor with its current `PositionComp` offset (ADR-0029). The f64
+    /// counterpart of [`Self::entity_abs_pos`] — the AoI grid input that stays
+    /// precise at true-AU distances (R2).
+    pub(super) fn entity_abs_pos_f64(&self, entity: Entity) -> [f64; 3] {
+        let off = self.world.inner().get::<&PositionComp>(entity).ok().map(|p| p.0).unwrap_or(Position::ORIGIN);
+        self.entity_absolute_f64(entity, off)
+    }
+
+    /// Absolute position (Sector-frame, metres, f64) of a ship entity given its
+    /// raw offset, composing its anchor (ADR-0029). Used by warp arrival math
+    /// that must stay precise at true-AU distances.
+    pub(super) fn entity_absolute_f64(&self, entity: Entity, offset: Position) -> [f64; 3] {
+        let Some(anchor) = self.world.ship_anchor(entity) else {
+            return [offset.x as f64, offset.y as f64, offset.z as f64];
+        };
+        let Some(a) = self.anchor_table.abs(anchor) else {
+            debug_assert_missing_anchor(anchor, "entity_absolute_f64");
+            return [offset.x as f64, offset.y as f64, offset.z as f64];
+        };
+        [a[0] + offset.x as f64, a[1] + offset.y as f64, a[2] + offset.z as f64]
+    }
+
+    /// Distance from a Ship to a Sector-frame point (a gate/body position),
+    /// composing the ship's anchor (ADR-0029). The accessor gameplay/tests use
+    /// instead of comparing a raw offset to absolute data.
+    pub fn ship_distance_to_point(&self, ship_id: ShipId, point: Position) -> Option<f32> {
+        let entity = *self.ships.index.get(&ship_id)?;
+        Some(self.entity_abs_pos(entity).distance(point))
+    }
+
+    /// True distance (metres) between two Ships, composing each ship's anchor
+    /// and offset in f64 so the result is correct even if the two ships are
+    /// anchored on different bodies (ADR-0029 step 3 / spike B-3).
+    pub fn ship_distance(&self, a: ShipId, b: ShipId) -> Option<f64> {
+        let pa = self.ship_absolute(a)?;
+        let pb = self.ship_absolute(b)?;
+        let d = [pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]];
+        Some((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt())
+    }
+
     /// Look up the current `ShipStatsComp` of a Ship by its ID. Test-only.
     #[cfg(test)]
     pub fn get_ship_stats(&self, ship_id: ShipId) -> Option<ShipStatsComp> {
@@ -365,6 +479,24 @@ impl<S: EventStore> SimulationNode<S> {
             .unwrap_or_default()
     }
 
+}
+
+/// Fire in debug builds when a ship's `AnchorComp` points at an `AnchorId` that
+/// the `AnchorTable` doesn't know (ADR-0029 R3). The absolute-position accessors
+/// fall back to treating the raw offset as absolute, which is only correct at the
+/// Sector origin — at true-AU scale a missing anchor silently misplaces the ship
+/// by the body's absolute position (~10^11 m). This can't happen for node-spawned
+/// ships (every spawn anchors on a real table entry), so a miss means a data /
+/// galaxy-table integrity bug; surface it loudly instead of returning a wrong
+/// frame. Release builds keep the silent fallback as a safety net.
+#[inline]
+#[allow(clippy::assertions_on_constants)]
+fn debug_assert_missing_anchor(anchor: dawn_core::AnchorId, site: &str) {
+    debug_assert!(
+        false,
+        "{site}: ship anchored on {anchor:?} which is absent from the AnchorTable \
+         — absolute position fell back to the raw offset (wrong frame at true AU)"
+    );
 }
 
 // -- Tests -------------------------------------------------------------------

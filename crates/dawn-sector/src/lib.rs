@@ -1,3 +1,4 @@
+pub mod anchor;
 pub mod aoi;
 pub mod dilation;
 pub mod modules;

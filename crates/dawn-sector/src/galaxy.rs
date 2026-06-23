@@ -21,14 +21,20 @@ pub struct Galaxy {
     pub bodies : Vec<CelestialBodyDef>,
 }
 
-/// Game units per astronomical unit. Celestial body orbits are authored in AU
-/// in `data/galaxy*.toml` (human-meaningful, astronomical) and converted to
-/// units at load time by this factor. The factor is a deliberate gameplay
-/// COMPRESSION (a real AU is ~1.5e11 m, far beyond f32 precision); it is chosen
-/// so a system spans a comfortable, f32-safe range and orbits sit well clear of
-/// the star's exaggerated visual radius. Body `radius` and gate `position` stay
-/// in units (they are not orbital distances). See ADR-0025 / ADR-0028.
-pub const UNITS_PER_AU: f32 = 200_000.0;
+/// Game units per astronomical unit. Celestial body orbits are authored in AU in
+/// `data/galaxy*.toml` and converted to units at load (1 unit = 1 m). Kept f64 so
+/// the anchor source (`CelestialBodyDef.abs_m`) stays precise — this is forward-
+/// compatible with the true-AU value (1.495978707e11).
+///
+/// **True AU, reactivated 2026-06-23** (ADR-0029): the residual checklist is
+/// clear (gate f64, gate re-authoring, warp-transit f64, AoI f64, anchor-miss
+/// guards, gates repositioned near a body so rebase keeps the offset small).
+/// `WARP_SPEED` (node/mod.rs) is scaled by the same factor so warp durations
+/// (in ticks) are unchanged from the compressed era; visual constants in the
+/// client (`BODY_MARKER_CLAMP_DISTANCE` / `SUN_EFFECTIVE_DISTANCE`) were left
+/// untouched on the reasoning that they are camera-relative rendering
+/// placeholders, not AU-coupled — needs a human playtest to confirm.
+pub const UNITS_PER_AU: f64 = 1.495978707e11;
 
 impl Galaxy {
     /// Construct from explicitly provided data (used by `DataLoader`).
@@ -119,7 +125,13 @@ struct JumpGateEntry {
     id               : u32,
     from_sector      : u8,
     to_sector        : u8,
-    position         : [f32; 3],
+    /// Gate position in AU, converted to metres by `UNITS_PER_AU` on load —
+    /// same convention as `CelestialBodyEntry.position` (ADR-0029 residual:
+    /// gates used to be authored as fixed units, decoupled from `UNITS_PER_AU`,
+    /// so flipping to true AU would have left them sitting on top of the star).
+    /// Parsed as f64 so the authoring precision survives at true-AU scale —
+    /// the f64 `abs_m` source (ADR-0029 R1).
+    position         : [f64; 3],
     activation_radius: f32,
 }
 
@@ -129,8 +141,9 @@ struct CelestialBodyEntry {
     sector       : u8,
     kind         : String,
     name         : String,
-    /// Orbit position in AU (converted to units by `UNITS_PER_AU` on load).
-    position     : [f32; 3],
+    /// Orbit position in AU (converted to metres by `UNITS_PER_AU` on load).
+    /// Parsed as f64 so the authoring precision survives at true-AU scale.
+    position     : [f64; 3],
     /// Visual radius in units (exaggerated for gameplay; not an AU distance).
     radius       : f32,
     #[serde(default)] spectral_type: f32,
@@ -149,10 +162,18 @@ fn entry_to_system(e: StarSystemEntry) -> StarSystemDef {
 }
 
 fn entry_to_gate(e: JumpGateEntry) -> JumpGateDef {
+    // Authored in AU, scaled to metres by UNITS_PER_AU (same conversion as
+    // `entry_to_body`) so gate placement tracks the sector scale instead of
+    // sitting at a fixed unit offset (ADR-0029 residual). `abs_m` is the
+    // authoritative f64 gate position; `position` is its f32 view (coarse at
+    // true AU, fine at compressed scale) — ADR-0029 R1.
+    let factor = UNITS_PER_AU;
+    let abs_m = [e.position[0] * factor, e.position[1] * factor, e.position[2] * factor];
     JumpGateDef {
         id               : JumpGateId(e.id),
         from_sector      : SectorId(e.from_sector),
-        position         : Position::new(e.position[0], e.position[1], e.position[2]),
+        position         : Position::new(abs_m[0] as f32, abs_m[1] as f32, abs_m[2] as f32),
+        abs_m,
         to_sector        : SectorId(e.to_sector),
         activation_radius: e.activation_radius,
     }
@@ -160,16 +181,22 @@ fn entry_to_gate(e: JumpGateEntry) -> JumpGateDef {
 
 fn entry_to_body(e: CelestialBodyEntry) -> CelestialBodyDef {
     // `position` is authored in AU; convert to game units (see UNITS_PER_AU).
+    // `abs_m` is the same conversion done in f64 — the authoritative anchor
+    // source that stays precise at true-AU scale (ADR-0029). At compressed scale
+    // it equals `position` numerically.
+    let factor = UNITS_PER_AU;
+    let abs_m = [
+        e.position[0] * factor,
+        e.position[1] * factor,
+        e.position[2] * factor,
+    ];
     CelestialBodyDef {
         id           : CelestialBodyId(e.id),
         sector       : SectorId(e.sector),
         kind         : parse_body_kind(&e.kind),
         name         : e.name,
-        position     : Position::new(
-            e.position[0] * UNITS_PER_AU,
-            e.position[1] * UNITS_PER_AU,
-            e.position[2] * UNITS_PER_AU,
-        ),
+        position     : Position::new(abs_m[0] as f32, abs_m[1] as f32, abs_m[2] as f32),
+        abs_m,
         radius       : e.radius,
         spectral_type: e.spectral_type,
     }
@@ -198,6 +225,23 @@ mod tests {
     }
 
     #[test]
+    fn gate_positions_are_converted_from_au_to_units_like_celestial_bodies() {
+        // ADR-0029 residual: gates used to be authored as a fixed unit offset
+        // (decoupled from UNITS_PER_AU), which would have put them on top of
+        // the star once UNITS_PER_AU flips to true AU. Gate 0 is authored at
+        // [-0.72, 0.0, -1.32] AU in galaxy.demo.toml -- confirm the loader
+        // scales it the same way it scales body positions.
+        let map = Galaxy::demo();
+        let gate0 = map.gates.iter().find(|g| g.id == JumpGateId(0)).expect("gate 0 exists");
+        assert_eq!(gate0.abs_m[0], -0.72 * UNITS_PER_AU);
+        assert_eq!(gate0.abs_m[1], 0.0);
+        assert_eq!(gate0.abs_m[2], -1.32 * UNITS_PER_AU);
+        // f32 ulp bound at this magnitude, not an exactness check (true AU only).
+        let ulp_bound = (0.72 * UNITS_PER_AU * f32::EPSILON as f64).abs().max(1.0);
+        assert!((gate0.position.x as f64 - (-0.72) * UNITS_PER_AU).abs() < ulp_bound, "x = {}", gate0.position.x);
+    }
+
+    #[test]
     fn demo_map_parses_from_embedded_toml() {
         let map = Galaxy::demo();
         assert_eq!(map.systems.len(), 3);
@@ -209,11 +253,18 @@ mod tests {
     fn celestial_body_positions_are_converted_from_au_to_units() {
         let map = Galaxy::demo();
         // Forge (id 1) is authored at [0.8, 0.0, 0.5] AU in galaxy.demo.toml;
-        // the loader scales it by UNITS_PER_AU into game units.
+        // the loader scales it by UNITS_PER_AU into metres. The f64 anchor source
+        // (abs_m) is exact; the f32 `position` is only ulp-precise at ~10^11 m
+        // (~16 km), which is why anchors use abs_m, not position (ADR-0029).
         let forge = map.bodies.iter().find(|b| b.id == CelestialBodyId(1)).expect("Forge exists");
-        assert!((forge.position.x - 0.8 * UNITS_PER_AU).abs() < 1.0, "x = {}", forge.position.x);
+        assert_eq!(forge.abs_m[0], 0.8 * UNITS_PER_AU);
+        assert_eq!(forge.abs_m[2], 0.5 * UNITS_PER_AU);
+        // At true AU the f32 `position` is only ulp-precise (~tens of km at
+        // ~10^11 m), which is why anchors use abs_m, not position (ADR-0029) --
+        // this bound is the f32 ulp at Forge's magnitude, not an exactness check.
+        let ulp_bound = (0.8 * UNITS_PER_AU * f32::EPSILON as f64).abs().max(1.0);
+        assert!((forge.position.x as f64 - 0.8 * UNITS_PER_AU).abs() < ulp_bound, "x = {}", forge.position.x);
         assert_eq!(forge.position.y, 0.0);
-        assert!((forge.position.z - 0.5 * UNITS_PER_AU).abs() < 1.0, "z = {}", forge.position.z);
         // Stars at [0,0,0] AU stay at the origin (0 * factor = 0).
         let helios = map.bodies.iter().find(|b| b.id == CelestialBodyId(0)).expect("Helios exists");
         assert_eq!(helios.position, Position::ORIGIN);

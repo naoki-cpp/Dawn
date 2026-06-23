@@ -180,6 +180,7 @@ mod tests {
                 ship_id       : ShipId::new(NodeId(0), 7),
                 ship_type_id  : ShipTypeId(1),
                 position      : Position::new(1.0, 2.0, 3.0),
+                anchor        : dawn_core::AnchorId(0),
                 velocity      : Velocity::new(4.0, 5.0, 6.0),
                 current_shield: 10.0,
                 current_armor : 20.0,

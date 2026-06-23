@@ -69,6 +69,8 @@ static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: fl
 
 		var marker: Node3D = Node3D.new()
 		marker.position = to_godot_pos.call(gate_pos) as Vector3
+		marker.set_meta("gate_id",  g.get("gate_id", -1) as int)
+		marker.set_meta("gate_pos", gate_pos)  ## server coords, kept for per-frame clamping (main.gd)
 		gates_root.add_child(marker)
 
 		var ring: MeshInstance3D = MeshInstance3D.new()

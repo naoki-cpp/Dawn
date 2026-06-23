@@ -34,6 +34,7 @@ impl<S: EventStore> SimulationNode<S> {
             .unwrap_or(ShipStatsComp::NPC);
 
         self.insert_to_world(ship_id, position, velocity);
+        self.set_spawn_anchor(ship_id, position);
         self.base_stats.insert(ship_id, base);
         self.ships.type_ids.insert(ship_id, ship_type_id);
 
@@ -99,6 +100,7 @@ impl<S: EventStore> SimulationNode<S> {
             .unwrap_or(ShipStatsComp::PLAYER);
 
         self.insert_to_world(ship_id, pos, Velocity::ZERO);
+        self.set_spawn_anchor(ship_id, pos);
         self.base_stats.insert(ship_id, base);
         self.ships.type_ids.insert(ship_id, SHIP_TYPE_MAGPIE);
 
@@ -224,7 +226,9 @@ impl<S: EventStore> SimulationNode<S> {
             let is_warping = self.world.inner().get::<&WarpComp>(entity).is_ok();
             bots.push(BotState {
                 player_id, ship_id,
-                position    : pos.0,
+                // Absolute (Sector-frame) position so distance/steering toward a
+                // target on a different anchor is correct (ADR-0029).
+                position    : self.entity_absolute(entity, pos.0),
                 weapon_range: stats.weapon_range,
                 locked_targets: locked,
                 weapon_modules,
@@ -241,7 +245,8 @@ impl<S: EventStore> SimulationNode<S> {
             if self.world.inner().get::<&IsNpcComp>(entity).is_ok()  { continue }
             if !self.ships.owners.contains_key(&ship_id)              { continue }
             let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { continue };
-            targets.push(TargetInfo { ship_id, position: pos.0 });
+            let abs = self.entity_absolute(entity, pos.0);
+            targets.push(TargetInfo { ship_id, position: abs });
         }
 
         if targets.is_empty() { return; }
@@ -336,6 +341,73 @@ impl<S: EventStore> SimulationNode<S> {
     pub(super) fn insert_to_world(&mut self, ship_id: ShipId, position: Position, velocity: Velocity) {
         let entity = self.world.spawn_ship(ship_id, position, velocity);
         self.ships.index.insert(ship_id, entity);
+        // Default to the Sector origin anchor (the star). Spawn paths override
+        // this with the nearest body via `set_spawn_anchor`; restore overrides it
+        // with the persisted anchor. `position` here is treated as the offset.
+        let anchor = self.anchor_table
+            .sector_origin_anchor(self.sector_id)
+            .unwrap_or(dawn_core::AnchorId(0));
+        self.world.set_ship_anchor(entity, anchor);
+    }
+
+    /// Anchor a freshly-spawned ship on the NEAREST celestial body and store its
+    /// position as a small offset from that anchor (ADR-0029 review #1). The
+    /// argument is the spawn position in the Sector-absolute (star-origin) frame.
+    ///
+    /// Keeping each ship anchored to a nearby body is the invariant that makes
+    /// method B work at true AU: a ship far from the star must not hold a ~10^11 m
+    /// star-relative f32 offset (which loses ~km of precision). At the compressed
+    /// scale the star is the nearest body for all current spawns, so this is a
+    /// no-op today; it becomes load-bearing once bodies sit at real AU.
+    ///
+    /// Deterministic: `ShipSpawned` replay calls this with the same
+    /// `initial_position`, reproducing the same anchor (later `AnchorRebased`
+    /// events replay the warp rebases on top).
+    pub(super) fn set_spawn_anchor(&mut self, ship_id: ShipId, abs_pos: Position) {
+        let Some(&entity) = self.ships.index.get(&ship_id) else { return };
+        let world = [abs_pos.x as f64, abs_pos.y as f64, abs_pos.z as f64];
+        let anchor = self.anchor_table
+            .nearest_anchor(self.sector_id, world)
+            .unwrap_or(dawn_core::AnchorId(0));
+        let offset = match self.anchor_table.abs(anchor) {
+            Some(a) => Position::new((world[0] - a[0]) as f32, (world[1] - a[1]) as f32, (world[2] - a[2]) as f32),
+            None    => {
+                super::debug_assert_missing_anchor(anchor, "set_spawn_anchor");
+                abs_pos
+            }
+        };
+        self.world.set_ship_anchor(entity, anchor);
+        if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+            p.0 = offset;
+        }
+    }
+
+    /// Test-only: re-anchor a ship from an absolute f64 point directly,
+    /// bypassing the f32 `Position` round trip `set_spawn_anchor` takes.
+    ///
+    /// Real callers always go through `PositionComp` (f32) — that's the whole
+    /// method-B contract (ADR-0029 §1). But constructing an absolute test
+    /// fixture "near gate G" or "at body B" via f32 arithmetic at true-AU
+    /// magnitude is itself lossy in ways that don't reflect any real bug: a
+    /// single cast loses ~tens of km of ulp, and subtracting a small offset
+    /// (e.g. "12,000 m short of the gate") from an AU-scale f32 number can
+    /// vanish entirely to catastrophic cancellation. This sidesteps that by
+    /// doing the anchor/offset split directly in f64, the same way production
+    /// code's f64 paths (warp arrival, AnchorTable) already do.
+    #[cfg(test)]
+    pub(super) fn set_spawn_anchor_abs(&mut self, ship_id: ShipId, world: [f64; 3]) {
+        let Some(&entity) = self.ships.index.get(&ship_id) else { return };
+        let anchor = self.anchor_table
+            .nearest_anchor(self.sector_id, world)
+            .unwrap_or(dawn_core::AnchorId(0));
+        let offset = match self.anchor_table.abs(anchor) {
+            Some(a) => Position::new((world[0] - a[0]) as f32, (world[1] - a[1]) as f32, (world[2] - a[2]) as f32),
+            None    => Position::new(world[0] as f32, world[1] as f32, world[2] as f32),
+        };
+        self.world.set_ship_anchor(entity, anchor);
+        if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+            p.0 = offset;
+        }
     }
 
     /// Reconstruct a Ship's full ECS state (stats, hull, capacitor, fitting)
@@ -345,6 +417,12 @@ impl<S: EventStore> SimulationNode<S> {
         use dawn_ecs::components::{FittingComp, TackledComp};
         self.insert_to_world(ship.ship_id, ship.position, ship.velocity);
         self.ships.type_ids.insert(ship.ship_id, ship.ship_type_id);
+        // Restore the coordinate anchor (ADR-0029): insert_to_world defaults to
+        // the Sector-origin anchor, but a rebased ship's `position` offset is
+        // relative to its saved anchor, so restore that to keep absolute position.
+        if let Some(&entity) = self.ships.index.get(&ship.ship_id) {
+            self.world.set_ship_anchor(entity, ship.anchor);
+        }
 
         let base = self.ship_type_registry.get(&ship.ship_type_id)
             .map(|def| ShipStatsComp::from_base(&def.base_stats))
@@ -411,6 +489,99 @@ mod tests {
         for def in modules::all_modules() { node.register_module(def); }
         for def in ship_types::all_ship_types() { node.register_ship_type(def); }
         node
+    }
+
+    #[test]
+    fn spawned_ship_is_anchored_on_the_nearest_body() {
+        // ADR-0029 review #1: a ship anchors on the nearest celestial body.
+        // A spawn near the star anchors on Helios (id 0); a spawn at Forge's
+        // position (160,000, 0, 100,000 in compressed units) anchors on Forge
+        // (id 1) with a ~zero offset, keeping the offset small (the method-B
+        // invariant). Distances stay correct via the absolute accessors.
+        let mut node = node_with_modules();
+        let near_star = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(30_000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
+        assert_eq!(node.get_ship_anchor(near_star), Some(dawn_core::AnchorId(0)));
+
+        let forge_abs = node.anchor_table().abs(dawn_core::AnchorId(1)).unwrap();
+        // Spawn anywhere, then re-anchor from the f64 source directly
+        // (set_spawn_anchor_abs) -- routing forge_abs through a single f32
+        // `Position` cast first would lose ~tens of km of ulp at true AU
+        // (not a bug; f32 simply can't hold an AU-scale absolute coordinate
+        // exactly), which isn't what this test is checking.
+        let at_forge = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, dawn_core::Velocity::ZERO);
+        node.set_spawn_anchor_abs(at_forge, forge_abs);
+        assert_eq!(node.get_ship_anchor(at_forge), Some(dawn_core::AnchorId(1)));
+        // Offset under the anchor is ~zero (small), and the absolute position is
+        // recovered exactly.
+        let abs = node.ship_absolute(at_forge).unwrap();
+        assert!((abs[0] - forge_abs[0]).abs() < 1.0 && (abs[2] - forge_abs[2]).abs() < 1.0);
+    }
+
+    #[test]
+    fn anchor_rebased_preserves_absolute_position_and_updates_anchor() {
+        use dawn_core::{AnchorId, events::AnchorRebased};
+        let mut node = node_with_modules();
+        let ship = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(30_000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
+        // AnchorRebased sets the anchor and a (small, near-Forge) offset; the
+        // absolute position composes anchor_abs(f64) + offset exactly (ADR-0029).
+        let forge_abs = node.anchor_table().abs(AnchorId(1)).unwrap();
+        let new_off = Position::new(2_000.0, 0.0, -1_500.0);
+        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased {
+            ship_id: ship, anchor: AnchorId(1), offset: new_off, tick: Tick(1),
+        }));
+        assert_eq!(node.get_ship_anchor(ship), Some(AnchorId(1)));
+        let after = node.ship_absolute(ship).unwrap();
+        assert!((after[0] - (forge_abs[0] + 2_000.0)).abs() < 1e-2, "x {}", after[0]);
+        assert!((after[2] - (forge_abs[2] - 1_500.0)).abs() < 1e-2, "z {}", after[2]);
+    }
+
+    #[test]
+    fn snapshot_restore_preserves_a_rebased_ships_anchor_and_absolute_position() {
+        use dawn_core::{AnchorId, events::AnchorRebased};
+        use dawn_event_store::InMemoryEventStore;
+        let mut node = node_with_modules();
+        let ship = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(160_000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
+        // Rebase onto Forge (AnchorId 1), preserving absolute position.
+        let world = node.ship_absolute(ship).unwrap();
+        let forge = node.anchor_table().abs(AnchorId(1)).unwrap();
+        let off = Position::new((world[0]-forge[0]) as f32, (world[1]-forge[1]) as f32, (world[2]-forge[2]) as f32);
+        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased { ship_id: ship, anchor: AnchorId(1), offset: off, tick: Tick(1) }));
+        let before = node.ship_absolute(ship).unwrap();
+
+        let snap = node.take_snapshot();
+        assert_eq!(snap.ships.iter().find(|s| s.ship_id == ship).unwrap().anchor, AnchorId(1),
+            "snapshot must capture the rebased anchor");
+
+        let node2 = SimulationNode::restore_from(
+            InMemoryEventStore::new(), &snap,
+            &crate::modules::all_modules(), &crate::ship_types::all_ship_types(),
+        );
+        assert_eq!(node2.get_ship_anchor(ship), Some(AnchorId(1)), "restore must keep the anchor");
+        let after = node2.ship_absolute(ship).unwrap();
+        let err = ((before[0]-after[0]).powi(2)+(before[1]-after[1]).powi(2)+(before[2]-after[2]).powi(2)).sqrt();
+        assert!(err < 1.0, "restore moved absolute position by {err} m");
+    }
+
+    #[test]
+    fn ship_distance_is_correct_across_different_anchors() {
+        use dawn_core::{AnchorId, events::AnchorRebased};
+        let mut node = node_with_modules();
+        // Ship a near the star (small offset under Helios), ship b near Forge
+        // (small offset under its own anchor). Each is precise locally; the
+        // cross-anchor distance composes both in f64 (ADR-0029 / spike B-3).
+        let a = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(1000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
+        let b = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(2000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
+        let off_b = Position::new(500.0, 0.0, 0.0);
+        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased {
+            ship_id: b, anchor: AnchorId(1), offset: off_b, tick: Tick(1),
+        }));
+        let forge_abs = node.anchor_table().abs(AnchorId(1)).unwrap();
+        let a_abs = [1000.0_f64, 0.0, 0.0];
+        let b_abs = [forge_abs[0] + 500.0, forge_abs[1], forge_abs[2]];
+        let d = [a_abs[0]-b_abs[0], a_abs[1]-b_abs[1], a_abs[2]-b_abs[2]];
+        let expected = (d[0]*d[0]+d[1]*d[1]+d[2]*d[2]).sqrt();
+        let after = node.ship_distance(a, b).unwrap();
+        assert!((after - expected).abs() < 1.0, "cross-anchor distance {after} != {expected}");
     }
 
     #[test]

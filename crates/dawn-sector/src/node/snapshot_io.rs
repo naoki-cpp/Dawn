@@ -26,10 +26,12 @@ impl<S: EventStore> SimulationNode<S> {
                     .map(|t| t.tacklers.clone())
                     .unwrap_or_default();
                 let ship_type_id = self.ships.type_ids.get(&ship_id).copied().unwrap_or(dawn_core::ShipTypeId(0));
+                let anchor = self.world.ship_anchor(entity).unwrap_or_default();
                 Some(ShipSnapshot {
                     ship_id,
                     ship_type_id,
                     position      : pos,
+                    anchor,
                     velocity      : vel,
                     current_shield: hull.current_shield,
                     current_armor : hull.current_armor,
@@ -387,5 +389,54 @@ mod tests {
         let fitted = node2.get_fitted_module_ids(ship_id);
         assert!(fitted.contains(&(modules::MODULE_AFTERBURNER, true)),
             "Afterburner must remain fitted and active after restore, got {:?}", fitted);
+    }
+
+    /// INV-002 / ADR-0029 — a warp-to-body rebases the ship onto the body's
+    /// anchor via an authoritative `AnchorRebased` event, leaving its raw
+    /// `PositionComp` body-relative. The snapshot must capture that anchor (not
+    /// just the offset) so restore reproduces the same *absolute* position; a
+    /// snapshot that dropped the anchor would silently relocate the ship by the
+    /// body's absolute position (~10^5+ units) on restart. This is the
+    /// new-schema check the pre-anchor round-trip tests can't make.
+    #[test]
+    fn warp_arrival_anchor_and_absolute_position_survive_snapshot_restore() {
+        use crate::{modules, ship_types};
+        use dawn_core::WarpTarget;
+
+        let mut node = node_with_modules();
+        let player   = node.next_player_id();
+        let ship_id  = node.spawn_player_ship_at_pub(player, Position::new(0.0, 0.0, 0.0));
+
+        let body_id = dawn_core::CelestialBodyId(1);
+        assert!(
+            node.apply_warp_command(ship_id, WarpTarget::Body(body_id), false),
+            "warp to body should be accepted",
+        );
+        for _ in 0..5_000 {
+            node.tick();
+            if node.warp_phase(ship_id).is_none() { break; }
+        }
+        assert!(node.warp_phase(ship_id).is_none(), "warp should have completed");
+
+        let live_anchor = node.get_ship_anchor(ship_id).expect("ship has an anchor");
+        assert_eq!(live_anchor, dawn_core::AnchorId::from(body_id),
+            "arrival should have rebased onto the body anchor");
+        let live_abs = node.ship_absolute(ship_id).expect("ship exists");
+
+        // Snapshot + restore from the event log (which includes AnchorRebased).
+        let snap = node.take_snapshot();
+        let mut store2 = InMemoryEventStore::new();
+        for rec in node.event_store().all_records() {
+            store2.append(rec.event.clone());
+        }
+        let node2 = SimulationNode::restore_from(
+            store2, &snap, &modules::all_modules(), &ship_types::all_ship_types(),
+        );
+
+        assert_eq!(node2.get_ship_anchor(ship_id), Some(live_anchor),
+            "anchor must survive snapshot + restore");
+        let restored_abs = node2.ship_absolute(ship_id).expect("ship exists after restore");
+        assert_eq!(restored_abs, live_abs,
+            "absolute position must be identical after restore (anchor + offset both restored)");
     }
 }

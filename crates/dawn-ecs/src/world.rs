@@ -1,7 +1,7 @@
 //! `SimWorld` — the single owner of all ECS state within a Sector Node.
 
-use crate::components::{FittingComp, HullComp, IsNpcComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, TransitComp, TransitState, VelocityComp, WeaponComp};
-use dawn_core::{Position, SectorId, ShipId, Velocity};
+use crate::components::{AnchorComp, FittingComp, HullComp, IsNpcComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, TransitComp, TransitState, VelocityComp, WeaponComp};
+use dawn_core::{AnchorId, Position, SectorId, ShipId, Velocity};
 use hecs::Entity;
 
 /// Wraps `hecs::World` with a domain-aware API.
@@ -42,6 +42,9 @@ impl SimWorld {
         self.inner.spawn((
             ShipIdComp(ship_id),
             PositionComp(position),
+            // ADR-0029 step 2: anchor defaults to the Sector origin (AnchorId 0,
+            // the star); the node overrides it per-Sector via set_ship_anchor.
+            AnchorComp(AnchorId(0)),
             VelocityComp(velocity),
             ThrustComp::ZERO,
             stats,
@@ -69,6 +72,21 @@ impl SimWorld {
         if let Ok(mut comp) = self.inner.get::<&mut TransitComp>(entity) {
             comp.0 = state;
         }
+    }
+
+    /// Set the coordinate anchor a Ship's position offset is relative to
+    /// (ADR-0029). Used at spawn/restore (Sector origin anchor) and on warp
+    /// arrival (rebase to the destination body's anchor).
+    pub fn set_ship_anchor(&mut self, entity: Entity, anchor: AnchorId) {
+        if let Ok(mut comp) = self.inner.get::<&mut AnchorComp>(entity) {
+            comp.0 = anchor;
+        }
+    }
+
+    /// The coordinate anchor a Ship's position offset is relative to, or `None`
+    /// if the entity has no `AnchorComp`.
+    pub fn ship_anchor(&self, entity: Entity) -> Option<AnchorId> {
+        self.inner.get::<&AnchorComp>(entity).ok().map(|c| c.0)
     }
 
     /// Override the stats (max_speed, mass, inertia_modifier, etc.) for a specific ship.

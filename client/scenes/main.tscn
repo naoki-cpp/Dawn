@@ -1,8 +1,16 @@
-[gd_scene load_steps=3 format=3 uid="uid://main_scene"]
+[gd_scene load_steps=6 format=3 uid="uid://main_scene"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/connection.gd" id="2_conn"]
 [ext_resource type="Script" path="res://scripts/camera_controller.gd" id="3_cam"]
+[ext_resource type="Script" path="res://scripts/warp_tunnel_effect.gd" id="4_warptunnel"]
+[ext_resource type="Shader" path="res://shaders/warp_tunnel.gdshader" id="5_warpshader"]
+
+[sub_resource type="ShaderMaterial" id="SM_warptunnel"]
+shader = ExtResource("5_warpshader")
+shader_parameter/intensity = 0.0
+shader_parameter/scroll_speed = 6.0
+shader_parameter/tunnel_color = Color(0.55, 0.75, 1.0, 1.0)
 
 [node name="Main" type="Node"]
 script = ExtResource("1_main")
@@ -33,6 +41,17 @@ shadow_enabled = true
 [node name="Bodies" type="Node3D" parent="World"]
 
 [node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="WarpTunnel" type="ColorRect" parent="HUD"]
+material = SubResource("SM_warptunnel")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(1, 1, 1, 1)
+script = ExtResource("4_warptunnel")
 
 [node name="StatsLabel" type="Label" parent="HUD"]
 anchors_preset = 1

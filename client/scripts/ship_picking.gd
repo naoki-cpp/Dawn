@@ -62,22 +62,26 @@ static func pick_ship_at(camera: Camera3D, screen_pos: Vector2, ships: Dictionar
 
 
 ## Returns the gate_id of the Jump Gate (in the current system) whose marker
-## is closest to the click ray, or -1. `to_godot_pos` converts a gate's
-## server-space position into Godot world space (main.gd's
-## _server_to_godot_pos) -- gates are large objects, so the pick radius is
-## wider than for ships.
-static func pick_gate_at(camera: Camera3D, screen_pos: Vector2, gates: Array, to_godot_pos: Callable) -> int:
+## is closest to the click ray, or -1. Picks against the marker's actual
+## rendered `global_position` (ADR-0029: gate markers are clamped to a
+## bounded render distance like body markers, navigation_marker_renderer.gd /
+## main.gd's _update_gate_markers) rather than recomputing the true server
+## position, so a click lands on what's on screen even when a gate is too far
+## to render at its real position. Gates are large objects, so the pick
+## radius is wider than for ships.
+static func pick_gate_at(camera: Camera3D, screen_pos: Vector2, gates_root: Node) -> int:
 	var from: Vector3 = camera.project_ray_origin(screen_pos)
 	var dir : Vector3 = camera.project_ray_normal(screen_pos)
 	var closest_id  : int   = -1
 	var closest_dist: float = 1e9
-	for gate: Variant in gates:
-		var g: Dictionary = gate as Dictionary
-		var p : Vector3 = to_godot_pos.call(g.get("position", Vector3.ZERO) as Vector3) as Vector3
+	for marker: Node in gates_root.get_children():
+		if not marker.has_meta("gate_id"):
+			continue
+		var p : Vector3 = (marker as Node3D).global_position
 		var dt: Vector2 = ray_point_distance(from, dir, p)
 		if dt.x < PICK_RADIUS_GATE and dt.y > 0.0 and dt.x < closest_dist:
 			closest_dist = dt.x
-			closest_id   = g.get("gate_id", -1) as int
+			closest_id   = marker.get_meta("gate_id") as int
 	return closest_id
 
 

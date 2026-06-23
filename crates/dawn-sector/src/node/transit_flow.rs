@@ -121,6 +121,11 @@ impl<S: EventStore> SimulationNode<S> {
             ship_id,
             ship_type_id,
             position: pos,
+            // Cross-sector transit re-places the ship in the destination Sector's
+            // star-origin frame, so it re-anchors on that Sector's origin
+            // (ADR-0029). A transiting ship sits at a sector-edge gate = already
+            // star-anchored.
+            anchor  : dawn_core::AnchorId(0),
             velocity: vel,
             current_shield,
             current_armor,

@@ -180,6 +180,16 @@ tackled 状態の間、Ship は `can_propose_warp()` / `can_propose_jump()` が 
 `TackleApplied` のない `TackleReleased` は発行しない（必ず 1:1 対応）。
 同一ターゲットに複数の tackler がいる場合は tackler ごとにペアを発行する。
 
+### 3.9 座標アンカー（ADR-0029）
+
+| イベント名 | 説明 | 発行者 | ステータス |
+|---|---|---|---|
+| `AnchorRebased` | Ship の座標アンカーが変わった（絶対位置は不変・`(anchor, offset)` 表現のみ更新。例: ワープ到着で恒星アンカー→着弾天体アンカー） | `SimulationNode`（ワープ到着・ADR-0029 step 4） | 🔶 イベント/apply 実装済み・発行は step 4 で配線 |
+
+権威イベント：`anchor` と post-rebase `offset` を保持し、replay が表現を厳密に再現する
+（リベースは速度由来でない不連続なフレーム変更のため、自身のファクトとして記録する。INV-MOVE は
+速度駆動の運動に関する不変条件で、フレームのリベースは絶対位置を保つ）。
+
 ### 3.9 System（将来予約）
 
 | イベント名 | 説明 | ステータス |

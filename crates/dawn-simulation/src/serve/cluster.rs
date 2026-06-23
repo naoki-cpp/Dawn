@@ -91,7 +91,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             }
             let player_id      = nodes[0].next_player_id();
             let ship_id        = nodes[0].spawn_player_ship_at_pub(player_id, PLAYER_SPAWN);
-            let initial_state  = match nodes[0].get_ship_position(ship_id) {
+            let initial_state  = match nodes[0].ship_absolute_pos(ship_id) {
                 Some(pos) => nodes[0].build_initial_state_json_for(pos, AOI_CELL_SIZE),
                 None      => nodes[0].build_initial_state_json(),
             };
@@ -112,7 +112,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
 
         while let Ok(sess) = ready_sess_rx.try_recv() {
             println!("  [Server] {} joined with ship #{}", sess.player_id, sess.ship_id.raw());
-            let seed = nodes[0].get_ship_position(sess.ship_id)
+            let seed = nodes[0].ship_absolute_pos(sess.ship_id)
                 .map(|pos| nodes[0].ships_visible_to(pos, AOI_CELL_SIZE))
                 .unwrap_or_default();
             prev_visible.insert(sess.player_id, seed);
@@ -170,6 +170,11 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             }
         }
 
+        // Drain each sector's warp arrivals (ADR-0029 warp-arrival authority) so
+        // the per-session deliver loop below can snap each owner/observer.
+        let warp_arrivals_by_sector: Vec<Vec<ShipId>> =
+            (0..SECTORS).map(|i| nodes[i].drain_completed_warps()).collect();
+
         let events_by_sector: Vec<Vec<DomainEvent>> = nodes
             .iter()
             .enumerate()
@@ -206,14 +211,14 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         }
 
         let grids: Vec<aoi::CellGrid> = nodes.iter()
-            .map(|n| aoi::CellGrid::build(AOI_CELL_SIZE, n.ship_positions()))
+            .map(|n| aoi::CellGrid::build(AOI_CELL_SIZE, n.ship_absolute_positions()))
             .collect();
         let jumped_ids: std::collections::HashSet<PlayerId> =
             jumped_players.iter().map(|(p, _)| *p).collect();
 
         sessions.retain_mut(|sess| {
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
-            let curr = nodes[sector].get_ship_position(sess.ship_id)
+            let curr = nodes[sector].ship_absolute_pos(sess.ship_id)
                 .map(|pos| grids[sector].neighbors_of(pos))
                 .unwrap_or_default();
 
@@ -223,7 +228,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             }
 
             let prev = prev_visible.entry(sess.player_id).or_default();
-            deliver_aoi_frame(sess, &nodes[sector], curr, prev, &events_by_sector[sector])
+            deliver_aoi_frame(sess, &nodes[sector], curr, prev, &events_by_sector[sector], &warp_arrivals_by_sector[sector])
         });
         prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
 
@@ -233,7 +238,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 if let Some(events) = jump_own_events.get(&player_id) {
                     sess.send_events(events);
                 }
-                let initial_state = nodes[dest].get_ship_position(sess.ship_id)
+                let initial_state = nodes[dest].ship_absolute_pos(sess.ship_id)
                     .map(|pos| nodes[dest].build_initial_state_json_for(pos, AOI_CELL_SIZE))
                     .unwrap_or_else(|| nodes[dest].build_initial_state_json());
                 sess.conn.send_raw(&initial_state);

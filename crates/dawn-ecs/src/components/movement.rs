@@ -1,6 +1,6 @@
 //! Movement-related ECS components.
 
-use dawn_core::{ApproachTarget, Position, Velocity, WarpTarget};
+use dawn_core::{AnchorId, ApproachTarget, Position, Velocity, WarpTarget};
 
 /// Persistent "approach" steering target (semi-automatic piloting, ADR-0015).
 ///
@@ -43,14 +43,35 @@ pub struct WarpComp {
     /// When true and `target` is `Gate`, automatically propose a Jump once warp
     /// completes and the ship arrives within the gate's activation radius.
     pub auto_jump: bool,
-    /// Parametric warp plan (ADR-0022 amendment, 2026-06-21). Warp walks the
-    /// segment from `warp_start` to the arrival point over `warp_total` ticks
-    /// (smoothstep eased), reaching the destination exactly. These are
-    /// meaningful only while `phase == Warping`; the `Aligning` phase leaves
-    /// them at their engage-time defaults (start = ORIGIN, total/elapsed = 0).
-    pub warp_start  : Position,
-    pub warp_total  : u32,
-    pub warp_elapsed: u32,
+    /// Parametric warp plan (ADR-0022 amendment, 2026-06-21; cubic-Hermite
+    /// reshape 2026-06-23, lore pass). Warp walks the segment from
+    /// `warp_start_abs` to `warp_arrival_abs` over `warp_total` ticks,
+    /// reaching the destination exactly. These are meaningful only while
+    /// `phase == Warping`; the `Aligning` phase leaves them at their
+    /// engage-time defaults (start/arrival = zero, total/elapsed = 0).
+    /// Absolute (Sector-frame) f64, not anchor-relative (ADR-0029): the whole
+    /// transit is interpolated in one frame so it does not pick up f32 ulp
+    /// error from the ship's current anchor when the destination sits at
+    /// true-AU distance from it — only the per-tick f32 cast (offset relative
+    /// to the ship's current anchor, written to `PositionComp`) is lossy, and
+    /// that loss does not compound across ticks the way repeated f32 lerp did.
+    pub warp_start_abs  : [f64; 3],
+    pub warp_total      : u32,
+    pub warp_elapsed    : u32,
+    /// Exact arrival point in absolute (Sector-frame) metres, f64 (ADR-0029).
+    /// Set at engage for Body warps from the f64 anchor source so the arrival
+    /// rebase is precise at true-AU distances (the f32 `PositionComp` near a
+    /// 7.5e11 anchor would be ~65 km coarse). `[0,0,0]` for Gate warps (no rebase).
+    pub warp_arrival_abs: [f64; 3],
+    /// Ship's actual velocity at the moment warp engaged (end of `Aligning`,
+    /// 2026-06-23 lore pass). The transit curve is a cubic Hermite spline with
+    /// this as its start tangent and a zero end tangent, so the ship's speed
+    /// is continuous across the Aligning→Warping cut (no snap-to-near-zero
+    /// before ramping to warp speed) while still decelerating smoothly to a
+    /// full stop exactly at `warp_arrival_abs` — "accelerate, enter the
+    /// tunnel, cruise, exit the tunnel, decelerate" reads as one continuous
+    /// motion rather than two different physics models stitched together.
+    pub warp_start_vel  : Velocity,
 }
 
 impl WarpComp {
@@ -74,6 +95,15 @@ pub struct TackledComp {
 
 #[derive(Debug, Clone, Copy)]
 pub struct PositionComp(pub Position);
+
+/// The coordinate anchor a ship's [`PositionComp`] offset is relative to
+/// (ADR-0029). The ship's absolute position is `anchor_abs(f64) + offset`,
+/// where `anchor_abs` comes from the static `AnchorTable`. While all bodies
+/// sit in the star-origin frame and ships anchor on the star (at the origin),
+/// the offset equals the absolute position — so introducing this component is
+/// a semantic no-op until anchors diverge at warp arrival (ADR-0029 §4 step 4).
+#[derive(Debug, Clone, Copy)]
+pub struct AnchorComp(pub AnchorId);
 
 #[derive(Debug, Clone, Copy)]
 pub struct VelocityComp(pub Velocity);

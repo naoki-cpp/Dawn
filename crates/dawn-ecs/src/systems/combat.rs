@@ -20,14 +20,15 @@
 //! - `destroyed` に含まれる ShipId は呼び出し元が ECS から削除すること。
 
 use crate::{
-    components::{HullComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, VelocityComp},
+    components::{AnchorComp, HullComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, VelocityComp},
     SimWorld,
 };
 use dawn_core::{
     events::{DamageTaken, ShipDestroyed, WeaponFired},
-    DomainEvent, Position, ShipId, Tick, Velocity,
+    AnchorId, DomainEvent, Position, ShipId, Tick, Velocity,
 };
 use rand::Rng;
+use std::collections::HashMap;
 
 // Internal snapshot type. `entity` is captured so write-back is O(1) per ship
 // instead of a full-world scan (ADR-0019: server compute stays O(n)).
@@ -35,7 +36,11 @@ struct ShipSnapshot {
     entity         : hecs::Entity,
     ship_id        : ShipId,
     stats          : ShipStatsComp,
-    position       : Position,
+    /// Absolute (Sector-frame) position in metres, kept as f64 so the pairwise
+    /// difference between nearby ships stays precise even when anchors sit at
+    /// true astronomical distances (ADR-0029). Differences are cast to f32 for
+    /// the hit-chance math (the delta is small for ships in weapon range).
+    abs            : [f64; 3],
     velocity       : Velocity,
     current_shield : f32,
     current_armor  : f32,
@@ -52,22 +57,54 @@ pub struct CombatResult {
     pub destroyed : Vec<ShipId>,
 }
 
+/// A ship's absolute position (Sector-frame, metres, f64) = its anchor's
+/// absolute position + its offset (ADR-0029). Falls back to the raw offset if
+/// the anchor is unknown (tests / pre-anchor data).
+fn absolute_position(offset: Position, anchor: AnchorId, anchor_abs: &HashMap<AnchorId, [f64; 3]>) -> [f64; 3] {
+    match anchor_abs.get(&anchor) {
+        Some(a) => [a[0] + offset.x as f64, a[1] + offset.y as f64, a[2] + offset.z as f64],
+        None    => {
+            // ADR-0029 R3: an anchor missing from a *populated* table is a data
+            // bug — at true AU it silently misplaces the ship by the body's
+            // absolute position. Tests pass an empty map on purpose (offset == the
+            // absolute), so only assert when the caller actually provided a table.
+            debug_assert!(
+                anchor_abs.is_empty(),
+                "combat: ship anchored on {anchor:?} absent from a populated anchor table \
+                 — distance fell back to the raw offset (wrong frame at true AU)"
+            );
+            [offset.x as f64, offset.y as f64, offset.z as f64]
+        }
+    }
+}
+
 /// 1 Tick 分の Combat を実行する。
 ///
 /// Lock System の後に呼ぶこと（LockComp が最新状態であること）。
 /// `fire_triggers` は CapacitorSystem から渡される「この Tick に武器サイクルが
 /// 開始した Ship の ID リスト」。リストにある Ship のみ発射する。
-pub fn run(world: &mut SimWorld, tick: Tick, fire_triggers: &[ShipId]) -> CombatResult {
+pub fn run(
+    world        : &mut SimWorld,
+    tick         : Tick,
+    fire_triggers: &[ShipId],
+    anchor_abs   : &HashMap<AnchorId, [f64; 3]>,
+) -> CombatResult {
     // ── 1. 全 Ship をスナップショット ────────────────────────────────────────
+    //
+    // ADR-0029: distance/tracking depend on relative geometry, which is
+    // frame-invariant only if both ships are expressed in the same frame. Once
+    // ships can anchor on different bodies, resolve each ship's ABSOLUTE position
+    // (anchor_abs + offset) so pairwise differences are correct. At compressed
+    // scale the absolute fits in f32; true-AU will refine this to an f64 delta.
 
     let mut ships: Vec<ShipSnapshot> = world
-        .query::<(&ShipIdComp, &ShipStatsComp, &PositionComp, &VelocityComp, &HullComp, &LockComp)>()
+        .query::<(&ShipIdComp, &ShipStatsComp, &PositionComp, &VelocityComp, &HullComp, &LockComp, &AnchorComp)>()
         .iter()
-        .map(|(entity, (id, stats, pos, vel, hull, lock))| ShipSnapshot {
+        .map(|(entity, (id, stats, pos, vel, hull, lock, anchor))| ShipSnapshot {
             entity,
             ship_id        : id.0,
             stats          : *stats,
-            position       : pos.0,
+            abs            : absolute_position(pos.0, anchor.0, anchor_abs),
             velocity       : vel.0,
             current_shield : hull.current_shield,
             current_armor  : hull.current_armor,
@@ -193,9 +230,11 @@ pub fn run(world: &mut SimWorld, tick: Tick, fire_triggers: &[ShipId]) -> Combat
 /// - opt = weapon optimal range
 /// - falloff = weapon falloff range (hit chance halves at opt+falloff)
 fn calc_hit_chance(attacker: &ShipSnapshot, target: &ShipSnapshot) -> f32 {
-    let dx = target.position.x - attacker.position.x;
-    let dy = target.position.y - attacker.position.y;
-    let dz = target.position.z - attacker.position.z;
+    // Compute the separation in f64 (absolutes may be astronomically large) then
+    // cast the small in-range delta to f32 for the tracking/range math.
+    let dx = (target.abs[0] - attacker.abs[0]) as f32;
+    let dy = (target.abs[1] - attacker.abs[1]) as f32;
+    let dz = (target.abs[2] - attacker.abs[2]) as f32;
     let dist = (dx * dx + dy * dy + dz * dz).sqrt();
 
     // Avoid division by zero when ships overlap
@@ -286,7 +325,7 @@ mod tests {
     fn weapon_fires_when_target_is_locked_and_in_fire_triggers() {
         let mut world = setup_with_lock(25.0);
         let triggers = [ship_id(1)];
-        let result = run(&mut world, Tick(1), &triggers);
+        let result = run(&mut world, Tick(1), &triggers, &HashMap::new());
         let fired = result.events.iter().filter(|e| matches!(e, DomainEvent::WeaponFired(_))).count();
         assert_eq!(fired, 1);
     }
@@ -299,7 +338,7 @@ mod tests {
         world.set_ship_stats(ea, armed_stats(25.0));
         // LockComp starts empty.
         let triggers = [ship_id(1)];
-        let result = run(&mut world, Tick(1), &triggers);
+        let result = run(&mut world, Tick(1), &triggers, &HashMap::new());
         assert!(result.events.is_empty(), "no fire without lock");
     }
 
@@ -307,7 +346,7 @@ mod tests {
     fn ship_destroyed_when_hp_reaches_zero() {
         let mut world = setup_with_lock(99999.0);
         let triggers = [ship_id(1)];
-        let result = run(&mut world, Tick(1), &triggers);
+        let result = run(&mut world, Tick(1), &triggers, &HashMap::new());
         let destroyed = result.events.iter().filter(|e| matches!(e, DomainEvent::ShipDestroyed(_))).count();
         assert_eq!(destroyed, 1);
         assert_eq!(result.destroyed.len(), 1);
@@ -317,7 +356,7 @@ mod tests {
     fn weapon_does_not_fire_when_not_in_fire_triggers() {
         let mut world = setup_with_lock(1.0);
         // ship_id(1) is NOT in fire_triggers this tick
-        let result = run(&mut world, Tick(1), &[]);
+        let result = run(&mut world, Tick(1), &[], &HashMap::new());
         let fired = result.events.iter().filter(|e| matches!(e, DomainEvent::WeaponFired(_))).count();
         assert_eq!(fired, 0, "no fire when ship is absent from fire_triggers");
     }
@@ -326,10 +365,10 @@ mod tests {
     fn weapon_fires_only_when_in_fire_triggers() {
         let mut world = setup_with_lock(1.0);
         // Tick 1: not triggered
-        let r1 = run(&mut world, Tick(1), &[]);
+        let r1 = run(&mut world, Tick(1), &[], &HashMap::new());
         assert_eq!(r1.events.iter().filter(|e| matches!(e, DomainEvent::WeaponFired(_))).count(), 0);
         // Tick 2: triggered (stationary target within optimal → hit_chance = 1.0)
-        let r2 = run(&mut world, Tick(2), &[ship_id(1)]);
+        let r2 = run(&mut world, Tick(2), &[ship_id(1)], &HashMap::new());
         assert_eq!(r2.events.iter().filter(|e| matches!(e, DomainEvent::WeaponFired(_))).count(), 1, "fire_triggersにあれば発射");
     }
 
@@ -345,7 +384,7 @@ mod tests {
             entity         : hecs::Entity::DANGLING,
             ship_id        : id,
             stats,
-            position       : pos,
+            abs            : [pos.x as f64, pos.y as f64, pos.z as f64],
             velocity       : vel,
             current_shield : 100.0,
             current_armor  : 100.0,
