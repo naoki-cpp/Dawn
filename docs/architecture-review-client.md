@@ -99,21 +99,10 @@ world_space_test.gd 71、合計 814行）は別カウント。§「テストカ�
 | C-1 | `main.gd` god object（13以上の異種責務） | 4クラスに分割抽出（下表）。main.gd 1661→1084行（-35%）。挙動変更なし |
 | C-2 | マーカー生成/ピッキング/ワープ着地点計算の同型ロジック2重実装 | 各組の「文字通り同一」な部分のみ named helper に抽出（後にC-1で各クラスへ移動）。挙動変更なし |
 
-C-1 の抽出先（実施順）:
-
-| 抽出先 | 内容 | 規模 |
-|---|---|---|
-| `ship_picking.gd`（`ShipPicking`） | 船/ゲート/天体ピッキング3関数（天体は画面空間ピッキング） | 100行 |
-| `navigation_marker_renderer.gd`（`NavigationMarkerRenderer`） | ゲート/惑星マーカー生成 + `spectral_color` + 惑星の固定画面サイズ選択リング | 192行 |
-| `input_decoder.gd`（`InputDecoder`） | キー入力→アクション決定（F1–F8/S/J/A/W/Tab のみ。マウス処理は意図的に除外※） | 85行 |
-| `hud_manager.gd`（`HudManager`） | HUD全パネル（status/ship status/target/module bar/duel overlay）の構築・更新 | 474行 |
-
-いずれも stateless static class（GdUnit4テスト付き）。`HudManager` のみ build_* が
-Control サブツリーを構築して参照 Dictionary を返すビルダー形式（main.gd がノード
-所有権を持ち続ける）で、他3クラスは「呼び出し側がデータを渡し、計算/構築だけする」形。
-
-※ マウス入力（ダブルクリック判定・HUD連動・ピッキング選択）は状態・依存が絡み
-「入力→決定」の純粋形に切り出せないため main.gd に残置。詳細は採らない方針を参照。
+C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` / `HudManager`、
+いずれも GdUnit4 テスト付きの stateless static class）と各規模は「ファイルサイズ一覧」を参照。
+マウス入力（ダブルクリック判定・HUD連動・ピッキング選択）は状態依存のため意図的に
+main.gd 残置（理由は「採らない方針」）。
 
 **運用上の注意**: `class_name` を新規追加した直後は Godot がプロジェクトを
 スキャンするまでグローバル識別子として認識されない（CLI テストが

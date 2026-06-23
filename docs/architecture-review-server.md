@@ -133,39 +133,8 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 `dawn-sector-node` の main ループの重複（両者とも tick + Raft + replication を駆動）が
 保守上の実害になったとき、または in-process クラスタを本番に近づける必要が出たとき。
 
-#### M-4（一部解消）: クライアント配線層が `dawn-simulation` と `dawn-sector-node` で重複
-
-以前は `dawn-sector-node` の WS/プロトコル/データロード層が `dawn-simulation` の手動コピーで、
-3ファイルすべてが「Adapted from …」「kept in sync manually」と保守負債を明記していた。
-
-解消（2026-06-20）: **`ws_server` と `protocol` を `dawn-actor` へ集約**した。
-`dawn-actor/src/client_connection.rs` のドキュメントが既に `WsClientConnection (ws_server.rs)`
-を「本番 WebSocket transport」と記述しており、移動は設計意図の実現（charter 変更ではない）。
-
-- `WsServer` / `WsClientConnection` / `PlayerSession` → `dawn-actor::ws_server`
-  （`bind` を `ToSocketAddrs + Display` でジェネリック化し両呼び出し元に対応）
-- `parse_client_command` / `domain_event_to_json` / JSON DTO / `redirect_json` → `dawn-actor::protocol`
-- 両バイナリは重複ファイルを削除し `use dawn_actor::{protocol, ws_server}` に切替
-- 不要になった依存（`tokio-tungstenite` / `futures-util` ほか）を両 Cargo.toml から除去
-
-残課題は M-6 に集約（`data_loader` 以外にも `deliver_aoi_frame` / `spawn_npcs` が重複）。
-
-#### ~~M-5~~（機能ギャップ）: 受信 replication batch が消費されていない（解消済み）
-
-以前は `dawn-sector-node` の tick ループが受信 `LogBatch` をログ出力するだけで破棄しており、
-ゴシップが「送るだけ」で複製の消費側が未実装だった。
-
-解消（2026-06-20）: `dawn-replication` に **`ReplicaSet`** を新設し、受信ループに配線した。
-既存の `AntiEntropy::plan_batch` を使い、peer セクターごとに **gap 検出・冪等・順序保持**で
-追記ログの複製を保持する（ADR-0021 のログシッピング消費側）。
-
-意図的に範囲外とした2点（別機能・別設計が必要）:
-- 複製イベントをライブ `SimulationNode` world へ適用すること
-  （別セクター座標の艦が自セクターの AoI/衝突を壊すため）
-- failover takeover（複製を所有へ昇格）
-
-`ReplicaSet` は順序付き追記ログを保持するところまでで、これは将来の read / failover 経路が
-消費する前提データである。誤解を招く「8D-2d scope」コメントも除去した。
+> M-4（WS 境界の `dawn-actor` 集約・2026-06-20）と M-5（replication 消費側 `ReplicaSet`・
+> 2026-06-20）は解消済み。詳細は「改善ロードマップ > 完了済み」を参照。M-4 の残課題は M-6 に集約。
 
 #### M-6（許容）: `dawn-sector-node` が `dawn-simulation` の serve 層をフォークしている
 
