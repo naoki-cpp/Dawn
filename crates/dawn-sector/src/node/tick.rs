@@ -20,6 +20,12 @@ impl<S: EventStore> SimulationNode<S> {
         // 2.5 Approach System — re-aim thrust at approach targets (ADR-0015)
         self.process_approach();
 
+        // 2.55 Orbit System — sweep around the target at a chosen radius (ADR-0031)
+        self.process_orbit();
+
+        // 2.56 Keep at Range System — hold at least a chosen range from the target (ADR-0031)
+        self.process_keep_at_range();
+
         // 2.6 Warp System — advance intra-Sector warps (short-range Fold, ADR-0022)
         let warp_events = self.process_warp(tick);
 

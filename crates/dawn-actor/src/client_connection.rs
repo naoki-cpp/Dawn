@@ -30,7 +30,8 @@
 
 use dawn_core::{
     ActivateModuleCommand, ApproachCommand, AttackCommand, DeactivateModuleCommand, DomainEvent,
-    JumpCommand, LockOnCommand, MoveCommand, StopCommand, WarpCommand,
+    JumpCommand, KeepAtRangeCommand, LockOnCommand, MoveCommand, OrbitCommand, StopCommand,
+    WarpCommand,
 };
 use tokio::sync::mpsc;
 
@@ -72,6 +73,10 @@ pub enum ClientCommand {
     Approach(ApproachCommand),
     /// Intra-Sector warp toward a Jump Gate (short-range Fold, ADR-0022).
     Warp(WarpCommand),
+    /// Sweep around a selected ship/gate at a chosen radius (ADR-0031).
+    Orbit(OrbitCommand),
+    /// Hold at least a chosen range from a selected ship/gate (ADR-0031).
+    KeepAtRange(KeepAtRangeCommand),
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────────

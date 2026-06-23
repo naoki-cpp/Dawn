@@ -21,9 +21,7 @@ use dawn_core::{
     SlotKind, Velocity,
 };
 use dawn_ecs::{
-    components::{
-        ApproachComp, FittedSlot, FittingComp, PositionComp, ShipStatsComp, ThrustComp, WarpComp,
-    },
+    components::{FittedSlot, FittingComp, PositionComp, ShipStatsComp, ThrustComp, WarpComp},
     systems::apply_fitting,
     Entity,
 };
@@ -50,8 +48,9 @@ impl<S: EventStore> SimulationNode<S> {
             return;
         }
         let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
-        // Manual thrust overrides any active approach (ADR-0015 §4).
-        let _ = self.world.inner_mut().remove_one::<ApproachComp>(entity);
+        // Manual thrust overrides any active steering mode (Approach ADR-0015
+        // §4, Orbit / Keep at Range ADR-0031).
+        self.clear_steering_modes(entity);
         let pos = match self.world.inner().get::<&PositionComp>(entity).ok() {
             Some(c) => c.0,
             None => return,
@@ -91,8 +90,9 @@ impl<S: EventStore> SimulationNode<S> {
             return;
         }
         let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
-        // Stopping cancels any active approach (ADR-0015 §4).
-        let _ = self.world.inner_mut().remove_one::<ApproachComp>(entity);
+        // Stopping cancels any active steering mode (Approach ADR-0015 §4,
+        // Orbit / Keep at Range ADR-0031).
+        self.clear_steering_modes(entity);
         self.brake_thrust(entity);
     }
 

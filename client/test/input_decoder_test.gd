@@ -94,6 +94,63 @@ func test_w_key_warps_to_the_selected_body_when_no_gate_is_selected() -> void:
 	assert_int(action.body_id as int).is_equal(3)
 
 
+# -- O key -> orbit -----------------------------------------------------------------------
+
+func test_o_key_orbits_the_selected_gate_over_a_selected_ship() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_O, 1, 5, 7, -1, -1)
+	assert_str(action.kind as String).is_equal("orbit_gate")
+	assert_int(action.gate_id as int).is_equal(5)
+
+
+func test_o_key_orbits_the_selected_ship_when_no_gate_is_selected() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_O, 1, NO_SELECTION, 7, -1, -1)
+	assert_str(action.kind as String).is_equal("orbit_ship")
+	assert_int(action.ship_id as int).is_equal(7)
+
+
+func test_o_key_does_nothing_without_a_selection() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_O, 1, NO_SELECTION, NO_SELECTION, -1, -1)
+	assert_str(action.kind as String).is_equal("none")
+
+
+# -- K key -> keep at range -----------------------------------------------------------------
+
+func test_k_key_keeps_range_from_the_selected_gate_over_a_selected_ship() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_K, 1, 5, 7, -1, -1)
+	assert_str(action.kind as String).is_equal("keep_at_range_gate")
+	assert_int(action.gate_id as int).is_equal(5)
+
+
+func test_k_key_keeps_range_from_the_selected_ship_when_no_gate_is_selected() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_K, 1, NO_SELECTION, 7, -1, -1)
+	assert_str(action.kind as String).is_equal("keep_at_range_ship")
+	assert_int(action.ship_id as int).is_equal(7)
+
+
+func test_k_key_does_nothing_without_a_selection() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_K, 1, NO_SELECTION, NO_SELECTION, -1, -1)
+	assert_str(action.kind as String).is_equal("none")
+
+
+# -- [ / ] keys -> adjust keep-at-range distance ----------------------------------------
+
+func test_bracket_left_decreases_keep_at_range_distance() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_BRACKETLEFT, 1, -1, -1, -1, -1)
+	assert_str(action.kind as String).is_equal("adjust_keep_at_range")
+	assert_float(action.delta_km as float).is_equal(-1.0)
+
+
+func test_bracket_right_increases_keep_at_range_distance() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_BRACKETRIGHT, 1, -1, -1, -1, -1)
+	assert_str(action.kind as String).is_equal("adjust_keep_at_range")
+	assert_float(action.delta_km as float).is_equal(1.0)
+
+
+func test_bracket_keys_do_nothing_without_a_player_ship() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_BRACKETLEFT, NO_SELECTION, -1, -1, -1, -1)
+	assert_str(action.kind as String).is_equal("none")
+
+
 # -- Tab key -> tactical overlay ---------------------------------------------------------
 
 func test_tab_key_toggles_the_tactical_overlay_even_without_a_player_ship() -> void:

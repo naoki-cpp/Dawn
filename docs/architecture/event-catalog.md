@@ -230,6 +230,8 @@ Replay には影響せず、`InitialState` + `DomainEvent` フィルタリング
 | `TransitCommand` | Sector Transit を要求する（Raft 経由・ADR-0014） | `SectorTransitRequested` / `Completed` | ✅ 実装済み |
 | `JumpCommand` | ジャンプゲート経由で別 Sector に移動する（Raft 経由・ADR-0009）。射程外の場合は自動ワープ後にジャンプ（auto-warp-then-jump / ADR-0023） | `JumpGateUsed`（+ 別星系なら `StarSystemChanged`） | ✅ 実装済み |
 | `WarpCommand` | 同一セクター内の Jump Gate または天体（恒星・惑星）へワープする（`WarpTarget::Gate` / `Body`・align → warping 2 フェーズ / ADR-0022 / ADR-0025） | —（新イベントなし。移動は `VelocityChanged` で記録） | ✅ 実装済み |
+| `OrbitCommand` | 対象（Ship / Jump Gate）の周りを指定半径で周回する（省略時は武器射程・Move / Stop / 他の操船モードで解除・ADR-0031） | —（新イベントなし。移動は `VelocityChanged` で記録） | ✅ 実装済み |
+| `KeepAtRangeCommand` | 対象（Ship / Jump Gate）から最低指定距離を保つ（省略時は武器射程・Move / Stop / 他の操船モードで解除・ADR-0031） | —（新イベントなし。移動は `VelocityChanged` で記録） | ✅ 実装済み |
 
 ---
 

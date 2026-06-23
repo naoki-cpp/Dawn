@@ -18,6 +18,7 @@ mod apply_event;
 mod approach;
 mod commands;
 mod navigation;
+mod orbit;
 mod sector_map;
 mod serialization;
 mod ship_registry;
@@ -85,6 +86,25 @@ const WARP_ARRIVAL_FACTOR: f32 = 0.8;
 /// Warp to a celestial body: arrive at this multiple of the body's radius from
 /// its centre (ADR-0025). 1.5 = orbit insertion outside the body surface.
 const BODY_WARP_ARRIVAL_FACTOR: f32 = 1.5;
+
+// -- Orbit / Keep at Range tuning (ADR-0031) --------------------------------
+
+/// Fallback orbit radius / keep-at-range distance (units) used when the ship
+/// has no fitted weapon (`ShipStatsComp.weapon_range == 0.0`) and the command
+/// did not specify one explicitly. Otherwise the default is the ship's own
+/// weapon range, so the default distance is already a useful one to fight at.
+const DEFAULT_MANEUVER_RADIUS: f32 = 5000.0;
+/// Tangential lead distance for orbit steering, as a fraction of the orbit
+/// radius (ADR-0031): the steering target is offset along the tangent by
+/// `radius * ORBIT_LEAD_FACTOR` so the ship sweeps around the target instead
+/// of just closing the radial gap. Larger = wider sweep, slower radius
+/// convergence; smaller = tighter radial correction, less visible orbiting.
+const ORBIT_LEAD_FACTOR: f32 = 0.5;
+/// Keep at Range deadband, as a fraction of the chosen `range` (ADR-0031):
+/// thrust briefly toggling between "too close" and "too far" every tick once
+/// the ship settles near `range` would look like jitter, so brake instead
+/// while within this band of the target distance.
+const KEEP_AT_RANGE_DEADBAND_FRACTION: f32 = 0.05;
 
 // -- TickResult --------------------------------------------------------------
 

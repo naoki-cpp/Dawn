@@ -326,6 +326,36 @@ pub fn parse_client_command(line: &str) -> Option<ClientCommand> {
                 target,
             }))
         }
+        "OrbitCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            let target = if let Some(gate) = v.get("gate_id").and_then(|g| g.as_u64()) {
+                ApproachTarget::Gate(dawn_core::JumpGateId(gate as u32))
+            } else {
+                let target_id_raw = v.get("target_id")?.as_u64()?;
+                ApproachTarget::Ship(ShipId(EntityId::from_raw(target_id_raw)))
+            };
+            let radius = v.get("radius").and_then(|r| r.as_f64()).map(|r| r as f32);
+            Some(ClientCommand::Orbit(dawn_core::OrbitCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                target,
+                radius,
+            }))
+        }
+        "KeepAtRangeCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            let target = if let Some(gate) = v.get("gate_id").and_then(|g| g.as_u64()) {
+                ApproachTarget::Gate(dawn_core::JumpGateId(gate as u32))
+            } else {
+                let target_id_raw = v.get("target_id")?.as_u64()?;
+                ApproachTarget::Ship(ShipId(EntityId::from_raw(target_id_raw)))
+            };
+            let range = v.get("range").and_then(|r| r.as_f64()).map(|r| r as f32);
+            Some(ClientCommand::KeepAtRange(dawn_core::KeepAtRangeCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                target,
+                range,
+            }))
+        }
         _ => None,
     }
 }
@@ -396,6 +426,47 @@ mod tests {
                 );
             }
             other => panic!("expected Warp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn orbit_command_json_with_target_id_is_parsed_into_client_command_orbit() {
+        let line = r#"{"type":"OrbitCommand","ship_id":1,"target_id":2,"radius":3000.0}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::Orbit(c) => {
+                assert_eq!(c.ship_id, ship_id(1));
+                assert_eq!(c.target, ApproachTarget::Ship(ship_id(2)));
+                assert_eq!(c.radius, Some(3000.0));
+            }
+            other => panic!("expected Orbit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn orbit_command_json_with_gate_id_and_no_radius_is_parsed() {
+        let line = r#"{"type":"OrbitCommand","ship_id":1,"gate_id":4}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::Orbit(c) => {
+                assert_eq!(c.target, ApproachTarget::Gate(JumpGateId(4)));
+                assert_eq!(c.radius, None);
+            }
+            other => panic!("expected Orbit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn keep_at_range_command_json_is_parsed_into_client_command_keep_at_range() {
+        let line = r#"{"type":"KeepAtRangeCommand","ship_id":1,"target_id":2,"range":5000.0}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::KeepAtRange(c) => {
+                assert_eq!(c.ship_id, ship_id(1));
+                assert_eq!(c.target, ApproachTarget::Ship(ship_id(2)));
+                assert_eq!(c.range, Some(5000.0));
+            }
+            other => panic!("expected KeepAtRange, got {other:?}"),
         }
     }
 

@@ -67,6 +67,10 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 - ✅ Phase 7.5 — 星系間ナビゲーション（ADR-0009 / Jump Gate Raft パイプライン + Godot クライアント配線 / 241テスト全パス）
 - ✅ 戦闘の深み — Warp（ADR-0022）/ Propulsion Physics（ADR-0023）/ Tackle（ADR-0024）実装済み（316テスト全パス）
 - ✅ 天体（ADR-0025）— 恒星・惑星を静的天体として追加。WarpTarget::Body 対応、sun_direction シェーダー、Godot クライアント配線（W キー / クリック選択）まで完了。（316テスト全パス）
+- ✅ Orbit / Keep at Range（ADR-0031・2026-06-23）— OrbitComp/KeepAtRangeComp + process_orbit
+  /process_keep_at_range（Step 2.55/2.56）。Approach/Orbit/KeepAtRange 相互排他、Warp 中は拒否。
+  O/K キー配線済み。これで戦闘の深み（Tackle → Signature → Orbit/Keep at Range）が完了し、
+  残るは Logistics のみ
 - ✅ Godot クライアント構造リファクタ + テスト基盤（2026-06-21）— `main.gd` の god object を
   `HudManager`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder` の4クラスへ分割
   （1661→1094行）。`scripts/setup-godot.*` で pin 済み Godot CLI を取得し GdUnit4 を導入、
@@ -109,8 +113,9 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 - **8D 分散インフラ（物理ノード分散）** — dawn-replication / ネットワーク RaftTransport / dawn-sector-node
   （ワイヤ = postcard 再利用、`dawn-proto`/protobuf は不採用）。第1次は静的 3 ノード + LAN 平文の最小スライス（§10 の 8D 表参照）。
   8B-2（Fission）はこれと本質的に対なので、8D 着手時にまとめて設計するのが自然。
-- **戦闘の深み（ADR-0016 §5）** — Warp（✅ ADR-0022 実装済み）→ Tackle → Signature Resolution →
-  Orbit/Keep at Range → Logistics。柱②④（グラインドゼロの深い戦闘 / 実損ある危険な宇宙）を厚くする方向。
+- **戦闘の深み（ADR-0016 §5）** — Warp（✅）→ Tackle（✅）→ Signature Resolution（✅ ADR-0012 の
+  命中率式で実質完了）→ Orbit/Keep at Range（✅ ADR-0031）→ **Logistics（次）**。
+  柱②④（グラインドゼロの深い戦闘 / 実損ある危険な宇宙）を厚くする方向。
   - ✅ **Warp（intra-Sector 短距離 Fold = ワープ・ADR-0022）** — 「逃がさない」の前提となる高速離脱。
     align/warping 2 フェーズ・Tick Step 2.6・W キー配線済み。これで Tackle（次）が意味を持つ。
   - ✅ **Propulsion Physics — 慣性モデル（ADR-0023）** — EVE 式指数接近による align time・
@@ -121,8 +126,13 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
   - ✅ **Tackle（Fold Disruptor・ADR-0024 実装済み）** — TackledComp / process_tackle（Step 4.5）/
     TackleApplied・TackleReleased イベント / can_propose_warp・can_propose_jump 拒否 /
     スナップショット永続化 / data/modules.toml Fold Disruptor I（id=12）配線済み。
+  - ✅ **Orbit / Keep at Range（ADR-0031 実装済み・2026-06-23）** — OrbitComp/KeepAtRangeComp・
+    process_orbit（Step 2.55）/ process_keep_at_range（Step 2.56）。Orbit は固定 UP 軸の
+    接線リードでターゲット円周を周回（ADR-0012 のトランスバーサル速度ペナルティが回避手段に
+    なる）。Keep at Range は純粋な離脱（周回なし）。半径/距離省略時は武器射程をデフォルトに
+    採用。Approach/Orbit/KeepAtRange は相互排他、Warp 中は拒否。O/K キー配線済み。
 
-Phase 8 全体のタスク内訳は §10 を参照。
+Phase 8 全体のタスク内訳は §10 を参照。残る戦闘の深みは **Logistics（遠隔修理）** が次。
 
 #### Phase 6 完了タスク一覧
 

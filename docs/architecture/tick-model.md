@@ -82,12 +82,20 @@ Step 2: コマンドキューを処理する
          JumpCommand              → can_propose_jump() 検証後、TransitOp::Request
                                     （gate_id 付き）を Raft に提案（ADR-0009）
          ApproachCommand          → ApproachComp を付与（対象 Ship / Jump Gate へ
-                                    半自動接近・Move / Stop で解除・ADR-0015）
+                                    半自動接近・Move / Stop / 他の操船モードで解除・ADR-0015）
+         OrbitCommand             → OrbitComp を付与（対象の周りを指定半径で周回・
+                                    省略時は武器射程・Move / Stop / 他の操船モードで解除・
+                                    Warp 中は拒否・ADR-0031）
+         KeepAtRangeCommand       → KeepAtRangeComp を付与（対象から最低指定距離を保つ・
+                                    省略時は武器射程・Move / Stop / 他の操船モードで解除・
+                                    Warp 中は拒否・ADR-0031）
          WarpCommand              → can_propose_warp() 検証後 WarpComp を付与
                                     （intra-Sector 短距離 Fold = ワープ・ADR-0022。
                                     Move / Stop は align 中のみ解除・warping は無視）
          ※ Transit 中（TransitState::InTransit）の Ship への Move / Stop /
-           二重 Transit / Jump / Approach / Warp は拒否する（ADR-0014 / CLAUDE.md §5）
+           二重 Transit / Jump / Approach / Orbit / KeepAtRange / Warp は拒否する
+           （ADR-0014 / AI_DEVELOPMENT_GUIDE.md §5）。Approach / Orbit / KeepAtRange は
+           互いに排他（後発のコマンドが前の操船モードを解除する・ADR-0031）。
 
 Step 2.5: Approach System を実行する（Movement の前・ADR-0015）
          SimulationNode::process_approach()
@@ -96,7 +104,21 @@ Step 2.5: Approach System を実行する（Movement の前・ADR-0015）
            Ship 対象が消失したら ApproachComp を除去して is_braking = true。
          → 生成イベントなし（次 Tick 以降の Movement が VelocityChanged を出す）
 
-Step 2.6: Warp System を実行する（Approach の後・Movement の前・ADR-0022 / ADR-0025）
+Step 2.55: Orbit System を実行する（Approach の後・Movement の前・ADR-0031）
+         SimulationNode::process_orbit()
+         → OrbitComp を持つ Ship のみ対象。対象から radius だけ離れた円周上、
+           接線方向にやや先回りした点へ thrust を向け直す（固定 UP 軸で周回方向を一定化）。
+           対象が消失したら OrbitComp を除去して is_braking = true。
+         → 生成イベントなし
+
+Step 2.56: Keep at Range System を実行する（Orbit の後・Movement の前・ADR-0031）
+         SimulationNode::process_keep_at_range()
+         → KeepAtRangeComp を持つ Ship のみ対象。距離 < range なら対象から真っ直ぐ
+           離れる方向へ thrust、距離 >= range なら is_braking = true で停止保持。
+           対象が消失したら KeepAtRangeComp を除去して is_braking = true。
+         → 生成イベントなし
+
+Step 2.6: Warp System を実行する（Keep at Range の後・Movement の前・ADR-0022 / ADR-0025）
          SimulationNode::process_warp(tick)
          → WarpComp を持つ Ship のみ対象。Aligning はターゲット方向へ加速し、ターゲット方向の速度が
            max_speed × 75% に達したら Warping へ遷移（EVE 準拠・整列時間は機動性次第・中断可・Tackle 窓）。
