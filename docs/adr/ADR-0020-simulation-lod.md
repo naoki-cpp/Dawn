@@ -4,7 +4,7 @@ title   : Simulation LoD — 非交戦エンティティの休眠化（近似ゼ
 status  : deferred
 date    : 2026-06-15
 deciders: [human, ai-agent]
-related : ADR-0018（負荷ヒエラルキー / 局所 TiDi）, ADR-0019（AoI 静的セルグリッド）, ADR-0008（VelocityChanged / 派生状態）, ADR-0016（柱① 大規模リアルタイム戦闘）, CLAUDE.md §2 INV-002 / INV-MOVE / INV-005 / §6 Tick Model, docs/game-design.md §8 層1, docs/tick-model.md §8
+related : ADR-0018（負荷ヒエラルキー / 局所 TiDi）, ADR-0019（AoI 静的セルグリッド）, ADR-0008（VelocityChanged / 派生状態）, ADR-0016（柱① 大規模リアルタイム戦闘）, CLAUDE.md §2 INV-002 / INV-MOVE / INV-005 / §6 Tick Model, docs/design/game-design.md §8 層1, docs/architecture/tick-model.md §8
 ---
 
 # ADR-0020 — Simulation LoD（非交戦エンティティの休眠化）

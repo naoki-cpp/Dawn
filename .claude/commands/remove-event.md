@@ -38,8 +38,8 @@
 - `crates/dawn-actor/src/replication_bus.rs` — テストヘルパー
 - `crates/dawn-event-store/src/file.rs` — テストヘルパー
 - `crates/dawn-event-store/src/memory.rs` — テストヘルパー
-- `docs/event-catalog.md` — イベント一覧・詳細セクション
-- `docs/tick-model.md` — ステップ説明・例示コード
+- `docs/architecture/event-catalog.md` — イベント一覧・詳細セクション
+- `docs/architecture/tick-model.md` — ステップ説明・例示コード
 - `docs/adr/` — 廃止手順の記述
 - `CLAUDE.md` — 例示コード・注記
 
@@ -92,16 +92,16 @@ DomainEvent::VelocityChanged(VelocityChanged {
 
 ### Step 6: ドキュメントの更新
 
-`docs/event-catalog.md`:
+`docs/architecture/event-catalog.md`:
 - イベント一覧テーブルから `<EventName>` の行を削除
 - `@deprecated` 注記ブロックを削除
 - `### <EventName>` 詳細セクションを削除（存在する場合）
 
-`docs/tick-model.md`:
+`docs/architecture/tick-model.md`:
 - `@deprecated` 注記・例示コードを削除または修正
 - §4「tick フィールドの必須化」の例示コードが削除したイベントを使っていれば修正
 
-`docs/entity-model.md`:
+`docs/architecture/entity-model.md`:
 - 削除したイベント名を参照している箇所を修正
 
 対応 ADR（`docs/adr/ADR-XXXX-*.md`）:

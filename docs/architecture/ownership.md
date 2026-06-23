@@ -190,7 +190,7 @@ CLAUDE.md の INV と重複する場合はリンクのみ記載。
 | 条件 | 内容 | 参照 |
 |---|---|---|
 | Ship は常に 1 Sector に帰属 | 複数 Sector による同時所有禁止 | §2 |
-| EntityId は再利用しない | Despawn 後も同 ID を割り当てない | [CLAUDE.md INV-004](../CLAUDE.md) |
+| EntityId は再利用しない | Despawn 後も同 ID を割り当てない | [CLAUDE.md INV-004](../../CLAUDE.md) |
 | Transit 中の Ship への操作制限 | MoveCommand 等を拒否する | §2 |
 | Sector は 1 Node が管理 | 複数 Node による同時管理禁止 | §3 |
-| Actor はデータを直接共有しない | Mailbox 経由のみ | [CLAUDE.md INV-005](../CLAUDE.md) |
+| Actor はデータを直接共有しない | Mailbox 経由のみ | [CLAUDE.md INV-005](../../CLAUDE.md) |

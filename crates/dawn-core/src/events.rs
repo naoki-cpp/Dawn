@@ -11,7 +11,7 @@
 //! # Adding a new event
 //!
 //! 1. Add the variant here.
-//! 2. Update `docs/event-catalog.md`.
+//! 2. Update `docs/architecture/event-catalog.md`.
 //! 3. Add a corresponding `Command` in `commands.rs` if applicable.
 //! 4. Write a unit test in this module.
 

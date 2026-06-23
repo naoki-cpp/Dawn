@@ -211,10 +211,10 @@ playtest-guide.md §2「プレイテスト前の前提条件」に反する。
 
 ### docs
 
-- [ ] `docs/event-catalog.md` に `EscapePodEjected` / `ShipDispatched` を追記
-- [ ] `docs/game-design.md` §4「リスポーン」を「船の喪失と再出撃」に改訂
-- [ ] `docs/playtest-guide.md` の「前提条件」を本 ADR を参照するよう更新
-- [ ] `docs/roadmap.md` に Phase 6 Cycle 5 として記録
+- [ ] `docs/architecture/event-catalog.md` に `EscapePodEjected` / `ShipDispatched` を追記
+- [ ] `docs/design/game-design.md` §4「リスポーン」を「船の喪失と再出撃」に改訂
+- [ ] `docs/process/playtest-guide.md` の「前提条件」を本 ADR を参照するよう更新
+- [ ] `docs/process/roadmap.md` に Phase 6 Cycle 5 として記録
 
 ---
 

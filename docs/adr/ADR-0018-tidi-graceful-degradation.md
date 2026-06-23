@@ -4,7 +4,7 @@ title   : Time Dilation を境界つき局所的最終手段として採用す�
 status  : accepted
 date    : 2026-06-14
 deciders: [human, ai-agent]
-related : ADR-0016（柱① TiDi-free 大規模戦闘）, CLAUDE.md §1 原則6 / §2 INV-TiDi, docs/tick-model.md §8, docs/reference/eve-reference.md §11.1, ADR-0017（INV-002 / 決定性）
+related : ADR-0016（柱① TiDi-free 大規模戦闘）, CLAUDE.md §1 原則6 / §2 INV-TiDi, docs/architecture/tick-model.md §8, docs/reference/eve-reference.md §11.1, ADR-0017（INV-002 / 決定性）
 ---
 
 # ADR-0018 — Time Dilation の境界つき局所採用
@@ -120,7 +120,7 @@ A 由来のイベントが B 視点で「実時間で引き伸ばされて」到
 | CLAUDE.md §1 原則6 | 「入場制限で対処し Tick を遅らせない」→「分割 → LoD → 局所 TiDi → 入場制限の順」（**要人間承認**） |
 | CLAUDE.md §1 競争優位 | 「論理 Tick を一定に保つ」→「TiDi 閾値を桁違いに高く保ち局所・短時間に抑える」（**要人間承認**） |
 | ADR-0016 柱① | 「TiDi の無い」→「TiDi 閾値が桁違いに高い / 局所・短時間・自動回復」に言い換え（別途追記） |
-| docs/tick-model.md §8 | 「TiDi を発生させない / SLA 超過はバグ」を全面改訂。劣化ヒエラルキーと TiDi の条件を記述 |
+| docs/architecture/tick-model.md §8 | 「TiDi を発生させない / SLA 超過はバグ」を全面改訂。劣化ヒエラルキーと TiDi の条件を記述 |
 
 イベントスキーマの変更は**なし**。TiDi の実装（dilation 係数・SLA イベント）は別タスク。
 
@@ -143,7 +143,7 @@ A 由来のイベントが B 視点で「実時間で引き伸ばされて」到
 - [x] CLAUDE.md §2 INV-TiDi を改訂（人間承認のうえ適用・2026-06-14）
 - [x] CLAUDE.md §1 原則6 / 柱① / 競争優位の記述を改訂（人間承認のうえ適用・2026-06-14）
 - [x] ADR-0016 柱①の言い換えを追記（2026-06-14）
-- [x] docs/tick-model.md §8 を劣化ヒエラルキーに全面改訂（2026-06-14）
+- [x] docs/architecture/tick-model.md §8 を劣化ヒエラルキーに全面改訂（2026-06-14）
 - [x] （実装）dilation 係数の適用 = 実時間ペーシングのみ。論理 Tick 処理は不変 — `dilation.rs::DilationController`（判定は論理コスト ship_count・物理時刻不使用で決定的、sleep のみ伸ばす）+ 8 テスト、単一 `--serve` ループに配線（2026-06-15）
 - [x] （実装）dilation が当該 Sector 局所であることのテスト（隣接へ伝播しない）— `dilation_in_one_sector_does_not_affect_another`（状態共有なし）。クラスタの per-Sector ペーシング適用は独立ループ化（8B-2）連動で別途（2026-06-15）
 - [ ] （実装・一部）SLA イベント / メトリクスの記録 — `active_ticks`（継続）+ 係数・engage/recover ログまで実装。構造化 SLA イベント化は未（2026-06-15）

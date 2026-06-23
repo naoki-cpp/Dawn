@@ -17,7 +17,7 @@ related : ADR-0008（Ship Movement Events）, CLAUDE.md §6（Tick Model）, CLA
 EVE Online の "Approach"（対象に自動で接近し続ける）に相当する半自動操船を追加し、
 「どの相手に詰めるか / 距離を取るか」という戦術判断にプレイヤーが集中できるようにする。
 
-> 設計の中心的な問い（docs/game-design.md）:
+> 設計の中心的な問い（docs/design/game-design.md）:
 > 「その機能はプレイヤーが意図的な判断を下す機会を増やすか？」
 > → アプローチは「接近 / 離脱の判断」を低操作コストで実行可能にし、
 >   ロックオン・射程管理・モジュール操作といった判断に注意を割けるようにする。Yes。

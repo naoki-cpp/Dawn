@@ -262,8 +262,8 @@ Event Sourcing と相性が悪い。「移動アニメーション」はクラ�
 
 ### docs
 
-- [x] `docs/event-catalog.md` に `JumpGateUsed`, `StarSystemChanged` を追記
-- [x] `docs/roadmap.md` を更新
+- [x] `docs/architecture/event-catalog.md` に `JumpGateUsed`, `StarSystemChanged` を追記
+- [x] `docs/process/roadmap.md` を更新
 
 ---
 
@@ -273,4 +273,4 @@ Event Sourcing と相性が悪い。「移動アニメーション」はクラ�
 - CLAUDE.md §1: 現在のスコープ
 - ADR-0001: Event Sourcing（JumpGateUsed はイベント、位置は派生状態）
 - ADR-0003: Local-First（Raft なしで単一プロセスで実装する）
-- docs/tick-model.md: Tick 順序（Jump 処理は Combat の後に行う）
+- docs/architecture/tick-model.md: Tick 順序（Jump 処理は Combat の後に行う）

@@ -75,10 +75,10 @@ ADR-0030 着手ブランチ（chore/steering-hooks）で 2 本導入済み:
 
 常時は不要だが必要時に参照する詳細は、独立 doc に出して「必要時に Read」する:
 
-- §10 Forbidden Changes の詳細列挙 → `docs/forbidden-changes.md`。ガイドには
+- §10 Forbidden Changes の詳細列挙 → `docs/architecture/forbidden-changes.md`。ガイドには
   FBD-00x の一覧（ID・一行要約）と参照リンクのみ残す。
-- §12 よくある設計違反パターン → `docs/design-violations.md`。ガイドには参照リンクのみ。
-- §7 Event Schema Evolution の詳細 → `docs/event-schema-evolution.md`。ガイドには
+- §12 よくある設計違反パターン → `docs/architecture/design-violations.md`。ガイドには参照リンクのみ。
+- §7 Event Schema Evolution の詳細 → `docs/architecture/event-schema-evolution.md`。ガイドには
   「現在プレリリース＝破壊的変更可」の注記とリンクのみ残す。
 
 ### 4. crate 固有制約の path-scoped Rule 化（任意・将来）
@@ -115,9 +115,9 @@ ADR-0030 着手ブランチ（chore/steering-hooks）で 2 本導入済み:
 - [x] .claude/settings.json にフック登録（チーム共有）
 - [x] 本 ADR の人間レビュー・承認（Proposed → Accepted）
 - [x] §9 AI Change Checklist を Skill 化（/ai-change-checklist）
-- [x] §10 詳細 → docs/forbidden-changes.md（ガイドに FBD ID 一覧 + リンク残置）
-- [x] §12 → docs/design-violations.md（ガイドにリンク残置）
-- [x] §7 詳細 → docs/event-schema-evolution.md（ガイドにプレリリース注記 + リンク残置）
+- [x] §10 詳細 → docs/architecture/forbidden-changes.md（ガイドに FBD ID 一覧 + リンク残置）
+- [x] §12 → docs/architecture/design-violations.md（ガイドにリンク残置）
+- [x] §7 詳細 → docs/architecture/event-schema-evolution.md（ガイドにプレリリース注記 + リンク残置）
 - [x] §4 Event Workflow は常時ロード核に残置（INV-/FBD-/§番号アンカーは ID 維持）
 - [x] doc-sync スキルの照合対象パスを再構成後の配置に更新
 - [ ]（任意・将来）dawn-core 制約の path-scoped Rule 化

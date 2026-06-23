@@ -86,7 +86,7 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
   イベントに記録せず**スナップショットに永続化**する。各イベントの **Replay** 欄は
   「権威ある状態をイベントから組み直す」手順を指す（transient 状態は live の Tick で再計算）。
 
-→ 詳細は [ADR-0017](./adr/ADR-0017-snapshot-compaction.md) / CLAUDE.md §2 INV-002 を参照。
+→ 詳細は [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / CLAUDE.md §2 INV-002 を参照。
 
 ---
 

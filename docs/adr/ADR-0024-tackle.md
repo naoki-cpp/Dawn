@@ -189,7 +189,7 @@ tackle_range_add = 20000.0
 - [ ] `propose_transit()` に is_tackled チェック追加（未実装 — Raft 経由の Transit は can_propose_jump で upstream 拒否済みのため実害なし。別途検討）
 - [x] ShipDestroyed 時の tackle 解除処理（`apply_event` で TackleApplied/TackleReleased を処理）
 - [x] `data/modules.toml` に `Fold Disruptor I`（id=12）追加
-- [x] `docs/event-catalog.md` を更新（TackleApplied / TackleReleased 追記）
+- [x] `docs/architecture/event-catalog.md` を更新（TackleApplied / TackleReleased 追記）
 - [x] テスト: tackled 中は warp/jump が拒否される（`tackled_ship_cannot_warp`）
 - [x] テスト: tackler が死亡したら tackle 解除（`tackle_releases_when_tackler_dies`）
 - [ ] テスト: 射程外に出たら tackle 解除（未実装）

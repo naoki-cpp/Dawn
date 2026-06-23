@@ -363,12 +363,12 @@ Fission は空間を平面で二分するので、その境界をまたぐ操作
 | 操作 | 扱い | 状態 |
 |---|---|---|
 | 離散的な通過（船が境界を横切る） | SectorTransit が `entry_pos` + `velocity` を引き渡し（ADR-0014） | 実装済み |
-| in-flight な Warp が境界をまたぐ | 各セクターが自分の区間を **媒介変数 warp** で局所計算（入口→終点を境界でクリップ）。transit が「warp 終点 + committed」を運び、受け側は Align を飛ばして継続。位置は各区間とも VelocityChanged で記録（INV-MOVE 維持） | 未実装・Fission 時に設計（[ADR-0022](adr/ADR-0022-intra-sector-warp.md) 媒介変数改訂が土台） |
+| in-flight な Warp が境界をまたぐ | 各セクターが自分の区間を **媒介変数 warp** で局所計算（入口→終点を境界でクリップ）。transit が「warp 終点 + committed」を運び、受け側は Align を飛ばして継続。位置は各区間とも VelocityChanged で記録（INV-MOVE 維持） | 未実装・Fission 時に設計（[ADR-0022](../adr/ADR-0022-intra-sector-warp.md) 媒介変数改訂が土台） |
 | 越境戦闘（境界をまたいで相互作用） | 毎 Tick 両セクターの状態同期を要する本丸の難所。Fission は分離可能負荷専用なので**境界では起きない前提**。単一密戦闘がノード容量を超えたら割らず **局所 TiDi** へ逃がす | 原理的に困難 → 分割回避（局所 TiDi）で対処（ADR-0018 / eve-reference §11.1, §11.3） |
 
 要するに：**Fission の境界は「分離可能＝低相互作用」の場所に引くので、またぐのは主に通過と warp。通過は解決済み、warp は媒介変数 warp を土台に Fission 時に設計、密な越境戦闘は「そもそも割らない（局所 TiDi）」で回避する。**
 
-関連: [ADR-0018](adr/ADR-0018-tidi-graceful-degradation.md)（越境因果）, [ADR-0020](adr/ADR-0020-simulation-lod.md)（Fission は密戦闘に効かない）, [ADR-0022](adr/ADR-0022-intra-sector-warp.md)（媒介変数 warp）, [roadmap.md](roadmap.md) §10（8B-2 Fission / 8B-8 越境 TiDi）, [eve-reference.md](reference/eve-reference.md) §11.1/§11.3。
+関連: [ADR-0018](../adr/ADR-0018-tidi-graceful-degradation.md)（越境因果）, [ADR-0020](../adr/ADR-0020-simulation-lod.md)（Fission は密戦闘に効かない）, [ADR-0022](../adr/ADR-0022-intra-sector-warp.md)（媒介変数 warp）, [roadmap.md](../process/roadmap.md) §10（8B-2 Fission / 8B-8 越境 TiDi）, [eve-reference.md](../reference/eve-reference.md) §11.1/§11.3。
 
 ### Local Time Dilation（局所 TiDi = 単一密戦闘の安全網）
 
