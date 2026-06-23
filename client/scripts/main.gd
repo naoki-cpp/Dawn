@@ -40,8 +40,10 @@ var _module_slots : Array         = []
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
 const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor
 const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is rejected for gates closer than this (ADR-0022).
-## Unit-to-meter scale: displayed m/s = (units/tick) * METERS_PER_UNIT.
-## Change this one constant to rescale all displayed speeds and distances.
+## Unit-to-metre scale: real metres = (units/tick or units) * METERS_PER_UNIT,
+## fed into UnitFormat for display (m/s, km/s, AU/s, ... -- whichever reads
+## best at the given magnitude). Change this one constant to rescale all
+## displayed speeds and distances.
 const METERS_PER_UNIT : float = 1.0
 
 ## Must match ship_controller.gd's VISUAL_SPEED_CAP (Godot units/tick): the
@@ -189,6 +191,11 @@ func _process(delta: float) -> void:
 ## resolve it without the editor's script-class cache.
 const WorldSpace = preload("res://scripts/world_space.gd")
 var _world := WorldSpace.new()
+
+## Real-unit (m/s, km/s, AU/s, ...) display formatting (ADR-0029 §1.5: single
+## conversion module). Static methods only -- preloaded rather than referenced
+## by global class_name for the same headless-test-cache reason as WorldSpace.
+const UnitFormat = preload("res://scripts/unit_format.gd")
 
 ## Converts a server-space position (Y-up, +Z) into Godot world space (Y-up,
 ## -Z), relative to the floating origin and scaled by WORLD_SCALE. Shared by
@@ -1007,7 +1014,7 @@ func _update_hud() -> void:
 	var speed_str: String = "-"
 	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
 		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
-		speed_str = "%d m/s" % int(spd * METERS_PER_UNIT)
+		speed_str = UnitFormat.format_speed(spd * METERS_PER_UNIT)
 	HudManager.update_status_panel(
 		_status_panel_refs, _connection.is_connected_to_server(),
 		_player_ship_type_name, _current_system_name, speed_str)
@@ -1022,7 +1029,7 @@ func _update_hud() -> void:
 	if target_known and _player_ship_id >= 0 and _ships.has(_player_ship_id):
 		var dist_m: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
 			(_ships[_player_lock_target] as Node3D).global_position) / WORLD_SCALE
-		dist_text = "%.1f km" % (dist_m * METERS_PER_UNIT / 1000.0)
+		dist_text = UnitFormat.format_distance(dist_m * METERS_PER_UNIT)
 	var target_hp: Dictionary = _ship_hp.get(_player_lock_target, {}) as Dictionary
 	HudManager.update_target_panel(_target_panel_refs, _player_lock_target, target_known, dist_text, target_hp)
 

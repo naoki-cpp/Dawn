@@ -245,6 +245,23 @@ lore通りの見え方になる。サーバ側のロジック・テストには�
 オーバーレイの濃さ）は引き続きプレイテストで確認が必要 — `WARP_TUNNEL_FADE_RATE` / シェーダーの
 `scroll_speed` / `tunnel_color` は数値チューニングの余地あり。
 
+### 速度・距離の表示単位を実スケールに対応（2026-06-23・ユーザー指摘）
+
+真AU化後も HUD の速度表示が常に `m/s` 固定だった（warp 中は秒速数十億 m にもなり、桁数が現実的でない）。
+ターゲット距離表示も `km` 固定で同根の問題（AU 級の距離で同様に桁が破綻）。
+
+ADR §1 決定 #5「実値表示（m/s・AU）の内部↔表示変換は単一モジュールに集約する」を実装：
+
+- `client/scripts/unit_format.gd`（新規）：`format_speed(mps)` / `format_distance(meters)` の static 関数のみ。
+  しきい値は両者共通（< 1,000 → そのまま m/m・s、< 0.01 AU 相当 → km/km・s、それ以上 → AU/AU・s）。
+  `main.gd` は `WorldSpace` と同じ理由（headless テストのクラスキャッシュ依存回避）で `class_name` ではなく
+  `preload` で読み込む。
+- `main.gd` の `_update_hud()` の速度・距離フォーマットをそれぞれ `UnitFormat.format_speed/format_distance`
+  に置き換え（ハードコードの `"%d m/s"`／`"%.1f km"` を削除）。
+- テスト `client/test/unit_format_test.gd`（新規・8件）でしきい値境界・各帯（m/s, km/s, AU/s 相当）を確認。
+
+**検証**：GdUnit4 全75件 green。
+
 ### 通し review #2（2026-06-22・R1–R3 修正後）
 
 R1（ゲート f64 源）・R3（アンカー欠落 assert）・R2（AoI f64 化）を入れた後の再レビュー。
