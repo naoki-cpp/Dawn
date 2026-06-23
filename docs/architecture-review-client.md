@@ -3,7 +3,7 @@ scope    : Godot クライアント（client/scripts/）の保守性・設計品
 audience : AI Agent / Human Developer
 update   : クライアント側で大規模リファクタ実施後 / 新スクリプト追加時
 related  : docs/architecture-review-server.md（サーバー側）, docs/architecture.md, docs/playtest-guide.md
-date     : 2026-06-20（C-1 完了後に更新）
+date     : 2026-06-23（ADR-0029 真スケール座標後にファイルサイズ一覧を再計測）
 ---
 
 # Architecture Review — Dawn Client (Godot)
@@ -33,34 +33,44 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 
 ---
 
-## ファイルサイズ一覧（2026-06-20 時点、C-1 完了後）
+## ファイルサイズ一覧（2026-06-23 時点）
+
+> 2026-06-20（C-1 完了）からの差分は主に ADR-0029（真スケール座標）。`main.gd` にワープ
+> トンネル演出・適応的な速度/距離表示・浮動原点リベースが加わり 1094→1210 に増加し、
+> 新スクリプト `unit_format.gd` / `world_space.gd` / `warp_tunnel_effect.gd` が追加された。
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `client/scripts/main.gd` | 1094 | 🟡 オーケストレーション層（入力ルーティング・イベント dispatch・spawning・状態保持）に縮小。god object ではなくなったが、まだ最大ファイル |
+| `client/scripts/main.gd` | 1210 | 🟡 オーケストレーション層。god object ではないが最大ファイル。ADR-0029 のワープ演出・単位整形・原点リベースで 1094→1210 |
 | `client/scripts/hud_manager.gd` | 474 | 🟢 C-1で新設。HUD全パネルの構築・更新を持つ stateless static class |
-| `client/scripts/ship_controller.gd` | 273 | 🟢 単一船の視覚表現に専念。ロックオン枠が `BillboardRing` 経由の fixed_size ビルボードに変更（2026-06-21）——`navigation_marker_renderer.gd` の惑星選択リングと共通化 |
+| `client/scripts/ship_controller.gd` | 323 | 🟢 単一船の視覚表現に専念。ADR-0029 でワープ時の他船トンネル隠蔽・速度キャップを追加（273→323）。ロックオン枠は `BillboardRing` 共通化 |
 | `client/scripts/connection.gd` | 245 | 🟢 WebSocket I/O とシグナル発行のみ。教科書的な境界 |
-| `client/scripts/navigation_marker_renderer.gd` | 161 | 🟢 C-1で新設。ゲート/惑星マーカー生成 + スペクトル色（恒星の実体メッシュは2026-06-21に撤廃）。選択リングの生成は `billboard_ring.gd` へ移動 |
-| `client/scripts/camera_controller.gd` | 124 | 🟢 自己完結したオービットカメラ |
-| `client/scripts/billboard_ring.gd` | 65 | 🟢 2026-06-21新設。固定画面サイズの選択リング billboard を生成する共通 stateless static class。`navigation_marker_renderer.gd`（惑星）と `ship_controller.gd`（ロックオン枠）が共有 |
+| `client/scripts/navigation_marker_renderer.gd` | 164 | 🟢 C-1で新設。ゲート/惑星マーカー生成 + スペクトル色。選択リング生成は `billboard_ring.gd` へ |
+| `client/scripts/camera_controller.gd` | 131 | 🟢 自己完結したオービットカメラ |
+| `client/scripts/ship_picking.gd` | 104 | 🟢 C-1で新設。船/ゲート/天体ピッキング3関数（画面空間ピッキング） |
 | `client/scripts/tactical_overlay.gd` | 93 | 🟢 射程リング描画のみ |
-| `client/scripts/ship_picking.gd` | 100 | 🟢 C-1で新設。船/ゲート/天体ピッキング3関数（天体は画面空間ピッキングに変更、2026-06-21） |
 | `client/scripts/input_decoder.gd` | 85 | 🟢 C-1で新設。キー入力→アクション決定の純粋関数 |
+| `client/scripts/world_space.gd` | 83 | 🟢 ADR-0029 新設。浮動原点（真 AU 距離レンダリング用の WorldSpace リベース） |
+| `client/scripts/billboard_ring.gd` | 65 | 🟢 2026-06-21新設。固定画面サイズの選択リング billboard 共通 static class |
+| `client/scripts/unit_format.gd` | 38 | 🟢 ADR-0029 新設。速度/距離の適応的単位整形（m/s・km/s・AU/s） |
+| `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 ADR-0029 新設。ワープトンネル ColorRect の intensity ラッパー |
 
-合計 2,714 行のうち `main.gd` が40%を占める（C-1着手前69%から大幅低下）。
-新設5ファイル（860行）はいずれも stateless static class で、main.gd の状態や
-シーンツリーへの直接依存を持たない。
+合計 3,025 行のうち `main.gd` が40%を占める（C-1着手前69%から大幅低下）。
+新設 static class 群（C-1 の5クラス + ADR-0029 の `world_space`/`unit_format`/`warp_tunnel_effect`）は
+いずれも main.gd の状態やシーンツリーへの直接依存を持たない。
 
-（`client/test/*.gd`（main_test.gd 108行 + ship_picking_test.gd 138行 +
-navigation_marker_renderer_test.gd 140行 + input_decoder_test.gd 108行 +
-hud_manager_test.gd 190行 + billboard_ring_test.gd 32行、合計716行）は別カウント。
-新設5クラスの全staticメソッド + main.gd残存ロジックの回帰テストをGdUnit4でテスト済み
-〔計66ケース、全件PASS〕。§「テストカバレッジ」参照）
+（`client/test/*.gd`（main_test.gd 73 + ship_picking_test.gd 153 +
+navigation_marker_renderer_test.gd 140 + input_decoder_test.gd 108 +
+hud_manager_test.gd 190 + billboard_ring_test.gd 32 + unit_format_test.gd 47 +
+world_space_test.gd 71、合計 814行）は別カウント。§「テストカバレッジ」参照）
 
 ---
 
 ## main.gd 内部構造（行範囲別、C-1 完了後）
+
+> 注: 以下の行範囲は C-1 完了時点（1094行）のもの。ADR-0029 でワープ演出・単位整形・
+> 原点リベースが加わり現在 1210行になっており、範囲は概ね下方にずれている。区分（責務の
+> まとまり）の傾向は有効だが、正確な行番号は次回の構造リファクタ時に再計測する。
 
 | 行範囲 | 内容 | 評価 |
 |---|---|---|
@@ -116,13 +126,15 @@ Control サブツリーを構築して参照 Dictionary を返すビルダー形
 
 | テストファイル | 対象 | ケース数 |
 |---|---|---|
-| `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 7 |
-| `ship_picking_test.gd` | `ShipPicking`（画面空間ピッキング含む） | 11 |
+| `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 4 |
+| `ship_picking_test.gd` | `ShipPicking`（画面空間ピッキング含む） | 12 |
 | `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer`（選択リング含む） | 10 |
 | `input_decoder_test.gd` | `InputDecoder` | 15 |
 | `hud_manager_test.gd` | `HudManager` | 20 |
 | `billboard_ring_test.gd` | `BillboardRing` | 3 |
-| **合計** | | **66**（全件PASS、orphan node 0） |
+| `unit_format_test.gd` | `UnitFormat`（ADR-0029 速度/距離単位整形） | 8 |
+| `world_space_test.gd` | `WorldSpace`（ADR-0029 浮動原点リベース） | 4 |
+| **合計** | | **76**（`func test_` 実測） |
 
 テスト導入で見つかった不具合・定着した手順（詳細: `AI_DEVELOPMENT_GUIDE.md` §8）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる

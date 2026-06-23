@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : CLAUDE.md §11, docs/architecture.md
-date     : 2026-06-20（P9-2 完了後に更新）
+date     : 2026-06-23（ADR-0029 真スケール座標後にファイルサイズ一覧を再計測）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -20,7 +20,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | 観点 | 評価 | 理由 |
 |---|---|---|
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027） |
-| ファイルサイズ | A− | P7-1/P7-2 + AoI テスト移動で node/mod.rs 514行に縮小。全ファイル 700行以下 |
+| ファイルサイズ | B+ | mod.rs は 646行で安定。ただし ADR-0029（真スケール座標）でワープ遷移を絶対 f64 フレームに書き換え、`node/navigation.rs` が 679→1092行に肥大（700行超は現状ここだけ・要分割候補） |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。近似ロジック解消 |
 | 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。残る両バイナリ間グルー重複（M-6）は ~230行・低ドリフトで許容判断（新規クレートは過剰）|
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。TCP transport も trait 境界内に収まる |
@@ -28,49 +28,61 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ---
 
-## ファイルサイズ一覧（2026-06-19 時点）
+## ファイルサイズ一覧（2026-06-23 時点）
+
+> 2026-06-19 の前回計測から、ADR-0029（真スケール座標）の実装でワープ遷移・座標変換・
+> シリアライズ周りが増加。M-4（WS 境界集約）で `protocol.rs` / `ws_server.rs` は両バイナリ
+> から削除され `dawn-actor` に集約済み（下の dawn-actor 表）。
 
 ### dawn-sector（ゲームロジック）
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-sector/src/node/mod.rs` | 575 | 🟢 P7-2 jump/warp validation 移動後 |
-| `crates/dawn-sector/src/node/navigation.rs` | 679 | 🟢 P7-2（validation + 実装 + approach/warp テスト） |
-| `crates/dawn-sector/src/node/spawner_logic.rs` | 485 | 🟢 P4-2 + P7-1（実装 394行 + bot テスト 91行） |
-| `crates/dawn-sector/src/node/transit_flow.rs` | 402 | 🟢 P7-1（実装 + 近接テスト） |
+| `crates/dawn-sector/src/node/navigation.rs` | 1092 | 🔴 ADR-0029 でワープ遷移を絶対 f64 フレーム（Hermite）に書き換え 679→1092。要分割候補 |
+| `crates/dawn-sector/src/node/spawner_logic.rs` | 662 | 🟢 P4-2 + P7-1（実装 + bot テスト）+ ADR-0029 `set_spawn_anchor_abs` |
+| `crates/dawn-sector/src/node/mod.rs` | 646 | 🟢 P7-2 jump/warp validation 移動後 |
+| `crates/dawn-sector/src/node/snapshot_io.rs` | 442 | 🟢 P7-pre |
+| `crates/dawn-sector/src/node/transit_flow.rs` | 407 | 🟢 P7-1（実装 + 近接テスト） |
 | `crates/dawn-sector/src/node/commands.rs` | 342 | 🟢 P7-1（実装 262行 + fitting/combat テスト 80行） |
-| `crates/dawn-sector/src/galaxy.rs` | 203 | 🟢 TOML schema parser 統合 |
-| `crates/dawn-sector/src/node/snapshot_io.rs` | 391 | 🟢 P7-pre |
-| `crates/dawn-sector/src/node/apply_event.rs` | 226 | 🟢 P7-pre |
-| `crates/dawn-sector/src/node/tackle.rs` | 204 | 🟢 P7-pre |
-| `crates/dawn-sector/src/aoi.rs` | 246 | 🟢 |
-| `crates/dawn-sector/src/transit.rs` | 215 | 🟢 |
-| `crates/dawn-sector/src/persistence/snapshot.rs` | 168 | 🟢 |
+| `crates/dawn-sector/src/node/serialization.rs` | 300 | 🟢 ADR-0029 でアンカー相対座標の WS 直列化を追加（158→300） |
+| `crates/dawn-sector/src/galaxy.rs` | 286 | 🟢 ADR-0029 AU→units 変換・ゲート AU 化（203→286） |
+| `crates/dawn-sector/src/aoi.rs` | 265 | 🟢 |
+| `crates/dawn-sector/src/anchor.rs` | 246 | 🟢 ADR-0029 新設（AnchorTable・静的 f64 アンカー絶対座標） |
+| `crates/dawn-sector/src/node/apply_event.rs` | 244 | 🟢 P7-pre |
+| `crates/dawn-sector/src/transit.rs` | 216 | 🟢 |
+| `crates/dawn-sector/src/node/tackle.rs` | 208 | 🟢 P7-pre |
+| `crates/dawn-sector/src/persistence/snapshot.rs` | 173 | 🟢 |
 | `crates/dawn-sector/src/dilation.rs` | 160 | 🟢 |
-| `crates/dawn-sector/src/node/serialization.rs` | 158 | 🟢 |
 | `crates/dawn-sector/src/persistence/checkpoint.rs` | 156 | 🟢 |
+| `crates/dawn-sector/src/node/tick.rs` | 140 | 🟢 P4-1 + P7-1（実装 + tick テスト） |
 | `crates/dawn-sector/src/modules.rs` | 137 | 🟢 |
 | `crates/dawn-sector/src/spawner.rs` | 127 | 🟢 |
-| `crates/dawn-sector/src/node/tick.rs` | 139 | 🟢 P4-1 + P7-1（実装 91行 + tick テスト 48行） |
 | `crates/dawn-sector/src/ship_types.rs` | 82 | 🟢 |
 | `crates/dawn-sector/src/node/ship_registry.rs` | 33 | 🟢 P3-1 |
 | `crates/dawn-sector/src/node/sector_map.rs` | 25 | 🟢 P3-1 |
+
+### dawn-actor（クライアント転送境界・M-4 集約先）
+
+| ファイル | 行数 | 判定 |
+|---|---|---|
+| `crates/dawn-actor/src/protocol.rs` | 335 | 🟢 M-4 で両バイナリから集約（DomainEvent↔JSON↔ClientCommand） |
+| `crates/dawn-actor/src/client_connection.rs` | 254 | 🟢 ClientConnection trait + InProcess/Ws 実装 |
+| `crates/dawn-actor/src/ws_server.rs` | 188 | 🟢 M-4 で両バイナリから集約（WsServer / PlayerSession） |
+| `crates/dawn-actor/src/lib.rs` | 29 | 🟢 |
 
 ### dawn-simulation（配線・起動）
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-simulation/src/cluster.rs` | 528 | 🟢 Raft クラスター配線 |
+| `crates/dawn-simulation/src/cluster.rs` | 538 | 🟢 Raft クラスター配線 |
+| `crates/dawn-simulation/src/serve/mod.rs` | 429 | 🟢 P5-1 共通ヘルパー |
 | `crates/dawn-simulation/src/sector_simulator_actor.rs` | 423 | 🟡 M-3 |
-| `crates/dawn-simulation/src/bench.rs` | 411 | 🟢 |
-| `crates/dawn-simulation/src/serve/mod.rs` | 402 | 🟢 P5-1 共通ヘルパー |
-| `crates/dawn-simulation/src/protocol.rs` | 309 | 🟢 |
-| `crates/dawn-simulation/src/serve/cluster.rs` | 241 | 🟢 P5-1 |
-| `crates/dawn-simulation/src/ws_server.rs` | 199 | 🟢 |
+| `crates/dawn-simulation/src/bench.rs` | 414 | 🟢 |
+| `crates/dawn-simulation/src/serve/cluster.rs` | 248 | 🟢 P5-1 |
 | `crates/dawn-simulation/src/data_loader/modules.rs` | 190 | 🟢 P5-2 |
-| `crates/dawn-simulation/src/serve/single.rs` | 177 | 🟢 P5-1 |
+| `crates/dawn-simulation/src/serve/single.rs` | 178 | 🟢 P5-1 |
 | `crates/dawn-simulation/src/data_loader/ship_types.rs` | 174 | 🟢 P5-2 |
-| `crates/dawn-simulation/src/main.rs` | 63 | 🟢 |
+| `crates/dawn-simulation/src/main.rs` | 65 | 🟢 |
 | `crates/dawn-simulation/src/data_loader/mod.rs` | 9 | 🟢 P5-2 |
 
 ### その他クレート
@@ -78,24 +90,23 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | ファイル | 行数 | 判定 |
 |---|---|---|
 | `crates/dawn-consensus/src/state.rs` | 573 | 🟡 許容範囲（Raft 実装の核）|
-| `crates/dawn-core/src/events.rs` | 495 | 🟢 |
+| `crates/dawn-core/src/events.rs` | 535 | 🟢 |
+| `crates/dawn-ecs/src/systems/combat.rs` | 469 | 🟢 |
+| `crates/dawn-consensus/src/actor.rs` | 441 | 🟢 |
 | `crates/dawn-event-store/src/file.rs` | 431 | 🟢 |
-| `crates/dawn-ecs/src/systems/combat.rs` | 430 | 🟢 |
-| `crates/dawn-consensus/src/actor.rs` | 430 | 🟢 |
 | `crates/dawn-ecs/src/systems/capacitor.rs` | 412 | 🟢 |
+| `crates/dawn-sector-node/src/main.rs` | 396 | 🟢 8D-4 本番バイナリ（TCP 配線・WS・Jump Redirect）|
 | `crates/dawn-consensus/src/rpc.rs` | 343 | 🟢 Raft RPC 型定義 |
-| `crates/dawn-consensus/src/tcp_transport.rs` | 330 | 🟢 8D-3 TcpRaftTransport |
-| `crates/dawn-sector-node/src/main.rs` | 337 | 🟢 8D-4 本番バイナリ（TCP 配線・WS・Jump Redirect）|
-| `crates/dawn-sector-node/src/protocol.rs` | 243 | 🟢 8D-4 WS プロトコル |
-| `crates/dawn-sector-node/src/data_loader.rs` | 178 | 🟢 8D-4 module/ship type TOML ローダー |
-| `crates/dawn-replication/src/tcp.rs` | 263 | 🟢 8D-2c |
-| `crates/dawn-core/src/navigation.rs` | 121 | 🟢 ナビゲーション型定義（star_system.rs より改名）|
-| `crates/dawn-sector-node/src/ws_server.rs` | 153 | 🟢 8D-4 WebSocket サーバー |
-| `crates/dawn-ecs/src/world.rs` | 252 | 🟢 P6-1 クエリヘルパー追加 |
+| `crates/dawn-consensus/src/tcp_transport.rs` | 337 | 🟢 8D-3 TcpRaftTransport |
+| `crates/dawn-replication/src/tcp.rs` | 283 | 🟢 8D-2c |
+| `crates/dawn-ecs/src/world.rs` | 270 | 🟢 P6-1 クエリヘルパー追加 |
 | `crates/dawn-replication/src/anti_entropy.rs` | 211 | 🟢 8D-2b |
 | `crates/dawn-replication/src/bus.rs` | 188 | 🟢 8D-2a |
+| `crates/dawn-core/src/navigation.rs` | 184 | 🟢 ナビゲーション型定義（star_system.rs より改名）|
+| `crates/dawn-sector-node/src/data_loader.rs` | 178 | 🟢 8D-4 module/ship type TOML ローダー |
 | `crates/dawn-replication/src/snapshot.rs` | 164 | 🟢 8D-2d SnapshotTransfer（ジェネリック / 256 MiB cap） |
-| `crates/dawn-replication/src/lib.rs` | 71 | 🟢 8D-2a/2b/2c/2d public API |
+| `crates/dawn-replication/src/lib.rs` | 78 | 🟢 8D-2a/2b/2c/2d public API |
+| `crates/dawn-sector-node/src/config.rs` | 56 | 🟢 8D-4 TOML 静的 config |
 
 ---
 
