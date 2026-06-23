@@ -141,7 +141,9 @@ var _bodies       : Array      = []
 ## Star System id -> name, used to resolve StarSystemChanged events.
 var _system_names : Dictionary = {}
 
-var _current_system_name : String = "Alpha"
+## Placeholder until InitialState arrives -- never a real system name (was
+## hardcoded to "Alpha", which looked like live data while still CONNECTING).
+var _current_system_name : String = "Unknown"
 var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
 var _selected_body_id    : int    = -1  ## -1 = no body selected
 var _sky_mat             : ShaderMaterial = null  ## reference kept for sun_direction updates
