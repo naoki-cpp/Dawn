@@ -87,6 +87,7 @@ impl<S: EventStore> SimulationNode<S> {
             warp_total    : 0,
             warp_elapsed  : 0,
             warp_arrival_abs: [0.0, 0.0, 0.0],  // set at engage
+            warp_start_vel  : Velocity::ZERO,   // set at engage
         });
         true
     }
@@ -196,15 +197,21 @@ impl<S: EventStore> SimulationNode<S> {
                     let d = [arrival_abs[0] - start_abs[0], arrival_abs[1] - start_abs[1], arrival_abs[2] - start_abs[2]];
                     let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
                     let total = warp_total_ticks(dist as f32);
+                    // Carry the ship's actual speed at engage into the transit
+                    // curve (lore pass, ADR-0022/0029): warp_step blends this in
+                    // as the curve's start tangent so the Aligning cruise speed
+                    // flows continuously into the warp-speed ramp, instead of
+                    // snapping to near-zero before re-accelerating.
                     if let Ok(mut w) = self.world.inner_mut().get::<&mut WarpComp>(entity) {
                         w.warp_start_abs = start_abs;
                         w.warp_arrival_abs = arrival_abs;
+                        w.warp_start_vel = vel;
                     }
-                    self.warp_step(entity, ship_id, pos, vel, start_abs, arrival_abs, total, 1, auto_jump_gate, dest_anchor, tick, &mut events);
+                    self.warp_step(entity, ship_id, pos, vel, start_abs, arrival_abs, vel, total, 1, auto_jump_gate, dest_anchor, tick, &mut events);
                 }
                 // Already warping: advance one tick along the fixed segment plan.
                 WarpPhase::Warping => {
-                    self.warp_step(entity, ship_id, pos, vel, warp.warp_start_abs, warp.warp_arrival_abs, warp.warp_total, warp.warp_elapsed + 1, auto_jump_gate, dest_anchor, tick, &mut events);
+                    self.warp_step(entity, ship_id, pos, vel, warp.warp_start_abs, warp.warp_arrival_abs, warp.warp_start_vel, warp.warp_total, warp.warp_elapsed + 1, auto_jump_gate, dest_anchor, tick, &mut events);
                 }
             }
         }
@@ -213,9 +220,20 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// One warping-phase step (ADR-0022 amendment, ADR-0029 absolute-frame
-    /// transit): walk the segment from `start_abs` to `arrival_abs` — both
-    /// Sector-frame f64 — over `total` ticks with smoothstep easing, reaching
-    /// the destination exactly. This tick is number `elapsed`.
+    /// transit, 2026-06-23 lore pass): walk the segment from `start_abs` to
+    /// `arrival_abs` — both Sector-frame f64 — over `total` ticks. This tick
+    /// is number `elapsed`.
+    ///
+    /// The path is a cubic Hermite spline with `start_vel` (the ship's actual
+    /// speed at the moment warp engaged) as its start tangent and a zero end
+    /// tangent, instead of the plain smoothstep ease this used before: plain
+    /// smoothstep has a zero derivative at *both* ends, so velocity used to
+    /// snap from the Aligning-phase cruise speed down to near-zero the instant
+    /// warp engaged, then ramp back up — a visible stutter at the very moment
+    /// that should read as "entering the tunnel". The Hermite blend keeps
+    /// speed continuous into the ramp while still decelerating smoothly to a
+    /// full stop exactly at `arrival_abs`, so the whole transit reads as one
+    /// continuous accelerate → cruise → decelerate motion.
     ///
     /// The eased point is computed in f64 and only cast to f32 once, relative
     /// to the ship's CURRENT anchor, when writing `PositionComp` — so error
@@ -237,6 +255,7 @@ impl<S: EventStore> SimulationNode<S> {
         old_vel         : Velocity,
         start_abs       : [f64; 3],
         arrival_abs     : [f64; 3],
+        start_vel       : Velocity,
         total           : u32,
         elapsed         : u32,
         auto_jump_gate  : Option<JumpGateId>,
@@ -249,18 +268,33 @@ impl<S: EventStore> SimulationNode<S> {
         let (new_pos, new_vel, arrived) = if elapsed > total {
             // One tick past the final step: settle and stop. The move tick at
             // `elapsed == total` already landed exactly on arrival_abs (below,
-            // smoothstep(1) = 1), so this just zeroes velocity — keeping the
-            // motion velocity-recorded (INV-MOVE) AND the arrival exact.
+            // h01(1) = 1), so this just zeroes velocity — keeping the motion
+            // velocity-recorded (INV-MOVE) AND the arrival exact.
             (pos, Velocity::ZERO, true)
         } else {
-            // Eased point along the segment this tick, in absolute f64; velocity
+            // Cubic Hermite spline (start tangent = start_vel, end tangent =
+            // zero) along the segment this tick, in absolute f64; velocity
             // carries the delta so the move is recorded by VelocityChanged
-            // (INV-MOVE). At elapsed == total, smoothstep(1) = 1 → planned = arrival_abs.
-            let s = smoothstep(elapsed as f32 / total as f32) as f64;
+            // (INV-MOVE). At elapsed == total, t = 1 → planned = arrival_abs
+            // exactly (h00(1)=h10(1)=0, h01(1)=1) regardless of start_vel.
+            let t = (elapsed as f64 / total as f64).clamp(0.0, 1.0);
+            let t2 = t * t;
+            let t3 = t2 * t;
+            let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+            let h10 = t3 - 2.0 * t2 + t;
+            let h01 = -2.0 * t3 + 3.0 * t2;
+            // Tangent scaled by `total` so its per-tick rate at t=0 equals the
+            // ship's actual entering speed (the curve parameter spans total
+            // ticks over t in [0,1], so d(planned)/d(elapsed) = d(planned)/dt / total).
+            let m0 = [
+                start_vel.dx as f64 * total as f64,
+                start_vel.dy as f64 * total as f64,
+                start_vel.dz as f64 * total as f64,
+            ];
             let planned_abs = [
-                start_abs[0] + (arrival_abs[0] - start_abs[0]) * s,
-                start_abs[1] + (arrival_abs[1] - start_abs[1]) * s,
-                start_abs[2] + (arrival_abs[2] - start_abs[2]) * s,
+                h00 * start_abs[0] + h10 * m0[0] + h01 * arrival_abs[0],
+                h00 * start_abs[1] + h10 * m0[1] + h01 * arrival_abs[1],
+                h00 * start_abs[2] + h10 * m0[2] + h01 * arrival_abs[2],
             ];
             let planned = Position::new(
                 (planned_abs[0] - anchor_abs[0]) as f32,
@@ -501,13 +535,6 @@ impl<S: EventStore> SimulationNode<S> {
 fn warp_total_ticks(warp_dist: f32) -> u32 {
     let n = (warp_dist / WARP_SPEED).ceil().max(0.0) as u32;
     n.max(WARP_MIN_TICKS)
-}
-
-/// Smoothstep ease (0→1): accelerate out of warp entry, decelerate into the
-/// arrival ring. ADR-0022 amendment (parametric warp).
-fn smoothstep(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
 }
 
 /// Component of velocity along the vector from `pos` toward `target`.
@@ -830,6 +857,39 @@ mod tests {
         }
         assert!(saw_decel_step, "warp must ramp down through intermediate speeds, not stop dead");
         assert_eq!(node.warp_phase(ship), None, "warp should have completed");
+    }
+
+    #[test]
+    fn warp_engage_carries_the_aligning_speed_into_the_transit_no_snap() {
+        // Lore pass (2026-06-23): the Hermite-blended transit must inherit the
+        // ship's actual cruise speed at the instant warp engages, instead of
+        // snapping toward zero before ramping to warp speed (the plain
+        // smoothstep curve this replaced has a zero derivative at t=0, which
+        // caused exactly that snap).
+        let mut node = mem_node();
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)) });
+
+        let entity = *node.ships.index.get(&ship).unwrap();
+        let mut speed_before_engage = 0.0_f32;
+        loop {
+            let phase = node.warp_phase(ship);
+            let v = node.world.inner().get::<&VelocityComp>(entity).unwrap().0;
+            let speed = (v.dx * v.dx + v.dy * v.dy + v.dz * v.dz).sqrt();
+            if phase == Some(WarpPhase::Aligning) { speed_before_engage = speed; }
+            node.tick();
+            if node.warp_phase(ship) == Some(WarpPhase::Warping) { break; }
+            assert!(node.warp_phase(ship).is_some(), "warp should not cancel before engaging");
+        }
+        let v_after_engage = node.world.inner().get::<&VelocityComp>(entity).unwrap().0;
+        let speed_after_engage = (v_after_engage.dx * v_after_engage.dx + v_after_engage.dy * v_after_engage.dy + v_after_engage.dz * v_after_engage.dz).sqrt();
+
+        assert!(speed_before_engage > 1.0,
+            "sanity: should have built up real cruise speed during Aligning (got {speed_before_engage})");
+        // The first Warping-phase tick's speed should be close to the cruise
+        // speed just before engage, not collapsed toward zero.
+        assert!(speed_after_engage > speed_before_engage * 0.5,
+            "warp engage should not snap speed toward zero: before={speed_before_engage}, after={speed_after_engage}");
     }
 
     #[test]

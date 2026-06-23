@@ -171,6 +171,7 @@ mod tests {
             warp_total    : 1,
             warp_elapsed  : 0,
             warp_arrival_abs: [0.0, 0.0, 0.0],
+            warp_start_vel  : Velocity::ZERO,
         }).unwrap();
 
         let events = MovementSystem::run(&mut w, Tick(1));

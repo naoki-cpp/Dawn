@@ -43,14 +43,15 @@ pub struct WarpComp {
     /// When true and `target` is `Gate`, automatically propose a Jump once warp
     /// completes and the ship arrives within the gate's activation radius.
     pub auto_jump: bool,
-    /// Parametric warp plan (ADR-0022 amendment, 2026-06-21). Warp walks the
-    /// segment from `warp_start_abs` to `warp_arrival_abs` over `warp_total`
-    /// ticks (smoothstep eased), reaching the destination exactly. These are
-    /// meaningful only while `phase == Warping`; the `Aligning` phase leaves
-    /// them at their engage-time defaults (start/arrival = zero, total/elapsed
-    /// = 0). Absolute (Sector-frame) f64, not anchor-relative (ADR-0029): the
-    /// whole transit is interpolated in one frame so it does not pick up f32
-    /// ulp error from the ship's current anchor when the destination sits at
+    /// Parametric warp plan (ADR-0022 amendment, 2026-06-21; cubic-Hermite
+    /// reshape 2026-06-23, lore pass). Warp walks the segment from
+    /// `warp_start_abs` to `warp_arrival_abs` over `warp_total` ticks,
+    /// reaching the destination exactly. These are meaningful only while
+    /// `phase == Warping`; the `Aligning` phase leaves them at their
+    /// engage-time defaults (start/arrival = zero, total/elapsed = 0).
+    /// Absolute (Sector-frame) f64, not anchor-relative (ADR-0029): the whole
+    /// transit is interpolated in one frame so it does not pick up f32 ulp
+    /// error from the ship's current anchor when the destination sits at
     /// true-AU distance from it — only the per-tick f32 cast (offset relative
     /// to the ship's current anchor, written to `PositionComp`) is lossy, and
     /// that loss does not compound across ticks the way repeated f32 lerp did.
@@ -62,6 +63,15 @@ pub struct WarpComp {
     /// rebase is precise at true-AU distances (the f32 `PositionComp` near a
     /// 7.5e11 anchor would be ~65 km coarse). `[0,0,0]` for Gate warps (no rebase).
     pub warp_arrival_abs: [f64; 3],
+    /// Ship's actual velocity at the moment warp engaged (end of `Aligning`,
+    /// 2026-06-23 lore pass). The transit curve is a cubic Hermite spline with
+    /// this as its start tangent and a zero end tangent, so the ship's speed
+    /// is continuous across the Aligning→Warping cut (no snap-to-near-zero
+    /// before ramping to warp speed) while still decelerating smoothly to a
+    /// full stop exactly at `warp_arrival_abs` — "accelerate, enter the
+    /// tunnel, cruise, exit the tunnel, decelerate" reads as one continuous
+    /// motion rather than two different physics models stitched together.
+    pub warp_start_vel  : Velocity,
 }
 
 impl WarpComp {
