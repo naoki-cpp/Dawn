@@ -123,11 +123,24 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
 
 圧縮では顕在化しないが、スケール値を上げた瞬間に効くもの。真スケール再活性化と束ねて潰す。
 
-- ⬜ **ゲート座標の再オーサリング**：配置値（現状 600,000 units 固定で `UNITS_PER_AU` 非連動）を真 AU 向けに
-  `UNITS_PER_AU` 連動でセクター縁へ置き直す（精度ではなく座標値の設計）。
-- ⬜ **ゲート到着の f64 化（R1 の積み残し・真 AU 限定）**：到着**権威**は解決済み（client は `PositionSnap` で正しく着地）。
-  残るは server 側の到着**座標精度** — `process_warp` のゲート分岐が `g.position`（f32）・`dest_anchor=None` のままなので、
-  真 AU では到着点が ~16 km 粗く到着後も恒星アンカー。再活性化時に **Body と対称化**（f64 到着点＋最寄りアンカーへリベース）。
+- ✅ **ゲート座標の再オーサリング**：`JumpGateEntry.position` を固定 units から AU 単位（天体と同じ規約）に変更し、
+  `entry_to_gate` で `UNITS_PER_AU` 換算するように。`data/galaxy.toml`／`galaxy.demo.toml` を 3.0 AU へ置き直し
+  （現行 `UNITS_PER_AU=200,000` では旧来の 600,000 units と数値一致＝圧縮スケールでの挙動は不変、外縁惑星
+  Meridian の ~1.5 AU の外側）。テスト `gate_positions_are_converted_from_au_to_units_like_celestial_bodies` で
+  天体と同じ変換規約を確認（2026-06-23）。
+- ✅ **ゲート到着の f64 化（R1 の積み残し）**：`process_warp` のゲート分岐を `JumpGateDef.abs_m`（f64）から
+  到着点を計算し、`AnchorTable::nearest_anchor` でゲート直近の天体アンカーへリベースするように変更（Body と対称）。
+  `warp_arrival_abs` は `dest_anchor` 経由の `anchor_table.abs()` 参照をやめ、ターゲットの f64 源を直接受け取る形に
+  一般化（Gate/Body 共通パス）。テスト `gate_warp_arrival_is_symmetric_with_body_warp` で到着距離とリベース先を確認（2026-06-23）。
+- ✅ **ワープ中補間の絶対 f64 化（レビューで新たに発覚・残課題に追加していた構造的負債）**：`WarpComp` の
+  `warp_start`（アンカー相対 f32）を `warp_start_abs`（Sector-frame f64）に変更し、`warp_step` の道中補間
+  （smoothstep イーズ）を絶対 f64 で行うように変更。旧実装は道中ずっと「エンゲージ時点のアンカー」基準の
+  f32 オフセットで補間していたため、真 AU では異アンカー間のワープ道中に f32 ulp（~54 km @ 3AU）が**毎 tick
+  複利的に蓄積**する経路があった（決定 #3 の「アンカー空間 f64 で媒介変数評価」を字面どおり満たしていなかった）。
+  修正後は f64 のまま補間し、`PositionComp` 書き込み直前の 1 回だけ f32 へキャスト（複利なし・到着点は既存の
+  到着リベースで自己修正）。`warp_arrival_abs` に「到着リング内ならオーバーシュートせず現在地に留まる」ガードを
+  追加（旧 `warp_arrival_point` の f32 版にあったが、到着点計算の一元化で見落としていた edge case）。
+  `WarpComp` は非永続（スナップショット対象外）のためスキーマ影響なし。全テスト緑で確認（2026-06-23）。
 - ⬜ **視覚定数の再調整**：`VISUAL_SPEED_CAP`／`SUN_EFFECTIVE_DISTANCE`／`BODY_MARKER_CLAMP_DISTANCE` は `WORLD_SCALE`
   と暗黙連動。`WARP_SPEED` と共に再活性化時にまとめて再調整。
 - ✅ **圧縮スケールでのプレイテスト**：ワープ到着権威化を入れた後の実機確認で問題なし（2026-06-23）。ワープ→到着・

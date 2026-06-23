@@ -123,8 +123,12 @@ struct JumpGateEntry {
     id               : u32,
     from_sector      : u8,
     to_sector        : u8,
-    /// Gate position in metres (Sector-frame). Parsed as f64 so the authoring
-    /// precision survives at true-AU scale — the f64 `abs_m` source (ADR-0029 R1).
+    /// Gate position in AU, converted to metres by `UNITS_PER_AU` on load —
+    /// same convention as `CelestialBodyEntry.position` (ADR-0029 residual:
+    /// gates used to be authored as fixed units, decoupled from `UNITS_PER_AU`,
+    /// so flipping to true AU would have left them sitting on top of the star).
+    /// Parsed as f64 so the authoring precision survives at true-AU scale —
+    /// the f64 `abs_m` source (ADR-0029 R1).
     position         : [f64; 3],
     activation_radius: f32,
 }
@@ -156,9 +160,13 @@ fn entry_to_system(e: StarSystemEntry) -> StarSystemDef {
 }
 
 fn entry_to_gate(e: JumpGateEntry) -> JumpGateDef {
-    // `abs_m` is the authoritative f64 gate position; `position` is its f32 view
-    // (coarse at true AU, fine at compressed scale) — ADR-0029 R1.
-    let abs_m = e.position;
+    // Authored in AU, scaled to metres by UNITS_PER_AU (same conversion as
+    // `entry_to_body`) so gate placement tracks the sector scale instead of
+    // sitting at a fixed unit offset (ADR-0029 residual). `abs_m` is the
+    // authoritative f64 gate position; `position` is its f32 view (coarse at
+    // true AU, fine at compressed scale) — ADR-0029 R1.
+    let factor = UNITS_PER_AU;
+    let abs_m = [e.position[0] * factor, e.position[1] * factor, e.position[2] * factor];
     JumpGateDef {
         id               : JumpGateId(e.id),
         from_sector      : SectorId(e.from_sector),
@@ -212,6 +220,21 @@ mod tests {
         assert!(gates.iter().all(|g| g.from_sector == SectorId(1)));
         assert!(gates.iter().any(|g| g.id == JumpGateId(1) && g.to_sector == SectorId(0)));
         assert!(gates.iter().any(|g| g.id == JumpGateId(2) && g.to_sector == SectorId(2)));
+    }
+
+    #[test]
+    fn gate_positions_are_converted_from_au_to_units_like_celestial_bodies() {
+        // ADR-0029 residual: gates used to be authored as a fixed unit offset
+        // (decoupled from UNITS_PER_AU), which would have put them on top of
+        // the star once UNITS_PER_AU flips to true AU. Gate 0 is authored at
+        // [3.0, 0.0, 0.0] AU in galaxy.demo.toml -- confirm the loader scales
+        // it the same way it scales body positions.
+        let map = Galaxy::demo();
+        let gate0 = map.gates.iter().find(|g| g.id == JumpGateId(0)).expect("gate 0 exists");
+        assert_eq!(gate0.abs_m[0], 3.0 * UNITS_PER_AU);
+        assert_eq!(gate0.abs_m[1], 0.0);
+        assert_eq!(gate0.abs_m[2], 0.0);
+        assert!((gate0.position.x as f64 - 3.0 * UNITS_PER_AU).abs() < 1.0, "x = {}", gate0.position.x);
     }
 
     #[test]

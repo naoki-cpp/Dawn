@@ -167,9 +167,9 @@ mod tests {
             target   : dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)),
             phase    : WarpPhase::Warping,
             auto_jump: false,
-            warp_start  : Position::ORIGIN,
-            warp_total  : 1,
-            warp_elapsed: 0,
+            warp_start_abs: [0.0, 0.0, 0.0],
+            warp_total    : 1,
+            warp_elapsed  : 0,
             warp_arrival_abs: [0.0, 0.0, 0.0],
         }).unwrap();
 

@@ -83,10 +83,10 @@ impl<S: EventStore> SimulationNode<S> {
             target,
             phase: WarpPhase::Aligning,
             auto_jump,
-            warp_start  : Position::ORIGIN,  // set when warp engages (Aligning -> Warping)
-            warp_total  : 0,
-            warp_elapsed: 0,
-            warp_arrival_abs: [0.0, 0.0, 0.0],  // set at engage for Body warps
+            warp_start_abs: [0.0, 0.0, 0.0],  // set when warp engages (Aligning -> Warping)
+            warp_total    : 0,
+            warp_elapsed  : 0,
+            warp_arrival_abs: [0.0, 0.0, 0.0],  // set at engage
         });
         true
     }
@@ -144,21 +144,25 @@ impl<S: EventStore> SimulationNode<S> {
             // destination anchor (Body warps rebase onto that body on arrival,
             // ADR-0029; Gate warps stay on the current anchor).
             let resolved = match warp.target {
+                // Gate arrival is now symmetric with Body (ADR-0029 R1 remnant):
+                // the f64 `abs_m` source feeds the precise arrival point, and the
+                // ship rebases onto whichever body anchor sits nearest the gate
+                // (gates have no anchor of their own — §2 anchors are per-body).
                 WarpTarget::Gate(gate_id) => self.jump_gate(gate_id)
-                    .map(|g| (g.position, g.activation_radius * WARP_ARRIVAL_FACTOR, warp.auto_jump.then_some(gate_id), None)),
+                    .map(|g| (g.position, g.activation_radius * WARP_ARRIVAL_FACTOR, warp.auto_jump.then_some(gate_id), self.anchor_table.nearest_anchor(g.from_sector, g.abs_m), g.abs_m)),
                 WarpTarget::Body(body_id) => self.sector_map.bodies.get(&body_id)
-                    .map(|b| (b.position, b.radius * BODY_WARP_ARRIVAL_FACTOR, None, Some(AnchorId::from(body_id)))),
+                    .map(|b| (b.position, b.radius * BODY_WARP_ARRIVAL_FACTOR, None, Some(AnchorId::from(body_id)), b.abs_m)),
             };
-            let Some((dest_world, arrival, auto_jump_gate, dest_anchor)) = resolved else {
+            let Some((dest_world, arrival, auto_jump_gate, dest_anchor, target_abs)) = resolved else {
                 // Target vanished — cancel and brake.
                 let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
                 self.brake_thrust(entity);
                 continue;
             };
             // Body/gate positions are Sector-frame (== absolute). Express the
-            // destination in the ship's CURRENT anchor frame so the parametric
-            // walk (pos/vel are anchor-relative) is consistent even if the ship
-            // is anchored on a body (ADR-0029). No-op while anchored on the star.
+            // destination in the ship's CURRENT anchor frame for the Aligning-phase
+            // steering check below (direction only, not the precise transit math —
+            // that runs in absolute f64, see warp_step). No-op while anchored on the star.
             let dest_pos = self.dest_in_ship_frame(entity, dest_world);
 
             // Tackle interrupts the aligning phase (ADR-0024): a tackled ship
@@ -180,22 +184,27 @@ impl<S: EventStore> SimulationNode<S> {
                 }
                 // Aligned: engage warp. Fix the parametric plan (start = here,
                 // duration from distance) and take the first step this tick.
+                // The whole transit is planned in absolute f64 (ADR-0029 §1.3):
+                // unlike the old anchor-relative f32 plan, this does not pick up
+                // ulp error from the ship's anchor when the destination sits at
+                // true-AU distance from it (only the per-tick f32 cast back to
+                // PositionComp is lossy, and that loss does not compound).
                 WarpPhase::Aligning => {
                     self.set_warp_phase(entity, WarpPhase::Warping);
-                    let arrival_point = warp_arrival_point(pos, dest_pos, arrival);
-                    let total = warp_total_ticks(pos.distance(arrival_point));
-                    // Precise f64 arrival for Body warps (ADR-0029), stored for
-                    // the rebase at arrival so it doesn't read the coarse f32 pos.
-                    let arrival_abs = self.warp_arrival_abs(entity, dest_anchor, arrival);
+                    let start_abs = self.entity_absolute_f64(entity, pos);
+                    let arrival_abs = self.warp_arrival_abs(entity, target_abs, arrival);
+                    let d = [arrival_abs[0] - start_abs[0], arrival_abs[1] - start_abs[1], arrival_abs[2] - start_abs[2]];
+                    let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                    let total = warp_total_ticks(dist as f32);
                     if let Ok(mut w) = self.world.inner_mut().get::<&mut WarpComp>(entity) {
+                        w.warp_start_abs = start_abs;
                         w.warp_arrival_abs = arrival_abs;
                     }
-                    self.warp_step(entity, ship_id, pos, vel, pos, arrival_point, total, 1, auto_jump_gate, dest_anchor, arrival_abs, tick, &mut events);
+                    self.warp_step(entity, ship_id, pos, vel, start_abs, arrival_abs, total, 1, auto_jump_gate, dest_anchor, tick, &mut events);
                 }
                 // Already warping: advance one tick along the fixed segment plan.
                 WarpPhase::Warping => {
-                    let arrival_point = warp_arrival_point(warp.warp_start, dest_pos, arrival);
-                    self.warp_step(entity, ship_id, pos, vel, warp.warp_start, arrival_point, warp.warp_total, warp.warp_elapsed + 1, auto_jump_gate, dest_anchor, warp.warp_arrival_abs, tick, &mut events);
+                    self.warp_step(entity, ship_id, pos, vel, warp.warp_start_abs, warp.warp_arrival_abs, warp.warp_total, warp.warp_elapsed + 1, auto_jump_gate, dest_anchor, tick, &mut events);
                 }
             }
         }
@@ -203,12 +212,19 @@ impl<S: EventStore> SimulationNode<S> {
         events
     }
 
-    /// One warping-phase step (ADR-0022 amendment): walk the segment from
-    /// `start` to `arrival_point` over `total` ticks with smoothstep easing,
-    /// reaching the destination exactly. This tick is number `elapsed`.
+    /// One warping-phase step (ADR-0022 amendment, ADR-0029 absolute-frame
+    /// transit): walk the segment from `start_abs` to `arrival_abs` — both
+    /// Sector-frame f64 — over `total` ticks with smoothstep easing, reaching
+    /// the destination exactly. This tick is number `elapsed`.
     ///
-    /// Each tick sets `velocity = planned_point - current_pos` and emits a
-    /// `VelocityChanged`, so replay reconstructs the same path purely by
+    /// The eased point is computed in f64 and only cast to f32 once, relative
+    /// to the ship's CURRENT anchor, when writing `PositionComp` — so error
+    /// does not compound across ticks the way repeated f32 lerp did (it is
+    /// still ulp-bounded at true-AU distance from that anchor mid-transit, but
+    /// self-corrects at arrival via the precise rebase, and nothing reads a
+    /// warping ship's exact position — Movement skips it, combat can't target
+    /// it). Each tick sets `velocity = planned_point - current_pos` and emits
+    /// a `VelocityChanged`, so replay reconstructs the same path purely by
     /// `position += velocity` (INV-MOVE) — no direct position writes leak past
     /// the velocity record. The final tick settles and stops (velocity ZERO).
     /// `auto_jump_gate`: if `Some(gate_id)`, queue an auto-jump on arrival.
@@ -219,33 +235,38 @@ impl<S: EventStore> SimulationNode<S> {
         ship_id         : ShipId,
         pos             : Position,
         old_vel         : Velocity,
-        start           : Position,
-        arrival_point   : Position,
+        start_abs       : [f64; 3],
+        arrival_abs     : [f64; 3],
         total           : u32,
         elapsed         : u32,
         auto_jump_gate  : Option<JumpGateId>,
         dest_anchor     : Option<AnchorId>,
-        arrival_abs     : [f64; 3],
         tick            : Tick,
         events          : &mut Vec<DomainEvent>,
     ) {
         let total = total.max(1);
+        let anchor_abs = self.world.ship_anchor(entity).and_then(|a| self.anchor_table.abs(a)).unwrap_or([0.0, 0.0, 0.0]);
         let (new_pos, new_vel, arrived) = if elapsed > total {
             // One tick past the final step: settle and stop. The move tick at
-            // `elapsed == total` already landed exactly on arrival_point (below,
+            // `elapsed == total` already landed exactly on arrival_abs (below,
             // smoothstep(1) = 1), so this just zeroes velocity — keeping the
             // motion velocity-recorded (INV-MOVE) AND the arrival exact.
             (pos, Velocity::ZERO, true)
         } else {
-            // Eased point along the segment this tick; velocity carries the
-            // delta so the move is recorded by VelocityChanged (INV-MOVE).
-            // At elapsed == total, smoothstep(1) = 1 → planned = arrival_point.
-            let s = smoothstep(elapsed as f32 / total as f32);
-            let planned = Position {
-                x: start.x + (arrival_point.x - start.x) * s,
-                y: start.y + (arrival_point.y - start.y) * s,
-                z: start.z + (arrival_point.z - start.z) * s,
-            };
+            // Eased point along the segment this tick, in absolute f64; velocity
+            // carries the delta so the move is recorded by VelocityChanged
+            // (INV-MOVE). At elapsed == total, smoothstep(1) = 1 → planned = arrival_abs.
+            let s = smoothstep(elapsed as f32 / total as f32) as f64;
+            let planned_abs = [
+                start_abs[0] + (arrival_abs[0] - start_abs[0]) * s,
+                start_abs[1] + (arrival_abs[1] - start_abs[1]) * s,
+                start_abs[2] + (arrival_abs[2] - start_abs[2]) * s,
+            ];
+            let planned = Position::new(
+                (planned_abs[0] - anchor_abs[0]) as f32,
+                (planned_abs[1] - anchor_abs[1]) as f32,
+                (planned_abs[2] - anchor_abs[2]) as f32,
+            );
             let v = Velocity {
                 dx: planned.x - pos.x,
                 dy: planned.y - pos.y,
@@ -274,9 +295,9 @@ impl<S: EventStore> SimulationNode<S> {
             self.completed_warps.push(ship_id);
         } else if let Ok(mut w) = self.world.inner_mut().get::<&mut WarpComp>(entity) {
             // Persist the plan + progress for the next tick.
-            w.warp_start   = start;
-            w.warp_total   = total;
-            w.warp_elapsed = elapsed;
+            w.warp_start_abs = start_abs;
+            w.warp_total     = total;
+            w.warp_elapsed   = elapsed;
         }
 
         // Emit VelocityChanged only when velocity actually changed (INV-MOVE).
@@ -341,21 +362,24 @@ impl<S: EventStore> SimulationNode<S> {
         }))
     }
 
-    /// Precise absolute (f64) warp arrival point for a Body warp: `arrival`
-    /// metres short of the body centre along the ship's approach, using the f64
-    /// anchor source (ADR-0029). Returns `[0,0,0]` for Gate warps (no rebase).
-    fn warp_arrival_abs(&self, entity: Entity, dest_anchor: Option<AnchorId>, arrival: f32) -> [f64; 3] {
-        let Some(to) = dest_anchor else { return [0.0, 0.0, 0.0] };
-        let Some(body_abs) = self.anchor_table.abs(to) else { return [0.0, 0.0, 0.0] };
+    /// Precise absolute (f64) warp arrival point: `arrival` metres short of
+    /// `target_abs` along the ship's approach, using the f64 source for the
+    /// warp target — a body centre (`CelestialBodyDef.abs_m`) or a gate
+    /// (`JumpGateDef.abs_m`, ADR-0029 R1). Symmetric for Gate and Body targets.
+    fn warp_arrival_abs(&self, entity: Entity, target_abs: [f64; 3], arrival: f32) -> [f64; 3] {
         let offset = self.world.inner().get::<&PositionComp>(entity).ok().map(|p| p.0).unwrap_or(Position::ORIGIN);
         let start = self.entity_absolute_f64(entity, offset);
-        let d = [body_abs[0] - start[0], body_abs[1] - start[1], body_abs[2] - start[2]];
+        let d = [target_abs[0] - start[0], target_abs[1] - start[1], target_abs[2] - start[2]];
         let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-        if len <= f64::EPSILON {
-            return body_abs;
-        }
         let a = arrival as f64;
-        [body_abs[0] - d[0] / len * a, body_abs[1] - d[1] / len * a, body_abs[2] - d[2] / len * a]
+        // Already inside the arrival ring: stay put rather than overshoot past
+        // `start` away from the target (the old f32 `warp_arrival_point` guarded
+        // the same case before this method became the sole flight target, not
+        // just the rebase point — ADR-0029 absolute-frame transit).
+        if len <= a || len <= f64::EPSILON {
+            return start;
+        }
+        [target_abs[0] - d[0] / len * a, target_abs[1] - d[1] / len * a, target_abs[2] - d[2] / len * a]
     }
 
     /// Convert a Sector-frame (absolute) destination position into the ship's
@@ -434,22 +458,6 @@ impl<S: EventStore> SimulationNode<S> {
             }
         }
     }
-}
-
-/// The point on the segment from `start` toward `dest`, `arrival` units short
-/// of `dest` — where a warp settles (gate ring / body orbit). If the ship is
-/// already inside the arrival ring, returns `start` (no forward motion).
-/// ADR-0022 amendment (parametric warp).
-fn warp_arrival_point(start: Position, dest: Position, arrival: f32) -> Position {
-    let dx = dest.x - start.x;
-    let dy = dest.y - start.y;
-    let dz = dest.z - start.z;
-    let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-    if dist <= arrival || dist < f32::EPSILON {
-        return start;
-    }
-    let f = (dist - arrival) / dist;
-    Position { x: start.x + dx * f, y: start.y + dy * f, z: start.z + dz * f }
 }
 
 /// Warp duration in ticks from the warp distance (start→arrival point), floored
@@ -864,6 +872,40 @@ mod tests {
         assert!(arrived, "a completed gate warp must surface in drain_completed_warps");
         // Drained: it is a per-tick transient, not re-reported.
         assert!(node.drain_completed_warps().is_empty(), "completed warps drain once");
+    }
+
+    #[test]
+    fn gate_warp_arrival_is_symmetric_with_body_warp() {
+        // ADR-0029 R1 remnant: a Gate warp must land via the gate's f64 `abs_m`
+        // source and rebase onto the nearest body anchor on arrival, exactly
+        // like a Body warp does -- not stay pinned to the star with a coarse
+        // f32 arrival point.
+        let mut node = mem_node();
+        let (player, ship_id) = spawn_owned_player_at(&mut node, Position::new(0.0, 0.0, 0.0));
+        assert!(node.apply_warp_command_owned(player, dawn_core::WarpCommand {
+            ship_id, target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+        }));
+
+        for _ in 0..5_000 {
+            node.tick();
+            if node.warp_phase(ship_id).is_none() { break; }
+        }
+        assert!(node.warp_phase(ship_id).is_none(), "gate warp should have completed");
+
+        let gate = node.jump_gate(dawn_core::JumpGateId(0)).expect("demo gate 0 exists").clone();
+        let expected_anchor = node.anchor_table()
+            .nearest_anchor(gate.from_sector, gate.abs_m)
+            .expect("gate sector has at least one anchor");
+        assert_eq!(node.get_ship_anchor(ship_id), Some(expected_anchor),
+            "gate warp arrival should rebase onto the nearest body anchor, same as a body warp");
+
+        // Arrival point must sit `activation_radius * WARP_ARRIVAL_FACTOR`
+        // from the gate's f64 source, not the coarse f32 `position`.
+        let ship_abs = node.ship_absolute(ship_id).expect("ship exists");
+        let d = [ship_abs[0] - gate.abs_m[0], ship_abs[1] - gate.abs_m[1], ship_abs[2] - gate.abs_m[2]];
+        let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        assert!((dist - (gate.activation_radius * WARP_ARRIVAL_FACTOR) as f64).abs() < 1.0,
+            "gate arrival distance from the f64 gate source should match the arrival ring (got {dist})");
     }
 
     // ── Celestial body warp (ADR-0025) ───────────────────────────────────

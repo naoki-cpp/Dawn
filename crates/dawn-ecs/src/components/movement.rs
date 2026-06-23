@@ -44,13 +44,19 @@ pub struct WarpComp {
     /// completes and the ship arrives within the gate's activation radius.
     pub auto_jump: bool,
     /// Parametric warp plan (ADR-0022 amendment, 2026-06-21). Warp walks the
-    /// segment from `warp_start` to the arrival point over `warp_total` ticks
-    /// (smoothstep eased), reaching the destination exactly. These are
+    /// segment from `warp_start_abs` to `warp_arrival_abs` over `warp_total`
+    /// ticks (smoothstep eased), reaching the destination exactly. These are
     /// meaningful only while `phase == Warping`; the `Aligning` phase leaves
-    /// them at their engage-time defaults (start = ORIGIN, total/elapsed = 0).
-    pub warp_start  : Position,
-    pub warp_total  : u32,
-    pub warp_elapsed: u32,
+    /// them at their engage-time defaults (start/arrival = zero, total/elapsed
+    /// = 0). Absolute (Sector-frame) f64, not anchor-relative (ADR-0029): the
+    /// whole transit is interpolated in one frame so it does not pick up f32
+    /// ulp error from the ship's current anchor when the destination sits at
+    /// true-AU distance from it — only the per-tick f32 cast (offset relative
+    /// to the ship's current anchor, written to `PositionComp`) is lossy, and
+    /// that loss does not compound across ticks the way repeated f32 lerp did.
+    pub warp_start_abs  : [f64; 3],
+    pub warp_total      : u32,
+    pub warp_elapsed    : u32,
     /// Exact arrival point in absolute (Sector-frame) metres, f64 (ADR-0029).
     /// Set at engage for Body warps from the f64 anchor source so the arrival
     /// rebase is precise at true-AU distances (the f32 `PositionComp` near a
