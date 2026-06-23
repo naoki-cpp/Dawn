@@ -110,8 +110,8 @@ docs/reference/eve-reference.md は「外部ゲームの事実と示唆の記録
 | CLAUDE.md §1 | 「ゲームではない」を撤回し、ゴール＝ゲーム / 分散基盤＝手段＋優位に再定義。4 本の柱を追記。スコープを「段階的に拡張可（ADR 経由）」に。「実装しない」一覧から経済/市場/キャラ(エンティティ)/UI/グラフィクスを除外し、反グラインド（スキル育成・AFK 採掘）は残す |
 | CLAUDE.md §10 | FBD-008 を撤廃。FBD-009 を「キャラ育成（スキルポイント）と AFK 採掘の禁止」に文言明確化（維持） |
 | CLAUDE.md §11 | 将来クレート表に economy/character/inventory/ui/graphics を「ADR 承認で作成可」として追記（任意） |
-| docs/roadmap.md | ゲーム化フェーズ（戦闘の深み → 世界拡張）を追記（別作業） |
-| docs/game-design.md | 中心原則「意図的判断を増やすか」は維持。4 本の柱を反映（別作業） |
+| docs/process/roadmap.md | ゲーム化フェーズ（戦闘の深み → 世界拡張）を追記（別作業） |
+| docs/design/game-design.md | 中心原則「意図的判断を増やすか」は維持。4 本の柱を反映（別作業） |
 | docs/reference/eve-reference.md | 本 ADR の観測的裏付け（実証ではない・§11.5）。コミットする |
 
 イベントスキーマの変更は**なし**（本 ADR は方針定義のみ。具体機能は各 ADR で）。
@@ -124,7 +124,7 @@ docs/reference/eve-reference.md は「外部ゲームの事実と示唆の記録
 - [x] CLAUDE.md §1 を再定義（人間承認のうえ適用・2026-06-14）
 - [x] CLAUDE.md §10 FBD-008 撤廃 / FBD-009 明確化（人間承認のうえ適用・2026-06-14）
 - [x] docs/reference/eve-reference.md（観測データ）をコミット
-- [x] docs/roadmap.md にゲーム化フェーズを追記（Phase 9 以降の方向性・§10 表）
+- [x] docs/process/roadmap.md にゲーム化フェーズを追記（Phase 9 以降の方向性・§10 表）
 - [x] 近期戦闘 ADR を順次起票（ADR-0022 Warp / ADR-0023 Propulsion / ADR-0024 Tackle / ADR-0025 Celestial Bodies）
 
 ---

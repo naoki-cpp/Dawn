@@ -16,14 +16,14 @@ AI_DEVELOPMENT_GUIDE.md §9 の正典（手続き）であり、ガイド本体�
 □ 変更によって影響を受けるCrateを Dependency DAG（§3）で特定した
 □ 変更が現在のスコープ内であることを確認した（§1）
 □ 変更が Architecture Invariants（§2）のいずれかを破らないことを確認した
-□ 変更が Forbidden Changes（docs/forbidden-changes.md / FBD-001〜009）に
+□ 変更が Forbidden Changes（docs/architecture/forbidden-changes.md / FBD-001〜009）に
   該当しないことを確認した
 ```
 
 ## イベントを追加・変更する場合の追加確認
 
 ```
-□ docs/event-catalog.md の更新を計画した
+□ docs/architecture/event-catalog.md の更新を計画した
 □ 新Eventは dawn-core/src/events.rs に追加した（他のCrateに追加していない）
 □ 新Eventに tick: Tick フィールドが含まれる（ShipMoveカテゴリのEvent）
 □ 新Eventのフィールドは全て Option ではなく必須フィールドで設計した
@@ -31,7 +31,7 @@ AI_DEVELOPMENT_GUIDE.md §9 の正典（手続き）であり、ガイド本体�
 □ 対応する Command が dawn-core/src/commands.rs に存在する
 □ 既存 Event を変更する場合: リリース済みか確認した
   - プレリリース（現在）→ 破壊的変更を直接行ってよい（Upcaster 不要）
-  - リリース以降       → docs/event-schema-evolution.md
+  - リリース以降       → docs/architecture/event-schema-evolution.md
     「リリース以降に破壊的変更が必要な場合の手順」に従う
 ```
 

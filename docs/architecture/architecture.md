@@ -2,7 +2,7 @@
 scope    : システム全体の地図。「何が存在し、どう繋がっているか」を俯瞰する
 audience : AI Agent / Human Developer
 update   : クレート構成が変わったとき / フェーズが進んだとき
-related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, roadmap.md, CLAUDE.md
+related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, ../process/roadmap.md, ../../CLAUDE.md
 ---
 
 # Dawn Architecture
@@ -16,20 +16,20 @@ related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, roadm
 
 - コードを書く前に **CLAUDE.md** を読むこと（不変条件・禁止事項を含む）
 - 設計判断の根拠は **docs/adr/** を参照すること
-- 「何を実装すべきか」は **docs/roadmap.md** を参照すること
+- 「何を実装すべきか」は **docs/process/roadmap.md** を参照すること
 
 ### ドキュメント責務早見表
 
 | ファイル | 答える問い |
 |---|---|
 | `CLAUDE.md` | 何をしてはならないか / 変更前に何を確認するか |
-| `docs/architecture.md` | 全体はどう構成されているか（このファイル） |
-| `docs/entity-model.md` | 何が存在するか（型・フィールド定義） |
-| `docs/event-catalog.md` | 何が起きるか（イベント仕様） |
-| `docs/ownership.md` | 誰が何を管理するか（所有権・状態遷移） |
-| `docs/tick-model.md` | いつ・どの順番で処理されるか |
-| `docs/roadmap.md` | 何を・どの順番で作るか |
-| `docs/game-design.md` | なぜその機能を作るか / EVE からの教訓・将来機能候補 |
+| `docs/architecture/architecture.md` | 全体はどう構成されているか（このファイル） |
+| `docs/architecture/entity-model.md` | 何が存在するか（型・フィールド定義） |
+| `docs/architecture/event-catalog.md` | 何が起きるか（イベント仕様） |
+| `docs/architecture/ownership.md` | 誰が何を管理するか（所有権・状態遷移） |
+| `docs/architecture/tick-model.md` | いつ・どの順番で処理されるか |
+| `docs/process/roadmap.md` | 何を・どの順番で作るか |
+| `docs/design/game-design.md` | なぜその機能を作るか / EVE からの教訓・将来機能候補 |
 | `docs/adr/` | なぜそう決めたか（変更不可の判断記録） |
 
 ---
@@ -56,7 +56,7 @@ EVE Online を**超えるゲーム**を作ることが目的（ADR-0016）。
 ノード間ネットワーク: TCP LAN plaintext（8D マイルストーン。TLS は次フェーズ）
 ```
 
-→ 詳細は [ADR-0003](./adr/ADR-0003-local-first-development.md) / [ADR-0027](./adr/ADR-0027-dawn-replication-crate.md) を参照。
+→ 詳細は [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/ADR-0027-dawn-replication-crate.md) を参照。
 
 ### 将来のスコープ（方向性のみ、未実装）
 
@@ -102,7 +102,7 @@ dawn-core
 ```
 
 依存は**下から上への一方向のみ**。逆方向・循環は設計の失敗を意味する。
-→ 詳細ルールは [CLAUDE.md §3](../CLAUDE.md) を参照。
+→ 詳細ルールは [CLAUDE.md §3](../../CLAUDE.md) を参照。
 
 ### クレートへの依存追加ルール
 
@@ -150,7 +150,7 @@ Event 生成 → EventStore に Append
 ```
 
 Command と Event は別の型として完全に分離する。
-→ フローの詳細は [CLAUDE.md §4](../CLAUDE.md) / イベント仕様は [event-catalog.md](./event-catalog.md) を参照。
+→ フローの詳細は [CLAUDE.md §4](../../CLAUDE.md) / イベント仕様は [event-catalog.md](./event-catalog.md) を参照。
 
 ---
 
@@ -320,7 +320,7 @@ EventStore trait は引き続き append-only（FBD-001。truncate / delete / rew
   ① snapshot → restore → snapshot がバイト一致（round-trip）
   ② snapshot + 末尾 Tick の再実行 == その時点の live 状態
 
-→ 詳細は [ADR-0017](./adr/ADR-0017-snapshot-compaction.md) / [CLAUDE.md §2 INV-002](../CLAUDE.md) を参照。
+→ 詳細は [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [CLAUDE.md §2 INV-002](../../CLAUDE.md) を参照。
 Read Model（§5-B）の off-path 再構築とは別物である（あちらは監査経路の任意再生）。
 
 ---
@@ -329,9 +329,9 @@ Read Model（§5-B）の off-path 再構築とは別物である（あちらは�
 
 | 制約 | 理由 | 根拠 ADR |
 |---|---|---|
-| Single Process のみ | ドメインロジックの正しさを先に確立する | [ADR-0003](./adr/ADR-0003-local-first-development.md) |
-| ノード間ネットワーク不使用 | In-Memory Channel で十分な段階 | [ADR-0003](./adr/ADR-0003-local-first-development.md) |
-| エンティティは Ship のみ（Fitting / Combat / Capacitor 含む） | MVP スコープの制限 | [CLAUDE.md §1](../CLAUDE.md) |
+| Single Process のみ | ドメインロジックの正しさを先に確立する | [ADR-0003](../adr/ADR-0003-local-first-development.md) |
+| ノード間ネットワーク不使用 | In-Memory Channel で十分な段階 | [ADR-0003](../adr/ADR-0003-local-first-development.md) |
+| エンティティは Ship のみ（Fitting / Combat / Capacitor 含む） | MVP スコープの制限 | [CLAUDE.md §1](../../CLAUDE.md) |
 
 ---
 

@@ -12,7 +12,7 @@
   永続化されたイベントログを持つ外部ユーザーが存在しない。
   → 破壊的変更（フィールド削除・型変更・イベント削除）を直接行ってよい。
   → Upcaster・V2 命名・Deprecated マークは不要。
-  → ただし docs/event-catalog.md と AI_DEVELOPMENT_GUIDE.md は常に実態と合わせること。
+  → ただし docs/architecture/event-catalog.md と AI_DEVELOPMENT_GUIDE.md は常に実態と合わせること。
 
 リリース以降（本番ログが存在する段階）:
   外部ユーザーのイベントログが存在する。
@@ -95,14 +95,14 @@ pub struct WeaponFired {
 
 4. Replay 時に Upcaster を通して新形式に変換する
 
-5. docs/event-catalog.md を更新する
+5. docs/architecture/event-catalog.md を更新する
 
 6. 対応する ADR を作成する（既存 ADR の更新ではなく新規作成）
 ```
 
 ## Event Catalog との同期
 
-`docs/event-catalog.md` が Event の唯一の仕様書である。
+`docs/architecture/event-catalog.md` が Event の唯一の仕様書である。
 フェーズにかかわらず、コードの変更と同時に更新すること。
 
 ```bash

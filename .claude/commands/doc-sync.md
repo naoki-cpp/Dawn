@@ -12,7 +12,7 @@
 ### Step 1: イベント定義の照合
 
 `dawn-core/src/events.rs` の `DomainEvent` enum を読み、
-`docs/event-catalog.md` のイベント一覧と照合する。
+`docs/architecture/event-catalog.md` のイベント一覧と照合する。
 
 確認項目:
 - コードにあってカタログにないイベント → カタログに追記
@@ -33,7 +33,7 @@ Grep で `実装チェックリスト` を含むファイルを特定してか�
 ### Step 3: Tick 処理順序の照合
 
 `crates/dawn-sector/src/node/tick.rs` の `tick_with_lock_commands()` メソッドの処理順を読み、
-`docs/tick-model.md` §3「Tick 内の処理ステップ」と照合する。
+`docs/architecture/tick-model.md` §3「Tick 内の処理ステップ」と照合する。
 
 確認項目:
 - ステップの順序・数・内容が実装と一致しているか
@@ -42,7 +42,7 @@ Grep で `実装チェックリスト` を含むファイルを特定してか�
 
 ### Step 4: ロードマップの照合
 
-`docs/roadmap.md` を読み、完了フラグ（`[x]` / `✅`）が実態と合っているか確認する。
+`docs/process/roadmap.md` を読み、完了フラグ（`[x]` / `✅`）が実態と合っているか確認する。
 
 確認項目:
 - 実装済みなのに `[ ]` のままのタスク → `[x]` に更新
@@ -60,14 +60,14 @@ Grep で `実装チェックリスト` を含むファイルを特定してか�
 - §11「Crate別責務早見表」に全クレートが載っているか、禁止依存が変わっていないか
 - フッターの「最終更新日」「対応ADR範囲」が古くなっていないか
 - ADR-0030 で正典を外部化したセクションの**ポインタとリンクが生きているか**:
-  §7 → `docs/event-schema-evolution.md` / §9 → `/ai-change-checklist` スキル /
-  §10 → `docs/forbidden-changes.md`（FBD-00x ID 一覧がガイドと一致）/
-  §12 → `docs/design-violations.md`。これらの参照先ファイルが存在し、ガイド側の
+  §7 → `docs/architecture/event-schema-evolution.md` / §9 → `/ai-change-checklist` スキル /
+  §10 → `docs/architecture/forbidden-changes.md`（FBD-00x ID 一覧がガイドと一致）/
+  §12 → `docs/architecture/design-violations.md`。これらの参照先ファイルが存在し、ガイド側の
   要約・ID 一覧と矛盾しないことを確認する。
 
 ### Step 6: プレイヤー向けドキュメントの照合
 
-`docs/playtest-guide.md` を読み、現在のキー操作・機能と一致しているか確認する。
+`docs/process/playtest-guide.md` を読み、現在のキー操作・機能と一致しているか確認する。
 
 確認項目:
 - キーバインドが `client/scripts/main.gd` の実装と一致しているか
@@ -75,8 +75,8 @@ Grep で `実装チェックリスト` を含むファイルを特定してか�
 
 ### Step 7: 設計ドキュメント群の照合
 
-`docs/architecture.md` / `docs/entity-model.md` / `docs/ownership.md` /
-`docs/game-design.md` を読み、実装状況の記述が実態と合っているか確認する。
+`docs/architecture/architecture.md` / `docs/architecture/entity-model.md` / `docs/architecture/ownership.md` /
+`docs/design/game-design.md` を読み、実装状況の記述が実態と合っているか確認する。
 
 確認項目:
 - architecture.md: クレート一覧・依存 DAG に全クレートが載っているか

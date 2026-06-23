@@ -298,9 +298,9 @@ Tick 駆動タイマー（決定 5）と整合しない。
 - [x] `src/events.rs` に `SectorTransitRequested` / `Completed` / `Aborted` 追加
 - [x] `src/commands.rs` に `TransitCommand` 追加
 - [x] 各型に単体テスト追加
-- [x] `docs/event-catalog.md` 更新（§3.6 の予約 `SectorTransitRejected` を
+- [x] `docs/architecture/event-catalog.md` 更新（§3.6 の予約 `SectorTransitRejected` を
       `SectorTransitAborted` にリネームし、型定義済みへ移行）
-- [x] `docs/tick-model.md` §3 に Step 7.5（実装済み・Tick ハンドラ冒頭）/ Step 10 を追記
+- [x] `docs/architecture/tick-model.md` §3 に Step 7.5（実装済み・Tick ハンドラ冒頭）/ Step 10 を追記
 - [x] CLAUDE.md §6 に Step 10 を追記（人間の承認を得て）
 
 ### dawn-consensus（新規クレート）
@@ -328,7 +328,7 @@ Tick 駆動タイマー（決定 5）と整合しない。
   - [x] INV-002: Transit 後の状態がSnapshot + Log Replayで完全再現される
   - [x] 完了基準そのもの: 旧Leaderの障害中に提案されたTransitが、
         新Leader選出後に完遂する（`transit_completes_after_a_new_leader_is_elected_during_node_failure`）
-- [x] ベンチマーク: Transit 1 回のレイテンシ（docs/benchmark-baseline.md に追記）
+- [x] ベンチマーク: Transit 1 回のレイテンシ（docs/process/benchmark-baseline.md に追記）
 
 ---
 
@@ -337,5 +337,5 @@ Tick 駆動タイマー（決定 5）と整合しない。
 - CLAUDE.md §1（中心仮説: CRDT と Raft の責務分離）, §3, §5, INV-003, INV-005, INV-006, FBD-003, FBD-004, FBD-006
 - ADR-0002: Actor モデル（tokio primitive 自前実装の先例）
 - ADR-0003: Local-First（In-Process トランスポートの根拠）
-- docs/roadmap.md §10: Phase 7 完了基準
+- docs/process/roadmap.md §10: Phase 7 完了基準
 - Diego Ongaro, John Ousterhout — "In Search of an Understandable Consensus Algorithm" (Raft paper)

@@ -2,7 +2,7 @@
 scope    : Phase 6 プレイテスト計画。セッション設計・メトリクス・バランス判定基準
 audience : Human Developer / AI Agent
 update   : セッション実施後に結果を追記する / バランス調整のたびに基準を見直す
-related  : game-design.md, roadmap.md, data/ship_types.toml, data/modules.toml
+related  : ../design/game-design.md, roadmap.md, data/ship_types.toml, data/modules.toml
 ---
 
 # Playtest Guide
@@ -375,7 +375,7 @@ total_events_per_tick       — Tick あたりのイベント数（負荷確認�
 
 ## 参照
 
-- `game-design.md` — ゲームデザイン方針・Capacitor 設計案
+- `../design/game-design.md` — ゲームデザイン方針・Capacitor 設計案
 - `data/ship_types.toml` — 船種バランスデータ（調整対象）
 - `data/modules.toml` — モジュールデータ（調整対象）
 - `roadmap.md` — Phase 6 の位置づけと Phase 7 への移行条件

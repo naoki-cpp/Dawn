@@ -4,7 +4,7 @@ title   : AoI のための静的セルグリッド（3×3×3 隣接可視）
 status  : accepted
 date    : 2026-06-15
 deciders: [human, ai-agent]
-related : ADR-0018（負荷ヒエラルキー / 局所 TiDi）, ADR-0016（柱① 大規模リアルタイム戦闘）, CLAUDE.md §2 INV-002 / INV-MOVE / INV-003, docs/architecture.md §5-B（Interest Management）, docs/reference/eve-reference.md
+related : ADR-0018（負荷ヒエラルキー / 局所 TiDi）, ADR-0016（柱① 大規模リアルタイム戦闘）, CLAUDE.md §2 INV-002 / INV-MOVE / INV-003, docs/architecture/architecture.md §5-B（Interest Management）, docs/reference/eve-reference.md
 ---
 
 # ADR-0019 — AoI のための静的セルグリッド（3×3×3 隣接可視）

@@ -2,7 +2,7 @@
 scope    : Godot クライアント（client/scripts/）の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : クライアント側で大規模リファクタ実施後 / 新スクリプト追加時
-related  : docs/architecture-review-server.md（サーバー側）, docs/architecture.md, docs/playtest-guide.md
+related  : docs/architecture/architecture-review-server.md（サーバー側）, docs/architecture/architecture.md, docs/process/playtest-guide.md
 date     : 2026-06-23（ADR-0029 真スケール座標後にファイルサイズ一覧を再計測）
 ---
 

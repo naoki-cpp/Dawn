@@ -2,7 +2,7 @@
 scope    : 何を・どの順番で・なぜその順番で作るか。現在地と次のステップの明示
 audience : AI Agent / Human Developer
 update   : フェーズ完了時 / タスクが完了するたびに更新する
-related  : architecture.md, CLAUDE.md §1
+related  : ../architecture/architecture.md, CLAUDE.md §1
 ---
 
 > **CLAUDE.md レビュータイミング**
@@ -51,7 +51,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
                 残り 8B（Fission / LoD=ADR-0020 deferred / 越境 TiDi / SLA イベント化）は
                 独立 ADR か 8D 連動で後続（§10「Phase 8B 一区切り」ボックス参照）。
                 次の前進先: 8D（物理ノード分散）か 戦闘の深み（ADR-0016 §5: Tackle 〜 Logistics）。
-                Sector キャパシティの悪用対策は docs/game-design.md §8 を参照。
+                Sector キャパシティの悪用対策は docs/design/game-design.md §8 を参照。
 ```
 
 ### 完了済みフェーズ
@@ -70,7 +70,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 - ✅ Godot クライアント構造リファクタ + テスト基盤（2026-06-21）— `main.gd` の god object を
   `HudManager`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder` の4クラスへ分割
   （1661→1094行）。`scripts/setup-godot.*` で pin 済み Godot CLI を取得し GdUnit4 を導入、
-  計58ケースを実行確認（詳細: `docs/architecture-review-client.md`）。モジュール
+  計58ケースを実行確認（詳細: `docs/architecture/architecture-review-client.md`）。モジュール
   ON/OFF→CAP!誤表示のバグ修正も含む。Rust側は343テスト全パス
 
 ### Phase 4 卒業記録（ADR-0007 §6）
@@ -393,7 +393,7 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 
 ## 9. Phase 7 — 分散コンセンサス（Raft）✅
 
-設計: [ADR-0014](./adr/ADR-0014-raft-consensus.md)（accepted）
+設計: [ADR-0014](../adr/ADR-0014-raft-consensus.md)（accepted）
 完了基準: ノード障害後に Sector Transit が正しく完了する → **達成**
 （`transit_completes_after_a_new_leader_is_elected_during_node_failure` で検証）
 ★ ADR-0009（星系間ナビゲーション）はこのフェーズ完了後に実装する
@@ -419,8 +419,8 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 
 > 本フェーズは 2026-06-14 の設計変更を反映して詳細化した（旧版は「方向性のみ」だった）。
 > 対応 ADR は **方針確定済み・コード実装は本フェーズで行う**。
-> 関連: ADR-0017（スナップショット圧縮・2層ログ）, ADR-0018（局所 TiDi）, docs/tick-model.md §8,
-> docs/game-design.md §8, docs/reference/eve-reference.md §8–§11。
+> 関連: ADR-0017（スナップショット圧縮・2層ログ）, ADR-0018（局所 TiDi）, docs/architecture/tick-model.md §8,
+> docs/design/game-design.md §8, docs/reference/eve-reference.md §8–§11。
 
 **完了基準（ADR-0018 で更新。旧「5,000 ships 上限で常に SLA」は撤回）:**
 

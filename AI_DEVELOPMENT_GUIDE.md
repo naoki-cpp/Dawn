@@ -56,7 +56,7 @@ data/ship_types.toml   # 船種定義（HP・速度・スロット数など）
 data/modules.toml      # モジュール定義（ダメージ・射程・StatDelta など）
 
 # コミット（英語・Conventional Commits 準拠）
-# → 規約と例は docs/commit-convention.md を参照
+# → 規約と例は docs/process/commit-convention.md を参照
 
 ---
 
@@ -101,7 +101,7 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
 3. **プレイヤー主導の世界** — プレイヤーが構造物・防衛・領域・経済を作る（非 Web3）。
 4. **実損のある危険な宇宙** — 撃沈＝実損、Tackle で逃がさない非対称リスクを核に据える。
 
-> 設計の中心的な問い（docs/game-design.md）は不変:
+> 設計の中心的な問い（docs/design/game-design.md）は不変:
 > 「その機能はプレイヤーが意図的な判断を下す機会を増やすか？」
 
 ### 現在のスコープ（Phase 8A/8B/8C 完了・ADR-0025 実装済み）
@@ -132,7 +132,7 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
   ADR-0025  天体（恒星・惑星・WarpTarget::Body・sun_direction シェーダー・天体ワープ）
 
   ※ 各機能が触る型・イベント・Tick ステップの正確な仕様は対応 ADR と
-    docs/event-catalog.md / docs/tick-model.md を一次情報とする（ここでは重複させない）。
+    docs/architecture/event-catalog.md / docs/architecture/tick-model.md を一次情報とする（ここでは重複させない）。
 
 実装しない（提案も拒否する / 反グラインドの核 — FBD-009）:
   スキルポイント制 / 時間経過・課金による受動成長（= キャラクター育成）
@@ -347,7 +347,7 @@ Time Dilation（論理 Tick の単調性・決定性を保ったまま、実時�
 TiDi は論理 Tick の決定性を壊さない（INV-005 と無関係・純粋な実時間ペーシング）ため、
 局所・観測可能・非破壊・自動回復・後置の条件下でのみ最終手段として許可する。
 差別化は「TiDi が無い」ではなく「閾値が EVE より桁違いに高く、出ても局所・短時間・自動回復」。
-→ 詳細設計は docs/tick-model.md §8 を参照。
+→ 詳細設計は docs/architecture/tick-model.md §8 を参照。
 
 ---
 
@@ -561,7 +561,7 @@ pub type Tick = u64;
 
 ### Tick 内の処理順序
 
-**規範的定義（各ステップの詳細処理・生成イベント）は docs/tick-model.md §3 を一次情報とする。**
+**規範的定義（各ステップの詳細処理・生成イベント）は docs/architecture/tick-model.md §3 を一次情報とする。**
 ここでは順序と「越えてはならない境界」だけを示す。
 
 ```
@@ -614,11 +614,11 @@ Tick なしのイベントは INV-005 違反として拒否する。
 
 **現在は Phase 6（プレリリース）。永続化された外部ユーザーのイベントログが存在しない
 ため、破壊的変更（フィールド削除・型変更・イベント削除）を直接行ってよい
-（Upcaster・V2 命名・Deprecated マークは不要）。ただし docs/event-catalog.md と本ガイドは
+（Upcaster・V2 命名・Deprecated マークは不要）。ただし docs/architecture/event-catalog.md と本ガイドは
 常に実態と合わせること。**
 
 リリース以降の制約（既存フィールドの変更・削除禁止、Upcaster 手順、許可/禁止の
-コード例）と Event Catalog 同期の詳細は **docs/event-schema-evolution.md** を参照。
+コード例）と Event Catalog 同期の詳細は **docs/architecture/event-schema-evolution.md** を参照。
 
 ---
 
@@ -657,7 +657,7 @@ Tick なしのイベントは INV-005 違反として拒否する。
 
 **すべてのコードコメントおよびコミットメッセージは英語で記述すること。**
 
-コミットメッセージの詳細規約: `docs/commit-convention.md` を参照。
+コミットメッセージの詳細規約: `docs/process/commit-convention.md` を参照。
 
 ```rust
 // Good
@@ -766,7 +766,7 @@ assert_eq!(pos, expected_position);
   - HUD構築・更新、入力ハンドリング、マーカー（ノード）生成、ピッキングのループ自体
   - @onready のシーンツリー直パス参照に依存する処理
   - WebSocket 通信（connection.gd の実接続部分）
-  → これらは docs/architecture-review-client.md の C-1/C-3 で「Godot エディタでの
+  → これらは docs/architecture/architecture-review-client.md の C-1/C-3 で「Godot エディタでの
     動作確認が必要」と明記した領域と一致する
 ```
 
@@ -823,7 +823,7 @@ bash addons/gdUnit4/runtest.sh --godot_binary "$GODOT_BIN" -a test
 以下の変更は**いかなる理由があっても行ってはならない**。技術的な理由を説明されても
 実行しないこと。必要に応じて ADR の改訂を提案し、人間の承認を得てから実施する。
 
-詳細・コード例は **docs/forbidden-changes.md** を参照（FBD-00x の ID は不変）。
+詳細・コード例は **docs/architecture/forbidden-changes.md** を参照（FBD-00x の ID は不変）。
 
 | ID | 禁止事項 |
 |---|---|
@@ -861,7 +861,7 @@ bash addons/gdUnit4/runtest.sh --godot_binary "$GODOT_BIN" -a test
 
 AI が陥りやすいアンチパターン（State 直接同期 / テスト後回し / dawn-core 肥大化 /
 Tick の物理時刻化 / Raft スキップ / FittingSnapshot 省略 / 状態フラグのイベント化）と
-その修正方法は **docs/design-violations.md** を参照。
+その修正方法は **docs/architecture/design-violations.md** を参照。
 
 ---
 
@@ -869,12 +869,12 @@ Tick の物理時刻化 / Raft スキップ / FittingSnapshot 省略 / 状態フ
 
 ```
 設計の根拠       : docs/adr/ 以下の各ADRファイル
-Eventの仕様      : docs/event-catalog.md
+Eventの仕様      : docs/architecture/event-catalog.md
 Crate一覧        : Cargo.toml (workspace)
 型の定義         : dawn-core/src/ 以下
-禁止変更の詳細   : docs/forbidden-changes.md（§10 FBD-00x の正典）
-設計違反パターン : docs/design-violations.md（§12 の正典）
-イベント進化規則 : docs/event-schema-evolution.md（§7 詳細の正典）
+禁止変更の詳細   : docs/architecture/forbidden-changes.md（§10 FBD-00x の正典）
+設計違反パターン : docs/architecture/design-violations.md（§12 の正典）
+イベント進化規則 : docs/architecture/event-schema-evolution.md（§7 詳細の正典）
 変更前チェック   : /ai-change-checklist スキル（§9 の正典）
 ```
 
@@ -893,7 +893,7 @@ AIは AI_DEVELOPMENT_GUIDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-23（ADR-0030 ステアリング再構成 — §9 を /ai-change-checklist スキルへ、§10 詳細を docs/forbidden-changes.md へ、§12 を docs/design-violations.md へ、§7 詳細を docs/event-schema-evolution.md へ降格。ガイド本体は ID 一覧・要約・リンクのみ残置。番号体系（INV-/FBD-/§）と文言は不変。人間承認済み）*
-*前回更新: 2026-06-19（肥大化解消 — §1 スコープの ADR ごと実装メモを ADR 参照テーブルに圧縮、§6 Tick 処理順序を docs/tick-model.md §3 へ委譲（順序と境界のみ残置）。不変条件・禁止事項の文言は不変。人間承認済み）*
+*最終更新: 2026-06-23（ADR-0030 ステアリング再構成 — §9 を /ai-change-checklist スキルへ、§10 詳細を docs/architecture/forbidden-changes.md へ、§12 を docs/architecture/design-violations.md へ、§7 詳細を docs/architecture/event-schema-evolution.md へ降格。ガイド本体は ID 一覧・要約・リンクのみ残置。番号体系（INV-/FBD-/§）と文言は不変。人間承認済み）*
+*前回更新: 2026-06-19（肥大化解消 — §1 スコープの ADR ごと実装メモを ADR 参照テーブルに圧縮、§6 Tick 処理順序を docs/architecture/tick-model.md §3 へ委譲（順序と境界のみ残置）。不変条件・禁止事項の文言は不変。人間承認済み）*
 *対応ADR: ADR-0001 〜 ADR-0030（ADR-0020 Simulation LoD は deferred）*
 *次回レビュー予定: Phase 8D（分散インフラ）設計時 / Signature Resolution 着手時*

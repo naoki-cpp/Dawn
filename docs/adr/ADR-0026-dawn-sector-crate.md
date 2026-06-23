@@ -5,7 +5,7 @@ status  : accepted
 date    : 2026-06-19
 deciders: [human, ai-agent]
 related : CLAUDE.md §3（Dependency DAG）, CLAUDE.md §11（Crate別責務早見表）,
-          ADR-0016（Game Vision）, docs/architecture-review-server.md（P3 完了後の課題）
+          ADR-0016（Game Vision）, docs/architecture/architecture-review-server.md（P3 完了後の課題）
 ---
 
 # ADR-0026 — dawn-sector クレート新設
@@ -128,7 +128,7 @@ Phase 3（P3-1/P3-2）で実施済みの方向。サブモジュール化はで�
 - [x] `cargo build --workspace` 成功確認
 - [x] `cargo test --workspace` 全通過確認
 - [x] CLAUDE.md §3（Dependency DAG）・§11（Crate別責務早見表）を更新
-- [x] `docs/architecture-review-server.md` を更新（C-1 の根本対処として記録）
+- [x] `docs/architecture/architecture-review-server.md` を更新（C-1 の根本対処として記録）
 
 ## 期待効果
 

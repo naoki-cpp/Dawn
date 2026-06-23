@@ -2,7 +2,7 @@
 scope    : Phase 7 着手前のパフォーマンス基準値の記録
 audience : AI Agent / Human Developer
 update   : フェーズ完了時にベンチマークを再実行して追記する
-related  : tick-model.md, roadmap.md
+related  : ../architecture/tick-model.md, roadmap.md
 ---
 
 # Benchmark Baseline

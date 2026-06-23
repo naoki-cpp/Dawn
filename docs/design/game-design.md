@@ -2,7 +2,7 @@
 scope    : ゲームデザイン方針。EVE Online から学んだ教訓と、このプロジェクトへの応用
 audience : Human Developer / AI Agent
 update   : 新機能を設計するとき / フィードバックに基づいて方針を変えるとき
-related  : roadmap.md, CLAUDE.md §1, docs/adr/ADR-0006
+related  : ../process/roadmap.md, CLAUDE.md §1, docs/adr/ADR-0006
 ---
 
 # Game Design
@@ -551,7 +551,7 @@ EVE Online よりさらに厳しい損失設計。「何もかも失う可能性
 このプロジェクトへの応用:
   リスポーン設計で活かす。
   即時復帰より「失うものがある」設計が戦術的判断を生む。
-  → docs/game-design.md §4 リスポーン設計参照
+  → docs/design/game-design.md §4 リスポーン設計参照
 ```
 
 ---

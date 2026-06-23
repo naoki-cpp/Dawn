@@ -106,6 +106,6 @@ cargo test --workspace
 ## 完了報告
 
 - 直したことと見送ったこと（理由つき）を簡潔にまとめる。
-- 変更があればコミットする（英語・Conventional Commits / docs/commit-convention.md）。
+- 変更があればコミットする（英語・Conventional Commits / docs/process/commit-convention.md）。
   例: `refactor(dawn-simulation): <file> のホットスポット整理（churn 上位）`
 - コミット前に必ずユーザーへ可否を確認する。

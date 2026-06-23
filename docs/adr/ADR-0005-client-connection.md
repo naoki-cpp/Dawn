@@ -158,4 +158,4 @@ Phase 5 移行時には ADR-0007 に従って対応する。
 - ADR-0007: マルチプレイヤー対応設計（Phase 5）
 - CLAUDE.md FBD-002: dawn-core への外部依存禁止
 - CLAUDE.md FBD-004: Actor 間の直接メソッド呼び出し禁止
-- docs/architecture.md §5-A: ClientConnection の詳細
+- docs/architecture/architecture.md §5-A: ClientConnection の詳細
