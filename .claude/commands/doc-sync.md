@@ -66,8 +66,10 @@ roadmap.md 本体には §2 の要約と進行中フェーズ（現在は §10 P
 - ADR-0030 で正典を外部化したセクションの**ポインタとリンクが生きているか**:
   §7 → `docs/architecture/event-schema-evolution.md` / §9 → `/ai-change-checklist` スキル /
   §10 → `docs/architecture/forbidden-changes.md`（FBD-00x ID 一覧がガイドと一致）/
-  §12 → `docs/architecture/design-violations.md`。これらの参照先ファイルが存在し、ガイド側の
-  要約・ID 一覧と矛盾しないことを確認する。
+  §12 → `docs/architecture/design-violations.md` / §8 GdUnit4 詳細 → `docs/process/godot-client-testing.md`。
+  これらの参照先ファイルが存在し、ガイド側の要約・ID 一覧と矛盾しないことを確認する。
+- ガイド冒頭が単一の H1 見出しであること、コードフェンスの外に裸の `#` 行（Markdown 見出し
+  と誤認される）が残っていないことを確認する（2026-06-23 に発見・修正した不具合）。
 
 ### Step 6: プレイヤー向けドキュメントの照合
 

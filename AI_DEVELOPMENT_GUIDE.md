@@ -1,10 +1,6 @@
-# AI_DEVELOPMENT_GUIDE.md
+# dawn プロジェクト AI開発ガイド
 
 This file provides guidance to AI coding agents when working with code in this repository.
-
----
-
-# dawn プロジェクト AI開発ガイド
 
 このファイルはAIエージェントが本プロジェクトを安全に継続開発するための
 **唯一の権威ある運用規約**である。
@@ -54,6 +50,7 @@ cargo run -p dawn-simulation --bin simulate --release -- --aoi-bench  # AoI ス�
 
 **WebSocket サーバー起動後の接続先**: `ws://127.0.0.1:7878`
 
+```
 # ゲームバランス調整（リビルド不要）
 # data/ ディレクトリの TOML を編集してサーバーを再起動するだけでよい
 # ファイルが見つからない場合は ship_types.rs / modules.rs のデフォルト値を使用
@@ -62,6 +59,7 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
 
 # コミット（英語・Conventional Commits 準拠）
 # → 規約と例は docs/process/commit-convention.md を参照
+```
 
 ---
 
@@ -749,67 +747,13 @@ assert_eq!(pos, expected_position);
 
 **`client/scripts/` を変更するときは、可能な範囲でテストを伴わせること。**
 テストフレームワークは [GdUnit4](https://github.com/MikeSchulze/gdUnit4)。
-`client/addons/` は `.gitignore` 対象（各開発者が Godot エディタの AssetLib から
-個別にインストールする想定）なので、**初回はエディタの AssetLib タブで
-「GdUnit4」を検索してインストールし、`project.godot` の Plugins でこのアドオンを
-有効化**すること（`enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg")`
-は既にコミット済み。アドオン本体だけが各マシンでの個別インストール対象）。
-テストは `client/test/` 以下に `<対象ファイル>_test.gd` として置く（例: `client/test/main_test.gd`）。
+クライアント側はサーバー側（Rustクレート）と違い**全コードをテストできるわけではない**
+（シーンツリー無依存の純粋関数のみテスト可能。HUD構築・入力ハンドリング・WebSocket通信
+等は Godot エディタでの目視確認に委ねる）。**新しい純粋関数を追加・抽出するときはテストも
+同じ変更に含め、シーンツリー依存のロジックを変更したときは PR 説明に確認内容を明記する。**
 
-クライアント側はサーバー側（Rustクレート）と違い**全コードをテストできるわけではない**。
-判断基準は以下の通り:
-
-```
-テスト可能（シーンツリー無依存の純粋関数・ロジック）:
-  - 座標変換、レイ/距離計算、配列・辞書を入出力とする計算
-  - 例: _server_to_godot_pos() / _ray_point_distance() / _spectral_color() /
-        _compute_warp_snap_pos_core()（client/test/main_test.gd 参照）
-  - スクリプトを .new() でシーンツリーに追加せずインスタンス化すれば _ready() は
-    呼ばれないため、@onready 変数を使わない関数なら安全にテストできる
-
-テスト不能・対象外（Godot エディタでの目視確認に委ねる）:
-  - HUD構築・更新、入力ハンドリング、マーカー（ノード）生成、ピッキングのループ自体
-  - @onready のシーンツリー直パス参照に依存する処理
-  - WebSocket 通信（connection.gd の実接続部分）
-  → これらは docs/architecture/architecture-review-client.md の C-1/C-3 で「Godot エディタでの
-    動作確認が必要」と明記した領域と一致する
-```
-
-**新しい純粋関数を `main.gd` 等に追加・抽出するときは、テストも同じ変更に含めること。**
-逆に、シーンツリー依存のロジックを変更したときは、テストを書けない代わりに
-「Godot エディタで何を確認したか」を PR 説明に明記する（実機検証ができないAIセッションの
-場合は、その旨と推奨される手動確認手順を明記する）。
-
-**Godot バイナリの取得**: リポジトリには Godot 本体を含めない（uv/pyenv 的に、
-`.godot-version` でバージョンを pin し、各マシンが個別に取得する）。
-
-```bash
-scripts/setup-godot.sh             # .godot-version の指定版を .tools/godot/ に取得・SHA512検証
-# Windows PowerShell:
-scripts/setup-godot.ps1
-```
-
-CLI 実行（取得した Godot バイナリで GdUnit4 を走らせる。作業ディレクトリは `client/`）:
-
-```bash
-cd client
-GODOT_BIN="$(../scripts/setup-godot.sh --print)"
-bash addons/gdUnit4/runtest.sh --godot_binary "$GODOT_BIN" -a test
-```
-
-> **既知の互換性問題（GdUnit4 v6.1.3 × Godot 4.6系）**: GdUnit4 v6.1.3
-> （AssetLib 配布版）は Godot 4.6 の破壊的変更（`FileAccess.get_as_text()` の
-> `skip_cr` 引数削除、`debug/gdscript/warnings/exclude_addons` 設定の廃止。
-> upstream issue GD-1004、master では修正済みだが本タグには未反映）に未対応で、
-> そのままでは CLI 実行が失敗する。`client/addons/` は `.gitignore` 対象（各マシン
-> ローカルインストール）なので、AssetLib でインストールした直後に以下の2点を
-> **ローカルで手動パッチする**こと（再インストール時は再適用が必要）:
->   - `addons/gdUnit4/src/core/GdUnitFileAccess.gd:199`:
->     `file.get_as_text(true)` → `file.get_as_text()`
->   - `addons/gdUnit4/plugin.gd:17`:
->     `ProjectSettings.get_setting("debug/gdscript/warnings/exclude_addons")` に
->     第2引数 `false`（デフォルト値）を追加
-> 次に GdUnit4 が 4.6 対応版をリリースしたら、このパッチは不要になる。
+セットアップ（GdUnit4 インストール・既知の互換性パッチ）・CLI 実行コマンド・
+テスト可能/対象外の詳細な判断基準は **docs/process/godot-client-testing.md** を参照。
 
 ---
 
@@ -881,6 +825,7 @@ Crate一覧        : Cargo.toml (workspace)
 設計違反パターン : docs/architecture/design-violations.md（§12 の正典）
 イベント進化規則 : docs/architecture/event-schema-evolution.md（§7 詳細の正典）
 変更前チェック   : /ai-change-checklist スキル（§9 の正典）
+Godotテスト手順  : docs/process/godot-client-testing.md（§8 GdUnit4 詳細の正典）
 ```
 
 ## 付録: このファイル自体の更新ルール
@@ -898,7 +843,10 @@ AIは AI_DEVELOPMENT_GUIDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-23（ADR-0030 ステアリング再構成 — §9 を /ai-change-checklist スキルへ、§10 詳細を docs/architecture/forbidden-changes.md へ、§12 を docs/architecture/design-violations.md へ、§7 詳細を docs/architecture/event-schema-evolution.md へ降格。ガイド本体は ID 一覧・要約・リンクのみ残置。番号体系（INV-/FBD-/§）と文言は不変。人間承認済み）*
-*前回更新: 2026-06-19（肥大化解消 — §1 スコープの ADR ごと実装メモを ADR 参照テーブルに圧縮、§6 Tick 処理順序を docs/architecture/tick-model.md §3 へ委譲（順序と境界のみ残置）。不変条件・禁止事項の文言は不変。人間承認済み）*
+*最終更新: 2026-06-23（見出し構造の修正 — 冒頭の重複 H1 を1つに統合、§0 内のコードフェンス外に
+漏れていた裸の `#` 行を修正。あわせて §8 GdUnit4 詳細手順（セットアップ・既知の互換性パッチ・
+CLI実行）を docs/process/godot-client-testing.md へ降格し、ガイド本体は方針要約のみ残置（ADR-0030 と
+同方式・人間承認済み）)*
+*前回更新: 2026-06-23（ADR-0030 ステアリング再構成 — §9 を /ai-change-checklist スキルへ、§10 詳細を docs/architecture/forbidden-changes.md へ、§12 を docs/architecture/design-violations.md へ、§7 詳細を docs/architecture/event-schema-evolution.md へ降格。ガイド本体は ID 一覧・要約・リンクのみ残置。番号体系（INV-/FBD-/§）と文言は不変。人間承認済み）*
 *対応ADR: ADR-0001 〜 ADR-0030（ADR-0020 Simulation LoD は deferred）*
 *次回レビュー予定: Phase 8D（分散インフラ）設計時 / Signature Resolution 着手時*
