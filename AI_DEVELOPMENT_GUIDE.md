@@ -55,14 +55,8 @@ cargo run -p dawn-simulation --bin simulate --release -- --aoi-bench  # AoI ス�
 data/ship_types.toml   # 船種定義（HP・速度・スロット数など）
 data/modules.toml      # モジュール定義（ダメージ・射程・StatDelta など）
 
-# コミット
-# → 規約: docs/commit-convention.md を参照すること（英語・Conventional Commits 準拠）
-# 例:
-#   feat(dawn-ecs): add CapacitorSystem with cycle-based cap drain
-#   fix(godot): correct cap bar percentage calculation
-#   docs(adr): update ADR-0006 checklist to reflect Phase 6 completion
-
----
+# コミット（英語・Conventional Commits 準拠）
+# → 規約と例は docs/commit-convention.md を参照
 
 ---
 
