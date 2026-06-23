@@ -90,6 +90,14 @@ var _selected_target_id : int  = -1
 ## Mutually exclusive with _selected_target_id.
 var _selected_gate_id   : int  = -1
 
+## Stand-off distance (km) the next K-key press will send as KeepAtRangeCommand's
+## range. Player-adjustable via [ / ] (ADR-0031) -- the right distance depends
+## on the target's weapon range, which is a tactical call the player should
+## make, not a value the server should silently pick.
+var _keep_at_range_km : float = 10.0
+const KEEP_AT_RANGE_MIN_KM : float = 1.0
+const KEEP_AT_RANGE_MAX_KM : float = 200.0
+
 ## Per-ship HP: { ship_id: {shield, armor, hull} }
 var _ship_hp : Dictionary = {}
 
@@ -442,6 +450,21 @@ func _input(event: InputEvent) -> void:
 				_connection.send_warp_command(_player_ship_id, action.gate_id as int)
 			"warp_to_body":
 				_connection.send_warp_to_body_command(_player_ship_id, action.body_id as int)
+			"orbit_gate":
+				_connection.send_orbit_gate_command(_player_ship_id, action.gate_id as int)
+			"orbit_ship":
+				_connection.send_orbit_command(_player_ship_id, action.ship_id as int)
+			"keep_at_range_gate":
+				_connection.send_keep_at_range_gate_command(
+					_player_ship_id, action.gate_id as int, _keep_at_range_km * 1000.0)
+			"keep_at_range_ship":
+				_connection.send_keep_at_range_command(
+					_player_ship_id, action.ship_id as int, _keep_at_range_km * 1000.0)
+			"adjust_keep_at_range":
+				_keep_at_range_km = clampf(
+					_keep_at_range_km + (action.delta_km as float),
+					KEEP_AT_RANGE_MIN_KM, KEEP_AT_RANGE_MAX_KM)
+				_update_hud()
 			"toggle_tactical_overlay":
 				if _tactical_overlay != null:
 					(_tactical_overlay as Node3D).call("toggle_visible")
@@ -1084,9 +1107,11 @@ func _update_hud() -> void:
 		jump_line += "\n" + _jump_notice
 
 	## Approach / warp target selection (ADR-0015 / ADR-0022 / ADR-0025).
+	var keep_at_range_hint: String = "\n[O] Orbit  [K] Keep at %.0f km  ([/]  adjust)" % _keep_at_range_km
+
 	var approach_line: String = ""
 	if _selected_gate_id >= 0:
-		approach_line = "\n[A] Approach Gate #%d" % _selected_gate_id
+		approach_line = "\n[A] Approach Gate #%d" % _selected_gate_id + keep_at_range_hint
 		## Warp is only valid beyond the minimum warp distance (ADR-0022).
 		var gate_dist: float = _selected_gate_distance()
 		if gate_dist >= MIN_WARP_DISTANCE:
@@ -1103,7 +1128,7 @@ func _update_hud() -> void:
 				break
 		approach_line = "\n[W] Warp to %s" % body_name
 	elif _selected_target_id >= 0:
-		approach_line = "\n[A] Approach #%d" % _selected_target_id
+		approach_line = "\n[A] Approach #%d" % _selected_target_id + keep_at_range_hint
 
 	_stats_label.text = (
 		"Ships: %d\nTick: %d%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"

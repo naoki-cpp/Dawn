@@ -48,6 +48,8 @@ impl<S: EventStore> SimulationNode<S> {
                 }
             }
         }
+        // Approach overrides any other active steering mode (ADR-0031).
+        self.clear_steering_modes(entity);
         let _ = self
             .world
             .inner_mut()

@@ -178,6 +178,54 @@ func send_warp_to_body_command(p_ship_id: int, p_body_id: int) -> void:
 		"target" : { "Body": p_body_id },
 	}) + "\n")
 
+## [O key] Orbit a selected ship at its weapon range (server-side default, ADR-0031).
+func send_orbit_command(p_ship_id: int, p_target_id: int) -> void:
+	if not _welcomed:
+		return
+	_ws.send_text(JSON.stringify({
+		"type"     : "OrbitCommand",
+		"ship_id"  : p_ship_id,
+		"target_id": p_target_id,
+	}) + "\n")
+
+## [O key] Orbit a selected Jump Gate at its weapon range (server-side default, ADR-0031).
+func send_orbit_gate_command(p_ship_id: int, p_gate_id: int) -> void:
+	if not _welcomed:
+		return
+	_ws.send_text(JSON.stringify({
+		"type"   : "OrbitCommand",
+		"ship_id": p_ship_id,
+		"gate_id": p_gate_id,
+	}) + "\n")
+
+## [K key] Hold at least p_range_m metres from a selected ship; p_range_m <= 0
+## falls back to the server-side default (weapon range, ADR-0031).
+func send_keep_at_range_command(p_ship_id: int, p_target_id: int, p_range_m: float = -1.0) -> void:
+	if not _welcomed:
+		return
+	var payload: Dictionary = {
+		"type"     : "KeepAtRangeCommand",
+		"ship_id"  : p_ship_id,
+		"target_id": p_target_id,
+	}
+	if p_range_m > 0.0:
+		payload["range"] = p_range_m
+	_ws.send_text(JSON.stringify(payload) + "\n")
+
+## [K key] Hold at least p_range_m metres from a selected Jump Gate; p_range_m
+## <= 0 falls back to the server-side default (weapon range, ADR-0031).
+func send_keep_at_range_gate_command(p_ship_id: int, p_gate_id: int, p_range_m: float = -1.0) -> void:
+	if not _welcomed:
+		return
+	var payload: Dictionary = {
+		"type"   : "KeepAtRangeCommand",
+		"ship_id": p_ship_id,
+		"gate_id": p_gate_id,
+	}
+	if p_range_m > 0.0:
+		payload["range"] = p_range_m
+	_ws.send_text(JSON.stringify(payload) + "\n")
+
 func is_connected_to_server() -> bool:
 	return _connected and _welcomed
 

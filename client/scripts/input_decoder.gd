@@ -64,6 +64,31 @@ static func decode_key(
 			return {"kind": "warp_to_body", "body_id": selected_body_id}
 		return {"kind": "none"}
 
+	## O key -> OrbitCommand (sweep around selected ship/gate, ADR-0031)
+	if keycode == KEY_O and player_ship_id >= 0:
+		if selected_gate_id >= 0:
+			return {"kind": "orbit_gate", "gate_id": selected_gate_id}
+		if selected_target_id >= 0:
+			return {"kind": "orbit_ship", "ship_id": selected_target_id}
+		return {"kind": "none"}
+
+	## K key -> KeepAtRangeCommand (hold a stand-off from selected ship/gate, ADR-0031)
+	if keycode == KEY_K and player_ship_id >= 0:
+		if selected_gate_id >= 0:
+			return {"kind": "keep_at_range_gate", "gate_id": selected_gate_id}
+		if selected_target_id >= 0:
+			return {"kind": "keep_at_range_ship", "ship_id": selected_target_id}
+		return {"kind": "none"}
+
+	## [ / ] keys -> adjust the stand-off distance the next K press will use.
+	## Lets the player dial in "keep at range" before locking it in, since
+	## the right distance depends on the target's weapon range and is a
+	## tactical choice, not something the server should pick alone.
+	if keycode == KEY_BRACKETLEFT and player_ship_id >= 0:
+		return {"kind": "adjust_keep_at_range", "delta_km": -1.0}
+	if keycode == KEY_BRACKETRIGHT and player_ship_id >= 0:
+		return {"kind": "adjust_keep_at_range", "delta_km": 1.0}
+
 	## Tab key -> toggle tactical overlay visibility (works regardless of
 	## whether a player ship exists yet).
 	if keycode == KEY_TAB:

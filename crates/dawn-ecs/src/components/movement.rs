@@ -17,6 +17,33 @@ pub struct ApproachComp {
     pub target: ApproachTarget,
 }
 
+/// Persistent "orbit" steering target (ADR-0031).
+///
+/// While a ship carries this component, the node's `process_orbit()` step
+/// re-aims `ThrustComp` every tick at a point on the circle of `radius` around
+/// `target`'s latest position, leading the orbit tangentially so the ship
+/// sweeps around it rather than just closing distance. Like `ApproachComp`,
+/// this is derived steering intent — NOT persisted in `ShipSnapshot` and never
+/// produces its own event (ADR-0008).
+#[derive(Debug, Clone, Copy)]
+pub struct OrbitComp {
+    pub target: ApproachTarget,
+    pub radius: f32,
+}
+
+/// Persistent "keep at range" steering target (ADR-0031).
+///
+/// While a ship carries this component, the node's `process_keep_at_range()`
+/// step steers directly away from `target` whenever closer than `range`, and
+/// brakes once at or beyond it. Unlike `OrbitComp` this has no tangential
+/// component. Like `ApproachComp`, this is derived steering intent — NOT
+/// persisted in `ShipSnapshot` and never produces its own event (ADR-0008).
+#[derive(Debug, Clone, Copy)]
+pub struct KeepAtRangeComp {
+    pub target: ApproachTarget,
+    pub range: f32,
+}
+
 /// Two-phase intra-Sector warp state (short-range Fold, ADR-0022).
 ///
 /// `Aligning` is the interruptible spin-up (the tackle window, ADR-0023);

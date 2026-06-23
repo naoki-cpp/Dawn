@@ -312,6 +312,12 @@ async fn main() -> anyhow::Result<()> {
                     dawn_actor::ClientCommand::Warp(w) => {
                         node.apply_warp_command_owned(sess.player_id, w);
                     }
+                    dawn_actor::ClientCommand::Orbit(o) => {
+                        node.apply_orbit_command_owned(sess.player_id, o);
+                    }
+                    dawn_actor::ClientCommand::KeepAtRange(k) => {
+                        node.apply_keep_at_range_command_owned(sess.player_id, k);
+                    }
                     dawn_actor::ClientCommand::Jump(j) => {
                         pending_jumps.push((i, j));
                         break;

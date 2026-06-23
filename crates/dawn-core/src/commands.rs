@@ -170,6 +170,44 @@ pub struct WarpCommand {
     pub target: WarpTarget,
 }
 
+/// Request to begin orbiting a Ship or a Jump Gate at `radius` (ADR-0031).
+///
+/// Like `ApproachCommand`, an accepted orbit is a persistent steering mode:
+/// each tick the movement pipeline re-aims thrust at a point on the circle of
+/// `radius` around the target's latest position, leading the orbit so the
+/// ship sweeps around it rather than just closing distance. `radius` defaults
+/// to the ship's fitted weapon range when omitted.
+///
+/// May be rejected if:
+/// - The orbiting Ship does not exist or is in transit between Sectors.
+/// - A `Ship` target does not exist or is the orbiting Ship itself.
+/// - A `Gate` target does not originate in the Ship's current Sector.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrbitCommand {
+    pub ship_id: ShipId,
+    pub target: ApproachTarget,
+    pub radius: Option<f32>,
+}
+
+/// Request to hold at least `range` away from a Ship or a Jump Gate (ADR-0031).
+///
+/// Like `ApproachCommand`, an accepted keep-at-range is a persistent steering
+/// mode: each tick the ship is steered directly away from the target while
+/// closer than `range`, and braked once at or beyond it. Unlike `OrbitCommand`
+/// this has no tangential component -- it is a pure stand-off, not a sweep.
+/// `range` defaults to the ship's fitted weapon range when omitted.
+///
+/// May be rejected if:
+/// - The Ship does not exist or is in transit between Sectors.
+/// - A `Ship` target does not exist or is the Ship itself.
+/// - A `Gate` target does not originate in the Ship's current Sector.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KeepAtRangeCommand {
+    pub ship_id: ShipId,
+    pub target: ApproachTarget,
+    pub range: Option<f32>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,5 +295,39 @@ mod tests {
         };
         assert_eq!(cmd.ship_id, ship_id(1));
         assert_eq!(cmd.target, WarpTarget::Gate(JumpGateId(2)));
+    }
+
+    #[test]
+    fn orbit_command_carries_ship_id_target_and_optional_radius() {
+        let cmd = OrbitCommand {
+            ship_id: ship_id(1),
+            target: ApproachTarget::Ship(ship_id(2)),
+            radius: Some(5000.0),
+        };
+        assert_eq!(cmd.ship_id, ship_id(1));
+        assert_eq!(cmd.target, ApproachTarget::Ship(ship_id(2)));
+        assert_eq!(cmd.radius, Some(5000.0));
+    }
+
+    #[test]
+    fn orbit_command_radius_defaults_to_none_when_omitted() {
+        let cmd = OrbitCommand {
+            ship_id: ship_id(1),
+            target: ApproachTarget::Gate(crate::navigation::JumpGateId(0)),
+            radius: None,
+        };
+        assert_eq!(cmd.radius, None);
+    }
+
+    #[test]
+    fn keep_at_range_command_carries_ship_id_target_and_optional_range() {
+        let cmd = KeepAtRangeCommand {
+            ship_id: ship_id(1),
+            target: ApproachTarget::Ship(ship_id(2)),
+            range: Some(8000.0),
+        };
+        assert_eq!(cmd.ship_id, ship_id(1));
+        assert_eq!(cmd.target, ApproachTarget::Ship(ship_id(2)));
+        assert_eq!(cmd.range, Some(8000.0));
     }
 }

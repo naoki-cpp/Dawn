@@ -218,6 +218,13 @@ pub(crate) fn apply_common_command(
         ClientCommand::Warp(w) => {
             node.apply_warp_command_owned(player_id, w);
         }
+        // Orbit / Keep at Range: persistent stand-off piloting (ADR-0031).
+        ClientCommand::Orbit(o) => {
+            node.apply_orbit_command_owned(player_id, o);
+        }
+        ClientCommand::KeepAtRange(k) => {
+            node.apply_keep_at_range_command_owned(player_id, k);
+        }
         // Jump differs per server: hand it back to the caller.
         ClientCommand::Jump(j) => return Some(j),
     }

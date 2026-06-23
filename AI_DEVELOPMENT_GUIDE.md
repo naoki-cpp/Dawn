@@ -116,6 +116,8 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
                   HullComp（Shield/Armor/Hull 3層）, FittingComp（装備スロット）,
                   CapacitorComp（現在 cap 量）, TransitComp（Transit 状態）,
                   ApproachComp（接近対象 Ship/Gate・半自動操船 / ADR-0015）,
+                  OrbitComp（周回対象 Ship/Gate・指定半径 / ADR-0031）,
+                  KeepAtRangeComp（離脱対象 Ship/Gate・最低距離 / ADR-0031）,
                   WarpComp（intra-Sector ワープ = 短距離 Fold・align/warping / ADR-0022）
   船種          : ShipTypeDefinition（id, name, class, base_stats, slot_layout）
   イベント      : ShipSpawned（ship_type_id 含む）, VelocityChanged, SectorTransit系,
@@ -129,6 +131,8 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
   ADR-0014  Raft コンセンサス + Sector Transit（dawn-consensus・Step 7.5 適用）
   ADR-0009  星系間ナビゲーション（JumpCommand / JumpGateUsed / StarSystemChanged・J キー）
   ADR-0015  Approach（半自動操船・対象 Ship/Gate・Step 2.5・Move/Stop で解除・A キー）
+  ADR-0031  Orbit / Keep at Range（持続操船・対象 Ship/Gate・Step 2.55/2.56・
+            Move/Stop/他の操船モードで解除・O/K キー）
   ADR-0022  intra-Sector Warp（短距離 Fold・align/warping 2フェーズ・Step 2.6・W キー）
   ADR-0023  Propulsion 慣性モデル（mass/inertia_modifier・指数接近・auto-warp-then-jump）
   ADR-0024  Tackle（Fold Disruptor・TackledComp・Step 4.5・warp/jump 拒否・snapshot 永続化）
@@ -569,11 +573,16 @@ pub type Tick = u64;
 
 ```
   1.   Tick カウンタをインクリメント
-  2.   コマンドキューを処理（Move/Stop/Lock/Activate/Deactivate/Jump/Approach/Warp）
-       ※ Transit 中（InTransit）の Ship への Move/Stop/二重 Transit/Jump/Approach/Warp は拒否（§5）
+  2.   コマンドキューを処理（Move/Stop/Lock/Activate/Deactivate/Jump/Approach/Orbit/KeepAtRange/Warp）
+       ※ Transit 中（InTransit）の Ship への Move/Stop/二重 Transit/Jump/Approach/
+         Orbit/KeepAtRange/Warp は拒否（§5）
        ※ Jump/Warp は can_propose_jump()/can_propose_warp() 検証を通すこと
-  2.5  Approach System  ← Movement の前（ADR-0015）
-  2.6  Warp System      ← Approach の後・Movement の前（ADR-0022/0023/0025）
+       ※ Orbit/KeepAtRange は Warp 中（Aligning/Warping）は拒否（ADR-0031）
+       ※ Approach/Orbit/KeepAtRange は相互排他（後発が前の操船モードを解除）
+  2.5  Approach System        ← Movement の前（ADR-0015）
+  2.55 Orbit System           ← Approach の後・Movement の前（ADR-0031）
+  2.56 Keep at Range System   ← Orbit の後・Movement の前（ADR-0031）
+  2.6  Warp System            ← Keep at Range の後・Movement の前（ADR-0022/0023/0025）
   3.   Movement System  （warping 中の船はスキップ）
   4.   Capacitor System ← Movement の後・Lock の前
   4.5  Tackle System    ← Capacitor の後・Lock の前（ADR-0024）
