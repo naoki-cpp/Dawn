@@ -97,8 +97,7 @@ pub struct StateSnapshot {
 impl StateSnapshot {
     /// Serialise with `postcard` and write to `path`.
     pub fn save(&self, path: impl AsRef<Path>) -> io::Result<()> {
-        let bytes = postcard::to_stdvec(self)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        let bytes = postcard::to_stdvec(self).map_err(|e| io::Error::other(e.to_string()))?;
         fs::write(path, bytes)
     }
 

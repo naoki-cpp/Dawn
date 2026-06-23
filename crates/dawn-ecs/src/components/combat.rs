@@ -75,6 +75,12 @@ pub struct WeaponComp {
     pub last_fired_tick: Tick,
 }
 
+impl Default for WeaponComp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WeaponComp {
     pub fn new() -> Self {
         Self {
@@ -112,6 +118,12 @@ pub struct LockEntry {
 #[derive(Debug, Clone)]
 pub struct LockComp {
     pub entries: Vec<LockEntry>,
+}
+
+impl Default for LockComp {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LockComp {

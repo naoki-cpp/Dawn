@@ -834,7 +834,7 @@ mod tests {
             target_id: bot_ship_id,
         };
         for _ in 0..5 {
-            node.tick_with_lock_commands(&[lock_cmd.clone()]);
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
 
         let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
@@ -852,7 +852,7 @@ mod tests {
             tick: Tick(10),
         }));
 
-        node.tick_with_lock_commands(&[lock_cmd.clone()]);
+        node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
 
         assert!(
             node.warp_phase(bot_ship_id).is_none(),

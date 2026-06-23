@@ -410,10 +410,9 @@ mod tests {
     #[test]
     fn approaching_a_jump_gate_steers_the_ship_toward_the_gate_and_into_range() {
         let mut node = mem_node();
-        let gate = node
+        let gate = *node
             .jump_gate(dawn_core::JumpGateId(0))
-            .expect("Sector 0 has Gate 0")
-            .clone();
+            .expect("Sector 0 has Gate 0");
         // Start near the gate: at the wide system scale you warp across the
         // system and only sublight-approach over the last stretch (the gate is
         // far beyond sublight range in a test budget). Compute "12,000 m short

@@ -230,7 +230,7 @@ mod tests {
         fitting.mid.push(shield_slot());
         let snap = fitting.to_snapshot();
         assert_eq!(snap.high[0].module_id, ModuleId(1));
-        assert_eq!(snap.high[0].is_active, true);
+        assert!(snap.high[0].is_active);
         assert_eq!(snap.mid[0].module_id, ModuleId(2));
     }
 
@@ -250,7 +250,7 @@ mod tests {
             rig: vec![],
         };
         let fitting = FittingComp::from_snapshot(&snap, &registry);
-        assert_eq!(fitting.high[0].is_active, true);
+        assert!(fitting.high[0].is_active);
         assert_eq!(fitting.total_delta().weapon_damage_add, 25.0);
     }
 }

@@ -19,7 +19,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
@@ -29,6 +29,12 @@ jobs:
       # advisory hook.
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
+
+      # -D warnings turns every clippy lint (including pedantic ones already
+      # clean across the workspace as of this workflow's introduction) into a
+      # hard failure, so new lint violations can't sneak in silently.
+      - name: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: cargo build --workspace
         run: cargo build --workspace --all-targets
