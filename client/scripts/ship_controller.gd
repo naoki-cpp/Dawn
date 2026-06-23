@@ -176,6 +176,13 @@ func set_thrust_direction(godot_dir: Vector3) -> void:
 func get_speed_server() -> float:
 	return _velocity.length() / WORLD_SCALE
 
+## Godot-space speed (i.e. already * WORLD_SCALE, same units as
+## VISUAL_SPEED_CAP). Used by main.gd to drive the warp-tunnel overlay
+## (ADR-0029 lore pass) -- comparable to VISUAL_SPEED_CAP without re-deriving
+## the scale conversion at the call site.
+func get_speed_godot() -> float:
+	return _velocity.length()
+
 ## ロック状態を設定する。
 ## state: "none" / "locking" / "locked"
 func set_lock_state(state: String) -> void:

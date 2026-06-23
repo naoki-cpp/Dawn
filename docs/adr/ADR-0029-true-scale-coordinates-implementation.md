@@ -217,6 +217,34 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
 これにより「確定→トンネル突入まで体感加速→トンネル中非表示→トンネルを抜けて体感減速→停止」という
 lore通りの見え方になる。サーバ側のロジック・テストには影響なし（表示のみの変更）。
 
+### 自機のワープ演出：トンネル表現で自然な前後の繋ぎ（2026-06-23・ユーザー方針）
+
+「キャップの問題は解決した？」に対し、上記は**他者の船のみ**の修正で、自機（カメラ追従中）は従来通り
+クランプ＋常時表示のままだったと回答 → 自機にも同種の体感を持たせたいが、カメラが追従するノードを隠せない
+ので「非表示」ではなく**トンネル表現**でいく方針が確定。さらに「トンネルの前後を自然にしたい」という要望から、
+閾値を跨いだ瞬間にオン/オフする実装ではなく、**速度に応じてなめらかにフェードする**画面オーバーレイにした。
+
+**実装**：
+- `client/shaders/warp_tunnel.gdshader`（新規）：画面中心に収束する放射状の光の筋＋コアグロー。
+  `intensity`（0〜1）で不透明度を制御、`intensity=0` は完全透明（無効化）。
+- `client/scripts/warp_tunnel_effect.gd`（新規）：上記シェーダーの `ColorRect` に付けるラッパー。
+  `set_intensity(value)` で `shader_parameter/intensity` を更新するだけの薄い層。
+- `client/scenes/main.tscn`：`HUD` 直下にフルスクリーン `ColorRect`（`WarpTunnel`）を追加
+  （`mouse_filter = ignore` でクリックを透過）。
+- `client/scripts/main.gd`：`_update_warp_tunnel_effect()` を新設し `_process()` から毎フレーム呼ぶ。
+  - 自機の速度（`ship_controller.get_speed_godot()`、Godot 単位・キャップ無視）と
+    `WARP_TUNNEL_THRESHOLD`（`VISUAL_SPEED_CAP` と同値・要同期のコメント付き）を比較してターゲット強度を決定。
+  - **`lerpf` による指数的イーズ**（`WARP_TUNNEL_FADE_RATE`）でターゲットへ毎フレーム漸近させる — これが
+    「トンネル前後を自然にする」の本体：実際のサーバ速度は1 tickで閾値を跨ぐが、画面側はそれを滑らかな
+    フェードへ変換する。
+  - 付随でカメラ FOV を強度に応じて広げる（`WARP_TUNNEL_FOV_BOOST`）、速度感の補強（任意・低リスク）。
+- `ship_controller.gd` に `get_speed_godot()` を追加（`get_speed_server()` の Godot スケール版）。
+
+**検証**：GdUnit4 全67件 green（既存挙動に影響なし）。シーン読み込み・シェーダーマテリアル割り当て・
+`set_intensity` 呼び出しをヘッドレス実行で個別確認（パースエラー無し）。実際の見え方（フェードの速さ・
+オーバーレイの濃さ）は引き続きプレイテストで確認が必要 — `WARP_TUNNEL_FADE_RATE` / シェーダーの
+`scroll_speed` / `tunnel_color` は数値チューニングの余地あり。
+
 ### 通し review #2（2026-06-22・R1–R3 修正後）
 
 R1（ゲート f64 源）・R3（アンカー欠落 assert）・R2（AoI f64 化）を入れた後の再レビュー。

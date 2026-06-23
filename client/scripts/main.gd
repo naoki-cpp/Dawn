@@ -12,13 +12,14 @@ extends Node
 
 # -- Node references ----------------------------------------------------------
 
-@onready var _connection  : Node        = $Connection
-@onready var _ships_root  : Node3D      = $World/Ships
-@onready var _gates_root  : Node3D      = $World/Gates
-@onready var _bodies_root : Node3D      = $World/Bodies
-@onready var _stats_label : Label       = $HUD/StatsLabel
-@onready var _hud         : CanvasLayer = $HUD
-@onready var _camera      : Camera3D   = $World/Camera3D
+@onready var _connection   : Node        = $Connection
+@onready var _ships_root   : Node3D      = $World/Ships
+@onready var _gates_root   : Node3D      = $World/Gates
+@onready var _bodies_root  : Node3D      = $World/Bodies
+@onready var _stats_label  : Label       = $HUD/StatsLabel
+@onready var _hud          : CanvasLayer = $HUD
+@onready var _camera       : Camera3D    = $World/Camera3D
+@onready var _warp_tunnel  : ColorRect   = $HUD/WarpTunnel
 
 # -- HUD panels (built by HudManager in _ready, architecture-review-client.md C-1) --
 ## Top-left status panel. {conn_dot, conn_label, name_label, info_label}.
@@ -42,6 +43,25 @@ const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is reject
 ## Unit-to-meter scale: displayed m/s = (units/tick) * METERS_PER_UNIT.
 ## Change this one constant to rescale all displayed speeds and distances.
 const METERS_PER_UNIT : float = 1.0
+
+## Must match ship_controller.gd's VISUAL_SPEED_CAP (Godot units/tick): the
+## warp-tunnel overlay (ADR-0029 lore pass) fades in once the player's ship is
+## moving faster than the speed ship_controller can render as literal motion,
+## and fades out once it drops back under it -- the same threshold that makes
+## OTHER ships hide entirely (ship_controller.gd), just shown as an overlay
+## here since the camera can't lose track of the locally piloted ship.
+const WARP_TUNNEL_THRESHOLD : float = 2_000.0
+## How fast the overlay's intensity eases toward its target each second (an
+## exponential approach, not a hard cut) -- this *is* the "natural before/after"
+## the tunnel transition reads as, since the true server speed jumps across the
+## threshold in a single tick.
+const WARP_TUNNEL_FADE_RATE : float = 3.0
+## Camera FOV pulls wide while in the tunnel for an extra sense of speed, then
+## eases back. Purely cosmetic.
+const WARP_TUNNEL_FOV_BOOST : float = 15.0
+
+var _warp_tunnel_amount : float = 0.0
+var _camera_base_fov    : float = 60.0
 
 # -- Materials ----------------------------------------------------------------
 
@@ -147,6 +167,7 @@ func _ready() -> void:
 	_ship_status_refs  = HudManager.build_ship_status_panel(_hud)
 	_target_panel_refs = HudManager.build_target_panel(_hud)
 	_module_bar = HudManager.build_module_bar(_hud)
+	_camera_base_fov = _camera.fov
 	_update_hud()
 	## Gate / body markers are spawned from the server's InitialState, not here.
 
@@ -155,6 +176,7 @@ func _process(delta: float) -> void:
 	_update_body_markers()
 	_update_gate_proximity()
 	_update_sun_direction()
+	_update_warp_tunnel_effect(delta)
 	if _jump_notice_timer > 0.0:
 		_jump_notice_timer -= delta
 		if _jump_notice_timer <= 0.0:
@@ -202,6 +224,23 @@ func _update_body_markers() -> void:
 			marker.global_position = player_godot + delta / dist * BODY_MARKER_CLAMP_DISTANCE
 		else:
 			marker.global_position = body_godot
+
+## Fade the full-screen warp-tunnel overlay in/out based on the player's own
+## ship speed (ADR-0029 lore pass, 2026-06-23). ship_controller.gd hides OTHER
+## ships entirely once they cross VISUAL_SPEED_CAP (the speed it can no longer
+## render as literal motion without f32 jitter); the camera can't lose track of
+## the LOCALLY piloted ship the same way, so this overlay covers the same
+## "moving too fast to render" stretch instead. The exponential ease (not a
+## hard cut) is what makes the tunnel's entry/exit read as a transition rather
+## than a flash -- the underlying speed crosses the threshold in a single tick.
+func _update_warp_tunnel_effect(delta: float) -> void:
+	var target := 0.0
+	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
+		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_godot") as float
+		target = 1.0 if spd > WARP_TUNNEL_THRESHOLD else 0.0
+	_warp_tunnel_amount = lerpf(_warp_tunnel_amount, target, clampf(delta * WARP_TUNNEL_FADE_RATE, 0.0, 1.0))
+	_warp_tunnel.call("set_intensity", _warp_tunnel_amount)
+	_camera.fov = _camera_base_fov + WARP_TUNNEL_FOV_BOOST * _warp_tunnel_amount
 
 ## Rebase the floating origin to the player when it drifts past the threshold so
 ## render coordinates stay small. Dormant at compressed scale (threshold never
