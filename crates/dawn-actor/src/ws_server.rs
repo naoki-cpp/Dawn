@@ -154,19 +154,19 @@ impl WsServer {
             player_id.raw(),
             ship_id.raw()
         );
-        ws_sink.send(Message::Text(welcome.into())).await?;
+        ws_sink.send(Message::Text(welcome)).await?;
         ws_sink
-            .send(Message::Text((initial_state.to_string() + "\n").into()))
+            .send(Message::Text(initial_state.to_string() + "\n"))
             .await?;
         if let Some(fitting) = player_fitting {
-            ws_sink.send(Message::Text((fitting + "\n").into())).await?;
+            ws_sink.send(Message::Text(fitting + "\n")).await?;
         }
 
         // Event-send task.
         tokio::spawn(async move {
             let mut rx = event_rx;
             while let Some(msg) = rx.recv().await {
-                if ws_sink.send(Message::Text(msg.into())).await.is_err() {
+                if ws_sink.send(Message::Text(msg)).await.is_err() {
                     break;
                 }
             }

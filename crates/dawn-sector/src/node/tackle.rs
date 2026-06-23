@@ -194,7 +194,7 @@ mod tests {
             target_id: ship_b,
         };
         for _ in 0..10 {
-            node.tick_with_lock_commands(&[lock_cmd.clone()]);
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
 
         let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
@@ -240,7 +240,7 @@ mod tests {
             target_id: ship_b,
         };
         for _ in 0..10 {
-            node.tick_with_lock_commands(&[lock_cmd.clone()]);
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
 
         let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
@@ -296,7 +296,7 @@ mod tests {
             target_id: ship_b,
         };
         for _ in 0..10 {
-            node.tick_with_lock_commands(&[lock_cmd.clone()]);
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
 
         let gate_id = node.sector_map.gates.keys().next().copied().unwrap();

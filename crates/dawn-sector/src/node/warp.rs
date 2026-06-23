@@ -532,7 +532,7 @@ mod tests {
     use dawn_core::{
         NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, Velocity, WarpTarget,
     };
-    use dawn_ecs::components::{ShipStatsComp, ThrustComp, VelocityComp, WarpPhase};
+    use dawn_ecs::components::{ShipStatsComp, VelocityComp, WarpPhase};
 
     fn mem_node() -> SimulationNode {
         SimulationNode::new(
@@ -941,10 +941,9 @@ mod tests {
             "gate warp should have completed"
         );
 
-        let gate = node
+        let gate = *node
             .jump_gate(dawn_core::JumpGateId(0))
-            .expect("demo gate 0 exists")
-            .clone();
+            .expect("demo gate 0 exists");
         let expected_anchor = node
             .anchor_table()
             .nearest_anchor(gate.from_sector, gate.abs_m)
@@ -984,7 +983,7 @@ mod tests {
         let ok = node.apply_warp_command_owned(
             player,
             dawn_core::WarpCommand {
-                ship_id: ship_id,
+                ship_id,
                 target: WarpTarget::Body(body_id),
             },
         );

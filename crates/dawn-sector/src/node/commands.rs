@@ -283,7 +283,7 @@ impl<S: EventStore> SimulationNode<S> {
         };
 
         use dawn_core::fitting::ActivationMode;
-        let is_npc = self.ships.owners.get(&cmd.ship_id).is_none();
+        let is_npc = !self.ships.owners.contains_key(&cmd.ship_id);
         let is_active = match def.activation_mode {
             ActivationMode::Passive => true,
             ActivationMode::Active => is_npc,
@@ -428,7 +428,7 @@ mod tests {
 
         let mut damage_events = 0;
         for _ in 0..25 {
-            let result = node.tick_with_lock_commands(&[lock_cmd.clone()]);
+            let result = node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
             damage_events += result
                 .events
                 .iter()

@@ -94,7 +94,7 @@ impl DuelMetrics {
         };
 
         let result = self.loser.map(|loser| {
-            let player_won = player_ship_id.map_or(false, |pid| pid != loser);
+            let player_won = player_ship_id.is_some_and(|pid| pid != loser);
             if player_won {
                 "player_win"
             } else {
@@ -140,7 +140,7 @@ impl DuelMetrics {
         println!("╠══════════════════════════════════════════╣");
 
         if let Some(loser) = self.loser {
-            let player_won = player_ship_id.map_or(false, |pid| pid != loser);
+            let player_won = player_ship_id.is_some_and(|pid| pid != loser);
             let result_str = if player_won { "PLAYER WIN" } else { "BOT WIN" };
             println!("║  Result  : {:<31}║", result_str);
         }

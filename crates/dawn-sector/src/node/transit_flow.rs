@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(snapshot.ship_id, ship_id);
 
         assert!(
-            node.ships.index.get(&ship_id).is_none(),
+            !node.ships.index.contains_key(&ship_id),
             "ship must leave the from-sector ECS"
         );
         assert_eq!(node.ship_count(), 0);

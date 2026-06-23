@@ -200,7 +200,7 @@ mod tests {
     fn server_events_are_received_by_client_endpoint() {
         let (server, mut client) = InProcessConnection::pair();
         let event = make_ship_spawned();
-        server.send_events(&[event.clone()]).unwrap();
+        server.send_events(std::slice::from_ref(&event)).unwrap();
         let received = client
             .event_rx
             .try_recv()

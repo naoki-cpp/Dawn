@@ -154,7 +154,7 @@ impl RaftState {
 
     /// Number of nodes required for a majority, including self.
     fn majority(&self) -> usize {
-        (self.peers.len() + 1) / 2 + 1
+        self.peers.len().div_ceil(2) + 1
     }
 
     /// Reset the election timer. Called when valid AppendEntries or
