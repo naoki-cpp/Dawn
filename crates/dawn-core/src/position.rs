@@ -13,7 +13,11 @@ pub struct Position {
 }
 
 impl Position {
-    pub const ORIGIN: Self = Self { x: 0.0, y: 0.0, z: 0.0 };
+    pub const ORIGIN: Self = Self {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
 
     pub fn new(x: f32, y: f32, z: f32) -> Self {
         Self { x, y, z }
@@ -48,7 +52,11 @@ pub struct Velocity {
 }
 
 impl Velocity {
-    pub const ZERO: Self = Self { dx: 0.0, dy: 0.0, dz: 0.0 };
+    pub const ZERO: Self = Self {
+        dx: 0.0,
+        dy: 0.0,
+        dz: 0.0,
+    };
 
     pub fn new(dx: f32, dy: f32, dz: f32) -> Self {
         Self { dx, dy, dz }
@@ -61,9 +69,24 @@ impl Velocity {
 
     /// Return a velocity with all components negated on axes where the
     /// boundary was exceeded.  Used for wall-bounce in the movement system.
-    pub fn reflect_x(self) -> Self { Self { dx: -self.dx, ..self } }
-    pub fn reflect_y(self) -> Self { Self { dy: -self.dy, ..self } }
-    pub fn reflect_z(self) -> Self { Self { dz: -self.dz, ..self } }
+    pub fn reflect_x(self) -> Self {
+        Self {
+            dx: -self.dx,
+            ..self
+        }
+    }
+    pub fn reflect_y(self) -> Self {
+        Self {
+            dy: -self.dy,
+            ..self
+        }
+    }
+    pub fn reflect_z(self) -> Self {
+        Self {
+            dz: -self.dz,
+            ..self
+        }
+    }
 }
 
 impl std::fmt::Display for Velocity {

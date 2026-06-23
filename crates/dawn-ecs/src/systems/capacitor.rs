@@ -46,21 +46,21 @@ pub struct CapacitorResult {
 
 struct SlotInfo {
     /// Flat index into high→mid→low→rig ordering.
-    flat_idx        : usize,
-    kind            : ModuleKind,
-    cap_cost        : f32,
-    cycle_time      : u64,
-    cycle_remaining : u64,
-    is_active       : bool,
+    flat_idx: usize,
+    kind: ModuleKind,
+    cap_cost: f32,
+    cycle_time: u64,
+    cycle_remaining: u64,
+    is_active: bool,
 }
 
 struct ShipSnap {
-    entity      : hecs::Entity,
-    ship_id     : ShipId,
-    cap_current : f32,
-    cap_max     : f32,
+    entity: hecs::Entity,
+    ship_id: ShipId,
+    cap_current: f32,
+    cap_max: f32,
     cap_recharge: f32,
-    slots       : Vec<SlotInfo>,
+    slots: Vec<SlotInfo>,
 }
 
 // ── System entry point ────────────────────────────────────────────────────────
@@ -73,27 +73,28 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
         .iter()
         .map(|(entity, (sid, cap, stats, fit))| {
             let slots: Vec<SlotInfo> = fit
-                .high.iter()
+                .high
+                .iter()
                 .chain(fit.mid.iter())
                 .chain(fit.low.iter())
                 .chain(fit.rig.iter())
                 .enumerate()
                 .filter(|(_, slot)| slot.def.activation_mode == ActivationMode::Active)
                 .map(|(i, slot)| SlotInfo {
-                    flat_idx        : i,
-                    kind            : slot.def.kind,
-                    cap_cost        : slot.def.cap_cost_per_cycle,
-                    cycle_time      : slot.def.cycle_time_ticks,
-                    cycle_remaining : slot.cycle_remaining,
-                    is_active       : slot.is_active,
+                    flat_idx: i,
+                    kind: slot.def.kind,
+                    cap_cost: slot.def.cap_cost_per_cycle,
+                    cycle_time: slot.def.cycle_time_ticks,
+                    cycle_remaining: slot.cycle_remaining,
+                    is_active: slot.is_active,
                 })
                 .collect();
 
             ShipSnap {
                 entity,
-                ship_id     : sid.0,
-                cap_current : cap.current,
-                cap_max     : stats.cap_max,
+                ship_id: sid.0,
+                cap_current: cap.current,
+                cap_max: stats.cap_max,
                 cap_recharge: stats.cap_recharge_per_tick,
                 slots,
             }
@@ -101,16 +102,16 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
         .collect();
 
     // ── 2. Compute new cap, cycle updates, and forced deactivations ───────────
-    let mut events               : Vec<DomainEvent> = Vec::new();
-    let mut refitted             : Vec<ShipId>      = Vec::new();
-    let mut weapon_cycles_started: Vec<ShipId>      = Vec::new();
+    let mut events: Vec<DomainEvent> = Vec::new();
+    let mut refitted: Vec<ShipId> = Vec::new();
+    let mut weapon_cycles_started: Vec<ShipId> = Vec::new();
 
     for snap in snaps {
         // Recharge first (every tick, before cycle logic).
         let mut cap = (snap.cap_current + snap.cap_recharge).min(snap.cap_max);
 
-        let mut forced_off : Vec<usize> = Vec::new();
-        let mut new_cycles : Vec<(usize, u64)> = Vec::new(); // (flat_idx, new remaining)
+        let mut forced_off: Vec<usize> = Vec::new();
+        let mut new_cycles: Vec<(usize, u64)> = Vec::new(); // (flat_idx, new remaining)
         let mut weapon_fired = false;
 
         for slot in &snap.slots {
@@ -152,12 +153,23 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
 
         // Force-deactivate modules and emit events.
         if !forced_off.is_empty() {
-            deactivate_modules(world, snap.entity, snap.ship_id, &forced_off, tick, &mut events);
+            deactivate_modules(
+                world,
+                snap.entity,
+                snap.ship_id,
+                &forced_off,
+                tick,
+                &mut events,
+            );
             refitted.push(snap.ship_id);
         }
     }
 
-    CapacitorResult { events, refitted, weapon_cycles_started }
+    CapacitorResult {
+        events,
+        refitted,
+        weapon_cycles_started,
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -173,11 +185,13 @@ fn update_cycles(world: &mut SimWorld, entity: hecs::Entity, updates: &[(usize, 
         return;
     }
 
-    let Some(mut fitting) = world.get_mut::<FittingComp>(entity) else { return };
+    let Some(mut fitting) = world.get_mut::<FittingComp>(entity) else {
+        return;
+    };
 
     let high_len = fitting.high.len();
-    let mid_len  = fitting.mid.len();
-    let low_len  = fitting.low.len();
+    let mid_len = fitting.mid.len();
+    let low_len = fitting.low.len();
 
     for &(flat_idx, new_remaining) in updates {
         let slot: Option<&mut FittedSlot> = if flat_idx < high_len {
@@ -196,18 +210,20 @@ fn update_cycles(world: &mut SimWorld, entity: hecs::Entity, updates: &[(usize, 
 }
 
 fn deactivate_modules(
-    world        : &mut SimWorld,
-    entity       : hecs::Entity,
-    ship_id      : ShipId,
-    flat_indices : &[usize],
-    tick         : Tick,
-    events       : &mut Vec<DomainEvent>,
+    world: &mut SimWorld,
+    entity: hecs::Entity,
+    ship_id: ShipId,
+    flat_indices: &[usize],
+    tick: Tick,
+    events: &mut Vec<DomainEvent>,
 ) {
-    let Some(mut fitting) = world.get_mut::<FittingComp>(entity) else { return };
+    let Some(mut fitting) = world.get_mut::<FittingComp>(entity) else {
+        return;
+    };
 
     let high_len = fitting.high.len();
-    let mid_len  = fitting.mid.len();
-    let low_len  = fitting.low.len();
+    let mid_len = fitting.mid.len();
+    let low_len = fitting.low.len();
 
     for &flat_idx in flat_indices {
         let slot: Option<&mut FittedSlot> = if flat_idx < high_len {
@@ -223,7 +239,7 @@ fn deactivate_modules(
         if let Some(slot) = slot {
             if slot.is_active {
                 let module_id = slot.def.id;
-                slot.is_active       = false;
+                slot.is_active = false;
                 slot.cycle_remaining = 0;
                 events.push(DomainEvent::ModuleDeactivated(ModuleDeactivated {
                     ship_id,
@@ -247,22 +263,27 @@ mod tests {
         NodeId, Position, SectorId, ShipId, Tick, Velocity,
     };
 
-    fn test_ship_id() -> ShipId { ShipId::new(NodeId(0), 1) }
+    fn test_ship_id() -> ShipId {
+        ShipId::new(NodeId(0), 1)
+    }
 
     /// Active weapon module: cap_cost=60, cycle_time=10 ticks.
     fn railgun_slot(active: bool) -> FittedSlot {
         FittedSlot {
             def: ModuleDefinition {
-                id               : ModuleId(1),
-                name             : "Railgun".to_string(),
-                kind             : ModuleKind::Weapon,
-                slot             : SlotKind::High,
-                activation_mode  : ActivationMode::Active,
+                id: ModuleId(1),
+                name: "Railgun".to_string(),
+                kind: ModuleKind::Weapon,
+                slot: SlotKind::High,
+                activation_mode: ActivationMode::Active,
                 cap_cost_per_cycle: 60.0,
-                cycle_time_ticks : 10,
-                stat_delta       : StatDelta { weapon_damage_add: 25.0, ..StatDelta::ZERO },
+                cycle_time_ticks: 10,
+                stat_delta: StatDelta {
+                    weapon_damage_add: 25.0,
+                    ..StatDelta::ZERO
+                },
             },
-            is_active      : active,
+            is_active: active,
             cycle_remaining: 0,
         }
     }
@@ -277,18 +298,26 @@ mod tests {
             cap_recharge_per_tick: recharge,
             ..ShipStatsComp::PLAYER
         };
-        world.inner_mut().insert(entity, (
-            fitting,
-            HullComp::new(stats.max_shield, stats.max_armor, stats.max_hull),
-            CapacitorComp { current: cap },
-        )).unwrap();
+        world
+            .inner_mut()
+            .insert(
+                entity,
+                (
+                    fitting,
+                    HullComp::new(stats.max_shield, stats.max_armor, stats.max_hull),
+                    CapacitorComp { current: cap },
+                ),
+            )
+            .unwrap();
         world.set_ship_stats(entity, stats);
         world
     }
 
     fn read_cap(world: &SimWorld) -> f32 {
         let id = test_ship_id();
-        world.query::<(&ShipIdComp, &CapacitorComp)>().iter()
+        world
+            .query::<(&ShipIdComp, &CapacitorComp)>()
+            .iter()
             .find(|(_, (sid, _))| sid.0 == id)
             .map(|(_, (_, cap))| cap.current)
             .expect("ship not found")
@@ -326,13 +355,21 @@ mod tests {
     fn new_cycle_consumes_cap_and_sets_cycle_remaining() {
         let mut fitting = FittingComp::empty();
         fitting.high.push(railgun_slot(true)); // ON, cycle_remaining=0
-        // cap: 400 + 10 recharge = 410, then consume 60 → 350
+                                               // cap: 400 + 10 recharge = 410, then consume 60 → 350
         let mut world = make_world(400.0, fitting, 500.0, 10.0);
 
         run(&mut world, Tick(1));
 
-        assert_eq!(read_cap(&world), 350.0, "410 recharge - 60 cycle cost = 350");
-        assert_eq!(read_cycle(&world), 10,   "cycle_remaining set to cycle_time=10");
+        assert_eq!(
+            read_cap(&world),
+            350.0,
+            "410 recharge - 60 cycle cost = 350"
+        );
+        assert_eq!(
+            read_cycle(&world),
+            10,
+            "cycle_remaining set to cycle_time=10"
+        );
     }
 
     #[test]
@@ -346,8 +383,12 @@ mod tests {
         run(&mut world, Tick(1));
 
         // Cap only recharges; no cost consumed mid-cycle.
-        assert_eq!(read_cap(&world), 310.0, "mid-cycle: only recharge, no cap cost");
-        assert_eq!(read_cycle(&world), 4,    "cycle_remaining decremented: 5→4");
+        assert_eq!(
+            read_cap(&world),
+            310.0,
+            "mid-cycle: only recharge, no cap cost"
+        );
+        assert_eq!(read_cycle(&world), 4, "cycle_remaining decremented: 5→4");
     }
 
     #[test]
@@ -360,13 +401,13 @@ mod tests {
 
         run(&mut world, Tick(1)); // cycle_remaining: 1 → 0 (tick down, no cost)
 
-        assert_eq!(read_cycle(&world), 0,    "cycle just ended");
-        assert_eq!(read_cap(&world),   410.0, "only recharge this tick");
+        assert_eq!(read_cycle(&world), 0, "cycle just ended");
+        assert_eq!(read_cap(&world), 410.0, "only recharge this tick");
 
         run(&mut world, Tick(2)); // cycle_remaining=0 → new cycle: 410+10-60=360
 
-        assert_eq!(read_cap(&world),   360.0, "new cycle consumed 60 GJ");
-        assert_eq!(read_cycle(&world), 10,    "new cycle started");
+        assert_eq!(read_cap(&world), 360.0, "new cycle consumed 60 GJ");
+        assert_eq!(read_cycle(&world), 10, "new cycle started");
     }
 
     // ── Force deactivation ────────────────────────────────────────────────────
@@ -375,7 +416,7 @@ mod tests {
     fn module_is_force_deactivated_and_event_emitted_when_cap_is_insufficient() {
         let mut fitting = FittingComp::empty();
         fitting.high.push(railgun_slot(true)); // ON, cycle_remaining=0, cost=60
-        // cap: 10 + 10 recharge = 20 < 60 → force OFF
+                                               // cap: 10 + 10 recharge = 20 < 60 → force OFF
         let mut world = make_world(10.0, fitting, 500.0, 10.0);
 
         let result = run(&mut world, Tick(1));

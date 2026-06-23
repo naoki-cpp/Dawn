@@ -40,10 +40,10 @@ pub enum RaftActorMessage {
 /// The Raft actor: owns a [`RaftState`] and a [`RaftTransport`] for sending
 /// RPCs to peers. All interaction happens via `RaftActorMessage` (FBD-004).
 pub struct RaftActor {
-    state    : RaftState,
-    peers    : Vec<NodeId>,
+    state: RaftState,
+    peers: Vec<NodeId>,
     transport: Arc<dyn RaftTransport>,
-    rx       : mpsc::UnboundedReceiver<RaftActorMessage>,
+    rx: mpsc::UnboundedReceiver<RaftActorMessage>,
     /// Committed entry payloads are delivered here in log order, exactly
     /// once each, for the owning node to apply (ADR-0014 §7 Step 7.5).
     committed_tx: mpsc::UnboundedSender<Vec<u8>>,
@@ -59,7 +59,14 @@ impl RaftActor {
         rx: mpsc::UnboundedReceiver<RaftActorMessage>,
         committed_tx: mpsc::UnboundedSender<Vec<u8>>,
     ) -> Self {
-        Self { state, peers, transport, rx, committed_tx, last_delivered: 0 }
+        Self {
+            state,
+            peers,
+            transport,
+            rx,
+            committed_tx,
+            last_delivered: 0,
+        }
     }
 
     /// Run the actor's mailbox loop until [`RaftActorMessage::Shutdown`] is
@@ -112,7 +119,8 @@ impl RaftActor {
             self.deliver_committed(); // a lone node commits immediately
             self.replicate_to_all();
         } else if let Some(leader) = self.state.leader_id {
-            self.transport.send(leader, RaftMessage::ProposeForward { payload });
+            self.transport
+                .send(leader, RaftMessage::ProposeForward { payload });
         }
         // No known leader: drop. The caller re-issues the command.
     }
@@ -122,7 +130,8 @@ impl RaftActor {
             RaftMessage::RequestVote(req) => {
                 let candidate_id = req.candidate_id;
                 let resp = self.state.handle_request_vote(&req);
-                self.transport.send(candidate_id, RaftMessage::RequestVoteResponse(resp));
+                self.transport
+                    .send(candidate_id, RaftMessage::RequestVoteResponse(resp));
             }
             RaftMessage::RequestVoteResponse(resp) => {
                 let became_leader = self.state.record_vote(resp.voter, resp.term);
@@ -137,7 +146,8 @@ impl RaftActor {
                 let leader_id = req.leader_id;
                 let resp = self.state.handle_append_entries(&req);
                 self.deliver_committed();
-                self.transport.send(leader_id, RaftMessage::AppendEntriesResponse(resp));
+                self.transport
+                    .send(leader_id, RaftMessage::AppendEntriesResponse(resp));
             }
             RaftMessage::AppendEntriesResponse(resp) => {
                 if resp.term > self.state.current_term {
@@ -145,7 +155,9 @@ impl RaftActor {
                     return;
                 }
                 if resp.success {
-                    let advanced = self.state.record_replication(resp.responder, resp.match_index);
+                    let advanced = self
+                        .state
+                        .record_replication(resp.responder, resp.match_index);
                     if advanced {
                         self.deliver_committed();
                         // Propagate the new commit index without waiting for
@@ -153,7 +165,8 @@ impl RaftActor {
                         self.replicate_to_all();
                     }
                 } else {
-                    self.state.record_rejection(resp.responder, resp.match_index);
+                    self.state
+                        .record_rejection(resp.responder, resp.match_index);
                 }
             }
             RaftMessage::ProposeForward { payload } => {
@@ -173,20 +186,24 @@ impl RaftActor {
         let leader_commit = self.state.commit_index();
         for &peer in &self.peers {
             let (prev_log_index, prev_log_term, entries) = self.state.entries_for(peer);
-            self.transport.send(peer, RaftMessage::AppendEntries(crate::rpc::AppendEntries {
-                term,
-                leader_id: self.state.node_id,
-                prev_log_index,
-                prev_log_term,
-                entries,
-                leader_commit,
-            }));
+            self.transport.send(
+                peer,
+                RaftMessage::AppendEntries(crate::rpc::AppendEntries {
+                    term,
+                    leader_id: self.state.node_id,
+                    prev_log_index,
+                    prev_log_term,
+                    entries,
+                    leader_commit,
+                }),
+            );
         }
     }
 
     /// Deliver newly committed payloads to the owning node, in log order.
     fn deliver_committed(&mut self) {
-        let committed: Vec<Vec<u8>> = self.state
+        let committed: Vec<Vec<u8>> = self
+            .state
             .committed_from(self.last_delivered)
             .iter()
             .map(|e| e.payload.clone())
@@ -231,7 +248,9 @@ impl RaftActorHandle {
 
     pub async fn role(&self) -> (Role, crate::state::Term) {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(RaftActorMessage::GetRole(tx)).expect("RaftActor is no longer running");
+        self.tx
+            .send(RaftActorMessage::GetRole(tx))
+            .expect("RaftActor is no longer running");
         rx.await.expect("RaftActor dropped reply sender")
     }
 
@@ -414,10 +433,14 @@ mod tests {
         settle(&handles, 6).await;
 
         for (i, rx) in committed_rxs.iter_mut().enumerate() {
-            let payload = rx.try_recv()
+            let payload = rx
+                .try_recv()
                 .unwrap_or_else(|_| panic!("node {i} did not receive the committed entry"));
             assert_eq!(payload, b"transit-1", "node {i}");
-            assert!(rx.try_recv().is_err(), "node {i} received the entry more than once");
+            assert!(
+                rx.try_recv().is_err(),
+                "node {i} received the entry more than once"
+            );
         }
     }
 
@@ -433,7 +456,8 @@ mod tests {
         settle(&handles, 6).await;
 
         for (i, rx) in committed_rxs.iter_mut().enumerate() {
-            let payload = rx.try_recv()
+            let payload = rx
+                .try_recv()
                 .unwrap_or_else(|_| panic!("node {i} did not receive the committed entry"));
             assert_eq!(payload, b"via-follower", "node {i}");
         }

@@ -18,12 +18,12 @@
 //! already in the bus channel ahead of any subsequent query.
 //! ```
 
+use dawn_consensus::{RaftActorHandle, Role, Term};
+use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
+use dawn_event_store::store::EventStore as _;
+use dawn_replication::{BusMessage, LogBatch};
 use dawn_sector::node::{SimulationNode, TickResult};
 use dawn_sector::transit::TransitOp;
-use dawn_replication::{BusMessage, LogBatch};
-use dawn_consensus::{RaftActorHandle, Role, Term};
-use dawn_event_store::store::EventStore as _;
-use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
 use tokio::sync::{mpsc, oneshot};
 
 // ── Public result/stats types ─────────────────────────────────────────────────
@@ -37,16 +37,16 @@ use tokio::sync::{mpsc, oneshot};
 #[derive(Debug, Clone)]
 #[cfg_attr(not(test), allow(dead_code))]
 pub struct TickSummary {
-    pub tick          : Tick,
+    pub tick: Tick,
     pub events_emitted: usize,
 }
 
 /// Snapshot of a node's current state, returned by `GetStats`.
 #[derive(Debug)]
 pub struct NodeStats {
-    pub node_id    : NodeId,
-    pub sector_id  : SectorId,
-    pub ship_count : usize,
+    pub node_id: NodeId,
+    pub sector_id: SectorId,
+    pub ship_count: usize,
     pub event_count: usize,
     pub current_tick: Tick,
 }
@@ -60,7 +60,7 @@ enum SectorSimulatorMessage {
     SpawnShip {
         position: Position,
         velocity: Velocity,
-        reply   : oneshot::Sender<ShipId>,
+        reply: oneshot::Sender<ShipId>,
     },
     GetStats {
         reply: oneshot::Sender<NodeStats>,
@@ -76,8 +76,8 @@ enum SectorSimulatorMessage {
     /// Step 7.5. `reply` is `false` if the command was rejected up front.
     Transit {
         ship_id: ShipId,
-        to     : SectorId,
-        reply  : oneshot::Sender<bool>,
+        to: SectorId,
+        reply: oneshot::Sender<bool>,
     },
     /// Request a Jump-Gate Transit for `ship_id` via `gate_id` (ADR-0009).
     ///
@@ -91,7 +91,7 @@ enum SectorSimulatorMessage {
     Jump {
         ship_id: ShipId,
         gate_id: dawn_core::JumpGateId,
-        reply  : oneshot::Sender<bool>,
+        reply: oneshot::Sender<bool>,
     },
     Shutdown,
 }
@@ -99,14 +99,14 @@ enum SectorSimulatorMessage {
 // ── Actor ─────────────────────────────────────────────────────────────────────
 
 struct SectorSimulatorActor {
-    rx              : mpsc::Receiver<SectorSimulatorMessage>,
-    node            : SimulationNode,
-    bus_tx          : mpsc::Sender<BusMessage>,
+    rx: mpsc::Receiver<SectorSimulatorMessage>,
+    node: SimulationNode,
+    bus_tx: mpsc::Sender<BusMessage>,
     /// Index of the next event in the node's log that has not yet been
     /// forwarded to the replication bus.
-    last_replicated : u64,
+    last_replicated: u64,
     /// Handle to this node's RaftActor (ADR-0014).
-    raft            : RaftActorHandle,
+    raft: RaftActorHandle,
     /// Committed Raft Log payloads from this node's RaftActor, applied at
     /// Step 7.5 each Tick (ADR-0014 §7).
     raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
@@ -114,13 +114,20 @@ struct SectorSimulatorActor {
 
 impl SectorSimulatorActor {
     fn new(
-        rx    : mpsc::Receiver<SectorSimulatorMessage>,
-        node  : SimulationNode,
+        rx: mpsc::Receiver<SectorSimulatorMessage>,
+        node: SimulationNode,
         bus_tx: mpsc::Sender<BusMessage>,
-        raft  : RaftActorHandle,
+        raft: RaftActorHandle,
         raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     ) -> Self {
-        Self { rx, node, bus_tx, last_replicated: 0, raft, raft_committed_rx }
+        Self {
+            rx,
+            node,
+            bus_tx,
+            last_replicated: 0,
+            raft,
+            raft_committed_rx,
+        }
     }
 
     /// Step 7.5 (ADR-0014 §7): apply committed Raft Log entries to the ECS.
@@ -137,7 +144,8 @@ impl SectorSimulatorActor {
 
     /// Forward any un-replicated events from the node's local log to the bus.
     async fn flush_to_bus(&mut self) {
-        let new_events: Vec<_> = self.node
+        let new_events: Vec<_> = self
+            .node
             .event_store()
             .iter_from(self.last_replicated)
             .map(|r| r.event.clone())
@@ -163,7 +171,7 @@ impl SectorSimulatorActor {
 
                     let result: TickResult = self.node.tick();
                     let summary = TickSummary {
-                        tick          : result.tick,
+                        tick: result.tick,
                         events_emitted: result.events_emitted,
                     };
 
@@ -180,8 +188,14 @@ impl SectorSimulatorActor {
                     let _ = reply.send(summary);
                 }
 
-                SectorSimulatorMessage::SpawnShip { position, velocity, reply } => {
-                    let ship_id = self.node.spawn_ship(dawn_core::ShipTypeId(1), position, velocity);
+                SectorSimulatorMessage::SpawnShip {
+                    position,
+                    velocity,
+                    reply,
+                } => {
+                    let ship_id =
+                        self.node
+                            .spawn_ship(dawn_core::ShipTypeId(1), position, velocity);
 
                     // Spawn appends to the internal log; flush those events.
                     self.flush_to_bus().await;
@@ -191,10 +205,10 @@ impl SectorSimulatorActor {
 
                 SectorSimulatorMessage::GetStats { reply } => {
                     let _ = reply.send(NodeStats {
-                        node_id     : self.node.node_id(),
-                        sector_id   : self.node.sector_id(),
-                        ship_count  : self.node.ship_count(),
-                        event_count : self.node.total_event_count(),
+                        node_id: self.node.node_id(),
+                        sector_id: self.node.sector_id(),
+                        ship_count: self.node.ship_count(),
+                        event_count: self.node.total_event_count(),
                         current_tick: self.node.current_tick(),
                     });
                 }
@@ -210,22 +224,42 @@ impl SectorSimulatorActor {
                     // commits and is applied at Step 7.5.
                     let accepted = self.node.can_propose_transit(ship_id);
                     if accepted {
-                        self.raft.propose(TransitOp::Request { ship_id, to, gate_id: None }.encode());
+                        self.raft.propose(
+                            TransitOp::Request {
+                                ship_id,
+                                to,
+                                gate_id: None,
+                            }
+                            .encode(),
+                        );
                     }
                     let _ = reply.send(accepted);
                 }
 
                 #[cfg(test)]
-                SectorSimulatorMessage::Jump { ship_id, gate_id, reply } => {
+                SectorSimulatorMessage::Jump {
+                    ship_id,
+                    gate_id,
+                    reply,
+                } => {
                     // Up-front validation only (INV-006): Ship must exist,
                     // not be in transit, and be within the gate's
                     // activation_radius (ADR-0009).
                     let accepted = self.node.can_propose_jump(ship_id, gate_id);
                     if accepted {
-                        let to = self.node.jump_gate(gate_id)
+                        let to = self
+                            .node
+                            .jump_gate(gate_id)
                             .expect("can_propose_jump confirmed gate exists")
                             .to_sector;
-                        self.raft.propose(TransitOp::Request { ship_id, to, gate_id: Some(gate_id) }.encode());
+                        self.raft.propose(
+                            TransitOp::Request {
+                                ship_id,
+                                to,
+                                gate_id: Some(gate_id),
+                            }
+                            .encode(),
+                        );
                     }
                     let _ = reply.send(accepted);
                 }
@@ -252,11 +286,11 @@ impl SectorSimulatorHandle {
     /// its peers via `RaftTransport`. `raft_committed_rx` is the matching
     /// committed-entries channel from the same `RaftActor`.
     pub fn spawn(
-        node_id  : NodeId,
+        node_id: NodeId,
         sector_id: SectorId,
-        bounds   : SectorBounds,
-        bus_tx   : mpsc::Sender<BusMessage>,
-        raft     : RaftActorHandle,
+        bounds: SectorBounds,
+        bus_tx: mpsc::Sender<BusMessage>,
+        raft: RaftActorHandle,
         raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(256);
@@ -267,21 +301,31 @@ impl SectorSimulatorHandle {
 
     pub async fn tick(&self) -> TickSummary {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(SectorSimulatorMessage::Tick { reply: tx }).await
+        self.tx
+            .send(SectorSimulatorMessage::Tick { reply: tx })
+            .await
             .expect("SectorSimulatorActor is no longer running");
         rx.await.expect("SectorSimulatorActor dropped reply sender")
     }
 
     pub async fn spawn_ship(&self, position: Position, velocity: Velocity) -> ShipId {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(SectorSimulatorMessage::SpawnShip { position, velocity, reply: tx }).await
+        self.tx
+            .send(SectorSimulatorMessage::SpawnShip {
+                position,
+                velocity,
+                reply: tx,
+            })
+            .await
             .expect("SectorSimulatorActor is no longer running");
         rx.await.expect("SectorSimulatorActor dropped reply sender")
     }
 
     pub async fn get_stats(&self) -> NodeStats {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(SectorSimulatorMessage::GetStats { reply: tx }).await
+        self.tx
+            .send(SectorSimulatorMessage::GetStats { reply: tx })
+            .await
             .expect("SectorSimulatorActor is no longer running");
         rx.await.expect("SectorSimulatorActor dropped reply sender")
     }
@@ -291,7 +335,13 @@ impl SectorSimulatorHandle {
     /// proposal was submitted to Raft; the move happens once it commits.
     pub async fn transit(&self, ship_id: ShipId, to: SectorId) -> bool {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(SectorSimulatorMessage::Transit { ship_id, to, reply: tx }).await
+        self.tx
+            .send(SectorSimulatorMessage::Transit {
+                ship_id,
+                to,
+                reply: tx,
+            })
+            .await
             .expect("SectorSimulatorActor is no longer running");
         rx.await.expect("SectorSimulatorActor dropped reply sender")
     }
@@ -304,7 +354,13 @@ impl SectorSimulatorHandle {
     #[cfg(test)]
     pub async fn jump(&self, ship_id: ShipId, gate_id: dawn_core::JumpGateId) -> bool {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(SectorSimulatorMessage::Jump { ship_id, gate_id, reply: tx }).await
+        self.tx
+            .send(SectorSimulatorMessage::Jump {
+                ship_id,
+                gate_id,
+                reply: tx,
+            })
+            .await
             .expect("SectorSimulatorActor is no longer running");
         rx.await.expect("SectorSimulatorActor dropped reply sender")
     }
@@ -312,7 +368,9 @@ impl SectorSimulatorHandle {
     /// Current Raft role/term of this node (ADR-0014).
     pub async fn raft_role(&self) -> (Role, Term) {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(SectorSimulatorMessage::GetRaftRole { reply: tx }).await
+        self.tx
+            .send(SectorSimulatorMessage::GetRaftRole { reply: tx })
+            .await
             .expect("SectorSimulatorActor is no longer running");
         rx.await.expect("SectorSimulatorActor dropped reply sender")
     }
@@ -327,8 +385,8 @@ impl SectorSimulatorHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_replication::InMemoryReplicationBus;
     use dawn_core::{SectorBounds, Velocity};
+    use dawn_replication::InMemoryReplicationBus;
 
     fn spawn_actor() -> (SectorSimulatorHandle, InMemoryReplicationBus) {
         let bus = InMemoryReplicationBus::spawn();
@@ -340,7 +398,9 @@ mod tests {
             std::collections::HashMap::new(),
         ));
         let state = dawn_consensus::RaftState::new(NodeId(0), vec![], 10, 2);
-        tokio::spawn(dawn_consensus::RaftActor::new(state, vec![], transport, raft_rx, committed_tx).run());
+        tokio::spawn(
+            dawn_consensus::RaftActor::new(state, vec![], transport, raft_rx, committed_tx).run(),
+        );
         let raft = RaftActorHandle::new(raft_tx);
 
         let handle = SectorSimulatorHandle::spawn(
@@ -366,7 +426,12 @@ mod tests {
     #[tokio::test]
     async fn spawning_a_ship_is_reflected_in_stats() {
         let (actor, bus) = spawn_actor();
-        actor.spawn_ship(Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0)).await;
+        actor
+            .spawn_ship(
+                Position::new(100.0, 100.0, 100.0),
+                Velocity::new(1.0, 0.0, 0.0),
+            )
+            .await;
         let stats = actor.get_stats().await;
         assert_eq!(stats.ship_count, 1);
         actor.shutdown().await;
@@ -376,7 +441,12 @@ mod tests {
     #[tokio::test]
     async fn ticking_advances_the_logical_tick() {
         let (actor, bus) = spawn_actor();
-        actor.spawn_ship(Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0)).await;
+        actor
+            .spawn_ship(
+                Position::new(100.0, 100.0, 100.0),
+                Velocity::new(1.0, 0.0, 0.0),
+            )
+            .await;
         let summary = actor.tick().await;
         assert_eq!(summary.tick, Tick(1));
         actor.shutdown().await;
@@ -407,10 +477,9 @@ mod tests {
         let (actor, bus) = spawn_actor();
 
         for i in 0..5 {
-            actor.spawn_ship(
-                Position::new(i as f32 * 50.0, 0.0, 0.0),
-                Velocity::ZERO,
-            ).await;
+            actor
+                .spawn_ship(Position::new(i as f32 * 50.0, 0.0, 0.0), Velocity::ZERO)
+                .await;
         }
 
         // All spawn events must be in the bus because spawn_ship awaits the reply,

@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 /// Raft term number. Monotonically increasing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash, Serialize, Deserialize,
+)]
 pub struct Term(pub u64);
 
 impl Term {
@@ -33,7 +35,7 @@ impl Term {
 /// turned into Events by the caller and appended to its EventStore.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogEntry {
-    pub term   : Term,
+    pub term: Term,
     pub payload: Vec<u8>,
 }
 
@@ -106,7 +108,12 @@ impl RaftState {
     /// `election_timeout` is the number of ticks of silence before this
     /// node starts an election. Callers should randomize this per node
     /// (e.g. `base + rng.gen_range(0..jitter)`) to avoid split votes.
-    pub fn new(node_id: NodeId, peers: Vec<NodeId>, election_timeout: u64, heartbeat_interval: u64) -> Self {
+    pub fn new(
+        node_id: NodeId,
+        peers: Vec<NodeId>,
+        election_timeout: u64,
+        heartbeat_interval: u64,
+    ) -> Self {
         assert!(election_timeout > 0, "election_timeout must be > 0");
         assert!(heartbeat_interval > 0, "heartbeat_interval must be > 0");
         Self {
@@ -167,14 +174,18 @@ impl RaftState {
                 self.election_elapsed += 1;
                 if self.election_elapsed >= self.election_timeout {
                     self.become_candidate();
-                    effects.push(TickEffect::StartElection { term: self.current_term });
+                    effects.push(TickEffect::StartElection {
+                        term: self.current_term,
+                    });
                 }
             }
             Role::Leader => {
                 self.heartbeat_elapsed += 1;
                 if self.heartbeat_elapsed >= self.heartbeat_interval {
                     self.heartbeat_elapsed = 0;
-                    effects.push(TickEffect::SendHeartbeat { term: self.current_term });
+                    effects.push(TickEffect::SendHeartbeat {
+                        term: self.current_term,
+                    });
                 }
             }
         }
@@ -249,7 +260,10 @@ impl RaftState {
         if self.role != Role::Leader {
             return false;
         }
-        self.log.push(LogEntry { term: self.current_term, payload });
+        self.log.push(LogEntry {
+            term: self.current_term,
+            payload,
+        });
         // A lone-node "cluster" (no peers) commits immediately.
         self.recompute_commit_index();
         true
@@ -269,7 +283,11 @@ impl RaftState {
     /// Leader only: the log suffix to send to `peer`, as
     /// `(prev_log_index, prev_log_term, entries)`.
     pub fn entries_for(&self, peer: NodeId) -> (u64, Term, Vec<LogEntry>) {
-        let next = self.next_index.get(&peer).copied().unwrap_or(self.log.len() as u64);
+        let next = self
+            .next_index
+            .get(&peer)
+            .copied()
+            .unwrap_or(self.log.len() as u64);
         let prev_term = if next == 0 {
             Term::ZERO
         } else {
@@ -440,7 +458,8 @@ mod tests {
     fn randomized_election_timeout_falls_within_base_plus_jitter_range() {
         let mut rng = rand::thread_rng();
         for _ in 0..50 {
-            let mut state = RaftState::new_randomized(node(0), vec![node(1), node(2)], 10, 5, 1, &mut rng);
+            let mut state =
+                RaftState::new_randomized(node(0), vec![node(1), node(2)], 10, 5, 1, &mut rng);
             // election_timeout is private; observe it indirectly via on_tick.
             let mut ticks = 0;
             loop {

@@ -28,7 +28,10 @@
 //! variant to `ClientCommand` (then update the ws_server.rs JSON parser and
 //! the main.rs dispatch).
 
-use dawn_core::{ActivateModuleCommand, ApproachCommand, AttackCommand, DeactivateModuleCommand, DomainEvent, JumpCommand, LockOnCommand, MoveCommand, StopCommand, WarpCommand};
+use dawn_core::{
+    ActivateModuleCommand, ApproachCommand, AttackCommand, DeactivateModuleCommand, DomainEvent,
+    JumpCommand, LockOnCommand, MoveCommand, StopCommand, WarpCommand,
+};
 use tokio::sync::mpsc;
 
 // ── Error ─────────────────────────────────────────────────────────────────────
@@ -106,23 +109,29 @@ pub trait ClientConnection: Send + 'static {
 /// // client_side → test code (send commands, observe events)
 /// ```
 pub struct InProcessConnection {
-    event_tx   : mpsc::UnboundedSender<DomainEvent>,
-    command_rx : mpsc::UnboundedReceiver<ClientCommand>,
+    event_tx: mpsc::UnboundedSender<DomainEvent>,
+    command_rx: mpsc::UnboundedReceiver<ClientCommand>,
 }
 
 /// The client-side endpoint of an [`InProcessConnection`].
 pub struct InProcessClientEndpoint {
-    pub event_rx   : mpsc::UnboundedReceiver<DomainEvent>,
-    pub command_tx : mpsc::UnboundedSender<ClientCommand>,
+    pub event_rx: mpsc::UnboundedReceiver<DomainEvent>,
+    pub command_tx: mpsc::UnboundedSender<ClientCommand>,
 }
 
 impl InProcessConnection {
     pub fn pair() -> (Self, InProcessClientEndpoint) {
-        let (event_tx,   event_rx)   = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         (
-            InProcessConnection { event_tx, command_rx },
-            InProcessClientEndpoint { event_rx, command_tx },
+            InProcessConnection {
+                event_tx,
+                command_rx,
+            },
+            InProcessClientEndpoint {
+                event_rx,
+                command_tx,
+            },
         )
     }
 }
@@ -147,33 +156,38 @@ impl ClientConnection for InProcessConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{
-        EntityId, NodeId, Position, ShipId, Tick,
-        DomainEvent, SectorId, MoveCommand,
-    };
     use dawn_core::events::ShipSpawned;
+    use dawn_core::{DomainEvent, EntityId, MoveCommand, NodeId, Position, SectorId, ShipId, Tick};
 
     fn make_ship_spawned() -> DomainEvent {
         DomainEvent::ShipSpawned(ShipSpawned {
-            ship_id          : ShipId(EntityId::new(NodeId(0), 1)),
-            initial_position : Position { x: 1.0, y: 2.0, z: 3.0 },
-            sector_id        : SectorId(0),
-            ship_type_id     : dawn_core::ShipTypeId(1),
-            tick             : Tick::ZERO,
+            ship_id: ShipId(EntityId::new(NodeId(0), 1)),
+            initial_position: Position {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+            sector_id: SectorId(0),
+            ship_type_id: dawn_core::ShipTypeId(1),
+            tick: Tick::ZERO,
         })
     }
 
     fn make_move_command() -> ClientCommand {
         ClientCommand::Move(MoveCommand {
-            ship_id         : ShipId(EntityId::new(NodeId(0), 1)),
-            target_position : Position { x: 10.0, y: 0.0, z: 0.0 },
+            ship_id: ShipId(EntityId::new(NodeId(0), 1)),
+            target_position: Position {
+                x: 10.0,
+                y: 0.0,
+                z: 0.0,
+            },
         })
     }
 
     fn make_lock_on_command() -> ClientCommand {
         ClientCommand::LockOn(LockOnCommand {
-            ship_id   : ShipId(EntityId::new(NodeId(0), 1)),
-            target_id : ShipId(EntityId::new(NodeId(0), 2)),
+            ship_id: ShipId(EntityId::new(NodeId(0), 1)),
+            target_id: ShipId(EntityId::new(NodeId(0), 2)),
         })
     }
 
@@ -182,7 +196,10 @@ mod tests {
         let (server, mut client) = InProcessConnection::pair();
         let event = make_ship_spawned();
         server.send_events(&[event.clone()]).unwrap();
-        let received = client.event_rx.try_recv().expect("event should be available");
+        let received = client
+            .event_rx
+            .try_recv()
+            .expect("event should be available");
         assert_eq!(format!("{:?}", received), format!("{:?}", event));
     }
 
@@ -190,7 +207,9 @@ mod tests {
     fn move_command_is_received_by_server_connection() {
         let (mut server, client) = InProcessConnection::pair();
         client.command_tx.send(make_move_command()).unwrap();
-        let cmd = server.try_recv_command().expect("command should be available");
+        let cmd = server
+            .try_recv_command()
+            .expect("command should be available");
         assert!(matches!(cmd, ClientCommand::Move(_)));
     }
 
@@ -198,7 +217,9 @@ mod tests {
     fn lock_on_command_is_received_by_server_connection() {
         let (mut server, client) = InProcessConnection::pair();
         client.command_tx.send(make_lock_on_command()).unwrap();
-        let cmd = server.try_recv_command().expect("command should be available");
+        let cmd = server
+            .try_recv_command()
+            .expect("command should be available");
         assert!(matches!(cmd, ClientCommand::LockOn(_)));
     }
 
@@ -207,18 +228,29 @@ mod tests {
         let (mut server, client) = InProcessConnection::pair();
         client.command_tx.send(make_move_command()).unwrap();
         client.command_tx.send(make_lock_on_command()).unwrap();
-        assert!(matches!(server.try_recv_command().unwrap(), ClientCommand::Move(_)));
-        assert!(matches!(server.try_recv_command().unwrap(), ClientCommand::LockOn(_)));
+        assert!(matches!(
+            server.try_recv_command().unwrap(),
+            ClientCommand::Move(_)
+        ));
+        assert!(matches!(
+            server.try_recv_command().unwrap(),
+            ClientCommand::LockOn(_)
+        ));
     }
 
     #[test]
     fn jump_command_is_received_by_server_connection() {
         let (mut server, client) = InProcessConnection::pair();
-        client.command_tx.send(ClientCommand::Jump(dawn_core::JumpCommand {
-            ship_id: ShipId(EntityId::new(NodeId(0), 1)),
-            gate_id: dawn_core::JumpGateId(0),
-        })).unwrap();
-        let cmd = server.try_recv_command().expect("command should be available");
+        client
+            .command_tx
+            .send(ClientCommand::Jump(dawn_core::JumpCommand {
+                ship_id: ShipId(EntityId::new(NodeId(0), 1)),
+                gate_id: dawn_core::JumpGateId(0),
+            }))
+            .unwrap();
+        let cmd = server
+            .try_recv_command()
+            .expect("command should be available");
         assert!(matches!(cmd, ClientCommand::Jump(_)));
     }
 
@@ -248,7 +280,9 @@ mod tests {
         let events: Vec<DomainEvent> = (0..3).map(|_| make_ship_spawned()).collect();
         server.send_events(&events).unwrap();
         let mut count = 0;
-        while client.event_rx.try_recv().is_ok() { count += 1; }
+        while client.event_rx.try_recv().is_ok() {
+            count += 1;
+        }
         assert_eq!(count, 3);
     }
 }

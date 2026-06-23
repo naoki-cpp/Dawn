@@ -60,7 +60,11 @@ impl AnchorTable {
     /// `anchor_abs + offset`, computed in f64.
     pub fn absolute(&self, anchor: AnchorId, offset: Position) -> Option<[f64; 3]> {
         let a = self.abs(anchor)?;
-        Some([a[0] + offset.x as f64, a[1] + offset.y as f64, a[2] + offset.z as f64])
+        Some([
+            a[0] + offset.x as f64,
+            a[1] + offset.y as f64,
+            a[2] + offset.z as f64,
+        ])
     }
 
     /// Re-express a ship currently anchored at `from` (with `offset`) relative
@@ -132,7 +136,11 @@ mod tests {
         let g = Galaxy::demo();
         let t = AnchorTable::from_galaxy(&g);
         for b in &g.bodies {
-            assert!(t.abs(AnchorId::from(b.id)).is_some(), "missing anchor for {:?}", b.id);
+            assert!(
+                t.abs(AnchorId::from(b.id)).is_some(),
+                "missing anchor for {:?}",
+                b.id
+            );
         }
     }
 
@@ -144,9 +152,16 @@ mod tests {
         // (0.8 * UNITS_PER_AU) exactly, and equal abs_m, not the f32 position.
         let g = Galaxy::demo();
         let t = AnchorTable::from_galaxy(&g);
-        let forge = g.bodies.iter().find(|b| b.id == CelestialBodyId(1)).unwrap();
+        let forge = g
+            .bodies
+            .iter()
+            .find(|b| b.id == CelestialBodyId(1))
+            .unwrap();
         let anchor_abs = t.abs(AnchorId(1)).unwrap();
-        assert_eq!(anchor_abs, forge.abs_m, "anchor must use the f64 abs_m source");
+        assert_eq!(
+            anchor_abs, forge.abs_m,
+            "anchor must use the f64 abs_m source"
+        );
     }
 
     #[test]
@@ -161,18 +176,21 @@ mod tests {
         let t = table();
         let star = AnchorId(0); // Helios at origin
         let planet = AnchorId(1); // Forge
-        // Rebasing across a FAR anchor (star <-> Forge ~1 AU) is inherently
-        // f32-lossy: the offset on the far side is ~10^11 m, whose f32 ulp is
-        // ~16 km. This is exactly why anchors must stay local and real warps
-        // rebase via the f64 arrival point (rebase_arrival_event), not via
-        // AnchorTable::rebase. Here we only assert the loss is bounded by the
-        // f32 ulp at that magnitude (ADR-0029).
+                                  // Rebasing across a FAR anchor (star <-> Forge ~1 AU) is inherently
+                                  // f32-lossy: the offset on the far side is ~10^11 m, whose f32 ulp is
+                                  // ~16 km. This is exactly why anchors must stay local and real warps
+                                  // rebase via the f64 arrival point (rebase_arrival_event), not via
+                                  // AnchorTable::rebase. Here we only assert the loss is bounded by the
+                                  // f32 ulp at that magnitude (ADR-0029).
         let offset = Position::new(1000.0, 0.0, 0.0);
         let world_before = t.absolute(star, offset).unwrap();
         let new_off = t.rebase(star, offset, planet).unwrap();
         let world_after = t.absolute(planet, new_off).unwrap();
         let err = sq_dist(world_before, world_after).sqrt();
-        assert!(err < 30_000.0, "rebase error {err} m exceeds the f32 ulp bound at ~1 AU");
+        assert!(
+            err < 30_000.0,
+            "rebase error {err} m exceeds the f32 ulp bound at ~1 AU"
+        );
     }
 
     #[test]
@@ -217,30 +235,58 @@ mod tests {
         let pb = t.absolute(AnchorId(11), off_b).unwrap();
         let expected = sq_dist(pa, pb).sqrt();
 
-        let d = t.distance((AnchorId(10), off_a), (AnchorId(11), off_b)).unwrap();
-        assert!((d - expected).abs() < 1e-3, "cross-anchor distance off by {} m at true AU", (d - expected).abs());
+        let d = t
+            .distance((AnchorId(10), off_a), (AnchorId(11), off_b))
+            .unwrap();
+        assert!(
+            (d - expected).abs() < 1e-3,
+            "cross-anchor distance off by {} m at true AU",
+            (d - expected).abs()
+        );
 
         // And the offsets themselves survive the compose to sub-mm (the property
         // f32-at-absolute would destroy): recover off_a from the composed point.
         let recovered_x = pa[0] - 1.0 * AU_M;
-        assert!((recovered_x - off_a.x as f64).abs() < 1e-3,
-            "near-anchor offset lost precision: {} vs {}", recovered_x, off_a.x);
+        assert!(
+            (recovered_x - off_a.x as f64).abs() < 1e-3,
+            "near-anchor offset lost precision: {} vs {}",
+            recovered_x,
+            off_a.x
+        );
     }
 
     #[test]
     fn distance_across_anchors_matches_body_separation() {
         let g = Galaxy::demo();
         let t = AnchorTable::from_galaxy(&g);
-        let helios = g.bodies.iter().find(|b| b.id == CelestialBodyId(0)).unwrap();
-        let forge = g.bodies.iter().find(|b| b.id == CelestialBodyId(1)).unwrap();
+        let helios = g
+            .bodies
+            .iter()
+            .find(|b| b.id == CelestialBodyId(0))
+            .unwrap();
+        let forge = g
+            .bodies
+            .iter()
+            .find(|b| b.id == CelestialBodyId(1))
+            .unwrap();
         // Expected from the f64 anchor source (positions are ~10^11 m, where the
         // f32 `position` distance would be ~km off).
-        let d_abs = [helios.abs_m[0] - forge.abs_m[0], helios.abs_m[1] - forge.abs_m[1], helios.abs_m[2] - forge.abs_m[2]];
+        let d_abs = [
+            helios.abs_m[0] - forge.abs_m[0],
+            helios.abs_m[1] - forge.abs_m[1],
+            helios.abs_m[2] - forge.abs_m[2],
+        ];
         let expected = (d_abs[0] * d_abs[0] + d_abs[1] * d_abs[1] + d_abs[2] * d_abs[2]).sqrt();
         // Two ships at their anchors' origins (zero offset).
         let d = t
-            .distance((AnchorId(0), Position::ORIGIN), (AnchorId(1), Position::ORIGIN))
+            .distance(
+                (AnchorId(0), Position::ORIGIN),
+                (AnchorId(1), Position::ORIGIN),
+            )
             .unwrap();
-        assert!((d - expected).abs() < 1.0, "anchor distance {d} != body sep {expected}");
+        assert!(
+            (d - expected).abs() < 1.0,
+            "anchor distance {d} != body sep {expected}"
+        );
     }
 }

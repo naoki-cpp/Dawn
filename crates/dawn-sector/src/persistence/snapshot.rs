@@ -30,8 +30,8 @@
 use std::{fs, io, path::Path};
 
 use dawn_core::{
-    fitting::FittingSnapshot, NodeId, Position, SectorBounds, SectorId, ShipId, ShipTypeId,
-    Tick, Velocity,
+    fitting::FittingSnapshot, NodeId, Position, SectorBounds, SectorId, ShipId, ShipTypeId, Tick,
+    Velocity,
 };
 use serde::{Deserialize, Serialize};
 
@@ -45,27 +45,27 @@ use serde::{Deserialize, Serialize};
 /// beginning of the log (INV-002).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShipSnapshot {
-    pub ship_id     : ShipId,
+    pub ship_id: ShipId,
     pub ship_type_id: ShipTypeId,
-    pub position    : Position,
+    pub position: Position,
     /// Coordinate anchor the `position` offset is relative to (ADR-0029).
     /// Defaults to the Sector-origin anchor (id 0) for pre-anchor snapshots.
     #[serde(default)]
-    pub anchor      : dawn_core::AnchorId,
-    pub velocity    : Velocity,
+    pub anchor: dawn_core::AnchorId,
+    pub velocity: Velocity,
     /// `HullComp` at the time of the snapshot (Shield / Armor / Hull layers).
     pub current_shield: f32,
-    pub current_armor : f32,
-    pub current_hull  : f32,
-    pub is_destroyed  : bool,
+    pub current_armor: f32,
+    pub current_hull: f32,
+    pub is_destroyed: bool,
     /// `CapacitorComp.current`, if the ship has a capacitor.
-    pub capacitor   : Option<f32>,
+    pub capacitor: Option<f32>,
     /// Fitted modules (High/Mid/Low/Rig) and their on/off state.
-    pub fitting     : FittingSnapshot,
+    pub fitting: FittingSnapshot,
     /// Ships currently tackling this ship (ADR-0024). Persisted so tackle
     /// state is not lost on restart (which would allow escape).
     #[serde(default)]
-    pub tackled_by  : Vec<dawn_core::ShipId>,
+    pub tackled_by: Vec<dawn_core::ShipId>,
 }
 
 // ── Node-level snapshot ───────────────────────────────────────────────────────
@@ -77,21 +77,21 @@ pub struct ShipSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateSnapshot {
     /// The node that produced this snapshot.
-    pub node_id    : NodeId,
+    pub node_id: NodeId,
     /// The Sector this node manages.
-    pub sector_id  : SectorId,
+    pub sector_id: SectorId,
     /// Spatial bounds of the Sector.
-    pub bounds     : SectorBounds,
+    pub bounds: SectorBounds,
     /// All events with index < `log_index` are covered by this snapshot.
     /// Events at `log_index` and beyond must be replayed.
-    pub log_index  : u64,
+    pub log_index: u64,
     /// Logical tick at the time of the snapshot.
-    pub tick       : Tick,
+    pub tick: Tick,
     /// Next value for `SimulationNode::id_counter`.
     /// Must be restored to prevent EntityId reuse (INV-004).
-    pub id_counter : u64,
+    pub id_counter: u64,
     /// State of every Ship in the Sector at the snapshot instant.
-    pub ships      : Vec<ShipSnapshot>,
+    pub ships: Vec<ShipSnapshot>,
 }
 
 impl StateSnapshot {
@@ -119,39 +119,37 @@ mod tests {
 
     fn sample_snapshot() -> StateSnapshot {
         StateSnapshot {
-            node_id   : NodeId(0),
-            sector_id : dawn_core::SectorId(0),
-            bounds    : SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-            log_index : 42,
-            tick      : Tick(10),
+            node_id: NodeId(0),
+            sector_id: dawn_core::SectorId(0),
+            bounds: SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            log_index: 42,
+            tick: Tick(10),
             id_counter: 5,
-            ships     : vec![
-                ShipSnapshot {
-                    ship_id       : ShipId::new(NodeId(0), 0),
-                    ship_type_id  : ShipTypeId(1),
-                    position      : Position::new(100.0, 200.0, 300.0),
-                    anchor        : dawn_core::AnchorId(0),
-                    velocity      : dawn_core::Velocity::new(1.0, 0.0, 0.0),
-                    current_shield: 50.0,
-                    current_armor : 60.0,
-                    current_hull  : 70.0,
-                    is_destroyed  : false,
-                    capacitor     : Some(250.0),
-                    fitting       : FittingSnapshot::empty(),
-                    tackled_by    : vec![],
-                },
-            ],
+            ships: vec![ShipSnapshot {
+                ship_id: ShipId::new(NodeId(0), 0),
+                ship_type_id: ShipTypeId(1),
+                position: Position::new(100.0, 200.0, 300.0),
+                anchor: dawn_core::AnchorId(0),
+                velocity: dawn_core::Velocity::new(1.0, 0.0, 0.0),
+                current_shield: 50.0,
+                current_armor: 60.0,
+                current_hull: 70.0,
+                is_destroyed: false,
+                capacitor: Some(250.0),
+                fitting: FittingSnapshot::empty(),
+                tackled_by: vec![],
+            }],
         }
     }
 
     #[test]
     fn snapshot_round_trips_through_postcard_without_data_loss() {
         let original = sample_snapshot();
-        let bytes    = postcard::to_stdvec(&original).unwrap();
+        let bytes = postcard::to_stdvec(&original).unwrap();
         let restored: StateSnapshot = postcard::from_bytes(&bytes).unwrap();
 
-        assert_eq!(restored.log_index,  original.log_index);
-        assert_eq!(restored.tick,       original.tick);
+        assert_eq!(restored.log_index, original.log_index);
+        assert_eq!(restored.tick, original.tick);
         assert_eq!(restored.id_counter, original.id_counter);
         assert_eq!(restored.ships.len(), 1);
         assert_eq!(restored.ships[0].position, original.ships[0].position);
@@ -159,15 +157,15 @@ mod tests {
 
     #[test]
     fn snapshot_survives_save_and_load_from_disk() {
-        let dir  = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("snapshot.bin");
 
         let original = sample_snapshot();
         original.save(&path).unwrap();
 
         let restored = StateSnapshot::load(&path).unwrap();
-        assert_eq!(restored.log_index,  original.log_index);
-        assert_eq!(restored.tick,       original.tick);
+        assert_eq!(restored.log_index, original.log_index);
+        assert_eq!(restored.tick, original.tick);
         assert_eq!(restored.id_counter, original.id_counter);
     }
 }

@@ -1,5 +1,5 @@
 use dawn_core::DomainEvent;
-use dawn_ecs::systems::{CapacitorSystem, CombatSystem, LockSystem, MovementSystem, apply_fitting};
+use dawn_ecs::systems::{apply_fitting, CapacitorSystem, CombatSystem, LockSystem, MovementSystem};
 use dawn_event_store::store::EventStore;
 
 use super::{SimulationNode, TickResult};
@@ -51,7 +51,12 @@ impl<S: EventStore> SimulationNode<S> {
 
         // 6. Combat System — fire only when the capacitor weapon cycle started this tick.
         // Pass the anchor table so distances resolve across anchors (ADR-0029).
-        let combat = CombatSystem(&mut self.world, tick, &cap.weapon_cycles_started, self.anchor_table.abs_map());
+        let combat = CombatSystem(
+            &mut self.world,
+            tick,
+            &cap.weapon_cycles_started,
+            self.anchor_table.abs_map(),
+        );
 
         // Remove destroyed ships from the ECS and all lookup maps.
         // CLAUDE.md §6: run the Bot System after Combat.
@@ -70,7 +75,8 @@ impl<S: EventStore> SimulationNode<S> {
         self.process_bots();
 
         // 8. Append to the EventStore
-        let all_events: Vec<DomainEvent> = warp_events.iter()
+        let all_events: Vec<DomainEvent> = warp_events
+            .iter()
             .chain(move_events.iter())
             .chain(cap.events.iter())
             .chain(tackle_events.iter())
@@ -97,7 +103,11 @@ mod tests {
     use dawn_core::{NodeId, Position, SectorBounds, SectorId, Tick, Velocity};
 
     fn mem_node() -> SimulationNode {
-        SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF))
+        SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        )
     }
 
     #[test]
@@ -113,10 +123,21 @@ mod tests {
     #[test]
     fn npc_ships_at_constant_velocity_produce_no_velocity_changed_events() {
         let mut node = mem_node();
-        node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(100.0, 100.0, 100.0), Velocity::new(1.0, 0.0, 0.0));
-        node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(200.0, 100.0, 100.0), Velocity::new(0.0, 1.0, 0.0));
-        assert_eq!(node.tick().events_emitted, 0,
-            "NPC ships at constant velocity do not emit VelocityChanged");
+        node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(100.0, 100.0, 100.0),
+            Velocity::new(1.0, 0.0, 0.0),
+        );
+        node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(200.0, 100.0, 100.0),
+            Velocity::new(0.0, 1.0, 0.0),
+        );
+        assert_eq!(
+            node.tick().events_emitted,
+            0,
+            "NPC ships at constant velocity do not emit VelocityChanged"
+        );
     }
 
     #[test]
@@ -129,7 +150,11 @@ mod tests {
     #[test]
     fn velocity_changed_events_carry_the_current_tick_value() {
         let mut node = mem_node();
-        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(100.0, 100.0, 100.0), Velocity::ZERO);
+        let ship_id = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(100.0, 100.0, 100.0),
+            Velocity::ZERO,
+        );
         node.set_player_ship(ship_id);
         node.apply_move_command(ship_id, Position::new(10000.0, 0.0, 0.0));
         node.tick();

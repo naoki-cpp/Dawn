@@ -11,11 +11,11 @@ use std::net::SocketAddr;
 #[derive(Deserialize)]
 pub struct NodeConfig {
     /// The unique node identifier (matches `RaftState::self_id`).
-    pub node_id  : u8,
+    pub node_id: u8,
     /// The Sector this node is authoritative for.
     pub sector_id: u8,
     /// WebSocket address the Godot clients connect to.
-    pub ws_addr  : SocketAddr,
+    pub ws_addr: SocketAddr,
     /// TCP address for incoming Raft RPC messages.
     pub raft_addr: SocketAddr,
     /// TCP address for incoming replication gossip frames.
@@ -25,26 +25,30 @@ pub struct NodeConfig {
     pub npc_ships: usize,
     /// Population backstop per sector (ADR-0018).
     #[serde(default = "default_pop_cap")]
-    pub pop_cap  : usize,
+    pub pop_cap: usize,
     /// Every other node in the cluster.
     #[serde(default)]
-    pub peers    : Vec<PeerConfig>,
+    pub peers: Vec<PeerConfig>,
 }
 
-fn default_npc_ships() -> usize { 20 }
-fn default_pop_cap()   -> usize { 500 }
+fn default_npc_ships() -> usize {
+    20
+}
+fn default_pop_cap() -> usize {
+    500
+}
 
 /// One peer's network endpoints.
 #[derive(Deserialize, Clone)]
 pub struct PeerConfig {
-    pub node_id   : u8,
+    pub node_id: u8,
     /// Raft TCP address of this peer.
-    pub raft_addr : SocketAddr,
+    pub raft_addr: SocketAddr,
     /// Replication TCP address of this peer.
-    pub repl_addr : SocketAddr,
+    pub repl_addr: SocketAddr,
     /// WebSocket address — used for the client Redirect message when a player
     /// jumps to this peer's sector (see `serve.rs`).
-    pub ws_addr   : SocketAddr,
+    pub ws_addr: SocketAddr,
 }
 
 /// Load a [`NodeConfig`] from a TOML file.

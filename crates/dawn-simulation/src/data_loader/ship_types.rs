@@ -8,74 +8,80 @@ pub(super) struct ShipTypesFile {
 
 #[derive(Deserialize)]
 pub(super) struct ShipTypeEntry {
-    pub(super) id         : u32,
-    pub(super) name       : String,
-    pub(super) class      : String,
+    pub(super) id: u32,
+    pub(super) name: String,
+    pub(super) class: String,
     pub(super) slot_layout: SlotLayoutEntry,
-    pub(super) base_stats : BaseStatsEntry,
+    pub(super) base_stats: BaseStatsEntry,
 }
 
 #[derive(Deserialize)]
 pub(super) struct SlotLayoutEntry {
     pub(super) high: u8,
-    pub(super) mid : u8,
-    pub(super) low : u8,
-    pub(super) rig : u8,
+    pub(super) mid: u8,
+    pub(super) low: u8,
+    pub(super) rig: u8,
 }
 
 #[derive(Deserialize)]
 pub(super) struct BaseStatsEntry {
-    pub(super) max_speed            : f32,
-    pub(super) mass                 : f32,
-    pub(super) inertia_modifier     : f32,
-    pub(super) max_shield           : f32,
-    pub(super) max_armor            : f32,
-    pub(super) max_hull             : f32,
-    pub(super) lock_time            : u64,
-    pub(super) max_locks            : u32,
+    pub(super) max_speed: f32,
+    pub(super) mass: f32,
+    pub(super) inertia_modifier: f32,
+    pub(super) max_shield: f32,
+    pub(super) max_armor: f32,
+    pub(super) max_hull: f32,
+    pub(super) lock_time: u64,
+    pub(super) max_locks: u32,
     #[serde(default = "default_cap_max")]
-    pub(super) cap_max              : f32,
+    pub(super) cap_max: f32,
     #[serde(default = "default_cap_recharge")]
     pub(super) cap_recharge_per_tick: f32,
     #[serde(default = "default_sig_radius")]
-    pub(super) sig_radius           : f32,
+    pub(super) sig_radius: f32,
 }
 
-fn default_cap_max() -> f32 { 400.0 }
-fn default_cap_recharge() -> f32 { 8.0 }
-fn default_sig_radius() -> f32 { 40.0 }
+fn default_cap_max() -> f32 {
+    400.0
+}
+fn default_cap_recharge() -> f32 {
+    8.0
+}
+fn default_sig_radius() -> f32 {
+    40.0
+}
 
 fn parse_ship_class(s: &str) -> ShipClass {
     match s {
-        "Cruiser"     => ShipClass::Cruiser,
-        "Battleship"  => ShipClass::Battleship,
-        _             => ShipClass::Frigate,
+        "Cruiser" => ShipClass::Cruiser,
+        "Battleship" => ShipClass::Battleship,
+        _ => ShipClass::Frigate,
     }
 }
 
 fn entry_to_ship_type(e: ShipTypeEntry) -> ShipTypeDefinition {
     ShipTypeDefinition {
-        id         : ShipTypeId(e.id),
-        name       : e.name,
-        class      : parse_ship_class(&e.class),
+        id: ShipTypeId(e.id),
+        name: e.name,
+        class: parse_ship_class(&e.class),
         slot_layout: SlotLayout {
             high: e.slot_layout.high,
-            mid : e.slot_layout.mid,
-            low : e.slot_layout.low,
-            rig : e.slot_layout.rig,
+            mid: e.slot_layout.mid,
+            low: e.slot_layout.low,
+            rig: e.slot_layout.rig,
         },
-        base_stats : ShipBaseStats {
-            max_speed            : e.base_stats.max_speed,
-            mass                 : e.base_stats.mass,
-            inertia_modifier     : e.base_stats.inertia_modifier,
-            max_shield           : e.base_stats.max_shield,
-            max_armor            : e.base_stats.max_armor,
-            max_hull             : e.base_stats.max_hull,
-            lock_time            : e.base_stats.lock_time,
-            max_locks            : e.base_stats.max_locks,
-            cap_max              : e.base_stats.cap_max,
+        base_stats: ShipBaseStats {
+            max_speed: e.base_stats.max_speed,
+            mass: e.base_stats.mass,
+            inertia_modifier: e.base_stats.inertia_modifier,
+            max_shield: e.base_stats.max_shield,
+            max_armor: e.base_stats.max_armor,
+            max_hull: e.base_stats.max_hull,
+            lock_time: e.base_stats.lock_time,
+            max_locks: e.base_stats.max_locks,
+            cap_max: e.base_stats.cap_max,
             cap_recharge_per_tick: e.base_stats.cap_recharge_per_tick,
-            sig_radius           : e.base_stats.sig_radius,
+            sig_radius: e.base_stats.sig_radius,
         },
     }
 }
@@ -84,23 +90,32 @@ fn entry_to_ship_type(e: ShipTypeEntry) -> ShipTypeDefinition {
 /// the file is absent or cannot be parsed.
 pub fn load_ship_types(path: &str, fallback: Vec<ShipTypeDefinition>) -> Vec<ShipTypeDefinition> {
     let content = match std::fs::read_to_string(path) {
-        Ok(s)  => s,
+        Ok(s) => s,
         Err(e) => {
-            eprintln!("[DataLoader] '{}' not found ({}), using built-in defaults.", path, e);
+            eprintln!(
+                "[DataLoader] '{}' not found ({}), using built-in defaults.",
+                path, e
+            );
             return fallback;
         }
     };
 
     match toml::from_str::<ShipTypesFile>(&content) {
         Ok(f) => {
-            let types: Vec<ShipTypeDefinition> = f.ship_types.into_iter()
-                .map(entry_to_ship_type)
-                .collect();
-            println!("[DataLoader] loaded {} ship types from '{}'.", types.len(), path);
+            let types: Vec<ShipTypeDefinition> =
+                f.ship_types.into_iter().map(entry_to_ship_type).collect();
+            println!(
+                "[DataLoader] loaded {} ship types from '{}'.",
+                types.len(),
+                path
+            );
             types
         }
         Err(e) => {
-            eprintln!("[DataLoader] parse error in '{}': {}, using built-in defaults.", path, e);
+            eprintln!(
+                "[DataLoader] parse error in '{}': {}, using built-in defaults.",
+                path, e
+            );
             fallback
         }
     }

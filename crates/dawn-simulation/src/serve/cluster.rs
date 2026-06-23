@@ -1,10 +1,15 @@
 //! Raft-cluster WebSocket server (`--serve --cluster`, ADR-0009/0014).
 
-use super::{AOI_CELL_SIZE, P4_TICK_MS, apply_common_command, build_serve_node, deliver_aoi_frame, spawn_npc_frigates};
+use super::{
+    apply_common_command, build_serve_node, deliver_aoi_frame, spawn_npc_frigates, AOI_CELL_SIZE,
+    P4_TICK_MS,
+};
 use crate::{cluster, ws_server};
-use dawn_sector::{aoi, transit};
+use dawn_core::{
+    DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, WarpTarget,
+};
 use dawn_sector::node::SimulationNode;
-use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, WarpTarget};
+use dawn_sector::{aoi, transit};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
@@ -17,14 +22,22 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     /// SimulationNode::DEFAULT_PLAYER_SPAWN): clear of the star body itself,
     /// far short of Gate 0 (600,000 units, at the Sector edge), and well beyond
     /// the 3,000u warp minimum, so warp/approach to the gate both work (ADR-0022).
-    const PLAYER_SPAWN: Position = Position { x: 30_000.0, y: 0.0, z: 0.0 };
+    const PLAYER_SPAWN: Position = Position {
+        x: 30_000.0,
+        y: 0.0,
+        z: 0.0,
+    };
 
     println!("═══════════════════════════════════════════");
     println!("  Phase 7.5 — Raft cluster WebSocket server ");
     println!("═══════════════════════════════════════════");
     println!("  sectors  : {SECTORS} (one Raft node each)");
     println!("  npc ships: {ship_count} in Sector 0  (change with --ships N)");
-    println!("  tick rate: {} ms/tick  ({} tick/sec)", P4_TICK_MS, 1000 / P4_TICK_MS);
+    println!(
+        "  tick rate: {} ms/tick  ({} tick/sec)",
+        P4_TICK_MS,
+        1000 / P4_TICK_MS
+    );
     println!("  travel   : select Gate 0 (click its ring), press W to warp (or A to approach),");
     println!("             then J to jump once in range (player spawns at the Sector origin)");
     println!();
@@ -32,7 +45,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     println!("  Press Ctrl-C to stop");
     println!();
 
-    let server = ws_server::WsServer::bind("127.0.0.1:7878").await
+    let server = ws_server::WsServer::bind("127.0.0.1:7878")
+        .await
         .expect("failed to bind WebSocket server");
 
     let ids: Vec<NodeId> = (0..SECTORS as u8).map(NodeId).collect();
@@ -40,7 +54,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     let (rafts, mut committed_rxs): (Vec<_>, Vec<_>) = endpoints.into_iter().unzip();
 
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
-    let mut nodes: Vec<SimulationNode> = ids.iter()
+    let mut nodes: Vec<SimulationNode> = ids
+        .iter()
         .map(|&id| build_serve_node(id, SectorId(id.0), bounds, pop_cap))
         .collect();
 
@@ -56,8 +71,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
 
     let (new_conn_tx, mut new_conn_rx) =
         mpsc::unbounded_channel::<(tokio::net::TcpStream, std::net::SocketAddr)>();
-    let (ready_sess_tx, mut ready_sess_rx) =
-        mpsc::unbounded_channel::<ws_server::PlayerSession>();
+    let (ready_sess_tx, mut ready_sess_rx) = mpsc::unbounded_channel::<ws_server::PlayerSession>();
 
     let server_arc = std::sync::Arc::new(server);
     let server_clone = server_arc.clone();
@@ -72,12 +86,10 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
 
     let mut sessions: Vec<ws_server::PlayerSession> = Vec::new();
     let mut player_sector: HashMap<PlayerId, usize> = HashMap::new();
-    let mut ship_player  : HashMap<ShipId, PlayerId> = HashMap::new();
-    let mut prev_visible : HashMap<PlayerId, Vec<ShipId>> = HashMap::new();
+    let mut ship_player: HashMap<ShipId, PlayerId> = HashMap::new();
+    let mut prev_visible: HashMap<PlayerId, Vec<ShipId>> = HashMap::new();
 
-    let mut interval = tokio::time::interval(
-        std::time::Duration::from_millis(P4_TICK_MS)
-    );
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(P4_TICK_MS));
 
     loop {
         interval.tick().await;
@@ -89,97 +101,158 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 drop(stream);
                 continue;
             }
-            let player_id      = nodes[0].next_player_id();
-            let ship_id        = nodes[0].spawn_player_ship_at_pub(player_id, PLAYER_SPAWN);
-            let initial_state  = match nodes[0].ship_absolute_pos(ship_id) {
+            let player_id = nodes[0].next_player_id();
+            let ship_id = nodes[0].spawn_player_ship_at_pub(player_id, PLAYER_SPAWN);
+            let initial_state = match nodes[0].ship_absolute_pos(ship_id) {
                 Some(pos) => nodes[0].build_initial_state_json_for(pos, AOI_CELL_SIZE),
-                None      => nodes[0].build_initial_state_json(),
+                None => nodes[0].build_initial_state_json(),
             };
             let player_fitting = nodes[0].build_player_fitting_json(ship_id);
-            let tx             = ready_sess_tx.clone();
+            let tx = ready_sess_tx.clone();
             player_sector.insert(player_id, 0);
             ship_player.insert(ship_id, player_id);
 
             tokio::spawn(async move {
                 match ws_server::WsServer::handshake(
-                    stream, addr, player_id, ship_id, &initial_state, player_fitting
-                ).await {
-                    Ok(sess) => { let _ = tx.send(sess); }
-                    Err(e)   => eprintln!("[Server] handshake failed: {e}"),
+                    stream,
+                    addr,
+                    player_id,
+                    ship_id,
+                    &initial_state,
+                    player_fitting,
+                )
+                .await
+                {
+                    Ok(sess) => {
+                        let _ = tx.send(sess);
+                    }
+                    Err(e) => eprintln!("[Server] handshake failed: {e}"),
                 }
             });
         }
 
         while let Ok(sess) = ready_sess_rx.try_recv() {
-            println!("  [Server] {} joined with ship #{}", sess.player_id, sess.ship_id.raw());
-            let seed = nodes[0].ship_absolute_pos(sess.ship_id)
+            println!(
+                "  [Server] {} joined with ship #{}",
+                sess.player_id,
+                sess.ship_id.raw()
+            );
+            let seed = nodes[0]
+                .ship_absolute_pos(sess.ship_id)
                 .map(|pos| nodes[0].ships_visible_to(pos, AOI_CELL_SIZE))
                 .unwrap_or_default();
             prev_visible.insert(sess.player_id, seed);
             sessions.push(sess);
         }
 
-        let events_before: Vec<u64> =
-            nodes.iter().map(|n| n.total_event_count() as u64).collect();
+        let events_before: Vec<u64> = nodes.iter().map(|n| n.total_event_count() as u64).collect();
 
-        let mut lock_commands: Vec<Vec<dawn_core::LockOnCommand>> =
-            vec![Vec::new(); SECTORS];
+        let mut lock_commands: Vec<Vec<dawn_core::LockOnCommand>> = vec![Vec::new(); SECTORS];
 
         for sess in sessions.iter_mut() {
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
             while let Some(cmd) = sess.try_recv_command() {
-                let Some(j) = apply_common_command(&mut nodes[sector], sess.player_id, cmd, &mut lock_commands[sector])
-                else { continue };
+                let Some(j) = apply_common_command(
+                    &mut nodes[sector],
+                    sess.player_id,
+                    cmd,
+                    &mut lock_commands[sector],
+                ) else {
+                    continue;
+                };
                 let ship_owned = j.ship_id == sess.ship_id;
-                let in_range   = ship_owned && nodes[sector].can_propose_jump(j.ship_id, j.gate_id);
+                let in_range = ship_owned && nodes[sector].can_propose_jump(j.ship_id, j.gate_id);
                 if in_range {
-                    let to = nodes[sector].jump_gate(j.gate_id)
+                    let to = nodes[sector]
+                        .jump_gate(j.gate_id)
                         .expect("can_propose_jump confirmed gate exists")
                         .to_sector;
                     rafts[sector].propose(
-                        TransitOp::Request { ship_id: j.ship_id, to, gate_id: Some(j.gate_id) }.encode(),
+                        TransitOp::Request {
+                            ship_id: j.ship_id,
+                            to,
+                            gate_id: Some(j.gate_id),
+                        }
+                        .encode(),
                     );
-                    println!("  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
-                        j.ship_id.raw(), j.gate_id.0, sector, to.0);
-                } else if ship_owned && nodes[sector].apply_warp_command(j.ship_id, WarpTarget::Gate(j.gate_id), true) {
-                    println!("  [Server] Jump: ship #{} out of range — auto-warp to gate #{} started",
-                        j.ship_id.raw(), j.gate_id.0);
+                    println!(
+                        "  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
+                        j.ship_id.raw(),
+                        j.gate_id.0,
+                        sector,
+                        to.0
+                    );
+                } else if ship_owned
+                    && nodes[sector].apply_warp_command(
+                        j.ship_id,
+                        WarpTarget::Gate(j.gate_id),
+                        true,
+                    )
+                {
+                    println!(
+                        "  [Server] Jump: ship #{} out of range — auto-warp to gate #{} started",
+                        j.ship_id.raw(),
+                        j.gate_id.0
+                    );
                 } else {
-                    eprintln!("[Server] JumpCommand rejected (ship #{} gate #{})",
-                        j.ship_id.raw(), j.gate_id.0);
+                    eprintln!(
+                        "[Server] JumpCommand rejected (ship #{} gate #{})",
+                        j.ship_id.raw(),
+                        j.gate_id.0
+                    );
                 }
             }
         }
 
         for i in 0..SECTORS {
-            transit::step_cluster_node(&mut nodes[i], &rafts[i], &mut committed_rxs[i], &lock_commands[i]);
+            transit::step_cluster_node(
+                &mut nodes[i],
+                &rafts[i],
+                &mut committed_rxs[i],
+                &lock_commands[i],
+            );
         }
 
         for i in 0..SECTORS {
             for (ship_id, gate_id) in nodes[i].drain_pending_auto_jumps() {
                 if nodes[i].can_propose_jump(ship_id, gate_id) {
-                    let to = nodes[i].jump_gate(gate_id)
+                    let to = nodes[i]
+                        .jump_gate(gate_id)
                         .expect("gate must exist if can_propose_jump passed")
                         .to_sector;
                     rafts[i].propose(
-                        TransitOp::Request { ship_id, to, gate_id: Some(gate_id) }.encode(),
+                        TransitOp::Request {
+                            ship_id,
+                            to,
+                            gate_id: Some(gate_id),
+                        }
+                        .encode(),
                     );
-                    println!("  [Server] Auto-jump proposed: ship #{} gate #{} (S{} → S{})",
-                        ship_id.raw(), gate_id.0, i, to.0);
+                    println!(
+                        "  [Server] Auto-jump proposed: ship #{} gate #{} (S{} → S{})",
+                        ship_id.raw(),
+                        gate_id.0,
+                        i,
+                        to.0
+                    );
                 }
             }
         }
 
         // Drain each sector's warp arrivals (ADR-0029 warp-arrival authority) so
         // the per-session deliver loop below can snap each owner/observer.
-        let warp_arrivals_by_sector: Vec<Vec<ShipId>> =
-            (0..SECTORS).map(|i| nodes[i].drain_completed_warps()).collect();
+        let warp_arrivals_by_sector: Vec<Vec<ShipId>> = (0..SECTORS)
+            .map(|i| nodes[i].drain_completed_warps())
+            .collect();
 
         let events_by_sector: Vec<Vec<DomainEvent>> = nodes
             .iter()
             .enumerate()
             .map(|(i, node)| {
-                node.event_store().iter_from(events_before[i]).map(|r| r.event.clone()).collect()
+                node.event_store()
+                    .iter_from(events_before[i])
+                    .map(|r| r.event.clone())
+                    .collect()
             })
             .collect();
 
@@ -195,14 +268,22 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                             nodes[dest].adopt_player_ship(e.ship_id, player_id);
                             player_sector.insert(player_id, dest);
                             jumped_players.push((player_id, dest));
-                            jump_own_events.entry(player_id).or_default().push(event.clone());
-                            println!("  [Server] {player_id:?} ship #{} now owned by Sector {dest}",
-                                e.ship_id.raw());
+                            jump_own_events
+                                .entry(player_id)
+                                .or_default()
+                                .push(event.clone());
+                            println!(
+                                "  [Server] {player_id:?} ship #{} now owned by Sector {dest}",
+                                e.ship_id.raw()
+                            );
                         }
                     }
                     DomainEvent::StarSystemChanged(e) => {
                         if let Some(&player_id) = ship_player.get(&e.ship_id) {
-                            jump_own_events.entry(player_id).or_default().push(event.clone());
+                            jump_own_events
+                                .entry(player_id)
+                                .or_default()
+                                .push(event.clone());
                         }
                     }
                     _ => {}
@@ -210,7 +291,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             }
         }
 
-        let grids: Vec<aoi::CellGrid> = nodes.iter()
+        let grids: Vec<aoi::CellGrid> = nodes
+            .iter()
             .map(|n| aoi::CellGrid::build(AOI_CELL_SIZE, n.ship_absolute_positions()))
             .collect();
         let jumped_ids: std::collections::HashSet<PlayerId> =
@@ -218,7 +300,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
 
         sessions.retain_mut(|sess| {
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
-            let curr = nodes[sector].ship_absolute_pos(sess.ship_id)
+            let curr = nodes[sector]
+                .ship_absolute_pos(sess.ship_id)
                 .map(|pos| grids[sector].neighbors_of(pos))
                 .unwrap_or_default();
 
@@ -228,7 +311,14 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             }
 
             let prev = prev_visible.entry(sess.player_id).or_default();
-            deliver_aoi_frame(sess, &nodes[sector], curr, prev, &events_by_sector[sector], &warp_arrivals_by_sector[sector])
+            deliver_aoi_frame(
+                sess,
+                &nodes[sector],
+                curr,
+                prev,
+                &events_by_sector[sector],
+                &warp_arrivals_by_sector[sector],
+            )
         });
         prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
 
@@ -238,7 +328,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 if let Some(events) = jump_own_events.get(&player_id) {
                     sess.send_events(events);
                 }
-                let initial_state = nodes[dest].ship_absolute_pos(sess.ship_id)
+                let initial_state = nodes[dest]
+                    .ship_absolute_pos(sess.ship_id)
                     .map(|pos| nodes[dest].build_initial_state_json_for(pos, AOI_CELL_SIZE))
                     .unwrap_or_else(|| nodes[dest].build_initial_state_json());
                 sess.conn.send_raw(&initial_state);

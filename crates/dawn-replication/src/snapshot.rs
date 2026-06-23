@@ -32,16 +32,19 @@ const MAX_SNAPSHOT_LEN: usize = 256 * 1024 * 1024;
 /// One `SnapshotTransfer` per node: bind once, call `accept_one` whenever a
 /// far-behind replica requests a snapshot catch-up.
 pub struct SnapshotTransfer {
-    listener  : TcpListener,
+    listener: TcpListener,
     local_addr: SocketAddr,
 }
 
 impl SnapshotTransfer {
     /// Bind a TCP listener for incoming snapshot requests.
     pub async fn bind(addr: SocketAddr) -> io::Result<Self> {
-        let listener   = TcpListener::bind(addr).await?;
+        let listener = TcpListener::bind(addr).await?;
         let local_addr = listener.local_addr()?;
-        Ok(Self { listener, local_addr })
+        Ok(Self {
+            listener,
+            local_addr,
+        })
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -78,7 +81,9 @@ async fn write_snapshot(stream: &mut TcpStream, bytes: &[u8]) -> io::Result<()> 
             ),
         ));
     }
-    stream.write_all(&(bytes.len() as u32).to_le_bytes()).await?;
+    stream
+        .write_all(&(bytes.len() as u32).to_le_bytes())
+        .await?;
     stream.write_all(bytes).await?;
     stream.flush().await
 }
@@ -93,8 +98,7 @@ async fn read_snapshot(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
             ErrorKind::InvalidData,
             format!(
                 "snapshot too large: {} bytes > {} bytes",
-                len,
-                MAX_SNAPSHOT_LEN
+                len, MAX_SNAPSHOT_LEN
             ),
         ));
     }
@@ -113,13 +117,17 @@ mod tests {
 
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
     struct FakeSnapshot {
-        id   : u32,
+        id: u32,
         label: String,
-        data : Vec<u8>,
+        data: Vec<u8>,
     }
 
     fn sample() -> FakeSnapshot {
-        FakeSnapshot { id: 42, label: "sector-0".into(), data: (0..128u8).collect() }
+        FakeSnapshot {
+            id: 42,
+            label: "sector-0".into(),
+            data: (0..128u8).collect(),
+        }
     }
 
     // ── End-to-end round-trip ─────────────────────────────────────────────────
@@ -132,9 +140,8 @@ mod tests {
         let addr = transfer.local_addr();
         let snap = sample();
 
-        let server = tokio::spawn(async move {
-            transfer.accept_one::<FakeSnapshot>().await.unwrap()
-        });
+        let server =
+            tokio::spawn(async move { transfer.accept_one::<FakeSnapshot>().await.unwrap() });
 
         SnapshotTransfer::send(addr, &snap).await.unwrap();
 
@@ -154,7 +161,10 @@ mod tests {
         });
 
         let mut client = TcpStream::connect(addr).await.unwrap();
-        client.write_all(&((MAX_SNAPSHOT_LEN as u32) + 1).to_le_bytes()).await.unwrap();
+        client
+            .write_all(&((MAX_SNAPSHOT_LEN as u32) + 1).to_le_bytes())
+            .await
+            .unwrap();
         client.flush().await.unwrap();
         drop(client);
 

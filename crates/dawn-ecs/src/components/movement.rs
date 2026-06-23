@@ -38,8 +38,8 @@ pub enum WarpPhase {
 
 #[derive(Debug, Clone, Copy)]
 pub struct WarpComp {
-    pub target   : WarpTarget,
-    pub phase    : WarpPhase,
+    pub target: WarpTarget,
+    pub phase: WarpPhase,
     /// When true and `target` is `Gate`, automatically propose a Jump once warp
     /// completes and the ship arrives within the gate's activation radius.
     pub auto_jump: bool,
@@ -55,9 +55,9 @@ pub struct WarpComp {
     /// true-AU distance from it — only the per-tick f32 cast (offset relative
     /// to the ship's current anchor, written to `PositionComp`) is lossy, and
     /// that loss does not compound across ticks the way repeated f32 lerp did.
-    pub warp_start_abs  : [f64; 3],
-    pub warp_total      : u32,
-    pub warp_elapsed    : u32,
+    pub warp_start_abs: [f64; 3],
+    pub warp_total: u32,
+    pub warp_elapsed: u32,
     /// Exact arrival point in absolute (Sector-frame) metres, f64 (ADR-0029).
     /// Set at engage for Body warps from the f64 anchor source so the arrival
     /// rebase is precise at true-AU distances (the f32 `PositionComp` near a
@@ -71,7 +71,7 @@ pub struct WarpComp {
     /// full stop exactly at `warp_arrival_abs` — "accelerate, enter the
     /// tunnel, cruise, exit the tunnel, decelerate" reads as one continuous
     /// motion rather than two different physics models stitched together.
-    pub warp_start_vel  : Velocity,
+    pub warp_start_vel: Velocity,
 }
 
 impl WarpComp {
@@ -115,13 +115,16 @@ pub struct VelocityComp(pub Velocity);
 /// velocity, decelerating the ship until it stops.
 #[derive(Debug, Clone, Copy)]
 pub struct ThrustComp {
-    pub direction  : Velocity,
-    pub is_braking : bool,
+    pub direction: Velocity,
+    pub is_braking: bool,
 }
 
 impl ThrustComp {
     /// No thrust, not braking.
-    pub const ZERO: Self = Self { direction: Velocity::ZERO, is_braking: false };
+    pub const ZERO: Self = Self {
+        direction: Velocity::ZERO,
+        is_braking: false,
+    };
 }
 
 /// Runtime ship stats after applying all active module deltas (ADR-0023).
@@ -133,112 +136,112 @@ impl ThrustComp {
 pub struct ShipStatsComp {
     // ── Movement (ADR-0023) ───────────────────────────────────────────────────
     /// Effective max speed (units/tick) after active propulsion modules.
-    pub max_speed            : f32,
+    pub max_speed: f32,
     /// Total mass including all fitted modules (kg). Always includes mass_add
     /// from all slots regardless of active/inactive state (passive behaviour).
-    pub mass                 : f32,
+    pub mass: f32,
     /// Inertia modifier (dimensionless). Controls align time; lower = more agile.
-    pub inertia_modifier     : f32,
+    pub inertia_modifier: f32,
 
     // ── HP (3-layer) ──────────────────────────────────────────────────────────
-    pub max_shield           : f32,
-    pub max_armor            : f32,
-    pub max_hull             : f32,
+    pub max_shield: f32,
+    pub max_armor: f32,
+    pub max_hull: f32,
 
     // ── Combat ────────────────────────────────────────────────────────────────
     /// Weapon damage per shot (0 = no weapon; supplied by modules only).
-    pub weapon_damage        : f32,
+    pub weapon_damage: f32,
     /// Weapon optimal range (units). Full hit chance within this distance.
-    pub weapon_range         : f32,
+    pub weapon_range: f32,
     /// Turret tracking speed (rad/tick). Hit chance falls with high angular velocity.
-    pub weapon_tracking      : f32,
+    pub weapon_tracking: f32,
     /// Weapon falloff range (units). Hit chance halves at optimal + falloff.
-    pub weapon_falloff       : f32,
-    pub weapon_cooldown      : u64,
+    pub weapon_falloff: f32,
+    pub weapon_cooldown: u64,
     /// Signature radius. Larger = easier to track and hit.
-    pub sig_radius           : f32,
+    pub sig_radius: f32,
 
     // ── Lock-on ───────────────────────────────────────────────────────────────
-    pub lock_time            : u64,
-    pub max_locks            : u32,
+    pub lock_time: u64,
+    pub max_locks: u32,
 
     // ── Capacitor ─────────────────────────────────────────────────────────────
     /// Maximum capacitor pool size (GJ).
-    pub cap_max              : f32,
+    pub cap_max: f32,
     /// Capacitor regenerated per tick (GJ/tick).
     pub cap_recharge_per_tick: f32,
 
     // ── Tackle ────────────────────────────────────────────────────────────────
     /// Effective tackle range (units) after summing active Tackle module deltas.
     /// Zero means this ship has no tackle capability (ADR-0024).
-    pub tackle_range         : f32,
+    pub tackle_range: f32,
 }
 
 impl ShipStatsComp {
     /// Fallback NPC default (tests and missing ship-type registry).
     /// Production code must use ShipTypeDefinition instead.
     pub const NPC: Self = Self {
-        max_speed            : 400.0,
-        mass                 : 12_000_000.0,
-        inertia_modifier     : 0.3,
-        max_shield           : 200.0,
-        max_armor            : 150.0,
-        max_hull             : 150.0,
-        weapon_damage        : 0.0,
-        weapon_range         : 0.0,
-        weapon_tracking      : 0.0,
-        weapon_falloff       : 0.0,
-        weapon_cooldown      : 1,
-        sig_radius           : 40.0,
-        lock_time            : 5,
-        max_locks            : 1,
-        cap_max              : 300.0,
+        max_speed: 400.0,
+        mass: 12_000_000.0,
+        inertia_modifier: 0.3,
+        max_shield: 200.0,
+        max_armor: 150.0,
+        max_hull: 150.0,
+        weapon_damage: 0.0,
+        weapon_range: 0.0,
+        weapon_tracking: 0.0,
+        weapon_falloff: 0.0,
+        weapon_cooldown: 1,
+        sig_radius: 40.0,
+        lock_time: 5,
+        max_locks: 1,
+        cap_max: 300.0,
         cap_recharge_per_tick: 6.0,
-        tackle_range         : 0.0,
+        tackle_range: 0.0,
     };
 
     /// Fallback player default (tests and missing ship-type registry).
     pub const PLAYER: Self = Self {
-        max_speed            : 500.0,
-        mass                 : 10_000_000.0,
-        inertia_modifier     : 0.3,
-        max_shield           : 500.0,
-        max_armor            : 300.0,
-        max_hull             : 200.0,
-        weapon_damage        : 0.0,
-        weapon_range         : 0.0,
-        weapon_tracking      : 0.0,
-        weapon_falloff       : 0.0,
-        weapon_cooldown      : 1,
-        sig_radius           : 40.0,
-        lock_time            : 3,
-        max_locks            : 2,
-        cap_max              : 500.0,
+        max_speed: 500.0,
+        mass: 10_000_000.0,
+        inertia_modifier: 0.3,
+        max_shield: 500.0,
+        max_armor: 300.0,
+        max_hull: 200.0,
+        weapon_damage: 0.0,
+        weapon_range: 0.0,
+        weapon_tracking: 0.0,
+        weapon_falloff: 0.0,
+        weapon_cooldown: 1,
+        sig_radius: 40.0,
+        lock_time: 3,
+        max_locks: 2,
+        cap_max: 500.0,
         cap_recharge_per_tick: 10.0,
-        tackle_range         : 0.0,
+        tackle_range: 0.0,
     };
 
     /// Build from `ShipBaseStats` (weapon stats start at zero).
     /// `apply_fitting()` will overwrite max_speed and mass after modules are applied.
     pub fn from_base(base: &dawn_core::ShipBaseStats) -> Self {
         Self {
-            max_speed            : base.max_speed,
-            mass                 : base.mass,
-            inertia_modifier     : base.inertia_modifier,
-            max_shield           : base.max_shield,
-            max_armor            : base.max_armor,
-            max_hull             : base.max_hull,
-            weapon_damage        : 0.0,
-            weapon_range         : 0.0,
-            weapon_tracking      : 0.0,
-            weapon_falloff       : 0.0,
-            weapon_cooldown      : 1,
-            sig_radius           : base.sig_radius,
-            lock_time            : base.lock_time,
-            max_locks            : base.max_locks,
-            cap_max              : base.cap_max,
+            max_speed: base.max_speed,
+            mass: base.mass,
+            inertia_modifier: base.inertia_modifier,
+            max_shield: base.max_shield,
+            max_armor: base.max_armor,
+            max_hull: base.max_hull,
+            weapon_damage: 0.0,
+            weapon_range: 0.0,
+            weapon_tracking: 0.0,
+            weapon_falloff: 0.0,
+            weapon_cooldown: 1,
+            sig_radius: base.sig_radius,
+            lock_time: base.lock_time,
+            max_locks: base.max_locks,
+            cap_max: base.cap_max,
             cap_recharge_per_tick: base.cap_recharge_per_tick,
-            tackle_range         : 0.0,
+            tackle_range: 0.0,
         }
     }
 }

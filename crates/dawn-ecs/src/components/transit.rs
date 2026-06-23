@@ -12,7 +12,9 @@ use dawn_core::SectorId;
 pub enum TransitState {
     #[default]
     None,
-    InTransit { to: SectorId },
+    InTransit {
+        to: SectorId,
+    },
 }
 
 impl TransitState {

@@ -24,18 +24,18 @@ pub enum CelestialBodyKind {
 /// Static definition of a celestial body (ADR-0025).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CelestialBodyDef {
-    pub id           : CelestialBodyId,
-    pub sector       : SectorId,
-    pub kind         : CelestialBodyKind,
-    pub name         : String,
-    pub position     : Position,
+    pub id: CelestialBodyId,
+    pub sector: SectorId,
+    pub kind: CelestialBodyKind,
+    pub name: String,
+    pub position: Position,
     /// Absolute position in metres as f64 — the authoritative anchor source
     /// (ADR-0029). Equals `position` numerically at compressed scale, but stays
     /// precise at true-AU distances where the f32 `position` would lose ~tens of
     /// km. `AnchorTable` is built from this, not from `position`.
-    pub abs_m        : [f64; 3],
+    pub abs_m: [f64; 3],
     /// Logical radius (units). Warp arrival stops at `radius * 1.5` from centre.
-    pub radius       : f32,
+    pub radius: f32,
     /// Blackbody spectral type [0=O/blue, 0.6=G/Sun-yellow, 1=M/red]. Planets: 0.0.
     pub spectral_type: f32,
 }
@@ -76,9 +76,9 @@ pub struct StarSystemId(pub u32);
 /// Static definition of a Star System: which Sectors belong to it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StarSystemDef {
-    pub id      : StarSystemId,
-    pub name    : String,
-    pub sectors : Vec<SectorId>,
+    pub id: StarSystemId,
+    pub name: String,
+    pub sectors: Vec<SectorId>,
 }
 
 // -- JumpGateId --------------------------------------------------------------
@@ -90,16 +90,16 @@ pub struct JumpGateId(pub u32);
 /// Static definition of a Jump Gate: its location and destination.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct JumpGateDef {
-    pub id               : JumpGateId,
-    pub from_sector      : SectorId,
-    pub position         : Position,
+    pub id: JumpGateId,
+    pub from_sector: SectorId,
+    pub position: Position,
     /// Absolute gate position in metres as f64 — the authoritative source for
     /// range/warp checks (ADR-0029 review R1). Equals `position` numerically at
     /// compressed scale, but stays precise at true-AU distances where the f32
     /// `position` is ~tens of km coarse (one f32 ulp at ~10^11 m). Gates are
     /// Sector-frame fixtures, so this *is* their absolute position.
-    pub abs_m            : [f64; 3],
-    pub to_sector        : SectorId,
+    pub abs_m: [f64; 3],
+    pub to_sector: SectorId,
     /// A Ship within this distance of `position` may use the gate.
     pub activation_radius: f32,
 }
@@ -122,7 +122,11 @@ impl JumpGateDef {
 
     /// True distance (metres, f64) from an absolute ship position to this gate.
     pub fn distance_abs(&self, ship_abs: [f64; 3]) -> f64 {
-        let d = [ship_abs[0] - self.abs_m[0], ship_abs[1] - self.abs_m[1], ship_abs[2] - self.abs_m[2]];
+        let d = [
+            ship_abs[0] - self.abs_m[0],
+            ship_abs[1] - self.abs_m[1],
+            ship_abs[2] - self.abs_m[2],
+        ];
         (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
     }
 }
@@ -135,11 +139,11 @@ mod tests {
 
     fn gate() -> JumpGateDef {
         JumpGateDef {
-            id               : JumpGateId(0),
-            from_sector      : SectorId(0),
-            position         : Position::new(100.0, 0.0, 0.0),
-            abs_m            : [100.0, 0.0, 0.0],
-            to_sector        : SectorId(1),
+            id: JumpGateId(0),
+            from_sector: SectorId(0),
+            position: Position::new(100.0, 0.0, 0.0),
+            abs_m: [100.0, 0.0, 0.0],
+            to_sector: SectorId(1),
             activation_radius: 50.0,
         }
     }
@@ -151,13 +155,21 @@ mod tests {
         // `position` could not distinguish (ADR-0029 R1).
         const AU_M: f64 = 1.495978707e11;
         let g = JumpGateDef {
-            id: JumpGateId(0), from_sector: SectorId(0),
+            id: JumpGateId(0),
+            from_sector: SectorId(0),
             position: Position::new(AU_M as f32, 0.0, 0.0),
-            abs_m: [AU_M, 0.0, 0.0], to_sector: SectorId(1),
+            abs_m: [AU_M, 0.0, 0.0],
+            to_sector: SectorId(1),
             activation_radius: 50.0,
         };
-        assert!(g.is_in_range_abs([AU_M + 40.0, 0.0, 0.0]), "40 m out is within the 50 m ring");
-        assert!(!g.is_in_range_abs([AU_M + 60.0, 0.0, 0.0]), "60 m out is beyond the ring");
+        assert!(
+            g.is_in_range_abs([AU_M + 40.0, 0.0, 0.0]),
+            "40 m out is within the 50 m ring"
+        );
+        assert!(
+            !g.is_in_range_abs([AU_M + 60.0, 0.0, 0.0]),
+            "60 m out is beyond the ring"
+        );
     }
 
     #[test]
@@ -175,8 +187,8 @@ mod tests {
     #[test]
     fn star_system_def_holds_its_member_sectors() {
         let sys = StarSystemDef {
-            id     : StarSystemId(0),
-            name   : "Alpha".to_string(),
+            id: StarSystemId(0),
+            name: "Alpha".to_string(),
             sectors: vec![SectorId(0)],
         };
         assert_eq!(sys.sectors, vec![SectorId(0)]);

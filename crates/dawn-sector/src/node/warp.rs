@@ -12,13 +12,15 @@ use dawn_core::{
     AnchorId, DomainEvent, JumpGateId, PlayerId, Position, ShipId, Tick, Velocity, WarpTarget,
 };
 use dawn_ecs::{
-    components::{PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp, WarpComp, WarpPhase},
+    components::{
+        PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp, WarpComp, WarpPhase,
+    },
     Entity,
 };
 use dawn_event_store::store::EventStore;
 
 use super::{
-    SimulationNode, WARP_ALIGN_FRACTION, WARP_ARRIVAL_FACTOR, BODY_WARP_ARRIVAL_FACTOR,
+    SimulationNode, BODY_WARP_ARRIVAL_FACTOR, WARP_ALIGN_FRACTION, WARP_ARRIVAL_FACTOR,
     WARP_MIN_TICKS, WARP_SPEED,
 };
 
@@ -29,34 +31,44 @@ impl<S: EventStore> SimulationNode<S> {
     /// accepts the request; `process_warp()` then advances the alignment and,
     /// once aligned, flies the ship to the gate at warp speed. Returns `false`
     /// (no component attached) on rejection.
-    pub fn apply_warp_command(&mut self, ship_id: ShipId, target: WarpTarget, auto_jump: bool) -> bool {
+    pub fn apply_warp_command(
+        &mut self,
+        ship_id: ShipId,
+        target: WarpTarget,
+        auto_jump: bool,
+    ) -> bool {
         if !self.can_propose_warp(ship_id, target) {
             return false;
         }
         let &entity = match self.ships.index.get(&ship_id) {
             Some(e) => e,
-            None    => return false,
+            None => return false,
         };
-        let _ = self.world.inner_mut().insert_one(entity, WarpComp {
-            target,
-            phase: WarpPhase::Aligning,
-            auto_jump,
-            warp_start_abs: [0.0, 0.0, 0.0],  // set when warp engages (Aligning -> Warping)
-            warp_total    : 0,
-            warp_elapsed  : 0,
-            warp_arrival_abs: [0.0, 0.0, 0.0],  // set at engage
-            warp_start_vel  : Velocity::ZERO,   // set at engage
-        });
+        let _ = self.world.inner_mut().insert_one(
+            entity,
+            WarpComp {
+                target,
+                phase: WarpPhase::Aligning,
+                auto_jump,
+                warp_start_abs: [0.0, 0.0, 0.0], // set when warp engages (Aligning -> Warping)
+                warp_total: 0,
+                warp_elapsed: 0,
+                warp_arrival_abs: [0.0, 0.0, 0.0], // set at engage
+                warp_start_vel: Velocity::ZERO,    // set at engage
+            },
+        );
         true
     }
 
     /// `apply_warp_command` wrapped with an ownership check.
     pub fn apply_warp_command_owned(
         &mut self,
-        player_id : PlayerId,
-        cmd       : dawn_core::WarpCommand,
+        player_id: PlayerId,
+        cmd: dawn_core::WarpCommand,
     ) -> bool {
-        if !self.owns_ship(player_id, cmd.ship_id) { return false; }
+        if !self.owns_ship(player_id, cmd.ship_id) {
+            return false;
+        }
         self.apply_warp_command(cmd.ship_id, cmd.target, false)
     }
 
@@ -90,8 +102,16 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn process_warp(&mut self, tick: Tick) -> Vec<DomainEvent> {
         // Collect warpers up front so the ECS query borrow is released before
         // the mutable write pass below.
-        let warpers: Vec<(Entity, ShipId, WarpComp, Position, Velocity, f32)> = self.world.inner()
-            .query::<(&ShipIdComp, &WarpComp, &PositionComp, &VelocityComp, &ShipStatsComp)>()
+        let warpers: Vec<(Entity, ShipId, WarpComp, Position, Velocity, f32)> = self
+            .world
+            .inner()
+            .query::<(
+                &ShipIdComp,
+                &WarpComp,
+                &PositionComp,
+                &VelocityComp,
+                &ShipStatsComp,
+            )>()
             .iter()
             .map(|(e, (id, w, p, v, s))| (e, id.0, *w, p.0, v.0, s.max_speed))
             .collect();
@@ -107,12 +127,27 @@ impl<S: EventStore> SimulationNode<S> {
                 // the f64 `abs_m` source feeds the precise arrival point, and the
                 // ship rebases onto whichever body anchor sits nearest the gate
                 // (gates have no anchor of their own — §2 anchors are per-body).
-                WarpTarget::Gate(gate_id) => self.jump_gate(gate_id)
-                    .map(|g| (g.position, g.activation_radius * WARP_ARRIVAL_FACTOR, warp.auto_jump.then_some(gate_id), self.anchor_table.nearest_anchor(g.from_sector, g.abs_m), g.abs_m)),
-                WarpTarget::Body(body_id) => self.sector_map.bodies.get(&body_id)
-                    .map(|b| (b.position, b.radius * BODY_WARP_ARRIVAL_FACTOR, None, Some(AnchorId::from(body_id)), b.abs_m)),
+                WarpTarget::Gate(gate_id) => self.jump_gate(gate_id).map(|g| {
+                    (
+                        g.position,
+                        g.activation_radius * WARP_ARRIVAL_FACTOR,
+                        warp.auto_jump.then_some(gate_id),
+                        self.anchor_table.nearest_anchor(g.from_sector, g.abs_m),
+                        g.abs_m,
+                    )
+                }),
+                WarpTarget::Body(body_id) => self.sector_map.bodies.get(&body_id).map(|b| {
+                    (
+                        b.position,
+                        b.radius * BODY_WARP_ARRIVAL_FACTOR,
+                        None,
+                        Some(AnchorId::from(body_id)),
+                        b.abs_m,
+                    )
+                }),
             };
-            let Some((dest_world, arrival, auto_jump_gate, dest_anchor, target_abs)) = resolved else {
+            let Some((dest_world, arrival, auto_jump_gate, dest_anchor, target_abs)) = resolved
+            else {
                 // Target vanished — cancel and brake.
                 let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
                 self.brake_thrust(entity);
@@ -152,7 +187,11 @@ impl<S: EventStore> SimulationNode<S> {
                     self.set_warp_phase(entity, WarpPhase::Warping);
                     let start_abs = self.entity_absolute_f64(entity, pos);
                     let arrival_abs = self.warp_arrival_abs(entity, target_abs, arrival);
-                    let d = [arrival_abs[0] - start_abs[0], arrival_abs[1] - start_abs[1], arrival_abs[2] - start_abs[2]];
+                    let d = [
+                        arrival_abs[0] - start_abs[0],
+                        arrival_abs[1] - start_abs[1],
+                        arrival_abs[2] - start_abs[2],
+                    ];
                     let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
                     let total = warp_total_ticks(dist as f32);
                     // Carry the ship's actual speed at engage into the transit
@@ -165,11 +204,39 @@ impl<S: EventStore> SimulationNode<S> {
                         w.warp_arrival_abs = arrival_abs;
                         w.warp_start_vel = vel;
                     }
-                    self.warp_step(entity, ship_id, pos, vel, start_abs, arrival_abs, vel, total, 1, auto_jump_gate, dest_anchor, tick, &mut events);
+                    self.warp_step(
+                        entity,
+                        ship_id,
+                        pos,
+                        vel,
+                        start_abs,
+                        arrival_abs,
+                        vel,
+                        total,
+                        1,
+                        auto_jump_gate,
+                        dest_anchor,
+                        tick,
+                        &mut events,
+                    );
                 }
                 // Already warping: advance one tick along the fixed segment plan.
                 WarpPhase::Warping => {
-                    self.warp_step(entity, ship_id, pos, vel, warp.warp_start_abs, warp.warp_arrival_abs, warp.warp_start_vel, warp.warp_total, warp.warp_elapsed + 1, auto_jump_gate, dest_anchor, tick, &mut events);
+                    self.warp_step(
+                        entity,
+                        ship_id,
+                        pos,
+                        vel,
+                        warp.warp_start_abs,
+                        warp.warp_arrival_abs,
+                        warp.warp_start_vel,
+                        warp.warp_total,
+                        warp.warp_elapsed + 1,
+                        auto_jump_gate,
+                        dest_anchor,
+                        tick,
+                        &mut events,
+                    );
                 }
             }
         }
@@ -207,22 +274,26 @@ impl<S: EventStore> SimulationNode<S> {
     #[allow(clippy::too_many_arguments)]
     fn warp_step(
         &mut self,
-        entity          : Entity,
-        ship_id         : ShipId,
-        pos             : Position,
-        old_vel         : Velocity,
-        start_abs       : [f64; 3],
-        arrival_abs     : [f64; 3],
-        start_vel       : Velocity,
-        total           : u32,
-        elapsed         : u32,
-        auto_jump_gate  : Option<JumpGateId>,
-        dest_anchor     : Option<AnchorId>,
-        tick            : Tick,
-        events          : &mut Vec<DomainEvent>,
+        entity: Entity,
+        ship_id: ShipId,
+        pos: Position,
+        old_vel: Velocity,
+        start_abs: [f64; 3],
+        arrival_abs: [f64; 3],
+        start_vel: Velocity,
+        total: u32,
+        elapsed: u32,
+        auto_jump_gate: Option<JumpGateId>,
+        dest_anchor: Option<AnchorId>,
+        tick: Tick,
+        events: &mut Vec<DomainEvent>,
     ) {
         let total = total.max(1);
-        let anchor_abs = self.world.ship_anchor(entity).and_then(|a| self.anchor_table.abs(a)).unwrap_or([0.0, 0.0, 0.0]);
+        let anchor_abs = self
+            .world
+            .ship_anchor(entity)
+            .and_then(|a| self.anchor_table.abs(a))
+            .unwrap_or([0.0, 0.0, 0.0]);
         let (new_pos, new_vel, arrived) = if elapsed > total {
             // One tick past the final step: settle and stop. The move tick at
             // `elapsed == total` already landed exactly on arrival_abs (below,
@@ -267,14 +338,18 @@ impl<S: EventStore> SimulationNode<S> {
             (planned, v, false)
         };
 
-        if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) { p.0 = new_pos; }
-        if let Ok(mut v) = self.world.inner_mut().get::<&mut VelocityComp>(entity) { v.0 = new_vel; }
+        if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+            p.0 = new_pos;
+        }
+        if let Ok(mut v) = self.world.inner_mut().get::<&mut VelocityComp>(entity) {
+            v.0 = new_vel;
+        }
 
         if arrived {
             // Warp complete: drop the component and clear thrust. Movement resumes next tick.
             let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
             if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
-                t.direction  = Velocity::ZERO;
+                t.direction = Velocity::ZERO;
                 t.is_braking = false;
             }
             // Queue auto-jump for Gate targets (ADR-0023).
@@ -288,8 +363,8 @@ impl<S: EventStore> SimulationNode<S> {
         } else if let Ok(mut w) = self.world.inner_mut().get::<&mut WarpComp>(entity) {
             // Persist the plan + progress for the next tick.
             w.warp_start_abs = start_abs;
-            w.warp_total     = total;
-            w.warp_elapsed   = elapsed;
+            w.warp_total = total;
+            w.warp_elapsed = elapsed;
         }
 
         // Emit VelocityChanged only when velocity actually changed (INV-MOVE).
@@ -297,11 +372,13 @@ impl<S: EventStore> SimulationNode<S> {
             || (new_vel.dy - old_vel.dy).abs() > f32::EPSILON
             || (new_vel.dz - old_vel.dz).abs() > f32::EPSILON;
         if changed {
-            events.push(DomainEvent::VelocityChanged(dawn_core::events::VelocityChanged {
-                ship_id,
-                velocity: new_vel,
-                tick,
-            }));
+            events.push(DomainEvent::VelocityChanged(
+                dawn_core::events::VelocityChanged {
+                    ship_id,
+                    velocity: new_vel,
+                    tick,
+                },
+            ));
         }
 
         // On Body arrival, rebase the ship onto the destination body's anchor
@@ -310,7 +387,8 @@ impl<S: EventStore> SimulationNode<S> {
         // body stays precise at true-AU distances.
         if arrived {
             if let Some(to) = dest_anchor {
-                if let Some(ev) = self.rebase_arrival_event(entity, ship_id, to, arrival_abs, tick) {
+                if let Some(ev) = self.rebase_arrival_event(entity, ship_id, to, arrival_abs, tick)
+                {
                     events.push(ev);
                 }
             }
@@ -322,7 +400,14 @@ impl<S: EventStore> SimulationNode<S> {
     /// relative to `to`, writes the new anchor + offset, and returns the
     /// authoritative `AnchorRebased` event. Returns `None` if either the current
     /// or destination anchor is unknown (leaves the ship on its old anchor).
-    fn rebase_arrival_event(&mut self, entity: Entity, ship_id: ShipId, to: AnchorId, arrival_abs: [f64; 3], tick: Tick) -> Option<DomainEvent> {
+    fn rebase_arrival_event(
+        &mut self,
+        entity: Entity,
+        ship_id: ShipId,
+        to: AnchorId,
+        arrival_abs: [f64; 3],
+        tick: Tick,
+    ) -> Option<DomainEvent> {
         let cur_anchor = self.world.ship_anchor(entity)?;
         if cur_anchor == to {
             return None;
@@ -346,12 +431,14 @@ impl<S: EventStore> SimulationNode<S> {
         if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
             p.0 = new_off;
         }
-        Some(DomainEvent::AnchorRebased(dawn_core::events::AnchorRebased {
-            ship_id,
-            anchor: to,
-            offset: new_off,
-            tick,
-        }))
+        Some(DomainEvent::AnchorRebased(
+            dawn_core::events::AnchorRebased {
+                ship_id,
+                anchor: to,
+                offset: new_off,
+                tick,
+            },
+        ))
     }
 
     /// Precise absolute (f64) warp arrival point: `arrival` metres short of
@@ -359,9 +446,19 @@ impl<S: EventStore> SimulationNode<S> {
     /// warp target — a body centre (`CelestialBodyDef.abs_m`) or a gate
     /// (`JumpGateDef.abs_m`, ADR-0029 R1). Symmetric for Gate and Body targets.
     fn warp_arrival_abs(&self, entity: Entity, target_abs: [f64; 3], arrival: f32) -> [f64; 3] {
-        let offset = self.world.inner().get::<&PositionComp>(entity).ok().map(|p| p.0).unwrap_or(Position::ORIGIN);
+        let offset = self
+            .world
+            .inner()
+            .get::<&PositionComp>(entity)
+            .ok()
+            .map(|p| p.0)
+            .unwrap_or(Position::ORIGIN);
         let start = self.entity_absolute_f64(entity, offset);
-        let d = [target_abs[0] - start[0], target_abs[1] - start[1], target_abs[2] - start[2]];
+        let d = [
+            target_abs[0] - start[0],
+            target_abs[1] - start[1],
+            target_abs[2] - start[2],
+        ];
         let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         let a = arrival as f64;
         // Already inside the arrival ring: stay put rather than overshoot past
@@ -371,7 +468,11 @@ impl<S: EventStore> SimulationNode<S> {
         if len <= a || len <= f64::EPSILON {
             return start;
         }
-        [target_abs[0] - d[0] / len * a, target_abs[1] - d[1] / len * a, target_abs[2] - d[2] / len * a]
+        [
+            target_abs[0] - d[0] / len * a,
+            target_abs[1] - d[1] / len * a,
+            target_abs[2] - d[2] / len * a,
+        ]
     }
 
     /// Convert a Sector-frame (absolute) destination position into the ship's
@@ -383,7 +484,9 @@ impl<S: EventStore> SimulationNode<S> {
     /// not for anything needing arrival-radius precision (use
     /// `approach::dest_in_ship_frame_abs` with an f64 source for that).
     fn dest_in_ship_frame(&self, entity: Entity, dest_world: Position) -> Position {
-        let Some(anchor) = self.world.ship_anchor(entity) else { return dest_world };
+        let Some(anchor) = self.world.ship_anchor(entity) else {
+            return dest_world;
+        };
         let Some(a) = self.anchor_table.abs(anchor) else {
             super::debug_assert_missing_anchor(anchor, "dest_in_ship_frame");
             return dest_world;
@@ -413,27 +516,35 @@ fn warp_total_ticks(warp_dist: f32) -> u32 {
 /// Component of velocity along the vector from `pos` toward `target`.
 /// Negative if moving away. Used by the warp alignment check.
 fn speed_toward(vel: Velocity, pos: Position, target: Position) -> f32 {
-    let dx   = target.x - pos.x;
-    let dy   = target.y - pos.y;
-    let dz   = target.z - pos.z;
+    let dx = target.x - pos.x;
+    let dy = target.y - pos.y;
+    let dz = target.z - pos.z;
     let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-    if dist < f32::EPSILON { return 0.0; }
+    if dist < f32::EPSILON {
+        return 0.0;
+    }
     (vel.dx * dx + vel.dy * dy + vel.dz * dz) / dist
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, Velocity, WarpTarget};
-    use dawn_ecs::components::{ThrustComp, VelocityComp, WarpPhase, ShipStatsComp};
+    use dawn_core::{
+        NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, Velocity, WarpTarget,
+    };
+    use dawn_ecs::components::{ShipStatsComp, ThrustComp, VelocityComp, WarpPhase};
 
     fn mem_node() -> SimulationNode {
-        SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF))
+        SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        )
     }
 
     fn spawn_owned_player_at(node: &mut SimulationNode, pos: Position) -> (PlayerId, ShipId) {
         let player_id = node.next_player_id();
-        let ship_id   = node.spawn_player_ship_at_pub(player_id, pos);
+        let ship_id = node.spawn_player_ship_at_pub(player_id, pos);
         (player_id, ship_id)
     }
 
@@ -448,29 +559,51 @@ mod tests {
         // confirm a second warp to the same gate is rejected as too close.
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        assert!(node.apply_warp_command_owned(player, dawn_core::WarpCommand {
-            ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
-        }));
+        assert!(node.apply_warp_command_owned(
+            player,
+            dawn_core::WarpCommand {
+                ship_id: ship,
+                target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            }
+        ));
         for _ in 0..5_000 {
             node.tick();
-            if node.warp_phase(ship).is_none() { break; }
+            if node.warp_phase(ship).is_none() {
+                break;
+            }
         }
-        assert_eq!(node.warp_phase(ship), None, "first warp should have completed");
+        assert_eq!(
+            node.warp_phase(ship),
+            None,
+            "first warp should have completed"
+        );
 
         assert!(!node.can_propose_warp(ship, WarpTarget::Gate(dawn_core::JumpGateId(0))));
-        assert!(!node.apply_warp_command_owned(player, dawn_core::WarpCommand {
-            ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
-        }));
-        assert_eq!(node.warp_phase(ship), None, "second warp should be rejected, not attached");
+        assert!(!node.apply_warp_command_owned(
+            player,
+            dawn_core::WarpCommand {
+                ship_id: ship,
+                target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            }
+        ));
+        assert_eq!(
+            node.warp_phase(ship),
+            None,
+            "second warp should be rejected, not attached"
+        );
     }
 
     #[test]
     fn warp_is_rejected_for_a_gate_not_in_this_sector() {
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        assert!(!node.apply_warp_command_owned(player, dawn_core::WarpCommand {
-            ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(1)),
-        }));
+        assert!(!node.apply_warp_command_owned(
+            player,
+            dawn_core::WarpCommand {
+                ship_id: ship,
+                target: WarpTarget::Gate(dawn_core::JumpGateId(1)),
+            }
+        ));
         assert_eq!(node.warp_phase(ship), None);
     }
 
@@ -478,47 +611,81 @@ mod tests {
     fn warp_aligns_by_accelerating_then_flies_into_gate_range_and_completes() {
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        assert!(node.apply_warp_command_owned(player, dawn_core::WarpCommand {
-            ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
-        }));
+        assert!(node.apply_warp_command_owned(
+            player,
+            dawn_core::WarpCommand {
+                ship_id: ship,
+                target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            }
+        ));
 
         node.tick();
         assert_eq!(node.warp_phase(ship), Some(WarpPhase::Aligning));
-        assert!(node.get_ship_position(ship).unwrap().x < 100.0,
-            "an aligning ship accelerates sublight, far short of warp speed");
+        assert!(
+            node.get_ship_position(ship).unwrap().x < 100.0,
+            "an aligning ship accelerates sublight, far short of warp speed"
+        );
 
-        for _ in 0..250 { node.tick(); }
-        assert_eq!(node.warp_phase(ship), None, "warp completes and the component is removed");
-        assert!(node.can_propose_jump(ship, dawn_core::JumpGateId(0)),
-            "warp drops the ship inside the gate's activation radius");
+        for _ in 0..250 {
+            node.tick();
+        }
+        assert_eq!(
+            node.warp_phase(ship),
+            None,
+            "warp completes and the component is removed"
+        );
+        assert!(
+            node.can_propose_jump(ship, dawn_core::JumpGateId(0)),
+            "warp drops the ship inside the gate's activation radius"
+        );
     }
 
     #[test]
     fn warp_align_time_emerges_from_ship_agility() {
         fn ticks_to_engage(mass: f32) -> u32 {
-            let mut node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+            let mut node = SimulationNode::new(
+                NodeId(0),
+                SectorId(0),
+                SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            );
             let player_id = node.next_player_id();
             let ship = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
             let entity = *node.ships.index.get(&ship).unwrap();
             let mut stats = *node.world.inner().get::<&ShipStatsComp>(entity).unwrap();
             stats.mass = mass;
             node.world.set_ship_stats(entity, stats);
-            node.apply_warp_command_owned(player_id, dawn_core::WarpCommand { ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)) });
+            node.apply_warp_command_owned(
+                player_id,
+                dawn_core::WarpCommand {
+                    ship_id: ship,
+                    target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+                },
+            );
             for t in 1..=500u32 {
                 node.tick();
-                if node.warp_phase(ship) == Some(WarpPhase::Warping) { return t; }
+                if node.warp_phase(ship) == Some(WarpPhase::Warping) {
+                    return t;
+                }
             }
             u32::MAX
         }
-        assert!(ticks_to_engage(50_000_000.0) > ticks_to_engage(1_000_000.0),
-            "a heavier ship spends longer aligning (a longer tackle window)");
+        assert!(
+            ticks_to_engage(50_000_000.0) > ticks_to_engage(1_000_000.0),
+            "a heavier ship spends longer aligning (a longer tackle window)"
+        );
     }
 
     #[test]
     fn warp_decelerates_smoothly_near_the_gate_instead_of_stopping_dead() {
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)) });
+        node.apply_warp_command_owned(
+            player,
+            dawn_core::WarpCommand {
+                ship_id: ship,
+                target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            },
+        );
 
         let entity = *node.ships.index.get(&ship).unwrap();
         let mut saw_decel_step = false;
@@ -530,9 +697,14 @@ mod tests {
             if warping && speed > f32::EPSILON && speed < WARP_SPEED * 0.9 {
                 saw_decel_step = true;
             }
-            if node.warp_phase(ship).is_none() { break; }
+            if node.warp_phase(ship).is_none() {
+                break;
+            }
         }
-        assert!(saw_decel_step, "warp must ramp down through intermediate speeds, not stop dead");
+        assert!(
+            saw_decel_step,
+            "warp must ramp down through intermediate speeds, not stop dead"
+        );
         assert_eq!(node.warp_phase(ship), None, "warp should have completed");
     }
 
@@ -545,7 +717,13 @@ mod tests {
         // caused exactly that snap).
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)) });
+        node.apply_warp_command_owned(
+            player,
+            dawn_core::WarpCommand {
+                ship_id: ship,
+                target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            },
+        );
 
         let entity = *node.ships.index.get(&ship).unwrap();
         let mut speed_before_engage = 0.0_f32;
@@ -553,13 +731,23 @@ mod tests {
             let phase = node.warp_phase(ship);
             let v = node.world.inner().get::<&VelocityComp>(entity).unwrap().0;
             let speed = (v.dx * v.dx + v.dy * v.dy + v.dz * v.dz).sqrt();
-            if phase == Some(WarpPhase::Aligning) { speed_before_engage = speed; }
+            if phase == Some(WarpPhase::Aligning) {
+                speed_before_engage = speed;
+            }
             node.tick();
-            if node.warp_phase(ship) == Some(WarpPhase::Warping) { break; }
-            assert!(node.warp_phase(ship).is_some(), "warp should not cancel before engaging");
+            if node.warp_phase(ship) == Some(WarpPhase::Warping) {
+                break;
+            }
+            assert!(
+                node.warp_phase(ship).is_some(),
+                "warp should not cancel before engaging"
+            );
         }
         let v_after_engage = node.world.inner().get::<&VelocityComp>(entity).unwrap().0;
-        let speed_after_engage = (v_after_engage.dx * v_after_engage.dx + v_after_engage.dy * v_after_engage.dy + v_after_engage.dz * v_after_engage.dz).sqrt();
+        let speed_after_engage = (v_after_engage.dx * v_after_engage.dx
+            + v_after_engage.dy * v_after_engage.dy
+            + v_after_engage.dz * v_after_engage.dz)
+            .sqrt();
 
         assert!(speed_before_engage > 1.0,
             "sanity: should have built up real cruise speed during Aligning (got {speed_before_engage})");
@@ -573,28 +761,53 @@ mod tests {
     fn a_move_command_cancels_an_aligning_warp() {
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)) });
+        node.apply_warp_command_owned(
+            player,
+            dawn_core::WarpCommand {
+                ship_id: ship,
+                target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            },
+        );
         node.tick();
         assert_eq!(node.warp_phase(ship), Some(WarpPhase::Aligning));
 
         node.apply_move_command(ship, Position::new(0.0, 1000.0, 0.0));
-        assert_eq!(node.warp_phase(ship), None, "a move during alignment cancels the warp");
+        assert_eq!(
+            node.warp_phase(ship),
+            None,
+            "a move during alignment cancels the warp"
+        );
     }
 
     #[test]
     fn a_move_command_is_ignored_during_the_committed_warping_phase() {
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        node.apply_warp_command_owned(player, dawn_core::WarpCommand { ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)) });
+        node.apply_warp_command_owned(
+            player,
+            dawn_core::WarpCommand {
+                ship_id: ship,
+                target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            },
+        );
         for _ in 0..100 {
             node.tick();
-            if node.warp_phase(ship) == Some(WarpPhase::Warping) { break; }
+            if node.warp_phase(ship) == Some(WarpPhase::Warping) {
+                break;
+            }
         }
-        assert_eq!(node.warp_phase(ship), Some(WarpPhase::Warping), "warp should be committed");
+        assert_eq!(
+            node.warp_phase(ship),
+            Some(WarpPhase::Warping),
+            "warp should be committed"
+        );
 
         node.apply_move_command(ship, Position::new(0.0, 1000.0, 0.0));
-        assert_eq!(node.warp_phase(ship), Some(WarpPhase::Warping),
-            "a committed warp cannot be interrupted by a move command");
+        assert_eq!(
+            node.warp_phase(ship),
+            Some(WarpPhase::Warping),
+            "a committed warp cannot be interrupted by a move command"
+        );
     }
 
     #[test]
@@ -603,10 +816,14 @@ mod tests {
         let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         assert!(node.apply_warp_command(ship, WarpTarget::Gate(dawn_core::JumpGateId(0)), true));
 
-        for _ in 0..250 { node.tick(); }
+        for _ in 0..250 {
+            node.tick();
+        }
         assert_eq!(node.warp_phase(ship), None, "warp must complete");
-        assert!(node.can_propose_jump(ship, dawn_core::JumpGateId(0)),
-            "ship must be within gate range after warp");
+        assert!(
+            node.can_propose_jump(ship, dawn_core::JumpGateId(0)),
+            "ship must be within gate range after warp"
+        );
 
         let pending = node.drain_pending_auto_jumps();
         assert_eq!(pending.len(), 1);
@@ -621,7 +838,9 @@ mod tests {
         let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         assert!(node.apply_warp_command(ship, WarpTarget::Gate(dawn_core::JumpGateId(0)), false));
 
-        for _ in 0..250 { node.tick(); }
+        for _ in 0..250 {
+            node.tick();
+        }
         assert_eq!(node.warp_phase(ship), None);
         assert!(node.drain_pending_auto_jumps().is_empty());
     }
@@ -634,23 +853,29 @@ mod tests {
         // floored number of ticks in the committed Warping phase.
         let mut node = mem_node();
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        node.apply_warp_command_owned(player, dawn_core::WarpCommand {
-            ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
-        });
+        node.apply_warp_command_owned(
+            player,
+            dawn_core::WarpCommand {
+                ship_id: ship,
+                target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            },
+        );
 
         let mut warping_ticks: u32 = 0;
         for _ in 0..400 {
             node.tick();
             match node.warp_phase(ship) {
                 Some(WarpPhase::Warping) => warping_ticks += 1,
-                None if warping_ticks > 0 => break,  // warp finished
+                None if warping_ticks > 0 => break, // warp finished
                 _ => {}
             }
         }
         // Allow a small boundary fuzz (the arriving tick removes the component).
-        assert!(warping_ticks >= WARP_MIN_TICKS - 2,
+        assert!(
+            warping_ticks >= WARP_MIN_TICKS - 2,
             "warp should ride the parametric segment for ~WARP_MIN_TICKS ticks, \
-             got {warping_ticks} (floor {WARP_MIN_TICKS})");
+             got {warping_ticks} (floor {WARP_MIN_TICKS})"
+        );
     }
 
     // ── Warp-arrival authority (ADR-0029) ────────────────────────────────
@@ -662,18 +887,31 @@ mod tests {
         // the case the old AnchorRebased-only snap missed.
         let mut node = mem_node();
         let (player, ship_id) = spawn_owned_player_at(&mut node, Position::new(0.0, 0.0, 0.0));
-        assert!(node.apply_warp_command_owned(player, dawn_core::WarpCommand {
-            ship_id, target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
-        }));
+        assert!(node.apply_warp_command_owned(
+            player,
+            dawn_core::WarpCommand {
+                ship_id,
+                target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            }
+        ));
 
         let mut arrived = false;
         for _ in 0..5_000 {
             node.tick();
-            if node.drain_completed_warps().contains(&ship_id) { arrived = true; break; }
+            if node.drain_completed_warps().contains(&ship_id) {
+                arrived = true;
+                break;
+            }
         }
-        assert!(arrived, "a completed gate warp must surface in drain_completed_warps");
+        assert!(
+            arrived,
+            "a completed gate warp must surface in drain_completed_warps"
+        );
         // Drained: it is a per-tick transient, not re-reported.
-        assert!(node.drain_completed_warps().is_empty(), "completed warps drain once");
+        assert!(
+            node.drain_completed_warps().is_empty(),
+            "completed warps drain once"
+        );
     }
 
     #[test]
@@ -684,27 +922,47 @@ mod tests {
         // f32 arrival point.
         let mut node = mem_node();
         let (player, ship_id) = spawn_owned_player_at(&mut node, Position::new(0.0, 0.0, 0.0));
-        assert!(node.apply_warp_command_owned(player, dawn_core::WarpCommand {
-            ship_id, target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
-        }));
+        assert!(node.apply_warp_command_owned(
+            player,
+            dawn_core::WarpCommand {
+                ship_id,
+                target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            }
+        ));
 
         for _ in 0..5_000 {
             node.tick();
-            if node.warp_phase(ship_id).is_none() { break; }
+            if node.warp_phase(ship_id).is_none() {
+                break;
+            }
         }
-        assert!(node.warp_phase(ship_id).is_none(), "gate warp should have completed");
+        assert!(
+            node.warp_phase(ship_id).is_none(),
+            "gate warp should have completed"
+        );
 
-        let gate = node.jump_gate(dawn_core::JumpGateId(0)).expect("demo gate 0 exists").clone();
-        let expected_anchor = node.anchor_table()
+        let gate = node
+            .jump_gate(dawn_core::JumpGateId(0))
+            .expect("demo gate 0 exists")
+            .clone();
+        let expected_anchor = node
+            .anchor_table()
             .nearest_anchor(gate.from_sector, gate.abs_m)
             .expect("gate sector has at least one anchor");
-        assert_eq!(node.get_ship_anchor(ship_id), Some(expected_anchor),
-            "gate warp arrival should rebase onto the nearest body anchor, same as a body warp");
+        assert_eq!(
+            node.get_ship_anchor(ship_id),
+            Some(expected_anchor),
+            "gate warp arrival should rebase onto the nearest body anchor, same as a body warp"
+        );
 
         // Arrival point must sit `activation_radius * WARP_ARRIVAL_FACTOR`
         // from the gate's f64 source, not the coarse f32 `position`.
         let ship_abs = node.ship_absolute(ship_id).expect("ship exists");
-        let d = [ship_abs[0] - gate.abs_m[0], ship_abs[1] - gate.abs_m[1], ship_abs[2] - gate.abs_m[2]];
+        let d = [
+            ship_abs[0] - gate.abs_m[0],
+            ship_abs[1] - gate.abs_m[1],
+            ship_abs[2] - gate.abs_m[2],
+        ];
         let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         // Tolerance is the f32 ulp at the rebased anchor's magnitude (the offset
         // composing ship_absolute is f32), not an exactness check — at true AU
@@ -723,21 +981,36 @@ mod tests {
         let (player, ship_id) = spawn_owned_player_at(&mut node, Position::new(0.0, 0.0, 0.0));
 
         let body_id = dawn_core::CelestialBodyId(1);
-        let ok = node.apply_warp_command_owned(player, dawn_core::WarpCommand {
-            ship_id: ship_id, target: WarpTarget::Body(body_id),
-        });
+        let ok = node.apply_warp_command_owned(
+            player,
+            dawn_core::WarpCommand {
+                ship_id: ship_id,
+                target: WarpTarget::Body(body_id),
+            },
+        );
         assert!(ok, "warp to body should be accepted");
-        assert!(node.warp_phase(ship_id).is_some(), "ship should have WarpComp");
+        assert!(
+            node.warp_phase(ship_id).is_some(),
+            "ship should have WarpComp"
+        );
 
         for _ in 0..5_000 {
             node.tick();
-            if node.warp_phase(ship_id).is_none() { break; }
+            if node.warp_phase(ship_id).is_none() {
+                break;
+            }
         }
-        assert!(node.warp_phase(ship_id).is_none(), "warp should have completed");
+        assert!(
+            node.warp_phase(ship_id).is_none(),
+            "warp should have completed"
+        );
 
         // ADR-0029 step 4: arriving at a Body rebases the ship onto that body's anchor.
-        assert_eq!(node.get_ship_anchor(ship_id), Some(dawn_core::AnchorId::from(body_id)),
-            "warp-to-body should rebase the ship onto the body anchor");
+        assert_eq!(
+            node.get_ship_anchor(ship_id),
+            Some(dawn_core::AnchorId::from(body_id)),
+            "warp-to-body should rebase the ship onto the body anchor"
+        );
 
         let body = crate::galaxy::Galaxy::demo()
             .bodies_in_sector(SectorId(0))
@@ -755,15 +1028,24 @@ mod tests {
         assert!(
             dist <= arrival_max,
             "ship distance {:.0} should be within {:.0} of body centre",
-            dist, arrival_max,
+            dist,
+            arrival_max,
         );
     }
 
     #[test]
     fn warp_to_body_is_rejected_for_body_not_in_this_sector() {
         let mut node = mem_node();
-        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(0.0, 0.0, 0.0), Velocity::ZERO);
-        let ok = node.apply_warp_command(ship_id, WarpTarget::Body(dawn_core::CelestialBodyId(2)), false);
+        let ship_id = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(0.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+        let ok = node.apply_warp_command(
+            ship_id,
+            WarpTarget::Body(dawn_core::CelestialBodyId(2)),
+            false,
+        );
         assert!(!ok, "warp to body in another sector should be rejected");
     }
 }

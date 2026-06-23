@@ -62,9 +62,9 @@ fn tmp_path_for(path: &Path) -> PathBuf {
 
 pub struct FileEventStore {
     /// Path to the hot log file.
-    path   : PathBuf,
+    path: PathBuf,
     /// Buffered writer positioned at the end of the file.
-    writer : BufWriter<File>,
+    writer: BufWriter<File>,
     /// In-memory mirror of the hot log — rebuilt from the file on open.
     records: Vec<EventRecord>,
     /// `log_index` of `records[0]`. Events before this live in the cold archive.
@@ -94,7 +94,12 @@ impl FileEventStore {
         };
 
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
-        Ok(Self { path, writer: BufWriter::new(file), records, base_index })
+        Ok(Self {
+            path,
+            writer: BufWriter::new(file),
+            records,
+            base_index,
+        })
     }
 
     /// Read the header and all records from an existing file.
@@ -106,7 +111,7 @@ impl FileEventStore {
         let base_index = u64::from_le_bytes(header);
 
         let mut records = Vec::new();
-        let mut index   = base_index;
+        let mut index = base_index;
 
         loop {
             let mut len_bytes = [0u8; 4];
@@ -199,14 +204,20 @@ impl FileEventStore {
         // 3. Update in-memory state and reopen the append writer on the new file.
         self.base_index = boundary;
         self.records.drain(..cut);
-        let file = OpenOptions::new().create(true).append(true).open(&self.path)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
         self.writer = BufWriter::new(file);
         Ok(())
     }
 
     /// Append `records` to the cold archive (append-only, header-less stream).
     fn append_to_cold(cold_path: &Path, records: &[EventRecord]) -> io::Result<()> {
-        let f = OpenOptions::new().create(true).append(true).open(cold_path)?;
+        let f = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(cold_path)?;
         let mut w = BufWriter::new(f);
         for rec in records {
             write_record(&mut w, &rec.event)?;
@@ -245,16 +256,13 @@ impl EventStore for FileEventStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{
-        events::VelocityChanged,
-        NodeId, ShipId, Tick, Velocity,
-    };
+    use dawn_core::{events::VelocityChanged, NodeId, ShipId, Tick, Velocity};
 
     fn moved_event(n: u64, tick: u64) -> DomainEvent {
         DomainEvent::VelocityChanged(VelocityChanged {
-            ship_id : ShipId::new(NodeId(0), n),
+            ship_id: ShipId::new(NodeId(0), n),
             velocity: Velocity::new(1.0, 0.0, 0.0),
-            tick    : Tick(tick),
+            tick: Tick(tick),
         })
     }
 
@@ -272,7 +280,7 @@ mod tests {
 
     #[test]
     fn events_survive_close_and_reopen_of_the_log_file() {
-        let dir  = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("events.log");
 
         // Write 5 events.
@@ -291,13 +299,15 @@ mod tests {
 
     #[test]
     fn log_indices_are_consecutive_across_two_open_sessions() {
-        let dir  = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("events.log");
 
         // Session 1: write 3 events (indices 0, 1, 2).
         {
             let mut store = FileEventStore::open(&path).unwrap();
-            for i in 0..3 { store.append(moved_event(i, i)); }
+            for i in 0..3 {
+                store.append(moved_event(i, i));
+            }
         }
 
         // Session 2: append 2 more (indices 3, 4).
@@ -315,11 +325,13 @@ mod tests {
 
     #[test]
     fn iter_from_returns_only_records_at_or_after_given_index() {
-        let dir  = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("events.log");
 
         let mut store = FileEventStore::open(&path).unwrap();
-        for i in 0..10 { store.append(moved_event(i, i)); }
+        for i in 0..10 {
+            store.append(moved_event(i, i));
+        }
 
         let tail: Vec<_> = store.iter_from(7).collect();
         assert_eq!(tail.len(), 3);
@@ -331,12 +343,12 @@ mod tests {
     fn file_store_and_memory_store_produce_identical_event_sequences() {
         use crate::InMemoryEventStore;
 
-        let dir  = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("events.log");
 
         let events: Vec<_> = (0..5).map(|i| moved_event(i, i)).collect();
 
-        let mut mem  = InMemoryEventStore::new();
+        let mut mem = InMemoryEventStore::new();
         let mut file = FileEventStore::open(&path).unwrap();
 
         for e in &events {
@@ -355,14 +367,16 @@ mod tests {
 
     #[test]
     fn compaction_preserves_global_indices_and_serves_the_tail() {
-        let dir  = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("events.log");
         let cold = dir.path().join("cold.log");
 
         let mut store = FileEventStore::open(&path).unwrap();
-        for i in 0..10 { store.append(moved_event(i, i)); }     // indices 0..=9
+        for i in 0..10 {
+            store.append(moved_event(i, i));
+        } // indices 0..=9
 
-        store.compact(6, &cold).unwrap();                       // archive [0,6); hot = [6,9]
+        store.compact(6, &cold).unwrap(); // archive [0,6); hot = [6,9]
 
         assert_eq!(store.base_index(), 6);
         assert_eq!(store.len(), 10, "global length is unchanged by compaction");
@@ -379,19 +393,25 @@ mod tests {
 
     #[test]
     fn compacted_hot_log_reopens_with_preserved_base_index() {
-        let dir  = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("events.log");
         let cold = dir.path().join("cold.log");
 
         {
             let mut s = FileEventStore::open(&path).unwrap();
-            for i in 0..8 { s.append(moved_event(i, i)); }      // 0..=7
-            s.compact(5, &cold).unwrap();                       // hot = 5,6,7
-            s.append(moved_event(8, 8));                        // hot = 5,6,7,8
+            for i in 0..8 {
+                s.append(moved_event(i, i));
+            } // 0..=7
+            s.compact(5, &cold).unwrap(); // hot = 5,6,7
+            s.append(moved_event(8, 8)); // hot = 5,6,7,8
         }
 
         let s = FileEventStore::open(&path).unwrap();
-        assert_eq!(s.base_index(), 5, "base_index survives reopen (file header)");
+        assert_eq!(
+            s.base_index(),
+            5,
+            "base_index survives reopen (file header)"
+        );
         assert_eq!(s.len(), 9, "global length 0..=8");
         let tail: Vec<_> = s.iter_from(5).collect();
         assert_eq!(tail[0].log_index, 5);
@@ -400,32 +420,44 @@ mod tests {
 
     #[test]
     fn cold_archive_receives_the_compacted_prefix() {
-        let dir  = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("events.log");
         let cold = dir.path().join("cold.log");
 
         let mut store = FileEventStore::open(&path).unwrap();
-        for i in 0..10 { store.append(moved_event(i, i)); }
+        for i in 0..10 {
+            store.append(moved_event(i, i));
+        }
         store.compact(4, &cold).unwrap();
 
         let bytes = std::fs::read(&cold).unwrap();
-        assert_eq!(count_archive_records(&bytes), 4, "cold archive holds the [0,4) prefix");
+        assert_eq!(
+            count_archive_records(&bytes),
+            4,
+            "cold archive holds the [0,4) prefix"
+        );
     }
 
     #[test]
     fn compacting_the_entire_hot_log_leaves_an_empty_suffix_that_still_appends() {
-        let dir  = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("events.log");
         let cold = dir.path().join("cold.log");
 
         let mut store = FileEventStore::open(&path).unwrap();
-        for i in 0..5 { store.append(moved_event(i, i)); }
-        store.compact(5, &cold).unwrap();                       // archive everything
+        for i in 0..5 {
+            store.append(moved_event(i, i));
+        }
+        store.compact(5, &cold).unwrap(); // archive everything
 
         assert_eq!(store.base_index(), 5);
         assert_eq!(store.records_on_disk(), 0);
         assert_eq!(store.len(), 5);
         assert_eq!(store.iter_from(5).count(), 0);
-        assert_eq!(store.append(moved_event(5, 5)), 5, "next append is still global index 5");
+        assert_eq!(
+            store.append(moved_event(5, 5)),
+            5,
+            "next append is still global index 5"
+        );
     }
 }

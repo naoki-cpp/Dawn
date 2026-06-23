@@ -12,16 +12,16 @@ use serde::{Deserialize, Serialize};
 /// A vote request sent by a Candidate to a peer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RequestVote {
-    pub term        : Term,
+    pub term: Term,
     pub candidate_id: NodeId,
 }
 
 /// A peer's response to [`RequestVote`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RequestVoteResponse {
-    pub term        : Term,
+    pub term: Term,
     pub vote_granted: bool,
-    pub voter       : NodeId,
+    pub voter: NodeId,
 }
 
 /// A heartbeat / log-replication message sent by the Leader.
@@ -32,12 +32,12 @@ pub struct RequestVoteResponse {
 /// (`Term::ZERO` when `prev_log_index == 0`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppendEntries {
-    pub term          : Term,
-    pub leader_id     : NodeId,
+    pub term: Term,
+    pub leader_id: NodeId,
     pub prev_log_index: u64,
-    pub prev_log_term : Term,
-    pub entries       : Vec<LogEntry>,
-    pub leader_commit : u64,
+    pub prev_log_term: Term,
+    pub entries: Vec<LogEntry>,
+    pub leader_commit: u64,
 }
 
 impl AppendEntries {
@@ -47,9 +47,9 @@ impl AppendEntries {
             term,
             leader_id,
             prev_log_index: 0,
-            prev_log_term : Term::ZERO,
-            entries       : Vec::new(),
-            leader_commit : 0,
+            prev_log_term: Term::ZERO,
+            entries: Vec::new(),
+            leader_commit: 0,
         }
     }
 }
@@ -62,9 +62,9 @@ impl AppendEntries {
 /// back-off.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppendEntriesResponse {
-    pub term       : Term,
-    pub success    : bool,
-    pub responder  : NodeId,
+    pub term: Term,
+    pub success: bool,
+    pub responder: NodeId,
     pub match_index: u64,
 }
 
@@ -77,7 +77,9 @@ pub enum RaftMessage {
     AppendEntriesResponse(AppendEntriesResponse),
     /// A proposal forwarded from a non-leader node to the Leader
     /// (ADR-0014 §3 [1]). The payload is the caller's serialized proposal.
-    ProposeForward { payload: Vec<u8> },
+    ProposeForward {
+        payload: Vec<u8>,
+    },
 }
 
 impl RaftState {
@@ -94,8 +96,7 @@ impl RaftState {
             self.become_follower(req.term);
         }
 
-        let already_voted_for_other =
-            matches!(self.voted_for, Some(v) if v != req.candidate_id);
+        let already_voted_for_other = matches!(self.voted_for, Some(v) if v != req.candidate_id);
 
         let vote_granted = req.term == self.current_term && !already_voted_for_other;
 
@@ -136,8 +137,8 @@ impl RaftState {
 
         // Log consistency check (Raft §5.3).
         let prev = req.prev_log_index as usize;
-        let log_matches = prev == 0
-            || (self.log.len() >= prev && self.log[prev - 1].term == req.prev_log_term);
+        let log_matches =
+            prev == 0 || (self.log.len() >= prev && self.log[prev - 1].term == req.prev_log_term);
         if !log_matches {
             return AppendEntriesResponse {
                 term: self.current_term,
@@ -190,7 +191,10 @@ mod tests {
     #[test]
     fn follower_grants_vote_for_higher_term_candidate() {
         let mut state = three_node_cluster();
-        let resp = state.handle_request_vote(&RequestVote { term: Term(1), candidate_id: node(1) });
+        let resp = state.handle_request_vote(&RequestVote {
+            term: Term(1),
+            candidate_id: node(1),
+        });
         assert!(resp.vote_granted);
         assert_eq!(resp.term, Term(1));
         assert_eq!(state.current_term, Term(1));
@@ -200,9 +204,15 @@ mod tests {
     #[test]
     fn follower_rejects_second_vote_request_in_same_term() {
         let mut state = three_node_cluster();
-        state.handle_request_vote(&RequestVote { term: Term(1), candidate_id: node(1) });
+        state.handle_request_vote(&RequestVote {
+            term: Term(1),
+            candidate_id: node(1),
+        });
 
-        let resp = state.handle_request_vote(&RequestVote { term: Term(1), candidate_id: node(2) });
+        let resp = state.handle_request_vote(&RequestVote {
+            term: Term(1),
+            candidate_id: node(2),
+        });
         assert!(!resp.vote_granted);
         assert_eq!(state.voted_for, Some(node(1)));
     }
@@ -210,8 +220,14 @@ mod tests {
     #[test]
     fn node_re_grants_vote_to_same_candidate_in_same_term() {
         let mut state = three_node_cluster();
-        state.handle_request_vote(&RequestVote { term: Term(1), candidate_id: node(1) });
-        let resp = state.handle_request_vote(&RequestVote { term: Term(1), candidate_id: node(1) });
+        state.handle_request_vote(&RequestVote {
+            term: Term(1),
+            candidate_id: node(1),
+        });
+        let resp = state.handle_request_vote(&RequestVote {
+            term: Term(1),
+            candidate_id: node(1),
+        });
         assert!(resp.vote_granted);
     }
 
@@ -221,7 +237,10 @@ mod tests {
         // Bring the node to term 5.
         state.become_follower(Term(5));
 
-        let resp = state.handle_request_vote(&RequestVote { term: Term(3), candidate_id: node(1) });
+        let resp = state.handle_request_vote(&RequestVote {
+            term: Term(3),
+            candidate_id: node(1),
+        });
         assert!(!resp.vote_granted);
         assert_eq!(resp.term, Term(5));
         assert_eq!(state.current_term, Term(5));
@@ -233,7 +252,10 @@ mod tests {
         for _ in 0..4 {
             state.on_tick();
         }
-        state.handle_request_vote(&RequestVote { term: Term(1), candidate_id: node(1) });
+        state.handle_request_vote(&RequestVote {
+            term: Term(1),
+            candidate_id: node(1),
+        });
 
         // Timer was reset; 4 more ticks should not trigger an election.
         for _ in 0..4 {
@@ -323,8 +345,14 @@ mod tests {
         let mut n1 = RaftState::new(node(1), vec![node(0), node(2)], 10, 1);
         let mut n2 = RaftState::new(node(2), vec![node(0), node(1)], 10, 1);
 
-        let resp1 = n1.handle_request_vote(&RequestVote { term, candidate_id: node(0) });
-        let resp2 = n2.handle_request_vote(&RequestVote { term, candidate_id: node(0) });
+        let resp1 = n1.handle_request_vote(&RequestVote {
+            term,
+            candidate_id: node(0),
+        });
+        let resp2 = n2.handle_request_vote(&RequestVote {
+            term,
+            candidate_id: node(0),
+        });
         assert!(resp1.vote_granted);
         assert!(resp2.vote_granted);
 

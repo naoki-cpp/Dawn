@@ -34,16 +34,31 @@ pub enum ShipClass {
 /// 装備スロットの最大数（船種固有）。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SlotLayout {
-    pub high : u8,
-    pub mid  : u8,
-    pub low  : u8,
-    pub rig  : u8,
+    pub high: u8,
+    pub mid: u8,
+    pub low: u8,
+    pub rig: u8,
 }
 
 impl SlotLayout {
-    pub const FRIGATE: Self = Self { high: 3, mid: 3, low: 2, rig: 3 };
-    pub const CRUISER: Self = Self { high: 5, mid: 4, low: 3, rig: 3 };
-    pub const BATTLESHIP: Self = Self { high: 8, mid: 4, low: 5, rig: 3 };
+    pub const FRIGATE: Self = Self {
+        high: 3,
+        mid: 3,
+        low: 2,
+        rig: 3,
+    };
+    pub const CRUISER: Self = Self {
+        high: 5,
+        mid: 4,
+        low: 3,
+        rig: 3,
+    };
+    pub const BATTLESHIP: Self = Self {
+        high: 8,
+        mid: 4,
+        low: 5,
+        rig: 3,
+    };
 }
 
 // ── ベーススタット ────────────────────────────────────────────────────────────
@@ -58,30 +73,30 @@ impl SlotLayout {
 pub struct ShipBaseStats {
     /// Base max speed without any modules (units/tick). AB/MWD multiply this
     /// via StatDelta.speed_multiplier to produce the effective max speed.
-    pub max_speed            : f32,
+    pub max_speed: f32,
     /// Hull mass (kg). Together with inertia_modifier determines τ (time
     /// constant for velocity changes) and therefore align time (ADR-0023).
-    pub mass                 : f32,
+    pub mass: f32,
     /// Inertia modifier (dimensionless). Lower = more agile. Controls only
     /// align time; has no direct effect on max speed.
-    pub inertia_modifier     : f32,
+    pub inertia_modifier: f32,
     /// Max Shield HP.
-    pub max_shield           : f32,
+    pub max_shield: f32,
     /// Max Armor HP.
-    pub max_armor            : f32,
+    pub max_armor: f32,
     /// Max Hull HP.
-    pub max_hull             : f32,
+    pub max_hull: f32,
     /// Ticks required to complete a lock-on.
-    pub lock_time            : u64,
+    pub lock_time: u64,
     /// Maximum simultaneous lock targets.
-    pub max_locks            : u32,
+    pub max_locks: u32,
     /// Capacitor pool size (GJ).
-    pub cap_max              : f32,
+    pub cap_max: f32,
     /// Capacitor recovered per tick (GJ/tick).
     pub cap_recharge_per_tick: f32,
     /// Signature radius (arbitrary units). Larger values are easier to track.
     /// Frigate ≈ 40, Cruiser ≈ 125, Battleship ≈ 360.
-    pub sig_radius            : f32,
+    pub sig_radius: f32,
 }
 
 // ── 船種定義 ──────────────────────────────────────────────────────────────────
@@ -92,11 +107,11 @@ pub struct ShipBaseStats {
 /// サーバー起動時にレジストリに登録し、`spawn_ship(ship_type_id, ...)` で参照する。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShipTypeDefinition {
-    pub id          : ShipTypeId,
-    pub name        : String,
-    pub class       : ShipClass,
-    pub base_stats  : ShipBaseStats,
-    pub slot_layout : SlotLayout,
+    pub id: ShipTypeId,
+    pub name: String,
+    pub class: ShipClass,
+    pub base_stats: ShipBaseStats,
+    pub slot_layout: SlotLayout,
 }
 
 #[cfg(test)]
@@ -105,22 +120,22 @@ mod tests {
 
     fn frigate_def() -> ShipTypeDefinition {
         ShipTypeDefinition {
-            id         : ShipTypeId(1),
-            name       : "Starter Frigate".to_string(),
-            class      : ShipClass::Frigate,
+            id: ShipTypeId(1),
+            name: "Starter Frigate".to_string(),
+            class: ShipClass::Frigate,
             slot_layout: SlotLayout::FRIGATE,
-            base_stats : ShipBaseStats {
-                max_speed            : 400.0,
-                mass                 : 1_500_000.0,
-                inertia_modifier     : 0.4,
-                max_shield           : 200.0,
-                max_armor            : 150.0,
-                max_hull             : 150.0,
-                lock_time            : 5,
-                max_locks            : 1,
-                cap_max              : 300.0,
+            base_stats: ShipBaseStats {
+                max_speed: 400.0,
+                mass: 1_500_000.0,
+                inertia_modifier: 0.4,
+                max_shield: 200.0,
+                max_armor: 150.0,
+                max_hull: 150.0,
+                lock_time: 5,
+                max_locks: 1,
+                cap_max: 300.0,
                 cap_recharge_per_tick: 6.0,
-                sig_radius           : 40.0,
+                sig_radius: 40.0,
             },
         }
     }
@@ -128,9 +143,7 @@ mod tests {
     #[test]
     fn ship_type_definition_has_correct_total_hp() {
         let def = frigate_def();
-        let total = def.base_stats.max_shield
-            + def.base_stats.max_armor
-            + def.base_stats.max_hull;
+        let total = def.base_stats.max_shield + def.base_stats.max_armor + def.base_stats.max_hull;
         assert_eq!(total, 500.0);
     }
 

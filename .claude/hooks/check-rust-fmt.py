@@ -5,10 +5,9 @@ Fires after Edit/Write. Runs `rustfmt --check` on just the file that changed
 (not the whole workspace, so it stays fast enough for an every-edit hook) and,
 if it would reformat, nudges Claude to run formatting. This is advisory: it
 never edits the file and never blocks -- it only reports, so a formatting nit
-can't wedge the session. While the codebase is still being migrated to rustfmt
-it will fire on legacy files too; that matches the "clean a file when you touch
-it" migration policy (AI_DEVELOPMENT_GUIDE.md §8) and goes quiet once the
-workspace is formatted.
+can't wedge the session. The workspace was brought to a clean `cargo fmt --all`
+baseline on 2026-06-23, so this should normally stay quiet; if it fires, the
+edit drifted from rustfmt's formatting and should be re-run through `cargo fmt`.
 
 Contract: read the tool-call JSON on stdin. On a non-clean .rs file, print a
 note to stderr and exit 2 (PostToolUse surfaces stderr back to Claude).

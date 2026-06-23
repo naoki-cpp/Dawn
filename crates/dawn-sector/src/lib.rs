@@ -1,10 +1,10 @@
 pub mod anchor;
 pub mod aoi;
 pub mod dilation;
+pub mod galaxy;
 pub mod modules;
 pub mod node;
 pub mod persistence;
 pub mod ship_types;
 pub mod spawner;
-pub mod galaxy;
 pub mod transit;

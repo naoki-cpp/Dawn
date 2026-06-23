@@ -65,19 +65,19 @@ mod tests {
 
     fn moved_event(ship_n: u64, tick: u64) -> DomainEvent {
         DomainEvent::VelocityChanged(VelocityChanged {
-            ship_id : ship_id(ship_n),
+            ship_id: ship_id(ship_n),
             velocity: Velocity::new(1.0, 0.0, 0.0),
-            tick    : Tick(tick),
+            tick: Tick(tick),
         })
     }
 
     fn spawned_event(ship_n: u64) -> DomainEvent {
         DomainEvent::ShipSpawned(ShipSpawned {
-            ship_id          : ship_id(ship_n),
-            sector_id        : SectorId(0),
-            initial_position : Position::ORIGIN,
-            ship_type_id     : dawn_core::ShipTypeId(1),
-            tick             : Tick::ZERO,
+            ship_id: ship_id(ship_n),
+            sector_id: SectorId(0),
+            initial_position: Position::ORIGIN,
+            ship_type_id: dawn_core::ShipTypeId(1),
+            tick: Tick::ZERO,
         })
     }
 
@@ -176,6 +176,9 @@ mod tests {
             .filter(|r| matches!(r.event, DomainEvent::ShipSpawned(_)))
             .count();
 
-        assert_eq!(ship_count, 3, "replay must reproduce the number of spawned ships");
+        assert_eq!(
+            ship_count, 3,
+            "replay must reproduce the number of spawned ships"
+        );
     }
 }

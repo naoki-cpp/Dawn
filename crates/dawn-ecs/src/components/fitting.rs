@@ -1,12 +1,14 @@
 //! Fitting ECS components.
 
-use dawn_core::fitting::{ActivationMode, FittingSnapshot, ModuleDefinition, ModuleId, SlotEntry, SlotKind, StatDelta};
+use dawn_core::fitting::{
+    ActivationMode, FittingSnapshot, ModuleDefinition, ModuleId, SlotEntry, SlotKind, StatDelta,
+};
 use std::collections::HashMap;
 
 /// One fitted slot (module definition + runtime activation state).
 #[derive(Debug, Clone)]
 pub struct FittedSlot {
-    pub def      : ModuleDefinition,
+    pub def: ModuleDefinition,
     /// Active modules only.  Passive modules are always effective.
     pub is_active: bool,
     /// Ticks remaining in the current activation cycle.
@@ -25,7 +27,7 @@ impl FittedSlot {
     pub fn is_effective(&self) -> bool {
         match self.def.activation_mode {
             ActivationMode::Passive => true,
-            ActivationMode::Active  => self.is_active,
+            ActivationMode::Active => self.is_active,
         }
     }
 }
@@ -36,10 +38,10 @@ impl FittedSlot {
 /// `ShipStatsComp` を再集計すること。
 #[derive(Debug, Clone)]
 pub struct FittingComp {
-    pub high : Vec<FittedSlot>,
-    pub mid  : Vec<FittedSlot>,
-    pub low  : Vec<FittedSlot>,
-    pub rig  : Vec<FittedSlot>,
+    pub high: Vec<FittedSlot>,
+    pub mid: Vec<FittedSlot>,
+    pub low: Vec<FittedSlot>,
+    pub rig: Vec<FittedSlot>,
 }
 
 impl FittingComp {
@@ -47,16 +49,17 @@ impl FittingComp {
     pub fn empty() -> Self {
         Self {
             high: Vec::new(),
-            mid : Vec::new(),
-            low : Vec::new(),
-            rig : Vec::new(),
+            mid: Vec::new(),
+            low: Vec::new(),
+            rig: Vec::new(),
         }
     }
 
     /// Returns true if any effective slot has the given module kind.
     /// Used by the Tackle System to check for active Fold Disruptors (ADR-0024).
     pub fn has_active_module_of_kind(&self, kind: dawn_core::fitting::ModuleKind) -> bool {
-        self.high.iter()
+        self.high
+            .iter()
             .chain(self.mid.iter())
             .chain(self.low.iter())
             .chain(self.rig.iter())
@@ -65,7 +68,8 @@ impl FittingComp {
 
     /// 有効なスロット（Passive または Active ON）の `StatDelta` を合計して返す。
     pub fn total_delta(&self) -> StatDelta {
-        self.high.iter()
+        self.high
+            .iter()
             .chain(self.mid.iter())
             .chain(self.low.iter())
             .chain(self.rig.iter())
@@ -77,14 +81,18 @@ impl FittingComp {
     pub fn slot_mut(&mut self, kind: SlotKind) -> &mut Vec<FittedSlot> {
         match kind {
             SlotKind::High => &mut self.high,
-            SlotKind::Mid  => &mut self.mid,
-            SlotKind::Low  => &mut self.low,
-            SlotKind::Rig  => &mut self.rig,
+            SlotKind::Mid => &mut self.mid,
+            SlotKind::Low => &mut self.low,
+            SlotKind::Rig => &mut self.rig,
         }
     }
 
     /// 指定 module_id を持つスロットの可変参照を返す。
-    pub fn find_slot_mut(&mut self, module_id: ModuleId, slot_kind: SlotKind) -> Option<&mut FittedSlot> {
+    pub fn find_slot_mut(
+        &mut self,
+        module_id: ModuleId,
+        slot_kind: SlotKind,
+    ) -> Option<&mut FittedSlot> {
         self.slot_mut(slot_kind)
             .iter_mut()
             .find(|s| s.def.id == module_id)
@@ -94,13 +102,19 @@ impl FittingComp {
     /// `ShipFitted` イベントへの埋め込みに使用する。
     pub fn to_snapshot(&self) -> FittingSnapshot {
         let to_entries = |slots: &[FittedSlot]| -> Vec<SlotEntry> {
-            slots.iter().map(|s| SlotEntry { module_id: s.def.id, is_active: s.is_active }).collect()
+            slots
+                .iter()
+                .map(|s| SlotEntry {
+                    module_id: s.def.id,
+                    is_active: s.is_active,
+                })
+                .collect()
         };
         FittingSnapshot {
             high: to_entries(&self.high),
-            mid : to_entries(&self.mid),
-            low : to_entries(&self.low),
-            rig : to_entries(&self.rig),
+            mid: to_entries(&self.mid),
+            low: to_entries(&self.low),
+            rig: to_entries(&self.rig),
         }
     }
 
@@ -110,19 +124,22 @@ impl FittingComp {
         registry: &HashMap<ModuleId, ModuleDefinition>,
     ) -> Self {
         let resolve = |entries: &[SlotEntry]| -> Vec<FittedSlot> {
-            entries.iter().filter_map(|e| {
-                registry.get(&e.module_id).map(|def| FittedSlot {
-                    def            : def.clone(),
-                    is_active      : e.is_active,
-                    cycle_remaining: 0,  // Cycle state is not persisted; reset to 0.
+            entries
+                .iter()
+                .filter_map(|e| {
+                    registry.get(&e.module_id).map(|def| FittedSlot {
+                        def: def.clone(),
+                        is_active: e.is_active,
+                        cycle_remaining: 0, // Cycle state is not persisted; reset to 0.
+                    })
                 })
-            }).collect()
+                .collect()
         };
         Self {
             high: resolve(&snapshot.high),
-            mid : resolve(&snapshot.mid),
-            low : resolve(&snapshot.low),
-            rig : resolve(&snapshot.rig),
+            mid: resolve(&snapshot.mid),
+            low: resolve(&snapshot.low),
+            rig: resolve(&snapshot.rig),
         }
     }
 }
@@ -135,14 +152,19 @@ mod tests {
     fn weapon_slot(active: bool) -> FittedSlot {
         FittedSlot {
             def: ModuleDefinition {
-                id: ModuleId(1), name: "Railgun".to_string(),
-                kind: ModuleKind::Weapon, slot: SlotKind::High,
-                stat_delta: StatDelta { weapon_damage_add: 25.0, ..StatDelta::ZERO },
+                id: ModuleId(1),
+                name: "Railgun".to_string(),
+                kind: ModuleKind::Weapon,
+                slot: SlotKind::High,
+                stat_delta: StatDelta {
+                    weapon_damage_add: 25.0,
+                    ..StatDelta::ZERO
+                },
                 activation_mode: ActivationMode::Active,
                 cap_cost_per_cycle: 60.0,
-                cycle_time_ticks  : 10,
+                cycle_time_ticks: 10,
             },
-            is_active      : active,
+            is_active: active,
             cycle_remaining: 0,
         }
     }
@@ -150,14 +172,19 @@ mod tests {
     fn shield_slot() -> FittedSlot {
         FittedSlot {
             def: ModuleDefinition {
-                id: ModuleId(2), name: "Shield".to_string(),
-                kind: ModuleKind::ShieldBooster, slot: SlotKind::Mid,
-                stat_delta: StatDelta { max_shield_add: 300.0, ..StatDelta::ZERO },
+                id: ModuleId(2),
+                name: "Shield".to_string(),
+                kind: ModuleKind::ShieldBooster,
+                slot: SlotKind::Mid,
+                stat_delta: StatDelta {
+                    max_shield_add: 300.0,
+                    ..StatDelta::ZERO
+                },
                 activation_mode: ActivationMode::Passive,
                 cap_cost_per_cycle: 0.0,
-                cycle_time_ticks  : 0,
+                cycle_time_ticks: 0,
             },
-            is_active      : false,  // Passive: is_active is ignored
+            is_active: false, // Passive: is_active is ignored
             cycle_remaining: 0,
         }
     }
@@ -170,9 +197,12 @@ mod tests {
     #[test]
     fn passive_module_always_applies_delta_regardless_of_is_active() {
         let mut fitting = FittingComp::empty();
-        fitting.mid.push(shield_slot());  // is_active=false だが Passive なので有効
+        fitting.mid.push(shield_slot()); // is_active=false だが Passive なので有効
         let delta = fitting.total_delta();
-        assert_eq!(delta.max_shield_add, 300.0, "Passive module is always effective");
+        assert_eq!(
+            delta.max_shield_add, 300.0,
+            "Passive module is always effective"
+        );
     }
 
     #[test]
@@ -186,8 +216,11 @@ mod tests {
     fn active_module_off_does_not_apply_delta() {
         let mut fitting = FittingComp::empty();
         fitting.high.push(weapon_slot(false));
-        assert_eq!(fitting.total_delta().weapon_damage_add, 0.0,
-            "Active module OFF does not contribute to stats");
+        assert_eq!(
+            fitting.total_delta().weapon_damage_add,
+            0.0,
+            "Active module OFF does not contribute to stats"
+        );
     }
 
     #[test]
@@ -208,8 +241,13 @@ mod tests {
         registry.insert(ModuleId(1), weapon_def);
 
         let snap = FittingSnapshot {
-            high: vec![SlotEntry { module_id: ModuleId(1), is_active: true }],
-            mid: vec![], low: vec![], rig: vec![],
+            high: vec![SlotEntry {
+                module_id: ModuleId(1),
+                is_active: true,
+            }],
+            mid: vec![],
+            low: vec![],
+            rig: vec![],
         };
         let fitting = FittingComp::from_snapshot(&snap, &registry);
         assert_eq!(fitting.high[0].is_active, true);

@@ -1,12 +1,12 @@
 //! Single-node WebSocket server (`--serve`, no Raft cluster).
 
 use super::{
-    AOI_CELL_SIZE, DuelMetrics, P4_TICK_MS, TIDI_BUDGET,
-    apply_common_command, build_serve_node, deliver_aoi_frame, spawn_npc_frigates,
+    apply_common_command, build_serve_node, deliver_aoi_frame, spawn_npc_frigates, DuelMetrics,
+    AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
 };
 use crate::ws_server;
-use dawn_sector::{aoi, dilation};
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId};
+use dawn_sector::{aoi, dilation};
 use tokio::sync::mpsc;
 
 pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_cap: usize) {
@@ -18,14 +18,18 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
     } else {
         println!("  npc ships: {ship_count}  (change with --ships N)");
     }
-    println!("  tick rate: {} ms/tick  ({} tick/sec)",
-        P4_TICK_MS, 1000 / P4_TICK_MS);
+    println!(
+        "  tick rate: {} ms/tick  ({} tick/sec)",
+        P4_TICK_MS,
+        1000 / P4_TICK_MS
+    );
     println!();
     println!("  Open Godot client and press Play (F5)");
     println!("  Press Ctrl-C to stop");
     println!();
 
-    let server = ws_server::WsServer::bind("127.0.0.1:7878").await
+    let server = ws_server::WsServer::bind("127.0.0.1:7878")
+        .await
         .expect("failed to bind WebSocket server");
 
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
@@ -35,15 +39,18 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
     if duel_mode {
         let bot_pos = Position::new(1200.0, 0.0, 0.0);
         let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
-        println!("  [Server] Duel mode: Bot ship #{} ready at {:?}", bot_ship_id.raw(), bot_pos);
+        println!(
+            "  [Server] Duel mode: Bot ship #{} ready at {:?}",
+            bot_ship_id.raw(),
+            bot_pos
+        );
     }
 
     println!("  [Server] {ship_count} NPC ships ready. Waiting for players...");
 
     let (new_conn_tx, mut new_conn_rx) =
         mpsc::unbounded_channel::<(tokio::net::TcpStream, std::net::SocketAddr)>();
-    let (ready_sess_tx, mut ready_sess_rx) =
-        mpsc::unbounded_channel::<ws_server::PlayerSession>();
+    let (ready_sess_tx, mut ready_sess_rx) = mpsc::unbounded_channel::<ws_server::PlayerSession>();
 
     let server_arc = std::sync::Arc::new(server);
     let server_clone = server_arc.clone();
@@ -59,12 +66,10 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
     let mut sessions: Vec<ws_server::PlayerSession> = Vec::new();
     let mut prev_visible: std::collections::HashMap<dawn_core::PlayerId, Vec<ShipId>> =
         std::collections::HashMap::new();
-    let mut interval = tokio::time::interval(
-        std::time::Duration::from_millis(P4_TICK_MS)
-    );
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(P4_TICK_MS));
 
-    let mut duel_metrics  : Option<DuelMetrics> = None;
-    let mut player_ship_id: Option<ShipId>      = None;
+    let mut duel_metrics: Option<DuelMetrics> = None;
+    let mut player_ship_id: Option<ShipId> = None;
     let mut tidi = dilation::DilationController::new(TIDI_BUDGET);
 
     loop {
@@ -72,19 +77,21 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
 
         while let Ok((stream, addr)) = new_conn_rx.try_recv() {
             if node.at_population_cap() {
-                eprintln!("[Server] connection from {addr} refused: Sector at population cap ({} ships)",
-                    node.ship_count());
+                eprintln!(
+                    "[Server] connection from {addr} refused: Sector at population cap ({} ships)",
+                    node.ship_count()
+                );
                 drop(stream);
                 continue;
             }
-            let player_id      = node.next_player_id();
-            let ship_id        = node.spawn_player_ship(player_id);
-            let initial_state  = match node.ship_absolute_pos(ship_id) {
+            let player_id = node.next_player_id();
+            let ship_id = node.spawn_player_ship(player_id);
+            let initial_state = match node.ship_absolute_pos(ship_id) {
                 Some(pos) => node.build_initial_state_json_for(pos, AOI_CELL_SIZE),
-                None      => node.build_initial_state_json(),
+                None => node.build_initial_state_json(),
             };
             let player_fitting = node.build_player_fitting_json(ship_id);
-            let tx             = ready_sess_tx.clone();
+            let tx = ready_sess_tx.clone();
 
             if duel_mode && player_ship_id.is_none() {
                 player_ship_id = Some(ship_id);
@@ -95,17 +102,31 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
 
             tokio::spawn(async move {
                 match ws_server::WsServer::handshake(
-                    stream, addr, player_id, ship_id, &initial_state, player_fitting
-                ).await {
-                    Ok(sess) => { let _ = tx.send(sess); }
-                    Err(e)   => eprintln!("[Server] handshake failed: {e}"),
+                    stream,
+                    addr,
+                    player_id,
+                    ship_id,
+                    &initial_state,
+                    player_fitting,
+                )
+                .await
+                {
+                    Ok(sess) => {
+                        let _ = tx.send(sess);
+                    }
+                    Err(e) => eprintln!("[Server] handshake failed: {e}"),
                 }
             });
         }
 
         while let Ok(sess) = ready_sess_rx.try_recv() {
-            println!("  [Server] {} joined with ship #{}", sess.player_id, sess.ship_id.raw());
-            let seed = node.ship_absolute_pos(sess.ship_id)
+            println!(
+                "  [Server] {} joined with ship #{}",
+                sess.player_id,
+                sess.ship_id.raw()
+            );
+            let seed = node
+                .ship_absolute_pos(sess.ship_id)
                 .map(|pos| node.ships_visible_to(pos, AOI_CELL_SIZE))
                 .unwrap_or_default();
             prev_visible.insert(sess.player_id, seed);
@@ -117,11 +138,14 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
         let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
         for sess in sessions.iter_mut() {
             while let Some(cmd) = sess.try_recv_command() {
-                if let Some(j) = apply_common_command(&mut node, sess.player_id, cmd, &mut lock_commands) {
+                if let Some(j) =
+                    apply_common_command(&mut node, sess.player_id, cmd, &mut lock_commands)
+                {
                     eprintln!(
                         "[Server] JumpCommand ignored (ship #{} gate #{}): \
                          --serve runs a single-sector node without Raft",
-                        j.ship_id.raw(), j.gate_id.0
+                        j.ship_id.raw(),
+                        j.gate_id.0
                     );
                 }
             }
@@ -145,14 +169,16 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
 
         let all_new_events: Vec<_> = {
             use dawn_event_store::store::EventStore as _;
-            node.event_store().iter_from(events_before)
+            node.event_store()
+                .iter_from(events_before)
                 .map(|r| r.event.clone())
                 .collect()
         };
         let grid = aoi::CellGrid::build(AOI_CELL_SIZE, node.ship_absolute_positions());
         let warp_arrivals = node.drain_completed_warps();
         sessions.retain_mut(|sess| {
-            let curr = node.ship_absolute_pos(sess.ship_id)
+            let curr = node
+                .ship_absolute_pos(sess.ship_id)
                 .map(|pos| grid.neighbors_of(pos))
                 .unwrap_or_default();
             let prev = prev_visible.entry(sess.player_id).or_default();
@@ -165,8 +191,11 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
         tidi.update(node.ship_count() as f64);
         if tidi.is_dilated() {
             if !was_dilated {
-                println!("[TiDi] dilation engaged: factor={:.2} (cost {} > budget {TIDI_BUDGET:.0})",
-                    tidi.dilation(), node.ship_count());
+                println!(
+                    "[TiDi] dilation engaged: factor={:.2} (cost {} > budget {TIDI_BUDGET:.0})",
+                    tidi.dilation(),
+                    node.ship_count()
+                );
             }
             let extra = tidi.paced_tick_ms(P4_TICK_MS as f64) - P4_TICK_MS as f64;
             tokio::time::sleep(std::time::Duration::from_millis(extra as u64)).await;

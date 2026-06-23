@@ -28,16 +28,16 @@ pub enum TransitOp {
     /// `JumpGateUsed` on the destination node.
     Request {
         ship_id: ShipId,
-        to     : SectorId,
+        to: SectorId,
         gate_id: Option<JumpGateId>,
     },
     /// Stage 2: the from-node ships the exported state to the to-node.
     Commit {
-        ship     : ShipSnapshot,
-        from     : SectorId,
-        to       : SectorId,
+        ship: ShipSnapshot,
+        from: SectorId,
+        to: SectorId,
         entry_pos: Position,
-        gate_id  : Option<JumpGateId>,
+        gate_id: Option<JumpGateId>,
     },
 }
 
@@ -68,14 +68,20 @@ impl TransitOp {
 /// Shared by `SectorSimulatorActor` and the `--serve --cluster` loop so the
 /// Step 7.5 semantics cannot drift between the two call sites.
 pub fn apply_committed_raft_entries<S: EventStore>(
-    node        : &mut SimulationNode<S>,
-    raft        : &RaftActorHandle,
+    node: &mut SimulationNode<S>,
+    raft: &RaftActorHandle,
     committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
 ) {
     while let Ok(payload) = committed_rx.try_recv() {
-        let Some(op) = TransitOp::decode(&payload) else { continue };
+        let Some(op) = TransitOp::decode(&payload) else {
+            continue;
+        };
         match op {
-            TransitOp::Request { ship_id, to, gate_id } => {
+            TransitOp::Request {
+                ship_id,
+                to,
+                gate_id,
+            } => {
                 let cmd = dawn_core::commands::TransitCommand { ship_id, to };
                 if node.propose_transit(cmd).is_ok() {
                     // This node owned the Ship: hand its state to the
@@ -86,7 +92,8 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                     // the player can immediately jump back (ADR-0009).
                     let entry_pos = gate_id
                         .and_then(|_| {
-                            node.galaxy().gates_in_sector(to)
+                            node.galaxy()
+                                .gates_in_sector(to)
                                 .into_iter()
                                 .find(|g| g.to_sector == node.sector_id())
                                 .map(|g| g.position)
@@ -95,12 +102,25 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                     if let Some(ship) = node.export_transit(ship_id, entry_pos) {
                         let from = node.sector_id();
                         raft.propose(
-                            TransitOp::Commit { ship, from, to, entry_pos, gate_id }.encode(),
+                            TransitOp::Commit {
+                                ship,
+                                from,
+                                to,
+                                entry_pos,
+                                gate_id,
+                            }
+                            .encode(),
                         );
                     }
                 }
             }
-            TransitOp::Commit { ship, from, to, entry_pos, gate_id } => {
+            TransitOp::Commit {
+                ship,
+                from,
+                to,
+                entry_pos,
+                gate_id,
+            } => {
                 if to == node.sector_id() {
                     let ship_id = ship.ship_id;
                     node.import_transit(&ship, from, entry_pos);
@@ -122,9 +142,9 @@ pub fn apply_committed_raft_entries<S: EventStore>(
 /// (`SectorSimulatorActor`) keeps its own variant because it interleaves a
 /// replication flush (Step 9) between the tick and the Raft timer step.
 pub fn step_cluster_node<S: EventStore>(
-    node         : &mut SimulationNode<S>,
-    raft         : &RaftActorHandle,
-    committed_rx : &mut mpsc::UnboundedReceiver<Vec<u8>>,
+    node: &mut SimulationNode<S>,
+    raft: &RaftActorHandle,
+    committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
     lock_commands: &[dawn_core::LockOnCommand],
 ) -> crate::node::TickResult {
     apply_committed_raft_entries(node, raft, committed_rx);
@@ -143,12 +163,16 @@ mod tests {
     fn request_op_round_trips_through_encode_and_decode() {
         let op = TransitOp::Request {
             ship_id: ShipId::new(NodeId(0), 42),
-            to     : SectorId(1),
+            to: SectorId(1),
             gate_id: None,
         };
         let decoded = TransitOp::decode(&op.encode()).expect("decode must succeed");
         match decoded {
-            TransitOp::Request { ship_id, to, gate_id } => {
+            TransitOp::Request {
+                ship_id,
+                to,
+                gate_id,
+            } => {
                 assert_eq!(ship_id, ShipId::new(NodeId(0), 42));
                 assert_eq!(to, SectorId(1));
                 assert_eq!(gate_id, None);
@@ -161,7 +185,7 @@ mod tests {
     fn request_op_round_trips_with_jump_gate_id() {
         let op = TransitOp::Request {
             ship_id: ShipId::new(NodeId(0), 42),
-            to     : SectorId(1),
+            to: SectorId(1),
             gate_id: Some(dawn_core::JumpGateId(0)),
         };
         let decoded = TransitOp::decode(&op.encode()).expect("decode must succeed");
@@ -177,27 +201,33 @@ mod tests {
     fn commit_op_round_trips_with_full_ship_snapshot() {
         let op = TransitOp::Commit {
             ship: ShipSnapshot {
-                ship_id       : ShipId::new(NodeId(0), 7),
-                ship_type_id  : ShipTypeId(1),
-                position      : Position::new(1.0, 2.0, 3.0),
-                anchor        : dawn_core::AnchorId(0),
-                velocity      : Velocity::new(4.0, 5.0, 6.0),
+                ship_id: ShipId::new(NodeId(0), 7),
+                ship_type_id: ShipTypeId(1),
+                position: Position::new(1.0, 2.0, 3.0),
+                anchor: dawn_core::AnchorId(0),
+                velocity: Velocity::new(4.0, 5.0, 6.0),
                 current_shield: 10.0,
-                current_armor : 20.0,
-                current_hull  : 30.0,
-                is_destroyed  : false,
-                capacitor     : Some(50.0),
-                fitting       : FittingSnapshot::empty(),
-                tackled_by    : vec![],
+                current_armor: 20.0,
+                current_hull: 30.0,
+                is_destroyed: false,
+                capacitor: Some(50.0),
+                fitting: FittingSnapshot::empty(),
+                tackled_by: vec![],
             },
-            from     : SectorId(0),
-            to       : SectorId(1),
+            from: SectorId(0),
+            to: SectorId(1),
             entry_pos: Position::new(500.0, 0.0, 0.0),
-            gate_id  : None,
+            gate_id: None,
         };
         let decoded = TransitOp::decode(&op.encode()).expect("decode must succeed");
         match decoded {
-            TransitOp::Commit { ship, from, to, entry_pos, gate_id } => {
+            TransitOp::Commit {
+                ship,
+                from,
+                to,
+                entry_pos,
+                gate_id,
+            } => {
                 assert_eq!(ship.ship_id, ShipId::new(NodeId(0), 7));
                 assert_eq!(ship.capacitor, Some(50.0));
                 assert_eq!(from, SectorId(0));

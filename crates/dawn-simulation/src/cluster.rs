@@ -14,10 +14,13 @@
 //! No sleep, no flush, no barrier is required.
 
 use crate::sector_simulator_actor::{NodeStats, SectorSimulatorHandle, TickSummary};
-use dawn_sector::spawner::{generate_ships, SpawnConfig};
-use dawn_replication::InMemoryReplicationBus;
-use dawn_consensus::{InProcessTransport, PartitionableTransport, RaftActor, RaftActorHandle, RaftState, RaftTransport, Role, Term};
+use dawn_consensus::{
+    InProcessTransport, PartitionableTransport, RaftActor, RaftActorHandle, RaftState,
+    RaftTransport, Role, Term,
+};
 use dawn_core::{NodeId, SectorBounds, SectorId};
+use dawn_replication::InMemoryReplicationBus;
+use dawn_sector::spawner::{generate_ships, SpawnConfig};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -26,7 +29,10 @@ use std::sync::{Arc, Mutex};
 /// One node's Raft endpoints produced by [`spawn_raft_actors`]:
 /// the proposal/timer handle and the committed-entries channel consumed at
 /// Tick Step 7.5.
-pub(crate) type RaftEndpoint = (RaftActorHandle, tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>);
+pub(crate) type RaftEndpoint = (
+    RaftActorHandle,
+    tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+);
 
 /// Spawn one `RaftActor` per `NodeId`, fully wired to its peers via
 /// `PartitionableTransport` over in-process mpsc channels (ADR-0014).
@@ -50,25 +56,29 @@ pub(crate) fn spawn_raft_actors(
     let partitioned = PartitionableTransport::new_partition_set();
     let mut rng = rand::thread_rng();
 
-    let endpoints = ids.iter().map(|&id| {
-        let peers: Vec<NodeId> = ids.iter().copied().filter(|&p| p != id).collect();
+    let endpoints = ids
+        .iter()
+        .map(|&id| {
+            let peers: Vec<NodeId> = ids.iter().copied().filter(|&p| p != id).collect();
 
-        let peer_txs: HashMap<NodeId, _> = raft_txs.iter()
-            .filter(|&(&p, _)| p != id)
-            .map(|(&p, tx)| (p, tx.clone()))
-            .collect();
-        let transport: Arc<dyn RaftTransport> = Arc::new(PartitionableTransport::new(
-            id,
-            InProcessTransport::new(peer_txs),
-            partitioned.clone(),
-        ));
+            let peer_txs: HashMap<NodeId, _> = raft_txs
+                .iter()
+                .filter(|&(&p, _)| p != id)
+                .map(|(&p, tx)| (p, tx.clone()))
+                .collect();
+            let transport: Arc<dyn RaftTransport> = Arc::new(PartitionableTransport::new(
+                id,
+                InProcessTransport::new(peer_txs),
+                partitioned.clone(),
+            ));
 
-        let state = RaftState::new_randomized(id, peers.clone(), 10, 10, 3, &mut rng);
-        let raft_rx = raft_rxs.remove(&id).unwrap();
-        let (committed_tx, committed_rx) = tokio::sync::mpsc::unbounded_channel();
-        tokio::spawn(RaftActor::new(state, peers, transport, raft_rx, committed_tx).run());
-        (RaftActorHandle::new(raft_txs[&id].clone()), committed_rx)
-    }).collect();
+            let state = RaftState::new_randomized(id, peers.clone(), 10, 10, 3, &mut rng);
+            let raft_rx = raft_rxs.remove(&id).unwrap();
+            let (committed_tx, committed_rx) = tokio::sync::mpsc::unbounded_channel();
+            tokio::spawn(RaftActor::new(state, peers, transport, raft_rx, committed_tx).run());
+            (RaftActorHandle::new(raft_txs[&id].clone()), committed_rx)
+        })
+        .collect();
 
     (endpoints, partitioned)
 }
@@ -76,8 +86,8 @@ pub(crate) fn spawn_raft_actors(
 // ── Cluster ───────────────────────────────────────────────────────────────────
 
 pub struct MultiNodeCluster {
-    nodes      : Vec<SectorSimulatorHandle>,
-    bus        : InMemoryReplicationBus,
+    nodes: Vec<SectorSimulatorHandle>,
+    bus: InMemoryReplicationBus,
     /// Shared fault-injection set for the cluster's Raft transports (ADR-0014).
     partitioned: Arc<Mutex<HashSet<NodeId>>>,
 }
@@ -97,18 +107,26 @@ impl MultiNodeCluster {
 
         let (endpoints, partitioned) = spawn_raft_actors(&ids);
 
-        let nodes = ids.iter().zip(endpoints).map(|(&id, (raft, committed_rx))| {
-            SectorSimulatorHandle::spawn(
-                id,
-                SectorId(id.0),
-                SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-                bus.event_sender(),
-                raft,
-                committed_rx,
-            )
-        }).collect();
+        let nodes = ids
+            .iter()
+            .zip(endpoints)
+            .map(|(&id, (raft, committed_rx))| {
+                SectorSimulatorHandle::spawn(
+                    id,
+                    SectorId(id.0),
+                    SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                    bus.event_sender(),
+                    raft,
+                    committed_rx,
+                )
+            })
+            .collect();
 
-        Self { nodes, bus, partitioned }
+        Self {
+            nodes,
+            bus,
+            partitioned,
+        }
     }
 
     /// Cut `node` off from the rest of the cluster's Raft messages
@@ -138,7 +156,7 @@ impl MultiNodeCluster {
     pub async fn spawn_ships_on_all(&self, count: usize, config: &SpawnConfig) {
         for (idx, node) in self.nodes.iter().enumerate() {
             let offset = (idx * count) as u64;
-            let ships  = generate_ships(count, config, offset);
+            let ships = generate_ships(count, config, offset);
             for (_, pos, vel) in ships {
                 node.spawn_ship(pos, vel).await;
             }
@@ -191,9 +209,9 @@ mod tests {
     use super::*;
     use dawn_core::NodeId;
 
-    const NODES : usize = 3;
-    const SHIPS : usize = 10;
-    const TICKS : usize = 5;
+    const NODES: usize = 3;
+    const SHIPS: usize = 10;
+    const TICKS: usize = 5;
 
     fn config() -> SpawnConfig {
         SpawnConfig::default_for_node(NodeId(0))
@@ -241,11 +259,15 @@ mod tests {
         let stats = cluster.get_all_stats().await;
 
         let sector_ids: Vec<_> = stats.iter().map(|s| s.sector_id).collect();
-        let node_ids  : Vec<_> = stats.iter().map(|s| s.node_id).collect();
+        let node_ids: Vec<_> = stats.iter().map(|s| s.node_id).collect();
 
         // All Sector IDs must be distinct (each node owns a unique Sector).
         let unique_sectors: std::collections::HashSet<_> = sector_ids.iter().collect();
-        assert_eq!(unique_sectors.len(), NODES, "sector IDs must be unique across nodes");
+        assert_eq!(
+            unique_sectors.len(),
+            NODES,
+            "sector IDs must be unique across nodes"
+        );
 
         let unique_nodes: std::collections::HashSet<_> = node_ids.iter().collect();
         assert_eq!(unique_nodes.len(), NODES, "node IDs must be unique");
@@ -287,11 +309,21 @@ mod tests {
         }
 
         let roles = cluster.raft_roles().await;
-        let leaders = roles.iter().filter(|(role, _)| *role == dawn_consensus::Role::Leader).count();
-        assert_eq!(leaders, 1, "exactly one node should be Leader after enough ticks: {roles:?}");
+        let leaders = roles
+            .iter()
+            .filter(|(role, _)| *role == dawn_consensus::Role::Leader)
+            .count();
+        assert_eq!(
+            leaders, 1,
+            "exactly one node should be Leader after enough ticks: {roles:?}"
+        );
 
         let terms: std::collections::HashSet<_> = roles.iter().map(|(_, term)| *term).collect();
-        assert_eq!(terms.len(), 1, "all nodes should agree on the term: {roles:?}");
+        assert_eq!(
+            terms.len(),
+            1,
+            "all nodes should agree on the term: {roles:?}"
+        );
 
         cluster.shutdown().await;
     }
@@ -325,8 +357,14 @@ mod tests {
         }
 
         let stats = cluster.get_all_stats().await;
-        assert_eq!(stats[0].ship_count, 0, "origin sector must no longer own the ship");
-        assert_eq!(stats[1].ship_count, 1, "destination sector must own the ship");
+        assert_eq!(
+            stats[0].ship_count, 0,
+            "origin sector must no longer own the ship"
+        );
+        assert_eq!(
+            stats[1].ship_count, 1,
+            "destination sector must own the ship"
+        );
         assert_eq!(stats[2].ship_count, 0, "third sector must be unaffected");
 
         cluster.shutdown().await;
@@ -358,7 +396,8 @@ mod tests {
         }
 
         // Gate 0 (Sector 0 -> Sector 1) sits near Sector 0's +X edge.
-        let gate = dawn_sector::galaxy::Galaxy::demo().gates
+        let gate = dawn_sector::galaxy::Galaxy::demo()
+            .gates
             .into_iter()
             .find(|g| g.id == JumpGateId(0))
             .expect("gate 0 must exist");
@@ -377,8 +416,14 @@ mod tests {
         }
 
         let stats = cluster.get_all_stats().await;
-        assert_eq!(stats[0].ship_count, 0, "origin sector must no longer own the ship");
-        assert_eq!(stats[1].ship_count, 1, "destination sector must own the ship");
+        assert_eq!(
+            stats[0].ship_count, 0,
+            "origin sector must no longer own the ship"
+        );
+        assert_eq!(
+            stats[1].ship_count, 1,
+            "destination sector must own the ship"
+        );
 
         cluster.shutdown().await;
     }
@@ -399,7 +444,10 @@ mod tests {
             .await;
 
         let accepted = cluster.nodes[0].jump(ship_id, JumpGateId(0)).await;
-        assert!(!accepted, "ship far from the gate must be rejected up front");
+        assert!(
+            !accepted,
+            "ship far from the gate must be rejected up front"
+        );
 
         cluster.shutdown().await;
     }
@@ -432,7 +480,9 @@ mod tests {
         }
 
         let roles = cluster.raft_roles().await;
-        let (leader_idx, (_, old_term)) = roles.iter().enumerate()
+        let (leader_idx, (_, old_term)) = roles
+            .iter()
+            .enumerate()
             .find(|(_, (role, _))| *role == dawn_consensus::Role::Leader)
             .expect("a leader must exist before the partition");
         let old_term = *old_term;
@@ -448,20 +498,39 @@ mod tests {
             // keeps believing it is Leader in its stale term, but it can no
             // longer replicate to a majority, so this is not split-brain.
             let roles = cluster.raft_roles().await;
-            let leaders = roles.iter().enumerate()
-                .filter(|&(idx, (role, _))| idx != leader_idx && *role == dawn_consensus::Role::Leader)
+            let leaders = roles
+                .iter()
+                .enumerate()
+                .filter(|&(idx, (role, _))| {
+                    idx != leader_idx && *role == dawn_consensus::Role::Leader
+                })
                 .count();
-            assert!(leaders <= 1, "at most one connected Leader at any time: {roles:?}");
+            assert!(
+                leaders <= 1,
+                "at most one connected Leader at any time: {roles:?}"
+            );
         }
 
         let roles = cluster.raft_roles().await;
-        let leaders: Vec<_> = roles.iter().enumerate()
+        let leaders: Vec<_> = roles
+            .iter()
+            .enumerate()
             .filter(|&(idx, (role, _))| idx != leader_idx && *role == dawn_consensus::Role::Leader)
             .collect();
-        assert_eq!(leaders.len(), 1, "remaining nodes must elect a new leader: {roles:?}");
+        assert_eq!(
+            leaders.len(),
+            1,
+            "remaining nodes must elect a new leader: {roles:?}"
+        );
         let (new_leader_idx, (_, new_term)) = leaders[0];
-        assert_ne!(new_leader_idx, leader_idx, "the partitioned node cannot be the new leader");
-        assert!(*new_term > old_term, "new leader must be in a higher term: old={old_term:?} new={new_term:?}");
+        assert_ne!(
+            new_leader_idx, leader_idx,
+            "the partitioned node cannot be the new leader"
+        );
+        assert!(
+            *new_term > old_term,
+            "new leader must be in a higher term: old={old_term:?} new={new_term:?}"
+        );
 
         cluster.shutdown().await;
     }
@@ -480,7 +549,9 @@ mod tests {
             cluster.tick_all().await;
         }
         let roles = cluster.raft_roles().await;
-        let (old_leader_idx, _) = roles.iter().enumerate()
+        let (old_leader_idx, _) = roles
+            .iter()
+            .enumerate()
             .find(|(_, (role, _))| *role == dawn_consensus::Role::Leader)
             .expect("a leader must exist before the partition");
 
@@ -492,20 +563,27 @@ mod tests {
             cluster.tick_all().await;
         }
         let roles = cluster.raft_roles().await;
-        let (new_leader_idx, _) = roles.iter().enumerate()
-            .find(|&(idx, (role, _))| idx != old_leader_idx && *role == dawn_consensus::Role::Leader)
+        let (new_leader_idx, _) = roles
+            .iter()
+            .enumerate()
+            .find(|&(idx, (role, _))| {
+                idx != old_leader_idx && *role == dawn_consensus::Role::Leader
+            })
             .expect("a new leader must be elected after the partition");
 
         // Propose a Transit owned by the new Leader's sector, away from the
         // partitioned node's sector (which can no longer import).
         let owner_idx = new_leader_idx;
-        let dest_idx = (0..NODES).find(|&i| i != old_leader_idx && i != owner_idx)
+        let dest_idx = (0..NODES)
+            .find(|&i| i != old_leader_idx && i != owner_idx)
             .expect("a third sector must exist for the destination");
 
         let ship_id = cluster.nodes[owner_idx]
             .spawn_ship(Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0))
             .await;
-        let accepted = cluster.nodes[owner_idx].transit(ship_id, SectorId(dest_idx as u8)).await;
+        let accepted = cluster.nodes[owner_idx]
+            .transit(ship_id, SectorId(dest_idx as u8))
+            .await;
         assert!(accepted, "transit command must pass up-front validation");
 
         for _ in 0..40 {
@@ -513,9 +591,18 @@ mod tests {
         }
 
         let stats = cluster.get_all_stats().await;
-        assert_eq!(stats[owner_idx].ship_count, 0, "origin sector must no longer own the ship");
-        assert_eq!(stats[dest_idx].ship_count, 1, "destination sector must own the ship");
-        assert_eq!(stats[old_leader_idx].ship_count, 0, "the partitioned sector must be unaffected");
+        assert_eq!(
+            stats[owner_idx].ship_count, 0,
+            "origin sector must no longer own the ship"
+        );
+        assert_eq!(
+            stats[dest_idx].ship_count, 1,
+            "destination sector must own the ship"
+        );
+        assert_eq!(
+            stats[old_leader_idx].ship_count, 0,
+            "the partitioned sector must be unaffected"
+        );
 
         cluster.shutdown().await;
     }
@@ -529,7 +616,10 @@ mod tests {
         for _ in 0..TICKS {
             cluster.tick_all().await;
             let current = cluster.total_replicated_events().await;
-            assert!(current >= prev, "replicated event count must never decrease");
+            assert!(
+                current >= prev,
+                "replicated event count must never decrease"
+            );
             prev = current;
         }
 

@@ -11,14 +11,18 @@ use dawn_event_store::EventStore;
 /// A request for the suffix of one Sector's append-only log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MissingLogRequest {
-    pub sector_id : SectorId,
+    pub sector_id: SectorId,
     pub from_index: u64,
     pub max_events: usize,
 }
 
 impl MissingLogRequest {
     pub fn new(sector_id: SectorId, from_index: u64, max_events: usize) -> Self {
-        Self { sector_id, from_index, max_events }
+        Self {
+            sector_id,
+            from_index,
+            max_events,
+        }
     }
 }
 
@@ -33,7 +37,7 @@ pub enum BatchApplyPlan {
     /// `next_index`. Offset is non-zero for an overlapping retry batch.
     Apply {
         first_event_offset: usize,
-        next_index        : u64,
+        next_index: u64,
     },
 }
 
@@ -92,7 +96,7 @@ impl AntiEntropy {
 
         BatchApplyPlan::Apply {
             first_event_offset: (expected_next_index - batch.from_index) as usize,
-            next_index        : batch.next_index(),
+            next_index: batch.next_index(),
         }
     }
 }
@@ -105,9 +109,9 @@ mod tests {
 
     fn event(n: u64) -> DomainEvent {
         DomainEvent::VelocityChanged(VelocityChanged {
-            ship_id : ShipId::new(NodeId(0), n),
+            ship_id: ShipId::new(NodeId(0), n),
             velocity: Velocity::new(1.0, 0.0, 0.0),
-            tick    : Tick(n),
+            tick: Tick(n),
         })
     }
 

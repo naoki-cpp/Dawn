@@ -32,8 +32,14 @@ pub struct CellGrid {
 impl CellGrid {
     /// Create an empty grid with the given cell edge length.
     pub fn new(cell_size: f32) -> Self {
-        assert!(cell_size > 0.0, "cell_size must be positive, got {cell_size}");
-        Self { cell_size, cells: BTreeMap::new() }
+        assert!(
+            cell_size > 0.0,
+            "cell_size must be positive, got {cell_size}"
+        );
+        Self {
+            cell_size,
+            cells: BTreeMap::new(),
+        }
     }
 
     /// Build a grid from `(ShipId, absolute position)` pairs. Positions are
@@ -41,13 +47,13 @@ impl CellGrid {
     /// at true-AU distances — an f32 absolute near a 1e11 m anchor has a ~16 km
     /// ulp, which would fuzz the cell boundary (ADR-0029 R2). Each bucket is
     /// sorted by `ShipId` so neighborhood enumeration is deterministic.
-    pub fn build(
-        cell_size: f32,
-        ships: impl IntoIterator<Item = (ShipId, [f64; 3])>,
-    ) -> Self {
+    pub fn build(cell_size: f32, ships: impl IntoIterator<Item = (ShipId, [f64; 3])>) -> Self {
         let mut grid = Self::new(cell_size);
         for (id, pos) in ships {
-            grid.cells.entry(grid_cell(cell_size, pos)).or_default().push(id);
+            grid.cells
+                .entry(grid_cell(cell_size, pos))
+                .or_default()
+                .push(id);
         }
         for bucket in grid.cells.values_mut() {
             bucket.sort_unstable();
@@ -85,8 +91,16 @@ impl CellGrid {
 /// longer visible. Both outputs stay `ShipId`-sorted. Used to emit `AoiEnter` /
 /// `AoiLeave` to a client as it moves (ADR-0019).
 pub fn aoi_delta(prev: &[ShipId], curr: &[ShipId]) -> (Vec<ShipId>, Vec<ShipId>) {
-    let entered = curr.iter().filter(|id| prev.binary_search(id).is_err()).copied().collect();
-    let left    = prev.iter().filter(|id| curr.binary_search(id).is_err()).copied().collect();
+    let entered = curr
+        .iter()
+        .filter(|id| prev.binary_search(id).is_err())
+        .copied()
+        .collect();
+    let left = prev
+        .iter()
+        .filter(|id| curr.binary_search(id).is_err())
+        .copied()
+        .collect();
     (entered, left)
 }
 
@@ -98,9 +112,9 @@ pub fn event_concerns_ships(event: &DomainEvent) -> Vec<ShipId> {
     let mut ids = vec![event.ship_id()];
     let secondary = match event {
         DomainEvent::ShipDestroyed(e) => Some(e.killer_id),
-        DomainEvent::TargetLocked(e)  => Some(e.target_id),
-        DomainEvent::LockLost(e)      => Some(e.target_id),
-        DomainEvent::WeaponFired(e)   => Some(e.target_id),
+        DomainEvent::TargetLocked(e) => Some(e.target_id),
+        DomainEvent::LockLost(e) => Some(e.target_id),
+        DomainEvent::WeaponFired(e) => Some(e.target_id),
         _ => None,
     };
     if let Some(s) = secondary {
@@ -174,26 +188,36 @@ mod tests {
         let boundary = (AU_M / 10_000.0).floor() * 10_000.0; // exact cell edge
         let lo = grid.cell_of([boundary - 100.0, 0.0, 0.0]);
         let hi = grid.cell_of([boundary + 100.0, 0.0, 0.0]);
-        assert_eq!(hi.0, lo.0 + 1, "200 m across a cell edge at 1 AU must bin into adjacent cells");
+        assert_eq!(
+            hi.0,
+            lo.0 + 1,
+            "200 m across a cell edge at 1 AU must bin into adjacent cells"
+        );
     }
 
     #[test]
     fn neighborhood_includes_same_cell_and_axis_adjacent_cells() {
         // center cell (0,0,0); one ship in it, one in an adjacent cell.
-        let grid = CellGrid::build(100.0, [
-            (ship(1), [10.0, 10.0, 10.0]),    // cell (0,0,0)
-            (ship(2), [110.0, 10.0, 10.0]),   // cell (1,0,0) — adjacent
-        ]);
+        let grid = CellGrid::build(
+            100.0,
+            [
+                (ship(1), [10.0, 10.0, 10.0]),  // cell (0,0,0)
+                (ship(2), [110.0, 10.0, 10.0]), // cell (1,0,0) — adjacent
+            ],
+        );
         let n = grid.neighbors_of([50.0, 50.0, 50.0]);
         assert_eq!(n, vec![ship(1), ship(2)]);
     }
 
     #[test]
     fn ships_two_cells_away_are_excluded() {
-        let grid = CellGrid::build(100.0, [
-            (ship(1), [50.0, 50.0, 50.0]),    // cell (0,0,0)
-            (ship(2), [250.0, 50.0, 50.0]),   // cell (2,0,0) — 2 cells away
-        ]);
+        let grid = CellGrid::build(
+            100.0,
+            [
+                (ship(1), [50.0, 50.0, 50.0]),  // cell (0,0,0)
+                (ship(2), [250.0, 50.0, 50.0]), // cell (2,0,0) — 2 cells away
+            ],
+        );
         let n = grid.neighbors_of([50.0, 50.0, 50.0]);
         assert_eq!(n, vec![ship(1)]);
     }
@@ -201,12 +225,15 @@ mod tests {
     #[test]
     fn enumeration_is_sorted_by_ship_id_regardless_of_insertion_order() {
         // Insert out of order and across several cells; result must be ShipId-sorted.
-        let grid = CellGrid::build(100.0, [
-            (ship(9), [10.0, 10.0, 10.0]),    // (0,0,0)
-            (ship(3), [110.0, 10.0, 10.0]),   // (1,0,0)
-            (ship(5), [10.0, 110.0, 10.0]),   // (0,1,0)
-            (ship(1), [10.0, 10.0, 10.0]),    // (0,0,0)
-        ]);
+        let grid = CellGrid::build(
+            100.0,
+            [
+                (ship(9), [10.0, 10.0, 10.0]),  // (0,0,0)
+                (ship(3), [110.0, 10.0, 10.0]), // (1,0,0)
+                (ship(5), [10.0, 110.0, 10.0]), // (0,1,0)
+                (ship(1), [10.0, 10.0, 10.0]),  // (0,0,0)
+            ],
+        );
         let n = grid.neighbors_of([50.0, 50.0, 50.0]);
         assert_eq!(n, vec![ship(1), ship(3), ship(5), ship(9)]);
     }
@@ -222,7 +249,7 @@ mod tests {
     #[test]
     fn aoi_delta_reports_entered_and_left_ships() {
         let prev = vec![ship(1), ship(2), ship(3)];
-        let curr = vec![ship(2), ship(3), ship(5)];   // 1 left, 5 entered
+        let curr = vec![ship(2), ship(3), ship(5)]; // 1 left, 5 entered
         let (entered, left) = aoi_delta(&prev, &curr);
         assert_eq!(entered, vec![ship(5)]);
         assert_eq!(left, vec![ship(1)]);
@@ -242,9 +269,9 @@ mod tests {
         // Attacker not visible, target visible → still delivered.
         let event = DomainEvent::WeaponFired(WeaponFired {
             attacker_id: ship(99),
-            target_id  : ship(2),
-            damage     : 10.0,
-            tick       : Tick(1),
+            target_id: ship(2),
+            damage: 10.0,
+            tick: Tick(1),
         });
         let visible = vec![ship(1), ship(2), ship(3)];
         assert!(event_visible_to(&event, &visible));
@@ -255,9 +282,9 @@ mod tests {
         use dawn_core::events::VelocityChanged;
         use dawn_core::{Tick, Velocity};
         let event = DomainEvent::VelocityChanged(VelocityChanged {
-            ship_id : ship(99),
+            ship_id: ship(99),
             velocity: Velocity::ZERO,
-            tick    : Tick(1),
+            tick: Tick(1),
         });
         let visible = vec![ship(1), ship(2)];
         assert!(!event_visible_to(&event, &visible));

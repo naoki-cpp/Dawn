@@ -41,7 +41,11 @@ impl DilationController {
     /// Create a controller that engages once a tick's cost exceeds `budget`.
     pub fn new(budget: f64) -> Self {
         assert!(budget > 0.0, "budget must be positive, got {budget}");
-        Self { budget, dilation: 1.0, active_ticks: 0 }
+        Self {
+            budget,
+            dilation: 1.0,
+            active_ticks: 0,
+        }
     }
 
     /// Update from this tick's deterministic logical cost; return the dilation
@@ -132,7 +136,7 @@ mod tests {
     #[test]
     fn dilation_in_one_sector_does_not_affect_another() {
         // Locality (INV-TiDi (a)): controllers share no state.
-        let mut hot  = DilationController::new(1_000.0);
+        let mut hot = DilationController::new(1_000.0);
         let mut calm = DilationController::new(1_000.0);
         hot.update(5_000.0);
         calm.update(200.0);

@@ -21,20 +21,20 @@ pub struct CapacitorComp {
 /// Hull が 0 になると `is_destroyed = true`。
 #[derive(Debug, Clone, Copy)]
 pub struct HullComp {
-    pub current_shield : f32,
-    pub current_armor  : f32,
-    pub current_hull   : f32,
-    pub is_destroyed   : bool,
+    pub current_shield: f32,
+    pub current_armor: f32,
+    pub current_hull: f32,
+    pub is_destroyed: bool,
 }
 
 impl HullComp {
     /// 初期 HP を 3 層で指定して初期化する。
     pub fn new(max_shield: f32, max_armor: f32, max_hull: f32) -> Self {
         Self {
-            current_shield : max_shield,
-            current_armor  : max_armor,
-            current_hull   : max_hull,
-            is_destroyed   : false,
+            current_shield: max_shield,
+            current_armor: max_armor,
+            current_hull: max_hull,
+            is_destroyed: false,
         }
     }
 
@@ -72,12 +72,14 @@ impl HullComp {
 #[derive(Debug, Clone, Copy)]
 pub struct WeaponComp {
     /// 最後に発射した Tick。`Tick::ZERO` は未発射。
-    pub last_fired_tick : Tick,
+    pub last_fired_tick: Tick,
 }
 
 impl WeaponComp {
     pub fn new() -> Self {
-        Self { last_fired_tick: Tick::ZERO }
+        Self {
+            last_fired_tick: Tick::ZERO,
+        }
     }
 
     /// 現在 Tick で発射可能かどうかを判定する。
@@ -100,8 +102,8 @@ pub enum LockState {
 /// 1ターゲットへのロックエントリ。
 #[derive(Debug, Clone)]
 pub struct LockEntry {
-    pub target_id : ShipId,
-    pub state     : LockState,
+    pub target_id: ShipId,
+    pub state: LockState,
 }
 
 /// Ship のロックオン状態全体を保持するコンポーネント。
@@ -114,7 +116,9 @@ pub struct LockComp {
 
 impl LockComp {
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     /// `target_id` がすでにロック中またはロック済みか。
@@ -129,7 +133,8 @@ impl LockComp {
 
     /// `Locked` 状態のターゲット一覧。
     pub fn locked_targets(&self) -> impl Iterator<Item = ShipId> + '_ {
-        self.entries.iter()
+        self.entries
+            .iter()
             .filter(|e| e.state == LockState::Locked)
             .map(|e| e.target_id)
     }
@@ -148,8 +153,8 @@ mod tests {
     fn hull_comp_initialized_with_full_hp() {
         let hull = HullComp::new(300.0, 200.0, 100.0);
         assert_eq!(hull.current_shield, 300.0);
-        assert_eq!(hull.current_armor,  200.0);
-        assert_eq!(hull.current_hull,   100.0);
+        assert_eq!(hull.current_armor, 200.0);
+        assert_eq!(hull.current_hull, 100.0);
         assert!(!hull.is_destroyed);
     }
 
@@ -158,8 +163,8 @@ mod tests {
         let mut hull = HullComp::new(300.0, 200.0, 100.0);
         hull.apply_damage(100.0);
         assert_eq!(hull.current_shield, 200.0);
-        assert_eq!(hull.current_armor,  200.0);
-        assert_eq!(hull.current_hull,   100.0);
+        assert_eq!(hull.current_armor, 200.0);
+        assert_eq!(hull.current_hull, 100.0);
         assert!(!hull.is_destroyed);
     }
 
@@ -168,8 +173,8 @@ mod tests {
         let mut hull = HullComp::new(100.0, 200.0, 100.0);
         hull.apply_damage(150.0);
         assert_eq!(hull.current_shield, 0.0);
-        assert_eq!(hull.current_armor,  150.0);
-        assert_eq!(hull.current_hull,   100.0);
+        assert_eq!(hull.current_armor, 150.0);
+        assert_eq!(hull.current_hull, 100.0);
     }
 
     #[test]
@@ -199,8 +204,8 @@ mod tests {
     fn weapon_comp_can_fire_after_cooldown_elapsed() {
         let mut weapon = WeaponComp::new();
         weapon.last_fired_tick = Tick(10);
-        assert!( weapon.can_fire(Tick(15), 5));  // 10 + 5 = 15 → OK
-        assert!(!weapon.can_fire(Tick(14), 5));  // 10 + 5 = 15 > 14 → NG
+        assert!(weapon.can_fire(Tick(15), 5)); // 10 + 5 = 15 → OK
+        assert!(!weapon.can_fire(Tick(14), 5)); // 10 + 5 = 15 > 14 → NG
     }
 
     #[test]

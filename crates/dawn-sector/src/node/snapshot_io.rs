@@ -1,4 +1,6 @@
-use dawn_ecs::components::{CapacitorComp, FittingComp, HullComp, PositionComp, TackledComp, VelocityComp};
+use dawn_ecs::components::{
+    CapacitorComp, FittingComp, HullComp, PositionComp, TackledComp, VelocityComp,
+};
 use dawn_event_store::store::EventStore;
 
 use crate::persistence::{ShipSnapshot, StateSnapshot};
@@ -12,31 +14,48 @@ impl<S: EventStore> SimulationNode<S> {
     /// Pair with the event log to reconstruct this exact state on restart.
     pub fn take_snapshot(&self) -> StateSnapshot {
         let mut ships: Vec<ShipSnapshot> = self
-            .ships.index
+            .ships
+            .index
             .iter()
             .filter_map(|(&ship_id, &entity)| {
-                let pos  = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
-                let vel  = self.world.inner().get::<&VelocityComp>(entity).ok()?.0;
+                let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+                let vel = self.world.inner().get::<&VelocityComp>(entity).ok()?.0;
                 let hull = self.world.inner().get::<&HullComp>(entity).ok()?;
-                let capacitor = self.world.inner().get::<&CapacitorComp>(entity).ok().map(|c| c.current);
-                let fitting = self.world.inner().get::<&FittingComp>(entity)
+                let capacitor = self
+                    .world
+                    .inner()
+                    .get::<&CapacitorComp>(entity)
+                    .ok()
+                    .map(|c| c.current);
+                let fitting = self
+                    .world
+                    .inner()
+                    .get::<&FittingComp>(entity)
                     .map(|f| f.to_snapshot())
                     .unwrap_or_else(|_| dawn_core::fitting::FittingSnapshot::empty());
-                let tackled_by = self.world.inner().get::<&TackledComp>(entity)
+                let tackled_by = self
+                    .world
+                    .inner()
+                    .get::<&TackledComp>(entity)
                     .map(|t| t.tacklers.clone())
                     .unwrap_or_default();
-                let ship_type_id = self.ships.type_ids.get(&ship_id).copied().unwrap_or(dawn_core::ShipTypeId(0));
+                let ship_type_id = self
+                    .ships
+                    .type_ids
+                    .get(&ship_id)
+                    .copied()
+                    .unwrap_or(dawn_core::ShipTypeId(0));
                 let anchor = self.world.ship_anchor(entity).unwrap_or_default();
                 Some(ShipSnapshot {
                     ship_id,
                     ship_type_id,
-                    position      : pos,
+                    position: pos,
                     anchor,
-                    velocity      : vel,
+                    velocity: vel,
                     current_shield: hull.current_shield,
-                    current_armor : hull.current_armor,
-                    current_hull  : hull.current_hull,
-                    is_destroyed  : hull.is_destroyed,
+                    current_armor: hull.current_armor,
+                    current_hull: hull.current_hull,
+                    is_destroyed: hull.is_destroyed,
                     capacitor,
                     fitting,
                     tackled_by,
@@ -51,11 +70,11 @@ impl<S: EventStore> SimulationNode<S> {
         ships.sort_by_key(|s| s.ship_id);
 
         StateSnapshot {
-            node_id   : self.node_id,
-            sector_id : self.sector_id,
-            bounds    : self.bounds,
-            log_index : self.event_store.len() as u64,
-            tick      : self.current_tick,
+            node_id: self.node_id,
+            sector_id: self.sector_id,
+            bounds: self.bounds,
+            log_index: self.event_store.len() as u64,
+            tick: self.current_tick,
             id_counter: self.id_counter,
             ships,
         }
@@ -91,19 +110,27 @@ impl SimulationNode<dawn_event_store::FileEventStore> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::persistence::StateSnapshot;
     use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
     use dawn_event_store::{FileEventStore, InMemoryEventStore};
-    use crate::persistence::StateSnapshot;
 
     fn mem_node() -> SimulationNode {
-        SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF))
+        SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        )
     }
 
     fn node_with_modules() -> SimulationNode {
         use crate::{modules, ship_types};
         let mut node = mem_node();
-        for def in modules::all_modules() { node.register_module(def); }
-        for def in ship_types::all_ship_types() { node.register_ship_type(def); }
+        for def in modules::all_modules() {
+            node.register_module(def);
+        }
+        for def in ship_types::all_ship_types() {
+            node.register_ship_type(def);
+        }
         node
     }
 
@@ -111,9 +138,15 @@ mod tests {
     fn snapshot_records_correct_ship_count_and_tick() {
         let mut node = mem_node();
         for i in 0..3 {
-            node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(i as f32 * 100.0, 0.0, 0.0), Velocity::new(1.0, 0.0, 0.0));
+            node.spawn_ship(
+                dawn_core::ShipTypeId(1),
+                Position::new(i as f32 * 100.0, 0.0, 0.0),
+                Velocity::new(1.0, 0.0, 0.0),
+            );
         }
-        for _ in 0..5 { node.tick(); }
+        for _ in 0..5 {
+            node.tick();
+        }
 
         let snap = node.take_snapshot();
         assert_eq!(snap.ships.len(), 3);
@@ -123,8 +156,8 @@ mod tests {
 
     #[test]
     fn ecs_state_is_fully_restored_from_snapshot_and_event_replay_after_simulated_restart() {
-        let dir           = tempfile::tempdir().unwrap();
-        let event_path    = dir.path().join("events.log");
+        let dir = tempfile::tempdir().unwrap();
+        let event_path = dir.path().join("events.log");
         let snapshot_path = dir.path().join("snapshot.bin");
 
         // ── Session 1: run, snapshot mid-way, continue, shut down ───────────
@@ -134,7 +167,8 @@ mod tests {
         {
             let store = FileEventStore::open(&event_path).unwrap();
             let mut node = SimulationNode::with_store(
-                NodeId(0), SectorId(0),
+                NodeId(0),
+                SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 store,
             );
@@ -143,25 +177,32 @@ mod tests {
             // (ADR-0008: NPC ships at constant velocity emit no events, so tick cannot
             //  be restored from the event log alone. Using player ships with thrust
             //  ensures VelocityChanged events carry the tick for replay.)
-            ship_ids = (0..5u64).map(|i| {
-                let id = node.spawn_ship(
-                    dawn_core::ShipTypeId(1),
-                    Position::new(i as f32 * 100.0, 0.0, 0.0),
-                    Velocity::ZERO,
-                );
-                node.set_player_ship(id);
-                node.apply_move_command(id, Position::new(10_000.0, 0.0, 0.0));
-                id
-            }).collect();
+            ship_ids = (0..5u64)
+                .map(|i| {
+                    let id = node.spawn_ship(
+                        dawn_core::ShipTypeId(1),
+                        Position::new(i as f32 * 100.0, 0.0, 0.0),
+                        Velocity::ZERO,
+                    );
+                    node.set_player_ship(id);
+                    node.apply_move_command(id, Position::new(10_000.0, 0.0, 0.0));
+                    id
+                })
+                .collect();
 
-            for _ in 0..5 { node.tick(); }
+            for _ in 0..5 {
+                node.tick();
+            }
             let snap = node.take_snapshot();
             snap.save(&snapshot_path).unwrap();
 
-            for _ in 0..3 { node.tick(); }
+            for _ in 0..3 {
+                node.tick();
+            }
 
-            final_tick      = node.current_tick();
-            final_positions = ship_ids.iter()
+            final_tick = node.current_tick();
+            final_positions = ship_ids
+                .iter()
                 .map(|id| node.get_ship_position(*id).unwrap())
                 .collect();
         }
@@ -170,18 +211,34 @@ mod tests {
         //
         // ADR-0008: position is derived state — restore replays velocity events,
         // then we re-run the remaining ticks to reach the exact final position.
-        let snap   = StateSnapshot::load(&snapshot_path).unwrap();
+        let snap = StateSnapshot::load(&snapshot_path).unwrap();
         let store2 = FileEventStore::open(&event_path).unwrap();
         let mut node2 = SimulationNode::restore_from(store2, &snap, &[], &[]);
 
         let remaining = final_tick.value() - node2.current_tick().value();
-        for _ in 0..remaining { node2.tick(); }
+        for _ in 0..remaining {
+            node2.tick();
+        }
 
-        assert_eq!(node2.current_tick(), final_tick, "tick must match after restore + replay ticks");
-        assert_eq!(node2.ship_count(), ship_ids.len(), "ship count must match after restore");
+        assert_eq!(
+            node2.current_tick(),
+            final_tick,
+            "tick must match after restore + replay ticks"
+        );
+        assert_eq!(
+            node2.ship_count(),
+            ship_ids.len(),
+            "ship count must match after restore"
+        );
         for (id, expected_pos) in ship_ids.iter().zip(final_positions.iter()) {
-            let restored_pos = node2.get_ship_position(*id).expect("ship must exist after restore");
-            assert_eq!(restored_pos, *expected_pos, "position of ship {} must match after restore + replay", id);
+            let restored_pos = node2
+                .get_ship_position(*id)
+                .expect("ship must exist after restore");
+            assert_eq!(
+                restored_pos, *expected_pos,
+                "position of ship {} must match after restore + replay",
+                id
+            );
         }
     }
 
@@ -202,7 +259,9 @@ mod tests {
             node.set_player_ship(id);
             node.apply_move_command(id, Position::new(9_000.0, 1_000.0, 0.0));
         }
-        for _ in 0..6 { node.tick(); }
+        for _ in 0..6 {
+            node.tick();
+        }
 
         let snap1 = node.take_snapshot();
 
@@ -211,7 +270,10 @@ mod tests {
             store2.append(rec.event.clone());
         }
         let node2 = SimulationNode::restore_from(
-            store2, &snap1, &modules::all_modules(), &ship_types::all_ship_types(),
+            store2,
+            &snap1,
+            &modules::all_modules(),
+            &ship_types::all_ship_types(),
         );
         let snap2 = node2.take_snapshot();
 
@@ -242,7 +304,9 @@ mod tests {
             );
         }
 
-        for _ in 0..12 { live.tick(); }
+        for _ in 0..12 {
+            live.tick();
+        }
         let snap = live.take_snapshot();
         let events_up_to_snapshot: Vec<_> = live
             .event_store()
@@ -252,15 +316,24 @@ mod tests {
             .map(|r| r.event.clone())
             .collect();
 
-        for _ in 0..4 { live.tick(); }
+        for _ in 0..4 {
+            live.tick();
+        }
         let live_final = live.take_snapshot();
 
         let mut store2 = InMemoryEventStore::new();
-        for e in events_up_to_snapshot { store2.append(e); }
+        for e in events_up_to_snapshot {
+            store2.append(e);
+        }
         let mut restored = SimulationNode::restore_from(
-            store2, &snap, &modules::all_modules(), &ship_types::all_ship_types(),
+            store2,
+            &snap,
+            &modules::all_modules(),
+            &ship_types::all_ship_types(),
         );
-        for _ in 0..4 { restored.tick(); }
+        for _ in 0..4 {
+            restored.tick();
+        }
         let restored_final = restored.take_snapshot();
 
         assert_eq!(
@@ -275,8 +348,8 @@ mod tests {
     /// restoring from the snapshot still reproduces the live state.
     #[test]
     fn recovery_does_not_require_genesis_replay_after_compaction() {
-        let dir  = tempfile::tempdir().unwrap();
-        let hot  = dir.path().join("events.log");
+        let dir = tempfile::tempdir().unwrap();
+        let hot = dir.path().join("events.log");
         let cold = dir.path().join("cold.log");
 
         let snap;
@@ -284,7 +357,8 @@ mod tests {
         {
             let store = FileEventStore::open(&hot).unwrap();
             let mut node = SimulationNode::with_store(
-                NodeId(0), SectorId(0),
+                NodeId(0),
+                SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 store,
             );
@@ -295,9 +369,13 @@ mod tests {
                     Velocity::new(40.0, -15.0, 0.0),
                 );
             }
-            for _ in 0..8 { node.tick(); }
+            for _ in 0..8 {
+                node.tick();
+            }
             snap = node.take_snapshot();
-            for _ in 0..4 { node.tick(); }
+            for _ in 0..4 {
+                node.tick();
+            }
             live_final = node.take_snapshot();
         }
 
@@ -305,15 +383,24 @@ mod tests {
             let mut store = FileEventStore::open(&hot).unwrap();
             store.compact(snap.log_index, &cold).unwrap();
             assert_eq!(store.base_index(), snap.log_index);
-            assert_eq!(store.records_on_disk(), 0,
-                "events behind the snapshot are archived, not in the hot log");
+            assert_eq!(
+                store.records_on_disk(),
+                0,
+                "events behind the snapshot are archived, not in the hot log"
+            );
         }
 
         let store2 = FileEventStore::open(&hot).unwrap();
-        assert_eq!(store2.base_index(), snap.log_index, "hot log holds no genesis events");
+        assert_eq!(
+            store2.base_index(),
+            snap.log_index,
+            "hot log holds no genesis events"
+        );
         let mut restored = SimulationNode::restore_from(store2, &snap, &[], &[]);
         assert_eq!(restored.current_tick(), snap.tick);
-        for _ in 0..4 { restored.tick(); }
+        for _ in 0..4 {
+            restored.tick();
+        }
         let restored_final = restored.take_snapshot();
 
         assert_eq!(
@@ -326,43 +413,55 @@ mod tests {
     #[test]
     fn hull_capacitor_and_fitting_state_are_restored_from_snapshot() {
         use crate::{modules, ship_types};
-        use dawn_core::DomainEvent;
         use dawn_core::events::{DamageTaken, ShipFitted};
         use dawn_core::fitting::{FittingSnapshot, SlotEntry};
+        use dawn_core::DomainEvent;
 
-        let dir           = tempfile::tempdir().unwrap();
-        let event_path    = dir.path().join("events.log");
+        let dir = tempfile::tempdir().unwrap();
+        let event_path = dir.path().join("events.log");
         let snapshot_path = dir.path().join("snapshot.bin");
 
         let ship_id: ShipId;
         {
             let store = FileEventStore::open(&event_path).unwrap();
             let mut node = SimulationNode::with_store(
-                NodeId(0), SectorId(0),
+                NodeId(0),
+                SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 store,
             );
-            for def in modules::all_modules() { node.register_module(def); }
-            for def in ship_types::all_ship_types() { node.register_ship_type(def); }
+            for def in modules::all_modules() {
+                node.register_module(def);
+            }
+            for def in ship_types::all_ship_types() {
+                node.register_ship_type(def);
+            }
 
-            ship_id = node.spawn_ship(ship_types::SHIP_TYPE_MAGPIE, Position::ORIGIN, Velocity::ZERO);
+            ship_id = node.spawn_ship(
+                ship_types::SHIP_TYPE_MAGPIE,
+                Position::ORIGIN,
+                Velocity::ZERO,
+            );
 
             node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
                 ship_id,
-                damage         : 50.0,
-                current_shield : 30.0,
-                current_armor  : 90.0,
-                current_hull   : 100.0,
-                tick           : Tick(1),
+                damage: 50.0,
+                current_shield: 30.0,
+                current_armor: 90.0,
+                current_hull: 100.0,
+                tick: Tick(1),
             }));
 
             node.apply_event_pub(DomainEvent::ShipFitted(ShipFitted {
                 ship_id,
                 fitting: FittingSnapshot {
                     high: vec![],
-                    mid : vec![SlotEntry { module_id: modules::MODULE_AFTERBURNER, is_active: true }],
-                    low : vec![],
-                    rig : vec![],
+                    mid: vec![SlotEntry {
+                        module_id: modules::MODULE_AFTERBURNER,
+                        is_active: true,
+                    }],
+                    low: vec![],
+                    rig: vec![],
                 },
                 tick: Tick(1),
             }));
@@ -371,24 +470,37 @@ mod tests {
             snap.save(&snapshot_path).unwrap();
         }
 
-        let snap   = StateSnapshot::load(&snapshot_path).unwrap();
+        let snap = StateSnapshot::load(&snapshot_path).unwrap();
         let store2 = FileEventStore::open(&event_path).unwrap();
-        let node2  = SimulationNode::restore_from(
-            store2, &snap,
+        let node2 = SimulationNode::restore_from(
+            store2,
+            &snap,
             &modules::all_modules(),
             &ship_types::all_ship_types(),
         );
 
         let hp = node2.get_ship_hp(ship_id).unwrap();
-        assert_eq!(hp, 30.0 + 90.0 + 100.0, "Hull HP layers must survive restore");
+        assert_eq!(
+            hp,
+            30.0 + 90.0 + 100.0,
+            "Hull HP layers must survive restore"
+        );
 
-        let cap = node2.get_ship_capacitor(ship_id).expect("capacitor must be restored");
-        assert_eq!(cap, node2.get_ship_stats(ship_id).unwrap().cap_max,
-            "capacitor must be restored to its snapshot value");
+        let cap = node2
+            .get_ship_capacitor(ship_id)
+            .expect("capacitor must be restored");
+        assert_eq!(
+            cap,
+            node2.get_ship_stats(ship_id).unwrap().cap_max,
+            "capacitor must be restored to its snapshot value"
+        );
 
         let fitted = node2.get_fitted_module_ids(ship_id);
-        assert!(fitted.contains(&(modules::MODULE_AFTERBURNER, true)),
-            "Afterburner must remain fitted and active after restore, got {:?}", fitted);
+        assert!(
+            fitted.contains(&(modules::MODULE_AFTERBURNER, true)),
+            "Afterburner must remain fitted and active after restore, got {:?}",
+            fitted
+        );
     }
 
     /// INV-002 / ADR-0029 — a warp-to-body rebases the ship onto the body's
@@ -404,8 +516,8 @@ mod tests {
         use dawn_core::WarpTarget;
 
         let mut node = node_with_modules();
-        let player   = node.next_player_id();
-        let ship_id  = node.spawn_player_ship_at_pub(player, Position::new(0.0, 0.0, 0.0));
+        let player = node.next_player_id();
+        let ship_id = node.spawn_player_ship_at_pub(player, Position::new(0.0, 0.0, 0.0));
 
         let body_id = dawn_core::CelestialBodyId(1);
         assert!(
@@ -414,13 +526,21 @@ mod tests {
         );
         for _ in 0..5_000 {
             node.tick();
-            if node.warp_phase(ship_id).is_none() { break; }
+            if node.warp_phase(ship_id).is_none() {
+                break;
+            }
         }
-        assert!(node.warp_phase(ship_id).is_none(), "warp should have completed");
+        assert!(
+            node.warp_phase(ship_id).is_none(),
+            "warp should have completed"
+        );
 
         let live_anchor = node.get_ship_anchor(ship_id).expect("ship has an anchor");
-        assert_eq!(live_anchor, dawn_core::AnchorId::from(body_id),
-            "arrival should have rebased onto the body anchor");
+        assert_eq!(
+            live_anchor,
+            dawn_core::AnchorId::from(body_id),
+            "arrival should have rebased onto the body anchor"
+        );
         let live_abs = node.ship_absolute(ship_id).expect("ship exists");
 
         // Snapshot + restore from the event log (which includes AnchorRebased).
@@ -430,13 +550,23 @@ mod tests {
             store2.append(rec.event.clone());
         }
         let node2 = SimulationNode::restore_from(
-            store2, &snap, &modules::all_modules(), &ship_types::all_ship_types(),
+            store2,
+            &snap,
+            &modules::all_modules(),
+            &ship_types::all_ship_types(),
         );
 
-        assert_eq!(node2.get_ship_anchor(ship_id), Some(live_anchor),
-            "anchor must survive snapshot + restore");
-        let restored_abs = node2.ship_absolute(ship_id).expect("ship exists after restore");
-        assert_eq!(restored_abs, live_abs,
-            "absolute position must be identical after restore (anchor + offset both restored)");
+        assert_eq!(
+            node2.get_ship_anchor(ship_id),
+            Some(live_anchor),
+            "anchor must survive snapshot + restore"
+        );
+        let restored_abs = node2
+            .ship_absolute(ship_id)
+            .expect("ship exists after restore");
+        assert_eq!(
+            restored_abs, live_abs,
+            "absolute position must be identical after restore (anchor + offset both restored)"
+        );
     }
 }
