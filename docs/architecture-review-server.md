@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : CLAUDE.md §11, docs/architecture.md
-date     : 2026-06-20（P9-2 完了後に更新）
+date     : 2026-06-23（ADR-0029 真スケール座標後にファイルサイズ一覧を再計測）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -20,7 +20,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | 観点 | 評価 | 理由 |
 |---|---|---|
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027） |
-| ファイルサイズ | A− | P7-1/P7-2 + AoI テスト移動で node/mod.rs 514行に縮小。全ファイル 700行以下 |
+| ファイルサイズ | B+ | mod.rs は 646行で安定。ただし ADR-0029（真スケール座標）でワープ遷移を絶対 f64 フレームに書き換え、`node/navigation.rs` が 679→1092行に肥大（700行超は現状ここだけ・要分割候補） |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。近似ロジック解消 |
 | 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。残る両バイナリ間グルー重複（M-6）は ~230行・低ドリフトで許容判断（新規クレートは過剰）|
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。TCP transport も trait 境界内に収まる |
@@ -28,49 +28,61 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ---
 
-## ファイルサイズ一覧（2026-06-19 時点）
+## ファイルサイズ一覧（2026-06-23 時点）
+
+> 2026-06-19 の前回計測から、ADR-0029（真スケール座標）の実装でワープ遷移・座標変換・
+> シリアライズ周りが増加。M-4（WS 境界集約）で `protocol.rs` / `ws_server.rs` は両バイナリ
+> から削除され `dawn-actor` に集約済み（下の dawn-actor 表）。
 
 ### dawn-sector（ゲームロジック）
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-sector/src/node/mod.rs` | 575 | 🟢 P7-2 jump/warp validation 移動後 |
-| `crates/dawn-sector/src/node/navigation.rs` | 679 | 🟢 P7-2（validation + 実装 + approach/warp テスト） |
-| `crates/dawn-sector/src/node/spawner_logic.rs` | 485 | 🟢 P4-2 + P7-1（実装 394行 + bot テスト 91行） |
-| `crates/dawn-sector/src/node/transit_flow.rs` | 402 | 🟢 P7-1（実装 + 近接テスト） |
+| `crates/dawn-sector/src/node/navigation.rs` | 1092 | 🔴 ADR-0029 でワープ遷移を絶対 f64 フレーム（Hermite）に書き換え 679→1092。要分割候補 |
+| `crates/dawn-sector/src/node/spawner_logic.rs` | 662 | 🟢 P4-2 + P7-1（実装 + bot テスト）+ ADR-0029 `set_spawn_anchor_abs` |
+| `crates/dawn-sector/src/node/mod.rs` | 646 | 🟢 P7-2 jump/warp validation 移動後 |
+| `crates/dawn-sector/src/node/snapshot_io.rs` | 442 | 🟢 P7-pre |
+| `crates/dawn-sector/src/node/transit_flow.rs` | 407 | 🟢 P7-1（実装 + 近接テスト） |
 | `crates/dawn-sector/src/node/commands.rs` | 342 | 🟢 P7-1（実装 262行 + fitting/combat テスト 80行） |
-| `crates/dawn-sector/src/galaxy.rs` | 203 | 🟢 TOML schema parser 統合 |
-| `crates/dawn-sector/src/node/snapshot_io.rs` | 391 | 🟢 P7-pre |
-| `crates/dawn-sector/src/node/apply_event.rs` | 226 | 🟢 P7-pre |
-| `crates/dawn-sector/src/node/tackle.rs` | 204 | 🟢 P7-pre |
-| `crates/dawn-sector/src/aoi.rs` | 246 | 🟢 |
-| `crates/dawn-sector/src/transit.rs` | 215 | 🟢 |
-| `crates/dawn-sector/src/persistence/snapshot.rs` | 168 | 🟢 |
+| `crates/dawn-sector/src/node/serialization.rs` | 300 | 🟢 ADR-0029 でアンカー相対座標の WS 直列化を追加（158→300） |
+| `crates/dawn-sector/src/galaxy.rs` | 286 | 🟢 ADR-0029 AU→units 変換・ゲート AU 化（203→286） |
+| `crates/dawn-sector/src/aoi.rs` | 265 | 🟢 |
+| `crates/dawn-sector/src/anchor.rs` | 246 | 🟢 ADR-0029 新設（AnchorTable・静的 f64 アンカー絶対座標） |
+| `crates/dawn-sector/src/node/apply_event.rs` | 244 | 🟢 P7-pre |
+| `crates/dawn-sector/src/transit.rs` | 216 | 🟢 |
+| `crates/dawn-sector/src/node/tackle.rs` | 208 | 🟢 P7-pre |
+| `crates/dawn-sector/src/persistence/snapshot.rs` | 173 | 🟢 |
 | `crates/dawn-sector/src/dilation.rs` | 160 | 🟢 |
-| `crates/dawn-sector/src/node/serialization.rs` | 158 | 🟢 |
 | `crates/dawn-sector/src/persistence/checkpoint.rs` | 156 | 🟢 |
+| `crates/dawn-sector/src/node/tick.rs` | 140 | 🟢 P4-1 + P7-1（実装 + tick テスト） |
 | `crates/dawn-sector/src/modules.rs` | 137 | 🟢 |
 | `crates/dawn-sector/src/spawner.rs` | 127 | 🟢 |
-| `crates/dawn-sector/src/node/tick.rs` | 139 | 🟢 P4-1 + P7-1（実装 91行 + tick テスト 48行） |
 | `crates/dawn-sector/src/ship_types.rs` | 82 | 🟢 |
 | `crates/dawn-sector/src/node/ship_registry.rs` | 33 | 🟢 P3-1 |
 | `crates/dawn-sector/src/node/sector_map.rs` | 25 | 🟢 P3-1 |
+
+### dawn-actor（クライアント転送境界・M-4 集約先）
+
+| ファイル | 行数 | 判定 |
+|---|---|---|
+| `crates/dawn-actor/src/protocol.rs` | 335 | 🟢 M-4 で両バイナリから集約（DomainEvent↔JSON↔ClientCommand） |
+| `crates/dawn-actor/src/client_connection.rs` | 254 | 🟢 ClientConnection trait + InProcess/Ws 実装 |
+| `crates/dawn-actor/src/ws_server.rs` | 188 | 🟢 M-4 で両バイナリから集約（WsServer / PlayerSession） |
+| `crates/dawn-actor/src/lib.rs` | 29 | 🟢 |
 
 ### dawn-simulation（配線・起動）
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-simulation/src/cluster.rs` | 528 | 🟢 Raft クラスター配線 |
+| `crates/dawn-simulation/src/cluster.rs` | 538 | 🟢 Raft クラスター配線 |
+| `crates/dawn-simulation/src/serve/mod.rs` | 429 | 🟢 P5-1 共通ヘルパー |
 | `crates/dawn-simulation/src/sector_simulator_actor.rs` | 423 | 🟡 M-3 |
-| `crates/dawn-simulation/src/bench.rs` | 411 | 🟢 |
-| `crates/dawn-simulation/src/serve/mod.rs` | 402 | 🟢 P5-1 共通ヘルパー |
-| `crates/dawn-simulation/src/protocol.rs` | 309 | 🟢 |
-| `crates/dawn-simulation/src/serve/cluster.rs` | 241 | 🟢 P5-1 |
-| `crates/dawn-simulation/src/ws_server.rs` | 199 | 🟢 |
+| `crates/dawn-simulation/src/bench.rs` | 414 | 🟢 |
+| `crates/dawn-simulation/src/serve/cluster.rs` | 248 | 🟢 P5-1 |
 | `crates/dawn-simulation/src/data_loader/modules.rs` | 190 | 🟢 P5-2 |
-| `crates/dawn-simulation/src/serve/single.rs` | 177 | 🟢 P5-1 |
+| `crates/dawn-simulation/src/serve/single.rs` | 178 | 🟢 P5-1 |
 | `crates/dawn-simulation/src/data_loader/ship_types.rs` | 174 | 🟢 P5-2 |
-| `crates/dawn-simulation/src/main.rs` | 63 | 🟢 |
+| `crates/dawn-simulation/src/main.rs` | 65 | 🟢 |
 | `crates/dawn-simulation/src/data_loader/mod.rs` | 9 | 🟢 P5-2 |
 
 ### その他クレート
@@ -78,24 +90,23 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | ファイル | 行数 | 判定 |
 |---|---|---|
 | `crates/dawn-consensus/src/state.rs` | 573 | 🟡 許容範囲（Raft 実装の核）|
-| `crates/dawn-core/src/events.rs` | 495 | 🟢 |
+| `crates/dawn-core/src/events.rs` | 535 | 🟢 |
+| `crates/dawn-ecs/src/systems/combat.rs` | 469 | 🟢 |
+| `crates/dawn-consensus/src/actor.rs` | 441 | 🟢 |
 | `crates/dawn-event-store/src/file.rs` | 431 | 🟢 |
-| `crates/dawn-ecs/src/systems/combat.rs` | 430 | 🟢 |
-| `crates/dawn-consensus/src/actor.rs` | 430 | 🟢 |
 | `crates/dawn-ecs/src/systems/capacitor.rs` | 412 | 🟢 |
+| `crates/dawn-sector-node/src/main.rs` | 396 | 🟢 8D-4 本番バイナリ（TCP 配線・WS・Jump Redirect）|
 | `crates/dawn-consensus/src/rpc.rs` | 343 | 🟢 Raft RPC 型定義 |
-| `crates/dawn-consensus/src/tcp_transport.rs` | 330 | 🟢 8D-3 TcpRaftTransport |
-| `crates/dawn-sector-node/src/main.rs` | 337 | 🟢 8D-4 本番バイナリ（TCP 配線・WS・Jump Redirect）|
-| `crates/dawn-sector-node/src/protocol.rs` | 243 | 🟢 8D-4 WS プロトコル |
-| `crates/dawn-sector-node/src/data_loader.rs` | 178 | 🟢 8D-4 module/ship type TOML ローダー |
-| `crates/dawn-replication/src/tcp.rs` | 263 | 🟢 8D-2c |
-| `crates/dawn-core/src/navigation.rs` | 121 | 🟢 ナビゲーション型定義（star_system.rs より改名）|
-| `crates/dawn-sector-node/src/ws_server.rs` | 153 | 🟢 8D-4 WebSocket サーバー |
-| `crates/dawn-ecs/src/world.rs` | 252 | 🟢 P6-1 クエリヘルパー追加 |
+| `crates/dawn-consensus/src/tcp_transport.rs` | 337 | 🟢 8D-3 TcpRaftTransport |
+| `crates/dawn-replication/src/tcp.rs` | 283 | 🟢 8D-2c |
+| `crates/dawn-ecs/src/world.rs` | 270 | 🟢 P6-1 クエリヘルパー追加 |
 | `crates/dawn-replication/src/anti_entropy.rs` | 211 | 🟢 8D-2b |
 | `crates/dawn-replication/src/bus.rs` | 188 | 🟢 8D-2a |
+| `crates/dawn-core/src/navigation.rs` | 184 | 🟢 ナビゲーション型定義（star_system.rs より改名）|
+| `crates/dawn-sector-node/src/data_loader.rs` | 178 | 🟢 8D-4 module/ship type TOML ローダー |
 | `crates/dawn-replication/src/snapshot.rs` | 164 | 🟢 8D-2d SnapshotTransfer（ジェネリック / 256 MiB cap） |
-| `crates/dawn-replication/src/lib.rs` | 71 | 🟢 8D-2a/2b/2c/2d public API |
+| `crates/dawn-replication/src/lib.rs` | 78 | 🟢 8D-2a/2b/2c/2d public API |
+| `crates/dawn-sector-node/src/config.rs` | 56 | 🟢 8D-4 TOML 静的 config |
 
 ---
 
@@ -122,39 +133,8 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 `dawn-sector-node` の main ループの重複（両者とも tick + Raft + replication を駆動）が
 保守上の実害になったとき、または in-process クラスタを本番に近づける必要が出たとき。
 
-#### M-4（一部解消）: クライアント配線層が `dawn-simulation` と `dawn-sector-node` で重複
-
-以前は `dawn-sector-node` の WS/プロトコル/データロード層が `dawn-simulation` の手動コピーで、
-3ファイルすべてが「Adapted from …」「kept in sync manually」と保守負債を明記していた。
-
-解消（2026-06-20）: **`ws_server` と `protocol` を `dawn-actor` へ集約**した。
-`dawn-actor/src/client_connection.rs` のドキュメントが既に `WsClientConnection (ws_server.rs)`
-を「本番 WebSocket transport」と記述しており、移動は設計意図の実現（charter 変更ではない）。
-
-- `WsServer` / `WsClientConnection` / `PlayerSession` → `dawn-actor::ws_server`
-  （`bind` を `ToSocketAddrs + Display` でジェネリック化し両呼び出し元に対応）
-- `parse_client_command` / `domain_event_to_json` / JSON DTO / `redirect_json` → `dawn-actor::protocol`
-- 両バイナリは重複ファイルを削除し `use dawn_actor::{protocol, ws_server}` に切替
-- 不要になった依存（`tokio-tungstenite` / `futures-util` ほか）を両 Cargo.toml から除去
-
-残課題は M-6 に集約（`data_loader` 以外にも `deliver_aoi_frame` / `spawn_npcs` が重複）。
-
-#### ~~M-5~~（機能ギャップ）: 受信 replication batch が消費されていない（解消済み）
-
-以前は `dawn-sector-node` の tick ループが受信 `LogBatch` をログ出力するだけで破棄しており、
-ゴシップが「送るだけ」で複製の消費側が未実装だった。
-
-解消（2026-06-20）: `dawn-replication` に **`ReplicaSet`** を新設し、受信ループに配線した。
-既存の `AntiEntropy::plan_batch` を使い、peer セクターごとに **gap 検出・冪等・順序保持**で
-追記ログの複製を保持する（ADR-0021 のログシッピング消費側）。
-
-意図的に範囲外とした2点（別機能・別設計が必要）:
-- 複製イベントをライブ `SimulationNode` world へ適用すること
-  （別セクター座標の艦が自セクターの AoI/衝突を壊すため）
-- failover takeover（複製を所有へ昇格）
-
-`ReplicaSet` は順序付き追記ログを保持するところまでで、これは将来の read / failover 経路が
-消費する前提データである。誤解を招く「8D-2d scope」コメントも除去した。
+> M-4（WS 境界の `dawn-actor` 集約・2026-06-20）と M-5（replication 消費側 `ReplicaSet`・
+> 2026-06-20）は解消済み。詳細は「改善ロードマップ > 完了済み」を参照。M-4 の残課題は M-6 に集約。
 
 #### M-6（許容）: `dawn-sector-node` が `dawn-simulation` の serve 層をフォークしている
 
@@ -234,14 +214,48 @@ M-4（WS 境界）解消後も、両バイナリの「アプリケーション�
 | M-4 WS 境界の集約 | 2026-06-20 | `ws_server` / `protocol` を `dawn-actor` へ移動し dawn-simulation / dawn-sector-node の手動コピーを解消（506行削除）。`bind` を `ToSocketAddrs` ジェネリック化・不要依存を除去 |
 
 > Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消は
-> すべて完了。コードベースの品質リファクタは一区切り。
+> すべて完了。**ただし** ADR-0029（真スケール座標）の実装で `node/navigation.rs` が
+> 679→1092 行に再肥大し、品質リファクタが部分的に再燃した（下記リファクタロードマップ R-1）。
+
+### リファクタロードマップ（2026-06-23 追加・ADR-0029 後の再計測で起票）
+
+機能追加（ADR-0029）で再び閾値を超えたファイルの分割を、過去の P7 系（`transit_flow.rs` /
+`tackle.rs` / `snapshot_io.rs` を `node/mod.rs` から切り出した）と同じ「責務ごとに sibling
+モジュールへ抽出、テストも実装と同じファイルへ」方式で行う。挙動は変えない（純粋な移動）。
+
+#### R-1（優先・着手可）: `node/navigation.rs` 1092 行の分割
+
+現状の navigation.rs は **approach（半自動接近・ADR-0015）** と **warp（ADR-0022/0029）** と
+**jump/warp バリデーション** の3責務が同居し、約 493 行がテスト。これを3分割する:
+
+| 抽出先（新規） | 移す内容 | 概算 |
+|---|---|---|
+| `node/warp.rs` | `process_warp` / `warp_step`（Hermite）/ `rebase_arrival_event` / `warp_arrival_abs` / `dest_in_ship_frame_abs` / `set_warp_phase` / `warp_total_ticks` / `apply_warp_command(_owned)` / `drain_pending_auto_jumps` / `drain_completed_warps` + 対応する warp テスト群 | ~600 行 |
+| `node/approach.rs` | `apply_approach_command(_owned)` / `process_approach` / `dest_in_ship_frame` + approach テスト群 | ~250 行 |
+| `node/navigation.rs`（残置） | `can_propose_jump` / `can_propose_warp`（ナビ系バリデーションの正典） | ~120 行 |
+
+- すべて `impl<S: EventStore> SimulationNode<S>` のメソッドなので、`node/mod.rs` の
+  `mod warp; mod approach;` 追加と impl ブロックの移設だけで割れる（公開 API・シグネチャ不変）。
+- 完了基準: 全ファイル 700 行以下に復帰、`cargo test --workspace` ゼロエラー（FBD-007: 移動した
+  `pub fn` のテストは同梱のまま移す）、挙動差分なし。
+- 着手条件なし（純粋リファクタ）。ADR 不要（イベントスキーマ・Tick 順序・公開境界を変えない）。
+
+#### R-2（低優先・トリガー待ち）: クライアント `main.gd` 1210 行
+
+ADR-0029 でワープ演出・単位整形・原点リベースが加わり 1094→1210 に増加（client レビュー参照）。
+ただし god object は C-1 で解消済みで、残りはオーケストレーション層。`world_space` /
+`unit_format` は既に static class に分離済み。さらなる分割はシーン参照切れリスクが上回るため、
+**C-3（シーンツリー直パス参照）が解消されるまで保留**（client レビューの「採らない方針」と同根）。
 
 ### 未完了・保留
 
-残るのは以下のみ。いずれも本番品質には直結せず、意識的に「今はやらない」と判断した項目。
+上記リファクタロードマップ以外で残るのは以下。いずれも本番品質には直結せず、意識的に
+「今はやらない」と判断した項目。
 
 | 項目 | 種別 | 状態・理由 |
 |---|---|---|
+| R-1 `node/navigation.rs` 分割 | 品質・着手可 | ADR-0029 で 1092 行に再肥大。warp.rs / approach.rs へ3分割（上記） |
+| R-2 client `main.gd` 分割 | 品質・保留 | 1210 行だが god object 解消済み。C-3 解消までトリガー待ち |
 | 8D-5 Raspberry Pi 実機検証 | 機能・外部依存待ち | ハードウェア未購入。観測ログ・config・localhost 検証は済み（完了済み参照）。Pi 入手後に着手 |
 | M-3 `SectorSimulatorActor` 密結合 | 品質・保留 | 本番パス外（in-process テスト/ベンチ専用）。P9-1 撤回。優先度低 |
 | M-6 アプリ層グルー重複（`data_loader` / `deliver_aoi_frame` / `spawn_npcs`） | 品質・許容 | ~230行・低ドリフト。新規クレートは過剰と判断。再評価トリガー付き |
@@ -263,11 +277,12 @@ M-4（WS 境界）解消後も、両バイナリの「アプリケーション�
 
 ### Phase 9 — 評価の総点検（決着）
 
-タスクは全て決着済み。総合評価は **A−** に据え、A への無理な引き上げは行わない。
-残る M-3（本番パス外）・M-6（許容）は「やらない」と意識的に判断したもので、
-本番品質には直結しない。これ以上の構造リファクタは費用対効果が見合わないため、
-A− を適正な落としどころとする。次の前進先は品質リファクタではなく
-**8D-5 実機検証**（roadmap）や戦闘の深み（ADR-0016 §5）といった機能側。
+Phase 9 時点では総合 **A−** で決着とし、M-3（本番パス外）・M-6（許容）は「やらない」と
+判断した。その後 ADR-0029（真スケール座標）の機能追加で `node/navigation.rs` が閾値を
+超えて再肥大したため、構造リファクタは「完全決着」ではなく **R-1（navigation.rs 分割）が
+再燃**した状態にある（上記リファクタロードマップ）。R-1 は純粋リファクタ（挙動・公開境界
+不変）で着手可。R-1 を消化すれば全ファイル 700 行以下に戻り A− を維持できる。
+それ以外の前進先は引き続き **8D-5 実機検証** や戦闘の深み（ADR-0016 §5）といった機能側。
 
 | 項目 | 状態 |
 |---|---|
