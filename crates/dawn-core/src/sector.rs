@@ -47,16 +47,18 @@ impl SectorBounds {
     pub fn centered(half: f32) -> Self {
         Self {
             min: Position::new(-half, -half, -half),
-            max: Position::new( half,  half,  half),
+            max: Position::new(half, half, half),
         }
     }
 
     pub fn contains(&self, pos: Position) -> bool {
-        pos.x >= self.min.x && pos.x <= self.max.x
-            && pos.y >= self.min.y && pos.y <= self.max.y
-            && pos.z >= self.min.z && pos.z <= self.max.z
+        pos.x >= self.min.x
+            && pos.x <= self.max.x
+            && pos.y >= self.min.y
+            && pos.y <= self.max.y
+            && pos.z >= self.min.z
+            && pos.z <= self.max.z
     }
-
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -85,6 +87,6 @@ mod tests {
     fn centered_bounds_are_symmetric_around_origin() {
         let b = SectorBounds::centered(100.0);
         assert_eq!(b.min, Position::new(-100.0, -100.0, -100.0));
-        assert_eq!(b.max, Position::new( 100.0,  100.0,  100.0));
+        assert_eq!(b.max, Position::new(100.0, 100.0, 100.0));
     }
 }

@@ -14,7 +14,9 @@
 //! - 返り値の events を EventStore に Append するのは呼び出し元の責務。
 
 use crate::{
-    components::{IsNpcComp, LockComp, LockEntry, LockState, PositionComp, ShipIdComp, ShipStatsComp},
+    components::{
+        IsNpcComp, LockComp, LockEntry, LockState, PositionComp, ShipIdComp, ShipStatsComp,
+    },
     SimWorld,
 };
 use dawn_core::{
@@ -31,34 +33,36 @@ pub struct LockResult {
 // Internal snapshot type. `entity` is captured so write-back is O(1) per ship
 // instead of a full-world scan (ADR-0019: server compute stays O(n)).
 struct ShipSnap {
-    entity   : hecs::Entity,
-    ship_id  : ShipId,
-    pos      : Position,
-    stats    : ShipStatsComp,
+    entity: hecs::Entity,
+    ship_id: ShipId,
+    pos: Position,
+    stats: ShipStatsComp,
     lock_comp: LockComp,
-    is_npc   : bool,  // true = NPC（自動ロック有効）/ false = プレイヤー
+    is_npc: bool, // true = NPC（自動ロック有効）/ false = プレイヤー
 }
 
 /// 1 Tick 分のロック処理を実行する。
 ///
 /// `pending_commands`: その Tick に届いた `LockOnCommand`（プレイヤー操作）。
-pub fn run(
-    world            : &mut SimWorld,
-    tick             : Tick,
-    pending_commands : &[LockOnCommand],
-) -> LockResult {
+pub fn run(world: &mut SimWorld, tick: Tick, pending_commands: &[LockOnCommand]) -> LockResult {
     // ── 1. 全 Ship をスナップショット ────────────────────────────────────────
 
     let mut ships: Vec<ShipSnap> = world
-        .query::<(&ShipIdComp, &PositionComp, &ShipStatsComp, &LockComp, Option<&IsNpcComp>)>()
+        .query::<(
+            &ShipIdComp,
+            &PositionComp,
+            &ShipStatsComp,
+            &LockComp,
+            Option<&IsNpcComp>,
+        )>()
         .iter()
         .map(|(entity, (id, pos, stats, lock, npc))| ShipSnap {
             entity,
-            ship_id  : id.0,
-            pos      : pos.0,
-            stats    : *stats,
+            ship_id: id.0,
+            pos: pos.0,
+            stats: *stats,
             lock_comp: lock.clone(),
-            is_npc   : npc.is_some(),
+            is_npc: npc.is_some(),
         })
         .collect();
 
@@ -70,7 +74,7 @@ pub fn run(
     for i in 0..ships.len() {
         let max_locks = ships[i].stats.max_locks;
         let lock_time = ships[i].stats.lock_time;
-        let self_id   = ships[i].ship_id;
+        let self_id = ships[i].ship_id;
 
         // 既存エントリを処理（消滅チェック + カウントダウン）
         let mut new_entries: Vec<LockEntry> = Vec::new();
@@ -94,13 +98,15 @@ pub fn run(
                     }));
                     new_entries.push(LockEntry {
                         target_id: entry.target_id,
-                        state    : LockState::Locked,
+                        state: LockState::Locked,
                     });
                 }
                 LockState::Locking { remaining_ticks } => {
                     new_entries.push(LockEntry {
                         target_id: entry.target_id,
-                        state    : LockState::Locking { remaining_ticks: remaining_ticks - 1 },
+                        state: LockState::Locking {
+                            remaining_ticks: remaining_ticks - 1,
+                        },
                     });
                 }
                 LockState::Locked => {
@@ -113,20 +119,32 @@ pub fn run(
 
         // プレイヤーコマンドを適用
         for cmd in pending_commands {
-            if cmd.ship_id != self_id { continue; }
-            if cmd.target_id == self_id { continue; }
-            if ships[i].lock_comp.has_target(cmd.target_id) { continue; }
-            if !ships[i].lock_comp.has_capacity(max_locks) { continue; }
-            if !alive.contains(&cmd.target_id) { continue; }
+            if cmd.ship_id != self_id {
+                continue;
+            }
+            if cmd.target_id == self_id {
+                continue;
+            }
+            if ships[i].lock_comp.has_target(cmd.target_id) {
+                continue;
+            }
+            if !ships[i].lock_comp.has_capacity(max_locks) {
+                continue;
+            }
+            if !alive.contains(&cmd.target_id) {
+                continue;
+            }
             // lock_time を initial remaining とする（lock_time Tick 後に Locked になる）
             // remaining = lock_time - 1 で開始し、毎 Tick デクリメント、0 → Locked
             let initial = lock_time.saturating_sub(1);
             ships[i].lock_comp.entries.push(LockEntry {
                 target_id: cmd.target_id,
-                state    : if initial == 0 {
-                    LockState::Locked  // lock_time=1 なら即 Locked
+                state: if initial == 0 {
+                    LockState::Locked // lock_time=1 なら即 Locked
                 } else {
-                    LockState::Locking { remaining_ticks: initial }
+                    LockState::Locking {
+                        remaining_ticks: initial,
+                    }
                 },
             });
         }
@@ -138,23 +156,26 @@ pub fn run(
             && ships[i].lock_comp.has_capacity(max_locks)
         {
             let origin = ships[i].pos;
-            let range  = ships[i].stats.weapon_range;
-            let nearest = ships.iter()
+            let range = ships[i].stats.weapon_range;
+            let nearest = ships
+                .iter()
                 .filter(|s| s.ship_id != self_id)
                 .filter(|s| {
                     let dx = s.pos.x - origin.x;
                     let dy = s.pos.y - origin.y;
                     let dz = s.pos.z - origin.z;
-                    (dx*dx + dy*dy + dz*dz).sqrt() <= range
+                    (dx * dx + dy * dy + dz * dz).sqrt() <= range
                 })
                 .min_by(|a, b| {
                     let dist = |s: &&ShipSnap| -> f32 {
                         let dx = s.pos.x - origin.x;
                         let dy = s.pos.y - origin.y;
                         let dz = s.pos.z - origin.z;
-                        (dx*dx + dy*dy + dz*dz).sqrt()
+                        (dx * dx + dy * dy + dz * dz).sqrt()
                     };
-                    dist(a).partial_cmp(&dist(b)).unwrap_or(std::cmp::Ordering::Equal)
+                    dist(a)
+                        .partial_cmp(&dist(b))
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 })
                 .map(|s| s.ship_id);
 
@@ -163,10 +184,12 @@ pub fn run(
                     let initial = lock_time.saturating_sub(1);
                     ships[i].lock_comp.entries.push(LockEntry {
                         target_id: target,
-                        state    : if initial == 0 {
+                        state: if initial == 0 {
                             LockState::Locked
                         } else {
-                            LockState::Locking { remaining_ticks: initial }
+                            LockState::Locking {
+                                remaining_ticks: initial,
+                            }
                         },
                     });
                 }
@@ -193,14 +216,16 @@ mod tests {
     use crate::{components::ShipStatsComp, SimWorld};
     use dawn_core::{NodeId, Position, SectorId, ShipId, Tick, Velocity};
 
-    fn ship_id(n: u64) -> ShipId { ShipId::new(NodeId(0), n) }
+    fn ship_id(n: u64) -> ShipId {
+        ShipId::new(NodeId(0), n)
+    }
 
     fn armed_stats() -> ShipStatsComp {
         ShipStatsComp {
             weapon_damage: 10.0,
-            weapon_range : 2_000.0,
-            lock_time    : 3,
-            max_locks    : 1,
+            weapon_range: 2_000.0,
+            lock_time: 3,
+            max_locks: 1,
             ..ShipStatsComp::NPC
         }
     }
@@ -216,56 +241,94 @@ mod tests {
 
     #[test]
     fn npc_auto_lock_starts_when_target_is_in_range() {
-        let mut world = setup(Position::ORIGIN, Position::new(500.0, 0.0, 0.0), armed_stats());
+        let mut world = setup(
+            Position::ORIGIN,
+            Position::new(500.0, 0.0, 0.0),
+            armed_stats(),
+        );
         run(&mut world, Tick(1), &[]);
-        let any_locking = world.query::<&LockComp>().iter()
+        let any_locking = world
+            .query::<&LockComp>()
+            .iter()
             .any(|(_, l)| !l.entries.is_empty());
         assert!(any_locking, "locking entry created when target is in range");
     }
 
     #[test]
     fn no_auto_lock_when_target_is_out_of_range() {
-        let mut world = setup(Position::ORIGIN, Position::new(10_000.0, 0.0, 0.0), armed_stats());
+        let mut world = setup(
+            Position::ORIGIN,
+            Position::new(10_000.0, 0.0, 0.0),
+            armed_stats(),
+        );
         run(&mut world, Tick(1), &[]);
-        let any_locking = world.query::<&LockComp>().iter()
+        let any_locking = world
+            .query::<&LockComp>()
+            .iter()
             .any(|(_, l)| !l.entries.is_empty());
         assert!(!any_locking, "no auto-lock when target is out of range");
     }
 
     #[test]
     fn target_locked_event_emitted_after_lock_time_ticks() {
-        let mut world = setup(Position::ORIGIN, Position::new(500.0, 0.0, 0.0), armed_stats());
+        let mut world = setup(
+            Position::ORIGIN,
+            Position::new(500.0, 0.0, 0.0),
+            armed_stats(),
+        );
         run(&mut world, Tick(1), &[]);
         run(&mut world, Tick(2), &[]);
         let r3 = run(&mut world, Tick(3), &[]);
-        let count = r3.events.iter().filter(|e| matches!(e, DomainEvent::TargetLocked(_))).count();
+        let count = r3
+            .events
+            .iter()
+            .filter(|e| matches!(e, DomainEvent::TargetLocked(_)))
+            .count();
         assert!(count >= 1, "TargetLocked emitted after lock_time=3 ticks");
     }
 
     #[test]
     fn lock_lost_emitted_when_target_is_removed_from_world() {
-        let mut world = setup(Position::ORIGIN, Position::new(500.0, 0.0, 0.0), armed_stats());
+        let mut world = setup(
+            Position::ORIGIN,
+            Position::new(500.0, 0.0, 0.0),
+            armed_stats(),
+        );
         run(&mut world, Tick(1), &[]);
         run(&mut world, Tick(2), &[]);
-        run(&mut world, Tick(3), &[]);  // Locked になる
+        run(&mut world, Tick(3), &[]); // Locked になる
 
         // Remove target from ECS.
         let entity = world.find_entity(ship_id(2)).unwrap();
         world.despawn_ship(entity);
 
         let r = run(&mut world, Tick(4), &[]);
-        let lost = r.events.iter().filter(|e| matches!(e, DomainEvent::LockLost(_))).count();
+        let lost = r
+            .events
+            .iter()
+            .filter(|e| matches!(e, DomainEvent::LockLost(_)))
+            .count();
         assert!(lost >= 1, "LockLost emitted when target is despawned");
     }
 
     #[test]
     fn player_lock_on_command_initiates_lock() {
         // weapon_damage=0 → NPC 自動ロックしない
-        let unarmed = ShipStatsComp { weapon_damage: 0.0, lock_time: 2, max_locks: 1, ..ShipStatsComp::NPC };
+        let unarmed = ShipStatsComp {
+            weapon_damage: 0.0,
+            lock_time: 2,
+            max_locks: 1,
+            ..ShipStatsComp::NPC
+        };
         let mut world = setup(Position::ORIGIN, Position::new(500.0, 0.0, 0.0), unarmed);
-        let cmd = LockOnCommand { ship_id: ship_id(1), target_id: ship_id(2) };
+        let cmd = LockOnCommand {
+            ship_id: ship_id(1),
+            target_id: ship_id(2),
+        };
         run(&mut world, Tick(1), &[cmd]);
-        let lock_started = world.query::<(&ShipIdComp, &LockComp)>().iter()
+        let lock_started = world
+            .query::<(&ShipIdComp, &LockComp)>()
+            .iter()
             .any(|(_, (id, l))| id.0 == ship_id(1) && !l.entries.is_empty());
         assert!(lock_started, "lock initiated by LockOnCommand");
     }
@@ -273,7 +336,12 @@ mod tests {
     #[test]
     fn max_locks_limits_simultaneous_lock_count() {
         // max_locks=1 で2コマンド送っても1つしかロックされない
-        let unarmed = ShipStatsComp { weapon_damage: 0.0, lock_time: 2, max_locks: 1, ..ShipStatsComp::NPC };
+        let unarmed = ShipStatsComp {
+            weapon_damage: 0.0,
+            lock_time: 2,
+            max_locks: 1,
+            ..ShipStatsComp::NPC
+        };
         let mut world = SimWorld::new(SectorId(0));
         let ea = world.spawn_ship(ship_id(1), Position::ORIGIN, Velocity::ZERO);
         world.spawn_ship(ship_id(2), Position::new(100.0, 0.0, 0.0), Velocity::ZERO);
@@ -281,15 +349,26 @@ mod tests {
         world.set_ship_stats(ea, unarmed);
 
         let cmds = vec![
-            LockOnCommand { ship_id: ship_id(1), target_id: ship_id(2) },
-            LockOnCommand { ship_id: ship_id(1), target_id: ship_id(3) },
+            LockOnCommand {
+                ship_id: ship_id(1),
+                target_id: ship_id(2),
+            },
+            LockOnCommand {
+                ship_id: ship_id(1),
+                target_id: ship_id(3),
+            },
         ];
         run(&mut world, Tick(1), &cmds);
 
-        let lock_count = world.query::<(&ShipIdComp, &LockComp)>().iter()
+        let lock_count = world
+            .query::<(&ShipIdComp, &LockComp)>()
+            .iter()
             .find(|(_, (id, _))| id.0 == ship_id(1))
             .map(|(_, (_, l))| l.entries.len())
             .unwrap_or(0);
-        assert_eq!(lock_count, 1, "max_locks=1 allows only one simultaneous lock");
+        assert_eq!(
+            lock_count, 1,
+            "max_locks=1 allows only one simultaneous lock"
+        );
     }
 }

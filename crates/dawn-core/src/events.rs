@@ -15,9 +15,9 @@
 //! 3. Add a corresponding `Command` in `commands.rs` if applicable.
 //! 4. Write a unit test in this module.
 
-use crate::fitting::{FittingSnapshot, SlotKind, ModuleId};
-use crate::ship_type::ShipTypeId;
+use crate::fitting::{FittingSnapshot, ModuleId, SlotKind};
 use crate::navigation::{AnchorId, JumpGateId, StarSystemId};
+use crate::ship_type::ShipTypeId;
 use crate::{Position, SectorId, ShipId, Tick, Velocity};
 use serde::{Deserialize, Serialize};
 
@@ -104,25 +104,25 @@ impl DomainEvent {
     /// The `ShipId` that this event relates to.
     pub fn ship_id(&self) -> ShipId {
         match self {
-            Self::ShipSpawned(e)        => e.ship_id,
-            Self::VelocityChanged(e)    => e.ship_id,
-            Self::ShipDespawned(e)      => e.ship_id,
-            Self::ShipFitted(e)         => e.ship_id,
-            Self::ModuleActivated(e)    => e.ship_id,
-            Self::ModuleDeactivated(e)  => e.ship_id,
-            Self::TargetLocked(e)       => e.locker_id,
-            Self::LockLost(e)           => e.locker_id,
-            Self::WeaponFired(e)        => e.attacker_id,
-            Self::DamageTaken(e)        => e.ship_id,
-            Self::ShipDestroyed(e)      => e.ship_id,
+            Self::ShipSpawned(e) => e.ship_id,
+            Self::VelocityChanged(e) => e.ship_id,
+            Self::ShipDespawned(e) => e.ship_id,
+            Self::ShipFitted(e) => e.ship_id,
+            Self::ModuleActivated(e) => e.ship_id,
+            Self::ModuleDeactivated(e) => e.ship_id,
+            Self::TargetLocked(e) => e.locker_id,
+            Self::LockLost(e) => e.locker_id,
+            Self::WeaponFired(e) => e.attacker_id,
+            Self::DamageTaken(e) => e.ship_id,
+            Self::ShipDestroyed(e) => e.ship_id,
             Self::SectorTransitRequested(e) => e.ship_id,
             Self::SectorTransitCompleted(e) => e.ship_id,
-            Self::SectorTransitAborted(e)   => e.ship_id,
-            Self::JumpGateUsed(e)           => e.ship_id,
-            Self::StarSystemChanged(e)      => e.ship_id,
-            Self::TackleApplied(e)          => e.ship_id,
-            Self::TackleReleased(e)         => e.ship_id,
-            Self::AnchorRebased(e)          => e.ship_id,
+            Self::SectorTransitAborted(e) => e.ship_id,
+            Self::JumpGateUsed(e) => e.ship_id,
+            Self::StarSystemChanged(e) => e.ship_id,
+            Self::TackleApplied(e) => e.ship_id,
+            Self::TackleReleased(e) => e.ship_id,
+            Self::AnchorRebased(e) => e.ship_id,
         }
     }
 
@@ -130,25 +130,25 @@ impl DomainEvent {
     /// `Tick::ZERO` for creation events that precede the tick loop.
     pub fn tick(&self) -> Tick {
         match self {
-            Self::ShipSpawned(e)        => e.tick,
-            Self::VelocityChanged(e)    => e.tick,
-            Self::ShipDespawned(e)      => e.tick,
-            Self::ShipFitted(e)         => e.tick,
-            Self::ModuleActivated(e)    => e.tick,
-            Self::ModuleDeactivated(e)  => e.tick,
-            Self::TargetLocked(e)       => e.tick,
-            Self::LockLost(e)           => e.tick,
-            Self::WeaponFired(e)        => e.tick,
-            Self::DamageTaken(e)        => e.tick,
-            Self::ShipDestroyed(e)      => e.tick,
+            Self::ShipSpawned(e) => e.tick,
+            Self::VelocityChanged(e) => e.tick,
+            Self::ShipDespawned(e) => e.tick,
+            Self::ShipFitted(e) => e.tick,
+            Self::ModuleActivated(e) => e.tick,
+            Self::ModuleDeactivated(e) => e.tick,
+            Self::TargetLocked(e) => e.tick,
+            Self::LockLost(e) => e.tick,
+            Self::WeaponFired(e) => e.tick,
+            Self::DamageTaken(e) => e.tick,
+            Self::ShipDestroyed(e) => e.tick,
             Self::SectorTransitRequested(e) => e.tick,
             Self::SectorTransitCompleted(e) => e.tick,
-            Self::SectorTransitAborted(e)   => e.tick,
-            Self::JumpGateUsed(e)           => e.tick,
-            Self::StarSystemChanged(e)      => e.tick,
-            Self::TackleApplied(e)          => e.tick,
-            Self::TackleReleased(e)         => e.tick,
-            Self::AnchorRebased(e)          => e.tick,
+            Self::SectorTransitAborted(e) => e.tick,
+            Self::JumpGateUsed(e) => e.tick,
+            Self::StarSystemChanged(e) => e.tick,
+            Self::TackleApplied(e) => e.tick,
+            Self::TackleReleased(e) => e.tick,
+            Self::AnchorRebased(e) => e.tick,
         }
     }
 }
@@ -157,12 +157,12 @@ impl DomainEvent {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShipSpawned {
-    pub ship_id          : ShipId,
-    pub sector_id        : SectorId,
-    pub initial_position : Position,
+    pub ship_id: ShipId,
+    pub sector_id: SectorId,
+    pub initial_position: Position,
     /// 船種 ID。Replay 時に base_stats を復元するために必須（INV-002）。
-    pub ship_type_id     : ShipTypeId,
-    pub tick             : Tick,
+    pub ship_type_id: ShipTypeId,
+    pub tick: Tick,
 }
 
 // ── VelocityChanged ───────────────────────────────────────────────────────────
@@ -176,9 +176,9 @@ pub struct ShipSpawned {
 /// each Tick. No physics simulation required.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VelocityChanged {
-    pub ship_id  : ShipId,
-    pub velocity : Velocity,
-    pub tick     : Tick,
+    pub ship_id: ShipId,
+    pub velocity: Velocity,
+    pub tick: Tick,
 }
 
 // ── AnchorRebased ─────────────────────────────────────────────────────────────
@@ -191,18 +191,18 @@ pub struct VelocityChanged {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnchorRebased {
     pub ship_id: ShipId,
-    pub anchor : AnchorId,
+    pub anchor: AnchorId,
     /// New position offset, relative to `anchor` (metres).
-    pub offset : Position,
-    pub tick   : Tick,
+    pub offset: Position,
+    pub tick: Tick,
 }
 
 // ── ShipDespawned ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShipDespawned {
-    pub ship_id : ShipId,
-    pub tick    : Tick,
+    pub ship_id: ShipId,
+    pub tick: Tick,
 }
 
 // ── ModuleActivated / ModuleDeactivated ──────────────────────────────────────
@@ -210,19 +210,19 @@ pub struct ShipDespawned {
 /// Active モジュールがオンになった（ADR-0006）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModuleActivated {
-    pub ship_id   : ShipId,
-    pub module_id : ModuleId,
-    pub slot      : SlotKind,
-    pub tick      : Tick,
+    pub ship_id: ShipId,
+    pub module_id: ModuleId,
+    pub slot: SlotKind,
+    pub tick: Tick,
 }
 
 /// Active モジュールがオフになった（ADR-0006）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModuleDeactivated {
-    pub ship_id   : ShipId,
-    pub module_id : ModuleId,
-    pub slot      : SlotKind,
-    pub tick      : Tick,
+    pub ship_id: ShipId,
+    pub module_id: ModuleId,
+    pub slot: SlotKind,
+    pub tick: Tick,
 }
 
 // ── TargetLocked ─────────────────────────────────────────────────────────────
@@ -230,9 +230,9 @@ pub struct ModuleDeactivated {
 /// ロック完了イベント。LockSystem がカウントダウンを完了したときに発行する。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TargetLocked {
-    pub locker_id : ShipId,
-    pub target_id : ShipId,
-    pub tick      : Tick,
+    pub locker_id: ShipId,
+    pub target_id: ShipId,
+    pub tick: Tick,
 }
 
 // ── LockLost ─────────────────────────────────────────────────────────────────
@@ -240,9 +240,9 @@ pub struct TargetLocked {
 /// ロック消失イベント。ターゲットが射程外または撃沈されたときに発行する。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LockLost {
-    pub locker_id : ShipId,
-    pub target_id : ShipId,
-    pub tick      : Tick,
+    pub locker_id: ShipId,
+    pub target_id: ShipId,
+    pub tick: Tick,
 }
 
 // ── ShipFitted ────────────────────────────────────────────────────────────────
@@ -251,20 +251,20 @@ pub struct LockLost {
 /// Event Replay 時に FittingComp を完全復元するために必要（INV-002）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShipFitted {
-    pub ship_id  : ShipId,
+    pub ship_id: ShipId,
     /// 変更後の装備全体スナップショット
-    pub fitting  : FittingSnapshot,
-    pub tick     : Tick,
+    pub fitting: FittingSnapshot,
+    pub tick: Tick,
 }
 
 // ── WeaponFired ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WeaponFired {
-    pub attacker_id : ShipId,
-    pub target_id   : ShipId,
-    pub damage      : f32,
-    pub tick        : Tick,
+    pub attacker_id: ShipId,
+    pub target_id: ShipId,
+    pub damage: f32,
+    pub tick: Tick,
 }
 
 // ── DamageTaken ───────────────────────────────────────────────────────────────
@@ -272,24 +272,24 @@ pub struct WeaponFired {
 /// HP は Shield → Armor → Hull の順に消費される。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DamageTaken {
-    pub ship_id        : ShipId,
-    pub damage         : f32,
+    pub ship_id: ShipId,
+    pub damage: f32,
     /// ダメージ後のシールド残量
-    pub current_shield : f32,
+    pub current_shield: f32,
     /// ダメージ後のアーマー残量
-    pub current_armor  : f32,
+    pub current_armor: f32,
     /// ダメージ後のハル残量
-    pub current_hull   : f32,
-    pub tick           : Tick,
+    pub current_hull: f32,
+    pub tick: Tick,
 }
 
 // ── ShipDestroyed ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShipDestroyed {
-    pub ship_id   : ShipId,
-    pub killer_id : ShipId,
-    pub tick      : Tick,
+    pub ship_id: ShipId,
+    pub killer_id: ShipId,
+    pub tick: Tick,
 }
 
 // ── Sector Transit (ADR-0014) ───────────────────────────────────────────────────
@@ -298,21 +298,21 @@ pub struct ShipDestroyed {
 /// with `from` until `SectorTransitCompleted` is appended.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SectorTransitRequested {
-    pub ship_id : ShipId,
-    pub from    : SectorId,
-    pub to      : SectorId,
-    pub tick    : Tick,
+    pub ship_id: ShipId,
+    pub from: SectorId,
+    pub to: SectorId,
+    pub tick: Tick,
 }
 
 /// A Sector Transit completed; ownership of `ship_id` moved from `from` to `to`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SectorTransitCompleted {
-    pub ship_id  : ShipId,
-    pub from     : SectorId,
-    pub to       : SectorId,
+    pub ship_id: ShipId,
+    pub from: SectorId,
+    pub to: SectorId,
     pub entry_pos: Position,
-    pub velocity : Velocity,
-    pub tick     : Tick,
+    pub velocity: Velocity,
+    pub tick: Tick,
 }
 
 /// A committed Sector Transit was aborted after `SectorTransitRequested`.
@@ -324,9 +324,9 @@ pub struct SectorTransitCompleted {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SectorTransitAborted {
     pub ship_id: ShipId,
-    pub from   : SectorId,
-    pub to     : SectorId,
-    pub tick   : Tick,
+    pub from: SectorId,
+    pub to: SectorId,
+    pub tick: Tick,
 }
 
 // ── Jump Gate Navigation (ADR-0009) ─────────────────────────────────────────────
@@ -338,12 +338,12 @@ pub struct SectorTransitAborted {
 /// the destination Sector without re-running gate-proximity checks.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JumpGateUsed {
-    pub ship_id    : ShipId,
-    pub gate_id    : JumpGateId,
+    pub ship_id: ShipId,
+    pub gate_id: JumpGateId,
     pub from_sector: SectorId,
-    pub to_sector  : SectorId,
-    pub entry_pos  : Position,
-    pub tick       : Tick,
+    pub to_sector: SectorId,
+    pub entry_pos: Position,
+    pub tick: Tick,
 }
 
 /// A Ship moved to another Star System. Emitted alongside `JumpGateUsed`
@@ -351,10 +351,10 @@ pub struct JumpGateUsed {
 /// `from_sector`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StarSystemChanged {
-    pub ship_id    : ShipId,
+    pub ship_id: ShipId,
     pub from_system: StarSystemId,
-    pub to_system  : StarSystemId,
-    pub tick       : Tick,
+    pub to_system: StarSystemId,
+    pub tick: Tick,
 }
 
 // ── Tackle (ADR-0024) ─────────────────────────────────────────────────────────
@@ -367,10 +367,10 @@ pub struct StarSystemChanged {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TackleApplied {
     /// Ship that is now tackled.
-    pub ship_id : ShipId,
+    pub ship_id: ShipId,
     /// Ship applying the tackle.
-    pub by      : ShipId,
-    pub tick    : Tick,
+    pub by: ShipId,
+    pub tick: Tick,
 }
 
 /// A tackle effect on a ship ended.
@@ -381,10 +381,10 @@ pub struct TackleApplied {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TackleReleased {
     /// Ship that was tackled.
-    pub ship_id : ShipId,
+    pub ship_id: ShipId,
     /// Ship that released (or lost) the tackle.
-    pub by      : ShipId,
-    pub tick    : Tick,
+    pub by: ShipId,
+    pub tick: Tick,
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -394,14 +394,16 @@ mod tests {
     use super::*;
     use crate::{NodeId, Position, Velocity};
 
-    fn ship_id() -> ShipId { ShipId::new(NodeId(0), 1) }
+    fn ship_id() -> ShipId {
+        ShipId::new(NodeId(0), 1)
+    }
 
     #[test]
     fn velocity_changed_event_carries_the_tick_at_which_it_occurred() {
         let event = DomainEvent::VelocityChanged(VelocityChanged {
-            ship_id  : ship_id(),
-            velocity : Velocity::new(1.0, 0.0, 0.0),
-            tick     : Tick(42),
+            ship_id: ship_id(),
+            velocity: Velocity::new(1.0, 0.0, 0.0),
+            tick: Tick(42),
         });
         assert_eq!(event.tick(), Tick(42));
     }
@@ -410,9 +412,9 @@ mod tests {
     fn anchor_rebased_event_carries_ship_anchor_and_tick() {
         let event = DomainEvent::AnchorRebased(AnchorRebased {
             ship_id: ship_id(),
-            anchor : crate::AnchorId(3),
-            offset : Position::new(10.0, 0.0, -5.0),
-            tick   : Tick(7),
+            anchor: crate::AnchorId(3),
+            offset: Position::new(10.0, 0.0, -5.0),
+            tick: Tick(7),
         });
         assert_eq!(event.ship_id(), ship_id());
         assert_eq!(event.tick(), Tick(7));
@@ -422,11 +424,11 @@ mod tests {
     fn domain_event_ship_id_accessor_returns_correct_id() {
         let id = ship_id();
         let event = DomainEvent::ShipSpawned(ShipSpawned {
-            ship_id          : id,
-            sector_id        : SectorId(0),
-            initial_position : Position::ORIGIN,
-            ship_type_id     : crate::ship_type::ShipTypeId(1),
-            tick             : Tick::ZERO,
+            ship_id: id,
+            sector_id: SectorId(0),
+            initial_position: Position::ORIGIN,
+            ship_type_id: crate::ship_type::ShipTypeId(1),
+            tick: Tick::ZERO,
         });
         assert_eq!(event.ship_id(), id);
     }
@@ -434,11 +436,11 @@ mod tests {
     #[test]
     fn domain_event_is_serializable_and_round_trips_without_loss() {
         let original = DomainEvent::VelocityChanged(VelocityChanged {
-            ship_id  : ship_id(),
-            velocity : Velocity::new(5.0, 3.0, 1.0),
-            tick     : Tick(100),
+            ship_id: ship_id(),
+            velocity: Velocity::new(5.0, 3.0, 1.0),
+            tick: Tick(100),
         });
-        let bytes    = bincode_roundtrip(&original);
+        let bytes = bincode_roundtrip(&original);
         let restored = bincode_restore(&bytes);
         assert_eq!(original, restored);
     }
@@ -448,9 +450,9 @@ mod tests {
         let id = ship_id();
         let event = DomainEvent::SectorTransitRequested(SectorTransitRequested {
             ship_id: id,
-            from   : SectorId(0),
-            to     : SectorId(1),
-            tick   : Tick(7),
+            from: SectorId(0),
+            to: SectorId(1),
+            tick: Tick(7),
         });
         assert_eq!(event.ship_id(), id);
         assert_eq!(event.tick(), Tick(7));
@@ -460,12 +462,12 @@ mod tests {
     fn sector_transit_completed_event_carries_entry_position_and_velocity() {
         let id = ship_id();
         let event = DomainEvent::SectorTransitCompleted(SectorTransitCompleted {
-            ship_id  : id,
-            from     : SectorId(0),
-            to       : SectorId(1),
+            ship_id: id,
+            from: SectorId(0),
+            to: SectorId(1),
             entry_pos: Position::new(100.0, 0.0, 0.0),
-            velocity : Velocity::new(1.0, 0.0, 0.0),
-            tick     : Tick(8),
+            velocity: Velocity::new(1.0, 0.0, 0.0),
+            tick: Tick(8),
         });
         match event {
             DomainEvent::SectorTransitCompleted(e) => {
@@ -481,9 +483,9 @@ mod tests {
         let id = ship_id();
         let event = DomainEvent::SectorTransitAborted(SectorTransitAborted {
             ship_id: id,
-            from   : SectorId(0),
-            to     : SectorId(1),
-            tick   : Tick(9),
+            from: SectorId(0),
+            to: SectorId(1),
+            tick: Tick(9),
         });
         assert_eq!(event.ship_id(), id);
         assert_eq!(event.tick(), Tick(9));
@@ -493,12 +495,12 @@ mod tests {
     fn jump_gate_used_event_carries_destination_sector_and_entry_position() {
         let id = ship_id();
         let event = DomainEvent::JumpGateUsed(JumpGateUsed {
-            ship_id    : id,
-            gate_id    : crate::navigation::JumpGateId(0),
+            ship_id: id,
+            gate_id: crate::navigation::JumpGateId(0),
             from_sector: SectorId(0),
-            to_sector  : SectorId(1),
-            entry_pos  : Position::new(0.0, 0.0, 0.0),
-            tick       : Tick(10),
+            to_sector: SectorId(1),
+            entry_pos: Position::new(0.0, 0.0, 0.0),
+            tick: Tick(10),
         });
         assert_eq!(event.ship_id(), id);
         assert_eq!(event.tick(), Tick(10));
@@ -512,10 +514,10 @@ mod tests {
     fn star_system_changed_event_carries_from_and_to_systems() {
         let id = ship_id();
         let event = DomainEvent::StarSystemChanged(StarSystemChanged {
-            ship_id    : id,
+            ship_id: id,
             from_system: crate::navigation::StarSystemId(0),
-            to_system  : crate::navigation::StarSystemId(1),
-            tick       : Tick(11),
+            to_system: crate::navigation::StarSystemId(1),
+            tick: Tick(11),
         });
         assert_eq!(event.ship_id(), id);
         assert_eq!(event.tick(), Tick(11));
@@ -527,9 +529,9 @@ mod tests {
     fn bincode_restore(s: &str) -> DomainEvent {
         let _ = s;
         DomainEvent::VelocityChanged(VelocityChanged {
-            ship_id  : ship_id(),
-            velocity : Velocity::new(5.0, 3.0, 1.0),
-            tick     : Tick(100),
+            ship_id: ship_id(),
+            velocity: Velocity::new(5.0, 3.0, 1.0),
+            tick: Tick(100),
         })
     }
 }

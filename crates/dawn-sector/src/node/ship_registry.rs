@@ -24,10 +24,10 @@ pub(super) struct ShipRegistry {
 impl ShipRegistry {
     pub(super) fn new() -> Self {
         Self {
-            index    : HashMap::new(),
-            type_ids : HashMap::new(),
+            index: HashMap::new(),
+            type_ids: HashMap::new(),
             by_player: HashMap::new(),
-            owners   : HashMap::new(),
+            owners: HashMap::new(),
         }
     }
 }

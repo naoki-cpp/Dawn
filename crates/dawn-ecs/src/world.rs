@@ -1,6 +1,9 @@
 //! `SimWorld` — the single owner of all ECS state within a Sector Node.
 
-use crate::components::{AnchorComp, FittingComp, HullComp, IsNpcComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, TransitComp, TransitState, VelocityComp, WeaponComp};
+use crate::components::{
+    AnchorComp, FittingComp, HullComp, IsNpcComp, LockComp, PositionComp, ShipIdComp,
+    ShipStatsComp, ThrustComp, TransitComp, TransitState, VelocityComp, WeaponComp,
+};
 use dawn_core::{AnchorId, Position, SectorId, ShipId, Velocity};
 use hecs::Entity;
 
@@ -9,7 +12,7 @@ use hecs::Entity;
 /// Direct access to the inner `hecs::World` is available via `inner()` and
 /// `inner_mut()` for use by systems that need query flexibility.
 pub struct SimWorld {
-    inner    : hecs::World,
+    inner: hecs::World,
     sector_id: SectorId,
 }
 
@@ -34,7 +37,7 @@ impl SimWorld {
     /// See CLAUDE.md INV-004 and FBD-005.
     pub fn spawn_ship(
         &mut self,
-        ship_id : ShipId,
+        ship_id: ShipId,
         position: Position,
         velocity: Velocity,
     ) -> Entity {
@@ -62,7 +65,8 @@ impl SimWorld {
     /// Returns `TransitState::None` if the entity has no `TransitComp`
     /// (should not happen for ships spawned via `spawn_ship`).
     pub fn transit_state(&self, entity: Entity) -> TransitState {
-        self.inner.get::<&TransitComp>(entity)
+        self.inner
+            .get::<&TransitComp>(entity)
             .map(|c| c.0)
             .unwrap_or_default()
     }
@@ -126,7 +130,9 @@ impl SimWorld {
     /// tackled ships (ADR-0024). Single query point so future tackle-type
     /// discrimination (disruptor vs scrambler) is added here only.
     pub fn is_tackled(&self, entity: Entity) -> bool {
-        self.inner.get::<&crate::components::TackledComp>(entity).is_ok()
+        self.inner
+            .get::<&crate::components::TackledComp>(entity)
+            .is_ok()
     }
 
     /// Look up the ECS `Entity` handle for a given `ShipId`.
@@ -134,7 +140,9 @@ impl SimWorld {
     /// Returns `None` if no ship with that ID exists in the world.
     /// O(n) linear scan — call once per operation, not per tick.
     pub fn find_entity(&self, ship_id: ShipId) -> Option<Entity> {
-        self.inner.query::<&ShipIdComp>().iter()
+        self.inner
+            .query::<&ShipIdComp>()
+            .iter()
             .find(|(_, id)| id.0 == ship_id)
             .map(|(e, _)| e)
     }
@@ -169,8 +177,12 @@ mod tests {
     use super::*;
     use dawn_core::{NodeId, Position, SectorId, Velocity};
 
-    fn make_world() -> SimWorld { SimWorld::new(SectorId(0)) }
-    fn make_ship_id(c: u64) -> ShipId { ShipId::new(NodeId(0), c) }
+    fn make_world() -> SimWorld {
+        SimWorld::new(SectorId(0))
+    }
+    fn make_ship_id(c: u64) -> ShipId {
+        ShipId::new(NodeId(0), c)
+    }
 
     #[test]
     fn newly_created_world_contains_no_ships() {
@@ -202,7 +214,7 @@ mod tests {
 
     #[test]
     fn spawned_ship_position_is_retrievable_via_inner_world() {
-        let mut w  = make_world();
+        let mut w = make_world();
         let target = Position::new(1.0, 2.0, 3.0);
         w.spawn_ship(make_ship_id(1), target, Velocity::ZERO);
         let mut found = false;
@@ -225,7 +237,10 @@ mod tests {
         let mut w = make_world();
         let e = w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
         w.set_transit_state(e, TransitState::InTransit { to: SectorId(2) });
-        assert_eq!(w.transit_state(e), TransitState::InTransit { to: SectorId(2) });
+        assert_eq!(
+            w.transit_state(e),
+            TransitState::InTransit { to: SectorId(2) }
+        );
     }
 
     #[test]

@@ -24,6 +24,5 @@ pub mod protocol;
 pub mod ws_server;
 
 pub use client_connection::{
-    ClientCommand, ClientConnection, ConnectionError,
-    InProcessClientEndpoint, InProcessConnection,
+    ClientCommand, ClientConnection, ConnectionError, InProcessClientEndpoint, InProcessConnection,
 };

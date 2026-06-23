@@ -1,14 +1,16 @@
 //! 標準モジュール定義カタログ。
 
-use dawn_core::fitting::{ActivationMode, ModuleDefinition, ModuleId, ModuleKind, SlotKind, StatDelta};
+use dawn_core::fitting::{
+    ActivationMode, ModuleDefinition, ModuleId, ModuleKind, SlotKind, StatDelta,
+};
 
-pub const MODULE_RAILGUN_SMALL  : ModuleId = ModuleId(1);
-pub const MODULE_RAILGUN_MEDIUM : ModuleId = ModuleId(2);
-pub const MODULE_SHIELD_BASIC   : ModuleId = ModuleId(3);
-pub const MODULE_ARMOR_BASIC    : ModuleId = ModuleId(4);
-pub const MODULE_AFTERBURNER    : ModuleId = ModuleId(5);
-pub const MODULE_SENSOR_BOOSTER : ModuleId = ModuleId(6);
-pub const MODULE_FOLD_DISRUPTOR : ModuleId = ModuleId(12);
+pub const MODULE_RAILGUN_SMALL: ModuleId = ModuleId(1);
+pub const MODULE_RAILGUN_MEDIUM: ModuleId = ModuleId(2);
+pub const MODULE_SHIELD_BASIC: ModuleId = ModuleId(3);
+pub const MODULE_ARMOR_BASIC: ModuleId = ModuleId(4);
+pub const MODULE_AFTERBURNER: ModuleId = ModuleId(5);
+pub const MODULE_SENSOR_BOOSTER: ModuleId = ModuleId(6);
+pub const MODULE_FOLD_DISRUPTOR: ModuleId = ModuleId(12);
 
 pub fn all_modules() -> Vec<ModuleDefinition> {
     vec![
@@ -17,70 +19,106 @@ pub fn all_modules() -> Vec<ModuleDefinition> {
         // Gun alone: 100 - 60 = +40/cycle (sustainable).
         // Gun + AB:  100 - 60 - 80 = -40/cycle → drains in ~12 cycles (12 s).
         ModuleDefinition {
-            id: MODULE_RAILGUN_SMALL, name: "Small Railgun I".to_string(),
-            kind: ModuleKind::Weapon, slot: SlotKind::High,
+            id: MODULE_RAILGUN_SMALL,
+            name: "Small Railgun I".to_string(),
+            kind: ModuleKind::Weapon,
+            slot: SlotKind::High,
             activation_mode: ActivationMode::Active,
             cap_cost_per_cycle: 60.0,
-            cycle_time_ticks  : 10,
-            stat_delta: StatDelta { weapon_damage_add: 25.0, weapon_range_add: 3_000.0, falloff_range_add: 2_000.0, tracking_speed_add: 0.035, ..StatDelta::ZERO },
+            cycle_time_ticks: 10,
+            stat_delta: StatDelta {
+                weapon_damage_add: 25.0,
+                weapon_range_add: 3_000.0,
+                falloff_range_add: 2_000.0,
+                tracking_speed_add: 0.035,
+                ..StatDelta::ZERO
+            },
         },
         ModuleDefinition {
-            id: MODULE_RAILGUN_MEDIUM, name: "Medium Railgun I".to_string(),
-            kind: ModuleKind::Weapon, slot: SlotKind::High,
+            id: MODULE_RAILGUN_MEDIUM,
+            name: "Medium Railgun I".to_string(),
+            kind: ModuleKind::Weapon,
+            slot: SlotKind::High,
             activation_mode: ActivationMode::Active,
             cap_cost_per_cycle: 100.0,
-            cycle_time_ticks  : 14,
-            stat_delta: StatDelta { weapon_damage_add: 50.0, weapon_range_add: 2_500.0, weapon_cooldown_add: 4, ..StatDelta::ZERO },
+            cycle_time_ticks: 14,
+            stat_delta: StatDelta {
+                weapon_damage_add: 50.0,
+                weapon_range_add: 2_500.0,
+                weapon_cooldown_add: 4,
+                ..StatDelta::ZERO
+            },
         },
-
         // ── Shield (Mid / Passive) ───────────────────────────────────────────
         ModuleDefinition {
-            id: MODULE_SHIELD_BASIC, name: "Basic Shield Extender".to_string(),
-            kind: ModuleKind::ShieldBooster, slot: SlotKind::Mid,
+            id: MODULE_SHIELD_BASIC,
+            name: "Basic Shield Extender".to_string(),
+            kind: ModuleKind::ShieldBooster,
+            slot: SlotKind::Mid,
             activation_mode: ActivationMode::Passive,
             cap_cost_per_cycle: 0.0,
-            cycle_time_ticks  : 0,
-            stat_delta: StatDelta { max_shield_add: 300.0, ..StatDelta::ZERO },
+            cycle_time_ticks: 0,
+            stat_delta: StatDelta {
+                max_shield_add: 300.0,
+                ..StatDelta::ZERO
+            },
         },
-
         // ── Armor (Low / Passive) ────────────────────────────────────────────
         ModuleDefinition {
-            id: MODULE_ARMOR_BASIC, name: "Basic Armor Plate".to_string(),
-            kind: ModuleKind::ArmorRepairer, slot: SlotKind::Low,
+            id: MODULE_ARMOR_BASIC,
+            name: "Basic Armor Plate".to_string(),
+            kind: ModuleKind::ArmorRepairer,
+            slot: SlotKind::Low,
             activation_mode: ActivationMode::Passive,
             cap_cost_per_cycle: 0.0,
-            cycle_time_ticks  : 0,
-            stat_delta: StatDelta { max_armor_add: 200.0, ..StatDelta::ZERO },
+            cycle_time_ticks: 0,
+            stat_delta: StatDelta {
+                max_armor_add: 200.0,
+                ..StatDelta::ZERO
+            },
         },
-
         // ── Propulsion (Mid / Active) ────────────────────────────────────────
         ModuleDefinition {
-            id: MODULE_AFTERBURNER, name: "1MN Afterburner".to_string(),
-            kind: ModuleKind::Propulsion, slot: SlotKind::Mid,
+            id: MODULE_AFTERBURNER,
+            name: "1MN Afterburner".to_string(),
+            kind: ModuleKind::Propulsion,
+            slot: SlotKind::Mid,
             activation_mode: ActivationMode::Active,
             cap_cost_per_cycle: 100.0, // 10 GJ/tick — must exceed Magpie's 8 GJ/tick recharge
-            cycle_time_ticks  : 10,
-            stat_delta: StatDelta { speed_multiplier: 2.35, ..StatDelta::ZERO },
+            cycle_time_ticks: 10,
+            stat_delta: StatDelta {
+                speed_multiplier: 2.35,
+                ..StatDelta::ZERO
+            },
         },
-
         // ── Sensor (Mid / Passive) ───────────────────────────────────────────
         ModuleDefinition {
-            id: MODULE_SENSOR_BOOSTER, name: "Sensor Booster I".to_string(),
-            kind: ModuleKind::Sensor, slot: SlotKind::Mid,
+            id: MODULE_SENSOR_BOOSTER,
+            name: "Sensor Booster I".to_string(),
+            kind: ModuleKind::Sensor,
+            slot: SlotKind::Mid,
             activation_mode: ActivationMode::Passive,
             cap_cost_per_cycle: 0.0,
-            cycle_time_ticks  : 0,
-            stat_delta: StatDelta { lock_time_add: -2, max_locks_add: 1, ..StatDelta::ZERO },
+            cycle_time_ticks: 0,
+            stat_delta: StatDelta {
+                lock_time_add: -2,
+                max_locks_add: 1,
+                ..StatDelta::ZERO
+            },
         },
-
         // ── Tackle (Mid / Active) — ADR-0024 ────────────────────────────────
         ModuleDefinition {
-            id: MODULE_FOLD_DISRUPTOR, name: "Fold Disruptor I".to_string(),
-            kind: ModuleKind::Tackle, slot: SlotKind::Mid,
+            id: MODULE_FOLD_DISRUPTOR,
+            name: "Fold Disruptor I".to_string(),
+            kind: ModuleKind::Tackle,
+            slot: SlotKind::Mid,
             activation_mode: ActivationMode::Active,
             cap_cost_per_cycle: 30.0,
-            cycle_time_ticks  : 10,
-            stat_delta: StatDelta { tackle_range_add: 20_000.0, ..StatDelta::ZERO },
+            cycle_time_ticks: 10,
+            stat_delta: StatDelta {
+                tackle_range_add: 20_000.0,
+                ..StatDelta::ZERO
+            },
         },
     ]
 }
@@ -88,8 +126,8 @@ pub fn all_modules() -> Vec<ModuleDefinition> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_ecs::components::ShipStatsComp;
     use dawn_core::fitting::ActivationMode;
+    use dawn_ecs::components::ShipStatsComp;
 
     #[test]
     fn all_modules_have_unique_ids() {
@@ -103,8 +141,12 @@ mod tests {
         for m in all_modules() {
             if m.kind == ModuleKind::Weapon {
                 assert_eq!(m.slot, SlotKind::High);
-                assert_eq!(m.activation_mode, ActivationMode::Active,
-                    "weapon '{}' must be Active", m.name);
+                assert_eq!(
+                    m.activation_mode,
+                    ActivationMode::Active,
+                    "weapon '{}' must be Active",
+                    m.name
+                );
             }
         }
     }
@@ -113,8 +155,12 @@ mod tests {
     fn passive_modules_are_not_weapons() {
         for m in all_modules() {
             if m.activation_mode == ActivationMode::Passive {
-                assert_ne!(m.kind, ModuleKind::Weapon,
-                    "passive module '{}' should not be a weapon", m.name);
+                assert_ne!(
+                    m.kind,
+                    ModuleKind::Weapon,
+                    "passive module '{}' should not be a weapon",
+                    m.name
+                );
             }
         }
     }

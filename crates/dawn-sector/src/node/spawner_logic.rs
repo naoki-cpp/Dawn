@@ -3,7 +3,10 @@ use dawn_core::{
     Position, ShipId, Velocity,
 };
 use dawn_ecs::{
-    components::{CapacitorComp, FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp, ShipStatsComp, WarpComp},
+    components::{
+        CapacitorComp, FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp,
+        ShipStatsComp, WarpComp,
+    },
     systems::apply_fitting,
 };
 use dawn_event_store::store::EventStore;
@@ -28,7 +31,8 @@ impl<S: EventStore> SimulationNode<S> {
         let ship_id = ShipId::new(self.node_id, self.id_counter);
         self.id_counter += 1;
 
-        let base = self.ship_type_registry
+        let base = self
+            .ship_type_registry
             .get(&ship_type_id)
             .map(|def| ShipStatsComp::from_base(&def.base_stats))
             .unwrap_or(ShipStatsComp::NPC);
@@ -45,16 +49,22 @@ impl<S: EventStore> SimulationNode<S> {
                 *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
             }
             // Initialize capacitor to full.
-            let _ = self.world.inner_mut().insert_one(entity, CapacitorComp { current: base.cap_max });
+            let _ = self.world.inner_mut().insert_one(
+                entity,
+                CapacitorComp {
+                    current: base.cap_max,
+                },
+            );
         }
 
-        self.event_store.append(DomainEvent::ShipSpawned(ShipSpawned {
-            ship_id,
-            sector_id        : self.sector_id,
-            initial_position : position,
-            ship_type_id,
-            tick             : self.current_tick,
-        }));
+        self.event_store
+            .append(DomainEvent::ShipSpawned(ShipSpawned {
+                ship_id,
+                sector_id: self.sector_id,
+                initial_position: position,
+                ship_type_id,
+                tick: self.current_tick,
+            }));
 
         ship_id
     }
@@ -77,7 +87,11 @@ impl<S: EventStore> SimulationNode<S> {
     /// radius (15_000 units) along +X, clear of the star body itself and
     /// far short of Gate 0 (600_000 units, at the Sector edge) so a fresh spawn
     /// doesn't start already inside the star or already in jump range.
-    pub const DEFAULT_PLAYER_SPAWN: Position = Position { x: 30_000.0, y: 0.0, z: 0.0 };
+    pub const DEFAULT_PLAYER_SPAWN: Position = Position {
+        x: 30_000.0,
+        y: 0.0,
+        z: 0.0,
+    };
 
     /// Spawn a player ship at the default starting position.
     pub fn spawn_player_ship(&mut self, player_id: PlayerId) -> ShipId {
@@ -94,7 +108,8 @@ impl<S: EventStore> SimulationNode<S> {
         let ship_id = ShipId::new(self.node_id, self.id_counter);
         self.id_counter += 1;
 
-        let base = self.ship_type_registry
+        let base = self
+            .ship_type_registry
             .get(&SHIP_TYPE_MAGPIE)
             .map(|def| ShipStatsComp::from_base(&def.base_stats))
             .unwrap_or(ShipStatsComp::PLAYER);
@@ -109,7 +124,12 @@ impl<S: EventStore> SimulationNode<S> {
             if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
                 *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
             }
-            let _ = self.world.inner_mut().insert_one(entity, CapacitorComp { current: base.cap_max });
+            let _ = self.world.inner_mut().insert_one(
+                entity,
+                CapacitorComp {
+                    current: base.cap_max,
+                },
+            );
             let _ = self.world.inner_mut().remove_one::<IsNpcComp>(entity);
         }
 
@@ -120,27 +140,28 @@ impl<S: EventStore> SimulationNode<S> {
         use dawn_core::SlotKind;
         self.fit_module(FitModuleCommand {
             ship_id,
-            slot      : SlotKind::High,
-            module_id : crate::modules::MODULE_RAILGUN_SMALL,
+            slot: SlotKind::High,
+            module_id: crate::modules::MODULE_RAILGUN_SMALL,
         });
         self.fit_module(FitModuleCommand {
             ship_id,
-            slot      : SlotKind::Mid,
-            module_id : crate::modules::MODULE_AFTERBURNER,
+            slot: SlotKind::Mid,
+            module_id: crate::modules::MODULE_AFTERBURNER,
         });
         self.fit_module(FitModuleCommand {
             ship_id,
-            slot      : SlotKind::Mid,
-            module_id : crate::modules::MODULE_FOLD_DISRUPTOR,
+            slot: SlotKind::Mid,
+            module_id: crate::modules::MODULE_FOLD_DISRUPTOR,
         });
 
-        self.event_store.append(DomainEvent::ShipSpawned(ShipSpawned {
-            ship_id,
-            sector_id        : self.sector_id,
-            initial_position : pos,
-            ship_type_id     : SHIP_TYPE_MAGPIE,
-            tick             : self.current_tick,
-        }));
+        self.event_store
+            .append(DomainEvent::ShipSpawned(ShipSpawned {
+                ship_id,
+                sector_id: self.sector_id,
+                initial_position: pos,
+                ship_type_id: SHIP_TYPE_MAGPIE,
+                tick: self.current_tick,
+            }));
 
         ship_id
     }
@@ -166,7 +187,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// command pipeline. `IsBotComp` marks it for `process_bots()` each tick.
     pub fn spawn_bot_ship(&mut self, spawn_pos: Position) -> (PlayerId, ShipId) {
         let player_id = self.next_player_id();
-        let ship_id   = self.spawn_player_ship_at(player_id, spawn_pos);
+        let ship_id = self.spawn_player_ship_at(player_id, spawn_pos);
         if let Some(&entity) = self.ships.index.get(&ship_id) {
             let _ = self.world.inner_mut().insert_one(entity, IsBotComp);
         }
@@ -181,36 +202,54 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn process_bots(&mut self) {
         // ── 1. Snapshot bot state (read-only pass) ────────────────────────────
         struct BotState {
-            player_id     : PlayerId,
-            ship_id       : ShipId,
-            position      : Position,
-            weapon_range  : f32,
+            player_id: PlayerId,
+            ship_id: ShipId,
+            position: Position,
+            weapon_range: f32,
             locked_targets: Vec<ShipId>,
             weapon_modules: Vec<(dawn_core::ModuleId, dawn_core::fitting::SlotKind)>,
             // HP fraction for flee decision (current / max across all three layers).
-            hp_fraction   : f32,
+            hp_fraction: f32,
             // True if WarpComp is already attached (alignment or warping in progress).
-            is_warping    : bool,
+            is_warping: bool,
         }
 
         let mut bots: Vec<BotState> = Vec::new();
         for (&ship_id, &entity) in &self.ships.index {
-            if self.world.inner().get::<&IsBotComp>(entity).is_err() { continue }
-            let Some(&player_id) = self.ships.owners.get(&ship_id) else { continue };
-            let Ok(pos)   = self.world.inner().get::<&PositionComp>(entity) else { continue };
-            let Ok(stats) = self.world.inner().get::<&ShipStatsComp>(entity) else { continue };
-            let Ok(lock)  = self.world.inner().get::<&LockComp>(entity) else { continue };
-            let locked: Vec<ShipId> = lock.entries.iter()
+            if self.world.inner().get::<&IsBotComp>(entity).is_err() {
+                continue;
+            }
+            let Some(&player_id) = self.ships.owners.get(&ship_id) else {
+                continue;
+            };
+            let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else {
+                continue;
+            };
+            let Ok(stats) = self.world.inner().get::<&ShipStatsComp>(entity) else {
+                continue;
+            };
+            let Ok(lock) = self.world.inner().get::<&LockComp>(entity) else {
+                continue;
+            };
+            let locked: Vec<ShipId> = lock
+                .entries
+                .iter()
                 .filter(|e| matches!(e.state, dawn_ecs::components::LockState::Locked))
                 .map(|e| e.target_id)
                 .collect();
             // Bots only auto-activate Weapon modules. Other Active modules
             // (e.g. Afterburner) would drain the capacitor pointlessly while
             // the bot is braking to hold its firing position.
-            let weapon_modules = self.world.inner()
+            let weapon_modules = self
+                .world
+                .inner()
                 .get::<&FittingComp>(entity)
                 .map(|f| {
-                    f.high.iter().chain(f.mid.iter()).chain(f.low.iter()).chain(f.rig.iter())
+                    f.high
+                        .iter()
+                        .chain(f.mid.iter())
+                        .chain(f.low.iter())
+                        .chain(f.rig.iter())
                         .filter(|s| s.def.kind == dawn_core::fitting::ModuleKind::Weapon)
                         .map(|s| (s.def.id, s.def.slot))
                         .collect()
@@ -219,16 +258,21 @@ impl<S: EventStore> SimulationNode<S> {
             let hp_fraction = if let Ok(hull) = self.world.inner().get::<&HullComp>(entity) {
                 let max_hp = stats.max_shield + stats.max_armor + stats.max_hull;
                 let cur_hp = hull.current_shield + hull.current_armor + hull.current_hull;
-                if max_hp > 0.0 { cur_hp / max_hp } else { 1.0 }
+                if max_hp > 0.0 {
+                    cur_hp / max_hp
+                } else {
+                    1.0
+                }
             } else {
                 1.0
             };
             let is_warping = self.world.inner().get::<&WarpComp>(entity).is_ok();
             bots.push(BotState {
-                player_id, ship_id,
+                player_id,
+                ship_id,
                 // Absolute (Sector-frame) position so distance/steering toward a
                 // target on a different anchor is correct (ADR-0029).
-                position    : self.entity_absolute(entity, pos.0),
+                position: self.entity_absolute(entity, pos.0),
                 weapon_range: stats.weapon_range,
                 locked_targets: locked,
                 weapon_modules,
@@ -238,22 +282,40 @@ impl<S: EventStore> SimulationNode<S> {
         }
 
         // ── 2. Snapshot human player target positions ─────────────────────────
-        struct TargetInfo { ship_id: ShipId, position: Position }
+        struct TargetInfo {
+            ship_id: ShipId,
+            position: Position,
+        }
         let mut targets: Vec<TargetInfo> = Vec::new();
         for (&ship_id, &entity) in &self.ships.index {
-            if self.world.inner().get::<&IsBotComp>(entity).is_ok()  { continue }
-            if self.world.inner().get::<&IsNpcComp>(entity).is_ok()  { continue }
-            if !self.ships.owners.contains_key(&ship_id)              { continue }
-            let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else { continue };
+            if self.world.inner().get::<&IsBotComp>(entity).is_ok() {
+                continue;
+            }
+            if self.world.inner().get::<&IsNpcComp>(entity).is_ok() {
+                continue;
+            }
+            if !self.ships.owners.contains_key(&ship_id) {
+                continue;
+            }
+            let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else {
+                continue;
+            };
             let abs = self.entity_absolute(entity, pos.0);
-            targets.push(TargetInfo { ship_id, position: abs });
+            targets.push(TargetInfo {
+                ship_id,
+                position: abs,
+            });
         }
 
-        if targets.is_empty() { return; }
+        if targets.is_empty() {
+            return;
+        }
 
         // ── 3. Issue commands (same pipeline as human player) ─────────────────
         // Collect gate list once — shared by all bots this tick.
-        let gates: Vec<(dawn_core::JumpGateId, Position)> = self.sector_map.gates
+        let gates: Vec<(dawn_core::JumpGateId, Position)> = self
+            .sector_map
+            .gates
             .iter()
             .map(|(&id, def)| (id, def.position))
             .collect();
@@ -269,11 +331,16 @@ impl<S: EventStore> SimulationNode<S> {
                     continue; // alignment/warp in progress — skip combat AI
                 }
                 let warp_started = if let Some(&(gate_id, _)) = gates.iter().min_by(|a, b| {
-                    bot.position.distance_squared(a.1)
+                    bot.position
+                        .distance_squared(a.1)
                         .partial_cmp(&bot.position.distance_squared(b.1))
                         .unwrap_or(std::cmp::Ordering::Equal)
                 }) {
-                    self.apply_warp_command(bot.ship_id, dawn_core::WarpTarget::Gate(gate_id), false)
+                    self.apply_warp_command(
+                        bot.ship_id,
+                        dawn_core::WarpTarget::Gate(gate_id),
+                        false,
+                    )
                 } else {
                     false
                 };
@@ -285,10 +352,13 @@ impl<S: EventStore> SimulationNode<S> {
 
             // Find closest human target.
             let Some(target) = targets.iter().min_by(|a, b| {
-                bot.position.distance_squared(a.position)
+                bot.position
+                    .distance_squared(a.position)
                     .partial_cmp(&bot.position.distance_squared(b.position))
                     .unwrap_or(std::cmp::Ordering::Equal)
-            }) else { continue };
+            }) else {
+                continue;
+            };
 
             let dist = bot.position.distance(target.position);
 
@@ -297,10 +367,11 @@ impl<S: EventStore> SimulationNode<S> {
             if !already_targeting {
                 // Queue lock command for the NEXT tick's LockSystem.
                 // (LockSystem already ran this tick before process_bots.)
-                self.pending_bot_lock_commands.push(dawn_core::LockOnCommand {
-                    ship_id  : bot.ship_id,
-                    target_id: target.ship_id,
-                });
+                self.pending_bot_lock_commands
+                    .push(dawn_core::LockOnCommand {
+                        ship_id: bot.ship_id,
+                        target_id: target.ship_id,
+                    });
             }
 
             // Move: approach until within 75% of weapon range, then brake to stop.
@@ -309,7 +380,7 @@ impl<S: EventStore> SimulationNode<S> {
                 let dx = target.position.x - bot.position.x;
                 let dy = target.position.y - bot.position.y;
                 let dz = target.position.z - bot.position.z;
-                let len = (dx*dx + dy*dy + dz*dz).sqrt().max(1.0);
+                let len = (dx * dx + dy * dy + dz * dz).sqrt().max(1.0);
                 let thrust_target = Position::new(
                     bot.position.x + dx / len * 1_000_000.0,
                     bot.position.y + dy / len * 1_000_000.0,
@@ -324,11 +395,14 @@ impl<S: EventStore> SimulationNode<S> {
             // Activate weapons once target is locked.
             if already_targeting {
                 for (module_id, slot) in &bot.weapon_modules {
-                    self.activate_module_owned(bot.player_id, dawn_core::ActivateModuleCommand {
-                        ship_id  : bot.ship_id,
-                        module_id: *module_id,
-                        slot     : *slot,
-                    });
+                    self.activate_module_owned(
+                        bot.player_id,
+                        dawn_core::ActivateModuleCommand {
+                            ship_id: bot.ship_id,
+                            module_id: *module_id,
+                            slot: *slot,
+                        },
+                    );
                 }
             }
         }
@@ -338,13 +412,19 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Add a Ship to the ECS World and record the entity in `ship_index`.
     /// Does NOT append any event — used by `spawn_ship` and replay.
-    pub(super) fn insert_to_world(&mut self, ship_id: ShipId, position: Position, velocity: Velocity) {
+    pub(super) fn insert_to_world(
+        &mut self,
+        ship_id: ShipId,
+        position: Position,
+        velocity: Velocity,
+    ) {
         let entity = self.world.spawn_ship(ship_id, position, velocity);
         self.ships.index.insert(ship_id, entity);
         // Default to the Sector origin anchor (the star). Spawn paths override
         // this with the nearest body via `set_spawn_anchor`; restore overrides it
         // with the persisted anchor. `position` here is treated as the offset.
-        let anchor = self.anchor_table
+        let anchor = self
+            .anchor_table
             .sector_origin_anchor(self.sector_id)
             .unwrap_or(dawn_core::AnchorId(0));
         self.world.set_ship_anchor(entity, anchor);
@@ -364,14 +444,21 @@ impl<S: EventStore> SimulationNode<S> {
     /// `initial_position`, reproducing the same anchor (later `AnchorRebased`
     /// events replay the warp rebases on top).
     pub(super) fn set_spawn_anchor(&mut self, ship_id: ShipId, abs_pos: Position) {
-        let Some(&entity) = self.ships.index.get(&ship_id) else { return };
+        let Some(&entity) = self.ships.index.get(&ship_id) else {
+            return;
+        };
         let world = [abs_pos.x as f64, abs_pos.y as f64, abs_pos.z as f64];
-        let anchor = self.anchor_table
+        let anchor = self
+            .anchor_table
             .nearest_anchor(self.sector_id, world)
             .unwrap_or(dawn_core::AnchorId(0));
         let offset = match self.anchor_table.abs(anchor) {
-            Some(a) => Position::new((world[0] - a[0]) as f32, (world[1] - a[1]) as f32, (world[2] - a[2]) as f32),
-            None    => {
+            Some(a) => Position::new(
+                (world[0] - a[0]) as f32,
+                (world[1] - a[1]) as f32,
+                (world[2] - a[2]) as f32,
+            ),
+            None => {
                 super::debug_assert_missing_anchor(anchor, "set_spawn_anchor");
                 abs_pos
             }
@@ -396,13 +483,20 @@ impl<S: EventStore> SimulationNode<S> {
     /// code's f64 paths (warp arrival, AnchorTable) already do.
     #[cfg(test)]
     pub(super) fn set_spawn_anchor_abs(&mut self, ship_id: ShipId, world: [f64; 3]) {
-        let Some(&entity) = self.ships.index.get(&ship_id) else { return };
-        let anchor = self.anchor_table
+        let Some(&entity) = self.ships.index.get(&ship_id) else {
+            return;
+        };
+        let anchor = self
+            .anchor_table
             .nearest_anchor(self.sector_id, world)
             .unwrap_or(dawn_core::AnchorId(0));
         let offset = match self.anchor_table.abs(anchor) {
-            Some(a) => Position::new((world[0] - a[0]) as f32, (world[1] - a[1]) as f32, (world[2] - a[2]) as f32),
-            None    => Position::new(world[0] as f32, world[1] as f32, world[2] as f32),
+            Some(a) => Position::new(
+                (world[0] - a[0]) as f32,
+                (world[1] - a[1]) as f32,
+                (world[2] - a[2]) as f32,
+            ),
+            None => Position::new(world[0] as f32, world[1] as f32, world[2] as f32),
         };
         self.world.set_ship_anchor(entity, anchor);
         if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
@@ -424,7 +518,9 @@ impl<S: EventStore> SimulationNode<S> {
             self.world.set_ship_anchor(entity, ship.anchor);
         }
 
-        let base = self.ship_type_registry.get(&ship.ship_type_id)
+        let base = self
+            .ship_type_registry
+            .get(&ship.ship_type_id)
             .map(|def| ShipStatsComp::from_base(&def.base_stats))
             .unwrap_or(ShipStatsComp::NPC);
         self.base_stats.insert(ship.ship_id, base);
@@ -440,17 +536,25 @@ impl<S: EventStore> SimulationNode<S> {
             apply_fitting(&mut self.world, ship.ship_id, base);
             if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
                 hull.current_shield = ship.current_shield;
-                hull.current_armor  = ship.current_armor;
-                hull.current_hull   = ship.current_hull;
-                hull.is_destroyed   = ship.is_destroyed;
+                hull.current_armor = ship.current_armor;
+                hull.current_hull = ship.current_hull;
+                hull.is_destroyed = ship.is_destroyed;
             }
 
             if let Some(cap) = ship.capacitor {
-                let _ = self.world.inner_mut().insert_one(entity, CapacitorComp { current: cap });
+                let _ = self
+                    .world
+                    .inner_mut()
+                    .insert_one(entity, CapacitorComp { current: cap });
             }
 
             if !ship.tackled_by.is_empty() {
-                let _ = self.world.inner_mut().insert_one(entity, TackledComp { tacklers: ship.tackled_by.clone() });
+                let _ = self.world.inner_mut().insert_one(
+                    entity,
+                    TackledComp {
+                        tacklers: ship.tackled_by.clone(),
+                    },
+                );
             }
         }
     }
@@ -480,14 +584,22 @@ impl<S: EventStore> SimulationNode<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{NodeId, Position, SectorBounds, SectorId, Tick, DomainEvent};
+    use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, Tick};
     use dawn_ecs::components::WarpPhase;
 
     fn node_with_modules() -> SimulationNode {
         use crate::{modules, ship_types};
-        let mut node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
-        for def in modules::all_modules() { node.register_module(def); }
-        for def in ship_types::all_ship_types() { node.register_ship_type(def); }
+        let mut node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        for def in modules::all_modules() {
+            node.register_module(def);
+        }
+        for def in ship_types::all_ship_types() {
+            node.register_ship_type(def);
+        }
         node
     }
 
@@ -499,8 +611,15 @@ mod tests {
         // (id 1) with a ~zero offset, keeping the offset small (the method-B
         // invariant). Distances stay correct via the absolute accessors.
         let mut node = node_with_modules();
-        let near_star = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(30_000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
-        assert_eq!(node.get_ship_anchor(near_star), Some(dawn_core::AnchorId(0)));
+        let near_star = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(30_000.0, 0.0, 0.0),
+            dawn_core::Velocity::ZERO,
+        );
+        assert_eq!(
+            node.get_ship_anchor(near_star),
+            Some(dawn_core::AnchorId(0))
+        );
 
         let forge_abs = node.anchor_table().abs(dawn_core::AnchorId(1)).unwrap();
         // Spawn anywhere, then re-anchor from the f64 source directly
@@ -508,7 +627,11 @@ mod tests {
         // `Position` cast first would lose ~tens of km of ulp at true AU
         // (not a bug; f32 simply can't hold an AU-scale absolute coordinate
         // exactly), which isn't what this test is checking.
-        let at_forge = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, dawn_core::Velocity::ZERO);
+        let at_forge = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::ORIGIN,
+            dawn_core::Velocity::ZERO,
+        );
         node.set_spawn_anchor_abs(at_forge, forge_abs);
         assert_eq!(node.get_ship_anchor(at_forge), Some(dawn_core::AnchorId(1)));
         // Offset under the anchor is ~zero (small), and the absolute position is
@@ -519,69 +642,131 @@ mod tests {
 
     #[test]
     fn anchor_rebased_preserves_absolute_position_and_updates_anchor() {
-        use dawn_core::{AnchorId, events::AnchorRebased};
+        use dawn_core::{events::AnchorRebased, AnchorId};
         let mut node = node_with_modules();
-        let ship = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(30_000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
+        let ship = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(30_000.0, 0.0, 0.0),
+            dawn_core::Velocity::ZERO,
+        );
         // AnchorRebased sets the anchor and a (small, near-Forge) offset; the
         // absolute position composes anchor_abs(f64) + offset exactly (ADR-0029).
         let forge_abs = node.anchor_table().abs(AnchorId(1)).unwrap();
         let new_off = Position::new(2_000.0, 0.0, -1_500.0);
         node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased {
-            ship_id: ship, anchor: AnchorId(1), offset: new_off, tick: Tick(1),
+            ship_id: ship,
+            anchor: AnchorId(1),
+            offset: new_off,
+            tick: Tick(1),
         }));
         assert_eq!(node.get_ship_anchor(ship), Some(AnchorId(1)));
         let after = node.ship_absolute(ship).unwrap();
-        assert!((after[0] - (forge_abs[0] + 2_000.0)).abs() < 1e-2, "x {}", after[0]);
-        assert!((after[2] - (forge_abs[2] - 1_500.0)).abs() < 1e-2, "z {}", after[2]);
+        assert!(
+            (after[0] - (forge_abs[0] + 2_000.0)).abs() < 1e-2,
+            "x {}",
+            after[0]
+        );
+        assert!(
+            (after[2] - (forge_abs[2] - 1_500.0)).abs() < 1e-2,
+            "z {}",
+            after[2]
+        );
     }
 
     #[test]
     fn snapshot_restore_preserves_a_rebased_ships_anchor_and_absolute_position() {
-        use dawn_core::{AnchorId, events::AnchorRebased};
+        use dawn_core::{events::AnchorRebased, AnchorId};
         use dawn_event_store::InMemoryEventStore;
         let mut node = node_with_modules();
-        let ship = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(160_000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
+        let ship = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(160_000.0, 0.0, 0.0),
+            dawn_core::Velocity::ZERO,
+        );
         // Rebase onto Forge (AnchorId 1), preserving absolute position.
         let world = node.ship_absolute(ship).unwrap();
         let forge = node.anchor_table().abs(AnchorId(1)).unwrap();
-        let off = Position::new((world[0]-forge[0]) as f32, (world[1]-forge[1]) as f32, (world[2]-forge[2]) as f32);
-        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased { ship_id: ship, anchor: AnchorId(1), offset: off, tick: Tick(1) }));
+        let off = Position::new(
+            (world[0] - forge[0]) as f32,
+            (world[1] - forge[1]) as f32,
+            (world[2] - forge[2]) as f32,
+        );
+        node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased {
+            ship_id: ship,
+            anchor: AnchorId(1),
+            offset: off,
+            tick: Tick(1),
+        }));
         let before = node.ship_absolute(ship).unwrap();
 
         let snap = node.take_snapshot();
-        assert_eq!(snap.ships.iter().find(|s| s.ship_id == ship).unwrap().anchor, AnchorId(1),
-            "snapshot must capture the rebased anchor");
+        assert_eq!(
+            snap.ships
+                .iter()
+                .find(|s| s.ship_id == ship)
+                .unwrap()
+                .anchor,
+            AnchorId(1),
+            "snapshot must capture the rebased anchor"
+        );
 
         let node2 = SimulationNode::restore_from(
-            InMemoryEventStore::new(), &snap,
-            &crate::modules::all_modules(), &crate::ship_types::all_ship_types(),
+            InMemoryEventStore::new(),
+            &snap,
+            &crate::modules::all_modules(),
+            &crate::ship_types::all_ship_types(),
         );
-        assert_eq!(node2.get_ship_anchor(ship), Some(AnchorId(1)), "restore must keep the anchor");
+        assert_eq!(
+            node2.get_ship_anchor(ship),
+            Some(AnchorId(1)),
+            "restore must keep the anchor"
+        );
         let after = node2.ship_absolute(ship).unwrap();
-        let err = ((before[0]-after[0]).powi(2)+(before[1]-after[1]).powi(2)+(before[2]-after[2]).powi(2)).sqrt();
+        let err = ((before[0] - after[0]).powi(2)
+            + (before[1] - after[1]).powi(2)
+            + (before[2] - after[2]).powi(2))
+        .sqrt();
         assert!(err < 1.0, "restore moved absolute position by {err} m");
     }
 
     #[test]
     fn ship_distance_is_correct_across_different_anchors() {
-        use dawn_core::{AnchorId, events::AnchorRebased};
+        use dawn_core::{events::AnchorRebased, AnchorId};
         let mut node = node_with_modules();
         // Ship a near the star (small offset under Helios), ship b near Forge
         // (small offset under its own anchor). Each is precise locally; the
         // cross-anchor distance composes both in f64 (ADR-0029 / spike B-3).
-        let a = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(1000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
-        let b = node.spawn_ship(dawn_core::ShipTypeId(1), Position::new(2000.0, 0.0, 0.0), dawn_core::Velocity::ZERO);
+        let a = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(1000.0, 0.0, 0.0),
+            dawn_core::Velocity::ZERO,
+        );
+        let b = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(2000.0, 0.0, 0.0),
+            dawn_core::Velocity::ZERO,
+        );
         let off_b = Position::new(500.0, 0.0, 0.0);
         node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased {
-            ship_id: b, anchor: AnchorId(1), offset: off_b, tick: Tick(1),
+            ship_id: b,
+            anchor: AnchorId(1),
+            offset: off_b,
+            tick: Tick(1),
         }));
         let forge_abs = node.anchor_table().abs(AnchorId(1)).unwrap();
         let a_abs = [1000.0_f64, 0.0, 0.0];
         let b_abs = [forge_abs[0] + 500.0, forge_abs[1], forge_abs[2]];
-        let d = [a_abs[0]-b_abs[0], a_abs[1]-b_abs[1], a_abs[2]-b_abs[2]];
-        let expected = (d[0]*d[0]+d[1]*d[1]+d[2]*d[2]).sqrt();
+        let d = [
+            a_abs[0] - b_abs[0],
+            a_abs[1] - b_abs[1],
+            a_abs[2] - b_abs[2],
+        ];
+        let expected = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         let after = node.ship_distance(a, b).unwrap();
-        assert!((after - expected).abs() < 1.0, "cross-anchor distance {after} != {expected}");
+        assert!(
+            (after - expected).abs() < 1.0,
+            "cross-anchor distance {after} != {expected}"
+        );
     }
 
     #[test]
@@ -599,12 +784,12 @@ mod tests {
         // Magpie max HP: shield=200, armor=120, hull=100, total=420.
         // Deal 215 → shield=0, armor=105, hull=100 → 205/420 ≈ 48.8% < 50%.
         node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
-            ship_id        : bot_ship_id,
-            damage         : 215.0,
-            current_shield : 0.0,
-            current_armor  : 105.0,
-            current_hull   : 100.0,
-            tick           : Tick(1),
+            ship_id: bot_ship_id,
+            damage: 215.0,
+            current_shield: 0.0,
+            current_armor: 105.0,
+            current_hull: 100.0,
+            tick: Tick(1),
         }));
 
         node.tick();
@@ -617,8 +802,10 @@ mod tests {
 
     #[test]
     fn tackled_bot_cannot_warp_but_keeps_fighting() {
-        use dawn_core::{FitModuleCommand, LockOnCommand, ActivateModuleCommand, SlotKind, events::DamageTaken};
         use crate::modules::MODULE_FOLD_DISRUPTOR;
+        use dawn_core::{
+            events::DamageTaken, ActivateModuleCommand, FitModuleCommand, LockOnCommand, SlotKind,
+        };
 
         let mut node = node_with_modules();
 
@@ -628,28 +815,41 @@ mod tests {
         let player_id = node.next_player_id();
         let player_ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
 
-        node.fit_module(FitModuleCommand { ship_id: player_ship_id, slot: SlotKind::Mid, module_id: MODULE_FOLD_DISRUPTOR });
-
-        node.activate_module_owned(player_id, ActivateModuleCommand {
-            ship_id  : player_ship_id,
+        node.fit_module(FitModuleCommand {
+            ship_id: player_ship_id,
+            slot: SlotKind::Mid,
             module_id: MODULE_FOLD_DISRUPTOR,
-            slot     : SlotKind::Mid,
         });
-        let lock_cmd = LockOnCommand { ship_id: player_ship_id, target_id: bot_ship_id };
+
+        node.activate_module_owned(
+            player_id,
+            ActivateModuleCommand {
+                ship_id: player_ship_id,
+                module_id: MODULE_FOLD_DISRUPTOR,
+                slot: SlotKind::Mid,
+            },
+        );
+        let lock_cmd = LockOnCommand {
+            ship_id: player_ship_id,
+            target_id: bot_ship_id,
+        };
         for _ in 0..5 {
             node.tick_with_lock_commands(&[lock_cmd.clone()]);
         }
 
         let gate_id = node.sector_map.gates.keys().next().copied().unwrap();
-        assert!(!node.can_propose_warp(bot_ship_id, dawn_core::WarpTarget::Gate(gate_id)), "bot should be tackled");
+        assert!(
+            !node.can_propose_warp(bot_ship_id, dawn_core::WarpTarget::Gate(gate_id)),
+            "bot should be tackled"
+        );
 
         node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
-            ship_id        : bot_ship_id,
-            damage         : 215.0,
-            current_shield : 0.0,
-            current_armor  : 105.0,
-            current_hull   : 100.0,
-            tick           : Tick(10),
+            ship_id: bot_ship_id,
+            damage: 215.0,
+            current_shield: 0.0,
+            current_armor: 105.0,
+            current_hull: 100.0,
+            tick: Tick(10),
         }));
 
         node.tick_with_lock_commands(&[lock_cmd.clone()]);

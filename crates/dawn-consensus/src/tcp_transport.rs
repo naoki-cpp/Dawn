@@ -141,12 +141,16 @@ async fn outbound_loop(peer_addr: SocketAddr, mut rx: mpsc::UnboundedReceiver<Ra
                 // for 8D-5 field observability — reconnect frequency on
                 // physical WiFi/USB links is a direct signal of link quality.
                 reconnects += 1;
-                eprintln!("[RaftTransport] {peer_addr} dropped, reconnecting (attempt #{reconnects})");
+                eprintln!(
+                    "[RaftTransport] {peer_addr} dropped, reconnecting (attempt #{reconnects})"
+                );
                 sleep(RECONNECT_DELAY).await;
             }
             Err(e) => {
                 reconnects += 1;
-                eprintln!("[RaftTransport] {peer_addr} connect failed: {e} (attempt #{reconnects})");
+                eprintln!(
+                    "[RaftTransport] {peer_addr} connect failed: {e} (attempt #{reconnects})"
+                );
                 sleep(RECONNECT_DELAY).await;
             }
         }
@@ -155,10 +159,7 @@ async fn outbound_loop(peer_addr: SocketAddr, mut rx: mpsc::UnboundedReceiver<Ra
 
 /// Drain `rx` into `writer`.  Returns `true` when `rx` is closed (shutdown),
 /// `false` when the TCP connection dropped (caller should reconnect).
-async fn drain_outbound<W>(
-    mut writer: W,
-    rx: &mut mpsc::UnboundedReceiver<RaftMessage>,
-) -> bool
+async fn drain_outbound<W>(mut writer: W, rx: &mut mpsc::UnboundedReceiver<RaftMessage>) -> bool
 where
     W: AsyncWrite + Unpin,
 {
@@ -188,7 +189,10 @@ where
 
     let len = u32::from_le_bytes(len_buf) as usize;
     if len > MAX_FRAME_LEN {
-        return Err(TcpRaftError::FrameTooLarge { actual: len, max: MAX_FRAME_LEN });
+        return Err(TcpRaftError::FrameTooLarge {
+            actual: len,
+            max: MAX_FRAME_LEN,
+        });
     }
 
     let mut payload = vec![0_u8; len];
@@ -202,9 +206,14 @@ where
 {
     let payload = postcard::to_stdvec(msg)?;
     if payload.len() > MAX_FRAME_LEN {
-        return Err(TcpRaftError::FrameTooLarge { actual: payload.len(), max: MAX_FRAME_LEN });
+        return Err(TcpRaftError::FrameTooLarge {
+            actual: payload.len(),
+            max: MAX_FRAME_LEN,
+        });
     }
-    writer.write_all(&(payload.len() as u32).to_le_bytes()).await?;
+    writer
+        .write_all(&(payload.len() as u32).to_le_bytes())
+        .await?;
     writer.write_all(&payload).await?;
     writer.flush().await?;
     Ok(())
@@ -224,7 +233,10 @@ mod tests {
     }
 
     fn vote_req() -> RaftMessage {
-        RaftMessage::RequestVote(RequestVote { term: Term(1), candidate_id: node(0) })
+        RaftMessage::RequestVote(RequestVote {
+            term: Term(1),
+            candidate_id: node(0),
+        })
     }
 
     fn heartbeat() -> RaftMessage {
@@ -330,7 +342,9 @@ mod tests {
 
     #[tokio::test]
     async fn send_to_unknown_node_is_silently_dropped() {
-        let transport = TcpRaftTransport { peer_txs: HashMap::new() };
+        let transport = TcpRaftTransport {
+            peer_txs: HashMap::new(),
+        };
         // Should not panic.
         transport.send(node(99), vote_req());
     }

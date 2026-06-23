@@ -49,8 +49,8 @@ impl RaftTransport for InProcessTransport {
 /// nodes' transports so tests can call [`Self::partition`] / [`Self::heal`]
 /// from a single handle and affect the whole cluster.
 pub struct PartitionableTransport {
-    inner      : InProcessTransport,
-    self_id    : NodeId,
+    inner: InProcessTransport,
+    self_id: NodeId,
     partitioned: Arc<Mutex<HashSet<NodeId>>>,
 }
 
@@ -60,7 +60,11 @@ impl PartitionableTransport {
         inner: InProcessTransport,
         partitioned: Arc<Mutex<HashSet<NodeId>>>,
     ) -> Self {
-        Self { inner, self_id, partitioned }
+        Self {
+            inner,
+            self_id,
+            partitioned,
+        }
     }
 
     /// Create a fresh, empty partition set shared by all nodes in a cluster.
@@ -109,7 +113,10 @@ mod tests {
         peers.insert(node(1), tx);
         let transport = InProcessTransport::new(peers);
 
-        let msg = RaftMessage::RequestVote(RequestVote { term: Term(1), candidate_id: node(0) });
+        let msg = RaftMessage::RequestVote(RequestVote {
+            term: Term(1),
+            candidate_id: node(0),
+        });
         transport.send(node(1), msg.clone());
 
         let received = rx.try_recv().unwrap();
@@ -120,7 +127,13 @@ mod tests {
     fn in_process_transport_silently_drops_message_to_unknown_node() {
         let transport = InProcessTransport::new(HashMap::new());
         // Should not panic.
-        transport.send(node(99), RaftMessage::RequestVote(RequestVote { term: Term(1), candidate_id: node(0) }));
+        transport.send(
+            node(99),
+            RaftMessage::RequestVote(RequestVote {
+                term: Term(1),
+                candidate_id: node(0),
+            }),
+        );
     }
 
     #[test]
@@ -134,9 +147,15 @@ mod tests {
         let transport = PartitionableTransport::new(node(0), inner, partitioned.clone());
 
         PartitionableTransport::partition(&partitioned, node(1));
-        transport.send(node(1), RaftMessage::AppendEntries(AppendEntries::heartbeat(Term(1), node(0))));
+        transport.send(
+            node(1),
+            RaftMessage::AppendEntries(AppendEntries::heartbeat(Term(1), node(0))),
+        );
 
-        assert!(rx.try_recv().is_err(), "partitioned node should not receive message");
+        assert!(
+            rx.try_recv().is_err(),
+            "partitioned node should not receive message"
+        );
     }
 
     #[test]
@@ -170,8 +189,14 @@ mod tests {
         let transport = PartitionableTransport::new(node(0), inner, partitioned.clone());
 
         PartitionableTransport::partition(&partitioned, node(0));
-        transport.send(node(1), RaftMessage::AppendEntries(AppendEntries::heartbeat(Term(1), node(0))));
+        transport.send(
+            node(1),
+            RaftMessage::AppendEntries(AppendEntries::heartbeat(Term(1), node(0))),
+        );
 
-        assert!(rx.try_recv().is_err(), "partitioned sender's messages should be dropped");
+        assert!(
+            rx.try_recv().is_err(),
+            "partitioned sender's messages should be dropped"
+        );
     }
 }

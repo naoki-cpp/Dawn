@@ -22,4 +22,3 @@ pub(super) struct SectorMap {
     /// Celestial bodies (stars, planets) in this node's Sector (ADR-0025).
     pub(super) bodies: HashMap<CelestialBodyId, CelestialBodyDef>,
 }
-

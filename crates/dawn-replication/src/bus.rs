@@ -29,14 +29,18 @@ pub enum BusMessage {
 // ── Actor ─────────────────────────────────────────────────────────────────────
 
 struct BusActor {
-    rx          : mpsc::Receiver<BusMessage>,
+    rx: mpsc::Receiver<BusMessage>,
     broadcast_tx: broadcast::Sender<LogBatch>,
-    store       : InMemoryEventStore,
+    store: InMemoryEventStore,
 }
 
 impl BusActor {
     fn new(rx: mpsc::Receiver<BusMessage>, broadcast_tx: broadcast::Sender<LogBatch>) -> Self {
-        Self { rx, broadcast_tx, store: InMemoryEventStore::new() }
+        Self {
+            rx,
+            broadcast_tx,
+            store: InMemoryEventStore::new(),
+        }
     }
 
     async fn run(mut self) {
@@ -62,7 +66,7 @@ impl BusActor {
 /// Drop-in replacement for the removed `dawn_actor::ReplicationBusHandle`.
 #[derive(Clone)]
 pub struct InMemoryReplicationBus {
-    tx          : mpsc::Sender<BusMessage>,
+    tx: mpsc::Sender<BusMessage>,
     broadcast_tx: broadcast::Sender<LogBatch>,
 }
 
@@ -86,7 +90,9 @@ impl InMemoryReplicationBus {
     /// they share the same channel.
     pub async fn event_count(&self) -> usize {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(BusMessage::EventCount { reply: tx }).await
+        self.tx
+            .send(BusMessage::EventCount { reply: tx })
+            .await
             .expect("BusActor is no longer running");
         rx.await.expect("BusActor dropped reply sender")
     }
@@ -115,22 +121,26 @@ mod tests {
 
     fn make_batch(sector_id: SectorId, from_index: u64, count: usize) -> LogBatch {
         let events = (0..count)
-            .map(|i| dawn_core::DomainEvent::VelocityChanged(VelocityChanged {
-                ship_id : ShipId::new(NodeId(0), i as u64),
-                velocity: Velocity::new(1.0, 0.0, 0.0),
-                tick    : Tick(1),
-            }))
+            .map(|i| {
+                dawn_core::DomainEvent::VelocityChanged(VelocityChanged {
+                    ship_id: ShipId::new(NodeId(0), i as u64),
+                    velocity: Velocity::new(1.0, 0.0, 0.0),
+                    tick: Tick(1),
+                })
+            })
             .collect();
         LogBatch::new(sector_id, from_index, events)
     }
 
     fn make_events(count: usize) -> Vec<dawn_core::DomainEvent> {
         (0..count)
-            .map(|i| dawn_core::DomainEvent::VelocityChanged(VelocityChanged {
-                ship_id : ShipId::new(NodeId(0), i as u64),
-                velocity: Velocity::new(1.0, 0.0, 0.0),
-                tick    : Tick(1),
-            }))
+            .map(|i| {
+                dawn_core::DomainEvent::VelocityChanged(VelocityChanged {
+                    ship_id: ShipId::new(NodeId(0), i as u64),
+                    velocity: Velocity::new(1.0, 0.0, 0.0),
+                    tick: Tick(1),
+                })
+            })
             .collect()
     }
 
@@ -146,8 +156,22 @@ mod tests {
         let bus = InMemoryReplicationBus::spawn();
         let sender = bus.event_sender();
 
-        sender.send(BusMessage::Batch(LogBatch::new(SectorId(0), 0, make_events(5)))).await.unwrap();
-        sender.send(BusMessage::Batch(LogBatch::new(SectorId(0), 5, make_events(3)))).await.unwrap();
+        sender
+            .send(BusMessage::Batch(LogBatch::new(
+                SectorId(0),
+                0,
+                make_events(5),
+            )))
+            .await
+            .unwrap();
+        sender
+            .send(BusMessage::Batch(LogBatch::new(
+                SectorId(0),
+                5,
+                make_events(3),
+            )))
+            .await
+            .unwrap();
 
         assert_eq!(bus.event_count().await, 8);
         bus.shutdown().await;
@@ -162,9 +186,33 @@ mod tests {
         let s3 = bus.event_sender();
 
         tokio::join!(
-            async { s1.send(BusMessage::Batch(LogBatch::new(SectorId(0),  0, make_events(10)))).await.unwrap() },
-            async { s2.send(BusMessage::Batch(LogBatch::new(SectorId(1), 10, make_events(10)))).await.unwrap() },
-            async { s3.send(BusMessage::Batch(LogBatch::new(SectorId(2), 20, make_events(10)))).await.unwrap() },
+            async {
+                s1.send(BusMessage::Batch(LogBatch::new(
+                    SectorId(0),
+                    0,
+                    make_events(10),
+                )))
+                .await
+                .unwrap()
+            },
+            async {
+                s2.send(BusMessage::Batch(LogBatch::new(
+                    SectorId(1),
+                    10,
+                    make_events(10),
+                )))
+                .await
+                .unwrap()
+            },
+            async {
+                s3.send(BusMessage::Batch(LogBatch::new(
+                    SectorId(2),
+                    20,
+                    make_events(10),
+                )))
+                .await
+                .unwrap()
+            },
         );
 
         assert_eq!(bus.event_count().await, 30);

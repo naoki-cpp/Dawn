@@ -16,8 +16,8 @@ use std::path::PathBuf;
 
 use dawn_event_store::FileEventStore;
 
-use crate::node::SimulationNode;
 use super::snapshot::StateSnapshot;
+use crate::node::SimulationNode;
 
 /// Where checkpoints are written and how often.
 #[derive(Debug, Clone)]
@@ -39,7 +39,10 @@ pub struct CheckpointScheduler {
 
 impl CheckpointScheduler {
     pub fn new(config: CheckpointConfig) -> Self {
-        Self { config, last_checkpoint_tick: 0 }
+        Self {
+            config,
+            last_checkpoint_tick: 0,
+        }
     }
 
     /// Checkpoint the node iff at least `interval_ticks` logical ticks have
@@ -103,7 +106,11 @@ mod tests {
     fn scheduler_checkpoints_once_the_interval_is_reached_and_compacts_the_log() {
         let dir = tempfile::tempdir().unwrap();
         let mut node = file_node(dir.path());
-        node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::new(30.0, 0.0, 0.0));
+        node.spawn_ship(
+            ShipTypeId(1),
+            Position::ORIGIN,
+            Velocity::new(30.0, 0.0, 0.0),
+        );
         let mut sched = CheckpointScheduler::new(cfg(dir.path()));
 
         let mut snapshot = None;
@@ -126,7 +133,11 @@ mod tests {
     fn checkpointed_node_restores_from_snapshot_plus_tail_after_compaction() {
         let dir = tempfile::tempdir().unwrap();
         let mut node = file_node(dir.path());
-        node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::new(40.0, -15.0, 0.0));
+        node.spawn_ship(
+            ShipTypeId(1),
+            Position::ORIGIN,
+            Velocity::new(40.0, -15.0, 0.0),
+        );
         let mut sched = CheckpointScheduler::new(cfg(dir.path()));
 
         // Run past one checkpoint, then a few more ticks (the post-snapshot tail).
@@ -142,7 +153,10 @@ mod tests {
         // Recover from the persisted snapshot + the compacted hot log's tail.
         let snap = StateSnapshot::load(dir.path().join("snapshot.bin")).unwrap();
         let store = FileEventStore::open(dir.path().join("events.log")).unwrap();
-        assert!(store.base_index() > 0, "hot log was compacted behind the snapshot");
+        assert!(
+            store.base_index() > 0,
+            "hot log was compacted behind the snapshot"
+        );
         let mut restored = SimulationNode::restore_from(store, &snap, &[], &[]);
         assert_eq!(restored.current_tick(), snap.tick);
         // Re-run the same post-snapshot tail. Transient state (position) is not
@@ -151,6 +165,9 @@ mod tests {
             restored.tick();
         }
         let restored_final = postcard::to_stdvec(&restored.take_snapshot()).unwrap();
-        assert_eq!(restored_final, live_final, "snapshot + tail catch-up == live");
+        assert_eq!(
+            restored_final, live_final,
+            "snapshot + tail catch-up == live"
+        );
     }
 }

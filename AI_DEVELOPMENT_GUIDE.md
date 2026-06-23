@@ -21,6 +21,11 @@ This file provides guidance to AI coding agents when working with code in this r
 cargo build --workspace
 cargo build --workspace --release
 
+# フォーマット（2026-06-23 にワークスペース全体を cargo fmt --all で統一済み。
+# コミット前に必ず確認すること）
+cargo fmt --all -- --check
+cargo fmt --all                               # 差分があれば実行
+
 # テスト
 cargo test --workspace                        # 全テスト
 cargo test -p dawn-core                       # 特定クレートのみ

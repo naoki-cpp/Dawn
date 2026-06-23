@@ -10,22 +10,22 @@ use rand::Rng;
 #[derive(Debug, Clone)]
 pub struct SpawnConfig {
     /// Which node is creating these ships.
-    pub node_id       : NodeId,
+    pub node_id: NodeId,
     /// Spatial bounds within which ships are scattered.
-    pub bounds        : SectorBounds,
+    pub bounds: SectorBounds,
     /// Absolute value cap for each velocity component (units/tick).
-    pub max_speed     : f32,
+    pub max_speed: f32,
     /// Seed for the PRNG, enabling deterministic reproduction.
-    pub seed          : u64,
+    pub seed: u64,
 }
 
 impl SpawnConfig {
     pub fn default_for_node(node_id: NodeId) -> Self {
         Self {
             node_id,
-            bounds   : SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            bounds: SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             max_speed: 5.0,
-            seed     : 0xDEAD_BEEF,
+            seed: 0xDEAD_BEEF,
         }
     }
 }
@@ -36,9 +36,9 @@ impl SpawnConfig {
 /// Counter starts at `counter_offset`, allowing multiple nodes to generate
 /// non-overlapping ID ranges.
 pub fn generate_ships(
-    count          : usize,
-    config         : &SpawnConfig,
-    counter_offset : u64,
+    count: usize,
+    config: &SpawnConfig,
+    counter_offset: u64,
 ) -> Vec<(ShipId, Position, Velocity)> {
     use rand::SeedableRng;
     let mut rng = rand::rngs::SmallRng::seed_from_u64(config.seed ^ counter_offset);
@@ -86,10 +86,13 @@ mod tests {
 
     #[test]
     fn all_generated_positions_are_within_sector_bounds() {
-        let cfg   = config();
+        let cfg = config();
         let ships = generate_ships(1_000, &cfg, 0);
         for (_, pos, _) in &ships {
-            assert!(cfg.bounds.contains(*pos), "position {pos} is outside bounds");
+            assert!(
+                cfg.bounds.contains(*pos),
+                "position {pos} is outside bounds"
+            );
         }
     }
 
@@ -109,17 +112,20 @@ mod tests {
         use std::collections::HashSet;
         let ships = generate_ships(10_000, &config(), 0);
         let ids: HashSet<_> = ships.iter().map(|(id, _, _)| id.raw()).collect();
-        assert_eq!(ids.len(), ships.len(), "all generated ShipIds must be unique");
+        assert_eq!(
+            ids.len(),
+            ships.len(),
+            "all generated ShipIds must be unique"
+        );
     }
 
     #[test]
     fn same_seed_produces_identical_populations() {
         let a = generate_ships(100, &config(), 0);
         let b = generate_ships(100, &config(), 0);
-        for (i, ((id_a, pos_a, vel_a), (id_b, pos_b, vel_b))) in
-            a.iter().zip(b.iter()).enumerate()
+        for (i, ((id_a, pos_a, vel_a), (id_b, pos_b, vel_b))) in a.iter().zip(b.iter()).enumerate()
         {
-            assert_eq!(id_a, id_b,   "id mismatch at index {i}");
+            assert_eq!(id_a, id_b, "id mismatch at index {i}");
             assert_eq!(pos_a, pos_b, "position mismatch at index {i}");
             assert_eq!(vel_a, vel_b, "velocity mismatch at index {i}");
         }

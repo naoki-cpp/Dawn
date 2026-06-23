@@ -32,21 +32,27 @@ impl<S: EventStore> SimulationNode<S> {
     /// `TransitOp::Request` is applied at Step 7.5 — never directly from a
     /// client command.
     pub fn propose_transit(&mut self, cmd: TransitCommand) -> Result<(), DawnError> {
-        let &entity = self.ships.index.get(&cmd.ship_id)
+        let &entity = self
+            .ships
+            .index
+            .get(&cmd.ship_id)
             .ok_or(DawnError::ShipNotFound(cmd.ship_id))?;
 
         if self.world.transit_state(entity).is_in_transit() {
             return Err(DawnError::ShipInTransit(cmd.ship_id));
         }
 
-        self.world.set_transit_state(entity, TransitState::InTransit { to: cmd.to });
+        self.world
+            .set_transit_state(entity, TransitState::InTransit { to: cmd.to });
 
-        self.event_store.append(DomainEvent::SectorTransitRequested(SectorTransitRequested {
-            ship_id: cmd.ship_id,
-            from   : self.sector_id,
-            to     : cmd.to,
-            tick   : self.current_tick,
-        }));
+        self.event_store.append(DomainEvent::SectorTransitRequested(
+            SectorTransitRequested {
+                ship_id: cmd.ship_id,
+                from: self.sector_id,
+                to: cmd.to,
+                tick: self.current_tick,
+            },
+        ));
 
         Ok(())
     }
@@ -55,7 +61,8 @@ impl<S: EventStore> SimulationNode<S> {
     /// (Ship exists and is not already in transit). Used to reject commands
     /// up front, before proposing to the Raft Log (INV-006).
     pub fn can_propose_transit(&self, ship_id: ShipId) -> bool {
-        self.ships.index
+        self.ships
+            .index
             .get(&ship_id)
             .is_some_and(|&entity| !self.world.transit_state(entity).is_in_transit())
     }
@@ -68,25 +75,34 @@ impl<S: EventStore> SimulationNode<S> {
     /// [`import_transit`](Self::import_transit) appends
     /// `SectorTransitCompleted` — `JumpGateUsed` records *how* the Ship
     /// moved, in addition to (not instead of) `SectorTransitCompleted`.
-    pub fn append_jump_events(&mut self, ship_id: ShipId, gate_id: JumpGateId, from: SectorId, to: SectorId, entry_pos: Position) {
-        self.event_store.append(DomainEvent::JumpGateUsed(JumpGateUsed {
-            ship_id,
-            gate_id,
-            from_sector: from,
-            to_sector  : to,
-            entry_pos,
-            tick       : self.current_tick,
-        }));
-
-        let from_system = self.sector_map.galaxy.system_for_sector(from);
-        let to_system   = self.sector_map.galaxy.system_for_sector(to);
-        if from_system != to_system {
-            self.event_store.append(DomainEvent::StarSystemChanged(StarSystemChanged {
+    pub fn append_jump_events(
+        &mut self,
+        ship_id: ShipId,
+        gate_id: JumpGateId,
+        from: SectorId,
+        to: SectorId,
+        entry_pos: Position,
+    ) {
+        self.event_store
+            .append(DomainEvent::JumpGateUsed(JumpGateUsed {
                 ship_id,
-                from_system,
-                to_system,
+                gate_id,
+                from_sector: from,
+                to_sector: to,
+                entry_pos,
                 tick: self.current_tick,
             }));
+
+        let from_system = self.sector_map.galaxy.system_for_sector(from);
+        let to_system = self.sector_map.galaxy.system_for_sector(to);
+        if from_system != to_system {
+            self.event_store
+                .append(DomainEvent::StarSystemChanged(StarSystemChanged {
+                    ship_id,
+                    from_system,
+                    to_system,
+                    tick: self.current_tick,
+                }));
         }
     }
 
@@ -103,17 +119,35 @@ impl<S: EventStore> SimulationNode<S> {
             TransitState::None => return None,
         };
 
-        let pos  = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
-        let vel  = self.world.inner().get::<&VelocityComp>(entity).ok()?.0;
+        let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+        let vel = self.world.inner().get::<&VelocityComp>(entity).ok()?.0;
         let (current_shield, current_armor, current_hull, is_destroyed) = {
             let hull = self.world.inner().get::<&HullComp>(entity).ok()?;
-            (hull.current_shield, hull.current_armor, hull.current_hull, hull.is_destroyed)
+            (
+                hull.current_shield,
+                hull.current_armor,
+                hull.current_hull,
+                hull.is_destroyed,
+            )
         };
-        let capacitor = self.world.inner().get::<&CapacitorComp>(entity).ok().map(|c| c.current);
-        let fitting = self.world.inner().get::<&FittingComp>(entity)
+        let capacitor = self
+            .world
+            .inner()
+            .get::<&CapacitorComp>(entity)
+            .ok()
+            .map(|c| c.current);
+        let fitting = self
+            .world
+            .inner()
+            .get::<&FittingComp>(entity)
             .map(|f| f.to_snapshot())
             .unwrap_or_else(|_| FittingSnapshot::empty());
-        let ship_type_id = self.ships.type_ids.get(&ship_id).copied().unwrap_or(ShipTypeId(0));
+        let ship_type_id = self
+            .ships
+            .type_ids
+            .get(&ship_id)
+            .copied()
+            .unwrap_or(ShipTypeId(0));
 
         // Tackle state is not transferred on sector transit (tacklers are in
         // this sector; they lose the tackle as the ship leaves).
@@ -125,7 +159,7 @@ impl<S: EventStore> SimulationNode<S> {
             // star-origin frame, so it re-anchors on that Sector's origin
             // (ADR-0029). A transiting ship sits at a sector-edge gate = already
             // star-anchored.
-            anchor  : dawn_core::AnchorId(0),
+            anchor: dawn_core::AnchorId(0),
             velocity: vel,
             current_shield,
             current_armor,
@@ -141,14 +175,16 @@ impl<S: EventStore> SimulationNode<S> {
         self.ships.type_ids.remove(&ship_id);
         self.base_stats.remove(&ship_id);
 
-        self.event_store.append(DomainEvent::SectorTransitCompleted(SectorTransitCompleted {
-            ship_id,
-            from     : self.sector_id,
-            to,
-            entry_pos,
-            velocity : vel,
-            tick     : self.current_tick,
-        }));
+        self.event_store.append(DomainEvent::SectorTransitCompleted(
+            SectorTransitCompleted {
+                ship_id,
+                from: self.sector_id,
+                to,
+                entry_pos,
+                velocity: vel,
+                tick: self.current_tick,
+            },
+        ));
 
         Some(snapshot)
     }
@@ -165,14 +201,16 @@ impl<S: EventStore> SimulationNode<S> {
         ship.position = entry_pos;
         self.restore_ship_from_snapshot(&ship);
 
-        self.event_store.append(DomainEvent::SectorTransitCompleted(SectorTransitCompleted {
-            ship_id  : ship.ship_id,
-            from,
-            to       : self.sector_id,
-            entry_pos,
-            velocity : ship.velocity,
-            tick     : self.current_tick,
-        }));
+        self.event_store.append(DomainEvent::SectorTransitCompleted(
+            SectorTransitCompleted {
+                ship_id: ship.ship_id,
+                from,
+                to: self.sector_id,
+                entry_pos,
+                velocity: ship.velocity,
+                tick: self.current_tick,
+            },
+        ));
     }
 }
 
@@ -196,10 +234,17 @@ mod tests {
         let mut node = mem_node();
         let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
 
-        node.propose_transit(TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+        node.propose_transit(TransitCommand {
+            ship_id,
+            to: SectorId(1),
+        })
+        .unwrap();
 
         let entity = *node.ships.index.get(&ship_id).unwrap();
-        assert_eq!(node.world.transit_state(entity), TransitState::InTransit { to: SectorId(1) });
+        assert_eq!(
+            node.world.transit_state(entity),
+            TransitState::InTransit { to: SectorId(1) }
+        );
 
         let last = node.event_store().all_records().last().unwrap();
         match &last.event {
@@ -216,9 +261,18 @@ mod tests {
     fn propose_transit_is_rejected_when_ship_is_already_in_transit() {
         let mut node = mem_node();
         let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-        node.propose_transit(TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+        node.propose_transit(TransitCommand {
+            ship_id,
+            to: SectorId(1),
+        })
+        .unwrap();
 
-        let err = node.propose_transit(TransitCommand { ship_id, to: SectorId(2) }).unwrap_err();
+        let err = node
+            .propose_transit(TransitCommand {
+                ship_id,
+                to: SectorId(2),
+            })
+            .unwrap_err();
         assert!(matches!(err, DawnError::ShipInTransit(id) if id == ship_id));
     }
 
@@ -226,21 +280,39 @@ mod tests {
     fn propose_transit_is_rejected_for_unknown_ship() {
         let mut node = mem_node();
         let unknown = ShipId::new(NodeId(99), 0);
-        let err = node.propose_transit(TransitCommand { ship_id: unknown, to: SectorId(1) }).unwrap_err();
+        let err = node
+            .propose_transit(TransitCommand {
+                ship_id: unknown,
+                to: SectorId(1),
+            })
+            .unwrap_err();
         assert!(matches!(err, DawnError::ShipNotFound(id) if id == unknown));
     }
 
     #[test]
     fn export_transit_removes_ship_and_appends_completed_event() {
         let mut node = mem_node();
-        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0));
-        node.propose_transit(TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+        let ship_id = node.spawn_ship(
+            ShipTypeId(1),
+            Position::ORIGIN,
+            Velocity::new(1.0, 0.0, 0.0),
+        );
+        node.propose_transit(TransitCommand {
+            ship_id,
+            to: SectorId(1),
+        })
+        .unwrap();
 
         let entry_pos = Position::new(500.0, 0.0, 0.0);
-        let snapshot = node.export_transit(ship_id, entry_pos).expect("ship should export");
+        let snapshot = node
+            .export_transit(ship_id, entry_pos)
+            .expect("ship should export");
         assert_eq!(snapshot.ship_id, ship_id);
 
-        assert!(node.ships.index.get(&ship_id).is_none(), "ship must leave the from-sector ECS");
+        assert!(
+            node.ships.index.get(&ship_id).is_none(),
+            "ship must leave the from-sector ECS"
+        );
         assert_eq!(node.ship_count(), 0);
 
         let last = node.event_store().all_records().last().unwrap();
@@ -265,11 +337,28 @@ mod tests {
 
     #[test]
     fn import_transit_restores_ship_with_same_id_at_entry_position_and_appends_completed_event() {
-        let mut from_node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
-        let mut to_node   = SimulationNode::new(NodeId(1), SectorId(1), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+        let mut from_node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        let mut to_node = SimulationNode::new(
+            NodeId(1),
+            SectorId(1),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
 
-        let ship_id = from_node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0));
-        from_node.propose_transit(TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+        let ship_id = from_node.spawn_ship(
+            ShipTypeId(1),
+            Position::ORIGIN,
+            Velocity::new(1.0, 0.0, 0.0),
+        );
+        from_node
+            .propose_transit(TransitCommand {
+                ship_id,
+                to: SectorId(1),
+            })
+            .unwrap();
 
         let entry_pos = Position::new(500.0, 0.0, 0.0);
         let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
@@ -293,12 +382,25 @@ mod tests {
 
     #[test]
     fn adopted_player_ship_accepts_owned_commands_on_the_destination_node() {
-        let mut from_node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
-        let mut to_node   = SimulationNode::new(NodeId(1), SectorId(1), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+        let mut from_node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        let mut to_node = SimulationNode::new(
+            NodeId(1),
+            SectorId(1),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
 
         let player_id = from_node.next_player_id();
-        let ship_id   = from_node.spawn_player_ship(player_id);
-        from_node.propose_transit(TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+        let ship_id = from_node.spawn_player_ship(player_id);
+        from_node
+            .propose_transit(TransitCommand {
+                ship_id,
+                to: SectorId(1),
+            })
+            .unwrap();
         let snapshot = from_node.export_transit(ship_id, Position::ORIGIN).unwrap();
         to_node.import_transit(&snapshot, SectorId(0), Position::ORIGIN);
 
@@ -313,13 +415,34 @@ mod tests {
     /// and at no point do both Sectors hold the Ship at once (INV-003).
     #[test]
     fn transit_moves_ship_ownership_to_destination_sector_exactly_once() {
-        let mut from_node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
-        let mut to_node   = SimulationNode::new(NodeId(1), SectorId(1), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
+        let mut from_node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        let mut to_node = SimulationNode::new(
+            NodeId(1),
+            SectorId(1),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
 
-        let ship_id = from_node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0));
-        assert_eq!(from_node.ship_count() + to_node.ship_count(), 1, "ship starts owned by exactly one sector");
+        let ship_id = from_node.spawn_ship(
+            ShipTypeId(1),
+            Position::ORIGIN,
+            Velocity::new(1.0, 0.0, 0.0),
+        );
+        assert_eq!(
+            from_node.ship_count() + to_node.ship_count(),
+            1,
+            "ship starts owned by exactly one sector"
+        );
 
-        from_node.propose_transit(TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+        from_node
+            .propose_transit(TransitCommand {
+                ship_id,
+                to: SectorId(1),
+            })
+            .unwrap();
         // Proposal alone does not move ownership yet.
         assert_eq!(from_node.ship_count() + to_node.ship_count(), 1);
 
@@ -342,20 +465,34 @@ mod tests {
     /// fully reproduced from a snapshot + Event Log replay (node restart).
     #[test]
     fn destination_sector_state_after_transit_is_fully_restored_from_snapshot_and_replay() {
-        let dir        = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let event_path = dir.path().join("events.log");
-        let snap_path  = dir.path().join("snapshot.bin");
+        let snap_path = dir.path().join("snapshot.bin");
 
-        let mut from_node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
-        let ship_id = from_node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0));
-        from_node.propose_transit(TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+        let mut from_node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        let ship_id = from_node.spawn_ship(
+            ShipTypeId(1),
+            Position::ORIGIN,
+            Velocity::new(1.0, 0.0, 0.0),
+        );
+        from_node
+            .propose_transit(TransitCommand {
+                ship_id,
+                to: SectorId(1),
+            })
+            .unwrap();
         let entry_pos = Position::new(500.0, 0.0, 0.0);
         let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
 
         {
             let store = FileEventStore::open(&event_path).unwrap();
             let mut to_node = SimulationNode::with_store(
-                NodeId(1), SectorId(1),
+                NodeId(1),
+                SectorId(1),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 store,
             );
@@ -365,7 +502,7 @@ mod tests {
             snap.save(&snap_path).unwrap();
         } // node drops; FileEventStore flushes via BufWriter
 
-        let snap   = StateSnapshot::load(&snap_path).unwrap();
+        let snap = StateSnapshot::load(&snap_path).unwrap();
         let store2 = FileEventStore::open(&event_path).unwrap();
         let restored = SimulationNode::restore_from(store2, &snap, &[], &[]);
 
@@ -387,13 +524,30 @@ mod tests {
         let mut total = std::time::Duration::ZERO;
 
         for i in 0..ITERATIONS {
-            let mut from_node = SimulationNode::new(NodeId(0), SectorId(0), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
-            let mut to_node   = SimulationNode::new(NodeId(1), SectorId(1), SectorBounds::centered(SectorBounds::DEFAULT_HALF));
-            let ship_id = from_node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::new(1.0, 0.0, 0.0));
+            let mut from_node = SimulationNode::new(
+                NodeId(0),
+                SectorId(0),
+                SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            );
+            let mut to_node = SimulationNode::new(
+                NodeId(1),
+                SectorId(1),
+                SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            );
+            let ship_id = from_node.spawn_ship(
+                ShipTypeId(1),
+                Position::ORIGIN,
+                Velocity::new(1.0, 0.0, 0.0),
+            );
             let entry_pos = Position::new(500.0, 0.0, 0.0);
 
             let start = Instant::now();
-            from_node.propose_transit(TransitCommand { ship_id, to: SectorId(1) }).unwrap();
+            from_node
+                .propose_transit(TransitCommand {
+                    ship_id,
+                    to: SectorId(1),
+                })
+                .unwrap();
             let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
             to_node.import_transit(&snapshot, SectorId(0), entry_pos);
             total += start.elapsed();

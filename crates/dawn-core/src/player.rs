@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 pub struct PlayerId(pub u64);
 
 impl PlayerId {
-    pub fn raw(self) -> u64 { self.0 }
+    pub fn raw(self) -> u64 {
+        self.0
+    }
 }
 
 impl std::fmt::Display for PlayerId {

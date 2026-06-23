@@ -30,10 +30,10 @@ use std::collections::HashMap;
 pub enum Ingest {
     /// The contiguous suffix was appended to the Sector's replica log.
     Applied {
-        sector_id : SectorId,
+        sector_id: SectorId,
         /// Number of events newly appended (may be fewer than the batch when
         /// the batch overlapped already-held entries).
-        applied   : usize,
+        applied: usize,
         /// The receiver's cursor after applying — the next index it expects.
         next_index: u64,
     },
@@ -51,7 +51,7 @@ struct SectorReplica {
     /// Next log index this replica expects (== number of events held).
     next_index: u64,
     /// The ordered event log, index 0 first.
-    events    : Vec<DomainEvent>,
+    events: Vec<DomainEvent>,
 }
 
 /// Holds a gap-checked, idempotent replica of one or more foreign Sectors'
@@ -60,12 +60,15 @@ pub struct ReplicaSet {
     /// Cap on the suffix length a gap request may ask for (passed through to
     /// [`AntiEntropy::plan_batch`]).
     max_events: usize,
-    sectors   : HashMap<SectorId, SectorReplica>,
+    sectors: HashMap<SectorId, SectorReplica>,
 }
 
 impl ReplicaSet {
     pub fn new(max_events: usize) -> Self {
-        Self { max_events, sectors: HashMap::new() }
+        Self {
+            max_events,
+            sectors: HashMap::new(),
+        }
     }
 
     /// Ingest one gossiped batch, returning what happened. Duplicate and
@@ -75,12 +78,17 @@ impl ReplicaSet {
         match AntiEntropy::plan_batch(replica.next_index, batch.sector_id, batch, self.max_events) {
             BatchApplyPlan::Duplicate => Ingest::Duplicate,
             BatchApplyPlan::Gap(request) => Ingest::Gap(request),
-            BatchApplyPlan::Apply { first_event_offset, next_index } => {
-                replica.events.extend_from_slice(&batch.events[first_event_offset..]);
+            BatchApplyPlan::Apply {
+                first_event_offset,
+                next_index,
+            } => {
+                replica
+                    .events
+                    .extend_from_slice(&batch.events[first_event_offset..]);
                 replica.next_index = next_index;
                 Ingest::Applied {
-                    sector_id : batch.sector_id,
-                    applied   : batch.events.len() - first_event_offset,
+                    sector_id: batch.sector_id,
+                    applied: batch.events.len() - first_event_offset,
                     next_index,
                 }
             }
@@ -99,7 +107,9 @@ impl ReplicaSet {
 
     /// The replicated event log for `sector_id`, in index order.
     pub fn events(&self, sector_id: SectorId) -> &[DomainEvent] {
-        self.sectors.get(&sector_id).map_or(&[], |r| r.events.as_slice())
+        self.sectors
+            .get(&sector_id)
+            .map_or(&[], |r| r.events.as_slice())
     }
 }
 
@@ -110,14 +120,18 @@ mod tests {
 
     fn event(n: u64) -> DomainEvent {
         DomainEvent::VelocityChanged(VelocityChanged {
-            ship_id : ShipId::new(NodeId(1), n),
+            ship_id: ShipId::new(NodeId(1), n),
             velocity: Velocity::new(1.0, 0.0, 0.0),
-            tick    : Tick(n),
+            tick: Tick(n),
         })
     }
 
     fn batch(sector: u8, from: u64, count: u64) -> LogBatch {
-        LogBatch::new(SectorId(sector), from, (from..from + count).map(event).collect())
+        LogBatch::new(
+            SectorId(sector),
+            from,
+            (from..from + count).map(event).collect(),
+        )
     }
 
     #[test]
@@ -126,11 +140,19 @@ mod tests {
 
         assert_eq!(
             set.ingest(&batch(1, 0, 3)),
-            Ingest::Applied { sector_id: SectorId(1), applied: 3, next_index: 3 },
+            Ingest::Applied {
+                sector_id: SectorId(1),
+                applied: 3,
+                next_index: 3
+            },
         );
         assert_eq!(
             set.ingest(&batch(1, 3, 2)),
-            Ingest::Applied { sector_id: SectorId(1), applied: 2, next_index: 5 },
+            Ingest::Applied {
+                sector_id: SectorId(1),
+                applied: 2,
+                next_index: 5
+            },
         );
         assert_eq!(set.replicated_len(SectorId(1)), 5);
         assert_eq!(set.next_index(SectorId(1)), 5);
@@ -142,7 +164,11 @@ mod tests {
         set.ingest(&batch(1, 0, 5));
 
         assert_eq!(set.ingest(&batch(1, 0, 3)), Ingest::Duplicate);
-        assert_eq!(set.replicated_len(SectorId(1)), 5, "duplicate must not grow the log");
+        assert_eq!(
+            set.replicated_len(SectorId(1)),
+            5,
+            "duplicate must not grow the log"
+        );
     }
 
     #[test]
@@ -153,7 +179,11 @@ mod tests {
         // Indices 2,3,4 — index 2 already held, 3 and 4 are new.
         assert_eq!(
             set.ingest(&batch(1, 2, 3)),
-            Ingest::Applied { sector_id: SectorId(1), applied: 2, next_index: 5 },
+            Ingest::Applied {
+                sector_id: SectorId(1),
+                applied: 2,
+                next_index: 5
+            },
         );
         assert_eq!(set.replicated_len(SectorId(1)), 5);
     }
@@ -170,7 +200,11 @@ mod tests {
             }
             other => panic!("expected Gap, got {other:?}"),
         }
-        assert_eq!(set.replicated_len(SectorId(1)), 2, "gapped batch must not be applied");
+        assert_eq!(
+            set.replicated_len(SectorId(1)),
+            2,
+            "gapped batch must not be applied"
+        );
     }
 
     #[test]
@@ -181,6 +215,10 @@ mod tests {
 
         assert_eq!(set.replicated_len(SectorId(1)), 3);
         assert_eq!(set.replicated_len(SectorId(2)), 1);
-        assert_eq!(set.next_index(SectorId(99)), 0, "unseen sector reads as empty");
+        assert_eq!(
+            set.next_index(SectorId(99)),
+            0,
+            "unseen sector reads as empty"
+        );
     }
 }

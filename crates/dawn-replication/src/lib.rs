@@ -50,14 +50,18 @@ pub use tcp::{TcpReplicationError, TcpReplicationTransport};
 /// idempotently in the anti-entropy step (ADR-0027 / 8D-2b).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogBatch {
-    pub sector_id : SectorId,
+    pub sector_id: SectorId,
     pub from_index: u64,
-    pub events    : Vec<DomainEvent>,
+    pub events: Vec<DomainEvent>,
 }
 
 impl LogBatch {
     pub fn new(sector_id: SectorId, from_index: u64, events: Vec<DomainEvent>) -> Self {
-        Self { sector_id, from_index, events }
+        Self {
+            sector_id,
+            from_index,
+            events,
+        }
     }
 
     pub fn next_index(&self) -> u64 {

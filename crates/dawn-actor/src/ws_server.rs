@@ -33,7 +33,7 @@ use tokio_tungstenite::{accept_async, tungstenite::Message};
 // ── WsClientConnection ────────────────────────────────────────────────────────
 
 pub struct WsClientConnection {
-    event_tx  : mpsc::UnboundedSender<String>,
+    event_tx: mpsc::UnboundedSender<String>,
     command_rx: mpsc::UnboundedReceiver<ClientCommand>,
 }
 
@@ -66,8 +66,8 @@ impl ClientConnection for WsClientConnection {
 /// One player connection: holds its PlayerId, ShipId, and connection.
 pub struct PlayerSession {
     pub player_id: PlayerId,
-    pub ship_id  : ShipId,
-    pub conn     : WsClientConnection,
+    pub ship_id: ShipId,
+    pub conn: WsClientConnection,
 }
 
 impl PlayerSession {
@@ -114,16 +114,16 @@ impl WsServer {
     /// 3. Send Welcome + InitialState (+ PlayerFitting)
     /// 4. Return the `PlayerSession`
     pub async fn handshake(
-        stream        : TcpStream,
-        peer_addr     : SocketAddr,
-        player_id     : PlayerId,
-        ship_id       : ShipId,
-        initial_state : &str,
+        stream: TcpStream,
+        peer_addr: SocketAddr,
+        player_id: PlayerId,
+        ship_id: ShipId,
+        initial_state: &str,
         player_fitting: Option<String>,
     ) -> anyhow::Result<PlayerSession> {
         let ws_stream = accept_async(stream).await?;
 
-        let (event_tx,   event_rx)   = mpsc::unbounded_channel::<String>();
+        let (event_tx, event_rx) = mpsc::unbounded_channel::<String>();
         let (command_tx, command_rx) = mpsc::unbounded_channel::<ClientCommand>();
         let (mut ws_sink, mut ws_source) = ws_stream.split();
 
@@ -140,7 +140,8 @@ impl WsServer {
                 }
             }
             false
-        }).await;
+        })
+        .await;
 
         match hello_result {
             Ok(true) => {}
@@ -150,10 +151,13 @@ impl WsServer {
         // Send Welcome + InitialState + (optional) PlayerFitting.
         let welcome = format!(
             "{{\"type\":\"Welcome\",\"player_id\":{},\"ship_id\":{}}}\n",
-            player_id.raw(), ship_id.raw()
+            player_id.raw(),
+            ship_id.raw()
         );
         ws_sink.send(Message::Text(welcome.into())).await?;
-        ws_sink.send(Message::Text((initial_state.to_string() + "\n").into())).await?;
+        ws_sink
+            .send(Message::Text((initial_state.to_string() + "\n").into()))
+            .await?;
         if let Some(fitting) = player_fitting {
             ws_sink.send(Message::Text((fitting + "\n").into())).await?;
         }
@@ -162,7 +166,9 @@ impl WsServer {
         tokio::spawn(async move {
             let mut rx = event_rx;
             while let Some(msg) = rx.recv().await {
-                if ws_sink.send(Message::Text(msg.into())).await.is_err() { break; }
+                if ws_sink.send(Message::Text(msg.into())).await.is_err() {
+                    break;
+                }
             }
             let _ = ws_sink.close().await;
         });
@@ -173,7 +179,9 @@ impl WsServer {
                 if let Message::Text(text) = msg {
                     for line in text.lines() {
                         if let Some(cmd) = parse_client_command(line) {
-                            if command_tx.send(cmd).is_err() { return; }
+                            if command_tx.send(cmd).is_err() {
+                                return;
+                            }
                         }
                     }
                 }
@@ -181,8 +189,18 @@ impl WsServer {
             println!("[WsServer] {peer_addr} disconnected");
         });
 
-        let conn = WsClientConnection { event_tx, command_rx };
-        println!("[WsServer] {peer_addr} handshake complete: {player_id} ship={}", ship_id.raw());
-        Ok(PlayerSession { player_id, ship_id, conn })
+        let conn = WsClientConnection {
+            event_tx,
+            command_rx,
+        };
+        println!(
+            "[WsServer] {peer_addr} handshake complete: {player_id} ship={}",
+            ship_id.raw()
+        );
+        Ok(PlayerSession {
+            player_id,
+            ship_id,
+            conn,
+        })
     }
 }

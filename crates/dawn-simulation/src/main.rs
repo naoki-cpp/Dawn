@@ -10,8 +10,8 @@
 mod bench;
 mod cluster;
 mod data_loader;
-mod serve;
 mod sector_simulator_actor;
+mod serve;
 
 // Client transport (WsServer) is shared via dawn-actor; bring the module into
 // crate scope so existing `crate::ws_server` paths keep resolving.
@@ -24,11 +24,15 @@ async fn main() {
     if args.contains(&"--serve".to_string()) {
         // --duel: 1 human vs 1 Bot, no NPC ships
         let duel_mode = args.contains(&"--duel".to_string());
-        let usize_arg = |name: &str| args.windows(2)
-            .find(|w| w[0] == name)
-            .and_then(|w| w[1].parse::<usize>().ok());
+        let usize_arg = |name: &str| {
+            args.windows(2)
+                .find(|w| w[0] == name)
+                .and_then(|w| w[1].parse::<usize>().ok())
+        };
         // --ships N sets the NPC count (ignored in --duel mode)
-        let ship_count = if duel_mode { 0 } else {
+        let ship_count = if duel_mode {
+            0
+        } else {
             usize_arg("--ships").unwrap_or(serve::P4_SHIPS_DEFAULT)
         };
         // --pop-cap N sets the per-Sector population backstop (ADR-0018, last

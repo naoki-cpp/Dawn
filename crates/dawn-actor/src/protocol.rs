@@ -13,9 +13,9 @@
 
 use crate::ClientCommand;
 use dawn_core::{
-    ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand,
-    DeactivateModuleCommand, DomainEvent, EntityId, LockOnCommand, ModuleId,
-    MoveCommand, Position, ShipId, SlotKind, StopCommand,
+    ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand, DeactivateModuleCommand,
+    DomainEvent, EntityId, LockOnCommand, ModuleId, MoveCommand, Position, ShipId, SlotKind,
+    StopCommand,
 };
 use serde::Serialize;
 
@@ -24,33 +24,107 @@ use serde::Serialize;
 #[derive(Serialize)]
 #[serde(tag = "type")]
 enum EventJson {
-    ShipSpawned      { ship_id: u64, position: PosJson, tick: u64 },
-    VelocityChanged  { ship_id: u64, velocity: VelJson, tick: u64 },
-    ShipDespawned    { ship_id: u64, tick: u64 },
-    DamageTaken      { ship_id: u64, damage: f32, current_shield: f32, current_armor: f32, current_hull: f32, tick: u64 },
-    ShipDestroyed    { ship_id: u64, killer_id: u64, tick: u64 },
-    TargetLocked     { locker_id: u64, target_id: u64, tick: u64 },
-    LockLost         { locker_id: u64, target_id: u64, tick: u64 },
-    ModuleActivated  { ship_id: u64, module_id: u32, slot: String, tick: u64 },
-    ModuleDeactivated{ ship_id: u64, module_id: u32, slot: String, tick: u64 },
-    JumpGateUsed     { ship_id: u64, gate_id: u32, from_sector: u8, to_sector: u8, entry_pos: PosJson, tick: u64 },
-    StarSystemChanged{ ship_id: u64, from_system: u32, to_system: u32, tick: u64 },
+    ShipSpawned {
+        ship_id: u64,
+        position: PosJson,
+        tick: u64,
+    },
+    VelocityChanged {
+        ship_id: u64,
+        velocity: VelJson,
+        tick: u64,
+    },
+    ShipDespawned {
+        ship_id: u64,
+        tick: u64,
+    },
+    DamageTaken {
+        ship_id: u64,
+        damage: f32,
+        current_shield: f32,
+        current_armor: f32,
+        current_hull: f32,
+        tick: u64,
+    },
+    ShipDestroyed {
+        ship_id: u64,
+        killer_id: u64,
+        tick: u64,
+    },
+    TargetLocked {
+        locker_id: u64,
+        target_id: u64,
+        tick: u64,
+    },
+    LockLost {
+        locker_id: u64,
+        target_id: u64,
+        tick: u64,
+    },
+    ModuleActivated {
+        ship_id: u64,
+        module_id: u32,
+        slot: String,
+        tick: u64,
+    },
+    ModuleDeactivated {
+        ship_id: u64,
+        module_id: u32,
+        slot: String,
+        tick: u64,
+    },
+    JumpGateUsed {
+        ship_id: u64,
+        gate_id: u32,
+        from_sector: u8,
+        to_sector: u8,
+        entry_pos: PosJson,
+        tick: u64,
+    },
+    StarSystemChanged {
+        ship_id: u64,
+        from_system: u32,
+        to_system: u32,
+        tick: u64,
+    },
     // Sent when the player's ship jumps to a sector owned by a different
     // physical node (dawn-sector-node multi-node clusters only).
-    Redirect         { ws_addr: String },
+    Redirect {
+        ws_addr: String,
+    },
 }
 
 #[derive(Serialize, Clone, Copy)]
-pub struct PosJson { pub x: f32, pub y: f32, pub z: f32 }
+pub struct PosJson {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
 
 #[derive(Serialize, Clone, Copy)]
-struct VelJson { dx: f32, dy: f32, dz: f32 }
+struct VelJson {
+    dx: f32,
+    dy: f32,
+    dz: f32,
+}
 
 impl From<Position> for PosJson {
-    fn from(p: Position) -> Self { Self { x: p.x, y: p.y, z: p.z } }
+    fn from(p: Position) -> Self {
+        Self {
+            x: p.x,
+            y: p.y,
+            z: p.z,
+        }
+    }
 }
 impl From<dawn_core::Velocity> for VelJson {
-    fn from(v: dawn_core::Velocity) -> Self { Self { dx: v.dx, dy: v.dy, dz: v.dz } }
+    fn from(v: dawn_core::Velocity) -> Self {
+        Self {
+            dx: v.dx,
+            dy: v.dy,
+            dz: v.dz,
+        }
+    }
 }
 
 /// Serialize a [`DomainEvent`] to the JSON line the Godot client expects.
@@ -59,83 +133,83 @@ impl From<dawn_core::Velocity> for VelJson {
 pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
     let j = match event {
         DomainEvent::ShipSpawned(e) => EventJson::ShipSpawned {
-            ship_id : e.ship_id.raw(),
+            ship_id: e.ship_id.raw(),
             position: e.initial_position.into(),
-            tick    : e.tick.value(),
+            tick: e.tick.value(),
         },
         DomainEvent::VelocityChanged(e) => EventJson::VelocityChanged {
-            ship_id : e.ship_id.raw(),
+            ship_id: e.ship_id.raw(),
             velocity: e.velocity.into(),
-            tick    : e.tick.value(),
+            tick: e.tick.value(),
         },
         DomainEvent::ShipDespawned(e) => EventJson::ShipDespawned {
             ship_id: e.ship_id.raw(),
-            tick   : e.tick.value(),
+            tick: e.tick.value(),
         },
         DomainEvent::DamageTaken(e) => EventJson::DamageTaken {
-            ship_id       : e.ship_id.raw(),
-            damage        : e.damage,
+            ship_id: e.ship_id.raw(),
+            damage: e.damage,
             current_shield: e.current_shield,
-            current_armor : e.current_armor,
-            current_hull  : e.current_hull,
-            tick          : e.tick.value(),
+            current_armor: e.current_armor,
+            current_hull: e.current_hull,
+            tick: e.tick.value(),
         },
         DomainEvent::ShipDestroyed(e) => EventJson::ShipDestroyed {
-            ship_id  : e.ship_id.raw(),
+            ship_id: e.ship_id.raw(),
             killer_id: e.killer_id.raw(),
-            tick     : e.tick.value(),
+            tick: e.tick.value(),
         },
         DomainEvent::TargetLocked(e) => EventJson::TargetLocked {
             locker_id: e.locker_id.raw(),
             target_id: e.target_id.raw(),
-            tick     : e.tick.value(),
+            tick: e.tick.value(),
         },
         DomainEvent::LockLost(e) => EventJson::LockLost {
             locker_id: e.locker_id.raw(),
             target_id: e.target_id.raw(),
-            tick     : e.tick.value(),
+            tick: e.tick.value(),
         },
         DomainEvent::ModuleActivated(e) => EventJson::ModuleActivated {
-            ship_id  : e.ship_id.raw(),
+            ship_id: e.ship_id.raw(),
             module_id: e.module_id.0,
-            slot     : format!("{:?}", e.slot),
-            tick     : e.tick.value(),
+            slot: format!("{:?}", e.slot),
+            tick: e.tick.value(),
         },
         DomainEvent::ModuleDeactivated(e) => EventJson::ModuleDeactivated {
-            ship_id  : e.ship_id.raw(),
+            ship_id: e.ship_id.raw(),
             module_id: e.module_id.0,
-            slot     : format!("{:?}", e.slot),
-            tick     : e.tick.value(),
+            slot: format!("{:?}", e.slot),
+            tick: e.tick.value(),
         },
         // Jump Gate Navigation (ADR-0009): Godot uses these to teleport the
         // ship to entry_pos and switch the star-system backdrop.
         DomainEvent::JumpGateUsed(e) => EventJson::JumpGateUsed {
-            ship_id    : e.ship_id.raw(),
-            gate_id    : e.gate_id.0,
+            ship_id: e.ship_id.raw(),
+            gate_id: e.gate_id.0,
             from_sector: e.from_sector.0,
-            to_sector  : e.to_sector.0,
-            entry_pos  : e.entry_pos.into(),
-            tick       : e.tick.value(),
+            to_sector: e.to_sector.0,
+            entry_pos: e.entry_pos.into(),
+            tick: e.tick.value(),
         },
         DomainEvent::StarSystemChanged(e) => EventJson::StarSystemChanged {
-            ship_id    : e.ship_id.raw(),
+            ship_id: e.ship_id.raw(),
             from_system: e.from_system.0,
-            to_system  : e.to_system.0,
-            tick       : e.tick.value(),
+            to_system: e.to_system.0,
+            tick: e.tick.value(),
         },
         // Internal node-ownership / combat events — not forwarded to clients.
-        DomainEvent::ShipFitted(_)             => return None,
-        DomainEvent::WeaponFired(_)            => return None,
-        DomainEvent::TackleApplied(_)          => return None,
-        DomainEvent::TackleReleased(_)         => return None,
+        DomainEvent::ShipFitted(_) => return None,
+        DomainEvent::WeaponFired(_) => return None,
+        DomainEvent::TackleApplied(_) => return None,
+        DomainEvent::TackleReleased(_) => return None,
         DomainEvent::SectorTransitRequested(_) => return None,
         DomainEvent::SectorTransitCompleted(_) => return None,
-        DomainEvent::SectorTransitAborted(_)   => return None,
+        DomainEvent::SectorTransitAborted(_) => return None,
         // ADR-0029: a coordinate rebase keeps the absolute position unchanged
         // and velocity is frame-invariant, so a client that integrates
         // VelocityChanged stays consistent without seeing the rebase. Client
         // anchor handling (floating origin, fresh InitialState) lands in step 6.
-        DomainEvent::AnchorRebased(_)          => return None,
+        DomainEvent::AnchorRebased(_) => return None,
     };
     serde_json::to_string(&j).ok()
 }
@@ -143,7 +217,9 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
 /// Build a `{"type":"Redirect","ws_addr":"..."}` JSON line for a client whose
 /// ship just jumped to a sector owned by a different physical node.
 pub fn redirect_json(ws_addr: std::net::SocketAddr) -> String {
-    let j = EventJson::Redirect { ws_addr: ws_addr.to_string() };
+    let j = EventJson::Redirect {
+        ws_addr: ws_addr.to_string(),
+    };
     serde_json::to_string(&j).unwrap_or_default()
 }
 
@@ -156,9 +232,9 @@ pub fn parse_client_command(line: &str) -> Option<ClientCommand> {
     match v.get("type")?.as_str()? {
         "MoveCommand" => {
             let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let target      = v.get("target")?;
+            let target = v.get("target")?;
             Some(ClientCommand::Move(MoveCommand {
-                ship_id        : ShipId(EntityId::from_raw(ship_id_raw)),
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
                 target_position: Position {
                     x: target.get("x")?.as_f64()? as f32,
                     y: target.get("y")?.as_f64()? as f32,
@@ -167,39 +243,39 @@ pub fn parse_client_command(line: &str) -> Option<ClientCommand> {
             }))
         }
         "LockOnCommand" => {
-            let ship_id_raw   = v.get("ship_id")?.as_u64()?;
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
             let target_id_raw = v.get("target_id")?.as_u64()?;
             Some(ClientCommand::LockOn(LockOnCommand {
-                ship_id  : ShipId(EntityId::from_raw(ship_id_raw)),
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
                 target_id: ShipId(EntityId::from_raw(target_id_raw)),
             }))
         }
         "ActivateModuleCommand" => {
-            let ship_id_raw   = v.get("ship_id")?.as_u64()?;
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
             let module_id_raw = v.get("module_id")?.as_u64()? as u32;
-            let slot_str      = v.get("slot")?.as_str()?;
+            let slot_str = v.get("slot")?.as_str()?;
             Some(ClientCommand::Activate(ActivateModuleCommand {
-                ship_id  : ShipId(EntityId::from_raw(ship_id_raw)),
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
                 module_id: ModuleId(module_id_raw),
-                slot     : parse_slot_kind(slot_str)?,
+                slot: parse_slot_kind(slot_str)?,
             }))
         }
         "DeactivateModuleCommand" => {
-            let ship_id_raw   = v.get("ship_id")?.as_u64()?;
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
             let module_id_raw = v.get("module_id")?.as_u64()? as u32;
-            let slot_str      = v.get("slot")?.as_str()?;
+            let slot_str = v.get("slot")?.as_str()?;
             Some(ClientCommand::Deactivate(DeactivateModuleCommand {
-                ship_id  : ShipId(EntityId::from_raw(ship_id_raw)),
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
                 module_id: ModuleId(module_id_raw),
-                slot     : parse_slot_kind(slot_str)?,
+                slot: parse_slot_kind(slot_str)?,
             }))
         }
         "AttackCommand" => {
             let attacker_id_raw = v.get("attacker_id")?.as_u64()?;
-            let target_id_raw   = v.get("target_id")?.as_u64()?;
+            let target_id_raw = v.get("target_id")?.as_u64()?;
             Some(ClientCommand::Attack(AttackCommand {
                 attacker_id: ShipId(EntityId::from_raw(attacker_id_raw)),
-                target_id  : ShipId(EntityId::from_raw(target_id_raw)),
+                target_id: ShipId(EntityId::from_raw(target_id_raw)),
             }))
         }
         "StopCommand" => {
@@ -257,10 +333,10 @@ pub fn parse_client_command(line: &str) -> Option<ClientCommand> {
 fn parse_slot_kind(s: &str) -> Option<SlotKind> {
     match s {
         "High" => Some(SlotKind::High),
-        "Mid"  => Some(SlotKind::Mid),
-        "Low"  => Some(SlotKind::Low),
-        "Rig"  => Some(SlotKind::Rig),
-        _      => None,
+        "Mid" => Some(SlotKind::Mid),
+        "Low" => Some(SlotKind::Low),
+        "Rig" => Some(SlotKind::Rig),
+        _ => None,
     }
 }
 
@@ -271,7 +347,9 @@ mod tests {
     use super::*;
     use dawn_core::{JumpGateId, NodeId};
 
-    fn ship_id(n: u64) -> ShipId { ShipId(EntityId::new(NodeId(0), n)) }
+    fn ship_id(n: u64) -> ShipId {
+        ShipId(EntityId::new(NodeId(0), n))
+    }
 
     #[test]
     fn move_command_json_is_parsed_into_client_command_move() {
@@ -312,7 +390,10 @@ mod tests {
         let cmd3 = parse_client_command(line3).expect("must parse");
         match cmd3 {
             ClientCommand::Warp(c) => {
-                assert_eq!(c.target, dawn_core::WarpTarget::Body(dawn_core::CelestialBodyId(1)));
+                assert_eq!(
+                    c.target,
+                    dawn_core::WarpTarget::Body(dawn_core::CelestialBodyId(1))
+                );
             }
             other => panic!("expected Warp, got {other:?}"),
         }
