@@ -38,6 +38,10 @@ var _vel_estimate : Vector3 = Vector3.ZERO  ## 速度インジケーター用（
 var _is_init      : bool    = false
 var _is_player    : bool    = false
 var _thrust_dir   : Vector3 = Vector3.ZERO
+## Hidden while warping faster than VISUAL_SPEED_CAP (ADR-0029 lore pass,
+## non-player ships only). Tracks the last applied visibility so we only
+## toggle `visible` on the actual crossing, not every frame.
+var _in_tunnel    : bool    = false
 
 ## ロック状態: "none" / "locking" / "locked"
 var _lock_state   : String  = "none"
@@ -78,14 +82,41 @@ func _process(delta: float) -> void:
 		return
 
 	## VelocityChanged (ADR-0008): integrate velocity every frame to avoid
-	## visible position jumps at tick boundaries. Cap the visual speed so a warp
-	## streaks smoothly instead of flinging the ship to f32-jitter territory.
-	var integ_vel := _velocity
+	## visible position jumps at tick boundaries.
 	var spd := _velocity.length()
-	if spd > VISUAL_SPEED_CAP:
-		integ_vel = _velocity / spd * VISUAL_SPEED_CAP
-	position += integ_vel * delta * TICKS_PER_SEC
-	_vel_estimate = integ_vel
+
+	if _is_player:
+		## The piloted ship: keep streaking at a capped, renderable speed
+		## instead of the literal (often ~10^8 Godot units/tick) warp speed --
+		## the camera follows this node, so hiding it or flinging it past the
+		## far plane would be disorienting. Continuous visual feedback while
+		## actually flying matters more here than for an observed ship.
+		var integ_vel := _velocity
+		if spd > VISUAL_SPEED_CAP:
+			integ_vel = _velocity / spd * VISUAL_SPEED_CAP
+		position += integ_vel * delta * TICKS_PER_SEC
+		_vel_estimate = integ_vel
+	else:
+		## Other ships, as observed by any client (ADR-0029 lore pass,
+		## 2026-06-23): clamping to a constant capped speed for the whole
+		## (often many-tick) warp made it look like the ship cruised at one
+		## flat speed forever, since real speed exceeds the cap for nearly the
+		## entire transit and only dips below it right at the accel/decel
+		## edges. Instead, render normally (uncapped -- it's already under the
+		## cap by construction) while real speed is at or below the cap, which
+		## covers the perceptible accelerate-into-warp and decelerate-out-of-warp
+		## edges; hide the ship for the bulk of the transit where it's moving
+		## too fast to render sanely, rather than showing a flat, wrong-feeling
+		## cruise. Position keeps integrating the UNCAPPED velocity while
+		## hidden so the ship is near its true position when it reappears
+		## (instead of resuming from a stale frozen spot) -- the jump itself is
+		## invisible since the node isn't drawn.
+		var in_tunnel := spd > VISUAL_SPEED_CAP
+		if in_tunnel != _in_tunnel:
+			visible    = not in_tunnel
+			_in_tunnel = in_tunnel
+		position += _velocity * delta * TICKS_PER_SEC
+		_vel_estimate = _velocity
 
 	## Rotate the ship to face its velocity direction.
 	## The Hull mesh tip is in local -Z after its -90° X rotation, which
@@ -114,10 +145,12 @@ func _process(delta: float) -> void:
 ## godot_pos is already in Godot world space (main.gd's WorldSpace converts at
 ## the boundary, applying the floating origin). Ship nodes stay origin-agnostic.
 func initialize(id: int, godot_pos: Vector3) -> void:
-	ship_id   = id
-	position  = godot_pos
-	_velocity = Vector3.ZERO
-	_is_init  = true
+	ship_id    = id
+	position   = godot_pos
+	_velocity  = Vector3.ZERO
+	_is_init   = true
+	_in_tunnel = false
+	visible    = true
 
 ## VelocityChanged イベントで速度を更新する（ADR-0008）。
 ## server_vel はサーバー座標系の速度ベクトル（units/tick）。
