@@ -55,14 +55,8 @@ cargo run -p dawn-simulation --bin simulate --release -- --aoi-bench  # AoI ス�
 data/ship_types.toml   # 船種定義（HP・速度・スロット数など）
 data/modules.toml      # モジュール定義（ダメージ・射程・StatDelta など）
 
-# コミット
-# → 規約: docs/commit-convention.md を参照すること（英語・Conventional Commits 準拠）
-# 例:
-#   feat(dawn-ecs): add CapacitorSystem with cycle-based cap drain
-#   fix(godot): correct cap bar percentage calculation
-#   docs(adr): update ADR-0006 checklist to reflect Phase 6 completion
-
----
+# コミット（英語・Conventional Commits 準拠）
+# → 規約と例は docs/commit-convention.md を参照
 
 ---
 
@@ -618,117 +612,13 @@ Tick なしのイベントは INV-005 違反として拒否する。
 
 ## 7. Event Schema Evolution Rules
 
-### フェーズによる適用範囲
+**現在は Phase 6（プレリリース）。永続化された外部ユーザーのイベントログが存在しない
+ため、破壊的変更（フィールド削除・型変更・イベント削除）を直接行ってよい
+（Upcaster・V2 命名・Deprecated マークは不要）。ただし docs/event-catalog.md と本ガイドは
+常に実態と合わせること。**
 
-このセクションのルールには **プレリリース（現在）** と **リリース以降** の 2 段階がある。
-
-```
-プレリリース（Phase 1〜リリース前）:
-  永続化されたイベントログを持つ外部ユーザーが存在しない。
-  → 破壊的変更（フィールド削除・型変更・イベント削除）を直接行ってよい。
-  → Upcaster・V2 命名・Deprecated マークは不要。
-  → ただし docs/event-catalog.md と AI_DEVELOPMENT_GUIDE.md は常に実態と合わせること。
-
-リリース以降（本番ログが存在する段階）:
-  外部ユーザーのイベントログが存在する。
-  → 既存フィールドの変更・削除は Upcaster なしに行ってはならない。
-  → 以下「リリース以降の制約」が完全に適用される。
-```
-
-**現在は Phase 6（プレリリース）。破壊的変更は許可されている。**
-
----
-
-### リリース以降の基本原則
-
-**既存の Event フィールドを変更・削除してはならない。**
-**新しいフィールドの追加のみが許可される。**
-
-### リリース以降に許可される変更
-
-```rust
-// 変更前
-pub struct WeaponFired {
-    pub ship_id  : ShipId,
-    pub target_id: ShipId,
-    pub damage   : f32,
-    pub tick     : Tick,
-}
-
-// 変更後: 新フィールドの追加は許可（必ず Option にする）
-pub struct WeaponFired {
-    pub ship_id  : ShipId,
-    pub target_id: ShipId,
-    pub damage   : f32,
-    pub tick     : Tick,
-    pub hit_chance: Option<f32>,  // ← 新フィールドは Option<T> で追加
-}
-```
-
-### リリース以降に禁止される変更
-
-```rust
-// 禁止1: フィールドの削除
-pub struct WeaponFired {
-    pub ship_id  : ShipId,
-    // target_id を削除 ← 禁止。過去のEventのReplayでデシリアライズが失敗する
-    pub damage   : f32,
-    pub tick     : Tick,
-}
-
-// 禁止2: フィールドの型変更
-pub struct WeaponFired {
-    pub ship_id  : ShipId,
-    pub target_id: u64,   // ShipId → u64 に変更 ← 禁止
-    pub damage   : f32,
-    pub tick     : Tick,
-}
-
-// 禁止3: フィールド名の変更（シリアライゼーションのキーが変わる）
-pub struct WeaponFired {
-    pub attacker_id: ShipId,  // ship_id → attacker_id に変更 ← 禁止
-    pub target_id  : ShipId,
-    pub damage     : f32,
-    pub tick       : Tick,
-}
-```
-
-### リリース以降に破壊的変更が必要な場合の手順
-
-```
-1. 新しい Event を別名で定義する
-   例: WeaponFired → WeaponFiredV2
-
-2. 古い Event を Deprecated としてマークする（削除しない）
-   /// @deprecated WeaponFiredV2 を使用すること
-   pub struct WeaponFired { ... }
-
-3. Upcaster を実装する
-   impl Upcaster for WeaponFired {
-       fn upcast(self) -> WeaponFiredV2 { ... }
-   }
-
-4. Replay 時に Upcaster を通して新形式に変換する
-
-5. docs/event-catalog.md を更新する
-
-6. 対応する ADR を作成する（既存 ADR の更新ではなく新規作成）
-```
-
-### Event Catalog との同期
-
-`docs/event-catalog.md` が Event の唯一の仕様書である。
-フェーズにかかわらず、コードの変更と同時に更新すること。
-
-```bash
-# Event定義とカタログの整合をCIで検証する
-cargo run --bin check-event-catalog
-
-# このコマンドが失敗する場合、以下のいずれかが発生している:
-# - コードにあってカタログにないEvent
-# - カタログにあってコードにないEvent
-# - フィールド定義の不一致
-```
+リリース以降の制約（既存フィールドの変更・削除禁止、Upcaster 手順、許可/禁止の
+コード例）と Event Catalog 同期の詳細は **docs/event-schema-evolution.md** を参照。
 
 ---
 
@@ -920,237 +810,32 @@ bash addons/gdUnit4/runtest.sh --godot_binary "$GODOT_BIN" -a test
 
 ## 9. AI Change Checklist
 
-コードを変更する前に以下を確認すること。
-**全項目に「問題なし」と判断できない場合は変更を止め、確認を求めること。**
+コードを変更する前にチェックリストを点検すること。全項目に「問題なし」と判断できない
+場合は変更を止め、確認を求める。
 
-### 変更前の確認
-
-```
-□ 変更するCrateを特定した
-□ そのCrateの責務を Crate別責務早見表（セクション11）で確認した
-□ 変更によって影響を受けるCrateを Dependency DAG（セクション3）で特定した
-□ 変更が現在のスコープ内であることを確認した（セクション1）
-□ 変更が Architecture Invariants（セクション2）のいずれかを破らないことを確認した
-```
-
-### イベントを追加・変更する場合の追加確認
-
-```
-□ docs/event-catalog.md の更新を計画した
-□ 新Eventは dawn-core/src/events.rs に追加した（他のCrateに追加していない）
-□ 新Eventに tick: Tick フィールドが含まれる（ShipMoveカテゴリのEvent）
-□ 新Eventのフィールドは全て Option ではなく必須フィールドで設計した
-  （Optional フィールドは後から追加、最初から Optional にしない）
-□ 対応する Command が dawn-core/src/commands.rs に存在する
-□ 既存 Event を変更する場合: リリース済みか確認した
-  - プレリリース（現在）→ 破壊的変更を直接行ってよい（Upcaster 不要）
-  - リリース以降       → §7「リリース以降に破壊的変更が必要な場合の手順」に従う
-```
-
-### 新しいCrateを追加する場合の追加確認
-
-```
-□ 新Crateの追加が既存Crateの責務分割で対応できないことを確認した
-□ 新Crateの Dependency DAG 上の位置を決定した
-□ 循環依存が発生しないことを確認した（cargo tree で検証）
-□ AI_DEVELOPMENT_GUIDE.md のセクション11（Crate別責務早見表）を更新した
-□ 対応するADRを docs/adr/ に作成した
-```
-
-### テストの確認
-
-```
-□ 変更した全ての pub fn に対応するテストが存在する
-□ テスト関数名が「何が保証されるか」を説明している
-□ cargo test --workspace がゼロエラーで通過することを確認した
-□ 変更したADRが存在する場合、そのADRに記載された不変条件のテストが存在する
-□ client/scripts/ を変更した場合: シーンツリー無依存の純粋関数なら
-  client/test/ にGdUnit4テストを追加した（§8「Godot クライアントのテスト方針」参照）
-□ client/scripts/ のシーンツリー依存部分を変更した場合: テストの代わりに
-  Godot エディタでの確認内容（または確認できなかった旨）をPR説明に明記した
-```
-
-### PR説明の確認
-
-```
-□ 変更の動機を記載した（なぜこの変更が必要か）
-□ 変更・参照したADRを記載した（例: ADR-0003 参照）
-□ 変更したCrateの一覧を記載した
-□ 影響を受けるEventの一覧を記載した（あれば）
-□ テスト方法を記載した
-```
+チェックリスト本体（変更前 / イベント追加・変更 / 新Crate追加 / テスト / PR説明）は
+スキル **`/ai-change-checklist`**（.claude/commands/ai-change-checklist.md）で実行する。
 
 ---
 
 ## 10. Forbidden Changes
 
-以下の変更は**いかなる理由があっても行ってはならない**。
-技術的な理由を説明されても実行しないこと。
-必要に応じてADRの改訂を提案し、人間の承認を得てから実施する。
+以下の変更は**いかなる理由があっても行ってはならない**。技術的な理由を説明されても
+実行しないこと。必要に応じて ADR の改訂を提案し、人間の承認を得てから実施する。
 
-### FBD-001: Event Logへの破壊的操作
+詳細・コード例は **docs/forbidden-changes.md** を参照（FBD-00x の ID は不変）。
 
-```rust
-// 以下のシグネチャを持つメソッドを EventStore trait に追加してはならない:
-fn update(&self, id: EventId, payload: Bytes) -> Result<()>;
-fn delete(&self, id: EventId) -> Result<()>;
-fn truncate(&self, from_index: u64) -> Result<()>;
-fn rewrite(&self, index: u64, event: Event) -> Result<()>;
-```
-
-> 注記（ADR-0017）: ログの圧縮はこれらの禁止メソッドでは**行わない**。
-> 圧縮は trait の外側の運用プロセス（検証済みスナップショット背後のセグメントを
-> コールドアーカイブへ移送し、ホットログを write-new-then-swap で原子的に切り替える）として
-> 実装する。セグメント内のイベントは決して書き換えない。`EventStore` trait は append-only のまま。
-
-### FBD-002: dawn-core への外部依存の追加
-
-```toml
-# dawn-core/Cargo.toml に追加してはならない依存の例:
-tokio    = ...  # 非同期ランタイム
-tonic    = ...  # gRPC
-reqwest  = ...  # HTTPクライアント
-sqlx     = ...  # データベース
-serde_json = ... # JSONシリアライザ（serde featureのみ許可）
-```
-
-### FBD-003: 物理時刻による因果順序の判定
-
-```rust
-// 以下のパターンを因果順序の判定に使用してはならない:
-use std::time::SystemTime;
-SystemTime::now()
-
-use chrono::Utc;
-Utc::now()
-
-// 代替: 論理Tickを使用する
-self.tick_counter.fetch_add(1, Ordering::SeqCst)
-```
-
-### FBD-004: Actor間の直接メソッド呼び出し
-
-```rust
-// 禁止: ActorAがActorBのメソッドを直接呼ぶ
-struct SectorSimulatorActor {
-    replication_actor: Arc<ReplicationActor>, // ← Arcで直接保持してはならない
-}
-
-impl SectorSimulatorActor {
-    async fn on_tick_complete(&self) {
-        self.replication_actor.sync(delta).await; // ← 直接呼び出し禁止
-    }
-}
-
-// 正しい実装: Mailbox経由でメッセージを送る
-struct SectorSimulatorActor {
-    replication_tx: mpsc::Sender<ReplicationMessage>, // ← Senderのみ保持
-}
-
-impl SectorSimulatorActor {
-    async fn on_tick_complete(&self, delta: Delta) {
-        let _ = self.replication_tx.send(ReplicationMessage::Sync(delta)).await;
-    }
-}
-```
-
-### FBD-005: ShipのEntityId再利用
-
-```rust
-// 禁止: Despawn済みIDのプール管理と再割り当て
-struct IdPool {
-    recycled: VecDeque<ShipId>,
-}
-
-impl IdPool {
-    fn next_id(&mut self) -> ShipId {
-        self.recycled.pop_front().unwrap_or_else(|| self.generate_new())
-        // ↑ recycled からの取り出しが禁止
-    }
-}
-```
-
-### FBD-006: Raftを経由しないSector Transit
-
-```rust
-// 禁止: RaftをバイパスしたSector間の直接状態移転
-async fn teleport_ship_between_sectors(
-    &self,
-    ship_id: ShipId,
-    from: SectorId,
-    to: SectorId,
-) {
-    self.sector_nodes[from].remove_ship(ship_id).await; // Raftなし
-    self.sector_nodes[to].add_ship(ship_id).await;     // Raftなし
-}
-```
-
-### FBD-007: テストなしでのpub fnの追加
-
-```
-CIが以下を検出した場合、PRを自動拒否する:
-  - pub fn が追加されているが対応するテストがない
-  - カバレッジが 80% を下回る
-
-例外はない。テストを書けない場合は pub(crate) または pub(super) にする。
-```
-
-### FBD-009: スキルポイント育成 / 受動成長 / AFK 採掘の実装
-
-> ゲーム化（ADR-0016）後も **維持** する。反グラインドは "EVE を超える" ための核であり、
-> §6 の観測（18k 文書・フォーラム傾向）でも最も嫌われた要素群として現れた
-> （フォーラム声は実証ではない — 選択バイアスに留意・eve-reference §11.5）。
-
-```
-【スキルポイント / 受動成長】
-以下のいかなる形式のスキルポイント制・受動成長も実装してはならない:
-  - 時間経過でアンロックされる能力
-  - プレイ時間に比例して強くなるパッシブ成長
-  - 課金で加速できる育成要素（Pay-to-Win）
-
-理由:
-  ゲームの上手さに関係なく、ゲーム時間・課金額で性能が変わる。
-  公平感（Perceived Fairness）を根本から損なう時代遅れの設計。
-
-  ※ 「キャラクター」を*エンティティ*として持つことは可（ADR-0016 で解禁）。
-    禁止するのは「キャラクターが時間/課金で強くなる育成」であって、存在そのものではない。
-
-【AFK 採掘】
-採掘レーザーを起動して放置するコンテンツを実装してはならない。
-
-理由:
-  採掘は「放置するだけ」であり、プレイヤーが意図的な判断を下す機会がない。
-  EVE では採掘者は「無力な標的」として海賊側のコンテンツとして機能する。
-  採掘している人自身はゲームをしていない。
-
-  設計の中心的な問い「その機能はプレイヤーが意図的な判断を下す機会を増やすか？」
-  に対して AFK 採掘は No である。
-
-  ※ 「能動的判断を伴う資源獲得」や「資源を消費シンクにして希少性で判断を強制する」設計は
-    検討可（ADR-0016 §5・eve-reference §7.4.3）。禁止するのは "放置で進む採取動作" のみ。
-
-  → docs/game-design.md §5 参照
-```
-
-### FBD-008: ~~MVP範囲外の実装~~ → 撤廃（ADR-0016）
-
-```
-【撤廃】ゲーム化（ADR-0016）に伴い、本禁則は撤廃した。
-以下のクレートは ADR 承認のうえ作成してよい:
-  crates/dawn-economy/   ← 経済システム
-  crates/dawn-character/ ← キャラクター（エンティティ。育成は FBD-009 で引き続き禁止）
-  crates/dawn-inventory/ ← インベントリ
-  crates/dawn-ui/        ← UI 専用クレート
-  crates/dawn-graphics/  ← グラフィックス専用クレート
-
-ただし新規クレートは従来どおりの手続きを踏むこと:
-  - 個別 ADR を起票し、人間の承認を得る（§9）
-  - Dependency DAG（§3）上の位置を確定し、循環依存を作らない
-  - §11 Crate別責務早見表を更新する
-
-Combat / Fitting ロジックは引き続き dawn-ecs / dawn-core 内に実装する
-（独立クレートに切り出すなら ADR が必要）。
-```
+| ID | 禁止事項 |
+|---|---|
+| FBD-001 | Event Log への破壊的操作（update/delete/truncate/rewrite を EventStore に追加しない。圧縮は trait 外の運用プロセス・ADR-0017） |
+| FBD-002 | dawn-core への外部依存の追加（tokio/tonic/reqwest/sqlx/serde_json 等。serde feature のみ可） |
+| FBD-003 | 物理時刻（SystemTime::now / Utc::now）による因果順序の判定。代替は論理 Tick |
+| FBD-004 | Actor 間の直接メソッド呼び出し（Arc 直接保持禁止。Mailbox / mpsc::Sender 経由） |
+| FBD-005 | Ship の EntityId 再利用（Despawn 済み ID のプール再割り当て禁止） |
+| FBD-006 | Raft を経由しない Sector Transit（スプリットブレイン防止・INV-003） |
+| FBD-007 | テストなしでの pub fn の追加（CI が自動拒否。書けないなら pub(crate)/pub(super)） |
+| FBD-008 | ~~MVP 範囲外の実装~~ → **撤廃**（ADR-0016。新規クレートは ADR + §11 更新で可） |
+| FBD-009 | スキルポイント育成 / 受動成長 / Pay-to-Win / AFK 採掘の実装（ADR-0016 後も維持） |
 
 ---
 
@@ -1174,134 +859,23 @@ Combat / Fitting ロジックは引き続き dawn-ecs / dawn-core 内に実装�
 
 ## 12. よくある設計違反パターン
 
-AIが陥りやすいアンチパターンとその修正方法を示す。
-
-### パターン1: 「便利だから」とState同期を使う
-
-```
-状況: ノード間でPosition差分が発生した時、Stateを直接上書きで同期しようとする
-
-違反コード:
-  // "Eventより直接同期の方が速い" という誤った判断
-  node_b.update_position(ship_id, node_a.get_position(ship_id))
-
-正しい判断:
-  EventをGossipで伝播させる。StateはEventから自動的に収束する。
-  State直接同期は INV-001 と INV-002 を同時に破る。
-```
-
-### パターン2: テストをスキップして「後で書く」
-
-```
-状況: 実装が複雑でテストを後回しにしようとする
-
-なぜ危険か:
-  AIは次のセッションでコンテキストを持ち越さない。
-  「後で書く」は「永遠に書かない」と等しい。
-  テストなしのコードは次のAIセッションで意図せず破壊される。
-
-対処:
-  実装が複雑ならテストを先に書き、テストを通す最小実装を先に行う。
-  テストが仕様書になる。
-```
-
-### パターン3: 新機能のためにdawn-coreを肥大化させる
-
-```
-状況: 新しい機能を追加するとき、dawn-coreに実装ロジックを追加しようとする
-
-違反コード（dawn-core/src/position.rs）:
-  impl Position {
-      pub async fn broadcast_to_nodes(&self, nodes: &[NodeAddr]) { // ← ネットワーク処理
-          ...
-      }
-  }
-
-正しい判断:
-  dawn-core はデータ定義のみ。
-  ネットワーク処理は dawn-replication または dawn-sector-node に配置する。
-```
-
-### パターン4: Tickを物理時刻に「合わせる」最適化
-
-```
-状況: "Tickと実時間を合わせると分かりやすい" という理由で物理時刻を使おうとする
-
-危険性:
-  物理時刻に依存した瞬間、3ノード間で Tick の順序が非決定論的になる。
-  テスト環境と本番環境でTick順序が変わる可能性がある。
-  NTPのステップ補正で時刻が逆行した瞬間、システムが破綻する。
-
-対処:
-  Tick は論理カウンタのまま維持する。
-  "人間が読みやすい時刻" は Observation Layer（ログ・メトリクス）でのみ使う。
-  INV-005 を参照すること。
-```
-
-### パターン5: Sector Transitを「最適化」してRaftをスキップする
-
-```
-状況: "レイテンシ削減のため" Sector Transit を Raft なしで実装しようとする
-
-違反の結果:
-  2つのノードが同一Shipの所有権を同時に主張する状態（スプリットブレイン）
-  → 両方のSectorが独立したShipMoveを処理し始める
-  → 世界が分岐する（Single Shardの破壊）
-
-対処:
-  Sector Transit は必ず Raft を経由する。INV-003 を参照すること。
-  レイテンシが問題なら Transit の頻度を下げる設計を検討する。
-  ※ Raft は Phase 7（ADR-0014）で実装済み。Transit は Raft Log 経由で動作する。
-```
-
-### パターン6: FittingSnapshot をイベントに含めず ID だけ記録する
-
-```
-状況: "モジュールIDだけ保存してレジストリで引けば十分" という判断で
-      ShipFitted イベントに ModuleId のリストだけを含めようとする
-
-違反の結果:
-  レジストリの内容が変わった場合（モジュールの stat が更新されるなど）、
-  過去の Event を Replay すると当時と異なる stat が再現される。
-  → INV-002 違反（Event Replay で世界が完全に再現されない）
-
-正しい実装:
-  ShipFitted イベントには FittingSnapshot（モジュール定義全体）を含める。
-  Replay はレジストリに依存せず、イベントの内容だけで完結しなければならない。
-  → ADR-0006 §1 参照
-```
-
-### パターン8: 状態変化をイベントとして表現する
-
-```
-状況: モジュールのオン/オフを表すイベントに is_active フラグを持たせようとする
-
-違反コード:
-  ModuleToggled { ship_id, module_id, is_active: bool, tick }
-  // → is_active を見ないと何が起きたかわからない
-  // → 状態の記述であって「事実」ではない
-
-正しい実装:
-  ModuleActivated   { ship_id, module_id, slot, tick }  // オンにした
-  ModuleDeactivated { ship_id, module_id, slot, tick }  // オフにした
-  // → イベント名自体が「何が起きたか」を表す
-
-原則:
-  Event は既に起きた事実（INV-006）。
-  「状態がこうなった」ではなく「この動作が起きた」と命名する。
-  過去形・動詞（Activated, Fired, Destroyed）を使う。
-  is_*/has_* フラグをイベントのキーフィールドにしない。
-```
+AI が陥りやすいアンチパターン（State 直接同期 / テスト後回し / dawn-core 肥大化 /
+Tick の物理時刻化 / Raft スキップ / FittingSnapshot 省略 / 状態フラグのイベント化）と
+その修正方法は **docs/design-violations.md** を参照。
 
 ---
 
 ## 付録: 参照すべきドキュメント
 
 ```
-設計の根拠   : docs/adr/ 以下の各ADRファイル
-Eventの仕様  : docs/event-catalog.md
-Crate一覧    : Cargo.toml (workspace)
-型の定義     : dawn-core/src/ 以下
+設計の根拠       : docs/adr/ 以下の各ADRファイル
+Eventの仕様      : docs/event-catalog.md
+Crate一覧        : Cargo.toml (workspace)
+型の定義         : dawn-core/src/ 以下
+禁止変更の詳細   : docs/forbidden-changes.md（§10 FBD-00x の正典）
+設計違反パターン : docs/design-violations.md（§12 の正典）
+イベント進化規則 : docs/event-schema-evolution.md（§7 詳細の正典）
+変更前チェック   : /ai-change-checklist スキル（§9 の正典）
 ```
 
 ## 付録: このファイル自体の更新ルール
@@ -1319,7 +893,7 @@ AIは AI_DEVELOPMENT_GUIDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-19（肥大化解消 — §1 スコープの ADR ごと実装メモを ADR 参照テーブルに圧縮、§6 Tick 処理順序を docs/tick-model.md §3 へ委譲（順序と境界のみ残置）。不変条件・禁止事項の文言は不変。人間承認済み）*
-*前回更新: 2026-06-18（ADR-0024 Tackle / ADR-0025 天体 実装反映）*
-*対応ADR: ADR-0001 〜 ADR-0027（ADR-0020 Simulation LoD は deferred）*
+*最終更新: 2026-06-23（ADR-0030 ステアリング再構成 — §9 を /ai-change-checklist スキルへ、§10 詳細を docs/forbidden-changes.md へ、§12 を docs/design-violations.md へ、§7 詳細を docs/event-schema-evolution.md へ降格。ガイド本体は ID 一覧・要約・リンクのみ残置。番号体系（INV-/FBD-/§）と文言は不変。人間承認済み）*
+*前回更新: 2026-06-19（肥大化解消 — §1 スコープの ADR ごと実装メモを ADR 参照テーブルに圧縮、§6 Tick 処理順序を docs/tick-model.md §3 へ委譲（順序と境界のみ残置）。不変条件・禁止事項の文言は不変。人間承認済み）*
+*対応ADR: ADR-0001 〜 ADR-0030（ADR-0020 Simulation LoD は deferred）*
 *次回レビュー予定: Phase 8D（分散インフラ）設計時 / Signature Resolution 着手時*

@@ -1,5 +1,5 @@
 ---
-status: Proposed
+status: Accepted
 date: 2026-06-23
 ---
 
@@ -61,22 +61,25 @@ ADR-0030 着手ブランチ（chore/steering-hooks）で 2 本導入済み:
 
 ### 2. 手続き的ワークフローの Skill 化
 
-ガイドの手続き的セクションを Skill（.claude/commands/）へ抽出し、ガイド本体には
-「正典の所在を指す短い節 + 番号アンカー」だけを残す:
+着手前チェックの手続きである §9 AI Change Checklist を Skill（.claude/commands/）へ
+抽出し、ガイド本体には「正典の所在を指す短い節」だけを残す。remove-event スキルが
+既にこのパターンの実証例である。
 
-- §4 Event Workflow → 新規 Skill（remove-event の追加手順版に相当する add-event 等）
-- §7 Event Schema Evolution Rules → 上記 Skill に統合、または専用 Skill
-- §9 AI Change Checklist → Skill（着手前チェックの手続き）
+> 当初案では §4 Event Workflow / §7 Schema Evolution も Skill 化を検討したが、これらは
+> 「呼び出して実行する手続き」ではなく多数の変更に常時効く **参照ルール** であるため、
+> Skill 化すると見落としリスクが高い。§4（正規イベントフロー）は常時ロード核に残し、
+> §7 の詳細（リリース以降の Upcaster 手順・コード例。現在はプレリリースで非適用）は
+> 参照 doc に降格してプレリリース注記＋リンクのみ残す（下記 3 に統合）。
 
-remove-event スキルが既にこのパターンの実証例である。
-
-### 3. 詳細カタログの参照ドキュメント降格
+### 3. 詳細カタログ・非適用ルールの参照ドキュメント降格
 
 常時は不要だが必要時に参照する詳細は、独立 doc に出して「必要時に Read」する:
 
-- §10 Forbidden Changes の詳細列挙 / §12 よくある設計違反パターン
-  → docs/ 配下の参照 doc に本文を移し、ガイドには FBD-00x の一覧（ID・一行要約）
-    と参照リンクのみ残す。
+- §10 Forbidden Changes の詳細列挙 → `docs/forbidden-changes.md`。ガイドには
+  FBD-00x の一覧（ID・一行要約）と参照リンクのみ残す。
+- §12 よくある設計違反パターン → `docs/design-violations.md`。ガイドには参照リンクのみ。
+- §7 Event Schema Evolution の詳細 → `docs/event-schema-evolution.md`。ガイドには
+  「現在プレリリース＝破壊的変更可」の注記とリンクのみ残す。
 
 ### 4. crate 固有制約の path-scoped Rule 化（任意・将来）
 
@@ -110,11 +113,13 @@ remove-event スキルが既にこのパターンの実証例である。
 - [x] Hook: block-cjk-commit.py（PreToolUse）導入・検証
 - [x] Hook: check-rust-fmt.py（PostToolUse）導入・検証
 - [x] .claude/settings.json にフック登録（チーム共有）
-- [ ] 本 ADR の人間レビュー・承認（Proposed → Accepted）
-- [ ] §4 / §7 / §9 を Skill 化（add-event 等）
-- [ ] §10 詳細 / §12 を参照 doc へ降格し、ガイドには ID 一覧 + リンクを残置
-- [ ] ガイド本体を最小核へ再構成（INV-/FBD-/§番号アンカーは ID 維持）
-- [ ] doc-sync スキルの照合対象パスを再構成後の配置に更新
+- [x] 本 ADR の人間レビュー・承認（Proposed → Accepted）
+- [x] §9 AI Change Checklist を Skill 化（/ai-change-checklist）
+- [x] §10 詳細 → docs/forbidden-changes.md（ガイドに FBD ID 一覧 + リンク残置）
+- [x] §12 → docs/design-violations.md（ガイドにリンク残置）
+- [x] §7 詳細 → docs/event-schema-evolution.md（ガイドにプレリリース注記 + リンク残置）
+- [x] §4 Event Workflow は常時ロード核に残置（INV-/FBD-/§番号アンカーは ID 維持）
+- [x] doc-sync スキルの照合対象パスを再構成後の配置に更新
 - [ ]（任意・将来）dawn-core 制約の path-scoped Rule 化
 
 ## 期待効果
