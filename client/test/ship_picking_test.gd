@@ -67,16 +67,31 @@ func test_pick_ship_at_returns_minus_one_when_nothing_is_within_pick_radius() ->
 
 # -- pick_gate_at -----------------------------------------------------------------
 
-func test_pick_gate_at_returns_the_gate_whose_converted_position_is_on_the_ray() -> void:
+func test_pick_gate_at_returns_the_gate_whose_marker_is_on_the_ray() -> void:
 	var camera: Camera3D = _make_camera()
-	## Mirrors main.gd's _server_to_godot_pos at WORLD_SCALE=0.1: server
-	## (0,0,0) -> Godot (0,0,0), right on the test camera's ray.
-	var to_godot_pos: Callable = func(p: Vector3) -> Vector3:
-		return Vector3(p.x, p.y, -p.z) * 0.1
-	var gates: Array = [{"gate_id": 3, "position": Vector3.ZERO}]
+	var gates_root: Node = auto_free(Node.new())
+	add_child(gates_root)
 
-	var picked: int = ShipPicking.pick_gate_at(camera, _screen_center(), gates, to_godot_pos)
+	var marker := Node3D.new()
+	marker.set_meta("gate_id", 3)
+	gates_root.add_child(marker)
+	marker.global_position = Vector3.ZERO  ## on the test camera's ray
+
+	var picked: int = ShipPicking.pick_gate_at(camera, _screen_center(), gates_root)
 	assert_int(picked).is_equal(3)
+
+
+func test_pick_gate_at_ignores_children_without_a_gate_id_meta() -> void:
+	var camera: Camera3D = _make_camera()
+	var gates_root: Node = auto_free(Node.new())
+	add_child(gates_root)
+
+	var decoy := Node3D.new()
+	gates_root.add_child(decoy)
+	decoy.global_position = Vector3.ZERO  ## on the ray, but has no gate_id meta
+
+	var picked: int = ShipPicking.pick_gate_at(camera, _screen_center(), gates_root)
+	assert_int(picked).is_equal(-1)
 
 
 # -- screen_point_distance ---------------------------------------------------------

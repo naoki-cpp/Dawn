@@ -262,6 +262,27 @@ ADR §1 決定 #5「実値表示（m/s・AU）の内部↔表示変換は単一�
 
 **検証**：GdUnit4 全75件 green。
 
+### ゲートマーカーも遠距離クランプ対応（2026-06-23・ユーザー指摘）
+
+ゲートは元々マーカー（リング＋ラベル）を持っていたが、惑星マーカーのような「カメラ遠方クリップ面の手前へ
+クランプして常に見える」処理（`_update_body_markers`／`NAV_MARKER_CLAMP_DISTANCE`、旧名
+`BODY_MARKER_CLAMP_DISTANCE`）が無かった。真AU化でゲートが恒星から AU 級に離れた今、クランプ無しではゲート
+マーカーが far plane（`scenes/main.tscn` の `far=100000`）の外に出て実質見えなくなる ——
+ちょうど惑星が以前に抱えていた問題と同根。
+
+**実装**：
+- `navigation_marker_renderer.gd`：ゲートマーカーに `gate_id`／`gate_pos`（サーバ座標）の meta を追加
+  （惑星マーカーの `body_id`／`body_pos` と同じパターン）。
+- `main.gd`：`_update_gate_markers()` を新設（`_update_body_markers()` と同型・毎フレーム呼び出し）。
+  クランプ定数は両者で共有するため `BODY_MARKER_CLAMP_DISTANCE` を `NAV_MARKER_CLAMP_DISTANCE` に改名。
+  `_apply_origin_rebase` のゲート位置シフトは不要になったので削除（毎フレーム再配置されるため、惑星と同じ理由）。
+- `ship_picking.gd`：`pick_gate_at` の引数を `gates: Array, to_godot_pos: Callable`（サーバ座標を都度再計算）
+  から `gates_root: Node`（マーカーの実際の `global_position` を見る）に変更。クランプ前提のままだと
+  「見えている場所」と「クリック判定される場所」がズレる（惑星の `pick_body_at` は元から実位置基準だった）。
+- テスト更新：`ship_picking_test.gd` の `pick_gate_at` テストを新シグネチャに対応＋ meta 欠落時のテストを追加。
+
+**検証**：GdUnit4 全76件 green。
+
 ### 通し review #2（2026-06-22・R1–R3 修正後）
 
 R1（ゲート f64 源）・R3（アンカー欠落 assert）・R2（AoI f64 化）を入れた後の再レビュー。

@@ -176,6 +176,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_maybe_rebase_origin()
 	_update_body_markers()
+	_update_gate_markers()
 	_update_gate_proximity()
 	_update_sun_direction()
 	_update_warp_tunnel_effect(delta)
@@ -204,16 +205,16 @@ const UnitFormat = preload("res://scripts/unit_format.gd")
 func _server_to_godot_pos(p: Vector3) -> Vector3:
 	return _world.to_godot(p)
 
-## Distance (Godot units) past which a celestial body marker is clamped toward
-## the player so it stays inside the camera far plane (true-AU only). At the
-## current compressed scale all bodies sit well inside this, so the marker is
-## drawn at its real position (no clamping). When true scale is reactivated the
-## clamp keeps far bodies visible as background markers (spike S5). Kept inside
-## the camera far plane (scenes/main.tscn far=100000).
-const BODY_MARKER_CLAMP_DISTANCE : float = 30_000.0
+## Distance (Godot units) past which a celestial-body or jump-gate marker is
+## clamped toward the player so it stays inside the camera far plane (true-AU
+## only). At the current compressed scale everything sits well inside this, so
+## markers draw at their real position (no clamping). At true AU this keeps
+## far bodies/gates visible as background bearing markers (spike S5) instead of
+## falling outside the far plane (scenes/main.tscn far=100000) and vanishing.
+const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
 
 ## Re-place every celestial-body marker each frame at the body's true bearing
-## from the player, clamped to BODY_MARKER_CLAMP_DISTANCE only when farther than
+## from the player, clamped to NAV_MARKER_CLAMP_DISTANCE only when farther than
 ## that (a no-op at compressed scale). The marker stores its server position in
 ## the "body_pos" meta (NavigationMarkerRenderer).
 func _update_body_markers() -> void:
@@ -227,10 +228,33 @@ func _update_body_markers() -> void:
 		var body_godot: Vector3 = _server_to_godot_pos(marker.get_meta("body_pos") as Vector3)
 		var delta: Vector3 = body_godot - player_godot
 		var dist: float = delta.length()
-		if dist > BODY_MARKER_CLAMP_DISTANCE:
-			marker.global_position = player_godot + delta / dist * BODY_MARKER_CLAMP_DISTANCE
+		if dist > NAV_MARKER_CLAMP_DISTANCE:
+			marker.global_position = player_godot + delta / dist * NAV_MARKER_CLAMP_DISTANCE
 		else:
 			marker.global_position = body_godot
+
+## Same as _update_body_markers, for Jump Gate markers (requested after the
+## true-AU reactivation: a gate can now sit AU-scale away from the player, so
+## without this it renders outside the far plane and is effectively invisible
+## -- the same problem bodies had before NAV_MARKER_CLAMP_DISTANCE existed).
+## The marker stores its server position in the "gate_id"/"gate_pos" meta
+## (NavigationMarkerRenderer); _pick_gate_at picks against the resulting
+## (possibly clamped) global_position, so clicks land on what's on screen.
+func _update_gate_markers() -> void:
+	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
+		return
+	var player_godot: Vector3 = (_ships[_player_ship_id] as Node3D).global_position
+	for c: Node in _gates_root.get_children():
+		var marker: Node3D = c as Node3D
+		if not marker.has_meta("gate_pos"):
+			continue
+		var gate_godot: Vector3 = _server_to_godot_pos(marker.get_meta("gate_pos") as Vector3)
+		var delta: Vector3 = gate_godot - player_godot
+		var dist: float = delta.length()
+		if dist > NAV_MARKER_CLAMP_DISTANCE:
+			marker.global_position = player_godot + delta / dist * NAV_MARKER_CLAMP_DISTANCE
+		else:
+			marker.global_position = gate_godot
 
 ## Fade the full-screen warp-tunnel overlay in/out based on the player's own
 ## ship speed (ADR-0029 lore pass, 2026-06-23). ship_controller.gd hides OTHER
@@ -267,17 +291,15 @@ func _maybe_rebase_origin() -> void:
 ## follows player) and authoritative position snaps (origin re-anchored to keep
 ## the player on-screen, `keep_player_fixed`).
 ##
-## Body markers are intentionally not shifted here: _update_body_markers re-places
-## them from their server position against the new origin every frame, so shifting
-## them now would be dead work.
+## Body and gate markers are intentionally not shifted here: _update_body_markers
+## / _update_gate_markers re-place them from their server position against the
+## new origin every frame, so shifting them now would be dead work.
 func _apply_origin_rebase(new_origin: Vector3, keep_player_fixed: bool) -> void:
 	var shift: Vector3 = _world.rebase_to(new_origin)
 	for id: int in _ships:
 		if keep_player_fixed and id == _player_ship_id:
 			continue
 		(_ships[id] as Node3D).position += shift
-	for c: Node in _gates_root.get_children():
-		(c as Node3D).position += shift
 	# When the player ship moved with the origin, shift the camera by the same
 	# delta so its follow-lerp/look_at don't swing for a frame (it follows the
 	# ship by world position, not as a child). When the player is held fixed on
@@ -483,7 +505,7 @@ func _select_approach_target(target_id: int) -> void:
 func _pick_gate_at(screen_pos: Vector2) -> int:
 	if _player_ship_id < 0:
 		return -1
-	return ShipPicking.pick_gate_at(_camera, screen_pos, _gates, _server_to_godot_pos)
+	return ShipPicking.pick_gate_at(_camera, screen_pos, _gates_root)
 
 ## Select a Jump Gate as the Approach target. Press A to fly into its range.
 func _select_approach_gate(gate_id: int) -> void:
