@@ -323,5 +323,5 @@ Event Sourcing の原則（INV-001〜006）は全フェーズで維持する
 ## 11. 廃止・変更された計画の記録
 
 2026-06-14（Phase 8 前提の3設計判断・ADR-0016/0017/0018）と 2026-06-04
-（Phase 4〜11 開発戦略の2段階変更）の詳細は **docs/roadmap-history.md** の
+（Phase 4〜11 開発戦略の2段階変更）の詳細は **docs/process/roadmap-history.md** の
 「廃止・変更された計画の記録」を参照。
