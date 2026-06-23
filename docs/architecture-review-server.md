@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : CLAUDE.md §11, docs/architecture.md
-date     : 2026-06-23（ADR-0029 真スケール座標後にファイルサイズ一覧を再計測）
+date     : 2026-06-23（R-1: node/navigation.rs を warp.rs / approach.rs へ分割完了）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -20,7 +20,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | 観点 | 評価 | 理由 |
 |---|---|---|
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027） |
-| ファイルサイズ | B+ | mod.rs は 646行で安定。ただし ADR-0029（真スケール座標）でワープ遷移を絶対 f64 フレームに書き換え、`node/navigation.rs` が 679→1092行に肥大（700行超は現状ここだけ・要分割候補） |
+| ファイルサイズ | A− | R-1 完了: ADR-0029 で 1092行に肥大した `node/navigation.rs` を `warp.rs`（769行）/ `approach.rs`（306行）/ `navigation.rs`（62行・バリデーションのみ）へ分割。`warp.rs` のみ 700行をわずかに超えるが、ワープ遷移の幾何計算一式という単一責務でこれ以上の分割は不自然と判断し許容 |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。近似ロジック解消 |
 | 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。残る両バイナリ間グルー重複（M-6）は ~230行・低ドリフトで許容判断（新規クレートは過剰）|
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。TCP transport も trait 境界内に収まる |
@@ -38,9 +38,10 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-sector/src/node/navigation.rs` | 1092 | 🔴 ADR-0029 でワープ遷移を絶対 f64 フレーム（Hermite）に書き換え 679→1092。要分割候補 |
+| `crates/dawn-sector/src/node/warp.rs` | 769 | 🟡 R-1 新設（2026-06-23）。`navigation.rs` から warp 系（process_warp / Hermite warp_step / 到着リベース / コマンド・drain + テスト）を分離。1092行から3分割した残り。幾何計算一式の単一責務でこれ以上の分割は不自然と判断し許容 |
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 662 | 🟢 P4-2 + P7-1（実装 + bot テスト）+ ADR-0029 `set_spawn_anchor_abs` |
 | `crates/dawn-sector/src/node/mod.rs` | 646 | 🟢 P7-2 jump/warp validation 移動後 |
+| `crates/dawn-sector/src/node/approach.rs` | 306 | 🟢 R-1 新設（2026-06-23）。`navigation.rs` から approach 系（コマンド + process_approach + テスト）を分離 |
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 442 | 🟢 P7-pre |
 | `crates/dawn-sector/src/node/transit_flow.rs` | 407 | 🟢 P7-1（実装 + 近接テスト） |
 | `crates/dawn-sector/src/node/commands.rs` | 342 | 🟢 P7-1（実装 262行 + fitting/combat テスト 80行） |
@@ -57,6 +58,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector/src/node/tick.rs` | 140 | 🟢 P4-1 + P7-1（実装 + tick テスト） |
 | `crates/dawn-sector/src/modules.rs` | 137 | 🟢 |
 | `crates/dawn-sector/src/spawner.rs` | 127 | 🟢 |
+| `crates/dawn-sector/src/node/navigation.rs` | 62 | 🟢 R-1 後（2026-06-23）。`can_propose_jump` / `can_propose_warp` のみ残置（バリデーションの正典） |
 | `crates/dawn-sector/src/ship_types.rs` | 82 | 🟢 |
 | `crates/dawn-sector/src/node/ship_registry.rs` | 33 | 🟢 P3-1 |
 | `crates/dawn-sector/src/node/sector_map.rs` | 25 | 🟢 P3-1 |
@@ -212,10 +214,10 @@ M-4（WS 境界）解消後も、両バイナリの「アプリケーション�
 | 8D-5 観測ログ仕込み | 2026-06-20 | Raft role 遷移 / TCP 再接続 / tick オーバーランを stderr 出力（実機検証で症状を切り分けるため）。`docs/8d5-hardware-notes.md` 追加・localhost 3 プロセス検証済み |
 | M-5 replication 消費側 | 2026-06-20 | `dawn-replication::ReplicaSet` 新設。受信 `LogBatch` を peer セクターごとに gap 検出・冪等・順序保持で複製ログに取り込む（ライブ world 適用 / failover は範囲外）|
 | M-4 WS 境界の集約 | 2026-06-20 | `ws_server` / `protocol` を `dawn-actor` へ移動し dawn-simulation / dawn-sector-node の手動コピーを解消（506行削除）。`bind` を `ToSocketAddrs` ジェネリック化・不要依存を除去 |
+| R-1 navigation.rs 分割 | 2026-06-23 | `node/navigation.rs`（ADR-0029 で 1092行に肥大）を `node/warp.rs`（769行）/ `node/approach.rs`（306行）/ `node/navigation.rs`（62行・バリデーションのみ）へ3分割。`mod warp; mod approach;` 追加 + impl ブロック移設の純粋移動（公開 API・挙動不変）。`cargo test --workspace` 全件ゼロエラー（warp 21件 + approach 10件を新パスで確認） |
 
-> Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消は
-> すべて完了。**ただし** ADR-0029（真スケール座標）の実装で `node/navigation.rs` が
-> 679→1092 行に再肥大し、品質リファクタが部分的に再燃した（下記リファクタロードマップ R-1）。
+> Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消、
+> および R-1（navigation.rs 分割）まですべて完了。
 
 ### リファクタロードマップ（2026-06-23 追加・ADR-0029 後の再計測で起票）
 
@@ -223,22 +225,7 @@ M-4（WS 境界）解消後も、両バイナリの「アプリケーション�
 `tackle.rs` / `snapshot_io.rs` を `node/mod.rs` から切り出した）と同じ「責務ごとに sibling
 モジュールへ抽出、テストも実装と同じファイルへ」方式で行う。挙動は変えない（純粋な移動）。
 
-#### R-1（優先・着手可）: `node/navigation.rs` 1092 行の分割
-
-現状の navigation.rs は **approach（半自動接近・ADR-0015）** と **warp（ADR-0022/0029）** と
-**jump/warp バリデーション** の3責務が同居し、約 493 行がテスト。これを3分割する:
-
-| 抽出先（新規） | 移す内容 | 概算 |
-|---|---|---|
-| `node/warp.rs` | `process_warp` / `warp_step`（Hermite）/ `rebase_arrival_event` / `warp_arrival_abs` / `dest_in_ship_frame_abs` / `set_warp_phase` / `warp_total_ticks` / `apply_warp_command(_owned)` / `drain_pending_auto_jumps` / `drain_completed_warps` + 対応する warp テスト群 | ~600 行 |
-| `node/approach.rs` | `apply_approach_command(_owned)` / `process_approach` / `dest_in_ship_frame` + approach テスト群 | ~250 行 |
-| `node/navigation.rs`（残置） | `can_propose_jump` / `can_propose_warp`（ナビ系バリデーションの正典） | ~120 行 |
-
-- すべて `impl<S: EventStore> SimulationNode<S>` のメソッドなので、`node/mod.rs` の
-  `mod warp; mod approach;` 追加と impl ブロックの移設だけで割れる（公開 API・シグネチャ不変）。
-- 完了基準: 全ファイル 700 行以下に復帰、`cargo test --workspace` ゼロエラー（FBD-007: 移動した
-  `pub fn` のテストは同梱のまま移す）、挙動差分なし。
-- 着手条件なし（純粋リファクタ）。ADR 不要（イベントスキーマ・Tick 順序・公開境界を変えない）。
+#### ~~R-1~~: `node/navigation.rs` 1092 行の分割（完了・上記「完了済み」参照）
 
 #### R-2（低優先・トリガー待ち）: クライアント `main.gd` 1210 行
 
@@ -254,7 +241,6 @@ ADR-0029 でワープ演出・単位整形・原点リベースが加わり 1094
 
 | 項目 | 種別 | 状態・理由 |
 |---|---|---|
-| R-1 `node/navigation.rs` 分割 | 品質・着手可 | ADR-0029 で 1092 行に再肥大。warp.rs / approach.rs へ3分割（上記） |
 | R-2 client `main.gd` 分割 | 品質・保留 | 1210 行だが god object 解消済み。C-3 解消までトリガー待ち |
 | 8D-5 Raspberry Pi 実機検証 | 機能・外部依存待ち | ハードウェア未購入。観測ログ・config・localhost 検証は済み（完了済み参照）。Pi 入手後に着手 |
 | M-3 `SectorSimulatorActor` 密結合 | 品質・保留 | 本番パス外（in-process テスト/ベンチ専用）。P9-1 撤回。優先度低 |
@@ -279,10 +265,9 @@ ADR-0029 でワープ演出・単位整形・原点リベースが加わり 1094
 
 Phase 9 時点では総合 **A−** で決着とし、M-3（本番パス外）・M-6（許容）は「やらない」と
 判断した。その後 ADR-0029（真スケール座標）の機能追加で `node/navigation.rs` が閾値を
-超えて再肥大したため、構造リファクタは「完全決着」ではなく **R-1（navigation.rs 分割）が
-再燃**した状態にある（上記リファクタロードマップ）。R-1 は純粋リファクタ（挙動・公開境界
-不変）で着手可。R-1 を消化すれば全ファイル 700 行以下に戻り A− を維持できる。
-それ以外の前進先は引き続き **8D-5 実機検証** や戦闘の深み（ADR-0016 §5）といった機能側。
+超えて再肥大し、構造リファクタが一時再燃したが、R-1（navigation.rs 分割・2026-06-23）で
+解消済み（上記「完了済み」参照）。A− を維持。残る前進先は引き続き **8D-5 実機検証** や
+戦闘の深み（ADR-0016 §5）といった機能側で、R-2（client `main.gd`）はトリガー待ちのまま。
 
 | 項目 | 状態 |
 |---|---|
