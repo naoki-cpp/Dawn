@@ -311,24 +311,34 @@ EVE の**グローバル** TiDi は大規模戦でゲームが 10 倍スロー�
 
 ---
 
-## 4. 将来検討する機能（優先順位付き）
+## 4. 機能の実装状況
 
-### 🔴 近い将来（ゲームバランスの核）
+実装済みの機能と、将来検討する機能（未実装）を分けて記載する。
+「将来検討する機能」に実装済みが混在すると見分けにくいため、このセクションで分離する
+（実装が進むたびに該当項目をここから「4.1 実装済み」へ移すこと）。
 
-#### Capacitor（エネルギー管理）— ✅ Phase 6 で実装済み（ADR-0011）
+### 4.1 実装済み
 
-Active モジュールが Cap を消費する。Cap が切れるとモジュールが強制 OFF になる。
-「全モジュールを常時 ON にすれば勝ち」にならないバランス調整機能。
-
-```
-実装（ADR-0011）:
+- **Capacitor（エネルギー管理）** — Phase 6 で実装済み（ADR-0011）。
+  Active モジュールが Cap を消費する。Cap が切れるとモジュールが強制 OFF になる。
+  「全モジュールを常時 ON にすれば勝ち」にならないバランス調整機能。
+  ```
   CapacitorComp.current / ShipStatsComp.cap_max, cap_recharge_per_tick
   ModuleDefinition.cap_cost_per_cycle, cycle_time_ticks（サイクルベース消費）
   Cap は毎 Tick 回復する
   サイクル開始時に cap 不足 → モジュールを強制 OFF（ModuleDeactivated）
-```
+  ```
+- **Warp** — 実装済み（ADR-0022 intra-Sector Warp）。align → warping 2 フェーズ・W キー。
+  移動は `VelocityChanged` で記録し専用イベントは設けない（ADR-0008 の方針）。
+- **Tackler（足止め）** — 実装済み（ADR-0024 Fold Disruptor）。`TackledComp` /
+  `TackleApplied` / `TackleReleased`・ワープ / ジャンプ拒否。
+  Web（速度低下）系はまだ未実装（§4.2 参照）。
 
-#### Shield リチャージ（非対称 HP 回復）— ⬜ 未実装
+### 4.2 将来検討する機能（優先順位付き・すべて未実装）
+
+### 🔴 近い将来（ゲームバランスの核）
+
+#### Shield リチャージ（非対称 HP 回復）
 
 Shield は時間で回復する（Armor / Hull は回復しない）。
 この非対称性が「今逃げるか、押し切るか」の判断を生む。
@@ -382,12 +392,10 @@ EM / Thermal / Kinetic / Explosive の 4 タイプと、各 HP 層への耐性�
 
 ### 🟢 遠い将来（EVE らしさの完成）
 
-- **Warp**: ✅ 実装済み（ADR-0022 intra-Sector Warp）。align → warping 2 フェーズ・W キー。
-  移動は `VelocityChanged` で記録し専用イベントは設けない（ADR-0008 の方針）。
-- **Tackler（足止め）**: ✅ 実装済み（ADR-0024 Fold Disruptor）。`TackledComp` / `TackleApplied` /
-  `TackleReleased`・ワープ / ジャンプ拒否。Web（速度低下）系はまだ未実装。
-- **Drone**: 船から展開する無人機 — ⬜ 未実装
-- **Logi（修理支援）**: 他の船の Shield を修復するモジュール — ⬜ 未実装
+- **Drone**: 船から展開する無人機 — 未実装
+- **Logi（修理支援）**: 他の船の Shield を修復するモジュール — 未実装
+- **Web（速度低下）**: Tackler（実装済み・§4.1）の隣接機能。速度を落として追走/逃走の
+  判断を生む — 未実装
 
 #### ステーション（拠点）— 種だけ・要検討（2026-06-23）
 
