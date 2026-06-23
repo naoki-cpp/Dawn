@@ -249,15 +249,14 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Keep at Range System (ADR-0031): for every ship carrying a
-    /// `KeepAtRangeComp`, steer directly away from the target while closer
-    /// than `range`, and brake once at or beyond it. Brakes and drops the
-    /// component if the target has vanished.
-    /// closer than `range`, *and now also closes in when farther than it* —
-    /// "hold at range" rather than just "never get closer than range" (a
-    /// stand-off that only ever retreated was a trap if the player picked a
-    /// distance the target hadn't closed to yet: nothing happens, and the
-    /// command looks broken). A small deadband around `range` avoids thrust
-    /// flapping back and forth every tick once the ship settles in.
+    /// `KeepAtRangeComp`, steers to hold at `range` from the target —
+    /// retreating when closer, closing in when farther — rather than just
+    /// "never get closer than range" (a stand-off that only ever retreated
+    /// was a trap if the player picked a distance the target hadn't closed
+    /// to yet: nothing would happen, and the command looked broken). A small
+    /// deadband around `range` avoids thrust flapping back and forth every
+    /// tick once the ship settles in. Brakes and drops the component if the
+    /// target has vanished.
     ///
     /// Runs at Step 2.56, after Orbit and before Warp.
     pub fn process_keep_at_range(&mut self) {
