@@ -72,13 +72,21 @@ steer_thrust_toward(ship_pos, target_point)
 KeepAtRangeCommand { ship_id, target, range: Option<f32> }
   → KeepAtRangeComp { target, range } を ship に付与
   → 毎 Tick process_keep_at_range() が:
-     距離 < range  → 対象から真っ直ぐ離れる方向へ thrust
-     距離 >= range → brake_thrust（詰め過ぎない・離れすぎない）
+     |距離 - range| <= deadband → brake_thrust（range 付近で揺れない）
+     距離 > range + deadband    → 対象へ向けて thrust（詰める）
+     距離 < range - deadband    → 対象から真っ直ぐ離れる方向へ thrust（離れる）
 ```
 
-Orbit と異なり接線成分を持たない（周回しない）。「この距離より近づきたくない」
-という純粋な離脱判断のための機能であり、Orbit（回りながら射程を保つ）とは
-プレイヤーが選ぶ意図が異なる。
+`deadband = max(range * 0.05, 1.0)`。range 付近で毎 Tick 接近/離脱が反転して
+ジッターになるのを防ぐための帯。
+
+Orbit と異なり接線成分を持たない（周回しない）。「この距離を保ちたい」という
+意図そのもの——近すぎれば離れる、遠すぎれば詰める——を表す機能であり、
+Orbit（回りながら射程を保つ）とはプレイヤーが選ぶ意図が異なる。
+
+当初は「指定距離より近づきたくない」という離脱専用（遠いときは何もしない）
+として実装したが、対象がまだ指定距離より遠い状態で発行すると何も起こらず
+「動かない」ように見えるため（プレイテストで報告）、双方向に直す形に改めた。
 
 ### 3. 対象とパラメータ
 

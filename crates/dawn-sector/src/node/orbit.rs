@@ -6,8 +6,9 @@
 //! - `apply_orbit_command(_owned)` / `process_orbit` — sweep around the
 //!   target at `radius`, leveraging the tracking-speed hit-chance penalty
 //!   (ADR-0012) as a defensive tactic.
-//! - `apply_keep_at_range_command(_owned)` / `process_keep_at_range` — hold at
-//!   least `range` away, with no tangential component (a pure stand-off).
+//! - `apply_keep_at_range_command(_owned)` / `process_keep_at_range` — hold
+//!   at `range` away, closing in when farther and retreating when closer
+//!   (no tangential component, unlike Orbit -- a pure stand-off distance).
 
 use dawn_core::{ApproachTarget, PlayerId, Position, ShipId};
 use dawn_ecs::{
@@ -16,7 +17,9 @@ use dawn_ecs::{
 };
 use dawn_event_store::store::EventStore;
 
-use super::{SimulationNode, DEFAULT_MANEUVER_RADIUS, ORBIT_LEAD_FACTOR};
+use super::{
+    SimulationNode, DEFAULT_MANEUVER_RADIUS, KEEP_AT_RANGE_DEADBAND_FRACTION, ORBIT_LEAD_FACTOR,
+};
 
 impl<S: EventStore> SimulationNode<S> {
     /// Begin orbiting a Ship or a Jump Gate at `radius` (ADR-0031). Falls back
@@ -249,6 +252,12 @@ impl<S: EventStore> SimulationNode<S> {
     /// `KeepAtRangeComp`, steer directly away from the target while closer
     /// than `range`, and brake once at or beyond it. Brakes and drops the
     /// component if the target has vanished.
+    /// closer than `range`, *and now also closes in when farther than it* —
+    /// "hold at range" rather than just "never get closer than range" (a
+    /// stand-off that only ever retreated was a trap if the player picked a
+    /// distance the target hadn't closed to yet: nothing happens, and the
+    /// command looks broken). A small deadband around `range` avoids thrust
+    /// flapping back and forth every tick once the ship settles in.
     ///
     /// Runs at Step 2.56, after Orbit and before Warp.
     pub fn process_keep_at_range(&mut self) {
@@ -272,8 +281,15 @@ impl<S: EventStore> SimulationNode<S> {
             let dz = ship_pos.z - target_pos.z;
             let dist = (dx * dx + dy * dy + dz * dz).sqrt();
 
-            if dist >= range {
+            let deadband = (range * KEEP_AT_RANGE_DEADBAND_FRACTION).max(1.0);
+            if (dist - range).abs() <= deadband {
                 self.brake_thrust(entity);
+                continue;
+            }
+            if dist > range {
+                // Farther than the chosen distance -- close in, same steering
+                // the Approach System uses.
+                self.steer_thrust_toward(entity, ship_pos, target_pos);
                 continue;
             }
             // Steer straight away: aim at a point further out along the
@@ -582,9 +598,10 @@ mod tests {
     }
 
     #[test]
-    fn ship_at_or_beyond_range_brakes_instead_of_approaching_further() {
+    fn ship_at_range_within_the_deadband_brakes() {
         let mut node = mem_node();
-        let (_player, chaser) = spawn_owned_player_at(&mut node, Position::new(6000.0, 0.0, 0.0));
+        // range 5000, deadband = 5000 * 0.05 = 250 -> 5100 sits inside it.
+        let (_player, chaser) = spawn_owned_player_at(&mut node, Position::new(5100.0, 0.0, 0.0));
         let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
         assert!(node.apply_keep_at_range_command(
             chaser,
@@ -600,6 +617,59 @@ mod tests {
                 .get::<&ThrustComp>(entity)
                 .unwrap()
                 .is_braking
+        );
+    }
+
+    #[test]
+    fn ship_farther_than_range_closes_in() {
+        let mut node = mem_node();
+        let (_player, chaser) = spawn_owned_player_at(&mut node, Position::new(20_000.0, 0.0, 0.0));
+        let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        assert!(node.apply_keep_at_range_command(
+            chaser,
+            dawn_core::ApproachTarget::Ship(target),
+            Some(5000.0)
+        ));
+
+        node.process_keep_at_range();
+        let entity = *node.ships.index.get(&chaser).unwrap();
+        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        assert!(
+            thrust.direction.dx < -0.9,
+            "should thrust toward target (-X) when farther than range, got {:?}",
+            thrust.direction
+        );
+        assert!(!thrust.is_braking);
+    }
+
+    #[test]
+    fn ship_farther_than_range_decreases_distance_over_several_ticks() {
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::new(20_000.0, 0.0, 0.0));
+        let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        node.apply_keep_at_range_command_owned(
+            player,
+            dawn_core::KeepAtRangeCommand {
+                ship_id: chaser,
+                target: dawn_core::ApproachTarget::Ship(target),
+                range: Some(5000.0),
+            },
+        );
+
+        let start = node
+            .get_ship_position(chaser)
+            .unwrap()
+            .distance(Position::ORIGIN);
+        for _ in 0..30 {
+            node.tick();
+        }
+        let end = node
+            .get_ship_position(chaser)
+            .unwrap()
+            .distance(Position::ORIGIN);
+        assert!(
+            end < start,
+            "keep-at-range should decrease distance while outside range: {start} -> {end}"
         );
     }
 

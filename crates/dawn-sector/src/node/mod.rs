@@ -100,6 +100,11 @@ const DEFAULT_MANEUVER_RADIUS: f32 = 5000.0;
 /// of just closing the radial gap. Larger = wider sweep, slower radius
 /// convergence; smaller = tighter radial correction, less visible orbiting.
 const ORBIT_LEAD_FACTOR: f32 = 0.5;
+/// Keep at Range deadband, as a fraction of the chosen `range` (ADR-0031):
+/// thrust briefly toggling between "too close" and "too far" every tick once
+/// the ship settles near `range` would look like jitter, so brake instead
+/// while within this band of the target distance.
+const KEEP_AT_RANGE_DEADBAND_FRACTION: f32 = 0.05;
 
 // -- TickResult --------------------------------------------------------------
 
