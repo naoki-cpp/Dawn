@@ -42,12 +42,16 @@ Grep で `実装チェックリスト` を含むファイルを特定してか�
 
 ### Step 4: ロードマップの照合
 
-`docs/process/roadmap.md` を読み、完了フラグ（`[x]` / `✅`）が実態と合っているか確認する。
+`docs/process/roadmap.md` を読み、完了フラグ（`[x]` / `✅`）が実態と合っているか確認する
+（2026-06-23、完了済み Phase 0〜7 の詳細記録は `docs/process/roadmap-history.md` へ分離済み。
+roadmap.md 本体には §2 の要約と進行中フェーズ（現在は §10 Phase 8）のみ残る）。
 
 確認項目:
 - 実装済みなのに `[ ]` のままのタスク → `[x]` に更新
 - 完了フェーズの説明文が現在の実装内容と一致しているか
 - 次フェーズの前提条件に未完了のものがないか
+- 新たにフェーズが完了したら、§2「完了済みフェーズ」要約に1行追記し、詳細記録は
+  roadmap.md ではなく `docs/process/roadmap-history.md` に追加する
 
 ### Step 5: AI_DEVELOPMENT_GUIDE.md の照合
 
