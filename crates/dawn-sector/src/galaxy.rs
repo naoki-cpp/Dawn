@@ -26,15 +26,15 @@ pub struct Galaxy {
 /// the anchor source (`CelestialBodyDef.abs_m`) stays precise — this is forward-
 /// compatible with the true-AU value (1.495978707e11).
 ///
-/// **Currently COMPRESSED** (200,000): a true-AU trial (2026-06-23) surfaced a
-/// new structural gap — gates have no anchor of their own (§2: anchors are
-/// per-body) and the demo topology has no body near the gates (~2.26 AU from
-/// the nearest), so "rebase onto the nearest anchor" does not actually keep
-/// the offset small there; arrival precision and several gate-approach tests
-/// broke. Reverted pending a decision (move gates near a body / give gates
-/// their own anchor / etc. — see ADR-0029 residual). To retry, set this to
-/// 1.495978707e11 and retune WARP_SPEED (see node/mod.rs).
-pub const UNITS_PER_AU: f64 = 200_000.0;
+/// **True AU, reactivated 2026-06-23** (ADR-0029): the residual checklist is
+/// clear (gate f64, gate re-authoring, warp-transit f64, AoI f64, anchor-miss
+/// guards, gates repositioned near a body so rebase keeps the offset small).
+/// `WARP_SPEED` (node/mod.rs) is scaled by the same factor so warp durations
+/// (in ticks) are unchanged from the compressed era; visual constants in the
+/// client (`BODY_MARKER_CLAMP_DISTANCE` / `SUN_EFFECTIVE_DISTANCE`) were left
+/// untouched on the reasoning that they are camera-relative rendering
+/// placeholders, not AU-coupled — needs a human playtest to confirm.
+pub const UNITS_PER_AU: f64 = 1.495978707e11;
 
 impl Galaxy {
     /// Construct from explicitly provided data (used by `DataLoader`).
@@ -229,14 +229,16 @@ mod tests {
         // ADR-0029 residual: gates used to be authored as a fixed unit offset
         // (decoupled from UNITS_PER_AU), which would have put them on top of
         // the star once UNITS_PER_AU flips to true AU. Gate 0 is authored at
-        // [3.0, 0.0, 0.0] AU in galaxy.demo.toml -- confirm the loader scales
-        // it the same way it scales body positions.
+        // [-0.72, 0.0, -1.32] AU in galaxy.demo.toml -- confirm the loader
+        // scales it the same way it scales body positions.
         let map = Galaxy::demo();
         let gate0 = map.gates.iter().find(|g| g.id == JumpGateId(0)).expect("gate 0 exists");
-        assert_eq!(gate0.abs_m[0], 3.0 * UNITS_PER_AU);
+        assert_eq!(gate0.abs_m[0], -0.72 * UNITS_PER_AU);
         assert_eq!(gate0.abs_m[1], 0.0);
-        assert_eq!(gate0.abs_m[2], 0.0);
-        assert!((gate0.position.x as f64 - 3.0 * UNITS_PER_AU).abs() < 1.0, "x = {}", gate0.position.x);
+        assert_eq!(gate0.abs_m[2], -1.32 * UNITS_PER_AU);
+        // f32 ulp bound at this magnitude, not an exactness check (true AU only).
+        let ulp_bound = (0.72 * UNITS_PER_AU * f32::EPSILON as f64).abs().max(1.0);
+        assert!((gate0.position.x as f64 - (-0.72) * UNITS_PER_AU).abs() < ulp_bound, "x = {}", gate0.position.x);
     }
 
     #[test]
@@ -257,9 +259,11 @@ mod tests {
         let forge = map.bodies.iter().find(|b| b.id == CelestialBodyId(1)).expect("Forge exists");
         assert_eq!(forge.abs_m[0], 0.8 * UNITS_PER_AU);
         assert_eq!(forge.abs_m[2], 0.5 * UNITS_PER_AU);
-        // At the compressed scale the f32 `position` matches abs_m closely; at
-        // true AU it would be ~16 km coarse, which is why anchors use abs_m.
-        assert!((forge.position.x as f64 - 0.8 * UNITS_PER_AU).abs() < 1.0, "x = {}", forge.position.x);
+        // At true AU the f32 `position` is only ulp-precise (~tens of km at
+        // ~10^11 m), which is why anchors use abs_m, not position (ADR-0029) --
+        // this bound is the f32 ulp at Forge's magnitude, not an exactness check.
+        let ulp_bound = (0.8 * UNITS_PER_AU * f32::EPSILON as f64).abs().max(1.0);
+        assert!((forge.position.x as f64 - 0.8 * UNITS_PER_AU).abs() < ulp_bound, "x = {}", forge.position.x);
         assert_eq!(forge.position.y, 0.0);
         // Stars at [0,0,0] AU stay at the origin (0 * factor = 0).
         let helios = map.bodies.iter().find(|b| b.id == CelestialBodyId(0)).expect("Helios exists");

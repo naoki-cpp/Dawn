@@ -67,11 +67,11 @@ const WARP_ALIGN_FRACTION: f32 = 0.75;
 /// along the start→arrival segment (ADR-0022 amendment), so this is the rough
 /// peak speed, not a constant velocity.
 ///
-// Reverted alongside galaxy::UNITS_PER_AU (see its doc comment) after a
-// true-AU trial surfaced a gate-anchor gap. At true AU this should be scaled
-// by the same factor as UNITS_PER_AU (~×747,989.35 → ~7.48e9) so warp tick
-// counts stay unchanged — retune together when retrying the reactivation.
-const WARP_SPEED: f32 = 10_000.0;
+/// Scaled by the same factor as `UNITS_PER_AU`'s true-AU reactivation
+/// (galaxy::UNITS_PER_AU went from 200,000 to 1.495978707e11, a ×747,989.35
+/// jump), so every warp's tick count — and therefore its felt duration —
+/// is unchanged from the compressed scale (ADR-0029 true-AU reactivation).
+const WARP_SPEED: f32 = 7_479_893_535.0;
 /// Floor on warp duration (ticks) so even a short warp reads as a warp rather
 /// than a blink. At 10 tick/s this is ~2 s.
 const WARP_MIN_TICKS: u32 = 20;

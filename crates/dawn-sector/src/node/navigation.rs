@@ -386,6 +386,10 @@ impl<S: EventStore> SimulationNode<S> {
     /// current anchor frame, so warp math stays in the same frame as the ship's
     /// anchor-relative `PositionComp` (ADR-0029). Falls back to the raw position
     /// if the anchor is unknown (no-op while anchored on the star at the origin).
+    /// Takes an f32 `dest_world`, so it is only as precise as that input already
+    /// is — fine for warp's Aligning-phase steering (direction only, ADR-0029),
+    /// not for anything needing arrival-radius precision (use
+    /// `dest_in_ship_frame_abs` with an f64 source for that).
     fn dest_in_ship_frame(&self, entity: Entity, dest_world: Position) -> Position {
         let Some(anchor) = self.world.ship_anchor(entity) else { return dest_world };
         let Some(a) = self.anchor_table.abs(anchor) else {
@@ -396,6 +400,27 @@ impl<S: EventStore> SimulationNode<S> {
             dest_world.x - a[0] as f32,
             dest_world.y - a[1] as f32,
             dest_world.z - a[2] as f32,
+        )
+    }
+
+    /// Same as `dest_in_ship_frame`, but takes the destination as an absolute
+    /// f64 point (e.g. `JumpGateDef.abs_m`, or another ship's `entity_absolute_f64`)
+    /// and does the whole subtraction in f64 before casting once — so it stays
+    /// precise at true-AU distance from the ship's anchor (ADR-0029). Used by
+    /// `process_approach`, where arrival is a tight radius check, not just a
+    /// steering direction.
+    fn dest_in_ship_frame_abs(&self, entity: Entity, dest_abs: [f64; 3]) -> Position {
+        let Some(anchor) = self.world.ship_anchor(entity) else {
+            return Position::new(dest_abs[0] as f32, dest_abs[1] as f32, dest_abs[2] as f32);
+        };
+        let Some(a) = self.anchor_table.abs(anchor) else {
+            super::debug_assert_missing_anchor(anchor, "dest_in_ship_frame_abs");
+            return Position::new(dest_abs[0] as f32, dest_abs[1] as f32, dest_abs[2] as f32);
+        };
+        Position::new(
+            (dest_abs[0] - a[0]) as f32,
+            (dest_abs[1] - a[1]) as f32,
+            (dest_abs[2] - a[2]) as f32,
         )
     }
 
@@ -428,20 +453,31 @@ impl<S: EventStore> SimulationNode<S> {
             .collect();
 
         for (entity, target, ship_offset) in approachers {
-            // Work in absolute (Sector-frame) coordinates so distance/steering
-            // are correct even if approacher and target sit on different anchors
-            // (ADR-0029). Gate positions are already Sector-frame.
-            let ship_pos = self.entity_absolute(entity, ship_offset);
+            // Work in the approacher's CURRENT anchor frame (small numbers),
+            // not absolute Sector-frame Position (ADR-0029): composing the
+            // anchor (f64) and offset down to an absolute f32 `Position` loses
+            // the same ulp a far anchor's own coordinate has (tens of km at
+            // true AU) — fine for warp's broad alignment check, but not for
+            // this system's tight arrival-radius comparison. `ship_offset` is
+            // already anchor-relative, so it needs no conversion; the target's
+            // f64 absolute position is brought into the SAME frame via
+            // `dest_in_ship_frame_abs` (which does the subtraction in f64,
+            // casting to f32 only once, so the only loss is the final small
+            // offset's own ulp, not the anchor's).
+            let ship_pos = ship_offset;
             // Resolve the target's current position and the arrival distance.
             // `None` means the target no longer exists.
             let resolved: Option<(Position, f32)> = match target {
                 ApproachTarget::Ship(target_id) => self.ships.index.get(&target_id).copied()
                     .and_then(|te| self.world.inner().get::<&PositionComp>(te).ok().map(|p| (te, p.0)))
-                    .map(|(te, off)| (self.entity_absolute(te, off), SHIP_ARRIVAL_RADIUS)),
+                    .map(|(te, off)| {
+                        let target_abs = self.entity_absolute_f64(te, off);
+                        (self.dest_in_ship_frame_abs(entity, target_abs), SHIP_ARRIVAL_RADIUS)
+                    }),
                 // Stop comfortably inside the gate's activation radius so the
                 // jump prompt becomes available on arrival (ADR-0015).
                 ApproachTarget::Gate(gate_id) => self.jump_gate(gate_id)
-                    .map(|g| (g.position, g.activation_radius * 0.8)),
+                    .map(|g| (self.dest_in_ship_frame_abs(entity, g.abs_m), g.activation_radius * 0.8)),
             };
 
             match resolved {
@@ -652,9 +688,15 @@ mod tests {
         let gate = node.jump_gate(dawn_core::JumpGateId(0)).expect("Sector 0 has Gate 0").clone();
         // Start near the gate: at the wide system scale you warp across the
         // system and only sublight-approach over the last stretch (the gate is
-        // ~600,000 units out — far beyond sublight range in a test budget).
-        let near_gate = Position::new(gate.position.x - 12_000.0, 0.0, 0.0);
-        let (player, chaser) = spawn_owned_player_at(&mut node, near_gate);
+        // far beyond sublight range in a test budget). Compute "12,000 m short
+        // of the gate" in f64 and re-anchor directly (set_spawn_anchor_abs) --
+        // subtracting 12,000 from gate.position (f32) at true-AU magnitude would
+        // vanish entirely to catastrophic cancellation (the f32 ulp there is
+        // tens of km, far bigger than 12,000), landing the ship exactly on the
+        // (still-lossy) gate position instead of meaningfully short of it.
+        let near_gate_abs = [gate.abs_m[0] - 12_000.0, gate.abs_m[1], gate.abs_m[2]];
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.set_spawn_anchor_abs(chaser, near_gate_abs);
 
         assert!(node.apply_approach_command_owned(player, dawn_core::ApproachCommand {
             ship_id: chaser,
@@ -662,9 +704,17 @@ mod tests {
         }));
         assert_eq!(node.approach_target(chaser), Some(dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(0))));
 
-        let start = node.ship_distance_to_point(chaser, gate.position).unwrap();
+        // Distance via the f64 absolute accessors throughout (ship_distance_to_point
+        // composes a f32 Position with the ship's f32 position, which has the same
+        // AU-scale ulp problem as the spawn point above).
+        let dist_to_gate = |node: &SimulationNode| {
+            let abs = node.ship_absolute(chaser).unwrap();
+            let d = [abs[0] - gate.abs_m[0], abs[1] - gate.abs_m[1], abs[2] - gate.abs_m[2]];
+            (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+        };
+        let start = dist_to_gate(&node);
         for _ in 0..600 { node.tick(); }
-        let end = node.ship_distance_to_point(chaser, gate.position).unwrap();
+        let end = dist_to_gate(&node);
         assert!(end < start, "ship should close on the gate: {start} -> {end}");
         assert!(node.can_propose_jump(chaser, dawn_core::JumpGateId(0)),
             "after approaching, the ship should be within the gate's activation radius");
@@ -685,14 +735,29 @@ mod tests {
 
     #[test]
     fn warp_is_rejected_when_the_gate_is_closer_than_the_minimum_warp_distance() {
+        // Spawning a ship via a raw f32 `Position` at the gate's AU-scale
+        // coordinate is itself lossy (one f32 ulp, tens of km at true AU) --
+        // real ships never get placed that way; they always end up at
+        // anchor + small offset (spawn-near-body, warp-arrival rebase). So
+        // drive the ship to the gate through the actual (precision-correct)
+        // warp arrival instead of spawning "at" the gate directly, then
+        // confirm a second warp to the same gate is rejected as too close.
         let mut node = mem_node();
-        let gate = node.jump_gate(dawn_core::JumpGateId(0)).unwrap().clone();
-        let (player, ship) = spawn_owned_player_at(&mut node, gate.position);
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(node.apply_warp_command_owned(player, dawn_core::WarpCommand {
+            ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+        }));
+        for _ in 0..5_000 {
+            node.tick();
+            if node.warp_phase(ship).is_none() { break; }
+        }
+        assert_eq!(node.warp_phase(ship), None, "first warp should have completed");
+
         assert!(!node.can_propose_warp(ship, WarpTarget::Gate(dawn_core::JumpGateId(0))));
         assert!(!node.apply_warp_command_owned(player, dawn_core::WarpCommand {
             ship_id: ship, target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
         }));
-        assert_eq!(node.warp_phase(ship), None);
+        assert_eq!(node.warp_phase(ship), None, "second warp should be rejected, not attached");
     }
 
     #[test]
@@ -904,8 +969,13 @@ mod tests {
         let ship_abs = node.ship_absolute(ship_id).expect("ship exists");
         let d = [ship_abs[0] - gate.abs_m[0], ship_abs[1] - gate.abs_m[1], ship_abs[2] - gate.abs_m[2]];
         let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-        assert!((dist - (gate.activation_radius * WARP_ARRIVAL_FACTOR) as f64).abs() < 1.0,
-            "gate arrival distance from the f64 gate source should match the arrival ring (got {dist})");
+        // Tolerance is the f32 ulp at the rebased anchor's magnitude (the offset
+        // composing ship_absolute is f32), not an exactness check — at true AU
+        // this is a few hundred metres, dwarfed by the km-scale activation ring.
+        let anchor_mag = gate.abs_m.iter().map(|c| c.abs()).fold(0.0_f64, f64::max);
+        let tolerance = (anchor_mag * f32::EPSILON as f64).max(5.0) * 4.0;
+        assert!((dist - (gate.activation_radius * WARP_ARRIVAL_FACTOR) as f64).abs() < tolerance,
+            "gate arrival distance from the f64 gate source should match the arrival ring (got {dist}, tolerance {tolerance})");
     }
 
     // ── Celestial body warp (ADR-0025) ───────────────────────────────────

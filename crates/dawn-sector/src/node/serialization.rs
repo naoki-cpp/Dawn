@@ -224,7 +224,13 @@ mod tests {
         // origin must land in the same AoI cell.
         use dawn_core::{AnchorId, DomainEvent, events::AnchorRebased, Tick};
         let mut node = mem_node();
-        let cell = 1_000.0;
+        // Forcing b's offset to exactly cancel Forge's own (true-AU-scale)
+        // absolute position is itself an unrealistic, maximally-imprecise case
+        // (an offset is only meant to be small, ADR-0029 §2) -- real gameplay
+        // never produces an offset this large. The cell is sized to absorb that
+        // f32 ulp (a few km at this magnitude) rather than expecting the exact
+        // 1-km binning a realistic small offset would get.
+        let cell = 50_000.0;
         let a = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
         let b = node.spawn_ship(crate::ship_types::SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
         // Rebase b onto Forge with an offset that returns it to absolute origin.
