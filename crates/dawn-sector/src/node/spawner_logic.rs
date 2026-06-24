@@ -137,6 +137,15 @@ impl<S: EventStore> SimulationNode<S> {
         self.ships.by_player.insert(player_id, ship_id);
         self.ships.owners.insert(ship_id, player_id);
 
+        // Seed the starting inventory (ADR-0032) before the default loadout
+        // below: those fit_module calls are the unchecked, privileged spawn
+        // path and don't consume from it, so seeding first vs. after makes no
+        // functional difference -- but it reads naturally as "the player owns
+        // everything, some of it happens to already be fitted."
+        if let Some(&entity) = self.ships.index.get(&ship_id) {
+            self.seed_player_inventory(entity);
+        }
+
         use dawn_core::SlotKind;
         self.fit_module(FitModuleCommand {
             ship_id,
@@ -556,6 +565,16 @@ impl<S: EventStore> SimulationNode<S> {
                     },
                 );
             }
+
+            // Inventory (ADR-0032): restore exactly what was persisted,
+            // regardless of ship type -- post-spawn Fit/Unfit could have
+            // emptied or refilled it differently from the deterministic seed.
+            let _ = self.world.inner_mut().insert_one(
+                entity,
+                dawn_ecs::components::InventoryComp {
+                    items: ship.inventory.clone(),
+                },
+            );
         }
     }
 

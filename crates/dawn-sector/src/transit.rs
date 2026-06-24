@@ -33,7 +33,10 @@ pub enum TransitOp {
     },
     /// Stage 2: the from-node ships the exported state to the to-node.
     Commit {
-        ship: ShipSnapshot,
+        // Boxed (ADR-0032 grew ShipSnapshot with `inventory`, pushing this
+        // variant well past Request's size): keeps every TransitOp the size
+        // of the smallest variant instead of the largest.
+        ship: Box<ShipSnapshot>,
         from: SectorId,
         to: SectorId,
         entry_pos: Position,
@@ -103,7 +106,7 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                         let from = node.sector_id();
                         raft.propose(
                             TransitOp::Commit {
-                                ship,
+                                ship: Box::new(ship),
                                 from,
                                 to,
                                 entry_pos,
@@ -200,7 +203,7 @@ mod tests {
     #[test]
     fn commit_op_round_trips_with_full_ship_snapshot() {
         let op = TransitOp::Commit {
-            ship: ShipSnapshot {
+            ship: Box::new(ShipSnapshot {
                 ship_id: ShipId::new(NodeId(0), 7),
                 ship_type_id: ShipTypeId(1),
                 position: Position::new(1.0, 2.0, 3.0),
@@ -213,7 +216,8 @@ mod tests {
                 capacitor: Some(50.0),
                 fitting: FittingSnapshot::empty(),
                 tackled_by: vec![],
-            },
+                inventory: vec![],
+            }),
             from: SectorId(0),
             to: SectorId(1),
             entry_pos: Position::new(500.0, 0.0, 0.0),

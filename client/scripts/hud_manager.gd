@@ -472,3 +472,156 @@ static func show_duel_result(label: Label, victory: bool) -> void:
 static func hide_duel_result(label: Label) -> void:
 	if label != null:
 		label.visible = false
+
+
+# -- Inventory / Fitting panel (ADR-0032) -------------------------------------
+#
+# Each module has a fixed slot kind (Weapon -> High, Afterburner -> Mid, ...),
+# so unlike a general-purpose inventory there is no slot-targeting step: an
+# inventory row's only action is "fit this module's own kind", and a fitted
+# row's only action is "unfit this one". One click each way, no drag-drop.
+# Rows are plain Panels (not real Buttons) hit-tested manually in main.gd's
+# _input, matching every other clickable HUD element here (module bar, etc.)
+# -- mouse_filter stays MOUSE_FILTER_IGNORE throughout so world clicks behind
+# a hidden panel are never blocked.
+
+const INVENTORY_ROW_HEIGHT := 22.0
+
+## Hidden by default; toggled by the I key. Returns
+## {panel, fitted_list, inventory_list, fitted_rows, inventory_rows}.
+## *_rows are populated by update_inventory_panel(); each row is
+## {panel, module_id, slot, action} ("fit" or "unfit").
+static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
+	var panel := Panel.new()
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_theme_stylebox_override("panel", hud_box_style())
+	panel.anchor_left = 0.5; panel.anchor_right = 0.5
+	panel.anchor_top = 0.5; panel.anchor_bottom = 0.5
+	panel.offset_left = -260.0; panel.offset_right = 260.0
+	panel.offset_top = -180.0; panel.offset_bottom = 180.0
+	panel.visible = false
+	hud.add_child(panel)
+
+	var columns := HBoxContainer.new()
+	columns.set_anchors_preset(Control.PRESET_FULL_RECT)
+	columns.offset_left = 10.0; columns.offset_top = 10.0
+	columns.offset_right = -10.0; columns.offset_bottom = -10.0
+	columns.add_theme_constant_override("separation", 12)
+	columns.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(columns)
+
+	var fitted_col := VBoxContainer.new()
+	fitted_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fitted_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	columns.add_child(fitted_col)
+	var fitted_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
+	fitted_header.text = "FITTED (click to unfit)"
+	fitted_col.add_child(fitted_header)
+	var fitted_list := VBoxContainer.new()
+	fitted_list.add_theme_constant_override("separation", 2)
+	fitted_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fitted_col.add_child(fitted_list)
+
+	var inv_col := VBoxContainer.new()
+	inv_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inv_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	columns.add_child(inv_col)
+	var inv_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
+	inv_header.text = "INVENTORY (click to fit)"
+	inv_col.add_child(inv_header)
+	var inventory_list := VBoxContainer.new()
+	inventory_list.add_theme_constant_override("separation", 2)
+	inventory_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	inv_col.add_child(inventory_list)
+
+	return {
+		"panel": panel, "fitted_list": fitted_list, "inventory_list": inventory_list,
+		"fitted_rows": [], "inventory_rows": [],
+	}
+
+
+## One clickable row: "<Slot>: <Name>". Returns {panel, module_id, slot, action}.
+static func _make_inventory_row(text: String, module_id: int, slot: String, action: String) -> Dictionary:
+	var row := Panel.new()
+	row.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.07, 0.11, 0.6)
+	style.set_corner_radius_all(3)
+	row.add_theme_stylebox_override("panel", style)
+
+	var lbl := make_hud_label(11, Color(0.82, 0.87, 0.94))
+	lbl.text = text
+	lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
+	lbl.offset_left = 6.0
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(lbl)
+
+	return {"panel": row, "module_id": module_id, "slot": slot, "action": action}
+
+
+## Rebuild both columns from the latest PlayerFitting payload. `modules` is
+## the flat fitted-module array (slot/module_id/name fields, same shape the
+## module bar already consumes); `inventory` is [{module_id,name,slot,kind}].
+static func update_inventory_panel(refs: Dictionary, modules: Array, inventory: Array) -> void:
+	var fitted_list: VBoxContainer = refs["fitted_list"]
+	var inventory_list: VBoxContainer = refs["inventory_list"]
+	for child: Node in fitted_list.get_children():
+		child.queue_free()
+	for child: Node in inventory_list.get_children():
+		child.queue_free()
+
+	var fitted_rows: Array = []
+	for entry: Variant in modules:
+		var m: Dictionary = entry as Dictionary
+		var slot: String = m.get("slot", "") as String
+		var module_id: int = m.get("module_id", 0) as int
+		var text := "%s: %s" % [slot, m.get("name", "?") as String]
+		var row := _make_inventory_row(text, module_id, slot, "unfit")
+		fitted_list.add_child(row["panel"])
+		fitted_rows.append(row)
+	refs["fitted_rows"] = fitted_rows
+
+	var inventory_rows: Array = []
+	for entry: Variant in inventory:
+		var item: Dictionary = entry as Dictionary
+		var slot: String = item.get("slot", "") as String
+		var module_id: int = item.get("module_id", 0) as int
+		var text := "%s: %s" % [slot, item.get("name", "?") as String]
+		var row := _make_inventory_row(text, module_id, slot, "fit")
+		inventory_list.add_child(row["panel"])
+		inventory_rows.append(row)
+	refs["inventory_rows"] = inventory_rows
+
+
+static func toggle_inventory_panel(refs: Dictionary) -> void:
+	var panel: Panel = refs["panel"]
+	panel.visible = not panel.visible
+
+
+## Returns the row under `pos` from either column, or {} if none.
+## {module_id, slot, action} ("fit" sends FitModuleCommand, "unfit" sends
+## UnfitModuleCommand) -- {} has no "action" key, so callers can check
+## `result.has("action")` to tell a miss from a hit.
+static func inventory_panel_row_at(refs: Dictionary, pos: Vector2) -> Dictionary:
+	var panel: Panel = refs["panel"]
+	if not panel.visible:
+		return {}
+	for row: Dictionary in (refs["fitted_rows"] as Array):
+		if (row["panel"] as Panel).get_global_rect().has_point(pos):
+			return row
+	for row: Dictionary in (refs["inventory_rows"] as Array):
+		if (row["panel"] as Panel).get_global_rect().has_point(pos):
+			return row
+	return {}
+
+
+## True when the inventory panel is open and `pos` falls anywhere inside it
+## (a row or its empty margin/header). Lets main.gd swallow the click so a
+## miss on the open panel doesn't fall through to the 3D world behind it
+## (thrust / select). Distinct from inventory_panel_row_at(), which only
+## reports actionable row hits.
+static func inventory_panel_consumes(refs: Dictionary, pos: Vector2) -> bool:
+	var panel: Panel = refs["panel"]
+	return panel.visible and panel.get_global_rect().has_point(pos)

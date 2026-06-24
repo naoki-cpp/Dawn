@@ -30,6 +30,14 @@ impl<S: EventStore> SimulationNode<S> {
                         if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
                             *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
                         }
+                        // Starting inventory (ADR-0032) is a pure function of
+                        // module_registry, loaded identically before replay
+                        // starts -- reproduce it here exactly like the live
+                        // spawn path does, the same way base/Hull are derived
+                        // above rather than event-sourced.
+                        if e.ship_type_id == crate::ship_types::SHIP_TYPE_MAGPIE {
+                            self.seed_player_inventory(entity);
+                        }
                     }
                 }
                 let counter = e.ship_id.0.counter();
@@ -87,6 +95,14 @@ impl<S: EventStore> SimulationNode<S> {
                         .unwrap_or(ShipStatsComp::NPC);
                     let _ = self.world.inner_mut().insert_one(entity, fitting);
                     apply_fitting(&mut self.world, e.ship_id, base);
+                    // Inventory snapshot (ADR-0032): always present alongside
+                    // the fitting it changed together with.
+                    let _ = self.world.inner_mut().insert_one(
+                        entity,
+                        dawn_ecs::components::InventoryComp {
+                            items: e.inventory.clone(),
+                        },
+                    );
                 }
             }
 

@@ -89,6 +89,10 @@ static func decode_key(
 	if keycode == KEY_BRACKETRIGHT and player_ship_id >= 0:
 		return {"kind": "adjust_keep_at_range", "delta_km": 1.0}
 
+	## I key -> toggle the Inventory / Fitting panel (ADR-0032).
+	if keycode == KEY_I and player_ship_id >= 0:
+		return {"kind": "toggle_inventory_panel"}
+
 	## Tab key -> toggle tactical overlay visibility (works regardless of
 	## whether a player ship exists yet).
 	if keycode == KEY_TAB:

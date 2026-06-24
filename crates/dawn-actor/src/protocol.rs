@@ -356,6 +356,26 @@ pub fn parse_client_command(line: &str) -> Option<ClientCommand> {
                 range,
             }))
         }
+        "FitModuleCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            let module_id_raw = v.get("module_id")?.as_u64()? as u32;
+            let slot_str = v.get("slot")?.as_str()?;
+            Some(ClientCommand::Fit(dawn_core::FitModuleCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                module_id: ModuleId(module_id_raw),
+                slot: parse_slot_kind(slot_str)?,
+            }))
+        }
+        "UnfitModuleCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            let module_id_raw = v.get("module_id")?.as_u64()? as u32;
+            let slot_str = v.get("slot")?.as_str()?;
+            Some(ClientCommand::Unfit(dawn_core::UnfitModuleCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                module_id: ModuleId(module_id_raw),
+                slot: parse_slot_kind(slot_str)?,
+            }))
+        }
         _ => None,
     }
 }
@@ -467,6 +487,34 @@ mod tests {
                 assert_eq!(c.range, Some(5000.0));
             }
             other => panic!("expected KeepAtRange, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fit_module_command_json_is_parsed_into_client_command_fit() {
+        let line = r#"{"type":"FitModuleCommand","ship_id":1,"module_id":2,"slot":"High"}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::Fit(c) => {
+                assert_eq!(c.ship_id, ship_id(1));
+                assert_eq!(c.module_id, ModuleId(2));
+                assert_eq!(c.slot, SlotKind::High);
+            }
+            other => panic!("expected Fit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unfit_module_command_json_is_parsed_into_client_command_unfit() {
+        let line = r#"{"type":"UnfitModuleCommand","ship_id":1,"module_id":2,"slot":"Mid"}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::Unfit(c) => {
+                assert_eq!(c.ship_id, ship_id(1));
+                assert_eq!(c.module_id, ModuleId(2));
+                assert_eq!(c.slot, SlotKind::Mid);
+            }
+            other => panic!("expected Unfit, got {other:?}"),
         }
     }
 

@@ -318,6 +318,20 @@ async fn main() -> anyhow::Result<()> {
                     dawn_actor::ClientCommand::KeepAtRange(k) => {
                         node.apply_keep_at_range_command_owned(sess.player_id, k);
                     }
+                    dawn_actor::ClientCommand::Fit(f) => {
+                        let ship_id = f.ship_id;
+                        node.fit_module_owned(sess.player_id, f);
+                        if let Some(json) = node.build_player_fitting_json(ship_id) {
+                            sess.send_raw(&json);
+                        }
+                    }
+                    dawn_actor::ClientCommand::Unfit(u) => {
+                        let ship_id = u.ship_id;
+                        node.unfit_module_owned(sess.player_id, u);
+                        if let Some(json) = node.build_player_fitting_json(ship_id) {
+                            sess.send_raw(&json);
+                        }
+                    }
                     dawn_actor::ClientCommand::Jump(j) => {
                         pending_jumps.push((i, j));
                         break;

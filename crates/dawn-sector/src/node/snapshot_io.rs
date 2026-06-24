@@ -1,5 +1,5 @@
 use dawn_ecs::components::{
-    CapacitorComp, FittingComp, HullComp, PositionComp, TackledComp, VelocityComp,
+    CapacitorComp, FittingComp, HullComp, InventoryComp, PositionComp, TackledComp, VelocityComp,
 };
 use dawn_event_store::store::EventStore;
 
@@ -39,6 +39,12 @@ impl<S: EventStore> SimulationNode<S> {
                     .get::<&TackledComp>(entity)
                     .map(|t| t.tacklers.clone())
                     .unwrap_or_default();
+                let inventory = self
+                    .world
+                    .inner()
+                    .get::<&InventoryComp>(entity)
+                    .map(|inv| inv.items.clone())
+                    .unwrap_or_default();
                 let ship_type_id = self
                     .ships
                     .type_ids
@@ -59,6 +65,7 @@ impl<S: EventStore> SimulationNode<S> {
                     capacitor,
                     fitting,
                     tackled_by,
+                    inventory,
                 })
             })
             .collect();
@@ -463,6 +470,7 @@ mod tests {
                     low: vec![],
                     rig: vec![],
                 },
+                inventory: vec![],
                 tick: Tick(1),
             }));
 

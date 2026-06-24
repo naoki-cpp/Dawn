@@ -118,10 +118,12 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
                   ApproachComp（接近対象 Ship/Gate・半自動操船 / ADR-0015）,
                   OrbitComp（周回対象 Ship/Gate・指定半径 / ADR-0031）,
                   KeepAtRangeComp（離脱対象 Ship/Gate・最低距離 / ADR-0031）,
-                  WarpComp（intra-Sector ワープ = 短距離 Fold・align/warping / ADR-0022）
+                  WarpComp（intra-Sector ワープ = 短距離 Fold・align/warping / ADR-0022）,
+                  InventoryComp（未装備の所有モジュール一覧 / ADR-0032）
   船種          : ShipTypeDefinition（id, name, class, base_stats, slot_layout）
   イベント      : ShipSpawned（ship_type_id 含む）, VelocityChanged, SectorTransit系,
-                  ShipFitted, WeaponFired, DamageTaken（3層 HP）, ShipDestroyed,
+                  ShipFitted（fitting + inventory スナップショット同梱 / ADR-0032）,
+                  WeaponFired, DamageTaken（3層 HP）, ShipDestroyed,
                   ModuleActivated, ModuleDeactivated
   ノード構成    : 3ノード固定
 
@@ -137,6 +139,8 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
   ADR-0023  Propulsion 慣性モデル（mass/inertia_modifier・指数接近・auto-warp-then-jump）
   ADR-0024  Tackle（Fold Disruptor・TackledComp・Step 4.5・warp/jump 拒否・snapshot 永続化）
   ADR-0025  天体（恒星・惑星・WarpTarget::Body・sun_direction シェーダー・天体ワープ）
+  ADR-0032  インベントリとランタイム換装（InventoryComp・固定初期セット・いつでも可・
+            Fit/UnfitModuleCommand・I キー）
 
   ※ 各機能が触る型・イベント・Tick ステップの正確な仕様は対応 ADR と
     docs/architecture/event-catalog.md / docs/architecture/tick-model.md を一次情報とする（ここでは重複させない）。

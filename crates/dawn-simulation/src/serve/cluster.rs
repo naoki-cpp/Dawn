@@ -1,8 +1,8 @@
 //! Raft-cluster WebSocket server (`--serve --cluster`, ADR-0009/0014).
 
 use super::{
-    apply_common_command, build_serve_node, deliver_aoi_frame, spawn_npc_frigates, AOI_CELL_SIZE,
-    P4_TICK_MS,
+    apply_common_command, build_serve_node, deliver_aoi_frame, spawn_npc_frigates,
+    CommonCommandFollowup, AOI_CELL_SIZE, P4_TICK_MS,
 };
 use crate::{cluster, ws_server};
 use dawn_core::{
@@ -152,13 +152,21 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         for sess in sessions.iter_mut() {
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
             while let Some(cmd) = sess.try_recv_command() {
-                let Some(j) = apply_common_command(
+                let followup = apply_common_command(
                     &mut nodes[sector],
                     sess.player_id,
                     cmd,
                     &mut lock_commands[sector],
-                ) else {
-                    continue;
+                );
+                let j = match followup {
+                    Some(CommonCommandFollowup::Jump(j)) => j,
+                    Some(CommonCommandFollowup::RefreshFitting(ship_id)) => {
+                        if let Some(json) = nodes[sector].build_player_fitting_json(ship_id) {
+                            sess.send_raw(&json);
+                        }
+                        continue;
+                    }
+                    None => continue,
                 };
                 let ship_owned = j.ship_id == sess.ship_id;
                 let in_range = ship_owned && nodes[sector].can_propose_jump(j.ship_id, j.gate_id);

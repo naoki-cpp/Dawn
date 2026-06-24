@@ -24,7 +24,7 @@ pub mod tick;
 pub use commands::{
     ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand, DeactivateModuleCommand,
     FitModuleCommand, JumpCommand, KeepAtRangeCommand, LockOnCommand, MoveCommand, OrbitCommand,
-    StopCommand, WarpCommand,
+    StopCommand, UnfitModuleCommand, WarpCommand,
 };
 pub use entity::{EntityId, NodeId, ShipId};
 pub use error::DawnError;

@@ -12,7 +12,7 @@ use dawn_core::{
     DawnError, DomainEvent, JumpGateId, Position, SectorId, ShipId, ShipTypeId,
 };
 use dawn_ecs::{
-    components::{CapacitorComp, FittingComp, HullComp, PositionComp, VelocityComp},
+    components::{CapacitorComp, FittingComp, HullComp, InventoryComp, PositionComp, VelocityComp},
     TransitState,
 };
 use dawn_event_store::store::EventStore;
@@ -148,6 +148,14 @@ impl<S: EventStore> SimulationNode<S> {
             .get(&ship_id)
             .copied()
             .unwrap_or(ShipTypeId(0));
+        // Inventory must follow the ship across Sectors (ADR-0032) -- unlike
+        // tackle, it's the pilot's possessions, not Sector-local state.
+        let inventory = self
+            .world
+            .inner()
+            .get::<&InventoryComp>(entity)
+            .map(|inv| inv.items.clone())
+            .unwrap_or_default();
 
         // Tackle state is not transferred on sector transit (tacklers are in
         // this sector; they lose the tackle as the ship leaves).
@@ -168,6 +176,7 @@ impl<S: EventStore> SimulationNode<S> {
             capacitor,
             fitting,
             tackled_by: Vec::new(),
+            inventory,
         };
 
         self.ships.index.remove(&ship_id);
@@ -378,6 +387,60 @@ mod tests {
             }
             other => panic!("expected SectorTransitCompleted, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn inventory_survives_a_cross_sector_transit() {
+        let mut from_node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        let mut to_node = SimulationNode::new(
+            NodeId(1),
+            SectorId(1),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+
+        for def in crate::modules::all_modules() {
+            from_node.register_module(def);
+        }
+        for def in crate::ship_types::all_ship_types() {
+            from_node.register_ship_type(def);
+        }
+        let player_id = from_node.next_player_id();
+        let ship_id = from_node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+        let before_entity = *from_node.ships.index.get(&ship_id).unwrap();
+        let before_len = from_node
+            .world
+            .inner()
+            .get::<&dawn_ecs::components::InventoryComp>(before_entity)
+            .unwrap()
+            .items
+            .len();
+        assert!(before_len > 0, "player ships spawn with a seeded inventory");
+
+        from_node
+            .propose_transit(TransitCommand {
+                ship_id,
+                to: SectorId(1),
+            })
+            .unwrap();
+        let entry_pos = Position::new(500.0, 0.0, 0.0);
+        let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos);
+
+        let after_entity = *to_node.ships.index.get(&ship_id).unwrap();
+        let after = to_node
+            .world
+            .inner()
+            .get::<&dawn_ecs::components::InventoryComp>(after_entity)
+            .unwrap();
+        assert_eq!(
+            after.items.len(),
+            before_len,
+            "inventory must carry over the gate, unlike tackle state"
+        );
     }
 
     #[test]

@@ -80,6 +80,12 @@ impl PlayerSession {
     pub fn try_recv_command(&mut self) -> Option<ClientCommand> {
         self.conn.try_recv_command()
     }
+
+    /// Send a raw JSON string directly (e.g. a refreshed PlayerFitting after
+    /// Fit/Unfit, ADR-0032 -- mirrors the one sent once at connect).
+    pub fn send_raw(&self, msg: &str) -> bool {
+        self.conn.send_raw(msg)
+    }
 }
 
 // ── WsServer ─────────────────────────────────────────────────────────────────

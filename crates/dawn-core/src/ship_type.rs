@@ -59,6 +59,19 @@ impl SlotLayout {
         low: 5,
         rig: 3,
     };
+
+    /// Max slot count for `kind` (ADR-0032): the player-facing Fit path
+    /// enforces this so a ship cannot accumulate more modules in a slot kind
+    /// than its hull supports.
+    pub fn capacity_for(&self, kind: crate::fitting::SlotKind) -> u8 {
+        use crate::fitting::SlotKind;
+        match kind {
+            SlotKind::High => self.high,
+            SlotKind::Mid => self.mid,
+            SlotKind::Low => self.low,
+            SlotKind::Rig => self.rig,
+        }
+    }
 }
 
 // ── ベーススタット ────────────────────────────────────────────────────────────
@@ -150,5 +163,15 @@ mod tests {
     #[test]
     fn frigate_slot_layout_has_three_high_slots() {
         assert_eq!(SlotLayout::FRIGATE.high, 3);
+    }
+
+    #[test]
+    fn capacity_for_returns_the_matching_slot_kind_field() {
+        use crate::fitting::SlotKind;
+        let layout = SlotLayout::FRIGATE;
+        assert_eq!(layout.capacity_for(SlotKind::High), layout.high);
+        assert_eq!(layout.capacity_for(SlotKind::Mid), layout.mid);
+        assert_eq!(layout.capacity_for(SlotKind::Low), layout.low);
+        assert_eq!(layout.capacity_for(SlotKind::Rig), layout.rig);
     }
 }

@@ -22,8 +22,9 @@ signal connection_changed(connected: bool)
 signal welcomed(player_id: int, ship_id: int)
 ## On InitialState: notifies the full payload (ships + navigation map)
 signal initial_state_received(state: Dictionary)
-## PlayerFitting 受信時: モジュール配列を通知
-signal player_fitting_received(modules: Array)
+## On PlayerFitting (sent on connect and again after every Fit/Unfit, ADR-0032):
+## notifies the full payload (modules + inventory + slot_capacity).
+signal player_fitting_received(payload: Dictionary)
 ## ModuleActivated 受信時
 signal module_activated(ship_id: int, module_id: int, slot: String)
 ## ModuleDeactivated 受信時
@@ -226,6 +227,28 @@ func send_keep_at_range_gate_command(p_ship_id: int, p_gate_id: int, p_range_m: 
 		payload["range"] = p_range_m
 	_ws.send_text(JSON.stringify(payload) + "\n")
 
+## [Inventory panel] Move a module from inventory into a fitting slot (ADR-0032).
+func send_fit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
+	if not _welcomed:
+		return
+	_ws.send_text(JSON.stringify({
+		"type"     : "FitModuleCommand",
+		"ship_id"  : p_ship_id,
+		"module_id": p_module_id,
+		"slot"     : p_slot,
+	}) + "\n")
+
+## [Inventory panel] Move a fitted module back into inventory (ADR-0032).
+func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
+	if not _welcomed:
+		return
+	_ws.send_text(JSON.stringify({
+		"type"     : "UnfitModuleCommand",
+		"ship_id"  : p_ship_id,
+		"module_id": p_module_id,
+		"slot"     : p_slot,
+	}) + "\n")
+
 func is_connected_to_server() -> bool:
 	return _connected and _welcomed
 
@@ -278,7 +301,7 @@ func _handle_message(payload: Dictionary) -> void:
 		"PlayerFitting":
 			var modules: Array = payload.get("modules", []) as Array
 			print("[Connection] PlayerFitting: %d modules" % modules.size())
-			player_fitting_received.emit(modules)
+			player_fitting_received.emit(payload)
 		"ModuleActivated":
 			var sid: int    = payload.get("ship_id",   0)  as int
 			var mid: int    = payload.get("module_id", 0)  as int

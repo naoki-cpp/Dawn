@@ -34,6 +34,12 @@ var _target_panel_refs : Dictionary = {}
 ## Each entry: {panel, style, name, state, module_index}.
 var _module_bar   : HBoxContainer = null
 var _module_slots : Array         = []
+## Inventory / Fitting panel (ADR-0032). {panel, fitted_list, inventory_list,
+## fitted_rows, inventory_rows}, toggled by the I key.
+var _inventory_panel_refs : Dictionary = {}
+## Unfitted owned modules from the latest PlayerFitting, as
+## [{module_id, name, kind, slot}, ...].
+var _player_inventory : Array = []
 
 # -- Constants ----------------------------------------------------------------
 
@@ -197,6 +203,7 @@ func _ready() -> void:
 	_ship_status_refs  = HudManager.build_ship_status_panel(_hud)
 	_target_panel_refs = HudManager.build_target_panel(_hud)
 	_module_bar = HudManager.build_module_bar(_hud)
+	_inventory_panel_refs = HudManager.build_inventory_panel(_hud)
 	_camera_base_fov = _camera.fov
 	_update_hud()
 	## Gate / body markers are spawned from the server's InitialState, not here.
@@ -474,11 +481,21 @@ func _input(event: InputEvent) -> void:
 			"toggle_tactical_overlay":
 				if _tactical_overlay != null:
 					(_tactical_overlay as Node3D).call("toggle_visible")
+			"toggle_inventory_panel":
+				HudManager.toggle_inventory_panel(_inventory_panel_refs)
 		return
 
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
 		if mb.pressed:
+			## A click on the open inventory panel fits/unfits (row hit) or is
+			## swallowed (margin/header) -- never a world click. Checked first
+			## since the panel can be open over anything.
+			if HudManager.inventory_panel_consumes(_inventory_panel_refs, mb.position):
+				var inv_row: Dictionary = HudManager.inventory_panel_row_at(_inventory_panel_refs, mb.position)
+				if mb.button_index == MOUSE_BUTTON_LEFT and inv_row.has("action"):
+					_handle_inventory_row_click(inv_row)
+				return
 			## A click on a module slot toggles it; it is never a world click.
 			var slot_index: int = HudManager.module_slot_at(_module_slots, mb.position)
 			if slot_index >= 0:
@@ -843,7 +860,11 @@ func _handle_aoi_leave(p: Dictionary) -> void:
 	if sid == _selected_target_id:
 		_selected_target_id = -1
 
-func _on_player_fitting(modules: Array) -> void:
+## Sent on connect and again after every Fit/Unfit (ADR-0032), so the panel
+## and module bar always reflect the server's authoritative fitting state --
+## including a rejected Fit/Unfit attempt reverting visibly.
+func _on_player_fitting(payload: Dictionary) -> void:
+	var modules: Array = payload.get("modules", []) as Array
 	## Initialise cycle_remaining for client-side cap simulation.
 	for m: Variant in modules:
 		var mod_dict: Dictionary = m as Dictionary
@@ -851,6 +872,8 @@ func _on_player_fitting(modules: Array) -> void:
 		mod_dict["cap_forced_off"]  = false
 	_player_modules = modules
 	_module_slots = HudManager.rebuild_module_bar(_module_bar, _player_modules)
+	_player_inventory = payload.get("inventory", []) as Array
+	HudManager.update_inventory_panel(_inventory_panel_refs, _player_modules, _player_inventory)
 	_recalc_weapon_range()
 
 func _recalc_weapon_range() -> void:
@@ -908,6 +931,21 @@ func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> 
 			mod_dict["cap_forced_off"]  = not was_manual
 			break
 	_recalc_weapon_range()
+
+
+## A row click in the inventory panel: "fit" sends the module's own slot kind
+## (the module's `def.slot` decides where it goes -- the player makes no slot
+## choice), "unfit" removes that exact fitted instance (ADR-0032).
+func _handle_inventory_row_click(row: Dictionary) -> void:
+	if _player_ship_id < 0:
+		return
+	var module_id: int = row.get("module_id", 0) as int
+	var slot: String = row.get("slot", "") as String
+	match row.get("action", "") as String:
+		"fit":
+			_connection.send_fit_module_command(_player_ship_id, module_id, slot)
+		"unfit":
+			_connection.send_unfit_module_command(_player_ship_id, module_id, slot)
 
 
 func _toggle_module_by_index(f_index: int) -> void:

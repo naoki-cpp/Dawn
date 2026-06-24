@@ -177,18 +177,33 @@ impl DuelMetrics {
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
+/// Signals `apply_common_command` hands back to the caller for commands that
+/// need context it doesn't have (the player's `PlayerSession`, multi-sector
+/// routing).
+pub(crate) enum CommonCommandFollowup {
+    /// Forward to Jump routing (per-server: in-process Raft vs. ignored in
+    /// single-node mode).
+    Jump(dawn_core::JumpCommand),
+    /// Fit/Unfit changed (or rejected unchanged) the ship's fitting/inventory
+    /// (ADR-0032) -- the caller should push a refreshed `PlayerFitting` JSON
+    /// to this ship's session so the client's UI reflects the authoritative
+    /// result either way.
+    RefreshFitting(dawn_core::ShipId),
+}
+
 /// Apply a player command that behaves identically in the single-node
 /// (`--serve`) and clustered (`--serve --cluster`) servers.
 ///
 /// Accepted `LockOn` commands are pushed to `lock_commands` for the tick's
-/// Lock System. When `cmd` is a `Jump`, it is returned to the caller so each
-/// server can route it appropriately.
+/// Lock System. When `cmd` needs server-specific routing (Jump) or a
+/// follow-up push to the session (Fit/Unfit), a `CommonCommandFollowup` is
+/// returned to the caller.
 pub(crate) fn apply_common_command(
     node: &mut SimulationNode,
     player_id: dawn_core::PlayerId,
     cmd: ClientCommand,
     lock_commands: &mut Vec<dawn_core::LockOnCommand>,
-) -> Option<dawn_core::JumpCommand> {
+) -> Option<CommonCommandFollowup> {
     match cmd {
         ClientCommand::Move(mv) => {
             node.apply_move_command_owned(player_id, mv.ship_id, mv.target_position);
@@ -225,8 +240,22 @@ pub(crate) fn apply_common_command(
         ClientCommand::KeepAtRange(k) => {
             node.apply_keep_at_range_command_owned(player_id, k);
         }
+        // Fit/Unfit (ADR-0032): apply, then always tell the caller to push a
+        // fresh PlayerFitting regardless of success, so a rejected attempt
+        // (e.g. slot full, module not owned) is visibly reverted client-side
+        // rather than left showing the attempted (but not applied) state.
+        ClientCommand::Fit(f) => {
+            let ship_id = f.ship_id;
+            node.fit_module_owned(player_id, f);
+            return Some(CommonCommandFollowup::RefreshFitting(ship_id));
+        }
+        ClientCommand::Unfit(u) => {
+            let ship_id = u.ship_id;
+            node.unfit_module_owned(player_id, u);
+            return Some(CommonCommandFollowup::RefreshFitting(ship_id));
+        }
         // Jump differs per server: hand it back to the caller.
-        ClientCommand::Jump(j) => return Some(j),
+        ClientCommand::Jump(j) => return Some(CommonCommandFollowup::Jump(j)),
     }
     None
 }

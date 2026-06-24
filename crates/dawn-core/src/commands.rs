@@ -42,6 +42,21 @@ pub struct FitModuleCommand {
     pub module_id: ModuleId,
 }
 
+/// Request to move a fitted module back into the owning player's inventory
+/// (ADR-0032). Symmetric with `FitModuleCommand`; `module_id` + `slot`
+/// together identify which fitted instance to remove (a slot can hold
+/// several modules of different ids).
+///
+/// May be rejected if:
+/// - The Ship does not exist, or the caller does not own it.
+/// - No module with `module_id` is fitted in `slot`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UnfitModuleCommand {
+    pub ship_id: ShipId,
+    pub slot: SlotKind,
+    pub module_id: ModuleId,
+}
+
 /// What an approaching Ship is steering toward (ADR-0015).
 ///
 /// A `Ship` target is dynamic (its position is read from the ECS each tick);
@@ -227,6 +242,17 @@ mod tests {
     #[test]
     fn fit_module_command_carries_slot_and_module_id() {
         let cmd = FitModuleCommand {
+            ship_id: ship_id(2),
+            slot: SlotKind::High,
+            module_id: ModuleId(42),
+        };
+        assert_eq!(cmd.slot, SlotKind::High);
+        assert_eq!(cmd.module_id, ModuleId(42));
+    }
+
+    #[test]
+    fn unfit_module_command_carries_slot_and_module_id() {
+        let cmd = UnfitModuleCommand {
             ship_id: ship_id(2),
             slot: SlotKind::High,
             module_id: ModuleId(42),
