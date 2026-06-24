@@ -3,7 +3,7 @@ scope    : Godot クライアント（client/scripts/）の保守性・設計品
 audience : AI Agent / Human Developer
 update   : クライアント側で大規模リファクタ実施後 / 新スクリプト追加時
 related  : docs/architecture/architecture-review-server.md（サーバー側）, docs/architecture/architecture.md, docs/process/playtest-guide.md
-date     : 2026-06-23（ADR-0029 真スケール座標後にファイルサイズ一覧を再計測）
+date     : 2026-06-24（ADR-0031/0032 後の再計測。main.gd 1210→1295・hud_manager 474→627・connection 245→316。総合 B 維持）
 ---
 
 # Architecture Review — Dawn Client (Godot)
@@ -15,12 +15,12 @@ date     : 2026-06-23（ADR-0029 真スケール座標後にファイルサイ�
 
 ## 現状評価
 
-**総合: B**（2026-06-23、C-3 解消で B− から上昇。2026-06-20 は C-1 完了で C+ から B− に上昇）
+**総合: B**（2026-06-24 維持。ADR-0031/0032 で main.gd 1210→1295・hud_manager 474→627 と増えたが、main.gd 増分は重複除去で相殺気味〔churn cleanup #18 で 1255→1239→inventory で 1295〕。R-2 で管理済み・新規問題なし）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
-| ファイル分割 | B+ | `main.gd` から `HudManager`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder` の4クラスを抽出（C-1完了）。残るのは入力ルーティング・イベント dispatch・spawning・状態保持のオーケストレーション層 |
-| `main.gd` の責務集約 | B− | god object はほぼ解消。マウス入力処理（ダブルクリック判定・HUD連動）のみ意図的に残置（理由は C-1 参照） |
+| ファイル分割 | B+ | `main.gd` から `HudManager`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder` の4クラスを抽出（C-1完了）。残るのは入力ルーティング・イベント dispatch・spawning・状態保持のオーケストレーション層。ADR-0032 のインベントリパネル UI 構築は `hud_manager.gd` に集約（main.gd を肥大させない方針を維持） |
+| `main.gd` の責務集約 | B− | god object はほぼ解消。マウス入力処理（ダブルクリック判定・HUD連動・インベントリ行ヒット）のみ意図的に残置（理由は C-1 参照）。churn cleanup（#18）で `_vec3_from_dict` / `_update_position_markers` / `_instantiate_ship` に重複統合 |
 | 重複 | A− | マーカー生成・ピッキング・ワープ着地点計算の同型ロジックは解消済み（C-2） |
 | 結合度 | A− | signal 経由の `connection.gd` ↔ `main.gd` 結合は良好。`@onready` のシーンツリー直パス参照はフェイルファストガードで解消（C-3）。modules dict のキー前提のみ脆さが残る（C-4、保留） |
 | デッドコード | A | 残骸なし。コメントは ADR 参照付きで現状と一致 |
@@ -33,29 +33,30 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 
 ---
 
-## ファイルサイズ一覧（2026-06-23 時点）
+## ファイルサイズ一覧（2026-06-24 時点）
 
-> 2026-06-20（C-1 完了）からの差分は主に ADR-0029（真スケール座標）。`main.gd` にワープ
-> トンネル演出・適応的な速度/距離表示・浮動原点リベースが加わり 1094→1210 に増加し、
-> 新スクリプト `unit_format.gd` / `world_space.gd` / `warp_tunnel_effect.gd` が追加された。
+> 2026-06-23 からの差分は ADR-0031（Orbit/KeepAtRange の O/K/[/] キー）と ADR-0032
+> （インベントリパネル・Fit/Unfit）。`main.gd` は churn cleanup（#18）で一度 1255→1239 に
+> 減ったのち inventory で 1295 へ。インベントリパネル UI は `hud_manager.gd`（474→627）に
+> 集約し main.gd を肥大させない方針を維持した。新スクリプトの追加はなし。
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `client/scripts/main.gd` | 1210 | 🟡 オーケストレーション層。god object ではないが最大ファイル。ADR-0029 のワープ演出・単位整形・原点リベースで 1094→1210 |
-| `client/scripts/hud_manager.gd` | 474 | 🟢 C-1で新設。HUD全パネルの構築・更新を持つ stateless static class |
-| `client/scripts/ship_controller.gd` | 323 | 🟢 単一船の視覚表現に専念。ADR-0029 でワープ時の他船トンネル隠蔽・速度キャップを追加（273→323）。ロックオン枠は `BillboardRing` 共通化 |
-| `client/scripts/connection.gd` | 245 | 🟢 WebSocket I/O とシグナル発行のみ。教科書的な境界 |
-| `client/scripts/navigation_marker_renderer.gd` | 164 | 🟢 C-1で新設。ゲート/惑星マーカー生成 + スペクトル色。選択リング生成は `billboard_ring.gd` へ |
+| `client/scripts/main.gd` | 1295 | 🟡 オーケストレーション層。god object ではないが最大ファイル。R-2 で管理（保留・トリガー付き）。churn cleanup で重複統合済み、ADR-0031/0032 のキー入力・インベントリ行クリック dispatch を追加 |
+| `client/scripts/hud_manager.gd` | 627 | 🟡 HUD 全パネルの構築・更新の stateless static class。474→627（ADR-0032 インベントリ/フィッティングパネル）。責務は単一（HUD 構築）だが規模が増えた。観察対象（分割するならパネル種別ごとだが、static 関数群で結合は弱く緊急性なし） |
+| `client/scripts/connection.gd` | 316 | 🟢 WebSocket I/O とシグナル発行のみ。245→316（ADR-0031/0032 の send_*・PlayerFitting payload 化） |
+| `client/scripts/ship_controller.gd` | 326 | 🟢 単一船の視覚表現に専念。ロックオン枠は `BillboardRing` 共通化 |
+| `client/scripts/navigation_marker_renderer.gd` | 164 | 🟢 C-1で新設。ゲート/惑星マーカー生成 + スペクトル色 |
 | `client/scripts/camera_controller.gd` | 131 | 🟢 自己完結したオービットカメラ |
+| `client/scripts/input_decoder.gd` | 114 | 🟢 C-1で新設。キー入力→アクション決定の純粋関数。85→114（ADR-0031 O/K/[/]・ADR-0032 I キー）。GdUnit4 テスト済み |
 | `client/scripts/ship_picking.gd` | 104 | 🟢 C-1で新設。船/ゲート/天体ピッキング3関数（画面空間ピッキング） |
 | `client/scripts/tactical_overlay.gd` | 93 | 🟢 射程リング描画のみ |
-| `client/scripts/input_decoder.gd` | 85 | 🟢 C-1で新設。キー入力→アクション決定の純粋関数 |
 | `client/scripts/world_space.gd` | 83 | 🟢 ADR-0029 新設。浮動原点（真 AU 距離レンダリング用の WorldSpace リベース） |
 | `client/scripts/billboard_ring.gd` | 65 | 🟢 2026-06-21新設。固定画面サイズの選択リング billboard 共通 static class |
 | `client/scripts/unit_format.gd` | 38 | 🟢 ADR-0029 新設。速度/距離の適応的単位整形（m/s・km/s・AU/s） |
 | `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 ADR-0029 新設。ワープトンネル ColorRect の intensity ラッパー |
 
-合計 3,025 行のうち `main.gd` が40%を占める（C-1着手前69%から大幅低下）。
+合計 3,366 行のうち `main.gd` が38%を占める（C-1着手前69%から大幅低下、前回 40% から微減）。
 新設 static class 群（C-1 の5クラス + ADR-0029 の `world_space`/`unit_format`/`warp_tunnel_effect`）は
 いずれも main.gd の状態やシーンツリーへの直接依存を持たない。
 
@@ -68,9 +69,10 @@ world_space_test.gd 71、合計 814行）は別カウント。§「テストカ�
 
 ## main.gd 内部構造（行範囲別、C-1 完了後）
 
-> 注: 以下の行範囲は C-1 完了時点（1094行）のもの。ADR-0029 でワープ演出・単位整形・
-> 原点リベースが加わり現在 1210行になっており、範囲は概ね下方にずれている。区分（責務の
-> まとまり）の傾向は有効だが、正確な行番号は次回の構造リファクタ時に再計測する。
+> 注: 以下の行範囲は C-1 完了時点（1094行）のもの。その後 ADR-0029（ワープ演出・単位整形・
+> 原点リベース）・ADR-0031（O/K/[/] キー）・ADR-0032（インベントリ行クリック）が加わり現在
+> 1295行で、範囲は下方にずれている。区分（責務のまとまり）の傾向は有効だが、正確な行番号は
+> 次回の構造リファクタ（R-2 着手時）に再計測する。
 
 | 行範囲 | 内容 | 評価 |
 |---|---|---|
