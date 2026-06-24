@@ -99,3 +99,63 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dawn_core::{NodeId, PlayerId, SectorBounds, SectorId};
+
+    fn mem_node() -> SimulationNode {
+        SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        )
+    }
+
+    fn spawn_owned_player_at(node: &mut SimulationNode, pos: Position) -> (PlayerId, ShipId) {
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, pos);
+        (player_id, ship_id)
+    }
+
+    /// Reproduces the bug a player reported as "gate jump sometimes fails even
+    /// in range": every demo/production gate has `activation_radius` (2000u)
+    /// smaller than `MIN_WARP_DISTANCE` (3000u), so a ship sitting in that
+    /// 1000u band is too far for `can_propose_jump` but too close for
+    /// `apply_warp_command`'s own distance check. Before the fix, a
+    /// `JumpCommand` issued from this band was silently dropped every tick
+    /// with no fallback and no feedback -- this test pins the gap so the
+    /// dispatch sites (cluster.rs / dawn-sector-node/main.rs) know an Approach
+    /// fallback is available and must use it.
+    #[test]
+    fn ship_between_activation_radius_and_min_warp_distance_can_neither_jump_nor_warp_but_can_approach(
+    ) {
+        let mut node = mem_node();
+        let gate = *node.jump_gate(JumpGateId(0)).expect("Sector 0 has Gate 0");
+        assert!(
+            gate.activation_radius < super::super::MIN_WARP_DISTANCE,
+            "this test only makes sense while the gap exists"
+        );
+        let gap_distance =
+            (gate.activation_radius as f64 + super::super::MIN_WARP_DISTANCE as f64) / 2.0;
+        let gap_abs = [gate.abs_m[0] - gap_distance, gate.abs_m[1], gate.abs_m[2]];
+
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.set_spawn_anchor_abs(ship, gap_abs);
+
+        assert!(
+            !node.can_propose_jump(ship, JumpGateId(0)),
+            "gap distance must be outside activation_radius"
+        );
+        assert!(
+            !node.apply_warp_command(ship, WarpTarget::Gate(JumpGateId(0)), true),
+            "gap distance must be closer than MIN_WARP_DISTANCE"
+        );
+        assert!(
+            node.apply_approach_command(ship, dawn_core::ApproachTarget::Gate(JumpGateId(0))),
+            "Approach must remain available as the fallback that closes the gap"
+        );
+        let _ = player;
+    }
+}

@@ -356,6 +356,21 @@ async fn main() -> anyhow::Result<()> {
                     j.ship_id.raw(),
                     j.gate_id.0
                 );
+            } else if ship_owned
+                && node
+                    .apply_approach_command(j.ship_id, dawn_core::ApproachTarget::Gate(j.gate_id))
+            {
+                // Too close to warp (< MIN_WARP_DISTANCE) but still outside
+                // activation_radius -- without this fallback a ship in that
+                // band could never jump: in_range fails, and apply_warp_command
+                // fails its own can_propose_warp distance check too, so the
+                // command was silently dropped every tick. Approach closes the
+                // rest of the gap sublight.
+                println!(
+                    "[Node] Jump: ship #{} too close to warp — approaching gate #{} instead",
+                    j.ship_id.raw(),
+                    j.gate_id.0
+                );
             }
         }
 
