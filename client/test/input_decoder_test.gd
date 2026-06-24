@@ -151,6 +151,18 @@ func test_bracket_keys_do_nothing_without_a_player_ship() -> void:
 	assert_str(action.kind as String).is_equal("none")
 
 
+# -- I key -> toggle inventory panel -----------------------------------------------------
+
+func test_i_key_toggles_the_inventory_panel() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_I, 1, -1, -1, -1, -1)
+	assert_str(action.kind as String).is_equal("toggle_inventory_panel")
+
+
+func test_i_key_does_nothing_without_a_player_ship() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_I, NO_SELECTION, -1, -1, -1, -1)
+	assert_str(action.kind as String).is_equal("none")
+
+
 # -- Tab key -> tactical overlay ---------------------------------------------------------
 
 func test_tab_key_toggles_the_tactical_overlay_even_without_a_player_ship() -> void:

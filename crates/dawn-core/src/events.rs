@@ -254,6 +254,11 @@ pub struct ShipFitted {
     pub ship_id: ShipId,
     /// 変更後の装備全体スナップショット
     pub fitting: FittingSnapshot,
+    /// 変更後のインベントリ全体スナップショット（ADR-0032）。Fit/Unfit は常に
+    /// 装備とインベントリの両方を同時に変えるため、新規イベント型を起こさず
+    /// 既存の ShipFitted に同梱する。
+    #[serde(default)]
+    pub inventory: Vec<ModuleId>,
     pub tick: Tick,
 }
 

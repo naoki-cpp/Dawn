@@ -1,11 +1,13 @@
 pub mod combat;
 pub mod fitting;
+pub mod inventory;
 pub mod movement;
 pub mod ship;
 pub mod transit;
 
 pub use combat::{CapacitorComp, HullComp, LockComp, LockEntry, LockState, WeaponComp};
 pub use fitting::{FittedSlot, FittingComp};
+pub use inventory::InventoryComp;
 pub use movement::{
     AnchorComp, ApproachComp, KeepAtRangeComp, OrbitComp, PositionComp, ShipStatsComp, TackledComp,
     ThrustComp, VelocityComp, WarpComp, WarpPhase,

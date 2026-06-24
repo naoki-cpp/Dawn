@@ -66,6 +66,11 @@ pub struct ShipSnapshot {
     /// state is not lost on restart (which would allow escape).
     #[serde(default)]
     pub tackled_by: Vec<dawn_core::ShipId>,
+    /// Unfitted modules the pilot owns (ADR-0032). `#[serde(default)]` for
+    /// backward compatibility with snapshots taken before InventoryComp
+    /// existed.
+    #[serde(default)]
+    pub inventory: Vec<dawn_core::ModuleId>,
 }
 
 // ── Node-level snapshot ───────────────────────────────────────────────────────
@@ -137,6 +142,7 @@ mod tests {
                 capacitor: Some(250.0),
                 fitting: FittingSnapshot::empty(),
                 tackled_by: vec![],
+                inventory: vec![dawn_core::ModuleId(7)],
             }],
         }
     }
@@ -152,6 +158,7 @@ mod tests {
         assert_eq!(restored.id_counter, original.id_counter);
         assert_eq!(restored.ships.len(), 1);
         assert_eq!(restored.ships[0].position, original.ships[0].position);
+        assert_eq!(restored.ships[0].inventory, original.ships[0].inventory);
     }
 
     #[test]

@@ -53,6 +53,7 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 | [ADR-0010](ADR-0010-ship-loss-and-redispatch.md) | 船の喪失と再出撃 — 脱出ポッド / 拠点帰還 / 新艦派遣 | Deferred |
 | [ADR-0011](ADR-0011-capacitor-system.md) | サイクルベース Capacitor システムとクライアント側シミュレーション | Accepted |
 | [ADR-0012](ADR-0012-turret-tracking.md) | タレット追跡メカニズム | Accepted |
+| [ADR-0032](ADR-0032-inventory-and-runtime-fitting.md) | インベントリとランタイム換装 — InventoryComp / Fit/UnfitModuleCommand | Accepted |
 
 ### UI / クライアント表示
 

@@ -221,7 +221,8 @@ Replay には影響せず、`InitialState` + `DomainEvent` フィルタリング
 |---|---|---|---|
 | `MoveCommand` | 推力方向を指定する | — | ✅ 実装済み |
 | `LockOnCommand` | ロックオン開始を要求する | `TargetLocked` | ✅ 実装済み |
-| `FitModuleCommand` | モジュールを装備する | `ShipFitted` | ✅ 実装済み |
+| `FitModuleCommand` | インベントリのモジュールをスロットへ装備する（クライアント発行は所有権・スロット種別・容量・所持を検証 / ADR-0032） | `ShipFitted` | ✅ 実装済み |
+| `UnfitModuleCommand` | 装備中のモジュールをインベントリへ戻す（ADR-0032） | `ShipFitted` | ✅ 実装済み |
 | `ActivateModuleCommand` | Active モジュールをオンにする | `ModuleActivated` | ✅ 実装済み |
 | `DeactivateModuleCommand` | Active モジュールをオフにする | `ModuleDeactivated` | ✅ 実装済み |
 | `AttackCommand` | 攻撃対象を指定する | `WeaponFired` | ✅ 型定義・WsServer JSON パーサー実装済み（Phase 5）|
@@ -293,10 +294,13 @@ Replay には影響せず、`InitialState` + `DomainEvent` フィルタリング
 |---|---|---|---|
 | `ship_id` | `ShipId` | ✓ | 装備を変更した Ship |
 | `fitting` | `FittingSnapshot` | ✓ | 変更後の全スロットのスナップショット（モジュール ID リスト） |
+| `inventory` | `Vec<ModuleId>` | ✓ | 変更後の未装備インベントリのスナップショット（ADR-0032。`#[serde(default)]`） |
 | `tick` | `Tick` | ✓ | 装備変更が確定した Tick |
 
 **設計メモ:** `stats` フィールドは持たない。Replay 時は `FittingSnapshot` から
-`apply_fitting()` で再計算するため（INV-002 準拠）。
+`apply_fitting()` で再計算するため（INV-002 準拠）。Fit/Unfit は常に装備と
+インベントリを同時に変えるため、新規イベント型を起こさず両方をここに同梱する
+（ADR-0032）。
 
 ---
 

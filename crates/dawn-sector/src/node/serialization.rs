@@ -5,7 +5,7 @@
 //! from the presentation layer.
 
 use dawn_core::{CelestialBodyKind, ShipId};
-use dawn_ecs::components::{FittingComp, HullComp, ShipStatsComp};
+use dawn_ecs::components::{FittingComp, HullComp, InventoryComp, ShipStatsComp};
 use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
@@ -13,11 +13,14 @@ use super::SimulationNode;
 impl<S: EventStore> SimulationNode<S> {
     /// Return the player ship's fitting state as a PlayerFitting JSON message.
     ///
-    /// Sent after Welcome + InitialState on connect. Format:
+    /// Sent after Welcome + InitialState on connect, and again after every
+    /// Fit/Unfit (ADR-0032). Format:
     /// ```json
     /// {"type":"PlayerFitting","modules":[
     ///   {"slot":"High","index":0,"module_id":1,"name":"Small Railgun I","is_active":false}
-    /// ]}
+    /// ],"inventory":[
+    ///   {"module_id":2,"name":"Medium Railgun I","kind":"Weapon","slot":"High"}
+    /// ],"slot_capacity":{"High":3,"Mid":3,"Low":2,"Rig":3}}
     /// ```
     pub fn build_player_fitting_json(&self, ship_id: ShipId) -> Option<String> {
         let entity = self.ships.index.get(&ship_id)?;
@@ -58,10 +61,48 @@ impl<S: EventStore> SimulationNode<S> {
             }
         }
 
+        // Unfitted owned modules (ADR-0032), resolved to display info via
+        // module_registry -- InventoryComp only stores bare ModuleIds.
+        let inventory: Vec<serde_json::Value> = self
+            .world
+            .inner()
+            .get::<&InventoryComp>(*entity)
+            .ok()
+            .map(|inv| {
+                inv.items
+                    .iter()
+                    .filter_map(|id| self.module_registry.get(id))
+                    .map(|def| {
+                        serde_json::json!({
+                            "module_id": def.id.0,
+                            "name"     : def.name,
+                            "kind"     : format!("{:?}", def.kind),
+                            "slot"     : format!("{:?}", def.slot),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let layout = self
+            .ships
+            .type_ids
+            .get(&ship_id)
+            .and_then(|t| self.ship_type_registry.get(t))
+            .map(|d| d.slot_layout);
+        let slot_capacity = serde_json::json!({
+            "High": layout.map(|l| l.high).unwrap_or(0),
+            "Mid" : layout.map(|l| l.mid).unwrap_or(0),
+            "Low" : layout.map(|l| l.low).unwrap_or(0),
+            "Rig" : layout.map(|l| l.rig).unwrap_or(0),
+        });
+
         Some(
             serde_json::json!({
-                "type"   : "PlayerFitting",
-                "modules": modules,
+                "type"         : "PlayerFitting",
+                "modules"      : modules,
+                "inventory"    : inventory,
+                "slot_capacity": slot_capacity,
             })
             .to_string(),
         )

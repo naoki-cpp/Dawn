@@ -17,6 +17,7 @@
 mod apply_event;
 mod approach;
 mod commands;
+mod inventory;
 mod navigation;
 mod orbit;
 mod sector_map;

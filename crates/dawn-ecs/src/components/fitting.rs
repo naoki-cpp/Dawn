@@ -87,6 +87,17 @@ impl FittingComp {
         }
     }
 
+    /// 読み取り専用版の `slot_mut`（ADR-0032）: 容量チェックなど、変更せずに
+    /// 件数や内容を見るだけの呼び出し元向け。
+    pub fn slot(&self, kind: SlotKind) -> &[FittedSlot] {
+        match kind {
+            SlotKind::High => &self.high,
+            SlotKind::Mid => &self.mid,
+            SlotKind::Low => &self.low,
+            SlotKind::Rig => &self.rig,
+        }
+    }
+
     /// 指定 module_id を持つスロットの可変参照を返す。
     pub fn find_slot_mut(
         &mut self,

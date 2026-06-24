@@ -313,11 +313,21 @@ impl<S: EventStore> SimulationNode<S> {
             .get::<&FittingComp>(entity)
             .map(|f| f.to_snapshot())
             .unwrap_or_else(|_| dawn_core::FittingSnapshot::empty());
+        // Inventory is absent for NPCs and for ships fit_module touches before
+        // seeding (ADR-0032) -- this privileged path doesn't consume from it,
+        // so just mirror whatever is currently there for replay fidelity.
+        let inventory = self
+            .world
+            .inner()
+            .get::<&dawn_ecs::components::InventoryComp>(entity)
+            .map(|inv| inv.items.clone())
+            .unwrap_or_default();
 
         self.event_store
             .append(DomainEvent::ShipFitted(dawn_core::events::ShipFitted {
                 ship_id: cmd.ship_id,
                 fitting: snapshot,
+                inventory,
                 tick: self.current_tick,
             }));
 

@@ -1,8 +1,8 @@
 //! Single-node WebSocket server (`--serve`, no Raft cluster).
 
 use super::{
-    apply_common_command, build_serve_node, deliver_aoi_frame, spawn_npc_frigates, DuelMetrics,
-    AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
+    apply_common_command, build_serve_node, deliver_aoi_frame, spawn_npc_frigates,
+    CommonCommandFollowup, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
 };
 use crate::ws_server;
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId};
@@ -138,15 +138,21 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
         let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
         for sess in sessions.iter_mut() {
             while let Some(cmd) = sess.try_recv_command() {
-                if let Some(j) =
-                    apply_common_command(&mut node, sess.player_id, cmd, &mut lock_commands)
-                {
-                    eprintln!(
-                        "[Server] JumpCommand ignored (ship #{} gate #{}): \
-                         --serve runs a single-sector node without Raft",
-                        j.ship_id.raw(),
-                        j.gate_id.0
-                    );
+                match apply_common_command(&mut node, sess.player_id, cmd, &mut lock_commands) {
+                    Some(CommonCommandFollowup::Jump(j)) => {
+                        eprintln!(
+                            "[Server] JumpCommand ignored (ship #{} gate #{}): \
+                             --serve runs a single-sector node without Raft",
+                            j.ship_id.raw(),
+                            j.gate_id.0
+                        );
+                    }
+                    Some(CommonCommandFollowup::RefreshFitting(ship_id)) => {
+                        if let Some(json) = node.build_player_fitting_json(ship_id) {
+                            sess.send_raw(&json);
+                        }
+                    }
+                    None => {}
                 }
             }
         }

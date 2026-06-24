@@ -30,8 +30,8 @@
 
 use dawn_core::{
     ActivateModuleCommand, ApproachCommand, AttackCommand, DeactivateModuleCommand, DomainEvent,
-    JumpCommand, KeepAtRangeCommand, LockOnCommand, MoveCommand, OrbitCommand, StopCommand,
-    WarpCommand,
+    FitModuleCommand, JumpCommand, KeepAtRangeCommand, LockOnCommand, MoveCommand, OrbitCommand,
+    StopCommand, UnfitModuleCommand, WarpCommand,
 };
 use tokio::sync::mpsc;
 
@@ -77,6 +77,10 @@ pub enum ClientCommand {
     Orbit(OrbitCommand),
     /// Hold at least a chosen range from a selected ship/gate (ADR-0031).
     KeepAtRange(KeepAtRangeCommand),
+    /// Move a module from inventory into a fitting slot (ADR-0032).
+    Fit(FitModuleCommand),
+    /// Move a fitted module back into inventory (ADR-0032).
+    Unfit(UnfitModuleCommand),
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
