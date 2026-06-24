@@ -66,6 +66,22 @@ impl HullComp {
 
         (self.current_shield, self.current_armor, self.current_hull)
     }
+
+    pub fn repair_shield(&mut self, amount: f32, max_shield: f32) -> f32 {
+        if self.is_destroyed || amount <= 0.0 {
+            return self.current_shield;
+        }
+        self.current_shield = (self.current_shield + amount).clamp(0.0, max_shield.max(0.0));
+        self.current_shield
+    }
+
+    pub fn repair_armor(&mut self, amount: f32, max_armor: f32) -> f32 {
+        if self.is_destroyed || amount <= 0.0 {
+            return self.current_armor;
+        }
+        self.current_armor = (self.current_armor + amount).clamp(0.0, max_armor.max(0.0));
+        self.current_armor
+    }
 }
 
 /// 武器クールダウン追跡コンポーネント。
@@ -210,6 +226,24 @@ mod tests {
         let mut hull = HullComp::new(200.0, 100.0, 100.0);
         hull.apply_damage(150.0);
         assert!(!hull.is_destroyed);
+    }
+
+    #[test]
+    fn shield_repair_clamps_to_max_shield() {
+        let mut hull = HullComp::new(100.0, 100.0, 100.0);
+        hull.apply_damage(75.0);
+        let repaired = hull.repair_shield(50.0, 100.0);
+        assert_eq!(repaired, 75.0);
+        assert_eq!(hull.current_shield, 75.0);
+    }
+
+    #[test]
+    fn armor_repair_clamps_to_max_armor() {
+        let mut hull = HullComp::new(0.0, 100.0, 100.0);
+        hull.apply_damage(40.0);
+        let repaired = hull.repair_armor(80.0, 100.0);
+        assert_eq!(repaired, 100.0);
+        assert_eq!(hull.current_armor, 100.0);
     }
 
     #[test]

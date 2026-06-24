@@ -672,6 +672,7 @@ func _on_event_received(payload: Dictionary) -> void:
 		"VelocityChanged"  : _handle_velocity_changed(payload)
 		"ShipDespawned"    : _handle_ship_despawned(payload)
 		"DamageTaken"   : _handle_damage_taken(payload)
+		"RepairApplied" : _handle_repair_applied(payload)
 		"ShipDestroyed" : _handle_ship_destroyed(payload)
 		"TargetLocked"  : _handle_target_locked(payload)
 		"LockLost"      : _handle_lock_lost(payload)
@@ -1050,6 +1051,23 @@ func _handle_damage_taken(p: Dictionary) -> void:
 	## Flash red on any ship that takes damage (visual hit feedback)
 	if _ships.has(ship_id):
 		(_ships[ship_id] as Node3D).call("flash_damage")
+
+func _handle_repair_applied(p: Dictionary) -> void:
+	var ship_id: int   = p.get("ship_id",        0)   as int
+	var sh     : float = p.get("current_shield", 0.0) as float
+	var ar     : float = p.get("current_armor",  0.0) as float
+	var hu     : float = p.get("current_hull",   0.0) as float
+	var entry: Dictionary = _ship_hp.get(ship_id, {}) as Dictionary
+	entry["shield"] = sh
+	entry["armor"]  = ar
+	entry["hull"]   = hu
+	_ship_hp[ship_id] = entry
+	if ship_id == _player_ship_id:
+		_player_shield = sh
+		_player_armor  = ar
+		_player_hull   = hu
+	if _ships.has(ship_id):
+		(_ships[ship_id] as Node3D).call("flash_repair")
 
 func _handle_ship_destroyed(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int

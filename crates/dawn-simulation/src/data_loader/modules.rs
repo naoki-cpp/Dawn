@@ -55,6 +55,8 @@ pub(super) struct StatDeltaEntry {
     pub(super) cap_recharge_add: f32,
     #[serde(default)]
     pub(super) tackle_range_add: f32,
+    #[serde(default)]
+    pub(super) repair_amount: f32,
 }
 
 fn default_speed_multiplier() -> f32 {
@@ -114,6 +116,7 @@ fn entry_to_module(e: ModuleEntry) -> ModuleDefinition {
             cap_max_add: e.stat_delta.cap_max_add,
             cap_recharge_add: e.stat_delta.cap_recharge_add,
             tackle_range_add: e.stat_delta.tackle_range_add,
+            repair_amount: e.stat_delta.repair_amount,
         },
     }
 }

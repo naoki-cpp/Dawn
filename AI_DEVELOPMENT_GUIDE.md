@@ -159,7 +159,7 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
 ゴール（ゲーム化）に沿う機能拡張は ADR を起票して人間の承認を得てから実装する（§9）。
 反グラインドの核（スキル育成・AFK 採掘・P2W）に該当する提案は、ゴール再定義後も拒否する。
 拡張は段階的に行う（まず Ship 中心の戦闘の深み: Tackle → Signature Resolution →
-Orbit/Keep at Range → Logistics → 資源シンク。受動採取は採らない / ADR-0016 §5）。
+Orbit/Keep at Range → Local Repair → Logistics → 資源シンク。受動採取は採らない / ADR-0016 §5 / ADR-0033）。
 
 ### 絶対に変えてはならない設計原則
 

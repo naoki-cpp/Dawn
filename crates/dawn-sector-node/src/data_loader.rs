@@ -63,6 +63,8 @@ struct StatDeltaEntry {
     cap_recharge_add: f32,
     #[serde(default)]
     tackle_range_add: f32,
+    #[serde(default)]
+    repair_amount: f32,
 }
 
 fn one() -> f32 {
@@ -136,6 +138,7 @@ pub fn load_modules(path: &str) -> Vec<ModuleDefinition> {
                         cap_max_add: e.stat_delta.cap_max_add,
                         cap_recharge_add: e.stat_delta.cap_recharge_add,
                         tackle_range_add: e.stat_delta.tackle_range_add,
+                        repair_amount: e.stat_delta.repair_amount,
                     },
                 })
                 .collect();

@@ -70,7 +70,10 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 - ✅ Orbit / Keep at Range（ADR-0031・2026-06-23）— OrbitComp/KeepAtRangeComp + process_orbit
   /process_keep_at_range（Step 2.55/2.56）。Approach/Orbit/KeepAtRange 相互排他、Warp 中は拒否。
   O/K キー配線済み。これで戦闘の深み（Tackle → Signature → Orbit/Keep at Range）が完了し、
-  残るは Logistics のみ
+  Logistics の前段として Local Repair（ADR-0033）へ進んだ
+- ✅ Local Repair（ADR-0033・2026-06-24）— Active Shield Booster / Armor Repairer、
+  RepairSystem（Step 6.5）、RepairApplied、Godot 緑フラッシュまで実装済み。
+  次は本体の Logistics（遠隔修理）
 - ✅ Godot クライアント構造リファクタ + テスト基盤（2026-06-21）— `main.gd` の god object を
   `HudManager`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder` の4クラスへ分割
   （1661→1094行）。`scripts/setup-godot.*` で pin 済み Godot CLI を取得し GdUnit4 を導入、
@@ -114,7 +117,8 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
   （ワイヤ = postcard 再利用、`dawn-proto`/protobuf は不採用）。第1次は静的 3 ノード + LAN 平文の最小スライス（§10 の 8D 表参照）。
   8B-2（Fission）はこれと本質的に対なので、8D 着手時にまとめて設計するのが自然。
 - **戦闘の深み（ADR-0016 §5）** — Warp（✅）→ Tackle（✅）→ Signature Resolution（✅ ADR-0012 の
-  命中率式で実質完了）→ Orbit/Keep at Range（✅ ADR-0031）→ **Logistics（次）**。
+  命中率式で実質完了）→ Orbit/Keep at Range（✅ ADR-0031）→ Local Repair（✅ ADR-0033）
+  → **Logistics（遠隔修理・次）**。
   柱②④（グラインドゼロの深い戦闘 / 実損ある危険な宇宙）を厚くする方向。
   - ✅ **Warp（intra-Sector 短距離 Fold = ワープ・ADR-0022）** — 「逃がさない」の前提となる高速離脱。
     align/warping 2 フェーズ・Tick Step 2.6・W キー配線済み。これで Tackle（次）が意味を持つ。
@@ -131,6 +135,9 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
     接線リードでターゲット円周を周回（ADR-0012 のトランスバーサル速度ペナルティが回避手段に
     なる）。Keep at Range は純粋な離脱（周回なし）。半径/距離省略時は武器射程をデフォルトに
     採用。Approach/Orbit/KeepAtRange は相互排他、Warp 中は拒否。O/K キー配線済み。
+  - ✅ **Local Repair（ADR-0033 実装済み・2026-06-24）** — Active Shield Booster / Armor Repairer、
+    RepairSystem（Step 6.5）/ RepairApplied / client flash_repair を追加。遠隔修理 Logistics の
+    共通土台として、自己修理だけを先に通した。
 
 Phase 8 全体のタスク内訳は §10 を参照。残る戦闘の深みは **Logistics（遠隔修理）** が次。
 

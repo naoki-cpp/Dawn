@@ -46,6 +46,15 @@ enum EventJson {
         current_hull: f32,
         tick: u64,
     },
+    RepairApplied {
+        ship_id: u64,
+        amount: f32,
+        layer: String,
+        current_shield: f32,
+        current_armor: f32,
+        current_hull: f32,
+        tick: u64,
+    },
     ShipDestroyed {
         ship_id: u64,
         killer_id: u64,
@@ -149,6 +158,15 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
         DomainEvent::DamageTaken(e) => EventJson::DamageTaken {
             ship_id: e.ship_id.raw(),
             damage: e.damage,
+            current_shield: e.current_shield,
+            current_armor: e.current_armor,
+            current_hull: e.current_hull,
+            tick: e.tick.value(),
+        },
+        DomainEvent::RepairApplied(e) => EventJson::RepairApplied {
+            ship_id: e.ship_id.raw(),
+            amount: e.amount,
+            layer: format!("{:?}", e.layer),
             current_shield: e.current_shield,
             current_armor: e.current_armor,
             current_hull: e.current_hull,

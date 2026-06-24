@@ -165,6 +165,14 @@ Step 6: Combat System を実行する
          ※ Lock System の後に実行すること（Locked 状態を参照するため）
          ※ 破壊された Ship は呼び出し元が ECS と ship_index から削除する
 
+Step 6.5: Repair System を実行する（ADR-0033）
+         RepairSystem::run(&mut world, tick, &cap.repair_cycles_started)
+         → repair_cycles_started に含まれる ShieldBooster / ArmorRepairer のみ回復判定する
+         → ShieldBooster は current_shield、ArmorRepairer は current_armor を回復する
+           （各層の max で clamp。Hull は対象外）
+         → 生成: Vec<RepairApplied>
+         ※ Combat の後に実行すること（同 Tick の被弾後に回復を適用するため）
+
 Step 7: Bot System を実行する（IsBotComp を持つ Ship のみ）
          SimulationNode::process_bots()
          → Bot が人間プレイヤーと同一のコマンドパイプラインでコマンドを生成・実行
@@ -173,7 +181,7 @@ Step 7: Bot System を実行する（IsBotComp を持つ Ship のみ）
          ※ Bot コマンドは apply_*_owned() メソッドを通じてプレイヤーと同一のパイプラインを使う
 
 Step 8: 全イベントを EventStore に Append する
-         event_store.append_batch(warp_events + move_events + cap_events + tackle_events + lock_events + combat_events)
+         event_store.append_batch(warp_events + move_events + cap_events + tackle_events + lock_events + combat_events + repair_events)
 
 Step 9: Replication Actor に差分を通知する
          replication_tx.send(delta)

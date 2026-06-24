@@ -11,6 +11,8 @@ pub const MODULE_ARMOR_BASIC: ModuleId = ModuleId(4);
 pub const MODULE_AFTERBURNER: ModuleId = ModuleId(5);
 pub const MODULE_SENSOR_BOOSTER: ModuleId = ModuleId(6);
 pub const MODULE_FOLD_DISRUPTOR: ModuleId = ModuleId(12);
+pub const MODULE_SMALL_SHIELD_BOOSTER: ModuleId = ModuleId(13);
+pub const MODULE_SMALL_ARMOR_REPAIRER: ModuleId = ModuleId(14);
 
 pub fn all_modules() -> Vec<ModuleDefinition> {
     vec![
@@ -74,6 +76,32 @@ pub fn all_modules() -> Vec<ModuleDefinition> {
             cycle_time_ticks: 0,
             stat_delta: StatDelta {
                 max_armor_add: 200.0,
+                ..StatDelta::ZERO
+            },
+        },
+        ModuleDefinition {
+            id: MODULE_SMALL_SHIELD_BOOSTER,
+            name: "Small Shield Booster I".to_string(),
+            kind: ModuleKind::ShieldBooster,
+            slot: SlotKind::Mid,
+            activation_mode: ActivationMode::Active,
+            cap_cost_per_cycle: 45.0,
+            cycle_time_ticks: 8,
+            stat_delta: StatDelta {
+                repair_amount: 60.0,
+                ..StatDelta::ZERO
+            },
+        },
+        ModuleDefinition {
+            id: MODULE_SMALL_ARMOR_REPAIRER,
+            name: "Small Armor Repairer I".to_string(),
+            kind: ModuleKind::ArmorRepairer,
+            slot: SlotKind::Low,
+            activation_mode: ActivationMode::Active,
+            cap_cost_per_cycle: 40.0,
+            cycle_time_ticks: 8,
+            stat_delta: StatDelta {
+                repair_amount: 55.0,
                 ..StatDelta::ZERO
             },
         },

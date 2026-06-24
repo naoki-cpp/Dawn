@@ -54,6 +54,7 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 | [ADR-0011](ADR-0011-capacitor-system.md) | サイクルベース Capacitor システムとクライアント側シミュレーション | Accepted |
 | [ADR-0012](ADR-0012-turret-tracking.md) | タレット追跡メカニズム | Accepted |
 | [ADR-0032](ADR-0032-inventory-and-runtime-fitting.md) | インベントリとランタイム換装 — InventoryComp / Fit/UnfitModuleCommand | Accepted |
+| [ADR-0033](ADR-0033-local-repair-module.md) | ローカルリペアモジュール — アクティブ自己修理 / RepairApplied / Repair System | Accepted |
 
 ### UI / クライアント表示
 
