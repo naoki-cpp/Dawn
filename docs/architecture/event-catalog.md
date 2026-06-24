@@ -127,6 +127,7 @@ Command と Event を同じ型・同じ enum で表現してはならない（IN
 |---|---|---|---|
 | `WeaponFired` | 武器が発射された | `CombatSystem::run()` | ✅ 実装済み |
 | `DamageTaken` | Ship がダメージを受けた | `CombatSystem::run()` | ✅ 実装済み |
+| `RepairApplied` | Ship がローカル修理モジュールでシールド / アーマーを回復した | `RepairSystem::run()` | ✅ 実装済み（ADR-0033） |
 
 ### 3.6 Sector Transit（ADR-0014）
 
@@ -371,6 +372,26 @@ HP は Shield → Armor → Hull の順に消費される。
 | `tick` | `Tick` | ✓ | ダメージを受けた Tick |
 
 **設計メモ:** 3 フィールドを含めることで Replay 時に `HullComp` を正確に復元できる（INV-002 準拠）。
+
+---
+
+### `RepairApplied`
+
+**説明:** Active な Shield Booster / Armor Repairer のサイクル開始により、Ship の現在 HP が回復した。
+回復対象は Shield または Armor のみで、最大 HP を超えない。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `ship_id` | `ShipId` | ✓ | 回復した Ship |
+| `amount` | `f32` | ✓ | 実際に回復した量（最大 HP clamp 後） |
+| `layer` | `RepairLayer` | ✓ | 回復した層（`Shield` / `Armor`） |
+| `current_shield` | `f32` | ✓ | 回復後のシールド残量 |
+| `current_armor` | `f32` | ✓ | 回復後のアーマー残量 |
+| `current_hull` | `f32` | ✓ | 回復後のハル残量 |
+| `tick` | `Tick` | ✓ | 回復が適用された Tick |
+
+**設計メモ:** `DamageTaken` の負値として表現せず、回復の事実を独立イベントとして記録する。
+クライアント表現とログ上の意味がダメージと異なるため（ADR-0033）。
 
 ---
 

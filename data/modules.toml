@@ -21,6 +21,7 @@
 #   tracking_speed_add, falloff_range_add
 #   lock_time_add, max_locks_add
 #   cap_max_add, cap_recharge_add
+#   repair_amount
 #
 # Cap balance guide (Magpie: recharge 8 GJ/tick → 80 GJ/10 ticks):
 #   Small Railgun (60 GJ/10 ticks):  gun alone  → +20 GJ surplus (sustainable)
@@ -132,6 +133,34 @@ activation_mode = "Passive"
 
 [modules.stat_delta]
 max_armor_add = 500.0
+
+# ----
+
+[[modules]]
+id                 = 13
+name               = "Small Shield Booster I"
+kind               = "ShieldBooster"
+slot               = "Mid"
+activation_mode    = "Active"
+cap_cost_per_cycle = 45.0
+cycle_time_ticks   = 8
+
+[modules.stat_delta]
+repair_amount = 60.0
+
+# ----
+
+[[modules]]
+id                 = 14
+name               = "Small Armor Repairer I"
+kind               = "ArmorRepairer"
+slot               = "Low"
+activation_mode    = "Active"
+cap_cost_per_cycle = 40.0
+cycle_time_ticks   = 8
+
+[modules.stat_delta]
+repair_amount = 55.0
 
 # ── Propulsion (Mid / Active) ────────────────────────────────
 

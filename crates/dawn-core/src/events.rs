@@ -58,6 +58,9 @@ pub enum DomainEvent {
     /// A Ship took damage.
     DamageTaken(DamageTaken),
 
+    /// A Ship repaired its own shield or armor.
+    RepairApplied(RepairApplied),
+
     /// A Ship was destroyed.
     ShipDestroyed(ShipDestroyed),
 
@@ -114,6 +117,7 @@ impl DomainEvent {
             Self::LockLost(e) => e.locker_id,
             Self::WeaponFired(e) => e.attacker_id,
             Self::DamageTaken(e) => e.ship_id,
+            Self::RepairApplied(e) => e.ship_id,
             Self::ShipDestroyed(e) => e.ship_id,
             Self::SectorTransitRequested(e) => e.ship_id,
             Self::SectorTransitCompleted(e) => e.ship_id,
@@ -140,6 +144,7 @@ impl DomainEvent {
             Self::LockLost(e) => e.tick,
             Self::WeaponFired(e) => e.tick,
             Self::DamageTaken(e) => e.tick,
+            Self::RepairApplied(e) => e.tick,
             Self::ShipDestroyed(e) => e.tick,
             Self::SectorTransitRequested(e) => e.tick,
             Self::SectorTransitCompleted(e) => e.tick,
@@ -284,6 +289,23 @@ pub struct DamageTaken {
     /// ダメージ後のアーマー残量
     pub current_armor: f32,
     /// ダメージ後のハル残量
+    pub current_hull: f32,
+    pub tick: Tick,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RepairLayer {
+    Shield,
+    Armor,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RepairApplied {
+    pub ship_id: ShipId,
+    pub amount: f32,
+    pub layer: RepairLayer,
+    pub current_shield: f32,
+    pub current_armor: f32,
     pub current_hull: f32,
     pub tick: Tick,
 }
@@ -461,6 +483,26 @@ mod tests {
         });
         assert_eq!(event.ship_id(), id);
         assert_eq!(event.tick(), Tick(7));
+    }
+
+    #[test]
+    fn repair_applied_event_carries_ship_id_layer_and_tick() {
+        let id = ship_id();
+        let event = DomainEvent::RepairApplied(RepairApplied {
+            ship_id: id,
+            amount: 25.0,
+            layer: RepairLayer::Shield,
+            current_shield: 75.0,
+            current_armor: 50.0,
+            current_hull: 40.0,
+            tick: Tick(12),
+        });
+        assert_eq!(event.ship_id(), id);
+        assert_eq!(event.tick(), Tick(12));
+        match event {
+            DomainEvent::RepairApplied(e) => assert_eq!(e.layer, RepairLayer::Shield),
+            _ => panic!("expected RepairApplied"),
+        }
     }
 
     #[test]

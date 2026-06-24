@@ -135,6 +135,7 @@ pub fn apply_delta(base: ShipStatsComp, delta: &StatDelta) -> ShipStatsComp {
         cap_max: (base.cap_max + delta.cap_max_add).max(0.0),
         cap_recharge_per_tick: (base.cap_recharge_per_tick + delta.cap_recharge_add).max(0.0),
         tackle_range: (base.tackle_range + delta.tackle_range_add).max(0.0),
+        repair_amount: (base.repair_amount + delta.repair_amount).max(0.0),
     }
 }
 

@@ -185,6 +185,16 @@ impl<S: EventStore> SimulationNode<S> {
                 }
             }
 
+            DomainEvent::RepairApplied(e) => {
+                if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+                    if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
+                        hull.current_shield = e.current_shield;
+                        hull.current_armor = e.current_armor;
+                        hull.current_hull = e.current_hull;
+                    }
+                }
+            }
+
             DomainEvent::ShipDestroyed(e) => {
                 if let Some(entity) = self.ships.index.remove(&e.ship_id) {
                     self.world.despawn_ship(entity);
@@ -304,5 +314,26 @@ mod tests {
 
         let hp = node.get_ship_hp(ship_id).unwrap();
         assert_eq!(hp, 400.0, "HP total after replay = 100 + 150 + 150 = 400");
+    }
+
+    #[test]
+    fn repair_applied_event_is_replayed_to_restore_current_hp() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+
+        node.apply_event_pub(DomainEvent::RepairApplied(
+            dawn_core::events::RepairApplied {
+                ship_id,
+                amount: 50.0,
+                layer: dawn_core::events::RepairLayer::Shield,
+                current_shield: 150.0,
+                current_armor: 150.0,
+                current_hull: 150.0,
+                tick: Tick(2),
+            },
+        ));
+
+        let hp = node.get_ship_hp(ship_id).unwrap();
+        assert_eq!(hp, 450.0, "HP total after replay = 150 + 150 + 150 = 450");
     }
 }

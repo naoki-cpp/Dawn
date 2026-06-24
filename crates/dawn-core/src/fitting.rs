@@ -114,6 +114,8 @@ pub struct StatDelta {
     /// Tackle range added by this module (units). 0 = no tackle capability.
     /// Summed across all active Tackle modules (ADR-0024).
     pub tackle_range_add: f32,
+    /// HP restored by one active local repair cycle (ADR-0033).
+    pub repair_amount: f32,
 }
 
 impl StatDelta {
@@ -134,6 +136,7 @@ impl StatDelta {
         cap_max_add: 0.0,
         cap_recharge_add: 0.0,
         tackle_range_add: 0.0,
+        repair_amount: 0.0,
     };
 
     /// Combine two deltas. Additive fields sum; speed_multiplier multiplies.
@@ -156,6 +159,7 @@ impl StatDelta {
             cap_max_add: self.cap_max_add + other.cap_max_add,
             cap_recharge_add: self.cap_recharge_add + other.cap_recharge_add,
             tackle_range_add: self.tackle_range_add + other.tackle_range_add,
+            repair_amount: self.repair_amount + other.repair_amount,
         }
     }
 }
@@ -238,6 +242,7 @@ mod tests {
             cap_max_add: 0.0,
             cap_recharge_add: 0.0,
             tackle_range_add: 0.0,
+            repair_amount: 0.0,
         };
         let result = base.add(&StatDelta::ZERO);
         assert_eq!(result, base);

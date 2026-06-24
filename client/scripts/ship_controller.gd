@@ -200,6 +200,9 @@ func flash_lock_indicator() -> void:
 func flash_damage() -> void:
 	_flash_hull(Color(1.0, 0.1, 0.1), Color(1.0, 0.0, 0.0), 0.1)
 
+func flash_repair() -> void:
+	_flash_hull(Color(0.15, 1.0, 0.45), Color(0.0, 1.0, 0.25), 0.12)
+
 ## 破壊エフェクト（膨張リング）を再生して自分自身を削除する。
 func play_destroy_effect() -> void:
 	## Hull を非表示にして爆発リングだけ残す

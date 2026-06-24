@@ -21,6 +21,7 @@
 
 use crate::{
     components::{CapacitorComp, FittedSlot, FittingComp, ShipIdComp, ShipStatsComp},
+    systems::repair::RepairCycle,
     SimWorld,
 };
 use dawn_core::{
@@ -40,6 +41,8 @@ pub struct CapacitorResult {
     /// Ships whose Weapon module started a new cycle this tick.
     /// The Combat system uses this list to decide which ships fire.
     pub weapon_cycles_started: Vec<ShipId>,
+    /// Local repair module cycles that started this tick.
+    pub repair_cycles_started: Vec<RepairCycle>,
 }
 
 // ── Internal snapshot ─────────────────────────────────────────────────────────
@@ -49,6 +52,7 @@ struct SlotInfo {
     flat_idx: usize,
     kind: ModuleKind,
     cap_cost: f32,
+    repair_amount: f32,
     cycle_time: u64,
     cycle_remaining: u64,
     is_active: bool,
@@ -84,6 +88,7 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
                     flat_idx: i,
                     kind: slot.def.kind,
                     cap_cost: slot.def.cap_cost_per_cycle,
+                    repair_amount: slot.def.stat_delta.repair_amount,
                     cycle_time: slot.def.cycle_time_ticks,
                     cycle_remaining: slot.cycle_remaining,
                     is_active: slot.is_active,
@@ -105,6 +110,7 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
     let mut events: Vec<DomainEvent> = Vec::new();
     let mut refitted: Vec<ShipId> = Vec::new();
     let mut weapon_cycles_started: Vec<ShipId> = Vec::new();
+    let mut repair_cycles_started: Vec<RepairCycle> = Vec::new();
 
     for snap in snaps {
         // Recharge first (every tick, before cycle logic).
@@ -128,6 +134,15 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
                     // Record weapon cycle start so Combat system can fire.
                     if slot.kind == ModuleKind::Weapon {
                         weapon_fired = true;
+                    } else if matches!(
+                        slot.kind,
+                        ModuleKind::ShieldBooster | ModuleKind::ArmorRepairer
+                    ) {
+                        repair_cycles_started.push(RepairCycle {
+                            ship_id: snap.ship_id,
+                            module_kind: slot.kind,
+                            repair_amount: slot.repair_amount,
+                        });
                     }
                 } else {
                     // Insufficient cap: force the module OFF.
@@ -169,6 +184,7 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
         events,
         refitted,
         weapon_cycles_started,
+        repair_cycles_started,
     }
 }
 
@@ -288,6 +304,26 @@ mod tests {
         }
     }
 
+    fn shield_booster_slot(active: bool) -> FittedSlot {
+        FittedSlot {
+            def: ModuleDefinition {
+                id: ModuleId(13),
+                name: "Small Shield Booster".to_string(),
+                kind: ModuleKind::ShieldBooster,
+                slot: SlotKind::Mid,
+                activation_mode: ActivationMode::Active,
+                cap_cost_per_cycle: 30.0,
+                cycle_time_ticks: 8,
+                stat_delta: StatDelta {
+                    repair_amount: 45.0,
+                    ..StatDelta::ZERO
+                },
+            },
+            is_active: active,
+            cycle_remaining: 0,
+        }
+    }
+
     fn make_world(cap: f32, fitting: FittingComp, cap_max: f32, recharge: f32) -> SimWorld {
         let id = test_ship_id();
         let mut world = SimWorld::new(SectorId(0));
@@ -370,6 +406,21 @@ mod tests {
             10,
             "cycle_remaining set to cycle_time=10"
         );
+    }
+
+    #[test]
+    fn repair_cycle_start_is_reported_with_module_repair_amount() {
+        let mut fitting = FittingComp::empty();
+        fitting.mid.push(shield_booster_slot(true));
+        let mut world = make_world(100.0, fitting, 500.0, 0.0);
+
+        let result = run(&mut world, Tick(1));
+
+        assert_eq!(result.repair_cycles_started.len(), 1);
+        let cycle = result.repair_cycles_started[0];
+        assert_eq!(cycle.ship_id, test_ship_id());
+        assert_eq!(cycle.module_kind, ModuleKind::ShieldBooster);
+        assert_eq!(cycle.repair_amount, 45.0);
     }
 
     #[test]

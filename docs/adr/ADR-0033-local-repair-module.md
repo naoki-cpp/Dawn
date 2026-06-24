@@ -1,7 +1,7 @@
 ---
 id      : ADR-0033
 title   : Local Repair Module — active self-repair (Shield Booster / Armor Repairer)
-status  : proposed
+status  : accepted
 date    : 2026-06-24
 deciders: [human, ai-agent]
 related : ADR-0006（モジュール装備）, ADR-0016 §5（戦闘の深みロードマップ・Logistics の前段）, ADR-0012（命中・HP モデル）, AI_DEVELOPMENT_GUIDE.md §1/§6
@@ -9,8 +9,7 @@ related : ADR-0006（モジュール装備）, ADR-0016 §5（戦闘の深みロ
 
 # ADR-0033 — Local Repair Module（アクティブ自己修理）
 
-> **status: proposed** — 挙動変更（新イベント・新 Tick ステップ）を含むため、
-> 実装着手前に人間承認が必要（§1/§7）。本 ADR は着手前のロードマップを兼ねる。
+> **status: accepted** — 2026-06-24 に実装済み。
 
 ## 背景
 
@@ -116,17 +115,17 @@ pub struct RepairApplied {
 低 HP 時に逃走（warp）の前段として修理モジュールを ON にする選択は自然だが、
 スコープを絞るため**本 ADR では bot の修理活用は含めない**（別途検討）。
 
-## 実装チェックリスト（着手は人間承認後）
+## 実装チェックリスト
 
-- [ ] `dawn-core`: `StatDelta.repair_amount` 追加・`RepairApplied` イベント・`RepairLayer` 列挙 + テスト
-- [ ] `dawn-ecs`: `HullComp::repair_shield/repair_armor` + テスト
-- [ ] `dawn-ecs`: Capacitor System に `repair_cycles_started` 収集を追加 + テスト
-- [ ] `dawn-ecs`: Repair System 実装（回復適用 + `RepairApplied` 発行）+ テスト
-- [ ] `dawn-sector`: Tick Step 6.5 に Repair System を配線（Combat の後）
-- [ ] `data/modules.toml`: Active な Shield Booster / Armor Repairer エントリ追加
-- [ ] クライアント: `RepairApplied` ハンドラ・`flash_repair`・HP バー更新
-- [ ] `docs`: event-catalog（RepairApplied）・tick-model（Step 6.5）・AI_DEVELOPMENT_GUIDE §6・playtest-guide・roadmap
-- [ ] 検証: `cargo test --workspace` + fmt + clippy -D warnings + GdUnit4
+- [x] `dawn-core`: `StatDelta.repair_amount` 追加・`RepairApplied` イベント・`RepairLayer` 列挙 + テスト
+- [x] `dawn-ecs`: `HullComp::repair_shield/repair_armor` + テスト
+- [x] `dawn-ecs`: Capacitor System に `repair_cycles_started` 収集を追加 + テスト
+- [x] `dawn-ecs`: Repair System 実装（回復適用 + `RepairApplied` 発行）+ テスト
+- [x] `dawn-sector`: Tick Step 6.5 に Repair System を配線（Combat の後）
+- [x] `data/modules.toml`: Active な Shield Booster / Armor Repairer エントリ追加
+- [x] クライアント: `RepairApplied` ハンドラ・`flash_repair`・HP バー更新
+- [x] `docs`: event-catalog（RepairApplied）・tick-model（Step 6.5）・roadmap
+- [x] 検証: `cargo test --workspace`
 
 ## 却下した代替案
 

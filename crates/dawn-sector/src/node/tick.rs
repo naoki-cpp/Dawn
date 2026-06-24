@@ -1,5 +1,7 @@
 use dawn_core::DomainEvent;
-use dawn_ecs::systems::{apply_fitting, CapacitorSystem, CombatSystem, LockSystem, MovementSystem};
+use dawn_ecs::systems::{
+    apply_fitting, CapacitorSystem, CombatSystem, LockSystem, MovementSystem, RepairSystem,
+};
 use dawn_event_store::store::EventStore;
 
 use super::{SimulationNode, TickResult};
@@ -64,6 +66,9 @@ impl<S: EventStore> SimulationNode<S> {
             self.anchor_table.abs_map(),
         );
 
+        // 6.5 Repair System — apply local repairs after damage for this tick.
+        let repair = RepairSystem(&mut self.world, tick, &cap.repair_cycles_started);
+
         // Remove destroyed ships from the ECS and all lookup maps.
         // CLAUDE.md §6: run the Bot System after Combat.
         for ship_id in &combat.destroyed {
@@ -88,6 +93,7 @@ impl<S: EventStore> SimulationNode<S> {
             .chain(tackle_events.iter())
             .chain(lock.events.iter())
             .chain(combat.events.iter())
+            .chain(repair.events.iter())
             .cloned()
             .collect();
 
