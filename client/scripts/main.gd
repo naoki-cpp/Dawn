@@ -233,6 +233,16 @@ const UnitFormat = preload("res://scripts/unit_format.gd")
 func _server_to_godot_pos(p: Vector3) -> Vector3:
 	return _world.to_godot(p)
 
+## Reads a {x,y,z} sub-dictionary -- the wire format for every server-space
+## Vector3 field (position/entry_pos/...) -- into a Vector3. Shared by every
+## event/state handler that parses a position out of a payload dict.
+func _vec3_from_dict(d: Dictionary, key: String) -> Vector3:
+	var v: Dictionary = d.get(key, {}) as Dictionary
+	return Vector3(
+		v.get("x", 0.0) as float,
+		v.get("y", 0.0) as float,
+		v.get("z", 0.0) as float)
+
 ## Distance (Godot units) past which a celestial-body or jump-gate marker is
 ## clamped toward the player so it stays inside the camera far plane (true-AU
 ## only). At the current compressed scale everything sits well inside this, so
@@ -246,20 +256,7 @@ const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
 ## that (a no-op at compressed scale). The marker stores its server position in
 ## the "body_pos" meta (NavigationMarkerRenderer).
 func _update_body_markers() -> void:
-	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
-		return
-	var player_godot: Vector3 = (_ships[_player_ship_id] as Node3D).global_position
-	for c: Node in _bodies_root.get_children():
-		var marker: Node3D = c as Node3D
-		if not marker.has_meta("body_pos"):
-			continue
-		var body_godot: Vector3 = _server_to_godot_pos(marker.get_meta("body_pos") as Vector3)
-		var delta: Vector3 = body_godot - player_godot
-		var dist: float = delta.length()
-		if dist > NAV_MARKER_CLAMP_DISTANCE:
-			marker.global_position = player_godot + delta / dist * NAV_MARKER_CLAMP_DISTANCE
-		else:
-			marker.global_position = body_godot
+	_update_position_markers(_bodies_root, "body_pos")
 
 ## Same as _update_body_markers, for Jump Gate markers (requested after the
 ## true-AU reactivation: a gate can now sit AU-scale away from the player, so
@@ -269,20 +266,29 @@ func _update_body_markers() -> void:
 ## (NavigationMarkerRenderer); _pick_gate_at picks against the resulting
 ## (possibly clamped) global_position, so clicks land on what's on screen.
 func _update_gate_markers() -> void:
+	_update_position_markers(_gates_root, "gate_pos")
+
+## Shared by `_update_body_markers` and `_update_gate_markers`, which were
+## previously identical except for the root node and meta key: re-place every
+## marker under `root` each frame at its true bearing from the player,
+## clamped to NAV_MARKER_CLAMP_DISTANCE only when farther than that (a no-op
+## at compressed scale). Each marker stores its server position in `meta_key`
+## (NavigationMarkerRenderer).
+func _update_position_markers(root: Node3D, meta_key: String) -> void:
 	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return
 	var player_godot: Vector3 = (_ships[_player_ship_id] as Node3D).global_position
-	for c: Node in _gates_root.get_children():
+	for c: Node in root.get_children():
 		var marker: Node3D = c as Node3D
-		if not marker.has_meta("gate_pos"):
+		if not marker.has_meta(meta_key):
 			continue
-		var gate_godot: Vector3 = _server_to_godot_pos(marker.get_meta("gate_pos") as Vector3)
-		var delta: Vector3 = gate_godot - player_godot
+		var marker_godot: Vector3 = _server_to_godot_pos(marker.get_meta(meta_key) as Vector3)
+		var delta: Vector3 = marker_godot - player_godot
 		var dist: float = delta.length()
 		if dist > NAV_MARKER_CLAMP_DISTANCE:
 			marker.global_position = player_godot + delta / dist * NAV_MARKER_CLAMP_DISTANCE
 		else:
-			marker.global_position = gate_godot
+			marker.global_position = marker_godot
 
 ## Fade the full-screen warp-tunnel overlay in/out based on the player's own
 ## ship speed (ADR-0029 lore pass, 2026-06-23). ship_controller.gd hides OTHER
@@ -669,11 +675,7 @@ func _handle_position_snap(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	if not _ships.has(ship_id):
 		return
-	var pos_dict: Dictionary = p.get("position", {}) as Dictionary
-	var server_pos := Vector3(
-		pos_dict.get("x", 0.0) as float,
-		pos_dict.get("y", 0.0) as float,
-		pos_dict.get("z", 0.0) as float)
+	var server_pos: Vector3 = _vec3_from_dict(p, "position")
 	if ship_id == _player_ship_id:
 		# A warp crosses ~1 AU but the player's visual ship lagged behind (its
 		# warp speed was capped). Correcting that by moving the ship would make
@@ -694,12 +696,7 @@ func _handle_jump_gate_used(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	if not _ships.has(ship_id):
 		return
-	var pos_dict: Dictionary = p.get("entry_pos", {}) as Dictionary
-	var entry_pos := Vector3(
-		pos_dict.get("x", 0.0) as float,
-		pos_dict.get("y", 0.0) as float,
-		pos_dict.get("z", 0.0) as float,
-	)
+	var entry_pos: Vector3 = _vec3_from_dict(p, "entry_pos")
 	(_ships[ship_id] as Node3D).call("update_target", _world.to_godot(entry_pos))
 	if ship_id == _player_ship_id:
 		(_ships[ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
@@ -754,10 +751,9 @@ func _ingest_star_map(state: Dictionary) -> void:
 	_gates.clear()
 	for entry: Variant in (state.get("jump_gates", []) as Array):
 		var g: Dictionary = entry as Dictionary
-		var gp: Dictionary = g.get("position", {}) as Dictionary
 		_gates.append({
 			"gate_id"          : g.get("gate_id", -1) as int,
-			"position"         : Vector3(gp.get("x", 0.0) as float, gp.get("y", 0.0) as float, gp.get("z", 0.0) as float),
+			"position"         : _vec3_from_dict(g, "position"),
 			"activation_radius": g.get("activation_radius", 0.0) as float,
 			"to_system_name"   : g.get("to_system_name", "") as String,
 		})
@@ -765,12 +761,11 @@ func _ingest_star_map(state: Dictionary) -> void:
 	_bodies.clear()
 	for entry: Variant in (state.get("celestial_bodies", []) as Array):
 		var b: Dictionary = entry as Dictionary
-		var bp: Dictionary = b.get("position", {}) as Dictionary
 		_bodies.append({
 			"body_id"      : b.get("id", -1) as int,
 			"kind"         : b.get("kind", "") as String,
 			"name"         : b.get("name", "") as String,
-			"position"     : Vector3(bp.get("x", 0.0) as float, bp.get("y", 0.0) as float, bp.get("z", 0.0) as float),
+			"position"     : _vec3_from_dict(b, "position"),
 			"radius"       : b.get("radius", 1.0) as float,
 			"spectral_type": b.get("spectral_type", 0.0) as float,
 		})
@@ -778,26 +773,26 @@ func _ingest_star_map(state: Dictionary) -> void:
 	_spawn_gate_markers()
 	_spawn_body_markers()
 
-## Materialize one ship node from a ship-state dict. Shared by InitialState and
-## AoiEnter (ADR-0019). Skips ships already present.
-func _spawn_ship_from_data(d: Dictionary) -> void:
-	var sid      : int        = d.get("ship_id",   0)   as int
-	if _ships.has(sid):
-		return
-	var is_player: bool       = d.get("is_player", false) as bool
-	var pos_dict : Dictionary = d.get("position",  {})  as Dictionary
-	var pos := Vector3(
-		(pos_dict.get("x", 0.0) as float),
-		(pos_dict.get("y", 0.0) as float),
-		(pos_dict.get("z", 0.0) as float),
-	)
-
-	## Instantiate ship node
+## Instantiate a ship scene at `pos` (server-space), register it in `_ships`,
+## and return the node. Shared by `_spawn_ship_from_data` (InitialState/AoiEnter,
+## ADR-0019) and `_handle_ship_spawned` (the legacy ShipSpawned event path) --
+## both need the exact same scene-instantiate-register sequence.
+func _instantiate_ship(sid: int, pos: Vector3) -> Node3D:
 	var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
 	_ships_root.add_child(ship)
 	ship.call("initialize", sid, _world.to_godot(pos))
 	ship.name = "Ship_%d" % sid
 	_ships[sid] = ship
+	return ship
+
+## Materialize one ship node from a ship-state dict. Shared by InitialState and
+## AoiEnter (ADR-0019). Skips ships already present.
+func _spawn_ship_from_data(d: Dictionary) -> void:
+	var sid: int = d.get("ship_id", 0) as int
+	if _ships.has(sid):
+		return
+	var is_player: bool = d.get("is_player", false) as bool
+	var ship: Node3D = _instantiate_ship(sid, _vec3_from_dict(d, "position"))
 
 	## Record HP (current + max) for every ship. The target panel needs each
 	## ship's own maxima to render fill percentages.
@@ -958,18 +953,7 @@ func _handle_ship_spawned(p: Dictionary) -> void:
 	if _ships.has(ship_id):
 		return
 
-	var pos_dict: Dictionary = p.get("position", {}) as Dictionary
-	var pos := Vector3(
-		(pos_dict.get("x", 0.0) as float),
-		(pos_dict.get("y", 0.0) as float),
-		(pos_dict.get("z", 0.0) as float),
-	)
-
-	var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
-	_ships_root.add_child(ship)
-	ship.call("initialize", ship_id, _world.to_godot(pos))
-	ship.name = "Ship_%d" % ship_id
-	_ships[ship_id] = ship
+	var ship: Node3D = _instantiate_ship(ship_id, _vec3_from_dict(p, "position"))
 
 	## If this ship matches the player_id from Welcome, set it as the player ship
 	if ship_id == _connection.ship_id and _player_ship_id < 0:
