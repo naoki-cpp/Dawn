@@ -140,8 +140,11 @@ Sector の空間的範囲を表す軸平行バウンディングボックス（A
 | `CapacitorComp` | プレイヤー船・ボット船（cap 管理対象） |
 | `IsBotComp` | ボット船（`process_bots()` の対象マーカー） |
 | `ApproachComp` | アプローチ中（対象 Ship / Jump Gate へ半自動接近・Move / Stop で除去・ADR-0015） |
+| `OrbitComp` | 周回中（対象を指定半径で周回・Approach / KeepAtRange と相互排他・ADR-0031） |
+| `KeepAtRangeComp` | 距離維持中（対象から指定距離を保つ・Approach / Orbit と相互排他・ADR-0031） |
 | `WarpComp` | ワープ中（align → warping 2 フェーズ・intra-Sector 短距離 Fold・ADR-0022） |
 | `TackledComp` | Tackle を受けている（`tacklers: Vec<ShipId>`・ワープ・ジャンプ不可・ADR-0024） |
+| `InventoryComp` | 未装備の所有モジュール一覧（プレイヤー船のみ・Fit / Unfit で増減・ADR-0032） |
 
 ### Ship が現在持たないもの（MVP 外）
 

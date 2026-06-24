@@ -123,8 +123,8 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
   船種          : ShipTypeDefinition（id, name, class, base_stats, slot_layout）
   イベント      : ShipSpawned（ship_type_id 含む）, VelocityChanged, SectorTransit系,
                   ShipFitted（fitting + inventory スナップショット同梱 / ADR-0032）,
-                  WeaponFired, DamageTaken（3層 HP）, ShipDestroyed,
-                  ModuleActivated, ModuleDeactivated
+                  WeaponFired, DamageTaken（3層 HP）, RepairApplied（Shield/Armor 局所修理 / ADR-0033）,
+                  ShipDestroyed, ModuleActivated, ModuleDeactivated
   ノード構成    : 3ノード固定
 
 追加承認済み機能（全て実装済み・詳細は各 ADR / docs を参照）:
@@ -141,6 +141,8 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
   ADR-0025  天体（恒星・惑星・WarpTarget::Body・sun_direction シェーダー・天体ワープ）
   ADR-0032  インベントリとランタイム換装（InventoryComp・固定初期セット・いつでも可・
             Fit/UnfitModuleCommand・I キー）
+  ADR-0033  ローカルリペア（Active Shield Booster / Armor Repairer・Step 6.5 Repair System・
+            RepairApplied・cap を武器と取り合う自己修理）
 
   ※ 各機能が触る型・イベント・Tick ステップの正確な仕様は対応 ADR と
     docs/architecture/event-catalog.md / docs/architecture/tick-model.md を一次情報とする（ここでは重複させない）。
@@ -592,6 +594,7 @@ pub type Tick = u64;
   4.5  Tackle System    ← Capacitor の後・Lock の前（ADR-0024）
   5.   Lock System      ← 位置確定後（Movement の後）
   6.   Combat System    ← Lock の後（Locked 状態を参照）
+  6.5  Repair System    ← Combat の後（同 Tick 被弾後に回復・ADR-0033）
   7.   Bot System       ← Combat の後（破壊判定済み後）
   8.   生成イベントを EventStore に Append
   9.   dawn-replication transport に差分を転送  ← 必ず 8 の後
@@ -856,10 +859,12 @@ AIは AI_DEVELOPMENT_GUIDE.md を自律的に変更してはならない。
 
 ---
 
-*最終更新: 2026-06-23（見出し構造の修正 — 冒頭の重複 H1 を1つに統合、§0 内のコードフェンス外に
+*最終更新: 2026-06-24（doc-sync — ADR-0031/0032/0033 反映: §1 に RepairApplied / ADR-0033 を追記、
+§6 Tick 順序に Step 6.5 Repair System を追加、対応 ADR 範囲を ADR-0033 まで更新）*
+*前回更新: 2026-06-23（見出し構造の修正 — 冒頭の重複 H1 を1つに統合、§0 内のコードフェンス外に
 漏れていた裸の `#` 行を修正。あわせて §8 GdUnit4 詳細手順（セットアップ・既知の互換性パッチ・
 CLI実行）を docs/process/godot-client-testing.md へ降格し、ガイド本体は方針要約のみ残置（ADR-0030 と
 同方式・人間承認済み）)*
 *前回更新: 2026-06-23（ADR-0030 ステアリング再構成 — §9 を /ai-change-checklist スキルへ、§10 詳細を docs/architecture/forbidden-changes.md へ、§12 を docs/architecture/design-violations.md へ、§7 詳細を docs/architecture/event-schema-evolution.md へ降格。ガイド本体は ID 一覧・要約・リンクのみ残置。番号体系（INV-/FBD-/§）と文言は不変。人間承認済み）*
-*対応ADR: ADR-0001 〜 ADR-0030（ADR-0020 Simulation LoD は deferred）*
+*対応ADR: ADR-0001 〜 ADR-0033（ADR-0010/0020 は deferred）*
 *次回レビュー予定: Phase 8D（分散インフラ）設計時 / Signature Resolution 着手時*
