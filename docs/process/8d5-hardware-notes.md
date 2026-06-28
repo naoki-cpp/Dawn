@@ -1,7 +1,7 @@
 ---
 scope    : 8D-5 Raspberry Pi 実機検証ハードウェアメモ
 audience : Human Developer / AI Agent
-status   : planning; hardware not purchased
+status   : in_progress; Raspberry Pi Zero W x3 deployed from host PC
 related  : docs/architecture/architecture-review-server.md Phase 8 / docs/process/roadmap.md Phase 8D
 date     : 2026-06-20
 ---
@@ -25,88 +25,6 @@ date     : 2026-06-20
 
 成功条件は「失敗しないこと」ではなく「失敗しても説明できること」。
 この段階では production-ready 判定まではしない。
-
-## 現時点の推奨
-
-初回は **Raspberry Pi Zero 2 W x3** で行う。理由は単純で、8D-5 の目的は
-「安い実機で分散配線の弱点を見つけること」だからである。Zero 2 W は 1GHz
-quad-core 64-bit Cortex-A53 / 512MB RAM / 2.4GHz WiFi という制約があり、
-遅延・パケロス・弱い CPU・電源問題が表面化しやすい。これは 8D-5 の目的に合う。
-
-ルーターも買わない。最初は以下の優先順で試す。
-
-1. **既存PCの WiFi hotspot**: 追加購入なしで一番成功確度が高い。
-2. **ESP32 SoftAP**: ルーター代替の最安追加ハード候補。ただし station 間 TCP が
-   安定して通るかを先に smoke test する。
-3. **Zero 2 W の1台を AP 化**: 追加ハードなし。ただし AP 役の node を落とすと
-   全ネットワークが落ちるため、leader-failover 検証には不向き。
-
-Pi 5 + 有線 switch は診断しやすいが、今回の「最安で始める」方針から外す。
-ClusterHAT も初回では保留する。
-
-## 候補比較
-
-| 構成 | Network | 利点 | リスク | 判定 |
-|---|---|---|---|---|
-| 3x Zero 2 W + 既存PC hotspot | WiFi | 追加 network 機材なし。最も簡単 | PC を常時起動する必要あり | 最初に試す |
-| 3x Zero 2 W + ESP32 SoftAP | WiFi SoftAP | ルーター不要。追加費用が小さい | ESP32 firmware 準備が必要。station 間 TCP を要確認 | 最安独立構成候補 |
-| 3x Zero 2 W / node-0 AP | WiFi SoftAP | 追加ハードなし | AP node を落とすと全体が落ちる | smoke test 限定 |
-| 3x Zero 2 W + USB Ethernet | USB Ethernet | Zero 2 W でも有線化できる | adapter / OTG / 給電が面倒 | WiFi がダメなら |
-| 3x Pi 5 + switch | native Gigabit Ethernet | 最も診断しやすい | コスト高 | 後回し |
-| ClusterHAT | USB gadget network | 配線がまとまる | 実 LAN とは違う。入手性確認が必要 | 後回し |
-
-## 買い物リスト
-
-### 最小構成 A: 既存PC hotspot を使う
-
-追加 network 機材を買わない。まずこれで試す。
-
-必須:
-
-- Raspberry Pi Zero 2 W x3
-- microSD 32GB 以上 x3
-- 5V micro USB 電源 x3
-
-あると楽:
-
-- mini HDMI adapter x1
-- USB OTG adapter x1
-- keyboard x1
-- Pi Zero 2 W case x3
-
-既存PC側:
-
-- Windows mobile hotspot / macOS Internet Sharing / Linux hotspot のいずれか
-- 3台の Pi に固定 IP を振るか、DHCP lease を控える
-
-### 最小構成 B: ESP32 SoftAP を使う
-
-PC hotspot を使いたくない場合の最安独立構成。ESP32 は router というより
-「簡易AP」として使う。Internet 接続は不要。
-
-必須:
-
-- Raspberry Pi Zero 2 W x3
-- microSD 32GB 以上 x3
-- 5V micro USB 電源 x3
-- ESP32 dev board x1
-- ESP32 用 USB cable x1
-
-注意:
-
-- ESP32 側に SoftAP firmware が必要。
-- 3台の Pi が同じ ESP32 AP に接続できることを確認する。
-- Pi 同士で `ping` と TCP 接続が通ることを確認してから Dawn を動かす。
-- ESP32 の AP mode は Espressif 公式 docs 上も「stations connect to the ESP32」
-  という位置づけなので、Dawn の peer-to-peer TCP で使えるかは実測で判断する。
-
-### 追加購入を避けるために後回し
-
-- WiFi router
-- Ethernet switch
-- USB Ethernet adapter
-- ClusterHAT
-- Raspberry Pi 5
 
 ## Network Plan
 
@@ -152,20 +70,6 @@ ip route
 uname -a
 vcgencmd measure_temp
 ```
-
-## Build And Run
-
-初回は各 Pi 上で build してよい。遅いが、cross compile の問題と実行時問題を混ぜずに済む。
-
-各 node で config を変えて実行する。
-
-```bash
-cargo build -p dawn-sector-node --release
-RUST_LOG=info ./target/release/sector-node crates/dawn-sector-node/config/node-0.toml 2>node-0.err.log
-```
-
-node-1 / node-2 では対応する config とログ名を使う。
-stdout と stderr は両方保存する。8D-5 向け観測ログは主に stderr に出る。
 
 ## 観測するログ
 
@@ -228,11 +132,329 @@ stdout と stderr は両方保存する。8D-5 向け観測ログは主に stder
 
 ## 参照
 
-- Raspberry Pi Zero 2 W official specs:
-  https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/
-- Raspberry Pi 5 official specs:
-  https://www.raspberrypi.com/products/raspberry-pi-5/
-- ClusterHAT project page:
-  https://clusterhat.com/
-- ESP-IDF Wi-Fi docs:
-  https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html
+- Raspberry Pi Zero W official product page:
+  https://www.raspberrypi.com/products/raspberry-pi-zero-w/
+- Raspberry Pi OS official page:
+  https://www.raspberrypi.com/software/operating-systems/
+- Raspberry Pi Imager official page:
+  https://www.raspberrypi.com/software/
+
+## Raspberry Pi Zero W initial setup notes
+
+This section records the first hands-on setup path for the currently available
+hardware: **Raspberry Pi Zero W x3** with an existing PC used as the Wi-Fi
+hotspot.
+
+### OS choice
+
+Use:
+
+```text
+Raspberry Pi OS Lite (32-bit)
+```
+
+Do not enable Raspberry Pi Connect for this setup. SSH is enough and has lower
+overhead.
+
+### PC hotspot setup
+
+Use the existing PC as the first network access point.
+
+Windows:
+
+```text
+Settings -> Network & internet -> Mobile hotspot
+```
+
+Recommended values:
+
+```text
+SSID      = DawnLab
+Band      = 2.4 GHz, if selectable
+Password  = any WPA2 password with 8+ characters
+```
+
+### Flash the OS with Raspberry Pi Imager
+
+Create one microSD card per node.
+
+For each card, select:
+
+```text
+Raspberry Pi Device = Raspberry Pi Zero
+Operating System    = Raspberry Pi OS (other) -> Raspberry Pi OS Lite (32-bit)
+Storage             = the target microSD card
+```
+
+Open `Edit Settings` before writing the image.
+
+Set hostnames:
+
+```text
+node-0.local
+node-1.local
+node-2.local
+```
+
+Set the same user, password, Wi-Fi SSID, and Wi-Fi password on all three nodes.
+For the current 8D-5 hardware setup, use `dawn` as the Linux username.
+
+Recommended Imager options:
+
+```text
+Configure wireless LAN = ON
+Wireless LAN country   = JP
+Time zone              = Asia/Tokyo
+Keyboard layout        = jp, or the developer's actual keyboard layout
+Username               = dawn
+Enable SSH             = ON
+SSH authentication     = password authentication for the first setup
+Enable Raspberry Pi Connect = OFF
+```
+
+After writing and verification finish, insert each microSD card into the
+matching Pi and power the nodes on.
+
+Observed on the current setup:
+
+- Even with `Enable SSH = ON` in Raspberry Pi Imager, SSH did not start on the
+  first boot until an empty `ssh` file was placed in the boot partition root.
+- If `ssh dawn@node-0.local` returns `Connection refused`, reinsert the card
+  into the PC and create this file in the boot partition:
+
+```text
+ssh
+```
+
+- The file name must be exactly `ssh` with no extension.
+
+### First SSH login
+
+Wait a few minutes for the first boot, then connect from the PC:
+
+```bash
+ssh dawn@node-0.local
+ssh dawn@node-1.local
+ssh dawn@node-2.local
+```
+
+Update the OS:
+
+```bash
+sudo apt update
+sudo apt upgrade -y
+```
+
+### SSH key automation
+
+After the first password-based login is confirmed, the SSH key setup can be
+automated from the PC with:
+
+```bash
+scripts/setup-pi-cluster.sh --ssh
+```
+
+This script creates a dedicated key, appends the public key to each Pi's
+`authorized_keys`, and updates `~/.ssh/config` on the PC for:
+
+```text
+node-0.local
+node-1.local
+node-2.local
+```
+
+Before installing the key, the script now checks that each target reports the
+expected hostname, and that hostname/IP/machine-id are not duplicated across
+the three nodes.
+
+Observed on the current setup:
+
+- Existing `~/.ssh/config` content may not end with a newline. The script now
+  guards against that before appending new `Host` blocks.
+- The first run still prompts for each Pi password once while the public key is
+  being installed.
+
+### Preferred deploy path
+
+For the current private-repo workflow, prefer deploying from the PC instead of
+cloning the repository separately on each Pi.
+
+The preferred runtime model is:
+
+- build `sector-node` on the host PC
+- deploy only the runtime artifact plus config/data files to each Pi
+- run the same prebuilt binary on all three nodes
+
+This path has been exercised on the current setup.
+
+Run from the PC:
+
+```bash
+scripts/deploy-pi-cluster.sh
+scripts/deploy-pi-cluster.sh --artifact-path /absolute/path/to/sector-node
+scripts/deploy-pi-cluster.sh --no-progress
+scripts/run-pi-cluster.sh
+```
+
+`scripts/deploy-pi-cluster.sh` now does the host-side preparation itself:
+
+- creates or reuses the repo-local tool environment with `scripts/setup-pi-cluster.sh --host-tools`
+- exports the local tool bin directory into `PATH`
+- exports `CARGO_ZIGBUILD_PYTHON_PATH`
+- runs `rustup target add arm-unknown-linux-gnueabihf`
+- builds the host artifact first if it does not already exist
+- skips the build if the host artifact is already present
+- `--build-host` forces a rebuild before deployment
+- connects to the Pi nodes only after the artifact is ready
+
+It then:
+
+- connects to `node-0.local`, `node-1.local`, and `node-2.local`
+- detects each node's current IPv4 address on `wlan0`
+- rewrites `crates/dawn-sector-node/config/node-0.toml`,
+  `node-1.toml`, and `node-2.toml` inside the deployment bundle
+- can use the repo-local `.tools/python/cargo-zigbuild/` virtual environment
+  for host-side cross-compilation without touching the global Python env
+- packages only the runtime files needed on the Pi:
+  `target/release/sector-node`, `crates/dawn-sector-node/config/node-*.toml`,
+  `data/galaxy.toml`, and the optional `data/modules.toml` /
+  `data/ship_types.toml`
+- copies that runtime bundle to each Pi
+- preserves each Pi's `logs/` directory across deploys
+- shows a per-node progress bar for detect/copy/expand/done
+- `--no-progress` disables terminal redraw if the terminal does not render it cleanly
+- aborts early if two node hostnames resolve to the same IPv4 address
+
+The generated cluster configs use:
+
+```toml
+npc_ships = 0
+pop_cap   = 50
+```
+
+The default artifact path is:
+
+```text
+target/arm-unknown-linux-gnueabihf/release/sector-node
+```
+
+For host-side cross-compilation, the recommended setup is:
+
+```bash
+scripts/setup-pi-cluster.sh --host-tools
+export PATH="$(scripts/setup-pi-cluster.sh --print-tool-bin):$PATH"
+export CARGO_ZIGBUILD_PYTHON_PATH="$(scripts/setup-pi-cluster.sh --print-python)"
+rustup target add arm-unknown-linux-gnueabihf
+```
+
+This keeps the global Python environment untouched and pins the helper tools
+inside the repository workspace.
+
+If the one-shot path is preferred, use:
+
+```bash
+scripts/deploy-pi-cluster.sh
+```
+
+If the artifact is built elsewhere, pass it with `--artifact-path`.
+
+### Manual path
+
+If the deploy script is not being used, clone or copy Dawn onto each Pi and
+edit the node configs by hand.
+
+On each Pi:
+
+```bash
+git clone <Dawn repo URL>
+cd Dawn
+```
+
+### Dawn node config for real hardware
+
+The checked-in configs use `127.0.0.1` for local three-process testing. For
+three physical Pis, keep each node's bind addresses as `0.0.0.0`, and replace
+only the peer addresses with the actual Pi IP addresses.
+
+Example `node-0.toml` peer section:
+
+```toml
+[[peers]]
+node_id   = 1
+raft_addr = "192.168.137.11:7901"
+repl_addr = "192.168.137.11:7911"
+ws_addr   = "192.168.137.11:7879"
+
+[[peers]]
+node_id   = 2
+raft_addr = "192.168.137.12:7902"
+repl_addr = "192.168.137.12:7912"
+ws_addr   = "192.168.137.12:7880"
+```
+
+Apply the same rule to `node-1.toml` and `node-2.toml`: each file should point
+at the other two physical nodes.
+
+### Build and run
+
+The preferred start command from the PC is:
+
+```bash
+scripts/run-pi-cluster.sh
+```
+
+Use this to restart a previous run:
+
+```bash
+scripts/run-pi-cluster.sh --replace
+```
+
+### Client connection
+
+The Godot client can connect to the physical cluster by writing the entry
+WebSocket URL to `client/server_url.txt` before launch.
+Use one node as the entry point, for example:
+
+```bash
+printf '%s\n' 'ws://node-0.local:7878' > client/server_url.txt
+```
+
+If `.local` resolution is not available on the client machine, use the node's
+hotspot IP instead:
+
+```bash
+printf '%s\n' 'ws://192.168.137.xxx:7878' > client/server_url.txt
+```
+
+The client now accepts the server's `Redirect` message and reconnects to the
+destination node automatically on inter-sector jumps.
+
+Each node writes logs under:
+
+```text
+~/Dawn/logs/node-0.out.log
+~/Dawn/logs/node-0.err.log
+~/Dawn/logs/node-1.out.log
+~/Dawn/logs/node-1.err.log
+~/Dawn/logs/node-2.out.log
+~/Dawn/logs/node-2.err.log
+```
+
+If the run script is not being used, start the nodes by hand on each Pi.
+
+The deployed bundle on each Pi contains the prebuilt binary plus config/data.
+If starting by hand:
+
+```bash
+cd ~/Dawn
+```
+
+Run one node per Pi:
+
+```bash
+RUST_LOG=info ./target/release/sector-node crates/dawn-sector-node/config/node-0.toml 2>node-0.err.log
+RUST_LOG=info ./target/release/sector-node crates/dawn-sector-node/config/node-1.toml 2>node-1.err.log
+RUST_LOG=info ./target/release/sector-node crates/dawn-sector-node/config/node-2.toml 2>node-2.err.log
+```
+
+Use the matching command on the matching physical node.
