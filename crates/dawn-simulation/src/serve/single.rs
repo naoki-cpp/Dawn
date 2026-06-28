@@ -1,12 +1,12 @@
 //! Single-node WebSocket server (`--serve`, no Raft cluster).
 
 use super::{
-    apply_common_command, build_serve_node, deliver_aoi_frame, spawn_npc_frigates,
-    CommonCommandFollowup, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
+    apply_common_command, build_serve_node, spawn_npc_frigates, AoiDelivery, CommonCommandFollowup,
+    DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
 };
 use crate::ws_server;
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId};
-use dawn_sector::{aoi, dilation};
+use dawn_sector::dilation;
 use tokio::sync::mpsc;
 
 pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_cap: usize) {
@@ -64,8 +64,7 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
     });
 
     let mut sessions: Vec<ws_server::PlayerSession> = Vec::new();
-    let mut prev_visible: std::collections::HashMap<dawn_core::PlayerId, Vec<ShipId>> =
-        std::collections::HashMap::new();
+    let mut aoi_delivery = AoiDelivery::new(AOI_CELL_SIZE);
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(P4_TICK_MS));
 
     let mut duel_metrics: Option<DuelMetrics> = None;
@@ -129,7 +128,7 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
                 .ship_absolute_pos(sess.ship_id)
                 .map(|pos| node.ships_visible_to(pos, AOI_CELL_SIZE))
                 .unwrap_or_default();
-            prev_visible.insert(sess.player_id, seed);
+            aoi_delivery.seed_player(sess.player_id, seed);
             sessions.push(sess);
         }
 
@@ -180,17 +179,8 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
                 .map(|r| r.event.clone())
                 .collect()
         };
-        let grid = aoi::CellGrid::build(AOI_CELL_SIZE, node.ship_absolute_positions());
         let warp_arrivals = node.drain_completed_warps();
-        sessions.retain_mut(|sess| {
-            let curr = node
-                .ship_absolute_pos(sess.ship_id)
-                .map(|pos| grid.neighbors_of(pos))
-                .unwrap_or_default();
-            let prev = prev_visible.entry(sess.player_id).or_default();
-            deliver_aoi_frame(sess, &node, curr, prev, &all_new_events, &warp_arrivals)
-        });
-        prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
+        aoi_delivery.deliver_single_sector(&node, &mut sessions, &all_new_events, &warp_arrivals);
 
         let was_dilated = tidi.is_dilated();
         let prior_active = tidi.active_ticks();

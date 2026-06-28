@@ -109,8 +109,8 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
 - ✅ **R3 アンカー欠落の検知**：生オフセットへのフォールバック分岐に `debug_assert!`（`debug_assert_missing_anchor`
   ／combat は populated 時のみ）。populated なテーブルにアンカーが無い＝データ整合性バグを debug ビルドで顕在化。
 - ✅ **ワープ到着権威化（R4）**：ドメインイベントを増やさない transient 到着リスト（`completed_warps: Vec<ShipId>`・
-  `pending_auto_jumps` と同型）。`warp_step` の到着時に push → 3 serve ループが `drain_completed_warps()` → 
-  `deliver_aoi_frame` が到着のたびに所有者／可視オブザーバへ権威的 `PositionSnap`（`ship_absolute` f64）。
+  `pending_auto_jumps` と同型）。`warp_step` の到着時に push → serve ループが `drain_completed_warps()` → 
+  `AoiDelivery` が到着のたびに所有者／可視オブザーバへ権威的 `PositionSnap`（`ship_absolute` f64）。
   旧 `AnchorRebased`→`PositionSnap` 分岐を撤去し単一機構に統一（Gate／同一アンカー内ワープもカバー）。client は
   `_player_warp_snap_pos` 事前計算・速度到着検知・`_compute_warp_snap_pos*` を撤去し `PositionSnap` 一本に。
 
