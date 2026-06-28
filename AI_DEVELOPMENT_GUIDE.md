@@ -220,6 +220,7 @@ as a separate change.
 Use this guide as the router, then read the relevant long-form doc:
 
 - ADR index: `docs/adr/README.md`
+- Domain context and vocabulary: `CONTEXT.md`
 - Game vision: `docs/adr/ADR-0016-game-vision.md`
 - Architecture overview: `docs/architecture/architecture.md`
 - Forbidden changes: `docs/architecture/forbidden-changes.md`
