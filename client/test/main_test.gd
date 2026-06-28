@@ -50,6 +50,7 @@ func test_server_to_godot_pos_flips_z_and_scales() -> void:
 
 func test_player_position_snap_clears_residual_warp_motion() -> void:
 	var ship := FakeShip.new()
+	_main.add_child(ship)
 	ship.global_position = Vector3(10.0, 0.0, 0.0)
 	_main._ships = {1: ship}
 	_main._player_ship_id = 1
@@ -66,6 +67,7 @@ func test_player_position_snap_clears_residual_warp_motion() -> void:
 
 func test_observed_ship_position_snap_clears_residual_warp_motion() -> void:
 	var ship := FakeShip.new()
+	_main.add_child(ship)
 	_main._ships = {2: ship}
 	_main._player_ship_id = 1
 
@@ -74,7 +76,7 @@ func test_observed_ship_position_snap_clears_residual_warp_motion() -> void:
 		"position": {"x": 100.0, "y": 20.0, "z": 300.0},
 	})
 
-	assert_vector(ship.global_position).is_equal_approx(Vector3(10.0, 2.0, -30.0), Vector3(0.0001, 0.0001, 0.0001))
+	assert_vector(ship.position).is_equal_approx(Vector3(10.0, 2.0, -30.0), Vector3(0.0001, 0.0001, 0.0001))
 	assert_vector(ship.velocity_calls.back()).is_equal(Vector3.ZERO)
 	assert_vector(ship.thrust_calls.back()).is_equal(Vector3.ZERO)
 	ship.free()
