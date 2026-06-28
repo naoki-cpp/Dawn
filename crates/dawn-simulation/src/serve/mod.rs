@@ -1,5 +1,6 @@
 //! Serve-loop functions: single-node and Raft-cluster WebSocket servers.
 
+mod aoi_delivery;
 mod cluster;
 mod runtime;
 mod single;
@@ -7,12 +8,13 @@ mod single;
 pub(crate) use cluster::run_cluster_server;
 pub(crate) use single::run_phase4_server;
 
-use crate::{data_loader, ws_server};
+use crate::data_loader;
+use aoi_delivery::AoiDelivery;
 use dawn_actor::ClientCommand;
 use dawn_core::{NodeId, SectorBounds, SectorId, ShipId};
 use dawn_sector::node::SimulationNode;
 use dawn_sector::spawner::{generate_ships, SpawnConfig};
-use dawn_sector::{aoi, galaxy::Galaxy, modules, ship_types};
+use dawn_sector::{galaxy::Galaxy, modules, ship_types};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -259,92 +261,6 @@ pub(crate) fn apply_common_command(
         ClientCommand::Jump(j) => return Some(CommonCommandFollowup::Jump(j)),
     }
     None
-}
-
-/// Push one Area-of-Interest frame to a session (ADR-0019): `AoiEnter` for ships
-/// that just became visible, `AoiLeave` for ships that left, then the new domain
-/// events that concern a currently-visible ship. `prev` is updated to `curr` in
-/// place. Returns `false` if any send fails (the caller drops the session).
-pub(crate) fn deliver_aoi_frame(
-    sess: &mut ws_server::PlayerSession,
-    node: &SimulationNode,
-    curr: Vec<ShipId>,
-    prev: &mut Vec<ShipId>,
-    new_events: &[dawn_core::DomainEvent],
-    warp_arrivals: &[ShipId],
-) -> bool {
-    // Ships that have a ShipDestroyed event this tick must NOT receive an
-    // AoiLeave — the client's _handle_ship_destroyed already removes them.
-    let destroyed_this_tick: std::collections::HashSet<ShipId> = new_events
-        .iter()
-        .filter_map(|e| {
-            if let dawn_core::DomainEvent::ShipDestroyed(d) = e {
-                Some(d.ship_id)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    let old_prev = prev.clone();
-    let (entered, left) = aoi::aoi_delta(&old_prev, &curr);
-    *prev = curr.clone();
-
-    for id in entered.iter().filter(|&&id| id != sess.ship_id) {
-        if let Some(msg) = node.aoi_enter_json(*id) {
-            if !sess.conn.send_raw(&msg) {
-                return false;
-            }
-        }
-    }
-    for id in left
-        .iter()
-        .filter(|&&id| id != sess.ship_id && !destroyed_this_tick.contains(&id))
-    {
-        if !sess.conn.send_raw(&aoi::aoi_leave_json(*id)) {
-            return false;
-        }
-    }
-
-    let visible_events: Vec<_> = new_events
-        .iter()
-        .filter(|e| {
-            if let dawn_core::DomainEvent::ShipDestroyed(d) = e {
-                return old_prev.binary_search(&d.ship_id).is_ok()
-                    || old_prev.binary_search(&d.killer_id).is_ok()
-                    || aoi::event_visible_to(e, &curr);
-            }
-            aoi::event_visible_to(e, &curr)
-        })
-        .cloned()
-        .collect();
-    if !sess.send_events(&visible_events) {
-        return false;
-    }
-
-    // Warp-arrival authority (ADR-0029): a warp ends with the client's visual
-    // ship lagging behind (its warp speed is capped to a renderable value), and
-    // for a true-AU warp the dead-reckoned position drifts badly. The server is
-    // authoritative, so for every ship that finished a warp this tick, push its
-    // absolute arrival position as a `PositionSnap` to each session that can see
-    // it (its owner, or an observer with it in view). This is the single arrival
-    // mechanism — it fires whether or not the arrival rebased the anchor, which
-    // is why the client no longer needs its own pre-computed warp snap.
-    for &sid in warp_arrivals {
-        let relevant = sid == sess.ship_id || curr.binary_search(&sid).is_ok();
-        if relevant {
-            if let Some(abs) = node.ship_absolute(sid) {
-                let msg = format!(
-                    "{{\"type\":\"PositionSnap\",\"ship_id\":{},\"position\":{{\"x\":{},\"y\":{},\"z\":{}}}}}",
-                    sid.raw(), abs[0], abs[1], abs[2]
-                );
-                if !sess.conn.send_raw(&msg) {
-                    return false;
-                }
-            }
-        }
-    }
-    true
 }
 
 /// Build a `SimulationNode` wired the way every serve loop needs it.

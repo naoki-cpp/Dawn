@@ -1,11 +1,11 @@
 //! Serve runtime orchestration shared by clustered serve loops.
 
-use super::{deliver_aoi_frame, AOI_CELL_SIZE};
+use super::{AoiDelivery, AOI_CELL_SIZE};
 use crate::ws_server;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_sector::node::SimulationNode;
-use dawn_sector::{aoi, transit};
+use dawn_sector::transit;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 
@@ -21,7 +21,7 @@ pub(crate) struct ClusterRuntimeTickContext<'a> {
     pub(crate) sessions: &'a mut Vec<ws_server::PlayerSession>,
     pub(crate) player_sector: &'a mut HashMap<PlayerId, usize>,
     pub(crate) ship_player: &'a HashMap<ShipId, PlayerId>,
-    pub(crate) prev_visible: &'a mut HashMap<PlayerId, Vec<ShipId>>,
+    pub(crate) aoi_delivery: &'a mut AoiDelivery,
 }
 
 pub(crate) fn run_cluster_runtime_tick(
@@ -61,7 +61,7 @@ pub(crate) fn run_cluster_runtime_tick(
         ctx.nodes,
         ctx.sessions,
         ctx.player_sector,
-        ctx.prev_visible,
+        ctx.aoi_delivery,
         &events_by_sector,
         &warp_arrivals_by_sector,
         &handoff,
@@ -151,44 +151,25 @@ fn deliver_cluster_frames(
     nodes: &[SimulationNode],
     sessions: &mut Vec<ws_server::PlayerSession>,
     player_sector: &HashMap<PlayerId, usize>,
-    prev_visible: &mut HashMap<PlayerId, Vec<ShipId>>,
+    aoi_delivery: &mut AoiDelivery,
     events_by_sector: &[Vec<DomainEvent>],
     warp_arrivals_by_sector: &[Vec<ShipId>],
     handoff: &JumpHandoff,
 ) {
-    let grids: Vec<aoi::CellGrid> = nodes
-        .iter()
-        .map(|n| aoi::CellGrid::build(AOI_CELL_SIZE, n.ship_absolute_positions()))
-        .collect();
     let jumped_ids: HashSet<PlayerId> = handoff
         .jumped_players
         .iter()
         .map(|(player_id, _)| *player_id)
         .collect();
 
-    sessions.retain_mut(|sess| {
-        let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
-        let curr = nodes[sector]
-            .ship_absolute_pos(sess.ship_id)
-            .map(|pos| grids[sector].neighbors_of(pos))
-            .unwrap_or_default();
-
-        if jumped_ids.contains(&sess.player_id) {
-            prev_visible.insert(sess.player_id, curr);
-            return true;
-        }
-
-        let prev = prev_visible.entry(sess.player_id).or_default();
-        deliver_aoi_frame(
-            sess,
-            &nodes[sector],
-            curr,
-            prev,
-            &events_by_sector[sector],
-            &warp_arrivals_by_sector[sector],
-        )
-    });
-    prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
+    aoi_delivery.deliver_cluster_sectors(
+        nodes,
+        sessions,
+        player_sector,
+        events_by_sector,
+        warp_arrivals_by_sector,
+        &jumped_ids,
+    );
 }
 
 fn resend_jump_initial_state(

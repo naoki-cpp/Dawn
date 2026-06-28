@@ -1,8 +1,8 @@
 //! Raft-cluster WebSocket server (`--serve --cluster`, ADR-0009/0014).
 
 use super::{
-    apply_common_command, build_serve_node, runtime, spawn_npc_frigates, CommonCommandFollowup,
-    AOI_CELL_SIZE, P4_TICK_MS,
+    apply_common_command, build_serve_node, runtime, spawn_npc_frigates, AoiDelivery,
+    CommonCommandFollowup, AOI_CELL_SIZE, P4_TICK_MS,
 };
 use crate::{cluster, ws_server};
 use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, WarpTarget};
@@ -85,7 +85,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     let mut sessions: Vec<ws_server::PlayerSession> = Vec::new();
     let mut player_sector: HashMap<PlayerId, usize> = HashMap::new();
     let mut ship_player: HashMap<ShipId, PlayerId> = HashMap::new();
-    let mut prev_visible: HashMap<PlayerId, Vec<ShipId>> = HashMap::new();
+    let mut aoi_delivery = AoiDelivery::new(AOI_CELL_SIZE);
 
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(P4_TICK_MS));
 
@@ -139,7 +139,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 .ship_absolute_pos(sess.ship_id)
                 .map(|pos| nodes[0].ships_visible_to(pos, AOI_CELL_SIZE))
                 .unwrap_or_default();
-            prev_visible.insert(sess.player_id, seed);
+            aoi_delivery.seed_player(sess.player_id, seed);
             sessions.push(sess);
         }
 
@@ -233,7 +233,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 sessions: &mut sessions,
                 player_sector: &mut player_sector,
                 ship_player: &ship_player,
-                prev_visible: &mut prev_visible,
+                aoi_delivery: &mut aoi_delivery,
             },
             &lock_commands,
         );
