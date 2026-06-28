@@ -225,8 +225,8 @@ func _process(delta: float) -> void:
 ## origin and is the only place server<->Godot conversions happen. Preloaded
 ## (not referenced by global class_name) so headless tests that load main.gd
 ## resolve it without the editor's script-class cache.
-const WorldSpace = preload("res://scripts/world_space.gd")
-var _world := WorldSpace.new()
+const WorldSpaceScript = preload("res://scripts/world_space.gd")
+var _world := WorldSpaceScript.new()
 
 ## Real-unit (m/s, km/s, AU/s, ...) display formatting (ADR-0029 §1.5: single
 ## conversion module). Static methods only -- preloaded rather than referenced
