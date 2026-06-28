@@ -13,7 +13,7 @@
 use crate::node::SimulationNode;
 use crate::persistence::ShipSnapshot;
 use dawn_consensus::RaftActorHandle;
-use dawn_core::{JumpGateId, Position, SectorId, ShipId};
+use dawn_core::{DomainEvent, JumpGateId, Position, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -136,14 +136,56 @@ pub fn apply_committed_raft_entries<S: EventStore>(
     }
 }
 
-/// Advance one cluster node by one logical Tick in the canonical step order
-/// (ADR-0014): Step 7.5 (apply committed Raft entries) → simulation tick →
-/// Step 10 (advance this node's Raft election/heartbeat timers).
+/// Per-node runtime tick output needed by the outer runtime loops.
+pub struct RuntimeTickOutput {
+    pub tick_result: crate::node::TickResult,
+    pub events: Vec<DomainEvent>,
+    pub pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
+    pub completed_warps: Vec<ShipId>,
+}
+
+/// Advance one cluster node by one logical Tick in the canonical runtime order
+/// (ADR-0014): Step 7.5 committed Raft entries, simulation tick, caller hook
+/// for durable-log consumers, Step 10 Raft timers, then transient tick outputs.
 ///
-/// Shared by the `--serve --cluster` warm-up and main loops so the per-node
-/// step order has a single source of truth. The actor path
-/// (`SectorSimulatorActor`) keeps its own variant because it interleaves a
-/// replication flush (Step 9) between the tick and the Raft timer step.
+/// Shared by the actor and `--serve --cluster` loops so the ordering cannot
+/// drift. The hook runs after Step 7.5 + simulation events are appended and
+/// before `raft.tick()`, preserving the actor's replication-before-reply
+/// contract while keeping the core step sequence in one place.
+pub fn run_runtime_tick<S, F>(
+    node: &mut SimulationNode<S>,
+    raft: &RaftActorHandle,
+    committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
+    lock_commands: &[dawn_core::LockOnCommand],
+    after_events_appended: F,
+) -> RuntimeTickOutput
+where
+    S: EventStore,
+    F: FnOnce(&mut SimulationNode<S>, &crate::node::TickResult),
+{
+    let events_before = node.total_event_count() as u64;
+    apply_committed_raft_entries(node, raft, committed_rx);
+    let result = node.tick_with_lock_commands(lock_commands);
+    after_events_appended(node, &result);
+    raft.tick();
+    let pending_auto_jumps = node.drain_pending_auto_jumps();
+    let completed_warps = node.drain_completed_warps();
+    let events = node
+        .event_store()
+        .iter_from(events_before)
+        .map(|record| record.event.clone())
+        .collect();
+
+    RuntimeTickOutput {
+        tick_result: result,
+        events,
+        pending_auto_jumps,
+        completed_warps,
+    }
+}
+
+/// Advance one cluster node by one logical Tick in the canonical step order
+/// when the caller owns all transient output drains.
 pub fn step_cluster_node<S: EventStore>(
     node: &mut SimulationNode<S>,
     raft: &RaftActorHandle,

@@ -1,20 +1,17 @@
 //! Raft-cluster WebSocket server (`--serve --cluster`, ADR-0009/0014).
 
 use super::{
-    apply_common_command, build_serve_node, deliver_aoi_frame, spawn_npc_frigates,
-    CommonCommandFollowup, AOI_CELL_SIZE, P4_TICK_MS,
+    apply_common_command, build_serve_node, runtime, spawn_npc_frigates, CommonCommandFollowup,
+    AOI_CELL_SIZE, P4_TICK_MS,
 };
 use crate::{cluster, ws_server};
-use dawn_core::{
-    DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, WarpTarget,
-};
+use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, WarpTarget};
 use dawn_sector::node::SimulationNode;
-use dawn_sector::{aoi, transit};
+use dawn_sector::transit;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
-    use dawn_event_store::store::EventStore as _;
     use transit::TransitOp;
 
     const SECTORS: usize = 3;
@@ -64,7 +61,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     // Warm up: tick until a Raft leader is elected (election timeout ≤ 20 ticks).
     for _ in 0..30 {
         for i in 0..SECTORS {
-            transit::step_cluster_node(&mut nodes[i], &rafts[i], &mut committed_rxs[i], &[]);
+            let _ =
+                transit::step_cluster_node(&mut nodes[i], &rafts[i], &mut committed_rxs[i], &[]);
         }
     }
     println!("  [Server] Raft warm-up complete. Waiting for players...");
@@ -144,8 +142,6 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             prev_visible.insert(sess.player_id, seed);
             sessions.push(sess);
         }
-
-        let events_before: Vec<u64> = nodes.iter().map(|n| n.total_event_count() as u64).collect();
 
         let mut lock_commands: Vec<Vec<dawn_core::LockOnCommand>> = vec![Vec::new(); SECTORS];
 
@@ -229,136 +225,15 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             }
         }
 
-        for i in 0..SECTORS {
-            transit::step_cluster_node(
-                &mut nodes[i],
-                &rafts[i],
-                &mut committed_rxs[i],
-                &lock_commands[i],
-            );
-        }
-
-        for i in 0..SECTORS {
-            for (ship_id, gate_id) in nodes[i].drain_pending_auto_jumps() {
-                if nodes[i].can_propose_jump(ship_id, gate_id) {
-                    let to = nodes[i]
-                        .jump_gate(gate_id)
-                        .expect("gate must exist if can_propose_jump passed")
-                        .to_sector;
-                    rafts[i].propose(
-                        TransitOp::Request {
-                            ship_id,
-                            to,
-                            gate_id: Some(gate_id),
-                        }
-                        .encode(),
-                    );
-                    println!(
-                        "  [Server] Auto-jump proposed: ship #{} gate #{} (S{} → S{})",
-                        ship_id.raw(),
-                        gate_id.0,
-                        i,
-                        to.0
-                    );
-                }
-            }
-        }
-
-        // Drain each sector's warp arrivals (ADR-0029 warp-arrival authority) so
-        // the per-session deliver loop below can snap each owner/observer.
-        let warp_arrivals_by_sector: Vec<Vec<ShipId>> = (0..SECTORS)
-            .map(|i| nodes[i].drain_completed_warps())
-            .collect();
-
-        let events_by_sector: Vec<Vec<DomainEvent>> = nodes
-            .iter()
-            .enumerate()
-            .map(|(i, node)| {
-                node.event_store()
-                    .iter_from(events_before[i])
-                    .map(|r| r.event.clone())
-                    .collect()
-            })
-            .collect();
-
-        // Ownership handoff: a player ship completed a jump.
-        let mut jumped_players: Vec<(PlayerId, usize)> = Vec::new();
-        let mut jump_own_events: HashMap<PlayerId, Vec<DomainEvent>> = HashMap::new();
-        for sector_events in &events_by_sector {
-            for event in sector_events {
-                match event {
-                    DomainEvent::JumpGateUsed(e) => {
-                        if let Some(&player_id) = ship_player.get(&e.ship_id) {
-                            let dest = e.to_sector.0 as usize;
-                            nodes[dest].adopt_player_ship(e.ship_id, player_id);
-                            player_sector.insert(player_id, dest);
-                            jumped_players.push((player_id, dest));
-                            jump_own_events
-                                .entry(player_id)
-                                .or_default()
-                                .push(event.clone());
-                            println!(
-                                "  [Server] {player_id:?} ship #{} now owned by Sector {dest}",
-                                e.ship_id.raw()
-                            );
-                        }
-                    }
-                    DomainEvent::StarSystemChanged(e) => {
-                        if let Some(&player_id) = ship_player.get(&e.ship_id) {
-                            jump_own_events
-                                .entry(player_id)
-                                .or_default()
-                                .push(event.clone());
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        let grids: Vec<aoi::CellGrid> = nodes
-            .iter()
-            .map(|n| aoi::CellGrid::build(AOI_CELL_SIZE, n.ship_absolute_positions()))
-            .collect();
-        let jumped_ids: std::collections::HashSet<PlayerId> =
-            jumped_players.iter().map(|(p, _)| *p).collect();
-
-        sessions.retain_mut(|sess| {
-            let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
-            let curr = nodes[sector]
-                .ship_absolute_pos(sess.ship_id)
-                .map(|pos| grids[sector].neighbors_of(pos))
-                .unwrap_or_default();
-
-            if jumped_ids.contains(&sess.player_id) {
-                prev_visible.insert(sess.player_id, curr);
-                return true;
-            }
-
-            let prev = prev_visible.entry(sess.player_id).or_default();
-            deliver_aoi_frame(
-                sess,
-                &nodes[sector],
-                curr,
-                prev,
-                &events_by_sector[sector],
-                &warp_arrivals_by_sector[sector],
-            )
-        });
-        prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
-
-        // Resend scoped InitialState to players that just jumped.
-        for (player_id, dest) in jumped_players {
-            if let Some(sess) = sessions.iter().find(|s| s.player_id == player_id) {
-                if let Some(events) = jump_own_events.get(&player_id) {
-                    sess.send_events(events);
-                }
-                let initial_state = nodes[dest]
-                    .ship_absolute_pos(sess.ship_id)
-                    .map(|pos| nodes[dest].build_initial_state_json_for(pos, AOI_CELL_SIZE))
-                    .unwrap_or_else(|| nodes[dest].build_initial_state_json());
-                sess.conn.send_raw(&initial_state);
-            }
-        }
+        runtime::run_cluster_runtime_tick(
+            &mut nodes,
+            &rafts,
+            &mut committed_rxs,
+            &lock_commands,
+            &mut sessions,
+            &mut player_sector,
+            &ship_player,
+            &mut prev_visible,
+        );
     }
 }

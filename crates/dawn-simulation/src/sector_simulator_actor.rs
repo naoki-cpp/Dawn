@@ -21,7 +21,7 @@
 use dawn_consensus::{RaftActorHandle, Role, Term};
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
 use dawn_replication::{InMemoryReplicationBus, OutboundLogPublisher};
-use dawn_sector::node::{SimulationNode, TickResult};
+use dawn_sector::node::SimulationNode;
 use dawn_sector::transit::TransitOp;
 use tokio::sync::{mpsc, oneshot};
 
@@ -125,18 +125,6 @@ impl SectorSimulatorActor {
         }
     }
 
-    /// Step 7.5 (ADR-0014 §7): apply committed Raft Log entries to the ECS.
-    ///
-    /// Delegates to [`dawn_sector::transit::apply_committed_raft_entries`], which
-    /// is shared with the `--serve --cluster` loop.
-    fn apply_committed_raft_entries(&mut self) {
-        dawn_sector::transit::apply_committed_raft_entries(
-            &mut self.node,
-            &self.raft,
-            &mut self.raft_committed_rx,
-        );
-    }
-
     /// Forward any un-replicated events from the node's local log.
     fn publish_new_events(&mut self) {
         self.replication
@@ -147,27 +135,21 @@ impl SectorSimulatorActor {
         while let Some(msg) = self.rx.recv().await {
             match msg {
                 SectorSimulatorMessage::Tick { reply } => {
-                    // Step 7.5 (ADR-0014): apply committed Raft entries.
-                    // Applied before the simulation step so the resulting
-                    // events are flushed to the bus in the same Tick.
-                    self.apply_committed_raft_entries();
-
-                    let result: TickResult = self.node.tick();
+                    let replication = &mut self.replication;
+                    let output = dawn_sector::transit::run_runtime_tick(
+                        &mut self.node,
+                        &self.raft,
+                        &mut self.raft_committed_rx,
+                        &[],
+                        |node, _| {
+                            replication.publish_new_events(node.sector_id(), node.event_store());
+                        },
+                    );
                     let summary = TickSummary {
-                        tick: result.tick,
-                        events_emitted: result.events_emitted,
+                        tick: output.tick_result.tick,
+                        events_emitted: output.tick_result.events_emitted,
                     };
 
-                    // Step 2: replicate BEFORE replying (ordering contract).
-                    // publish_new_events covers both the Step 7.5 Transit events
-                    // and the events emitted by the simulation step.
-                    self.publish_new_events();
-
-                    // Step 10: advance this node's Raft election/heartbeat
-                    // timers by one logical Tick (INV-005 / FBD-003).
-                    self.raft.tick();
-
-                    // Step 3: reply to caller.
                     let _ = reply.send(summary);
                 }
 
