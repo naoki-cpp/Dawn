@@ -14,29 +14,33 @@ use tokio::sync::mpsc;
 /// This module owns the ordering around runtime tick outputs: auto-jump
 /// proposals, jump ownership handoff, AOI delivery, and scoped InitialState
 /// resend for players that changed Sector.
+pub(crate) struct ClusterRuntimeTickContext<'a> {
+    pub(crate) nodes: &'a mut [SimulationNode],
+    pub(crate) rafts: &'a [RaftActorHandle],
+    pub(crate) committed_rxs: &'a mut [mpsc::UnboundedReceiver<Vec<u8>>],
+    pub(crate) sessions: &'a mut Vec<ws_server::PlayerSession>,
+    pub(crate) player_sector: &'a mut HashMap<PlayerId, usize>,
+    pub(crate) ship_player: &'a HashMap<ShipId, PlayerId>,
+    pub(crate) prev_visible: &'a mut HashMap<PlayerId, Vec<ShipId>>,
+}
+
 pub(crate) fn run_cluster_runtime_tick(
-    nodes: &mut [SimulationNode],
-    rafts: &[RaftActorHandle],
-    committed_rxs: &mut [mpsc::UnboundedReceiver<Vec<u8>>],
+    ctx: ClusterRuntimeTickContext<'_>,
     lock_commands: &[Vec<dawn_core::LockOnCommand>],
-    sessions: &mut Vec<ws_server::PlayerSession>,
-    player_sector: &mut HashMap<PlayerId, usize>,
-    ship_player: &HashMap<ShipId, PlayerId>,
-    prev_visible: &mut HashMap<PlayerId, Vec<ShipId>>,
 ) {
-    let tick_outputs: Vec<_> = (0..nodes.len())
+    let tick_outputs: Vec<_> = (0..ctx.nodes.len())
         .map(|i| {
             transit::run_runtime_tick(
-                &mut nodes[i],
-                &rafts[i],
-                &mut committed_rxs[i],
+                &mut ctx.nodes[i],
+                &ctx.rafts[i],
+                &mut ctx.committed_rxs[i],
                 &lock_commands[i],
                 |_, _| {},
             )
         })
         .collect();
 
-    propose_auto_jumps(nodes, rafts, &tick_outputs);
+    propose_auto_jumps(ctx.nodes, ctx.rafts, &tick_outputs);
 
     let warp_arrivals_by_sector: Vec<Vec<ShipId>> = tick_outputs
         .iter()
@@ -47,17 +51,22 @@ pub(crate) fn run_cluster_runtime_tick(
         .map(|output| output.events.clone())
         .collect();
 
-    let handoff = apply_jump_handoffs(nodes, player_sector, ship_player, &events_by_sector);
+    let handoff = apply_jump_handoffs(
+        ctx.nodes,
+        ctx.player_sector,
+        ctx.ship_player,
+        &events_by_sector,
+    );
     deliver_cluster_frames(
-        nodes,
-        sessions,
-        player_sector,
-        prev_visible,
+        ctx.nodes,
+        ctx.sessions,
+        ctx.player_sector,
+        ctx.prev_visible,
         &events_by_sector,
         &warp_arrivals_by_sector,
         &handoff,
     );
-    resend_jump_initial_state(nodes, sessions, &handoff);
+    resend_jump_initial_state(ctx.nodes, ctx.sessions, &handoff);
 }
 
 struct JumpHandoff {

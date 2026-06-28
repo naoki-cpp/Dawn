@@ -226,14 +226,16 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         }
 
         runtime::run_cluster_runtime_tick(
-            &mut nodes,
-            &rafts,
-            &mut committed_rxs,
+            runtime::ClusterRuntimeTickContext {
+                nodes: &mut nodes,
+                rafts: &rafts,
+                committed_rxs: &mut committed_rxs,
+                sessions: &mut sessions,
+                player_sector: &mut player_sector,
+                ship_player: &ship_player,
+                prev_visible: &mut prev_visible,
+            },
             &lock_commands,
-            &mut sessions,
-            &mut player_sector,
-            &ship_player,
-            &mut prev_visible,
         );
     }
 }
