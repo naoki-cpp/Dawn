@@ -189,12 +189,17 @@ Step 9: Replication Actor に差分を通知する
 Step 10: RaftActor に TickElapsed を送る（ADR-0014）
          raft.tick()
          → election timeout / heartbeat タイマーを 1 Tick 進める（INV-005 / FBD-003）
-         ※ serve は `transit::step_cluster_node`（7.5 apply → node.tick → raft.tick）
-           が `run_cluster_server` 内で実行。actor 経路（テスト/デモ）は
-           SectorSimulatorActor の Tick ハンドラで Step 9 flush を挟んで実行する。
+         ※ actor 経路と clustered serve 経路は `transit::run_runtime_tick`
+           （7.5 apply → node.tick → Step 9 hook → raft.tick → transient outputs）
+           を共有する。`serve::runtime::run_cluster_runtime_tick` は clustered serve の
+           auto-jump / ownership handoff / AOI delivery / scoped InitialState resend を持つ。
+           `transit::step_cluster_node` は transient drains を呼び出し側が持つ
+           `dawn-sector-node` などのための薄い入口。
 
 Step 7.5: コミット済み Raft エントリを適用する（ADR-0014 §7）
-         transit::apply_committed_raft_entries()（serve と actor で共有）
+         transit::apply_committed_raft_entries()
+         ※ actor / clustered serve は `transit::run_runtime_tick()` 経由で共有し、
+           `dawn-sector-node` は `transit::step_cluster_node()` 経由で実行する。
          → コミット済み TransitOp を ECS に適用する:
            TransitOp::Request → 所有ノード: InTransit 化 + SectorTransitRequested を
              Append、Ship 状態を export して TransitOp::Commit を Raft に提案

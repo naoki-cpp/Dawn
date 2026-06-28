@@ -1,6 +1,7 @@
 //! Serve-loop functions: single-node and Raft-cluster WebSocket servers.
 
 mod cluster;
+mod runtime;
 mod single;
 
 pub(crate) use cluster::run_cluster_server;
