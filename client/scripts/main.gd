@@ -706,6 +706,8 @@ func _handle_position_snap(p: Dictionary) -> void:
 		_apply_origin_rebase(new_origin, true)
 	else:
 		(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(server_pos)
+	(_ships[ship_id] as Node3D).call("set_velocity", Vector3.ZERO)
+	(_ships[ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
 
 # -- Jump Gate (ADR-0009) -----------------------------------------------------
 

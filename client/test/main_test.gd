@@ -15,6 +15,19 @@ const __source: String = "res://scripts/main.gd"
 var _main: Node
 
 
+class FakeShip:
+	extends Node3D
+
+	var velocity_calls: Array[Vector3] = []
+	var thrust_calls: Array[Vector3] = []
+
+	func set_velocity(v: Vector3) -> void:
+		velocity_calls.append(v)
+
+	func set_thrust_direction(v: Vector3) -> void:
+		thrust_calls.append(v)
+
+
 func before_test() -> void:
 	## .new() without adding to the scene tree never triggers _ready(), so
 	## the @onready scene-path vars stay null -- fine, since none of the
@@ -31,6 +44,40 @@ func after_test() -> void:
 func test_server_to_godot_pos_flips_z_and_scales() -> void:
 	var result: Vector3 = _main._server_to_godot_pos(Vector3(100.0, 20.0, 300.0))
 	assert_vector(result).is_equal_approx(Vector3(10.0, 2.0, -30.0), Vector3(0.0001, 0.0001, 0.0001))
+
+
+# -- _handle_position_snap ----------------------------------------------------
+
+func test_player_position_snap_clears_residual_warp_motion() -> void:
+	var ship := FakeShip.new()
+	ship.global_position = Vector3(10.0, 0.0, 0.0)
+	_main._ships = {1: ship}
+	_main._player_ship_id = 1
+
+	_main._handle_position_snap({
+		"ship_id": 1,
+		"position": {"x": 1_000_000.0, "y": 0.0, "z": 0.0},
+	})
+
+	assert_vector(ship.velocity_calls.back()).is_equal(Vector3.ZERO)
+	assert_vector(ship.thrust_calls.back()).is_equal(Vector3.ZERO)
+	ship.free()
+
+
+func test_observed_ship_position_snap_clears_residual_warp_motion() -> void:
+	var ship := FakeShip.new()
+	_main._ships = {2: ship}
+	_main._player_ship_id = 1
+
+	_main._handle_position_snap({
+		"ship_id": 2,
+		"position": {"x": 100.0, "y": 20.0, "z": 300.0},
+	})
+
+	assert_vector(ship.global_position).is_equal_approx(Vector3(10.0, 2.0, -30.0), Vector3(0.0001, 0.0001, 0.0001))
+	assert_vector(ship.velocity_calls.back()).is_equal(Vector3.ZERO)
+	assert_vector(ship.thrust_calls.back()).is_equal(Vector3.ZERO)
+	ship.free()
 
 
 # -- _on_module_deactivated (manual OFF vs capacitor-forced OFF) ---------------------

@@ -55,6 +55,8 @@ impl<S: EventStore> SimulationNode<S> {
             Some(c) => c.0,
             None => return,
         };
+        let target = self
+            .dest_in_ship_frame_abs(entity, [target.x as f64, target.y as f64, target.z as f64]);
         self.steer_thrust_toward(entity, pos, target);
     }
 
@@ -449,6 +451,44 @@ mod tests {
         assert!(
             damage_events > 0,
             "player should have dealt at least 1 DamageTaken to bot within 25 ticks"
+        );
+    }
+
+    #[test]
+    fn move_command_target_is_interpreted_in_the_ships_current_anchor_frame() {
+        use dawn_core::AnchorId;
+
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let anchor = AnchorId(1);
+        let anchor_abs = node.anchor_table().abs(anchor).expect("demo anchor exists");
+        let local_pos = Position::new(250.0, 0.0, -100.0);
+        node.world.set_ship_anchor(entity, anchor);
+        node.world
+            .inner_mut()
+            .get::<&mut PositionComp>(entity)
+            .unwrap()
+            .0 = local_pos;
+
+        let target_abs = Position::new(
+            (anchor_abs[0] + local_pos.x as f64) as f32,
+            (anchor_abs[1] + local_pos.y as f64 + 1_000_000.0) as f32,
+            (anchor_abs[2] + local_pos.z as f64) as f32,
+        );
+
+        node.apply_move_command(ship_id, target_abs);
+
+        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        assert!(
+            thrust.direction.dy > 0.99,
+            "move command should preserve the local +Y intent after an anchor rebase, got {:?}",
+            thrust.direction
+        );
+        assert!(
+            thrust.direction.dx.abs() < 0.01 && thrust.direction.dz.abs() < 0.01,
+            "move command must not be dominated by the far anchor offset, got {:?}",
+            thrust.direction
         );
     }
 }
