@@ -77,6 +77,7 @@ data/modules.toml      # モジュール定義（ダメージ・射程・StatDel
 10. [Forbidden Changes](#10-forbidden-changes)
 11. [Crate別責務早見表](#11-crate別責務早見表)
 12. [よくある設計違反パターン](#12-よくある設計違反パターン)
+13. [Agent skills](#13-agent-skills)
 
 ---
 
@@ -827,6 +828,24 @@ assert_eq!(pos, expected_position);
 AI が陥りやすいアンチパターン（State 直接同期 / テスト後回し / dawn-core 肥大化 /
 Tick の物理時刻化 / Raft スキップ / FittingSnapshot 省略 / 状態フラグのイベント化）と
 その修正方法は **docs/architecture/design-violations.md** を参照。
+
+---
+
+## 13. Agent skills
+
+Matt Pocock's engineering skills use the following repository configuration.
+
+### Issue tracker
+
+Issues live in GitHub Issues for `naoki-cpp/Dawn`; external PRs are also treated as a triage request surface. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default mattpocock/skills triage label vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repo uses a single-context domain docs layout: root `CONTEXT.md` plus root `docs/adr/`. See `docs/agents/domain.md`.
 
 ---
 
