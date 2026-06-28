@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : CLAUDE.md §11, docs/architecture/architecture.md
-date     : 2026-06-24（ADR-0031/0032/0033 後の再計測。warp.rs 1050 / spawner_logic 881 / mod.rs 797 が再肥大、R-3 起票。ファイルサイズ A−→B+）
+date     : 2026-06-29（PR #34 後の再計測。AoI delivery deepening で serve/aoi_delivery.rs 174 追加、serve/mod.rs 467→437。warp.rs 985 / spawner_logic 804 / mod.rs 724）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -15,20 +15,20 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ## 現状評価
 
-**総合: B+**（2026-06-24、ファイルサイズ A−→B+ で下降。ADR-0031/0032/0033 の機能追加で `warp.rs` 1050 / `spawner_logic.rs` 881 / `mod.rs` 797 が再び閾値帯へ。R-3 起票・トリガー保留。他観点は A− 維持）
+**総合: B+**（2026-06-29 維持。PR #34 で AoI delivery policy が `serve/aoi_delivery.rs` に集約され、single/cluster serve loop から visible-set 管理と PositionSnap 配信詳細が外れた。大きいファイルは `warp.rs` 985 / `spawner_logic.rs` 804 / `node/mod.rs` 724 に残るが、いずれも単一責務の観察対象として R-3 保留）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027）。新規 `node/orbit.rs`・`node/inventory.rs`・`systems/repair.rs` も既存責務分割に沿う |
-| ファイルサイズ | B+ | R-1 後さらに ADR-0031/0032/0033 が積まれ、**3ファイルが総行数で閾値帯**: `warp.rs` 1050（impl 528 / test 522）・`spawner_logic.rs` 881（impl 602）・`mod.rs` 797（impl 608）。ただし impl 部分は概ね 700 未満で単一責務を保つ（増分の多くはテスト）。実害はまだ無いが観察対象が複数 → R-3 に集約しトリガー保留 |
+| ファイルサイズ | B+ | 2026-06-29 再計測で **3ファイルが総行数で閾値帯**: `warp.rs` 985・`spawner_logic.rs` 804・`node/mod.rs` 724。`serve` は `runtime.rs` / `aoi_delivery.rs` へ分割され、各 loop は小さく維持。実害はまだ無いが観察対象が複数 → R-3 に集約しトリガー保留 |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。`InventoryComp`（ADR-0032）・`RepairLayer`/`RepairApplied`（ADR-0033）も既存型設計に整合 |
-| 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。残る両バイナリ間グルー重複（M-6）は ~230行・低ドリフトで許容判断（新規クレートは過剰）|
+| 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。PR #34 で dawn-simulation 側の AoI delivery は深い module 化。残る両バイナリ間グルー重複（M-6）は data loading / NPC spawn / sector-node 側 delivery adapter で許容判断 |
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。`TransitOp::Commit` は ADR-0032 で `Box<ShipSnapshot>` 化しサイズ非対称を解消済み |
 | AI開発由来 | A− | 命名汚染なし。残る `SectorSimulatorActor` の密結合（M-3）は本番パス外の in-process 専用で実害小 |
 
 ---
 
-## ファイルサイズ一覧（2026-06-23 時点）
+## ファイルサイズ一覧（2026-06-29 時点）
 
 > 2026-06-19 の前回計測から、ADR-0029（真スケール座標）の実装でワープ遷移・座標変換・
 > シリアライズ周りが増加。M-4（WS 境界集約）で `protocol.rs` / `ws_server.rs` は両バイナリ
@@ -38,21 +38,21 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-sector/src/node/warp.rs` | 1050 | 🟡 R-1 新設（2026-06-23）。769→1050（impl 528 / test 522）。warp 幾何の単一責務だが総行数が閾値を明確に超過。impl は 700 未満で増分はほぼテスト。R-3 でトリガー保留（impl が 700 を超えたら process_warp / warp 幾何 / コマンドへ分割） |
-| `crates/dawn-sector/src/node/spawner_logic.rs` | 881 | 🟡 P4-2 + P7-1 + ADR-0029 + ADR-0032（inventory seeding）。662→881（impl 602）。spawn / bot AI / inventory seed が同居し始めた。R-3 で観察（impl 700 超 or 責務分岐で分割） |
-| `crates/dawn-sector/src/node/orbit.rs` | 788 | 🟡 ADR-0031 新設（impl 311 / test 477）。Orbit / Keep at Range の操船一式。impl は小さく増分はテスト主体。単一責務で許容、R-3 で観察 |
-| `crates/dawn-sector/src/node/mod.rs` | 797 | 🟡 P7-2 後 + ADR-0031/0032 のフィールド・定数追加。646→797（impl 608）。R-3 で観察 |
-| `crates/dawn-sector/src/node/transit_flow.rs` | 624 | 🟢 P7-1 + ADR-0032（inventory 転送）。407→624（impl 225 / test 399）。impl は小、増分はテスト |
-| `crates/dawn-sector/src/node/snapshot_io.rs` | 580 | 🟢 P7-pre + ADR-0032（inventory 永続化）。442→580（impl 116 / test 464）。ほぼテスト |
-| `crates/dawn-sector/src/node/inventory.rs` | 459 | 🟢 ADR-0032 新設。fit/unfit_module_owned + seed + テスト |
-| `crates/dawn-sector/src/node/commands.rs` | 454 | 🟢 P7-1 + ADR-0032（fit 時 inventory 同梱）。342→454（impl 337） |
-| `crates/dawn-sector/src/node/serialization.rs` | 434 | 🟢 ADR-0029 + ADR-0032（inventory / slot_capacity を PlayerFitting に追加）。300→434 |
+| `crates/dawn-sector/src/node/warp.rs` | 985 | 🟡 R-1 新設（2026-06-23）。warp 幾何の単一責務だが総行数が閾値を超過。R-3 でトリガー保留（impl が 700 を超えたら process_warp / warp 幾何 / コマンドへ分割） |
+| `crates/dawn-sector/src/node/spawner_logic.rs` | 804 | 🟡 P4-2 + P7-1 + ADR-0029 + ADR-0032（inventory seeding）。spawn / bot AI / inventory seed が同居。R-3 で観察（impl 700 超 or 責務分岐で分割） |
+| `crates/dawn-sector/src/node/orbit.rs` | 723 | 🟡 ADR-0031 新設。Orbit / Keep at Range の操船一式。単一責務で許容、R-3 で観察 |
+| `crates/dawn-sector/src/node/mod.rs` | 724 | 🟡 P7-2 後 + ADR-0031/0032 のフィールド・定数追加。R-3 で観察 |
+| `crates/dawn-sector/src/node/transit_flow.rs` | 558 | 🟢 P7-1 + ADR-0032（inventory 転送）。impl は小、増分はテスト |
+| `crates/dawn-sector/src/node/snapshot_io.rs` | 524 | 🟢 P7-pre + ADR-0032（inventory 永続化）。ほぼテスト |
+| `crates/dawn-sector/src/node/inventory.rs` | 422 | 🟢 ADR-0032 新設。fit/unfit_module_owned + seed + テスト |
+| `crates/dawn-sector/src/node/commands.rs` | 440 | 🟢 P7-1 + ADR-0032（fit 時 inventory 同梱） |
+| `crates/dawn-sector/src/node/serialization.rs` | 400 | 🟢 ADR-0029 + ADR-0032（inventory / slot_capacity を PlayerFitting に追加） |
 | `crates/dawn-sector/src/galaxy.rs` | 360 | 🟢 ADR-0029 AU→units 変換・ゲート AU 化 |
 | `crates/dawn-sector/src/node/apply_event.rs` | 339 | 🟢 P7-pre + ADR-0032（ShipFitted/ShipSpawned で inventory 復元） |
 | `crates/dawn-sector/src/node/tackle.rs` | 324 | 🟢 P7-pre |
 | `crates/dawn-sector/src/aoi.rs` | 292 | 🟢 |
 | `crates/dawn-sector/src/anchor.rs` | 292 | 🟢 ADR-0029 新設（AnchorTable・静的 f64 アンカー絶対座標） |
-| `crates/dawn-sector/src/transit.rs` | 250 | 🟢 ADR-0032 で `Commit { ship: Box<ShipSnapshot> }` 化 |
+| `crates/dawn-sector/src/transit.rs` | 278 | 🟢 PR #30 で `run_runtime_tick` / `RuntimeTickOutput` を追加。actor / clustered serve の tick pipeline 共有入口 |
 | `crates/dawn-sector/src/modules.rs` | 211 | 🟢 ADR-0033 で Active 修理モジュール定義を追加 |
 | `crates/dawn-sector/src/persistence/snapshot.rs` | 173 | 🟢 ADR-0032 で `ShipSnapshot.inventory` 追加 |
 | `crates/dawn-sector/src/dilation.rs` | 160 | 🟢 |
@@ -78,13 +78,15 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-simulation/src/cluster.rs` | 628 | 🟢 Raft クラスター配線（in-process テスト用）。538→628 |
-| `crates/dawn-simulation/src/serve/mod.rs` | 520 | 🟢 P5-1 共通ヘルパー。429→520。ADR-0017 jump dead-zone fallback・ADR-0032 `CommonCommandFollowup` enum 追加 |
-| `crates/dawn-simulation/src/sector_simulator_actor.rs` | 492 | 🟡 M-3（本番パス外・保留） |
-| `crates/dawn-simulation/src/bench.rs` | 493 | 🟢 |
-| `crates/dawn-simulation/src/serve/cluster.rs` | 364 | 🟢 P5-1。248→364。ADR-0017 fallback・ADR-0032 fitting refresh |
+| `crates/dawn-simulation/src/cluster.rs` | 531 | 🟢 Raft クラスター配線（in-process テスト用） |
+| `crates/dawn-simulation/src/serve/mod.rs` | 437 | 🟢 P5-1 共通ヘルパー。ADR-0017 jump dead-zone fallback・ADR-0032 `CommonCommandFollowup` enum 追加。PR #34 で AoI delivery を分離 |
+| `crates/dawn-simulation/src/sector_simulator_actor.rs` | 413 | 🟡 M-3（本番パス外・保留）。PR #30 で tick pipeline を `transit::run_runtime_tick` に寄せた |
+| `crates/dawn-simulation/src/bench.rs` | 430 | 🟢 |
+| `crates/dawn-simulation/src/serve/cluster.rs` | 241 | 🟢 PR #30 で tick 後処理を `serve/runtime.rs` へ移動。PR #34 後は `AoiDelivery` を持ち、入力処理と runtime 呼び出し中心 |
+| `crates/dawn-simulation/src/serve/runtime.rs` | 192 | 🟢 PR #30 新設。auto-jump / ownership handoff / scoped InitialState resend を集約し、AoI delivery は `AoiDelivery` に委譲 |
+| `crates/dawn-simulation/src/serve/aoi_delivery.rs` | 174 | 🟢 PR #34 新設。visible-set memory / AoiEnter・AoiLeave / event filtering / warp `PositionSnap` delivery を集約 |
 | `crates/dawn-simulation/src/data_loader/modules.rs` | 219 | 🟢 P5-2 |
-| `crates/dawn-simulation/src/serve/single.rs` | 213 | 🟢 P5-1 |
+| `crates/dawn-simulation/src/serve/single.rs` | 203 | 🟢 P5-1。PR #34 後は AoI delivery 詳細を `AoiDelivery` に委譲 |
 | `crates/dawn-simulation/src/data_loader/ship_types.rs` | 189 | 🟢 P5-2 |
 | `crates/dawn-simulation/src/main.rs` | 65 | 🟢 |
 | `crates/dawn-simulation/src/data_loader/mod.rs` | 9 | 🟢 P5-2 |
@@ -142,27 +144,31 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 `dawn-sector-node` の main ループの重複（両者とも tick + Raft + replication を駆動）が
 保守上の実害になったとき、または in-process クラスタを本番に近づける必要が出たとき。
 
-> M-4（WS 境界の `dawn-actor` 集約・2026-06-20）と M-5（replication 消費側 `ReplicaSet`・
-> 2026-06-20）は解消済み。詳細は「改善ロードマップ > 完了済み」を参照。M-4 の残課題は M-6 に集約。
+> M-4（WS 境界の `dawn-actor` 集約・2026-06-20）、M-5（replication 消費側 `ReplicaSet`・
+> 2026-06-20）、および dawn-simulation 側の AoI delivery deepening（PR #34）は解消済み。
+> 詳細は「改善ロードマップ > 完了済み」を参照。
 
-#### M-6（許容）: `dawn-sector-node` が `dawn-simulation` の serve 層をフォークしている
+#### M-6（許容）: 2つの serve バイナリに残るアプリ層 adapter 重複
 
-M-4（WS 境界）解消後も、両バイナリの「アプリケーション層」グルーが重複している:
+M-4（WS 境界）と PR #34（dawn-simulation 側 AoI delivery deepening）後も、
+両バイナリの「アプリケーション層」adapter/glue は一部重複している:
 
 | 重複 | dawn-simulation | dawn-sector-node | 備考 |
 |---|---|---|---|
 | `data_loader`（`load_modules` / `load_ship_types` / `parse_*`） | `data_loader/*.rs`（実装 ~280行）| `data_loader.rs`（178行）| TOML ローダー |
-| `deliver_aoi_frame`（AoI フレーム配信） | `serve/mod.rs:207` | `main.rs:338` | **実質同一**（~40行）|
+| AoI フレーム配信 | `serve/aoi_delivery.rs`（`AoiDelivery`） | `main.rs:518`（`deliver_aoi_frame`） | **責務は同型**。dawn-simulation 側は PR #34 で deep module 化、sector-node 側は adapter として残る |
 | `spawn_npcs` / `spawn_npc_frigates` | `serve/mod.rs:278` | `main.rs:325` | **実質同一**（~12行）|
 
-根本原因: **`dawn-actor`（転送境界）と `dawn-sector`（ゲームロジック）の両方に依存する
-共有ライブラリが存在しない**。両方に依存するのは2バイナリだけなので、両者を組み合わせる
-グルー（セッション AoI 配信・NPC スポーン・データロード・serve ループ）は共有の置き場がなく、
-各バイナリにコピーされる。8D-4 で `dawn-sector-node` を `dawn-simulation` の serve 経路から
-コピーして作ったことで顕在化した。
+現在の実態では、`dawn-simulation` 側は `serve/runtime.rs` と `serve/aoi_delivery.rs` によって
+single/cluster の内部知識をかなり集約済みで、問題は「同じ大きな serve loop が二重化している」
+というより、**dawn-sector-node だけが production process model 固有の adapter を持っている**こと。
+8D-4 で `dawn-sector-node` を `dawn-simulation` の serve 経路からコピーして作った名残はあるが、
+WS protocol は `dawn-actor` に、ゲームロジックは `dawn-sector` に、dawn-simulation 側の AoI delivery は
+`AoiDelivery` に寄っており、残る重複は低頻度の glue に縮小している。
 
 これは M-4 で `data_loader` を `dawn-actor` に置けなかった理由（I/O 禁止）と同根で、
-個別ファイルの置き場問題ではなく**共有アプリ層クレートの欠如**である。
+個別ファイルの置き場問題ではなく**共有アプリ層クレートの欠如**である。ただし、現時点では
+そのクレートを作るほどの深さや adapter 数には達していない。
 
 #### 判断: 当面は許容する（新規クレートは作らない）
 
@@ -176,12 +182,12 @@ M-4（WS 境界）解消後も、両バイナリの「アプリケーション�
   クレート新設は不均衡。
 - **8D 最小化方針**（roadmap「巨大基盤の一括建設をしない・薄いスライス」）に逆行する。
 - **前例との整合**: `dawn-proto` は「見返りが乏しい」と却下、P4-3 は `_owned` 統合を
-  「統合コストが効果を上回る」とスキップ。~230行の安定したグルーの重複も同じ費用対効果で許容が妥当。
+  「統合コストが効果を上回る」とスキップ。現在残る安定したグルーの重複も同じ費用対効果で許容が妥当。
 - **ドリフトの実害が小さい**: M-4 で直した `protocol`（18 variant・変更頻度高）と違い、
-  `data_loader` / `deliver_aoi_frame` は変更頻度が低く無言バグ化のリスクは限定的。
+  `data_loader` / AoI delivery adapter は変更頻度が低く無言バグ化のリスクは限定的。
 
 再評価トリガー（このいずれかが起きたら設計し直す）:
-- `data_loader` / `deliver_aoi_frame` が実際にドリフトしてバグを生んだとき
+- `data_loader` / AoI delivery adapter が実際にドリフトしてバグを生んだとき
 - 3つ目の serve バイナリが必要になったとき
 - 2バイナリの process モデル差を解消し1バイナリ化できる見込みが立ったとき
   （その場合は新規クレートではなくバイナリ統合を優先検討する）
@@ -222,9 +228,11 @@ M-4（WS 境界）解消後も、両バイナリの「アプリケーション�
 | M-5 replication 消費側 | 2026-06-20 | `dawn-replication::ReplicaSet` 新設。受信 `LogBatch` を peer セクターごとに gap 検出・冪等・順序保持で複製ログに取り込む（ライブ world 適用 / failover は範囲外）|
 | M-4 WS 境界の集約 | 2026-06-20 | `ws_server` / `protocol` を `dawn-actor` へ移動し dawn-simulation / dawn-sector-node の手動コピーを解消（506行削除）。`bind` を `ToSocketAddrs` ジェネリック化・不要依存を除去 |
 | R-1 navigation.rs 分割 | 2026-06-23 | `node/navigation.rs`（ADR-0029 で 1092行に肥大）を `node/warp.rs`（769行）/ `node/approach.rs`（306行）/ `node/navigation.rs`（62行・バリデーションのみ）へ3分割。`mod warp; mod approach;` 追加 + impl ブロック移設の純粋移動（公開 API・挙動不変）。`cargo test --workspace` 全件ゼロエラー（warp 21件 + approach 10件を新パスで確認） |
+| runtime tick pipeline collapse | 2026-06-28 | `transit::run_runtime_tick` / `RuntimeTickOutput` と `serve/runtime.rs` で actor / clustered serve の tick ordering を共有。replication-before-raft ordering と transient drain を一箇所へ集約 |
+| AoI delivery deepening | 2026-06-29 | `serve/aoi_delivery.rs` の `AoiDelivery` に visible-set memory / Enter-Leave / event filtering / warp `PositionSnap` delivery を集約。single/cluster serve loop から AoI frame の内部知識を除去 |
 
 > Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消、
-> および R-1（navigation.rs 分割）まですべて完了。
+> R-1（navigation.rs 分割）、runtime tick pipeline collapse、AoI delivery deepening まですべて完了。
 
 ### リファクタロードマップ（2026-06-23 追加・ADR-0029 後の再計測で起票）
 
@@ -245,17 +253,16 @@ C-3 はフェイルファストガードで解消済み・2026-06-23 だが、�
 
 #### R-3（低優先・トリガー保留）: `node/` 系ファイルの再肥大（ADR-0031/0032/0033 後）
 
-2026-06-24 の再計測で、`warp.rs`（1050）/ `spawner_logic.rs`（881）/ `mod.rs`（797）/
-`orbit.rs`（788）が総行数で閾値帯に再突入した。R-1（navigation.rs 分割）後に積まれた
+2026-06-28 の再計測で、`warp.rs`（985）/ `spawner_logic.rs`（804）/ `mod.rs`（724）/
+`orbit.rs`（723）が総行数で閾値帯に残っている。R-1（navigation.rs 分割）後に積まれた
 Orbit/KeepAtRange（ADR-0031）・Inventory（ADR-0032）・Repair（ADR-0033）の累積。
 
 **根本原因**: 機能追加のたびに `node/` 直下へ impl + テストが積まれる構造。これ自体は
 P7 系で確立した「責務ごとに sibling モジュールへ抽出」方式の想定内の蓄積であり、
 設計の破綻ではない。
 
-**判断: 保留（トリガー付き）。** 増分の多くはテスト（`warp.rs` impl 528 / test 522、
-`orbit.rs` impl 311 / test 477、`mod.rs` test 189・impl 608）で、impl 部分は概ね 700 未満を
-保ち単一責務。**今分割すると純粋移動の差分だけが増え、得が薄い。**
+**判断: 保留（トリガー付き）。** 総行数はまだ大きいが、現時点では単一責務を保っている。
+**今分割すると純粋移動の差分だけが増え、得が薄い。**
 
 再評価トリガー（いずれかで着手）:
 - いずれかの **impl 部分**（テスト除く）が ~700 行を超えたとき。
@@ -266,16 +273,16 @@ P7 系で確立した「責務ごとに sibling モジュールへ抽出」方�
 
 ### 未完了・保留
 
-上記リファクタロードマップ以外で残るのは以下。いずれも本番品質には直結せず、意識的に
-「今はやらない」と判断した項目。
+上記リファクタロードマップ以外で残るのは以下。いずれも現時点では新しい module / crate を
+増やすより保留・観察の方が費用対効果が高い、と判断した項目。
 
 | 項目 | 種別 | 状態・理由 |
 |---|---|---|
-| R-2 client `main.gd` 分割 | 品質・保留 | 1295 行だが god object 解消済み。`.tscn` 化コンポーネントへのシーン参照切れリスクが上回るため保留（C-3 とは無関係） |
+| R-2 client `main.gd` 分割 | 品質・保留 | 1151 行だが god object 解消済み。`.tscn` 化コンポーネントへのシーン参照切れリスクが上回るため保留（C-3 とは無関係） |
 | R-3 `node/` 系再肥大（warp/spawner/mod/orbit） | 品質・保留 | 総行数は閾値帯だが impl は概ね 700 未満・増分はテスト主体。impl が 700 超でファイル別に分割（トリガー付き・上記 R-3） |
 | 8D-5 Raspberry Pi 実機検証 | 機能・外部依存待ち | ハードウェア未購入。観測ログ・config・localhost 検証は済み（完了済み参照）。Pi 入手後に着手 |
 | M-3 `SectorSimulatorActor` 密結合 | 品質・保留 | 本番パス外（in-process テスト/ベンチ専用）。P9-1 撤回。優先度低 |
-| M-6 アプリ層グルー重複（`data_loader` / `deliver_aoi_frame` / `spawn_npcs`） | 品質・許容 | ~230行・低ドリフト。新規クレートは過剰と判断。再評価トリガー付き |
+| M-6 アプリ層 adapter 重複（`data_loader` / AoI delivery adapter / `spawn_npcs`） | 許容重複 | PR #34 で dawn-simulation 側 AoI は deep module 化済み。sector-node 側 adapter との重複は低ドリフトとして許容。新規クレートは過剰と判断。再評価トリガー付き |
 
 採らない方針（恒久）:
 
