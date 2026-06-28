@@ -20,6 +20,8 @@
 scripts/setup-godot.sh             # .godot-version の指定版を .tools/godot/ に取得・SHA512検証
 # Windows PowerShell:
 scripts/setup-godot.ps1
+scripts/setup-godot.sh --run-tests
+scripts/setup-godot.ps1 -RunTests
 ```
 
 ## CLI 実行
@@ -30,6 +32,13 @@ scripts/setup-godot.ps1
 cd client
 GODOT_BIN="$(../scripts/setup-godot.sh --print)"
 bash addons/gdUnit4/runtest.sh --godot_binary "$GODOT_BIN" -a test
+```
+
+On Windows, prefer the setup script so it also creates the Godot user log
+directory and applies the pinned-version GdUnit4 compatibility patches:
+
+```powershell
+scripts/setup-godot.ps1 -RunTests
 ```
 
 > **既知の互換性問題（GdUnit4 v6.1.3 × Godot 4.6系）**: GdUnit4 v6.1.3
