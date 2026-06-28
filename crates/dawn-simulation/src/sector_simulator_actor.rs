@@ -20,8 +20,7 @@
 
 use dawn_consensus::{RaftActorHandle, Role, Term};
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
-use dawn_event_store::store::EventStore as _;
-use dawn_replication::{BusMessage, LogBatch};
+use dawn_replication::{InMemoryReplicationBus, OutboundLogPublisher};
 use dawn_sector::node::{SimulationNode, TickResult};
 use dawn_sector::transit::TransitOp;
 use tokio::sync::{mpsc, oneshot};
@@ -101,10 +100,7 @@ enum SectorSimulatorMessage {
 struct SectorSimulatorActor {
     rx: mpsc::Receiver<SectorSimulatorMessage>,
     node: SimulationNode,
-    bus_tx: mpsc::Sender<BusMessage>,
-    /// Index of the next event in the node's log that has not yet been
-    /// forwarded to the replication bus.
-    last_replicated: u64,
+    replication: OutboundLogPublisher<InMemoryReplicationBus>,
     /// Handle to this node's RaftActor (ADR-0014).
     raft: RaftActorHandle,
     /// Committed Raft Log payloads from this node's RaftActor, applied at
@@ -116,15 +112,14 @@ impl SectorSimulatorActor {
     fn new(
         rx: mpsc::Receiver<SectorSimulatorMessage>,
         node: SimulationNode,
-        bus_tx: mpsc::Sender<BusMessage>,
+        replication: OutboundLogPublisher<InMemoryReplicationBus>,
         raft: RaftActorHandle,
         raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     ) -> Self {
         Self {
             rx,
             node,
-            bus_tx,
-            last_replicated: 0,
+            replication,
             raft,
             raft_committed_rx,
         }
@@ -142,22 +137,10 @@ impl SectorSimulatorActor {
         );
     }
 
-    /// Forward any un-replicated events from the node's local log to the bus.
-    async fn flush_to_bus(&mut self) {
-        let new_events: Vec<_> = self
-            .node
-            .event_store()
-            .iter_from(self.last_replicated)
-            .map(|r| r.event.clone())
-            .collect();
-
-        if !new_events.is_empty() {
-            let event_count = new_events.len() as u64;
-            let batch = LogBatch::new(self.node.sector_id(), self.last_replicated, new_events);
-            self.last_replicated += event_count;
-            // Ignore send error — bus may have been shut down in tests.
-            let _ = self.bus_tx.send(BusMessage::Batch(batch)).await;
-        }
+    /// Forward any un-replicated events from the node's local log.
+    fn publish_new_events(&mut self) {
+        self.replication
+            .publish_new_events(self.node.sector_id(), self.node.event_store());
     }
 
     async fn run(mut self) {
@@ -176,9 +159,9 @@ impl SectorSimulatorActor {
                     };
 
                     // Step 2: replicate BEFORE replying (ordering contract).
-                    // flush_to_bus covers both the Step 7.5 Transit events
+                    // publish_new_events covers both the Step 7.5 Transit events
                     // and the events emitted by the simulation step.
-                    self.flush_to_bus().await;
+                    self.publish_new_events();
 
                     // Step 10: advance this node's Raft election/heartbeat
                     // timers by one logical Tick (INV-005 / FBD-003).
@@ -197,8 +180,8 @@ impl SectorSimulatorActor {
                         self.node
                             .spawn_ship(dawn_core::ShipTypeId(1), position, velocity);
 
-                    // Spawn appends to the internal log; flush those events.
-                    self.flush_to_bus().await;
+                    // Spawn appends to the internal log; publish those events.
+                    self.publish_new_events();
 
                     let _ = reply.send(ship_id);
                 }
@@ -281,7 +264,7 @@ pub struct SectorSimulatorHandle {
 impl SectorSimulatorHandle {
     /// Spawn a `SectorSimulatorActor` and return a handle.
     ///
-    /// `bus` provides the replication channel.  Pass `bus.event_sender()` here.
+    /// `replication` publishes this node's append-log suffix after mutations.
     /// `raft` is this node's `RaftActorHandle` (ADR-0014), already wired to
     /// its peers via `RaftTransport`. `raft_committed_rx` is the matching
     /// committed-entries channel from the same `RaftActor`.
@@ -289,13 +272,15 @@ impl SectorSimulatorHandle {
         node_id: NodeId,
         sector_id: SectorId,
         bounds: SectorBounds,
-        bus_tx: mpsc::Sender<BusMessage>,
+        replication: OutboundLogPublisher<InMemoryReplicationBus>,
         raft: RaftActorHandle,
         raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(256);
         let node = SimulationNode::new(node_id, sector_id, bounds);
-        tokio::spawn(SectorSimulatorActor::new(rx, node, bus_tx, raft, raft_committed_rx).run());
+        tokio::spawn(
+            SectorSimulatorActor::new(rx, node, replication, raft, raft_committed_rx).run(),
+        );
         Self { tx }
     }
 
@@ -407,7 +392,7 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-            bus.event_sender(),
+            OutboundLogPublisher::new(bus.clone()),
             raft,
             committed_rx,
         );
@@ -483,7 +468,7 @@ mod tests {
         }
 
         // All spawn events must be in the bus because spawn_ship awaits the reply,
-        // and the reply is sent AFTER flush_to_bus().
+        // and the reply is sent AFTER publish_new_events().
         assert_eq!(bus.event_count().await, 5);
 
         actor.shutdown().await;

@@ -20,6 +20,7 @@ use dawn_consensus::{
 };
 use dawn_core::{NodeId, SectorBounds, SectorId};
 use dawn_replication::InMemoryReplicationBus;
+use dawn_replication::OutboundLogPublisher;
 use dawn_sector::spawner::{generate_ships, SpawnConfig};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -115,7 +116,7 @@ impl MultiNodeCluster {
                     id,
                     SectorId(id.0),
                     SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-                    bus.event_sender(),
+                    OutboundLogPublisher::new(bus.clone()),
                     raft,
                     committed_rx,
                 )
