@@ -37,13 +37,13 @@ var _module_slots : Array         = []
 ## Inventory / Fitting panel (ADR-0032). {panel, fitted_list, inventory_list,
 ## fitted_rows, inventory_rows}, toggled by the I key.
 var _inventory_panel_refs : Dictionary = {}
-## Unfitted owned modules from the latest PlayerFitting, as
-## [{module_id, name, kind, slot}, ...].
+## Unfitted owned modules from the latest normalized PlayerFitting.
 var _player_inventory : Array = []
 
 # -- Constants ----------------------------------------------------------------
 
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
+const PlayerFitting = preload("res://scripts/player_fitting.gd")
 const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor
 const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is rejected for gates closer than this (ADR-0022).
 ## Unit-to-metre scale: real metres = (units/tick or units) * METERS_PER_UNIT,
@@ -112,9 +112,7 @@ var _opponent_ship_ids : Array = []
 ## Duel result overlay label (created dynamically)
 var _duel_result_label : Label = null
 
-## Module slot info
-## [{slot, index, module_id, name, is_active, is_active_module,
-##   cap_cost_per_cycle, cycle_time_ticks, cycle_remaining}, ...]
+## Normalized PlayerFitting modules, enriched with client runtime fields.
 var _player_modules : Array = []
 
 ## module_id set for which we just sent DeactivateModuleCommand ourselves.
@@ -867,33 +865,17 @@ func _handle_aoi_leave(p: Dictionary) -> void:
 ## and module bar always reflect the server's authoritative fitting state --
 ## including a rejected Fit/Unfit attempt reverting visibly.
 func _on_player_fitting(payload: Dictionary) -> void:
-	var modules: Array = payload.get("modules", []) as Array
-	## Initialise cycle_remaining for client-side cap simulation.
-	for m: Variant in modules:
-		var mod_dict: Dictionary = m as Dictionary
-		mod_dict["cycle_remaining"] = 0
-		mod_dict["cap_forced_off"]  = false
-	_player_modules = modules
+	var fitting: Dictionary = PlayerFitting.normalize_payload(payload)
+	_player_modules = fitting["modules"] as Array
 	_module_slots = HudManager.rebuild_module_bar(_module_bar, _player_modules)
-	_player_inventory = payload.get("inventory", []) as Array
+	_player_inventory = fitting["inventory"] as Array
 	HudManager.update_inventory_panel(_inventory_panel_refs, _player_modules, _player_inventory)
 	_recalc_weapon_range()
 
 func _recalc_weapon_range() -> void:
-	## Sum weapon_range_add and falloff_range_add from active Weapon modules.
-	var opt: float  = 0.0
-	var fall: float = 0.0
-	for m: Variant in _player_modules:
-		var mod_dict: Dictionary = m as Dictionary
-		if not (mod_dict.get("is_active", false) as bool):
-			continue
-		if mod_dict.get("kind", "") as String != "Weapon":
-			continue
-		var sd: Dictionary = mod_dict.get("stat_delta", {}) as Dictionary
-		opt  += sd.get("weapon_range_add",  0.0) as float
-		fall += sd.get("falloff_range_add", 0.0) as float
-	_weapon_range   = opt
-	_weapon_falloff = fall
+	var ranges: Dictionary = PlayerFitting.weapon_ranges(_player_modules)
+	_weapon_range = ranges["optimal"] as float
+	_weapon_falloff = ranges["falloff"] as float
 	_update_tactical_overlay()
 
 func _update_tactical_overlay() -> void:
@@ -909,13 +891,7 @@ func _update_tactical_overlay() -> void:
 func _on_module_activated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
 	if p_ship_id != _player_ship_id:
 		return
-	for m: Variant in _player_modules:
-		var mod_dict: Dictionary = m as Dictionary
-		if mod_dict.get("module_id", 0) as int == p_module_id:
-			mod_dict["is_active"]       = true
-			mod_dict["cap_forced_off"]  = false
-			mod_dict["cycle_remaining"] = 0  ## Next tick will start a fresh cycle.
-			break
+	PlayerFitting.set_module_activation(_player_modules, p_module_id, true, false)
 	_recalc_weapon_range()
 
 func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
@@ -926,13 +902,7 @@ func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> 
 	## module_id) from "capacitor forced it off" (unsolicited) here.
 	var was_manual: bool = _pending_manual_deactivations.has(p_module_id)
 	_pending_manual_deactivations.erase(p_module_id)
-	for m: Variant in _player_modules:
-		var mod_dict: Dictionary = m as Dictionary
-		if mod_dict.get("module_id", 0) as int == p_module_id:
-			mod_dict["is_active"]       = false
-			mod_dict["cycle_remaining"] = 0
-			mod_dict["cap_forced_off"]  = not was_manual
-			break
+	PlayerFitting.set_module_activation(_player_modules, p_module_id, false, not was_manual)
 	_recalc_weapon_range()
 
 
@@ -955,22 +925,16 @@ func _toggle_module_by_index(f_index: int) -> void:
 	if _player_ship_id < 0:
 		return
 	## F1-F8 map to active module indices 0-7 (High/Mid slots)
-	var active_count: int = 0
-	for m: Variant in _player_modules:
-		var mod_dict: Dictionary = m as Dictionary
-		if mod_dict.get("is_active_module", false) as bool == false:
-			continue  ## Skip Passive modules
-		if active_count == f_index:
-			var mid : int    = mod_dict.get("module_id", 0)   as int
-			var slot: String = mod_dict.get("slot",      "")  as String
-			var currently_active: bool = mod_dict.get("is_active", false) as bool
-			if currently_active:
-				_pending_manual_deactivations[mid] = true
-				_connection.send_deactivate_module(_player_ship_id, mid, slot)
-			else:
-				_connection.send_activate_module(_player_ship_id, mid, slot)
-			return
-		active_count += 1
+	var toggle: Dictionary = PlayerFitting.active_module_toggle_at(_player_modules, f_index)
+	if toggle.is_empty():
+		return
+	var mid: int = toggle["module_id"] as int
+	var slot: String = toggle["slot"] as String
+	if toggle["is_active"] as bool:
+		_pending_manual_deactivations[mid] = true
+		_connection.send_deactivate_module(_player_ship_id, mid, slot)
+	else:
+		_connection.send_activate_module(_player_ship_id, mid, slot)
 
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 	_player_ship_id = p_ship_id
@@ -1185,32 +1149,12 @@ func _simulate_cap(ticks: int) -> void:
 	if _cap_current < 0.0 or _player_ship_id < 0:
 		return
 
-	for _t: int in range(ticks):
-		## Recharge.
-		_cap_current = minf(_cap_current + _cap_recharge, _cap_max)
-
-		## Cycle logic for each active module.
-		for m: Variant in _player_modules:
-			var mod: Dictionary = m as Dictionary
-			if not (mod.get("is_active_module", false) as bool):
-				continue
-			if not (mod.get("is_active", false) as bool):
-				continue
-
-			var cycle_rem: int   = mod.get("cycle_remaining", 0) as int
-			var cost     : float = mod.get("cap_cost_per_cycle", 0.0) as float
-			var cycle_t  : int   = mod.get("cycle_time_ticks",  10)  as int
-
-			if cycle_rem == 0:
-				## Try to start new cycle.
-				if cost <= 0.0 or _cap_current >= cost:
-					_cap_current -= cost
-					mod["cycle_remaining"] = cycle_t
-				## If not enough cap, server will emit ModuleDeactivated -- skip here.
-			else:
-				mod["cycle_remaining"] = cycle_rem - 1
-
-		_cap_current = maxf(_cap_current, 0.0)
+	_cap_current = PlayerFitting.simulate_capacitor_ticks(
+		_player_modules,
+		_cap_current,
+		_cap_max,
+		_cap_recharge,
+		ticks)
 
 # -- Internal utilities -------------------------------------------------------
 
