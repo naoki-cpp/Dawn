@@ -309,14 +309,15 @@ fn select_handshake_identity(
     resume: Option<ResumeIdentity>,
 ) -> HandshakeSelection {
     if let Some(resume) = resume {
-        return node
-            .adopt_player_ship(resume.ship_id, resume.player_id)
-            .then_some(HandshakeSelection::Selected(HandshakeIdentity {
+        return if node.adopt_player_ship(resume.ship_id, resume.player_id) {
+            HandshakeSelection::Selected(HandshakeIdentity {
                 player_id: resume.player_id,
                 ship_id: resume.ship_id,
                 resumed: true,
-            }))
-            .unwrap_or(HandshakeSelection::RefusedResumeMissingShip(resume));
+            })
+        } else {
+            HandshakeSelection::RefusedResumeMissingShip(resume)
+        };
     }
 
     if node.at_population_cap() {
