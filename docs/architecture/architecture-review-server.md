@@ -50,7 +50,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector/src/galaxy.rs` | 360 | 🟢 ADR-0029 AU→units 変換・ゲート AU 化 |
 | `crates/dawn-sector/src/node/apply_event.rs` | 339 | 🟢 P7-pre + ADR-0032（ShipFitted/ShipSpawned で inventory 復元） |
 | `crates/dawn-sector/src/node/tackle.rs` | 324 | 🟢 P7-pre |
-| `crates/dawn-sector/src/aoi.rs` | 292 | 🟢 |
+| `crates/dawn-sector/src/aoi.rs` | 583 | 🟢 2026-06-29、`AoiDelivery`/`AoiSink`/`Observer`（旧 dawn-simulation・dawn-sector-node 重複の集約先）を追加。半分弱はテスト |
 | `crates/dawn-sector/src/anchor.rs` | 292 | 🟢 ADR-0029 新設（AnchorTable・静的 f64 アンカー絶対座標） |
 | `crates/dawn-sector/src/transit.rs` | 278 | 🟢 PR #30 で `run_runtime_tick` / `RuntimeTickOutput` を追加。actor / clustered serve の tick pipeline 共有入口 |
 | `crates/dawn-sector/src/modules.rs` | 211 | 🟢 ADR-0033 で Active 修理モジュール定義を追加 |
@@ -84,7 +84,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-simulation/src/bench.rs` | 430 | 🟢 |
 | `crates/dawn-simulation/src/serve/cluster.rs` | 241 | 🟢 PR #30 で tick 後処理を `serve/runtime.rs` へ移動。PR #34 後は `AoiDelivery` を持ち、入力処理と runtime 呼び出し中心 |
 | `crates/dawn-simulation/src/serve/runtime.rs` | 192 | 🟢 PR #30 新設。auto-jump / ownership handoff / scoped InitialState resend を集約し、AoI delivery は `AoiDelivery` に委譲 |
-| `crates/dawn-simulation/src/serve/aoi_delivery.rs` | 174 | 🟢 PR #34 新設。visible-set memory / AoiEnter・AoiLeave / event filtering / warp `PositionSnap` delivery を集約 |
+| `crates/dawn-simulation/src/serve/aoi_delivery.rs` | 119 | 🟢 2026-06-29、配信ロジック本体を `dawn_sector::aoi::AoiDelivery` へ移動。残りは `CellGrid` 構築・セッション loop・`SessionSink` adapter のみ |
 | `crates/dawn-simulation/src/data_loader/modules.rs` | 219 | 🟢 P5-2 |
 | `crates/dawn-simulation/src/serve/single.rs` | 203 | 🟢 P5-1。PR #34 後は AoI delivery 詳細を `AoiDelivery` に委譲 |
 | `crates/dawn-simulation/src/data_loader/ship_types.rs` | 189 | 🟢 P5-2 |
@@ -96,7 +96,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | ファイル | 行数 | 判定 |
 |---|---|---|
 | `crates/dawn-consensus/src/state.rs` | 592 | 🟡 許容範囲（Raft 実装の核）。`div_ceil` clippy 修正のみ |
-| `crates/dawn-sector-node/src/runtime.rs` | 354 | 🟢 2026-06-29 新設。production Node の command dispatch / jump fallback / tick stepping / outbound replication / Redirect / AoI delivery を集約 |
+| `crates/dawn-sector-node/src/runtime.rs` | 304 | 🟢 2026-06-29 新設。production Node の command dispatch / jump fallback / tick stepping / outbound replication / Redirect を集約。AoI delivery 本体は同日中に `dawn_sector::aoi::AoiDelivery` へ移動済み |
 | `crates/dawn-sector-node/src/main.rs` | 308 | 🟢 8D-4 本番バイナリ。config / TCP transport / accept channel / data loading の配線に縮小 |
 | `crates/dawn-core/src/events.rs` | 584 | 🟢 535→584。ADR-0032 `ShipFitted.inventory`・ADR-0033 `RepairApplied`/`RepairLayer` 追加 |
 | `crates/dawn-ecs/src/systems/combat.rs` | 580 | 🟢 469→580（impl 329 / test 251） |
@@ -152,15 +152,16 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 #### M-6（許容）: 2つの serve バイナリに残るアプリ層 adapter 重複
 
-M-4（WS 境界）、PR #34（dawn-simulation 側 AoI delivery deepening）、および
-Sector Node runtime deepening 後も、
+M-4（WS 境界）、PR #34（dawn-simulation 側 AoI delivery deepening）、
+Sector Node runtime deepening、AoI delivery の dawn-sector への集約後も、
 両バイナリの「アプリケーション層」adapter/glue は一部重複している:
 
 | 重複 | dawn-simulation | dawn-sector-node | 備考 |
 |---|---|---|---|
 | `data_loader`（`load_modules` / `load_ship_types` / `parse_*`） | `data_loader/*.rs`（実装 ~280行）| `data_loader.rs`（178行）| TOML ローダー |
-| AoI フレーム配信 | `serve/aoi_delivery.rs`（`AoiDelivery`） | `runtime.rs`（`SectorNodeRuntime` 内の delivery policy） | **責務は同型**だが、両側とも起動 loop から deep module へ移動済み |
 | `spawn_npcs` / `spawn_npc_frigates` | `serve/mod.rs:278` | `main.rs:298` | **実質同一**（~12行）|
+
+> AoI フレーム配信の重複は解消済み（2026-06-29）。下記参照。
 
 現在の実態では、`dawn-simulation` 側は `serve/runtime.rs` と `serve/aoi_delivery.rs` によって
 single/cluster の内部知識をかなり集約済みで、`dawn-sector-node` 側も `runtime.rs` によって
@@ -235,10 +236,11 @@ WS protocol は `dawn-actor` に、ゲームロジックは `dawn-sector` に、
 | runtime tick pipeline collapse | 2026-06-28 | `transit::run_runtime_tick` / `RuntimeTickOutput` と `serve/runtime.rs` で actor / clustered serve の tick ordering を共有。replication-before-raft ordering と transient drain を一箇所へ集約 |
 | AoI delivery deepening | 2026-06-29 | `serve/aoi_delivery.rs` の `AoiDelivery` に visible-set memory / Enter-Leave / event filtering / warp `PositionSnap` delivery を集約。single/cluster serve loop から AoI frame の内部知識を除去 |
 | Sector Node runtime deepening | 2026-06-29 | `dawn-sector-node/src/runtime.rs` の `SectorNodeRuntime` に command dispatch / jump fallback / tick stepping / outbound replication / Redirect / AoI delivery を集約。`main.rs` は config・TCP transport・accept channel 配線中心に縮小 |
+| AoI delivery を `dawn-sector` へ集約（M-6 の AoI 重複を解消） | 2026-06-29 | `dawn-simulation::serve::aoi_delivery::AoiDelivery` と `dawn-sector-node::runtime::deliver_aoi_frame` の同型実装を `dawn_sector::aoi::AoiDelivery`（`deliver_frame` + `AoiSink` trait + `Observer`）へ統合。送信先は `dawn-actor::ws_server::PlayerSession` を直接持てない（dawn-sector は dawn-actor に非依存）ため `AoiSink` trait で抽象化し、各バイナリ側にローカルな `SessionSink` ラッパー adapter（orphan rule 回避）を置く。Redirect 判定・セッション retain はそれぞれの呼び出し側に残す。`FakeSink` を使った enter/leave delta・destroyed-ship 抑制・warp snap のユニットテストを3本追加（移動前は AoI delivery のユニットテストが存在しなかった）。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
 
 > Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消、
 > R-1（navigation.rs 分割）、runtime tick pipeline collapse、AoI delivery deepening、
-> Sector Node runtime deepening まですべて完了。
+> Sector Node runtime deepening、AoI delivery の dawn-sector への集約まですべて完了。
 
 ### リファクタロードマップ（2026-06-23 追加・ADR-0029 後の再計測で起票）
 

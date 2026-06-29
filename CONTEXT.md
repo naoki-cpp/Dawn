@@ -32,6 +32,9 @@ player stronger.
 - Warp: intra-sector fast movement represented through velocity changes and
   deterministic integration.
 - Tackle: combat control that prevents escape actions such as warp or jump.
+- Area-of-Interest (AoI): the policy deciding which ships and events a given
+  player's session is owed each frame, based on spatial proximity
+  (`dawn_sector::aoi`).
 - Fitting: a ship's equipped modules and slot layout.
 - Module: an item that changes capabilities or performs an active effect.
 - Capacitor: the ship energy resource shared by active modules.
