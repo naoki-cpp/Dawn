@@ -78,7 +78,7 @@ Consequence of the violation:
 Fix:
   Sector Transit must always go through Raft. See INV-003.
   If latency is a concern, reduce Transit frequency instead.
-  Raft has been implemented since Phase 7 (ADR-0014); Transit runs over the Raft log.
+  Raft is implemented (ADR-0014); Transit runs over the Raft log.
 ```
 
 ## Pattern 6: Recording only an ID instead of a FittingSnapshot in events

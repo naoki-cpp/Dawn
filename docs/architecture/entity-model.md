@@ -89,7 +89,7 @@ Axis-aligned bounding box (AABB) describing a Sector's spatial extent.
 | `max` | `Position` | max corner |
 
 **Default:** `SectorBounds::centered(DEFAULT_HALF)` — a cube centered at the origin, 100,000 per side (DEFAULT_HALF = 50,000).
-**Boundary crossing:** the Tick loop does not enforce bounds (walls were removed in Phase 4 Cycle 2 — space is infinite). `SectorBounds` is currently used only to generate spawn positions.
+**Boundary crossing:** the Tick loop does not enforce bounds — space is infinite. `SectorBounds` is used only to generate spawn positions.
 
 ### Tick
 
@@ -107,7 +107,7 @@ nature : monotonically increasing, unrelated to wall-clock time
 
 The only entity kind in the current MVP.
 
-### ECS Component List (as of Phase 8 / ADR-0024)
+### ECS Component List (ADR-0024)
 
 `SimWorld::spawn_ship()` always creates a Ship with every component below; a partially-equipped Ship entity must never be spawned.
 
@@ -147,13 +147,11 @@ Cargo (cargo hold)  <- Economy Context
 Name  (ship name)   <- UI / Social Context
 ```
 
-`TransitState` (`TransitComp`) is already implemented (Phase 7 / ADR-0014, see table above).
-
 Ownership (PlayerId) is not an ECS Component; it's tracked in `SimulationNode`'s `ship_owners: HashMap<ShipId, PlayerId>`.
 
-### Ship Template (data-driven, implemented)
+### Ship Template (data-driven)
 
-Each ship class's base performance is data, not code (implemented in Phase 4 Cycle 4 as `ShipTypeDefinition` + TOML externalization).
+Each ship class's base performance is data, not code: `ShipTypeDefinition` loaded from TOML.
 
 ```
 ShipTypeDefinition (immutable, data)   ShipInstance (mutable, ECS)

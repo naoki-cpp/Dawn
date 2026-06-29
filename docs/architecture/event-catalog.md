@@ -193,7 +193,7 @@ Commands are defined in `dawn-core/src/commands.rs`. Clients send them to the se
 | `UnfitModuleCommand` | Return a fitted Module to inventory (ADR-0032) | `ShipFitted` | ✅ implemented |
 | `ActivateModuleCommand` | Turn on an Active Module | `ModuleActivated` | ✅ implemented |
 | `DeactivateModuleCommand` | Turn off an Active Module | `ModuleDeactivated` | ✅ implemented |
-| `AttackCommand` | Designate an attack target | `WeaponFired` | ✅ type + WsServer JSON parser implemented (Phase 5) |
+| `AttackCommand` | Designate an attack target | `WeaponFired` | ⬜ type + WsServer JSON parser only; not wired into combat |
 | `StopCommand` | Decelerate to zero velocity using acceleration | — | ✅ implemented |
 | `ApproachCommand` | Semi-automatic approach to a target (Ship / Jump Gate); cancelled by Move/Stop (ADR-0015) | — (no new event) | ✅ implemented |
 | `TransitCommand` | Request a Sector Transit (via Raft, ADR-0014) | `SectorTransitRequested` / `Completed` | ✅ implemented |

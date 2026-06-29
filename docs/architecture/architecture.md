@@ -151,19 +151,19 @@ Command and Event are fully separate types. See [CLAUDE.md §4](../../CLAUDE.md)
 
 ---
 
-## 5-A. ClientConnection abstraction (implemented in Phase 4)
+## 5-A. ClientConnection abstraction
 
 The connection between client (Godot) and server (Rust) is abstracted behind a trait, so swapping the implementation for networking requires no Godot-side changes.
 
 ```
-Phase 4 (test):                  Phase 5+ (current):
-  InProcessConnection             WsClientConnection
-  via in-memory channel           via WebSocket + JSON (ADR-0007)
+Test:                             Production:
+  InProcessConnection              WsClientConnection
+  via in-memory channel            via WebSocket + JSON (ADR-0007)
 
   Both implement the same ClientConnection trait
 
-ADR-0007 ruled out a move to gRPC; revisit no earlier than Phase 9
-(when inter-node distributed comms become necessary).
+ADR-0007 ruled out a move to gRPC; revisit only once inter-node
+distributed comms need it.
 ```
 
 ### Trait responsibility (these two directions only)
@@ -175,7 +175,7 @@ Client -> Server : Command submission
 
 No other responsibility may be mixed into this trait. Connection-state management, auth, and reconnection belong to higher layers.
 
-### Data flow (Phase 4+)
+### Data flow
 
 ```
 SectorSimulatorActor
@@ -215,7 +215,7 @@ Solution: each client receives Events only for entities within its own
            +--------------+
 ```
 
-**Current implementation (Phase 8C, ADR-0019):**
+**Implementation (ADR-0019):**
 - Static cell grid (3x3x3 = 27 cells) spatial index (`dawn-sector/src/aoi.rs`)
 - Crossing a cell boundary sends `AoiEnter` / `AoiLeave` diff messages to the client
 - `DomainEvent` delivery filter: deliver only when the involved Ship is within the observer's 27-cell neighborhood
@@ -259,7 +259,7 @@ The server remains authoritative (unchanged). The client shows a predicted state
 ```
 Implemented:
   Spatial + Movement + Combat (Fitting / Lock-on / Capacitor included)
-  Navigation (Jump Gate / inter-system travel, ADR-0009, Phase 7.5)
+  Navigation (Jump Gate / inter-system travel, ADR-0009)
 
 Recommended next order (by dependency):
   Resource    <- idle/passive mining is banned by FBD-009; contested-only
@@ -318,7 +318,7 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [CLAUDE.md §2 INV-002]
 | Sector count/assignment is fixed (no dynamic split/merge) | MVP scope limit | [entity-model.md §5](./entity-model.md) |
 | Ship is the only entity (includes Fitting / Combat / Capacitor) | MVP scope limit | [CLAUDE.md §1](../../CLAUDE.md) |
 
-> "Single process only" and "no inter-node network" were constraints as of ADR-0003 (pre-Phase 3) and have been superseded by 8D-3/8D-4 (`TcpRaftTransport` / `TcpReplicationTransport` / `dawn-sector-node`). The crate table and dependency DAG in §3 are the current source of truth.
+> §3's crate table and dependency DAG are the current source of truth for deployment topology.
 
 ---
 

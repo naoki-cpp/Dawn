@@ -7,14 +7,11 @@ related  : entity-model.md, event-catalog.md, CLAUDE.md §5
 
 > **Implementation status**
 >
-> This document describes the full design, including future phases. Current
-> status (Phase 8D — physical Node distribution, TCP wiring complete):
->
 > | Section | Content | Status |
 > |---|---|---|
 > | §1-2 | Ship ownership, basic state transitions | Implemented |
-> | §2 Sector Transit / §3 Node failure | Cross-Sector move exclusion, Raft failover | Implemented (Phase 7, ADR-0014) |
-> | §4 Actor ownership | Data isolation between Actors | Implemented (Phase 2) |
+> | §2 Sector Transit / §3 Node failure | Cross-Sector move exclusion, Raft failover | Implemented (ADR-0014) |
+> | §4 Actor ownership | Data isolation between Actors | Implemented |
 > | §5 ID generation | NodeId + monotonic counter | Implemented |
 >
 > Sector Transit must always go through Raft (CLAUDE.md FBD-006).
@@ -117,7 +114,7 @@ Future:   Consensus Layer manages Sector → Node mapping dynamically.
 
 ## 4. Actor ownership
 
-The Actor model was introduced in Phase 2 (`dawn-actor` crate, ADR-0002).
+The Actor model lives in `dawn-actor` (ADR-0002).
 
 ### Actor-to-data mapping
 
@@ -125,7 +122,7 @@ The Actor model was introduced in Phase 2 (`dawn-actor` crate, ADR-0002).
 |---|---|---|
 | `SectorSimulatorActor` | ECS World + Event Log (for its Sector) | `Tick`, `MoveCommand`, `SpawnShip`, `Transit` |
 
-`SimulationNode` owns the Event Log directly; there is no dedicated EventStore actor. (The Phase 2 `EventStoreActor` was never wired up and has been removed.)
+`SimulationNode` owns the Event Log directly; there is no dedicated EventStore actor.
 
 ### Inter-Actor data-sharing rules
 

@@ -63,8 +63,6 @@ See §8 for details.
 **This order must not change without an ADR.**
 
 ```
-Current implementation (Phase 7 — Raft-timer-driven Step 10 added, ADR-0014):
-
 Step 1: Increment the Tick counter
          current_tick = current_tick + 1
 
@@ -260,8 +258,8 @@ Implementation: u64 overflow occurs after u64::MAX (~1.8 x 10^19) Ticks —
 
 ### Tick across node restarts
 
-`StateSnapshot` retains `tick`, and `SimulationNode::restore_from` restores it
-(implemented in Phase 3). Tick continues across restarts.
+`StateSnapshot` retains `tick`, and `SimulationNode::restore_from` restores
+it. Tick continues across restarts.
 
 ---
 
@@ -292,14 +290,10 @@ cargo run -p dawn-simulation --bin simulate --release
 
 ## 7. Tick Loop Implementation Ownership
 
-| Phase | Implementation | Execution model |
-|---|---|---|
-| Phase 0–1 | `SimulationNode::tick()` | synchronous, simple loop (benchmark) |
-| Phase 2 | `SectorSimulatorActor` | async tokio task |
-| Phase 4+ (current) | `run_phase4_server()` (single node) / `run_cluster_server()` (3-node Raft, Phase 7.5) in `main.rs` | `tokio::time::interval` (100ms/tick) |
-
-Phase 4+ uses a fixed-interval loop via `tokio::time::interval`.
-`SimulationNode::tick_with_lock_commands()` is synchronous; the caller's interval controls pacing.
+`run_phase4_server()` (single node) / `run_cluster_server()` (3-node Raft) in
+`main.rs` drive the loop via a fixed-interval `tokio::time::interval`
+(100 ms/tick). `SimulationNode::tick_with_lock_commands()` itself is
+synchronous; the caller's interval controls pacing.
 
 ---
 
