@@ -262,7 +262,7 @@ impl SectorNodeRuntime {
         self.sessions.retain_mut(|sess| {
             if let Some(&dest) = jumped_ships.get(&sess.ship_id) {
                 if let Some(&ws_addr) = self.peer_ws.get(&dest) {
-                    let msg = protocol::redirect_json(ws_addr);
+                    let msg = protocol::redirect_json(ws_addr, sess.player_id, sess.ship_id);
                     sess.conn.send_raw(&msg);
                     println!("[Node] Redirect {:?} -> {ws_addr}", sess.player_id);
                 }

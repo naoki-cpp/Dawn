@@ -43,6 +43,43 @@ ORIGIN 座標シグナル（Phase 4 の暫定実装）を廃止し、
   5. 以降、通常の Tick ループで DomainEvent を受信する
 ```
 
+#### 2-A. 現在の追加仕様: Redirect 後の resume Hello
+
+8D の `dawn-sector-node` では、Sector Transit によりプレイヤー船が別の
+物理ノードへ移動したとき、現在のノードが `Redirect` を送信して Godot
+クライアントを宛先 WebSocket に誘導する。
+
+```
+Redirect:
+  {
+    "type": "Redirect",
+    "ws_addr": "127.0.0.1:7879",
+    "player_id": 7,
+    "ship_id": 504403158265495553
+  }
+
+Resume Hello:
+  {
+    "type": "Hello",
+    "player_id": 7,
+    "ship_id": 504403158265495553
+  }
+```
+
+Redirect を受けたクライアントは `ws_addr` に再接続し、保持している
+`player_id` / `ship_id` を Hello に含める。宛先 `dawn-sector-node`
+は Hello を読んでからセッションを確定し、その `ship_id` が自 Sector
+内に存在する場合だけ `player_id` の所有 ship として adopt する。
+
+新規クライアントは従来どおり `{"type":"Hello"}` を送る。この場合、
+サーバーは新しい `PlayerId` / `ShipId` を採番して fresh spawn する。
+
+この resume はクライアント接続の再確立だけを扱う。Sector 間の所有権移動
+そのものは ADR-0014 の consensus path と `dawn-sector` の transit/import
+処理を通る。宛先 Sector に ship が存在しない resume Hello は拒否し、
+fresh spawn にフォールバックしない。これは同じプレイヤー ship の重複生成を
+防ぐためである。
+
 ### 3. PlayerId の管理：接続レイヤーで保持する（Option B）
 
 ```
@@ -137,6 +174,9 @@ Phase 5 着手は以下の条件を全て満たした時点とする。
 - [x] `dawn-simulation/ws_server.rs`: `InitialState` メッセージの送信
 - [x] `dawn-simulation/ws_server.rs`: `PlayerSession` 構造体でセッション管理
 - [x] `dawn-simulation/ws_server.rs`: 複数クライアントの同時接続対応（accept ループ）
+- [x] `dawn-actor/protocol.rs`: Redirect に resume identity（`player_id` / `ship_id`）を含める
+- [x] `dawn-actor/ws_server.rs`: Hello の optional resume identity をパースする
+- [x] `dawn-sector-node`: Redirect resume Hello で宛先 Sector の既存 ship を adopt する
 - [x] `dawn-simulation/main.rs`: ORIGIN シグナル処理を削除
 - [x] `dawn-simulation/ws_server.rs`: `AttackCommand` JSON パーサー追加
 - [x] 全テスト通過（138テスト）
@@ -144,6 +184,7 @@ Phase 5 着手は以下の条件を全て満たした時点とする。
 ### クライアント側（Godot）
 
 - [x] `connection.gd`: 接続後に `Hello` を自動送信
+- [x] `connection.gd`: `Redirect` を受けて宛先 WS に再接続し resume Hello を送信
 - [x] `connection.gd`: `Welcome` を受け取り `player_id` / `ship_id` を保持・シグナル発行
 - [x] `connection.gd`: `InitialState` を受け取り各 Ship の HP を初期化
 - [x] `main.gd`: ORIGIN シグナル送信を削除

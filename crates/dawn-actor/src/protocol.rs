@@ -14,8 +14,8 @@
 use crate::ClientCommand;
 use dawn_core::{
     ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand, DeactivateModuleCommand,
-    DomainEvent, EntityId, LockOnCommand, ModuleId, MoveCommand, Position, ShipId, SlotKind,
-    StopCommand,
+    DomainEvent, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId, Position, ShipId,
+    SlotKind, StopCommand,
 };
 use serde::Serialize;
 
@@ -100,7 +100,20 @@ enum EventJson {
     // physical node (dawn-sector-node multi-node clusters only).
     Redirect {
         ws_addr: String,
+        player_id: u64,
+        ship_id: u64,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResumeIdentity {
+    pub player_id: PlayerId,
+    pub ship_id: ShipId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HelloMessage {
+    pub resume: Option<ResumeIdentity>,
 }
 
 #[derive(Serialize, Clone, Copy)]
@@ -234,11 +247,39 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
 
 /// Build a `{"type":"Redirect","ws_addr":"..."}` JSON line for a client whose
 /// ship just jumped to a sector owned by a different physical node.
-pub fn redirect_json(ws_addr: std::net::SocketAddr) -> String {
+pub fn redirect_json(
+    ws_addr: std::net::SocketAddr,
+    player_id: PlayerId,
+    ship_id: ShipId,
+) -> String {
     let j = EventJson::Redirect {
         ws_addr: ws_addr.to_string(),
+        player_id: player_id.raw(),
+        ship_id: ship_id.raw(),
     };
     serde_json::to_string(&j).unwrap_or_default()
+}
+
+/// Parse the client Hello line. Fresh clients send only `{"type":"Hello"}`;
+/// clients following a Redirect include the identity to resume.
+pub fn parse_hello(line: &str) -> Option<HelloMessage> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    if v.get("type")?.as_str()? != "Hello" {
+        return None;
+    }
+
+    let resume = match (
+        v.get("player_id").and_then(|id| id.as_u64()),
+        v.get("ship_id").and_then(|id| id.as_u64()),
+    ) {
+        (Some(player_id), Some(ship_id)) => Some(ResumeIdentity {
+            player_id: PlayerId(player_id),
+            ship_id: ShipId(EntityId::from_raw(ship_id)),
+        }),
+        _ => None,
+    };
+
+    Some(HelloMessage { resume })
 }
 
 // ── Input parser (client → server) ───────────────────────────────────────────
@@ -543,11 +584,30 @@ mod tests {
     }
 
     #[test]
-    fn redirect_json_carries_the_target_ws_addr() {
+    fn redirect_json_carries_resume_identity() {
         let addr: std::net::SocketAddr = "127.0.0.1:7880".parse().unwrap();
-        let json = redirect_json(addr);
+        let json = redirect_json(addr, dawn_core::PlayerId(7), ship_id(42));
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["type"], "Redirect");
         assert_eq!(v["ws_addr"], "127.0.0.1:7880");
+        assert_eq!(v["player_id"], 7);
+        assert_eq!(v["ship_id"], ship_id(42).raw());
+    }
+
+    #[test]
+    fn hello_json_can_carry_resume_identity() {
+        let line = format!(
+            r#"{{"type":"Hello","player_id":7,"ship_id":{}}}"#,
+            ship_id(42).raw()
+        );
+        let hello = parse_hello(&line).expect("must parse Hello");
+        assert_eq!(hello.resume.unwrap().player_id, dawn_core::PlayerId(7));
+        assert_eq!(hello.resume.unwrap().ship_id, ship_id(42));
+    }
+
+    #[test]
+    fn hello_json_without_resume_stays_fresh() {
+        let hello = parse_hello(r#"{"type":"Hello"}"#).expect("must parse Hello");
+        assert!(hello.resume.is_none());
     }
 }
