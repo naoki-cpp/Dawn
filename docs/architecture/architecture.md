@@ -329,9 +329,13 @@ Read Model（§5-B）の off-path 再構築とは別物である（あちらは�
 
 | 制約 | 理由 | 根拠 ADR |
 |---|---|---|
-| Single Process のみ | ドメインロジックの正しさを先に確立する | [ADR-0003](../adr/ADR-0003-local-first-development.md) |
-| ノード間ネットワーク不使用 | In-Memory Channel で十分な段階 | [ADR-0003](../adr/ADR-0003-local-first-development.md) |
+| ノード間ネットワークは TCP LAN plaintext のみ（TLS/QUIC 不使用） | 8D マイルストーンの段階。暗号化は次フェーズ | [ADR-0003](../adr/ADR-0003-local-first-development.md)（初期方針）/ §2 将来のスコープ参照 |
+| Sector 数・割り当ては固定（動的分割・統合は未実装） | MVP スコープの制限 | [entity-model.md §5](./entity-model.md) |
 | エンティティは Ship のみ（Fitting / Combat / Capacitor 含む） | MVP スコープの制限 | [CLAUDE.md §1](../../CLAUDE.md) |
+
+> 「Single Process のみ」「ノード間ネットワーク不使用」は ADR-0003 時点（Phase 3 以前）の制約で、
+> 8D-3/8D-4（`TcpRaftTransport` / `TcpReplicationTransport` / `dawn-sector-node`）により撤廃済み。
+> §3 のクレート表・依存 DAG が現状の正典。
 
 ---
 
