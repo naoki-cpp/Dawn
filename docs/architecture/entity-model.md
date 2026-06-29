@@ -1,231 +1,220 @@
 ---
-scope    : 世界に存在する「もの」の定義。型・フィールド・識別子のスキーマ仕様
+scope    : Definition of the "things" that exist in the World. Schema spec for types, fields, and identifiers
 audience : AI Agent / Human Developer
-update   : 型定義・フィールド定義が変わったとき
+update   : When a type or field definition changes
 related  : event-catalog.md, ownership.md, CLAUDE.md §5
 ---
 
 # Entity Model
 
-## 1. 識別子の設計
+## 1. Identifier Design
 
 ### EntityId
 
-全エンティティに共通する一意識別子。
+A unique identifier shared by all entities.
 
 ```
-構造: [NodeId: 上位 8 bit | Counter: 下位 56 bit]
-型  : u64 の newtype
+layout: [NodeId: upper 8 bit | Counter: lower 56 bit]
+type  : u64 newtype
 ```
 
-**生成規則:**
-- `NodeId` は ID を発行するノードの識別子
-- `Counter` は同一 `NodeId` 内で単調増加する符号なし整数
-- 2 つの `NodeId` が異なれば、`Counter` が同じでも ID は一意
-- 一度発行した ID は **再利用しない**（INV-004）
-
-**再利用禁止の理由:**  
-再利用した ID を Event Log でリプレイすると、Despawn 済みの Ship が
-再び Spawn したように見える矛盾が生じる。
+**Generation rules:**
+- `NodeId` identifies the Node that issued the ID
+- `Counter` increases monotonically within a given `NodeId`
+- IDs from different `NodeId`s are unique even if `Counter` matches
+- Once issued, an ID is **never reused** (INV-004) — reuse would make a replayed Event Log show a despawned Ship spawning again.
 
 ### ShipId
 
-`EntityId` の newtype。Ship エンティティであることを型で表明する。
+A newtype over `EntityId`, marking an entity as a Ship at the type level.
 
 ```rust
-// 型定義のイメージ（実装は dawn-core/src/entity.rs）
+// type definition sketch (actual impl: dawn-core/src/entity.rs)
 struct ShipId(EntityId);
 ```
 
-将来 `StationId` 等が追加されても `ShipId` と混同されない。
+Keeps `ShipId` distinct from future types like `StationId`.
 
 ### NodeId
 
 ```
-型  : u8 の newtype
-範囲: 0–255（最大 256 ノード）
-現在: Single Process 内の論理識別子として使用
+type  : u8 newtype
+range : 0-255 (max 256 Nodes)
+today : used as a logical identifier within a single process
 ```
 
 ### SectorId
 
 ```
-型  : u8 の newtype
-範囲: 0–255
-現在: 固定数・固定割り当て
+type  : u8 newtype
+range : 0-255
+today : fixed count, fixed assignment
 ```
 
 ---
 
-## 2. 値オブジェクト
+## 2. Value Objects
 
 ### Position
 
-3 次元座標。World Space の単位は任意（現在は抽象的な距離単位）。
+3D coordinate. World Space unit is arbitrary (currently an abstract distance unit).
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `x` | `f32` | 東西方向 |
-| `y` | `f32` | 上下方向 |
-| `z` | `f32` | 南北方向 |
+| `x` | `f32` | east-west |
+| `y` | `f32` | up-down |
+| `z` | `f32` | north-south |
 
-**精度の選択（f32）:**  
-10,000 エンティティ規模の ECS バッチ処理では SIMD 最適化が効く f32 を採用。
-天文学的精度（f64）は現フェーズでは不要。将来の要件変化は ADR で再評価する。
+**Why f32:** SIMD-friendly for ECS batch processing at ~10,000-entity scale; f64 astronomical precision isn't needed at this phase. Revisit via ADR if requirements change.
 
 ### Velocity
 
-1 Tick あたりの変位ベクトル。単位は「距離単位 / Tick」。
+Displacement vector per Tick, in distance-units / Tick.
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `dx` | `f32` | X 軸方向の変位 |
-| `dy` | `f32` | Y 軸方向の変位 |
-| `dz` | `f32` | Z 軸方向の変位 |
+| `dx` | `f32` | displacement along X |
+| `dy` | `f32` | displacement along Y |
+| `dz` | `f32` | displacement along Z |
 
-`Velocity::ZERO` は速度ゼロを表す定数。速度ゼロの Ship は `VelocityChanged` を発行しない。
+`Velocity::ZERO` represents zero speed. A Ship at zero velocity does not emit `VelocityChanged`.
 
 ### SectorBounds
 
-Sector の空間的範囲を表す軸平行バウンディングボックス（AABB）。
+Axis-aligned bounding box (AABB) describing a Sector's spatial extent.
 
-| フィールド | 型 | 説明 |
+| Field | Type | Description |
 |---|---|---|
-| `min` | `Position` | 範囲の最小座標（原点側） |
-| `max` | `Position` | 範囲の最大座標 |
+| `min` | `Position` | min corner (origin side) |
+| `max` | `Position` | max corner |
 
-**デフォルト値:** `SectorBounds::centered(DEFAULT_HALF)` — 原点中心・一辺 100,000（DEFAULT_HALF = 50,000）の立方体  
-**境界越え時の挙動:** Tick ループでは境界判定を行わない（Phase 4 Cycle 2 で壁を削除 — 宇宙は無限）。
-`SectorBounds` は現在スポーン位置の生成範囲としてのみ使用する。  
+**Default:** `SectorBounds::centered(DEFAULT_HALF)` — a cube centered at the origin, 100,000 per side (DEFAULT_HALF = 50,000).
+**Boundary crossing:** the Tick loop does not enforce bounds (walls were removed in Phase 4 Cycle 2 — space is infinite). `SectorBounds` is currently used only to generate spawn positions.
 
 ### Tick
 
-論理時間カウンタ。詳細は [tick-model.md](./tick-model.md) を参照。
+Logical time counter. See [tick-model.md](./tick-model.md) for details.
 
 ```
-型  : u64 の newtype
-初期値: Tick::ZERO (= 0)
-性質 : 単調増加・物理時刻と無関係
+type   : u64 newtype
+initial: Tick::ZERO (= 0)
+nature : monotonically increasing, unrelated to wall-clock time
 ```
 
 ---
 
-## 3. エンティティ：Ship
+## 3. Entity: Ship
 
-現在の MVP における唯一のエンティティ種別。
+The only entity kind in the current MVP.
 
-### ECS Component 一覧（Phase 8 / ADR-0024 時点）
+### ECS Component List (as of Phase 8 / ADR-0024)
 
-`SimWorld::spawn_ship()` は以下の Component を全て持つ Ship を生成する。
-一部だけを持つ不完全な Ship Entity を生成してはならない。
+`SimWorld::spawn_ship()` always creates a Ship with every component below; a partially-equipped Ship entity must never be spawned.
 
-| Component | 説明 |
+| Component | Description |
 |---|---|
-| `ShipIdComp` | hecs Entity と domain ShipId の対応付け |
-| `PositionComp` | 現在の世界座標 |
-| `VelocityComp` | 1 Tick あたりの変位 |
-| `ThrustComp` | 推力方向・ブレーキ状態（MoveCommand / StopCommand で更新） |
-| `ShipStatsComp` | 集計済み stats（base_stats + Σmodule.delta、apply_fitting() が更新） |
-| `FittingComp` | 装備スロット（High / Mid / Low / Rig の `FittedSlot` リスト） |
-| `HullComp` | 3層 HP（Shield / Armor / Hull） |
-| `WeaponComp` | 武器サイクル状態 |
-| `LockComp` | ロックオン状態（ターゲットごとの `LockState`） |
-| `IsNpcComp` | NPC マーカー（プレイヤー船は spawn 後に remove される） |
-| `TransitComp` | Sector Transit 状態（`None` / `InTransit`、ADR-0014） |
+| `ShipIdComp` | maps the hecs Entity to the domain `ShipId` |
+| `PositionComp` | current world coordinate |
+| `VelocityComp` | displacement per Tick |
+| `ThrustComp` | thrust direction / braking state (updated by MoveCommand / StopCommand) |
+| `ShipStatsComp` | aggregated stats (base_stats + Σmodule.delta, updated by apply_fitting()) |
+| `FittingComp` | equipment slots (High / Mid / Low / Rig lists of `FittedSlot`) |
+| `HullComp` | 3-layer HP (Shield / Armor / Hull) |
+| `WeaponComp` | weapon cycle state |
+| `LockComp` | lock-on state (`LockState` per target) |
+| `IsNpcComp` | NPC marker (removed from player ships after spawn) |
+| `TransitComp` | Sector Transit state (`None` / `InTransit`, ADR-0014) |
 
-追加で条件付きで付与される Component:
+Conditionally attached components:
 
-| Component | 条件 |
+| Component | Condition |
 |---|---|
-| `CapacitorComp` | プレイヤー船・ボット船（cap 管理対象） |
-| `IsBotComp` | ボット船（`process_bots()` の対象マーカー） |
-| `ApproachComp` | アプローチ中（対象 Ship / Jump Gate へ半自動接近・Move / Stop で除去・ADR-0015） |
-| `OrbitComp` | 周回中（対象を指定半径で周回・Approach / KeepAtRange と相互排他・ADR-0031） |
-| `KeepAtRangeComp` | 距離維持中（対象から指定距離を保つ・Approach / Orbit と相互排他・ADR-0031） |
-| `WarpComp` | ワープ中（align → warping 2 フェーズ・intra-Sector 短距離 Fold・ADR-0022） |
-| `TackledComp` | Tackle を受けている（`tacklers: Vec<ShipId>`・ワープ・ジャンプ不可・ADR-0024） |
-| `InventoryComp` | 未装備の所有モジュール一覧（プレイヤー船のみ・Fit / Unfit で増減・ADR-0032） |
+| `CapacitorComp` | player ships and bot ships (subject to Capacitor management) |
+| `IsBotComp` | bot ships (target marker for `process_bots()`) |
+| `ApproachComp` | approaching a target Ship / Jump Gate (semi-auto approach; removed by Move/Stop; ADR-0015) |
+| `OrbitComp` | orbiting a target at a set radius (mutually exclusive with Approach/KeepAtRange; ADR-0031) |
+| `KeepAtRangeComp` | holding distance from a target (mutually exclusive with Approach/Orbit; ADR-0031) |
+| `WarpComp` | warping (align -> warping two-phase, intra-Sector short-range Fold; ADR-0022) |
+| `TackledComp` | under Tackle (`tacklers: Vec<ShipId>`; blocks Warp/jump; ADR-0024) |
+| `InventoryComp` | unequipped owned modules (player ships only; changed by Fit/Unfit; ADR-0032) |
 
-### Ship が現在持たないもの（MVP 外）
+### Not Yet on Ship (out of MVP scope)
 
-以下は将来のフェーズで追加するが、現在は存在しない。
-
-```
-Cargo（積荷）        ← Economy Context
-Name（船名）         ← UI / Social Context
-```
-
-※ `TransitState`（`TransitComp`）は Phase 7（ADR-0014）で実装済み（上表参照）。
-
-※ 所有者（PlayerId）は ECS Component ではなく
-  `SimulationNode` の `ship_owners: HashMap<ShipId, PlayerId>` で管理する。
-
-### Ship Template（データ駆動設計・実装済み）
-
-各船種の「基本性能」はコードではなくデータとして管理する。
-Phase 4 Cycle 4 で `ShipTypeDefinition` + TOML 外部化として実装済み。
+Planned for future phases, not present today:
 
 ```
-ShipTypeDefinition（不変・データ）     ShipInstance（可変・ECS）
-─────────────────────────────────    ──────────────────────────
-id          : ShipTypeId             ship_id       : ShipId
-name        : "Magpie"               （ship_type_ids: ShipId → ShipTypeId
-class       : ShipClass                は SimulationNode 側で管理）
-slot_layout : SlotLayout             position      : Position
-base_stats  : ShipBaseStats          velocity      : Velocity
-                                     HullComp / CapacitorComp …
+Cargo (cargo hold)  <- Economy Context
+Name  (ship name)   <- UI / Social Context
 ```
 
-**実装の現状：**
-- `data/ship_types.toml` から起動時に読み込む（DataLoader）
-- ファイル不在時は `ship_types.rs` の built-in デフォルトへフォールバック
-- 定義はイミュータブル。バランス調整は TOML 編集 + サーバー再起動（リビルド不要）
-- `ShipTypeId` は `dawn-core` に定義済み。`ShipSpawned` イベントに含まれる
+`TransitState` (`TransitComp`) is already implemented (Phase 7 / ADR-0014, see table above).
+
+Ownership (PlayerId) is not an ECS Component; it's tracked in `SimulationNode`'s `ship_owners: HashMap<ShipId, PlayerId>`.
+
+### Ship Template (data-driven, implemented)
+
+Each ship class's base performance is data, not code (implemented in Phase 4 Cycle 4 as `ShipTypeDefinition` + TOML externalization).
+
+```
+ShipTypeDefinition (immutable, data)   ShipInstance (mutable, ECS)
+─────────────────────────────────      ──────────────────────────
+id          : ShipTypeId               ship_id       : ShipId
+name        : "Magpie"                 (ship_type_ids: ShipId -> ShipTypeId
+class       : ShipClass                 is managed by SimulationNode)
+slot_layout : SlotLayout               position      : Position
+base_stats  : ShipBaseStats            velocity      : Velocity
+                                        HullComp / CapacitorComp ...
+```
+
+**Current implementation:**
+- Loaded at startup from `data/ship_types.toml` (DataLoader)
+- Falls back to built-in defaults in `ship_types.rs` if the file is absent
+- Definitions are immutable; balance changes mean editing TOML + restarting the server (no rebuild)
+- `ShipTypeId` is defined in `dawn-core` and included in the `ShipSpawned` event
 
 ---
 
-## 4. エンティティ：Node（論理概念）
+## 4. Entity: Node (logical concept)
 
-現在の実装では Node は実行プロセス内の**論理的な分割単位**にすぎない。
-将来のフェーズで物理的な分散ノードに対応する概念として設計されている。
+Today, a Node is only a logical partition within one process; it's designed to later map onto a physically distributed node.
 
-| 属性 | 現在の実装 | 将来の実装 |
+| Attribute | Current | Future |
 |---|---|---|
-| 実体 | In-Process な論理識別子 | 独立したプロセス / マシン |
-| 通信 | In-Memory Channel | ノード間: ネットワーク RaftTransport + ゴシップ（ワイヤ = postcard 再利用）。クライアント境界: WebSocket（ADR-0007）。gRPC/protobuf は不採用 |
-| 障害 | 発生しない | Node Crash / Network Partition |
+| Identity | in-process logical identifier | independent process / machine |
+| Communication | in-memory channel | between Nodes: network RaftTransport + gossip (wire format reuses postcard); client boundary: WebSocket (ADR-0007); gRPC/protobuf not adopted |
+| Failure | none | Node crash / network partition |
 
-Node の物理的実装が変わっても、`NodeId` の役割（ID 発行の単位）は変わらない。
+`NodeId`'s role (unit of ID issuance) is unaffected by how Node is physically implemented.
 
 ---
 
-## 5. エンティティ：Sector
+## 5. Entity: Sector
 
-Ship を空間的に分割して管理する単位。
+The unit by which Ships are spatially partitioned.
 
-| 属性 | 説明 |
+| Attribute | Description |
 |---|---|
-| `SectorId` | Sector の識別子 |
-| `SectorBounds` | Sector の空間的範囲（AABB） |
-| 管理 Node | この Sector を担当する論理 Node（[ownership.md](./ownership.md) 参照） |
+| `SectorId` | Sector identifier |
+| `SectorBounds` | Sector's spatial extent (AABB) |
+| owning Node | the logical Node responsible for this Sector (see [ownership.md](./ownership.md)) |
 
-**現在の制約:**
-- Sector 数は固定（MVP: 3）
-- Sector のサイズは固定（一辺 100,000 = DEFAULT_HALF × 2、原点中心）
-- 動的分割・統合は未実装
+**Current constraints:**
+- Sector count is fixed (MVP: 3)
+- Sector size is fixed (100,000 per side = DEFAULT_HALF x 2, centered at origin)
+- Dynamic split/merge not implemented
 
 ---
 
-## 6. 型の後方互換性ルール
+## 6. Type Backward-Compatibility Rules
 
-`dawn-core` の型変更は全クレートに波及するため特に慎重に扱う。
+`dawn-core` type changes ripple through every crate, so handle them carefully.
 
 ```
-許可: フィールドの追加（ただし Option<T> として追加し、既存コードを壊さない）
-禁止: フィールドの削除
-禁止: フィールドの型変更（f32 → f64 等）
-禁止: フィールド名の変更（シリアライズキーが変わる）
-禁止: newtype のラップ解除
+allowed  : adding a field (as Option<T> only, must not break existing code)
+forbidden: removing a field
+forbidden: changing a field's type (e.g. f32 -> f64)
+forbidden: renaming a field (changes the serialization key)
+forbidden: unwrapping a newtype
 ```
 
-型を変更する必要が生じた場合は ADR を起こして人間の承認を得ること。
+Any necessary type change requires raising an ADR and getting human approval.
