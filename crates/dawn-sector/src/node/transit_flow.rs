@@ -163,10 +163,13 @@ impl<S: EventStore> SimulationNode<S> {
             ship_id,
             ship_type_id,
             position: pos,
-            // Cross-sector transit re-places the ship in the destination Sector's
-            // star-origin frame, so it re-anchors on that Sector's origin
-            // (ADR-0029). A transiting ship sits at a sector-edge gate = already
-            // star-anchored.
+            // Placeholder only: `AnchorId(0)` is a real, specific anchor
+            // (Helios, Sector 0's star — see `anchor.rs`), not a "this
+            // Sector's star" sentinel, so it is only ever correct by
+            // coincidence for a transit out of Sector 0. `import_transit`'s
+            // `rebase_after_transit` overwrites both this and `position`
+            // with the real destination anchor before anything reads them
+            // (ADR-0029), so the value here never survives past restore.
             anchor: dawn_core::AnchorId(0),
             velocity: vel,
             current_shield,
@@ -203,12 +206,28 @@ impl<S: EventStore> SimulationNode<S> {
     /// node's ECS at `entry_pos`, preserving its `ShipId` (INV-004 — no ID
     /// reuse, the same Ship simply changes Sector ownership).
     ///
+    /// `restore_ship_from_snapshot` re-applies the Ship's *old* (source-Sector)
+    /// anchor, and `entry_pos` alone is too coarse (one f32 ulp is ~16 km at
+    /// true-AU magnitudes — far past a Gate's 2 km `activation_radius`) to use
+    /// as a raw offset against it. `entry_pos_abs` is the precise f64
+    /// Sector-frame arrival point (the destination Gate's `abs_m`, or the
+    /// origin for a non-Gate Transit); `rebase_after_transit` re-anchors
+    /// against it (appending the authoritative `AnchorRebased` event, ADR-0029)
+    /// so the Ship can immediately jump back out (ADR-0009).
+    ///
     /// Appends `SectorTransitCompleted` from this (the `to`) Sector's
     /// perspective.
-    pub fn import_transit(&mut self, ship: &ShipSnapshot, from: SectorId, entry_pos: Position) {
+    pub fn import_transit(
+        &mut self,
+        ship: &ShipSnapshot,
+        from: SectorId,
+        entry_pos: Position,
+        entry_pos_abs: [f64; 3],
+    ) {
         let mut ship = ship.clone();
         ship.position = entry_pos;
         self.restore_ship_from_snapshot(&ship);
+        self.rebase_after_transit(ship.ship_id, entry_pos_abs);
 
         self.event_store.append(DomainEvent::SectorTransitCompleted(
             SectorTransitCompleted {
@@ -217,6 +236,48 @@ impl<S: EventStore> SimulationNode<S> {
                 to: self.sector_id,
                 entry_pos,
                 velocity: ship.velocity,
+                tick: self.current_tick,
+            },
+        ));
+    }
+
+    /// Re-anchor a Ship that just arrived in this Sector via Sector Transit
+    /// to the nearest body anchor to `entry_pos_abs`, appending the
+    /// authoritative `AnchorRebased` event (ADR-0029). No-op if the Ship or
+    /// an anchor candidate in this Sector can't be found.
+    ///
+    /// Unlike `warp::rebase_arrival_event` (which uses an all-zero
+    /// `[f64; 3]` as an "arrival not engaged yet" sentinel), `entry_pos_abs`
+    /// here is always a deliberate absolute point — a Gate's `abs_m`, or the
+    /// Sector origin for a non-Gate Transit — so there's no fallback-compose
+    /// branch to skip.
+    fn rebase_after_transit(&mut self, ship_id: ShipId, entry_pos_abs: [f64; 3]) {
+        let Some(&entity) = self.ships.index.get(&ship_id) else {
+            return;
+        };
+        let Some(to) = self
+            .anchor_table
+            .nearest_anchor(self.sector_id, entry_pos_abs)
+        else {
+            return;
+        };
+        let Some(to_abs) = self.anchor_table.abs(to) else {
+            return;
+        };
+        let offset = Position::new(
+            (entry_pos_abs[0] - to_abs[0]) as f32,
+            (entry_pos_abs[1] - to_abs[1]) as f32,
+            (entry_pos_abs[2] - to_abs[2]) as f32,
+        );
+        self.world.set_ship_anchor(entity, to);
+        if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+            p.0 = offset;
+        }
+        self.event_store.append(DomainEvent::AnchorRebased(
+            dawn_core::events::AnchorRebased {
+                ship_id,
+                anchor: to,
+                offset,
                 tick: self.current_tick,
             },
         ));
@@ -372,7 +433,12 @@ mod tests {
         let entry_pos = Position::new(500.0, 0.0, 0.0);
         let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
 
-        to_node.import_transit(&snapshot, SectorId(0), entry_pos);
+        to_node.import_transit(
+            &snapshot,
+            SectorId(0),
+            entry_pos,
+            [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
+        );
 
         assert_eq!(to_node.ship_count(), 1);
         assert_eq!(to_node.get_ship_position(ship_id), Some(entry_pos));
@@ -387,6 +453,59 @@ mod tests {
             }
             other => panic!("expected SectorTransitCompleted, got {other:?}"),
         }
+    }
+
+    /// Regression: a Ship that jumps through a Gate must land within the
+    /// *return* Gate's `activation_radius`, so it can jump straight back.
+    /// `entry_pos` alone (the f32 `JumpGateDef::position`) is too coarse to
+    /// re-anchor against at true-AU magnitudes — `import_transit` must use
+    /// the precise `entry_pos_abs` (the gate's `abs_m`) to set up the arriving
+    /// Ship's anchor in the destination Sector (ADR-0029). Without that
+    /// re-anchoring, the Ship keeps its *source*-Sector anchor and its
+    /// absolute position computes to nonsense, so `can_propose_jump` for the
+    /// return Gate (and every other Gate in the destination Sector) falsely
+    /// fails.
+    #[test]
+    fn ship_arriving_through_a_gate_can_immediately_jump_back_through_the_return_gate() {
+        let galaxy = crate::galaxy::Galaxy::demo();
+        let mut from_node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        let mut to_node = SimulationNode::new(
+            NodeId(1),
+            SectorId(1),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+
+        let return_gate = galaxy
+            .gates_in_sector(SectorId(1))
+            .into_iter()
+            .find(|g| g.to_sector == SectorId(0))
+            .expect("Sector 1 has a gate back to Sector 0");
+
+        let ship_id = from_node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        from_node
+            .propose_transit(TransitCommand {
+                ship_id,
+                to: SectorId(1),
+            })
+            .unwrap();
+
+        // Mirrors `transit::apply_committed_raft_entries`'s Request handler:
+        // arrive at the return gate's position so the player can jump
+        // straight back (ADR-0009).
+        let entry_pos = return_gate.position;
+        let entry_pos_abs = return_gate.abs_m;
+        let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos_abs);
+
+        assert!(
+            to_node.can_propose_jump(ship_id, return_gate.id),
+            "ship must land within the return gate's activation_radius, not just \
+             at its f32-coarse `position` interpreted against the wrong anchor"
+        );
     }
 
     #[test]
@@ -428,7 +547,12 @@ mod tests {
             .unwrap();
         let entry_pos = Position::new(500.0, 0.0, 0.0);
         let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
-        to_node.import_transit(&snapshot, SectorId(0), entry_pos);
+        to_node.import_transit(
+            &snapshot,
+            SectorId(0),
+            entry_pos,
+            [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
+        );
 
         let after_entity = *to_node.ships.index.get(&ship_id).unwrap();
         let after = to_node
@@ -465,7 +589,7 @@ mod tests {
             })
             .unwrap();
         let snapshot = from_node.export_transit(ship_id, Position::ORIGIN).unwrap();
-        to_node.import_transit(&snapshot, SectorId(0), Position::ORIGIN);
+        to_node.import_transit(&snapshot, SectorId(0), Position::ORIGIN, [0.0, 0.0, 0.0]);
 
         // Before the handoff, the destination node rejects owned commands.
         assert!(!to_node.apply_stop_command_owned(player_id, ship_id));
@@ -516,7 +640,12 @@ mod tests {
         assert_eq!(from_node.ship_count(), 0);
         assert_eq!(to_node.ship_count(), 0);
 
-        to_node.import_transit(&snapshot, SectorId(0), entry_pos);
+        to_node.import_transit(
+            &snapshot,
+            SectorId(0),
+            entry_pos,
+            [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
+        );
 
         // Final state: destination sector owns the ship, exactly once overall.
         assert_eq!(from_node.ship_count(), 0);
@@ -559,7 +688,12 @@ mod tests {
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 store,
             );
-            to_node.import_transit(&snapshot, SectorId(0), entry_pos);
+            to_node.import_transit(
+                &snapshot,
+                SectorId(0),
+                entry_pos,
+                [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
+            );
 
             let snap = to_node.take_snapshot();
             snap.save(&snap_path).unwrap();
@@ -612,7 +746,12 @@ mod tests {
                 })
                 .unwrap();
             let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
-            to_node.import_transit(&snapshot, SectorId(0), entry_pos);
+            to_node.import_transit(
+                &snapshot,
+                SectorId(0),
+                entry_pos,
+                [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
+            );
             total += start.elapsed();
 
             let _ = i;

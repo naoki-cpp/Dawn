@@ -40,6 +40,10 @@ pub enum TransitOp {
         from: SectorId,
         to: SectorId,
         entry_pos: Position,
+        /// Precise f64 Sector-frame arrival point (ADR-0029): `entry_pos`
+        /// alone is too coarse to re-anchor the Ship against at true-AU
+        /// magnitudes (see `SimulationNode::import_transit`).
+        entry_pos_abs: [f64; 3],
         gate_id: Option<JumpGateId>,
     },
 }
@@ -92,16 +96,18 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                     //
                     // For Jump Gate transits, spawn the Ship near the gate in
                     // the destination Sector that leads back to `from`, so
-                    // the player can immediately jump back (ADR-0009).
-                    let entry_pos = gate_id
-                        .and_then(|_| {
-                            node.galaxy()
-                                .gates_in_sector(to)
-                                .into_iter()
-                                .find(|g| g.to_sector == node.sector_id())
-                                .map(|g| g.position)
-                        })
-                        .unwrap_or(Position::ORIGIN);
+                    // the player can immediately jump back (ADR-0009). Take
+                    // both the coarse f32 `position` (event display) and the
+                    // precise f64 `abs_m` (re-anchoring, ADR-0029) from the
+                    // same gate lookup so they never disagree.
+                    let arrival_gate = gate_id.and_then(|_| {
+                        node.galaxy()
+                            .gates_in_sector(to)
+                            .into_iter()
+                            .find(|g| g.to_sector == node.sector_id())
+                    });
+                    let entry_pos = arrival_gate.map(|g| g.position).unwrap_or(Position::ORIGIN);
+                    let entry_pos_abs = arrival_gate.map(|g| g.abs_m).unwrap_or([0.0, 0.0, 0.0]);
                     if let Some(ship) = node.export_transit(ship_id, entry_pos) {
                         let from = node.sector_id();
                         raft.propose(
@@ -110,6 +116,7 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                                 from,
                                 to,
                                 entry_pos,
+                                entry_pos_abs,
                                 gate_id,
                             }
                             .encode(),
@@ -122,11 +129,12 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                 from,
                 to,
                 entry_pos,
+                entry_pos_abs,
                 gate_id,
             } => {
                 if to == node.sector_id() {
                     let ship_id = ship.ship_id;
-                    node.import_transit(&ship, from, entry_pos);
+                    node.import_transit(&ship, from, entry_pos, entry_pos_abs);
                     if let Some(gate_id) = gate_id {
                         node.append_jump_events(ship_id, gate_id, from, to, entry_pos);
                     }
@@ -263,6 +271,7 @@ mod tests {
             from: SectorId(0),
             to: SectorId(1),
             entry_pos: Position::new(500.0, 0.0, 0.0),
+            entry_pos_abs: [500.0, 0.0, 0.0],
             gate_id: None,
         };
         let decoded = TransitOp::decode(&op.encode()).expect("decode must succeed");
@@ -272,6 +281,7 @@ mod tests {
                 from,
                 to,
                 entry_pos,
+                entry_pos_abs,
                 gate_id,
             } => {
                 assert_eq!(ship.ship_id, ShipId::new(NodeId(0), 7));
@@ -279,6 +289,7 @@ mod tests {
                 assert_eq!(from, SectorId(0));
                 assert_eq!(to, SectorId(1));
                 assert_eq!(entry_pos, Position::new(500.0, 0.0, 0.0));
+                assert_eq!(entry_pos_abs, [500.0, 0.0, 0.0]);
                 assert_eq!(gate_id, None);
             }
             other => panic!("expected Commit, got {other:?}"),
