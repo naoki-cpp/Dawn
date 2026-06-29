@@ -182,6 +182,6 @@ VelocityChanged（新）: 速度が変化した時のみ
 ## 参照
 
 - ADR-0001: Event Sourcing 基本原則
-- CLAUDE.md §1: 「Event が唯一の真実。State は派生物に過ぎない」
-- CLAUDE.md §2 INV-002: State は Event の Replay で完全再現できなければならない
-- CLAUDE.md §7: Event Schema Evolution Rules（`ShipMoved` の廃止手順）
+- AI_DEVELOPMENT_GUIDE.md「Project North Star」: 「Event が唯一の真実。State は派生物に過ぎない」
+- AI_DEVELOPMENT_GUIDE.md「Architecture Invariants」INV-002: State は Event の Replay で完全再現できなければならない
+- docs/architecture/event-schema-evolution.md: Event Schema Evolution Rules（`ShipMoved` の廃止手順）

@@ -1,122 +1,120 @@
-# よくある設計違反パターン
+# Common Design Violation Patterns
 
-> AI_DEVELOPMENT_GUIDE.md §12 の正典。ガイド本体には参照リンクのみを残す（ADR-0030）。
+> Canonical source for AI_DEVELOPMENT_GUIDE.md §12. The guide keeps only a reference link (ADR-0030).
 
-AIが陥りやすいアンチパターンとその修正方法を示す。
+Anti-patterns AI assistants tend to fall into, and how to fix them.
 
-## パターン1: 「便利だから」とState同期を使う
+## Pattern 1: Using State sync because it's "convenient"
 
 ```
-状況: ノード間でPosition差分が発生した時、Stateを直接上書きで同期しようとする
+Situation: a Position discrepancy appears between nodes, and the fix
+directly overwrites State instead of going through events.
 
-違反コード:
-  // "Eventより直接同期の方が速い" という誤った判断
+Violating code:
+  // "Direct sync is faster than an Event" — wrong call
   node_b.update_position(ship_id, node_a.get_position(ship_id))
 
-正しい判断:
-  EventをGossipで伝播させる。StateはEventから自動的に収束する。
-  State直接同期は INV-001 と INV-002 を同時に破る。
+Correct approach:
+  Propagate the Event via Gossip. State converges from Events automatically.
+  Direct State sync breaks INV-001 and INV-002 simultaneously.
 ```
 
-## パターン2: テストをスキップして「後で書く」
+## Pattern 2: Skipping tests to "write them later"
 
 ```
-状況: 実装が複雑でテストを後回しにしようとする
+Situation: implementation is complex, so tests get deferred.
 
-なぜ危険か:
-  AIは次のセッションでコンテキストを持ち越さない。
-  「後で書く」は「永遠に書かない」と等しい。
-  テストなしのコードは次のAIセッションで意図せず破壊される。
+Why this is dangerous:
+  AI has no context across sessions. "Later" means "never."
+  Untested code gets broken unintentionally in the next AI session.
 
-対処:
-  実装が複雑ならテストを先に書き、テストを通す最小実装を先に行う。
-  テストが仕様書になる。
+Fix:
+  For complex work, write the test first, then the minimal implementation
+  that passes it. The test becomes the spec.
 ```
 
-## パターン3: 新機能のためにdawn-coreを肥大化させる
+## Pattern 3: Bloating dawn-core for a new feature
 
 ```
-状況: 新しい機能を追加するとき、dawn-coreに実装ロジックを追加しようとする
+Situation: adding new functionality by putting implementation logic into dawn-core.
 
-違反コード（dawn-core/src/position.rs）:
+Violating code (dawn-core/src/position.rs):
   impl Position {
-      pub async fn broadcast_to_nodes(&self, nodes: &[NodeAddr]) { // ← ネットワーク処理
+      pub async fn broadcast_to_nodes(&self, nodes: &[NodeAddr]) { // network logic
           ...
       }
   }
 
-正しい判断:
-  dawn-core はデータ定義のみ。
-  ネットワーク処理は dawn-replication または dawn-sector-node に配置する。
+Correct approach:
+  dawn-core holds only data definitions.
+  Network logic belongs in dawn-replication or dawn-sector-node.
 ```
 
-## パターン4: Tickを物理時刻に「合わせる」最適化
+## Pattern 4: "Aligning" Tick with wall-clock time as an optimization
 
 ```
-状況: "Tickと実時間を合わせると分かりやすい" という理由で物理時刻を使おうとする
+Situation: using wall-clock time because "matching Tick to real time is easier to follow."
 
-危険性:
-  物理時刻に依存した瞬間、3ノード間で Tick の順序が非決定論的になる。
-  テスト環境と本番環境でTick順序が変わる可能性がある。
-  NTPのステップ補正で時刻が逆行した瞬間、システムが破綻する。
+Why this is dangerous:
+  Once Tick depends on wall-clock time, Tick order becomes non-deterministic
+  across nodes. Test and production environments can diverge in Tick order.
+  An NTP step correction that moves time backward can break the system.
 
-対処:
-  Tick は論理カウンタのまま維持する。
-  "人間が読みやすい時刻" は Observation Layer（ログ・メトリクス）でのみ使う。
-  INV-005 を参照すること。
+Fix:
+  Keep Tick as a logical counter. Use human-readable time only in the
+  Observation Layer (logs, metrics). See INV-005.
 ```
 
-## パターン5: Sector Transitを「最適化」してRaftをスキップする
+## Pattern 5: "Optimizing" Sector Transit by skipping Raft
 
 ```
-状況: "レイテンシ削減のため" Sector Transit を Raft なしで実装しようとする
+Situation: implementing Sector Transit without Raft "to cut latency."
 
-違反の結果:
-  2つのノードが同一Shipの所有権を同時に主張する状態（スプリットブレイン）
-  → 両方のSectorが独立したShipMoveを処理し始める
-  → 世界が分岐する（Single Shardの破壊）
+Consequence of the violation:
+  Two nodes claim ownership of the same Ship simultaneously (split brain)
+  -> both Sectors process ShipMove independently
+  -> the world diverges (breaks the Single Shard guarantee).
 
-対処:
-  Sector Transit は必ず Raft を経由する。INV-003 を参照すること。
-  レイテンシが問題なら Transit の頻度を下げる設計を検討する。
-  ※ Raft は Phase 7（ADR-0014）で実装済み。Transit は Raft Log 経由で動作する。
+Fix:
+  Sector Transit must always go through Raft. See INV-003.
+  If latency is a concern, reduce Transit frequency instead.
+  Raft is implemented (ADR-0014); Transit runs over the Raft log.
 ```
 
-## パターン6: FittingSnapshot をイベントに含めず ID だけ記録する
+## Pattern 6: Recording only an ID instead of a FittingSnapshot in events
 
 ```
-状況: "モジュールIDだけ保存してレジストリで引けば十分" という判断で
-      ShipFitted イベントに ModuleId のリストだけを含めようとする
+Situation: a ShipFitted event stores only a list of ModuleIds, reasoning that
+"the registry can resolve them later."
 
-違反の結果:
-  レジストリの内容が変わった場合（モジュールの stat が更新されるなど）、
-  過去の Event を Replay すると当時と異なる stat が再現される。
-  → INV-002 違反（Event Replay で世界が完全に再現されない）
+Consequence of the violation:
+  If the registry changes later (e.g. a module's stats are updated), replaying
+  the old Event reproduces different stats than at the time it occurred.
+  -> Violates INV-002 (Event replay must fully reproduce the world).
 
-正しい実装:
-  ShipFitted イベントには FittingSnapshot（モジュール定義全体）を含める。
-  Replay はレジストリに依存せず、イベントの内容だけで完結しなければならない。
-  → ADR-0006 §1 参照
+Correct implementation:
+  ShipFitted must include the full FittingSnapshot (complete module definitions).
+  Replay must be self-contained and never depend on the registry. See ADR-0006 §1.
 ```
 
-## パターン8: 状態変化をイベントとして表現する
+## Pattern 8: Encoding state as a flag instead of as the event itself
 
 ```
-状況: モジュールのオン/オフを表すイベントに is_active フラグを持たせようとする
+Situation: a module on/off change is represented with an is_active flag.
 
-違反コード:
+Violating code:
   ModuleToggled { ship_id, module_id, is_active: bool, tick }
-  // → is_active を見ないと何が起きたかわからない
-  // → 状態の記述であって「事実」ではない
+  // you can't tell what happened without reading is_active
+  // this describes a state, not a fact
 
-正しい実装:
-  ModuleActivated   { ship_id, module_id, slot, tick }  // オンにした
-  ModuleDeactivated { ship_id, module_id, slot, tick }  // オフにした
-  // → イベント名自体が「何が起きたか」を表す
+Correct implementation:
+  ModuleActivated   { ship_id, module_id, slot, tick }
+  ModuleDeactivated { ship_id, module_id, slot, tick }
+  // the event name itself says what happened
 
-原則:
-  Event は既に起きた事実（INV-006）。
-  「状態がこうなった」ではなく「この動作が起きた」と命名する。
-  過去形・動詞（Activated, Fired, Destroyed）を使う。
-  is_*/has_* フラグをイベントのキーフィールドにしない。
+Principle:
+  An Event is a fact that already happened (INV-006).
+  Name it as "this action occurred," not "the state became this."
+  Use past-tense verbs (Activated, Fired, Destroyed).
+  Never make is_*/has_* flags a key field of an event.
 ```

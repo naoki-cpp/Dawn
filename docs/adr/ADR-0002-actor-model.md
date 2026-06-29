@@ -109,7 +109,7 @@ Actor 化は Phase 2 の分散化と同時に行う。
 ### この決定が強制する設計上の制約
 
 ```
-- Actor はデータを Arc<Mutex<T>> で直接共有してはならない（CLAUDE.md FBD-004）
+- Actor はデータを Arc<Mutex<T>> で直接共有してはならない（docs/architecture/forbidden-changes.md FBD-004）
 - Actor 間の通信は Mailbox（mpsc::Sender）経由のみ
 - Actor の内部状態をテストで直接参照してはならない（メッセージ経由でテスト）
 ```

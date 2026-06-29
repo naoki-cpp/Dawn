@@ -4,7 +4,7 @@ title   : dawn-sector クレート新設 — ゲームロジックの分離
 status  : accepted
 date    : 2026-06-19
 deciders: [human, ai-agent]
-related : CLAUDE.md §3（Dependency DAG）, CLAUDE.md §11（Crate別責務早見表）,
+related : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」（Dependency DAG / Crate別責務早見表）,
           ADR-0016（Game Vision）, docs/architecture/architecture-review-server.md（P3 完了後の課題）
 ---
 
@@ -12,7 +12,7 @@ related : CLAUDE.md §3（Dependency DAG）, CLAUDE.md §11（Crate別責務早�
 
 ## 背景
 
-CLAUDE.md §11 の設計意図では `dawn-simulation` は「実行バイナリ・配線専門」である。
+AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」の設計意図では `dawn-simulation` は「実行バイナリ・配線専門」である。
 しかし現状、`SimulationNode`（ゲームの中核ロジック）が `dawn-simulation` 内に直接
 実装されており、クレートの責務が破綻している:
 
@@ -28,7 +28,7 @@ CLAUDE.md §11 の設計意図では `dawn-simulation` は「実行バイナリ�
 3. **将来の拡張障壁**: Signature Resolution・Logistics・Economy など次の機能追加の
    たびに `dawn-simulation` が肥大し続ける。
 4. **`dawn-sector-node`（Phase 8D）への道が閉じる**: 本番バイナリを別クレートにする
-   計画（CLAUDE.md §11）は、ゲームロジックが `dawn-simulation` に縛られている限り
+   計画（AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」）は、ゲームロジックが `dawn-simulation` に縛られている限り
    実現できない。
 
 ## 決定
@@ -108,7 +108,7 @@ Phase 3（P3-1/P3-2）で実施済みの方向。サブモジュール化はで�
 
 ### B: dawn-ecs にゲームロジックを移す
 
-`dawn-ecs` の責務（CLAUDE.md §11）は「ECS World の薄いラッパー・Component定義・System定義」。
+`dawn-ecs` の責務（AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」）は「ECS World の薄いラッパー・Component定義・System定義」。
 `SimulationNode`（Tick 全体の実行・イベント管理・Transit）は `dawn-ecs` より上位の概念であり
 依存方向が逆転する。不採用。
 

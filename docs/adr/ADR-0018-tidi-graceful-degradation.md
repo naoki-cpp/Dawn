@@ -4,7 +4,7 @@ title   : Time Dilation を境界つき局所的最終手段として採用す�
 status  : accepted
 date    : 2026-06-14
 deciders: [human, ai-agent]
-related : ADR-0016（柱① TiDi-free 大規模戦闘）, CLAUDE.md §1 原則6 / §2 INV-TiDi, docs/architecture/tick-model.md §8, docs/reference/eve-reference.md §11.1, ADR-0017（INV-002 / 決定性）
+related : ADR-0016（柱① TiDi-free 大規模戦闘）, AI_DEVELOPMENT_GUIDE.md「Project North Star」/「Architecture Invariants」, docs/architecture/tick-model.md, docs/reference/eve-reference.md §11.1, ADR-0017（INV-002 / 決定性）
 ---
 
 # ADR-0018 — Time Dilation の境界つき局所採用

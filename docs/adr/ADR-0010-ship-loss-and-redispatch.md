@@ -225,4 +225,4 @@ playtest-guide.md §2「プレイテスト前の前提条件」に反する。
 - playtest-guide.md §2: プレイテスト前提条件
 - ADR-0006: Combat システム（ShipDestroyed イベント）
 - ADR-0009: 星系間ナビゲーション（拠点フェーズとの将来統合）
-- CLAUDE.md §1: スコープ（ポッドは Ship の一種として実装可能）
+- AI_DEVELOPMENT_GUIDE.md「Project North Star」: スコープ（ポッドは Ship の一種として実装可能）

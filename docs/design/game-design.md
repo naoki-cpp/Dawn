@@ -2,7 +2,7 @@
 scope    : ゲームデザイン方針。EVE Online から学んだ教訓と、このプロジェクトへの応用
 audience : Human Developer / AI Agent
 update   : 新機能を設計するとき / フィードバックに基づいて方針を変えるとき
-related  : ../process/roadmap.md, CLAUDE.md §1, docs/adr/ADR-0006
+related  : ../process/roadmap.md, ../../AI_DEVELOPMENT_GUIDE.md, docs/adr/ADR-0006
 ---
 
 # Game Design
@@ -498,7 +498,7 @@ EVE Online における採掘は**放置コンテンツ**であり、ゲーム�
 
 ### その他スコープ外
 
-CLAUDE.md §1 に準拠。以下は EVE に存在するがこのプロジェクトでは実装しない：
+AI_DEVELOPMENT_GUIDE.md「Project North Star」に準拠。以下は EVE に存在するがこのプロジェクトでは実装しない：
 
 ```
 × 市場・経済システム
@@ -694,7 +694,7 @@ LoD を導入しても物理限界は残る。残った制約は
 
 EVE Online が学んだ教訓は「絶対安全圏を作るとそこに経済と人口が
 吸い込まれ、リスクある空間 = コンテンツが死ぬ」だった。
-この原則は INV-001〜006（CLAUDE.md・技術的不変条件）と対をなす
+この原則は INV-001〜006（AI_DEVELOPMENT_GUIDE.md「Architecture Invariants」・技術的不変条件）と対をなす
 **ゲームデザイン不変条件**であり、§7 の問いと並んで、将来のあらゆる
 機能提案（構造物・防衛設備・新たな保護メカニクスなど）を審査する基準とする。
 

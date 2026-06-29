@@ -1,348 +1,333 @@
 ---
-scope    : システム全体の地図。「何が存在し、どう繋がっているか」を俯瞰する
+scope    : Map of the whole system. A bird's-eye view of what exists and how it connects
 audience : AI Agent / Human Developer
-update   : クレート構成が変わったとき / フェーズが進んだとき
+update   : When crate composition changes / when a phase advances
 related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, ../process/roadmap.md, ../../CLAUDE.md
 ---
 
 # Dawn Architecture
 
-## 1. このドキュメントの読み方
+## 1. How to read this document
 
-このファイルはプロジェクトへの**最初の入口**である。
-詳細は必ず専用ドキュメントへのリンクを辿ること。このファイルに詳細を書き足さない。
+This file is the project's **entry point**. For details, always follow the link to the dedicated document — do not append details here.
 
-### AIエージェントへの注意
+### Notes for AI agents
 
-- コードを書く前に **CLAUDE.md** を読むこと（不変条件・禁止事項を含む）
-- 設計判断の根拠は **docs/adr/** を参照すること
-- 「何を実装すべきか」は **docs/process/roadmap.md** を参照すること
+- Read **CLAUDE.md** before writing code (invariants, prohibitions)
+- For the rationale behind design decisions, see **docs/adr/**
+- For "what to implement," see **docs/process/roadmap.md**
 
-### ドキュメント責務早見表
+### Document responsibility map
 
-| ファイル | 答える問い |
+| File | Answers |
 |---|---|
-| `CLAUDE.md` | 何をしてはならないか / 変更前に何を確認するか |
-| `docs/architecture/architecture.md` | 全体はどう構成されているか（このファイル） |
-| `docs/architecture/entity-model.md` | 何が存在するか（型・フィールド定義） |
-| `docs/architecture/event-catalog.md` | 何が起きるか（イベント仕様） |
-| `docs/architecture/ownership.md` | 誰が何を管理するか（所有権・状態遷移） |
-| `docs/architecture/tick-model.md` | いつ・どの順番で処理されるか |
-| `docs/process/roadmap.md` | 何を・どの順番で作るか |
-| `docs/design/game-design.md` | なぜその機能を作るか / EVE からの教訓・将来機能候補 |
-| `docs/adr/` | なぜそう決めたか（変更不可の判断記録） |
+| `CLAUDE.md` | What must not be done / what to check before changing code |
+| `docs/architecture/architecture.md` | How the whole system is structured (this file) |
+| `docs/architecture/entity-model.md` | What exists (types, field definitions) |
+| `docs/architecture/event-catalog.md` | What happens (Event specs) |
+| `docs/architecture/ownership.md` | Who manages what (ownership, state transitions) |
+| `docs/architecture/tick-model.md` | When and in what order things are processed |
+| `docs/process/roadmap.md` | What to build, and in what order |
+| `docs/design/game-design.md` | Why a feature exists / lessons from EVE, future candidates |
+| `docs/adr/` | Why a decision was made (immutable decision record) |
 
 ---
 
-## 2. プロジェクトの本質
+## 2. Project essence
 
-### 目的
+### Purpose
 
-EVE Online を**超えるゲーム**を作ることが目的（ADR-0016）。
-分散シミュレーション基盤はその**実現手段**であり、かつ EVE が TiDi で諦めた領域を突く**競争優位**である。
-基盤は以下の技術的命題を体現する。
+The goal is to build a game that **surpasses EVE Online** (ADR-0016). The distributed simulation foundation is both the **means** to that end and a **competitive edge** in the area EVE gave up on with TiDi. The foundation embodies:
 
-- Single Shard における数万エンティティのリアルタイム同期
-- Event Sourcing による完全な因果追跡と世界の再現性
-- Actor モデルと ECS の責務分離による高スループット処理
+- Real-time sync of tens of thousands of entities in a Single Shard
+- Full causal traceability and world reproducibility via Event Sourcing
+- High throughput via separation of concerns between the Actor model and ECS
 
-### 現在のスコープ（Phase 8D — TCP 分散配線完了）
+### Current scope (Phase 8D — TCP distributed wiring complete)
 
 ```
-動作環境 : 複数プロセス（`dawn-sector-node` / `dawn-simulation` どちらも可）
-ノード間通信 : TCP（TcpRaftTransport / TcpReplicationTransport、8D-3/2c）
-クライアント接続 : WebSocket + JSON（Godot ⇔ WsServer、ADR-0007）
-ノード   : 物理プロセスとして存在（`sector-node config/node-N.toml`）
-ノード間ネットワーク: TCP LAN plaintext（8D マイルストーン。TLS は次フェーズ）
+Runtime          : multi-process (`dawn-sector-node` or `dawn-simulation`)
+Inter-node comms : TCP (TcpRaftTransport / TcpReplicationTransport, 8D-3/2c)
+Client comms     : WebSocket + JSON (Godot <-> WsServer, ADR-0007)
+Node             : a physical process (`sector-node config/node-N.toml`)
+Inter-node net   : TCP LAN plaintext (8D milestone; TLS is next phase)
 ```
 
-→ 詳細は [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/ADR-0027-dawn-replication-crate.md) を参照。
+See [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/ADR-0027-dawn-replication-crate.md) for details.
 
-### 将来のスコープ（方向性のみ、未実装）
+### Future scope (direction only, not implemented)
 
-- Raspberry Pi クラスタ実機検証（8D-5）
-- TLS / QUIC 化（8E 以降）
-- Raft ログ圧縮 + InstallSnapshot（snapshot + tail catch-up は SnapshotTransfer で基盤整備済み）
+- Raspberry Pi cluster hardware validation (8D-5)
+- TLS / QUIC (8E+)
+- Raft log compaction + InstallSnapshot (snapshot + tail catch-up groundwork already exists via SnapshotTransfer)
 
-**現在のフェーズを超えたコードを先行実装しないこと。**
+**Do not implement code ahead of the current phase.**
 
 ---
 
-## 3. Cargo Workspace 構成
+## 3. Cargo workspace layout
 
-### クレート一覧
+### Crate list
 
-| クレート | 種別 | 責務 |
+| Crate | Kind | Responsibility |
 |---|---|---|
-| `dawn-core` | ライブラリ | 純粋ドメインモデル定義。外部依存ゼロ |
-| `dawn-ecs` | ライブラリ | ECS World ラッパー。Component / System 定義 |
-| `dawn-event-store` | ライブラリ | 2 層 Event Log（ホットログ＋コールドアーカイブ）の永続化・圧縮（ADR-0017） |
-| `dawn-consensus` | ライブラリ | Raft 実装（Leader 選出 / Log Replication / RaftActor、ADR-0014） |
-| `dawn-actor` | ライブラリ | クライアント転送境界（ClientConnection trait） |
-| `dawn-replication` | ライブラリ | 追記ログのゴシップ配布境界（InMemoryReplicationBus / ReplicationTransport / AntiEntropy / TcpReplicationTransport / SnapshotTransfer / ReplicaSet、ADR-0021/0027） |
-| `dawn-sector` | ライブラリ | Sector 単位のゲームロジック（SimulationNode・Tick・Transit・Warp・Bot AI・AoI・Snapshot、ADR-0026） |
-| `dawn-simulation` | バイナリ | 配線・起動のみ。WsServer（Godot 接続）・Raft クラスター配線・負荷生成・TOML ローダー |
-| `dawn-sector-node` | バイナリ | 本番実行バイナリ（8D-4）。TcpRaftTransport + TcpReplicationTransport を TOML 静的 config で配線。3 プロセスで 3 セクタクラスタ |
+| `dawn-core` | library | Pure domain model. Zero external dependencies |
+| `dawn-ecs` | library | ECS World wrapper. Component / System definitions |
+| `dawn-event-store` | library | Persistence/compaction of the two-tier Event Log (hot log + cold archive) (ADR-0017) |
+| `dawn-consensus` | library | Raft implementation (leader election, log replication, RaftActor; ADR-0014) |
+| `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
+| `dawn-replication` | library | Gossip distribution boundary for the append log (InMemoryReplicationBus / ReplicationTransport / AntiEntropy / TcpReplicationTransport / SnapshotTransfer / ReplicaSet; ADR-0021/0027) |
+| `dawn-sector` | library | Per-Sector game logic (SimulationNode, Tick, Transit, Warp, Bot AI, AoI, Snapshot; ADR-0026) |
+| `dawn-simulation` | binary | Wiring/bootstrap only. WsServer (Godot), Raft cluster wiring, load generation, TOML loader |
+| `dawn-sector-node` | binary | Production binary (8D-4). Wires TcpRaftTransport + TcpReplicationTransport from static TOML config. 3 processes = 3-Sector cluster |
 
-### 依存 DAG
+### Dependency DAG
 
 ```
 dawn-core
-    ↑
+    ^
     ├── dawn-ecs
     ├── dawn-consensus
     └── dawn-event-store
-            ↑
+            ^
             ├── dawn-actor
             ├── dawn-replication
-            └── dawn-sector          ← ゲームロジック（dawn-ecs / dawn-consensus にも依存・ADR-0026）
-                    ↑
-                    ├── dawn-simulation     (バイナリ・dawn-actor / dawn-consensus にも依存)
-                    └── dawn-sector-node    (本番バイナリ・dawn-consensus / dawn-replication にも依存・8D-4)
+            └── dawn-sector          <- game logic (also depends on dawn-ecs / dawn-consensus, ADR-0026)
+                    ^
+                    ├── dawn-simulation     (binary; also depends on dawn-actor / dawn-consensus)
+                    └── dawn-sector-node    (production binary; also depends on dawn-consensus / dawn-replication, 8D-4)
 ```
 
-依存は**下から上への一方向のみ**。逆方向・循環は設計の失敗を意味する。
-→ 詳細ルールは [CLAUDE.md §3](../../CLAUDE.md) を参照。
+Dependencies flow **bottom-to-top only**; any reverse or circular dependency is a design failure. See [AI_DEVELOPMENT_GUIDE.md "Crate Boundaries"](../../AI_DEVELOPMENT_GUIDE.md) for the full rule.
 
-### クレートへの依存追加ルール
+### Rule for adding crate dependencies
 
-`dawn-core` に追加してよい依存は以下のみ。追加前に ADR を作成すること。
+`dawn-core` may only depend on:
 
 ```
-serde / thiserror のみ
-ネットワーク・ファイル I/O・非同期ランタイムは禁止
+serde / thiserror only
+Network I/O, file I/O, and async runtimes are forbidden
 ```
+
+Create an ADR before adding any dependency to `dawn-core`.
 
 ---
 
-## 4. 主要概念の定義
+## 4. Key concepts
 
-各概念の**詳細は専用ドキュメントを参照**すること。ここでは1行定義のみ記載する。
+See the linked document for details; this table is a one-line definition only.
 
-| 概念 | 定義 | 詳細 |
+| Concept | Definition | Details |
 |---|---|---|
-| **World** | シミュレーション世界全体。全 Sector の集合 | — |
-| **Sector** | 空間的分割単位。Ship エンティティの管理範囲 | [ownership.md](./ownership.md) |
-| **Node** | 論理的処理単位。現在は In-Process な概念 | [ownership.md](./ownership.md) |
-| **Ship** | 唯一の Entity 種別（MVP） | [entity-model.md](./entity-model.md) |
-| **Tick** | 論理時間単位。物理時刻と無関係 | [tick-model.md](./tick-model.md) |
-| **Event** | 世界で起きた不変の事実 | [event-catalog.md](./event-catalog.md) |
-| **Command** | 変更要求。拒否される可能性がある | [event-catalog.md](./event-catalog.md) |
+| **World** | The entire simulated world; the set of all Sectors | — |
+| **Sector** | A spatial partition; the management scope for Ship entities | [ownership.md](./ownership.md) |
+| **Node** | A logical processing unit; currently in-process | [ownership.md](./ownership.md) |
+| **Ship** | The only Entity kind (MVP) | [entity-model.md](./entity-model.md) |
+| **Tick** | Logical time unit, unrelated to wall-clock time | [tick-model.md](./tick-model.md) |
+| **Event** | An immutable fact about something that happened | [event-catalog.md](./event-catalog.md) |
+| **Command** | A change request that may be rejected | [event-catalog.md](./event-catalog.md) |
 
 ---
 
-## 5. データフローの概観
+## 5. Data flow overview
 
 ```
-Command 受信
-    │
-    ▼
-Validation（拒否 → CommandRejected を返す）
-    │
-    ▼
-Domain Logic 実行（ECS World を更新）
-    │
-    ▼
-Event 生成 → EventStore に Append
-    │
-    ▼
-（将来）ノード間 Replication
+Receive Command
+    |
+    v
+Validation (reject -> return CommandRejected)
+    |
+    v
+Execute domain logic (update ECS World)
+    |
+    v
+Generate Event -> Append to EventStore
+    |
+    v
+(future) inter-Node replication
 ```
 
-Command と Event は別の型として完全に分離する。
-→ フローの詳細は [CLAUDE.md §4](../../CLAUDE.md) / イベント仕様は [event-catalog.md](./event-catalog.md) を参照。
+Command and Event are fully separate types. See [AI_DEVELOPMENT_GUIDE.md "Event Workflow"](../../AI_DEVELOPMENT_GUIDE.md) for flow details and [event-catalog.md](./event-catalog.md) for Event specs.
 
 ---
 
-## 5-A. ClientConnection 抽象化（Phase 4 で実装）
+## 5-A. ClientConnection abstraction
 
-クライアント（Godot）とサーバー（Rust）の接続を trait で抽象化する。
-実装を差し替えることでネットワーク化時に Godot 側のコードを変更しない。
-
-```
-Phase 4（テスト用）:            Phase 5 以降（現在）:
-  InProcessConnection             WsClientConnection
-  ↓ In-Memory Channel で直結      ↓ WebSocket + JSON（ADR-0007）
-
-  どちらも同じ ClientConnection trait を実装する
-
-※ gRPC への移行は行わないことを ADR-0007 で決定済み。
-  再検討するとしても Phase 9 以降（分散ノード間通信が必要になったとき）。
-```
-
-### trait の責務（この 2 方向のみ）
+The connection between client (Godot) and server (Rust) is abstracted behind a trait, so swapping the implementation for networking requires no Godot-side changes.
 
 ```
-サーバー → クライアント : DomainEvent のストリーム配信
-クライアント → サーバー : Command の送信
+Test:                             Production:
+  InProcessConnection              WsClientConnection
+  via in-memory channel            via WebSocket + JSON (ADR-0007)
+
+  Both implement the same ClientConnection trait
+
+ADR-0007 ruled out a move to gRPC; revisit only once inter-node
+distributed comms need it.
 ```
 
-これ以外の責務をこの trait に混入してはならない。
-接続状態管理・認証・再接続は上位レイヤーが担う。
+### Trait responsibility (these two directions only)
 
-### データフロー（Phase 4 以降）
+```
+Server -> Client : stream of DomainEvents
+Client -> Server : Command submission
+```
+
+No other responsibility may be mixed into this trait. Connection-state management, auth, and reconnection belong to higher layers.
+
+### Data flow
 
 ```
 SectorSimulatorActor
-    ↓ events
+    | events
 dawn-replication::InMemoryReplicationBus
-    ↓
-ClientConnection（InProcess / WebSocket）
-    ↓ DomainEvent stream
-Godot クライアント（GDScript）
-    ↑ Command
+    |
+ClientConnection (InProcess / WebSocket)
+    | DomainEvent stream
+Godot client (GDScript)
+    ^ Command
 ```
 
-→ 詳細設計は ADR-0005（trait）/ ADR-0007（WebSocket セッション）を参照
+See ADR-0005 (trait) / ADR-0007 (WebSocket session) for detailed design.
 
 ---
 
-## 5-B. ゲーム化に向けた設計方向性
+## 5-B. Design direction for productization
 
-現在の技術基盤をEVEライクな3Dゲームに育てるために、
-以下の概念を**今から設計の前提として持つ**。実装はPhaseに従う。
+To grow the current technical foundation into an EVE-like 3D game, the following concepts are treated as design assumptions now; implementation follows the roadmap phases.
 
-### Interest Management（観測範囲）✅ 8C で実装済み（ADR-0019）
+### Interest Management (AoI) — implemented in 8C (ADR-0019)
 
-最重要。これなしでは実際のゲームにならない。
+Critical: without this there is no real game.
 
 ```
-問題: 10万隻が存在する場合、全Eventを全クライアントに送ることは不可能
-解法: 各クライアントは「自分の周囲 R km 以内のエンティティ」の
-     Eventのみを受信する（Bubble / Area of Interest）
+Problem: with 100k ships, broadcasting every Event to every client is infeasible
+Solution: each client receives Events only for entities within its own
+          bubble / Area of Interest (AoI)
 
               World
-           ┌──────────────┐
-           │  C           │
-           │     ┌──────┐ │
-           │  A  │[you] │ │  ← Bubble内のA,Bのみ受信
-           │     │  B   │ │     Cは受信しない
-           │     └──────┘ │
-           └──────────────┘
+           +--------------+
+           |  C           |
+           |     +------+ |
+           |  A  |[you] | |  <- only A, B in the bubble are received
+           |     |  B   | |     C is not received
+           |     +------+ |
+           +--------------+
 ```
 
-**現在の実装（Phase 8C・ADR-0019）:**
-- 静的セルグリッド（3×3×3 = 27 セル）による空間インデックス（`dawn-sector/src/aoi.rs`）
-- セル境界跨ぎで `AoiEnter` / `AoiLeave` 差分メッセージをクライアントへ送信
-- `DomainEvent` 配信フィルタ: 関与 Ship が観測者の 27 セル近傍内のときのみ配信
-- 新しいドメインイベント型は追加しない（配信フィルタのみで実現）
-- `InitialState` は 3×3×3 スコープに絞った状態を配信する
+**Implementation (ADR-0019):**
+- Static cell grid (3x3x3 = 27 cells) spatial index (`dawn-sector/src/aoi.rs`)
+- Crossing a cell boundary sends `AoiEnter` / `AoiLeave` diff messages to the client
+- `DomainEvent` delivery filter: deliver only when the involved Ship is within the observer's 27-cell neighborhood
+- No new domain event types added — delivery filtering alone implements this
+- `InitialState` delivers state scoped to the 3x3x3 neighborhood
 
-### Projection / Read Model 層
+### Projection / Read Model layer
 
-現在のCQRSはWrite側のみ設計済み。Read側を明示化する。
-
-```
-Write側（現在実装済み）:
-  Command → Validation → Event → EventStore
-
-Read側（将来実装）:
-  EventStore → Projection → Read Model
-                                ├── SpatialIndex（近傍クエリ）
-                                ├── ShipStateView（Ship現在状態）
-                                └── SectorOccupancyView（Sector人口）
-```
-
-Projectionは**EventのReplayで再構築できる**（INV-002の延長）。
-Read Modelが破損しても、EventLogから再生成できる。
-
-### クライアント接続モデル
+The current CQRS design covers the write side only; the read side is specified here.
 
 ```
-Server（Authoritative）        Client（表示）
+Write side (implemented):
+  Command -> Validation -> Event -> EventStore
+
+Read side (future):
+  EventStore -> Projection -> Read Model
+                                ├── SpatialIndex (proximity queries)
+                                ├── ShipStateView (current Ship state)
+                                └── SectorOccupancyView (Sector population)
+```
+
+Projections are **rebuildable by replaying Events** (extension of INV-002): if a Read Model is corrupted, it can be regenerated from the EventLog.
+
+### Client connection model
+
+```
+Server (authoritative)         Client (presentation)
 ─────────────────────          ──────────────
-真の状態を持つ                   表示用の状態を持つ
-     │                               │
-     │ ① Commandを受信               │ Client-Side Prediction
-     │ ② 検証・Event生成             │ （レイテンシを隠すための先読み）
-     │ ③ EventをClientへ配信    →    │ Reconciliation
-     │                               │ （Eventで先読みを補正）
+Holds true state                Holds display state
+     |                               |
+     | 1. Receive Command            | Client-side prediction
+     | 2. Validate, generate Event   | (look-ahead to hide latency)
+     | 3. Deliver Event to client -> | Reconciliation
+     |                               | (corrects prediction with Event)
 ```
 
-ServerはAuthoritative（現在の設計のまま）。
-Clientは「仮の状態」を先行表示し、Serverからのイベントで補正する。
+The server remains authoritative (unchanged). The client shows a predicted state ahead of confirmation and reconciles it against server Events.
 
-### Bounded Context 拡張順序
+### Bounded Context expansion order
 
 ```
-現在実装済み:
-  Spatial + Movement + Combat（Fitting / Lock-on / Capacitor 含む）
-  Navigation（Jump Gate / 星系間移動、ADR-0009・Phase 7.5 実装済み）
+Implemented:
+  Spatial + Movement + Combat (Fitting / Lock-on / Capacitor included)
+  Navigation (Jump Gate / inter-system travel, ADR-0009)
 
-推奨追加順序（依存関係による）:
-  Resource    ← 資源（放置型採掘は FBD-009 で禁止。争奪型のみ検討）
-      ↓
-  Economy     ← Market / Trade / Manufacturing
-      ↓
-  Social      ← Corporation / Alliance / Chat
+Recommended next order (by dependency):
+  Resource    <- idle/passive mining is banned by FBD-009; contested-only
+      v
+  Economy     <- Market / Trade / Manufacturing
+      v
+  Social      <- Corporation / Alliance / Chat
 
-原則: 上位ContextはSpatialを使うが、SpatialはContextを知らない
-     （依存は常に下向き）
+Principle: higher Contexts use Spatial, but Spatial never knows about
+           higher Contexts (dependency always points downward)
 ```
 
 ---
 
-## 5-C. 永続化と復旧モデル（2 層ログ・ADR-0017）
+## 5-C. Persistence and recovery model (two-tier log, ADR-0017)
 
-Event Log は**ホットログ**と**コールドアーカイブ**の 2 層で構成する。
-EventStore trait は引き続き append-only（FBD-001。truncate / delete / rewrite は存在しない）。
+The Event Log has two tiers, **hot log** and **cold archive**. The `EventStore` trait remains append-only (FBD-001: no truncate / delete / rewrite).
 
 ```
                        Append
-                         │
-                         ▼
-   ┌──────────────────── Hot Log ───────────────────┐
-   │  [8B base_index header][len|payload]...          │  ← 有界。最新セグメントのみ保持
-   └──────────────────────────────────────────────────┘
-                         │ compact(boundary)         ← 検証済みスナップショット背後の
-                         │  (segment migration)        セグメントだけを移送
-                         ▼
-   ┌────────────── Cold Archive ─────────────────────┐
-   │  append-only forever（監査・災害復旧。運用ホットパス外）│
-   └──────────────────────────────────────────────────┘
+                         |
+                         v
+   +---------------------- Hot Log ---------------------+
+   |  [8B base_index header][len|payload]...             |  <- bounded; latest segment only
+   +-------------------------------------------------------+
+                         | compact(boundary)        <- migrates only the segments
+                         |  (segment migration)        behind a verified snapshot
+                         v
+   +--------------- Cold Archive ------------------------+
+   |  append-only forever (audit / disaster recovery; off the hot path) |
+   +-------------------------------------------------------+
 ```
 
-**スナップショットが権威ある永続チェックポイント**（INV-002 改訂）。
-クラッシュ復旧・failover（ADR-0014）は次の経路で行う:
+**The snapshot is the authoritative persistent checkpoint** (INV-002 revised). Crash recovery / failover (ADR-0014) follows:
 
 ```
-復旧 = 検証済みスナップショット + それ以降のホットログ末尾の catch-up
+Recovery = verified snapshot + catch-up from the hot log tail since that snapshot
 ```
 
-- 運用ホットパスで要る replay は「末尾の catch-up」のみ。
-  創世記（log index 0）からの完全 replay は**経路外**（監査・災害復旧専用）。
-- 位置・capacitor・lock カウントダウン・thrust intent などの派生・transient 状態は
-  **スナップショットに永続化する**（イベントには記録しない）。復旧後は live の Tick で再計算される。
-- 圧縮はセグメント移送であってイベントの破壊ではない。ホットログのファイル先頭に
-  `base_index`（records[0] の global log index）を持ち、原子的 rename で切り替える。
-  コールド追記 → ホット swap の順で行うため、いかなる時点でもイベントは失われない。
-- スナップショットは検証可能でなければならない:
-  ① snapshot → restore → snapshot がバイト一致（round-trip）
-  ② snapshot + 末尾 Tick の再実行 == その時点の live 状態
+- The only replay on the operational hot path is the tail catch-up. Full replay from genesis (log index 0) is **off-path** (audit / disaster recovery only).
+- Derived/transient state (position, capacitor, lock countdowns, thrust intent, etc.) is **persisted in the snapshot**, not recorded as events; it is recomputed live on the next Tick after recovery.
+- Compaction is segment migration, not event destruction. The hot log file holds a `base_index` header (the global log index of `records[0]`) and is swapped via atomic rename. Cold append happens before the hot swap, so an event is never lost at any point in time.
+- Snapshots must be verifiable:
+  1. snapshot -> restore -> snapshot round-trips to a byte-identical result
+  2. snapshot + replay of the trailing Ticks == live state at that point
 
-→ 詳細は [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [CLAUDE.md §2 INV-002](../../CLAUDE.md) を参照。
-Read Model（§5-B）の off-path 再構築とは別物である（あちらは監査経路の任意再生）。
+See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.md "Architecture Invariants"](../../AI_DEVELOPMENT_GUIDE.md) (INV-002). This is distinct from the off-path Read Model rebuild in §5-B (that one is an optional audit-path replay).
 
 ---
 
-## 6. 現在の制約（変更には ADR が必要）
+## 6. Current constraints (changing these requires an ADR)
 
-| 制約 | 理由 | 根拠 ADR |
+| Constraint | Reason | Basis (ADR) |
 |---|---|---|
-| ノード間ネットワークは TCP LAN plaintext のみ（TLS/QUIC 不使用） | 8D マイルストーンの段階。暗号化は次フェーズ | [ADR-0003](../adr/ADR-0003-local-first-development.md)（初期方針）/ §2 将来のスコープ参照 |
-| Sector 数・割り当ては固定（動的分割・統合は未実装） | MVP スコープの制限 | [entity-model.md §5](./entity-model.md) |
-| エンティティは Ship のみ（Fitting / Combat / Capacitor 含む） | MVP スコープの制限 | [CLAUDE.md §1](../../CLAUDE.md) |
+| Inter-node network is TCP LAN plaintext only (no TLS/QUIC) | Current 8D milestone stage; encryption is next phase | [ADR-0003](../adr/ADR-0003-local-first-development.md) (initial policy) / see §2 future scope |
+| Sector count/assignment is fixed (no dynamic split/merge) | MVP scope limit | [entity-model.md §5](./entity-model.md) |
+| Ship is the only entity (includes Fitting / Combat / Capacitor) | MVP scope limit | [AI_DEVELOPMENT_GUIDE.md "Project North Star"](../../AI_DEVELOPMENT_GUIDE.md) |
 
-> 「Single Process のみ」「ノード間ネットワーク不使用」は ADR-0003 時点（Phase 3 以前）の制約で、
-> 8D-3/8D-4（`TcpRaftTransport` / `TcpReplicationTransport` / `dawn-sector-node`）により撤廃済み。
-> §3 のクレート表・依存 DAG が現状の正典。
+> §3's crate table and dependency DAG are the current source of truth for deployment topology.
 
 ---
 
-## 7. このドキュメントの更新ルール
+## 7. Update rules for this document
 
-以下の場合のみ更新する。それ以外は専用ドキュメントを更新すること。
+Update this file only for:
 
-- クレートの追加・削除
-- 主要概念の追加
-- フェーズの進行によるスコープ変更
+- Crate addition/removal
+- Addition of a key concept
+- Scope changes from phase progression
+
+Everything else belongs in the dedicated document.

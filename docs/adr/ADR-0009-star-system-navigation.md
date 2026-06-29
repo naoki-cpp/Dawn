@@ -4,7 +4,7 @@ title   : 星系間ナビゲーション — StarSystem / JumpGate 設計
 status  : accepted
 date    : 2026-06-06
 deciders: [human, ai-agent]
-related : ADR-0001（Event Sourcing）, ADR-0003（Local-First）, ADR-0014（Raft Consensus）, CLAUDE.md §5（Entity Ownership）
+related : ADR-0001（Event Sourcing）, ADR-0003（Local-First）, ADR-0014（Raft Consensus）, docs/architecture/ownership.md（Entity Ownership）
 ---
 
 > **着手時の補足（2026-06-12・Phase 7 完了後）**
@@ -51,7 +51,7 @@ StarSystem（星系）
 - **StarSystem** はメタレイヤー。Ship は常に特定の Sector に存在し、Sector が StarSystem に帰属する。
 - **JumpGate** は Sector 内の固定座標に配置されたオブジェクト。Ship が一定距離内に近づくと
   ジャンプコマンドが有効になる。
-- Sector 間の遷移は **既存の Entity Ownership ルール**（CLAUDE.md §5）を継承する。
+- Sector 間の遷移は **既存の Entity Ownership ルール**（docs/architecture/ownership.md）を継承する。
   Ship の所有権は常に 1 つの Sector が保持し、Transit 中は元 Sector が保有し続ける。
 
 ### 2. 新規型定義（dawn-core）
@@ -124,7 +124,7 @@ pub struct StarSystemChanged {
 ///
 /// 拒否条件:
 ///   - Ship が gate の activation_radius 外にいる
-///   - Ship が Transit 中（CLAUDE.md §5）
+///   - Ship が Transit 中（docs/architecture/ownership.md）
 ///   - Ship が存在しない
 pub struct JumpCommand {
     pub ship_id: ShipId,
@@ -196,7 +196,7 @@ Event Sourcing と相性が悪い。「移動アニメーション」はクラ�
 
 星・惑星・小惑星帯を ECS の Entity として追加する。
 
-**却下理由**: Ship のみが Entity というスコープ制約（CLAUDE.md §1）に違反する。
+**却下理由**: Ship のみが Entity というスコープ制約（AI_DEVELOPMENT_GUIDE.md「Project North Star」）に違反する。
 天体は静的な環境データ（マップデータ）として扱い、ECS に含めない。
 
 ---
@@ -269,8 +269,8 @@ Event Sourcing と相性が悪い。「移動アニメーション」はクラ�
 
 ## 参照
 
-- CLAUDE.md §5: Entity Ownership Rules（SectorTransit 設計の原則を継承）
-- CLAUDE.md §1: 現在のスコープ
+- docs/architecture/ownership.md: Entity Ownership Rules（SectorTransit 設計の原則を継承）
+- AI_DEVELOPMENT_GUIDE.md「Project North Star」: 現在のスコープ
 - ADR-0001: Event Sourcing（JumpGateUsed はイベント、位置は派生状態）
 - ADR-0003: Local-First（Raft なしで単一プロセスで実装する）
 - docs/architecture/tick-model.md: Tick 順序（Jump 処理は Combat の後に行う）

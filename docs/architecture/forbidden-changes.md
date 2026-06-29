@@ -1,69 +1,74 @@
-# Forbidden Changes（禁止変更カタログ）
+# Forbidden Changes Catalog
 
-> AI_DEVELOPMENT_GUIDE.md §10 の正典。ガイド本体には FBD-00x の ID 一覧と一行要約のみを
-> 残し、詳細・コード例はこのファイルが保持する（ADR-0030）。FBD-00x の ID は不変。
+> Canonical reference for AI_DEVELOPMENT_GUIDE.md §10. The guide keeps only the
+> FBD-00x ID list and one-line summaries; this file holds the details and code
+> examples (ADR-0030). FBD-00x IDs are stable and must not be renumbered.
 
-以下の変更は**いかなる理由があっても行ってはならない**。
-技術的な理由を説明されても実行しないこと。
-必要に応じて ADR の改訂を提案し、人間の承認を得てから実施する。
+The changes below must **never be made, for any reason**, even if a technical
+justification is offered. If a change like this is genuinely needed, propose
+an ADR revision and get human approval first.
 
-## FBD-001: Event Log への破壊的操作
+## FBD-001: Destructive operations on the Event Log
 
 ```rust
-// 以下のシグネチャを持つメソッドを EventStore trait に追加してはならない:
+// Do not add methods with these signatures to the EventStore trait:
 fn update(&self, id: EventId, payload: Bytes) -> Result<()>;
 fn delete(&self, id: EventId) -> Result<()>;
 fn truncate(&self, from_index: u64) -> Result<()>;
 fn rewrite(&self, index: u64, event: Event) -> Result<()>;
 ```
 
-> 注記（ADR-0017）: ログの圧縮はこれらの禁止メソッドでは**行わない**。
-> 圧縮は trait の外側の運用プロセス（検証済みスナップショット背後のセグメントを
-> コールドアーカイブへ移送し、ホットログを write-new-then-swap で原子的に切り替える）として
-> 実装する。セグメント内のイベントは決して書き換えない。`EventStore` trait は append-only のまま。
+Protects INV-001 (event log is append-only). Per ADR-0017, log compaction is
+handled outside the trait as an operational process (move segments behind a
+verified snapshot to cold storage, then atomically swap the hot log via
+write-new-then-swap) — events within a segment are never rewritten.
 
-## FBD-002: dawn-core への外部依存の追加
+## FBD-002: External dependencies in `dawn-core`
 
 ```toml
-# dawn-core/Cargo.toml に追加してはならない依存の例:
-tokio    = ...  # 非同期ランタイム
-tonic    = ...  # gRPC
-reqwest  = ...  # HTTPクライアント
-sqlx     = ...  # データベース
-serde_json = ... # JSONシリアライザ（serde featureのみ許可）
+# Do not add dependencies like these to dawn-core/Cargo.toml:
+tokio      = ...  # async runtime
+tonic      = ...  # gRPC
+reqwest    = ...  # HTTP client
+sqlx       = ...  # database
+serde_json = ...  # JSON serializer (only the serde feature is allowed)
 ```
 
-## FBD-003: 物理時刻による因果順序の判定
+Keeps `dawn-core` a dependency-free, deterministic simulation core.
+
+## FBD-003: Wall-clock time for causal ordering
 
 ```rust
-// 以下のパターンを因果順序の判定に使用してはならない:
+// Do not use these for causal ordering:
 use std::time::SystemTime;
 SystemTime::now()
 
 use chrono::Utc;
 Utc::now()
 
-// 代替: 論理Tickを使用する
+// Use the logical tick counter instead:
 self.tick_counter.fetch_add(1, Ordering::SeqCst)
 ```
 
-## FBD-004: Actor間の直接メソッド呼び出し
+Wall-clock time is non-deterministic across nodes; only logical Tick order is reproducible.
+
+## FBD-004: Direct method calls between Actors
 
 ```rust
-// 禁止: ActorAがActorBのメソッドを直接呼ぶ
+// Forbidden: Actor A calls Actor B's methods directly
 struct SectorSimulatorActor {
-    replication_actor: Arc<ReplicationActor>, // ← Arcで直接保持してはならない
+    replication_actor: Arc<ReplicationActor>, // must not hold an Arc directly
 }
 
 impl SectorSimulatorActor {
     async fn on_tick_complete(&self) {
-        self.replication_actor.sync(delta).await; // ← 直接呼び出し禁止
+        self.replication_actor.sync(delta).await; // direct call forbidden
     }
 }
 
-// 正しい実装: Mailbox経由でメッセージを送る
+// Correct: send a message through the mailbox
 struct SectorSimulatorActor {
-    replication_tx: mpsc::Sender<ReplicationMessage>, // ← Senderのみ保持
+    replication_tx: mpsc::Sender<ReplicationMessage>, // hold only the Sender
 }
 
 impl SectorSimulatorActor {
@@ -73,10 +78,12 @@ impl SectorSimulatorActor {
 }
 ```
 
-## FBD-005: ShipのEntityId再利用
+Preserves actor isolation and the message-passing concurrency model.
+
+## FBD-005: Reusing a Ship's EntityId
 
 ```rust
-// 禁止: Despawn済みIDのプール管理と再割り当て
+// Forbidden: pooling and reassigning despawned IDs
 struct IdPool {
     recycled: VecDeque<ShipId>,
 }
@@ -84,89 +91,85 @@ struct IdPool {
 impl IdPool {
     fn next_id(&mut self) -> ShipId {
         self.recycled.pop_front().unwrap_or_else(|| self.generate_new())
-        // ↑ recycled からの取り出しが禁止
+        // ^ popping from `recycled` is forbidden
     }
 }
 ```
 
-## FBD-006: Raftを経由しないSector Transit
+Reused IDs break event-log identity guarantees and can resurrect stale references.
+
+## FBD-006: Sector Transit that bypasses consensus
 
 ```rust
-// 禁止: RaftをバイパスしたSector間の直接状態移転
+// Forbidden: direct cross-sector state transfer that bypasses Raft
 async fn teleport_ship_between_sectors(
     &self,
     ship_id: ShipId,
     from: SectorId,
     to: SectorId,
 ) {
-    self.sector_nodes[from].remove_ship(ship_id).await; // Raftなし
-    self.sector_nodes[to].add_ship(ship_id).await;     // Raftなし
+    self.sector_nodes[from].remove_ship(ship_id).await; // no Raft
+    self.sector_nodes[to].add_ship(ship_id).await;       // no Raft
 }
 ```
 
-## FBD-007: テストなしでのpub fnの追加
+Every cross-Node Ship transfer must go through consensus to keep World state consistent.
+
+## FBD-007: Adding `pub fn` without tests
 
 ```
-CIが以下を検出した場合、PRを自動拒否する:
-  - pub fn が追加されているが対応するテストがない
-  - カバレッジが 80% を下回る
+CI auto-rejects a PR if:
+  - a pub fn was added with no corresponding test
+  - coverage drops below 80%
 
-例外はない。テストを書けない場合は pub(crate) または pub(super) にする。
+No exceptions. If a test can't be written, use pub(crate) or pub(super) instead.
 ```
 
-## FBD-009: スキルポイント育成 / 受動成長 / AFK 採掘の実装
+## FBD-008: ~~Implementation outside MVP scope~~ — repealed (ADR-0016)
 
-> ゲーム化（ADR-0016）後も **維持** する。反グラインドは "EVE を超える" ための核であり、
-> §6 の観測（18k 文書・フォーラム傾向）でも最も嫌われた要素群として現れた
-> （フォーラム声は実証ではない — 選択バイアスに留意・eve-reference §11.5）。
-
-```
-【スキルポイント / 受動成長】
-以下のいかなる形式のスキルポイント制・受動成長も実装してはならない:
-  - 時間経過でアンロックされる能力
-  - プレイ時間に比例して強くなるパッシブ成長
-  - 課金で加速できる育成要素（Pay-to-Win）
-
-理由:
-  ゲームの上手さに関係なく、ゲーム時間・課金額で性能が変わる。
-  公平感（Perceived Fairness）を根本から損なう時代遅れの設計。
-
-  ※ 「キャラクター」を*エンティティ*として持つことは可（ADR-0016 で解禁）。
-    禁止するのは「キャラクターが時間/課金で強くなる育成」であって、存在そのものではない。
-
-【AFK 採掘】
-採掘レーザーを起動して放置するコンテンツを実装してはならない。
-
-理由:
-  採掘は「放置するだけ」であり、プレイヤーが意図的な判断を下す機会がない。
-  EVE では採掘者は「無力な標的」として海賊側のコンテンツとして機能する。
-  採掘している人自身はゲームをしていない。
-
-  設計の中心的な問い「その機能はプレイヤーが意図的な判断を下す機会を増やすか？」
-  に対して AFK 採掘は No である。
-
-  ※ 「能動的判断を伴う資源獲得」や「資源を消費シンクにして希少性で判断を強制する」設計は
-    検討可（ADR-0016 §5・eve-reference §7.4.3）。禁止するのは "放置で進む採取動作" のみ。
-
-  → docs/design/game-design.md §5 参照
-```
-
-## FBD-008: ~~MVP範囲外の実装~~ → 撤廃（ADR-0016）
+Repealed following the gamification decision (ADR-0016). These crates may now
+be created, subject to ADR approval:
 
 ```
-【撤廃】ゲーム化（ADR-0016）に伴い、本禁則は撤廃した。
-以下のクレートは ADR 承認のうえ作成してよい:
-  crates/dawn-economy/   ← 経済システム
-  crates/dawn-character/ ← キャラクター（エンティティ。育成は FBD-009 で引き続き禁止）
-  crates/dawn-inventory/ ← インベントリ
-  crates/dawn-ui/        ← UI 専用クレート
-  crates/dawn-graphics/  ← グラフィックス専用クレート
-
-ただし新規クレートは従来どおりの手続きを踏むこと:
-  - 個別 ADR を起票し、人間の承認を得る（§9）
-  - Dependency DAG（§3）上の位置を確定し、循環依存を作らない
-  - §11 Crate別責務早見表を更新する
-
-Combat / Fitting ロジックは引き続き dawn-ecs / dawn-core 内に実装する
-（独立クレートに切り出すなら ADR が必要）。
+crates/dawn-economy/   — economy systems
+crates/dawn-character/ — character entity (growth/progression still banned, see FBD-009)
+crates/dawn-inventory/ — inventory
+crates/dawn-ui/        — UI-only crate
+crates/dawn-graphics/  — graphics-only crate
 ```
+
+New crates still require the normal process: file an ADR and get human
+approval (§9), place the crate correctly in the Dependency DAG (§3) without
+creating cycles, and update the crate responsibility table (§11). Combat and
+Fitting logic stay inside `dawn-ecs` / `dawn-core` (an ADR is required to
+split them into a separate crate).
+
+## FBD-009: Skill-point growth / passive growth / AFK mining
+
+> Stays in force after gamification (ADR-0016). Anti-grind is core to
+> "surpassing EVE" and was the most-disliked element family observed in §6
+> (18k-document/forum survey; forum sentiment is not proof — mind selection
+> bias, see eve-reference §11.5).
+
+**Skill points / passive growth** — do not implement any form of:
+- abilities that unlock over time
+- passive growth proportional to play time
+- progression that can be accelerated with real money (pay-to-win)
+
+Reason: performance would scale with time/money spent rather than player
+skill, undermining perceived fairness. (Having a Character as an *entity* is
+allowed per ADR-0016 — only growth/progression tied to time or payment is
+banned, not the entity's existence.)
+
+**AFK mining** — do not implement content where a player activates a mining
+laser and walks away.
+
+Reason: it removes the moment of deliberate player decision-making (the core
+design question is "does this feature increase opportunities for deliberate
+player decisions?" — AFK mining answers no). In EVE, miners function as
+"helpless targets" for pirates; the miner themself isn't really playing.
+(Active-decision resource gathering, or resource sinks that force decisions
+via scarcity, remain open designs — see ADR-0016 §5, eve-reference §7.4.3.
+Only unattended, idle-progress mining is banned.)
+
+See `docs/design/game-design.md` §5.

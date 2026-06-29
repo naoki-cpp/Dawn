@@ -282,7 +282,7 @@ pub struct ShipDestroyed {
 `current_shield` / `current_armor` / `current_hull` を各フィールドで上書きする。
 `WeaponFired` は ECS 状態を変えないためスキップする。
 
-#### Combat System フロー（CLAUDE.md §6 Tick 処理順序に準拠）
+#### Combat System フロー（docs/architecture/tick-model.md の Tick 処理順序に準拠）
 
 ```
 Phase 6 以降の Tick 処理:

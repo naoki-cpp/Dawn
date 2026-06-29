@@ -2,7 +2,7 @@
 scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
-related  : CLAUDE.md §11, docs/architecture/architecture.md
+related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md
 date     : 2026-06-29（Sector Node runtime deepening 後の再計測。dawn-sector-node/main.rs 589→308、runtime.rs 354 追加。R-3 は warp.rs 985 / spawner_logic.rs 804 / orbit.rs 723 / mod.rs 724）
 ---
 

@@ -6,7 +6,7 @@ date    : 2026-06-12
 deciders: [human, ai-agent]
 related : ADR-0001（Event Sourcing）, ADR-0002（Actor モデル）,
           ADR-0003（Local-First）, ADR-0009（星系間ナビゲーション・deferred）,
-          CLAUDE.md §3（Dependency DAG）, §5（Entity Ownership）, INV-003, FBD-006
+          AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/ownership.md（Entity Ownership）, INV-003, FBD-006
 ---
 
 # ADR-0014 — 分散コンセンサス（Raft）
@@ -29,7 +29,7 @@ Phase 7 の完了基準（roadmap §10）:
 
 Sector Transit は「Ship の所有権を Sector A から Sector B へ移す」操作であり、
 2 つのノードが同一 Ship の所有権を同時に主張するスプリットブレインを
-構造的に防がなければならない（INV-003 / FBD-006 / CLAUDE.md パターン5）。
+構造的に防がなければならない（INV-003 / FBD-006 / AI_DEVELOPMENT_GUIDE.md パターン5）。
 
 ---
 
@@ -65,7 +65,7 @@ Raft を経由しない（データプレーン）:
 理由: Raft のスループットはリーダーの fsync + 過半数 ACK に律速される。
 毎 Tick 数千イベントを Raft に流すと Tick SLA（INV-TiDi）を破壊する。
 これは本プロジェクトの中心仮説「CRDT と Raft の責務分離による高スループット同期」
-（CLAUDE.md §1）そのものである。
+（AI_DEVELOPMENT_GUIDE.md「Project North Star」）そのものである。
 
 ### 2. Raft は自前実装する（dawn-consensus クレート）
 
@@ -83,7 +83,7 @@ crates/dawn-consensus/
     timer.rs      // election timeout / heartbeat（論理駆動・後述）
 ```
 
-依存方向（CLAUDE.md §3 の予定どおり）:
+依存方向（AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」の予定どおり）:
 
 ```
 dawn-actor ← dawn-consensus ← dawn-simulation
@@ -157,12 +157,12 @@ pub struct SectorTransitAborted {
 
 命名規則 — `Rejected` イベントは存在しない:
 バリデーション段階の拒否（Ship 不在・Transit 中など）はイベントではなく
-`CommandRejected` の返却で表現する（CLAUDE.md §4 / INV-006）。
+`CommandRejected` の返却で表現する（AI_DEVELOPMENT_GUIDE.md「Event Workflow」 / INV-006）。
 イベントになるのは `Requested` がコミットされた**後**の中断のみであり、
 これを `SectorTransitAborted` と命名する。
 
 `tick` フィールドの解釈 — Sector 間の順序は Raft Log Index が保証する:
-Tick は同一 Sector 内でのみ比較可能である（CLAUDE.md §6）。
+Tick は同一 Sector 内でのみ比較可能である（docs/architecture/tick-model.md）。
 Transit イベントは 2 つの Sector をまたぐため、**各ノードは自分の
 ローカル Tick を刻んで自分の EventStore に Append する**
 （同一 Transit でもノードごとに tick 値は異なってよい）。
@@ -179,7 +179,7 @@ pub struct TransitCommand {
 }
 ```
 
-Transit 中の Ship は CLAUDE.md §5 のとおり `TransitState::InTransit` となり、
+Transit 中の Ship は docs/architecture/ownership.md のとおり `TransitState::InTransit` となり、
 Move / Despawn / 二重 Transit を拒否する。
 
 ### 5. タイマーは Tick 駆動にする（INV-005 / FBD-003）
@@ -217,8 +217,7 @@ pub trait RaftTransport: Send + Sync {
 ### 7. Tick 処理順序への組み込み
 
 tick-model.md §3 の処理順序は「変更には ADR が必要」と定められている。
-本 ADR は以下の変更を承認する（Phase 7 適用時に tick-model.md / CLAUDE.md §6
-を更新すること）。
+本 ADR は以下の変更を承認する（Phase 7 適用時に tick-model.md を更新すること）。
 
 ```
 Step 2  : コマンドキューを処理する
@@ -334,7 +333,7 @@ Tick 駆動タイマー（決定 5）と整合しない。
 
 ## 参照
 
-- CLAUDE.md §1（中心仮説: CRDT と Raft の責務分離）, §3, §5, INV-003, INV-005, INV-006, FBD-003, FBD-004, FBD-006
+- AI_DEVELOPMENT_GUIDE.md「Project North Star」（中心仮説: CRDT と Raft の責務分離）, AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/ownership.md, INV-003, INV-005, INV-006, FBD-003, FBD-004, FBD-006
 - ADR-0002: Actor モデル（tokio primitive 自前実装の先例）
 - ADR-0003: Local-First（In-Process トランスポートの根拠）
 - docs/process/roadmap.md §10: Phase 7 完了基準

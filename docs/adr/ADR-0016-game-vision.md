@@ -4,7 +4,7 @@ title   : プロジェクトの再定義 — 「EVE を超えるゲーム」を�
 status  : accepted
 date    : 2026-06-14
 deciders: [human, ai-agent]
-related : CLAUDE.md §1（Scope）, CLAUDE.md §10（Forbidden Changes）, docs/reference/eve-reference.md（観測データ §6/§7）, ADR-0014（Raft）, ADR-0012（Turret Tracking）, ADR-0015（Approach）
+related : AI_DEVELOPMENT_GUIDE.md「Project North Star」（Scope）, docs/architecture/forbidden-changes.md（Forbidden Changes）, docs/reference/eve-reference.md（観測データ §6/§7）, ADR-0014（Raft）, ADR-0012（Turret Tracking）, ADR-0015（Approach）
 ---
 
 # ADR-0016 — プロジェクトの再定義: 「EVE を超えるゲーム」
@@ -15,7 +15,7 @@ related : CLAUDE.md §1（Scope）, CLAUDE.md §10（Forbidden Changes）, docs/
 
 ## 背景
 
-これまで CLAUDE.md §1 は「**ゲームを作っているのではない。研究基盤である**」と宣言してきた。
+これまで AI_DEVELOPMENT_GUIDE.md「Project North Star」は「**ゲームを作っているのではない。研究基盤である**」と宣言してきた。
 人間オーナーの判断により、プロジェクトのゴールを **「EVE Online を超えるゲームを作る」** に
 再定義する。
 
@@ -43,7 +43,7 @@ related : CLAUDE.md §1（Scope）, CLAUDE.md §10（Forbidden Changes）, docs/
 
 **ゲームを作ることがゴールである。分散シミュレーション基盤はその実現手段であり、
 かつ競争優位（EVE が TiDi で諦めた大規模リアルタイム性）である。**
-CLAUDE.md §1 の「ゲームを作っているのではない」を撤回し、両者の関係を上記に置き換える。
+AI_DEVELOPMENT_GUIDE.md「Project North Star」の「ゲームを作っているのではない」を撤回し、両者の関係を上記に置き換える。
 
 ### 2. 4 本の柱（ビジョン）
 

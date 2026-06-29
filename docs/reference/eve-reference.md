@@ -4,7 +4,7 @@ dawn プロジェクトの設計・バランス調整の参照元として、EVE
 EVE Frontier（CCP の新作）の公開情報を収集・整理したもの。
 
 > このファイルは「外部ゲームの事実の記録」であり仕様ではない。dawn の挙動を変える根拠に
-> 使う場合は ADR を起票すること（CLAUDE.md §1/§7）。数式・定数は原典に当たって検算する。
+> 使う場合は ADR を起票すること（AI_DEVELOPMENT_GUIDE.md「Project North Star」/ docs/architecture/event-schema-evolution.md）。数式・定数は原典に当たって検算する。
 > 最終収集日: 2026-06-13。
 
 ---
@@ -27,7 +27,7 @@ ChanceToHit = 0.5 ^ ( (Angular × 40000 / (Tracking × Signature))²
 | Optimal | 最適射程 [m] | `weapon_range_add` |
 | Falloff | 減衰射程 [m]。Optimal+Falloff で命中率 50% | `falloff_range_add` |
 
-**dawn の現行式**（CLAUDE.md §6 / Combat System）:
+**dawn の現行式**（docs/architecture/tick-model.md Step 6 Combat System）:
 `0.5^((angular/(tracking×sig))² + (max(0,d−opt)/falloff)²)` ——
 EVE 式から Signature Resolution 定数（40000）を省いた簡略版。構造は完全一致。
 
@@ -43,9 +43,9 @@ RandomDamageModifier = x + 0.49        (x ≥ 0.01)
 - dawn は現状フラットダメージ。
 - **✅ 通常命中の乱数（50–149%, 期待値≈1.0）は採用方針。** `x + 0.49`（x∈[0,1)）の係数で、
   毎発に小さな分散を与える。期待値が 1.0 なのでバランスを崩さず、命中の手触りが増す。
-  実装は挙動変更のため要 ADR（CLAUDE.md §7）。
+  実装は挙動変更のため要 ADR（docs/architecture/event-schema-evolution.md）。
 - **🚫 Wrecking shot（確定300%）は採用しない。** 低確率の大ダメージは結果の分散を運任せにし、
-  CLAUDE.md / game-design.md の「プレイヤーの意図的判断を増やすか」という設計の問いに対して
+  AI_DEVELOPMENT_GUIDE.md / game-design.md の「プレイヤーの意図的判断を増やすか」という設計の問いに対して
   No（プレイヤーが制御できない揺らぎ）。よって x<0.01 の 300% 分岐は入れず、係数は
   `clamp` ではなく 50–149% の範囲に収める。
 
@@ -414,7 +414,7 @@ Fuel を消費**、という循環。
 4. **Logistics（7.4.2）** — 集団戦の深み。多人数前提なので Tackle の後。
 5. **資源シンク（7.4.3 の良い点のみ）** — 希少性で判断を生む。受動採取は採らない。要 community データ。
 
-> いずれも挙動変更につき、着手は ADR 起票 → 人間承認（CLAUDE.md §1/§7）。本ファイルは
+> いずれも挙動変更につき、着手は ADR 起票 → 人間承認（AI_DEVELOPMENT_GUIDE.md / docs/architecture/event-schema-evolution.md）。本ファイルは
 > 「外部ゲームの事実と示唆の記録」であって仕様ではない。
 
 ---
@@ -625,7 +625,7 @@ Fanfest / GDC の CCP 技術講演・devblog・学術論文。**dawn の Phase 8
 
 > dawn の立場: **grey area を採らない。** INV-003（Sector 境界を越える操作は Raft 経由）を守れば、
 > 境界の二重所有による同期バグを**構造的に排除**できる。代償はハンドオフのレイテンシだが、
-> dawn は Transit 頻度を下げる設計（CLAUDE.md パターン5）でこれを吸収する。
+> dawn は Transit 頻度を下げる設計（docs/architecture/design-violations.md Pattern 5）でこれを吸収する。
 
 ### 10.2 既存基盤の比較
 
@@ -705,7 +705,7 @@ dawn 自身の設計が抱える未解決問題・誇張・前提の弱さを列
 
 - 全 Sector 越え移動が Raft コミット（リーダー経由・ネットワーク往復）を通る。**頻繁な境界越えで
   リーダーが律速**し、移動ごとに遅延が乗る。
-- dawn の緩和策「Transit 頻度を下げる」（CLAUDE.md パターン5）は、**アーキテクチャがゲーム設計を
+- dawn の緩和策「Transit 頻度を下げる」（docs/architecture/design-violations.md Pattern 5）は、**アーキテクチャがゲーム設計を
   制約している**ことの裏返し。流動的移動や「境界を跨ぐ戦闘」がやりにくく、柱①
   「大規模リアルタイム戦闘」と緊張関係にある。
 - 軽減はあるが（Sector を粗く / 近接同居 / バッチコミット）、**「境界をまたぐ戦闘」は本質的に苦手**

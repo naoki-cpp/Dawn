@@ -1,38 +1,37 @@
 # Event Schema Evolution Rules
 
-> AI_DEVELOPMENT_GUIDE.md §7 の詳細の正典。ガイド本体には「現在プレリリース＝破壊的変更可」
-> の注記とこのファイルへのリンクのみを残す（ADR-0030）。
+> Canonical detail for AI_DEVELOPMENT_GUIDE.md §7 (ADR-0030). The guide itself keeps only
+> a note that we are currently pre-release (breaking changes allowed) and a link here.
 
-## フェーズによる適用範囲
+## Scope by phase
 
-このルールには **プレリリース（現在）** と **リリース以降** の 2 段階がある。
+This document applies in two phases:
 
 ```
-プレリリース（Phase 1〜リリース前）:
-  永続化されたイベントログを持つ外部ユーザーが存在しない。
-  → 破壊的変更（フィールド削除・型変更・イベント削除）を直接行ってよい。
-  → Upcaster・V2 命名・Deprecated マークは不要。
-  → ただし docs/architecture/event-catalog.md と AI_DEVELOPMENT_GUIDE.md は常に実態と合わせること。
+Pre-release (Phase 1 through release):
+  No external user holds a persisted event log.
+  -> Breaking changes (remove a field, change a type, remove an Event) are allowed directly.
+  -> No Upcaster, V2 naming, or Deprecated marking required.
+  -> docs/architecture/event-catalog.md and AI_DEVELOPMENT_GUIDE.md must always match the code.
 
-リリース以降（本番ログが存在する段階）:
-  外部ユーザーのイベントログが存在する。
-  → 既存フィールドの変更・削除は Upcaster なしに行ってはならない。
-  → 以下「リリース以降の制約」が完全に適用される。
+Post-release (once production logs exist):
+  External users hold event logs.
+  -> Existing fields may not be changed or removed without an Upcaster.
+  -> The "Post-release constraints" below apply in full.
 ```
 
-**現在は Phase 6（プレリリース）。破壊的変更は許可されている。**
+**We are currently in Phase 6 (pre-release). Breaking changes are permitted.**
 
 ---
 
-## リリース以降の基本原則
+## Post-release basic principle
 
-**既存の Event フィールドを変更・削除してはならない。**
-**新しいフィールドの追加のみが許可される。**
+**Existing Event fields must not be changed or removed. Only adding new fields is allowed.**
 
-### リリース以降に許可される変更
+### Allowed post-release
 
 ```rust
-// 変更前
+// Before
 pub struct WeaponFired {
     pub ship_id  : ShipId,
     pub target_id: ShipId,
@@ -40,77 +39,77 @@ pub struct WeaponFired {
     pub tick     : Tick,
 }
 
-// 変更後: 新フィールドの追加は許可（必ず Option にする）
+// After: adding a new field is allowed (must be Option)
 pub struct WeaponFired {
     pub ship_id  : ShipId,
     pub target_id: ShipId,
     pub damage   : f32,
     pub tick     : Tick,
-    pub hit_chance: Option<f32>,  // ← 新フィールドは Option<T> で追加
+    pub hit_chance: Option<f32>,  // new field added as Option<T>
 }
 ```
 
-### リリース以降に禁止される変更
+### Forbidden post-release
 
 ```rust
-// 禁止1: フィールドの削除
+// Forbidden 1: removing a field
 pub struct WeaponFired {
     pub ship_id  : ShipId,
-    // target_id を削除 ← 禁止。過去のEventのReplayでデシリアライズが失敗する
+    // target_id removed <- forbidden. Replay of past Events fails to deserialize.
     pub damage   : f32,
     pub tick     : Tick,
 }
 
-// 禁止2: フィールドの型変更
+// Forbidden 2: changing a field's type
 pub struct WeaponFired {
     pub ship_id  : ShipId,
-    pub target_id: u64,   // ShipId → u64 に変更 ← 禁止
+    pub target_id: u64,   // ShipId -> u64 <- forbidden
     pub damage   : f32,
     pub tick     : Tick,
 }
 
-// 禁止3: フィールド名の変更（シリアライゼーションのキーが変わる）
+// Forbidden 3: renaming a field (changes the serialization key)
 pub struct WeaponFired {
-    pub attacker_id: ShipId,  // ship_id → attacker_id に変更 ← 禁止
+    pub attacker_id: ShipId,  // ship_id -> attacker_id <- forbidden
     pub target_id  : ShipId,
     pub damage     : f32,
     pub tick       : Tick,
 }
 ```
 
-### リリース以降に破壊的変更が必要な場合の手順
+### Procedure when a breaking change is unavoidable post-release
 
 ```
-1. 新しい Event を別名で定義する
-   例: WeaponFired → WeaponFiredV2
+1. Define a new Event under a new name
+   e.g. WeaponFired -> WeaponFiredV2
 
-2. 古い Event を Deprecated としてマークする（削除しない）
-   /// @deprecated WeaponFiredV2 を使用すること
+2. Mark the old Event as Deprecated (do not delete it)
+   /// @deprecated use WeaponFiredV2
    pub struct WeaponFired { ... }
 
-3. Upcaster を実装する
+3. Implement an Upcaster
    impl Upcaster for WeaponFired {
        fn upcast(self) -> WeaponFiredV2 { ... }
    }
 
-4. Replay 時に Upcaster を通して新形式に変換する
+4. Pass through the Upcaster during Replay to convert to the new form
 
-5. docs/architecture/event-catalog.md を更新する
+5. Update docs/architecture/event-catalog.md
 
-6. 対応する ADR を作成する（既存 ADR の更新ではなく新規作成）
+6. Write a new ADR for this change (do not edit an existing ADR)
 ```
 
-## Event Catalog との同期
+## Syncing with the Event Catalog
 
-`docs/architecture/event-catalog.md` が Event の唯一の仕様書である。
-フェーズにかかわらず、コードの変更と同時に更新すること。
+`docs/architecture/event-catalog.md` is the single source of truth for Events.
+Update it together with any code change, in every phase.
 
 ```bash
-# Event定義とカタログの整合をCIで検証する
+# CI verifies that Event definitions and the catalog agree
 cargo run --bin check-event-catalog
 
-# このコマンドが失敗する場合、以下のいずれかが発生している:
-# - コードにあってカタログにないEvent
-# - カタログにあってコードにないEvent
-# - フィールド定義の不一致
+# Failure means one of:
+# - an Event exists in code but not in the catalog
+# - an Event exists in the catalog but not in code
+# - a field definition mismatch
 ```

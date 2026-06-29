@@ -1,572 +1,520 @@
 ---
-scope    : 存在する全イベントと全コマンドの完全仕様。「何が起きうるか」の唯一の真実
+scope    : Complete spec of every Event and Command that exists. The single source of truth for "what can happen"
 audience : AI Agent / Human Developer
-update   : イベント / コマンドを追加・変更するたびに必ず更新する
-related  : entity-model.md, tick-model.md, CLAUDE.md §7
+update   : Must be updated whenever an Event or Command is added or changed
+related  : entity-model.md, tick-model.md, event-schema-evolution.md
 ---
 
 # Event Catalog
 
-## 1. このカタログの使い方
+## 1. Using This Catalog
 
-### コードとの同期ルール
+### Sync rule
 
-`dawn-core/src/events.rs` / `dawn-core/src/commands.rs` の定義と
-このカタログは**常に一致していなければならない**。
-イベント / コマンドを追加・変更した場合は、コードとカタログを同一 PR で更新すること。
+This catalog must always match the definitions in `dawn-core/src/events.rs` / `dawn-core/src/commands.rs`. Update both code and catalog in the same PR.
 
-### イベント追加の手順
+### Procedure for adding an Event
 
 ```
-1. このカタログに新しいイベントを追記する
-2. dawn-core/src/events.rs に型を追加する
-3. 対応する Command が必要なら dawn-core/src/commands.rs にも追加する
-4. 単体テストを events.rs 内に書く
-5. PR 説明に「変更したイベント一覧」を記載する
+1. Add the new event to this catalog
+2. Add the type to dawn-core/src/events.rs
+3. If a corresponding Command is needed, add it to dawn-core/src/commands.rs
+4. Write a unit test in events.rs
+5. List the changed events in the PR description
 ```
 
-### 後方互換性ルール
+### Backward compatibility rules
 
-**プレリリース段階（現在）:** 外部ユーザーのイベントログが存在しないため、
-フィールド削除・型変更・イベント削除などの破壊的変更を直接行ってよい。
+**Pre-release (current):** No external user event logs exist yet, so breaking changes (removing fields, changing types, removing events) are allowed directly.
 
-**リリース以降:**
+**Post-release:**
 ```
-許可: 新しいフィールドを Option<T> として追加する
-禁止: 既存フィールドを削除する
-禁止: 既存フィールドの型を変更する
-禁止: 既存フィールドの名前を変更する
-禁止: イベント名を変更する（代わりに V2 を新設する）
+Allowed: add new fields as Option<T>
+Forbidden: remove an existing field
+Forbidden: change an existing field's type
+Forbidden: rename an existing field
+Forbidden: rename an event (introduce a V2 instead)
 ```
 
-リリース後に破壊的変更が必要な場合は [Upcaster の手順](#6-upcasterカタログ) に従うこと。
-→ 詳細は CLAUDE.md §7 参照。
+Post-release breaking changes must follow the [Upcaster procedure](#6-upcaster-catalog). See [event-schema-evolution.md](./event-schema-evolution.md) for details.
 
 ---
 
-## 2. イベント設計の原則
+## 2. Event Design Principles
 
-### Command と Event の違い
+### Command vs Event
 
 | | Command | Event |
 |---|---|---|
-| 意味 | 変更の**要求** | 変更が起きた**事実** |
-| 拒否 | される可能性がある | されない（既に起きた） |
-| 保存 | しない | Append-only で永続化 |
-| ファイル | `commands.rs` | `events.rs` |
+| Meaning | a **request** for change | the **fact** that change occurred |
+| Rejectable | yes | no (already happened) |
+| Persisted | no | yes, append-only |
+| File | `commands.rs` | `events.rs` |
 
-Command と Event を同じ型・同じ enum で表現してはならない（INV-006）。
+Commands and Events must never share a type or enum (INV-006).
 
-### 全イベントが持つ共通フィールド
+### Common field
 
-全イベントは必ず `tick: Tick` を持つ。
-`tick` を省略したイベントは INV-005 違反として拒否する。
+Every event has `tick: Tick`. An event omitting `tick` is rejected as an INV-005 violation.
 
-### Optional フィールドの方針
+### Optional field policy
 
-- 最初に定義するフィールドは全て必須（`Option` にしない）
-- 後から追加するフィールドは全て `Option<T>` とする
-- 最初から `Option` にすることは禁止（意図のない省略を許すため）
+- Fields defined initially are always required (never `Option`)
+- Fields added later are always `Option<T>`
+- Never define a field as `Option` from the start (to avoid unintentional omission)
 
-### イベントログの永続化モデル（2 層ログ・ADR-0017）
+### Persistence model (two-tier log, ADR-0017)
 
-ここに載るイベントは **append-only** で永続化される（INV-001 / FBD-001）。
-物理的なログは 2 層構成だが、**イベントの不変性とカタログの意味は変わらない**。
+Events in this catalog are persisted **append-only** (INV-001 / FBD-001). The physical log has two tiers, but this does not change event immutability or catalog semantics:
 
 ```
-ホットログ       : 最新セグメント。有界に保つため検証済みスナップショット背後を圧縮する
-コールドアーカイブ : 圧縮で移送されたセグメント。append-only で永久保持（監査・災害復旧）
+Hot log      : latest segment, kept bounded by compacting behind verified snapshots
+Cold archive : segments moved out by compaction; retained forever, append-only (audit / DR)
 ```
 
-- 圧縮（`compact`）は**セグメントの移送**であり、イベントの書き換え・削除ではない。
-  EventStore trait は append-only のまま（truncate / delete / rewrite は存在しない）。
-- **スナップショットが権威ある永続チェックポイント**（INV-002）。通常運用・failover の復旧は
-  「スナップショット + ホットログ末尾の catch-up」で行い、創世記からの全 replay は経路外。
-- 位置・capacitor・lock カウントダウン・thrust intent などの派生 / transient 状態は
-  イベントに記録せず**スナップショットに永続化**する。各イベントの **Replay** 欄は
-  「権威ある状態をイベントから組み直す」手順を指す（transient 状態は live の Tick で再計算）。
+- Compaction (`compact`) **relocates segments**; it never rewrites or deletes events. The EventStore trait stays append-only (no truncate / delete / rewrite).
+- **The snapshot is the authoritative persistent checkpoint** (INV-002). Normal recovery and failover use "snapshot + hot-log tail catch-up"; full replay from genesis is off the critical path.
+- Derived/transient state (position, capacitor, lock countdowns, thrust intent) is not recorded in events — it lives only in snapshots. Each event's **Replay** note describes reconstructing authoritative state from events; transient state is recomputed live each Tick.
 
-→ 詳細は [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / CLAUDE.md §2 INV-002 を参照。
+See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.md "Architecture Invariants"](../../AI_DEVELOPMENT_GUIDE.md) (INV-002).
 
 ---
 
-## 3. イベント一覧
+## 3. Event List
 
-### 3.1 Ship ライフサイクル
+### 3.1 Ship Lifecycle
 
-| イベント名 | 説明 | 発行者 | ステータス |
+| Event | Description | Emitter | Status |
 |---|---|---|---|
-| `ShipSpawned` | Ship が世界に出現した | `SimulationNode::spawn_ship()` | ✅ 実装済み |
-| `ShipDespawned` | Ship が世界から消えた（手動） | `SimulationNode` | 型定義のみ（発行箇所なし・Replay 対応あり） |
-| `ShipDestroyed` | Ship が戦闘で破壊された | `CombatSystem` | ✅ 実装済み |
+| `ShipSpawned` | Ship appeared in the world | `SimulationNode::spawn_ship()` | ✅ implemented |
+| `ShipDespawned` | Ship manually removed from the world | `SimulationNode` | type only (no emission site; Replay supported) |
+| `ShipDestroyed` | Ship destroyed in combat | `CombatSystem` | ✅ implemented |
 
 ### 3.2 Movement
 
-| イベント名 | 説明 | 発行者 | ステータス |
+| Event | Description | Emitter | Status |
 |---|---|---|---|
-| `VelocityChanged` | Ship の速度が変化した | `MovementSystem::run()` | ✅ 実装済み（ADR-0008） |
+| `VelocityChanged` | Ship velocity changed | `MovementSystem::run()` | ✅ implemented (ADR-0008) |
 
 ### 3.3 Fitting
 
-| イベント名 | 説明 | 発行者 | ステータス |
+| Event | Description | Emitter | Status |
 |---|---|---|---|
-| `ShipFitted` | Ship の装備スロットが変更された | `SimulationNode::fit_module()` | ✅ 実装済み |
-| `ModuleActivated` | Active モジュールがオンになった | `SimulationNode::activate_module_owned()` | ✅ 実装済み |
-| `ModuleDeactivated` | Active モジュールがオフになった（手動 or cap 枯渇による強制 OFF） | `SimulationNode::deactivate_module_owned()` / `CapacitorSystem` | ✅ 実装済み（cap 枯渇による強制 OFF は ADR-0011 参照） |
+| `ShipFitted` | Ship's fitting slots changed | `SimulationNode::fit_module()` | ✅ implemented |
+| `ModuleActivated` | Active Module turned on | `SimulationNode::activate_module_owned()` | ✅ implemented |
+| `ModuleDeactivated` | Active Module turned off (manual, or forced off by Capacitor exhaustion) | `SimulationNode::deactivate_module_owned()` / `CapacitorSystem` | ✅ implemented (forced off on cap exhaustion: ADR-0011) |
 
 ### 3.4 Lock-on
 
-| イベント名 | 説明 | 発行者 | ステータス |
+| Event | Description | Emitter | Status |
 |---|---|---|---|
-| `TargetLocked` | ロックオンが完了した | `LockSystem::run()` | ✅ 実装済み |
-| `LockLost` | ロックが消失した | `LockSystem::run()` | ✅ 実装済み |
+| `TargetLocked` | Lock-on completed | `LockSystem::run()` | ✅ implemented |
+| `LockLost` | Lock lost | `LockSystem::run()` | ✅ implemented |
 
 ### 3.5 Combat
 
-| イベント名 | 説明 | 発行者 | ステータス |
+| Event | Description | Emitter | Status |
 |---|---|---|---|
-| `WeaponFired` | 武器が発射された | `CombatSystem::run()` | ✅ 実装済み |
-| `DamageTaken` | Ship がダメージを受けた | `CombatSystem::run()` | ✅ 実装済み |
-| `RepairApplied` | Ship がローカル修理モジュールでシールド / アーマーを回復した | `RepairSystem::run()` | ✅ 実装済み（ADR-0033） |
+| `WeaponFired` | Weapon fired | `CombatSystem::run()` | ✅ implemented |
+| `DamageTaken` | Ship took damage | `CombatSystem::run()` | ✅ implemented |
+| `RepairApplied` | Ship's Shield/Armor restored by a local repair Module | `RepairSystem::run()` | ✅ implemented (ADR-0033) |
 
-### 3.6 Sector Transit（ADR-0014）
+### 3.6 Sector Transit (ADR-0014)
 
-| イベント名 | 説明 | 発行者 | ステータス |
+| Event | Description | Emitter | Status |
 |---|---|---|---|
-| `SectorTransitRequested` | Sector Transit が提案された（所有権は from のまま） | `SimulationNode::propose_transit()` | ✅ 実装済み |
-| `SectorTransitCompleted` | Sector Transit が完了した（所有権が to に移った） | `SimulationNode::export_transit()` / `import_transit()`（from / to 双方が自ログに Append） | ✅ 実装済み |
-| `SectorTransitAborted` | Transit が中断された（所有権は from に残る） | （宛先ノード障害時・未配線） | 型定義のみ |
+| `SectorTransitRequested` | Sector Transit proposed (ownership stays with `from`) | `SimulationNode::propose_transit()` | ✅ implemented |
+| `SectorTransitCompleted` | Sector Transit completed (ownership moved to `to`) | `SimulationNode::export_transit()` / `import_transit()` (both `from` and `to` append to their own log) | ✅ implemented |
+| `SectorTransitAborted` | Transit aborted (ownership stays with `from`) | (destination node failure case; not wired) | type only |
 
-バリデーション段階の拒否はイベントではなく `CommandRejected` の返却で
-表現する（INV-006）。`SectorTransitRejected` というイベントは定義しない。
-`propose_transit` は Ship 不在 / 既に Transit 中の場合 `Err` を返し、
-イベントを発行しない。
+Validation-stage rejection is expressed via `CommandRejected`, not an event (INV-006); there is no `SectorTransitRejected` event. `propose_transit` returns `Err` without emitting an event if the Ship is absent or already in Transit.
 
-`TransitCommand { ship_id, to }` が対応する Command（dawn-core/src/commands.rs）。
-Transit Proposal（`TransitOp::Request` / `Commit`）は Raft Log を経由して
-コミットされ、各ノードが Tick Step 7.5（`apply_committed_raft_entries`）で
-ECS に適用したうえで上記イベントを自分の EventStore に Append する。
+The corresponding Command is `TransitCommand { ship_id, to }` (`dawn-core/src/commands.rs`). The Transit Proposal (`TransitOp::Request` / `Commit`) is committed via the Raft Log; each node applies it to ECS in Tick Step 7.5 (`apply_committed_raft_entries`) before appending the events above to its own EventStore.
 
-### 3.7 Jump Gate Navigation（ADR-0009・実装完了）
+### 3.7 Jump Gate Navigation (ADR-0009, complete)
 
-| イベント名 | 説明 | 発行者 | ステータス |
+| Event | Description | Emitter | Status |
 |---|---|---|---|
-| `JumpGateUsed` | Ship がジャンプゲートを使って別 Sector に移動した | `SimulationNode::append_jump_events`（Step 7.5・destination ノード） | ✅ 実装済み（Raft パイプライン） |
-| `StarSystemChanged` | Ship が別の星系に移動した（`JumpGateUsed` と同時） | `SimulationNode::append_jump_events`（Step 7.5・destination ノード） | ✅ 実装済み（Raft パイプライン） |
+| `JumpGateUsed` | Ship moved to another Sector via a Jump Gate | `SimulationNode::append_jump_events` (Step 7.5, destination node) | ✅ implemented (Raft pipeline) |
+| `StarSystemChanged` | Ship moved to a different star system (concurrent with `JumpGateUsed`) | `SimulationNode::append_jump_events` (Step 7.5, destination node) | ✅ implemented (Raft pipeline) |
 
-`JumpCommand { ship_id, gate_id }` が対応する Command。
-`TransitCommand` と同じ Raft Log 経路（ADR-0014）でコミットする。
-`TransitOp::Request`/`Commit` は `gate_id: Option<JumpGateId>` を持ち、
-Step 7.5 で destination ノードが `SectorTransitCompleted` に加えて
-`JumpGateUsed` を Append し、`from`/`to` の `StarSystemId` が異なる場合は
-`StarSystemChanged` も Append する（`SimulationNode::append_jump_events`）。
+Corresponding Command: `JumpCommand { ship_id, gate_id }`, committed over the same Raft Log path as `TransitCommand` (ADR-0014). `TransitOp::Request`/`Commit` carries `gate_id: Option<JumpGateId>`; in Step 7.5 the destination node appends `JumpGateUsed` alongside `SectorTransitCompleted`, and appends `StarSystemChanged` too if `from`/`to` have different `StarSystemId` (`SimulationNode::append_jump_events`).
 
-静的トポロジー（3 星系・4 ジャンプゲート）は `dawn-sector/src/galaxy.rs`
-に定義する（ADR-0026）。`protocol.rs` の `domain_event_to_json` が両イベントを JSON としてクライアントに配信し、
-`JumpCommand` の JSON パーサーも `protocol.rs` に実装済み。Godot クライアント側
-（`connection.gd` の `send_jump_command`、`main.gd` の
-`_handle_jump_gate_used` / `_handle_star_system_changed`）も実装済み
-（ADR-0009 実装チェックリスト全完了）。
+Static topology (3 star systems, 4 jump gates) is defined in `dawn-sector/src/galaxy.rs` (ADR-0026). `protocol.rs`'s `domain_event_to_json` serializes both events to clients, and its JSON parser handles `JumpCommand`. The Godot client (`connection.gd`'s `send_jump_command`, `main.gd`'s `_handle_jump_gate_used` / `_handle_star_system_changed`) is also implemented (ADR-0009 checklist fully complete).
 
-### 3.8 Tackle（ADR-0024）
+### 3.8 Tackle (ADR-0024)
 
-| イベント名 | 説明 | 発行者 | ステータス |
+| Event | Description | Emitter | Status |
 |---|---|---|---|
-| `TackleApplied` | Fold Disruptor がターゲットに有効化された（射程内 + ロック済み） | `SimulationNode::process_tackle()`（Step 4.5） | ✅ 実装済み |
-| `TackleReleased` | Tackle 効果が終了した（モジュール OFF / 射程外 / tackler 破壊） | `SimulationNode::process_tackle()`（Step 4.5） | ✅ 実装済み |
+| `TackleApplied` | Fold Disruptor activated on a target (in range + locked) | `SimulationNode::process_tackle()` (Step 4.5) | ✅ implemented |
+| `TackleReleased` | Tackle effect ended (Module off / out of range / tackler destroyed) | `SimulationNode::process_tackle()` (Step 4.5) | ✅ implemented |
 
-tackled 状態の間、Ship は `can_propose_warp()` / `can_propose_jump()` が false を返すため
-ワープ・ジャンプを実行できない。`TackledComp` はスナップショットに永続化される（INV-002）。
+While tackled, `can_propose_warp()` / `can_propose_jump()` return false, blocking Warp/Jump. `TackledComp` is persisted in the snapshot (INV-002).
 
-`TackleApplied` のない `TackleReleased` は発行しない（必ず 1:1 対応）。
-同一ターゲットに複数の tackler がいる場合は tackler ごとにペアを発行する。
+`TackleReleased` is never emitted without a matching prior `TackleApplied` (strict 1:1 pairing). With multiple simultaneous tacklers, each tackler gets its own pair.
 
-### 3.9 座標アンカー（ADR-0029）
+### 3.9 Coordinate Anchoring (ADR-0029)
 
-| イベント名 | 説明 | 発行者 | ステータス |
+| Event | Description | Emitter | Status |
 |---|---|---|---|
-| `AnchorRebased` | Ship の座標アンカーが変わった（絶対位置は不変・`(anchor, offset)` 表現のみ更新。例: ワープ到着で恒星アンカー→着弾天体アンカー） | `SimulationNode`（ワープ到着・ADR-0029 step 4） | 🔶 イベント/apply 実装済み・発行は step 4 で配線 |
+| `AnchorRebased` | Ship's coordinate anchor changed (absolute position unchanged; only the `(anchor, offset)` representation updates — e.g. star anchor → destination-body anchor on Warp arrival) | `SimulationNode` (Warp arrival, ADR-0029 step 4) | 🔶 event/apply implemented; emission wiring is step 4 |
 
-権威イベント：`anchor` と post-rebase `offset` を保持し、replay が表現を厳密に再現する
-（リベースは速度由来でない不連続なフレーム変更のため、自身のファクトとして記録する。INV-MOVE は
-速度駆動の運動に関する不変条件で、フレームのリベースは絶対位置を保つ）。
+This is an authoritative event: it stores `anchor` and the post-rebase `offset` so Replay reproduces the representation exactly. A rebase is a non-velocity-driven frame change, so it's recorded as its own fact; INV-MOVE (the invariant for velocity-driven motion) doesn't apply since absolute position is preserved.
 
-### 3.9 System（将来予約）
+### 3.9 System (reserved for future use)
 
-| イベント名 | 説明 | ステータス |
+| Event | Description | Status |
 |---|---|---|
-| `TickStarted` | Tick の開始 | 未実装 |
-| `TickCompleted` | Tick の完了 | 未実装 |
+| `TickStarted` | Tick started | not implemented |
+| `TickCompleted` | Tick completed | not implemented |
 
-### 3.10 AoI（Area of Interest）配信フィルタ（ADR-0019）
+### 3.10 AoI (Area of Interest) Delivery Filter (ADR-0019)
 
-AoI の実装は **新しいドメインイベントを持たない**。
-`DomainEvent` の配信時に観測者の 27 セル近傍フィルタを適用することで実現する。
+AoI introduces **no new domain events**. It's implemented by filtering `DomainEvent` delivery through each observer's 27-cell neighborhood.
 
-| メッセージ | 説明 | ステータス |
+| Message | Description | Status |
 |---|---|---|
-| `AoiEnter` | Ship が観測者の観測範囲に入った（WebSocket 配信メッセージ・ドメインイベントではない） | ✅ 実装済み（8C・ADR-0019） |
-| `AoiLeave` | Ship が観測者の観測範囲から出た（同上） | ✅ 実装済み（8C・ADR-0019） |
+| `AoiEnter` | Ship entered an observer's AoI (WebSocket delivery message, not a domain event) | ✅ implemented (8C, ADR-0019) |
+| `AoiLeave` | Ship left an observer's AoI (same) | ✅ implemented (8C, ADR-0019) |
 
-`AoiEnter` / `AoiLeave` は EventStore に Append されない（ドメインイベントではなく配信制御メッセージ）。
-Replay には影響せず、`InitialState` + `DomainEvent` フィルタリングで AoI 整合性を保つ。
+`AoiEnter` / `AoiLeave` are not appended to the EventStore — they are delivery-control messages, not domain events. They don't affect Replay; AoI consistency comes from `InitialState` + `DomainEvent` filtering.
 
 ---
 
-## 4. コマンド一覧
+## 4. Command List
 
-コマンドは `dawn-core/src/commands.rs` で定義される。
-クライアントからサーバーへは `ClientCommand` enum（`dawn-actor`）でラップして送信する。
+Commands are defined in `dawn-core/src/commands.rs`. Clients send them to the server wrapped in the `ClientCommand` enum (`dawn-actor`).
 
-| コマンド名 | 説明 | 対応イベント | ステータス |
+| Command | Description | Resulting Event(s) | Status |
 |---|---|---|---|
-| `MoveCommand` | 推力方向を指定する | — | ✅ 実装済み |
-| `LockOnCommand` | ロックオン開始を要求する | `TargetLocked` | ✅ 実装済み |
-| `FitModuleCommand` | インベントリのモジュールをスロットへ装備する（クライアント発行は所有権・スロット種別・容量・所持を検証 / ADR-0032） | `ShipFitted` | ✅ 実装済み |
-| `UnfitModuleCommand` | 装備中のモジュールをインベントリへ戻す（ADR-0032） | `ShipFitted` | ✅ 実装済み |
-| `ActivateModuleCommand` | Active モジュールをオンにする | `ModuleActivated` | ✅ 実装済み |
-| `DeactivateModuleCommand` | Active モジュールをオフにする | `ModuleDeactivated` | ✅ 実装済み |
-| `AttackCommand` | 攻撃対象を指定する | `WeaponFired` | ✅ 型定義・WsServer JSON パーサー実装済み（Phase 5）|
-| `StopCommand` | 加速度を用いて速度をゼロに減速する | — | ✅ 実装済み |
-| `ApproachCommand` | 対象（Ship / Jump Gate）へ半自動接近する（Move / Stop で解除・ADR-0015） | —（新イベントなし） | ✅ 実装済み |
-| `TransitCommand` | Sector Transit を要求する（Raft 経由・ADR-0014） | `SectorTransitRequested` / `Completed` | ✅ 実装済み |
-| `JumpCommand` | ジャンプゲート経由で別 Sector に移動する（Raft 経由・ADR-0009）。射程外の場合は自動ワープ後にジャンプ（auto-warp-then-jump / ADR-0023） | `JumpGateUsed`（+ 別星系なら `StarSystemChanged`） | ✅ 実装済み |
-| `WarpCommand` | 同一セクター内の Jump Gate または天体（恒星・惑星）へワープする（`WarpTarget::Gate` / `Body`・align → warping 2 フェーズ / ADR-0022 / ADR-0025） | —（新イベントなし。移動は `VelocityChanged` で記録） | ✅ 実装済み |
-| `OrbitCommand` | 対象（Ship / Jump Gate）の周りを指定半径で周回する（省略時は武器射程・Move / Stop / 他の操船モードで解除・ADR-0031） | —（新イベントなし。移動は `VelocityChanged` で記録） | ✅ 実装済み |
-| `KeepAtRangeCommand` | 対象（Ship / Jump Gate）から最低指定距離を保つ（省略時は武器射程・Move / Stop / 他の操船モードで解除・ADR-0031） | —（新イベントなし。移動は `VelocityChanged` で記録） | ✅ 実装済み |
+| `MoveCommand` | Specify thrust direction | — | ✅ implemented |
+| `LockOnCommand` | Request lock-on | `TargetLocked` | ✅ implemented |
+| `FitModuleCommand` | Fit an inventory Module into a slot (client-side checks ownership, slot type, capacity, possession; ADR-0032) | `ShipFitted` | ✅ implemented |
+| `UnfitModuleCommand` | Return a fitted Module to inventory (ADR-0032) | `ShipFitted` | ✅ implemented |
+| `ActivateModuleCommand` | Turn on an Active Module | `ModuleActivated` | ✅ implemented |
+| `DeactivateModuleCommand` | Turn off an Active Module | `ModuleDeactivated` | ✅ implemented |
+| `AttackCommand` | Designate an attack target | `WeaponFired` | ⬜ type + WsServer JSON parser only; not wired into combat |
+| `StopCommand` | Decelerate to zero velocity using acceleration | — | ✅ implemented |
+| `ApproachCommand` | Semi-automatic approach to a target (Ship / Jump Gate); cancelled by Move/Stop (ADR-0015) | — (no new event) | ✅ implemented |
+| `TransitCommand` | Request a Sector Transit (via Raft, ADR-0014) | `SectorTransitRequested` / `Completed` | ✅ implemented |
+| `JumpCommand` | Move to another Sector via a Jump Gate (via Raft, ADR-0009); auto-warps first if out of range (auto-warp-then-jump, ADR-0023) | `JumpGateUsed` (+ `StarSystemChanged` if star system changes) | ✅ implemented |
+| `WarpCommand` | Warp within the same Sector to a Jump Gate or celestial body (star/planet) (`WarpTarget::Gate` / `Body`; align → warping, two phases; ADR-0022 / ADR-0025) | — (no new event; movement recorded via `VelocityChanged`) | ✅ implemented |
+| `OrbitCommand` | Orbit a target (Ship / Jump Gate) at a given radius (defaults to weapon range; cancelled by Move/Stop/other helm modes; ADR-0031) | — (no new event; movement via `VelocityChanged`) | ✅ implemented |
+| `KeepAtRangeCommand` | Maintain a minimum distance from a target (Ship / Jump Gate) (defaults to weapon range; cancelled by Move/Stop/other helm modes; ADR-0031) | — (no new event; movement via `VelocityChanged`) | ✅ implemented |
 
 ---
 
-## 5. イベント詳細仕様
+## 5. Event Field Specs
 
 ### `ShipSpawned`
 
-**説明:** Ship が Sector 内に生成された。
+Ship generated within a Sector.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | 生成された Ship の一意な識別子 |
-| `sector_id` | `SectorId` | ✓ | 生成先の Sector |
-| `initial_position` | `Position` | ✓ | 生成時の座標 |
-| `ship_type_id` | `ShipTypeId` | ✓ | 船種 ID（`ShipTypeDefinition` レジストリで解決） |
-| `tick` | `Tick` | ✓ | 生成された Tick |
+| `ship_id` | `ShipId` | ✓ | unique identifier of the spawned Ship |
+| `sector_id` | `SectorId` | ✓ | Sector it spawned into |
+| `initial_position` | `Position` | ✓ | spawn coordinates |
+| `ship_type_id` | `ShipTypeId` | ✓ | ship type ID (resolved via the `ShipTypeDefinition` registry) |
+| `tick` | `Tick` | ✓ | spawn Tick |
 
-**不変条件:** `ship_id` は世界全体で一意であり、再利用されない（INV-004）。
-`ship_type_id` を含めることで Replay 時に正確な base_stats が復元できる（INV-002）。
+**Invariant:** `ship_id` is globally unique and never reused (INV-004). Including `ship_type_id` lets Replay restore exact base_stats (INV-002).
 
 ---
 
 ### `VelocityChanged`
 
-**説明:** Ship の速度が変化した。`MovementSystem` が物理計算を行い、前 Tick から速度が変わった場合のみ発行する。
+Ship velocity changed. `MovementSystem` runs the physics and emits this only when velocity differs from the previous Tick.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id`  | `ShipId`  | ✓ | 速度が変わった Ship |
-| `velocity` | `Velocity` | ✓ | 変化後の速度ベクトル（units/tick） |
-| `tick`     | `Tick`    | ✓ | 速度が確定した Tick |
+| `ship_id`  | `ShipId`  | ✓ | Ship whose velocity changed |
+| `velocity` | `Velocity` | ✓ | new velocity vector (units/tick) |
+| `tick`     | `Tick`    | ✓ | Tick the velocity was finalized |
 
-**不変条件:** `velocity` は前 Tick と異なる値でなければ発行しない（変化なしはイベントを出さない）。
+**Invariant:** only emitted when `velocity` differs from the previous Tick (no-change is not emitted).
 
-**Replay:** `VelocityChanged` を時系列に適用し、各 Tick で `position += velocity` を計算する。
-物理シミュレーションは不要。`position += velocity` は純粋な算術である。
+**Replay:** apply `VelocityChanged` in order, computing `position += velocity` each Tick. No physics simulation needed — `position += velocity` is pure arithmetic.
 
-**設計根拠:** 位置は派生状態であり権威的イベントに含めない。
-物理入力（推力）もコマンドであり権威的イベントに含めない（ADR-0008）。
+**Rationale:** position is derived state and excluded from authoritative events; thrust input is a Command and likewise excluded (ADR-0008).
 
 ---
 
 ### `ShipDespawned`
 
-**説明:** Ship が世界から永続的に取り除かれた（手動削除）。
+Ship permanently removed from the world (manual deletion).
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | 消滅した Ship |
-| `tick` | `Tick` | ✓ | 消滅した Tick |
+| `ship_id` | `ShipId` | ✓ | removed Ship |
+| `tick` | `Tick` | ✓ | removal Tick |
 
 ---
 
 ### `ShipFitted`
 
-**説明:** Ship の装備スロットが変更された。
+Ship's fitting slots changed.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | 装備を変更した Ship |
-| `fitting` | `FittingSnapshot` | ✓ | 変更後の全スロットのスナップショット（モジュール ID リスト） |
-| `inventory` | `Vec<ModuleId>` | ✓ | 変更後の未装備インベントリのスナップショット（ADR-0032。`#[serde(default)]`） |
-| `tick` | `Tick` | ✓ | 装備変更が確定した Tick |
+| `ship_id` | `ShipId` | ✓ | Ship whose fitting changed |
+| `fitting` | `FittingSnapshot` | ✓ | snapshot of all slots after the change (list of Module IDs) |
+| `inventory` | `Vec<ModuleId>` | ✓ | snapshot of unfitted inventory after the change (ADR-0032, `#[serde(default)]`) |
+| `tick` | `Tick` | ✓ | Tick the fitting change was finalized |
 
-**設計メモ:** `stats` フィールドは持たない。Replay 時は `FittingSnapshot` から
-`apply_fitting()` で再計算するため（INV-002 準拠）。Fit/Unfit は常に装備と
-インベントリを同時に変えるため、新規イベント型を起こさず両方をここに同梱する
-（ADR-0032）。
+**Design note:** no `stats` field — Replay recomputes via `apply_fitting()` from `FittingSnapshot` (INV-002). Fit/Unfit always change both fitting and inventory together, so both are carried by this one event type rather than splitting into two (ADR-0032).
 
 ---
 
 ### `TargetLocked`
 
-**説明:** `LockSystem` のカウントダウンが完了し、ロックオンが確立した。
+`LockSystem`'s countdown completed and lock-on was established.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `locker_id` | `ShipId` | ✓ | ロックした Ship |
-| `target_id` | `ShipId` | ✓ | ロックされた Ship |
-| `tick` | `Tick` | ✓ | ロックが完了した Tick |
+| `locker_id` | `ShipId` | ✓ | Ship that locked |
+| `target_id` | `ShipId` | ✓ | Ship that was locked |
+| `tick` | `Tick` | ✓ | Tick lock completed |
 
-**Replay:** `LockComp` の該当エントリを `Locked` 状態に更新する。
+**Replay:** update the matching `LockComp` entry to `Locked`.
 
 ---
 
 ### `LockLost`
 
-**説明:** ロックが消失した。ターゲットが撃沈または射程外になった場合に発行する。
+Lock lost, e.g. because the target was destroyed or moved out of range.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `locker_id` | `ShipId` | ✓ | ロックを失った Ship |
-| `target_id` | `ShipId` | ✓ | ロック対象だった Ship |
-| `tick` | `Tick` | ✓ | ロックが消失した Tick |
+| `locker_id` | `ShipId` | ✓ | Ship that lost the lock |
+| `target_id` | `ShipId` | ✓ | Ship that was the lock target |
+| `tick` | `Tick` | ✓ | Tick the lock was lost |
 
-**Replay:** `LockComp` から該当エントリを削除する。
+**Replay:** remove the matching entry from `LockComp`.
 
 ---
 
 ### `WeaponFired`
 
-**説明:** 武器が発射され、かつ命中した。ミス（命中率チェック失敗）の場合はイベントを発行しない。
-ダメージは同 Tick の `DamageTaken` で確認できる。
+Weapon fired and hit. A miss (failed hit-chance check) does not emit this event. Damage appears in the same-Tick `DamageTaken`.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `attacker_id` | `ShipId` | ✓ | 発射した Ship |
-| `target_id` | `ShipId` | ✓ | 攻撃対象の Ship |
-| `damage` | `f32` | ✓ | 実際に与えるダメージ量（基礎ダメージ × ランダム倍率 0.49〜1.49、1%確率で 3.0） |
-| `tick` | `Tick` | ✓ | 発射した Tick |
+| `attacker_id` | `ShipId` | ✓ | firing Ship |
+| `target_id` | `ShipId` | ✓ | targeted Ship |
+| `damage` | `f32` | ✓ | actual damage dealt (base damage × random multiplier 0.49–1.49, 1% chance of 3.0) |
+| `tick` | `Tick` | ✓ | Tick of firing |
 
-**発行条件（ADR-0012）:**
-1. ターゲットが `LockComp` で `Locked` 状態である
-2. Capacitor サイクルが開始された Tick である（`fire_triggers` に含まれる）
-3. 命中率チェックを通過した（`rand() < hit_chance`）
+**Emission conditions (ADR-0012):**
+1. target is `Locked` in `LockComp`
+2. the Capacitor cycle started this Tick (included in `fire_triggers`)
+3. the hit-chance check passed (`rand() < hit_chance`)
 
-命中率 = `0.5 ^ ((angular / (tracking × sig))² + (max(0, dist − optimal) / falloff)²)`
+Hit chance = `0.5 ^ ((angular / (tracking × sig))² + (max(0, dist − optimal) / falloff)²)`
 
-**Replay:** ECS 状態を変更しない（発射ログのみ）。`damage` フィールドに実際の値が記録されているため、
-Replay 時は乱数を再計算しない。
+**Replay:** does not mutate ECS state (fire log only). `damage` already holds the realized value, so Replay does not re-roll randomness.
 
 ---
 
 ### `DamageTaken`
 
-**説明:** Ship がダメージを受け、HP が変化した。
-HP は Shield → Armor → Hull の順に消費される。
+Ship took damage and HP changed. HP is consumed Shield → Armor → Hull.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | ダメージを受けた Ship |
-| `damage` | `f32` | ✓ | 受けたダメージ量（適用前） |
-| `current_shield` | `f32` | ✓ | ダメージ後のシールド残量 |
-| `current_armor` | `f32` | ✓ | ダメージ後のアーマー残量 |
-| `current_hull` | `f32` | ✓ | ダメージ後のハル残量 |
-| `tick` | `Tick` | ✓ | ダメージを受けた Tick |
+| `ship_id` | `ShipId` | ✓ | Ship damaged |
+| `damage` | `f32` | ✓ | damage received (pre-application) |
+| `current_shield` | `f32` | ✓ | shield remaining after damage |
+| `current_armor` | `f32` | ✓ | armor remaining after damage |
+| `current_hull` | `f32` | ✓ | hull remaining after damage |
+| `tick` | `Tick` | ✓ | Tick of damage |
 
-**設計メモ:** 3 フィールドを含めることで Replay 時に `HullComp` を正確に復元できる（INV-002 準拠）。
+**Design note:** carrying all three HP layers lets Replay reconstruct `HullComp` exactly (INV-002).
 
 ---
 
 ### `RepairApplied`
 
-**説明:** Active な Shield Booster / Armor Repairer のサイクル開始により、Ship の現在 HP が回復した。
-回復対象は Shield または Armor のみで、最大 HP を超えない。
+An active Shield Booster / Armor Repairer cycle restored a Ship's current HP. Only Shield or Armor is restored, never beyond max HP.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | 回復した Ship |
-| `amount` | `f32` | ✓ | 実際に回復した量（最大 HP clamp 後） |
-| `layer` | `RepairLayer` | ✓ | 回復した層（`Shield` / `Armor`） |
-| `current_shield` | `f32` | ✓ | 回復後のシールド残量 |
-| `current_armor` | `f32` | ✓ | 回復後のアーマー残量 |
-| `current_hull` | `f32` | ✓ | 回復後のハル残量 |
-| `tick` | `Tick` | ✓ | 回復が適用された Tick |
+| `ship_id` | `ShipId` | ✓ | Ship repaired |
+| `amount` | `f32` | ✓ | actual amount restored (after max-HP clamp) |
+| `layer` | `RepairLayer` | ✓ | layer restored (`Shield` / `Armor`) |
+| `current_shield` | `f32` | ✓ | shield remaining after repair |
+| `current_armor` | `f32` | ✓ | armor remaining after repair |
+| `current_hull` | `f32` | ✓ | hull remaining after repair |
+| `tick` | `Tick` | ✓ | Tick repair was applied |
 
-**設計メモ:** `DamageTaken` の負値として表現せず、回復の事実を独立イベントとして記録する。
-クライアント表現とログ上の意味がダメージと異なるため（ADR-0033）。
+**Design note:** modeled as its own event rather than a negative `DamageTaken`, since its client presentation and log meaning differ from damage (ADR-0033).
 
 ---
 
 ### `ModuleActivated`
 
-**説明:** Active モジュールがオンになった。
+Active Module turned on.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id`   | `ShipId`  | ✓ | 操作した Ship |
-| `module_id` | `ModuleId` | ✓ | 対象モジュール |
-| `slot`      | `SlotKind` | ✓ | 装備スロット種別 |
-| `tick`      | `Tick`    | ✓ | 活性化した Tick |
+| `ship_id`   | `ShipId`  | ✓ | Ship performing the action |
+| `module_id` | `ModuleId` | ✓ | target Module |
+| `slot`      | `SlotKind` | ✓ | fitting slot type |
+| `tick`      | `Tick`    | ✓ | Tick of activation |
 
-**設計メモ:** `is_active: true` という状態変化ではなく「オンにした」という事実として表現する。
-Replay 時は `FittedSlot.is_active = true` にセットし、`apply_fitting()` を再実行する。
+**Design note:** represents the fact "turned on", not the state `is_active: true`. Replay sets `FittedSlot.is_active = true` and re-runs `apply_fitting()`.
 
 ---
 
 ### `ModuleDeactivated`
 
-**説明:** Active モジュールがオフになった。
+Active Module turned off.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id`   | `ShipId`  | ✓ | 操作した Ship |
-| `module_id` | `ModuleId` | ✓ | 対象モジュール |
-| `slot`      | `SlotKind` | ✓ | 装備スロット種別 |
-| `tick`      | `Tick`    | ✓ | 非活性化した Tick |
+| `ship_id`   | `ShipId`  | ✓ | Ship performing the action |
+| `module_id` | `ModuleId` | ✓ | target Module |
+| `slot`      | `SlotKind` | ✓ | fitting slot type |
+| `tick`      | `Tick`    | ✓ | Tick of deactivation |
 
-**設計メモ:** `ModuleActivated` の対。Replay 時は `FittedSlot.is_active = false` にセットする。
+**Design note:** counterpart of `ModuleActivated`. Replay sets `FittedSlot.is_active = false`.
 
 ---
 
 ### `ShipDestroyed`
 
-**説明:** Ship が戦闘で HP ゼロになり破壊された。
+Ship reached zero HP in combat and was destroyed.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | 破壊された Ship |
-| `killer_id` | `ShipId` | ✓ | 最後の一撃を与えた Ship |
-| `tick` | `Tick` | ✓ | 破壊された Tick |
+| `ship_id` | `ShipId` | ✓ | destroyed Ship |
+| `killer_id` | `ShipId` | ✓ | Ship that landed the final blow |
+| `tick` | `Tick` | ✓ | Tick of destruction |
 
-**Replay:** `ship_id` に対応する Entity を ECS と `ship_index` から削除する。
+**Replay:** remove the matching Entity from ECS and from `ship_index`.
 
 ---
 
 ### `SectorTransitRequested`
 
-**説明:** Sector Transit が Raft でコミットされた。所有権は `SectorTransitCompleted` まで `from` に残る（ADR-0014）。
+Sector Transit committed via Raft. Ownership stays with `from` until `SectorTransitCompleted` (ADR-0014).
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | Transit する Ship |
-| `from` | `SectorId` | ✓ | 現在の所有 Sector |
-| `to` | `SectorId` | ✓ | 宛先 Sector |
-| `tick` | `Tick` | ✓ | コミットが適用された Tick |
+| `ship_id` | `ShipId` | ✓ | Ship transiting |
+| `from` | `SectorId` | ✓ | current owning Sector |
+| `to` | `SectorId` | ✓ | destination Sector |
+| `tick` | `Tick` | ✓ | Tick the commit was applied |
 
-**Replay:** `TransitComp` を `InTransit { to }` に更新する。
+**Replay:** set `TransitComp` to `InTransit { to }`.
 
 ---
 
 ### `SectorTransitCompleted`
 
-**説明:** Sector Transit が完了し、所有権が `from` から `to` に移った。
+Sector Transit completed; ownership moved from `from` to `to`.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | Transit した Ship |
-| `from` | `SectorId` | ✓ | 元の所有 Sector |
-| `to` | `SectorId` | ✓ | 新しい所有 Sector |
-| `entry_pos` | `Position` | ✓ | 宛先 Sector での入場座標 |
-| `velocity` | `Velocity` | ✓ | 入場時の速度（INV-002: Replay で完全復元するため必須） |
-| `tick` | `Tick` | ✓ | 完了した Tick |
+| `ship_id` | `ShipId` | ✓ | Ship that transited |
+| `from` | `SectorId` | ✓ | previous owning Sector |
+| `to` | `SectorId` | ✓ | new owning Sector |
+| `entry_pos` | `Position` | ✓ | entry coordinates in the destination Sector |
+| `velocity` | `Velocity` | ✓ | velocity on entry (required for full Replay reconstruction, INV-002) |
+| `tick` | `Tick` | ✓ | Tick of completion |
 
-**Replay:** from ノードでは Ship を ECS から削除、to ノードでは `entry_pos` / `velocity` で Ship を追加する。
+**Replay:** on the `from` node, remove the Ship from ECS; on the `to` node, add it at `entry_pos` / `velocity`.
 
 ---
 
 ### `SectorTransitAborted`
 
-**説明:** コミット済み Transit が中断された。所有権は `from` に残る。
-バリデーション段階の拒否は `CommandRejected` で表現し、本イベントは発行しない（INV-006）。
+A committed Transit was aborted; ownership stays with `from`. Validation-stage rejection is expressed via `CommandRejected`, not this event (INV-006).
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | Transit を中断した Ship |
-| `from` | `SectorId` | ✓ | 所有 Sector（変わらない） |
-| `to` | `SectorId` | ✓ | 中断された宛先 Sector |
-| `tick` | `Tick` | ✓ | 中断が確定した Tick |
+| `ship_id` | `ShipId` | ✓ | Ship whose Transit was aborted |
+| `from` | `SectorId` | ✓ | owning Sector (unchanged) |
+| `to` | `SectorId` | ✓ | aborted destination Sector |
+| `tick` | `Tick` | ✓ | Tick the abort was finalized |
 
-**ステータス:** 型定義のみ（宛先ノード障害時の発行は未配線）。
+**Status:** type only (emission on destination-node failure is not wired).
 
 ---
 
-### JumpGateUsed
+### `JumpGateUsed`
 
-Ship がジャンプゲートを通過し、別 Sector に移動した（ADR-0009）。
-`SectorTransitCompleted` を置き換えるものではなく、
-「どう移動したか」を記録する追加イベント（同 Tick で両方 Append される）。
+Ship passed through a Jump Gate to another Sector (ADR-0009). Does not replace `SectorTransitCompleted` — it's an additional record of *how* the move happened, appended in the same Tick.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | ゲートを使用した Ship |
-| `gate_id` | `JumpGateId` | ✓ | 使用したジャンプゲート |
-| `from_sector` | `SectorId` | ✓ | 元の Sector |
-| `to_sector` | `SectorId` | ✓ | 宛先 Sector |
-| `entry_pos` | `Position` | ✓ | 宛先 Sector の出現座標 |
-| `tick` | `Tick` | ✓ | ゲート通過が確定した Tick |
+| `ship_id` | `ShipId` | ✓ | Ship that used the gate |
+| `gate_id` | `JumpGateId` | ✓ | Jump Gate used |
+| `from_sector` | `SectorId` | ✓ | originating Sector |
+| `to_sector` | `SectorId` | ✓ | destination Sector |
+| `entry_pos` | `Position` | ✓ | spawn coordinates in the destination Sector |
+| `tick` | `Tick` | ✓ | Tick the gate transit was finalized |
 
-**ステータス:** ✅ 実装済み（Step 7.5 `append_jump_events`）。
+**Status:** ✅ implemented (Step 7.5 `append_jump_events`).
 
 ---
 
-### StarSystemChanged
+### `StarSystemChanged`
 
-Ship が別の星系に移動した（ADR-0009）。
-`JumpGateUsed` と同 Tick で発行される（宛先 Sector が別 `StarSystemId` に
-属する場合のみ）。
+Ship moved to a different star system (ADR-0009). Emitted in the same Tick as `JumpGateUsed`, only when the destination Sector belongs to a different `StarSystemId`.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | 星系を移動した Ship |
-| `from_system` | `StarSystemId` | ✓ | 元の星系 |
-| `to_system` | `StarSystemId` | ✓ | 宛先の星系 |
-| `tick` | `Tick` | ✓ | 移動が確定した Tick |
+| `ship_id` | `ShipId` | ✓ | Ship that moved |
+| `from_system` | `StarSystemId` | ✓ | originating star system |
+| `to_system` | `StarSystemId` | ✓ | destination star system |
+| `tick` | `Tick` | ✓ | Tick the move was finalized |
 
-**ステータス:** ✅ 実装済み（Step 7.5 `append_jump_events`）。
+**Status:** ✅ implemented (Step 7.5 `append_jump_events`).
 
 ---
 
 ### `TackleApplied`
 
-**説明:** Fold Disruptor モジュールがターゲット Ship に有効化された（射程内 + ロック済み）。
-tackled Ship はワープ・ジャンプが禁止される（ADR-0024）。
+A Fold Disruptor Module was activated on a target Ship (in range + locked). The tackled Ship is barred from Warp/Jump (ADR-0024).
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | tackled された Ship |
-| `by` | `ShipId` | ✓ | tackle を行った Ship（tackler） |
-| `tick` | `Tick` | ✓ | tackle が有効化された Tick |
+| `ship_id` | `ShipId` | ✓ | Ship being tackled |
+| `by` | `ShipId` | ✓ | tackling Ship (tackler) |
+| `tick` | `Tick` | ✓ | Tick tackle was activated |
 
-**Replay:** `ship_id` の `TackledComp.tacklers` に `by` を追加する。
+**Replay:** add `by` to `ship_id`'s `TackledComp.tacklers`.
 
 ---
 
 ### `TackleReleased`
 
-**説明:** `TackleApplied` の対。tackle 効果が終了した（モジュール OFF / 射程外 / tackler 破壊 / ロック消失）。
-他の tackler が残っている場合 Ship は依然として tackled 状態が継続する。
+Counterpart to `TackleApplied`. The tackle effect ended (Module off / out of range / tackler destroyed / lock lost). If other tacklers remain, the Ship stays tackled.
 
-| フィールド | 型 | 必須 | 説明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | tackle から解放された（or 解放待ち）Ship |
-| `by` | `ShipId` | ✓ | tackle を解除した（or 失った）Ship |
-| `tick` | `Tick` | ✓ | 解除された Tick |
+| `ship_id` | `ShipId` | ✓ | Ship released from (or pending release from) tackle |
+| `by` | `ShipId` | ✓ | Ship whose tackle ended |
+| `tick` | `Tick` | ✓ | Tick of release |
 
-**Replay:** `ship_id` の `TackledComp.tacklers` から `by` を削除する。空になれば `TackledComp` を除去する。
+**Replay:** remove `by` from `ship_id`'s `TackledComp.tacklers`; remove `TackledComp` entirely if it becomes empty.
 
 ---
 
-## 6. Upcasterカタログ
+## 6. Upcaster Catalog
 
-破壊的変更があった場合にのみここに記録する。
+Record breaking changes here only when they occur.
 
-現時点での破壊的変更: **なし**
+Breaking changes to date: **none**
 
-### Upcaster の実装手順（将来のための記録）
+### Upcaster procedure (for future reference)
 
 ```
-1. 旧イベントを Deprecated としてマークする（削除しない）
-2. 新イベントを別名（V2）で定義する
-3. impl Upcaster for 旧イベント { fn upcast(self) -> 新イベント } を実装する
-4. Replay パスで Upcaster を通す
-5. このカタログに変更履歴を記録する
-6. 新 ADR を作成する
+1. Mark the old event as Deprecated (do not delete it)
+2. Define the new event under a new name (V2)
+3. Implement impl Upcaster for OldEvent { fn upcast(self) -> NewEvent }
+4. Route Replay through the Upcaster
+5. Record the change in this catalog
+6. Create a new ADR
 ```

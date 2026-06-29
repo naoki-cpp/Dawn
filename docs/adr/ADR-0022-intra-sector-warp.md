@@ -4,7 +4,7 @@ title   : イントラセクター Warp — WarpCommand / WarpComp（align/warpi
 status  : accepted
 date    : 2026-06-15
 deciders: [human, ai-agent]
-related : ADR-0008（Ship Movement Events / INV-MOVE）, ADR-0009（Jump Gate Navigation）, ADR-0015（Approach / 半自動操船）, ADR-0016 §5（戦闘の深み）, docs/reference/eve-reference.md §7.4.1, CLAUDE.md §6（Tick Model）, CLAUDE.md §1（Scope）
+related : ADR-0008（Ship Movement Events / INV-MOVE）, ADR-0009（Jump Gate Navigation）, ADR-0015（Approach / 半自動操船）, ADR-0016 §5（戦闘の深み）, docs/reference/eve-reference.md §7.4.1, docs/architecture/tick-model.md（Tick Model）, AI_DEVELOPMENT_GUIDE.md「Project North Star」（Scope）
 ---
 
 # ADR-0022 — イントラセクター Warp
@@ -163,7 +163,7 @@ velocity を warp 速度ベクトルに設定し、Movement と同じく velocit
 > 理由は ADR-0015 が `ApproachStarted/Stopped` を却下したのと同一（状態の記述であって
 > 「事実」ではない・INV-006 / 設計違反パターン 8）。移動は `VelocityChanged` で記録済み。
 
-### 6. Tick 処理順序への追加（CLAUDE.md §6）
+### 6. Tick 処理順序への追加（docs/architecture/tick-model.md）
 
 `process_warp()` を **Approach（Step 2.5）の後・Movement（Step 3）の前** の Step 2.6 として追加する。
 
