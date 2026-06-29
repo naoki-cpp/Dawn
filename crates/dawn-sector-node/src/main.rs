@@ -14,22 +14,14 @@
 
 mod config;
 mod data_loader;
+mod runtime;
 
-// Client transport (WsServer) and wire protocol (incl. redirect_json) are
-// shared via dawn-actor; bring the modules into crate scope so existing
-// `ws_server::` / `protocol::` paths keep resolving.
-use dawn_actor::{protocol, ws_server};
+use dawn_actor::ws_server;
 use dawn_consensus::{RaftActor, RaftActorHandle, RaftActorMessage, RaftState, TcpRaftTransport};
-use dawn_core::{
-    DomainEvent, FitModuleCommand, NodeId, SectorBounds, SectorId, ShipId, SlotKind, WarpTarget,
-};
-use dawn_event_store::store::EventStore as _;
-use dawn_replication::{
-    Ingest, LogBatch, ReplicaSet, ReplicationTransport, TcpReplicationTransport,
-};
+use dawn_core::{FitModuleCommand, NodeId, SectorBounds, SectorId, SlotKind};
+use dawn_replication::{Ingest, ReplicaSet, ReplicationTransport, TcpReplicationTransport};
 use dawn_sector::node::SimulationNode;
 use dawn_sector::{
-    aoi,
     galaxy::Galaxy,
     modules, ship_types,
     spawner::{generate_ships, SpawnConfig},
@@ -181,9 +173,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Main tick loop ────────────────────────────────────────────────────────
 
-    let mut sessions: Vec<ws_server::PlayerSession> = Vec::new();
-    let mut ship_player: HashMap<ShipId, dawn_core::PlayerId> = HashMap::new();
-    let mut prev_visible: HashMap<dawn_core::PlayerId, Vec<ShipId>> = HashMap::new();
+    let mut runtime = runtime::SectorNodeRuntime::new(sector_id, AOI_CELL_SIZE, peer_ws);
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(TICK_MS));
 
     loop {
@@ -208,7 +198,6 @@ async fn main() -> anyhow::Result<()> {
                 .map(|pos| node.build_initial_state_json_for(pos, AOI_CELL_SIZE))
                 .unwrap_or_else(|| node.build_initial_state_json());
             let player_fitting = node.build_player_fitting_json(ship_id);
-            ship_player.insert(ship_id, player_id);
             let tx = ready_sess_tx.clone();
             tokio::spawn(async move {
                 match ws_server::WsServer::handshake(
@@ -231,17 +220,7 @@ async fn main() -> anyhow::Result<()> {
 
         // Promote completed handshakes to active sessions.
         while let Ok(sess) = ready_sess_rx.try_recv() {
-            println!(
-                "[Node] {:?} joined with ship #{}",
-                sess.player_id,
-                sess.ship_id.raw()
-            );
-            let seed = node
-                .ship_absolute_pos(sess.ship_id)
-                .map(|pos| node.ships_visible_to(pos, AOI_CELL_SIZE))
-                .unwrap_or_default();
-            prev_visible.insert(sess.player_id, seed);
-            sessions.push(sess);
+            runtime.promote_ready_session(&node, sess);
         }
 
         // Drain incoming replication batches from peers into the per-Sector
@@ -275,193 +254,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        let event_cursor = node.total_event_count() as u64;
-
-        // Collect player commands.
-        let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
-        let mut pending_jumps: Vec<(usize, dawn_core::JumpCommand)> = Vec::new();
-
-        for (i, sess) in sessions.iter_mut().enumerate() {
-            while let Some(cmd) = sess.try_recv_command() {
-                match cmd {
-                    dawn_actor::ClientCommand::Move(mv) => {
-                        node.apply_move_command_owned(
-                            sess.player_id,
-                            mv.ship_id,
-                            mv.target_position,
-                        );
-                    }
-                    dawn_actor::ClientCommand::LockOn(lo) => {
-                        if node.owns_ship(sess.player_id, lo.ship_id) {
-                            lock_commands.push(lo);
-                        }
-                    }
-                    dawn_actor::ClientCommand::Activate(c) => {
-                        node.activate_module_owned(sess.player_id, c);
-                    }
-                    dawn_actor::ClientCommand::Deactivate(c) => {
-                        node.deactivate_module_owned(sess.player_id, c);
-                    }
-                    dawn_actor::ClientCommand::Attack(_) => {}
-                    dawn_actor::ClientCommand::Stop(s) => {
-                        node.apply_stop_command_owned(sess.player_id, s.ship_id);
-                    }
-                    dawn_actor::ClientCommand::Approach(a) => {
-                        node.apply_approach_command_owned(sess.player_id, a);
-                    }
-                    dawn_actor::ClientCommand::Warp(w) => {
-                        node.apply_warp_command_owned(sess.player_id, w);
-                    }
-                    dawn_actor::ClientCommand::Orbit(o) => {
-                        node.apply_orbit_command_owned(sess.player_id, o);
-                    }
-                    dawn_actor::ClientCommand::KeepAtRange(k) => {
-                        node.apply_keep_at_range_command_owned(sess.player_id, k);
-                    }
-                    dawn_actor::ClientCommand::Fit(f) => {
-                        let ship_id = f.ship_id;
-                        node.fit_module_owned(sess.player_id, f);
-                        if let Some(json) = node.build_player_fitting_json(ship_id) {
-                            sess.send_raw(&json);
-                        }
-                    }
-                    dawn_actor::ClientCommand::Unfit(u) => {
-                        let ship_id = u.ship_id;
-                        node.unfit_module_owned(sess.player_id, u);
-                        if let Some(json) = node.build_player_fitting_json(ship_id) {
-                            sess.send_raw(&json);
-                        }
-                    }
-                    dawn_actor::ClientCommand::Jump(j) => {
-                        pending_jumps.push((i, j));
-                        break;
-                    }
-                }
-            }
-        }
-
-        for (idx, j) in pending_jumps {
-            let sess = &sessions[idx];
-            let ship_owned = j.ship_id == sess.ship_id;
-            let in_range = ship_owned && node.can_propose_jump(j.ship_id, j.gate_id);
-            if in_range {
-                let to = node
-                    .jump_gate(j.gate_id)
-                    .expect("gate must exist")
-                    .to_sector;
-                raft.propose(
-                    transit::TransitOp::Request {
-                        ship_id: j.ship_id,
-                        to,
-                        gate_id: Some(j.gate_id),
-                    }
-                    .encode(),
-                );
-                println!(
-                    "[Node] Jump proposed: ship #{} gate #{}",
-                    j.ship_id.raw(),
-                    j.gate_id.0
-                );
-            } else if ship_owned
-                && node.apply_warp_command(j.ship_id, WarpTarget::Gate(j.gate_id), true)
-            {
-                println!(
-                    "[Node] Jump: ship #{} out of range — auto-warp to gate #{} started",
-                    j.ship_id.raw(),
-                    j.gate_id.0
-                );
-            } else if ship_owned
-                && node
-                    .apply_approach_command(j.ship_id, dawn_core::ApproachTarget::Gate(j.gate_id))
-            {
-                // Too close to warp (< MIN_WARP_DISTANCE) but still outside
-                // activation_radius -- without this fallback a ship in that
-                // band could never jump: in_range fails, and apply_warp_command
-                // fails its own can_propose_warp distance check too, so the
-                // command was silently dropped every tick. Approach closes the
-                // rest of the gap sublight.
-                println!(
-                    "[Node] Jump: ship #{} too close to warp — approaching gate #{} instead",
-                    j.ship_id.raw(),
-                    j.gate_id.0
-                );
-            }
-        }
-
-        // Handle auto-jumps triggered by warp completion.
-        for (ship_id, gate_id) in node.drain_pending_auto_jumps() {
-            if node.can_propose_jump(ship_id, gate_id) {
-                let to = node.jump_gate(gate_id).expect("gate must exist").to_sector;
-                raft.propose(
-                    transit::TransitOp::Request {
-                        ship_id,
-                        to,
-                        gate_id: Some(gate_id),
-                    }
-                    .encode(),
-                );
-                println!(
-                    "[Node] Auto-jump proposed: ship #{} gate #{}",
-                    ship_id.raw(),
-                    gate_id.0
-                );
-            }
-        }
-
-        // Tick (Raft steps + game logic).
-        transit::step_cluster_node(&mut node, &raft, &mut committed_rx, &lock_commands);
-
-        // Broadcast new events to peer replication subscribers (8D-2c gossip).
-        let new_events: Vec<DomainEvent> = node
-            .event_store()
-            .iter_from(event_cursor)
-            .map(|r| r.event.clone())
-            .collect();
-        if !new_events.is_empty() {
-            let batch = LogBatch::new(sector_id, event_cursor, new_events.clone());
-            repl_transport.broadcast(batch);
-        }
-
-        // Detect ships that jumped out of this node's sector.
-        let jumped_ships: HashMap<ShipId, SectorId> = new_events
-            .iter()
-            .filter_map(|e| {
-                if let DomainEvent::JumpGateUsed(j) = e {
-                    if j.from_sector == sector_id {
-                        Some((j.ship_id, j.to_sector))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // AoI delivery and session management.
-        let grid = aoi::CellGrid::build(AOI_CELL_SIZE, node.ship_absolute_positions());
-        let warp_arrivals = node.drain_completed_warps();
-
-        sessions.retain_mut(|sess| {
-            // Player's ship jumped to another node → Redirect and drop session.
-            if let Some(&dest) = jumped_ships.get(&sess.ship_id) {
-                if let Some(&ws_addr) = peer_ws.get(&dest) {
-                    let msg = protocol::redirect_json(ws_addr);
-                    sess.conn.send_raw(&msg);
-                    println!("[Node] Redirect {:?} → {ws_addr}", sess.player_id);
-                }
-                prev_visible.remove(&sess.player_id);
-                return false;
-            }
-
-            let curr = node
-                .ship_absolute_pos(sess.ship_id)
-                .map(|pos| grid.neighbors_of(pos))
-                .unwrap_or_default();
-            let prev = prev_visible.entry(sess.player_id).or_default();
-            deliver_aoi_frame(sess, &node, curr, prev, &new_events, &warp_arrivals)
-        });
-        prev_visible.retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
+        runtime.run_frame(&mut node, &raft, &mut committed_rx, &repl_transport);
 
         // Field observability for 8D-5: a tick that overruns its own period
         // means TCP/WS I/O (Raft, replication, or session delivery) is
@@ -512,78 +305,4 @@ fn spawn_npcs(node: &mut SimulationNode, count: usize) {
             module_id: modules::MODULE_RAILGUN_SMALL,
         });
     }
-}
-
-/// Deliver one AoI frame to a session. Returns `false` when the connection dropped.
-fn deliver_aoi_frame(
-    sess: &mut ws_server::PlayerSession,
-    node: &SimulationNode,
-    curr: Vec<ShipId>,
-    prev: &mut Vec<ShipId>,
-    new_events: &[DomainEvent],
-    warp_arrivals: &[ShipId],
-) -> bool {
-    let destroyed_this_tick: std::collections::HashSet<ShipId> = new_events
-        .iter()
-        .filter_map(|e| {
-            if let DomainEvent::ShipDestroyed(d) = e {
-                Some(d.ship_id)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    let old_prev = prev.clone();
-    let (entered, left) = aoi::aoi_delta(&old_prev, &curr);
-    *prev = curr.clone();
-
-    for &id in entered.iter().filter(|&&id| id != sess.ship_id) {
-        if let Some(msg) = node.aoi_enter_json(id) {
-            if !sess.conn.send_raw(&msg) {
-                return false;
-            }
-        }
-    }
-    for &id in left
-        .iter()
-        .filter(|&&id| id != sess.ship_id && !destroyed_this_tick.contains(&id))
-    {
-        if !sess.conn.send_raw(&aoi::aoi_leave_json(id)) {
-            return false;
-        }
-    }
-
-    let visible_events: Vec<_> = new_events
-        .iter()
-        .filter(|e| {
-            if let DomainEvent::ShipDestroyed(d) = e {
-                return old_prev.binary_search(&d.ship_id).is_ok()
-                    || old_prev.binary_search(&d.killer_id).is_ok()
-                    || aoi::event_visible_to(e, &curr);
-            }
-            aoi::event_visible_to(e, &curr)
-        })
-        .cloned()
-        .collect();
-    if !sess.send_events(&visible_events) {
-        return false;
-    }
-
-    // Warp-arrival authority (ADR-0029): snap each ship that finished a warp this
-    // tick to its authoritative absolute position, for the owner/visible observers.
-    for &sid in warp_arrivals {
-        if sid == sess.ship_id || curr.binary_search(&sid).is_ok() {
-            if let Some(abs) = node.ship_absolute(sid) {
-                let msg = format!(
-                    "{{\"type\":\"PositionSnap\",\"ship_id\":{},\"position\":{{\"x\":{},\"y\":{},\"z\":{}}}}}",
-                    sid.raw(), abs[0], abs[1], abs[2]
-                );
-                if !sess.conn.send_raw(&msg) {
-                    return false;
-                }
-            }
-        }
-    }
-    true
 }
