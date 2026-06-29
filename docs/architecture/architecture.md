@@ -98,7 +98,7 @@ dawn-core
                     └── dawn-sector-node    (production binary; also depends on dawn-consensus / dawn-replication, 8D-4)
 ```
 
-Dependencies flow **bottom-to-top only**; any reverse or circular dependency is a design failure. See [CLAUDE.md §3](../../CLAUDE.md) for the full rule.
+Dependencies flow **bottom-to-top only**; any reverse or circular dependency is a design failure. See [AI_DEVELOPMENT_GUIDE.md "Crate Boundaries"](../../AI_DEVELOPMENT_GUIDE.md) for the full rule.
 
 ### Rule for adding crate dependencies
 
@@ -147,7 +147,7 @@ Generate Event -> Append to EventStore
 (future) inter-Node replication
 ```
 
-Command and Event are fully separate types. See [CLAUDE.md §4](../../CLAUDE.md) for flow details and [event-catalog.md](./event-catalog.md) for Event specs.
+Command and Event are fully separate types. See [AI_DEVELOPMENT_GUIDE.md "Event Workflow"](../../AI_DEVELOPMENT_GUIDE.md) for flow details and [event-catalog.md](./event-catalog.md) for Event specs.
 
 ---
 
@@ -306,7 +306,7 @@ Recovery = verified snapshot + catch-up from the hot log tail since that snapsho
   1. snapshot -> restore -> snapshot round-trips to a byte-identical result
   2. snapshot + replay of the trailing Ticks == live state at that point
 
-See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [CLAUDE.md §2 INV-002](../../CLAUDE.md). This is distinct from the off-path Read Model rebuild in §5-B (that one is an optional audit-path replay).
+See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.md "Architecture Invariants"](../../AI_DEVELOPMENT_GUIDE.md) (INV-002). This is distinct from the off-path Read Model rebuild in §5-B (that one is an optional audit-path replay).
 
 ---
 
@@ -316,7 +316,7 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [CLAUDE.md §2 INV-002]
 |---|---|---|
 | Inter-node network is TCP LAN plaintext only (no TLS/QUIC) | Current 8D milestone stage; encryption is next phase | [ADR-0003](../adr/ADR-0003-local-first-development.md) (initial policy) / see §2 future scope |
 | Sector count/assignment is fixed (no dynamic split/merge) | MVP scope limit | [entity-model.md §5](./entity-model.md) |
-| Ship is the only entity (includes Fitting / Combat / Capacitor) | MVP scope limit | [CLAUDE.md §1](../../CLAUDE.md) |
+| Ship is the only entity (includes Fitting / Combat / Capacitor) | MVP scope limit | [AI_DEVELOPMENT_GUIDE.md "Project North Star"](../../AI_DEVELOPMENT_GUIDE.md) |
 
 > §3's crate table and dependency DAG are the current source of truth for deployment topology.
 

@@ -101,7 +101,7 @@ AI エージェントが機能を拡張する際、新しい Projection（Read �
 ### この決定が強制する設計上の制約
 
 ```
-- EventStore に update / delete / truncate メソッドを追加してはならない（CLAUDE.md FBD-001）
+- EventStore に update / delete / truncate メソッドを追加してはならない（docs/architecture/forbidden-changes.md FBD-001）
 - 全ての**権威ある** State 変更は Event として記録する（INV-002）
   ※ ADR-0017 で精緻化: 派生・transient 状態（位置・capacitor 等）はイベント化せず
     スナップショットに永続化する。スナップショットが権威ある永続チェックポイントであり、

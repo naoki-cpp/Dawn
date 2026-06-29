@@ -4,7 +4,7 @@ title   : Sector-local 複製は単一所有 + 追記ログのゴシップ配布
 status  : accepted
 date    : 2026-06-15
 deciders: [human, ai-agent]
-related : ADR-0001（Event Sourcing）, ADR-0002（Actor / ReplicationBus）, ADR-0014（Raft / Sector Transit）, ADR-0017（2層ログ / スナップショット権威）, CLAUDE.md §1（CRDT と Raft の責務分離）, §2 INV-001/002/004/005, §3 Dependency DAG, §5 Entity Ownership
+related : ADR-0001（Event Sourcing）, ADR-0002（Actor / ReplicationBus）, ADR-0014（Raft / Sector Transit）, ADR-0017（2層ログ / スナップショット権威）, AI_DEVELOPMENT_GUIDE.md「Event Workflow」（CRDT と Raft の責務分離）, AI_DEVELOPMENT_GUIDE.md「Architecture Invariants」（INV-001/002/004/005）, AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」（Dependency DAG）, docs/architecture/ownership.md（Entity Ownership）
 ---
 
 # ADR-0021 — Sector-local 複製は単一所有 + 追記ログのゴシップ配布
@@ -16,7 +16,7 @@ related : ADR-0001（Event Sourcing）, ADR-0002（Actor / ReplicationBus）, AD
 
 ## 背景
 
-CLAUDE.md §1 は同期戦略を「**CRDT と Raft の責務分離**」と表現し、roadmap 8D-2 は
+AI_DEVELOPMENT_GUIDE.md「Event Workflow」は同期戦略を「**CRDT と Raft の責務分離**」と表現し、roadmap 8D-2 は
 `dawn-replication（Gossip + CRDT / LWW-Register）` を新規クレートとして予定している。
 8D 着手前に「Sector-local 複製に CRDT（特に LWW-Register）は本当に要るか」を確定する。
 
@@ -37,7 +37,7 @@ CRDT が価値を持つのは「**複数の複製が同じデータを同時並�
 Sequence CRDT（共同編集テキスト）。roadmap が名指す「LWW-Register」は、1 つの可変値を複数ノードで複製し
 衝突を「新しい方が勝つ」で解決する最も単純な CRDT である。
 
-**Raft との対比**（dawn は両者を使い分ける設計 / CLAUDE.md §1）:
+**Raft との対比**（dawn は両者を使い分ける設計 / AI_DEVELOPMENT_GUIDE.md「Event Workflow」）:
 
 | | Raft | CRDT |
 |---|---|---|
@@ -50,7 +50,7 @@ Sequence CRDT（共同編集テキスト）。roadmap が名指す「LWW-Registe
 
 ### 検証: 所有権モデルの下で並行衝突は構造的に発生しない
 
-CLAUDE.md §5 は「**各 Sector は必ず 1 ノードが所有**」「**各エンティティは必ず 1 Sector に所有される**」と定める。
+docs/architecture/ownership.md は「**各 Sector は必ず 1 ノードが所有**」「**各エンティティは必ず 1 Sector に所有される**」と定める。
 権威ある状態への並行衝突が起きうる経路を総当たりした:
 
 > **用語: split-brain（スプリットブレイン）** = フェイルオーバーの最中に 2 ノードが同時に「自分が所有者」と
@@ -104,7 +104,7 @@ CLAUDE.md §5 は「**各 Sector は必ず 1 ノードが所有**」「**各エ�
 
 ### 2. 「高スループット同期」の本質は「Raft 迂回の非同期ゴシップ」であって「CRDT」ではない
 
-CLAUDE.md §1 の意図（重要な排他は Raft で厳密に、大量の Sector-local 状態は安く速く）は**正しい**。
+AI_DEVELOPMENT_GUIDE.md「Event Workflow」の意図（重要な排他は Raft で厳密に、大量の Sector-local 状態は安く速く）は**正しい**。
 ただしその"安く速い"経路の実体は **追記ログを Raft に通さず非同期ゴシップで配る**ことであり、
 CRDT のマージ演算ではない。文言を機構名（CRDT/LWW）から仕組み（追記ログのゴシップ配布）へ正す。
 

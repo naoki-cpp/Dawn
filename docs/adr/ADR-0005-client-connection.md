@@ -156,6 +156,6 @@ Phase 5 移行時には ADR-0007 に従って対応する。
 - ADR-0003: Local-First Development Strategy
 - ADR-0004: Client Technology Selection (Godot 4)
 - ADR-0007: マルチプレイヤー対応設計（Phase 5）
-- CLAUDE.md FBD-002: dawn-core への外部依存禁止
-- CLAUDE.md FBD-004: Actor 間の直接メソッド呼び出し禁止
+- docs/architecture/forbidden-changes.md FBD-002: dawn-core への外部依存禁止
+- docs/architecture/forbidden-changes.md FBD-004: Actor 間の直接メソッド呼び出し禁止
 - docs/architecture/architecture.md §5-A: ClientConnection の詳細

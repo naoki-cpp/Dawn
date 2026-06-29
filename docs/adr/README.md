@@ -2,7 +2,7 @@
 
 ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時系列）であり、
 カテゴリ分けはこのインデックスのみで行う。ファイルの移動・リネームは行わない
-（既存リンク・CLAUDE.md からの参照を壊さないため）。
+（既存リンク・AI_DEVELOPMENT_GUIDE.md からの参照を壊さないため）。
 
 新しい ADR を追加したら、このインデックスにも追記すること。
 
@@ -64,4 +64,4 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 
 ## 参照
 
-- ADRの作成・更新ルール: CLAUDE.md §9 AI Change Checklist
+- ADRの作成・更新ルール: `/ai-change-checklist` スキル（`.claude/commands/ai-change-checklist.md`）

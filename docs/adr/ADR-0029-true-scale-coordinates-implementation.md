@@ -337,8 +337,8 @@ R1（ゲート f64 源）・R3（アンカー欠落 assert）・R2（AoI f64 化
 - **ADR-0025（天体スケール）**：「圧縮」記述を実 AU 正式化へ改訂。
 - **ADR-0022（ワープ）**：所要時間の根拠を実距離に。
 - **game-design.md / roadmap.md / playtest-guide.md**：距離・移動・スケール前提の記述。
-- **CLAUDE.md §1 スコープ**：スケール前提があれば（**自律編集しない**。CLAUDE.md / ADR の改訂は人間承認・
-  CLAUDE.md §1/§7）。
+- **AI_DEVELOPMENT_GUIDE.md「Project North Star」のスコープ**：スケール前提があれば（**自律編集しない**。AI_DEVELOPMENT_GUIDE.md / ADR の改訂は人間承認・
+  AI_DEVELOPMENT_GUIDE.md「Project North Star」/ docs/architecture/event-schema-evolution.md）。
 
 > 本 ADR はこの仕様変更を**明示して合意を取る**ことが目的。上位ドキュメントの実書き換えは本 ADR が
 > accepted になってから、各ドキュメントの所有者承認のもとで行う（座標移行 §4 と同期させる）。

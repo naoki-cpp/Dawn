@@ -2,7 +2,7 @@
 scope    : Complete specification of the simulation time model and the per-Tick processing order
 audience : AI Agent / Human Developer
 update   : When the Tick processing order changes / when performance targets change
-related  : event-catalog.md, ownership.md, CLAUDE.md §6
+related  : event-catalog.md, ownership.md
 ---
 
 # Tick Model
@@ -436,5 +436,5 @@ INV-TiDi: logical Tick rate is normally constant.
           exceeds capacity, and only as a bounded last resort satisfying
           (a) local (b) observable (c) non-destructive (d) auto-recovering
           (e) after split/LoD.
-          (Canonical definition: CLAUDE.md §2 INV-TiDi)
+          (Canonical definition: AI_DEVELOPMENT_GUIDE.md "Architecture Invariants", INV-TiDi)
 ```

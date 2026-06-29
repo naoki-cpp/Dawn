@@ -4,7 +4,7 @@ title   : アプローチ（半自動操船） — ApproachCommand / ApproachCom
 status  : accepted
 date    : 2026-06-13
 deciders: [human, ai-agent]
-related : ADR-0008（Ship Movement Events）, CLAUDE.md §6（Tick Model）, CLAUDE.md §1（Scope）
+related : ADR-0008（Ship Movement Events）, docs/architecture/tick-model.md（Tick Model）, AI_DEVELOPMENT_GUIDE.md「Project North Star」（Scope）
 ---
 
 # ADR-0015 — アプローチ（半自動操船）
@@ -67,7 +67,7 @@ pub struct ApproachComp {
 }
 ```
 
-### 3. Tick 処理順序への追加（CLAUDE.md §6）
+### 3. Tick 処理順序への追加（docs/architecture/tick-model.md）
 
 `process_approach()` を **Movement System（Step 3）の直前** に実行する新しい
 Step 2.5 として追加する。対象の最新位置に基づいて thrust を更新してから

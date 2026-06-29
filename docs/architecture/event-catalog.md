@@ -2,7 +2,7 @@
 scope    : Complete spec of every Event and Command that exists. The single source of truth for "what can happen"
 audience : AI Agent / Human Developer
 update   : Must be updated whenever an Event or Command is added or changed
-related  : entity-model.md, tick-model.md, CLAUDE.md §7
+related  : entity-model.md, tick-model.md, event-schema-evolution.md
 ---
 
 # Event Catalog
@@ -36,7 +36,7 @@ Forbidden: rename an existing field
 Forbidden: rename an event (introduce a V2 instead)
 ```
 
-Post-release breaking changes must follow the [Upcaster procedure](#6-upcaster-catalog). See CLAUDE.md §7 for details.
+Post-release breaking changes must follow the [Upcaster procedure](#6-upcaster-catalog). See [event-schema-evolution.md](./event-schema-evolution.md) for details.
 
 ---
 
@@ -76,7 +76,7 @@ Cold archive : segments moved out by compaction; retained forever, append-only (
 - **The snapshot is the authoritative persistent checkpoint** (INV-002). Normal recovery and failover use "snapshot + hot-log tail catch-up"; full replay from genesis is off the critical path.
 - Derived/transient state (position, capacitor, lock countdowns, thrust intent) is not recorded in events — it lives only in snapshots. Each event's **Replay** note describes reconstructing authoritative state from events; transient state is recomputed live each Tick.
 
-See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / CLAUDE.md §2 INV-002.
+See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.md "Architecture Invariants"](../../AI_DEVELOPMENT_GUIDE.md) (INV-002).
 
 ---
 

@@ -4,7 +4,7 @@ title   : イベントログのスナップショット圧縮と2層ログ（INV
 status  : accepted
 date    : 2026-06-14
 deciders: [human, ai-agent]
-related : ADR-0001（Event Sourcing）, ADR-0014（Raft / failover）, CLAUDE.md §2 INV-002, CLAUDE.md §10 FBD-001, docs/reference/eve-reference.md §11.2
+related : ADR-0001（Event Sourcing）, ADR-0014（Raft / failover）, AI_DEVELOPMENT_GUIDE.md「Architecture Invariants」, docs/architecture/forbidden-changes.md, docs/reference/eve-reference.md §11.2
 ---
 
 # ADR-0017 — スナップショット圧縮と2層ログ

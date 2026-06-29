@@ -2,7 +2,7 @@
 scope    : Complete rules for "who manages what" — ownership, state transitions, responsibilities.
 audience : AI Agent / Human Developer
 update   : When Actor composition changes / when Sector management rules change.
-related  : entity-model.md, event-catalog.md, CLAUDE.md §5
+related  : entity-model.md, event-catalog.md
 ---
 
 > **Implementation status**

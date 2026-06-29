@@ -2,7 +2,7 @@
 scope    : Definition of the "things" that exist in the World. Schema spec for types, fields, and identifiers
 audience : AI Agent / Human Developer
 update   : When a type or field definition changes
-related  : event-catalog.md, ownership.md, CLAUDE.md §5
+related  : event-catalog.md, ownership.md
 ---
 
 # Entity Model

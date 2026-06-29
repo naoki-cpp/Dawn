@@ -2,20 +2,8 @@
 scope    : 何を・どの順番で・なぜその順番で作るか。現在地と次のステップの明示
 audience : AI Agent / Human Developer
 update   : フェーズ完了時 / タスクが完了するたびに更新する
-related  : ../architecture/architecture.md, CLAUDE.md §1, docs/process/roadmap-history.md（完了済みフェーズの詳細記録）
+related  : ../architecture/architecture.md, AI_DEVELOPMENT_GUIDE.md, docs/process/roadmap-history.md（完了済みフェーズの詳細記録）
 ---
-
-> **CLAUDE.md レビュータイミング**
-> このファイルの各フェーズ完了マーク（✅）を更新するタイミングで
-> `CLAUDE.md` のレビューも実施すること。
->
-> | タイミング | レビュー内容 |
-> |---|---|
-> | Phase 4 完了時（Phase 5 移行前） | スコープ・Crate表・Tick順序・パターン集を全面見直し |
-> | Phase 5 完了時 | ClientConnection 差し替え後の設計原則を更新。ADR-0007 実装チェックリストを消化してから着手すること |
-> | Phase 7 完了時 | Raft 導入後の INV-003 / INV-005 の具体例を更新 |
->
-> CLAUDE.md フッターの `次回レビュー予定` と必ず一致させること。
 
 # Roadmap
 
@@ -251,7 +239,7 @@ Phase 0〜7 は全て完了済み（要約は §2「完了済みフェーズ」�
 
 | # | タスク | 備考 | 状態 |
 |---|---|---|---|
-| 1 | ~~dawn-proto（protobuf）~~ → **不採用**。ワイヤ = postcard+serde 再利用 + 最小の版付きフレーミング（長さ前置・種別タグ・版ハンドシェイク）を transport 層に置く | CLAUDE.md §3 参照。理由: Rust↔Rust・多言語不要・スキーマ進化は §7 で規律化済み。protobuf は型の二重定義のみ生む | ✅ 方針確定（不採用） |
+| 1 | ~~dawn-proto（protobuf）~~ → **不採用**。ワイヤ = postcard+serde 再利用 + 最小の版付きフレーミング（長さ前置・種別タグ・版ハンドシェイク）を transport 層に置く | AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」参照。理由: Rust↔Rust・多言語不要・スキーマ進化は event-schema-evolution.md で規律化済み。protobuf は型の二重定義のみ生む | ✅ 方針確定（不採用） |
 | 2 | dawn-replication（追記ログのゴシップ配布 + アンチエントロピー + スナップショット転送） | 新規クレート・ADR-0021/0027（単一所有のため競合解決 CRDT/LWW は不要）。8D-2a: `ReplicationBus` を dawn-replication の `InMemoryReplicationBus` へ移動し、`dawn-actor` は純粋なクライアント転送境界（`ClientConnection`）に縮小済み。8D-2b: `AntiEntropy`（gap 検出・重複/overlap 判定・`iter_from` suffix 応答）実装済み。8D-2c: `TcpReplicationTransport`（4-byte length prefix + postcard / LAN plaintext）実装済み。8D-2d: `SnapshotTransfer`（`Serialize+DeserializeOwned` ジェネリック・u32 LE length prefix / 256 MiB cap）実装済み（2 テスト）。消費側: `ReplicaSet`（peer セクターごとに gap 検出・冪等・順序保持で複製ログを保持。ライブ world 適用と failover は別機能）実装済み（M-5・6 テスト） | ✅ |
 | 3 | ネットワーク `RaftTransport` 実装（`InProcessTransport` の差し替え。静的 config のピア表） | trait は既存（transport.rs）。TLS 可能な選択（TCP+rustls / QUIC）にし後付けを塞がない。`TcpRaftTransport`（4-byte LE + postcard / LAN plaintext / per-peer 自動再接続 / accept ループ）実装済み（dawn-consensus/src/tcp_transport.rs・8D-3） | ✅ |
 | 4 | dawn-sector-node（本番実行バイナリ・上記 transport + ゴシップの配線・静的 config 起動） | 新規クレート。`TcpRaftTransport` + `TcpReplicationTransport` を TOML 静的 config で配線。3 プロセスで 3 セクタクラスタ（ws/:787{8,9,80} raft/:790{0,1,2} repl/:791{0,1,2}）。プレイヤー Jump 時は `Redirect` JSON でクライアントを宛先 WS へ誘導し、`player_id` / `ship_id` 付き Hello で同じ player ship を resume（2026-06-29） | ✅ |
