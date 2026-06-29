@@ -42,6 +42,7 @@ var _connected       : bool          = false
 var _welcomed        : bool          = false   ## Welcome 受信済みか
 var _reconnect_timer : float         = 0.0
 var _buffer          : String        = ""
+var _server_url      : String        = SERVER_URL
 
 var player_id : int = -1
 var ship_id   : int = -1
@@ -59,7 +60,7 @@ func _process(delta: float) -> void:
 		if not _connected:
 			_connected = true
 			_welcomed  = false
-			print("[Connection] connected to ", SERVER_URL)
+			print("[Connection] connected to ", _server_url)
 			connection_changed.emit(true)
 			## 接続直後に Hello を送信する
 			_send_hello()
@@ -255,13 +256,17 @@ func is_connected_to_server() -> bool:
 # ── 内部処理 ──────────────────────────────────────────────────────────────────
 
 func _send_hello() -> void:
-	_ws.send_text("{\"type\":\"Hello\"}\n")
+	var payload: Dictionary = { "type": "Hello" }
+	if player_id >= 0 and ship_id >= 0:
+		payload["player_id"] = player_id
+		payload["ship_id"] = ship_id
+	_ws.send_text(JSON.stringify(payload) + "\n")
 	print("[Connection] Hello sent")
 
 func _connect_to_server() -> void:
-	print("[Connection] connecting to ", SERVER_URL, " ...")
+	print("[Connection] connecting to ", _server_url, " ...")
 	_ws = WebSocketPeer.new()
-	var err: int = _ws.connect_to_url(SERVER_URL)
+	var err: int = _ws.connect_to_url(_server_url)
 	if err != OK:
 		push_warning("[Connection] connect_to_url failed: %s" % error_string(err))
 
@@ -302,6 +307,8 @@ func _handle_message(payload: Dictionary) -> void:
 			var modules: Array = payload.get("modules", []) as Array
 			print("[Connection] PlayerFitting: %d modules" % modules.size())
 			player_fitting_received.emit(payload)
+		"Redirect":
+			_handle_redirect(payload)
 		"ModuleActivated":
 			var sid: int    = payload.get("ship_id",   0)  as int
 			var mid: int    = payload.get("module_id", 0)  as int
@@ -314,3 +321,23 @@ func _handle_message(payload: Dictionary) -> void:
 			module_deactivated.emit(sid, mid, slt)
 		_:
 			event_received.emit(payload)
+
+func _handle_redirect(payload: Dictionary) -> void:
+	var ws_addr: String = payload.get("ws_addr", "") as String
+	if ws_addr.is_empty():
+		push_warning("[Connection] Redirect without ws_addr")
+		return
+	player_id = payload.get("player_id", player_id) as int
+	ship_id = payload.get("ship_id", ship_id) as int
+	_server_url = _normalize_ws_url(ws_addr)
+	_welcomed = false
+	_connected = false
+	_reconnect_timer = RECONNECT_INTERVAL
+	print("[Connection] Redirect: reconnecting to %s as player_id=%d ship_id=%d" % [_server_url, player_id, ship_id])
+	connection_changed.emit(false)
+	_ws.close()
+
+func _normalize_ws_url(addr: String) -> String:
+	if addr.begins_with("ws://") or addr.begins_with("wss://"):
+		return addr
+	return "ws://" + addr

@@ -17,10 +17,13 @@
 //! Client → Server:  ClientCommand JSON
 //! ```
 
-use crate::protocol::{domain_event_to_json, parse_client_command};
+use crate::protocol::{domain_event_to_json, parse_client_command, parse_hello, ResumeIdentity};
 use crate::{ClientCommand, ClientConnection};
 use dawn_core::{DomainEvent, PlayerId, ShipId};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{
+    stream::{SplitSink, SplitStream},
+    SinkExt, StreamExt,
+};
 use std::fmt::Display;
 use std::net::SocketAddr;
 use tokio::{
@@ -28,7 +31,7 @@ use tokio::{
     sync::mpsc,
     time::{timeout, Duration},
 };
-use tokio_tungstenite::{accept_async, tungstenite::Message};
+use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
 // ── WsClientConnection ────────────────────────────────────────────────────────
 
@@ -68,6 +71,93 @@ pub struct PlayerSession {
     pub player_id: PlayerId,
     pub ship_id: ShipId,
     pub conn: WsClientConnection,
+}
+
+// ── HandshakeRequest ─────────────────────────────────────────────────────────
+
+type WsSink = SplitSink<WebSocketStream<TcpStream>, Message>;
+type WsSource = SplitStream<WebSocketStream<TcpStream>>;
+
+pub struct HandshakeRequest {
+    pub peer_addr: SocketAddr,
+    pub resume: Option<ResumeIdentity>,
+    ws_sink: WsSink,
+    ws_source: WsSource,
+}
+
+impl HandshakeRequest {
+    pub async fn complete(
+        self,
+        player_id: PlayerId,
+        ship_id: ShipId,
+        initial_state: &str,
+        player_fitting: Option<String>,
+    ) -> anyhow::Result<PlayerSession> {
+        let Self {
+            peer_addr,
+            mut ws_sink,
+            mut ws_source,
+            ..
+        } = self;
+
+        let (event_tx, event_rx) = mpsc::unbounded_channel::<String>();
+        let (command_tx, command_rx) = mpsc::unbounded_channel::<ClientCommand>();
+
+        // Send Welcome + InitialState + (optional) PlayerFitting.
+        let welcome = format!(
+            "{{\"type\":\"Welcome\",\"player_id\":{},\"ship_id\":{}}}\n",
+            player_id.raw(),
+            ship_id.raw()
+        );
+        ws_sink.send(Message::Text(welcome)).await?;
+        ws_sink
+            .send(Message::Text(initial_state.to_string() + "\n"))
+            .await?;
+        if let Some(fitting) = player_fitting {
+            ws_sink.send(Message::Text(fitting + "\n")).await?;
+        }
+
+        // Event-send task.
+        tokio::spawn(async move {
+            let mut rx = event_rx;
+            while let Some(msg) = rx.recv().await {
+                if ws_sink.send(Message::Text(msg)).await.is_err() {
+                    break;
+                }
+            }
+            let _ = ws_sink.close().await;
+        });
+
+        // Command-receive task.
+        tokio::spawn(async move {
+            while let Some(Ok(msg)) = ws_source.next().await {
+                if let Message::Text(text) = msg {
+                    for line in text.lines() {
+                        if let Some(cmd) = parse_client_command(line) {
+                            if command_tx.send(cmd).is_err() {
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            println!("[WsServer] {peer_addr} disconnected");
+        });
+
+        let conn = WsClientConnection {
+            event_tx,
+            command_rx,
+        };
+        println!(
+            "[WsServer] {peer_addr} handshake complete: {player_id} ship={}",
+            ship_id.raw()
+        );
+        Ok(PlayerSession {
+            player_id,
+            ship_id,
+            conn,
+        })
+    }
 }
 
 impl PlayerSession {
@@ -127,86 +217,47 @@ impl WsServer {
         initial_state: &str,
         player_fitting: Option<String>,
     ) -> anyhow::Result<PlayerSession> {
-        let ws_stream = accept_async(stream).await?;
+        let request = Self::accept_handshake_request(stream, peer_addr).await?;
+        request
+            .complete(player_id, ship_id, initial_state, player_fitting)
+            .await
+    }
 
-        let (event_tx, event_rx) = mpsc::unbounded_channel::<String>();
-        let (command_tx, command_rx) = mpsc::unbounded_channel::<ClientCommand>();
-        let (mut ws_sink, mut ws_source) = ws_stream.split();
+    /// Upgrade a socket and read the client Hello without committing to a
+    /// player identity yet. Callers can inspect `resume` before completing the
+    /// handshake with Welcome + InitialState.
+    pub async fn accept_handshake_request(
+        stream: TcpStream,
+        peer_addr: SocketAddr,
+    ) -> anyhow::Result<HandshakeRequest> {
+        let ws_stream = accept_async(stream).await?;
+        let (ws_sink, mut ws_source) = ws_stream.split();
 
         // Wait for Hello (3s timeout).
         let hello_result = timeout(Duration::from_secs(3), async {
             while let Some(Ok(msg)) = ws_source.next().await {
                 if let Message::Text(text) = msg {
                     for line in text.lines() {
-                        let v: serde_json::Value = serde_json::from_str(line).unwrap_or_default();
-                        if v.get("type").and_then(|t| t.as_str()) == Some("Hello") {
-                            return true;
+                        if let Some(hello) = parse_hello(line) {
+                            return Some(hello);
                         }
                     }
                 }
             }
-            false
+            None
         })
         .await;
 
-        match hello_result {
-            Ok(true) => {}
+        let hello = match hello_result {
+            Ok(Some(hello)) => hello,
             _ => anyhow::bail!("Hello timeout or not received from {peer_addr}"),
-        }
-
-        // Send Welcome + InitialState + (optional) PlayerFitting.
-        let welcome = format!(
-            "{{\"type\":\"Welcome\",\"player_id\":{},\"ship_id\":{}}}\n",
-            player_id.raw(),
-            ship_id.raw()
-        );
-        ws_sink.send(Message::Text(welcome)).await?;
-        ws_sink
-            .send(Message::Text(initial_state.to_string() + "\n"))
-            .await?;
-        if let Some(fitting) = player_fitting {
-            ws_sink.send(Message::Text(fitting + "\n")).await?;
-        }
-
-        // Event-send task.
-        tokio::spawn(async move {
-            let mut rx = event_rx;
-            while let Some(msg) = rx.recv().await {
-                if ws_sink.send(Message::Text(msg)).await.is_err() {
-                    break;
-                }
-            }
-            let _ = ws_sink.close().await;
-        });
-
-        // Command-receive task.
-        tokio::spawn(async move {
-            while let Some(Ok(msg)) = ws_source.next().await {
-                if let Message::Text(text) = msg {
-                    for line in text.lines() {
-                        if let Some(cmd) = parse_client_command(line) {
-                            if command_tx.send(cmd).is_err() {
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
-            println!("[WsServer] {peer_addr} disconnected");
-        });
-
-        let conn = WsClientConnection {
-            event_tx,
-            command_rx,
         };
-        println!(
-            "[WsServer] {peer_addr} handshake complete: {player_id} ship={}",
-            ship_id.raw()
-        );
-        Ok(PlayerSession {
-            player_id,
-            ship_id,
-            conn,
+
+        Ok(HandshakeRequest {
+            peer_addr,
+            resume: hello.resume,
+            ws_sink,
+            ws_source,
         })
     }
 }
