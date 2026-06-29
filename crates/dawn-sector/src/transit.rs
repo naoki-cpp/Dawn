@@ -89,39 +89,22 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                 to,
                 gate_id,
             } => {
-                let cmd = dawn_core::commands::TransitCommand { ship_id, to };
-                if node.propose_transit(cmd).is_ok() {
-                    // This node owned the Ship: hand its state to the
-                    // destination through a second Raft round.
-                    //
-                    // For Jump Gate transits, spawn the Ship near the gate in
-                    // the destination Sector that leads back to `from`, so
-                    // the player can immediately jump back (ADR-0009). Take
-                    // both the coarse f32 `position` (event display) and the
-                    // precise f64 `abs_m` (re-anchoring, ADR-0029) from the
-                    // same gate lookup so they never disagree.
-                    let arrival_gate = gate_id.and_then(|_| {
-                        node.galaxy()
-                            .gates_in_sector(to)
-                            .into_iter()
-                            .find(|g| g.to_sector == node.sector_id())
-                    });
-                    let entry_pos = arrival_gate.map(|g| g.position).unwrap_or(Position::ORIGIN);
-                    let entry_pos_abs = arrival_gate.map(|g| g.abs_m).unwrap_or([0.0, 0.0, 0.0]);
-                    if let Some(ship) = node.export_transit(ship_id, entry_pos) {
-                        let from = node.sector_id();
-                        raft.propose(
-                            TransitOp::Commit {
-                                ship: Box::new(ship),
-                                from,
-                                to,
-                                entry_pos,
-                                entry_pos_abs,
-                                gate_id,
-                            }
-                            .encode(),
-                        );
-                    }
+                // `prepare_transit_commit` owns the Gate-lookup/entry-point
+                // logic (ADR-0009/0029) — this orchestrator just wraps the
+                // result into the follow-up Raft proposal.
+                if let Some(data) = node.prepare_transit_commit(ship_id, to, gate_id) {
+                    let from = node.sector_id();
+                    raft.propose(
+                        TransitOp::Commit {
+                            ship: data.ship,
+                            from,
+                            to,
+                            entry_pos: data.entry_pos,
+                            entry_pos_abs: data.entry_pos_abs,
+                            gate_id,
+                        }
+                        .encode(),
+                    );
                 }
             }
             TransitOp::Commit {
@@ -133,11 +116,7 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                 gate_id,
             } => {
                 if to == node.sector_id() {
-                    let ship_id = ship.ship_id;
-                    node.import_transit(&ship, from, entry_pos, entry_pos_abs);
-                    if let Some(gate_id) = gate_id {
-                        node.append_jump_events(ship_id, gate_id, from, to, entry_pos);
-                    }
+                    node.handle_transit_commit(&ship, from, entry_pos, entry_pos_abs, gate_id);
                 }
             }
         }
