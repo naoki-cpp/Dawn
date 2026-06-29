@@ -1,31 +1,34 @@
 //! Area-of-Interest delivery for serve loops.
 //!
-//! The serve loops own transport and runtime ordering; this module owns the
-//! delivery policy for one client-visible frame: visible-set memory, AoI
-//! enter/leave messages, event filtering, destroyed-ship suppression, and
-//! authoritative warp-arrival snaps.
+//! The delivery policy itself (visible-set memory, AoI enter/leave, event
+//! filtering, warp-arrival snaps) lives in `dawn_sector::aoi::AoiDelivery` —
+//! this module only owns what's specific to the in-process serve loop:
+//! building the per-tick `CellGrid`, looping over sessions, and adapting
+//! `ws_server::PlayerSession` to the `AoiSink` trait (the type and the trait
+//! live in different crates, so the adapter has to live here or in
+//! dawn-actor — see AI_DEVELOPMENT_GUIDE.md crate boundaries).
 
 use crate::ws_server;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
+use dawn_sector::aoi::{AoiSink, CellGrid};
 use dawn_sector::node::SimulationNode;
-use dawn_sector::{aoi, aoi::CellGrid};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) struct AoiDelivery {
     cell_size: f32,
-    visible_by_player: HashMap<PlayerId, Vec<ShipId>>,
+    inner: dawn_sector::aoi::AoiDelivery,
 }
 
 impl AoiDelivery {
     pub(crate) fn new(cell_size: f32) -> Self {
         Self {
             cell_size,
-            visible_by_player: HashMap::new(),
+            inner: dawn_sector::aoi::AoiDelivery::new(),
         }
     }
 
     pub(crate) fn seed_player(&mut self, player_id: PlayerId, visible: Vec<ShipId>) {
-        self.visible_by_player.insert(player_id, visible);
+        self.inner.seed_player(player_id, visible);
     }
 
     pub(crate) fn deliver_single_sector(
@@ -38,7 +41,13 @@ impl AoiDelivery {
         let grid = CellGrid::build(self.cell_size, node.ship_absolute_positions());
         sessions.retain_mut(|sess| {
             let curr = current_visible(node, &grid, sess.ship_id);
-            self.deliver_frame(sess, node, curr, new_events, warp_arrivals)
+            let observer = dawn_sector::aoi::Observer {
+                player_id: sess.player_id,
+                ship_id: sess.ship_id,
+            };
+            let mut sink = SessionSink(sess);
+            self.inner
+                .deliver_frame(&mut sink, node, observer, curr, new_events, warp_arrivals)
         });
         self.retain_sessions(sessions);
     }
@@ -66,9 +75,15 @@ impl AoiDelivery {
                 return true;
             }
 
-            self.deliver_frame(
-                sess,
+            let observer = dawn_sector::aoi::Observer {
+                player_id: sess.player_id,
+                ship_id: sess.ship_id,
+            };
+            let mut sink = SessionSink(sess);
+            self.inner.deliver_frame(
+                &mut sink,
                 &nodes[sector],
+                observer,
                 curr,
                 &new_events_by_sector[sector],
                 &warp_arrivals_by_sector[sector],
@@ -77,93 +92,9 @@ impl AoiDelivery {
         self.retain_sessions(sessions);
     }
 
-    /// Push one Area-of-Interest frame to a session (ADR-0019): `AoiEnter` for
-    /// ships that just became visible, `AoiLeave` for ships that left, then
-    /// the new domain events that concern a currently-visible ship.
-    fn deliver_frame(
-        &mut self,
-        sess: &mut ws_server::PlayerSession,
-        node: &SimulationNode,
-        curr: Vec<ShipId>,
-        new_events: &[DomainEvent],
-        warp_arrivals: &[ShipId],
-    ) -> bool {
-        // Ships that have a ShipDestroyed event this tick must NOT receive an
-        // AoiLeave -- the client's _handle_ship_destroyed already removes them.
-        let destroyed_this_tick: HashSet<ShipId> = new_events
-            .iter()
-            .filter_map(|e| {
-                if let DomainEvent::ShipDestroyed(d) = e {
-                    Some(d.ship_id)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let old_prev = self
-            .visible_by_player
-            .get(&sess.player_id)
-            .cloned()
-            .unwrap_or_default();
-        let (entered, left) = aoi::aoi_delta(&old_prev, &curr);
-        self.seed_player(sess.player_id, curr.clone());
-
-        for id in entered.iter().filter(|&&id| id != sess.ship_id) {
-            if let Some(msg) = node.aoi_enter_json(*id) {
-                if !sess.conn.send_raw(&msg) {
-                    return false;
-                }
-            }
-        }
-        for id in left
-            .iter()
-            .filter(|&&id| id != sess.ship_id && !destroyed_this_tick.contains(&id))
-        {
-            if !sess.conn.send_raw(&aoi::aoi_leave_json(*id)) {
-                return false;
-            }
-        }
-
-        let visible_events: Vec<_> = new_events
-            .iter()
-            .filter(|e| {
-                if let DomainEvent::ShipDestroyed(d) = e {
-                    return old_prev.binary_search(&d.ship_id).is_ok()
-                        || old_prev.binary_search(&d.killer_id).is_ok()
-                        || aoi::event_visible_to(e, &curr);
-                }
-                aoi::event_visible_to(e, &curr)
-            })
-            .cloned()
-            .collect();
-        if !sess.send_events(&visible_events) {
-            return false;
-        }
-
-        // Warp-arrival authority (ADR-0029): a warp ends with the client's
-        // visual ship lagging behind. Push the server's absolute arrival as a
-        // `PositionSnap` to the owner and any observer that can see the ship.
-        for &sid in warp_arrivals {
-            let relevant = sid == sess.ship_id || curr.binary_search(&sid).is_ok();
-            if relevant {
-                if let Some(abs) = node.ship_absolute(sid) {
-                    let msg = format!(
-                        "{{\"type\":\"PositionSnap\",\"ship_id\":{},\"position\":{{\"x\":{},\"y\":{},\"z\":{}}}}}",
-                        sid.raw(), abs[0], abs[1], abs[2]
-                    );
-                    if !sess.conn.send_raw(&msg) {
-                        return false;
-                    }
-                }
-            }
-        }
-        true
-    }
-
     fn retain_sessions(&mut self, sessions: &[ws_server::PlayerSession]) {
-        self.visible_by_player
-            .retain(|pid, _| sessions.iter().any(|s| s.player_id == *pid));
+        let live: HashSet<PlayerId> = sessions.iter().map(|s| s.player_id).collect();
+        self.inner.retain_players(|pid| live.contains(&pid));
     }
 }
 
@@ -171,4 +102,18 @@ fn current_visible(node: &SimulationNode, grid: &CellGrid, ship_id: ShipId) -> V
     node.ship_absolute_pos(ship_id)
         .map(|pos| grid.neighbors_of(pos))
         .unwrap_or_default()
+}
+
+/// Adapts a `ws_server::PlayerSession` to `AoiSink` (orphan-rule workaround:
+/// neither this crate nor dawn-actor can be skipped — the wrapper just has to
+/// live wherever the concrete session type is in scope).
+struct SessionSink<'a>(&'a mut ws_server::PlayerSession);
+
+impl AoiSink for SessionSink<'_> {
+    fn send_raw(&mut self, msg: &str) -> bool {
+        self.0.conn.send_raw(msg)
+    }
+    fn send_events(&mut self, events: &[DomainEvent]) -> bool {
+        self.0.send_events(events)
+    }
 }

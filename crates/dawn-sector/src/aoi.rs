@@ -16,9 +16,11 @@
 //! (ADR-0019). Enumeration is `ShipId`-sorted so the result is deterministic
 //! regardless of insertion order.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use dawn_core::{DomainEvent, ShipId};
+use dawn_core::{DomainEvent, PlayerId, ShipId};
+
+use crate::node::SimulationNode;
 
 /// Integer 3-D cell coordinate.
 pub type Cell = (i32, i32, i32);
@@ -138,6 +140,151 @@ pub fn event_visible_to(event: &DomainEvent, visible: &[ShipId]) -> bool {
 /// ([`crate::node::SimulationNode::aoi_enter_json`]).
 pub fn aoi_leave_json(ship_id: ShipId) -> String {
     serde_json::json!({ "type": "AoiLeave", "ship_id": ship_id.raw() }).to_string()
+}
+
+/// The identity of one observer receiving a frame: which player, and which
+/// ship is theirs (excluded from its own Enter/Leave/snap messages).
+pub struct Observer {
+    pub player_id: PlayerId,
+    pub ship_id: ShipId,
+}
+
+/// Per-session delivery destination for one Area-of-Interest frame. Two real
+/// adapters justify this seam: the in-process serve loop's `PlayerSession`
+/// and the standalone sector-node binary's `PlayerSession` — both wrap the
+/// same `dawn-actor` connection type, but `dawn-sector` cannot name it
+/// directly without depending on `dawn-actor` (see AI_DEVELOPMENT_GUIDE.md
+/// crate boundaries). Callers wrap their session in a local newtype that
+/// implements this trait (orphan-rule friendly: the wrapper type is local to
+/// the calling crate even though the trait lives here).
+pub trait AoiSink {
+    fn send_raw(&mut self, msg: &str) -> bool;
+    fn send_events(&mut self, events: &[DomainEvent]) -> bool;
+}
+
+/// Area-of-Interest delivery policy (ADR-0019): tracks each player's visible
+/// set across ticks and emits `AoiEnter` / `AoiLeave` plus the new events and
+/// warp-arrival snaps a client is owed for one frame. Owns the per-player
+/// visible-set memory so callers don't have to.
+///
+/// Out of scope (caller's responsibility): cross-sector Redirect handling,
+/// session retention/removal, and building the `CellGrid` for the tick —
+/// this struct only delivers a frame given an already-computed current
+/// visible set.
+#[derive(Default)]
+pub struct AoiDelivery {
+    visible_by_player: HashMap<PlayerId, Vec<ShipId>>,
+}
+
+impl AoiDelivery {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Seed (or reseed) a player's visible set without emitting any
+    /// Enter/Leave messages — used when a player joins or transfers sectors
+    /// in-process and the first frame should not look like every ship just
+    /// entered.
+    pub fn seed_player(&mut self, player_id: PlayerId, visible: Vec<ShipId>) {
+        self.visible_by_player.insert(player_id, visible);
+    }
+
+    /// Drop visible-set memory for players no longer present, given the
+    /// current player set.
+    pub fn retain_players(&mut self, keep: impl Fn(PlayerId) -> bool) {
+        self.visible_by_player.retain(|pid, _| keep(*pid));
+    }
+
+    /// Deliver one Area-of-Interest frame to `sink`: `AoiEnter` for ships
+    /// that just became visible, `AoiLeave` for ships that left, the new
+    /// domain events that concern a currently-visible ship, then any
+    /// warp-arrival `PositionSnap`s relevant to this observer. Returns
+    /// `false` as soon as a send fails (caller should drop the session).
+    pub fn deliver_frame(
+        &mut self,
+        sink: &mut dyn AoiSink,
+        node: &SimulationNode,
+        observer: Observer,
+        curr: Vec<ShipId>,
+        new_events: &[DomainEvent],
+        warp_arrivals: &[ShipId],
+    ) -> bool {
+        let Observer {
+            player_id,
+            ship_id: own_ship_id,
+        } = observer;
+        // Ships that have a ShipDestroyed event this tick must NOT receive an
+        // AoiLeave -- the client's _handle_ship_destroyed already removes them.
+        let destroyed_this_tick: HashSet<ShipId> = new_events
+            .iter()
+            .filter_map(|e| {
+                if let DomainEvent::ShipDestroyed(d) = e {
+                    Some(d.ship_id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let old_prev = self
+            .visible_by_player
+            .get(&player_id)
+            .cloned()
+            .unwrap_or_default();
+        let (entered, left) = aoi_delta(&old_prev, &curr);
+        self.seed_player(player_id, curr.clone());
+
+        for &id in entered.iter().filter(|&&id| id != own_ship_id) {
+            if let Some(msg) = node.aoi_enter_json(id) {
+                if !sink.send_raw(&msg) {
+                    return false;
+                }
+            }
+        }
+        for &id in left
+            .iter()
+            .filter(|&&id| id != own_ship_id && !destroyed_this_tick.contains(&id))
+        {
+            if !sink.send_raw(&aoi_leave_json(id)) {
+                return false;
+            }
+        }
+
+        let visible_events: Vec<_> = new_events
+            .iter()
+            .filter(|e| {
+                if let DomainEvent::ShipDestroyed(d) = e {
+                    return old_prev.binary_search(&d.ship_id).is_ok()
+                        || old_prev.binary_search(&d.killer_id).is_ok()
+                        || event_visible_to(e, &curr);
+                }
+                event_visible_to(e, &curr)
+            })
+            .cloned()
+            .collect();
+        if !sink.send_events(&visible_events) {
+            return false;
+        }
+
+        // Warp-arrival authority (ADR-0029): a warp ends with the client's
+        // visual ship lagging behind. Push the server's absolute arrival as a
+        // `PositionSnap` to the owner and any observer that can see the ship.
+        for &sid in warp_arrivals {
+            let relevant = sid == own_ship_id || curr.binary_search(&sid).is_ok();
+            if relevant {
+                if let Some(abs) = node.ship_absolute(sid) {
+                    let msg = format!(
+                        "{{\"type\":\"PositionSnap\",\"ship_id\":{},\"position\":{{\"x\":{},\"y\":{},\"z\":{}}}}}",
+                        sid.raw(), abs[0], abs[1], abs[2]
+                    );
+                    if !sink.send_raw(&msg) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
 }
 
 /// Map an absolute (f64) position to its integer cell via floor division
@@ -288,5 +435,149 @@ mod tests {
         });
         let visible = vec![ship(1), ship(2)];
         assert!(!event_visible_to(&event, &visible));
+    }
+
+    // ── AoiDelivery ───────────────────────────────────────────────────────────
+
+    #[derive(Default)]
+    struct FakeSink {
+        raw: Vec<String>,
+        events: Vec<DomainEvent>,
+    }
+
+    impl AoiSink for FakeSink {
+        fn send_raw(&mut self, msg: &str) -> bool {
+            self.raw.push(msg.to_string());
+            true
+        }
+        fn send_events(&mut self, events: &[DomainEvent]) -> bool {
+            self.events.extend_from_slice(events);
+            true
+        }
+    }
+
+    fn mem_node() -> SimulationNode {
+        use dawn_core::{SectorBounds, SectorId};
+        SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        )
+    }
+
+    fn player(n: u64) -> PlayerId {
+        PlayerId(n)
+    }
+
+    #[test]
+    fn deliver_frame_emits_aoi_enter_for_a_newly_visible_ship() {
+        use dawn_core::{Position, Velocity};
+        let mut node = mem_node();
+        let other = node.spawn_ship(
+            crate::ship_types::SHIP_TYPE_NPC_FRIGATE,
+            Position::ORIGIN,
+            Velocity::ZERO,
+        );
+
+        let mut delivery = AoiDelivery::new();
+        let mut sink = FakeSink::default();
+        delivery.deliver_frame(
+            &mut sink,
+            &node,
+            Observer {
+                player_id: player(1),
+                ship_id: ship(1),
+            },
+            vec![other],
+            &[],
+            &[],
+        );
+
+        assert_eq!(sink.raw.len(), 1, "exactly one AoiEnter for the new ship");
+        let v: serde_json::Value = serde_json::from_str(&sink.raw[0]).unwrap();
+        assert_eq!(v["type"], "AoiEnter");
+    }
+
+    #[test]
+    fn deliver_frame_emits_aoi_leave_for_a_ship_that_left_unless_it_was_destroyed() {
+        let node = mem_node();
+        let mut delivery = AoiDelivery::new();
+        delivery.seed_player(player(1), vec![ship(2), ship(3)]);
+
+        // ship(2) left and was NOT destroyed -> AoiLeave.
+        let mut sink = FakeSink::default();
+        delivery.deliver_frame(
+            &mut sink,
+            &node,
+            Observer {
+                player_id: player(1),
+                ship_id: ship(1),
+            },
+            vec![ship(3)],
+            &[],
+            &[],
+        );
+        assert_eq!(sink.raw.len(), 1);
+        let v: serde_json::Value = serde_json::from_str(&sink.raw[0]).unwrap();
+        assert_eq!(v["type"], "AoiLeave");
+        assert_eq!(v["ship_id"].as_u64().unwrap(), ship(2).raw());
+
+        // Reseed, then ship(2) leaves because it was destroyed this tick -> no AoiLeave.
+        delivery.seed_player(player(1), vec![ship(2), ship(3)]);
+        let destroyed = DomainEvent::ShipDestroyed(dawn_core::events::ShipDestroyed {
+            ship_id: ship(2),
+            killer_id: ship(3),
+            tick: dawn_core::Tick(1),
+        });
+        let mut sink = FakeSink::default();
+        delivery.deliver_frame(
+            &mut sink,
+            &node,
+            Observer {
+                player_id: player(1),
+                ship_id: ship(1),
+            },
+            vec![ship(3)],
+            &[destroyed],
+            &[],
+        );
+        assert!(
+            sink.raw.is_empty(),
+            "a destroyed ship's own removal handles this client-side, no AoiLeave"
+        );
+    }
+
+    #[test]
+    fn deliver_frame_pushes_a_position_snap_for_a_visible_warp_arrival() {
+        use dawn_core::{Position, Velocity};
+        let mut node = mem_node();
+        let arrived = node.spawn_ship(
+            crate::ship_types::SHIP_TYPE_NPC_FRIGATE,
+            Position::new(5.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+
+        let mut delivery = AoiDelivery::new();
+        delivery.seed_player(player(1), vec![arrived]);
+        let mut sink = FakeSink::default();
+        delivery.deliver_frame(
+            &mut sink,
+            &node,
+            Observer {
+                player_id: player(1),
+                ship_id: ship(1),
+            },
+            vec![arrived],
+            &[],
+            &[arrived],
+        );
+
+        let snap = sink
+            .raw
+            .iter()
+            .find(|m| m.contains("PositionSnap"))
+            .expect("a PositionSnap is sent for the visible warp arrival");
+        let v: serde_json::Value = serde_json::from_str(snap).unwrap();
+        assert_eq!(v["ship_id"].as_u64().unwrap(), arrived.raw());
     }
 }

@@ -7,9 +7,10 @@
 
 use dawn_actor::{protocol, ws_server};
 use dawn_consensus::RaftActorHandle;
-use dawn_core::{DomainEvent, PlayerId, SectorId, ShipId, WarpTarget};
+use dawn_core::{DomainEvent, SectorId, ShipId, WarpTarget};
 use dawn_event_store::store::EventStore as _;
 use dawn_replication::{LogBatch, ReplicationTransport, TcpReplicationTransport};
+use dawn_sector::aoi::AoiSink;
 use dawn_sector::node::SimulationNode;
 use dawn_sector::{aoi, transit};
 use std::collections::HashMap;
@@ -21,7 +22,7 @@ pub(crate) struct SectorNodeRuntime {
     aoi_cell_size: f32,
     peer_ws: HashMap<SectorId, SocketAddr>,
     sessions: Vec<ws_server::PlayerSession>,
-    prev_visible: HashMap<PlayerId, Vec<ShipId>>,
+    aoi_delivery: aoi::AoiDelivery,
 }
 
 impl SectorNodeRuntime {
@@ -35,7 +36,7 @@ impl SectorNodeRuntime {
             aoi_cell_size,
             peer_ws,
             sessions: Vec::new(),
-            prev_visible: HashMap::new(),
+            aoi_delivery: aoi::AoiDelivery::new(),
         }
     }
 
@@ -53,7 +54,7 @@ impl SectorNodeRuntime {
             .ship_absolute_pos(sess.ship_id)
             .map(|pos| node.ships_visible_to(pos, self.aoi_cell_size))
             .unwrap_or_default();
-        self.prev_visible.insert(sess.player_id, seed);
+        self.aoi_delivery.seed_player(sess.player_id, seed);
         self.sessions.push(sess);
     }
 
@@ -258,6 +259,7 @@ impl SectorNodeRuntime {
     ) {
         let grid = aoi::CellGrid::build(self.aoi_cell_size, node.ship_absolute_positions());
         let warp_arrivals = node.drain_completed_warps();
+        let aoi_delivery = &mut self.aoi_delivery;
 
         self.sessions.retain_mut(|sess| {
             if let Some(&dest) = jumped_ships.get(&sess.ship_id) {
@@ -266,7 +268,7 @@ impl SectorNodeRuntime {
                     sess.conn.send_raw(&msg);
                     println!("[Node] Redirect {:?} -> {ws_addr}", sess.player_id);
                 }
-                self.prev_visible.remove(&sess.player_id);
+                aoi_delivery.retain_players(|pid| pid != sess.player_id);
                 return false;
             }
 
@@ -274,81 +276,29 @@ impl SectorNodeRuntime {
                 .ship_absolute_pos(sess.ship_id)
                 .map(|pos| grid.neighbors_of(pos))
                 .unwrap_or_default();
-            let prev = self.prev_visible.entry(sess.player_id).or_default();
-            deliver_aoi_frame(sess, node, curr, prev, new_events, &warp_arrivals)
+            let observer = aoi::Observer {
+                player_id: sess.player_id,
+                ship_id: sess.ship_id,
+            };
+            let mut sink = SessionSink(sess);
+            aoi_delivery.deliver_frame(&mut sink, node, observer, curr, new_events, &warp_arrivals)
         });
-        self.prev_visible
-            .retain(|pid, _| self.sessions.iter().any(|s| s.player_id == *pid));
+        let live: std::collections::HashSet<_> =
+            self.sessions.iter().map(|s| s.player_id).collect();
+        self.aoi_delivery.retain_players(|pid| live.contains(&pid));
     }
 }
 
-fn deliver_aoi_frame(
-    sess: &mut ws_server::PlayerSession,
-    node: &SimulationNode,
-    curr: Vec<ShipId>,
-    prev: &mut Vec<ShipId>,
-    new_events: &[DomainEvent],
-    warp_arrivals: &[ShipId],
-) -> bool {
-    let destroyed_this_tick: std::collections::HashSet<ShipId> = new_events
-        .iter()
-        .filter_map(|e| {
-            if let DomainEvent::ShipDestroyed(d) = e {
-                Some(d.ship_id)
-            } else {
-                None
-            }
-        })
-        .collect();
+/// Adapts a `ws_server::PlayerSession` to `AoiSink` (orphan-rule workaround:
+/// the trait lives in dawn-sector, the type in dawn-actor, so the impl has to
+/// live here where both are foreign).
+struct SessionSink<'a>(&'a mut ws_server::PlayerSession);
 
-    let old_prev = prev.clone();
-    let (entered, left) = aoi::aoi_delta(&old_prev, &curr);
-    *prev = curr.clone();
-
-    for &id in entered.iter().filter(|&&id| id != sess.ship_id) {
-        if let Some(msg) = node.aoi_enter_json(id) {
-            if !sess.conn.send_raw(&msg) {
-                return false;
-            }
-        }
+impl AoiSink for SessionSink<'_> {
+    fn send_raw(&mut self, msg: &str) -> bool {
+        self.0.conn.send_raw(msg)
     }
-    for &id in left
-        .iter()
-        .filter(|&&id| id != sess.ship_id && !destroyed_this_tick.contains(&id))
-    {
-        if !sess.conn.send_raw(&aoi::aoi_leave_json(id)) {
-            return false;
-        }
+    fn send_events(&mut self, events: &[DomainEvent]) -> bool {
+        self.0.send_events(events)
     }
-
-    let visible_events: Vec<_> = new_events
-        .iter()
-        .filter(|e| {
-            if let DomainEvent::ShipDestroyed(d) = e {
-                return old_prev.binary_search(&d.ship_id).is_ok()
-                    || old_prev.binary_search(&d.killer_id).is_ok()
-                    || aoi::event_visible_to(e, &curr);
-            }
-            aoi::event_visible_to(e, &curr)
-        })
-        .cloned()
-        .collect();
-    if !sess.send_events(&visible_events) {
-        return false;
-    }
-
-    for &sid in warp_arrivals {
-        if sid == sess.ship_id || curr.binary_search(&sid).is_ok() {
-            if let Some(abs) = node.ship_absolute(sid) {
-                let msg = format!(
-                    "{{\"type\":\"PositionSnap\",\"ship_id\":{},\"position\":{{\"x\":{},\"y\":{},\"z\":{}}}}}",
-                    sid.raw(), abs[0], abs[1], abs[2]
-                );
-                if !sess.conn.send_raw(&msg) {
-                    return false;
-                }
-            }
-        }
-    }
-    true
 }
