@@ -426,8 +426,12 @@ hotspot IP instead:
 printf '%s\n' 'ws://192.168.137.xxx:7878' > client/server_url.txt
 ```
 
-The client now accepts the server's `Redirect` message and reconnects to the
-destination node automatically on inter-sector jumps.
+The client accepts the server's `Redirect` message and reconnects to the
+destination node automatically on inter-sector jumps. The `Redirect` payload
+includes `player_id` and `ship_id`; the next `Hello` sends those values back so
+the destination node can resume the same player ship instead of spawning a new
+one. If the destination Sector does not already contain that ship, the resume is
+rejected rather than falling back to a duplicate fresh spawn.
 
 Each node writes logs under:
 
