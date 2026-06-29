@@ -21,6 +21,16 @@ use crate::persistence::ShipSnapshot;
 
 use super::SimulationNode;
 
+/// Everything the Raft layer needs to propose a `TransitOp::Commit`, produced
+/// by [`SimulationNode::prepare_transit_commit`]. `ship` is boxed for the same
+/// reason `TransitOp::Commit` boxes it (ADR-0032 grew `ShipSnapshot` with
+/// `inventory`).
+pub struct TransitCommitData {
+    pub ship: Box<ShipSnapshot>,
+    pub entry_pos: Position,
+    pub entry_pos_abs: [f64; 3],
+}
+
 impl<S: EventStore> SimulationNode<S> {
     /// Validate and begin a Sector Transit (CLAUDE.md §4 Step 2).
     ///
@@ -30,8 +40,9 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// In the Raft pipeline (ADR-0014) this is invoked when a committed
     /// `TransitOp::Request` is applied at Step 7.5 — never directly from a
-    /// client command.
-    pub fn propose_transit(&mut self, cmd: TransitCommand) -> Result<(), DawnError> {
+    /// client command. Folded into [`prepare_transit_commit`](Self::prepare_transit_commit);
+    /// not called directly outside this module.
+    pub(super) fn propose_transit(&mut self, cmd: TransitCommand) -> Result<(), DawnError> {
         let &entity = self
             .ships
             .index
@@ -67,6 +78,42 @@ impl<S: EventStore> SimulationNode<S> {
             .is_some_and(|&entity| !self.world.transit_state(entity).is_in_transit())
     }
 
+    /// Stage 1 of a Sector Transit (ADR-0014 §3 [4]), as one action: validate
+    /// and begin the Transit, work out where `ship_id` lands in `to` (a Jump
+    /// Gate's `position`/`abs_m` leading back to this Sector, so the Ship can
+    /// jump straight back — ADR-0009/0029 — or the Sector origin for a
+    /// non-Gate Transit), and export the Ship's state. Returns `None` if the
+    /// Transit can't begin (unknown Ship, already in transit) or the Ship
+    /// can't be found to export.
+    ///
+    /// Replaces the orchestrator in `transit::apply_committed_raft_entries`
+    /// needing to know the Gate-lookup/entry-point logic itself — it now
+    /// just wraps the result into a `TransitOp::Commit`.
+    pub fn prepare_transit_commit(
+        &mut self,
+        ship_id: ShipId,
+        to: SectorId,
+        gate_id: Option<JumpGateId>,
+    ) -> Option<TransitCommitData> {
+        self.propose_transit(TransitCommand { ship_id, to }).ok()?;
+
+        let arrival_gate = gate_id.and_then(|_| {
+            self.galaxy()
+                .gates_in_sector(to)
+                .into_iter()
+                .find(|g| g.to_sector == self.sector_id())
+        });
+        let entry_pos = arrival_gate.map(|g| g.position).unwrap_or(Position::ORIGIN);
+        let entry_pos_abs = arrival_gate.map(|g| g.abs_m).unwrap_or([0.0, 0.0, 0.0]);
+
+        let ship = self.export_transit(ship_id, entry_pos)?;
+        Some(TransitCommitData {
+            ship: Box::new(ship),
+            entry_pos,
+            entry_pos_abs,
+        })
+    }
+
     /// Append `JumpGateUsed` (and `StarSystemChanged` if the destination
     /// Sector belongs to a different Star System) for a Ship that just
     /// completed a Jump-Gate Transit (ADR-0009).
@@ -75,7 +122,9 @@ impl<S: EventStore> SimulationNode<S> {
     /// [`import_transit`](Self::import_transit) appends
     /// `SectorTransitCompleted` — `JumpGateUsed` records *how* the Ship
     /// moved, in addition to (not instead of) `SectorTransitCompleted`.
-    pub fn append_jump_events(
+    /// Folded into [`handle_transit_commit`](Self::handle_transit_commit);
+    /// not called directly outside this module.
+    pub(super) fn append_jump_events(
         &mut self,
         ship_id: ShipId,
         gate_id: JumpGateId,
@@ -111,8 +160,13 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// Appends `SectorTransitCompleted` from this (the `from`) Sector's
     /// perspective. Returns `None` if `ship_id` is unknown or not currently
-    /// `InTransit`.
-    pub fn export_transit(&mut self, ship_id: ShipId, entry_pos: Position) -> Option<ShipSnapshot> {
+    /// `InTransit`. Folded into [`prepare_transit_commit`](Self::prepare_transit_commit);
+    /// not called directly outside this module.
+    pub(super) fn export_transit(
+        &mut self,
+        ship_id: ShipId,
+        entry_pos: Position,
+    ) -> Option<ShipSnapshot> {
         let &entity = self.ships.index.get(&ship_id)?;
         let to = match self.world.transit_state(entity) {
             TransitState::InTransit { to } => to,
@@ -216,8 +270,9 @@ impl<S: EventStore> SimulationNode<S> {
     /// so the Ship can immediately jump back out (ADR-0009).
     ///
     /// Appends `SectorTransitCompleted` from this (the `to`) Sector's
-    /// perspective.
-    pub fn import_transit(
+    /// perspective. Folded into [`handle_transit_commit`](Self::handle_transit_commit);
+    /// not called directly outside this module.
+    pub(super) fn import_transit(
         &mut self,
         ship: &ShipSnapshot,
         from: SectorId,
@@ -239,6 +294,31 @@ impl<S: EventStore> SimulationNode<S> {
                 tick: self.current_tick,
             },
         ));
+    }
+
+    /// Stage 2 of a Sector Transit, as one action: import `ship` (from
+    /// [`prepare_transit_commit`](Self::prepare_transit_commit) on the `from`
+    /// Sector), then append `JumpGateUsed`/`StarSystemChanged` if this
+    /// Transit came through a Jump Gate (ADR-0009). Callers no longer need to
+    /// know that the Gate-event append is conditional and comes after import.
+    ///
+    /// The caller (`transit::apply_committed_raft_entries`) must already have
+    /// checked `to == self.sector_id()` before calling — this only runs the
+    /// import/event sequence, it doesn't re-check ownership of the Commit.
+    pub fn handle_transit_commit(
+        &mut self,
+        ship: &ShipSnapshot,
+        from: SectorId,
+        entry_pos: Position,
+        entry_pos_abs: [f64; 3],
+        gate_id: Option<JumpGateId>,
+    ) {
+        let ship_id = ship.ship_id;
+        self.import_transit(ship, from, entry_pos, entry_pos_abs);
+        if let Some(gate_id) = gate_id {
+            let to = self.sector_id();
+            self.append_jump_events(ship_id, gate_id, from, to, entry_pos);
+        }
     }
 
     /// Re-anchor a Ship that just arrived in this Sector via Sector Transit
@@ -505,6 +585,76 @@ mod tests {
             to_node.can_propose_jump(ship_id, return_gate.id),
             "ship must land within the return gate's activation_radius, not just \
              at its f32-coarse `position` interpreted against the wrong anchor"
+        );
+    }
+
+    /// Same regression as above, but through the consolidated
+    /// `prepare_transit_commit`/`handle_transit_commit` pair instead of the
+    /// individual primitives — exercises the Gate-lookup/entry-point logic
+    /// those two methods now own, mirroring exactly what
+    /// `transit::apply_committed_raft_entries` calls in production.
+    #[test]
+    fn the_consolidated_request_commit_pair_reproduces_the_same_arrival() {
+        let mut from_node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        let mut to_node = SimulationNode::new(
+            NodeId(1),
+            SectorId(1),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+
+        let outbound_gate = crate::galaxy::Galaxy::demo()
+            .gates_in_sector(SectorId(0))
+            .into_iter()
+            .find(|g| g.to_sector == SectorId(1))
+            .expect("Sector 0 has a gate to Sector 1");
+        let return_gate = crate::galaxy::Galaxy::demo()
+            .gates_in_sector(SectorId(1))
+            .into_iter()
+            .find(|g| g.to_sector == SectorId(0))
+            .expect("Sector 1 has a gate back to Sector 0");
+
+        let ship_id = from_node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+
+        let data = from_node
+            .prepare_transit_commit(ship_id, SectorId(1), Some(outbound_gate.id))
+            .expect("transit must be accepted and the ship exported");
+        assert_eq!(
+            data.entry_pos_abs, return_gate.abs_m,
+            "the arrival point must be the return gate's precise abs_m, not Sector 0's"
+        );
+
+        to_node.handle_transit_commit(
+            &data.ship,
+            SectorId(0),
+            data.entry_pos,
+            data.entry_pos_abs,
+            Some(outbound_gate.id),
+        );
+
+        assert!(
+            to_node.can_propose_jump(ship_id, return_gate.id),
+            "the consolidated pair must reproduce the same anchor-fix as the primitives"
+        );
+        let records = to_node.event_store().all_records();
+        let jump_used = records
+            .iter()
+            .find_map(|r| match &r.event {
+                DomainEvent::JumpGateUsed(e) => Some(e),
+                _ => None,
+            })
+            .expect("handle_transit_commit must append JumpGateUsed");
+        assert_eq!(jump_used.ship_id, ship_id);
+        assert_eq!(jump_used.gate_id, outbound_gate.id);
+        assert!(
+            records
+                .iter()
+                .any(|r| matches!(&r.event, DomainEvent::StarSystemChanged(_))),
+            "Sector 0 (Alpha) and Sector 1 (Beta) are different Star Systems, \
+             so StarSystemChanged must also be appended"
         );
     }
 

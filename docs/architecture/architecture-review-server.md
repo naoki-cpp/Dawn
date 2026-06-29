@@ -42,7 +42,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 804 | 🟡 P4-2 + P7-1 + ADR-0029 + ADR-0032（inventory seeding）。spawn / bot AI / inventory seed が同居。R-3 で観察（impl 700 超 or 責務分岐で分割） |
 | `crates/dawn-sector/src/node/orbit.rs` | 723 | 🟡 ADR-0031 新設。Orbit / Keep at Range の操船一式。単一責務で許容、R-3 で観察 |
 | `crates/dawn-sector/src/node/mod.rs` | 724 | 🟡 P7-2 後 + ADR-0031/0032 のフィールド・定数追加。R-3 で観察 |
-| `crates/dawn-sector/src/node/transit_flow.rs` | 558 | 🟢 P7-1 + ADR-0032（inventory 転送）。impl は小、増分はテスト |
+| `crates/dawn-sector/src/node/transit_flow.rs` | 913 | 🟢 2026-06-29、`prepare_transit_commit`/`handle_transit_commit`（公開面 5→2 に集約）+ `rebase_after_transit`（#38）を追加。impl は依然小さく、増分はテスト |
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 524 | 🟢 P7-pre + ADR-0032（inventory 永続化）。ほぼテスト |
 | `crates/dawn-sector/src/node/inventory.rs` | 422 | 🟢 ADR-0032 新設。fit/unfit_module_owned + seed + テスト |
 | `crates/dawn-sector/src/node/commands.rs` | 440 | 🟢 P7-1 + ADR-0032（fit 時 inventory 同梱） |
@@ -52,7 +52,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector/src/node/tackle.rs` | 324 | 🟢 P7-pre |
 | `crates/dawn-sector/src/aoi.rs` | 583 | 🟢 2026-06-29、`AoiDelivery`/`AoiSink`/`Observer`（旧 dawn-simulation・dawn-sector-node 重複の集約先）を追加。半分弱はテスト |
 | `crates/dawn-sector/src/anchor.rs` | 292 | 🟢 ADR-0029 新設（AnchorTable・静的 f64 アンカー絶対座標） |
-| `crates/dawn-sector/src/transit.rs` | 278 | 🟢 PR #30 で `run_runtime_tick` / `RuntimeTickOutput` を追加。actor / clustered serve の tick pipeline 共有入口 |
+| `crates/dawn-sector/src/transit.rs` | 282 | 🟢 PR #30 で `run_runtime_tick` / `RuntimeTickOutput` を追加。2026-06-29、Request/Commit ハンドラが `prepare_transit_commit`/`handle_transit_commit` に委譲し Gate-lookup 知識を手放した |
 | `crates/dawn-sector/src/modules.rs` | 211 | 🟢 ADR-0033 で Active 修理モジュール定義を追加 |
 | `crates/dawn-sector/src/persistence/snapshot.rs` | 173 | 🟢 ADR-0032 で `ShipSnapshot.inventory` 追加 |
 | `crates/dawn-sector/src/dilation.rs` | 160 | 🟢 |
@@ -237,10 +237,12 @@ WS protocol は `dawn-actor` に、ゲームロジックは `dawn-sector` に、
 | AoI delivery deepening | 2026-06-29 | `serve/aoi_delivery.rs` の `AoiDelivery` に visible-set memory / Enter-Leave / event filtering / warp `PositionSnap` delivery を集約。single/cluster serve loop から AoI frame の内部知識を除去 |
 | Sector Node runtime deepening | 2026-06-29 | `dawn-sector-node/src/runtime.rs` の `SectorNodeRuntime` に command dispatch / jump fallback / tick stepping / outbound replication / Redirect / AoI delivery を集約。`main.rs` は config・TCP transport・accept channel 配線中心に縮小 |
 | AoI delivery を `dawn-sector` へ集約（M-6 の AoI 重複を解消） | 2026-06-29 | `dawn-simulation::serve::aoi_delivery::AoiDelivery` と `dawn-sector-node::runtime::deliver_aoi_frame` の同型実装を `dawn_sector::aoi::AoiDelivery`（`deliver_frame` + `AoiSink` trait + `Observer`）へ統合。送信先は `dawn-actor::ws_server::PlayerSession` を直接持てない（dawn-sector は dawn-actor に非依存）ため `AoiSink` trait で抽象化し、各バイナリ側にローカルな `SessionSink` ラッパー adapter（orphan rule 回避）を置く。Redirect 判定・セッション retain はそれぞれの呼び出し側に残す。`FakeSink` を使った enter/leave delta・destroyed-ship 抑制・warp snap のユニットテストを3本追加（移動前は AoI delivery のユニットテストが存在しなかった）。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
+| Sector Transit プロトコルを公開面 5→2 に集約 | 2026-06-29 | `node/transit_flow.rs` の `propose_transit`/`export_transit`/`import_transit`/`append_jump_events` を `pub(super)` に格下げし、新設の `prepare_transit_commit`（Request 側：Gate-lookup・`entry_pos`/`entry_pos_abs` 算出・export を集約）と `handle_transit_commit`（Commit 側：import + `JumpGateUsed`/`StarSystemChanged` 追記の条件分岐を集約）の2メソッドへ統合。`transit.rs` の `apply_committed_raft_entries` オーケストレーターはこの2メソッドを呼ぶだけになり、Gate の往復先探索ロジックを二重に持たなくなった（#38 のバグ修正直後の整理）。新規ユニットテスト1本（`the_consolidated_request_commit_pair_reproduces_the_same_arrival`）で集約後の経路が既存の低レベルプリミティブと同じ着地点を再現することを確認。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
 
 > Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消、
 > R-1（navigation.rs 分割）、runtime tick pipeline collapse、AoI delivery deepening、
-> Sector Node runtime deepening、AoI delivery の dawn-sector への集約まですべて完了。
+> Sector Node runtime deepening、AoI delivery の dawn-sector への集約、
+> Sector Transit プロトコルの公開面集約まですべて完了。
 
 ### リファクタロードマップ（2026-06-23 追加・ADR-0029 後の再計測で起票）
 
