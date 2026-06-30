@@ -70,6 +70,47 @@ func test_set_player_fitting_rebuilds_module_slots_and_inventory_rows() -> void:
 	assert_int((_surface._inventory_panel_refs["inventory_rows"] as Array).size()).is_equal(1)
 
 
+func test_panel_changed_is_false_for_equal_dictionaries() -> void:
+	var a: Dictionary = {"shield": 250.0, "armor": 300.0}
+	var b: Dictionary = {"shield": 250.0, "armor": 300.0}
+	assert_bool(_surface._panel_changed(a, b)).is_false()
+
+
+func test_panel_changed_is_true_when_a_value_differs() -> void:
+	var a: Dictionary = {"shield": 250.0, "armor": 300.0}
+	var b: Dictionary = {"shield": 200.0, "armor": 300.0}
+	assert_bool(_surface._panel_changed(a, b)).is_true()
+
+
+func test_panel_changed_is_true_for_nested_dictionary_difference() -> void:
+	var a: Dictionary = {"target_hp": {"shield": 50.0, "max_shield": 100.0}}
+	var b: Dictionary = {"target_hp": {"shield": 40.0, "max_shield": 100.0}}
+	assert_bool(_surface._panel_changed(a, b)).is_true()
+
+
+func test_panel_changed_is_true_for_array_difference() -> void:
+	var a: Array = [{"name": "Afterburner"}]
+	var b: Array = [{"name": "Plate"}]
+	assert_bool(_surface._panel_changed(a, b)).is_true()
+
+
+func test_render_called_twice_with_same_frame_does_not_change_painted_values() -> void:
+	var frame: Dictionary = {
+		"connected": true,
+		"ship_type_name": "Magpie",
+		"system_name": "Alpha",
+		"speed": "120 m/s",
+		"shield": 250.0,
+		"cap_current": 75.0,
+		"cap_max": 100.0,
+	}
+	_surface.render(frame)
+	_surface.render(frame)
+
+	assert_str((_surface._status_panel_refs["conn_label"] as Label).text).is_equal("ONLINE")
+	assert_float((_surface._ship_status_refs["bar_cap"]["bar"] as ProgressBar).value).is_equal_approx(75.0, 0.0001)
+
+
 func test_inventory_panel_hit_helpers_delegate_to_built_panel() -> void:
 	_surface.set_player_fitting([], [{"module_id": 3, "slot": "Mid", "name": "Afterburner"}])
 	_surface.toggle_inventory_panel()
