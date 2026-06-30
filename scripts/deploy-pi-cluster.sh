@@ -289,6 +289,10 @@ raft_addr  = "0.0.0.0:7900"
 repl_addr  = "0.0.0.0:7910"
 npc_ships  = 0
 pop_cap    = 50
+event_log_path           = "data/node-0/events.log"
+snapshot_path             = "data/node-0/snapshot.bin"
+cold_path                 = "data/node-0/cold.log"
+checkpoint_interval_ticks = 600
 
 [[peers]]
 node_id   = 1
@@ -314,6 +318,10 @@ raft_addr  = "0.0.0.0:7901"
 repl_addr  = "0.0.0.0:7911"
 npc_ships  = 0
 pop_cap    = 50
+event_log_path           = "data/node-1/events.log"
+snapshot_path             = "data/node-1/snapshot.bin"
+cold_path                 = "data/node-1/cold.log"
+checkpoint_interval_ticks = 600
 
 [[peers]]
 node_id   = 0
@@ -339,6 +347,10 @@ raft_addr  = "0.0.0.0:7902"
 repl_addr  = "0.0.0.0:7912"
 npc_ships  = 0
 pop_cap    = 50
+event_log_path           = "data/node-2/events.log"
+snapshot_path             = "data/node-2/snapshot.bin"
+cold_path                 = "data/node-2/cold.log"
+checkpoint_interval_ticks = 600
 
 [[peers]]
 node_id   = 0

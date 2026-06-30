@@ -29,6 +29,24 @@ pub struct NodeConfig {
     /// Every other node in the cluster.
     #[serde(default)]
     pub peers: Vec<PeerConfig>,
+    /// Path to this node's hot event log (ADR-0017 two-tier log). Created on
+    /// first run; reopened (and replayed past the snapshot, if any) on
+    /// restart.
+    #[serde(default = "default_event_log_path")]
+    pub event_log_path: String,
+    /// Path to the latest authoritative snapshot (ADR-0017 §5-C). Overwritten
+    /// on every checkpoint.
+    #[serde(default = "default_snapshot_path")]
+    pub snapshot_path: String,
+    /// Path to the append-only cold archive that compaction migrates
+    /// snapshotted-and-confirmed segments into.
+    #[serde(default = "default_cold_path")]
+    pub cold_path: String,
+    /// Logical ticks between checkpoints (snapshot + hot-log compaction).
+    /// Driven by the logical tick, not wall-clock time (INV-005/FBD-003), so
+    /// checkpointing stays deterministic and replay-stable.
+    #[serde(default = "default_checkpoint_interval_ticks")]
+    pub checkpoint_interval_ticks: u64,
 }
 
 fn default_npc_ships() -> usize {
@@ -36,6 +54,18 @@ fn default_npc_ships() -> usize {
 }
 fn default_pop_cap() -> usize {
     500
+}
+fn default_event_log_path() -> String {
+    "data/events.log".to_string()
+}
+fn default_snapshot_path() -> String {
+    "data/snapshot.bin".to_string()
+}
+fn default_cold_path() -> String {
+    "data/cold.log".to_string()
+}
+fn default_checkpoint_interval_ticks() -> u64 {
+    600
 }
 
 /// One peer's network endpoints.

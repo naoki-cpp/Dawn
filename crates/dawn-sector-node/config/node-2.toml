@@ -9,6 +9,11 @@ repl_addr  = "0.0.0.0:7912"
 npc_ships  = 0
 pop_cap    = 500
 
+event_log_path           = "data/node-2/events.log"
+snapshot_path             = "data/node-2/snapshot.bin"
+cold_path                 = "data/node-2/cold.log"
+checkpoint_interval_ticks = 600
+
 [[peers]]
 node_id   = 0
 raft_addr = "127.0.0.1:7900"

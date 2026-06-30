@@ -244,6 +244,7 @@ Phase 0〜7 は全て完了済み（要約は §2「完了済みフェーズ」�
 | 3 | ネットワーク `RaftTransport` 実装（`InProcessTransport` の差し替え。静的 config のピア表） | trait は既存（transport.rs）。TLS 可能な選択（TCP+rustls / QUIC）にし後付けを塞がない。`TcpRaftTransport`（4-byte LE + postcard / LAN plaintext / per-peer 自動再接続 / accept ループ）実装済み（dawn-consensus/src/tcp_transport.rs・8D-3） | ✅ |
 | 4 | dawn-sector-node（本番実行バイナリ・上記 transport + ゴシップの配線・静的 config 起動） | 新規クレート。`TcpRaftTransport` + `TcpReplicationTransport` を TOML 静的 config で配線。3 プロセスで 3 セクタクラスタ（ws/:787{8,9,80} raft/:790{0,1,2} repl/:791{0,1,2}）。プレイヤー Jump 時は `Redirect` JSON でクライアントを宛先 WS へ誘導し、`player_id` / `ship_id` 付き Hello で同じ player ship を resume（2026-06-29） | ✅ |
 | 5 | （任意・推奨）Raspberry Pi クラスタ実機検証 | 下記 ★ 参照 | ✅ 2026-07-01・3項目とも PASS（[8d5-hardware-notes.md](./8d5-hardware-notes.md) 実行ログ参照） |
+| 6 | `dawn-sector-node` への永続化配線（FileEventStore + checkpoint + 起動時リカバリ） | Phase 3 で `FileEventStore`/`checkpoint()`/`CheckpointScheduler`/`restore_from` は実装・テスト済みだったが、8D-4 で新設した本番バイナリには配線されておらず、本番は `InMemoryEventStore`（再起動で全消失）のまま稼働していたことが判明。`NodeConfig` に `event_log_path`/`snapshot_path`/`cold_path`/`checkpoint_interval_ticks` を追加し、起動時にスナップショットの有無で新規/復元を分岐、tickループに `CheckpointScheduler::maybe_checkpoint` を配線。実機起動→kill→再起動で tick・log_index が継続することを確認済み | ✅ 2026-07-01 |
 
 **defer（トリガー付き・第1次マイルストン外。2026-07-01 時点で4項目とも未発火、着手不要）:**
 

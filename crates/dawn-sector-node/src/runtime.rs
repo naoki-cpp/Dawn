@@ -47,9 +47,9 @@ impl SectorNodeRuntime {
         }
     }
 
-    pub(crate) fn promote_ready_session(
+    pub(crate) fn promote_ready_session<S: EventStore>(
         &mut self,
-        node: &SimulationNode,
+        node: &SimulationNode<S>,
         sess: ws_server::PlayerSession,
     ) {
         println!(
@@ -65,9 +65,9 @@ impl SectorNodeRuntime {
         self.sessions.push(sess);
     }
 
-    pub(crate) fn run_frame(
+    pub(crate) fn run_frame<S: EventStore>(
         &mut self,
-        node: &mut SimulationNode,
+        node: &mut SimulationNode<S>,
         raft: &RaftActorHandle,
         committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
     ) {
@@ -87,9 +87,9 @@ impl SectorNodeRuntime {
         self.deliver_frames(node, &new_events, &jumped_ships);
     }
 
-    fn collect_player_commands(
+    fn collect_player_commands<S: EventStore>(
         &mut self,
-        node: &mut SimulationNode,
+        node: &mut SimulationNode<S>,
     ) -> (
         Vec<dawn_core::LockOnCommand>,
         Vec<(usize, dawn_core::JumpCommand)>,
@@ -159,9 +159,9 @@ impl SectorNodeRuntime {
         (lock_commands, pending_jumps)
     }
 
-    fn propose_player_jumps(
+    fn propose_player_jumps<S: EventStore>(
         &self,
-        node: &mut SimulationNode,
+        node: &mut SimulationNode<S>,
         raft: &RaftActorHandle,
         pending_jumps: Vec<(usize, dawn_core::JumpCommand)>,
     ) {
@@ -207,7 +207,11 @@ impl SectorNodeRuntime {
         }
     }
 
-    fn propose_auto_jumps(&self, node: &mut SimulationNode, raft: &RaftActorHandle) {
+    fn propose_auto_jumps<S: EventStore>(
+        &self,
+        node: &mut SimulationNode<S>,
+        raft: &RaftActorHandle,
+    ) {
         for (ship_id, gate_id) in node.drain_pending_auto_jumps() {
             if node.can_propose_jump(ship_id, gate_id) {
                 let to = node.jump_gate(gate_id).expect("gate must exist").to_sector;
@@ -228,7 +232,11 @@ impl SectorNodeRuntime {
         }
     }
 
-    fn collect_new_events(&self, node: &SimulationNode, event_cursor: u64) -> Vec<DomainEvent> {
+    fn collect_new_events<S: EventStore>(
+        &self,
+        node: &SimulationNode<S>,
+        event_cursor: u64,
+    ) -> Vec<DomainEvent> {
         node.event_store()
             .iter_from(event_cursor)
             .map(|r| r.event.clone())
@@ -252,9 +260,9 @@ impl SectorNodeRuntime {
             .collect()
     }
 
-    fn deliver_frames(
+    fn deliver_frames<S: EventStore>(
         &mut self,
-        node: &mut SimulationNode,
+        node: &mut SimulationNode<S>,
         new_events: &[DomainEvent],
         jumped_ships: &HashMap<ShipId, SectorId>,
     ) {

@@ -20,8 +20,10 @@ mod runtime;
 use dawn_actor::ws_server;
 use dawn_consensus::{RaftActor, RaftActorHandle, RaftActorMessage, RaftState, TcpRaftTransport};
 use dawn_core::{FitModuleCommand, NodeId, SectorBounds, SectorId, SlotKind};
+use dawn_event_store::FileEventStore;
 use dawn_replication::{Ingest, ReplicaSet, ReplicationTransport, TcpReplicationTransport};
 use dawn_sector::node::SimulationNode;
+use dawn_sector::persistence::{CheckpointConfig, CheckpointScheduler, StateSnapshot};
 use dawn_sector::{
     galaxy::Galaxy,
     modules, ship_types,
@@ -66,8 +68,10 @@ async fn main() -> anyhow::Result<()> {
 
     // ── SimulationNode ────────────────────────────────────────────────────────
 
-    let mut node = build_node(&cfg, node_id, sector_id, bounds);
-    spawn_npcs(&mut node, cfg.npc_ships);
+    let (mut node, is_fresh) = build_node(&cfg, node_id, sector_id, bounds);
+    if is_fresh {
+        spawn_npcs(&mut node, cfg.npc_ships);
+    }
 
     // Lookup: SectorId → peer WS address (for client Redirect on jump).
     let peer_ws: HashMap<SectorId, SocketAddr> = cfg
@@ -169,6 +173,11 @@ async fn main() -> anyhow::Result<()> {
         repl_transport.clone(),
         node.event_store(),
     );
+    let mut checkpoints = CheckpointScheduler::new(CheckpointConfig {
+        interval_ticks: cfg.checkpoint_interval_ticks,
+        snapshot_path: cfg.snapshot_path.clone().into(),
+        cold_path: cfg.cold_path.clone().into(),
+    });
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(TICK_MS));
 
     loop {
@@ -215,6 +224,23 @@ async fn main() -> anyhow::Result<()> {
 
         runtime.run_frame(&mut node, &raft, &mut committed_rx);
 
+        // Snapshot + compact on a fixed logical-tick cadence (ADR-0017 §5-C).
+        // A checkpoint failure (e.g. disk full) is logged and skipped rather
+        // than killing the live server -- the hot log keeps appending
+        // normally on the next tick either way, and the next scheduled
+        // checkpoint will retry.
+        match checkpoints.maybe_checkpoint(&mut node) {
+            Ok(Some(snapshot)) => {
+                println!(
+                    "[Node] checkpoint at tick {} (log_index={})",
+                    snapshot.tick.value(),
+                    snapshot.log_index
+                );
+            }
+            Ok(None) => {}
+            Err(e) => eprintln!("[Node] checkpoint failed, will retry next interval: {e}"),
+        }
+
         // Field observability for 8D-5: a tick that overruns its own period
         // means TCP/WS I/O (Raft, replication, or session delivery) is
         // blocking the simulation loop — the first symptom of WiFi/USB
@@ -228,23 +254,71 @@ async fn main() -> anyhow::Result<()> {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/// Builds the node, restoring from `cfg.snapshot_path` if one exists.
+///
+/// Returns whether the node started fresh (`true`) or was restored from a
+/// snapshot (`false`) -- callers must not re-run one-time genesis setup
+/// (e.g. `spawn_npcs`) on a restored node, since its NPCs already exist (or
+/// were destroyed) in the restored state.
 fn build_node(
     cfg: &config::NodeConfig,
     node_id: NodeId,
     sector_id: SectorId,
     bounds: SectorBounds,
-) -> SimulationNode {
-    let mut node = SimulationNode::new(node_id, sector_id, bounds);
+) -> (SimulationNode<FileEventStore>, bool) {
+    let modules = data_loader::load_modules("data/modules.toml");
+    let ship_types = data_loader::load_ship_types("data/ship_types.toml");
+
+    // FileEventStore::open does not create its parent directory, and a fresh
+    // deployment has no `data/node-N/` yet -- create it (and the snapshot/
+    // cold-archive parents, which are normally the same directory) up front.
+    for path in [&cfg.event_log_path, &cfg.snapshot_path, &cfg.cold_path] {
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            std::fs::create_dir_all(parent).unwrap_or_else(|e| {
+                panic!("failed to create directory '{}': {e}", parent.display())
+            });
+        }
+    }
+
+    let store = FileEventStore::open(&cfg.event_log_path)
+        .unwrap_or_else(|e| panic!("failed to open event log '{}': {e}", cfg.event_log_path));
+
+    let (mut node, is_fresh) = match StateSnapshot::load(&cfg.snapshot_path) {
+        Ok(snapshot) => {
+            println!(
+                "[Node] restoring from snapshot (tick={}, log_index={})",
+                snapshot.tick.value(),
+                snapshot.log_index
+            );
+            (
+                SimulationNode::restore_from(store, &snapshot, &modules, &ship_types),
+                false,
+            )
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            println!(
+                "[Node] no snapshot at '{}', starting fresh",
+                cfg.snapshot_path
+            );
+            let mut node = SimulationNode::with_store(node_id, sector_id, bounds, store);
+            for def in &modules {
+                node.register_module(def.clone());
+            }
+            for def in &ship_types {
+                node.register_ship_type(def.clone());
+            }
+            (node, true)
+        }
+        Err(e) => panic!(
+            "snapshot '{}' exists but could not be read: {e}",
+            cfg.snapshot_path
+        ),
+    };
+
     node.set_population_cap(cfg.pop_cap);
     let star_map = load_required_galaxy(PRODUCTION_GALAXY_PATH);
     node.set_galaxy(Arc::new(star_map));
-    for def in data_loader::load_modules("data/modules.toml") {
-        node.register_module(def);
-    }
-    for def in data_loader::load_ship_types("data/ship_types.toml") {
-        node.register_ship_type(def);
-    }
-    node
+    (node, is_fresh)
 }
 
 fn load_required_galaxy(path: &str) -> Galaxy {
@@ -254,7 +328,7 @@ fn load_required_galaxy(path: &str) -> Galaxy {
         .unwrap_or_else(|e| panic!("failed to parse production galaxy map '{path}': {e}"))
 }
 
-fn spawn_npcs(node: &mut SimulationNode, count: usize) {
+fn spawn_npcs(node: &mut SimulationNode<FileEventStore>, count: usize) {
     let config = SpawnConfig::default_for_node(NodeId(0));
     for (_, pos, vel) in generate_ships(count, &config, 0) {
         let ship_id = node.spawn_ship(ship_types::SHIP_TYPE_NPC_FRIGATE, pos, vel);

@@ -67,14 +67,15 @@ binary + `data/*.toml` + configs to each Pi over scp. `run-pi-cluster.sh
 
 ```bash
 scripts/verify-pi-cluster.sh reachability
-scripts/verify-pi-cluster.sh tick-sla --window-seconds 60 --max-overrun-rate 0.01
+scripts/verify-pi-cluster.sh tick-sla --window-seconds 90 --max-overrun-rate 0.01
 scripts/verify-pi-cluster.sh failover --timeout-seconds 15
+scripts/verify-pi-cluster.sh restart-recovery --restart-wait-seconds 10
 ```
 
-`reachability` and `tick-sla` are fully automated against the running
-cluster. `failover` watches the Raft role-transition logs for a new leader;
-the network partition itself must still be induced manually on the current
-leader, e.g.:
+`reachability`, `tick-sla`, and `restart-recovery` are fully automated against
+the running cluster. `failover` watches the Raft role-transition logs for a
+new leader; the network partition itself must still be induced manually on
+the current leader, e.g.:
 
 ```bash
 # on the leader node, immediately before running `verify-pi-cluster.sh failover`
@@ -84,6 +85,14 @@ sudo ip link set wlan0 down; sleep 12; sudo ip link set wlan0 up
 (`iptables`/`nft` were not present on the Raspberry Pi OS Lite image used
 here, so dropping the link is the simplest available fault injection.)
 
+`tick-sla`'s window should span at least one checkpoint interval (default
+`checkpoint_interval_ticks=600` = 60s) so a slow SD-card snapshot write would
+actually show up as an overrun — hence 90s rather than 60s above.
+`restart-recovery` (added 2026-07-01 alongside production persistence wiring)
+kills and restarts `node-0`'s `sector-node` process and checks its log for
+`restoring from snapshot` with a nonzero tick, instead of starting over from
+genesis.
+
 ## Result (2026-07-01)
 
 | Check | Result |
@@ -91,6 +100,8 @@ here, so dropping the link is the simplest available fault injection.)
 | `reachability` | PASS — all 3 nodes ssh-reachable, `sector-node` running, ws/raft/repl ports listening |
 | `tick-sla` (60s window) | PASS — 0 overruns / ~600 ticks on all 3 nodes (rate 0.0000) |
 | `failover` (node-2, the leader, partitioned for 12s) | PASS — node-0 transitioned to Leader within 15s; after node-2 rejoined, all nodes converged on a single leader (node-0, term 11), no split leadership |
+| `tick-sla` (90s window, spans a checkpoint) | PASS — 0 overruns / ~900 ticks on all 3 nodes (rate 0.0000); checkpoint snapshot writes did not blow the tick budget |
+| `restart-recovery` (node-0, after production persistence wiring) | PASS — killed and restarted `sector-node`; log showed `restoring from snapshot (tick=9631, log_index=0)`, ticks continued instead of resetting to genesis |
 
 ### Bugs found and fixed while running this
 
@@ -103,6 +114,18 @@ here, so dropping the link is the simplest available fault injection.)
   to `1` whenever the log file had no new overrun lines (the normal/healthy
   case), making the overrun rate meaningless. Fixed to use a fixed
   `window_seconds * 1000 / 100` estimate.
+- `scripts/verify-pi-cluster.sh`: `restart-recovery`'s `pkill` was passed as
+  an inline ssh command-string argument. The remote shell invoking it has
+  `pkill -f 'target/release/sector-node' ...` in its own argv, which is
+  exactly the pattern being matched — `pkill -f` killed its own invoking
+  shell before reaching the real target, severing the SSH channel (ssh exits
+  255, `exit-signal`). Fixed by moving the kill into the same heredoc script
+  as the restart (mirroring `run-pi-cluster.sh`, whose remote process is
+  just `bash -s` with no self-matching substring in its argv).
+- `scripts/verify-pi-cluster.sh`: `restart-recovery` initially read
+  `restoring from snapshot` / `no snapshot at` from `.err.log`; both are
+  `println!` (stdout), so they land in `.out.log`. The check silently never
+  matched until this was fixed.
 
 ### Non-bug observation
 

@@ -19,6 +19,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use dawn_core::{DomainEvent, PlayerId, ShipId};
+use dawn_event_store::store::EventStore;
 
 use crate::node::SimulationNode;
 
@@ -200,10 +201,10 @@ impl AoiDelivery {
     /// domain events that concern a currently-visible ship, then any
     /// warp-arrival `PositionSnap`s relevant to this observer. Returns
     /// `false` as soon as a send fails (caller should drop the session).
-    pub fn deliver_frame(
+    pub fn deliver_frame<S: EventStore>(
         &mut self,
         sink: &mut dyn AoiSink,
-        node: &SimulationNode,
+        node: &SimulationNode<S>,
         observer: Observer,
         curr: Vec<ShipId>,
         new_events: &[DomainEvent],

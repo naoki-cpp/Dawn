@@ -7,15 +7,24 @@
 # pass/fail criterion so a single run produces a verdict, not just logs.
 #
 # Checks:
-#   reachability  - all 3 nodes are up and listening on ws/raft/repl ports
-#   tick-sla      - "[Node] tick overrun" rate in logs stays under threshold
-#   failover      - after the operator partitions the current Raft leader,
-#                   a new leader is elected within the expected window
+#   reachability      - all 3 nodes are up and listening on ws/raft/repl ports
+#   tick-sla          - "[Node] tick overrun" rate in logs stays under threshold.
+#                        Pass --window-seconds long enough to span at least one
+#                        checkpoint (default checkpoint_interval_ticks=600 *
+#                        100ms = 60s) so a slow SD-card snapshot write would
+#                        actually show up as an overrun -- e.g. --window-seconds 90.
+#   failover          - after the operator partitions the current Raft leader,
+#                        a new leader is elected within the expected window
+#   restart-recovery  - kill and restart one node's sector-node process, and
+#                        confirm it logs "restoring from snapshot" with a
+#                        nonzero tick instead of starting over from genesis
+#                        (production persistence wiring, 2026-07-01)
 #
 # Usage:
 #   scripts/verify-pi-cluster.sh reachability
-#   scripts/verify-pi-cluster.sh tick-sla [--window-seconds 60] [--max-overrun-rate 0.01]
+#   scripts/verify-pi-cluster.sh tick-sla [--window-seconds 90] [--max-overrun-rate 0.01]
 #   scripts/verify-pi-cluster.sh failover [--timeout-seconds 15]
+#   scripts/verify-pi-cluster.sh restart-recovery [--restart-wait-seconds 10]
 #   scripts/verify-pi-cluster.sh all
 set -euo pipefail
 
@@ -26,6 +35,7 @@ remote_repo_path="/home/dawn/Dawn"
 window_seconds=60
 max_overrun_rate="0.01"
 failover_timeout_seconds=15
+restart_wait_seconds=10
 command_name=""
 
 ports_for_node() {
@@ -36,7 +46,7 @@ ports_for_node() {
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
-		reachability|tick-sla|failover|all)
+		reachability|tick-sla|failover|restart-recovery|all)
 			command_name="$1"
 			shift
 			;;
@@ -71,6 +81,10 @@ while [[ $# -gt 0 ]]; do
 			;;
 		--timeout-seconds)
 			failover_timeout_seconds="$2"
+			shift 2
+			;;
+		--restart-wait-seconds)
+			restart_wait_seconds="$2"
 			shift 2
 			;;
 		*)
@@ -193,6 +207,67 @@ check_failover() {
 	return 0
 }
 
+check_restart_recovery() {
+	# Single-node check: persistence is per-node, not a cluster property.
+	# Startup/checkpoint lines are println! (stdout -> .out.log), unlike the
+	# eprintln! diagnostics (tick overrun, Raft role transitions) the other
+	# checks read from .err.log.
+	local node="${nodes[0]}"
+	local config="${configs[0]}"
+	local remote="${user}@${node}"
+	local log_path="${remote_repo_path}/logs/${config}.out.log"
+
+	echo "Killing and restarting $node ($config) to verify snapshot recovery..."
+
+	# pkill + restart in one heredoc script (not an inline ssh argument
+	# string): when 'pkill -f target/release/sector-node' is passed as an
+	# inline ssh command argument, the invoking remote shell's own argv
+	# contains that same pattern and pkill kills its own shell, severing the
+	# SSH channel (ssh exits 255, "exit-signal", before pkill even reaches
+	# the real target). A heredoc's remote process is just `bash -s`, with
+	# no self-matching substring -- the same reason run-pi-cluster.sh
+	# already does it this way.
+	ssh "$remote" \
+		REMOTE_REPO_PATH="$remote_repo_path" \
+		CONFIG_NAME="$config" \
+		'bash -s' <<'EOF'
+set -euo pipefail
+cd "$REMOTE_REPO_PATH"
+mkdir -p logs
+pkill -u "$USER" -f 'target/release/sector-node' || true
+sleep 2
+nohup env RUST_LOG=info \
+	./target/release/sector-node "crates/dawn-sector-node/config/${CONFIG_NAME}.toml" \
+	>"logs/${CONFIG_NAME}.out.log" \
+	2>"logs/${CONFIG_NAME}.err.log" \
+	</dev/null &
+EOF
+
+	sleep "$restart_wait_seconds"
+
+	local restore_line
+	restore_line="$(ssh "$remote" "grep 'restoring from snapshot' '$log_path' 2>/dev/null | head -1 || true")"
+
+	if [[ -z "$restore_line" ]]; then
+		if ssh "$remote" "grep -q 'no snapshot at' '$log_path' 2>/dev/null"; then
+			echo "FAIL  $node: restarted with no snapshot found -- checkpoint_interval_ticks may not have elapsed yet, or persistence paths are misconfigured"
+		else
+			echo "FAIL  $node: no startup persistence log line found within ${restart_wait_seconds}s"
+		fi
+		return 1
+	fi
+
+	local tick
+	tick="$(echo "$restore_line" | grep -o 'tick=[0-9]*' | grep -o '[0-9]*')"
+	if [[ -n "$tick" && "$tick" -gt 0 ]]; then
+		echo "PASS  $node: $restore_line"
+		return 0
+	fi
+
+	echo "FAIL  $node: restore log line found but tick was not a positive number: $restore_line"
+	return 1
+}
+
 case "$command_name" in
 	reachability)
 		check_reachability
@@ -203,11 +278,15 @@ case "$command_name" in
 	failover)
 		check_failover
 		;;
+	restart-recovery)
+		check_restart_recovery
+		;;
 	all)
 		overall=0
 		check_reachability || overall=1
 		check_tick_sla || overall=1
 		check_failover || overall=1
+		check_restart_recovery || overall=1
 		exit $overall
 		;;
 esac
