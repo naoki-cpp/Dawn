@@ -162,14 +162,19 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|s| serde_json::json!({ "id": s.id.0, "name": s.name }))
             .collect();
 
-        let gates: Vec<serde_json::Value> = self.sector_map.gates.values().map(|g| {
-            serde_json::json!({
-                "gate_id"          : g.id.0,
-                "position"         : { "x": g.position.x, "y": g.position.y, "z": g.position.z },
-                "activation_radius": g.activation_radius,
-                "to_system_name"   : system_name_of(g.to_sector),
+        let gates: Vec<serde_json::Value> = self
+            .sector_map
+            .gates
+            .values()
+            .map(|g| {
+                serde_json::json!({
+                    "gate_id"          : g.id.0,
+                    "position"         : { "x": g.abs_m[0], "y": g.abs_m[1], "z": g.abs_m[2] },
+                    "activation_radius": g.activation_radius,
+                    "to_system_name"   : system_name_of(g.to_sector),
+                })
             })
-        }).collect();
+            .collect();
 
         serde_json::json!({
             "type"             : "InitialState",
@@ -400,6 +405,17 @@ mod tests {
         assert_eq!(gates.len(), 1, "Sector 0 has exactly one gate");
         assert_eq!(gates[0]["gate_id"].as_u64().unwrap(), 0);
         assert_eq!(gates[0]["to_system_name"], "Beta", "gate 0 leads to Beta");
+        let gate = node.jump_gate(dawn_core::JumpGateId(0)).unwrap();
+        assert_eq!(
+            gates[0]["position"]["x"].as_f64().unwrap(),
+            gate.abs_m[0],
+            "client gate marker/proximity source must match the f64 jump range source"
+        );
+        assert_eq!(
+            gates[0]["position"]["z"].as_f64().unwrap(),
+            gate.abs_m[2],
+            "client gate marker/proximity source must match the f64 jump range source"
+        );
 
         assert_eq!(
             v["celestial_bodies"].as_array().unwrap().len(),

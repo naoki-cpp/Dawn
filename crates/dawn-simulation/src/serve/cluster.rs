@@ -199,10 +199,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                         j.gate_id.0
                     );
                 } else if ship_owned
-                    && nodes[sector].apply_approach_command(
-                        j.ship_id,
-                        dawn_core::ApproachTarget::Gate(j.gate_id),
-                    )
+                    && nodes[sector].apply_approach_jump_fallback(j.ship_id, j.gate_id)
                 {
                     // Too close to warp (< MIN_WARP_DISTANCE) but still outside
                     // activation_radius -- without this, a ship in that band

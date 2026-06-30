@@ -28,6 +28,30 @@ impl<S: EventStore> SimulationNode<S> {
         ship_id: ShipId,
         target: dawn_core::ApproachTarget,
     ) -> bool {
+        self.apply_approach_command_with_auto_jump(ship_id, target, None)
+    }
+
+    /// Begin approaching as part of a JumpCommand fallback. Unlike a manual
+    /// ApproachCommand, reaching the gate queues the same auto-jump follow-up
+    /// that WarpCommand(auto_jump=true) uses.
+    pub fn apply_approach_jump_fallback(
+        &mut self,
+        ship_id: ShipId,
+        gate_id: dawn_core::JumpGateId,
+    ) -> bool {
+        self.apply_approach_command_with_auto_jump(
+            ship_id,
+            dawn_core::ApproachTarget::Gate(gate_id),
+            Some(gate_id),
+        )
+    }
+
+    fn apply_approach_command_with_auto_jump(
+        &mut self,
+        ship_id: ShipId,
+        target: dawn_core::ApproachTarget,
+        auto_jump_gate: Option<dawn_core::JumpGateId>,
+    ) -> bool {
         use dawn_core::ApproachTarget;
         let &entity = match self.ships.index.get(&ship_id) {
             Some(e) => e,
@@ -50,10 +74,13 @@ impl<S: EventStore> SimulationNode<S> {
         }
         // Approach overrides any other active steering mode (ADR-0031).
         self.clear_steering_modes(entity);
-        let _ = self
-            .world
-            .inner_mut()
-            .insert_one(entity, ApproachComp { target });
+        let _ = self.world.inner_mut().insert_one(
+            entity,
+            ApproachComp {
+                target,
+                auto_jump_gate,
+            },
+        );
         true
     }
 
@@ -84,15 +111,22 @@ impl<S: EventStore> SimulationNode<S> {
 
         // Collect approachers up front (entity, target, current position) so the
         // ECS query borrow is released before the mutable write pass below.
-        let approachers: Vec<(Entity, dawn_core::ApproachTarget, Position)> = self
+        let approachers: Vec<(
+            Entity,
+            dawn_core::ApproachTarget,
+            Option<dawn_core::JumpGateId>,
+            Position,
+        )> = self
             .world
             .inner()
             .query::<(&ApproachComp, &PositionComp)>()
             .iter()
-            .map(|(entity, (approach, pos))| (entity, approach.target, pos.0))
+            .map(|(entity, (approach, pos))| {
+                (entity, approach.target, approach.auto_jump_gate, pos.0)
+            })
             .collect();
 
-        for (entity, target, ship_offset) in approachers {
+        for (entity, target, auto_jump_gate, ship_offset) in approachers {
             // Work in the approacher's CURRENT anchor frame (small numbers),
             // not absolute Sector-frame Position (ADR-0029): composing the
             // anchor (f64) and offset down to an absolute f32 `Position` loses
@@ -146,6 +180,14 @@ impl<S: EventStore> SimulationNode<S> {
                 // Arrived: hold position, keep ApproachComp so the ship resumes
                 // if a Ship target later drifts back out of range.
                 Some((tp, arrival)) if ship_pos.distance(tp) <= arrival => {
+                    if let Some(gate_id) = auto_jump_gate {
+                        if let Some((&ship_id, _)) =
+                            self.ships.index.iter().find(|(_, &e)| e == entity)
+                        {
+                            self.pending_auto_jumps.push((ship_id, gate_id));
+                        }
+                        let _ = self.world.inner_mut().remove_one::<ApproachComp>(entity);
+                    }
                     self.brake_thrust(entity)
                 }
                 // Still closing: steer toward the target's latest position.
@@ -461,6 +503,54 @@ mod tests {
         assert!(
             node.can_propose_jump(chaser, dawn_core::JumpGateId(0)),
             "after approaching, the ship should be within the gate's activation radius"
+        );
+        assert!(
+            node.drain_pending_auto_jumps().is_empty(),
+            "manual Approach must not auto-jump on gate arrival"
+        );
+    }
+
+    #[test]
+    fn jump_fallback_approach_queues_auto_jump_when_gate_range_is_reached() {
+        let mut node = mem_node();
+        let gate = *node
+            .jump_gate(dawn_core::JumpGateId(0))
+            .expect("Sector 0 has Gate 0");
+        let near_gate_abs = [gate.abs_m[0] - 2_500.0, gate.abs_m[1], gate.abs_m[2]];
+        let (_player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.set_spawn_anchor_abs(chaser, near_gate_abs);
+
+        assert!(
+            !node.can_propose_jump(chaser, dawn_core::JumpGateId(0)),
+            "fixture starts outside activation radius"
+        );
+        assert!(
+            !node.apply_warp_command(
+                chaser,
+                dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)),
+                true
+            ),
+            "fixture is too close for warp, matching the Jump fallback path"
+        );
+        assert!(node.apply_approach_jump_fallback(chaser, dawn_core::JumpGateId(0)));
+
+        let mut pending = Vec::new();
+        for _ in 0..400 {
+            node.tick();
+            pending = node.drain_pending_auto_jumps();
+            if !pending.is_empty() {
+                break;
+            }
+        }
+
+        assert_eq!(
+            pending,
+            vec![(chaser, dawn_core::JumpGateId(0))],
+            "Jump fallback Approach must hand off to the existing auto-jump proposal path"
+        );
+        assert!(
+            node.can_propose_jump(chaser, dawn_core::JumpGateId(0)),
+            "queued auto-jump must only happen once the ship is in gate range"
         );
     }
 
