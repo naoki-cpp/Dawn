@@ -106,6 +106,29 @@ func test_lock_events_only_change_player_locks() -> void:
 	assert_int(_session.player_lock_target).is_equal(-1)
 
 
+func test_client_ticks_advance_capacitor_without_server_events() -> void:
+	var ship := Node3D.new()
+	_session.register_ship(11, ship, {
+		"ship_id": 11,
+		"cap_max": 100.0,
+		"cap_recharge_per_tick": 5.0,
+	}, 11)
+	var modules: Array = [{
+		"is_active_module": true,
+		"is_active": true,
+		"cap_cost_per_cycle": 20.0,
+		"cycle_time_ticks": 10,
+		"cycle_remaining": 0,
+	}]
+
+	_session.advance_client_ticks(1, modules)
+
+	assert_int(_session.current_tick).is_equal(1)
+	assert_float(_session.cap_current).is_equal_approx(80.0, 0.001)
+	assert_int((modules[0] as Dictionary)["cycle_remaining"]).is_equal(10)
+	ship.free()
+
+
 func test_destroying_opponent_reports_victory_candidate() -> void:
 	var ship := Node3D.new()
 	_session.register_ship(22, ship, {"ship_id": 22, "is_player": true}, 11)

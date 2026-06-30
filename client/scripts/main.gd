@@ -52,6 +52,7 @@ const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is reject
 ## best at the given magnitude). Change this one constant to rescale all
 ## displayed speeds and distances.
 const METERS_PER_UNIT : float = 1.0
+const CLIENT_TICKS_PER_SEC : float = 10.0
 
 ## Must match ship_controller.gd's VISUAL_SPEED_CAP (Godot units/tick): the
 ## warp-tunnel overlay (ADR-0029 lore pass) fades in once the player's ship is
@@ -71,6 +72,7 @@ const WARP_TUNNEL_FOV_BOOST : float = 15.0
 
 var _warp_tunnel_amount : float = 0.0
 var _camera_base_fov    : float = 60.0
+var _cap_tick_accumulator : float = 0.0
 
 # -- Materials ----------------------------------------------------------------
 
@@ -215,6 +217,7 @@ func _process(delta: float) -> void:
 	_update_gate_proximity()
 	_update_sun_direction()
 	_update_warp_tunnel_effect(delta)
+	_advance_client_cap_ticks(delta)
 	if _jump_notice_timer > 0.0:
 		_jump_notice_timer -= delta
 		if _jump_notice_timer <= 0.0:
@@ -1061,8 +1064,19 @@ func _update_hud() -> void:
 ## Mirror of CapacitorSystem::run() -- called once per tick elapsed.
 ## Keeps cap display in sync without any extra server messages.
 func _simulate_cap(ticks: int) -> void:
-	_session.simulate_cap(ticks, _player_modules)
+	_session.advance_client_ticks(ticks, _player_modules)
 	_sync_session_state()
+
+func _advance_client_cap_ticks(delta: float) -> void:
+	if _player_ship_id < 0 or _cap_current < 0.0:
+		_cap_tick_accumulator = 0.0
+		return
+	_cap_tick_accumulator += delta * CLIENT_TICKS_PER_SEC
+	var ticks: int = int(floor(_cap_tick_accumulator))
+	if ticks <= 0:
+		return
+	_cap_tick_accumulator -= float(ticks)
+	_simulate_cap(ticks)
 
 # -- Internal utilities -------------------------------------------------------
 
@@ -1076,6 +1090,7 @@ func _clear_all_ships() -> void:
 	_selected_gate_id   = -1
 	_selected_body_id   = -1
 	_pending_manual_deactivations.clear()
+	_cap_tick_accumulator = 0.0
 
 
 func _sync_session_state() -> void:

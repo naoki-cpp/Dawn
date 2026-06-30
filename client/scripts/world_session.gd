@@ -221,6 +221,13 @@ func advance_tick_from_event(tick: int, modules: Array) -> int:
 	return ticks_elapsed
 
 
+func advance_client_ticks(ticks: int, modules: Array) -> void:
+	if ticks <= 0:
+		return
+	current_tick += ticks
+	simulate_cap(ticks, modules)
+
+
 func simulate_cap(ticks: int, modules: Array) -> void:
 	if cap_current < 0.0 or player_ship_id < 0:
 		return
