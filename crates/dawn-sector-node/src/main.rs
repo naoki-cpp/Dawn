@@ -162,7 +162,13 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Main tick loop ────────────────────────────────────────────────────────
 
-    let mut runtime = runtime::SectorNodeRuntime::new(sector_id, AOI_CELL_SIZE, peer_ws);
+    let mut runtime = runtime::SectorNodeRuntime::new(
+        sector_id,
+        AOI_CELL_SIZE,
+        peer_ws,
+        repl_transport.clone(),
+        node.event_store(),
+    );
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(TICK_MS));
 
     loop {
@@ -207,7 +213,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        runtime.run_frame(&mut node, &raft, &mut committed_rx, &repl_transport);
+        runtime.run_frame(&mut node, &raft, &mut committed_rx);
 
         // Field observability for 8D-5: a tick that overruns its own period
         // means TCP/WS I/O (Raft, replication, or session delivery) is

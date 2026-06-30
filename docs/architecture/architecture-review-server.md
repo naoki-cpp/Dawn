@@ -96,8 +96,8 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | ファイル | 行数 | 判定 |
 |---|---|---|
 | `crates/dawn-consensus/src/state.rs` | 592 | 🟡 許容範囲（Raft 実装の核）。`div_ceil` clippy 修正のみ |
-| `crates/dawn-sector-node/src/runtime.rs` | 304 | 🟢 2026-06-29 新設。production Node の command dispatch / jump fallback / tick stepping / outbound replication / Redirect を集約。AoI delivery 本体は同日中に `dawn_sector::aoi::AoiDelivery` へ移動済み |
-| `crates/dawn-sector-node/src/main.rs` | 308 | 🟢 8D-4 本番バイナリ。config / TCP transport / accept channel / data loading の配線に縮小 |
+| `crates/dawn-sector-node/src/runtime.rs` | 308 | 🟢 2026-06-29 新設。production Node の command dispatch / jump fallback / tick stepping / replication publish 呼び出し / Redirect を集約。AoI delivery 本体は同日中に `dawn_sector::aoi::AoiDelivery` へ、replication cursor と `LogBatch` 構築は `dawn_replication::OutboundLogPublisher` へ移動済み |
+| `crates/dawn-sector-node/src/main.rs` | 267 | 🟢 8D-4 本番バイナリ。config / TCP transport / accept channel / data loading の配線に縮小 |
 | `crates/dawn-core/src/events.rs` | 584 | 🟢 535→584。ADR-0032 `ShipFitted.inventory`・ADR-0033 `RepairApplied`/`RepairLayer` 追加 |
 | `crates/dawn-ecs/src/systems/combat.rs` | 580 | 🟢 469→580（impl 329 / test 251） |
 | `crates/dawn-ecs/src/systems/capacitor.rs` | 504 | 🟢 412→504。ADR-0033 `repair_cycles_started` 収集を並置 |
@@ -114,6 +114,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-ecs/src/world.rs` | 270 | 🟢 P6-1 クエリヘルパー追加 |
 | `crates/dawn-replication/src/anti_entropy.rs` | 211 | 🟢 8D-2b |
 | `crates/dawn-replication/src/bus.rs` | 188 | 🟢 8D-2a |
+| `crates/dawn-replication/src/outbound.rs` | 141 | 🟢 sender-side `OutboundLogPublisher`。append-log cursor と `LogBatch` suffix 構築を保持 |
 | `crates/dawn-core/src/navigation.rs` | 184 | 🟢 ナビゲーション型定義（star_system.rs より改名）|
 | `crates/dawn-sector-node/src/data_loader.rs` | 178 | 🟢 8D-4 module/ship type TOML ローダー |
 | `crates/dawn-replication/src/snapshot.rs` | 164 | 🟢 8D-2d SnapshotTransfer（ジェネリック / 256 MiB cap） |
@@ -235,13 +236,14 @@ WS protocol は `dawn-actor` に、ゲームロジックは `dawn-sector` に、
 | R-1 navigation.rs 分割 | 2026-06-23 | `node/navigation.rs`（ADR-0029 で 1092行に肥大）を `node/warp.rs`（769行）/ `node/approach.rs`（306行）/ `node/navigation.rs`（62行・バリデーションのみ）へ3分割。`mod warp; mod approach;` 追加 + impl ブロック移設の純粋移動（公開 API・挙動不変）。`cargo test --workspace` 全件ゼロエラー（warp 21件 + approach 10件を新パスで確認） |
 | runtime tick pipeline collapse | 2026-06-28 | `transit::run_runtime_tick` / `RuntimeTickOutput` と `serve/runtime.rs` で actor / clustered serve の tick ordering を共有。replication-before-raft ordering と transient drain を一箇所へ集約 |
 | AoI delivery deepening | 2026-06-29 | `serve/aoi_delivery.rs` の `AoiDelivery` に visible-set memory / Enter-Leave / event filtering / warp `PositionSnap` delivery を集約。single/cluster serve loop から AoI frame の内部知識を除去 |
-| Sector Node runtime deepening | 2026-06-29 | `dawn-sector-node/src/runtime.rs` の `SectorNodeRuntime` に command dispatch / jump fallback / tick stepping / outbound replication / Redirect / AoI delivery を集約。`main.rs` は config・TCP transport・accept channel 配線中心に縮小 |
+| Sector Node runtime deepening | 2026-06-29 | `dawn-sector-node/src/runtime.rs` の `SectorNodeRuntime` に command dispatch / jump fallback / tick stepping / replication publish orchestration / Redirect / AoI delivery を集約。`main.rs` は config・TCP transport・accept channel 配線中心に縮小 |
+| production outbound replication publisher deepening | 2026-06-30 | `SectorNodeRuntime` から append-log cursor 管理と `LogBatch` 構築を除去し、`dawn_replication::OutboundLogPublisher` に集約。runtime は frame 後に `publish_new_events(sector_id, node.event_store())` を呼ぶだけになり、sender-side replication の locality が `dawn-replication` に揃った |
 | AoI delivery を `dawn-sector` へ集約（M-6 の AoI 重複を解消） | 2026-06-29 | `dawn-simulation::serve::aoi_delivery::AoiDelivery` と `dawn-sector-node::runtime::deliver_aoi_frame` の同型実装を `dawn_sector::aoi::AoiDelivery`（`deliver_frame` + `AoiSink` trait + `Observer`）へ統合。送信先は `dawn-actor::ws_server::PlayerSession` を直接持てない（dawn-sector は dawn-actor に非依存）ため `AoiSink` trait で抽象化し、各バイナリ側にローカルな `SessionSink` ラッパー adapter（orphan rule 回避）を置く。Redirect 判定・セッション retain はそれぞれの呼び出し側に残す。`FakeSink` を使った enter/leave delta・destroyed-ship 抑制・warp snap のユニットテストを3本追加（移動前は AoI delivery のユニットテストが存在しなかった）。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
 | Sector Transit プロトコルを公開面 5→2 に集約 | 2026-06-29 | `node/transit_flow.rs` の `propose_transit`/`export_transit`/`import_transit`/`append_jump_events` を `pub(super)` に格下げし、新設の `prepare_transit_commit`（Request 側：Gate-lookup・`entry_pos`/`entry_pos_abs` 算出・export を集約）と `handle_transit_commit`（Commit 側：import + `JumpGateUsed`/`StarSystemChanged` 追記の条件分岐を集約）の2メソッドへ統合。`transit.rs` の `apply_committed_raft_entries` オーケストレーターはこの2メソッドを呼ぶだけになり、Gate の往復先探索ロジックを二重に持たなくなった（#38 のバグ修正直後の整理）。新規ユニットテスト1本（`the_consolidated_request_commit_pair_reproduces_the_same_arrival`）で集約後の経路が既存の低レベルプリミティブと同じ着地点を再現することを確認。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
 
 > Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消、
 > R-1（navigation.rs 分割）、runtime tick pipeline collapse、AoI delivery deepening、
-> Sector Node runtime deepening、AoI delivery の dawn-sector への集約、
+> Sector Node runtime deepening、production outbound replication publisher deepening、AoI delivery の dawn-sector への集約、
 > Sector Transit プロトコルの公開面集約まですべて完了。
 
 ### リファクタロードマップ（2026-06-23 追加・ADR-0029 後の再計測で起票）

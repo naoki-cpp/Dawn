@@ -25,6 +25,13 @@ impl<T: ReplicationTransport> OutboundLogPublisher<T> {
         }
     }
 
+    pub fn from_store_tail<S: EventStore>(transport: T, store: &S) -> Self {
+        Self {
+            transport,
+            next_index: store.next_index(),
+        }
+    }
+
     pub fn with_next_index(transport: T, next_index: u64) -> Self {
         Self {
             transport,
@@ -101,6 +108,32 @@ mod tests {
         let second = rx.recv().await.unwrap();
         assert_eq!(second.from_index, 2);
         assert_eq!(second.events.len(), 1);
+
+        let bus = publisher.into_transport();
+        bus.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn from_store_tail_starts_after_existing_events() {
+        let bus = crate::InMemoryReplicationBus::spawn();
+        let mut rx = bus.subscribe();
+        let mut store = InMemoryEventStore::new();
+
+        store.append(event(0));
+        store.append(event(1));
+
+        let mut publisher = OutboundLogPublisher::from_store_tail(bus.clone(), &store);
+        assert_eq!(publisher.next_index(), 2);
+        assert_eq!(publisher.publish_new_events(SectorId(7), &store), 0);
+        assert!(rx.try_recv().is_err());
+
+        store.append(event(2));
+        assert_eq!(publisher.publish_new_events(SectorId(7), &store), 1);
+
+        let batch = rx.recv().await.unwrap();
+        assert_eq!(batch.sector_id, SectorId(7));
+        assert_eq!(batch.from_index, 2);
+        assert_eq!(batch.events.len(), 1);
 
         let bus = publisher.into_transport();
         bus.shutdown().await;
