@@ -157,7 +157,7 @@ While tackled, `can_propose_warp()` / `can_propose_jump()` return false, blockin
 
 | Event | Description | Emitter | Status |
 |---|---|---|---|
-| `AnchorRebased` | Ship's coordinate anchor changed (absolute position unchanged; only the `(anchor, offset)` representation updates — e.g. star anchor → destination-body anchor on Warp arrival) | `SimulationNode` (Warp arrival, ADR-0029 step 4) | 🔶 event/apply implemented; emission wiring is step 4 |
+| `AnchorRebased` | Ship's coordinate anchor changed (absolute position unchanged; only the `(anchor, offset)` representation updates — e.g. star anchor → destination-body anchor on Warp arrival) | `SimulationNode` (Warp arrival, ADR-0029 step 4) | ✅ implemented (emitted from `warp_step`/`rebase_arrival_event`, appended via `tick.rs`'s `all_events`) |
 
 This is an authoritative event: it stores `anchor` and the post-rebase `offset` so Replay reproduces the representation exactly. A rebase is a non-velocity-driven frame change, so it's recorded as its own fact; INV-MOVE (the invariant for velocity-driven motion) doesn't apply since absolute position is preserved.
 
@@ -197,7 +197,7 @@ Commands are defined in `dawn-core/src/commands.rs`. Clients send them to the se
 | `StopCommand` | Decelerate to zero velocity using acceleration | — | ✅ implemented |
 | `ApproachCommand` | Semi-automatic approach to a target (Ship / Jump Gate); cancelled by Move/Stop (ADR-0015) | — (no new event) | ✅ implemented |
 | `TransitCommand` | Request a Sector Transit (via Raft, ADR-0014) | `SectorTransitRequested` / `Completed` | ✅ implemented |
-| `JumpCommand` | Move to another Sector via a Jump Gate (via Raft, ADR-0009); auto-warps first if out of range (auto-warp-then-jump, ADR-0023) | `JumpGateUsed` (+ `StarSystemChanged` if star system changes) | ✅ implemented |
+| `JumpCommand` | Move to another Sector via a Jump Gate (via Raft, ADR-0009). In range: proposed directly. Out of range: auto-warps toward the gate first (auto-warp-then-jump, ADR-0023). Too close to warp: auto-approaches instead. The 3-way decision is owned by `SimulationNode::apply_jump_with_fallback` (`dawn-sector::node::jump`), called identically from both `dawn-sector-node` and `dawn-simulation`'s cluster server | `JumpGateUsed` (+ `StarSystemChanged` if star system changes) | ✅ implemented |
 | `WarpCommand` | Warp within the same Sector to a Jump Gate or celestial body (star/planet) (`WarpTarget::Gate` / `Body`; align → warping, two phases; ADR-0022 / ADR-0025) | — (no new event; movement recorded via `VelocityChanged`) | ✅ implemented |
 | `OrbitCommand` | Orbit a target (Ship / Jump Gate) at a given radius (defaults to weapon range; cancelled by Move/Stop/other helm modes; ADR-0031) | — (no new event; movement via `VelocityChanged`) | ✅ implemented |
 | `KeepAtRangeCommand` | Maintain a minimum distance from a target (Ship / Jump Gate) (defaults to weapon range; cancelled by Move/Stop/other helm modes; ADR-0031) | — (no new event; movement via `VelocityChanged`) | ✅ implemented |
