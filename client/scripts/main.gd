@@ -483,6 +483,9 @@ func _input(event: InputEvent) -> void:
 
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed:
+			_camera.call("end_orbit_drag")
+			return
 		if mb.pressed:
 			## A click on the open inventory panel fits/unfits (row hit) or is
 			## swallowed (margin/header) -- never a world click. Checked first
@@ -500,6 +503,7 @@ func _input(event: InputEvent) -> void:
 				return
 			match mb.button_index:
 				MOUSE_BUTTON_LEFT:
+					_camera.call("begin_orbit_drag", mb.position)
 					## Double-click steering takes priority and must work even when a
 					## ship or gate is under the cursor (e.g. at spawn next to Gate 0).
 					## Only a click that is NOT a double-click selects an approach target.
