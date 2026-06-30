@@ -388,7 +388,7 @@ mod serve_pipeline_tests {
 
     /// A command for a ship the player does not own is rejected by the pipeline:
     /// no `VelocityChanged` reaches the client. Guards the ownership check in
-    /// `apply_common_command` → `apply_move_command_owned` (CLAUDE.md §5).
+    /// `apply_common_command` → `apply_move_command_owned` (AI_DEVELOPMENT_GUIDE.md).
     #[test]
     fn move_for_unowned_ship_produces_no_event_over_connection() {
         let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);

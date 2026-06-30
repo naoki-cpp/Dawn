@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md
-date     : 2026-06-29（Sector Node runtime deepening 後の再計測。dawn-sector-node/main.rs 589→308、runtime.rs 354 追加。R-3 は warp.rs 985 / spawner_logic.rs 804 / orbit.rs 723 / mod.rs 724）
+date     : 2026-06-30（Player Command Dispatch deepening 案を検討し、新 crate 化は見送り。M-6 の許容重複として整理）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -15,14 +15,14 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ## 現状評価
 
-**総合: B+**（2026-06-29 維持。PR #34 で `dawn-simulation` 側 AoI delivery policy が `serve/aoi_delivery.rs` に集約され、続いて `dawn-sector-node` 側 production frame orchestration が `runtime.rs` に集約された。大きいファイルは `warp.rs` 985 / `spawner_logic.rs` 804 / `orbit.rs` 723 / `node/mod.rs` 724 に残るが、いずれも単一責務の観察対象として R-3 保留）
+**総合: B+**（2026-06-30 維持。PR #34 で `dawn-simulation` 側 AoI delivery policy が `serve/aoi_delivery.rs` に集約され、続いて `dawn-sector-node` 側 production frame orchestration が `runtime.rs` に集約された。Player Command Dispatch は新 crate 化を検討したが、現時点では過剰と判断し M-6 の許容重複として残す。大きいファイルは `warp.rs` / `spawner_logic.rs` / `orbit.rs` / `node/mod.rs` に残るが、いずれも単一責務の観察対象として R-3 保留）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
-| クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027）。新規 `node/orbit.rs`・`node/inventory.rs`・`systems/repair.rs` も既存責務分割に沿う |
+| クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027）。Player Command Dispatch のためだけの新 crate は深さ不足と判断し見送り |
 | ファイルサイズ | B+ | 2026-06-29 再計測で **4ファイルが総行数で閾値帯**: `warp.rs` 985・`spawner_logic.rs` 804・`orbit.rs` 723・`node/mod.rs` 724。`dawn-simulation/serve` は `runtime.rs` / `aoi_delivery.rs` へ、`dawn-sector-node` は `runtime.rs` へ分割され、各起動 loop は小さく維持。実害はまだ無いが観察対象が複数 → R-3 に集約しトリガー保留 |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。`InventoryComp`（ADR-0032）・`RepairLayer`/`RepairApplied`（ADR-0033）も既存型設計に整合 |
-| 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。PR #34 で dawn-simulation 側 AoI delivery、続いて sector-node 側 production runtime は deep module 化。残る両バイナリ間グルー重複（M-6）は data loading / NPC spawn など低頻度 glue として許容判断 |
+| 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。AoI delivery、production runtime は deep module 化済み。残る両バイナリ間グルー重複（M-6）は command dispatch / data loading / NPC spawn などとして許容判断 |
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。`TransitOp::Commit` は ADR-0032 で `Box<ShipSnapshot>` 化しサイズ非対称を解消済み |
 | AI開発由来 | A− | 命名汚染なし。残る `SectorSimulatorActor` の密結合（M-3）は本番パス外の in-process 専用で実害小 |
 
@@ -79,7 +79,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | ファイル | 行数 | 判定 |
 |---|---|---|
 | `crates/dawn-simulation/src/cluster.rs` | 531 | 🟢 Raft クラスター配線（in-process テスト用） |
-| `crates/dawn-simulation/src/serve/mod.rs` | 437 | 🟢 P5-1 共通ヘルパー。ADR-0017 jump dead-zone fallback・ADR-0032 `CommonCommandFollowup` enum 追加。PR #34 で AoI delivery を分離 |
+| `crates/dawn-simulation/src/serve/mod.rs` | 437 | 🟢 P5-1 共通ヘルパー。`apply_common_command` は single/cluster serve の command dispatch を共有。PR #34 で AoI delivery を分離 |
 | `crates/dawn-simulation/src/sector_simulator_actor.rs` | 413 | 🟡 M-3（本番パス外・保留）。PR #30 で tick pipeline を `transit::run_runtime_tick` に寄せた |
 | `crates/dawn-simulation/src/bench.rs` | 430 | 🟢 |
 | `crates/dawn-simulation/src/serve/cluster.rs` | 241 | 🟢 PR #30 で tick 後処理を `serve/runtime.rs` へ移動。PR #34 後は `AoiDelivery` を持ち、入力処理と runtime 呼び出し中心 |
@@ -147,11 +147,11 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 保守上の実害になったとき、または in-process クラスタを本番に近づける必要が出たとき。
 
 > M-4（WS 境界の `dawn-actor` 集約・2026-06-20）、M-5（replication 消費側 `ReplicaSet`・
-> 2026-06-20）、dawn-simulation 側の AoI delivery deepening（PR #34）、および
-> Sector Node runtime deepening（2026-06-29）は解消済み。
+> 2026-06-20）、dawn-simulation 側の AoI delivery deepening（PR #34）、
+> および Sector Node runtime deepening（2026-06-29）は解消済み。
 > 詳細は「改善ロードマップ > 完了済み」を参照。
 
-#### M-6（許容）: 2つの serve バイナリに残るアプリ層 adapter 重複
+#### M-6（縮小・許容）: 2つの serve バイナリに残る adapter 重複
 
 M-4（WS 境界）、PR #34（dawn-simulation 側 AoI delivery deepening）、
 Sector Node runtime deepening、AoI delivery の dawn-sector への集約後も、
@@ -159,41 +159,43 @@ Sector Node runtime deepening、AoI delivery の dawn-sector への集約後も�
 
 | 重複 | dawn-simulation | dawn-sector-node | 備考 |
 |---|---|---|---|
+| Player Command Dispatch | `serve/mod.rs::apply_common_command` | `runtime.rs::collect_player_commands` | `ClientCommand` 適用 + `Jump` / fitting refresh follow-up |
 | `data_loader`（`load_modules` / `load_ship_types` / `parse_*`） | `data_loader/*.rs`（実装 ~280行）| `data_loader.rs`（178行）| TOML ローダー |
 | `spawn_npcs` / `spawn_npc_frigates` | `serve/mod.rs:278` | `main.rs:298` | **実質同一**（~12行）|
 
-> AoI フレーム配信の重複は解消済み（2026-06-29）。下記参照。
+> AoI フレーム配信の重複は解消済み（2026-06-29）。
+> Player Command Dispatch は新 crate 化を検討したが、現時点では過剰として見送った。下記参照。
 
 現在の実態では、`dawn-simulation` 側は `serve/runtime.rs` と `serve/aoi_delivery.rs` によって
 single/cluster の内部知識をかなり集約済みで、`dawn-sector-node` 側も `runtime.rs` によって
 production process model 固有の frame orchestration を集約済みである。問題は「同じ大きな serve loop が
-二重化している」ではなく、**2つの process model がそれぞれ自分の adapter を持つ**ことに縮小した。
+二重化している」ではなく、**2つの process model がそれぞれ adapter を持つ**ことに縮小した。
 8D-4 で `dawn-sector-node` を `dawn-simulation` の serve 経路からコピーして作った名残はあるが、
 WS protocol は `dawn-actor` に、ゲームロジックは `dawn-sector` に、両 runtime の frame policy は
 それぞれのローカル module に寄っており、残る重複は低頻度の glue に縮小している。
 
-これは M-4 で `data_loader` を `dawn-actor` に置けなかった理由（I/O 禁止）と同根で、
-個別ファイルの置き場問題ではなく**共有アプリ層クレートの欠如**である。ただし、現時点では
-そのクレートを作るほどの深さや adapter 数には達していない。
+Player Command Dispatch は `ClientCommand` と `SimulationNode` の両方を知るため、
+`dawn-actor` / `dawn-sector` のどちらにも置きにくい。ただし新 crate にするには
+interface に対する implementation がまだ浅く、ADR/DAG 更新コストに見合わない。
+`data_loader` / NPC spawn も I/O と demo wiring の低頻度 glue で、同じく共有 crate へ
+押し込むほどの深さがない。
 
-#### 判断: 当面は許容する（新規クレートは作らない）
+#### 判断: 当面は許容する（新規 crate は作らない）
 
-`dawn-server`（仮称）共有クレートを新設する案もあるが、文書全体に照らして
+`dawn-server`（仮称）のような大きい共有 runtime crate を新設する案は、文書全体に照らして
 **過剰**と判断し採らない。理由:
 
-- **ガイド §「新Crate追加チェック」第1項目**「既存Crateの責務分割で対応できないことを確認」を
-  満たさない。両バイナリの差は process モデル（N-in-1 vs 1-per-process）と
-  **transport の選択だけ**で、その transport は既に trait 抽象化済み
-  （`RaftTransport` / `ReplicationTransport`）。重複はこの2バイナリ構成の副産物で、
-  クレート新設は不均衡。
+- **Player Command Dispatch は crate seam としては浅い。** Command 追加時に drift しやすい
+  match と fitting refresh / jump follow-up 判定はあるが、現時点では2 runtime 間の100行前後の重複で、
+  ADR を伴う新 crate にするほどの depth ではない。
 - **8D 最小化方針**（roadmap「巨大基盤の一括建設をしない・薄いスライス」）に逆行する。
 - **前例との整合**: `dawn-proto` は「見返りが乏しい」と却下、P4-3 は `_owned` 統合を
   「統合コストが効果を上回る」とスキップ。現在残る安定したグルーの重複も同じ費用対効果で許容が妥当。
-- **ドリフトの実害が小さい**: M-4 で直した `protocol`（18 variant・変更頻度高）と違い、
-  `data_loader` / NPC spawn / 各 process model 固有 runtime は変更頻度が低く無言バグ化のリスクは限定的。
+- **残るドリフトの実害が限定的**: M-4 で直した `protocol`（18 variant・wire 境界・変更頻度高）と違い、
+  Player Command Dispatch / `data_loader` / NPC spawn は process model に近い adapter で、差分が見えやすい。
 
 再評価トリガー（このいずれかが起きたら設計し直す）:
-- `data_loader` / NPC spawn / 各 runtime adapter が実際にドリフトしてバグを生んだとき
+- Player Command Dispatch / `data_loader` / NPC spawn が実際にドリフトしてバグを生んだとき
 - 3つ目の serve バイナリが必要になったとき
 - 2バイナリの process モデル差を解消し1バイナリ化できる見込みが立ったとき
   （その場合は新規クレートではなくバイナリ統合を優先検討する）
@@ -243,7 +245,8 @@ WS protocol は `dawn-actor` に、ゲームロジックは `dawn-sector` に、
 
 > Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消、
 > R-1（navigation.rs 分割）、runtime tick pipeline collapse、AoI delivery deepening、
-> Sector Node runtime deepening、production outbound replication publisher deepening、AoI delivery の dawn-sector への集約、
+> Sector Node runtime deepening、production outbound replication publisher deepening、
+> AoI delivery の dawn-sector への集約、
 > Sector Transit プロトコルの公開面集約まですべて完了。
 
 ### リファクタロードマップ（2026-06-23 追加・ADR-0029 後の再計測で起票）
@@ -298,7 +301,7 @@ P7 系で確立した「責務ごとに sibling モジュールへ抽出」方�
 | R-3 `node/` 系再肥大（warp/spawner/mod/orbit） | 品質・保留 | 総行数は閾値帯だが impl は概ね 700 未満・増分はテスト主体。impl が 700 超でファイル別に分割（トリガー付き・上記 R-3） |
 | 8D-5 Raspberry Pi 実機検証 | 機能・外部依存待ち | ハードウェア未購入。観測ログ・config・localhost 検証は済み（完了済み参照）。Pi 入手後に着手 |
 | M-3 `SectorSimulatorActor` 密結合 | 品質・保留 | 本番パス外（in-process テスト/ベンチ専用）。P9-1 撤回。優先度低 |
-| M-6 アプリ層 adapter 重複（`data_loader` / runtime adapter / `spawn_npcs`） | 許容重複 | dawn-simulation 側 AoI と sector-node 側 production runtime は deep module 化済み。残る重複は低頻度 glue として許容。新規クレートは過剰と判断。再評価トリガー付き |
+| M-6 アプリ層 adapter 重複（command dispatch / `data_loader` / `spawn_npcs`） | 許容重複 | AoI / production runtime は deep module 化済み。Player Command Dispatch は新 crate 化を検討したが浅い seam と判断し許容。再評価トリガー付き |
 
 採らない方針（恒久）:
 
@@ -317,11 +320,12 @@ P7 系で確立した「責務ごとに sibling モジュールへ抽出」方�
 
 ### Phase 9 — 評価の総点検（決着）
 
-Phase 9 時点では総合 **A−** で決着とし、M-3（本番パス外）・M-6（許容）は「共有クレートを作らない」と
+Phase 9 時点では総合 **A−** で決着とし、M-3（本番パス外）・M-6（許容）は「大きい共有 runtime crate を作らない」と
 判断した。その後 ADR-0029（真スケール座標）の機能追加で `node/navigation.rs` が閾値を
 超えて再肥大し、構造リファクタが一時再燃したが、R-1（navigation.rs 分割・2026-06-23）で
 解消済み。さらに `dawn-simulation` 側 AoI delivery と `dawn-sector-node` 側 runtime は
-それぞれローカル deep module 化済み（上記「完了済み」参照）。A− を維持。残る前進先は引き続き **8D-5 実機検証** や
+deep module 化済み（上記「完了済み」参照）。Player Command Dispatch は新 crate 化を見送った。
+A− を維持。残る前進先は引き続き **8D-5 実機検証** や
 戦闘の深み（ADR-0016 §5）といった機能側で、R-2（client `main.gd`）は保留のまま
 （client レビューの「採らない方針」参照。トリガーは C-3 ではなくシーン参照切れリスクそのもの）。
 
