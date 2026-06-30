@@ -841,8 +841,7 @@ func _update_tactical_overlay() -> void:
 func _on_module_activated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
 	if p_ship_id != _player_ship_id:
 		return
-	PlayerFitting.set_module_activation(_player_modules, p_module_id, true, false)
-	_recalc_weapon_range()
+	_apply_player_module_activation(p_module_id, true, false)
 
 func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
 	if p_ship_id != _player_ship_id:
@@ -852,7 +851,11 @@ func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> 
 	## module_id) from "capacitor forced it off" (unsolicited) here.
 	var was_manual: bool = _pending_manual_deactivations.has(p_module_id)
 	_pending_manual_deactivations.erase(p_module_id)
-	PlayerFitting.set_module_activation(_player_modules, p_module_id, false, not was_manual)
+	_apply_player_module_activation(p_module_id, false, not was_manual)
+
+
+func _apply_player_module_activation(module_id: int, active: bool, cap_forced_off: bool) -> void:
+	PlayerFitting.set_module_activation(_player_modules, module_id, active, cap_forced_off)
 	_recalc_weapon_range()
 
 
@@ -882,12 +885,11 @@ func _toggle_module_by_index(f_index: int) -> void:
 	var slot: String = toggle["slot"] as String
 	if toggle["is_active"] as bool:
 		_pending_manual_deactivations[mid] = true
-		PlayerFitting.set_module_activation(_player_modules, mid, false, false)
+		_apply_player_module_activation(mid, false, false)
 		_connection.send_deactivate_module(_player_ship_id, mid, slot)
 	else:
-		PlayerFitting.set_module_activation(_player_modules, mid, true, false)
+		_apply_player_module_activation(mid, true, false)
 		_connection.send_activate_module(_player_ship_id, mid, slot)
-	_recalc_weapon_range()
 
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 	_player_ship_id = p_ship_id
