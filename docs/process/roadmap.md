@@ -245,14 +245,14 @@ Phase 0〜7 は全て完了済み（要約は §2「完了済みフェーズ」�
 | 4 | dawn-sector-node（本番実行バイナリ・上記 transport + ゴシップの配線・静的 config 起動） | 新規クレート。`TcpRaftTransport` + `TcpReplicationTransport` を TOML 静的 config で配線。3 プロセスで 3 セクタクラスタ（ws/:787{8,9,80} raft/:790{0,1,2} repl/:791{0,1,2}）。プレイヤー Jump 時は `Redirect` JSON でクライアントを宛先 WS へ誘導し、`player_id` / `ship_id` 付き Hello で同じ player ship を resume（2026-06-29） | ✅ |
 | 5 | （任意・推奨）Raspberry Pi クラスタ実機検証 | 下記 ★ 参照 | ✅ 2026-07-01・3項目とも PASS（[8d5-hardware-notes.md](./8d5-hardware-notes.md) 実行ログ参照） |
 
-**defer（トリガー付き・第1次マイルストン外）:**
+**defer（トリガー付き・第1次マイルストン外。2026-07-01 時点で4項目とも未発火、着手不要）:**
 
-| 項目 | トリガー（いつ着手するか） |
-|---|---|
-| Raft ログ圧縮 + **InstallSnapshot RPC** | Raft ログ（transit 専用で小・成長は遅い）の無限成長が問題化、または圧縮導入で base_index 前を捨て遅延 follower が AppendEntries で追えなくなったら（ADR-0017 圧縮と対の completeness 項目） |
-| メンバーシップ変更（Raft ConfChange） | ノード入替・スケール・**8B-2 Fission（動的トポロジ）** が要るとき |
-| 動的ノード発見 | 弾力クラスタにするとき（固定 3 ノードは静的 config で足りる） |
-| TLS / 認証 | インターネット公開時（LAN の Pi 検証は平文で可）。transport を TLS 可能にしておけば後付け可 |
+| 項目 | トリガー（いつ着手するか） | 現状 |
+|---|---|---|
+| Raft ログ圧縮 + **InstallSnapshot RPC** | Raft ログ（transit 専用で小・成長は遅い）の無限成長が問題化、または圧縮導入で base_index 前を捨て遅延 follower が AppendEntries で追えなくなったら（ADR-0017 圧縮と対の completeness 項目） | 未発火。`dawn-consensus/src/lib.rs` のスコープ注記どおり未実装のまま。8D-5 実機検証（数百隻規模・短時間）でもログ成長は問題化せず |
+| メンバーシップ変更（Raft ConfChange） | ノード入替・スケール・**8B-2 Fission（動的トポロジ）** が要るとき | 未発火。8B-2 Fission は roadmap 上も `⬜`・未着手のまま（要 ADR） |
+| 動的ノード発見 | 弾力クラスタにするとき（固定 3 ノードは静的 config で足りる） | 未発火。8D-4/8D-5 とも 3 ノード静的 config のまま運用・検証済み |
+| TLS / 認証 | インターネット公開時（LAN の Pi 検証は平文で可）。transport を TLS 可能にしておけば後付け可 | 未発火。8D-5 の実機検証も意図的に LAN 平文のまま実施（[8d5-hardware-notes.md](./8d5-hardware-notes.md) Out of scope 参照）。インターネット公開の計画はまだない |
 
 ★ 実機検証（任意・推奨）: ネットワークトランスポート実装後、Raspberry Pi クラスタ
 （Pi 4/5 推奨。Zero 2 W は aarch64 ビルド可だが 512MB RAM が制約のため数百隻規模に縮小）で
