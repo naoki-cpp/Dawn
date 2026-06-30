@@ -3,7 +3,7 @@ scope    : Godot クライアント（client/scripts/）の保守性・設計品
 audience : AI Agent / Human Developer
 update   : クライアント側で大規模リファクタ実施後 / 新スクリプト追加時
 related  : docs/architecture/architecture-review-server.md（サーバー側）, docs/architecture/architecture.md, docs/process/playtest-guide.md
-date     : 2026-06-29（再計測。main.gd 1151→1241・hud_manager 521→627・connection 279→343・player_fitting.gd 新設。総合 B 維持）
+date     : 2026-06-30（再計測。main.gd 1241→1161・world_session.gd 新設。総合 B+）
 ---
 
 # Architecture Review — Dawn Client (Godot)
@@ -15,16 +15,16 @@ date     : 2026-06-29（再計測。main.gd 1151→1241・hud_manager 521→627�
 
 ## 現状評価
 
-**総合: B**（2026-06-29 維持。再計測で `main.gd` 1241 / `hud_manager.gd` 627 / `connection.gd` 343、新設 `player_fitting.gd` 123。前回計測（2026-06-28）からは増加に転じたが、PR #33 のフィッティング抽出により責務分離自体は前進。`main.gd` はまだ最大ファイルだが、C-1 後のオーケストレーション層として管理済み。新規問題なし）
+**総合: B+**（2026-06-30 更新。`WorldSession` 新設で InitialState / AoI / HP / lock / tick-cap の live world state を `main.gd` から移動。`main.gd` は 1241→1161。scene node 生成・input・HUD 呼び出しはまだ `main.gd` に残るが、client-side world invariants の locality は改善）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
-| ファイル分割 | B+ | `main.gd` から `HudManager`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder` の4クラスを抽出（C-1完了）。残るのは入力ルーティング・イベント dispatch・spawning・状態保持のオーケストレーション層。ADR-0032 のインベントリパネル UI 構築は `hud_manager.gd` に集約（main.gd を肥大させない方針を維持） |
-| `main.gd` の責務集約 | B− | god object はほぼ解消。マウス入力処理（ダブルクリック判定・HUD連動・インベントリ行ヒット）のみ意図的に残置（理由は C-1 参照）。churn cleanup（#18）で `_vec3_from_dict` / `_update_position_markers` / `_instantiate_ship` に重複統合 |
+| ファイル分割 | A− | `main.gd` から `HudManager`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder`/`WorldSession` を抽出。live world state は `WorldSession`、scene wiring と input は `main.gd` に残す方針へ前進 |
+| `main.gd` の責務集約 | B | god object はほぼ解消。マウス入力処理（ダブルクリック判定・HUD連動・インベントリ行ヒット）と scene node 生成は意図的に残置。InitialState / AoI / HP / lock / tick-cap の状態遷移は `WorldSession` へ移動 |
 | 重複 | A− | マーカー生成・ピッキング・ワープ着地点計算の同型ロジックは解消済み（C-2） |
 | 結合度 | A− | signal 経由の `connection.gd` ↔ `main.gd` 結合は良好。`@onready` のシーンツリー直パス参照はフェイルファストガードで解消（C-3）。modules dict のキー前提のみ脆さが残る（C-4、保留） |
 | デッドコード | A | 残骸なし。コメントは ADR 参照付きで現状と一致 |
-| テストカバレッジ | B | 新設クラス + main.gd残存ロジックの一部（モジュールdeactivate判定など）を GdUnit4 で計97ケース実行確認済み。HUD構築呼び出し・マウス入力・イベント dispatch本体は未テスト——シーンツリー/ネットワーク依存のため |
+| テストカバレッジ | B+ | 新設クラス + main.gd残存ロジックの一部を GdUnit4 で計102ケース実行確認済み。`WorldSession` は scene tree / WebSocket なしで InitialState・HP・lock・destroy をテスト可能。HUD構築呼び出し・マウス入力・イベント dispatch本体は未テスト——シーンツリー/ネットワーク依存のため |
 | サーバー側との対比 | — | サーバー側はクレート分割（A−）、クライアントはファイル分割（B+）。テストカバレッジは依然サーバー側（カバレッジ80%要件）が厚い |
 
 サーバー側が長期にわたる分割リファクタ（Phase 2〜9）を経て A− に達したのに対し、
@@ -33,21 +33,19 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 
 ---
 
-## ファイルサイズ一覧（2026-06-29 時点）
+## ファイルサイズ一覧（2026-06-30 時点）
 
-> 2026-06-29 再計測（PR #33 `player_fitting.gd` 抽出後）。前回計測（2026-06-28）以降
-> `main.gd` は 1151→1241、`hud_manager.gd` は 521→627、`connection.gd` は 279→343、
-> `input_decoder.gd` は 100→114、`ship_controller.gd` は 277→326 と増加しており、
-> 新規ファイル `player_fitting.gd`（123行）が追加された。前回の「全体的に縮小」は
-> 一時的な落ち込みで、ADR-0031/0032/0033・client redirect 対応の機能追加に伴い
-> 再び増加傾向にある。
+> 2026-06-30 再計測（`WorldSession` 抽出後）。`main.gd` は 1241→1161 に縮小。
+> 新規 `world_session.gd`（265行）は live world state の deep module で、scene
+> node 生成・input・HUD adapter は `main.gd` に残す。
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `client/scripts/main.gd` | 1241 | 🟡 オーケストレーション層。god object ではないが最大ファイル。R-2 で管理（保留・トリガー付き）。前回 1151 から増加（機能追加によるもの、設計悪化ではない） |
+| `client/scripts/main.gd` | 1161 | 🟡 オーケストレーション層。scene lifecycle / input / node creation / HUD adapter を保持。live world state は `WorldSession` へ移動開始 |
 | `client/scripts/hud_manager.gd` | 627 | 🟡 HUD 全パネルの構築・更新の stateless static class。責務は単一（HUD 構築）で、前回 521 から増加 |
 | `client/scripts/connection.gd` | 343 | 🟢 WebSocket I/O とシグナル発行のみ。前回 279 から増加 |
 | `client/scripts/ship_controller.gd` | 326 | 🟢 単一船の視覚表現に専念。ロックオン枠は `BillboardRing` 共通化。前回 277 から増加 |
+| `client/scripts/world_session.gd` | 265 | 🟢 InitialState / AoI / HP / lock / tick-cap の client-side live world state |
 | `client/scripts/navigation_marker_renderer.gd` | 164 | 🟢 C-1で新設。ゲート/惑星マーカー生成 + スペクトル色 |
 | `client/scripts/camera_controller.gd` | 131 | 🟢 自己完結したオービットカメラ |
 | `client/scripts/player_fitting.gd` | 123 | 🟢 PR #33 新設。フィッティング/インベントリの純粋関数（`normalize_payload` / `simulate_capacitor_ticks` 等）。main.gd は呼び出すのみで内部構造に触れない |
@@ -59,16 +57,16 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/unit_format.gd` | 38 | 🟢 ADR-0029 新設。速度/距離の適応的単位整形（m/s・km/s・AU/s） |
 | `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 ADR-0029 新設。ワープトンネル ColorRect の intensity ラッパー |
 
-合計 3,462 行のうち `main.gd` が36%を占める（C-1着手前69%から大幅低下。前回 40% からは
-ファイル数増加で相対的に下がったが、絶対行数は増加傾向）。
+合計 3,647 行のうち `main.gd` が32%を占める（C-1着手前69%から大幅低下）。
 新設 static class 群（C-1 の5クラス + ADR-0029 の `world_space`/`unit_format`/`warp_tunnel_effect`
-+ PR #33 の `player_fitting`）はいずれも main.gd の状態やシーンツリーへの直接依存を持たない。
++ PR #33 の `player_fitting` + `WorldSession`）は、`WorldSession` だけが ship Node 参照を
+registry として保持する。scene 生成・入力・HUD Control 構築は依然 `main.gd`/`HudManager` 側。
 
 （`client/test/*.gd`（main_test.gd 122 + ship_picking_test.gd 153 +
 navigation_marker_renderer_test.gd 140 + input_decoder_test.gd 177 +
 hud_manager_test.gd 190 + billboard_ring_test.gd 32 + unit_format_test.gd 47 +
-world_space_test.gd 71 + connection_test.gd 25 + player_fitting_test.gd 75、
-合計 1,032行）は別カウント。§「テストカバレッジ」参照）
+world_space_test.gd 71 + connection_test.gd 25 + player_fitting_test.gd 75 +
+world_session_test.gd 118、合計 1,150行）は別カウント。§「テストカバレッジ」参照）
 
 ---
 
@@ -104,6 +102,7 @@ world_space_test.gd 71 + connection_test.gd 25 + player_fitting_test.gd 75、
 | ID | 内容 | 解消内容 |
 |---|---|---|
 | C-1 | `main.gd` god object（13以上の異種責務） | 4クラスに分割抽出（下表）。main.gd 1661→1084行（-35%）。挙動変更なし |
+| C-5 | client World Session module | `world_session.gd` を新設。InitialState navigation、ship registry、per-ship HP、player ship state、lock target、tick/cap progression、destroy/despawn/AoI removal を集約。`main.gd` は scene node generation / visual effects / HUD adapter を担当 |
 | C-2 | マーカー生成/ピッキング/ワープ着地点計算の同型ロジック2重実装 | 各組の「文字通り同一」な部分のみ named helper に抽出（後にC-1で各クラスへ移動）。挙動変更なし |
 | C-3 | シーンツリー直パス参照の脆さ（`@onready` の `$Connection` 等8箇所、null チェックなし） | `_ready()` 先頭で `_assert_scene_tree_refs()` を呼び、8箇所すべてを一括検証して `push_error` で起動時に即報告（2026-06-23）。調査の結果、結合は main.gd の8行に閉じており（C-1抽出先は `@onready` を使わず引数で受け取る設計）、`main.tscn` 変更14回中ノードパス不一致の不具合は0件——フェイルファストガードで十分、null安全化の全面展開は過剰と判断。GdUnit4 76件 全PASS |
 
@@ -133,7 +132,8 @@ main.gd 残置（理由は「採らない方針」）。
 | `world_space_test.gd` | `WorldSpace`（ADR-0029 浮動原点リベース） | 4 |
 | `connection_test.gd` | `connection.gd`（PR #33 新設・送信ペイロード整形の回帰テスト） | 3 |
 | `player_fitting_test.gd` | `PlayerFitting`（PR #33 新設） | 5 |
-| **合計** | | **97**（`func test_` 実測） |
+| `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / destroy state） | 5 |
+| **合計** | | **102**（`func test_` 実測） |
 
 テスト導入で見つかった不具合・定着した手順（詳細: `AI_DEVELOPMENT_GUIDE.md` §8）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる
