@@ -578,7 +578,7 @@ mod tests {
                 ship_id: own_ship,
             },
             vec![],
-            &[event.clone()],
+            std::slice::from_ref(&event),
             &[],
         );
 
