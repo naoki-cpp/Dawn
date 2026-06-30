@@ -1,7 +1,7 @@
 ---
 scope    : 8D-5 Raspberry Pi 実機検証ハードウェアメモ
 audience : Human Developer / AI Agent
-status   : in_progress; Raspberry Pi Zero W x3 deployed from host PC
+status   : done; 3 checks (reachability/tick-sla/failover) PASS on 2026-07-01
 related  : docs/architecture/architecture-review-server.md Phase 8 / docs/process/roadmap.md Phase 8D
 date     : 2026-06-20
 ---
@@ -107,6 +107,65 @@ vcgencmd measure_temp
 - tick overrun が少なく、発生タイミングを説明できる
 - TCP reconnect log が手動 fault injection と対応する
 - node process が予期せず終了しない
+
+## 自動検証スクリプト (verify-pi-cluster.sh)
+
+上の「検証手順」「合格ライン」を毎回手で確認するのは手間で再現性も低いため、
+3項目とも合否基準つきでスクリプト化した: `scripts/verify-pi-cluster.sh`。
+既存の観測ログ（「観測するログ」節の3点）を読むだけで、独自の計装は追加していない。
+
+```bash
+scripts/verify-pi-cluster.sh reachability
+scripts/verify-pi-cluster.sh tick-sla --window-seconds 60 --max-overrun-rate 0.01
+scripts/verify-pi-cluster.sh failover --timeout-seconds 15
+scripts/verify-pi-cluster.sh all
+```
+
+| 検証項目 | コマンド | 合否基準 |
+|---|---|---|
+| ノード間通信の到達性 | `reachability` | 3 ノードとも ssh 到達・`sector-node` 起動中・ws/raft/repl 全ポート listen |
+| 低スペック環境での Tick SLA | `tick-sla` | 観測窓内の tick overrun 率が `--max-overrun-rate`（既定 1%）未満 |
+| ネットワーク分断時の Raft フェイルオーバー | `failover` | 検証手順5の手動分断後、別ノードが `--timeout-seconds`（既定15秒）以内に Leader へ role-transition |
+
+`failover` はネットワーク分断そのものは自動化していない（検証手順5/7と同じく手動で
+切断・復帰する）。スクリプトは分断後にログを監視し、新リーダーの選出を検知するところまでを担う。
+
+`reachability` / `tick-sla` は `scripts/deploy-pi-cluster.sh` → `scripts/run-pi-cluster.sh`
+で起動済みのクラスタに対して実行する前提（`--user` / `--nodes` / `--remote-repo-path` は
+他のスクリプトと同じ既定値・同じオプション名）。
+
+実行結果（PASS/FAIL と実測値、日時）はこの節の下に追記していく。
+
+### 実行ログ
+
+**2026-07-01, Raspberry Pi Zero W x3 (node-0/1/2.local, PC hotspot 192.168.137.0/24)**
+
+実行前に `scripts/deploy-pi-cluster.sh --no-progress` が `set -euo pipefail` 下で
+即座に exit 1 する不具合を発見・修正した（`render_progress` / `finish_progress` の
+早期 return が直前の `[[ ... ]]` の偽の終了ステータスをそのまま返し、`set -e` に
+よってスクリプト全体が落ちていた。`return` を `return 0` に修正）。
+再デプロイ後 `scripts/run-pi-cluster.sh --replace` で起動。
+
+| 検証項目 | コマンド | 結果 |
+|---|---|---|
+| 到達性 | `verify-pi-cluster.sh reachability` | ✅ PASS（3ノードとも） |
+| Tick SLA | `verify-pi-cluster.sh tick-sla --window-seconds 60` | ✅ PASS（3ノードとも overrun 0 / ~600 ticks, rate=0.0000） |
+| Raft フェイルオーバー | `verify-pi-cluster.sh failover --timeout-seconds 15` | ✅ PASS（node-0 が15秒以内に Leader へ role-transition を観測） |
+
+`tick-sla` の集計式に1件バグを発見・修正した（overrun 行が0件＝ログにファイルサイズ変化が
+ない場合に観測窓の総 tick 数が `1` に丸まり、率の意味が壊れていた。`window_seconds * 1000 / 100`
+の固定計算に修正）。
+
+`failover` のネットワーク分断は `iptables`/`nft` が未インストールだったため、
+leader ノード（node-2）上で `sudo ip link set wlan0 down` → 12秒後に自動 `up` する
+ワンショットコマンドをバックグラウンドで仕込んで実施した。分断中に node-0 が
+Candidate → Leader（term 11）へ遷移し、node-2 の wlan0 復帰後は node-2/node-1 とも
+Follower へ収束（split leadership なし）。
+
+観測されたその他の事象（バグではなく仕様として妥当と判断）:
+- 起動直後、`[RaftTransport] ... connect failed (attempt #N)` が peer 起動順序の
+  ずれにより数十回出力されたのち、reconnect が成功してログが止まる（成功はログされない
+  ため一見ログが「止まった」ように見えるが、`nc -zv` で疎通を直接確認して正常と判断）。
 
 ## 失敗パターンと次の一手
 
