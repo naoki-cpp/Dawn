@@ -23,3 +23,25 @@ func test_normalize_ws_url_keeps_existing_wss_scheme() -> void:
 	var connection: Node = Connection.new()
 	assert_str(connection._normalize_ws_url("wss://example.test/ws")).is_equal("wss://example.test/ws")
 	connection.free()
+
+
+func test_module_activated_message_emits_module_signal() -> void:
+	var connection: Node = Connection.new()
+	var received: Array = []
+	connection.module_activated.connect(func(ship_id: int, module_id: int, slot: String) -> void:
+		received.append({"ship_id": ship_id, "module_id": module_id, "slot": slot})
+	)
+
+	connection._handle_message({
+		"type": "ModuleActivated",
+		"ship_id": 11,
+		"module_id": 7,
+		"slot": "Mid",
+		"tick": 4,
+	})
+
+	assert_int(received.size()).is_equal(1)
+	assert_int((received[0] as Dictionary)["ship_id"]).is_equal(11)
+	assert_int((received[0] as Dictionary)["module_id"]).is_equal(7)
+	assert_str((received[0] as Dictionary)["slot"]).is_equal("Mid")
+	connection.free()

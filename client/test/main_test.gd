@@ -28,6 +28,19 @@ class FakeShip:
 		thrust_calls.append(v)
 
 
+class FakeConnection:
+	extends Node
+
+	var activate_calls: Array[Dictionary] = []
+	var deactivate_calls: Array[Dictionary] = []
+
+	func send_activate_module(ship_id: int, module_id: int, slot: String) -> void:
+		activate_calls.append({"ship_id": ship_id, "module_id": module_id, "slot": slot})
+
+	func send_deactivate_module(ship_id: int, module_id: int, slot: String) -> void:
+		deactivate_calls.append({"ship_id": ship_id, "module_id": module_id, "slot": slot})
+
+
 func before_test() -> void:
 	## .new() without adding to the scene tree never triggers _ready(), so
 	## the @onready scene-path vars stay null -- fine, since none of the
@@ -88,6 +101,60 @@ func test_observed_ship_position_snap_clears_residual_warp_motion() -> void:
 # track its own DeactivateModuleCommand sends to tell "player turned it off"
 # apart from "capacitor forced it off" (regression: toggling a module on
 # then off was showing CAP! instead of OFF).
+
+func test_module_activated_marks_matching_player_module_active() -> void:
+	_main._player_ship_id = 1
+	_main._player_modules = [{"module_id": 5, "is_active": false, "cap_forced_off": false}]
+
+	_main._on_module_activated(1, 5, "Mid")
+
+	var mod_dict: Dictionary = _main._player_modules[0]
+	assert_bool(mod_dict["is_active"] as bool).is_true()
+	assert_bool(mod_dict["cap_forced_off"] as bool).is_false()
+
+
+func test_module_toggle_marks_module_active_before_server_echo() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._player_modules = [{
+		"module_id": 5,
+		"slot": "Mid",
+		"is_active": false,
+		"is_active_module": true,
+		"cap_forced_off": false,
+	}]
+
+	_main._toggle_module_by_index(0)
+
+	var mod_dict: Dictionary = _main._player_modules[0]
+	assert_bool(mod_dict["is_active"] as bool).is_true()
+	assert_bool(mod_dict["cap_forced_off"] as bool).is_false()
+	assert_int(connection.activate_calls.size()).is_equal(1)
+	connection.free()
+
+
+func test_module_toggle_marks_module_inactive_before_server_echo() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._player_modules = [{
+		"module_id": 5,
+		"slot": "High",
+		"is_active": true,
+		"is_active_module": true,
+		"cap_forced_off": false,
+	}]
+
+	_main._toggle_module_by_index(0)
+
+	var mod_dict: Dictionary = _main._player_modules[0]
+	assert_bool(mod_dict["is_active"] as bool).is_false()
+	assert_bool(mod_dict["cap_forced_off"] as bool).is_false()
+	assert_bool(_main._pending_manual_deactivations.has(5)).is_true()
+	assert_int(connection.deactivate_calls.size()).is_equal(1)
+	connection.free()
+
 
 func test_module_deactivated_after_a_manual_toggle_does_not_flag_cap_forced_off() -> void:
 	_main._player_ship_id = 1

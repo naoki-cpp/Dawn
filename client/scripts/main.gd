@@ -882,9 +882,12 @@ func _toggle_module_by_index(f_index: int) -> void:
 	var slot: String = toggle["slot"] as String
 	if toggle["is_active"] as bool:
 		_pending_manual_deactivations[mid] = true
+		PlayerFitting.set_module_activation(_player_modules, mid, false, false)
 		_connection.send_deactivate_module(_player_ship_id, mid, slot)
 	else:
+		PlayerFitting.set_module_activation(_player_modules, mid, true, false)
 		_connection.send_activate_module(_player_ship_id, mid, slot)
+	_recalc_weapon_range()
 
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 	_player_ship_id = p_ship_id
