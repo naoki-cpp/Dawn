@@ -21,22 +21,6 @@ extends Node
 @onready var _camera       : Camera3D    = $World/Camera3D
 @onready var _warp_tunnel  : ColorRect   = $HUD/WarpTunnel
 
-# -- HUD panels (built by HudManager in _ready, architecture-review-client.md C-1) --
-## Top-left status panel. {conn_dot, conn_label, name_label, info_label}.
-var _status_panel_refs : Dictionary = {}
-## Bottom-left ship-status panel. {bar_shield, bar_armor, bar_hull, bar_cap},
-## each itself {row, bar, value}.
-var _ship_status_refs : Dictionary = {}
-## Top-center target panel (visible only while a lock target is held).
-## {panel, name_label, dist_label, bar_shield, bar_armor, bar_hull}.
-var _target_panel_refs : Dictionary = {}
-## Bottom-center module bar. One slot per active module, in F-key order.
-## Each entry: {panel, style, name, state, module_index}.
-var _module_bar   : HBoxContainer = null
-var _module_slots : Array         = []
-## Inventory / Fitting panel (ADR-0032). {panel, fitted_list, inventory_list,
-## fitted_rows, inventory_rows}, toggled by the I key.
-var _inventory_panel_refs : Dictionary = {}
 ## Unfitted owned modules from the latest normalized PlayerFitting.
 var _player_inventory : Array = []
 
@@ -44,6 +28,7 @@ var _player_inventory : Array = []
 
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
 const PlayerFitting = preload("res://scripts/player_fitting.gd")
+const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
 const WorldSessionScript = preload("res://scripts/world_session.gd")
 const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor
 const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is rejected for gates closer than this (ADR-0022).
@@ -81,6 +66,7 @@ var _player_material : StandardMaterial3D = null
 # -- Internal state -----------------------------------------------------------
 
 var _session := WorldSessionScript.new()
+var _hud_surface := HudSurfaceScript.new()
 var _ships                 : Dictionary = _session.ships
 var _player_ship_id        : int        = -1
 var _player_ship_type_name : String     = ""
@@ -113,9 +99,6 @@ var _ship_hp : Dictionary = _session.ship_hp
 
 ## Duel mode: opponent player ship IDs (populated from InitialState is_player flag)
 var _opponent_ship_ids : Array = _session.opponent_ship_ids
-## Duel result overlay label (created dynamically)
-var _duel_result_label : Label = null
-
 ## Normalized PlayerFitting modules, enriched with client runtime fields.
 var _player_modules : Array = []
 
@@ -200,12 +183,7 @@ func _ready() -> void:
 	_connection.module_deactivated.connect(_on_module_deactivated)
 	_build_player_material()
 	_setup_space_environment()
-	_duel_result_label = HudManager.build_duel_result_overlay(self)
-	_status_panel_refs = HudManager.build_status_panel(_hud)
-	_ship_status_refs  = HudManager.build_ship_status_panel(_hud)
-	_target_panel_refs = HudManager.build_target_panel(_hud)
-	_module_bar = HudManager.build_module_bar(_hud)
-	_inventory_panel_refs = HudManager.build_inventory_panel(_hud)
+	_hud_surface.build(self, _hud, _stats_label)
 	_camera_base_fov = _camera.fov
 	_update_hud()
 	## Gate / body markers are spawned from the server's InitialState, not here.
@@ -481,7 +459,7 @@ func _input(event: InputEvent) -> void:
 				if _tactical_overlay != null:
 					(_tactical_overlay as Node3D).call("toggle_visible")
 			"toggle_inventory_panel":
-				HudManager.toggle_inventory_panel(_inventory_panel_refs)
+				_hud_surface.toggle_inventory_panel()
 		return
 
 	if event is InputEventMouseButton:
@@ -493,13 +471,13 @@ func _input(event: InputEvent) -> void:
 			## A click on the open inventory panel fits/unfits (row hit) or is
 			## swallowed (margin/header) -- never a world click. Checked first
 			## since the panel can be open over anything.
-			if HudManager.inventory_panel_consumes(_inventory_panel_refs, mb.position):
-				var inv_row: Dictionary = HudManager.inventory_panel_row_at(_inventory_panel_refs, mb.position)
+			if _hud_surface.inventory_panel_consumes(mb.position):
+				var inv_row: Dictionary = _hud_surface.inventory_panel_row_at(mb.position)
 				if mb.button_index == MOUSE_BUTTON_LEFT and inv_row.has("action"):
 					_handle_inventory_row_click(inv_row)
 				return
 			## A click on a module slot toggles it; it is never a world click.
-			var slot_index: int = HudManager.module_slot_at(_module_slots, mb.position)
+			var slot_index: int = _hud_surface.module_slot_at(mb.position)
 			if slot_index >= 0:
 				if mb.button_index == MOUSE_BUTTON_LEFT:
 					_toggle_module_by_index(slot_index)
@@ -756,7 +734,7 @@ func _on_welcomed(_p_player_id: int, _p_ship_id: int) -> void:
 ## InitialState handles initialization.
 func _on_initial_state(state: Dictionary) -> void:
 	_clear_all_ships()  ## Reset on reconnect
-	HudManager.hide_duel_result(_duel_result_label)
+	_hud_surface.hide_duel_result()
 	_ingest_star_map(state)
 
 	for ship_data: Variant in (state.get("ships", []) as Array):
@@ -817,9 +795,8 @@ func _handle_aoi_leave(p: Dictionary) -> void:
 func _on_player_fitting(payload: Dictionary) -> void:
 	var fitting: Dictionary = PlayerFitting.normalize_payload(payload)
 	_player_modules = fitting["modules"] as Array
-	_module_slots = HudManager.rebuild_module_bar(_module_bar, _player_modules)
 	_player_inventory = fitting["inventory"] as Array
-	HudManager.update_inventory_panel(_inventory_panel_refs, _player_modules, _player_inventory)
+	_hud_surface.set_player_fitting(_player_modules, _player_inventory)
 	_recalc_weapon_range()
 
 func _recalc_weapon_range() -> void:
@@ -980,9 +957,9 @@ func _handle_ship_destroyed(p: Dictionary) -> void:
 	## Play destruction effect (queue_free happens inside play_destroy_effect)
 	ship.call("play_destroy_effect")
 	if result.get("destroyed_player", false) as bool:
-		HudManager.show_duel_result(_duel_result_label, false)  ## DEFEAT
+		_hud_surface.show_duel_result(false)  ## DEFEAT
 	elif result.get("destroyed_opponent", false) as bool:
-		HudManager.show_duel_result(_duel_result_label, true)   ## VICTORY
+		_hud_surface.show_duel_result(true)   ## VICTORY
 
 func _handle_target_locked(p: Dictionary) -> void:
 	var locker_id: int = p.get("locker_id", 0) as int
@@ -1009,15 +986,6 @@ func _update_hud() -> void:
 	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
 		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_server") as float
 		speed_str = UnitFormat.format_speed(spd * METERS_PER_UNIT)
-	HudManager.update_status_panel(
-		_status_panel_refs, _connection.is_connected_to_server(),
-		_player_ship_type_name, _current_system_name, speed_str)
-
-	HudManager.update_ship_status_panel(
-		_ship_status_refs, _player_ship_id,
-		_player_shield, _player_max_shield, _player_armor, _player_max_armor, _player_hull, _player_max_hull,
-		_cap_current, _cap_max)
-
 	var target_known: bool = _ships.has(_player_lock_target)
 	var dist_text: String = "—"
 	if target_known and _player_ship_id >= 0 and _ships.has(_player_ship_id):
@@ -1025,9 +993,6 @@ func _update_hud() -> void:
 			(_ships[_player_lock_target] as Node3D).global_position) / WORLD_SCALE
 		dist_text = UnitFormat.format_distance(dist_m * METERS_PER_UNIT)
 	var target_hp: Dictionary = _ship_hp.get(_player_lock_target, {}) as Dictionary
-	HudManager.update_target_panel(_target_panel_refs, _player_lock_target, target_known, dist_text, target_hp)
-
-	HudManager.update_module_bar(_module_slots, _player_modules)
 
 	var jump_line  : String = ""
 	if _nearby_gate_id >= 0:
@@ -1059,10 +1024,30 @@ func _update_hud() -> void:
 	elif _selected_target_id >= 0:
 		approach_line = "\n[A] Approach #%d" % _selected_target_id + keep_at_range_hint
 
-	_stats_label.text = (
-		"Ships: %d\nTick: %d%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
-		% [_ships.size(), _current_tick, approach_line, jump_line]
-	)
+	_hud_surface.render({
+		"connected": _connection.is_connected_to_server(),
+		"ship_type_name": _player_ship_type_name,
+		"system_name": _current_system_name,
+		"speed": speed_str,
+		"player_ship_id": _player_ship_id,
+		"shield": _player_shield,
+		"max_shield": _player_max_shield,
+		"armor": _player_armor,
+		"max_armor": _player_max_armor,
+		"hull": _player_hull,
+		"max_hull": _player_max_hull,
+		"cap_current": _cap_current,
+		"cap_max": _cap_max,
+		"lock_target": _player_lock_target,
+		"target_known": target_known,
+		"target_distance": dist_text,
+		"target_hp": target_hp,
+		"modules": _player_modules,
+		"stats_text": (
+			"Ships: %d\nTick: %d%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
+			% [_ships.size(), _current_tick, approach_line, jump_line]
+		),
+	})
 
 # -- Capacitor client-side simulation -----------------------------------------
 
