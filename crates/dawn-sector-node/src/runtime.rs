@@ -8,8 +8,8 @@
 use dawn_actor::{protocol, ws_server};
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, SectorId, ShipId, WarpTarget};
-use dawn_event_store::store::EventStore as _;
-use dawn_replication::{LogBatch, ReplicationTransport, TcpReplicationTransport};
+use dawn_event_store::store::EventStore;
+use dawn_replication::{OutboundLogPublisher, TcpReplicationTransport};
 use dawn_sector::aoi::AoiSink;
 use dawn_sector::node::SimulationNode;
 use dawn_sector::{aoi, transit};
@@ -23,13 +23,16 @@ pub(crate) struct SectorNodeRuntime {
     peer_ws: HashMap<SectorId, SocketAddr>,
     sessions: Vec<ws_server::PlayerSession>,
     aoi_delivery: aoi::AoiDelivery,
+    outbound_replication: OutboundLogPublisher<TcpReplicationTransport>,
 }
 
 impl SectorNodeRuntime {
-    pub(crate) fn new(
+    pub(crate) fn new<S: EventStore>(
         sector_id: SectorId,
         aoi_cell_size: f32,
         peer_ws: HashMap<SectorId, SocketAddr>,
+        repl_transport: TcpReplicationTransport,
+        event_store: &S,
     ) -> Self {
         Self {
             sector_id,
@@ -37,6 +40,10 @@ impl SectorNodeRuntime {
             peer_ws,
             sessions: Vec::new(),
             aoi_delivery: aoi::AoiDelivery::new(),
+            outbound_replication: OutboundLogPublisher::from_store_tail(
+                repl_transport,
+                event_store,
+            ),
         }
     }
 
@@ -63,7 +70,6 @@ impl SectorNodeRuntime {
         node: &mut SimulationNode,
         raft: &RaftActorHandle,
         committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
-        repl_transport: &TcpReplicationTransport,
     ) {
         let event_cursor = node.total_event_count() as u64;
         let (lock_commands, pending_jumps) = self.collect_player_commands(node);
@@ -74,10 +80,8 @@ impl SectorNodeRuntime {
         transit::step_cluster_node(node, raft, committed_rx, &lock_commands);
 
         let new_events = self.collect_new_events(node, event_cursor);
-        if !new_events.is_empty() {
-            let batch = LogBatch::new(self.sector_id, event_cursor, new_events.clone());
-            repl_transport.broadcast(batch);
-        }
+        self.outbound_replication
+            .publish_new_events(self.sector_id, node.event_store());
 
         let jumped_ships = self.jumped_ships(&new_events);
         self.deliver_frames(node, &new_events, &jumped_ships);

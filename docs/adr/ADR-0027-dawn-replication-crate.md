@@ -87,6 +87,9 @@ pub trait ReplicationTransport: Send + Sync {
 pub struct InMemoryReplicationBus { ... }
 impl ReplicationTransport for InMemoryReplicationBus { ... }
 
+/// Sender-side cursor and LogBatch construction for an owning Sector's append log.
+pub struct OutboundLogPublisher<T: ReplicationTransport> { ... }
+
 /// Anti-entropy: request missing events from a peer by log index range.
 pub struct AntiEntropy { ... }
 
@@ -160,6 +163,7 @@ thiserror        = "1"
 - [x] 人間が本 ADR を承認する（proposed → accepted）
 - [x] `crates/dawn-replication/` を新設（Cargo.toml + src/lib.rs）
 - [x] `ReplicationTransport` trait + `InMemoryReplicationBus` を実装
+- [x] `OutboundLogPublisher` で送信側 cursor と `LogBatch` suffix 構築を集約
 - [x] `dawn-actor` から `ReplicationBus` を削除し、`dawn-simulation` を差し替え
 - [x] `AntiEntropy`（iter_from ベース）を実装しテストを書く
 - [x] `TcpReplicationTransport`（LAN plaintext）を実装

@@ -76,7 +76,7 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/A
 | `dawn-event-store` | library | Persistence/compaction of the two-tier Event Log (hot log + cold archive) (ADR-0017) |
 | `dawn-consensus` | library | Raft implementation (leader election, log replication, RaftActor; ADR-0014) |
 | `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
-| `dawn-replication` | library | Gossip distribution boundary for the append log (InMemoryReplicationBus / ReplicationTransport / AntiEntropy / TcpReplicationTransport / SnapshotTransfer / ReplicaSet; ADR-0021/0027) |
+| `dawn-replication` | library | Gossip distribution boundary for the append log (OutboundLogPublisher / InMemoryReplicationBus / ReplicationTransport / AntiEntropy / TcpReplicationTransport / SnapshotTransfer / ReplicaSet; ADR-0021/0027) |
 | `dawn-sector` | library | Per-Sector game logic (SimulationNode, Tick, Transit, Warp, Bot AI, AoI, Snapshot; ADR-0026) |
 | `dawn-simulation` | binary | Wiring/bootstrap only. WsServer (Godot), Raft cluster wiring, load generation, TOML loader |
 | `dawn-sector-node` | binary | Production binary (8D-4). Wires TcpRaftTransport + TcpReplicationTransport from static TOML config. 3 processes = 3-Sector cluster |
