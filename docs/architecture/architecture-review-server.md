@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md
-date     : 2026-07-01（再計測。R-3 トリガー未発火確認。記録漏れだった client_admission.rs deepening（#41）と 8D-5 実機検証完了を追加。`/improve-codebase-architecture` 由来の M-7（新規・保留）・M-8（新規・許容）を起票）
+date     : 2026-07-01（再計測。R-3 トリガー未発火確認。記録漏れだった client_admission.rs deepening（#41）と 8D-5 実機検証完了を追加。`/improve-codebase-architecture` 由来の M-7（新規・保留）・M-8（新規・許容）を起票。Steering-mode 排他制御の非対称性バグ2件を発見・即修正（issue化せず直接対応）し `begin_maneuver` ヘルパーへ重複統合）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -39,14 +39,14 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-sector/src/node/warp.rs` | 1050（impl 528） | 🟡 R-1 新設（2026-06-23）。warp 幾何の単一責務だが総行数が閾値を超過。impl は700未満でトリガー未発火（process_warp / warp 幾何 / コマンドへ分割は引き続き保留） |
+| `crates/dawn-sector/src/node/warp.rs` | 1094（impl 534） | 🟡 R-1 新設（2026-06-23）。warp 幾何の単一責務だが総行数が閾値を超過。impl は700未満でトリガー未発火（process_warp / warp 幾何 / コマンドへ分割は引き続き保留）。2026-07-01、`apply_warp_command` に `clear_steering_modes` を追加（下記「Steering-mode 排他制御の非対称性を是正」参照） |
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 881（impl 492） | 🟡 P4-2 + P7-1 + ADR-0029 + ADR-0032（inventory seeding）。spawn / bot AI / inventory seed が同居。impl 700未満でトリガー未発火 |
-| `crates/dawn-sector/src/node/orbit.rs` | 788（impl 311） | 🟡 ADR-0031 新設。Orbit / Keep at Range の操船一式。単一責務で許容、impl 700未満 |
+| `crates/dawn-sector/src/node/orbit.rs` | 854（impl 317） | 🟡 ADR-0031 新設。Orbit / Keep at Range の操船一式。単一責務で許容、impl 700未満。2026-07-01、`begin_maneuver` ヘルパーを新設し `apply_orbit_command`/`apply_keep_at_range_command`/`apply_approach_command`（approach.rs）の共通スカフォールドを集約。Warp優先チェックを `has_active_warp`（全フェーズ）に修正 |
 | `crates/dawn-sector/src/node/mod.rs` | 797（impl 49・大半テスト） | 🟡 P7-2 後 + ADR-0031/0032 のフィールド・定数追加。impl は小さくテスト主体の増分 |
 | `crates/dawn-sector/src/node/transit_flow.rs` | 913（impl 366） | 🟢 `prepare_transit_commit`/`handle_transit_commit`（公開面 5→2 に集約）+ `rebase_after_transit`（#38）。impl は依然小さく、増分はテスト |
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 580 | 🟢 P7-pre + ADR-0032（inventory 永続化）。ほぼテスト |
 | `crates/dawn-sector/src/node/inventory.rs` | 459 | 🟢 ADR-0032 新設。fit/unfit_module_owned + seed + テスト |
-| `crates/dawn-sector/src/node/commands.rs` | 494 | 🟢 P7-1 + ADR-0032（fit 時 inventory 同梱） |
+| `crates/dawn-sector/src/node/commands.rs` | 509 | 🟢 P7-1 + ADR-0032（fit 時 inventory 同梱）。2026-07-01、`has_active_warp`（全フェーズ判定）を追加し `is_warping`（committed限定、Move専用）と役割分離 |
 | `crates/dawn-sector/src/node/serialization.rs` | 450 | 🟢 ADR-0029 + ADR-0032（inventory / slot_capacity を PlayerFitting に追加） |
 | `crates/dawn-sector/src/galaxy.rs` | 360 | 🟢 ADR-0029 AU→units 変換・ゲート AU 化 |
 | `crates/dawn-sector/src/node/apply_event.rs` | 339 | 🟢 P7-pre + ADR-0032（ShipFitted/ShipSpawned で inventory 復元） |
@@ -58,7 +58,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector/src/persistence/snapshot.rs` | 177 | 🟢 ADR-0032 で `ShipSnapshot.inventory` 追加 |
 | `crates/dawn-sector/src/dilation.rs` | 164 | 🟢 |
 | `crates/dawn-sector/src/persistence/checkpoint.rs` | 173 | 🟢 |
-| `crates/dawn-sector/src/node/approach.rs` | 570（impl 220） | 🟢 R-1 新設（2026-06-23）。approach 系 + ADR-0031 で clear_steering_modes 連携 |
+| `crates/dawn-sector/src/node/approach.rs` | 629（impl 205） | 🟢 R-1 新設（2026-06-23）。approach 系 + ADR-0031 で clear_steering_modes 連携。2026-07-01、独自の検証チェックリストを `orbit.rs` の `begin_maneuver` 呼び出しに置き換え、Orbit/KeepAtRange と完全に同じ経路を通るように統一 |
 | `crates/dawn-sector/src/node/tick.rs` | 177 | 🟢 P4-1 + ADR-0031 Step 2.55/2.56 + ADR-0033 Step 6.5 配線 |
 | `crates/dawn-sector/src/spawner.rs` | 133 | 🟢 |
 | `crates/dawn-sector/src/ship_types.rs` | 91 | 🟢 |
@@ -255,6 +255,46 @@ M-6 で見送った「新 crate」と同様に ROI を見極めてから着手�
 
 再評価トリガー: 3つ目の Fit 経路（例: NPC ループ内リフィット等）が必要になり、
 テール重複が3箇所に増えたとき。
+
+#### Steering-mode 排他制御の非対称性を是正（2026-07-01・解消済み）
+
+`/improve-codebase-architecture` で「Orbit/KeepAtRange/Approach/Warp の5ハンドラが
+同じ排他制御スカフォールドを重複している」と指摘されたが、実装を確認したところ
+前提は不正確だった: `validate_maneuver_target` は元々 Orbit/KeepAtRange でのみ共有され、
+Warp はそもそも `clear_steering_modes` に参加していなかった。詳細に検証した結果、
+**スタイル上の重複ではなく実害のある非対称性が3件**見つかったため、issue化せず
+このまま直接修正した:
+
+- `apply_warp_command` が `clear_steering_modes` を呼んでいなかった。Orbit中の
+  Ship が Warp を始めても `OrbitComp` が残り続け、tick順序
+  （`process_orbit` → `process_warp`、後者が `ThrustComp` を上書き）に
+  依存して見かけ上だけ正しく動いていた。Warp完了後に古い `OrbitComp` が
+  残り、操船意図が意図せず復帰し得る状態だった
+- `apply_approach_command` に `is_warping` ガードが無かった（Orbit/KeepAtRangeには
+  ある）。committed Warping 中の Ship に Approach を送ると拒否されず
+  `ApproachComp` が付与されてしまっていた
+- `is_warping`（committed フェーズのみ true）を Orbit/KeepAtRange/Approach の
+  Warp優先チェックに使っていたため、**Aligning フェーズ中は素通りしていた**。
+  `clear_steering_modes` のコメントは「warp はこれらのコマンドを検証ガードで
+  完全に拒否する」と書いていたが実態と食い違っていた。`has_active_warp`
+  （フェーズ問わず `WarpComp` の有無のみ判定）を新設し、Move/Stop だけが
+  Aligning Warp を明示的にキャンセルできる特例として残し、他3コマンドは
+  Aligning も含めて拒否するよう統一した
+
+上記を修正したうえで、`apply_orbit_command`/`apply_keep_at_range_command`/
+`apply_approach_command` の共通スカフォールド（entity解決・transit/Warp優先チェック・
+的中判定・距離デフォルト・`clear_steering_modes`）を `begin_maneuver` ヘルパー
+（`orbit.rs`、`pub(super)`）へ完全に集約した（純粋な移動・挙動不変。Approach は
+distance に `None` を渡し戻り値の距離を無視するだけ）。結果として、元のレポートが
+提案していた「5ハンドラの重複整理」は、3つの実バグ修正の副産物として達成された
+（Move/Warp自体は意味的に非対称であるべきなので対象外のまま）。
+
+回帰テスト5本追加（`starting_a_warp_clears_an_active_orbit` /
+`approach_command_is_rejected_while_warping` /
+`approach_command_is_rejected_while_aligning_to_warp` /
+`orbit_command_is_rejected_while_aligning_to_warp` /
+`keep_at_range_command_is_rejected_while_aligning_to_warp`）。
+`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過。
 
 ---
 

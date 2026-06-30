@@ -52,28 +52,13 @@ impl<S: EventStore> SimulationNode<S> {
         target: dawn_core::ApproachTarget,
         auto_jump_gate: Option<dawn_core::JumpGateId>,
     ) -> bool {
-        use dawn_core::ApproachTarget;
-        let &entity = match self.ships.index.get(&ship_id) {
-            Some(e) => e,
-            None => return false,
-        };
-        if self.world.transit_state(entity).is_in_transit() {
+        // `begin_maneuver` runs the same rejection checklist (unknown ship /
+        // in transit / Warp priority / invalid target) and clears any other
+        // active steering mode -- shared with Orbit/Keep at Range. Approach
+        // has no stand-off distance, so the resolved one is unused.
+        let Some((entity, _)) = self.begin_maneuver(ship_id, target, None) else {
             return false;
-        }
-        match target {
-            ApproachTarget::Ship(target_id) => {
-                if ship_id == target_id || !self.ships.index.contains_key(&target_id) {
-                    return false;
-                }
-            }
-            ApproachTarget::Gate(gate_id) => {
-                if self.jump_gate(gate_id).is_none() {
-                    return false;
-                }
-            }
-        }
-        // Approach overrides any other active steering mode (ADR-0031).
-        self.clear_steering_modes(entity);
+        };
         let _ = self.world.inner_mut().insert_one(
             entity,
             ApproachComp {
@@ -259,6 +244,80 @@ mod tests {
             node.approach_target(chaser),
             Some(dawn_core::ApproachTarget::Ship(target))
         );
+    }
+
+    #[test]
+    fn approach_command_is_rejected_while_aligning_to_warp() {
+        // Warp takes priority over Approach (ADR-0031) from the moment it's
+        // issued, not just once it commits (ADR-0022) -- `has_active_warp`
+        // covers the Aligning phase too, unlike `is_warping`.
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(10_000.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+
+        assert!(node.apply_warp_command(
+            chaser,
+            dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            false
+        ));
+        assert_eq!(
+            node.warp_phase(chaser),
+            Some(dawn_ecs::components::WarpPhase::Aligning),
+            "warp should still be aligning, not committed"
+        );
+
+        assert!(!node.apply_approach_command_owned(
+            player,
+            dawn_core::ApproachCommand {
+                ship_id: chaser,
+                target: dawn_core::ApproachTarget::Ship(target)
+            }
+        ));
+        assert_eq!(node.approach_target(chaser), None);
+    }
+
+    #[test]
+    fn approach_command_is_rejected_while_warping() {
+        // Warp takes priority over Approach (ADR-0031), mirroring Orbit/Keep
+        // at Range: a committed warp must not be interrupted by a new
+        // steering mode racing in underneath it.
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(10_000.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+
+        assert!(node.apply_warp_command(
+            chaser,
+            dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            false
+        ));
+        for _ in 0..500 {
+            node.tick();
+            if node.warp_phase(chaser) == Some(dawn_ecs::components::WarpPhase::Warping) {
+                break;
+            }
+        }
+        assert_eq!(
+            node.warp_phase(chaser),
+            Some(dawn_ecs::components::WarpPhase::Warping),
+            "warp should have engaged by now"
+        );
+
+        assert!(!node.apply_approach_command_owned(
+            player,
+            dawn_core::ApproachCommand {
+                ship_id: chaser,
+                target: dawn_core::ApproachTarget::Ship(target)
+            }
+        ));
+        assert_eq!(node.approach_target(chaser), None);
     }
 
     #[test]
