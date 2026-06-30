@@ -250,15 +250,21 @@ impl AoiDelivery {
             }
         }
 
+        let mut event_visible = curr.clone();
+        if event_visible.binary_search(&own_ship_id).is_err() {
+            event_visible.push(own_ship_id);
+            event_visible.sort_unstable_by_key(|id| id.raw());
+        }
+
         let visible_events: Vec<_> = new_events
             .iter()
             .filter(|e| {
                 if let DomainEvent::ShipDestroyed(d) = e {
                     return old_prev.binary_search(&d.ship_id).is_ok()
                         || old_prev.binary_search(&d.killer_id).is_ok()
-                        || event_visible_to(e, &curr);
+                        || event_visible_to(e, &event_visible);
                 }
-                event_visible_to(e, &curr)
+                event_visible_to(e, &event_visible)
             })
             .cloned()
             .collect();
@@ -544,6 +550,42 @@ mod tests {
         assert!(
             sink.raw.is_empty(),
             "a destroyed ship's own removal handles this client-side, no AoiLeave"
+        );
+    }
+
+    #[test]
+    fn deliver_frame_sends_own_ship_events_even_when_visible_set_excludes_self() {
+        use dawn_core::events::ModuleActivated;
+        use dawn_core::{ModuleId, SlotKind, Tick};
+
+        let node = mem_node();
+        let own_ship = ship(1);
+        let event = DomainEvent::ModuleActivated(ModuleActivated {
+            ship_id: own_ship,
+            module_id: ModuleId(7),
+            slot: SlotKind::Mid,
+            tick: Tick(1),
+        });
+
+        let mut delivery = AoiDelivery::new();
+        delivery.seed_player(player(1), vec![]);
+        let mut sink = FakeSink::default();
+        delivery.deliver_frame(
+            &mut sink,
+            &node,
+            Observer {
+                player_id: player(1),
+                ship_id: own_ship,
+            },
+            vec![],
+            &[event.clone()],
+            &[],
+        );
+
+        assert_eq!(
+            sink.events,
+            vec![event],
+            "the owning client must receive its own module event so HUD state updates"
         );
     }
 
