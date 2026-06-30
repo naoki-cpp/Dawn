@@ -7,11 +7,11 @@
 
 use dawn_actor::{protocol, ws_server};
 use dawn_consensus::RaftActorHandle;
-use dawn_core::{DomainEvent, SectorId, ShipId, WarpTarget};
+use dawn_core::{DomainEvent, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
 use dawn_replication::{OutboundLogPublisher, TcpReplicationTransport};
 use dawn_sector::aoi::AoiSink;
-use dawn_sector::node::SimulationNode;
+use dawn_sector::node::{JumpOutcome, SimulationNode};
 use dawn_sector::{aoi, transit};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -169,40 +169,44 @@ impl SectorNodeRuntime {
             let Some(sess) = self.sessions.get(idx) else {
                 continue;
             };
-            let ship_owned = j.ship_id == sess.ship_id;
-            let in_range = ship_owned && node.can_propose_jump(j.ship_id, j.gate_id);
-            if in_range {
-                let to = node
-                    .jump_gate(j.gate_id)
-                    .expect("gate must exist")
-                    .to_sector;
-                raft.propose(
-                    transit::TransitOp::Request {
-                        ship_id: j.ship_id,
-                        to,
-                        gate_id: Some(j.gate_id),
-                    }
-                    .encode(),
-                );
-                println!(
-                    "[Node] Jump proposed: ship #{} gate #{}",
-                    j.ship_id.raw(),
-                    j.gate_id.0
-                );
-            } else if ship_owned
-                && node.apply_warp_command(j.ship_id, WarpTarget::Gate(j.gate_id), true)
-            {
-                println!(
-                    "[Node] Jump: ship #{} out of range - auto-warp to gate #{} started",
-                    j.ship_id.raw(),
-                    j.gate_id.0
-                );
-            } else if ship_owned && node.apply_approach_jump_fallback(j.ship_id, j.gate_id) {
-                println!(
-                    "[Node] Jump: ship #{} too close to warp - approaching gate #{} instead",
-                    j.ship_id.raw(),
-                    j.gate_id.0
-                );
+            if j.ship_id != sess.ship_id {
+                continue;
+            }
+            // The in-range/auto-warp/approach fallback chain is owned by
+            // dawn-sector (node/jump.rs) -- this just runs it and reacts to
+            // the outcome. Only the Raft proposal itself stays here, since
+            // RaftActorHandle isn't available to dawn-sector.
+            match node.apply_jump_with_fallback(j.ship_id, j.gate_id) {
+                JumpOutcome::NeedsTransitProposal { to } => {
+                    raft.propose(
+                        transit::TransitOp::Request {
+                            ship_id: j.ship_id,
+                            to,
+                            gate_id: Some(j.gate_id),
+                        }
+                        .encode(),
+                    );
+                    println!(
+                        "[Node] Jump proposed: ship #{} gate #{}",
+                        j.ship_id.raw(),
+                        j.gate_id.0
+                    );
+                }
+                JumpOutcome::WarpFallbackStarted => {
+                    println!(
+                        "[Node] Jump: ship #{} out of range - auto-warp to gate #{} started",
+                        j.ship_id.raw(),
+                        j.gate_id.0
+                    );
+                }
+                JumpOutcome::ApproachFallbackStarted => {
+                    println!(
+                        "[Node] Jump: ship #{} too close to warp - approaching gate #{} instead",
+                        j.ship_id.raw(),
+                        j.gate_id.0
+                    );
+                }
+                JumpOutcome::Rejected => {}
             }
         }
     }

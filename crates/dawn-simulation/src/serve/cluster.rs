@@ -5,8 +5,8 @@ use super::{
     CommonCommandFollowup, AOI_CELL_SIZE, P4_TICK_MS,
 };
 use crate::{cluster, ws_server};
-use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId, WarpTarget};
-use dawn_sector::node::SimulationNode;
+use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
+use dawn_sector::node::{JumpOutcome, SimulationNode};
 use dawn_sector::transit;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -164,60 +164,57 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     }
                     None => continue,
                 };
-                let ship_owned = j.ship_id == sess.ship_id;
-                let in_range = ship_owned && nodes[sector].can_propose_jump(j.ship_id, j.gate_id);
-                if in_range {
-                    let to = nodes[sector]
-                        .jump_gate(j.gate_id)
-                        .expect("can_propose_jump confirmed gate exists")
-                        .to_sector;
-                    rafts[sector].propose(
-                        TransitOp::Request {
-                            ship_id: j.ship_id,
-                            to,
-                            gate_id: Some(j.gate_id),
-                        }
-                        .encode(),
-                    );
-                    println!(
-                        "  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
-                        j.ship_id.raw(),
-                        j.gate_id.0,
-                        sector,
-                        to.0
-                    );
-                } else if ship_owned
-                    && nodes[sector].apply_warp_command(
-                        j.ship_id,
-                        WarpTarget::Gate(j.gate_id),
-                        true,
-                    )
-                {
-                    println!(
-                        "  [Server] Jump: ship #{} out of range — auto-warp to gate #{} started",
-                        j.ship_id.raw(),
-                        j.gate_id.0
-                    );
-                } else if ship_owned
-                    && nodes[sector].apply_approach_jump_fallback(j.ship_id, j.gate_id)
-                {
-                    // Too close to warp (< MIN_WARP_DISTANCE) but still outside
-                    // activation_radius -- without this, a ship in that band
-                    // could never jump: in_range fails, and apply_warp_command
-                    // also fails its own can_propose_warp distance check, so
-                    // the command was silently dropped every tick the ship sat
-                    // there. Approach closes the rest of the gap sublight.
-                    println!(
-                        "  [Server] Jump: ship #{} too close to warp — approaching gate #{} instead",
-                        j.ship_id.raw(),
-                        j.gate_id.0
-                    );
-                } else {
-                    eprintln!(
-                        "[Server] JumpCommand rejected (ship #{} gate #{})",
-                        j.ship_id.raw(),
-                        j.gate_id.0
-                    );
+                if j.ship_id != sess.ship_id {
+                    continue;
+                }
+                // Fallback chain (in-range propose / auto-warp / approach) is
+                // owned by dawn-sector (node/jump.rs); only the Raft proposal
+                // for the in-range case stays here.
+                match nodes[sector].apply_jump_with_fallback(j.ship_id, j.gate_id) {
+                    JumpOutcome::NeedsTransitProposal { to } => {
+                        rafts[sector].propose(
+                            TransitOp::Request {
+                                ship_id: j.ship_id,
+                                to,
+                                gate_id: Some(j.gate_id),
+                            }
+                            .encode(),
+                        );
+                        println!(
+                            "  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
+                            j.ship_id.raw(),
+                            j.gate_id.0,
+                            sector,
+                            to.0
+                        );
+                    }
+                    JumpOutcome::WarpFallbackStarted => {
+                        println!(
+                            "  [Server] Jump: ship #{} out of range — auto-warp to gate #{} started",
+                            j.ship_id.raw(),
+                            j.gate_id.0
+                        );
+                    }
+                    JumpOutcome::ApproachFallbackStarted => {
+                        // Too close to warp (< MIN_WARP_DISTANCE) but still outside
+                        // activation_radius -- without this, a ship in that band
+                        // could never jump: in_range fails, and apply_warp_command
+                        // also fails its own can_propose_warp distance check, so
+                        // the command was silently dropped every tick the ship sat
+                        // there. Approach closes the rest of the gap sublight.
+                        println!(
+                            "  [Server] Jump: ship #{} too close to warp — approaching gate #{} instead",
+                            j.ship_id.raw(),
+                            j.gate_id.0
+                        );
+                    }
+                    JumpOutcome::Rejected => {
+                        eprintln!(
+                            "[Server] JumpCommand rejected (ship #{} gate #{})",
+                            j.ship_id.raw(),
+                            j.gate_id.0
+                        );
+                    }
                 }
             }
         }

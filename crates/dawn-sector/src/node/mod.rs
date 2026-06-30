@@ -18,6 +18,7 @@ mod apply_event;
 mod approach;
 mod commands;
 mod inventory;
+mod jump;
 mod navigation;
 mod orbit;
 mod sector_map;
@@ -29,6 +30,8 @@ mod tackle;
 mod tick;
 mod transit_flow;
 mod warp;
+
+pub use jump::JumpOutcome;
 
 use sector_map::SectorMap;
 use ship_registry::ShipRegistry;
