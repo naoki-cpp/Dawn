@@ -18,7 +18,6 @@ AI agents must apply it without exception.
 
 [body]
 
-[footer]
 ```
 
 ### type
@@ -73,16 +72,6 @@ single scope dominates.
 
 ---
 
-## Footer
-
-| Key | When to add |
-|---|---|
-| `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>` | Every AI-assisted commit |
-| `Refs: ADR-XXXX` | When implementing a specific ADR decision |
-| `BREAKING CHANGE: <description>` | When a public API or event schema changes incompatibly |
-
----
-
 ## Examples
 
 ```
@@ -91,9 +80,6 @@ feat(dawn-ecs): add CapacitorSystem with cycle-based cap drain
 Active modules now consume cap once per cycle rather than every tick.
 Introduces FittedSlot.cycle_remaining to track countdown state.
 Cap shortage forces module OFF and emits ModuleDeactivated.
-
-Refs: ADR-0006
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 ```
 
 ```
