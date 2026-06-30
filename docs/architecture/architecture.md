@@ -51,6 +51,9 @@ Inter-node comms : TCP (TcpRaftTransport / TcpReplicationTransport, 8D-3/2c)
 Client comms     : WebSocket + JSON (Godot <-> WsServer, ADR-0007)
 Node             : a physical process (`sector-node config/node-N.toml`)
 Inter-node net   : TCP LAN plaintext (8D milestone; TLS is next phase)
+Persistence      : FileEventStore + checkpoint/restore wired into
+                    `dawn-sector-node` (2026-07-01); each node's hot log,
+                    snapshot, and cold archive paths are config fields
 ```
 
 See [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/ADR-0027-dawn-replication-crate.md) for details.

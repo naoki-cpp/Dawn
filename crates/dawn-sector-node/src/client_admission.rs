@@ -6,6 +6,7 @@
 
 use dawn_actor::{protocol::ResumeIdentity, ws_server};
 use dawn_core::{PlayerId, Position, SectorId, ShipId};
+use dawn_event_store::store::EventStore;
 use dawn_sector::node::SimulationNode;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -46,9 +47,9 @@ impl ClientAdmission {
         }
     }
 
-    pub(crate) fn advance_handshakes(
+    pub(crate) fn advance_handshakes<S: EventStore>(
         &mut self,
-        node: &mut SimulationNode,
+        node: &mut SimulationNode<S>,
         sector_id: SectorId,
         aoi_cell_size: f32,
     ) {
@@ -122,8 +123,8 @@ enum HandshakeSelection {
     RefusedResumeMissingShip(ResumeIdentity),
 }
 
-fn select_handshake_identity(
-    node: &mut SimulationNode,
+fn select_handshake_identity<S: EventStore>(
+    node: &mut SimulationNode<S>,
     resume: Option<ResumeIdentity>,
 ) -> HandshakeSelection {
     if let Some(resume) = resume {

@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md
-date     : 2026-07-01（再計測。R-3 トリガー未発火確認。記録漏れだった client_admission.rs deepening（#41）と 8D-5 実機検証完了を追加。`/improve-codebase-architecture` 由来の M-7（新規・保留）・M-8（新規・許容）を起票。Steering-mode 排他制御の非対称性バグ2件を発見・即修正（issue化せず直接対応）し `begin_maneuver` ヘルパーへ重複統合）
+date     : 2026-07-01（再計測。R-3 トリガー未発火確認。記録漏れだった client_admission.rs deepening（#41）と 8D-5 実機検証完了を追加。`/improve-codebase-architecture` 由来の M-7（新規・保留）・M-8（新規・許容）・M-9（新規・保留）を起票。Steering-mode 排他制御の非対称性バグ3件を発見・即修正し `begin_maneuver` ヘルパーへ重複統合。`dawn-sector-node` への永続化配線（FileEventStore/checkpoint/起動時リカバリ）を実施）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -51,7 +51,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector/src/galaxy.rs` | 360 | 🟢 ADR-0029 AU→units 変換・ゲート AU 化 |
 | `crates/dawn-sector/src/node/apply_event.rs` | 339 | 🟢 P7-pre + ADR-0032（ShipFitted/ShipSpawned で inventory 復元） |
 | `crates/dawn-sector/src/node/tackle.rs` | 324 | 🟢 P7-pre |
-| `crates/dawn-sector/src/aoi.rs` | 625（impl 307） | 🟢 `AoiDelivery`/`AoiSink`/`Observer`（旧 dawn-simulation・dawn-sector-node 重複の集約先）。半分弱はテスト |
+| `crates/dawn-sector/src/aoi.rs` | 626（impl 307） | 🟢 `AoiDelivery`/`AoiSink`/`Observer`（旧 dawn-simulation・dawn-sector-node 重複の集約先）。半分弱はテスト。2026-07-01、`deliver_frame` を `<S: EventStore>` でジェネリック化 |
 | `crates/dawn-sector/src/anchor.rs` | 292 | 🟢 ADR-0029 新設（AnchorTable・静的 f64 アンカー絶対座標） |
 | `crates/dawn-sector/src/transit.rs` | 282 | 🟢 PR #30 で `run_runtime_tick` / `RuntimeTickOutput` を追加。Request/Commit ハンドラが `prepare_transit_commit`/`handle_transit_commit` に委譲し Gate-lookup 知識を手放した |
 | `crates/dawn-sector/src/modules.rs` | 211 | 🟢 ADR-0033 で Active 修理モジュール定義を追加 |
@@ -97,9 +97,9 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | ファイル | 行数 | 判定 |
 |---|---|---|
 | `crates/dawn-consensus/src/state.rs` | 592 | 🟡 許容範囲（Raft 実装の核） |
-| `crates/dawn-sector-node/src/runtime.rs` | 305 | 🟢 production Node の command dispatch / jump fallback / tick stepping / replication publish 呼び出し / Redirect を集約。AoI delivery 本体は `dawn_sector::aoi::AoiDelivery` へ、replication cursor と `LogBatch` 構築は `dawn_replication::OutboundLogPublisher` へ移動済み |
-| `crates/dawn-sector-node/src/client_admission.rs` | 234 | 🟢 **新規記録**（2026-06-29・PR #41「deepen client admission flow」。これまで本表に未記載だった）。`main.rs` から WebSocket accept / Hello 読み取り / fresh-vs-resume 判定 / Welcome・InitialState 完了までの client admission state machine を集約。`main.rs` はプロセス配線、本ファイルはハンドシェイク状態機械、と責務分離 |
-| `crates/dawn-sector-node/src/main.rs` | 267 | 🟢 8D-4 本番バイナリ。config / TCP transport / accept channel / data loading の配線に縮小 |
+| `crates/dawn-sector-node/src/runtime.rs` | 313 | 🟢 production Node の command dispatch / jump fallback / tick stepping / replication publish 呼び出し / Redirect を集約。AoI delivery 本体は `dawn_sector::aoi::AoiDelivery` へ、replication cursor と `LogBatch` 構築は `dawn_replication::OutboundLogPublisher` へ移動済み。2026-07-01、永続化配線にあわせ全メソッドを `<S: EventStore>` でジェネリック化（旧 `SimulationNode`＝暗黙の `InMemoryEventStore` から `SimulationNode<FileEventStore>` に対応するため） |
+| `crates/dawn-sector-node/src/client_admission.rs` | 235 | 🟢 **新規記録**（2026-06-29・PR #41「deepen client admission flow」。これまで本表に未記載だった）。`main.rs` から WebSocket accept / Hello 読み取り / fresh-vs-resume 判定 / Welcome・InitialState 完了までの client admission state machine を集約。`main.rs` はプロセス配線、本ファイルはハンドシェイク状態機械、と責務分離。2026-07-01、`advance_handshakes`/`select_handshake_identity` を `<S: EventStore>` でジェネリック化 |
+| `crates/dawn-sector-node/src/main.rs` | 341 | 🟢 8D-4 本番バイナリ。config / TCP transport / accept channel / data loading の配線に縮小。2026-07-01、永続化配線（`build_node` がスナップショット有無で新規/復元を分岐、`CheckpointScheduler` をtickループに配線）で 267→341 |
 | `crates/dawn-core/src/events.rs` | 584 | 🟢 ADR-0032 `ShipFitted.inventory`・ADR-0033 `RepairApplied`/`RepairLayer` 追加 |
 | `crates/dawn-ecs/src/systems/combat.rs` | 580 | 🟢 |
 | `crates/dawn-ecs/src/systems/capacitor.rs` | 504 | 🟢 ADR-0033 `repair_cycles_started` 収集を並置 |
@@ -127,7 +127,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-replication/src/outbound.rs` | 141 | 🟢 sender-side `OutboundLogPublisher`。append-log cursor と `LogBatch` suffix 構築を保持 |
 | `crates/dawn-replication/src/lib.rs` | 84 | 🟢 8D-2a/2b/2c/2d public API |
 | `crates/dawn-ecs/src/components/inventory.rs` | 69 | 🟢 ADR-0032 新設（InventoryComp） |
-| `crates/dawn-sector-node/src/config.rs` | 60 | 🟢 8D-4 TOML 静的 config |
+| `crates/dawn-sector-node/src/config.rs` | 90 | 🟢 8D-4 TOML 静的 config。2026-07-01、永続化パス（`event_log_path`/`snapshot_path`/`cold_path`/`checkpoint_interval_ticks`）を追加（全て `#[serde(default)]` 付きで後方互換） |
 
 ---
 
@@ -296,6 +296,30 @@ distance に `None` を渡し戻り値の距離を無視するだけ）。結果
 `keep_at_range_command_is_rejected_while_aligning_to_warp`）。
 `cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過。
 
+#### M-9（新規・2026-07-01・保留）: `EventStore::append` がinfallibleと偽る
+
+`/improve-codebase-architecture` の指摘: トレイト `EventStore::append` は `u64` を
+返すのみで失敗を表現できないが、`FileEventStore::append`（file.rs:232-240）は
+書き込み/flush失敗時に `.expect()` で panic する。tickのホットパス上にあるため、
+ディスクフル等が起きるとSectorプロセス全体が落ちる。
+
+調査の結果、この経路は**2026-07-01の永続化配線（上記参照）まで本番で到達不可能**
+だった（`dawn-sector-node` は `InMemoryEventStore` のみで稼働していたため）。
+配線完了により実際に到達可能になった。
+
+**判断: 保留（トリガー付き）。** トレイトを `Result` 化する案は、戻り値を使う
+6箇所以上の `apply_*_command` の戻り値型変更（`bool` → `Result<bool, _>`）に波及し、
+かつ「tick処理中に一部のイベントだけappend失敗する」状態はINV-005（tick決定性）的に
+中途半端な復旧ができない。1 Sector = 1 プロセス（8D-4）構成では panic = そのプロセスのみ
+クラッシュし、再起動時にスナップショット+ホットログから復旧する設計（ADR-0017、
+上記の永続化配線で実際に動作確認済み）なので、crash-only としての panic 自体は
+不合理ではない。8D最小化方針に照らし、全面 `Result` 化より panic メッセージの充実化・
+意図の明文化（トレイトdocコメントへの追記）の方が費用対効果が高いと判断し保留する。
+
+再評価トリガー: 実機運用でディスクフルによる予期しないクラッシュが実際に発生したとき、
+または `dawn-sector-node` がマルチSector・マルチスレッド構成に変わり panic の影響範囲が
+1Sectorを超えるようになったとき。
+
 ---
 
 ## 改善ロードマップ
@@ -340,6 +364,7 @@ distance に `None` を渡し戻り値の距離を無視するだけ）。結果
 | AoI delivery を `dawn-sector` へ集約（M-6 の AoI 重複を解消） | 2026-06-29 | `dawn-simulation::serve::aoi_delivery::AoiDelivery` と `dawn-sector-node::runtime::deliver_aoi_frame` の同型実装を `dawn_sector::aoi::AoiDelivery`（`deliver_frame` + `AoiSink` trait + `Observer`）へ統合。送信先は `dawn-actor::ws_server::PlayerSession` を直接持てない（dawn-sector は dawn-actor に非依存）ため `AoiSink` trait で抽象化し、各バイナリ側にローカルな `SessionSink` ラッパー adapter（orphan rule 回避）を置く。Redirect 判定・セッション retain はそれぞれの呼び出し側に残す。`FakeSink` を使った enter/leave delta・destroyed-ship 抑制・warp snap のユニットテストを3本追加（移動前は AoI delivery のユニットテストが存在しなかった）。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
 | Client admission deepening（記録漏れ・今回追記） | 2026-06-29 | `dawn-sector-node/src/client_admission.rs` を新設（PR #41）。WebSocket accept / Hello 読み取り / fresh-vs-resume 判定 / Welcome・InitialState 完了までを `ClientAdmission` state machine に集約し、`main.rs` から分離。当時このレビュー文書への記録が漏れていたため、2026-07-01 の再計測で追加 |
 | Sector Transit プロトコルを公開面 5→2 に集約 | 2026-06-29 | `node/transit_flow.rs` の `propose_transit`/`export_transit`/`import_transit`/`append_jump_events` を `pub(super)` に格下げし、新設の `prepare_transit_commit`（Request 側：Gate-lookup・`entry_pos`/`entry_pos_abs` 算出・export を集約）と `handle_transit_commit`（Commit 側：import + `JumpGateUsed`/`StarSystemChanged` 追記の条件分岐を集約）の2メソッドへ統合。`transit.rs` の `apply_committed_raft_entries` オーケストレーターはこの2メソッドを呼ぶだけになり、Gate の往復先探索ロジックを二重に持たなくなった（#38 のバグ修正直後の整理）。新規ユニットテスト1本（`the_consolidated_request_commit_pair_reproduces_the_same_arrival`）で集約後の経路が既存の低レベルプリミティブと同じ着地点を再現することを確認。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
+| `dawn-sector-node` への永続化配線 | 2026-07-01 | `/improve-codebase-architecture` で「`EventStore::append` がinfallibleと嘘をついている」と指摘されたのを調査する過程で、より大きな問題を発見: `dawn-sector-node`（本番バイナリ）は `SimulationNode::new`（デフォルト `InMemoryEventStore`）で動いており、`FileEventStore`/`checkpoint()`/`CheckpointScheduler`/`restore_from`（Phase 3 実装・テスト済み）は本番に一切配線されていなかった（`maybe_checkpoint` の呼び出しは `dawn-simulation/src/bench.rs` のみ）。`NodeConfig` に永続化パス4フィールドを追加し、`build_node` でスナップショットの有無により新規/復元を分岐（`StateSnapshot::load` が `NotFound` なら新規、それ以外のエラーなら panic——サイレントなデータ損失を避ける）。復元時は `spawn_npcs` を呼ばない（NPC重複生成防止、`is_fresh` フラグで判定）。tickループに `CheckpointScheduler::maybe_checkpoint` を配線し、チェックポイント失敗はログのみで継続（ホットログへのappendは別経路で動き続ける）。`SectorNodeRuntime`/`ClientAdmission`/`AoiDelivery::deliver_frame` を `<S: EventStore>` でジェネリック化し `SimulationNode<FileEventStore>` に対応。実機での起動→kill→再起動でtick/log_indexが継続し、NPCが重複生成されないことを手動確認済み。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
 
 > Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消、
 > R-1（navigation.rs 分割）、runtime tick pipeline collapse、AoI delivery deepening、
@@ -404,6 +429,7 @@ P7 系で確立した「責務ごとに sibling モジュールへ抽出」方�
 | M-6 アプリ層 adapter 重複（command dispatch / `data_loader` / `spawn_npcs`） | 許容重複 | AoI / production runtime は deep module 化済み。Player Command Dispatch は新 crate 化を検討したが浅い seam と判断し許容。再評価トリガー付き |
 | M-7 Player Command Dispatch のルーティングが `dawn-sector` 外に漏れている | 品質・保留（新規 2026-07-01） | `runtime.rs` 13分岐 match と `protocol.rs` パース分岐が同型。`apply_player_command` 単一 interface 化の余地はあるが影響範囲が大きく、drift がバグ化するまで保留 |
 | M-8 `fit_module`/`fit_module_owned` 共有テール重複 | 許容（新規 2026-07-01） | `inventory.rs` のモジュールコメントで意図的な分離と明記済み。テールのみの軽微な重複で優先度なし |
+| M-9 `EventStore::append` がinfallibleと偽る | 品質・保留（新規 2026-07-01） | 永続化配線完了で実際に到達可能になったpanic経路。1プロセス1Sector構成ではcrash-only設計として不合理ではないため、全面Result化は見送り保留。実機クラッシュ発生 or マルチSectorプロセス化がトリガー |
 
 採らない方針（恒久）:
 

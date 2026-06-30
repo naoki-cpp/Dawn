@@ -9,6 +9,14 @@ repl_addr  = "0.0.0.0:7910"    # Log replication gossip (TcpReplicationTransport
 npc_ships  = 20
 pop_cap    = 500
 
+# Persistence (ADR-0017). event_log_path/snapshot_path/cold_path must be
+# distinct per node when multiple nodes share a machine (e.g. local 3-process
+# testing) -- they are not, by default, namespaced by node_id.
+event_log_path           = "data/node-0/events.log"
+snapshot_path             = "data/node-0/snapshot.bin"
+cold_path                 = "data/node-0/cold.log"
+checkpoint_interval_ticks = 600
+
 [[peers]]
 node_id   = 1
 raft_addr = "127.0.0.1:7901"
