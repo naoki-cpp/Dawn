@@ -44,6 +44,12 @@ impl<S: EventStore> SimulationNode<S> {
             Some(e) => e,
             None => return false,
         };
+        // Warp is also a persistent steering mode (ADR-0031): starting one
+        // must clear any active Orbit/KeepAtRange/Approach so they don't keep
+        // computing thrust for an entity that's now warping (previously
+        // relied on tick order alone -- process_warp happens to run after
+        // them and overwrite ThrustComp each tick, which masked this).
+        self.clear_steering_modes(entity);
         let _ = self.world.inner_mut().insert_one(
             entity,
             WarpComp {
@@ -590,6 +596,44 @@ mod tests {
             node.warp_phase(ship),
             None,
             "second warp should be rejected, not attached"
+        );
+    }
+
+    #[test]
+    fn starting_a_warp_clears_an_active_orbit() {
+        // Orbit and Warp are both persistent steering modes (ADR-0031);
+        // starting a Warp must clear an active OrbitComp, not just rely on
+        // process_warp() running after process_orbit() in tick order to
+        // overwrite ThrustComp every tick.
+        let mut node = mem_node();
+        let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let entity = *node.ships.index.get(&ship).unwrap();
+
+        assert!(node.apply_orbit_command(
+            ship,
+            dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(0)),
+            None,
+        ));
+        assert!(node
+            .world
+            .inner()
+            .get::<&dawn_ecs::components::OrbitComp>(entity)
+            .is_ok());
+
+        assert!(node.apply_warp_command_owned(
+            player,
+            dawn_core::WarpCommand {
+                ship_id: ship,
+                target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            }
+        ));
+
+        assert!(
+            node.world
+                .inner()
+                .get::<&dawn_ecs::components::OrbitComp>(entity)
+                .is_err(),
+            "OrbitComp should be cleared once Warp starts"
         );
     }
 

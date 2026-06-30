@@ -118,12 +118,27 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// True if the ship is in the committed warping phase (ADR-0022): its warp
     /// cannot be interrupted by Move/Stop. Aligning or absent warp → false.
+    /// Used only by `apply_move_command`, which is the one command allowed to
+    /// cancel an *aligning* warp outright (ADR-0022 §7) -- every other
+    /// steering command must use `has_active_warp` instead, which also
+    /// covers the aligning phase.
     pub(super) fn is_warping(&self, entity: Entity) -> bool {
         self.world
             .inner()
             .get::<&WarpComp>(entity)
             .map(|w| w.is_warping())
             .unwrap_or(false)
+    }
+
+    /// True if `entity` has a `WarpComp` in *any* phase, aligning or
+    /// committed (ADR-0022/ADR-0031). Warp takes priority over Approach /
+    /// Orbit / Keep at Range: a new steering command must not silently race
+    /// an in-progress warp, whether or not it has engaged yet. Move/Stop are
+    /// the only commands that may interrupt an aligning warp, and they do so
+    /// explicitly (`is_warping` + removing `WarpComp`) rather than going
+    /// through this check.
+    pub(super) fn has_active_warp(&self, entity: Entity) -> bool {
+        self.world.inner().get::<&WarpComp>(entity).is_ok()
     }
 
     /// Point `entity`'s thrust at `to` from `from` (unit direction, not braking).

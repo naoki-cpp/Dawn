@@ -35,24 +35,9 @@ impl<S: EventStore> SimulationNode<S> {
         target: ApproachTarget,
         radius: Option<f32>,
     ) -> bool {
-        let &entity = match self.ships.index.get(&ship_id) {
-            Some(e) => e,
-            None => return false,
+        let Some((entity, radius)) = self.begin_maneuver(ship_id, target, radius) else {
+            return false;
         };
-        if self.world.transit_state(entity).is_in_transit() {
-            return false;
-        }
-        // Warp takes priority over Orbit/Keep at Range (ADR-0031); a committed
-        // warp must not be interrupted and an aligning warp should be cancelled
-        // via Move/Stop, not silently raced by a new steering mode.
-        if self.is_warping(entity) {
-            return false;
-        }
-        if !self.validate_maneuver_target(ship_id, target) {
-            return false;
-        }
-        let radius = radius.unwrap_or_else(|| self.default_maneuver_radius(entity));
-        self.clear_steering_modes(entity);
         let _ = self
             .world
             .inner_mut()
@@ -83,22 +68,9 @@ impl<S: EventStore> SimulationNode<S> {
         target: ApproachTarget,
         range: Option<f32>,
     ) -> bool {
-        let &entity = match self.ships.index.get(&ship_id) {
-            Some(e) => e,
-            None => return false,
+        let Some((entity, range)) = self.begin_maneuver(ship_id, target, range) else {
+            return false;
         };
-        if self.world.transit_state(entity).is_in_transit() {
-            return false;
-        }
-        // Warp takes priority over Orbit/Keep at Range (ADR-0031).
-        if self.is_warping(entity) {
-            return false;
-        }
-        if !self.validate_maneuver_target(ship_id, target) {
-            return false;
-        }
-        let range = range.unwrap_or_else(|| self.default_maneuver_radius(entity));
-        self.clear_steering_modes(entity);
         let _ = self
             .world
             .inner_mut()
@@ -118,11 +90,10 @@ impl<S: EventStore> SimulationNode<S> {
         self.apply_keep_at_range_command(cmd.ship_id, cmd.target, cmd.range)
     }
 
-    /// Shared target validation for Orbit / Keep at Range (ADR-0031), mirroring
-    /// `approach::apply_approach_command`'s checks: a `Ship` target must exist
-    /// and not be the maneuvering ship itself; a `Gate` target must originate
-    /// in this Sector.
-    fn validate_maneuver_target(&self, ship_id: ShipId, target: ApproachTarget) -> bool {
+    /// Shared target validation for Orbit / Keep at Range / Approach
+    /// (ADR-0031/ADR-0015): a `Ship` target must exist and not be the
+    /// maneuvering ship itself; a `Gate` target must originate in this Sector.
+    pub(super) fn validate_maneuver_target(&self, ship_id: ShipId, target: ApproachTarget) -> bool {
         match target {
             ApproachTarget::Ship(target_id) => {
                 ship_id != target_id && self.ships.index.contains_key(&target_id)
@@ -147,6 +118,41 @@ impl<S: EventStore> SimulationNode<S> {
         } else {
             DEFAULT_MANEUVER_RADIUS
         }
+    }
+
+    /// Shared "begin a persistent steering mode" scaffold (ADR-0015/ADR-0031):
+    /// resolves `ship_id`'s entity, runs the rejection checklist (unknown ship
+    /// / in transit / Warp priority / invalid target) shared by
+    /// `apply_orbit_command`, `apply_keep_at_range_command`, and
+    /// `apply_approach_command`, resolves the maneuver distance default, and
+    /// clears any other active steering mode. Returns `None` on rejection
+    /// (nothing is changed); otherwise the caller only needs to insert its
+    /// own component (`OrbitComp` / `KeepAtRangeComp` / `ApproachComp`).
+    /// `distance` is `None` and the resolved value ignored for Approach,
+    /// which has no notion of a stand-off distance.
+    pub(super) fn begin_maneuver(
+        &mut self,
+        ship_id: ShipId,
+        target: ApproachTarget,
+        distance: Option<f32>,
+    ) -> Option<(Entity, f32)> {
+        let &entity = self.ships.index.get(&ship_id)?;
+        if self.world.transit_state(entity).is_in_transit() {
+            return None;
+        }
+        // Warp takes priority over Orbit/Keep at Range (ADR-0031), in either
+        // phase: a committed warp must not be interrupted, and an aligning
+        // warp should be cancelled via Move/Stop, not silently raced by a
+        // new steering mode.
+        if self.has_active_warp(entity) {
+            return None;
+        }
+        if !self.validate_maneuver_target(ship_id, target) {
+            return None;
+        }
+        let distance = distance.unwrap_or_else(|| self.default_maneuver_radius(entity));
+        self.clear_steering_modes(entity);
+        Some((entity, distance))
     }
 
     /// Remove any other persistent steering mode before attaching a new one
@@ -347,6 +353,66 @@ mod tests {
                 ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
                 radius: Some(2000.0)
+            }
+        ));
+    }
+
+    #[test]
+    fn orbit_command_is_rejected_while_aligning_to_warp() {
+        // Warp takes priority over Orbit (ADR-0031) from the moment it's
+        // issued, not just once it commits (ADR-0022) -- `has_active_warp`
+        // covers the Aligning phase too, unlike `is_warping`.
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(10_000.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+
+        assert!(node.apply_warp_command(
+            chaser,
+            dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            false
+        ));
+        assert_eq!(
+            node.warp_phase(chaser),
+            Some(dawn_ecs::components::WarpPhase::Aligning),
+            "warp should still be aligning, not committed"
+        );
+
+        assert!(!node.apply_orbit_command_owned(
+            player,
+            dawn_core::OrbitCommand {
+                ship_id: chaser,
+                target: dawn_core::ApproachTarget::Ship(target),
+                radius: Some(2000.0)
+            }
+        ));
+    }
+
+    #[test]
+    fn keep_at_range_command_is_rejected_while_aligning_to_warp() {
+        let mut node = mem_node();
+        let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(10_000.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+
+        assert!(node.apply_warp_command(
+            chaser,
+            dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)),
+            false
+        ));
+
+        assert!(!node.apply_keep_at_range_command_owned(
+            player,
+            dawn_core::KeepAtRangeCommand {
+                ship_id: chaser,
+                target: dawn_core::ApproachTarget::Ship(target),
+                range: Some(2000.0)
             }
         ));
     }
