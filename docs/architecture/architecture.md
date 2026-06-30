@@ -57,7 +57,6 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/A
 
 ### Future scope (direction only, not implemented)
 
-- Raspberry Pi cluster hardware validation (8D-5)
 - TLS / QUIC (8E+)
 - Raft log compaction + InstallSnapshot (snapshot + tail catch-up groundwork already exists via SnapshotTransfer)
 

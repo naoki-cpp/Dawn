@@ -135,7 +135,7 @@ progress_bar() {
 }
 
 render_progress() {
-	[[ $progress_enabled -eq 1 ]] || return
+	[[ $progress_enabled -eq 1 ]] || return 0
 
 	if [[ $progress_lines -gt 0 ]]; then
 		printf '\033[%sA' "$progress_lines"
@@ -158,7 +158,7 @@ render_progress() {
 }
 
 finish_progress() {
-	[[ $progress_enabled -eq 1 ]] || return
+	[[ $progress_enabled -eq 1 ]] || return 0
 	if [[ $progress_lines -gt 0 ]]; then
 		printf '\r\033[2K\n'
 		progress_lines=0

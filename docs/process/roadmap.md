@@ -243,7 +243,7 @@ Phase 0〜7 は全て完了済み（要約は §2「完了済みフェーズ」�
 | 2 | dawn-replication（追記ログのゴシップ配布 + アンチエントロピー + スナップショット転送） | 新規クレート・ADR-0021/0027（単一所有のため競合解決 CRDT/LWW は不要）。8D-2a: `ReplicationBus` を dawn-replication の `InMemoryReplicationBus` へ移動し、`dawn-actor` は純粋なクライアント転送境界（`ClientConnection`）に縮小済み。送信側: `OutboundLogPublisher` が append-log cursor と `LogBatch` suffix 構築を保持し、production Node は `publish_new_events` を呼ぶだけに縮小済み。8D-2b: `AntiEntropy`（gap 検出・重複/overlap 判定・`iter_from` suffix 応答）実装済み。8D-2c: `TcpReplicationTransport`（4-byte length prefix + postcard / LAN plaintext）実装済み。8D-2d: `SnapshotTransfer`（`Serialize+DeserializeOwned` ジェネリック・u32 LE length prefix / 256 MiB cap）実装済み（2 テスト）。消費側: `ReplicaSet`（peer セクターごとに gap 検出・冪等・順序保持で複製ログを保持。ライブ world 適用と failover は別機能）実装済み（M-5・6 テスト） | ✅ |
 | 3 | ネットワーク `RaftTransport` 実装（`InProcessTransport` の差し替え。静的 config のピア表） | trait は既存（transport.rs）。TLS 可能な選択（TCP+rustls / QUIC）にし後付けを塞がない。`TcpRaftTransport`（4-byte LE + postcard / LAN plaintext / per-peer 自動再接続 / accept ループ）実装済み（dawn-consensus/src/tcp_transport.rs・8D-3） | ✅ |
 | 4 | dawn-sector-node（本番実行バイナリ・上記 transport + ゴシップの配線・静的 config 起動） | 新規クレート。`TcpRaftTransport` + `TcpReplicationTransport` を TOML 静的 config で配線。3 プロセスで 3 セクタクラスタ（ws/:787{8,9,80} raft/:790{0,1,2} repl/:791{0,1,2}）。プレイヤー Jump 時は `Redirect` JSON でクライアントを宛先 WS へ誘導し、`player_id` / `ship_id` 付き Hello で同じ player ship を resume（2026-06-29） | ✅ |
-| 5 | （任意・推奨）Raspberry Pi クラスタ実機検証 | 下記 ★ 参照 | ⬜ |
+| 5 | （任意・推奨）Raspberry Pi クラスタ実機検証 | 下記 ★ 参照 | ✅ 2026-07-01・3項目とも PASS（[8d5-hardware-notes.md](./8d5-hardware-notes.md) 実行ログ参照） |
 
 **defer（トリガー付き・第1次マイルストン外）:**
 
@@ -258,7 +258,7 @@ Phase 0〜7 は全て完了済み（要約は §2「完了済みフェーズ」�
 （Pi 4/5 推奨。Zero 2 W は aarch64 ビルド可だが 512MB RAM が制約のため数百隻規模に縮小）で
 3 ノードを物理的に分離して動作確認する。目的: 実ネットワーク遅延・分断条件下での Raft / Gossip
 挙動を実機で検証する（dawn の競争優位＝分散基盤の本番妥当性を確かめる / ADR-0016）。
-検証項目: ノード間通信の到達性、ネットワーク分断時の Raft フェイルオーバー、低スペック環境での Tick SLA。
+検証項目・合否基準・自動検証スクリプトは [8d5-hardware-notes.md](./8d5-hardware-notes.md) 参照。
 
 ### 8E. Transit consensus（ADR-0017 §5 で方針決定済み）
 
