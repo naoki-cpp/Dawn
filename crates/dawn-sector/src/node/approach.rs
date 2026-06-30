@@ -31,22 +31,10 @@ impl<S: EventStore> SimulationNode<S> {
         self.apply_approach_command_with_auto_jump(ship_id, target, None)
     }
 
-    /// Begin approaching as part of a JumpCommand fallback. Unlike a manual
-    /// ApproachCommand, reaching the gate queues the same auto-jump follow-up
-    /// that WarpCommand(auto_jump=true) uses.
-    pub fn apply_approach_jump_fallback(
-        &mut self,
-        ship_id: ShipId,
-        gate_id: dawn_core::JumpGateId,
-    ) -> bool {
-        self.apply_approach_command_with_auto_jump(
-            ship_id,
-            dawn_core::ApproachTarget::Gate(gate_id),
-            Some(gate_id),
-        )
-    }
-
-    fn apply_approach_command_with_auto_jump(
+    /// Begin approaching toward `target`, optionally queuing an auto-jump on
+    /// arrival (used by `apply_jump_with_fallback`'s too-close-to-warp case,
+    /// jump.rs). A plain `ApproachCommand` (above) always passes `None`.
+    pub(super) fn apply_approach_command_with_auto_jump(
         &mut self,
         ship_id: ShipId,
         target: dawn_core::ApproachTarget,
@@ -569,49 +557,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn jump_fallback_approach_queues_auto_jump_when_gate_range_is_reached() {
-        let mut node = mem_node();
-        let gate = *node
-            .jump_gate(dawn_core::JumpGateId(0))
-            .expect("Sector 0 has Gate 0");
-        let near_gate_abs = [gate.abs_m[0] - 2_500.0, gate.abs_m[1], gate.abs_m[2]];
-        let (_player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
-        node.set_spawn_anchor_abs(chaser, near_gate_abs);
-
-        assert!(
-            !node.can_propose_jump(chaser, dawn_core::JumpGateId(0)),
-            "fixture starts outside activation radius"
-        );
-        assert!(
-            !node.apply_warp_command(
-                chaser,
-                dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(0)),
-                true
-            ),
-            "fixture is too close for warp, matching the Jump fallback path"
-        );
-        assert!(node.apply_approach_jump_fallback(chaser, dawn_core::JumpGateId(0)));
-
-        let mut pending = Vec::new();
-        for _ in 0..400 {
-            node.tick();
-            pending = node.drain_pending_auto_jumps();
-            if !pending.is_empty() {
-                break;
-            }
-        }
-
-        assert_eq!(
-            pending,
-            vec![(chaser, dawn_core::JumpGateId(0))],
-            "Jump fallback Approach must hand off to the existing auto-jump proposal path"
-        );
-        assert!(
-            node.can_propose_jump(chaser, dawn_core::JumpGateId(0)),
-            "queued auto-jump must only happen once the ship is in gate range"
-        );
-    }
+    // The "too close to warp -> approach -> auto-jump on arrival" path
+    // (formerly `apply_approach_jump_fallback`) is now exercised in
+    // node/jump.rs, where the orchestration lives (apply_jump_with_fallback).
 
     #[test]
     fn approach_command_is_rejected_for_a_gate_not_in_this_sector() {
