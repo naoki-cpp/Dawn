@@ -197,10 +197,7 @@ impl SectorNodeRuntime {
                     j.ship_id.raw(),
                     j.gate_id.0
                 );
-            } else if ship_owned
-                && node
-                    .apply_approach_command(j.ship_id, dawn_core::ApproachTarget::Gate(j.gate_id))
-            {
+            } else if ship_owned && node.apply_approach_jump_fallback(j.ship_id, j.gate_id) {
                 println!(
                     "[Node] Jump: ship #{} too close to warp - approaching gate #{} instead",
                     j.ship_id.raw(),

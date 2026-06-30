@@ -1,6 +1,6 @@
 //! Movement-related ECS components.
 
-use dawn_core::{AnchorId, ApproachTarget, Position, Velocity, WarpTarget};
+use dawn_core::{AnchorId, ApproachTarget, JumpGateId, Position, Velocity, WarpTarget};
 
 /// Persistent "approach" steering target (semi-automatic piloting, ADR-0015).
 ///
@@ -15,6 +15,11 @@ use dawn_core::{AnchorId, ApproachTarget, Position, Velocity, WarpTarget};
 #[derive(Debug, Clone, Copy)]
 pub struct ApproachComp {
     pub target: ApproachTarget,
+    /// Internal follow-up used when a JumpCommand is close enough that warp is
+    /// rejected but still outside gate activation range. Manual Approach keeps
+    /// this empty; jump fallback fills it so arrival can reuse the same
+    /// pending-auto-jump drain path as WarpComp::auto_jump.
+    pub auto_jump_gate: Option<JumpGateId>,
 }
 
 /// Persistent "orbit" steering target (ADR-0031).

@@ -164,8 +164,9 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
   カメラ相対の見せ方の定数であり、浮動原点クライアントでは AU スケールと直接連動しない（再検討の結果、
   事前のブラインド調整は見送り）。実機プレイテストで違和感が出た場合のみ調整する。
 - 📝 **記録のみ（許容）**：combat が `anchor_abs: HashMap` を受ける（dawn-ecs へアンカー概念がやや漏出・許容範囲）／
-  InitialState のワイヤで body・gate 位置が f32（船は f64・クライアントはマーカー描画ゆえ実害小）／`ship_absolute_pos`
-  が `ship_absolute` の薄いラッパ。
+  InitialState のワイヤで body 位置は f32（船と gate は f64。gate はクライアントのマーカー／近接判定と
+  サーバの jump 範囲判定を揃えるため `JumpGateDef.abs_m` を配信）／`ship_absolute_pos` が `ship_absolute`
+  の薄いラッパ。
 
 ### ワープの加減速を lore に合わせて自然化（2026-06-23・ユーザー指摘）
 
