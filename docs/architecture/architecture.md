@@ -95,7 +95,7 @@ dawn-core
             └── dawn-sector          <- game logic (also depends on dawn-ecs / dawn-consensus, ADR-0026)
                     ^
                     ├── dawn-simulation     (binary; also depends on dawn-actor / dawn-consensus)
-                    └── dawn-sector-node    (production binary; also depends on dawn-consensus / dawn-replication, 8D-4)
+                    └── dawn-sector-node    (production binary; also depends on dawn-actor / dawn-consensus / dawn-replication, 8D-4)
 ```
 
 Dependencies flow **bottom-to-top only**; any reverse or circular dependency is a design failure. See [AI_DEVELOPMENT_GUIDE.md "Crate Boundaries"](../../AI_DEVELOPMENT_GUIDE.md) for the full rule.
