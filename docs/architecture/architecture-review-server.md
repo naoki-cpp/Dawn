@@ -254,12 +254,13 @@ WS protocol は `dawn-actor` に、ゲームロジックは `dawn-sector` に、
 
 #### ~~R-1~~: `node/navigation.rs` 1092 行の分割（完了・上記「完了済み」参照）
 
-#### R-2（低優先・トリガー待ち）: クライアント `main.gd` 1210 行
+#### R-2（一部着手済み）: クライアント `main.gd` 1161 行
 
-ADR-0029 でワープ演出・単位整形・原点リベースが加わり 1094→1210 に増加（client レビュー参照）。
-ただし god object は C-1 で解消済みで、残りはオーケストレーション層。`world_space` /
-`unit_format` は既に static class に分離済み。さらなる分割は `.tscn` 化コンポーネントへの
-シーン参照切れリスクが上回るため保留（client レビューの「採らない方針」と同根。
+ADR-0029 以降に増加した `main.gd` は、2026-06-30 に `WorldSession` を抽出して
+1241→1161 に縮小。InitialState / AoI / HP / lock / tick-cap の live world state は
+`client/scripts/world_session.gd` へ移動済み。残りは scene lifecycle / input / node generation /
+HUD adapter のオーケストレーション層。さらなる分割は `.tscn` 化コンポーネントへの
+シーン参照切れリスクが上回るため引き続き保留（client レビューの「採らない方針」と同根。
 C-3 はフェイルファストガードで解消済み・2026-06-23 だが、これはこの判断とは独立——
 更なる分割を妨げるのはシーン参照切れリスクそのもので、C-3 の有無は前提条件ではなかった）。
 
@@ -293,7 +294,7 @@ P7 系で確立した「責務ごとに sibling モジュールへ抽出」方�
 
 | 項目 | 種別 | 状態・理由 |
 |---|---|---|
-| R-2 client `main.gd` 分割 | 品質・保留 | 1151 行だが god object 解消済み。`.tscn` 化コンポーネントへのシーン参照切れリスクが上回るため保留（C-3 とは無関係） |
+| R-2 client `main.gd` 分割 | 品質・一部着手済み | `WorldSession` 抽出で live world state を移動し、`main.gd` は 1161 行。残る scene lifecycle / input / node generation / HUD adapter は `.tscn` 化コンポーネントへのシーン参照切れリスクが上回るため保留（C-3 とは無関係） |
 | R-3 `node/` 系再肥大（warp/spawner/mod/orbit） | 品質・保留 | 総行数は閾値帯だが impl は概ね 700 未満・増分はテスト主体。impl が 700 超でファイル別に分割（トリガー付き・上記 R-3） |
 | 8D-5 Raspberry Pi 実機検証 | 機能・外部依存待ち | ハードウェア未購入。観測ログ・config・localhost 検証は済み（完了済み参照）。Pi 入手後に着手 |
 | M-3 `SectorSimulatorActor` 密結合 | 品質・保留 | 本番パス外（in-process テスト/ベンチ専用）。P9-1 撤回。優先度低 |

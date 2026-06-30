@@ -44,6 +44,7 @@ var _player_inventory : Array = []
 
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
 const PlayerFitting = preload("res://scripts/player_fitting.gd")
+const WorldSessionScript = preload("res://scripts/world_session.gd")
 const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor
 const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is rejected for gates closer than this (ADR-0022).
 ## Unit-to-metre scale: real metres = (units/tick or units) * METERS_PER_UNIT,
@@ -51,6 +52,7 @@ const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is reject
 ## best at the given magnitude). Change this one constant to rescale all
 ## displayed speeds and distances.
 const METERS_PER_UNIT : float = 1.0
+const CLIENT_TICKS_PER_SEC : float = 10.0
 
 ## Must match ship_controller.gd's VISUAL_SPEED_CAP (Godot units/tick): the
 ## warp-tunnel overlay (ADR-0029 lore pass) fades in once the player's ship is
@@ -70,6 +72,7 @@ const WARP_TUNNEL_FOV_BOOST : float = 15.0
 
 var _warp_tunnel_amount : float = 0.0
 var _camera_base_fov    : float = 60.0
+var _cap_tick_accumulator : float = 0.0
 
 # -- Materials ----------------------------------------------------------------
 
@@ -77,7 +80,8 @@ var _player_material : StandardMaterial3D = null
 
 # -- Internal state -----------------------------------------------------------
 
-var _ships                 : Dictionary = {}
+var _session := WorldSessionScript.new()
+var _ships                 : Dictionary = _session.ships
 var _player_ship_id        : int        = -1
 var _player_ship_type_name : String     = ""
 var _event_count     : int        = 0
@@ -105,10 +109,10 @@ const KEEP_AT_RANGE_MIN_KM : float = 1.0
 const KEEP_AT_RANGE_MAX_KM : float = 200.0
 
 ## Per-ship HP: { ship_id: {shield, armor, hull} }
-var _ship_hp : Dictionary = {}
+var _ship_hp : Dictionary = _session.ship_hp
 
 ## Duel mode: opponent player ship IDs (populated from InitialState is_player flag)
-var _opponent_ship_ids : Array = []
+var _opponent_ship_ids : Array = _session.opponent_ship_ids
 ## Duel result overlay label (created dynamically)
 var _duel_result_label : Label = null
 
@@ -148,10 +152,10 @@ const DOUBLE_CLICK_PX : float  = 10.0  ## Within this many screen pixels
 ##             activation_radius:float, to_system_name:String}]
 ##   _bodies: [{body_id:int, kind:String, name:String,
 ##             position:Vector3 (server coords), radius:float, spectral_type:float}]
-var _gates        : Array      = []
-var _bodies       : Array      = []
+var _gates        : Array      = _session.gates
+var _bodies       : Array      = _session.bodies
 ## Star System id -> name, used to resolve StarSystemChanged events.
-var _system_names : Dictionary = {}
+var _system_names : Dictionary = _session.system_names
 
 ## Placeholder until InitialState arrives -- never a real system name (was
 ## hardcoded to "Alpha", which looked like live data while still CONNECTING).
@@ -213,6 +217,7 @@ func _process(delta: float) -> void:
 	_update_gate_proximity()
 	_update_sun_direction()
 	_update_warp_tunnel_effect(delta)
+	_advance_client_cap_ticks(delta)
 	if _jump_notice_timer > 0.0:
 		_jump_notice_timer -= delta
 		if _jump_notice_timer <= 0.0:
@@ -242,11 +247,7 @@ func _server_to_godot_pos(p: Vector3) -> Vector3:
 ## Vector3 field (position/entry_pos/...) -- into a Vector3. Shared by every
 ## event/state handler that parses a position out of a payload dict.
 func _vec3_from_dict(d: Dictionary, key: String) -> Vector3:
-	var v: Dictionary = d.get(key, {}) as Dictionary
-	return Vector3(
-		v.get("x", 0.0) as float,
-		v.get("y", 0.0) as float,
-		v.get("z", 0.0) as float)
+	return WorldSessionScript.vec3_from_dict(d, key)
 
 ## Distance (Godot units) past which a celestial-body or jump-gate marker is
 ## clamped toward the player so it stays inside the camera far plane (true-AU
@@ -485,6 +486,9 @@ func _input(event: InputEvent) -> void:
 
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed:
+			_camera.call("end_orbit_drag")
+			return
 		if mb.pressed:
 			## A click on the open inventory panel fits/unfits (row hit) or is
 			## swallowed (margin/header) -- never a world click. Checked first
@@ -502,6 +506,7 @@ func _input(event: InputEvent) -> void:
 				return
 			match mb.button_index:
 				MOUSE_BUTTON_LEFT:
+					_camera.call("begin_orbit_drag", mb.position)
 					## Double-click steering takes priority and must work even when a
 					## ship or gate is under the cursor (e.g. at spawn next to Gate 0).
 					## Only a click that is NOT a double-click selects an approach target.
@@ -663,7 +668,8 @@ func _send_stop_command() -> void:
 # -- Event handlers -----------------------------------------------------------
 
 func _on_event_received(payload: Dictionary) -> void:
-	_event_count += 1
+	_session.event_count += 1
+	_sync_session_state()
 	var event_type: String = payload.get("type", "") as String
 	match event_type:
 		"ShipSpawned"      : _handle_ship_spawned(payload)
@@ -725,9 +731,10 @@ func _handle_jump_gate_used(p: Dictionary) -> void:
 func _handle_star_system_changed(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	var to_system: int = p.get("to_system", 0) as int
-	var to_name: String = _system_names.get(to_system, "System %d" % to_system) as String
-	if ship_id == _player_ship_id:
-		_current_system_name = to_name
+	var result: Dictionary = _session.system_changed(ship_id, to_system)
+	_sync_session_state()
+	if result.get("changed_player", false) as bool:
+		var to_name: String = result.get("system_name", "System %d" % to_system) as String
 		_jump_notice         = "Entered %s system" % to_name
 		_jump_notice_timer   = 3.0
 		_selected_gate_id    = -1
@@ -759,48 +766,18 @@ func _on_initial_state(state: Dictionary) -> void:
 ## and bodies) and rebuild the gate / body markers from it. This replaces the
 ## previously hard-coded JUMP_GATES / CELESTIAL_BODIES / STAR_SYSTEM_NAMES.
 func _ingest_star_map(state: Dictionary) -> void:
-	_current_system_name = state.get("system_name", _current_system_name) as String
-
-	_system_names.clear()
-	for entry: Variant in (state.get("systems", []) as Array):
-		var s: Dictionary = entry as Dictionary
-		_system_names[s.get("id", -1) as int] = s.get("name", "") as String
-
-	_gates.clear()
-	for entry: Variant in (state.get("jump_gates", []) as Array):
-		var g: Dictionary = entry as Dictionary
-		_gates.append({
-			"gate_id"          : g.get("gate_id", -1) as int,
-			"position"         : _vec3_from_dict(g, "position"),
-			"activation_radius": g.get("activation_radius", 0.0) as float,
-			"to_system_name"   : g.get("to_system_name", "") as String,
-		})
-
-	_bodies.clear()
-	for entry: Variant in (state.get("celestial_bodies", []) as Array):
-		var b: Dictionary = entry as Dictionary
-		_bodies.append({
-			"body_id"      : b.get("id", -1) as int,
-			"kind"         : b.get("kind", "") as String,
-			"name"         : b.get("name", "") as String,
-			"position"     : _vec3_from_dict(b, "position"),
-			"radius"       : b.get("radius", 1.0) as float,
-			"spectral_type": b.get("spectral_type", 0.0) as float,
-		})
-
+	_session.ingest_navigation(state)
+	_sync_session_state()
 	_spawn_gate_markers()
 	_spawn_body_markers()
 
-## Instantiate a ship scene at `pos` (server-space), register it in `_ships`,
-## and return the node. Shared by `_spawn_ship_from_data` (InitialState/AoiEnter,
-## ADR-0019) and `_handle_ship_spawned` (the legacy ShipSpawned event path) --
-## both need the exact same scene-instantiate-register sequence.
+## Instantiate a ship scene at `pos` (server-space) and return the node.
+## WorldSession owns registry insertion; main.gd only creates the scene node.
 func _instantiate_ship(sid: int, pos: Vector3) -> Node3D:
 	var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
 	_ships_root.add_child(ship)
 	ship.call("initialize", sid, _world.to_godot(pos))
 	ship.name = "Ship_%d" % sid
-	_ships[sid] = ship
 	return ship
 
 ## Materialize one ship node from a ship-state dict. Shared by InitialState and
@@ -809,39 +786,11 @@ func _spawn_ship_from_data(d: Dictionary) -> void:
 	var sid: int = d.get("ship_id", 0) as int
 	if _ships.has(sid):
 		return
-	var is_player: bool = d.get("is_player", false) as bool
 	var ship: Node3D = _instantiate_ship(sid, _vec3_from_dict(d, "position"))
-
-	## Record HP (current + max) for every ship. The target panel needs each
-	## ship's own maxima to render fill percentages.
-	var msh: float = d.get("max_shield", 200.0) as float
-	var mar: float = d.get("max_armor",  150.0) as float
-	var mhu: float = d.get("max_hull",   150.0) as float
-	var sh: float = d.get("current_shield", msh) as float
-	var ar: float = d.get("current_armor",  mar) as float
-	var hu: float = d.get("current_hull",   mhu) as float
-	_ship_hp[sid] = {
-		"shield": sh, "armor": ar, "hull": hu,
-		"max_shield": msh, "max_armor": mar, "max_hull": mhu,
-	}
-
-	if sid == _connection.ship_id and _player_ship_id < 0:
-		_player_max_shield = d.get("max_shield", 500.0) as float
-		_player_max_armor  = d.get("max_armor",  300.0) as float
-		_player_max_hull   = d.get("max_hull",   200.0) as float
-		_player_shield     = sh
-		_player_armor      = ar
-		_player_hull       = hu
-		## Initialize client-side capacitor simulation.
-		_cap_max      = d.get("cap_max",               500.0) as float
-		_cap_recharge = d.get("cap_recharge_per_tick",  10.0) as float
-		_cap_current  = _cap_max  ## Assume full cap on connect.
-		_player_ship_type_name = d.get("ship_type_name", "") as String
+	var result: Dictionary = _session.register_ship(sid, ship, d, _connection.ship_id)
+	_sync_session_state()
+	if result.get("became_player", false) as bool:
 		_set_as_player_ship(sid, ship)
-	elif is_player:
-		## Other player ship = potential duel opponent
-		if sid not in _opponent_ship_ids:
-			_opponent_ship_ids.append(sid)
 
 ## AoI: a ship entered the player's neighborhood -- materialize it (ADR-0019).
 func _handle_aoi_enter(p: Dictionary) -> void:
@@ -853,13 +802,14 @@ func _handle_aoi_enter(p: Dictionary) -> void:
 ## effect (it is still alive elsewhere, just out of view / ADR-0019).
 func _handle_aoi_leave(p: Dictionary) -> void:
 	var sid: int = p.get("ship_id", 0) as int
-	if not _ships.has(sid):
+	var result: Dictionary = _session.remove_ship(sid)
+	_sync_session_state()
+	if not (result.get("removed", false) as bool):
 		return
-	(_ships[sid] as Node3D).queue_free()
-	_ships.erase(sid)
-	_ship_hp.erase(sid)
 	if sid == _selected_target_id:
 		_selected_target_id = -1
+	var ship: Node3D = result.get("node") as Node3D
+	ship.queue_free()
 
 ## Sent on connect and again after every Fit/Unfit (ADR-0032), so the panel
 ## and module bar always reflect the server's authoritative fitting state --
@@ -891,8 +841,7 @@ func _update_tactical_overlay() -> void:
 func _on_module_activated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
 	if p_ship_id != _player_ship_id:
 		return
-	PlayerFitting.set_module_activation(_player_modules, p_module_id, true, false)
-	_recalc_weapon_range()
+	_apply_player_module_activation(p_module_id, true, false)
 
 func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
 	if p_ship_id != _player_ship_id:
@@ -902,7 +851,11 @@ func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> 
 	## module_id) from "capacitor forced it off" (unsolicited) here.
 	var was_manual: bool = _pending_manual_deactivations.has(p_module_id)
 	_pending_manual_deactivations.erase(p_module_id)
-	PlayerFitting.set_module_activation(_player_modules, p_module_id, false, not was_manual)
+	_apply_player_module_activation(p_module_id, false, not was_manual)
+
+
+func _apply_player_module_activation(module_id: int, active: bool, cap_forced_off: bool) -> void:
+	PlayerFitting.set_module_activation(_player_modules, module_id, active, cap_forced_off)
 	_recalc_weapon_range()
 
 
@@ -932,8 +885,10 @@ func _toggle_module_by_index(f_index: int) -> void:
 	var slot: String = toggle["slot"] as String
 	if toggle["is_active"] as bool:
 		_pending_manual_deactivations[mid] = true
+		_apply_player_module_activation(mid, false, false)
 		_connection.send_deactivate_module(_player_ship_id, mid, slot)
 	else:
+		_apply_player_module_activation(mid, true, false)
 		_connection.send_activate_module(_player_ship_id, mid, slot)
 
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
@@ -959,9 +914,11 @@ func _handle_ship_spawned(p: Dictionary) -> void:
 		return
 
 	var ship: Node3D = _instantiate_ship(ship_id, _vec3_from_dict(p, "position"))
+	var result: Dictionary = _session.register_ship(ship_id, ship, p, _connection.ship_id)
+	_sync_session_state()
 
 	## If this ship matches the player_id from Welcome, set it as the player ship
-	if ship_id == _connection.ship_id and _player_ship_id < 0:
+	if result.get("became_player", false) as bool:
 		_set_as_player_ship(ship_id, ship)
 
 func _handle_velocity_changed(p: Dictionary) -> void:
@@ -981,91 +938,58 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 	## client-side dead-reckoning detection.
 
 	var tick: int = p.get("tick", 0) as int
-	if tick > _current_tick:
-		var ticks_elapsed: int = tick - _current_tick
-		_current_tick = tick
-		_simulate_cap(ticks_elapsed)
+	_session.advance_tick_from_event(tick, _player_modules)
+	_sync_session_state()
 
 
 func _handle_ship_despawned(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
-	if not _ships.has(ship_id):
+	var result: Dictionary = _session.remove_ship(ship_id)
+	_sync_session_state()
+	if not (result.get("removed", false) as bool):
 		return
-	var ship: Node3D = _ships[ship_id] as Node3D
+	var ship: Node3D = result.get("node") as Node3D
 	ship.queue_free()
-	_ships.erase(ship_id)
 	if ship_id == _selected_target_id:
 		_selected_target_id = -1
-	if ship_id == _player_ship_id:
-		_player_ship_id = -1
 
 func _handle_damage_taken(p: Dictionary) -> void:
-	var ship_id: int   = p.get("ship_id",        0)   as int
-	var sh     : float = p.get("current_shield", 0.0) as float
-	var ar     : float = p.get("current_armor",  0.0) as float
-	var hu     : float = p.get("current_hull",   0.0) as float
-	## Update current HP in place so the maxima recorded at spawn survive.
-	var entry: Dictionary = _ship_hp.get(ship_id, {}) as Dictionary
-	entry["shield"] = sh
-	entry["armor"]  = ar
-	entry["hull"]   = hu
-	_ship_hp[ship_id] = entry
-	if ship_id == _player_ship_id:
-		_player_shield = sh
-		_player_armor  = ar
-		_player_hull   = hu
+	var result: Dictionary = _session.apply_hp_event(p)
+	_sync_session_state()
+	var ship_id: int = result.get("ship_id", 0) as int
 	## Flash red on any ship that takes damage (visual hit feedback)
 	if _ships.has(ship_id):
 		(_ships[ship_id] as Node3D).call("flash_damage")
 
 func _handle_repair_applied(p: Dictionary) -> void:
-	var ship_id: int   = p.get("ship_id",        0)   as int
-	var sh     : float = p.get("current_shield", 0.0) as float
-	var ar     : float = p.get("current_armor",  0.0) as float
-	var hu     : float = p.get("current_hull",   0.0) as float
-	var entry: Dictionary = _ship_hp.get(ship_id, {}) as Dictionary
-	entry["shield"] = sh
-	entry["armor"]  = ar
-	entry["hull"]   = hu
-	_ship_hp[ship_id] = entry
-	if ship_id == _player_ship_id:
-		_player_shield = sh
-		_player_armor  = ar
-		_player_hull   = hu
+	var result: Dictionary = _session.apply_hp_event(p)
+	_sync_session_state()
+	var ship_id: int = result.get("ship_id", 0) as int
 	if _ships.has(ship_id):
 		(_ships[ship_id] as Node3D).call("flash_repair")
 
 func _handle_ship_destroyed(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
-	if not _ships.has(ship_id):
+	var result: Dictionary = _session.destroy_ship(ship_id)
+	_sync_session_state()
+	if not (result.get("destroyed", false) as bool):
 		return
-	var ship: Node3D = _ships[ship_id] as Node3D
-	_ships.erase(ship_id)
-	_ship_hp.erase(ship_id)
+	var ship: Node3D = result.get("node") as Node3D
 	if ship_id == _selected_target_id:
 		_selected_target_id = -1
 	## Play destruction effect (queue_free happens inside play_destroy_effect)
 	ship.call("play_destroy_effect")
-	if ship_id == _player_ship_id:
-		_player_ship_id     = -1
-		_player_shield      = 0.0
-		_player_armor       = 0.0
-		_player_hull        = 0.0
-		_player_lock_target = -1
+	if result.get("destroyed_player", false) as bool:
 		HudManager.show_duel_result(_duel_result_label, false)  ## DEFEAT
-	elif ship_id in _opponent_ship_ids:
-		_opponent_ship_ids.erase(ship_id)
+	elif result.get("destroyed_opponent", false) as bool:
 		HudManager.show_duel_result(_duel_result_label, true)   ## VICTORY
-	## Clear lock target if it was just destroyed
-	if ship_id == _player_lock_target:
-		_player_lock_target = -1
 
 func _handle_target_locked(p: Dictionary) -> void:
 	var locker_id: int = p.get("locker_id", 0) as int
 	var target_id: int = p.get("target_id", 0) as int
 	## Player completed a lock
-	if locker_id == _player_ship_id:
-		_player_lock_target = target_id
+	if _session.apply_target_locked(locker_id, target_id):
+		_sync_session_state()
 		if _ships.has(target_id):
 			(_ships[target_id] as Node3D).call("set_lock_state", "locked")
 	## Locked by another ship (no visual indicator)
@@ -1073,11 +997,10 @@ func _handle_target_locked(p: Dictionary) -> void:
 func _handle_lock_lost(p: Dictionary) -> void:
 	var locker_id: int = p.get("locker_id", 0) as int
 	var target_id: int = p.get("target_id", 0) as int
-	if locker_id == _player_ship_id:
+	if _session.apply_lock_lost(locker_id, target_id):
+		_sync_session_state()
 		if _ships.has(target_id):
 			(_ships[target_id] as Node3D).call("set_lock_state", "none")
-		if target_id == _player_lock_target:
-			_player_lock_target = -1
 
 # -- HUD ----------------------------------------------------------------------
 
@@ -1146,15 +1069,19 @@ func _update_hud() -> void:
 ## Mirror of CapacitorSystem::run() -- called once per tick elapsed.
 ## Keeps cap display in sync without any extra server messages.
 func _simulate_cap(ticks: int) -> void:
-	if _cap_current < 0.0 or _player_ship_id < 0:
-		return
+	_session.advance_client_ticks(ticks, _player_modules)
+	_sync_session_state()
 
-	_cap_current = PlayerFitting.simulate_capacitor_ticks(
-		_player_modules,
-		_cap_current,
-		_cap_max,
-		_cap_recharge,
-		ticks)
+func _advance_client_cap_ticks(delta: float) -> void:
+	if _player_ship_id < 0 or _cap_current < 0.0:
+		_cap_tick_accumulator = 0.0
+		return
+	_cap_tick_accumulator += delta * CLIENT_TICKS_PER_SEC
+	var ticks: int = int(floor(_cap_tick_accumulator))
+	if ticks <= 0:
+		return
+	_cap_tick_accumulator -= float(ticks)
+	_simulate_cap(ticks)
 
 # -- Internal utilities -------------------------------------------------------
 
@@ -1162,20 +1089,37 @@ func _clear_all_ships() -> void:
 	for ship_node: Node3D in _ships.values():
 		if is_instance_valid(ship_node):
 			ship_node.queue_free()
-	_ships.clear()
-	_ship_hp.clear()
-	_opponent_ship_ids.clear()
-	_player_ship_id     = -1
-	_player_shield      = -1.0
-	_player_armor       = -1.0
-	_player_hull        = -1.0
-	_player_lock_target = -1
+	_session.reset()
+	_sync_session_state()
 	_selected_target_id = -1
 	_selected_gate_id   = -1
 	_selected_body_id   = -1
-	_current_tick       = 0
-	_event_count        = 0
 	_pending_manual_deactivations.clear()
+	_cap_tick_accumulator = 0.0
+
+
+func _sync_session_state() -> void:
+	_ships = _session.ships
+	_ship_hp = _session.ship_hp
+	_opponent_ship_ids = _session.opponent_ship_ids
+	_gates = _session.gates
+	_bodies = _session.bodies
+	_system_names = _session.system_names
+	_player_ship_id = _session.player_ship_id
+	_player_ship_type_name = _session.player_ship_type_name
+	_player_shield = _session.player_shield
+	_player_armor = _session.player_armor
+	_player_hull = _session.player_hull
+	_player_max_shield = _session.player_max_shield
+	_player_max_armor = _session.player_max_armor
+	_player_max_hull = _session.player_max_hull
+	_player_lock_target = _session.player_lock_target
+	_current_tick = _session.current_tick
+	_event_count = _session.event_count
+	_current_system_name = _session.current_system_name
+	_cap_current = _session.cap_current
+	_cap_max = _session.cap_max
+	_cap_recharge = _session.cap_recharge
 
 func _setup_space_environment() -> void:
 	## Build the procedural space sky at runtime.

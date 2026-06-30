@@ -73,23 +73,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		# 左ボタン押下: ドラッグ開始の準備のみ（消費しない）
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			if mb.pressed:
-				_btn_down   = true
-				_dragging   = false
-				_drag_start = mb.position
+				begin_orbit_drag(mb.position)
 			else:
-				_btn_down = false
-				_dragging = false
+				end_orbit_drag()
 
 	# ── ドラッグで軌道回転 ─────────────────────────────────────────────────────
 	elif event is InputEventMouseMotion and _btn_down:
 		var mm : InputEventMouseMotion = event as InputEventMouseMotion
 
-		if not _dragging:
-			if mm.position.distance_to(_drag_start) >= DRAG_THRESHOLD:
-				_dragging = true
-
-		if _dragging:
-			_apply_orbit(mm.relative.x, mm.relative.y)
+		if update_orbit_drag(mm.position, mm.relative):
 			get_viewport().set_input_as_handled()
 
 # ── 公開 API ──────────────────────────────────────────────────────────────────
@@ -106,6 +98,25 @@ func set_target(node: Node3D) -> void:
 ## look_at stay continuous and the view doesn't swing for a frame.
 func on_origin_rebased(shift: Vector3) -> void:
 	_target_pos += shift
+
+func begin_orbit_drag(drag_position: Vector2) -> void:
+	_btn_down = true
+	_dragging = false
+	_drag_start = drag_position
+
+func update_orbit_drag(drag_position: Vector2, relative: Vector2) -> bool:
+	if not _btn_down:
+		return false
+	if not _dragging and drag_position.distance_to(_drag_start) >= DRAG_THRESHOLD:
+		_dragging = true
+	if not _dragging:
+		return false
+	_apply_orbit(relative.x, relative.y)
+	return true
+
+func end_orbit_drag() -> void:
+	_btn_down = false
+	_dragging = false
 
 func is_dragging() -> bool:
 	return _dragging

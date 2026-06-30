@@ -28,6 +28,19 @@ class FakeShip:
 		thrust_calls.append(v)
 
 
+class FakeConnection:
+	extends Node
+
+	var activate_calls: Array[Dictionary] = []
+	var deactivate_calls: Array[Dictionary] = []
+
+	func send_activate_module(ship_id: int, module_id: int, slot: String) -> void:
+		activate_calls.append({"ship_id": ship_id, "module_id": module_id, "slot": slot})
+
+	func send_deactivate_module(ship_id: int, module_id: int, slot: String) -> void:
+		deactivate_calls.append({"ship_id": ship_id, "module_id": module_id, "slot": slot})
+
+
 func before_test() -> void:
 	## .new() without adding to the scene tree never triggers _ready(), so
 	## the @onready scene-path vars stay null -- fine, since none of the
@@ -37,6 +50,16 @@ func before_test() -> void:
 
 func after_test() -> void:
 	_main.free()
+
+
+func _module_fixture(module_id: int, slot: String, active: bool) -> Dictionary:
+	return {
+		"module_id": module_id,
+		"slot": slot,
+		"is_active": active,
+		"is_active_module": true,
+		"cap_forced_off": false,
+	}
 
 
 # -- _server_to_godot_pos ------------------------------------------------------
@@ -89,9 +112,51 @@ func test_observed_ship_position_snap_clears_residual_warp_motion() -> void:
 # apart from "capacitor forced it off" (regression: toggling a module on
 # then off was showing CAP! instead of OFF).
 
+func test_module_activated_marks_matching_player_module_active() -> void:
+	_main._player_ship_id = 1
+	_main._player_modules = [_module_fixture(5, "Mid", false)]
+
+	_main._on_module_activated(1, 5, "Mid")
+
+	var mod_dict: Dictionary = _main._player_modules[0]
+	assert_bool(mod_dict["is_active"] as bool).is_true()
+	assert_bool(mod_dict["cap_forced_off"] as bool).is_false()
+
+
+func test_module_toggle_marks_module_active_before_server_echo() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._player_modules = [_module_fixture(5, "Mid", false)]
+
+	_main._toggle_module_by_index(0)
+
+	var mod_dict: Dictionary = _main._player_modules[0]
+	assert_bool(mod_dict["is_active"] as bool).is_true()
+	assert_bool(mod_dict["cap_forced_off"] as bool).is_false()
+	assert_int(connection.activate_calls.size()).is_equal(1)
+	connection.free()
+
+
+func test_module_toggle_marks_module_inactive_before_server_echo() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._player_modules = [_module_fixture(5, "High", true)]
+
+	_main._toggle_module_by_index(0)
+
+	var mod_dict: Dictionary = _main._player_modules[0]
+	assert_bool(mod_dict["is_active"] as bool).is_false()
+	assert_bool(mod_dict["cap_forced_off"] as bool).is_false()
+	assert_bool(_main._pending_manual_deactivations.has(5)).is_true()
+	assert_int(connection.deactivate_calls.size()).is_equal(1)
+	connection.free()
+
+
 func test_module_deactivated_after_a_manual_toggle_does_not_flag_cap_forced_off() -> void:
 	_main._player_ship_id = 1
-	_main._player_modules = [{"module_id": 5, "is_active": true, "cap_forced_off": false}]
+	_main._player_modules = [_module_fixture(5, "High", true)]
 	_main._pending_manual_deactivations = {5: true}  ## set by _toggle_module_by_index
 
 	_main._on_module_deactivated(1, 5, "High")
@@ -103,7 +168,7 @@ func test_module_deactivated_after_a_manual_toggle_does_not_flag_cap_forced_off(
 
 func test_module_deactivated_without_a_pending_manual_request_flags_cap_forced_off() -> void:
 	_main._player_ship_id = 1
-	_main._player_modules = [{"module_id": 5, "is_active": true, "cap_forced_off": false}]
+	_main._player_modules = [_module_fixture(5, "High", true)]
 	## No entry in _pending_manual_deactivations -- the server deactivated it unprompted.
 
 	_main._on_module_deactivated(1, 5, "High")
@@ -114,7 +179,7 @@ func test_module_deactivated_without_a_pending_manual_request_flags_cap_forced_o
 
 func test_module_deactivated_clears_the_pending_flag_so_it_does_not_leak_to_the_next_event() -> void:
 	_main._player_ship_id = 1
-	_main._player_modules = [{"module_id": 5, "is_active": true, "cap_forced_off": false}]
+	_main._player_modules = [_module_fixture(5, "High", true)]
 	_main._pending_manual_deactivations = {5: true}
 
 	_main._on_module_deactivated(1, 5, "High")

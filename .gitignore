@@ -26,6 +26,7 @@ client/addons/
 
 # gdUnit4 test run reports (XML/HTML), regenerated on every test run.
 client/reports/
+client/.godot-test-logs/
 client/server_url.txt
 
 # ── IDE / Editor ─────────────────────────────────────────────────────────────
