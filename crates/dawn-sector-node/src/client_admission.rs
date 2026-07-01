@@ -85,16 +85,17 @@ impl ClientAdmission {
 
             let player_id = handshake_identity.player_id;
             let ship_id = handshake_identity.ship_id;
-            let initial_state = node
-                .ship_absolute_pos(ship_id)
-                .map(|pos| node.build_initial_state_json_for(pos, aoi_cell_size))
-                .unwrap_or_else(|| node.build_initial_state_json());
-            let player_fitting = node.build_player_fitting_json(ship_id);
+            let payload = node.build_handoff_payload(ship_id, aoi_cell_size);
             let tx = self.ready_sess_tx.clone();
 
             tokio::spawn(async move {
                 match request
-                    .complete(player_id, ship_id, &initial_state, player_fitting)
+                    .complete(
+                        player_id,
+                        ship_id,
+                        &payload.initial_state,
+                        payload.player_fitting,
+                    )
                     .await
                 {
                     Ok(sess) => {

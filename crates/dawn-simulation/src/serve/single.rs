@@ -86,11 +86,7 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
             }
             let player_id = node.next_player_id();
             let ship_id = node.spawn_player_ship(player_id);
-            let initial_state = match node.ship_absolute_pos(ship_id) {
-                Some(pos) => node.build_initial_state_json_for(pos, AOI_CELL_SIZE),
-                None => node.build_initial_state_json(),
-            };
-            let player_fitting = node.build_player_fitting_json(ship_id);
+            let payload = node.build_handoff_payload(ship_id, AOI_CELL_SIZE);
             let tx = ready_sess_tx.clone();
 
             if duel_mode && player_ship_id.is_none() {
@@ -106,8 +102,8 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
                     addr,
                     player_id,
                     ship_id,
-                    &initial_state,
-                    player_fitting,
+                    &payload.initial_state,
+                    payload.player_fitting,
                 )
                 .await
                 {

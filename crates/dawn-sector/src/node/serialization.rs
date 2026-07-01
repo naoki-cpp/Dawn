@@ -10,7 +10,29 @@ use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
+/// The two JSON payloads sent to a client immediately after handshake
+/// (before Welcome), regardless of whether the identity was freshly spawned
+/// or resumed.
+pub struct HandoffPayload {
+    pub initial_state: String,
+    pub player_fitting: Option<String>,
+}
+
 impl<S: EventStore> SimulationNode<S> {
+    /// Build the `InitialState` + `PlayerFitting` pair to hand a client once
+    /// its identity (fresh or resumed) has already been decided by the caller.
+    pub fn build_handoff_payload(&self, ship_id: ShipId, aoi_cell_size: f32) -> HandoffPayload {
+        let initial_state = self
+            .ship_absolute_pos(ship_id)
+            .map(|pos| self.build_initial_state_json_for(pos, aoi_cell_size))
+            .unwrap_or_else(|| self.build_initial_state_json());
+        let player_fitting = self.build_player_fitting_json(ship_id);
+        HandoffPayload {
+            initial_state,
+            player_fitting,
+        }
+    }
+
     /// Return the player ship's fitting state as a PlayerFitting JSON message.
     ///
     /// Sent after Welcome + InitialState on connect, and again after every
@@ -446,5 +468,40 @@ mod tests {
         let node = mem_node();
         let unknown = ShipId::new(NodeId(9), 999);
         assert!(node.aoi_enter_json(unknown).is_none());
+    }
+
+    #[test]
+    fn build_handoff_payload_scopes_initial_state_to_the_ship_and_carries_its_fitting() {
+        let mut node = mem_node();
+        let cell = 1_000.0;
+        let ship_id = node.spawn_ship(
+            crate::ship_types::SHIP_TYPE_NPC_FRIGATE,
+            Position::ORIGIN,
+            Velocity::ZERO,
+        );
+        let far = node.spawn_ship(
+            crate::ship_types::SHIP_TYPE_NPC_FRIGATE,
+            Position::new(9_000.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+
+        let payload = node.build_handoff_payload(ship_id, cell);
+
+        let v: serde_json::Value = serde_json::from_str(&payload.initial_state).unwrap();
+        let ids: Vec<u64> = v["ships"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["ship_id"].as_u64().unwrap())
+            .collect();
+        assert!(ids.contains(&ship_id.raw()), "ship sees its own state");
+        assert!(
+            !ids.contains(&far.raw()),
+            "handoff scopes InitialState to the ship's AoI, not the whole sector"
+        );
+        assert!(
+            payload.player_fitting.is_some(),
+            "every ship with a FittingComp gets a PlayerFitting payload"
+        );
     }
 }
