@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md
-date     : 2026-07-01（再計測。R-3 トリガー未発火確認。記録漏れだった client_admission.rs deepening（#41）と 8D-5 実機検証完了を追加。`/improve-codebase-architecture` 由来の M-7（新規・保留）・M-8（新規・許容）・M-9（新規・保留）を起票。Steering-mode 排他制御の非対称性バグ3件を発見・即修正し `begin_maneuver` ヘルパーへ重複統合。`dawn-sector-node` への永続化配線（FileEventStore/checkpoint/起動時リカバリ）を実施。同日、`/improve-codebase-architecture`（ゲートジャンプ挙動）由来でJump 3択フォールバックを `node/jump.rs` の `apply_jump_with_fallback` へ集約（M-6 のapp層重複の一種を解消）、`/doc-sync` で全ファイルサイズ表を `wc -l` 実測に基づき訂正（`node/mod.rs` impl 49→612 等、過去の誤測定を是正））
+date     : 2026-07-01（再計測2回目。M-7 解消（Issue #56）を受けて行数再測定・説明文更新。乖離6件: `node/commands.rs` 509→693（impl 440）・`node/jump.rs` 186→250（impl 88）・`core/commands.rs` 359→395・`serve/mod.rs` 437→355・`sector-node/runtime.rs` 317→274・`actor/client_connection.rs` 297→259。いずれも impl 700 未満で R-3 トリガー未発火。M-6 表の Player Command Dispatch 行を解消済みに更新）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -15,14 +15,14 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ## 現状評価
 
-**総合: B+**（2026-07-01 維持・再計測のみ。新たな構造変更なし。`warp.rs` / `spawner_logic.rs` / `orbit.rs` / `node/mod.rs` は機能追加でさらに増加したが、impl 部分（テスト除く）はいずれも700行未満で R-3 のトリガーは未発火のまま）
+**総合: B+**（2026-07-01 維持。M-7（Issue #56）解消で `node/commands.rs` に `apply_client_command` が集約され重複観点はさらに改善。R-3 の4ファイル（warp/spawner/orbit/mod）は impl 700 未満でトリガー未発火のまま。`node/commands.rs` は合計 693 行（impl 440）まで増加したが単一責務を保っており 🟢）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
-| クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027）。Player Command Dispatch のためだけの新 crate は深さ不足と判断し見送り |
+| クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027）。M-7 解消で `ClientCommand` を `dawn-core` へ移動し DAG が整理された（`dawn-sector` が `dawn-actor` 非依存のまま dispatch を保持できるようになった）。Player Command Dispatch のための新 crate は引き続き不要 |
 | ファイルサイズ | B+ | 2026-07-01 doc-sync で再計測（`wc -l` 実測、過去の記録値との乖離を訂正）: `warp.rs` 1094（impl 535）・`spawner_logic.rs` 881（impl 603）・`orbit.rs` 854（impl 318）・`node/mod.rs` 800（impl 612）。新設 `node/jump.rs` 186（impl 66）は閾値内で健全。`dawn-simulation/serve` は `runtime.rs` / `aoi_delivery.rs` へ、`dawn-sector-node` は `runtime.rs` へ分割され、各起動 loop は小さく維持。4ファイルとも impl は700行未満で R-3 トリガーは未発火だが、`node/mod.rs`（612）が最も閾値に近い → 次回 `/architecture-review` での再評価を推奨 |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。`InventoryComp`（ADR-0032）・`RepairLayer`/`RepairApplied`（ADR-0033）も既存型設計に整合 |
-| 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。AoI delivery、production runtime は deep module 化済み。残る両バイナリ間グルー重複（M-6）は command dispatch / data loading / NPC spawn などとして許容判断 |
+| 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。AoI delivery、production runtime、Command dispatch は deep module 化済み（M-7 解消で `apply_client_command` が `SimulationNode` に集約）。残る両バイナリ間グルー重複（M-6）は data loading / NPC spawn の低頻度 glue として許容判断 |
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。`TransitOp::Commit` は ADR-0032 で `Box<ShipSnapshot>` 化しサイズ非対称を解消済み |
 | AI開発由来 | A− | 命名汚染なし。残る `SectorSimulatorActor` の密結合（M-3）は本番パス外の in-process 専用で実害小 |
 
@@ -46,7 +46,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector/src/node/transit_flow.rs` | 913（impl 366） | 🟢 `prepare_transit_commit`/`handle_transit_commit`（公開面 5→2 に集約）+ `rebase_after_transit`（#38）。impl は依然小さく、増分はテスト |
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 580 | 🟢 P7-pre + ADR-0032（inventory 永続化）。ほぼテスト |
 | `crates/dawn-sector/src/node/inventory.rs` | 459 | 🟢 ADR-0032 新設。fit/unfit_module_owned + seed + テスト |
-| `crates/dawn-sector/src/node/commands.rs` | 509 | 🟢 P7-1 + ADR-0032（fit 時 inventory 同梱）。2026-07-01、`has_active_warp`（全フェーズ判定）を追加し `is_warping`（committed限定、Move専用）と役割分離 |
+| `crates/dawn-sector/src/node/commands.rs` | 693（impl 440） | 🟢 P7-1 + ADR-0032 + M-7（Issue #56）。M-7 で `ClientCommandFollowup` enum・`apply_client_command` メソッド・4テストを追加（509→693）。impl 440 行で700未満。単一責務（command dispatch + 操作検証）を保ちつつ `dawn-sector-node` と `dawn-simulation` 双方の dispatch 重複を解消した |
 | `crates/dawn-sector/src/node/serialization.rs` | 450 | 🟢 ADR-0029 + ADR-0032（inventory / slot_capacity を PlayerFitting に追加） |
 | `crates/dawn-sector/src/galaxy.rs` | 360 | 🟢 ADR-0029 AU→units 変換・ゲート AU 化 |
 | `crates/dawn-sector/src/node/apply_event.rs` | 339 | 🟢 P7-pre + ADR-0032（ShipFitted/ShipSpawned で inventory 復元） |
@@ -59,7 +59,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector/src/dilation.rs` | 164 | 🟢 |
 | `crates/dawn-sector/src/persistence/checkpoint.rs` | 173 | 🟢 |
 | `crates/dawn-sector/src/node/approach.rs` | 577（impl 194） | 🟢 R-1 新設（2026-06-23）。approach 系 + ADR-0031 で clear_steering_modes 連携。2026-07-01、独自の検証チェックリストを `orbit.rs` の `begin_maneuver` 呼び出しに置き換え、Orbit/KeepAtRange と完全に同じ経路を通るように統一。同日、`apply_approach_jump_fallback`（1行ラッパー）を `jump.rs` へ移設・削除し、`apply_approach_command_with_auto_jump` を `pub(super)` 化 |
-| `crates/dawn-sector/src/node/jump.rs` | 186（impl 66） | 🟢 新設（2026-07-01）。`apply_jump_with_fallback` がJumpCommandの3択（射程内propose／out-of-range auto-warp／too-close approach）を一箇所に集約。`dawn-sector-node::runtime.rs` と `dawn-simulation::serve::cluster.rs` の双方に存在していた同型の3分岐実装を解消（M-6 のapp層adapter重複の一種だったが、ゲーム規則そのものなのでdawn-sector側へ深化） |
+| `crates/dawn-sector/src/node/jump.rs` | 250（impl 88） | 🟢 新設（2026-07-01）。PR #54 で `apply_jump_with_fallback`（3択フォールバック）、PR #55 で `resolve_auto_jump`（auto-jump 判定）を追加。両 PR でテストも追加（186→250）。impl 88 行で健全 |
 | `crates/dawn-sector/src/node/tick.rs` | 177 | 🟢 P4-1 + ADR-0031 Step 2.55/2.56 + ADR-0033 Step 6.5 配線 |
 | `crates/dawn-sector/src/spawner.rs` | 133 | 🟢 |
 | `crates/dawn-sector/src/ship_types.rs` | 91 | 🟢 |
@@ -71,8 +71,8 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-actor/src/protocol.rs` | 613（impl 453） | 🟢 M-4 集約（DomainEvent↔JSON↔ClientCommand）。継続的なコマンド追加（ADR-0031/0032 等）でパース分岐が増加。18+ variant・変更頻度高だが単一責務 |
-| `crates/dawn-actor/src/client_connection.rs` | 297 | 🟢 ClientConnection trait + InProcess/Ws 実装。ADR-0031/0032 の ClientCommand variant 追加 |
+| `crates/dawn-actor/src/protocol.rs` | 612（impl 453） | 🟢 M-4 集約（DomainEvent↔JSON↔ClientCommand）。継続的なコマンド追加（ADR-0031/0032 等）でパース分岐が増加。18+ variant・変更頻度高だが単一責務 |
+| `crates/dawn-actor/src/client_connection.rs` | 259 | 🟢 ClientConnection trait + InProcess/Ws 実装。M-7（Issue #56）で `ClientCommand` 定義を `dawn-core` へ移動し `pub use dawn_core::ClientCommand` 再エクスポートに変更（297→259）。後方互換を維持しつつ定義がDAG下層へ |
 | `crates/dawn-actor/src/ws_server.rs` | 263 | 🟢 M-4 集約（WsServer / PlayerSession）+ ADR-0032 `send_raw` |
 | `crates/dawn-actor/src/lib.rs` | 28 | 🟢 |
 
@@ -81,7 +81,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | ファイル | 行数 | 判定 |
 |---|---|---|
 | `crates/dawn-simulation/src/cluster.rs` | 629 | 🟢 Raft クラスター配線（in-process テスト用） |
-| `crates/dawn-simulation/src/serve/mod.rs` | 437 | 🟢 P5-1 共通ヘルパー。`apply_common_command` は single/cluster serve の command dispatch を共有。PR #34 で AoI delivery を分離 |
+| `crates/dawn-simulation/src/serve/mod.rs` | 355 | 🟢 P5-1 共通ヘルパー。M-7（Issue #56）で `apply_common_command` と `CommonCommandFollowup` を削除し `node.apply_client_command` 呼び出しに置き換え（437→355、-82行）。PR #34 で AoI delivery を分離済み |
 | `crates/dawn-simulation/src/sector_simulator_actor.rs` | 459 | 🟡 M-3（本番パス外・保留）。PR #30 で tick pipeline を `transit::run_runtime_tick` に寄せた |
 | `crates/dawn-simulation/src/bench.rs` | 493 | 🟢 |
 | `crates/dawn-simulation/src/serve/cluster.rs` | 235 | 🟢 PR #30 で tick 後処理を `serve/runtime.rs` へ移動。PR #34 後は `AoiDelivery` を持ち、入力処理と runtime 呼び出し中心。2026-07-01、Jump の3択フォールバックを `dawn_sector::node::jump::apply_jump_with_fallback` 呼び出しに置き換え（旧来の自前3分岐を削除） |
@@ -98,7 +98,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | ファイル | 行数 | 判定 |
 |---|---|---|
 | `crates/dawn-consensus/src/state.rs` | 592 | 🟡 許容範囲（Raft 実装の核） |
-| `crates/dawn-sector-node/src/runtime.rs` | 317 | 🟢 production Node の command dispatch / jump fallback / tick stepping / replication publish 呼び出し / Redirect を集約。AoI delivery 本体は `dawn_sector::aoi::AoiDelivery` へ、replication cursor と `LogBatch` 構築は `dawn_replication::OutboundLogPublisher` へ移動済み。2026-07-01、永続化配線にあわせ全メソッドを `<S: EventStore>` でジェネリック化（旧 `SimulationNode`＝暗黙の `InMemoryEventStore` から `SimulationNode<FileEventStore>` に対応するため）。同日、jump fallbackの3択判定自体を `dawn_sector::node::jump::apply_jump_with_fallback` へ委譲し、ここはRaft proposeとログ出力のみの薄いmatchに縮小 |
+| `crates/dawn-sector-node/src/runtime.rs` | 274 | 🟢 production Node の jump fallback / tick stepping / replication publish 呼び出し / Redirect / AoI delivery を集約。M-7（Issue #56）で `collect_player_commands` の13分岐 match を `node.apply_client_command` 1呼び出しに置き換え（317→274、-43行）。AoI delivery 本体は `dawn_sector::aoi::AoiDelivery` へ、replication は `dawn_replication::OutboundLogPublisher` へ、command dispatch は `dawn_sector::node::SimulationNode` へ移動済みで、本ファイルは orchestration のみ |
 | `crates/dawn-sector-node/src/client_admission.rs` | 235 | 🟢 **新規記録**（2026-06-29・PR #41「deepen client admission flow」。これまで本表に未記載だった）。`main.rs` から WebSocket accept / Hello 読み取り / fresh-vs-resume 判定 / Welcome・InitialState 完了までの client admission state machine を集約。`main.rs` はプロセス配線、本ファイルはハンドシェイク状態機械、と責務分離。2026-07-01、`advance_handshakes`/`select_handshake_identity` を `<S: EventStore>` でジェネリック化 |
 | `crates/dawn-sector-node/src/main.rs` | 341 | 🟢 8D-4 本番バイナリ。config / TCP transport / accept channel / data loading の配線に縮小。2026-07-01、永続化配線（`build_node` がスナップショット有無で新規/復元を分岐、`CheckpointScheduler` をtickループに配線）で 267→341 |
 | `crates/dawn-core/src/events.rs` | 584 | 🟢 ADR-0032 `ShipFitted.inventory`・ADR-0033 `RepairApplied`/`RepairLayer` 追加 |
@@ -108,7 +108,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-event-store/src/file.rs` | 463 | 🟢 |
 | `crates/dawn-ecs/src/systems/movement.rs` | 414 | 🟢 |
 | `crates/dawn-ecs/src/systems/lock.rs` | 374 | 🟢 |
-| `crates/dawn-core/src/commands.rs` | 359 | 🟢 Command enum 群（継続的に variant 追加） |
+| `crates/dawn-core/src/commands.rs` | 395 | 🟢 Command enum 群（継続的に variant 追加）。M-7（Issue #56）で `ClientCommand` enum を `dawn-actor` から移動（359→395）。`dawn-sector` が DAG の上位 `dawn-actor` に依存せず dispatch できる基盤となった |
 | `crates/dawn-consensus/src/rpc.rs` | 371 | 🟢 343→371。Raft RPC 型定義 |
 | `crates/dawn-consensus/src/tcp_transport.rs` | 351 | 🟢 337→351。8D-3 TcpRaftTransport |
 | `crates/dawn-ecs/src/systems/fitting.rs` | 333 | 🟢 |
@@ -168,12 +168,12 @@ Sector Node runtime deepening、AoI delivery の dawn-sector への集約後も�
 
 | 重複 | dawn-simulation | dawn-sector-node | 備考 |
 |---|---|---|---|
-| Player Command Dispatch | `serve/mod.rs::apply_common_command` | `runtime.rs::collect_player_commands` | `ClientCommand` 適用 + `Jump` / fitting refresh follow-up |
-| `data_loader`（`load_modules` / `load_ship_types` / `parse_*`） | `data_loader/*.rs`（実装 ~280行）| `data_loader.rs`（178行）| TOML ローダー |
+| ~~Player Command Dispatch~~ | ~~`serve/mod.rs::apply_common_command`~~ | ~~`runtime.rs::collect_player_commands`~~ | **解消済み（M-7・Issue #56）**: `node.apply_client_command` に統一 |
+| `data_loader`（`load_modules` / `load_ship_types` / `parse_*`） | `data_loader/*.rs`（実装 ~280行）| `data_loader.rs`（278行）| TOML ローダー |
 | `spawn_npcs` / `spawn_npc_frigates` | `serve/mod.rs:278` | `main.rs:298` | **実質同一**（~12行）|
 
 > AoI フレーム配信の重複は解消済み（2026-06-29）。
-> Player Command Dispatch は新 crate 化を検討したが、現時点では過剰として見送った。下記参照。
+> Player Command Dispatch の重複は M-7（Issue #56）で解消済み（2026-07-01）。
 
 現在の実態では、`dawn-simulation` 側は `serve/runtime.rs` と `serve/aoi_delivery.rs` によって
 single/cluster の内部知識をかなり集約済みで、`dawn-sector-node` 側も `runtime.rs` によって
@@ -183,10 +183,8 @@ production process model 固有の frame orchestration を集約済みである�
 WS protocol は `dawn-actor` に、ゲームロジックは `dawn-sector` に、両 runtime の frame policy は
 それぞれのローカル module に寄っており、残る重複は低頻度の glue に縮小している。
 
-Player Command Dispatch は `ClientCommand` と `SimulationNode` の両方を知るため、
-`dawn-actor` / `dawn-sector` のどちらにも置きにくい。ただし新 crate にするには
-interface に対する implementation がまだ浅く、ADR/DAG 更新コストに見合わない。
-`data_loader` / NPC spawn も I/O と demo wiring の低頻度 glue で、同じく共有 crate へ
+~~Player Command Dispatch は `ClientCommand` と `SimulationNode` の両方を知るため、`dawn-actor` / `dawn-sector` のどちらにも置きにくかった。~~ M-7（Issue #56）で解消: `ClientCommand` を `dawn-core` へ移動し DAG ブロッカーを外したうえで `SimulationNode::apply_client_command` に集約した。
+`data_loader` / NPC spawn は I/O と demo wiring の低頻度 glue で、共有 crate へ
 押し込むほどの深さがない。
 
 #### 判断: 当面は許容する（新規 crate は作らない）
@@ -204,19 +202,17 @@ interface に対する implementation がまだ浅く、ADR/DAG 更新コスト�
   Player Command Dispatch / `data_loader` / NPC spawn は process model に近い adapter で、差分が見えやすい。
 
 再評価トリガー（このいずれかが起きたら設計し直す）:
-- Player Command Dispatch / `data_loader` / NPC spawn が実際にドリフトしてバグを生んだとき
+- `data_loader` / NPC spawn が実際にドリフトしてバグを生んだとき
 - 3つ目の serve バイナリが必要になったとき
 - 2バイナリの process モデル差を解消し1バイナリ化できる見込みが立ったとき
   （その場合は新規クレートではなくバイナリ統合を優先検討する）
 
-> 2026-07-01、`/improve-codebase-architecture` の独立調査で本問題（Player Command
-> Dispatch のルーティングが `dawn-sector-node/runtime.rs` の13分岐 match と
-> `dawn-actor/protocol.rs` のパース分岐に分散している点）が再確認された。
-> ただしこれは2バイナリ間の重複ではなく `dawn-sector` 内部のルーティングの浅さで、
-> M-6（2バイナリ間 glue）とは別軸の指摘のため M-7 として新規に起票する（下記）。
-> M-6 自体の判断・トリガーは変更なし。
+> 2026-07-01、Player Command Dispatch（M-7・Issue #56）を解消。`dawn-sector-node/runtime.rs` の
+> 13分岐 match と `dawn-simulation/serve/mod.rs::apply_common_command` を
+> `SimulationNode::apply_client_command` に統一した。M-6 の残る重複（data_loader / NPC spawn）は
+> 引き続き許容判断・トリガー付きで保留。
 
-#### M-7（新規・2026-07-01・保留）: Player Command Dispatch のルーティングが `dawn-sector` の外に漏れている
+#### ~~M-7~~（新規・2026-07-01・**解消済み** 2026-07-01）: Player Command Dispatch のルーティングが `dawn-sector` の外に漏れている
 
 `runtime.rs::collect_player_commands`（13分岐の match。各分岐は「所有権チェック→
 `apply_*_command_owned` 呼び出し」のみでドメイン知識を持たない）と、
@@ -229,15 +225,12 @@ interface に対する implementation がまだ浅く、ADR/DAG 更新コスト�
 `dawn-sector`（実装側）と `dawn-sector-node`/`dawn-actor`（ルーティング側）に
 分かれており、ルーティング層がドメイン知識を持たない薄いまま外側に置かれている。
 
-**判断: 保留（トリガー付き）。** `dawn_sector::node::commands` に
-`apply_player_command(ClientCommand) -> Outcome` のような単一 interface を作り、
-`runtime.rs` 側の13分岐 match を1呼び出しに置き換える案は筋が良いが、
-影響範囲が `dawn-simulation`/`dawn-sector-node` 両方の呼び出し元に及び、
-M-6 で見送った「新 crate」と同様に ROI を見極めてから着手すべき規模。
-
-再評価トリガー（いずれかで着手）:
-- Command の種類がさらに増え（現在13種）、4箇所同期の drift が実際にバグを生んだとき
-- `runtime.rs` の dispatch match 自体が次の R-3 的閾値（300行超等）に達したとき
+**判断: 解消済み（2026-07-01）。** `ClientCommand` を `dawn-core` へ移動し（DAG ブロッカー解消）、
+`SimulationNode::apply_client_command(player_id, cmd, lock_commands) -> Option<ClientCommandFollowup>` を
+`dawn-sector::node::commands` に新設。`dawn-sector-node/runtime.rs` の13分岐 match と
+`dawn-simulation/serve/mod.rs` の `apply_common_command` を両方この1呼び出しに置き換え。
+`ClientCommandFollowup::Jump` / `RefreshFitting` で caller への戻り値を型安全に返す。
+Issue #56 参照。詳細は「完了済み」表の M-7 行を参照。
 
 #### M-8（新規・2026-07-01・許容）: `fit_module` / `fit_module_owned` の共有テール重複
 
@@ -366,6 +359,7 @@ distance に `None` を渡し戻り値の距離を無視するだけ）。結果
 | Client admission deepening（記録漏れ・今回追記） | 2026-06-29 | `dawn-sector-node/src/client_admission.rs` を新設（PR #41）。WebSocket accept / Hello 読み取り / fresh-vs-resume 判定 / Welcome・InitialState 完了までを `ClientAdmission` state machine に集約し、`main.rs` から分離。当時このレビュー文書への記録が漏れていたため、2026-07-01 の再計測で追加 |
 | Sector Transit プロトコルを公開面 5→2 に集約 | 2026-06-29 | `node/transit_flow.rs` の `propose_transit`/`export_transit`/`import_transit`/`append_jump_events` を `pub(super)` に格下げし、新設の `prepare_transit_commit`（Request 側：Gate-lookup・`entry_pos`/`entry_pos_abs` 算出・export を集約）と `handle_transit_commit`（Commit 側：import + `JumpGateUsed`/`StarSystemChanged` 追記の条件分岐を集約）の2メソッドへ統合。`transit.rs` の `apply_committed_raft_entries` オーケストレーターはこの2メソッドを呼ぶだけになり、Gate の往復先探索ロジックを二重に持たなくなった（#38 のバグ修正直後の整理）。新規ユニットテスト1本（`the_consolidated_request_commit_pair_reproduces_the_same_arrival`）で集約後の経路が既存の低レベルプリミティブと同じ着地点を再現することを確認。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
 | `dawn-sector-node` への永続化配線 | 2026-07-01 | `/improve-codebase-architecture` で「`EventStore::append` がinfallibleと嘘をついている」と指摘されたのを調査する過程で、より大きな問題を発見: `dawn-sector-node`（本番バイナリ）は `SimulationNode::new`（デフォルト `InMemoryEventStore`）で動いており、`FileEventStore`/`checkpoint()`/`CheckpointScheduler`/`restore_from`（Phase 3 実装・テスト済み）は本番に一切配線されていなかった（`maybe_checkpoint` の呼び出しは `dawn-simulation/src/bench.rs` のみ）。`NodeConfig` に永続化パス4フィールドを追加し、`build_node` でスナップショットの有無により新規/復元を分岐（`StateSnapshot::load` が `NotFound` なら新規、それ以外のエラーなら panic——サイレントなデータ損失を避ける）。復元時は `spawn_npcs` を呼ばない（NPC重複生成防止、`is_fresh` フラグで判定）。tickループに `CheckpointScheduler::maybe_checkpoint` を配線し、チェックポイント失敗はログのみで継続（ホットログへのappendは別経路で動き続ける）。`SectorNodeRuntime`/`ClientAdmission`/`AoiDelivery::deliver_frame` を `<S: EventStore>` でジェネリック化し `SimulationNode<FileEventStore>` に対応。実機での起動→kill→再起動でtick/log_indexが継続し、NPCが重複生成されないことを手動確認済み。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
+| M-7 ClientCommand dispatch 統一（Issue #56） | 2026-07-01 | `ClientCommand` enum を `dawn-actor` → `dawn-core` へ移動（`dawn-actor` は `pub use dawn_core::ClientCommand` で後方互換維持）。`dawn-sector::node::SimulationNode::apply_client_command(player_id, cmd, lock_commands) -> Option<ClientCommandFollowup>` を新設し、`dawn-sector-node/src/runtime.rs` の13分岐 match と `dawn-simulation/src/serve/` の `apply_common_command`（両バイナリの重複）を1呼び出しに統一。`ClientCommandFollowup` で Jump と RefreshFitting を呼び出し元に返す。`cargo test --workspace` 全件通過 |
 
 > Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消、
 > R-1（navigation.rs 分割）、runtime tick pipeline collapse、AoI delivery deepening、
@@ -393,8 +387,8 @@ C-3 はフェイルファストガードで解消済み・2026-06-23 だが、�
 
 #### R-3（低優先・トリガー保留）: `node/` 系ファイルの再肥大（ADR-0031/0032/0033 後）
 
-2026-07-01 の再計測で、`warp.rs`（1050、impl 528）/ `spawner_logic.rs`（881、impl 492）/
-`orbit.rs`（788、impl 311）/ `mod.rs`（797、impl 49・大半テスト）が総行数で閾値帯に残っている。
+2026-07-01 の再計測（2回目）で、`warp.rs`（1094、impl 534）/ `spawner_logic.rs`（881、impl 603）/
+`orbit.rs`（854、impl 317）/ `mod.rs`（801、impl 612）が総行数で閾値帯に残っている。
 R-1（navigation.rs 分割）後に積まれた Orbit/KeepAtRange（ADR-0031）・Inventory（ADR-0032）・
 Repair（ADR-0033）の累積に加え、テストの増加が総行数を押し上げている。
 **4ファイルとも impl（テスト除く）は700行未満** で、下記トリガーは未発火。
@@ -427,8 +421,8 @@ P7 系で確立した「責務ごとに sibling モジュールへ抽出」方�
 | R-3 `node/` 系再肥大（warp/spawner/mod/orbit） | 品質・保留 | 総行数は閾値帯だが impl は概ね 700 未満・増分はテスト主体。impl が 700 超でファイル別に分割（トリガー付き・上記 R-3） |
 | 8D-5 Raspberry Pi 実機検証 | 完了 → 「完了済み」参照 | 2026-07-01、reachability/tick-sla/failover 3項目とも PASS。詳細は `docs/process/8d5-hardware-notes.md` |
 | M-3 `SectorSimulatorActor` 密結合 | 品質・保留 | 本番パス外（in-process テスト/ベンチ専用）。P9-1 撤回。優先度低 |
-| M-6 アプリ層 adapter 重複（command dispatch / `data_loader` / `spawn_npcs`） | 許容重複 | AoI / production runtime は deep module 化済み。Player Command Dispatch は新 crate 化を検討したが浅い seam と判断し許容。再評価トリガー付き |
-| M-7 Player Command Dispatch のルーティングが `dawn-sector` 外に漏れている | 品質・保留（新規 2026-07-01） | `runtime.rs` 13分岐 match と `protocol.rs` パース分岐が同型。`apply_player_command` 単一 interface 化の余地はあるが影響範囲が大きく、drift がバグ化するまで保留 |
+| M-6 アプリ層 adapter 重複（`data_loader` / `spawn_npcs`） | 許容重複（縮小） | AoI / production runtime / Command dispatch は deep module 化済み（M-7 解消で Command dispatch 項目を削除）。残る data_loader / NPC spawn は低頻度 glue として許容。再評価トリガー付き |
+| ~~M-7 Player Command Dispatch のルーティングが `dawn-sector` 外に漏れている~~ | 完了 → 「完了済み」参照 | `ClientCommand` を `dawn-core` へ移動・`apply_client_command` を `SimulationNode` に追加し両バイナリで統一。Issue #56 |
 | M-8 `fit_module`/`fit_module_owned` 共有テール重複 | 許容（新規 2026-07-01） | `inventory.rs` のモジュールコメントで意図的な分離と明記済み。テールのみの軽微な重複で優先度なし |
 | M-9 `EventStore::append` がinfallibleと偽る | 品質・保留（新規 2026-07-01） | 永続化配線完了で実際に到達可能になったpanic経路。1プロセス1Sector構成ではcrash-only設計として不合理ではないため、全面Result化は見送り保留。実機クラッシュ発生 or マルチSectorプロセス化がトリガー |
 
@@ -454,9 +448,9 @@ Phase 9 時点では総合 **A−** で決着とし、M-3（本番パス外）�
 超えて再肥大し、構造リファクタが一時再燃したが、R-1（navigation.rs 分割・2026-06-23）で
 解消済み。さらに `dawn-simulation` 側 AoI delivery と `dawn-sector-node` 側 runtime は
 deep module 化済み（上記「完了済み」参照）。Player Command Dispatch は新 crate 化を見送った。
-A− を維持。8D-5 実機検証も 2026-07-01 に完了し、残る前進先は
-戦闘の深み（ADR-0016 §5）といった機能側、または M-7（Player Command Dispatch の
-ルーティング deepening）のトリガー待ちで、R-2（client `main.gd`）は保留のまま
+A− を維持。8D-5 実機検証も 2026-07-01 に完了。同日 M-7（Player Command Dispatch
+統一）も完了し、残る前進先は戦闘の深み（ADR-0016 §5）といった機能側で、
+R-2（client `main.gd`）は保留のまま
 （client レビューの「採らない方針」参照。トリガーは C-3 ではなくシーン参照切れリスクそのもの）。
 
 | 項目 | 状態 |
