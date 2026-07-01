@@ -491,7 +491,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// doing the anchor/offset split directly in f64, the same way production
     /// code's f64 paths (warp arrival, AnchorTable) already do.
     #[cfg(test)]
-    pub(super) fn set_spawn_anchor_abs(&mut self, ship_id: ShipId, world: [f64; 3]) {
+    pub(crate) fn set_spawn_anchor_abs(&mut self, ship_id: ShipId, world: [f64; 3]) {
         let Some(&entity) = self.ships.index.get(&ship_id) else {
             return;
         };
