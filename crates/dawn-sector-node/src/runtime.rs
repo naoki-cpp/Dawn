@@ -217,8 +217,7 @@ impl SectorNodeRuntime {
         raft: &RaftActorHandle,
     ) {
         for (ship_id, gate_id) in node.drain_pending_auto_jumps() {
-            if node.can_propose_jump(ship_id, gate_id) {
-                let to = node.jump_gate(gate_id).expect("gate must exist").to_sector;
+            if let Some(to) = node.resolve_auto_jump(ship_id, gate_id) {
                 raft.propose(
                     transit::TransitOp::Request {
                         ship_id,

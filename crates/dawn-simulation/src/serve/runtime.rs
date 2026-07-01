@@ -81,11 +81,7 @@ fn propose_auto_jumps(
 ) {
     for (i, output) in tick_outputs.iter().enumerate() {
         for (ship_id, gate_id) in &output.pending_auto_jumps {
-            if nodes[i].can_propose_jump(*ship_id, *gate_id) {
-                let to = nodes[i]
-                    .jump_gate(*gate_id)
-                    .expect("gate must exist if can_propose_jump passed")
-                    .to_sector;
+            if let Some(to) = nodes[i].resolve_auto_jump(*ship_id, *gate_id) {
                 rafts[i].propose(
                     transit::TransitOp::Request {
                         ship_id: *ship_id,
