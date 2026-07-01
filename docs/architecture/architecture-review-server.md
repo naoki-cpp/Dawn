@@ -421,7 +421,11 @@ P7 系で確立した「責務ごとに sibling モジュールへ抽出」方�
 | R-3 `node/` 系再肥大（warp/spawner/mod/orbit） | 品質・保留 | 総行数は閾値帯だが impl は概ね 700 未満・増分はテスト主体。impl が 700 超でファイル別に分割（トリガー付き・上記 R-3） |
 | 8D-5 Raspberry Pi 実機検証 | 完了 → 「完了済み」参照 | 2026-07-01、reachability/tick-sla/failover 3項目とも PASS。詳細は `docs/process/8d5-hardware-notes.md` |
 | M-3 `SectorSimulatorActor` 密結合 | 品質・保留 | 本番パス外（in-process テスト/ベンチ専用）。P9-1 撤回。優先度低 |
+<<<<<<< HEAD
 | M-6 アプリ層 adapter 重複（`data_loader` / `spawn_npcs`） | 許容重複（縮小） | AoI / production runtime / Command dispatch は deep module 化済み（M-7 解消で Command dispatch 項目を削除）。残る data_loader / NPC spawn は低頻度 glue として許容。再評価トリガー付き |
+=======
+| M-6 アプリ層 adapter 重複（command dispatch / `data_loader` / `spawn_npcs`） | 許容重複 | AoI / production runtime は deep module 化済み。Player Command Dispatch は新 crate 化を検討したが浅い seam と判断し許容。再評価トリガー付き |
+>>>>>>> origin/main
 | ~~M-7 Player Command Dispatch のルーティングが `dawn-sector` 外に漏れている~~ | 完了 → 「完了済み」参照 | `ClientCommand` を `dawn-core` へ移動・`apply_client_command` を `SimulationNode` に追加し両バイナリで統一。Issue #56 |
 | M-8 `fit_module`/`fit_module_owned` 共有テール重複 | 許容（新規 2026-07-01） | `inventory.rs` のモジュールコメントで意図的な分離と明記済み。テールのみの軽微な重複で優先度なし |
 | M-9 `EventStore::append` がinfallibleと偽る | 品質・保留（新規 2026-07-01） | 永続化配線完了で実際に到達可能になったpanic経路。1プロセス1Sector構成ではcrash-only設計として不合理ではないため、全面Result化は見送り保留。実機クラッシュ発生 or マルチSectorプロセス化がトリガー |
