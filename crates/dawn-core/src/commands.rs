@@ -223,6 +223,42 @@ pub struct KeepAtRangeCommand {
     pub range: Option<f32>,
 }
 
+/// All commands a client may send to the server.
+///
+/// Variants map directly to the concrete command structs above. To add a
+/// command: add a variant here, update `dawn-actor/protocol.rs` (wire parse),
+/// and add a branch to `SimulationNode::apply_client_command` (dawn-sector).
+#[derive(Debug, Clone)]
+pub enum ClientCommand {
+    /// Set thrust direction.
+    Move(MoveCommand),
+    /// Begin locking a target.
+    LockOn(LockOnCommand),
+    /// Turn an active module on.
+    Activate(ActivateModuleCommand),
+    /// Turn an active module off.
+    Deactivate(DeactivateModuleCommand),
+    /// Attack a target (reserved for future manual-fire mode; combat is
+    /// currently automatic each tick).
+    Attack(AttackCommand),
+    /// Decelerate to a stop (applies reverse thrust until velocity is zero).
+    Stop(StopCommand),
+    /// Cross a Sector boundary via a Jump Gate (ADR-0009).
+    Jump(JumpCommand),
+    /// Semi-automatic piloting: approach a selected ship/gate (ADR-0015).
+    Approach(ApproachCommand),
+    /// Intra-Sector warp toward a Jump Gate (short-range Fold, ADR-0022).
+    Warp(WarpCommand),
+    /// Sweep around a selected ship/gate at a chosen radius (ADR-0031).
+    Orbit(OrbitCommand),
+    /// Hold at least a chosen range from a selected ship/gate (ADR-0031).
+    KeepAtRange(KeepAtRangeCommand),
+    /// Move a module from inventory into a fitting slot (ADR-0032).
+    Fit(FitModuleCommand),
+    /// Move a fitted module back into inventory (ADR-0032).
+    Unfit(UnfitModuleCommand),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
