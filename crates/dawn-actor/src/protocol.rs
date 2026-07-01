@@ -11,11 +11,10 @@
 //! - [`redirect_json`]: tell a client to reconnect to another node's WS (multi-node jump).
 //! - [`parse_client_command`]: JSON line → ClientCommand (client → server).
 
-use crate::ClientCommand;
 use dawn_core::{
-    ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand, DeactivateModuleCommand,
-    DomainEvent, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId, Position, ShipId,
-    SlotKind, StopCommand,
+    ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand, ClientCommand,
+    DeactivateModuleCommand, DomainEvent, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId,
+    Position, ShipId, SlotKind, StopCommand,
 };
 use serde::Serialize;
 

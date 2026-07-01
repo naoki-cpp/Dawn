@@ -10,7 +10,6 @@ pub(crate) use single::run_phase4_server;
 
 use crate::data_loader;
 use aoi_delivery::AoiDelivery;
-use dawn_actor::ClientCommand;
 use dawn_core::{NodeId, SectorBounds, SectorId, ShipId};
 use dawn_sector::node::SimulationNode;
 use dawn_sector::spawner::{generate_ships, SpawnConfig};
@@ -180,89 +179,6 @@ impl DuelMetrics {
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
-/// Signals `apply_common_command` hands back to the caller for commands that
-/// need context it doesn't have (the player's `PlayerSession`, multi-sector
-/// routing).
-pub(crate) enum CommonCommandFollowup {
-    /// Forward to Jump routing (per-server: in-process Raft vs. ignored in
-    /// single-node mode).
-    Jump(dawn_core::JumpCommand),
-    /// Fit/Unfit changed (or rejected unchanged) the ship's fitting/inventory
-    /// (ADR-0032) -- the caller should push a refreshed `PlayerFitting` JSON
-    /// to this ship's session so the client's UI reflects the authoritative
-    /// result either way.
-    RefreshFitting(dawn_core::ShipId),
-}
-
-/// Apply a player command that behaves identically in the single-node
-/// (`--serve`) and clustered (`--serve --cluster`) servers.
-///
-/// Accepted `LockOn` commands are pushed to `lock_commands` for the tick's
-/// Lock System. When `cmd` needs server-specific routing (Jump) or a
-/// follow-up push to the session (Fit/Unfit), a `CommonCommandFollowup` is
-/// returned to the caller.
-pub(crate) fn apply_common_command(
-    node: &mut SimulationNode,
-    player_id: dawn_core::PlayerId,
-    cmd: ClientCommand,
-    lock_commands: &mut Vec<dawn_core::LockOnCommand>,
-) -> Option<CommonCommandFollowup> {
-    match cmd {
-        ClientCommand::Move(mv) => {
-            node.apply_move_command_owned(player_id, mv.ship_id, mv.target_position);
-        }
-        ClientCommand::LockOn(lo) => {
-            if node.owns_ship(player_id, lo.ship_id) {
-                lock_commands.push(lo);
-            }
-        }
-        ClientCommand::Activate(c) => {
-            node.activate_module_owned(player_id, c);
-        }
-        ClientCommand::Deactivate(c) => {
-            node.deactivate_module_owned(player_id, c);
-        }
-        // Combat is automatic (CombatSystem each tick); AttackCommand is
-        // reserved for a future manual-fire mode.
-        ClientCommand::Attack(_) => {}
-        ClientCommand::Stop(s) => {
-            node.apply_stop_command_owned(player_id, s.ship_id);
-        }
-        // Approach: semi-automatic piloting toward a chosen ship/gate (ADR-0015).
-        ClientCommand::Approach(a) => {
-            node.apply_approach_command_owned(player_id, a);
-        }
-        // Warp: intra-Sector short-range Fold toward a gate (ADR-0022).
-        ClientCommand::Warp(w) => {
-            node.apply_warp_command_owned(player_id, w);
-        }
-        // Orbit / Keep at Range: persistent stand-off piloting (ADR-0031).
-        ClientCommand::Orbit(o) => {
-            node.apply_orbit_command_owned(player_id, o);
-        }
-        ClientCommand::KeepAtRange(k) => {
-            node.apply_keep_at_range_command_owned(player_id, k);
-        }
-        // Fit/Unfit (ADR-0032): apply, then always tell the caller to push a
-        // fresh PlayerFitting regardless of success, so a rejected attempt
-        // (e.g. slot full, module not owned) is visibly reverted client-side
-        // rather than left showing the attempted (but not applied) state.
-        ClientCommand::Fit(f) => {
-            let ship_id = f.ship_id;
-            node.fit_module_owned(player_id, f);
-            return Some(CommonCommandFollowup::RefreshFitting(ship_id));
-        }
-        ClientCommand::Unfit(u) => {
-            let ship_id = u.ship_id;
-            node.unfit_module_owned(player_id, u);
-            return Some(CommonCommandFollowup::RefreshFitting(ship_id));
-        }
-        // Jump differs per server: hand it back to the caller.
-        ClientCommand::Jump(j) => return Some(CommonCommandFollowup::Jump(j)),
-    }
-    None
-}
-
 /// Build a `SimulationNode` wired the way every serve loop needs it.
 /// Shared by `run_phase4_server` and `run_cluster_server`.
 pub(crate) fn build_serve_node(
@@ -314,8 +230,10 @@ pub(crate) fn spawn_npc_frigates(node: &mut SimulationNode, ship_count: usize) {
 #[cfg(test)]
 mod serve_pipeline_tests {
     use super::*;
-    use dawn_actor::{ClientCommand, ClientConnection, InProcessConnection};
-    use dawn_core::{DomainEvent, MoveCommand, NodeId, Position, SectorBounds, SectorId};
+    use dawn_actor::{ClientConnection, InProcessConnection};
+    use dawn_core::{
+        ClientCommand, DomainEvent, MoveCommand, NodeId, Position, SectorBounds, SectorId,
+    };
     use dawn_event_store::store::EventStore as _;
     use dawn_sector::node;
 
@@ -358,7 +276,7 @@ mod serve_pipeline_tests {
         let mut lock_commands = Vec::new();
         let before = node.total_event_count() as u64;
         while let Some(cmd) = conn.try_recv_command() {
-            apply_common_command(&mut node, player_id, cmd, &mut lock_commands);
+            node.apply_client_command(player_id, cmd, &mut lock_commands);
         }
 
         node.tick_with_lock_commands(&lock_commands);
@@ -388,7 +306,7 @@ mod serve_pipeline_tests {
 
     /// A command for a ship the player does not own is rejected by the pipeline:
     /// no `VelocityChanged` reaches the client. Guards the ownership check in
-    /// `apply_common_command` → `apply_move_command_owned` (AI_DEVELOPMENT_GUIDE.md).
+    /// `apply_client_command` → `apply_move_command_owned` (AI_DEVELOPMENT_GUIDE.md).
     #[test]
     fn move_for_unowned_ship_produces_no_event_over_connection() {
         let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
@@ -412,7 +330,7 @@ mod serve_pipeline_tests {
         let mut lock_commands = Vec::new();
         let before = node.total_event_count() as u64;
         while let Some(cmd) = conn.try_recv_command() {
-            apply_common_command(&mut node, player_id, cmd, &mut lock_commands);
+            node.apply_client_command(player_id, cmd, &mut lock_commands);
         }
         node.tick_with_lock_commands(&lock_commands);
 

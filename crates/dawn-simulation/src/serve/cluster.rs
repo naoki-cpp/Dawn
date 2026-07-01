@@ -1,12 +1,11 @@
 //! Raft-cluster WebSocket server (`--serve --cluster`, ADR-0009/0014).
 
 use super::{
-    apply_common_command, build_serve_node, runtime, spawn_npc_frigates, AoiDelivery,
-    CommonCommandFollowup, AOI_CELL_SIZE, P4_TICK_MS,
+    build_serve_node, runtime, spawn_npc_frigates, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS,
 };
 use crate::{cluster, ws_server};
 use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
-use dawn_sector::node::{JumpOutcome, SimulationNode};
+use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
 use dawn_sector::transit;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -148,15 +147,14 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         for sess in sessions.iter_mut() {
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
             while let Some(cmd) = sess.try_recv_command() {
-                let followup = apply_common_command(
-                    &mut nodes[sector],
+                let followup = nodes[sector].apply_client_command(
                     sess.player_id,
                     cmd,
                     &mut lock_commands[sector],
                 );
                 let j = match followup {
-                    Some(CommonCommandFollowup::Jump(j)) => j,
-                    Some(CommonCommandFollowup::RefreshFitting(ship_id)) => {
+                    Some(ClientCommandFollowup::Jump(j)) => j,
+                    Some(ClientCommandFollowup::RefreshFitting(ship_id)) => {
                         if let Some(json) = nodes[sector].build_player_fitting_json(ship_id) {
                             sess.send_raw(&json);
                         }

@@ -22,9 +22,9 @@ pub mod tick;
 
 // Re-export the most commonly used types at crate root for ergonomics.
 pub use commands::{
-    ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand, DeactivateModuleCommand,
-    FitModuleCommand, JumpCommand, KeepAtRangeCommand, LockOnCommand, MoveCommand, OrbitCommand,
-    StopCommand, UnfitModuleCommand, WarpCommand,
+    ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand, ClientCommand,
+    DeactivateModuleCommand, FitModuleCommand, JumpCommand, KeepAtRangeCommand, LockOnCommand,
+    MoveCommand, OrbitCommand, StopCommand, UnfitModuleCommand, WarpCommand,
 };
 pub use entity::{EntityId, NodeId, ShipId};
 pub use error::DawnError;

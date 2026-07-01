@@ -11,7 +11,7 @@ use dawn_core::{DomainEvent, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
 use dawn_replication::{OutboundLogPublisher, TcpReplicationTransport};
 use dawn_sector::aoi::AoiSink;
-use dawn_sector::node::{JumpOutcome, SimulationNode};
+use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
 use dawn_sector::{aoi, transit};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -99,59 +99,17 @@ impl SectorNodeRuntime {
 
         for (i, sess) in self.sessions.iter_mut().enumerate() {
             while let Some(cmd) = sess.try_recv_command() {
-                match cmd {
-                    dawn_actor::ClientCommand::Move(mv) => {
-                        node.apply_move_command_owned(
-                            sess.player_id,
-                            mv.ship_id,
-                            mv.target_position,
-                        );
-                    }
-                    dawn_actor::ClientCommand::LockOn(lo) => {
-                        if node.owns_ship(sess.player_id, lo.ship_id) {
-                            lock_commands.push(lo);
-                        }
-                    }
-                    dawn_actor::ClientCommand::Activate(c) => {
-                        node.activate_module_owned(sess.player_id, c);
-                    }
-                    dawn_actor::ClientCommand::Deactivate(c) => {
-                        node.deactivate_module_owned(sess.player_id, c);
-                    }
-                    dawn_actor::ClientCommand::Attack(_) => {}
-                    dawn_actor::ClientCommand::Stop(s) => {
-                        node.apply_stop_command_owned(sess.player_id, s.ship_id);
-                    }
-                    dawn_actor::ClientCommand::Approach(a) => {
-                        node.apply_approach_command_owned(sess.player_id, a);
-                    }
-                    dawn_actor::ClientCommand::Warp(w) => {
-                        node.apply_warp_command_owned(sess.player_id, w);
-                    }
-                    dawn_actor::ClientCommand::Orbit(o) => {
-                        node.apply_orbit_command_owned(sess.player_id, o);
-                    }
-                    dawn_actor::ClientCommand::KeepAtRange(k) => {
-                        node.apply_keep_at_range_command_owned(sess.player_id, k);
-                    }
-                    dawn_actor::ClientCommand::Fit(f) => {
-                        let ship_id = f.ship_id;
-                        node.fit_module_owned(sess.player_id, f);
-                        if let Some(json) = node.build_player_fitting_json(ship_id) {
-                            sess.send_raw(&json);
-                        }
-                    }
-                    dawn_actor::ClientCommand::Unfit(u) => {
-                        let ship_id = u.ship_id;
-                        node.unfit_module_owned(sess.player_id, u);
-                        if let Some(json) = node.build_player_fitting_json(ship_id) {
-                            sess.send_raw(&json);
-                        }
-                    }
-                    dawn_actor::ClientCommand::Jump(j) => {
+                match node.apply_client_command(sess.player_id, cmd, &mut lock_commands) {
+                    Some(ClientCommandFollowup::Jump(j)) => {
                         pending_jumps.push((i, j));
                         break;
                     }
+                    Some(ClientCommandFollowup::RefreshFitting(ship_id)) => {
+                        if let Some(json) = node.build_player_fitting_json(ship_id) {
+                            sess.send_raw(&json);
+                        }
+                    }
+                    None => {}
                 }
             }
         }
