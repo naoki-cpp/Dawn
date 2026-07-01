@@ -11,8 +11,6 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
-    use transit::TransitOp;
-
     const SECTORS: usize = 3;
     /// 2x the Alpha star (Helios) radius from Sector origin (matches
     /// SimulationNode::DEFAULT_PLAYER_SPAWN): clear of the star body itself,
@@ -165,19 +163,13 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 if j.ship_id != sess.ship_id {
                     continue;
                 }
-                // Fallback chain (in-range propose / auto-warp / approach) is
-                // owned by dawn-sector (node/jump.rs); only the Raft proposal
-                // for the in-range case stays here.
-                match nodes[sector].apply_jump_with_fallback(j.ship_id, j.gate_id) {
+                match transit::propose_jump(
+                    &mut nodes[sector],
+                    &rafts[sector],
+                    j.ship_id,
+                    j.gate_id,
+                ) {
                     JumpOutcome::NeedsTransitProposal { to } => {
-                        rafts[sector].propose(
-                            TransitOp::Request {
-                                ship_id: j.ship_id,
-                                to,
-                                gate_id: Some(j.gate_id),
-                            }
-                            .encode(),
-                        );
                         println!(
                             "  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
                             j.ship_id.raw(),

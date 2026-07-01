@@ -130,24 +130,13 @@ impl SectorNodeRuntime {
             if j.ship_id != sess.ship_id {
                 continue;
             }
-            // The in-range/auto-warp/approach fallback chain is owned by
-            // dawn-sector (node/jump.rs) -- this just runs it and reacts to
-            // the outcome. Only the Raft proposal itself stays here, since
-            // RaftActorHandle isn't available to dawn-sector.
-            match node.apply_jump_with_fallback(j.ship_id, j.gate_id) {
+            match transit::propose_jump(node, raft, j.ship_id, j.gate_id) {
                 JumpOutcome::NeedsTransitProposal { to } => {
-                    raft.propose(
-                        transit::TransitOp::Request {
-                            ship_id: j.ship_id,
-                            to,
-                            gate_id: Some(j.gate_id),
-                        }
-                        .encode(),
-                    );
                     println!(
-                        "[Node] Jump proposed: ship #{} gate #{}",
+                        "[Node] Jump proposed: ship #{} gate #{} (-> S{})",
                         j.ship_id.raw(),
-                        j.gate_id.0
+                        j.gate_id.0,
+                        to.0
                     );
                 }
                 JumpOutcome::WarpFallbackStarted => {
@@ -175,19 +164,12 @@ impl SectorNodeRuntime {
         raft: &RaftActorHandle,
     ) {
         for (ship_id, gate_id) in node.drain_pending_auto_jumps() {
-            if let Some(to) = node.resolve_auto_jump(ship_id, gate_id) {
-                raft.propose(
-                    transit::TransitOp::Request {
-                        ship_id,
-                        to,
-                        gate_id: Some(gate_id),
-                    }
-                    .encode(),
-                );
+            if let Some(to) = transit::propose_auto_jump(node, raft, ship_id, gate_id) {
                 println!(
-                    "[Node] Auto-jump proposed: ship #{} gate #{}",
+                    "[Node] Auto-jump proposed: ship #{} gate #{} (-> S{})",
                     ship_id.raw(),
-                    gate_id.0
+                    gate_id.0,
+                    to.0
                 );
             }
         }

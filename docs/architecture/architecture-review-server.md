@@ -3,7 +3,7 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md
-date     : 2026-07-01（再計測2回目。M-7 解消（Issue #56）を受けて行数再測定・説明文更新。乖離6件: `node/commands.rs` 509→693（impl 440）・`node/jump.rs` 186→250（impl 88）・`core/commands.rs` 359→395・`serve/mod.rs` 437→355・`sector-node/runtime.rs` 317→274・`actor/client_connection.rs` 297→259。いずれも impl 700 未満で R-3 トリガー未発火。M-6 表の Player Command Dispatch 行を解消済みに更新）
+date     : 2026-07-02（doc-sync。jump proposal orchestration 統合（`transit::propose_jump`/`propose_auto_jump` 新設）を受けて行数再測定。乖離4件: `transit.rs` 282→418（impl 240）・`sector-node/runtime.rs` 274→256・`serve/cluster.rs` 235→225・`serve/runtime.rs` 192→182。いずれも impl 700 未満で R-3 トリガー未発火）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -47,13 +47,13 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 580 | 🟢 P7-pre + ADR-0032（inventory 永続化）。ほぼテスト |
 | `crates/dawn-sector/src/node/inventory.rs` | 459 | 🟢 ADR-0032 新設。fit/unfit_module_owned + seed + テスト |
 | `crates/dawn-sector/src/node/commands.rs` | 693（impl 440） | 🟢 P7-1 + ADR-0032 + M-7（Issue #56）。M-7 で `ClientCommandFollowup` enum・`apply_client_command` メソッド・4テストを追加（509→693）。impl 440 行で700未満。単一責務（command dispatch + 操作検証）を保ちつつ `dawn-sector-node` と `dawn-simulation` 双方の dispatch 重複を解消した |
-| `crates/dawn-sector/src/node/serialization.rs` | 450 | 🟢 ADR-0029 + ADR-0032（inventory / slot_capacity を PlayerFitting に追加） |
+| `crates/dawn-sector/src/node/serialization.rs` | 507 | 🟢 ADR-0029 + ADR-0032（inventory / slot_capacity を PlayerFitting に追加）。2026-07-02、`build_handoff_payload`（`HandoffPayload { initial_state, player_fitting }`）を新設し、`single.rs`・`client_admission.rs` に重複していた InitialState/PlayerFitting 組み立てを1箇所へ集約（PR #59、450→507、ユニットテスト1件追加） |
 | `crates/dawn-sector/src/galaxy.rs` | 360 | 🟢 ADR-0029 AU→units 変換・ゲート AU 化 |
 | `crates/dawn-sector/src/node/apply_event.rs` | 339 | 🟢 P7-pre + ADR-0032（ShipFitted/ShipSpawned で inventory 復元） |
 | `crates/dawn-sector/src/node/tackle.rs` | 324 | 🟢 P7-pre |
 | `crates/dawn-sector/src/aoi.rs` | 626（impl 307） | 🟢 `AoiDelivery`/`AoiSink`/`Observer`（旧 dawn-simulation・dawn-sector-node 重複の集約先）。半分弱はテスト。2026-07-01、`deliver_frame` を `<S: EventStore>` でジェネリック化 |
 | `crates/dawn-sector/src/anchor.rs` | 292 | 🟢 ADR-0029 新設（AnchorTable・静的 f64 アンカー絶対座標） |
-| `crates/dawn-sector/src/transit.rs` | 282 | 🟢 PR #30 で `run_runtime_tick` / `RuntimeTickOutput` を追加。Request/Commit ハンドラが `prepare_transit_commit`/`handle_transit_commit` に委譲し Gate-lookup 知識を手放した |
+| `crates/dawn-sector/src/transit.rs` | 418（impl 240） | 🟢 PR #30 で `run_runtime_tick` / `RuntimeTickOutput` を追加。Request/Commit ハンドラが `prepare_transit_commit`/`handle_transit_commit` に委譲し Gate-lookup 知識を手放した。2026-07-02、`propose_jump` / `propose_auto_jump` を新設し、jump fallback outcome → `TransitOp::Request` 提案の組み立てを `dawn-sector-node`・`dawn-simulation` 双方の重複から集約（282→418、テスト2件追加でimpl 240） |
 | `crates/dawn-sector/src/modules.rs` | 211 | 🟢 ADR-0033 で Active 修理モジュール定義を追加 |
 | `crates/dawn-sector/src/persistence/snapshot.rs` | 177 | 🟢 ADR-0032 で `ShipSnapshot.inventory` 追加 |
 | `crates/dawn-sector/src/dilation.rs` | 164 | 🟢 |
@@ -84,11 +84,11 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-simulation/src/serve/mod.rs` | 355 | 🟢 P5-1 共通ヘルパー。M-7（Issue #56）で `apply_common_command` と `CommonCommandFollowup` を削除し `node.apply_client_command` 呼び出しに置き換え（437→355、-82行）。PR #34 で AoI delivery を分離済み |
 | `crates/dawn-simulation/src/sector_simulator_actor.rs` | 459 | 🟡 M-3（本番パス外・保留）。PR #30 で tick pipeline を `transit::run_runtime_tick` に寄せた |
 | `crates/dawn-simulation/src/bench.rs` | 493 | 🟢 |
-| `crates/dawn-simulation/src/serve/cluster.rs` | 235 | 🟢 PR #30 で tick 後処理を `serve/runtime.rs` へ移動。PR #34 後は `AoiDelivery` を持ち、入力処理と runtime 呼び出し中心。2026-07-01、Jump の3択フォールバックを `dawn_sector::node::jump::apply_jump_with_fallback` 呼び出しに置き換え（旧来の自前3分岐を削除） |
-| `crates/dawn-simulation/src/serve/runtime.rs` | 192 | 🟢 PR #30 新設。auto-jump / ownership handoff / scoped InitialState resend を集約し、AoI delivery は `AoiDelivery` に委譲 |
+| `crates/dawn-simulation/src/serve/cluster.rs` | 225 | 🟢 PR #30 で tick 後処理を `serve/runtime.rs` へ移動。PR #34 後は `AoiDelivery` を持ち、入力処理と runtime 呼び出し中心。2026-07-01、Jump の3択フォールバックを `dawn_sector::node::jump::apply_jump_with_fallback` 呼び出しに置き換え（旧来の自前3分岐を削除）。2026-07-02、Raft への `TransitOp::Request` 提案を `dawn_sector::transit::propose_jump` 呼び出しに置き換え（235→225） |
+| `crates/dawn-simulation/src/serve/runtime.rs` | 182 | 🟢 PR #30 新設。auto-jump / ownership handoff / scoped InitialState resend を集約し、AoI delivery は `AoiDelivery` に委譲。2026-07-02、auto-jump の Raft 提案を `dawn_sector::transit::propose_auto_jump` 呼び出しに置き換え（192→182） |
 | `crates/dawn-simulation/src/serve/aoi_delivery.rs` | 119 | 🟢 配信ロジック本体を `dawn_sector::aoi::AoiDelivery` へ移動。残りは `CellGrid` 構築・セッション loop・`SessionSink` adapter のみ |
 | `crates/dawn-simulation/src/data_loader/modules.rs` | 219 | 🟢 P5-2 |
-| `crates/dawn-simulation/src/serve/single.rs` | 203 | 🟢 P5-1。PR #34 後は AoI delivery 詳細を `AoiDelivery` に委譲 |
+| `crates/dawn-simulation/src/serve/single.rs` | 200 | 🟢 P5-1。PR #34 後は AoI delivery 詳細を `AoiDelivery` に委譲。2026-07-02、`node.build_handoff_payload` 呼び出しに置き換え（203→200） |
 | `crates/dawn-simulation/src/data_loader/ship_types.rs` | 189 | 🟢 P5-2 |
 | `crates/dawn-simulation/src/main.rs` | 69 | 🟢 |
 | `crates/dawn-simulation/src/data_loader/mod.rs` | 9 | 🟢 P5-2 |
@@ -98,8 +98,8 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | ファイル | 行数 | 判定 |
 |---|---|---|
 | `crates/dawn-consensus/src/state.rs` | 592 | 🟡 許容範囲（Raft 実装の核） |
-| `crates/dawn-sector-node/src/runtime.rs` | 274 | 🟢 production Node の jump fallback / tick stepping / replication publish 呼び出し / Redirect / AoI delivery を集約。M-7（Issue #56）で `collect_player_commands` の13分岐 match を `node.apply_client_command` 1呼び出しに置き換え（317→274、-43行）。AoI delivery 本体は `dawn_sector::aoi::AoiDelivery` へ、replication は `dawn_replication::OutboundLogPublisher` へ、command dispatch は `dawn_sector::node::SimulationNode` へ移動済みで、本ファイルは orchestration のみ |
-| `crates/dawn-sector-node/src/client_admission.rs` | 235 | 🟢 **新規記録**（2026-06-29・PR #41「deepen client admission flow」。これまで本表に未記載だった）。`main.rs` から WebSocket accept / Hello 読み取り / fresh-vs-resume 判定 / Welcome・InitialState 完了までの client admission state machine を集約。`main.rs` はプロセス配線、本ファイルはハンドシェイク状態機械、と責務分離。2026-07-01、`advance_handshakes`/`select_handshake_identity` を `<S: EventStore>` でジェネリック化 |
+| `crates/dawn-sector-node/src/runtime.rs` | 256 | 🟢 production Node の jump fallback / tick stepping / replication publish 呼び出し / Redirect / AoI delivery を集約。M-7（Issue #56）で `collect_player_commands` の13分岐 match を `node.apply_client_command` 1呼び出しに置き換え（317→274）。2026-07-02、jump proposal の Raft 提案（in-range / auto-jump 双方）を `dawn_sector::transit::propose_jump` / `propose_auto_jump` に置き換え、`serve/cluster.rs`・`serve/runtime.rs` と重複していた `TransitOp::Request` 組み立てを解消（274→256）。AoI delivery 本体は `dawn_sector::aoi::AoiDelivery` へ、replication は `dawn_replication::OutboundLogPublisher` へ、command dispatch と jump proposal は `dawn_sector` 側へ移動済みで、本ファイルは orchestration のみ |
+| `crates/dawn-sector-node/src/client_admission.rs` | 236 | 🟢 **新規記録**（2026-06-29・PR #41「deepen client admission flow」。これまで本表に未記載だった）。`main.rs` から WebSocket accept / Hello 読み取り / fresh-vs-resume 判定 / Welcome・InitialState 完了までの client admission state machine を集約。`main.rs` はプロセス配線、本ファイルはハンドシェイク状態機械、と責務分離。2026-07-01、`advance_handshakes`/`select_handshake_identity` を `<S: EventStore>` でジェネリック化。2026-07-02、InitialState/PlayerFitting 組み立てを `dawn_sector::node::SimulationNode::build_handoff_payload`（PR #59）呼び出しに置き換え（235→236） |
 | `crates/dawn-sector-node/src/main.rs` | 341 | 🟢 8D-4 本番バイナリ。config / TCP transport / accept channel / data loading の配線に縮小。2026-07-01、永続化配線（`build_node` がスナップショット有無で新規/復元を分岐、`CheckpointScheduler` をtickループに配線）で 267→341 |
 | `crates/dawn-core/src/events.rs` | 584 | 🟢 ADR-0032 `ShipFitted.inventory`・ADR-0033 `RepairApplied`/`RepairLayer` 追加 |
 | `crates/dawn-ecs/src/systems/combat.rs` | 580 | 🟢 |
@@ -360,6 +360,8 @@ distance に `None` を渡し戻り値の距離を無視するだけ）。結果
 | Sector Transit プロトコルを公開面 5→2 に集約 | 2026-06-29 | `node/transit_flow.rs` の `propose_transit`/`export_transit`/`import_transit`/`append_jump_events` を `pub(super)` に格下げし、新設の `prepare_transit_commit`（Request 側：Gate-lookup・`entry_pos`/`entry_pos_abs` 算出・export を集約）と `handle_transit_commit`（Commit 側：import + `JumpGateUsed`/`StarSystemChanged` 追記の条件分岐を集約）の2メソッドへ統合。`transit.rs` の `apply_committed_raft_entries` オーケストレーターはこの2メソッドを呼ぶだけになり、Gate の往復先探索ロジックを二重に持たなくなった（#38 のバグ修正直後の整理）。新規ユニットテスト1本（`the_consolidated_request_commit_pair_reproduces_the_same_arrival`）で集約後の経路が既存の低レベルプリミティブと同じ着地点を再現することを確認。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
 | `dawn-sector-node` への永続化配線 | 2026-07-01 | `/improve-codebase-architecture` で「`EventStore::append` がinfallibleと嘘をついている」と指摘されたのを調査する過程で、より大きな問題を発見: `dawn-sector-node`（本番バイナリ）は `SimulationNode::new`（デフォルト `InMemoryEventStore`）で動いており、`FileEventStore`/`checkpoint()`/`CheckpointScheduler`/`restore_from`（Phase 3 実装・テスト済み）は本番に一切配線されていなかった（`maybe_checkpoint` の呼び出しは `dawn-simulation/src/bench.rs` のみ）。`NodeConfig` に永続化パス4フィールドを追加し、`build_node` でスナップショットの有無により新規/復元を分岐（`StateSnapshot::load` が `NotFound` なら新規、それ以外のエラーなら panic——サイレントなデータ損失を避ける）。復元時は `spawn_npcs` を呼ばない（NPC重複生成防止、`is_fresh` フラグで判定）。tickループに `CheckpointScheduler::maybe_checkpoint` を配線し、チェックポイント失敗はログのみで継続（ホットログへのappendは別経路で動き続ける）。`SectorNodeRuntime`/`ClientAdmission`/`AoiDelivery::deliver_frame` を `<S: EventStore>` でジェネリック化し `SimulationNode<FileEventStore>` に対応。実機での起動→kill→再起動でtick/log_indexが継続し、NPCが重複生成されないことを手動確認済み。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
 | M-7 ClientCommand dispatch 統一（Issue #56） | 2026-07-01 | `ClientCommand` enum を `dawn-actor` → `dawn-core` へ移動（`dawn-actor` は `pub use dawn_core::ClientCommand` で後方互換維持）。`dawn-sector::node::SimulationNode::apply_client_command(player_id, cmd, lock_commands) -> Option<ClientCommandFollowup>` を新設し、`dawn-sector-node/src/runtime.rs` の13分岐 match と `dawn-simulation/src/serve/` の `apply_common_command`（両バイナリの重複）を1呼び出しに統一。`ClientCommandFollowup` で Jump と RefreshFitting を呼び出し元に返す。`cargo test --workspace` 全件通過 |
+| Client handshake payload の集約（PR #59） | 2026-07-02 | `single.rs`（dawn-simulation）と `client_admission.rs`（dawn-sector-node）が、identity 選択後の InitialState/PlayerFitting JSON 組み立てを同一コードで重複していた（identity 選択自体は resume 対応の有無で別物なので統一対象外）。`dawn_sector::node::SimulationNode::build_handoff_payload(ship_id, aoi_cell_size) -> HandoffPayload` を新設し両呼び出し元から呼ぶ形に統一。ユニットテスト1件追加。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
+| Jump proposal orchestration 統一 | 2026-07-02 | `apply_jump_with_fallback` の outcome（in-range → Raft へ `TransitOp::Request` 提案）と auto-jump 提案パスが、`dawn-sector-node/src/runtime.rs` と `dawn-simulation/src/serve/{cluster,runtime}.rs` の3箇所に重複していた。`dawn_sector::transit::propose_jump` / `propose_auto_jump` を新設し、fallback chain の結果を Raft 提案へ橋渡しする部分を1箇所に集約。呼び出し元は返り値の `JumpOutcome`/`Option<SectorId>` を自分のログ整形にだけ使う。`SimulationNode::set_spawn_anchor_abs` を `pub(super)`→`pub(crate)`（`#[cfg(test)]` のまま）に広げ、新規テスト2件を追加。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
 
 > Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消、
 > R-1（navigation.rs 分割）、runtime tick pipeline collapse、AoI delivery deepening、

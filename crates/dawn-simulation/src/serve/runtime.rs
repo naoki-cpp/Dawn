@@ -75,21 +75,15 @@ struct JumpHandoff {
 }
 
 fn propose_auto_jumps(
-    nodes: &[SimulationNode],
+    nodes: &mut [SimulationNode],
     rafts: &[RaftActorHandle],
     tick_outputs: &[transit::RuntimeTickOutput],
 ) {
     for (i, output) in tick_outputs.iter().enumerate() {
         for (ship_id, gate_id) in &output.pending_auto_jumps {
-            if let Some(to) = nodes[i].resolve_auto_jump(*ship_id, *gate_id) {
-                rafts[i].propose(
-                    transit::TransitOp::Request {
-                        ship_id: *ship_id,
-                        to,
-                        gate_id: Some(*gate_id),
-                    }
-                    .encode(),
-                );
+            if let Some(to) =
+                transit::propose_auto_jump(&mut nodes[i], &rafts[i], *ship_id, *gate_id)
+            {
                 println!(
                     "  [Server] Auto-jump proposed: ship #{} gate #{} (S{} -> S{})",
                     ship_id.raw(),
