@@ -1,12 +1,16 @@
 //! Jump-gate command orchestration for `SimulationNode` (ADR-0009/0022).
 //!
-//! A player's `JumpCommand` has three possible outcomes depending on the
-//! ship's distance to the gate: propose the Sector Transit directly (in
-//! range), auto-warp toward the gate (out of range), or approach it
-//! (too close to warp). This module owns that 3-way decision so callers
-//! outside `dawn-sector` (the production tick loop) don't need to know the
-//! fallback conditions themselves -- they just call `apply_jump_with_fallback`
-//! and act on the returned `JumpOutcome`.
+//! Owns two entry points into the jump pipeline:
+//!
+//! - `apply_jump_with_fallback` — player-initiated `JumpCommand`: tries the
+//!   Transit / auto-warp / approach fallback chain in order and returns which
+//!   path fired as a `JumpOutcome`.
+//! - `resolve_auto_jump` — auto-jump on warp/approach arrival: checks whether
+//!   the ship is now in range and returns the destination `SectorId` so the
+//!   caller can propose Transit to Raft, or `None` to silently drop.
+//!
+//! Both callers outside `dawn-sector` (the production tick loops) only need to
+//! know the result; the game-rule conditions stay here.
 
 use dawn_core::{JumpGateId, SectorId, ShipId, WarpTarget};
 use dawn_event_store::store::EventStore;
@@ -32,6 +36,25 @@ pub enum JumpOutcome {
 }
 
 impl<S: EventStore> SimulationNode<S> {
+    /// If `ship_id` has arrived within `gate_id`'s activation radius, return
+    /// the destination `SectorId` so the caller can propose a Transit to Raft.
+    /// Returns `None` if not yet in range — the attempt is silently dropped;
+    /// auto-jump never retries, it fires once on warp/approach arrival.
+    ///
+    /// Ownership checks are the caller's responsibility. Tackle blocks
+    /// auto-jump: CONTEXT.md defines Tackle as preventing escape actions
+    /// including jump.
+    pub fn resolve_auto_jump(&self, ship_id: ShipId, gate_id: JumpGateId) -> Option<SectorId> {
+        if !self.can_propose_jump(ship_id, gate_id) {
+            return None;
+        }
+        Some(
+            self.jump_gate(gate_id)
+                .expect("can_propose_jump confirmed the gate exists")
+                .to_sector,
+        )
+    }
+
     /// Resolve a `JumpCommand` against `gate_id`, trying the Transit /
     /// auto-warp / approach fallback chain in order (ADR-0009 §5, ADR-0022
     /// §2). Ownership checks are the caller's responsibility -- this only
@@ -182,5 +205,46 @@ mod tests {
         let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let outcome = node.apply_jump_with_fallback(ship, JumpGateId(1));
         assert_eq!(outcome, JumpOutcome::Rejected);
+    }
+
+    // ── resolve_auto_jump ────────────────────────────────────────────────────
+
+    #[test]
+    fn in_range_ship_resolves_auto_jump() {
+        let mut node = mem_node();
+        let gate = *node.jump_gate(JumpGateId(0)).expect("Sector 0 has Gate 0");
+        let near_gate_abs = [
+            gate.abs_m[0] - (gate.activation_radius as f64 * 0.5),
+            gate.abs_m[1],
+            gate.abs_m[2],
+        ];
+        let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.set_spawn_anchor_abs(ship, near_gate_abs);
+
+        assert_eq!(
+            node.resolve_auto_jump(ship, JumpGateId(0)),
+            Some(gate.to_sector),
+        );
+    }
+
+    #[test]
+    fn out_of_range_ship_returns_none_for_auto_jump() {
+        let mut node = mem_node();
+        let (_player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        assert!(
+            !node.can_propose_jump(ship, JumpGateId(0)),
+            "fixture starts far from the gate"
+        );
+
+        assert_eq!(node.resolve_auto_jump(ship, JumpGateId(0)), None);
+    }
+
+    #[test]
+    fn unknown_ship_returns_none_for_auto_jump() {
+        let node = mem_node();
+        assert_eq!(
+            node.resolve_auto_jump(ShipId::new(NodeId(0), 999), JumpGateId(0)),
+            None,
+        );
     }
 }
