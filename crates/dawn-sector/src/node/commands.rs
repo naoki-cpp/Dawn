@@ -2,6 +2,11 @@
 //!
 //! # Contents
 //!
+//! ## Unified client dispatch
+//! - `apply_client_command` — single entry point for all `ClientCommand`
+//!   variants; returns `Some(ClientCommandFollowup)` for commands that need
+//!   server-side follow-up (Jump proposal to Raft, fitting JSON resend).
+//!
 //! ## Movement
 //! - `apply_move_command` / `apply_move_command_owned`
 //! - `apply_stop_command` / `apply_stop_command_owned`
@@ -17,9 +22,22 @@
 //! - `register_module`, `fit_module`
 
 use dawn_core::{
-    DomainEvent, FitModuleCommand, ModuleDefinition, ModuleId, PlayerId, Position, ShipId,
-    SlotKind, Velocity,
+    ClientCommand, DomainEvent, FitModuleCommand, JumpCommand, ModuleDefinition, ModuleId,
+    PlayerId, Position, ShipId, SlotKind, Velocity,
 };
+
+/// What `apply_client_command` hands back to the caller for commands that
+/// require server-side context it does not have (Raft handles, session refs).
+#[derive(Debug, Clone)]
+pub enum ClientCommandFollowup {
+    /// Forward to Jump routing (propose Transit to Raft if in range, or let
+    /// `apply_jump_with_fallback` start a warp/approach fallback).
+    Jump(JumpCommand),
+    /// The ship's fitting changed (or the attempt was rejected) — push a
+    /// refreshed `PlayerFitting` JSON to this ship's session so the client's
+    /// UI reflects the authoritative state.
+    RefreshFitting(ShipId),
+}
 use dawn_ecs::{
     components::{FittedSlot, FittingComp, PositionComp, ShipStatsComp, ThrustComp, WarpComp},
     systems::apply_fitting,
@@ -103,6 +121,74 @@ impl<S: EventStore> SimulationNode<S> {
     /// Used by `_owned` command variants and external player-command dispatch.
     pub fn owns_ship(&self, player_id: PlayerId, ship_id: ShipId) -> bool {
         self.ships.owners.get(&ship_id) == Some(&player_id)
+    }
+
+    /// Apply one `ClientCommand` on behalf of `player_id`.
+    ///
+    /// Most variants are dispatched to the matching `apply_*_command_owned`
+    /// method and return `None`. Two variants need server-side context that
+    /// lives outside `dawn-sector` and are handed back as a
+    /// `ClientCommandFollowup`:
+    ///
+    /// - `Jump` → caller proposes Transit to Raft (or starts warp/approach
+    ///   fallback via `apply_jump_with_fallback`).
+    /// - `Fit` / `Unfit` → caller pushes a refreshed `PlayerFitting` JSON to
+    ///   the session, so a rejected attempt is visibly reverted client-side.
+    ///
+    /// `lock_commands` accumulates `LockOn` commands for the tick's Lock System
+    /// (the caller passes the same vec to `tick_with_lock_commands`).
+    pub fn apply_client_command(
+        &mut self,
+        player_id: PlayerId,
+        cmd: ClientCommand,
+        lock_commands: &mut Vec<dawn_core::LockOnCommand>,
+    ) -> Option<ClientCommandFollowup> {
+        match cmd {
+            ClientCommand::Move(mv) => {
+                self.apply_move_command_owned(player_id, mv.ship_id, mv.target_position);
+            }
+            ClientCommand::LockOn(lo) => {
+                if self.owns_ship(player_id, lo.ship_id) {
+                    lock_commands.push(lo);
+                }
+            }
+            ClientCommand::Activate(c) => {
+                self.activate_module_owned(player_id, c);
+            }
+            ClientCommand::Deactivate(c) => {
+                self.deactivate_module_owned(player_id, c);
+            }
+            // Combat is automatic (CombatSystem each tick); AttackCommand is
+            // reserved for a future manual-fire mode.
+            ClientCommand::Attack(_) => {}
+            ClientCommand::Stop(s) => {
+                self.apply_stop_command_owned(player_id, s.ship_id);
+            }
+            ClientCommand::Approach(a) => {
+                self.apply_approach_command_owned(player_id, a);
+            }
+            ClientCommand::Warp(w) => {
+                self.apply_warp_command_owned(player_id, w);
+            }
+            ClientCommand::Orbit(o) => {
+                self.apply_orbit_command_owned(player_id, o);
+            }
+            ClientCommand::KeepAtRange(k) => {
+                self.apply_keep_at_range_command_owned(player_id, k);
+            }
+            ClientCommand::Fit(f) => {
+                let ship_id = f.ship_id;
+                self.fit_module_owned(player_id, f);
+                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+            }
+            ClientCommand::Unfit(u) => {
+                let ship_id = u.ship_id;
+                self.unfit_module_owned(player_id, u);
+                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+            }
+            ClientCommand::Jump(j) => return Some(ClientCommandFollowup::Jump(j)),
+        }
+        None
     }
 
     /// `apply_stop_command` wrapped with ownership check.
@@ -466,6 +552,104 @@ mod tests {
         assert!(
             damage_events > 0,
             "player should have dealt at least 1 DamageTaken to bot within 25 ticks"
+        );
+    }
+
+    // ── apply_client_command ─────────────────────────────────────────────────
+
+    fn spawn_owned_player_at(node: &mut SimulationNode, pos: Position) -> (PlayerId, ShipId) {
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, pos);
+        (player_id, ship_id)
+    }
+
+    #[test]
+    fn owned_move_command_is_applied_and_returns_no_followup() {
+        use dawn_core::{ClientCommand, MoveCommand};
+        let mut node = mem_node();
+        let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Move(MoveCommand {
+                ship_id,
+                target_position: Position::new(1_000.0, 0.0, 0.0),
+            }),
+            &mut locks,
+        );
+        assert!(result.is_none(), "Move must not produce a followup");
+    }
+
+    #[test]
+    fn unowned_move_command_is_silently_ignored_and_returns_no_followup() {
+        use dawn_core::{ClientCommand, MoveCommand};
+        let mut node = mem_node();
+        let (player_id, _own_ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let other_player_id = node.next_player_id();
+        let other_ship = node.spawn_player_ship_at_pub(other_player_id, Position::ORIGIN);
+        let before = node.total_event_count();
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Move(MoveCommand {
+                ship_id: other_ship,
+                target_position: Position::new(1_000.0, 0.0, 0.0),
+            }),
+            &mut locks,
+        );
+        assert!(
+            result.is_none(),
+            "Rejected Move must not produce a followup"
+        );
+        assert_eq!(
+            node.total_event_count(),
+            before,
+            "Rejected Move must not append events"
+        );
+    }
+
+    #[test]
+    fn fit_command_returns_refresh_fitting_followup() {
+        use crate::modules;
+        use dawn_core::{ClientCommand, FitModuleCommand, ModuleId, SlotKind};
+        let mut node = mem_node();
+        for def in modules::all_modules() {
+            node.register_module(def);
+        }
+        let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Fit(FitModuleCommand {
+                ship_id,
+                module_id: ModuleId(1),
+                slot: SlotKind::High,
+            }),
+            &mut locks,
+        );
+        assert!(
+            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == ship_id),
+            "Fit must return RefreshFitting for the ship's id"
+        );
+    }
+
+    #[test]
+    fn jump_command_is_handed_back_as_followup() {
+        use dawn_core::{ClientCommand, JumpCommand, JumpGateId};
+        let mut node = mem_node();
+        let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Jump(JumpCommand {
+                ship_id,
+                gate_id: JumpGateId(0),
+            }),
+            &mut locks,
+        );
+        assert!(
+            matches!(result, Some(ClientCommandFollowup::Jump(j)) if j.gate_id == JumpGateId(0)),
+            "Jump must be handed back as a followup"
         );
     }
 
