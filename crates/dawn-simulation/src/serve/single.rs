@@ -1,12 +1,13 @@
 //! Single-node WebSocket server (`--serve`, no Raft cluster).
 
 use super::{
-    apply_common_command, build_serve_node, spawn_npc_frigates, AoiDelivery, CommonCommandFollowup,
-    DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
+    build_serve_node, spawn_npc_frigates, AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS,
+    TIDI_BUDGET,
 };
 use crate::ws_server;
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId};
 use dawn_sector::dilation;
+use dawn_sector::node::ClientCommandFollowup;
 use tokio::sync::mpsc;
 
 pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_cap: usize) {
@@ -137,8 +138,8 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
         let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
         for sess in sessions.iter_mut() {
             while let Some(cmd) = sess.try_recv_command() {
-                match apply_common_command(&mut node, sess.player_id, cmd, &mut lock_commands) {
-                    Some(CommonCommandFollowup::Jump(j)) => {
+                match node.apply_client_command(sess.player_id, cmd, &mut lock_commands) {
+                    Some(ClientCommandFollowup::Jump(j)) => {
                         eprintln!(
                             "[Server] JumpCommand ignored (ship #{} gate #{}): \
                              --serve runs a single-sector node without Raft",
@@ -146,7 +147,7 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
                             j.gate_id.0
                         );
                     }
-                    Some(CommonCommandFollowup::RefreshFitting(ship_id)) => {
+                    Some(ClientCommandFollowup::RefreshFitting(ship_id)) => {
                         if let Some(json) = node.build_player_fitting_json(ship_id) {
                             sess.send_raw(&json);
                         }
