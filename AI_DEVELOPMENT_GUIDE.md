@@ -240,3 +240,7 @@ This repo uses Matt Pocock's engineering skills configuration:
 
 When a skill applies, use it. Keep this file short; add detailed project memory
 to the correct doc instead of expanding this guide.
+
+---
+
+Last updated: 2026-07-02 / Covers ADR-0001 through ADR-0033
