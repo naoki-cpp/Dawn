@@ -243,4 +243,4 @@ to the correct doc instead of expanding this guide.
 
 ---
 
-最終更新日: 2026-07-02 ／ 対応ADR範囲: ADR-0001〜ADR-0033
+Last updated: 2026-07-02 / Covers ADR-0001 through ADR-0033
