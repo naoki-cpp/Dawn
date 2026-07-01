@@ -289,6 +289,126 @@ Godot 側のコードは変更しない。gRPC は Phase 9 以降で再検討す
 
 ---
 
+## Phase 8 — スケール基盤 / 持続性（詳細記録・8A/8C/8D/8E ほぼ完了）
+
+> 2026-07-02、roadmap.md 本体の分量削減のため詳細タスク表をここへ移設（Phase 0〜7 と同じ理由）。
+> 8B のみ「一区切り」で保留項目を残すため、保留項目の要約は roadmap.md §10 に残す。
+> 対応 ADR: ADR-0017（スナップショット圧縮・2層ログ）, ADR-0018（局所 TiDi）,
+> ADR-0019（AoI 静的セルグリッド）, ADR-0020（Simulation LoD・deferred）, ADR-0021/0027（複製）。
+> 関連: docs/architecture/tick-model.md §8, docs/design/game-design.md §8, docs/reference/eve-reference.md §8–§11。
+
+**完了基準（ADR-0018 で更新。旧「5,000 ships 上限で常に SLA」は撤回）:**
+
+- 通常負荷では論理 Tick が一定で SLA（≤32ms）を満たす。
+- 空間的に分離可能な負荷は動的分割で**劣化ゼロ**に捌ける。
+- 分割不能な単一密戦闘がノード容量を超えたら、当該 Sector **局所**の TiDi で graceful に劣化し、
+  dilation 係数を SLA メトリクスに記録、負荷減で 1.0 に**自動回復**する（イベントの並べ替え・欠落なし）。
+- 入場制限は**最終バックストップ**としてのみ発動する。
+- **創世記 replay なし**で failover / 再起動できる（最新スナップショット + 末尾 replay）。
+
+### 8A. イベントログの持続性（ADR-0017）✅ 完了
+
+| # | タスク | クレート | 状態 |
+|---|---|---|---|
+| 1 | **スナップショット検証テスト**: ① round-trip（snapshot→restore→snapshot バイト一致）② snapshot + 末尾 Tick == live（cap/hull 含む） | dawn-simulation | ✅ take_snapshot 正準ソート + 2テスト |
+| 2 | ホットログのセグメント化（base_index ヘッダ）+ `compact()` 機構 | dawn-event-store | ✅ FileEventStore.compact + 4テスト |
+| 3 | コールドアーカイブ書き出し（append-only）+ 原子的 swap（write-new-then-swap） | dawn-event-store | ✅ compact() 内で実装（header に base を埋め rename 一発で原子的） |
+| 4 | failover / 再起動が創世記 replay を要求しないテスト（ADR-0014 連携） | dawn-simulation | ✅ 圧縮後 reopen + restore テスト |
+| 5 | snapshot.rs のドキュメントコメントを改訂後 INV-002 に更新 | dawn-simulation | ✅（228f244） |
+| 6 | event-catalog.md / architecture.md に2層ログを反映 | docs | ✅ §5-C 復旧モデル + §2 永続化モデル追記 |
+| 7 | 圧縮の自動トリガ（ノードのスナップショット周期 → `compact()` 呼び出しのオーケストレーション） | dawn-simulation | ✅ `checkpoint()` + `CheckpointScheduler`（checkpoint.rs）+ Phase 3 デモ配線 + 3テスト |
+
+### 8B. 負荷制御 / Anti-TiDi（ADR-0018 + 既存方針）🔶 一区切り（詳細は roadmap.md §10 参照）
+
+| # | タスク | 備考 | 状態 |
+|---|---|---|---|
+| 1 | Sector Population Cap（**最終バックストップに格下げ**） | game-design.md §8 | ✅ 生 `ship_count()` ベース: `at_population_cap()` = `ship_count() >= population_cap`。TiDi 予算と同じ単位（生カウント）。`--pop-cap N` で Sector 毎に可変、両 serve ループで新規入場を拒否・3 テスト。当初の「アクティブ船除外（実効人口）」案は撤回 — INV-MOVE により等速船はイベントを出さず「無イベント = idle」が不成立（放置船を安くするのは数の除外でなく LoD=8B-3 の忠実度低下で表現する） |
+| 2 | Dynamic Sector Fission（分離可能負荷の第1手） | tick-model.md §8 | ⬜ |
+| 3 | Simulation LoD（忠実度の階層化・更新間引き） | game-design.md §8 層1 / ADR-0020 | ⏸️ **deferred**（ADR-0020）。設計は完了（近似ゼロの 2 段階・交差閉包）だが、着手前のコストモデルで計算メリットが未実証と判明。サーバ計算は O(n²) でなく小定数の O(n)（ADR-0019）で、LoD が削るのは c·(n−k) のみ。再開は go/no-go スパイク（idle 反復が Tick 予算の有意割合か）次第 |
+| 4 | 局所 TiDi: dilation = 実時間ペーシングのみ・論理 Tick の処理内容は不変（テスト） | INV-005 と無関係 | ✅ `dilation.rs::DilationController`（判定は論理コスト=ship_count、物理時刻不使用・決定的）。単一 `--serve` ループに実配線（sleep のみ伸ばす） |
+| 5 | dilation が当該 Sector 局所であること（隣接へ伝播しない）のテスト | INV-TiDi (a) | ✅ コントローラは状態共有なし・per-Sector（`dilation_in_one_sector_does_not_affect_another`）。クラスタ（多 Sector lockstep）への per-Sector ペーシングは独立ループ化（8B-2 連動）が必要・未 |
+| 6 | SLA イベント / メトリクス（dilation 係数・継続時間の記録） | INV-TiDi (b) 観測可能 | 🔶 `active_ticks`（継続 Tick）+ 係数・engage/recover ログ。構造化 SLA イベント化は未 |
+| 7 | 負荷減での自動回復（係数 → 1.0）のテスト | INV-TiDi (d) | ✅ `auto_recovers_to_real_time_when_load_drops` |
+| 8 | 差分 TiDi の越境因果ルールを実装 ADR で詰める | ADR-0018 未解決論点 | ⬜ |
+
+> **Phase 8B 一区切り（2026-06-15）**
+>
+> **達成**: 過負荷対応ヒエラルキー（ADR-0018）の中核が機能する状態になった。
+> - **局所 TiDi コア（8B-4/5/7）** ✅ — 決定論的に発動（論理コスト基準・非破壊・自動回復）。単一密戦闘の安全網。
+> - **入場バックストップ（8B-1）** ✅ — 生カウントの最終手段。
+> - **容量レバー（8C / AoI）** ✅ — 真の O(n²)（配信側）を解消し TiDi 閾値を押し上げ。
+>
+> これで**柱①（TiDi 閾値が桁違いに高い大規模リアルタイム戦闘 / ADR-0016）の主要レバーは単一 Sector 内で出揃った**。
+> 単一密戦闘＝クライマックスは「AoI で容量↑ → それでも超えたら局所 TiDi で全員が少し遅い → 極端時のみ入場制限」で一貫して捌ける。
+>
+> **意図的に open のまま残す項目（柱①をブロックしない）**:
+> - **8B-3 Simulation LoD** ⏸️ deferred（ADR-0020）— 計算メリット未実証。再開は go/no-go スパイク次第。
+> - **8B-2 Dynamic Sector Fission** ⬜ — 要 ADR。密戦闘には効かず**空間分離可能な負荷**（複数戦線・広域経済）向け。
+>   物理ノード分散（**8D**）と本質的に対であり、8D 着手時にまとめて設計するのが自然。クラスタ per-Sector ペーシング（8B-5 残り）の前提でもある。
+> - **8B-8 差分 TiDi 越境** ⬜ — 別 ADR・8B-2 に依存。多 Sector の差分 dilation が前提。
+> - **8B-6 構造化 SLA イベント** 🔶 — 係数・継続 Tick・engage/recover ログは実装済み。イベント化は小さな磨き込みで後回し可。
+>
+> **結論**: 密戦闘（柱①）の主要レバーが揃ったので Phase 8B を一区切りとする。残り（Fission / 越境 TiDi / SLA イベント化）は
+> それぞれ独立 ADR・または 8D（分散インフラ）と連動して着手する。次の自然な前進先は **8D（物理ノード分散）** か
+> **戦闘の深み（ADR-0016 §5: Tackle → Signature → Orbit/Keep at Range → Logistics）**。
+
+### 8C. AoI 静的セルグリッド（ADR-0019）✅ ほぼ完了（NPCオートロック連携のみ保留）
+
+> 8C が効くほど 8B-4〜7（TiDi 発動）が稀になる。両者は連動する。
+> ADR-0019 で確定: 真に O(n²) なのは **AoI（配信側・O(p·n)）** のみ。サーバ計算側は戦闘が
+> 既知ターゲットに作用するため近傍探索負荷が実在せず、専用の exact 半径加速グリッドは**撤回**。
+> 解は **静的セルグリッド + 3×3×3 隣接可視**（EVE 流バケツ化 + 不連続を 1.5 セル先へ。3D ゆえ 27 セル）。
+> 単一密戦闘は空間分割では救えず TiDi（ADR-0018）に落ちる。
+
+| # | タスク | 備考 | 状態 |
+|---|---|---|---|
+| 1 | **新規 ADR 起票**（AoI 静的セルグリッド 3×3×3） | ADR-0019・人間承認済み 2026-06-15 | ✅ |
+| 2 | `dawn-simulation` に静的セルグリッド（床除算 + セル→ShipId バケツ、近傍列挙・ShipId 順） | 派生・非永続（スナップショットに含めない）。`aoi.rs` + 6 テスト。3D ゆえ近傍は 3×3×3=27 セル | ✅ |
+| 3 | `ws_server` `InitialState` を 3×3×3 スコープ化 + セル跨ぎで外周殻のみ Enter/Leave（churn 有界） | 帯域レバー（fb2a484 の発展） | ✅ 接続時スコープ化 + `aoi_delta` で毎 Tick Enter/Leave 配信（`AoiEnter`/`AoiLeave` 新メッセージ・両 serve ループ + client main.gd）|
+| 4 | `DomainEvent` 配信フィルタ（関与 Ship が観測者の 27 セル近傍のときのみ送る） | 配信側の関心事・権威状態に触れない | ✅ `event_visible_to`（主船+副次船）で per-session フィルタ・両 serve ループ + 4 aoi テスト |
+| 5 | （副次）NPC オートロック / 将来 AoE の半径内探索を同じ静的セルの 27 セル候補 + 厳密距離に載せ替え | 全走査版と同一結果テスト | ⬜ |
+| 6 | p を増やしつつ AoI 有無の 1 Tick 時間・配信量を比較し閾値上昇を記録 | 容量↑の実証 | ✅ `--aoi-bench`（バイナリ内・benches 基盤未整備のため慣習に合わせた）。n=1k→20k で naive scan 770µs→315ms に対し AoI query ~16ms・speedup 3→19.5x・配信量 ~45x 削減 |
+
+### 8D. 分散インフラ（物理ノード）✅ 完了（Raspberry Pi 実機検証 2026-07-01 PASS）
+
+> **第1次 8D マイルストンは意図的に最小化する**（8D レビュー 2026-06-15 の結論）。
+> 「巨大基盤の一括建設」ではなく「実機で検証できる薄いスライス」を先に通す:
+> **静的 3 ノード config + postcard ワイヤ + ネットワーク RaftTransport + ログ配布ゴシップ（ADR-0021）+ LAN 平文
+> → Pi 実機で Raft/Gossip を検証**。下記の defer 項目はトリガー付きで後続。
+
+| # | タスク | 備考 | 状態 |
+|---|---|---|---|
+| 1 | ~~dawn-proto（protobuf）~~ → **不採用**。ワイヤ = postcard+serde 再利用 + 最小の版付きフレーミング（長さ前置・種別タグ・版ハンドシェイク）を transport 層に置く | AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」参照。理由: Rust↔Rust・多言語不要・スキーマ進化は event-schema-evolution.md で規律化済み。protobuf は型の二重定義のみ生む | ✅ 方針確定（不採用） |
+| 2 | dawn-replication（追記ログのゴシップ配布 + アンチエントロピー + スナップショット転送） | 新規クレート・ADR-0021/0027（単一所有のため競合解決 CRDT/LWW は不要）。8D-2a: `ReplicationBus` を dawn-replication の `InMemoryReplicationBus` へ移動し、`dawn-actor` は純粋なクライアント転送境界（`ClientConnection`）に縮小済み。送信側: `OutboundLogPublisher` が append-log cursor と `LogBatch` suffix 構築を保持し、production Node は `publish_new_events` を呼ぶだけに縮小済み。8D-2b: `AntiEntropy`（gap 検出・重複/overlap 判定・`iter_from` suffix 応答）実装済み。8D-2c: `TcpReplicationTransport`（4-byte length prefix + postcard / LAN plaintext）実装済み。8D-2d: `SnapshotTransfer`（`Serialize+DeserializeOwned` ジェネリック・u32 LE length prefix / 256 MiB cap）実装済み（2 テスト）。消費側: `ReplicaSet`（peer セクターごとに gap 検出・冪等・順序保持で複製ログを保持。ライブ world 適用と failover は別機能）実装済み（M-5・6 テスト） | ✅ |
+| 3 | ネットワーク `RaftTransport` 実装（`InProcessTransport` の差し替え。静的 config のピア表） | trait は既存（transport.rs）。TLS 可能な選択（TCP+rustls / QUIC）にし後付けを塞がない。`TcpRaftTransport`（4-byte LE + postcard / LAN plaintext / per-peer 自動再接続 / accept ループ）実装済み（dawn-consensus/src/tcp_transport.rs・8D-3） | ✅ |
+| 4 | dawn-sector-node（本番実行バイナリ・上記 transport + ゴシップの配線・静的 config 起動） | 新規クレート。`TcpRaftTransport` + `TcpReplicationTransport` を TOML 静的 config で配線。3 プロセスで 3 セクタクラスタ（ws/:787{8,9,80} raft/:790{0,1,2} repl/:791{0,1,2}）。プレイヤー Jump 時は `Redirect` JSON でクライアントを宛先 WS へ誘導し、`player_id` / `ship_id` 付き Hello で同じ player ship を resume（2026-06-29） | ✅ |
+| 5 | （任意・推奨）Raspberry Pi クラスタ実機検証 | 下記 ★ 参照 | ✅ 2026-07-01・3項目とも PASS（[8d5-hardware-notes.md](./8d5-hardware-notes.md) 実行ログ参照） |
+| 6 | `dawn-sector-node` への永続化配線（FileEventStore + checkpoint + 起動時リカバリ） | Phase 3 で `FileEventStore`/`checkpoint()`/`CheckpointScheduler`/`restore_from` は実装・テスト済みだったが、8D-4 で新設した本番バイナリには配線されておらず、本番は `InMemoryEventStore`（再起動で全消失）のまま稼働していたことが判明。`NodeConfig` に `event_log_path`/`snapshot_path`/`cold_path`/`checkpoint_interval_ticks` を追加し、起動時にスナップショットの有無で新規/復元を分岐、tickループに `CheckpointScheduler::maybe_checkpoint` を配線。実機起動→kill→再起動で tick・log_index が継続することを確認済み | ✅ 2026-07-01 |
+
+**defer（トリガー付き・第1次マイルストン外。2026-07-01 時点で4項目とも未発火、着手不要）:**
+
+| 項目 | トリガー（いつ着手するか） | 現状 |
+|---|---|---|
+| Raft ログ圧縮 + **InstallSnapshot RPC** | Raft ログ（transit 専用で小・成長は遅い）の無限成長が問題化、または圧縮導入で base_index 前を捨て遅延 follower が AppendEntries で追えなくなったら（ADR-0017 圧縮と対の completeness 項目） | 未発火。`dawn-consensus/src/lib.rs` のスコープ注記どおり未実装のまま。8D-5 実機検証（数百隻規模・短時間）でもログ成長は問題化せず |
+| メンバーシップ変更（Raft ConfChange） | ノード入替・スケール・**8B-2 Fission（動的トポロジ）** が要るとき | 未発火。8B-2 Fission は roadmap 上も `⬜`・未着手のまま（要 ADR） |
+| 動的ノード発見 | 弾力クラスタにするとき（固定 3 ノードは静的 config で足りる） | 未発火。8D-4/8D-5 とも 3 ノード静的 config のまま運用・検証済み |
+| TLS / 認証 | インターネット公開時（LAN の Pi 検証は平文で可）。transport を TLS 可能にしておけば後付け可 | 未発火。8D-5 の実機検証も意図的に LAN 平文のまま実施（[8d5-hardware-notes.md](./8d5-hardware-notes.md) Out of scope 参照）。インターネット公開の計画はまだない |
+
+★ 実機検証（任意・推奨）: ネットワークトランスポート実装後、Raspberry Pi クラスタ
+（Pi 4/5 推奨。Zero 2 W は aarch64 ビルド可だが 512MB RAM が制約のため数百隻規模に縮小）で
+3 ノードを物理的に分離して動作確認する。目的: 実ネットワーク遅延・分断条件下での Raft / Gossip
+挙動を実機で検証する（dawn の競争優位＝分散基盤の本番妥当性を確かめる / ADR-0016）。
+検証項目・合否基準・自動検証スクリプトは [8d5-hardware-notes.md](./8d5-hardware-notes.md) 参照。
+
+### 8E. Transit consensus（ADR-0017 §5 で方針決定済み）✅ 方針確定（バッチ提案は保留）
+
+| # | タスク | 備考 | 状態 |
+|---|---|---|---|
+| 1 | 単一 Raft グループを維持（実装変更なし） | マルチ Raft はメンテ不能として却下 | ✅ 方針確定 |
+| 2 | バッチ提案（fleet jump = N 隻を 1 エントリに束ねる） | fleet-jump レイテンシが実測で問題化したら着手 | ⬜ 保留 |
+
+---
+
 ## 廃止・変更された計画の記録
 
 ### 2026-06-14: Phase 8 の前提を 3 つの設計判断で変更（ADR-0016/0017/0018）
