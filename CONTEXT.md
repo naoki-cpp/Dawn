@@ -36,7 +36,26 @@ player stronger.
   player's session is owed each frame, based on spatial proximity
   (`dawn_sector::aoi`).
 - Fitting: a ship's equipped modules and slot layout.
-- Module: an item that changes capabilities or performs an active effect.
+- Item: something a player can own, store in inventory, and consume/produce
+  via Station operations (build cost, Assemble/Disassemble). Includes Module,
+  Packaged Ship, and Scrap Metal.
+- Scrap Metal: the raw resource consumed to build a new Packaged Ship (and,
+  later, other Items). Dropped by ShipDestroyed — acquired only through
+  active combat, never passive gathering (Non-Goals: no AFK mining).
+- Module: an Item that changes capabilities or performs an active effect.
+- Packaged Ship: the Item form of a Ship — storable, not pilotable. Converts
+  to a Ship via Assemble at a Station, and back via Disassemble. Assemble
+  requires the Packaged Ship to be fully unfitted (no Modules attached).
+  Disassemble requires the Ship to be undamaged and fully unfitted (prevents
+  free repair by round-tripping through Item form, and reuses the existing
+  Module fit/unfit path instead of a new fitted-Item data shape).
+- Station: a location where Assemble/Disassemble (and future building)
+  happens. Initially NPC-provided only; player-built Stations are a later
+  extension (see Source Of Truth: roadmap.md Phase 9).
+- Currency: a per-Player balance held in the Market's own ledger, not an Item.
+  Unlike Item (which a Ship physically carries and can lose on ShipDestroyed),
+  Currency survives ship loss. Priced trades settle via the Market's own
+  bid/ask order book, not a fixed or formula-driven price.
 - Capacitor: the ship energy resource shared by active modules.
 - TiDi: local real-time pacing degradation used only as a bounded last resort;
   logical ticks remain deterministic.

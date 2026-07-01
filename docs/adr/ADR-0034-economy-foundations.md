@@ -1,0 +1,190 @@
+---
+id      : ADR-0034
+title   : Economy Foundations — Item Generalization, Packaged Ships, Scrap Metal, and the Market/DB Boundary
+status  : accepted
+date    : 2026-07-02
+deciders: [human, ai-agent]
+related : ADR-0016（FBD-008 撤廃・段階的拡張方針§5）, ADR-0032（InventoryComp / Fit・Unfit の初出、本ADRが一般化する）, ADR-0003（Local-first development）, docs/process/roadmap.md §12（Phase 9）/ §9（継続的システム）, CONTEXT.md
+---
+
+# ADR-0034 — Economy Foundations
+
+## 背景
+
+roadmap.md §12（Phase 9 — Resource + Economy Context）は方向性のみで、具体的な
+資源シンク・データモデル・Market の置き場所が未確定だった。`/grill-with-docs`
+（`/grilling` + `/domain-modeling`）で人間と対話しながら以下を1つずつ決定した。
+ADR-0016 §5「各項目は個別ADRを起票して着手する」に従い、本ADRでその決定を記録する。
+
+現状の `InventoryComp`（ADR-0032）は `items: Vec<ModuleId>` で Module 専用に
+型が固定されている。今回 Item の種類を増やす（Packaged Ship・Scrap Metal）に
+あたり、この型を一般化する必要がある。
+
+## 決定
+
+### 1. Item の一般化
+
+`Item` を「プレイヤーが所有し、インベントリに保管し、Station操作を通じて
+消費/生産できるもの」の上位概念として定義する（CONTEXT.md へ反映済み）。
+Module・Packaged Ship・Scrap Metal はすべて Item である。
+
+```rust
+enum ItemId {
+    Module(ModuleId),
+    PackagedShip(ShipTypeId),
+    ScrapMetal,
+}
+
+// InventoryComp.items: Vec<ModuleId> を置き換える
+pub struct InventoryComp {
+    pub items: BTreeMap<ItemId, u64>,  // 種類ごとの数量スタック
+}
+```
+
+`Vec<ModuleId>`（1エントリ=1個）から `BTreeMap<ItemId, u64>`（種類ごとの数量）
+へ変える。Scrap Metal はバルクな数量資源であり「1エントリ=1個」方式では
+表現できないため。`HashMap` ではなく `BTreeMap` にするのは、決定論的シミュレー
+ション（INV-005・Replay再現性）で反復順序を安定させるため。
+
+`ShipTypeId` と `ModuleId` は構造的には統合しない（船体はスロットレイアウト・
+HPを持ち、モジュールはスタットデルタを持つ——フィールド形状が全く異なる）。
+統合するのは経済上の扱い（Item として同じ棚に乗る）だけで、既存レジストリ
+（`module_registry`/`ship_type_registry`）はそのまま別に保つ。
+
+### 2. Packaged Ship / Station / Assemble・Disassemble
+
+Ship は「Packaged Ship」（Item形態・格納可能・搭乗不可）と「Ship」（搭乗可能な
+エンティティ）の2形態を持つ。**Station** で相互変換する:
+
+- **Assemble**: Packaged Ship → Ship。Packaged Ship が未艤装であることが条件
+  （艤装情報はPackaged Ship側に持たせない——既存の `fit_module_owned` の延長で
+  Assemble後に艤装する）。
+- **Disassemble**: Ship → Packaged Ship。Ship が**無傷**（Shield/Armor/Hull
+  フル）かつ**未艤装**であることが条件。無傷を要求するのは、Disassemble→
+  Assembleの往復で無料修理ができてしまうと既存の Local Repair モジュール
+  （ADR-0033）の存在価値を壊すため。未艤装を要求するのは、艤装済みモジュールを
+  Packaged Ship 側に持たせる新データ構造を避け、既存の Fit/Unfit 経路
+  （ADR-0032）だけで足りるようにするため。
+
+Station は初期段階では **NPC提供のみ**（プレイヤー建造不可）。プレイヤーが
+建造できる構造物（Smart Assembly相当のアクセス制御述語含む）は
+roadmap.md §12 の 9C で別途扱う。Assemble/Disassemble 自体は**無料**で
+何度でも往復可能（新規建造ではなく状態変換のため）。
+
+### 3. Scrap Metal（資源シンク）
+
+Packaged Ship を**新規に建造する**ときに消費する生資源を `Scrap Metal` と
+命名する。当初「船の移動（Warp/Jump）で燃料を消費する」モデルを検討したが
+却下し（§却下した代替案）、「建造コスト」モデルを採用した。
+
+Scrap Metal は `ShipDestroyed` イベント発生時に**撃破者へ即座に加算**される
+（新しい Wreck エンティティは作らない）。既存の戦闘という能動的行為がそのまま
+資源獲得の導線になり、ADR-0016 §5 / eve-reference §7.4.3 の「受動採取
+（AFK放置）は禁止・能動的な複数ステップの導線にする」という制約と、Non-Goals
+の「no AFK mining」に整合する。
+
+建造コストが発生するのは Packaged Ship の**新規建造時のみ**（一度きり）。
+Assemble/Disassemble のループ自体には追加コストがかからない。
+
+### 4. Market / データベースの境界
+
+将来の Market（プレイヤー間取引）を見据え、SQL 等のデータベースをどこに
+導入するかの境界を決めた。
+
+- **Market の内部（注文帳・マッチング・価格履歴）は完全に独立した新規クレート
+  （例: `dawn-market`）が SQL（SQLiteが第一候補・ADR-0003 Local-first と
+  相性が良い）を**それ自身の権威**として持つ。Tickの決定論制約
+  （INV-001/002/005）には縛られない、遅延許容の別ドメインとして切り離す。
+- Item の実体増減（プレイヤーが所有するShip/PlayerのInventoryComp書き換え）
+  だけは Sector 側の権威状態なので、既存の Event Workflow
+  （AI_DEVELOPMENT_GUIDE.md「Event Workflow」Command→検証→Event→EventStore）
+  を通す。Market から Sector へは、**片側だけの独立した3つのCommand**で
+  橋渡しする:
+  - `RemoveItemCommand`（出品/List時、売り手のSectorへ）
+  - `ReturnItemCommand`（キャンセル時、売り手のSectorへ）
+  - `CreditItemCommand`（成立/Settle時、買い手のSectorへ）
+
+  「Aから消してBへ移す」という単一のTransferではなく、常に片側1SectorだけへComamndを
+  発行する設計にすることで、売り手/買い手が別Sectorに所属していても
+  Transit/Raft合意（INV-003）が一切不要になる（エンティティの所有権移転
+  ではなく、単なるInventory内訳の増減のため）。
+
+### 5. Currency（通貨）は Market 側の台帳、Item ではない
+
+Currency は `ItemId` に含めず、**`dawn-market` の SQL 台帳に `PlayerId` 単位の
+残高**として持つ。Sector 側の `InventoryComp` には一切現れない。
+
+理由: 価格情報（bid/ask の指値注文帳）はすでに Market が SQL で権威として
+持っている。取引に使う Currency の残高までSector側 Item として二重に持たせると、
+「本当の残高はどちらか」という権威の分裂を生む。Currency は Market ドメイン
+だけで完結させるのが自然。
+
+副次的な帰結: **Currency は Ship が撃破されても失われない**（EVE の ISK
+ウォレットと同じ扱い）。Scrap Metal / Module / Packaged Ship は Ship が物理的に
+運ぶ Item（`InventoryComp`）なので `ShipDestroyed` で失われうるが、Currency は
+Player 単位の Market 台帳なので対象外——これは意図的な非対称性である。
+
+決済時の扱いも非対称になる: Item の受け渡しは §4 の片側Command
+（`RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand`）で Sector へ
+橋渡しするが、Currency の受け渡しは **Market内部のSQLトランザクションだけで完結**
+し、Sector へは一切Commandを発行しない（買い手のCurrency残高を減らし、
+売り手のCurrency残高を増やすだけ）。
+
+### 6. 価格決定: 指値マッチング（板・オーダーブック）
+
+Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格を決めない。
+**買い手・売り手それぞれが指値（bid/ask）を出し、Market が交差した時点で
+約定させる**、通常の板（オーダーブック）方式を採用する。
+
+理由: CONTEXT.mdの設計原則「意図的なプレイヤー判断を増やすか」に沿う——
+指値を出す/受け入れるという判断自体がプレイヤーの意思決定になる。アルゴリズム式
+だと Market 自身が価格を決めてしまい、プレイヤーの判断が「買うか買わないか」
+だけに縮小する。需要が多ければ bid が自然に吊り上がるので、追加の価格式は不要。
+
+## 却下した代替案
+
+- **資源シンクを船の燃料消費（Warp/Jump時）にする**: eve-reference §7.4.3の
+  Frontier燃料経済を参考に最初に提案したが、ユーザーの意図は「建造コスト」
+  であり却下。建造コストの方が「実損のある危険な宇宙」（ADR-0016柱④）に
+  直結する。
+- **ShipTypeId/ModuleId を1つのRust型に構造的統合する**: フィールド形状が
+  大きく異なり、統合すると大きなリファクタが必要な割に経済的利益が薄い。
+  `ItemId` enumによる語彙レベルの統一で十分。
+- **Disassemble時に艤装ごとPackaged Shipへ保存する**: 艤装情報を持つ新しい
+  データ構造が必要になる。既存のUnfit経路を使う方が実装コストが低い。
+- **損傷した船でもDisassemble可能にする**: Disassemble→Assembleの往復による
+  無料修理という抜け穴を生み、Local Repairモジュール（ADR-0033）を無意味に
+  する。フルHP必須のバリデーションで防ぐ。
+- **Scrap MetalをWreck（残骸）に残し、拾いに行く必要がある形にする**: 「拾う
+  リスク」という駆け引きは魅力的だが、新しいエンティティ型・所有権・AoI配信
+  が必要になり、§9Aの最小スコープを超える。即時加算をMVPとし、Wreck方式は
+  将来の拡張候補として残す。
+- **プレイヤーが最初からStationを建造できるようにする**: 構造物のアクセス
+  制御（Smart Assembly相当）はそれ自体が別の大きな決定空間（§9C）。NPC提供の
+  最小Stationだけを先に用意し、資源シンクの動作確認を待たずに済ませる。
+- **MarketをSector側イベントから構築する「read model」（投影）として設計する**:
+  当初はこの形（Marketの状態は全てEvent Logから再構築可能な投影）を提案したが、
+  「Marketは遅くていい」という前提のもとで不要な複雑さと判断し、Market自身の
+  状態（注文・マッチング）はSQL側を直接の権威とする形に変更した。Sector側の
+  権威状態（Item所持）とだけ、片側Command経由で整合性を取る。
+- **Currency を `ItemId` の1バリアントとして `InventoryComp` に持たせる**:
+  最初に提案したが、Market が既に価格情報（指値注文帳）をSQLで権威として
+  持っている以上、取引に使うCurrency残高までSector側Itemとして二重に持たせる
+  意味がないと判断し却下。Currencyは`dawn-market`の`PlayerId`単位の台帳に
+  一本化する。
+- **Marketの価格をアルゴリズム式（AMM/Bonding curve）で決める**: Market自身が
+  数式で価格を提示する方式も検討したが、プレイヤーの指値という意思決定を
+  奪ってしまうため却下。板（オーダーブック）方式を採用する。
+
+## 実装チェックリスト
+
+- [ ] dawn-core: `ItemId` enum（Module/PackagedShip/ScrapMetal。**Currencyは含まない**）
+- [ ] dawn-ecs: `InventoryComp.items` を `Vec<ModuleId>` → `BTreeMap<ItemId, u64>` へ一般化（ADR-0032 のデータモデルを置き換え）
+- [ ] dawn-core: 新規イベント（`PackagedShipBuilt`/`ShipAssembled`/`ShipDisassembled` 等、event-catalog.md に追記）
+- [ ] dawn-sector: `ShipDestroyed` 発生時に Scrap Metal を撃破者へ加算する経路
+- [ ] dawn-sector: Station（NPC提供の最小実装）+ Assemble/Disassemble コマンド・バリデーション（未艤装/無傷チェック）
+- [ ] dawn-sector: Packaged Ship 建造（Scrap Metal 消費）コマンド
+- [ ] 新規クレート `dawn-market`: SQLite バックエンドの指値注文帳（bid/ask マッチング）・`PlayerId` 単位の Currency 台帳・`RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` 発行経路（Dependency DAG 上の位置は別途確認）
+- [ ] client: Packaged Ship のインベントリ表示・Station操作UI・Market閲覧UI（指値注文の発注・Currency残高表示）
+- [x] CONTEXT.md: `Item`/`Packaged Ship`/`Station`/`Scrap Metal`/`Currency` を追記済み（本セッション中）
+- [ ] `cargo test --workspace` / `fmt` / `clippy -D warnings` 全緑
