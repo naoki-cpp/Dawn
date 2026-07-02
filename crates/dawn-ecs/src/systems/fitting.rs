@@ -36,22 +36,11 @@ pub fn apply_fitting(
         .get::<FittingComp>(entity)
         .map(|f| {
             // mass_add: passive — sum from ALL slots regardless of is_effective().
-            let mass_add: f32 = f
-                .high
-                .iter()
-                .chain(f.mid.iter())
-                .chain(f.low.iter())
-                .chain(f.rig.iter())
-                .map(|s| s.def.stat_delta.mass_add)
-                .sum();
+            let mass_add: f32 = f.iter_slots().map(|s| s.def.stat_delta.mass_add).sum();
 
             // speed_multiplier: product of EFFECTIVE slots only (AB must be ON).
             let speed_mult: f32 = f
-                .high
-                .iter()
-                .chain(f.mid.iter())
-                .chain(f.low.iter())
-                .chain(f.rig.iter())
+                .iter_slots()
                 .filter(|s| s.is_effective())
                 .map(|s| s.def.stat_delta.speed_multiplier)
                 .product();

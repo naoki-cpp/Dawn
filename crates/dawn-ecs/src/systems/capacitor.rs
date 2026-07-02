@@ -20,7 +20,7 @@
 //!   so that `ShipStatsComp` reflects the new module state.
 
 use crate::{
-    components::{CapacitorComp, FittedSlot, FittingComp, ShipIdComp, ShipStatsComp},
+    components::{CapacitorComp, FittingComp, ShipIdComp, ShipStatsComp},
     systems::repair::RepairCycle,
     SimWorld,
 };
@@ -77,11 +77,7 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
         .iter()
         .map(|(entity, (sid, cap, stats, fit))| {
             let slots: Vec<SlotInfo> = fit
-                .high
-                .iter()
-                .chain(fit.mid.iter())
-                .chain(fit.low.iter())
-                .chain(fit.rig.iter())
+                .iter_slots()
                 .enumerate()
                 .filter(|(_, slot)| slot.def.activation_mode == ActivationMode::Active)
                 .map(|(i, slot)| SlotInfo {
@@ -205,21 +201,8 @@ fn update_cycles(world: &mut SimWorld, entity: hecs::Entity, updates: &[(usize, 
         return;
     };
 
-    let high_len = fitting.high.len();
-    let mid_len = fitting.mid.len();
-    let low_len = fitting.low.len();
-
     for &(flat_idx, new_remaining) in updates {
-        let slot: Option<&mut FittedSlot> = if flat_idx < high_len {
-            fitting.high.get_mut(flat_idx)
-        } else if flat_idx < high_len + mid_len {
-            fitting.mid.get_mut(flat_idx - high_len)
-        } else if flat_idx < high_len + mid_len + low_len {
-            fitting.low.get_mut(flat_idx - high_len - mid_len)
-        } else {
-            fitting.rig.get_mut(flat_idx - high_len - mid_len - low_len)
-        };
-        if let Some(slot) = slot {
+        if let Some(slot) = fitting.slot_at_flat_mut(flat_idx) {
             slot.cycle_remaining = new_remaining;
         }
     }
@@ -237,22 +220,8 @@ fn deactivate_modules(
         return;
     };
 
-    let high_len = fitting.high.len();
-    let mid_len = fitting.mid.len();
-    let low_len = fitting.low.len();
-
     for &flat_idx in flat_indices {
-        let slot: Option<&mut FittedSlot> = if flat_idx < high_len {
-            fitting.high.get_mut(flat_idx)
-        } else if flat_idx < high_len + mid_len {
-            fitting.mid.get_mut(flat_idx - high_len)
-        } else if flat_idx < high_len + mid_len + low_len {
-            fitting.low.get_mut(flat_idx - high_len - mid_len)
-        } else {
-            fitting.rig.get_mut(flat_idx - high_len - mid_len - low_len)
-        };
-
-        if let Some(slot) = slot {
+        if let Some(slot) = fitting.slot_at_flat_mut(flat_idx) {
             if slot.is_active {
                 let module_id = slot.def.id;
                 slot.is_active = false;

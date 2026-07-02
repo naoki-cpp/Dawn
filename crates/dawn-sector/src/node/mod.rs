@@ -578,15 +578,7 @@ impl<S: EventStore> SimulationNode<S> {
         self.world
             .inner()
             .get::<&FittingComp>(entity)
-            .map(|f| {
-                f.high
-                    .iter()
-                    .chain(f.mid.iter())
-                    .chain(f.low.iter())
-                    .chain(f.rig.iter())
-                    .map(|s| (s.def.id, s.is_active))
-                    .collect()
-            })
+            .map(|f| f.iter_slots().map(|s| (s.def.id, s.is_active)).collect())
             .unwrap_or_default()
     }
 }

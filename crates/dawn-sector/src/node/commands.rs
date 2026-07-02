@@ -336,11 +336,7 @@ impl<S: EventStore> SimulationNode<S> {
             .get::<&FittingComp>(entity)
             .ok()
             .and_then(|f| {
-                f.high
-                    .iter()
-                    .chain(f.mid.iter())
-                    .chain(f.low.iter())
-                    .chain(f.rig.iter())
+                f.iter_slots()
                     .find(|s| s.def.id == module_id && s.def.slot == slot)
                     .map(|s| (s.def.kind, s.is_active, s.target_ship_id))
             });
