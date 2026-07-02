@@ -156,10 +156,18 @@ impl<S: EventStore> SimulationNode<S> {
                 }
             }
             ClientCommand::Activate(c) => {
+                let ship_id = c.ship_id;
                 self.activate_module_owned(player_id, c);
+                // Activation can now be rejected (ADR-0035: missing/unlocked
+                // target), which the client cannot distinguish from success
+                // by itself — resync so its optimistic HUD toggle gets
+                // corrected when the server refused.
+                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
             }
             ClientCommand::Deactivate(c) => {
+                let ship_id = c.ship_id;
                 self.deactivate_module_owned(player_id, c);
+                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
             }
             // Combat is automatic (CombatSystem each tick); AttackCommand is
             // reserved for a future manual-fire mode.
