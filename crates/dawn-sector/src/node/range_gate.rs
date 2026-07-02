@@ -14,7 +14,7 @@
 
 use dawn_core::events::ModuleDeactivated;
 use dawn_core::{DomainEvent, ShipId, Tick};
-use dawn_ecs::components::{FittingComp, PositionComp, ShipStatsComp};
+use dawn_ecs::components::{FittingComp, ShipStatsComp};
 use dawn_ecs::Entity;
 use dawn_event_store::store::EventStore;
 
@@ -51,34 +51,18 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    /// Whether `target_id` is currently within `range` of `entity`, in
-    /// Sector-frame absolute coordinates. f64 absolutes (ADR-0029): anchor
-    /// offsets can sit at true-AU scale, so the anchor+offset sum must stay
-    /// f64 until *after* the two absolutes are subtracted — casting each one
-    /// to f32 first (as the plain `entity_absolute` helper does) would round
-    /// away the offset entirely and report a bogus distance even for ships
-    /// sitting right next to each other.
+    /// Whether `target_id` is currently within `range` of `ship_id`. Delegates
+    /// to `ship_distance()`, which already composes both ships' anchors in
+    /// f64 before subtracting (ADR-0029) — the precision-safe pattern this
+    /// function used to hand-roll itself.
     pub(super) fn is_target_within_range(
         &self,
-        entity: Entity,
+        ship_id: ShipId,
         target_id: ShipId,
         range: f32,
     ) -> bool {
-        let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else {
-            return false;
-        };
-        let self_abs = self.entity_absolute_f64(entity, pos.0);
-        let Some(&target_entity) = self.ships.index.get(&target_id) else {
-            return false;
-        };
-        let Ok(tp) = self.world.inner().get::<&PositionComp>(target_entity) else {
-            return false;
-        };
-        let target_abs = self.entity_absolute_f64(target_entity, tp.0);
-        let dx = (target_abs[0] - self_abs[0]) as f32;
-        let dy = (target_abs[1] - self_abs[1]) as f32;
-        let dz = (target_abs[2] - self_abs[2]) as f32;
-        (dx * dx + dy * dy + dz * dz).sqrt() <= range
+        self.ship_distance(ship_id, target_id)
+            .is_some_and(|d| d <= range as f64)
     }
 
     /// Range Gate System — Step 5.5 (ADR-0035).
@@ -125,7 +109,7 @@ impl<S: EventStore> SimulationNode<S> {
         let mut events: Vec<DomainEvent> = Vec::new();
         let mut refitted: Vec<ShipId> = Vec::new();
         for c in candidates {
-            if self.is_target_within_range(c.entity, c.target, c.range) {
+            if self.is_target_within_range(c.ship_id, c.target, c.range) {
                 continue;
             }
 

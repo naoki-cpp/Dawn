@@ -394,7 +394,7 @@ impl<S: EventStore> SimulationNode<S> {
         if active {
             if let Some(target_id) = target {
                 if let Some(range) = self.effective_range_for_kind(entity, kind) {
-                    if !self.is_target_within_range(entity, target_id, range) {
+                    if !self.is_target_within_range(ship_id, target_id, range) {
                         self.write_module_slot_state(
                             entity,
                             module_id,
