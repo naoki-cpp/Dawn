@@ -14,7 +14,7 @@
 
 use dawn_core::events::ModuleDeactivated;
 use dawn_core::{DomainEvent, ShipId, Tick};
-use dawn_ecs::components::{FittedSlot, FittingComp, PositionComp, ShipStatsComp};
+use dawn_ecs::components::{FittingComp, PositionComp, ShipStatsComp};
 use dawn_ecs::Entity;
 use dawn_event_store::store::EventStore;
 
@@ -94,14 +94,7 @@ impl<S: EventStore> SimulationNode<S> {
             let Ok(fitting) = self.world.inner().get::<&FittingComp>(entity) else {
                 continue;
             };
-            let flat: Vec<&FittedSlot> = fitting
-                .high
-                .iter()
-                .chain(fitting.mid.iter())
-                .chain(fitting.low.iter())
-                .chain(fitting.rig.iter())
-                .collect();
-            for (flat_idx, slot) in flat.iter().enumerate() {
+            for (flat_idx, slot) in fitting.iter_slots().enumerate() {
                 if !slot.is_active {
                     continue;
                 }
@@ -137,21 +130,7 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(c.entity) {
-                let high_len = fitting.high.len();
-                let mid_len = fitting.mid.len();
-                let low_len = fitting.low.len();
-                let slot: Option<&mut FittedSlot> = if c.flat_idx < high_len {
-                    fitting.high.get_mut(c.flat_idx)
-                } else if c.flat_idx < high_len + mid_len {
-                    fitting.mid.get_mut(c.flat_idx - high_len)
-                } else if c.flat_idx < high_len + mid_len + low_len {
-                    fitting.low.get_mut(c.flat_idx - high_len - mid_len)
-                } else {
-                    fitting
-                        .rig
-                        .get_mut(c.flat_idx - high_len - mid_len - low_len)
-                };
-                if let Some(slot) = slot {
+                if let Some(slot) = fitting.slot_at_flat_mut(c.flat_idx) {
                     if slot.is_active {
                         slot.is_active = false;
                         slot.cycle_remaining = 0;

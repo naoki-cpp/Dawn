@@ -60,24 +60,36 @@ impl FittingComp {
         }
     }
 
-    /// Returns true if any effective slot has the given module kind.
-    /// Used by the Tackle System to check for active Fold Disruptors (ADR-0024).
-    pub fn has_active_module_of_kind(&self, kind: dawn_core::fitting::ModuleKind) -> bool {
+    /// 全スロット（High → Mid → Low → Rig の順）へのイテレータ。
+    /// `flat_idx`（Capacitor System 等が使う「全スロットを通した通し番号」）は
+    /// この順序に対応する — 対になるのは `slot_at_flat`/`slot_at_flat_mut`。
+    pub fn iter_slots(&self) -> impl Iterator<Item = &FittedSlot> {
         self.high
             .iter()
             .chain(self.mid.iter())
             .chain(self.low.iter())
             .chain(self.rig.iter())
+    }
+
+    /// `iter_slots` の可変版。
+    pub fn iter_slots_mut(&mut self) -> impl Iterator<Item = &mut FittedSlot> {
+        self.high
+            .iter_mut()
+            .chain(self.mid.iter_mut())
+            .chain(self.low.iter_mut())
+            .chain(self.rig.iter_mut())
+    }
+
+    /// Returns true if any effective slot has the given module kind.
+    /// Used by the Tackle System to check for active Fold Disruptors (ADR-0024).
+    pub fn has_active_module_of_kind(&self, kind: dawn_core::fitting::ModuleKind) -> bool {
+        self.iter_slots()
             .any(|s| s.def.kind == kind && s.is_effective())
     }
 
     /// 有効なスロット（Passive または Active ON）の `StatDelta` を合計して返す。
     pub fn total_delta(&self) -> StatDelta {
-        self.high
-            .iter()
-            .chain(self.mid.iter())
-            .chain(self.low.iter())
-            .chain(self.rig.iter())
+        self.iter_slots()
             .filter(|slot| slot.is_effective())
             .fold(StatDelta::ZERO, |acc, slot| acc.add(&slot.def.stat_delta))
     }
@@ -100,6 +112,41 @@ impl FittingComp {
             SlotKind::Mid => &self.mid,
             SlotKind::Low => &self.low,
             SlotKind::Rig => &self.rig,
+        }
+    }
+
+    /// `iter_slots` の順序（High → Mid → Low → Rig）における通し番号 `flat_idx`
+    /// が指すスロットを返す。Capacitor System / Range Gate System が使う唯一の
+    /// 逆引き手段 — High/Mid/Low の境界計算をここへ一元化し、呼び出し側が
+    /// `high.len()`/`mid.len()`/`low.len()` を毎回再導出しなくて済むようにする。
+    pub fn slot_at_flat(&self, flat_idx: usize) -> Option<&FittedSlot> {
+        let high_len = self.high.len();
+        let mid_len = self.mid.len();
+        let low_len = self.low.len();
+        if flat_idx < high_len {
+            self.high.get(flat_idx)
+        } else if flat_idx < high_len + mid_len {
+            self.mid.get(flat_idx - high_len)
+        } else if flat_idx < high_len + mid_len + low_len {
+            self.low.get(flat_idx - high_len - mid_len)
+        } else {
+            self.rig.get(flat_idx - high_len - mid_len - low_len)
+        }
+    }
+
+    /// `slot_at_flat` の可変版。
+    pub fn slot_at_flat_mut(&mut self, flat_idx: usize) -> Option<&mut FittedSlot> {
+        let high_len = self.high.len();
+        let mid_len = self.mid.len();
+        let low_len = self.low.len();
+        if flat_idx < high_len {
+            self.high.get_mut(flat_idx)
+        } else if flat_idx < high_len + mid_len {
+            self.mid.get_mut(flat_idx - high_len)
+        } else if flat_idx < high_len + mid_len + low_len {
+            self.low.get_mut(flat_idx - high_len - mid_len)
+        } else {
+            self.rig.get_mut(flat_idx - high_len - mid_len - low_len)
         }
     }
 
@@ -211,6 +258,53 @@ mod tests {
     #[test]
     fn empty_fitting_produces_zero_delta() {
         assert_eq!(FittingComp::empty().total_delta(), StatDelta::ZERO);
+    }
+
+    #[test]
+    fn slot_at_flat_resolves_across_high_mid_low_rig_boundaries() {
+        let mut fitting = FittingComp::empty();
+        fitting.high.push(weapon_slot(true)); // flat_idx 0
+        fitting.mid.push(shield_slot()); // flat_idx 1
+        fitting.low.push(weapon_slot(false)); // flat_idx 2 (id reused for brevity)
+        fitting.rig.push(shield_slot()); // flat_idx 3
+
+        assert_eq!(fitting.slot_at_flat(0).unwrap().def.id, ModuleId(1));
+        assert_eq!(fitting.slot_at_flat(1).unwrap().def.id, ModuleId(2));
+        assert_eq!(fitting.slot_at_flat(2).unwrap().def.id, ModuleId(1));
+        assert_eq!(fitting.slot_at_flat(3).unwrap().def.id, ModuleId(2));
+        assert!(
+            fitting.slot_at_flat(4).is_none(),
+            "out of range must be None"
+        );
+    }
+
+    #[test]
+    fn slot_at_flat_mut_allows_in_place_mutation() {
+        let mut fitting = FittingComp::empty();
+        fitting.high.push(weapon_slot(false));
+        fitting.mid.push(shield_slot());
+
+        fitting.slot_at_flat_mut(1).unwrap().is_active = true;
+
+        assert!(!fitting.high[0].is_active);
+        assert!(fitting.mid[0].is_active);
+    }
+
+    #[test]
+    fn slot_at_flat_handles_empty_leading_vecs() {
+        // High/Mid empty, so flat_idx 0 must resolve into Low, not panic.
+        let mut fitting = FittingComp::empty();
+        fitting.low.push(weapon_slot(true));
+        assert_eq!(fitting.slot_at_flat(0).unwrap().def.id, ModuleId(1));
+    }
+
+    #[test]
+    fn iter_slots_visits_high_mid_low_rig_in_order() {
+        let mut fitting = FittingComp::empty();
+        fitting.high.push(weapon_slot(true));
+        fitting.mid.push(shield_slot());
+        let ids: Vec<ModuleId> = fitting.iter_slots().map(|s| s.def.id).collect();
+        assert_eq!(ids, vec![ModuleId(1), ModuleId(2)]);
     }
 
     #[test]

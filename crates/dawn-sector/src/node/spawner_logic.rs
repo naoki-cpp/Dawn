@@ -254,11 +254,7 @@ impl<S: EventStore> SimulationNode<S> {
                 .inner()
                 .get::<&FittingComp>(entity)
                 .map(|f| {
-                    f.high
-                        .iter()
-                        .chain(f.mid.iter())
-                        .chain(f.low.iter())
-                        .chain(f.rig.iter())
+                    f.iter_slots()
                         .filter(|s| s.def.kind == dawn_core::fitting::ModuleKind::Weapon)
                         .map(|s| (s.def.id, s.def.slot))
                         .collect()
