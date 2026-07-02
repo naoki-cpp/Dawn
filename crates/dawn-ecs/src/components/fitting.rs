@@ -60,9 +60,9 @@ impl FittingComp {
         }
     }
 
-    /// 全スロット（High → Mid → Low → Rig の順）へのイテレータ。
-    /// `flat_idx`（Capacitor System 等が使う「全スロットを通した通し番号」）は
-    /// この順序に対応する — 対になるのは `slot_at_flat`/`slot_at_flat_mut`。
+    /// Iterates every slot in High → Mid → Low → Rig order. `flat_idx` (the
+    /// flat, all-slots index used by the Capacitor System etc.) matches this
+    /// order — the counterpart is `slot_at_flat`/`slot_at_flat_mut`.
     pub fn iter_slots(&self) -> impl Iterator<Item = &FittedSlot> {
         self.high
             .iter()
@@ -71,7 +71,7 @@ impl FittingComp {
             .chain(self.rig.iter())
     }
 
-    /// `iter_slots` の可変版。
+    /// Mutable version of `iter_slots`.
     pub fn iter_slots_mut(&mut self) -> impl Iterator<Item = &mut FittedSlot> {
         self.high
             .iter_mut()
@@ -115,10 +115,11 @@ impl FittingComp {
         }
     }
 
-    /// `iter_slots` の順序（High → Mid → Low → Rig）における通し番号 `flat_idx`
-    /// が指すスロットを返す。Capacitor System / Range Gate System が使う唯一の
-    /// 逆引き手段 — High/Mid/Low の境界計算をここへ一元化し、呼び出し側が
-    /// `high.len()`/`mid.len()`/`low.len()` を毎回再導出しなくて済むようにする。
+    /// Resolves the slot at `flat_idx`, the index into the `iter_slots` order
+    /// (High → Mid → Low → Rig). The single place the Capacitor System and
+    /// Range Gate System resolve this index back to a slot — centralizes the
+    /// High/Mid/Low boundary arithmetic instead of each caller re-deriving
+    /// `high.len()`/`mid.len()`/`low.len()`.
     pub fn slot_at_flat(&self, flat_idx: usize) -> Option<&FittedSlot> {
         let high_len = self.high.len();
         let mid_len = self.mid.len();
@@ -134,7 +135,7 @@ impl FittingComp {
         }
     }
 
-    /// `slot_at_flat` の可変版。
+    /// Mutable version of `slot_at_flat`.
     pub fn slot_at_flat_mut(&mut self, flat_idx: usize) -> Option<&mut FittedSlot> {
         let high_len = self.high.len();
         let mid_len = self.mid.len();
