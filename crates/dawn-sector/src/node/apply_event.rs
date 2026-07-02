@@ -129,8 +129,7 @@ impl<S: EventStore> SimulationNode<S> {
                     if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(entity)
                     {
                         if let Some(slot) = fitting.find_slot_mut(e.module_id, e.slot) {
-                            slot.is_active = false;
-                            slot.target_ship_id = None;
+                            slot.force_off();
                         }
                     }
                     let base = self
@@ -337,5 +336,65 @@ mod tests {
 
         let hp = node.get_ship_hp(ship_id).unwrap();
         assert_eq!(hp, 450.0, "HP total after replay = 150 + 150 + 150 = 450");
+    }
+
+    #[test]
+    fn module_deactivated_event_replay_resets_cycle_remaining() {
+        use crate::modules;
+        use dawn_core::{FitModuleCommand, SlotKind};
+
+        let mut node = mem_node();
+        for def in modules::all_modules() {
+            node.register_module(def);
+        }
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        node.fit_module(FitModuleCommand {
+            ship_id,
+            slot: SlotKind::High,
+            module_id: modules::MODULE_RAILGUN_SMALL,
+        });
+
+        // Reach into the fitting directly (bypassing activation/capacitor)
+        // to simulate a module that was mid-cycle when the node stopped:
+        // is_active = true and cycle_remaining > 0.
+        {
+            let entity = *node.ships.index.get(&ship_id).unwrap();
+            let mut fitting = node
+                .world
+                .inner_mut()
+                .get::<&mut FittingComp>(entity)
+                .unwrap();
+            let slot = fitting
+                .find_slot_mut(modules::MODULE_RAILGUN_SMALL, SlotKind::High)
+                .unwrap();
+            slot.is_active = true;
+            slot.cycle_remaining = 7;
+        }
+
+        node.apply_event_pub(DomainEvent::ModuleDeactivated(
+            dawn_core::events::ModuleDeactivated {
+                ship_id,
+                module_id: modules::MODULE_RAILGUN_SMALL,
+                slot: SlotKind::High,
+                forced_reason: None,
+                tick: Tick(3),
+            },
+        ));
+
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let mut fitting = node
+            .world
+            .inner_mut()
+            .get::<&mut FittingComp>(entity)
+            .unwrap();
+        let slot = fitting
+            .find_slot_mut(modules::MODULE_RAILGUN_SMALL, SlotKind::High)
+            .unwrap();
+        assert!(!slot.is_active);
+        assert_eq!(
+            slot.cycle_remaining, 0,
+            "replaying ModuleDeactivated must reset cycle_remaining, matching every live \
+             deactivation path (capacitor exhaustion, Range Gate, player-issued)"
+        );
     }
 }
