@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use dawn_core::events::{TackleApplied, TackleReleased};
 use dawn_core::fitting::ModuleKind;
 use dawn_core::{DomainEvent, ShipId, Tick};
-use dawn_ecs::components::{FittingComp, LockComp, PositionComp, ShipStatsComp, TackledComp};
+use dawn_ecs::components::{FittingComp, LockComp, ShipStatsComp, TackledComp};
 use dawn_ecs::Entity;
 use dawn_event_store::store::EventStore;
 
@@ -17,15 +17,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// `TackleApplied`/`TackleReleased` events for changes, and updates the ECS.
     pub fn process_tackle(&mut self, tick: Tick) -> Vec<DomainEvent> {
         // Collect ships with at least one active Tackle module.
-        //
-        // Position is kept in f64 absolute (anchor + offset, ADR-0029): at
-        // true-AU anchor scale, adding the offset and casting straight to
-        // f32 (the plain `entity_absolute` helper) rounds the offset away
-        // entirely, misjudging nearby ships as out of range. The delta is
-        // only cast to f32 after subtracting two f64 absolutes below,
-        // matching the precision-safe pattern combat.rs uses for hit-chance
-        // distance.
-        let tacklers: Vec<(ShipId, f32, Vec<ShipId>, [f64; 3])> = self
+        let tacklers: Vec<(ShipId, f32, Vec<ShipId>)> = self
             .ships
             .index
             .iter()
@@ -43,27 +35,22 @@ impl<S: EventStore> SimulationNode<S> {
                 if locked.is_empty() {
                     return None;
                 }
-                let off = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
-                let pos = self.entity_absolute_f64(entity, off);
-                Some((ship_id, stats.tackle_range, locked, pos))
+                Some((ship_id, stats.tackle_range, locked))
             })
             .collect();
 
         // desired[target] = Vec of tacklers currently in range and holding a lock.
+        // ship_distance() composes both ships' anchors in f64 before
+        // subtracting (ADR-0029) — the precision-safe pattern this used to
+        // hand-roll itself, matching combat.rs's hit-chance distance.
         let mut desired: HashMap<ShipId, Vec<ShipId>> = HashMap::new();
-        for (tackler_id, range, locked, tackler_abs) in &tacklers {
+        for (tackler_id, range, locked) in &tacklers {
             for &target_id in locked {
-                if let Some(&te) = self.ships.index.get(&target_id) {
-                    if let Ok(tp) = self.world.inner().get::<&PositionComp>(te) {
-                        let target_abs = self.entity_absolute_f64(te, tp.0);
-                        let dx = (target_abs[0] - tackler_abs[0]) as f32;
-                        let dy = (target_abs[1] - tackler_abs[1]) as f32;
-                        let dz = (target_abs[2] - tackler_abs[2]) as f32;
-                        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-                        if dist <= *range {
-                            desired.entry(target_id).or_default().push(*tackler_id);
-                        }
-                    }
+                if self
+                    .ship_distance(*tackler_id, target_id)
+                    .is_some_and(|d| d <= *range as f64)
+                {
+                    desired.entry(target_id).or_default().push(*tackler_id);
                 }
             }
         }
