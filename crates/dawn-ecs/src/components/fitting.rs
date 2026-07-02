@@ -35,6 +35,20 @@ impl FittedSlot {
             ActivationMode::Active => self.is_active,
         }
     }
+
+    /// Forces this slot off (ADR-0035): clears `is_active`, `cycle_remaining`,
+    /// and `target_ship_id`. Shared by every place that decides a module must
+    /// be turned off — capacitor exhaustion, Range Gate, and player-issued
+    /// deactivation — each of which still builds its own `ModuleDeactivated`
+    /// event (the `forced_reason` and event-sink/`apply_fitting` timing
+    /// differ per caller). Returns this slot's `module_id`, which callers
+    /// need to build that event.
+    pub fn force_off(&mut self) -> ModuleId {
+        self.is_active = false;
+        self.cycle_remaining = 0;
+        self.target_ship_id = None;
+        self.def.id
+    }
 }
 
 /// Ship の装備スロット全体を保持するコンポーネント。

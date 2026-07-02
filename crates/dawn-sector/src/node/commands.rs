@@ -454,8 +454,12 @@ impl<S: EventStore> SimulationNode<S> {
             .ok()
             .and_then(|mut f| {
                 f.find_slot_mut(module_id, slot).map(|s| {
-                    s.is_active = is_active;
-                    s.target_ship_id = if is_active { target } else { None };
+                    if is_active {
+                        s.is_active = true;
+                        s.target_ship_id = target;
+                    } else {
+                        s.force_off();
+                    }
                     true
                 })
             })

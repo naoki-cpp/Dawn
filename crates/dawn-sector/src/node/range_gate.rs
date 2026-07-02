@@ -132,9 +132,7 @@ impl<S: EventStore> SimulationNode<S> {
             if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(c.entity) {
                 if let Some(slot) = fitting.slot_at_flat_mut(c.flat_idx) {
                     if slot.is_active {
-                        slot.is_active = false;
-                        slot.cycle_remaining = 0;
-                        slot.target_ship_id = None;
+                        slot.force_off();
                         events.push(DomainEvent::ModuleDeactivated(ModuleDeactivated {
                             ship_id: c.ship_id,
                             module_id: c.module_id,

@@ -223,10 +223,7 @@ fn deactivate_modules(
     for &flat_idx in flat_indices {
         if let Some(slot) = fitting.slot_at_flat_mut(flat_idx) {
             if slot.is_active {
-                let module_id = slot.def.id;
-                slot.is_active = false;
-                slot.cycle_remaining = 0;
-                slot.target_ship_id = None;
+                let module_id = slot.force_off();
                 events.push(DomainEvent::ModuleDeactivated(ModuleDeactivated {
                     ship_id,
                     module_id,
