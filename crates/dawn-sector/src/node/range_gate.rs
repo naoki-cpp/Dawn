@@ -93,7 +93,13 @@ impl<S: EventStore> SimulationNode<S> {
             let Some(self_pos) = self_pos else {
                 continue;
             };
-            let self_abs = self.entity_absolute(c.entity, self_pos);
+            // f64 absolutes (ADR-0029): anchor offsets can sit at true-AU
+            // scale, so the anchor+offset sum must stay f64 until *after*
+            // the two absolutes are subtracted — casting each one to f32
+            // first (as the plain `entity_absolute` helper does) would
+            // round away the offset entirely and report a bogus distance
+            // even for ships sitting right next to each other.
+            let self_abs = self.entity_absolute_f64(c.entity, self_pos);
 
             let in_range = match self.ships.index.get(&c.target).copied() {
                 Some(target_entity) => {
@@ -105,8 +111,12 @@ impl<S: EventStore> SimulationNode<S> {
                         .ok();
                     target_pos
                         .map(|tp| {
-                            let target_abs = self.entity_absolute(target_entity, tp);
-                            self_abs.distance(target_abs) <= c.range
+                            let target_abs = self.entity_absolute_f64(target_entity, tp);
+                            let dx = (target_abs[0] - self_abs[0]) as f32;
+                            let dy = (target_abs[1] - self_abs[1]) as f32;
+                            let dz = (target_abs[2] - self_abs[2]) as f32;
+                            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+                            dist <= c.range
                         })
                         .unwrap_or(false)
                 }
