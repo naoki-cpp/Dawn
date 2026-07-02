@@ -102,7 +102,7 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.m
 |---|---|---|---|
 | `ShipFitted` | Ship's fitting slots changed | `SimulationNode::fit_module()` | ✅ implemented |
 | `ModuleActivated` | Active Module turned on | `SimulationNode::activate_module_owned()` | ✅ implemented |
-| `ModuleDeactivated` | Active Module turned off (manual, or forced off by Capacitor exhaustion) | `SimulationNode::deactivate_module_owned()` / `CapacitorSystem` | ✅ implemented (forced off on cap exhaustion: ADR-0011) |
+| `ModuleDeactivated` | Active Module turned off (manual, or forced off by Capacitor exhaustion / target out of range) | `SimulationNode::deactivate_module_owned()` / `CapacitorSystem` / `SimulationNode::process_range_gate()` | ✅ implemented (cap exhaustion: ADR-0011, out-of-range: ADR-0035; `forced_reason` carries the cause) |
 
 ### 3.4 Lock-on
 
@@ -376,9 +376,10 @@ Active Module turned off.
 | `ship_id`   | `ShipId`  | ✓ | Ship performing the action |
 | `module_id` | `ModuleId` | ✓ | target Module |
 | `slot`      | `SlotKind` | ✓ | fitting slot type |
+| `forced_reason` | `Option<ModuleDeactivationReason>` |  | `None` for a player-issued OFF; `CapacitorExhausted` (CapacitorSystem) or `OutOfRange` (Range Gate System) for a system-forced OFF (ADR-0035) |
 | `tick`      | `Tick`    | ✓ | Tick of deactivation |
 
-**Design note:** counterpart of `ModuleActivated`. Replay sets `FittedSlot.is_active = false`.
+**Design note:** counterpart of `ModuleActivated`. Replay sets `FittedSlot.is_active = false` and clears `target_ship_id`. The wire protocol maps `forced_reason` to `reason: "cap" | "range"` (omitted for `None`) so the client labels CAP!/RANGE! from the authoritative reason.
 
 ---
 

@@ -192,6 +192,7 @@ tackle_range_add = 20000.0
 - [x] `docs/architecture/event-catalog.md` を更新（TackleApplied / TackleReleased 追記）
 - [x] テスト: tackled 中は warp/jump が拒否される（`tackled_ship_cannot_warp`）
 - [x] テスト: tackler が死亡したら tackle 解除（`tackle_releases_when_tackler_dies`）
-- [ ] テスト: 射程外に出たら tackle 解除（未実装）
+- [x] テスト: 射程外に出たら tackle 解除（ADR-0035 で挙動を強化: 射程外になるとモジュール自体が
+      Range Gate System により強制 OFF される。`range_gate.rs::tackle_is_force_deactivated_once_its_locked_target_drifts_beyond_tackle_range`）
 - [ ] テスト: 複数 tackler のうち 1 人が解除しても残りが有効なら tackled 継続（未実装）
 - [x] テスト: スナップショット round-trip で TackledComp が保持される（`tackle_snapshot_round_trip_preserves_tackle_state`）

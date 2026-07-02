@@ -41,14 +41,14 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `client/scripts/main.gd` | 1170 | 🟡 オーケストレーション層。scene lifecycle / input / node creation を保持。live world state は `WorldSession`、HUD surface ownership は `HudSurface` へ移動 |
-| `client/scripts/hud_manager.gd` | 627 | 🟡 HUD 全パネルの構築・更新の stateless static class。責務は単一（HUD 構築）で、前回 521 から増加 |
-| `client/scripts/connection.gd` | 343 | 🟢 WebSocket I/O とシグナル発行のみ。前回 279 から増加 |
+| `client/scripts/main.gd` | 1165 | 🟡 オーケストレーション層。scene lifecycle / input / node creation を保持。live world state は `WorldSession`、HUD surface ownership は `HudSurface` へ移動 |
+| `client/scripts/hud_manager.gd` | 634 | 🟡 HUD 全パネルの構築・更新の stateless static class。責務は単一（HUD 構築）で、前回 521 から増加 |
+| `client/scripts/connection.gd` | 348 | 🟢 WebSocket I/O とシグナル発行のみ。前回 279 から増加 |
 | `client/scripts/ship_controller.gd` | 326 | 🟢 単一船の視覚表現に専念。ロックオン枠は `BillboardRing` 共通化。前回 277 から増加 |
 | `client/scripts/world_session.gd` | 265 | 🟢 InitialState / AoI / HP / lock / tick-cap の client-side live world state |
 | `client/scripts/navigation_marker_renderer.gd` | 164 | 🟢 C-1で新設。ゲート/惑星マーカー生成 + スペクトル色 |
 | `client/scripts/camera_controller.gd` | 131 | 🟢 自己完結したオービットカメラ |
-| `client/scripts/player_fitting.gd` | 123 | 🟢 PR #33 新設。フィッティング/インベントリの純粋関数（`normalize_payload` / `simulate_capacitor_ticks` 等）。main.gd は呼び出すのみで内部構造に触れない |
+| `client/scripts/player_fitting.gd` | 126 | 🟢 PR #33 新設。フィッティング/インベントリの純粋関数（`normalize_payload` / `simulate_capacitor_ticks` 等）。main.gd は呼び出すのみで内部構造に触れない |
 | `client/scripts/input_decoder.gd` | 114 | 🟢 C-1で新設。キー入力→アクション決定の純粋関数。GdUnit4 テスト済み。前回 100 から増加（`[`/`]`・`I` キー追加） |
 | `client/scripts/ship_picking.gd` | 104 | 🟢 C-1で新設。船/ゲート/天体ピッキング3関数（画面空間ピッキング） |
 | `client/scripts/hud_surface.gd` | 129 | 🟢 86→129。HUD Control 参照を所有し、`main.gd` からの render frame / hit-test 要求を `HudManager` へ委譲。`render()` にパネル単位の dirty-tracking を追加（2026-07-01・C-6 参照） |
