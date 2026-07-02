@@ -17,7 +17,15 @@ impl<S: EventStore> SimulationNode<S> {
     /// `TackleApplied`/`TackleReleased` events for changes, and updates the ECS.
     pub fn process_tackle(&mut self, tick: Tick) -> Vec<DomainEvent> {
         // Collect ships with at least one active Tackle module.
-        let tacklers: Vec<(ShipId, f32, Vec<ShipId>, dawn_core::Position)> = self
+        //
+        // Position is kept in f64 absolute (anchor + offset, ADR-0029): at
+        // true-AU anchor scale, adding the offset and casting straight to
+        // f32 (the plain `entity_absolute` helper) rounds the offset away
+        // entirely, misjudging nearby ships as out of range. The delta is
+        // only cast to f32 after subtracting two f64 absolutes below,
+        // matching the precision-safe pattern combat.rs uses for hit-chance
+        // distance.
+        let tacklers: Vec<(ShipId, f32, Vec<ShipId>, [f64; 3])> = self
             .ships
             .index
             .iter()
@@ -35,22 +43,24 @@ impl<S: EventStore> SimulationNode<S> {
                 if locked.is_empty() {
                     return None;
                 }
-                // Absolute (Sector-frame) position so range checks are correct
-                // across anchors (ADR-0029).
                 let off = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
-                let pos = self.entity_absolute(entity, off);
+                let pos = self.entity_absolute_f64(entity, off);
                 Some((ship_id, stats.tackle_range, locked, pos))
             })
             .collect();
 
         // desired[target] = Vec of tacklers currently in range and holding a lock.
         let mut desired: HashMap<ShipId, Vec<ShipId>> = HashMap::new();
-        for (tackler_id, range, locked, tackler_pos) in &tacklers {
+        for (tackler_id, range, locked, tackler_abs) in &tacklers {
             for &target_id in locked {
                 if let Some(&te) = self.ships.index.get(&target_id) {
                     if let Ok(tp) = self.world.inner().get::<&PositionComp>(te) {
-                        let target_abs = self.entity_absolute(te, tp.0);
-                        if tackler_pos.distance(target_abs) <= *range {
+                        let target_abs = self.entity_absolute_f64(te, tp.0);
+                        let dx = (target_abs[0] - tackler_abs[0]) as f32;
+                        let dy = (target_abs[1] - tackler_abs[1]) as f32;
+                        let dz = (target_abs[2] - tackler_abs[2]) as f32;
+                        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+                        if dist <= *range {
                             desired.entry(target_id).or_default().push(*tackler_id);
                         }
                     }
@@ -180,19 +190,27 @@ mod tests {
 
         fit_fold_disruptor(&mut node, ship_a);
         let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
+
+        let lock_cmd = LockOnCommand {
+            ship_id: ship_a,
+            target_id: ship_b,
+        };
+        // Tackle activation requires a Locked target (ADR-0035 Q4) — tick
+        // until the lock completes before activating.
+        for _ in 0..5 {
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
+        }
+
         node.activate_module_owned(
             owner_a,
             ActivateModuleCommand {
                 ship_id: ship_a,
                 module_id: MODULE_FOLD_DISRUPTOR,
                 slot: SlotKind::Mid,
+                target_ship_id: Some(ship_b),
             },
         );
 
-        let lock_cmd = LockOnCommand {
-            ship_id: ship_a,
-            target_id: ship_b,
-        };
         for _ in 0..10 {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
@@ -226,19 +244,27 @@ mod tests {
 
         fit_fold_disruptor(&mut node, ship_a);
         let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
+
+        let lock_cmd = LockOnCommand {
+            ship_id: ship_a,
+            target_id: ship_b,
+        };
+        // Tackle activation requires a Locked target (ADR-0035 Q4) — tick
+        // until the lock completes before activating.
+        for _ in 0..5 {
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
+        }
+
         node.activate_module_owned(
             owner_a,
             ActivateModuleCommand {
                 ship_id: ship_a,
                 module_id: MODULE_FOLD_DISRUPTOR,
                 slot: SlotKind::Mid,
+                target_ship_id: Some(ship_b),
             },
         );
 
-        let lock_cmd = LockOnCommand {
-            ship_id: ship_a,
-            target_id: ship_b,
-        };
         for _ in 0..10 {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
@@ -282,19 +308,27 @@ mod tests {
 
         fit_fold_disruptor(&mut node, ship_a);
         let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
+
+        let lock_cmd = LockOnCommand {
+            ship_id: ship_a,
+            target_id: ship_b,
+        };
+        // Tackle activation requires a Locked target (ADR-0035 Q4) — tick
+        // until the lock completes before activating.
+        for _ in 0..5 {
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
+        }
+
         node.activate_module_owned(
             owner_a,
             ActivateModuleCommand {
                 ship_id: ship_a,
                 module_id: MODULE_FOLD_DISRUPTOR,
                 slot: SlotKind::Mid,
+                target_ship_id: Some(ship_b),
             },
         );
 
-        let lock_cmd = LockOnCommand {
-            ship_id: ship_a,
-            target_id: ship_b,
-        };
         for _ in 0..10 {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }

@@ -565,6 +565,7 @@ mod tests {
             ship_id: own_ship,
             module_id: ModuleId(7),
             slot: SlotKind::Mid,
+            target_ship_id: None,
             tick: Tick(1),
         });
 

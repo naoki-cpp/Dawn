@@ -94,6 +94,7 @@ impl<S: EventStore> SimulationNode<S> {
                     def,
                     is_active,
                     cycle_remaining: 0,
+                    target_ship_id: None,
                 });
             })
             .is_ok();

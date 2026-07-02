@@ -360,6 +360,7 @@ Active Module turned on.
 | `ship_id`   | `ShipId`  | ✓ | Ship performing the action |
 | `module_id` | `ModuleId` | ✓ | target Module |
 | `slot`      | `SlotKind` | ✓ | fitting slot type |
+| `target_ship_id` | `Option<ShipId>` |  | target of a targeted module (Weapon/Tackle); `None` for self-only kinds (ADR-0035) |
 | `tick`      | `Tick`    | ✓ | Tick of activation |
 
 **Design note:** represents the fact "turned on", not the state `is_active: true`. Replay sets `FittedSlot.is_active = true` and re-runs `apply_fitting()`.

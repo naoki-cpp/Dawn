@@ -102,13 +102,6 @@ var _opponent_ship_ids : Array = _session.opponent_ship_ids
 ## Normalized PlayerFitting modules, enriched with client runtime fields.
 var _player_modules : Array = []
 
-## module_id set for which we just sent DeactivateModuleCommand ourselves.
-## ModuleDeactivated carries no reason field (ADR-0006), so this is how the
-## client tells "player turned it off" apart from "capacitor forced it off"
-## -- otherwise every manual OFF gets mislabelled as a cap-out (CAP! instead
-## of OFF in the module bar).
-var _pending_manual_deactivations : Dictionary = {}
-
 ## Client-side capacitor simulation (mirrors server CapacitorSystem logic).
 ## Populated from InitialState (cap_max, cap_recharge_per_tick) and
 ## PlayerFitting (cap_cost_per_cycle, cycle_time_ticks per module).
@@ -818,21 +811,19 @@ func _update_tactical_overlay() -> void:
 func _on_module_activated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
 	if p_ship_id != _player_ship_id:
 		return
-	_apply_player_module_activation(p_module_id, true, false)
+	_apply_player_module_activation(p_module_id, true, "")
 
-func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
+## reason is server-authoritative now ("cap" | "range" | "", ADR-0035), so it
+## replaces the old "were we the one who sent Deactivate" heuristic, which
+## always mislabelled a range-forced OFF as a capacitor exhaustion.
+func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String, reason: String) -> void:
 	if p_ship_id != _player_ship_id:
 		return
-	## ModuleDeactivated carries no reason field, so distinguish "player
-	## turned it off" (we just sent DeactivateModuleCommand for this
-	## module_id) from "capacitor forced it off" (unsolicited) here.
-	var was_manual: bool = _pending_manual_deactivations.has(p_module_id)
-	_pending_manual_deactivations.erase(p_module_id)
-	_apply_player_module_activation(p_module_id, false, not was_manual)
+	_apply_player_module_activation(p_module_id, false, reason)
 
 
-func _apply_player_module_activation(module_id: int, active: bool, cap_forced_off: bool) -> void:
-	PlayerFitting.set_module_activation(_player_modules, module_id, active, cap_forced_off)
+func _apply_player_module_activation(module_id: int, active: bool, forced_reason: String) -> void:
+	PlayerFitting.set_module_activation(_player_modules, module_id, active, forced_reason)
 	_recalc_weapon_range()
 
 
@@ -860,13 +851,18 @@ func _toggle_module_by_index(f_index: int) -> void:
 		return
 	var mid: int = toggle["module_id"] as int
 	var slot: String = toggle["slot"] as String
+	var kind: String = toggle.get("kind", "") as String
 	if toggle["is_active"] as bool:
-		_pending_manual_deactivations[mid] = true
-		_apply_player_module_activation(mid, false, false)
+		_apply_player_module_activation(mid, false, "")
 		_connection.send_deactivate_module(_player_ship_id, mid, slot)
 	else:
+		## Weapon/Tackle require a Locked target (ADR-0035); other kinds
+		## (self-only Active modules) must not carry one.
+		var target_id: int = -1
+		if kind == "Weapon" or kind == "Tackle":
+			target_id = _session.player_lock_target
 		_apply_player_module_activation(mid, true, false)
-		_connection.send_activate_module(_player_ship_id, mid, slot)
+		_connection.send_activate_module(_player_ship_id, mid, slot, target_id)
 
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 	_player_ship_id = p_ship_id
@@ -1079,7 +1075,6 @@ func _clear_all_ships() -> void:
 	_selected_target_id = -1
 	_selected_gate_id   = -1
 	_selected_body_id   = -1
-	_pending_manual_deactivations.clear()
 	_cap_tick_accumulator = 0.0
 
 

@@ -141,15 +141,23 @@ func test_rebuild_module_bar_skips_passive_modules() -> void:
 
 func test_update_module_bar_marks_cap_forced_off_modules() -> void:
 	var module_bar: HBoxContainer = HudManager.build_module_bar(_hud)
-	var modules: Array = [{"name": "Gun", "is_active_module": true, "is_active": true, "cap_forced_off": true}]
+	var modules: Array = [{"name": "Gun", "is_active_module": true, "is_active": true, "forced_reason": "cap"}]
 	var slots: Array = HudManager.rebuild_module_bar(module_bar, modules)
 	HudManager.update_module_bar(slots, modules)
 	assert_str((slots[0]["state"] as Label).text).is_equal("CAP!")
 
 
+func test_update_module_bar_marks_range_forced_off_modules() -> void:
+	var module_bar: HBoxContainer = HudManager.build_module_bar(_hud)
+	var modules: Array = [{"name": "Gun", "is_active_module": true, "is_active": true, "forced_reason": "range"}]
+	var slots: Array = HudManager.rebuild_module_bar(module_bar, modules)
+	HudManager.update_module_bar(slots, modules)
+	assert_str((slots[0]["state"] as Label).text).is_equal("RANGE!")
+
+
 func test_update_module_bar_marks_active_modules_on() -> void:
 	var module_bar: HBoxContainer = HudManager.build_module_bar(_hud)
-	var modules: Array = [{"name": "Gun", "is_active_module": true, "is_active": true, "cap_forced_off": false}]
+	var modules: Array = [{"name": "Gun", "is_active_module": true, "is_active": true, "forced_reason": ""}]
 	var slots: Array = HudManager.rebuild_module_bar(module_bar, modules)
 	HudManager.update_module_bar(slots, modules)
 	assert_str((slots[0]["state"] as Label).text).is_equal("ON")

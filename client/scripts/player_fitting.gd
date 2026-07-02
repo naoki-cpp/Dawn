@@ -22,7 +22,7 @@ static func normalize_payload(payload: Dictionary) -> Dictionary:
 			"cap_cost_per_cycle": src.get("cap_cost_per_cycle", 0.0) as float,
 			"cycle_time_ticks": src.get("cycle_time_ticks", 10) as int,
 			"cycle_remaining": 0,
-			"cap_forced_off": false,
+			"forced_reason": "",
 			"stat_delta": {
 				"weapon_range_add": stat_delta.get("weapon_range_add", 0.0) as float,
 				"falloff_range_add": stat_delta.get("falloff_range_add", 0.0) as float,
@@ -61,18 +61,20 @@ static func weapon_ranges(modules: Array) -> Dictionary:
 	return {"optimal": optimal, "falloff": falloff}
 
 
+## p_forced_reason: "cap" | "range" | "" (server-authoritative reason for a
+## non-player-issued deactivation, ADR-0035; "" for ON or a player-issued OFF).
 static func set_module_activation(
 	modules: Array,
 	module_id: int,
 	active: bool,
-	cap_forced_off: bool = false,
+	p_forced_reason: String = "",
 ) -> void:
 	for entry: Variant in modules:
 		var module: Dictionary = entry as Dictionary
 		if module.get("module_id", 0) as int == module_id:
 			module["is_active"] = active
 			module["cycle_remaining"] = 0
-			module["cap_forced_off"] = cap_forced_off
+			module["forced_reason"] = p_forced_reason
 			return
 
 
@@ -87,6 +89,7 @@ static func active_module_toggle_at(modules: Array, active_index: int) -> Dictio
 				"module_id": module.get("module_id", 0) as int,
 				"slot": module.get("slot", "") as String,
 				"is_active": module.get("is_active", false) as bool,
+				"kind": module.get("kind", "") as String,
 			}
 		active_count += 1
 	return {}

@@ -19,9 +19,10 @@ const COLOR_HULL   := Color(0.82, 0.29, 0.29)  ## red
 const COLOR_CAP    := Color(0.17, 0.66, 0.54)  ## teal
 
 ## Module slot state colours (border + state label).
-const MODULE_ON  := Color(0.30, 0.75, 0.45)  ## active
-const MODULE_OFF := Color(0.45, 0.50, 0.60)  ## inactive
-const MODULE_CAP := Color(0.85, 0.35, 0.35)  ## cap-forced off
+const MODULE_ON    := Color(0.30, 0.75, 0.45)  ## active
+const MODULE_OFF   := Color(0.45, 0.50, 0.60)  ## inactive
+const MODULE_CAP   := Color(0.85, 0.35, 0.35)  ## cap-forced off
+const MODULE_RANGE := Color(0.85, 0.65, 0.25)  ## range-forced off (ADR-0035)
 
 
 # -- Shared style/label helpers ------------------------------------------------
@@ -406,7 +407,7 @@ static func make_module_slot(f_number: int, mod_name: String) -> Dictionary:
 	return {"panel": panel, "style": style, "name": name_lbl, "state": state_lbl, "module_index": -1}
 
 
-## Refresh each module slot's state text + border colour (ON / OFF / CAP!).
+## Refresh each module slot's state text + border colour (ON / OFF / CAP! / RANGE!).
 static func update_module_bar(module_slots: Array, player_modules: Array) -> void:
 	for slot: Dictionary in module_slots:
 		var idx: int = slot["module_index"]
@@ -415,12 +416,18 @@ static func update_module_bar(module_slots: Array, player_modules: Array) -> voi
 		var mod_dict: Dictionary = player_modules[idx] as Dictionary
 		var col: Color
 		var txt: String
-		if mod_dict.get("cap_forced_off", false) as bool:
-			col = MODULE_CAP;  txt = "CAP!"
+		## "cap" | "range" | "" (server-authoritative, ADR-0035) — replaces the
+		## old client-side manual/forced heuristic, which always mislabelled
+		## a range-forced deactivation as a capacitor exhaustion.
+		var forced_reason: String = mod_dict.get("forced_reason", "") as String
+		if forced_reason == "cap":
+			col = MODULE_CAP;   txt = "CAP!"
+		elif forced_reason == "range":
+			col = MODULE_RANGE; txt = "RANGE!"
 		elif mod_dict.get("is_active", false) as bool:
-			col = MODULE_ON;   txt = "ON"
+			col = MODULE_ON;    txt = "ON"
 		else:
-			col = MODULE_OFF;  txt = "OFF"
+			col = MODULE_OFF;   txt = "OFF"
 		var state_lbl: Label = slot["state"]
 		state_lbl.text = txt
 		state_lbl.add_theme_color_override("font_color", col)

@@ -54,6 +54,16 @@ pub enum ModuleKind {
     Tackle,
 }
 
+impl ModuleKind {
+    /// Whether Active modules of this kind must be given a `target_ship_id`
+    /// when activated (ADR-0035). Weapon/Tackle act on another ship and are
+    /// meaningless without a target; other kinds (self-buffs, local repair)
+    /// act on the fitting ship itself and must not carry a target.
+    pub fn requires_target(self) -> bool {
+        matches!(self, ModuleKind::Weapon | ModuleKind::Tackle)
+    }
+}
+
 // ── 活性化モード ──────────────────────────────────────────────────────────────
 
 /// モジュールの活性化モード。
@@ -263,6 +273,17 @@ mod tests {
         let total = module_a.add(&module_b);
         assert!((total.speed_multiplier - 2.35 * 1.5).abs() < 0.001);
         assert_eq!(total.weapon_damage_add, 15.0);
+    }
+
+    #[test]
+    fn weapon_and_tackle_require_a_target_other_kinds_do_not() {
+        assert!(ModuleKind::Weapon.requires_target());
+        assert!(ModuleKind::Tackle.requires_target());
+        assert!(!ModuleKind::ShieldBooster.requires_target());
+        assert!(!ModuleKind::ArmorRepairer.requires_target());
+        assert!(!ModuleKind::Propulsion.requires_target());
+        assert!(!ModuleKind::Sensor.requires_target());
+        assert!(!ModuleKind::Rig.requires_target());
     }
 
     #[test]

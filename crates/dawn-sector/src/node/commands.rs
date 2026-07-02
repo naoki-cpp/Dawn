@@ -39,7 +39,10 @@ pub enum ClientCommandFollowup {
     RefreshFitting(ShipId),
 }
 use dawn_ecs::{
-    components::{FittedSlot, FittingComp, PositionComp, ShipStatsComp, ThrustComp, WarpComp},
+    components::{
+        FittedSlot, FittingComp, LockComp, LockState, PositionComp, ShipStatsComp, ThrustComp,
+        WarpComp,
+    },
     systems::apply_fitting,
     Entity,
 };
@@ -153,10 +156,18 @@ impl<S: EventStore> SimulationNode<S> {
                 }
             }
             ClientCommand::Activate(c) => {
+                let ship_id = c.ship_id;
                 self.activate_module_owned(player_id, c);
+                // Activation can now be rejected (ADR-0035: missing/unlocked
+                // target), which the client cannot distinguish from success
+                // by itself — resync so its optimistic HUD toggle gets
+                // corrected when the server refused.
+                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
             }
             ClientCommand::Deactivate(c) => {
+                let ship_id = c.ship_id;
                 self.deactivate_module_owned(player_id, c);
+                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
             }
             // Combat is automatic (CombatSystem each tick); AttackCommand is
             // reserved for a future manual-fire mode.
@@ -262,11 +273,17 @@ impl<S: EventStore> SimulationNode<S> {
     // ── Module commands ───────────────────────────────────────────────────────
 
     pub fn activate_module(&mut self, cmd: dawn_core::ActivateModuleCommand) -> bool {
-        self.set_module_active(cmd.ship_id, cmd.module_id, cmd.slot, true)
+        self.set_module_active(
+            cmd.ship_id,
+            cmd.module_id,
+            cmd.slot,
+            true,
+            cmd.target_ship_id,
+        )
     }
 
     pub fn deactivate_module(&mut self, cmd: dawn_core::DeactivateModuleCommand) -> bool {
-        self.set_module_active(cmd.ship_id, cmd.module_id, cmd.slot, false)
+        self.set_module_active(cmd.ship_id, cmd.module_id, cmd.slot, false, None)
     }
 
     pub fn activate_module_owned(
@@ -291,12 +308,20 @@ impl<S: EventStore> SimulationNode<S> {
         self.deactivate_module(cmd)
     }
 
+    /// Activate/deactivate a fitted module (ADR-0006, target handling ADR-0035).
+    ///
+    /// `target` is validated against `ModuleKind::requires_target()`: kinds
+    /// that require a target (Weapon, Tackle) are rejected without one, and
+    /// kinds that don't are rejected if one is given. When required, `target`
+    /// must be a `Locked` entry in this ship's `LockComp` — activation is
+    /// rejected against an unlocked or unknown target (Q4/ADR-0035).
     fn set_module_active(
         &mut self,
         ship_id: ShipId,
         module_id: ModuleId,
         slot: SlotKind,
         active: bool,
+        target: Option<ShipId>,
     ) -> bool {
         use dawn_core::events::{ModuleActivated, ModuleDeactivated};
         let entity = match self.ships.index.get(&ship_id).copied() {
@@ -304,9 +329,8 @@ impl<S: EventStore> SimulationNode<S> {
             None => return false,
         };
 
-        // Return early if the module is already in the requested state —
-        // avoids emitting duplicate ModuleActivated/Deactivated events every tick.
-        let already_in_state = self
+        // Snapshot the slot's current state before mutating anything.
+        let current = self
             .world
             .inner()
             .get::<&FittingComp>(entity)
@@ -318,28 +342,39 @@ impl<S: EventStore> SimulationNode<S> {
                     .chain(f.low.iter())
                     .chain(f.rig.iter())
                     .find(|s| s.def.id == module_id && s.def.slot == slot)
-                    .map(|s| s.is_active == active)
-            })
-            .unwrap_or(false);
-        if already_in_state {
-            return true;
+                    .map(|s| (s.def.kind, s.is_active, s.target_ship_id))
+            });
+        let (kind, prev_active, prev_target) = match current {
+            Some(c) => c,
+            None => return false, // slot not found
+        };
+
+        if active {
+            if kind.requires_target() != target.is_some() {
+                return false;
+            }
+            if let Some(target_id) = target {
+                let locked = self
+                    .world
+                    .inner()
+                    .get::<&LockComp>(entity)
+                    .ok()
+                    .map(|lock| {
+                        lock.entries
+                            .iter()
+                            .any(|e| e.target_id == target_id && e.state == LockState::Locked)
+                    })
+                    .unwrap_or(false);
+                if !locked {
+                    return false;
+                }
+            }
         }
 
-        let found = self
-            .world
-            .inner_mut()
-            .get::<&mut FittingComp>(entity)
-            .ok()
-            .and_then(|mut f| {
-                f.find_slot_mut(module_id, slot).map(|s| {
-                    s.is_active = active;
-                    true
-                })
-            })
-            .unwrap_or(false);
-
-        if !found {
-            return false;
+        // Return early if the module is already in the requested state —
+        // avoids emitting duplicate ModuleActivated/Deactivated events every tick.
+        if prev_active == active && prev_target == target {
+            return true;
         }
 
         let base = self
@@ -347,13 +382,43 @@ impl<S: EventStore> SimulationNode<S> {
             .get(&ship_id)
             .copied()
             .unwrap_or(ShipStatsComp::NPC);
+
+        // Tentatively apply, then range-validate against the *post-fit*
+        // stats (ADR-0035): a module's own range contribution only shows up
+        // in ShipStatsComp after apply_fitting runs, so this can't be
+        // checked beforehand. Roll back if it lands out of range — this
+        // rejects the activation outright instead of flipping ON then
+        // having the Range Gate System flip it back OFF next tick, a
+        // same-tick flicker the client can't tell apart from a real cap-out.
+        if !self.write_module_slot_state(entity, module_id, slot, active, target) {
+            return false;
+        }
         apply_fitting(&mut self.world, ship_id, base);
+
+        if active {
+            if let Some(target_id) = target {
+                if let Some(range) = self.effective_range_for_kind(entity, kind) {
+                    if !self.is_target_within_range(entity, target_id, range) {
+                        self.write_module_slot_state(
+                            entity,
+                            module_id,
+                            slot,
+                            prev_active,
+                            prev_target,
+                        );
+                        apply_fitting(&mut self.world, ship_id, base);
+                        return false;
+                    }
+                }
+            }
+        }
 
         let event = if active {
             DomainEvent::ModuleActivated(ModuleActivated {
                 ship_id,
                 module_id,
                 slot,
+                target_ship_id: target,
                 tick: self.current_tick,
             })
         } else {
@@ -361,11 +426,44 @@ impl<S: EventStore> SimulationNode<S> {
                 ship_id,
                 module_id,
                 slot,
+                // set_module_active(active=false) is only ever reached via
+                // deactivate_module, which is only ever called for a
+                // player-issued DeactivateModuleCommand (ADR-0035) — system-
+                // forced deactivations (Capacitor/Range Gate) write to
+                // FittingComp directly and emit their own events instead.
+                forced_reason: None,
                 tick: self.current_tick,
             })
         };
         self.event_store.append(event);
         true
+    }
+
+    /// Writes `is_active`/`target_ship_id` onto one fitted slot. Returns
+    /// `false` if the slot no longer exists. Does not call `apply_fitting` —
+    /// the caller is responsible for that (ADR-0035: `set_module_active`
+    /// calls this twice, tentative-apply then possible rollback, and only
+    /// wants one `apply_fitting` per attempt).
+    fn write_module_slot_state(
+        &mut self,
+        entity: Entity,
+        module_id: ModuleId,
+        slot: SlotKind,
+        is_active: bool,
+        target: Option<ShipId>,
+    ) -> bool {
+        self.world
+            .inner_mut()
+            .get::<&mut FittingComp>(entity)
+            .ok()
+            .and_then(|mut f| {
+                f.find_slot_mut(module_id, slot).map(|s| {
+                    s.is_active = is_active;
+                    s.target_ship_id = if is_active { target } else { None };
+                    true
+                })
+            })
+            .unwrap_or(false)
     }
 
     // ── Fitting ───────────────────────────────────────────────────────────────
@@ -396,6 +494,7 @@ impl<S: EventStore> SimulationNode<S> {
                 def,
                 is_active,
                 cycle_remaining: 0,
+                target_ship_id: None,
             });
         } else {
             return false;
@@ -527,6 +626,12 @@ mod tests {
             target_id: bot_ship_id,
         };
 
+        // Weapon activation requires a Locked target (ADR-0035 Q4) — tick
+        // until the lock completes before activating.
+        for _ in 0..5 {
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
+        }
+
         assert!(
             node.activate_module_owned(
                 player_id,
@@ -534,6 +639,7 @@ mod tests {
                     ship_id: player_ship_id,
                     module_id: ModuleId(1),
                     slot: SlotKind::High,
+                    target_ship_id: Some(bot_ship_id),
                 }
             ),
             "activate_module_owned should return true for player's own ship"

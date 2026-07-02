@@ -73,12 +73,19 @@ enum EventJson {
         ship_id: u64,
         module_id: u32,
         slot: String,
+        /// Target of a targeted module (Weapon/Tackle), per ADR-0035.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        target_ship_id: Option<u64>,
         tick: u64,
     },
     ModuleDeactivated {
         ship_id: u64,
         module_id: u32,
         slot: String,
+        /// Why the system forced this off ("cap" | "range"); omitted for a
+        /// player-issued deactivation (ADR-0035).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
         tick: u64,
     },
     JumpGateUsed {
@@ -203,12 +210,19 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
             ship_id: e.ship_id.raw(),
             module_id: e.module_id.0,
             slot: format!("{:?}", e.slot),
+            target_ship_id: e.target_ship_id.map(|t| t.raw()),
             tick: e.tick.value(),
         },
         DomainEvent::ModuleDeactivated(e) => EventJson::ModuleDeactivated {
             ship_id: e.ship_id.raw(),
             module_id: e.module_id.0,
             slot: format!("{:?}", e.slot),
+            reason: e.forced_reason.map(|r| match r {
+                dawn_core::events::ModuleDeactivationReason::CapacitorExhausted => {
+                    "cap".to_string()
+                }
+                dawn_core::events::ModuleDeactivationReason::OutOfRange => "range".to_string(),
+            }),
             tick: e.tick.value(),
         },
         // Jump Gate Navigation (ADR-0009): Godot uses these to teleport the
@@ -312,10 +326,17 @@ pub fn parse_client_command(line: &str) -> Option<ClientCommand> {
             let ship_id_raw = v.get("ship_id")?.as_u64()?;
             let module_id_raw = v.get("module_id")?.as_u64()? as u32;
             let slot_str = v.get("slot")?.as_str()?;
+            // target_ship_id (ADR-0035): optional — required only for
+            // targeted module kinds (Weapon/Tackle), validated server-side.
+            let target_ship_id = v
+                .get("target_ship_id")
+                .and_then(|t| t.as_u64())
+                .map(|raw| ShipId(EntityId::from_raw(raw)));
             Some(ClientCommand::Activate(ActivateModuleCommand {
                 ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
                 module_id: ModuleId(module_id_raw),
                 slot: parse_slot_kind(slot_str)?,
+                target_ship_id,
             }))
         }
         "DeactivateModuleCommand" => {

@@ -192,6 +192,7 @@ mod tests {
             },
             is_active: true,
             cycle_remaining: 0,
+            target_ship_id: None,
         };
         world
             .get_mut::<FittingComp>(entity)
@@ -222,6 +223,7 @@ mod tests {
             },
             is_active: true,
             cycle_remaining: 0,
+            target_ship_id: None,
         };
         world
             .get_mut::<FittingComp>(entity)
@@ -257,6 +259,7 @@ mod tests {
             },
             is_active: false, // OFF
             cycle_remaining: 0,
+            target_ship_id: None,
         };
         world
             .get_mut::<FittingComp>(entity)
@@ -291,6 +294,7 @@ mod tests {
             },
             is_active: false, // OFF — but mass_add must still apply
             cycle_remaining: 0,
+            target_ship_id: None,
         };
         world.get_mut::<FittingComp>(entity).unwrap().mid.push(oaab);
         let stats = apply_fitting(&mut world, id, ShipStatsComp::NPC).unwrap();

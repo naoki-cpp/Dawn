@@ -218,7 +218,22 @@ pub struct ModuleActivated {
     pub ship_id: ShipId,
     pub module_id: ModuleId,
     pub slot: SlotKind,
+    /// Target of a targeted module (Weapon/Tackle), per ADR-0035.
+    /// `None` for self-only modules.
+    pub target_ship_id: Option<ShipId>,
     pub tick: Tick,
+}
+
+/// Why a module was force-deactivated by a system rather than by the player
+/// (ADR-0035). `None` on `ModuleDeactivated.forced_reason` means the player
+/// issued `DeactivateModuleCommand` themselves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ModuleDeactivationReason {
+    /// `CapacitorSystem` forced it off — insufficient cap to start a cycle.
+    CapacitorExhausted,
+    /// `SimulationNode::process_range_gate` forced it off — the targeted
+    /// module's target drifted beyond its effective range.
+    OutOfRange,
 }
 
 /// Active モジュールがオフになった（ADR-0006）。
@@ -227,6 +242,10 @@ pub struct ModuleDeactivated {
     pub ship_id: ShipId,
     pub module_id: ModuleId,
     pub slot: SlotKind,
+    /// `None` for a player-issued deactivation; `Some(reason)` for a
+    /// system-forced one (ADR-0035) so the client can show the right label
+    /// instead of always assuming capacitor exhaustion.
+    pub forced_reason: Option<ModuleDeactivationReason>,
     pub tick: Tick,
 }
 

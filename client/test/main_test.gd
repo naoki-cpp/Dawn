@@ -58,7 +58,7 @@ func _module_fixture(module_id: int, slot: String, active: bool) -> Dictionary:
 		"slot": slot,
 		"is_active": active,
 		"is_active_module": true,
-		"cap_forced_off": false,
+		"forced_reason": "",
 	}
 
 
@@ -105,12 +105,12 @@ func test_observed_ship_position_snap_clears_residual_warp_motion() -> void:
 	ship.free()
 
 
-# -- _on_module_deactivated (manual OFF vs capacitor-forced OFF) ---------------------
+# -- _on_module_deactivated (manual OFF vs system-forced OFF) -----------------------
 #
-# ModuleDeactivated carries no reason field (ADR-0006), so the client must
-# track its own DeactivateModuleCommand sends to tell "player turned it off"
-# apart from "capacitor forced it off" (regression: toggling a module on
-# then off was showing CAP! instead of OFF).
+# ModuleDeactivated now carries a server-authoritative reason ("cap" | "range"
+# | "", ADR-0035), so the client trusts it directly instead of guessing from
+# its own DeactivateModuleCommand sends (regression this replaced: every
+# forced-off used to render as CAP! even when the real cause was out-of-range).
 
 func test_module_activated_marks_matching_player_module_active() -> void:
 	_main._player_ship_id = 1
@@ -120,7 +120,7 @@ func test_module_activated_marks_matching_player_module_active() -> void:
 
 	var mod_dict: Dictionary = _main._player_modules[0]
 	assert_bool(mod_dict["is_active"] as bool).is_true()
-	assert_bool(mod_dict["cap_forced_off"] as bool).is_false()
+	assert_str(mod_dict["forced_reason"] as String).is_equal("")
 
 
 func test_module_toggle_marks_module_active_before_server_echo() -> void:
@@ -133,7 +133,7 @@ func test_module_toggle_marks_module_active_before_server_echo() -> void:
 
 	var mod_dict: Dictionary = _main._player_modules[0]
 	assert_bool(mod_dict["is_active"] as bool).is_true()
-	assert_bool(mod_dict["cap_forced_off"] as bool).is_false()
+	assert_str(mod_dict["forced_reason"] as String).is_equal("")
 	assert_int(connection.activate_calls.size()).is_equal(1)
 	connection.free()
 
@@ -148,40 +148,37 @@ func test_module_toggle_marks_module_inactive_before_server_echo() -> void:
 
 	var mod_dict: Dictionary = _main._player_modules[0]
 	assert_bool(mod_dict["is_active"] as bool).is_false()
-	assert_bool(mod_dict["cap_forced_off"] as bool).is_false()
-	assert_bool(_main._pending_manual_deactivations.has(5)).is_true()
+	assert_str(mod_dict["forced_reason"] as String).is_equal("")
 	assert_int(connection.deactivate_calls.size()).is_equal(1)
 	connection.free()
 
 
-func test_module_deactivated_after_a_manual_toggle_does_not_flag_cap_forced_off() -> void:
+func test_module_deactivated_with_no_reason_is_a_plain_off() -> void:
 	_main._player_ship_id = 1
 	_main._player_modules = [_module_fixture(5, "High", true)]
-	_main._pending_manual_deactivations = {5: true}  ## set by _toggle_module_by_index
 
-	_main._on_module_deactivated(1, 5, "High")
+	_main._on_module_deactivated(1, 5, "High", "")
 
 	var mod_dict: Dictionary = _main._player_modules[0]
 	assert_bool(mod_dict["is_active"] as bool).is_false()
-	assert_bool(mod_dict["cap_forced_off"] as bool).is_false()
+	assert_str(mod_dict["forced_reason"] as String).is_equal("")
 
 
-func test_module_deactivated_without_a_pending_manual_request_flags_cap_forced_off() -> void:
+func test_module_deactivated_with_cap_reason_flags_forced_reason() -> void:
 	_main._player_ship_id = 1
 	_main._player_modules = [_module_fixture(5, "High", true)]
-	## No entry in _pending_manual_deactivations -- the server deactivated it unprompted.
 
-	_main._on_module_deactivated(1, 5, "High")
+	_main._on_module_deactivated(1, 5, "High", "cap")
 
 	var mod_dict: Dictionary = _main._player_modules[0]
-	assert_bool(mod_dict["cap_forced_off"] as bool).is_true()
+	assert_str(mod_dict["forced_reason"] as String).is_equal("cap")
 
 
-func test_module_deactivated_clears_the_pending_flag_so_it_does_not_leak_to_the_next_event() -> void:
+func test_module_deactivated_with_range_reason_flags_forced_reason() -> void:
 	_main._player_ship_id = 1
 	_main._player_modules = [_module_fixture(5, "High", true)]
-	_main._pending_manual_deactivations = {5: true}
 
-	_main._on_module_deactivated(1, 5, "High")
+	_main._on_module_deactivated(1, 5, "High", "range")
 
-	assert_bool(_main._pending_manual_deactivations.has(5)).is_false()
+	var mod_dict: Dictionary = _main._player_modules[0]
+	assert_str(mod_dict["forced_reason"] as String).is_equal("range")

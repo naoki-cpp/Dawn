@@ -24,7 +24,7 @@ func before_test() -> void:
 
 
 func test_render_updates_all_hud_panels_from_one_frame() -> void:
-	var modules: Array = [{"name": "Afterburner", "is_active_module": true, "is_active": true, "cap_forced_off": false}]
+	var modules: Array = [{"name": "Afterburner", "is_active_module": true, "is_active": true, "forced_reason": ""}]
 	_surface.set_player_fitting(modules, [])
 
 	_surface.render({

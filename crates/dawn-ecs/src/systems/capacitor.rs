@@ -257,10 +257,14 @@ fn deactivate_modules(
                 let module_id = slot.def.id;
                 slot.is_active = false;
                 slot.cycle_remaining = 0;
+                slot.target_ship_id = None;
                 events.push(DomainEvent::ModuleDeactivated(ModuleDeactivated {
                     ship_id,
                     module_id,
                     slot: slot.def.slot,
+                    forced_reason: Some(
+                        dawn_core::events::ModuleDeactivationReason::CapacitorExhausted,
+                    ),
                     tick,
                 }));
             }
@@ -301,6 +305,7 @@ mod tests {
             },
             is_active: active,
             cycle_remaining: 0,
+            target_ship_id: None,
         }
     }
 
@@ -321,6 +326,7 @@ mod tests {
             },
             is_active: active,
             cycle_remaining: 0,
+            target_ship_id: None,
         }
     }
 
