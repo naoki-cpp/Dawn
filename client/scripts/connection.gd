@@ -27,8 +27,8 @@ signal initial_state_received(state: Dictionary)
 signal player_fitting_received(payload: Dictionary)
 ## ModuleActivated 受信時
 signal module_activated(ship_id: int, module_id: int, slot: String)
-## ModuleDeactivated 受信時
-signal module_deactivated(ship_id: int, module_id: int, slot: String)
+## ModuleDeactivated 受信時。reason は "cap" | "range" | ""（""=プレイヤー起因、ADR-0035）。
+signal module_deactivated(ship_id: int, module_id: int, slot: String, reason: String)
 
 # ── 設定 ─────────────────────────────────────────────────────────────────────
 
@@ -322,7 +322,8 @@ func _handle_message(payload: Dictionary) -> void:
 			var sid: int    = payload.get("ship_id",   0)  as int
 			var mid: int    = payload.get("module_id", 0)  as int
 			var slt: String = payload.get("slot",      "") as String
-			module_deactivated.emit(sid, mid, slt)
+			var rsn: String = payload.get("reason",    "") as String
+			module_deactivated.emit(sid, mid, slt, rsn)
 		_:
 			event_received.emit(payload)
 

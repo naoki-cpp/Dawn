@@ -82,6 +82,10 @@ enum EventJson {
         ship_id: u64,
         module_id: u32,
         slot: String,
+        /// Why the system forced this off ("cap" | "range"); omitted for a
+        /// player-issued deactivation (ADR-0035).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
         tick: u64,
     },
     JumpGateUsed {
@@ -213,6 +217,12 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
             ship_id: e.ship_id.raw(),
             module_id: e.module_id.0,
             slot: format!("{:?}", e.slot),
+            reason: e.forced_reason.map(|r| match r {
+                dawn_core::events::ModuleDeactivationReason::CapacitorExhausted => {
+                    "cap".to_string()
+                }
+                dawn_core::events::ModuleDeactivationReason::OutOfRange => "range".to_string(),
+            }),
             tick: e.tick.value(),
         },
         // Jump Gate Navigation (ADR-0009): Godot uses these to teleport the

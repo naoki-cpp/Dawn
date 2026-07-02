@@ -33,6 +33,54 @@ struct TargetedSlot {
 }
 
 impl<S: EventStore> SimulationNode<S> {
+    /// Effective range for a targeted `ModuleKind`, read from `entity`'s
+    /// fitted `ShipStatsComp` (weapon: range+falloff, tackle: tackle_range).
+    /// `None` for kinds that are not range-gated (ADR-0035).
+    pub(super) fn effective_range_for_kind(
+        &self,
+        entity: Entity,
+        kind: dawn_core::fitting::ModuleKind,
+    ) -> Option<f32> {
+        let stats = self.world.inner().get::<&ShipStatsComp>(entity).ok()?;
+        match kind {
+            dawn_core::fitting::ModuleKind::Weapon => {
+                Some(stats.weapon_range + stats.weapon_falloff)
+            }
+            dawn_core::fitting::ModuleKind::Tackle => Some(stats.tackle_range),
+            _ => None,
+        }
+    }
+
+    /// Whether `target_id` is currently within `range` of `entity`, in
+    /// Sector-frame absolute coordinates. f64 absolutes (ADR-0029): anchor
+    /// offsets can sit at true-AU scale, so the anchor+offset sum must stay
+    /// f64 until *after* the two absolutes are subtracted — casting each one
+    /// to f32 first (as the plain `entity_absolute` helper does) would round
+    /// away the offset entirely and report a bogus distance even for ships
+    /// sitting right next to each other.
+    pub(super) fn is_target_within_range(
+        &self,
+        entity: Entity,
+        target_id: ShipId,
+        range: f32,
+    ) -> bool {
+        let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else {
+            return false;
+        };
+        let self_abs = self.entity_absolute_f64(entity, pos.0);
+        let Some(&target_entity) = self.ships.index.get(&target_id) else {
+            return false;
+        };
+        let Ok(tp) = self.world.inner().get::<&PositionComp>(target_entity) else {
+            return false;
+        };
+        let target_abs = self.entity_absolute_f64(target_entity, tp.0);
+        let dx = (target_abs[0] - self_abs[0]) as f32;
+        let dy = (target_abs[1] - self_abs[1]) as f32;
+        let dz = (target_abs[2] - self_abs[2]) as f32;
+        (dx * dx + dy * dy + dz * dz).sqrt() <= range
+    }
+
     /// Range Gate System — Step 5.5 (ADR-0035).
     pub fn process_range_gate(&mut self, tick: Tick) -> Vec<DomainEvent> {
         // ── 1. Snapshot Active, targeted slots + their ship's absolute position ──
@@ -84,46 +132,7 @@ impl<S: EventStore> SimulationNode<S> {
         let mut events: Vec<DomainEvent> = Vec::new();
         let mut refitted: Vec<ShipId> = Vec::new();
         for c in candidates {
-            let self_pos = self
-                .world
-                .inner()
-                .get::<&PositionComp>(c.entity)
-                .map(|p| p.0)
-                .ok();
-            let Some(self_pos) = self_pos else {
-                continue;
-            };
-            // f64 absolutes (ADR-0029): anchor offsets can sit at true-AU
-            // scale, so the anchor+offset sum must stay f64 until *after*
-            // the two absolutes are subtracted — casting each one to f32
-            // first (as the plain `entity_absolute` helper does) would
-            // round away the offset entirely and report a bogus distance
-            // even for ships sitting right next to each other.
-            let self_abs = self.entity_absolute_f64(c.entity, self_pos);
-
-            let in_range = match self.ships.index.get(&c.target).copied() {
-                Some(target_entity) => {
-                    let target_pos = self
-                        .world
-                        .inner()
-                        .get::<&PositionComp>(target_entity)
-                        .map(|p| p.0)
-                        .ok();
-                    target_pos
-                        .map(|tp| {
-                            let target_abs = self.entity_absolute_f64(target_entity, tp);
-                            let dx = (target_abs[0] - self_abs[0]) as f32;
-                            let dy = (target_abs[1] - self_abs[1]) as f32;
-                            let dz = (target_abs[2] - self_abs[2]) as f32;
-                            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-                            dist <= c.range
-                        })
-                        .unwrap_or(false)
-                }
-                // Target no longer exists (destroyed/despawned) — treat as out of range.
-                None => false,
-            };
-            if in_range {
+            if self.is_target_within_range(c.entity, c.target, c.range) {
                 continue;
             }
 
@@ -151,6 +160,9 @@ impl<S: EventStore> SimulationNode<S> {
                             ship_id: c.ship_id,
                             module_id: c.module_id,
                             slot: c.slot_kind,
+                            forced_reason: Some(
+                                dawn_core::events::ModuleDeactivationReason::OutOfRange,
+                            ),
                             tick,
                         }));
                         refitted.push(c.ship_id);
@@ -206,15 +218,16 @@ mod tests {
     }
 
     #[test]
-    fn weapon_is_force_deactivated_once_its_locked_target_is_beyond_range_plus_falloff() {
+    fn weapon_is_force_deactivated_once_its_locked_target_drifts_beyond_range_plus_falloff() {
         use crate::modules::MODULE_RAILGUN_SMALL;
 
         let mut node = node_with_modules();
         let player_id = node.next_player_id();
         let ship_a = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
         // Small Railgun: weapon_range 3000 + falloff 2000 = 5000 effective range.
+        // Spawn well within range so activation itself succeeds.
         let ship_b_owner = node.next_player_id();
-        let ship_b = node.spawn_player_ship_at_pub(ship_b_owner, Position::new(10_000.0, 0.0, 0.0));
+        let ship_b = node.spawn_player_ship_at_pub(ship_b_owner, Position::new(500.0, 0.0, 0.0));
 
         node.fit_module(FitModuleCommand {
             ship_id: ship_a,
@@ -233,8 +246,11 @@ mod tests {
                     target_ship_id: Some(ship_b),
                 }
             ),
-            "activation against a Locked (but out-of-range) target must still succeed"
+            "activation against a Locked, in-range target must succeed"
         );
+
+        // Drift the target beyond effective range (5000) after activation.
+        node.set_spawn_anchor_abs(ship_b, [50_000.0, 0.0, 0.0]);
 
         let result = node.tick_with_lock_commands(&[]);
         assert!(
@@ -253,15 +269,49 @@ mod tests {
     }
 
     #[test]
-    fn tackle_is_force_deactivated_once_its_locked_target_is_beyond_tackle_range() {
+    fn weapon_activation_is_rejected_outright_against_a_locked_but_out_of_range_target() {
+        use crate::modules::MODULE_RAILGUN_SMALL;
+
+        let mut node = node_with_modules();
+        let player_id = node.next_player_id();
+        let ship_a = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+        // Small Railgun: weapon_range 3000 + falloff 2000 = 5000 effective range.
+        let ship_b_owner = node.next_player_id();
+        let ship_b = node.spawn_player_ship_at_pub(ship_b_owner, Position::new(10_000.0, 0.0, 0.0));
+
+        node.fit_module(FitModuleCommand {
+            ship_id: ship_a,
+            slot: SlotKind::High,
+            module_id: MODULE_RAILGUN_SMALL,
+        });
+        lock_until_locked(&mut node, ship_a, ship_b);
+
+        assert!(
+            !node.activate_module_owned(
+                player_id,
+                ActivateModuleCommand {
+                    ship_id: ship_a,
+                    module_id: MODULE_RAILGUN_SMALL,
+                    slot: SlotKind::High,
+                    target_ship_id: Some(ship_b),
+                }
+            ),
+            "activation must be rejected outright when the Locked target is already out of \
+             range — turning ON then having Range Gate turn it back OFF next tick would flicker"
+        );
+    }
+
+    #[test]
+    fn tackle_is_force_deactivated_once_its_locked_target_drifts_beyond_tackle_range() {
         use crate::modules::MODULE_FOLD_DISRUPTOR;
 
         let mut node = node_with_modules();
         let player_id = node.next_player_id();
         let ship_a = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
-        // Fold Disruptor: tackle_range 20_000.
+        // Fold Disruptor: tackle_range 20_000. Spawn well within range so
+        // activation itself succeeds.
         let ship_b_owner = node.next_player_id();
-        let ship_b = node.spawn_player_ship_at_pub(ship_b_owner, Position::new(30_000.0, 0.0, 0.0));
+        let ship_b = node.spawn_player_ship_at_pub(ship_b_owner, Position::new(1_000.0, 0.0, 0.0));
 
         node.fit_module(FitModuleCommand {
             ship_id: ship_a,
@@ -279,6 +329,9 @@ mod tests {
                 target_ship_id: Some(ship_b),
             }
         ));
+
+        // Drift the target beyond tackle_range (20_000) after activation.
+        node.set_spawn_anchor_abs(ship_b, [50_000.0, 0.0, 0.0]);
 
         let result = node.tick_with_lock_commands(&[]);
         assert!(

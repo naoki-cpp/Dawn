@@ -329,26 +329,28 @@ impl<S: EventStore> SimulationNode<S> {
             None => return false,
         };
 
+        // Snapshot the slot's current state before mutating anything.
+        let current = self
+            .world
+            .inner()
+            .get::<&FittingComp>(entity)
+            .ok()
+            .and_then(|f| {
+                f.high
+                    .iter()
+                    .chain(f.mid.iter())
+                    .chain(f.low.iter())
+                    .chain(f.rig.iter())
+                    .find(|s| s.def.id == module_id && s.def.slot == slot)
+                    .map(|s| (s.def.kind, s.is_active, s.target_ship_id))
+            });
+        let (kind, prev_active, prev_target) = match current {
+            Some(c) => c,
+            None => return false, // slot not found
+        };
+
         if active {
-            let requires_target = self
-                .world
-                .inner()
-                .get::<&FittingComp>(entity)
-                .ok()
-                .and_then(|f| {
-                    f.high
-                        .iter()
-                        .chain(f.mid.iter())
-                        .chain(f.low.iter())
-                        .chain(f.rig.iter())
-                        .find(|s| s.def.id == module_id && s.def.slot == slot)
-                        .map(|s| s.def.kind.requires_target())
-                });
-            let requires_target = match requires_target {
-                Some(r) => r,
-                None => return false, // slot not found
-            };
-            if requires_target != target.is_some() {
+            if kind.requires_target() != target.is_some() {
                 return false;
             }
             if let Some(target_id) = target {
@@ -371,41 +373,8 @@ impl<S: EventStore> SimulationNode<S> {
 
         // Return early if the module is already in the requested state —
         // avoids emitting duplicate ModuleActivated/Deactivated events every tick.
-        let already_in_state = self
-            .world
-            .inner()
-            .get::<&FittingComp>(entity)
-            .ok()
-            .and_then(|f| {
-                f.high
-                    .iter()
-                    .chain(f.mid.iter())
-                    .chain(f.low.iter())
-                    .chain(f.rig.iter())
-                    .find(|s| s.def.id == module_id && s.def.slot == slot)
-                    .map(|s| s.is_active == active && s.target_ship_id == target)
-            })
-            .unwrap_or(false);
-        if already_in_state {
+        if prev_active == active && prev_target == target {
             return true;
-        }
-
-        let found = self
-            .world
-            .inner_mut()
-            .get::<&mut FittingComp>(entity)
-            .ok()
-            .and_then(|mut f| {
-                f.find_slot_mut(module_id, slot).map(|s| {
-                    s.is_active = active;
-                    s.target_ship_id = if active { target } else { None };
-                    true
-                })
-            })
-            .unwrap_or(false);
-
-        if !found {
-            return false;
         }
 
         let base = self
@@ -413,7 +382,36 @@ impl<S: EventStore> SimulationNode<S> {
             .get(&ship_id)
             .copied()
             .unwrap_or(ShipStatsComp::NPC);
+
+        // Tentatively apply, then range-validate against the *post-fit*
+        // stats (ADR-0035): a module's own range contribution only shows up
+        // in ShipStatsComp after apply_fitting runs, so this can't be
+        // checked beforehand. Roll back if it lands out of range — this
+        // rejects the activation outright instead of flipping ON then
+        // having the Range Gate System flip it back OFF next tick, a
+        // same-tick flicker the client can't tell apart from a real cap-out.
+        if !self.write_module_slot_state(entity, module_id, slot, active, target) {
+            return false;
+        }
         apply_fitting(&mut self.world, ship_id, base);
+
+        if active {
+            if let Some(target_id) = target {
+                if let Some(range) = self.effective_range_for_kind(entity, kind) {
+                    if !self.is_target_within_range(entity, target_id, range) {
+                        self.write_module_slot_state(
+                            entity,
+                            module_id,
+                            slot,
+                            prev_active,
+                            prev_target,
+                        );
+                        apply_fitting(&mut self.world, ship_id, base);
+                        return false;
+                    }
+                }
+            }
+        }
 
         let event = if active {
             DomainEvent::ModuleActivated(ModuleActivated {
@@ -428,11 +426,44 @@ impl<S: EventStore> SimulationNode<S> {
                 ship_id,
                 module_id,
                 slot,
+                // set_module_active(active=false) is only ever reached via
+                // deactivate_module, which is only ever called for a
+                // player-issued DeactivateModuleCommand (ADR-0035) — system-
+                // forced deactivations (Capacitor/Range Gate) write to
+                // FittingComp directly and emit their own events instead.
+                forced_reason: None,
                 tick: self.current_tick,
             })
         };
         self.event_store.append(event);
         true
+    }
+
+    /// Writes `is_active`/`target_ship_id` onto one fitted slot. Returns
+    /// `false` if the slot no longer exists. Does not call `apply_fitting` —
+    /// the caller is responsible for that (ADR-0035: `set_module_active`
+    /// calls this twice, tentative-apply then possible rollback, and only
+    /// wants one `apply_fitting` per attempt).
+    fn write_module_slot_state(
+        &mut self,
+        entity: Entity,
+        module_id: ModuleId,
+        slot: SlotKind,
+        is_active: bool,
+        target: Option<ShipId>,
+    ) -> bool {
+        self.world
+            .inner_mut()
+            .get::<&mut FittingComp>(entity)
+            .ok()
+            .and_then(|mut f| {
+                f.find_slot_mut(module_id, slot).map(|s| {
+                    s.is_active = is_active;
+                    s.target_ship_id = if is_active { target } else { None };
+                    true
+                })
+            })
+            .unwrap_or(false)
     }
 
     // ── Fitting ───────────────────────────────────────────────────────────────

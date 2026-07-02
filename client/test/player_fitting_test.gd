@@ -26,7 +26,7 @@ func test_normalize_payload_adds_client_runtime_fields() -> void:
 
 	var module: Dictionary = (fitting["modules"] as Array)[0] as Dictionary
 	assert_int(module["module_id"]).is_equal(7)
-	assert_bool(module["cap_forced_off"]).is_false()
+	assert_str(module["forced_reason"]).is_equal("")
 	assert_int(module["cycle_remaining"]).is_equal(0)
 	assert_int(((fitting["inventory"] as Array)[0] as Dictionary)["module_id"]).is_equal(8)
 
@@ -42,13 +42,13 @@ func test_weapon_ranges_sum_active_weapon_modules_only() -> void:
 	assert_float(ranges["falloff"]).is_equal_approx(250.0, 0.001)
 
 
-func test_set_module_activation_resets_cycle_and_marks_cap_forced_off() -> void:
-	var modules: Array = [{"module_id": 4, "is_active": true, "cycle_remaining": 5, "cap_forced_off": false}]
-	PlayerFitting.set_module_activation(modules, 4, false, true)
+func test_set_module_activation_resets_cycle_and_marks_forced_reason() -> void:
+	var modules: Array = [{"module_id": 4, "is_active": true, "cycle_remaining": 5, "forced_reason": ""}]
+	PlayerFitting.set_module_activation(modules, 4, false, "cap")
 	var module: Dictionary = modules[0] as Dictionary
 	assert_bool(module["is_active"]).is_false()
 	assert_int(module["cycle_remaining"]).is_equal(0)
-	assert_bool(module["cap_forced_off"]).is_true()
+	assert_str(module["forced_reason"]).is_equal("cap")
 
 
 func test_active_module_toggle_at_skips_passive_modules() -> void:

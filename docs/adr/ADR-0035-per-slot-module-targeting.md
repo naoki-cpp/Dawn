@@ -122,6 +122,16 @@ Logistics 本体（`RepairApplied` を他船に適用する Command/Event/Tick �
       Range Gate System 経由の強制 OFF に統一
 - [x] クライアント: `_toggle_module_by_index`（F1-F8 / モジュールバー共通経路）で
       Weapon/Tackle 起動時に現在のロックターゲットを `target_ship_id` として送信
+- [x] `dawn-sector`: `set_module_active` が距離を f64 で判定し（ADR-0029 精度パターン準拠）、
+      Locked だが射程外のターゲットへの起動は ON→次 Tick で強制 OFF ではなく**その場で拒否**
+      （フリッカー防止）。判定は「起動を仮適用 → `apply_fitting()` → 判定 → 却下ならロールバック」
+      という手順（モジュール自身の射程寄与は `apply_fitting()` 後でないと `ShipStatsComp` に
+      反映されないため）
+- [x] `dawn-core`: `ModuleDeactivationReason { CapacitorExhausted, OutOfRange }` を追加し、
+      `ModuleDeactivated.forced_reason: Option<...>` で「なぜ強制 OFF になったか」をイベントに
+      持たせる（プレイヤー起因の OFF は `None`）。`dawn-actor` の wire JSON に `reason: "cap"|"range"`
+      として反映し、クライアントは `cap_forced_off: bool` の自前ヒューリスティックをやめてこれを
+      直接信頼するようにした（旧実装は射程外による強制 OFF もすべて CAP! と誤表示していた）
 - [x] `docs`: tick-model.md（Step 5.5）・event-catalog.md（`ModuleActivated.target_ship_id`）更新済み
 - [x] 検証: `cargo test --workspace`（218 tests）+ `cargo fmt` + `cargo clippy --workspace --all-targets -- -D warnings`
 
