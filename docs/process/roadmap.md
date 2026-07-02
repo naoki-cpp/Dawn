@@ -116,6 +116,12 @@ deferred / 越境 TiDi / SLA イベント化）はいずれも現状は不要・
 Orbit/Keep at Range（✅）→ Local Repair（✅・自己修理まで）と積み上げてきており、残る
 遠隔修理（味方への Repair）で Phase 8 発案時点の近期ロードマップ（ADR-0016 §5）が一巡する。
 
+Logistics 本体に先立ち、その土台となる **ADR-0035（Per-Slot Module Targeting）が完了**
+（2026-07-02）: `FittedSlot.target_ship_id` による per-slot ターゲット、
+`ModuleKind::requires_target()` によるバリデーション、Weapon/Tackle 共通の
+Range Gate System（Step 5.5、射程外で強制 deactivate に統一）。Logistics 本体は
+この基盤の上に `repair_range_add` と Repairer 系 ModuleKind を追加するだけで乗る想定。
+
 Logistics 完了後は **Phase 9（Resource + Economy Context・§12）** に進む。ただし戦闘システムは
 Logistics で「完了」するわけではなく、§9 のとおりその後も継続的に深化していく対象であることに注意。
 

@@ -3,6 +3,7 @@
 use dawn_core::fitting::{
     ActivationMode, FittingSnapshot, ModuleDefinition, ModuleId, SlotEntry, SlotKind, StatDelta,
 };
+use dawn_core::ShipId;
 use std::collections::HashMap;
 
 /// One fitted slot (module definition + runtime activation state).
@@ -19,6 +20,10 @@ pub struct FittedSlot {
     ///
     /// Always `0` for Passive modules (cycle concept does not apply).
     pub cycle_remaining: u64,
+    /// Per-slot target for kinds where `ModuleKind::requires_target()` is true
+    /// (Weapon, Tackle), per ADR-0035. Set on activation, cleared on
+    /// deactivation. `None` for self-only modules.
+    pub target_ship_id: Option<ShipId>,
 }
 
 impl FittedSlot {
@@ -142,6 +147,7 @@ impl FittingComp {
                         def: def.clone(),
                         is_active: e.is_active,
                         cycle_remaining: 0, // Cycle state is not persisted; reset to 0.
+                        target_ship_id: None, // Target is not persisted; re-selected on next activation.
                     })
                 })
                 .collect()
@@ -177,6 +183,7 @@ mod tests {
             },
             is_active: active,
             cycle_remaining: 0,
+            target_ship_id: None,
         }
     }
 
@@ -197,6 +204,7 @@ mod tests {
             },
             is_active: false, // Passive: is_active is ignored
             cycle_remaining: 0,
+            target_ship_id: None,
         }
     }
 

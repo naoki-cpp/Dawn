@@ -218,6 +218,9 @@ pub struct ModuleActivated {
     pub ship_id: ShipId,
     pub module_id: ModuleId,
     pub slot: SlotKind,
+    /// Target of a targeted module (Weapon/Tackle), per ADR-0035.
+    /// `None` for self-only modules.
+    pub target_ship_id: Option<ShipId>,
     pub tick: Tick,
 }
 

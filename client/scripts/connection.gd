@@ -99,16 +99,20 @@ func send_lock_on_command(p_ship_id: int, target_id: int) -> void:
 	}
 	_ws.send_text(JSON.stringify(payload) + "\n")
 
-## Active モジュールをオンにする。
-func send_activate_module(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
+## Active モジュールをオンにする。p_target_ship_id は Weapon/Tackle など
+## ターゲットを要求する種別のときだけ指定する（-1 = 指定なし、ADR-0035）。
+func send_activate_module(p_ship_id: int, p_module_id: int, p_slot: String, p_target_ship_id: int = -1) -> void:
 	if not _welcomed:
 		return
-	_ws.send_text(JSON.stringify({
+	var payload: Dictionary = {
 		"type"     : "ActivateModuleCommand",
 		"ship_id"  : p_ship_id,
 		"module_id": p_module_id,
 		"slot"     : p_slot,
-	}) + "\n")
+	}
+	if p_target_ship_id >= 0:
+		payload["target_ship_id"] = p_target_ship_id
+	_ws.send_text(JSON.stringify(payload) + "\n")
 
 ## Active モジュールをオフにする。
 func send_deactivate_module(p_ship_id: int, p_module_id: int, p_slot: String) -> void:

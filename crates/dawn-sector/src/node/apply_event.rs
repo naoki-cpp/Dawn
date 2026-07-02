@@ -112,6 +112,7 @@ impl<S: EventStore> SimulationNode<S> {
                     {
                         if let Some(slot) = fitting.find_slot_mut(e.module_id, e.slot) {
                             slot.is_active = true;
+                            slot.target_ship_id = e.target_ship_id;
                         }
                     }
                     let base = self
@@ -129,6 +130,7 @@ impl<S: EventStore> SimulationNode<S> {
                     {
                         if let Some(slot) = fitting.find_slot_mut(e.module_id, e.slot) {
                             slot.is_active = false;
+                            slot.target_ship_id = None;
                         }
                     }
                     let base = self

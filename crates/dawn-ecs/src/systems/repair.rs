@@ -157,6 +157,7 @@ mod tests {
             },
             is_active: true,
             cycle_remaining: 0,
+            target_ship_id: None,
         };
         if kind == ModuleKind::ShieldBooster {
             world.get_mut::<FittingComp>(entity).unwrap().mid.push(slot);

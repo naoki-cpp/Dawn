@@ -98,11 +98,17 @@ pub struct LockOnCommand {
 }
 
 /// Request to activate an Active module.
+///
+/// `target_ship_id` (ADR-0035): required for module kinds where
+/// `ModuleKind::requires_target()` is true (Weapon, Tackle), forbidden
+/// otherwise. When required, the target must already be a `Locked` entry in
+/// the activating ship's `LockComp` — activation is rejected otherwise.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActivateModuleCommand {
     pub ship_id: ShipId,
     pub module_id: ModuleId,
     pub slot: SlotKind,
+    pub target_ship_id: Option<ShipId>,
 }
 
 /// Request to deactivate an Active module.

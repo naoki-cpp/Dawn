@@ -21,6 +21,7 @@ mod inventory;
 mod jump;
 mod navigation;
 mod orbit;
+mod range_gate;
 mod sector_map;
 mod serialization;
 mod ship_registry;

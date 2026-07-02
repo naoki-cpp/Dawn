@@ -301,6 +301,7 @@ mod tests {
             },
             is_active: active,
             cycle_remaining: 0,
+            target_ship_id: None,
         }
     }
 
@@ -321,6 +322,7 @@ mod tests {
             },
             is_active: active,
             cycle_remaining: 0,
+            target_ship_id: None,
         }
     }
 

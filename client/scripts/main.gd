@@ -860,13 +860,19 @@ func _toggle_module_by_index(f_index: int) -> void:
 		return
 	var mid: int = toggle["module_id"] as int
 	var slot: String = toggle["slot"] as String
+	var kind: String = toggle.get("kind", "") as String
 	if toggle["is_active"] as bool:
 		_pending_manual_deactivations[mid] = true
 		_apply_player_module_activation(mid, false, false)
 		_connection.send_deactivate_module(_player_ship_id, mid, slot)
 	else:
+		## Weapon/Tackle require a Locked target (ADR-0035); other kinds
+		## (self-only Active modules) must not carry one.
+		var target_id: int = -1
+		if kind == "Weapon" or kind == "Tackle":
+			target_id = _session.player_lock_target
 		_apply_player_module_activation(mid, true, false)
-		_connection.send_activate_module(_player_ship_id, mid, slot)
+		_connection.send_activate_module(_player_ship_id, mid, slot, target_id)
 
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 	_player_ship_id = p_ship_id

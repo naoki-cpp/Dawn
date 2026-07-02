@@ -39,7 +39,10 @@ pub enum ClientCommandFollowup {
     RefreshFitting(ShipId),
 }
 use dawn_ecs::{
-    components::{FittedSlot, FittingComp, PositionComp, ShipStatsComp, ThrustComp, WarpComp},
+    components::{
+        FittedSlot, FittingComp, LockComp, LockState, PositionComp, ShipStatsComp, ThrustComp,
+        WarpComp,
+    },
     systems::apply_fitting,
     Entity,
 };
@@ -262,11 +265,17 @@ impl<S: EventStore> SimulationNode<S> {
     // ── Module commands ───────────────────────────────────────────────────────
 
     pub fn activate_module(&mut self, cmd: dawn_core::ActivateModuleCommand) -> bool {
-        self.set_module_active(cmd.ship_id, cmd.module_id, cmd.slot, true)
+        self.set_module_active(
+            cmd.ship_id,
+            cmd.module_id,
+            cmd.slot,
+            true,
+            cmd.target_ship_id,
+        )
     }
 
     pub fn deactivate_module(&mut self, cmd: dawn_core::DeactivateModuleCommand) -> bool {
-        self.set_module_active(cmd.ship_id, cmd.module_id, cmd.slot, false)
+        self.set_module_active(cmd.ship_id, cmd.module_id, cmd.slot, false, None)
     }
 
     pub fn activate_module_owned(
@@ -291,18 +300,66 @@ impl<S: EventStore> SimulationNode<S> {
         self.deactivate_module(cmd)
     }
 
+    /// Activate/deactivate a fitted module (ADR-0006, target handling ADR-0035).
+    ///
+    /// `target` is validated against `ModuleKind::requires_target()`: kinds
+    /// that require a target (Weapon, Tackle) are rejected without one, and
+    /// kinds that don't are rejected if one is given. When required, `target`
+    /// must be a `Locked` entry in this ship's `LockComp` — activation is
+    /// rejected against an unlocked or unknown target (Q4/ADR-0035).
     fn set_module_active(
         &mut self,
         ship_id: ShipId,
         module_id: ModuleId,
         slot: SlotKind,
         active: bool,
+        target: Option<ShipId>,
     ) -> bool {
         use dawn_core::events::{ModuleActivated, ModuleDeactivated};
         let entity = match self.ships.index.get(&ship_id).copied() {
             Some(e) => e,
             None => return false,
         };
+
+        if active {
+            let requires_target = self
+                .world
+                .inner()
+                .get::<&FittingComp>(entity)
+                .ok()
+                .and_then(|f| {
+                    f.high
+                        .iter()
+                        .chain(f.mid.iter())
+                        .chain(f.low.iter())
+                        .chain(f.rig.iter())
+                        .find(|s| s.def.id == module_id && s.def.slot == slot)
+                        .map(|s| s.def.kind.requires_target())
+                });
+            let requires_target = match requires_target {
+                Some(r) => r,
+                None => return false, // slot not found
+            };
+            if requires_target != target.is_some() {
+                return false;
+            }
+            if let Some(target_id) = target {
+                let locked = self
+                    .world
+                    .inner()
+                    .get::<&LockComp>(entity)
+                    .ok()
+                    .map(|lock| {
+                        lock.entries
+                            .iter()
+                            .any(|e| e.target_id == target_id && e.state == LockState::Locked)
+                    })
+                    .unwrap_or(false);
+                if !locked {
+                    return false;
+                }
+            }
+        }
 
         // Return early if the module is already in the requested state —
         // avoids emitting duplicate ModuleActivated/Deactivated events every tick.
@@ -318,7 +375,7 @@ impl<S: EventStore> SimulationNode<S> {
                     .chain(f.low.iter())
                     .chain(f.rig.iter())
                     .find(|s| s.def.id == module_id && s.def.slot == slot)
-                    .map(|s| s.is_active == active)
+                    .map(|s| s.is_active == active && s.target_ship_id == target)
             })
             .unwrap_or(false);
         if already_in_state {
@@ -333,6 +390,7 @@ impl<S: EventStore> SimulationNode<S> {
             .and_then(|mut f| {
                 f.find_slot_mut(module_id, slot).map(|s| {
                     s.is_active = active;
+                    s.target_ship_id = if active { target } else { None };
                     true
                 })
             })
@@ -354,6 +412,7 @@ impl<S: EventStore> SimulationNode<S> {
                 ship_id,
                 module_id,
                 slot,
+                target_ship_id: target,
                 tick: self.current_tick,
             })
         } else {
@@ -396,6 +455,7 @@ impl<S: EventStore> SimulationNode<S> {
                 def,
                 is_active,
                 cycle_remaining: 0,
+                target_ship_id: None,
             });
         } else {
             return false;
@@ -527,6 +587,12 @@ mod tests {
             target_id: bot_ship_id,
         };
 
+        // Weapon activation requires a Locked target (ADR-0035 Q4) — tick
+        // until the lock completes before activating.
+        for _ in 0..5 {
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
+        }
+
         assert!(
             node.activate_module_owned(
                 player_id,
@@ -534,6 +600,7 @@ mod tests {
                     ship_id: player_ship_id,
                     module_id: ModuleId(1),
                     slot: SlotKind::High,
+                    target_ship_id: Some(bot_ship_id),
                 }
             ),
             "activate_module_owned should return true for player's own ship"

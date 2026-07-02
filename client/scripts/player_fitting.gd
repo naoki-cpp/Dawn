@@ -87,6 +87,7 @@ static func active_module_toggle_at(modules: Array, active_index: int) -> Dictio
 				"module_id": module.get("module_id", 0) as int,
 				"slot": module.get("slot", "") as String,
 				"is_active": module.get("is_active", false) as bool,
+				"kind": module.get("kind", "") as String,
 			}
 		active_count += 1
 	return {}

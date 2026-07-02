@@ -180,19 +180,27 @@ mod tests {
 
         fit_fold_disruptor(&mut node, ship_a);
         let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
+
+        let lock_cmd = LockOnCommand {
+            ship_id: ship_a,
+            target_id: ship_b,
+        };
+        // Tackle activation requires a Locked target (ADR-0035 Q4) — tick
+        // until the lock completes before activating.
+        for _ in 0..5 {
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
+        }
+
         node.activate_module_owned(
             owner_a,
             ActivateModuleCommand {
                 ship_id: ship_a,
                 module_id: MODULE_FOLD_DISRUPTOR,
                 slot: SlotKind::Mid,
+                target_ship_id: Some(ship_b),
             },
         );
 
-        let lock_cmd = LockOnCommand {
-            ship_id: ship_a,
-            target_id: ship_b,
-        };
         for _ in 0..10 {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
@@ -226,19 +234,27 @@ mod tests {
 
         fit_fold_disruptor(&mut node, ship_a);
         let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
+
+        let lock_cmd = LockOnCommand {
+            ship_id: ship_a,
+            target_id: ship_b,
+        };
+        // Tackle activation requires a Locked target (ADR-0035 Q4) — tick
+        // until the lock completes before activating.
+        for _ in 0..5 {
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
+        }
+
         node.activate_module_owned(
             owner_a,
             ActivateModuleCommand {
                 ship_id: ship_a,
                 module_id: MODULE_FOLD_DISRUPTOR,
                 slot: SlotKind::Mid,
+                target_ship_id: Some(ship_b),
             },
         );
 
-        let lock_cmd = LockOnCommand {
-            ship_id: ship_a,
-            target_id: ship_b,
-        };
         for _ in 0..10 {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
@@ -282,19 +298,27 @@ mod tests {
 
         fit_fold_disruptor(&mut node, ship_a);
         let owner_a = node.ships.owners.get(&ship_a).copied().unwrap();
+
+        let lock_cmd = LockOnCommand {
+            ship_id: ship_a,
+            target_id: ship_b,
+        };
+        // Tackle activation requires a Locked target (ADR-0035 Q4) — tick
+        // until the lock completes before activating.
+        for _ in 0..5 {
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
+        }
+
         node.activate_module_owned(
             owner_a,
             ActivateModuleCommand {
                 ship_id: ship_a,
                 module_id: MODULE_FOLD_DISRUPTOR,
                 slot: SlotKind::Mid,
+                target_ship_id: Some(ship_b),
             },
         );
 
-        let lock_cmd = LockOnCommand {
-            ship_id: ship_a,
-            target_id: ship_b,
-        };
         for _ in 0..10 {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }

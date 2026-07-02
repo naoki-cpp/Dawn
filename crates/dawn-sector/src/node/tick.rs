@@ -57,6 +57,10 @@ impl<S: EventStore> SimulationNode<S> {
             .collect();
         let lock = LockSystem(&mut self.world, tick, &merged_locks);
 
+        // 5.5 Range Gate System — force OFF targeted modules (Weapon/Tackle)
+        // whose target has drifted out of effective range (ADR-0035).
+        let range_gate_events = self.process_range_gate(tick);
+
         // 6. Combat System — fire only when the capacitor weapon cycle started this tick.
         // Pass the anchor table so distances resolve across anchors (ADR-0029).
         let combat = CombatSystem(
@@ -92,6 +96,7 @@ impl<S: EventStore> SimulationNode<S> {
             .chain(cap.events.iter())
             .chain(tackle_events.iter())
             .chain(lock.events.iter())
+            .chain(range_gate_events.iter())
             .chain(combat.events.iter())
             .chain(repair.events.iter())
             .cloned()

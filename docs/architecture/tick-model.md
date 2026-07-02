@@ -155,6 +155,17 @@ Step 5: Lock System
          -> Emits: Vec<TargetLocked | LockLost>
          Must run after Movement (lock decisions need final positions).
 
+Step 5.5: Range Gate System (ADR-0035)
+         SimulationNode::process_range_gate(tick)
+         -> For every Active, targeted slot (Weapon/Tackle, FittedSlot.target_ship_id
+           set), computes distance to target and force-deactivates the module if
+           beyond its effective range (Weapon: weapon_range + weapon_falloff;
+           Tackle: tackle_range). Mirrors capacitor.rs::deactivate_modules() —
+           clears is_active/cycle_remaining/target_ship_id and re-runs apply_fitting().
+         -> Emits: Vec<ModuleDeactivated>
+         Must run after Lock (Step 5, freshest lock state) and before Combat/Repair
+         (Step 6+, so those only ever see modules still in range).
+
 Step 6: Combat System
          CombatSystem::run(&mut world, tick, &cap.weapon_cycles_started)
          -> Only fires for ships in weapon_cycles_started (ADR-0012)

@@ -410,6 +410,7 @@ impl<S: EventStore> SimulationNode<S> {
                             ship_id: bot.ship_id,
                             module_id: *module_id,
                             slot: *slot,
+                            target_ship_id: Some(target.ship_id),
                         },
                     );
                 }
@@ -840,18 +841,25 @@ mod tests {
             module_id: MODULE_FOLD_DISRUPTOR,
         });
 
+        let lock_cmd = LockOnCommand {
+            ship_id: player_ship_id,
+            target_id: bot_ship_id,
+        };
+        // Tackle activation requires a Locked target (ADR-0035 Q4) — tick
+        // until the lock completes before activating.
+        for _ in 0..5 {
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
+        }
+
         node.activate_module_owned(
             player_id,
             ActivateModuleCommand {
                 ship_id: player_ship_id,
                 module_id: MODULE_FOLD_DISRUPTOR,
                 slot: SlotKind::Mid,
+                target_ship_id: Some(bot_ship_id),
             },
         );
-        let lock_cmd = LockOnCommand {
-            ship_id: player_ship_id,
-            target_id: bot_ship_id,
-        };
         for _ in 0..5 {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
