@@ -32,26 +32,33 @@ struct TargetedSlot {
     range: f32,
 }
 
+/// Effective range for a `RangeGateKind` family, read from `stats`
+/// (weapon: range+falloff, tackle: tackle_range, remote repair: repair_range).
+/// Single source of truth for the stat lookup so per-ship-batch callers
+/// (`process_range_gate`) and per-slot callers (`effective_range_for_kind`)
+/// can't drift apart on which stat backs which kind.
+fn effective_range_from_stats(
+    kind: dawn_core::fitting::RangeGateKind,
+    stats: &ShipStatsComp,
+) -> f32 {
+    match kind {
+        dawn_core::fitting::RangeGateKind::Weapon => stats.weapon_range + stats.weapon_falloff,
+        dawn_core::fitting::RangeGateKind::Tackle => stats.tackle_range,
+        dawn_core::fitting::RangeGateKind::RemoteRepair => stats.repair_range,
+    }
+}
+
 impl<S: EventStore> SimulationNode<S> {
     /// Effective range for a targeted `ModuleKind`, read from `entity`'s
-    /// fitted `ShipStatsComp` (weapon: range+falloff, tackle: tackle_range,
-    /// remote repair: repair_range). `None` for kinds that are not
-    /// range-gated (ADR-0035/0036).
+    /// fitted `ShipStatsComp`. `None` for kinds that are not range-gated
+    /// (ADR-0035/0036).
     pub(super) fn effective_range_for_kind(
         &self,
         entity: Entity,
         kind: dawn_core::fitting::ModuleKind,
     ) -> Option<f32> {
         let stats = self.world.inner().get::<&ShipStatsComp>(entity).ok()?;
-        match kind {
-            dawn_core::fitting::ModuleKind::Weapon => {
-                Some(stats.weapon_range + stats.weapon_falloff)
-            }
-            dawn_core::fitting::ModuleKind::Tackle => Some(stats.tackle_range),
-            dawn_core::fitting::ModuleKind::RemoteShieldBooster
-            | dawn_core::fitting::ModuleKind::RemoteArmorRepairer => Some(stats.repair_range),
-            _ => None,
-        }
+        Some(effective_range_from_stats(kind.range_gate_kind()?, &stats))
     }
 
     /// Whether `target_id` is currently within `range` of `ship_id`. Delegates
@@ -76,9 +83,6 @@ impl<S: EventStore> SimulationNode<S> {
             let Ok(stats) = self.world.inner().get::<&ShipStatsComp>(entity) else {
                 continue;
             };
-            let weapon_effective_range = stats.weapon_range + stats.weapon_falloff;
-            let tackle_range = stats.tackle_range;
-            let repair_range = stats.repair_range;
             let Ok(fitting) = self.world.inner().get::<&FittingComp>(entity) else {
                 continue;
             };
@@ -89,13 +93,10 @@ impl<S: EventStore> SimulationNode<S> {
                 let Some(target) = slot.target_ship_id else {
                     continue;
                 };
-                let range = match slot.def.kind {
-                    dawn_core::fitting::ModuleKind::Weapon => weapon_effective_range,
-                    dawn_core::fitting::ModuleKind::Tackle => tackle_range,
-                    dawn_core::fitting::ModuleKind::RemoteShieldBooster
-                    | dawn_core::fitting::ModuleKind::RemoteArmorRepairer => repair_range,
-                    _ => continue, // Not a range-gated kind.
+                let Some(gate_kind) = slot.def.kind.range_gate_kind() else {
+                    continue; // Not a range-gated kind.
                 };
+                let range = effective_range_from_stats(gate_kind, &stats);
                 candidates.push(TargetedSlot {
                     entity,
                     ship_id,
