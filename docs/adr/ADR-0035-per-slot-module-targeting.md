@@ -113,8 +113,8 @@ Logistics 本体（`RepairApplied` を他船に適用する Command/Event/Tick �
 - [x] `dawn-ecs`: `FittedSlot.target_ship_id: Option<ShipId>` 追加
 - [x] `dawn-core`: `ActivateModuleCommand.target_ship_id: Option<ShipId>` 追加 + バリデーション
       （`ModuleKind::requires_target()` でターゲット要否を判定）
-- [ ] `dawn-core`/`dawn-ecs`: `repair_range_add: f32`（`StatDelta`）+ `data/modules.toml` 反映
-      — Logistics 本体の ADR に持ち越し（消費する ModuleKind が未実装のため）
+- [x] `dawn-core`/`dawn-ecs`: `repair_range_add: f32`（`StatDelta`）+ `data/modules.toml` 反映
+      — ADR-0036（Remote Repair）で実装済み
 - [x] `dawn-sector`: Range Gate System 新設（`node/range_gate.rs`、Step 5.5、
       Weapon/Tackle 共通。effective range は Weapon=`weapon_range+weapon_falloff`、
       Tackle=`tackle_range`）+ `capacitor.rs::deactivate_modules()` 相当のロジックを再利用

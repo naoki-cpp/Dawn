@@ -57,6 +57,8 @@ pub(super) struct StatDeltaEntry {
     pub(super) tackle_range_add: f32,
     #[serde(default)]
     pub(super) repair_amount: f32,
+    #[serde(default)]
+    pub(super) repair_range_add: f32,
 }
 
 fn default_speed_multiplier() -> f32 {
@@ -80,6 +82,8 @@ fn parse_module_kind(s: &str) -> ModuleKind {
         "Sensor" => ModuleKind::Sensor,
         "Rig" => ModuleKind::Rig,
         "Tackle" => ModuleKind::Tackle,
+        "RemoteShieldBooster" => ModuleKind::RemoteShieldBooster,
+        "RemoteArmorRepairer" => ModuleKind::RemoteArmorRepairer,
         _ => ModuleKind::Weapon,
     }
 }
@@ -117,6 +121,7 @@ fn entry_to_module(e: ModuleEntry) -> ModuleDefinition {
             cap_recharge_add: e.stat_delta.cap_recharge_add,
             tackle_range_add: e.stat_delta.tackle_range_add,
             repair_amount: e.stat_delta.repair_amount,
+            repair_range_add: e.stat_delta.repair_range_add,
         },
     }
 }

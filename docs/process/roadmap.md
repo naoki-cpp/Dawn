@@ -42,8 +42,8 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
                   （docs/process/8d5-hardware-notes.md）。
                 残り 8B（Fission / LoD=ADR-0020 deferred / 越境 TiDi / SLA イベント化）は
                 いずれも現状は不要・§11 の負荷対応バックログへ切り出し済み。
-                次の前進先: 戦闘の深み（ADR-0016 §5: 残る Logistics）→ Phase 9（Resource + Economy
-                Context・§12）。
+                戦闘の深み（ADR-0016 §5）は Logistics（遠隔修理、ADR-0036）完了で一巡。
+                次の前進先: Phase 9（Resource + Economy Context・§12）。
                 Sector キャパシティの悪用対策は docs/design/game-design.md §8 を参照。
 ```
 
@@ -65,8 +65,11 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
   O/K キー配線済み。これで戦闘の深み（Tackle → Signature → Orbit/Keep at Range）が完了し、
   Logistics の前段として Local Repair（ADR-0033）へ進んだ
 - ✅ Local Repair（ADR-0033・2026-06-24）— Active Shield Booster / Armor Repairer、
-  RepairSystem（Step 6.5）、RepairApplied、Godot 緑フラッシュまで実装済み。
-  次は本体の Logistics（遠隔修理）
+  RepairSystem（Step 6.5）、RepairApplied、Godot 緑フラッシュまで実装済み
+- ✅ Remote Repair / Logistics（ADR-0036・2026-07-03）— `ModuleKind::RemoteShieldBooster`/
+  `RemoteArmorRepairer` を ADR-0035 の per-slot ターゲット・Range Gate System 基盤に乗せ、
+  `repair_range_add`/`RepairCycle.target_ship_id` を追加。これで戦闘の深み
+  （ADR-0016 §5）が一巡し、次は Phase 9（Resource + Economy Context）
 - ✅ Godot クライアント構造リファクタ + テスト基盤（2026-06-21）— `main.gd` の god object を
   `HudManager`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder` の4クラスへ分割
   （1661→1094行）。`scripts/setup-godot.*` で pin 済み Godot CLI を取得し GdUnit4 を導入、
@@ -111,19 +114,22 @@ deferred / 越境 TiDi / SLA イベント化）はいずれも現状は不要・
 切り出し済み（トリガー待ちで通常のスプリント計画からは外す）。
 8D（物理ノード分散）は Raspberry Pi 実機検証まで完了しており、次の前進先の選択肢からは外れた。
 
-**次に着手するのはただ1つ: 戦闘システムの Logistics（遠隔修理）。**
+**戦闘システムの Logistics（遠隔修理）は完了（ADR-0036、2026-07-03）。**
 戦闘システム（§9 参照）は Warp（✅）→ Tackle（✅）→ Signature Resolution（✅）→
-Orbit/Keep at Range（✅）→ Local Repair（✅・自己修理まで）と積み上げてきており、残る
-遠隔修理（味方への Repair）で Phase 8 発案時点の近期ロードマップ（ADR-0016 §5）が一巡する。
+Orbit/Keep at Range（✅）→ Local Repair（✅）→ **Remote Repair（✅）** と積み上がり、
+Phase 8 発案時点の近期ロードマップ（ADR-0016 §5）が一巡した。
 
-Logistics 本体に先立ち、その土台となる **ADR-0035（Per-Slot Module Targeting）が完了**
-（2026-07-02）: `FittedSlot.target_ship_id` による per-slot ターゲット、
-`ModuleKind::requires_target()` によるバリデーション、Weapon/Tackle 共通の
-Range Gate System（Step 5.5、射程外で強制 deactivate に統一）。Logistics 本体は
-この基盤の上に `repair_range_add` と Repairer 系 ModuleKind を追加するだけで乗る想定。
+Logistics 本体は ADR-0035（Per-Slot Module Targeting、2026-07-02）の土台の上に、
+新規 `ModuleKind::RemoteShieldBooster`/`RemoteArmorRepairer`（`requires_target()`
+に追加）・`repair_range_add`/`ShipStatsComp.repair_range`（`tackle_range` と同じ
+集計経路）・`RepairCycle.target_ship_id`（Capacitor System が
+`slot.target_ship_id.unwrap_or(snap.ship_id)` で解決、Local/Remote 共通コード
+パス）を積むだけで乗った。Range Gate System（Step 5.5）は2行追加で
+Remote Repair にも対応。
 
-Logistics 完了後は **Phase 9（Resource + Economy Context・§12）** に進む。ただし戦闘システムは
-Logistics で「完了」するわけではなく、§9 のとおりその後も継続的に深化していく対象であることに注意。
+**次に着手するのは Phase 9（Resource + Economy Context・§12）。** ただし戦闘システムは
+Logistics で「完了」するわけではなく、§9 のとおりその後も継続的に深化していく対象であることに注意
+（クライアント表現・Bot AI の Remote Repair 活用は ADR-0036 のスコープ外として残っている）。
 
 #### Phase 6 完了タスク一覧
 
@@ -159,10 +165,9 @@ Phase 0〜7 は全て完了済み（要約は §2「完了済みフェーズ」�
 
 ADR-0016 §5（段階的拡張）で優先順位づけされ、Phase 6〜8 を跨いで継続的に深化してきた。
 現状: Tackle（ADR-0024）→ Signature Resolution（ADR-0012）→ Orbit/Keep at Range（ADR-0031）→
-Local Repair（ADR-0033）まで実装済み。次は **Logistics（遠隔修理）**（§10「次に着手すべき
-タスク」参照）。
+Local Repair（ADR-0033）→ **Remote Repair / Logistics（ADR-0036）** まで実装済み。
 
-Logistics 着手後も、戦闘システムとしての拡張は終わらない想定（新モジュール種・新ダメージ
+Logistics 完了後も、戦闘システムとしての拡張は終わらない想定（新モジュール種・新ダメージ
 タイプ・新戦術オプションなど）。個別の追加は都度 ADR を起票し、本節ではなく該当箇所
 （game-design.md §4.1 実装済み一覧・event-catalog.md 等）に反映していく。
 
@@ -256,10 +261,8 @@ Phase 10: Client 本格化（GDExtension 導入）
 > 拡張方針）, ADR-0032（`InventoryComp` の初出・ADR-0034 が一般化する）, CONTEXT.md
 > （`Item`/`Packaged Ship`/`Station`/`Scrap Metal`/`Currency`）。
 
-**前提**: 戦闘の深み（ADR-0016 §5 items 1–4: Tackle → Signature Resolution → Orbit/Keep at
-Range → Local Repair）は完了済み。残る **Logistics（遠隔修理）** は §10 の Phase 8 側の
-積み残しとして先に着手し（eve-reference §7.4.2: 優先度は Tackle より下だが Phase 9 の
-経済ループより先）、Phase 9 はその後に着手する。
+**前提**: 戦闘の深み（ADR-0016 §5 items 1–5: Tackle → Signature Resolution → Orbit/Keep at
+Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み。Phase 9 はこの後に着手する。
 
 **完了基準**:
 

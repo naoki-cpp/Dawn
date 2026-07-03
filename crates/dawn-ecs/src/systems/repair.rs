@@ -12,7 +12,12 @@ use dawn_core::{
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RepairCycle {
-    pub ship_id: ShipId,
+    /// The ship receiving the repair. For Local Repair (ShieldBooster/
+    /// ArmorRepairer) this is the repairing ship itself; for Remote Repair
+    /// (RemoteShieldBooster/RemoteArmorRepairer, ADR-0036) it's the module's
+    /// Locked target. The Capacitor System resolves which one this is —
+    /// Repair System doesn't need to know or care.
+    pub target_ship_id: ShipId,
     pub module_kind: ModuleKind,
     pub repair_amount: f32,
 }
@@ -56,7 +61,7 @@ pub fn run(world: &mut SimWorld, tick: Tick, repair_cycles: &[RepairCycle]) -> R
     let mut changed: Vec<usize> = Vec::new();
 
     for cycle in repair_cycles {
-        let Some(index) = snaps.iter().position(|s| s.ship_id == cycle.ship_id) else {
+        let Some(index) = snaps.iter().position(|s| s.ship_id == cycle.target_ship_id) else {
             continue;
         };
         let snap = &mut snaps[index];
@@ -65,13 +70,13 @@ pub fn run(world: &mut SimWorld, tick: Tick, repair_cycles: &[RepairCycle]) -> R
         }
 
         let (layer, before, after) = match cycle.module_kind {
-            ModuleKind::ShieldBooster => {
+            ModuleKind::ShieldBooster | ModuleKind::RemoteShieldBooster => {
                 let before = snap.current_shield;
                 snap.current_shield =
                     (snap.current_shield + cycle.repair_amount).clamp(0.0, snap.max_shield);
                 (RepairLayer::Shield, before, snap.current_shield)
             }
-            ModuleKind::ArmorRepairer => {
+            ModuleKind::ArmorRepairer | ModuleKind::RemoteArmorRepairer => {
                 let before = snap.current_armor;
                 snap.current_armor =
                     (snap.current_armor + cycle.repair_amount).clamp(0.0, snap.max_armor);
@@ -174,7 +179,7 @@ mod tests {
             &mut world,
             Tick(3),
             &[RepairCycle {
-                ship_id: ship_id(),
+                target_ship_id: ship_id(),
                 module_kind: ModuleKind::ShieldBooster,
                 repair_amount: 40.0,
             }],
@@ -196,7 +201,7 @@ mod tests {
             &mut world,
             Tick(3),
             &[RepairCycle {
-                ship_id: ship_id(),
+                target_ship_id: ship_id(),
                 module_kind: ModuleKind::ArmorRepairer,
                 repair_amount: 40.0,
             }],
@@ -208,6 +213,43 @@ mod tests {
                 amount,
                 ..
             })) if (*amount - 40.0).abs() < f32::EPSILON
+        ));
+    }
+
+    #[test]
+    fn remote_shield_booster_cycle_repairs_the_target_not_the_repairer() {
+        // Two ships: the repairer (whose module cycled) and a separate ally
+        // target. ADR-0036: Remote Repair heals target_ship_id, which the
+        // Capacitor System resolves from the module's own target_ship_id --
+        // Repair System itself doesn't distinguish self vs remote.
+        let mut world = SimWorld::new(SectorId(0));
+        let repairer_id = ship_id();
+        let target_id = ShipId::new(NodeId(0), 2);
+        world.spawn_ship(repairer_id, Position::ORIGIN, Velocity::ZERO);
+        let target_entity = world.spawn_ship(target_id, Position::ORIGIN, Velocity::ZERO);
+        world.set_ship_stats(target_entity, ShipStatsComp::PLAYER);
+        if let Some(mut hull) = world.get_mut::<HullComp>(target_entity) {
+            hull.current_shield = 50.0;
+        }
+
+        let result = run(
+            &mut world,
+            Tick(3),
+            &[RepairCycle {
+                target_ship_id: target_id,
+                module_kind: ModuleKind::RemoteShieldBooster,
+                repair_amount: 40.0,
+            }],
+        );
+
+        assert!(matches!(
+            result.events.first(),
+            Some(DomainEvent::RepairApplied(RepairApplied {
+                ship_id,
+                layer: RepairLayer::Shield,
+                amount,
+                ..
+            })) if *ship_id == target_id && (*amount - 40.0).abs() < f32::EPSILON
         ));
     }
 }

@@ -340,7 +340,10 @@ EVE の**グローバル** TiDi は大規模戦でゲームが 10 倍スロー�
   スポーン時に全モジュール1個ずつ所持し、いつでもスロットを組み替えられる（I キー）。
 - **ローカルリペア（自己修理）** — 実装済み（ADR-0033）。Active な Shield Booster /
   Armor Repairer がサイクルごとに cap を消費して現在 HP を回復（`RepairApplied`）。
-  cap を武器 / AB と取り合う判断を生む。**他船への遠隔修理（Logi）は未実装**（§4.2 参照）。
+  cap を武器 / AB と取り合う判断を生む。
+- **リモートリペア / Logistics（味方への遠隔修理）** — 実装済み（ADR-0036）。ロック済みの
+  味方を対象に選び Remote Shield Booster / Remote Armor Repairer を起動する。射程外に
+  出ると Range Gate System が自動的に強制 OFF する（Weapon/Tackle と共通の仕組み）。
 
 ### 4.2 将来検討する機能（優先順位付き・すべて未実装）
 
@@ -404,7 +407,6 @@ EM / Thermal / Kinetic / Explosive の 4 タイプと、各 HP 層への耐性�
 ### 🟢 遠い将来（EVE らしさの完成）
 
 - **Drone**: 船から展開する無人機 — 未実装
-- **Logi（修理支援）**: 他の船の Shield を修復するモジュール — 未実装
 - **Web（速度低下）**: Tackler（実装済み・§4.1）の隣接機能。速度を落として追走/逃走の
   判断を生む — 未実装
 

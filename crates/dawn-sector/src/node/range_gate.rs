@@ -34,8 +34,9 @@ struct TargetedSlot {
 
 impl<S: EventStore> SimulationNode<S> {
     /// Effective range for a targeted `ModuleKind`, read from `entity`'s
-    /// fitted `ShipStatsComp` (weapon: range+falloff, tackle: tackle_range).
-    /// `None` for kinds that are not range-gated (ADR-0035).
+    /// fitted `ShipStatsComp` (weapon: range+falloff, tackle: tackle_range,
+    /// remote repair: repair_range). `None` for kinds that are not
+    /// range-gated (ADR-0035/0036).
     pub(super) fn effective_range_for_kind(
         &self,
         entity: Entity,
@@ -47,6 +48,8 @@ impl<S: EventStore> SimulationNode<S> {
                 Some(stats.weapon_range + stats.weapon_falloff)
             }
             dawn_core::fitting::ModuleKind::Tackle => Some(stats.tackle_range),
+            dawn_core::fitting::ModuleKind::RemoteShieldBooster
+            | dawn_core::fitting::ModuleKind::RemoteArmorRepairer => Some(stats.repair_range),
             _ => None,
         }
     }
@@ -75,6 +78,7 @@ impl<S: EventStore> SimulationNode<S> {
             };
             let weapon_effective_range = stats.weapon_range + stats.weapon_falloff;
             let tackle_range = stats.tackle_range;
+            let repair_range = stats.repair_range;
             let Ok(fitting) = self.world.inner().get::<&FittingComp>(entity) else {
                 continue;
             };
@@ -88,6 +92,8 @@ impl<S: EventStore> SimulationNode<S> {
                 let range = match slot.def.kind {
                     dawn_core::fitting::ModuleKind::Weapon => weapon_effective_range,
                     dawn_core::fitting::ModuleKind::Tackle => tackle_range,
+                    dawn_core::fitting::ModuleKind::RemoteShieldBooster
+                    | dawn_core::fitting::ModuleKind::RemoteArmorRepairer => repair_range,
                     _ => continue, // Not a range-gated kind.
                 };
                 candidates.push(TargetedSlot {
@@ -357,6 +363,107 @@ mod tests {
                 }
             ),
             "Weapon requires a target (ModuleKind::requires_target) — activation without one must be rejected"
+        );
+    }
+
+    #[test]
+    fn remote_shield_booster_repairs_a_locked_ally_within_range() {
+        // ADR-0036: Remote Repair follows the exact same target/Locked/Range
+        // Gate machinery as Weapon/Tackle, just healing instead of damaging.
+        use crate::modules::MODULE_SMALL_REMOTE_SHIELD_BOOSTER;
+        use dawn_core::events::DamageTaken;
+
+        let mut node = node_with_modules();
+        let repairer_id = node.next_player_id();
+        let repairer = node.spawn_player_ship_at_pub(repairer_id, Position::ORIGIN);
+        let ally_owner = node.next_player_id();
+        let ally = node.spawn_player_ship_at_pub(ally_owner, Position::new(1_000.0, 0.0, 0.0));
+
+        node.fit_module(FitModuleCommand {
+            ship_id: repairer,
+            slot: SlotKind::Mid,
+            module_id: MODULE_SMALL_REMOTE_SHIELD_BOOSTER,
+        });
+        lock_until_locked(&mut node, repairer, ally);
+
+        // Magpie max HP: shield=200, armor=120, hull=100 (matches ADR-0033 tests).
+        let hp_before = node.get_ship_hp(ally).unwrap();
+        node.apply_event_pub(DomainEvent::DamageTaken(DamageTaken {
+            ship_id: ally,
+            damage: 220.0,
+            current_shield: 0.0,
+            current_armor: 100.0,
+            current_hull: 100.0,
+            tick: dawn_core::Tick(1),
+        }));
+
+        assert!(
+            node.activate_module_owned(
+                repairer_id,
+                ActivateModuleCommand {
+                    ship_id: repairer,
+                    module_id: MODULE_SMALL_REMOTE_SHIELD_BOOSTER,
+                    slot: SlotKind::Mid,
+                    target_ship_id: Some(ally),
+                }
+            ),
+            "activation against a Locked, in-range ally must succeed"
+        );
+
+        node.tick_with_lock_commands(&[]);
+
+        let hp_after = node.get_ship_hp(ally).unwrap();
+        assert!(
+            hp_after > 0.0 && hp_after < hp_before,
+            "sanity: ally took damage before repair could offset all of it in one cycle \
+             (hp_before={hp_before}, hp_after={hp_after})"
+        );
+        assert!(
+            hp_after > 100.0 + 100.0,
+            "ally's shield must have started recovering from the Remote Shield Booster \
+             (repair_amount 50, so current_shield > 0 after one cycle; hp_after={hp_after})"
+        );
+    }
+
+    #[test]
+    fn remote_shield_booster_is_force_deactivated_once_its_locked_target_drifts_beyond_repair_range(
+    ) {
+        use crate::modules::MODULE_SMALL_REMOTE_SHIELD_BOOSTER;
+
+        let mut node = node_with_modules();
+        let repairer_id = node.next_player_id();
+        let repairer = node.spawn_player_ship_at_pub(repairer_id, Position::ORIGIN);
+        let ally_owner = node.next_player_id();
+        // repair_range_add = 15,000; spawn well within range so activation succeeds.
+        let ally = node.spawn_player_ship_at_pub(ally_owner, Position::new(1_000.0, 0.0, 0.0));
+
+        node.fit_module(FitModuleCommand {
+            ship_id: repairer,
+            slot: SlotKind::Mid,
+            module_id: MODULE_SMALL_REMOTE_SHIELD_BOOSTER,
+        });
+        lock_until_locked(&mut node, repairer, ally);
+
+        assert!(node.activate_module_owned(
+            repairer_id,
+            ActivateModuleCommand {
+                ship_id: repairer,
+                module_id: MODULE_SMALL_REMOTE_SHIELD_BOOSTER,
+                slot: SlotKind::Mid,
+                target_ship_id: Some(ally),
+            }
+        ));
+
+        // Drift the ally beyond repair_range (15,000) after activation.
+        node.set_spawn_anchor_abs(ally, [50_000.0, 0.0, 0.0]);
+
+        let result = node.tick_with_lock_commands(&[]);
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|e| matches!(e, DomainEvent::ModuleDeactivated(d) if d.ship_id == repairer)),
+            "Range Gate must force the Remote Shield Booster OFF once the ally drifts beyond repair_range"
         );
     }
 }
