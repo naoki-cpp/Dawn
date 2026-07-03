@@ -65,8 +65,11 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
   O/K キー配線済み。これで戦闘の深み（Tackle → Signature → Orbit/Keep at Range）が完了し、
   Logistics の前段として Local Repair（ADR-0033）へ進んだ
 - ✅ Local Repair（ADR-0033・2026-06-24）— Active Shield Booster / Armor Repairer、
-  RepairSystem（Step 6.5）、RepairApplied、Godot 緑フラッシュまで実装済み。
-  次は本体の Logistics（遠隔修理）
+  RepairSystem（Step 6.5）、RepairApplied、Godot 緑フラッシュまで実装済み
+- ✅ Remote Repair / Logistics（ADR-0036・2026-07-03）— `ModuleKind::RemoteShieldBooster`/
+  `RemoteArmorRepairer` を ADR-0035 の per-slot ターゲット・Range Gate System 基盤に乗せ、
+  `repair_range_add`/`RepairCycle.target_ship_id` を追加。これで戦闘の深み
+  （ADR-0016 §5）が一巡し、次は Phase 9（Resource + Economy Context）
 - ✅ Godot クライアント構造リファクタ + テスト基盤（2026-06-21）— `main.gd` の god object を
   `HudManager`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder` の4クラスへ分割
   （1661→1094行）。`scripts/setup-godot.*` で pin 済み Godot CLI を取得し GdUnit4 を導入、
