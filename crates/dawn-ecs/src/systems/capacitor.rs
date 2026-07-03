@@ -134,13 +134,7 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
                     // Record weapon cycle start so Combat system can fire.
                     if slot.kind == ModuleKind::Weapon {
                         weapon_fired = true;
-                    } else if matches!(
-                        slot.kind,
-                        ModuleKind::ShieldBooster
-                            | ModuleKind::ArmorRepairer
-                            | ModuleKind::RemoteShieldBooster
-                            | ModuleKind::RemoteArmorRepairer
-                    ) {
+                    } else if slot.kind.repair_layer().is_some() {
                         // Local repair kinds never carry a target (ADR-0035
                         // requires_target() == false), so this falls back to
                         // self; Remote repair kinds always carry one (ADR-0036).
