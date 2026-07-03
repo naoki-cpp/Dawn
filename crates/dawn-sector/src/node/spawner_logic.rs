@@ -2,12 +2,9 @@ use dawn_core::{
     events::ShipSpawned, ship_type::ShipTypeDefinition, DomainEvent, FitModuleCommand, PlayerId,
     Position, ShipId, Velocity,
 };
-use dawn_ecs::{
-    components::{
-        CapacitorComp, FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp,
-        ShipStatsComp, WarpComp,
-    },
-    systems::apply_fitting,
+use dawn_ecs::components::{
+    CapacitorComp, FittingComp, HullComp, IsBotComp, IsNpcComp, LockComp, PositionComp,
+    ShipStatsComp, WarpComp,
 };
 use dawn_event_store::store::EventStore;
 
@@ -539,7 +536,7 @@ impl<S: EventStore> SimulationNode<S> {
 
             // apply_fitting recomputes ShipStatsComp and rescales HullComp;
             // restore the exact HP layers from the snapshot afterwards.
-            apply_fitting(&mut self.world, ship.ship_id, base);
+            self.reapply_fitting(ship.ship_id);
             if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
                 hull.current_shield = ship.current_shield;
                 hull.current_armor = ship.current_armor;
@@ -591,8 +588,7 @@ impl<S: EventStore> SimulationNode<S> {
                     ShipStatsComp::PLAYER.max_hull,
                 );
             }
-            let base = ShipStatsComp::PLAYER;
-            apply_fitting(&mut self.world, ship_id, base);
+            self.reapply_fitting(ship_id);
         }
     }
 }

@@ -40,10 +40,8 @@ pub enum ClientCommandFollowup {
 }
 use dawn_ecs::{
     components::{
-        FittedSlot, FittingComp, LockComp, LockState, PositionComp, ShipStatsComp, ThrustComp,
-        WarpComp,
+        FittedSlot, FittingComp, LockComp, LockState, PositionComp, ThrustComp, WarpComp,
     },
-    systems::apply_fitting,
     Entity,
 };
 use dawn_event_store::store::EventStore;
@@ -373,12 +371,6 @@ impl<S: EventStore> SimulationNode<S> {
             return true;
         }
 
-        let base = self
-            .base_stats
-            .get(&ship_id)
-            .copied()
-            .unwrap_or(ShipStatsComp::NPC);
-
         // Tentatively apply, then range-validate against the *post-fit*
         // stats (ADR-0035): a module's own range contribution only shows up
         // in ShipStatsComp after apply_fitting runs, so this can't be
@@ -389,7 +381,7 @@ impl<S: EventStore> SimulationNode<S> {
         if !self.write_module_slot_state(entity, module_id, slot, active, target) {
             return false;
         }
-        apply_fitting(&mut self.world, ship_id, base);
+        self.reapply_fitting(ship_id);
 
         if active {
             if let Some(target_id) = target {
@@ -402,7 +394,7 @@ impl<S: EventStore> SimulationNode<S> {
                             prev_active,
                             prev_target,
                         );
-                        apply_fitting(&mut self.world, ship_id, base);
+                        self.reapply_fitting(ship_id);
                         return false;
                     }
                 }
@@ -500,13 +492,7 @@ impl<S: EventStore> SimulationNode<S> {
             return false;
         }
 
-        let base = self
-            .base_stats
-            .get(&cmd.ship_id)
-            .copied()
-            .unwrap_or(ShipStatsComp::NPC);
-
-        apply_fitting(&mut self.world, cmd.ship_id, base);
+        self.reapply_fitting(cmd.ship_id);
 
         // Append the ShipFitted event
         let snapshot = self

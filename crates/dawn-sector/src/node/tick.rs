@@ -1,7 +1,5 @@
 use dawn_core::DomainEvent;
-use dawn_ecs::systems::{
-    apply_fitting, CapacitorSystem, CombatSystem, LockSystem, MovementSystem, RepairSystem,
-};
+use dawn_ecs::systems::{CapacitorSystem, CombatSystem, LockSystem, MovementSystem, RepairSystem};
 use dawn_event_store::store::EventStore;
 
 use super::{SimulationNode, TickResult};
@@ -42,9 +40,7 @@ impl<S: EventStore> SimulationNode<S> {
             std::mem::take(&mut self.pending_bot_lock_commands);
         // Re-apply fitting for any ship whose module was force-deactivated.
         for ship_id in &cap.refitted {
-            if let Some(&base) = self.base_stats.get(ship_id) {
-                apply_fitting(&mut self.world, *ship_id, base);
-            }
+            self.reapply_fitting(*ship_id);
         }
 
         // 4.5 Tackle System — update TackledComp for active Tackle modules (ADR-0024)
@@ -76,14 +72,7 @@ impl<S: EventStore> SimulationNode<S> {
         // Remove destroyed ships from the ECS and all lookup maps.
         // CLAUDE.md §6: run the Bot System after Combat.
         for ship_id in &combat.destroyed {
-            if let Some(entity) = self.ships.index.remove(ship_id) {
-                self.world.despawn_ship(entity);
-            }
-            self.ships.type_ids.remove(ship_id);
-            self.base_stats.remove(ship_id);
-            if let Some(player_id) = self.ships.owners.remove(ship_id) {
-                self.ships.by_player.remove(&player_id);
-            }
+            self.remove_ship(*ship_id);
         }
 
         // 7. Bot System — bots issue the same commands as human players
