@@ -1,30 +1,30 @@
 //! Fitting system domain types.
 //!
-//! EVE Online準拠のモジュール装備システム。
-//! Ship はスロットにモジュールを装備し、モジュールの効果が ShipStats に集計される。
+//! EVE Online-style module fitting system.
+//! A Ship equips modules into slots, and module effects are aggregated into ShipStats.
 //!
-//! # スロット種別
-//! - High : 武器など攻撃系
-//! - Mid  : シールド / 推進など
-//! - Low  : アーマー / 速度強化など
-//! - Rig  : 恒久的な改造（取り外し不可）
+//! # Slot kinds
+//! - High : weapons and other offensive modules
+//! - Mid  : shields / propulsion, etc.
+//! - Low  : armor / speed enhancement, etc.
+//! - Rig  : permanent modification (not removable)
 //!
-//! # 設計原則
-//! - `StatDelta` が Fitting の出力。ECS の `ShipStatsComp` に集計される。
-//! - `FittingSnapshot` を Event に含めることで Event Replay 時に完全復元（INV-002）。
+//! # Design principles
+//! - `StatDelta` is Fitting's output. Aggregated into ECS's `ShipStatsComp`.
+//! - Including `FittingSnapshot` in an Event allows full restoration on Event Replay (INV-002).
 
 use crate::events::RepairLayer;
 use serde::{Deserialize, Serialize};
 
 // ── ID ────────────────────────────────────────────────────────────────────────
 
-/// モジュールの種類を識別する ID。
+/// ID identifying a module's kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ModuleId(pub u32);
 
-// ── スロット ──────────────────────────────────────────────────────────────────
+// ── Slot ──────────────────────────────────────────────────────────────────────
 
-/// 装備スロットの種別。
+/// The kind of an equipment slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SlotKind {
     High,
@@ -33,22 +33,22 @@ pub enum SlotKind {
     Rig,
 }
 
-// ── モジュール種別 ────────────────────────────────────────────────────────────
+// ── Module kind ───────────────────────────────────────────────────────────────
 
-/// モジュールが提供する効果の大分類。
+/// The broad category of effect a module provides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModuleKind {
-    /// 武器（High スロット）
+    /// Weapon (High slot)
     Weapon,
-    /// シールドブースター（Mid スロット）
+    /// Shield Booster (Mid slot)
     ShieldBooster,
-    /// アーマーリペアラー（Low スロット）
+    /// Armor Repairer (Low slot)
     ArmorRepairer,
-    /// 推進モジュール（Mid スロット）
+    /// Propulsion module (Mid slot)
     Propulsion,
-    /// センサー強化（Mid スロット）
+    /// Sensor booster (Mid slot)
     Sensor,
-    /// リグ（Rig スロット）
+    /// Rig (Rig slot)
     Rig,
     /// Fold Disruptor — prevents tackled ship from warping or jumping (ADR-0024).
     /// High slot, active. tackle_range_add in StatDelta determines effective range.
@@ -93,18 +93,18 @@ impl ModuleKind {
     }
 }
 
-// ── 活性化モード ──────────────────────────────────────────────────────────────
+// ── Activation mode ───────────────────────────────────────────────────────────
 
-/// モジュールの活性化モード。
+/// A module's activation mode.
 ///
-/// Passive: 装備するだけで StatDelta が常時適用される（Shield Extender など）。
-/// Active : プレイヤーがオン/オフを切り替える（Weapon, Afterburner など）。
-///          オフ時は StatDelta が適用されない。
+/// Passive: StatDelta is always applied just by fitting it (e.g. Shield Extender).
+/// Active : the player toggles it on/off (e.g. Weapon, Afterburner).
+///          StatDelta does not apply while off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActivationMode {
-    /// 常時効果。装備するだけで有効。
+    /// Always-on effect. Active as soon as it's fitted.
     Passive,
-    /// オン/オフ切り替え可能。オフ時は効果なし。
+    /// Can be toggled on/off. No effect while off.
     Active,
 }
 
@@ -231,18 +231,18 @@ pub struct ModuleDefinition {
 
 // ── FittingSnapshot ───────────────────────────────────────────────────────────
 
-/// スナップショット内の 1 スロット分のエントリ。
-/// `is_active` を含めることで Replay 時の活性化状態も復元できる（INV-002）。
+/// One slot's worth of entry within a snapshot.
+/// Including `is_active` also restores activation state on Replay (INV-002).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SlotEntry {
     pub module_id: ModuleId,
     pub is_active: bool,
 }
 
-/// 装備スロット全体のスナップショット。
+/// A snapshot of the entire equipment slot layout.
 ///
-/// `ShipFitted` イベントに含めることで Event Replay 時に
-/// 完全に Fitting 状態が復元される（INV-002）。
+/// Including this in the `ShipFitted` event fully restores Fitting state
+/// on Event Replay (INV-002).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FittingSnapshot {
     pub high: Vec<SlotEntry>,
@@ -252,7 +252,7 @@ pub struct FittingSnapshot {
 }
 
 impl FittingSnapshot {
-    /// 空の装備状態
+    /// Empty equipment state
     pub fn empty() -> Self {
         Self {
             high: Vec::new(),
@@ -370,7 +370,7 @@ mod tests {
                 ..StatDelta::ZERO
             },
         };
-        // serde_json ではなく Debug で代用（dawn-core は JSON 非依存）
+        // Use Debug instead of serde_json (dawn-core has no JSON dependency)
         let debug_str = format!("{def:?}");
         assert!(debug_str.contains("150mm Railgun"));
         assert!(debug_str.contains("Weapon"));
