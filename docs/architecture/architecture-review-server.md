@@ -3,12 +3,12 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md
-date     : 2026-07-03（doc-sync。PR #65（`FittedSlot::force_off()` で module force-off の3実装統一）・
-PR #66（`SimulationNode::ship_distance` へ Range Gate/Tackle の距離計算統一）・PR #67（`/improve-codebase-architecture`
-候補1+4: `ShipRegistry::remove`/`SimulationNode::remove_ship`/`reapply_fitting` 新設）の行数を反映:
-`node/spawner_logic.rs` 885→881・`node/mod.rs` 794→819（impl 606→631）・`node/transit_flow.rs` 913→946・
-`node/inventory.rs` 459→454・`node/commands.rs` 795→785・`node/apply_event.rs` 341→370・`node/range_gate.rs`
-382→362・`node/tick.rs` 177→171・`node/ship_registry.rs` 33→56。いずれも impl 700 未満で R-3 トリガー未発火）
+date     : 2026-07-03（/architecture-review。PR #65/#66/#67 の行数を反映（doc-sync で先行反映済みの9ファイルに
+加え、今回さらに `tackle.rs` 358→345・`components/fitting.rs` 370→384・`systems/capacitor.rs` 479→476・
+`systems/repair.rs` 212→213 の乖離を訂正）。本表への記録漏れだった `dawn-core/src/fitting.rs`（320）・
+`dawn-consensus/src/transport.rs`（202）・`dawn-event-store/src/memory.rs`（184）を追加。クライアント側も
+`world_session.gd` 265→272・`camera_controller.gd` 131→142 の乖離を訂正。いずれも impl 700 未満で
+R-3 トリガー未発火、グレード変動なし（総合 B+ 維持））
 ---
 
 # Architecture Review — Dawn Codebase
@@ -20,12 +20,12 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ## 現状評価
 
-**総合: B+**（2026-07-01 維持。M-7（Issue #56）解消で `node/commands.rs` に `apply_client_command` が集約され重複観点はさらに改善。R-3 の4ファイル（warp/spawner/orbit/mod）は impl 700 未満でトリガー未発火のまま。`node/commands.rs` は合計 693 行（impl 440）まで増加したが単一責務を保っており 🟢）
+**総合: B+**（2026-07-03 維持。PR #65/#66/#67（module force-off 統一・Range Gate/Tackle 距離計算統一・ShipRegistry 削除処理一元化 + reapply_fitting 統一）で `dawn-ecs`/`dawn-sector` の重複がさらに解消。R-3 の4ファイル（warp/spawner/orbit/mod）は impl 700 未満でトリガー未発火のまま。`node/mod.rs` は `remove_ship`/`reapply_fitting` 新設で 800→819 行（impl 631）に増加したが単一責務を保っており 🟢）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027）。M-7 解消で `ClientCommand` を `dawn-core` へ移動し DAG が整理された（`dawn-sector` が `dawn-actor` 非依存のまま dispatch を保持できるようになった）。Player Command Dispatch のための新 crate は引き続き不要 |
-| ファイルサイズ | B+ | 2026-07-01 doc-sync で再計測（`wc -l` 実測、過去の記録値との乖離を訂正）: `warp.rs` 1094（impl 535）・`spawner_logic.rs` 881（impl 603）・`orbit.rs` 854（impl 318）・`node/mod.rs` 800（impl 612）。新設 `node/jump.rs` 186（impl 66）は閾値内で健全。`dawn-simulation/serve` は `runtime.rs` / `aoi_delivery.rs` へ、`dawn-sector-node` は `runtime.rs` へ分割され、各起動 loop は小さく維持。4ファイルとも impl は700行未満で R-3 トリガーは未発火だが、`node/mod.rs`（612）が最も閾値に近い → 次回 `/architecture-review` での再評価を推奨 |
+| ファイルサイズ | B+ | 2026-07-03 `/architecture-review` で再計測（`wc -l` 実測）: `warp.rs` 1094（impl 535）・`spawner_logic.rs` 881（impl 596）・`orbit.rs` 854（impl 318）・`node/mod.rs` 819（impl 631、PR #67 で `remove_ship`/`reapply_fitting` 新設のため 800→819）。新設 `node/jump.rs` 250（impl 88）は閾値内で健全。`dawn-simulation/serve` は `runtime.rs` / `aoi_delivery.rs` へ、`dawn-sector-node` は `runtime.rs` へ分割され、各起動 loop は小さく維持。4ファイルとも impl は700行未満で R-3 トリガーは未発火だが、`node/mod.rs`（631）が最も閾値に近い → 次回 `/architecture-review` での再評価を推奨 |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。`InventoryComp`（ADR-0032）・`RepairLayer`/`RepairApplied`（ADR-0033）も既存型設計に整合 |
 | 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。AoI delivery、production runtime、Command dispatch は deep module 化済み（M-7 解消で `apply_client_command` が `SimulationNode` に集約）。残る両バイナリ間グルー重複（M-6）は data loading / NPC spawn の低頻度 glue として許容判断 |
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。`TransitOp::Commit` は ADR-0032 で `Box<ShipSnapshot>` 化しサイズ非対称を解消済み |
@@ -33,12 +33,15 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ---
 
-## ファイルサイズ一覧（2026-07-01 時点）
+## ファイルサイズ一覧（2026-07-03 時点）
 
-> 2026-06-29 の前回計測から、構造変更はなし。各ファイルは継続中の機能追加（ADR-0031/0032/0033
-> 系の延長）で増分しているのみ。R-3 の4ファイルは impl 行数（テスト除く）を併記し、
-> トリガー（impl 700 超）未発火を確認した。`client_admission.rs`（その他クレート表）は
-> 2026-06-29 の deepening（#41）がこれまで記録漏れだったため今回追加。
+> 2026-07-01 の前回計測から、構造変更はなし。ADR-0035 の残作業として PR #65（module
+> force-off の3実装を `FittedSlot::force_off()` に統一）・PR #66（Range Gate/Tackle の
+> 距離計算を `SimulationNode::ship_distance` に統一）・PR #67（`/improve-codebase-architecture`
+> 候補1+4: `ShipRegistry::remove`/`SimulationNode::remove_ship`/`reapply_fitting` 新設）が
+> landed。`dawn-core/src/fitting.rs`（320）・`dawn-consensus/src/transport.rs`（202）・
+> `dawn-event-store/src/memory.rs`（184）は本表への記録漏れが今回判明したため追加。
+> R-3 の4ファイルは impl 行数（テスト除く）を併記し、トリガー（impl 700 超）未発火を確認した。
 
 ### dawn-sector（ゲームロジック）
 
@@ -55,7 +58,7 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector/src/node/serialization.rs` | 507 | 🟢 ADR-0029 + ADR-0032（inventory / slot_capacity を PlayerFitting に追加）。2026-07-02、`build_handoff_payload`（`HandoffPayload { initial_state, player_fitting }`）を新設し、`single.rs`・`client_admission.rs` に重複していた InitialState/PlayerFitting 組み立てを1箇所へ集約（PR #59、450→507、ユニットテスト1件追加） |
 | `crates/dawn-sector/src/galaxy.rs` | 360 | 🟢 ADR-0029 AU→units 変換・ゲート AU 化 |
 | `crates/dawn-sector/src/node/apply_event.rs` | 370（impl 259） | 🟢 P7-pre + ADR-0032（ShipFitted/ShipSpawned で inventory 復元）+ ADR-0035（ModuleActivated/Deactivated replay で `target_ship_id` 復元/クリア）。PR #67 で ShipDespawned/ShipDestroyed の削除処理を `SimulationNode::remove_ship` に、ShipFitted/ModuleActivated/ModuleDeactivated の `apply_fitting` 手組み呼び出しを `reapply_fitting` に置換（341→370、正味は簡素化だがテスト等で純増） |
-| `crates/dawn-sector/src/node/tackle.rs` | 358 | 🟢 P7-pre。ADR-0035（PR #62）で距離判定を `entity_absolute_f64` の f64 差分に修正（真 AU スケールでの f32 丸め対策・ADR-0029 パターン準拠） |
+| `crates/dawn-sector/src/node/tackle.rs` | 345 | 🟢 P7-pre。ADR-0035（PR #62）で距離判定を `entity_absolute_f64` の f64 差分に修正（真 AU スケールでの f32 丸め対策・ADR-0029 パターン準拠）。PR #66 で手組みの delta 計算を `SimulationNode::ship_distance` 呼び出しに置換し未使用 `PositionComp` import を削除（358→345） |
 | `crates/dawn-sector/src/node/range_gate.rs` | 362（impl 143） | 🟢 ADR-0035 新設（PR #62）。Range Gate System（Step 5.5）— Weapon/Tackle のターゲットが射程外に出たら強制 OFF（`ModuleDeactivated { forced_reason: OutOfRange }`）。PR #63 で flat-index 解決を `FittingComp::slot_at_flat_mut` に置換（403→382）。PR #66 で距離判定を `SimulationNode::ship_distance` 呼び出しに置換（382→362）。半分強はテスト |
 | `crates/dawn-sector/src/aoi.rs` | 627（impl 307） | 🟢 `AoiDelivery`/`AoiSink`/`Observer`（旧 dawn-simulation・dawn-sector-node 重複の集約先）。半分弱はテスト。2026-07-01、`deliver_frame` を `<S: EventStore>` でジェネリック化 |
 | `crates/dawn-sector/src/anchor.rs` | 292 | 🟢 ADR-0029 新設（AnchorTable・静的 f64 アンカー絶対座標） |
@@ -109,9 +112,12 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-sector-node/src/main.rs` | 341 | 🟢 8D-4 本番バイナリ。config / TCP transport / accept channel / data loading の配線に縮小。2026-07-01、永続化配線（`build_node` がスナップショット有無で新規/復元を分岐、`CheckpointScheduler` をtickループに配線）で 267→341 |
 | `crates/dawn-core/src/events.rs` | 603 | 🟢 ADR-0032 `ShipFitted.inventory`・ADR-0033 `RepairApplied`/`RepairLayer`・ADR-0035 `ModuleActivated.target_ship_id`/`ModuleDeactivated.forced_reason`/`ModuleDeactivationReason` 追加 |
 | `crates/dawn-ecs/src/systems/combat.rs` | 580 | 🟢 |
-| `crates/dawn-ecs/src/systems/capacitor.rs` | 479 | 🟢 ADR-0033 `repair_cycles_started` 収集を並置。ADR-0035 で強制 OFF に `forced_reason: CapacitorExhausted` を付与。PR #63 で flat-index 境界計算と 4-way chain を `FittingComp::slot_at_flat_mut`/`iter_slots` に置換（504→479） |
+| `crates/dawn-ecs/src/systems/capacitor.rs` | 476 | 🟢 ADR-0033 `repair_cycles_started` 収集を並置。ADR-0035 で強制 OFF に `forced_reason: CapacitorExhausted` を付与。PR #63 で flat-index 境界計算と 4-way chain を `FittingComp::slot_at_flat_mut`/`iter_slots` に置換（504→479）。PR #65 でスロット変更3行を `FittedSlot::force_off()` 呼び出しに置換（479→476） |
 | `crates/dawn-consensus/src/actor.rs` | 465 | 🟢 8D-5 実機検証で使う Raft role-transition ログ（`eprintln!`）を保持 |
 | `crates/dawn-event-store/src/file.rs` | 463 | 🟢 |
+| `crates/dawn-core/src/fitting.rs` | 320 | 🟢 **新規記録**（本表に未記載だった）。`ModuleDefinition`/`ModuleKind`/`SlotKind`/`StatDelta`/`FittingSnapshot` 等、Fitting ドメイン型の定義一式 |
+| `crates/dawn-consensus/src/transport.rs` | 202 | 🟢 **新規記録**（本表に未記載だった）。`RaftTransport` trait 定義 + in-process 実装 |
+| `crates/dawn-event-store/src/memory.rs` | 184 | 🟢 **新規記録**（本表に未記載だった）。`InMemoryEventStore` |
 | `crates/dawn-ecs/src/systems/movement.rs` | 414 | 🟢 |
 | `crates/dawn-ecs/src/systems/lock.rs` | 374 | 🟢 |
 | `crates/dawn-core/src/commands.rs` | 401 | 🟢 Command enum 群（継続的に variant 追加）。M-7（Issue #56）で `ClientCommand` enum を `dawn-actor` から移動（359→395）。ADR-0035 で `ActivateModuleCommand.target_ship_id` 追加（395→401） |
@@ -122,10 +128,10 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 | `crates/dawn-ecs/src/components/movement.rs` | 284 | 🟢 |
 | `crates/dawn-ecs/src/world.rs` | 285 | 🟢 270→285。クエリヘルパー |
 | `crates/dawn-sector-node/src/data_loader.rs` | 278 | 🟢 178→278（+100）。8D-4/8D-5 のテスト追加が主因。module/ship type TOML ローダー |
-| `crates/dawn-ecs/src/components/fitting.rs` | 370 | 🟢 ADR-0035 `FittedSlot.target_ship_id` 追加。PR #63 で `slot_at_flat`/`slot_at_flat_mut`/`iter_slots`/`iter_slots_mut` を新設し、3系統に分散していた flat-index 境界計算と6+箇所の4-way chain の唯一の所有者になった |
+| `crates/dawn-ecs/src/components/fitting.rs` | 384 | 🟢 ADR-0035 `FittedSlot.target_ship_id` 追加。PR #63 で `slot_at_flat`/`slot_at_flat_mut`/`iter_slots`/`iter_slots_mut` を新設し、3系統に分散していた flat-index 境界計算と6+箇所の4-way chain の唯一の所有者になった。PR #65 で `FittedSlot::force_off()` を新設し、capacitor/Range Gate/player-deactivate の3箇所が個別に手組みしていたスロット強制OFF処理（is_active/cycle_remaining/target_ship_idの3フィールド）の唯一の所有者になった（370→384） |
 | `crates/dawn-ecs/src/components/combat.rs` | 264 | 🟢 |
 | `crates/dawn-replication/src/anti_entropy.rs` | 215 | 🟢 211→215。8D-2b |
-| `crates/dawn-ecs/src/systems/repair.rs` | 212 | 🟢 ADR-0033 新設（Step 6.5 Repair System・RepairApplied 発行 + テスト） |
+| `crates/dawn-ecs/src/systems/repair.rs` | 213 | 🟢 ADR-0033 新設（Step 6.5 Repair System・RepairApplied 発行 + テスト） |
 | `crates/dawn-replication/src/replica.rs` | 224 | 🟢 M-5（ReplicaSet・複製ログ消費側） |
 | `crates/dawn-replication/src/bus.rs` | 236 | 🟢 188→236（+48）。8D-2a。テスト追加が主因 |
 | `crates/dawn-core/src/navigation.rs` | 196 | 🟢 184→196。ナビゲーション型定義 |
