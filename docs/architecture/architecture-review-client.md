@@ -45,9 +45,9 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/hud_manager.gd` | 634 | 🟡 HUD 全パネルの構築・更新の stateless static class。責務は単一（HUD 構築）で、前回 521 から増加 |
 | `client/scripts/connection.gd` | 348 | 🟢 WebSocket I/O とシグナル発行のみ。前回 279 から増加 |
 | `client/scripts/ship_controller.gd` | 326 | 🟢 単一船の視覚表現に専念。ロックオン枠は `BillboardRing` 共通化。前回 277 から増加 |
-| `client/scripts/world_session.gd` | 265 | 🟢 InitialState / AoI / HP / lock / tick-cap の client-side live world state |
+| `client/scripts/world_session.gd` | 272 | 🟢 InitialState / AoI / HP / lock / tick-cap の client-side live world state。前回 265 から増加（計測更新のみ、要因未特定） |
 | `client/scripts/navigation_marker_renderer.gd` | 164 | 🟢 C-1で新設。ゲート/惑星マーカー生成 + スペクトル色 |
-| `client/scripts/camera_controller.gd` | 131 | 🟢 自己完結したオービットカメラ |
+| `client/scripts/camera_controller.gd` | 142 | 🟢 自己完結したオービットカメラ。前回 131 から増加（計測更新のみ、要因未特定） |
 | `client/scripts/player_fitting.gd` | 126 | 🟢 PR #33 新設。フィッティング/インベントリの純粋関数（`normalize_payload` / `simulate_capacitor_ticks` 等）。main.gd は呼び出すのみで内部構造に触れない |
 | `client/scripts/input_decoder.gd` | 114 | 🟢 C-1で新設。キー入力→アクション決定の純粋関数。GdUnit4 テスト済み。前回 100 から増加（`[`/`]`・`I` キー追加） |
 | `client/scripts/ship_picking.gd` | 104 | 🟢 C-1で新設。船/ゲート/天体ピッキング3関数（画面空間ピッキング） |

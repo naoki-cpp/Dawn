@@ -535,6 +535,31 @@ impl<S: EventStore> SimulationNode<S> {
         Some((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt())
     }
 
+    /// Removes a ship entirely: despawns its ECS entity, clears it from every
+    /// `ShipRegistry` map (`ShipRegistry::remove`), and drops its `base_stats`
+    /// entry. The single removal path for combat death, `ShipDespawned`
+    /// replay, and Sector Transit departure — each used to hand-roll this
+    /// sequence, and one (Transit) forgot the ownership maps entirely.
+    pub(super) fn remove_ship(&mut self, ship_id: ShipId) {
+        self.ships.remove(ship_id, &mut self.world);
+        self.base_stats.remove(&ship_id);
+    }
+
+    /// Recomputes `ShipStatsComp` from `ship_id`'s current `FittingComp`
+    /// against its stored `base_stats` (falling back to `ShipStatsComp::NPC`
+    /// if the ship has none, e.g. a bot). Callers still decide separately
+    /// whether the fitting change also warrants a `ShipFitted` event (see
+    /// `inventory.rs::apply_fitting_and_emit`) — force-off paths (capacitor,
+    /// Range Gate) must not emit one, so that stays their own call.
+    pub(super) fn reapply_fitting(&mut self, ship_id: ShipId) {
+        let base = self
+            .base_stats
+            .get(&ship_id)
+            .copied()
+            .unwrap_or(ShipStatsComp::NPC);
+        dawn_ecs::systems::apply_fitting(&mut self.world, ship_id, base);
+    }
+
     /// Look up the current `ShipStatsComp` of a Ship by its ID. Test-only.
     #[cfg(test)]
     pub fn get_ship_stats(&self, ship_id: ShipId) -> Option<ShipStatsComp> {

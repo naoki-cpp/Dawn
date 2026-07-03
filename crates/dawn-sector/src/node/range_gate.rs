@@ -133,9 +133,7 @@ impl<S: EventStore> SimulationNode<S> {
         }
 
         for ship_id in refitted {
-            if let Some(&base) = self.base_stats.get(&ship_id) {
-                dawn_ecs::systems::apply_fitting(&mut self.world, ship_id, base);
-            }
+            self.reapply_fitting(ship_id);
         }
 
         events

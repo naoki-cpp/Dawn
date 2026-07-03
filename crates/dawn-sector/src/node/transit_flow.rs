@@ -236,10 +236,10 @@ impl<S: EventStore> SimulationNode<S> {
             inventory,
         };
 
-        self.ships.index.remove(&ship_id);
-        self.world.despawn_ship(entity);
-        self.ships.type_ids.remove(&ship_id);
-        self.base_stats.remove(&ship_id);
+        // remove_ship also clears owners/by_player (ADR-0035 review: this used
+        // to hand-roll index/type_ids/base_stats removal only, leaking a
+        // dangling ownership entry for a transited player ship).
+        self.remove_ship(ship_id);
 
         self.event_store.append(DomainEvent::SectorTransitCompleted(
             SectorTransitCompleted {
@@ -475,6 +475,39 @@ mod tests {
             }
             other => panic!("expected SectorTransitCompleted, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn export_transit_clears_ownership_maps_for_a_player_ship() {
+        // Regression test (architecture review 2026-07-03): export_transit
+        // used to hand-roll index/type_ids/base_stats removal and forgot
+        // owners/by_player, leaving a dangling ownership entry for a
+        // transited player ship. Now routed through ShipRegistry::remove
+        // via SimulationNode::remove_ship, which clears all four maps.
+        let mut node = mem_node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+        node.propose_transit(TransitCommand {
+            ship_id,
+            to: SectorId(1),
+        })
+        .unwrap();
+
+        node.export_transit(ship_id, Position::new(500.0, 0.0, 0.0))
+            .expect("ship should export");
+
+        assert!(
+            !node.owns_ship(player_id, ship_id),
+            "owners map must not retain a dangling entry after transit"
+        );
+        assert!(
+            !node.ships.owners.contains_key(&ship_id),
+            "owners map must be cleared"
+        );
+        assert!(
+            !node.ships.by_player.contains_key(&player_id),
+            "by_player map must be cleared"
+        );
     }
 
     #[test]

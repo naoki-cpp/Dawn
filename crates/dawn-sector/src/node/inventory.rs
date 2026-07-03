@@ -14,8 +14,7 @@
 
 use dawn_core::{FitModuleCommand, PlayerId, UnfitModuleCommand};
 use dawn_ecs::{
-    components::{FittedSlot, FittingComp, InventoryComp, ShipStatsComp},
-    systems::apply_fitting,
+    components::{FittedSlot, FittingComp, InventoryComp},
     Entity,
 };
 use dawn_event_store::store::EventStore;
@@ -164,12 +163,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// event carrying both the new fitting and inventory snapshots (ADR-0032
     /// §5 -- one event covers both sides of the move).
     fn apply_fitting_and_emit(&mut self, ship_id: dawn_core::ShipId, entity: Entity) {
-        let base = self
-            .base_stats
-            .get(&ship_id)
-            .copied()
-            .unwrap_or(ShipStatsComp::NPC);
-        apply_fitting(&mut self.world, ship_id, base);
+        self.reapply_fitting(ship_id);
 
         let fitting = self
             .world

@@ -2,7 +2,6 @@ use dawn_core::{DomainEvent, Velocity};
 use dawn_ecs::components::{
     FittingComp, HullComp, LockComp, PositionComp, ShipStatsComp, TackledComp, VelocityComp,
 };
-use dawn_ecs::systems::apply_fitting;
 use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
@@ -75,26 +74,14 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             DomainEvent::ShipDespawned(e) => {
-                if let Some(entity) = self.ships.index.remove(&e.ship_id) {
-                    self.world.despawn_ship(entity);
-                }
-                self.ships.type_ids.remove(&e.ship_id);
-                self.base_stats.remove(&e.ship_id);
-                if let Some(player_id) = self.ships.owners.remove(&e.ship_id) {
-                    self.ships.by_player.remove(&player_id);
-                }
+                self.remove_ship(e.ship_id);
             }
 
             DomainEvent::ShipFitted(e) => {
                 if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     let fitting = FittingComp::from_snapshot(&e.fitting, &self.module_registry);
-                    let base = self
-                        .base_stats
-                        .get(&e.ship_id)
-                        .copied()
-                        .unwrap_or(ShipStatsComp::NPC);
                     let _ = self.world.inner_mut().insert_one(entity, fitting);
-                    apply_fitting(&mut self.world, e.ship_id, base);
+                    self.reapply_fitting(e.ship_id);
                     // Inventory snapshot (ADR-0032): always present alongside
                     // the fitting it changed together with.
                     let _ = self.world.inner_mut().insert_one(
@@ -115,12 +102,7 @@ impl<S: EventStore> SimulationNode<S> {
                             slot.target_ship_id = e.target_ship_id;
                         }
                     }
-                    let base = self
-                        .base_stats
-                        .get(&e.ship_id)
-                        .copied()
-                        .unwrap_or(ShipStatsComp::NPC);
-                    apply_fitting(&mut self.world, e.ship_id, base);
+                    self.reapply_fitting(e.ship_id);
                 }
             }
 
@@ -132,12 +114,7 @@ impl<S: EventStore> SimulationNode<S> {
                             slot.force_off();
                         }
                     }
-                    let base = self
-                        .base_stats
-                        .get(&e.ship_id)
-                        .copied()
-                        .unwrap_or(ShipStatsComp::NPC);
-                    apply_fitting(&mut self.world, e.ship_id, base);
+                    self.reapply_fitting(e.ship_id);
                 }
             }
 
@@ -197,14 +174,7 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             DomainEvent::ShipDestroyed(e) => {
-                if let Some(entity) = self.ships.index.remove(&e.ship_id) {
-                    self.world.despawn_ship(entity);
-                }
-                self.ships.type_ids.remove(&e.ship_id);
-                self.base_stats.remove(&e.ship_id);
-                if let Some(player_id) = self.ships.owners.remove(&e.ship_id) {
-                    self.ships.by_player.remove(&player_id);
-                }
+                self.remove_ship(e.ship_id);
             }
 
             // Sector Transit (ADR-0014): TransitState component and ownership
