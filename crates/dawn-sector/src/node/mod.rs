@@ -16,6 +16,7 @@
 
 mod apply_event;
 mod approach;
+mod bot_ai;
 mod commands;
 mod inventory;
 mod jump;
