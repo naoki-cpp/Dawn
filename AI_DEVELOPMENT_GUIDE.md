@@ -229,6 +229,8 @@ Use this guide as the router, then read the relevant long-form doc:
 - Client testing: `docs/process/godot-client-testing.md`
 - Raspberry Pi hardware flow: `docs/process/8d5-hardware-notes.md`
 - Commit convention: `docs/process/commit-convention.md`
+- EVE Online research notes: `docs/reference/eve-reference.md`
+- Carbon Engine comparison: `docs/reference/carbon-engine-comparison.md`
 
 ## Agent Configuration
 
