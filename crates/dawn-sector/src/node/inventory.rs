@@ -159,33 +159,12 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Shared tail of `fit_module_owned`/`unfit_module_owned`: recompute
-    /// `ShipStatsComp` from the new `FittingComp`, then append a `ShipFitted`
-    /// event carrying both the new fitting and inventory snapshots (ADR-0032
-    /// §5 -- one event covers both sides of the move).
+    /// `ShipStatsComp` from the new `FittingComp` (`reapply_fitting`), then
+    /// tell the world about it (`emit_ship_fitted`, shared with
+    /// `commands.rs::fit_module`'s privileged path -- ADR-0032 §5).
     fn apply_fitting_and_emit(&mut self, ship_id: dawn_core::ShipId, entity: Entity) {
         self.reapply_fitting(ship_id);
-
-        let fitting = self
-            .world
-            .inner()
-            .get::<&FittingComp>(entity)
-            .map(|f| f.to_snapshot())
-            .unwrap_or_else(|_| dawn_core::FittingSnapshot::empty());
-        let inventory = self
-            .world
-            .inner()
-            .get::<&InventoryComp>(entity)
-            .map(|inv| inv.items.clone())
-            .unwrap_or_default();
-
-        self.event_store.append(dawn_core::DomainEvent::ShipFitted(
-            dawn_core::events::ShipFitted {
-                ship_id,
-                fitting,
-                inventory,
-                tick: self.current_tick,
-            },
-        ));
+        self.emit_ship_fitted(ship_id, entity);
     }
 }
 

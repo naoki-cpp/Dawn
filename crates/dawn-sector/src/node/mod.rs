@@ -559,8 +559,8 @@ impl<S: EventStore> SimulationNode<S> {
     /// against its stored `base_stats` (falling back to `ShipStatsComp::NPC`
     /// if the ship has none, e.g. a bot). Callers still decide separately
     /// whether the fitting change also warrants a `ShipFitted` event (see
-    /// `inventory.rs::apply_fitting_and_emit`) — force-off paths (capacitor,
-    /// Range Gate) must not emit one, so that stays their own call.
+    /// `emit_ship_fitted`) — force-off paths (capacitor, Range Gate) must
+    /// not emit one, so that stays their own call.
     pub(super) fn reapply_fitting(&mut self, ship_id: ShipId) {
         let base = self
             .base_stats
@@ -568,6 +568,37 @@ impl<S: EventStore> SimulationNode<S> {
             .copied()
             .unwrap_or(ShipStatsComp::NPC);
         dawn_ecs::systems::apply_fitting(&mut self.world, ship_id, base);
+    }
+
+    /// Snapshots `entity`'s current `FittingComp`/`InventoryComp` and appends
+    /// a `ShipFitted` event — the "and tell the world" half of a fitting
+    /// change, called after `reapply_fitting` (its "recompute stats" half)
+    /// once the caller has decided the change warrants an event. Both Fit
+    /// paths (the privileged/NPC path in `commands.rs::fit_module` and the
+    /// owned path in `inventory.rs::fit_module_owned`/`unfit_module_owned`)
+    /// used to duplicate this exact four-step tail (ADR-0032 §5: one event
+    /// covers both sides of the move). Their *validation* still differs
+    /// (ownership/inventory checks vs. none, M-8) — only the tail is shared.
+    pub(super) fn emit_ship_fitted(&mut self, ship_id: ShipId, entity: Entity) {
+        let fitting = self
+            .world
+            .inner()
+            .get::<&dawn_ecs::components::FittingComp>(entity)
+            .map(|f| f.to_snapshot())
+            .unwrap_or_else(|_| dawn_core::FittingSnapshot::empty());
+        let inventory = self
+            .world
+            .inner()
+            .get::<&dawn_ecs::components::InventoryComp>(entity)
+            .map(|inv| inv.items.clone())
+            .unwrap_or_default();
+        self.event_store
+            .append(DomainEvent::ShipFitted(dawn_core::events::ShipFitted {
+                ship_id,
+                fitting,
+                inventory,
+                tick: self.current_tick,
+            }));
     }
 
     /// Look up the current `ShipStatsComp` of a Ship by its ID. Test-only.
