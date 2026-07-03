@@ -169,26 +169,11 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    /// Convert a Sector-frame (absolute) destination given as an f64 point into
-    /// the ship's current anchor frame (ADR-0029), doing the subtraction in f64
-    /// before casting once — so it stays precise at true-AU distance from the
-    /// ship's anchor. Used by `process_approach`, where arrival is a tight
-    /// radius check, not just a steering direction (cf. `warp::dest_in_ship_frame`,
-    /// which takes an already-f32 source and is only as precise as that input).
-    pub(super) fn dest_in_ship_frame_abs(&self, entity: Entity, dest_abs: [f64; 3]) -> Position {
-        let Some(anchor) = self.world.ship_anchor(entity) else {
-            return Position::new(dest_abs[0] as f32, dest_abs[1] as f32, dest_abs[2] as f32);
-        };
-        let Some(a) = self.anchor_table.abs(anchor) else {
-            super::debug_assert_missing_anchor(anchor, "dest_in_ship_frame_abs");
-            return Position::new(dest_abs[0] as f32, dest_abs[1] as f32, dest_abs[2] as f32);
-        };
-        Position::new(
-            (dest_abs[0] - a[0]) as f32,
-            (dest_abs[1] - a[1]) as f32,
-            (dest_abs[2] - a[2]) as f32,
-        )
-    }
+    // `dest_in_ship_frame_abs` (Sector-frame f64 point -> ship's anchor frame)
+    // moved to `node/mod.rs`, alongside the rest of the anchor-composition
+    // family (`entity_absolute_f64`/`entity_absolute`/`ship_absolute`) — it's
+    // called from here, `commands.rs`, `orbit.rs`, and `warp.rs`, so having
+    // its one implementation live in a single submodule was arbitrary.
 }
 
 #[cfg(test)]

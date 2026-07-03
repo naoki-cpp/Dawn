@@ -483,24 +483,19 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Convert a Sector-frame (absolute) destination position into the ship's
     /// current anchor frame, so warp math stays in the same frame as the ship's
-    /// anchor-relative `PositionComp` (ADR-0029). Falls back to the raw position
-    /// if the anchor is unknown (no-op while anchored on the star at the origin).
-    /// Takes an f32 `dest_world`, so it is only as precise as that input already
-    /// is — fine for warp's Aligning-phase steering (direction only, ADR-0029),
-    /// not for anything needing arrival-radius precision (use
-    /// `approach::dest_in_ship_frame_abs` with an f64 source for that).
+    /// anchor-relative `PositionComp` (ADR-0029). Takes an f32 `dest_world`, so
+    /// it is only as precise as that input already is — fine for warp's
+    /// Aligning-phase steering (direction only, ADR-0029), not for anything
+    /// needing arrival-radius precision (use `dest_in_ship_frame_abs` with an
+    /// f64 source for that — this delegates to it after upcasting).
     fn dest_in_ship_frame(&self, entity: Entity, dest_world: Position) -> Position {
-        let Some(anchor) = self.world.ship_anchor(entity) else {
-            return dest_world;
-        };
-        let Some(a) = self.anchor_table.abs(anchor) else {
-            super::debug_assert_missing_anchor(anchor, "dest_in_ship_frame");
-            return dest_world;
-        };
-        Position::new(
-            dest_world.x - a[0] as f32,
-            dest_world.y - a[1] as f32,
-            dest_world.z - a[2] as f32,
+        self.dest_in_ship_frame_abs(
+            entity,
+            [
+                dest_world.x as f64,
+                dest_world.y as f64,
+                dest_world.z as f64,
+            ],
         )
     }
 
