@@ -174,11 +174,16 @@ Step 6: Combat System
          Must run after Lock (reads Locked state). Destroyed ships are removed from
          ECS and ship_index by the caller.
 
-Step 6.5: Repair System (ADR-0033)
+Step 6.5: Repair System (ADR-0033, ADR-0036)
          RepairSystem::run(&mut world, tick, &cap.repair_cycles_started)
-         -> Only resolves ShieldBooster / ArmorRepairer in repair_cycles_started
-         -> ShieldBooster restores current_shield, ArmorRepairer restores current_armor
-           (each clamped to its layer max; Hull is not affected)
+         -> Resolves ShieldBooster/ArmorRepairer (self, ADR-0033) and
+           RemoteShieldBooster/RemoteArmorRepairer (a Locked target, ADR-0036)
+           in repair_cycles_started -- each RepairCycle carries a
+           target_ship_id (self for Local Repair, the module's own target for
+           Remote Repair), resolved once by the Capacitor System; Repair
+           System itself does not distinguish self vs remote.
+         -> Shield-layer kinds restore current_shield, Armor-layer kinds
+           restore current_armor (each clamped to its layer max; Hull is not affected)
          -> Emits: Vec<RepairApplied>
          Must run after Combat (applies repair after this Tick's damage).
 

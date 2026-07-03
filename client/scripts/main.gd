@@ -856,10 +856,10 @@ func _toggle_module_by_index(f_index: int) -> void:
 		_apply_player_module_activation(mid, false, "")
 		_connection.send_deactivate_module(_player_ship_id, mid, slot)
 	else:
-		## Weapon/Tackle require a Locked target (ADR-0035); other kinds
-		## (self-only Active modules) must not carry one.
+		## Weapon/Tackle/Remote-repair require a Locked target (ADR-0035/0036);
+		## other kinds (self-only Active modules) must not carry one.
 		var target_id: int = -1
-		if kind == "Weapon" or kind == "Tackle":
+		if kind == "Weapon" or kind == "Tackle" or kind == "RemoteShieldBooster" or kind == "RemoteArmorRepairer":
 			target_id = _session.player_lock_target
 		_apply_player_module_activation(mid, true, false)
 		_connection.send_activate_module(_player_ship_id, mid, slot, target_id)

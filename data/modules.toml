@@ -4,6 +4,7 @@
 # Loaded at server startup. No rebuild needed to adjust values.
 #
 # kind: "Weapon" | "ShieldBooster" | "ArmorRepairer" | "Propulsion" | "Sensor" | "Rig" | "Tackle"
+#     | "RemoteShieldBooster" | "RemoteArmorRepairer"
 # slot: "High" | "Mid" | "Low" | "Rig"
 # activation_mode: "Active" | "Passive"
 #
@@ -22,6 +23,7 @@
 #   lock_time_add, max_locks_add
 #   cap_max_add, cap_recharge_add
 #   repair_amount
+#   repair_range_add
 #
 # Cap balance guide (Magpie: recharge 8 GJ/tick → 80 GJ/10 ticks):
 #   Small Railgun (60 GJ/10 ticks):  gun alone  → +20 GJ surplus (sustainable)
@@ -161,6 +163,39 @@ cycle_time_ticks   = 8
 
 [modules.stat_delta]
 repair_amount = 55.0
+
+# ── Remote Repair / Logistics (Mid+Low / Active) ─────────────
+# Targeted at a Locked ally (never self, unlike ShieldBooster/ArmorRepairer
+# above). Slightly less cap-efficient and range-limited (15 km), trading
+# self-sufficiency for supporting a fleet from beyond weapon range (ADR-0036).
+
+[[modules]]
+id                 = 15
+name               = "Small Remote Shield Booster I"
+kind               = "RemoteShieldBooster"
+slot               = "Mid"
+activation_mode    = "Active"
+cap_cost_per_cycle = 55.0
+cycle_time_ticks   = 8
+
+[modules.stat_delta]
+repair_amount    = 50.0
+repair_range_add = 15000.0
+
+# ----
+
+[[modules]]
+id                 = 16
+name               = "Small Remote Armor Repairer I"
+kind               = "RemoteArmorRepairer"
+slot               = "Low"
+activation_mode    = "Active"
+cap_cost_per_cycle = 50.0
+cycle_time_ticks   = 8
+
+[modules.stat_delta]
+repair_amount    = 45.0
+repair_range_add = 15000.0
 
 # ── Propulsion (Mid / Active) ────────────────────────────────
 

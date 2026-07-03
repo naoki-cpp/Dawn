@@ -52,15 +52,29 @@ pub enum ModuleKind {
     /// Fold Disruptor — prevents tackled ship from warping or jumping (ADR-0024).
     /// High slot, active. tackle_range_add in StatDelta determines effective range.
     Tackle,
+    /// Remote Shield Booster — repairs a Locked ally's Shield layer (ADR-0036).
+    /// A distinct kind from `ShieldBooster` (which is always self-targeted):
+    /// keeping them separate lets `requires_target()` stay a per-kind bool
+    /// rather than needing per-slot conditional target validation.
+    RemoteShieldBooster,
+    /// Remote Armor Repairer — repairs a Locked ally's Armor layer (ADR-0036).
+    RemoteArmorRepairer,
 }
 
 impl ModuleKind {
     /// Whether Active modules of this kind must be given a `target_ship_id`
-    /// when activated (ADR-0035). Weapon/Tackle act on another ship and are
-    /// meaningless without a target; other kinds (self-buffs, local repair)
-    /// act on the fitting ship itself and must not carry a target.
+    /// when activated (ADR-0035/0036). Weapon/Tackle/Remote-repair act on
+    /// another ship and are meaningless without a target; other kinds
+    /// (self-buffs, local repair) act on the fitting ship itself and must
+    /// not carry a target.
     pub fn requires_target(self) -> bool {
-        matches!(self, ModuleKind::Weapon | ModuleKind::Tackle)
+        matches!(
+            self,
+            ModuleKind::Weapon
+                | ModuleKind::Tackle
+                | ModuleKind::RemoteShieldBooster
+                | ModuleKind::RemoteArmorRepairer
+        )
     }
 }
 
@@ -126,6 +140,10 @@ pub struct StatDelta {
     pub tackle_range_add: f32,
     /// HP restored by one active local repair cycle (ADR-0033).
     pub repair_amount: f32,
+    /// Remote repair range added by this module (units). 0 = no remote-repair
+    /// capability. Summed across all active Remote Shield Booster / Remote
+    /// Armor Repairer modules (ADR-0036), exactly like `tackle_range_add`.
+    pub repair_range_add: f32,
 }
 
 impl StatDelta {
@@ -147,6 +165,7 @@ impl StatDelta {
         cap_recharge_add: 0.0,
         tackle_range_add: 0.0,
         repair_amount: 0.0,
+        repair_range_add: 0.0,
     };
 
     /// Combine two deltas. Additive fields sum; speed_multiplier multiplies.
@@ -170,6 +189,7 @@ impl StatDelta {
             cap_recharge_add: self.cap_recharge_add + other.cap_recharge_add,
             tackle_range_add: self.tackle_range_add + other.tackle_range_add,
             repair_amount: self.repair_amount + other.repair_amount,
+            repair_range_add: self.repair_range_add + other.repair_range_add,
         }
     }
 }
@@ -253,6 +273,7 @@ mod tests {
             cap_recharge_add: 0.0,
             tackle_range_add: 0.0,
             repair_amount: 0.0,
+            repair_range_add: 0.0,
         };
         let result = base.add(&StatDelta::ZERO);
         assert_eq!(result, base);

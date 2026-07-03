@@ -65,6 +65,8 @@ struct StatDeltaEntry {
     tackle_range_add: f32,
     #[serde(default)]
     repair_amount: f32,
+    #[serde(default)]
+    repair_range_add: f32,
 }
 
 fn one() -> f32 {
@@ -87,6 +89,8 @@ fn parse_module_kind(s: &str) -> ModuleKind {
         "Sensor" => ModuleKind::Sensor,
         "Rig" => ModuleKind::Rig,
         "Tackle" => ModuleKind::Tackle,
+        "RemoteShieldBooster" => ModuleKind::RemoteShieldBooster,
+        "RemoteArmorRepairer" => ModuleKind::RemoteArmorRepairer,
         _ => ModuleKind::Weapon,
     }
 }
@@ -139,6 +143,7 @@ pub fn load_modules(path: &str) -> Vec<ModuleDefinition> {
                         cap_recharge_add: e.stat_delta.cap_recharge_add,
                         tackle_range_add: e.stat_delta.tackle_range_add,
                         repair_amount: e.stat_delta.repair_amount,
+                        repair_range_add: e.stat_delta.repair_range_add,
                     },
                 })
                 .collect();

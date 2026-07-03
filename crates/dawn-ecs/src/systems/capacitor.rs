@@ -53,6 +53,9 @@ struct SlotInfo {
     kind: ModuleKind,
     cap_cost: f32,
     repair_amount: f32,
+    /// Per-slot target (ADR-0035/0036). `None` for self-only repair kinds;
+    /// `Some` for Weapon/Tackle/Remote-repair kinds.
+    target_ship_id: Option<ShipId>,
     cycle_time: u64,
     cycle_remaining: u64,
     is_active: bool,
@@ -85,6 +88,7 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
                     kind: slot.def.kind,
                     cap_cost: slot.def.cap_cost_per_cycle,
                     repair_amount: slot.def.stat_delta.repair_amount,
+                    target_ship_id: slot.target_ship_id,
                     cycle_time: slot.def.cycle_time_ticks,
                     cycle_remaining: slot.cycle_remaining,
                     is_active: slot.is_active,
@@ -132,10 +136,16 @@ pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
                         weapon_fired = true;
                     } else if matches!(
                         slot.kind,
-                        ModuleKind::ShieldBooster | ModuleKind::ArmorRepairer
+                        ModuleKind::ShieldBooster
+                            | ModuleKind::ArmorRepairer
+                            | ModuleKind::RemoteShieldBooster
+                            | ModuleKind::RemoteArmorRepairer
                     ) {
+                        // Local repair kinds never carry a target (ADR-0035
+                        // requires_target() == false), so this falls back to
+                        // self; Remote repair kinds always carry one (ADR-0036).
                         repair_cycles_started.push(RepairCycle {
-                            ship_id: snap.ship_id,
+                            target_ship_id: slot.target_ship_id.unwrap_or(snap.ship_id),
                             module_kind: slot.kind,
                             repair_amount: slot.repair_amount,
                         });
@@ -390,7 +400,11 @@ mod tests {
 
         assert_eq!(result.repair_cycles_started.len(), 1);
         let cycle = result.repair_cycles_started[0];
-        assert_eq!(cycle.ship_id, test_ship_id());
+        assert_eq!(
+            cycle.target_ship_id,
+            test_ship_id(),
+            "local repair has no target_ship_id, so it falls back to self"
+        );
         assert_eq!(cycle.module_kind, ModuleKind::ShieldBooster);
         assert_eq!(cycle.repair_amount, 45.0);
     }

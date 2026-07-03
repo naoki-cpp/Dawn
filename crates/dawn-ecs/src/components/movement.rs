@@ -209,6 +209,10 @@ pub struct ShipStatsComp {
     pub tackle_range: f32,
     /// HP restored by one local repair cycle from active repair modules.
     pub repair_amount: f32,
+    /// Effective remote-repair range (units) after summing active Remote
+    /// Shield Booster / Remote Armor Repairer module deltas. Zero means this
+    /// ship has no remote-repair capability (ADR-0036).
+    pub repair_range: f32,
 }
 
 impl ShipStatsComp {
@@ -233,6 +237,7 @@ impl ShipStatsComp {
         cap_recharge_per_tick: 6.0,
         tackle_range: 0.0,
         repair_amount: 0.0,
+        repair_range: 0.0,
     };
 
     /// Fallback player default (tests and missing ship-type registry).
@@ -255,6 +260,7 @@ impl ShipStatsComp {
         cap_recharge_per_tick: 10.0,
         tackle_range: 0.0,
         repair_amount: 0.0,
+        repair_range: 0.0,
     };
 
     /// Build from `ShipBaseStats` (weapon stats start at zero).
@@ -279,6 +285,7 @@ impl ShipStatsComp {
             cap_recharge_per_tick: base.cap_recharge_per_tick,
             tackle_range: 0.0,
             repair_amount: 0.0,
+            repair_range: 0.0,
         }
     }
 }

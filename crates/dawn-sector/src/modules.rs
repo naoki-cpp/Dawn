@@ -13,6 +13,8 @@ pub const MODULE_SENSOR_BOOSTER: ModuleId = ModuleId(6);
 pub const MODULE_FOLD_DISRUPTOR: ModuleId = ModuleId(12);
 pub const MODULE_SMALL_SHIELD_BOOSTER: ModuleId = ModuleId(13);
 pub const MODULE_SMALL_ARMOR_REPAIRER: ModuleId = ModuleId(14);
+pub const MODULE_SMALL_REMOTE_SHIELD_BOOSTER: ModuleId = ModuleId(15);
+pub const MODULE_SMALL_REMOTE_ARMOR_REPAIRER: ModuleId = ModuleId(16);
 
 pub fn all_modules() -> Vec<ModuleDefinition> {
     vec![
@@ -145,6 +147,39 @@ pub fn all_modules() -> Vec<ModuleDefinition> {
             cycle_time_ticks: 10,
             stat_delta: StatDelta {
                 tackle_range_add: 20_000.0,
+                ..StatDelta::ZERO
+            },
+        },
+        // ── Remote Repair / Logistics (Mid+Low / Active) — ADR-0036 ─────────
+        // Targeted at a Locked ally (never self, unlike ShieldBooster/
+        // ArmorRepairer). Slightly less cap-efficient than the local repair
+        // equivalents and range-limited (15 km), trading self-sufficiency for
+        // the ability to support a fleet from beyond weapon range.
+        ModuleDefinition {
+            id: MODULE_SMALL_REMOTE_SHIELD_BOOSTER,
+            name: "Small Remote Shield Booster I".to_string(),
+            kind: ModuleKind::RemoteShieldBooster,
+            slot: SlotKind::Mid,
+            activation_mode: ActivationMode::Active,
+            cap_cost_per_cycle: 55.0,
+            cycle_time_ticks: 8,
+            stat_delta: StatDelta {
+                repair_amount: 50.0,
+                repair_range_add: 15_000.0,
+                ..StatDelta::ZERO
+            },
+        },
+        ModuleDefinition {
+            id: MODULE_SMALL_REMOTE_ARMOR_REPAIRER,
+            name: "Small Remote Armor Repairer I".to_string(),
+            kind: ModuleKind::RemoteArmorRepairer,
+            slot: SlotKind::Low,
+            activation_mode: ActivationMode::Active,
+            cap_cost_per_cycle: 50.0,
+            cycle_time_ticks: 8,
+            stat_delta: StatDelta {
+                repair_amount: 45.0,
+                repair_range_add: 15_000.0,
                 ..StatDelta::ZERO
             },
         },
