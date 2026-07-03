@@ -69,20 +69,22 @@ pub fn run(world: &mut SimWorld, tick: Tick, repair_cycles: &[RepairCycle]) -> R
             continue;
         }
 
-        let (layer, before, after) = match cycle.module_kind {
-            ModuleKind::ShieldBooster | ModuleKind::RemoteShieldBooster => {
+        let Some(layer) = cycle.module_kind.repair_layer() else {
+            continue;
+        };
+        let (before, after) = match layer {
+            RepairLayer::Shield => {
                 let before = snap.current_shield;
                 snap.current_shield =
                     (snap.current_shield + cycle.repair_amount).clamp(0.0, snap.max_shield);
-                (RepairLayer::Shield, before, snap.current_shield)
+                (before, snap.current_shield)
             }
-            ModuleKind::ArmorRepairer | ModuleKind::RemoteArmorRepairer => {
+            RepairLayer::Armor => {
                 let before = snap.current_armor;
                 snap.current_armor =
                     (snap.current_armor + cycle.repair_amount).clamp(0.0, snap.max_armor);
-                (RepairLayer::Armor, before, snap.current_armor)
+                (before, snap.current_armor)
             }
-            _ => continue,
         };
 
         let amount = after - before;

@@ -13,6 +13,7 @@
 //! - `StatDelta` が Fitting の出力。ECS の `ShipStatsComp` に集計される。
 //! - `FittingSnapshot` を Event に含めることで Event Replay 時に完全復元（INV-002）。
 
+use crate::events::RepairLayer;
 use serde::{Deserialize, Serialize};
 
 // ── ID ────────────────────────────────────────────────────────────────────────
@@ -75,6 +76,20 @@ impl ModuleKind {
                 | ModuleKind::RemoteShieldBooster
                 | ModuleKind::RemoteArmorRepairer
         )
+    }
+
+    /// Which `HullComp` layer this kind repairs, if any (ADR-0033/0036).
+    /// Local and Remote variants of the same booster/repairer type heal the
+    /// same layer — only the target resolution differs, which the Capacitor
+    /// System handles separately via `target_ship_id`.
+    pub fn repair_layer(self) -> Option<RepairLayer> {
+        match self {
+            ModuleKind::ShieldBooster | ModuleKind::RemoteShieldBooster => {
+                Some(RepairLayer::Shield)
+            }
+            ModuleKind::ArmorRepairer | ModuleKind::RemoteArmorRepairer => Some(RepairLayer::Armor),
+            _ => None,
+        }
     }
 }
 
@@ -305,6 +320,28 @@ mod tests {
         assert!(!ModuleKind::Propulsion.requires_target());
         assert!(!ModuleKind::Sensor.requires_target());
         assert!(!ModuleKind::Rig.requires_target());
+    }
+
+    #[test]
+    fn repair_layer_groups_local_and_remote_variants_by_layer() {
+        assert_eq!(
+            ModuleKind::ShieldBooster.repair_layer(),
+            Some(RepairLayer::Shield)
+        );
+        assert_eq!(
+            ModuleKind::RemoteShieldBooster.repair_layer(),
+            Some(RepairLayer::Shield)
+        );
+        assert_eq!(
+            ModuleKind::ArmorRepairer.repair_layer(),
+            Some(RepairLayer::Armor)
+        );
+        assert_eq!(
+            ModuleKind::RemoteArmorRepairer.repair_layer(),
+            Some(RepairLayer::Armor)
+        );
+        assert_eq!(ModuleKind::Weapon.repair_layer(), None);
+        assert_eq!(ModuleKind::Tackle.repair_layer(), None);
     }
 
     #[test]
