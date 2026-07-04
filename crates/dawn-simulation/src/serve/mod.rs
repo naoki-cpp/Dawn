@@ -12,7 +12,6 @@ use crate::data_loader;
 use aoi_delivery::AoiDelivery;
 use dawn_core::{NodeId, SectorBounds, SectorId, ShipId};
 use dawn_sector::node::SimulationNode;
-use dawn_sector::spawner::{generate_ships, SpawnConfig};
 use dawn_sector::{galaxy::Galaxy, modules, ship_types};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -189,7 +188,8 @@ pub(crate) fn build_serve_node(
 ) -> SimulationNode {
     let mut node = SimulationNode::new(id, sector, bounds);
     node.set_population_cap(pop_cap);
-    let star_map = load_required_galaxy(PRODUCTION_GALAXY_PATH);
+    let star_map = Galaxy::load_from_file(PRODUCTION_GALAXY_PATH)
+        .unwrap_or_else(|e| panic!("failed to load production galaxy map: {e}"));
     node.set_galaxy(std::sync::Arc::new(star_map));
     register_data_driven_definitions(&mut node);
     node
@@ -201,27 +201,6 @@ fn register_data_driven_definitions(node: &mut SimulationNode) {
     }
     for def in data_loader::load_ship_types("data/ship_types.toml", ship_types::all_ship_types()) {
         node.register_ship_type(def);
-    }
-}
-
-fn load_required_galaxy(path: &str) -> Galaxy {
-    let content = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to read production galaxy map '{path}': {e}"));
-    Galaxy::from_toml_str(&content)
-        .unwrap_or_else(|e| panic!("failed to parse production galaxy map '{path}': {e}"))
-}
-
-/// Spawn `ship_count` NPC frigates into `node`, each fitted with a small railgun.
-/// Shared by `run_phase4_server` and `run_cluster_server`.
-pub(crate) fn spawn_npc_frigates(node: &mut SimulationNode, ship_count: usize) {
-    let config = SpawnConfig::default_for_node(NodeId(0));
-    for (_, pos, vel) in generate_ships(ship_count, &config, 0) {
-        let ship_id = node.spawn_ship(ship_types::SHIP_TYPE_NPC_FRIGATE, pos, vel);
-        node.fit_module(dawn_core::FitModuleCommand {
-            ship_id,
-            slot: dawn_core::SlotKind::High,
-            module_id: modules::MODULE_RAILGUN_SMALL,
-        });
     }
 }
 

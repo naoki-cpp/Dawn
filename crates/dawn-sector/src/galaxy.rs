@@ -70,6 +70,22 @@ impl Galaxy {
             .expect("embedded demo galaxy map must parse")
     }
 
+    /// Read and parse a `Galaxy` from a TOML file on disk (the production
+    /// `data/galaxy.toml` path). Shared by `dawn-simulation` and
+    /// `dawn-sector-node`, which used to each hand-roll an identical
+    /// read-then-parse-then-panic helper.
+    ///
+    /// Returns `Err` rather than panicking (library code shouldn't decide to
+    /// crash the process) -- callers that want today's "fail fast on startup
+    /// misconfiguration" behavior panic on the `Err` themselves.
+    pub fn load_from_file(path: &str) -> Result<Self, GalaxyTomlError> {
+        let content = std::fs::read_to_string(path).map_err(|source| GalaxyTomlError::Io {
+            path: path.to_string(),
+            source,
+        })?;
+        Self::from_toml_str(&content)
+    }
+
     /// Gates whose `from_sector` matches `sector`.
     pub fn gates_in_sector(&self, sector: SectorId) -> Vec<JumpGateDef> {
         self.gates
@@ -110,12 +126,20 @@ impl Galaxy {
 #[derive(Debug)]
 pub enum GalaxyTomlError {
     Parse(toml::de::Error),
+    /// Reading the galaxy map file itself failed (e.g. `load_from_file`).
+    /// Carries the path so callers can build a useful panic/log message
+    /// without re-deriving it themselves.
+    Io {
+        path: String,
+        source: std::io::Error,
+    },
 }
 
 impl fmt::Display for GalaxyTomlError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Parse(e) => write!(f, "{e}"),
+            Self::Io { path, source } => write!(f, "cannot read galaxy map '{path}': {source}"),
         }
     }
 }
@@ -356,5 +380,23 @@ mod tests {
                 sid
             );
         }
+    }
+
+    #[test]
+    fn load_from_file_reads_and_parses_a_real_galaxy_toml() {
+        // Relative to the crate root (cargo test's cwd), same demo fixture
+        // Galaxy::demo() embeds at compile time via include_str!.
+        let map = Galaxy::load_from_file("../../data/galaxy.demo.toml")
+            .expect("demo galaxy map file must load");
+        assert_eq!(map.systems.len(), 3);
+    }
+
+    #[test]
+    fn load_from_file_returns_io_error_for_a_missing_path_instead_of_panicking() {
+        let err = Galaxy::load_from_file("does/not/exist.toml").unwrap_err();
+        assert!(
+            matches!(err, GalaxyTomlError::Io { .. }),
+            "expected an Io variant, got {err:?}"
+        );
     }
 }
