@@ -12,6 +12,9 @@ members = [
 ]
 resolver = "2"
 
+[workspace.package]
+repository = "https://github.com/naoki-cpp/Dawn"
+
 [workspace.dependencies]
 serde      = { version = "1", features = ["derive"] }
 thiserror  = "1"

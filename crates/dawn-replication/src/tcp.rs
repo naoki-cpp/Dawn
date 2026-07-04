@@ -19,6 +19,7 @@ const CHANNEL_CAPACITY: usize = 10_000;
 const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TcpReplicationError {
     #[error("tcp replication io error: {0}")]
     Io(#[from] io::Error),
@@ -32,7 +33,7 @@ pub enum TcpReplicationError {
 ///
 /// `broadcast()` publishes a `LogBatch` to every currently connected peer.
 /// Incoming frames from peers are exposed through `subscribe()`.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct TcpReplicationTransport {
     local_addr: SocketAddr,
     inbound_tx: broadcast::Sender<LogBatch>,

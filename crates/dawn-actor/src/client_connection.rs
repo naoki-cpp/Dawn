@@ -37,6 +37,7 @@ use tokio::sync::mpsc;
 
 /// Errors that a `ClientConnection` operation can produce.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ConnectionError {
     /// The peer (client) is already disconnected.
     #[error("client disconnected")]
@@ -77,12 +78,14 @@ pub trait ClientConnection: Send + 'static {
 /// // server_side → drive from the serve loop (drain commands, send events)
 /// // client_side → test code (send commands, observe events)
 /// ```
+#[derive(Debug)]
 pub struct InProcessConnection {
     event_tx: mpsc::UnboundedSender<DomainEvent>,
     command_rx: mpsc::UnboundedReceiver<ClientCommand>,
 }
 
 /// The client-side endpoint of an [`InProcessConnection`].
+#[derive(Debug)]
 pub struct InProcessClientEndpoint {
     pub event_rx: mpsc::UnboundedReceiver<DomainEvent>,
     pub command_tx: mpsc::UnboundedSender<ClientCommand>,

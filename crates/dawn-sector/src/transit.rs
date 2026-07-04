@@ -6,7 +6,7 @@
 //!
 //! - `Request`: the owning (from) node marks the Ship `InTransit`, appends
 //!   `SectorTransitRequested`, exports the Ship's state, and proposes a
-//!   follow-up `Commit` op carrying that state (ADR-0014 §3 [4]).
+//!   follow-up `Commit` op carrying that state (ADR-0014 §3 \[4\]).
 //! - `Commit`: the destination (to) node imports the Ship at `entry_pos`
 //!   and appends `SectorTransitCompleted`. Other nodes ignore it.
 
@@ -124,6 +124,7 @@ pub fn apply_committed_raft_entries<S: EventStore>(
 }
 
 /// Per-node runtime tick output needed by the outer runtime loops.
+#[derive(Debug)]
 pub struct RuntimeTickOutput {
     pub tick_result: crate::node::TickResult,
     pub events: Vec<DomainEvent>,

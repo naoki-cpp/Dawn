@@ -27,6 +27,7 @@ use crate::node::SimulationNode;
 pub type Cell = (i32, i32, i32);
 
 /// Static-cell spatial bucket for AoI queries.
+#[derive(Debug)]
 pub struct CellGrid {
     cell_size: f32,
     cells: BTreeMap<Cell, Vec<ShipId>>,
@@ -145,6 +146,7 @@ pub fn aoi_leave_json(ship_id: ShipId) -> String {
 
 /// The identity of one observer receiving a frame: which player, and which
 /// ship is theirs (excluded from its own Enter/Leave/snap messages).
+#[derive(Debug)]
 pub struct Observer {
     pub player_id: PlayerId,
     pub ship_id: ShipId,
@@ -172,7 +174,7 @@ pub trait AoiSink {
 /// session retention/removal, and building the `CellGrid` for the tick —
 /// this struct only delivers a frame given an already-computed current
 /// visible set.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct AoiDelivery {
     visible_by_player: HashMap<PlayerId, Vec<ShipId>>,
 }

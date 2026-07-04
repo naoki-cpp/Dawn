@@ -10,14 +10,14 @@ use dawn_core::NodeId;
 use serde::{Deserialize, Serialize};
 
 /// A vote request sent by a Candidate to a peer.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RequestVote {
     pub term: Term,
     pub candidate_id: NodeId,
 }
 
 /// A peer's response to [`RequestVote`].
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RequestVoteResponse {
     pub term: Term,
     pub vote_granted: bool,
@@ -30,7 +30,7 @@ pub struct RequestVoteResponse {
 /// of log entries the recipient is assumed to already hold before
 /// `entries`; `prev_log_term` is the term of the last of those entries
 /// (`Term::ZERO` when `prev_log_index == 0`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AppendEntries {
     pub term: Term,
     pub leader_id: NodeId,
@@ -60,7 +60,7 @@ impl AppendEntries {
 /// (everything up to it matches the leader). On failure it is the
 /// follower's current log length, as a hint for the leader's `next_index`
 /// back-off.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AppendEntriesResponse {
     pub term: Term,
     pub success: bool,
@@ -69,14 +69,14 @@ pub struct AppendEntriesResponse {
 }
 
 /// Messages exchanged between `RaftActor`s via `RaftTransport`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RaftMessage {
     RequestVote(RequestVote),
     RequestVoteResponse(RequestVoteResponse),
     AppendEntries(AppendEntries),
     AppendEntriesResponse(AppendEntriesResponse),
     /// A proposal forwarded from a non-leader node to the Leader
-    /// (ADR-0014 §3 [1]). The payload is the caller's serialized proposal.
+    /// (ADR-0014 §3 \[1\]). The payload is the caller's serialized proposal.
     ProposeForward {
         payload: Vec<u8>,
     },

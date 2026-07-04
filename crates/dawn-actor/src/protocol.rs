@@ -122,14 +122,14 @@ pub struct HelloMessage {
     pub resume: Option<ResumeIdentity>,
 }
 
-#[derive(Serialize, Clone, Copy)]
+#[derive(Debug, Serialize, Clone, Copy)]
 pub struct PosJson {
     pub x: f32,
     pub y: f32,
     pub z: f32,
 }
 
-#[derive(Serialize, Clone, Copy)]
+#[derive(Debug, Serialize, Clone, Copy)]
 struct VelJson {
     dx: f32,
     dy: f32,

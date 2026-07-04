@@ -16,6 +16,15 @@ pub struct SimWorld {
     sector_id: SectorId,
 }
 
+impl std::fmt::Debug for SimWorld {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimWorld")
+            .field("sector_id", &self.sector_id)
+            .field("ship_count", &self.ship_count())
+            .finish_non_exhaustive()
+    }
+}
+
 impl SimWorld {
     pub fn new(sector_id: SectorId) -> Self {
         Self {

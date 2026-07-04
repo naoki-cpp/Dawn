@@ -22,6 +22,7 @@ pub struct RepairCycle {
     pub repair_amount: f32,
 }
 
+#[derive(Debug)]
 pub struct RepairResult {
     pub events: Vec<DomainEvent>,
 }

@@ -17,6 +17,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 // ── Message type ──────────────────────────────────────────────────────────────
 
 /// Messages routed through the bus channel.
+#[derive(Debug)]
 pub enum BusMessage {
     /// A batch of domain events from one Sector node's append-only log.
     Batch(LogBatch),
@@ -64,7 +65,7 @@ impl BusActor {
 /// Cloneable handle to a running `BusActor`.
 ///
 /// Drop-in replacement for the removed `dawn_actor::ReplicationBusHandle`.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct InMemoryReplicationBus {
     tx: mpsc::Sender<BusMessage>,
     broadcast_tx: broadcast::Sender<LogBatch>,

@@ -37,6 +37,7 @@ const MAX_FRAME_LEN: usize = 1024 * 1024; // 1 MiB — generous for Raft RPCs
 const RECONNECT_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TcpRaftError {
     #[error("tcp raft io error: {0}")]
     Io(#[from] io::Error),
@@ -52,6 +53,7 @@ pub enum TcpRaftError {
 /// best-effort (dropped on connection failure, retried by the Raft algorithm).
 /// Incoming messages from any peer are deserialized and forwarded to the local
 /// `RaftActor` mailbox via the `inbox` channel provided at construction time.
+#[derive(Debug)]
 pub struct TcpRaftTransport {
     peer_txs: HashMap<NodeId, UnboundedSender<RaftMessage>>,
 }

@@ -36,7 +36,7 @@ pub enum SlotKind {
 // ── Module kind ───────────────────────────────────────────────────────────────
 
 /// The broad category of effect a module provides.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ModuleKind {
     /// Weapon (High slot)
     Weapon,
@@ -114,7 +114,7 @@ impl ModuleKind {
 /// Each variant corresponds to a different `ShipStatsComp` range stat; the
 /// Range Gate System (dawn-sector) owns the actual stat lookup since
 /// `ShipStatsComp` lives in dawn-ecs, not dawn-core.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RangeGateKind {
     Weapon,
     Tackle,
@@ -128,7 +128,7 @@ pub enum RangeGateKind {
 /// Passive: StatDelta is always applied just by fitting it (e.g. Shield Extender).
 /// Active : the player toggles it on/off (e.g. Weapon, Afterburner).
 ///          StatDelta does not apply while off.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ActivationMode {
     /// Always-on effect. Active as soon as it's fitted.
     Passive,

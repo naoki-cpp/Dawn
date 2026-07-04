@@ -25,6 +25,7 @@ use super::SimulationNode;
 /// by [`SimulationNode::prepare_transit_commit`]. `ship` is boxed for the same
 /// reason `TransitOp::Commit` boxes it (ADR-0032 grew `ShipSnapshot` with
 /// `inventory`).
+#[derive(Debug)]
 pub struct TransitCommitData {
     pub ship: Box<ShipSnapshot>,
     pub entry_pos: Position,
@@ -78,7 +79,7 @@ impl<S: EventStore> SimulationNode<S> {
             .is_some_and(|&entity| !self.world.transit_state(entity).is_in_transit())
     }
 
-    /// Stage 1 of a Sector Transit (ADR-0014 §3 [4]), as one action: validate
+    /// Stage 1 of a Sector Transit (ADR-0014 §3 \[4\]), as one action: validate
     /// and begin the Transit, work out where `ship_id` lands in `to` (a Jump
     /// Gate's `position`/`abs_m` leading back to this Sector, so the Ship can
     /// jump straight back — ADR-0009/0029 — or the Sector origin for a

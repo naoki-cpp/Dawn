@@ -26,6 +26,7 @@ use dawn_core::{
 use std::collections::HashSet;
 
 /// Lock System の実行結果。
+#[derive(Debug)]
 pub struct LockResult {
     pub events: Vec<DomainEvent>,
 }

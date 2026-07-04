@@ -22,7 +22,7 @@ pub enum RaftActorMessage {
     /// One logical Tick elapsed (ADR-0014 §7 Step 10).
     TickElapsed,
 
-    /// Submit a proposal to the Raft Log (ADR-0014 §3 [1]).
+    /// Submit a proposal to the Raft Log (ADR-0014 §3 \[1\]).
     ///
     /// If this node is the Leader it appends the entry; otherwise it
     /// forwards the payload to the leader it currently recognizes. The
@@ -51,6 +51,17 @@ pub struct RaftActor {
     last_delivered: u64,
 }
 
+impl std::fmt::Debug for RaftActor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RaftActor")
+            .field("state", &self.state)
+            .field("peers", &self.peers)
+            .field("leader_id", &self.state.leader_id)
+            .field("last_delivered", &self.last_delivered)
+            .finish_non_exhaustive()
+    }
+}
+
 impl RaftActor {
     pub fn new(
         state: RaftState,
@@ -73,13 +84,13 @@ impl RaftActor {
     /// received or the mailbox is closed.
     pub async fn run(mut self) {
         while let Some(msg) = self.rx.recv().await {
-            let role_before = self.state.role.clone();
+            let role_before = self.state.role;
             match msg {
                 RaftActorMessage::Raft(raft_msg) => self.handle_raft_message(raft_msg),
                 RaftActorMessage::TickElapsed => self.handle_tick(),
                 RaftActorMessage::Propose(payload) => self.handle_propose(payload),
                 RaftActorMessage::GetRole(reply) => {
-                    let _ = reply.send((self.state.role.clone(), self.state.current_term));
+                    let _ = reply.send((self.state.role, self.state.current_term));
                 }
                 RaftActorMessage::Shutdown => break,
             }
@@ -223,7 +234,7 @@ impl RaftActor {
 }
 
 /// Cloneable handle for sending messages to a running [`RaftActor`].
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct RaftActorHandle {
     tx: mpsc::UnboundedSender<RaftActorMessage>,
 }

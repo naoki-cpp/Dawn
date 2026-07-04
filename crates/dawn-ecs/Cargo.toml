@@ -2,6 +2,8 @@
 name    = "dawn-ecs"
 version = "0.1.0"
 edition = "2021"
+description = "ECS components and deterministic simulation systems for Dawn."
+repository.workspace = true
 
 [dependencies]
 dawn-core = { path = "../dawn-core" }

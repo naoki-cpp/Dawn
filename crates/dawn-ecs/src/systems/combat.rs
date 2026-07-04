@@ -52,6 +52,7 @@ struct ShipSnapshot {
 }
 
 /// Combat System の実行結果。
+#[derive(Debug)]
 pub struct CombatResult {
     /// 今 Tick で生成されたイベント（WeaponFired / DamageTaken / ShipDestroyed）。
     pub events: Vec<DomainEvent>,
