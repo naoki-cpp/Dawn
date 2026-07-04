@@ -38,6 +38,10 @@ cargo test -p dawn-core
 cargo test test_name_filter
 cargo build --workspace
 cargo build --workspace --release
+cargo deny check                              # licenses/bans/advisories/sources (deny.toml)
+cargo audit                                   # RUSTSEC vulnerability advisories
+cargo machete                                 # unused dependencies
+cargo semver-checks check-release --baseline-rev main   # public API breakage vs main
 ```
 
 Simulation:
