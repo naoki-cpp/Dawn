@@ -47,6 +47,7 @@ cargo run -p dawn-simulation --bin simulate
 cargo run -p dawn-simulation --bin simulate --release -- --serve
 cargo run -p dawn-simulation --bin simulate --release -- --serve --cluster
 cargo run -p dawn-simulation --bin simulate --release -- --serve --duel
+cargo run -p dawn-simulation --bin simulate --release -- --serve --duel --enemies 2
 cargo run -p dawn-simulation --bin simulate --release -- --aoi-bench
 ```
 

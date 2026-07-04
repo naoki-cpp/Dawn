@@ -10,12 +10,17 @@ use dawn_sector::dilation;
 use dawn_sector::node::ClientCommandFollowup;
 use tokio::sync::mpsc;
 
-pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_cap: usize) {
+pub(crate) async fn run_phase4_server(
+    ship_count: usize,
+    duel_mode: bool,
+    enemy_count: usize,
+    pop_cap: usize,
+) {
     println!("═══════════════════════════════════════════");
     println!("  Phase 5 — Godot WebSocket server          ");
     println!("═══════════════════════════════════════════");
     if duel_mode {
-        println!("  mode: DUEL (1 human vs 1 Bot, no NPC)");
+        println!("  mode: DUEL (1 human vs {enemy_count} Bot(s), no NPC)");
     } else {
         println!("  npc ships: {ship_count}  (change with --ships N)");
     }
@@ -46,13 +51,19 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
     // flickering on then instantly off).
     let duel_player_spawn = Position::new(1200.0 + 2000.0, 0.0, 0.0);
     if duel_mode {
-        let bot_pos = Position::new(1200.0, 0.0, 0.0);
-        let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
-        println!(
-            "  [Server] Duel mode: Bot ship #{} ready at {:?}",
-            bot_ship_id.raw(),
-            bot_pos
-        );
+        // Spread multiple enemy Bots along +Y so they don't spawn stacked on
+        // top of each other, while staying within the player's weapon range
+        // (Small Railgun: 3000 + 2000 falloff = 5000) for --enemies N>1 too
+        // (e.g. to practice locking/engaging more than one target at once).
+        for i in 0..enemy_count.max(1) {
+            let bot_pos = Position::new(1200.0, i as f32 * 800.0, 0.0);
+            let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
+            println!(
+                "  [Server] Duel mode: Bot ship #{} ready at {:?}",
+                bot_ship_id.raw(),
+                bot_pos
+            );
+        }
     }
 
     println!("  [Server] {ship_count} NPC ships ready. Waiting for players...");
