@@ -170,6 +170,37 @@ func test_module_toggle_of_a_targeted_kind_without_a_locked_target_is_refused_cl
 	connection.free()
 
 
+func test_module_toggle_of_a_targeted_kind_against_a_locked_but_out_of_aoi_target_is_refused_client_side() -> void:
+	## Lock survives AoI leave (ADR-0019, world_session.gd
+	## remove_ship(clear_lock=false)): the locked target can be gone from
+	## _ships while player_lock_target still points at it (e.g. right after
+	## the target warps away). With no node to read a position from, the
+	## range guard used to be skipped entirely and the activation fell
+	## through to the server -- which rejects it, producing the same
+	## on-then-off flicker the visible-target range guard exists to
+	## prevent. The client must refuse here too.
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._session.player_lock_target = 99
+	_main._ships = {} # target 99 is not in AoI; player ship 1 isn't either.
+	_main._player_modules = [{
+		"module_id": 5,
+		"slot": "High",
+		"kind": "Weapon",
+		"is_active": false,
+		"is_active_module": true,
+		"forced_reason": "",
+	}]
+
+	_main._toggle_module_by_index(0)
+
+	var mod_dict: Dictionary = _main._player_modules[0]
+	assert_bool(mod_dict["is_active"] as bool).is_false()
+	assert_int(connection.activate_calls.size()).is_equal(0)
+	connection.free()
+
+
 func test_module_toggle_marks_module_inactive_before_server_echo() -> void:
 	var connection := FakeConnection.new()
 	_main._connection = connection
