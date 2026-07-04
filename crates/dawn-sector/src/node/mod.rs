@@ -643,7 +643,7 @@ impl<S: EventStore> SimulationNode<S> {
             .inner()
             .get::<&HullComp>(*entity)
             .ok()
-            .map(|c| c.current_shield + c.current_armor + c.current_hull)
+            .map(|c| c.total_hp())
     }
 
     /// Look up the current `CapacitorComp.current` of a Ship by its ID.

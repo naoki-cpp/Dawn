@@ -72,7 +72,7 @@ impl<S: EventStore> SimulationNode<S> {
                 .unwrap_or_default();
             let hp_fraction = if let Ok(hull) = self.world.inner().get::<&HullComp>(entity) {
                 let max_hp = stats.max_shield + stats.max_armor + stats.max_hull;
-                let cur_hp = hull.current_shield + hull.current_armor + hull.current_hull;
+                let cur_hp = hull.total_hp();
                 if max_hp > 0.0 {
                     cur_hp / max_hp
                 } else {
