@@ -65,6 +65,7 @@ pub enum TickEffect {
 /// Election timeout and heartbeat interval are expressed in logical Tick
 /// counts (ADR-0014 §5). `on_tick` must be called once per Tick from
 /// `SimulationNode`'s Step 10.
+#[derive(Debug)]
 pub struct RaftState {
     pub node_id: NodeId,
     peers: Vec<NodeId>,

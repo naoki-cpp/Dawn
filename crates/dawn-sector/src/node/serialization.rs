@@ -13,6 +13,7 @@ use super::SimulationNode;
 /// The two JSON payloads sent to a client immediately after handshake
 /// (before Welcome), regardless of whether the identity was freshly spawned
 /// or resumed.
+#[derive(Debug)]
 pub struct HandoffPayload {
     pub initial_state: String,
     pub player_fitting: Option<String>,

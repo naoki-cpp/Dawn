@@ -31,6 +31,7 @@ pub struct CheckpointConfig {
 }
 
 /// Fires [`SimulationNode::checkpoint`] on a fixed logical-tick cadence.
+#[derive(Debug)]
 pub struct CheckpointScheduler {
     config: CheckpointConfig,
     /// Logical tick of the most recent checkpoint (starts at 0 = node genesis).

@@ -33,6 +33,7 @@ use dawn_core::{
 // ── Result type ───────────────────────────────────────────────────────────────
 
 /// Result returned by the capacitor system for one tick.
+#[derive(Debug)]
 pub struct CapacitorResult {
     pub events: Vec<DomainEvent>,
     /// Ships that had at least one module force-deactivated.

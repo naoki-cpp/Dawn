@@ -31,6 +31,7 @@ const MAX_SNAPSHOT_LEN: usize = 256 * 1024 * 1024;
 ///
 /// One `SnapshotTransfer` per node: bind once, call `accept_one` whenever a
 /// far-behind replica requests a snapshot catch-up.
+#[derive(Debug)]
 pub struct SnapshotTransfer {
     listener: TcpListener,
     local_addr: SocketAddr,

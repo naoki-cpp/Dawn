@@ -35,6 +35,7 @@ use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
 // ── WsClientConnection ────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub struct WsClientConnection {
     event_tx: mpsc::UnboundedSender<String>,
     command_rx: mpsc::UnboundedReceiver<ClientCommand>,
@@ -67,6 +68,7 @@ impl ClientConnection for WsClientConnection {
 // ── PlayerSession ─────────────────────────────────────────────────────────────
 
 /// One player connection: holds its PlayerId, ShipId, and connection.
+#[derive(Debug)]
 pub struct PlayerSession {
     pub player_id: PlayerId,
     pub ship_id: ShipId,
@@ -83,6 +85,15 @@ pub struct HandshakeRequest {
     pub resume: Option<ResumeIdentity>,
     ws_sink: WsSink,
     ws_source: WsSource,
+}
+
+impl std::fmt::Debug for HandshakeRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HandshakeRequest")
+            .field("peer_addr", &self.peer_addr)
+            .field("resume", &self.resume)
+            .finish_non_exhaustive()
+    }
 }
 
 impl HandshakeRequest {
@@ -180,6 +191,7 @@ impl PlayerSession {
 
 // ── WsServer ─────────────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub struct WsServer {
     listener: TcpListener,
 }

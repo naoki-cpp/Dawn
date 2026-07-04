@@ -60,6 +60,7 @@ fn tmp_path_for(path: &Path) -> PathBuf {
 
 // ── FileEventStore ────────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub struct FileEventStore {
     /// Path to the hot log file.
     path: PathBuf,

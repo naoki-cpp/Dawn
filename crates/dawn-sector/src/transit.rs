@@ -124,6 +124,7 @@ pub fn apply_committed_raft_entries<S: EventStore>(
 }
 
 /// Per-node runtime tick output needed by the outer runtime loops.
+#[derive(Debug)]
 pub struct RuntimeTickOutput {
     pub tick_result: crate::node::TickResult,
     pub events: Vec<DomainEvent>,

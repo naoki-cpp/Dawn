@@ -52,6 +52,7 @@ pub enum TcpRaftError {
 /// best-effort (dropped on connection failure, retried by the Raft algorithm).
 /// Incoming messages from any peer are deserialized and forwarded to the local
 /// `RaftActor` mailbox via the `inbox` channel provided at construction time.
+#[derive(Debug)]
 pub struct TcpRaftTransport {
     peer_txs: HashMap<NodeId, UnboundedSender<RaftMessage>>,
 }

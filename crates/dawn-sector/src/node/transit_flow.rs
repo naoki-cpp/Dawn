@@ -25,6 +25,7 @@ use super::SimulationNode;
 /// by [`SimulationNode::prepare_transit_commit`]. `ship` is boxed for the same
 /// reason `TransitOp::Commit` boxes it (ADR-0032 grew `ShipSnapshot` with
 /// `inventory`).
+#[derive(Debug)]
 pub struct TransitCommitData {
     pub ship: Box<ShipSnapshot>,
     pub entry_pos: Position,

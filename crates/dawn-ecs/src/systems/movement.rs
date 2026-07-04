@@ -32,6 +32,7 @@ use crate::{
 };
 use dawn_core::{events::VelocityChanged, DomainEvent, Tick, Velocity};
 
+#[derive(Debug)]
 pub struct MovementSystem;
 
 impl MovementSystem {

@@ -51,6 +51,17 @@ pub struct RaftActor {
     last_delivered: u64,
 }
 
+impl std::fmt::Debug for RaftActor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RaftActor")
+            .field("state", &self.state)
+            .field("peers", &self.peers)
+            .field("leader_id", &self.state.leader_id)
+            .field("last_delivered", &self.last_delivered)
+            .finish_non_exhaustive()
+    }
+}
+
 impl RaftActor {
     pub fn new(
         state: RaftState,
@@ -223,7 +234,7 @@ impl RaftActor {
 }
 
 /// Cloneable handle for sending messages to a running [`RaftActor`].
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct RaftActorHandle {
     tx: mpsc::UnboundedSender<RaftActorMessage>,
 }

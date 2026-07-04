@@ -183,6 +183,21 @@ where
     completed_warps: Vec<ShipId>,
 }
 
+impl<S: EventStore> std::fmt::Debug for SimulationNode<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimulationNode")
+            .field("node_id", &self.node_id)
+            .field("sector_id", &self.sector_id)
+            .field("current_tick", &self.current_tick)
+            .field("ship_count", &self.ship_count())
+            .field("total_event_count", &self.total_event_count())
+            .field("population_cap", &self.population_cap)
+            .field("pending_auto_jumps", &self.pending_auto_jumps)
+            .field("completed_warps", &self.completed_warps)
+            .finish_non_exhaustive()
+    }
+}
+
 // -- Constructors ------------------------------------------------------------
 
 impl SimulationNode<InMemoryEventStore> {

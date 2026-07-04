@@ -22,6 +22,7 @@ pub trait RaftTransport: Send + Sync {
 }
 
 /// Routes [`RaftMessage`]s to peer mailboxes within the same process.
+#[derive(Debug)]
 pub struct InProcessTransport {
     peers: HashMap<NodeId, UnboundedSender<RaftActorMessage>>,
 }
@@ -48,6 +49,7 @@ impl RaftTransport for InProcessTransport {
 /// partitioned. The partition set is shared (via `Arc<Mutex<_>>`) across all
 /// nodes' transports so tests can call [`Self::partition`] / [`Self::heal`]
 /// from a single handle and affect the whole cluster.
+#[derive(Debug)]
 pub struct PartitionableTransport {
     inner: InProcessTransport,
     self_id: NodeId,
