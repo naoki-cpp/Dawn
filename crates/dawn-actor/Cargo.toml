@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Client transport, protocol translation, and actor boundaries for Dawn."
 repository.workspace = true
+publish.workspace     = true
 
 # dawn-actor must not depend on dawn-ecs or dawn-simulation.
 # It provides Actor infrastructure used by upper layers, including the

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Production sector node binary and runtime wiring for Dawn."
 repository.workspace = true
+publish.workspace     = true
 
 [[bin]]
 name = "sector-node"

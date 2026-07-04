@@ -14,6 +14,9 @@ resolver = "2"
 
 [workspace.package]
 repository = "https://github.com/naoki-cpp/Dawn"
+# This is a private game workspace, not a library ecosystem -- none of these
+# crates are meant to be published to crates.io.
+publish = false
 
 [workspace.dependencies]
 serde      = { version = "1", features = ["derive"] }

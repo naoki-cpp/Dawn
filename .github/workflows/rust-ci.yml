@@ -123,7 +123,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
-          baseline-rev: main
+          baseline-rev: origin/main
 
   # Single required-status-check target for branch protection: succeeds only
   # if every job above succeeded, so protection rules don't need to list

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Core domain types, commands, and events for Dawn."
 repository.workspace = true
+publish.workspace     = true
 
 # dawn-core must depend on nothing except serialization utilities.
 # Any addition here requires an ADR. See CLAUDE.md FBD-002.
