@@ -13,6 +13,27 @@
 //! - `EventStore` trait — the contract all store implementations must satisfy.
 //! - `InMemoryEventStore` — in-process store used by MVP and all tests.
 //! - `EventRecord` — a single entry in the log.
+//!
+//! ## Example
+//!
+//! ```
+//! use dawn_core::{DomainEvent, NodeId, Position, SectorId, ShipId, ShipTypeId, Tick};
+//! use dawn_core::events::ShipSpawned;
+//! use dawn_event_store::{EventStore, InMemoryEventStore};
+//!
+//! let mut store = InMemoryEventStore::new();
+//! let ship_id = ShipId::new(NodeId(1), 7);
+//! let index = store.append(DomainEvent::ShipSpawned(ShipSpawned {
+//!     ship_id,
+//!     sector_id: SectorId(0),
+//!     initial_position: Position::ORIGIN,
+//!     ship_type_id: ShipTypeId(1),
+//!     tick: Tick::ZERO,
+//! }));
+//!
+//! assert_eq!(index, 0);
+//! assert_eq!(store.next_index(), 1);
+//! ```
 
 pub mod file;
 pub mod memory;

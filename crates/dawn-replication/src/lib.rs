@@ -26,6 +26,28 @@
 //!
 //! - `ReplicaSet`: holds a gap-checked, idempotent, ordered replica of each
 //!   foreign Sector's log, fed by gossiped `LogBatch`es via `AntiEntropy`.
+//!
+//! ## Example
+//!
+//! ```
+//! use dawn_core::{DomainEvent, NodeId, Position, SectorId, ShipId, ShipTypeId, Tick};
+//! use dawn_core::events::ShipSpawned;
+//! use dawn_replication::{Ingest, LogBatch, ReplicaSet};
+//!
+//! let ship_id = ShipId::new(NodeId(1), 1);
+//! let event = DomainEvent::ShipSpawned(ShipSpawned {
+//!     ship_id,
+//!     sector_id: SectorId(0),
+//!     initial_position: Position::ORIGIN,
+//!     ship_type_id: ShipTypeId(1),
+//!     tick: Tick::ZERO,
+//! });
+//! let batch = LogBatch::new(SectorId(0), 0, vec![event]);
+//!
+//! let mut replica = ReplicaSet::new(128);
+//! assert!(matches!(replica.ingest(&batch), Ingest::Applied { applied: 1, next_index: 1, .. }));
+//! assert_eq!(replica.next_index(SectorId(0)), 1);
+//! ```
 
 pub mod anti_entropy;
 pub mod bus;

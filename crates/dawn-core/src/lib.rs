@@ -7,6 +7,18 @@
 //! - Zero network or I/O dependencies.
 //! - All types are `Clone + Copy + serde::{Serialize, Deserialize}` where possible.
 //! - No mutable global state.
+//!
+//! ## Example
+//!
+//! ```
+//! use dawn_core::{MoveCommand, NodeId, Position, ShipId};
+//!
+//! let ship_id = ShipId::new(NodeId(1), 42);
+//! let command = MoveCommand::new(ship_id, Position::new(10.0, 0.0, -5.0));
+//!
+//! assert_eq!(command.ship_id, ship_id);
+//! assert_eq!(command.target_position.x, 10.0);
+//! ```
 
 pub mod commands;
 pub mod entity;
