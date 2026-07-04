@@ -152,7 +152,6 @@ version = "0.1.0"
 dependencies = [
  "dawn-core",
  "postcard",
- "serde",
  "tempfile",
 ]
 
@@ -209,11 +208,9 @@ dependencies = [
  "dawn-actor",
  "dawn-consensus",
  "dawn-core",
- "dawn-ecs",
  "dawn-event-store",
  "dawn-replication",
  "dawn-sector",
- "postcard",
  "rand",
  "serde",
  "serde_json",
