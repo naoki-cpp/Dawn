@@ -773,7 +773,11 @@ func _handle_aoi_enter(p: Dictionary) -> void:
 ## effect (it is still alive elsewhere, just out of view / ADR-0019).
 func _handle_aoi_leave(p: Dictionary) -> void:
 	var sid: int = p.get("ship_id", 0) as int
-	var result: Dictionary = _session.remove_ship(sid)
+	## clear_lock=false: the ship is still alive server-side, just outside
+	## this player's AoI radius (ADR-0019) -- Lock has no distance-based
+	## expiry (lock.rs), so clearing player_lock_target here would desync
+	## from the server and strand the lock forever (see world_session.gd).
+	var result: Dictionary = _session.remove_ship(sid, false)
 	_sync_session_state()
 	if not (result.get("removed", false) as bool):
 		return

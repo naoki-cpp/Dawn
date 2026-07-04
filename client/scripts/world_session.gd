@@ -91,7 +91,16 @@ func register_ship(ship_id: int, node: Node3D, ship_data: Dictionary, connection
 	}
 
 
-func remove_ship(ship_id: int) -> Dictionary:
+## `clear_lock`: false for an AoI leave (ADR-0019) -- the ship is still alive
+## and still Locked server-side (Lock has no distance-based expiry today, only
+## despawn/destruction clears a lock, see lock.rs), just outside this
+## player's AoI radius. Clearing player_lock_target here would desync from
+## the server: a fresh LockOnCommand the player sends afterward is silently
+## ignored server-side (it already has_target()==true), so no new
+## TargetLocked ever arrives to resync the client -- the lock would look
+## like it "never completes" even once the target is back in range/view.
+## True despawn/destruction (the ship is actually gone) should still clear it.
+func remove_ship(ship_id: int, clear_lock: bool = true) -> Dictionary:
 	if not ships.has(ship_id):
 		return {"removed": false}
 	var node: Node3D = ships[ship_id] as Node3D
@@ -106,7 +115,7 @@ func remove_ship(ship_id: int) -> Dictionary:
 	if ship_id in opponent_ship_ids:
 		opponent_ship_ids.erase(ship_id)
 		removed_opponent = true
-	if ship_id == player_lock_target:
+	if clear_lock and ship_id == player_lock_target:
 		player_lock_target = -1
 	return {
 		"removed": true,
