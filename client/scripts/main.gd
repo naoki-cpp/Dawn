@@ -861,7 +861,7 @@ func _toggle_module_by_index(f_index: int) -> void:
 		var target_id: int = -1
 		if kind == "Weapon" or kind == "Tackle" or kind == "RemoteShieldBooster" or kind == "RemoteArmorRepairer":
 			target_id = _session.player_lock_target
-		_apply_player_module_activation(mid, true, false)
+		_apply_player_module_activation(mid, true, "")
 		_connection.send_activate_module(_player_ship_id, mid, slot, target_id)
 
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
