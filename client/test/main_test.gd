@@ -143,6 +143,33 @@ func test_module_toggle_marks_module_active_before_server_echo() -> void:
 	connection.free()
 
 
+func test_module_toggle_of_a_targeted_kind_without_a_locked_target_is_refused_client_side() -> void:
+	## Sending Activate for a Weapon/Tackle/Remote-repair kind without a
+	## Locked target is rejected server-side outright (ADR-0035), which
+	## previously showed as an instant on-then-off flicker (optimistic
+	## toggle immediately corrected by the PlayerFitting resync). The
+	## client now refuses client-side instead, regardless of range.
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._player_modules = [{
+		"module_id": 5,
+		"slot": "High",
+		"kind": "Weapon",
+		"is_active": false,
+		"is_active_module": true,
+		"forced_reason": "",
+	}]
+	## Fresh _main has _session.player_lock_target == -1 (no Lock).
+
+	_main._toggle_module_by_index(0)
+
+	var mod_dict: Dictionary = _main._player_modules[0]
+	assert_bool(mod_dict["is_active"] as bool).is_false()
+	assert_int(connection.activate_calls.size()).is_equal(0)
+	connection.free()
+
+
 func test_module_toggle_marks_module_inactive_before_server_echo() -> void:
 	var connection := FakeConnection.new()
 	_main._connection = connection

@@ -858,9 +858,21 @@ func _toggle_module_by_index(f_index: int) -> void:
 	else:
 		## Weapon/Tackle/Remote-repair require a Locked target (ADR-0035/0036);
 		## other kinds (self-only Active modules) must not carry one.
-		var target_id: int = -1
-		if kind == "Weapon" or kind == "Tackle" or kind == "RemoteShieldBooster" or kind == "RemoteArmorRepairer":
-			target_id = _session.player_lock_target
+		var requires_target: bool = (
+			kind == "Weapon" or kind == "Tackle"
+			or kind == "RemoteShieldBooster" or kind == "RemoteArmorRepairer"
+		)
+		if requires_target and _session.player_lock_target < 0:
+			## Sending this without a target is rejected server-side outright
+			## (ADR-0035: requires_target() vs target.is_some() mismatch),
+			## which the client can only observe as an instant on-then-off
+			## flicker (the PlayerFitting resync correcting the optimistic
+			## toggle). Refuse client-side instead so the player gets a
+			## clear reason rather than a confusing flicker.
+			_jump_notice = "No target locked"
+			_jump_notice_timer = 2.0
+			return
+		var target_id: int = _session.player_lock_target if requires_target else -1
 		_apply_player_module_activation(mid, true, "")
 		_connection.send_activate_module(_player_ship_id, mid, slot, target_id)
 
