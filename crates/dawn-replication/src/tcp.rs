@@ -19,6 +19,7 @@ const CHANNEL_CAPACITY: usize = 10_000;
 const MAX_FRAME_LEN: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TcpReplicationError {
     #[error("tcp replication io error: {0}")]
     Io(#[from] io::Error),

@@ -3,6 +3,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum DawnError {
     #[error("ship {0} does not exist")]
     ShipNotFound(crate::ShipId),

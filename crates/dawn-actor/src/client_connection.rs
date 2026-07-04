@@ -37,6 +37,7 @@ use tokio::sync::mpsc;
 
 /// Errors that a `ClientConnection` operation can produce.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ConnectionError {
     /// The peer (client) is already disconnected.
     #[error("client disconnected")]

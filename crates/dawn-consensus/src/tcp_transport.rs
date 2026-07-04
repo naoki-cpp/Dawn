@@ -37,6 +37,7 @@ const MAX_FRAME_LEN: usize = 1024 * 1024; // 1 MiB — generous for Raft RPCs
 const RECONNECT_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TcpRaftError {
     #[error("tcp raft io error: {0}")]
     Io(#[from] io::Error),
