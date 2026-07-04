@@ -50,3 +50,31 @@ jobs:
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: "-D warnings"
+
+  coverage:
+    name: coverage (report only, does not gate merges)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      # Informational only -- no --fail-under-lines/--fail-under-functions,
+      # so this job never blocks a PR on a coverage number. Baseline as of
+      # this workflow's introduction (2026-07) is ~83% lines workspace-wide;
+      # revisit adding a threshold once that baseline has been observed for
+      # a while.
+      - name: cargo llvm-cov --workspace (summary to job summary)
+        run: |
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cargo llvm-cov --workspace --summary-only >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

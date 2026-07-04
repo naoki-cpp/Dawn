@@ -38,6 +38,8 @@ cargo test -p dawn-core
 cargo test test_name_filter
 cargo build --workspace
 cargo build --workspace --release
+cargo llvm-cov --workspace --summary-only   # coverage report (needs cargo-llvm-cov)
+cargo llvm-cov --workspace --html --open    # same, as a browsable HTML report
 ```
 
 Simulation:
