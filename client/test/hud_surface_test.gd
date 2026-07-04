@@ -70,6 +70,44 @@ func test_set_player_fitting_rebuilds_module_slots_and_inventory_rows() -> void:
 	assert_int((_surface._inventory_panel_refs["inventory_rows"] as Array).size()).is_equal(1)
 
 
+func test_set_player_fitting_reuses_slots_when_active_module_set_is_unchanged() -> void:
+	var modules_off: Array = [
+		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false},
+	]
+	_surface.set_player_fitting(modules_off, [])
+	var slots_before: Array = _surface._module_slots
+
+	## Activate/Deactivate resyncs only flip is_active/forced_reason -- the
+	## module_id/slot identity list is unchanged, so this must reuse the
+	## existing slot Controls (no rebuild) rather than tearing them down.
+	var modules_on: Array = [
+		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": true},
+	]
+	_surface.set_player_fitting(modules_on, [])
+
+	assert_bool(_surface._module_slots == slots_before).is_true()
+	assert_str((_surface._module_slots[0]["state"] as Label).text).is_equal("ON")
+
+
+func test_set_player_fitting_rebuilds_when_active_module_set_changes() -> void:
+	var modules_a: Array = [
+		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false},
+	]
+	_surface.set_player_fitting(modules_a, [])
+	var slots_before: Array = _surface._module_slots
+
+	## Fit/Unfit changes which modules are in the active set -- this must
+	## rebuild since slot indices/Controls no longer correspond 1:1.
+	var modules_b: Array = [
+		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false},
+		{"module_id": 5, "slot": "Mid", "name": "Tackle", "is_active_module": true, "is_active": false},
+	]
+	_surface.set_player_fitting(modules_b, [])
+
+	assert_int(_surface._module_slots.size()).is_equal(2)
+	assert_bool(_surface._module_slots == slots_before).is_false()
+
+
 func test_panel_changed_is_false_for_equal_dictionaries() -> void:
 	var a: Dictionary = {"shield": 250.0, "armor": 300.0}
 	var b: Dictionary = {"shield": 250.0, "armor": 300.0}
