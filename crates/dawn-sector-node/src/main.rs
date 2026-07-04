@@ -12,6 +12,10 @@
 //! sector-node config/node-2.toml
 //! ```
 
+// Rust API Guidelines C-DEBUG: catch new pub types that forget to derive
+// Debug at compile time instead of relying on periodic audits (see #83).
+#![warn(missing_debug_implementations)]
+
 mod client_admission;
 mod config;
 mod data_loader;

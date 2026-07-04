@@ -178,6 +178,15 @@ For hard bugs, follow the `diagnosing-bugs` skill:
 - Client tests should extract pure logic where possible; scene-tree and editor
   behavior can remain manual if documented.
 - Run `cargo fmt --all -- --check` before committing Rust changes.
+- Any PR that adds or changes a `pub` item in a Rust crate (new type, new
+  constructor, changed error enum, new crate) must be checked against the
+  [Rust API Guidelines checklist](https://rust-lang.github.io/api-guidelines/checklist.html)
+  before opening the PR. Focus on the categories most likely to regress here:
+  `C-DEBUG` (public types implement `Debug`), `C-VALIDATE` (constructors
+  reject invariant-breaking input), `C-GOOD-ERR` (error variants carry
+  context), and `C-CRATE-DOC`/`C-EXAMPLE` (new crates get a crate-level doc
+  example). Note any deliberately-skipped item in the PR description rather
+  than silently ignoring it. See #82 and #83 for the audit pattern.
 
 ## Encoding Rules
 

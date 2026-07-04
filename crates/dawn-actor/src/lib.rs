@@ -18,6 +18,19 @@
 //! `protocol` (DomainEvent <-> JSON <-> ClientCommand) and `ws_server`
 //! (`WsServer` / `WsClientConnection` / `PlayerSession`) are the production
 //! WebSocket transport, shared by both binaries (previously duplicated).
+//!
+//! ## Example
+//!
+//! ```
+//! use dawn_actor::protocol::parse_hello;
+//!
+//! let hello = parse_hello(r#"{"type":"Hello"}"#).expect("valid Hello line");
+//! assert!(hello.resume.is_none());
+//! ```
+
+// Rust API Guidelines C-DEBUG: catch new pub types that forget to derive
+// Debug at compile time instead of relying on periodic audits (see #83).
+#![warn(missing_debug_implementations)]
 
 pub mod client_connection;
 pub mod protocol;
