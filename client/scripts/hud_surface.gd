@@ -91,10 +91,20 @@ func render(frame: Dictionary) -> void:
 		)
 		_prev_target = target
 
+	## `modules` here is the *same* Array/Dictionary objects as main.gd's
+	## _player_modules (frame["modules"] is assigned by reference, not
+	## copied) -- and _on_module_activated/_on_module_deactivated mutate
+	## those dictionaries in place (PlayerFitting.set_module_activation).
+	## Storing _prev_modules = modules would alias the live array, so any
+	## later in-place mutation would silently also "update" _prev_modules,
+	## permanently masking the change from this comparison (e.g. a weapon
+	## forced OFF by Range Gate never repainted the module bar, since no
+	## PlayerFitting resync -- which replaces the array wholesale -- happens
+	## for that event). duplicate(true) takes a real, independent snapshot.
 	var modules: Array = frame.get("modules", []) as Array
 	if _panel_changed(_prev_modules, modules):
 		HudManager.update_module_bar(_module_slots, modules)
-		_prev_modules = modules
+		_prev_modules = modules.duplicate(true)
 
 	if _stats_label != null:
 		_stats_label.text = frame.get("stats_text", "") as String
@@ -115,7 +125,8 @@ func set_player_fitting(modules: Array, inventory: Array) -> void:
 	## rebuild_module_bar() only builds each slot's F-number/name Controls --
 	## it never paints state/colour, so this must always run, rebuilt or not.
 	HudManager.update_module_bar(_module_slots, modules)
-	_prev_modules = modules
+	## Independent snapshot, not an alias -- see the comment in render().
+	_prev_modules = modules.duplicate(true)
 	HudManager.update_inventory_panel(_inventory_panel_refs, modules, inventory)
 
 
