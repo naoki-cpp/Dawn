@@ -70,6 +70,70 @@ func test_set_player_fitting_rebuilds_module_slots_and_inventory_rows() -> void:
 	assert_int((_surface._inventory_panel_refs["inventory_rows"] as Array).size()).is_equal(1)
 
 
+func test_render_repaints_after_the_modules_array_is_mutated_in_place() -> void:
+	## Regression: main.gd passes _player_modules into frame["modules"] by
+	## reference (not a copy), and _apply_player_module_activation (driven
+	## by ModuleActivated/Deactivated events, e.g. Range Gate forcing a
+	## weapon off out-of-range) mutates that same array's dictionaries in
+	## place via PlayerFitting.set_module_activation. If render() stored
+	## _prev_modules as an alias of that live array instead of a snapshot,
+	## the in-place mutation would silently "update" _prev_modules too,
+	## permanently masking the change (the module bar staying ON forever
+	## even though the ship truly went inactive server-side).
+	var modules: Array = [
+		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": true, "forced_reason": ""},
+	]
+	var frame: Dictionary = {"modules": modules}
+	_surface.set_player_fitting(modules, [])
+	_surface.render(frame)
+	assert_str((_surface._module_slots[0]["state"] as Label).text).is_equal("ON")
+
+	## Mutate the very same array/dictionary objects in place, exactly as
+	## PlayerFitting.set_module_activation does -- no new Array is created.
+	(modules[0] as Dictionary)["is_active"] = false
+
+	_surface.render(frame)
+	assert_str((_surface._module_slots[0]["state"] as Label).text).is_equal("OFF")
+
+
+func test_set_player_fitting_reuses_slots_when_active_module_set_is_unchanged() -> void:
+	var modules_off: Array = [
+		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false},
+	]
+	_surface.set_player_fitting(modules_off, [])
+	var slots_before: Array = _surface._module_slots
+
+	## Activate/Deactivate resyncs only flip is_active/forced_reason -- the
+	## module_id/slot identity list is unchanged, so this must reuse the
+	## existing slot Controls (no rebuild) rather than tearing them down.
+	var modules_on: Array = [
+		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": true},
+	]
+	_surface.set_player_fitting(modules_on, [])
+
+	assert_bool(_surface._module_slots == slots_before).is_true()
+	assert_str((_surface._module_slots[0]["state"] as Label).text).is_equal("ON")
+
+
+func test_set_player_fitting_rebuilds_when_active_module_set_changes() -> void:
+	var modules_a: Array = [
+		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false},
+	]
+	_surface.set_player_fitting(modules_a, [])
+	var slots_before: Array = _surface._module_slots
+
+	## Fit/Unfit changes which modules are in the active set -- this must
+	## rebuild since slot indices/Controls no longer correspond 1:1.
+	var modules_b: Array = [
+		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false},
+		{"module_id": 5, "slot": "Mid", "name": "Tackle", "is_active_module": true, "is_active": false},
+	]
+	_surface.set_player_fitting(modules_b, [])
+
+	assert_int(_surface._module_slots.size()).is_equal(2)
+	assert_bool(_surface._module_slots == slots_before).is_false()
+
+
 func test_panel_changed_is_false_for_equal_dictionaries() -> void:
 	var a: Dictionary = {"shield": 250.0, "armor": 300.0}
 	var b: Dictionary = {"shield": 250.0, "armor": 300.0}

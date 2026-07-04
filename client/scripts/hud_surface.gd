@@ -91,18 +91,54 @@ func render(frame: Dictionary) -> void:
 		)
 		_prev_target = target
 
+	## `modules` here is the *same* Array/Dictionary objects as main.gd's
+	## _player_modules (frame["modules"] is assigned by reference, not
+	## copied) -- and _on_module_activated/_on_module_deactivated mutate
+	## those dictionaries in place (PlayerFitting.set_module_activation).
+	## Storing _prev_modules = modules would alias the live array, so any
+	## later in-place mutation would silently also "update" _prev_modules,
+	## permanently masking the change from this comparison (e.g. a weapon
+	## forced OFF by Range Gate never repainted the module bar, since no
+	## PlayerFitting resync -- which replaces the array wholesale -- happens
+	## for that event). duplicate(true) takes a real, independent snapshot.
 	var modules: Array = frame.get("modules", []) as Array
 	if _panel_changed(_prev_modules, modules):
 		HudManager.update_module_bar(_module_slots, modules)
-		_prev_modules = modules
+		_prev_modules = modules.duplicate(true)
 
 	if _stats_label != null:
 		_stats_label.text = frame.get("stats_text", "") as String
 
 
+## PlayerFitting arrives both after a structural change (Fit/Unfit) and as a
+## state-only resync after every Activate/Deactivate (ADR-0035: the server
+## corrects the client's optimistic toggle when it rejects an activation,
+## e.g. out of range). Only the former needs rebuild_module_bar() (which
+## frees and recreates every slot's Control nodes); rebuilding on every
+## Activate/Deactivate caused a visible one-frame stutter each time a module
+## was toggled, even when the toggle was rejected. Compare the active-module
+## identity list first and skip straight to the cheap per-frame update path
+## when nothing structural changed.
 func set_player_fitting(modules: Array, inventory: Array) -> void:
-	_module_slots = HudManager.rebuild_module_bar(_module_bar, modules)
+	if _active_module_signature(modules) != _active_module_signature(_prev_modules):
+		_module_slots = HudManager.rebuild_module_bar(_module_bar, modules)
+	## rebuild_module_bar() only builds each slot's F-number/name Controls --
+	## it never paints state/colour, so this must always run, rebuilt or not.
+	HudManager.update_module_bar(_module_slots, modules)
+	## Independent snapshot, not an alias -- see the comment in render().
+	_prev_modules = modules.duplicate(true)
 	HudManager.update_inventory_panel(_inventory_panel_refs, modules, inventory)
+
+
+## Identity of the modules rebuild_module_bar() would render as slots, in
+## order -- (module_id, slot) pairs for entries with is_active_module true.
+## Order matters: rebuild_module_bar() assigns F-numbers by iteration order.
+func _active_module_signature(modules: Array) -> Array:
+	var sig: Array = []
+	for m: Dictionary in modules:
+		if m.get("is_active_module", false) as bool:
+			sig.append([m.get("module_id"), m.get("slot")])
+	return sig
 
 
 func toggle_inventory_panel() -> void:

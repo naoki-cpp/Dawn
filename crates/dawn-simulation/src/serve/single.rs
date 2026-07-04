@@ -37,6 +37,14 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
     let mut node = build_serve_node(NodeId(0), SectorId(0), bounds, pop_cap);
 
     spawn_npc_frigates(&mut node, ship_count);
+    // Duel-mode player spawn: close enough to the Bot to be within weapon
+    // range (Small Railgun: 3000 range + 2000 falloff = 5000) from the
+    // moment the human connects, instead of the universe-wide
+    // DEFAULT_PLAYER_SPAWN (30_000 units away -- so far from the Bot's
+    // fixed spawn that every weapon activation was rejected as out-of-range
+    // immediately after Lock, which looked to the player like the turret
+    // flickering on then instantly off).
+    let duel_player_spawn = Position::new(1200.0 + 2000.0, 0.0, 0.0);
     if duel_mode {
         let bot_pos = Position::new(1200.0, 0.0, 0.0);
         let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
@@ -85,7 +93,11 @@ pub(crate) async fn run_phase4_server(ship_count: usize, duel_mode: bool, pop_ca
                 continue;
             }
             let player_id = node.next_player_id();
-            let ship_id = node.spawn_player_ship(player_id);
+            let ship_id = if duel_mode {
+                node.spawn_player_ship_at_pub(player_id, duel_player_spawn)
+            } else {
+                node.spawn_player_ship(player_id)
+            };
             let payload = node.build_handoff_payload(ship_id, AOI_CELL_SIZE);
             let tx = ready_sess_tx.clone();
 
