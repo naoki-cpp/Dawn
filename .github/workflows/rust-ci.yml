@@ -6,12 +6,18 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel a still-running CI run for the same branch/PR when a new push
+# supersedes it, instead of burning minutes on output nobody will look at.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: fmt + build + test
+  lint:
+    name: fmt + clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,45 +42,57 @@ jobs:
       - name: cargo clippy --workspace --all-targets
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: cargo build --workspace
-        run: cargo build --workspace --all-targets
-
-      - name: cargo test --workspace
-        run: cargo test --workspace
-
-      # Catches broken intra-doc links and other rustdoc warnings (Rust API
-      # Guidelines C-LINK) that `cargo test --workspace`'s doctests don't
-      # surface -- doctests only fail on wrong/panicking *code*, not on
-      # rustdoc itself warning about e.g. an unresolved `[Foo]` reference.
-      - name: cargo doc (deny warnings)
-        run: cargo doc --workspace --no-deps
-        env:
-          RUSTDOCFLAGS: "-D warnings"
-
-  coverage:
-    name: coverage (report only, does not gate merges)
+  test:
+    name: build + test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: cargo build --workspace
+        run: cargo build --workspace --all-targets
 
-      # Informational only -- no --fail-under-lines/--fail-under-functions,
-      # so this job never blocks a PR on a coverage number. Baseline as of
-      # this workflow's introduction (2026-07) is ~83% lines workspace-wide;
-      # revisit adding a threshold once that baseline has been observed for
-      # a while.
-      - name: cargo llvm-cov --workspace (summary to job summary)
+      - name: cargo test --workspace
+        run: cargo test --workspace
+
+  doc:
+    name: cargo doc (deny warnings)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      # Catches broken intra-doc links and other rustdoc warnings (Rust API
+      # Guidelines C-LINK) that `cargo test --workspace`'s doctests don't
+      # surface -- doctests only fail on wrong/panicking *code*, not on
+      # rustdoc itself warning about e.g. an unresolved `[Foo]` reference.
+      - name: cargo doc --workspace --no-deps
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+  # Single required-status-check target for branch protection: succeeds only
+  # if every job above succeeded, so protection rules don't need to list
+  # lint/test/doc individually and stay correct as jobs are split further.
+  ci-success:
+    name: CI success
+    runs-on: ubuntu-latest
+    needs: [lint, test, doc]
+    if: always()
+    steps:
+      - name: Check all required jobs succeeded
         run: |
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cargo llvm-cov --workspace --summary-only >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more required jobs failed."
+            exit 1
+          fi
