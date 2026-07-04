@@ -2,6 +2,8 @@
 name    = "dawn-event-store"
 version = "0.1.0"
 edition = "2021"
+description = "Append-only event storage and replay support for Dawn."
+repository.workspace = true
 
 [dependencies]
 dawn-core = { path = "../dawn-core" }

@@ -22,7 +22,7 @@ pub enum RaftActorMessage {
     /// One logical Tick elapsed (ADR-0014 §7 Step 10).
     TickElapsed,
 
-    /// Submit a proposal to the Raft Log (ADR-0014 §3 [1]).
+    /// Submit a proposal to the Raft Log (ADR-0014 §3 \[1\]).
     ///
     /// If this node is the Leader it appends the entry; otherwise it
     /// forwards the payload to the leader it currently recognizes. The

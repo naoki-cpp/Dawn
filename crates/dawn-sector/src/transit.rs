@@ -6,7 +6,7 @@
 //!
 //! - `Request`: the owning (from) node marks the Ship `InTransit`, appends
 //!   `SectorTransitRequested`, exports the Ship's state, and proposes a
-//!   follow-up `Commit` op carrying that state (ADR-0014 §3 [4]).
+//!   follow-up `Commit` op carrying that state (ADR-0014 §3 \[4\]).
 //! - `Commit`: the destination (to) node imports the Ship at `entry_pos`
 //!   and appends `SectorTransitCompleted`. Other nodes ignore it.
 

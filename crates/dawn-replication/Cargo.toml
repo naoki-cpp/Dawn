@@ -2,6 +2,8 @@
 name    = "dawn-replication"
 version = "0.1.0"
 edition = "2021"
+description = "Sector-local log replication and anti-entropy for Dawn."
+repository.workspace = true
 
 # Dependency DAG (ADR-0027):
 #   dawn-core, dawn-event-store → dawn-replication → dawn-sector, dawn-simulation

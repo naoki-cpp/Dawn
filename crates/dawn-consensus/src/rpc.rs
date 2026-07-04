@@ -76,7 +76,7 @@ pub enum RaftMessage {
     AppendEntries(AppendEntries),
     AppendEntriesResponse(AppendEntriesResponse),
     /// A proposal forwarded from a non-leader node to the Leader
-    /// (ADR-0014 §3 [1]). The payload is the caller's serialized proposal.
+    /// (ADR-0014 §3 \[1\]). The payload is the caller's serialized proposal.
     ProposeForward {
         payload: Vec<u8>,
     },
