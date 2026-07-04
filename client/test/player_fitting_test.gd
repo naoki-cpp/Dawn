@@ -19,7 +19,10 @@ func test_normalize_payload_adds_client_runtime_fields() -> void:
 			"is_active_module": true,
 			"cap_cost_per_cycle": 5.0,
 			"cycle_time_ticks": 3,
-			"stat_delta": {"weapon_range_add": 1200.0, "falloff_range_add": 300.0},
+			"stat_delta": {
+				"weapon_range_add": 1200.0, "falloff_range_add": 300.0,
+				"tackle_range_add": 20000.0, "repair_range_add": 15000.0,
+			},
 		}],
 		"inventory": [{"module_id": 8, "name": "Afterburner", "kind": "Propulsion", "slot": "Mid"}],
 	})
@@ -29,6 +32,9 @@ func test_normalize_payload_adds_client_runtime_fields() -> void:
 	assert_str(module["forced_reason"]).is_equal("")
 	assert_int(module["cycle_remaining"]).is_equal(0)
 	assert_int(((fitting["inventory"] as Array)[0] as Dictionary)["module_id"]).is_equal(8)
+	var stat_delta: Dictionary = module["stat_delta"] as Dictionary
+	assert_float(stat_delta["tackle_range_add"]).is_equal_approx(20000.0, 0.001)
+	assert_float(stat_delta["repair_range_add"]).is_equal_approx(15000.0, 0.001)
 
 
 func test_weapon_ranges_sum_active_weapon_modules_only() -> void:
@@ -40,6 +46,55 @@ func test_weapon_ranges_sum_active_weapon_modules_only() -> void:
 	var ranges: Dictionary = PlayerFitting.weapon_ranges(modules)
 	assert_float(ranges["optimal"]).is_equal_approx(1000.0, 0.001)
 	assert_float(ranges["falloff"]).is_equal_approx(250.0, 0.001)
+
+
+func test_effective_range_for_activation_includes_the_modules_own_contribution() -> void:
+	## The module being activated isn't active yet, so it wouldn't otherwise
+	## be counted -- effective_range_for_activation must include it anyway,
+	## mirroring the server's tentative-apply-then-check (commands.rs).
+	var modules: Array = [
+		{"module_id": 1, "kind": "Weapon", "is_active": false,
+			"stat_delta": {"weapon_range_add": 3000.0, "falloff_range_add": 2000.0}},
+	]
+	var range: float = PlayerFitting.effective_range_for_activation(modules, "Weapon", 1)
+	assert_float(range).is_equal_approx(5000.0, 0.001)
+
+
+func test_effective_range_for_activation_sums_other_already_active_modules_of_the_same_family() -> void:
+	var modules: Array = [
+		{"module_id": 1, "kind": "Weapon", "is_active": false,
+			"stat_delta": {"weapon_range_add": 3000.0, "falloff_range_add": 2000.0}},
+		{"module_id": 2, "kind": "Weapon", "is_active": true,
+			"stat_delta": {"weapon_range_add": 1000.0, "falloff_range_add": 500.0}},
+		## Inactive Weapon that isn't the one being activated must not count.
+		{"module_id": 3, "kind": "Weapon", "is_active": false,
+			"stat_delta": {"weapon_range_add": 9999.0, "falloff_range_add": 9999.0}},
+	]
+	var range: float = PlayerFitting.effective_range_for_activation(modules, "Weapon", 1)
+	assert_float(range).is_equal_approx(6500.0, 0.001)
+
+
+func test_effective_range_for_activation_uses_tackle_range_for_tackle_kind() -> void:
+	var modules: Array = [
+		{"module_id": 5, "kind": "Tackle", "is_active": false,
+			"stat_delta": {"tackle_range_add": 20000.0}},
+	]
+	var range: float = PlayerFitting.effective_range_for_activation(modules, "Tackle", 5)
+	assert_float(range).is_equal_approx(20000.0, 0.001)
+
+
+func test_effective_range_for_activation_uses_repair_range_for_remote_repair_kinds() -> void:
+	var modules: Array = [
+		{"module_id": 6, "kind": "RemoteShieldBooster", "is_active": false,
+			"stat_delta": {"repair_range_add": 15000.0}},
+	]
+	var range: float = PlayerFitting.effective_range_for_activation(modules, "RemoteShieldBooster", 6)
+	assert_float(range).is_equal_approx(15000.0, 0.001)
+
+
+func test_effective_range_for_activation_returns_negative_one_for_non_range_gated_kinds() -> void:
+	var modules: Array = [{"module_id": 9, "kind": "ShieldBooster", "is_active": false, "stat_delta": {}}]
+	assert_float(PlayerFitting.effective_range_for_activation(modules, "ShieldBooster", 9)).is_less(0.0)
 
 
 func test_set_module_activation_resets_cycle_and_marks_forced_reason() -> void:

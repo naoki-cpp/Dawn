@@ -873,6 +873,22 @@ func _toggle_module_by_index(f_index: int) -> void:
 			_jump_notice_timer = 2.0
 			return
 		var target_id: int = _session.player_lock_target if requires_target else -1
+		if requires_target and target_id >= 0 and _ships.has(target_id) and _player_ship_id >= 0 and _ships.has(_player_ship_id):
+			## Same idea as the missing-lock guard above, but for range
+			## (ADR-0035): the server rejects activation against a Locked
+			## but out-of-range target outright, which otherwise shows the
+			## exact same instant on-then-off flicker. Mirrors
+			## range_gate.rs's effective_range_from_stats(), using the
+			## module's own contribution (not yet active) plus every
+			## already-active module of the same family.
+			var range: float = PlayerFitting.effective_range_for_activation(_player_modules, kind, mid)
+			if range >= 0.0:
+				var dist_u: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
+					(_ships[target_id] as Node3D).global_position) / WORLD_SCALE
+				if dist_u > range:
+					_jump_notice = "Target out of range"
+					_jump_notice_timer = 2.0
+					return
 		_apply_player_module_activation(mid, true, "")
 		_connection.send_activate_module(_player_ship_id, mid, slot, target_id)
 

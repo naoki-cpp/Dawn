@@ -26,6 +26,8 @@ static func normalize_payload(payload: Dictionary) -> Dictionary:
 			"stat_delta": {
 				"weapon_range_add": stat_delta.get("weapon_range_add", 0.0) as float,
 				"falloff_range_add": stat_delta.get("falloff_range_add", 0.0) as float,
+				"tackle_range_add": stat_delta.get("tackle_range_add", 0.0) as float,
+				"repair_range_add": stat_delta.get("repair_range_add", 0.0) as float,
 			},
 		})
 
@@ -44,6 +46,52 @@ static func normalize_payload(payload: Dictionary) -> Dictionary:
 		"inventory": inventory,
 		"slot_capacity": payload.get("slot_capacity", {}) as Dictionary,
 	}
+
+
+## Effective range for a targeted module kind once `module_id` is activated
+## (ADR-0035/0036) -- sums the matching range stat across already-active
+## modules of the same family, plus module_id's own contribution (it isn't
+## active yet, so the loop below wouldn't otherwise count it). Mirrors
+## range_gate.rs's effective_range_from_stats() server-side, so the client
+## can refuse an out-of-range activation itself instead of showing an
+## optimistic ON that a moment later flickers back OFF via the server's
+## resync. Returns -1.0 for kinds that aren't range-gated (self-only/passive).
+static func effective_range_for_activation(modules: Array, kind: String, module_id: int) -> float:
+	var family: String = ""
+	match kind:
+		"Weapon":
+			family = "weapon"
+		"Tackle":
+			family = "tackle"
+		"RemoteShieldBooster", "RemoteArmorRepairer":
+			family = "repair"
+		_:
+			return -1.0
+
+	var total: float = 0.0
+	for entry: Variant in modules:
+		var module: Dictionary = entry as Dictionary
+		var is_this_module: bool = (module.get("module_id", -1) as int) == module_id
+		if not is_this_module and not (module.get("is_active", false) as bool):
+			continue
+		var mkind: String = module.get("kind", "") as String
+		var matches_family: bool = (
+			(family == "weapon" and mkind == "Weapon")
+			or (family == "tackle" and mkind == "Tackle")
+			or (family == "repair" and (mkind == "RemoteShieldBooster" or mkind == "RemoteArmorRepairer"))
+		)
+		if not matches_family:
+			continue
+		var stat_delta: Dictionary = module.get("stat_delta", {}) as Dictionary
+		match family:
+			"weapon":
+				total += (stat_delta.get("weapon_range_add", 0.0) as float) \
+					+ (stat_delta.get("falloff_range_add", 0.0) as float)
+			"tackle":
+				total += stat_delta.get("tackle_range_add", 0.0) as float
+			"repair":
+				total += stat_delta.get("repair_range_add", 0.0) as float
+	return total
 
 
 static func weapon_ranges(modules: Array) -> Dictionary:

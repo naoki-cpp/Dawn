@@ -78,6 +78,8 @@ impl<S: EventStore> SimulationNode<S> {
                         "max_shield_add"      : d.max_shield_add,
                         "max_armor_add"       : d.max_armor_add,
                         "max_hull_add"        : d.max_hull_add,
+                        "tackle_range_add"    : d.tackle_range_add,
+                        "repair_range_add"    : d.repair_range_add,
                     },
                 }));
             }
