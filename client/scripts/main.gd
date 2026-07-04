@@ -877,7 +877,19 @@ func _toggle_module_by_index(f_index: int) -> void:
 			_jump_notice_timer = 2.0
 			return
 		var target_id: int = _session.player_lock_target if requires_target else -1
-		if requires_target and target_id >= 0 and _ships.has(target_id) and _player_ship_id >= 0 and _ships.has(_player_ship_id):
+		if requires_target and target_id >= 0 and _player_ship_id >= 0:
+			if not _ships.has(target_id) or not _ships.has(_player_ship_id):
+				## Locked target has left AoI (ADR-0019: Lock survives AoI
+				## leave via world_session.gd remove_ship(clear_lock=false))
+				## -- its node is gone so there is no position to check range
+				## against. A target outside AoI is certain to be beyond any
+				## module's effective range, so refuse here too rather than
+				## falling through to an optimistic send that the server
+				## rejects a moment later (the same on-then-off flicker the
+				## visible-target check below exists to prevent).
+				_jump_notice = "Target out of range"
+				_jump_notice_timer = 2.0
+				return
 			## Same idea as the missing-lock guard above, but for range
 			## (ADR-0035): the server rejects activation against a Locked
 			## but out-of-range target outright, which otherwise shows the
