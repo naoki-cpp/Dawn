@@ -7,6 +7,10 @@
 //!   cargo run -p dawn-simulation --bin simulate
 //!   cargo run -p dawn-simulation --bin simulate --release
 
+// Rust API Guidelines C-DEBUG: catch new pub types that forget to derive
+// Debug at compile time instead of relying on periodic audits (see #83).
+#![warn(missing_debug_implementations)]
+
 mod bench;
 mod cluster;
 mod data_loader;

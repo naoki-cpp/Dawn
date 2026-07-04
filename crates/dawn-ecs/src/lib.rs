@@ -23,6 +23,10 @@
 //! assert_eq!(world.sector_id(), SectorId(0));
 //! ```
 
+// Rust API Guidelines C-DEBUG: catch new pub types that forget to derive
+// Debug at compile time instead of relying on periodic audits (see #83).
+#![warn(missing_debug_implementations)]
+
 pub mod components;
 pub mod systems;
 pub mod world;

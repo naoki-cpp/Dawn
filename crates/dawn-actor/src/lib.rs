@@ -28,6 +28,10 @@
 //! assert!(hello.resume.is_none());
 //! ```
 
+// Rust API Guidelines C-DEBUG: catch new pub types that forget to derive
+// Debug at compile time instead of relying on periodic audits (see #83).
+#![warn(missing_debug_implementations)]
+
 pub mod client_connection;
 pub mod protocol;
 pub mod ws_server;

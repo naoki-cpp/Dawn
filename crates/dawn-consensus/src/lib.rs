@@ -17,6 +17,10 @@
 //! assert_eq!(state.role, Role::Follower);
 //! ```
 
+// Rust API Guidelines C-DEBUG: catch new pub types that forget to derive
+// Debug at compile time instead of relying on periodic audits (see #83).
+#![warn(missing_debug_implementations)]
+
 pub mod actor;
 pub mod rpc;
 pub mod state;

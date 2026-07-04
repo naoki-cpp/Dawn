@@ -41,3 +41,12 @@ jobs:
 
       - name: cargo test --workspace
         run: cargo test --workspace
+
+      # Catches broken intra-doc links and other rustdoc warnings (Rust API
+      # Guidelines C-LINK) that `cargo test --workspace`'s doctests don't
+      # surface -- doctests only fail on wrong/panicking *code*, not on
+      # rustdoc itself warning about e.g. an unresolved `[Foo]` reference.
+      - name: cargo doc (deny warnings)
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: "-D warnings"
