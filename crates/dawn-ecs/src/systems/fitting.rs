@@ -74,19 +74,7 @@ pub fn apply_fitting(
 
     // Scale current HP proportionally when max HP changes.
     if let Some(mut hull) = world.get_mut::<HullComp>(entity) {
-        let scale = |cur: f32, old_max: f32, new_max: f32| -> f32 {
-            if old_max <= 0.0 {
-                return new_max;
-            }
-            (cur / old_max * new_max).clamp(0.0, new_max)
-        };
-        hull.current_shield = scale(
-            hull.current_shield,
-            old_stats.max_shield,
-            new_stats.max_shield,
-        );
-        hull.current_armor = scale(hull.current_armor, old_stats.max_armor, new_stats.max_armor);
-        hull.current_hull = scale(hull.current_hull, old_stats.max_hull, new_stats.max_hull);
+        hull.rescale(&old_stats, &new_stats);
     }
 
     Some(new_stats)

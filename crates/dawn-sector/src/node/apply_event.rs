@@ -153,12 +153,7 @@ impl<S: EventStore> SimulationNode<S> {
             DomainEvent::DamageTaken(e) => {
                 if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
-                        hull.current_shield = e.current_shield;
-                        hull.current_armor = e.current_armor;
-                        hull.current_hull = e.current_hull;
-                        if e.current_hull <= 0.0 {
-                            hull.is_destroyed = true;
-                        }
+                        hull.set_hp(e.current_shield, e.current_armor, e.current_hull);
                     }
                 }
             }
@@ -166,9 +161,7 @@ impl<S: EventStore> SimulationNode<S> {
             DomainEvent::RepairApplied(e) => {
                 if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
-                        hull.current_shield = e.current_shield;
-                        hull.current_armor = e.current_armor;
-                        hull.current_hull = e.current_hull;
+                        hull.set_hp(e.current_shield, e.current_armor, e.current_hull);
                     }
                 }
             }

@@ -331,10 +331,7 @@ impl<S: EventStore> SimulationNode<S> {
             // restore the exact HP layers from the snapshot afterwards.
             self.reapply_fitting(ship.ship_id);
             if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
-                hull.current_shield = ship.current_shield;
-                hull.current_armor = ship.current_armor;
-                hull.current_hull = ship.current_hull;
-                hull.is_destroyed = ship.is_destroyed;
+                hull.set_hp(ship.current_shield, ship.current_armor, ship.current_hull);
             }
 
             if let Some(cap) = ship.capacitor {

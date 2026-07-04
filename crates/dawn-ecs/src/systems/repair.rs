@@ -51,10 +51,10 @@ pub fn run(world: &mut SimWorld, tick: Tick, repair_cycles: &[RepairCycle]) -> R
             ship_id: id.0,
             max_shield: stats.max_shield,
             max_armor: stats.max_armor,
-            current_shield: hull.current_shield,
-            current_armor: hull.current_armor,
-            current_hull: hull.current_hull,
-            is_destroyed: hull.is_destroyed,
+            current_shield: hull.shield(),
+            current_armor: hull.armor(),
+            current_hull: hull.hull(),
+            is_destroyed: hull.is_destroyed(),
         })
         .collect();
 
@@ -109,9 +109,7 @@ pub fn run(world: &mut SimWorld, tick: Tick, repair_cycles: &[RepairCycle]) -> R
     for index in changed {
         let snap = &snaps[index];
         if let Some(mut hull) = world.get_mut::<HullComp>(snap.entity) {
-            hull.current_shield = snap.current_shield;
-            hull.current_armor = snap.current_armor;
-            hull.current_hull = snap.current_hull;
+            hull.set_hp(snap.current_shield, snap.current_armor, snap.current_hull);
         }
     }
 
@@ -142,8 +140,8 @@ mod tests {
             },
         );
         if let Some(mut hull) = world.get_mut::<HullComp>(entity) {
-            hull.current_shield = 50.0;
-            hull.current_armor = 70.0;
+            let full_hull = hull.hull();
+            hull.set_hp(50.0, 70.0, full_hull);
         }
         let slot = FittedSlot {
             def: ModuleDefinition {
@@ -232,7 +230,8 @@ mod tests {
         let target_entity = world.spawn_ship(target_id, Position::ORIGIN, Velocity::ZERO);
         world.set_ship_stats(target_entity, ShipStatsComp::PLAYER);
         if let Some(mut hull) = world.get_mut::<HullComp>(target_entity) {
-            hull.current_shield = 50.0;
+            let (armor, full_hull) = (hull.armor(), hull.hull());
+            hull.set_hp(50.0, armor, full_hull);
         }
 
         let result = run(

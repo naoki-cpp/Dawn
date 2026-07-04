@@ -126,10 +126,10 @@ pub fn run(
                 stats: *stats,
                 abs: absolute_position(pos.0, anchor.0, anchor_abs),
                 velocity: vel.0,
-                current_shield: hull.current_shield,
-                current_armor: hull.current_armor,
-                current_hull: hull.current_hull,
-                is_dead: hull.is_destroyed,
+                current_shield: hull.shield(),
+                current_armor: hull.armor(),
+                current_hull: hull.hull(),
+                is_dead: hull.is_destroyed(),
                 locked_targets: lock.locked_targets().collect(),
             },
         )
@@ -236,10 +236,7 @@ pub fn run(
     for j in changed {
         let s = &ships[j];
         if let Some(mut hull) = world.get_mut::<HullComp>(s.entity) {
-            hull.current_shield = s.current_shield;
-            hull.current_armor = s.current_armor;
-            hull.current_hull = s.current_hull;
-            hull.is_destroyed = s.is_dead;
+            hull.set_hp(s.current_shield, s.current_armor, s.current_hull);
         }
     }
 

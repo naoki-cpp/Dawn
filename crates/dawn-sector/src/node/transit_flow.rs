@@ -179,10 +179,10 @@ impl<S: EventStore> SimulationNode<S> {
         let (current_shield, current_armor, current_hull, is_destroyed) = {
             let hull = self.world.inner().get::<&HullComp>(entity).ok()?;
             (
-                hull.current_shield,
-                hull.current_armor,
-                hull.current_hull,
-                hull.is_destroyed,
+                hull.shield(),
+                hull.armor(),
+                hull.hull(),
+                hull.is_destroyed(),
             )
         };
         let capacitor = self

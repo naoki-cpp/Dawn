@@ -1,5 +1,6 @@
 //! Combat ECS components.
 
+use super::movement::ShipStatsComp;
 use dawn_core::{ShipId, Tick};
 
 // ── CapacitorComp ─────────────────────────────────────────────────────────────
@@ -15,20 +16,29 @@ pub struct CapacitorComp {
     pub current: f32,
 }
 
-/// Ship の現在 HP 状態（Shield / Armor / Hull の 3 層）。
+/// A Ship's current HP state (Shield / Armor / Hull layers).
 ///
-/// ダメージ適用順序: Shield → Armor → Hull
-/// Hull が 0 になると `is_destroyed = true`。
+/// Damage order: Shield → Armor → Hull. `is_destroyed` becomes `true` when
+/// Hull reaches 0.
+///
+/// Fields are private (`/improve-codebase-architecture` HullComp deepening,
+/// 2026-07-05): every caller that restores or overwrites HP already has the
+/// authoritative (shield, armor, hull) triple in hand (event replay, snapshot
+/// restore, batch write-back) and used to hand-write all three fields plus
+/// `is_destroyed` individually -- five call sites duplicating the same write
+/// and, in two of them, deriving `is_destroyed` by hand instead of reusing
+/// `apply_damage`'s own `hull <= 0.0` rule. `set_hp` is the one place that
+/// invariant lives now.
 #[derive(Debug, Clone, Copy)]
 pub struct HullComp {
-    pub current_shield: f32,
-    pub current_armor: f32,
-    pub current_hull: f32,
-    pub is_destroyed: bool,
+    current_shield: f32,
+    current_armor: f32,
+    current_hull: f32,
+    is_destroyed: bool,
 }
 
 impl HullComp {
-    /// 初期 HP を 3 層で指定して初期化する。
+    /// Initialize at full HP across all three layers.
     pub fn new(max_shield: f32, max_armor: f32, max_hull: f32) -> Self {
         Self {
             current_shield: max_shield,
@@ -38,24 +48,47 @@ impl HullComp {
         }
     }
 
-    /// ダメージを Shield → Armor → Hull の順に適用する。
-    /// 返り値: (current_shield, current_armor, current_hull)
+    pub fn shield(&self) -> f32 {
+        self.current_shield
+    }
+
+    pub fn armor(&self) -> f32 {
+        self.current_armor
+    }
+
+    pub fn hull(&self) -> f32 {
+        self.current_hull
+    }
+
+    pub fn is_destroyed(&self) -> bool {
+        self.is_destroyed
+    }
+
+    /// Sum of all three layers. Used for HP-fraction checks (e.g. Bot AI's
+    /// flee threshold); does not weight layers, since callers already have
+    /// each max separately when they need a fraction.
+    pub fn total_hp(&self) -> f32 {
+        self.current_shield + self.current_armor + self.current_hull
+    }
+
+    /// Apply damage in Shield → Armor → Hull order.
+    /// Returns (current_shield, current_armor, current_hull).
     pub fn apply_damage(&mut self, amount: f32) -> (f32, f32, f32) {
         let mut remaining = amount;
 
-        // 1. Shield から引く
+        // 1. Absorb from Shield.
         let shield_absorbed = remaining.min(self.current_shield);
         self.current_shield -= shield_absorbed;
         remaining -= shield_absorbed;
 
-        // 2. Armor から引く
+        // 2. Absorb from Armor.
         if remaining > 0.0 {
             let armor_absorbed = remaining.min(self.current_armor);
             self.current_armor -= armor_absorbed;
             remaining -= armor_absorbed;
         }
 
-        // 3. Hull から引く
+        // 3. Absorb from Hull.
         if remaining > 0.0 {
             self.current_hull = (self.current_hull - remaining).max(0.0);
         }
@@ -81,6 +114,33 @@ impl HullComp {
         }
         self.current_armor = (self.current_armor + amount).clamp(0.0, max_armor.max(0.0));
         self.current_armor
+    }
+
+    /// Overwrite all three HP layers with already-known authoritative values
+    /// (event replay, snapshot restore, batch write-back). Derives
+    /// `is_destroyed = hull <= 0.0` internally -- no caller has ever needed
+    /// it to differ (a destroyed Ship's entity is removed outright, so a live
+    /// `HullComp` is never snapshotted or replayed mid-destruction).
+    pub fn set_hp(&mut self, shield: f32, armor: f32, hull: f32) {
+        self.current_shield = shield;
+        self.current_armor = armor;
+        self.current_hull = hull;
+        self.is_destroyed = hull <= 0.0;
+    }
+
+    /// Proportionally rescale current HP when max HP changes (refit).
+    /// `is_destroyed` is left untouched: a refit cannot destroy or revive a
+    /// Ship, only change its maxima.
+    pub fn rescale(&mut self, old: &ShipStatsComp, new: &ShipStatsComp) {
+        let scale = |cur: f32, old_max: f32, new_max: f32| -> f32 {
+            if old_max <= 0.0 {
+                return new_max;
+            }
+            (cur / old_max * new_max).clamp(0.0, new_max)
+        };
+        self.current_shield = scale(self.current_shield, old.max_shield, new.max_shield);
+        self.current_armor = scale(self.current_armor, old.max_armor, new.max_armor);
+        self.current_hull = scale(self.current_hull, old.max_hull, new.max_hull);
     }
 }
 
@@ -244,6 +304,58 @@ mod tests {
         let repaired = hull.repair_armor(80.0, 100.0);
         assert_eq!(repaired, 100.0);
         assert_eq!(hull.current_armor, 100.0);
+    }
+
+    #[test]
+    fn set_hp_overwrites_all_three_layers() {
+        let mut hull = HullComp::new(300.0, 200.0, 100.0);
+        hull.set_hp(10.0, 20.0, 30.0);
+        assert_eq!(hull.shield(), 10.0);
+        assert_eq!(hull.armor(), 20.0);
+        assert_eq!(hull.hull(), 30.0);
+        assert!(!hull.is_destroyed());
+    }
+
+    #[test]
+    fn set_hp_derives_is_destroyed_from_hull_reaching_zero() {
+        let mut hull = HullComp::new(300.0, 200.0, 100.0);
+        hull.set_hp(10.0, 20.0, 0.0);
+        assert!(hull.is_destroyed());
+    }
+
+    #[test]
+    fn total_hp_sums_all_three_layers() {
+        let hull = HullComp::new(300.0, 200.0, 100.0);
+        assert_eq!(hull.total_hp(), 600.0);
+    }
+
+    #[test]
+    fn rescale_scales_current_hp_proportionally_to_new_maxima() {
+        use crate::components::movement::ShipStatsComp;
+
+        let mut hull = HullComp::new(100.0, 100.0, 100.0);
+        hull.apply_damage(50.0); // shield 50 / 100
+        let old = ShipStatsComp {
+            max_shield: 100.0,
+            ..ShipStatsComp::PLAYER
+        };
+        let new = ShipStatsComp {
+            max_shield: 200.0,
+            ..ShipStatsComp::PLAYER
+        };
+        hull.rescale(&old, &new);
+        assert_eq!(hull.shield(), 100.0); // 50/100 * 200
+    }
+
+    #[test]
+    fn rescale_leaves_is_destroyed_untouched() {
+        use crate::components::movement::ShipStatsComp;
+
+        let mut hull = HullComp::new(0.0, 0.0, 100.0);
+        hull.apply_damage(100.0);
+        assert!(hull.is_destroyed());
+        hull.rescale(&ShipStatsComp::PLAYER, &ShipStatsComp::PLAYER);
+        assert!(hull.is_destroyed());
     }
 
     #[test]
