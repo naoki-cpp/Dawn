@@ -33,7 +33,7 @@ mod tick;
 mod transit_flow;
 mod warp;
 
-pub use commands::ClientCommandFollowup;
+pub use commands::{ClientCommandFollowup, ModuleActivationRejection};
 pub use jump::JumpOutcome;
 
 use sector_map::SectorMap;

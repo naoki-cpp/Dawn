@@ -211,7 +211,8 @@ mod tests {
                     slot: SlotKind::High,
                     target_ship_id: Some(ship_b),
                 }
-            ),
+            )
+            .is_ok(),
             "activation against a Locked, in-range target must succeed"
         );
 
@@ -252,8 +253,8 @@ mod tests {
         });
         lock_until_locked(&mut node, ship_a, ship_b);
 
-        assert!(
-            !node.activate_module_owned(
+        assert_eq!(
+            node.activate_module_owned(
                 player_id,
                 ActivateModuleCommand {
                     ship_id: ship_a,
@@ -262,6 +263,7 @@ mod tests {
                     target_ship_id: Some(ship_b),
                 }
             ),
+            Err(super::super::ModuleActivationRejection::OutOfRange),
             "activation must be rejected outright when the Locked target is already out of \
              range — turning ON then having Range Gate turn it back OFF next tick would flicker"
         );
@@ -286,15 +288,17 @@ mod tests {
         });
         lock_until_locked(&mut node, ship_a, ship_b);
 
-        assert!(node.activate_module_owned(
-            player_id,
-            ActivateModuleCommand {
-                ship_id: ship_a,
-                module_id: MODULE_FOLD_DISRUPTOR,
-                slot: SlotKind::Mid,
-                target_ship_id: Some(ship_b),
-            }
-        ));
+        assert!(node
+            .activate_module_owned(
+                player_id,
+                ActivateModuleCommand {
+                    ship_id: ship_a,
+                    module_id: MODULE_FOLD_DISRUPTOR,
+                    slot: SlotKind::Mid,
+                    target_ship_id: Some(ship_b),
+                }
+            )
+            .is_ok());
 
         // Drift the target beyond tackle_range (20_000) after activation.
         node.set_spawn_anchor_abs(ship_b, [50_000.0, 0.0, 0.0]);
@@ -325,8 +329,8 @@ mod tests {
             module_id: MODULE_RAILGUN_SMALL,
         });
 
-        assert!(
-            !node.activate_module_owned(
+        assert_eq!(
+            node.activate_module_owned(
                 player_id,
                 ActivateModuleCommand {
                     ship_id: ship_a,
@@ -335,6 +339,7 @@ mod tests {
                     target_ship_id: Some(ship_b),
                 }
             ),
+            Err(super::super::ModuleActivationRejection::TargetNotLocked),
             "activation must be rejected when target is not yet a Locked LockComp entry"
         );
     }
@@ -353,8 +358,8 @@ mod tests {
             module_id: MODULE_RAILGUN_SMALL,
         });
 
-        assert!(
-            !node.activate_module_owned(
+        assert_eq!(
+            node.activate_module_owned(
                 player_id,
                 ActivateModuleCommand {
                     ship_id: ship_a,
@@ -363,6 +368,7 @@ mod tests {
                     target_ship_id: None,
                 }
             ),
+            Err(super::super::ModuleActivationRejection::TargetRequirementMismatch),
             "Weapon requires a target (ModuleKind::requires_target) — activation without one must be rejected"
         );
     }
@@ -407,7 +413,8 @@ mod tests {
                     slot: SlotKind::Mid,
                     target_ship_id: Some(ally),
                 }
-            ),
+            )
+            .is_ok(),
             "activation against a Locked, in-range ally must succeed"
         );
 
@@ -445,15 +452,17 @@ mod tests {
         });
         lock_until_locked(&mut node, repairer, ally);
 
-        assert!(node.activate_module_owned(
-            repairer_id,
-            ActivateModuleCommand {
-                ship_id: repairer,
-                module_id: MODULE_SMALL_REMOTE_SHIELD_BOOSTER,
-                slot: SlotKind::Mid,
-                target_ship_id: Some(ally),
-            }
-        ));
+        assert!(node
+            .activate_module_owned(
+                repairer_id,
+                ActivateModuleCommand {
+                    ship_id: repairer,
+                    module_id: MODULE_SMALL_REMOTE_SHIELD_BOOSTER,
+                    slot: SlotKind::Mid,
+                    target_ship_id: Some(ally),
+                }
+            )
+            .is_ok());
 
         // Drift the ally beyond repair_range (15,000) after activation.
         node.set_spawn_anchor_abs(ally, [50_000.0, 0.0, 0.0]);

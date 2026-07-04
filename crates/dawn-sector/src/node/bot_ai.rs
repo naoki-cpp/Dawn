@@ -210,7 +210,7 @@ impl<S: EventStore> SimulationNode<S> {
             // Activate weapons once target is locked.
             if already_targeting {
                 for (module_id, slot) in &bot.weapon_modules {
-                    self.activate_module_owned(
+                    let _ = self.activate_module_owned(
                         bot.player_id,
                         dawn_core::ActivateModuleCommand {
                             ship_id: bot.ship_id,
@@ -309,7 +309,7 @@ mod tests {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
 
-        node.activate_module_owned(
+        let _ = node.activate_module_owned(
             player_id,
             ActivateModuleCommand {
                 ship_id: player_ship_id,
