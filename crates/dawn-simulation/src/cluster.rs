@@ -86,6 +86,7 @@ pub(crate) fn spawn_raft_actors(
 
 // ── Cluster ───────────────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub struct MultiNodeCluster {
     nodes: Vec<SectorSimulatorHandle>,
     bus: InMemoryReplicationBus,

@@ -8,7 +8,7 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 
 /// Top-level node configuration.
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct NodeConfig {
     /// The unique node identifier (matches `RaftState::self_id`).
     pub node_id: u8,
@@ -69,7 +69,7 @@ fn default_checkpoint_interval_ticks() -> u64 {
 }
 
 /// One peer's network endpoints.
-#[derive(Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct PeerConfig {
     pub node_id: u8,
     /// Raft TCP address of this peer.

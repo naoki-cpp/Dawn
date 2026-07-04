@@ -12,6 +12,16 @@
 //! - Systems are pure functions: same inputs → same outputs.
 //! - Systems never write to I/O.  They return `Vec<DomainEvent>` to the caller.
 //! - `SimWorld` is the single mutable owner of all ECS state.
+//!
+//! ## Example
+//!
+//! ```
+//! use dawn_core::SectorId;
+//! use dawn_ecs::SimWorld;
+//!
+//! let world = SimWorld::new(SectorId(0));
+//! assert_eq!(world.sector_id(), SectorId(0));
+//! ```
 
 pub mod components;
 pub mod systems;

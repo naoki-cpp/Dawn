@@ -38,7 +38,14 @@ impl SectorBounds {
     /// placement range only; space is unbounded since Phase 4).
     pub const DEFAULT_HALF: f32 = 700_000.0;
 
+    /// # Panics
+    /// Panics if `min` is not component-wise `<= max` (an inverted or
+    /// degenerate box would silently break `contains()`).
     pub fn new(min: Position, max: Position) -> Self {
+        assert!(
+            min.x <= max.x && min.y <= max.y && min.z <= max.z,
+            "SectorBounds::new: min {min:?} must be <= max {max:?} on every axis"
+        );
         Self { min, max }
     }
 
@@ -81,6 +88,12 @@ mod tests {
         // DEFAULT_HALF = 50_000; anything beyond that is outside.
         let p = Position::new(SectorBounds::DEFAULT_HALF + 1.0, 0.0, 0.0);
         assert!(!default_bounds().contains(p));
+    }
+
+    #[test]
+    #[should_panic(expected = "must be <= max")]
+    fn new_panics_on_an_inverted_box() {
+        SectorBounds::new(Position::new(1.0, 0.0, 0.0), Position::new(-1.0, 0.0, 0.0));
     }
 
     #[test]

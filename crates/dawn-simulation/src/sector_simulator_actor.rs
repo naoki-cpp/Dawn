@@ -243,6 +243,17 @@ pub struct SectorSimulatorHandle {
     tx: mpsc::Sender<SectorSimulatorMessage>,
 }
 
+impl std::fmt::Debug for SectorSimulatorHandle {
+    /// `SectorSimulatorMessage` carries `oneshot::Sender`s, which are not
+    /// `Debug`, so this can't derive -- print the handle's identity instead
+    /// (C-DEBUG: still gives callers something in `{:?}` contexts like
+    /// `assert_eq!` failures, without the channel's internal state).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SectorSimulatorHandle")
+            .finish_non_exhaustive()
+    }
+}
+
 impl SectorSimulatorHandle {
     /// Spawn a `SectorSimulatorActor` and return a handle.
     ///

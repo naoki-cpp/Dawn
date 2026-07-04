@@ -1,3 +1,24 @@
+//! # dawn-sector
+//!
+//! Server-side Sector simulation: owns the authoritative `SimulationNode`
+//! (ECS world + tick loop + event log) for one Sector, plus the static
+//! galaxy map (star systems, jump gates, celestial bodies) and Area-of-
+//! Interest delivery used to decide what each client is sent.
+//!
+//! ## Example
+//!
+//! ```
+//! use dawn_core::{SectorBounds, SectorId};
+//! use dawn_sector::node::SimulationNode;
+//!
+//! let node = SimulationNode::new(
+//!     dawn_core::NodeId(0),
+//!     SectorId(0),
+//!     SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+//! );
+//! assert_eq!(node.sector_id(), SectorId(0));
+//! ```
+
 pub mod anchor;
 pub mod aoi;
 pub mod dilation;
