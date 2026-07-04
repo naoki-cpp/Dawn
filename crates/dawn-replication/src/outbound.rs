@@ -12,6 +12,7 @@ use dawn_event_store::EventStore;
 /// The publisher keeps the next un-published log index. Each call reads the
 /// suffix from the owner store, wraps it in a `LogBatch`, and hands it to the
 /// configured replication transport.
+#[derive(Debug)]
 pub struct OutboundLogPublisher<T> {
     transport: T,
     next_index: u64,

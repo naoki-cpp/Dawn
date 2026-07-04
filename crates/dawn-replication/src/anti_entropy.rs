@@ -42,6 +42,7 @@ pub enum BatchApplyPlan {
 }
 
 /// Stateless anti-entropy operations.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct AntiEntropy;
 
 impl AntiEntropy {

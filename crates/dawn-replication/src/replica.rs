@@ -46,7 +46,7 @@ pub enum Ingest {
 }
 
 /// One foreign Sector's replicated log.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct SectorReplica {
     /// Next log index this replica expects (== number of events held).
     next_index: u64,
@@ -56,6 +56,7 @@ struct SectorReplica {
 
 /// Holds a gap-checked, idempotent replica of one or more foreign Sectors'
 /// append-only logs, fed by gossiped [`LogBatch`]es.
+#[derive(Debug)]
 pub struct ReplicaSet {
     /// Cap on the suffix length a gap request may ask for (passed through to
     /// [`AntiEntropy::plan_batch`]).
