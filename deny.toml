@@ -31,6 +31,14 @@ allow = [
 ]
 confidence-threshold = 0.8
 
+[licenses.private]
+# The workspace crates themselves (dawn-core, dawn-sector, etc.) have no
+# `license` field and never will -- this is a private game, not something
+# published to crates.io (see `publish = false` in workspace.package).
+# Crates that declare `publish = false` are skipped by the license check
+# instead of inventing a license string for code that isn't distributed.
+ignore = true
+
 [bans]
 # Duplicate versions of a crate in the dependency tree are noisy but not
 # inherently wrong (transitive deps often lag); warn instead of failing CI.
