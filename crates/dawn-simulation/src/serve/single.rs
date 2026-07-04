@@ -1,9 +1,6 @@
 //! Single-node WebSocket server (`--serve`, no Raft cluster).
 
-use super::{
-    build_serve_node, spawn_npc_frigates, AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS,
-    TIDI_BUDGET,
-};
+use super::{build_serve_node, AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET};
 use crate::ws_server;
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId};
 use dawn_sector::dilation;
@@ -41,7 +38,7 @@ pub(crate) async fn run_phase4_server(
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
     let mut node = build_serve_node(NodeId(0), SectorId(0), bounds, pop_cap);
 
-    spawn_npc_frigates(&mut node, ship_count);
+    node.spawn_npc_frigates(ship_count);
     // Duel-mode player spawn: close enough to the Bot to be within weapon
     // range (Small Railgun: 3000 range + 2000 falloff = 5000) from the
     // moment the human connects, instead of the universe-wide

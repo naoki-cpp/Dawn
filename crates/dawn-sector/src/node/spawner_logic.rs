@@ -1,6 +1,6 @@
 use dawn_core::{
-    events::ShipSpawned, ship_type::ShipTypeDefinition, DomainEvent, FitModuleCommand, PlayerId,
-    Position, ShipId, Velocity,
+    events::ShipSpawned, ship_type::ShipTypeDefinition, DomainEvent, FitModuleCommand, NodeId,
+    PlayerId, Position, ShipId, Velocity,
 };
 use dawn_ecs::components::{
     CapacitorComp, HullComp, IsBotComp, IsNpcComp, PositionComp, ShipStatsComp,
@@ -8,6 +8,8 @@ use dawn_ecs::components::{
 use dawn_event_store::store::EventStore;
 
 use crate::persistence::ShipSnapshot;
+use crate::spawner::{generate_ships, SpawnConfig};
+use crate::{modules, ship_types};
 
 use super::SimulationNode;
 
@@ -203,6 +205,23 @@ impl<S: EventStore> SimulationNode<S> {
     // (`/improve-codebase-architecture` candidate 3, 2026-07-03) — spawning a
     // bot is spawn mechanics, deciding what it does each tick is a separate
     // concern with its own test fixtures.
+
+    /// Spawn `count` NPC frigates, each fitted with a small railgun.
+    ///
+    /// Shared by `dawn-simulation` and `dawn-sector-node`
+    /// (`/improve-codebase-architecture` deepening, 2026-07-05) — both binaries
+    /// used to hand-roll an identical copy of this loop.
+    pub fn spawn_npc_frigates(&mut self, count: usize) {
+        let config = SpawnConfig::default_for_node(NodeId(0));
+        for (_, pos, vel) in generate_ships(count, &config, 0) {
+            let ship_id = self.spawn_ship(ship_types::SHIP_TYPE_NPC_FRIGATE, pos, vel);
+            self.fit_module(FitModuleCommand {
+                ship_id,
+                slot: dawn_core::SlotKind::High,
+                module_id: modules::MODULE_RAILGUN_SMALL,
+            });
+        }
+    }
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
@@ -568,5 +587,30 @@ mod tests {
             (after - expected).abs() < 1.0,
             "cross-anchor distance {after} != {expected}"
         );
+    }
+
+    #[test]
+    fn spawn_npc_frigates_spawns_the_requested_count_each_fitted_with_a_railgun() {
+        // `/improve-codebase-architecture` deepening (2026-07-05): this method
+        // replaces what used to be two hand-rolled copies, one per binary
+        // (dawn-simulation and dawn-sector-node).
+        use crate::modules;
+
+        let mut node = node_with_modules();
+        node.spawn_npc_frigates(3);
+        assert_eq!(node.ship_count(), 3);
+
+        for &ship_id in node.ships.index.keys() {
+            let fitting_json = node
+                .build_player_fitting_json(ship_id)
+                .expect("every spawned ship has a fitting");
+            let v: serde_json::Value = serde_json::from_str(&fitting_json).unwrap();
+            let modules = v["modules"].as_array().unwrap();
+            assert!(
+                modules.iter().any(|m| m["slot"] == "High"
+                    && m["module_id"].as_u64().unwrap() == modules::MODULE_RAILGUN_SMALL.0 as u64),
+                "ship {ship_id:?} should have a Small Railgun in its High slot"
+            );
+        }
     }
 }

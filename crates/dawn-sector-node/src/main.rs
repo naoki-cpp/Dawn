@@ -23,17 +23,12 @@ mod runtime;
 
 use dawn_actor::ws_server;
 use dawn_consensus::{RaftActor, RaftActorHandle, RaftActorMessage, RaftState, TcpRaftTransport};
-use dawn_core::{FitModuleCommand, NodeId, SectorBounds, SectorId, SlotKind};
+use dawn_core::{NodeId, SectorBounds, SectorId};
 use dawn_event_store::FileEventStore;
 use dawn_replication::{Ingest, ReplicaSet, ReplicationTransport, TcpReplicationTransport};
 use dawn_sector::node::SimulationNode;
 use dawn_sector::persistence::{CheckpointConfig, CheckpointScheduler, StateSnapshot};
-use dawn_sector::{
-    galaxy::Galaxy,
-    modules, ship_types,
-    spawner::{generate_ships, SpawnConfig},
-    transit,
-};
+use dawn_sector::{galaxy::Galaxy, transit};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -74,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
 
     let (mut node, is_fresh) = build_node(&cfg, node_id, sector_id, bounds);
     if is_fresh {
-        spawn_npcs(&mut node, cfg.npc_ships);
+        node.spawn_npc_frigates(cfg.npc_ships);
     }
 
     // Lookup: SectorId → peer WS address (for client Redirect on jump).
@@ -262,7 +257,7 @@ async fn main() -> anyhow::Result<()> {
 ///
 /// Returns whether the node started fresh (`true`) or was restored from a
 /// snapshot (`false`) -- callers must not re-run one-time genesis setup
-/// (e.g. `spawn_npcs`) on a restored node, since its NPCs already exist (or
+/// (e.g. `spawn_npc_frigates`) on a restored node, since its NPCs already exist (or
 /// were destroyed) in the restored state.
 fn build_node(
     cfg: &config::NodeConfig,
@@ -320,26 +315,8 @@ fn build_node(
     };
 
     node.set_population_cap(cfg.pop_cap);
-    let star_map = load_required_galaxy(PRODUCTION_GALAXY_PATH);
+    let star_map = Galaxy::load_from_file(PRODUCTION_GALAXY_PATH)
+        .unwrap_or_else(|e| panic!("failed to load production galaxy map: {e}"));
     node.set_galaxy(Arc::new(star_map));
     (node, is_fresh)
-}
-
-fn load_required_galaxy(path: &str) -> Galaxy {
-    let content = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to read production galaxy map '{path}': {e}"));
-    Galaxy::from_toml_str(&content)
-        .unwrap_or_else(|e| panic!("failed to parse production galaxy map '{path}': {e}"))
-}
-
-fn spawn_npcs(node: &mut SimulationNode<FileEventStore>, count: usize) {
-    let config = SpawnConfig::default_for_node(NodeId(0));
-    for (_, pos, vel) in generate_ships(count, &config, 0) {
-        let ship_id = node.spawn_ship(ship_types::SHIP_TYPE_NPC_FRIGATE, pos, vel);
-        node.fit_module(FitModuleCommand {
-            ship_id,
-            slot: SlotKind::High,
-            module_id: modules::MODULE_RAILGUN_SMALL,
-        });
-    }
 }

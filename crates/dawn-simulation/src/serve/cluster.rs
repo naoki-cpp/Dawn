@@ -1,8 +1,6 @@
 //! Raft-cluster WebSocket server (`--serve --cluster`, ADR-0009/0014).
 
-use super::{
-    build_serve_node, runtime, spawn_npc_frigates, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS,
-};
+use super::{build_serve_node, runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS};
 use crate::{cluster, ws_server};
 use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
 use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
@@ -53,7 +51,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         .map(|&id| build_serve_node(id, SectorId(id.0), bounds, pop_cap))
         .collect();
 
-    spawn_npc_frigates(&mut nodes[0], ship_count);
+    nodes[0].spawn_npc_frigates(ship_count);
 
     // Warm up: tick until a Raft leader is elected (election timeout ≤ 20 ticks).
     for _ in 0..30 {
