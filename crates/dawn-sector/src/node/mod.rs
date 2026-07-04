@@ -128,6 +128,14 @@ pub struct TickResult {
     pub cap_depletions: Vec<dawn_core::ShipId>,
 }
 
+/// Test-facing snapshot of one fitted module's identity and activation state.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FittedModuleStatus {
+    pub module_id: ModuleId,
+    pub is_active: bool,
+}
+
 // -- SimulationNode ----------------------------------------------------------
 
 /// A single-Sector simulation node, generic over its event store.
@@ -649,9 +657,9 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|c| c.current)
     }
 
-    /// `(ModuleId, is_active)` for every fitted module on a Ship, across all slots.
+    /// Module identity and activation state for every fitted module on a Ship.
     #[cfg(test)]
-    pub fn get_fitted_module_ids(&self, ship_id: ShipId) -> Vec<(ModuleId, bool)> {
+    pub fn get_fitted_module_ids(&self, ship_id: ShipId) -> Vec<FittedModuleStatus> {
         let entity = match self.ships.index.get(&ship_id) {
             Some(&e) => e,
             None => return Vec::new(),
@@ -659,7 +667,14 @@ impl<S: EventStore> SimulationNode<S> {
         self.world
             .inner()
             .get::<&FittingComp>(entity)
-            .map(|f| f.iter_slots().map(|s| (s.def.id, s.is_active)).collect())
+            .map(|f| {
+                f.iter_slots()
+                    .map(|s| FittedModuleStatus {
+                        module_id: s.def.id,
+                        is_active: s.is_active,
+                    })
+                    .collect()
+            })
             .unwrap_or_default()
     }
 }

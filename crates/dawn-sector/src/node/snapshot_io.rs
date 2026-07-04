@@ -505,7 +505,9 @@ mod tests {
 
         let fitted = node2.get_fitted_module_ids(ship_id);
         assert!(
-            fitted.contains(&(modules::MODULE_AFTERBURNER, true)),
+            fitted.iter().any(|module| {
+                module.module_id == modules::MODULE_AFTERBURNER && module.is_active
+            }),
             "Afterburner must remain fitted and active after restore, got {:?}",
             fitted
         );
