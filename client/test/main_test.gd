@@ -34,8 +34,13 @@ class FakeConnection:
 	var activate_calls: Array[Dictionary] = []
 	var deactivate_calls: Array[Dictionary] = []
 
-	func send_activate_module(ship_id: int, module_id: int, slot: String) -> void:
-		activate_calls.append({"ship_id": ship_id, "module_id": module_id, "slot": slot})
+	func send_activate_module(ship_id: int, module_id: int, slot: String, target_ship_id: int = -1) -> void:
+		activate_calls.append({
+			"ship_id": ship_id,
+			"module_id": module_id,
+			"slot": slot,
+			"target_ship_id": target_ship_id,
+		})
 
 	func send_deactivate_module(ship_id: int, module_id: int, slot: String) -> void:
 		deactivate_calls.append({"ship_id": ship_id, "module_id": module_id, "slot": slot})
