@@ -91,6 +91,34 @@ impl ModuleKind {
             _ => None,
         }
     }
+
+    /// Which effective-range family gates this kind's targeted activation
+    /// (ADR-0035/0036), if any. The Range Gate System uses this to know
+    /// which `ShipStatsComp` range stat determines whether a targeted
+    /// module should be force-deactivated once its target drifts away.
+    /// `None` for kinds that are not range-gated (self-buffs, local repair,
+    /// passives).
+    pub fn range_gate_kind(self) -> Option<RangeGateKind> {
+        match self {
+            ModuleKind::Weapon => Some(RangeGateKind::Weapon),
+            ModuleKind::Tackle => Some(RangeGateKind::Tackle),
+            ModuleKind::RemoteShieldBooster | ModuleKind::RemoteArmorRepairer => {
+                Some(RangeGateKind::RemoteRepair)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// The range-gated family a `ModuleKind` belongs to (see `ModuleKind::range_gate_kind`).
+/// Each variant corresponds to a different `ShipStatsComp` range stat; the
+/// Range Gate System (dawn-sector) owns the actual stat lookup since
+/// `ShipStatsComp` lives in dawn-ecs, not dawn-core.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeGateKind {
+    Weapon,
+    Tackle,
+    RemoteRepair,
 }
 
 // ── Activation mode ───────────────────────────────────────────────────────────
@@ -342,6 +370,30 @@ mod tests {
         );
         assert_eq!(ModuleKind::Weapon.repair_layer(), None);
         assert_eq!(ModuleKind::Tackle.repair_layer(), None);
+    }
+
+    #[test]
+    fn range_gate_kind_groups_targeted_kinds_by_stat_family() {
+        assert_eq!(
+            ModuleKind::Weapon.range_gate_kind(),
+            Some(RangeGateKind::Weapon)
+        );
+        assert_eq!(
+            ModuleKind::Tackle.range_gate_kind(),
+            Some(RangeGateKind::Tackle)
+        );
+        assert_eq!(
+            ModuleKind::RemoteShieldBooster.range_gate_kind(),
+            Some(RangeGateKind::RemoteRepair)
+        );
+        assert_eq!(
+            ModuleKind::RemoteArmorRepairer.range_gate_kind(),
+            Some(RangeGateKind::RemoteRepair)
+        );
+        // Self-targeted / passive kinds are not range-gated.
+        assert_eq!(ModuleKind::ShieldBooster.range_gate_kind(), None);
+        assert_eq!(ModuleKind::ArmorRepairer.range_gate_kind(), None);
+        assert_eq!(ModuleKind::Propulsion.range_gate_kind(), None);
     }
 
     #[test]
