@@ -188,7 +188,7 @@ mod tests {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
 
-        node.activate_module_owned(
+        let _ = node.activate_module_owned(
             owner_a,
             ActivateModuleCommand {
                 ship_id: ship_a,
@@ -242,7 +242,7 @@ mod tests {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
 
-        node.activate_module_owned(
+        let _ = node.activate_module_owned(
             owner_a,
             ActivateModuleCommand {
                 ship_id: ship_a,
@@ -306,7 +306,7 @@ mod tests {
             node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
         }
 
-        node.activate_module_owned(
+        let _ = node.activate_module_owned(
             owner_a,
             ActivateModuleCommand {
                 ship_id: ship_a,

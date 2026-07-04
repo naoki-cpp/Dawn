@@ -38,6 +38,32 @@ pub enum ClientCommandFollowup {
     /// UI reflects the authoritative state.
     RefreshFitting(ShipId),
 }
+
+/// Why an Activate/Deactivate attempt was rejected (ADR-0006/0035).
+///
+/// Named so a rejection can be logged, tested, and (eventually) surfaced to
+/// the client instead of collapsing to a bare `bool` at the call boundary —
+/// diagnosing which of these fired used to require temporarily wiring in
+/// ad hoc `eprintln!` calls one per branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleActivationRejection {
+    /// `player_id` does not own `ship_id` (checked by the `_owned` wrappers).
+    NotOwned,
+    /// `ship_id` has no entity in this Sector.
+    ShipNotFound,
+    /// No fitted slot matches `module_id`/`slot`.
+    SlotNotFound,
+    /// `ModuleKind::requires_target()` and `target.is_some()` disagree —
+    /// e.g. a Weapon activated with no target, or a self-only module
+    /// activated with one.
+    TargetRequirementMismatch,
+    /// A target was given but it is not a `Locked` entry in this ship's
+    /// `LockComp`.
+    TargetNotLocked,
+    /// The target is Locked, but beyond the module's effective range
+    /// (weapon range+falloff, tackle range, remote-repair range).
+    OutOfRange,
+}
 use dawn_ecs::{
     components::{
         FittedSlot, FittingComp, LockComp, LockState, PositionComp, ThrustComp, WarpComp,
@@ -155,16 +181,19 @@ impl<S: EventStore> SimulationNode<S> {
             }
             ClientCommand::Activate(c) => {
                 let ship_id = c.ship_id;
-                self.activate_module_owned(player_id, c);
-                // Activation can now be rejected (ADR-0035: missing/unlocked
-                // target), which the client cannot distinguish from success
-                // by itself — resync so its optimistic HUD toggle gets
-                // corrected when the server refused.
+                // The rejection reason (if any) is now a named
+                // ModuleActivationRejection value rather than a discarded
+                // bool -- available to a future caller that wants to log or
+                // surface it. Today's contract stays unchanged: resync
+                // unconditionally, since a rejected activation and an
+                // accepted one both need the client's optimistic HUD toggle
+                // corrected to the authoritative state (ADR-0035).
+                let _ = self.activate_module_owned(player_id, c);
                 return Some(ClientCommandFollowup::RefreshFitting(ship_id));
             }
             ClientCommand::Deactivate(c) => {
                 let ship_id = c.ship_id;
-                self.deactivate_module_owned(player_id, c);
+                let _ = self.deactivate_module_owned(player_id, c);
                 return Some(ClientCommandFollowup::RefreshFitting(ship_id));
             }
             // Combat is automatic (CombatSystem each tick); AttackCommand is
@@ -270,7 +299,10 @@ impl<S: EventStore> SimulationNode<S> {
 
     // ── Module commands ───────────────────────────────────────────────────────
 
-    pub fn activate_module(&mut self, cmd: dawn_core::ActivateModuleCommand) -> bool {
+    pub fn activate_module(
+        &mut self,
+        cmd: dawn_core::ActivateModuleCommand,
+    ) -> Result<(), ModuleActivationRejection> {
         self.set_module_active(
             cmd.ship_id,
             cmd.module_id,
@@ -280,7 +312,10 @@ impl<S: EventStore> SimulationNode<S> {
         )
     }
 
-    pub fn deactivate_module(&mut self, cmd: dawn_core::DeactivateModuleCommand) -> bool {
+    pub fn deactivate_module(
+        &mut self,
+        cmd: dawn_core::DeactivateModuleCommand,
+    ) -> Result<(), ModuleActivationRejection> {
         self.set_module_active(cmd.ship_id, cmd.module_id, cmd.slot, false, None)
     }
 
@@ -288,9 +323,9 @@ impl<S: EventStore> SimulationNode<S> {
         &mut self,
         player_id: PlayerId,
         cmd: dawn_core::ActivateModuleCommand,
-    ) -> bool {
+    ) -> Result<(), ModuleActivationRejection> {
         if !self.owns_ship(player_id, cmd.ship_id) {
-            return false;
+            return Err(ModuleActivationRejection::NotOwned);
         }
         self.activate_module(cmd)
     }
@@ -299,9 +334,9 @@ impl<S: EventStore> SimulationNode<S> {
         &mut self,
         player_id: PlayerId,
         cmd: dawn_core::DeactivateModuleCommand,
-    ) -> bool {
+    ) -> Result<(), ModuleActivationRejection> {
         if !self.owns_ship(player_id, cmd.ship_id) {
-            return false;
+            return Err(ModuleActivationRejection::NotOwned);
         }
         self.deactivate_module(cmd)
     }
@@ -320,11 +355,12 @@ impl<S: EventStore> SimulationNode<S> {
         slot: SlotKind,
         active: bool,
         target: Option<ShipId>,
-    ) -> bool {
+    ) -> Result<(), ModuleActivationRejection> {
         use dawn_core::events::{ModuleActivated, ModuleDeactivated};
+        use ModuleActivationRejection::*;
         let entity = match self.ships.index.get(&ship_id).copied() {
             Some(e) => e,
-            None => return false,
+            None => return Err(ShipNotFound),
         };
 
         // Snapshot the slot's current state before mutating anything.
@@ -340,12 +376,12 @@ impl<S: EventStore> SimulationNode<S> {
             });
         let (kind, prev_active, prev_target) = match current {
             Some(c) => c,
-            None => return false, // slot not found
+            None => return Err(SlotNotFound),
         };
 
         if active {
             if kind.requires_target() != target.is_some() {
-                return false;
+                return Err(TargetRequirementMismatch);
             }
             if let Some(target_id) = target {
                 let locked = self
@@ -360,7 +396,7 @@ impl<S: EventStore> SimulationNode<S> {
                     })
                     .unwrap_or(false);
                 if !locked {
-                    return false;
+                    return Err(TargetNotLocked);
                 }
             }
         }
@@ -368,7 +404,7 @@ impl<S: EventStore> SimulationNode<S> {
         // Return early if the module is already in the requested state —
         // avoids emitting duplicate ModuleActivated/Deactivated events every tick.
         if prev_active == active && prev_target == target {
-            return true;
+            return Ok(());
         }
 
         // Tentatively apply, then range-validate against the *post-fit*
@@ -379,7 +415,7 @@ impl<S: EventStore> SimulationNode<S> {
         // having the Range Gate System flip it back OFF next tick, a
         // same-tick flicker the client can't tell apart from a real cap-out.
         if !self.write_module_slot_state(entity, module_id, slot, active, target) {
-            return false;
+            return Err(SlotNotFound);
         }
         self.reapply_fitting(ship_id);
 
@@ -395,7 +431,7 @@ impl<S: EventStore> SimulationNode<S> {
                             prev_target,
                         );
                         self.reapply_fitting(ship_id);
-                        return false;
+                        return Err(OutOfRange);
                     }
                 }
             }
@@ -424,7 +460,7 @@ impl<S: EventStore> SimulationNode<S> {
             })
         };
         self.event_store.append(event);
-        true
+        Ok(())
     }
 
     /// Writes `is_active`/`target_ship_id` onto one fitted slot. Returns
@@ -607,8 +643,9 @@ mod tests {
                     slot: SlotKind::High,
                     target_ship_id: Some(bot_ship_id),
                 }
-            ),
-            "activate_module_owned should return true for player's own ship"
+            )
+            .is_ok(),
+            "activate_module_owned should succeed for player's own ship"
         );
 
         let mut damage_events = 0;
@@ -624,6 +661,49 @@ mod tests {
         assert!(
             damage_events > 0,
             "player should have dealt at least 1 DamageTaken to bot within 25 ticks"
+        );
+    }
+
+    #[test]
+    fn activate_module_owned_reports_the_specific_rejection_reason() {
+        use crate::modules::MODULE_RAILGUN_SMALL;
+
+        let mut node = node_with_modules();
+        let owner_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship_at_pub(owner_id, Position::ORIGIN);
+        node.fit_module(FitModuleCommand {
+            ship_id,
+            slot: SlotKind::High,
+            module_id: MODULE_RAILGUN_SMALL,
+        });
+
+        let intruder_id = node.next_player_id();
+        assert_eq!(
+            node.activate_module_owned(
+                intruder_id,
+                dawn_core::ActivateModuleCommand {
+                    ship_id,
+                    module_id: MODULE_RAILGUN_SMALL,
+                    slot: SlotKind::High,
+                    target_ship_id: None,
+                }
+            ),
+            Err(ModuleActivationRejection::NotOwned),
+            "a player who doesn't own the ship must be rejected before any fitting lookup"
+        );
+
+        assert_eq!(
+            node.activate_module_owned(
+                owner_id,
+                dawn_core::ActivateModuleCommand {
+                    ship_id,
+                    module_id: ModuleId(9999),
+                    slot: SlotKind::High,
+                    target_ship_id: None,
+                }
+            ),
+            Err(ModuleActivationRejection::SlotNotFound),
+            "activating a module_id that isn't fitted in that slot must name the real reason"
         );
     }
 
