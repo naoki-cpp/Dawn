@@ -38,12 +38,16 @@ async fn main() {
         // --pop-cap N sets the per-Sector population backstop (ADR-0018, last
         // resort); set it low to observe new connections being refused.
         let pop_cap = usize_arg("--pop-cap").unwrap_or(dawn_sector::node::POPULATION_CAP);
+        // --enemies N sets the Bot count in --duel mode (default 1) -- e.g.
+        // to practice locking/engaging more than one target, or Remote
+        // Repair against a Locked target, without needing a real ally.
+        let enemy_count = usize_arg("--enemies").unwrap_or(1);
         // --cluster: 3-node Raft cluster so Jump Gates work (ADR-0009)
         if args.contains(&"--cluster".to_string()) {
             serve::run_cluster_server(ship_count, pop_cap).await;
             return;
         }
-        serve::run_phase4_server(ship_count, duel_mode, pop_cap).await;
+        serve::run_phase4_server(ship_count, duel_mode, enemy_count, pop_cap).await;
         return;
     }
 
