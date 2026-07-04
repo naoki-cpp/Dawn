@@ -33,14 +33,14 @@ impl Term {
 /// proposal type (e.g. a Transit proposal) into it. The Raft Log holds
 /// Commands (proposals), never Events (INV-006) — committed proposals are
 /// turned into Events by the caller and appended to its EventStore.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LogEntry {
     pub term: Term,
     pub payload: Vec<u8>,
 }
 
 /// The role a node currently plays in the Raft cluster.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
     Follower,
     Candidate,
@@ -49,7 +49,7 @@ pub enum Role {
 
 /// Side effects produced by [`RaftState::on_tick`] that the caller (the
 /// `RaftActor`) must act on, e.g. by sending RPCs via `RaftTransport`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TickEffect {
     /// Election timeout elapsed: the node became a Candidate and should
     /// broadcast RequestVote to all peers for the new term.

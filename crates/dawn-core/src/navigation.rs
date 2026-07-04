@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CelestialBodyId(pub u32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CelestialBodyKind {
     Star,
     Planet,
@@ -61,7 +61,7 @@ impl From<CelestialBodyId> for AnchorId {
 // -- WarpTarget --------------------------------------------------------------
 
 /// The destination of a `WarpCommand` (ADR-0025).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WarpTarget {
     Gate(JumpGateId),
     Body(CelestialBodyId),

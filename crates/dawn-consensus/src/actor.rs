@@ -84,13 +84,13 @@ impl RaftActor {
     /// received or the mailbox is closed.
     pub async fn run(mut self) {
         while let Some(msg) = self.rx.recv().await {
-            let role_before = self.state.role.clone();
+            let role_before = self.state.role;
             match msg {
                 RaftActorMessage::Raft(raft_msg) => self.handle_raft_message(raft_msg),
                 RaftActorMessage::TickElapsed => self.handle_tick(),
                 RaftActorMessage::Propose(payload) => self.handle_propose(payload),
                 RaftActorMessage::GetRole(reply) => {
-                    let _ = reply.send((self.state.role.clone(), self.state.current_term));
+                    let _ = reply.send((self.state.role, self.state.current_term));
                 }
                 RaftActorMessage::Shutdown => break,
             }
