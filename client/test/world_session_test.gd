@@ -106,6 +106,37 @@ func test_lock_events_only_change_player_locks() -> void:
 	assert_int(_session.player_lock_target).is_equal(-1)
 
 
+func test_remove_ship_with_clear_lock_false_preserves_the_lock_target() -> void:
+	## AoI leave (ADR-0019): the ship is still alive and still Locked
+	## server-side (Lock has no distance-based expiry, lock.rs). Clearing
+	## player_lock_target here would desync from the server -- a fresh
+	## LockOnCommand the player sends afterward is silently ignored
+	## server-side (already has_target()==true), so the lock would never
+	## visibly complete again even once the target is back in view.
+	var ship := Node3D.new()
+	_session.register_ship(42, ship, {"ship_id": 42}, -1)
+	_session.player_lock_target = 42
+
+	var result: Dictionary = _session.remove_ship(42, false)
+
+	assert_bool(result["removed"] as bool).is_true()
+	assert_int(_session.player_lock_target).is_equal(42)
+	assert_bool(_session.ships.has(42)).is_false()
+	ship.free()
+
+
+func test_remove_ship_with_clear_lock_true_clears_the_lock_target() -> void:
+	var ship := Node3D.new()
+	_session.register_ship(42, ship, {"ship_id": 42}, -1)
+	_session.player_lock_target = 42
+
+	var result: Dictionary = _session.remove_ship(42)
+
+	assert_bool(result["removed"] as bool).is_true()
+	assert_int(_session.player_lock_target).is_equal(-1)
+	ship.free()
+
+
 func test_client_ticks_advance_capacitor_without_server_events() -> void:
 	var ship := Node3D.new()
 	_session.register_ship(11, ship, {
