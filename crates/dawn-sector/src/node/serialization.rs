@@ -19,6 +19,16 @@ pub struct HandoffPayload {
     pub player_fitting: Option<String>,
 }
 
+/// Wire shape for an absolute (f64, ADR-0029) position: `{"x":...,"y":...,"z":...}`.
+/// The one seam this file's three position-carrying messages (celestial body,
+/// jump gate, ship) go through, instead of each authoring the same literal.
+/// Kept local to `dawn-sector` rather than reusing `dawn-actor`'s `PosJson` --
+/// `dawn-actor` sits one layer up in the crate DAG (CONTEXT.md Runtime
+/// Boundaries) and `dawn-sector` must not depend on it.
+fn abs_pos_json(p: [f64; 3]) -> serde_json::Value {
+    serde_json::json!({ "x": p[0], "y": p[1], "z": p[2] })
+}
+
 impl<S: EventStore> SimulationNode<S> {
     /// Build the `InitialState` + `PlayerFitting` pair to hand a client once
     /// its identity (fresh or resumed) has already been decided by the caller.
@@ -162,7 +172,7 @@ impl<S: EventStore> SimulationNode<S> {
                         CelestialBodyKind::Planet => "Planet",
                     },
                     "name"         : b.name,
-                    "position"     : { "x": b.position.x, "y": b.position.y, "z": b.position.z },
+                    "position"     : abs_pos_json(b.abs_m),
                     "radius"       : b.radius,
                     "spectral_type": b.spectral_type,
                 })
@@ -194,7 +204,7 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|g| {
                 serde_json::json!({
                     "gate_id"          : g.id.0,
-                    "position"         : { "x": g.abs_m[0], "y": g.abs_m[1], "z": g.abs_m[2] },
+                    "position"         : abs_pos_json(g.abs_m),
                     "activation_radius": g.activation_radius,
                     "to_system_name"   : system_name_of(g.to_sector),
                 })
@@ -235,7 +245,7 @@ impl<S: EventStore> SimulationNode<S> {
         Some(serde_json::json!({
             "ship_id"              : ship_id.raw(),
             "ship_type_name"       : ship_type_name,
-            "position"             : { "x": pos[0], "y": pos[1], "z": pos[2] },
+            "position"             : abs_pos_json(pos),
             "max_shield"           : stats.max_shield,
             "max_armor"            : stats.max_armor,
             "max_hull"             : stats.max_hull,
@@ -442,10 +452,22 @@ mod tests {
             "client gate marker/proximity source must match the f64 jump range source"
         );
 
+        let bodies_json = v["celestial_bodies"].as_array().unwrap();
+        assert_eq!(bodies_json.len(), 3, "Helios + Forge + Meridian");
+        let first_body = node.sector_map.bodies.values().next().unwrap();
+        let first_body_json = bodies_json
+            .iter()
+            .find(|b| b["id"].as_u64().unwrap() == first_body.id.0 as u64)
+            .expect("every body in sector_map appears in the JSON");
         assert_eq!(
-            v["celestial_bodies"].as_array().unwrap().len(),
-            3,
-            "Helios + Forge + Meridian"
+            first_body_json["position"]["x"].as_f64().unwrap(),
+            first_body.abs_m[0],
+            "client body marker source must match the f64 anchor source (abs_m), not the f32 position"
+        );
+        assert_eq!(
+            first_body_json["position"]["z"].as_f64().unwrap(),
+            first_body.abs_m[2],
+            "client body marker source must match the f64 anchor source (abs_m), not the f32 position"
         );
     }
 
