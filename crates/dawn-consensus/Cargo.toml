@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Raft consensus primitives used by Dawn sector transit."
 repository.workspace = true
+publish.workspace     = true
 
 [dependencies]
 dawn-core = { path = "../dawn-core" }

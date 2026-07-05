@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Authoritative sector simulation, ownership, transit, and snapshots for Dawn."
 repository.workspace = true
+publish.workspace     = true
 
 [dependencies]
 dawn-core        = { path = "../dawn-core" }

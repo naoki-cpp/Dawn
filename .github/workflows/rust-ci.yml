@@ -6,12 +6,18 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel a still-running CI run for the same branch/PR when a new push
+# supersedes it, instead of burning minutes on output nobody will look at.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: fmt + build + test
+  lint:
+    name: fmt + clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,17 +42,101 @@ jobs:
       - name: cargo clippy --workspace --all-targets
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+  test:
+    name: build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
       - name: cargo build --workspace
         run: cargo build --workspace --all-targets
 
       - name: cargo test --workspace
         run: cargo test --workspace
 
+  doc:
+    name: cargo doc (deny warnings)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
       # Catches broken intra-doc links and other rustdoc warnings (Rust API
       # Guidelines C-LINK) that `cargo test --workspace`'s doctests don't
       # surface -- doctests only fail on wrong/panicking *code*, not on
       # rustdoc itself warning about e.g. an unresolved `[Foo]` reference.
-      - name: cargo doc (deny warnings)
+      - name: cargo doc --workspace --no-deps
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: "-D warnings"
+
+  deny:
+    name: cargo deny (licenses, bans, advisories, sources)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Rules live in deny.toml at the repo root.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  audit:
+    name: cargo audit (RUSTSEC advisories)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-audit
+      - run: cargo audit
+
+  machete:
+    name: cargo machete (unused dependencies)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-machete
+      - run: cargo machete
+
+  semver:
+    name: cargo semver-checks (public API vs main)
+    runs-on: ubuntu-latest
+    # Workspace crates aren't published to crates.io (FBD-002-adjacent: this
+    # is a private game workspace, not a library ecosystem), so the baseline
+    # is the main branch tip rather than the default crates.io lookup.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          baseline-rev: origin/main
+
+  # Single required-status-check target for branch protection: succeeds only
+  # if every job above succeeded, so protection rules don't need to list
+  # lint/test/doc individually and stay correct as jobs are split further.
+  ci-success:
+    name: CI success
+    runs-on: ubuntu-latest
+    needs: [lint, test, doc, deny, audit, machete, semver]
+    if: always()
+    steps:
+      - name: Check all required jobs succeeded
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more required jobs failed."
+            exit 1
+          fi

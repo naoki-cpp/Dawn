@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Append-only event storage and replay support for Dawn."
 repository.workspace = true
+publish.workspace     = true
 
 [dependencies]
 dawn-core = { path = "../dawn-core" }
-serde     = { workspace = true }
 postcard  = { workspace = true }
 
 [dev-dependencies]
