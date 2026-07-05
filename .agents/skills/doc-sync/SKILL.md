@@ -1,0 +1,130 @@
+---
+name: doc-sync
+description: Detect and fix drift between Dawn's documentation and its implementation (event catalog, ADR checklists, tick order, roadmap, AI_DEVELOPMENT_GUIDE.md, playtest guide, design docs). Use at phase completion, after large refactors, or as periodic session-start maintenance.
+---
+
+# doc-sync — Detect and fix drift between docs and implementation
+
+This skill cross-checks the documentation against the current codebase, finds
+mismatches / stale entries / typos, and fixes them in one pass.
+
+---
+
+## Steps
+
+### Step 1: Event definitions
+
+Read the `DomainEvent` enum in `crates/dawn-core/src/events.rs` and compare it
+with the event list in `docs/architecture/event-catalog.md`. Do the same for
+commands in `crates/dawn-core/src/commands.rs`.
+
+Check:
+- Event in code but missing from the catalog -> add it to the catalog
+- Event in the catalog but not in code -> remove it (or mark it deleted)
+- Field mismatches (type / field name) -> fix the catalog to match the code
+- Status column (implemented / not implemented / @deprecated) wrong -> fix
+
+### Step 2: ADR implementation checklists
+
+Only ADRs that contain an implementation checklist section are in scope.
+Grep `docs/adr/` for the checklist heading first -- do not bulk-read every
+ADR.
+
+Check:
+- Items still `[ ]` that are actually implemented -> flip to `[x]`
+- Prose that contradicts the current code -> fix
+- References to types / fields / methods that no longer exist -> fix
+
+### Step 3: Tick processing order
+
+Read the step order in `tick_with_lock_commands()` in
+`crates/dawn-sector/src/node/tick.rs` and compare it with
+`docs/architecture/tick-model.md` ("Tick processing steps" section).
+
+Check:
+- Step order, count, and content match the implementation
+- The events emitted at each step are listed correctly
+
+### Step 4: Roadmap
+
+Read `docs/process/roadmap.md` and verify completion flags (`[x]` / done
+markers) against reality. Completed-phase details live in
+`docs/process/roadmap-history.md`; roadmap.md keeps only the completed-phase
+summary plus the in-progress phase.
+
+Check:
+- Tasks implemented but still `[ ]` -> flip to `[x]`
+- Completed-phase summaries match what was actually built
+- No unmet prerequisites listed for the next phase
+- When a phase completes: add one summary line to roadmap.md and move the
+  detailed record to roadmap-history.md (not into roadmap.md)
+
+### Step 5: AI_DEVELOPMENT_GUIDE.md
+
+Read `AI_DEVELOPMENT_GUIDE.md` (CLAUDE.md and AGENTS.md only delegate to it)
+and verify:
+
+- "Crate Boundaries" lists every crate in `crates/` (compare with `ls crates/`)
+  and the one-way dependency rules still hold
+- "Common Commands" all still work as written (spot-check anything suspicious)
+- "Architecture Invariants" and the FBD-001..009 list match
+  `docs/architecture/forbidden-changes.md`
+- Every link in "Documentation Map" and "Reference docs" resolves to an
+  existing file
+- The footer "Last updated / Covers ADR-XXXX through ADR-YYYY" matches the
+  highest ADR number in `docs/adr/`
+- The guide starts with a single H1 and no bare `#` lines outside code fences
+
+### Step 6: Player-facing docs
+
+Read `docs/process/playtest-guide.md` and verify it matches current controls
+and features.
+
+Check:
+- Keybindings match the implementation in `client/scripts/main.gd`
+- No documented-but-removed features; no implemented-but-undocumented ones
+
+### Step 7: Design docs
+
+Read `docs/architecture/architecture.md`, `docs/architecture/entity-model.md`,
+`docs/architecture/ownership.md`, and `docs/design/game-design.md`, and verify
+implementation-status statements.
+
+Check:
+- architecture.md: crate list and dependency DAG cover every crate
+  (compare with `ls crates/`); transport description does not contradict
+  ADR-0007
+- architecture-review-server.md / architecture-review-client.md: line counts
+  in the file-size tables match reality (`wc -l` on the biggest files -- these
+  go stale fastest; a full refresh belongs to the architecture-review skill)
+- entity-model.md: ECS component list matches `crates/dawn-ecs/src/components/`;
+  nothing marked "future / unimplemented" is actually implemented
+- ownership.md: the status table and phase labels match the current phase;
+  no state-transition entries still marked unimplemented that now exist
+- game-design.md: implemented-features section and future/unimplemented
+  section are correctly separated; promote items to "implemented" as they
+  land
+
+---
+
+## Report format
+
+After each step report either:
+
+```
+### Step N: <target>
+OK -- no drift
+```
+
+or
+
+```
+### Step N: <target>
+Drift -- N issue(s)
+  - <file>: <what>
+  - ...
+-> fixed
+```
+
+After all steps, commit any changes together:
+`docs: sync documentation with current implementation`
