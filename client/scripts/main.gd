@@ -141,9 +141,6 @@ var _system_names : Dictionary = _session.system_names
 var _current_system_name : String = "Unknown"
 var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
 var _nearby_station_id   : int    = -1
-var _docked_station_id   : int    = -1
-var _docked_station_name : String = ""
-var _latest_dock_state_tick : int = -1
 var _selected_body_id    : int    = -1  ## -1 = no body selected
 var _sky_mat             : ShaderMaterial = null  ## reference kept for sun_direction updates
 var _jump_notice         : String = ""
@@ -436,10 +433,11 @@ func _input(event: InputEvent) -> void:
 	## effects (network sends, warp-snap-pos / overlay state writes).
 	if event is InputEventKey and event.pressed and not event.echo:
 		var key: InputEventKey = event as InputEventKey
+		var dock_status: Dictionary = _session.dock_status()
 		var action: Dictionary = InputDecoder.decode_key(
 			key.keycode, _player_ship_id,
 			_selected_gate_id, _selected_target_id, _selected_body_id, _nearby_gate_id,
-			_nearby_station_id, _docked_station_id)
+			_nearby_station_id, dock_status.get("docked_station_id", -1) as int)
 		match action.get("kind", "none") as String:
 			"toggle_module":
 				_toggle_module_by_index(action.module_index as int)
@@ -739,11 +737,8 @@ func _handle_ship_docked(p: Dictionary) -> void:
 			station.get("position", Vector3.ZERO) as Vector3
 		)
 		if ship_id == _player_ship_id:
-			_apply_docked_station_context(
-				station_id,
-				station.get("name", "") as String,
-				tick
-			)
+			_session.apply_dock_event(ship_id, station_id, station.get("name", "") as String, tick)
+			_sync_session_state()
 		break
 	_stop_ship_motion(ship_id)
 
@@ -751,20 +746,14 @@ func _handle_ship_undocked(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	if ship_id == _player_ship_id:
 		_nearby_station_id = p.get("station_id", -1) as int
-		_apply_docked_station_context(-1, "", p.get("tick", 0) as int)
+		_session.apply_undock_event(ship_id, p.get("tick", 0) as int)
+		_sync_session_state()
 
 func _stop_ship_motion(ship_id: int) -> void:
 	if not _ships.has(ship_id):
 		return
 	(_ships[ship_id] as Node3D).call("set_velocity", Vector3.ZERO)
 	(_ships[ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
-
-func _apply_docked_station_context(station_id: int, station_name: String, tick: int) -> void:
-	if tick < _latest_dock_state_tick:
-		return
-	_latest_dock_state_tick = tick
-	_docked_station_id = station_id
-	_docked_station_name = station_name
 
 # -- Jump Gate (ADR-0009) -----------------------------------------------------
 
@@ -876,12 +865,13 @@ func _on_player_fitting(payload: Dictionary) -> void:
 	_player_modules = fitting["modules"] as Array
 	_player_inventory = fitting["inventory"] as Array
 	_player_station_inventory = fitting.get("station_inventory", []) as Array
-	_apply_docked_station_context(
+	_session.apply_dock_fitting(
 		fitting.get("docked_station_id", -1) as int,
 		fitting.get("docked_station_name", "") as String,
 		fitting.get("tick", 0) as int
 	)
-	if _docked_station_id >= 0 and _player_ship_id >= 0:
+	_sync_session_state()
+	if _session.is_docked() and _player_ship_id >= 0:
 		_stop_ship_motion(_player_ship_id)
 	_hud_surface.set_player_fitting(_player_modules, _player_inventory, _player_station_inventory)
 	_recalc_weapon_range()
@@ -1131,8 +1121,11 @@ func _update_hud() -> void:
 		jump_line += "\n" + _jump_notice
 
 	var station_line: String = ""
-	if _docked_station_id >= 0:
-		var docked_name := _docked_station_name if not _docked_station_name.is_empty() else "Station #%d" % _docked_station_id
+	if _session.is_docked():
+		var status: Dictionary = _session.dock_status()
+		var docked_station_id: int = status.get("docked_station_id", -1) as int
+		var docked_station_name: String = status.get("docked_station_name", "") as String
+		var docked_name := docked_station_name if not docked_station_name.is_empty() else "Station #%d" % docked_station_id
 		station_line = "\nDocked: %s\n[U] Undock  [B] Build Magpie  [Y] Disassemble ship" % docked_name
 	elif _nearby_station_id >= 0:
 		var nearby_name: String = "Station #%d" % _nearby_station_id

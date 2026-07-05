@@ -177,3 +177,39 @@ func test_destroying_opponent_reports_victory_candidate() -> void:
 	assert_bool(result["destroyed_opponent"]).is_true()
 	assert_bool(_session.has_ship(22)).is_false()
 	ship.free()
+
+
+func test_dock_event_updates_player_dock_status() -> void:
+	_session.player_ship_id = 7
+
+	assert_bool(_session.apply_dock_event(7, 3, "Forge Station", 12)).is_true()
+
+	var status: Dictionary = _session.dock_status()
+	assert_bool(status["is_docked"] as bool).is_true()
+	assert_int(status["docked_station_id"] as int).is_equal(3)
+	assert_str(status["docked_station_name"] as String).is_equal("Forge Station")
+	assert_int(status["latest_dock_state_tick"] as int).is_equal(12)
+
+
+func test_undock_event_clears_player_dock_status() -> void:
+	_session.player_ship_id = 7
+	_session.apply_dock_event(7, 3, "Forge Station", 12)
+
+	assert_bool(_session.apply_undock_event(7, 13)).is_true()
+
+	var status: Dictionary = _session.dock_status()
+	assert_bool(status["is_docked"] as bool).is_false()
+	assert_int(status["docked_station_id"] as int).is_equal(-1)
+	assert_str(status["docked_station_name"] as String).is_equal("")
+	assert_int(status["latest_dock_state_tick"] as int).is_equal(13)
+
+
+func test_older_fitting_dock_context_is_ignored_after_newer_undock() -> void:
+	_session.player_ship_id = 7
+	_session.apply_undock_event(7, 20)
+
+	assert_bool(_session.apply_dock_fitting(3, "Forge Station", 19)).is_false()
+
+	var status: Dictionary = _session.dock_status()
+	assert_bool(status["is_docked"] as bool).is_false()
+	assert_int(status["docked_station_id"] as int).is_equal(-1)
