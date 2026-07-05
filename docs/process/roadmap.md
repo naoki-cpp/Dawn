@@ -299,7 +299,7 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
 | 6 | Disassemble コマンド + バリデーション（Ship が無傷・未艤装であること） | 出力は Station インベントリ上の `PackagedShip`。**docked 中のみ**実行可。無傷チェックは無料修理の抜け穴防止（Local Repair・ADR-0033 の価値を守る） | ✅ |
 | 7 | Packaged Ship 建造コマンド（Scrap Metal 消費 → Packaged Ship 生成） | Scrap Metal を Station インベントリから消費し、生成物も Station インベントリへ置く。**docked 中のみ**実行可能。現状コストは MVP として `1 Scrap Metal / 1 hull` の固定値 | ✅ |
 | 8 | client実装の開始条件を固定 | **基本方針: client UI は 5〜7 の server 側本体（Assemble / Disassemble / Build）が揃ってから実装する。** 先に UI だけ作って wire 先行にならないようにする | ⬜ |
-| 9 | client: Dock/Undock + Station操作UI | まず入港状態の表示と操作を作る。その上で ship inventory と station inventory の見分けがつくこと。**現状の client 側変更は `dawn-actor` の `DockCommand` / `UndockCommand` parser 追加までで、Godot UI は未着手** | ⬜ |
+| 9 | client: Dock/Undock + Station操作UI | 入港状態の表示と `D` / `U` / `B` / `Y` 操作は実装済み。client は `ShipDocked` / `ShipUndocked` と `PlayerFitting` の両方から dock state を受けるため、順序逆転で古い fitting が HUD を巻き戻さないこと、undock 後の `null` dock context を `station_id=0` と誤解しないことを維持条件とする。ship inventory と station inventory の見分けがつくことは引き続き必要 | ◐ |
 | 10 | client: Packaged Ship のインベントリ表示・Assemble/Disassemble/建造UI | station UI の上に載せる。Ship側 inventory と Station側 inventory が混ざらないこと | ⬜ |
 
 #### 9B 補足: Station inventory の保存戦略

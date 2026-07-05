@@ -143,6 +143,7 @@ var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
 var _nearby_station_id   : int    = -1
 var _docked_station_id   : int    = -1
 var _docked_station_name : String = ""
+var _latest_dock_state_tick : int = -1
 var _selected_body_id    : int    = -1  ## -1 = no body selected
 var _sky_mat             : ShaderMaterial = null  ## reference kept for sun_direction updates
 var _jump_notice         : String = ""
@@ -679,6 +680,8 @@ func _on_event_received(payload: Dictionary) -> void:
 		"ShipSpawned"      : _handle_ship_spawned(payload)
 		"VelocityChanged"  : _handle_velocity_changed(payload)
 		"ShipDespawned"    : _handle_ship_despawned(payload)
+		"ShipDocked"       : _handle_ship_docked(payload)
+		"ShipUndocked"     : _handle_ship_undocked(payload)
 		"DamageTaken"   : _handle_damage_taken(payload)
 		"RepairApplied" : _handle_repair_applied(payload)
 		"ShipDestroyed" : _handle_ship_destroyed(payload)
@@ -716,6 +719,52 @@ func _handle_position_snap(p: Dictionary) -> void:
 		(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(server_pos)
 	(_ships[ship_id] as Node3D).call("set_velocity", Vector3.ZERO)
 	(_ships[ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
+
+## Docking is authoritative server state. The server stops the ship
+## immediately, but without an explicit client event the ship_controller keeps
+## integrating the last VelocityChanged it saw and visually drifts. Treat a
+## ShipDocked like a motion snap-to-station from the client's perspective:
+## zero residual velocity/thrust at once.
+func _handle_ship_docked(p: Dictionary) -> void:
+	var ship_id: int = p.get("ship_id", 0) as int
+	var station_id: int = p.get("station_id", -1) as int
+	var tick: int = p.get("tick", 0) as int
+	if not _ships.has(ship_id):
+		return
+	for entry: Variant in _stations:
+		var station: Dictionary = entry as Dictionary
+		if (station.get("station_id", -1) as int) != station_id:
+			continue
+		(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(
+			station.get("position", Vector3.ZERO) as Vector3
+		)
+		if ship_id == _player_ship_id:
+			_apply_docked_station_context(
+				station_id,
+				station.get("name", "") as String,
+				tick
+			)
+		break
+	_stop_ship_motion(ship_id)
+
+func _handle_ship_undocked(p: Dictionary) -> void:
+	var ship_id: int = p.get("ship_id", 0) as int
+	if ship_id == _player_ship_id:
+		_nearby_station_id = p.get("station_id", -1) as int
+		_apply_docked_station_context(-1, "", p.get("tick", 0) as int)
+
+func _stop_ship_motion(ship_id: int) -> void:
+	if not _ships.has(ship_id):
+		return
+	(_ships[ship_id] as Node3D).call("set_velocity", Vector3.ZERO)
+	(_ships[ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
+
+func _apply_docked_station_context(station_id: int, station_name: String, tick: int) -> void:
+	if tick < _latest_dock_state_tick:
+		return
+	_latest_dock_state_tick = tick
+	_docked_station_id = station_id
+	_docked_station_name = station_name
 
 # -- Jump Gate (ADR-0009) -----------------------------------------------------
 
@@ -827,8 +876,13 @@ func _on_player_fitting(payload: Dictionary) -> void:
 	_player_modules = fitting["modules"] as Array
 	_player_inventory = fitting["inventory"] as Array
 	_player_station_inventory = fitting.get("station_inventory", []) as Array
-	_docked_station_id = fitting.get("docked_station_id", -1) as int
-	_docked_station_name = fitting.get("docked_station_name", "") as String
+	_apply_docked_station_context(
+		fitting.get("docked_station_id", -1) as int,
+		fitting.get("docked_station_name", "") as String,
+		fitting.get("tick", 0) as int
+	)
+	if _docked_station_id >= 0 and _player_ship_id >= 0:
+		_stop_ship_motion(_player_ship_id)
 	_hud_surface.set_player_fitting(_player_modules, _player_inventory, _player_station_inventory)
 	_recalc_weapon_range()
 

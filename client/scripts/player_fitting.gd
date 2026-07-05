@@ -7,6 +7,16 @@ extends RefCounted
 
 
 static func normalize_payload(payload: Dictionary) -> Dictionary:
+	var raw_docked_station_id: Variant = payload.get("docked_station_id", null)
+	var docked_station_id: int = -1
+	if raw_docked_station_id != null:
+		docked_station_id = raw_docked_station_id as int
+
+	var raw_docked_station_name: Variant = payload.get("docked_station_name", null)
+	var docked_station_name: String = ""
+	if raw_docked_station_name != null:
+		docked_station_name = raw_docked_station_name as String
+
 	var modules: Array = []
 	for entry: Variant in payload.get("modules", []) as Array:
 		var src: Dictionary = entry as Dictionary
@@ -58,11 +68,12 @@ static func normalize_payload(payload: Dictionary) -> Dictionary:
 		})
 
 	return {
+		"tick": payload.get("tick", 0) as int,
 		"modules": modules,
 		"inventory": inventory,
 		"station_inventory": station_inventory,
-		"docked_station_id": payload.get("docked_station_id", -1) as int,
-		"docked_station_name": payload.get("docked_station_name", "") as String,
+		"docked_station_id": docked_station_id,
+		"docked_station_name": docked_station_name,
 		"slot_capacity": payload.get("slot_capacity", {}) as Dictionary,
 	}
 

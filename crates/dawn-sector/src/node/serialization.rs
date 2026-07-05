@@ -202,6 +202,7 @@ impl<S: EventStore> SimulationNode<S> {
         Some(
             serde_json::json!({
                 "type"         : "PlayerFitting",
+                "tick"         : self.current_tick.value(),
                 "modules"      : modules,
                 "inventory"    : inventory,
                 "station_inventory": station_inventory,
@@ -686,5 +687,28 @@ mod tests {
             .find(|row| row["item_type"] == "ScrapMetal")
             .expect("docked station inventory should be serialized");
         assert_eq!(scrap["count"].as_u64().unwrap(), 5);
+    }
+
+    #[test]
+    fn player_fitting_json_uses_null_dock_context_after_undock() {
+        use dawn_core::{DockCommand, StationId, UndockCommand};
+
+        let mut node = mem_node();
+        let player_id = node.next_player_id();
+        let station = node.station(StationId(0)).unwrap().clone();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
+        assert!(node.dock_owned(
+            player_id,
+            DockCommand {
+                ship_id,
+                station_id: StationId(0),
+            }
+        ));
+        assert!(node.undock_owned(player_id, UndockCommand { ship_id }));
+
+        let json = node.build_player_fitting_json(ship_id).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(payload["docked_station_id"].is_null());
+        assert!(payload["docked_station_name"].is_null());
     }
 }

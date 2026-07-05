@@ -38,6 +38,16 @@ enum EventJson {
         ship_id: u64,
         tick: u64,
     },
+    ShipDocked {
+        ship_id: u64,
+        station_id: u32,
+        tick: u64,
+    },
+    ShipUndocked {
+        ship_id: u64,
+        station_id: u32,
+        tick: u64,
+    },
     DamageTaken {
         ship_id: u64,
         damage: f32,
@@ -175,6 +185,16 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
             ship_id: e.ship_id.raw(),
             tick: e.tick.value(),
         },
+        DomainEvent::ShipDocked(e) => EventJson::ShipDocked {
+            ship_id: e.ship_id.raw(),
+            station_id: e.station_id.0,
+            tick: e.tick.value(),
+        },
+        DomainEvent::ShipUndocked(e) => EventJson::ShipUndocked {
+            ship_id: e.ship_id.raw(),
+            station_id: e.station_id.0,
+            tick: e.tick.value(),
+        },
         DomainEvent::DamageTaken(e) => EventJson::DamageTaken {
             ship_id: e.ship_id.raw(),
             damage: e.damage,
@@ -255,8 +275,6 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
         // VelocityChanged stays consistent without seeing the rebase. Client
         // anchor handling (floating origin, fresh InitialState) lands in step 6.
         DomainEvent::AnchorRebased(_) => return None,
-        DomainEvent::ShipDocked(_) => return None,
-        DomainEvent::ShipUndocked(_) => return None,
         DomainEvent::PackagedShipBuilt(_) => return None,
         DomainEvent::ShipDisassembled(_) => return None,
     };
@@ -664,6 +682,21 @@ mod tests {
     fn unknown_command_type_returns_none() {
         let line = r#"{"type":"UnknownCommand","ship_id":1}"#;
         assert!(parse_client_command(line).is_none());
+    }
+
+    #[test]
+    fn ship_docked_event_is_serialized_for_clients() {
+        let json = domain_event_to_json(&DomainEvent::ShipDocked(dawn_core::events::ShipDocked {
+            ship_id: ship_id(42),
+            station_id: dawn_core::StationId(3),
+            tick: dawn_core::Tick(9),
+        }))
+        .expect("ShipDocked should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "ShipDocked");
+        assert_eq!(v["ship_id"], ship_id(42).raw());
+        assert_eq!(v["station_id"], 3);
+        assert_eq!(v["tick"], 9);
     }
 
     #[test]
