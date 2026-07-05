@@ -1,32 +1,36 @@
-# Godot クライアントのテスト手順（GdUnit4）
+# Godot Client Testing (GdUnit4)
 
-> AI_DEVELOPMENT_GUIDE.md §8「Godot クライアントのテスト方針」の詳細手順の正典。
-> ガイド本体には方針の要約とこのファイルへのリンクのみを残す
-> （ADR-0030 と同じ理由 — セットアップ手順は client/ を触るときだけ必要）。
+> Canonical detail behind the "Godot client tests" section of
+> AI_DEVELOPMENT_GUIDE.md. The guide keeps only the policy summary and a link
+> here (same rationale as ADR-0030 — setup steps are only needed when
+> touching `client/`).
 
-## セットアップ
+## Setup
 
-`client/addons/` は `.gitignore` 対象（各開発者が Godot エディタの AssetLib から
-個別にインストールする想定）なので、**初回はエディタの AssetLib タブで
-「GdUnit4」を検索してインストールし、`project.godot` の Plugins でこのアドオンを
-有効化**すること（`enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg")`
-は既にコミット済み。アドオン本体だけが各マシンでの個別インストール対象）。
-テストは `client/test/` 以下に `<対象ファイル>_test.gd` として置く（例: `client/test/main_test.gd`）。
+`client/addons/` is `.gitignore`d (each developer installs addons locally
+from the Godot editor's AssetLib), so **on first setup, search for "GdUnit4"
+in the editor's AssetLib tab, install it, and enable the plugin in
+`project.godot`** (`enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg")`
+is already committed; only the addon body needs per-machine installation).
 
-**Godot バイナリの取得**: リポジトリには Godot 本体を含めない（uv/pyenv 的に、
-`.godot-version` でバージョンを pin し、各マシンが個別に取得する）。
+Tests live under `client/test/` as `<target-file>_test.gd`
+(e.g. `client/test/main_test.gd`).
+
+**Getting the Godot binary**: the repository does not vendor Godot itself
+(uv/pyenv style — `.godot-version` pins the version and each machine fetches
+it individually).
 
 ```bash
-scripts/setup-godot.sh             # .godot-version の指定版を .tools/godot/ に取得・SHA512検証
+scripts/setup-godot.sh             # fetch the pinned version into .tools/godot/ with SHA512 verification
 # Windows PowerShell:
 scripts/setup-godot.ps1
 scripts/setup-godot.sh --run-tests
 scripts/setup-godot.ps1 -RunTests
 ```
 
-## CLI 実行
+## Running from the CLI
 
-取得した Godot バイナリで GdUnit4 を走らせる（作業ディレクトリは `client/`）:
+Run GdUnit4 with the fetched Godot binary (working directory: `client/`):
 
 ```bash
 cd client
@@ -41,41 +45,47 @@ directory and applies the pinned-version GdUnit4 compatibility patches:
 scripts/setup-godot.ps1 -RunTests
 ```
 
-> **既知の互換性問題（GdUnit4 v6.1.3 × Godot 4.6系）**: GdUnit4 v6.1.3
-> （AssetLib 配布版）は Godot 4.6 の破壊的変更（`FileAccess.get_as_text()` の
-> `skip_cr` 引数削除、`debug/gdscript/warnings/exclude_addons` 設定の廃止。
-> upstream issue GD-1004、master では修正済みだが本タグには未反映）に未対応で、
-> そのままでは CLI 実行が失敗する。`client/addons/` は `.gitignore` 対象（各マシン
-> ローカルインストール）なので、AssetLib でインストールした直後に以下の2点を
-> **ローカルで手動パッチする**こと（再インストール時は再適用が必要）:
+> **Known compatibility issue (GdUnit4 v6.1.3 × Godot 4.6.x)**: GdUnit4
+> v6.1.3 (the AssetLib release) does not handle Godot 4.6's breaking changes
+> (removal of the `skip_cr` argument from `FileAccess.get_as_text()`, and
+> removal of the `debug/gdscript/warnings/exclude_addons` setting; upstream
+> issue GD-1004 — fixed on master but not in this tag), so CLI runs fail
+> out of the box. Because `client/addons/` is `.gitignore`d (per-machine
+> local install), **apply these two manual patches locally right after
+> installing from AssetLib** (re-apply after any reinstall):
 >   - `addons/gdUnit4/src/core/GdUnitFileAccess.gd:199`:
 >     `file.get_as_text(true)` → `file.get_as_text()`
->   - `addons/gdUnit4/plugin.gd:17`:
->     `ProjectSettings.get_setting("debug/gdscript/warnings/exclude_addons")` に
->     第2引数 `false`（デフォルト値）を追加
-> 次に GdUnit4 が 4.6 対応版をリリースしたら、このパッチは不要になる。
+>   - `addons/gdUnit4/plugin.gd:17`: add the second argument `false`
+>     (default value) to
+>     `ProjectSettings.get_setting("debug/gdscript/warnings/exclude_addons")`
+> Once GdUnit4 ships a 4.6-compatible release, these patches become
+> unnecessary.
 
-## テスト可能 / 対象外の判断基準
+## What is testable vs out of scope
 
-クライアント側はサーバー側（Rustクレート）と違い**全コードをテストできるわけではない**。
+Unlike the server side (Rust crates), **not all client code can be tested**.
 
 ```
-テスト可能（シーンツリー無依存の純粋関数・ロジック）:
-  - 座標変換、レイ/距離計算、配列・辞書を入出力とする計算
-  - 例: _server_to_godot_pos() / _ray_point_distance() / _spectral_color() /
-        _compute_warp_snap_pos_core()（client/test/main_test.gd 参照）
-  - スクリプトを .new() でシーンツリーに追加せずインスタンス化すれば _ready() は
-    呼ばれないため、@onready 変数を使わない関数なら安全にテストできる
+Testable (pure functions/logic with no scene-tree dependency):
+  - coordinate conversion, ray/distance math, computations over arrays and
+    dictionaries
+  - e.g. _server_to_godot_pos() / _ray_point_distance() / _spectral_color() /
+    _compute_warp_snap_pos_core() (see client/test/main_test.gd)
+  - instantiating a script with .new() without adding it to the scene tree
+    never calls _ready(), so functions that avoid @onready variables are
+    safe to test
 
-テスト不能・対象外（Godot エディタでの目視確認に委ねる）:
-  - HUD構築・更新、入力ハンドリング、マーカー（ノード）生成、ピッキングのループ自体
-  - @onready のシーンツリー直パス参照に依存する処理
-  - WebSocket 通信（connection.gd の実接続部分）
-  → これらは docs/architecture/architecture-review-client.md の C-1/C-3 で「Godot エディタでの
-    動作確認が必要」と明記した領域と一致する
+Not testable / out of scope (left to visual checks in the Godot editor):
+  - HUD construction/updates, input handling, marker (node) creation, the
+    picking loop itself
+  - anything depending on @onready scene-tree path references
+  - WebSocket communication (the live connection part of connection.gd)
+  -> matches the areas marked "needs Godot editor verification" as C-1/C-3
+     in docs/architecture/architecture-review-client.md
 ```
 
-**新しい純粋関数を `main.gd` 等に追加・抽出するときは、テストも同じ変更に含めること。**
-逆に、シーンツリー依存のロジックを変更したときは、テストを書けない代わりに
-「Godot エディタで何を確認したか」を PR 説明に明記する（実機検証ができないAIセッションの
-場合は、その旨と推奨される手動確認手順を明記する）。
+**When adding or extracting a new pure function into `main.gd` etc., include
+its test in the same change.** Conversely, when changing scene-tree-dependent
+logic, state in the PR description what was verified in the Godot editor in
+place of a test (for AI sessions that cannot run the editor, state that fact
+and the recommended manual verification steps).

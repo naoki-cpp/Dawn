@@ -1,16 +1,17 @@
 # ADR Index
 
-ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時系列）であり、
-カテゴリ分けはこのインデックスのみで行う。ファイルの移動・リネームは行わない
-（既存リンク・AI_DEVELOPMENT_GUIDE.md からの参照を壊さないため）。
+List of all ADRs (Architecture Decision Records). Numbers are chronological
+by decision; categorization happens only in this index. Never move or rename
+ADR files (it would break existing links and references from
+AI_DEVELOPMENT_GUIDE.md).
 
-新しい ADR を追加したら、このインデックスにも追記すること。
+When adding a new ADR, register it here too (the `/new-adr` skill does both).
 
-## カテゴリ別一覧
+## By category
 
-### Architecture / 基盤方針
+### Architecture / Foundations
 
-| ADR | タイトル | ステータス |
+| ADR | Title | Status |
 |---|---|---|
 | [ADR-0001](ADR-0001-event-sourcing.md) | Event Sourcing の採用 | Accepted |
 | [ADR-0002](ADR-0002-actor-model.md) | Actor モデルによるノード内並行制御 | Accepted |
@@ -28,9 +29,9 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 | [ADR-0029](ADR-0029-true-scale-coordinates-implementation.md) | 真スケール座標の実装 — アンカー相対 f32（サーバ B）＋ 浮動原点（クライアント C2） | Accepted |
 | [ADR-0030](ADR-0030-steering-files-restructure.md) | ステアリング系ファイルの再構成（常時ロード文脈の軽量化 — Hook + ガイド分割） | Accepted |
 
-### Client / 通信
+### Client / Communication
 
-| ADR | タイトル | ステータス |
+| ADR | Title | Status |
 |---|---|---|
 | [ADR-0004](ADR-0004-client-technology.md) | クライアント技術選択（Godot 4 + godot-rust） | Accepted |
 | [ADR-0005](ADR-0005-client-connection.md) | ClientConnection — サーバー／クライアント通信の抽象化 | Accepted |
@@ -38,7 +39,7 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 
 ### Movement / Navigation
 
-| ADR | タイトル | ステータス |
+| ADR | Title | Status |
 |---|---|---|
 | [ADR-0008](ADR-0008-ship-movement-events.md) | 移動イベントの権威的設計：VelocityChanged | Accepted |
 | [ADR-0009](ADR-0009-star-system-navigation.md) | 星系間ナビゲーション — StarSystem / JumpGate 設計 | Accepted |
@@ -47,7 +48,7 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 
 ### Combat / Fitting
 
-| ADR | タイトル | ステータス |
+| ADR | Title | Status |
 |---|---|---|
 | [ADR-0006](ADR-0006-fitting-and-combat.md) | Fitting / Combat / Lock-on / Active モジュールシステムの設計 | Accepted |
 | [ADR-0010](ADR-0010-ship-loss-and-redispatch.md) | 船の喪失と再出撃 — 脱出ポッド / 拠点帰還 / 新艦派遣 | Deferred |
@@ -56,19 +57,22 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 | [ADR-0032](ADR-0032-inventory-and-runtime-fitting.md) | インベントリとランタイム換装 — InventoryComp / Fit/UnfitModuleCommand | Accepted |
 | [ADR-0033](ADR-0033-local-repair-module.md) | ローカルリペアモジュール — アクティブ自己修理 / RepairApplied / Repair System | Accepted |
 | [ADR-0035](ADR-0035-per-slot-module-targeting.md) | Per-Slot Module Targeting — Weapon/Tackle/Logistics 共通のモジュール起動/ロック基盤 | Accepted |
+| [ADR-0036](ADR-0036-remote-repair.md) | Remote Repair — Logistics (targeted ally repair) | Accepted |
 
-### Economy（Phase 9）
+### Economy (Phase 9)
 
-| ADR | タイトル | ステータス |
+| ADR | Title | Status |
 |---|---|---|
 | [ADR-0034](ADR-0034-economy-foundations.md) | Economy Foundations — Item一般化 / Packaged Ship / Scrap Metal / Market・DBの境界 | Accepted |
 
-### UI / クライアント表示
+### UI / Client Presentation
 
-| ADR | タイトル | ステータス |
+| ADR | Title | Status |
 |---|---|---|
 | [ADR-0013](ADR-0013-tactical-overlay.md) | タクティカルオーバーレイ（射程リング） | Accepted |
 
-## 参照
+## References
 
-- ADRの作成・更新ルール: `/ai-change-checklist` スキル（`.claude/commands/ai-change-checklist.md`）
+- Creating a new ADR: `/new-adr` skill (`.claude/commands/new-adr.md`)
+- Pre-change checks that decide when an ADR is required: `/ai-change-checklist`
+  skill (`.claude/commands/ai-change-checklist.md`)

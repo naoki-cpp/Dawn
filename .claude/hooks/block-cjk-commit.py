@@ -37,7 +37,8 @@ def main() -> int:
         sys.stderr.write(
             "Blocked: this git commit message contains Japanese/CJK text.\n"
             "Commit messages must be in English (Conventional Commits) -- see "
-            "docs/commit-convention.md and AI_DEVELOPMENT_GUIDE.md §8.\n"
+            "docs/process/commit-convention.md and AI_DEVELOPMENT_GUIDE.md "
+            "'Comments And Commits'.\n"
             "Rewrite the message in English and commit again.\n"
         )
         return 2
