@@ -231,24 +231,28 @@ impl<S: EventStore> SimulationNode<S> {
                 return Some(ClientCommandFollowup::RefreshFitting(ship_id));
             }
             ClientCommand::Dock(d) => {
-                let ship_id = d.ship_id;
-                let _ = self.dock_owned(player_id, d);
-                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+                let outcome = self.dock_owned(player_id, d);
+                return outcome
+                    .refresh_fitting_ship_id()
+                    .map(ClientCommandFollowup::RefreshFitting);
             }
             ClientCommand::Undock(u) => {
-                let ship_id = u.ship_id;
-                let _ = self.undock_owned(player_id, u);
-                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+                let outcome = self.undock_owned(player_id, u);
+                return outcome
+                    .refresh_fitting_ship_id()
+                    .map(ClientCommandFollowup::RefreshFitting);
             }
             ClientCommand::BuildPackagedShip(b) => {
-                let ship_id = b.ship_id;
-                let _ = self.build_packaged_ship_owned(player_id, b);
-                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+                let outcome = self.build_packaged_ship_owned(player_id, b);
+                return outcome
+                    .refresh_fitting_ship_id()
+                    .map(ClientCommandFollowup::RefreshFitting);
             }
             ClientCommand::DisassembleShip(d) => {
-                let ship_id = d.ship_id;
-                let _ = self.disassemble_ship_owned(player_id, d);
-                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+                let outcome = self.disassemble_ship_owned(player_id, d);
+                return outcome
+                    .refresh_fitting_ship_id()
+                    .map(ClientCommandFollowup::RefreshFitting);
             }
             ClientCommand::Jump(j) => {
                 if self.is_ship_docked(j.ship_id) {
@@ -579,6 +583,7 @@ impl<S: EventStore> SimulationNode<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node::station::StationOperationOutcome;
     use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, Velocity};
 
     fn mem_node() -> SimulationNode {
@@ -889,12 +894,15 @@ mod tests {
             "attacker should have an active weapon on the target before docking"
         );
 
-        assert!(node.dock_owned(
-            target_player_id,
-            DockCommand {
-                ship_id: target_ship_id,
-                station_id: StationId(0),
-            }
+        assert!(matches!(
+            node.dock_owned(
+                target_player_id,
+                DockCommand {
+                    ship_id: target_ship_id,
+                    station_id: StationId(0),
+                }
+            ),
+            StationOperationOutcome::Accepted { .. }
         ));
 
         let result = node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));

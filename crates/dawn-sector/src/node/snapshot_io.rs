@@ -120,6 +120,7 @@ impl SimulationNode<dawn_event_store::FileEventStore> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node::station::StationOperationOutcome;
     use crate::persistence::StateSnapshot;
     use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
     use dawn_event_store::{FileEventStore, InMemoryEventStore};
@@ -625,12 +626,15 @@ mod tests {
         let ship_id = node.spawn_player_ship(player_id);
         let station = node.station(StationId(0)).expect("demo station exists");
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
-        assert!(node.dock_owned(
-            player_id,
-            DockCommand {
-                ship_id,
-                station_id: StationId(0),
-            }
+        assert!(matches!(
+            node.dock_owned(
+                player_id,
+                DockCommand {
+                    ship_id,
+                    station_id: StationId(0),
+                }
+            ),
+            StationOperationOutcome::Accepted { .. }
         ));
 
         let snap = node.take_snapshot();
