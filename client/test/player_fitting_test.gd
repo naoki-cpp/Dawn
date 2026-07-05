@@ -24,7 +24,10 @@ func test_normalize_payload_adds_client_runtime_fields() -> void:
 				"tackle_range_add": 20000.0, "repair_range_add": 15000.0,
 			},
 		}],
-		"inventory": [{"module_id": 8, "name": "Afterburner", "kind": "Propulsion", "slot": "Mid"}],
+		"inventory": [
+			{"item_type": "Module", "module_id": 8, "name": "Afterburner", "kind": "Propulsion", "slot": "Mid", "count": 2},
+			{"item_type": "ScrapMetal", "name": "Scrap Metal", "count": 3},
+		],
 	})
 
 	var module: Dictionary = (fitting["modules"] as Array)[0] as Dictionary
@@ -32,6 +35,8 @@ func test_normalize_payload_adds_client_runtime_fields() -> void:
 	assert_str(module["forced_reason"]).is_equal("")
 	assert_int(module["cycle_remaining"]).is_equal(0)
 	assert_int(((fitting["inventory"] as Array)[0] as Dictionary)["module_id"]).is_equal(8)
+	assert_str(((fitting["inventory"] as Array)[1] as Dictionary)["item_type"]).is_equal("ScrapMetal")
+	assert_int(((fitting["inventory"] as Array)[1] as Dictionary)["count"]).is_equal(3)
 	var stat_delta: Dictionary = module["stat_delta"] as Dictionary
 	assert_float(stat_delta["tackle_range_add"]).is_equal_approx(20000.0, 0.001)
 	assert_float(stat_delta["repair_range_add"]).is_equal_approx(15000.0, 0.001)

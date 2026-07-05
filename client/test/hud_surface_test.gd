@@ -61,13 +61,18 @@ func test_set_player_fitting_rebuilds_module_slots_and_inventory_rows() -> void:
 		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true},
 		{"module_id": 2, "slot": "Low", "name": "Plate", "is_active_module": false},
 	]
-	var inventory: Array = [{"module_id": 3, "slot": "Mid", "name": "Afterburner"}]
+	var inventory: Array = [
+		{"item_type": "Module", "module_id": 3, "slot": "Mid", "name": "Afterburner", "count": 2},
+		{"item_type": "ScrapMetal", "name": "Scrap Metal", "count": 4},
+	]
 
 	_surface.set_player_fitting(modules, inventory)
 
 	assert_int(_surface._module_slots.size()).is_equal(1)
 	assert_int((_surface._inventory_panel_refs["fitted_rows"] as Array).size()).is_equal(2)
-	assert_int((_surface._inventory_panel_refs["inventory_rows"] as Array).size()).is_equal(1)
+	assert_int((_surface._inventory_panel_refs["inventory_rows"] as Array).size()).is_equal(2)
+	var rows: Array = _surface._inventory_panel_refs["inventory_rows"] as Array
+	assert_str((((rows[1] as Dictionary)["panel"] as Panel).get_child(0) as Label).text).is_equal("Scrap Metal x4")
 
 
 func test_render_repaints_after_the_modules_array_is_mutated_in_place() -> void:

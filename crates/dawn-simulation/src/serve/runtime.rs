@@ -27,7 +27,7 @@ pub(crate) struct ClusterRuntimeTickContext<'a> {
 pub(crate) fn run_cluster_runtime_tick(
     ctx: ClusterRuntimeTickContext<'_>,
     lock_commands: &[Vec<dawn_core::LockOnCommand>],
-) {
+) -> Vec<transit::RuntimeTickOutput> {
     let tick_outputs: Vec<_> = (0..ctx.nodes.len())
         .map(|i| {
             transit::run_runtime_tick(
@@ -67,6 +67,7 @@ pub(crate) fn run_cluster_runtime_tick(
         &handoff,
     );
     resend_jump_initial_state(ctx.nodes, ctx.sessions, &handoff);
+    tick_outputs
 }
 
 struct JumpHandoff {
