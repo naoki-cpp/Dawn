@@ -163,6 +163,31 @@ func test_i_key_does_nothing_without_a_player_ship() -> void:
 	assert_str(action.kind as String).is_equal("none")
 
 
+# -- D/U/B/Y keys -> station actions ---------------------------------------------------
+
+func test_d_key_docks_at_the_nearby_station_when_not_already_docked() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_D, 1, -1, -1, -1, -1, 3, -1)
+	assert_str(action.kind as String).is_equal("dock")
+	assert_int(action.station_id as int).is_equal(3)
+
+
+func test_u_key_undocks_when_currently_docked() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_U, 1, -1, -1, -1, -1, -1, 3)
+	assert_str(action.kind as String).is_equal("undock")
+
+
+func test_b_key_builds_a_packaged_ship_when_currently_docked() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_B, 1, -1, -1, -1, -1, -1, 3)
+	assert_str(action.kind as String).is_equal("build_packaged_ship")
+	assert_int(action.station_id as int).is_equal(3)
+
+
+func test_y_key_disassembles_the_current_ship_when_docked() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_Y, 1, -1, -1, -1, -1, -1, 3)
+	assert_str(action.kind as String).is_equal("disassemble_ship")
+	assert_int(action.station_id as int).is_equal(3)
+
+
 # -- Tab key -> tactical overlay ---------------------------------------------------------
 
 func test_tab_key_toggles_the_tactical_overlay_even_without_a_player_ship() -> void:

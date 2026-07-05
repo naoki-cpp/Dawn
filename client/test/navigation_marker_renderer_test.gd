@@ -138,3 +138,34 @@ func test_spawn_body_markers_adds_a_fixed_size_selection_reticle_to_each_planet(
 	assert_object(reticle).is_not_null()
 	assert_bool(reticle.fixed_size).is_true()
 	assert_object(reticle.texture).is_not_null()
+
+
+# -- spawn_station_markers ----------------------------------------------------------
+
+func test_spawn_station_markers_builds_one_marker_per_station_with_label_and_ring() -> void:
+	var bodies_root: Node3D = auto_free(Node3D.new())
+	var stations: Array = [
+		{"station_id": 3, "name": "Forge Station", "position": Vector3(100.0, 0.0, 200.0), "docking_radius": 16000.0},
+	]
+
+	NavigationMarkerRenderer.spawn_station_markers(bodies_root, stations, 0.1, _to_godot_pos)
+
+	assert_int(bodies_root.get_child_count()).is_equal(1)
+	var marker: Node3D = bodies_root.get_child(0) as Node3D
+	assert_int(marker.get_meta("station_id") as int).is_equal(3)
+	assert_vector(marker.position).is_equal_approx(Vector3(10.0, 0.0, -20.0), Vector3(0.0001, 0.0001, 0.0001))
+	var label: Label3D = marker.get_child(2) as Label3D  ## 0=mesh,1=ring,2=label
+	assert_str(label.text).is_equal("Forge Station")
+
+
+func test_spawn_station_markers_appends_after_existing_body_markers() -> void:
+	var bodies_root: Node3D = auto_free(Node3D.new())
+	NavigationMarkerRenderer.spawn_body_markers(bodies_root, [
+		{"body_id": 2, "kind": "Planet", "name": "Forge", "position": Vector3(500.0, 0.0, 0.0), "radius": 200.0, "spectral_type": 0.0},
+	], 0.1, _to_godot_pos)
+
+	NavigationMarkerRenderer.spawn_station_markers(bodies_root, [
+		{"station_id": 3, "name": "Forge Station", "position": Vector3(100.0, 0.0, 200.0), "docking_radius": 16000.0},
+	], 0.1, _to_godot_pos)
+
+	assert_int(bodies_root.get_child_count()).is_equal(2)

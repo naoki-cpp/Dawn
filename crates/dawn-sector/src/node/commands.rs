@@ -80,6 +80,9 @@ impl<S: EventStore> SimulationNode<S> {
     /// Steer `ship_id` toward `target`. Cancels any active warp/approach.
     /// No-op if the ship is unknown, in transit, or in committed warp.
     pub fn apply_move_command(&mut self, ship_id: ShipId, target: Position) {
+        if self.is_ship_docked(ship_id) {
+            return;
+        }
         let entity = match self.ships.index.get(&ship_id) {
             Some(&e) => e,
             None => return,
@@ -124,6 +127,9 @@ impl<S: EventStore> SimulationNode<S> {
     /// The movement system applies thrust opposite to velocity each tick until
     /// the ship stops. Cancels any active thrust direction.
     pub fn apply_stop_command(&mut self, ship_id: ShipId) {
+        if self.is_ship_docked(ship_id) {
+            return;
+        }
         let entity = match self.ships.index.get(&ship_id) {
             Some(&e) => e,
             None => return,
@@ -175,7 +181,7 @@ impl<S: EventStore> SimulationNode<S> {
                 self.apply_move_command_owned(player_id, mv.ship_id, mv.target_position);
             }
             ClientCommand::LockOn(lo) => {
-                if self.owns_ship(player_id, lo.ship_id) {
+                if self.owns_ship(player_id, lo.ship_id) && !self.is_ship_docked(lo.ship_id) {
                     lock_commands.push(lo);
                 }
             }
@@ -224,7 +230,32 @@ impl<S: EventStore> SimulationNode<S> {
                 self.unfit_module_owned(player_id, u);
                 return Some(ClientCommandFollowup::RefreshFitting(ship_id));
             }
-            ClientCommand::Jump(j) => return Some(ClientCommandFollowup::Jump(j)),
+            ClientCommand::Dock(d) => {
+                let ship_id = d.ship_id;
+                let _ = self.dock_owned(player_id, d);
+                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+            }
+            ClientCommand::Undock(u) => {
+                let ship_id = u.ship_id;
+                let _ = self.undock_owned(player_id, u);
+                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+            }
+            ClientCommand::BuildPackagedShip(b) => {
+                let ship_id = b.ship_id;
+                let _ = self.build_packaged_ship_owned(player_id, b);
+                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+            }
+            ClientCommand::DisassembleShip(d) => {
+                let ship_id = d.ship_id;
+                let _ = self.disassemble_ship_owned(player_id, d);
+                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+            }
+            ClientCommand::Jump(j) => {
+                if self.is_ship_docked(j.ship_id) {
+                    return None;
+                }
+                return Some(ClientCommandFollowup::Jump(j));
+            }
         }
         None
     }
@@ -327,6 +358,9 @@ impl<S: EventStore> SimulationNode<S> {
         if !self.owns_ship(player_id, cmd.ship_id) {
             return Err(ModuleActivationRejection::NotOwned);
         }
+        if self.is_ship_docked(cmd.ship_id) {
+            return Err(ModuleActivationRejection::ShipNotFound);
+        }
         self.activate_module(cmd)
     }
 
@@ -337,6 +371,9 @@ impl<S: EventStore> SimulationNode<S> {
     ) -> Result<(), ModuleActivationRejection> {
         if !self.owns_ship(player_id, cmd.ship_id) {
             return Err(ModuleActivationRejection::NotOwned);
+        }
+        if self.is_ship_docked(cmd.ship_id) {
+            return Err(ModuleActivationRejection::ShipNotFound);
         }
         self.deactivate_module(cmd)
     }
@@ -802,6 +839,78 @@ mod tests {
         assert!(
             matches!(result, Some(ClientCommandFollowup::Jump(j)) if j.gate_id == JumpGateId(0)),
             "Jump must be handed back as a followup"
+        );
+    }
+
+    #[test]
+    fn docked_target_loses_locks_and_cannot_be_damaged_by_active_weapons() {
+        use dawn_core::{
+            ActivateModuleCommand, DockCommand, LockOnCommand, ModuleId, SlotKind, StationId,
+        };
+
+        let mut node = node_with_modules();
+        let station = node
+            .station(StationId(0))
+            .expect("demo station exists")
+            .clone();
+
+        let attacker_id = node.next_player_id();
+        let attacker_ship_id = node.spawn_player_ship_at_pub(
+            attacker_id,
+            Position::new(
+                station.position.x + 200.0,
+                station.position.y,
+                station.position.z,
+            ),
+        );
+
+        let target_player_id = node.next_player_id();
+        let target_ship_id = node.spawn_player_ship_at_pub(target_player_id, station.position);
+
+        let lock_cmd = LockOnCommand {
+            ship_id: attacker_ship_id,
+            target_id: target_ship_id,
+        };
+        for _ in 0..5 {
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
+        }
+
+        assert!(
+            node.activate_module_owned(
+                attacker_id,
+                ActivateModuleCommand {
+                    ship_id: attacker_ship_id,
+                    module_id: ModuleId(1),
+                    slot: SlotKind::High,
+                    target_ship_id: Some(target_ship_id),
+                }
+            )
+            .is_ok(),
+            "attacker should have an active weapon on the target before docking"
+        );
+
+        assert!(node.dock_owned(
+            target_player_id,
+            DockCommand {
+                ship_id: target_ship_id,
+                station_id: StationId(0),
+            }
+        ));
+
+        let result = node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
+        assert!(
+            result
+                .events
+                .iter()
+                .any(|e| matches!(e, DomainEvent::LockLost(l) if l.locker_id == attacker_ship_id && l.target_id == target_ship_id)),
+            "docking should tear down the attacker's lock on the target"
+        );
+        assert!(
+            !result
+                .events
+                .iter()
+                .any(|e| matches!(e, DomainEvent::DamageTaken(d) if d.ship_id == target_ship_id)),
+            "docked targets must not take combat damage"
         );
     }
 

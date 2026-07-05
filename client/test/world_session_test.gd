@@ -27,6 +27,12 @@ func test_ingest_navigation_normalizes_server_vectors() -> void:
 			"activation_radius": 1000.0,
 			"to_system_name": "Beta",
 		}],
+		"stations": [{
+			"station_id": 5,
+			"name": "Forge Station",
+			"position": {"x": 11.0, "y": 21.0, "z": 31.0},
+			"docking_radius": 5000.0,
+		}],
 		"celestial_bodies": [{
 			"id": 9,
 			"kind": "Star",
@@ -40,6 +46,7 @@ func test_ingest_navigation_normalizes_server_vectors() -> void:
 	assert_str(_session.current_system_name).is_equal("Alpha")
 	assert_str(_session.system_names[2]).is_equal("Beta")
 	assert_vector((_session.gates[0] as Dictionary)["position"]).is_equal(Vector3(10.0, 20.0, 30.0))
+	assert_vector((_session.stations[0] as Dictionary)["position"]).is_equal(Vector3(11.0, 21.0, 31.0))
 	assert_vector((_session.bodies[0] as Dictionary)["position"]).is_equal(Vector3(1.0, 2.0, 3.0))
 
 

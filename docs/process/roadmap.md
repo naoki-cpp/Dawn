@@ -291,14 +291,26 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
 
 | # | タスク | 備考 | 状態 |
 |---|---|---|---|
-| 1 | Station（NPC提供の最小実装） | **先行タスク**。プレイヤー建造は9Cへ先送り。位置的な制約チェックのみで十分 | ⬜ |
-| 2 | Station 利用可否判定（`can_use` の NPC 最小版） | 「Station の中でしか建造/Assemble/Disassemble できない」前提を先に固定する | ⬜ |
-| 3 | Station インベントリ（最小保管先） | `PackagedShip` / `ScrapMetal` を置く `BTreeMap<ItemId, u64>` の最小版。まずは `PlayerId` 単位で十分 | ⬜ |
-| 4 | Assemble コマンド + バリデーション（Packaged Ship が未艤装であること） | 入力は Station インベントリ上の `PackagedShip`。艤装情報はPackaged Ship側に持たせず、Assemble後に既存のFit経路で艤装する | ⬜ |
-| 5 | Disassemble コマンド + バリデーション（Ship が無傷・未艤装であること） | 出力は Station インベントリ上の `PackagedShip`。無傷チェックは無料修理の抜け穴防止（Local Repair・ADR-0033 の価値を守る） | ⬜ |
-| 6 | Packaged Ship 建造コマンド（Scrap Metal 消費 → Packaged Ship 生成） | Scrap Metal を Station インベントリから消費し、生成物も Station インベントリへ置く。**Station 利用可否判定の上でのみ実行可能** | ⬜ |
-| 7 | 新規イベント（`PackagedShipBuilt`/`ShipAssembled`/`ShipDisassembled`） | event-catalog.md に追記。INV-006（Command は拒否可・Event は事実）に従う | ⬜ |
-| 8 | client: Packaged Ship のインベントリ表示・Station操作UI | ship inventory と station inventory の見分けがつくこと | ⬜ |
+| 1 | Station（NPC提供の最小実装） | `StationId` / `StationDef` と galaxy TOML の `npc_stations` を追加。各 sector に最小 NPC station を1つ配置 | ✅ |
+| 2 | Dock/Undock + Station 利用可否判定 | `DockCommand` / `UndockCommand` と docked 状態を追加。`can_use_station(player_id, station_id)` は「半径内」ではなく「その station に docked 済み」を見る。player-level の docked context を保持し、station access が active ship lookup に依存しないようにする | ✅ |
+| 3 | Station インベントリ（最小保管先） | `PlayerId -> BTreeMap<ItemId, u64>` の最小 station inventory を追加。snapshot restore 対応済み。**これは MVP の in-memory 実装であり、将来は hot-memory + durable storage の二層へ進める** | ✅ |
+| 4 | Station系イベントの土台 | `ShipDocked` / `ShipUndocked` / `PackagedShipBuilt` / `ShipDisassembled` は実装済み。残る `ShipAssembled` をこの列に揃える | ◐ |
+| 5 | Assemble コマンド + バリデーション（Packaged Ship が未艤装であること） | 入力は Station インベントリ上の `PackagedShip`。**docked 中のみ**実行可。艤装情報は Packaged Ship 側に持たせず、Assemble 後に既存の Fit 経路で艤装する。**着手前に `docs/architecture/assemble-ownership-memo.md` の ownership 前提を満たすこと** | ⬜ |
+| 6 | Disassemble コマンド + バリデーション（Ship が無傷・未艤装であること） | 出力は Station インベントリ上の `PackagedShip`。**docked 中のみ**実行可。無傷チェックは無料修理の抜け穴防止（Local Repair・ADR-0033 の価値を守る） | ✅ |
+| 7 | Packaged Ship 建造コマンド（Scrap Metal 消費 → Packaged Ship 生成） | Scrap Metal を Station インベントリから消費し、生成物も Station インベントリへ置く。**docked 中のみ**実行可能。現状コストは MVP として `1 Scrap Metal / 1 hull` の固定値 | ✅ |
+| 8 | client実装の開始条件を固定 | **基本方針: client UI は 5〜7 の server 側本体（Assemble / Disassemble / Build）が揃ってから実装する。** 先に UI だけ作って wire 先行にならないようにする | ⬜ |
+| 9 | client: Dock/Undock + Station操作UI | まず入港状態の表示と操作を作る。その上で ship inventory と station inventory の見分けがつくこと。**現状の client 側変更は `dawn-actor` の `DockCommand` / `UndockCommand` parser 追加までで、Godot UI は未着手** | ⬜ |
+| 10 | client: Packaged Ship のインベントリ表示・Assemble/Disassemble/建造UI | station UI の上に載せる。Ship側 inventory と Station側 inventory が混ざらないこと | ⬜ |
+
+#### 9B 補足: Station inventory の保存戦略
+
+- Market と違って、Station inventory は Sector command validation のホットパスにある。
+- そのため、即時の権威状態を毎回 SQL 直読みにする設計は採らない。
+- 方向性は **実行中はメモリ、耐久保存と容量対策は DB/スナップショット** の二層。
+- 将来の大量入港対策は、dock 中 / 最近使った player の inventory を lazy load /
+  write-back cache として扱える seam を切ることで進める。
+- 現状は raw `BTreeMap` 直参照を helper 経由へ寄せ始めた段階で、backend 差し替えの
+  足場だけ先に整えている。
 
 ### 9C. プレイヤー設置インフラ（Smart Assembly 相当・ADR-0034 の範囲外）
 

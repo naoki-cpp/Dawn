@@ -62,6 +62,7 @@ ADR (Architecture Decision Record) の一覧。番号は採番順（決定の時
 | ADR | タイトル | ステータス |
 |---|---|---|
 | [ADR-0034](ADR-0034-economy-foundations.md) | Economy Foundations — Item一般化 / Packaged Ship / Scrap Metal / Market・DBの境界 | Accepted |
+| [ADR-0037](ADR-0037-docked-ship-ownership.md) | Docked Ship Ownership — owned ship / active ship / docked station context を分離する | Accepted |
 
 ### UI / クライアント表示
 

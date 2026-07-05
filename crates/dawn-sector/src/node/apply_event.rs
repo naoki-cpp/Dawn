@@ -245,6 +245,55 @@ impl<S: EventStore> SimulationNode<S> {
                     self.current_tick = e.tick;
                 }
             }
+
+            DomainEvent::ShipDocked(e) => {
+                self.settle_ship_into_station(e.ship_id, e.station_id);
+                self.docked_ships.insert(e.ship_id, e.station_id);
+                if let Some(player_id) = self.ships.owners.get(&e.ship_id).copied() {
+                    self.docked_players.insert(player_id, e.station_id);
+                }
+                if e.tick > self.current_tick {
+                    self.current_tick = e.tick;
+                }
+            }
+
+            DomainEvent::ShipUndocked(e) => {
+                if let Some(player_id) = self.ships.owners.get(&e.ship_id).copied() {
+                    self.docked_players.remove(&player_id);
+                }
+                self.docked_ships.remove(&e.ship_id);
+                if e.tick > self.current_tick {
+                    self.current_tick = e.tick;
+                }
+            }
+
+            DomainEvent::PackagedShipBuilt(e) => {
+                let _ = self.try_debit_station_item(
+                    e.player_id,
+                    dawn_core::ItemId::ScrapMetal,
+                    e.scrap_cost,
+                );
+                self.credit_station_item(
+                    e.player_id,
+                    dawn_core::ItemId::PackagedShip(e.ship_type_id),
+                    1,
+                );
+                if e.tick > self.current_tick {
+                    self.current_tick = e.tick;
+                }
+            }
+
+            DomainEvent::ShipDisassembled(e) => {
+                self.credit_station_item(
+                    e.player_id,
+                    dawn_core::ItemId::PackagedShip(e.ship_type_id),
+                    1,
+                );
+                self.remove_ship(e.ship_id);
+                if e.tick > self.current_tick {
+                    self.current_tick = e.tick;
+                }
+            }
         }
     }
 
@@ -365,5 +414,85 @@ mod tests {
             "replaying ModuleDeactivated must reset cycle_remaining, matching every live \
              deactivation path (capacitor exhaustion, Range Gate, player-issued)"
         );
+    }
+
+    #[test]
+    fn packaged_ship_built_event_replay_updates_station_inventory() {
+        let mut node = mem_node();
+        let player_id = dawn_core::PlayerId(5);
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        node.replace_station_inventory(
+            player_id,
+            std::collections::BTreeMap::from([(dawn_core::ItemId::ScrapMetal, 3)]),
+        );
+
+        node.apply_event_pub(DomainEvent::PackagedShipBuilt(
+            dawn_core::events::PackagedShipBuilt {
+                ship_id,
+                player_id,
+                station_id: dawn_core::StationId(0),
+                ship_type_id: crate::ship_types::SHIP_TYPE_MAGPIE,
+                scrap_cost: 1,
+                tick: Tick(3),
+            },
+        ));
+
+        assert_eq!(
+            node.station_item_count(player_id, dawn_core::ItemId::ScrapMetal),
+            2
+        );
+        assert_eq!(
+            node.station_item_count(
+                player_id,
+                dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE)
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn docking_event_replay_restores_player_docked_context() {
+        let mut node = mem_node();
+        let player_id = dawn_core::PlayerId(5);
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        node.adopt_player_ship(ship_id, player_id);
+
+        node.apply_event_pub(DomainEvent::ShipDocked(dawn_core::events::ShipDocked {
+            ship_id,
+            station_id: dawn_core::StationId(0),
+            tick: Tick(3),
+        }));
+
+        assert_eq!(
+            node.player_docked_station(player_id),
+            Some(dawn_core::StationId(0))
+        );
+    }
+
+    #[test]
+    fn ship_disassembled_event_replay_credits_station_inventory_and_removes_ship() {
+        let mut node = mem_node();
+        let player_id = dawn_core::PlayerId(5);
+        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        node.adopt_player_ship(ship_id, player_id);
+
+        node.apply_event_pub(DomainEvent::ShipDisassembled(
+            dawn_core::events::ShipDisassembled {
+                ship_id,
+                player_id,
+                station_id: dawn_core::StationId(0),
+                ship_type_id: dawn_core::ShipTypeId(1),
+                tick: Tick(3),
+            },
+        ));
+
+        assert_eq!(
+            node.station_item_count(
+                player_id,
+                dawn_core::ItemId::PackagedShip(dawn_core::ShipTypeId(1))
+            ),
+            1
+        );
+        assert!(node.get_ship_position(ship_id).is_none());
     }
 }

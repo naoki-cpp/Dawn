@@ -12,9 +12,10 @@
 //! - [`parse_client_command`]: JSON line → ClientCommand (client → server).
 
 use dawn_core::{
-    ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand, ClientCommand,
-    DeactivateModuleCommand, DomainEvent, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId,
-    Position, ShipId, SlotKind, StopCommand,
+    ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand,
+    BuildPackagedShipCommand, ClientCommand, DeactivateModuleCommand, DisassembleShipCommand,
+    DockCommand, DomainEvent, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId, Position,
+    ShipId, SlotKind, StopCommand, UndockCommand,
 };
 use serde::Serialize;
 
@@ -254,6 +255,10 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
         // VelocityChanged stays consistent without seeing the rebase. Client
         // anchor handling (floating origin, fresh InitialState) lands in step 6.
         DomainEvent::AnchorRebased(_) => return None,
+        DomainEvent::ShipDocked(_) => return None,
+        DomainEvent::ShipUndocked(_) => return None,
+        DomainEvent::PackagedShipBuilt(_) => return None,
+        DomainEvent::ShipDisassembled(_) => return None,
     };
     serde_json::to_string(&j).ok()
 }
@@ -455,6 +460,38 @@ pub fn parse_client_command(line: &str) -> Option<ClientCommand> {
                 slot: parse_slot_kind(slot_str)?,
             }))
         }
+        "DockCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            let station_id_raw = v.get("station_id")?.as_u64()? as u32;
+            Some(ClientCommand::Dock(DockCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                station_id: dawn_core::StationId(station_id_raw),
+            }))
+        }
+        "UndockCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            Some(ClientCommand::Undock(UndockCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+            }))
+        }
+        "BuildPackagedShipCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            let station_id_raw = v.get("station_id")?.as_u64()? as u32;
+            let ship_type_id_raw = v.get("ship_type_id")?.as_u64()? as u32;
+            Some(ClientCommand::BuildPackagedShip(BuildPackagedShipCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                station_id: dawn_core::StationId(station_id_raw),
+                ship_type_id: dawn_core::ShipTypeId(ship_type_id_raw),
+            }))
+        }
+        "DisassembleShipCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            let station_id_raw = v.get("station_id")?.as_u64()? as u32;
+            Some(ClientCommand::DisassembleShip(DisassembleShipCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                station_id: dawn_core::StationId(station_id_raw),
+            }))
+        }
         _ => None,
     }
 }
@@ -525,6 +562,32 @@ mod tests {
                 );
             }
             other => panic!("expected Warp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dock_command_json_is_parsed_into_client_command_dock() {
+        let line = r#"{"type":"DockCommand","ship_id":42,"station_id":2}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::Dock(c) => {
+                assert_eq!(c.ship_id, ship_id(42));
+                assert_eq!(c.station_id, dawn_core::StationId(2));
+            }
+            other => panic!("expected Dock, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn disassemble_ship_command_json_is_parsed_into_client_command_disassemble_ship() {
+        let line = r#"{"type":"DisassembleShipCommand","ship_id":42,"station_id":2}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::DisassembleShip(c) => {
+                assert_eq!(c.ship_id, ship_id(42));
+                assert_eq!(c.station_id, dawn_core::StationId(2));
+            }
+            other => panic!("expected DisassembleShip, got {other:?}"),
         }
     }
 

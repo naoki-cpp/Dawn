@@ -119,7 +119,7 @@ func render(frame: Dictionary) -> void:
 ## was toggled, even when the toggle was rejected. Compare the active-module
 ## identity list first and skip straight to the cheap per-frame update path
 ## when nothing structural changed.
-func set_player_fitting(modules: Array, inventory: Array) -> void:
+func set_player_fitting(modules: Array, inventory: Array, station_inventory: Array = []) -> void:
 	if _active_module_signature(modules) != _active_module_signature(_prev_modules):
 		_module_slots = HudManager.rebuild_module_bar(_module_bar, modules)
 	## rebuild_module_bar() only builds each slot's F-number/name Controls --
@@ -127,7 +127,7 @@ func set_player_fitting(modules: Array, inventory: Array) -> void:
 	HudManager.update_module_bar(_module_slots, modules)
 	## Independent snapshot, not an alias -- see the comment in render().
 	_prev_modules = modules.duplicate(true)
-	HudManager.update_inventory_panel(_inventory_panel_refs, modules, inventory)
+	HudManager.update_inventory_panel(_inventory_panel_refs, modules, inventory, station_inventory)
 
 
 ## Identity of the modules rebuild_module_bar() would render as slots, in

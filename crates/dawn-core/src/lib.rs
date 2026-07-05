@@ -39,9 +39,10 @@ pub mod tick;
 
 // Re-export the most commonly used types at crate root for ergonomics.
 pub use commands::{
-    ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand, ClientCommand,
-    DeactivateModuleCommand, FitModuleCommand, JumpCommand, KeepAtRangeCommand, LockOnCommand,
-    MoveCommand, OrbitCommand, StopCommand, UnfitModuleCommand, WarpCommand,
+    ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand,
+    BuildPackagedShipCommand, ClientCommand, DeactivateModuleCommand, DisassembleShipCommand,
+    DockCommand, FitModuleCommand, JumpCommand, KeepAtRangeCommand, LockOnCommand, MoveCommand,
+    OrbitCommand, StopCommand, UndockCommand, UnfitModuleCommand, WarpCommand,
 };
 pub use entity::{EntityId, NodeId, ShipId};
 pub use error::DawnError;
@@ -53,7 +54,7 @@ pub use fitting::{
 pub use item::ItemId;
 pub use navigation::{
     AnchorId, CelestialBodyDef, CelestialBodyId, CelestialBodyKind, JumpGateDef, JumpGateId,
-    StarSystemDef, StarSystemId, WarpTarget,
+    StarSystemDef, StarSystemId, StationDef, StationId, WarpTarget,
 };
 pub use player::PlayerId;
 pub use position::{Position, Velocity};

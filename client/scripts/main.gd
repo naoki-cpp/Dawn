@@ -23,6 +23,7 @@ extends Node
 
 ## Unfitted owned modules from the latest normalized PlayerFitting.
 var _player_inventory : Array = []
+var _player_station_inventory : Array = []
 
 # -- Constants ----------------------------------------------------------------
 
@@ -54,6 +55,7 @@ const WARP_TUNNEL_FADE_RATE : float = 3.0
 ## Camera FOV pulls wide while in the tunnel for an extra sense of speed, then
 ## eases back. Purely cosmetic.
 const WARP_TUNNEL_FOV_BOOST : float = 15.0
+const BUILDABLE_SHIP_TYPE_ID : int = 7
 
 var _warp_tunnel_amount : float = 0.0
 var _camera_base_fov    : float = 60.0
@@ -129,6 +131,7 @@ const DOUBLE_CLICK_PX : float  = 10.0  ## Within this many screen pixels
 ##   _bodies: [{body_id:int, kind:String, name:String,
 ##             position:Vector3 (server coords), radius:float, spectral_type:float}]
 var _gates        : Array      = _session.gates
+var _stations     : Array      = _session.stations
 var _bodies       : Array      = _session.bodies
 ## Star System id -> name, used to resolve StarSystemChanged events.
 var _system_names : Dictionary = _session.system_names
@@ -137,6 +140,9 @@ var _system_names : Dictionary = _session.system_names
 ## hardcoded to "Alpha", which looked like live data while still CONNECTING).
 var _current_system_name : String = "Unknown"
 var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
+var _nearby_station_id   : int    = -1
+var _docked_station_id   : int    = -1
+var _docked_station_name : String = ""
 var _selected_body_id    : int    = -1  ## -1 = no body selected
 var _sky_mat             : ShaderMaterial = null  ## reference kept for sun_direction updates
 var _jump_notice         : String = ""
@@ -186,6 +192,7 @@ func _process(delta: float) -> void:
 	_update_body_markers()
 	_update_gate_markers()
 	_update_gate_proximity()
+	_update_station_proximity()
 	_update_sun_direction()
 	_update_warp_tunnel_effect(delta)
 	_advance_client_cap_ticks(delta)
@@ -233,7 +240,7 @@ const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
 ## that (a no-op at compressed scale). The marker stores its server position in
 ## the "body_pos" meta (NavigationMarkerRenderer).
 func _update_body_markers() -> void:
-	_update_position_markers(_bodies_root, "body_pos")
+	_update_position_markers(_bodies_root, "nav_pos")
 
 ## Same as _update_body_markers, for Jump Gate markers (requested after the
 ## true-AU reactivation: a gate can now sit AU-scale away from the player, so
@@ -243,7 +250,7 @@ func _update_body_markers() -> void:
 ## (NavigationMarkerRenderer); _pick_gate_at picks against the resulting
 ## (possibly clamped) global_position, so clicks land on what's on screen.
 func _update_gate_markers() -> void:
-	_update_position_markers(_gates_root, "gate_pos")
+	_update_position_markers(_gates_root, "nav_pos")
 
 ## Shared by `_update_body_markers` and `_update_gate_markers`, which were
 ## previously identical except for the root node and meta key: re-place every
@@ -335,6 +342,7 @@ func _spawn_body_markers() -> void:
 		return
 	_selected_body_id = -1
 	NavigationMarkerRenderer.spawn_body_markers(_bodies_root, _bodies, WORLD_SCALE, _server_to_godot_pos)
+	NavigationMarkerRenderer.spawn_station_markers(_bodies_root, _stations, WORLD_SCALE, _server_to_godot_pos)
 
 ## Star data positions (galaxy.toml) sit a few ship-travel-distances away
 ## (e.g. 0 to ~30,000 units), so as the ship moves across a system the angle
@@ -408,6 +416,19 @@ func _update_gate_proximity() -> void:
 			_nearby_gate_id = g.get("gate_id", -1) as int
 			return
 
+
+func _update_station_proximity() -> void:
+	_nearby_station_id = -1
+	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
+		return
+	var ship_pos: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
+	for station_entry: Variant in _stations:
+		var station: Dictionary = station_entry as Dictionary
+		var station_pos: Vector3 = station.get("position", Vector3.ZERO) as Vector3
+		if ship_pos.distance_to(station_pos) <= (station.get("docking_radius", 0.0) as float):
+			_nearby_station_id = station.get("station_id", -1) as int
+			return
+
 func _input(event: InputEvent) -> void:
 	## Keyboard shortcuts: InputDecoder decides what the keypress means
 	## (architecture-review-client.md C-1); this just performs the side
@@ -416,7 +437,8 @@ func _input(event: InputEvent) -> void:
 		var key: InputEventKey = event as InputEventKey
 		var action: Dictionary = InputDecoder.decode_key(
 			key.keycode, _player_ship_id,
-			_selected_gate_id, _selected_target_id, _selected_body_id, _nearby_gate_id)
+			_selected_gate_id, _selected_target_id, _selected_body_id, _nearby_gate_id,
+			_nearby_station_id, _docked_station_id)
 		match action.get("kind", "none") as String:
 			"toggle_module":
 				_toggle_module_by_index(action.module_index as int)
@@ -453,6 +475,17 @@ func _input(event: InputEvent) -> void:
 					(_tactical_overlay as Node3D).call("toggle_visible")
 			"toggle_inventory_panel":
 				_hud_surface.toggle_inventory_panel()
+			"dock":
+				_connection.send_dock_command(_player_ship_id, action.station_id as int)
+			"undock":
+				_connection.send_undock_command(_player_ship_id)
+			"build_packaged_ship":
+				_connection.send_build_packaged_ship_command(
+					_player_ship_id,
+					action.station_id as int,
+					BUILDABLE_SHIP_TYPE_ID)
+			"disassemble_ship":
+				_connection.send_disassemble_ship_command(_player_ship_id, action.station_id as int)
 		return
 
 	if event is InputEventMouseButton:
@@ -793,7 +826,10 @@ func _on_player_fitting(payload: Dictionary) -> void:
 	var fitting: Dictionary = PlayerFitting.normalize_payload(payload)
 	_player_modules = fitting["modules"] as Array
 	_player_inventory = fitting["inventory"] as Array
-	_hud_surface.set_player_fitting(_player_modules, _player_inventory)
+	_player_station_inventory = fitting.get("station_inventory", []) as Array
+	_docked_station_id = fitting.get("docked_station_id", -1) as int
+	_docked_station_name = fitting.get("docked_station_name", "") as String
+	_hud_surface.set_player_fitting(_player_modules, _player_inventory, _player_station_inventory)
 	_recalc_weapon_range()
 
 func _recalc_weapon_range() -> void:
@@ -1040,6 +1076,19 @@ func _update_hud() -> void:
 	if _jump_notice != "":
 		jump_line += "\n" + _jump_notice
 
+	var station_line: String = ""
+	if _docked_station_id >= 0:
+		var docked_name := _docked_station_name if not _docked_station_name.is_empty() else "Station #%d" % _docked_station_id
+		station_line = "\nDocked: %s\n[U] Undock  [B] Build Magpie  [Y] Disassemble ship" % docked_name
+	elif _nearby_station_id >= 0:
+		var nearby_name: String = "Station #%d" % _nearby_station_id
+		for entry: Variant in _stations:
+			var station: Dictionary = entry as Dictionary
+			if (station.get("station_id", -1) as int) == _nearby_station_id:
+				nearby_name = station.get("name", nearby_name) as String
+				break
+		station_line = "\n[D] Dock at %s" % nearby_name
+
 	## Approach / warp target selection (ADR-0015 / ADR-0022 / ADR-0025).
 	var keep_at_range_hint: String = "\n[O] Orbit  [K] Keep at %.0f km  ([/]  adjust)" % _keep_at_range_km
 
@@ -1084,8 +1133,8 @@ func _update_hud() -> void:
 		"target_hp": target_hp,
 		"modules": _player_modules,
 		"stats_text": (
-			"Ships: %d\nTick: %d%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
-			% [_ships.size(), _current_tick, approach_line, jump_line]
+			"Ships: %d\nTick: %d%s%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
+			% [_ships.size(), _current_tick, approach_line, station_line, jump_line]
 		),
 	})
 

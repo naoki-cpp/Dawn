@@ -17,7 +17,7 @@
 
 use crate::fitting::{FittingSnapshot, ModuleId, SlotKind};
 use crate::item::ItemId;
-use crate::navigation::{AnchorId, JumpGateId, StarSystemId};
+use crate::navigation::{AnchorId, JumpGateId, StarSystemId, StationId};
 use crate::ship_type::ShipTypeId;
 use crate::{Position, SectorId, ShipId, Tick, Velocity};
 use serde::{Deserialize, Serialize};
@@ -102,6 +102,18 @@ pub enum DomainEvent {
     /// must be recorded as its own fact — INV-MOVE is about velocity-driven
     /// motion, a frame rebase keeps the same absolute position).
     AnchorRebased(AnchorRebased),
+
+    /// A ship docked at an NPC station.
+    ShipDocked(ShipDocked),
+
+    /// A ship undocked from an NPC station.
+    ShipUndocked(ShipUndocked),
+
+    /// Scrap Metal was consumed in a docked station to build a packaged ship.
+    PackagedShipBuilt(PackagedShipBuilt),
+
+    /// A docked ship was converted into a packaged ship item.
+    ShipDisassembled(ShipDisassembled),
 }
 
 impl DomainEvent {
@@ -128,6 +140,10 @@ impl DomainEvent {
             Self::TackleApplied(e) => e.ship_id,
             Self::TackleReleased(e) => e.ship_id,
             Self::AnchorRebased(e) => e.ship_id,
+            Self::ShipDocked(e) => e.ship_id,
+            Self::ShipUndocked(e) => e.ship_id,
+            Self::PackagedShipBuilt(e) => e.ship_id,
+            Self::ShipDisassembled(e) => e.ship_id,
         }
     }
 
@@ -155,6 +171,10 @@ impl DomainEvent {
             Self::TackleApplied(e) => e.tick,
             Self::TackleReleased(e) => e.tick,
             Self::AnchorRebased(e) => e.tick,
+            Self::ShipDocked(e) => e.tick,
+            Self::ShipUndocked(e) => e.tick,
+            Self::PackagedShipBuilt(e) => e.tick,
+            Self::ShipDisassembled(e) => e.tick,
         }
     }
 }
@@ -200,6 +220,39 @@ pub struct AnchorRebased {
     pub anchor: AnchorId,
     /// New position offset, relative to `anchor` (metres).
     pub offset: Position,
+    pub tick: Tick,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShipDocked {
+    pub ship_id: ShipId,
+    pub station_id: StationId,
+    pub tick: Tick,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShipUndocked {
+    pub ship_id: ShipId,
+    pub station_id: StationId,
+    pub tick: Tick,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PackagedShipBuilt {
+    pub ship_id: ShipId,
+    pub player_id: crate::PlayerId,
+    pub station_id: StationId,
+    pub ship_type_id: ShipTypeId,
+    pub scrap_cost: u64,
+    pub tick: Tick,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShipDisassembled {
+    pub ship_id: ShipId,
+    pub player_id: crate::PlayerId,
+    pub station_id: StationId,
+    pub ship_type_id: ShipTypeId,
     pub tick: Tick,
 }
 

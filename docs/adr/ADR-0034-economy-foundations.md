@@ -77,10 +77,33 @@ Disassemble の生成物、Packaged Ship 建造の入力資源、建造の生成
 曖昧になるため。MVP では `PlayerId` 単位の Station inventory を持てば十分で、
 最初から汎用倉庫や複雑な権限モデルまでは要らない。
 
+さらに、Station 操作は単なる距離条件ではなく、**明示的な Dock/Undock 状態**を
+通して許可する。つまり「半径内にいるのでそのまま使える」ではなく、
+半径内で `DockCommand` が受理されて `docked_at = station_id` になっている間だけ
+Assemble/Disassemble/建造が可能、という形にする。
+
 実装順としては、**Station の最小実装と利用可否判定を先に置き、その内側で
 Station inventory を置き、その上で Assemble/Disassemble と Packaged Ship 建造を
 順に有効化する**。建造コスト（Scrap Metal 消費）は「どこでも押せるコマンド」
 ではなく、Station 利用条件と Station inventory の上に乗るべきだからである。
+
+Station inventory の**永続化境界**は Market と同じにはしない。Market は
+「遅くてよい別ドメイン」なので SQL をそのまま権威にできるが、Station 操作は
+`Dock` / `BuildPackagedShip` / `Disassemble` / 将来の `Assemble` のように
+Sector の command validation と同じホットパスに乗る。そのため、**Tick/command
+のたびに SQL を直接叩く権威モデルは採らない**。
+
+代わりに、Station inventory は将来的に **「実行中の権威状態はメモリ、
+耐久保存と容量対策は DB/スナップショット」** の二層構成へ進める。すなわち:
+
+- command validation と event 生成は Sector メモリ上の inventory を使う
+- durable state は snapshot / DB に保存する
+- 全プレイヤー分を常時常駐させるのではなく、dock 中または最近使った player /
+  station を lazy load / write-back cache として扱う余地を残す
+
+MVP の 9B では `PlayerId` 単位の in-memory `Station inventory` を採用してよい。
+ただしこれは**最終形ではなく、storage seam を切った上で後から DB-backed 実装へ
+差し替えられる前提の一時的な単純化**である。
 
 ### 3. Scrap Metal（資源シンク）
 
@@ -173,6 +196,11 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 - **プレイヤーが最初からStationを建造できるようにする**: 構造物のアクセス
   制御（Smart Assembly相当）はそれ自体が別の大きな決定空間（§9C）。NPC提供の
   最小Stationだけを先に用意し、資源シンクの動作確認を待たずに済ませる。
+- **Station inventory も Market と同様に SQL を即時の権威にする**: 大量入港時の
+  メモリ圧迫懸念は正当だが、Station 操作は Sector の command validation と同じ
+  ホットパスにあるため、毎回 DB 往復を伴う権威モデルは相性が悪い。永続化は
+  DB/スナップショットへ逃がしつつ、実行中の権威状態はメモリに置く二層構成を
+  採る。
 - **MarketをSector側イベントから構築する「read model」（投影）として設計する**:
   当初はこの形（Marketの状態は全てEvent Logから再構築可能な投影）を提案したが、
   「Marketは遅くていい」という前提のもとで不要な複雑さと判断し、Market自身の
@@ -189,18 +217,22 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 
 ## 実装チェックリスト
 
-- [ ] dawn-core: 新規イベント（`PackagedShipBuilt`/`ShipAssembled`/`ShipDisassembled` 等、event-catalog.md に追記）
+- [ ] dawn-core: Station 系イベント列を完成させる（`ShipDocked`/`ShipUndocked`/`PackagedShipBuilt`/`ShipDisassembled` は実装済み。残りの `ShipAssembled` を追加し、event-catalog.md に追記）
 - [x] dawn-core: `ItemId` enum（Module/PackagedShip/ScrapMetal。**Currencyは含まない**）
 - [x] dawn-ecs: `InventoryComp.items` を `Vec<ModuleId>` → `BTreeMap<ItemId, u64>` へ一般化（ADR-0032 のデータモデルを置き換え）
 - [x] dawn-sector: `ShipDestroyed` 発生時に Scrap Metal を撃破者へ加算する経路（MVP は `1 kill = 1 Scrap Metal` の固定値）
 - [x] dawn-sector: スナップショット/Transit/PlayerFitting JSON を `InventoryComp.items: BTreeMap<ItemId, u64>` に追従
 - [ ] 「受動採取ではない」ことの再点検項目化（現状は取得経路が `ShipDestroyed` のみなのでコード読解で十分。別経路追加時に自動検証/CI 昇格を検討）
-- [ ] dawn-sector: Station（NPC提供の最小実装）
-- [ ] dawn-sector: Station 利用可否判定（NPC 最小版 `can_use`）
-- [ ] dawn-sector: Station inventory（`PackagedShip` / `ScrapMetal` の最小保管先）
-- [ ] dawn-sector: Assemble/Disassemble コマンド・バリデーション（未艤装/無傷チェック、入出力は Station inventory）
-- [ ] dawn-sector: Packaged Ship 建造（Scrap Metal 消費。Station 利用条件と Station inventory の上でのみ実行可能）
+- [x] dawn-sector: Station（NPC提供の最小実装）
+- [x] dawn-sector: Dock/Undock + Station 利用可否判定（`can_use` は docked 状態を見る）
+- [x] dawn-sector: Station inventory（`PackagedShip` / `ScrapMetal` の最小保管先）
+- [ ] dawn-sector: Station inventory storage seam（将来の DB-backed / lazy-load / write-back cache 化を見据え、`BTreeMap` 直参照から1段抽象化する）
+- [ ] dawn-sector: Assemble コマンド・バリデーション（入力は Station inventory 上の `PackagedShip`、**docked 中のみ**、Assemble 後の艤装は既存 Fit 経路で行う）
+- [x] dawn-sector: Disassemble コマンド・バリデーション（無傷・未艤装チェック、出力は Station inventory 上の `PackagedShip`、**docked 中のみ**）
+- [x] dawn-sector: Packaged Ship 建造（Scrap Metal 消費、入出力とも Station inventory、**docked 中のみ**。MVP コストは `1 Scrap Metal / 1 hull` の固定値）
 - [ ] 新規クレート `dawn-market`: SQLite バックエンドの指値注文帳（bid/ask マッチング）・`PlayerId` 単位の Currency 台帳・`RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` 発行経路（Dependency DAG 上の位置は別途確認）
-- [ ] client: Packaged Ship のインベントリ表示・Station操作UI・Market閲覧UI（指値注文の発注・Currency残高表示）
+- [ ] client: Dock/Undock + Station操作UI（まず入港状態の表示と操作を作る。**現状の client 側変更は `dawn-actor` の `DockCommand` / `UndockCommand` parser 追加までで、Godot UI は未着手**）
+- [ ] client: Packaged Ship のインベントリ表示・Assemble/Disassemble/建造UI（Station UI の上に載せる）
+- [ ] client: Market閲覧UI（指値注文の発注・Currency残高表示）
 - [x] CONTEXT.md: `Item`/`Packaged Ship`/`Station`/`Scrap Metal`/`Currency` を追記済み（本セッション中）
 - [ ] `cargo test --workspace` / `fmt` / `clippy -D warnings` 全緑

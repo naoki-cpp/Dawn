@@ -11,6 +11,7 @@ var ships: Dictionary = {}
 var ship_hp: Dictionary = {}
 var opponent_ship_ids: Array = []
 var gates: Array = []
+var stations: Array = []
 var bodies: Array = []
 var system_names: Dictionary = {}
 
@@ -169,6 +170,16 @@ func ingest_navigation(state: Dictionary) -> void:
 			"position": vec3_from_dict(g, "position"),
 			"activation_radius": g.get("activation_radius", 0.0) as float,
 			"to_system_name": g.get("to_system_name", "") as String,
+		})
+
+	stations.clear()
+	for entry: Variant in (state.get("stations", []) as Array):
+		var station: Dictionary = entry as Dictionary
+		stations.append({
+			"station_id": station.get("station_id", -1) as int,
+			"name": station.get("name", "") as String,
+			"position": vec3_from_dict(station, "position"),
+			"docking_radius": station.get("docking_radius", 0.0) as float,
 		})
 
 	bodies.clear()
