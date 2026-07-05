@@ -51,6 +51,7 @@ func before_test() -> void:
 	## the @onready scene-path vars stay null -- fine, since none of the
 	## functions under test touch them.
 	_main = load(__source).new()
+	_main._interaction = load("res://scripts/world_interaction.gd").new()
 
 
 func after_test() -> void:
