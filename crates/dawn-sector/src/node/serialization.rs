@@ -4,7 +4,7 @@
 //! expects live here, keeping the core simulation logic in `mod.rs` separate
 //! from the presentation layer.
 
-use dawn_core::{CelestialBodyKind, ShipId};
+use dawn_core::{CelestialBodyKind, ItemId, ShipId};
 use dawn_ecs::components::{FittingComp, HullComp, InventoryComp, ShipStatsComp};
 use dawn_event_store::store::EventStore;
 
@@ -96,8 +96,9 @@ impl<S: EventStore> SimulationNode<S> {
             }
         }
 
-        // Unfitted owned modules (ADR-0032), resolved to display info via
-        // module_registry -- InventoryComp only stores bare ModuleIds.
+        // Unfitted owned items (ADR-0034). The client inventory panel can now
+        // show both fittable modules and passive item stacks such as Scrap
+        // Metal, so keep the wire rows generic enough for both.
         let inventory: Vec<serde_json::Value> = self
             .world
             .inner()
@@ -106,14 +107,34 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|inv| {
                 inv.items
                     .iter()
-                    .filter_map(|id| self.module_registry.get(id))
-                    .map(|def| {
-                        serde_json::json!({
-                            "module_id": def.id.0,
-                            "name"     : def.name,
-                            "kind"     : format!("{:?}", def.kind),
-                            "slot"     : format!("{:?}", def.slot),
-                        })
+                    .filter_map(|(item_id, count)| match item_id {
+                        ItemId::Module(module_id) => {
+                            self.module_registry.get(module_id).map(|def| {
+                                serde_json::json!({
+                                    "item_type": "Module",
+                                    "module_id": def.id.0,
+                                    "name"     : def.name,
+                                    "kind"     : format!("{:?}", def.kind),
+                                    "slot"     : format!("{:?}", def.slot),
+                                    "count"    : count,
+                                })
+                            })
+                        }
+                        ItemId::PackagedShip(ship_type_id) => {
+                            self.ship_type_registry.get(ship_type_id).map(|def| {
+                                serde_json::json!({
+                                    "item_type": "PackagedShip",
+                                    "ship_type_id": def.id.0,
+                                    "name"        : def.name,
+                                    "count"       : count,
+                                })
+                            })
+                        }
+                        ItemId::ScrapMetal => Some(serde_json::json!({
+                            "item_type": "ScrapMetal",
+                            "name"     : "Scrap Metal",
+                            "count"    : count,
+                        })),
                     })
                     .collect()
             })
@@ -528,5 +549,37 @@ mod tests {
             payload.player_fitting.is_some(),
             "every ship with a FittingComp gets a PlayerFitting payload"
         );
+    }
+
+    #[test]
+    fn player_fitting_json_includes_scrap_metal_inventory_rows() {
+        use dawn_core::ItemId;
+
+        let mut node = mem_node();
+        for def in crate::modules::all_modules() {
+            node.register_module(def);
+        }
+        for def in crate::ship_types::all_ship_types() {
+            node.register_ship_type(def);
+        }
+
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.world
+            .inner_mut()
+            .get::<&mut InventoryComp>(entity)
+            .unwrap()
+            .add_item(ItemId::ScrapMetal, 3);
+
+        let json = node.build_player_fitting_json(ship_id).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let inventory = payload["inventory"].as_array().unwrap();
+        let scrap = inventory
+            .iter()
+            .find(|row| row["item_type"] == "ScrapMetal")
+            .expect("scrap rows must be serialized to the client");
+        assert_eq!(scrap["name"], "Scrap Metal");
+        assert_eq!(scrap["count"].as_u64().unwrap(), 3);
     }
 }

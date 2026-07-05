@@ -2,7 +2,7 @@
 
 use super::{build_serve_node, AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET};
 use crate::ws_server;
-use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId};
+use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
 use dawn_sector::dilation;
 use dawn_sector::node::ClientCommandFollowup;
 use tokio::sync::mpsc;
@@ -174,6 +174,21 @@ pub(crate) async fn run_phase4_server(
         }
 
         let tick_result = node.tick_with_lock_commands(&lock_commands);
+
+        for sess in &sessions {
+            let should_refresh = tick_result.events.iter().any(|event| {
+                matches!(
+                    event,
+                    DomainEvent::ShipDestroyed(destroyed)
+                        if destroyed.killer_id == sess.ship_id
+                )
+            });
+            if should_refresh {
+                if let Some(json) = node.build_player_fitting_json(sess.ship_id) {
+                    sess.send_raw(&json);
+                }
+            }
+        }
 
         if duel_mode {
             if let Some(ref mut metrics) = duel_metrics {

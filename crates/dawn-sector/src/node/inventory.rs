@@ -30,11 +30,11 @@ impl<S: EventStore> SimulationNode<S> {
     /// startup, identically on every replay) to stay INV-002 compliant
     /// without a dedicated event.
     pub(super) fn seed_player_inventory(&mut self, entity: Entity) {
-        let items = self.module_registry.keys().copied().collect();
-        let _ = self
-            .world
-            .inner_mut()
-            .insert_one(entity, InventoryComp { items });
+        let mut inventory = InventoryComp::empty();
+        for module_id in self.module_registry.keys().copied() {
+            inventory.add(module_id);
+        }
+        let _ = self.world.inner_mut().insert_one(entity, inventory);
     }
 
     /// Move one instance of `cmd.module_id` from the owning player's
@@ -146,12 +146,11 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|mut inv| inv.add(cmd.module_id))
             .is_ok();
         if !added {
-            let _ = self.world.inner_mut().insert_one(
-                entity,
-                InventoryComp {
-                    items: vec![cmd.module_id],
-                },
-            );
+            let _ = self.world.inner_mut().insert_one(entity, {
+                let mut inv = InventoryComp::empty();
+                inv.add(cmd.module_id);
+                inv
+            });
         }
 
         self.apply_fitting_and_emit(cmd.ship_id, entity);
@@ -173,6 +172,10 @@ mod tests {
     use super::*;
     use crate::{modules, ship_types};
     use dawn_core::{NodeId, Position, SectorBounds, SectorId, SlotKind};
+
+    fn total_items(inv: &InventoryComp) -> u64 {
+        inv.items.values().copied().sum()
+    }
 
     fn node_with_modules() -> SimulationNode {
         let mut node = SimulationNode::new(
@@ -209,13 +212,8 @@ mod tests {
         let mut node = node_with_modules();
         let (player, ship_id) = spawn_owned_player(&mut node);
         let entity = *node.ships.index.get(&ship_id).unwrap();
-        let before_inv_len = node
-            .world
-            .inner()
-            .get::<&InventoryComp>(entity)
-            .unwrap()
-            .items
-            .len();
+        let before_inv_len =
+            total_items(&node.world.inner().get::<&InventoryComp>(entity).unwrap());
 
         assert!(node.fit_module_owned(
             player,
@@ -232,7 +230,7 @@ mod tests {
             .iter()
             .any(|s| s.def.id == modules::MODULE_RAILGUN_MEDIUM));
         let inv = node.world.inner().get::<&InventoryComp>(entity).unwrap();
-        assert_eq!(inv.items.len(), before_inv_len - 1);
+        assert_eq!(total_items(&inv), before_inv_len - 1);
     }
 
     #[test]
@@ -308,10 +306,9 @@ mod tests {
             .get::<&mut InventoryComp>(entity)
             .unwrap()
             .items
-            .extend(std::iter::repeat_n(
-                modules::MODULE_RAILGUN_MEDIUM,
-                remaining,
-            ));
+            .entry(dawn_core::ItemId::Module(modules::MODULE_RAILGUN_MEDIUM))
+            .and_modify(|count| *count += remaining as u64)
+            .or_insert(remaining as u64);
 
         for _ in 0..remaining {
             assert!(node.fit_module_owned(
@@ -344,9 +341,8 @@ mod tests {
             .world
             .inner()
             .get::<&InventoryComp>(entity)
-            .unwrap()
-            .items
-            .len();
+            .map(|inv| total_items(&inv))
+            .unwrap();
 
         assert!(node.unfit_module_owned(
             player,
@@ -363,7 +359,7 @@ mod tests {
             .iter()
             .any(|s| s.def.id == modules::MODULE_RAILGUN_SMALL));
         let inv = node.world.inner().get::<&InventoryComp>(entity).unwrap();
-        assert_eq!(inv.items.len(), before_inv_len + 1);
+        assert_eq!(total_items(&inv), before_inv_len + 1);
     }
 
     #[test]
@@ -406,9 +402,8 @@ mod tests {
             .world
             .inner()
             .get::<&InventoryComp>(entity)
-            .unwrap()
-            .items
-            .len();
+            .map(|inv| total_items(&inv))
+            .unwrap();
 
         assert!(node.fit_module_owned(
             player,
@@ -428,6 +423,6 @@ mod tests {
         ));
 
         let inv = node.world.inner().get::<&InventoryComp>(entity).unwrap();
-        assert_eq!(inv.items.len(), start_len);
+        assert_eq!(total_items(&inv), start_len);
     }
 }

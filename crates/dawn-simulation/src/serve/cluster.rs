@@ -2,7 +2,7 @@
 
 use super::{build_serve_node, runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS};
 use crate::{cluster, ws_server};
-use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
+use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
 use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
 use dawn_sector::transit;
 use std::collections::HashMap;
@@ -207,7 +207,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             }
         }
 
-        runtime::run_cluster_runtime_tick(
+        let tick_results = runtime::run_cluster_runtime_tick(
             runtime::ClusterRuntimeTickContext {
                 nodes: &mut nodes,
                 rafts: &rafts,
@@ -219,5 +219,21 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             },
             &lock_commands,
         );
+
+        for sess in &sessions {
+            let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
+            let should_refresh = tick_results[sector].events.iter().any(|event| {
+                matches!(
+                    event,
+                    DomainEvent::ShipDestroyed(destroyed)
+                        if destroyed.killer_id == sess.ship_id
+                )
+            });
+            if should_refresh {
+                if let Some(json) = nodes[sector].build_player_fitting_json(sess.ship_id) {
+                    sess.send_raw(&json);
+                }
+            }
+        }
     }
 }

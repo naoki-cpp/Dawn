@@ -87,7 +87,13 @@ impl<S: EventStore> SimulationNode<S> {
                     let _ = self.world.inner_mut().insert_one(
                         entity,
                         dawn_ecs::components::InventoryComp {
-                            items: e.inventory.clone(),
+                            items: e.inventory.iter().copied().fold(
+                                std::collections::BTreeMap::new(),
+                                |mut items, item_id| {
+                                    *items.entry(item_id).or_default() += 1;
+                                    items
+                                },
+                            ),
                         },
                     );
                 }

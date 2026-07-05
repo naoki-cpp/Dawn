@@ -29,6 +29,7 @@ pub mod entity;
 pub mod error;
 pub mod events;
 pub mod fitting;
+pub mod item;
 pub mod navigation;
 pub mod player;
 pub mod position;
@@ -49,6 +50,7 @@ pub use fitting::{
     ActivationMode, FittingSnapshot, ModuleDefinition, ModuleId, ModuleKind, SlotEntry, SlotKind,
     StatDelta,
 };
+pub use item::ItemId;
 pub use navigation::{
     AnchorId, CelestialBodyDef, CelestialBodyId, CelestialBodyKind, JumpGateDef, JumpGateId,
     StarSystemDef, StarSystemId, WarpTarget,

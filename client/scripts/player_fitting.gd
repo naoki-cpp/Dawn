@@ -35,10 +35,13 @@ static func normalize_payload(payload: Dictionary) -> Dictionary:
 	for entry: Variant in payload.get("inventory", []) as Array:
 		var src: Dictionary = entry as Dictionary
 		inventory.append({
+			"item_type": src.get("item_type", "Module") as String,
 			"module_id": src.get("module_id", 0) as int,
+			"ship_type_id": src.get("ship_type_id", 0) as int,
 			"name": src.get("name", "?") as String,
 			"kind": src.get("kind", "") as String,
 			"slot": src.get("slot", "") as String,
+			"count": src.get("count", 1) as int,
 		})
 
 	return {

@@ -547,7 +547,8 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 	}
 
 
-## One clickable row: "<Slot>: <Name>". Returns {panel, module_id, slot, action}.
+## One inventory row. `action` is "fit"/"unfit" for modules and "" for
+## passive item stacks (e.g. Scrap Metal) that are only informational today.
 static func _make_inventory_row(text: String, module_id: int, slot: String, action: String) -> Dictionary:
 	var row := Panel.new()
 	row.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
@@ -570,7 +571,8 @@ static func _make_inventory_row(text: String, module_id: int, slot: String, acti
 
 ## Rebuild both columns from the latest PlayerFitting payload. `modules` is
 ## the flat fitted-module array (slot/module_id/name fields, same shape the
-## module bar already consumes); `inventory` is [{module_id,name,slot,kind}].
+## module bar already consumes); `inventory` may contain both fittable module
+## rows and passive item stacks.
 static func update_inventory_panel(refs: Dictionary, modules: Array, inventory: Array) -> void:
 	var fitted_list: VBoxContainer = refs["fitted_list"]
 	var inventory_list: VBoxContainer = refs["inventory_list"]
@@ -593,10 +595,18 @@ static func update_inventory_panel(refs: Dictionary, modules: Array, inventory: 
 	var inventory_rows: Array = []
 	for entry: Variant in inventory:
 		var item: Dictionary = entry as Dictionary
+		var item_type: String = item.get("item_type", "Module") as String
 		var slot: String = item.get("slot", "") as String
 		var module_id: int = item.get("module_id", 0) as int
-		var text := "%s: %s" % [slot, item.get("name", "?") as String]
-		var row := _make_inventory_row(text, module_id, slot, "fit")
+		var count: int = item.get("count", 1) as int
+		var text: String
+		var action := ""
+		if item_type == "Module":
+			text = "%s: %s x%d" % [slot, item.get("name", "?") as String, count]
+			action = "fit"
+		else:
+			text = "%s x%d" % [item.get("name", "?") as String, count]
+		var row := _make_inventory_row(text, module_id, slot, action)
 		inventory_list.add_child(row["panel"])
 		inventory_rows.append(row)
 	refs["inventory_rows"] = inventory_rows

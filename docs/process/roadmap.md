@@ -270,6 +270,7 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
   （AFK 相当）は存在しない** — `ShipDestroyed` からの即時ドロップのみが取得経路（FBD-009 維持）。
 - Packaged Ship ⇄ Ship の Assemble/Disassemble が Station（NPC提供）で機能し、無料修理の
   抜け穴（損傷した船のDisassemble）を防ぐバリデーションが効いている。
+  Station は**Packaged Ship / Scrap Metal を置く最小インベントリ**も持つ。
 - Market（`dawn-market` クレート）が SQL を独自の権威として持ち、指値（bid/ask）マッチングで
   価格が決まる。Currency は Item ではなく `PlayerId` 単位の台帳（船を失っても消えない）。
 - プレイヤー設置インフラ（Smart Assembly 相当）のアクセス制御は、Tick パイプライン内で
@@ -280,22 +281,24 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
 
 | # | タスク | 備考 | 状態 |
 |---|---|---|---|
-| 1 | `dawn-core`: `ItemId` enum（`Module`/`PackagedShip`/`ScrapMetal`） | Currency は含まない（ADR-0034 §5） | ⬜ |
-| 2 | `dawn-ecs`: `InventoryComp.items` を `Vec<ModuleId>` → `BTreeMap<ItemId, u64>` へ一般化 | ADR-0032 のデータモデルを置き換え。既存の `fit_module_owned`/`unfit_module_owned` の呼び出し側修正を伴う | ⬜ |
-| 3 | `dawn-sector`: `ShipDestroyed` 発生時に Scrap Metal を撃破者へ即時加算 | 新規 Wreck エンティティは作らない（ADR-0034 却下代替案） | ⬜ |
-| 4 | スナップショット永続化（`ShipSnapshot.inventory` の型変更に追従） | ADR-0032 の `#[serde(default)]` 後方互換パターンを踏襲 | ⬜ |
-| 5 | 「受動採取ではない」ことを検証するテスト（AFK シナリオでの Scrap Metal 蓄積がゼロ） | FBD-009 の実装的裏付け | ⬜ |
+| 1 | `dawn-core`: `ItemId` enum（`Module`/`PackagedShip`/`ScrapMetal`） | Currency は含まない（ADR-0034 §5） | ✅ |
+| 2 | `dawn-ecs`: `InventoryComp.items` を `Vec<ModuleId>` → `BTreeMap<ItemId, u64>` へ一般化 | ADR-0032 のデータモデルを置き換え。既存の `fit_module_owned`/`unfit_module_owned` の呼び出し側修正を伴う | ✅ |
+| 3 | `dawn-sector`: `ShipDestroyed` 発生時に Scrap Metal を撃破者へ即時加算 | 新規 Wreck エンティティは作らない（ADR-0034 却下代替案）。**現状は MVP として 1 kill = 1 Scrap Metal の固定値** | ✅ |
+| 4 | スナップショット永続化（`ShipSnapshot.inventory` の型変更に追従） | ADR-0032 の `#[serde(default)]` 後方互換パターンを踏襲 | ✅ |
+| 5 | 「受動採取ではない」ことのチェック項目化 | **現状は不要**。取得経路が `ShipDestroyed` 以外にも増えたときに、AFK/受動導線が混入していないかを再点検する | ⏸️ |
 
-### 9B. Packaged Ship / Station / Assemble・Disassemble（ADR-0034 §2）
+### 9B. Station / Packaged Ship / Assemble・Disassemble（ADR-0034 §2）
 
 | # | タスク | 備考 | 状態 |
 |---|---|---|---|
-| 1 | Packaged Ship 建造コマンド（Scrap Metal 消費 → Packaged Ship 生成） | 一度きりの建造コスト（Assemble/Disassembleループ自体は無料） | ⬜ |
-| 2 | Station（NPC提供の最小実装） | プレイヤー建造は9Cへ先送り。位置的な制約チェックのみで十分 | ⬜ |
-| 3 | Assemble コマンド + バリデーション（Packaged Ship が未艤装であること） | 艤装情報はPackaged Ship側に持たせず、Assemble後に既存のFit経路で艤装する | ⬜ |
-| 4 | Disassemble コマンド + バリデーション（Ship が無傷・未艤装であること） | 無傷チェックは無料修理の抜け穴防止（Local Repair・ADR-0033 の価値を守る） | ⬜ |
-| 5 | 新規イベント（`PackagedShipBuilt`/`ShipAssembled`/`ShipDisassembled`） | event-catalog.md に追記。INV-006（Command は拒否可・Event は事実）に従う | ⬜ |
-| 6 | client: Packaged Ship のインベントリ表示・Station操作UI | | ⬜ |
+| 1 | Station（NPC提供の最小実装） | **先行タスク**。プレイヤー建造は9Cへ先送り。位置的な制約チェックのみで十分 | ⬜ |
+| 2 | Station 利用可否判定（`can_use` の NPC 最小版） | 「Station の中でしか建造/Assemble/Disassemble できない」前提を先に固定する | ⬜ |
+| 3 | Station インベントリ（最小保管先） | `PackagedShip` / `ScrapMetal` を置く `BTreeMap<ItemId, u64>` の最小版。まずは `PlayerId` 単位で十分 | ⬜ |
+| 4 | Assemble コマンド + バリデーション（Packaged Ship が未艤装であること） | 入力は Station インベントリ上の `PackagedShip`。艤装情報はPackaged Ship側に持たせず、Assemble後に既存のFit経路で艤装する | ⬜ |
+| 5 | Disassemble コマンド + バリデーション（Ship が無傷・未艤装であること） | 出力は Station インベントリ上の `PackagedShip`。無傷チェックは無料修理の抜け穴防止（Local Repair・ADR-0033 の価値を守る） | ⬜ |
+| 6 | Packaged Ship 建造コマンド（Scrap Metal 消費 → Packaged Ship 生成） | Scrap Metal を Station インベントリから消費し、生成物も Station インベントリへ置く。**Station 利用可否判定の上でのみ実行可能** | ⬜ |
+| 7 | 新規イベント（`PackagedShipBuilt`/`ShipAssembled`/`ShipDisassembled`） | event-catalog.md に追記。INV-006（Command は拒否可・Event は事実）に従う | ⬜ |
+| 8 | client: Packaged Ship のインベントリ表示・Station操作UI | ship inventory と station inventory の見分けがつくこと | ⬜ |
 
 ### 9C. プレイヤー設置インフラ（Smart Assembly 相当・ADR-0034 の範囲外）
 
@@ -321,7 +324,7 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
 | # | タスク | 備考 | 状態 |
 |---|---|---|---|
 | 1 | 資源希少性が実際に判断/対立を生んでいるかのプレイテスト（playtest-guide.md 拡張） | 「数値を積むだけ」になっていないかを人間の観察で判定 | ⬜ |
-| 2 | 受動蓄積ゼロの自動検証（9A-5 のテストを CI 相当で維持） | 回帰防止 | ⬜ |
+| 2 | 受動蓄積ゼロの回帰チェック | 9A-5 が「自動テストで守るべき性質」に育った段階で CI へ昇格する。現状はチェック項目として運用 | ⏸️ |
 
 ---
 
