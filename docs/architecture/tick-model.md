@@ -89,7 +89,7 @@ Step 2: Process the command queue
                                     Move/Stop only clear it during align, ignored while warping)
          Note: while a Ship is in Transit (TransitState::InTransit), Move/Stop/duplicate
            Transit/Jump/Approach/Orbit/KeepAtRange/Warp are all rejected (ADR-0014 /
-           AI_DEVELOPMENT_GUIDE.md §5). Approach/Orbit/KeepAtRange are mutually exclusive —
+           AI_DEVELOPMENT_GUIDE.md "Event Workflow"). Approach/Orbit/KeepAtRange are mutually exclusive —
            a later command clears the previous flight mode (ADR-0031).
 
 Step 2.5: Approach System (before Movement, ADR-0015)

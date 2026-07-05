@@ -141,7 +141,7 @@ main.gd 残置（理由は「採らない方針」）。
 | `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy state） | 6 |
 | **合計** | | **117**（`func test_` 実測） |
 
-テスト導入で見つかった不具合・定着した手順（詳細: `AI_DEVELOPMENT_GUIDE.md` §8）:
+テスト導入で見つかった不具合・定着した手順（詳細: `docs/process/godot-client-testing.md`）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる
 - `class_name` 新規追加直後はキャッシュ未更新で全件失敗する（上記コマンドで解消）
 - `add_child()` しない Control ノードは `auto_free()` で明示的に解放する（orphan node 検出）

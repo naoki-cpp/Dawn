@@ -1,6 +1,7 @@
 # Common Design Violation Patterns
 
-> Canonical source for AI_DEVELOPMENT_GUIDE.md §12. The guide keeps only a reference link (ADR-0030).
+> Canonical source for the design-violations reference in AI_DEVELOPMENT_GUIDE.md.
+> The guide keeps only a reference link (ADR-0030).
 
 Anti-patterns AI assistants tend to fall into, and how to fix them.
 

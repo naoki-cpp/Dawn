@@ -1,122 +1,127 @@
-# /doc-sync — ドキュメントと実装の乖離チェック＆修正
+# /doc-sync — Detect and fix drift between docs and implementation
 
-このスキルはコードベースの現状とドキュメントを照合し、
-不一致・陳腐化・誤記を洗い出して修正するまでを一括で行う。
+This skill cross-checks the documentation against the current codebase, finds
+mismatches / stale entries / typos, and fixes them in one pass.
 
-フェーズ完了時・大きなリファクタ後・セッション開始時の定期メンテナンスとして実行する。
-
----
-
-## 手順
-
-### Step 1: イベント定義の照合
-
-`dawn-core/src/events.rs` の `DomainEvent` enum を読み、
-`docs/architecture/event-catalog.md` のイベント一覧と照合する。
-
-確認項目:
-- コードにあってカタログにないイベント → カタログに追記
-- カタログにあってコードにないイベント → カタログから削除（または削除済みと明記）
-- フィールド定義の不一致（型・フィールド名）→ カタログを実装に合わせる
-- ステータス欄（✅ 実装済み / ⬜ 未実装 / @deprecated）が実態と異なる → 修正
-
-### Step 2: ADR 実装チェックリストの照合
-
-`docs/adr/` 以下の ADR のうち `## 実装チェックリスト` セクションを持つものだけを対象にする。
-Grep で `実装チェックリスト` を含むファイルを特定してから読むこと（全 ADR を一括読みしない）。
-
-確認項目:
-- `[ ]` のままになっているが実際は実装済みの項目 → `[x]` に更新
-- 説明文がコードの現状と食い違っている箇所 → 修正
-- 存在しない型・フィールド・メソッドを参照している箇所 → 修正
-
-### Step 3: Tick 処理順序の照合
-
-`crates/dawn-sector/src/node/tick.rs` の `tick_with_lock_commands()` メソッドの処理順を読み、
-`docs/architecture/tick-model.md` §3「Tick 内の処理ステップ」と照合する。
-
-確認項目:
-- ステップの順序・数・内容が実装と一致しているか
-- 各ステップで発行されるイベントの種類が正しいか
-- `AI_DEVELOPMENT_GUIDE.md` §6 の「Tick 内の処理順序」も同様に照合する
-
-### Step 4: ロードマップの照合
-
-`docs/process/roadmap.md` を読み、完了フラグ（`[x]` / `✅`）が実態と合っているか確認する
-（2026-06-23、完了済み Phase 0〜7 の詳細記録は `docs/process/roadmap-history.md` へ分離済み。
-roadmap.md 本体には §2 の要約と進行中フェーズ（現在は §10 Phase 8）のみ残る）。
-
-確認項目:
-- 実装済みなのに `[ ]` のままのタスク → `[x]` に更新
-- 完了フェーズの説明文が現在の実装内容と一致しているか
-- 次フェーズの前提条件に未完了のものがないか
-- 新たにフェーズが完了したら、§2「完了済みフェーズ」要約に1行追記し、詳細記録は
-  roadmap.md ではなく `docs/process/roadmap-history.md` に追加する
-
-### Step 5: AI_DEVELOPMENT_GUIDE.md の照合
-
-`AI_DEVELOPMENT_GUIDE.md` を読み（`CLAUDE.md` はこのファイルへの委譲のみで §番号を持たない）、
-以下の箇所が実態と合っているか確認する。
-
-確認項目:
-- §1「現在のスコープ」に列挙されているコンポーネント・イベント・コマンドが実装済みか
-- §6「Tick 内の処理順序」が `tick.rs` と一致しているか（Step 3 と重複確認）
-- §11「Crate別責務早見表」に全クレートが載っているか、禁止依存が変わっていないか
-- フッターの「最終更新日」「対応ADR範囲」が古くなっていないか
-- ADR-0030 で正典を外部化したセクションの**ポインタとリンクが生きているか**:
-  §7 → `docs/architecture/event-schema-evolution.md` / §9 → `/ai-change-checklist` スキル /
-  §10 → `docs/architecture/forbidden-changes.md`（FBD-00x ID 一覧がガイドと一致）/
-  §12 → `docs/architecture/design-violations.md` / §8 GdUnit4 詳細 → `docs/process/godot-client-testing.md`。
-  これらの参照先ファイルが存在し、ガイド側の要約・ID 一覧と矛盾しないことを確認する。
-- ガイド冒頭が単一の H1 見出しであること、コードフェンスの外に裸の `#` 行（Markdown 見出し
-  と誤認される）が残っていないことを確認する（2026-06-23 に発見・修正した不具合）。
-
-### Step 6: プレイヤー向けドキュメントの照合
-
-`docs/process/playtest-guide.md` を読み、現在のキー操作・機能と一致しているか確認する。
-
-確認項目:
-- キーバインドが `client/scripts/main.gd` の実装と一致しているか
-- 存在しない機能が記載されていないか・実装済みの機能が未記載でないか
-
-### Step 7: 設計ドキュメント群の照合
-
-`docs/architecture/architecture.md` / `docs/architecture/entity-model.md` / `docs/architecture/ownership.md` /
-`docs/design/game-design.md` を読み、実装状況の記述が実態と合っているか確認する。
-
-確認項目:
-- architecture.md: クレート一覧・依存 DAG に全クレートが載っているか
-  （`ls crates/` と照合）。通信方式の記述が ADR-0007 と矛盾していないか
-- architecture-review-server.md / architecture-review-client.md: ファイルサイズ一覧の行数が実際のファイルと一致しているか
-  （`wc -l` で主要ファイルを照合。リファクタ後に stale になりやすい）
-- entity-model.md: ECS Component 一覧が `dawn-ecs/src/components/` と一致しているか。
-  「将来」「未実装」と書かれた項目が実装済みになっていないか
-- ownership.md: 冒頭の実装状況テーブルとフェーズ表記が現在のフェーズと合っているか。
-  状態遷移図に `（未実装）` ラベルが残っているイベント・操作が実際には実装済みでないか確認する
-- game-design.md: §4 は「4.1 実装済み」と「4.2 将来検討する機能（未実装）」に分離済み
-  （2026-06-23、混在が分かりにくいとの指摘で分割）。4.2 に実装済みの機能が紛れ込んでいないか、
-  4.1 に対応 ADR が明記されているかを確認し、実装が進んだ項目は 4.2 から 4.1 へ移すこと
+Run it at phase completion, after large refactors, or as periodic session-start
+maintenance.
 
 ---
 
-## 報告フォーマット
+## Steps
 
-各 Step の後に以下の形式で報告する:
+### Step 1: Event definitions
+
+Read the `DomainEvent` enum in `crates/dawn-core/src/events.rs` and compare it
+with the event list in `docs/architecture/event-catalog.md`. Do the same for
+commands in `crates/dawn-core/src/commands.rs`.
+
+Check:
+- Event in code but missing from the catalog → add it to the catalog
+- Event in the catalog but not in code → remove it (or mark it deleted)
+- Field mismatches (type / field name) → fix the catalog to match the code
+- Status column (implemented / not implemented / @deprecated) wrong → fix
+
+### Step 2: ADR implementation checklists
+
+Only ADRs that contain an implementation checklist section are in scope.
+Grep `docs/adr/` for `実装チェックリスト` (the section heading used in the
+Japanese ADR bodies) first — do not bulk-read every ADR.
+
+Check:
+- Items still `[ ]` that are actually implemented → flip to `[x]`
+- Prose that contradicts the current code → fix
+- References to types / fields / methods that no longer exist → fix
+
+### Step 3: Tick processing order
+
+Read the step order in `tick_with_lock_commands()` in
+`crates/dawn-sector/src/node/tick.rs` and compare it with
+`docs/architecture/tick-model.md` ("Tick processing steps" section).
+
+Check:
+- Step order, count, and content match the implementation
+- The events emitted at each step are listed correctly
+
+### Step 4: Roadmap
+
+Read `docs/process/roadmap.md` and verify completion flags (`[x]` / done
+markers) against reality. Completed-phase details live in
+`docs/process/roadmap-history.md`; roadmap.md keeps only the completed-phase
+summary plus the in-progress phase.
+
+Check:
+- Tasks implemented but still `[ ]` → flip to `[x]`
+- Completed-phase summaries match what was actually built
+- No unmet prerequisites listed for the next phase
+- When a phase completes: add one summary line to roadmap.md and move the
+  detailed record to roadmap-history.md (not into roadmap.md)
+
+### Step 5: AI_DEVELOPMENT_GUIDE.md
+
+Read `AI_DEVELOPMENT_GUIDE.md` (CLAUDE.md only delegates to it) and verify:
+
+- "Crate Boundaries" lists every crate in `crates/` (compare with `ls crates/`)
+  and the one-way dependency rules still hold
+- "Common Commands" all still work as written (spot-check anything suspicious)
+- "Architecture Invariants" and the FBD-001..009 list match
+  `docs/architecture/forbidden-changes.md`
+- Every link in "Documentation Map" and "Reference docs" resolves to an
+  existing file
+- The footer "Last updated / Covers ADR-XXXX through ADR-YYYY" matches the
+  highest ADR number in `docs/adr/`
+- The guide starts with a single H1 and no bare `#` lines outside code fences
+
+### Step 6: Player-facing docs
+
+Read `docs/process/playtest-guide.md` and verify it matches current controls
+and features.
+
+Check:
+- Keybindings match the implementation in `client/scripts/main.gd`
+- No documented-but-removed features; no implemented-but-undocumented ones
+
+### Step 7: Design docs
+
+Read `docs/architecture/architecture.md`, `docs/architecture/entity-model.md`,
+`docs/architecture/ownership.md`, and `docs/design/game-design.md`, and verify
+implementation-status statements.
+
+Check:
+- architecture.md: crate list and dependency DAG cover every crate
+  (compare with `ls crates/`); transport description does not contradict
+  ADR-0007
+- architecture-review-server.md / architecture-review-client.md: line counts
+  in the file-size tables match reality (`wc -l` on the biggest files — these
+  go stale fastest; full refresh belongs to /architecture-review)
+- entity-model.md: ECS component list matches `crates/dawn-ecs/src/components/`;
+  nothing marked "future / unimplemented" is actually implemented
+- ownership.md: the status table and phase labels match the current phase;
+  no state-transition entries still marked unimplemented that now exist
+- game-design.md: §4.1 (implemented, with ADR references) vs §4.2 (future,
+  unimplemented) are correctly separated; promote items from 4.2 to 4.1 as
+  they land
+
+---
+
+## Report format
+
+After each step report either:
 
 ```
-### Step N: <対象>
-✅ 問題なし
+### Step N: <target>
+OK — no drift
 ```
 
-または
+or
 
 ```
-### Step N: <対象>
-⚠️ 不一致 N 件
-  - <ファイル>: <内容>
+### Step N: <target>
+Drift — N issue(s)
+  - <file>: <what>
   - ...
-→ 修正済み
+-> fixed
 ```
 
-全 Step 完了後、変更があればまとめてコミットする。
-コミットメッセージ: `docs: sync documentation with current implementation`
+After all steps, commit any changes together:
+`docs: sync documentation with current implementation`

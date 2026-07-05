@@ -1,7 +1,8 @@
 # Event Schema Evolution Rules
 
-> Canonical detail for AI_DEVELOPMENT_GUIDE.md §7 (ADR-0030). The guide itself keeps only
-> a note that we are currently pre-release (breaking changes allowed) and a link here.
+> Canonical detail behind the AI_DEVELOPMENT_GUIDE.md event-schema reference (ADR-0030).
+> The guide itself keeps only a note that we are currently pre-release
+> (breaking changes allowed) and a link here.
 
 ## Scope by phase
 
