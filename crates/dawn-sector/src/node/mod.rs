@@ -28,6 +28,7 @@ mod serialization;
 mod ship_registry;
 mod snapshot_io;
 mod spawner_logic;
+mod station;
 mod tackle;
 mod tick;
 mod transit_flow;
@@ -39,13 +40,13 @@ pub use jump::JumpOutcome;
 use sector_map::SectorMap;
 use ship_registry::ShipRegistry;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use dawn_core::{
     ship_type::{ShipTypeDefinition, ShipTypeId},
-    DomainEvent, JumpGateDef, JumpGateId, ModuleDefinition, ModuleId, NodeId, Position,
-    SectorBounds, SectorId, ShipId, Tick,
+    DomainEvent, ItemId, JumpGateDef, JumpGateId, ModuleDefinition, ModuleId, NodeId, PlayerId,
+    Position, SectorBounds, SectorId, ShipId, StationDef, StationId, Tick,
 };
 use dawn_ecs::{
     components::{PositionComp, ShipStatsComp},
@@ -177,6 +178,16 @@ where
     /// Per-Sector population backstop (ADR-0018). Defaults to [`POPULATION_CAP`];
     /// tunable via [`Self::set_population_cap`].
     population_cap: usize,
+    /// Minimal station storage keyed by player for this Sector's NPC stations
+    /// (ADR-0034 9B foundation). The first slice is intentionally simple:
+    /// `PlayerId`-scoped storage without structure ownership or permission graphs.
+    station_inventories: BTreeMap<PlayerId, BTreeMap<ItemId, u64>>,
+    /// Current docked station per ship. Docking is authoritative state, so
+    /// station operations must consult this rather than raw spatial proximity.
+    docked_ships: BTreeMap<ShipId, StationId>,
+    /// Current docked station context per player. This is separate from the
+    /// active ship map so station access can survive ship-specific actions.
+    docked_players: BTreeMap<PlayerId, StationId>,
     /// Auto-jump triggers accumulated during `process_warp()` for ships that
     /// completed a warp with `WarpComp::auto_jump = true`. Drained by the
     /// caller after each tick so the jump can be proposed to the Raft Log
@@ -252,11 +263,19 @@ impl<S: EventStore> SimulationNode<S> {
                         .into_iter()
                         .map(|b| (b.id, b))
                         .collect(),
+                    stations: sm
+                        .stations_in_sector(sector_id)
+                        .into_iter()
+                        .map(|s| (s.id, s))
+                        .collect(),
                     galaxy: sm,
                 }
             },
             anchor_table: crate::anchor::AnchorTable::from_galaxy(&crate::galaxy::Galaxy::demo()),
             population_cap: POPULATION_CAP,
+            station_inventories: BTreeMap::new(),
+            docked_ships: BTreeMap::new(),
+            docked_players: BTreeMap::new(),
             pending_auto_jumps: Vec::new(),
             completed_warps: Vec::new(),
         }
@@ -303,14 +322,24 @@ impl<S: EventStore> SimulationNode<S> {
                         .into_iter()
                         .map(|b| (b.id, b))
                         .collect(),
+                    stations: sm
+                        .stations_in_sector(snapshot.sector_id)
+                        .into_iter()
+                        .map(|s| (s.id, s))
+                        .collect(),
                     galaxy: sm,
                 }
             },
             anchor_table: crate::anchor::AnchorTable::from_galaxy(&crate::galaxy::Galaxy::demo()),
             population_cap: POPULATION_CAP,
+            station_inventories: BTreeMap::new(),
+            docked_ships: snapshot.docked_ships.clone(),
+            docked_players: snapshot.docked_players.clone(),
             pending_auto_jumps: Vec::new(),
             completed_warps: Vec::new(),
         };
+
+        node.replace_station_inventory_storage(snapshot.station_inventories.clone());
 
         for def in modules {
             node.register_module(def.clone());
@@ -375,6 +404,11 @@ impl<S: EventStore> SimulationNode<S> {
             .into_iter()
             .map(|b| (b.id, b))
             .collect();
+        self.sector_map.stations = map
+            .stations_in_sector(sid)
+            .into_iter()
+            .map(|s| (s.id, s))
+            .collect();
         self.anchor_table = crate::anchor::AnchorTable::from_galaxy(&map);
         self.sector_map.galaxy = map;
     }
@@ -398,6 +432,11 @@ impl<S: EventStore> SimulationNode<S> {
     /// Look up a Jump Gate originating in this Sector by `gate_id`.
     pub fn jump_gate(&self, gate_id: JumpGateId) -> Option<&JumpGateDef> {
         self.sector_map.gates.get(&gate_id)
+    }
+
+    /// Look up an NPC station in this Sector by `station_id`.
+    pub fn station(&self, station_id: StationId) -> Option<&StationDef> {
+        self.sector_map.stations.get(&station_id)
     }
 
     // -- Observation ---------------------------------------------------------
@@ -576,6 +615,7 @@ impl<S: EventStore> SimulationNode<S> {
     pub(super) fn remove_ship(&mut self, ship_id: ShipId) {
         self.ships.remove(ship_id, &mut self.world);
         self.base_stats.remove(&ship_id);
+        self.docked_ships.remove(&ship_id);
     }
 
     /// Recomputes `ShipStatsComp` from `ship_id`'s current `FittingComp`

@@ -23,6 +23,7 @@ extends Node
 
 ## Unfitted owned modules from the latest normalized PlayerFitting.
 var _player_inventory : Array = []
+var _player_station_inventory : Array = []
 
 # -- Constants ----------------------------------------------------------------
 
@@ -30,6 +31,7 @@ const SHIP_SCENE  := preload("res://scenes/ship.tscn")
 const PlayerFitting = preload("res://scripts/player_fitting.gd")
 const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
 const WorldSessionScript = preload("res://scripts/world_session.gd")
+const WorldInteractionScript = preload("res://scripts/world_interaction.gd")
 const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor
 const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is rejected for gates closer than this (ADR-0022).
 ## Unit-to-metre scale: real metres = (units/tick or units) * METERS_PER_UNIT,
@@ -54,6 +56,7 @@ const WARP_TUNNEL_FADE_RATE : float = 3.0
 ## Camera FOV pulls wide while in the tunnel for an extra sense of speed, then
 ## eases back. Purely cosmetic.
 const WARP_TUNNEL_FOV_BOOST : float = 15.0
+const BUILDABLE_SHIP_TYPE_ID : int = 7
 
 var _warp_tunnel_amount : float = 0.0
 var _camera_base_fov    : float = 60.0
@@ -66,6 +69,7 @@ var _player_material : StandardMaterial3D = null
 # -- Internal state -----------------------------------------------------------
 
 var _session := WorldSessionScript.new()
+var _interaction := WorldInteractionScript.new()
 var _hud_surface := HudSurfaceScript.new()
 var _ships                 : Dictionary = _session.ships
 var _player_ship_id        : int        = -1
@@ -80,11 +84,6 @@ var _player_max_shield : float = 500.0
 var _player_max_armor  : float = 300.0
 var _player_max_hull   : float = 200.0
 var _player_lock_target : int  = -1
-## Approach target selected by left-clicking a ship (ADR-0015). -1 = none.
-var _selected_target_id : int  = -1
-## Approach target selected by left-clicking a Jump Gate (ADR-0015). -1 = none.
-## Mutually exclusive with _selected_target_id.
-var _selected_gate_id   : int  = -1
 
 ## Stand-off distance (km) the next K-key press will send as KeepAtRangeCommand's
 ## range. Player-adjustable via [ / ] (ADR-0031) -- the right distance depends
@@ -115,12 +114,6 @@ var _tactical_overlay : Node3D = null  ## TacticalOverlay node, parented to play
 var _weapon_range     : float  = 0.0   ## optimal range (u), recalculated on fitting change
 var _weapon_falloff   : float  = 0.0   ## falloff range (u)
 
-## Double-click detection
-var _last_click_time  : float  = -1.0
-var _last_click_pos   : Vector2 = Vector2.ZERO
-const DOUBLE_CLICK_SEC: float  = 0.4   ## Two clicks within this many seconds count as a double-click
-const DOUBLE_CLICK_PX : float  = 10.0  ## Within this many screen pixels
-
 ## Navigation map for the *current* Sector, received from the server in the
 ## InitialState message (ADR-0009/0025). No longer hard-coded: the server owns
 ## the galaxy (data/galaxy.toml) and is the single source of truth.
@@ -129,6 +122,7 @@ const DOUBLE_CLICK_PX : float  = 10.0  ## Within this many screen pixels
 ##   _bodies: [{body_id:int, kind:String, name:String,
 ##             position:Vector3 (server coords), radius:float, spectral_type:float}]
 var _gates        : Array      = _session.gates
+var _stations     : Array      = _session.stations
 var _bodies       : Array      = _session.bodies
 ## Star System id -> name, used to resolve StarSystemChanged events.
 var _system_names : Dictionary = _session.system_names
@@ -137,7 +131,7 @@ var _system_names : Dictionary = _session.system_names
 ## hardcoded to "Alpha", which looked like live data while still CONNECTING).
 var _current_system_name : String = "Unknown"
 var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
-var _selected_body_id    : int    = -1  ## -1 = no body selected
+var _nearby_station_id   : int    = -1
 var _sky_mat             : ShaderMaterial = null  ## reference kept for sun_direction updates
 var _jump_notice         : String = ""
 var _jump_notice_timer   : float  = 0.0
@@ -186,6 +180,7 @@ func _process(delta: float) -> void:
 	_update_body_markers()
 	_update_gate_markers()
 	_update_gate_proximity()
+	_update_station_proximity()
 	_update_sun_direction()
 	_update_warp_tunnel_effect(delta)
 	_advance_client_cap_ticks(delta)
@@ -233,7 +228,7 @@ const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
 ## that (a no-op at compressed scale). The marker stores its server position in
 ## the "body_pos" meta (NavigationMarkerRenderer).
 func _update_body_markers() -> void:
-	_update_position_markers(_bodies_root, "body_pos")
+	_update_position_markers(_bodies_root, "nav_pos")
 
 ## Same as _update_body_markers, for Jump Gate markers (requested after the
 ## true-AU reactivation: a gate can now sit AU-scale away from the player, so
@@ -243,7 +238,7 @@ func _update_body_markers() -> void:
 ## (NavigationMarkerRenderer); _pick_gate_at picks against the resulting
 ## (possibly clamped) global_position, so clicks land on what's on screen.
 func _update_gate_markers() -> void:
-	_update_position_markers(_gates_root, "gate_pos")
+	_update_position_markers(_gates_root, "nav_pos")
 
 ## Shared by `_update_body_markers` and `_update_gate_markers`, which were
 ## previously identical except for the root node and meta key: re-place every
@@ -321,7 +316,7 @@ func _apply_origin_rebase(new_origin: Vector3, keep_player_fixed: bool) -> void:
 
 ## Gate/body marker spawning lives in navigation_marker_renderer.gd
 ## (NavigationMarkerRenderer, architecture-review-client.md C-1) -- main.gd
-## only owns the live data and non-rendering state (_selected_body_id reset).
+## only owns the live data and refresh orchestration.
 
 ## Spawns a visual marker for every Jump Gate in the player's current Star
 ## System (ADR-0009). Re-run on Star System change to swap markers.
@@ -333,8 +328,9 @@ func _spawn_gate_markers() -> void:
 func _spawn_body_markers() -> void:
 	if _bodies_root == null:
 		return
-	_selected_body_id = -1
+	_interaction.clear_navigation_selection()
 	NavigationMarkerRenderer.spawn_body_markers(_bodies_root, _bodies, WORLD_SCALE, _server_to_godot_pos)
+	NavigationMarkerRenderer.spawn_station_markers(_bodies_root, _stations, WORLD_SCALE, _server_to_godot_pos)
 
 ## Star data positions (galaxy.toml) sit a few ship-travel-distances away
 ## (e.g. 0 to ~30,000 units), so as the ship moves across a system the angle
@@ -408,15 +404,32 @@ func _update_gate_proximity() -> void:
 			_nearby_gate_id = g.get("gate_id", -1) as int
 			return
 
+
+func _update_station_proximity() -> void:
+	_nearby_station_id = -1
+	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
+		return
+	var ship_pos: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
+	for station_entry: Variant in _stations:
+		var station: Dictionary = station_entry as Dictionary
+		var station_pos: Vector3 = station.get("position", Vector3.ZERO) as Vector3
+		if ship_pos.distance_to(station_pos) <= (station.get("docking_radius", 0.0) as float):
+			_nearby_station_id = station.get("station_id", -1) as int
+			return
+
 func _input(event: InputEvent) -> void:
 	## Keyboard shortcuts: InputDecoder decides what the keypress means
 	## (architecture-review-client.md C-1); this just performs the side
 	## effects (network sends, warp-snap-pos / overlay state writes).
 	if event is InputEventKey and event.pressed and not event.echo:
 		var key: InputEventKey = event as InputEventKey
-		var action: Dictionary = InputDecoder.decode_key(
-			key.keycode, _player_ship_id,
-			_selected_gate_id, _selected_target_id, _selected_body_id, _nearby_gate_id)
+		var dock_status: Dictionary = _session.dock_status()
+		var action: Dictionary = _interaction.resolve_key_action(
+			key.keycode,
+			_player_ship_id,
+			_nearby_gate_id,
+			_nearby_station_id,
+			dock_status.get("docked_station_id", -1) as int)
 		match action.get("kind", "none") as String:
 			"toggle_module":
 				_toggle_module_by_index(action.module_index as int)
@@ -453,6 +466,17 @@ func _input(event: InputEvent) -> void:
 					(_tactical_overlay as Node3D).call("toggle_visible")
 			"toggle_inventory_panel":
 				_hud_surface.toggle_inventory_panel()
+			"dock":
+				_connection.send_dock_command(_player_ship_id, action.station_id as int)
+			"undock":
+				_connection.send_undock_command(_player_ship_id)
+			"build_packaged_ship":
+				_connection.send_build_packaged_ship_command(
+					_player_ship_id,
+					action.station_id as int,
+					BUILDABLE_SHIP_TYPE_ID)
+			"disassemble_ship":
+				_connection.send_disassemble_ship_command(_player_ship_id, action.station_id as int)
 		return
 
 	if event is InputEventMouseButton:
@@ -478,45 +502,32 @@ func _input(event: InputEvent) -> void:
 			match mb.button_index:
 				MOUSE_BUTTON_LEFT:
 					_camera.call("begin_orbit_drag", mb.position)
-					## Double-click steering takes priority and must work even when a
-					## ship or gate is under the cursor (e.g. at spawn next to Gate 0).
-					## Only a click that is NOT a double-click selects an approach target.
-					if not _check_double_click(mb.position):
-						var hit_ship: int = _pick_ship_at(mb.position)
-						if hit_ship >= 0:
-							_select_approach_target(hit_ship)
-						else:
-							var hit_gate: int = _pick_gate_at(mb.position)
-							if hit_gate >= 0:
-								_select_approach_gate(hit_gate)
-							else:
-								var hit_body: int = _pick_body_at(mb.position)
-								if hit_body >= 0:
-									_select_body(hit_body)
+					var hit_ship: int = _pick_ship_at(mb.position)
+					var hit_gate: int = -1
+					var hit_body: int = -1
+					if hit_ship < 0:
+						hit_gate = _pick_gate_at(mb.position)
+						if hit_gate < 0:
+							hit_body = _pick_body_at(mb.position)
+					var click_action: Dictionary = _interaction.interpret_primary_click(
+						mb.position,
+						Time.get_ticks_msec() / 1000.0,
+						(_camera as Node).call("is_dragging") as bool,
+						_player_ship_id,
+						hit_ship,
+						hit_gate,
+						hit_body)
+					match click_action.get("kind", "none") as String:
+						"double_click_move":
+							_on_double_click(mb.position)
+						"selection_changed":
+							_update_hud()
 				MOUSE_BUTTON_RIGHT:
-					## Right-click -> select lock-on target
-					_try_lock_on(mb.position)
-
-# -- Double-click detection ---------------------------------------------------
-
-## Returns true when this click was consumed as a double-click (a move was
-## issued, or suppressed only because the camera was dragging). The caller
-## then skips approach-target selection so steering always wins.
-func _check_double_click(pos: Vector2) -> bool:
-	var now: float = Time.get_ticks_msec() / 1000.0
-	var dt : float = now - _last_click_time
-	var dp : float = pos.distance_to(_last_click_pos)
-
-	if dt < DOUBLE_CLICK_SEC and dp < DOUBLE_CLICK_PX:
-		## Ignore a double-click made while dragging the camera.
-		var cam_dragging: bool = (_camera as Node).call("is_dragging") as bool
-		if not cam_dragging:
-			_on_double_click(pos)
-		_last_click_time = -1.0  ## reset so a triple-click is not a 2nd double-click
-		return true
-	_last_click_time = now
-	_last_click_pos  = pos
-	return false
+					var lock_action: Dictionary = _interaction.interpret_lock_click(
+						_player_ship_id,
+						_pick_ship_at(mb.position))
+					if (lock_action.get("kind", "none") as String) == "lock_on":
+						_try_lock_on(lock_action.ship_id as int)
 
 # -- Ship picking (screen position -> nearest ship ID) ------------------------
 #
@@ -533,12 +544,6 @@ func _pick_ship_at(screen_pos: Vector2) -> int:
 
 # -- Left-click -> select approach target (ADR-0015) -------------------------
 
-## Select a ship as the Approach target. Press A to start approaching it.
-func _select_approach_target(target_id: int) -> void:
-	_selected_target_id = target_id
-	_selected_gate_id   = -1
-	_update_hud()
-
 ## Returns the gate_id of the Jump Gate (in the current system) whose marker
 ## is closest to the click ray, or -1. Gates are large objects, so the pick
 ## radius is wider than for ships.
@@ -547,13 +552,6 @@ func _pick_gate_at(screen_pos: Vector2) -> int:
 		return -1
 	return ShipPicking.pick_gate_at(_camera, screen_pos, _gates_root)
 
-## Select a Jump Gate as the Approach target. Press A to fly into its range.
-func _select_approach_gate(gate_id: int) -> void:
-	_selected_gate_id   = gate_id
-	_selected_target_id = -1
-	_selected_body_id   = -1
-	_update_hud()
-
 ## Returns the body_id of the celestial body marker closest to the click
 ## position on screen, or -1.
 func _pick_body_at(screen_pos: Vector2) -> int:
@@ -561,22 +559,16 @@ func _pick_body_at(screen_pos: Vector2) -> int:
 		return -1
 	return ShipPicking.pick_body_at(_camera, screen_pos, _bodies_root)
 
-## Select a celestial body. Press W to warp to it.
-func _select_body(body_id: int) -> void:
-	_selected_body_id   = body_id
-	_selected_gate_id   = -1
-	_selected_target_id = -1
-	_update_hud()
-
 ## Server-unit distance from the player ship to the selected gate, or -1 if
 ## there is no player ship or no selected gate (ADR-0022 warp gating / HUD).
 func _selected_gate_distance() -> float:
-	if _selected_gate_id < 0 or _player_ship_id < 0 or not _ships.has(_player_ship_id):
+	var selected_gate_id: int = _interaction.selected_gate_id()
+	if selected_gate_id < 0 or _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return -1.0
 	var ship_server: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
 	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
-		if (g.get("gate_id", -1) as int) != _selected_gate_id:
+		if (g.get("gate_id", -1) as int) != selected_gate_id:
 			continue
 		var gpos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
 		return ship_server.distance_to(gpos)
@@ -584,21 +576,18 @@ func _selected_gate_distance() -> float:
 
 # -- Right-click -> LockOnCommand ---------------------------------------------
 
-func _try_lock_on(screen_pos: Vector2) -> void:
-	if _player_ship_id < 0:
+func _try_lock_on(target_ship_id: int) -> void:
+	if _player_ship_id < 0 or target_ship_id < 0:
 		return
-
-	var closest_id: int = _pick_ship_at(screen_pos)
-	if closest_id >= 0:
-		## Clear previous lock target
-		if _player_lock_target >= 0 and _ships.has(_player_lock_target):
-			(_ships[_player_lock_target] as Node3D).call("set_lock_state", "none")
-		_player_lock_target = closest_id
-		_connection.send_lock_on_command(_player_ship_id, closest_id)
-		## Set Locking state and flash indicator
-		if _ships.has(closest_id):
-			(_ships[closest_id] as Node3D).call("set_lock_state", "locking")
-			(_ships[closest_id] as Node3D).call("flash_lock_indicator")
+	## Clear previous lock target
+	if _player_lock_target >= 0 and _ships.has(_player_lock_target):
+		(_ships[_player_lock_target] as Node3D).call("set_lock_state", "none")
+	_player_lock_target = target_ship_id
+	_connection.send_lock_on_command(_player_ship_id, target_ship_id)
+	## Set Locking state and flash indicator
+	if _ships.has(target_ship_id):
+		(_ships[target_ship_id] as Node3D).call("set_lock_state", "locking")
+		(_ships[target_ship_id] as Node3D).call("flash_lock_indicator")
 
 # -- Double-click -> MoveCommand ----------------------------------------------
 
@@ -646,6 +635,8 @@ func _on_event_received(payload: Dictionary) -> void:
 		"ShipSpawned"      : _handle_ship_spawned(payload)
 		"VelocityChanged"  : _handle_velocity_changed(payload)
 		"ShipDespawned"    : _handle_ship_despawned(payload)
+		"ShipDocked"       : _handle_ship_docked(payload)
+		"ShipUndocked"     : _handle_ship_undocked(payload)
 		"DamageTaken"   : _handle_damage_taken(payload)
 		"RepairApplied" : _handle_repair_applied(payload)
 		"ShipDestroyed" : _handle_ship_destroyed(payload)
@@ -684,6 +675,43 @@ func _handle_position_snap(p: Dictionary) -> void:
 	(_ships[ship_id] as Node3D).call("set_velocity", Vector3.ZERO)
 	(_ships[ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
 
+## Docking is authoritative server state. The server stops the ship
+## immediately, but without an explicit client event the ship_controller keeps
+## integrating the last VelocityChanged it saw and visually drifts. Treat a
+## ShipDocked like a motion snap-to-station from the client's perspective:
+## zero residual velocity/thrust at once.
+func _handle_ship_docked(p: Dictionary) -> void:
+	var ship_id: int = p.get("ship_id", 0) as int
+	var station_id: int = p.get("station_id", -1) as int
+	var tick: int = p.get("tick", 0) as int
+	if not _ships.has(ship_id):
+		return
+	for entry: Variant in _stations:
+		var station: Dictionary = entry as Dictionary
+		if (station.get("station_id", -1) as int) != station_id:
+			continue
+		(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(
+			station.get("position", Vector3.ZERO) as Vector3
+		)
+		if ship_id == _player_ship_id:
+			_session.apply_dock_event(ship_id, station_id, station.get("name", "") as String, tick)
+			_sync_session_state()
+		break
+	_stop_ship_motion(ship_id)
+
+func _handle_ship_undocked(p: Dictionary) -> void:
+	var ship_id: int = p.get("ship_id", 0) as int
+	if ship_id == _player_ship_id:
+		_nearby_station_id = p.get("station_id", -1) as int
+		_session.apply_undock_event(ship_id, p.get("tick", 0) as int)
+		_sync_session_state()
+
+func _stop_ship_motion(ship_id: int) -> void:
+	if not _ships.has(ship_id):
+		return
+	(_ships[ship_id] as Node3D).call("set_velocity", Vector3.ZERO)
+	(_ships[ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
+
 # -- Jump Gate (ADR-0009) -----------------------------------------------------
 
 ## Ship passed through a Jump Gate -- teleport to entry_pos.
@@ -708,8 +736,7 @@ func _handle_star_system_changed(p: Dictionary) -> void:
 		var to_name: String = result.get("system_name", "System %d" % to_system) as String
 		_jump_notice         = "Entered %s system" % to_name
 		_jump_notice_timer   = 3.0
-		_selected_gate_id    = -1
-		_selected_body_id    = -1
+		_interaction.clear_navigation_selection()
 		## Gate / body markers refresh from the next InitialState (sent when the
 		## client reconnects to the destination node after the Redirect).
 
@@ -781,8 +808,7 @@ func _handle_aoi_leave(p: Dictionary) -> void:
 	_sync_session_state()
 	if not (result.get("removed", false) as bool):
 		return
-	if sid == _selected_target_id:
-		_selected_target_id = -1
+	_interaction.clear_target_if_matches(sid)
 	var ship: Node3D = result.get("node") as Node3D
 	ship.queue_free()
 
@@ -793,7 +819,16 @@ func _on_player_fitting(payload: Dictionary) -> void:
 	var fitting: Dictionary = PlayerFitting.normalize_payload(payload)
 	_player_modules = fitting["modules"] as Array
 	_player_inventory = fitting["inventory"] as Array
-	_hud_surface.set_player_fitting(_player_modules, _player_inventory)
+	_player_station_inventory = fitting.get("station_inventory", []) as Array
+	_session.apply_dock_fitting(
+		fitting.get("docked_station_id", -1) as int,
+		fitting.get("docked_station_name", "") as String,
+		fitting.get("tick", 0) as int
+	)
+	_sync_session_state()
+	if _session.is_docked() and _player_ship_id >= 0:
+		_stop_ship_motion(_player_ship_id)
+	_hud_surface.set_player_fitting(_player_modules, _player_inventory, _player_station_inventory)
 	_recalc_weapon_range()
 
 func _recalc_weapon_range() -> void:
@@ -967,8 +1002,7 @@ func _handle_ship_despawned(p: Dictionary) -> void:
 		return
 	var ship: Node3D = result.get("node") as Node3D
 	ship.queue_free()
-	if ship_id == _selected_target_id:
-		_selected_target_id = -1
+	_interaction.clear_target_if_matches(ship_id)
 
 func _handle_damage_taken(p: Dictionary) -> void:
 	var result: Dictionary = _session.apply_hp_event(p)
@@ -992,8 +1026,7 @@ func _handle_ship_destroyed(p: Dictionary) -> void:
 	if not (result.get("destroyed", false) as bool):
 		return
 	var ship: Node3D = result.get("node") as Node3D
-	if ship_id == _selected_target_id:
-		_selected_target_id = -1
+	_interaction.clear_target_if_matches(ship_id)
 	## Play destruction effect (queue_free happens inside play_destroy_effect)
 	ship.call("play_destroy_effect")
 	if result.get("destroyed_player", false) as bool:
@@ -1040,29 +1073,49 @@ func _update_hud() -> void:
 	if _jump_notice != "":
 		jump_line += "\n" + _jump_notice
 
+	var station_line: String = ""
+	if _session.is_docked():
+		var status: Dictionary = _session.dock_status()
+		var docked_station_id: int = status.get("docked_station_id", -1) as int
+		var docked_station_name: String = status.get("docked_station_name", "") as String
+		var docked_name := docked_station_name if not docked_station_name.is_empty() else "Station #%d" % docked_station_id
+		station_line = "\nDocked: %s\n[U] Undock  [B] Build Magpie  [Y] Disassemble ship" % docked_name
+	elif _nearby_station_id >= 0:
+		var nearby_name: String = "Station #%d" % _nearby_station_id
+		for entry: Variant in _stations:
+			var station: Dictionary = entry as Dictionary
+			if (station.get("station_id", -1) as int) == _nearby_station_id:
+				nearby_name = station.get("name", nearby_name) as String
+				break
+		station_line = "\n[D] Dock at %s" % nearby_name
+
 	## Approach / warp target selection (ADR-0015 / ADR-0022 / ADR-0025).
 	var keep_at_range_hint: String = "\n[O] Orbit  [K] Keep at %.0f km  ([/]  adjust)" % _keep_at_range_km
 
 	var approach_line: String = ""
-	if _selected_gate_id >= 0:
-		approach_line = "\n[A] Approach Gate #%d" % _selected_gate_id + keep_at_range_hint
+	var selection: Dictionary = _interaction.selection_state()
+	var selected_gate_id: int = selection.get("selected_gate_id", -1) as int
+	var selected_body_id: int = selection.get("selected_body_id", -1) as int
+	var selected_target_id: int = selection.get("selected_target_id", -1) as int
+	if selected_gate_id >= 0:
+		approach_line = "\n[A] Approach Gate #%d" % selected_gate_id + keep_at_range_hint
 		## Warp is only valid beyond the minimum warp distance (ADR-0022).
 		var gate_dist: float = _selected_gate_distance()
 		if gate_dist >= MIN_WARP_DISTANCE:
 			approach_line += "\n[W] Warp  [J] Warp+Jump"
 		elif gate_dist >= 0.0:
 			approach_line += "\n[W] too close to warp"
-	elif _selected_body_id >= 0:
+	elif selected_body_id >= 0:
 		## Look up body name for HUD.
-		var body_name: String = "Body #%d" % _selected_body_id
+		var body_name: String = "Body #%d" % selected_body_id
 		for entry: Variant in _bodies:
 			var b: Dictionary = entry as Dictionary
-			if (b.get("body_id", -1) as int) == _selected_body_id:
+			if (b.get("body_id", -1) as int) == selected_body_id:
 				body_name = b.get("name", body_name) as String
 				break
 		approach_line = "\n[W] Warp to %s" % body_name
-	elif _selected_target_id >= 0:
-		approach_line = "\n[A] Approach #%d" % _selected_target_id + keep_at_range_hint
+	elif selected_target_id >= 0:
+		approach_line = "\n[A] Approach #%d" % selected_target_id + keep_at_range_hint
 
 	_hud_surface.render({
 		"connected": _connection.is_connected_to_server(),
@@ -1084,8 +1137,8 @@ func _update_hud() -> void:
 		"target_hp": target_hp,
 		"modules": _player_modules,
 		"stats_text": (
-			"Ships: %d\nTick: %d%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
-			% [_ships.size(), _current_tick, approach_line, jump_line]
+			"Ships: %d\nTick: %d%s%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
+			% [_ships.size(), _current_tick, approach_line, station_line, jump_line]
 		),
 	})
 
@@ -1116,9 +1169,7 @@ func _clear_all_ships() -> void:
 			ship_node.queue_free()
 	_session.reset()
 	_sync_session_state()
-	_selected_target_id = -1
-	_selected_gate_id   = -1
-	_selected_body_id   = -1
+	_interaction.clear_selection()
 	_cap_tick_accumulator = 0.0
 
 

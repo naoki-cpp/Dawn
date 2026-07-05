@@ -140,6 +140,52 @@ impl<S: EventStore> SimulationNode<S> {
             })
             .unwrap_or_default();
 
+        let player_id = self.ships.owners.get(&ship_id).copied();
+        let docked_station_id = player_id.and_then(|pid| self.player_docked_station(pid));
+        let docked_station_name = docked_station_id
+            .and_then(|station_id| self.station(station_id))
+            .map(|station| station.name.clone());
+        let station_inventory: Vec<serde_json::Value> = player_id
+            .and_then(|pid| {
+                docked_station_id.and_then(|_| {
+                    self.station_inventory(pid).map(|inventory| {
+                        inventory
+                            .iter()
+                            .filter_map(|(item_id, count)| match item_id {
+                                ItemId::Module(module_id) => {
+                                    self.module_registry.get(module_id).map(|def| {
+                                        serde_json::json!({
+                                            "item_type": "Module",
+                                            "module_id": def.id.0,
+                                            "name"     : def.name,
+                                            "kind"     : format!("{:?}", def.kind),
+                                            "slot"     : format!("{:?}", def.slot),
+                                            "count"    : count,
+                                        })
+                                    })
+                                }
+                                ItemId::PackagedShip(ship_type_id) => {
+                                    self.ship_type_registry.get(ship_type_id).map(|def| {
+                                        serde_json::json!({
+                                            "item_type": "PackagedShip",
+                                            "ship_type_id": def.id.0,
+                                            "name"        : def.name,
+                                            "count"       : count,
+                                        })
+                                    })
+                                }
+                                ItemId::ScrapMetal => Some(serde_json::json!({
+                                    "item_type": "ScrapMetal",
+                                    "name"     : "Scrap Metal",
+                                    "count"    : count,
+                                })),
+                            })
+                            .collect()
+                    })
+                })
+            })
+            .unwrap_or_default();
+
         let layout = self
             .ships
             .type_ids
@@ -156,8 +202,12 @@ impl<S: EventStore> SimulationNode<S> {
         Some(
             serde_json::json!({
                 "type"         : "PlayerFitting",
+                "tick"         : self.current_tick.value(),
                 "modules"      : modules,
                 "inventory"    : inventory,
+                "station_inventory": station_inventory,
+                "docked_station_id": docked_station_id.map(|id| id.0),
+                "docked_station_name": docked_station_name,
                 "slot_capacity": slot_capacity,
             })
             .to_string(),
@@ -232,12 +282,27 @@ impl<S: EventStore> SimulationNode<S> {
             })
             .collect();
 
+        let stations: Vec<serde_json::Value> = self
+            .sector_map
+            .stations
+            .values()
+            .map(|station| {
+                serde_json::json!({
+                    "station_id": station.id.0,
+                    "name": station.name,
+                    "position": abs_pos_json(station.abs_m),
+                    "docking_radius": station.docking_radius,
+                })
+            })
+            .collect();
+
         serde_json::json!({
             "type"             : "InitialState",
             "ships"            : ships,
             "system_name"      : system_name_of(self.sector_id),
             "systems"          : systems,
             "jump_gates"       : gates,
+            "stations"         : stations,
             "celestial_bodies" : bodies,
         })
         .to_string()
@@ -490,6 +555,11 @@ mod tests {
             first_body.abs_m[2],
             "client body marker source must match the f64 anchor source (abs_m), not the f32 position"
         );
+
+        let stations = v["stations"].as_array().unwrap();
+        assert_eq!(stations.len(), 1, "Sector 0 has exactly one NPC station");
+        assert_eq!(stations[0]["station_id"].as_u64().unwrap(), 0);
+        assert_eq!(stations[0]["name"], "Forge Station");
     }
 
     #[test]
@@ -581,5 +651,64 @@ mod tests {
             .expect("scrap rows must be serialized to the client");
         assert_eq!(scrap["name"], "Scrap Metal");
         assert_eq!(scrap["count"].as_u64().unwrap(), 3);
+    }
+
+    #[test]
+    fn player_fitting_json_carries_docked_station_context_and_station_inventory() {
+        use dawn_core::{DockCommand, ItemId, StationId};
+
+        let mut node = mem_node();
+        for def in crate::modules::all_modules() {
+            node.register_module(def);
+        }
+        for def in crate::ship_types::all_ship_types() {
+            node.register_ship_type(def);
+        }
+
+        let player_id = node.next_player_id();
+        let station = node.station(StationId(0)).unwrap().clone();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
+        node.credit_station_item(player_id, ItemId::ScrapMetal, 5);
+        assert!(node.dock_owned(
+            player_id,
+            DockCommand {
+                ship_id,
+                station_id: StationId(0),
+            }
+        ));
+
+        let json = node.build_player_fitting_json(ship_id).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(payload["docked_station_id"].as_u64().unwrap(), 0);
+        assert_eq!(payload["docked_station_name"], "Forge Station");
+        let station_inventory = payload["station_inventory"].as_array().unwrap();
+        let scrap = station_inventory
+            .iter()
+            .find(|row| row["item_type"] == "ScrapMetal")
+            .expect("docked station inventory should be serialized");
+        assert_eq!(scrap["count"].as_u64().unwrap(), 5);
+    }
+
+    #[test]
+    fn player_fitting_json_uses_null_dock_context_after_undock() {
+        use dawn_core::{DockCommand, StationId, UndockCommand};
+
+        let mut node = mem_node();
+        let player_id = node.next_player_id();
+        let station = node.station(StationId(0)).unwrap().clone();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
+        assert!(node.dock_owned(
+            player_id,
+            DockCommand {
+                ship_id,
+                station_id: StationId(0),
+            }
+        ));
+        assert!(node.undock_owned(player_id, UndockCommand { ship_id }));
+
+        let json = node.build_player_fitting_json(ship_id).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(payload["docked_station_id"].is_null());
+        assert!(payload["docked_station_name"].is_null());
     }
 }

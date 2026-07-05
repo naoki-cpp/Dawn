@@ -84,6 +84,9 @@ impl<S: EventStore> SimulationNode<S> {
             tick: self.current_tick,
             id_counter: self.id_counter,
             ships,
+            station_inventories: self.station_inventory_storage().clone(),
+            docked_ships: self.docked_ships.clone(),
+            docked_players: self.docked_players.clone(),
         }
     }
 }
@@ -578,5 +581,71 @@ mod tests {
             restored_abs, live_abs,
             "absolute position must be identical after restore (anchor + offset both restored)"
         );
+    }
+
+    #[test]
+    fn station_inventory_survives_snapshot_restore() {
+        use crate::{modules, ship_types};
+        use dawn_core::{ItemId, PlayerId};
+
+        let mut node = node_with_modules();
+        node.credit_station_item(PlayerId(7), ItemId::ScrapMetal, 4);
+        node.credit_station_item(
+            PlayerId(7),
+            ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
+            1,
+        );
+
+        let snap = node.take_snapshot();
+        let mut store2 = InMemoryEventStore::new();
+        for rec in node.event_store().all_records() {
+            store2.append(rec.event.clone());
+        }
+        let node2 = SimulationNode::restore_from(
+            store2,
+            &snap,
+            &modules::all_modules(),
+            &ship_types::all_ship_types(),
+        );
+
+        assert_eq!(node2.station_item_count(PlayerId(7), ItemId::ScrapMetal), 4);
+        assert_eq!(
+            node2.station_item_count(PlayerId(7), ItemId::PackagedShip(dawn_core::ShipTypeId(1))),
+            1
+        );
+    }
+
+    #[test]
+    fn docked_station_state_survives_snapshot_restore() {
+        use crate::{modules, ship_types};
+        use dawn_core::{DockCommand, StationId};
+
+        let mut node = node_with_modules();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station = node.station(StationId(0)).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        assert!(node.dock_owned(
+            player_id,
+            DockCommand {
+                ship_id,
+                station_id: StationId(0),
+            }
+        ));
+
+        let snap = node.take_snapshot();
+        let mut store2 = InMemoryEventStore::new();
+        for rec in node.event_store().all_records() {
+            store2.append(rec.event.clone());
+        }
+        let node2 = SimulationNode::restore_from(
+            store2,
+            &snap,
+            &modules::all_modules(),
+            &ship_types::all_ship_types(),
+        );
+
+        assert_eq!(node2.docked_station(ship_id), Some(StationId(0)));
+        assert_eq!(node2.player_docked_station(player_id), Some(StationId(0)));
     }
 }

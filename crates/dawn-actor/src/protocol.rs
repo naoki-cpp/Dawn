@@ -12,9 +12,10 @@
 //! - [`parse_client_command`]: JSON line → ClientCommand (client → server).
 
 use dawn_core::{
-    ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand, ClientCommand,
-    DeactivateModuleCommand, DomainEvent, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId,
-    Position, ShipId, SlotKind, StopCommand,
+    ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand,
+    BuildPackagedShipCommand, ClientCommand, DeactivateModuleCommand, DisassembleShipCommand,
+    DockCommand, DomainEvent, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId, Position,
+    ShipId, SlotKind, StopCommand, UndockCommand,
 };
 use serde::Serialize;
 
@@ -35,6 +36,16 @@ enum EventJson {
     },
     ShipDespawned {
         ship_id: u64,
+        tick: u64,
+    },
+    ShipDocked {
+        ship_id: u64,
+        station_id: u32,
+        tick: u64,
+    },
+    ShipUndocked {
+        ship_id: u64,
+        station_id: u32,
         tick: u64,
     },
     DamageTaken {
@@ -174,6 +185,16 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
             ship_id: e.ship_id.raw(),
             tick: e.tick.value(),
         },
+        DomainEvent::ShipDocked(e) => EventJson::ShipDocked {
+            ship_id: e.ship_id.raw(),
+            station_id: e.station_id.0,
+            tick: e.tick.value(),
+        },
+        DomainEvent::ShipUndocked(e) => EventJson::ShipUndocked {
+            ship_id: e.ship_id.raw(),
+            station_id: e.station_id.0,
+            tick: e.tick.value(),
+        },
         DomainEvent::DamageTaken(e) => EventJson::DamageTaken {
             ship_id: e.ship_id.raw(),
             damage: e.damage,
@@ -254,6 +275,8 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
         // VelocityChanged stays consistent without seeing the rebase. Client
         // anchor handling (floating origin, fresh InitialState) lands in step 6.
         DomainEvent::AnchorRebased(_) => return None,
+        DomainEvent::PackagedShipBuilt(_) => return None,
+        DomainEvent::ShipDisassembled(_) => return None,
     };
     serde_json::to_string(&j).ok()
 }
@@ -455,6 +478,38 @@ pub fn parse_client_command(line: &str) -> Option<ClientCommand> {
                 slot: parse_slot_kind(slot_str)?,
             }))
         }
+        "DockCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            let station_id_raw = v.get("station_id")?.as_u64()? as u32;
+            Some(ClientCommand::Dock(DockCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                station_id: dawn_core::StationId(station_id_raw),
+            }))
+        }
+        "UndockCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            Some(ClientCommand::Undock(UndockCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+            }))
+        }
+        "BuildPackagedShipCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            let station_id_raw = v.get("station_id")?.as_u64()? as u32;
+            let ship_type_id_raw = v.get("ship_type_id")?.as_u64()? as u32;
+            Some(ClientCommand::BuildPackagedShip(BuildPackagedShipCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                station_id: dawn_core::StationId(station_id_raw),
+                ship_type_id: dawn_core::ShipTypeId(ship_type_id_raw),
+            }))
+        }
+        "DisassembleShipCommand" => {
+            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+            let station_id_raw = v.get("station_id")?.as_u64()? as u32;
+            Some(ClientCommand::DisassembleShip(DisassembleShipCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                station_id: dawn_core::StationId(station_id_raw),
+            }))
+        }
         _ => None,
     }
 }
@@ -525,6 +580,32 @@ mod tests {
                 );
             }
             other => panic!("expected Warp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dock_command_json_is_parsed_into_client_command_dock() {
+        let line = r#"{"type":"DockCommand","ship_id":42,"station_id":2}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::Dock(c) => {
+                assert_eq!(c.ship_id, ship_id(42));
+                assert_eq!(c.station_id, dawn_core::StationId(2));
+            }
+            other => panic!("expected Dock, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn disassemble_ship_command_json_is_parsed_into_client_command_disassemble_ship() {
+        let line = r#"{"type":"DisassembleShipCommand","ship_id":42,"station_id":2}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::DisassembleShip(c) => {
+                assert_eq!(c.ship_id, ship_id(42));
+                assert_eq!(c.station_id, dawn_core::StationId(2));
+            }
+            other => panic!("expected DisassembleShip, got {other:?}"),
         }
     }
 
@@ -601,6 +682,21 @@ mod tests {
     fn unknown_command_type_returns_none() {
         let line = r#"{"type":"UnknownCommand","ship_id":1}"#;
         assert!(parse_client_command(line).is_none());
+    }
+
+    #[test]
+    fn ship_docked_event_is_serialized_for_clients() {
+        let json = domain_event_to_json(&DomainEvent::ShipDocked(dawn_core::events::ShipDocked {
+            ship_id: ship_id(42),
+            station_id: dawn_core::StationId(3),
+            tick: dawn_core::Tick(9),
+        }))
+        .expect("ShipDocked should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "ShipDocked");
+        assert_eq!(v["ship_id"], ship_id(42).raw());
+        assert_eq!(v["station_id"], 3);
+        assert_eq!(v["tick"], 9);
     }
 
     #[test]

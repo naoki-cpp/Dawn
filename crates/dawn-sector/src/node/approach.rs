@@ -66,6 +66,9 @@ impl<S: EventStore> SimulationNode<S> {
         if !self.owns_ship(player_id, cmd.ship_id) {
             return false;
         }
+        if self.is_ship_docked(cmd.ship_id) {
+            return false;
+        }
         self.apply_approach_command(cmd.ship_id, cmd.target)
     }
 

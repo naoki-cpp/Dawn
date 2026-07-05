@@ -12,6 +12,9 @@ extends RefCounted
 const GATE_RING_INNER_RATIO    : float = 0.85
 const GATE_LABEL_HEIGHT_RATIO  : float = 0.3
 const PLANET_VISUAL_RADIUS_RATIO: float = 0.5
+const STATION_VISUAL_RADIUS     : float = 350.0
+const STATION_RING_INNER_RATIO  : float = 0.92
+const STATION_LABEL_HEIGHT_RATIO: float = 1.8
 
 ## Selection reticle: a fixed-screen-size ring billboard so every planet is
 ## equally easy to click regardless of distance (pairs with
@@ -71,6 +74,7 @@ static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: fl
 		marker.position = to_godot_pos.call(gate_pos) as Vector3
 		marker.set_meta("gate_id",  g.get("gate_id", -1) as int)
 		marker.set_meta("gate_pos", gate_pos)  ## server coords, kept for per-frame clamping (main.gd)
+		marker.set_meta("nav_pos", gate_pos)
 		gates_root.add_child(marker)
 
 		var ring: MeshInstance3D = MeshInstance3D.new()
@@ -133,6 +137,7 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		marker.set_meta("body_id",   b_id)
 		marker.set_meta("body_kind", kind)
 		marker.set_meta("body_pos",  b_pos)  ## server coords, kept for sun direction
+		marker.set_meta("nav_pos",   b_pos)
 		bodies_root.add_child(marker)
 
 		## Visual sphere. Planets: solid matte sphere, visual radius = 8% of
@@ -162,3 +167,61 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		## easy to click regardless of distance (pairs with
 		## ShipPicking.pick_body_at's screen-space picking).
 		marker.add_child(BillboardRing.build(RETICLE_COLOR, RETICLE_PIXEL_SIZE))
+
+
+## Appends visual markers for NPC stations in the current star system.
+## Stations share the bodies root because they live in the same local spatial
+## context as planets and should clamp the same way at true AU distances.
+static func spawn_station_markers(bodies_root: Node3D, stations: Array, world_scale: float, to_godot_pos: Callable) -> void:
+	for entry: Variant in stations:
+		var station: Dictionary = entry as Dictionary
+		var station_id: int = station.get("station_id", -1) as int
+		var name_str: String = station.get("name", "") as String
+		var station_pos: Vector3 = station.get("position", Vector3.ZERO) as Vector3
+		var docking_radius: float = station.get("docking_radius", 0.0) as float
+		var visual_radius: float = STATION_VISUAL_RADIUS * world_scale
+
+		var marker: Node3D = Node3D.new()
+		marker.position = to_godot_pos.call(station_pos) as Vector3
+		marker.set_meta("station_id", station_id)
+		marker.set_meta("station_pos", station_pos)
+		marker.set_meta("nav_pos", station_pos)
+		bodies_root.add_child(marker)
+
+		var mesh_inst: MeshInstance3D = MeshInstance3D.new()
+		var sphere: SphereMesh = SphereMesh.new()
+		sphere.radius = visual_radius
+		sphere.height = visual_radius * 2.0
+		var station_mat: StandardMaterial3D = StandardMaterial3D.new()
+		station_mat.albedo_color = Color(0.85, 0.72, 0.30)
+		station_mat.emission_enabled = true
+		station_mat.emission = Color(0.85, 0.72, 0.30)
+		station_mat.emission_energy_multiplier = 1.0
+		station_mat.roughness = 0.35
+		mesh_inst.material_override = station_mat
+		mesh_inst.mesh = sphere
+		marker.add_child(mesh_inst)
+
+		var ring: MeshInstance3D = MeshInstance3D.new()
+		var torus: TorusMesh = TorusMesh.new()
+		torus.inner_radius = docking_radius * world_scale * STATION_RING_INNER_RATIO
+		torus.outer_radius = docking_radius * world_scale
+		var ring_mat: StandardMaterial3D = StandardMaterial3D.new()
+		ring_mat.albedo_color = Color(0.95, 0.78, 0.22, 0.30)
+		ring_mat.emission_enabled = true
+		ring_mat.emission = Color(0.95, 0.78, 0.22)
+		ring_mat.emission_energy_multiplier = 1.2
+		ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ring.mesh = torus
+		ring.material_override = ring_mat
+		ring.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+		marker.add_child(ring)
+
+		var label: Label3D = Label3D.new()
+		label.text = name_str
+		label.position = Vector3(0.0, visual_radius * STATION_LABEL_HEIGHT_RATIO, 0.0)
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.no_depth_test = true
+		label.modulate = Color(0.95, 0.82, 0.32)
+		marker.add_child(label)

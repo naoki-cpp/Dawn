@@ -573,7 +573,7 @@ static func _make_inventory_row(text: String, module_id: int, slot: String, acti
 ## the flat fitted-module array (slot/module_id/name fields, same shape the
 ## module bar already consumes); `inventory` may contain both fittable module
 ## rows and passive item stacks.
-static func update_inventory_panel(refs: Dictionary, modules: Array, inventory: Array) -> void:
+static func update_inventory_panel(refs: Dictionary, modules: Array, inventory: Array, station_inventory: Array = []) -> void:
 	var fitted_list: VBoxContainer = refs["fitted_list"]
 	var inventory_list: VBoxContainer = refs["inventory_list"]
 	for child: Node in fitted_list.get_children():
@@ -607,6 +607,15 @@ static func update_inventory_panel(refs: Dictionary, modules: Array, inventory: 
 		else:
 			text = "%s x%d" % [item.get("name", "?") as String, count]
 		var row := _make_inventory_row(text, module_id, slot, action)
+		inventory_list.add_child(row["panel"])
+		inventory_rows.append(row)
+	for entry: Variant in station_inventory:
+		var item: Dictionary = entry as Dictionary
+		var text := "[Station] %s x%d" % [
+			item.get("name", "?") as String,
+			item.get("count", 1) as int,
+		]
+		var row := _make_inventory_row(text, 0, "", "")
 		inventory_list.add_child(row["panel"])
 		inventory_rows.append(row)
 	refs["inventory_rows"] = inventory_rows

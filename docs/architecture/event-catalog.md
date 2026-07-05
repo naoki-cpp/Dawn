@@ -158,6 +158,10 @@ While tackled, `can_propose_warp()` / `can_propose_jump()` return false, blockin
 | Event | Description | Emitter | Status |
 |---|---|---|---|
 | `AnchorRebased` | Ship's coordinate anchor changed (absolute position unchanged; only the `(anchor, offset)` representation updates — e.g. star anchor → destination-body anchor on Warp arrival) | `SimulationNode` (Warp arrival, ADR-0029 step 4) | ✅ implemented (emitted from `warp_step`/`rebase_arrival_event`, appended via `tick.rs`'s `all_events`) |
+| `ShipDocked` | Ship docked at an NPC station (ADR-0034 9B docking foundation) | `SimulationNode::dock_owned` | ✅ implemented |
+| `ShipUndocked` | Ship undocked from an NPC station (ADR-0034 9B docking foundation) | `SimulationNode::undock_owned` | ✅ implemented |
+| `PackagedShipBuilt` | Scrap Metal consumed in a docked station and converted into a packaged ship (ADR-0034 9B) | `SimulationNode::build_packaged_ship_owned` | ✅ implemented |
+| `ShipDisassembled` | Docked undamaged unfitted ship converted into a packaged ship in station inventory (ADR-0034 9B) | `SimulationNode::disassemble_ship_owned` | ✅ implemented |
 
 This is an authoritative event: it stores `anchor` and the post-rebase `offset` so Replay reproduces the representation exactly. A rebase is a non-velocity-driven frame change, so it's recorded as its own fact; INV-MOVE (the invariant for velocity-driven motion) doesn't apply since absolute position is preserved.
 
@@ -191,6 +195,10 @@ Commands are defined in `dawn-core/src/commands.rs`. Clients send them to the se
 | `LockOnCommand` | Request lock-on | `TargetLocked` | ✅ implemented |
 | `FitModuleCommand` | Fit an inventory Module into a slot (client-side checks ownership, slot type, capacity, possession; ADR-0032) | `ShipFitted` | ✅ implemented |
 | `UnfitModuleCommand` | Return a fitted Module to inventory (ADR-0032) | `ShipFitted` | ✅ implemented |
+| `DockCommand` | Dock at an NPC station once within its docking radius (ADR-0034 9B) | `ShipDocked` | ✅ implemented |
+| `UndockCommand` | Leave a previously-docked NPC station (ADR-0034 9B) | `ShipUndocked` | ✅ implemented |
+| `BuildPackagedShipCommand` | Consume Scrap Metal in the current docked station and create a `PackagedShip` item there (ADR-0034 9B) | `PackagedShipBuilt` | ✅ implemented |
+| `DisassembleShipCommand` | Convert the current docked ship into a station-side `PackagedShip` item after undamaged/unfitted validation (ADR-0034 9B) | `ShipDisassembled` | ✅ implemented |
 | `ActivateModuleCommand` | Turn on an Active Module | `ModuleActivated` | ✅ implemented |
 | `DeactivateModuleCommand` | Turn off an Active Module | `ModuleDeactivated` | ✅ implemented |
 | `AttackCommand` | Designate an attack target | `WeaponFired` | ⬜ type + WsServer JSON parser only; not wired into combat |

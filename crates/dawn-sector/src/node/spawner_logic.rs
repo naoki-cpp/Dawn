@@ -5,6 +5,7 @@ use dawn_core::{
 use dawn_ecs::components::{
     CapacitorComp, HullComp, IsBotComp, IsNpcComp, PositionComp, ShipStatsComp,
 };
+use dawn_ecs::Entity;
 use dawn_event_store::store::EventStore;
 
 use crate::persistence::ShipSnapshot;
@@ -301,6 +302,12 @@ impl<S: EventStore> SimulationNode<S> {
         let Some(&entity) = self.ships.index.get(&ship_id) else {
             return;
         };
+        self.place_entity_at_absolute(entity, world);
+    }
+
+    /// Re-anchor an existing entity to the nearest anchor for `world` and set
+    /// its local offset so its absolute position becomes exactly `world`.
+    pub(super) fn place_entity_at_absolute(&mut self, entity: Entity, world: [f64; 3]) {
         let anchor = self
             .anchor_table
             .nearest_anchor(self.sector_id, world)

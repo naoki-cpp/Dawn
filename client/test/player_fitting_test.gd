@@ -28,18 +28,42 @@ func test_normalize_payload_adds_client_runtime_fields() -> void:
 			{"item_type": "Module", "module_id": 8, "name": "Afterburner", "kind": "Propulsion", "slot": "Mid", "count": 2},
 			{"item_type": "ScrapMetal", "name": "Scrap Metal", "count": 3},
 		],
+		"station_inventory": [
+			{"item_type": "PackagedShip", "ship_type_id": 7, "name": "Magpie", "count": 1},
+		],
+		"tick": 12,
+		"docked_station_id": 4,
+		"docked_station_name": "Forge Station",
 	})
 
 	var module: Dictionary = (fitting["modules"] as Array)[0] as Dictionary
+	assert_int(fitting["tick"] as int).is_equal(12)
 	assert_int(module["module_id"]).is_equal(7)
 	assert_str(module["forced_reason"]).is_equal("")
 	assert_int(module["cycle_remaining"]).is_equal(0)
 	assert_int(((fitting["inventory"] as Array)[0] as Dictionary)["module_id"]).is_equal(8)
 	assert_str(((fitting["inventory"] as Array)[1] as Dictionary)["item_type"]).is_equal("ScrapMetal")
 	assert_int(((fitting["inventory"] as Array)[1] as Dictionary)["count"]).is_equal(3)
+	assert_int(((fitting["station_inventory"] as Array)[0] as Dictionary)["ship_type_id"]).is_equal(7)
+	assert_int(fitting["docked_station_id"] as int).is_equal(4)
+	assert_str(fitting["docked_station_name"] as String).is_equal("Forge Station")
 	var stat_delta: Dictionary = module["stat_delta"] as Dictionary
 	assert_float(stat_delta["tackle_range_add"]).is_equal_approx(20000.0, 0.001)
 	assert_float(stat_delta["repair_range_add"]).is_equal_approx(15000.0, 0.001)
+
+
+func test_normalize_payload_keeps_undocked_station_context_at_negative_one() -> void:
+	var fitting: Dictionary = PlayerFitting.normalize_payload({
+		"modules": [],
+		"inventory": [],
+		"station_inventory": [],
+		"tick": 13,
+		"docked_station_id": null,
+		"docked_station_name": null,
+	})
+
+	assert_int(fitting["docked_station_id"] as int).is_equal(-1)
+	assert_str(fitting["docked_station_name"] as String).is_equal("")
 
 
 func test_weapon_ranges_sum_active_weapon_modules_only() -> void:

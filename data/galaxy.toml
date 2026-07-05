@@ -141,3 +141,28 @@ name          = "Bastion"
 position      = [0.7, 0.0, -0.6]  # AU; clear of Crimson's ~0.6-AU visual radius
 radius        = 7000.0
 spectral_type = 0.0
+
+# -- NPC Stations -------------------------------------------------------------
+# Phase 9B foundation: one minimal NPC station per sector. These are the only
+# places where Station inventory / Assemble / Disassemble / build flows may run.
+
+[[npc_stations]]
+id             = 0
+sector         = 0
+name           = "Forge Station"
+position       = [0.800000007, 0.0, 0.500000007]  # About 1 km off Forge at true AU
+docking_radius = 16000.0
+
+[[npc_stations]]
+id             = 1
+sector         = 1
+name           = "Haven Station"
+position       = [-0.719999993, 0.0, 0.240000007]  # About 1 km off Haven at true AU
+docking_radius = 16000.0
+
+[[npc_stations]]
+id             = 2
+sector         = 2
+name           = "Bastion Station"
+position       = [0.700000007, 0.0, -0.599999993]  # About 1 km off Bastion at true AU
+docking_radius = 16000.0

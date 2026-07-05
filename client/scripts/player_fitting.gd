@@ -7,6 +7,16 @@ extends RefCounted
 
 
 static func normalize_payload(payload: Dictionary) -> Dictionary:
+	var raw_docked_station_id: Variant = payload.get("docked_station_id", null)
+	var docked_station_id: int = -1
+	if raw_docked_station_id != null:
+		docked_station_id = raw_docked_station_id as int
+
+	var raw_docked_station_name: Variant = payload.get("docked_station_name", null)
+	var docked_station_name: String = ""
+	if raw_docked_station_name != null:
+		docked_station_name = raw_docked_station_name as String
+
 	var modules: Array = []
 	for entry: Variant in payload.get("modules", []) as Array:
 		var src: Dictionary = entry as Dictionary
@@ -44,9 +54,26 @@ static func normalize_payload(payload: Dictionary) -> Dictionary:
 			"count": src.get("count", 1) as int,
 		})
 
+	var station_inventory: Array = []
+	for entry: Variant in payload.get("station_inventory", []) as Array:
+		var src: Dictionary = entry as Dictionary
+		station_inventory.append({
+			"item_type": src.get("item_type", "Module") as String,
+			"module_id": src.get("module_id", 0) as int,
+			"ship_type_id": src.get("ship_type_id", 0) as int,
+			"name": src.get("name", "?") as String,
+			"kind": src.get("kind", "") as String,
+			"slot": src.get("slot", "") as String,
+			"count": src.get("count", 1) as int,
+		})
+
 	return {
+		"tick": payload.get("tick", 0) as int,
 		"modules": modules,
 		"inventory": inventory,
+		"station_inventory": station_inventory,
+		"docked_station_id": docked_station_id,
+		"docked_station_name": docked_station_name,
 		"slot_capacity": payload.get("slot_capacity", {}) as Dictionary,
 	}
 

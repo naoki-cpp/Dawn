@@ -254,6 +254,42 @@ func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String)
 		"slot"     : p_slot,
 	}) + "\n")
 
+func send_dock_command(p_ship_id: int, p_station_id: int) -> void:
+	if not _welcomed:
+		return
+	_ws.send_text(JSON.stringify({
+		"type": "DockCommand",
+		"ship_id": p_ship_id,
+		"station_id": p_station_id,
+	}) + "\n")
+
+func send_undock_command(p_ship_id: int) -> void:
+	if not _welcomed:
+		return
+	_ws.send_text(JSON.stringify({
+		"type": "UndockCommand",
+		"ship_id": p_ship_id,
+	}) + "\n")
+
+func send_build_packaged_ship_command(p_ship_id: int, p_station_id: int, p_ship_type_id: int) -> void:
+	if not _welcomed:
+		return
+	_ws.send_text(JSON.stringify({
+		"type": "BuildPackagedShipCommand",
+		"ship_id": p_ship_id,
+		"station_id": p_station_id,
+		"ship_type_id": p_ship_type_id,
+	}) + "\n")
+
+func send_disassemble_ship_command(p_ship_id: int, p_station_id: int) -> void:
+	if not _welcomed:
+		return
+	_ws.send_text(JSON.stringify({
+		"type": "DisassembleShipCommand",
+		"ship_id": p_ship_id,
+		"station_id": p_station_id,
+	}) + "\n")
+
 func is_connected_to_server() -> bool:
 	return _connected and _welcomed
 

@@ -5,7 +5,7 @@
 
 use dawn_core::{
     CelestialBodyDef, CelestialBodyId, CelestialBodyKind, JumpGateDef, JumpGateId, Position,
-    SectorId, StarSystemDef, StarSystemId,
+    SectorId, StarSystemDef, StarSystemId, StationDef, StationId,
 };
 use serde::Deserialize;
 use std::{error::Error, fmt};
@@ -19,6 +19,7 @@ pub struct Galaxy {
     pub systems: Vec<StarSystemDef>,
     pub gates: Vec<JumpGateDef>,
     pub bodies: Vec<CelestialBodyDef>,
+    pub stations: Vec<StationDef>,
 }
 
 /// Game units per astronomical unit. Celestial body orbits are authored in AU in
@@ -42,11 +43,13 @@ impl Galaxy {
         systems: Vec<StarSystemDef>,
         gates: Vec<JumpGateDef>,
         bodies: Vec<CelestialBodyDef>,
+        stations: Vec<StationDef>,
     ) -> Self {
         Self {
             systems,
             gates,
             bodies,
+            stations,
         }
     }
 
@@ -60,6 +63,11 @@ impl Galaxy {
                 .celestial_bodies
                 .into_iter()
                 .map(entry_to_body)
+                .collect(),
+            stations: file
+                .npc_stations
+                .into_iter()
+                .map(entry_to_station)
                 .collect(),
         })
     }
@@ -100,6 +108,15 @@ impl Galaxy {
         self.bodies
             .iter()
             .filter(|b| b.sector == sector)
+            .cloned()
+            .collect()
+    }
+
+    /// NPC stations explicitly assigned to `sector`.
+    pub fn stations_in_sector(&self, sector: SectorId) -> Vec<StationDef> {
+        self.stations
+            .iter()
+            .filter(|s| s.sector == sector)
             .cloned()
             .collect()
     }
@@ -160,6 +177,8 @@ struct StarMapFile {
     jump_gates: Vec<JumpGateEntry>,
     #[serde(default)]
     celestial_bodies: Vec<CelestialBodyEntry>,
+    #[serde(default)]
+    npc_stations: Vec<StationEntry>,
 }
 
 #[derive(Deserialize)]
@@ -197,6 +216,16 @@ struct CelestialBodyEntry {
     radius: f32,
     #[serde(default)]
     spectral_type: f32,
+}
+
+#[derive(Deserialize)]
+struct StationEntry {
+    id: u32,
+    sector: u8,
+    name: String,
+    /// Authored in AU and converted to metres on load.
+    position: [f64; 3],
+    docking_radius: f32,
 }
 
 fn parse_body_kind(s: &str) -> CelestialBodyKind {
@@ -259,6 +288,23 @@ fn entry_to_body(e: CelestialBodyEntry) -> CelestialBodyDef {
     }
 }
 
+fn entry_to_station(e: StationEntry) -> StationDef {
+    let factor = UNITS_PER_AU;
+    let abs_m = [
+        e.position[0] * factor,
+        e.position[1] * factor,
+        e.position[2] * factor,
+    ];
+    StationDef {
+        id: StationId(e.id),
+        sector: SectorId(e.sector),
+        name: e.name,
+        position: Position::new(abs_m[0] as f32, abs_m[1] as f32, abs_m[2] as f32),
+        abs_m,
+        docking_radius: e.docking_radius,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +362,7 @@ mod tests {
         assert_eq!(map.systems.len(), 3);
         assert_eq!(map.gates.len(), 4);
         assert_eq!(map.bodies.len(), 7);
+        assert_eq!(map.stations.len(), 3);
     }
 
     #[test]
@@ -398,5 +445,15 @@ mod tests {
             matches!(err, GalaxyTomlError::Io { .. }),
             "expected an Io variant, got {err:?}"
         );
+    }
+
+    #[test]
+    fn stations_in_sector_returns_only_local_stations() {
+        let map = Galaxy::demo();
+        let stations = map.stations_in_sector(SectorId(1));
+        assert_eq!(stations.len(), 1);
+        assert_eq!(stations[0].id, StationId(1));
+        assert_eq!(stations[0].name, "Haven Station");
+        assert!(stations.iter().all(|s| s.sector == SectorId(1)));
     }
 }

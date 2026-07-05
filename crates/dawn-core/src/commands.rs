@@ -4,8 +4,8 @@
 //! The system validates a Command before producing an Event.  (INV-006)
 
 use crate::fitting::{ModuleId, SlotKind};
-use crate::navigation::{JumpGateId, WarpTarget};
-use crate::{Position, SectorId, ShipId};
+use crate::navigation::{JumpGateId, StationId, WarpTarget};
+use crate::{Position, SectorId, ShipId, ShipTypeId};
 use serde::{Deserialize, Serialize};
 
 /// Request to move a Ship to `target_position` within its current Sector.
@@ -55,6 +55,54 @@ pub struct UnfitModuleCommand {
     pub ship_id: ShipId,
     pub slot: SlotKind,
     pub module_id: ModuleId,
+}
+
+/// Request to dock at an NPC station (ADR-0034 9B foundation).
+///
+/// May be rejected if:
+/// - The Ship does not exist or the caller does not own it.
+/// - The Ship is not within the station's docking radius.
+/// - The Ship is already docked somewhere.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DockCommand {
+    pub ship_id: ShipId,
+    pub station_id: StationId,
+}
+
+/// Request to undock from the currently-docked NPC station.
+///
+/// May be rejected if:
+/// - The Ship does not exist or the caller does not own it.
+/// - The Ship is not currently docked.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UndockCommand {
+    pub ship_id: ShipId,
+}
+
+/// Request to build a packaged ship inside the currently-docked station.
+///
+/// May be rejected if:
+/// - The Ship does not exist or the caller does not own it.
+/// - The caller is not currently docked at the target station.
+/// - The station inventory does not contain enough Scrap Metal.
+/// - `ship_type_id` is unknown to the current node.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BuildPackagedShipCommand {
+    pub ship_id: ShipId,
+    pub station_id: StationId,
+    pub ship_type_id: ShipTypeId,
+}
+
+/// Request to disassemble a docked ship into a packaged ship item.
+///
+/// May be rejected if:
+/// - The Ship does not exist or the caller does not own it.
+/// - The caller is not currently docked at the target station.
+/// - The Ship is damaged or has any fitted modules.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DisassembleShipCommand {
+    pub ship_id: ShipId,
+    pub station_id: StationId,
 }
 
 /// What an approaching Ship is steering toward (ADR-0015).
@@ -263,6 +311,14 @@ pub enum ClientCommand {
     Fit(FitModuleCommand),
     /// Move a fitted module back into inventory (ADR-0032).
     Unfit(UnfitModuleCommand),
+    /// Dock at an NPC station.
+    Dock(DockCommand),
+    /// Leave a previously-docked NPC station.
+    Undock(UndockCommand),
+    /// Consume Scrap Metal in the docked station and create a Packaged Ship.
+    BuildPackagedShip(BuildPackagedShipCommand),
+    /// Convert a docked, unfitted, undamaged ship into a Packaged Ship.
+    DisassembleShip(DisassembleShipCommand),
 }
 
 #[cfg(test)]

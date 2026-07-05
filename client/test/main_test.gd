@@ -51,6 +51,7 @@ func before_test() -> void:
 	## the @onready scene-path vars stay null -- fine, since none of the
 	## functions under test touch them.
 	_main = load(__source).new()
+	_main._interaction = load("res://scripts/world_interaction.gd").new()
 
 
 func after_test() -> void:
@@ -108,6 +109,50 @@ func test_observed_ship_position_snap_clears_residual_warp_motion() -> void:
 	assert_vector(ship.velocity_calls.back()).is_equal(Vector3.ZERO)
 	assert_vector(ship.thrust_calls.back()).is_equal(Vector3.ZERO)
 	ship.free()
+
+
+func test_ship_docked_event_clears_residual_motion() -> void:
+	var ship := FakeShip.new()
+	_main.add_child(ship)
+	ship.global_position = Vector3(99.0, 99.0, 99.0)
+	_main._ships = {2: ship}
+	_main._stations = [{
+		"station_id": 0,
+		"name": "Forge Station",
+		"position": Vector3(100.0, 20.0, 300.0),
+	}]
+
+	_main._handle_ship_docked({
+		"ship_id": 2,
+		"station_id": 0,
+		"tick": 12,
+	})
+
+	assert_vector(ship.global_position).is_equal_approx(
+		Vector3(10.0, 2.0, -30.0),
+		Vector3(0.0001, 0.0001, 0.0001)
+	)
+	assert_vector(ship.velocity_calls.back()).is_equal(Vector3.ZERO)
+	assert_vector(ship.thrust_calls.back()).is_equal(Vector3.ZERO)
+	ship.free()
+
+
+func test_player_ship_undocked_event_clears_docked_station_state() -> void:
+	_main._player_ship_id = 2
+	_main._nearby_station_id = -1
+	_main._session.player_ship_id = 2
+	_main._session.apply_dock_fitting(0, "Forge Station", 12)
+
+	_main._handle_ship_undocked({
+		"ship_id": 2,
+		"station_id": 0,
+		"tick": 13,
+	})
+
+	assert_int(_main._nearby_station_id).is_equal(0)
+	var status: Dictionary = _main._session.dock_status()
+	assert_int(status["docked_station_id"] as int).is_equal(-1)
+	assert_str(status["docked_station_name"] as String).is_equal("")
 
 
 # -- _on_module_deactivated (manual OFF vs system-forced OFF) -----------------------

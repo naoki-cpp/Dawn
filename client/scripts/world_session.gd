@@ -11,6 +11,7 @@ var ships: Dictionary = {}
 var ship_hp: Dictionary = {}
 var opponent_ship_ids: Array = []
 var gates: Array = []
+var stations: Array = []
 var bodies: Array = []
 var system_names: Dictionary = {}
 
@@ -29,6 +30,9 @@ var current_system_name: String = "Unknown"
 var cap_current: float = -1.0
 var cap_max: float = 500.0
 var cap_recharge: float = 10.0
+var docked_station_id: int = -1
+var docked_station_name: String = ""
+var latest_dock_state_tick: int = -1
 
 
 static func vec3_from_dict(d: Dictionary, key: String) -> Vector3:
@@ -57,6 +61,9 @@ func reset() -> void:
 	cap_current = -1.0
 	cap_max = 500.0
 	cap_recharge = 10.0
+	docked_station_id = -1
+	docked_station_name = ""
+	latest_dock_state_tick = -1
 
 
 func has_ship(ship_id: int) -> bool:
@@ -171,6 +178,16 @@ func ingest_navigation(state: Dictionary) -> void:
 			"to_system_name": g.get("to_system_name", "") as String,
 		})
 
+	stations.clear()
+	for entry: Variant in (state.get("stations", []) as Array):
+		var station: Dictionary = entry as Dictionary
+		stations.append({
+			"station_id": station.get("station_id", -1) as int,
+			"name": station.get("name", "") as String,
+			"position": vec3_from_dict(station, "position"),
+			"docking_radius": station.get("docking_radius", 0.0) as float,
+		})
+
 	bodies.clear()
 	for entry: Variant in (state.get("celestial_bodies", []) as Array):
 		var b: Dictionary = entry as Dictionary
@@ -246,6 +263,44 @@ func simulate_cap(ticks: int, modules: Array) -> void:
 		cap_max,
 		cap_recharge,
 		ticks)
+
+
+func apply_dock_event(ship_id: int, station_id: int, station_name: String, tick: int) -> bool:
+	if ship_id != player_ship_id:
+		return false
+	return _apply_dock_state(station_id, station_name, tick)
+
+
+func apply_undock_event(ship_id: int, tick: int) -> bool:
+	if ship_id != player_ship_id:
+		return false
+	return _apply_dock_state(-1, "", tick)
+
+
+func apply_dock_fitting(station_id: int, station_name: String, tick: int) -> bool:
+	return _apply_dock_state(station_id, station_name, tick)
+
+
+func dock_status() -> Dictionary:
+	return {
+		"docked_station_id": docked_station_id,
+		"docked_station_name": docked_station_name,
+		"is_docked": docked_station_id >= 0,
+		"latest_dock_state_tick": latest_dock_state_tick,
+	}
+
+
+func is_docked() -> bool:
+	return docked_station_id >= 0
+
+
+func _apply_dock_state(station_id: int, station_name: String, tick: int) -> bool:
+	if tick < latest_dock_state_tick:
+		return false
+	latest_dock_state_tick = tick
+	docked_station_id = station_id
+	docked_station_name = station_name
+	return true
 
 
 func target_hp() -> Dictionary:

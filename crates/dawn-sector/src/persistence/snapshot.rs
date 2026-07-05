@@ -34,6 +34,7 @@ use dawn_core::{
     Velocity,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 // ── Ship-level snapshot ───────────────────────────────────────────────────────
 
@@ -97,6 +98,17 @@ pub struct StateSnapshot {
     pub id_counter: u64,
     /// State of every Ship in the Sector at the snapshot instant.
     pub ships: Vec<ShipSnapshot>,
+    /// Per-player station inventory for this Sector's NPC station layer
+    /// (ADR-0034 9B foundation). `#[serde(default)]` keeps older snapshots
+    /// readable.
+    #[serde(default)]
+    pub station_inventories: BTreeMap<dawn_core::PlayerId, BTreeMap<dawn_core::ItemId, u64>>,
+    /// Current docked station per ship.
+    #[serde(default)]
+    pub docked_ships: BTreeMap<dawn_core::ShipId, dawn_core::StationId>,
+    /// Current docked station context per player.
+    #[serde(default)]
+    pub docked_players: BTreeMap<dawn_core::PlayerId, dawn_core::StationId>,
 }
 
 impl StateSnapshot {
@@ -147,6 +159,12 @@ mod tests {
                     1,
                 )]),
             }],
+            station_inventories: BTreeMap::from([(
+                dawn_core::PlayerId(9),
+                BTreeMap::from([(dawn_core::ItemId::ScrapMetal, 4)]),
+            )]),
+            docked_ships: BTreeMap::from([(ShipId::new(NodeId(0), 0), dawn_core::StationId(0))]),
+            docked_players: BTreeMap::from([(dawn_core::PlayerId(9), dawn_core::StationId(0))]),
         }
     }
 
@@ -162,6 +180,9 @@ mod tests {
         assert_eq!(restored.ships.len(), 1);
         assert_eq!(restored.ships[0].position, original.ships[0].position);
         assert_eq!(restored.ships[0].inventory, original.ships[0].inventory);
+        assert_eq!(restored.station_inventories, original.station_inventories);
+        assert_eq!(restored.docked_ships, original.docked_ships);
+        assert_eq!(restored.docked_players, original.docked_players);
     }
 
     #[test]

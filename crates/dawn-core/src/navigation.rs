@@ -131,6 +131,48 @@ impl JumpGateDef {
     }
 }
 
+// -- StationId ---------------------------------------------------------------
+
+/// Identifies an NPC-provided station within a Sector (ADR-0034 9B foundation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StationId(pub u32);
+
+/// Static definition of a station where players may assemble/disassemble ships
+/// and access a station inventory.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StationDef {
+    pub id: StationId,
+    pub sector: SectorId,
+    pub name: String,
+    pub position: Position,
+    /// Absolute station position in metres as f64, matching gate/body authoring.
+    pub abs_m: [f64; 3],
+    /// A ship within this radius may use the station.
+    pub docking_radius: f32,
+}
+
+impl StationDef {
+    /// Whether `ship_pos` is close enough to use the station.
+    pub fn is_in_range(&self, ship_pos: Position) -> bool {
+        ship_pos.distance(self.position) <= self.docking_radius
+    }
+
+    /// Whether an absolute (Sector-frame, f64) ship position is within range.
+    pub fn is_in_range_abs(&self, ship_abs: [f64; 3]) -> bool {
+        self.distance_abs(ship_abs) <= self.docking_radius as f64
+    }
+
+    /// True distance (metres, f64) from an absolute ship position to this station.
+    pub fn distance_abs(&self, ship_abs: [f64; 3]) -> f64 {
+        let d = [
+            ship_abs[0] - self.abs_m[0],
+            ship_abs[1] - self.abs_m[1],
+            ship_abs[2] - self.abs_m[2],
+        ];
+        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+    }
+}
+
 // -- Tests -------------------------------------------------------------------
 
 #[cfg(test)]
@@ -192,5 +234,20 @@ mod tests {
             sectors: vec![SectorId(0)],
         };
         assert_eq!(sys.sectors, vec![SectorId(0)]);
+    }
+
+    #[test]
+    fn station_in_range_abs_is_precise_at_true_au() {
+        const AU_M: f64 = 1.495978707e11;
+        let station = StationDef {
+            id: StationId(0),
+            sector: SectorId(0),
+            name: "Forge Station".to_string(),
+            position: Position::new(AU_M as f32, 0.0, 0.0),
+            abs_m: [AU_M, 0.0, 0.0],
+            docking_radius: 100.0,
+        };
+        assert!(station.is_in_range_abs([AU_M + 80.0, 0.0, 0.0]));
+        assert!(!station.is_in_range_abs([AU_M + 120.0, 0.0, 0.0]));
     }
 }

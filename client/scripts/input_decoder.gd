@@ -28,6 +28,8 @@ static func decode_key(
 	selected_target_id: int,
 	selected_body_id: int,
 	nearby_gate_id: int,
+	nearby_station_id: int = -1,
+	docked_station_id: int = -1,
 ) -> Dictionary:
 	var f_index: int = _f_key_index(keycode)
 	if f_index >= 0:
@@ -92,6 +94,30 @@ static func decode_key(
 	## I key -> toggle the Inventory / Fitting panel (ADR-0032).
 	if keycode == KEY_I and player_ship_id >= 0:
 		return {"kind": "toggle_inventory_panel"}
+
+	## D key -> dock at the nearby station when in range.
+	if keycode == KEY_D and player_ship_id >= 0:
+		if nearby_station_id >= 0 and docked_station_id < 0:
+			return {"kind": "dock", "station_id": nearby_station_id}
+		return {"kind": "none"}
+
+	## U key -> undock from the current station.
+	if keycode == KEY_U and player_ship_id >= 0:
+		if docked_station_id >= 0:
+			return {"kind": "undock"}
+		return {"kind": "none"}
+
+	## B key -> build a packaged ship at the current station.
+	if keycode == KEY_B and player_ship_id >= 0:
+		if docked_station_id >= 0:
+			return {"kind": "build_packaged_ship", "station_id": docked_station_id}
+		return {"kind": "none"}
+
+	## Y key -> disassemble the currently-docked ship at the current station.
+	if keycode == KEY_Y and player_ship_id >= 0:
+		if docked_station_id >= 0:
+			return {"kind": "disassemble_ship", "station_id": docked_station_id}
+		return {"kind": "none"}
 
 	## Tab key -> toggle tactical overlay visibility (works regardless of
 	## whether a player ship exists yet).
