@@ -395,6 +395,10 @@ Ship reached zero HP in combat and was destroyed.
 
 **Replay:** remove the matching Entity from ECS and from `ship_index`.
 
+**Current downstream effect:** the `SimulationNode` tick pipeline immediately
+credits the killer ship's inventory with `ItemId::ScrapMetal` (ADR-0034 MVP:
+currently a fixed `1` per kill, no Wreck entity).
+
 ---
 
 ### `SectorTransitRequested`

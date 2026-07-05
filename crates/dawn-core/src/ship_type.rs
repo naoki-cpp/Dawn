@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 // ── ID ────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ShipTypeId(pub u32);
 
 // ── クラス ────────────────────────────────────────────────────────────────────

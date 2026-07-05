@@ -71,6 +71,17 @@ Station は初期段階では **NPC提供のみ**（プレイヤー建造不可�
 roadmap.md §12 の 9C で別途扱う。Assemble/Disassemble 自体は**無料**で
 何度でも往復可能（新規建造ではなく状態変換のため）。
 
+また、Station は「その場で操作を許可する地点」だけでは足りず、**Packaged Ship
+と Scrap Metal を置く最小インベントリ（保管先）**を持つ。そうしないと、
+Disassemble の生成物、Packaged Ship 建造の入力資源、建造の生成物の置き場所が
+曖昧になるため。MVP では `PlayerId` 単位の Station inventory を持てば十分で、
+最初から汎用倉庫や複雑な権限モデルまでは要らない。
+
+実装順としては、**Station の最小実装と利用可否判定を先に置き、その内側で
+Station inventory を置き、その上で Assemble/Disassemble と Packaged Ship 建造を
+順に有効化する**。建造コスト（Scrap Metal 消費）は「どこでも押せるコマンド」
+ではなく、Station 利用条件と Station inventory の上に乗るべきだからである。
+
 ### 3. Scrap Metal（資源シンク）
 
 Packaged Ship を**新規に建造する**ときに消費する生資源を `Scrap Metal` と
@@ -178,12 +189,17 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 
 ## 実装チェックリスト
 
-- [ ] dawn-core: `ItemId` enum（Module/PackagedShip/ScrapMetal。**Currencyは含まない**）
-- [ ] dawn-ecs: `InventoryComp.items` を `Vec<ModuleId>` → `BTreeMap<ItemId, u64>` へ一般化（ADR-0032 のデータモデルを置き換え）
 - [ ] dawn-core: 新規イベント（`PackagedShipBuilt`/`ShipAssembled`/`ShipDisassembled` 等、event-catalog.md に追記）
-- [ ] dawn-sector: `ShipDestroyed` 発生時に Scrap Metal を撃破者へ加算する経路
-- [ ] dawn-sector: Station（NPC提供の最小実装）+ Assemble/Disassemble コマンド・バリデーション（未艤装/無傷チェック）
-- [ ] dawn-sector: Packaged Ship 建造（Scrap Metal 消費）コマンド
+- [x] dawn-core: `ItemId` enum（Module/PackagedShip/ScrapMetal。**Currencyは含まない**）
+- [x] dawn-ecs: `InventoryComp.items` を `Vec<ModuleId>` → `BTreeMap<ItemId, u64>` へ一般化（ADR-0032 のデータモデルを置き換え）
+- [x] dawn-sector: `ShipDestroyed` 発生時に Scrap Metal を撃破者へ加算する経路（MVP は `1 kill = 1 Scrap Metal` の固定値）
+- [x] dawn-sector: スナップショット/Transit/PlayerFitting JSON を `InventoryComp.items: BTreeMap<ItemId, u64>` に追従
+- [ ] 「受動採取ではない」ことの再点検項目化（現状は取得経路が `ShipDestroyed` のみなのでコード読解で十分。別経路追加時に自動検証/CI 昇格を検討）
+- [ ] dawn-sector: Station（NPC提供の最小実装）
+- [ ] dawn-sector: Station 利用可否判定（NPC 最小版 `can_use`）
+- [ ] dawn-sector: Station inventory（`PackagedShip` / `ScrapMetal` の最小保管先）
+- [ ] dawn-sector: Assemble/Disassemble コマンド・バリデーション（未艤装/無傷チェック、入出力は Station inventory）
+- [ ] dawn-sector: Packaged Ship 建造（Scrap Metal 消費。Station 利用条件と Station inventory の上でのみ実行可能）
 - [ ] 新規クレート `dawn-market`: SQLite バックエンドの指値注文帳（bid/ask マッチング）・`PlayerId` 単位の Currency 台帳・`RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` 発行経路（Dependency DAG 上の位置は別途確認）
 - [ ] client: Packaged Ship のインベントリ表示・Station操作UI・Market閲覧UI（指値注文の発注・Currency残高表示）
 - [x] CONTEXT.md: `Item`/`Packaged Ship`/`Station`/`Scrap Metal`/`Currency` を追記済み（本セッション中）

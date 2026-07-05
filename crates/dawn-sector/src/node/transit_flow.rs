@@ -720,7 +720,9 @@ mod tests {
             .get::<&dawn_ecs::components::InventoryComp>(before_entity)
             .unwrap()
             .items
-            .len();
+            .values()
+            .copied()
+            .sum::<u64>();
         assert!(before_len > 0, "player ships spawn with a seeded inventory");
 
         from_node
@@ -745,7 +747,7 @@ mod tests {
             .get::<&dawn_ecs::components::InventoryComp>(after_entity)
             .unwrap();
         assert_eq!(
-            after.items.len(),
+            after.items.values().copied().sum::<u64>(),
             before_len,
             "inventory must carry over the gate, unlike tackle state"
         );

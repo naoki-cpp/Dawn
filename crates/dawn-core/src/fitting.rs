@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 // ── ID ────────────────────────────────────────────────────────────────────────
 
 /// ID identifying a module's kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ModuleId(pub u32);
 
 // ── Slot ──────────────────────────────────────────────────────────────────────

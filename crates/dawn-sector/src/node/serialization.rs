@@ -4,7 +4,7 @@
 //! expects live here, keeping the core simulation logic in `mod.rs` separate
 //! from the presentation layer.
 
-use dawn_core::{CelestialBodyKind, ShipId};
+use dawn_core::{CelestialBodyKind, ItemId, ShipId};
 use dawn_ecs::components::{FittingComp, HullComp, InventoryComp, ShipStatsComp};
 use dawn_event_store::store::EventStore;
 
@@ -96,8 +96,9 @@ impl<S: EventStore> SimulationNode<S> {
             }
         }
 
-        // Unfitted owned modules (ADR-0032), resolved to display info via
-        // module_registry -- InventoryComp only stores bare ModuleIds.
+        // Unfitted owned items (ADR-0034). For now the client only knows how
+        // to render module inventory rows, so non-module items are skipped
+        // until the Phase 9 UI lands.
         let inventory: Vec<serde_json::Value> = self
             .world
             .inner()
@@ -106,14 +107,19 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|inv| {
                 inv.items
                     .iter()
-                    .filter_map(|id| self.module_registry.get(id))
-                    .map(|def| {
-                        serde_json::json!({
-                            "module_id": def.id.0,
-                            "name"     : def.name,
-                            "kind"     : format!("{:?}", def.kind),
-                            "slot"     : format!("{:?}", def.slot),
-                        })
+                    .filter_map(|(item_id, count)| match item_id {
+                        ItemId::Module(module_id) => {
+                            self.module_registry.get(module_id).map(|def| {
+                                serde_json::json!({
+                                    "module_id": def.id.0,
+                                    "name"     : def.name,
+                                    "kind"     : format!("{:?}", def.kind),
+                                    "slot"     : format!("{:?}", def.slot),
+                                    "count"    : count,
+                                })
+                            })
+                        }
+                        ItemId::PackagedShip(_) | ItemId::ScrapMetal => None,
                     })
                     .collect()
             })

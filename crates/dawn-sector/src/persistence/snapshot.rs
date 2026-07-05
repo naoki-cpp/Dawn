@@ -66,11 +66,11 @@ pub struct ShipSnapshot {
     /// state is not lost on restart (which would allow escape).
     #[serde(default)]
     pub tackled_by: Vec<dawn_core::ShipId>,
-    /// Unfitted modules the pilot owns (ADR-0032). `#[serde(default)]` for
-    /// backward compatibility with snapshots taken before InventoryComp
+    /// Unfitted / unassembled items the pilot owns (ADR-0034). `#[serde(default)]`
+    /// for backward compatibility with snapshots taken before InventoryComp
     /// existed.
     #[serde(default)]
-    pub inventory: Vec<dawn_core::ModuleId>,
+    pub inventory: std::collections::BTreeMap<dawn_core::ItemId, u64>,
 }
 
 // ── Node-level snapshot ───────────────────────────────────────────────────────
@@ -142,7 +142,10 @@ mod tests {
                 capacitor: Some(250.0),
                 fitting: FittingSnapshot::empty(),
                 tackled_by: vec![],
-                inventory: vec![dawn_core::ModuleId(7)],
+                inventory: std::collections::BTreeMap::from([(
+                    dawn_core::ItemId::Module(dawn_core::ModuleId(7)),
+                    1,
+                )]),
             }],
         }
     }

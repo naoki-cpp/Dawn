@@ -16,6 +16,7 @@
 //! 4. Write a unit test in this module.
 
 use crate::fitting::{FittingSnapshot, ModuleId, SlotKind};
+use crate::item::ItemId;
 use crate::navigation::{AnchorId, JumpGateId, StarSystemId};
 use crate::ship_type::ShipTypeId;
 use crate::{Position, SectorId, ShipId, Tick, Velocity};
@@ -282,7 +283,7 @@ pub struct ShipFitted {
     /// 装備とインベントリの両方を同時に変えるため、新規イベント型を起こさず
     /// 既存の ShipFitted に同梱する。
     #[serde(default)]
-    pub inventory: Vec<ModuleId>,
+    pub inventory: Vec<ItemId>,
     pub tick: Tick,
 }
 

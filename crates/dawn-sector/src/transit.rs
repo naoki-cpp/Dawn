@@ -382,7 +382,7 @@ mod tests {
                 capacitor: Some(50.0),
                 fitting: FittingSnapshot::empty(),
                 tackled_by: vec![],
-                inventory: vec![],
+                inventory: std::collections::BTreeMap::new(),
             }),
             from: SectorId(0),
             to: SectorId(1),

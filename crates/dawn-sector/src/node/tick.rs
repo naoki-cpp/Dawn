@@ -1,8 +1,10 @@
-use dawn_core::DomainEvent;
+use dawn_core::{DomainEvent, ItemId};
 use dawn_ecs::systems::{CapacitorSystem, CombatSystem, LockSystem, MovementSystem, RepairSystem};
 use dawn_event_store::store::EventStore;
 
 use super::{SimulationNode, TickResult};
+
+const SCRAP_METAL_PER_SHIP_DESTROYED: u64 = 1;
 
 impl<S: EventStore> SimulationNode<S> {
     /// Execute one simulation tick.
@@ -69,6 +71,22 @@ impl<S: EventStore> SimulationNode<S> {
         // 6.5 Repair System — apply local repairs after damage for this tick.
         let repair = RepairSystem(&mut self.world, tick, &cap.repair_cycles_started);
 
+        for event in &combat.events {
+            let DomainEvent::ShipDestroyed(destroyed) = event else {
+                continue;
+            };
+            let Some(&killer_entity) = self.ships.index.get(&destroyed.killer_id) else {
+                continue;
+            };
+            if let Ok(mut inventory) =
+                self.world
+                    .inner_mut()
+                    .get::<&mut dawn_ecs::components::InventoryComp>(killer_entity)
+            {
+                inventory.add_item(ItemId::ScrapMetal, SCRAP_METAL_PER_SHIP_DESTROYED);
+            }
+        }
+
         // Remove destroyed ships from the ECS and all lookup maps.
         // CLAUDE.md §6: run the Bot System after Combat.
         for ship_id in &combat.destroyed {
@@ -106,6 +124,7 @@ impl<S: EventStore> SimulationNode<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{modules, ship_types};
     use dawn_core::{NodeId, Position, SectorBounds, SectorId, Tick, Velocity};
 
     fn mem_node() -> SimulationNode {
@@ -167,5 +186,76 @@ mod tests {
         node.tick();
         let last = node.event_store().all_records().last().unwrap();
         assert_eq!(last.event.tick(), Tick(2));
+    }
+
+    #[test]
+    fn ship_destroyed_immediately_credits_scrap_metal_to_the_killer_inventory() {
+        let mut node = mem_node();
+        for def in modules::all_modules() {
+            node.register_module(def);
+        }
+        for def in ship_types::all_ship_types() {
+            node.register_ship_type(def);
+        }
+
+        let killer_player = node.next_player_id();
+        let killer = node.spawn_player_ship_at_pub(killer_player, Position::ORIGIN);
+        let (_bot_player, victim) = node.spawn_bot_ship(Position::new(500.0, 0.0, 0.0));
+        let killer_entity = *node.ships.index.get(&killer).unwrap();
+        let before = node
+            .world
+            .inner()
+            .get::<&dawn_ecs::components::InventoryComp>(killer_entity)
+            .unwrap()
+            .item_count(ItemId::ScrapMetal);
+
+        let victim_entity = *node.ships.index.get(&victim).unwrap();
+        if let Some(mut hull) = node
+            .world
+            .get_mut::<dawn_ecs::components::HullComp>(victim_entity)
+        {
+            hull.set_hp(0.0, 0.0, 1.0);
+        }
+
+        let lock_cmd = dawn_core::LockOnCommand {
+            ship_id: killer,
+            target_id: victim,
+        };
+        for _ in 0..5 {
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd));
+        }
+        assert!(
+            node.activate_module_owned(
+                killer_player,
+                dawn_core::ActivateModuleCommand {
+                    ship_id: killer,
+                    module_id: dawn_core::ModuleId(1),
+                    slot: dawn_core::SlotKind::High,
+                    target_ship_id: Some(victim),
+                }
+            )
+            .is_ok(),
+            "weapon activation should succeed once the lock has completed"
+        );
+
+        let destroyed = (0..25).any(|_| {
+            node.tick_with_lock_commands(std::slice::from_ref(&lock_cmd))
+                .events
+                .iter()
+                .any(
+                    |e| matches!(e, DomainEvent::ShipDestroyed(d) if d.ship_id == victim && d.killer_id == killer),
+                )
+        });
+        assert!(
+            destroyed,
+            "combat should eventually destroy the victim ship"
+        );
+        let after = node
+            .world
+            .inner()
+            .get::<&dawn_ecs::components::InventoryComp>(killer_entity)
+            .unwrap()
+            .item_count(ItemId::ScrapMetal);
+        assert_eq!(after, before + SCRAP_METAL_PER_SHIP_DESTROYED);
     }
 }
