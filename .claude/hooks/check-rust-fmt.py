@@ -44,7 +44,7 @@ def main() -> int:
     if result.returncode != 0:
         sys.stderr.write(
             f"Note: {path} is not rustfmt-clean. Run `cargo fmt` before committing "
-            "(AI_DEVELOPMENT_GUIDE.md §8).\n"
+            "(AI_DEVELOPMENT_GUIDE.md \"Testing Rules\").\n"
         )
         return 2
 

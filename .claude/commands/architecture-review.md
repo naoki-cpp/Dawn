@@ -1,117 +1,158 @@
-# /architecture-review — シニアアーキテクト視点の定期保守レビュー
+# /architecture-review — Periodic maintenance review from a senior-architect viewpoint
 
-このスキルは `docs/architecture/architecture-review-server.md`（Rust クレート）と
-`architecture-review-client.md`（Godot クライアント）を**最新のコードベースに対して
-再計測・再評価し、ファイル自体を更新する**。
+This skill re-measures and re-evaluates
+`docs/architecture/architecture-review-server.md` (Rust crates) and
+`docs/architecture/architecture-review-client.md` (Godot client) against the
+latest codebase, **updating those files in place**.
 
-> **これは分析スキルである。コードは変更しない。**
-> `/simplify` が「散らかったコードを実際に直す」のに対し、本スキルは
-> 「コードベース全体の健全性を棚卸しし、所見とロードマップを文書に記録する」ことに専念する。
-> 直す作業は、本レビューが起票したロードマップ項目を別途（`/simplify` や手動リファクタで）実施する。
-> この分離は意図的：レビューの差分は文書のみに閉じ、レビューと改修を別 PR にできる。
+> **This is an analysis skill. It changes no code.**
+> Where `/simplify` actually fixes messy code, this skill takes stock of
+> codebase health and records findings and a roadmap in the review documents.
+> Fixes happen later, in separate PRs, via the roadmap items this review files
+> (through `/simplify` or manual refactoring). The separation is deliberate:
+> the review diff stays docs-only, so review and remediation can be separate
+> PRs.
 
-引数（任意）:
-- `server` = サーバー側（`architecture-review-server.md`）のみ
-- `client` = クライアント側（`architecture-review-client.md`）のみ
-- 省略 = 両方
+Arguments (optional):
+- `server` = server side only (`architecture-review-server.md`)
+- `client` = client side only (`architecture-review-client.md`)
+- omitted = both
 
 ---
 
-## Phase 0 — ファイルサイズの再計測と差分
+## Phase 0 — Re-measure file sizes and diff against the tables
 
-対象スコープのソース行数を実測し、レビュー文書の「ファイルサイズ一覧」表と照合する。
+Measure actual source line counts for the target scope and compare with the
+"file size" tables in the review document.
 
-サーバー:
+Server:
 ```bash
 find crates -name '*.rs' -not -path '*/target/*' | xargs wc -l | sort -rn | head -50
 ```
-クライアント:
+Client:
 ```bash
 find client/scripts -name '*.gd' | xargs wc -l | sort -rn
 ```
 
-確認項目:
-- 表に**ある**が実ファイルが消滅 → 表から削除（リネーム・統合の追跡）。
-- 実ファイルが表に**ない**（新規追加） → 表に追加し判定を付ける。
-- 行数が表と乖離 → 実測値に更新。**ここが最も陳腐化しやすい**（機能追加で静かに増える）。
+Check:
+- In the table but the file is gone → remove the row (track renames/merges).
+- On disk but not in the table (new file) → add a row with a verdict.
+- Line count drifted → update to the measured value. **This is the most
+  common staleness** — counts creep up silently as features land.
 
-> 表の行数は手で書かれているため、前回レビュー以降の機能追加（例: ADR 実装）で
-> ほぼ必ずずれている。実測を正とする。
+> The table counts are hand-written, so they are almost always stale after
+> feature work (e.g. ADR implementations). The measurement is the truth.
 
-## Phase 1 — 健全性の再評価（🟢/🟡/🔴）
+## Phase 1 — Re-evaluate health (green / yellow / red)
 
-各ファイルに判定を付け直す。判定は厳密な行数カットオフではなく**責務の凝集度を主、規模を従**とする：
+Re-grade every file. The verdict weighs **cohesion of responsibility first,
+size second** — not a strict line cutoff:
 
-- 🟢 **健全**: 単一責務で凝集している。規模が小さい、または大きくても「分割すると不自然」な単一の幾何計算・状態機械など。
-- 🟡 **要観察**: 規模が増えてきた（目安 ~500行超）、責務が複数混ざり始めた、または分割候補だが「今はまだ早い」もの。理由と「いつ分割するか」を書く。
-- 🔴 **要対応**: 明確に閾値（目安 ~700行）を超え、かつ複数責務が同居。Phase 2 で改善ロードマップに起票する。
+- **Green — healthy**: single cohesive responsibility. Small, or large but
+  "splitting would be unnatural" (a single geometry kernel, a state machine).
+- **Yellow — watch**: growing (~500+ lines as a guide), responsibilities
+  starting to mix, or a split candidate where "not yet" is the right call.
+  Record the reason and the trigger for when to split.
+- **Red — act**: clearly past the threshold (~700+ lines as a guide) AND
+  multiple responsibilities cohabiting. File it on the improvement roadmap in
+  Phase 2.
 
-あわせて「現状評価」の総合グレード表（観点: クレート構成 / ファイルサイズ / 型設計 / 重複 / Rust固有 / AI開発由来。クライアントは ファイル分割 / 責務集約 / 重複 / 結合度 / テストカバレッジ）を、現状に合わせて更新する。
+Also refresh the overall grade table ("current assessment") — server axes:
+crate structure / file size / type design / duplication / Rust-specific /
+AI-development-induced; client axes: file split / responsibility cohesion /
+duplication / coupling / test coverage.
 
-### グレード基準（A〜F・±付き）
+### Grade scale (A–F with ±)
 
-各観点と総合グレードは、**負債の有無ではなく「未解決かつトリガーも判断もない負債」の量**で付ける。
-許容判断や再評価トリガーが文書化済みの負債は減点しない（管理されているため）。
+Grades measure **the amount of unmanaged debt (no decision, no trigger)** —
+not the mere existence of debt. Debt that has a documented acceptance decision
+or re-evaluation trigger does not lower the grade (it is managed).
 
-| グレード | 意味 |
+| Grade | Meaning |
 |---|---|
-| **A** | 設計通り。未管理の負債ゼロ。その観点の理想形。 |
-| **A−** | ほぼ理想。残るのは**判断・トリガー付きで許容済み**の軽微な負債のみ。 |
-| **B+** | 良好だが、**観察中（🟡）**の項目が複数、または分割途上の大ファイルが残る。実害はまだない。 |
-| **B** | 機能はするが構造的負債が顕在。改善の方向は定まっているが道半ば。 |
-| **B−** | 顕在負債が複数同居。是正に着手済みだが完了していない。 |
-| **C** | 要改善が明確。命名汚染・大きな重複・未分離の god object・🔴 ファイルが存在し、ロードマップ化が必要。 |
-| **D / F** | 設計が破綻（DAG 逆流・全体が1ファイル・テスト皆無など）。本プロジェクトでは想定しないが、基準として置く。 |
+| **A** | As designed. Zero unmanaged debt. The ideal for that axis. |
+| **A−** | Near-ideal. Only minor debt that is **accepted with a decision and trigger**. |
+| **B+** | Good, but several items **under watch (yellow)** or large files mid-split. No harm yet. |
+| **B** | Works, but structural debt is visible. Direction is set, journey incomplete. |
+| **B−** | Multiple visible debts coexist. Remediation started but unfinished. |
+| **C** | Clear need for improvement: naming pollution, large duplication, an unsplit god object, or red files. Needs roadmap entries. |
+| **D / F** | Design is broken (DAG inversion, everything in one file, no tests). Not expected in this project, but defined as the floor. |
 
-`±` の使い分け: バンド内で「上澄み」なら `+`、「次バンドに片足」なら `−`。
-**総合グレードは最弱の観点に引きずられる**（平均ではなく、ボトルネック観点 ±1 を目安に）。
+`±` within a band: top of the band → `+`, one foot in the next band down → `−`.
+**The overall grade is dragged by the weakest axis** (bottleneck axis ±1, not
+an average).
 
-判定の根拠は表の「理由」欄に、その時点の**具体ファイル名・問題 ID・行数**で書く（「良好」だけにしない）。
-グレードを動かしたときは、何が解消/悪化してそのバンドに移ったかを一行添える。
-（基準表には個別のファイル名・問題 ID を埋め込まない——コードで変わるため、それらは理由欄にだけ書く。）
+Justify each grade in the "reason" column with concrete file names, issue IDs,
+and line counts as of this review (never just "good"). When a grade moves,
+add one line on what got fixed/worse to move it. Keep the scale table itself
+free of file names and issue IDs — those change with the code and belong only
+in the reason column.
 
-評価の観点（過去の所見が使っている軸）:
-- **クレート DAG / 依存方向**: `architecture.md` の DAG と矛盾していないか。上位 Context が下位に依存していないか。
-- **重複**: 同型ロジックのコピー（特に2バイナリ間グルー、イベント↔JSON 変換など）。
-- **Rust 固有**: 不要な `Box<dyn>` / `Mutex`、`inner()` 脱出、巨大 enum のサイズ非対称（`Box` 化候補）。
-- **AI 開発由来**: 命名汚染、薄いラッパーの過剰生成、場当たり的特殊化。
-- **テスト**（クライアント）: シーンツリー/ネットワーク非依存の純粋ロジックがテストされているか。
+Evaluation axes used by past findings:
+- **Crate DAG / dependency direction**: consistent with architecture.md's DAG?
+  No upper context depending on a lower one?
+- **Duplication**: copied logic of the same shape (two-binary glue,
+  event↔JSON conversion, etc.).
+- **Rust-specific**: needless `Box<dyn>` / `Mutex`, `inner()` escapes, large
+  enum size asymmetry (`Box` candidates).
+- **AI-development-induced**: naming pollution, excess thin wrappers, ad-hoc
+  specialization.
+- **Tests** (client): is scene-tree/network-free pure logic tested?
 
-## Phase 2 — 問題の棚卸し（ID 付き・根本原因・判断・再評価トリガー）
+## Phase 2 — Issue inventory (IDs, root cause, decision, re-evaluation trigger)
 
-既存の問題一覧（サーバー: `M-`/`L-`/`R-`/`P-`、クライアント: `C-`）を引き継ぐ。**ID 体系と採番の連続性を必ず維持する**（新規問題は次番号を採る）。
+Carry the existing issue lists forward (server: `M-`/`L-`/`R-`/`P-`; client:
+`C-`). **Preserve the ID scheme and numbering continuity** — new issues take
+the next number.
 
-各問題は次の3点を必ず持つ：
-1. **根本原因**: 表層（このファイルが大きい）ではなく構造的な原因（共有置き場の欠如、など）。
-2. **判断**: 次のいずれか。
-   - **直す**（改善ロードマップに起票 → 別途 `/simplify` や手動リファクタで実施）
-   - **保留**（**再評価トリガー**を必ず添える＝「何が起きたら着手するか」。トリガーのない保留は禁止）
-   - **許容**（なぜ費用対効果が見合わないかを、過去の却下事例〔`dawn-proto` 不採用・P4-3 スキップ等〕と整合する形で）
-3. 前回からの**状態遷移**: 解消した問題は「改善ロードマップ > 完了済み」表へ移し、完了日と内容を記録する。
+Every issue must carry three things:
+1. **Root cause**: structural, not surface ("no shared home for X exists",
+   not "this file is big").
+2. **Decision**, one of:
+   - **Fix** (file on the improvement roadmap → executed later via
+     `/simplify` or manual refactor)
+   - **Defer** (must include a **re-evaluation trigger** — "what happening
+     would make us start". A defer without a trigger is forbidden)
+   - **Accept** (why the cost/benefit doesn't pay, consistent with past
+     rejections such as the `dawn-proto` non-adoption or the P4-3 skip)
+3. **State transition** since last review: resolved issues move to the
+   "improvement roadmap > completed" table with date and description.
 
-> 判断は CLAUDE.md / `AI_DEVELOPMENT_GUIDE.md` の方針（新 Crate 追加チェック・8D 最小化・反グラインド等）と矛盾しないこと。挙動変更を要する改善は「ADR を起票せよ」と書くに留め、本スキルでは ADR を書かない。
+> Decisions must not contradict CLAUDE.md / AI_DEVELOPMENT_GUIDE.md policy
+> (new-crate checklist, 8D minimization, anti-grind, etc.). Improvements that
+> change behavior get "file an ADR" written down — this skill never writes
+> the ADR itself.
 
-## Phase 3 — レビュー文書を更新する
+## Phase 3 — Update the review document
 
-対象の `architecture-review-*.md` を**その場で**更新する：
-- フロントマターの `date` を今日＋一行要約に更新（例: `2026-06-24（R-2 起票・main.gd 1255→1239 計測更新）`）。
-- 「現状評価」グレード表・「ファイルサイズ一覧」・「問題一覧」・「改善ロードマップ（完了済み＋保留）」を Phase 0〜2 の結果で書き換える。
-- 既存の文体・表構造・絵文字判定・ID を踏襲する（新フォーマットを発明しない）。
+Update the target `architecture-review-*.md` in place:
+- Front-matter `date` → today plus a one-line summary
+  (e.g. `2026-06-24 (filed R-2; main.gd 1255→1239 remeasured)`).
+- Rewrite the grade table, file-size tables, issue list, and improvement
+  roadmap (completed + deferred) from the Phase 0–2 results.
+- Keep the existing style, table structure, verdict markers, and IDs — do not
+  invent a new format.
 
 ---
 
-## ガードレール（このスキル固有・必須）
+## Guardrails (specific to this skill — mandatory)
 
-- **コードを 1 行も変更しない。** 変更するのは `docs/architecture/architecture-review-*.md` のみ。
-  改修が必要なら問題一覧／ロードマップに**起票するだけ**。
-- **CLAUDE.md / `AI_DEVELOPMENT_GUIDE.md` / `docs/adr/` を書き換えない**（参照はする）。
-- **ID と採番の連続性を壊さない。** 過去の `M-`/`L-`/`R-`/`C-` を消したり振り直したりしない。
-- 行数・判定は**必ず実測**（`wc -l`）に基づく。記憶や前回値で書かない。
-- 保留にはトリガーを必ず付ける。「無理に直す」ことも「曖昧に保留する」こともしない。
+- **Change zero lines of code.** Only `docs/architecture/architecture-review-*.md`
+  may change. If remediation is needed, **file it** on the issue list /
+  roadmap — nothing more.
+- **Do not edit CLAUDE.md / AI_DEVELOPMENT_GUIDE.md / docs/adr/** (reading is
+  fine).
+- **Never break ID continuity.** Do not delete or renumber past `M-`/`L-`/
+  `R-`/`P-`/`C-` entries.
+- Line counts and verdicts come from **actual measurement** (`wc -l`), never
+  from memory or the previous values.
+- Every defer carries a trigger. Neither force a fix nor defer vaguely.
 
-## 完了報告
+## Completion report
 
-- 計測更新の要点（消滅/新規/乖離の件数）、グレードの変化、新規起票/解消した問題 ID を簡潔にまとめる。
-- 文書のみの変更なのでテスト実行は不要。`git diff --stat docs/architecture/` で差分範囲を提示する。
-- コミットするかはユーザーに確認する（英語・Conventional Commits、例:
-  `docs(architecture): refresh server review — recount sizes, file R-2`）。
+- Summarize: measurement changes (gone / new / drifted counts), grade moves,
+  issue IDs filed and resolved.
+- Docs-only change, so no test run needed. Show the diff scope with
+  `git diff --stat docs/architecture/`.
+- Ask the user before committing (English, Conventional Commits, e.g.
+  `docs(architecture): refresh server review — recount sizes, file R-2`).

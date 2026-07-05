@@ -133,6 +133,9 @@ Keep this flow intact unless an ADR changes it:
 Do not merge command and event types. Do not invent rejection events for facts
 that never happened.
 
+Use the `/add-event` skill when introducing a new event and `/remove-event`
+when deleting a deprecated one — they cover every pipeline touchpoint.
+
 ## Crate Boundaries
 
 Keep dependencies one-way. If a change needs a new dependency, check the
@@ -162,7 +165,7 @@ Use the same discipline for features and bugs:
 
 Before changing invariants, crate responsibilities, event schemas, tick order,
 or AI steering files, check the ADR index and get human approval. If the change
-is architectural, record the decision in `docs/adr/`.
+is architectural, record the decision in `docs/adr/` (use the `/new-adr` skill).
 
 For hard bugs, follow the `diagnosing-bugs` skill:
 
@@ -190,7 +193,8 @@ For hard bugs, follow the `diagnosing-bugs` skill:
   reject invariant-breaking input), `C-GOOD-ERR` (error variants carry
   context), and `C-CRATE-DOC`/`C-EXAMPLE` (new crates get a crate-level doc
   example). Note any deliberately-skipped item in the PR description rather
-  than silently ignoring it. See #82 and #83 for the audit pattern.
+  than silently ignoring it. See #82 and #83 for the audit pattern. The
+  `/rust-api-audit` skill runs this audit end to end.
 
 ## Encoding Rules
 

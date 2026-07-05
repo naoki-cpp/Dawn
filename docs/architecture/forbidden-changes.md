@@ -1,6 +1,7 @@
 # Forbidden Changes Catalog
 
-> Canonical reference for AI_DEVELOPMENT_GUIDE.md §10. The guide keeps only the
+> Canonical reference behind the Forbidden Changes list in AI_DEVELOPMENT_GUIDE.md
+> ("Architecture Invariants"). The guide keeps only the
 > FBD-00x ID list and one-line summaries; this file holds the details and code
 > examples (ADR-0030). FBD-00x IDs are stable and must not be renumbered.
 

@@ -1,87 +1,78 @@
-# /remove-event — 廃止イベントの完全削除
+# /remove-event — Fully delete a deprecated event
 
-**引数:** 削除するイベント名（例: `/remove-event ShipMoved`）
+**Argument:** the event name to delete (e.g. `/remove-event ShipMoved`)
 
-このスキルは指定された `DomainEvent` バリアントとその構造体を
-コードベース・テスト・ドキュメントから完全に削除する。
+This skill removes the given `DomainEvent` variant and its struct from the
+codebase, tests, and documentation completely.
 
-**前提:** プレリリース段階（永続化された外部ユーザーのイベントログが存在しない）。
-リリース後に実行する場合は docs/architecture/event-schema-evolution.md「リリース以降に破壊的変更が必要な場合の手順」に従うこと。
+**Precondition:** pre-release stage (no persisted external-user event logs
+exist). After release, follow the post-release breaking-change procedure in
+`docs/architecture/event-schema-evolution.md` instead.
 
 ---
 
-## 手順
+## Steps
 
-### Step 1: 削除対象の確認
+### Step 1: Confirm the deletion target
 
-`crates/dawn-core/src/events.rs` を読み、以下を確認する:
-- `pub struct <EventName> { ... }` が存在するか
-- `DomainEvent::<EventName>(...)` バリアントが存在するか
-- `#[deprecated]` または `@deprecated` が付いているか（付いていない場合は削除の意図を確認する）
+Read `crates/dawn-core/src/events.rs` and confirm:
+- `pub struct <EventName> { ... }` exists
+- the `DomainEvent::<EventName>(...)` variant exists
+- it carries `#[deprecated]` or an `@deprecated` note (if not, confirm the
+  intent to delete with the user first)
 
-### Step 2: 全参照箇所の洗い出し
+### Step 2: Enumerate every reference
 
-以下のパターンで grep して参照箇所を全て列挙する:
+Grep for the bare name across the whole repo — **this grep is the source of
+truth**, not the list below:
 
 ```
-<EventName>
+rg -l '<EventName>' crates docs client CLAUDE.md AI_DEVELOPMENT_GUIDE.md
 ```
 
-対象範囲: `crates/`, `docs/`, `client/`, `CLAUDE.md`
+Typical reference sites (verify against the grep; the layout moves over time):
+- `crates/dawn-core/src/events.rs` — struct definition, enum variant, and the
+  match arms in `ship_id()` / `tick()`
+- `crates/dawn-sector/src/node/apply_event.rs` — `apply_event()` match arm
+- `crates/dawn-sector/src/node/serialization.rs` — event↔JSON conversion arms
+- `crates/dawn-sector/src/` and `crates/dawn-simulation/src/serve/` — tests
+  and assertions that spawn or expect the event
+- `crates/dawn-event-store/src/file.rs`, `memory.rs` — test helpers
+- `crates/dawn-replication/src/` — bus / replica test helpers
+- `docs/architecture/event-catalog.md` — event table row and detail section
+- `docs/architecture/tick-model.md` — step descriptions and example code
+- `docs/adr/` — the deprecation-procedure text in the owning ADR
+- `AI_DEVELOPMENT_GUIDE.md` / `CLAUDE.md` — example code, notes
 
-典型的な参照場所:
-- `crates/dawn-core/src/events.rs` — struct 定義、enum バリアント、`ship_id()`/`tick()` メソッドの match アーム
-- `crates/dawn-simulation/src/node.rs` — `apply_event()` の match アーム
-- `crates/dawn-simulation/src/ws_server.rs` — JSON 変換の match アーム
-- `crates/dawn-simulation/src/spawner.rs` — テスト・アサーションのコメント
-- `crates/dawn-actor/src/event_store_actor.rs` — テストヘルパー
-- `crates/dawn-actor/src/replication_bus.rs` — テストヘルパー
-- `crates/dawn-event-store/src/file.rs` — テストヘルパー
-- `crates/dawn-event-store/src/memory.rs` — テストヘルパー
-- `docs/architecture/event-catalog.md` — イベント一覧・詳細セクション
-- `docs/architecture/tick-model.md` — ステップ説明・例示コード
-- `docs/adr/` — 廃止手順の記述
-- `CLAUDE.md` — 例示コード・注記
+### Step 3: Delete the core definitions
 
-### Step 3: コアコードの削除
+Edit `crates/dawn-core/src/events.rs`:
 
-`crates/dawn-core/src/events.rs` を編集する:
+1. Delete `pub struct <EventName> { ... }`
+2. Delete the `DomainEvent::<EventName>(<EventName>)` variant
+3. Delete the `ship_id()` match arm for it
+4. Delete the `tick()` match arm for it
+5. Remove any now-unneeded `#[allow(deprecated)]` annotations
 
-1. `pub struct <EventName> { ... }` を削除
-2. `DomainEvent::<EventName>(<EventName>)` バリアントを削除
-3. `ship_id()` メソッドの `DomainEvent::<EventName>(e) => e.ship_id` アームを削除
-4. `tick()` メソッドの `DomainEvent::<EventName>(e) => e.tick` アームを削除
-5. `#[allow(deprecated)]` アノテーションが残っていれば削除
+### Step 4: Delete the runtime arms
 
-### Step 4: シミュレーション層の削除
+- `crates/dawn-sector/src/node/apply_event.rs`: remove the `apply_event()`
+  match arm; fix any comments that reference the event
+- `crates/dawn-sector/src/node/serialization.rs`: remove the JSON conversion
+  arm(s)
 
-`crates/dawn-simulation/src/node.rs`:
-- `apply_event()` の `DomainEvent::<EventName>(_) => { ... }` アームを削除
-- コメント内の参照を適切な表現に修正
+### Step 5: Replace test-helper usages
 
-`crates/dawn-simulation/src/ws_server.rs`:
-- `DomainEvent::<EventName>(_) => return None` などのアームを削除
+Wherever a test helper constructs `<EventName>` just to have "some event"
+(event-store and replication tests), replace it with an existing event —
+usually `VelocityChanged` or `ShipSpawned`:
 
-`crates/dawn-simulation/src/spawner.rs`:
-- テストのアサーションメッセージ内の参照を修正
-
-### Step 5: テストヘルパーの置き換え
-
-以下の各ファイルで `<EventName>` を使っているテストヘルパーを
-既存の代替イベント（通常は `VelocityChanged` または `ShipSpawned`）で置き換える:
-
-- `crates/dawn-actor/src/event_store_actor.rs`
-- `crates/dawn-actor/src/replication_bus.rs`
-- `crates/dawn-event-store/src/file.rs`
-- `crates/dawn-event-store/src/memory.rs`
-
-置き換えパターン:
 ```rust
 // Before
 use dawn_core::events::<EventName>;
 DomainEvent::<EventName>(<EventName> { ship_id: ..., ... })
 
-// After (VelocityChanged で代替する場合)
+// After (using VelocityChanged)
 use dawn_core::{events::VelocityChanged, Velocity};
 DomainEvent::VelocityChanged(VelocityChanged {
     ship_id : ShipId::new(NodeId(0), n),
@@ -90,46 +81,51 @@ DomainEvent::VelocityChanged(VelocityChanged {
 })
 ```
 
-### Step 6: ドキュメントの更新
+These tests exercise log mechanics, not event semantics, so any event works
+as a substitute.
+
+### Step 6: Update the docs
 
 `docs/architecture/event-catalog.md`:
-- イベント一覧テーブルから `<EventName>` の行を削除
-- `@deprecated` 注記ブロックを削除
-- `### <EventName>` 詳細セクションを削除（存在する場合）
+- Delete the event's row from the event table
+- Delete its `@deprecated` note block
+- Delete its detail section if one exists
 
 `docs/architecture/tick-model.md`:
-- `@deprecated` 注記・例示コードを削除または修正
-- §4「tick フィールドの必須化」の例示コードが削除したイベントを使っていれば修正
+- Remove or fix `@deprecated` notes and example code using the event
 
 `docs/architecture/entity-model.md`:
-- 削除したイベント名を参照している箇所を修正
+- Fix any references to the deleted event name
 
-対応 ADR（`docs/adr/ADR-XXXX-*.md`）:
-- 「廃止手順」セクションを「削除済み」に書き換え
-- 実装チェックリストを `[x]` に更新
+Owning ADR (`docs/adr/ADR-XXXX-*.md`):
+- Rewrite the "deprecation procedure" section to "deleted"
+- Flip the implementation-checklist item to `[x]`
 
-`CLAUDE.md`:
-- 例示コードに削除したイベント名が残っていれば修正
+`AI_DEVELOPMENT_GUIDE.md` / `CLAUDE.md`:
+- Fix any example code still naming the event
 
-### Step 7: ビルド検証
+### Step 7: Verify the build
 
 ```bash
 cargo test --workspace
 ```
 
-エラーが出た場合は Step 2 の grep 漏れがある。エラーメッセージの参照先を修正して再実行する。
+Any error means Step 2 missed a reference. Fix what the error points at and
+re-run.
 
-### Step 8: コミット
+### Step 8: Commit
 
 ```bash
-git add -p   # 変更を確認しながらステージング
+git add -p   # stage while reviewing each hunk
 git commit -m "refactor(dawn-core): remove deprecated <EventName> event (ADR-XXXX)"
 ```
 
 ---
 
-## 注意事項
+## Notes
 
-- Step 2 の grep で見つかった参照を 1 件でも見落とすとコンパイルエラーになる
-- `#[allow(deprecated)]` アノテーションが残ると警告が出続ける
-- テストヘルパーの置き換えは「イベントのセマンティクス」ではなく「ログ操作のテスト」が目的なので、どのイベントで代替してもよい
+- Missing even one reference from the Step 2 grep produces a compile error —
+  that is the safety net, not a failure of the procedure.
+- A leftover `#[allow(deprecated)]` keeps emitting warnings; sweep them.
+- Run the final `rg '<EventName>'` once more after Step 7 to catch doc-only
+  stragglers that the compiler cannot see.

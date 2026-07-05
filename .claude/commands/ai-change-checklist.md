@@ -1,69 +1,83 @@
-# /ai-change-checklist — コード変更前チェックリスト
+# /ai-change-checklist — Pre-change checklist for code changes
 
-このスキルはコードを変更する前に確認すべき項目を順に点検する。
-AI_DEVELOPMENT_GUIDE.md §9 の正典（手続き）であり、ガイド本体にはこのスキルへの
-ポインタのみを残す（ADR-0030）。
+Run through this checklist before changing code. This skill is the canonical
+procedure delegated from `AI_DEVELOPMENT_GUIDE.md` (ADR-0030); the guide keeps
+only a pointer to it.
 
-**全項目に「問題なし」と判断できない場合は変更を止め、確認を求めること。**
+**If any item cannot be answered "no problem", stop and ask the human before
+changing anything.**
 
 ---
 
-## 変更前の確認
+## Before any change
 
 ```
-□ 変更するCrateを特定した
-□ そのCrateの責務を Crate別責務早見表（AI_DEVELOPMENT_GUIDE.md §11）で確認した
-□ 変更によって影響を受けるCrateを Dependency DAG（§3）で特定した
-□ 変更が現在のスコープ内であることを確認した（§1）
-□ 変更が Architecture Invariants（§2）のいずれかを破らないことを確認した
-□ 変更が Forbidden Changes（docs/architecture/forbidden-changes.md / FBD-001〜009）に
-  該当しないことを確認した
+[ ] Identified which crate(s) the change touches
+[ ] Checked that crate's responsibility in AI_DEVELOPMENT_GUIDE.md
+    "Crate Boundaries" (and docs/architecture/architecture.md for the DAG)
+[ ] Identified downstream crates affected via the dependency DAG
+    (cargo tree if in doubt)
+[ ] Confirmed the change is in scope for the current roadmap phase
+    (docs/process/roadmap.md)
+[ ] Confirmed the change does not violate any Architecture Invariant
+    (AI_DEVELOPMENT_GUIDE.md "Architecture Invariants": INV-001..006,
+    INV-MOVE, INV-TiDi, and the unnumbered invariants listed there)
+[ ] Confirmed the change is not a Forbidden Change
+    (docs/architecture/forbidden-changes.md, FBD-001..009)
 ```
 
-## イベントを追加・変更する場合の追加確認
+## Extra checks when adding or changing an Event
+
+Prefer running `/add-event` for new events — it walks the full workflow.
+Minimum bar either way:
 
 ```
-□ docs/architecture/event-catalog.md の更新を計画した
-□ 新Eventは dawn-core/src/events.rs に追加した（他のCrateに追加していない）
-□ 新Eventに tick: Tick フィールドが含まれる（ShipMoveカテゴリのEvent）
-□ 新Eventのフィールドは全て Option ではなく必須フィールドで設計した
-  （Optional フィールドは後から追加、最初から Optional にしない）
-□ 対応する Command が dawn-core/src/commands.rs に存在する
-□ 既存 Event を変更する場合: リリース済みか確認した
-  - プレリリース（現在）→ 破壊的変更を直接行ってよい（Upcaster 不要）
-  - リリース以降       → docs/architecture/event-schema-evolution.md
-    「リリース以降に破壊的変更が必要な場合の手順」に従う
+[ ] Planned the docs/architecture/event-catalog.md update (same PR as code)
+[ ] New event lives in crates/dawn-core/src/events.rs (never another crate)
+[ ] New event carries tick: Tick (INV-005)
+[ ] All initial fields are required, not Option
+    (Option is only for fields added after release — never at creation)
+[ ] A corresponding Command exists in crates/dawn-core/src/commands.rs
+    (commands and events never share a type — INV-006)
+[ ] If changing an existing event: checked release status
+    - Pre-release (current): direct breaking change is allowed, no upcaster
+    - Post-release: follow docs/architecture/event-schema-evolution.md
+      "post-release breaking change procedure"
 ```
 
-## 新しいCrateを追加する場合の追加確認
+## Extra checks when adding a new crate
 
 ```
-□ 新Crateの追加が既存Crateの責務分割で対応できないことを確認した
-□ 新Crateの Dependency DAG 上の位置を決定した
-□ 循環依存が発生しないことを確認した（cargo tree で検証）
-□ AI_DEVELOPMENT_GUIDE.md §11（Crate別責務早見表）を更新した
-□ 対応するADRを docs/adr/ に作成した
+[ ] Confirmed the need cannot be met by re-splitting existing crate
+    responsibilities
+[ ] Decided the new crate's position in the dependency DAG
+[ ] Verified no dependency cycle (cargo tree)
+[ ] Updated AI_DEVELOPMENT_GUIDE.md "Crate Boundaries" and
+    docs/architecture/architecture.md
+[ ] Wrote an ADR in docs/adr/ (use /new-adr)
 ```
 
-## テストの確認
+## Test checks
 
 ```
-□ 変更した全ての pub fn に対応するテストが存在する
-□ テスト関数名が「何が保証されるか」を説明している
-□ cargo test --workspace がゼロエラーで通過することを確認した
-□ 変更したADRが存在する場合、そのADRに記載された不変条件のテストが存在する
-□ client/scripts/ を変更した場合: シーンツリー無依存の純粋関数なら
-  client/test/ にGdUnit4テストを追加した（§8「Godot クライアントのテスト方針」参照）
-□ client/scripts/ のシーンツリー依存部分を変更した場合: テストの代わりに
-  Godot エディタでの確認内容（または確認できなかった旨）をPR説明に明記した
+[ ] Every changed pub fn has a corresponding test (FBD-007)
+[ ] Test names describe the guarantee, not the implementation step
+[ ] cargo test --workspace passes with zero errors
+[ ] If an ADR with an implementation checklist is involved, its invariant
+    tests exist
+[ ] client/scripts/ change with scene-tree-free pure logic: GdUnit4 test
+    added under client/test/ (docs/process/godot-client-testing.md)
+[ ] client/scripts/ change that depends on the scene tree: manual Godot
+    editor verification (or its absence) is stated in the PR description
+[ ] PR adds/changes a pub item: run /rust-api-audit before opening the PR
 ```
 
-## PR説明の確認
+## PR description checks
 
 ```
-□ 変更の動機を記載した（なぜこの変更が必要か）
-□ 変更・参照したADRを記載した（例: ADR-0003 参照）
-□ 変更したCrateの一覧を記載した
-□ 影響を受けるEventの一覧を記載した（あれば）
-□ テスト方法を記載した
+[ ] Motivation stated (why this change is needed)
+[ ] ADRs referenced or changed are listed (e.g. "see ADR-0003")
+[ ] Changed crates listed
+[ ] Affected events listed (if any)
+[ ] Test method described
 ```
