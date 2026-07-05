@@ -55,6 +55,11 @@ impl<S: EventStore> SimulationNode<S> {
             .collect();
         let lock = LockSystem(&mut self.world, tick, &merged_locks);
 
+        // Docked ships are not valid space-combat participants: any lock held
+        // by a docked ship, or onto a docked ship, is torn down before range
+        // gating and combat run for this tick.
+        let docked_lock_lost = self.clear_docked_lock_targets(tick);
+
         // 5.5 Range Gate System — force OFF targeted modules (Weapon/Tackle)
         // whose target has drifted out of effective range (ADR-0035).
         let range_gate_events = self.process_range_gate(tick);
@@ -103,6 +108,7 @@ impl<S: EventStore> SimulationNode<S> {
             .chain(cap.events.iter())
             .chain(tackle_events.iter())
             .chain(lock.events.iter())
+            .chain(docked_lock_lost.iter())
             .chain(range_gate_events.iter())
             .chain(combat.events.iter())
             .chain(repair.events.iter())

@@ -54,6 +54,9 @@ impl<S: EventStore> SimulationNode<S> {
         if !self.owns_ship(player_id, cmd.ship_id) {
             return false;
         }
+        if self.is_ship_docked(cmd.ship_id) {
+            return false;
+        }
         self.apply_orbit_command(cmd.ship_id, cmd.target, cmd.radius)
     }
 
@@ -85,6 +88,9 @@ impl<S: EventStore> SimulationNode<S> {
         cmd: dawn_core::KeepAtRangeCommand,
     ) -> bool {
         if !self.owns_ship(player_id, cmd.ship_id) {
+            return false;
+        }
+        if self.is_ship_docked(cmd.ship_id) {
             return false;
         }
         self.apply_keep_at_range_command(cmd.ship_id, cmd.target, cmd.range)
