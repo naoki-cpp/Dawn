@@ -367,19 +367,23 @@ pub enum WarpTargetJson {
 /// - `ApproachCommand` / `OrbitCommand` / `KeepAtRangeCommand` select their
 ///   target with either `gate_id` (a Jump Gate) or `target_id` (a Ship);
 ///   `gate_id` wins if both are present.
+///
+/// Flight/steering/module/Undock variants carry no `ship_id` (ADR-0037): the
+/// server always resolves them against the caller's active ship, so there is
+/// no wire-representable way to name a ship the player isn't currently
+/// flying. Station inventory-management variants (Fit/Unfit/Dock/
+/// BuildPackagedShip/DisassembleShip) still carry an explicit `ship_id`,
+/// since they may target any owned docked ship, not just the active one.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(tag = "type")]
 pub enum ClientCommandJson {
     MoveCommand {
-        ship_id: u64,
         target: PosJson,
     },
     LockOnCommand {
-        ship_id: u64,
         target_id: u64,
     },
     ActivateModuleCommand {
-        ship_id: u64,
         module_id: u32,
         slot: String,
         /// Target of a targeted module (Weapon/Tackle), per ADR-0035.
@@ -387,7 +391,6 @@ pub enum ClientCommandJson {
         target_ship_id: Option<u64>,
     },
     DeactivateModuleCommand {
-        ship_id: u64,
         module_id: u32,
         slot: String,
     },
@@ -395,32 +398,25 @@ pub enum ClientCommandJson {
         attacker_id: u64,
         target_id: u64,
     },
-    StopCommand {
-        ship_id: u64,
-    },
+    StopCommand {},
     JumpCommand {
-        ship_id: u64,
         gate_id: u32,
     },
     ApproachCommand {
-        ship_id: u64,
         gate_id: Option<u32>,
         target_id: Option<u64>,
     },
     WarpCommand {
-        ship_id: u64,
         target: Option<WarpTargetJson>,
         /// Legacy form: `{"gate_id": N}` instead of `{"target": {"Gate": N}}`.
         gate_id: Option<u32>,
     },
     OrbitCommand {
-        ship_id: u64,
         gate_id: Option<u32>,
         target_id: Option<u64>,
         radius: Option<f32>,
     },
     KeepAtRangeCommand {
-        ship_id: u64,
         gate_id: Option<u32>,
         target_id: Option<u64>,
         range: Option<f32>,
@@ -436,12 +432,9 @@ pub enum ClientCommandJson {
         slot: String,
     },
     DockCommand {
-        ship_id: u64,
         station_id: u32,
     },
-    UndockCommand {
-        ship_id: u64,
-    },
+    UndockCommand {},
     BuildPackagedShipCommand {
         ship_id: u64,
         station_id: u32,
@@ -450,6 +443,9 @@ pub enum ClientCommandJson {
     DisassembleShipCommand {
         ship_id: u64,
         station_id: u32,
+    },
+    SelectActiveShipCommand {
+        ship_id: u64,
     },
 }
 
@@ -489,42 +485,37 @@ fn approach_target_from_gate_or_ship(
 
 fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
     match json {
-        ClientCommandJson::MoveCommand { ship_id, target } => {
-            Some(ClientCommand::Move(MoveCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id)),
-                target_position: Position {
-                    x: target.x,
-                    y: target.y,
-                    z: target.z,
-                },
-            }))
-        }
-        ClientCommandJson::LockOnCommand { ship_id, target_id } => {
+        ClientCommandJson::MoveCommand { target } => Some(ClientCommand::Move(MoveCommand {
+            target_position: Position {
+                x: target.x,
+                y: target.y,
+                z: target.z,
+            },
+        })),
+        ClientCommandJson::LockOnCommand { target_id } => {
+            // `ship_id` is resolved server-side from the caller's active ship
+            // (ADR-0037) -- it is never read from `lo.ship_id` in
+            // `apply_client_command`, so a placeholder here is safe.
             Some(ClientCommand::LockOn(LockOnCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id)),
+                ship_id: ShipId(EntityId::from_raw(0)),
                 target_id: ShipId(EntityId::from_raw(target_id)),
             }))
         }
         ClientCommandJson::ActivateModuleCommand {
-            ship_id,
             module_id,
             slot,
             target_ship_id,
         } => Some(ClientCommand::Activate(ActivateModuleCommand {
-            ship_id: ShipId(EntityId::from_raw(ship_id)),
             module_id: ModuleId(module_id),
             slot: parse_slot_kind(&slot)?,
             target_ship_id: target_ship_id.map(|raw| ShipId(EntityId::from_raw(raw))),
         })),
-        ClientCommandJson::DeactivateModuleCommand {
-            ship_id,
-            module_id,
-            slot,
-        } => Some(ClientCommand::Deactivate(DeactivateModuleCommand {
-            ship_id: ShipId(EntityId::from_raw(ship_id)),
-            module_id: ModuleId(module_id),
-            slot: parse_slot_kind(&slot)?,
-        })),
+        ClientCommandJson::DeactivateModuleCommand { module_id, slot } => {
+            Some(ClientCommand::Deactivate(DeactivateModuleCommand {
+                module_id: ModuleId(module_id),
+                slot: parse_slot_kind(&slot)?,
+            }))
+        }
         ClientCommandJson::AttackCommand {
             attacker_id,
             target_id,
@@ -532,31 +523,17 @@ fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
             attacker_id: ShipId(EntityId::from_raw(attacker_id)),
             target_id: ShipId(EntityId::from_raw(target_id)),
         })),
-        ClientCommandJson::StopCommand { ship_id } => Some(ClientCommand::Stop(StopCommand {
-            ship_id: ShipId(EntityId::from_raw(ship_id)),
-        })),
-        ClientCommandJson::JumpCommand { ship_id, gate_id } => {
+        ClientCommandJson::StopCommand {} => Some(ClientCommand::Stop(StopCommand)),
+        ClientCommandJson::JumpCommand { gate_id } => {
             Some(ClientCommand::Jump(dawn_core::JumpCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id)),
                 gate_id: dawn_core::JumpGateId(gate_id),
             }))
         }
-        ClientCommandJson::ApproachCommand {
-            ship_id,
-            gate_id,
-            target_id,
-        } => {
+        ClientCommandJson::ApproachCommand { gate_id, target_id } => {
             let target = approach_target_from_gate_or_ship(gate_id, target_id)?;
-            Some(ClientCommand::Approach(ApproachCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id)),
-                target,
-            }))
+            Some(ClientCommand::Approach(ApproachCommand { target }))
         }
-        ClientCommandJson::WarpCommand {
-            ship_id,
-            target,
-            gate_id,
-        } => {
+        ClientCommandJson::WarpCommand { target, gate_id } => {
             let warp_target = match target {
                 Some(WarpTargetJson::Gate(gate)) => {
                     dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(gate))
@@ -567,32 +544,27 @@ fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
                 None => dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(gate_id?)),
             };
             Some(ClientCommand::Warp(dawn_core::WarpCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id)),
                 target: warp_target,
             }))
         }
         ClientCommandJson::OrbitCommand {
-            ship_id,
             gate_id,
             target_id,
             radius,
         } => {
             let target = approach_target_from_gate_or_ship(gate_id, target_id)?;
             Some(ClientCommand::Orbit(dawn_core::OrbitCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id)),
                 target,
                 radius,
             }))
         }
         ClientCommandJson::KeepAtRangeCommand {
-            ship_id,
             gate_id,
             target_id,
             range,
         } => {
             let target = approach_target_from_gate_or_ship(gate_id, target_id)?;
             Some(ClientCommand::KeepAtRange(dawn_core::KeepAtRangeCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id)),
                 target,
                 range,
             }))
@@ -615,18 +587,10 @@ fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
             module_id: ModuleId(module_id),
             slot: parse_slot_kind(&slot)?,
         })),
-        ClientCommandJson::DockCommand {
-            ship_id,
-            station_id,
-        } => Some(ClientCommand::Dock(DockCommand {
-            ship_id: ShipId(EntityId::from_raw(ship_id)),
+        ClientCommandJson::DockCommand { station_id } => Some(ClientCommand::Dock(DockCommand {
             station_id: dawn_core::StationId(station_id),
         })),
-        ClientCommandJson::UndockCommand { ship_id } => {
-            Some(ClientCommand::Undock(UndockCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id)),
-            }))
-        }
+        ClientCommandJson::UndockCommand {} => Some(ClientCommand::Undock(UndockCommand)),
         ClientCommandJson::BuildPackagedShipCommand {
             ship_id,
             station_id,
@@ -643,6 +607,11 @@ fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
             ship_id: ShipId(EntityId::from_raw(ship_id)),
             station_id: dawn_core::StationId(station_id),
         })),
+        ClientCommandJson::SelectActiveShipCommand { ship_id } => Some(
+            ClientCommand::SelectActiveShip(dawn_core::SelectActiveShipCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id)),
+            }),
+        ),
     }
 }
 
@@ -669,11 +638,10 @@ mod tests {
 
     #[test]
     fn move_command_json_is_parsed_into_client_command_move() {
-        let line = r#"{"type":"MoveCommand","ship_id":1,"target":{"x":10.0,"y":0.0,"z":-5.0}}"#;
+        let line = r#"{"type":"MoveCommand","target":{"x":10.0,"y":0.0,"z":-5.0}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             ClientCommand::Move(c) => {
-                assert_eq!(c.ship_id, ship_id(1));
                 assert!((c.target_position.x - 10.0).abs() < 1e-6);
             }
             other => panic!("expected Move, got {other:?}"),
@@ -683,17 +651,16 @@ mod tests {
     #[test]
     fn warp_command_json_is_parsed_into_client_command_warp() {
         // Legacy wire format (gate_id key)
-        let line = r#"{"type":"WarpCommand","ship_id":42,"gate_id":2}"#;
+        let line = r#"{"type":"WarpCommand","gate_id":2}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             ClientCommand::Warp(c) => {
-                assert_eq!(c.ship_id.raw(), 42);
                 assert_eq!(c.target, dawn_core::WarpTarget::Gate(JumpGateId(2)));
             }
             other => panic!("expected Warp, got {other:?}"),
         }
         // New wire format (target key with Gate variant)
-        let line2 = r#"{"type":"WarpCommand","ship_id":42,"target":{"Gate":2}}"#;
+        let line2 = r#"{"type":"WarpCommand","target":{"Gate":2}}"#;
         let cmd2 = parse_client_command(line2).expect("must parse");
         match cmd2 {
             ClientCommand::Warp(c) => {
@@ -702,7 +669,7 @@ mod tests {
             other => panic!("expected Warp, got {other:?}"),
         }
         // Body target
-        let line3 = r#"{"type":"WarpCommand","ship_id":42,"target":{"Body":1}}"#;
+        let line3 = r#"{"type":"WarpCommand","target":{"Body":1}}"#;
         let cmd3 = parse_client_command(line3).expect("must parse");
         match cmd3 {
             ClientCommand::Warp(c) => {
@@ -717,11 +684,10 @@ mod tests {
 
     #[test]
     fn dock_command_json_is_parsed_into_client_command_dock() {
-        let line = r#"{"type":"DockCommand","ship_id":42,"station_id":2}"#;
+        let line = r#"{"type":"DockCommand","station_id":2}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             ClientCommand::Dock(c) => {
-                assert_eq!(c.ship_id, ship_id(42));
                 assert_eq!(c.station_id, dawn_core::StationId(2));
             }
             other => panic!("expected Dock, got {other:?}"),
@@ -743,11 +709,10 @@ mod tests {
 
     #[test]
     fn orbit_command_json_with_target_id_is_parsed_into_client_command_orbit() {
-        let line = r#"{"type":"OrbitCommand","ship_id":1,"target_id":2,"radius":3000.0}"#;
+        let line = r#"{"type":"OrbitCommand","target_id":2,"radius":3000.0}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             ClientCommand::Orbit(c) => {
-                assert_eq!(c.ship_id, ship_id(1));
                 assert_eq!(c.target, ApproachTarget::Ship(ship_id(2)));
                 assert_eq!(c.radius, Some(3000.0));
             }
@@ -757,7 +722,7 @@ mod tests {
 
     #[test]
     fn orbit_command_json_with_gate_id_and_no_radius_is_parsed() {
-        let line = r#"{"type":"OrbitCommand","ship_id":1,"gate_id":4}"#;
+        let line = r#"{"type":"OrbitCommand","gate_id":4}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             ClientCommand::Orbit(c) => {
@@ -770,11 +735,10 @@ mod tests {
 
     #[test]
     fn keep_at_range_command_json_is_parsed_into_client_command_keep_at_range() {
-        let line = r#"{"type":"KeepAtRangeCommand","ship_id":1,"target_id":2,"range":5000.0}"#;
+        let line = r#"{"type":"KeepAtRangeCommand","target_id":2,"range":5000.0}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             ClientCommand::KeepAtRange(c) => {
-                assert_eq!(c.ship_id, ship_id(1));
                 assert_eq!(c.target, ApproachTarget::Ship(ship_id(2)));
                 assert_eq!(c.range, Some(5000.0));
             }

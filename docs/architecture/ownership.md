@@ -16,14 +16,11 @@ related  : entity-model.md, event-catalog.md
 >
 > Sector Transit must always go through Raft (CLAUDE.md FBD-006).
 >
-> **Scope note (2026-07-05):** this file documents *Sector*-level ownership
-> (which Sector owns a Ship) and Actor data isolation. It does not yet cover
-> *player*-level ownership (which Player owns which Ship(s)) -- today that is
-> still the 1-player-to-1-active-ship model in `ShipRegistry` (`by_player` /
-> `owners`). ADR-0037 (Docked Ship Ownership) decided the target shape for
-> that axis -- owned ship / active ship / docked station context -- as a
-> prerequisite for Phase 9B's `Assemble`, but no code implements it yet. This
-> file should gain its own section once that work lands.
+> **Scope note (2026-07-07):** this file documents *Sector*-level ownership
+> (which Sector owns a Ship) and Actor data isolation. §7 now covers
+> *player*-level ownership (which Player owns which Ship(s)) per ADR-0037 --
+> the owned ship / active ship / docked station context split has landed
+> (`ShipRegistry.owners` / `active_ship`), unblocking Phase 9B's `Assemble`.
 
 # Ownership Rules
 
@@ -184,3 +181,61 @@ Where these duplicate CLAUDE.md INVs, only the link is listed.
 | Operations on an in-Transit Ship are restricted | MoveCommand etc. rejected | §2 |
 | A Sector is managed by exactly 1 Node | No simultaneous management by multiple Nodes | §3 |
 | Actors never share data directly | Mailbox only | [CLAUDE.md INV-005](../../CLAUDE.md) |
+
+---
+
+## 7. Player-level ship ownership (ADR-0037)
+
+`ShipRegistry` splits the "which player controls which ship" question into
+three separate, independently-tracked concerns instead of one conflated
+`PlayerId -> ShipId` map:
+
+- **Owned ship** (`owners: ShipId -> PlayerId`): every ship a player owns.
+  Plural -- a player may own more than one. Unchanged shape from before
+  ADR-0037; this map was already correct for multiple ownership, since it's
+  keyed by ship, not by player.
+- **Active ship** (`active_ship: PlayerId -> ShipId`): the *one* owned ship
+  currently routable for flight/steering commands (Move/Stop/Approach/Warp/
+  Orbit/KeepAtRange/Jump/LockOn/Activate/Deactivate) and Undock. This was
+  the field previously named `by_player`; it coincided 1:1 with `owners`
+  before any player could own more than one ship.
+- **Docked station context** (`docked_players: PlayerId -> StationId`):
+  which station the player is currently docked at. Player-level, not
+  ship-derived -- unaffected by which owned ship is active (§2 predates
+  ADR-0037 and already got this right).
+
+```
+Player owns {Ship A, Ship B}, both docked at Station S, active = A
+
+  SelectActiveShipCommand{ship_id: B}
+        │
+        ▼ (must own B, B != current active, B docked at same station
+        │  the player is currently docked at)
+  active = B  (docked_ships/docked_players for both A and B: unchanged --
+               only which ship is *controllable* changed)
+```
+
+Flight/steering commands and Undock check `is_active_ship(player_id,
+ship_id)` (implies `owns_ship`, since active ⊆ owned) -- a wire-level
+consequence is that these commands carry no `ship_id` at all (`MoveCommand`,
+`WarpCommand`, `UndockCommand`, etc.): the server always resolves the target
+from `active_ship`, so there is no wire-representable way for a client to
+name a ship it isn't currently flying. Station inventory-management commands
+(`FitModuleCommand`/`UnfitModuleCommand`/`DockCommand`/
+`BuildPackagedShipCommand`/`DisassembleShipCommand`) still carry an explicit
+`ship_id` and check `owns_ship` only, since they operate on any owned ship,
+not just the active one (e.g. Disassemble a spare docked ship without first
+making it active).
+
+Switching active ship is **session-local, not event-sourced**: it changes
+no Ship's authoritative state (HP, fitting, position), only which ship a
+connection's commands route to. Comparable to AoI delivery-control messages
+(`event-catalog.md` §3.12) -- no `DomainEvent` variant exists for it. It is
+still captured in `StateSnapshot` (`active_ship: BTreeMap<PlayerId, ShipId>`)
+so a reconnecting player's active ship survives restart/restore, the same
+tier as `docked_ships`/`docked_players`.
+
+`ShipRegistry::remove()` only clears a player's `active_ship` entry if the
+removed ship *was* that player's active ship -- removing a different owned
+ship (e.g. Disassemble) must not silently clear the pointer to the ship the
+player is still flying.

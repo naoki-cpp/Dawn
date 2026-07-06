@@ -79,34 +79,36 @@ func _process(delta: float) -> void:
 
 # ── 公開 API ──────────────────────────────────────────────────────────────────
 
-func send_move_command(p_ship_id: int, target: Vector3) -> void:
+## ADR-0037: flight/steering/module/Undock commands carry no ship_id — the
+## server always resolves them against the caller's active ship, so there is
+## no wire-representable way to name a ship the player isn't currently
+## flying. Station inventory-management commands (Fit/Unfit/Dock/
+## BuildPackagedShip/DisassembleShip) still carry an explicit ship_id.
+func send_move_command(target: Vector3) -> void:
 	if not _welcomed:
 		return
 	var payload: Dictionary = {
 		"type":    "MoveCommand",
-		"ship_id": p_ship_id,
 		"target":  { "x": target.x, "y": target.y, "z": target.z }
 	}
 	_ws.send_text(JSON.stringify(payload) + "\n")
 
-func send_lock_on_command(p_ship_id: int, target_id: int) -> void:
+func send_lock_on_command(target_id: int) -> void:
 	if not _welcomed:
 		return
 	var payload: Dictionary = {
 		"type":      "LockOnCommand",
-		"ship_id":   p_ship_id,
 		"target_id": target_id,
 	}
 	_ws.send_text(JSON.stringify(payload) + "\n")
 
 ## Active モジュールをオンにする。p_target_ship_id は Weapon/Tackle など
 ## ターゲットを要求する種別のときだけ指定する（-1 = 指定なし、ADR-0035）。
-func send_activate_module(p_ship_id: int, p_module_id: int, p_slot: String, p_target_ship_id: int = -1) -> void:
+func send_activate_module(p_module_id: int, p_slot: String, p_target_ship_id: int = -1) -> void:
 	if not _welcomed:
 		return
 	var payload: Dictionary = {
 		"type"     : "ActivateModuleCommand",
-		"ship_id"  : p_ship_id,
 		"module_id": p_module_id,
 		"slot"     : p_slot,
 	}
@@ -115,103 +117,93 @@ func send_activate_module(p_ship_id: int, p_module_id: int, p_slot: String, p_ta
 	_ws.send_text(JSON.stringify(payload) + "\n")
 
 ## Active モジュールをオフにする。
-func send_deactivate_module(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
+func send_deactivate_module(p_module_id: int, p_slot: String) -> void:
 	if not _welcomed:
 		return
 	_ws.send_text(JSON.stringify({
 		"type"     : "DeactivateModuleCommand",
-		"ship_id"  : p_ship_id,
 		"module_id": p_module_id,
 		"slot"     : p_slot,
 	}) + "\n")
 
 ## [S キー] 減速停止コマンド。サーバーが thrust を逆方向に掛けて速度ゼロまで減速する。
-func send_stop_command(p_ship_id: int) -> void:
+func send_stop_command() -> void:
 	if not _welcomed:
 		return
 	_ws.send_text(JSON.stringify({
 		"type"   : "StopCommand",
-		"ship_id": p_ship_id,
 	}) + "\n")
 
 ## ジャンプゲート経由の Sector 移動を要求する（ADR-0009）。
-func send_jump_command(p_ship_id: int, p_gate_id: int) -> void:
+func send_jump_command(p_gate_id: int) -> void:
 	if not _welcomed:
 		return
 	_ws.send_text(JSON.stringify({
 		"type"   : "JumpCommand",
-		"ship_id": p_ship_id,
 		"gate_id": p_gate_id,
 	}) + "\n")
 
 ## [A キー] アプローチ（半自動操船）。選択した船へ自動接近する（ADR-0015）。
-func send_approach_command(p_ship_id: int, p_target_id: int) -> void:
+func send_approach_command(p_target_id: int) -> void:
 	if not _welcomed:
 		return
 	_ws.send_text(JSON.stringify({
 		"type"     : "ApproachCommand",
-		"ship_id"  : p_ship_id,
 		"target_id": p_target_id,
 	}) + "\n")
 
 ## [A キー] ジャンプゲートへアプローチ（半自動操船）。射程内まで自動接近する（ADR-0015）。
-func send_approach_gate_command(p_ship_id: int, p_gate_id: int) -> void:
+func send_approach_gate_command(p_gate_id: int) -> void:
 	if not _welcomed:
 		return
 	_ws.send_text(JSON.stringify({
 		"type"   : "ApproachCommand",
-		"ship_id": p_ship_id,
 		"gate_id": p_gate_id,
 	}) + "\n")
 
 ## [W key] Warp (short-range Fold) to a Jump Gate (ADR-0022/ADR-0025).
-func send_warp_command(p_ship_id: int, p_gate_id: int) -> void:
+func send_warp_command(p_gate_id: int) -> void:
 	if not _welcomed:
 		return
 	_ws.send_text(JSON.stringify({
 		"type"   : "WarpCommand",
-		"ship_id": p_ship_id,
 		"target" : { "Gate": p_gate_id },
 	}) + "\n")
 
 ## [W key] Warp (short-range Fold) to a celestial body (ADR-0025).
-func send_warp_to_body_command(p_ship_id: int, p_body_id: int) -> void:
+func send_warp_to_body_command(p_body_id: int) -> void:
 	if not _welcomed:
 		return
 	_ws.send_text(JSON.stringify({
 		"type"   : "WarpCommand",
-		"ship_id": p_ship_id,
 		"target" : { "Body": p_body_id },
 	}) + "\n")
 
 ## [O key] Orbit a selected ship at its weapon range (server-side default, ADR-0031).
-func send_orbit_command(p_ship_id: int, p_target_id: int) -> void:
+func send_orbit_command(p_target_id: int) -> void:
 	if not _welcomed:
 		return
 	_ws.send_text(JSON.stringify({
 		"type"     : "OrbitCommand",
-		"ship_id"  : p_ship_id,
 		"target_id": p_target_id,
 	}) + "\n")
 
 ## [O key] Orbit a selected Jump Gate at its weapon range (server-side default, ADR-0031).
-func send_orbit_gate_command(p_ship_id: int, p_gate_id: int) -> void:
+func send_orbit_gate_command(p_gate_id: int) -> void:
 	if not _welcomed:
 		return
 	_ws.send_text(JSON.stringify({
 		"type"   : "OrbitCommand",
-		"ship_id": p_ship_id,
 		"gate_id": p_gate_id,
 	}) + "\n")
 
 ## [K key] Hold at least p_range_m metres from a selected ship; p_range_m <= 0
 ## falls back to the server-side default (weapon range, ADR-0031).
-func send_keep_at_range_command(p_ship_id: int, p_target_id: int, p_range_m: float = -1.0) -> void:
+func send_keep_at_range_command(p_target_id: int, p_range_m: float = -1.0) -> void:
 	if not _welcomed:
 		return
 	var payload: Dictionary = {
 		"type"     : "KeepAtRangeCommand",
-		"ship_id"  : p_ship_id,
 		"target_id": p_target_id,
 	}
 	if p_range_m > 0.0:
@@ -220,12 +212,11 @@ func send_keep_at_range_command(p_ship_id: int, p_target_id: int, p_range_m: flo
 
 ## [K key] Hold at least p_range_m metres from a selected Jump Gate; p_range_m
 ## <= 0 falls back to the server-side default (weapon range, ADR-0031).
-func send_keep_at_range_gate_command(p_ship_id: int, p_gate_id: int, p_range_m: float = -1.0) -> void:
+func send_keep_at_range_gate_command(p_gate_id: int, p_range_m: float = -1.0) -> void:
 	if not _welcomed:
 		return
 	var payload: Dictionary = {
 		"type"   : "KeepAtRangeCommand",
-		"ship_id": p_ship_id,
 		"gate_id": p_gate_id,
 	}
 	if p_range_m > 0.0:
@@ -254,21 +245,19 @@ func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String)
 		"slot"     : p_slot,
 	}) + "\n")
 
-func send_dock_command(p_ship_id: int, p_station_id: int) -> void:
+func send_dock_command(p_station_id: int) -> void:
 	if not _welcomed:
 		return
 	_ws.send_text(JSON.stringify({
 		"type": "DockCommand",
-		"ship_id": p_ship_id,
 		"station_id": p_station_id,
 	}) + "\n")
 
-func send_undock_command(p_ship_id: int) -> void:
+func send_undock_command() -> void:
 	if not _welcomed:
 		return
 	_ws.send_text(JSON.stringify({
 		"type": "UndockCommand",
-		"ship_id": p_ship_id,
 	}) + "\n")
 
 func send_build_packaged_ship_command(p_ship_id: int, p_station_id: int, p_ship_type_id: int) -> void:

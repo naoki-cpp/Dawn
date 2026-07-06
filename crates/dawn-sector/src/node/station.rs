@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use dawn_core::{
     events::{PackagedShipBuilt, ShipDisassembled, ShipDocked, ShipUndocked},
     BuildPackagedShipCommand, DisassembleShipCommand, DockCommand, DomainEvent, ItemId, PlayerId,
-    ShipId, StationId, UndockCommand,
+    ShipId, StationId,
 };
 use dawn_ecs::components::{
     FittingComp, HullComp, LockComp, ShipStatsComp, ThrustComp, VelocityComp, WarpComp,
@@ -58,6 +58,11 @@ pub(super) enum StationOperationRejection {
     ShipNotFound,
     ShipIsFitted,
     ShipIsDamaged,
+    /// `SelectActiveShipCommand` targeted the already-active ship (ADR-0037).
+    AlreadyActive,
+    /// `SelectActiveShipCommand` targeted a ship not docked at the caller's
+    /// current docked station (ADR-0037; station-local switch only).
+    ShipNotDockedHere,
 }
 
 impl<S: EventStore> SimulationNode<S> {
@@ -111,66 +116,103 @@ impl<S: EventStore> SimulationNode<S> {
         self.place_entity_at_absolute(entity, station_abs);
     }
 
+    /// Dock the caller's active ship (ADR-0037: `ship_id` is always the
+    /// caller's resolved active ship — `apply_client_command` never calls
+    /// this without one).
     pub(super) fn dock_owned(
         &mut self,
         player_id: PlayerId,
+        ship_id: ShipId,
         cmd: DockCommand,
     ) -> StationOperationOutcome {
-        if !self.owns_ship(player_id, cmd.ship_id) {
+        if !self.is_active_ship(player_id, ship_id) {
             return StationOperationOutcome::Rejected {
-                ship_id: cmd.ship_id,
+                ship_id,
                 reason: StationOperationRejection::NotOwned,
             };
         }
-        if self.docked_ships.contains_key(&cmd.ship_id) {
+        if self.docked_ships.contains_key(&ship_id) {
             return StationOperationOutcome::Rejected {
-                ship_id: cmd.ship_id,
+                ship_id,
                 reason: StationOperationRejection::AlreadyDocked,
             };
         }
-        if !self.can_dock_station(cmd.ship_id, cmd.station_id) {
+        if !self.can_dock_station(ship_id, cmd.station_id) {
             return StationOperationOutcome::Rejected {
-                ship_id: cmd.ship_id,
+                ship_id,
                 reason: StationOperationRejection::OutOfDockRange,
             };
         }
-        self.settle_ship_into_station(cmd.ship_id, cmd.station_id);
-        self.docked_ships.insert(cmd.ship_id, cmd.station_id);
+        self.settle_ship_into_station(ship_id, cmd.station_id);
+        self.docked_ships.insert(ship_id, cmd.station_id);
         self.docked_players.insert(player_id, cmd.station_id);
         self.event_store.append(DomainEvent::ShipDocked(ShipDocked {
-            ship_id: cmd.ship_id,
+            ship_id,
             station_id: cmd.station_id,
             tick: self.current_tick,
         }));
-        StationOperationOutcome::Accepted {
-            ship_id: cmd.ship_id,
-        }
+        StationOperationOutcome::Accepted { ship_id }
     }
 
+    /// Undock the caller's active ship (ADR-0037: only the active ship may
+    /// leave dock — `ship_id` is always the caller's resolved active ship).
     pub(super) fn undock_owned(
         &mut self,
         player_id: PlayerId,
-        cmd: UndockCommand,
+        ship_id: ShipId,
     ) -> StationOperationOutcome {
-        if !self.owns_ship(player_id, cmd.ship_id) {
+        if !self.is_active_ship(player_id, ship_id) {
             return StationOperationOutcome::Rejected {
-                ship_id: cmd.ship_id,
+                ship_id,
                 reason: StationOperationRejection::NotOwned,
             };
         }
-        let Some(station_id) = self.docked_ships.remove(&cmd.ship_id) else {
+        let Some(station_id) = self.docked_ships.remove(&ship_id) else {
             return StationOperationOutcome::Rejected {
-                ship_id: cmd.ship_id,
+                ship_id,
                 reason: StationOperationRejection::ShipNotDocked,
             };
         };
         self.docked_players.remove(&player_id);
         self.event_store
             .append(DomainEvent::ShipUndocked(ShipUndocked {
-                ship_id: cmd.ship_id,
+                ship_id,
                 station_id,
                 tick: self.current_tick,
             }));
+        StationOperationOutcome::Accepted { ship_id }
+    }
+
+    /// Switch the caller's active ship to another owned ship docked at the
+    /// same station (ADR-0037). Station-local only for now: `ship_id` must
+    /// be docked where the caller is currently docked.
+    pub(super) fn select_active_ship_owned(
+        &mut self,
+        player_id: PlayerId,
+        cmd: dawn_core::SelectActiveShipCommand,
+    ) -> StationOperationOutcome {
+        if !self.owns_ship(player_id, cmd.ship_id) {
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::NotOwned,
+            };
+        }
+        if self.ships.active_ship.get(&player_id) == Some(&cmd.ship_id) {
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::AlreadyActive,
+            };
+        }
+        let target_station = self.docked_ships.get(&cmd.ship_id).copied();
+        if target_station.is_none()
+            || target_station != self.docked_players.get(&player_id).copied()
+        {
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::ShipNotDockedHere,
+            };
+        }
+        self.ships.active_ship.insert(player_id, cmd.ship_id);
         StationOperationOutcome::Accepted {
             ship_id: cmd.ship_id,
         }
@@ -505,8 +547,8 @@ mod tests {
 
         assert!(node.apply_warp_command_owned(
             player_id,
+            ship_id,
             dawn_core::WarpCommand {
-                ship_id,
                 target: WarpTarget::Body(dawn_core::CelestialBodyId(1)),
             }
         ));
@@ -550,8 +592,8 @@ mod tests {
 
         assert!(accepted(node.dock_owned(
             player_id,
+            ship_id,
             DockCommand {
-                ship_id,
                 station_id: StationId(0),
             }
         )));
@@ -573,8 +615,8 @@ mod tests {
         let entity = *node.ships.index.get(&ship_id).expect("ship entity");
         assert!(accepted(node.dock_owned(
             player_id,
+            ship_id,
             DockCommand {
-                ship_id,
                 station_id: StationId(0),
             }
         )));
@@ -605,16 +647,16 @@ mod tests {
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
         assert!(accepted(node.dock_owned(
             player_id,
+            ship_id,
             DockCommand {
-                ship_id,
                 station_id: StationId(0),
             }
         )));
 
         assert!(!node.apply_warp_command_owned(
             player_id,
+            ship_id,
             dawn_core::WarpCommand {
-                ship_id,
                 target: WarpTarget::Body(dawn_core::CelestialBodyId(1)),
             }
         ));
@@ -644,8 +686,8 @@ mod tests {
 
         assert!(accepted(node.dock_owned(
             player_id,
+            ship_id,
             DockCommand {
-                ship_id,
                 station_id: StationId(0),
             }
         )));
@@ -695,15 +737,13 @@ mod tests {
 
         assert!(accepted(node.dock_owned(
             player_id,
+            ship_id,
             DockCommand {
-                ship_id,
                 station_id: StationId(0),
             }
         )));
         node.tick();
-        assert!(accepted(
-            node.undock_owned(player_id, UndockCommand { ship_id })
-        ));
+        assert!(accepted(node.undock_owned(player_id, ship_id)));
 
         assert!(
             node.can_dock_station(ship_id, StationId(0)),
@@ -711,8 +751,8 @@ mod tests {
         );
         assert!(accepted(node.dock_owned(
             player_id,
+            ship_id,
             DockCommand {
-                ship_id,
                 station_id: StationId(0),
             }
         )));
@@ -729,8 +769,8 @@ mod tests {
         assert!(!node.can_use_station(player_id, StationId(0)));
         assert!(accepted(node.dock_owned(
             player_id,
+            ship_id,
             DockCommand {
-                ship_id,
                 station_id: StationId(0),
             }
         )));
@@ -746,15 +786,13 @@ mod tests {
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
         assert!(accepted(node.dock_owned(
             player_id,
+            ship_id,
             DockCommand {
-                ship_id,
                 station_id: StationId(0),
             }
         )));
 
-        assert!(accepted(
-            node.undock_owned(player_id, UndockCommand { ship_id })
-        ));
+        assert!(accepted(node.undock_owned(player_id, ship_id)));
         assert!(!node.can_use_station(player_id, StationId(0)));
     }
 
@@ -767,13 +805,13 @@ mod tests {
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
         assert!(accepted(node.dock_owned(
             player_id,
+            ship_id,
             DockCommand {
-                ship_id,
                 station_id: StationId(0),
             }
         )));
 
-        node.ships.by_player.remove(&player_id);
+        node.ships.active_ship.remove(&player_id);
 
         assert_eq!(node.player_docked_station(player_id), Some(StationId(0)));
         assert!(node.can_use_station(player_id, StationId(0)));
@@ -831,8 +869,8 @@ mod tests {
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
         assert!(accepted(node.dock_owned(
             player_id,
+            ship_id,
             DockCommand {
-                ship_id,
                 station_id: StationId(0),
             }
         )));
@@ -892,8 +930,8 @@ mod tests {
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
         assert!(accepted(node.dock_owned(
             player_id,
+            ship_id,
             DockCommand {
-                ship_id,
                 station_id: StationId(0),
             }
         )));
@@ -949,8 +987,8 @@ mod tests {
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
         assert!(accepted(node.dock_owned(
             player_id,
+            ship_id,
             DockCommand {
-                ship_id,
                 station_id: StationId(0),
             }
         )));

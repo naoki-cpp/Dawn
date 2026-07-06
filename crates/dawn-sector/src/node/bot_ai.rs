@@ -212,8 +212,8 @@ impl<S: EventStore> SimulationNode<S> {
                 for (module_id, slot) in &bot.weapon_modules {
                     let _ = self.activate_module_owned(
                         bot.player_id,
+                        bot.ship_id,
                         dawn_core::ActivateModuleCommand {
-                            ship_id: bot.ship_id,
                             module_id: *module_id,
                             slot: *slot,
                             target_ship_id: Some(target.ship_id),
@@ -311,8 +311,8 @@ mod tests {
 
         let _ = node.activate_module_owned(
             player_id,
+            player_ship_id,
             ActivateModuleCommand {
-                ship_id: player_ship_id,
                 module_id: MODULE_FOLD_DISRUPTOR,
                 slot: SlotKind::Mid,
                 target_ship_id: Some(bot_ship_id),

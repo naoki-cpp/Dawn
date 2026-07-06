@@ -237,7 +237,7 @@ impl<S: EventStore> SimulationNode<S> {
             inventory,
         };
 
-        // remove_ship also clears owners/by_player (ADR-0035 review: this used
+        // remove_ship also clears owners/active_ship (ADR-0035 review: this used
         // to hand-roll index/type_ids/base_stats removal only, leaking a
         // dangling ownership entry for a transited player ship).
         self.remove_ship(ship_id);
@@ -482,7 +482,7 @@ mod tests {
     fn export_transit_clears_ownership_maps_for_a_player_ship() {
         // Regression test (architecture review 2026-07-03): export_transit
         // used to hand-roll index/type_ids/base_stats removal and forgot
-        // owners/by_player, leaving a dangling ownership entry for a
+        // owners/active_ship, leaving a dangling ownership entry for a
         // transited player ship. Now routed through ShipRegistry::remove
         // via SimulationNode::remove_ship, which clears all four maps.
         let mut node = mem_node();
@@ -506,8 +506,8 @@ mod tests {
             "owners map must be cleared"
         );
         assert!(
-            !node.ships.by_player.contains_key(&player_id),
-            "by_player map must be cleared"
+            !node.ships.active_ship.contains_key(&player_id),
+            "active_ship map must be cleared"
         );
     }
 

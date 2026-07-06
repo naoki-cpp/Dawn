@@ -246,7 +246,6 @@ mod serve_pipeline_tests {
         client
             .command_tx
             .send(ClientCommand::Move(MoveCommand {
-                ship_id,
                 target_position: Position::new(1_000.0, 0.0, 0.0),
             }))
             .expect("server connection is alive");
@@ -283,16 +282,16 @@ mod serve_pipeline_tests {
         );
     }
 
-    /// A command for a ship the player does not own is rejected by the pipeline:
-    /// no `VelocityChanged` reaches the client. Guards the ownership check in
-    /// `apply_client_command` → `apply_move_command_owned` (AI_DEVELOPMENT_GUIDE.md).
+    /// A player with no active ship (ADR-0037: MoveCommand no longer names a
+    /// ship, so there is no longer a wire-representable way to move a ship
+    /// the caller doesn't fly) gets no `VelocityChanged` back: the command is
+    /// silently dropped by `apply_client_command`.
     #[test]
-    fn move_for_unowned_ship_produces_no_event_over_connection() {
+    fn move_with_no_active_ship_produces_no_event_over_connection() {
         let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
         let mut node = build_test_node(NodeId(0), SectorId(0), bounds, node::POPULATION_CAP);
 
         let player_id = node.next_player_id();
-        let _own_ship = node.spawn_player_ship_at_pub(player_id, Position::new(0.0, 0.0, 0.0));
         let other_id = node.next_player_id();
         let other_ship = node.spawn_player_ship_at_pub(other_id, Position::new(500.0, 0.0, 0.0));
 
@@ -300,7 +299,6 @@ mod serve_pipeline_tests {
         client
             .command_tx
             .send(ClientCommand::Move(MoveCommand {
-                ship_id: other_ship,
                 target_position: Position::new(1_000.0, 0.0, 0.0),
             }))
             .expect("server connection is alive");
@@ -326,7 +324,7 @@ mod serve_pipeline_tests {
             if let DomainEvent::VelocityChanged(vc) = ev {
                 assert_ne!(
                     vc.ship_id, other_ship,
-                    "a player must not be able to move a ship it does not own"
+                    "a player with no active ship must not move another player's ship"
                 );
             }
         }

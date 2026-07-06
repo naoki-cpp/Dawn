@@ -229,25 +229,25 @@ func _input(event: InputEvent) -> void:
 				_send_stop_command()
 			"jump":
 				var jump_gate: int = action.gate_id as int
-				_connection.send_jump_command(_player_ship_id, jump_gate)
+				_connection.send_jump_command(jump_gate)
 			"approach_gate":
-				_connection.send_approach_gate_command(_player_ship_id, action.gate_id as int)
+				_connection.send_approach_gate_command(action.gate_id as int)
 			"approach_ship":
-				_connection.send_approach_command(_player_ship_id, action.ship_id as int)
+				_connection.send_approach_command(action.ship_id as int)
 			"warp_to_gate":
-				_connection.send_warp_command(_player_ship_id, action.gate_id as int)
+				_connection.send_warp_command(action.gate_id as int)
 			"warp_to_body":
-				_connection.send_warp_to_body_command(_player_ship_id, action.body_id as int)
+				_connection.send_warp_to_body_command(action.body_id as int)
 			"orbit_gate":
-				_connection.send_orbit_gate_command(_player_ship_id, action.gate_id as int)
+				_connection.send_orbit_gate_command(action.gate_id as int)
 			"orbit_ship":
-				_connection.send_orbit_command(_player_ship_id, action.ship_id as int)
+				_connection.send_orbit_command(action.ship_id as int)
 			"keep_at_range_gate":
 				_connection.send_keep_at_range_gate_command(
-					_player_ship_id, action.gate_id as int, _keep_at_range_km * 1000.0)
+					action.gate_id as int, _keep_at_range_km * 1000.0)
 			"keep_at_range_ship":
 				_connection.send_keep_at_range_command(
-					_player_ship_id, action.ship_id as int, _keep_at_range_km * 1000.0)
+					action.ship_id as int, _keep_at_range_km * 1000.0)
 			"adjust_keep_at_range":
 				_keep_at_range_km = clampf(
 					_keep_at_range_km + (action.delta_km as float),
@@ -258,9 +258,9 @@ func _input(event: InputEvent) -> void:
 			"toggle_inventory_panel":
 				_hud_surface.toggle_inventory_panel()
 			"dock":
-				_connection.send_dock_command(_player_ship_id, action.station_id as int)
+				_connection.send_dock_command(action.station_id as int)
 			"undock":
-				_connection.send_undock_command(_player_ship_id)
+				_connection.send_undock_command()
 			"build_packaged_ship":
 				_connection.send_build_packaged_ship_command(
 					_player_ship_id,
@@ -374,7 +374,7 @@ func _try_lock_on(target_ship_id: int) -> void:
 	if _player_lock_target >= 0 and _ships.has(_player_lock_target):
 		(_ships[_player_lock_target] as Node3D).call("set_lock_state", "none")
 	_player_lock_target = target_ship_id
-	_connection.send_lock_on_command(_player_ship_id, target_ship_id)
+	_connection.send_lock_on_command(target_ship_id)
 	## Set Locking state and flash indicator
 	if _ships.has(target_ship_id):
 		(_ships[target_ship_id] as Node3D).call("set_lock_state", "locking")
@@ -400,7 +400,7 @@ func _on_double_click(screen_pos: Vector2) -> void:
 
 	## Set target far away so server treats normalize(target - ship) as server_dir
 	var target: Vector3 = ship_server_pos + server_dir * 1_000_000.0
-	_connection.send_move_command(_player_ship_id, target)
+	_connection.send_move_command(target)
 
 	## Show thrust arrow on player ship (ray_dir stays in Godot space)
 	if _ships.has(_player_ship_id):
@@ -411,7 +411,7 @@ func _on_double_click(screen_pos: Vector2) -> void:
 func _send_stop_command() -> void:
 	if _player_ship_id < 0:
 		return
-	_connection.send_stop_command(_player_ship_id)
+	_connection.send_stop_command()
 	## Clear thrust arrow on player ship
 	if _ships.has(_player_ship_id):
 		(_ships[_player_ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
@@ -681,7 +681,7 @@ func _toggle_module_by_index(f_index: int) -> void:
 	var kind: String = toggle.get("kind", "") as String
 	if toggle["is_active"] as bool:
 		_apply_player_module_activation(mid, false, "")
-		_connection.send_deactivate_module(_player_ship_id, mid, slot)
+		_connection.send_deactivate_module(mid, slot)
 	else:
 		## Weapon/Tackle/Remote-repair require a Locked target (ADR-0035/0036);
 		## other kinds (self-only Active modules) must not carry one.
@@ -726,7 +726,7 @@ func _toggle_module_by_index(f_index: int) -> void:
 					_jump_notice_timer = 2.0
 					return
 		_apply_player_module_activation(mid, true, "")
-		_connection.send_activate_module(_player_ship_id, mid, slot, target_id)
+		_connection.send_activate_module(mid, slot, target_id)
 
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 	_player_ship_id = p_ship_id

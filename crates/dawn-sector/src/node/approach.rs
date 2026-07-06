@@ -57,19 +57,20 @@ impl<S: EventStore> SimulationNode<S> {
         true
     }
 
-    /// `apply_approach_command` wrapped with an ownership check.
+    /// `apply_approach_command` wrapped with an active-ship check (ADR-0037).
     pub fn apply_approach_command_owned(
         &mut self,
         player_id: PlayerId,
+        ship_id: ShipId,
         cmd: dawn_core::ApproachCommand,
     ) -> bool {
-        if !self.owns_ship(player_id, cmd.ship_id) {
+        if !self.is_active_ship(player_id, ship_id) {
             return false;
         }
-        if self.is_ship_docked(cmd.ship_id) {
+        if self.is_ship_docked(ship_id) {
             return false;
         }
-        self.apply_approach_command(cmd.ship_id, cmd.target)
+        self.apply_approach_command(ship_id, cmd.target)
     }
 
     /// Approach System (ADR-0015 §3): for every ship carrying an `ApproachComp`,
@@ -211,9 +212,9 @@ mod tests {
 
         assert!(node.apply_approach_command_owned(
             player,
+            chaser,
             dawn_core::ApproachCommand {
-                ship_id: chaser,
-                target: dawn_core::ApproachTarget::Ship(target)
+                target: dawn_core::ApproachTarget::Ship(target),
             }
         ));
         assert_eq!(
@@ -248,9 +249,9 @@ mod tests {
 
         assert!(!node.apply_approach_command_owned(
             player,
+            chaser,
             dawn_core::ApproachCommand {
-                ship_id: chaser,
-                target: dawn_core::ApproachTarget::Ship(target)
+                target: dawn_core::ApproachTarget::Ship(target),
             }
         ));
         assert_eq!(node.approach_target(chaser), None);
@@ -288,9 +289,9 @@ mod tests {
 
         assert!(!node.apply_approach_command_owned(
             player,
+            chaser,
             dawn_core::ApproachCommand {
-                ship_id: chaser,
-                target: dawn_core::ApproachTarget::Ship(target)
+                target: dawn_core::ApproachTarget::Ship(target),
             }
         ));
         assert_eq!(node.approach_target(chaser), None);
@@ -309,9 +310,9 @@ mod tests {
         let stranger = node.next_player_id();
         assert!(!node.apply_approach_command_owned(
             stranger,
+            chaser,
             dawn_core::ApproachCommand {
-                ship_id: chaser,
-                target: dawn_core::ApproachTarget::Ship(target)
+                target: dawn_core::ApproachTarget::Ship(target),
             }
         ));
         assert_eq!(node.approach_target(chaser), None);
@@ -328,8 +329,8 @@ mod tests {
         );
         node.apply_approach_command_owned(
             player,
+            chaser,
             dawn_core::ApproachCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
             },
         );
@@ -356,8 +357,8 @@ mod tests {
         );
         node.apply_approach_command_owned(
             player,
+            chaser,
             dawn_core::ApproachCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
             },
         );
@@ -390,8 +391,8 @@ mod tests {
         );
         node.apply_approach_command_owned(
             player,
+            chaser,
             dawn_core::ApproachCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
             },
         );
@@ -419,8 +420,8 @@ mod tests {
         );
         node.apply_approach_command_owned(
             player,
+            chaser,
             dawn_core::ApproachCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
             },
         );
@@ -444,8 +445,8 @@ mod tests {
         );
         node.apply_approach_command_owned(
             player,
+            chaser,
             dawn_core::ApproachCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
             },
         );
@@ -476,9 +477,9 @@ mod tests {
         let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         assert!(!node.apply_approach_command_owned(
             player,
+            chaser,
             dawn_core::ApproachCommand {
-                ship_id: chaser,
-                target: dawn_core::ApproachTarget::Ship(chaser)
+                target: dawn_core::ApproachTarget::Ship(chaser),
             }
         ));
         assert_eq!(node.approach_target(chaser), None);
@@ -504,8 +505,8 @@ mod tests {
 
         assert!(node.apply_approach_command_owned(
             player,
+            chaser,
             dawn_core::ApproachCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(0)),
             }
         ));
@@ -555,8 +556,8 @@ mod tests {
         let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         assert!(!node.apply_approach_command_owned(
             player,
+            chaser,
             dawn_core::ApproachCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(1)),
             }
         ));

@@ -43,4 +43,15 @@ Ship ownership を次の3つに分ける。
 - `Disassemble` は「現在の active docked ship のみ対象」として先に入れやすい。
 - `Assemble` 着手前に、station 内での owned ship roster と active ship 切替の
   最小モデルを実装する必要がある。
+
+## 実装状況（2026-07-07 追記）
+
+上記の帰結は実装済み。`ShipRegistry.owners`（既存、複数所有に対応済みだった）と
+`active_ship`（`by_player` から改名）を分離し、`SelectActiveShipCommand`（station-local
+切替のみ）を新設。Undock を含む操縦系コマンドは `ship_id` を持たず、常に caller の
+active ship に解決される（`is_active_ship` チェック）。station 管理系
+（Fit/Unfit/Dock/BuildPackagedShip/DisassembleShip）は `ship_id` を維持し
+`owns_ship` のまま（active でない所有船も対象にできる）。詳細は
+`docs/architecture/ownership.md` §7。これで `Assemble`（roadmap.md §12 9B-5）の
+前提条件は満たされた——本体はまだ未着手。
 - 9B の blocker は Station そのものではなく、**ownership 語彙の浅さ**である。

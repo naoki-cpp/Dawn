@@ -1,21 +1,15 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ClientCommandJson",
-  "description": "Every message a client can send to the server over the WebSocket connection. Serialized as a single JSON line tagged by `\"type\"`.\n\nThis enum is the schema-of-record for the client -> server half of the wire protocol (see [`EventJson`] for the server -> client half). It intentionally mirrors the wire format exactly, including the two backward-compatible quirks below -- it does not enforce the \"exactly one of these two fields\" business rules those quirks involve; that validation still happens in [`parse_client_command`], same as before this enum existed.\n\n- `WarpCommand` accepts either `target` (current) or `gate_id` (legacy); `target` wins if both are present. - `ApproachCommand` / `OrbitCommand` / `KeepAtRangeCommand` select their target with either `gate_id` (a Jump Gate) or `target_id` (a Ship); `gate_id` wins if both are present.",
+  "description": "Every message a client can send to the server over the WebSocket connection. Serialized as a single JSON line tagged by `\"type\"`.\n\nThis enum is the schema-of-record for the client -> server half of the wire protocol (see [`EventJson`] for the server -> client half). It intentionally mirrors the wire format exactly, including the two backward-compatible quirks below -- it does not enforce the \"exactly one of these two fields\" business rules those quirks involve; that validation still happens in [`parse_client_command`], same as before this enum existed.\n\n- `WarpCommand` accepts either `target` (current) or `gate_id` (legacy); `target` wins if both are present. - `ApproachCommand` / `OrbitCommand` / `KeepAtRangeCommand` select their target with either `gate_id` (a Jump Gate) or `target_id` (a Ship); `gate_id` wins if both are present.\n\nFlight/steering/module/Undock variants carry no `ship_id` (ADR-0037): the server always resolves them against the caller's active ship, so there is no wire-representable way to name a ship the player isn't currently flying. Station inventory-management variants (Fit/Unfit/Dock/ BuildPackagedShip/DisassembleShip) still carry an explicit `ship_id`, since they may target any owned docked ship, not just the active one.",
   "oneOf": [
     {
       "type": "object",
       "required": [
-        "ship_id",
         "target",
         "type"
       ],
       "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "target": {
           "$ref": "#/definitions/PosJson"
         },
@@ -30,16 +24,10 @@
     {
       "type": "object",
       "required": [
-        "ship_id",
         "target_id",
         "type"
       ],
       "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "target_id": {
           "type": "integer",
           "format": "uint64",
@@ -57,7 +45,6 @@
       "type": "object",
       "required": [
         "module_id",
-        "ship_id",
         "slot",
         "type"
       ],
@@ -65,11 +52,6 @@
         "module_id": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 0.0
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
           "minimum": 0.0
         },
         "slot": {
@@ -96,7 +78,6 @@
       "type": "object",
       "required": [
         "module_id",
-        "ship_id",
         "slot",
         "type"
       ],
@@ -104,11 +85,6 @@
         "module_id": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 0.0
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
           "minimum": 0.0
         },
         "slot": {
@@ -151,15 +127,9 @@
     {
       "type": "object",
       "required": [
-        "ship_id",
         "type"
       ],
       "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "type": {
           "type": "string",
           "enum": [
@@ -172,18 +142,12 @@
       "type": "object",
       "required": [
         "gate_id",
-        "ship_id",
         "type"
       ],
       "properties": {
         "gate_id": {
           "type": "integer",
           "format": "uint32",
-          "minimum": 0.0
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
           "minimum": 0.0
         },
         "type": {
@@ -197,7 +161,6 @@
     {
       "type": "object",
       "required": [
-        "ship_id",
         "type"
       ],
       "properties": {
@@ -207,11 +170,6 @@
             "null"
           ],
           "format": "uint32",
-          "minimum": 0.0
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
           "minimum": 0.0
         },
         "target_id": {
@@ -233,7 +191,6 @@
     {
       "type": "object",
       "required": [
-        "ship_id",
         "type"
       ],
       "properties": {
@@ -244,11 +201,6 @@
             "null"
           ],
           "format": "uint32",
-          "minimum": 0.0
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
           "minimum": 0.0
         },
         "target": {
@@ -272,7 +224,6 @@
     {
       "type": "object",
       "required": [
-        "ship_id",
         "type"
       ],
       "properties": {
@@ -290,11 +241,6 @@
             "null"
           ],
           "format": "float"
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
         },
         "target_id": {
           "type": [
@@ -315,7 +261,6 @@
     {
       "type": "object",
       "required": [
-        "ship_id",
         "type"
       ],
       "properties": {
@@ -333,11 +278,6 @@
             "null"
           ],
           "format": "float"
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
         },
         "target_id": {
           "type": [
@@ -418,16 +358,10 @@
     {
       "type": "object",
       "required": [
-        "ship_id",
         "station_id",
         "type"
       ],
       "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "station_id": {
           "type": "integer",
           "format": "uint32",
@@ -444,15 +378,9 @@
     {
       "type": "object",
       "required": [
-        "ship_id",
         "type"
       ],
       "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "type": {
           "type": "string",
           "enum": [
@@ -515,6 +443,26 @@
           "type": "string",
           "enum": [
             "DisassembleShipCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "SelectActiveShipCommand"
           ]
         }
       }

@@ -148,8 +148,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     cmd,
                     &mut lock_commands[sector],
                 );
-                let j = match followup {
-                    Some(ClientCommandFollowup::Jump(j)) => j,
+                let (ship_id, j) = match followup {
+                    Some(ClientCommandFollowup::Jump(ship_id, j)) => (ship_id, j),
                     Some(ClientCommandFollowup::RefreshFitting(ship_id)) => {
                         if let Some(json) = nodes[sector].build_player_loadout_json(ship_id) {
                             sess.send_raw(&json);
@@ -158,19 +158,15 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     }
                     None => continue,
                 };
-                if j.ship_id != sess.ship_id {
+                if ship_id != sess.ship_id {
                     continue;
                 }
-                match transit::propose_jump(
-                    &mut nodes[sector],
-                    &rafts[sector],
-                    j.ship_id,
-                    j.gate_id,
-                ) {
+                match transit::propose_jump(&mut nodes[sector], &rafts[sector], ship_id, j.gate_id)
+                {
                     JumpOutcome::NeedsTransitProposal { to } => {
                         println!(
                             "  [Server] Jump proposed: ship #{} gate #{} (S{} → S{})",
-                            j.ship_id.raw(),
+                            ship_id.raw(),
                             j.gate_id.0,
                             sector,
                             to.0
@@ -179,7 +175,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     JumpOutcome::WarpFallbackStarted => {
                         println!(
                             "  [Server] Jump: ship #{} out of range — auto-warp to gate #{} started",
-                            j.ship_id.raw(),
+                            ship_id.raw(),
                             j.gate_id.0
                         );
                     }
@@ -192,14 +188,14 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                         // there. Approach closes the rest of the gap sublight.
                         println!(
                             "  [Server] Jump: ship #{} too close to warp — approaching gate #{} instead",
-                            j.ship_id.raw(),
+                            ship_id.raw(),
                             j.gate_id.0
                         );
                     }
                     JumpOutcome::Rejected => {
                         eprintln!(
                             "[Server] JumpCommand rejected (ship #{} gate #{})",
-                            j.ship_id.raw(),
+                            ship_id.raw(),
                             j.gate_id.0
                         );
                     }

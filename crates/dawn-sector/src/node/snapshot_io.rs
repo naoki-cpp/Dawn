@@ -629,8 +629,8 @@ mod tests {
         assert!(matches!(
             node.dock_owned(
                 player_id,
+                ship_id,
                 DockCommand {
-                    ship_id,
                     station_id: StationId(0),
                 }
             ),

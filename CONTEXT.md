@@ -28,6 +28,11 @@ player stronger.
 - Node: a process or logical runtime that hosts sectors and participates in
   replication or consensus.
 - Ship: the current primary entity controlled by players, bots, or scripts.
+- Owned ship: a Ship a `PlayerId` holds ownership of. A player may own more
+  than one (ADR-0037).
+- Active ship: the one owned ship currently routable for flight/steering/
+  module commands and Undock. Singular per player; switched explicitly via
+  `SelectActiveShipCommand`, never automatically (ADR-0037).
 - Command: a request to change the world. It may be rejected.
 - Event: an immutable fact that already happened.
 - Tick: deterministic logical time. It is not wall-clock time.

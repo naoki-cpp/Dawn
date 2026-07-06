@@ -45,19 +45,20 @@ impl<S: EventStore> SimulationNode<S> {
         true
     }
 
-    /// `apply_orbit_command` wrapped with an ownership check.
+    /// `apply_orbit_command` wrapped with an active-ship check (ADR-0037).
     pub fn apply_orbit_command_owned(
         &mut self,
         player_id: PlayerId,
+        ship_id: ShipId,
         cmd: dawn_core::OrbitCommand,
     ) -> bool {
-        if !self.owns_ship(player_id, cmd.ship_id) {
+        if !self.is_active_ship(player_id, ship_id) {
             return false;
         }
-        if self.is_ship_docked(cmd.ship_id) {
+        if self.is_ship_docked(ship_id) {
             return false;
         }
-        self.apply_orbit_command(cmd.ship_id, cmd.target, cmd.radius)
+        self.apply_orbit_command(ship_id, cmd.target, cmd.radius)
     }
 
     /// Begin holding at least `range` away from a Ship or a Jump Gate
@@ -81,19 +82,20 @@ impl<S: EventStore> SimulationNode<S> {
         true
     }
 
-    /// `apply_keep_at_range_command` wrapped with an ownership check.
+    /// `apply_keep_at_range_command` wrapped with an active-ship check (ADR-0037).
     pub fn apply_keep_at_range_command_owned(
         &mut self,
         player_id: PlayerId,
+        ship_id: ShipId,
         cmd: dawn_core::KeepAtRangeCommand,
     ) -> bool {
-        if !self.owns_ship(player_id, cmd.ship_id) {
+        if !self.is_active_ship(player_id, ship_id) {
             return false;
         }
-        if self.is_ship_docked(cmd.ship_id) {
+        if self.is_ship_docked(ship_id) {
             return false;
         }
-        self.apply_keep_at_range_command(cmd.ship_id, cmd.target, cmd.range)
+        self.apply_keep_at_range_command(ship_id, cmd.target, cmd.range)
     }
 
     /// Shared target validation for Orbit / Keep at Range / Approach
@@ -355,10 +357,10 @@ mod tests {
 
         assert!(node.apply_orbit_command_owned(
             player,
+            chaser,
             dawn_core::OrbitCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
-                radius: Some(2000.0)
+                radius: Some(2000.0),
             }
         ));
     }
@@ -389,10 +391,10 @@ mod tests {
 
         assert!(!node.apply_orbit_command_owned(
             player,
+            chaser,
             dawn_core::OrbitCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
-                radius: Some(2000.0)
+                radius: Some(2000.0),
             }
         ));
     }
@@ -415,10 +417,10 @@ mod tests {
 
         assert!(!node.apply_keep_at_range_command_owned(
             player,
+            chaser,
             dawn_core::KeepAtRangeCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
-                range: Some(2000.0)
+                range: Some(2000.0),
             }
         ));
     }
@@ -436,10 +438,10 @@ mod tests {
 
         assert!(!node.apply_orbit_command_owned(
             stranger,
+            chaser,
             dawn_core::OrbitCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
-                radius: Some(2000.0)
+                radius: Some(2000.0),
             }
         ));
     }
@@ -506,8 +508,8 @@ mod tests {
         let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
         node.apply_orbit_command_owned(
             player,
+            chaser,
             dawn_core::OrbitCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
                 radius: Some(2000.0),
             },
@@ -591,9 +593,9 @@ mod tests {
 
         assert!(node.apply_approach_command_owned(
             player,
+            chaser,
             dawn_core::ApproachCommand {
-                ship_id: chaser,
-                target: dawn_core::ApproachTarget::Ship(target)
+                target: dawn_core::ApproachTarget::Ship(target),
             }
         ));
         let entity = *node.ships.index.get(&chaser).unwrap();
@@ -617,10 +619,10 @@ mod tests {
 
         assert!(node.apply_keep_at_range_command_owned(
             player,
+            chaser,
             dawn_core::KeepAtRangeCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
-                range: Some(5000.0)
+                range: Some(5000.0),
             }
         ));
     }
@@ -638,10 +640,10 @@ mod tests {
 
         assert!(!node.apply_keep_at_range_command_owned(
             stranger,
+            chaser,
             dawn_core::KeepAtRangeCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
-                range: Some(5000.0)
+                range: Some(5000.0),
             }
         ));
     }
@@ -720,8 +722,8 @@ mod tests {
         let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
         node.apply_keep_at_range_command_owned(
             player,
+            chaser,
             dawn_core::KeepAtRangeCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
                 range: Some(5000.0),
             },
@@ -751,8 +753,8 @@ mod tests {
         let target = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
         node.apply_keep_at_range_command_owned(
             player,
+            chaser,
             dawn_core::KeepAtRangeCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Ship(target),
                 range: Some(5000.0),
             },
@@ -850,10 +852,10 @@ mod tests {
 
         assert!(!node.apply_keep_at_range_command_owned(
             player,
+            chaser,
             dawn_core::KeepAtRangeCommand {
-                ship_id: chaser,
                 target: dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(1)),
-                range: Some(5000.0)
+                range: Some(5000.0),
             }
         ));
     }

@@ -92,7 +92,7 @@ impl SectorNodeRuntime {
         node: &mut SimulationNode<S>,
     ) -> (
         Vec<dawn_core::LockOnCommand>,
-        Vec<(usize, dawn_core::JumpCommand)>,
+        Vec<(usize, ShipId, dawn_core::JumpCommand)>,
     ) {
         let mut lock_commands = Vec::new();
         let mut pending_jumps = Vec::new();
@@ -100,8 +100,8 @@ impl SectorNodeRuntime {
         for (i, sess) in self.sessions.iter_mut().enumerate() {
             while let Some(cmd) = sess.try_recv_command() {
                 match node.apply_client_command(sess.player_id, cmd, &mut lock_commands) {
-                    Some(ClientCommandFollowup::Jump(j)) => {
-                        pending_jumps.push((i, j));
+                    Some(ClientCommandFollowup::Jump(ship_id, j)) => {
+                        pending_jumps.push((i, ship_id, j));
                         break;
                     }
                     Some(ClientCommandFollowup::RefreshFitting(ship_id)) => {
@@ -121,20 +121,20 @@ impl SectorNodeRuntime {
         &self,
         node: &mut SimulationNode<S>,
         raft: &RaftActorHandle,
-        pending_jumps: Vec<(usize, dawn_core::JumpCommand)>,
+        pending_jumps: Vec<(usize, ShipId, dawn_core::JumpCommand)>,
     ) {
-        for (idx, j) in pending_jumps {
+        for (idx, ship_id, j) in pending_jumps {
             let Some(sess) = self.sessions.get(idx) else {
                 continue;
             };
-            if j.ship_id != sess.ship_id {
+            if ship_id != sess.ship_id {
                 continue;
             }
-            match transit::propose_jump(node, raft, j.ship_id, j.gate_id) {
+            match transit::propose_jump(node, raft, ship_id, j.gate_id) {
                 JumpOutcome::NeedsTransitProposal { to } => {
                     println!(
                         "[Node] Jump proposed: ship #{} gate #{} (-> S{})",
-                        j.ship_id.raw(),
+                        ship_id.raw(),
                         j.gate_id.0,
                         to.0
                     );
@@ -142,14 +142,14 @@ impl SectorNodeRuntime {
                 JumpOutcome::WarpFallbackStarted => {
                     println!(
                         "[Node] Jump: ship #{} out of range - auto-warp to gate #{} started",
-                        j.ship_id.raw(),
+                        ship_id.raw(),
                         j.gate_id.0
                     );
                 }
                 JumpOutcome::ApproachFallbackStarted => {
                     println!(
                         "[Node] Jump: ship #{} too close to warp - approaching gate #{} instead",
-                        j.ship_id.raw(),
+                        ship_id.raw(),
                         j.gate_id.0
                     );
                 }

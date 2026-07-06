@@ -11,12 +11,10 @@
 //! ## Example
 //!
 //! ```
-//! use dawn_core::{MoveCommand, NodeId, Position, ShipId};
+//! use dawn_core::{MoveCommand, Position};
 //!
-//! let ship_id = ShipId::new(NodeId(1), 42);
-//! let command = MoveCommand::new(ship_id, Position::new(10.0, 0.0, -5.0));
+//! let command = MoveCommand::new(Position::new(10.0, 0.0, -5.0));
 //!
-//! assert_eq!(command.ship_id, ship_id);
 //! assert_eq!(command.target_position.x, 10.0);
 //! ```
 
@@ -42,7 +40,8 @@ pub use commands::{
     ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand,
     BuildPackagedShipCommand, ClientCommand, DeactivateModuleCommand, DisassembleShipCommand,
     DockCommand, FitModuleCommand, JumpCommand, KeepAtRangeCommand, LockOnCommand, MoveCommand,
-    OrbitCommand, StopCommand, UndockCommand, UnfitModuleCommand, WarpCommand,
+    OrbitCommand, SelectActiveShipCommand, StopCommand, UndockCommand, UnfitModuleCommand,
+    WarpCommand,
 };
 pub use entity::{EntityId, NodeId, ShipId};
 pub use error::DawnError;
