@@ -51,7 +51,7 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 |---|---|---|
 | `client/scripts/main.gd` | 974 | 🟢 オーケストレーション層。scene lifecycle / node generation / event dispatch / network send / HUD frame assembly を保持。live world state は `WorldSession`、HUD surface ownership は `HudSurface`、world interaction policy は `WorldInteraction`、world visual side effect は `WorldPresentation` へ移動 |
 | `client/scripts/hud_manager.gd` | 648 | 🟢 HUD 全パネルの構築・更新の stateless static class。責務は単一（HUD 構築） |
-| `client/scripts/connection.gd` | 373 | 🟢 WebSocket I/O とシグナル発行のみ。2026-07-07、ADR-0037 で操縦系/Undock の send_* 関数群から `ship_id` 引数を除去（サーバーが active ship から解決するため）、384→373 |
+| `client/scripts/connection.gd` | 297 | 🟢 WebSocket I/O とシグナル発行のみ。2026-07-07、ADR-0037 で操縦系/Undock の send_* 関数群から `ship_id` 引数を除去（384→373）。同日、`/improve-codebase-architecture` で20超の `send_*` に反復していた「welcomedガード+type付与+JSON化+改行」を private `_send_json(type, extra)` ヘルパーへ集約（373→297）。純粋移動、挙動変更なし |
 | `client/scripts/world_session.gd` | 345 | 🟢 InitialState / AoI / HP / lock / tick-cap / dock state の client-side live world state |
 | `client/scripts/ship_controller.gd` | 326 | 🟢 単一船の視覚表現に専念。ロックオン枠は `BillboardRing` 共通化 |
 | `client/scripts/navigation_marker_renderer.gd` | 227 | 🟢 ゲート/惑星/ステーションマーカー生成 + スペクトル色 |
@@ -70,7 +70,7 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/unit_format.gd` | 38 | 🟢 速度/距離の適応的単位整形（m/s・km/s・AU/s） |
 | `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 ワープトンネル ColorRect の intensity ラッパー |
 
-合計 4,548 行（2026-07-07 実測。C-4 解消で `module_row.gd`/`item_row.gd` を追加、ADR-0037 で `connection.gd` の send_* から `ship_id` 除去）のうち
+合計 4,472 行（2026-07-07 実測。C-4 解消で `module_row.gd`/`item_row.gd` を追加、ADR-0037 で `connection.gd` の send_* から `ship_id` 除去、さらに `_send_json` ヘルパー集約で373→297）のうち
 `main.gd` が21%を占める（C-1着手前69%から大幅低下）。
 新設 static class 群（C-1 の5クラス + ADR-0029 の `world_space`/`unit_format`/`warp_tunnel_effect`
 + PR #33 の `player_loadout` + `WorldSession` + `HudSurface` + `WorldInteraction` +
