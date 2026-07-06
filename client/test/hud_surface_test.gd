@@ -5,6 +5,8 @@
 extends GdUnitTestSuite
 
 const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
+const ModuleRow = preload("res://scripts/module_row.gd")
+const ItemRow = preload("res://scripts/item_row.gd")
 
 var _parent: Node
 var _hud: CanvasLayer
@@ -23,8 +25,34 @@ func before_test() -> void:
 	_surface.build(_parent, _hud, _stats_label)
 
 
+## Minimal but schema-complete rows -- callers override only the keys the
+## test cares about, matching ModuleRow/ItemRow's required-key validation.
+func _module(overrides: Dictionary) -> ModuleRow:
+	var base: Dictionary = {
+		"slot": "High", "index": 0, "module_id": 1, "name": "Test Module", "kind": "Weapon",
+		"is_active": false, "is_active_module": true,
+		"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10,
+		"stat_delta": {},
+	}
+	for key: String in overrides:
+		base[key] = overrides[key]
+	return ModuleRow.from_json(base)
+
+
+func _item(overrides: Dictionary) -> ItemRow:
+	var base: Dictionary = {
+		"item_type": "Module", "module_id": 1, "ship_type_id": 0,
+		"name": "Test Item", "kind": "", "slot": "", "count": 1,
+	}
+	for key: String in overrides:
+		base[key] = overrides[key]
+	return ItemRow.from_json(base)
+
+
 func test_render_updates_all_hud_panels_from_one_frame() -> void:
-	var modules: Array = [{"name": "Afterburner", "is_active_module": true, "is_active": true, "forced_reason": ""}]
+	var modules: Array[ModuleRow] = [
+		_module({"name": "Afterburner", "is_active_module": true, "is_active": true}),
+	]
 	_surface.set_player_fitting(modules, [])
 
 	_surface.render({
@@ -57,13 +85,13 @@ func test_render_updates_all_hud_panels_from_one_frame() -> void:
 
 
 func test_set_player_fitting_rebuilds_module_slots_and_inventory_rows() -> void:
-	var modules: Array = [
-		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true},
-		{"module_id": 2, "slot": "Low", "name": "Plate", "is_active_module": false},
+	var modules: Array[ModuleRow] = [
+		_module({"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true}),
+		_module({"module_id": 2, "slot": "Low", "name": "Plate", "is_active_module": false}),
 	]
-	var inventory: Array = [
-		{"item_type": "Module", "module_id": 3, "slot": "Mid", "name": "Afterburner", "count": 2},
-		{"item_type": "ScrapMetal", "name": "Scrap Metal", "count": 4},
+	var inventory: Array[ItemRow] = [
+		_item({"item_type": "Module", "module_id": 3, "slot": "Mid", "name": "Afterburner", "count": 2}),
+		_item({"item_type": "ScrapMetal", "name": "Scrap Metal", "count": 4}),
 	]
 
 	_surface.set_player_fitting(modules, inventory)
@@ -79,31 +107,31 @@ func test_render_repaints_after_the_modules_array_is_mutated_in_place() -> void:
 	## Regression: main.gd passes the live PlayerLoadout modules into frame["modules"] by
 	## reference (not a copy), and _apply_player_module_activation (driven
 	## by ModuleActivated/Deactivated events, e.g. Range Gate forcing a
-	## weapon off out-of-range) mutates that same array's dictionaries in
+	## weapon off out-of-range) mutates that same array's ModuleRow objects in
 	## place via PlayerLoadout.apply_module_activation. If render() stored
 	## _prev_modules as an alias of that live array instead of a snapshot,
 	## the in-place mutation would silently "update" _prev_modules too,
 	## permanently masking the change (the module bar staying ON forever
 	## even though the ship truly went inactive server-side).
-	var modules: Array = [
-		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": true, "forced_reason": ""},
+	var modules: Array[ModuleRow] = [
+		_module({"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": true}),
 	]
 	var frame: Dictionary = {"modules": modules}
 	_surface.set_player_fitting(modules, [])
 	_surface.render(frame)
 	assert_str((_surface._module_slots[0]["state"] as Label).text).is_equal("ON")
 
-	## Mutate the very same array/dictionary objects in place, exactly as
-	## PlayerLoadout.apply_module_activation does -- no new Array is created.
-	(modules[0] as Dictionary)["is_active"] = false
+	## Mutate the very same ModuleRow object in place, exactly as
+	## PlayerLoadout.apply_module_activation does -- no new object is created.
+	(modules[0] as ModuleRow).is_active = false
 
 	_surface.render(frame)
 	assert_str((_surface._module_slots[0]["state"] as Label).text).is_equal("OFF")
 
 
 func test_set_player_fitting_reuses_slots_when_active_module_set_is_unchanged() -> void:
-	var modules_off: Array = [
-		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false},
+	var modules_off: Array[ModuleRow] = [
+		_module({"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false}),
 	]
 	_surface.set_player_fitting(modules_off, [])
 	var slots_before: Array = _surface._module_slots
@@ -111,8 +139,8 @@ func test_set_player_fitting_reuses_slots_when_active_module_set_is_unchanged() 
 	## Activate/Deactivate resyncs only flip is_active/forced_reason -- the
 	## module_id/slot identity list is unchanged, so this must reuse the
 	## existing slot Controls (no rebuild) rather than tearing them down.
-	var modules_on: Array = [
-		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": true},
+	var modules_on: Array[ModuleRow] = [
+		_module({"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": true}),
 	]
 	_surface.set_player_fitting(modules_on, [])
 
@@ -121,17 +149,17 @@ func test_set_player_fitting_reuses_slots_when_active_module_set_is_unchanged() 
 
 
 func test_set_player_fitting_rebuilds_when_active_module_set_changes() -> void:
-	var modules_a: Array = [
-		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false},
+	var modules_a: Array[ModuleRow] = [
+		_module({"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false}),
 	]
 	_surface.set_player_fitting(modules_a, [])
 	var slots_before: Array = _surface._module_slots
 
 	## Fit/Unfit changes which modules are in the active set -- this must
 	## rebuild since slot indices/Controls no longer correspond 1:1.
-	var modules_b: Array = [
-		{"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false},
-		{"module_id": 5, "slot": "Mid", "name": "Tackle", "is_active_module": true, "is_active": false},
+	var modules_b: Array[ModuleRow] = [
+		_module({"module_id": 1, "slot": "High", "name": "Gun", "is_active_module": true, "is_active": false}),
+		_module({"module_id": 5, "slot": "Mid", "name": "Tackle", "is_active_module": true, "is_active": false}),
 	]
 	_surface.set_player_fitting(modules_b, [])
 
@@ -163,6 +191,24 @@ func test_panel_changed_is_true_for_array_difference() -> void:
 	assert_bool(_surface._panel_changed(a, b)).is_true()
 
 
+func test_modules_changed_is_false_for_equal_module_rows() -> void:
+	var a: Array[ModuleRow] = [_module({"module_id": 1})]
+	var b: Array[ModuleRow] = [_module({"module_id": 1})]
+	assert_bool(_surface._modules_changed(a, b)).is_false()
+
+
+func test_modules_changed_is_true_when_a_field_differs() -> void:
+	var a: Array[ModuleRow] = [_module({"module_id": 1, "is_active": false})]
+	var b: Array[ModuleRow] = [_module({"module_id": 1, "is_active": true})]
+	assert_bool(_surface._modules_changed(a, b)).is_true()
+
+
+func test_modules_changed_is_true_when_size_differs() -> void:
+	var a: Array[ModuleRow] = [_module({"module_id": 1})]
+	var b: Array[ModuleRow] = [_module({"module_id": 1}), _module({"module_id": 2})]
+	assert_bool(_surface._modules_changed(a, b)).is_true()
+
+
 func test_render_called_twice_with_same_frame_does_not_change_painted_values() -> void:
 	var frame: Dictionary = {
 		"connected": true,
@@ -181,7 +227,7 @@ func test_render_called_twice_with_same_frame_does_not_change_painted_values() -
 
 
 func test_inventory_panel_hit_helpers_delegate_to_built_panel() -> void:
-	_surface.set_player_fitting([], [{"module_id": 3, "slot": "Mid", "name": "Afterburner"}])
+	_surface.set_player_fitting([], [_item({"module_id": 3, "slot": "Mid", "name": "Afterburner"})])
 	_surface.toggle_inventory_panel()
 	await get_tree().process_frame
 

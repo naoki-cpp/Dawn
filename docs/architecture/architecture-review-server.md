@@ -87,7 +87,7 @@ managed debt として扱い、ファイルサイズ軸は B+ を維持する）
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-actor/src/protocol.rs` | 729 | 🟢 M-4 集約（DomainEvent↔JSON↔ClientCommand）。メッセージ family は増えているが単一責務 |
+| `crates/dawn-actor/src/protocol.rs` | 896 | 🟢 M-4 集約（DomainEvent↔JSON↔ClientCommand）。メッセージ family は増えているが単一責務 |
 | `crates/dawn-actor/src/client_connection.rs` | 262 | 🟢 ClientConnection trait + InProcess/Ws 実装 |
 | `crates/dawn-actor/src/ws_server.rs` | 275 | 🟢 M-4 集約（WsServer / PlayerSession）+ ADR-0032 `send_raw` |
 | `crates/dawn-actor/src/lib.rs` | 41 | 🟢 |

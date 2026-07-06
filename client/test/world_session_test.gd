@@ -5,6 +5,7 @@
 extends GdUnitTestSuite
 
 const WorldSession = preload("res://scripts/world_session.gd")
+const ModuleRow = preload("res://scripts/module_row.gd")
 
 var _session
 
@@ -151,19 +152,20 @@ func test_client_ticks_advance_capacitor_without_server_events() -> void:
 		"cap_max": 100.0,
 		"cap_recharge_per_tick": 5.0,
 	}, 11)
-	var modules: Array = [{
+	var modules: Array[ModuleRow] = [ModuleRow.from_json({
+		"slot": "High", "index": 0, "module_id": 1, "name": "Gun", "kind": "Weapon",
 		"is_active_module": true,
 		"is_active": true,
 		"cap_cost_per_cycle": 20.0,
 		"cycle_time_ticks": 10,
-		"cycle_remaining": 0,
-	}]
+		"stat_delta": {},
+	})]
 
 	_session.advance_client_ticks(1, modules)
 
 	assert_int(_session.current_tick).is_equal(1)
 	assert_float(_session.cap_current).is_equal_approx(80.0, 0.001)
-	assert_int((modules[0] as Dictionary)["cycle_remaining"]).is_equal(10)
+	assert_int(modules[0].cycle_remaining).is_equal(10)
 	ship.free()
 
 

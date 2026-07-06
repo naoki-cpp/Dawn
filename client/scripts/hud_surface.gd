@@ -5,6 +5,8 @@
 ## interface for rendering HUD state and hit-testing HUD controls.
 extends RefCounted
 
+const ModuleRow = preload("res://scripts/module_row.gd")
+
 var _stats_label: Label = null
 var _duel_result_label: Label = null
 var _status_panel_refs: Dictionary = {}
@@ -17,8 +19,11 @@ var _inventory_panel_refs: Dictionary = {}
 ## Last frame's per-panel sub-Dictionary/Array, used by render() to skip
 ## HudManager calls for panels that haven't changed since the previous
 ## frame. GDScript's Dictionary/Array `!=` is a deep (value) comparison, so
-## this also catches nested values like target_hp and the modules array.
-## Both start empty so the very first render() always paints every panel.
+## this also catches nested values like target_hp.
+## _prev_modules is the one exception: its elements are ModuleRow (an
+## Object), and Object's `!=` is reference identity, not value comparison --
+## see _modules_changed() below.
+## All start empty so the very first render() always paints every panel.
 var _prev_status: Dictionary = {}
 var _prev_ship_status: Dictionary = {}
 var _prev_target: Dictionary = {}
@@ -40,6 +45,30 @@ func build(parent: Node, hud: CanvasLayer, stats_label: Label) -> void:
 ## the real Control nodes render() paints.
 func _panel_changed(prev: Variant, next: Variant) -> bool:
 	return prev != next
+
+
+## Same purpose as _panel_changed(), but for Array[ModuleRow]: ModuleRow is
+## an Object, so `!=` between arrays of them compares references, not the
+## field values render() actually needs to notice changing.
+func _modules_changed(prev: Array, next: Array) -> bool:
+	if prev.size() != next.size():
+		return true
+	for i: int in range(next.size()):
+		var p: ModuleRow = prev[i]
+		var n: ModuleRow = next[i]
+		if not p.equals(n):
+			return true
+	return false
+
+
+## Independent per-element copies, not aliases -- see _prev_modules's
+## comment: ModuleRow is mutated in place, so a plain Array.duplicate(true)
+## would keep the same object references.
+func _clone_modules(modules: Array) -> Array:
+	var out: Array = []
+	for m: ModuleRow in modules:
+		out.append(m.clone())
+	return out
 
 
 func render(frame: Dictionary) -> void:
@@ -91,20 +120,21 @@ func render(frame: Dictionary) -> void:
 		)
 		_prev_target = target
 
-	## `modules` here is the *same* Array/Dictionary objects as the current
+	## `modules` here is the *same* ModuleRow objects as the current
 	## PlayerLoadout snapshot (frame["modules"] is assigned by reference, not
-	## copied) -- and module activation updates mutate those dictionaries
-	## in place inside PlayerLoadout.
+	## copied) -- and module activation updates mutate those ModuleRow
+	## instances in place inside PlayerLoadout.
 	## Storing _prev_modules = modules would alias the live array, so any
 	## later in-place mutation would silently also "update" _prev_modules,
 	## permanently masking the change from this comparison (e.g. a weapon
 	## forced OFF by Range Gate never repainted the module bar, since no
 	## PlayerFitting resync -- which replaces the array wholesale -- happens
-	## for that event). duplicate(true) takes a real, independent snapshot.
+	## for that event). _clone_modules() takes a real, independent snapshot
+	## (ModuleRow is an Object, so Array.duplicate(true) alone would not).
 	var modules: Array = frame.get("modules", []) as Array
-	if _panel_changed(_prev_modules, modules):
+	if _modules_changed(_prev_modules, modules):
 		HudManager.update_module_bar(_module_slots, modules)
-		_prev_modules = modules.duplicate(true)
+		_prev_modules = _clone_modules(modules)
 
 	if _stats_label != null:
 		_stats_label.text = frame.get("stats_text", "") as String
@@ -126,7 +156,7 @@ func set_player_fitting(modules: Array, inventory: Array, station_inventory: Arr
 	## it never paints state/colour, so this must always run, rebuilt or not.
 	HudManager.update_module_bar(_module_slots, modules)
 	## Independent snapshot, not an alias -- see the comment in render().
-	_prev_modules = modules.duplicate(true)
+	_prev_modules = _clone_modules(modules)
 	HudManager.update_inventory_panel(_inventory_panel_refs, modules, inventory, station_inventory)
 
 
@@ -135,9 +165,9 @@ func set_player_fitting(modules: Array, inventory: Array, station_inventory: Arr
 ## Order matters: rebuild_module_bar() assigns F-numbers by iteration order.
 func _active_module_signature(modules: Array) -> Array:
 	var sig: Array = []
-	for m: Dictionary in modules:
-		if m.get("is_active_module", false) as bool:
-			sig.append([m.get("module_id"), m.get("slot")])
+	for m: ModuleRow in modules:
+		if m.is_active_module:
+			sig.append([m.module_id, m.slot])
 	return sig
 
 
