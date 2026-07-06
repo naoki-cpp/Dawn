@@ -22,6 +22,44 @@ use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
 
+/// The station command seam: callers learn whether the operation was accepted
+/// and which ship should have its fitting/state resent to the client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StationOperationOutcome {
+    Accepted {
+        ship_id: ShipId,
+    },
+    Rejected {
+        ship_id: ShipId,
+        reason: StationOperationRejection,
+    },
+}
+
+impl StationOperationOutcome {
+    pub(super) fn refresh_fitting_ship_id(self) -> Option<ShipId> {
+        match self {
+            Self::Accepted { ship_id } | Self::Rejected { ship_id, .. } => Some(ship_id),
+        }
+    }
+}
+
+/// Why a station operation was rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StationOperationRejection {
+    NotOwned,
+    AlreadyDocked,
+    OutOfDockRange,
+    ShipNotDocked,
+    MissingDockedStationContext,
+    WrongDockedStation,
+    UnknownShipType,
+    MissingStationItem,
+    InsufficientStationItem,
+    ShipNotFound,
+    ShipIsFitted,
+    ShipIsDamaged,
+}
+
 impl<S: EventStore> SimulationNode<S> {
     pub const SCRAP_METAL_COST_PER_PACKAGED_SHIP: u64 = 1;
 
@@ -73,15 +111,28 @@ impl<S: EventStore> SimulationNode<S> {
         self.place_entity_at_absolute(entity, station_abs);
     }
 
-    pub fn dock_owned(&mut self, player_id: PlayerId, cmd: DockCommand) -> bool {
+    pub(super) fn dock_owned(
+        &mut self,
+        player_id: PlayerId,
+        cmd: DockCommand,
+    ) -> StationOperationOutcome {
         if !self.owns_ship(player_id, cmd.ship_id) {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::NotOwned,
+            };
         }
         if self.docked_ships.contains_key(&cmd.ship_id) {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::AlreadyDocked,
+            };
         }
         if !self.can_dock_station(cmd.ship_id, cmd.station_id) {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::OutOfDockRange,
+            };
         }
         self.settle_ship_into_station(cmd.ship_id, cmd.station_id);
         self.docked_ships.insert(cmd.ship_id, cmd.station_id);
@@ -91,15 +142,27 @@ impl<S: EventStore> SimulationNode<S> {
             station_id: cmd.station_id,
             tick: self.current_tick,
         }));
-        true
+        StationOperationOutcome::Accepted {
+            ship_id: cmd.ship_id,
+        }
     }
 
-    pub fn undock_owned(&mut self, player_id: PlayerId, cmd: UndockCommand) -> bool {
+    pub(super) fn undock_owned(
+        &mut self,
+        player_id: PlayerId,
+        cmd: UndockCommand,
+    ) -> StationOperationOutcome {
         if !self.owns_ship(player_id, cmd.ship_id) {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::NotOwned,
+            };
         }
         let Some(station_id) = self.docked_ships.remove(&cmd.ship_id) else {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::ShipNotDocked,
+            };
         };
         self.docked_players.remove(&player_id);
         self.event_store
@@ -108,7 +171,9 @@ impl<S: EventStore> SimulationNode<S> {
                 station_id,
                 tick: self.current_tick,
             }));
-        true
+        StationOperationOutcome::Accepted {
+            ship_id: cmd.ship_id,
+        }
     }
 
     pub fn clear_docked_lock_targets(&mut self, tick: dawn_core::Tick) -> Vec<DomainEvent> {
@@ -217,43 +282,56 @@ impl<S: EventStore> SimulationNode<S> {
         player_id: PlayerId,
         item_id: ItemId,
         count: u64,
-    ) -> bool {
+    ) -> Result<(), StationOperationRejection> {
         if count == 0 {
-            return true;
+            return Ok(());
         }
         let Some(inv) = self.station_inventory_mut(player_id) else {
-            return false;
+            return Err(StationOperationRejection::MissingStationItem);
         };
         let Some(stack) = inv.get_mut(&item_id) else {
-            return false;
+            return Err(StationOperationRejection::MissingStationItem);
         };
         if *stack < count {
-            return false;
+            return Err(StationOperationRejection::InsufficientStationItem);
         }
         *stack -= count;
         if *stack == 0 {
             inv.remove(&item_id);
         }
-        true
+        Ok(())
     }
 
-    pub fn build_packaged_ship_owned(
+    pub(super) fn build_packaged_ship_owned(
         &mut self,
         player_id: PlayerId,
         cmd: BuildPackagedShipCommand,
-    ) -> bool {
+    ) -> StationOperationOutcome {
         if !self.owns_ship(player_id, cmd.ship_id) {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::NotOwned,
+            };
         }
         if !self.can_use_station(player_id, cmd.station_id) {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::MissingDockedStationContext,
+            };
         }
         if !self.ship_type_registry.contains_key(&cmd.ship_type_id) {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::UnknownShipType,
+            };
         }
         let scrap_cost = Self::SCRAP_METAL_COST_PER_PACKAGED_SHIP;
-        if !self.try_debit_station_item(player_id, ItemId::ScrapMetal, scrap_cost) {
-            return false;
+        if let Err(reason) = self.try_debit_station_item(player_id, ItemId::ScrapMetal, scrap_cost)
+        {
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason,
+            };
         }
         self.credit_station_item(player_id, ItemId::PackagedShip(cmd.ship_type_id), 1);
         self.event_store
@@ -265,42 +343,68 @@ impl<S: EventStore> SimulationNode<S> {
                 scrap_cost,
                 tick: self.current_tick,
             }));
-        true
+        StationOperationOutcome::Accepted {
+            ship_id: cmd.ship_id,
+        }
     }
 
-    pub fn disassemble_ship_owned(
+    pub(super) fn disassemble_ship_owned(
         &mut self,
         player_id: PlayerId,
         cmd: DisassembleShipCommand,
-    ) -> bool {
+    ) -> StationOperationOutcome {
         if !self.owns_ship(player_id, cmd.ship_id) {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::NotOwned,
+            };
         }
         if self.player_docked_station(player_id) != Some(cmd.station_id) {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::MissingDockedStationContext,
+            };
         }
         if self.docked_station(cmd.ship_id) != Some(cmd.station_id) {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::WrongDockedStation,
+            };
         }
         let Some(&entity) = self.ships.index.get(&cmd.ship_id) else {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::ShipNotFound,
+            };
         };
         let is_fitted = {
             let Ok(fitting) = self.world.inner().get::<&FittingComp>(entity) else {
-                return false;
+                return StationOperationOutcome::Rejected {
+                    ship_id: cmd.ship_id,
+                    reason: StationOperationRejection::ShipNotFound,
+                };
             };
             let has_any_fitted_module = fitting.iter_slots().next().is_some();
             has_any_fitted_module
         };
         if is_fitted {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::ShipIsFitted,
+            };
         }
         let is_damaged = {
             let Ok(hull) = self.world.inner().get::<&HullComp>(entity) else {
-                return false;
+                return StationOperationOutcome::Rejected {
+                    ship_id: cmd.ship_id,
+                    reason: StationOperationRejection::ShipNotFound,
+                };
             };
             let Ok(stats) = self.world.inner().get::<&ShipStatsComp>(entity) else {
-                return false;
+                return StationOperationOutcome::Rejected {
+                    ship_id: cmd.ship_id,
+                    reason: StationOperationRejection::ShipNotFound,
+                };
             };
             hull.is_destroyed()
                 || hull.shield() != stats.max_shield
@@ -308,10 +412,16 @@ impl<S: EventStore> SimulationNode<S> {
                 || hull.hull() != stats.max_hull
         };
         if is_damaged {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::ShipIsDamaged,
+            };
         }
         let Some(ship_type_id) = self.ships.type_ids.get(&cmd.ship_id).copied() else {
-            return false;
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::ShipNotFound,
+            };
         };
 
         self.credit_station_item(player_id, ItemId::PackagedShip(ship_type_id), 1);
@@ -324,7 +434,9 @@ impl<S: EventStore> SimulationNode<S> {
                 ship_type_id,
                 tick: self.current_tick,
             }));
-        true
+        StationOperationOutcome::Accepted {
+            ship_id: cmd.ship_id,
+        }
     }
 }
 
@@ -336,6 +448,10 @@ mod tests {
     use crate::{modules, ship_types};
 
     use super::*;
+
+    fn accepted(outcome: StationOperationOutcome) -> bool {
+        matches!(outcome, StationOperationOutcome::Accepted { .. })
+    }
 
     fn node() -> SimulationNode<InMemoryEventStore> {
         let mut node = SimulationNode::new(
@@ -432,13 +548,13 @@ mod tests {
             thrust.is_braking = false;
         }
 
-        assert!(node.dock_owned(
+        assert!(accepted(node.dock_owned(
             player_id,
             DockCommand {
                 ship_id,
                 station_id: StationId(0),
             }
-        ));
+        )));
 
         let velocity = node.world.inner().get::<&VelocityComp>(entity).unwrap().0;
         let thrust = *node.world.inner().get::<&ThrustComp>(entity).unwrap();
@@ -455,13 +571,13 @@ mod tests {
         let station = node.station(StationId(0)).expect("demo station exists");
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
         let entity = *node.ships.index.get(&ship_id).expect("ship entity");
-        assert!(node.dock_owned(
+        assert!(accepted(node.dock_owned(
             player_id,
             DockCommand {
                 ship_id,
                 station_id: StationId(0),
             }
-        ));
+        )));
 
         let before = *node.world.inner().get::<&ThrustComp>(entity).unwrap();
         assert!(node.apply_move_command_owned(
@@ -487,13 +603,13 @@ mod tests {
         let ship_id = node.spawn_player_ship(player_id);
         let station = node.station(StationId(0)).expect("demo station exists");
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
-        assert!(node.dock_owned(
+        assert!(accepted(node.dock_owned(
             player_id,
             DockCommand {
                 ship_id,
                 station_id: StationId(0),
             }
-        ));
+        )));
 
         assert!(!node.apply_warp_command_owned(
             player_id,
@@ -526,13 +642,13 @@ mod tests {
             };
         }
 
-        assert!(node.dock_owned(
+        assert!(accepted(node.dock_owned(
             player_id,
             DockCommand {
                 ship_id,
                 station_id: StationId(0),
             }
-        ));
+        )));
 
         let after_dock = node
             .ship_absolute(ship_id)
@@ -577,27 +693,29 @@ mod tests {
             [station_abs[0] + 1000.0, station_abs[1], station_abs[2]],
         );
 
-        assert!(node.dock_owned(
+        assert!(accepted(node.dock_owned(
             player_id,
             DockCommand {
                 ship_id,
                 station_id: StationId(0),
             }
-        ));
+        )));
         node.tick();
-        assert!(node.undock_owned(player_id, UndockCommand { ship_id }));
+        assert!(accepted(
+            node.undock_owned(player_id, UndockCommand { ship_id })
+        ));
 
         assert!(
             node.can_dock_station(ship_id, StationId(0)),
             "undocked ships should still be in docking range of the station they just left"
         );
-        assert!(node.dock_owned(
+        assert!(accepted(node.dock_owned(
             player_id,
             DockCommand {
                 ship_id,
                 station_id: StationId(0),
             }
-        ));
+        )));
     }
 
     #[test]
@@ -609,13 +727,13 @@ mod tests {
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
 
         assert!(!node.can_use_station(player_id, StationId(0)));
-        assert!(node.dock_owned(
+        assert!(accepted(node.dock_owned(
             player_id,
             DockCommand {
                 ship_id,
                 station_id: StationId(0),
             }
-        ));
+        )));
         assert!(node.can_use_station(player_id, StationId(0)));
     }
 
@@ -626,15 +744,17 @@ mod tests {
         let ship_id = node.spawn_player_ship(player_id);
         let station = node.station(StationId(0)).expect("demo station exists");
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
-        assert!(node.dock_owned(
+        assert!(accepted(node.dock_owned(
             player_id,
             DockCommand {
                 ship_id,
                 station_id: StationId(0),
             }
-        ));
+        )));
 
-        assert!(node.undock_owned(player_id, UndockCommand { ship_id }));
+        assert!(accepted(
+            node.undock_owned(player_id, UndockCommand { ship_id })
+        ));
         assert!(!node.can_use_station(player_id, StationId(0)));
     }
 
@@ -645,13 +765,13 @@ mod tests {
         let ship_id = node.spawn_player_ship(player_id);
         let station = node.station(StationId(0)).expect("demo station exists");
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
-        assert!(node.dock_owned(
+        assert!(accepted(node.dock_owned(
             player_id,
             DockCommand {
                 ship_id,
                 station_id: StationId(0),
             }
-        ));
+        )));
 
         node.ships.by_player.remove(&player_id);
 
@@ -683,14 +803,22 @@ mod tests {
         let player_id = PlayerId(1);
         node.credit_station_item(player_id, ItemId::ScrapMetal, 2);
 
-        assert!(!node.try_debit_station_item(
-            player_id,
-            ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
-            1
+        assert!(matches!(
+            node.try_debit_station_item(
+                player_id,
+                ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
+                1
+            ),
+            Err(StationOperationRejection::MissingStationItem)
         ));
-        assert!(!node.try_debit_station_item(player_id, ItemId::ScrapMetal, 3));
+        assert!(matches!(
+            node.try_debit_station_item(player_id, ItemId::ScrapMetal, 3),
+            Err(StationOperationRejection::InsufficientStationItem)
+        ));
         assert_eq!(node.station_item_count(player_id, ItemId::ScrapMetal), 2);
-        assert!(node.try_debit_station_item(player_id, ItemId::ScrapMetal, 2));
+        assert!(node
+            .try_debit_station_item(player_id, ItemId::ScrapMetal, 2)
+            .is_ok());
         assert_eq!(node.station_item_count(player_id, ItemId::ScrapMetal), 0);
     }
 
@@ -701,27 +829,27 @@ mod tests {
         let ship_id = node.spawn_player_ship(player_id);
         let station = node.station(StationId(0)).expect("demo station exists");
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
-        assert!(node.dock_owned(
+        assert!(accepted(node.dock_owned(
             player_id,
             DockCommand {
                 ship_id,
                 station_id: StationId(0),
             }
-        ));
+        )));
         node.credit_station_item(
             player_id,
             ItemId::ScrapMetal,
             SimulationNode::<InMemoryEventStore>::SCRAP_METAL_COST_PER_PACKAGED_SHIP,
         );
 
-        assert!(node.build_packaged_ship_owned(
+        assert!(accepted(node.build_packaged_ship_owned(
             player_id,
             BuildPackagedShipCommand {
                 ship_id,
                 station_id: StationId(0),
                 ship_type_id: crate::ship_types::SHIP_TYPE_MAGPIE,
             }
-        ));
+        )));
         assert_eq!(node.station_item_count(player_id, ItemId::ScrapMetal), 0);
         assert_eq!(
             node.station_item_count(
@@ -739,12 +867,18 @@ mod tests {
         let ship_id = node.spawn_player_ship(player_id);
         node.credit_station_item(player_id, ItemId::ScrapMetal, 10);
 
-        assert!(!node.build_packaged_ship_owned(
-            player_id,
-            BuildPackagedShipCommand {
-                ship_id,
-                station_id: StationId(0),
-                ship_type_id: crate::ship_types::SHIP_TYPE_MAGPIE,
+        assert!(matches!(
+            node.build_packaged_ship_owned(
+                player_id,
+                BuildPackagedShipCommand {
+                    ship_id,
+                    station_id: StationId(0),
+                    ship_type_id: crate::ship_types::SHIP_TYPE_MAGPIE,
+                }
+            ),
+            StationOperationOutcome::Rejected {
+                reason: StationOperationRejection::MissingDockedStationContext,
+                ..
             }
         ));
     }
@@ -756,13 +890,13 @@ mod tests {
         let ship_id = node.spawn_player_ship(player_id);
         let station = node.station(StationId(0)).expect("demo station exists");
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
-        assert!(node.dock_owned(
+        assert!(accepted(node.dock_owned(
             player_id,
             DockCommand {
                 ship_id,
                 station_id: StationId(0),
             }
-        ));
+        )));
         assert!(node.unfit_module_owned(
             player_id,
             dawn_core::UnfitModuleCommand {
@@ -788,13 +922,13 @@ mod tests {
             }
         ));
 
-        assert!(node.disassemble_ship_owned(
+        assert!(accepted(node.disassemble_ship_owned(
             player_id,
             DisassembleShipCommand {
                 ship_id,
                 station_id: StationId(0),
             }
-        ));
+        )));
         assert_eq!(
             node.station_item_count(
                 player_id,
@@ -813,19 +947,25 @@ mod tests {
         let ship_id = node.spawn_player_ship(player_id);
         let station = node.station(StationId(0)).expect("demo station exists");
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
-        assert!(node.dock_owned(
+        assert!(accepted(node.dock_owned(
             player_id,
             DockCommand {
                 ship_id,
                 station_id: StationId(0),
             }
-        ));
+        )));
 
-        assert!(!node.disassemble_ship_owned(
-            player_id,
-            DisassembleShipCommand {
-                ship_id,
-                station_id: StationId(0),
+        assert!(matches!(
+            node.disassemble_ship_owned(
+                player_id,
+                DisassembleShipCommand {
+                    ship_id,
+                    station_id: StationId(0),
+                }
+            ),
+            StationOperationOutcome::Rejected {
+                reason: StationOperationRejection::ShipIsFitted,
+                ..
             }
         ));
     }

@@ -388,6 +388,7 @@ impl<S: EventStore> SimulationNode<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node::station::StationOperationOutcome;
     use dawn_core::{NodeId, Position, SectorBounds, SectorId, Velocity};
 
     fn mem_node() -> SimulationNode {
@@ -669,12 +670,15 @@ mod tests {
         let station = node.station(StationId(0)).unwrap().clone();
         let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
         node.credit_station_item(player_id, ItemId::ScrapMetal, 5);
-        assert!(node.dock_owned(
-            player_id,
-            DockCommand {
-                ship_id,
-                station_id: StationId(0),
-            }
+        assert!(matches!(
+            node.dock_owned(
+                player_id,
+                DockCommand {
+                    ship_id,
+                    station_id: StationId(0),
+                }
+            ),
+            StationOperationOutcome::Accepted { .. }
         ));
 
         let json = node.build_player_fitting_json(ship_id).unwrap();
@@ -697,14 +701,20 @@ mod tests {
         let player_id = node.next_player_id();
         let station = node.station(StationId(0)).unwrap().clone();
         let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
-        assert!(node.dock_owned(
-            player_id,
-            DockCommand {
-                ship_id,
-                station_id: StationId(0),
-            }
+        assert!(matches!(
+            node.dock_owned(
+                player_id,
+                DockCommand {
+                    ship_id,
+                    station_id: StationId(0),
+                }
+            ),
+            StationOperationOutcome::Accepted { .. }
         ));
-        assert!(node.undock_owned(player_id, UndockCommand { ship_id }));
+        assert!(matches!(
+            node.undock_owned(player_id, UndockCommand { ship_id }),
+            StationOperationOutcome::Accepted { .. }
+        ));
 
         let json = node.build_player_fitting_json(ship_id).unwrap();
         let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
