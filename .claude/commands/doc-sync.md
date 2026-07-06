@@ -22,7 +22,26 @@ Check:
 - Field mismatches (type / field name) → fix the catalog to match the code
 - Status column (implemented / not implemented / @deprecated) wrong → fix
 
-### Step 2: ADR implementation checklists
+### Step 2: Wire protocol
+
+Run `cargo test -p dawn-actor wire_schema_doc_is_up_to_date` to check the two
+generated schema files (`docs/architecture/wire-protocol.schema.json` /
+`wire-protocol-commands.schema.json`) against `EventJson` /
+`ClientCommandJson` in `crates/dawn-actor/src/protocol.rs`. If it fails,
+regenerate with `cargo run -p dawn-actor --example gen_wire_schema` and
+commit the updated files — do not hand-edit them.
+
+The schema files are machine-checked; the prose in
+`docs/architecture/wire-protocol.md` is not. Check it separately:
+
+- The `"type"` value lists for both halves match the current enum variants
+- The documented quirks (`WarpCommand`'s legacy `gate_id` vs `target` form,
+  the `gate_id`/`target_id` selection on `ApproachCommand`/`OrbitCommand`/
+  `KeepAtRangeCommand`) still match `client_command_from_json`
+- The list of `DomainEvent` variants that never reach the wire (return `None`
+  from `domain_event_to_json`) is still accurate
+
+### Step 3: ADR implementation checklists
 
 Only ADRs that contain an implementation checklist section are in scope.
 Grep `docs/adr/` for `実装チェックリスト` (the section heading used in the
@@ -33,7 +52,7 @@ Check:
 - Prose that contradicts the current code → fix
 - References to types / fields / methods that no longer exist → fix
 
-### Step 3: Tick processing order
+### Step 4: Tick processing order
 
 Read the step order in `tick_with_lock_commands()` in
 `crates/dawn-sector/src/node/tick.rs` and compare it with
@@ -43,7 +62,7 @@ Check:
 - Step order, count, and content match the implementation
 - The events emitted at each step are listed correctly
 
-### Step 4: Roadmap
+### Step 5: Roadmap
 
 Read `docs/process/roadmap.md` and verify completion flags (`[x]` / done
 markers) against reality. Completed-phase details live in
@@ -57,7 +76,7 @@ Check:
 - When a phase completes: add one summary line to roadmap.md and move the
   detailed record to roadmap-history.md (not into roadmap.md)
 
-### Step 5: AI_DEVELOPMENT_GUIDE.md
+### Step 6: AI_DEVELOPMENT_GUIDE.md
 
 Read `AI_DEVELOPMENT_GUIDE.md` (CLAUDE.md only delegates to it) and verify:
 
@@ -72,7 +91,7 @@ Read `AI_DEVELOPMENT_GUIDE.md` (CLAUDE.md only delegates to it) and verify:
   highest ADR number in `docs/adr/`
 - The guide starts with a single H1 and no bare `#` lines outside code fences
 
-### Step 6: Player-facing docs
+### Step 7: Player-facing docs
 
 Read `docs/process/playtest-guide.md` and verify it matches current controls
 and features.
@@ -81,7 +100,7 @@ Check:
 - Keybindings match the implementation in `client/scripts/main.gd`
 - No documented-but-removed features; no implemented-but-undocumented ones
 
-### Step 7: Design docs
+### Step 8: Design docs
 
 Read `docs/architecture/architecture.md`, `docs/architecture/entity-model.md`,
 `docs/architecture/ownership.md`, and `docs/design/game-design.md`, and verify

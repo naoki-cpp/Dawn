@@ -136,6 +136,19 @@ that never happened.
 Use the `/add-event` skill when introducing a new event and `/remove-event`
 when deleting a deprecated one — they cover every pipeline touchpoint.
 
+### Wire protocol (client<->server JSON)
+
+`EventJson` and `ClientCommandJson` in `crates/dawn-actor/src/protocol.rs` are
+the schema-of-record for the wire format and are generated into
+`docs/architecture/wire-protocol.schema.json` /
+`wire-protocol-commands.schema.json` (see `docs/architecture/wire-protocol.md`).
+After changing either enum (or a type either references), regenerate with
+`cargo run -p dawn-actor --example gen_wire_schema` and commit both updated
+`.schema.json` files in the same PR — `cargo test -p dawn-actor` fails
+otherwise (`wire_schema_doc_is_up_to_date`). Never hand-edit the `.schema.json`
+files; never add a new domain type to `dawn-core` just to reuse it here
+(FBD-002 keeps `dawn-core` free of the `schemars` dependency).
+
 ## Crate Boundaries
 
 Keep dependencies one-way. If a change needs a new dependency, check the

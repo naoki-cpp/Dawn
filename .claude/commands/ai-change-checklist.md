@@ -45,6 +45,27 @@ Minimum bar either way:
       "post-release breaking change procedure"
 ```
 
+## Extra checks when the wire protocol changes
+
+If the change touches `EventJson` or `ClientCommandJson` in
+`crates/dawn-actor/src/protocol.rs` (or a type either references —
+`PosJson`, `VelJson`, `WarpTargetJson`):
+
+```
+[ ] Regenerated both schema files:
+    cargo run -p dawn-actor --example gen_wire_schema
+[ ] Committed the updated docs/architecture/wire-protocol.schema.json and
+    wire-protocol-commands.schema.json in the same PR as the code change
+[ ] cargo test -p dawn-actor passes (wire_schema_doc_is_up_to_date catches
+    a forgotten regeneration)
+[ ] If the set of "type" values or a documented quirk changed (e.g. a new
+    command, a field becoming required), updated the prose in
+    docs/architecture/wire-protocol.md to match — the schema files are
+    generated, but that prose is hand-maintained
+[ ] Did not add a new pub type to dawn-core just to reuse it in protocol.rs
+    (FBD-002: dawn-core must not depend on schemars)
+```
+
 ## Extra checks when adding a new crate
 
 ```
