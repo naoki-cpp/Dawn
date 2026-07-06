@@ -11,6 +11,7 @@
 extends GdUnitTestSuite
 
 const __source: String = "res://scripts/main.gd"
+const ModuleRow = preload("res://scripts/module_row.gd")
 
 var _main: Node
 
@@ -61,11 +62,16 @@ func after_test() -> void:
 
 func _module_fixture(module_id: int, slot: String, active: bool) -> Dictionary:
 	return {
-		"module_id": module_id,
 		"slot": slot,
+		"index": 0,
+		"module_id": module_id,
+		"name": "Test Module",
+		"kind": "",
 		"is_active": active,
 		"is_active_module": true,
-		"forced_reason": "",
+		"cap_cost_per_cycle": 0.0,
+		"cycle_time_ticks": 10,
+		"stat_delta": {},
 	}
 
 
@@ -175,9 +181,9 @@ func test_module_activated_marks_matching_player_module_active() -> void:
 
 	_main._on_module_activated(1, 5, "Mid")
 
-	var mod_dict: Dictionary = _main._loadout.modules()[0]
-	assert_bool(mod_dict["is_active"] as bool).is_true()
-	assert_str(mod_dict["forced_reason"] as String).is_equal("")
+	var mod_dict: ModuleRow = _main._loadout.modules()[0]
+	assert_bool(mod_dict.is_active).is_true()
+	assert_str(mod_dict.forced_reason).is_equal("")
 
 
 func test_module_toggle_marks_module_active_before_server_echo() -> void:
@@ -188,9 +194,9 @@ func test_module_toggle_marks_module_active_before_server_echo() -> void:
 
 	_main._toggle_module_by_index(0)
 
-	var mod_dict: Dictionary = _main._loadout.modules()[0]
-	assert_bool(mod_dict["is_active"] as bool).is_true()
-	assert_str(mod_dict["forced_reason"] as String).is_equal("")
+	var mod_dict: ModuleRow = _main._loadout.modules()[0]
+	assert_bool(mod_dict.is_active).is_true()
+	assert_str(mod_dict.forced_reason).is_equal("")
 	assert_int(connection.activate_calls.size()).is_equal(1)
 	connection.free()
 
@@ -205,19 +211,16 @@ func test_module_toggle_of_a_targeted_kind_without_a_locked_target_is_refused_cl
 	_main._connection = connection
 	_main._player_ship_id = 1
 	_set_loadout_modules([{
-		"module_id": 5,
-		"slot": "High",
-		"kind": "Weapon",
-		"is_active": false,
-		"is_active_module": true,
-		"forced_reason": "",
+		"slot": "High", "index": 0, "module_id": 5, "name": "Test Module", "kind": "Weapon",
+		"is_active": false, "is_active_module": true,
+		"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10, "stat_delta": {},
 	}])
 	## Fresh _main has _session.player_lock_target == -1 (no Lock).
 
 	_main._toggle_module_by_index(0)
 
-	var mod_dict: Dictionary = _main._loadout.modules()[0]
-	assert_bool(mod_dict["is_active"] as bool).is_false()
+	var mod_dict: ModuleRow = _main._loadout.modules()[0]
+	assert_bool(mod_dict.is_active).is_false()
 	assert_int(connection.activate_calls.size()).is_equal(0)
 	connection.free()
 
@@ -237,18 +240,15 @@ func test_module_toggle_of_a_targeted_kind_against_a_locked_but_out_of_aoi_targe
 	_main._session.player_lock_target = 99
 	_main._ships = {} # target 99 is not in AoI; player ship 1 isn't either.
 	_set_loadout_modules([{
-		"module_id": 5,
-		"slot": "High",
-		"kind": "Weapon",
-		"is_active": false,
-		"is_active_module": true,
-		"forced_reason": "",
+		"slot": "High", "index": 0, "module_id": 5, "name": "Test Module", "kind": "Weapon",
+		"is_active": false, "is_active_module": true,
+		"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10, "stat_delta": {},
 	}])
 
 	_main._toggle_module_by_index(0)
 
-	var mod_dict: Dictionary = _main._loadout.modules()[0]
-	assert_bool(mod_dict["is_active"] as bool).is_false()
+	var mod_dict: ModuleRow = _main._loadout.modules()[0]
+	assert_bool(mod_dict.is_active).is_false()
 	assert_int(connection.activate_calls.size()).is_equal(0)
 	connection.free()
 
@@ -261,9 +261,9 @@ func test_module_toggle_marks_module_inactive_before_server_echo() -> void:
 
 	_main._toggle_module_by_index(0)
 
-	var mod_dict: Dictionary = _main._loadout.modules()[0]
-	assert_bool(mod_dict["is_active"] as bool).is_false()
-	assert_str(mod_dict["forced_reason"] as String).is_equal("")
+	var mod_dict: ModuleRow = _main._loadout.modules()[0]
+	assert_bool(mod_dict.is_active).is_false()
+	assert_str(mod_dict.forced_reason).is_equal("")
 	assert_int(connection.deactivate_calls.size()).is_equal(1)
 	connection.free()
 
@@ -274,9 +274,9 @@ func test_module_deactivated_with_no_reason_is_a_plain_off() -> void:
 
 	_main._on_module_deactivated(1, 5, "High", "")
 
-	var mod_dict: Dictionary = _main._loadout.modules()[0]
-	assert_bool(mod_dict["is_active"] as bool).is_false()
-	assert_str(mod_dict["forced_reason"] as String).is_equal("")
+	var mod_dict: ModuleRow = _main._loadout.modules()[0]
+	assert_bool(mod_dict.is_active).is_false()
+	assert_str(mod_dict.forced_reason).is_equal("")
 
 
 func test_module_deactivated_with_cap_reason_flags_forced_reason() -> void:
@@ -285,8 +285,8 @@ func test_module_deactivated_with_cap_reason_flags_forced_reason() -> void:
 
 	_main._on_module_deactivated(1, 5, "High", "cap")
 
-	var mod_dict: Dictionary = _main._loadout.modules()[0]
-	assert_str(mod_dict["forced_reason"] as String).is_equal("cap")
+	var mod_dict: ModuleRow = _main._loadout.modules()[0]
+	assert_str(mod_dict.forced_reason).is_equal("cap")
 
 
 func test_module_deactivated_with_range_reason_flags_forced_reason() -> void:
@@ -295,5 +295,5 @@ func test_module_deactivated_with_range_reason_flags_forced_reason() -> void:
 
 	_main._on_module_deactivated(1, 5, "High", "range")
 
-	var mod_dict: Dictionary = _main._loadout.modules()[0]
-	assert_str(mod_dict["forced_reason"] as String).is_equal("range")
+	var mod_dict: ModuleRow = _main._loadout.modules()[0]
+	assert_str(mod_dict.forced_reason).is_equal("range")

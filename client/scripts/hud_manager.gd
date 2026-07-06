@@ -12,6 +12,11 @@
 class_name HudManager
 extends RefCounted
 
+## Typed PlayerLoadout row shapes -- preloaded rather than referenced by
+## global class_name, same as player_loadout.gd itself.
+const ModuleRow = preload("res://scripts/module_row.gd")
+const ItemRow = preload("res://scripts/item_row.gd")
+
 ## Layer colours for the three HP bands and the capacitor (EVE convention).
 const COLOR_SHIELD := Color(0.29, 0.56, 0.85)  ## blue
 const COLOR_ARMOR  := Color(0.88, 0.63, 0.19)  ## amber
@@ -355,10 +360,10 @@ static func rebuild_module_bar(module_bar: HBoxContainer, player_modules: Array)
 
 	var f_number: int = 1
 	for i: int in range(player_modules.size()):
-		var mod_dict: Dictionary = player_modules[i] as Dictionary
-		if not (mod_dict.get("is_active_module", false) as bool):
+		var row: ModuleRow = player_modules[i]
+		if not row.is_active_module:
 			continue  ## Skip Passive modules
-		var slot: Dictionary = make_module_slot(f_number, mod_dict.get("name", "?") as String)
+		var slot: Dictionary = make_module_slot(f_number, row.name)
 		slot["module_index"] = i
 		module_bar.add_child(slot["panel"])
 		module_slots.append(slot)
@@ -413,18 +418,17 @@ static func update_module_bar(module_slots: Array, player_modules: Array) -> voi
 		var idx: int = slot["module_index"]
 		if idx < 0 or idx >= player_modules.size():
 			continue
-		var mod_dict: Dictionary = player_modules[idx] as Dictionary
+		var row: ModuleRow = player_modules[idx]
 		var col: Color
 		var txt: String
 		## "cap" | "range" | "" (server-authoritative, ADR-0035) — replaces the
 		## old client-side manual/forced heuristic, which always mislabelled
 		## a range-forced deactivation as a capacitor exhaustion.
-		var forced_reason: String = mod_dict.get("forced_reason", "") as String
-		if forced_reason == "cap":
+		if row.forced_reason == "cap":
 			col = MODULE_CAP;   txt = "CAP!"
-		elif forced_reason == "range":
+		elif row.forced_reason == "range":
 			col = MODULE_RANGE; txt = "RANGE!"
-		elif mod_dict.get("is_active", false) as bool:
+		elif row.is_active:
 			col = MODULE_ON;    txt = "ON"
 		else:
 			col = MODULE_OFF;   txt = "OFF"
@@ -583,38 +587,29 @@ static func update_inventory_panel(refs: Dictionary, modules: Array, inventory: 
 
 	var fitted_rows: Array = []
 	for entry: Variant in modules:
-		var m: Dictionary = entry as Dictionary
-		var slot: String = m.get("slot", "") as String
-		var module_id: int = m.get("module_id", 0) as int
-		var text := "%s: %s" % [slot, m.get("name", "?") as String]
-		var row := _make_inventory_row(text, module_id, slot, "unfit")
+		var m: ModuleRow = entry
+		var text := "%s: %s" % [m.slot, m.name]
+		var row := _make_inventory_row(text, m.module_id, m.slot, "unfit")
 		fitted_list.add_child(row["panel"])
 		fitted_rows.append(row)
 	refs["fitted_rows"] = fitted_rows
 
 	var inventory_rows: Array = []
 	for entry: Variant in inventory:
-		var item: Dictionary = entry as Dictionary
-		var item_type: String = item.get("item_type", "Module") as String
-		var slot: String = item.get("slot", "") as String
-		var module_id: int = item.get("module_id", 0) as int
-		var count: int = item.get("count", 1) as int
+		var item: ItemRow = entry
 		var text: String
 		var action := ""
-		if item_type == "Module":
-			text = "%s: %s x%d" % [slot, item.get("name", "?") as String, count]
+		if item.item_type == "Module":
+			text = "%s: %s x%d" % [item.slot, item.name, item.count]
 			action = "fit"
 		else:
-			text = "%s x%d" % [item.get("name", "?") as String, count]
-		var row := _make_inventory_row(text, module_id, slot, action)
+			text = "%s x%d" % [item.name, item.count]
+		var row := _make_inventory_row(text, item.module_id, item.slot, action)
 		inventory_list.add_child(row["panel"])
 		inventory_rows.append(row)
 	for entry: Variant in station_inventory:
-		var item: Dictionary = entry as Dictionary
-		var text := "[Station] %s x%d" % [
-			item.get("name", "?") as String,
-			item.get("count", 1) as int,
-		]
+		var item: ItemRow = entry
+		var text := "[Station] %s x%d" % [item.name, item.count]
 		var row := _make_inventory_row(text, 0, "", "")
 		inventory_list.add_child(row["panel"])
 		inventory_rows.append(row)

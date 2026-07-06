@@ -9,6 +9,7 @@
 extends GdUnitTestSuite
 
 const __source: String = "res://scripts/hud_manager.gd"
+const ModuleRow = preload("res://scripts/module_row.gd")
 
 var _hud: CanvasLayer
 
@@ -16,6 +17,20 @@ var _hud: CanvasLayer
 func before_test() -> void:
 	_hud = auto_free(CanvasLayer.new())
 	add_child(_hud)
+
+
+## Minimal but schema-complete module row -- callers override only the keys
+## the test cares about, matching ModuleRow's required-key validation.
+func _module(overrides: Dictionary) -> ModuleRow:
+	var base: Dictionary = {
+		"slot": "High", "index": 0, "module_id": 1, "name": "Test Module", "kind": "Weapon",
+		"is_active": false, "is_active_module": true,
+		"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10,
+		"stat_delta": {},
+	}
+	for key: String in overrides:
+		base[key] = overrides[key]
+	return ModuleRow.from_json(base)
 
 
 # -- set_stat_bar / set_mini_bar (percentage math) -----------------------------
@@ -128,10 +143,10 @@ func test_update_target_panel_leaves_bars_unchanged_when_no_hp_record_yet() -> v
 
 func test_rebuild_module_bar_skips_passive_modules() -> void:
 	var module_bar: HBoxContainer = HudManager.build_module_bar(_hud)
-	var modules: Array = [
-		{"name": "Small Railgun I", "is_active_module": true},
-		{"name": "Basic Shield Extender", "is_active_module": false},
-		{"name": "1MN Afterburner", "is_active_module": true},
+	var modules: Array[ModuleRow] = [
+		_module({"name": "Small Railgun I", "is_active_module": true}),
+		_module({"name": "Basic Shield Extender", "is_active_module": false}),
+		_module({"name": "1MN Afterburner", "is_active_module": true}),
 	]
 	var slots: Array = HudManager.rebuild_module_bar(module_bar, modules)
 	assert_int(slots.size()).is_equal(2)
@@ -141,7 +156,8 @@ func test_rebuild_module_bar_skips_passive_modules() -> void:
 
 func test_update_module_bar_marks_cap_forced_off_modules() -> void:
 	var module_bar: HBoxContainer = HudManager.build_module_bar(_hud)
-	var modules: Array = [{"name": "Gun", "is_active_module": true, "is_active": true, "forced_reason": "cap"}]
+	var modules: Array[ModuleRow] = [_module({"name": "Gun", "is_active_module": true, "is_active": true})]
+	modules[0].forced_reason = "cap"
 	var slots: Array = HudManager.rebuild_module_bar(module_bar, modules)
 	HudManager.update_module_bar(slots, modules)
 	assert_str((slots[0]["state"] as Label).text).is_equal("CAP!")
@@ -149,7 +165,8 @@ func test_update_module_bar_marks_cap_forced_off_modules() -> void:
 
 func test_update_module_bar_marks_range_forced_off_modules() -> void:
 	var module_bar: HBoxContainer = HudManager.build_module_bar(_hud)
-	var modules: Array = [{"name": "Gun", "is_active_module": true, "is_active": true, "forced_reason": "range"}]
+	var modules: Array[ModuleRow] = [_module({"name": "Gun", "is_active_module": true, "is_active": true})]
+	modules[0].forced_reason = "range"
 	var slots: Array = HudManager.rebuild_module_bar(module_bar, modules)
 	HudManager.update_module_bar(slots, modules)
 	assert_str((slots[0]["state"] as Label).text).is_equal("RANGE!")
@@ -157,7 +174,7 @@ func test_update_module_bar_marks_range_forced_off_modules() -> void:
 
 func test_update_module_bar_marks_active_modules_on() -> void:
 	var module_bar: HBoxContainer = HudManager.build_module_bar(_hud)
-	var modules: Array = [{"name": "Gun", "is_active_module": true, "is_active": true, "forced_reason": ""}]
+	var modules: Array[ModuleRow] = [_module({"name": "Gun", "is_active_module": true, "is_active": true})]
 	var slots: Array = HudManager.rebuild_module_bar(module_bar, modules)
 	HudManager.update_module_bar(slots, modules)
 	assert_str((slots[0]["state"] as Label).text).is_equal("ON")
@@ -165,7 +182,7 @@ func test_update_module_bar_marks_active_modules_on() -> void:
 
 func test_module_slot_at_finds_the_slot_under_a_screen_position() -> void:
 	var module_bar: HBoxContainer = HudManager.build_module_bar(_hud)
-	var modules: Array = [{"name": "Gun", "is_active_module": true}]
+	var modules: Array[ModuleRow] = [_module({"name": "Gun", "is_active_module": true})]
 	var slots: Array = HudManager.rebuild_module_bar(module_bar, modules)
 	await get_tree().process_frame  ## let layout/anchors resolve global_rect
 
