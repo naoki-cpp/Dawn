@@ -556,15 +556,11 @@ impl<S: EventStore> SimulationNode<S> {
         let Some(anchor) = self.world.ship_anchor(entity) else {
             return [offset.x as f64, offset.y as f64, offset.z as f64];
         };
-        let Some(a) = self.anchor_table.abs(anchor) else {
+        let Some(abs) = self.anchor_table.absolute(anchor, offset) else {
             debug_assert_missing_anchor(anchor, "entity_absolute_f64");
             return [offset.x as f64, offset.y as f64, offset.z as f64];
         };
-        [
-            a[0] + offset.x as f64,
-            a[1] + offset.y as f64,
-            a[2] + offset.z as f64,
-        ]
+        abs
     }
 
     /// Convert a Sector-frame (absolute) destination given as an f64 point into
@@ -578,15 +574,11 @@ impl<S: EventStore> SimulationNode<S> {
         let Some(anchor) = self.world.ship_anchor(entity) else {
             return Position::new(dest_abs[0] as f32, dest_abs[1] as f32, dest_abs[2] as f32);
         };
-        let Some(a) = self.anchor_table.abs(anchor) else {
+        let Some(rel) = self.anchor_table.to_relative(anchor, dest_abs) else {
             debug_assert_missing_anchor(anchor, "dest_in_ship_frame_abs");
             return Position::new(dest_abs[0] as f32, dest_abs[1] as f32, dest_abs[2] as f32);
         };
-        Position::new(
-            (dest_abs[0] - a[0]) as f32,
-            (dest_abs[1] - a[1]) as f32,
-            (dest_abs[2] - a[2]) as f32,
-        )
+        rel
     }
 
     /// Distance from a Ship to a Sector-frame point (a gate/body position),
@@ -599,12 +591,23 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// True distance (metres) between two Ships, composing each ship's anchor
     /// and offset in f64 so the result is correct even if the two ships are
-    /// anchored on different bodies (ADR-0029 step 3 / spike B-3).
+    /// anchored on different bodies (ADR-0029 step 3 / spike B-3). Resolves
+    /// each ship to its `(AnchorId, offset)` and delegates the composition to
+    /// `AnchorTable::distance`.
     pub fn ship_distance(&self, a: ShipId, b: ShipId) -> Option<f64> {
-        let pa = self.ship_absolute(a)?;
-        let pb = self.ship_absolute(b)?;
-        let d = [pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]];
-        Some((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt())
+        let (anchor_a, off_a) = self.ship_anchor_and_offset(a)?;
+        let (anchor_b, off_b) = self.ship_anchor_and_offset(b)?;
+        self.anchor_table
+            .distance((anchor_a, off_a), (anchor_b, off_b))
+    }
+
+    /// A ship's `AnchorId` and raw (anchor-relative) `PositionComp` offset —
+    /// the pair `AnchorTable`'s composition methods take.
+    fn ship_anchor_and_offset(&self, ship_id: ShipId) -> Option<(dawn_core::AnchorId, Position)> {
+        let entity = *self.ships.index.get(&ship_id)?;
+        let anchor = self.world.ship_anchor(entity)?;
+        let offset = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+        Some((anchor, offset))
     }
 
     /// Removes a ship entirely: despawns its ECS entity, clears it from every

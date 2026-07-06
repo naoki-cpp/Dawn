@@ -19,6 +19,10 @@ player stronger.
 
 ## Core Terms
 
+- Anchor: a per-body local coordinate origin a Ship's position is stored
+  relative to (`AnchorId` + f32 offset), keeping ship-scale precision at
+  true-AU distances from the Sector origin. Composed to/from Sector-frame
+  absolute coordinates by `AnchorTable` (`dawn_sector::anchor`).
 - World: the whole simulated universe.
 - Sector: a spatial partition that owns ships and runs local simulation.
 - Node: a process or logical runtime that hosts sectors and participates in
