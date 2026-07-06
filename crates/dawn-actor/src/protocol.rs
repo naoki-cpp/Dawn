@@ -18,7 +18,7 @@ use dawn_core::{
     ShipId, SlotKind, StopCommand, UndockCommand,
 };
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // ── Output types (server → client) ───────────────────────────────────────────
 
@@ -26,7 +26,7 @@ use serde::Serialize;
 /// Serialized as a single JSON line tagged by `"type"`.
 ///
 /// This enum is the schema-of-record for the server -> client half of the
-/// wire protocol: [`schema()`] renders it to a JSON Schema document that
+/// wire protocol: [`event_json_schema()`] renders it to a JSON Schema document that
 /// `docs/architecture/wire-protocol.md` is generated from. Adding, removing,
 /// or renaming a field here changes the wire format for every client
 /// (Godot today; any future client written against
@@ -143,7 +143,7 @@ pub struct HelloMessage {
     pub resume: Option<ResumeIdentity>,
 }
 
-#[derive(Debug, Serialize, JsonSchema, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy)]
 pub struct PosJson {
     pub x: f32,
     pub y: f32,
@@ -342,197 +342,307 @@ pub fn parse_hello(line: &str) -> Option<HelloMessage> {
 
 // ── Input parser (client → server) ───────────────────────────────────────────
 
+/// A `{"Gate": N}` or `{"Body": N}` warp destination, as sent by
+/// `WarpCommand`'s current wire format (externally tagged: the variant name
+/// is the JSON object's only key).
+#[derive(Debug, Deserialize, JsonSchema, Clone, Copy)]
+pub enum WarpTargetJson {
+    Gate(u32),
+    Body(u32),
+}
+
+/// Every message a client can send to the server over the WebSocket
+/// connection. Serialized as a single JSON line tagged by `"type"`.
+///
+/// This enum is the schema-of-record for the client -> server half of the
+/// wire protocol (see [`EventJson`] for the server -> client half). It
+/// intentionally mirrors the wire format exactly, including the two
+/// backward-compatible quirks below -- it does not enforce the "exactly one
+/// of these two fields" business rules those quirks involve; that
+/// validation still happens in [`parse_client_command`], same as before
+/// this enum existed.
+///
+/// - `WarpCommand` accepts either `target` (current) or `gate_id` (legacy);
+///   `target` wins if both are present.
+/// - `ApproachCommand` / `OrbitCommand` / `KeepAtRangeCommand` select their
+///   target with either `gate_id` (a Jump Gate) or `target_id` (a Ship);
+///   `gate_id` wins if both are present.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(tag = "type")]
+pub enum ClientCommandJson {
+    MoveCommand {
+        ship_id: u64,
+        target: PosJson,
+    },
+    LockOnCommand {
+        ship_id: u64,
+        target_id: u64,
+    },
+    ActivateModuleCommand {
+        ship_id: u64,
+        module_id: u32,
+        slot: String,
+        /// Target of a targeted module (Weapon/Tackle), per ADR-0035.
+        /// Required only for targeted module kinds; validated server-side.
+        target_ship_id: Option<u64>,
+    },
+    DeactivateModuleCommand {
+        ship_id: u64,
+        module_id: u32,
+        slot: String,
+    },
+    AttackCommand {
+        attacker_id: u64,
+        target_id: u64,
+    },
+    StopCommand {
+        ship_id: u64,
+    },
+    JumpCommand {
+        ship_id: u64,
+        gate_id: u32,
+    },
+    ApproachCommand {
+        ship_id: u64,
+        gate_id: Option<u32>,
+        target_id: Option<u64>,
+    },
+    WarpCommand {
+        ship_id: u64,
+        target: Option<WarpTargetJson>,
+        /// Legacy form: `{"gate_id": N}` instead of `{"target": {"Gate": N}}`.
+        gate_id: Option<u32>,
+    },
+    OrbitCommand {
+        ship_id: u64,
+        gate_id: Option<u32>,
+        target_id: Option<u64>,
+        radius: Option<f32>,
+    },
+    KeepAtRangeCommand {
+        ship_id: u64,
+        gate_id: Option<u32>,
+        target_id: Option<u64>,
+        range: Option<f32>,
+    },
+    FitModuleCommand {
+        ship_id: u64,
+        module_id: u32,
+        slot: String,
+    },
+    UnfitModuleCommand {
+        ship_id: u64,
+        module_id: u32,
+        slot: String,
+    },
+    DockCommand {
+        ship_id: u64,
+        station_id: u32,
+    },
+    UndockCommand {
+        ship_id: u64,
+    },
+    BuildPackagedShipCommand {
+        ship_id: u64,
+        station_id: u32,
+        ship_type_id: u32,
+    },
+    DisassembleShipCommand {
+        ship_id: u64,
+        station_id: u32,
+    },
+}
+
+/// Render the client -> server wire schema (see [`ClientCommandJson`]) as a
+/// JSON Schema document.
+///
+/// `examples/gen_wire_schema.rs` writes this to
+/// `docs/architecture/wire-protocol-commands.schema.json`, and the
+/// `wire_schema_doc_is_up_to_date` test below fails the build if the checked
+/// in file drifts from what this function currently produces -- regenerate
+/// with `cargo run -p dawn-actor --example gen_wire_schema` when it does.
+pub fn client_command_json_schema() -> schemars::schema::RootSchema {
+    schemars::schema_for!(ClientCommandJson)
+}
+
 /// Parse a newline-terminated JSON line from the Godot client into a
 /// [`ClientCommand`]. Returns `None` for unknown or malformed messages.
 pub fn parse_client_command(line: &str) -> Option<ClientCommand> {
-    let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    match v.get("type")?.as_str()? {
-        "MoveCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let target = v.get("target")?;
+    let json: ClientCommandJson = serde_json::from_str(line).ok()?;
+    client_command_from_json(json)
+}
+
+/// Resolve an `Option<gate_id>` / `Option<target_id>` pair into an
+/// [`ApproachTarget`], shared by `ApproachCommand` / `OrbitCommand` /
+/// `KeepAtRangeCommand`. `gate_id` wins if both are present, matching the
+/// wire format documented on [`ClientCommandJson`].
+fn approach_target_from_gate_or_ship(
+    gate_id: Option<u32>,
+    target_id: Option<u64>,
+) -> Option<ApproachTarget> {
+    if let Some(gate) = gate_id {
+        Some(ApproachTarget::Gate(dawn_core::JumpGateId(gate)))
+    } else {
+        Some(ApproachTarget::Ship(ShipId(EntityId::from_raw(target_id?))))
+    }
+}
+
+fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
+    match json {
+        ClientCommandJson::MoveCommand { ship_id, target } => {
             Some(ClientCommand::Move(MoveCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                ship_id: ShipId(EntityId::from_raw(ship_id)),
                 target_position: Position {
-                    x: target.get("x")?.as_f64()? as f32,
-                    y: target.get("y")?.as_f64()? as f32,
-                    z: target.get("z")?.as_f64()? as f32,
+                    x: target.x,
+                    y: target.y,
+                    z: target.z,
                 },
             }))
         }
-        "LockOnCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let target_id_raw = v.get("target_id")?.as_u64()?;
+        ClientCommandJson::LockOnCommand { ship_id, target_id } => {
             Some(ClientCommand::LockOn(LockOnCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
-                target_id: ShipId(EntityId::from_raw(target_id_raw)),
+                ship_id: ShipId(EntityId::from_raw(ship_id)),
+                target_id: ShipId(EntityId::from_raw(target_id)),
             }))
         }
-        "ActivateModuleCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let module_id_raw = v.get("module_id")?.as_u64()? as u32;
-            let slot_str = v.get("slot")?.as_str()?;
-            // target_ship_id (ADR-0035): optional — required only for
-            // targeted module kinds (Weapon/Tackle), validated server-side.
-            let target_ship_id = v
-                .get("target_ship_id")
-                .and_then(|t| t.as_u64())
-                .map(|raw| ShipId(EntityId::from_raw(raw)));
-            Some(ClientCommand::Activate(ActivateModuleCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
-                module_id: ModuleId(module_id_raw),
-                slot: parse_slot_kind(slot_str)?,
-                target_ship_id,
-            }))
-        }
-        "DeactivateModuleCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let module_id_raw = v.get("module_id")?.as_u64()? as u32;
-            let slot_str = v.get("slot")?.as_str()?;
-            Some(ClientCommand::Deactivate(DeactivateModuleCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
-                module_id: ModuleId(module_id_raw),
-                slot: parse_slot_kind(slot_str)?,
-            }))
-        }
-        "AttackCommand" => {
-            let attacker_id_raw = v.get("attacker_id")?.as_u64()?;
-            let target_id_raw = v.get("target_id")?.as_u64()?;
-            Some(ClientCommand::Attack(AttackCommand {
-                attacker_id: ShipId(EntityId::from_raw(attacker_id_raw)),
-                target_id: ShipId(EntityId::from_raw(target_id_raw)),
-            }))
-        }
-        "StopCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            Some(ClientCommand::Stop(StopCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
-            }))
-        }
-        "JumpCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let gate_id_raw = v.get("gate_id")?.as_u64()? as u32;
+        ClientCommandJson::ActivateModuleCommand {
+            ship_id,
+            module_id,
+            slot,
+            target_ship_id,
+        } => Some(ClientCommand::Activate(ActivateModuleCommand {
+            ship_id: ShipId(EntityId::from_raw(ship_id)),
+            module_id: ModuleId(module_id),
+            slot: parse_slot_kind(&slot)?,
+            target_ship_id: target_ship_id.map(|raw| ShipId(EntityId::from_raw(raw))),
+        })),
+        ClientCommandJson::DeactivateModuleCommand {
+            ship_id,
+            module_id,
+            slot,
+        } => Some(ClientCommand::Deactivate(DeactivateModuleCommand {
+            ship_id: ShipId(EntityId::from_raw(ship_id)),
+            module_id: ModuleId(module_id),
+            slot: parse_slot_kind(&slot)?,
+        })),
+        ClientCommandJson::AttackCommand {
+            attacker_id,
+            target_id,
+        } => Some(ClientCommand::Attack(AttackCommand {
+            attacker_id: ShipId(EntityId::from_raw(attacker_id)),
+            target_id: ShipId(EntityId::from_raw(target_id)),
+        })),
+        ClientCommandJson::StopCommand { ship_id } => Some(ClientCommand::Stop(StopCommand {
+            ship_id: ShipId(EntityId::from_raw(ship_id)),
+        })),
+        ClientCommandJson::JumpCommand { ship_id, gate_id } => {
             Some(ClientCommand::Jump(dawn_core::JumpCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
-                gate_id: dawn_core::JumpGateId(gate_id_raw),
+                ship_id: ShipId(EntityId::from_raw(ship_id)),
+                gate_id: dawn_core::JumpGateId(gate_id),
             }))
         }
-        "ApproachCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            // gate_id selects a Jump Gate target; otherwise target_id is a Ship.
-            let target = if let Some(gate) = v.get("gate_id").and_then(|g| g.as_u64()) {
-                ApproachTarget::Gate(dawn_core::JumpGateId(gate as u32))
-            } else {
-                let target_id_raw = v.get("target_id")?.as_u64()?;
-                ApproachTarget::Ship(ShipId(EntityId::from_raw(target_id_raw)))
-            };
+        ClientCommandJson::ApproachCommand {
+            ship_id,
+            gate_id,
+            target_id,
+        } => {
+            let target = approach_target_from_gate_or_ship(gate_id, target_id)?;
             Some(ClientCommand::Approach(ApproachCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                ship_id: ShipId(EntityId::from_raw(ship_id)),
                 target,
             }))
         }
-        "WarpCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            // Accept {"target":{"Gate":2}} / {"target":{"Body":1}} or legacy {"gate_id":2}.
-            let target = if let Some(t) = v.get("target") {
-                if let Some(gate_val) = t.get("Gate").and_then(|g| g.as_u64()) {
-                    dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(gate_val as u32))
-                } else if let Some(body_val) = t.get("Body").and_then(|b| b.as_u64()) {
-                    dawn_core::WarpTarget::Body(dawn_core::CelestialBodyId(body_val as u32))
-                } else {
-                    return None;
+        ClientCommandJson::WarpCommand {
+            ship_id,
+            target,
+            gate_id,
+        } => {
+            let warp_target = match target {
+                Some(WarpTargetJson::Gate(gate)) => {
+                    dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(gate))
                 }
-            } else {
-                let gate_id_raw = v.get("gate_id")?.as_u64()? as u32;
-                dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(gate_id_raw))
+                Some(WarpTargetJson::Body(body)) => {
+                    dawn_core::WarpTarget::Body(dawn_core::CelestialBodyId(body))
+                }
+                None => dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(gate_id?)),
             };
             Some(ClientCommand::Warp(dawn_core::WarpCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
-                target,
+                ship_id: ShipId(EntityId::from_raw(ship_id)),
+                target: warp_target,
             }))
         }
-        "OrbitCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let target = if let Some(gate) = v.get("gate_id").and_then(|g| g.as_u64()) {
-                ApproachTarget::Gate(dawn_core::JumpGateId(gate as u32))
-            } else {
-                let target_id_raw = v.get("target_id")?.as_u64()?;
-                ApproachTarget::Ship(ShipId(EntityId::from_raw(target_id_raw)))
-            };
-            let radius = v.get("radius").and_then(|r| r.as_f64()).map(|r| r as f32);
+        ClientCommandJson::OrbitCommand {
+            ship_id,
+            gate_id,
+            target_id,
+            radius,
+        } => {
+            let target = approach_target_from_gate_or_ship(gate_id, target_id)?;
             Some(ClientCommand::Orbit(dawn_core::OrbitCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                ship_id: ShipId(EntityId::from_raw(ship_id)),
                 target,
                 radius,
             }))
         }
-        "KeepAtRangeCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let target = if let Some(gate) = v.get("gate_id").and_then(|g| g.as_u64()) {
-                ApproachTarget::Gate(dawn_core::JumpGateId(gate as u32))
-            } else {
-                let target_id_raw = v.get("target_id")?.as_u64()?;
-                ApproachTarget::Ship(ShipId(EntityId::from_raw(target_id_raw)))
-            };
-            let range = v.get("range").and_then(|r| r.as_f64()).map(|r| r as f32);
+        ClientCommandJson::KeepAtRangeCommand {
+            ship_id,
+            gate_id,
+            target_id,
+            range,
+        } => {
+            let target = approach_target_from_gate_or_ship(gate_id, target_id)?;
             Some(ClientCommand::KeepAtRange(dawn_core::KeepAtRangeCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                ship_id: ShipId(EntityId::from_raw(ship_id)),
                 target,
                 range,
             }))
         }
-        "FitModuleCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let module_id_raw = v.get("module_id")?.as_u64()? as u32;
-            let slot_str = v.get("slot")?.as_str()?;
-            Some(ClientCommand::Fit(dawn_core::FitModuleCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
-                module_id: ModuleId(module_id_raw),
-                slot: parse_slot_kind(slot_str)?,
-            }))
-        }
-        "UnfitModuleCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let module_id_raw = v.get("module_id")?.as_u64()? as u32;
-            let slot_str = v.get("slot")?.as_str()?;
-            Some(ClientCommand::Unfit(dawn_core::UnfitModuleCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
-                module_id: ModuleId(module_id_raw),
-                slot: parse_slot_kind(slot_str)?,
-            }))
-        }
-        "DockCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let station_id_raw = v.get("station_id")?.as_u64()? as u32;
-            Some(ClientCommand::Dock(DockCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
-                station_id: dawn_core::StationId(station_id_raw),
-            }))
-        }
-        "UndockCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
+        ClientCommandJson::FitModuleCommand {
+            ship_id,
+            module_id,
+            slot,
+        } => Some(ClientCommand::Fit(dawn_core::FitModuleCommand {
+            ship_id: ShipId(EntityId::from_raw(ship_id)),
+            module_id: ModuleId(module_id),
+            slot: parse_slot_kind(&slot)?,
+        })),
+        ClientCommandJson::UnfitModuleCommand {
+            ship_id,
+            module_id,
+            slot,
+        } => Some(ClientCommand::Unfit(dawn_core::UnfitModuleCommand {
+            ship_id: ShipId(EntityId::from_raw(ship_id)),
+            module_id: ModuleId(module_id),
+            slot: parse_slot_kind(&slot)?,
+        })),
+        ClientCommandJson::DockCommand {
+            ship_id,
+            station_id,
+        } => Some(ClientCommand::Dock(DockCommand {
+            ship_id: ShipId(EntityId::from_raw(ship_id)),
+            station_id: dawn_core::StationId(station_id),
+        })),
+        ClientCommandJson::UndockCommand { ship_id } => {
             Some(ClientCommand::Undock(UndockCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
+                ship_id: ShipId(EntityId::from_raw(ship_id)),
             }))
         }
-        "BuildPackagedShipCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let station_id_raw = v.get("station_id")?.as_u64()? as u32;
-            let ship_type_id_raw = v.get("ship_type_id")?.as_u64()? as u32;
-            Some(ClientCommand::BuildPackagedShip(BuildPackagedShipCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
-                station_id: dawn_core::StationId(station_id_raw),
-                ship_type_id: dawn_core::ShipTypeId(ship_type_id_raw),
-            }))
-        }
-        "DisassembleShipCommand" => {
-            let ship_id_raw = v.get("ship_id")?.as_u64()?;
-            let station_id_raw = v.get("station_id")?.as_u64()? as u32;
-            Some(ClientCommand::DisassembleShip(DisassembleShipCommand {
-                ship_id: ShipId(EntityId::from_raw(ship_id_raw)),
-                station_id: dawn_core::StationId(station_id_raw),
-            }))
-        }
-        _ => None,
+        ClientCommandJson::BuildPackagedShipCommand {
+            ship_id,
+            station_id,
+            ship_type_id,
+        } => Some(ClientCommand::BuildPackagedShip(BuildPackagedShipCommand {
+            ship_id: ShipId(EntityId::from_raw(ship_id)),
+            station_id: dawn_core::StationId(station_id),
+            ship_type_id: dawn_core::ShipTypeId(ship_type_id),
+        })),
+        ClientCommandJson::DisassembleShipCommand {
+            ship_id,
+            station_id,
+        } => Some(ClientCommand::DisassembleShip(DisassembleShipCommand {
+            ship_id: ShipId(EntityId::from_raw(ship_id)),
+            station_id: dawn_core::StationId(station_id),
+        })),
     }
 }
 
@@ -749,21 +859,37 @@ mod tests {
         assert!(hello.resume.is_none());
     }
 
-    /// Guards `docs/architecture/wire-protocol.schema.json` against drift.
-    /// If this fails, `EventJson` (or a type it references) changed --
-    /// regenerate with `cargo run -p dawn-actor --example gen_wire_schema`
-    /// and commit the updated file alongside the code change.
+    /// Guards `docs/architecture/wire-protocol.schema.json` and
+    /// `wire-protocol-commands.schema.json` against drift. If this fails,
+    /// `EventJson` / `ClientCommandJson` (or a type either references)
+    /// changed -- regenerate with
+    /// `cargo run -p dawn-actor --example gen_wire_schema` and commit the
+    /// updated files alongside the code change.
     #[test]
     fn wire_schema_doc_is_up_to_date() {
-        let current = serde_json::to_string_pretty(&event_json_schema()).unwrap() + "\n";
-        let checked_in = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../docs/architecture/wire-protocol.schema.json"
-        ))
-        .expect("docs/architecture/wire-protocol.schema.json must exist");
+        assert_schema_file_matches(
+            &event_json_schema(),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/architecture/wire-protocol.schema.json"
+            ),
+        );
+        assert_schema_file_matches(
+            &client_command_json_schema(),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/architecture/wire-protocol-commands.schema.json"
+            ),
+        );
+    }
+
+    fn assert_schema_file_matches(schema: &schemars::schema::RootSchema, path: &str) {
+        let current = serde_json::to_string_pretty(schema).unwrap() + "\n";
+        let checked_in =
+            std::fs::read_to_string(path).unwrap_or_else(|_| panic!("{path} must exist"));
         assert_eq!(
             current, checked_in,
-            "wire-protocol.schema.json is stale -- regenerate with \
+            "{path} is stale -- regenerate with \
              `cargo run -p dawn-actor --example gen_wire_schema`"
         );
     }

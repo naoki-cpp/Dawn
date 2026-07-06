@@ -2,8 +2,7 @@
 scope    : Client<->server wire format over the WebSocket connection. What an
            external (non-Godot) client would need to talk to a Dawn server.
 audience : AI Agent / Human Developer
-update   : Server -> client half is generated; see "Keeping this in sync".
-           Client -> server half (issue #94 part 2) is still hand-maintained.
+update   : Both halves are generated from the types; see "Keeping this in sync".
 related  : ADR-0005 (ClientConnection), docs/architecture/event-catalog.md,
            crates/dawn-actor/src/protocol.rs
 ---
@@ -41,41 +40,51 @@ Not every `DomainEvent` reaches the wire -- `domain_event_to_json()` returns
 `AnchorRebased`, `PackagedShipBuilt`, `ShipDisassembled`). See
 `docs/architecture/event-catalog.md` for what those events mean server-side.
 
-### Keeping this in sync
+## Client -> server: generated from `ClientCommandJson`
 
-`wire-schema_doc_is_up_to_date` (a test in `protocol.rs`) fails the build if
-`wire-protocol.schema.json` drifts from what `EventJson` currently produces.
-After changing `EventJson` (or `PosJson`/`VelJson`), regenerate with:
+The full list of messages a client can send, with every field and its JSON
+type, is generated the same way and checked in at
+[`wire-protocol-commands.schema.json`](./wire-protocol-commands.schema.json).
+It is produced by `dawn_actor::protocol::client_command_json_schema()`,
+which reflects the `ClientCommandJson` enum in `protocol.rs`.
+
+The `"type"` values are: `MoveCommand`, `LockOnCommand`,
+`ActivateModuleCommand`, `DeactivateModuleCommand`, `AttackCommand`,
+`StopCommand`, `JumpCommand`, `ApproachCommand`, `WarpCommand`,
+`OrbitCommand`, `KeepAtRangeCommand`, `FitModuleCommand`,
+`UnfitModuleCommand`, `DockCommand`, `UndockCommand`,
+`BuildPackagedShipCommand`, `DisassembleShipCommand`.
+
+`ClientCommandJson` mirrors the wire format exactly, including two
+backward-compatible quirks it does not itself resolve (that validation
+happens in `parse_client_command()`, same as before this enum existed):
+
+- `WarpCommand` accepts a legacy `{"gate_id": N}` form and the current
+  `{"target": {"Gate": N}}` / `{"target": {"Body": N}}` form. `target` wins
+  if both are present; prefer it for new clients.
+- `ApproachCommand`, `OrbitCommand`, and `KeepAtRangeCommand` select their
+  target with either `gate_id` (a Jump Gate) or `target_id` (a Ship);
+  `gate_id` wins if both are present, and the command is rejected
+  (`parse_client_command` returns `None`) if neither is present.
+
+`ActivateModuleCommand`'s `target_ship_id` is only required for targeted
+module kinds (Weapon/Tackle, ADR-0035); the server validates that
+requirement, not the wire schema.
+
+## Keeping this in sync
+
+`wire_schema_doc_is_up_to_date` (a test in `protocol.rs`) fails the build if
+either checked-in schema file drifts from what `EventJson` /
+`ClientCommandJson` currently produce. After changing either enum (or a type
+either references -- `PosJson`, `VelJson`, `WarpTargetJson`), regenerate with:
 
 ```bash
 cargo run -p dawn-actor --example gen_wire_schema
 ```
 
-and commit the updated `wire-protocol.schema.json` alongside the code change.
-This file is documentation, generated from the types -- never hand-edit it.
-
-## Client -> server: still hand-maintained
-
-`parse_client_command()` in `protocol.rs` parses each incoming line by
-inspecting `"type"` and pulling fields out of a `serde_json::Value` by hand.
-It is not yet backed by a typed, schema-derivable enum, so there is no
-generated schema for this half -- see issue #94 part 2. Until that lands,
-read `parse_client_command()` directly for the exact set of accepted command
-messages and their fields (`MoveCommand`, `LockOnCommand`,
-`ActivateModuleCommand`, `DeactivateModuleCommand`, `AttackCommand`,
-`StopCommand`, `JumpCommand`, `ApproachCommand`, `WarpCommand`,
-`OrbitCommand`, `KeepAtRangeCommand`, `FitModuleCommand`,
-`UnfitModuleCommand`, `DockCommand`, `UndockCommand`,
-`BuildPackagedShipCommand`, `DisassembleShipCommand`).
-
-Two format quirks worth knowing if you're implementing a new client:
-
-- `WarpCommand` accepts a legacy `{"gate_id": N}` form and the current
-  `{"target": {"Gate": N}}` / `{"target": {"Body": N}}` form. Prefer the
-  `target` form; the legacy form only exists for backward compatibility.
-- `ApproachCommand`, `OrbitCommand`, and `KeepAtRangeCommand` select their
-  target with either `gate_id` (a Jump Gate) or `target_id` (a Ship); exactly
-  one must be present.
+and commit both updated `.schema.json` files alongside the code change.
+These files are documentation, generated from the types -- never hand-edit
+them.
 
 ## Connection handshake
 

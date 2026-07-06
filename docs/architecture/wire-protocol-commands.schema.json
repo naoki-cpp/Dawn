@@ -1,34 +1,28 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "EventJson",
-  "description": "Every message the server sends to a client over the WebSocket connection. Serialized as a single JSON line tagged by `\"type\"`.\n\nThis enum is the schema-of-record for the server -> client half of the wire protocol: [`event_json_schema()`] renders it to a JSON Schema document that `docs/architecture/wire-protocol.md` is generated from. Adding, removing, or renaming a field here changes the wire format for every client (Godot today; any future client written against `docs/architecture/wire-protocol.md`).",
+  "title": "ClientCommandJson",
+  "description": "Every message a client can send to the server over the WebSocket connection. Serialized as a single JSON line tagged by `\"type\"`.\n\nThis enum is the schema-of-record for the client -> server half of the wire protocol (see [`EventJson`] for the server -> client half). It intentionally mirrors the wire format exactly, including the two backward-compatible quirks below -- it does not enforce the \"exactly one of these two fields\" business rules those quirks involve; that validation still happens in [`parse_client_command`], same as before this enum existed.\n\n- `WarpCommand` accepts either `target` (current) or `gate_id` (legacy); `target` wins if both are present. - `ApproachCommand` / `OrbitCommand` / `KeepAtRangeCommand` select their target with either `gate_id` (a Jump Gate) or `target_id` (a Ship); `gate_id` wins if both are present.",
   "oneOf": [
     {
       "type": "object",
       "required": [
-        "position",
         "ship_id",
-        "tick",
+        "target",
         "type"
       ],
       "properties": {
-        "position": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "target": {
           "$ref": "#/definitions/PosJson"
         },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "type": {
           "type": "string",
           "enum": [
-            "ShipSpawned"
+            "MoveCommand"
           ]
         }
       }
@@ -37,260 +31,11 @@
       "type": "object",
       "required": [
         "ship_id",
-        "tick",
-        "type",
-        "velocity"
-      ],
-      "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "VelocityChanged"
-          ]
-        },
-        "velocity": {
-          "$ref": "#/definitions/VelJson"
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "ship_id",
-        "tick",
-        "type"
-      ],
-      "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "ShipDespawned"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "ship_id",
-        "station_id",
-        "tick",
-        "type"
-      ],
-      "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "station_id": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "ShipDocked"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "ship_id",
-        "station_id",
-        "tick",
-        "type"
-      ],
-      "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "station_id": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "ShipUndocked"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "current_armor",
-        "current_hull",
-        "current_shield",
-        "damage",
-        "ship_id",
-        "tick",
-        "type"
-      ],
-      "properties": {
-        "current_armor": {
-          "type": "number",
-          "format": "float"
-        },
-        "current_hull": {
-          "type": "number",
-          "format": "float"
-        },
-        "current_shield": {
-          "type": "number",
-          "format": "float"
-        },
-        "damage": {
-          "type": "number",
-          "format": "float"
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "DamageTaken"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "amount",
-        "current_armor",
-        "current_hull",
-        "current_shield",
-        "layer",
-        "ship_id",
-        "tick",
-        "type"
-      ],
-      "properties": {
-        "amount": {
-          "type": "number",
-          "format": "float"
-        },
-        "current_armor": {
-          "type": "number",
-          "format": "float"
-        },
-        "current_hull": {
-          "type": "number",
-          "format": "float"
-        },
-        "current_shield": {
-          "type": "number",
-          "format": "float"
-        },
-        "layer": {
-          "type": "string"
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "RepairApplied"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "killer_id",
-        "ship_id",
-        "tick",
-        "type"
-      ],
-      "properties": {
-        "killer_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "ShipDestroyed"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "locker_id",
         "target_id",
-        "tick",
         "type"
       ],
       "properties": {
-        "locker_id": {
+        "ship_id": {
           "type": "integer",
           "format": "uint64",
           "minimum": 0.0
@@ -300,47 +45,10 @@
           "format": "uint64",
           "minimum": 0.0
         },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "type": {
           "type": "string",
           "enum": [
-            "TargetLocked"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "locker_id",
-        "target_id",
-        "tick",
-        "type"
-      ],
-      "properties": {
-        "locker_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "target_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "LockLost"
+            "LockOnCommand"
           ]
         }
       }
@@ -351,7 +59,6 @@
         "module_id",
         "ship_id",
         "slot",
-        "tick",
         "type"
       ],
       "properties": {
@@ -369,7 +76,7 @@
           "type": "string"
         },
         "target_ship_id": {
-          "description": "Target of a targeted module (Weapon/Tackle), per ADR-0035.",
+          "description": "Target of a targeted module (Weapon/Tackle), per ADR-0035. Required only for targeted module kinds; validated server-side.",
           "type": [
             "integer",
             "null"
@@ -377,15 +84,10 @@
           "format": "uint64",
           "minimum": 0.0
         },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "type": {
           "type": "string",
           "enum": [
-            "ModuleActivated"
+            "ActivateModuleCommand"
           ]
         }
       }
@@ -396,7 +98,6 @@
         "module_id",
         "ship_id",
         "slot",
-        "tick",
         "type"
       ],
       "properties": {
@@ -404,13 +105,6 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0.0
-        },
-        "reason": {
-          "description": "Why the system forced this off (\"cap\" | \"range\"); omitted for a player-issued deactivation (ADR-0035).",
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "ship_id": {
           "type": "integer",
@@ -420,15 +114,10 @@
         "slot": {
           "type": "string"
         },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
         "type": {
           "type": "string",
           "enum": [
-            "ModuleDeactivated"
+            "DeactivateModuleCommand"
           ]
         }
       }
@@ -436,23 +125,57 @@
     {
       "type": "object",
       "required": [
-        "entry_pos",
-        "from_sector",
-        "gate_id",
-        "ship_id",
-        "tick",
-        "to_sector",
+        "attacker_id",
+        "target_id",
         "type"
       ],
       "properties": {
-        "entry_pos": {
-          "$ref": "#/definitions/PosJson"
-        },
-        "from_sector": {
+        "attacker_id": {
           "type": "integer",
-          "format": "uint8",
+          "format": "uint64",
           "minimum": 0.0
         },
+        "target_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "AttackCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "StopCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "gate_id",
+        "ship_id",
+        "type"
+      ],
+      "properties": {
         "gate_id": {
           "type": "integer",
           "format": "uint32",
@@ -463,20 +186,10 @@
           "format": "uint64",
           "minimum": 0.0
         },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "to_sector": {
-          "type": "integer",
-          "format": "uint8",
-          "minimum": 0.0
-        },
         "type": {
           "type": "string",
           "enum": [
-            "JumpGateUsed"
+            "JumpCommand"
           ]
         }
       }
@@ -484,15 +197,15 @@
     {
       "type": "object",
       "required": [
-        "from_system",
         "ship_id",
-        "tick",
-        "to_system",
         "type"
       ],
       "properties": {
-        "from_system": {
-          "type": "integer",
+        "gate_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint32",
           "minimum": 0.0
         },
@@ -501,20 +214,18 @@
           "format": "uint64",
           "minimum": 0.0
         },
-        "tick": {
-          "type": "integer",
+        "target_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint64",
-          "minimum": 0.0
-        },
-        "to_system": {
-          "type": "integer",
-          "format": "uint32",
           "minimum": 0.0
         },
         "type": {
           "type": "string",
           "enum": [
-            "StarSystemChanged"
+            "ApproachCommand"
           ]
         }
       }
@@ -522,17 +233,221 @@
     {
       "type": "object",
       "required": [
-        "player_id",
         "ship_id",
-        "type",
-        "ws_addr"
+        "type"
       ],
       "properties": {
-        "player_id": {
+        "gate_id": {
+          "description": "Legacy form: `{\"gate_id\": N}` instead of `{\"target\": {\"Gate\": N}}`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
           "type": "integer",
           "format": "uint64",
           "minimum": 0.0
         },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WarpTargetJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "WarpCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "type"
+      ],
+      "properties": {
+        "gate_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "radius": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "target_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "OrbitCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "type"
+      ],
+      "properties": {
+        "gate_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "range": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "target_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "KeepAtRangeCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "module_id",
+        "ship_id",
+        "slot",
+        "type"
+      ],
+      "properties": {
+        "module_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "slot": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "FitModuleCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "module_id",
+        "ship_id",
+        "slot",
+        "type"
+      ],
+      "properties": {
+        "module_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "slot": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "UnfitModuleCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "station_id",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "station_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "DockCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "type"
+      ],
+      "properties": {
         "ship_id": {
           "type": "integer",
           "format": "uint64",
@@ -541,11 +456,66 @@
         "type": {
           "type": "string",
           "enum": [
-            "Redirect"
+            "UndockCommand"
           ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "ship_type_id",
+        "station_id",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
         },
-        "ws_addr": {
-          "type": "string"
+        "ship_type_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "station_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "BuildPackagedShipCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "station_id",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "station_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "DisassembleShipCommand"
+          ]
         }
       }
     }
@@ -573,27 +543,38 @@
         }
       }
     },
-    "VelJson": {
-      "type": "object",
-      "required": [
-        "dx",
-        "dy",
-        "dz"
-      ],
-      "properties": {
-        "dx": {
-          "type": "number",
-          "format": "float"
+    "WarpTargetJson": {
+      "description": "A `{\"Gate\": N}` or `{\"Body\": N}` warp destination, as sent by `WarpCommand`'s current wire format (externally tagged: the variant name is the JSON object's only key).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "Gate"
+          ],
+          "properties": {
+            "Gate": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
         },
-        "dy": {
-          "type": "number",
-          "format": "float"
-        },
-        "dz": {
-          "type": "number",
-          "format": "float"
+        {
+          "type": "object",
+          "required": [
+            "Body"
+          ],
+          "properties": {
+            "Body": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
         }
-      }
+      ]
     }
   }
 }
