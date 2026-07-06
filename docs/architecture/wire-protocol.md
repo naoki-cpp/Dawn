@@ -53,7 +53,21 @@ The `"type"` values are: `MoveCommand`, `LockOnCommand`,
 `StopCommand`, `JumpCommand`, `ApproachCommand`, `WarpCommand`,
 `OrbitCommand`, `KeepAtRangeCommand`, `FitModuleCommand`,
 `UnfitModuleCommand`, `DockCommand`, `UndockCommand`,
-`BuildPackagedShipCommand`, `DisassembleShipCommand`.
+`BuildPackagedShipCommand`, `DisassembleShipCommand`,
+`SelectActiveShipCommand`.
+
+**ADR-0037 (owned ship / active ship split):** `MoveCommand`, `LockOnCommand`,
+`ActivateModuleCommand`, `DeactivateModuleCommand`, `StopCommand`,
+`JumpCommand`, `ApproachCommand`, `WarpCommand`, `OrbitCommand`,
+`KeepAtRangeCommand`, `DockCommand`, and `UndockCommand` carry no `ship_id`
+field at all -- the server always resolves them against the caller's active
+ship, so there is no wire-representable way to name a ship the player isn't
+currently flying. `FitModuleCommand`, `UnfitModuleCommand`,
+`BuildPackagedShipCommand`, and `DisassembleShipCommand` still carry an
+explicit `ship_id`, since they may target any owned docked ship, not just the
+active one. `SelectActiveShipCommand { ship_id }` is the only way to change
+which owned ship is active (station-local switch only for now). See
+`docs/architecture/ownership.md` §7.
 
 `ClientCommandJson` mirrors the wire format exactly, including two
 backward-compatible quirks it does not itself resolve (that validation
