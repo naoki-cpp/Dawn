@@ -221,7 +221,7 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 - [x] dawn-core: `ItemId` enum（Module/PackagedShip/ScrapMetal。**Currencyは含まない**）
 - [x] dawn-ecs: `InventoryComp.items` を `Vec<ModuleId>` → `BTreeMap<ItemId, u64>` へ一般化（ADR-0032 のデータモデルを置き換え）
 - [x] dawn-sector: `ShipDestroyed` 発生時に Scrap Metal を撃破者へ加算する経路（MVP は `1 kill = 1 Scrap Metal` の固定値）
-- [x] dawn-sector: スナップショット/Transit/PlayerFitting JSON を `InventoryComp.items: BTreeMap<ItemId, u64>` に追従
+- [x] dawn-sector: スナップショット/Transit/PlayerLoadout JSON を `InventoryComp.items: BTreeMap<ItemId, u64>` に追従
 - [ ] 「受動採取ではない」ことの再点検項目化（現状は取得経路が `ShipDestroyed` のみなのでコード読解で十分。別経路追加時に自動検証/CI 昇格を検討）
 - [x] dawn-sector: Station（NPC提供の最小実装）
 - [x] dawn-sector: Dock/Undock + Station 利用可否判定（`can_use` は docked 状態を見る）
@@ -231,7 +231,7 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 - [x] dawn-sector: Disassemble コマンド・バリデーション（無傷・未艤装チェック、出力は Station inventory 上の `PackagedShip`、**docked 中のみ**）
 - [x] dawn-sector: Packaged Ship 建造（Scrap Metal 消費、入出力とも Station inventory、**docked 中のみ**。MVP コストは `1 Scrap Metal / 1 hull` の固定値）
 - [ ] 新規クレート `dawn-market`: SQLite バックエンドの指値注文帳（bid/ask マッチング）・`PlayerId` 単位の Currency 台帳・`RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` 発行経路（Dependency DAG 上の位置は別途確認）
-- [~] client: Dock/Undock + Station操作UI（入港状態の表示と `D` / `U` / `B` / `Y` 操作は実装済み。client は `ShipDocked` / `ShipUndocked` イベントと `PlayerFitting` の両方から dock state を受けるため、古い fitting が新しい undock を巻き戻さないこと、undock 後の `null` dock context を `station_id=0` と誤解しないことを維持条件とする。inventory UI の見分けや Assemble 系は未完）
+- [~] client: Dock/Undock + Station操作UI（入港状態の表示と `D` / `U` / `B` / `Y` 操作は実装済み。client は `ShipDocked` / `ShipUndocked` イベントと `PlayerLoadout` の両方から dock state を受けるため、古い loadout が新しい undock を巻き戻さないこと、undock 後の `null` dock context を `station_id=0` と誤解しないことを維持条件とする。inventory UI の見分けや Assemble 系は未完）
 - [ ] client: Packaged Ship のインベントリ表示・Assemble/Disassemble/建造UI（Station UI の上に載せる）
 - [ ] client: Market閲覧UI（指値注文の発注・Currency残高表示）
 - [x] CONTEXT.md: `Item`/`Packaged Ship`/`Station`/`Scrap Metal`/`Currency` を追記済み（本セッション中）

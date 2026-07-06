@@ -34,7 +34,7 @@ pub enum ClientCommandFollowup {
     /// `apply_jump_with_fallback` start a warp/approach fallback).
     Jump(JumpCommand),
     /// The ship's fitting changed (or the attempt was rejected) — push a
-    /// refreshed `PlayerFitting` JSON to this ship's session so the client's
+    /// refreshed `PlayerLoadout` JSON to this ship's session so the client's
     /// UI reflects the authoritative state.
     RefreshFitting(ShipId),
 }
@@ -165,7 +165,7 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// - `Jump` → caller proposes Transit to Raft (or starts warp/approach
     ///   fallback via `apply_jump_with_fallback`).
-    /// - `Fit` / `Unfit` → caller pushes a refreshed `PlayerFitting` JSON to
+    /// - `Fit` / `Unfit` → caller pushes a refreshed `PlayerLoadout` JSON to
     ///   the session, so a rejected attempt is visibly reverted client-side.
     ///
     /// `lock_commands` accumulates `LockOn` commands for the tick's Lock System

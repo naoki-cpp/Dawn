@@ -123,7 +123,7 @@ pub(crate) async fn run_phase4_server(
                     player_id,
                     ship_id,
                     &payload.initial_state,
-                    payload.player_fitting,
+                    payload.player_loadout,
                 )
                 .await
                 {
@@ -164,7 +164,7 @@ pub(crate) async fn run_phase4_server(
                         );
                     }
                     Some(ClientCommandFollowup::RefreshFitting(ship_id)) => {
-                        if let Some(json) = node.build_player_fitting_json(ship_id) {
+                        if let Some(json) = node.build_player_loadout_json(ship_id) {
                             sess.send_raw(&json);
                         }
                     }
@@ -184,7 +184,7 @@ pub(crate) async fn run_phase4_server(
                 )
             });
             if should_refresh {
-                if let Some(json) = node.build_player_fitting_json(sess.ship_id) {
+                if let Some(json) = node.build_player_loadout_json(sess.ship_id) {
                     sess.send_raw(&json);
                 }
             }

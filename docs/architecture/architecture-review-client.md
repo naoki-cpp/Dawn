@@ -15,7 +15,7 @@ date     : 2026-07-06（`WorldPresentation` を新設し、floating origin / nav
 
 ## 現状評価
 
-**総合: A**（2026-07-06 更新。`WorldPresentation` 新設で floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation を `main.gd` から移動。`WorldSession`・`HudSurface`・`WorldInteraction`・`WorldPresentation` の4つの deep module により、`main.gd` は scene wiring / network send / event dispatch / HUD frame assembly の orchestration にほぼ絞られた。残る debt は `PlayerFitting` dict スキーマの非検証（C-4）と、scene-tree 依存ゆえに手動確認が必要な入力経路のみ）
+**総合: A**（2026-07-06 更新。`WorldPresentation` 新設で floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation を `main.gd` から移動。`WorldSession`・`HudSurface`・`WorldInteraction`・`WorldPresentation` の4つの deep module により、`main.gd` は scene wiring / network send / event dispatch / HUD frame assembly の orchestration にほぼ絞られた。残る debt は `PlayerLoadout` dict スキーマの非検証（C-4）と、scene-tree 依存ゆえに手動確認が必要な入力経路のみ）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
@@ -49,7 +49,7 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/world_session.gd` | 278 | 🟢 InitialState / AoI / HP / lock / tick-cap / dock state の client-side live world state |
 | `client/scripts/ship_controller.gd` | 277 | 🟢 単一船の視覚表現に専念。ロックオン枠は `BillboardRing` 共通化 |
 | `client/scripts/navigation_marker_renderer.gd` | 200 | 🟢 ゲート/惑星/ステーションマーカー生成 + スペクトル色 |
-| `client/scripts/player_fitting.gd` | 184 | 🟢 フィッティング/インベントリ正規化と capacitor 再現の純粋関数。main.gd は呼び出すのみで内部構造に触れない |
+| `client/scripts/player_loadout.gd` | 148 | 🟢 loadout/インベントリ正規化と capacitor 再現の純粋関数。main.gd は呼び出すのみで内部構造に触れない |
 | `client/scripts/hud_surface.gd` | 137 | 🟢 HUD Control 参照を所有し、`main.gd` からの render frame / hit-test 要求を `HudManager` へ委譲。パネル単位の dirty-tracking あり |
 | `client/scripts/input_decoder.gd` | 122 | 🟢 キー入力→アクション決定の純粋関数。GdUnit4 テスト済み |
 | `client/scripts/camera_controller.gd` | 113 | 🟢 自己完結したオービットカメラ |
@@ -64,7 +64,7 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 
 合計 3,762 行のうち `main.gd` が30%を占める（C-1着手前69%から大幅低下）。
 新設 static class 群（C-1 の5クラス + ADR-0029 の `world_space`/`unit_format`/`warp_tunnel_effect`
-+ PR #33 の `player_fitting` + `WorldSession` + `HudSurface` + `WorldInteraction`）は、
++ PR #33 の `player_loadout` + `WorldSession` + `HudSurface` + `WorldInteraction`）は、
 `WorldSession` が ship registry と live world state、`HudSurface` が HUD Control 参照、
 `WorldInteraction` が selection と world interaction policy を保持する。scene 生成と
 network send は `main.gd` 側。
@@ -140,7 +140,7 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 | `unit_format_test.gd` | `UnitFormat`（ADR-0029 速度/距離単位整形） | 8 |
 | `world_space_test.gd` | `WorldSpace`（ADR-0029 浮動原点リベース） | 4 |
 | `connection_test.gd` | `connection.gd`（URL正規化・module activated signal の回帰テスト） | 4 |
-| `player_fitting_test.gd` | `PlayerFitting`（PR #33 新設） | 11 |
+| `player_loadout_test.gd` | `PlayerLoadout`（PR #33 起点、後に rename） | 11 |
 | `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy / dock state） | 11 |
 | `world_interaction_test.gd` | `WorldInteraction`（selection ownership / double-click / lock intent / key action 解釈） | 8 |
 | `world_presentation_test.gd` | `WorldPresentation`（marker clamp / warp tunnel easing / sun state） | 6 |
@@ -156,12 +156,12 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 
 ### Medium（保留）
 
-#### C-4: PlayerFitting dict のスキーマ非検証
+#### C-4: PlayerLoadout dict のスキーマ非検証
 
 `_player_modules` 配列の各要素は `"is_active"` / `"module_id"` / `"slot"` /
 `"cap_cost_per_cycle"` / `"stat_delta"` 等の特定キーを前提に読まれるが、
 `connection.gd` 側でのスキーマ検証はない。サーバー側 JSON 形式
-（`serialization.rs` の `build_player_fitting_json()`）とキー名が食い違うと
+（`serialization.rs` の `build_player_loadout_json()`）とキー名が食い違うと
 silent に値が欠落する（GDScript の `Dictionary.get()` はデフォルト値で握り潰す）。
 
 ---

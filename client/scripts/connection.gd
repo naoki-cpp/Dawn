@@ -22,7 +22,7 @@ signal connection_changed(connected: bool)
 signal welcomed(player_id: int, ship_id: int)
 ## On InitialState: notifies the full payload (ships + navigation map)
 signal initial_state_received(state: Dictionary)
-## On PlayerFitting (sent on connect and again after every Fit/Unfit, ADR-0032):
+## On PlayerLoadout (sent on connect and again after every Fit/Unfit, ADR-0032):
 ## notifies the full payload (modules + inventory + slot_capacity).
 signal player_fitting_received(payload: Dictionary)
 ## ModuleActivated 受信時
@@ -343,9 +343,9 @@ func _handle_message(payload: Dictionary) -> void:
 			var ships: Array = payload.get("ships", []) as Array
 			print("[Connection] InitialState: %d ships" % ships.size())
 			initial_state_received.emit(payload)
-		"PlayerFitting":
+		"PlayerLoadout", "PlayerFitting":
 			var modules: Array = payload.get("modules", []) as Array
-			print("[Connection] PlayerFitting: %d modules" % modules.size())
+			print("[Connection] PlayerLoadout: %d modules" % modules.size())
 			player_fitting_received.emit(payload)
 		"Redirect":
 			_handle_redirect(payload)

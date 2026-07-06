@@ -127,7 +127,7 @@ spawn 時に直接構築する（`apply_event` の `ShipSpawned` 分岐でも同
 - [x] dawn-sector: `node/inventory.rs`（`fit_module_owned`/`unfit_module_owned`・初期シード関数）
 - [x] dawn-sector: spawn（live・replay 両方）で初期インベントリをシード
 - [x] dawn-sector: snapshot 保存/復元に `inventory` を追加
-- [x] dawn-sector: `build_player_fitting_json` にインベントリを含める
+- [x] dawn-sector: `build_player_loadout_json` にインベントリを含める
 - [x] dawn-actor: `ClientCommand::Fit`/`Unfit` 追加・protocol.rs 配線
 - [x] dawn-simulation/dawn-sector-node: 両 dispatch site に配線
 - [x] client: インベントリパネル UI・Fit/Unfit 送信

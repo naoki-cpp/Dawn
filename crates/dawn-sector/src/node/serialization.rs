@@ -16,7 +16,7 @@ use super::SimulationNode;
 #[derive(Debug)]
 pub struct HandoffPayload {
     pub initial_state: String,
-    pub player_fitting: Option<String>,
+    pub player_loadout: Option<String>,
 }
 
 /// Wire shape for an absolute (f64, ADR-0029) position: `{"x":...,"y":...,"z":...}`.
@@ -30,32 +30,32 @@ fn abs_pos_json(p: [f64; 3]) -> serde_json::Value {
 }
 
 impl<S: EventStore> SimulationNode<S> {
-    /// Build the `InitialState` + `PlayerFitting` pair to hand a client once
+    /// Build the `InitialState` + `PlayerLoadout` pair to hand a client once
     /// its identity (fresh or resumed) has already been decided by the caller.
     pub fn build_handoff_payload(&self, ship_id: ShipId, aoi_cell_size: f32) -> HandoffPayload {
         let initial_state = self
             .ship_absolute_pos(ship_id)
             .map(|pos| self.build_initial_state_json_for(pos, aoi_cell_size))
             .unwrap_or_else(|| self.build_initial_state_json());
-        let player_fitting = self.build_player_fitting_json(ship_id);
+        let player_loadout = self.build_player_loadout_json(ship_id);
         HandoffPayload {
             initial_state,
-            player_fitting,
+            player_loadout,
         }
     }
 
-    /// Return the player ship's fitting state as a PlayerFitting JSON message.
+    /// Return the player ship's loadout state as a PlayerLoadout JSON message.
     ///
     /// Sent after Welcome + InitialState on connect, and again after every
     /// Fit/Unfit (ADR-0032). Format:
     /// ```json
-    /// {"type":"PlayerFitting","modules":[
+    /// {"type":"PlayerLoadout","modules":[
     ///   {"slot":"High","index":0,"module_id":1,"name":"Small Railgun I","is_active":false}
     /// ],"inventory":[
     ///   {"module_id":2,"name":"Medium Railgun I","kind":"Weapon","slot":"High"}
     /// ],"slot_capacity":{"High":3,"Mid":3,"Low":2,"Rig":3}}
     /// ```
-    pub fn build_player_fitting_json(&self, ship_id: ShipId) -> Option<String> {
+    pub fn build_player_loadout_json(&self, ship_id: ShipId) -> Option<String> {
         let entity = self.ships.index.get(&ship_id)?;
         let fitting = self.world.inner().get::<&FittingComp>(*entity).ok()?;
 
@@ -201,7 +201,7 @@ impl<S: EventStore> SimulationNode<S> {
 
         Some(
             serde_json::json!({
-                "type"         : "PlayerFitting",
+                "type"         : "PlayerLoadout",
                 "tick"         : self.current_tick.value(),
                 "modules"      : modules,
                 "inventory"    : inventory,
@@ -617,13 +617,13 @@ mod tests {
             "handoff scopes InitialState to the ship's AoI, not the whole sector"
         );
         assert!(
-            payload.player_fitting.is_some(),
-            "every ship with a FittingComp gets a PlayerFitting payload"
+            payload.player_loadout.is_some(),
+            "every ship with a FittingComp gets a PlayerLoadout payload"
         );
     }
 
     #[test]
-    fn player_fitting_json_includes_scrap_metal_inventory_rows() {
+    fn player_loadout_json_includes_scrap_metal_inventory_rows() {
         use dawn_core::ItemId;
 
         let mut node = mem_node();
@@ -643,7 +643,7 @@ mod tests {
             .unwrap()
             .add_item(ItemId::ScrapMetal, 3);
 
-        let json = node.build_player_fitting_json(ship_id).unwrap();
+        let json = node.build_player_loadout_json(ship_id).unwrap();
         let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
         let inventory = payload["inventory"].as_array().unwrap();
         let scrap = inventory
@@ -655,7 +655,7 @@ mod tests {
     }
 
     #[test]
-    fn player_fitting_json_carries_docked_station_context_and_station_inventory() {
+    fn player_loadout_json_carries_docked_station_context_and_station_inventory() {
         use dawn_core::{DockCommand, ItemId, StationId};
 
         let mut node = mem_node();
@@ -681,7 +681,7 @@ mod tests {
             StationOperationOutcome::Accepted { .. }
         ));
 
-        let json = node.build_player_fitting_json(ship_id).unwrap();
+        let json = node.build_player_loadout_json(ship_id).unwrap();
         let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(payload["docked_station_id"].as_u64().unwrap(), 0);
         assert_eq!(payload["docked_station_name"], "Forge Station");
@@ -694,7 +694,7 @@ mod tests {
     }
 
     #[test]
-    fn player_fitting_json_uses_null_dock_context_after_undock() {
+    fn player_loadout_json_uses_null_dock_context_after_undock() {
         use dawn_core::{DockCommand, StationId, UndockCommand};
 
         let mut node = mem_node();
@@ -716,7 +716,7 @@ mod tests {
             StationOperationOutcome::Accepted { .. }
         ));
 
-        let json = node.build_player_fitting_json(ship_id).unwrap();
+        let json = node.build_player_loadout_json(ship_id).unwrap();
         let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(payload["docked_station_id"].is_null());
         assert!(payload["docked_station_name"].is_null());

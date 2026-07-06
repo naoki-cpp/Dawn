@@ -3,7 +3,7 @@
 //! The single WebSocket server / session implementation shared by both
 //! binaries (`dawn-simulation`, `dawn-sector-node`). It owns:
 //!   - Hello/Welcome handshake (assigns and announces a PlayerId)
-//!   - InitialState + PlayerFitting on connect
+//!   - InitialState + PlayerLoadout on connect
 //!   - `PlayerSession` mapping a connection to its PlayerId / ShipId
 //!   - `WsClientConnection`, the [`ClientConnection`] impl over a socket
 //!
@@ -102,7 +102,7 @@ impl HandshakeRequest {
         player_id: PlayerId,
         ship_id: ShipId,
         initial_state: &str,
-        player_fitting: Option<String>,
+        player_loadout: Option<String>,
     ) -> anyhow::Result<PlayerSession> {
         let Self {
             peer_addr,
@@ -114,7 +114,7 @@ impl HandshakeRequest {
         let (event_tx, event_rx) = mpsc::unbounded_channel::<String>();
         let (command_tx, command_rx) = mpsc::unbounded_channel::<ClientCommand>();
 
-        // Send Welcome + InitialState + (optional) PlayerFitting.
+        // Send Welcome + InitialState + (optional) PlayerLoadout.
         let welcome = format!(
             "{{\"type\":\"Welcome\",\"player_id\":{},\"ship_id\":{}}}\n",
             player_id.raw(),
@@ -124,8 +124,8 @@ impl HandshakeRequest {
         ws_sink
             .send(Message::Text(initial_state.to_string() + "\n"))
             .await?;
-        if let Some(fitting) = player_fitting {
-            ws_sink.send(Message::Text(fitting + "\n")).await?;
+        if let Some(loadout) = player_loadout {
+            ws_sink.send(Message::Text(loadout + "\n")).await?;
         }
 
         // Event-send task.
@@ -182,7 +182,7 @@ impl PlayerSession {
         self.conn.try_recv_command()
     }
 
-    /// Send a raw JSON string directly (e.g. a refreshed PlayerFitting after
+    /// Send a raw JSON string directly (e.g. a refreshed PlayerLoadout after
     /// Fit/Unfit, ADR-0032 -- mirrors the one sent once at connect).
     pub fn send_raw(&self, msg: &str) -> bool {
         self.conn.send_raw(msg)
@@ -219,7 +219,7 @@ impl WsServer {
     /// # Flow
     /// 1. WebSocket upgrade
     /// 2. Wait for the Hello message (3s timeout)
-    /// 3. Send Welcome + InitialState (+ PlayerFitting)
+    /// 3. Send Welcome + InitialState (+ PlayerLoadout)
     /// 4. Return the `PlayerSession`
     pub async fn handshake(
         stream: TcpStream,
@@ -227,11 +227,11 @@ impl WsServer {
         player_id: PlayerId,
         ship_id: ShipId,
         initial_state: &str,
-        player_fitting: Option<String>,
+        player_loadout: Option<String>,
     ) -> anyhow::Result<PlayerSession> {
         let request = Self::accept_handshake_request(stream, peer_addr).await?;
         request
-            .complete(player_id, ship_id, initial_state, player_fitting)
+            .complete(player_id, ship_id, initial_state, player_loadout)
             .await
     }
 

@@ -1,7 +1,7 @@
 ## player_loadout.gd
 ##
-## Client-side deep module for the PlayerFitting wire message. The server still
-## emits one PlayerFitting payload, but this module owns the richer client
+## Client-side deep module for the PlayerLoadout wire message. The server emits
+## one PlayerLoadout payload, but this module owns the richer client
 ## concept behind it: fitted modules, ship inventory, station inventory, dock
 ## context, activation semantics, and capacitor-cycle runtime state.
 extends RefCounted

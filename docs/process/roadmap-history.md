@@ -209,7 +209,7 @@ Client: 左ダブルクリック → カメラレイ方向に推力ベクトル�
     - 物理ロジック変更に対して Replay が堅牢
   Phase 5 マルチプレイヤー基盤
     - PlayerId / Hello-Welcome ハンドシェイク
-    - InitialState / PlayerFitting 送信
+    - InitialState / PlayerLoadout 送信（当時名称: PlayerFitting）
     - 複数クライアント同時接続
 
 Godot 側（実装済み）:
