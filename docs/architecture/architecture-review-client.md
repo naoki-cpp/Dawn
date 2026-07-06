@@ -3,7 +3,7 @@ scope    : Godot クライアント（client/scripts/）の保守性・設計品
 audience : AI Agent / Human Developer
 update   : クライアント側で大規模リファクタ実施後 / 新スクリプト追加時
 related  : docs/architecture/architecture-review-server.md（サーバー側）, docs/architecture/architecture.md, docs/process/playtest-guide.md
-date     : 2026-07-05（`WorldInteraction` を新設し、selection state / double-click / world intent 解釈を `main.gd` から移動。`main.gd` 1165→1127、`world_interaction.gd` 101 行を追加。C-7 を解消済みに追記、総合 A− へ更新）
+date     : 2026-07-06（`WorldPresentation` を新設し、floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation を `main.gd` から移動。`main.gd` は 1127→872、`world_presentation.gd` 233 行を追加。）
 ---
 
 # Architecture Review — Dawn Client (Godot)
@@ -15,16 +15,16 @@ date     : 2026-07-05（`WorldInteraction` を新設し、selection state / doub
 
 ## 現状評価
 
-**総合: A−**（2026-07-05 更新。`WorldInteraction` 新設で selection state / double-click timing / keyboard action 解釈 / click→intent 変換を `main.gd` から移動。`WorldSession`・`HudSurface`・`WorldInteraction` の3つの deep module により、`main.gd` は scene wiring / network send / visual side effect の orchestration にほぼ絞られた。残る debt は `PlayerFitting` dict スキーマの非検証（C-4）と、scene-tree 依存ゆえに手動確認が必要な入力経路のみ）
+**総合: A**（2026-07-06 更新。`WorldPresentation` 新設で floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation を `main.gd` から移動。`WorldSession`・`HudSurface`・`WorldInteraction`・`WorldPresentation` の4つの deep module により、`main.gd` は scene wiring / network send / event dispatch / HUD frame assembly の orchestration にほぼ絞られた。残る debt は `PlayerFitting` dict スキーマの非検証（C-4）と、scene-tree 依存ゆえに手動確認が必要な入力経路のみ）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
-| ファイル分割 | A− | `main.gd` から `HudManager`/`HudSurface`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder`/`WorldSession`/`WorldInteraction` を抽出。live world state は `WorldSession`、live HUD Control 参照は `HudSurface`、world interaction policy は `WorldInteraction` が所有 |
-| `main.gd` の責務集約 | A− | god object は実質解消。selection state・ダブルクリック・world selection 優先順位・dock/undock を含む action gating は `WorldInteraction` へ移動済み。`main.gd` に残るのは scene lifecycle / scene node generation / visual effect / network send の orchestration |
+| ファイル分割 | A | `main.gd` から `HudManager`/`HudSurface`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder`/`WorldSession`/`WorldInteraction`/`WorldPresentation` を抽出。live world state は `WorldSession`、live HUD Control 参照は `HudSurface`、world interaction policy は `WorldInteraction`、world visual side effect は `WorldPresentation` が所有 |
+| `main.gd` の責務集約 | A | god object は実質解消。selection state・ダブルクリック・world selection 優先順位・dock/undock を含む action gating は `WorldInteraction` へ、floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation は `WorldPresentation` へ移動済み。`main.gd` に残るのは scene lifecycle / scene node generation / event dispatch / network send / HUD frame assembly |
 | 重複 | A− | マーカー生成・ピッキング・ワープ着地点計算の同型ロジックは解消済み（C-2） |
 | 結合度 | A− | signal 経由の `connection.gd` ↔ `main.gd` 結合は良好。`@onready` のシーンツリー直パス参照はフェイルファストガードで解消（C-3）。modules dict のキー前提のみ脆さが残る（C-4、保留） |
 | デッドコード | A | 残骸なし。コメントは ADR 参照付きで現状と一致 |
-| テストカバレッジ | A− | 新設クラス + main.gd残存ロジックの一部を GdUnit4 で計150ケース実行確認済み。`WorldSession` / `HudSurface` に加えて `WorldInteraction` も scene tree なしで selection ownership・double-click・lock intent を単体テスト可能になった。scene-tree/ネットワーク依存の end-to-end 入力経路だけが手動確認領域として残る |
+| テストカバレッジ | A− | 新設クラス + main.gd残存ロジックの一部を GdUnit4 で計156ケース実行確認済み。`WorldSession` / `HudSurface` / `WorldInteraction` に加えて `WorldPresentation` も marker clamp・warp tunnel easing・sun direction を scene tree なしで単体テスト可能になった。scene-tree/ネットワーク依存の end-to-end 入力経路だけが手動確認領域として残る |
 | サーバー側との対比 | — | サーバー側はクレート分割（A−）、クライアントはファイル分割（B+）。テストカバレッジは依然サーバー側（カバレッジ80%要件）が厚い |
 
 サーバー側が長期にわたる分割リファクタ（Phase 2〜9）を経て A− に達したのに対し、
@@ -35,14 +35,15 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 
 ## ファイルサイズ一覧（2026-07-05 時点）
 
-> 2026-07-05 再計測。`WorldInteraction` deepening により `main.gd` は 1165→1127 に縮小。
-> 新規 `world_interaction.gd`（101行）は selection state、double-click timing、keyboard action
-> 解釈、click→intent 変換を所有する deep module。`WorldSession` は live world state、
-> `HudSurface` は live HUD Control 参照、`WorldInteraction` は world interaction policy を所有する。
+> 2026-07-06 再計測。`WorldPresentation` deepening により `main.gd` は 1127→872 に縮小。
+> 新規 `world_presentation.gd`（233行）は floating origin / nav marker placement / sky sun update /
+> warp tunnel / player ship presentation を所有する deep module。`WorldSession` は live world state、
+> `HudSurface` は live HUD Control 参照、`WorldInteraction` は world interaction policy、
+> `WorldPresentation` は world visual side effect を所有する。
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `client/scripts/main.gd` | 1127 | 🟡 オーケストレーション層。scene lifecycle / node generation / network send / visual side effect を保持。live world state は `WorldSession`、HUD surface ownership は `HudSurface`、world interaction policy は `WorldInteraction` へ移動 |
+| `client/scripts/main.gd` | 872 | 🟢 オーケストレーション層。scene lifecycle / node generation / event dispatch / network send / HUD frame assembly を保持。live world state は `WorldSession`、HUD surface ownership は `HudSurface`、world interaction policy は `WorldInteraction`、world visual side effect は `WorldPresentation` へ移動 |
 | `client/scripts/hud_manager.gd` | 547 | 🟢 HUD 全パネルの構築・更新の stateless static class。責務は単一（HUD 構築） |
 | `client/scripts/connection.gd` | 341 | 🟢 WebSocket I/O とシグナル発行のみ |
 | `client/scripts/world_session.gd` | 278 | 🟢 InitialState / AoI / HP / lock / tick-cap / dock state の client-side live world state |
@@ -53,6 +54,7 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/input_decoder.gd` | 122 | 🟢 キー入力→アクション決定の純粋関数。GdUnit4 テスト済み |
 | `client/scripts/camera_controller.gd` | 113 | 🟢 自己完結したオービットカメラ |
 | `client/scripts/world_interaction.gd` | 101 | 🟢 新設（2026-07-05）。selection state、double-click timing、click→intent、lock intent、`InputDecoder` 連携を所有する deep module |
+| `client/scripts/world_presentation.gd` | 233 | 🟢 新設（2026-07-06）。floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation を所有する deep module |
 | `client/scripts/ship_picking.gd` | 93 | 🟢 船/ゲート/天体ピッキング3関数（画面空間ピッキング） |
 | `client/scripts/world_space.gd` | 74 | 🟢 浮動原点（真 AU 距離レンダリング用の WorldSpace リベース） |
 | `client/scripts/tactical_overlay.gd` | 67 | 🟢 射程リング描画のみ |
@@ -141,7 +143,8 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 | `player_fitting_test.gd` | `PlayerFitting`（PR #33 新設） | 11 |
 | `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy / dock state） | 11 |
 | `world_interaction_test.gd` | `WorldInteraction`（selection ownership / double-click / lock intent / key action 解釈） | 8 |
-| **合計** | | **150**（`func test_` 実測） |
+| `world_presentation_test.gd` | `WorldPresentation`（marker clamp / warp tunnel easing / sun state） | 6 |
+| **合計** | | **156**（`func test_` 実測） |
 
 テスト導入で見つかった不具合・定着した手順（詳細: `docs/process/godot-client-testing.md`）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる

@@ -30,6 +30,7 @@ var _player_station_inventory : Array = []
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
 const PlayerFitting = preload("res://scripts/player_fitting.gd")
 const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
+const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 const WorldSessionScript = preload("res://scripts/world_session.gd")
 const WorldInteractionScript = preload("res://scripts/world_interaction.gd")
 const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor
@@ -41,36 +42,16 @@ const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is reject
 const METERS_PER_UNIT : float = 1.0
 const CLIENT_TICKS_PER_SEC : float = 10.0
 
-## Must match ship_controller.gd's VISUAL_SPEED_CAP (Godot units/tick): the
-## warp-tunnel overlay (ADR-0029 lore pass) fades in once the player's ship is
-## moving faster than the speed ship_controller can render as literal motion,
-## and fades out once it drops back under it -- the same threshold that makes
-## OTHER ships hide entirely (ship_controller.gd), just shown as an overlay
-## here since the camera can't lose track of the locally piloted ship.
-const WARP_TUNNEL_THRESHOLD : float = 2_000.0
-## How fast the overlay's intensity eases toward its target each second (an
-## exponential approach, not a hard cut) -- this *is* the "natural before/after"
-## the tunnel transition reads as, since the true server speed jumps across the
-## threshold in a single tick.
-const WARP_TUNNEL_FADE_RATE : float = 3.0
-## Camera FOV pulls wide while in the tunnel for an extra sense of speed, then
-## eases back. Purely cosmetic.
-const WARP_TUNNEL_FOV_BOOST : float = 15.0
 const BUILDABLE_SHIP_TYPE_ID : int = 7
 
-var _warp_tunnel_amount : float = 0.0
-var _camera_base_fov    : float = 60.0
 var _cap_tick_accumulator : float = 0.0
-
-# -- Materials ----------------------------------------------------------------
-
-var _player_material : StandardMaterial3D = null
 
 # -- Internal state -----------------------------------------------------------
 
 var _session := WorldSessionScript.new()
 var _interaction := WorldInteractionScript.new()
 var _hud_surface := HudSurfaceScript.new()
+var _presentation := WorldPresentationScript.new()
 var _ships                 : Dictionary = _session.ships
 var _player_ship_id        : int        = -1
 var _player_ship_type_name : String     = ""
@@ -109,8 +90,6 @@ var _cap_current      : float = -1.0   ## -1 = not yet received
 var _cap_max          : float = 500.0
 var _cap_recharge     : float = 10.0   ## GJ per tick
 
-## Tactical overlay (range rings).
-var _tactical_overlay : Node3D = null  ## TacticalOverlay node, parented to player ship
 var _weapon_range     : float  = 0.0   ## optimal range (u), recalculated on fitting change
 var _weapon_falloff   : float  = 0.0   ## falloff range (u)
 
@@ -132,7 +111,6 @@ var _system_names : Dictionary = _session.system_names
 var _current_system_name : String = "Unknown"
 var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
 var _nearby_station_id   : int    = -1
-var _sky_mat             : ShaderMaterial = null  ## reference kept for sun_direction updates
 var _jump_notice         : String = ""
 var _jump_notice_timer   : float  = 0.0
 ## Warp arrival is handled authoritatively by the server (ADR-0029 warp-arrival
@@ -168,21 +146,15 @@ func _ready() -> void:
 	_connection.player_fitting_received.connect(_on_player_fitting)
 	_connection.module_activated.connect(_on_module_activated)
 	_connection.module_deactivated.connect(_on_module_deactivated)
-	_build_player_material()
-	_setup_space_environment()
+	_presentation.build(self, _camera, _warp_tunnel, _gates_root, _bodies_root, _world, WORLD_SCALE)
 	_hud_surface.build(self, _hud, _stats_label)
-	_camera_base_fov = _camera.fov
 	_update_hud()
 	## Gate / body markers are spawned from the server's InitialState, not here.
 
 func _process(delta: float) -> void:
-	_maybe_rebase_origin()
-	_update_body_markers()
-	_update_gate_markers()
+	_presentation.refresh(delta, _player_ship_id, _ships, _bodies)
 	_update_gate_proximity()
 	_update_station_proximity()
-	_update_sun_direction()
-	_update_warp_tunnel_effect(delta)
 	_advance_client_cap_ticks(delta)
 	if _jump_notice_timer > 0.0:
 		_jump_notice_timer -= delta
@@ -214,181 +186,6 @@ func _server_to_godot_pos(p: Vector3) -> Vector3:
 ## event/state handler that parses a position out of a payload dict.
 func _vec3_from_dict(d: Dictionary, key: String) -> Vector3:
 	return WorldSessionScript.vec3_from_dict(d, key)
-
-## Distance (Godot units) past which a celestial-body or jump-gate marker is
-## clamped toward the player so it stays inside the camera far plane (true-AU
-## only). At the current compressed scale everything sits well inside this, so
-## markers draw at their real position (no clamping). At true AU this keeps
-## far bodies/gates visible as background bearing markers (spike S5) instead of
-## falling outside the far plane (scenes/main.tscn far=100000) and vanishing.
-const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
-
-## Re-place every celestial-body marker each frame at the body's true bearing
-## from the player, clamped to NAV_MARKER_CLAMP_DISTANCE only when farther than
-## that (a no-op at compressed scale). The marker stores its server position in
-## the "body_pos" meta (NavigationMarkerRenderer).
-func _update_body_markers() -> void:
-	_update_position_markers(_bodies_root, "nav_pos")
-
-## Same as _update_body_markers, for Jump Gate markers (requested after the
-## true-AU reactivation: a gate can now sit AU-scale away from the player, so
-## without this it renders outside the far plane and is effectively invisible
-## -- the same problem bodies had before NAV_MARKER_CLAMP_DISTANCE existed).
-## The marker stores its server position in the "gate_id"/"gate_pos" meta
-## (NavigationMarkerRenderer); _pick_gate_at picks against the resulting
-## (possibly clamped) global_position, so clicks land on what's on screen.
-func _update_gate_markers() -> void:
-	_update_position_markers(_gates_root, "nav_pos")
-
-## Shared by `_update_body_markers` and `_update_gate_markers`, which were
-## previously identical except for the root node and meta key: re-place every
-## marker under `root` each frame at its true bearing from the player,
-## clamped to NAV_MARKER_CLAMP_DISTANCE only when farther than that (a no-op
-## at compressed scale). Each marker stores its server position in `meta_key`
-## (NavigationMarkerRenderer).
-func _update_position_markers(root: Node3D, meta_key: String) -> void:
-	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
-		return
-	var player_godot: Vector3 = (_ships[_player_ship_id] as Node3D).global_position
-	for c: Node in root.get_children():
-		var marker: Node3D = c as Node3D
-		if not marker.has_meta(meta_key):
-			continue
-		var marker_godot: Vector3 = _server_to_godot_pos(marker.get_meta(meta_key) as Vector3)
-		var delta: Vector3 = marker_godot - player_godot
-		var dist: float = delta.length()
-		if dist > NAV_MARKER_CLAMP_DISTANCE:
-			marker.global_position = player_godot + delta / dist * NAV_MARKER_CLAMP_DISTANCE
-		else:
-			marker.global_position = marker_godot
-
-## Fade the full-screen warp-tunnel overlay in/out based on the player's own
-## ship speed (ADR-0029 lore pass, 2026-06-23). ship_controller.gd hides OTHER
-## ships entirely once they cross VISUAL_SPEED_CAP (the speed it can no longer
-## render as literal motion without f32 jitter); the camera can't lose track of
-## the LOCALLY piloted ship the same way, so this overlay covers the same
-## "moving too fast to render" stretch instead. The exponential ease (not a
-## hard cut) is what makes the tunnel's entry/exit read as a transition rather
-## than a flash -- the underlying speed crosses the threshold in a single tick.
-func _update_warp_tunnel_effect(delta: float) -> void:
-	var target := 0.0
-	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
-		var spd: float = (_ships[_player_ship_id] as Node3D).call("get_speed_godot") as float
-		target = 1.0 if spd > WARP_TUNNEL_THRESHOLD else 0.0
-	_warp_tunnel_amount = lerpf(_warp_tunnel_amount, target, clampf(delta * WARP_TUNNEL_FADE_RATE, 0.0, 1.0))
-	_warp_tunnel.call("set_intensity", _warp_tunnel_amount)
-	_camera.fov = _camera_base_fov + WARP_TUNNEL_FOV_BOOST * _warp_tunnel_amount
-
-## Rebase the floating origin to the player when it drifts past the threshold so
-## render coordinates stay small. Dormant at compressed scale (threshold never
-## reached). The player moves to the new origin (render ~0), so it is shifted
-## along with everything else and the camera follows.
-func _maybe_rebase_origin() -> void:
-	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
-		return
-	var player_server: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
-	if not _world.should_rebase(player_server):
-		return
-	_apply_origin_rebase(player_server, false)
-
-## Move the floating origin to `new_origin` and shift every world node that holds
-## a fixed Godot position by the same delta, so the move is invisible (the spike's
-## C2-2 property). The single primitive behind both threshold rebases (origin
-## follows player) and authoritative position snaps (origin re-anchored to keep
-## the player on-screen, `keep_player_fixed`).
-##
-## Body and gate markers are intentionally not shifted here: _update_body_markers
-## / _update_gate_markers re-place them from their server position against the
-## new origin every frame, so shifting them now would be dead work.
-func _apply_origin_rebase(new_origin: Vector3, keep_player_fixed: bool) -> void:
-	var shift: Vector3 = _world.rebase_to(new_origin)
-	for id: int in _ships:
-		if keep_player_fixed and id == _player_ship_id:
-			continue
-		(_ships[id] as Node3D).position += shift
-	# When the player ship moved with the origin, shift the camera by the same
-	# delta so its follow-lerp/look_at don't swing for a frame (it follows the
-	# ship by world position, not as a child). When the player is held fixed on
-	# screen the camera must stay put too.
-	if not keep_player_fixed and _camera != null:
-		_camera.global_position += shift
-		_camera.call("on_origin_rebased", shift)
-
-## Gate/body marker spawning lives in navigation_marker_renderer.gd
-## (NavigationMarkerRenderer, architecture-review-client.md C-1) -- main.gd
-## only owns the live data and refresh orchestration.
-
-## Spawns a visual marker for every Jump Gate in the player's current Star
-## System (ADR-0009). Re-run on Star System change to swap markers.
-func _spawn_gate_markers() -> void:
-	NavigationMarkerRenderer.spawn_gate_markers(_gates_root, _gates, WORLD_SCALE, _server_to_godot_pos)
-
-## Spawn visual nodes for all celestial bodies in the current star system
-## (stars + planets, ADR-0025). Re-called on system change.
-func _spawn_body_markers() -> void:
-	if _bodies_root == null:
-		return
-	_interaction.clear_navigation_selection()
-	NavigationMarkerRenderer.spawn_body_markers(_bodies_root, _bodies, WORLD_SCALE, _server_to_godot_pos)
-	NavigationMarkerRenderer.spawn_station_markers(_bodies_root, _stations, WORLD_SCALE, _server_to_godot_pos)
-
-## Star data positions (galaxy.toml) sit a few ship-travel-distances away
-## (e.g. 0 to ~30,000 units), so as the ship moves across a system the angle
-## to the star changes enough to visibly drift -- wrong for something meant
-## to read as a fixed background light source. Push the direction calculation
-## out to an effectively-infinite distance (the player's whole travel range
-## becomes a negligible fraction of it) so the sun direction stays visually
-## fixed, without touching the star body's actual gameplay position (still
-## used as-is by warp/navigation code elsewhere).
-const SUN_EFFECTIVE_DISTANCE : float = 50_000_000.0
-## Arbitrary fixed unit vector the star is pushed along for the calculation
-## above. Only its direction matters (not tied to gameplay), so any constant
-## works; picked off-axis so the sun isn't perfectly aligned with a world axis.
-const SUN_FAR_DIRECTION : Vector3 = Vector3(0.62, 0.31, 0.72)
-
-## Update the sky shader's sun_direction each frame so the star appears in the
-## correct direction relative to the player ship (ADR-0025).
-func _update_sun_direction() -> void:
-	if _sky_mat == null or _player_ship_id < 0 or not _ships.has(_player_ship_id):
-		return
-	var bodies: Array = _bodies
-	var star_pos: Vector3 = Vector3.ZERO
-	var found: bool = false
-	for entry: Variant in bodies:
-		var b: Dictionary = entry as Dictionary
-		if (b.get("kind", "") as String) == "Star":
-			star_pos = b.get("position", Vector3.ZERO) as Vector3
-			found    = true
-			break
-	if not found:
-		_sky_mat.set_shader_parameter("sun_active", 0.0)
-		return
-
-	## Player position in server space.
-	var ship_node   : Node3D = _ships[_player_ship_id] as Node3D
-	var ship_server : Vector3 = _world.to_server(ship_node.global_position)
-
-	## Direction from ship toward the star's effective (pushed-out) position in
-	## server coords; map to Godot world space. See SUN_EFFECTIVE_DISTANCE.
-	var effective_star_pos : Vector3 = star_pos + SUN_FAR_DIRECTION.normalized() * SUN_EFFECTIVE_DISTANCE
-	var diff : Vector3 = effective_star_pos - ship_server
-	if diff.length_squared() < 1.0:
-		_sky_mat.set_shader_parameter("sun_active", 0.0)
-		return
-	## Map the server-space direction to Godot world space (scale cancels on normalize).
-	var godot_dir : Vector3 = _world.dir_to_godot(diff).normalized()
-	_sky_mat.set_shader_parameter("sun_direction", godot_dir)
-	_sky_mat.set_shader_parameter("sun_active",    1.0)
-
-	## Sun colour from the star's spectral type.
-	var spec: float = 0.60
-	for entry: Variant in bodies:
-		var b: Dictionary = entry as Dictionary
-		if (b.get("kind", "") as String) == "Star":
-			spec = b.get("spectral_type", 0.60) as float
-			break
-	var sun_col: Color = NavigationMarkerRenderer.spectral_color(spec)
-	_sky_mat.set_shader_parameter("sun_color", Vector3(sun_col.r, sun_col.g, sun_col.b))
 
 ## Tracks whether the player ship is within activation range of a Jump Gate
 ## (ADR-0009). Distance is computed in server units (Godot units / WORLD_SCALE).
@@ -462,8 +259,7 @@ func _input(event: InputEvent) -> void:
 					KEEP_AT_RANGE_MIN_KM, KEEP_AT_RANGE_MAX_KM)
 				_update_hud()
 			"toggle_tactical_overlay":
-				if _tactical_overlay != null:
-					(_tactical_overlay as Node3D).call("toggle_visible")
+				_presentation.toggle_tactical_overlay()
 			"toggle_inventory_panel":
 				_hud_surface.toggle_inventory_panel()
 			"dock":
@@ -669,7 +465,7 @@ func _handle_position_snap(p: Dictionary) -> void:
 		# new_origin = server_pos - (ship's server-space offset from the origin).
 		var pg: Vector3 = (_ships[ship_id] as Node3D).global_position
 		var new_origin: Vector3 = server_pos - _world.dir_to_server(pg)
-		_apply_origin_rebase(new_origin, true)
+		_presentation.apply_origin_rebase(new_origin, true, _player_ship_id, _ships)
 	else:
 		(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(server_pos)
 	(_ships[ship_id] as Node3D).call("set_velocity", Vector3.ZERO)
@@ -766,8 +562,13 @@ func _on_initial_state(state: Dictionary) -> void:
 func _ingest_star_map(state: Dictionary) -> void:
 	_session.ingest_navigation(state)
 	_sync_session_state()
-	_spawn_gate_markers()
-	_spawn_body_markers()
+	_presentation.respawn_navigation_markers(
+		_gates,
+		_bodies,
+		_stations,
+		_server_to_godot_pos,
+		Callable(_interaction, "clear_navigation_selection")
+	)
 
 ## Instantiate a ship scene at `pos` (server-space) and return the node.
 ## WorldSession owns registry insertion; main.gd only creates the scene node.
@@ -835,17 +636,7 @@ func _recalc_weapon_range() -> void:
 	var ranges: Dictionary = PlayerFitting.weapon_ranges(_player_modules)
 	_weapon_range = ranges["optimal"] as float
 	_weapon_falloff = ranges["falloff"] as float
-	_update_tactical_overlay()
-
-func _update_tactical_overlay() -> void:
-	if _tactical_overlay == null:
-		return
-	## Convert server units -> Godot units before passing to the overlay.
-	## weapon_range/_falloff are in server coordinate units; the overlay lives
-	## in Godot world space which is scaled by WORLD_SCALE (0.1).
-	_tactical_overlay.call("set_ranges",
-		_weapon_range   * WORLD_SCALE,
-		_weapon_falloff * WORLD_SCALE)
+	_presentation.update_tactical_overlay_ranges(_weapon_range, _weapon_falloff)
 
 func _on_module_activated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
 	if p_ship_id != _player_ship_id:
@@ -945,18 +736,7 @@ func _toggle_module_by_index(f_index: int) -> void:
 
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 	_player_ship_id = p_ship_id
-	_apply_player_material(ship)
-	ship.call("set_as_player")
-	_camera.call("set_target", ship)
-	## Attach tactical overlay to player ship so rings follow it automatically.
-	if _tactical_overlay != null:
-		_tactical_overlay.queue_free()
-	var overlay_script: GDScript = load("res://scripts/tactical_overlay.gd") as GDScript
-	if overlay_script != null:
-		_tactical_overlay = Node3D.new()
-		_tactical_overlay.set_script(overlay_script)
-		ship.add_child(_tactical_overlay)
-		_update_tactical_overlay()
+	_presentation.attach_player_ship(ship, _weapon_range, _weapon_falloff)
 
 # -- Domain event handlers ----------------------------------------------------
 
@@ -1178,6 +958,7 @@ func _sync_session_state() -> void:
 	_ship_hp = _session.ship_hp
 	_opponent_ship_ids = _session.opponent_ship_ids
 	_gates = _session.gates
+	_stations = _session.stations
 	_bodies = _session.bodies
 	_system_names = _session.system_names
 	_player_ship_id = _session.player_ship_id
@@ -1196,65 +977,3 @@ func _sync_session_state() -> void:
 	_cap_max = _session.cap_max
 	_cap_recharge = _session.cap_recharge
 
-func _setup_space_environment() -> void:
-	## Build the procedural space sky at runtime.
-	## WorldEnvironment is created dynamically -- no .tscn changes needed.
-	var shader := load("res://shaders/space_sky.gdshader") as Shader
-	if shader == null:
-		push_warning("[Main] space_sky.gdshader not found")
-		return
-
-	var sky_mat := ShaderMaterial.new()
-	sky_mat.shader = shader
-	_sky_mat = sky_mat
-
-	## Tweak nebula / star appearance here without editing the shader.
-	sky_mat.set_shader_parameter("star_threshold",    0.960)
-	sky_mat.set_shader_parameter("star_brightness",   3.5)
-	sky_mat.set_shader_parameter("nebula_strength",   0.40)
-	sky_mat.set_shader_parameter("milkyway_strength", 0.12)
-	sky_mat.set_shader_parameter("milkyway_color",    Color(0.48, 0.58, 0.90))
-	sky_mat.set_shader_parameter("ambient_color",     Color(0.004, 0.003, 0.010))
-
-	var sky := Sky.new()
-	sky.sky_material  = sky_mat
-	sky.process_mode  = Sky.PROCESS_MODE_REALTIME
-	sky.radiance_size = Sky.RADIANCE_SIZE_256
-
-	var env := Environment.new()
-	env.background_mode      = Environment.BG_SKY
-	env.sky                  = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.03   ## Space is very dark
-	env.tonemap_mode         = Environment.TONE_MAPPER_FILMIC
-	env.tonemap_exposure     = 1.0
-	env.tonemap_white        = 6.0    ## Prevent star bloom clipping
-
-	## Bloom -- makes ship emissions and bright stars glow cinematically.
-	env.glow_enabled       = true
-	env.glow_normalized    = false
-	env.glow_intensity     = 0.8
-	env.glow_bloom         = 0.10
-	env.glow_blend_mode    = Environment.GLOW_BLEND_MODE_SOFTLIGHT
-	## Stars peak at ~1.5; engine glow emission is x12.
-	## Set threshold above star peak so only ship emissions trigger bloom.
-	env.glow_hdr_threshold = 2.0
-	env.glow_hdr_scale     = 1.0
-
-	var world_env         := WorldEnvironment.new()
-	world_env.environment  = env
-	add_child(world_env)
-
-func _build_player_material() -> void:
-	_player_material = StandardMaterial3D.new()
-	_player_material.albedo_color               = Color(1.0, 0.5, 0.1, 1)
-	_player_material.metallic                   = 0.9
-	_player_material.roughness                  = 0.2
-	_player_material.emission_enabled           = true
-	_player_material.emission                   = Color(1.0, 0.3, 0.0, 1)
-	_player_material.emission_energy_multiplier = 1.5
-
-func _apply_player_material(ship: Node3D) -> void:
-	var hull: MeshInstance3D = ship.get_node_or_null("Hull") as MeshInstance3D
-	if hull != null:
-		hull.set_surface_override_material(0, _player_material)
