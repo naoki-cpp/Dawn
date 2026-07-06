@@ -3,13 +3,10 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md
-date     : 2026-07-06（全ファイル再計測。前回パス以降、多数のファイルで記録値が実測より
-古いままだったと判明——一部は前回計測時点で既に誤っていた（例: `world_presentation.gd`
-新設時の記録漏れ）。63ファイルの行数を実測に更新。最重要の発見: `node/mod.rs` の
-impl が748行（前回641行）に達し、R-3 自身が定めた「impl 700超で着手」トリガーが
-発火——R-4として新規に着手判断へ格上げ。server 総合 B+ 維持（R-4 は決定・ロードマップ
-記載済みのため managed debt）、client 側は別途 architecture-review-client.md で
-974/278/245 等に再計測）
+date     : 2026-07-07（R-4完了: `node/mod.rs`（impl 748行でトリガー発火）の座標合成
+アクセサ群を `node/coordinates.rs` へ純粋移動し939→821行・impl700行未満に復帰。
+2026-07-06の全ファイル再計測（63ファイル更新）はそのまま有効。server 総合 B+ 維持、
+client 側は別途 architecture-review-client.md 参照）
 ---
 
 # Architecture Review — Dawn Codebase
@@ -56,7 +53,8 @@ managed debt として扱い、ファイルサイズ軸は B+ を維持する）
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 623 | 🟢 P4-2 + P7-1 + ADR-0029 + ADR-0032。残るのは spawn mechanics（spawn / inventory seed）のみで、R-3 の観察対象から外れた |
 | `crates/dawn-sector/src/node/bot_ai.rs` | 347 | 🟢 `spawner_logic.rs` から `process_bots` を抽出した Bot AI 決定ループ。純粋移動、挙動変更なし |
 | `crates/dawn-sector/src/node/orbit.rs` | 860（impl 324） | 🟡 ADR-0031 新設。Orbit / Keep at Range の操船一式。単一責務で許容だが総行数は watch 帯。impl 324 でトリガー未発火 |
-| `crates/dawn-sector/src/node/mod.rs` | 939（impl 748） | 🔴 R-4（2026-07-06起票、2026-07-07一部着手）。P7-2 後 + ADR-0031/0032/0035 のフィールド・定数追加。**impl（テスト除く）748 行で R-3 のトリガー（700超）が発火**。2026-07-07、座標合成アクセサ3件を `AnchorTable` への薄い委譲に置換（詳細は下記 anchor.rs）したが行数はほぼ不変（doc コメント増分のみ）——フィールド定義と補助 impl の分離という R-4 本体は未着手のまま（詳細は問題一覧 R-4） |
+| `crates/dawn-sector/src/node/mod.rs` | 821（impl 700未満） | 🟢 R-4 完了（2026-07-07）。座標合成アクセサ群（`entity_absolute`/`entity_abs_pos`/`entity_abs_pos_f64`/`entity_absolute_f64`/`dest_in_ship_frame_abs`/`ship_distance`/`ship_distance_to_point`/`ship_anchor_and_offset`/`debug_assert_missing_anchor`）を新設 `node/coordinates.rs` へ移動し、`mod.rs` は構造体宣言・定数・コンストラクタ・population backstop・identity/observation アクセサに絞った。純粋移動、挙動変更なし（939→821） |
+| `crates/dawn-sector/src/node/coordinates.rs` | 134 | 🟢 R-4（2026-07-07新設）。`AnchorTable`（ADR-0029）呼び出し側の座標合成アクセサを一元化した deep module。`mod.rs` から純粋移動 |
 | `crates/dawn-sector/src/node/transit_flow.rs` | 949（impl 368） | 🟢 `prepare_transit_commit`/`handle_transit_commit`（公開面 5→2 に集約）+ `rebase_after_transit`。大きいが責務は cohesive。impl 368 で余裕あり |
 | `crates/dawn-sector/src/node/station.rs` | 1010（impl 443） | 🟡 ADR-0034/9B foundation。dock/undock・station inventory・build/disassemble が1ファイルに集まっており、単一の「Station operations」としては読めるが総行数は新たな watch 対象。2026-07-07、ADR-0037 で `dock_owned`/`undock_owned` が active-ship 解決に、`select_active_ship_owned` を新設（972→1010）。impl 443 でトリガー未発火 |
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 655 | 🟢 P7-pre + ADR-0032（inventory 永続化）。ほぼテスト |
@@ -386,6 +384,7 @@ distance に `None` を渡し戻り値の距離を無視するだけ）。結果
 | ShipRegistry が削除処理を一元所有 + `reapply_fitting` 統一（`/improve-codebase-architecture` 候補1+4） | 2026-07-03 | Ship の同一性は `index`/`type_ids`/`owners`/`by_player`（`ShipRegistry`）+ `base_stats`（`SimulationNode`）の5マップに分散しており、削除時の「4-6行の手組み削除シーケンス」が combat death（tick.rs）・`ShipDespawned`/`ShipDestroyed` replay（apply_event.rs）・Sector Transit 離脱（transit_flow.rs）の4箇所に重複、うち transit_flow.rs の1箇所は `owners`/`by_player` の削除を欠落させ、転移した player ship の所有権エントリがダングリングする実バグがあった。`ShipRegistry::remove(ship_id, world)` が4マップの削除+ECS despawn を一元所有し、`SimulationNode::remove_ship` がこれに `base_stats` 削除を足す薄いラッパーとして全4箇所から呼ばれる形に統一（回帰テスト `export_transit_clears_ownership_maps_for_a_player_ship` を追加）。あわせて `base_stats` 参照＋`apply_fitting` の反復（tick.rs/apply_event.rs/commands.rs/inventory.rs/range_gate.rs/spawner_logic.rs の計9箇所）を `SimulationNode::reapply_fitting(ship_id)` に統一（force-off 系は引き続き `ShipFitted` を発行しない）。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過（PR #67） |
 | アンカー合成ヘルパーを2つの真のコアに統一（`/improve-codebase-architecture` 候補2） | 2026-07-03 | ADR-0029 のアンカー+offset 合成が `node/mod.rs`・`node/approach.rs`・`node/warp.rs` に7つの近い実装として散らばり、シグネチャと精度が微妙に異なっていた（過去セッションの「近くの船が射程外と誤判定される」バグと同じ精度クラス）。`entity_absolute_f64`（offset+anchor→絶対座標）と `dest_in_ship_frame_abs`（絶対座標→船のアンカー相対）の2つのコアへ集約し、`ship_absolute`/`entity_absolute`（f32版）はどちらも前者に委譲。`dest_in_ship_frame_abs` は4つの node サブモジュールから呼ばれるため `approach.rs` から `node/mod.rs` へ移設、`warp.rs::dest_in_ship_frame` はアップキャストしてそれに委譲する形に置換。挙動変更なし。`cargo test --workspace`（194/194）/ `fmt` / `clippy -D warnings` 全件通過（PR #68） |
 | Bot AI 決定ループを `node/bot_ai.rs` へ抽出（`/improve-codebase-architecture` 候補3） | 2026-07-03 | `spawner_logic.rs` が spawn mechanics（ECS 挿入・inventory seed・`ShipSpawned` 発行）と Bot AI 決定ロジック（`process_bots` — target selection・低HP時の退避・engage range 操船・武器起動）という無関係な2つの関心事を同居させていた。両者を繋ぐのは「bot もspawnされた船である」という偶然のみで、`process_bots` は tick loop から呼ばれ spawn からは呼ばれない。`process_bots`（と、それをテストする2件のテスト）を新設 `node/bot_ai.rs` へ移動。`spawn_bot_ship`（船を作り `IsBotComp` を付けるだけの spawn mechanics）は `spawner_logic.rs` に残置。純粋移動、挙動変更なし。`spawner_logic.rs` 881→575行に縮小し R-3 の観察対象から外れた。`cargo test --workspace`（194/194、移動した2テストは `node::bot_ai::tests` で再確認）/ `fmt` / `clippy -D warnings` 全件通過（PR #69） |
+| R-4 `node/mod.rs` フィールド定義と補助impl分離 | 2026-07-07 | 座標合成アクセサ群（`entity_absolute`/`entity_abs_pos`/`entity_abs_pos_f64`/`entity_absolute_f64`/`dest_in_ship_frame_abs`/`ship_distance`/`ship_distance_to_point`/`ship_anchor_and_offset`）+ `debug_assert_missing_anchor` を新設 `node/coordinates.rs` へ純粋移動。`mod.rs` は939→821行、impl 748→700未満に復帰。可視性・挙動変更なし |
 | Owned ship / Active ship モデル実装（ADR-0037、Phase 9B-5 Assemble の前提） | 2026-07-07 | `ShipRegistry.by_player`（1player=1shipの暗黙前提）を `active_ship` に改名し、`owners`（既に複数所有対応済みだった）と分離。`remove()` は削除される船が実際に active だった場合のみ `active_ship` を消すよう修正（複数所有時に別の所有船削除でactiveポインタが誤って消える潜在バグを先回りで解消）。`SelectActiveShipCommand`（station-local 切替のみ）を新設。操縦系/Undock コマンド（Move/Stop/Approach/Warp/Orbit/KeepAtRange/Jump/LockOn/Activate/Deactivate/Undock）は `ship_id` を持たず常に caller の active ship へ解決（`is_active_ship`）、station 管理系（Fit/Unfit/Dock/BuildPackagedShip/DisassembleShip）は `ship_id` を維持し `owns_ship` のまま。wire protocol・スキーマ・Godotクライアント（`connection.gd`/`main.gd`）を追従。`cargo test --workspace`（229/229 dawn-sector）/ `fmt` / `clippy -D warnings` 全件通過、GdUnit4 164/164 通過。詳細は `docs/architecture/ownership.md` §7・ADR-0037 |
 
 > Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消、
@@ -443,7 +442,7 @@ P7 系で確立した「責務ごとに sibling モジュールへ抽出」方�
   - `transit_flow.rs` → Request 側と Commit 側のハンドラを分離。
 - または `node/` のファイル総数が増えて「どこに何があるか」の見通しが実際に悪化したとき。
 
-#### R-4（新設・2026-07-06・着手判断へ格上げ）: `node/mod.rs` の impl が700行トリガーを超過
+#### ~~R-4~~（新設・2026-07-06・**完了** 2026-07-07）: `node/mod.rs` の impl が700行トリガーを超過
 
 `node/mod.rs` は 2026-07-03 時点で impl 641 行（総行数 829）とR-3の観察対象に含まれ、
 「700行超で着手」というトリガー付きで保留されていた。2026-07-06 の再計測で総行数 936・
@@ -475,9 +474,19 @@ mod.rs 側で再実装していたと判明。`AnchorTable` に `to_relative()`�
 `ship_distance` は各 Ship を `(AnchorId, offset)` に解決してから `anchor_table.distance()` に
 委譲する形に置き換えた（f32 ラッパー `entity_absolute`/`entity_abs_pos` は ECS 由来のオフセット
 読み出しが関心事のため mod.rs に残置）。挙動変更なし・`cargo test --workspace` / `fmt` /
-`clippy -D warnings` 全件通過。ただし **これは R-4 の全解決ではない**——mod.rs の行数はほぼ
-変わらず（936→939、doc コメント増分）、フィールド定義と補助 impl の分離という R-4 本体の作業は
-未着手のまま残る。`CONTEXT.md` に Anchor の語彙を追加済み。
+`clippy -D warnings` 全件通過。`CONTEXT.md` に Anchor の語彙を追加済み。
+
+**2026-07-07、R-4 本体を完了（`/improve-codebase-architecture` → `/grilling` 経由）**:
+座標合成アクセサ群（`entity_absolute`/`entity_abs_pos`/`entity_abs_pos_f64`/
+`entity_absolute_f64`/`dest_in_ship_frame_abs`/`ship_distance`/`ship_distance_to_point`/
+`ship_anchor_and_offset`）と、その両方が使う `debug_assert_missing_anchor` を新設
+`node/coordinates.rs` へ `impl<S: EventStore> SimulationNode<S>` ブロックごと移動（可視性は
+`pub(super)`/`pub`のまま完全維持）。`mod.rs` は構造体宣言・定数・コンストラクタ・population
+backstop・identity/observation アクセサに絞られ、939→821 行、impl は700行未満に戻った。
+純粋移動で挙動変更なし。`cargo test --workspace`（dawn-sector 229/229）/ `fmt` /
+`clippy -D warnings` 全件通過（既知の無関係な失敗1件: `wire_schema_doc_is_up_to_date` は
+チェックイン済み `.schema.json` の改行コード CRLF/LF 差分によるもので、この変更以前から
+発生していた別問題）。
 
 ### 未完了・保留
 
@@ -488,7 +497,7 @@ mod.rs 側で再実装していたと判明。`AnchorTable` に `to_relative()`�
 |---|---|---|
 | R-2 client `main.gd` 分割 | 品質・一部着手済み | `WorldSession`・`WorldInteraction`・`WorldPresentation` 抽出で live world state / world interaction policy / world visual side effect を移動し、`main.gd` は 974 行（詳細・最新値は architecture-review-client.md）。残る scene lifecycle / node generation / network send / HUD adapter は `.tscn` 化コンポーネントへのシーン参照切れリスクが上回るため保留（C-3 とは無関係） |
 | R-3 `node/` 系再肥大（warp/orbit/commands/station/transit_flow） | 品質・保留 | 総行数は閾値帯だが impl は全て700未満・増分はテスト主体。impl が 700 超でファイル別に分割（トリガー付き・上記 R-3）。`mod.rs` はトリガー発火のため R-4 として分離 |
-| R-4 `node/mod.rs` impl 700行超過 | 品質・**着手判断**（新規 2026-07-06） | R-3 が定めたトリガー（impl 700 超）が発火。フィールド定義と補助 impl の分離が必要（詳細は上記 R-4） |
+| ~~R-4 `node/mod.rs` impl 700行超過~~ | 完了 → 「完了済み」参照 | 2026-07-07、座標合成アクセサ群 + `debug_assert_missing_anchor` を `node/coordinates.rs` へ純粋移動。939→821行、impl700行未満に復帰 |
 | 8D-5 Raspberry Pi 実機検証 | 完了 → 「完了済み」参照 | 2026-07-01、reachability/tick-sla/failover 3項目とも PASS。詳細は `docs/process/8d5-hardware-notes.md` |
 | M-3 `SectorSimulatorActor` 密結合 | 品質・保留 | 本番パス外（in-process テスト/ベンチ専用）。P9-1 撤回。優先度低 |
 | M-6 アプリ層 adapter 重複（`data_loader` / `spawn_npcs`） | 許容重複（縮小） | AoI / production runtime / Command dispatch は deep module 化済み（M-7 解消で Command dispatch 項目を削除）。残る data_loader / NPC spawn は低頻度 glue として許容。再評価トリガー付き |
