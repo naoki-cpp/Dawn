@@ -1,0 +1,580 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ClientCommandJson",
+  "description": "Every message a client can send to the server over the WebSocket connection. Serialized as a single JSON line tagged by `\"type\"`.\n\nThis enum is the schema-of-record for the client -> server half of the wire protocol (see [`EventJson`] for the server -> client half). It intentionally mirrors the wire format exactly, including the two backward-compatible quirks below -- it does not enforce the \"exactly one of these two fields\" business rules those quirks involve; that validation still happens in [`parse_client_command`], same as before this enum existed.\n\n- `WarpCommand` accepts either `target` (current) or `gate_id` (legacy); `target` wins if both are present. - `ApproachCommand` / `OrbitCommand` / `KeepAtRangeCommand` select their target with either `gate_id` (a Jump Gate) or `target_id` (a Ship); `gate_id` wins if both are present.",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "target",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "target": {
+          "$ref": "#/definitions/PosJson"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "MoveCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "target_id",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "target_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "LockOnCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "module_id",
+        "ship_id",
+        "slot",
+        "type"
+      ],
+      "properties": {
+        "module_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "slot": {
+          "type": "string"
+        },
+        "target_ship_id": {
+          "description": "Target of a targeted module (Weapon/Tackle), per ADR-0035. Required only for targeted module kinds; validated server-side.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ActivateModuleCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "module_id",
+        "ship_id",
+        "slot",
+        "type"
+      ],
+      "properties": {
+        "module_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "slot": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "DeactivateModuleCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "attacker_id",
+        "target_id",
+        "type"
+      ],
+      "properties": {
+        "attacker_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "target_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "AttackCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "StopCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "gate_id",
+        "ship_id",
+        "type"
+      ],
+      "properties": {
+        "gate_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "JumpCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "type"
+      ],
+      "properties": {
+        "gate_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "target_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ApproachCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "type"
+      ],
+      "properties": {
+        "gate_id": {
+          "description": "Legacy form: `{\"gate_id\": N}` instead of `{\"target\": {\"Gate\": N}}`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WarpTargetJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "WarpCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "type"
+      ],
+      "properties": {
+        "gate_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "radius": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "target_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "OrbitCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "type"
+      ],
+      "properties": {
+        "gate_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "range": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "target_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "KeepAtRangeCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "module_id",
+        "ship_id",
+        "slot",
+        "type"
+      ],
+      "properties": {
+        "module_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "slot": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "FitModuleCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "module_id",
+        "ship_id",
+        "slot",
+        "type"
+      ],
+      "properties": {
+        "module_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "slot": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "UnfitModuleCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "station_id",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "station_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "DockCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "UndockCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "ship_type_id",
+        "station_id",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ship_type_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "station_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "BuildPackagedShipCommand"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "station_id",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "station_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "DisassembleShipCommand"
+          ]
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "PosJson": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "format": "float"
+        },
+        "y": {
+          "type": "number",
+          "format": "float"
+        },
+        "z": {
+          "type": "number",
+          "format": "float"
+        }
+      }
+    },
+    "WarpTargetJson": {
+      "description": "A `{\"Gate\": N}` or `{\"Body\": N}` warp destination, as sent by `WarpCommand`'s current wire format (externally tagged: the variant name is the JSON object's only key).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "Gate"
+          ],
+          "properties": {
+            "Gate": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "Body"
+          ],
+          "properties": {
+            "Body": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,599 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EventJson",
+  "description": "Every message the server sends to a client over the WebSocket connection. Serialized as a single JSON line tagged by `\"type\"`.\n\nThis enum is the schema-of-record for the server -> client half of the wire protocol: [`event_json_schema()`] renders it to a JSON Schema document that `docs/architecture/wire-protocol.md` is generated from. Adding, removing, or renaming a field here changes the wire format for every client (Godot today; any future client written against `docs/architecture/wire-protocol.md`).",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "position",
+        "ship_id",
+        "tick",
+        "type"
+      ],
+      "properties": {
+        "position": {
+          "$ref": "#/definitions/PosJson"
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ShipSpawned"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "tick",
+        "type",
+        "velocity"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "VelocityChanged"
+          ]
+        },
+        "velocity": {
+          "$ref": "#/definitions/VelJson"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "tick",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ShipDespawned"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "station_id",
+        "tick",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "station_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ShipDocked"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "ship_id",
+        "station_id",
+        "tick",
+        "type"
+      ],
+      "properties": {
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "station_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ShipUndocked"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "current_armor",
+        "current_hull",
+        "current_shield",
+        "damage",
+        "ship_id",
+        "tick",
+        "type"
+      ],
+      "properties": {
+        "current_armor": {
+          "type": "number",
+          "format": "float"
+        },
+        "current_hull": {
+          "type": "number",
+          "format": "float"
+        },
+        "current_shield": {
+          "type": "number",
+          "format": "float"
+        },
+        "damage": {
+          "type": "number",
+          "format": "float"
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "DamageTaken"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "amount",
+        "current_armor",
+        "current_hull",
+        "current_shield",
+        "layer",
+        "ship_id",
+        "tick",
+        "type"
+      ],
+      "properties": {
+        "amount": {
+          "type": "number",
+          "format": "float"
+        },
+        "current_armor": {
+          "type": "number",
+          "format": "float"
+        },
+        "current_hull": {
+          "type": "number",
+          "format": "float"
+        },
+        "current_shield": {
+          "type": "number",
+          "format": "float"
+        },
+        "layer": {
+          "type": "string"
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "RepairApplied"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "killer_id",
+        "ship_id",
+        "tick",
+        "type"
+      ],
+      "properties": {
+        "killer_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ShipDestroyed"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "locker_id",
+        "target_id",
+        "tick",
+        "type"
+      ],
+      "properties": {
+        "locker_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "target_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "TargetLocked"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "locker_id",
+        "target_id",
+        "tick",
+        "type"
+      ],
+      "properties": {
+        "locker_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "target_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "LockLost"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "module_id",
+        "ship_id",
+        "slot",
+        "tick",
+        "type"
+      ],
+      "properties": {
+        "module_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "slot": {
+          "type": "string"
+        },
+        "target_ship_id": {
+          "description": "Target of a targeted module (Weapon/Tackle), per ADR-0035.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ModuleActivated"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "module_id",
+        "ship_id",
+        "slot",
+        "tick",
+        "type"
+      ],
+      "properties": {
+        "module_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "reason": {
+          "description": "Why the system forced this off (\"cap\" | \"range\"); omitted for a player-issued deactivation (ADR-0035).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "slot": {
+          "type": "string"
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ModuleDeactivated"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "entry_pos",
+        "from_sector",
+        "gate_id",
+        "ship_id",
+        "tick",
+        "to_sector",
+        "type"
+      ],
+      "properties": {
+        "entry_pos": {
+          "$ref": "#/definitions/PosJson"
+        },
+        "from_sector": {
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "gate_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "to_sector": {
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "JumpGateUsed"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "from_system",
+        "ship_id",
+        "tick",
+        "to_system",
+        "type"
+      ],
+      "properties": {
+        "from_system": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tick": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "to_system": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "StarSystemChanged"
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "player_id",
+        "ship_id",
+        "type",
+        "ws_addr"
+      ],
+      "properties": {
+        "player_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "Redirect"
+          ]
+        },
+        "ws_addr": {
+          "type": "string"
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "PosJson": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "format": "float"
+        },
+        "y": {
+          "type": "number",
+          "format": "float"
+        },
+        "z": {
+          "type": "number",
+          "format": "float"
+        }
+      }
+    },
+    "VelJson": {
+      "type": "object",
+      "required": [
+        "dx",
+        "dy",
+        "dz"
+      ],
+      "properties": {
+        "dx": {
+          "type": "number",
+          "format": "float"
+        },
+        "dy": {
+          "type": "number",
+          "format": "float"
+        },
+        "dz": {
+          "type": "number",
+          "format": "float"
+        }
+      }
+    }
+  }
+}

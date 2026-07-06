@@ -136,6 +136,19 @@ that never happened.
 Use the `/add-event` skill when introducing a new event and `/remove-event`
 when deleting a deprecated one — they cover every pipeline touchpoint.
 
+### Wire protocol (client<->server JSON)
+
+`EventJson` and `ClientCommandJson` in `crates/dawn-actor/src/protocol.rs` are
+the schema-of-record for the wire format and are generated into
+`docs/architecture/wire-protocol.schema.json` /
+`wire-protocol-commands.schema.json` (see `docs/architecture/wire-protocol.md`).
+After changing either enum (or a type either references), regenerate with
+`cargo run -p dawn-actor --example gen_wire_schema` and commit both updated
+`.schema.json` files in the same PR — `cargo test -p dawn-actor` fails
+otherwise (`wire_schema_doc_is_up_to_date`). Never hand-edit the `.schema.json`
+files; never add a new domain type to `dawn-core` just to reuse it here
+(FBD-002 keeps `dawn-core` free of the `schemars` dependency).
+
 ## Crate Boundaries
 
 Keep dependencies one-way. If a change needs a new dependency, check the
@@ -243,6 +256,7 @@ Use this guide as the router, then read the relevant long-form doc:
 - Architecture overview: `docs/architecture/architecture.md`
 - Forbidden changes: `docs/architecture/forbidden-changes.md`
 - Event catalog: `docs/architecture/event-catalog.md`
+- Wire protocol (client<->server JSON over WebSocket): `docs/architecture/wire-protocol.md`
 - Tick model: `docs/architecture/tick-model.md`
 - Client testing: `docs/process/godot-client-testing.md`
 - Raspberry Pi hardware flow: `docs/process/8d5-hardware-notes.md`
