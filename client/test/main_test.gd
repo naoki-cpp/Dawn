@@ -128,7 +128,9 @@ func test_ship_docked_event_clears_residual_motion() -> void:
 		"tick": 12,
 	})
 
-	assert_vector(ship.global_position).is_equal_approx(
+	## FakeShip is not attached to a live SceneTree here, so `position` is the
+	## stable seam for verifying the dock snap.
+	assert_vector(ship.position).is_equal_approx(
 		Vector3(10.0, 2.0, -30.0),
 		Vector3(0.0001, 0.0001, 0.0001)
 	)
