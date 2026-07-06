@@ -205,8 +205,8 @@ mod tests {
         assert!(
             node.activate_module_owned(
                 player_id,
+                ship_a,
                 ActivateModuleCommand {
-                    ship_id: ship_a,
                     module_id: MODULE_RAILGUN_SMALL,
                     slot: SlotKind::High,
                     target_ship_id: Some(ship_b),
@@ -256,8 +256,8 @@ mod tests {
         assert_eq!(
             node.activate_module_owned(
                 player_id,
+                ship_a,
                 ActivateModuleCommand {
-                    ship_id: ship_a,
                     module_id: MODULE_RAILGUN_SMALL,
                     slot: SlotKind::High,
                     target_ship_id: Some(ship_b),
@@ -291,8 +291,8 @@ mod tests {
         assert!(node
             .activate_module_owned(
                 player_id,
+                ship_a,
                 ActivateModuleCommand {
-                    ship_id: ship_a,
                     module_id: MODULE_FOLD_DISRUPTOR,
                     slot: SlotKind::Mid,
                     target_ship_id: Some(ship_b),
@@ -332,8 +332,8 @@ mod tests {
         assert_eq!(
             node.activate_module_owned(
                 player_id,
+                ship_a,
                 ActivateModuleCommand {
-                    ship_id: ship_a,
                     module_id: MODULE_RAILGUN_SMALL,
                     slot: SlotKind::High,
                     target_ship_id: Some(ship_b),
@@ -361,13 +361,12 @@ mod tests {
         assert_eq!(
             node.activate_module_owned(
                 player_id,
+                ship_a,
                 ActivateModuleCommand {
-                    ship_id: ship_a,
                     module_id: MODULE_RAILGUN_SMALL,
                     slot: SlotKind::High,
                     target_ship_id: None,
-                }
-            ),
+                }),
             Err(super::super::ModuleActivationRejection::TargetRequirementMismatch),
             "Weapon requires a target (ModuleKind::requires_target) — activation without one must be rejected"
         );
@@ -407,8 +406,8 @@ mod tests {
         assert!(
             node.activate_module_owned(
                 repairer_id,
+                repairer,
                 ActivateModuleCommand {
-                    ship_id: repairer,
                     module_id: MODULE_SMALL_REMOTE_SHIELD_BOOSTER,
                     slot: SlotKind::Mid,
                     target_ship_id: Some(ally),
@@ -455,8 +454,8 @@ mod tests {
         assert!(node
             .activate_module_owned(
                 repairer_id,
+                repairer,
                 ActivateModuleCommand {
-                    ship_id: repairer,
                     module_id: MODULE_SMALL_REMOTE_SHIELD_BOOSTER,
                     slot: SlotKind::Mid,
                     target_ship_id: Some(ally),

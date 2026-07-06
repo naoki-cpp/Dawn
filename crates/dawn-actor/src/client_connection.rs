@@ -149,7 +149,6 @@ mod tests {
 
     fn make_move_command() -> ClientCommand {
         ClientCommand::Move(MoveCommand {
-            ship_id: ShipId(EntityId::new(NodeId(0), 1)),
             target_position: Position {
                 x: 10.0,
                 y: 0.0,
@@ -218,7 +217,6 @@ mod tests {
         client
             .command_tx
             .send(ClientCommand::Jump(dawn_core::JumpCommand {
-                ship_id: ShipId(EntityId::new(NodeId(0), 1)),
                 gate_id: dawn_core::JumpGateId(0),
             }))
             .unwrap();

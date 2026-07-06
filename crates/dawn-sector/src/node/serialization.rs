@@ -673,8 +673,8 @@ mod tests {
         assert!(matches!(
             node.dock_owned(
                 player_id,
+                ship_id,
                 DockCommand {
-                    ship_id,
                     station_id: StationId(0),
                 }
             ),
@@ -695,7 +695,7 @@ mod tests {
 
     #[test]
     fn player_loadout_json_uses_null_dock_context_after_undock() {
-        use dawn_core::{DockCommand, StationId, UndockCommand};
+        use dawn_core::{DockCommand, StationId};
 
         let mut node = mem_node();
         let player_id = node.next_player_id();
@@ -704,15 +704,15 @@ mod tests {
         assert!(matches!(
             node.dock_owned(
                 player_id,
+                ship_id,
                 DockCommand {
-                    ship_id,
                     station_id: StationId(0),
                 }
             ),
             StationOperationOutcome::Accepted { .. }
         ));
         assert!(matches!(
-            node.undock_owned(player_id, UndockCommand { ship_id }),
+            node.undock_owned(player_id, ship_id),
             StationOperationOutcome::Accepted { .. }
         ));
 

@@ -233,8 +233,8 @@ mod tests {
         assert!(
             node.activate_module_owned(
                 killer_player,
+                killer,
                 dawn_core::ActivateModuleCommand {
-                    ship_id: killer,
                     module_id: dawn_core::ModuleId(1),
                     slot: dawn_core::SlotKind::High,
                     target_ship_id: Some(victim),

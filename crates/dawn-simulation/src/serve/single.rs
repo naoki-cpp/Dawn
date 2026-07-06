@@ -155,11 +155,11 @@ pub(crate) async fn run_phase4_server(
         for sess in sessions.iter_mut() {
             while let Some(cmd) = sess.try_recv_command() {
                 match node.apply_client_command(sess.player_id, cmd, &mut lock_commands) {
-                    Some(ClientCommandFollowup::Jump(j)) => {
+                    Some(ClientCommandFollowup::Jump(ship_id, j)) => {
                         eprintln!(
                             "[Server] JumpCommand ignored (ship #{} gate #{}): \
                              --serve runs a single-sector node without Raft",
-                            j.ship_id.raw(),
+                            ship_id.raw(),
                             j.gate_id.0
                         );
                     }

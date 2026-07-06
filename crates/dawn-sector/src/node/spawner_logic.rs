@@ -133,7 +133,7 @@ impl<S: EventStore> SimulationNode<S> {
         }
 
         // Record ownership before fit_module (needed for is_npc check).
-        self.ships.by_player.insert(player_id, ship_id);
+        self.ships.active_ship.insert(player_id, ship_id);
         self.ships.owners.insert(ship_id, player_id);
 
         // Seed the starting inventory (ADR-0032) before the default loadout
@@ -184,7 +184,7 @@ impl<S: EventStore> SimulationNode<S> {
         if !self.ships.index.contains_key(&ship_id) {
             return false;
         }
-        self.ships.by_player.insert(player_id, ship_id);
+        self.ships.active_ship.insert(player_id, ship_id);
         self.ships.owners.insert(ship_id, player_id);
         true
     }

@@ -190,8 +190,8 @@ mod tests {
 
         let _ = node.activate_module_owned(
             owner_a,
+            ship_a,
             ActivateModuleCommand {
-                ship_id: ship_a,
                 module_id: MODULE_FOLD_DISRUPTOR,
                 slot: SlotKind::Mid,
                 target_ship_id: Some(ship_b),
@@ -244,8 +244,8 @@ mod tests {
 
         let _ = node.activate_module_owned(
             owner_a,
+            ship_a,
             ActivateModuleCommand {
-                ship_id: ship_a,
                 module_id: MODULE_FOLD_DISRUPTOR,
                 slot: SlotKind::Mid,
                 target_ship_id: Some(ship_b),
@@ -308,8 +308,8 @@ mod tests {
 
         let _ = node.activate_module_owned(
             owner_a,
+            ship_a,
             ActivateModuleCommand {
-                ship_id: ship_a,
                 module_id: MODULE_FOLD_DISRUPTOR,
                 slot: SlotKind::Mid,
                 target_ship_id: Some(ship_b),

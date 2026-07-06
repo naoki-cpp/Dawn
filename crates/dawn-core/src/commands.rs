@@ -2,30 +2,38 @@
 //!
 //! A Command is *not* an Event.  It expresses intent, not fact.
 //! The system validates a Command before producing an Event.  (INV-006)
+//!
+//! # Owned ship vs. active ship (ADR-0037)
+//!
+//! Flight/steering/module/Undock commands do not carry a `ship_id` — the
+//! server always resolves them against the caller's *active* ship
+//! (`SimulationNode::apply_client_command`), so there is no wire-representable
+//! way for a client to name a ship it does not currently control. Station
+//! inventory-management commands (Fit/Unfit/Dock/BuildPackagedShip/
+//! DisassembleShip) still carry an explicit `ship_id`, because they operate
+//! on any *owned* docked ship, not just the active one (docs/architecture/
+//! ownership.md §7).
 
 use crate::fitting::{ModuleId, SlotKind};
 use crate::navigation::{JumpGateId, StationId, WarpTarget};
 use crate::{Position, SectorId, ShipId, ShipTypeId};
 use serde::{Deserialize, Serialize};
 
-/// Request to move a Ship to `target_position` within its current Sector.
+/// Request to move the caller's active ship to `target_position` within its
+/// current Sector.
 ///
 /// May be rejected if:
 /// - The Ship does not exist.
 /// - The Ship is currently in transit between Sectors.
 /// - `target_position` is outside the Sector boundary.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MoveCommand {
-    pub ship_id: ShipId,
     pub target_position: Position,
 }
 
 impl MoveCommand {
-    pub fn new(ship_id: ShipId, target_position: Position) -> Self {
-        Self {
-            ship_id,
-            target_position,
-        }
+    pub fn new(target_position: Position) -> Self {
+        Self { target_position }
     }
 }
 
@@ -57,27 +65,27 @@ pub struct UnfitModuleCommand {
     pub module_id: ModuleId,
 }
 
-/// Request to dock at an NPC station (ADR-0034 9B foundation).
+/// Request to dock the caller's active ship at an NPC station (ADR-0034 9B
+/// foundation).
 ///
 /// May be rejected if:
-/// - The Ship does not exist or the caller does not own it.
+/// - The active Ship does not exist.
 /// - The Ship is not within the station's docking radius.
 /// - The Ship is already docked somewhere.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct DockCommand {
-    pub ship_id: ShipId,
     pub station_id: StationId,
 }
 
-/// Request to undock from the currently-docked NPC station.
+/// Request to undock the caller's active ship from its currently-docked NPC
+/// station (ADR-0037: only the active ship may leave dock — switch active
+/// ship first via `SelectActiveShipCommand`).
 ///
 /// May be rejected if:
-/// - The Ship does not exist or the caller does not own it.
+/// - The active Ship does not exist.
 /// - The Ship is not currently docked.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UndockCommand {
-    pub ship_id: ShipId,
-}
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct UndockCommand;
 
 /// Request to build a packaged ship inside the currently-docked station.
 ///
@@ -105,6 +113,22 @@ pub struct DisassembleShipCommand {
     pub station_id: StationId,
 }
 
+/// Request to make an owned, docked ship the caller's active ship (ADR-0037).
+///
+/// Unlike Assemble (which will later add a new owned ship without switching),
+/// this is the only way an already-owned ship becomes active. Scoped to
+/// station-local switches for now: `ship_id` must be docked at the same
+/// station the caller is currently docked at.
+///
+/// May be rejected if:
+/// - The caller does not own `ship_id`.
+/// - `ship_id` is already the caller's active ship.
+/// - `ship_id` is not docked at the caller's current docked station.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SelectActiveShipCommand {
+    pub ship_id: ShipId,
+}
+
 /// What an approaching Ship is steering toward (ADR-0015).
 ///
 /// A `Ship` target is dynamic (its position is read from the ECS each tick);
@@ -116,7 +140,8 @@ pub enum ApproachTarget {
     Gate(JumpGateId),
 }
 
-/// Request to begin approaching a Ship or a Jump Gate (semi-automatic piloting).
+/// Request to begin approaching a Ship or a Jump Gate with the caller's
+/// active ship (semi-automatic piloting).
 ///
 /// Unlike `MoveCommand` (a one-shot thrust direction), an accepted approach
 /// is a persistent steering mode: each tick the movement pipeline re-aims
@@ -124,45 +149,42 @@ pub enum ApproachTarget {
 /// disappears, or a `MoveCommand` / `StopCommand` cancels it (ADR-0015).
 ///
 /// May be rejected if:
-/// - The approaching Ship does not exist or is in transit between Sectors.
+/// - The active Ship does not exist or is in transit between Sectors.
 /// - A `Ship` target does not exist or is the approaching Ship itself.
 /// - A `Gate` target does not originate in the Ship's current Sector.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ApproachCommand {
-    pub ship_id: ShipId,
     pub target: ApproachTarget,
 }
 
-/// Request to begin locking onto a target.
+/// Request to begin locking onto a target with the caller's active ship.
 ///
 /// May be rejected if:
 /// - Either Ship does not exist.
 /// - The locker is already at max_locks capacity.
 /// - The target is already being locked or is locked.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LockOnCommand {
     pub ship_id: ShipId,
     pub target_id: ShipId,
 }
 
-/// Request to activate an Active module.
+/// Request to activate an Active module on the caller's active ship.
 ///
 /// `target_ship_id` (ADR-0035): required for module kinds where
 /// `ModuleKind::requires_target()` is true (Weapon, Tackle), forbidden
 /// otherwise. When required, the target must already be a `Locked` entry in
 /// the activating ship's `LockComp` — activation is rejected otherwise.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ActivateModuleCommand {
-    pub ship_id: ShipId,
     pub module_id: ModuleId,
     pub slot: SlotKind,
     pub target_ship_id: Option<ShipId>,
 }
 
-/// Request to deactivate an Active module.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Request to deactivate an Active module on the caller's active ship.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct DeactivateModuleCommand {
-    pub ship_id: ShipId,
     pub module_id: ModuleId,
     pub slot: SlotKind,
 }
@@ -174,20 +196,18 @@ pub struct DeactivateModuleCommand {
 /// - The attacker has no weapon modules fitted.
 /// - The target is out of range.
 /// - The weapon is still on cooldown.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AttackCommand {
     pub attacker_id: ShipId,
     pub target_id: ShipId,
 }
 
-/// Decelerate a ship to zero using its own thrust.
+/// Decelerate the caller's active ship to zero using its own thrust.
 ///
 /// The movement system applies thrust opposite to the current velocity each
 /// tick until the ship reaches zero speed. Cancels any active thrust direction.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StopCommand {
-    pub ship_id: ShipId,
-}
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct StopCommand;
 
 /// Request to transit a Ship from its current Sector to `to`.
 ///
@@ -204,25 +224,25 @@ pub struct TransitCommand {
     pub to: SectorId,
 }
 
-/// Request to use a Jump Gate to move a Ship to its destination Sector
-/// (ADR-0009).
+/// Request to use a Jump Gate to move the caller's active ship to its
+/// destination Sector (ADR-0009).
 ///
 /// Like `TransitCommand`, the actual Sector change is committed via the
 /// Raft consensus layer (ADR-0014 / INV-003); this command only carries
 /// the player's intent.
 ///
 /// May be rejected if:
-/// - The Ship does not exist.
+/// - The active Ship does not exist.
 /// - The Ship is not within the gate's `activation_radius`.
 /// - The Ship is already in transit (`TransitState::InTransit`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct JumpCommand {
-    pub ship_id: ShipId,
     pub gate_id: JumpGateId,
 }
 
-/// Request to warp a Ship toward a Jump Gate or a celestial body within its
-/// current Sector (intra-Sector short-range Fold, ADR-0022/ADR-0025).
+/// Request to warp the caller's active ship toward a Jump Gate or a celestial
+/// body within its current Sector (intra-Sector short-range Fold,
+/// ADR-0022/ADR-0025).
 ///
 /// An accepted warp is a persistent two-phase steering mode (`WarpComp`):
 /// an interruptible alignment phase, then a committed warping phase.
@@ -233,13 +253,13 @@ pub struct JumpCommand {
 /// - The Ship does not exist, is in transit, or is already warping.
 /// - The target does not belong to the Ship's current Sector.
 /// - The target is closer than the minimum warp distance.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct WarpCommand {
-    pub ship_id: ShipId,
     pub target: WarpTarget,
 }
 
-/// Request to begin orbiting a Ship or a Jump Gate at `radius` (ADR-0031).
+/// Request to begin orbiting a Ship or a Jump Gate at `radius` with the
+/// caller's active ship (ADR-0031).
 ///
 /// Like `ApproachCommand`, an accepted orbit is a persistent steering mode:
 /// each tick the movement pipeline re-aims thrust at a point on the circle of
@@ -248,17 +268,17 @@ pub struct WarpCommand {
 /// to the ship's fitted weapon range when omitted.
 ///
 /// May be rejected if:
-/// - The orbiting Ship does not exist or is in transit between Sectors.
+/// - The active Ship does not exist or is in transit between Sectors.
 /// - A `Ship` target does not exist or is the orbiting Ship itself.
 /// - A `Gate` target does not originate in the Ship's current Sector.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct OrbitCommand {
-    pub ship_id: ShipId,
     pub target: ApproachTarget,
     pub radius: Option<f32>,
 }
 
-/// Request to hold at least `range` away from a Ship or a Jump Gate (ADR-0031).
+/// Request to hold at least `range` away from a Ship or a Jump Gate with the
+/// caller's active ship (ADR-0031).
 ///
 /// Like `ApproachCommand`, an accepted keep-at-range is a persistent steering
 /// mode: each tick the ship is steered directly away from the target while
@@ -267,12 +287,11 @@ pub struct OrbitCommand {
 /// `range` defaults to the ship's fitted weapon range when omitted.
 ///
 /// May be rejected if:
-/// - The Ship does not exist or is in transit between Sectors.
+/// - The active Ship does not exist or is in transit between Sectors.
 /// - A `Ship` target does not exist or is the Ship itself.
 /// - A `Gate` target does not originate in the Ship's current Sector.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct KeepAtRangeCommand {
-    pub ship_id: ShipId,
     pub target: ApproachTarget,
     pub range: Option<f32>,
 }
@@ -319,6 +338,8 @@ pub enum ClientCommand {
     BuildPackagedShip(BuildPackagedShipCommand),
     /// Convert a docked, unfitted, undamaged ship into a Packaged Ship.
     DisassembleShip(DisassembleShipCommand),
+    /// Switch which owned, docked ship is the caller's active ship (ADR-0037).
+    SelectActiveShip(SelectActiveShipCommand),
 }
 
 #[cfg(test)]
@@ -331,9 +352,8 @@ mod tests {
     }
 
     #[test]
-    fn move_command_stores_ship_id_and_target() {
-        let cmd = MoveCommand::new(ship_id(1), Position::new(10.0, 0.0, 0.0));
-        assert_eq!(cmd.ship_id, ship_id(1));
+    fn move_command_stores_target() {
+        let cmd = MoveCommand::new(Position::new(10.0, 0.0, 0.0));
         assert_eq!(cmd.target_position, Position::new(10.0, 0.0, 0.0));
     }
 
@@ -362,17 +382,14 @@ mod tests {
     #[test]
     fn approach_command_can_target_a_ship() {
         let cmd = ApproachCommand {
-            ship_id: ship_id(1),
             target: ApproachTarget::Ship(ship_id(2)),
         };
-        assert_eq!(cmd.ship_id, ship_id(1));
         assert_eq!(cmd.target, ApproachTarget::Ship(ship_id(2)));
     }
 
     #[test]
     fn approach_command_can_target_a_jump_gate() {
         let cmd = ApproachCommand {
-            ship_id: ship_id(1),
             target: ApproachTarget::Gate(crate::navigation::JumpGateId(3)),
         };
         assert_eq!(
@@ -401,34 +418,28 @@ mod tests {
     }
 
     #[test]
-    fn jump_command_carries_ship_id_and_gate_id() {
+    fn jump_command_carries_gate_id() {
         let cmd = JumpCommand {
-            ship_id: ship_id(1),
             gate_id: crate::navigation::JumpGateId(0),
         };
-        assert_eq!(cmd.ship_id, ship_id(1));
         assert_eq!(cmd.gate_id, crate::navigation::JumpGateId(0));
     }
 
     #[test]
-    fn warp_command_carries_ship_id_and_target() {
+    fn warp_command_carries_target() {
         use crate::navigation::{JumpGateId, WarpTarget};
         let cmd = WarpCommand {
-            ship_id: ship_id(1),
             target: WarpTarget::Gate(JumpGateId(2)),
         };
-        assert_eq!(cmd.ship_id, ship_id(1));
         assert_eq!(cmd.target, WarpTarget::Gate(JumpGateId(2)));
     }
 
     #[test]
-    fn orbit_command_carries_ship_id_target_and_optional_radius() {
+    fn orbit_command_carries_target_and_optional_radius() {
         let cmd = OrbitCommand {
-            ship_id: ship_id(1),
             target: ApproachTarget::Ship(ship_id(2)),
             radius: Some(5000.0),
         };
-        assert_eq!(cmd.ship_id, ship_id(1));
         assert_eq!(cmd.target, ApproachTarget::Ship(ship_id(2)));
         assert_eq!(cmd.radius, Some(5000.0));
     }
@@ -436,7 +447,6 @@ mod tests {
     #[test]
     fn orbit_command_radius_defaults_to_none_when_omitted() {
         let cmd = OrbitCommand {
-            ship_id: ship_id(1),
             target: ApproachTarget::Gate(crate::navigation::JumpGateId(0)),
             radius: None,
         };
@@ -444,14 +454,20 @@ mod tests {
     }
 
     #[test]
-    fn keep_at_range_command_carries_ship_id_target_and_optional_range() {
+    fn keep_at_range_command_carries_target_and_optional_range() {
         let cmd = KeepAtRangeCommand {
-            ship_id: ship_id(1),
             target: ApproachTarget::Ship(ship_id(2)),
             range: Some(8000.0),
         };
-        assert_eq!(cmd.ship_id, ship_id(1));
         assert_eq!(cmd.target, ApproachTarget::Ship(ship_id(2)));
         assert_eq!(cmd.range, Some(8000.0));
+    }
+
+    #[test]
+    fn select_active_ship_command_carries_ship_id() {
+        let cmd = SelectActiveShipCommand {
+            ship_id: ship_id(1),
+        };
+        assert_eq!(cmd.ship_id, ship_id(1));
     }
 }

@@ -66,19 +66,20 @@ impl<S: EventStore> SimulationNode<S> {
         true
     }
 
-    /// `apply_warp_command` wrapped with an ownership check.
+    /// `apply_warp_command` wrapped with an active-ship check (ADR-0037).
     pub fn apply_warp_command_owned(
         &mut self,
         player_id: PlayerId,
+        ship_id: ShipId,
         cmd: dawn_core::WarpCommand,
     ) -> bool {
-        if !self.owns_ship(player_id, cmd.ship_id) {
+        if !self.is_active_ship(player_id, ship_id) {
             return false;
         }
-        if self.is_ship_docked(cmd.ship_id) {
+        if self.is_ship_docked(ship_id) {
             return false;
         }
-        self.apply_warp_command(cmd.ship_id, cmd.target, false)
+        self.apply_warp_command(ship_id, cmd.target, false)
     }
 
     /// Drain auto-jump triggers accumulated during `process_warp()`.
@@ -565,8 +566,8 @@ mod tests {
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         assert!(node.apply_warp_command_owned(
             player,
+            ship,
             dawn_core::WarpCommand {
-                ship_id: ship,
                 target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
             }
         ));
@@ -585,8 +586,8 @@ mod tests {
         assert!(!node.can_propose_warp(ship, WarpTarget::Gate(dawn_core::JumpGateId(0))));
         assert!(!node.apply_warp_command_owned(
             player,
+            ship,
             dawn_core::WarpCommand {
-                ship_id: ship,
                 target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
             }
         ));
@@ -620,8 +621,8 @@ mod tests {
 
         assert!(node.apply_warp_command_owned(
             player,
+            ship,
             dawn_core::WarpCommand {
-                ship_id: ship,
                 target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
             }
         ));
@@ -641,8 +642,8 @@ mod tests {
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         assert!(!node.apply_warp_command_owned(
             player,
+            ship,
             dawn_core::WarpCommand {
-                ship_id: ship,
                 target: WarpTarget::Gate(dawn_core::JumpGateId(1)),
             }
         ));
@@ -655,8 +656,8 @@ mod tests {
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         assert!(node.apply_warp_command_owned(
             player,
+            ship,
             dawn_core::WarpCommand {
-                ship_id: ship,
                 target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
             }
         ));
@@ -698,8 +699,8 @@ mod tests {
             node.world.set_ship_stats(entity, stats);
             node.apply_warp_command_owned(
                 player_id,
+                ship,
                 dawn_core::WarpCommand {
-                    ship_id: ship,
                     target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
                 },
             );
@@ -723,8 +724,8 @@ mod tests {
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         node.apply_warp_command_owned(
             player,
+            ship,
             dawn_core::WarpCommand {
-                ship_id: ship,
                 target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
             },
         );
@@ -761,8 +762,8 @@ mod tests {
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         node.apply_warp_command_owned(
             player,
+            ship,
             dawn_core::WarpCommand {
-                ship_id: ship,
                 target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
             },
         );
@@ -805,8 +806,8 @@ mod tests {
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         node.apply_warp_command_owned(
             player,
+            ship,
             dawn_core::WarpCommand {
-                ship_id: ship,
                 target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
             },
         );
@@ -827,8 +828,8 @@ mod tests {
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         node.apply_warp_command_owned(
             player,
+            ship,
             dawn_core::WarpCommand {
-                ship_id: ship,
                 target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
             },
         );
@@ -897,8 +898,8 @@ mod tests {
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         node.apply_warp_command_owned(
             player,
+            ship,
             dawn_core::WarpCommand {
-                ship_id: ship,
                 target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
             },
         );
@@ -931,8 +932,8 @@ mod tests {
         let (player, ship_id) = spawn_owned_player_at(&mut node, Position::new(0.0, 0.0, 0.0));
         assert!(node.apply_warp_command_owned(
             player,
+            ship_id,
             dawn_core::WarpCommand {
-                ship_id,
                 target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
             }
         ));
@@ -966,8 +967,8 @@ mod tests {
         let (player, ship_id) = spawn_owned_player_at(&mut node, Position::new(0.0, 0.0, 0.0));
         assert!(node.apply_warp_command_owned(
             player,
+            ship_id,
             dawn_core::WarpCommand {
-                ship_id,
                 target: WarpTarget::Gate(dawn_core::JumpGateId(0)),
             }
         ));
@@ -1024,8 +1025,8 @@ mod tests {
         let body_id = dawn_core::CelestialBodyId(1);
         let ok = node.apply_warp_command_owned(
             player,
+            ship_id,
             dawn_core::WarpCommand {
-                ship_id,
                 target: WarpTarget::Body(body_id),
             },
         );
