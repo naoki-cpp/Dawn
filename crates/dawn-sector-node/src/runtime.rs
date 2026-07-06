@@ -105,7 +105,7 @@ impl SectorNodeRuntime {
                         break;
                     }
                     Some(ClientCommandFollowup::RefreshFitting(ship_id)) => {
-                        if let Some(json) = node.build_player_fitting_json(ship_id) {
+                        if let Some(json) = node.build_player_loadout_json(ship_id) {
                             sess.send_raw(&json);
                         }
                     }

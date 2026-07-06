@@ -608,10 +608,10 @@ mod tests {
         assert_eq!(node.ship_count(), 3);
 
         for &ship_id in node.ships.index.keys() {
-            let fitting_json = node
-                .build_player_fitting_json(ship_id)
-                .expect("every spawned ship has a fitting");
-            let v: serde_json::Value = serde_json::from_str(&fitting_json).unwrap();
+            let loadout_json = node
+                .build_player_loadout_json(ship_id)
+                .expect("every spawned ship has a loadout");
+            let v: serde_json::Value = serde_json::from_str(&loadout_json).unwrap();
             let modules = v["modules"].as_array().unwrap();
             assert!(
                 modules.iter().any(|m| m["slot"] == "High"

@@ -94,7 +94,7 @@ impl ClientAdmission {
                         player_id,
                         ship_id,
                         &payload.initial_state,
-                        payload.player_fitting,
+                        payload.player_loadout,
                     )
                     .await
                 {

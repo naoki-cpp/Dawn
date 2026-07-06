@@ -97,7 +97,7 @@ pub struct FittedSlot {
   - サーバーは初期パラメータ（cap_max, cap_recharge_per_tick）を
     InitialState で一度だけ送る。
   - サーバーはモジュール定義（cap_cost_per_cycle, cycle_time_ticks）を
-    PlayerFitting で一度だけ送る。
+    PlayerLoadout で一度だけ送る。
   - クライアントは ModuleActivated / ModuleDeactivated イベント（既存の認可された
     イベント）を受信した時点を起点として、_simulate_cap() でサーバーと同じ
     回復・消費ロジックをローカル実行する。

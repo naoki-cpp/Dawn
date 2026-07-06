@@ -51,12 +51,12 @@ Godot の `ImmediateMesh` を用い、毎フレーム XZ 平面上にポリラ�
 
 ### 4. 射程データの取得方法
 
-サーバーが送信する `PlayerFitting` JSON の各モジュールエントリに
+サーバーが送信する `PlayerLoadout` JSON の各モジュールエントリに
 `stat_delta` フィールドを追加する。
 
 ```json
 {
-  "type": "PlayerFitting",
+  "type": "PlayerLoadout",
   "modules": [
     {
       "slot": "High",
@@ -92,8 +92,8 @@ weapon_falloff = Σ falloff_range_add  (アクティブ Weapon モジュール)
 
 | 対象 | 変更内容 |
 |---|---|
-| `dawn-simulation/src/node.rs` | `build_player_fitting_json`: `stat_delta` フィールドを追加 |
-| `client/scripts/main.gd` | `_on_player_fitting`: `weapon_range` / `weapon_falloff` を計算して保持 |
+| `crates/dawn-sector/src/node/serialization.rs` | `build_player_loadout_json`: `stat_delta` フィールドを追加 |
+| `client/scripts/main.gd` | `_on_player_fitting`（`connection.gd` の `player_fitting_received` 経由）で `weapon_range` / `weapon_falloff` を計算して保持 |
 | `client/scripts/main.gd` | `_on_module_activated/deactivated`: 射程を再集計 |
 | `client/scripts/main.gd` | Tab キートグル、`TacticalOverlay` ノード制御 |
 | `client/scripts/tactical_overlay.gd` | 新規スクリプト: ImmediateMesh によるリング描画 |
@@ -110,7 +110,7 @@ weapon_falloff = Σ falloff_range_add  (アクティブ Weapon モジュール)
   近距離オービット vs 遠距離スナイプの判断材料が揃う。
 
 **ネガティブ / リスク**
-- `stat_delta` を PlayerFitting に含めると JSON が大きくなる。
+- `stat_delta` を PlayerLoadout に含めると JSON が大きくなる。
   ただし接続時の 1 回のみ送信するため問題にならない。
 - モジュール変更時に射程表示が一瞬ずれる可能性。
   サーバーの `ModuleActivated` を待ってから再集計するため
@@ -124,7 +124,7 @@ weapon_falloff = Σ falloff_range_add  (アクティブ Weapon モジュール)
 
 `weapon_range` / `weapon_falloff` をサーバーで計算して別メッセージで送る案。  
 フィッティング変更のたびに追加イベントが必要になり、
-イベントスキーマが複雑になる。`PlayerFitting` に `stat_delta` を含める方が
+イベントスキーマが複雑になる。`PlayerLoadout` に `stat_delta` を含める方が
 「1 メッセージで装備情報を完結させる」設計として整合する。
 
 ### B. 2D スクリーンオーバーレイ（Camera overlay）

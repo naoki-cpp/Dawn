@@ -45,3 +45,39 @@ func test_module_activated_message_emits_module_signal() -> void:
 	assert_int((received[0] as Dictionary)["module_id"]).is_equal(7)
 	assert_str((received[0] as Dictionary)["slot"]).is_equal("Mid")
 	connection.free()
+
+
+func test_player_loadout_message_emits_player_fitting_signal() -> void:
+	var connection: Node = Connection.new()
+	var received: Array = []
+	connection.player_fitting_received.connect(func(payload: Dictionary) -> void:
+		received.append(payload)
+	)
+
+	connection._handle_message({
+		"type": "PlayerLoadout",
+		"modules": [{"module_id": 3}],
+		"inventory": [],
+	})
+
+	assert_int(received.size()).is_equal(1)
+	assert_int((((received[0] as Dictionary)["modules"] as Array)[0] as Dictionary)["module_id"]).is_equal(3)
+	connection.free()
+
+
+func test_legacy_player_fitting_message_still_emits_player_fitting_signal() -> void:
+	var connection: Node = Connection.new()
+	var received: Array = []
+	connection.player_fitting_received.connect(func(payload: Dictionary) -> void:
+		received.append(payload)
+	)
+
+	connection._handle_message({
+		"type": "PlayerFitting",
+		"modules": [{"module_id": 7}],
+		"inventory": [],
+	})
+
+	assert_int(received.size()).is_equal(1)
+	assert_int((((received[0] as Dictionary)["modules"] as Array)[0] as Dictionary)["module_id"]).is_equal(7)
+	connection.free()
