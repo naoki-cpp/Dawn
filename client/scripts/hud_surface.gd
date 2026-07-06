@@ -91,10 +91,10 @@ func render(frame: Dictionary) -> void:
 		)
 		_prev_target = target
 
-	## `modules` here is the *same* Array/Dictionary objects as main.gd's
-	## _player_modules (frame["modules"] is assigned by reference, not
-	## copied) -- and _on_module_activated/_on_module_deactivated mutate
-	## those dictionaries in place (PlayerFitting.set_module_activation).
+	## `modules` here is the *same* Array/Dictionary objects as the current
+	## PlayerLoadout snapshot (frame["modules"] is assigned by reference, not
+	## copied) -- and module activation updates mutate those dictionaries
+	## in place inside PlayerLoadout.
 	## Storing _prev_modules = modules would alias the live array, so any
 	## later in-place mutation would silently also "update" _prev_modules,
 	## permanently masking the change from this comparison (e.g. a weapon
@@ -110,7 +110,7 @@ func render(frame: Dictionary) -> void:
 		_stats_label.text = frame.get("stats_text", "") as String
 
 
-## PlayerFitting arrives both after a structural change (Fit/Unfit) and as a
+## PlayerLoadout arrives both after a structural change (Fit/Unfit) and as a
 ## state-only resync after every Activate/Deactivate (ADR-0035: the server
 ## corrects the client's optimistic toggle when it rejects an activation,
 ## e.g. out of range). Only the former needs rebuild_module_bar() (which

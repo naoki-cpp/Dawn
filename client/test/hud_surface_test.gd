@@ -76,11 +76,11 @@ func test_set_player_fitting_rebuilds_module_slots_and_inventory_rows() -> void:
 
 
 func test_render_repaints_after_the_modules_array_is_mutated_in_place() -> void:
-	## Regression: main.gd passes _player_modules into frame["modules"] by
+	## Regression: main.gd passes the live PlayerLoadout modules into frame["modules"] by
 	## reference (not a copy), and _apply_player_module_activation (driven
 	## by ModuleActivated/Deactivated events, e.g. Range Gate forcing a
 	## weapon off out-of-range) mutates that same array's dictionaries in
-	## place via PlayerFitting.set_module_activation. If render() stored
+	## place via PlayerLoadout.apply_module_activation. If render() stored
 	## _prev_modules as an alias of that live array instead of a snapshot,
 	## the in-place mutation would silently "update" _prev_modules too,
 	## permanently masking the change (the module bar staying ON forever
@@ -94,7 +94,7 @@ func test_render_repaints_after_the_modules_array_is_mutated_in_place() -> void:
 	assert_str((_surface._module_slots[0]["state"] as Label).text).is_equal("ON")
 
 	## Mutate the very same array/dictionary objects in place, exactly as
-	## PlayerFitting.set_module_activation does -- no new Array is created.
+	## PlayerLoadout.apply_module_activation does -- no new Array is created.
 	(modules[0] as Dictionary)["is_active"] = false
 
 	_surface.render(frame)

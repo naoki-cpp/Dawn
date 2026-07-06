@@ -5,7 +5,7 @@
 ## invariants that are updated by InitialState and DomainEvents.
 extends RefCounted
 
-const PlayerFitting = preload("res://scripts/player_fitting.gd")
+const PlayerLoadout = preload("res://scripts/player_loadout.gd")
 
 var ships: Dictionary = {}
 var ship_hp: Dictionary = {}
@@ -238,31 +238,40 @@ func apply_lock_lost(locker_id: int, target_id: int) -> bool:
 	return true
 
 
-func advance_tick_from_event(tick: int, modules: Array) -> int:
+func advance_tick_from_event(tick: int, loadout: Variant) -> int:
 	if tick <= current_tick:
 		return 0
 	var ticks_elapsed: int = tick - current_tick
 	current_tick = tick
-	simulate_cap(ticks_elapsed, modules)
+	simulate_cap(ticks_elapsed, loadout)
 	return ticks_elapsed
 
 
-func advance_client_ticks(ticks: int, modules: Array) -> void:
+func advance_client_ticks(ticks: int, loadout: Variant) -> void:
 	if ticks <= 0:
 		return
 	current_tick += ticks
-	simulate_cap(ticks, modules)
+	simulate_cap(ticks, loadout)
 
 
-func simulate_cap(ticks: int, modules: Array) -> void:
+func simulate_cap(ticks: int, loadout: Variant) -> void:
 	if cap_current < 0.0 or player_ship_id < 0:
 		return
-	cap_current = PlayerFitting.simulate_capacitor_ticks(
-		modules,
-		cap_current,
-		cap_max,
-		cap_recharge,
-		ticks)
+	if loadout == null:
+		cap_current = PlayerLoadout.simulate_modules_capacitor_ticks([], cap_current, cap_max, cap_recharge, ticks)
+	elif loadout is Array:
+		cap_current = PlayerLoadout.simulate_modules_capacitor_ticks(
+			loadout as Array,
+			cap_current,
+			cap_max,
+			cap_recharge,
+			ticks)
+	else:
+		cap_current = loadout.simulate_capacitor_ticks(
+			cap_current,
+			cap_max,
+			cap_recharge,
+			ticks)
 
 
 func apply_dock_event(ship_id: int, station_id: int, station_name: String, tick: int) -> bool:

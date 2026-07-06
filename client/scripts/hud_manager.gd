@@ -569,7 +569,7 @@ static func _make_inventory_row(text: String, module_id: int, slot: String, acti
 	return {"panel": row, "module_id": module_id, "slot": slot, "action": action}
 
 
-## Rebuild both columns from the latest PlayerFitting payload. `modules` is
+## Rebuild both columns from the latest PlayerLoadout snapshot. `modules` is
 ## the flat fitted-module array (slot/module_id/name fields, same shape the
 ## module bar already consumes); `inventory` may contain both fittable module
 ## rows and passive item stacks.

@@ -21,14 +21,10 @@ extends Node
 @onready var _camera       : Camera3D    = $World/Camera3D
 @onready var _warp_tunnel  : ColorRect   = $HUD/WarpTunnel
 
-## Unfitted owned modules from the latest normalized PlayerFitting.
-var _player_inventory : Array = []
-var _player_station_inventory : Array = []
-
 # -- Constants ----------------------------------------------------------------
 
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
-const PlayerFitting = preload("res://scripts/player_fitting.gd")
+const PlayerLoadoutScript = preload("res://scripts/player_loadout.gd")
 const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 const WorldSessionScript = preload("res://scripts/world_session.gd")
@@ -79,12 +75,11 @@ var _ship_hp : Dictionary = _session.ship_hp
 
 ## Duel mode: opponent player ship IDs (populated from InitialState is_player flag)
 var _opponent_ship_ids : Array = _session.opponent_ship_ids
-## Normalized PlayerFitting modules, enriched with client runtime fields.
-var _player_modules : Array = []
+var _loadout := PlayerLoadoutScript.new()
 
 ## Client-side capacitor simulation (mirrors server CapacitorSystem logic).
 ## Populated from InitialState (cap_max, cap_recharge_per_tick) and
-## PlayerFitting (cap_cost_per_cycle, cycle_time_ticks per module).
+## PlayerLoadout (cap_cost_per_cycle, cycle_time_ticks per module).
 ## Corrected by ModuleDeactivated events (cap-forced OFF).
 var _cap_current      : float = -1.0   ## -1 = not yet received
 var _cap_max          : float = 500.0
@@ -617,23 +612,25 @@ func _handle_aoi_leave(p: Dictionary) -> void:
 ## and module bar always reflect the server's authoritative fitting state --
 ## including a rejected Fit/Unfit attempt reverting visibly.
 func _on_player_fitting(payload: Dictionary) -> void:
-	var fitting: Dictionary = PlayerFitting.normalize_payload(payload)
-	_player_modules = fitting["modules"] as Array
-	_player_inventory = fitting["inventory"] as Array
-	_player_station_inventory = fitting.get("station_inventory", []) as Array
+	_loadout.apply_payload(payload)
+	var dock_status: Dictionary = _loadout.dock_status()
 	_session.apply_dock_fitting(
-		fitting.get("docked_station_id", -1) as int,
-		fitting.get("docked_station_name", "") as String,
-		fitting.get("tick", 0) as int
+		dock_status.get("docked_station_id", -1) as int,
+		dock_status.get("docked_station_name", "") as String,
+		_loadout.tick()
 	)
 	_sync_session_state()
 	if _session.is_docked() and _player_ship_id >= 0:
 		_stop_ship_motion(_player_ship_id)
-	_hud_surface.set_player_fitting(_player_modules, _player_inventory, _player_station_inventory)
+	var snapshot: Dictionary = _loadout.hud_snapshot()
+	_hud_surface.set_player_fitting(
+		snapshot.get("modules", []) as Array,
+		snapshot.get("inventory", []) as Array,
+		snapshot.get("station_inventory", []) as Array)
 	_recalc_weapon_range()
 
 func _recalc_weapon_range() -> void:
-	var ranges: Dictionary = PlayerFitting.weapon_ranges(_player_modules)
+	var ranges: Dictionary = _loadout.weapon_ranges()
 	_weapon_range = ranges["optimal"] as float
 	_weapon_falloff = ranges["falloff"] as float
 	_presentation.update_tactical_overlay_ranges(_weapon_range, _weapon_falloff)
@@ -653,7 +650,7 @@ func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String, rea
 
 
 func _apply_player_module_activation(module_id: int, active: bool, forced_reason: String) -> void:
-	PlayerFitting.set_module_activation(_player_modules, module_id, active, forced_reason)
+	_loadout.apply_module_activation(module_id, active, forced_reason)
 	_recalc_weapon_range()
 
 
@@ -676,7 +673,7 @@ func _toggle_module_by_index(f_index: int) -> void:
 	if _player_ship_id < 0:
 		return
 	## F1-F8 map to active module indices 0-7 (High/Mid slots)
-	var toggle: Dictionary = PlayerFitting.active_module_toggle_at(_player_modules, f_index)
+	var toggle: Dictionary = _loadout.toggle_at(f_index)
 	if toggle.is_empty():
 		return
 	var mid: int = toggle["module_id"] as int
@@ -688,10 +685,7 @@ func _toggle_module_by_index(f_index: int) -> void:
 	else:
 		## Weapon/Tackle/Remote-repair require a Locked target (ADR-0035/0036);
 		## other kinds (self-only Active modules) must not carry one.
-		var requires_target: bool = (
-			kind == "Weapon" or kind == "Tackle"
-			or kind == "RemoteShieldBooster" or kind == "RemoteArmorRepairer"
-		)
+		var requires_target: bool = toggle.get("requires_target", false) as bool
 		if requires_target and _session.player_lock_target < 0:
 			## Sending this without a target is rejected server-side outright
 			## (ADR-0035: requires_target() vs target.is_some() mismatch),
@@ -723,7 +717,7 @@ func _toggle_module_by_index(f_index: int) -> void:
 			## range_gate.rs's effective_range_from_stats(), using the
 			## module's own contribution (not yet active) plus every
 			## already-active module of the same family.
-			var range: float = PlayerFitting.effective_range_for_activation(_player_modules, kind, mid)
+			var range: float = toggle.get("effective_range", -1.0) as float
 			if range >= 0.0:
 				var dist_u: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
 					(_ships[target_id] as Node3D).global_position) / WORLD_SCALE
@@ -770,7 +764,7 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 	## client-side dead-reckoning detection.
 
 	var tick: int = p.get("tick", 0) as int
-	_session.advance_tick_from_event(tick, _player_modules)
+	_session.advance_tick_from_event(tick, _loadout)
 	_sync_session_state()
 
 
@@ -915,7 +909,7 @@ func _update_hud() -> void:
 		"target_known": target_known,
 		"target_distance": dist_text,
 		"target_hp": target_hp,
-		"modules": _player_modules,
+		"modules": _loadout.modules(),
 		"stats_text": (
 			"Ships: %d\nTick: %d%s%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
 			% [_ships.size(), _current_tick, approach_line, station_line, jump_line]
@@ -927,7 +921,7 @@ func _update_hud() -> void:
 ## Mirror of CapacitorSystem::run() -- called once per tick elapsed.
 ## Keeps cap display in sync without any extra server messages.
 func _simulate_cap(ticks: int) -> void:
-	_session.advance_client_ticks(ticks, _player_modules)
+	_session.advance_client_ticks(ticks, _loadout)
 	_sync_session_state()
 
 func _advance_client_cap_ticks(delta: float) -> void:
@@ -950,6 +944,7 @@ func _clear_all_ships() -> void:
 	_session.reset()
 	_sync_session_state()
 	_interaction.clear_selection()
+	_loadout.reset()
 	_cap_tick_accumulator = 0.0
 
 
