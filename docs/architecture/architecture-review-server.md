@@ -229,25 +229,10 @@ WS protocol は `dawn-actor` に、ゲームロジックは `dawn-sector` に、
 > `SimulationNode::apply_client_command` に統一した。M-6 の残る重複（data_loader / NPC spawn）は
 > 引き続き許容判断・トリガー付きで保留。
 
-#### ~~M-7~~（新規・2026-07-01・**解消済み** 2026-07-01）: Player Command Dispatch のルーティングが `dawn-sector` の外に漏れている
+#### ~~M-7~~（**解消済み** 2026-07-01）: Player Command Dispatch のルーティングが `dawn-sector` の外に漏れていた
 
-`runtime.rs::collect_player_commands`（13分岐の match。各分岐は「所有権チェック→
-`apply_*_command_owned` 呼び出し」のみでドメイン知識を持たない）と、
-`protocol.rs::parse_client_command` のパース分岐が同じ13種類の Command 構造を
-ミラーしている。Command を1種追加するたびに、`dawn-core`（enum 追加）・
-`protocol.rs`（パース追加）・`runtime.rs`（dispatch 追加）・`node/*.rs`（実装追加）の
-4箇所を同じ順で触る。
-
-**根本原因**: dispatch の「ルーティング」と「各 Command の検証・実行」が
-`dawn-sector`（実装側）と `dawn-sector-node`/`dawn-actor`（ルーティング側）に
-分かれており、ルーティング層がドメイン知識を持たない薄いまま外側に置かれている。
-
-**判断: 解消済み（2026-07-01）。** `ClientCommand` を `dawn-core` へ移動し（DAG ブロッカー解消）、
-`SimulationNode::apply_client_command(player_id, cmd, lock_commands) -> Option<ClientCommandFollowup>` を
-`dawn-sector::node::commands` に新設。`dawn-sector-node/runtime.rs` の13分岐 match と
-`dawn-simulation/serve/mod.rs` の `apply_common_command` を両方この1呼び出しに置き換え。
-`ClientCommandFollowup::Jump` / `RefreshFitting` で caller への戻り値を型安全に返す。
-Issue #56 参照。詳細は「完了済み」表の M-7 行を参照。
+`runtime.rs`/`protocol.rs` に分かれていたコマンドルーティングを `SimulationNode::apply_client_command`
+に統一して解消。詳細は「改善ロードマップ > 完了済み」の M-7 行・Issue #56 を参照。
 
 #### M-8（新規・2026-07-01・許容）: `fit_module` / `fit_module_owned` の共有テール重複
 
@@ -267,45 +252,12 @@ Issue #56 参照。詳細は「完了済み」表の M-7 行を参照。
 再評価トリガー: 3つ目の Fit 経路（例: NPC ループ内リフィット等）が必要になり、
 テール重複が3箇所に増えたとき。
 
-#### Steering-mode 排他制御の非対称性を是正（2026-07-01・解消済み）
+#### ~~Steering-mode 排他制御の非対称性~~（**解消済み** 2026-07-01）
 
-`/improve-codebase-architecture` で「Orbit/KeepAtRange/Approach/Warp の5ハンドラが
-同じ排他制御スカフォールドを重複している」と指摘されたが、実装を確認したところ
-前提は不正確だった: `validate_maneuver_target` は元々 Orbit/KeepAtRange でのみ共有され、
-Warp はそもそも `clear_steering_modes` に参加していなかった。詳細に検証した結果、
-**スタイル上の重複ではなく実害のある非対称性が3件**見つかったため、issue化せず
-このまま直接修正した:
-
-- `apply_warp_command` が `clear_steering_modes` を呼んでいなかった。Orbit中の
-  Ship が Warp を始めても `OrbitComp` が残り続け、tick順序
-  （`process_orbit` → `process_warp`、後者が `ThrustComp` を上書き）に
-  依存して見かけ上だけ正しく動いていた。Warp完了後に古い `OrbitComp` が
-  残り、操船意図が意図せず復帰し得る状態だった
-- `apply_approach_command` に `is_warping` ガードが無かった（Orbit/KeepAtRangeには
-  ある）。committed Warping 中の Ship に Approach を送ると拒否されず
-  `ApproachComp` が付与されてしまっていた
-- `is_warping`（committed フェーズのみ true）を Orbit/KeepAtRange/Approach の
-  Warp優先チェックに使っていたため、**Aligning フェーズ中は素通りしていた**。
-  `clear_steering_modes` のコメントは「warp はこれらのコマンドを検証ガードで
-  完全に拒否する」と書いていたが実態と食い違っていた。`has_active_warp`
-  （フェーズ問わず `WarpComp` の有無のみ判定）を新設し、Move/Stop だけが
-  Aligning Warp を明示的にキャンセルできる特例として残し、他3コマンドは
-  Aligning も含めて拒否するよう統一した
-
-上記を修正したうえで、`apply_orbit_command`/`apply_keep_at_range_command`/
-`apply_approach_command` の共通スカフォールド（entity解決・transit/Warp優先チェック・
-的中判定・距離デフォルト・`clear_steering_modes`）を `begin_maneuver` ヘルパー
-（`orbit.rs`、`pub(super)`）へ完全に集約した（純粋な移動・挙動不変。Approach は
-distance に `None` を渡し戻り値の距離を無視するだけ）。結果として、元のレポートが
-提案していた「5ハンドラの重複整理」は、3つの実バグ修正の副産物として達成された
-（Move/Warp自体は意味的に非対称であるべきなので対象外のまま）。
-
-回帰テスト5本追加（`starting_a_warp_clears_an_active_orbit` /
-`approach_command_is_rejected_while_warping` /
-`approach_command_is_rejected_while_aligning_to_warp` /
-`orbit_command_is_rejected_while_aligning_to_warp` /
-`keep_at_range_command_is_rejected_while_aligning_to_warp`）。
-`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過。
+`/improve-codebase-architecture` の「5ハンドラの重複」指摘を調査する過程で、スタイル上の重複ではなく
+実害のある非対称性3件（Warpが`clear_steering_modes`を呼ばない、Approachに`is_warping`ガードがない、
+Aligningフェーズ中はWarp優先チェックが素通りする）を発見・修正。詳細は「改善ロードマップ > 完了済み」の
+該当行を参照。
 
 #### M-9（新規・2026-07-01・保留）: `EventStore::append` がinfallibleと偽る
 
@@ -337,45 +289,23 @@ distance に `None` を渡し戻り値の距離を無視するだけ）。結果
 
 ### 完了済み
 
+**Phase 2〜8D（2026-06-19〜2026-06-30、アーカイブ済み）**: node.rs のサブモジュール化
+（commands/navigation/serialization/sector_map/ship_registry/tick/spawner_logic/tackle/
+snapshot_io/apply_event/transit_flow）、main.rs・serve.rs・data_loader.rs の分割、
+`SimWorld` クエリヘルパー追加、`dawn-sector`/`dawn-replication` 新設（ADR-0026/0027）、
+Phase 8D 全項目（TCP replication/Raft transport/本番バイナリ `dawn-sector-node`/
+Raspberry Pi 実機検証 PASS）、命名整理（`navigation.rs`/`galaxy.rs`）、`CelestialBodyDef.sector`
+追加、M-4（WS境界集約）・M-5（replication消費側 `ReplicaSet`）解消、R-1（`navigation.rs`
+1092行を warp/approach/navigation に3分割）、runtime tick pipeline collapse、AoI delivery
+deepening（`dawn-sector::aoi::AoiDelivery` への集約でM-6のAoI重複解消）、Sector Node runtime
+deepening、production outbound replication publisher deepening、Client admission deepening
+（`client_admission.rs`）、Sector Transit プロトコル公開面 5→2 集約。全て純粋移動/deep module化で
+挙動変更なし、`cargo test --workspace` 全件通過を都度確認済み。詳細な差分は各PRのコミット履歴を参照。
+
 | 作業 | 完了日 | 内容 |
 |---|---|---|
-| P2-1 node.rs サブモジュール化 | 2026-06-19 | commands / navigation / serialization / sector_map / ship_registry に分割 |
-| P2-2 main.rs 分割 | 2026-06-19 | 63行に縮小。実装は serve.rs / bench.rs / cluster.rs へ |
-| P2-3 ws JSON 分離 | 2026-06-19 | serialization.rs + protocol.rs に分離 |
-| P3-1 SectorMap / ShipRegistry 抽出 | 2026-06-19 | SimulationNode フィールド 17→12 |
-| P3-2 persistence/ サブモジュール | 2026-06-19 | snapshot.rs + checkpoint.rs を persistence/ 下に統合 |
-| ADR-0026 dawn-sector 新設 | 2026-06-19 | ゲームロジックを dawn-simulation から完全分離 |
-| P4-1 tick.rs 抽出 | 2026-06-19 | tick() / tick_with_lock_commands() を node/tick.rs へ（91行）|
-| P4-2 spawner_logic.rs 抽出 | 2026-06-19 | spawn/bot メソッド群を node/spawner_logic.rs へ（394行）。node/mod.rs 2,868→2,396行 |
-| P4-3 `_owned` 統合 | — | スキップ: `_owned` は3行ラッパーでロジック重複ゼロ。統合コストが効果を上回る |
-| P5-1 serve.rs 分割 | 2026-06-19 | serve/{mod,single,cluster}.rs の3ファイルに分割（899行 → 382/177/241）|
-| P5-2 data_loader.rs 分割 | 2026-06-19 | data_loader/{mod,ship_types,modules,star_map}.rs に分割（479行 → 12/174/190/98）|
-| P6-1 `SimWorld` クエリヘルパー追加 | 2026-06-19 | `find_entity` / `query` / `get` / `get_mut` を追加。combat/capacitor/lock/fitting の `inner()` 脱出を削減（L-2 解消）|
-| P7-pre node補助責務抽出 | 2026-06-19 | `tackle.rs` / `snapshot_io.rs` / `apply_event.rs` を分離。node/mod.rs は 1,545行へ縮小 |
-| P7-1 Transit flow 境界整理 | 2026-06-19 | `node/transit_flow.rs` を新設。`propose_transit` / `export_transit` / `import_transit` / jump event 追記と対応テストを移動 |
-| 8D-2a dawn-replication 基盤 | 2026-06-19 | `InMemoryReplicationBus` / `ReplicationTransport` を dawn-replication へ移動 |
-| 8D-2b AntiEntropy | 2026-06-19 | log index gap 検出・重複/overlap 判定・`iter_from` suffix 応答 |
-| 8D-2c TcpReplicationTransport | 2026-06-19 | 4-byte length prefix + postcard / LAN plaintext TCP transport |
-| 8D-2d SnapshotTransfer | 2026-06-19 | `Serialize+DeserializeOwned` ジェネリック / 256 MiB cap |
-| 8D-3 TcpRaftTransport | 2026-06-19 | per-peer 自動再接続 / accept ループ / postcard framing |
-| 8D-4 dawn-sector-node | 2026-06-19 | 本番バイナリ（TOML 静的 config / 3 ノードクラスタ / Jump Redirect）|
-| navigation.rs / galaxy.rs リネーム | 2026-06-19 | `star_system.rs` → `navigation.rs`（dawn-core）、`star_map.rs`/`StarMap` → `galaxy.rs`/`Galaxy`（dawn-sector）。L-3 解消 |
-| P7-2 jump/warp validation 移動 | 2026-06-20 | `can_propose_jump` / `can_propose_warp` を `node/mod.rs` → `node/navigation.rs` へ移動。mod.rs 514行に縮小。Phase 7 完了 |
-| AoI テストを serialization.rs へ移動 | 2026-06-20 | `ships_visible_to` / `aoi_enter_json` のテストを実装と同じファイルへ。L-1 解消 |
-| P9-2 CelestialBodyDef sector 帰属 | 2026-06-20 | `CelestialBodyDef.sector` を追加し、`Galaxy::bodies_in_sector` の ID 割り当て近似を削除 |
-| 8D-5 観測ログ仕込み | 2026-06-20 | Raft role 遷移 / TCP 再接続 / tick オーバーランを stderr 出力（実機検証で症状を切り分けるため）。`docs/process/8d5-hardware-notes.md` 追加・localhost 3 プロセス検証済み |
-| 8D-5 Raspberry Pi 実機検証 | 2026-07-01 | 物理 Pi Zero W x3 で reachability / tick-sla / failover の3項目すべて PASS。`scripts/verify-pi-cluster.sh` を新設し合否基準を自動化。実行中に発見した `deploy-pi-cluster.sh` の `set -e` 早期終了バグも修正。詳細は `docs/process/8d5-hardware-notes.md` |
-| M-5 replication 消費側 | 2026-06-20 | `dawn-replication::ReplicaSet` 新設。受信 `LogBatch` を peer セクターごとに gap 検出・冪等・順序保持で複製ログに取り込む（ライブ world 適用 / failover は範囲外）|
-| M-4 WS 境界の集約 | 2026-06-20 | `ws_server` / `protocol` を `dawn-actor` へ移動し dawn-simulation / dawn-sector-node の手動コピーを解消（506行削除）。`bind` を `ToSocketAddrs` ジェネリック化・不要依存を除去 |
-| R-1 navigation.rs 分割 | 2026-06-23 | `node/navigation.rs`（ADR-0029 で 1092行に肥大）を `node/warp.rs`（769行）/ `node/approach.rs`（306行）/ `node/navigation.rs`（62行・バリデーションのみ）へ3分割。`mod warp; mod approach;` 追加 + impl ブロック移設の純粋移動（公開 API・挙動不変）。`cargo test --workspace` 全件ゼロエラー（warp 21件 + approach 10件を新パスで確認） |
-| runtime tick pipeline collapse | 2026-06-28 | `transit::run_runtime_tick` / `RuntimeTickOutput` と `serve/runtime.rs` で actor / clustered serve の tick ordering を共有。replication-before-raft ordering と transient drain を一箇所へ集約 |
-| AoI delivery deepening | 2026-06-29 | `serve/aoi_delivery.rs` の `AoiDelivery` に visible-set memory / Enter-Leave / event filtering / warp `PositionSnap` delivery を集約。single/cluster serve loop から AoI frame の内部知識を除去 |
-| Sector Node runtime deepening | 2026-06-29 | `dawn-sector-node/src/runtime.rs` の `SectorNodeRuntime` に command dispatch / jump fallback / tick stepping / replication publish orchestration / Redirect / AoI delivery を集約。`main.rs` は config・TCP transport・accept channel 配線中心に縮小 |
-| production outbound replication publisher deepening | 2026-06-30 | `SectorNodeRuntime` から append-log cursor 管理と `LogBatch` 構築を除去し、`dawn_replication::OutboundLogPublisher` に集約。runtime は frame 後に `publish_new_events(sector_id, node.event_store())` を呼ぶだけになり、sender-side replication の locality が `dawn-replication` に揃った |
-| AoI delivery を `dawn-sector` へ集約（M-6 の AoI 重複を解消） | 2026-06-29 | `dawn-simulation::serve::aoi_delivery::AoiDelivery` と `dawn-sector-node::runtime::deliver_aoi_frame` の同型実装を `dawn_sector::aoi::AoiDelivery`（`deliver_frame` + `AoiSink` trait + `Observer`）へ統合。送信先は `dawn-actor::ws_server::PlayerSession` を直接持てない（dawn-sector は dawn-actor に非依存）ため `AoiSink` trait で抽象化し、各バイナリ側にローカルな `SessionSink` ラッパー adapter（orphan rule 回避）を置く。Redirect 判定・セッション retain はそれぞれの呼び出し側に残す。`FakeSink` を使った enter/leave delta・destroyed-ship 抑制・warp snap のユニットテストを3本追加（移動前は AoI delivery のユニットテストが存在しなかった）。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
-| Client admission deepening（記録漏れ・今回追記） | 2026-06-29 | `dawn-sector-node/src/client_admission.rs` を新設（PR #41）。WebSocket accept / Hello 読み取り / fresh-vs-resume 判定 / Welcome・InitialState 完了までを `ClientAdmission` state machine に集約し、`main.rs` から分離。当時このレビュー文書への記録が漏れていたため、2026-07-01 の再計測で追加 |
-| Sector Transit プロトコルを公開面 5→2 に集約 | 2026-06-29 | `node/transit_flow.rs` の `propose_transit`/`export_transit`/`import_transit`/`append_jump_events` を `pub(super)` に格下げし、新設の `prepare_transit_commit`（Request 側：Gate-lookup・`entry_pos`/`entry_pos_abs` 算出・export を集約）と `handle_transit_commit`（Commit 側：import + `JumpGateUsed`/`StarSystemChanged` 追記の条件分岐を集約）の2メソッドへ統合。`transit.rs` の `apply_committed_raft_entries` オーケストレーターはこの2メソッドを呼ぶだけになり、Gate の往復先探索ロジックを二重に持たなくなった（#38 のバグ修正直後の整理）。新規ユニットテスト1本（`the_consolidated_request_commit_pair_reproduces_the_same_arrival`）で集約後の経路が既存の低レベルプリミティブと同じ着地点を再現することを確認。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
 | `dawn-sector-node` への永続化配線 | 2026-07-01 | `/improve-codebase-architecture` で「`EventStore::append` がinfallibleと嘘をついている」と指摘されたのを調査する過程で、より大きな問題を発見: `dawn-sector-node`（本番バイナリ）は `SimulationNode::new`（デフォルト `InMemoryEventStore`）で動いており、`FileEventStore`/`checkpoint()`/`CheckpointScheduler`/`restore_from`（Phase 3 実装・テスト済み）は本番に一切配線されていなかった（`maybe_checkpoint` の呼び出しは `dawn-simulation/src/bench.rs` のみ）。`NodeConfig` に永続化パス4フィールドを追加し、`build_node` でスナップショットの有無により新規/復元を分岐（`StateSnapshot::load` が `NotFound` なら新規、それ以外のエラーなら panic——サイレントなデータ損失を避ける）。復元時は `spawn_npcs` を呼ばない（NPC重複生成防止、`is_fresh` フラグで判定）。tickループに `CheckpointScheduler::maybe_checkpoint` を配線し、チェックポイント失敗はログのみで継続（ホットログへのappendは別経路で動き続ける）。`SectorNodeRuntime`/`ClientAdmission`/`AoiDelivery::deliver_frame` を `<S: EventStore>` でジェネリック化し `SimulationNode<FileEventStore>` に対応。実機での起動→kill→再起動でtick/log_indexが継続し、NPCが重複生成されないことを手動確認済み。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
+| Steering-mode 排他制御の非対称性を是正 | 2026-07-01 | Warpが`clear_steering_modes`を呼ばずOrbit中断後も`OrbitComp`が残る、Approachに`is_warping`ガードがない、Aligningフェーズ中はWarp優先チェックが素通りする、という実害のある非対称性3件を修正。`begin_maneuver`ヘルパー（`orbit.rs`）に共通スカフォールドを集約。回帰テスト5本追加 |
 | M-7 ClientCommand dispatch 統一（Issue #56） | 2026-07-01 | `ClientCommand` enum を `dawn-actor` → `dawn-core` へ移動（`dawn-actor` は `pub use dawn_core::ClientCommand` で後方互換維持）。`dawn-sector::node::SimulationNode::apply_client_command(player_id, cmd, lock_commands) -> Option<ClientCommandFollowup>` を新設し、`dawn-sector-node/src/runtime.rs` の13分岐 match と `dawn-simulation/src/serve/` の `apply_common_command`（両バイナリの重複）を1呼び出しに統一。`ClientCommandFollowup` で Jump と RefreshFitting を呼び出し元に返す。`cargo test --workspace` 全件通過 |
 | Client handshake payload の集約（PR #59） | 2026-07-02 | `single.rs`（dawn-simulation）と `client_admission.rs`（dawn-sector-node）が、identity 選択後の InitialState/PlayerLoadout JSON 組み立てを同一コードで重複していた（identity 選択自体は resume 対応の有無で別物なので統一対象外）。`dawn_sector::node::SimulationNode::build_handoff_payload(ship_id, aoi_cell_size) -> HandoffPayload` を新設し両呼び出し元から呼ぶ形に統一。ユニットテスト1件追加。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
 | Jump proposal orchestration 統一 | 2026-07-02 | `apply_jump_with_fallback` の outcome（in-range → Raft へ `TransitOp::Request` 提案）と auto-jump 提案パスが、`dawn-sector-node/src/runtime.rs` と `dawn-simulation/src/serve/{cluster,runtime}.rs` の3箇所に重複していた。`dawn_sector::transit::propose_jump` / `propose_auto_jump` を新設し、fallback chain の結果を Raft 提案へ橋渡しする部分を1箇所に集約。呼び出し元は返り値の `JumpOutcome`/`Option<SectorId>` を自分のログ整形にだけ使う。`SimulationNode::set_spawn_anchor_abs` を `pub(super)`→`pub(crate)`（`#[cfg(test)]` のまま）に広げ、新規テスト2件を追加。`cargo test --workspace` / `fmt` / `clippy -D warnings` 全件通過 |
@@ -386,12 +316,6 @@ distance に `None` を渡し戻り値の距離を無視するだけ）。結果
 | Bot AI 決定ループを `node/bot_ai.rs` へ抽出（`/improve-codebase-architecture` 候補3） | 2026-07-03 | `spawner_logic.rs` が spawn mechanics（ECS 挿入・inventory seed・`ShipSpawned` 発行）と Bot AI 決定ロジック（`process_bots` — target selection・低HP時の退避・engage range 操船・武器起動）という無関係な2つの関心事を同居させていた。両者を繋ぐのは「bot もspawnされた船である」という偶然のみで、`process_bots` は tick loop から呼ばれ spawn からは呼ばれない。`process_bots`（と、それをテストする2件のテスト）を新設 `node/bot_ai.rs` へ移動。`spawn_bot_ship`（船を作り `IsBotComp` を付けるだけの spawn mechanics）は `spawner_logic.rs` に残置。純粋移動、挙動変更なし。`spawner_logic.rs` 881→575行に縮小し R-3 の観察対象から外れた。`cargo test --workspace`（194/194、移動した2テストは `node::bot_ai::tests` で再確認）/ `fmt` / `clippy -D warnings` 全件通過（PR #69） |
 | R-4 `node/mod.rs` フィールド定義と補助impl分離 | 2026-07-07 | 座標合成アクセサ群（`entity_absolute`/`entity_abs_pos`/`entity_abs_pos_f64`/`entity_absolute_f64`/`dest_in_ship_frame_abs`/`ship_distance`/`ship_distance_to_point`/`ship_anchor_and_offset`）+ `debug_assert_missing_anchor` を新設 `node/coordinates.rs` へ純粋移動。`mod.rs` は939→821行、impl 748→700未満に復帰。可視性・挙動変更なし |
 | Owned ship / Active ship モデル実装（ADR-0037、Phase 9B-5 Assemble の前提） | 2026-07-07 | `ShipRegistry.by_player`（1player=1shipの暗黙前提）を `active_ship` に改名し、`owners`（既に複数所有対応済みだった）と分離。`remove()` は削除される船が実際に active だった場合のみ `active_ship` を消すよう修正（複数所有時に別の所有船削除でactiveポインタが誤って消える潜在バグを先回りで解消）。`SelectActiveShipCommand`（station-local 切替のみ）を新設。操縦系/Undock コマンド（Move/Stop/Approach/Warp/Orbit/KeepAtRange/Jump/LockOn/Activate/Deactivate/Undock）は `ship_id` を持たず常に caller の active ship へ解決（`is_active_ship`）、station 管理系（Fit/Unfit/Dock/BuildPackagedShip/DisassembleShip）は `ship_id` を維持し `owns_ship` のまま。wire protocol・スキーマ・Godotクライアント（`connection.gd`/`main.gd`）を追従。`cargo test --workspace`（229/229 dawn-sector）/ `fmt` / `clippy -D warnings` 全件通過、GdUnit4 164/164 通過。詳細は `docs/architecture/ownership.md` §7・ADR-0037 |
-
-> Phase 2〜7 の構造リファクタ、Phase 8D の TCP 分散配線、M-4/M-5 の重複/機能ギャップ解消、
-> R-1（navigation.rs 分割）、runtime tick pipeline collapse、AoI delivery deepening、
-> Sector Node runtime deepening、production outbound replication publisher deepening、
-> AoI delivery の dawn-sector への集約、
-> Sector Transit プロトコルの公開面集約まですべて完了。
 
 ### リファクタロードマップ（2026-06-23 追加・ADR-0029 後の再計測で起票）
 
@@ -522,15 +446,9 @@ backstop・identity/observation アクセサに絞られ、939→821 行、impl 
 
 ### Phase 9 — 評価の総点検（決着）
 
-Phase 9 時点では総合 **A−** で決着とし、M-3（本番パス外）・M-6（許容）は「大きい共有 runtime crate を作らない」と
-判断した。その後 ADR-0029（真スケール座標）の機能追加で `node/navigation.rs` が閾値を
-超えて再肥大し、構造リファクタが一時再燃したが、R-1（navigation.rs 分割・2026-06-23）で
-解消済み。さらに `dawn-simulation` 側 AoI delivery と `dawn-sector-node` 側 runtime は
-deep module 化済み（上記「完了済み」参照）。Player Command Dispatch は新 crate 化を見送った。
-A− を維持。8D-5 実機検証も 2026-07-01 に完了。同日 M-7（Player Command Dispatch
-統一）も完了し、残る前進先は戦闘の深み（ADR-0016 §5）といった機能側で、
-R-2（client `main.gd`）は保留のまま
-（client レビューの「採らない方針」参照。トリガーは C-3 ではなくシーン参照切れリスクそのもの）。
+Phase 9 時点で総合 A−（現在は B+、上記「現状評価」参照）で決着。新 crate は作らない方針
+（M-3/M-6）、ADR-0029 後の再肥大は R-1 で解消済み。残る前進先は戦闘の深み（ADR-0016 §5）
+といった機能側で、R-2（client `main.gd`）は保留のまま（client レビューの「採らない方針」参照）。
 
 | 項目 | 状態 |
 |---|---|
@@ -539,15 +457,9 @@ R-2（client `main.gd`）は保留のまま
 
 #### ~~P9-1: M-3 解消~~（撤回・保留）
 
-当初は「`SectorSimulatorActor` / `SimulationNode` 境界をコマンド/応答 enum で疎結合化し、
-8D-5 実機検証の完了後に着手」としていたが、前提が崩れたため撤回する。
-
-`SectorSimulatorActor` は本番パス外（インプロセス・テスト/ベンチ専用）で、本番バイナリ
-`dawn-sector-node` は 8D-4 で独自 main ループに移行しこの Actor を使わない（M-3 参照）。
-8D-5 はこの境界を経由しないため「実機検証後に着手」という条件は無意味。優先度を下げて保留する。
-
-残る品質観点は **低頻度 glue 重複**（M-6・許容）と **密結合**（M-3・本番パス外で低優先）のみで、
-いずれも本番品質には直結しない（「未完了・保留」参照）。
+当初計画の「8D-5実機検証後にSectorSimulatorActor境界を疎結合化」は前提が崩れて撤回。
+`SectorSimulatorActor`は本番パス外（M-3参照）で8D-5はこの境界を経由しないため無意味だった。
+残る品質観点は低頻度glue重複（M-6・許容）と密結合（M-3・本番パス外で低優先）のみ（「未完了・保留」参照）。
 
 ---
 
