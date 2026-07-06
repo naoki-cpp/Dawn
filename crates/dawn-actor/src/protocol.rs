@@ -17,13 +17,23 @@ use dawn_core::{
     DockCommand, DomainEvent, EntityId, LockOnCommand, ModuleId, MoveCommand, PlayerId, Position,
     ShipId, SlotKind, StopCommand, UndockCommand,
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 
 // ── Output types (server → client) ───────────────────────────────────────────
 
-#[derive(Serialize)]
+/// Every message the server sends to a client over the WebSocket connection.
+/// Serialized as a single JSON line tagged by `"type"`.
+///
+/// This enum is the schema-of-record for the server -> client half of the
+/// wire protocol: [`schema()`] renders it to a JSON Schema document that
+/// `docs/architecture/wire-protocol.md` is generated from. Adding, removing,
+/// or renaming a field here changes the wire format for every client
+/// (Godot today; any future client written against
+/// `docs/architecture/wire-protocol.md`).
+#[derive(Debug, Serialize, JsonSchema)]
 #[serde(tag = "type")]
-enum EventJson {
+pub enum EventJson {
     ShipSpawned {
         ship_id: u64,
         position: PosJson,
@@ -133,18 +143,18 @@ pub struct HelloMessage {
     pub resume: Option<ResumeIdentity>,
 }
 
-#[derive(Debug, Serialize, Clone, Copy)]
+#[derive(Debug, Serialize, JsonSchema, Clone, Copy)]
 pub struct PosJson {
     pub x: f32,
     pub y: f32,
     pub z: f32,
 }
 
-#[derive(Debug, Serialize, Clone, Copy)]
-struct VelJson {
-    dx: f32,
-    dy: f32,
-    dz: f32,
+#[derive(Debug, Serialize, JsonSchema, Clone, Copy)]
+pub struct VelJson {
+    pub dx: f32,
+    pub dy: f32,
+    pub dz: f32,
 }
 
 impl From<Position> for PosJson {
@@ -164,6 +174,18 @@ impl From<dawn_core::Velocity> for VelJson {
             dz: v.dz,
         }
     }
+}
+
+/// Render the server -> client wire schema (see [`EventJson`]) as a JSON
+/// Schema document.
+///
+/// `examples/gen_wire_schema.rs` writes this to
+/// `docs/architecture/wire-protocol.schema.json`, and the
+/// `wire_schema_doc_is_up_to_date` test below fails the build if the checked
+/// in file drifts from what this function currently produces -- regenerate
+/// with `cargo run -p dawn-actor --example gen_wire_schema` when it does.
+pub fn event_json_schema() -> schemars::schema::RootSchema {
+    schemars::schema_for!(EventJson)
 }
 
 /// Serialize a [`DomainEvent`] to the JSON line the Godot client expects.
@@ -725,5 +747,24 @@ mod tests {
     fn hello_json_without_resume_stays_fresh() {
         let hello = parse_hello(r#"{"type":"Hello"}"#).expect("must parse Hello");
         assert!(hello.resume.is_none());
+    }
+
+    /// Guards `docs/architecture/wire-protocol.schema.json` against drift.
+    /// If this fails, `EventJson` (or a type it references) changed --
+    /// regenerate with `cargo run -p dawn-actor --example gen_wire_schema`
+    /// and commit the updated file alongside the code change.
+    #[test]
+    fn wire_schema_doc_is_up_to_date() {
+        let current = serde_json::to_string_pretty(&event_json_schema()).unwrap() + "\n";
+        let checked_in = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/architecture/wire-protocol.schema.json"
+        ))
+        .expect("docs/architecture/wire-protocol.schema.json must exist");
+        assert_eq!(
+            current, checked_in,
+            "wire-protocol.schema.json is stale -- regenerate with \
+             `cargo run -p dawn-actor --example gen_wire_schema`"
+        );
     }
 }

@@ -243,6 +243,7 @@ Use this guide as the router, then read the relevant long-form doc:
 - Architecture overview: `docs/architecture/architecture.md`
 - Forbidden changes: `docs/architecture/forbidden-changes.md`
 - Event catalog: `docs/architecture/event-catalog.md`
+- Wire protocol (client<->server JSON over WebSocket): `docs/architecture/wire-protocol.md`
 - Tick model: `docs/architecture/tick-model.md`
 - Client testing: `docs/process/godot-client-testing.md`
 - Raspberry Pi hardware flow: `docs/process/8d5-hardware-notes.md`
