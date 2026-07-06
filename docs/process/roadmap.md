@@ -259,7 +259,9 @@ Phase 10: Client 本格化（GDExtension 導入）
 >
 > 関連: ADR-0034（本節の決定はすべてここに記録）, ADR-0016 §4/§5（FBD-008 撤廃・段階的
 > 拡張方針）, ADR-0032（`InventoryComp` の初出・ADR-0034 が一般化する）, CONTEXT.md
-> （`Item`/`Packaged Ship`/`Station`/`Scrap Metal`/`Currency`）。
+> （`Item`/`Packaged Ship`/`Station`/`Scrap Metal`/`Currency`）, ADR-0037（2026-07-05・
+> Docked Ship Ownership — 9B の `Assemble` が player-level の owned ship / active ship /
+> docked station context を要求すると判明したことを受けた決定。9B-5 参照）。
 
 **前提**: 戦闘の深み（ADR-0016 §5 items 1–5: Tackle → Signature Resolution → Orbit/Keep at
 Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み。Phase 9 はこの後に着手する。
@@ -295,7 +297,7 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
 | 2 | Dock/Undock + Station 利用可否判定 | `DockCommand` / `UndockCommand` と docked 状態を追加。`can_use_station(player_id, station_id)` は「半径内」ではなく「その station に docked 済み」を見る。player-level の docked context を保持し、station access が active ship lookup に依存しないようにする | ✅ |
 | 3 | Station インベントリ（最小保管先） | `PlayerId -> BTreeMap<ItemId, u64>` の最小 station inventory を追加。snapshot restore 対応済み。**これは MVP の in-memory 実装であり、将来は hot-memory + durable storage の二層へ進める** | ✅ |
 | 4 | Station系イベントの土台 | `ShipDocked` / `ShipUndocked` / `PackagedShipBuilt` / `ShipDisassembled` は実装済み。残る `ShipAssembled` をこの列に揃える | ◐ |
-| 5 | Assemble コマンド + バリデーション（Packaged Ship が未艤装であること） | 入力は Station インベントリ上の `PackagedShip`。**docked 中のみ**実行可。艤装情報は Packaged Ship 側に持たせず、Assemble 後に既存の Fit 経路で艤装する。**着手前に `docs/architecture/assemble-ownership-memo.md` の ownership 前提を満たすこと** | ⬜ |
+| 5 | Assemble コマンド + バリデーション（Packaged Ship が未艤装であること） | 入力は Station インベントリ上の `PackagedShip`。**docked 中のみ**実行可。艤装情報は Packaged Ship 側に持たせず、Assemble 後に既存の Fit 経路で艤装する。**着手前に ADR-0037（Docked Ship Ownership）で決定した owned ship / active ship / docked station context 拡張を実装すること**（背景は `docs/architecture/assemble-ownership-memo.md`） | ⬜ |
 | 6 | Disassemble コマンド + バリデーション（Ship が無傷・未艤装であること） | 出力は Station インベントリ上の `PackagedShip`。**docked 中のみ**実行可。無傷チェックは無料修理の抜け穴防止（Local Repair・ADR-0033 の価値を守る） | ✅ |
 | 7 | Packaged Ship 建造コマンド（Scrap Metal 消費 → Packaged Ship 生成） | Scrap Metal を Station インベントリから消費し、生成物も Station インベントリへ置く。**docked 中のみ**実行可能。現状コストは MVP として `1 Scrap Metal / 1 hull` の固定値 | ✅ |
 | 8 | client実装の開始条件を固定 | **基本方針: client UI は 5〜7 の server 側本体（Assemble / Disassemble / Build）が揃ってから実装する。** 先に UI だけ作って wire 先行にならないようにする | ⬜ |

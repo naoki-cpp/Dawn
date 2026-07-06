@@ -113,6 +113,15 @@ Phase 6 の主目標は「ゲームが実際に面白いか」を人間から検
   HUD に「[J] Jump Gate」と表示される）
   ※ ジャンプは `--serve --cluster`（3ノード Raft クラスタ）でのみ有効。
     単一 Sector の `--serve` では無効。
+- **ドッキング（Phase 9B、ADR-0034）**: NPC ステーションの docking_radius 内に入ると
+  HUD に「[D] Dock at Station #N」と表示される。D キーでドック（未ドック時のみ）。
+  ドック中は HUD が「Docked: <name>」+「[U] Undock  [B] Build Magpie  [Y] Disassemble
+  ship」に切り替わる。U キーでアンドック。B キーでドック中のステーションで
+  Scrap Metal を消費してパッケージ済み Ship（Magpie）を建造（現状 MVP は
+  1 Scrap Metal / 1 hull の固定コスト）。Y キーで現在ドック中の船（無傷・未艤装の
+  ときのみ）をパッケージ済み Ship に解体してステーション在庫へ戻す（無料修理の
+  抜け道防止）。ドッキング中はインベントリパネル（I キー）に船側とステーション側の
+  在庫が分けて表示される。
 - **移動ループ（クラスタモード）**: プレイヤーは Sector 原点付近（30,000, 0, 0、恒星から十分離れた安全距離）にスポーンする。
   Gate 0（x=600,000 付近、Sector の縁）のリングをクリックで選択 → **W でワープ**（または A で接近）→
   ゲート圏内に着いたら **J でジャンプ**。HUD に選択ゲートと「[W] Warp」/「[W] too close to warp」が出る

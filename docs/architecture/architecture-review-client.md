@@ -3,7 +3,11 @@ scope    : Godot クライアント（client/scripts/）の保守性・設計品
 audience : AI Agent / Human Developer
 update   : クライアント側で大規模リファクタ実施後 / 新スクリプト追加時
 related  : docs/architecture/architecture-review-server.md（サーバー側）, docs/architecture/architecture.md, docs/process/playtest-guide.md
-date     : 2026-07-06（`WorldPresentation` を新設し、floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation を `main.gd` から移動。`main.gd` は 1127→872、`world_presentation.gd` 233 行を追加。）
+date     : 2026-07-06（全ファイル再計測（`/architecture-review`）。前回パスの記録値
+（`main.gd` 872・`world_presentation.gd` 233・`player_loadout.gd` 148 等）は実測より
+古く、一部は新設・rename 時点から既にずれていたと判明。18ファイル全ての行数を実測へ
+更新（`main.gd` 974・`world_presentation.gd` 278・`player_loadout.gd` 245 など）。
+総合評価は変わらず A——責務分離の構造自体は健全で、ずれていたのは数値のみ）
 ---
 
 # Architecture Review — Dawn Client (Godot)
@@ -24,8 +28,8 @@ date     : 2026-07-06（`WorldPresentation` を新設し、floating origin / nav
 | 重複 | A− | マーカー生成・ピッキング・ワープ着地点計算の同型ロジックは解消済み（C-2） |
 | 結合度 | A− | signal 経由の `connection.gd` ↔ `main.gd` 結合は良好。`@onready` のシーンツリー直パス参照はフェイルファストガードで解消（C-3）。modules dict のキー前提のみ脆さが残る（C-4、保留） |
 | デッドコード | A | 残骸なし。コメントは ADR 参照付きで現状と一致 |
-| テストカバレッジ | A− | 新設クラス + main.gd残存ロジックの一部を GdUnit4 で計156ケース実行確認済み。`WorldSession` / `HudSurface` / `WorldInteraction` に加えて `WorldPresentation` も marker clamp・warp tunnel easing・sun direction を scene tree なしで単体テスト可能になった。scene-tree/ネットワーク依存の end-to-end 入力経路だけが手動確認領域として残る |
-| サーバー側との対比 | — | サーバー側はクレート分割（A−）、クライアントはファイル分割（B+）。テストカバレッジは依然サーバー側（カバレッジ80%要件）が厚い |
+| テストカバレッジ | A− | 新設クラス + main.gd残存ロジックの一部を GdUnit4 で計158ケース実行確認済み（2026-07-06 実測。前回記録の156は概ね正確だったが `connection_test.gd` が4→6件に増えていた）。`WorldSession` / `HudSurface` / `WorldInteraction` に加えて `WorldPresentation` も marker clamp・warp tunnel easing・sun direction を scene tree なしで単体テスト可能になった。scene-tree/ネットワーク依存の end-to-end 入力経路だけが手動確認領域として残る |
+| サーバー側との対比 | — | サーバー側はクレート分割（A−）、クライアントはファイル分割（A）。2026-07-06 修正: 本行は旧グレード（B+）を参照したまま残っていた——上表「ファイル分割」は既に A。テストカバレッジは依然サーバー側（カバレッジ80%要件）が厚い |
 
 サーバー側が長期にわたる分割リファクタ（Phase 2〜9）を経て A− に達したのに対し、
 クライアントは 2026-06-20 の C-1 で初めて本格的な責務分離に着手し、4クラスの抽出と
@@ -33,44 +37,49 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 
 ---
 
-## ファイルサイズ一覧（2026-07-05 時点）
+## ファイルサイズ一覧（2026-07-06 時点）
 
-> 2026-07-06 再計測。`WorldPresentation` deepening により `main.gd` は 1127→872 に縮小。
-> 新規 `world_presentation.gd`（233行）は floating origin / nav marker placement / sky sun update /
-> warp tunnel / player ship presentation を所有する deep module。`WorldSession` は live world state、
-> `HudSurface` は live HUD Control 参照、`WorldInteraction` は world interaction policy、
-> `WorldPresentation` は world visual side effect を所有する。
+> **2026-07-06、全ファイル再計測（`/architecture-review`）。** 18ファイル全てで表の
+> 記録値が実測とずれていたと判明した——`main.gd`/`world_presentation.gd`/`player_loadout.gd`
+> のような直近で変更されたファイルだけでなく、`billboard_ring.gd`・`warp_tunnel_effect.gd`
+> のように何十コミットも変更されていない安定ファイルも含めて全件ずれており、単発の
+> 記録漏れではなく計測方法そのものが古い可能性がある。今回は `wc -l` による実測へ全件更新した。
+> `WorldSession` は live world state、`HudSurface` は live HUD Control 参照、
+> `WorldInteraction` は world interaction policy、`WorldPresentation` は world visual
+> side effect を所有する、という責務分担自体に変更はない。
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `client/scripts/main.gd` | 872 | 🟢 オーケストレーション層。scene lifecycle / node generation / event dispatch / network send / HUD frame assembly を保持。live world state は `WorldSession`、HUD surface ownership は `HudSurface`、world interaction policy は `WorldInteraction`、world visual side effect は `WorldPresentation` へ移動 |
-| `client/scripts/hud_manager.gd` | 547 | 🟢 HUD 全パネルの構築・更新の stateless static class。責務は単一（HUD 構築） |
-| `client/scripts/connection.gd` | 341 | 🟢 WebSocket I/O とシグナル発行のみ |
-| `client/scripts/world_session.gd` | 278 | 🟢 InitialState / AoI / HP / lock / tick-cap / dock state の client-side live world state |
-| `client/scripts/ship_controller.gd` | 277 | 🟢 単一船の視覚表現に専念。ロックオン枠は `BillboardRing` 共通化 |
-| `client/scripts/navigation_marker_renderer.gd` | 200 | 🟢 ゲート/惑星/ステーションマーカー生成 + スペクトル色 |
-| `client/scripts/player_loadout.gd` | 148 | 🟢 loadout/インベントリ正規化と capacitor 再現の純粋関数。main.gd は呼び出すのみで内部構造に触れない |
-| `client/scripts/hud_surface.gd` | 137 | 🟢 HUD Control 参照を所有し、`main.gd` からの render frame / hit-test 要求を `HudManager` へ委譲。パネル単位の dirty-tracking あり |
-| `client/scripts/input_decoder.gd` | 122 | 🟢 キー入力→アクション決定の純粋関数。GdUnit4 テスト済み |
-| `client/scripts/camera_controller.gd` | 113 | 🟢 自己完結したオービットカメラ |
-| `client/scripts/world_interaction.gd` | 101 | 🟢 新設（2026-07-05）。selection state、double-click timing、click→intent、lock intent、`InputDecoder` 連携を所有する deep module |
-| `client/scripts/world_presentation.gd` | 233 | 🟢 新設（2026-07-06）。floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation を所有する deep module |
-| `client/scripts/ship_picking.gd` | 93 | 🟢 船/ゲート/天体ピッキング3関数（画面空間ピッキング） |
-| `client/scripts/world_space.gd` | 74 | 🟢 浮動原点（真 AU 距離レンダリング用の WorldSpace リベース） |
-| `client/scripts/tactical_overlay.gd` | 67 | 🟢 射程リング描画のみ |
-| `client/scripts/billboard_ring.gd` | 59 | 🟢 固定画面サイズの選択リング billboard 共通 static class |
-| `client/scripts/unit_format.gd` | 34 | 🟢 速度/距離の適応的単位整形（m/s・km/s・AU/s） |
-| `client/scripts/warp_tunnel_effect.gd` | 8 | 🟢 ワープトンネル ColorRect の intensity ラッパー |
+| `client/scripts/main.gd` | 974 | 🟢 オーケストレーション層。scene lifecycle / node generation / event dispatch / network send / HUD frame assembly を保持。live world state は `WorldSession`、HUD surface ownership は `HudSurface`、world interaction policy は `WorldInteraction`、world visual side effect は `WorldPresentation` へ移動 |
+| `client/scripts/hud_manager.gd` | 653 | 🟢 HUD 全パネルの構築・更新の stateless static class。責務は単一（HUD 構築） |
+| `client/scripts/connection.gd` | 384 | 🟢 WebSocket I/O とシグナル発行のみ |
+| `client/scripts/world_session.gd` | 345 | 🟢 InitialState / AoI / HP / lock / tick-cap / dock state の client-side live world state |
+| `client/scripts/ship_controller.gd` | 326 | 🟢 単一船の視覚表現に専念。ロックオン枠は `BillboardRing` 共通化 |
+| `client/scripts/navigation_marker_renderer.gd` | 227 | 🟢 ゲート/惑星/ステーションマーカー生成 + スペクトル色 |
+| `client/scripts/player_loadout.gd` | 245 | 🟢 loadout/インベントリ正規化と capacitor 再現の純粋関数。main.gd は呼び出すのみで内部構造に触れない |
+| `client/scripts/hud_surface.gd` | 165 | 🟢 HUD Control 参照を所有し、`main.gd` からの render frame / hit-test 要求を `HudManager` へ委譲。パネル単位の dirty-tracking あり |
+| `client/scripts/input_decoder.gd` | 140 | 🟢 キー入力→アクション決定の純粋関数。GdUnit4 テスト済み |
+| `client/scripts/camera_controller.gd` | 142 | 🟢 自己完結したオービットカメラ |
+| `client/scripts/world_interaction.gd` | 133 | 🟢 新設（2026-07-05）。selection state、double-click timing、click→intent、lock intent、`InputDecoder` 連携を所有する deep module |
+| `client/scripts/world_presentation.gd` | 278 | 🟢 新設（2026-07-06）。floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation を所有する deep module |
+| `client/scripts/ship_picking.gd` | 104 | 🟢 船/ゲート/天体ピッキング3関数（画面空間ピッキング） |
+| `client/scripts/world_space.gd` | 83 | 🟢 浮動原点（真 AU 距離レンダリング用の WorldSpace リベース） |
+| `client/scripts/tactical_overlay.gd` | 93 | 🟢 射程リング描画のみ |
+| `client/scripts/billboard_ring.gd` | 65 | 🟢 固定画面サイズの選択リング billboard 共通 static class |
+| `client/scripts/unit_format.gd` | 38 | 🟢 速度/距離の適応的単位整形（m/s・km/s・AU/s） |
+| `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 ワープトンネル ColorRect の intensity ラッパー |
 
-合計 3,762 行のうち `main.gd` が30%を占める（C-1着手前69%から大幅低下）。
+合計 4,405 行（2026-07-06 実測）のうち `main.gd` が22%を占める（C-1着手前69%から大幅低下）。
 新設 static class 群（C-1 の5クラス + ADR-0029 の `world_space`/`unit_format`/`warp_tunnel_effect`
-+ PR #33 の `player_loadout` + `WorldSession` + `HudSurface` + `WorldInteraction`）は、
-`WorldSession` が ship registry と live world state、`HudSurface` が HUD Control 参照、
-`WorldInteraction` が selection と world interaction policy を保持する。scene 生成と
++ PR #33 の `player_loadout` + `WorldSession` + `HudSurface` + `WorldInteraction` +
+`WorldPresentation`）は、`WorldSession` が ship registry と live world state、`HudSurface` が
+HUD Control 参照、`WorldInteraction` が selection と world interaction policy、
+`WorldPresentation` が world visual side effect を保持する。scene 生成と
 network send は `main.gd` 側。
 
-（`client/test/*.gd` は `world_interaction_test.gd` を含め 14 ファイル・合計 1,346 行。
-ケース数は 150。§「テストカバレッジ」参照）
+（`client/test/*.gd` は `world_presentation_test.gd` を含め 15 ファイル・合計 2,075 行
+（2026-07-06 実測。旧記録の「14ファイル・1,346行」は既にずれていた）。
+ケース数は 158。§「テストカバレッジ」参照）
 
 ---
 
@@ -139,12 +148,12 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 | `camera_controller_test.gd` | `CameraController`（orbit drag） | 2 |
 | `unit_format_test.gd` | `UnitFormat`（ADR-0029 速度/距離単位整形） | 8 |
 | `world_space_test.gd` | `WorldSpace`（ADR-0029 浮動原点リベース） | 4 |
-| `connection_test.gd` | `connection.gd`（URL正規化・module activated signal の回帰テスト） | 4 |
+| `connection_test.gd` | `connection.gd`（URL正規化・module activated signal・PlayerLoadout wire message rename の回帰テスト） | 6 |
 | `player_loadout_test.gd` | `PlayerLoadout`（PR #33 起点、後に rename） | 11 |
 | `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy / dock state） | 11 |
 | `world_interaction_test.gd` | `WorldInteraction`（selection ownership / double-click / lock intent / key action 解釈） | 8 |
 | `world_presentation_test.gd` | `WorldPresentation`（marker clamp / warp tunnel easing / sun state） | 6 |
-| **合計** | | **156**（`func test_` 実測） |
+| **合計** | | **158**（`func test_` 実測、2026-07-06） |
 
 テスト導入で見つかった不具合・定着した手順（詳細: `docs/process/godot-client-testing.md`）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる
