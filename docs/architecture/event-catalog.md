@@ -165,14 +165,14 @@ While tackled, `can_propose_warp()` / `can_propose_jump()` return false, blockin
 
 This is an authoritative event: it stores `anchor` and the post-rebase `offset` so Replay reproduces the representation exactly. A rebase is a non-velocity-driven frame change, so it's recorded as its own fact; INV-MOVE (the invariant for velocity-driven motion) doesn't apply since absolute position is preserved.
 
-### 3.9 System (reserved for future use)
+### 3.11 System (reserved for future use)
 
 | Event | Description | Status |
 |---|---|---|
 | `TickStarted` | Tick started | not implemented |
 | `TickCompleted` | Tick completed | not implemented |
 
-### 3.10 AoI (Area of Interest) Delivery Filter (ADR-0019)
+### 3.12 AoI (Area of Interest) Delivery Filter (ADR-0019)
 
 AoI introduces **no new domain events**. It's implemented by filtering `DomainEvent` delivery through each observer's 27-cell neighborhood.
 
@@ -267,7 +267,7 @@ Ship's fitting slots changed.
 |---|---|---|---|
 | `ship_id` | `ShipId` | ✓ | Ship whose fitting changed |
 | `fitting` | `FittingSnapshot` | ✓ | snapshot of all slots after the change (list of Module IDs) |
-| `inventory` | `Vec<ModuleId>` | ✓ | snapshot of unfitted inventory after the change (ADR-0032, `#[serde(default)]`) |
+| `inventory` | `Vec<ItemId>` | ✓ | snapshot of unfitted inventory after the change (ADR-0032, `#[serde(default)]`) |
 | `tick` | `Tick` | ✓ | Tick the fitting change was finalized |
 
 **Design note:** no `stats` field — Replay recomputes via `apply_fitting()` from `FittingSnapshot` (INV-002). Fit/Unfit always change both fitting and inventory together, so both are carried by this one event type rather than splitting into two (ADR-0032).
