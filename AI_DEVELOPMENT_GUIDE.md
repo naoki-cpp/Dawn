@@ -263,4 +263,4 @@ to the correct doc instead of expanding this guide.
 
 ---
 
-Last updated: 2026-07-03 / Covers ADR-0001 through ADR-0036
+Last updated: 2026-07-06 / Covers ADR-0001 through ADR-0037

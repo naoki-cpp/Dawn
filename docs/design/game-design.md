@@ -344,6 +344,14 @@ EVE の**グローバル** TiDi は大規模戦でゲームが 10 倍スロー�
 - **リモートリペア / Logistics（味方への遠隔修理）** — 実装済み（ADR-0036）。ロック済みの
   味方を対象に選び Remote Shield Booster / Remote Armor Repairer を起動する。射程外に
   出ると Range Gate System が自動的に強制 OFF する（Weapon/Tackle と共通の仕組み）。
+- **Economy Foundations（資源シンクの基礎）** — 実装済み（ADR-0034、ADR-0016 の FBD-008
+  撤廃を受けた Phase 9）。`ItemId`（Module/PackagedShip/ScrapMetal）へ`InventoryComp`を
+  一般化。Scrap Metal は `ShipDestroyed` からの即時ドロップのみが取得経路（放置採掘に
+  ならない、FBD-009 維持）。NPC Station への Dock/Undock（D / U キー）、Station 上で
+  Scrap Metal を消費した Packaged Ship 建造（B キー）、無傷・未艤装確認つきの Disassemble
+  （Y キー）が機能する。プレイヤー間 Market（`dawn-market` クレート・指値注文帳・
+  `PlayerId` 単位の Currency 台帳）と Assemble（Packaged Ship → 稼働船）は
+  未実装（`docs/process/roadmap.md` §12 9D、ADR-0037 参照）。
 
 ### 4.2 将来検討する機能（優先順位付き・すべて未実装）
 
@@ -503,13 +511,21 @@ EVE Online における採掘は**放置コンテンツ**であり、ゲーム�
 AI_DEVELOPMENT_GUIDE.md「Project North Star」に準拠。以下は EVE に存在するがこのプロジェクトでは実装しない：
 
 ```
-× 市場・経済システム
 × キャラクター育成・スキルポイント（上記参照）
-× 採掘・製造（上記参照）
-× インベントリ
+× 放置採掘・製造（上記参照。「能動的な判断を要さない」資源収集全般が対象）
 × 課金・PLEX
 × グラフィックスエンジン外部依存
 ```
+
+> **2026-07-06 更新**: 「市場・経済システム」「インベントリ」は以前ここに
+> スコープ外として掲載していたが、ADR-0016（FBD-008 撤廃）を受けて
+> ADR-0034（Economy Foundations）として起票・実装が進んでいる（§4.1、
+> `docs/process/roadmap.md` §12 Phase 9 参照）。実装済み: `InventoryComp`
+> （Item 一般化・ADR-0034）、Scrap Metal（撃破からの即時ドロップのみ——
+> 「放置採掘」の対象外）、Station / Packaged Ship の Assemble・Disassemble。
+> 未実装で ⬜: `dawn-market` クレート（指値注文帳・`PlayerId` 単位の
+> Currency 台帳、roadmap.md §12 9D）。方針として変わっていないのは
+> 「能動的な判断を伴わない放置資源収集（採掘）」を入れないことのみ。
 
 ---
 

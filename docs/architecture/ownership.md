@@ -15,6 +15,15 @@ related  : entity-model.md, event-catalog.md
 > | §5 ID generation | NodeId + monotonic counter | Implemented |
 >
 > Sector Transit must always go through Raft (CLAUDE.md FBD-006).
+>
+> **Scope note (2026-07-05):** this file documents *Sector*-level ownership
+> (which Sector owns a Ship) and Actor data isolation. It does not yet cover
+> *player*-level ownership (which Player owns which Ship(s)) -- today that is
+> still the 1-player-to-1-active-ship model in `ShipRegistry` (`by_player` /
+> `owners`). ADR-0037 (Docked Ship Ownership) decided the target shape for
+> that axis -- owned ship / active ship / docked station context -- as a
+> prerequisite for Phase 9B's `Assemble`, but no code implements it yet. This
+> file should gain its own section once that work lands.
 
 # Ownership Rules
 

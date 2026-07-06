@@ -114,7 +114,8 @@ The only entity kind in the current MVP.
 | Component | Description |
 |---|---|
 | `ShipIdComp` | maps the hecs Entity to the domain `ShipId` |
-| `PositionComp` | current world coordinate |
+| `PositionComp` | current world coordinate, relative to `AnchorComp`'s anchor |
+| `AnchorComp` | which `AnchorId` `PositionComp` is relative to (defaults to the Sector origin/star; rebased on Warp arrival, ADR-0029) |
 | `VelocityComp` | displacement per Tick |
 | `ThrustComp` | thrust direction / braking state (updated by MoveCommand / StopCommand) |
 | `ShipStatsComp` | aggregated stats (base_stats + Σmodule.delta, updated by apply_fitting()) |
@@ -136,16 +137,19 @@ Conditionally attached components:
 | `KeepAtRangeComp` | holding distance from a target (mutually exclusive with Approach/Orbit; ADR-0031) |
 | `WarpComp` | warping (align -> warping two-phase, intra-Sector short-range Fold; ADR-0022) |
 | `TackledComp` | under Tackle (`tacklers: Vec<ShipId>`; blocks Warp/jump; ADR-0024) |
-| `InventoryComp` | unequipped owned modules (player ships only; changed by Fit/Unfit; ADR-0032) |
+| `InventoryComp` | unfitted item stacks the pilot owns (player ships only; `BTreeMap<ItemId, u64>` — Module / PackagedShip / ScrapMetal; changed by Fit/Unfit and by combat drops; ADR-0032, generalized to `ItemId` by ADR-0034) |
 
 ### Not Yet on Ship (out of MVP scope)
 
 Planned for future phases, not present today:
 
 ```
-Cargo (cargo hold)  <- Economy Context
 Name  (ship name)   <- UI / Social Context
 ```
+
+(Cargo hold is no longer future work -- `InventoryComp` already serves that
+role as of ADR-0034's `ItemId` generalization; see the conditionally-attached
+table above.)
 
 Ownership (PlayerId) is not an ECS Component; it's tracked in `SimulationNode`'s `ship_owners: HashMap<ShipId, PlayerId>`.
 
