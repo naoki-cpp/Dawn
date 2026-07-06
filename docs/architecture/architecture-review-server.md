@@ -56,7 +56,7 @@ managed debt として扱い、ファイルサイズ軸は B+ を維持する）
 | `crates/dawn-sector/src/node/spawner_logic.rs` | 623 | 🟢 P4-2 + P7-1 + ADR-0029 + ADR-0032。残るのは spawn mechanics（spawn / inventory seed）のみで、R-3 の観察対象から外れた |
 | `crates/dawn-sector/src/node/bot_ai.rs` | 347 | 🟢 `spawner_logic.rs` から `process_bots` を抽出した Bot AI 決定ループ。純粋移動、挙動変更なし |
 | `crates/dawn-sector/src/node/orbit.rs` | 860（impl 324） | 🟡 ADR-0031 新設。Orbit / Keep at Range の操船一式。単一責務で許容だが総行数は watch 帯。impl 324 でトリガー未発火 |
-| `crates/dawn-sector/src/node/mod.rs` | 936（impl 748） | 🔴 R-4 新設（2026-07-06）。P7-2 後 + ADR-0031/0032/0035 のフィールド・定数追加。**impl（テスト除く）748 行で R-3 のトリガー（700超）が発火**。補助 impl と field hub が同居しており、フィールド定義と補助 impl の分離が必要（詳細は問題一覧 R-4） |
+| `crates/dawn-sector/src/node/mod.rs` | 939（impl 748） | 🔴 R-4（2026-07-06起票、2026-07-07一部着手）。P7-2 後 + ADR-0031/0032/0035 のフィールド・定数追加。**impl（テスト除く）748 行で R-3 のトリガー（700超）が発火**。2026-07-07、座標合成アクセサ3件を `AnchorTable` への薄い委譲に置換（詳細は下記 anchor.rs）したが行数はほぼ不変（doc コメント増分のみ）——フィールド定義と補助 impl の分離という R-4 本体は未着手のまま（詳細は問題一覧 R-4） |
 | `crates/dawn-sector/src/node/transit_flow.rs` | 949（impl 368） | 🟢 `prepare_transit_commit`/`handle_transit_commit`（公開面 5→2 に集約）+ `rebase_after_transit`。大きいが責務は cohesive。impl 368 で余裕あり |
 | `crates/dawn-sector/src/node/station.rs` | 972（impl 443） | 🟡 ADR-0034/9B foundation。dock/undock・station inventory・build/disassemble が1ファイルに集まっており、単一の「Station operations」としては読めるが総行数は新たな watch 対象。impl 443 でトリガー未発火 |
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 655 | 🟢 P7-pre + ADR-0032（inventory 永続化）。ほぼテスト |
@@ -68,7 +68,7 @@ managed debt として扱い、ファイルサイズ軸は B+ を維持する）
 | `crates/dawn-sector/src/node/tackle.rs` | 345 | 🟢 P7-pre。ADR-0035（PR #62）で距離判定を `entity_absolute_f64` の f64 差分に修正（真 AU スケールでの f32 丸め対策・ADR-0029 パターン準拠）。PR #66 で手組みの delta 計算を `SimulationNode::ship_distance` 呼び出しに置換し未使用 `PositionComp` import を削除（358→345） |
 | `crates/dawn-sector/src/node/range_gate.rs` | 479（impl 150） | 🟢 ADR-0035 新設（PR #62）。Range Gate System（Step 5.5）— Weapon/Tackle/Remote Repair のターゲットが射程外に出たら強制 OFF（`ModuleDeactivated { forced_reason: OutOfRange }`）。PR #63 で flat-index 解決を `FittingComp::slot_at_flat_mut` に置換（403→382）。PR #66 で距離判定を `SimulationNode::ship_distance` 呼び出しに置換（382→362）。ADR-0036 で `effective_range_for_kind`/`process_range_gate` に Remote Repair 2 kind を追加 + 活性化/Range Gate/回復のテスト3件を追加（362→469） |
 | `crates/dawn-sector/src/aoi.rs` | 629（impl 311） | 🟢 `AoiDelivery`/`AoiSink`/`Observer`（旧 dawn-simulation・dawn-sector-node 重複の集約先）。半分弱はテスト。2026-07-01、`deliver_frame` を `<S: EventStore>` でジェネリック化 |
-| `crates/dawn-sector/src/anchor.rs` | 292 | 🟢 ADR-0029 新設（AnchorTable・静的 f64 アンカー絶対座標） |
+| `crates/dawn-sector/src/anchor.rs` | 311 | 🟢 ADR-0029 新設（AnchorTable・静的 f64 アンカー絶対座標）。2026-07-07、`/improve-codebase-architecture` で `node/mod.rs` が再実装していた逆変換を `to_relative()` として新設し、`rebase()` をその合成に書き直し。座標合成代数の唯一の所有者になった（292→311） |
 | `crates/dawn-sector/src/transit.rs` | 419（impl 242） | 🟢 PR #30 で `run_runtime_tick` / `RuntimeTickOutput` を追加。Request/Commit ハンドラが `prepare_transit_commit`/`handle_transit_commit` に委譲し Gate-lookup 知識を手放した。2026-07-02、`propose_jump` / `propose_auto_jump` を新設し、jump fallback outcome → `TransitOp::Request` 提案の組み立てを `dawn-sector-node`・`dawn-simulation` 双方の重複から集約（282→418、テスト2件追加でimpl 240） |
 | `crates/dawn-sector/src/modules.rs` | 246 | 🟢 ADR-0033 で Active 修理モジュール定義を追加。ADR-0036 で Remote Shield Booster / Remote Armor Repairer を追加（211→246） |
 | `crates/dawn-sector/src/persistence/snapshot.rs` | 201 | 🟢 ADR-0032 で `ShipSnapshot.inventory` 追加 |
@@ -464,6 +464,19 @@ R-3 が示していた分割方針（フィールド定義と補助 impl の分�
 純粋な移動として行い、挙動変更は伴わないこと。
 
 再評価トリガー: このリファクタが完了し次第、次回レビューで「完了済み」表へ移動する。
+
+**2026-07-07、一部着手（`/improve-codebase-architecture` 発の deepening）**: 「補助 impl」の
+中身を精査した結果、`entity_absolute_f64`/`dest_in_ship_frame_abs`/`ship_distance` は単なる
+共有アクセサではなく、`AnchorTable`（`anchor.rs`、ADR-0029 の座標合成代数）の一部を
+mod.rs 側で再実装していたと判明。`AnchorTable` に `to_relative()`（`absolute()` の逆変換）を
+新設し、`rebase()` をその合成として書き直したうえで、`entity_absolute_f64`/
+`dest_in_ship_frame_abs` は `anchor_table.absolute()`/`to_relative()` を呼ぶだけに、
+`ship_distance` は各 Ship を `(AnchorId, offset)` に解決してから `anchor_table.distance()` に
+委譲する形に置き換えた（f32 ラッパー `entity_absolute`/`entity_abs_pos` は ECS 由来のオフセット
+読み出しが関心事のため mod.rs に残置）。挙動変更なし・`cargo test --workspace` / `fmt` /
+`clippy -D warnings` 全件通過。ただし **これは R-4 の全解決ではない**——mod.rs の行数はほぼ
+変わらず（936→939、doc コメント増分）、フィールド定義と補助 impl の分離という R-4 本体の作業は
+未着手のまま残る。`CONTEXT.md` に Anchor の語彙を追加済み。
 
 ### 未完了・保留
 

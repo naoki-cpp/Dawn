@@ -67,18 +67,26 @@ impl AnchorTable {
         ])
     }
 
+    /// Re-express a Sector-frame absolute point relative to `anchor`, i.e. the
+    /// inverse of [`Self::absolute`]: `abs - anchor_abs`, computed in f64 then
+    /// cast to f32 once. Exact when `abs` is near `anchor` (ship-scale
+    /// offsets); ADR-0029's precision guarantee does not extend to points far
+    /// from `anchor`.
+    pub fn to_relative(&self, anchor: AnchorId, abs: [f64; 3]) -> Option<Position> {
+        let a = self.abs(anchor)?;
+        Some(Position::new(
+            (abs[0] - a[0]) as f32,
+            (abs[1] - a[1]) as f32,
+            (abs[2] - a[2]) as f32,
+        ))
+    }
+
     /// Re-express a ship currently anchored at `from` (with `offset`) relative
     /// to a new anchor `to`. The new offset is `(from_abs + offset) - to_abs`,
     /// computed in f64 then stored as f32 — exact when the ship is near `to`
     /// (ADR-0029 §2: rebase at warp arrival, where the new offset is small).
     pub fn rebase(&self, from: AnchorId, offset: Position, to: AnchorId) -> Option<Position> {
-        let world = self.absolute(from, offset)?;
-        let t = self.abs(to)?;
-        Some(Position::new(
-            (world[0] - t[0]) as f32,
-            (world[1] - t[1]) as f32,
-            (world[2] - t[2]) as f32,
-        ))
+        self.to_relative(to, self.absolute(from, offset)?)
     }
 
     /// True distance (metres) between two anchored positions, computed by
@@ -169,6 +177,17 @@ mod tests {
         let t = table();
         // Helios (id 0) sits at [0,0,0] in Sector 0 — the origin anchor.
         assert_eq!(t.sector_origin_anchor(SectorId(0)), Some(AnchorId(0)));
+    }
+
+    #[test]
+    fn to_relative_is_the_inverse_of_absolute() {
+        let t = table();
+        let forge = AnchorId(1);
+        let offset = Position::new(2000.0, 0.0, -1500.0);
+        let abs = t.absolute(forge, offset).unwrap();
+        let recovered = t.to_relative(forge, abs).unwrap();
+        assert!((recovered.x - offset.x).abs() < 1e-3);
+        assert!((recovered.z - offset.z).abs() < 1e-3);
     }
 
     #[test]
