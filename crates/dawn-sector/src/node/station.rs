@@ -954,7 +954,9 @@ mod tests {
                 player_id,
                 ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE)
             ),
-            1
+            // 1 from the starter Packaged Ship every new player is granted
+            // (spawn_player_ship_at) + 1 just built here.
+            2
         );
     }
 
@@ -1032,7 +1034,9 @@ mod tests {
                 player_id,
                 ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE)
             ),
-            1
+            // 1 from the starter Packaged Ship every new player is granted
+            // (spawn_player_ship_at) + 1 just disassembled here.
+            2
         );
         assert!(node.get_ship_position(ship_id).is_none());
         assert_eq!(node.player_docked_station(player_id), Some(StationId(0)));

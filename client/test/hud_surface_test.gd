@@ -252,3 +252,28 @@ func test_station_inventory_packaged_ship_row_is_clickable_to_assemble() -> void
 	var hit: Dictionary = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
 	assert_str(hit.get("action", "") as String).is_equal("assemble")
 	assert_int(hit.get("ship_type_id", 0) as int).is_equal(7)
+
+
+func test_owned_ships_roster_lists_active_and_inactive_ships() -> void:
+	_surface.set_player_fitting([], [], [], [
+		{"ship_id": 1, "ship_type_id": 7, "ship_type_name": "Magpie", "docked_station_id": 0, "is_active": true},
+		{"ship_id": 2, "ship_type_id": 7, "ship_type_name": "Magpie", "docked_station_id": 0, "is_active": false},
+	])
+	_surface.toggle_inventory_panel()
+	await get_tree().process_frame
+
+	var ship_rows: Array = _surface._inventory_panel_refs["ship_rows"] as Array
+	assert_int(ship_rows.size()).is_equal(2)
+
+	var active_row: Dictionary = ship_rows[0]
+	assert_int(active_row.get("ship_id", 0) as int).is_equal(1)
+	assert_str(active_row.get("action", "") as String).is_equal("")
+
+	var inactive_row: Dictionary = ship_rows[1]
+	assert_int(inactive_row.get("ship_id", 0) as int).is_equal(2)
+	assert_str(inactive_row.get("action", "") as String).is_equal("select_active_ship")
+
+	var hit: Dictionary = _surface.inventory_panel_row_at(
+		(inactive_row["panel"] as Panel).get_global_rect().get_center())
+	assert_str(hit.get("action", "") as String).is_equal("select_active_ship")
+	assert_int(hit.get("ship_id", 0) as int).is_equal(2)

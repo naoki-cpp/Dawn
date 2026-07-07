@@ -205,6 +205,11 @@ func send_assemble_command(p_station_id: int, p_ship_type_id: int) -> void:
 func send_disembark_command() -> void:
 	_send_json("DisembarkCommand")
 
+## Make an owned, docked ship the caller's active ship (ADR-0037). This is
+## how a player re-boards after Disembark, or switches between owned ships.
+func send_select_active_ship_command(p_ship_id: int) -> void:
+	_send_json("SelectActiveShipCommand", { "ship_id": p_ship_id })
+
 func is_connected_to_server() -> bool:
 	return _connected and _welcomed
 

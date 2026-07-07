@@ -665,7 +665,8 @@ func _on_player_fitting(payload: Dictionary) -> void:
 	_hud_surface.set_player_fitting(
 		snapshot.get("modules", []) as Array,
 		snapshot.get("inventory", []) as Array,
-		snapshot.get("station_inventory", []) as Array)
+		snapshot.get("station_inventory", []) as Array,
+		snapshot.get("owned_ships", []) as Array)
 	_recalc_weapon_range()
 
 func _recalc_weapon_range() -> void:
@@ -713,6 +714,10 @@ func _handle_inventory_row_click(row: Dictionary) -> void:
 			if docked_station_id >= 0:
 				_connection.send_assemble_command(
 					docked_station_id, row.get("ship_type_id", 0) as int)
+		"select_active_ship":
+			## Also no active-ship requirement -- this is how a player re-boards
+			## after Disembark, or switches to a different owned ship.
+			_connection.send_select_active_ship_command(row.get("ship_id", 0) as int)
 
 
 func _toggle_module_by_index(f_index: int) -> void:

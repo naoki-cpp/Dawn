@@ -298,3 +298,27 @@ when it changes, but only when the new value is `-1` or a ship already
 rendered client-side -- reattaching camera/presentation to a *different*
 owned ship the client has never seen needs client UI for multi-ship
 ownership that doesn't exist yet, so that case is left alone for now.
+
+**Multi-ship roster UI (added 2026-07-08):** `PlayerLoadout` also carries
+`owned_ships: [{ship_id, ship_type_id, ship_type_name, docked_station_id,
+is_active}]` -- every ship `player_id` owns, not just the active one, via a
+new `owned_ships_json` reverse-lookup over `ShipRegistry.owners`. The Godot
+client's inventory panel gained a third "SHIPS" column
+(`hud_manager.gd::_make_ship_row`/`update_inventory_panel`) listing the
+roster; clicking a non-active row sends `SelectActiveShipCommand`
+(`connection.gd::send_select_active_ship_command`), the same command used
+to re-board after Disembark. Every new player is now also granted one
+starter `PackagedShip` in station inventory at spawn
+(`spawn_player_ship_at`), so the whole Disembark -> Assemble ->
+SelectActiveShip -> Undock loop is exercisable immediately without first
+Disassembling anything.
+
+**Known pre-existing gap (found in passing, not fixed):** `StateSnapshot`
+does not actually persist `ShipRegistry.owners`/`active_ship` -- despite this
+doc previously claiming `active_ship` survives restart via the snapshot,
+neither map has a field in `crates/dawn-sector/src/persistence/snapshot.rs`.
+Ownership is only ever established via the live spawn/Assemble/Transit code
+paths that call `self.ships.owners.insert(...)` directly, never through an
+event a replay could reconstruct (`ShipSpawned` doesn't even carry a
+`player_id`). Out of scope for this session; flagged for whoever next
+touches node persistence.

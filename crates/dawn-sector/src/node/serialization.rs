@@ -173,6 +173,10 @@ impl<S: EventStore> SimulationNode<S> {
             "Rig" : layout.map(|l| l.rig).unwrap_or(0),
         });
 
+        let owned_ships = player_id
+            .map(|pid| self.owned_ships_json(pid))
+            .unwrap_or_default();
+
         Some(
             serde_json::json!({
                 "type"         : "PlayerLoadout",
@@ -184,6 +188,7 @@ impl<S: EventStore> SimulationNode<S> {
                 "docked_station_name": docked_station_name,
                 "slot_capacity": slot_capacity,
                 "active_ship_id": active_ship_id.map(|id| id.raw()),
+                "owned_ships": owned_ships,
             })
             .to_string(),
         )
@@ -209,6 +214,7 @@ impl<S: EventStore> SimulationNode<S> {
             .and_then(|station_id| self.station(station_id))
             .map(|station| station.name.clone());
         let station_inventory = self.station_inventory_json(player_id);
+        let owned_ships = self.owned_ships_json(player_id);
         Some(
             serde_json::json!({
                 "type"         : "PlayerLoadout",
@@ -222,9 +228,38 @@ impl<S: EventStore> SimulationNode<S> {
                     "High": 0, "Mid": 0, "Low": 0, "Rig": 0,
                 }),
                 "active_ship_id": Option::<u64>::None,
+                "owned_ships": owned_ships,
             })
             .to_string(),
         )
+    }
+
+    /// Every ship `player_id` owns (`docs/architecture/ownership.md` §7),
+    /// regardless of whether it's the active one -- the client needs the
+    /// full roster to offer a "select active ship" UI. Each row:
+    /// `{ship_id, ship_type_id, ship_type_name, docked_station_id, is_active}`.
+    /// `docked_station_id` is `null` for a ship not currently docked anywhere
+    /// this node knows about (e.g. it flew off, or is in another Sector).
+    fn owned_ships_json(&self, player_id: dawn_core::PlayerId) -> Vec<serde_json::Value> {
+        let active_ship_id = self.ships.active_ship.get(&player_id).copied();
+        self.ships
+            .owners
+            .iter()
+            .filter(|(_, owner)| **owner == player_id)
+            .map(|(&ship_id, _)| {
+                let ship_type_id = self.ships.type_ids.get(&ship_id).copied();
+                let ship_type_name = ship_type_id
+                    .and_then(|t| self.ship_type_registry.get(&t))
+                    .map(|def| def.name.clone());
+                serde_json::json!({
+                    "ship_id": ship_id.raw(),
+                    "ship_type_id": ship_type_id.map(|t| t.0),
+                    "ship_type_name": ship_type_name,
+                    "docked_station_id": self.docked_station(ship_id).map(|id| id.0),
+                    "is_active": Some(ship_id) == active_ship_id,
+                })
+            })
+            .collect()
     }
 
     /// Station inventory as wire rows for `player_id`, empty if the player
@@ -447,7 +482,7 @@ impl<S: EventStore> SimulationNode<S> {
 mod tests {
     use super::*;
     use crate::node::station::StationOperationOutcome;
-    use dawn_core::{NodeId, Position, SectorBounds, SectorId, Velocity};
+    use dawn_core::{AssembleCommand, NodeId, Position, SectorBounds, SectorId, Velocity};
 
     fn mem_node() -> SimulationNode {
         SimulationNode::new(
@@ -835,5 +870,62 @@ mod tests {
             payload["active_ship_id"].is_null(),
             "disembarked player has no active ship, even though {ship_id:?} is still owned"
         );
+    }
+
+    #[test]
+    fn player_loadout_json_lists_every_owned_ship_with_active_and_docked_flags() {
+        use dawn_core::{DockCommand, StationId};
+
+        let mut node = mem_node();
+        for def in crate::ship_types::all_ship_types() {
+            node.register_ship_type(def);
+        }
+        let player_id = node.next_player_id();
+        let station = node.station(StationId(0)).unwrap().clone();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
+        assert!(matches!(
+            node.dock_owned(
+                player_id,
+                ship_id,
+                DockCommand {
+                    station_id: StationId(0),
+                }
+            ),
+            StationOperationOutcome::Accepted { .. }
+        ));
+
+        // A second owned ship, via Assemble (the starter Packaged Ship every
+        // new player gets, spawner_logic.rs).
+        let second_ship_id = node
+            .assemble_ship_owned(
+                player_id,
+                AssembleCommand {
+                    station_id: StationId(0),
+                    ship_type_id: crate::ship_types::SHIP_TYPE_MAGPIE,
+                },
+            )
+            .expect("assemble should succeed with the starter packaged ship");
+
+        let json = node.build_player_loadout_json(ship_id).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let owned_ships = payload["owned_ships"].as_array().unwrap();
+        assert_eq!(owned_ships.len(), 2);
+
+        let first_row = owned_ships
+            .iter()
+            .find(|row| row["ship_id"].as_u64().unwrap() == ship_id.raw())
+            .expect("original ship listed");
+        assert!(first_row["is_active"].as_bool().unwrap());
+        assert_eq!(first_row["docked_station_id"].as_u64().unwrap(), 0);
+
+        let second_row = owned_ships
+            .iter()
+            .find(|row| row["ship_id"].as_u64().unwrap() == second_ship_id.raw())
+            .expect("assembled ship listed");
+        assert!(
+            !second_row["is_active"].as_bool().unwrap(),
+            "Assemble must not auto-activate the new ship (ADR-0037)"
+        );
+        assert_eq!(second_row["docked_station_id"].as_u64().unwrap(), 0);
     }
 }

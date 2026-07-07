@@ -28,6 +28,9 @@ var _slot_capacity: Dictionary = {}
 ## ship_id server-side; the client should treat this field, not the presence
 ## of module rows, as the source of truth for "do I have a ship to fly".
 var _active_ship_id: int = -1
+## The full ADR-0037 roster: every ship the caller owns, active or not.
+## {ship_id, ship_type_id, ship_type_name, docked_station_id, is_active}.
+var _owned_ships: Array[Dictionary] = []
 
 
 func reset() -> void:
@@ -39,6 +42,7 @@ func reset() -> void:
 	_docked_station_name = ""
 	_slot_capacity.clear()
 	_active_ship_id = -1
+	_owned_ships.clear()
 
 
 func apply_payload(payload: Dictionary) -> void:
@@ -76,6 +80,10 @@ func apply_payload(payload: Dictionary) -> void:
 	var raw_active_ship_id: Variant = payload.get("active_ship_id", null)
 	_active_ship_id = (raw_active_ship_id as int) if raw_active_ship_id != null else -1
 
+	_owned_ships.clear()
+	for entry: Variant in payload.get("owned_ships", []) as Array:
+		_owned_ships.append(entry as Dictionary)
+
 
 func tick() -> int:
 	return _tick
@@ -84,6 +92,11 @@ func tick() -> int:
 ## The caller's active ship (ADR-0037), or -1 if they currently have none.
 func active_ship_id() -> int:
 	return _active_ship_id
+
+
+## Every ship the caller owns (ADR-0037), active or not.
+func owned_ships() -> Array[Dictionary]:
+	return _owned_ships
 
 
 func dock_status() -> Dictionary:
@@ -100,6 +113,7 @@ func hud_snapshot() -> Dictionary:
 		"inventory": inventory(),
 		"station_inventory": station_inventory(),
 		"dock_status": dock_status(),
+		"owned_ships": owned_ships(),
 	}
 
 
