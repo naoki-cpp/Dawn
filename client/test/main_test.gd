@@ -151,7 +151,7 @@ func test_ship_docked_event_clears_residual_motion() -> void:
 
 func test_player_ship_undocked_event_clears_docked_station_state() -> void:
 	_main._player_ship_id = 2
-	_main._nearby_station_id = -1
+	_main._nearby_station_ids = [] as Array[int]
 	_main._session.player_ship_id = 2
 	_main._session.apply_dock_fitting(0, "Forge Station", 12)
 
@@ -161,7 +161,7 @@ func test_player_ship_undocked_event_clears_docked_station_state() -> void:
 		"tick": 13,
 	})
 
-	assert_int(_main._nearby_station_id).is_equal(0)
+	assert_int(_main._nearby_station_ids[0]).is_equal(0)
 	var status: Dictionary = _main._session.dock_status()
 	assert_int(status["docked_station_id"] as int).is_equal(-1)
 	assert_str(status["docked_station_name"] as String).is_equal("")

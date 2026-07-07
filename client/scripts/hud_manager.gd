@@ -508,7 +508,7 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 	panel.add_theme_stylebox_override("panel", hud_box_style())
 	panel.anchor_left = 0.5; panel.anchor_right = 0.5
 	panel.anchor_top = 0.5; panel.anchor_bottom = 0.5
-	panel.offset_left = -260.0; panel.offset_right = 260.0
+	panel.offset_left = -340.0; panel.offset_right = 340.0
 	panel.offset_top = -180.0; panel.offset_bottom = 180.0
 	panel.visible = false
 	hud.add_child(panel)
@@ -538,22 +538,58 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 	inv_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	columns.add_child(inv_col)
 	var inv_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
-	inv_header.text = "INVENTORY (click to fit)"
+	inv_header.text = "SHIP CARGO (click to fit, right-click to move to station)"
 	inv_col.add_child(inv_header)
 	var inventory_list := VBoxContainer.new()
 	inventory_list.add_theme_constant_override("separation", 2)
 	inventory_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	inv_col.add_child(inventory_list)
 
+	## Separate from SHIP CARGO above -- station inventory (ADR-0034 9B) is
+	## per-player, not per-ship, and must not be visually merged with a
+	## specific ship's cargo (roadmap.md §12 task 10's own stated requirement).
+	var station_col := VBoxContainer.new()
+	station_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	station_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	columns.add_child(station_col)
+	var station_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
+	station_header.text = "STATION (click PackagedShip to assemble)"
+	station_col.add_child(station_header)
+	var station_list := VBoxContainer.new()
+	station_list.add_theme_constant_override("separation", 2)
+	station_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	station_col.add_child(station_list)
+
+	var ships_col := VBoxContainer.new()
+	ships_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ships_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	columns.add_child(ships_col)
+	var ships_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
+	ships_header.text = "SHIPS (click to select active)"
+	ships_col.add_child(ships_header)
+	var ships_list := VBoxContainer.new()
+	ships_list.add_theme_constant_override("separation", 2)
+	ships_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ships_col.add_child(ships_list)
+
 	return {
 		"panel": panel, "fitted_list": fitted_list, "inventory_list": inventory_list,
-		"fitted_rows": [], "inventory_rows": [],
+		"station_list": station_list, "ships_list": ships_list,
+		"fitted_rows": [], "inventory_rows": [], "station_rows": [], "ship_rows": [],
 	}
 
 
-## One inventory row. `action` is "fit"/"unfit" for modules and "" for
-## passive item stacks (e.g. Scrap Metal) that are only informational today.
-static func _make_inventory_row(text: String, module_id: int, slot: String, action: String) -> Dictionary:
+## One inventory row. `action` is "fit"/"unfit" for ship-inventory modules,
+## "assemble" for a station-inventory PackagedShip stack, and "" for passive
+## item stacks (e.g. Scrap Metal) that are only informational today. `source`
+## tags which column the row belongs to ("ship_cargo" or "station") so
+## main.gd can tell a right-click-to-transfer target (ship_cargo only) from
+## a similarly-actionless station row without relying on `action`, which
+## collides ("" means different things in each column).
+static func _make_inventory_row(
+	text: String, module_id: int, slot: String, action: String, ship_type_id: int = 0,
+	item_type: String = "", count: int = 0, source: String = ""
+) -> Dictionary:
 	var row := Panel.new()
 	row.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -570,19 +606,62 @@ static func _make_inventory_row(text: String, module_id: int, slot: String, acti
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(lbl)
 
-	return {"panel": row, "module_id": module_id, "slot": slot, "action": action}
+	return {
+		"panel": row, "module_id": module_id, "slot": slot, "action": action,
+		"ship_type_id": ship_type_id, "item_type": item_type, "count": count,
+		"source": source,
+	}
 
 
-## Rebuild both columns from the latest PlayerLoadout snapshot. `modules` is
-## the flat fitted-module array (slot/module_id/name fields, same shape the
-## module bar already consumes); `inventory` may contain both fittable module
-## rows and passive item stacks.
-static func update_inventory_panel(refs: Dictionary, modules: Array, inventory: Array, station_inventory: Array = []) -> void:
+## One owned-ship row (ADR-0037 roster). `action` is "" for the already-active
+## ship (nothing to do -- clicking it would just re-select itself) and
+## "select_active_ship" for any other owned ship, docked at the same station
+## or not (the server validates that; a miss here just gets rejected).
+static func _make_ship_row(text: String, ship_id: int, is_active: bool) -> Dictionary:
+	var row := Panel.new()
+	row.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.09, 0.14, 0.09, 0.6) if is_active else Color(0.05, 0.07, 0.11, 0.6)
+	style.set_corner_radius_all(3)
+	row.add_theme_stylebox_override("panel", style)
+
+	var lbl := make_hud_label(11, Color(0.82, 0.87, 0.94))
+	lbl.text = text
+	lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
+	lbl.offset_left = 6.0
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(lbl)
+
+	return {
+		"panel": row, "ship_id": ship_id,
+		"action": "" if is_active else "select_active_ship",
+	}
+
+
+## Rebuild all four columns from the latest PlayerLoadout snapshot. `modules`
+## is the flat fitted-module array (slot/module_id/name fields, same shape
+## the module bar already consumes); `inventory` is the active ship's own
+## unfitted cargo; `station_inventory` is the player-level (not per-ship)
+## station inventory (ADR-0034 9B) and is kept in its own column so the two
+## are never visually merged; `owned_ships` is the ADR-0037 roster
+## (ship_id/ship_type_name/docked_station_id/is_active rows).
+static func update_inventory_panel(
+	refs: Dictionary, modules: Array, inventory: Array, station_inventory: Array = [],
+	owned_ships: Array = []
+) -> void:
 	var fitted_list: VBoxContainer = refs["fitted_list"]
 	var inventory_list: VBoxContainer = refs["inventory_list"]
+	var station_list: VBoxContainer = refs["station_list"]
+	var ships_list: VBoxContainer = refs["ships_list"]
 	for child: Node in fitted_list.get_children():
 		child.queue_free()
 	for child: Node in inventory_list.get_children():
+		child.queue_free()
+	for child: Node in station_list.get_children():
+		child.queue_free()
+	for child: Node in ships_list.get_children():
 		child.queue_free()
 
 	var fitted_rows: Array = []
@@ -604,16 +683,43 @@ static func update_inventory_panel(refs: Dictionary, modules: Array, inventory: 
 			action = "fit"
 		else:
 			text = "%s x%d" % [item.name, item.count]
-		var row := _make_inventory_row(text, item.module_id, item.slot, action)
-		inventory_list.add_child(row["panel"])
-		inventory_rows.append(row)
-	for entry: Variant in station_inventory:
-		var item: ItemRow = entry
-		var text := "[Station] %s x%d" % [item.name, item.count]
-		var row := _make_inventory_row(text, 0, "", "")
+		var row := _make_inventory_row(
+			text, item.module_id, item.slot, action, item.ship_type_id,
+			item.item_type, item.count, "ship_cargo")
 		inventory_list.add_child(row["panel"])
 		inventory_rows.append(row)
 	refs["inventory_rows"] = inventory_rows
+
+	var station_rows: Array = []
+	for entry: Variant in station_inventory:
+		var item: ItemRow = entry
+		var text: String
+		var action := ""
+		if item.item_type == "PackagedShip":
+			text = "%s x%d (click to assemble)" % [item.name, item.count]
+			action = "assemble"
+		else:
+			text = "%s x%d" % [item.name, item.count]
+		var row := _make_inventory_row(
+			text, 0, "", action, item.ship_type_id, item.item_type, item.count, "station")
+		station_list.add_child(row["panel"])
+		station_rows.append(row)
+	refs["station_rows"] = station_rows
+
+	var ship_rows: Array = []
+	for entry: Variant in owned_ships:
+		var ship: Dictionary = entry as Dictionary
+		var ship_id: int = ship.get("ship_id", 0) as int
+		var is_active: bool = ship.get("is_active", false) as bool
+		var ship_type_name: String = ship.get("ship_type_name", "") as String
+		var name := ship_type_name if not ship_type_name.is_empty() else "Ship #%d" % ship_id
+		var docked_station_id: int = ship.get("docked_station_id", -1) as int
+		var status := "active" if is_active else ("docked" if docked_station_id >= 0 else "away")
+		var text := "%s (%s)" % [name, status]
+		var row := _make_ship_row(text, ship_id, is_active)
+		ships_list.add_child(row["panel"])
+		ship_rows.append(row)
+	refs["ship_rows"] = ship_rows
 
 
 static func toggle_inventory_panel(refs: Dictionary) -> void:
@@ -633,6 +739,12 @@ static func inventory_panel_row_at(refs: Dictionary, pos: Vector2) -> Dictionary
 		if (row["panel"] as Panel).get_global_rect().has_point(pos):
 			return row
 	for row: Dictionary in (refs["inventory_rows"] as Array):
+		if (row["panel"] as Panel).get_global_rect().has_point(pos):
+			return row
+	for row: Dictionary in (refs["station_rows"] as Array):
+		if (row["panel"] as Panel).get_global_rect().has_point(pos):
+			return row
+	for row: Dictionary in (refs["ship_rows"] as Array):
 		if (row["panel"] as Panel).get_global_rect().has_point(pos):
 			return row
 	return {}

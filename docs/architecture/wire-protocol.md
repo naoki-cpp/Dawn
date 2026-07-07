@@ -25,11 +25,16 @@ which reflects the `EventJson` enum in
 
 Read `wire-protocol.schema.json` for the exact contract. In summary, the
 `"type"` values are: `ShipSpawned`, `VelocityChanged`, `ShipDespawned`,
-`ShipDocked`, `ShipUndocked`, `DamageTaken`, `RepairApplied`,
+`ShipDocked`, `ShipUndocked`, `ShipAssembled`, `DamageTaken`, `RepairApplied`,
 `ShipDestroyed`, `TargetLocked`, `LockLost`, `ModuleActivated`,
 `ModuleDeactivated`, `JumpGateUsed`, `StarSystemChanged`, and `Redirect`
 (server-initiated reconnect to a different node on cross-node jump, see
 ADR-0026 / multi-node clusters).
+
+`ShipAssembled` (Phase 9B-5, ADR-0034/ADR-0037) reports a new live docked
+ship created from a station-inventory `PackagedShip` item: `ship_id`,
+`station_id`, `ship_type_id`, `tick`. It does not imply the ship became the
+caller's `active_ship` -- send `SelectActiveShipCommand` to fly it.
 
 Every event carries `tick: u64` except `Redirect`, which is a transport
 control message rather than a domain fact.
@@ -54,20 +59,48 @@ The `"type"` values are: `MoveCommand`, `LockOnCommand`,
 `OrbitCommand`, `KeepAtRangeCommand`, `FitModuleCommand`,
 `UnfitModuleCommand`, `DockCommand`, `UndockCommand`,
 `BuildPackagedShipCommand`, `DisassembleShipCommand`,
-`SelectActiveShipCommand`.
+`SelectActiveShipCommand`, `AssembleCommand`, `DisembarkCommand`,
+`TransferToStationCommand`.
+
+`AssembleCommand { station_id, ship_type_id }` (Phase 9B-5) carries no
+`ship_id` -- the ship doesn't exist yet; its ID is reported back via the
+resulting `ShipAssembled` event. Rejected if the caller isn't docked at
+`station_id`, `ship_type_id` is unknown, or the station inventory has no
+matching `PackagedShip`.
+
+`DisembarkCommand {}` (ADR-0037) clears the caller's active ship while
+docked, without disassembling it or changing ownership -- the ship stays
+owned and docked, only which ship the caller's commands route to changes.
+Session-local, not event-sourced (same tier as `SelectActiveShipCommand`), so
+there is no resulting domain event on the wire. Rejected if the caller has no
+active ship, or the active ship isn't currently docked. See
+`docs/architecture/ownership.md` §8.
+
+`TransferToStationCommand { ship_id, station_id, item_type, module_id,
+ship_type_id }` (ADR-0034 9B) moves the entire stack of one item out of a
+docked ship's own cargo (`InventoryComp`) into the caller's station
+inventory -- whole-stack only, no partial-count transfer. `item_type` is one
+of `"Module"`, `"PackagedShip"`, `"ScrapMetal"` (same wire shape as
+`ItemRow`); `module_id`/`ship_type_id` are populated only for the matching
+variant (`0` otherwise). Carries an explicit `ship_id` like
+`FitModuleCommand` (it may target any owned docked ship, not just the
+active one). Rejected if the caller doesn't own `ship_id`, isn't docked at
+`station_id`, or the ship's cargo has none of the named item. No resulting
+domain event -- silent station-inventory credit, same tier as
+`BuildPackagedShipCommand`/`DisassembleShipCommand`.
 
 **ADR-0037 (owned ship / active ship split):** `MoveCommand`, `LockOnCommand`,
 `ActivateModuleCommand`, `DeactivateModuleCommand`, `StopCommand`,
 `JumpCommand`, `ApproachCommand`, `WarpCommand`, `OrbitCommand`,
-`KeepAtRangeCommand`, `DockCommand`, and `UndockCommand` carry no `ship_id`
-field at all -- the server always resolves them against the caller's active
-ship, so there is no wire-representable way to name a ship the player isn't
-currently flying. `FitModuleCommand`, `UnfitModuleCommand`,
-`BuildPackagedShipCommand`, and `DisassembleShipCommand` still carry an
-explicit `ship_id`, since they may target any owned docked ship, not just the
-active one. `SelectActiveShipCommand { ship_id }` is the only way to change
-which owned ship is active (station-local switch only for now). See
-`docs/architecture/ownership.md` §7.
+`KeepAtRangeCommand`, `DockCommand`, `UndockCommand`, and `DisembarkCommand`
+carry no `ship_id` field at all -- the server always resolves them against
+the caller's active ship, so there is no wire-representable way to name a
+ship the player isn't currently flying. `FitModuleCommand`,
+`UnfitModuleCommand`, `BuildPackagedShipCommand`, and `DisassembleShipCommand`
+still carry an explicit `ship_id`, since they may target any owned docked
+ship, not just the active one. `SelectActiveShipCommand { ship_id }` is the
+only way to change which owned ship is active (station-local switch only for
+now). See `docs/architecture/ownership.md` §7.
 
 `ClientCommandJson` mirrors the wire format exactly, including two
 backward-compatible quirks it does not itself resolve (that validation

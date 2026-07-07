@@ -105,7 +105,7 @@ var _system_names : Dictionary = _session.system_names
 ## hardcoded to "Alpha", which looked like live data while still CONNECTING).
 var _current_system_name : String = "Unknown"
 var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
-var _nearby_station_id   : int    = -1
+var _nearby_station_ids  : Array[int] = []  ## in-range stations, nearest first
 var _jump_notice         : String = ""
 var _jump_notice_timer   : float  = 0.0
 ## Warp arrival is handled authoritatively by the server (ADR-0029 warp-arrival
@@ -197,17 +197,37 @@ func _update_gate_proximity() -> void:
 			return
 
 
+## Every station currently within docking range, nearest first. Usually at
+## most one (stations shouldn't be placed close enough to overlap docking
+## radii), but ranked by distance rather than array order in case they ever
+## are, so [D] docks at the one the player is actually closest to.
 func _update_station_proximity() -> void:
-	_nearby_station_id = -1
+	_nearby_station_ids.clear()
 	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return
 	var ship_pos: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
+	var in_range: Array[Dictionary] = []
 	for station_entry: Variant in _stations:
 		var station: Dictionary = station_entry as Dictionary
 		var station_pos: Vector3 = station.get("position", Vector3.ZERO) as Vector3
-		if ship_pos.distance_to(station_pos) <= (station.get("docking_radius", 0.0) as float):
-			_nearby_station_id = station.get("station_id", -1) as int
-			return
+		var dist: float = ship_pos.distance_to(station_pos)
+		if dist <= (station.get("docking_radius", 0.0) as float):
+			in_range.append({"station_id": station.get("station_id", -1) as int, "distance": dist})
+	in_range.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return (a.distance as float) < (b.distance as float))
+	for entry: Dictionary in in_range:
+		_nearby_station_ids.append(entry.station_id as int)
+
+
+## Display name for a station_id, falling back to "Station #N" if unnamed
+## or not found in the galaxy map (e.g. between InitialState and StarMap sync).
+func _station_name(station_id: int) -> String:
+	for entry: Variant in _stations:
+		var station: Dictionary = entry as Dictionary
+		if (station.get("station_id", -1) as int) == station_id:
+			var name: String = station.get("name", "") as String
+			return name if not name.is_empty() else "Station #%d" % station_id
+	return "Station #%d" % station_id
 
 func _input(event: InputEvent) -> void:
 	## Keyboard shortcuts: InputDecoder decides what the keypress means
@@ -216,11 +236,12 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		var key: InputEventKey = event as InputEventKey
 		var dock_status: Dictionary = _session.dock_status()
+		var nearest_station_id: int = _nearby_station_ids[0] if not _nearby_station_ids.is_empty() else -1
 		var action: Dictionary = _interaction.resolve_key_action(
 			key.keycode,
 			_player_ship_id,
 			_nearby_gate_id,
-			_nearby_station_id,
+			nearest_station_id,
 			dock_status.get("docked_station_id", -1) as int)
 		match action.get("kind", "none") as String:
 			"toggle_module":
@@ -268,6 +289,8 @@ func _input(event: InputEvent) -> void:
 					BUILDABLE_SHIP_TYPE_ID)
 			"disassemble_ship":
 				_connection.send_disassemble_ship_command(_player_ship_id, action.station_id as int)
+			"disembark":
+				_connection.send_disembark_command()
 		return
 
 	if event is InputEventMouseButton:
@@ -283,6 +306,8 @@ func _input(event: InputEvent) -> void:
 				var inv_row: Dictionary = _hud_surface.inventory_panel_row_at(mb.position)
 				if mb.button_index == MOUSE_BUTTON_LEFT and inv_row.has("action"):
 					_handle_inventory_row_click(inv_row)
+				elif mb.button_index == MOUSE_BUTTON_RIGHT and inv_row.has("source"):
+					_handle_inventory_row_right_click(inv_row)
 				return
 			## A click on a module slot toggles it; it is never a world click.
 			var slot_index: int = _hud_surface.module_slot_at(mb.position)
@@ -493,7 +518,10 @@ func _handle_ship_docked(p: Dictionary) -> void:
 func _handle_ship_undocked(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	if ship_id == _player_ship_id:
-		_nearby_station_id = p.get("station_id", -1) as int
+		var station_id: int = p.get("station_id", -1) as int
+		_nearby_station_ids.clear()
+		if station_id >= 0:
+			_nearby_station_ids.append(station_id)
 		_session.apply_undock_event(ship_id, p.get("tick", 0) as int)
 		_sync_session_state()
 
@@ -613,6 +641,19 @@ func _handle_aoi_leave(p: Dictionary) -> void:
 ## including a rejected Fit/Unfit attempt reverting visibly.
 func _on_player_fitting(payload: Dictionary) -> void:
 	_loadout.apply_payload(payload)
+
+	## Disembark/SelectActiveShip/Assemble (ADR-0037) can change which ship
+	## is active independently of any command this client sent. Only follow
+	## it when it's -1 (no active ship) or a ship this client already knows
+	## about -- switching to a *different* owned ship this client has never
+	## rendered would need camera/presentation reattachment work this session
+	## doesn't cover (docs/architecture/ownership.md §8).
+	var new_active_ship_id: int = _loadout.active_ship_id()
+	if new_active_ship_id != _player_ship_id \
+			and (new_active_ship_id < 0 or _ships.has(new_active_ship_id)):
+		_player_ship_id = new_active_ship_id
+		_session.player_ship_id = new_active_ship_id
+
 	var dock_status: Dictionary = _loadout.dock_status()
 	_session.apply_dock_fitting(
 		dock_status.get("docked_station_id", -1) as int,
@@ -626,7 +667,8 @@ func _on_player_fitting(payload: Dictionary) -> void:
 	_hud_surface.set_player_fitting(
 		snapshot.get("modules", []) as Array,
 		snapshot.get("inventory", []) as Array,
-		snapshot.get("station_inventory", []) as Array)
+		snapshot.get("station_inventory", []) as Array,
+		snapshot.get("owned_ships", []) as Array)
 	_recalc_weapon_range()
 
 func _recalc_weapon_range() -> void:
@@ -658,15 +700,46 @@ func _apply_player_module_activation(module_id: int, active: bool, forced_reason
 ## (the module's `def.slot` decides where it goes -- the player makes no slot
 ## choice), "unfit" removes that exact fitted instance (ADR-0032).
 func _handle_inventory_row_click(row: Dictionary) -> void:
-	if _player_ship_id < 0:
-		return
 	var module_id: int = row.get("module_id", 0) as int
 	var slot: String = row.get("slot", "") as String
 	match row.get("action", "") as String:
 		"fit":
-			_connection.send_fit_module_command(_player_ship_id, module_id, slot)
+			if _player_ship_id >= 0:
+				_connection.send_fit_module_command(_player_ship_id, module_id, slot)
 		"unfit":
-			_connection.send_unfit_module_command(_player_ship_id, module_id, slot)
+			if _player_ship_id >= 0:
+				_connection.send_unfit_module_command(_player_ship_id, module_id, slot)
+		"assemble":
+			## No active-ship requirement: this is exactly the recovery path
+			## for a shipless docked player (docs/architecture/ownership.md §8).
+			var docked_station_id: int = _session.dock_status().get("docked_station_id", -1) as int
+			if docked_station_id >= 0:
+				_connection.send_assemble_command(
+					docked_station_id, row.get("ship_type_id", 0) as int)
+		"select_active_ship":
+			## Also no active-ship requirement -- this is how a player re-boards
+			## after Disembark, or switches to a different owned ship.
+			_connection.send_select_active_ship_command(row.get("ship_id", 0) as int)
+
+
+## Right-click on a SHIP CARGO row moves the whole stack to the docked
+## station's inventory (ADR-0034 9B). Uniform across item types (Module,
+## ScrapMetal) per the user's explicit preference for a single straightforward
+## right-click gesture rather than per-type UI carve-outs.
+func _handle_inventory_row_right_click(row: Dictionary) -> void:
+	if row.get("source", "") as String != "ship_cargo":
+		return
+	if _player_ship_id < 0:
+		return
+	var docked_station_id: int = _session.dock_status().get("docked_station_id", -1) as int
+	if docked_station_id < 0:
+		return
+	_connection.send_transfer_to_station_command(
+		_player_ship_id,
+		docked_station_id,
+		row.get("item_type", "") as String,
+		row.get("module_id", 0) as int,
+		row.get("ship_type_id", 0) as int)
 
 
 func _toggle_module_by_index(f_index: int) -> void:
@@ -853,15 +926,25 @@ func _update_hud() -> void:
 		var docked_station_id: int = status.get("docked_station_id", -1) as int
 		var docked_station_name: String = status.get("docked_station_name", "") as String
 		var docked_name := docked_station_name if not docked_station_name.is_empty() else "Station #%d" % docked_station_id
-		station_line = "\nDocked: %s\n[U] Undock  [B] Build Magpie  [Y] Disassemble ship" % docked_name
-	elif _nearby_station_id >= 0:
-		var nearby_name: String = "Station #%d" % _nearby_station_id
-		for entry: Variant in _stations:
-			var station: Dictionary = entry as Dictionary
-			if (station.get("station_id", -1) as int) == _nearby_station_id:
-				nearby_name = station.get("name", nearby_name) as String
-				break
-		station_line = "\n[D] Dock at %s" % nearby_name
+		if _player_ship_id >= 0:
+			station_line = (
+				"\nDocked: %s\n[U] Undock  [B] Build Magpie\n[Y] Disassemble ship  [X] Disembark"
+				% docked_name
+			)
+		else:
+			## Disembarked (ADR-0037): still docked, but no ship is active.
+			## No client UI yet to pick among owned ships (roadmap.md §12
+			## task 10), so this just confirms the state without an action hint.
+			station_line = "\nDisembarked at: %s\n(no active ship)" % docked_name
+	elif not _nearby_station_ids.is_empty():
+		var nearest_name: String = _station_name(_nearby_station_ids[0])
+		if _nearby_station_ids.size() == 1:
+			station_line = "\nNearby: %s\n[D] Dock at %s" % [nearest_name, nearest_name]
+		else:
+			var names: Array[String] = []
+			for sid: int in _nearby_station_ids:
+				names.append(_station_name(sid))
+			station_line = "\nNearby: %s\n[D] Dock at %s (nearest)" % [", ".join(names), nearest_name]
 
 	## Approach / warp target selection (ADR-0015 / ADR-0022 / ADR-0025).
 	var keep_at_range_hint: String = "\n[O] Orbit  [K] Keep at %.0f km  ([/]  adjust)" % _keep_at_range_km
@@ -971,4 +1054,3 @@ func _sync_session_state() -> void:
 	_cap_current = _session.cap_current
 	_cap_max = _session.cap_max
 	_cap_recharge = _session.cap_recharge
-

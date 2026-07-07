@@ -35,10 +35,15 @@ pub enum ClientCommandFollowup {
     /// the caller's active ship explicitly, since `JumpCommand` itself no
     /// longer does (ADR-0037).
     Jump(ShipId, JumpCommand),
-    /// The ship's fitting changed (or the attempt was rejected) — push a
-    /// refreshed `PlayerLoadout` JSON to this ship's session so the client's
-    /// UI reflects the authoritative state.
-    RefreshFitting(ShipId),
+    /// The player's fitting/station-inventory changed (or the attempt was
+    /// rejected) — push a refreshed `PlayerLoadout` JSON to this player's
+    /// session so the client's UI reflects the authoritative state. Carries
+    /// `PlayerId` rather than `ShipId`: some triggers (Disassemble, or
+    /// Assemble from a shipless state) leave the caller with no active ship
+    /// at all, so a ship_id can't always be resolved back to a player, but a
+    /// player_id always identifies the right session
+    /// (`docs/architecture/ownership.md` §8).
+    RefreshFitting(PlayerId),
 }
 
 /// Why an Activate/Deactivate attempt was rejected (ADR-0006/0035).
@@ -227,13 +232,13 @@ impl<S: EventStore> SimulationNode<S> {
                     // accepted one both need the client's optimistic HUD
                     // toggle corrected to the authoritative state (ADR-0035).
                     let _ = self.activate_module_owned(player_id, ship_id, c);
-                    return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+                    return Some(ClientCommandFollowup::RefreshFitting(player_id));
                 }
             }
             ClientCommand::Deactivate(c) => {
                 if let Some(ship_id) = active_ship {
                     let _ = self.deactivate_module_owned(player_id, ship_id, c);
-                    return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+                    return Some(ClientCommandFollowup::RefreshFitting(player_id));
                 }
             }
             // Combat is automatic (CombatSystem each tick); AttackCommand is
@@ -265,42 +270,32 @@ impl<S: EventStore> SimulationNode<S> {
                 }
             }
             ClientCommand::Fit(f) => {
-                let ship_id = f.ship_id;
                 self.fit_module_owned(player_id, f);
-                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+                return Some(ClientCommandFollowup::RefreshFitting(player_id));
             }
             ClientCommand::Unfit(u) => {
-                let ship_id = u.ship_id;
                 self.unfit_module_owned(player_id, u);
-                return Some(ClientCommandFollowup::RefreshFitting(ship_id));
+                return Some(ClientCommandFollowup::RefreshFitting(player_id));
             }
             ClientCommand::Dock(d) => {
                 if let Some(ship_id) = active_ship {
-                    let outcome = self.dock_owned(player_id, ship_id, d);
-                    return outcome
-                        .refresh_fitting_ship_id()
-                        .map(ClientCommandFollowup::RefreshFitting);
+                    self.dock_owned(player_id, ship_id, d);
+                    return Some(ClientCommandFollowup::RefreshFitting(player_id));
                 }
             }
             ClientCommand::Undock(_) => {
                 if let Some(ship_id) = active_ship {
-                    let outcome = self.undock_owned(player_id, ship_id);
-                    return outcome
-                        .refresh_fitting_ship_id()
-                        .map(ClientCommandFollowup::RefreshFitting);
+                    self.undock_owned(player_id, ship_id);
+                    return Some(ClientCommandFollowup::RefreshFitting(player_id));
                 }
             }
             ClientCommand::BuildPackagedShip(b) => {
-                let outcome = self.build_packaged_ship_owned(player_id, b);
-                return outcome
-                    .refresh_fitting_ship_id()
-                    .map(ClientCommandFollowup::RefreshFitting);
+                self.build_packaged_ship_owned(player_id, b);
+                return Some(ClientCommandFollowup::RefreshFitting(player_id));
             }
             ClientCommand::DisassembleShip(d) => {
-                let outcome = self.disassemble_ship_owned(player_id, d);
-                return outcome
-                    .refresh_fitting_ship_id()
-                    .map(ClientCommandFollowup::RefreshFitting);
+                self.disassemble_ship_owned(player_id, d);
+                return Some(ClientCommandFollowup::RefreshFitting(player_id));
             }
             ClientCommand::Jump(j) => {
                 if let Some(ship_id) = active_ship {
@@ -311,10 +306,20 @@ impl<S: EventStore> SimulationNode<S> {
                 }
             }
             ClientCommand::SelectActiveShip(s) => {
-                let outcome = self.select_active_ship_owned(player_id, s);
-                return outcome
-                    .refresh_fitting_ship_id()
-                    .map(ClientCommandFollowup::RefreshFitting);
+                self.select_active_ship_owned(player_id, s);
+                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+            }
+            ClientCommand::Assemble(a) => {
+                let _ = self.assemble_ship_owned(player_id, a);
+                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+            }
+            ClientCommand::Disembark(_) => {
+                let _ = self.disembark_owned(player_id);
+                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+            }
+            ClientCommand::TransferToStation(t) => {
+                self.transfer_to_station_owned(player_id, t);
+                return Some(ClientCommandFollowup::RefreshFitting(player_id));
             }
         }
         None
@@ -878,8 +883,8 @@ mod tests {
             &mut locks,
         );
         assert!(
-            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == ship_id),
-            "Fit must return RefreshFitting for the ship's id"
+            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
+            "Fit must return RefreshFitting for the caller's player_id"
         );
     }
 

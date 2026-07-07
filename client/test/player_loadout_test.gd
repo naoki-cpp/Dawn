@@ -72,6 +72,43 @@ func test_apply_payload_keeps_undocked_station_context_at_negative_one() -> void
 	assert_str(dock_status["docked_station_name"] as String).is_equal("")
 
 
+func test_active_ship_id_reflects_the_wire_value() -> void:
+	var loadout := PlayerLoadoutScript.new()
+	loadout.apply_payload({
+		"modules": [], "inventory": [], "station_inventory": [],
+		"tick": 1, "docked_station_id": null, "docked_station_name": null,
+		"active_ship_id": 42,
+	})
+	assert_int(loadout.active_ship_id()).is_equal(42)
+
+
+func test_active_ship_id_is_negative_one_when_null_on_the_wire() -> void:
+	var loadout := PlayerLoadoutScript.new()
+	loadout.apply_payload({
+		"modules": [], "inventory": [], "station_inventory": [],
+		"tick": 1, "docked_station_id": null, "docked_station_name": null,
+		"active_ship_id": null,
+	})
+	assert_int(loadout.active_ship_id()).is_equal(-1)
+
+
+func test_owned_ships_reflects_the_wire_roster() -> void:
+	var loadout := PlayerLoadoutScript.new()
+	loadout.apply_payload({
+		"modules": [], "inventory": [], "station_inventory": [],
+		"tick": 1, "docked_station_id": null, "docked_station_name": null,
+		"active_ship_id": 1,
+		"owned_ships": [
+			{"ship_id": 1, "ship_type_id": 7, "ship_type_name": "Magpie", "docked_station_id": 0, "is_active": true},
+			{"ship_id": 2, "ship_type_id": 7, "ship_type_name": "Magpie", "docked_station_id": 0, "is_active": false},
+		],
+	})
+	var ships: Array = loadout.owned_ships()
+	assert_int(ships.size()).is_equal(2)
+	assert_bool((ships[0] as Dictionary)["is_active"] as bool).is_true()
+	assert_bool((ships[1] as Dictionary)["is_active"] as bool).is_false()
+
+
 ## Minimal but complete module row -- callers override only the keys the
 ## test cares about, so every fixture stays valid against ModuleRow's
 ## required-key schema without repeating the boilerplate everywhere.

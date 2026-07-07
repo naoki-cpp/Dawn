@@ -294,6 +294,38 @@ impl<S: EventStore> SimulationNode<S> {
                     self.current_tick = e.tick;
                 }
             }
+
+            DomainEvent::ShipAssembled(e) => {
+                let _ = self.try_debit_station_item(
+                    e.player_id,
+                    dawn_core::ItemId::PackagedShip(e.ship_type_id),
+                    1,
+                );
+                if !self.ships.index.contains_key(&e.ship_id) {
+                    self.insert_ship_entity(
+                        e.ship_id,
+                        e.ship_type_id,
+                        dawn_core::Position::ORIGIN,
+                        Velocity::ZERO,
+                    );
+                    if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+                        let _ = self
+                            .world
+                            .inner_mut()
+                            .remove_one::<dawn_ecs::components::IsNpcComp>(entity);
+                    }
+                    self.settle_ship_into_station(e.ship_id, e.station_id);
+                }
+                self.docked_ships.insert(e.ship_id, e.station_id);
+                self.ships.owners.insert(e.ship_id, e.player_id);
+                let counter = e.ship_id.0.counter();
+                if counter >= self.id_counter {
+                    self.id_counter = counter + 1;
+                }
+                if e.tick > self.current_tick {
+                    self.current_tick = e.tick;
+                }
+            }
         }
     }
 
@@ -494,5 +526,41 @@ mod tests {
             1
         );
         assert!(node.get_ship_position(ship_id).is_none());
+    }
+
+    #[test]
+    fn ship_assembled_event_replay_debits_station_inventory_and_reconstructs_the_ship() {
+        let mut node = mem_node();
+        let player_id = dawn_core::PlayerId(5);
+        node.credit_station_item(
+            player_id,
+            dawn_core::ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
+            1,
+        );
+        let new_ship_id = dawn_core::ShipId::new(dawn_core::NodeId(0), 99);
+
+        node.apply_event_pub(DomainEvent::ShipAssembled(
+            dawn_core::events::ShipAssembled {
+                ship_id: new_ship_id,
+                player_id,
+                station_id: dawn_core::StationId(0),
+                ship_type_id: dawn_core::ShipTypeId(1),
+                tick: Tick(3),
+            },
+        ));
+
+        assert_eq!(
+            node.station_item_count(
+                player_id,
+                dawn_core::ItemId::PackagedShip(dawn_core::ShipTypeId(1))
+            ),
+            0
+        );
+        assert!(node.owns_ship(player_id, new_ship_id));
+        assert_eq!(
+            node.docked_station(new_ship_id),
+            Some(dawn_core::StationId(0))
+        );
+        assert!(!node.is_active_ship(player_id, new_ship_id));
     }
 }

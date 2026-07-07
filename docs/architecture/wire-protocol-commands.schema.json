@@ -466,6 +466,91 @@
           ]
         }
       }
+    },
+    {
+      "description": "Convert a station-inventory Packaged Ship item into a new live docked ship (ADR-0034 9B, ADR-0037). No `ship_id` -- the ship doesn't exist yet; its ID is reported via the resulting `ShipAssembled` event.",
+      "type": "object",
+      "required": [
+        "ship_type_id",
+        "station_id",
+        "type"
+      ],
+      "properties": {
+        "ship_type_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "station_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "AssembleCommand"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Clear the caller's active ship while docked, without disassembling it (ADR-0037). No `ship_id` -- always targets the caller's own active ship, like `UndockCommand`.",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "DisembarkCommand"
+          ]
+        }
+      }
+    },
+    {
+      "description": "Move the entire stack of an item out of a docked ship's own cargo into the caller's station inventory (ADR-0034 9B). `item_type` is one of `\"Module\"`, `\"PackagedShip\"`, `\"ScrapMetal\"` (matching `ItemRow`'s wire shape) with `module_id`/`ship_type_id` populated only for the variant that uses them (`0` otherwise).",
+      "type": "object",
+      "required": [
+        "item_type",
+        "module_id",
+        "ship_id",
+        "ship_type_id",
+        "station_id",
+        "type"
+      ],
+      "properties": {
+        "item_type": {
+          "type": "string"
+        },
+        "module_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "ship_type_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "station_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "TransferToStationCommand"
+          ]
+        }
+      }
     }
   ],
   "definitions": {

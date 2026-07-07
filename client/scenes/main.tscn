@@ -63,6 +63,7 @@ offset_top = 10.0
 offset_right = -10.0
 offset_bottom = -10.0
 grow_vertical = 2
+autowrap_mode = 3
 text = "CONNECTING...\nShips: 0\nTick: 0"
 horizontal_alignment = 2
 size_flags_vertical = 3

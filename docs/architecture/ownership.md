@@ -16,11 +16,9 @@ related  : entity-model.md, event-catalog.md
 >
 > Sector Transit must always go through Raft (CLAUDE.md FBD-006).
 >
-> **Scope note (2026-07-07):** this file documents *Sector*-level ownership
-> (which Sector owns a Ship) and Actor data isolation. §7 now covers
-> *player*-level ownership (which Player owns which Ship(s)) per ADR-0037 --
-> the owned ship / active ship / docked station context split has landed
-> (`ShipRegistry.owners` / `active_ship`), unblocking Phase 9B's `Assemble`.
+> **Scope note:** this file documents *Sector*-level ownership (which Sector
+> owns a Ship) and Actor data isolation. §7 covers *player*-level ownership
+> (which Player owns which Ship(s)) per ADR-0037.
 
 # Ownership Rules
 
@@ -242,24 +240,33 @@ player is still flying.
 
 ---
 
-## 8. Known gap: a player can reach zero owned ships while docked
+## 8. A docked player with no active ship cannot Undock
 
-`disassemble_ship_owned` checks ownership, docked-station context, unfitted,
-and undamaged -- not whether this is the player's only ship. A player who
-owns exactly one ship can `Disassemble` it, after which `ShipRegistry::remove()`
-clears `active_ship` (it was the only owned ship), leaving the player with
-zero owned ships, no active ship, still docked.
+Flight/steering commands and Undock require `is_active_ship`. A player can
+be docked with no active ship -- via `DisassembleShipCommand` (destroys the
+only owned ship) or `DisembarkCommand` (clears `active_ship` without
+destroying anything) -- and simply has nothing to fly until:
 
-This state is structurally representable (no crash, no invariant violated),
-but is currently a dead end: flight/steering commands and `UndockCommand`
-resolve against `active_ship` and are silently ignored when it is `None`, and
-there is no `AssembleCommand` yet to turn the station's `PackagedShip` item
-back into a ship. `BuildPackagedShipCommand` also requires
-`owns_ship(player_id, cmd.ship_id)` (used only as an ownership-proof anchor,
-unrelated to the packaged ship being built), so a shipless player cannot use
-it either.
+- `AssembleCommand` turns a station-inventory `PackagedShip` item into a new
+  owned, docked ship (does not set it active), or
+- `SelectActiveShipCommand` makes an owned, docked ship active.
 
-**Status: accepted as temporary debt, not fixed.** Re-evaluation trigger:
-`AssembleCommand` (`docs/process/roadmap.md` §12, Phase 9B-5) resolves this
-directly and is already next up; revisit `BuildPackagedShipCommand`'s
-ownership check (owns-some-ship vs. docked-at-this-station) at the same time.
+Both `AssembleCommand` and `DisembarkCommand` are session-local, not
+event-sourced (same tier as `SelectActiveShipCommand`) -- no `DomainEvent`
+exists for either. Both return `Result<ShipId, StationOperationRejection>`
+rather than `StationOperationOutcome`, since a rejection may have no real
+`ship_id` to report.
+
+`PlayerLoadout` carries `active_ship_id: Option<u64>` (`null` when shipless)
+and `owned_ships: [{ship_id, ship_type_id, ship_type_name,
+docked_station_id, is_active}]`, so the client can render a shipless docked
+player and a full ship roster. The inventory panel has four columns --
+FITTED, SHIP CARGO, STATION, SHIPS -- kept strictly separate.
+
+`TransferToStationCommand { ship_id, station_id, item_id }` moves the
+entire stack of one item (`Module` or `ScrapMetal`) from a docked ship's
+cargo into the caller's station inventory; whole-stack only, no partial
+transfer. Client trigger: right-click a SHIP CARGO row.
+
+**Known gap:** `StateSnapshot` does not persist `ShipRegistry.owners`/
+`active_ship`.

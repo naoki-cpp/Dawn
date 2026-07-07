@@ -193,6 +193,42 @@ func send_disassemble_ship_command(p_ship_id: int, p_station_id: int) -> void:
 		"station_id": p_station_id,
 	})
 
+## Convert a station-inventory Packaged Ship item into a new live docked ship
+## (ADR-0034 9B, ADR-0037). No ship_id -- the ship doesn't exist yet.
+func send_assemble_command(p_station_id: int, p_ship_type_id: int) -> void:
+	_send_json("AssembleCommand", {
+		"station_id"  : p_station_id,
+		"ship_type_id": p_ship_type_id,
+	})
+
+## Leave the active ship while docked, without disassembling it (ADR-0037).
+func send_disembark_command() -> void:
+	_send_json("DisembarkCommand")
+
+## Make an owned, docked ship the caller's active ship (ADR-0037). This is
+## how a player re-boards after Disembark, or switches between owned ships.
+func send_select_active_ship_command(p_ship_id: int) -> void:
+	_send_json("SelectActiveShipCommand", { "ship_id": p_ship_id })
+
+## Move the entire stack of an item out of a docked ship's own cargo into
+## the caller's station inventory (ADR-0034 9B). p_item_type is one of
+## "Module", "PackagedShip", "ScrapMetal" (matches ItemRow.item_type);
+## p_module_id/p_ship_type_id are only meaningful for the matching variant.
+func send_transfer_to_station_command(
+	p_ship_id: int,
+	p_station_id: int,
+	p_item_type: String,
+	p_module_id: int = 0,
+	p_ship_type_id: int = 0
+) -> void:
+	_send_json("TransferToStationCommand", {
+		"ship_id"     : p_ship_id,
+		"station_id"  : p_station_id,
+		"item_type"   : p_item_type,
+		"module_id"   : p_module_id,
+		"ship_type_id": p_ship_type_id,
+	})
+
 func is_connected_to_server() -> bool:
 	return _connected and _welcomed
 

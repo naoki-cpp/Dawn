@@ -114,6 +114,10 @@ pub enum DomainEvent {
 
     /// A docked ship was converted into a packaged ship item.
     ShipDisassembled(ShipDisassembled),
+
+    /// A station-inventory packaged ship item was converted into a new live
+    /// docked ship (ADR-0034 9B, ADR-0037).
+    ShipAssembled(ShipAssembled),
 }
 
 impl DomainEvent {
@@ -144,6 +148,7 @@ impl DomainEvent {
             Self::ShipUndocked(e) => e.ship_id,
             Self::PackagedShipBuilt(e) => e.ship_id,
             Self::ShipDisassembled(e) => e.ship_id,
+            Self::ShipAssembled(e) => e.ship_id,
         }
     }
 
@@ -175,6 +180,7 @@ impl DomainEvent {
             Self::ShipUndocked(e) => e.tick,
             Self::PackagedShipBuilt(e) => e.tick,
             Self::ShipDisassembled(e) => e.tick,
+            Self::ShipAssembled(e) => e.tick,
         }
     }
 }
@@ -249,6 +255,19 @@ pub struct PackagedShipBuilt {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShipDisassembled {
+    pub ship_id: ShipId,
+    pub player_id: crate::PlayerId,
+    pub station_id: StationId,
+    pub ship_type_id: ShipTypeId,
+    pub tick: Tick,
+}
+
+/// A station-inventory `PackagedShip` item was converted into a new live
+/// docked ship, owned by `player_id` (ADR-0034 9B, ADR-0037). `ship_id` is
+/// freshly allocated -- never reused (INV-004). Does not change the
+/// player's `active_ship`; a later `SelectActiveShipCommand` makes it active.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ShipAssembled {
     pub ship_id: ShipId,
     pub player_id: crate::PlayerId,
     pub station_id: StationId,
@@ -641,6 +660,24 @@ mod tests {
         });
         assert_eq!(event.ship_id(), id);
         assert_eq!(event.tick(), Tick(11));
+    }
+
+    #[test]
+    fn ship_assembled_event_carries_the_new_ships_identity() {
+        let id = ship_id();
+        let event = DomainEvent::ShipAssembled(ShipAssembled {
+            ship_id: id,
+            player_id: crate::PlayerId(3),
+            station_id: StationId(0),
+            ship_type_id: ShipTypeId(1),
+            tick: Tick(12),
+        });
+        assert_eq!(event.ship_id(), id);
+        assert_eq!(event.tick(), Tick(12));
+        match event {
+            DomainEvent::ShipAssembled(e) => assert_eq!(e.player_id, crate::PlayerId(3)),
+            _ => panic!("expected ShipAssembled"),
+        }
     }
 
     fn bincode_roundtrip(event: &DomainEvent) -> String {

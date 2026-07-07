@@ -58,6 +58,15 @@ pub enum EventJson {
         station_id: u32,
         tick: u64,
     },
+    /// A station-inventory Packaged Ship item became a new live docked ship,
+    /// owned by the caller (ADR-0034 9B, ADR-0037). `active_ship` is
+    /// unchanged -- the client must send `SelectActiveShipCommand` to fly it.
+    ShipAssembled {
+        ship_id: u64,
+        station_id: u32,
+        ship_type_id: u32,
+        tick: u64,
+    },
     DamageTaken {
         ship_id: u64,
         damage: f32,
@@ -215,6 +224,12 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
         DomainEvent::ShipUndocked(e) => EventJson::ShipUndocked {
             ship_id: e.ship_id.raw(),
             station_id: e.station_id.0,
+            tick: e.tick.value(),
+        },
+        DomainEvent::ShipAssembled(e) => EventJson::ShipAssembled {
+            ship_id: e.ship_id.raw(),
+            station_id: e.station_id.0,
+            ship_type_id: e.ship_type_id.0,
             tick: e.tick.value(),
         },
         DomainEvent::DamageTaken(e) => EventJson::DamageTaken {
@@ -447,6 +462,29 @@ pub enum ClientCommandJson {
     SelectActiveShipCommand {
         ship_id: u64,
     },
+    /// Convert a station-inventory Packaged Ship item into a new live docked
+    /// ship (ADR-0034 9B, ADR-0037). No `ship_id` -- the ship doesn't exist
+    /// yet; its ID is reported via the resulting `ShipAssembled` event.
+    AssembleCommand {
+        station_id: u32,
+        ship_type_id: u32,
+    },
+    /// Clear the caller's active ship while docked, without disassembling it
+    /// (ADR-0037). No `ship_id` -- always targets the caller's own active
+    /// ship, like `UndockCommand`.
+    DisembarkCommand {},
+    /// Move the entire stack of an item out of a docked ship's own cargo
+    /// into the caller's station inventory (ADR-0034 9B). `item_type` is
+    /// one of `"Module"`, `"PackagedShip"`, `"ScrapMetal"` (matching
+    /// `ItemRow`'s wire shape) with `module_id`/`ship_type_id` populated
+    /// only for the variant that uses them (`0` otherwise).
+    TransferToStationCommand {
+        ship_id: u64,
+        station_id: u32,
+        item_type: String,
+        module_id: u32,
+        ship_type_id: u32,
+    },
 }
 
 /// Render the client -> server wire schema (see [`ClientCommandJson`]) as a
@@ -612,6 +650,39 @@ fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
                 ship_id: ShipId(EntityId::from_raw(ship_id)),
             }),
         ),
+        ClientCommandJson::AssembleCommand {
+            station_id,
+            ship_type_id,
+        } => Some(ClientCommand::Assemble(dawn_core::AssembleCommand {
+            station_id: dawn_core::StationId(station_id),
+            ship_type_id: dawn_core::ShipTypeId(ship_type_id),
+        })),
+        ClientCommandJson::DisembarkCommand {} => {
+            Some(ClientCommand::Disembark(dawn_core::DisembarkCommand))
+        }
+        ClientCommandJson::TransferToStationCommand {
+            ship_id,
+            station_id,
+            item_type,
+            module_id,
+            ship_type_id,
+        } => {
+            let item_id = match item_type.as_str() {
+                "Module" => dawn_core::ItemId::Module(ModuleId(module_id)),
+                "PackagedShip" => {
+                    dawn_core::ItemId::PackagedShip(dawn_core::ShipTypeId(ship_type_id))
+                }
+                "ScrapMetal" => dawn_core::ItemId::ScrapMetal,
+                _ => return None,
+            };
+            Some(ClientCommand::TransferToStation(
+                dawn_core::TransferToStationCommand {
+                    ship_id: ShipId(EntityId::from_raw(ship_id)),
+                    station_id: dawn_core::StationId(station_id),
+                    item_id,
+                },
+            ))
+        }
     }
 }
 
@@ -708,6 +779,58 @@ mod tests {
     }
 
     #[test]
+    fn assemble_command_json_is_parsed_into_client_command_assemble() {
+        let line = r#"{"type":"AssembleCommand","station_id":2,"ship_type_id":1}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::Assemble(c) => {
+                assert_eq!(c.station_id, dawn_core::StationId(2));
+                assert_eq!(c.ship_type_id, dawn_core::ShipTypeId(1));
+            }
+            other => panic!("expected Assemble, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn disembark_command_json_is_parsed_into_client_command_disembark() {
+        let line = r#"{"type":"DisembarkCommand"}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        assert!(matches!(cmd, ClientCommand::Disembark(_)));
+    }
+
+    #[test]
+    fn transfer_to_station_command_json_with_scrap_metal_is_parsed() {
+        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::TransferToStation(c) => {
+                assert_eq!(c.ship_id, ship_id(42));
+                assert_eq!(c.station_id, dawn_core::StationId(2));
+                assert_eq!(c.item_id, dawn_core::ItemId::ScrapMetal);
+            }
+            other => panic!("expected TransferToStation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn transfer_to_station_command_json_with_module_is_parsed() {
+        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"Module","module_id":7,"ship_type_id":0}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::TransferToStation(c) => {
+                assert_eq!(c.item_id, dawn_core::ItemId::Module(ModuleId(7)));
+            }
+            other => panic!("expected TransferToStation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn transfer_to_station_command_json_with_unknown_item_type_fails_to_parse() {
+        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"Bogus","module_id":0,"ship_type_id":0}"#;
+        assert!(parse_client_command(line).is_none());
+    }
+
+    #[test]
     fn orbit_command_json_with_target_id_is_parsed_into_client_command_orbit() {
         let line = r#"{"type":"OrbitCommand","target_id":2,"radius":3000.0}"#;
         let cmd = parse_client_command(line).expect("must parse");
@@ -792,6 +915,26 @@ mod tests {
         assert_eq!(v["type"], "ShipDocked");
         assert_eq!(v["ship_id"], ship_id(42).raw());
         assert_eq!(v["station_id"], 3);
+        assert_eq!(v["tick"], 9);
+    }
+
+    #[test]
+    fn ship_assembled_event_is_serialized_for_clients() {
+        let json = domain_event_to_json(&DomainEvent::ShipAssembled(
+            dawn_core::events::ShipAssembled {
+                ship_id: ship_id(99),
+                player_id: dawn_core::PlayerId(1),
+                station_id: dawn_core::StationId(3),
+                ship_type_id: dawn_core::ShipTypeId(1),
+                tick: dawn_core::Tick(9),
+            },
+        ))
+        .expect("ShipAssembled should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "ShipAssembled");
+        assert_eq!(v["ship_id"], ship_id(99).raw());
+        assert_eq!(v["station_id"], 3);
+        assert_eq!(v["ship_type_id"], 1);
         assert_eq!(v["tick"], 9);
     }
 

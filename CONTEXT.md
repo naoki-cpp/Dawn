@@ -33,6 +33,10 @@ player stronger.
 - Active ship: the one owned ship currently routable for flight/steering/
   module commands and Undock. Singular per player; switched explicitly via
   `SelectActiveShipCommand`, never automatically (ADR-0037).
+- Disembark: voluntarily clearing a player's active ship while docked, via
+  `DisembarkCommand`. The ship stays owned and docked; only which ship the
+  player's commands route to changes (ADR-0037). Re-entered via
+  `SelectActiveShipCommand`.
 - Command: a request to change the world. It may be rejected.
 - Event: an immutable fact that already happened.
 - Tick: deterministic logical time. It is not wall-clock time.

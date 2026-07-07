@@ -150,8 +150,10 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 );
                 let (ship_id, j) = match followup {
                     Some(ClientCommandFollowup::Jump(ship_id, j)) => (ship_id, j),
-                    Some(ClientCommandFollowup::RefreshFitting(ship_id)) => {
-                        if let Some(json) = nodes[sector].build_player_loadout_json(ship_id) {
+                    Some(ClientCommandFollowup::RefreshFitting(player_id)) => {
+                        if let Some(json) =
+                            nodes[sector].build_player_loadout_json_for_player(player_id)
+                        {
                             sess.send_raw(&json);
                         }
                         continue;

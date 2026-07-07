@@ -16,7 +16,7 @@
 
 use crate::fitting::{ModuleId, SlotKind};
 use crate::navigation::{JumpGateId, StationId, WarpTarget};
-use crate::{Position, SectorId, ShipId, ShipTypeId};
+use crate::{ItemId, Position, SectorId, ShipId, ShipTypeId};
 use serde::{Deserialize, Serialize};
 
 /// Request to move the caller's active ship to `target_position` within its
@@ -87,6 +87,21 @@ pub struct DockCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct UndockCommand;
 
+/// Request to disembark: clear the caller's `active_ship` while docked,
+/// without disassembling or transferring ownership of it (ADR-0037). No
+/// `ship_id` -- always targets the caller's own active ship, like
+/// `UndockCommand`. Session-local, not event-sourced (same tier as
+/// `SelectActiveShipCommand`): it changes no Ship's authoritative state, only
+/// which ship the caller's commands route to. A later `SelectActiveShipCommand`
+/// re-activates a ship (this one or another owned ship docked at the same
+/// station).
+///
+/// May be rejected if:
+/// - The caller has no active ship (already disembarked, or never had one).
+/// - The active ship is not currently docked.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DisembarkCommand;
+
 /// Request to build a packaged ship inside the currently-docked station.
 ///
 /// May be rejected if:
@@ -101,6 +116,26 @@ pub struct BuildPackagedShipCommand {
     pub ship_type_id: ShipTypeId,
 }
 
+/// Request to move an item from a docked ship's own cargo (`InventoryComp`)
+/// into the caller's station inventory (ADR-0034 9B), all of it in one go --
+/// no partial-count transfer. Ship cargo can currently only ever hold
+/// `ItemId::Module` (starter loadout) or `ItemId::ScrapMetal` (combat loot,
+/// `tick.rs`'s kill credit); `ItemId::PackagedShip` never enters ship cargo,
+/// so it's never a meaningful `item_id` here, but nothing stops a client from
+/// naming one -- the server rejects it the same way as naming an item the
+/// ship doesn't have any of.
+///
+/// May be rejected if:
+/// - The Ship does not exist or the caller does not own it.
+/// - The caller is not currently docked at the target station.
+/// - The Ship's cargo has none of `item_id`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TransferToStationCommand {
+    pub ship_id: ShipId,
+    pub station_id: StationId,
+    pub item_id: ItemId,
+}
+
 /// Request to disassemble a docked ship into a packaged ship item.
 ///
 /// May be rejected if:
@@ -111,6 +146,24 @@ pub struct BuildPackagedShipCommand {
 pub struct DisassembleShipCommand {
     pub ship_id: ShipId,
     pub station_id: StationId,
+}
+
+/// Request to convert a station-inventory `PackagedShip` item into a new
+/// live docked ship, owned by the caller (ADR-0034 9B, ADR-0037). There is
+/// no `ship_id` field -- the ship doesn't exist yet; the resulting ship's ID
+/// is allocated on success and reported via the followup.
+///
+/// Does not change the caller's `active_ship`; a later `SelectActiveShipCommand`
+/// makes the newly-assembled ship active.
+///
+/// May be rejected if:
+/// - The caller is not currently docked at `station_id`.
+/// - `ship_type_id` is unknown to the current node.
+/// - The station inventory does not contain a `PackagedShip` of that type.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AssembleCommand {
+    pub station_id: StationId,
+    pub ship_type_id: ShipTypeId,
 }
 
 /// Request to make an owned, docked ship the caller's active ship (ADR-0037).
@@ -340,6 +393,15 @@ pub enum ClientCommand {
     DisassembleShip(DisassembleShipCommand),
     /// Switch which owned, docked ship is the caller's active ship (ADR-0037).
     SelectActiveShip(SelectActiveShipCommand),
+    /// Convert a station-inventory Packaged Ship item into a new live docked
+    /// ship, owned by the caller (ADR-0034 9B, ADR-0037).
+    Assemble(AssembleCommand),
+    /// Clear the caller's active ship while docked, without disassembling it
+    /// (ADR-0037).
+    Disembark(DisembarkCommand),
+    /// Move an item from a docked ship's own cargo into the caller's station
+    /// inventory (ADR-0034 9B).
+    TransferToStation(TransferToStationCommand),
 }
 
 #[cfg(test)]
@@ -469,5 +531,21 @@ mod tests {
             ship_id: ship_id(1),
         };
         assert_eq!(cmd.ship_id, ship_id(1));
+    }
+
+    #[test]
+    fn assemble_command_carries_no_ship_id() {
+        let cmd = AssembleCommand {
+            station_id: StationId(0),
+            ship_type_id: ShipTypeId(1),
+        };
+        assert_eq!(cmd.station_id, StationId(0));
+        assert_eq!(cmd.ship_type_id, ShipTypeId(1));
+    }
+
+    #[test]
+    fn disembark_command_wraps_into_client_command() {
+        let cmd = ClientCommand::Disembark(DisembarkCommand);
+        assert!(matches!(cmd, ClientCommand::Disembark(DisembarkCommand)));
     }
 }

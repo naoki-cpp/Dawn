@@ -17,19 +17,20 @@ use super::SimulationNode;
 impl<S: EventStore> SimulationNode<S> {
     // ── Spawn ─────────────────────────────────────────────────────────────────
 
-    /// Spawn a Ship, record it in the ECS, append a `ShipSpawned` event.
-    ///
-    /// INV-004: the ID is generated from a monotonically increasing counter
-    /// combined with `NodeId`.  IDs are never reused.
-    pub fn spawn_ship(
+    /// Insert a ship entity into the ECS with stats derived from
+    /// `ship_type_id`, for a `ship_id` the caller has already allocated (or is
+    /// replaying from an event). The ECS/base-stats core shared by
+    /// `spawn_ship` (fresh ID, appends `ShipSpawned`) and
+    /// `assemble_ship_owned`/its replay arm (appends `ShipAssembled` instead) --
+    /// each call site appends its own event afterward since which event fits
+    /// depends on why the ship came into being.
+    pub(super) fn insert_ship_entity(
         &mut self,
+        ship_id: ShipId,
         ship_type_id: dawn_core::ship_type::ShipTypeId,
         position: Position,
         velocity: Velocity,
-    ) -> ShipId {
-        let ship_id = ShipId::new(self.node_id, self.id_counter);
-        self.id_counter += 1;
-
+    ) {
         let base = self
             .ship_type_registry
             .get(&ship_type_id)
@@ -55,6 +56,22 @@ impl<S: EventStore> SimulationNode<S> {
                 },
             );
         }
+    }
+
+    /// Spawn a Ship, record it in the ECS, append a `ShipSpawned` event.
+    ///
+    /// INV-004: the ID is generated from a monotonically increasing counter
+    /// combined with `NodeId`.  IDs are never reused.
+    pub fn spawn_ship(
+        &mut self,
+        ship_type_id: dawn_core::ship_type::ShipTypeId,
+        position: Position,
+        velocity: Velocity,
+    ) -> ShipId {
+        let ship_id = ShipId::new(self.node_id, self.id_counter);
+        self.id_counter += 1;
+
+        self.insert_ship_entity(ship_id, ship_type_id, position, velocity);
 
         self.event_store
             .append(DomainEvent::ShipSpawned(ShipSpawned {
@@ -144,6 +161,17 @@ impl<S: EventStore> SimulationNode<S> {
         if let Some(&entity) = self.ships.index.get(&ship_id) {
             self.seed_player_inventory(entity);
         }
+        // Starter Packaged Ship (ADR-0034/0037 round trip): every new player
+        // gets one immediately, so Assemble/Disembark/SelectActiveShip/Undock
+        // is exercisable from a fresh connect without first Disassembling
+        // their only ship. Station inventory is per-player, not per-station
+        // (docs/architecture/ownership.md), so this shows up at any station
+        // the player docks at, not just the one nearest their spawn point.
+        self.credit_station_item(
+            player_id,
+            dawn_core::ItemId::PackagedShip(SHIP_TYPE_MAGPIE),
+            1,
+        );
 
         use dawn_core::SlotKind;
         self.fit_module(FitModuleCommand {
@@ -428,6 +456,24 @@ mod tests {
             node.register_ship_type(def);
         }
         node
+    }
+
+    #[test]
+    fn a_new_player_starts_with_one_packaged_ship_in_station_inventory() {
+        // ADR-0034/0037 round trip: every new player can exercise
+        // Assemble/Disembark/SelectActiveShip/Undock immediately, without
+        // first Disassembling their only ship.
+        let mut node = node_with_modules();
+        let player_id = node.next_player_id();
+        node.spawn_player_ship(player_id);
+
+        assert_eq!(
+            node.station_item_count(
+                player_id,
+                dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE)
+            ),
+            1
+        );
     }
 
     #[test]

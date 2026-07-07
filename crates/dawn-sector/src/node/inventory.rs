@@ -12,7 +12,7 @@
 //! Both emit the existing `ShipFitted` event (now carrying the resulting
 //! inventory snapshot too, ADR-0032 §5) -- no new event type.
 
-use dawn_core::{FitModuleCommand, PlayerId, UnfitModuleCommand};
+use dawn_core::{FitModuleCommand, PlayerId, TransferToStationCommand, UnfitModuleCommand};
 use dawn_ecs::{
     components::{FittedSlot, FittingComp, InventoryComp},
     Entity,
@@ -154,6 +154,39 @@ impl<S: EventStore> SimulationNode<S> {
         }
 
         self.apply_fitting_and_emit(cmd.ship_id, entity);
+        true
+    }
+
+    /// Move the entire stack of `cmd.item_id` out of the docked ship's own
+    /// cargo (`InventoryComp`) into the caller's station inventory
+    /// (ADR-0034 section 9B). Whole-stack only -- no partial-count transfer.
+    /// Rejected if the caller doesn't own `cmd.ship_id`, isn't currently
+    /// docked at `cmd.station_id`, or the ship's cargo has none of
+    /// `cmd.item_id`.
+    pub fn transfer_to_station_owned(
+        &mut self,
+        player_id: PlayerId,
+        cmd: TransferToStationCommand,
+    ) -> bool {
+        if !self.owns_ship(player_id, cmd.ship_id) {
+            return false;
+        }
+        if !self.can_use_station(player_id, cmd.station_id) {
+            return false;
+        }
+        let Some(&entity) = self.ships.index.get(&cmd.ship_id) else {
+            return false;
+        };
+        let taken = self
+            .world
+            .inner_mut()
+            .get::<&mut InventoryComp>(entity)
+            .map(|mut inv| inv.take_all(cmd.item_id))
+            .unwrap_or(0);
+        if taken == 0 {
+            return false;
+        }
+        self.credit_station_item(player_id, cmd.item_id, taken);
         true
     }
 
@@ -424,5 +457,114 @@ mod tests {
 
         let inv = node.world.inner().get::<&InventoryComp>(entity).unwrap();
         assert_eq!(total_items(&inv), start_len);
+    }
+
+    /// Spawns a fresh owned player ship at the demo station (`StationId(0)`,
+    /// present in every `node_with_modules()` fixture) and docks it there.
+    fn spawn_and_dock_owned_player(
+        node: &mut SimulationNode,
+    ) -> (dawn_core::PlayerId, dawn_core::ShipId, dawn_core::StationId) {
+        use dawn_core::{DockCommand, StationId};
+
+        let station = node
+            .station(StationId(0))
+            .expect("demo station exists")
+            .clone();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
+        assert!(matches!(
+            node.dock_owned(
+                player_id,
+                ship_id,
+                DockCommand {
+                    station_id: StationId(0),
+                }
+            ),
+            crate::node::station::StationOperationOutcome::Accepted { .. }
+        ));
+        (player_id, ship_id, StationId(0))
+    }
+
+    #[test]
+    fn transfer_to_station_owned_moves_the_whole_stack_of_scrap_metal() {
+        let mut node = node_with_modules();
+        let (player, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.world
+            .inner_mut()
+            .get::<&mut InventoryComp>(entity)
+            .unwrap()
+            .add_item(dawn_core::ItemId::ScrapMetal, 4);
+
+        assert!(node.transfer_to_station_owned(
+            player,
+            TransferToStationCommand {
+                ship_id,
+                station_id,
+                item_id: dawn_core::ItemId::ScrapMetal,
+            }
+        ));
+
+        let inv = node.world.inner().get::<&InventoryComp>(entity).unwrap();
+        assert_eq!(inv.item_count(dawn_core::ItemId::ScrapMetal), 0);
+        assert_eq!(
+            node.station_inventory(player)
+                .and_then(|inv| inv.get(&dawn_core::ItemId::ScrapMetal))
+                .copied()
+                .unwrap_or(0),
+            4
+        );
+    }
+
+    #[test]
+    fn transfer_to_station_owned_is_rejected_for_a_ship_the_player_does_not_own() {
+        let mut node = node_with_modules();
+        let (_owner, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
+        let stranger = node.next_player_id();
+
+        assert!(!node.transfer_to_station_owned(
+            stranger,
+            TransferToStationCommand {
+                ship_id,
+                station_id,
+                item_id: dawn_core::ItemId::ScrapMetal,
+            }
+        ));
+    }
+
+    #[test]
+    fn transfer_to_station_owned_is_rejected_when_not_docked_at_the_station() {
+        let mut node = node_with_modules();
+        let (player, ship_id) = spawn_owned_player(&mut node);
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.world
+            .inner_mut()
+            .get::<&mut InventoryComp>(entity)
+            .unwrap()
+            .add_item(dawn_core::ItemId::ScrapMetal, 4);
+
+        assert!(!node.transfer_to_station_owned(
+            player,
+            TransferToStationCommand {
+                ship_id,
+                station_id: dawn_core::StationId(0),
+                item_id: dawn_core::ItemId::ScrapMetal,
+            }
+        ));
+    }
+
+    #[test]
+    fn transfer_to_station_owned_is_rejected_when_the_ship_cargo_has_none_of_the_item() {
+        let mut node = node_with_modules();
+        let (player, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
+
+        assert!(!node.transfer_to_station_owned(
+            player,
+            TransferToStationCommand {
+                ship_id,
+                station_id,
+                item_id: dawn_core::ItemId::ScrapMetal,
+            }
+        ));
     }
 }
