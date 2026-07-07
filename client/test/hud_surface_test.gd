@@ -247,7 +247,7 @@ func test_station_inventory_packaged_ship_row_is_clickable_to_assemble() -> void
 	_surface.toggle_inventory_panel()
 	await get_tree().process_frame
 
-	var rows: Array = _surface._inventory_panel_refs["inventory_rows"] as Array
+	var rows: Array = _surface._inventory_panel_refs["station_rows"] as Array
 	var row_panel: Panel = rows[0]["panel"]
 	var hit: Dictionary = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
 	assert_str(hit.get("action", "") as String).is_equal("assemble")
