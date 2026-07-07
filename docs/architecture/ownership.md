@@ -16,11 +16,9 @@ related  : entity-model.md, event-catalog.md
 >
 > Sector Transit must always go through Raft (CLAUDE.md FBD-006).
 >
-> **Scope note (2026-07-07):** this file documents *Sector*-level ownership
-> (which Sector owns a Ship) and Actor data isolation. §7 now covers
-> *player*-level ownership (which Player owns which Ship(s)) per ADR-0037 --
-> the owned ship / active ship / docked station context split has landed
-> (`ShipRegistry.owners` / `active_ship`), unblocking Phase 9B's `Assemble`.
+> **Scope note:** this file documents *Sector*-level ownership (which Sector
+> owns a Ship) and Actor data isolation. §7 covers *player*-level ownership
+> (which Player owns which Ship(s)) per ADR-0037.
 
 # Ownership Rules
 
@@ -242,124 +240,33 @@ player is still flying.
 
 ---
 
-## 8. A player can reach zero owned ships while docked (resolved 2026-07-07)
+## 8. A docked player with no active ship cannot Undock
 
-`disassemble_ship_owned` checks ownership, docked-station context, unfitted,
-and undamaged -- not whether this is the player's only ship. A player who
-owns exactly one ship can `Disassemble` it, after which `ShipRegistry::remove()`
-clears `active_ship` (it was the only owned ship), leaving the player with
-zero owned ships, no active ship, still docked.
+Flight/steering commands and Undock require `is_active_ship`. A player can
+be docked with no active ship -- via `DisassembleShipCommand` (destroys the
+only owned ship) or `DisembarkCommand` (clears `active_ship` without
+destroying anything) -- and simply has nothing to fly until:
 
-This state is structurally representable (no crash, no invariant violated),
-and is no longer a dead end: `AssembleCommand` (Phase 9B-5, implemented
-2026-07-07) converts a station-inventory `PackagedShip` item into a new
-owned, docked ship without changing `active_ship` (ADR-0037); the player then
-sends `SelectActiveShipCommand` to make it active and can `Undock` normally.
-`BuildPackagedShipCommand` still requires `owns_ship(player_id, cmd.ship_id)`
-(used only as an ownership-proof anchor, unrelated to the packaged ship being
-built) -- a shipless player cannot use it, but this no longer matters for
-recovery since Assemble only needs a `PackagedShip` already in station
-inventory, not an existing ship.
+- `AssembleCommand` turns a station-inventory `PackagedShip` item into a new
+  owned, docked ship (does not set it active), or
+- `SelectActiveShipCommand` makes an owned, docked ship active.
 
-A related bug surfaced and was fixed in the same change: `ClientCommandFollowup::RefreshFitting`
-used to carry a `ShipId`, and `build_player_loadout_json` bailed out
-immediately once that ship no longer existed in the ECS -- so a client that
-disassembled its only ship never received the updated station inventory at
-all (the item existed server-side, but the client never learned about it).
-Fixed by keying `RefreshFitting` on `PlayerId` instead, with a new
-`build_player_loadout_json_for_player` that falls back to reporting just the
-docked station and station inventory when the player has no active ship.
+Both `AssembleCommand` and `DisembarkCommand` are session-local, not
+event-sourced (same tier as `SelectActiveShipCommand`) -- no `DomainEvent`
+exists for either. Both return `Result<ShipId, StationOperationRejection>`
+rather than `StationOperationOutcome`, since a rejection may have no real
+`ship_id` to report.
 
-**Disembark (added 2026-07-07):** the zero-owned-ships-while-docked state was
-previously only reachable by accident (via Disassemble). `DisembarkCommand`
-(no fields, no `ship_id`, resolved from the caller's active ship like
-`UndockCommand`) makes it a deliberate player action: it clears `active_ship`
-while docked, without disassembling the ship or touching `owns_ship` --
-`docked_ships`/`docked_players` are unaffected, only which ship the caller's
-commands route to. `disembark_owned` returns `Result<ShipId, StationOperationRejection>`
-rather than `StationOperationOutcome` for the same reason `assemble_ship_owned`
-does: the "no active ship" rejection has no real ship to report. Session-local,
-not event-sourced (same tier as `SelectActiveShipCommand`) -- no `DomainEvent`
-variant exists for it, and it isn't forwarded on the wire as an event. Round
-trip: `Disembark` -> `SelectActiveShipCommand` (this ship, or another owned
-ship docked at the same station) -> `Undock`.
+`PlayerLoadout` carries `active_ship_id: Option<u64>` (`null` when shipless)
+and `owned_ships: [{ship_id, ship_type_id, ship_type_name,
+docked_station_id, is_active}]`, so the client can render a shipless docked
+player and a full ship roster. The inventory panel has four columns --
+FITTED, SHIP CARGO, STATION, SHIPS -- kept strictly separate.
 
-**Client visibility gap found and fixed (2026-07-07):** Disembark worked
-correctly server-side but was invisible to the client -- the `PlayerLoadout`
-wire message had no field identifying which ship (if any) it described, so
-the client had no way to learn that its active ship changed independently of
-a command it sent. Added `active_ship_id: Option<u64>` (`null` when shipless)
-to `PlayerLoadout`, derived from the player's true `active_ship` rather than
-echoed back from whatever `ship_id` the caller happened to pass into
-`build_player_loadout_json` (which can be stale, e.g. a session's original
-`ship_id` after `active_ship` changed). The Godot client
-(`player_loadout.gd::active_ship_id()`) updates `main.gd`'s `_player_ship_id`
-when it changes, but only when the new value is `-1` or a ship already
-rendered client-side -- reattaching camera/presentation to a *different*
-owned ship the client has never seen needs client UI for multi-ship
-ownership that doesn't exist yet, so that case is left alone for now.
+`TransferToStationCommand { ship_id, station_id, item_id }` moves the
+entire stack of one item (`Module` or `ScrapMetal`) from a docked ship's
+cargo into the caller's station inventory; whole-stack only, no partial
+transfer. Client trigger: right-click a SHIP CARGO row.
 
-**Multi-ship roster UI (added 2026-07-08):** `PlayerLoadout` also carries
-`owned_ships: [{ship_id, ship_type_id, ship_type_name, docked_station_id,
-is_active}]` -- every ship `player_id` owns, not just the active one, via a
-new `owned_ships_json` reverse-lookup over `ShipRegistry.owners`. The Godot
-client's inventory panel gained a third "SHIPS" column
-(`hud_manager.gd::_make_ship_row`/`update_inventory_panel`) listing the
-roster; clicking a non-active row sends `SelectActiveShipCommand`
-(`connection.gd::send_select_active_ship_command`), the same command used
-to re-board after Disembark. Every new player is now also granted one
-starter `PackagedShip` in station inventory at spawn
-(`spawn_player_ship_at`), so the whole Disembark -> Assemble ->
-SelectActiveShip -> Undock loop is exercisable immediately without first
-Disassembling anything.
-
-**`ItemRow` wire/client validation mismatch (found and fixed 2026-07-08):**
-the starter Packaged Ship was invisible client-side even though it existed
-server-side. Root cause: the client's `ItemRow.from_json()` requires all of
-`item_type`/`module_id`/`ship_type_id`/`name`/`kind`/`slot`/`count` and
-silently drops (push_error + null) any row missing one, but the server's
-`PackagedShip` and `ScrapMetal` rows (both ship inventory and station
-inventory) omitted `module_id`/`kind`/`slot`, and the unfitted-`Module` rows
-omitted `ship_type_id` -- so every non-fitted inventory row of every kind was
-being silently dropped, not just the new Packaged Ship one. Pre-existing bug,
-invisible to unit tests because they hand-craft fully-populated fixture
-dictionaries rather than exercising the real server JSON shape. Fixed by
-adding the missing keys (`0`/`""` defaults, matching `ItemRow`'s own field
-defaults) to all three `ItemId` branches in both places they're serialized.
-Added a regression test asserting every row in `inventory`/`station_inventory`
-carries all seven keys.
-
-**Known pre-existing gap (found in passing, not fixed):** `StateSnapshot`
-does not actually persist `ShipRegistry.owners`/`active_ship` -- despite this
-doc previously claiming `active_ship` survives restart via the snapshot,
-neither map has a field in `crates/dawn-sector/src/persistence/snapshot.rs`.
-Ownership is only ever established via the live spawn/Assemble/Transit code
-paths that call `self.ships.owners.insert(...)` directly, never through an
-event a replay could reconstruct (`ShipSpawned` doesn't even carry a
-`player_id`). Out of scope for this session; flagged for whoever next
-touches node persistence.
-
-**Ship cargo / station inventory UI mixing (found and fixed 2026-07-08):**
-the inventory panel merged ship-side unfitted cargo and station inventory
-into one "INVENTORY (click to fit)" column, distinguished only by a
-`"[Station] "` text prefix -- directly violating roadmap.md's own stated
-acceptance criterion that Ship-side and Station-side inventory must not be
-visually mixed. Fixed by splitting the panel into four columns (FITTED,
-SHIP CARGO, STATION, SHIPS), widening it from 520px to 680px
-(`hud_manager.gd::build_inventory_panel`).
-
-**`TransferToStationCommand` (added 2026-07-08):** moves the entire stack of
-one item (`Module` or `ScrapMetal`) out of a docked ship's own cargo
-(`InventoryComp::take_all`) into the caller's station inventory
-(`credit_station_item`) -- whole-stack only, no partial-count transfer.
-Triggered by right-clicking a SHIP CARGO row (`main.gd::
-_handle_inventory_row_right_click`), deliberately uniform across item types
-rather than carving out a special case for one -- left-click on a Module row
-already means "fit," so a second, distinct gesture (right-click) was needed
-for "send to station" rather than overloading left-click's meaning per item
-type. `transfer_to_station_owned` (`node/inventory.rs`) checks
-`owns_ship`/`can_use_station` like `fit_module_owned`/`unfit_module_owned`,
-and returns a plain `bool` (not `Result<ShipId, _>` like Assemble/Disembark)
-since `cmd.ship_id` is always known upfront from the command itself. No new
-`DomainEvent` -- silent station-inventory credit, same tier as
-`BuildPackagedShipCommand`/`DisassembleShipCommand`.
+**Known gap:** `StateSnapshot` does not persist `ShipRegistry.owners`/
+`active_ship`.
