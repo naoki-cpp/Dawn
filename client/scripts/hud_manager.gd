@@ -526,7 +526,15 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 	fitted_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	columns.add_child(fitted_col)
 	var fitted_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
-	fitted_header.text = "FITTED (click to unfit)"
+	fitted_header.text = "FITTED (unfit)"
+	## clip_text keeps a long header from setting the Label's minimum width to
+	## its full unwrapped text extent -- without it, a long header forces
+	## HBoxContainer to grow this column past its fair share, pushing later
+	## columns (SHIPS is last) past the panel's own right edge. Rows rendered
+	## there are visually outside the panel, and inventory_panel_consumes()
+	## (which tests only the outer panel's rect) never registers a click on
+	## them, so they silently stop being interactable.
+	fitted_header.clip_text = true
 	fitted_col.add_child(fitted_header)
 	var fitted_list := VBoxContainer.new()
 	fitted_list.add_theme_constant_override("separation", 2)
@@ -538,7 +546,8 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 	inv_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	columns.add_child(inv_col)
 	var inv_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
-	inv_header.text = "SHIP CARGO (click to fit, right-click to move to station)"
+	inv_header.text = "SHIP CARGO (fit / →station)"
+	inv_header.clip_text = true
 	inv_col.add_child(inv_header)
 	var inventory_list := VBoxContainer.new()
 	inventory_list.add_theme_constant_override("separation", 2)
@@ -553,7 +562,8 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 	station_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	columns.add_child(station_col)
 	var station_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
-	station_header.text = "STATION (click PackagedShip to assemble)"
+	station_header.text = "STATION (assemble)"
+	station_header.clip_text = true
 	station_col.add_child(station_header)
 	var station_list := VBoxContainer.new()
 	station_list.add_theme_constant_override("separation", 2)
@@ -565,7 +575,8 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 	ships_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	columns.add_child(ships_col)
 	var ships_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
-	ships_header.text = "SHIPS (click to select active)"
+	ships_header.text = "SHIPS (select)"
+	ships_header.clip_text = true
 	ships_col.add_child(ships_header)
 	var ships_list := VBoxContainer.new()
 	ships_list.add_theme_constant_override("separation", 2)

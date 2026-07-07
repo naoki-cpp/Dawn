@@ -213,3 +213,28 @@ func test_hide_duel_result_hides_the_label() -> void:
 	HudManager.show_duel_result(label, true)
 	HudManager.hide_duel_result(label)
 	assert_bool(label.visible).is_false()
+
+
+# -- inventory panel ----------------------------------------------------------------
+
+## Regression: the column headers used to be long, unclipped Labels whose
+## minimum width equalled their full unwrapped text. HBoxContainer can't
+## shrink a child below its minimum size, so the four columns' combined
+## minimum width exceeded the panel's own width, and the last column
+## (SHIPS) got pushed outside the panel's rect entirely -- rows rendered
+## there were invisible to inventory_panel_consumes() (which only tests the
+## outer panel's rect), so a docked player's SHIPS rows became unclickable.
+func test_inventory_panel_columns_stay_within_the_panels_bounds() -> void:
+	var hud: CanvasLayer = auto_free(CanvasLayer.new())
+	add_child(hud)
+	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	HudManager.update_inventory_panel(refs, [], [], [], [
+		{"ship_id": 1, "ship_type_id": 7, "ship_type_name": "Magpie",
+			"docked_station_id": 0, "is_active": true},
+	])
+	HudManager.toggle_inventory_panel(refs)
+	await get_tree().process_frame
+
+	var panel_rect: Rect2 = (refs["panel"] as Panel).get_global_rect()
+	var ships_list: VBoxContainer = refs["ships_list"]
+	assert_bool(panel_rect.encloses(ships_list.get_global_rect())).is_true()
