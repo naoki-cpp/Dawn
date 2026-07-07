@@ -58,6 +58,15 @@ impl InventoryComp {
     pub fn item_count(&self, item_id: ItemId) -> u64 {
         self.items.get(&item_id).copied().unwrap_or(0)
     }
+
+    /// Remove the entire stack of `item_id`, returning how many were present
+    /// (0 if none). Unlike `take`, which removes exactly one `Module`
+    /// instance, this is for whole-stack moves (e.g.
+    /// `TransferToStationCommand`, ADR-0034 9B) where a partial transfer
+    /// isn't a supported operation.
+    pub fn take_all(&mut self, item_id: ItemId) -> u64 {
+        self.items.remove(&item_id).unwrap_or(0)
+    }
 }
 
 #[cfg(test)]
@@ -100,5 +109,19 @@ mod tests {
         inv.add_item(ItemId::ScrapMetal, 3);
         inv.add_item(ItemId::ScrapMetal, 2);
         assert_eq!(inv.item_count(ItemId::ScrapMetal), 5);
+    }
+
+    #[test]
+    fn take_all_removes_the_whole_stack_and_returns_its_count() {
+        let mut inv = InventoryComp::empty();
+        inv.add_item(ItemId::ScrapMetal, 5);
+        assert_eq!(inv.take_all(ItemId::ScrapMetal), 5);
+        assert_eq!(inv.item_count(ItemId::ScrapMetal), 0);
+    }
+
+    #[test]
+    fn take_all_returns_zero_when_the_item_is_absent() {
+        let mut inv = InventoryComp::empty();
+        assert_eq!(inv.take_all(ItemId::ScrapMetal), 0);
     }
 }

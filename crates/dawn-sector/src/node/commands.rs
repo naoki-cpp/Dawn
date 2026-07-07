@@ -317,6 +317,10 @@ impl<S: EventStore> SimulationNode<S> {
                 let _ = self.disembark_owned(player_id);
                 return Some(ClientCommandFollowup::RefreshFitting(player_id));
             }
+            ClientCommand::TransferToStation(t) => {
+                self.transfer_to_station_owned(player_id, t);
+                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+            }
         }
         None
     }

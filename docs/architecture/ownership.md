@@ -338,3 +338,28 @@ paths that call `self.ships.owners.insert(...)` directly, never through an
 event a replay could reconstruct (`ShipSpawned` doesn't even carry a
 `player_id`). Out of scope for this session; flagged for whoever next
 touches node persistence.
+
+**Ship cargo / station inventory UI mixing (found and fixed 2026-07-08):**
+the inventory panel merged ship-side unfitted cargo and station inventory
+into one "INVENTORY (click to fit)" column, distinguished only by a
+`"[Station] "` text prefix -- directly violating roadmap.md's own stated
+acceptance criterion that Ship-side and Station-side inventory must not be
+visually mixed. Fixed by splitting the panel into four columns (FITTED,
+SHIP CARGO, STATION, SHIPS), widening it from 520px to 680px
+(`hud_manager.gd::build_inventory_panel`).
+
+**`TransferToStationCommand` (added 2026-07-08):** moves the entire stack of
+one item (`Module` or `ScrapMetal`) out of a docked ship's own cargo
+(`InventoryComp::take_all`) into the caller's station inventory
+(`credit_station_item`) -- whole-stack only, no partial-count transfer.
+Triggered by right-clicking a SHIP CARGO row (`main.gd::
+_handle_inventory_row_right_click`), deliberately uniform across item types
+rather than carving out a special case for one -- left-click on a Module row
+already means "fit," so a second, distinct gesture (right-click) was needed
+for "send to station" rather than overloading left-click's meaning per item
+type. `transfer_to_station_owned` (`node/inventory.rs`) checks
+`owns_ship`/`can_use_station` like `fit_module_owned`/`unfit_module_owned`,
+and returns a plain `bool` (not `Result<ShipId, _>` like Assemble/Disembark)
+since `cmd.ship_id` is always known upfront from the command itself. No new
+`DomainEvent` -- silent station-inventory credit, same tier as
+`BuildPackagedShipCommand`/`DisassembleShipCommand`.

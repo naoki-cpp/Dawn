@@ -306,6 +306,8 @@ func _input(event: InputEvent) -> void:
 				var inv_row: Dictionary = _hud_surface.inventory_panel_row_at(mb.position)
 				if mb.button_index == MOUSE_BUTTON_LEFT and inv_row.has("action"):
 					_handle_inventory_row_click(inv_row)
+				elif mb.button_index == MOUSE_BUTTON_RIGHT and inv_row.has("source"):
+					_handle_inventory_row_right_click(inv_row)
 				return
 			## A click on a module slot toggles it; it is never a world click.
 			var slot_index: int = _hud_surface.module_slot_at(mb.position)
@@ -718,6 +720,26 @@ func _handle_inventory_row_click(row: Dictionary) -> void:
 			## Also no active-ship requirement -- this is how a player re-boards
 			## after Disembark, or switches to a different owned ship.
 			_connection.send_select_active_ship_command(row.get("ship_id", 0) as int)
+
+
+## Right-click on a SHIP CARGO row moves the whole stack to the docked
+## station's inventory (ADR-0034 9B). Uniform across item types (Module,
+## ScrapMetal) per the user's explicit preference for a single straightforward
+## right-click gesture rather than per-type UI carve-outs.
+func _handle_inventory_row_right_click(row: Dictionary) -> void:
+	if row.get("source", "") as String != "ship_cargo":
+		return
+	if _player_ship_id < 0:
+		return
+	var docked_station_id: int = _session.dock_status().get("docked_station_id", -1) as int
+	if docked_station_id < 0:
+		return
+	_connection.send_transfer_to_station_command(
+		_player_ship_id,
+		docked_station_id,
+		row.get("item_type", "") as String,
+		row.get("module_id", 0) as int,
+		row.get("ship_type_id", 0) as int)
 
 
 func _toggle_module_by_index(f_index: int) -> void:

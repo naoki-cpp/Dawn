@@ -101,6 +101,11 @@ func test_set_player_fitting_rebuilds_module_slots_and_inventory_rows() -> void:
 	assert_int((_surface._inventory_panel_refs["inventory_rows"] as Array).size()).is_equal(2)
 	var rows: Array = _surface._inventory_panel_refs["inventory_rows"] as Array
 	assert_str((((rows[1] as Dictionary)["panel"] as Panel).get_child(0) as Label).text).is_equal("Scrap Metal x4")
+	## Every ship-cargo row is tagged "ship_cargo" (main.gd's right-click
+	## transfer-to-station handler keys off this to avoid firing on station/
+	## fitted/ship rows, which reuse "" for their own unrelated meanings).
+	assert_str((rows[0] as Dictionary)["source"] as String).is_equal("ship_cargo")
+	assert_str((rows[1] as Dictionary)["item_type"] as String).is_equal("ScrapMetal")
 
 
 func test_render_repaints_after_the_modules_array_is_mutated_in_place() -> void:

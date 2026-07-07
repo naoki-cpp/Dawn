@@ -16,7 +16,7 @@
 
 use crate::fitting::{ModuleId, SlotKind};
 use crate::navigation::{JumpGateId, StationId, WarpTarget};
-use crate::{Position, SectorId, ShipId, ShipTypeId};
+use crate::{ItemId, Position, SectorId, ShipId, ShipTypeId};
 use serde::{Deserialize, Serialize};
 
 /// Request to move the caller's active ship to `target_position` within its
@@ -114,6 +114,26 @@ pub struct BuildPackagedShipCommand {
     pub ship_id: ShipId,
     pub station_id: StationId,
     pub ship_type_id: ShipTypeId,
+}
+
+/// Request to move an item from a docked ship's own cargo (`InventoryComp`)
+/// into the caller's station inventory (ADR-0034 9B), all of it in one go --
+/// no partial-count transfer. Ship cargo can currently only ever hold
+/// `ItemId::Module` (starter loadout) or `ItemId::ScrapMetal` (combat loot,
+/// `tick.rs`'s kill credit); `ItemId::PackagedShip` never enters ship cargo,
+/// so it's never a meaningful `item_id` here, but nothing stops a client from
+/// naming one -- the server rejects it the same way as naming an item the
+/// ship doesn't have any of.
+///
+/// May be rejected if:
+/// - The Ship does not exist or the caller does not own it.
+/// - The caller is not currently docked at the target station.
+/// - The Ship's cargo has none of `item_id`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TransferToStationCommand {
+    pub ship_id: ShipId,
+    pub station_id: StationId,
+    pub item_id: ItemId,
 }
 
 /// Request to disassemble a docked ship into a packaged ship item.
@@ -379,6 +399,9 @@ pub enum ClientCommand {
     /// Clear the caller's active ship while docked, without disassembling it
     /// (ADR-0037).
     Disembark(DisembarkCommand),
+    /// Move an item from a docked ship's own cargo into the caller's station
+    /// inventory (ADR-0034 9B).
+    TransferToStation(TransferToStationCommand),
 }
 
 #[cfg(test)]

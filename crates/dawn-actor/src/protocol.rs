@@ -473,6 +473,18 @@ pub enum ClientCommandJson {
     /// (ADR-0037). No `ship_id` -- always targets the caller's own active
     /// ship, like `UndockCommand`.
     DisembarkCommand {},
+    /// Move the entire stack of an item out of a docked ship's own cargo
+    /// into the caller's station inventory (ADR-0034 9B). `item_type` is
+    /// one of `"Module"`, `"PackagedShip"`, `"ScrapMetal"` (matching
+    /// `ItemRow`'s wire shape) with `module_id`/`ship_type_id` populated
+    /// only for the variant that uses them (`0` otherwise).
+    TransferToStationCommand {
+        ship_id: u64,
+        station_id: u32,
+        item_type: String,
+        module_id: u32,
+        ship_type_id: u32,
+    },
 }
 
 /// Render the client -> server wire schema (see [`ClientCommandJson`]) as a
@@ -648,6 +660,29 @@ fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
         ClientCommandJson::DisembarkCommand {} => {
             Some(ClientCommand::Disembark(dawn_core::DisembarkCommand))
         }
+        ClientCommandJson::TransferToStationCommand {
+            ship_id,
+            station_id,
+            item_type,
+            module_id,
+            ship_type_id,
+        } => {
+            let item_id = match item_type.as_str() {
+                "Module" => dawn_core::ItemId::Module(ModuleId(module_id)),
+                "PackagedShip" => {
+                    dawn_core::ItemId::PackagedShip(dawn_core::ShipTypeId(ship_type_id))
+                }
+                "ScrapMetal" => dawn_core::ItemId::ScrapMetal,
+                _ => return None,
+            };
+            Some(ClientCommand::TransferToStation(
+                dawn_core::TransferToStationCommand {
+                    ship_id: ShipId(EntityId::from_raw(ship_id)),
+                    station_id: dawn_core::StationId(station_id),
+                    item_id,
+                },
+            ))
+        }
     }
 }
 
@@ -761,6 +796,38 @@ mod tests {
         let line = r#"{"type":"DisembarkCommand"}"#;
         let cmd = parse_client_command(line).expect("must parse");
         assert!(matches!(cmd, ClientCommand::Disembark(_)));
+    }
+
+    #[test]
+    fn transfer_to_station_command_json_with_scrap_metal_is_parsed() {
+        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::TransferToStation(c) => {
+                assert_eq!(c.ship_id, ship_id(42));
+                assert_eq!(c.station_id, dawn_core::StationId(2));
+                assert_eq!(c.item_id, dawn_core::ItemId::ScrapMetal);
+            }
+            other => panic!("expected TransferToStation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn transfer_to_station_command_json_with_module_is_parsed() {
+        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"Module","module_id":7,"ship_type_id":0}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            ClientCommand::TransferToStation(c) => {
+                assert_eq!(c.item_id, dawn_core::ItemId::Module(ModuleId(7)));
+            }
+            other => panic!("expected TransferToStation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn transfer_to_station_command_json_with_unknown_item_type_fails_to_parse() {
+        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"Bogus","module_id":0,"ship_type_id":0}"#;
+        assert!(parse_client_command(line).is_none());
     }
 
     #[test]

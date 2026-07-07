@@ -538,7 +538,7 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 	inv_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	columns.add_child(inv_col)
 	var inv_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
-	inv_header.text = "SHIP CARGO (click to fit)"
+	inv_header.text = "SHIP CARGO (click to fit, right-click to move to station)"
 	inv_col.add_child(inv_header)
 	var inventory_list := VBoxContainer.new()
 	inventory_list.add_theme_constant_override("separation", 2)
@@ -581,9 +581,14 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 
 ## One inventory row. `action` is "fit"/"unfit" for ship-inventory modules,
 ## "assemble" for a station-inventory PackagedShip stack, and "" for passive
-## item stacks (e.g. Scrap Metal) that are only informational today.
+## item stacks (e.g. Scrap Metal) that are only informational today. `source`
+## tags which column the row belongs to ("ship_cargo" or "station") so
+## main.gd can tell a right-click-to-transfer target (ship_cargo only) from
+## a similarly-actionless station row without relying on `action`, which
+## collides ("" means different things in each column).
 static func _make_inventory_row(
-	text: String, module_id: int, slot: String, action: String, ship_type_id: int = 0
+	text: String, module_id: int, slot: String, action: String, ship_type_id: int = 0,
+	item_type: String = "", count: int = 0, source: String = ""
 ) -> Dictionary:
 	var row := Panel.new()
 	row.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
@@ -603,7 +608,8 @@ static func _make_inventory_row(
 
 	return {
 		"panel": row, "module_id": module_id, "slot": slot, "action": action,
-		"ship_type_id": ship_type_id,
+		"ship_type_id": ship_type_id, "item_type": item_type, "count": count,
+		"source": source,
 	}
 
 
@@ -677,7 +683,9 @@ static func update_inventory_panel(
 			action = "fit"
 		else:
 			text = "%s x%d" % [item.name, item.count]
-		var row := _make_inventory_row(text, item.module_id, item.slot, action)
+		var row := _make_inventory_row(
+			text, item.module_id, item.slot, action, item.ship_type_id,
+			item.item_type, item.count, "ship_cargo")
 		inventory_list.add_child(row["panel"])
 		inventory_rows.append(row)
 	refs["inventory_rows"] = inventory_rows
@@ -692,7 +700,8 @@ static func update_inventory_panel(
 			action = "assemble"
 		else:
 			text = "%s x%d" % [item.name, item.count]
-		var row := _make_inventory_row(text, 0, "", action, item.ship_type_id)
+		var row := _make_inventory_row(
+			text, 0, "", action, item.ship_type_id, item.item_type, item.count, "station")
 		station_list.add_child(row["panel"])
 		station_rows.append(row)
 	refs["station_rows"] = station_rows

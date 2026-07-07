@@ -59,7 +59,8 @@ The `"type"` values are: `MoveCommand`, `LockOnCommand`,
 `OrbitCommand`, `KeepAtRangeCommand`, `FitModuleCommand`,
 `UnfitModuleCommand`, `DockCommand`, `UndockCommand`,
 `BuildPackagedShipCommand`, `DisassembleShipCommand`,
-`SelectActiveShipCommand`, `AssembleCommand`, `DisembarkCommand`.
+`SelectActiveShipCommand`, `AssembleCommand`, `DisembarkCommand`,
+`TransferToStationCommand`.
 
 `AssembleCommand { station_id, ship_type_id }` (Phase 9B-5) carries no
 `ship_id` -- the ship doesn't exist yet; its ID is reported back via the
@@ -74,6 +75,19 @@ Session-local, not event-sourced (same tier as `SelectActiveShipCommand`), so
 there is no resulting domain event on the wire. Rejected if the caller has no
 active ship, or the active ship isn't currently docked. See
 `docs/architecture/ownership.md` §8.
+
+`TransferToStationCommand { ship_id, station_id, item_type, module_id,
+ship_type_id }` (ADR-0034 9B) moves the entire stack of one item out of a
+docked ship's own cargo (`InventoryComp`) into the caller's station
+inventory -- whole-stack only, no partial-count transfer. `item_type` is one
+of `"Module"`, `"PackagedShip"`, `"ScrapMetal"` (same wire shape as
+`ItemRow`); `module_id`/`ship_type_id` are populated only for the matching
+variant (`0` otherwise). Carries an explicit `ship_id` like
+`FitModuleCommand` (it may target any owned docked ship, not just the
+active one). Rejected if the caller doesn't own `ship_id`, isn't docked at
+`station_id`, or the ship's cargo has none of the named item. No resulting
+domain event -- silent station-inventory credit, same tier as
+`BuildPackagedShipCommand`/`DisassembleShipCommand`.
 
 **ADR-0037 (owned ship / active ship split):** `MoveCommand`, `LockOnCommand`,
 `ActivateModuleCommand`, `DeactivateModuleCommand`, `StopCommand`,
