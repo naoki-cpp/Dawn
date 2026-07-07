@@ -7,6 +7,7 @@ extends GdUnitTestSuite
 const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
 const ModuleRow = preload("res://scripts/module_row.gd")
 const ItemRow = preload("res://scripts/item_row.gd")
+const InventoryRow = preload("res://scripts/inventory_row.gd")
 
 var _parent: Node
 var _hud: CanvasLayer
@@ -99,13 +100,13 @@ func test_set_player_fitting_rebuilds_module_slots_and_inventory_rows() -> void:
 	assert_int(_surface._module_slots.size()).is_equal(1)
 	assert_int((_surface._inventory_panel_refs["fitted_rows"] as Array).size()).is_equal(2)
 	assert_int((_surface._inventory_panel_refs["inventory_rows"] as Array).size()).is_equal(2)
-	var rows: Array = _surface._inventory_panel_refs["inventory_rows"] as Array
-	assert_str((((rows[1] as Dictionary)["panel"] as Panel).get_child(0) as Label).text).is_equal("Scrap Metal x4")
+	var rows: Array[InventoryRow] = _surface._inventory_panel_refs["inventory_rows"] as Array[InventoryRow]
+	assert_str(((rows[1].panel as Panel).get_child(0) as Label).text).is_equal("Scrap Metal x4")
 	## Every ship-cargo row is tagged "ship_cargo" (main.gd's right-click
 	## transfer-to-station handler keys off this to avoid firing on station/
 	## fitted/ship rows, which reuse "" for their own unrelated meanings).
-	assert_str((rows[0] as Dictionary)["source"] as String).is_equal("ship_cargo")
-	assert_str((rows[1] as Dictionary)["item_type"] as String).is_equal("ScrapMetal")
+	assert_str(rows[0].source).is_equal(InventoryRow.SOURCE_SHIP_CARGO)
+	assert_str(rows[1].item_type).is_equal("ScrapMetal")
 
 
 func test_render_repaints_after_the_modules_array_is_mutated_in_place() -> void:
@@ -239,10 +240,10 @@ func test_inventory_panel_hit_helpers_delegate_to_built_panel() -> void:
 	var panel: Panel = _surface._inventory_panel_refs["panel"]
 	assert_bool(_surface.inventory_panel_consumes(panel.get_global_rect().get_center())).is_true()
 
-	var rows: Array = _surface._inventory_panel_refs["inventory_rows"] as Array
-	var row_panel: Panel = rows[0]["panel"]
-	var hit: Dictionary = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
-	assert_str(hit.get("action", "") as String).is_equal("fit")
+	var rows: Array[InventoryRow] = _surface._inventory_panel_refs["inventory_rows"] as Array[InventoryRow]
+	var row_panel: Panel = rows[0].panel
+	var hit: InventoryRow = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
+	assert_str(hit.action).is_equal(InventoryRow.ACTION_FIT)
 
 
 func test_station_inventory_packaged_ship_row_is_clickable_to_assemble() -> void:
@@ -252,11 +253,11 @@ func test_station_inventory_packaged_ship_row_is_clickable_to_assemble() -> void
 	_surface.toggle_inventory_panel()
 	await get_tree().process_frame
 
-	var rows: Array = _surface._inventory_panel_refs["station_rows"] as Array
-	var row_panel: Panel = rows[0]["panel"]
-	var hit: Dictionary = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
-	assert_str(hit.get("action", "") as String).is_equal("assemble")
-	assert_int(hit.get("ship_type_id", 0) as int).is_equal(7)
+	var rows: Array[InventoryRow] = _surface._inventory_panel_refs["station_rows"] as Array[InventoryRow]
+	var row_panel: Panel = rows[0].panel
+	var hit: InventoryRow = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
+	assert_str(hit.action).is_equal(InventoryRow.ACTION_ASSEMBLE)
+	assert_int(hit.ship_type_id).is_equal(7)
 
 
 func test_owned_ships_roster_lists_active_and_inactive_ships() -> void:
@@ -267,18 +268,18 @@ func test_owned_ships_roster_lists_active_and_inactive_ships() -> void:
 	_surface.toggle_inventory_panel()
 	await get_tree().process_frame
 
-	var ship_rows: Array = _surface._inventory_panel_refs["ship_rows"] as Array
+	var ship_rows: Array[InventoryRow] = _surface._inventory_panel_refs["ship_rows"] as Array[InventoryRow]
 	assert_int(ship_rows.size()).is_equal(2)
 
-	var active_row: Dictionary = ship_rows[0]
-	assert_int(active_row.get("ship_id", 0) as int).is_equal(1)
-	assert_str(active_row.get("action", "") as String).is_equal("")
+	var active_row: InventoryRow = ship_rows[0]
+	assert_int(active_row.ship_id).is_equal(1)
+	assert_str(active_row.action).is_equal(InventoryRow.ACTION_NONE)
 
-	var inactive_row: Dictionary = ship_rows[1]
-	assert_int(inactive_row.get("ship_id", 0) as int).is_equal(2)
-	assert_str(inactive_row.get("action", "") as String).is_equal("select_active_ship")
+	var inactive_row: InventoryRow = ship_rows[1]
+	assert_int(inactive_row.ship_id).is_equal(2)
+	assert_str(inactive_row.action).is_equal(InventoryRow.ACTION_SELECT_ACTIVE_SHIP)
 
-	var hit: Dictionary = _surface.inventory_panel_row_at(
-		(inactive_row["panel"] as Panel).get_global_rect().get_center())
-	assert_str(hit.get("action", "") as String).is_equal("select_active_ship")
-	assert_int(hit.get("ship_id", 0) as int).is_equal(2)
+	var hit: InventoryRow = _surface.inventory_panel_row_at(
+		(inactive_row.panel as Panel).get_global_rect().get_center())
+	assert_str(hit.action).is_equal(InventoryRow.ACTION_SELECT_ACTIVE_SHIP)
+	assert_int(hit.ship_id).is_equal(2)
