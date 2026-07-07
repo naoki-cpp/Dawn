@@ -4,7 +4,7 @@ title   : Docked Ship Ownership — owned ship / active ship / docked station co
 status  : accepted
 date    : 2026-07-05
 deciders: [human, ai-agent]
-related : ADR-0034（Packaged Ship / Station / Assemble・Disassemble）, docs/architecture/ownership.md, docs/process/roadmap.md §12（Phase 9B）, docs/architecture/assemble-ownership-memo.md
+related : ADR-0034（Packaged Ship / Station / Assemble・Disassemble）, docs/architecture/ownership.md（§8 に Assemble 設計史・shipless gap を統合済み）, docs/process/roadmap.md §12（Phase 9B）
 ---
 
 # ADR-0037 — Docked Ship Ownership

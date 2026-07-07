@@ -239,3 +239,27 @@ tier as `docked_ships`/`docked_players`.
 removed ship *was* that player's active ship -- removing a different owned
 ship (e.g. Disassemble) must not silently clear the pointer to the ship the
 player is still flying.
+
+---
+
+## 8. Known gap: a player can reach zero owned ships while docked
+
+`disassemble_ship_owned` checks ownership, docked-station context, unfitted,
+and undamaged -- not whether this is the player's only ship. A player who
+owns exactly one ship can `Disassemble` it, after which `ShipRegistry::remove()`
+clears `active_ship` (it was the only owned ship), leaving the player with
+zero owned ships, no active ship, still docked.
+
+This state is structurally representable (no crash, no invariant violated),
+but is currently a dead end: flight/steering commands and `UndockCommand`
+resolve against `active_ship` and are silently ignored when it is `None`, and
+there is no `AssembleCommand` yet to turn the station's `PackagedShip` item
+back into a ship. `BuildPackagedShipCommand` also requires
+`owns_ship(player_id, cmd.ship_id)` (used only as an ownership-proof anchor,
+unrelated to the packaged ship being built), so a shipless player cannot use
+it either.
+
+**Status: accepted as temporary debt, not fixed.** Re-evaluation trigger:
+`AssembleCommand` (`docs/process/roadmap.md` §12, Phase 9B-5) resolves this
+directly and is already next up; revisit `BuildPackagedShipCommand`'s
+ownership check (owns-some-ship vs. docked-at-this-station) at the same time.
