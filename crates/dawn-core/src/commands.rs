@@ -113,6 +113,24 @@ pub struct DisassembleShipCommand {
     pub station_id: StationId,
 }
 
+/// Request to convert a station-inventory `PackagedShip` item into a new
+/// live docked ship, owned by the caller (ADR-0034 9B, ADR-0037). There is
+/// no `ship_id` field -- the ship doesn't exist yet; the resulting ship's ID
+/// is allocated on success and reported via the followup.
+///
+/// Does not change the caller's `active_ship`; a later `SelectActiveShipCommand`
+/// makes the newly-assembled ship active.
+///
+/// May be rejected if:
+/// - The caller is not currently docked at `station_id`.
+/// - `ship_type_id` is unknown to the current node.
+/// - The station inventory does not contain a `PackagedShip` of that type.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AssembleCommand {
+    pub station_id: StationId,
+    pub ship_type_id: ShipTypeId,
+}
+
 /// Request to make an owned, docked ship the caller's active ship (ADR-0037).
 ///
 /// Unlike Assemble (which will later add a new owned ship without switching),
@@ -340,6 +358,9 @@ pub enum ClientCommand {
     DisassembleShip(DisassembleShipCommand),
     /// Switch which owned, docked ship is the caller's active ship (ADR-0037).
     SelectActiveShip(SelectActiveShipCommand),
+    /// Convert a station-inventory Packaged Ship item into a new live docked
+    /// ship, owned by the caller (ADR-0034 9B, ADR-0037).
+    Assemble(AssembleCommand),
 }
 
 #[cfg(test)]
@@ -469,5 +490,15 @@ mod tests {
             ship_id: ship_id(1),
         };
         assert_eq!(cmd.ship_id, ship_id(1));
+    }
+
+    #[test]
+    fn assemble_command_carries_no_ship_id() {
+        let cmd = AssembleCommand {
+            station_id: StationId(0),
+            ship_type_id: ShipTypeId(1),
+        };
+        assert_eq!(cmd.station_id, StationId(0));
+        assert_eq!(cmd.ship_type_id, ShipTypeId(1));
     }
 }

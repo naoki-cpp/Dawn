@@ -17,19 +17,20 @@ use super::SimulationNode;
 impl<S: EventStore> SimulationNode<S> {
     // ── Spawn ─────────────────────────────────────────────────────────────────
 
-    /// Spawn a Ship, record it in the ECS, append a `ShipSpawned` event.
-    ///
-    /// INV-004: the ID is generated from a monotonically increasing counter
-    /// combined with `NodeId`.  IDs are never reused.
-    pub fn spawn_ship(
+    /// Insert a ship entity into the ECS with stats derived from
+    /// `ship_type_id`, for a `ship_id` the caller has already allocated (or is
+    /// replaying from an event). The ECS/base-stats core shared by
+    /// `spawn_ship` (fresh ID, appends `ShipSpawned`) and
+    /// `assemble_ship_owned`/its replay arm (appends `ShipAssembled` instead) --
+    /// each call site appends its own event afterward since which event fits
+    /// depends on why the ship came into being.
+    pub(super) fn insert_ship_entity(
         &mut self,
+        ship_id: ShipId,
         ship_type_id: dawn_core::ship_type::ShipTypeId,
         position: Position,
         velocity: Velocity,
-    ) -> ShipId {
-        let ship_id = ShipId::new(self.node_id, self.id_counter);
-        self.id_counter += 1;
-
+    ) {
         let base = self
             .ship_type_registry
             .get(&ship_type_id)
@@ -55,6 +56,22 @@ impl<S: EventStore> SimulationNode<S> {
                 },
             );
         }
+    }
+
+    /// Spawn a Ship, record it in the ECS, append a `ShipSpawned` event.
+    ///
+    /// INV-004: the ID is generated from a monotonically increasing counter
+    /// combined with `NodeId`.  IDs are never reused.
+    pub fn spawn_ship(
+        &mut self,
+        ship_type_id: dawn_core::ship_type::ShipTypeId,
+        position: Position,
+        velocity: Velocity,
+    ) -> ShipId {
+        let ship_id = ShipId::new(self.node_id, self.id_counter);
+        self.id_counter += 1;
+
+        self.insert_ship_entity(ship_id, ship_type_id, position, velocity);
 
         self.event_store
             .append(DomainEvent::ShipSpawned(ShipSpawned {

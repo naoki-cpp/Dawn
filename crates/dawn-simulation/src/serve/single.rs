@@ -163,8 +163,8 @@ pub(crate) async fn run_phase4_server(
                             j.gate_id.0
                         );
                     }
-                    Some(ClientCommandFollowup::RefreshFitting(ship_id)) => {
-                        if let Some(json) = node.build_player_loadout_json(ship_id) {
+                    Some(ClientCommandFollowup::RefreshFitting(player_id)) => {
+                        if let Some(json) = node.build_player_loadout_json_for_player(player_id) {
                             sess.send_raw(&json);
                         }
                     }

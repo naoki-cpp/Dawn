@@ -146,44 +146,7 @@ impl<S: EventStore> SimulationNode<S> {
             .and_then(|station_id| self.station(station_id))
             .map(|station| station.name.clone());
         let station_inventory: Vec<serde_json::Value> = player_id
-            .and_then(|pid| {
-                docked_station_id.and_then(|_| {
-                    self.station_inventory(pid).map(|inventory| {
-                        inventory
-                            .iter()
-                            .filter_map(|(item_id, count)| match item_id {
-                                ItemId::Module(module_id) => {
-                                    self.module_registry.get(module_id).map(|def| {
-                                        serde_json::json!({
-                                            "item_type": "Module",
-                                            "module_id": def.id.0,
-                                            "name"     : def.name,
-                                            "kind"     : format!("{:?}", def.kind),
-                                            "slot"     : format!("{:?}", def.slot),
-                                            "count"    : count,
-                                        })
-                                    })
-                                }
-                                ItemId::PackagedShip(ship_type_id) => {
-                                    self.ship_type_registry.get(ship_type_id).map(|def| {
-                                        serde_json::json!({
-                                            "item_type": "PackagedShip",
-                                            "ship_type_id": def.id.0,
-                                            "name"        : def.name,
-                                            "count"       : count,
-                                        })
-                                    })
-                                }
-                                ItemId::ScrapMetal => Some(serde_json::json!({
-                                    "item_type": "ScrapMetal",
-                                    "name"     : "Scrap Metal",
-                                    "count"    : count,
-                                })),
-                            })
-                            .collect()
-                    })
-                })
-            })
+            .map(|pid| self.station_inventory_json(pid))
             .unwrap_or_default();
 
         let layout = self
@@ -212,6 +175,88 @@ impl<S: EventStore> SimulationNode<S> {
             })
             .to_string(),
         )
+    }
+
+    /// Same wire message as [`Self::build_player_loadout_json`], keyed by
+    /// `player_id` instead of a specific ship. Delegates to the ship-keyed
+    /// builder when the player has an active ship; otherwise (no active ship
+    /// -- e.g. right after Disassemble removed the caller's only ship, or
+    /// before a freshly-Assembled ship is made active, `docs/architecture/ownership.md`
+    /// §8) still reports the player's docked station and station inventory,
+    /// with empty fitting/cargo/slot_capacity sections since there's no ship
+    /// to report those for.
+    pub fn build_player_loadout_json_for_player(
+        &self,
+        player_id: dawn_core::PlayerId,
+    ) -> Option<String> {
+        if let Some(ship_id) = self.ships.active_ship.get(&player_id).copied() {
+            return self.build_player_loadout_json(ship_id);
+        }
+        let docked_station_id = self.player_docked_station(player_id);
+        let docked_station_name = docked_station_id
+            .and_then(|station_id| self.station(station_id))
+            .map(|station| station.name.clone());
+        let station_inventory = self.station_inventory_json(player_id);
+        Some(
+            serde_json::json!({
+                "type"         : "PlayerLoadout",
+                "tick"         : self.current_tick.value(),
+                "modules"      : Vec::<serde_json::Value>::new(),
+                "inventory"    : Vec::<serde_json::Value>::new(),
+                "station_inventory": station_inventory,
+                "docked_station_id": docked_station_id.map(|id| id.0),
+                "docked_station_name": docked_station_name,
+                "slot_capacity": serde_json::json!({
+                    "High": 0, "Mid": 0, "Low": 0, "Rig": 0,
+                }),
+            })
+            .to_string(),
+        )
+    }
+
+    /// Station inventory as wire rows for `player_id`, empty if the player
+    /// isn't currently docked anywhere. Shared by `build_player_loadout_json`
+    /// (ship-keyed) and `build_player_loadout_json_for_player` (player-keyed).
+    fn station_inventory_json(&self, player_id: dawn_core::PlayerId) -> Vec<serde_json::Value> {
+        if self.player_docked_station(player_id).is_none() {
+            return Vec::new();
+        }
+        self.station_inventory(player_id)
+            .map(|inventory| {
+                inventory
+                    .iter()
+                    .filter_map(|(item_id, count)| match item_id {
+                        ItemId::Module(module_id) => {
+                            self.module_registry.get(module_id).map(|def| {
+                                serde_json::json!({
+                                    "item_type": "Module",
+                                    "module_id": def.id.0,
+                                    "name"     : def.name,
+                                    "kind"     : format!("{:?}", def.kind),
+                                    "slot"     : format!("{:?}", def.slot),
+                                    "count"    : count,
+                                })
+                            })
+                        }
+                        ItemId::PackagedShip(ship_type_id) => {
+                            self.ship_type_registry.get(ship_type_id).map(|def| {
+                                serde_json::json!({
+                                    "item_type": "PackagedShip",
+                                    "ship_type_id": def.id.0,
+                                    "name"        : def.name,
+                                    "count"       : count,
+                                })
+                            })
+                        }
+                        ItemId::ScrapMetal => Some(serde_json::json!({
+                            "item_type": "ScrapMetal",
+                            "name"     : "Scrap Metal",
+                            "count"    : count,
+                        })),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Full-world `InitialState` (every ship). Used for non-AoI callers.

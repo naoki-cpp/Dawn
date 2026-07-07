@@ -242,7 +242,7 @@ player is still flying.
 
 ---
 
-## 8. Known gap: a player can reach zero owned ships while docked
+## 8. A player can reach zero owned ships while docked (resolved 2026-07-07)
 
 `disassemble_ship_owned` checks ownership, docked-station context, unfitted,
 and undamaged -- not whether this is the player's only ship. A player who
@@ -251,15 +251,21 @@ clears `active_ship` (it was the only owned ship), leaving the player with
 zero owned ships, no active ship, still docked.
 
 This state is structurally representable (no crash, no invariant violated),
-but is currently a dead end: flight/steering commands and `UndockCommand`
-resolve against `active_ship` and are silently ignored when it is `None`, and
-there is no `AssembleCommand` yet to turn the station's `PackagedShip` item
-back into a ship. `BuildPackagedShipCommand` also requires
-`owns_ship(player_id, cmd.ship_id)` (used only as an ownership-proof anchor,
-unrelated to the packaged ship being built), so a shipless player cannot use
-it either.
+and is no longer a dead end: `AssembleCommand` (Phase 9B-5, implemented
+2026-07-07) converts a station-inventory `PackagedShip` item into a new
+owned, docked ship without changing `active_ship` (ADR-0037); the player then
+sends `SelectActiveShipCommand` to make it active and can `Undock` normally.
+`BuildPackagedShipCommand` still requires `owns_ship(player_id, cmd.ship_id)`
+(used only as an ownership-proof anchor, unrelated to the packaged ship being
+built) -- a shipless player cannot use it, but this no longer matters for
+recovery since Assemble only needs a `PackagedShip` already in station
+inventory, not an existing ship.
 
-**Status: accepted as temporary debt, not fixed.** Re-evaluation trigger:
-`AssembleCommand` (`docs/process/roadmap.md` §12, Phase 9B-5) resolves this
-directly and is already next up; revisit `BuildPackagedShipCommand`'s
-ownership check (owns-some-ship vs. docked-at-this-station) at the same time.
+A related bug surfaced and was fixed in the same change: `ClientCommandFollowup::RefreshFitting`
+used to carry a `ShipId`, and `build_player_loadout_json` bailed out
+immediately once that ship no longer existed in the ECS -- so a client that
+disassembled its only ship never received the updated station inventory at
+all (the item existed server-side, but the client never learned about it).
+Fixed by keying `RefreshFitting` on `PlayerId` instead, with a new
+`build_player_loadout_json_for_player` that falls back to reporting just the
+docked station and station inventory when the player has no active ship.

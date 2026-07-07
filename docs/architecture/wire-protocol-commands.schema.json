@@ -466,6 +466,33 @@
           ]
         }
       }
+    },
+    {
+      "description": "Convert a station-inventory Packaged Ship item into a new live docked ship (ADR-0034 9B, ADR-0037). No `ship_id` -- the ship doesn't exist yet; its ID is reported via the resulting `ShipAssembled` event.",
+      "type": "object",
+      "required": [
+        "ship_type_id",
+        "station_id",
+        "type"
+      ],
+      "properties": {
+        "ship_type_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "station_id": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "AssembleCommand"
+          ]
+        }
+      }
     }
   ],
   "definitions": {

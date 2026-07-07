@@ -11,12 +11,12 @@
 use std::collections::BTreeMap;
 
 use dawn_core::{
-    events::{PackagedShipBuilt, ShipDisassembled, ShipDocked, ShipUndocked},
-    BuildPackagedShipCommand, DisassembleShipCommand, DockCommand, DomainEvent, ItemId, PlayerId,
-    ShipId, StationId,
+    events::{PackagedShipBuilt, ShipAssembled, ShipDisassembled, ShipDocked, ShipUndocked},
+    AssembleCommand, BuildPackagedShipCommand, DisassembleShipCommand, DockCommand, DomainEvent,
+    ItemId, PlayerId, Position, ShipId, StationId, Velocity,
 };
 use dawn_ecs::components::{
-    FittingComp, HullComp, LockComp, ShipStatsComp, ThrustComp, VelocityComp, WarpComp,
+    FittingComp, HullComp, IsNpcComp, LockComp, ShipStatsComp, ThrustComp, VelocityComp, WarpComp,
 };
 use dawn_event_store::store::EventStore;
 
@@ -24,6 +24,13 @@ use super::SimulationNode;
 
 /// The station command seam: callers learn whether the operation was accepted
 /// and which ship should have its fitting/state resent to the client.
+///
+/// Callers no longer extract `ship_id` for a `RefreshFitting` followup --
+/// `apply_client_command` already has `player_id` in scope and uses that
+/// directly (a `ship_id` can't always be resolved back to a player, e.g.
+/// after Disassemble removes it; see `docs/architecture/ownership.md` §8).
+/// `ship_id` is kept because callers (tests, other station ops) still match
+/// on which ship an operation targeted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum StationOperationOutcome {
     Accepted {
@@ -33,14 +40,6 @@ pub(super) enum StationOperationOutcome {
         ship_id: ShipId,
         reason: StationOperationRejection,
     },
-}
-
-impl StationOperationOutcome {
-    pub(super) fn refresh_fitting_ship_id(self) -> Option<ShipId> {
-        match self {
-            Self::Accepted { ship_id } | Self::Rejected { ship_id, .. } => Some(ship_id),
-        }
-    }
 }
 
 /// Why a station operation was rejected.
@@ -479,6 +478,47 @@ impl<S: EventStore> SimulationNode<S> {
         StationOperationOutcome::Accepted {
             ship_id: cmd.ship_id,
         }
+    }
+
+    /// Convert a station-inventory `PackagedShip` item into a new live docked
+    /// ship, owned by `player_id` (ADR-0034 9B, ADR-0037). Unlike the other
+    /// station operations, there is no pre-existing `ship_id` to reject
+    /// against on failure, so this returns `Result<ShipId, _>` rather than
+    /// `StationOperationOutcome`. Does not change `active_ship` -- a later
+    /// `SelectActiveShipCommand` makes the new ship active (see
+    /// `docs/architecture/ownership.md` §7-8).
+    pub(super) fn assemble_ship_owned(
+        &mut self,
+        player_id: PlayerId,
+        cmd: AssembleCommand,
+    ) -> Result<ShipId, StationOperationRejection> {
+        if !self.can_use_station(player_id, cmd.station_id) {
+            return Err(StationOperationRejection::MissingDockedStationContext);
+        }
+        if !self.ship_type_registry.contains_key(&cmd.ship_type_id) {
+            return Err(StationOperationRejection::UnknownShipType);
+        }
+        self.try_debit_station_item(player_id, ItemId::PackagedShip(cmd.ship_type_id), 1)?;
+
+        let ship_id = ShipId::new(self.node_id, self.id_counter);
+        self.id_counter += 1;
+        self.insert_ship_entity(ship_id, cmd.ship_type_id, Position::ORIGIN, Velocity::ZERO);
+        if let Some(&entity) = self.ships.index.get(&ship_id) {
+            let _ = self.world.inner_mut().remove_one::<IsNpcComp>(entity);
+        }
+        self.settle_ship_into_station(ship_id, cmd.station_id);
+        self.docked_ships.insert(ship_id, cmd.station_id);
+        self.ships.owners.insert(ship_id, player_id);
+
+        self.event_store
+            .append(DomainEvent::ShipAssembled(ShipAssembled {
+                ship_id,
+                player_id,
+                station_id: cmd.station_id,
+                ship_type_id: cmd.ship_type_id,
+                tick: self.current_tick,
+            }));
+        Ok(ship_id)
     }
 }
 
@@ -979,6 +1019,80 @@ mod tests {
     }
 
     #[test]
+    fn disassembling_the_only_owned_ship_still_lets_the_client_see_the_updated_station_inventory() {
+        // Regression: RefreshFitting used to carry the (now-removed) ship_id,
+        // and build_player_loadout_json bailed out immediately once the ship
+        // no longer existed in the ECS -- so a client that disassembled its
+        // only ship never received the updated station inventory at all.
+        // Fixed by keying RefreshFitting on player_id instead
+        // (docs/architecture/ownership.md §8).
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station = node.station(StationId(0)).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        assert!(accepted(node.dock_owned(
+            player_id,
+            ship_id,
+            DockCommand {
+                station_id: StationId(0),
+            }
+        )));
+        node.unfit_module_owned(
+            player_id,
+            dawn_core::UnfitModuleCommand {
+                ship_id,
+                slot: dawn_core::SlotKind::High,
+                module_id: crate::modules::MODULE_RAILGUN_SMALL,
+            },
+        );
+        node.unfit_module_owned(
+            player_id,
+            dawn_core::UnfitModuleCommand {
+                ship_id,
+                slot: dawn_core::SlotKind::Mid,
+                module_id: crate::modules::MODULE_AFTERBURNER,
+            },
+        );
+        node.unfit_module_owned(
+            player_id,
+            dawn_core::UnfitModuleCommand {
+                ship_id,
+                slot: dawn_core::SlotKind::Mid,
+                module_id: crate::modules::MODULE_FOLD_DISRUPTOR,
+            },
+        );
+
+        let mut locks = Vec::new();
+        let followup = node.apply_client_command(
+            player_id,
+            dawn_core::ClientCommand::DisassembleShip(DisassembleShipCommand {
+                ship_id,
+                station_id: StationId(0),
+            }),
+            &mut locks,
+        );
+        let crate::node::ClientCommandFollowup::RefreshFitting(refreshed_player) =
+            followup.expect("Disassemble must return a followup")
+        else {
+            panic!("expected RefreshFitting followup");
+        };
+        assert_eq!(refreshed_player, player_id);
+
+        let json = node
+            .build_player_loadout_json_for_player(refreshed_player)
+            .expect("payload must build even though no ship is left");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let station_inventory = v["station_inventory"].as_array().unwrap();
+        assert!(
+            station_inventory
+                .iter()
+                .any(|row| row["item_type"] == "PackagedShip"),
+            "station_inventory must show the newly-created PackagedShip item: {station_inventory:?}"
+        );
+    }
+
+    #[test]
     fn disassemble_ship_is_rejected_when_any_module_is_fitted() {
         let mut node = node();
         let player_id = node.next_player_id();
@@ -1005,6 +1119,160 @@ mod tests {
                 reason: StationOperationRejection::ShipIsFitted,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn assemble_ship_creates_a_new_docked_owned_ship_and_debits_the_packaged_ship_item() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        node.credit_station_item(
+            player_id,
+            ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE),
+            1,
+        );
+        node.docked_players.insert(player_id, StationId(0));
+
+        let new_ship_id = node
+            .assemble_ship_owned(
+                player_id,
+                AssembleCommand {
+                    station_id: StationId(0),
+                    ship_type_id: crate::ship_types::SHIP_TYPE_MAGPIE,
+                },
+            )
+            .expect("assemble should succeed with a packaged ship in inventory");
+
+        assert!(node.owns_ship(player_id, new_ship_id));
+        assert_eq!(node.docked_station(new_ship_id), Some(StationId(0)));
+        assert_eq!(
+            node.station_item_count(
+                player_id,
+                ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE)
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn assemble_ship_does_not_change_active_ship() {
+        // A player who disassembled their only ship (active_ship cleared,
+        // still docked) must not have Assemble silently re-activate the new
+        // ship -- ADR-0037 requires an explicit SelectActiveShipCommand.
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station = node.station(StationId(0)).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        assert!(accepted(node.dock_owned(
+            player_id,
+            ship_id,
+            DockCommand {
+                station_id: StationId(0),
+            }
+        )));
+        node.unfit_module_owned(
+            player_id,
+            dawn_core::UnfitModuleCommand {
+                ship_id,
+                slot: dawn_core::SlotKind::High,
+                module_id: crate::modules::MODULE_RAILGUN_SMALL,
+            },
+        );
+        node.unfit_module_owned(
+            player_id,
+            dawn_core::UnfitModuleCommand {
+                ship_id,
+                slot: dawn_core::SlotKind::Mid,
+                module_id: crate::modules::MODULE_AFTERBURNER,
+            },
+        );
+        node.unfit_module_owned(
+            player_id,
+            dawn_core::UnfitModuleCommand {
+                ship_id,
+                slot: dawn_core::SlotKind::Mid,
+                module_id: crate::modules::MODULE_FOLD_DISRUPTOR,
+            },
+        );
+        assert!(accepted(node.disassemble_ship_owned(
+            player_id,
+            DisassembleShipCommand {
+                ship_id,
+                station_id: StationId(0),
+            }
+        )));
+        assert!(!node.is_active_ship(player_id, ship_id));
+
+        let new_ship_id = node
+            .assemble_ship_owned(
+                player_id,
+                AssembleCommand {
+                    station_id: StationId(0),
+                    ship_type_id: crate::ship_types::SHIP_TYPE_MAGPIE,
+                },
+            )
+            .expect("assemble should succeed");
+
+        assert!(
+            !node.is_active_ship(player_id, new_ship_id),
+            "Assemble must not auto-activate the new ship (ADR-0037)"
+        );
+
+        // The shipless dead end (docs/architecture/ownership.md §8) is now
+        // resolvable: SelectActiveShip then Undock.
+        assert!(matches!(
+            node.select_active_ship_owned(
+                player_id,
+                dawn_core::SelectActiveShipCommand {
+                    ship_id: new_ship_id
+                }
+            ),
+            StationOperationOutcome::Accepted { .. }
+        ));
+        assert!(matches!(
+            node.undock_owned(player_id, new_ship_id),
+            StationOperationOutcome::Accepted { .. }
+        ));
+    }
+
+    #[test]
+    fn assemble_ship_is_rejected_when_caller_is_not_docked_at_the_target_station() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        node.credit_station_item(
+            player_id,
+            ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE),
+            1,
+        );
+
+        assert!(matches!(
+            node.assemble_ship_owned(
+                player_id,
+                AssembleCommand {
+                    station_id: StationId(0),
+                    ship_type_id: crate::ship_types::SHIP_TYPE_MAGPIE,
+                }
+            ),
+            Err(StationOperationRejection::MissingDockedStationContext)
+        ));
+    }
+
+    #[test]
+    fn assemble_ship_is_rejected_when_no_packaged_ship_is_in_station_inventory() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        node.docked_players.insert(player_id, StationId(0));
+
+        assert!(matches!(
+            node.assemble_ship_owned(
+                player_id,
+                AssembleCommand {
+                    station_id: StationId(0),
+                    ship_type_id: crate::ship_types::SHIP_TYPE_MAGPIE,
+                }
+            ),
+            Err(StationOperationRejection::MissingStationItem)
         ));
     }
 }

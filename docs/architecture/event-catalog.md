@@ -162,6 +162,7 @@ While tackled, `can_propose_warp()` / `can_propose_jump()` return false, blockin
 | `ShipUndocked` | Ship undocked from an NPC station (ADR-0034 9B docking foundation) | `SimulationNode::undock_owned` | ✅ implemented |
 | `PackagedShipBuilt` | Scrap Metal consumed in a docked station and converted into a packaged ship (ADR-0034 9B) | `SimulationNode::build_packaged_ship_owned` | ✅ implemented |
 | `ShipDisassembled` | Docked undamaged unfitted ship converted into a packaged ship in station inventory (ADR-0034 9B) | `SimulationNode::disassemble_ship_owned` | ✅ implemented |
+| `ShipAssembled` | A station-inventory `PackagedShip` item converted into a new live docked `Ship`, owned by the caller (ADR-0034 9B, ADR-0037). Fields: `ship_id` (freshly allocated), `player_id`, `station_id`, `ship_type_id`, `tick`. Replay: allocates the ECS entity with `e.ship_id` directly (no new ID counter increment beyond what's needed to keep it monotonic), unfitted, docked at `station_id`, owned by `player_id`; does **not** change `active_ship` (ADR-0037 -- a later `SelectActiveShipCommand` makes it active) | `SimulationNode::assemble_ship_owned` | ✅ implemented |
 
 This is an authoritative event: it stores `anchor` and the post-rebase `offset` so Replay reproduces the representation exactly. A rebase is a non-velocity-driven frame change, so it's recorded as its own fact; INV-MOVE (the invariant for velocity-driven motion) doesn't apply since absolute position is preserved.
 
@@ -199,6 +200,7 @@ Commands are defined in `dawn-core/src/commands.rs`. Clients send them to the se
 | `UndockCommand` | Leave a previously-docked NPC station (ADR-0034 9B) | `ShipUndocked` | ✅ implemented |
 | `BuildPackagedShipCommand` | Consume Scrap Metal in the current docked station and create a `PackagedShip` item there (ADR-0034 9B) | `PackagedShipBuilt` | ✅ implemented |
 | `DisassembleShipCommand` | Convert the current docked ship into a station-side `PackagedShip` item after undamaged/unfitted validation (ADR-0034 9B) | `ShipDisassembled` | ✅ implemented |
+| `AssembleCommand` | Convert a station-inventory `PackagedShip` item into a new live docked `Ship` owned by the caller; does not change `active_ship` (ADR-0034 9B, ADR-0037) | `ShipAssembled` | ✅ implemented |
 | `ActivateModuleCommand` | Turn on an Active Module | `ModuleActivated` | ✅ implemented |
 | `DeactivateModuleCommand` | Turn off an Active Module | `ModuleDeactivated` | ✅ implemented |
 | `AttackCommand` | Designate an attack target | `WeaponFired` | ⬜ type + WsServer JSON parser only; not wired into combat |

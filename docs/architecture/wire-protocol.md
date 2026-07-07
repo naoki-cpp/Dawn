@@ -25,11 +25,16 @@ which reflects the `EventJson` enum in
 
 Read `wire-protocol.schema.json` for the exact contract. In summary, the
 `"type"` values are: `ShipSpawned`, `VelocityChanged`, `ShipDespawned`,
-`ShipDocked`, `ShipUndocked`, `DamageTaken`, `RepairApplied`,
+`ShipDocked`, `ShipUndocked`, `ShipAssembled`, `DamageTaken`, `RepairApplied`,
 `ShipDestroyed`, `TargetLocked`, `LockLost`, `ModuleActivated`,
 `ModuleDeactivated`, `JumpGateUsed`, `StarSystemChanged`, and `Redirect`
 (server-initiated reconnect to a different node on cross-node jump, see
 ADR-0026 / multi-node clusters).
+
+`ShipAssembled` (Phase 9B-5, ADR-0034/ADR-0037) reports a new live docked
+ship created from a station-inventory `PackagedShip` item: `ship_id`,
+`station_id`, `ship_type_id`, `tick`. It does not imply the ship became the
+caller's `active_ship` -- send `SelectActiveShipCommand` to fly it.
 
 Every event carries `tick: u64` except `Redirect`, which is a transport
 control message rather than a domain fact.
@@ -54,7 +59,13 @@ The `"type"` values are: `MoveCommand`, `LockOnCommand`,
 `OrbitCommand`, `KeepAtRangeCommand`, `FitModuleCommand`,
 `UnfitModuleCommand`, `DockCommand`, `UndockCommand`,
 `BuildPackagedShipCommand`, `DisassembleShipCommand`,
-`SelectActiveShipCommand`.
+`SelectActiveShipCommand`, `AssembleCommand`.
+
+`AssembleCommand { station_id, ship_type_id }` (Phase 9B-5) carries no
+`ship_id` -- the ship doesn't exist yet; its ID is reported back via the
+resulting `ShipAssembled` event. Rejected if the caller isn't docked at
+`station_id`, `ship_type_id` is unknown, or the station inventory has no
+matching `PackagedShip`.
 
 **ADR-0037 (owned ship / active ship split):** `MoveCommand`, `LockOnCommand`,
 `ActivateModuleCommand`, `DeactivateModuleCommand`, `StopCommand`,
