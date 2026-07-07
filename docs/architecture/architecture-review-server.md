@@ -3,9 +3,11 @@ scope    : コードベース全体の保守性・設計品質レビュー
 audience : AI Agent / Human Developer
 update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md
-date     : 2026-07-07（R-4完了: `node/mod.rs`（impl 748行でトリガー発火）の座標合成
-アクセサ群を `node/coordinates.rs` へ純粋移動し939→821行・impl700行未満に復帰。
-2026-07-06の全ファイル再計測（63ファイル更新）はそのまま有効。server 総合 B+ 維持、
+date     : 2026-07-08（定期再計測。9B-5/ADR-0037系の機能追加（Assemble/Disembark/
+複数船ロスターUI/TransferToStationCommand）で7ファイルの記録値が実測とずれていたのを
+修正。新規発見: `dawn-actor/src/protocol.rs` の impl が700行トリガーを超過（701）— R-5として
+起票（保留・分割方針は明記済み）。ItemId→ItemRow JSON重複除去は前セッションで解消済み
+（`item_id_to_row_json`、完了済み表に記載）。server 総合 B+ 維持、
 client 側は別途 architecture-review-client.md 参照）
 ---
 
@@ -18,51 +20,54 @@ Rust シニアアーキテクト視点での現状分析と改善ロードマッ
 
 ## 現状評価
 
-**総合: B+**（2026-07-06 維持。全ファイル再計測で63ファイルの記録値を修正したが、
-クレート DAG・重複・型設計・Rust固有・AI開発由来の評価軸を下げるほどの新たな
-unmanaged debt は見つかっていない。唯一の例外は `node/mod.rs` — impl 700行トリガーが
-発火し R-4 として起票したが、決定（分割方針）とロードマップ記載が済んでいるため
-managed debt として扱い、ファイルサイズ軸は B+ を維持する）
+**総合: B+**（2026-07-08 再計測で維持。9B-5/ADR-0037 系の機能追加（Assemble/Disembark/
+複数船ロスターUI/TransferToStationCommand）で7ファイルの記録値が実測より古くなっていたが、
+純増分はすべて機能追加+テスト蓄積で説明がつき、クレート DAG・重複・型設計・Rust固有・
+AI開発由来の評価軸を下げるほどの新たな unmanaged debt ではない。新規発見1件:
+`dawn-actor/src/protocol.rs` の impl が700行トリガーを超過（701）——R-5として起票。
+決定（Defer・分割方針・トリガー）を伴う managed debt として扱い、ファイルサイズ軸は B+ を維持する）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027）。M-7 解消で `ClientCommand` を `dawn-core` へ移動し DAG が整理された（`dawn-sector` が `dawn-actor` 非依存のまま dispatch を保持できるようになった）。Player Command Dispatch のための新 crate は引き続き不要 |
-| ファイルサイズ | B+ | 2026-07-06 全ファイル再計測。`warp.rs` 1092（impl 533）・`commands.rs` 962（impl 583）・`transit_flow.rs` 949（impl 368）・`node/mod.rs` 936（**impl 748、R-4 トリガー発火**）・`orbit.rs` 860（impl 324）・`station.rs` 972（impl 443）。`mod.rs` 以外は全て impl 700 未満で trigger 付き defer を維持。`mod.rs` は R-4 として着手判断へ格上げ（分割方針は決定済み・実施はロードマップ次項） |
-| 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。`InventoryComp`（ADR-0032）・`RepairLayer`/`RepairApplied`（ADR-0033）も既存型設計に整合 |
-| 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。AoI delivery、production runtime、Command dispatch は deep module 化済み（M-7 解消で `apply_client_command` が `SimulationNode` に集約）。残る両バイナリ間グルー重複（M-6）は data loading / NPC spawn の低頻度 glue として許容判断 |
+| ファイルサイズ | B+ | 2026-07-08 再計測。`warp.rs` 1093（impl 534）・`commands.rs` 1022（impl 644）・`transit_flow.rs` 949（impl 368）・`station.rs` 1391（impl 545）・`orbit.rs` 862（impl 326）は全て impl 700 未満で trigger 付き defer を維持（R-3）。`node/mod.rs` は 821（impl 633）で R-4 完了状態を維持。**新規**: `dawn-actor/src/protocol.rs` が 1003（impl 701）でR-3と同じ700行トリガーに到達 — R-5 として起票（保留・分割方針明記済み） |
+| 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。`InventoryComp`（ADR-0032）・`RepairLayer`/`RepairApplied`（ADR-0033）・`ItemId`（ADR-0034、`dawn-core/src/item.rs`）も既存型設計に整合 |
+| 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。AoI delivery、production runtime、Command dispatch は deep module 化済み（M-7 解消で `apply_client_command` が `SimulationNode` に集約）。2026-07-08、`ItemId -> ItemRow` JSON変換の重複（`serialization.rs` 2箇所）を `item_id_to_row_json` へ集約し解消済み。残る両バイナリ間グルー重複（M-6）・Fit経路のテール重複（M-8）は許容判断のまま |
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。`TransitOp::Commit` は ADR-0032 で `Box<ShipSnapshot>` 化しサイズ非対称を解消済み |
 | AI開発由来 | A− | 命名汚染なし。残る `SectorSimulatorActor` の密結合（M-3）は本番パス外の in-process 専用で実害小 |
 
 ---
 
-## ファイルサイズ一覧（2026-07-06 時点）
+## ファイルサイズ一覧（2026-07-08 時点）
 
-> **2026-07-06、全ファイル再計測（`/architecture-review`）。** 前回パス以降、多数の
-> ファイルで表の記録値が実測より古いままだったと判明した——一部は前回計測時点で
-> 既に誤っていた（例: `world_presentation.gd`〈クライアント側〉は新設時から実測と
-> 数十行ずれていた）。63ファイルの行数をこのパスで実測へ更新した。
-> R-3 の観察対象ファイルは impl 行数（テスト除く）を併記し、`node/mod.rs` 以外は
-> トリガー（impl 700 超）未発火を確認。`node/mod.rs` は impl 748 行でトリガーが発火し、
-> R-4 として新規に着手判断へ格上げした（詳細は「問題一覧」参照）。
+> **2026-07-08、全ファイル再計測（`/architecture-review`）。** 前回パス（2026-07-06/07）
+> 以降に landed した9B-5/ADR-0037系の機能（Assemble/Disembark/複数船ロスターUI/
+> TransferToStationCommand）で、`inventory.rs`（428→570）・`spawner_logic.rs`（623→669）・
+> `apply_event.rs`（498→566）・`commands.rs`（dawn-core、473→551）・`events.rs`（657→694）・
+> `serialization.rs`（前回パスで既に1066に更新済み・変更なし）・`protocol.rs`（860→1003）が
+> 記録値より実測が増えていた。純増分は全て機能追加+回帰テストで説明がつく。
+> R-3 の観察対象ファイル（warp/orbit/commands/station/transit_flow）は引き続き全て
+> impl 700 未満（トリガー未発火）。**新規**: `dawn-actor/src/protocol.rs` の impl が
+> 701 行でトリガー到達 — R-5 として起票（詳細は「問題一覧」参照）。
 
 ### dawn-sector（ゲームロジック）
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-sector/src/node/warp.rs` | 1092（impl 533） | 🟡 R-1 新設（2026-06-23）。warp 幾何の単一責務だが総行数が閾値を超過。2026-07-06 再計測で前回記録（1023）より実際は増加（機能追加＋テスト蓄積）と判明。impl は 533 でトリガー未発火、依然 watch 対象 |
-| `crates/dawn-sector/src/node/spawner_logic.rs` | 623 | 🟢 P4-2 + P7-1 + ADR-0029 + ADR-0032。残るのは spawn mechanics（spawn / inventory seed）のみで、R-3 の観察対象から外れた |
+| `crates/dawn-sector/src/node/warp.rs` | 1093（impl 534） | 🟡 R-1 新設（2026-06-23）。warp 幾何の単一責務だが総行数が閾値を超過。2026-07-08 再計測でほぼ横ばい（1092→1093）。impl は 534 でトリガー未発火、依然 watch 対象 |
+| `crates/dawn-sector/src/node/spawner_logic.rs` | 669（impl 440） | 🟢 P4-2 + P7-1 + ADR-0029 + ADR-0032。残るのは spawn mechanics（spawn / inventory seed）のみで、R-3 の観察対象から外れた。2026-07-07、`insert_ship_entity` を抽出し `assemble_ship_owned`/`apply_event` のReplay armと共有。新規プレイヤーへの starter `PackagedShip` 自動付与を追加（623→669） |
 | `crates/dawn-sector/src/node/bot_ai.rs` | 347 | 🟢 `spawner_logic.rs` から `process_bots` を抽出した Bot AI 決定ループ。純粋移動、挙動変更なし |
-| `crates/dawn-sector/src/node/orbit.rs` | 860（impl 324） | 🟡 ADR-0031 新設。Orbit / Keep at Range の操船一式。単一責務で許容だが総行数は watch 帯。impl 324 でトリガー未発火 |
-| `crates/dawn-sector/src/node/mod.rs` | 821（impl 700未満） | 🟢 R-4 完了（2026-07-07）。座標合成アクセサ群（`entity_absolute`/`entity_abs_pos`/`entity_abs_pos_f64`/`entity_absolute_f64`/`dest_in_ship_frame_abs`/`ship_distance`/`ship_distance_to_point`/`ship_anchor_and_offset`/`debug_assert_missing_anchor`）を新設 `node/coordinates.rs` へ移動し、`mod.rs` は構造体宣言・定数・コンストラクタ・population backstop・identity/observation アクセサに絞った。純粋移動、挙動変更なし（939→821） |
+| `crates/dawn-sector/src/node/orbit.rs` | 862（impl 326） | 🟡 ADR-0031 新設。Orbit / Keep at Range の操船一式。単一責務で許容だが総行数は watch 帯。impl 326 でトリガー未発火 |
+| `crates/dawn-sector/src/node/mod.rs` | 821（impl 633） | 🟢 R-4 完了（2026-07-07）。座標合成アクセサ群（`entity_absolute`/`entity_abs_pos`/`entity_abs_pos_f64`/`entity_absolute_f64`/`dest_in_ship_frame_abs`/`ship_distance`/`ship_distance_to_point`/`ship_anchor_and_offset`/`debug_assert_missing_anchor`）を新設 `node/coordinates.rs` へ移動し、`mod.rs` は構造体宣言・定数・コンストラクタ・population backstop・identity/observation アクセサに絞った。純粋移動、挙動変更なし（939→821） |
 | `crates/dawn-sector/src/node/coordinates.rs` | 134 | 🟢 R-4（2026-07-07新設）。`AnchorTable`（ADR-0029）呼び出し側の座標合成アクセサを一元化した deep module。`mod.rs` から純粋移動 |
 | `crates/dawn-sector/src/node/transit_flow.rs` | 949（impl 368） | 🟢 `prepare_transit_commit`/`handle_transit_commit`（公開面 5→2 に集約）+ `rebase_after_transit`。大きいが責務は cohesive。impl 368 で余裕あり |
-| `crates/dawn-sector/src/node/station.rs` | 1387（impl 546） | 🟡 ADR-0034/9B foundation。dock/undock・station inventory・build/disassemble/assemble/disembark が1ファイルに集まっており、単一の「Station operations」としては読めるが総行数は watch 帯。2026-07-07、ADR-0037 で `dock_owned`/`undock_owned` が active-ship 解決に、`select_active_ship_owned` を新設（972→1010）。同日、Phase 9B-5 `assemble_ship_owned`（`Result<ShipId, StationOperationRejection>`、既存 `StationOperationOutcome` は失敗時にも実在するship_idを要求するため不採用）を新設 + 回帰テスト4件追加（1010→1278）。同日、`disembark_owned`（同じ理由で`Result`採用）を新設 + テスト4件追加（1278→1387）。impl 546 でトリガー未発火 |
+| `crates/dawn-sector/src/node/station.rs` | 1391（impl 545） | 🟡 ADR-0034/9B foundation。dock/undock・station inventory・build/disassemble/assemble/disembark が1ファイルに集まっており、単一の「Station operations」としては読めるが総行数は watch 帯。2026-07-07、ADR-0037 で `dock_owned`/`undock_owned` が active-ship 解決に、`select_active_ship_owned` を新設（972→1010）。同日、Phase 9B-5 `assemble_ship_owned`（`Result<ShipId, StationOperationRejection>`、既存 `StationOperationOutcome` は失敗時にも実在するship_idを要求するため不採用）を新設 + 回帰テスト4件追加（1010→1278）。同日、`disembark_owned`（同じ理由で`Result`採用）を新設 + テスト4件追加（1278→1387）。2026-07-08 再計測でほぼ横ばい（1387→1391）。impl 545 でトリガー未発火 |
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 655 | 🟢 P7-pre + ADR-0032（inventory 永続化）。ほぼテスト |
-| `crates/dawn-sector/src/node/inventory.rs` | 428（impl 170） | 🟢 ADR-0032 新設。fit/unfit_module_owned + seed + テスト。PR #67 で `apply_fitting_and_emit` 内の手組み `apply_fitting` 呼び出しを `reapply_fitting` に置換（459→454） |
-| `crates/dawn-sector/src/node/commands.rs` | 1014（impl 637） | 🟡 P7-1 + ADR-0032 + M-7（Issue #56）+ ADR-0035 + 9B station commands。command dispatch と操作検証の責務は保っているが、総行数は watch 帯。2026-07-07、ADR-0037 で `owns_ship` に加え `is_active_ship` を新設し `apply_client_command` の各 arm を active_ship 解決へ書き換え（962→1017）。同日、Phase 9B-5 Assemble 実装に伴い `ClientCommandFollowup::RefreshFitting` を `ShipId` から `PlayerId` へ変更（Disassemble後にRefreshFittingがship_id経由でplayer_idを解決できず更新が届かないバグを修正）、Dock/Undock/Build/Disassemble/SelectActiveShip/Assembleの各armを簡略化（1017→1014）。impl 637 でトリガー未発火だが引き続き watch 対象 |
-| `crates/dawn-sector/src/node/serialization.rs` | 1066 | 🟢 InitialState / PlayerLoadout / handoff payload の組み立て。サイズは増えたが責務は単一。2026-07-08、`ItemId -> ItemRow JSON`（7キー必須）変換が`build_player_loadout_json`のship-inventory部分と`station_inventory_json`の2箇所に独立コピーされていた（過去のキー欠落バグの温床）のを`item_id_to_row_json`単一メソッドへ集約 |
+| `crates/dawn-sector/src/node/inventory.rs` | 570（impl 203） | 🟢 ADR-0032 新設。fit/unfit_module_owned + seed + テスト。PR #67 で `apply_fitting_and_emit` 内の手組み `apply_fitting` 呼び出しを `reapply_fitting` に置換（459→454）。2026-07-08、ADR-0034 9B `transfer_to_station_owned`（`fit_module_owned`/`unfit_module_owned`と同じ`owns_ship`+`can_use_station`検証パターン）+ 回帰テスト4件を新設（428→570） |
+| `crates/dawn-sector/src/node/commands.rs` | 1022（impl 644） | 🟡 P7-1 + ADR-0032 + M-7（Issue #56）+ ADR-0035 + 9B station commands。command dispatch と操作検証の責務は保っているが、総行数は watch 帯。2026-07-07、ADR-0037 で `owns_ship` に加え `is_active_ship` を新設し `apply_client_command` の各 arm を active_ship 解決へ書き換え（962→1017）。同日、Phase 9B-5 Assemble 実装に伴い `ClientCommandFollowup::RefreshFitting` を `ShipId` から `PlayerId` へ変更（Disassemble後にRefreshFittingがship_id経由でplayer_idを解決できず更新が届かないバグを修正）、Dock/Undock/Build/Disassemble/SelectActiveShip/Assembleの各armを簡略化（1017→1014）。2026-07-08、`TransferToStationCommand` の dispatch arm を1件追加（1014→1022）。impl 644 でトリガー未発火だが引き続き watch 対象 |
+| `crates/dawn-sector/src/node/serialization.rs` | 1066（impl 471） | 🟢 InitialState / PlayerLoadout / handoff payload の組み立て。サイズは増えたが責務は単一。2026-07-08、`ItemId -> ItemRow JSON`（7キー必須）変換が`build_player_loadout_json`のship-inventory部分と`station_inventory_json`の2箇所に独立コピーされていた（過去のキー欠落バグの温床）のを`item_id_to_row_json`単一メソッドへ集約 |
 | `crates/dawn-sector/src/galaxy.rs` | 459 | 🟢 ADR-0029 AU→units 変換・ゲート AU 化 |
-| `crates/dawn-sector/src/node/apply_event.rs` | 498 | 🟢 P7-pre + ADR-0032 + ADR-0035。replay apply の責務は単一 |
+| `crates/dawn-sector/src/node/apply_event.rs` | 566（impl 339） | 🟢 P7-pre + ADR-0032 + ADR-0035。replay apply の責務は単一。2026-07-07、`ShipAssembled` の replay arm（station item 借方・`insert_ship_entity`・`docked_ships`/`owners` 復元）を追加（498→566） |
 | `crates/dawn-sector/src/node/tackle.rs` | 345 | 🟢 P7-pre。ADR-0035（PR #62）で距離判定を `entity_absolute_f64` の f64 差分に修正（真 AU スケールでの f32 丸め対策・ADR-0029 パターン準拠）。PR #66 で手組みの delta 計算を `SimulationNode::ship_distance` 呼び出しに置換し未使用 `PositionComp` import を削除（358→345） |
 | `crates/dawn-sector/src/node/range_gate.rs` | 479（impl 150） | 🟢 ADR-0035 新設（PR #62）。Range Gate System（Step 5.5）— Weapon/Tackle/Remote Repair のターゲットが射程外に出たら強制 OFF（`ModuleDeactivated { forced_reason: OutOfRange }`）。PR #63 で flat-index 解決を `FittingComp::slot_at_flat_mut` に置換（403→382）。PR #66 で距離判定を `SimulationNode::ship_distance` 呼び出しに置換（382→362）。ADR-0036 で `effective_range_for_kind`/`process_range_gate` に Remote Repair 2 kind を追加 + 活性化/Range Gate/回復のテスト3件を追加（362→469） |
 | `crates/dawn-sector/src/aoi.rs` | 629（impl 311） | 🟢 `AoiDelivery`/`AoiSink`/`Observer`（旧 dawn-simulation・dawn-sector-node 重複の集約先）。半分弱はテスト。2026-07-01、`deliver_frame` を `<S: EventStore>` でジェネリック化 |
@@ -85,7 +90,7 @@ managed debt として扱い、ファイルサイズ軸は B+ を維持する）
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-actor/src/protocol.rs` | 860 | 🟢 M-4 集約（DomainEvent↔JSON↔ClientCommand）。メッセージ family は増えているが単一責務。2026-07-07、ADR-0037 で操縦系/Undock コマンドの wire 表現から `ship_id` を除去（`SelectActiveShipCommand` 新設分を含めても純減、896→860） |
+| `crates/dawn-actor/src/protocol.rs` | 1003（impl 701） | 🟡 R-5 新設（2026-07-08）。M-4 集約（DomainEvent↔JSON↔ClientCommand）。メッセージ family は増え続けているが単一責務（wire ⇄ domain 変換）。2026-07-07、ADR-0037 で操縦系/Undock コマンドの wire 表現から `ship_id` を除去（896→860）。2026-07-07〜08、`AssembleCommand`/`ShipAssembled`/`DisembarkCommand`/`TransferToStationCommand` の JSON variant + parse arm + テストを追加（860→1003）。impl が700行トリガーに到達（701）——詳細は「問題一覧」R-5参照 |
 | `crates/dawn-actor/src/client_connection.rs` | 262 | 🟢 ClientConnection trait + InProcess/Ws 実装 |
 | `crates/dawn-actor/src/ws_server.rs` | 275 | 🟢 M-4 集約（WsServer / PlayerSession）+ ADR-0032 `send_raw` |
 | `crates/dawn-actor/src/lib.rs` | 41 | 🟢 |
@@ -115,7 +120,8 @@ managed debt として扱い、ファイルサイズ軸は B+ を維持する）
 | `crates/dawn-sector-node/src/runtime.rs` | 256 | 🟢 production Node の jump fallback / tick stepping / replication publish 呼び出し / Redirect / AoI delivery を集約。本ファイルは orchestration のみ |
 | `crates/dawn-sector-node/src/client_admission.rs` | 236 | 🟢 client admission state machine |
 | `crates/dawn-sector-node/src/main.rs` | 322 | 🟢 8D-4 本番バイナリ。config / TCP transport / accept channel / data loading の配線に縮小 |
-| `crates/dawn-core/src/events.rs` | 657 | 🟢 ADR-0032 `ShipFitted.inventory`・ADR-0033 `RepairApplied`/`RepairLayer`・ADR-0035 `ModuleActivated.target_ship_id`/`ModuleDeactivated.forced_reason`/`ModuleDeactivationReason` 追加 |
+| `crates/dawn-core/src/events.rs` | 694 | 🟢 ADR-0032 `ShipFitted.inventory`・ADR-0033 `RepairApplied`/`RepairLayer`・ADR-0035 `ModuleActivated.target_ship_id`/`ModuleDeactivated.forced_reason`/`ModuleDeactivationReason` 追加。2026-07-07、ADR-0034/0037 `ShipAssembled` イベントを追加（657→694） |
+| `crates/dawn-core/src/item.rs` | 36 | 🟢 **新規記録**（本表に未記載だった）。ADR-0034 `ItemId`（`Module`/`PackagedShip`/`ScrapMetal`）— 経済系機能全体が参照する小さく安定した型定義 |
 | `crates/dawn-ecs/src/systems/combat.rs` | 578 | 🟢 |
 | `crates/dawn-ecs/src/systems/capacitor.rs` | 485 | 🟢 ADR-0033 `repair_cycles_started` 収集を並置。ADR-0035 で強制 OFF に `forced_reason: CapacitorExhausted` を付与。PR #63 で flat-index 境界計算と 4-way chain を `FittingComp::slot_at_flat_mut`/`iter_slots` に置換（504→479）。PR #65 でスロット変更3行を `FittedSlot::force_off()` 呼び出しに置換（479→476）。ADR-0036 で `SlotInfo.target_ship_id` を追加し `RepairCycle` へ `slot.target_ship_id.unwrap_or(snap.ship_id)` を渡すよう変更（476→490） |
 | `crates/dawn-consensus/src/actor.rs` | 476 | 🟢 8D-5 実機検証で使う Raft role-transition ログ（`eprintln!`）を保持 |
@@ -125,7 +131,7 @@ managed debt として扱い、ファイルサイズ軸は B+ を維持する）
 | `crates/dawn-event-store/src/memory.rs` | 184 | 🟢 **新規記録**（本表に未記載だった）。`InMemoryEventStore` |
 | `crates/dawn-ecs/src/systems/movement.rs` | 415 | 🟢 |
 | `crates/dawn-ecs/src/systems/lock.rs` | 375 | 🟢 |
-| `crates/dawn-core/src/commands.rs` | 473 | 🟢 Command enum 群（継続的に variant 追加）。M-7（Issue #56）で `ClientCommand` enum を `dawn-actor` から移動（359→395）。ADR-0035 で `ActivateModuleCommand.target_ship_id` 追加（395→401）。2026-07-07、ADR-0037 で操縦系/Undock コマンド構造体から `ship_id` を除去し `SelectActiveShipCommand` を新設（457→473） |
+| `crates/dawn-core/src/commands.rs` | 551 | 🟢 Command enum 群（継続的に variant 追加）。M-7（Issue #56）で `ClientCommand` enum を `dawn-actor` から移動（359→395）。ADR-0035 で `ActivateModuleCommand.target_ship_id` 追加（395→401）。2026-07-07、ADR-0037 で操縦系/Undock コマンド構造体から `ship_id` を除去し `SelectActiveShipCommand` を新設（457→473）。2026-07-07〜08、`AssembleCommand`/`DisembarkCommand`/`TransferToStationCommand` を新設（473→551） |
 | `crates/dawn-consensus/src/rpc.rs` | 371 | 🟢 343→371。Raft RPC 型定義 |
 | `crates/dawn-consensus/src/tcp_transport.rs` | 353 | 🟢 337→351。8D-3 TcpRaftTransport |
 | `crates/dawn-ecs/src/systems/fitting.rs` | 315 | 🟢 PR #63 で `apply_fitting()` の4-way chain を `FittingComp::iter_slots()` に置換 |
@@ -144,7 +150,7 @@ managed debt として扱い、ファイルサイズ軸は B+ を維持する）
 | `crates/dawn-core/src/ship_type.rs` | 177 | 🟢 |
 | `crates/dawn-replication/src/outbound.rs` | 142 | 🟢 sender-side `OutboundLogPublisher`。append-log cursor と `LogBatch` suffix 構築を保持 |
 | `crates/dawn-replication/src/lib.rs` | 110 | 🟢 8D-2a/2b/2c/2d public API |
-| `crates/dawn-ecs/src/components/inventory.rs` | 104 | 🟢 ADR-0032 新設（InventoryComp） |
+| `crates/dawn-ecs/src/components/inventory.rs` | 127 | 🟢 ADR-0032 新設（InventoryComp）。2026-07-08、ADR-0034 9B `take_all`（whole-stack removal、`TransferToStationCommand`向け）+ テスト2件を追加（104→127） |
 | `crates/dawn-sector-node/src/config.rs` | 90 | 🟢 8D-4 TOML 静的 config。2026-07-01、永続化パス（`event_log_path`/`snapshot_path`/`cold_path`/`checkpoint_interval_ticks`）を追加（全て `#[serde(default)]` 付きで後方互換） |
 
 ---
@@ -418,6 +424,30 @@ backstop・identity/observation アクセサに絞られ、939→821 行、impl 
 チェックイン済み `.schema.json` の改行コード CRLF/LF 差分によるもので、この変更以前から
 発生していた別問題）。
 
+#### R-5（新設・2026-07-08・保留）: `dawn-actor/src/protocol.rs` の impl が700行トリガーに到達
+
+2026-07-06〜08 に landed した ADR-0037/ADR-0034 9B 系の機能（`AssembleCommand`/
+`ShipAssembled`/`DisembarkCommand`/`TransferToStationCommand`）が `EventJson`/
+`ClientCommandJson` に variant を追加し続け、860→1003 行（impl 701）に増加。R-3 が
+`node/` 系ファイルに適用してきた「impl 700 超で着手判断」の同じトリガーに達した。
+
+**根本原因**: メッセージ family（サーバー→クライアントの `EventJson`、クライアント→
+サーバーの `ClientCommandJson`）が増えるたびに、この1ファイルに variant + 変換関数 +
+テストが積まれ続ける構造。`node/mod.rs`（R-4）のような「無関係な2つの関心事の同居」
+ではなく、単一責務（wire JSON ⇄ domain 型変換）が愚直に大きくなっているだけ。
+
+**判断: 保留（トリガー付き）。** ファイル内部は既に `EventJson`/`domain_event_to_json`
+（サーバー→クライアント、36-338行）と `ClientCommandJson`/`parse_client_command`
+（クライアント→サーバー、364-701行）の2半分に明確に分かれており、無理な分割ではなく
+自然な分割軸が既に存在する。ただし現時点では両半分とも単独では変更頻度・複雑度とも
+低く、分割の実益より「1ファイルで wire protocol 全体を見渡せる」利点の方が大きいと判断。
+
+再評価トリガー（いずれかで着手）:
+- impl が ~850 行を超えたとき（`event_json.rs`/`client_command_json.rs` へ2分割）。
+- どちらか半分に unrelated な責務が紛れ込み始めたとき（現時点ではなし）。
+- スキーマ生成（`event_json_schema`/`client_command_json_schema`）の複雑さが
+  増し、2つの独立したスキーマ生成モジュールとして扱いたくなったとき。
+
 ### 未完了・保留
 
 上記リファクタロードマップ以外で残るのは以下。いずれも現時点では新しい module / crate を
@@ -427,6 +457,7 @@ backstop・identity/observation アクセサに絞られ、939→821 行、impl 
 |---|---|---|
 | R-2 client `main.gd` 分割 | 品質・一部着手済み | `WorldSession`・`WorldInteraction`・`WorldPresentation` 抽出で live world state / world interaction policy / world visual side effect を移動し、`main.gd` は 974 行（詳細・最新値は architecture-review-client.md）。残る scene lifecycle / node generation / network send / HUD adapter は `.tscn` 化コンポーネントへのシーン参照切れリスクが上回るため保留（C-3 とは無関係） |
 | R-3 `node/` 系再肥大（warp/orbit/commands/station/transit_flow） | 品質・保留 | 総行数は閾値帯だが impl は全て700未満・増分はテスト主体。impl が 700 超でファイル別に分割（トリガー付き・上記 R-3）。`mod.rs` はトリガー発火のため R-4 として分離 |
+| R-5 `dawn-actor/protocol.rs` の impl が700行トリガーに到達 | 品質・保留（新規 2026-07-08） | メッセージ family 増加による自然増（`EventJson`/`ClientCommandJson`の2半分は既に自然な分割軸あり）。impl ~850 or 責務混在でトリガー |
 | ~~R-4 `node/mod.rs` impl 700行超過~~ | 完了 → 「完了済み」参照 | 2026-07-07、座標合成アクセサ群 + `debug_assert_missing_anchor` を `node/coordinates.rs` へ純粋移動。939→821行、impl700行未満に復帰 |
 | 8D-5 Raspberry Pi 実機検証 | 完了 → 「完了済み」参照 | 2026-07-01、reachability/tick-sla/failover 3項目とも PASS。詳細は `docs/process/8d5-hardware-notes.md` |
 | M-3 `SectorSimulatorActor` 密結合 | 品質・保留 | 本番パス外（in-process テスト/ベンチ専用）。P9-1 撤回。優先度低 |

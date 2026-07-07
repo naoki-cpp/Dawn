@@ -3,10 +3,12 @@ scope    : Godot クライアント（client/scripts/）の保守性・設計品
 audience : AI Agent / Human Developer
 update   : クライアント側で大規模リファクタ実施後 / 新スクリプト追加時
 related  : docs/architecture/architecture-review-server.md（サーバー側）, docs/architecture/architecture.md, docs/process/playtest-guide.md
-date     : 2026-07-07（C-4 解消〈`ModuleRow`/`ItemRow` typed schema〉に伴い軽量リフレッシュ。
-前回パス（2026-07-06、全ファイル再計測）以降に追加された `module_row.gd`/`item_row.gd` を
-表へ追加し、変更のあったファイル（`player_loadout.gd`/`hud_surface.gd`/`hud_manager.gd`）と
-テストケース数を実測へ更新。総合評価は変わらず A）
+date     : 2026-07-08（定期再計測。9B-5/ADR-0037系の機能追加（Assemble/Disembark/複数船
+ロスターUI/4列インベントリパネル/TransferToStationCommand）で6ファイルの記録値が実測とずれて
+いたのを修正。新規発見: `/improve-codebase-architecture` で指摘された、インベントリ行
+Dictionary が9個の magic string（`action`/`source`/`item_type`等）で main.gd と合意している
+だけの stringly-typed 設計を C-8 として起票（保留・`ModuleRow`/`ItemRow`〈C-4〉と同じ
+解決パターンが使える）。総合評価は変わらず A）
 ---
 
 # Architecture Review — Dawn Client (Godot)
@@ -18,17 +20,22 @@ date     : 2026-07-07（C-4 解消〈`ModuleRow`/`ItemRow` typed schema〉に伴
 
 ## 現状評価
 
-**総合: A**（2026-07-07 更新。`WorldPresentation` 新設で floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation を `main.gd` から移動。`WorldSession`・`HudSurface`・`WorldInteraction`・`WorldPresentation` の4つの deep module により、`main.gd` は scene wiring / network send / event dispatch / HUD frame assembly の orchestration にほぼ絞られた。2026-07-07、`PlayerLoadout` dict スキーマの非検証（C-4）も `ModuleRow`/`ItemRow` typed row 化で解消。残る debt は scene-tree 依存ゆえに手動確認が必要な入力経路のみ）
+**総合: A**（2026-07-08 再計測で維持。9B-5/ADR-0037系の機能（Assemble/Disembark/複数船
+ロスターUI/4列インベントリパネル/TransferToStationCommand）で `main.gd`/`hud_manager.gd`/
+`connection.gd`/`player_loadout.gd`/`hud_surface.gd`/`input_decoder.gd` が増加したが、
+純増分は全て機能追加+テスト。新規発見1件（C-8: インベントリ行 Dictionary の stringly-typed
+設計）はC-4と同じ解決パターンが使える軽微な debt として決定・トリガー付きで起票、
+結合度軸を A→A− に調整。残りは変わらず健全）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
 | ファイル分割 | A | `main.gd` から `HudManager`/`HudSurface`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder`/`WorldSession`/`WorldInteraction`/`WorldPresentation` を抽出。live world state は `WorldSession`、live HUD Control 参照は `HudSurface`、world interaction policy は `WorldInteraction`、world visual side effect は `WorldPresentation` が所有 |
-| `main.gd` の責務集約 | A | god object は実質解消。selection state・ダブルクリック・world selection 優先順位・dock/undock を含む action gating は `WorldInteraction` へ、floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation は `WorldPresentation` へ移動済み。`main.gd` に残るのは scene lifecycle / scene node generation / event dispatch / network send / HUD frame assembly |
+| `main.gd` の責務集約 | A | god object は実質解消。selection state・ダブルクリック・world selection 優先順位・dock/undock を含む action gating は `WorldInteraction` へ、floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation は `WorldPresentation` へ移動済み。`main.gd` に残るのは scene lifecycle / scene node generation / event dispatch / network send / HUD frame assembly。2026-07-08、複数所有船ロスター（SHIPS列）・右クリックでのTransferToStation送信ハンドラを追加（974→1056）が、既存の orchestration 層に自然に収まった |
 | 重複 | A− | マーカー生成・ピッキング・ワープ着地点計算の同型ロジックは解消済み（C-2） |
-| 結合度 | A | signal 経由の `connection.gd` ↔ `main.gd` 結合は良好。`@onready` のシーンツリー直パス参照はフェイルファストガードで解消（C-3）。2026-07-07、modules/inventory dict のキー前提の脆さ（C-4）も `ModuleRow`/`ItemRow` typed row 化で解消 |
+| 結合度 | A− | signal 経由の `connection.gd` ↔ `main.gd` 結合は良好。`@onready` のシーンツリー直パス参照はフェイルファストガードで解消（C-3）。modules/inventory dict のキー前提の脆さ（C-4）は `ModuleRow`/`ItemRow` typed row 化で解消済み。**新規（C-8、2026-07-08）**: `hud_manager.gd` のインベントリ行が typed row 化されず、9個の magic string キー（`action`/`source`/`item_type`等）を `main.gd` が `row.get(key, default)` で読み戻す設計のまま——C-4と同じ形の debt が別の行データに残っている。決定・トリガー付きで保留（下記「問題一覧」参照） |
 | デッドコード | A | 残骸なし。コメントは ADR 参照付きで現状と一致 |
-| テストカバレッジ | A− | 新設クラス + main.gd残存ロジックの一部を GdUnit4 で計164ケース実行確認済み（2026-07-07 実測。C-4 解消に伴い `player_loadout_test.gd`/`hud_surface_test.gd` にケース追加）。`WorldSession` / `HudSurface` / `WorldInteraction` に加えて `WorldPresentation` も marker clamp・warp tunnel easing・sun direction を scene tree なしで単体テスト可能になった。scene-tree/ネットワーク依存の end-to-end 入力経路だけが手動確認領域として残る |
-| サーバー側との対比 | — | サーバー側はクレート分割（A−）、クライアントはファイル分割（A）。2026-07-06 修正: 本行は旧グレード（B+）を参照したまま残っていた——上表「ファイル分割」は既に A。テストカバレッジは依然サーバー側（カバレッジ80%要件）が厚い |
+| テストカバレッジ | A− | 新設クラス + main.gd残存ロジックの一部を GdUnit4 で計171ケース実行確認済み（2026-07-08 実測。X key/Disembark・station roster・active_ship_id/owned_ships 関連のケースを追加）。`WorldSession` / `HudSurface` / `WorldInteraction` / `WorldPresentation` は引き続き scene tree なしで単体テスト可能。scene-tree/ネットワーク依存の end-to-end 入力経路（C-8対象の右クリックハンドラを含む）だけが手動確認領域として残る |
+| サーバー側との対比 | — | サーバー側はクレート分割（A−）、クライアントはファイル分割（A）。テストカバレッジは依然サーバー側（カバレッジ80%要件）が厚い |
 
 サーバー側が長期にわたる分割リファクタ（Phase 2〜9）を経て A− に達したのに対し、
 クライアントは 2026-06-20 の C-1 で初めて本格的な責務分離に着手し、4クラスの抽出と
@@ -36,30 +43,28 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 
 ---
 
-## ファイルサイズ一覧（2026-07-06 時点）
+## ファイルサイズ一覧（2026-07-08 時点）
 
-> **2026-07-06、全ファイル再計測（`/architecture-review`）。** 18ファイル全てで表の
-> 記録値が実測とずれていたと判明した——`main.gd`/`world_presentation.gd`/`player_loadout.gd`
-> のような直近で変更されたファイルだけでなく、`billboard_ring.gd`・`warp_tunnel_effect.gd`
-> のように何十コミットも変更されていない安定ファイルも含めて全件ずれており、単発の
-> 記録漏れではなく計測方法そのものが古い可能性がある。今回は `wc -l` による実測へ全件更新した。
-> `WorldSession` は live world state、`HudSurface` は live HUD Control 参照、
-> `WorldInteraction` は world interaction policy、`WorldPresentation` は world visual
-> side effect を所有する、という責務分担自体に変更はない。
+> **2026-07-08、全ファイル再計測（`/architecture-review`）。** 前回パス（2026-07-07）
+> 以降に landed した9B-5/ADR-0037系の機能（Assemble/Disembark/複数船ロスターUI/
+> 4列インベントリパネル/TransferToStationCommand）で `main.gd`（974→1056）・
+> `hud_manager.gd`（648→760）・`connection.gd`（297→332）・`player_loadout.gd`（208→238）・
+> `hud_surface.gd`（195→198）・`input_decoder.gd`（140→147）の6ファイルが増加。
+> 純増分は全て機能追加+テストで説明がつく。責務分担自体に変更はない。
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `client/scripts/main.gd` | 974 | 🟢 オーケストレーション層。scene lifecycle / node generation / event dispatch / network send / HUD frame assembly を保持。live world state は `WorldSession`、HUD surface ownership は `HudSurface`、world interaction policy は `WorldInteraction`、world visual side effect は `WorldPresentation` へ移動 |
-| `client/scripts/hud_manager.gd` | 648 | 🟢 HUD 全パネルの構築・更新の stateless static class。責務は単一（HUD 構築） |
-| `client/scripts/connection.gd` | 297 | 🟢 WebSocket I/O とシグナル発行のみ。2026-07-07、ADR-0037 で操縦系/Undock の send_* 関数群から `ship_id` 引数を除去（384→373）。同日、`/improve-codebase-architecture` で20超の `send_*` に反復していた「welcomedガード+type付与+JSON化+改行」を private `_send_json(type, extra)` ヘルパーへ集約（373→297）。純粋移動、挙動変更なし |
+| `client/scripts/main.gd` | 1056 | 🟢 オーケストレーション層。scene lifecycle / node generation / event dispatch / network send / HUD frame assembly を保持。live world state は `WorldSession`、HUD surface ownership は `HudSurface`、world interaction policy は `WorldInteraction`、world visual side effect は `WorldPresentation` へ移動。2026-07-07〜08、Disembark（`[X]`キー）・複数所有船ロスターUI（SHIPS列クリック→`SelectActiveShipCommand`）・SHIP CARGO行の右クリック→`TransferToStationCommand`を追加（974→1056） |
+| `client/scripts/hud_manager.gd` | 760 | 🟢 HUD 全パネルの構築・更新の stateless static class。責務は単一（HUD 構築）。2026-07-07〜08、インベントリパネルを2列→4列（FITTED/SHIP CARGO/STATION/SHIPS）に拡張し `_make_ship_row` を新設（648→760）。C-8（下記）の対象 |
+| `client/scripts/connection.gd` | 332 | 🟢 WebSocket I/O とシグナル発行のみ。2026-07-07、ADR-0037 で操縦系/Undock の send_* 関数群から `ship_id` 引数を除去（384→373）。同日、`/improve-codebase-architecture` で20超の `send_*` に反復していた「welcomedガード+type付与+JSON化+改行」を private `_send_json(type, extra)` ヘルパーへ集約（373→297）。2026-07-07〜08、`send_assemble_command`/`send_disembark_command`/`send_select_active_ship_command`/`send_transfer_to_station_command` を追加（297→332）。いずれも `_send_json` 呼び出しの1行ラッパー |
 | `client/scripts/world_session.gd` | 345 | 🟢 InitialState / AoI / HP / lock / tick-cap / dock state の client-side live world state |
 | `client/scripts/ship_controller.gd` | 326 | 🟢 単一船の視覚表現に専念。ロックオン枠は `BillboardRing` 共通化 |
 | `client/scripts/navigation_marker_renderer.gd` | 227 | 🟢 ゲート/惑星/ステーションマーカー生成 + スペクトル色 |
-| `client/scripts/player_loadout.gd` | 208 | 🟢 loadout/インベントリ正規化と capacitor 再現の純粋関数。main.gd は呼び出すのみで内部構造に触れない。C-4 解消（typed `ModuleRow`/`ItemRow` 導入）で `.get(key, default)` チェーンを排し縮小 |
+| `client/scripts/player_loadout.gd` | 238 | 🟢 loadout/インベントリ正規化と capacitor 再現の純粋関数。main.gd は呼び出すのみで内部構造に触れない。C-4 解消（typed `ModuleRow`/`ItemRow` 導入）で `.get(key, default)` チェーンを排し縮小。2026-07-07〜08、`active_ship_id`/`owned_ships` を追加（208→238） |
 | `client/scripts/module_row.gd` | 117 | 🟢 新設（2026-07-07、C-4 解消）。`ModuleRow.from_json()` が wire キー欠落を `push_error` + 行 drop で検出する typed row |
 | `client/scripts/item_row.gd` | 49 | 🟢 新設（2026-07-07、C-4 解消）。`ItemRow.from_json()`（inventory/station_inventory 行の typed schema） |
-| `client/scripts/hud_surface.gd` | 195 | 🟢 HUD Control 参照を所有し、`main.gd` からの render frame / hit-test 要求を `HudManager` へ委譲。パネル単位の dirty-tracking あり。C-4 解消で `ModuleRow` の Object 参照同一性に対応する `clone()`/`equals()` ベースの差分判定を追加 |
-| `client/scripts/input_decoder.gd` | 140 | 🟢 キー入力→アクション決定の純粋関数。GdUnit4 テスト済み |
+| `client/scripts/hud_surface.gd` | 198 | 🟢 HUD Control 参照を所有し、`main.gd` からの render frame / hit-test 要求を `HudManager` へ委譲。パネル単位の dirty-tracking あり。C-4 解消で `ModuleRow` の Object 参照同一性に対応する `clone()`/`equals()` ベースの差分判定を追加。2026-07-08、`station_inventory`/`owned_ships` の受け渡しを追加（195→198） |
+| `client/scripts/input_decoder.gd` | 147 | 🟢 キー入力→アクション決定の純粋関数。GdUnit4 テスト済み。2026-07-07、`KEY_X`（Disembark）判定を追加（140→147） |
 | `client/scripts/camera_controller.gd` | 142 | 🟢 自己完結したオービットカメラ |
 | `client/scripts/world_interaction.gd` | 133 | 🟢 新設（2026-07-05）。selection state、double-click timing、click→intent、lock intent、`InputDecoder` 連携を所有する deep module |
 | `client/scripts/world_presentation.gd` | 278 | 🟢 新設（2026-07-06）。floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation を所有する deep module |
@@ -70,8 +75,8 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/unit_format.gd` | 38 | 🟢 速度/距離の適応的単位整形（m/s・km/s・AU/s） |
 | `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 ワープトンネル ColorRect の intensity ラッパー |
 
-合計 4,472 行（2026-07-07 実測。C-4 解消で `module_row.gd`/`item_row.gd` を追加、ADR-0037 で `connection.gd` の send_* から `ship_id` 除去、さらに `_send_json` ヘルパー集約で373→297）のうち
-`main.gd` が21%を占める（C-1着手前69%から大幅低下）。
+合計 4,741 行（2026-07-08 実測。9B-5/ADR-0037系の機能追加で6ファイル+269行）のうち
+`main.gd` が22%を占める（C-1着手前69%から大幅低下、水準維持）。
 新設 static class 群（C-1 の5クラス + ADR-0029 の `world_space`/`unit_format`/`warp_tunnel_effect`
 + PR #33 の `player_loadout` + `WorldSession` + `HudSurface` + `WorldInteraction` +
 `WorldPresentation` + C-4 の `ModuleRow`/`ItemRow`）は、`WorldSession` が ship registry と
@@ -80,9 +85,8 @@ world interaction policy、`WorldPresentation` が world visual side effect、
 `ModuleRow`/`ItemRow` が PlayerLoadout の wire row schema を保持する。scene 生成と
 network send は `main.gd` 側。
 
-（`client/test/*.gd` は `world_presentation_test.gd` を含め 15 ファイル・合計 2,181 行
-（2026-07-07 実測。ADR-0037 で `main_test.gd` の `FakeConnection` から `ship_id` 引数を除去）。
-ケース数は164のまま。§「テストカバレッジ」参照）
+（`client/test/*.gd` は `world_presentation_test.gd` を含め 15 ファイル・合計 2,272 行
+（2026-07-08 実測、+91行）。ケース数は171（2026-07-08実測、+7）。§「テストカバレッジ」参照）
 
 ---
 
@@ -125,6 +129,30 @@ network send は `main.gd` 側。
 | C-2 | マーカー生成/ピッキング/ワープ着地点計算の同型ロジック2重実装 | 各組の「文字通り同一」な部分のみ named helper に抽出（後にC-1で各クラスへ移動）。挙動変更なし |
 | C-3 | シーンツリー直パス参照の脆さ（`@onready` の `$Connection` 等8箇所、null チェックなし） | `_ready()` 先頭で `_assert_scene_tree_refs()` を呼び、8箇所すべてを一括検証して `push_error` で起動時に即報告（2026-06-23）。調査の結果、結合は main.gd の8行に閉じており（C-1抽出先は `@onready` を使わず引数で受け取る設計）、`main.tscn` 変更14回中ノードパス不一致の不具合は0件——フェイルファストガードで十分、null安全化の全面展開は過剰と判断。GdUnit4 76件 全PASS |
 
+### 保留（トリガー付き）
+
+#### C-8（新規・2026-07-08・保留）: インベントリ行 Dictionary が stringly-typed のまま main.gd と合意している
+
+`/improve-codebase-architecture` の指摘: `hud_manager.gd::_make_inventory_row`/
+`_make_ship_row` は9個の magic string キー（`panel`/`module_id`/`slot`/`action`/
+`ship_type_id`/`item_type`/`count`/`source`/`ship_id`）を持つ bare Dictionary を作り、
+`main.gd`（`_handle_inventory_row_click`/`_handle_inventory_row_right_click` 等）が
+同じ文字列で `row.get(key, "")` と読み戻す。両ファイルはこの形について**合意しているだけ**
+で、コンパイラチェックはない。
+
+**根本原因**: C-4（`PlayerLoadout` の modules/inventory 行）は `ModuleRow`/`ItemRow` という
+typed class で解決済みだが、インベントリパネルの表示行（fit/unfit/assemble/select_active_ship
+の action と HUD 描画用の `panel` 参照を持つ、UI 専用の行）は対象外のままだった。
+
+**判断: 保留（トリガー付き）。** C-4 と全く同じ解決パターン（`InventoryRow` class +
+`from_json()` 相当の構築ヘルパー）が使えるため実装コスト自体は低いが、現時点で
+実際にバグを生んだ形跡はなく（`main.gd`/`hud_manager.gd` は同一セッション内で追従して
+変更されている）、優先度を上げるほどの実害は確認されていない。
+
+再評価トリガー: この行の形が原因で実際に不具合が起きたとき、またはアクション種別
+（`fit`/`unfit`/`assemble`/`select_active_ship`/将来の追加分）がさらに増えて
+文字列の食い違いリスクが上がったとき。
+
 C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` / `HudManager`）と
 追加の deep modules（`WorldSession` / `HudSurface`）はいずれも GdUnit4 テスト付き。
 各規模は「ファイルサイズ一覧」を参照。
@@ -145,19 +173,19 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 | `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 13 |
 | `ship_picking_test.gd` | `ShipPicking`（画面空間ピッキング含む） | 12 |
 | `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer`（選択リング含む） | 12 |
-| `input_decoder_test.gd` | `InputDecoder` | 30 |
+| `input_decoder_test.gd` | `InputDecoder`。2026-07-07、`KEY_X`（Disembark）判定のケースを追加（+2） | 32 |
 | `hud_manager_test.gd` | `HudManager` | 21 |
-| `hud_surface_test.gd` | `HudSurface`（HUD render frame / fitting更新 / inventory hit-test 委譲 / パネル dirty-tracking 判定。C-4 で `ModuleRow` の `clone()`/`equals()` ベース差分判定のケースを追加） | 14 |
+| `hud_surface_test.gd` | `HudSurface`（HUD render frame / fitting更新 / inventory hit-test 委譲 / パネル dirty-tracking 判定。C-4 で `ModuleRow` の `clone()`/`equals()` ベース差分判定のケースを追加）。2026-07-08、station roster / `source` タグ付けのケースを追加（+2） | 16 |
 | `billboard_ring_test.gd` | `BillboardRing` | 3 |
 | `camera_controller_test.gd` | `CameraController`（orbit drag） | 2 |
 | `unit_format_test.gd` | `UnitFormat`（ADR-0029 速度/距離単位整形） | 8 |
 | `world_space_test.gd` | `WorldSpace`（ADR-0029 浮動原点リベース） | 4 |
 | `connection_test.gd` | `connection.gd`（URL正規化・module activated signal・PlayerLoadout wire message rename の回帰テスト） | 6 |
-| `player_loadout_test.gd` | `PlayerLoadout`（PR #33 起点、後に rename。C-4 で `ModuleRow`/`ItemRow` の `from_json()` 検証ケースを追加） | 14 |
+| `player_loadout_test.gd` | `PlayerLoadout`（PR #33 起点、後に rename。C-4 で `ModuleRow`/`ItemRow` の `from_json()` 検証ケースを追加）。2026-07-07〜08、`active_ship_id`/`owned_ships` のケースを追加（+3） | 17 |
 | `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy / dock state） | 11 |
 | `world_interaction_test.gd` | `WorldInteraction`（selection ownership / double-click / lock intent / key action 解釈） | 8 |
 | `world_presentation_test.gd` | `WorldPresentation`（marker clamp / warp tunnel easing / sun state） | 6 |
-| **合計** | | **164**（`func test_` 実測、2026-07-07） |
+| **合計** | | **171**（`func test_` 実測、2026-07-08） |
 
 テスト導入で見つかった不具合・定着した手順（詳細: `docs/process/godot-client-testing.md`）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる
@@ -167,17 +195,18 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 `main.gd` に残るのは input event の配線、イベント dispatch、scene spawning といった
 シーンインスタンス化やネットワーク接続が絡む領域で、ここは引き続き視覚的な確認が主な検証手段になる。
 
-（Medium debt: 保留項目なし。C-4 は下記「解消済み」参照）
+（Medium debt: C-8（保留・トリガー付き、上記参照）のみ。C-1〜C-7 は「解消済み」参照）
 
 ---
 
 ## 改善ロードマップ
 
-C-1/C-2/C-3/C-4/C-5/C-6/C-7 はすべて解消済み（上記「問題一覧」参照）。
+C-1/C-2/C-3/C-4/C-5/C-6/C-7 はすべて解消済み（上記「問題一覧」参照）。C-8（新規・
+インベントリ行 Dictionary の stringly-typed 設計）はトリガー付きで保留中。
 
 `main.gd` の god object 問題は実質解消し、C-4（PlayerLoadout dict のスキーマ非検証）も
 typed row 化で解消したため、クライアント側の次の課題は構造リファクタではなく機能側
-（戦闘の深み、ADR-0016 §5）が妥当。
+（戦闘の深み、ADR-0016 §5）が妥当。C-8 は再評価トリガーが引かれるまで着手しない。
 
 ### 採らない方針
 
