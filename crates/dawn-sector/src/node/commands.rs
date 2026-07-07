@@ -313,6 +313,10 @@ impl<S: EventStore> SimulationNode<S> {
                 let _ = self.assemble_ship_owned(player_id, a);
                 return Some(ClientCommandFollowup::RefreshFitting(player_id));
             }
+            ClientCommand::Disembark(_) => {
+                let _ = self.disembark_owned(player_id);
+                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+            }
         }
         None
     }

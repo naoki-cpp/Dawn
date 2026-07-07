@@ -193,6 +193,10 @@ func send_disassemble_ship_command(p_ship_id: int, p_station_id: int) -> void:
 		"station_id": p_station_id,
 	})
 
+## Leave the active ship while docked, without disassembling it (ADR-0037).
+func send_disembark_command() -> void:
+	_send_json("DisembarkCommand")
+
 func is_connected_to_server() -> bool:
 	return _connected and _welcomed
 

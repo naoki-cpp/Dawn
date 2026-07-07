@@ -119,6 +119,13 @@ static func decode_key(
 			return {"kind": "disassemble_ship", "station_id": docked_station_id}
 		return {"kind": "none"}
 
+	## X key -> disembark: leave the active ship while docked, without
+	## disassembling it (ADR-0037).
+	if keycode == KEY_X and player_ship_id >= 0:
+		if docked_station_id >= 0:
+			return {"kind": "disembark"}
+		return {"kind": "none"}
+
 	## Tab key -> toggle tactical overlay visibility (works regardless of
 	## whether a player ship exists yet).
 	if keycode == KEY_TAB:

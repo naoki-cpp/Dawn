@@ -217,6 +217,26 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
+    /// Clear the caller's active ship while docked, without disassembling it
+    /// or changing ownership (ADR-0037). Like `assemble_ship_owned`, there is
+    /// no pre-existing ship_id to report on the "no active ship" rejection,
+    /// so this returns `Result<ShipId, _>` rather than
+    /// `StationOperationOutcome`. Session-local, not event-sourced (same tier
+    /// as `select_active_ship_owned`) -- see `docs/architecture/ownership.md` §8.
+    pub(super) fn disembark_owned(
+        &mut self,
+        player_id: PlayerId,
+    ) -> Result<ShipId, StationOperationRejection> {
+        let Some(ship_id) = self.ships.active_ship.get(&player_id).copied() else {
+            return Err(StationOperationRejection::NotOwned);
+        };
+        if !self.is_ship_docked(ship_id) {
+            return Err(StationOperationRejection::ShipNotDocked);
+        }
+        self.ships.active_ship.remove(&player_id);
+        Ok(ship_id)
+    }
+
     pub fn clear_docked_lock_targets(&mut self, tick: dawn_core::Tick) -> Vec<DomainEvent> {
         let mut events: Vec<DomainEvent> = Vec::new();
         let ship_ids: Vec<ShipId> = self.ships.index.keys().copied().collect();
@@ -1273,6 +1293,95 @@ mod tests {
                 }
             ),
             Err(StationOperationRejection::MissingStationItem)
+        ));
+    }
+
+    #[test]
+    fn disembark_clears_active_ship_without_touching_ownership_or_docked_state() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station = node.station(StationId(0)).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        assert!(accepted(node.dock_owned(
+            player_id,
+            ship_id,
+            DockCommand {
+                station_id: StationId(0),
+            }
+        )));
+
+        let disembarked_ship_id = node
+            .disembark_owned(player_id)
+            .expect("disembark should succeed while docked in an active ship");
+        assert_eq!(disembarked_ship_id, ship_id);
+
+        assert!(!node.is_active_ship(player_id, ship_id));
+        assert!(node.owns_ship(player_id, ship_id), "ownership unaffected");
+        assert_eq!(
+            node.docked_station(ship_id),
+            Some(StationId(0)),
+            "the ship stays docked"
+        );
+        assert_eq!(
+            node.player_docked_station(player_id),
+            Some(StationId(0)),
+            "the player's station context is unaffected"
+        );
+    }
+
+    #[test]
+    fn disembark_is_rejected_when_the_caller_has_no_active_ship() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+
+        assert!(matches!(
+            node.disembark_owned(player_id),
+            Err(StationOperationRejection::NotOwned)
+        ));
+    }
+
+    #[test]
+    fn disembark_is_rejected_when_the_active_ship_is_not_docked() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        node.spawn_player_ship(player_id);
+
+        assert!(matches!(
+            node.disembark_owned(player_id),
+            Err(StationOperationRejection::ShipNotDocked)
+        ));
+    }
+
+    #[test]
+    fn disembark_then_select_active_ship_then_undock_round_trips_back_to_flying() {
+        // The whole point of Disembark: leave the ship voluntarily, then get
+        // back into it (or another owned ship) and fly off again.
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station = node.station(StationId(0)).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        assert!(accepted(node.dock_owned(
+            player_id,
+            ship_id,
+            DockCommand {
+                station_id: StationId(0),
+            }
+        )));
+        node.disembark_owned(player_id).expect("disembark succeeds");
+        assert!(!node.is_active_ship(player_id, ship_id));
+
+        assert!(matches!(
+            node.select_active_ship_owned(
+                player_id,
+                dawn_core::SelectActiveShipCommand { ship_id }
+            ),
+            StationOperationOutcome::Accepted { .. }
+        ));
+        assert!(matches!(
+            node.undock_owned(player_id, ship_id),
+            StationOperationOutcome::Accepted { .. }
         ));
     }
 }

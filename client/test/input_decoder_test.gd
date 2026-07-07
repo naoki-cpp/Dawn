@@ -188,6 +188,16 @@ func test_y_key_disassembles_the_current_ship_when_docked() -> void:
 	assert_int(action.station_id as int).is_equal(3)
 
 
+func test_x_key_disembarks_when_currently_docked() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_X, 1, -1, -1, -1, -1, -1, 3)
+	assert_str(action.kind as String).is_equal("disembark")
+
+
+func test_x_key_does_nothing_when_not_docked() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_X, 1, -1, -1, -1, -1, -1, -1)
+	assert_str(action.kind as String).is_equal("none")
+
+
 # -- Tab key -> tactical overlay ---------------------------------------------------------
 
 func test_tab_key_toggles_the_tactical_overlay_even_without_a_player_ship() -> void:

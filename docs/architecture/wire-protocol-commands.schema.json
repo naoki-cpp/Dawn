@@ -493,6 +493,21 @@
           ]
         }
       }
+    },
+    {
+      "description": "Clear the caller's active ship while docked, without disassembling it (ADR-0037). No `ship_id` -- always targets the caller's own active ship, like `UndockCommand`.",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "DisembarkCommand"
+          ]
+        }
+      }
     }
   ],
   "definitions": {

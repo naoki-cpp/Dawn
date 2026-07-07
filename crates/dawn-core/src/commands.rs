@@ -87,6 +87,21 @@ pub struct DockCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct UndockCommand;
 
+/// Request to disembark: clear the caller's `active_ship` while docked,
+/// without disassembling or transferring ownership of it (ADR-0037). No
+/// `ship_id` -- always targets the caller's own active ship, like
+/// `UndockCommand`. Session-local, not event-sourced (same tier as
+/// `SelectActiveShipCommand`): it changes no Ship's authoritative state, only
+/// which ship the caller's commands route to. A later `SelectActiveShipCommand`
+/// re-activates a ship (this one or another owned ship docked at the same
+/// station).
+///
+/// May be rejected if:
+/// - The caller has no active ship (already disembarked, or never had one).
+/// - The active ship is not currently docked.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DisembarkCommand;
+
 /// Request to build a packaged ship inside the currently-docked station.
 ///
 /// May be rejected if:
@@ -361,6 +376,9 @@ pub enum ClientCommand {
     /// Convert a station-inventory Packaged Ship item into a new live docked
     /// ship, owned by the caller (ADR-0034 9B, ADR-0037).
     Assemble(AssembleCommand),
+    /// Clear the caller's active ship while docked, without disassembling it
+    /// (ADR-0037).
+    Disembark(DisembarkCommand),
 }
 
 #[cfg(test)]
@@ -500,5 +518,11 @@ mod tests {
         };
         assert_eq!(cmd.station_id, StationId(0));
         assert_eq!(cmd.ship_type_id, ShipTypeId(1));
+    }
+
+    #[test]
+    fn disembark_command_wraps_into_client_command() {
+        let cmd = ClientCommand::Disembark(DisembarkCommand);
+        assert!(matches!(cmd, ClientCommand::Disembark(DisembarkCommand)));
     }
 }

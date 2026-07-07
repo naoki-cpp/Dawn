@@ -269,3 +269,17 @@ all (the item existed server-side, but the client never learned about it).
 Fixed by keying `RefreshFitting` on `PlayerId` instead, with a new
 `build_player_loadout_json_for_player` that falls back to reporting just the
 docked station and station inventory when the player has no active ship.
+
+**Disembark (added 2026-07-07):** the zero-owned-ships-while-docked state was
+previously only reachable by accident (via Disassemble). `DisembarkCommand`
+(no fields, no `ship_id`, resolved from the caller's active ship like
+`UndockCommand`) makes it a deliberate player action: it clears `active_ship`
+while docked, without disassembling the ship or touching `owns_ship` --
+`docked_ships`/`docked_players` are unaffected, only which ship the caller's
+commands route to. `disembark_owned` returns `Result<ShipId, StationOperationRejection>`
+rather than `StationOperationOutcome` for the same reason `assemble_ship_owned`
+does: the "no active ship" rejection has no real ship to report. Session-local,
+not event-sourced (same tier as `SelectActiveShipCommand`) -- no `DomainEvent`
+variant exists for it, and it isn't forwarded on the wire as an event. Round
+trip: `Disembark` -> `SelectActiveShipCommand` (this ship, or another owned
+ship docked at the same station) -> `Undock`.

@@ -469,6 +469,10 @@ pub enum ClientCommandJson {
         station_id: u32,
         ship_type_id: u32,
     },
+    /// Clear the caller's active ship while docked, without disassembling it
+    /// (ADR-0037). No `ship_id` -- always targets the caller's own active
+    /// ship, like `UndockCommand`.
+    DisembarkCommand {},
 }
 
 /// Render the client -> server wire schema (see [`ClientCommandJson`]) as a
@@ -641,6 +645,9 @@ fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
             station_id: dawn_core::StationId(station_id),
             ship_type_id: dawn_core::ShipTypeId(ship_type_id),
         })),
+        ClientCommandJson::DisembarkCommand {} => {
+            Some(ClientCommand::Disembark(dawn_core::DisembarkCommand))
+        }
     }
 }
 
@@ -747,6 +754,13 @@ mod tests {
             }
             other => panic!("expected Assemble, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn disembark_command_json_is_parsed_into_client_command_disembark() {
+        let line = r#"{"type":"DisembarkCommand"}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        assert!(matches!(cmd, ClientCommand::Disembark(_)));
     }
 
     #[test]

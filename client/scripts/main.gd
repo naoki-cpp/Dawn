@@ -268,6 +268,8 @@ func _input(event: InputEvent) -> void:
 					BUILDABLE_SHIP_TYPE_ID)
 			"disassemble_ship":
 				_connection.send_disassemble_ship_command(_player_ship_id, action.station_id as int)
+			"disembark":
+				_connection.send_disembark_command()
 		return
 
 	if event is InputEventMouseButton:
@@ -853,7 +855,7 @@ func _update_hud() -> void:
 		var docked_station_id: int = status.get("docked_station_id", -1) as int
 		var docked_station_name: String = status.get("docked_station_name", "") as String
 		var docked_name := docked_station_name if not docked_station_name.is_empty() else "Station #%d" % docked_station_id
-		station_line = "\nDocked: %s\n[U] Undock  [B] Build Magpie  [Y] Disassemble ship" % docked_name
+		station_line = "\nDocked: %s\n[U] Undock  [B] Build Magpie  [Y] Disassemble ship  [X] Disembark" % docked_name
 	elif _nearby_station_id >= 0:
 		var nearby_name: String = "Station #%d" % _nearby_station_id
 		for entry: Variant in _stations:
