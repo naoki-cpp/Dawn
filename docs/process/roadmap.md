@@ -302,7 +302,7 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
 | 7 | Packaged Ship 建造コマンド（Scrap Metal 消費 → Packaged Ship 生成） | Scrap Metal を Station インベントリから消費し、生成物も Station インベントリへ置く。**docked 中のみ**実行可能。現状コストは MVP として `1 Scrap Metal / 1 hull` の固定値 | ✅ |
 | 8 | client実装の開始条件を固定 | **基本方針: client UI は 5〜7 の server 側本体（Assemble / Disassemble / Build）が揃ってから実装する。** 先に UI だけ作って wire 先行にならないようにする | ⬜ |
 | 9 | client: Dock/Undock + Station操作UI | 入港状態の表示と `D` / `U` / `B` / `Y` 操作は実装済み。client は `ShipDocked` / `ShipUndocked` と `PlayerLoadout` の両方から dock state を受けるため、順序逆転で古い loadout が HUD を巻き戻さないこと、undock 後の `null` dock context を `station_id=0` と誤解しないことを維持条件とする。ship inventory と station inventory の見分けがつくことは引き続き必要 | ◐ |
-| 10 | client: Packaged Ship のインベントリ表示・Assemble/Disassemble/建造UI | station UI の上に載せる。Ship側 inventory と Station側 inventory が混ざらないこと | ⬜ |
+| 10 | client: Packaged Ship のインベントリ表示・Assemble/Disassemble/建造UI | station UI の上に載せる。Ship側 inventory と Station側 inventory が混ざらないこと。2026-07-07、Station Inventory上の`PackagedShip`行クリックで`AssembleCommand`を送るところまで実装（`hud_manager.gd`の行に`ship_type_id`と`"assemble"` actionを追加、`_player_ship_id`不要な唯一の操作としてゲート）。Disassemble/建造の専用ボタンUIは`[Y]`/`[B]`キー止まりで未着手 | ◐ |
 
 #### 9B 補足: Station inventory の保存戦略
 

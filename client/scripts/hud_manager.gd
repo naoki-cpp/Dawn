@@ -551,9 +551,12 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 	}
 
 
-## One inventory row. `action` is "fit"/"unfit" for modules and "" for
-## passive item stacks (e.g. Scrap Metal) that are only informational today.
-static func _make_inventory_row(text: String, module_id: int, slot: String, action: String) -> Dictionary:
+## One inventory row. `action` is "fit"/"unfit" for ship-inventory modules,
+## "assemble" for a station-inventory PackagedShip stack, and "" for passive
+## item stacks (e.g. Scrap Metal) that are only informational today.
+static func _make_inventory_row(
+	text: String, module_id: int, slot: String, action: String, ship_type_id: int = 0
+) -> Dictionary:
 	var row := Panel.new()
 	row.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -570,7 +573,10 @@ static func _make_inventory_row(text: String, module_id: int, slot: String, acti
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(lbl)
 
-	return {"panel": row, "module_id": module_id, "slot": slot, "action": action}
+	return {
+		"panel": row, "module_id": module_id, "slot": slot, "action": action,
+		"ship_type_id": ship_type_id,
+	}
 
 
 ## Rebuild both columns from the latest PlayerLoadout snapshot. `modules` is
@@ -609,8 +615,14 @@ static func update_inventory_panel(refs: Dictionary, modules: Array, inventory: 
 		inventory_rows.append(row)
 	for entry: Variant in station_inventory:
 		var item: ItemRow = entry
-		var text := "[Station] %s x%d" % [item.name, item.count]
-		var row := _make_inventory_row(text, 0, "", "")
+		var text: String
+		var action := ""
+		if item.item_type == "PackagedShip":
+			text = "[Station] %s x%d (click to assemble)" % [item.name, item.count]
+			action = "assemble"
+		else:
+			text = "[Station] %s x%d" % [item.name, item.count]
+		var row := _make_inventory_row(text, 0, "", action, item.ship_type_id)
 		inventory_list.add_child(row["panel"])
 		inventory_rows.append(row)
 	refs["inventory_rows"] = inventory_rows

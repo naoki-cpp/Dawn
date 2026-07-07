@@ -697,15 +697,22 @@ func _apply_player_module_activation(module_id: int, active: bool, forced_reason
 ## (the module's `def.slot` decides where it goes -- the player makes no slot
 ## choice), "unfit" removes that exact fitted instance (ADR-0032).
 func _handle_inventory_row_click(row: Dictionary) -> void:
-	if _player_ship_id < 0:
-		return
 	var module_id: int = row.get("module_id", 0) as int
 	var slot: String = row.get("slot", "") as String
 	match row.get("action", "") as String:
 		"fit":
-			_connection.send_fit_module_command(_player_ship_id, module_id, slot)
+			if _player_ship_id >= 0:
+				_connection.send_fit_module_command(_player_ship_id, module_id, slot)
 		"unfit":
-			_connection.send_unfit_module_command(_player_ship_id, module_id, slot)
+			if _player_ship_id >= 0:
+				_connection.send_unfit_module_command(_player_ship_id, module_id, slot)
+		"assemble":
+			## No active-ship requirement: this is exactly the recovery path
+			## for a shipless docked player (docs/architecture/ownership.md §8).
+			var docked_station_id: int = _session.dock_status().get("docked_station_id", -1) as int
+			if docked_station_id >= 0:
+				_connection.send_assemble_command(
+					docked_station_id, row.get("ship_type_id", 0) as int)
 
 
 func _toggle_module_by_index(f_index: int) -> void:

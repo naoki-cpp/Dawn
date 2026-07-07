@@ -238,3 +238,17 @@ func test_inventory_panel_hit_helpers_delegate_to_built_panel() -> void:
 	var row_panel: Panel = rows[0]["panel"]
 	var hit: Dictionary = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
 	assert_str(hit.get("action", "") as String).is_equal("fit")
+
+
+func test_station_inventory_packaged_ship_row_is_clickable_to_assemble() -> void:
+	_surface.set_player_fitting([], [], [
+		_item({"item_type": "PackagedShip", "ship_type_id": 7, "name": "Magpie", "count": 1}),
+	])
+	_surface.toggle_inventory_panel()
+	await get_tree().process_frame
+
+	var rows: Array = _surface._inventory_panel_refs["inventory_rows"] as Array
+	var row_panel: Panel = rows[0]["panel"]
+	var hit: Dictionary = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
+	assert_str(hit.get("action", "") as String).is_equal("assemble")
+	assert_int(hit.get("ship_type_id", 0) as int).is_equal(7)

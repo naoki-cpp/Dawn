@@ -193,6 +193,14 @@ func send_disassemble_ship_command(p_ship_id: int, p_station_id: int) -> void:
 		"station_id": p_station_id,
 	})
 
+## Convert a station-inventory Packaged Ship item into a new live docked ship
+## (ADR-0034 9B, ADR-0037). No ship_id -- the ship doesn't exist yet.
+func send_assemble_command(p_station_id: int, p_ship_type_id: int) -> void:
+	_send_json("AssembleCommand", {
+		"station_id"  : p_station_id,
+		"ship_type_id": p_ship_type_id,
+	})
+
 ## Leave the active ship while docked, without disassembling it (ADR-0037).
 func send_disembark_command() -> void:
 	_send_json("DisembarkCommand")
