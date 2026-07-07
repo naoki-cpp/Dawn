@@ -21,9 +21,15 @@ class FakeShip:
 
 	var velocity_calls: Array[Vector3] = []
 	var thrust_calls: Array[Vector3] = []
+	var set_as_player_calls: int = 0
 
 	func set_velocity(v: Vector3) -> void:
 		velocity_calls.append(v)
+
+	## WorldPresentation.attach_player_ship() calls this via ship.call(...);
+	## a real ship (ship_controller.gd) sets up player-only visuals here.
+	func set_as_player() -> void:
+		set_as_player_calls += 1
 
 	func set_thrust_direction(v: Vector3) -> void:
 		thrust_calls.append(v)
@@ -296,3 +302,64 @@ func test_module_deactivated_with_range_reason_flags_forced_reason() -> void:
 
 	var mod_dict: ModuleRow = _main._loadout.modules()[0]
 	assert_str(mod_dict.forced_reason).is_equal("range")
+
+
+## Regression: switching active ship via the SHIPS roster (SelectActiveShip,
+## ADR-0037) used to only update _player_ship_id/_session.player_ship_id --
+## bookkeeping the camera never reads. WorldPresentation.attach_player_ship()
+## (which retargets the camera, applies the player material, and re-attaches
+## the tactical overlay) was never called for this path, so the camera
+## silently kept following the old ship.
+func test_switching_active_ship_to_a_known_ship_reattaches_the_camera() -> void:
+	var camera: Camera3D = auto_free(load("res://scripts/camera_controller.gd").new())
+	add_child(camera)
+	_main._camera = camera
+	_main._presentation._camera = camera
+	_main._hud_surface.build(
+		auto_free(Node.new()), auto_free(CanvasLayer.new()), auto_free(Label.new()))
+
+	var ship_a: FakeShip = auto_free(FakeShip.new())
+	add_child(ship_a)
+	var ship_b: FakeShip = auto_free(FakeShip.new())
+	add_child(ship_b)
+	ship_b.global_position = Vector3(100.0, 0.0, 0.0)
+
+	_main._session.ships[1] = ship_a
+	_main._session.ships[2] = ship_b
+	_main._session.player_ship_id = 1
+	_main._player_ship_id = 1
+	_main._ships = _main._session.ships
+	camera.set_target(ship_a)
+
+	_main._on_player_fitting({"active_ship_id": 2})
+
+	assert_int(_main._player_ship_id).is_equal(2)
+	assert_int(_main._session.player_ship_id).is_equal(2)
+	assert_int(ship_b.set_as_player_calls).is_equal(1)
+	assert_object(camera._target_node).is_equal(ship_b)
+
+
+## The client has never rendered ship 3 (never entered AoI), so there is no
+## Node3D to attach the camera to -- this case is left alone (needs to spawn
+## the ship first, docs/architecture/ownership.md §8), not a regression.
+func test_switching_active_ship_to_an_unknown_ship_leaves_the_camera_alone() -> void:
+	var camera: Camera3D = auto_free(load("res://scripts/camera_controller.gd").new())
+	add_child(camera)
+	_main._camera = camera
+	_main._presentation._camera = camera
+	_main._hud_surface.build(
+		auto_free(Node.new()), auto_free(CanvasLayer.new()), auto_free(Label.new()))
+
+	var ship_a: FakeShip = auto_free(FakeShip.new())
+	add_child(ship_a)
+
+	_main._session.ships[1] = ship_a
+	_main._session.player_ship_id = 1
+	_main._player_ship_id = 1
+	_main._ships = _main._session.ships
+	camera.set_target(ship_a)
+
+	_main._on_player_fitting({"active_ship_id": 3})
+
+	assert_int(_main._player_ship_id).is_equal(1)
+	assert_object(camera._target_node).is_equal(ship_a)
