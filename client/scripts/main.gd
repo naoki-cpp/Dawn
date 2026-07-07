@@ -105,7 +105,7 @@ var _system_names : Dictionary = _session.system_names
 ## hardcoded to "Alpha", which looked like live data while still CONNECTING).
 var _current_system_name : String = "Unknown"
 var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
-var _nearby_station_id   : int    = -1
+var _nearby_station_ids  : Array[int] = []  ## in-range stations, nearest first
 var _jump_notice         : String = ""
 var _jump_notice_timer   : float  = 0.0
 ## Warp arrival is handled authoritatively by the server (ADR-0029 warp-arrival
@@ -197,17 +197,37 @@ func _update_gate_proximity() -> void:
 			return
 
 
+## Every station currently within docking range, nearest first. Usually at
+## most one (stations shouldn't be placed close enough to overlap docking
+## radii), but ranked by distance rather than array order in case they ever
+## are, so [D] docks at the one the player is actually closest to.
 func _update_station_proximity() -> void:
-	_nearby_station_id = -1
+	_nearby_station_ids.clear()
 	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return
 	var ship_pos: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
+	var in_range: Array[Dictionary] = []
 	for station_entry: Variant in _stations:
 		var station: Dictionary = station_entry as Dictionary
 		var station_pos: Vector3 = station.get("position", Vector3.ZERO) as Vector3
-		if ship_pos.distance_to(station_pos) <= (station.get("docking_radius", 0.0) as float):
-			_nearby_station_id = station.get("station_id", -1) as int
-			return
+		var dist: float = ship_pos.distance_to(station_pos)
+		if dist <= (station.get("docking_radius", 0.0) as float):
+			in_range.append({"station_id": station.get("station_id", -1) as int, "distance": dist})
+	in_range.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return (a.distance as float) < (b.distance as float))
+	for entry: Dictionary in in_range:
+		_nearby_station_ids.append(entry.station_id as int)
+
+
+## Display name for a station_id, falling back to "Station #N" if unnamed
+## or not found in the galaxy map (e.g. between InitialState and StarMap sync).
+func _station_name(station_id: int) -> String:
+	for entry: Variant in _stations:
+		var station: Dictionary = entry as Dictionary
+		if (station.get("station_id", -1) as int) == station_id:
+			var name: String = station.get("name", "") as String
+			return name if not name.is_empty() else "Station #%d" % station_id
+	return "Station #%d" % station_id
 
 func _input(event: InputEvent) -> void:
 	## Keyboard shortcuts: InputDecoder decides what the keypress means
@@ -216,11 +236,12 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		var key: InputEventKey = event as InputEventKey
 		var dock_status: Dictionary = _session.dock_status()
+		var nearest_station_id: int = _nearby_station_ids[0] if not _nearby_station_ids.is_empty() else -1
 		var action: Dictionary = _interaction.resolve_key_action(
 			key.keycode,
 			_player_ship_id,
 			_nearby_gate_id,
-			_nearby_station_id,
+			nearest_station_id,
 			dock_status.get("docked_station_id", -1) as int)
 		match action.get("kind", "none") as String:
 			"toggle_module":
@@ -495,7 +516,10 @@ func _handle_ship_docked(p: Dictionary) -> void:
 func _handle_ship_undocked(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	if ship_id == _player_ship_id:
-		_nearby_station_id = p.get("station_id", -1) as int
+		var station_id: int = p.get("station_id", -1) as int
+		_nearby_station_ids.clear()
+		if station_id >= 0:
+			_nearby_station_ids.append(station_id)
 		_session.apply_undock_event(ship_id, p.get("tick", 0) as int)
 		_sync_session_state()
 
@@ -856,14 +880,15 @@ func _update_hud() -> void:
 		var docked_station_name: String = status.get("docked_station_name", "") as String
 		var docked_name := docked_station_name if not docked_station_name.is_empty() else "Station #%d" % docked_station_id
 		station_line = "\nDocked: %s\n[U] Undock  [B] Build Magpie  [Y] Disassemble ship  [X] Disembark" % docked_name
-	elif _nearby_station_id >= 0:
-		var nearby_name: String = "Station #%d" % _nearby_station_id
-		for entry: Variant in _stations:
-			var station: Dictionary = entry as Dictionary
-			if (station.get("station_id", -1) as int) == _nearby_station_id:
-				nearby_name = station.get("name", nearby_name) as String
-				break
-		station_line = "\n[D] Dock at %s" % nearby_name
+	elif not _nearby_station_ids.is_empty():
+		var nearest_name: String = _station_name(_nearby_station_ids[0])
+		if _nearby_station_ids.size() == 1:
+			station_line = "\nNearby: %s\n[D] Dock at %s" % [nearest_name, nearest_name]
+		else:
+			var names: Array[String] = []
+			for sid: int in _nearby_station_ids:
+				names.append(_station_name(sid))
+			station_line = "\nNearby: %s\n[D] Dock at %s (nearest)" % [", ".join(names), nearest_name]
 
 	## Approach / warp target selection (ADR-0015 / ADR-0022 / ADR-0025).
 	var keep_at_range_hint: String = "\n[O] Orbit  [K] Keep at %.0f km  ([/]  adjust)" % _keep_at_range_km
@@ -973,4 +998,3 @@ func _sync_session_state() -> void:
 	_cap_current = _session.cap_current
 	_cap_max = _session.cap_max
 	_cap_recharge = _session.cap_recharge
-
