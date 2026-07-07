@@ -313,6 +313,22 @@ starter `PackagedShip` in station inventory at spawn
 SelectActiveShip -> Undock loop is exercisable immediately without first
 Disassembling anything.
 
+**`ItemRow` wire/client validation mismatch (found and fixed 2026-07-08):**
+the starter Packaged Ship was invisible client-side even though it existed
+server-side. Root cause: the client's `ItemRow.from_json()` requires all of
+`item_type`/`module_id`/`ship_type_id`/`name`/`kind`/`slot`/`count` and
+silently drops (push_error + null) any row missing one, but the server's
+`PackagedShip` and `ScrapMetal` rows (both ship inventory and station
+inventory) omitted `module_id`/`kind`/`slot`, and the unfitted-`Module` rows
+omitted `ship_type_id` -- so every non-fitted inventory row of every kind was
+being silently dropped, not just the new Packaged Ship one. Pre-existing bug,
+invisible to unit tests because they hand-craft fully-populated fixture
+dictionaries rather than exercising the real server JSON shape. Fixed by
+adding the missing keys (`0`/`""` defaults, matching `ItemRow`'s own field
+defaults) to all three `ItemId` branches in both places they're serialized.
+Added a regression test asserting every row in `inventory`/`station_inventory`
+carries all seven keys.
+
 **Known pre-existing gap (found in passing, not fixed):** `StateSnapshot`
 does not actually persist `ShipRegistry.owners`/`active_ship` -- despite this
 doc previously claiming `active_ship` survives restart via the snapshot,

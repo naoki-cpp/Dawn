@@ -118,6 +118,7 @@ impl<S: EventStore> SimulationNode<S> {
                                 serde_json::json!({
                                     "item_type": "Module",
                                     "module_id": def.id.0,
+                                    "ship_type_id": 0,
                                     "name"     : def.name,
                                     "kind"     : format!("{:?}", def.kind),
                                     "slot"     : format!("{:?}", def.slot),
@@ -129,15 +130,22 @@ impl<S: EventStore> SimulationNode<S> {
                             self.ship_type_registry.get(ship_type_id).map(|def| {
                                 serde_json::json!({
                                     "item_type": "PackagedShip",
+                                    "module_id": 0,
                                     "ship_type_id": def.id.0,
                                     "name"        : def.name,
+                                    "kind"        : "",
+                                    "slot"        : "",
                                     "count"       : count,
                                 })
                             })
                         }
                         ItemId::ScrapMetal => Some(serde_json::json!({
                             "item_type": "ScrapMetal",
+                            "module_id": 0,
+                            "ship_type_id": 0,
                             "name"     : "Scrap Metal",
+                            "kind"     : "",
+                            "slot"     : "",
                             "count"    : count,
                         })),
                     })
@@ -279,6 +287,7 @@ impl<S: EventStore> SimulationNode<S> {
                                 serde_json::json!({
                                     "item_type": "Module",
                                     "module_id": def.id.0,
+                                    "ship_type_id": 0,
                                     "name"     : def.name,
                                     "kind"     : format!("{:?}", def.kind),
                                     "slot"     : format!("{:?}", def.slot),
@@ -290,15 +299,22 @@ impl<S: EventStore> SimulationNode<S> {
                             self.ship_type_registry.get(ship_type_id).map(|def| {
                                 serde_json::json!({
                                     "item_type": "PackagedShip",
+                                    "module_id": 0,
                                     "ship_type_id": def.id.0,
                                     "name"        : def.name,
+                                    "kind"        : "",
+                                    "slot"        : "",
                                     "count"       : count,
                                 })
                             })
                         }
                         ItemId::ScrapMetal => Some(serde_json::json!({
                             "item_type": "ScrapMetal",
+                            "module_id": 0,
+                            "ship_type_id": 0,
                             "name"     : "Scrap Metal",
+                            "kind"     : "",
+                            "slot"     : "",
                             "count"    : count,
                         })),
                     })
@@ -745,6 +761,96 @@ mod tests {
             .expect("scrap rows must be serialized to the client");
         assert_eq!(scrap["name"], "Scrap Metal");
         assert_eq!(scrap["count"].as_u64().unwrap(), 3);
+    }
+
+    #[test]
+    fn every_item_row_carries_all_the_keys_item_row_gd_requires() {
+        // Regression: item_row.gd's ItemRow.from_json() requires item_type/
+        // module_id/ship_type_id/name/kind/slot/count on every row, and drops
+        // (push_error + null) any row missing even one -- silently, with no
+        // client-visible symptom beyond "the row just isn't there". The
+        // PackagedShip/ScrapMetal branches (both ship inventory and station
+        // inventory) and the unfitted-Module branch used to omit some of
+        // these, so a station's starter Packaged Ship (or any Scrap Metal,
+        // or any unfitted Module) never reached the client's inventory panel.
+        use dawn_core::{DockCommand, ItemId, StationId};
+
+        const REQUIRED_KEYS: &[&str] = &[
+            "item_type",
+            "module_id",
+            "ship_type_id",
+            "name",
+            "kind",
+            "slot",
+            "count",
+        ];
+
+        let mut node = mem_node();
+        for def in crate::modules::all_modules() {
+            node.register_module(def);
+        }
+        for def in crate::ship_types::all_ship_types() {
+            node.register_ship_type(def);
+        }
+
+        let player_id = node.next_player_id();
+        let station = node.station(StationId(0)).unwrap().clone();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
+        assert!(matches!(
+            node.dock_owned(
+                player_id,
+                ship_id,
+                DockCommand {
+                    station_id: StationId(0),
+                }
+            ),
+            StationOperationOutcome::Accepted { .. }
+        ));
+
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.world
+            .inner_mut()
+            .get::<&mut InventoryComp>(entity)
+            .unwrap()
+            .add_item(ItemId::ScrapMetal, 1);
+        // Unfit one already-fitted module so an unfitted Module row exists.
+        node.unfit_module_owned(
+            player_id,
+            dawn_core::UnfitModuleCommand {
+                ship_id,
+                slot: dawn_core::SlotKind::High,
+                module_id: crate::modules::MODULE_RAILGUN_SMALL,
+            },
+        );
+        // Starter Packaged Ship (spawner_logic.rs) already sits in station
+        // inventory from spawn_player_ship_at_pub above.
+
+        let json = node.build_player_loadout_json(ship_id).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        let mut rows: Vec<&serde_json::Value> =
+            payload["inventory"].as_array().unwrap().iter().collect();
+        rows.extend(payload["station_inventory"].as_array().unwrap().iter());
+        assert!(
+            rows.iter().any(|r| r["item_type"] == "Module"),
+            "expected an unfitted Module row: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|r| r["item_type"] == "ScrapMetal"),
+            "expected a ScrapMetal row: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|r| r["item_type"] == "PackagedShip"),
+            "expected the starter PackagedShip row: {rows:?}"
+        );
+        for row in &rows {
+            for key in REQUIRED_KEYS {
+                assert!(
+                    row.get(key).is_some(),
+                    "row {row:?} is missing required key '{key}' (ItemRow.from_json would drop it)"
+                );
+            }
+        }
     }
 
     #[test]
