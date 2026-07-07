@@ -639,6 +639,19 @@ func _handle_aoi_leave(p: Dictionary) -> void:
 ## including a rejected Fit/Unfit attempt reverting visibly.
 func _on_player_fitting(payload: Dictionary) -> void:
 	_loadout.apply_payload(payload)
+
+	## Disembark/SelectActiveShip/Assemble (ADR-0037) can change which ship
+	## is active independently of any command this client sent. Only follow
+	## it when it's -1 (no active ship) or a ship this client already knows
+	## about -- switching to a *different* owned ship this client has never
+	## rendered would need camera/presentation reattachment work this session
+	## doesn't cover (docs/architecture/ownership.md §8).
+	var new_active_ship_id: int = _loadout.active_ship_id()
+	if new_active_ship_id != _player_ship_id \
+			and (new_active_ship_id < 0 or _ships.has(new_active_ship_id)):
+		_player_ship_id = new_active_ship_id
+		_session.player_ship_id = new_active_ship_id
+
 	var dock_status: Dictionary = _loadout.dock_status()
 	_session.apply_dock_fitting(
 		dock_status.get("docked_station_id", -1) as int,
@@ -879,7 +892,13 @@ func _update_hud() -> void:
 		var docked_station_id: int = status.get("docked_station_id", -1) as int
 		var docked_station_name: String = status.get("docked_station_name", "") as String
 		var docked_name := docked_station_name if not docked_station_name.is_empty() else "Station #%d" % docked_station_id
-		station_line = "\nDocked: %s\n[U] Undock  [B] Build Magpie  [Y] Disassemble ship  [X] Disembark" % docked_name
+		if _player_ship_id >= 0:
+			station_line = "\nDocked: %s\n[U] Undock  [B] Build Magpie  [Y] Disassemble ship  [X] Disembark" % docked_name
+		else:
+			## Disembarked (ADR-0037): still docked, but no ship is active.
+			## No client UI yet to pick among owned ships (roadmap.md §12
+			## task 10), so this just confirms the state without an action hint.
+			station_line = "\nDisembarked at: %s\n(no active ship)" % docked_name
 	elif not _nearby_station_ids.is_empty():
 		var nearest_name: String = _station_name(_nearby_station_ids[0])
 		if _nearby_station_ids.size() == 1:

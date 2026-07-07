@@ -53,8 +53,13 @@ impl<S: EventStore> SimulationNode<S> {
     ///   {"slot":"High","index":0,"module_id":1,"name":"Small Railgun I","is_active":false}
     /// ],"inventory":[
     ///   {"module_id":2,"name":"Medium Railgun I","kind":"Weapon","slot":"High"}
-    /// ],"slot_capacity":{"High":3,"Mid":3,"Low":2,"Rig":3}}
+    /// ],"slot_capacity":{"High":3,"Mid":3,"Low":2,"Rig":3},"active_ship_id":1}
     /// ```
+    ///
+    /// `active_ship_id` is `null` when the caller has no active ship at all
+    /// (ADR-0037 -- Disembark, or before a freshly-Assembled/Disassembled
+    /// state settles); the client uses it to detect that its active ship
+    /// changed independently of any command it sent.
     pub fn build_player_loadout_json(&self, ship_id: ShipId) -> Option<String> {
         let entity = self.ships.index.get(&ship_id)?;
         let fitting = self.world.inner().get::<&FittingComp>(*entity).ok()?;
@@ -148,6 +153,12 @@ impl<S: EventStore> SimulationNode<S> {
         let station_inventory: Vec<serde_json::Value> = player_id
             .map(|pid| self.station_inventory_json(pid))
             .unwrap_or_default();
+        // Derived from the player's true active_ship, not echoed back from the
+        // `ship_id` argument -- callers may pass a session's original ship_id
+        // (e.g. periodic resends), which can be stale once active_ship changes
+        // independently (Disembark/SelectActiveShip/Assemble, ADR-0037). The
+        // client needs this to know whether it still has a ship to fly at all.
+        let active_ship_id = player_id.and_then(|pid| self.ships.active_ship.get(&pid).copied());
 
         let layout = self
             .ships
@@ -172,6 +183,7 @@ impl<S: EventStore> SimulationNode<S> {
                 "docked_station_id": docked_station_id.map(|id| id.0),
                 "docked_station_name": docked_station_name,
                 "slot_capacity": slot_capacity,
+                "active_ship_id": active_ship_id.map(|id| id.raw()),
             })
             .to_string(),
         )
@@ -209,6 +221,7 @@ impl<S: EventStore> SimulationNode<S> {
                 "slot_capacity": serde_json::json!({
                     "High": 0, "Mid": 0, "Low": 0, "Rig": 0,
                 }),
+                "active_ship_id": Option::<u64>::None,
             })
             .to_string(),
         )
@@ -765,5 +778,62 @@ mod tests {
         let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(payload["docked_station_id"].is_null());
         assert!(payload["docked_station_name"].is_null());
+    }
+
+    #[test]
+    fn player_loadout_json_reports_the_true_active_ship_id() {
+        let mut node = mem_node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+
+        let json = node.build_player_loadout_json(ship_id).unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(payload["active_ship_id"].as_u64().unwrap(), ship_id.raw());
+    }
+
+    #[test]
+    fn player_loadout_json_for_player_reports_null_active_ship_id_when_shipless() {
+        use dawn_core::StationId;
+
+        let mut node = mem_node();
+        let player_id = node.next_player_id();
+        node.docked_players.insert(player_id, StationId(0));
+
+        let json = node
+            .build_player_loadout_json_for_player(player_id)
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(payload["active_ship_id"].is_null());
+        assert!(payload["modules"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn player_loadout_json_for_player_reports_active_ship_id_when_disembarked_ship_still_owned() {
+        use dawn_core::{DockCommand, StationId};
+
+        let mut node = mem_node();
+        let player_id = node.next_player_id();
+        let station = node.station(StationId(0)).unwrap().clone();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
+        assert!(matches!(
+            node.dock_owned(
+                player_id,
+                ship_id,
+                DockCommand {
+                    station_id: StationId(0),
+                }
+            ),
+            StationOperationOutcome::Accepted { .. }
+        ));
+        node.disembark_owned(player_id).expect("disembark succeeds");
+
+        let json = node
+            .build_player_loadout_json_for_player(player_id)
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(
+            payload["active_ship_id"].is_null(),
+            "disembarked player has no active ship, even though {ship_id:?} is still owned"
+        );
     }
 }

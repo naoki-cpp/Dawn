@@ -283,3 +283,18 @@ not event-sourced (same tier as `SelectActiveShipCommand`) -- no `DomainEvent`
 variant exists for it, and it isn't forwarded on the wire as an event. Round
 trip: `Disembark` -> `SelectActiveShipCommand` (this ship, or another owned
 ship docked at the same station) -> `Undock`.
+
+**Client visibility gap found and fixed (2026-07-07):** Disembark worked
+correctly server-side but was invisible to the client -- the `PlayerLoadout`
+wire message had no field identifying which ship (if any) it described, so
+the client had no way to learn that its active ship changed independently of
+a command it sent. Added `active_ship_id: Option<u64>` (`null` when shipless)
+to `PlayerLoadout`, derived from the player's true `active_ship` rather than
+echoed back from whatever `ship_id` the caller happened to pass into
+`build_player_loadout_json` (which can be stale, e.g. a session's original
+`ship_id` after `active_ship` changed). The Godot client
+(`player_loadout.gd::active_ship_id()`) updates `main.gd`'s `_player_ship_id`
+when it changes, but only when the new value is `-1` or a ship already
+rendered client-side -- reattaching camera/presentation to a *different*
+owned ship the client has never seen needs client UI for multi-ship
+ownership that doesn't exist yet, so that case is left alone for now.

@@ -21,6 +21,13 @@ var _tick: int = 0
 var _docked_station_id: int = -1
 var _docked_station_name: String = ""
 var _slot_capacity: Dictionary = {}
+## The caller's active ship (ADR-0037), or -1 if they have none right now
+## (Disembark, or before a freshly-Assembled/Disassembled state settles --
+## docs/architecture/ownership.md §8). Not necessarily the same ship this
+## payload's modules/inventory describe if a caller ever passes a stale
+## ship_id server-side; the client should treat this field, not the presence
+## of module rows, as the source of truth for "do I have a ship to fly".
+var _active_ship_id: int = -1
 
 
 func reset() -> void:
@@ -31,6 +38,7 @@ func reset() -> void:
 	_docked_station_id = -1
 	_docked_station_name = ""
 	_slot_capacity.clear()
+	_active_ship_id = -1
 
 
 func apply_payload(payload: Dictionary) -> void:
@@ -65,9 +73,17 @@ func apply_payload(payload: Dictionary) -> void:
 	_tick = payload.get("tick", 0) as int
 	_slot_capacity = payload.get("slot_capacity", {}) as Dictionary
 
+	var raw_active_ship_id: Variant = payload.get("active_ship_id", null)
+	_active_ship_id = (raw_active_ship_id as int) if raw_active_ship_id != null else -1
+
 
 func tick() -> int:
 	return _tick
+
+
+## The caller's active ship (ADR-0037), or -1 if they currently have none.
+func active_ship_id() -> int:
+	return _active_ship_id
 
 
 func dock_status() -> Dictionary:
