@@ -6,6 +6,7 @@
 extends RefCounted
 
 const ModuleRow = preload("res://scripts/module_row.gd")
+const InventoryRow = preload("res://scripts/inventory_row.gd")
 
 var _stats_label: Label = null
 var _duel_result_label: Label = null
@@ -182,7 +183,7 @@ func inventory_panel_consumes(pos: Vector2) -> bool:
 	return HudManager.inventory_panel_consumes(_inventory_panel_refs, pos)
 
 
-func inventory_panel_row_at(pos: Vector2) -> Dictionary:
+func inventory_panel_row_at(pos: Vector2) -> InventoryRow:
 	return HudManager.inventory_panel_row_at(_inventory_panel_refs, pos)
 
 

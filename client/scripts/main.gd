@@ -29,6 +29,7 @@ const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 const WorldSessionScript = preload("res://scripts/world_session.gd")
 const WorldInteractionScript = preload("res://scripts/world_interaction.gd")
+const InventoryRow = preload("res://scripts/inventory_row.gd")
 const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor
 const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is rejected for gates closer than this (ADR-0022).
 ## Unit-to-metre scale: real metres = (units/tick or units) * METERS_PER_UNIT,
@@ -303,11 +304,12 @@ func _input(event: InputEvent) -> void:
 			## swallowed (margin/header) -- never a world click. Checked first
 			## since the panel can be open over anything.
 			if _hud_surface.inventory_panel_consumes(mb.position):
-				var inv_row: Dictionary = _hud_surface.inventory_panel_row_at(mb.position)
-				if mb.button_index == MOUSE_BUTTON_LEFT and inv_row.has("action"):
-					_handle_inventory_row_click(inv_row)
-				elif mb.button_index == MOUSE_BUTTON_RIGHT and inv_row.has("source"):
-					_handle_inventory_row_right_click(inv_row)
+				var inv_row: InventoryRow = _hud_surface.inventory_panel_row_at(mb.position)
+				if inv_row != null:
+					if mb.button_index == MOUSE_BUTTON_LEFT:
+						_handle_inventory_row_click(inv_row)
+					elif mb.button_index == MOUSE_BUTTON_RIGHT:
+						_handle_inventory_row_right_click(inv_row)
 				return
 			## A click on a module slot toggles it; it is never a world click.
 			var slot_index: int = _hud_surface.module_slot_at(mb.position)
@@ -699,35 +701,32 @@ func _apply_player_module_activation(module_id: int, active: bool, forced_reason
 ## A row click in the inventory panel: "fit" sends the module's own slot kind
 ## (the module's `def.slot` decides where it goes -- the player makes no slot
 ## choice), "unfit" removes that exact fitted instance (ADR-0032).
-func _handle_inventory_row_click(row: Dictionary) -> void:
-	var module_id: int = row.get("module_id", 0) as int
-	var slot: String = row.get("slot", "") as String
-	match row.get("action", "") as String:
-		"fit":
+func _handle_inventory_row_click(row: InventoryRow) -> void:
+	match row.action:
+		InventoryRow.ACTION_FIT:
 			if _player_ship_id >= 0:
-				_connection.send_fit_module_command(_player_ship_id, module_id, slot)
-		"unfit":
+				_connection.send_fit_module_command(_player_ship_id, row.module_id, row.slot)
+		InventoryRow.ACTION_UNFIT:
 			if _player_ship_id >= 0:
-				_connection.send_unfit_module_command(_player_ship_id, module_id, slot)
-		"assemble":
+				_connection.send_unfit_module_command(_player_ship_id, row.module_id, row.slot)
+		InventoryRow.ACTION_ASSEMBLE:
 			## No active-ship requirement: this is exactly the recovery path
 			## for a shipless docked player (docs/architecture/ownership.md §8).
 			var docked_station_id: int = _session.dock_status().get("docked_station_id", -1) as int
 			if docked_station_id >= 0:
-				_connection.send_assemble_command(
-					docked_station_id, row.get("ship_type_id", 0) as int)
-		"select_active_ship":
+				_connection.send_assemble_command(docked_station_id, row.ship_type_id)
+		InventoryRow.ACTION_SELECT_ACTIVE_SHIP:
 			## Also no active-ship requirement -- this is how a player re-boards
 			## after Disembark, or switches to a different owned ship.
-			_connection.send_select_active_ship_command(row.get("ship_id", 0) as int)
+			_connection.send_select_active_ship_command(row.ship_id)
 
 
 ## Right-click on a SHIP CARGO row moves the whole stack to the docked
 ## station's inventory (ADR-0034 9B). Uniform across item types (Module,
 ## ScrapMetal) per the user's explicit preference for a single straightforward
 ## right-click gesture rather than per-type UI carve-outs.
-func _handle_inventory_row_right_click(row: Dictionary) -> void:
-	if row.get("source", "") as String != "ship_cargo":
+func _handle_inventory_row_right_click(row: InventoryRow) -> void:
+	if row.source != InventoryRow.SOURCE_SHIP_CARGO:
 		return
 	if _player_ship_id < 0:
 		return
@@ -735,11 +734,7 @@ func _handle_inventory_row_right_click(row: Dictionary) -> void:
 	if docked_station_id < 0:
 		return
 	_connection.send_transfer_to_station_command(
-		_player_ship_id,
-		docked_station_id,
-		row.get("item_type", "") as String,
-		row.get("module_id", 0) as int,
-		row.get("ship_type_id", 0) as int)
+		_player_ship_id, docked_station_id, row.item_type, row.module_id, row.ship_type_id)
 
 
 func _toggle_module_by_index(f_index: int) -> void:

@@ -1,0 +1,68 @@
+## inventory_row.gd
+##
+## Typed shape for one row of the HUD inventory panel (FITTED/SHIP CARGO/
+## STATION/SHIPS columns), replacing the bare Dictionary `hud_manager.gd`
+## used to hand back to `main.gd` (architecture-review-client.md C-8).
+## Unlike `ModuleRow`/`ItemRow` (typed PlayerLoadout wire rows), this is not
+## wire-sourced -- it wraps a UI `Panel` reference plus whichever of the
+## fields below a given row kind (module fit/unfit, ship cargo, station
+## inventory, ship roster) actually uses; unused fields keep their default.
+##
+## Note on typing: because this script has no class_name, it has no way to
+## name its own type inside its own body -- see module_row.gd's header for
+## the full explanation. Constructors below use bare `new()` and an untyped
+## return for that reason; external callers use
+## `const InventoryRow = preload(...)` + `-> InventoryRow` as normal.
+extends RefCounted
+
+## action vocabulary -- named so a typo is an unknown-identifier error at
+## parse time instead of a silently-never-matching string literal.
+const ACTION_NONE := ""
+const ACTION_FIT := "fit"
+const ACTION_UNFIT := "unfit"
+const ACTION_ASSEMBLE := "assemble"
+const ACTION_SELECT_ACTIVE_SHIP := "select_active_ship"
+
+## `source` vocabulary -- tags which column a row belongs to (only
+## meaningful for SHIP CARGO/STATION rows; empty for FITTED/SHIPS).
+const SOURCE_NONE := ""
+const SOURCE_SHIP_CARGO := "ship_cargo"
+const SOURCE_STATION := "station"
+
+var panel: Control = null
+var module_id: int = 0
+var slot: String = ""
+var action: String = ACTION_NONE
+var ship_type_id: int = 0
+var item_type: String = ""
+var count: int = 0
+var source: String = SOURCE_NONE
+var ship_id: int = 0
+
+
+## FITTED/SHIP CARGO/STATION rows (module fit/unfit, ship cargo item, station
+## inventory item). `ship_id` stays at its default (0) -- these rows are
+## never a ship-roster row.
+static func for_item(
+	panel: Control, module_id: int, slot: String, action: String, ship_type_id: int = 0,
+	item_type: String = "", count: int = 0, source: String = SOURCE_NONE
+) -> Variant:
+	var row = new()
+	row.panel = panel
+	row.module_id = module_id
+	row.slot = slot
+	row.action = action
+	row.ship_type_id = ship_type_id
+	row.item_type = item_type
+	row.count = count
+	row.source = source
+	return row
+
+
+## SHIPS roster row (ADR-0037). Only `ship_id`/`action` are meaningful.
+static func for_ship(panel: Control, ship_id: int, action: String) -> Variant:
+	var row = new()
+	row.panel = panel
+	row.ship_id = ship_id
+	row.action = action
+	return row

@@ -16,6 +16,7 @@ extends RefCounted
 ## global class_name, same as player_loadout.gd itself.
 const ModuleRow = preload("res://scripts/module_row.gd")
 const ItemRow = preload("res://scripts/item_row.gd")
+const InventoryRow = preload("res://scripts/inventory_row.gd")
 
 ## Layer colours for the three HP bands and the capacitor (EVE convention).
 const COLOR_SHIELD := Color(0.29, 0.56, 0.85)  ## blue
@@ -500,8 +501,7 @@ const INVENTORY_ROW_HEIGHT := 22.0
 
 ## Hidden by default; toggled by the I key. Returns
 ## {panel, fitted_list, inventory_list, fitted_rows, inventory_rows}.
-## *_rows are populated by update_inventory_panel(); each row is
-## {panel, module_id, slot, action} ("fit" or "unfit").
+## *_rows are populated by update_inventory_panel() as Array[InventoryRow].
 static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 	var panel := Panel.new()
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -575,21 +575,23 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 	return {
 		"panel": panel, "fitted_list": fitted_list, "inventory_list": inventory_list,
 		"station_list": station_list, "ships_list": ships_list,
-		"fitted_rows": [], "inventory_rows": [], "station_rows": [], "ship_rows": [],
+		"fitted_rows": [] as Array[InventoryRow], "inventory_rows": [] as Array[InventoryRow],
+		"station_rows": [] as Array[InventoryRow], "ship_rows": [] as Array[InventoryRow],
 	}
 
 
-## One inventory row. `action` is "fit"/"unfit" for ship-inventory modules,
-## "assemble" for a station-inventory PackagedShip stack, and "" for passive
-## item stacks (e.g. Scrap Metal) that are only informational today. `source`
-## tags which column the row belongs to ("ship_cargo" or "station") so
-## main.gd can tell a right-click-to-transfer target (ship_cargo only) from
-## a similarly-actionless station row without relying on `action`, which
-## collides ("" means different things in each column).
+## One inventory row (FITTED/SHIP CARGO/STATION). `action` is "fit"/"unfit"
+## for ship-inventory modules, "assemble" for a station-inventory PackagedShip
+## stack, and "" for passive item stacks (e.g. Scrap Metal) that are only
+## informational today. `source` tags which column the row belongs to
+## ("ship_cargo" or "station") so main.gd can tell a right-click-to-transfer
+## target (ship_cargo only) from a similarly-actionless station row without
+## relying on `action`, which collides ("" means different things in each
+## column).
 static func _make_inventory_row(
 	text: String, module_id: int, slot: String, action: String, ship_type_id: int = 0,
-	item_type: String = "", count: int = 0, source: String = ""
-) -> Dictionary:
+	item_type: String = "", count: int = 0, source: String = InventoryRow.SOURCE_NONE
+) -> InventoryRow:
 	var row := Panel.new()
 	row.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -606,18 +608,14 @@ static func _make_inventory_row(
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(lbl)
 
-	return {
-		"panel": row, "module_id": module_id, "slot": slot, "action": action,
-		"ship_type_id": ship_type_id, "item_type": item_type, "count": count,
-		"source": source,
-	}
+	return InventoryRow.for_item(row, module_id, slot, action, ship_type_id, item_type, count, source)
 
 
 ## One owned-ship row (ADR-0037 roster). `action` is "" for the already-active
 ## ship (nothing to do -- clicking it would just re-select itself) and
 ## "select_active_ship" for any other owned ship, docked at the same station
 ## or not (the server validates that; a miss here just gets rejected).
-static func _make_ship_row(text: String, ship_id: int, is_active: bool) -> Dictionary:
+static func _make_ship_row(text: String, ship_id: int, is_active: bool) -> InventoryRow:
 	var row := Panel.new()
 	row.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -634,10 +632,8 @@ static func _make_ship_row(text: String, ship_id: int, is_active: bool) -> Dicti
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(lbl)
 
-	return {
-		"panel": row, "ship_id": ship_id,
-		"action": "" if is_active else "select_active_ship",
-	}
+	var action := InventoryRow.ACTION_NONE if is_active else InventoryRow.ACTION_SELECT_ACTIVE_SHIP
+	return InventoryRow.for_ship(row, ship_id, action)
 
 
 ## Rebuild all four columns from the latest PlayerLoadout snapshot. `modules`
@@ -664,49 +660,50 @@ static func update_inventory_panel(
 	for child: Node in ships_list.get_children():
 		child.queue_free()
 
-	var fitted_rows: Array = []
+	var fitted_rows: Array[InventoryRow] = []
 	for entry: Variant in modules:
 		var m: ModuleRow = entry
 		var text := "%s: %s" % [m.slot, m.name]
-		var row := _make_inventory_row(text, m.module_id, m.slot, "unfit")
-		fitted_list.add_child(row["panel"])
+		var row := _make_inventory_row(text, m.module_id, m.slot, InventoryRow.ACTION_UNFIT)
+		fitted_list.add_child(row.panel)
 		fitted_rows.append(row)
 	refs["fitted_rows"] = fitted_rows
 
-	var inventory_rows: Array = []
+	var inventory_rows: Array[InventoryRow] = []
 	for entry: Variant in inventory:
 		var item: ItemRow = entry
 		var text: String
-		var action := ""
+		var action := InventoryRow.ACTION_NONE
 		if item.item_type == "Module":
 			text = "%s: %s x%d" % [item.slot, item.name, item.count]
-			action = "fit"
+			action = InventoryRow.ACTION_FIT
 		else:
 			text = "%s x%d" % [item.name, item.count]
 		var row := _make_inventory_row(
 			text, item.module_id, item.slot, action, item.ship_type_id,
-			item.item_type, item.count, "ship_cargo")
-		inventory_list.add_child(row["panel"])
+			item.item_type, item.count, InventoryRow.SOURCE_SHIP_CARGO)
+		inventory_list.add_child(row.panel)
 		inventory_rows.append(row)
 	refs["inventory_rows"] = inventory_rows
 
-	var station_rows: Array = []
+	var station_rows: Array[InventoryRow] = []
 	for entry: Variant in station_inventory:
 		var item: ItemRow = entry
 		var text: String
-		var action := ""
+		var action := InventoryRow.ACTION_NONE
 		if item.item_type == "PackagedShip":
 			text = "%s x%d (click to assemble)" % [item.name, item.count]
-			action = "assemble"
+			action = InventoryRow.ACTION_ASSEMBLE
 		else:
 			text = "%s x%d" % [item.name, item.count]
 		var row := _make_inventory_row(
-			text, 0, "", action, item.ship_type_id, item.item_type, item.count, "station")
-		station_list.add_child(row["panel"])
+			text, 0, "", action, item.ship_type_id, item.item_type, item.count,
+			InventoryRow.SOURCE_STATION)
+		station_list.add_child(row.panel)
 		station_rows.append(row)
 	refs["station_rows"] = station_rows
 
-	var ship_rows: Array = []
+	var ship_rows: Array[InventoryRow] = []
 	for entry: Variant in owned_ships:
 		var ship: Dictionary = entry as Dictionary
 		var ship_id: int = ship.get("ship_id", 0) as int
@@ -717,7 +714,7 @@ static func update_inventory_panel(
 		var status := "active" if is_active else ("docked" if docked_station_id >= 0 else "away")
 		var text := "%s (%s)" % [name, status]
 		var row := _make_ship_row(text, ship_id, is_active)
-		ships_list.add_child(row["panel"])
+		ships_list.add_child(row.panel)
 		ship_rows.append(row)
 	refs["ship_rows"] = ship_rows
 
@@ -727,27 +724,27 @@ static func toggle_inventory_panel(refs: Dictionary) -> void:
 	panel.visible = not panel.visible
 
 
-## Returns the row under `pos` from either column, or {} if none.
-## {module_id, slot, action} ("fit" sends FitModuleCommand, "unfit" sends
-## UnfitModuleCommand) -- {} has no "action" key, so callers can check
-## `result.has("action")` to tell a miss from a hit.
-static func inventory_panel_row_at(refs: Dictionary, pos: Vector2) -> Dictionary:
+## Returns the row under `pos` from either column, or `null` if none.
+## "fit" sends FitModuleCommand, "unfit" sends UnfitModuleCommand (see
+## InventoryRow's action constants) -- callers distinguish a miss from a hit
+## with a plain `null` check instead of a sentinel-key lookup.
+static func inventory_panel_row_at(refs: Dictionary, pos: Vector2) -> InventoryRow:
 	var panel: Panel = refs["panel"]
 	if not panel.visible:
-		return {}
-	for row: Dictionary in (refs["fitted_rows"] as Array):
-		if (row["panel"] as Panel).get_global_rect().has_point(pos):
+		return null
+	for row: InventoryRow in (refs["fitted_rows"] as Array[InventoryRow]):
+		if row.panel.get_global_rect().has_point(pos):
 			return row
-	for row: Dictionary in (refs["inventory_rows"] as Array):
-		if (row["panel"] as Panel).get_global_rect().has_point(pos):
+	for row: InventoryRow in (refs["inventory_rows"] as Array[InventoryRow]):
+		if row.panel.get_global_rect().has_point(pos):
 			return row
-	for row: Dictionary in (refs["station_rows"] as Array):
-		if (row["panel"] as Panel).get_global_rect().has_point(pos):
+	for row: InventoryRow in (refs["station_rows"] as Array[InventoryRow]):
+		if row.panel.get_global_rect().has_point(pos):
 			return row
-	for row: Dictionary in (refs["ship_rows"] as Array):
-		if (row["panel"] as Panel).get_global_rect().has_point(pos):
+	for row: InventoryRow in (refs["ship_rows"] as Array[InventoryRow]):
+		if row.panel.get_global_rect().has_point(pos):
 			return row
-	return {}
+	return null
 
 
 ## True when the inventory panel is open and `pos` falls anywhere inside it
