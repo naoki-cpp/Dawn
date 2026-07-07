@@ -30,6 +30,52 @@ fn abs_pos_json(p: [f64; 3]) -> serde_json::Value {
 }
 
 impl<S: EventStore> SimulationNode<S> {
+    /// The one seam every ItemRow wire row (ship cargo, station inventory)
+    /// goes through. The client's `ItemRow.from_json()` requires all of
+    /// `item_type`/`module_id`/`ship_type_id`/`name`/`kind`/`slot`/`count` on
+    /// every row and silently drops (push_error + null) any row missing one
+    /// -- `0`/`""` fill the fields a given `ItemId` variant doesn't use, so
+    /// the invariant is enforced here instead of copy-pasted at each call
+    /// site. `None` if the registry backing `item_id` no longer has a
+    /// definition for it (stale/renamed module or ship type).
+    fn item_id_to_row_json(&self, item_id: ItemId, count: u64) -> Option<serde_json::Value> {
+        match item_id {
+            ItemId::Module(module_id) => self.module_registry.get(&module_id).map(|def| {
+                serde_json::json!({
+                    "item_type": "Module",
+                    "module_id": def.id.0,
+                    "ship_type_id": 0,
+                    "name"     : def.name,
+                    "kind"     : format!("{:?}", def.kind),
+                    "slot"     : format!("{:?}", def.slot),
+                    "count"    : count,
+                })
+            }),
+            ItemId::PackagedShip(ship_type_id) => {
+                self.ship_type_registry.get(&ship_type_id).map(|def| {
+                    serde_json::json!({
+                        "item_type": "PackagedShip",
+                        "module_id": 0,
+                        "ship_type_id": def.id.0,
+                        "name"        : def.name,
+                        "kind"        : "",
+                        "slot"        : "",
+                        "count"       : count,
+                    })
+                })
+            }
+            ItemId::ScrapMetal => Some(serde_json::json!({
+                "item_type": "ScrapMetal",
+                "module_id": 0,
+                "ship_type_id": 0,
+                "name"     : "Scrap Metal",
+                "kind"     : "",
+                "slot"     : "",
+                "count"    : count,
+            })),
+        }
+    }
+
     /// Build the `InitialState` + `PlayerLoadout` pair to hand a client once
     /// its identity (fresh or resumed) has already been decided by the caller.
     pub fn build_handoff_payload(&self, ship_id: ShipId, aoi_cell_size: f32) -> HandoffPayload {
@@ -112,43 +158,7 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|inv| {
                 inv.items
                     .iter()
-                    .filter_map(|(item_id, count)| match item_id {
-                        ItemId::Module(module_id) => {
-                            self.module_registry.get(module_id).map(|def| {
-                                serde_json::json!({
-                                    "item_type": "Module",
-                                    "module_id": def.id.0,
-                                    "ship_type_id": 0,
-                                    "name"     : def.name,
-                                    "kind"     : format!("{:?}", def.kind),
-                                    "slot"     : format!("{:?}", def.slot),
-                                    "count"    : count,
-                                })
-                            })
-                        }
-                        ItemId::PackagedShip(ship_type_id) => {
-                            self.ship_type_registry.get(ship_type_id).map(|def| {
-                                serde_json::json!({
-                                    "item_type": "PackagedShip",
-                                    "module_id": 0,
-                                    "ship_type_id": def.id.0,
-                                    "name"        : def.name,
-                                    "kind"        : "",
-                                    "slot"        : "",
-                                    "count"       : count,
-                                })
-                            })
-                        }
-                        ItemId::ScrapMetal => Some(serde_json::json!({
-                            "item_type": "ScrapMetal",
-                            "module_id": 0,
-                            "ship_type_id": 0,
-                            "name"     : "Scrap Metal",
-                            "kind"     : "",
-                            "slot"     : "",
-                            "count"    : count,
-                        })),
-                    })
+                    .filter_map(|(&item_id, &count)| self.item_id_to_row_json(item_id, count))
                     .collect()
             })
             .unwrap_or_default();
@@ -281,43 +291,7 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|inventory| {
                 inventory
                     .iter()
-                    .filter_map(|(item_id, count)| match item_id {
-                        ItemId::Module(module_id) => {
-                            self.module_registry.get(module_id).map(|def| {
-                                serde_json::json!({
-                                    "item_type": "Module",
-                                    "module_id": def.id.0,
-                                    "ship_type_id": 0,
-                                    "name"     : def.name,
-                                    "kind"     : format!("{:?}", def.kind),
-                                    "slot"     : format!("{:?}", def.slot),
-                                    "count"    : count,
-                                })
-                            })
-                        }
-                        ItemId::PackagedShip(ship_type_id) => {
-                            self.ship_type_registry.get(ship_type_id).map(|def| {
-                                serde_json::json!({
-                                    "item_type": "PackagedShip",
-                                    "module_id": 0,
-                                    "ship_type_id": def.id.0,
-                                    "name"        : def.name,
-                                    "kind"        : "",
-                                    "slot"        : "",
-                                    "count"       : count,
-                                })
-                            })
-                        }
-                        ItemId::ScrapMetal => Some(serde_json::json!({
-                            "item_type": "ScrapMetal",
-                            "module_id": 0,
-                            "ship_type_id": 0,
-                            "name"     : "Scrap Metal",
-                            "kind"     : "",
-                            "slot"     : "",
-                            "count"    : count,
-                        })),
-                    })
+                    .filter_map(|(&item_id, &count)| self.item_id_to_row_json(item_id, count))
                     .collect()
             })
             .unwrap_or_default()
@@ -851,6 +825,61 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn item_id_to_row_json_fills_every_required_key_for_every_item_id_variant() {
+        // Direct unit test on the seam itself (item_id_to_row_json), rather
+        // than only through the end-to-end fixture above -- a future ItemId
+        // variant that forgets a key fails here immediately, without needing
+        // to route through a docked ship/station setup.
+        const REQUIRED_KEYS: &[&str] = &[
+            "item_type",
+            "module_id",
+            "ship_type_id",
+            "name",
+            "kind",
+            "slot",
+            "count",
+        ];
+
+        let mut node = mem_node();
+        for def in crate::modules::all_modules() {
+            node.register_module(def);
+        }
+        for def in crate::ship_types::all_ship_types() {
+            node.register_ship_type(def);
+        }
+
+        let module_id = crate::modules::MODULE_RAILGUN_SMALL;
+        let ship_type_id = crate::ship_types::SHIP_TYPE_MAGPIE;
+        for item_id in [
+            ItemId::Module(module_id),
+            ItemId::PackagedShip(ship_type_id),
+            ItemId::ScrapMetal,
+        ] {
+            let row = node
+                .item_id_to_row_json(item_id, 3)
+                .unwrap_or_else(|| panic!("expected a row for {item_id:?}"));
+            for key in REQUIRED_KEYS {
+                assert!(
+                    row.get(key).is_some(),
+                    "{item_id:?} row {row:?} is missing required key '{key}'"
+                );
+            }
+            assert_eq!(row["count"].as_u64().unwrap(), 3);
+        }
+    }
+
+    #[test]
+    fn item_id_to_row_json_returns_none_for_an_item_id_with_no_registry_definition() {
+        let node = mem_node(); // no modules/ship types registered
+        assert!(node
+            .item_id_to_row_json(ItemId::Module(dawn_core::ModuleId(999)), 1)
+            .is_none());
+        assert!(node
+            .item_id_to_row_json(ItemId::PackagedShip(dawn_core::ShipTypeId(999)), 1)
+            .is_none());
     }
 
     #[test]
