@@ -900,7 +900,10 @@ func _update_hud() -> void:
 		var docked_station_name: String = status.get("docked_station_name", "") as String
 		var docked_name := docked_station_name if not docked_station_name.is_empty() else "Station #%d" % docked_station_id
 		if _player_ship_id >= 0:
-			station_line = "\nDocked: %s\n[U] Undock  [B] Build Magpie  [Y] Disassemble ship  [X] Disembark" % docked_name
+			station_line = (
+				"\nDocked: %s\n[U] Undock  [B] Build Magpie\n[Y] Disassemble ship  [X] Disembark"
+				% docked_name
+			)
 		else:
 			## Disembarked (ADR-0037): still docked, but no ship is active.
 			## No client UI yet to pick among owned ships (roadmap.md §12
