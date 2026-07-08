@@ -79,9 +79,24 @@ use dawn_ecs::{
 };
 use dawn_event_store::store::EventStore;
 
-use super::SimulationNode;
+use super::{
+    command_station::{StationDispatchCommand, StationDispatchOutcome},
+    SimulationNode,
+};
 
 impl<S: EventStore> SimulationNode<S> {
+    fn station_followup(
+        player_id: PlayerId,
+        outcome: StationDispatchOutcome,
+    ) -> Option<ClientCommandFollowup> {
+        match outcome {
+            StationDispatchOutcome::NoFollowup => None,
+            StationDispatchOutcome::RefreshFitting => {
+                Some(ClientCommandFollowup::RefreshFitting(player_id))
+            }
+        }
+    }
+
     // ── Movement commands ─────────────────────────────────────────────────────
 
     /// Steer `ship_id` toward `target`. Cancels any active warp/approach.
@@ -282,24 +297,34 @@ impl<S: EventStore> SimulationNode<S> {
                 return Some(ClientCommandFollowup::RefreshFitting(player_id));
             }
             ClientCommand::Dock(d) => {
-                if let Some(ship_id) = active_ship {
-                    self.dock_owned(player_id, ship_id, d);
-                    return Some(ClientCommandFollowup::RefreshFitting(player_id));
-                }
+                return Self::station_followup(
+                    player_id,
+                    self.dispatch_station_command(player_id, StationDispatchCommand::Dock(d)),
+                );
             }
-            ClientCommand::Undock(_) => {
-                if let Some(ship_id) = active_ship {
-                    self.undock_owned(player_id, ship_id);
-                    return Some(ClientCommandFollowup::RefreshFitting(player_id));
-                }
+            ClientCommand::Undock(u) => {
+                return Self::station_followup(
+                    player_id,
+                    self.dispatch_station_command(player_id, StationDispatchCommand::Undock(u)),
+                );
             }
             ClientCommand::BuildPackagedShip(b) => {
-                self.build_packaged_ship_owned(player_id, b);
-                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+                return Self::station_followup(
+                    player_id,
+                    self.dispatch_station_command(
+                        player_id,
+                        StationDispatchCommand::BuildPackagedShip(b),
+                    ),
+                );
             }
             ClientCommand::DisassembleShip(d) => {
-                self.disassemble_ship_owned(player_id, d);
-                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+                return Self::station_followup(
+                    player_id,
+                    self.dispatch_station_command(
+                        player_id,
+                        StationDispatchCommand::DisassembleShip(d),
+                    ),
+                );
             }
             ClientCommand::Jump(j) => {
                 if let Some(ship_id) = active_ship {
@@ -310,20 +335,34 @@ impl<S: EventStore> SimulationNode<S> {
                 }
             }
             ClientCommand::SelectActiveShip(s) => {
-                self.select_active_ship_owned(player_id, s);
-                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+                return Self::station_followup(
+                    player_id,
+                    self.dispatch_station_command(
+                        player_id,
+                        StationDispatchCommand::SelectActiveShip(s),
+                    ),
+                );
             }
             ClientCommand::Assemble(a) => {
-                let _ = self.assemble_ship_owned(player_id, a);
-                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+                return Self::station_followup(
+                    player_id,
+                    self.dispatch_station_command(player_id, StationDispatchCommand::Assemble(a)),
+                );
             }
             ClientCommand::Disembark(_) => {
-                let _ = self.disembark_owned(player_id);
-                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+                return Self::station_followup(
+                    player_id,
+                    self.dispatch_station_command(player_id, StationDispatchCommand::Disembark),
+                );
             }
             ClientCommand::TransferToStation(t) => {
-                self.transfer_to_station_owned(player_id, t);
-                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+                return Self::station_followup(
+                    player_id,
+                    self.dispatch_station_command(
+                        player_id,
+                        StationDispatchCommand::TransferToStation(t),
+                    ),
+                );
             }
         }
         None
