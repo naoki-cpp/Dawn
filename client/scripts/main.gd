@@ -649,12 +649,11 @@ func _on_player_fitting(payload: Dictionary) -> void:
 	## it when it's -1 (no active ship) or a ship this client already knows
 	## about -- switching to a *different* owned ship this client has never
 	## rendered would need to spawn it first, which isn't covered here
-	## (docs/architecture/ownership.md §8). For a known ship, route through
-	## _set_as_player_ship() (not just a bookkeeping assignment) so the
-	## camera/material/tactical-overlay actually reattach to it -- regression:
-	## switching active ship via the SHIPS roster silently left the camera on
-	## the old ship since only _player_ship_id/_session.player_ship_id were
-	## updated, never WorldPresentation.attach_player_ship().
+	## (docs/architecture/ownership.md §8). Both branches route through
+	## WorldPresentation (attach for a known ship, detach for none) instead of
+	## a bare _player_ship_id assignment -- regression (fixed twice already):
+	## a bookkeeping-only update leaves the camera/material/tactical-overlay
+	## out of sync with which ship is actually active.
 	var new_active_ship_id: int = _loadout.active_ship_id()
 	if new_active_ship_id != _player_ship_id \
 			and (new_active_ship_id < 0 or _ships.has(new_active_ship_id)):
@@ -663,6 +662,7 @@ func _on_player_fitting(payload: Dictionary) -> void:
 			_set_as_player_ship(new_active_ship_id, _ships[new_active_ship_id] as Node3D)
 		else:
 			_player_ship_id = new_active_ship_id
+			_presentation.detach_player_ship()
 
 	var dock_status: Dictionary = _loadout.dock_status()
 	_session.apply_dock_fitting(
