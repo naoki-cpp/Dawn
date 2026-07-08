@@ -219,8 +219,8 @@ consequence is that these commands carry no `ship_id` at all (`MoveCommand`,
 `WarpCommand`, `UndockCommand`, etc.): the server always resolves the target
 from `active_ship`, so there is no wire-representable way for a client to
 name a ship it isn't currently flying. Station inventory-management commands
-(`FitModuleCommand`/`UnfitModuleCommand`/`DockCommand`/
-`BuildPackagedShipCommand`/`DisassembleShipCommand`) still carry an explicit
+(`FitModuleCommand`/`UnfitModuleCommand`/`ReorderFittedModuleCommand`/
+`DockCommand`/`BuildPackagedShipCommand`/`DisassembleShipCommand`) still carry an explicit
 `ship_id` and check `owns_ship` only, since they operate on any owned ship,
 not just the active one (e.g. Disassemble a spare docked ship without first
 making it active).

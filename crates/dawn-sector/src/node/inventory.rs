@@ -12,7 +12,10 @@
 //! Both emit the existing `ShipFitted` event (now carrying the resulting
 //! inventory snapshot too, ADR-0032 §5) -- no new event type.
 
-use dawn_core::{FitModuleCommand, PlayerId, TransferToStationCommand, UnfitModuleCommand};
+use dawn_core::{
+    FitModuleCommand, PlayerId, ReorderFittedModuleCommand, TransferDirection,
+    TransferToStationCommand, UnfitModuleCommand,
+};
 use dawn_ecs::{
     components::{FittedSlot, FittingComp, InventoryComp},
     Entity,
@@ -44,6 +47,12 @@ impl<S: EventStore> SimulationNode<S> {
     /// in `InventoryComp` -- rejecting (no state change) otherwise.
     pub fn fit_module_owned(&mut self, player_id: PlayerId, cmd: FitModuleCommand) -> bool {
         if !self.owns_ship(player_id, cmd.ship_id) {
+            return false;
+        }
+        // ADR-0032 amendment (2026-07-08): the §2 "anywhere, MVP" trigger
+        // fired now that Station exists (ADR-0034/0037) -- refitting
+        // requires being docked.
+        if !self.is_ship_docked(cmd.ship_id) {
             return false;
         }
         let Some(def) = self.module_registry.get(&cmd.module_id).cloned() else {
@@ -116,6 +125,10 @@ impl<S: EventStore> SimulationNode<S> {
         if !self.owns_ship(player_id, cmd.ship_id) {
             return false;
         }
+        // ADR-0032 amendment (2026-07-08): see fit_module_owned above.
+        if !self.is_ship_docked(cmd.ship_id) {
+            return false;
+        }
         let Some(&entity) = self.ships.index.get(&cmd.ship_id) else {
             return false;
         };
@@ -157,12 +170,56 @@ impl<S: EventStore> SimulationNode<S> {
         true
     }
 
-    /// Move the entire stack of `cmd.item_id` out of the docked ship's own
-    /// cargo (`InventoryComp`) into the caller's station inventory
-    /// (ADR-0034 section 9B). Whole-stack only -- no partial-count transfer.
-    /// Rejected if the caller doesn't own `cmd.ship_id`, isn't currently
-    /// docked at `cmd.station_id`, or the ship's cargo has none of
-    /// `cmd.item_id`.
+    /// Reorder two fitted modules within the same slot kind (drag-and-drop
+    /// reorder in the FITTED column, ADR-0032 amendment). Persisted (not
+    /// merely a client display order) since iteration order assigns weapon
+    /// hotkey F-numbers -- reuses `ShipFitted` (via `apply_fitting_and_emit`)
+    /// the same way Fit/Unfit do, since that event already carries the full
+    /// `FittingSnapshot` and a pure reorder doesn't need its own event type.
+    pub fn reorder_fitted_module_owned(
+        &mut self,
+        player_id: PlayerId,
+        cmd: ReorderFittedModuleCommand,
+    ) -> bool {
+        if !self.owns_ship(player_id, cmd.ship_id) {
+            return false;
+        }
+        if !self.is_ship_docked(cmd.ship_id) {
+            return false;
+        }
+        let Some(&entity) = self.ships.index.get(&cmd.ship_id) else {
+            return false;
+        };
+        let reordered =
+            if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(entity) {
+                let slots = fitting.slot_mut(cmd.slot);
+                let (from, to) = (cmd.from_index as usize, cmd.to_index as usize);
+                if from >= slots.len() || to >= slots.len() {
+                    false
+                } else {
+                    let moved = slots.remove(from);
+                    slots.insert(to, moved);
+                    true
+                }
+            } else {
+                false
+            };
+        if !reordered {
+            return false;
+        }
+        // Stats are unaffected by pure reordering, but ShipFitted still
+        // needs to carry the new order for replay -- emit without the
+        // reapply_fitting half of apply_fitting_and_emit's usual tail.
+        self.emit_ship_fitted(cmd.ship_id, entity);
+        true
+    }
+
+    /// Move the entire stack of `cmd.item_id` between the docked ship's own
+    /// cargo (`InventoryComp`) and the caller's station inventory (ADR-0034
+    /// section 9B), in the direction `cmd.direction` says. Whole-stack only
+    /// -- no partial-count transfer. Rejected if the caller doesn't own
+    /// `cmd.ship_id`, isn't currently docked at `cmd.station_id`, or the
+    /// source side has none of `cmd.item_id`.
     pub fn transfer_to_station_owned(
         &mut self,
         player_id: PlayerId,
@@ -177,17 +234,40 @@ impl<S: EventStore> SimulationNode<S> {
         let Some(&entity) = self.ships.index.get(&cmd.ship_id) else {
             return false;
         };
-        let taken = self
-            .world
-            .inner_mut()
-            .get::<&mut InventoryComp>(entity)
-            .map(|mut inv| inv.take_all(cmd.item_id))
-            .unwrap_or(0);
-        if taken == 0 {
-            return false;
+        match cmd.direction {
+            TransferDirection::ToStation => {
+                let taken = self
+                    .world
+                    .inner_mut()
+                    .get::<&mut InventoryComp>(entity)
+                    .map(|mut inv| inv.take_all(cmd.item_id))
+                    .unwrap_or(0);
+                if taken == 0 {
+                    return false;
+                }
+                self.credit_station_item(player_id, cmd.item_id, taken);
+                true
+            }
+            TransferDirection::ToShip => {
+                // Whole-stack here too, for symmetry with ToStation: how
+                // many the player currently has in Station inventory is
+                // exactly how many arrive in ship cargo.
+                let count = self.station_item_count(player_id, cmd.item_id);
+                if count == 0 {
+                    return false;
+                }
+                if self
+                    .try_debit_station_item(player_id, cmd.item_id, count)
+                    .is_err()
+                {
+                    return false;
+                }
+                if let Ok(mut inv) = self.world.inner_mut().get::<&mut InventoryComp>(entity) {
+                    inv.add_item(cmd.item_id, count);
+                }
+                true
+            }
         }
-        self.credit_station_item(player_id, cmd.item_id, taken);
-        true
     }
 
     /// Shared tail of `fit_module_owned`/`unfit_module_owned`: recompute
@@ -225,7 +305,38 @@ mod tests {
         node
     }
 
+    /// Spawns and docks an owned player ship at the demo station
+    /// (`StationId(0)`). Fit/Unfit require being docked (ADR-0032
+    /// amendment, 2026-07-08), so this is the default fixture for every
+    /// fit/unfit test in this module -- the handful that only test an
+    /// ownership/inventory/capacity rejection don't care whether the ship
+    /// is also docked, since `owns_ship` is checked first either way.
     fn spawn_owned_player(node: &mut SimulationNode) -> (dawn_core::PlayerId, dawn_core::ShipId) {
+        use dawn_core::{DockCommand, StationId};
+        let station = node
+            .station(StationId(0))
+            .expect("demo station exists")
+            .clone();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
+        assert!(matches!(
+            node.dock_owned(
+                player_id,
+                ship_id,
+                DockCommand {
+                    station_id: StationId(0),
+                },
+            ),
+            crate::node::station::StationOperationOutcome::Accepted { .. }
+        ));
+        (player_id, ship_id)
+    }
+
+    /// Spawns and docks a second owned player ship for docked-fit rejection
+    /// tests that also need an explicitly *undocked* ship.
+    fn spawn_owned_player_undocked(
+        node: &mut SimulationNode,
+    ) -> (dawn_core::PlayerId, dawn_core::ShipId) {
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
         (player_id, ship_id)
@@ -426,6 +537,38 @@ mod tests {
         ));
     }
 
+    /// ADR-0032 amendment (2026-07-08): the §2 "anywhere, MVP" trigger fired
+    /// now that Station exists.
+    #[test]
+    fn fit_module_owned_is_rejected_when_the_ship_is_undocked() {
+        let mut node = node_with_modules();
+        let (player, ship_id) = spawn_owned_player_undocked(&mut node);
+
+        assert!(!node.fit_module_owned(
+            player,
+            FitModuleCommand {
+                ship_id,
+                slot: SlotKind::High,
+                module_id: modules::MODULE_RAILGUN_MEDIUM,
+            }
+        ));
+    }
+
+    #[test]
+    fn unfit_module_owned_is_rejected_when_the_ship_is_undocked() {
+        let mut node = node_with_modules();
+        let (player, ship_id) = spawn_owned_player_undocked(&mut node);
+
+        assert!(!node.unfit_module_owned(
+            player,
+            UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::High,
+                module_id: modules::MODULE_RAILGUN_SMALL,
+            }
+        ));
+    }
+
     #[test]
     fn fit_then_unfit_round_trips_inventory_count() {
         let mut node = node_with_modules();
@@ -502,6 +645,7 @@ mod tests {
                 ship_id,
                 station_id,
                 item_id: dawn_core::ItemId::ScrapMetal,
+                direction: dawn_core::TransferDirection::ToStation,
             }
         ));
 
@@ -527,6 +671,7 @@ mod tests {
                 ship_id,
                 station_id,
                 item_id: dawn_core::ItemId::ScrapMetal,
+                direction: dawn_core::TransferDirection::ToStation,
             }
         ));
     }
@@ -534,7 +679,7 @@ mod tests {
     #[test]
     fn transfer_to_station_owned_is_rejected_when_not_docked_at_the_station() {
         let mut node = node_with_modules();
-        let (player, ship_id) = spawn_owned_player(&mut node);
+        let (player, ship_id) = spawn_owned_player_undocked(&mut node);
         let entity = *node.ships.index.get(&ship_id).unwrap();
         node.world
             .inner_mut()
@@ -548,6 +693,7 @@ mod tests {
                 ship_id,
                 station_id: dawn_core::StationId(0),
                 item_id: dawn_core::ItemId::ScrapMetal,
+                direction: dawn_core::TransferDirection::ToStation,
             }
         ));
     }
@@ -563,6 +709,142 @@ mod tests {
                 ship_id,
                 station_id,
                 item_id: dawn_core::ItemId::ScrapMetal,
+                direction: dawn_core::TransferDirection::ToStation,
+            }
+        ));
+    }
+
+    #[test]
+    fn transfer_to_station_owned_to_ship_moves_the_whole_stack_back_into_cargo() {
+        let mut node = node_with_modules();
+        let (player, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
+        node.credit_station_item(player, dawn_core::ItemId::ScrapMetal, 7);
+
+        assert!(node.transfer_to_station_owned(
+            player,
+            TransferToStationCommand {
+                ship_id,
+                station_id,
+                item_id: dawn_core::ItemId::ScrapMetal,
+                direction: dawn_core::TransferDirection::ToShip,
+            }
+        ));
+
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let inv = node.world.inner().get::<&InventoryComp>(entity).unwrap();
+        assert_eq!(inv.item_count(dawn_core::ItemId::ScrapMetal), 7);
+        assert_eq!(
+            node.station_item_count(player, dawn_core::ItemId::ScrapMetal),
+            0
+        );
+    }
+
+    #[test]
+    fn transfer_to_station_owned_to_ship_is_rejected_when_station_inventory_has_none_of_the_item() {
+        let mut node = node_with_modules();
+        let (player, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
+
+        assert!(!node.transfer_to_station_owned(
+            player,
+            TransferToStationCommand {
+                ship_id,
+                station_id,
+                item_id: dawn_core::ItemId::ScrapMetal,
+                direction: dawn_core::TransferDirection::ToShip,
+            }
+        ));
+    }
+
+    /// The default loadout (`spawn_player_ship_at`) fits two Mid modules
+    /// (Afterburner then Fold Disruptor, in that order) -- exactly the
+    /// fixture a reorder test needs, with no extra Fit calls.
+    #[test]
+    fn reorder_fitted_module_owned_swaps_two_modules_within_the_same_slot_kind() {
+        let mut node = node_with_modules();
+        let (player, ship_id) = spawn_owned_player(&mut node);
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let before: Vec<dawn_core::ModuleId> = node
+            .world
+            .inner()
+            .get::<&FittingComp>(entity)
+            .unwrap()
+            .slot(SlotKind::Mid)
+            .iter()
+            .map(|s| s.def.id)
+            .collect();
+        assert_eq!(
+            before.len(),
+            2,
+            "default loadout fits exactly 2 Mid modules"
+        );
+
+        assert!(node.reorder_fitted_module_owned(
+            player,
+            ReorderFittedModuleCommand {
+                ship_id,
+                slot: SlotKind::Mid,
+                from_index: 0,
+                to_index: 1,
+            }
+        ));
+
+        let after: Vec<dawn_core::ModuleId> = node
+            .world
+            .inner()
+            .get::<&FittingComp>(entity)
+            .unwrap()
+            .slot(SlotKind::Mid)
+            .iter()
+            .map(|s| s.def.id)
+            .collect();
+        assert_eq!(after, vec![before[1], before[0]]);
+    }
+
+    #[test]
+    fn reorder_fitted_module_owned_is_rejected_when_the_ship_is_undocked() {
+        let mut node = node_with_modules();
+        let (player, ship_id) = spawn_owned_player_undocked(&mut node);
+
+        assert!(!node.reorder_fitted_module_owned(
+            player,
+            ReorderFittedModuleCommand {
+                ship_id,
+                slot: SlotKind::Mid,
+                from_index: 0,
+                to_index: 1,
+            }
+        ));
+    }
+
+    #[test]
+    fn reorder_fitted_module_owned_is_rejected_for_an_out_of_bounds_index() {
+        let mut node = node_with_modules();
+        let (player, ship_id) = spawn_owned_player(&mut node);
+
+        assert!(!node.reorder_fitted_module_owned(
+            player,
+            ReorderFittedModuleCommand {
+                ship_id,
+                slot: SlotKind::Mid,
+                from_index: 0,
+                to_index: 99,
+            }
+        ));
+    }
+
+    #[test]
+    fn reorder_fitted_module_owned_is_rejected_for_a_ship_the_player_does_not_own() {
+        let mut node = node_with_modules();
+        let (_owner, ship_id) = spawn_owned_player(&mut node);
+        let stranger = node.next_player_id();
+
+        assert!(!node.reorder_fitted_module_owned(
+            stranger,
+            ReorderFittedModuleCommand {
+                ship_id,
+                slot: SlotKind::Mid,
+                from_index: 0,
+                to_index: 1,
             }
         ));
     }

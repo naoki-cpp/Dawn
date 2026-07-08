@@ -132,3 +132,30 @@ spawn 時に直接構築する（`apply_event` の `ShipSpawned` 分岐でも同
 - [x] dawn-simulation/dawn-sector-node: 両 dispatch site に配線
 - [x] client: インベントリパネル UI・Fit/Unfit 送信
 - [x] `cargo test --workspace` 全緑・GdUnit4 全緑
+
+## 追記（2026-07-08）: §2 の制約トリガーが発火 — ドッキング必須化
+
+§2「いつでもどこでも可能（MVP）」・却下した代替案「ドッキング/セーフゾーン
+制約を今回入れる」は、当時 Station 等のエンティティ種別が存在せず前提が
+無かったための時限的な単純化だった。ADR-0034/ADR-0037 で Station・
+ドッキング状態が実装済みになり、この ADR 自身が名指ししていたトリガー
+（「戦闘中の換装が問題になった場合は、別 ADR で制約を追加する」— 実際には
+戦闘中に限らず「宇宙にいる間ずっと換装できる」こと自体が問題として報告された）
+が発火したと判断し、新規 ADR を起票する代わりに本項を追記する。
+
+**決定**: `fit_module_owned`/`unfit_module_owned`/新設
+`reorder_fitted_module_owned`（ドラッグ&ドロップによる FITTED 内並べ替え、
+別途ドラッグ&ドロップ機能一式と合わせて実装）は、呼び出し元の船が
+**ドッキング中でなければ拒否**する（`is_ship_docked` チェック追加）。
+スポーン時の特権パス `commands.rs::fit_module`（内部専用、既定ロードアウト
+設定用）は対象外のまま——ADR-0032 冒頭の説明どおり、プレイヤー操作ではない。
+
+**却下した代替**: 速度ゼロ必須・Tackle 中拒否等のより細かい制約は見送り。
+「ドッキング中のみ」の方が Station という既存の実体に素直に対応し、
+Assemble/Disassemble/Build と同じ「ドック中のみ」ルールに揃うため、
+一貫性が高い。
+
+実装: `crates/dawn-sector/src/node/inventory.rs`。テスト:
+`fit_module_owned_is_rejected_when_the_ship_is_undocked`・
+`unfit_module_owned_is_rejected_when_the_ship_is_undocked`・
+`reorder_fitted_module_owned_is_rejected_when_the_ship_is_undocked`。

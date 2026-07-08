@@ -40,8 +40,9 @@ pub use commands::{
     ActivateModuleCommand, ApproachCommand, ApproachTarget, AssembleCommand, AttackCommand,
     BuildPackagedShipCommand, ClientCommand, DeactivateModuleCommand, DisassembleShipCommand,
     DisembarkCommand, DockCommand, FitModuleCommand, JumpCommand, KeepAtRangeCommand,
-    LockOnCommand, MoveCommand, OrbitCommand, SelectActiveShipCommand, StopCommand,
-    TransferToStationCommand, UndockCommand, UnfitModuleCommand, WarpCommand,
+    LockOnCommand, MoveCommand, OrbitCommand, ReorderFittedModuleCommand, SelectActiveShipCommand,
+    StopCommand, TransferDirection, TransferToStationCommand, UndockCommand, UnfitModuleCommand,
+    WarpCommand,
 };
 pub use entity::{EntityId, NodeId, ShipId};
 pub use error::DawnError;

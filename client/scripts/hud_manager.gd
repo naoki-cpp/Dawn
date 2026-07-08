@@ -586,6 +586,13 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 	return {
 		"panel": panel, "fitted_list": fitted_list, "inventory_list": inventory_list,
 		"station_list": station_list, "ships_list": ships_list,
+		## The wrapping column (header + list) for each of the four columns --
+		## column_at() hit-tests these instead of the bare *_list containers,
+		## since a *_list with no rows yet (e.g. FITTED before any module is
+		## fitted) collapses to zero height, but the wrapping column always
+		## has nonzero height (the header Label).
+		"fitted_col": fitted_col, "inv_col": inv_col,
+		"station_col": station_col, "ships_col": ships_col,
 		"fitted_rows": [] as Array[InventoryRow], "inventory_rows": [] as Array[InventoryRow],
 		"station_rows": [] as Array[InventoryRow], "ship_rows": [] as Array[InventoryRow],
 		## Whether the Build ship-type picker (Phase 9B task 10) is expanded.
@@ -605,7 +612,8 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 ## column).
 static func _make_inventory_row(
 	text: String, module_id: int, slot: String, action: String, ship_type_id: int = 0,
-	item_type: String = "", count: int = 0, source: String = InventoryRow.SOURCE_NONE
+	item_type: String = "", count: int = 0, source: String = InventoryRow.SOURCE_NONE,
+	slot_index: int = 0
 ) -> InventoryRow:
 	var row := Panel.new()
 	row.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
@@ -623,7 +631,8 @@ static func _make_inventory_row(
 	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(lbl)
 
-	return InventoryRow.for_item(row, module_id, slot, action, ship_type_id, item_type, count, source)
+	return InventoryRow.for_item(
+		row, module_id, slot, action, ship_type_id, item_type, count, source, slot_index)
 
 
 ## One owned-ship row (ADR-0037 roster). `action` is "" for the already-active
@@ -679,7 +688,9 @@ static func update_inventory_panel(
 	for entry: Variant in modules:
 		var m: ModuleRow = entry
 		var text := "%s: %s" % [m.slot, m.name]
-		var row := _make_inventory_row(text, m.module_id, m.slot, InventoryRow.ACTION_UNFIT)
+		var row := _make_inventory_row(
+			text, m.module_id, m.slot, InventoryRow.ACTION_UNFIT, 0, "", 0,
+			InventoryRow.SOURCE_FITTED, m.index)
 		fitted_list.add_child(row.panel)
 		fitted_rows.append(row)
 
@@ -688,7 +699,8 @@ static func update_inventory_panel(
 	## one module is actually fitted.
 	if not fitted_rows.is_empty():
 		var unfit_all_row := _make_inventory_row(
-			"Unfit all", 0, "", InventoryRow.ACTION_UNFIT_ALL)
+			"Unfit all", 0, "", InventoryRow.ACTION_UNFIT_ALL, 0, "", 0,
+			InventoryRow.SOURCE_FITTED)
 		fitted_list.add_child(unfit_all_row.panel)
 		fitted_rows.append(unfit_all_row)
 
@@ -803,6 +815,31 @@ static func inventory_panel_row_at(refs: Dictionary, pos: Vector2) -> InventoryR
 		if row.panel.get_global_rect().has_point(pos):
 			return row
 	return null
+
+
+## Which of the four inventory-panel columns `pos` falls in (an
+## `InventoryRow.SOURCE_*` value), or `""` if outside all of them. Used by
+## the drag-and-drop drop-target resolution (main.gd) -- unlike
+## inventory_panel_row_at(), this matches empty space within a column's list
+## too (dropping below the last row must still count as a drop into that
+## column, not a miss).
+static func column_at(refs: Dictionary, pos: Vector2) -> String:
+	var panel: Panel = refs["panel"]
+	if not panel.visible:
+		return ""
+	var fitted_col: VBoxContainer = refs["fitted_col"]
+	if fitted_col.get_global_rect().has_point(pos):
+		return InventoryRow.SOURCE_FITTED
+	var inv_col: VBoxContainer = refs["inv_col"]
+	if inv_col.get_global_rect().has_point(pos):
+		return InventoryRow.SOURCE_SHIP_CARGO
+	var station_col: VBoxContainer = refs["station_col"]
+	if station_col.get_global_rect().has_point(pos):
+		return InventoryRow.SOURCE_STATION
+	var ships_col: VBoxContainer = refs["ships_col"]
+	if ships_col.get_global_rect().has_point(pos):
+		return InventoryRow.SOURCE_SHIPS
+	return ""
 
 
 ## True when the inventory panel is open and `pos` falls anywhere inside it

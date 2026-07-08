@@ -277,6 +277,10 @@ impl<S: EventStore> SimulationNode<S> {
                 self.unfit_module_owned(player_id, u);
                 return Some(ClientCommandFollowup::RefreshFitting(player_id));
             }
+            ClientCommand::ReorderFittedModule(r) => {
+                self.reorder_fitted_module_owned(player_id, r);
+                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+            }
             ClientCommand::Dock(d) => {
                 if let Some(ship_id) = active_ship {
                     self.dock_owned(player_id, ship_id, d);
@@ -1471,7 +1475,9 @@ mod tests {
 
     #[test]
     fn transfer_to_station_command_dispatches_through() {
-        use dawn_core::{ClientCommand, ItemId, StationId, TransferToStationCommand};
+        use dawn_core::{
+            ClientCommand, ItemId, StationId, TransferDirection, TransferToStationCommand,
+        };
         let mut node = node_with_modules();
         let (player_id, ship_id) = docked_owned_player(&mut node);
         let entity = *node.ships.index.get(&ship_id).unwrap();
@@ -1488,6 +1494,7 @@ mod tests {
                 ship_id,
                 station_id: StationId(0),
                 item_id: ItemId::ScrapMetal,
+                direction: TransferDirection::ToStation,
             }),
             &mut locks,
         );

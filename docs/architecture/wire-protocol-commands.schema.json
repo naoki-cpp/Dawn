@@ -356,6 +356,43 @@
       }
     },
     {
+      "description": "Reorder two fitted modules within the same slot kind (drag-and-drop reorder in the FITTED column).",
+      "type": "object",
+      "required": [
+        "from_index",
+        "ship_id",
+        "slot",
+        "to_index",
+        "type"
+      ],
+      "properties": {
+        "from_index": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "ship_id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "slot": {
+          "type": "string"
+        },
+        "to_index": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "ReorderFittedModuleCommand"
+          ]
+        }
+      }
+    },
+    {
       "type": "object",
       "required": [
         "station_id",
@@ -510,9 +547,10 @@
       }
     },
     {
-      "description": "Move the entire stack of an item out of a docked ship's own cargo into the caller's station inventory (ADR-0034 9B). `item_type` is one of `\"Module\"`, `\"PackagedShip\"`, `\"ScrapMetal\"` (matching `ItemRow`'s wire shape) with `module_id`/`ship_type_id` populated only for the variant that uses them (`0` otherwise).",
+      "description": "Move the entire stack of an item between a docked ship's own cargo and the caller's station inventory (ADR-0034 9B), in the direction `direction` says (`\"ToStation\"` or `\"ToShip\"`). `item_type` is one of `\"Module\"`, `\"PackagedShip\"`, `\"ScrapMetal\"` (matching `ItemRow`'s wire shape) with `module_id`/`ship_type_id` populated only for the variant that uses them (`0` otherwise).",
       "type": "object",
       "required": [
+        "direction",
         "item_type",
         "module_id",
         "ship_id",
@@ -521,6 +559,9 @@
         "type"
       ],
       "properties": {
+        "direction": {
+          "type": "string"
+        },
         "item_type": {
           "type": "string"
         },

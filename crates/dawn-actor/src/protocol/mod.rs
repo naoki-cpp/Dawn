@@ -226,13 +226,14 @@ mod tests {
 
     #[test]
     fn transfer_to_station_command_json_with_scrap_metal_is_parsed() {
-        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0}"#;
+        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"ToStation"}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::TransferToStation(c) => {
                 assert_eq!(c.ship_id, ship_id(42));
                 assert_eq!(c.station_id, dawn_core::StationId(2));
                 assert_eq!(c.item_id, dawn_core::ItemId::ScrapMetal);
+                assert_eq!(c.direction, dawn_core::TransferDirection::ToStation);
             }
             other => panic!("expected TransferToStation, got {other:?}"),
         }
@@ -240,7 +241,7 @@ mod tests {
 
     #[test]
     fn transfer_to_station_command_json_with_module_is_parsed() {
-        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"Module","module_id":7,"ship_type_id":0}"#;
+        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"Module","module_id":7,"ship_type_id":0,"direction":"ToStation"}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::TransferToStation(c) => {
@@ -251,9 +252,42 @@ mod tests {
     }
 
     #[test]
+    fn transfer_to_station_command_json_with_to_ship_direction_is_parsed() {
+        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"ToShip"}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::TransferToStation(c) => {
+                assert_eq!(c.direction, dawn_core::TransferDirection::ToShip);
+            }
+            other => panic!("expected TransferToStation, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn transfer_to_station_command_json_with_unknown_item_type_fails_to_parse() {
-        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"Bogus","module_id":0,"ship_type_id":0}"#;
+        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"Bogus","module_id":0,"ship_type_id":0,"direction":"ToStation"}"#;
         assert!(parse_client_command(line).is_none());
+    }
+
+    #[test]
+    fn transfer_to_station_command_json_with_unknown_direction_fails_to_parse() {
+        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"Bogus"}"#;
+        assert!(parse_client_command(line).is_none());
+    }
+
+    #[test]
+    fn reorder_fitted_module_command_json_is_parsed() {
+        let line = r#"{"type":"ReorderFittedModuleCommand","ship_id":1,"slot":"Mid","from_index":0,"to_index":1}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::ReorderFittedModule(c) => {
+                assert_eq!(c.ship_id, ship_id(1));
+                assert_eq!(c.slot, dawn_core::SlotKind::Mid);
+                assert_eq!(c.from_index, 0);
+                assert_eq!(c.to_index, 1);
+            }
+            other => panic!("expected ReorderFittedModule, got {other:?}"),
+        }
     }
 
     #[test]
