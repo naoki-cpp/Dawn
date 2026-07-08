@@ -30,6 +30,7 @@ mod ship_registry;
 mod snapshot_io;
 mod spawner_logic;
 mod station;
+mod station_inventory;
 mod station_inventory_db;
 mod tackle;
 mod tick;
@@ -187,7 +188,7 @@ where
     /// of it (`node/station.rs`'s seam). `RefCell` for interior mutability so
     /// read-only accessors can still populate the cache on a miss.
     station_inventory_db: station_inventory_db::StationInventoryDb,
-    station_inventory_cache: std::cell::RefCell<station::StationInventoryCache>,
+    station_inventory_cache: std::cell::RefCell<station_inventory::StationInventoryCache>,
     /// Current docked station per ship. Docking is authoritative state, so
     /// station operations must consult this rather than raw spatial proximity.
     docked_ships: BTreeMap<ShipId, StationId>,
@@ -281,7 +282,9 @@ impl<S: EventStore> SimulationNode<S> {
             population_cap: POPULATION_CAP,
             station_inventory_db: station_inventory_db::StationInventoryDb::open_in_memory()
                 .expect("in-memory sqlite connection never fails to open"),
-            station_inventory_cache: std::cell::RefCell::new(station::StationInventoryCache::new()),
+            station_inventory_cache: std::cell::RefCell::new(
+                station_inventory::StationInventoryCache::new(),
+            ),
             docked_ships: BTreeMap::new(),
             docked_players: BTreeMap::new(),
             pending_auto_jumps: Vec::new(),
@@ -342,7 +345,9 @@ impl<S: EventStore> SimulationNode<S> {
             population_cap: POPULATION_CAP,
             station_inventory_db: station_inventory_db::StationInventoryDb::open_in_memory()
                 .expect("in-memory sqlite connection never fails to open"),
-            station_inventory_cache: std::cell::RefCell::new(station::StationInventoryCache::new()),
+            station_inventory_cache: std::cell::RefCell::new(
+                station_inventory::StationInventoryCache::new(),
+            ),
             docked_ships: snapshot.docked_ships.clone(),
             docked_players: snapshot.docked_players.clone(),
             pending_auto_jumps: Vec::new(),
@@ -418,7 +423,7 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn open_station_inventory_db(&mut self, path: &str) -> rusqlite::Result<()> {
         self.station_inventory_db = station_inventory_db::StationInventoryDb::open(path)?;
         self.station_inventory_cache
-            .replace(station::StationInventoryCache::new());
+            .replace(station_inventory::StationInventoryCache::new());
         Ok(())
     }
 
