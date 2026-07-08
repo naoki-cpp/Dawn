@@ -26,6 +26,11 @@ var _bodies_root: Node3D = null
 var _sky_mat: ShaderMaterial = null
 var _player_material: StandardMaterial3D = null
 var _tactical_overlay: Node3D = null
+## The ship currently wearing the player material/indicators, so
+## attach_player_ship() can revert it when the active ship switches to a
+## different one (ADR-0037 SelectActiveShip/Disembark/Assemble) instead of
+## leaving a stale player-colored ship behind.
+var _player_ship: Node3D = null
 var _camera_base_fov: float = 60.0
 var _warp_tunnel_amount: float = 0.0
 
@@ -91,6 +96,14 @@ func apply_origin_rebase(new_origin: Vector3, keep_player_fixed: bool, player_sh
 func attach_player_ship(ship: Node3D, weapon_range: float, weapon_falloff: float) -> void:
 	if ship == null:
 		return
+	## Revert the previously-piloted ship (if any, and if it isn't the same
+	## one) instead of leaving it with the player material/velocity-thrust
+	## indicators forever -- regression: switching active ship left the old
+	## ship permanently player-colored.
+	if _player_ship != null and is_instance_valid(_player_ship) and _player_ship != ship:
+		_clear_player_material(_player_ship)
+		_player_ship.call("clear_as_player")
+	_player_ship = ship
 	_apply_player_material(ship)
 	ship.call("set_as_player")
 	if _camera != null:
@@ -276,3 +289,11 @@ func _apply_player_material(ship: Node3D) -> void:
 	var hull: MeshInstance3D = ship.get_node_or_null("Hull") as MeshInstance3D
 	if hull != null:
 		hull.set_surface_override_material(0, _player_material)
+
+
+## Undo _apply_player_material(): clearing the override lets the Hull mesh's
+## own material (whatever a non-piloted ship normally uses) show again.
+func _clear_player_material(ship: Node3D) -> void:
+	var hull: MeshInstance3D = ship.get_node_or_null("Hull") as MeshInstance3D
+	if hull != null:
+		hull.set_surface_override_material(0, null)
