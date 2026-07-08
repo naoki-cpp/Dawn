@@ -66,10 +66,13 @@ two categories above deserve a look regardless of percentage.
   `skip_serializing_if` omissions (absent key, not `null`), and that
   internal events return `None` — the "not forwarded" list is a contract
   too.
-- **f32 precision trap** (learned in coordinates.rs): when testing f32
-  position/distance accessors, keep the fixture near the origin. A ~10 m
-  expected difference vanishes in the f32 cast at true-AU distances, and
-  the test fails with a misleading `0`.
+- **Precision/scale trap** (learned in coordinates.rs): match the fixture's
+  scale to the precision the accessor actually guarantees. A small expected
+  delta can silently vanish — not crash, just quietly round to `0` or some
+  other misleadingly clean wrong value — if the numeric representation's
+  precision at the fixture's chosen scale is coarser than the delta being
+  tested. This applies to any representation (f32, fixed-point, or whatever
+  replaces it later), not just f32 specifically.
 
 ## Step 4: Re-measure and report
 
