@@ -91,6 +91,12 @@ If the change touches `EventJson` or `ClientCommandJson` in
 [ ] client/scripts/ change that depends on the scene tree: manual Godot
     editor verification (or its absence) is stated in the PR description
 [ ] PR adds/changes a pub item: run /rust-api-audit before opening the PR
+[ ] PR adds a new logic-bearing .rs file, or adds match arms to event
+    replay (node/apply_event.rs) or wire conversion (dawn-actor/src/
+    protocol.rs): the new arms have direct tests, not just incidental
+    coverage through other tests. These two files' failure modes only
+    surface on restart / at the client, so gaps stay invisible to manual
+    testing (see /coverage-audit for the full periodic audit)
 ```
 
 ## PR description checks
