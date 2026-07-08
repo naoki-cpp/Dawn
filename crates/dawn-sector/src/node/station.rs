@@ -300,14 +300,20 @@ impl<S: EventStore> SimulationNode<S> {
             };
         }
         let scrap_cost = Self::SCRAP_METAL_COST_PER_PACKAGED_SHIP;
-        if let Err(reason) = self.try_debit_station_item(player_id, ItemId::ScrapMetal, scrap_cost)
+        if let Err(reason) =
+            self.try_debit_station_item(player_id, cmd.station_id, ItemId::ScrapMetal, scrap_cost)
         {
             return StationOperationOutcome::Rejected {
                 ship_id: cmd.ship_id,
                 reason,
             };
         }
-        self.credit_station_item(player_id, ItemId::PackagedShip(cmd.ship_type_id), 1);
+        self.credit_station_item(
+            player_id,
+            cmd.station_id,
+            ItemId::PackagedShip(cmd.ship_type_id),
+            1,
+        );
         self.event_store
             .append(DomainEvent::PackagedShipBuilt(PackagedShipBuilt {
                 ship_id: cmd.ship_id,
@@ -398,7 +404,12 @@ impl<S: EventStore> SimulationNode<S> {
             };
         };
 
-        self.credit_station_item(player_id, ItemId::PackagedShip(ship_type_id), 1);
+        self.credit_station_item(
+            player_id,
+            cmd.station_id,
+            ItemId::PackagedShip(ship_type_id),
+            1,
+        );
         self.remove_ship(cmd.ship_id);
         self.event_store
             .append(DomainEvent::ShipDisassembled(ShipDisassembled {
@@ -431,7 +442,12 @@ impl<S: EventStore> SimulationNode<S> {
         if !self.ship_type_registry.contains_key(&cmd.ship_type_id) {
             return Err(StationOperationRejection::UnknownShipType);
         }
-        self.try_debit_station_item(player_id, ItemId::PackagedShip(cmd.ship_type_id), 1)?;
+        self.try_debit_station_item(
+            player_id,
+            cmd.station_id,
+            ItemId::PackagedShip(cmd.ship_type_id),
+            1,
+        )?;
 
         let ship_id = ShipId::new(self.node_id, self.id_counter);
         self.id_counter += 1;
@@ -806,6 +822,7 @@ mod tests {
         )));
         node.credit_station_item(
             player_id,
+            StationId(0),
             ItemId::ScrapMetal,
             SimulationNode::<InMemoryEventStore>::SCRAP_METAL_COST_PER_PACKAGED_SHIP,
         );
@@ -818,10 +835,14 @@ mod tests {
                 ship_type_id: crate::ship_types::SHIP_TYPE_MAGPIE,
             }
         )));
-        assert_eq!(node.station_item_count(player_id, ItemId::ScrapMetal), 0);
+        assert_eq!(
+            node.station_item_count(player_id, StationId(0), ItemId::ScrapMetal),
+            0
+        );
         assert_eq!(
             node.station_item_count(
                 player_id,
+                StationId(0),
                 ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE)
             ),
             // 1 from the starter Packaged Ship every new player is granted
@@ -835,7 +856,7 @@ mod tests {
         let mut node = node();
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship(player_id);
-        node.credit_station_item(player_id, ItemId::ScrapMetal, 10);
+        node.credit_station_item(player_id, StationId(0), ItemId::ScrapMetal, 10);
 
         assert!(matches!(
             node.build_packaged_ship_owned(
@@ -902,6 +923,7 @@ mod tests {
         assert_eq!(
             node.station_item_count(
                 player_id,
+                StationId(0),
                 ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE)
             ),
             // 1 from the starter Packaged Ship every new player is granted
@@ -1022,6 +1044,7 @@ mod tests {
         let player_id = node.next_player_id();
         node.credit_station_item(
             player_id,
+            StationId(0),
             ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE),
             1,
         );
@@ -1042,6 +1065,7 @@ mod tests {
         assert_eq!(
             node.station_item_count(
                 player_id,
+                StationId(0),
                 ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE)
             ),
             0
@@ -1136,6 +1160,7 @@ mod tests {
         let player_id = node.next_player_id();
         node.credit_station_item(
             player_id,
+            StationId(0),
             ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE),
             1,
         );

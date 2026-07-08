@@ -284,10 +284,10 @@ impl<S: EventStore> SimulationNode<S> {
     /// isn't currently docked anywhere. Shared by `build_player_loadout_json`
     /// (ship-keyed) and `build_player_loadout_json_for_player` (player-keyed).
     fn station_inventory_json(&self, player_id: dawn_core::PlayerId) -> Vec<serde_json::Value> {
-        if self.player_docked_station(player_id).is_none() {
+        let Some(station_id) = self.player_docked_station(player_id) else {
             return Vec::new();
-        }
-        self.station_inventory(player_id)
+        };
+        self.station_inventory(player_id, station_id)
             .map(|inventory| {
                 inventory
                     .iter()
@@ -929,7 +929,7 @@ mod tests {
         let player_id = node.next_player_id();
         let station = node.station(StationId(0)).unwrap().clone();
         let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
-        node.credit_station_item(player_id, ItemId::ScrapMetal, 5);
+        node.credit_station_item(player_id, StationId(0), ItemId::ScrapMetal, 5);
         assert!(matches!(
             node.dock_owned(
                 player_id,

@@ -602,16 +602,17 @@ mod tests {
     #[test]
     fn station_inventory_survives_snapshot_restore() {
         use crate::{modules, ship_types};
-        use dawn_core::{ItemId, PlayerId};
+        use dawn_core::{ItemId, PlayerId, StationId};
 
         let db_path = tempfile::NamedTempFile::new().unwrap();
         let db_path = db_path.path().to_str().unwrap();
 
         let mut node = node_with_modules();
         node.open_station_inventory_db(db_path).unwrap();
-        node.credit_station_item(PlayerId(7), ItemId::ScrapMetal, 4);
+        node.credit_station_item(PlayerId(7), StationId(0), ItemId::ScrapMetal, 4);
         node.credit_station_item(
             PlayerId(7),
+            StationId(0),
             ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
             1,
         );
@@ -629,9 +630,16 @@ mod tests {
         );
         node2.open_station_inventory_db(db_path).unwrap();
 
-        assert_eq!(node2.station_item_count(PlayerId(7), ItemId::ScrapMetal), 4);
         assert_eq!(
-            node2.station_item_count(PlayerId(7), ItemId::PackagedShip(dawn_core::ShipTypeId(1))),
+            node2.station_item_count(PlayerId(7), StationId(0), ItemId::ScrapMetal),
+            4
+        );
+        assert_eq!(
+            node2.station_item_count(
+                PlayerId(7),
+                StationId(0),
+                ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
+            ),
             1
         );
     }
@@ -642,7 +650,7 @@ mod tests {
     #[test]
     fn restore_from_migrates_a_pre_adr_0038_snapshots_station_inventories() {
         use crate::{modules, ship_types};
-        use dawn_core::{ItemId, PlayerId};
+        use dawn_core::{ItemId, PlayerId, StationId};
 
         let node = node_with_modules();
         let mut snap = node.take_snapshot();
@@ -657,7 +665,10 @@ mod tests {
             &ship_types::all_ship_types(),
         );
 
-        assert_eq!(node2.station_item_count(PlayerId(7), ItemId::ScrapMetal), 9);
+        assert_eq!(
+            node2.station_item_count(PlayerId(7), StationId(0), ItemId::ScrapMetal),
+            9
+        );
     }
 
     #[test]

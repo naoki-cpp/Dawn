@@ -451,6 +451,7 @@ mod tests {
         // +1 PackagedShip.
         node.replace_station_inventory(
             player_id,
+            dawn_core::StationId(0),
             std::collections::BTreeMap::from([
                 (dawn_core::ItemId::ScrapMetal, 2),
                 (
@@ -472,13 +473,18 @@ mod tests {
         ));
 
         assert_eq!(
-            node.station_item_count(player_id, dawn_core::ItemId::ScrapMetal),
+            node.station_item_count(
+                player_id,
+                dawn_core::StationId(0),
+                dawn_core::ItemId::ScrapMetal,
+            ),
             2,
             "replay must not debit ScrapMetal a second time"
         );
         assert_eq!(
             node.station_item_count(
                 player_id,
+                dawn_core::StationId(0),
                 dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE)
             ),
             1,
@@ -518,6 +524,7 @@ mod tests {
         // As if disassemble_ship_owned already ran live.
         node.credit_station_item(
             player_id,
+            dawn_core::StationId(0),
             dawn_core::ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
             1,
         );
@@ -535,6 +542,7 @@ mod tests {
         assert_eq!(
             node.station_item_count(
                 player_id,
+                dawn_core::StationId(0),
                 dawn_core::ItemId::PackagedShip(dawn_core::ShipTypeId(1))
             ),
             1,
@@ -567,6 +575,7 @@ mod tests {
         assert_eq!(
             node.station_item_count(
                 player_id,
+                dawn_core::StationId(0),
                 dawn_core::ItemId::PackagedShip(dawn_core::ShipTypeId(1))
             ),
             0,

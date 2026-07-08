@@ -143,7 +143,7 @@ mod tests {
     fn packaged_ship_build_dispatch_refreshes_fitting_after_station_operation() {
         let mut node = node();
         let (player_id, ship_id) = docked_owned_player(&mut node);
-        node.credit_station_item(player_id, ItemId::ScrapMetal, 10);
+        node.credit_station_item(player_id, StationId(0), ItemId::ScrapMetal, 10);
 
         let outcome = node.dispatch_station_command(
             player_id,
@@ -156,7 +156,7 @@ mod tests {
 
         assert_eq!(outcome, StationDispatchOutcome::RefreshFitting);
         assert_eq!(
-            node.station_item_count(player_id, ItemId::PackagedShip(ShipTypeId(1))),
+            node.station_item_count(player_id, StationId(0), ItemId::PackagedShip(ShipTypeId(1)),),
             1,
             "station dispatch must still perform the underlying packaged ship build"
         );

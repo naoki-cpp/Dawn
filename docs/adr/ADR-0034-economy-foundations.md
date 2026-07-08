@@ -102,6 +102,8 @@ Sector の command validation と同じホットパスに乗る。そのため�
   station を lazy load / write-back cache として扱う余地を残す
 
 MVP の 9B では `PlayerId` 単位の in-memory `Station inventory` を採用してよい。
+2026-07-09 amendment: 実装は `(PlayerId, StationId)` 単位へ更新し、在庫は
+station-local に分離した。dock 中の station context を通して参照する。
 ただしこれは**最終形ではなく、storage seam を切った上で後から DB-backed 実装へ
 差し替えられる前提の一時的な単純化**である。
 
@@ -217,7 +219,7 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 
 ## 実装チェックリスト
 
-- [ ] dawn-core: Station 系イベント列を完成させる（`ShipDocked`/`ShipUndocked`/`PackagedShipBuilt`/`ShipDisassembled` は実装済み。残りの `ShipAssembled` を追加し、event-catalog.md に追記）
+- [x] dawn-core: Station 系イベント列を完成させる（`ShipDocked`/`ShipUndocked`/`PackagedShipBuilt`/`ShipDisassembled`/`ShipAssembled` 実装済み、event-catalog.md 追記済み）
 - [x] dawn-core: `ItemId` enum（Module/PackagedShip/ScrapMetal。**Currencyは含まない**）
 - [x] dawn-ecs: `InventoryComp.items` を `Vec<ModuleId>` → `BTreeMap<ItemId, u64>` へ一般化（ADR-0032 のデータモデルを置き換え）
 - [x] dawn-sector: `ShipDestroyed` 発生時に Scrap Metal を撃破者へ加算する経路（MVP は `1 kill = 1 Scrap Metal` の固定値）
