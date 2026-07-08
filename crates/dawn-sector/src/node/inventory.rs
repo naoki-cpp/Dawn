@@ -245,19 +245,19 @@ impl<S: EventStore> SimulationNode<S> {
                 if taken == 0 {
                     return false;
                 }
-                self.credit_station_item(player_id, cmd.item_id, taken);
+                self.credit_station_item(player_id, cmd.station_id, cmd.item_id, taken);
                 true
             }
             TransferDirection::ToShip => {
                 // Whole-stack here too, for symmetry with ToStation: how
                 // many the player currently has in Station inventory is
                 // exactly how many arrive in ship cargo.
-                let count = self.station_item_count(player_id, cmd.item_id);
+                let count = self.station_item_count(player_id, cmd.station_id, cmd.item_id);
                 if count == 0 {
                     return false;
                 }
                 if self
-                    .try_debit_station_item(player_id, cmd.item_id, count)
+                    .try_debit_station_item(player_id, cmd.station_id, cmd.item_id, count)
                     .is_err()
                 {
                     return false;
@@ -652,7 +652,7 @@ mod tests {
         let inv = node.world.inner().get::<&InventoryComp>(entity).unwrap();
         assert_eq!(inv.item_count(dawn_core::ItemId::ScrapMetal), 0);
         assert_eq!(
-            node.station_inventory(player)
+            node.station_inventory(player, dawn_core::StationId(0))
                 .and_then(|inv| inv.get(&dawn_core::ItemId::ScrapMetal).copied())
                 .unwrap_or(0),
             4
@@ -718,7 +718,7 @@ mod tests {
     fn transfer_to_station_owned_to_ship_moves_the_whole_stack_back_into_cargo() {
         let mut node = node_with_modules();
         let (player, ship_id, station_id) = spawn_and_dock_owned_player(&mut node);
-        node.credit_station_item(player, dawn_core::ItemId::ScrapMetal, 7);
+        node.credit_station_item(player, station_id, dawn_core::ItemId::ScrapMetal, 7);
 
         assert!(node.transfer_to_station_owned(
             player,
@@ -734,7 +734,7 @@ mod tests {
         let inv = node.world.inner().get::<&InventoryComp>(entity).unwrap();
         assert_eq!(inv.item_count(dawn_core::ItemId::ScrapMetal), 7);
         assert_eq!(
-            node.station_item_count(player, dawn_core::ItemId::ScrapMetal),
+            node.station_item_count(player, station_id, dawn_core::ItemId::ScrapMetal),
             0
         );
     }

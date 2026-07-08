@@ -102,6 +102,8 @@ Sector の command validation と同じホットパスに乗る。そのため�
   station を lazy load / write-back cache として扱う余地を残す
 
 MVP の 9B では `PlayerId` 単位の in-memory `Station inventory` を採用してよい。
+2026-07-09 amendment: 実装は `(PlayerId, StationId)` 単位へ更新し、在庫は
+station-local に分離した。dock 中の station context を通して参照する。
 ただしこれは**最終形ではなく、storage seam を切った上で後から DB-backed 実装へ
 差し替えられる前提の一時的な単純化**である。
 

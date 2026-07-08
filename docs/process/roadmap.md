@@ -295,7 +295,7 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
 |---|---|---|---|
 | 1 | Station（NPC提供の最小実装） | `StationId` / `StationDef` と galaxy TOML の `npc_stations` を追加。各 sector に最小 NPC station を1つ配置 | ✅ |
 | 2 | Dock/Undock + Station 利用可否判定 | `DockCommand` / `UndockCommand` と docked 状態を追加。`can_use_station(player_id, station_id)` は「半径内」ではなく「その station に docked 済み」を見る。player-level の docked context を保持し、station access が active ship lookup に依存しないようにする | ✅ |
-| 3 | Station インベントリ（最小保管先） | `PlayerId -> BTreeMap<ItemId, u64>` の最小 station inventory を追加。snapshot restore 対応済み。**これは MVP の in-memory 実装であり、将来は hot-memory + durable storage の二層へ進める** | ✅ |
+| 3 | Station インベントリ（最小保管先） | `(PlayerId, StationId) -> BTreeMap<ItemId, u64>` の station-local inventory を追加。2026-07-09、player-global ではなく station ごとに分離し、現在 dock している station の在庫だけを参照する形へ修正。snapshot restore / SQLite backing 対応済み。 | ✅ |
 | 4 | Station系イベントの土台 | `ShipDocked` / `ShipUndocked` / `PackagedShipBuilt` / `ShipDisassembled` / `ShipAssembled` すべて実装済み | ✅ |
 | 5 | Assemble コマンド + バリデーション（Packaged Ship が未艤装であること） | 2026-07-07 実装完了。入力は Station インベントリ上の `PackagedShip`。**docked 中のみ**実行可。艤装情報は Packaged Ship 側に持たせず、Assemble 後に既存の Fit 経路で艤装する。`AssembleCommand`/`ShipAssembled`、`SimulationNode::assemble_ship_owned`（`Result<ShipId, StationOperationRejection>`）を新設。`active_ship` は自動変更しない（ADR-0037）ため、唯一の船をDisassembleして詰んだプレイヤーは Assemble → `SelectActiveShipCommand` → Undock で復帰可能に（詳細・修正した副次バグは `docs/architecture/ownership.md` §7-8 参照）。`cargo test --workspace` 全件通過・GdUnit4 未変更（クライアントUIはタスク8の方針通り未着手） | ✅ |
 | 6 | Disassemble コマンド + バリデーション（Ship が無傷・未艤装であること） | 出力は Station インベントリ上の `PackagedShip`。**docked 中のみ**実行可。無傷チェックは無料修理の抜け穴防止（Local Repair・ADR-0033 の価値を守る） | ✅ |

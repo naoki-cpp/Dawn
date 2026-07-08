@@ -1424,7 +1424,7 @@ mod tests {
         use dawn_core::{BuildPackagedShipCommand, ClientCommand, ItemId, StationId};
         let mut node = node_with_modules();
         let (player_id, ship_id) = docked_owned_player(&mut node);
-        node.credit_station_item(player_id, ItemId::ScrapMetal, 10);
+        node.credit_station_item(player_id, StationId(0), ItemId::ScrapMetal, 10);
 
         let mut locks = Vec::new();
         let result = node.apply_client_command(
@@ -1441,7 +1441,11 @@ mod tests {
             "BuildPackagedShip must return RefreshFitting for the caller's player_id"
         );
         assert_eq!(
-            node.station_item_count(player_id, ItemId::PackagedShip(dawn_core::ShipTypeId(1))),
+            node.station_item_count(
+                player_id,
+                StationId(0),
+                ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
+            ),
             1,
             "BuildPackagedShip dispatch must actually credit the packaged-ship item"
         );
@@ -1542,7 +1546,7 @@ mod tests {
             "TransferToStation must return RefreshFitting for the caller's player_id"
         );
         assert_eq!(
-            node.station_item_count(player_id, ItemId::ScrapMetal),
+            node.station_item_count(player_id, StationId(0), ItemId::ScrapMetal),
             5,
             "TransferToStation dispatch must actually move the item into the station inventory"
         );

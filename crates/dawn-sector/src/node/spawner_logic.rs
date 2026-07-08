@@ -164,11 +164,12 @@ impl<S: EventStore> SimulationNode<S> {
         // Starter Packaged Ship (ADR-0034/0037 round trip): every new player
         // gets one immediately, so Assemble/Disembark/SelectActiveShip/Undock
         // is exercisable from a fresh connect without first Disassembling
-        // their only ship. Station inventory is per-player, not per-station
-        // (docs/architecture/ownership.md), so this shows up at any station
-        // the player docks at, not just the one nearest their spawn point.
+        // their only ship. For now the starter packaged ship lives at the
+        // demo NPC station (`StationId(0)`), which is also where fresh-play
+        // station flows are exercised.
         self.credit_station_item(
             player_id,
+            dawn_core::StationId(0),
             dawn_core::ItemId::PackagedShip(SHIP_TYPE_MAGPIE),
             1,
         );
@@ -470,6 +471,7 @@ mod tests {
         assert_eq!(
             node.station_item_count(
                 player_id,
+                dawn_core::StationId(0),
                 dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE)
             ),
             1

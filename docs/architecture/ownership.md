@@ -264,9 +264,9 @@ player and a full ship roster. The inventory panel has four columns --
 FITTED, SHIP CARGO, STATION, SHIPS -- kept strictly separate.
 
 `TransferToStationCommand { ship_id, station_id, item_id }` moves the
-entire stack of one item (`Module` or `ScrapMetal`) from a docked ship's
-cargo into the caller's station inventory; whole-stack only, no partial
-transfer. Client trigger: right-click a SHIP CARGO row.
+entire stack of one item (`Module` or `ScrapMetal`) between a docked ship's
+cargo and the caller's inventory **at that station**; whole-stack only, no
+partial transfer. Client trigger: right-click a SHIP CARGO row.
 
 **Known gap:** `StateSnapshot` does not persist `ShipRegistry.owners`/
 `active_ship`.
