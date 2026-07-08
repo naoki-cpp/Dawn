@@ -17,6 +17,7 @@
 mod apply_event;
 mod approach;
 mod bot_ai;
+mod command_station;
 mod commands;
 mod coordinates;
 mod inventory;
