@@ -33,6 +33,8 @@ mod spawner_logic;
 mod station;
 mod station_inventory;
 mod station_inventory_db;
+mod station_lifecycle;
+mod station_materialization;
 mod tackle;
 mod tick;
 mod transit_flow;

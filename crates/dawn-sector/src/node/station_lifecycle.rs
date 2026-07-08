@@ -1,0 +1,407 @@
+//! Ship-facing station lifecycle rules.
+
+use dawn_core::{
+    events::{ShipDocked, ShipUndocked},
+    DockCommand, DomainEvent, PlayerId, ShipId, StationId,
+};
+use dawn_ecs::components::{LockComp, ThrustComp, VelocityComp, WarpComp};
+use dawn_event_store::store::EventStore;
+
+use super::{
+    station::{StationOperationOutcome, StationOperationRejection},
+    SimulationNode,
+};
+
+impl<S: EventStore> SimulationNode<S> {
+    /// True when `player_id`'s ship is currently docked at `station_id`.
+    pub fn can_use_station(&self, player_id: PlayerId, station_id: StationId) -> bool {
+        self.docked_players.get(&player_id).copied() == Some(station_id)
+    }
+
+    /// True when `ship_id` is spatially eligible to dock at `station_id`.
+    pub fn can_dock_station(&self, ship_id: ShipId, station_id: StationId) -> bool {
+        let station = match self.station(station_id) {
+            Some(station) => station,
+            None => return false,
+        };
+        let ship_abs = match self.ship_absolute(ship_id) {
+            Some(ship_abs) => ship_abs,
+            None => return false,
+        };
+        station.is_in_range_abs(ship_abs)
+    }
+
+    pub fn docked_station(&self, ship_id: ShipId) -> Option<StationId> {
+        self.docked_ships.get(&ship_id).copied()
+    }
+
+    pub fn is_ship_docked(&self, ship_id: ShipId) -> bool {
+        self.docked_ships.contains_key(&ship_id)
+    }
+
+    pub fn player_docked_station(&self, player_id: PlayerId) -> Option<StationId> {
+        self.docked_players.get(&player_id).copied()
+    }
+
+    pub(super) fn settle_ship_into_station(&mut self, ship_id: ShipId, station_id: StationId) {
+        let Some(station_abs) = self.station(station_id).map(|station| station.abs_m) else {
+            return;
+        };
+        let Some(&entity) = self.ships.index.get(&ship_id) else {
+            return;
+        };
+        let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
+        self.clear_steering_modes(entity);
+        if let Ok(mut thrust) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
+            *thrust = ThrustComp::ZERO;
+        }
+        if let Ok(mut velocity) = self.world.inner_mut().get::<&mut VelocityComp>(entity) {
+            velocity.0 = dawn_core::Velocity::ZERO;
+        }
+        self.place_entity_at_absolute(entity, station_abs);
+    }
+
+    /// Dock the caller's active ship (ADR-0037: `ship_id` is always the
+    /// caller's resolved active ship — `apply_client_command` never calls
+    /// this without one).
+    pub(super) fn dock_owned(
+        &mut self,
+        player_id: PlayerId,
+        ship_id: ShipId,
+        cmd: DockCommand,
+    ) -> StationOperationOutcome {
+        if !self.is_active_ship(player_id, ship_id) {
+            return StationOperationOutcome::Rejected {
+                ship_id,
+                reason: StationOperationRejection::NotOwned,
+            };
+        }
+        if self.docked_ships.contains_key(&ship_id) {
+            return StationOperationOutcome::Rejected {
+                ship_id,
+                reason: StationOperationRejection::AlreadyDocked,
+            };
+        }
+        if !self.can_dock_station(ship_id, cmd.station_id) {
+            return StationOperationOutcome::Rejected {
+                ship_id,
+                reason: StationOperationRejection::OutOfDockRange,
+            };
+        }
+        self.settle_ship_into_station(ship_id, cmd.station_id);
+        self.docked_ships.insert(ship_id, cmd.station_id);
+        self.docked_players.insert(player_id, cmd.station_id);
+        self.event_store.append(DomainEvent::ShipDocked(ShipDocked {
+            ship_id,
+            station_id: cmd.station_id,
+            tick: self.current_tick,
+        }));
+        StationOperationOutcome::Accepted { ship_id }
+    }
+
+    /// Undock the caller's active ship (ADR-0037: only the active ship may
+    /// leave dock — `ship_id` is always the caller's resolved active ship).
+    pub(super) fn undock_owned(
+        &mut self,
+        player_id: PlayerId,
+        ship_id: ShipId,
+    ) -> StationOperationOutcome {
+        if !self.is_active_ship(player_id, ship_id) {
+            return StationOperationOutcome::Rejected {
+                ship_id,
+                reason: StationOperationRejection::NotOwned,
+            };
+        }
+        let Some(station_id) = self.docked_ships.remove(&ship_id) else {
+            return StationOperationOutcome::Rejected {
+                ship_id,
+                reason: StationOperationRejection::ShipNotDocked,
+            };
+        };
+        self.docked_players.remove(&player_id);
+        self.event_store
+            .append(DomainEvent::ShipUndocked(ShipUndocked {
+                ship_id,
+                station_id,
+                tick: self.current_tick,
+            }));
+        StationOperationOutcome::Accepted { ship_id }
+    }
+
+    /// Switch the caller's active ship to another owned ship docked at the
+    /// same station (ADR-0037). Station-local only for now: `ship_id` must
+    /// be docked where the caller is currently docked.
+    pub(super) fn select_active_ship_owned(
+        &mut self,
+        player_id: PlayerId,
+        cmd: dawn_core::SelectActiveShipCommand,
+    ) -> StationOperationOutcome {
+        if !self.owns_ship(player_id, cmd.ship_id) {
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::NotOwned,
+            };
+        }
+        if self.ships.active_ship.get(&player_id) == Some(&cmd.ship_id) {
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::AlreadyActive,
+            };
+        }
+        let target_station = self.docked_ships.get(&cmd.ship_id).copied();
+        if target_station.is_none()
+            || target_station != self.docked_players.get(&player_id).copied()
+        {
+            return StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason: StationOperationRejection::ShipNotDockedHere,
+            };
+        }
+        self.ships.active_ship.insert(player_id, cmd.ship_id);
+        StationOperationOutcome::Accepted {
+            ship_id: cmd.ship_id,
+        }
+    }
+
+    /// Clear the caller's active ship while docked, without disassembling it
+    /// or changing ownership (ADR-0037). Like `assemble_ship_owned`, there is
+    /// no pre-existing ship_id to report on the "no active ship" rejection,
+    /// so this returns `Result<ShipId, _>` rather than
+    /// `StationOperationOutcome`. Session-local, not event-sourced (same tier
+    /// as `select_active_ship_owned`) -- see `docs/architecture/ownership.md` §8.
+    pub(super) fn disembark_owned(
+        &mut self,
+        player_id: PlayerId,
+    ) -> Result<ShipId, StationOperationRejection> {
+        let Some(ship_id) = self.ships.active_ship.get(&player_id).copied() else {
+            return Err(StationOperationRejection::NotOwned);
+        };
+        if !self.is_ship_docked(ship_id) {
+            return Err(StationOperationRejection::ShipNotDocked);
+        }
+        self.ships.active_ship.remove(&player_id);
+        Ok(ship_id)
+    }
+
+    pub fn clear_docked_lock_targets(&mut self, tick: dawn_core::Tick) -> Vec<DomainEvent> {
+        let mut events: Vec<DomainEvent> = Vec::new();
+        let ship_ids: Vec<ShipId> = self.ships.index.keys().copied().collect();
+        for ship_id in ship_ids {
+            let Some(&entity) = self.ships.index.get(&ship_id) else {
+                continue;
+            };
+            let locker_docked = self.is_ship_docked(ship_id);
+            let lost_targets: Vec<ShipId> = match self.world.inner().get::<&LockComp>(entity) {
+                Ok(lock) => lock
+                    .entries
+                    .iter()
+                    .filter_map(|entry| {
+                        if locker_docked || self.is_ship_docked(entry.target_id) {
+                            Some(entry.target_id)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+                Err(_) => Vec::new(),
+            };
+            if lost_targets.is_empty() {
+                continue;
+            }
+            if let Ok(mut lock) = self.world.inner_mut().get::<&mut LockComp>(entity) {
+                lock.entries
+                    .retain(|entry| !lost_targets.contains(&entry.target_id));
+            }
+            for target_id in lost_targets {
+                events.push(DomainEvent::LockLost(dawn_core::events::LockLost {
+                    locker_id: ship_id,
+                    target_id,
+                    tick,
+                }));
+            }
+        }
+        events
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dawn_core::{DockCommand, NodeId, SectorBounds, SectorId, StationId, WarpTarget};
+    use dawn_ecs::components::{ThrustComp, VelocityComp};
+    use dawn_event_store::InMemoryEventStore;
+
+    use crate::{modules, ship_types};
+
+    use super::*;
+
+    fn accepted(outcome: StationOperationOutcome) -> bool {
+        matches!(outcome, StationOperationOutcome::Accepted { .. })
+    }
+
+    fn node() -> SimulationNode<InMemoryEventStore> {
+        let mut node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        for def in modules::all_modules() {
+            node.register_module(def);
+        }
+        for def in ship_types::all_ship_types() {
+            node.register_ship_type(def);
+        }
+        node
+    }
+
+    #[test]
+    fn player_can_dock_a_station_when_inside_its_docking_radius() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station = node.station(StationId(0)).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+
+        assert!(node.can_dock_station(ship_id, StationId(0)));
+    }
+
+    #[test]
+    fn player_cannot_dock_a_station_when_out_of_range() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station = node.station(StationId(0)).expect("demo station exists");
+        node.set_spawn_anchor_abs(
+            ship_id,
+            [
+                station.abs_m[0] + station.docking_radius as f64 + 5000.0,
+                station.abs_m[1],
+                station.abs_m[2],
+            ],
+        );
+
+        assert!(!node.can_dock_station(ship_id, StationId(0)));
+    }
+
+    #[test]
+    fn warping_to_the_host_planet_lands_within_dock_range_of_the_local_station() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+
+        assert!(node.apply_warp_command_owned(
+            player_id,
+            ship_id,
+            dawn_core::WarpCommand {
+                target: WarpTarget::Body(dawn_core::CelestialBodyId(1)),
+            }
+        ));
+
+        for _ in 0..5_000 {
+            node.tick();
+            if node.warp_phase(ship_id).is_none() {
+                break;
+            }
+        }
+
+        assert!(
+            node.can_dock_station(ship_id, StationId(0)),
+            "Forge warp arrival should be close enough to dock at Forge Station"
+        );
+    }
+
+    #[test]
+    fn docking_zeroes_velocity_and_thrust() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station = node.station(StationId(0)).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        let entity = *node.ships.index.get(&ship_id).expect("ship entity");
+        if let Ok(mut velocity) = node.world.inner_mut().get::<&mut VelocityComp>(entity) {
+            velocity.0 = dawn_core::Velocity {
+                dx: 10.0,
+                dy: 0.0,
+                dz: 0.0,
+            };
+        }
+        if let Ok(mut thrust) = node.world.inner_mut().get::<&mut ThrustComp>(entity) {
+            thrust.direction = dawn_core::Velocity {
+                dx: 1.0,
+                dy: 0.0,
+                dz: 0.0,
+            };
+            thrust.is_braking = false;
+        }
+
+        assert!(accepted(node.dock_owned(
+            player_id,
+            ship_id,
+            DockCommand {
+                station_id: StationId(0),
+            }
+        )));
+
+        let velocity = node.world.inner().get::<&VelocityComp>(entity).unwrap().0;
+        let thrust = *node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        assert_eq!(velocity, dawn_core::Velocity::ZERO);
+        assert_eq!(thrust.direction, ThrustComp::ZERO.direction);
+        assert_eq!(thrust.is_braking, ThrustComp::ZERO.is_braking);
+    }
+
+    #[test]
+    fn docked_ship_rejects_movement_commands() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station = node.station(StationId(0)).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        let entity = *node.ships.index.get(&ship_id).expect("ship entity");
+        assert!(accepted(node.dock_owned(
+            player_id,
+            ship_id,
+            DockCommand {
+                station_id: StationId(0),
+            }
+        )));
+
+        let before = *node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        assert!(node.apply_move_command_owned(
+            player_id,
+            ship_id,
+            dawn_core::Position::new(5000.0, 0.0, 0.0)
+        ));
+        let after = *node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        assert_eq!(
+            before.direction, after.direction,
+            "docked ships should ignore manual piloting"
+        );
+        assert_eq!(
+            before.is_braking, after.is_braking,
+            "docked ships should ignore manual piloting"
+        );
+    }
+
+    #[test]
+    fn docked_ship_rejects_warp_commands() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station = node.station(StationId(0)).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        assert!(accepted(node.dock_owned(
+            player_id,
+            ship_id,
+            DockCommand {
+                station_id: StationId(0),
+            }
+        )));
+
+        assert!(!node.apply_warp_command_owned(
+            player_id,
+            ship_id,
+            dawn_core::WarpCommand {
+                target: WarpTarget::Body(dawn_core::CelestialBodyId(1)),
+            }
+        ));
+    }
+}
