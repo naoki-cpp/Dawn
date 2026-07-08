@@ -130,6 +130,14 @@ pub enum ClientCommandJson {
         module_id: u32,
         slot: String,
     },
+    /// Reorder two fitted modules within the same slot kind (drag-and-drop
+    /// reorder in the FITTED column).
+    ReorderFittedModuleCommand {
+        ship_id: u64,
+        slot: String,
+        from_index: u32,
+        to_index: u32,
+    },
     DockCommand {
         station_id: u32,
     },
@@ -157,17 +165,19 @@ pub enum ClientCommandJson {
     /// (ADR-0037). No `ship_id` -- always targets the caller's own active
     /// ship, like `UndockCommand`.
     DisembarkCommand {},
-    /// Move the entire stack of an item out of a docked ship's own cargo
-    /// into the caller's station inventory (ADR-0034 9B). `item_type` is
-    /// one of `"Module"`, `"PackagedShip"`, `"ScrapMetal"` (matching
-    /// `ItemRow`'s wire shape) with `module_id`/`ship_type_id` populated
-    /// only for the variant that uses them (`0` otherwise).
+    /// Move the entire stack of an item between a docked ship's own cargo
+    /// and the caller's station inventory (ADR-0034 9B), in the direction
+    /// `direction` says (`"ToStation"` or `"ToShip"`). `item_type` is one of
+    /// `"Module"`, `"PackagedShip"`, `"ScrapMetal"` (matching `ItemRow`'s
+    /// wire shape) with `module_id`/`ship_type_id` populated only for the
+    /// variant that uses them (`0` otherwise).
     TransferToStationCommand {
         ship_id: u64,
         station_id: u32,
         item_type: String,
         module_id: u32,
         ship_type_id: u32,
+        direction: String,
     },
 }
 
@@ -296,6 +306,19 @@ fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
             module_id: ModuleId(module_id),
             slot: parse_slot_kind(&slot)?,
         })),
+        ClientCommandJson::ReorderFittedModuleCommand {
+            ship_id,
+            slot,
+            from_index,
+            to_index,
+        } => Some(ClientCommand::ReorderFittedModule(
+            dawn_core::ReorderFittedModuleCommand {
+                ship_id: ShipId(EntityId::from_raw(ship_id)),
+                slot: parse_slot_kind(&slot)?,
+                from_index,
+                to_index,
+            },
+        )),
         ClientCommandJson::DockCommand { station_id } => Some(ClientCommand::Dock(DockCommand {
             station_id: dawn_core::StationId(station_id),
         })),
@@ -337,6 +360,7 @@ fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
             item_type,
             module_id,
             ship_type_id,
+            direction,
         } => {
             let item_id = match item_type.as_str() {
                 "Module" => dawn_core::ItemId::Module(ModuleId(module_id)),
@@ -346,11 +370,17 @@ fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
                 "ScrapMetal" => dawn_core::ItemId::ScrapMetal,
                 _ => return None,
             };
+            let direction = match direction.as_str() {
+                "ToStation" => dawn_core::TransferDirection::ToStation,
+                "ToShip" => dawn_core::TransferDirection::ToShip,
+                _ => return None,
+            };
             Some(ClientCommand::TransferToStation(
                 dawn_core::TransferToStationCommand {
                     ship_id: ShipId(EntityId::from_raw(ship_id)),
                     station_id: dawn_core::StationId(station_id),
                     item_id,
+                    direction,
                 },
             ))
         }

@@ -71,6 +71,17 @@ var _keep_at_range_km : float = 10.0
 const KEEP_AT_RANGE_MIN_KM : float = 1.0
 const KEEP_AT_RANGE_MAX_KM : float = 200.0
 
+## Inventory-panel drag-and-drop (hand-rolled, consistent with the rest of
+## this HUD's manual _input() hit-testing -- no native Control drag API).
+## `_drag_row` is set on a left-press over a row and cleared on release;
+## while non-null, a press+move past DRAG_THRESHOLD_PX is a drop instead of
+## a click, resolved against whichever inventory-panel column is under the
+## release position (HudManager.column_at()).
+var _drag_row : InventoryRow = null
+var _drag_start_pos : Vector2 = Vector2.ZERO
+var _drag_ghost : Label = null
+const DRAG_THRESHOLD_PX : float = 6.0
+
 ## Per-ship HP: { ship_id: {shield, armor, hull} }
 var _ship_hp : Dictionary = _session.ship_hp
 
@@ -296,9 +307,16 @@ func _input(event: InputEvent) -> void:
 				_connection.send_disembark_command()
 		return
 
+	if event is InputEventMouseMotion and _drag_row != null:
+		_update_drag_ghost((event as InputEventMouseMotion).position)
+		return
+
 	if event is InputEventMouseButton:
 		var mb: InputEventMouseButton = event as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed:
+			if _drag_row != null:
+				_end_inventory_drag(mb.position)
+				return
 			_camera.call("end_orbit_drag")
 			return
 		if mb.pressed:
@@ -309,7 +327,11 @@ func _input(event: InputEvent) -> void:
 				var inv_row: InventoryRow = _hud_surface.inventory_panel_row_at(mb.position)
 				if inv_row != null:
 					if mb.button_index == MOUSE_BUTTON_LEFT:
-						_handle_inventory_row_click(inv_row)
+						## Defer to release: a plain click and the start of a
+						## drag look identical at press time. See
+						## _end_inventory_drag()'s threshold check.
+						_drag_row = inv_row
+						_drag_start_pos = mb.position
 					elif mb.button_index == MOUSE_BUTTON_RIGHT:
 						_handle_inventory_row_right_click(inv_row)
 				return
@@ -715,17 +737,21 @@ func _apply_player_module_activation(module_id: int, active: bool, forced_reason
 func _handle_inventory_row_click(row: InventoryRow) -> void:
 	match row.action:
 		InventoryRow.ACTION_FIT:
-			if _player_ship_id >= 0:
+			## ADR-0032's 2026-07-08 amendment: refitting requires being
+			## docked. Guarded client-side too (not just server-side) so this
+			## reads as an obvious no-op rather than a silent-failure resync,
+			## the same UX lesson learned from Disassemble earlier this phase.
+			if _player_ship_id >= 0 and _session.is_docked():
 				_connection.send_fit_module_command(_player_ship_id, row.module_id, row.slot)
 		InventoryRow.ACTION_UNFIT:
-			if _player_ship_id >= 0:
+			if _player_ship_id >= 0 and _session.is_docked():
 				_connection.send_unfit_module_command(_player_ship_id, row.module_id, row.slot)
 		InventoryRow.ACTION_UNFIT_ALL:
 			## No new wire command -- sends one UnfitModuleCommand per
 			## currently-fitted module (non-atomic: a mid-loop failure leaves
 			## a partially-unfitted ship, but each Unfit is independently safe
 			## and this is a convenience action, not a transactional one).
-			if _player_ship_id >= 0:
+			if _player_ship_id >= 0 and _session.is_docked():
 				for entry: Variant in _loadout.modules():
 					_connection.send_unfit_module_command(
 						_player_ship_id, entry.module_id as int, entry.slot as String)
@@ -782,6 +808,91 @@ func _handle_inventory_row_right_click(row: InventoryRow) -> void:
 		return
 	_connection.send_transfer_to_station_command(
 		_player_ship_id, docked_station_id, row.item_type, row.module_id, row.ship_type_id)
+
+
+## Lazily creates the drag ghost once the cursor has moved past
+## DRAG_THRESHOLD_PX (avoids a ghost flash on an ordinary click) and keeps it
+## following the cursor.
+func _update_drag_ghost(pos: Vector2) -> void:
+	if _drag_row == null:
+		return
+	if _drag_ghost == null:
+		if pos.distance_to(_drag_start_pos) < DRAG_THRESHOLD_PX:
+			return
+		var label: Label = (_drag_row.panel as Panel).get_child(0) as Label
+		_drag_ghost = _hud_surface.create_drag_ghost(label.text)
+	_drag_ghost.position = pos + Vector2(12.0, 12.0)
+
+
+func _clear_drag_ghost() -> void:
+	if _drag_ghost != null:
+		_drag_ghost.queue_free()
+		_drag_ghost = null
+
+
+## Resolves a mouse-up while `_drag_row` is set: a plain click (moved less
+## than DRAG_THRESHOLD_PX since press) fires the existing click handler
+## exactly as before this feature existed; past the threshold, it's a drop,
+## dispatched by (origin column, target column) below.
+func _end_inventory_drag(release_pos: Vector2) -> void:
+	var row: InventoryRow = _drag_row
+	var start: Vector2 = _drag_start_pos
+	_drag_row = null
+	_clear_drag_ghost()
+	if row == null:
+		return
+	if release_pos.distance_to(start) < DRAG_THRESHOLD_PX:
+		_handle_inventory_row_click(row)
+		return
+	var target_column: String = _hud_surface.inventory_panel_column_at(release_pos)
+	_handle_inventory_row_drop(row, target_column, release_pos)
+
+
+## Dispatch matrix for a drag that ended in `target_column`. Right-click
+## transfer and plain-click fit/unfit/etc. are untouched by this -- drag is
+## an additive path to the same commands, same "keep both interaction paths"
+## precedent as the Build/Disassemble buttons-plus-keys work.
+func _handle_inventory_row_drop(row: InventoryRow, target_column: String, release_pos: Vector2) -> void:
+	if target_column == "":
+		return
+	if row.source == InventoryRow.SOURCE_FITTED and target_column == InventoryRow.SOURCE_FITTED:
+		## Reordering needs the specific row dropped on, not just the column
+		## -- mismatched slot kinds (e.g. dropping a High module onto a Mid
+		## row) are a no-op, since a module can't change slot kind by reorder.
+		var target_row: InventoryRow = _hud_surface.inventory_panel_row_at(release_pos)
+		if target_row == null or target_row.source != InventoryRow.SOURCE_FITTED:
+			return
+		if target_row.slot != row.slot or target_row.module_id == row.module_id:
+			return
+		if _player_ship_id >= 0 and _session.is_docked():
+			_connection.send_reorder_fitted_module_command(
+				_player_ship_id, row.slot, row.slot_index, target_row.slot_index)
+		return
+	if target_column == row.source:
+		return
+	match row.source:
+		InventoryRow.SOURCE_SHIP_CARGO:
+			match target_column:
+				InventoryRow.SOURCE_FITTED:
+					if row.item_type == "Module" and _player_ship_id >= 0 and _session.is_docked():
+						_connection.send_fit_module_command(_player_ship_id, row.module_id, row.slot)
+				InventoryRow.SOURCE_STATION:
+					_handle_inventory_row_right_click(row)
+		InventoryRow.SOURCE_FITTED:
+			match target_column:
+				InventoryRow.SOURCE_SHIP_CARGO:
+					if _player_ship_id >= 0 and _session.is_docked():
+						_connection.send_unfit_module_command(_player_ship_id, row.module_id, row.slot)
+		InventoryRow.SOURCE_STATION:
+			match target_column:
+				InventoryRow.SOURCE_SHIP_CARGO:
+					if _player_ship_id >= 0:
+						var docked_station_id: int = _session.dock_status().get("docked_station_id", -1) as int
+						if docked_station_id >= 0:
+							_connection.send_transfer_from_station_command(
+								_player_ship_id, docked_station_id, row.item_type, row.module_id,
+								row.ship_type_id)
+		## else: SHIPS column, or anything else -- not a meaningful drag target.
 
 
 func _toggle_module_by_index(f_index: int) -> void:

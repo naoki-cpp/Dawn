@@ -33,11 +33,16 @@ const ACTION_BUILD_TOGGLE := "build_toggle"
 ## "open the picker" apart from "build this type" with the same action prefix.
 const ACTION_BUILD_SHIP_TYPE := "build_ship_type"
 
-## `source` vocabulary -- tags which column a row belongs to (only
-## meaningful for SHIP CARGO/STATION rows; empty for FITTED/SHIPS).
+## `source` vocabulary -- tags which of the four inventory-panel columns a
+## row belongs to. Originally only distinguished SHIP CARGO/STATION (for the
+## ship-cargo right-click transfer gesture); now also covers FITTED/SHIPS so
+## the drag-and-drop dispatch matrix can tell which column a drag started or
+## ended in without re-deriving it from `action`.
 const SOURCE_NONE := ""
 const SOURCE_SHIP_CARGO := "ship_cargo"
 const SOURCE_STATION := "station"
+const SOURCE_FITTED := "fitted"
+const SOURCE_SHIPS := "ships"
 
 var panel: Control = null
 var module_id: int = 0
@@ -48,6 +53,11 @@ var item_type: String = ""
 var count: int = 0
 var source: String = SOURCE_NONE
 var ship_id: int = 0
+## Position within this module's own slot kind (ModuleRow.index / the
+## server's per-slot-kind array position, not a global row index). Only
+## meaningful for FITTED rows -- drag-and-drop reorder needs it to build
+## ReorderFittedModuleCommand's from_index/to_index.
+var slot_index: int = 0
 
 
 ## FITTED/SHIP CARGO/STATION rows (module fit/unfit, ship cargo item, station
@@ -55,7 +65,7 @@ var ship_id: int = 0
 ## never a ship-roster row.
 static func for_item(
 	panel: Control, module_id: int, slot: String, action: String, ship_type_id: int = 0,
-	item_type: String = "", count: int = 0, source: String = SOURCE_NONE
+	item_type: String = "", count: int = 0, source: String = SOURCE_NONE, slot_index: int = 0
 ) -> Variant:
 	var row = new()
 	row.panel = panel
@@ -66,6 +76,7 @@ static func for_item(
 	row.item_type = item_type
 	row.count = count
 	row.source = source
+	row.slot_index = slot_index
 	return row
 
 
@@ -75,4 +86,5 @@ static func for_ship(panel: Control, ship_id: int, action: String) -> Variant:
 	row.panel = panel
 	row.ship_id = ship_id
 	row.action = action
+	row.source = SOURCE_SHIPS
 	return row

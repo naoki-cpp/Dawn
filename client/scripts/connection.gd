@@ -174,6 +174,20 @@ func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String)
 		"slot"     : p_slot,
 	})
 
+## [Inventory panel] Reorder two fitted modules within the same slot kind
+## (drag-and-drop reorder in the FITTED column). Persisted server-side since
+## iteration order assigns weapon hotkey F-numbers -- see ADR-0032's
+## 2026-07-08 amendment.
+func send_reorder_fitted_module_command(
+	p_ship_id: int, p_slot: String, p_from_index: int, p_to_index: int
+) -> void:
+	_send_json("ReorderFittedModuleCommand", {
+		"ship_id"   : p_ship_id,
+		"slot"      : p_slot,
+		"from_index": p_from_index,
+		"to_index"  : p_to_index,
+	})
+
 func send_dock_command(p_station_id: int) -> void:
 	_send_json("DockCommand", { "station_id": p_station_id })
 
@@ -221,12 +235,35 @@ func send_transfer_to_station_command(
 	p_module_id: int = 0,
 	p_ship_type_id: int = 0
 ) -> void:
+	_send_transfer_command(p_ship_id, p_station_id, p_item_type, p_module_id, p_ship_type_id, "ToStation")
+
+## The reverse of send_transfer_to_station_command: move the entire stack of
+## an item out of the caller's station inventory back into the docked ship's
+## own cargo.
+func send_transfer_from_station_command(
+	p_ship_id: int,
+	p_station_id: int,
+	p_item_type: String,
+	p_module_id: int = 0,
+	p_ship_type_id: int = 0
+) -> void:
+	_send_transfer_command(p_ship_id, p_station_id, p_item_type, p_module_id, p_ship_type_id, "ToShip")
+
+func _send_transfer_command(
+	p_ship_id: int,
+	p_station_id: int,
+	p_item_type: String,
+	p_module_id: int,
+	p_ship_type_id: int,
+	p_direction: String
+) -> void:
 	_send_json("TransferToStationCommand", {
 		"ship_id"     : p_ship_id,
 		"station_id"  : p_station_id,
 		"item_type"   : p_item_type,
 		"module_id"   : p_module_id,
 		"ship_type_id": p_ship_type_id,
+		"direction"   : p_direction,
 	})
 
 func is_connected_to_server() -> bool:

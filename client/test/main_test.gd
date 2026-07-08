@@ -13,6 +13,7 @@ extends GdUnitTestSuite
 const __source: String = "res://scripts/main.gd"
 const ModuleRow = preload("res://scripts/module_row.gd")
 const InventoryRow = preload("res://scripts/inventory_row.gd")
+const HudManager = preload("res://scripts/hud_manager.gd")
 
 var _main: Node
 
@@ -74,6 +75,41 @@ class FakeConnection:
 
 	func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
 		unfit_calls.append({"ship_id": p_ship_id, "module_id": p_module_id, "slot": p_slot})
+
+	var fit_calls: Array[Dictionary] = []
+
+	func send_fit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
+		fit_calls.append({"ship_id": p_ship_id, "module_id": p_module_id, "slot": p_slot})
+
+	var reorder_calls: Array[Dictionary] = []
+
+	func send_reorder_fitted_module_command(
+		p_ship_id: int, p_slot: String, p_from_index: int, p_to_index: int
+	) -> void:
+		reorder_calls.append({
+			"ship_id": p_ship_id, "slot": p_slot, "from_index": p_from_index, "to_index": p_to_index,
+		})
+
+	var transfer_to_station_calls: Array[Dictionary] = []
+	var transfer_from_station_calls: Array[Dictionary] = []
+
+	func send_transfer_to_station_command(
+		p_ship_id: int, p_station_id: int, p_item_type: String, p_module_id: int = 0,
+		p_ship_type_id: int = 0
+	) -> void:
+		transfer_to_station_calls.append({
+			"ship_id": p_ship_id, "station_id": p_station_id, "item_type": p_item_type,
+			"module_id": p_module_id, "ship_type_id": p_ship_type_id,
+		})
+
+	func send_transfer_from_station_command(
+		p_ship_id: int, p_station_id: int, p_item_type: String, p_module_id: int = 0,
+		p_ship_type_id: int = 0
+	) -> void:
+		transfer_from_station_calls.append({
+			"ship_id": p_ship_id, "station_id": p_station_id, "item_type": p_item_type,
+			"module_id": p_module_id, "ship_type_id": p_ship_type_id,
+		})
 
 
 func before_test() -> void:
@@ -474,6 +510,7 @@ func test_unfit_all_row_click_sends_one_unfit_command_per_fitted_module() -> voi
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
+	_main._session.docked_station_id = 3
 	_set_loadout_modules([
 		_module_fixture(1, "High", false),
 		_module_fixture(2, "Low", false),
@@ -499,4 +536,202 @@ func test_unfit_all_row_click_is_a_no_op_when_no_module_is_fitted() -> void:
 	_main._handle_inventory_row_click(row)
 
 	assert_int(connection.unfit_calls.size()).is_equal(0)
+	connection.free()
+
+
+# -- Drag-and-drop dispatch matrix --------------------------------------------
+
+func test_drag_from_ship_cargo_to_fitted_sends_fit_command() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._session.docked_station_id = 3
+
+	var row: InventoryRow = InventoryRow.for_item(
+		null, 5, "High", InventoryRow.ACTION_FIT, 0, "Module", 1, InventoryRow.SOURCE_SHIP_CARGO)
+	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_FITTED, Vector2.ZERO)
+
+	assert_int(connection.fit_calls.size()).is_equal(1)
+	assert_int(connection.fit_calls[0]["module_id"] as int).is_equal(5)
+	assert_str(connection.fit_calls[0]["slot"] as String).is_equal("High")
+	connection.free()
+
+
+func test_drag_from_ship_cargo_to_fitted_is_a_no_op_when_undocked() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._session.docked_station_id = -1
+
+	var row: InventoryRow = InventoryRow.for_item(
+		null, 5, "High", InventoryRow.ACTION_FIT, 0, "Module", 1, InventoryRow.SOURCE_SHIP_CARGO)
+	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_FITTED, Vector2.ZERO)
+
+	assert_int(connection.fit_calls.size()).is_equal(0)
+	connection.free()
+
+
+func test_drag_from_fitted_to_ship_cargo_sends_unfit_command() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._session.docked_station_id = 3
+
+	var row: InventoryRow = InventoryRow.for_item(
+		null, 5, "High", InventoryRow.ACTION_UNFIT, 0, "", 0, InventoryRow.SOURCE_FITTED)
+	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_SHIP_CARGO, Vector2.ZERO)
+
+	assert_int(connection.unfit_calls.size()).is_equal(1)
+	assert_int(connection.unfit_calls[0]["module_id"] as int).is_equal(5)
+	connection.free()
+
+
+func test_drag_from_ship_cargo_to_station_sends_transfer_to_station_command() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._session.docked_station_id = 3
+
+	var row: InventoryRow = InventoryRow.for_item(
+		null, 0, "", InventoryRow.ACTION_NONE, 0, "ScrapMetal", 4, InventoryRow.SOURCE_SHIP_CARGO)
+	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_STATION, Vector2.ZERO)
+
+	assert_int(connection.transfer_to_station_calls.size()).is_equal(1)
+	assert_str(connection.transfer_to_station_calls[0]["item_type"] as String).is_equal("ScrapMetal")
+	connection.free()
+
+
+func test_drag_from_station_to_ship_cargo_sends_transfer_from_station_command() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._session.docked_station_id = 3
+
+	var row: InventoryRow = InventoryRow.for_item(
+		null, 0, "", InventoryRow.ACTION_NONE, 0, "ScrapMetal", 4, InventoryRow.SOURCE_STATION)
+	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_SHIP_CARGO, Vector2.ZERO)
+
+	assert_int(connection.transfer_from_station_calls.size()).is_equal(1)
+	assert_int(connection.transfer_from_station_calls[0]["station_id"] as int).is_equal(3)
+	assert_str(connection.transfer_from_station_calls[0]["item_type"] as String).is_equal("ScrapMetal")
+	connection.free()
+
+
+func test_drag_dropped_back_onto_its_own_column_is_a_no_op() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._session.docked_station_id = 3
+
+	var row: InventoryRow = InventoryRow.for_item(
+		null, 0, "", InventoryRow.ACTION_NONE, 0, "ScrapMetal", 4, InventoryRow.SOURCE_SHIP_CARGO)
+	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_SHIP_CARGO, Vector2.ZERO)
+
+	assert_int(connection.transfer_to_station_calls.size()).is_equal(0)
+	assert_int(connection.transfer_from_station_calls.size()).is_equal(0)
+	connection.free()
+
+
+## Reordering needs the real built panel (inventory_panel_row_at() reads live
+## Control rects), unlike the other drag cases above.
+func test_drag_within_fitted_reorders_two_modules_of_the_same_slot_kind() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._session.docked_station_id = 3
+	var hud: CanvasLayer = auto_free(CanvasLayer.new())
+	add_child(hud)
+	_main._hud_surface.build(auto_free(Node.new()), hud, auto_free(Label.new()))
+
+	var mid_1: Dictionary = _module_fixture(1, "Mid", false)
+	var mid_2: Dictionary = _module_fixture(2, "Mid", false)
+	mid_2["index"] = 1  # ModuleRow.index is the per-slot-kind position; _module_fixture defaults to 0
+	_set_loadout_modules([mid_1, mid_2])
+	_main._hud_surface.set_player_fitting(_main._loadout.modules(), [])
+	## inventory_panel_row_at() (used by the reorder branch) short-circuits
+	## to null while the panel is hidden -- it starts hidden by default.
+	HudManager.toggle_inventory_panel(_main._hud_surface._inventory_panel_refs)
+	await get_tree().process_frame
+
+	var fitted_rows: Array = _main._hud_surface._inventory_panel_refs["fitted_rows"]
+	var source_row: InventoryRow = fitted_rows[0]
+	var target_row: InventoryRow = fitted_rows[1]
+	var target_pos: Vector2 = (target_row.panel as Panel).get_global_rect().position + Vector2(2, 2)
+
+	_main._handle_inventory_row_drop(source_row, InventoryRow.SOURCE_FITTED, target_pos)
+
+	assert_int(connection.reorder_calls.size()).is_equal(1)
+	assert_str(connection.reorder_calls[0]["slot"] as String).is_equal("Mid")
+	assert_int(connection.reorder_calls[0]["from_index"] as int).is_equal(0)
+	assert_int(connection.reorder_calls[0]["to_index"] as int).is_equal(1)
+	connection.free()
+
+
+func test_drag_within_fitted_across_different_slot_kinds_is_a_no_op() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._session.docked_station_id = 3
+	var hud: CanvasLayer = auto_free(CanvasLayer.new())
+	add_child(hud)
+	_main._hud_surface.build(auto_free(Node.new()), hud, auto_free(Label.new()))
+
+	_set_loadout_modules([
+		_module_fixture(1, "High", false),
+		_module_fixture(2, "Mid", false),
+	])
+	_main._hud_surface.set_player_fitting(_main._loadout.modules(), [])
+	HudManager.toggle_inventory_panel(_main._hud_surface._inventory_panel_refs)
+	await get_tree().process_frame
+
+	var fitted_rows: Array = _main._hud_surface._inventory_panel_refs["fitted_rows"]
+	var source_row: InventoryRow = fitted_rows[0]
+	var target_row: InventoryRow = fitted_rows[1]
+	var target_pos: Vector2 = (target_row.panel as Panel).get_global_rect().position + Vector2(2, 2)
+
+	_main._handle_inventory_row_drop(source_row, InventoryRow.SOURCE_FITTED, target_pos)
+
+	assert_int(connection.reorder_calls.size()).is_equal(0)
+	connection.free()
+
+
+# -- Drag threshold (click vs. drop) -------------------------------------------
+
+func test_release_within_threshold_of_press_is_treated_as_a_plain_click() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._session.docked_station_id = 3
+
+	_main._drag_row = InventoryRow.for_item(
+		null, 5, "High", InventoryRow.ACTION_UNFIT, 0, "", 0, InventoryRow.SOURCE_FITTED)
+	_main._drag_start_pos = Vector2(100, 100)
+	_main._end_inventory_drag(Vector2(102, 101))  # well within DRAG_THRESHOLD_PX
+
+	assert_int(connection.unfit_calls.size()).is_equal(1)
+	assert_object(_main._drag_row).is_null()
+	connection.free()
+
+
+func test_release_past_threshold_is_treated_as_a_drop_not_a_click() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_main._session.docked_station_id = 3
+	var hud: CanvasLayer = auto_free(CanvasLayer.new())
+	add_child(hud)
+	_main._hud_surface.build(auto_free(Node.new()), hud, auto_free(Label.new()))
+	HudManager.update_inventory_panel(_main._hud_surface._inventory_panel_refs, [], [], [], [], [])
+	HudManager.toggle_inventory_panel(_main._hud_surface._inventory_panel_refs)
+	await get_tree().process_frame
+
+	var station_list: VBoxContainer = _main._hud_surface._inventory_panel_refs["station_list"]
+	var far_pos: Vector2 = station_list.get_global_rect().position + Vector2(2, 2)
+
+	_main._drag_row = InventoryRow.for_item(
+		null, 0, "", InventoryRow.ACTION_NONE, 0, "ScrapMetal", 4, InventoryRow.SOURCE_SHIP_CARGO)
+	_main._drag_start_pos = far_pos + Vector2(500, 500)  # far past DRAG_THRESHOLD_PX
+	_main._end_inventory_drag(far_pos)
+
+	assert_int(connection.transfer_to_station_calls.size()).is_equal(1)
 	connection.free()

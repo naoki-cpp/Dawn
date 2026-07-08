@@ -65,6 +65,25 @@ pub struct UnfitModuleCommand {
     pub module_id: ModuleId,
 }
 
+/// Request to reorder two fitted modules within the same slot kind
+/// (drag-and-drop reorder in the FITTED column). Persisted server-side
+/// (not merely a client display order) because iteration order over a
+/// slot kind's modules is what assigns weapon hotkey F-numbers.
+///
+/// May be rejected if:
+/// - The Ship does not exist, or the caller does not own it.
+/// - The caller's ship is not currently docked (same restriction as
+///   Fit/Unfit).
+/// - `from_index`/`to_index` is out of bounds for `slot`'s current module
+///   count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReorderFittedModuleCommand {
+    pub ship_id: ShipId,
+    pub slot: SlotKind,
+    pub from_index: u32,
+    pub to_index: u32,
+}
+
 /// Request to dock the caller's active ship at an NPC station (ADR-0034 9B
 /// foundation).
 ///
@@ -128,12 +147,23 @@ pub struct BuildPackagedShipCommand {
 /// May be rejected if:
 /// - The Ship does not exist or the caller does not own it.
 /// - The caller is not currently docked at the target station.
-/// - The Ship's cargo has none of `item_id`.
+/// - The source side (ship cargo for `ToStation`, station inventory for
+///   `ToShip`) has none of `item_id`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TransferToStationCommand {
     pub ship_id: ShipId,
     pub station_id: StationId,
     pub item_id: ItemId,
+    pub direction: TransferDirection,
+}
+
+/// Which way `TransferToStationCommand` moves the stack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TransferDirection {
+    /// Ship cargo -> station inventory (the original, one-way behavior).
+    ToStation,
+    /// Station inventory -> ship cargo.
+    ToShip,
 }
 
 /// Request to disassemble a docked ship into a packaged ship item.
@@ -383,6 +413,9 @@ pub enum ClientCommand {
     Fit(FitModuleCommand),
     /// Move a fitted module back into inventory (ADR-0032).
     Unfit(UnfitModuleCommand),
+    /// Reorder two fitted modules within the same slot kind (drag-and-drop
+    /// reorder in the FITTED column).
+    ReorderFittedModule(ReorderFittedModuleCommand),
     /// Dock at an NPC station.
     Dock(DockCommand),
     /// Leave a previously-docked NPC station.

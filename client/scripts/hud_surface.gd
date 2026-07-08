@@ -16,6 +16,7 @@ var _target_panel_refs: Dictionary = {}
 var _module_bar: HBoxContainer = null
 var _module_slots: Array = []
 var _inventory_panel_refs: Dictionary = {}
+var _hud: CanvasLayer = null
 
 ## Last frame's per-panel sub-Dictionary/Array, used by render() to skip
 ## HudManager calls for panels that haven't changed since the previous
@@ -33,6 +34,7 @@ var _prev_modules: Array = []
 
 func build(parent: Node, hud: CanvasLayer, stats_label: Label) -> void:
 	_stats_label = stats_label
+	_hud = hud
 	_duel_result_label = HudManager.build_duel_result_overlay(parent)
 	_status_panel_refs = HudManager.build_status_panel(hud)
 	_ship_status_refs = HudManager.build_ship_status_panel(hud)
@@ -199,6 +201,24 @@ func inventory_panel_consumes(pos: Vector2) -> bool:
 
 func inventory_panel_row_at(pos: Vector2) -> InventoryRow:
 	return HudManager.inventory_panel_row_at(_inventory_panel_refs, pos)
+
+
+func inventory_panel_column_at(pos: Vector2) -> String:
+	return HudManager.column_at(_inventory_panel_refs, pos)
+
+
+## A small floating Label that follows the cursor while a row drag is in
+## progress -- the only visual feedback the hand-rolled drag gesture gets
+## (main.gd's DRAG_THRESHOLD_PX / _drag_row state machine). Caller is
+## responsible for freeing it (main.gd's _clear_drag_ghost()).
+func create_drag_ghost(text: String) -> Label:
+	var ghost := Label.new()
+	ghost.text = text
+	ghost.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ghost.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 0.85))
+	ghost.z_index = 100
+	_hud.add_child(ghost)
+	return ghost
 
 
 func module_slot_at(pos: Vector2) -> int:
