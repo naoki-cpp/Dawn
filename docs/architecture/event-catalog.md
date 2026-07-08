@@ -194,15 +194,16 @@ Commands are defined in `dawn-core/src/commands.rs`. Clients send them to the se
 |---|---|---|---|
 | `MoveCommand` | Specify thrust direction | — | ✅ implemented |
 | `LockOnCommand` | Request lock-on | `TargetLocked` | ✅ implemented |
-| `FitModuleCommand` | Fit an inventory Module into a slot (client-side checks ownership, slot type, capacity, possession; ADR-0032) | `ShipFitted` | ✅ implemented |
-| `UnfitModuleCommand` | Return a fitted Module to inventory (ADR-0032) | `ShipFitted` | ✅ implemented |
+| `FitModuleCommand` | Fit an inventory Module into a slot; requires the ship to be docked (ADR-0032, docked requirement added 2026-07-08) | `ShipFitted` | ✅ implemented |
+| `UnfitModuleCommand` | Return a fitted Module to inventory; requires docked (ADR-0032) | `ShipFitted` | ✅ implemented |
+| `ReorderFittedModuleCommand` | Reorder two fitted modules within the same slot kind (persisted -- iteration order assigns weapon hotkeys); requires docked (ADR-0032) | `ShipFitted` | ✅ implemented |
 | `DockCommand` | Dock at an NPC station once within its docking radius (ADR-0034 9B) | `ShipDocked` | ✅ implemented |
 | `UndockCommand` | Leave a previously-docked NPC station (ADR-0034 9B) | `ShipUndocked` | ✅ implemented |
 | `BuildPackagedShipCommand` | Consume Scrap Metal in the current docked station and create a `PackagedShip` item there (ADR-0034 9B) | `PackagedShipBuilt` | ✅ implemented |
 | `DisassembleShipCommand` | Convert the current docked ship into a station-side `PackagedShip` item after undamaged/unfitted validation (ADR-0034 9B) | `ShipDisassembled` | ✅ implemented |
 | `AssembleCommand` | Convert a station-inventory `PackagedShip` item into a new live docked `Ship` owned by the caller; does not change `active_ship` (ADR-0034 9B, ADR-0037) | `ShipAssembled` | ✅ implemented |
 | `DisembarkCommand` | Clear the caller's active ship while docked, without disassembling it or changing ownership; session-local, not event-sourced (ADR-0037) | — (no new event) | ✅ implemented |
-| `TransferToStationCommand` | Move the entire stack of an item (`Module` or `ScrapMetal`) from a docked ship's own cargo (`InventoryComp`) into the caller's station inventory; whole-stack only, no partial-count transfer (ADR-0034 9B) | — (no new event; mirrors `BuildPackagedShipCommand`/`DisassembleShipCommand`'s silent station-inventory credit) | ✅ implemented |
+| `TransferToStationCommand` | Move the entire stack of an item (`Module` or `ScrapMetal`) between a docked ship's own cargo and the caller's station inventory, in either direction (`direction: ToStation\|ToShip`); whole-stack only (ADR-0034 9B) | — (no new event; mirrors `BuildPackagedShipCommand`/`DisassembleShipCommand`'s silent station-inventory credit/debit) | ✅ implemented |
 | `ActivateModuleCommand` | Turn on an Active Module | `ModuleActivated` | ✅ implemented |
 | `DeactivateModuleCommand` | Turn off an Active Module | `ModuleDeactivated` | ✅ implemented |
 | `AttackCommand` | Designate an attack target | `WeaponFired` | ⬜ type + WsServer JSON parser only; not wired into combat |

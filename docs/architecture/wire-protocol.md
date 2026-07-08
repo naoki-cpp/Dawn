@@ -57,8 +57,8 @@ The `"type"` values are: `MoveCommand`, `LockOnCommand`,
 `ActivateModuleCommand`, `DeactivateModuleCommand`, `AttackCommand`,
 `StopCommand`, `JumpCommand`, `ApproachCommand`, `WarpCommand`,
 `OrbitCommand`, `KeepAtRangeCommand`, `FitModuleCommand`,
-`UnfitModuleCommand`, `DockCommand`, `UndockCommand`,
-`BuildPackagedShipCommand`, `DisassembleShipCommand`,
+`UnfitModuleCommand`, `ReorderFittedModuleCommand`, `DockCommand`,
+`UndockCommand`, `BuildPackagedShipCommand`, `DisassembleShipCommand`,
 `SelectActiveShipCommand`, `AssembleCommand`, `DisembarkCommand`,
 `TransferToStationCommand`.
 
@@ -77,17 +77,25 @@ active ship, or the active ship isn't currently docked. See
 `docs/architecture/ownership.md` §8.
 
 `TransferToStationCommand { ship_id, station_id, item_type, module_id,
-ship_type_id }` (ADR-0034 9B) moves the entire stack of one item out of a
-docked ship's own cargo (`InventoryComp`) into the caller's station
-inventory -- whole-stack only, no partial-count transfer. `item_type` is one
-of `"Module"`, `"PackagedShip"`, `"ScrapMetal"` (same wire shape as
-`ItemRow`); `module_id`/`ship_type_id` are populated only for the matching
-variant (`0` otherwise). Carries an explicit `ship_id` like
-`FitModuleCommand` (it may target any owned docked ship, not just the
-active one). Rejected if the caller doesn't own `ship_id`, isn't docked at
-`station_id`, or the ship's cargo has none of the named item. No resulting
-domain event -- silent station-inventory credit, same tier as
+ship_type_id, direction }` (ADR-0034 9B) moves the entire stack of one item
+between a docked ship's own cargo (`InventoryComp`) and the caller's station
+inventory -- whole-stack only, no partial-count transfer. `direction` is
+`"ToStation"` or `"ToShip"`. `item_type` is one of `"Module"`,
+`"PackagedShip"`, `"ScrapMetal"` (same wire shape as `ItemRow`);
+`module_id`/`ship_type_id` are populated only for the matching variant (`0`
+otherwise). Carries an explicit `ship_id` like `FitModuleCommand` (it may
+target any owned docked ship, not just the active one). Rejected if the
+caller doesn't own `ship_id`, isn't docked at `station_id`, or the source
+side has none of the named item. No resulting domain event -- silent
+station-inventory credit/debit, same tier as
 `BuildPackagedShipCommand`/`DisassembleShipCommand`.
+
+`ReorderFittedModuleCommand { ship_id, slot, from_index, to_index }`
+(ADR-0032's 2026-07-08 amendment) reorders two fitted modules within the
+same slot kind -- persisted, not cosmetic, since iteration order assigns
+weapon hotkey F-numbers. Rejected if the caller doesn't own `ship_id`, the
+ship isn't docked, or either index is out of bounds for `slot`'s current
+module count. Reuses `ShipFitted` (no new event type).
 
 **ADR-0037 (owned ship / active ship split):** `MoveCommand`, `LockOnCommand`,
 `ActivateModuleCommand`, `DeactivateModuleCommand`, `StopCommand`,
@@ -96,11 +104,12 @@ domain event -- silent station-inventory credit, same tier as
 carry no `ship_id` field at all -- the server always resolves them against
 the caller's active ship, so there is no wire-representable way to name a
 ship the player isn't currently flying. `FitModuleCommand`,
-`UnfitModuleCommand`, `BuildPackagedShipCommand`, and `DisassembleShipCommand`
-still carry an explicit `ship_id`, since they may target any owned docked
-ship, not just the active one. `SelectActiveShipCommand { ship_id }` is the
-only way to change which owned ship is active (station-local switch only for
-now). See `docs/architecture/ownership.md` §7.
+`UnfitModuleCommand`, `ReorderFittedModuleCommand`, `BuildPackagedShipCommand`,
+and `DisassembleShipCommand` still carry an explicit `ship_id`, since they
+may target any owned docked ship, not just the active one.
+`SelectActiveShipCommand { ship_id }` is the only way to change which owned
+ship is active (station-local switch only for now). See
+`docs/architecture/ownership.md` §7.
 
 `ClientCommandJson` mirrors the wire format exactly, including two
 backward-compatible quirks it does not itself resolve (that validation
