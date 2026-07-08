@@ -297,3 +297,27 @@ func test_unfit_all_row_appears_after_the_fitted_modules_when_any_are_fitted() -
 	assert_int(fitted_rows.size()).is_equal(2)
 	assert_str(fitted_rows[0].action).is_equal(InventoryRow.ACTION_UNFIT)
 	assert_str(fitted_rows[1].action).is_equal(InventoryRow.ACTION_UNFIT_ALL)
+
+
+## Regression: owned_ships_json (serialization.rs) sends docked_station_id/
+## ship_type_name as JSON null (not an absent key) for an away/undocked ship
+## or an unregistered ship type. Dictionary.get(key, default) only falls back
+## to default when the key is absent, not when it's present with a null
+## value -- `as int`/`as String` on that null value crashed with "Invalid
+## cast: could not convert value to 'int'".
+func test_owned_ship_row_handles_null_docked_station_id_and_ship_type_name() -> void:
+	var hud: CanvasLayer = auto_free(CanvasLayer.new())
+	add_child(hud)
+	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	var owned_ships := [
+		{
+			"ship_id": 1, "ship_type_id": null, "ship_type_name": null,
+			"docked_station_id": null, "is_active": false,
+		},
+	]
+
+	HudManager.update_inventory_panel(refs, [], [], [], owned_ships, [])
+
+	var ship_rows: Array[InventoryRow] = refs["ship_rows"]
+	assert_int(ship_rows.size()).is_equal(1)
+	assert_int(ship_rows[0].ship_id).is_equal(1)
