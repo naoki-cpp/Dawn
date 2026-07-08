@@ -379,14 +379,25 @@ impl<S: EventStore> SimulationNode<S> {
             })
             .collect();
 
+        // Buildable Packaged Ship catalog (ADR-0034 9B): static registry data,
+        // not per-tick, so it's cheapest to send once alongside the rest of
+        // InitialState rather than as its own message type.
+        let buildable_ship_types: Vec<serde_json::Value> = self
+            .ship_type_registry
+            .values()
+            .filter(|def| def.buildable)
+            .map(|def| serde_json::json!({ "ship_type_id": def.id.0, "name": def.name }))
+            .collect();
+
         serde_json::json!({
-            "type"             : "InitialState",
-            "ships"            : ships,
-            "system_name"      : system_name_of(self.sector_id),
-            "systems"          : systems,
-            "jump_gates"       : gates,
-            "stations"         : stations,
-            "celestial_bodies" : bodies,
+            "type"                 : "InitialState",
+            "ships"                : ships,
+            "system_name"          : system_name_of(self.sector_id),
+            "systems"              : systems,
+            "jump_gates"           : gates,
+            "stations"             : stations,
+            "celestial_bodies"     : bodies,
+            "buildable_ship_types" : buildable_ship_types,
         })
         .to_string()
     }
@@ -644,6 +655,27 @@ mod tests {
         assert_eq!(stations.len(), 1, "Sector 0 has exactly one NPC station");
         assert_eq!(stations[0]["station_id"].as_u64().unwrap(), 0);
         assert_eq!(stations[0]["name"], "Forge Station");
+    }
+
+    #[test]
+    fn initial_state_lists_only_buildable_ship_types() {
+        let mut node = mem_node();
+        for def in crate::ship_types::all_ship_types() {
+            node.register_ship_type(def);
+        }
+        let v: serde_json::Value = serde_json::from_str(&node.build_initial_state_json()).unwrap();
+
+        let buildable = v["buildable_ship_types"].as_array().unwrap();
+        assert_eq!(
+            buildable.len(),
+            1,
+            "only the Magpie is buildable, the NPC Frigate must not appear"
+        );
+        assert_eq!(
+            buildable[0]["ship_type_id"].as_u64().unwrap(),
+            crate::ship_types::SHIP_TYPE_MAGPIE.0 as u64
+        );
+        assert_eq!(buildable[0]["name"], "Magpie");
     }
 
     #[test]

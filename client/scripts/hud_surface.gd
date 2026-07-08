@@ -151,7 +151,8 @@ func render(frame: Dictionary) -> void:
 ## identity list first and skip straight to the cheap per-frame update path
 ## when nothing structural changed.
 func set_player_fitting(
-	modules: Array, inventory: Array, station_inventory: Array = [], owned_ships: Array = []
+	modules: Array, inventory: Array, station_inventory: Array = [], owned_ships: Array = [],
+	buildable_ship_types: Array = []
 ) -> void:
 	if _active_module_signature(modules) != _active_module_signature(_prev_modules):
 		_module_slots = HudManager.rebuild_module_bar(_module_bar, modules)
@@ -161,7 +162,20 @@ func set_player_fitting(
 	## Independent snapshot, not an alias -- see the comment in render().
 	_prev_modules = _clone_modules(modules)
 	HudManager.update_inventory_panel(
-		_inventory_panel_refs, modules, inventory, station_inventory, owned_ships)
+		_inventory_panel_refs, modules, inventory, station_inventory, owned_ships,
+		buildable_ship_types)
+
+
+## Toggles the Build ship-type picker (Phase 9B task 10) and forces the panel
+## to redraw with the new expand/collapse state; called by main.gd on a
+## ACTION_BUILD_TOGGLE click, which doesn't itself carry a new PlayerLoadout
+## snapshot to trigger a rebuild.
+func toggle_build_picker(modules: Array, inventory: Array, station_inventory: Array,
+		owned_ships: Array, buildable_ship_types: Array) -> void:
+	var refs: Dictionary = _inventory_panel_refs
+	refs["build_picker_open"] = not (refs.get("build_picker_open", false) as bool)
+	HudManager.update_inventory_panel(
+		refs, modules, inventory, station_inventory, owned_ships, buildable_ship_types)
 
 
 ## Identity of the modules rebuild_module_bar() would render as slots, in

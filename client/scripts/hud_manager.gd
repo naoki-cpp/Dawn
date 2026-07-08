@@ -588,6 +588,10 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 		"station_list": station_list, "ships_list": ships_list,
 		"fitted_rows": [] as Array[InventoryRow], "inventory_rows": [] as Array[InventoryRow],
 		"station_rows": [] as Array[InventoryRow], "ship_rows": [] as Array[InventoryRow],
+		## Whether the Build ship-type picker (Phase 9B task 10) is expanded.
+		## Lives here, not as a local, since refs persists across the repeated
+		## update_inventory_panel() rebuilds and main.gd toggles it on click.
+		"build_picker_open": false,
 	}
 
 
@@ -656,7 +660,7 @@ static func _make_ship_row(text: String, ship_id: int, is_active: bool) -> Inven
 ## (ship_id/ship_type_name/docked_station_id/is_active rows).
 static func update_inventory_panel(
 	refs: Dictionary, modules: Array, inventory: Array, station_inventory: Array = [],
-	owned_ships: Array = []
+	owned_ships: Array = [], buildable_ship_types: Array = []
 ) -> void:
 	var fitted_list: VBoxContainer = refs["fitted_list"]
 	var inventory_list: VBoxContainer = refs["inventory_list"]
@@ -712,6 +716,37 @@ static func update_inventory_panel(
 			InventoryRow.SOURCE_STATION)
 		station_list.add_child(row.panel)
 		station_rows.append(row)
+
+	## Disassemble/Build action rows (Phase 9B task 10) -- dedicated buttons
+	## alongside the existing [Y]/[B] keyboard shortcuts, which keep working
+	## unchanged. Always shown; the server validates docked/ownership context
+	## and rejects if not applicable (same pattern as SHIPS-column
+	## select_active_ship rows, which rely on server-side validation too).
+	var disassemble_row := _make_inventory_row(
+		"Disassemble active ship", 0, "", InventoryRow.ACTION_DISASSEMBLE, 0, "", 0,
+		InventoryRow.SOURCE_STATION)
+	station_list.add_child(disassemble_row.panel)
+	station_rows.append(disassemble_row)
+
+	var picker_open: bool = refs.get("build_picker_open", false) as bool
+	var toggle_text := "Build Ship ▾" if picker_open else "Build Ship ▸"
+	var build_toggle_row := _make_inventory_row(
+		toggle_text, 0, "", InventoryRow.ACTION_BUILD_TOGGLE, 0, "", 0,
+		InventoryRow.SOURCE_STATION)
+	station_list.add_child(build_toggle_row.panel)
+	station_rows.append(build_toggle_row)
+
+	if picker_open:
+		for entry: Variant in buildable_ship_types:
+			var t: Dictionary = entry as Dictionary
+			var ship_type_id: int = t.get("ship_type_id", -1) as int
+			var name: String = t.get("name", "") as String
+			var picker_row := _make_inventory_row(
+				"  %s" % name, 0, "", InventoryRow.ACTION_BUILD_SHIP_TYPE, ship_type_id,
+				"", 0, InventoryRow.SOURCE_STATION)
+			station_list.add_child(picker_row.panel)
+			station_rows.append(picker_row)
+
 	refs["station_rows"] = station_rows
 
 	var ship_rows: Array[InventoryRow] = []
