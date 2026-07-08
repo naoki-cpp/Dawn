@@ -720,6 +720,15 @@ func _handle_inventory_row_click(row: InventoryRow) -> void:
 		InventoryRow.ACTION_UNFIT:
 			if _player_ship_id >= 0:
 				_connection.send_unfit_module_command(_player_ship_id, row.module_id, row.slot)
+		InventoryRow.ACTION_UNFIT_ALL:
+			## No new wire command -- sends one UnfitModuleCommand per
+			## currently-fitted module (non-atomic: a mid-loop failure leaves
+			## a partially-unfitted ship, but each Unfit is independently safe
+			## and this is a convenience action, not a transactional one).
+			if _player_ship_id >= 0:
+				for entry: Variant in _loadout.modules():
+					_connection.send_unfit_module_command(
+						_player_ship_id, entry.module_id as int, entry.slot as String)
 		InventoryRow.ACTION_ASSEMBLE:
 			## No active-ship requirement: this is exactly the recovery path
 			## for a shipless docked player (docs/architecture/ownership.md §8).

@@ -70,6 +70,11 @@ class FakeConnection:
 			"ship_id": p_ship_id, "station_id": p_station_id, "ship_type_id": p_ship_type_id,
 		})
 
+	var unfit_calls: Array[Dictionary] = []
+
+	func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
+		unfit_calls.append({"ship_id": p_ship_id, "module_id": p_module_id, "slot": p_slot})
+
 
 func before_test() -> void:
 	## .new() without adding to the scene tree never triggers _ready(), so
@@ -462,4 +467,36 @@ func test_build_ship_type_row_click_sends_the_picked_ship_type_not_the_hardcoded
 	assert_int(connection.build_calls[0]["ship_id"] as int).is_equal(1)
 	assert_int(connection.build_calls[0]["station_id"] as int).is_equal(3)
 	assert_int(connection.build_calls[0]["ship_type_id"] as int).is_equal(42)
+	connection.free()
+
+
+func test_unfit_all_row_click_sends_one_unfit_command_per_fitted_module() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+	_set_loadout_modules([
+		_module_fixture(1, "High", false),
+		_module_fixture(2, "Low", false),
+	])
+
+	var row: InventoryRow = InventoryRow.for_item(null, 0, "", InventoryRow.ACTION_UNFIT_ALL)
+	_main._handle_inventory_row_click(row)
+
+	assert_int(connection.unfit_calls.size()).is_equal(2)
+	assert_int(connection.unfit_calls[0]["module_id"] as int).is_equal(1)
+	assert_str(connection.unfit_calls[0]["slot"] as String).is_equal("High")
+	assert_int(connection.unfit_calls[1]["module_id"] as int).is_equal(2)
+	assert_str(connection.unfit_calls[1]["slot"] as String).is_equal("Low")
+	connection.free()
+
+
+func test_unfit_all_row_click_is_a_no_op_when_no_module_is_fitted() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	_main._player_ship_id = 1
+
+	var row: InventoryRow = InventoryRow.for_item(null, 0, "", InventoryRow.ACTION_UNFIT_ALL)
+	_main._handle_inventory_row_click(row)
+
+	assert_int(connection.unfit_calls.size()).is_equal(0)
 	connection.free()

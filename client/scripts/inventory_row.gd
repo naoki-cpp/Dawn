@@ -20,6 +20,9 @@ extends RefCounted
 const ACTION_NONE := ""
 const ACTION_FIT := "fit"
 const ACTION_UNFIT := "unfit"
+## Unfits every currently-fitted module in one click (e.g. to clear the way
+## for Disassemble, which requires a fully unfitted ship).
+const ACTION_UNFIT_ALL := "unfit_all"
 const ACTION_ASSEMBLE := "assemble"
 const ACTION_SELECT_ACTIVE_SHIP := "select_active_ship"
 const ACTION_DISASSEMBLE := "disassemble"

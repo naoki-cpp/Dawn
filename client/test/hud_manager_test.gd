@@ -271,3 +271,29 @@ func test_build_picker_is_collapsed_by_default_and_expands_when_toggled() -> voi
 		func(r: InventoryRow) -> bool: return r.action == InventoryRow.ACTION_BUILD_SHIP_TYPE
 	)[0]
 	assert_int(picker_row.ship_type_id).is_equal(7)
+
+
+func test_unfit_all_row_is_hidden_when_no_module_is_fitted() -> void:
+	var hud: CanvasLayer = auto_free(CanvasLayer.new())
+	add_child(hud)
+	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	HudManager.update_inventory_panel(refs, [], [], [], [], [])
+
+	var fitted_rows: Array[InventoryRow] = refs["fitted_rows"]
+	assert_bool(
+		fitted_rows.any(func(r: InventoryRow) -> bool: return r.action == InventoryRow.ACTION_UNFIT_ALL)
+	).is_false()
+
+
+func test_unfit_all_row_appears_after_the_fitted_modules_when_any_are_fitted() -> void:
+	var hud: CanvasLayer = auto_free(CanvasLayer.new())
+	add_child(hud)
+	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	var modules := [_module({"module_id": 1, "slot": "High", "name": "Gun"})]
+
+	HudManager.update_inventory_panel(refs, modules, [], [], [], [])
+
+	var fitted_rows: Array[InventoryRow] = refs["fitted_rows"]
+	assert_int(fitted_rows.size()).is_equal(2)
+	assert_str(fitted_rows[0].action).is_equal(InventoryRow.ACTION_UNFIT)
+	assert_str(fitted_rows[1].action).is_equal(InventoryRow.ACTION_UNFIT_ALL)

@@ -682,6 +682,16 @@ static func update_inventory_panel(
 		var row := _make_inventory_row(text, m.module_id, m.slot, InventoryRow.ACTION_UNFIT)
 		fitted_list.add_child(row.panel)
 		fitted_rows.append(row)
+
+	## "Unfit All" (e.g. to clear the way for Disassemble, which requires a
+	## fully unfitted ship) -- only meaningful, and only shown, when at least
+	## one module is actually fitted.
+	if not fitted_rows.is_empty():
+		var unfit_all_row := _make_inventory_row(
+			"Unfit all", 0, "", InventoryRow.ACTION_UNFIT_ALL)
+		fitted_list.add_child(unfit_all_row.panel)
+		fitted_rows.append(unfit_all_row)
+
 	refs["fitted_rows"] = fitted_rows
 
 	var inventory_rows: Array[InventoryRow] = []
