@@ -203,7 +203,7 @@ Commands are defined in `dawn-core/src/commands.rs`. Clients send them to the se
 | `DisassembleShipCommand` | Convert the current docked ship into a station-side `PackagedShip` item after undamaged/unfitted validation (ADR-0034 9B) | `ShipDisassembled` | ✅ implemented |
 | `AssembleCommand` | Convert a station-inventory `PackagedShip` item into a new live docked `Ship` owned by the caller; does not change `active_ship` (ADR-0034 9B, ADR-0037) | `ShipAssembled` | ✅ implemented |
 | `DisembarkCommand` | Clear the caller's active ship while docked, without disassembling it or changing ownership; session-local, not event-sourced (ADR-0037) | — (no new event) | ✅ implemented |
-| `TransferToStationCommand` | Move the entire stack of an item (`Module` or `ScrapMetal`) between a docked ship's own cargo and the caller's station inventory, in either direction (`direction: ToStation\|ToShip`); whole-stack only (ADR-0034 9B) | — (no new event; mirrors `BuildPackagedShipCommand`/`DisassembleShipCommand`'s silent station-inventory credit/debit) | ✅ implemented |
+| `TransferToStationCommand` | Move the entire stack of an item (`Module` or `ScrapMetal`) between a docked ship's own cargo and the caller's inventory at that station, in either direction (`direction: ToStation\|ToShip`); whole-stack only (ADR-0034 9B) | — (no new event; mirrors `BuildPackagedShipCommand`/`DisassembleShipCommand`'s silent station-inventory credit/debit) | ✅ implemented |
 | `ActivateModuleCommand` | Turn on an Active Module | `ModuleActivated` | ✅ implemented |
 | `DeactivateModuleCommand` | Turn off an Active Module | `ModuleDeactivated` | ✅ implemented |
 | `AttackCommand` | Designate an attack target | `WeaponFired` | ⬜ type + WsServer JSON parser only; not wired into combat |

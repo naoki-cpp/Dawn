@@ -219,7 +219,7 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 
 ## 実装チェックリスト
 
-- [ ] dawn-core: Station 系イベント列を完成させる（`ShipDocked`/`ShipUndocked`/`PackagedShipBuilt`/`ShipDisassembled` は実装済み。残りの `ShipAssembled` を追加し、event-catalog.md に追記）
+- [x] dawn-core: Station 系イベント列を完成させる（`ShipDocked`/`ShipUndocked`/`PackagedShipBuilt`/`ShipDisassembled`/`ShipAssembled` 実装済み、event-catalog.md 追記済み）
 - [x] dawn-core: `ItemId` enum（Module/PackagedShip/ScrapMetal。**Currencyは含まない**）
 - [x] dawn-ecs: `InventoryComp.items` を `Vec<ModuleId>` → `BTreeMap<ItemId, u64>` へ一般化（ADR-0032 のデータモデルを置き換え）
 - [x] dawn-sector: `ShipDestroyed` 発生時に Scrap Metal を撃破者へ加算する経路（MVP は `1 kill = 1 Scrap Metal` の固定値）

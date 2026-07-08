@@ -11,7 +11,7 @@ related : ADR-0034（Economy Foundations §2 Market/データベースの境界 
 
 ## 背景
 
-`SimulationNode.station_inventories: BTreeMap<PlayerId, BTreeMap<ItemId, u64>>`
+`SimulationNode.station_inventories: BTreeMap<(PlayerId, StationId), BTreeMap<ItemId, u64>>`
 は全プレイヤー分の Station inventory を起動から終了までメモリに常駐させ続け、
 `StateSnapshot`（`persistence/snapshot.rs`）にもその全体を毎回まるごと
 シリアライズしている。プレイヤー人口が増えるほどこれは際限なく肥大化する
@@ -28,7 +28,7 @@ write-back cache として扱う余地を残す」と明記しつつ、9B の MV
 
 - Station inventory の**永続化の権威を SQLite に置く**。`credit_station_item`/
   `try_debit_station_item` は呼ばれるたびに SQLite へ同期的に書き込む。
-- メモリ上には**直近に触れた player だけの有界キャッシュ**を持つ
+- メモリ上には**直近に触れた `(player, station)` だけの有界キャッシュ**を持つ
   （容量超過分は追い出す。追い出しは常に安全——追い出す時点で既に SQLite へ
   同期書き込み済みだからflush-before-evictが不要）。
 - `StateSnapshot.station_inventories` フィールドは**今後書かれなくなる**
