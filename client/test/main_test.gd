@@ -376,3 +376,31 @@ func test_switching_active_ship_to_an_unknown_ship_leaves_the_camera_alone() -> 
 
 	assert_int(_main._player_ship_id).is_equal(1)
 	assert_object(camera._target_node).is_equal(ship_a)
+
+
+## Regression: Disembark (active_ship_id -> -1) used to set _player_ship_id
+## directly with no call into WorldPresentation at all, so the disembarked
+## ship kept the player material and _is_player = true forever -- the same
+## desync class as the camera bug above, just on the "no active ship" branch
+## instead of the "switch to a different ship" branch.
+func test_disembarking_reverts_the_old_ships_player_material() -> void:
+	var camera: Camera3D = auto_free(load("res://scripts/camera_controller.gd").new())
+	add_child(camera)
+	_main._camera = camera
+	_main._presentation._camera = camera
+	_main._hud_surface.build(
+		auto_free(Node.new()), auto_free(CanvasLayer.new()), auto_free(Label.new()))
+
+	var ship_a: FakeShip = auto_free(FakeShip.new())
+	add_child(ship_a)
+
+	_main._session.ships[1] = ship_a
+	_main._session.player_ship_id = 1
+	_main._ships = _main._session.ships
+	_main._set_as_player_ship(1, ship_a)
+
+	_main._on_player_fitting({"active_ship_id": -1})
+
+	assert_int(_main._player_ship_id).is_equal(-1)
+	assert_int(_main._session.player_ship_id).is_equal(-1)
+	assert_int(ship_a.clear_as_player_calls).is_equal(1)

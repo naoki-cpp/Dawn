@@ -100,9 +100,8 @@ func attach_player_ship(ship: Node3D, weapon_range: float, weapon_falloff: float
 	## one) instead of leaving it with the player material/velocity-thrust
 	## indicators forever -- regression: switching active ship left the old
 	## ship permanently player-colored.
-	if _player_ship != null and is_instance_valid(_player_ship) and _player_ship != ship:
-		_clear_player_material(_player_ship)
-		_player_ship.call("clear_as_player")
+	if _player_ship != ship:
+		detach_player_ship()
 	_player_ship = ship
 	_apply_player_material(ship)
 	ship.call("set_as_player")
@@ -116,6 +115,19 @@ func attach_player_ship(ship: Node3D, weapon_range: float, weapon_falloff: float
 		_tactical_overlay.set_script(overlay_script)
 		ship.add_child(_tactical_overlay)
 		update_tactical_overlay_ranges(weapon_range, weapon_falloff)
+
+
+## Revert the tracked player ship's material/velocity-thrust indicators and
+## forget it, without attaching a replacement -- the caller has no active
+## ship at all (ADR-0037 Disembark, or the active ship despawned). Idempotent
+## when there's no tracked ship, or it's already been freed. Camera framing
+## is left untouched: staying on the last-piloted ship's position is a
+## reasonable default for "no ship to fly" rather than snapping away.
+func detach_player_ship() -> void:
+	if _player_ship != null and is_instance_valid(_player_ship):
+		_clear_player_material(_player_ship)
+		_player_ship.call("clear_as_player")
+	_player_ship = null
 
 
 func update_tactical_overlay_ranges(weapon_range: float, weapon_falloff: float) -> void:
