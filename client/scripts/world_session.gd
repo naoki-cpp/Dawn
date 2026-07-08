@@ -13,6 +13,7 @@ var opponent_ship_ids: Array = []
 var gates: Array = []
 var stations: Array = []
 var bodies: Array = []
+var buildable_ship_types: Array = []
 var system_names: Dictionary = {}
 
 var player_ship_id: int = -1
@@ -198,6 +199,17 @@ func ingest_navigation(state: Dictionary) -> void:
 			"position": vec3_from_dict(b, "position"),
 			"radius": b.get("radius", 1.0) as float,
 			"spectral_type": b.get("spectral_type", 0.0) as float,
+		})
+
+	# Buildable Packaged Ship catalog (ADR-0034 9B). Static registry data --
+	# unchanged across reconnects in practice, but refreshed here anyway since
+	# InitialState is the only message that carries it.
+	buildable_ship_types.clear()
+	for entry: Variant in (state.get("buildable_ship_types", []) as Array):
+		var t: Dictionary = entry as Dictionary
+		buildable_ship_types.append({
+			"ship_type_id": t.get("ship_type_id", -1) as int,
+			"name": t.get("name", "") as String,
 		})
 
 

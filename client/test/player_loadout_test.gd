@@ -72,6 +72,25 @@ func test_apply_payload_keeps_undocked_station_context_at_negative_one() -> void
 	assert_str(dock_status["docked_station_name"] as String).is_equal("")
 
 
+func test_apply_payload_treats_station_id_zero_as_docked() -> void:
+	# station_id 0 is a real station (the first one in a Sector), not "no
+	# station" -- apply_payload must distinguish it from the null wire value
+	# above rather than treating 0 as falsy.
+	var loadout := PlayerLoadoutScript.new()
+	loadout.apply_payload({
+		"modules": [],
+		"inventory": [],
+		"station_inventory": [],
+		"tick": 13,
+		"docked_station_id": 0,
+		"docked_station_name": "Forge Station",
+	})
+
+	var dock_status: Dictionary = loadout.dock_status()
+	assert_int(dock_status["docked_station_id"] as int).is_equal(0)
+	assert_bool(dock_status["is_docked"] as bool).is_true()
+
+
 func test_active_ship_id_reflects_the_wire_value() -> void:
 	var loadout := PlayerLoadoutScript.new()
 	loadout.apply_payload({

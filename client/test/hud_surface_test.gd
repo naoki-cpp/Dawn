@@ -98,7 +98,9 @@ func test_set_player_fitting_rebuilds_module_slots_and_inventory_rows() -> void:
 	_surface.set_player_fitting(modules, inventory)
 
 	assert_int(_surface._module_slots.size()).is_equal(1)
-	assert_int((_surface._inventory_panel_refs["fitted_rows"] as Array).size()).is_equal(2)
+	## 2 module rows + 1 trailing "Unfit all" row (only appended when at
+	## least one module is fitted).
+	assert_int((_surface._inventory_panel_refs["fitted_rows"] as Array).size()).is_equal(3)
 	assert_int((_surface._inventory_panel_refs["inventory_rows"] as Array).size()).is_equal(2)
 	var rows: Array[InventoryRow] = _surface._inventory_panel_refs["inventory_rows"] as Array[InventoryRow]
 	assert_str(((rows[1].panel as Panel).get_child(0) as Label).text).is_equal("Scrap Metal x4")

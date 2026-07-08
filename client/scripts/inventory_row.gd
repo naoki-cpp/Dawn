@@ -20,8 +20,18 @@ extends RefCounted
 const ACTION_NONE := ""
 const ACTION_FIT := "fit"
 const ACTION_UNFIT := "unfit"
+## Unfits every currently-fitted module in one click (e.g. to clear the way
+## for Disassemble, which requires a fully unfitted ship).
+const ACTION_UNFIT_ALL := "unfit_all"
 const ACTION_ASSEMBLE := "assemble"
 const ACTION_SELECT_ACTIVE_SHIP := "select_active_ship"
+const ACTION_DISASSEMBLE := "disassemble"
+## Toggles the Build ship-type picker open/closed (Phase 9B task 10).
+const ACTION_BUILD_TOGGLE := "build_toggle"
+## One picker sub-row for a specific buildable ship type; `ship_type_id`
+## carries which one. Distinct from ACTION_BUILD_TOGGLE so main.gd can tell
+## "open the picker" apart from "build this type" with the same action prefix.
+const ACTION_BUILD_SHIP_TYPE := "build_ship_type"
 
 ## `source` vocabulary -- tags which column a row belongs to (only
 ## meaningful for SHIP CARGO/STATION rows; empty for FITTED/SHIPS).

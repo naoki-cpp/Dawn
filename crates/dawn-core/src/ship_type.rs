@@ -125,6 +125,9 @@ pub struct ShipTypeDefinition {
     pub class: ShipClass,
     pub base_stats: ShipBaseStats,
     pub slot_layout: SlotLayout,
+    /// Whether `BuildPackagedShipCommand` may target this type (ADR-0034 9B).
+    /// NPC-only hulls (e.g. the starter Frigate) are never player-buildable.
+    pub buildable: bool,
 }
 
 #[cfg(test)]
@@ -137,6 +140,7 @@ mod tests {
             name: "Starter Frigate".to_string(),
             class: ShipClass::Frigate,
             slot_layout: SlotLayout::FRIGATE,
+            buildable: false,
             base_stats: ShipBaseStats {
                 max_speed: 400.0,
                 mass: 1_500_000.0,

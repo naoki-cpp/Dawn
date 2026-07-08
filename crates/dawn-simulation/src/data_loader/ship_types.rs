@@ -13,6 +13,8 @@ pub(super) struct ShipTypeEntry {
     pub(super) class: String,
     pub(super) slot_layout: SlotLayoutEntry,
     pub(super) base_stats: BaseStatsEntry,
+    #[serde(default)]
+    pub(super) buildable: bool,
 }
 
 #[derive(Deserialize)]
@@ -70,6 +72,7 @@ fn entry_to_ship_type(e: ShipTypeEntry) -> ShipTypeDefinition {
             low: e.slot_layout.low,
             rig: e.slot_layout.rig,
         },
+        buildable: e.buildable,
         base_stats: ShipBaseStats {
             max_speed: e.base_stats.max_speed,
             mass: e.base_stats.mass,

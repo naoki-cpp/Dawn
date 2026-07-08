@@ -10,6 +10,7 @@ extends GdUnitTestSuite
 
 const __source: String = "res://scripts/hud_manager.gd"
 const ModuleRow = preload("res://scripts/module_row.gd")
+const InventoryRow = preload("res://scripts/inventory_row.gd")
 
 var _hud: CanvasLayer
 
@@ -238,3 +239,61 @@ func test_inventory_panel_columns_stay_within_the_panels_bounds() -> void:
 	var panel_rect: Rect2 = (refs["panel"] as Panel).get_global_rect()
 	var ships_list: VBoxContainer = refs["ships_list"]
 	assert_bool(panel_rect.encloses(ships_list.get_global_rect())).is_true()
+
+
+func test_station_column_always_shows_disassemble_and_build_toggle_rows() -> void:
+	var hud: CanvasLayer = auto_free(CanvasLayer.new())
+	add_child(hud)
+	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	HudManager.update_inventory_panel(refs, [], [], [], [], [])
+
+	var station_rows: Array[InventoryRow] = refs["station_rows"]
+	var actions: Array = station_rows.map(func(r: InventoryRow) -> String: return r.action)
+	assert_array(actions).contains([InventoryRow.ACTION_DISASSEMBLE, InventoryRow.ACTION_BUILD_TOGGLE])
+
+
+func test_build_picker_is_collapsed_by_default_and_expands_when_toggled() -> void:
+	var hud: CanvasLayer = auto_free(CanvasLayer.new())
+	add_child(hud)
+	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	var buildable := [{"ship_type_id": 7, "name": "Magpie"}]
+
+	HudManager.update_inventory_panel(refs, [], [], [], [], buildable)
+	var collapsed_rows: Array[InventoryRow] = refs["station_rows"]
+	assert_bool(
+		collapsed_rows.any(func(r: InventoryRow) -> bool: return r.action == InventoryRow.ACTION_BUILD_SHIP_TYPE)
+	).is_false()
+
+	refs["build_picker_open"] = true
+	HudManager.update_inventory_panel(refs, [], [], [], [], buildable)
+	var expanded_rows: Array[InventoryRow] = refs["station_rows"]
+	var picker_row: InventoryRow = expanded_rows.filter(
+		func(r: InventoryRow) -> bool: return r.action == InventoryRow.ACTION_BUILD_SHIP_TYPE
+	)[0]
+	assert_int(picker_row.ship_type_id).is_equal(7)
+
+
+func test_unfit_all_row_is_hidden_when_no_module_is_fitted() -> void:
+	var hud: CanvasLayer = auto_free(CanvasLayer.new())
+	add_child(hud)
+	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	HudManager.update_inventory_panel(refs, [], [], [], [], [])
+
+	var fitted_rows: Array[InventoryRow] = refs["fitted_rows"]
+	assert_bool(
+		fitted_rows.any(func(r: InventoryRow) -> bool: return r.action == InventoryRow.ACTION_UNFIT_ALL)
+	).is_false()
+
+
+func test_unfit_all_row_appears_after_the_fitted_modules_when_any_are_fitted() -> void:
+	var hud: CanvasLayer = auto_free(CanvasLayer.new())
+	add_child(hud)
+	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	var modules := [_module({"module_id": 1, "slot": "High", "name": "Gun"})]
+
+	HudManager.update_inventory_panel(refs, modules, [], [], [], [])
+
+	var fitted_rows: Array[InventoryRow] = refs["fitted_rows"]
+	assert_int(fitted_rows.size()).is_equal(2)
+	assert_str(fitted_rows[0].action).is_equal(InventoryRow.ACTION_UNFIT)
+	assert_str(fitted_rows[1].action).is_equal(InventoryRow.ACTION_UNFIT_ALL)

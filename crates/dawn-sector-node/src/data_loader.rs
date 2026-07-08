@@ -177,6 +177,8 @@ struct ShipTypeEntry {
     class: String,
     slot_layout: SlotLayoutEntry,
     base_stats: BaseStatsEntry,
+    #[serde(default)]
+    buildable: bool,
 }
 
 #[derive(Deserialize)]
@@ -250,6 +252,7 @@ pub fn load_ship_types(path: &str) -> Vec<ShipTypeDefinition> {
                         low: e.slot_layout.low,
                         rig: e.slot_layout.rig,
                     },
+                    buildable: e.buildable,
                     base_stats: ShipBaseStats {
                         max_speed: e.base_stats.max_speed,
                         mass: e.base_stats.mass,

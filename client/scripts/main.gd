@@ -99,6 +99,8 @@ var _weapon_falloff   : float  = 0.0   ## falloff range (u)
 var _gates        : Array      = _session.gates
 var _stations     : Array      = _session.stations
 var _bodies       : Array      = _session.bodies
+## Buildable Packaged Ship catalog (ADR-0034 9B): [{ship_type_id:int, name:String}].
+var _buildable_ship_types : Array = _session.buildable_ship_types
 ## Star System id -> name, used to resolve StarSystemChanged events.
 var _system_names : Dictionary = _session.system_names
 
@@ -678,7 +680,8 @@ func _on_player_fitting(payload: Dictionary) -> void:
 		snapshot.get("modules", []) as Array,
 		snapshot.get("inventory", []) as Array,
 		snapshot.get("station_inventory", []) as Array,
-		snapshot.get("owned_ships", []) as Array)
+		snapshot.get("owned_ships", []) as Array,
+		_buildable_ship_types)
 	_recalc_weapon_range()
 
 func _recalc_weapon_range() -> void:
@@ -717,6 +720,15 @@ func _handle_inventory_row_click(row: InventoryRow) -> void:
 		InventoryRow.ACTION_UNFIT:
 			if _player_ship_id >= 0:
 				_connection.send_unfit_module_command(_player_ship_id, row.module_id, row.slot)
+		InventoryRow.ACTION_UNFIT_ALL:
+			## No new wire command -- sends one UnfitModuleCommand per
+			## currently-fitted module (non-atomic: a mid-loop failure leaves
+			## a partially-unfitted ship, but each Unfit is independently safe
+			## and this is a convenience action, not a transactional one).
+			if _player_ship_id >= 0:
+				for entry: Variant in _loadout.modules():
+					_connection.send_unfit_module_command(
+						_player_ship_id, entry.module_id as int, entry.slot as String)
 		InventoryRow.ACTION_ASSEMBLE:
 			## No active-ship requirement: this is exactly the recovery path
 			## for a shipless docked player (docs/architecture/ownership.md §8).
@@ -727,6 +739,33 @@ func _handle_inventory_row_click(row: InventoryRow) -> void:
 			## Also no active-ship requirement -- this is how a player re-boards
 			## after Disembark, or switches to a different owned ship.
 			_connection.send_select_active_ship_command(row.ship_id)
+		InventoryRow.ACTION_DISASSEMBLE:
+			## Dedicated button alongside the existing [Y] key (Phase 9B task
+			## 10) -- same command, server validates docked/undamaged/unfitted.
+			if _player_ship_id >= 0:
+				var docked_station_id: int = _session.dock_status().get("docked_station_id", -1) as int
+				if docked_station_id >= 0:
+					_connection.send_disassemble_ship_command(_player_ship_id, docked_station_id)
+		InventoryRow.ACTION_BUILD_TOGGLE:
+			## No command sent -- this only expands/collapses the ship-type
+			## picker rows below it, then forces an immediate panel redraw
+			## (there's no new PlayerLoadout snapshot to trigger one).
+			var snapshot: Dictionary = _loadout.hud_snapshot()
+			_hud_surface.toggle_build_picker(
+				snapshot.get("modules", []) as Array,
+				snapshot.get("inventory", []) as Array,
+				snapshot.get("station_inventory", []) as Array,
+				snapshot.get("owned_ships", []) as Array,
+				_buildable_ship_types)
+		InventoryRow.ACTION_BUILD_SHIP_TYPE:
+			## Dedicated button alongside the existing [B] key (Phase 9B task
+			## 10), but lets the player pick which buildable type instead of
+			## always sending the hard-coded BUILDABLE_SHIP_TYPE_ID.
+			if _player_ship_id >= 0:
+				var docked_station_id: int = _session.dock_status().get("docked_station_id", -1) as int
+				if docked_station_id >= 0:
+					_connection.send_build_packaged_ship_command(
+						_player_ship_id, docked_station_id, row.ship_type_id)
 
 
 ## Right-click on a SHIP CARGO row moves the whole stack to the docked
@@ -1041,6 +1080,7 @@ func _sync_session_state() -> void:
 	_gates = _session.gates
 	_stations = _session.stations
 	_bodies = _session.bodies
+	_buildable_ship_types = _session.buildable_ship_types
 	_system_names = _session.system_names
 	_player_ship_id = _session.player_ship_id
 	_player_ship_type_name = _session.player_ship_type_name

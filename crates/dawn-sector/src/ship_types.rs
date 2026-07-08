@@ -15,6 +15,7 @@ pub fn all_ship_types() -> Vec<ShipTypeDefinition> {
             name: "NPC Frigate".to_string(),
             class: ShipClass::Frigate,
             slot_layout: SlotLayout::FRIGATE,
+            buildable: false,
             base_stats: ShipBaseStats {
                 max_speed: 400.0,
                 mass: 1_500_000.0,
@@ -40,6 +41,7 @@ pub fn all_ship_types() -> Vec<ShipTypeDefinition> {
                 low: 2,
                 rig: 3,
             },
+            buildable: true,
             base_stats: ShipBaseStats {
                 max_speed: 400.0,
                 mass: 12_000_000.0,
@@ -76,6 +78,21 @@ mod tests {
             .unwrap();
         assert!(npc.base_stats.mass > 0.0);
         assert!(npc.base_stats.inertia_modifier > 0.0);
+    }
+
+    #[test]
+    fn only_the_magpie_is_buildable() {
+        let types = all_ship_types();
+        let npc = types
+            .iter()
+            .find(|t| t.id == SHIP_TYPE_NPC_FRIGATE)
+            .unwrap();
+        let magpie = types.iter().find(|t| t.id == SHIP_TYPE_MAGPIE).unwrap();
+        assert!(
+            !npc.buildable,
+            "NPC-only hulls must not be player-buildable"
+        );
+        assert!(magpie.buildable);
     }
 
     #[test]
