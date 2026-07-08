@@ -1019,4 +1019,505 @@ mod tests {
             thrust.direction
         );
     }
+
+    fn docked_owned_player(node: &mut SimulationNode) -> (PlayerId, ShipId) {
+        use dawn_core::StationId;
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station = node.station(StationId(0)).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        assert!(matches!(
+            node.dock_owned(
+                player_id,
+                ship_id,
+                dawn_core::DockCommand {
+                    station_id: StationId(0),
+                },
+            ),
+            StationOperationOutcome::Accepted { .. }
+        ));
+        (player_id, ship_id)
+    }
+
+    #[test]
+    fn lock_on_command_dispatches_a_lock_command_for_the_active_ship() {
+        use dawn_core::{ClientCommand, LockOnCommand};
+        let mut node = mem_node();
+        let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target_ship_id = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(500.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::LockOn(LockOnCommand {
+                ship_id: target_ship_id,
+                target_id: target_ship_id,
+            }),
+            &mut locks,
+        );
+        assert!(result.is_none(), "LockOn must not produce a followup");
+        assert_eq!(locks.len(), 1, "LockOn must push exactly one LockOnCommand");
+        assert_eq!(
+            locks[0].ship_id, ship_id,
+            "the pushed command must resolve to the caller's active ship, not the wire ship_id"
+        );
+        assert_eq!(locks[0].target_id, target_ship_id);
+    }
+
+    #[test]
+    fn activate_command_dispatches_through_and_activates_the_fitted_module() {
+        use crate::modules::MODULE_AFTERBURNER;
+        use dawn_core::{ActivateModuleCommand, ClientCommand, FitModuleCommand, SlotKind};
+
+        let mut node = node_with_modules();
+        let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.fit_module(FitModuleCommand {
+            ship_id,
+            slot: SlotKind::Mid,
+            module_id: MODULE_AFTERBURNER,
+        });
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Activate(ActivateModuleCommand {
+                module_id: MODULE_AFTERBURNER,
+                slot: SlotKind::Mid,
+                target_ship_id: None,
+            }),
+            &mut locks,
+        );
+        assert!(
+            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
+            "Activate must return RefreshFitting for the caller's player_id"
+        );
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let is_active = node
+            .world
+            .inner()
+            .get::<&FittingComp>(entity)
+            .unwrap()
+            .iter_slots()
+            .find(|s| s.def.id == MODULE_AFTERBURNER)
+            .unwrap()
+            .is_active;
+        assert!(
+            is_active,
+            "Activate dispatch must actually flip the module on"
+        );
+    }
+
+    #[test]
+    fn deactivate_command_dispatches_through_and_deactivates_the_fitted_module() {
+        use crate::modules::MODULE_AFTERBURNER;
+        use dawn_core::{
+            ActivateModuleCommand, ClientCommand, DeactivateModuleCommand, FitModuleCommand,
+            SlotKind,
+        };
+
+        let mut node = node_with_modules();
+        let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.fit_module(FitModuleCommand {
+            ship_id,
+            slot: SlotKind::Mid,
+            module_id: MODULE_AFTERBURNER,
+        });
+        node.activate_module_owned(
+            player_id,
+            ship_id,
+            ActivateModuleCommand {
+                module_id: MODULE_AFTERBURNER,
+                slot: SlotKind::Mid,
+                target_ship_id: None,
+            },
+        )
+        .unwrap();
+
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Deactivate(DeactivateModuleCommand {
+                module_id: MODULE_AFTERBURNER,
+                slot: SlotKind::Mid,
+            }),
+            &mut locks,
+        );
+        assert!(
+            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
+            "Deactivate must return RefreshFitting for the caller's player_id"
+        );
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let is_active = node
+            .world
+            .inner()
+            .get::<&FittingComp>(entity)
+            .unwrap()
+            .iter_slots()
+            .find(|s| s.def.id == MODULE_AFTERBURNER)
+            .unwrap()
+            .is_active;
+        assert!(
+            !is_active,
+            "Deactivate dispatch must actually flip the module off"
+        );
+    }
+
+    #[test]
+    fn stop_command_dispatches_through_and_brakes_the_ship() {
+        use dawn_core::{ClientCommand, StopCommand};
+        let mut node = mem_node();
+        let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.apply_move_command_owned(player_id, ship_id, Position::new(1_000.0, 0.0, 0.0));
+
+        let mut locks = Vec::new();
+        let result =
+            node.apply_client_command(player_id, ClientCommand::Stop(StopCommand), &mut locks);
+        assert!(result.is_none(), "Stop must not produce a followup");
+        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        assert!(
+            thrust.is_braking,
+            "Stop dispatch must brake the ship's thrust"
+        );
+    }
+
+    #[test]
+    fn approach_command_dispatches_through_and_attaches_approach_comp() {
+        use dawn_core::{ApproachCommand, ApproachTarget, ClientCommand};
+        use dawn_ecs::components::ApproachComp;
+
+        let mut node = mem_node();
+        let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target_ship_id = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(2_000.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Approach(ApproachCommand {
+                target: ApproachTarget::Ship(target_ship_id),
+            }),
+            &mut locks,
+        );
+        assert!(result.is_none(), "Approach must not produce a followup");
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        assert!(
+            node.world.inner().get::<&ApproachComp>(entity).is_ok(),
+            "Approach dispatch must attach ApproachComp to the caller's active ship"
+        );
+    }
+
+    #[test]
+    fn warp_command_dispatches_through_and_attaches_warp_comp() {
+        use dawn_core::{ClientCommand, WarpCommand, WarpTarget};
+        use dawn_ecs::components::WarpComp;
+
+        let mut node = node_with_modules();
+        let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Warp(WarpCommand {
+                target: WarpTarget::Body(dawn_core::CelestialBodyId(1)),
+            }),
+            &mut locks,
+        );
+        assert!(result.is_none(), "Warp must not produce a followup");
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        assert!(
+            node.world.inner().get::<&WarpComp>(entity).is_ok(),
+            "Warp dispatch must attach WarpComp to the caller's active ship"
+        );
+    }
+
+    #[test]
+    fn orbit_command_dispatches_through_and_attaches_orbit_comp() {
+        use dawn_core::{ApproachTarget, ClientCommand, OrbitCommand};
+        use dawn_ecs::components::OrbitComp;
+
+        let mut node = mem_node();
+        let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target_ship_id = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(2_000.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Orbit(OrbitCommand {
+                target: ApproachTarget::Ship(target_ship_id),
+                radius: Some(750.0),
+            }),
+            &mut locks,
+        );
+        assert!(result.is_none(), "Orbit must not produce a followup");
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        assert!(
+            node.world.inner().get::<&OrbitComp>(entity).is_ok(),
+            "Orbit dispatch must attach OrbitComp to the caller's active ship"
+        );
+    }
+
+    #[test]
+    fn keep_at_range_command_dispatches_through_and_attaches_keep_at_range_comp() {
+        use dawn_core::{ApproachTarget, ClientCommand, KeepAtRangeCommand};
+        use dawn_ecs::components::KeepAtRangeComp;
+
+        let mut node = mem_node();
+        let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let target_ship_id = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(2_000.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::KeepAtRange(KeepAtRangeCommand {
+                target: ApproachTarget::Ship(target_ship_id),
+                range: Some(1_500.0),
+            }),
+            &mut locks,
+        );
+        assert!(result.is_none(), "KeepAtRange must not produce a followup");
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        assert!(
+            node.world.inner().get::<&KeepAtRangeComp>(entity).is_ok(),
+            "KeepAtRange dispatch must attach KeepAtRangeComp to the caller's active ship"
+        );
+    }
+
+    #[test]
+    fn unfit_command_dispatches_through_and_returns_refresh_fitting_followup() {
+        use crate::modules;
+        use dawn_core::{ClientCommand, FitModuleCommand, ModuleId, SlotKind, UnfitModuleCommand};
+        let mut node = mem_node();
+        for def in modules::all_modules() {
+            node.register_module(def);
+        }
+        let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        node.fit_module(FitModuleCommand {
+            ship_id,
+            slot: SlotKind::High,
+            module_id: ModuleId(1),
+        });
+
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Unfit(UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::High,
+                module_id: ModuleId(1),
+            }),
+            &mut locks,
+        );
+        assert!(
+            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
+            "Unfit must return RefreshFitting for the caller's player_id"
+        );
+    }
+
+    #[test]
+    fn undock_command_dispatches_through_and_undocks_the_active_ship() {
+        use dawn_core::ClientCommand;
+        let mut node = node_with_modules();
+        let (player_id, ship_id) = docked_owned_player(&mut node);
+        assert!(node.is_ship_docked(ship_id));
+
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Undock(dawn_core::UndockCommand),
+            &mut locks,
+        );
+        assert!(
+            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
+            "Undock must return RefreshFitting for the caller's player_id"
+        );
+        assert!(
+            !node.is_ship_docked(ship_id),
+            "Undock dispatch must actually undock the ship"
+        );
+    }
+
+    #[test]
+    fn dock_command_dispatches_through_and_docks_the_active_ship() {
+        use dawn_core::{ClientCommand, DockCommand, StationId};
+        let mut node = node_with_modules();
+        let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
+        let station = node.station(StationId(0)).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Dock(DockCommand {
+                station_id: StationId(0),
+            }),
+            &mut locks,
+        );
+        assert!(
+            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
+            "Dock must return RefreshFitting for the caller's player_id"
+        );
+        assert!(
+            node.is_ship_docked(ship_id),
+            "Dock dispatch must actually dock the ship"
+        );
+    }
+
+    #[test]
+    fn build_packaged_ship_command_dispatches_through_and_credits_the_station_item() {
+        use dawn_core::{BuildPackagedShipCommand, ClientCommand, ItemId, StationId};
+        let mut node = node_with_modules();
+        let (player_id, ship_id) = docked_owned_player(&mut node);
+        node.credit_station_item(player_id, ItemId::ScrapMetal, 10);
+
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::BuildPackagedShip(BuildPackagedShipCommand {
+                ship_id,
+                station_id: StationId(0),
+                ship_type_id: dawn_core::ShipTypeId(1),
+            }),
+            &mut locks,
+        );
+        assert!(
+            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
+            "BuildPackagedShip must return RefreshFitting for the caller's player_id"
+        );
+        assert_eq!(
+            node.station_item_count(player_id, ItemId::PackagedShip(dawn_core::ShipTypeId(1))),
+            1,
+            "BuildPackagedShip dispatch must actually credit the packaged-ship item"
+        );
+    }
+
+    #[test]
+    fn select_active_ship_command_dispatches_through_and_switches_active_ship() {
+        use dawn_core::{ClientCommand, SelectActiveShipCommand, StationId};
+        let mut node = node_with_modules();
+        let (player_id, first_ship_id) = docked_owned_player(&mut node);
+        let station_abs = node
+            .station(StationId(0))
+            .expect("demo station exists")
+            .abs_m;
+        // spawn_player_ship_at_pub makes the new ship the caller's active
+        // ship, so dock it here (dock_owned requires the docking ship to be
+        // active) before resetting active back to `first_ship_id` -- the
+        // test then exercises an actual switch away from a docked, owned,
+        // inactive ship.
+        let second_ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+        node.set_spawn_anchor_abs(second_ship_id, station_abs);
+        assert!(matches!(
+            node.dock_owned(
+                player_id,
+                second_ship_id,
+                dawn_core::DockCommand {
+                    station_id: StationId(0)
+                }
+            ),
+            StationOperationOutcome::Accepted { .. }
+        ));
+        node.ships.active_ship.insert(player_id, first_ship_id);
+
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::SelectActiveShip(SelectActiveShipCommand {
+                ship_id: second_ship_id,
+            }),
+            &mut locks,
+        );
+        assert!(
+            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
+            "SelectActiveShip must return RefreshFitting for the caller's player_id"
+        );
+        let _ = first_ship_id;
+    }
+
+    #[test]
+    fn disembark_command_dispatches_through_and_clears_the_active_ship() {
+        use dawn_core::{ClientCommand, DisembarkCommand};
+        let mut node = node_with_modules();
+        let (player_id, ship_id) = docked_owned_player(&mut node);
+
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Disembark(DisembarkCommand),
+            &mut locks,
+        );
+        assert!(
+            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
+            "Disembark must return RefreshFitting for the caller's player_id"
+        );
+        assert!(
+            !node.is_active_ship(player_id, ship_id),
+            "Disembark dispatch must actually clear the caller's active ship"
+        );
+    }
+
+    #[test]
+    fn transfer_to_station_command_dispatches_through() {
+        use dawn_core::{ClientCommand, ItemId, StationId, TransferToStationCommand};
+        let mut node = node_with_modules();
+        let (player_id, ship_id) = docked_owned_player(&mut node);
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.world
+            .inner_mut()
+            .get::<&mut dawn_ecs::components::InventoryComp>(entity)
+            .map(|mut inv| inv.add_item(ItemId::ScrapMetal, 5))
+            .ok();
+
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::TransferToStation(TransferToStationCommand {
+                ship_id,
+                station_id: StationId(0),
+                item_id: ItemId::ScrapMetal,
+            }),
+            &mut locks,
+        );
+        assert!(
+            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
+            "TransferToStation must return RefreshFitting for the caller's player_id"
+        );
+        assert_eq!(
+            node.station_item_count(player_id, ItemId::ScrapMetal),
+            5,
+            "TransferToStation dispatch must actually move the item into the station inventory"
+        );
+    }
+
+    #[test]
+    fn jump_command_from_a_docked_ship_returns_no_followup() {
+        use dawn_core::{ClientCommand, JumpCommand, JumpGateId};
+        let mut node = node_with_modules();
+        let (player_id, _ship_id) = docked_owned_player(&mut node);
+        let mut locks = Vec::new();
+        let result = node.apply_client_command(
+            player_id,
+            ClientCommand::Jump(JumpCommand {
+                gate_id: JumpGateId(0),
+            }),
+            &mut locks,
+        );
+        assert!(
+            result.is_none(),
+            "Jump from a docked ship must not produce a followup"
+        );
+    }
 }
