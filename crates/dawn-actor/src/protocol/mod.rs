@@ -34,6 +34,107 @@ mod tests {
     }
 
     #[test]
+    fn lock_on_command_json_is_parsed_into_client_command_lock_on() {
+        let line = r#"{"type":"LockOnCommand","target_id":7}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::LockOn(c) => {
+                assert_eq!(c.target_id, ship_id(7));
+            }
+            other => panic!("expected LockOn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn activate_module_command_json_is_parsed_with_and_without_a_target() {
+        let line =
+            r#"{"type":"ActivateModuleCommand","module_id":3,"slot":"High","target_ship_id":9}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Activate(c) => {
+                assert_eq!(c.module_id, ModuleId(3));
+                assert_eq!(c.slot, SlotKind::High);
+                assert_eq!(c.target_ship_id, Some(ship_id(9)));
+            }
+            other => panic!("expected Activate, got {other:?}"),
+        }
+
+        let line_no_target = r#"{"type":"ActivateModuleCommand","module_id":3,"slot":"High"}"#;
+        let cmd_no_target = parse_client_command(line_no_target).expect("must parse");
+        match cmd_no_target {
+            dawn_core::ClientCommand::Activate(c) => assert_eq!(c.target_ship_id, None),
+            other => panic!("expected Activate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deactivate_module_command_json_is_parsed_into_client_command_deactivate() {
+        let line = r#"{"type":"DeactivateModuleCommand","module_id":3,"slot":"Mid"}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Deactivate(c) => {
+                assert_eq!(c.module_id, ModuleId(3));
+                assert_eq!(c.slot, SlotKind::Mid);
+            }
+            other => panic!("expected Deactivate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn attack_command_json_is_parsed_into_client_command_attack() {
+        let line = r#"{"type":"AttackCommand","attacker_id":1,"target_id":2}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Attack(c) => {
+                assert_eq!(c.attacker_id, ship_id(1));
+                assert_eq!(c.target_id, ship_id(2));
+            }
+            other => panic!("expected Attack, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_command_json_is_parsed_into_client_command_stop() {
+        let line = r#"{"type":"StopCommand"}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        assert!(matches!(cmd, dawn_core::ClientCommand::Stop(_)));
+    }
+
+    #[test]
+    fn undock_command_json_is_parsed_into_client_command_undock() {
+        let line = r#"{"type":"UndockCommand"}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        assert!(matches!(cmd, dawn_core::ClientCommand::Undock(_)));
+    }
+
+    #[test]
+    fn build_packaged_ship_command_json_is_parsed_into_client_command_build_packaged_ship() {
+        let line =
+            r#"{"type":"BuildPackagedShipCommand","ship_id":1,"station_id":2,"ship_type_id":7}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::BuildPackagedShip(c) => {
+                assert_eq!(c.ship_id, ship_id(1));
+                assert_eq!(c.station_id, dawn_core::StationId(2));
+                assert_eq!(c.ship_type_id, dawn_core::ShipTypeId(7));
+            }
+            other => panic!("expected BuildPackagedShip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn select_active_ship_command_json_is_parsed_into_client_command_select_active_ship() {
+        let line = r#"{"type":"SelectActiveShipCommand","ship_id":5}"#;
+        let cmd = parse_client_command(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::SelectActiveShip(c) => {
+                assert_eq!(c.ship_id, ship_id(5));
+            }
+            other => panic!("expected SelectActiveShip, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn move_command_json_is_parsed_into_client_command_move() {
         let line = r#"{"type":"MoveCommand","target":{"x":10.0,"y":0.0,"z":-5.0}}"#;
         let cmd = parse_client_command(line).expect("must parse");
@@ -261,6 +362,347 @@ mod tests {
         assert_eq!(v["station_id"], 3);
         assert_eq!(v["ship_type_id"], 1);
         assert_eq!(v["tick"], 9);
+    }
+
+    #[test]
+    fn ship_spawned_event_is_serialized_for_clients() {
+        let json =
+            domain_event_to_json(&DomainEvent::ShipSpawned(dawn_core::events::ShipSpawned {
+                ship_id: ship_id(1),
+                sector_id: dawn_core::SectorId(0),
+                initial_position: dawn_core::Position::new(1.0, 2.0, 3.0),
+                ship_type_id: dawn_core::ShipTypeId(7),
+                tick: dawn_core::Tick(1),
+            }))
+            .expect("ShipSpawned should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "ShipSpawned");
+        assert_eq!(v["ship_id"], ship_id(1).raw());
+        assert_eq!(v["position"]["x"], 1.0);
+        assert_eq!(v["position"]["y"], 2.0);
+        assert_eq!(v["position"]["z"], 3.0);
+        assert_eq!(v["tick"], 1);
+        assert!(v.get("ship_type_id").is_none());
+    }
+
+    #[test]
+    fn velocity_changed_event_is_serialized_for_clients() {
+        let json = domain_event_to_json(&DomainEvent::VelocityChanged(
+            dawn_core::events::VelocityChanged {
+                ship_id: ship_id(1),
+                velocity: dawn_core::Velocity {
+                    dx: 1.0,
+                    dy: 0.0,
+                    dz: -2.0,
+                },
+                tick: dawn_core::Tick(2),
+            },
+        ))
+        .expect("VelocityChanged should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "VelocityChanged");
+        assert_eq!(v["velocity"]["dx"], 1.0);
+        assert_eq!(v["velocity"]["dz"], -2.0);
+    }
+
+    #[test]
+    fn ship_despawned_event_is_serialized_for_clients() {
+        let json = domain_event_to_json(&DomainEvent::ShipDespawned(
+            dawn_core::events::ShipDespawned {
+                ship_id: ship_id(5),
+                tick: dawn_core::Tick(3),
+            },
+        ))
+        .expect("ShipDespawned should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "ShipDespawned");
+        assert_eq!(v["ship_id"], ship_id(5).raw());
+    }
+
+    #[test]
+    fn ship_undocked_event_is_serialized_for_clients() {
+        let json = domain_event_to_json(&DomainEvent::ShipUndocked(
+            dawn_core::events::ShipUndocked {
+                ship_id: ship_id(5),
+                station_id: dawn_core::StationId(2),
+                tick: dawn_core::Tick(4),
+            },
+        ))
+        .expect("ShipUndocked should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "ShipUndocked");
+        assert_eq!(v["station_id"], 2);
+    }
+
+    #[test]
+    fn damage_taken_event_is_serialized_for_clients() {
+        let json =
+            domain_event_to_json(&DomainEvent::DamageTaken(dawn_core::events::DamageTaken {
+                ship_id: ship_id(1),
+                damage: 25.0,
+                current_shield: 10.0,
+                current_armor: 20.0,
+                current_hull: 30.0,
+                tick: dawn_core::Tick(5),
+            }))
+            .expect("DamageTaken should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "DamageTaken");
+        assert_eq!(v["damage"], 25.0);
+        assert_eq!(v["current_hull"], 30.0);
+    }
+
+    #[test]
+    fn repair_applied_event_is_serialized_for_clients() {
+        let json = domain_event_to_json(&DomainEvent::RepairApplied(
+            dawn_core::events::RepairApplied {
+                ship_id: ship_id(1),
+                amount: 15.0,
+                layer: dawn_core::events::RepairLayer::Armor,
+                current_shield: 10.0,
+                current_armor: 25.0,
+                current_hull: 30.0,
+                tick: dawn_core::Tick(6),
+            },
+        ))
+        .expect("RepairApplied should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "RepairApplied");
+        assert_eq!(v["layer"], "Armor");
+        assert_eq!(v["current_armor"], 25.0);
+    }
+
+    #[test]
+    fn ship_destroyed_event_is_serialized_for_clients() {
+        let json = domain_event_to_json(&DomainEvent::ShipDestroyed(
+            dawn_core::events::ShipDestroyed {
+                ship_id: ship_id(1),
+                killer_id: ship_id(2),
+                tick: dawn_core::Tick(7),
+            },
+        ))
+        .expect("ShipDestroyed should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "ShipDestroyed");
+        assert_eq!(v["killer_id"], ship_id(2).raw());
+    }
+
+    #[test]
+    fn target_locked_and_lock_lost_events_are_serialized_for_clients() {
+        let locked = domain_event_to_json(&DomainEvent::TargetLocked(
+            dawn_core::events::TargetLocked {
+                locker_id: ship_id(1),
+                target_id: ship_id(2),
+                tick: dawn_core::Tick(8),
+            },
+        ))
+        .expect("TargetLocked should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&locked).unwrap();
+        assert_eq!(v["type"], "TargetLocked");
+        assert_eq!(v["locker_id"], ship_id(1).raw());
+        assert_eq!(v["target_id"], ship_id(2).raw());
+
+        let lost = domain_event_to_json(&DomainEvent::LockLost(dawn_core::events::LockLost {
+            locker_id: ship_id(1),
+            target_id: ship_id(2),
+            tick: dawn_core::Tick(9),
+        }))
+        .expect("LockLost should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&lost).unwrap();
+        assert_eq!(v["type"], "LockLost");
+    }
+
+    #[test]
+    fn module_activated_event_with_a_target_is_serialized_for_clients() {
+        let json = domain_event_to_json(&DomainEvent::ModuleActivated(
+            dawn_core::events::ModuleActivated {
+                ship_id: ship_id(1),
+                module_id: ModuleId(3),
+                slot: SlotKind::High,
+                target_ship_id: Some(ship_id(2)),
+                tick: dawn_core::Tick(10),
+            },
+        ))
+        .expect("ModuleActivated should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "ModuleActivated");
+        assert_eq!(v["module_id"], 3);
+        assert_eq!(v["slot"], "High");
+        assert_eq!(v["target_ship_id"], ship_id(2).raw());
+    }
+
+    #[test]
+    fn module_activated_event_without_a_target_omits_the_field() {
+        let json = domain_event_to_json(&DomainEvent::ModuleActivated(
+            dawn_core::events::ModuleActivated {
+                ship_id: ship_id(1),
+                module_id: ModuleId(3),
+                slot: SlotKind::High,
+                target_ship_id: None,
+                tick: dawn_core::Tick(10),
+            },
+        ))
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(v.get("target_ship_id").is_none());
+    }
+
+    #[test]
+    fn module_deactivated_event_carries_the_forced_reason_when_present() {
+        let json = domain_event_to_json(&DomainEvent::ModuleDeactivated(
+            dawn_core::events::ModuleDeactivated {
+                ship_id: ship_id(1),
+                module_id: ModuleId(3),
+                slot: SlotKind::High,
+                forced_reason: Some(
+                    dawn_core::events::ModuleDeactivationReason::CapacitorExhausted,
+                ),
+                tick: dawn_core::Tick(11),
+            },
+        ))
+        .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["reason"], "cap");
+
+        let json_range = domain_event_to_json(&DomainEvent::ModuleDeactivated(
+            dawn_core::events::ModuleDeactivated {
+                ship_id: ship_id(1),
+                module_id: ModuleId(3),
+                slot: SlotKind::High,
+                forced_reason: Some(dawn_core::events::ModuleDeactivationReason::OutOfRange),
+                tick: dawn_core::Tick(11),
+            },
+        ))
+        .unwrap();
+        let v_range: serde_json::Value = serde_json::from_str(&json_range).unwrap();
+        assert_eq!(v_range["reason"], "range");
+
+        let json_player = domain_event_to_json(&DomainEvent::ModuleDeactivated(
+            dawn_core::events::ModuleDeactivated {
+                ship_id: ship_id(1),
+                module_id: ModuleId(3),
+                slot: SlotKind::High,
+                forced_reason: None,
+                tick: dawn_core::Tick(11),
+            },
+        ))
+        .unwrap();
+        let v_player: serde_json::Value = serde_json::from_str(&json_player).unwrap();
+        assert!(v_player.get("reason").is_none());
+    }
+
+    #[test]
+    fn jump_gate_used_event_is_serialized_for_clients() {
+        let json = domain_event_to_json(&DomainEvent::JumpGateUsed(
+            dawn_core::events::JumpGateUsed {
+                ship_id: ship_id(1),
+                gate_id: JumpGateId(4),
+                from_sector: dawn_core::SectorId(0),
+                to_sector: dawn_core::SectorId(1),
+                entry_pos: dawn_core::Position::new(5.0, 6.0, 7.0),
+                tick: dawn_core::Tick(12),
+            },
+        ))
+        .expect("JumpGateUsed should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "JumpGateUsed");
+        assert_eq!(v["gate_id"], 4);
+        assert_eq!(v["from_sector"], 0);
+        assert_eq!(v["to_sector"], 1);
+        assert_eq!(v["entry_pos"]["x"], 5.0);
+    }
+
+    #[test]
+    fn star_system_changed_event_is_serialized_for_clients() {
+        let json = domain_event_to_json(&DomainEvent::StarSystemChanged(
+            dawn_core::events::StarSystemChanged {
+                ship_id: ship_id(1),
+                from_system: dawn_core::StarSystemId(0),
+                to_system: dawn_core::StarSystemId(2),
+                tick: dawn_core::Tick(13),
+            },
+        ))
+        .expect("StarSystemChanged should be forwarded");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "StarSystemChanged");
+        assert_eq!(v["from_system"], 0);
+        assert_eq!(v["to_system"], 2);
+    }
+
+    #[test]
+    fn internal_events_are_never_forwarded_to_clients() {
+        let tick = dawn_core::Tick(1);
+        let not_forwarded: Vec<DomainEvent> = vec![
+            DomainEvent::ShipFitted(dawn_core::events::ShipFitted {
+                ship_id: ship_id(1),
+                fitting: dawn_core::fitting::FittingSnapshot::empty(),
+                inventory: vec![],
+                tick,
+            }),
+            DomainEvent::WeaponFired(dawn_core::events::WeaponFired {
+                attacker_id: ship_id(1),
+                target_id: ship_id(2),
+                damage: 10.0,
+                tick,
+            }),
+            DomainEvent::TackleApplied(dawn_core::events::TackleApplied {
+                ship_id: ship_id(1),
+                by: ship_id(2),
+                tick,
+            }),
+            DomainEvent::TackleReleased(dawn_core::events::TackleReleased {
+                ship_id: ship_id(1),
+                by: ship_id(2),
+                tick,
+            }),
+            DomainEvent::SectorTransitRequested(dawn_core::events::SectorTransitRequested {
+                ship_id: ship_id(1),
+                from: dawn_core::SectorId(0),
+                to: dawn_core::SectorId(1),
+                tick,
+            }),
+            DomainEvent::SectorTransitCompleted(dawn_core::events::SectorTransitCompleted {
+                ship_id: ship_id(1),
+                from: dawn_core::SectorId(0),
+                to: dawn_core::SectorId(1),
+                entry_pos: dawn_core::Position::ORIGIN,
+                velocity: dawn_core::Velocity::ZERO,
+                tick,
+            }),
+            DomainEvent::SectorTransitAborted(dawn_core::events::SectorTransitAborted {
+                ship_id: ship_id(1),
+                from: dawn_core::SectorId(0),
+                to: dawn_core::SectorId(1),
+                tick,
+            }),
+            DomainEvent::AnchorRebased(dawn_core::events::AnchorRebased {
+                ship_id: ship_id(1),
+                anchor: dawn_core::AnchorId(0),
+                offset: dawn_core::Position::ORIGIN,
+                tick,
+            }),
+            DomainEvent::PackagedShipBuilt(dawn_core::events::PackagedShipBuilt {
+                ship_id: ship_id(1),
+                player_id: dawn_core::PlayerId(1),
+                station_id: dawn_core::StationId(0),
+                ship_type_id: dawn_core::ShipTypeId(1),
+                scrap_cost: 1,
+                tick,
+            }),
+            DomainEvent::ShipDisassembled(dawn_core::events::ShipDisassembled {
+                ship_id: ship_id(1),
+                player_id: dawn_core::PlayerId(1),
+                station_id: dawn_core::StationId(0),
+                ship_type_id: dawn_core::ShipTypeId(1),
+                tick,
+            }),
+        ];
+        for event in not_forwarded {
+            assert!(
+                domain_event_to_json(&event).is_none(),
+                "{event:?} must not be forwarded to clients"
+            );
+        }
     }
 
     #[test]

@@ -208,6 +208,15 @@ For hard bugs, follow the `diagnosing-bugs` skill:
   example). Note any deliberately-skipped item in the PR description rather
   than silently ignoring it. See #82 and #83 for the audit pattern. The
   `/rust-api-audit` skill runs this audit end to end.
+- Coverage is audited periodically with `cargo llvm-cov` (the
+  `/coverage-audit` skill runs the procedure end to end), not gated per PR.
+  Wiring/binary files at 0% are intentional (covered by manual/hardware
+  verification); the gaps worth closing are logic whose failure mode is
+  invisible to manual play — event replay (`node/apply_event.rs`, INV-002)
+  and wire conversion (`dawn-actor/src/protocol.rs`) first. New match arms
+  in those two files need direct tests in the same PR. Deliberately
+  uncovered code is named in the PR description with the reason, never
+  silently skipped. See #112 for the audit pattern.
 
 ## Encoding Rules
 

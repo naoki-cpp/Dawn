@@ -132,3 +132,59 @@ pub(super) fn debug_assert_missing_anchor(anchor: dawn_core::AnchorId, site: &st
          — absolute position fell back to the raw offset (wrong frame at true AU)"
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dawn_core::{
+        AnchorId, DomainEvent, NodeId, SectorBounds, SectorId, ShipTypeId, Tick, Velocity,
+    };
+
+    fn mem_node() -> SimulationNode {
+        SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        )
+    }
+
+    #[test]
+    fn ship_distance_to_point_composes_the_ships_anchor() {
+        let mut node = mem_node();
+        let ship = node.spawn_ship(
+            ShipTypeId(1),
+            Position::new(1000.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+        // Rebase onto the star (AnchorId(0), abs [0,0,0]) so the expected
+        // absolute position is exactly the offset -- ship_distance_to_point
+        // is f32 (this file's own doc comment: not precise at true-AU
+        // scale), so keep this near the origin rather than a far-away anchor
+        // where a 10m difference would vanish in the f32 cast.
+        node.apply_event_pub(DomainEvent::AnchorRebased(
+            dawn_core::events::AnchorRebased {
+                ship_id: ship,
+                anchor: AnchorId(0),
+                offset: Position::new(500.0, 0.0, 0.0),
+                tick: Tick(1),
+            },
+        ));
+
+        let point = Position::new(510.0, 0.0, 0.0);
+        let dist = node.ship_distance_to_point(ship, point).unwrap();
+        assert!(
+            (dist - 10.0).abs() < 0.01,
+            "expected ~10m, got {dist}m -- ship_distance_to_point must compose \
+             the ship's anchor + offset before comparing to the Sector-frame point"
+        );
+    }
+
+    #[test]
+    fn ship_distance_to_point_returns_none_for_an_unknown_ship() {
+        let node = mem_node();
+        assert_eq!(
+            node.ship_distance_to_point(dawn_core::ShipId::new(NodeId(0), 999), Position::ORIGIN),
+            None
+        );
+    }
+}
