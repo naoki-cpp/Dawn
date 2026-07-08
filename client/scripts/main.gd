@@ -130,7 +130,7 @@ var _jump_notice_timer   : float  = 0.0
 # -- Lifecycle ----------------------------------------------------------------
 
 ## Fail fast if main.tscn's node layout drifts from the `@onready` paths above
-## (architecture-review-client.md C-3): a missing node currently surfaces as a
+## (architecture-review/client.md C-3): a missing node currently surfaces as a
 ## confusing null-deref deep inside whichever method touches it first. Checking
 ## all of them up front turns that into one clear, actionable error at startup.
 func _assert_scene_tree_refs() -> void:
@@ -245,7 +245,7 @@ func _station_name(station_id: int) -> String:
 
 func _input(event: InputEvent) -> void:
 	## Keyboard shortcuts: InputDecoder decides what the keypress means
-	## (architecture-review-client.md C-1); this just performs the side
+	## (architecture-review/client.md C-1); this just performs the side
 	## effects (network sends, warp-snap-pos / overlay state writes).
 	if event is InputEventKey and event.pressed and not event.echo:
 		var key: InputEventKey = event as InputEventKey
@@ -373,7 +373,7 @@ func _input(event: InputEvent) -> void:
 
 # -- Ship picking (screen position -> nearest ship ID) ------------------------
 #
-# Picking math lives in ship_picking.gd (ShipPicking, architecture-review-
+# Picking math lives in ship_picking.gd (ShipPicking, architecture-review/
 # client.md C-1) -- main.gd only supplies the live candidate data.
 
 ## Returns the ship_id whose node is closest to the click ray (within

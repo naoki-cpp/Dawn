@@ -2,7 +2,7 @@
 ##
 ## Builds and updates the player HUD panels (status, ship status, target,
 ## module bar, duel result overlay), extracted from main.gd
-## (architecture-review-client.md C-1, final slice). Stateless static
+## (architecture-review/client.md C-1, final slice). Stateless static
 ## methods: build_* functions construct a Control subtree under the given
 ## `hud` root and return a Dictionary of the node references the caller
 ## needs to keep (mirroring main.gd's old member vars); update_* functions

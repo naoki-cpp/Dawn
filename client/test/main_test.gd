@@ -4,7 +4,7 @@
 ## conversion and module-deactivation bookkeeping. These are the only parts of main.gd
 ## testable without a running scene tree -- HUD construction and input
 ## routing depend on @onready scene paths and need the Godot editor to
-## verify (see docs/architecture/architecture-review-client.md C-1). Picking math lives
+## verify (see docs/architecture/architecture-review/client.md C-1). Picking math lives
 ## in ship_picking.gd (client/test/ship_picking_test.gd); marker spawning
 ## and spectral colour live in navigation_marker_renderer.gd
 ## (client/test/navigation_marker_renderer_test.gd).

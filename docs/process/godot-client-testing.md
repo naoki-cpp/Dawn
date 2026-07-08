@@ -81,7 +81,7 @@ Not testable / out of scope (left to visual checks in the Godot editor):
   - anything depending on @onready scene-tree path references
   - WebSocket communication (the live connection part of connection.gd)
   -> matches the areas marked "needs Godot editor verification" as C-1/C-3
-     in docs/architecture/architecture-review-client.md
+     in docs/architecture/architecture-review/client.md
 ```
 
 **When adding or extracting a new pure function into `main.gd` etc., include

@@ -1,7 +1,7 @@
 ## navigation_marker_renderer.gd
 ##
 ## Builds the visual markers for Jump Gates and celestial bodies, extracted
-## from main.gd (architecture-review-client.md C-1, second slice after
+## from main.gd (architecture-review/client.md C-1, second slice after
 ## ShipPicking). Stateless static helpers -- callers supply the scene root
 ## to populate and the live navigation data; main.gd keeps ownership of
 ## that data and any state that isn't purely about rendering (e.g.

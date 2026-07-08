@@ -1,7 +1,7 @@
 ## ship_picking.gd
 ##
 ## Ray-vs-candidate picking math for ship/gate/body selection, extracted from
-## main.gd (architecture-review-client.md C-1: main.gd was a god object;
+## main.gd (architecture-review/client.md C-1: main.gd was a god object;
 ## this is the first piece pulled out). Stateless static helpers -- every
 ## method takes the camera and candidate data it needs and returns the
 ## picked id, or -1. No @onready / scene-path dependencies, so this class
