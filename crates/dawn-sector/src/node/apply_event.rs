@@ -268,27 +268,19 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             DomainEvent::PackagedShipBuilt(e) => {
-                let _ = self.try_debit_station_item(
-                    e.player_id,
-                    dawn_core::ItemId::ScrapMetal,
-                    e.scrap_cost,
-                );
-                self.credit_station_item(
-                    e.player_id,
-                    dawn_core::ItemId::PackagedShip(e.ship_type_id),
-                    1,
-                );
+                // ADR-0038: Station inventory is durable in SQLite, written
+                // through synchronously by the live command handler
+                // (`station.rs::build_packaged_ship_owned`) before this event
+                // was even appended. Replaying the credit/debit here would
+                // double-apply it.
                 if e.tick > self.current_tick {
                     self.current_tick = e.tick;
                 }
             }
 
             DomainEvent::ShipDisassembled(e) => {
-                self.credit_station_item(
-                    e.player_id,
-                    dawn_core::ItemId::PackagedShip(e.ship_type_id),
-                    1,
-                );
+                // ADR-0038: see PackagedShipBuilt above -- the credit already
+                // happened live in `disassemble_ship_owned`.
                 self.remove_ship(e.ship_id);
                 if e.tick > self.current_tick {
                     self.current_tick = e.tick;
@@ -296,11 +288,8 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             DomainEvent::ShipAssembled(e) => {
-                let _ = self.try_debit_station_item(
-                    e.player_id,
-                    dawn_core::ItemId::PackagedShip(e.ship_type_id),
-                    1,
-                );
+                // ADR-0038: see PackagedShipBuilt above -- the debit already
+                // happened live in `assemble_ship_owned`.
                 if !self.ships.index.contains_key(&e.ship_id) {
                     self.insert_ship_entity(
                         e.ship_id,
@@ -448,14 +437,27 @@ mod tests {
         );
     }
 
+    /// ADR-0038: the credit/debit already happened live in
+    /// `build_packaged_ship_owned` (synchronously, straight to SQLite) before
+    /// this event was ever appended. Replaying it must NOT touch Station
+    /// inventory again -- pre-seed the state as it would already be
+    /// post-live-command, replay the event, and confirm nothing changed.
     #[test]
-    fn packaged_ship_built_event_replay_updates_station_inventory() {
+    fn packaged_ship_built_event_replay_does_not_double_apply_station_inventory() {
         let mut node = mem_node();
         let player_id = dawn_core::PlayerId(5);
         let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        // As if build_packaged_ship_owned already ran live: 3 -> 2 ScrapMetal,
+        // +1 PackagedShip.
         node.replace_station_inventory(
             player_id,
-            std::collections::BTreeMap::from([(dawn_core::ItemId::ScrapMetal, 3)]),
+            std::collections::BTreeMap::from([
+                (dawn_core::ItemId::ScrapMetal, 2),
+                (
+                    dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE),
+                    1,
+                ),
+            ]),
         );
 
         node.apply_event_pub(DomainEvent::PackagedShipBuilt(
@@ -471,14 +473,16 @@ mod tests {
 
         assert_eq!(
             node.station_item_count(player_id, dawn_core::ItemId::ScrapMetal),
-            2
+            2,
+            "replay must not debit ScrapMetal a second time"
         );
         assert_eq!(
             node.station_item_count(
                 player_id,
                 dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE)
             ),
-            1
+            1,
+            "replay must not credit the PackagedShip a second time"
         );
     }
 
@@ -501,12 +505,22 @@ mod tests {
         );
     }
 
+    /// ADR-0038: the credit already happened live in `disassemble_ship_owned`.
+    /// Replay must still remove the ship (that's not SQLite-durable, it's
+    /// ECS state reconstructed from the event tail) but must NOT credit
+    /// Station inventory again.
     #[test]
-    fn ship_disassembled_event_replay_credits_station_inventory_and_removes_ship() {
+    fn ship_disassembled_event_replay_does_not_double_credit_station_inventory() {
         let mut node = mem_node();
         let player_id = dawn_core::PlayerId(5);
         let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
         node.adopt_player_ship(ship_id, player_id);
+        // As if disassemble_ship_owned already ran live.
+        node.credit_station_item(
+            player_id,
+            dawn_core::ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
+            1,
+        );
 
         node.apply_event_pub(DomainEvent::ShipDisassembled(
             dawn_core::events::ShipDisassembled {
@@ -523,20 +537,21 @@ mod tests {
                 player_id,
                 dawn_core::ItemId::PackagedShip(dawn_core::ShipTypeId(1))
             ),
-            1
+            1,
+            "replay must not credit the PackagedShip a second time"
         );
         assert!(node.get_ship_position(ship_id).is_none());
     }
 
+    /// ADR-0038: the debit already happened live in `assemble_ship_owned`
+    /// (there is nothing left to debit here -- pre-seeding a stack and
+    /// expecting replay to consume it, as this test used to, would prove the
+    /// double-application bug this ADR fixes rather than guard against it).
+    /// Replay must still reconstruct the ship ECS state from the event.
     #[test]
-    fn ship_assembled_event_replay_debits_station_inventory_and_reconstructs_the_ship() {
+    fn ship_assembled_event_replay_does_not_double_debit_station_inventory() {
         let mut node = mem_node();
         let player_id = dawn_core::PlayerId(5);
-        node.credit_station_item(
-            player_id,
-            dawn_core::ItemId::PackagedShip(dawn_core::ShipTypeId(1)),
-            1,
-        );
         let new_ship_id = dawn_core::ShipId::new(dawn_core::NodeId(0), 99);
 
         node.apply_event_pub(DomainEvent::ShipAssembled(
@@ -554,7 +569,8 @@ mod tests {
                 player_id,
                 dawn_core::ItemId::PackagedShip(dawn_core::ShipTypeId(1))
             ),
-            0
+            0,
+            "replay must not debit a stack that was already consumed live"
         );
         assert!(node.owns_ship(player_id, new_ship_id));
         assert_eq!(

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use dawn_ecs::components::{
     CapacitorComp, FittingComp, HullComp, InventoryComp, PositionComp, TackledComp, VelocityComp,
 };
@@ -84,7 +86,12 @@ impl<S: EventStore> SimulationNode<S> {
             tick: self.current_tick,
             id_counter: self.id_counter,
             ships,
-            station_inventories: self.station_inventory_storage().clone(),
+            // ADR-0038: Station inventory is durable in SQLite now, decoupled
+            // from the tick-log snapshot cadence -- never populated here
+            // going forward. Kept on `StateSnapshot` only so old snapshots
+            // (from before this change) still deserialize; `restore_from`
+            // migrates a non-empty one into SQLite once.
+            station_inventories: BTreeMap::new(),
             docked_ships: self.docked_ships.clone(),
             docked_players: self.docked_players.clone(),
         }
@@ -584,12 +591,24 @@ mod tests {
         );
     }
 
+    /// ADR-0038: Station inventory now survives a restart because it lives in
+    /// its own durable SQLite file, independent of the snapshot/event-log
+    /// lifecycle -- not because `take_snapshot()`/`restore_from()` carry it
+    /// (they don't, going forward). Simulates a real restart: `node` and
+    /// `node2` are otherwise-independent `SimulationNode`s (fresh in-memory
+    /// event store, like a real process restart would use a fresh
+    /// `FileEventStore` handle), but both point `open_station_inventory_db`
+    /// at the same on-disk file.
     #[test]
     fn station_inventory_survives_snapshot_restore() {
         use crate::{modules, ship_types};
         use dawn_core::{ItemId, PlayerId};
 
+        let db_path = tempfile::NamedTempFile::new().unwrap();
+        let db_path = db_path.path().to_str().unwrap();
+
         let mut node = node_with_modules();
+        node.open_station_inventory_db(db_path).unwrap();
         node.credit_station_item(PlayerId(7), ItemId::ScrapMetal, 4);
         node.credit_station_item(
             PlayerId(7),
@@ -602,6 +621,35 @@ mod tests {
         for rec in node.event_store().all_records() {
             store2.append(rec.event.clone());
         }
+        let mut node2 = SimulationNode::restore_from(
+            store2,
+            &snap,
+            &modules::all_modules(),
+            &ship_types::all_ship_types(),
+        );
+        node2.open_station_inventory_db(db_path).unwrap();
+
+        assert_eq!(node2.station_item_count(PlayerId(7), ItemId::ScrapMetal), 4);
+        assert_eq!(
+            node2.station_item_count(PlayerId(7), ItemId::PackagedShip(dawn_core::ShipTypeId(1))),
+            1
+        );
+    }
+
+    /// ADR-0038 back-compat: a `StateSnapshot` taken before this change still
+    /// carries a populated `station_inventories` field. `restore_from` must
+    /// migrate it into the (fresh, in-memory) SQLite database once.
+    #[test]
+    fn restore_from_migrates_a_pre_adr_0038_snapshots_station_inventories() {
+        use crate::{modules, ship_types};
+        use dawn_core::{ItemId, PlayerId};
+
+        let node = node_with_modules();
+        let mut snap = node.take_snapshot();
+        snap.station_inventories =
+            BTreeMap::from([(PlayerId(7), BTreeMap::from([(ItemId::ScrapMetal, 9)]))]);
+
+        let store2 = InMemoryEventStore::new();
         let node2 = SimulationNode::restore_from(
             store2,
             &snap,
@@ -609,11 +657,7 @@ mod tests {
             &ship_types::all_ship_types(),
         );
 
-        assert_eq!(node2.station_item_count(PlayerId(7), ItemId::ScrapMetal), 4);
-        assert_eq!(
-            node2.station_item_count(PlayerId(7), ItemId::PackagedShip(dawn_core::ShipTypeId(1))),
-            1
-        );
+        assert_eq!(node2.station_item_count(PlayerId(7), ItemId::ScrapMetal), 9);
     }
 
     #[test]

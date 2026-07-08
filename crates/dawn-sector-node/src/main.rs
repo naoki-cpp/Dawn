@@ -270,8 +270,14 @@ fn build_node(
 
     // FileEventStore::open does not create its parent directory, and a fresh
     // deployment has no `data/node-N/` yet -- create it (and the snapshot/
-    // cold-archive parents, which are normally the same directory) up front.
-    for path in [&cfg.event_log_path, &cfg.snapshot_path, &cfg.cold_path] {
+    // cold-archive/station-inventory-db parents, which are normally the same
+    // directory) up front.
+    for path in [
+        &cfg.event_log_path,
+        &cfg.snapshot_path,
+        &cfg.cold_path,
+        &cfg.station_inventory_db_path,
+    ] {
         if let Some(parent) = std::path::Path::new(path).parent() {
             std::fs::create_dir_all(parent).unwrap_or_else(|e| {
                 panic!("failed to create directory '{}': {e}", parent.display())
@@ -318,5 +324,15 @@ fn build_node(
     let star_map = Galaxy::load_from_file(PRODUCTION_GALAXY_PATH)
         .unwrap_or_else(|e| panic!("failed to load production galaxy map: {e}"));
     node.set_galaxy(Arc::new(star_map));
+    // ADR-0038: Station inventory's durability is independent of the event
+    // log / snapshot lifecycle above -- opening it is just pointing at the
+    // (persistent, on-disk) file, whether this node is fresh or restored.
+    node.open_station_inventory_db(&cfg.station_inventory_db_path)
+        .unwrap_or_else(|e| {
+            panic!(
+                "failed to open station inventory db '{}': {e}",
+                cfg.station_inventory_db_path
+            )
+        });
     (node, is_fresh)
 }

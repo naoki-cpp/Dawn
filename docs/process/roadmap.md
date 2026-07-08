@@ -304,15 +304,19 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
 | 9 | client: Dock/Undock + Station操作UI | 入港状態の表示と `D` / `U` / `B` / `Y` 操作は実装済み。2026-07-08、「維持条件」として挙げていた2点（`ShipDocked`/`ShipUndocked`と`PlayerLoadout`の順序レース、`station_id=0`と未dockの混同）を調査した結果、`world_session.gd::_apply_dock_state`のtickガード（`tick < latest_dock_state_tick`）と`player_loadout.gd::apply_payload`の`!= null`判定（truthy判定ではない）で両方とも実装は既に正しいことを確認。GdUnit4回帰テストを4件追加して固定（`world_session_test.gd`の`test_dock_event_with_station_id_zero_is_treated_as_docked`/`test_stale_undock_event_does_not_revert_a_newer_dock_fitting_context`、`player_loadout_test.gd`の`test_apply_payload_treats_station_id_zero_as_docked`）。プロダクションコード変更なし | ✅ |
 | 10 | client: Packaged Ship のインベントリ表示・Assemble/Disassemble/建造UI | station UI の上に載せる。Ship側 inventory と Station側 inventory が混ざらないこと。2026-07-07、Station Inventory上の`PackagedShip`行クリックで`AssembleCommand`を送るところまで実装。2026-07-08、複数所有船の切り替えUI（インベントリパネル「SHIPS」列、`PlayerLoadout.owned_ships`から構築、クリックで`SelectActiveShipCommand`）を追加し、Disembark→Assemble→SelectActiveShip→Undockが一通りクライアントから完結。新規プレイヤーはspawn時にStation Inventoryへ`PackagedShip`を1隻自動付与（`spawn_player_ship_at`）。同日、Ship側cargoとStation Inventoryが同じ「INVENTORY」列に`[Station]`プレフィックスだけで同居していた（この行自体が明記する要件に反していた）ことが発覚し、「SHIP CARGO」「STATION」の別列に分離（`hud_manager.gd`のinventory panelを3列→4列に拡張）。同日、船のインベントリをStation Inventoryへ移す`TransferToStationCommand`（`Module`/`ScrapMetal`共通の汎用コマンド、docked中のみ、全量転送のみ）を追加し、SHIP CARGO列の行を右クリックで送信できるように（左クリックは既存の"fit"操作のため別ジェスチャーとした）。2026-07-08、`[Y]`/`[B]`キー止まりだったDisassemble/建造に専用ボタンUIを追加（キーは維持・併存）。`ShipTypeDefinition`に`buildable: bool`を新設（`dawn-core`、NPC Frigateはfalse・Magpieはtrue）し、`InitialState`の新フィールド`buildable_ship_types`（`serialization.rs`）でクライアントに公開。STATION列に常設の「Disassemble active ship」行と、クリックで展開する「Build Ship ▸」ピッカー行（`buildable_ship_types`から1隻種1行）を追加（`inventory_row.gd`に`ACTION_DISASSEMBLE`/`ACTION_BUILD_TOGGLE`/`ACTION_BUILD_SHIP_TYPE`を新設）。これにより`BUILDABLE_SHIP_TYPE_ID`固定值に頼らず船種を選んで建造できる。GdUnit4テスト6件追加（`hud_manager_test.gd`2件・`main_test.gd`3件、既存分含め183/183通過・0 orphans）。`cargo test --workspace`/`fmt`/`clippy -D warnings`全件通過 | ✅ |
 
-#### 9B 補足: Station inventory の保存戦略
+#### 9B 補足: Station inventory の保存戦略（2026-07-08、ADR-0038 で実装完了）
 
 - Market と違って、Station inventory は Sector command validation のホットパスにある。
-- そのため、即時の権威状態を毎回 SQL 直読みにする設計は採らない。
-- 方向性は **実行中はメモリ、耐久保存と容量対策は DB/スナップショット** の二層。
-- 将来の大量入港対策は、dock 中 / 最近使った player の inventory を lazy load /
-  write-back cache として扱える seam を切ることで進める。
-- 現状は raw `BTreeMap` 直参照を helper 経由へ寄せ始めた段階で、backend 差し替えの
-  足場だけ先に整えている。
+- そのため、即時の権威状態を毎回 SQL 直読みにする設計は採らない——
+  読み取りは直近に触れた player だけのbounded in-memory cache経由（ヒット時はDB往復なし）。
+- **実装済み**: SQLite（`crates/dawn-sector/src/node/station_inventory_db.rs`）を
+  永続化の権威とし、`StateSnapshot.station_inventories` は今後書かれなくなった
+  （旧形式スナップショット読み込み用の後方互換フィールドとしてのみ残る）。
+  再起動時に全プレイヤー分をメモリへ丸ごと読み込むコストが消え、
+  「全アイテムをロードしておく必要がある」問題を解消。
+- `credit_station_item`/`try_debit_station_item` は SQLiteへ同期書き込み
+  （Station操作はtickごとではなくプレイヤー起点の低頻度コマンドのため許容）。
+- 詳細・却下した代替案・リプレイとの二重適用を避ける設計は ADR-0038 参照。
 
 ### 9C. プレイヤー設置インフラ（Smart Assembly 相当・ADR-0034 の範囲外）
 
