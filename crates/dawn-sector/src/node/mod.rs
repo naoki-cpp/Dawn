@@ -24,6 +24,7 @@ mod inventory;
 mod jump;
 mod navigation;
 mod orbit;
+mod player_loadout_projection;
 mod range_gate;
 mod sector_map;
 mod serialization;
