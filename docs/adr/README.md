@@ -65,6 +65,7 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 |---|---|---|
 | [ADR-0034](ADR-0034-economy-foundations.md) | Economy Foundations — Item一般化 / Packaged Ship / Scrap Metal / Market・DBの境界 | Accepted |
 | [ADR-0037](ADR-0037-docked-ship-ownership.md) | Docked Ship Ownership — owned ship / active ship / docked station context を分離する | Accepted |
+| [ADR-0038](ADR-0038-station-inventory-sqlite.md) | Station Inventory — SQLite as the durable authority, lazy-loaded in memory | Accepted |
 
 ### UI / Client Presentation
 

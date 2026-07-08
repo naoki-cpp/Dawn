@@ -509,8 +509,7 @@ mod tests {
         assert_eq!(inv.item_count(dawn_core::ItemId::ScrapMetal), 0);
         assert_eq!(
             node.station_inventory(player)
-                .and_then(|inv| inv.get(&dawn_core::ItemId::ScrapMetal))
-                .copied()
+                .and_then(|inv| inv.get(&dawn_core::ItemId::ScrapMetal).copied())
                 .unwrap_or(0),
             4
         );

@@ -30,6 +30,7 @@ mod ship_registry;
 mod snapshot_io;
 mod spawner_logic;
 mod station;
+mod station_inventory_db;
 mod tackle;
 mod tick;
 mod transit_flow;
@@ -48,8 +49,8 @@ use std::sync::Arc;
 
 use dawn_core::{
     ship_type::{ShipTypeDefinition, ShipTypeId},
-    DomainEvent, ItemId, JumpGateDef, JumpGateId, ModuleDefinition, ModuleId, NodeId, PlayerId,
-    Position, SectorBounds, SectorId, ShipId, StationDef, StationId, Tick,
+    DomainEvent, JumpGateDef, JumpGateId, ModuleDefinition, ModuleId, NodeId, PlayerId, Position,
+    SectorBounds, SectorId, ShipId, StationDef, StationId, Tick,
 };
 use dawn_ecs::{
     components::{PositionComp, ShipStatsComp},
@@ -181,10 +182,12 @@ where
     /// Per-Sector population backstop (ADR-0018). Defaults to [`POPULATION_CAP`];
     /// tunable via [`Self::set_population_cap`].
     population_cap: usize,
-    /// Minimal station storage keyed by player for this Sector's NPC stations
-    /// (ADR-0034 9B foundation). The first slice is intentionally simple:
-    /// `PlayerId`-scoped storage without structure ownership or permission graphs.
-    station_inventories: BTreeMap<PlayerId, BTreeMap<ItemId, u64>>,
+    /// Durable Station inventory store (ADR-0038): SQLite is the authority,
+    /// this is a bounded in-memory cache of recently-touched players on top
+    /// of it (`node/station.rs`'s seam). `RefCell` for interior mutability so
+    /// read-only accessors can still populate the cache on a miss.
+    station_inventory_db: station_inventory_db::StationInventoryDb,
+    station_inventory_cache: std::cell::RefCell<station::StationInventoryCache>,
     /// Current docked station per ship. Docking is authoritative state, so
     /// station operations must consult this rather than raw spatial proximity.
     docked_ships: BTreeMap<ShipId, StationId>,
@@ -276,7 +279,9 @@ impl<S: EventStore> SimulationNode<S> {
             },
             anchor_table: crate::anchor::AnchorTable::from_galaxy(&crate::galaxy::Galaxy::demo()),
             population_cap: POPULATION_CAP,
-            station_inventories: BTreeMap::new(),
+            station_inventory_db: station_inventory_db::StationInventoryDb::open_in_memory()
+                .expect("in-memory sqlite connection never fails to open"),
+            station_inventory_cache: std::cell::RefCell::new(station::StationInventoryCache::new()),
             docked_ships: BTreeMap::new(),
             docked_players: BTreeMap::new(),
             pending_auto_jumps: Vec::new(),
@@ -335,14 +340,24 @@ impl<S: EventStore> SimulationNode<S> {
             },
             anchor_table: crate::anchor::AnchorTable::from_galaxy(&crate::galaxy::Galaxy::demo()),
             population_cap: POPULATION_CAP,
-            station_inventories: BTreeMap::new(),
+            station_inventory_db: station_inventory_db::StationInventoryDb::open_in_memory()
+                .expect("in-memory sqlite connection never fails to open"),
+            station_inventory_cache: std::cell::RefCell::new(station::StationInventoryCache::new()),
             docked_ships: snapshot.docked_ships.clone(),
             docked_players: snapshot.docked_players.clone(),
             pending_auto_jumps: Vec::new(),
             completed_warps: Vec::new(),
         };
 
-        node.replace_station_inventory_storage(snapshot.station_inventories.clone());
+        // ADR-0038 back-compat: snapshots taken before Station inventory
+        // moved to SQLite still carry the full map in this field. Migrate it
+        // once; snapshots taken from now on always leave it empty (SQLite is
+        // independently durable, so there's nothing to migrate on a fresh
+        // restore of a node that's already on the new format).
+        if !snapshot.station_inventories.is_empty() {
+            node.station_inventory_db
+                .migrate_from_snapshot(&snapshot.station_inventories);
+        }
 
         for def in modules {
             node.register_module(def.clone());
@@ -391,6 +406,20 @@ impl<S: EventStore> SimulationNode<S> {
     /// Override the per-Sector population backstop (default [`POPULATION_CAP`]).
     pub fn set_population_cap(&mut self, cap: usize) {
         self.population_cap = cap;
+    }
+
+    /// Point Station inventory persistence at a real on-disk SQLite file
+    /// (ADR-0038) instead of the private in-memory database `new`/`with_store`/
+    /// `restore_from` default to. Production wiring (`dawn-sector-node`'s
+    /// `build_node`) calls this once after construction, mirroring
+    /// `set_galaxy`'s "construct generically, configure production specifics
+    /// afterward" shape. Replaces the cache too, since it would otherwise
+    /// still hold entries read from the old (in-memory) database.
+    pub fn open_station_inventory_db(&mut self, path: &str) -> rusqlite::Result<()> {
+        self.station_inventory_db = station_inventory_db::StationInventoryDb::open(path)?;
+        self.station_inventory_cache
+            .replace(station::StationInventoryCache::new());
+        Ok(())
     }
 
     /// Replace the navigation topology.  Updates `jump_gates` and

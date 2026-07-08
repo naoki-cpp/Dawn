@@ -47,6 +47,11 @@ pub struct NodeConfig {
     /// checkpointing stays deterministic and replay-stable.
     #[serde(default = "default_checkpoint_interval_ticks")]
     pub checkpoint_interval_ticks: u64,
+    /// Path to the SQLite database backing Station inventory (ADR-0038).
+    /// Independent of the event log / snapshot lifecycle -- durable on its
+    /// own, and reopened as-is on restart.
+    #[serde(default = "default_station_inventory_db_path")]
+    pub station_inventory_db_path: String,
 }
 
 fn default_npc_ships() -> usize {
@@ -66,6 +71,9 @@ fn default_cold_path() -> String {
 }
 fn default_checkpoint_interval_ticks() -> u64 {
     600
+}
+fn default_station_inventory_db_path() -> String {
+    "data/station_inventory.sqlite3".to_string()
 }
 
 /// One peer's network endpoints.
