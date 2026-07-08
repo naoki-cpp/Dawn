@@ -110,7 +110,7 @@ Check:
 - architecture.md: crate list and dependency DAG cover every crate
   (compare with `ls crates/`); transport description does not contradict
   ADR-0007
-- architecture-review-server.md / architecture-review-client.md: line counts
+- architecture-review/server.md / architecture-review/client.md: line counts
   in the file-size tables match reality (`wc -l` on the biggest files — these
   go stale fastest; full refresh belongs to /architecture-review)
 - entity-model.md: ECS component list matches `crates/dawn-ecs/src/components/`;

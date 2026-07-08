@@ -94,7 +94,7 @@ SQLite は**クラッシュ直前まで**の状態を既に持っている。こ
 - クラッシュのタイミングによっては、SQLiteへの書き込みとイベントログへの
   追記の間に**狭い不整合ウィンドウ**が残る（例: Station inventoryは加算済み
   だが`ShipDisassembled`はログに記録されずshipが残ったまま）。これは
-  M-9（`architecture-review-server.md`）で既に許容している「crash-onlyで
+  M-9（`architecture-review/server-pending.md`）で既に許容している「crash-onlyで
   narrowな不整合ウィンドウ」と同じクラスのリスクとして許容し、今回は
   解決しない。
 - `dawn-sector`に`rusqlite`（bundled feature）を追加する。FBD-002

@@ -1,6 +1,6 @@
 ---
 name: architecture-review
-description: Periodic senior-architect-style health review of Dawn's Rust crates and Godot client. Re-measures file sizes, re-grades health (green/yellow/red), files/updates issue IDs with root cause and decision, and updates architecture-review-server.md / architecture-review-client.md in place. Docs-only -- never changes code. Use for periodic maintenance review, not for fixing code.
+description: Periodic senior-architect-style health review of Dawn's Rust crates and Godot client. Re-measures file sizes, re-grades health (green/yellow/red), files/updates issue IDs with root cause and decision, and updates architecture-review/server.md / architecture-review/client.md in place. Docs-only -- never changes code. Use for periodic maintenance review, not for fixing code.
 ---
 
 # architecture-review

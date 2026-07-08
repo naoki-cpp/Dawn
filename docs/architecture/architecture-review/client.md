@@ -1,15 +1,27 @@
 ---
-scope    : Godot クライアント（client/scripts/）の保守性・設計品質レビュー
+scope    : Godot クライアント（client/scripts/）の保守性・設計品質レビュー — 構造評価
 audience : AI Agent / Human Developer
 update   : クライアント側で大規模リファクタ実施後 / 新スクリプト追加時
-related  : docs/architecture/architecture-review-server.md（サーバー側）, docs/architecture/architecture.md, docs/process/playtest-guide.md
+related  : docs/architecture/architecture-review/server.md（サーバー側）, docs/architecture/architecture.md, docs/process/playtest-guide.md,
+           docs/architecture/architecture-review/client-completed.md（完了済みログ）,
+           docs/architecture/architecture-review/client-pending.md（未完項目）
 date     : 2026-07-09（定期再計測。client/scripts の行数 drift を再計測して更新。構造評価と issue 状態に変化はなく、client 総合 A を維持）
 ---
 
-# Architecture Review — Dawn Client (Godot)
+# Architecture Review — Dawn Client（Godot・構造評価）
 
-サーバー側 [architecture-review-server.md](./architecture-review-server.md) のクライアント版。
+サーバー側 [server.md](./server.md) のクライアント版。
 **分析のみ。コード変更はロードマップに従い段階的に実施すること。**
+
+このファイルは「今どういう状態か」（グレード・ファイルサイズ・issue ID の登録簿）を扱う。
+未完項目・保留判断は
+[client-pending.md](./client-pending.md)、
+解消済みの作業ログは
+[client-completed.md](./client-completed.md) を参照。
+
+> `client/scripts/*.gd` のコード内コメントは issue ID（例 `C-1`）でこのファイルを参照している
+> （`client.md C-1` の形）。ID の登録簿はこのファイルに残し続けること —
+> 完了済みログへ移しても構わないが、その場合はコード側の参照コメントも更新すること。
 
 ---
 
@@ -82,7 +94,7 @@ world visual side effect、`ModuleRow`/`ItemRow` が PlayerLoadout の wire row 
 network send は `main.gd` 側。
 
 （`client/test/*.gd` は `world_presentation_test.gd` を含め 15 ファイル・合計 1,808 行。
-ケース数は175。§「テストカバレッジ」参照）
+ケース数は175。詳細な内訳は completed.md のテストカバレッジ表を参照）
 
 ---
 
@@ -111,26 +123,22 @@ network send は `main.gd` 側。
 
 ---
 
-## 問題一覧
+## Issue ID 登録簿
 
-### 解消済み（要約）
+コード内コメントが参照する issue ID の一覧。詳細な解消経緯は
+[client-completed.md](./client-completed.md) を参照。
+現時点で client 側に open な issue はない（全て解消済み）。
 
-| ID | 内容 | 解消内容 |
+| ID | 内容 | 状態 |
 |---|---|---|
-| C-1 | `main.gd` god object（13以上の異種責務） | 補助 module を抽出して orchestration 層へ縮小。 |
-| C-5 | client World Session module | `world_session.gd` に live world state を集約。 |
-| C-6 | client HUD Surface module | `hud_surface.gd` を新設し、HUD 参照所有と dirty-tracking を集約。 |
-| C-7 | client World Interaction module | `world_interaction.gd` に selection / click→intent / key action を集約。 |
-| C-4 | PlayerLoadout dict のスキーマ非検証 | `ModuleRow` / `ItemRow` を導入し typed row 化。 |
-| C-2 | マーカー生成/ピッキング/ワープ着地点計算の同型ロジック2重実装 | 共通 helper と補助 module へ抽出。 |
-| C-3 | シーンツリー直パス参照の脆さ（`@onready` の `$Connection` 等8箇所、null チェックなし） | `_assert_scene_tree_refs()` による fail-fast 検証を追加。 |
-| C-8 | インベントリ行 Dictionary が stringly-typed のまま main.gd と合意している | `InventoryRow` を導入し typed row 化。 |
-
-C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` / `HudManager`）と
-追加の deep modules（`WorldSession` / `HudSurface`）はいずれも GdUnit4 テスト付き。
-各規模は「ファイルサイズ一覧」を参照。
-マウス入力は scene-tree 依存の end-to-end 配線こそ `main.gd` に残るが、状態依存の本体
-（selection ownership / double-click / click→intent）は `WorldInteraction` に移動済み。
+| C-1 | `main.gd` god object（13以上の異種責務） | 解消済み |
+| C-2 | マーカー生成/ピッキング/ワープ着地点計算の同型ロジック2重実装 | 解消済み |
+| C-3 | シーンツリー直パス参照の脆さ（`@onready` の `$Connection` 等8箇所、null チェックなし） | 解消済み |
+| C-4 | PlayerLoadout dict のスキーマ非検証 | 解消済み |
+| C-5 | client World Session module | 解消済み |
+| C-6 | client HUD Surface module | 解消済み |
+| C-7 | client World Interaction module | 解消済み |
+| C-8 | インベントリ行 Dictionary が stringly-typed のまま main.gd と合意している | 解消済み |
 
 **運用上の注意**: `class_name` を新規追加した直後は Godot がプロジェクトを
 スキャンするまでグローバル識別子として認識されない（CLI テストが
@@ -138,58 +146,6 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 ```bash
 "$GODOT_BIN" --headless --editor --quit-after 3 --path client
 ```
-
-### テストカバレッジ（C-1 完了時点 + 以降の回帰テスト追加）
-
-| テストファイル | 対象 | ケース数 |
-|---|---|---|
-| `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 13 |
-| `ship_picking_test.gd` | `ShipPicking`（画面空間ピッキング含む） | 12 |
-| `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer`（選択リング含む） | 12 |
-| `input_decoder_test.gd` | `InputDecoder`。2026-07-07、`KEY_X`（Disembark）判定のケースを追加（+2） | 32 |
-| `hud_manager_test.gd` | `HudManager` | 21 |
-| `hud_surface_test.gd` | `HudSurface`（HUD render frame / fitting更新 / inventory hit-test 委譲 / パネル dirty-tracking 判定。C-4 で `ModuleRow` の `clone()`/`equals()` ベース差分判定のケースを追加）。2026-07-08、station roster / `source` タグ付けのケースを追加（+2） | 16 |
-| `billboard_ring_test.gd` | `BillboardRing` | 3 |
-| `camera_controller_test.gd` | `CameraController`（orbit drag） | 2 |
-| `unit_format_test.gd` | `UnitFormat`（ADR-0029 速度/距離単位整形） | 8 |
-| `world_space_test.gd` | `WorldSpace`（ADR-0029 浮動原点リベース） | 4 |
-| `connection_test.gd` | `connection.gd`（URL正規化・module activated signal・PlayerLoadout wire message rename の回帰テスト） | 6 |
-| `player_loadout_test.gd` | `PlayerLoadout`（PR #33 起点、後に rename。C-4 で `ModuleRow`/`ItemRow` の `from_json()` 検証ケースを追加）。2026-07-07〜08、`active_ship_id`/`owned_ships` のケースを追加（+3） | 17 |
-| `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy / dock state） | 11 |
-| `world_interaction_test.gd` | `WorldInteraction`（selection ownership / double-click / lock intent / key action 解釈） | 8 |
-| `world_presentation_test.gd` | `WorldPresentation`（marker clamp / warp tunnel easing / sun state） | 6 |
-| **合計** | | **175**（`func test_` 実測、2026-07-08） |
-
-テスト導入で見つかった不具合・定着した手順（詳細: `docs/process/godot-client-testing.md`）:
-- `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる
-- `class_name` 新規追加直後はキャッシュ未更新で全件失敗する（上記コマンドで解消）
-- `add_child()` しない Control ノードは `auto_free()` で明示的に解放する（orphan node 検出）
-
-`main.gd` に残るのは input event の配線、イベント dispatch、scene spawning といった
-シーンインスタンス化やネットワーク接続が絡む領域で、ここは引き続き視覚的な確認が主な検証手段になる。
-
-（Medium debt: 保留項目なし。C-1〜C-8 は「解消済み」参照）
-
----
-
-## 改善ロードマップ
-
-C-1〜C-8 はすべて解消済み（上記「問題一覧」参照）。
-
-`main.gd` の god object 問題は実質解消し、C-4（PlayerLoadout dict のスキーマ非検証）も
-C-8（インベントリ行 Dictionary の stringly-typed 設計）も typed row 化で解消したため、
-クライアント側の次の課題は構造リファクタではなく機能側（戦闘の深み、ADR-0016 §5）が妥当。
-
-### 採らない方針
-
-- main.gd を複数の `.tscn` 化されたコンポーネント（個別シーン+スクリプト）に分割することは、
-  シーン参照切れのリスクが高い。pin 済み Godot CLI で構文・実行エラーは検出できるようになったが、
-  シーンツリー構成の妥当性（ノードパスの解決・レイアウト）はヘッドレス実行だけでは確認しきれない。
-  GDScript ファイル内の `class_name` 抽出（同一シーンに留める）の方が安全で、C-1 では
-  実際にこの方式で4クラスを抽出し、GdUnit4 で検証できた。
-- raw `InputEvent` をそのまま deep module に飲ませることは当面行わない。`WorldInteraction` は
-  正規化された input facts を受けて intent を返す形に留め、Godot の scene-tree / `InputEvent`
-  依存を抱え込まない。これにより GdUnit4 での scene-tree なしテスト可能性を保っている。
 
 ---
 
@@ -210,3 +166,10 @@ C-8（インベントリ行 Dictionary の stringly-typed 設計）も typed row
   （Camera3D・候補データ・Callable・refs Dictionary・`BillboardRing`・HUD root Control・正規化 input facts）で、main.tscn のノード構成
   変更の影響を受けにくい
 - `main.gd` のイベント dispatch 層（455–788行） — 個々のハンドラは narrow で ADR 参照付き
+
+---
+
+未完項目・保留判断は
+[client-pending.md](./client-pending.md)、
+解消済みの作業ログ・テストカバレッジの内訳は
+[client-completed.md](./client-completed.md) を参照。

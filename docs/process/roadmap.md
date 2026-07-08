@@ -73,7 +73,7 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 - ✅ Godot クライアント構造リファクタ + テスト基盤（2026-06-21）— `main.gd` の god object を
   `HudManager`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder` の4クラスへ分割
   （1661→1094行）。`scripts/setup-godot.*` で pin 済み Godot CLI を取得し GdUnit4 を導入、
-  計58ケースを実行確認（詳細: `docs/architecture/architecture-review-client.md`）。モジュール
+  計58ケースを実行確認（詳細: `docs/architecture/architecture-review/client.md`）。モジュール
   ON/OFF→CAP!誤表示のバグ修正も含む。Rust側は343テスト全パス
 - ✅ Phase 8D — 分散インフラ（物理ノード）完了（2026-06-29）+ Raspberry Pi 実機検証（2026-07-01）—
   `dawn-replication`（ゴシップ配布 + アンチエントロピー + スナップショット転送）・ネットワーク
@@ -224,7 +224,7 @@ Phase 10: Client 本格化（GDExtension 導入）
 
 - クライアント技術選定（Godot 4 / GDScript / godot-rust の根拠）: `docs/adr/ADR-0004-client-technology.md`
 - サーバー側 Cargo workspace のクレート構成・依存 DAG: `docs/architecture/architecture.md` §3
-- クライアント側 `client/scripts/` の現在のファイル構成・責務・行数: `docs/architecture/architecture-review-client.md`
+- クライアント側 `client/scripts/` の現在のファイル構成・責務・行数: `docs/architecture/architecture-review/client.md`
 
 2026-07-02、「フェーズ横断の設計原則」節を削除（`AI_DEVELOPMENT_GUIDE.md`「Architecture Invariants」
 と重複・そちらが正典）。

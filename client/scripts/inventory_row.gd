@@ -2,7 +2,7 @@
 ##
 ## Typed shape for one row of the HUD inventory panel (FITTED/SHIP CARGO/
 ## STATION/SHIPS columns), replacing the bare Dictionary `hud_manager.gd`
-## used to hand back to `main.gd` (architecture-review-client.md C-8).
+## used to hand back to `main.gd` (architecture-review/client.md C-8).
 ## Unlike `ModuleRow`/`ItemRow` (typed PlayerLoadout wire rows), this is not
 ## wire-sourced -- it wraps a UI `Panel` reference plus whichever of the
 ## fields below a given row kind (module fit/unfit, ship cargo, station

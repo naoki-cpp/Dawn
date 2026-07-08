@@ -33,7 +33,7 @@ cargo llvm-cov --workspace --summary-only -- --skip wire_schema_doc_is_up_to_dat
   `serve/{runtime,single,cluster,aoi_delivery}.rs`, `dawn-sector-node/src/
   {main,runtime,config,data_loader}.rs`, `dawn-actor/src/ws_server.rs`,
   `bench.rs`. These are covered by manual/hardware verification (8D-5) per
-  `docs/architecture/architecture-review-server.md` — unit tests here would
+  `docs/architecture/architecture-review/server.md` — unit tests here would
   mock away everything they actually do.
 - Defensive debug-only branches (e.g. `debug_assert_missing_anchor`): they
   exist to fail loudly on a data-integrity bug during development, not to
