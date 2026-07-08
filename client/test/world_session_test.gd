@@ -215,3 +215,31 @@ func test_older_fitting_dock_context_is_ignored_after_newer_undock() -> void:
 	var status: Dictionary = _session.dock_status()
 	assert_bool(status["is_docked"] as bool).is_false()
 	assert_int(status["docked_station_id"] as int).is_equal(-1)
+
+
+func test_dock_event_with_station_id_zero_is_treated_as_docked() -> void:
+	# station_id 0 is a real station (the first one in a Sector) -- is_docked
+	# must key off the tick guard / >= 0 comparison, not station_id truthiness.
+	_session.player_ship_id = 7
+
+	assert_bool(_session.apply_dock_event(7, 0, "Forge Station", 12)).is_true()
+
+	var status: Dictionary = _session.dock_status()
+	assert_bool(status["is_docked"] as bool).is_true()
+	assert_int(status["docked_station_id"] as int).is_equal(0)
+
+
+func test_stale_undock_event_does_not_revert_a_newer_dock_fitting_context() -> void:
+	# The reverse direction of the race already covered above: a PlayerLoadout
+	# fitting can also arrive *before* a delayed ShipUndocked event for an
+	# already-superseded tick. The stale event must not revert the newer
+	# dock context established by apply_dock_fitting.
+	_session.player_ship_id = 7
+	_session.apply_dock_fitting(5, "Forge Station", 20)
+
+	assert_bool(_session.apply_undock_event(7, 15)).is_false()
+
+	var status: Dictionary = _session.dock_status()
+	assert_bool(status["is_docked"] as bool).is_true()
+	assert_int(status["docked_station_id"] as int).is_equal(5)
+	assert_str(status["docked_station_name"] as String).is_equal("Forge Station")
