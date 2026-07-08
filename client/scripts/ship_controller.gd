@@ -170,6 +170,22 @@ func set_as_player() -> void:
 	_thr_instance = _make_indicator(Color(1.0, 0.55, 0.0))
 	_thr_mesh     = _thr_instance.mesh as ImmediateMesh
 
+## Undo set_as_player() when a different ship becomes the piloted one
+## (ADR-0037 SelectActiveShip/Disembark/Assemble). Frees the velocity/thrust
+## indicator MeshInstances rather than just flipping _is_player off --
+## leaving them around would freeze their last-drawn arrows in place forever
+## since _process() only redraws them while _is_player is true.
+func clear_as_player() -> void:
+	_is_player = false
+	if _vel_instance != null:
+		_vel_instance.queue_free()
+		_vel_instance = null
+		_vel_mesh = null
+	if _thr_instance != null:
+		_thr_instance.queue_free()
+		_thr_instance = null
+		_thr_mesh = null
+
 func set_thrust_direction(godot_dir: Vector3) -> void:
 	_thrust_dir = godot_dir.normalized() if godot_dir.length_squared() > 0.0 else Vector3.ZERO
 

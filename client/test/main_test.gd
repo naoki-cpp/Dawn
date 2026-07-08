@@ -22,6 +22,7 @@ class FakeShip:
 	var velocity_calls: Array[Vector3] = []
 	var thrust_calls: Array[Vector3] = []
 	var set_as_player_calls: int = 0
+	var clear_as_player_calls: int = 0
 
 	func set_velocity(v: Vector3) -> void:
 		velocity_calls.append(v)
@@ -30,6 +31,12 @@ class FakeShip:
 	## a real ship (ship_controller.gd) sets up player-only visuals here.
 	func set_as_player() -> void:
 		set_as_player_calls += 1
+
+	## WorldPresentation.attach_player_ship() calls this on the previously
+	## piloted ship (if any) via ship.call(...) when a different ship
+	## becomes the active one; a real ship tears down player-only visuals.
+	func clear_as_player() -> void:
+		clear_as_player_calls += 1
 
 	func set_thrust_direction(v: Vector3) -> void:
 		thrust_calls.append(v)
@@ -327,9 +334,12 @@ func test_switching_active_ship_to_a_known_ship_reattaches_the_camera() -> void:
 	_main._session.ships[1] = ship_a
 	_main._session.ships[2] = ship_b
 	_main._session.player_ship_id = 1
-	_main._player_ship_id = 1
 	_main._ships = _main._session.ships
-	camera.set_target(ship_a)
+	## Route through the real attach path (not a bare camera.set_target())
+	## so WorldPresentation._player_ship is seeded correctly -- otherwise the
+	## "revert the old ship" assertions below would trivially pass even
+	## without the fix, since there'd be no previous ship to revert.
+	_main._set_as_player_ship(1, ship_a)
 
 	_main._on_player_fitting({"active_ship_id": 2})
 
@@ -337,6 +347,9 @@ func test_switching_active_ship_to_a_known_ship_reattaches_the_camera() -> void:
 	assert_int(_main._session.player_ship_id).is_equal(2)
 	assert_int(ship_b.set_as_player_calls).is_equal(1)
 	assert_object(camera._target_node).is_equal(ship_b)
+	## Regression: the old ship used to stay permanently player-colored
+	## (and kept drawing frozen velocity/thrust indicators) after switching.
+	assert_int(ship_a.clear_as_player_calls).is_equal(1)
 
 
 ## The client has never rendered ship 3 (never entered AoI), so there is no
