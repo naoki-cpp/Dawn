@@ -74,6 +74,7 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/A
 | Crate | Kind | Responsibility |
 |---|---|---|
 | `dawn-core` | library | Pure domain model. Zero external dependencies |
+| `dawn-client-core` | library | Godot-independent client-side domain model (loadout, wire row types). Depends only on `dawn-core` (ADR-0039) |
 | `dawn-ecs` | library | ECS World wrapper. Component / System definitions |
 | `dawn-event-store` | library | Persistence/compaction of the two-tier Event Log (hot log + cold archive) (ADR-0017) |
 | `dawn-consensus` | library | Raft implementation (leader election, log replication, RaftActor; ADR-0014) |
@@ -88,6 +89,7 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/A
 ```
 dawn-core
     ^
+    ├── dawn-client-core   <- Godot-independent client domain model (ADR-0039), no other crate depends on it yet
     ├── dawn-ecs
     ├── dawn-consensus
     └── dawn-event-store

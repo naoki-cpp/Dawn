@@ -36,6 +36,7 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 | [ADR-0004](ADR-0004-client-technology.md) | クライアント技術選択（Godot 4 + godot-rust） | Accepted |
 | [ADR-0005](ADR-0005-client-connection.md) | ClientConnection — サーバー／クライアント通信の抽象化 | Accepted |
 | [ADR-0007](ADR-0007-multiplayer-session.md) | マルチプレイヤー対応設計（Phase 5） | Accepted |
+| [ADR-0039](ADR-0039-dawn-client-core-crate.md) | dawn-client-core クレート新設 — Godot非依存クライアントドメインモデルのRust抽出（Phase 1: Loadout） | Accepted |
 
 ### Movement / Navigation
 

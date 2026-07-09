@@ -1,0 +1,20 @@
+[package]
+name    = "dawn-client-core"
+version = "0.1.0"
+edition = "2021"
+description = "Godot-independent client-side domain model for Dawn (loadout, wire types)."
+repository.workspace = true
+publish.workspace     = true
+
+# dawn-client-core must not depend on Godot/GDExtension, dawn-sector, or
+# dawn-actor at runtime -- it is a pure Rust library shared between the
+# (future) GDExtension binding and its own test suite. See ADR-0039.
+[dependencies]
+dawn-core = { path = "../dawn-core" }
+serde     = { workspace = true }
+
+[dev-dependencies]
+dawn-sector      = { path = "../dawn-sector" }
+dawn-ecs         = { path = "../dawn-ecs" }
+dawn-event-store = { path = "../dawn-event-store" }
+serde_json       = "1"

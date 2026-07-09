@@ -129,6 +129,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dawn-client-core"
+version = "0.1.0"
+dependencies = [
+ "dawn-core",
+ "dawn-ecs",
+ "dawn-event-store",
+ "dawn-sector",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "dawn-consensus"
 version = "0.1.0"
 dependencies = [

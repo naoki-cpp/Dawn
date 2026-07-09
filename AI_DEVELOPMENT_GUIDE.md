@@ -155,6 +155,8 @@ Keep dependencies one-way. If a change needs a new dependency, check the
 workspace DAG and relevant ADR first.
 
 - `dawn-core`: domain types, commands, events. No network, ECS, storage, or IO.
+- `dawn-client-core`: Godot-independent client-side domain model (loadout,
+  wire row types). Depends only on `dawn-core` (ADR-0039).
 - `dawn-ecs`: components and systems. No event store or network ownership.
 - `dawn-event-store`: append-only persistence and snapshots.
 - `dawn-consensus`: Raft and consensus transport.
@@ -286,4 +288,4 @@ to the correct doc instead of expanding this guide.
 
 ---
 
-Last updated: 2026-07-10 / Covers ADR-0001 through ADR-0038
+Last updated: 2026-07-10 / Covers ADR-0001 through ADR-0039
