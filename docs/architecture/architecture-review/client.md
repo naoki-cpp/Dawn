@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / 新スク
 related  : docs/architecture/architecture-review/server.md（サーバー側）, docs/architecture/architecture.md, docs/process/playtest-guide.md,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-07-09（定期再計測。client/scripts の行数 drift を再計測して更新。構造評価と issue 状態に変化はなく、client 総合 A を維持）
+date     : 2026-07-09（定期再計測。client/scripts と GdUnit4 ケース数を再計測して更新。構造評価と issue 状態に変化はなく、client 総合 A を維持）
 ---
 
 # Architecture Review — Dawn Client（Godot・構造評価）
@@ -30,7 +30,7 @@ date     : 2026-07-09（定期再計測。client/scripts の行数 drift を再�
 **総合: A**（2026-07-09 再計測で維持。前回レビュー以降、ファイルサイズ表の
 記録値は再び drift していたが、責務分担・結合度・保留課題の状態に新しい悪化はない。
 `main.gd` は 1089 行、補助モジュール群も引き続き 100〜300 行帯が中心で収まっている。
-GdUnit4 ケース数は実測 175）
+GdUnit4 ケース数は実測 204）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
@@ -39,7 +39,7 @@ GdUnit4 ケース数は実測 175）
 | 重複 | A− | マーカー生成・ピッキング・ワープ着地点計算の同型ロジックは解消済み（C-2） |
 | 結合度 | A | signal 経由の `connection.gd` ↔ `main.gd` 結合は良好。`@onready` のシーンツリー直パス参照はフェイルファストガードで解消（C-3）。modules/inventory dict のキー前提の脆さ（C-4）は `ModuleRow`/`ItemRow` typed row 化で解消済み。2026-07-08、`hud_manager.gd` のインベントリ行 Dictionary も `InventoryRow` typed class 化で解消（C-8） |
 | デッドコード | A | 残骸なし。コメントは ADR 参照付きで現状と一致 |
-| テストカバレッジ | A− | 新設クラス + main.gd残存ロジックの一部を GdUnit4 で計175ケース実行確認済み（2026-07-08 実測）。`WorldSession` / `HudSurface` / `WorldInteraction` / `WorldPresentation` は引き続き scene tree なしで単体テスト可能。scene-tree/ネットワーク依存の end-to-end 入力経路だけが手動確認領域として残る |
+| テストカバレッジ | A− | 新設クラス + main.gd残存ロジックの一部を GdUnit4 で計204ケース実行確認済み（2026-07-09 実測）。`WorldSession` / `HudSurface` / `WorldInteraction` / `WorldPresentation` は引き続き scene tree なしで単体テスト可能。scene-tree/ネットワーク依存の end-to-end 入力経路だけが手動確認領域として残る |
 | サーバー側との対比 | — | サーバー側はクレート分割（A−）、クライアントはファイル分割（A）。テストカバレッジは依然サーバー側（カバレッジ80%要件）が厚い |
 
 サーバー側が長期にわたる分割リファクタ（Phase 2〜9）を経て A− に達したのに対し、
@@ -93,16 +93,15 @@ world visual side effect、`ModuleRow`/`ItemRow` が PlayerLoadout の wire row 
 `InventoryRow` が HUD インベントリパネル行の shape を保持する。scene 生成と
 network send は `main.gd` 側。
 
-（`client/test/*.gd` は `world_presentation_test.gd` を含め 15 ファイル・合計 1,808 行。
-ケース数は175。詳細な内訳は completed.md のテストカバレッジ表を参照）
+（`client/test/*.gd` は `world_presentation_test.gd` を含め 15 ファイル・合計 2,215 行。
+ケース数は204。詳細な内訳は completed.md のテストカバレッジ表を参照）
 
 ---
 
 ## main.gd 内部構造（行範囲別、C-1 完了後）
 
-> 注: 以下の行範囲は C-1 完了時点（1094行）のもの。その後 ADR-0029（ワープ演出・単位整形・
-> 原点リベース）・ADR-0031（O/K/[/] キー）・ADR-0032（インベントリ行クリック）・PR #33
-> （fitting 抽出後の呼び出し変更）が加わり現在 1241行で、範囲は下方にずれている。区分
+> 注: 以下の行範囲は C-1 完了時点（1094行）のもの。現在の `main.gd` は 1089 行で、範囲には
+> 数行のずれがありうるが、区分
 > （責務のまとまり）の傾向は有効だが、正確な行番号は次回の構造リファクタ（R-2 着手時）に再計測する。
 
 | 行範囲 | 内容 | 評価 |
