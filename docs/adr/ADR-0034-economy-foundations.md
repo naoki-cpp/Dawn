@@ -228,13 +228,12 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 - [x] dawn-sector: Station（NPC提供の最小実装）
 - [x] dawn-sector: Dock/Undock + Station 利用可否判定（`can_use` は docked 状態を見る）
 - [x] dawn-sector: Station inventory（`PackagedShip` / `ScrapMetal` の最小保管先）
-- [ ] dawn-sector: Station inventory storage seam（将来の DB-backed / lazy-load / write-back cache 化を見据え、`BTreeMap` 直参照から1段抽象化する）
-- [ ] dawn-sector: Assemble コマンド・バリデーション（入力は Station inventory 上の `PackagedShip`、**docked 中のみ**、Assemble 後の艤装は既存 Fit 経路で行う）
+- [x] dawn-sector: Station inventory storage seam（ADR-0038 で SQLite backing として実装済み、`node/station_inventory_db.rs`）
+- [x] dawn-sector: Assemble コマンド・バリデーション（入力は Station inventory 上の `PackagedShip`、**docked 中のみ**、Assemble 後の艤装は既存 Fit 経路で行う。`node/station_materialization.rs::assemble_ship_owned`）
 - [x] dawn-sector: Disassemble コマンド・バリデーション（無傷・未艤装チェック、出力は Station inventory 上の `PackagedShip`、**docked 中のみ**）
 - [x] dawn-sector: Packaged Ship 建造（Scrap Metal 消費、入出力とも Station inventory、**docked 中のみ**。MVP コストは `1 Scrap Metal / 1 hull` の固定値）
 - [ ] 新規クレート `dawn-market`: SQLite バックエンドの指値注文帳（bid/ask マッチング）・`PlayerId` 単位の Currency 台帳・`RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` 発行経路（Dependency DAG 上の位置は別途確認）
-- [~] client: Dock/Undock + Station操作UI（入港状態の表示と `D` / `U` / `B` / `Y` 操作は実装済み。client は `ShipDocked` / `ShipUndocked` イベントと `PlayerLoadout` の両方から dock state を受けるため、古い loadout が新しい undock を巻き戻さないこと、undock 後の `null` dock context を `station_id=0` と誤解しないことを維持条件とする。inventory UI の見分けや Assemble 系は未完）
-- [ ] client: Packaged Ship のインベントリ表示・Assemble/Disassemble/建造UI（Station UI の上に載せる）
+- [x] client: Dock/Undock + Station操作UI（入港状態の表示と `D` / `U` / `B` / `Y` 操作、Packaged Ship のインベントリ表示、Assemble/Disassemble/建造UI すべて実装済み。`main.gd` の `ACTION_ASSEMBLE`/`ACTION_DISASSEMBLE`、`connection.gd` の `send_assemble_command`/`send_disassemble_ship_command`/`send_build_packaged_ship_command`）
 - [ ] client: Market閲覧UI（指値注文の発注・Currency残高表示）
 - [x] CONTEXT.md: `Item`/`Packaged Ship`/`Station`/`Scrap Metal`/`Currency` を追記済み（本セッション中）
-- [ ] `cargo test --workspace` / `fmt` / `clippy -D warnings` 全緑
+- [x] `cargo test --workspace` / `fmt` / `clippy -D warnings` 全緑

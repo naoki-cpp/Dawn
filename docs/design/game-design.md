@@ -337,7 +337,9 @@ EVE の**グローバル** TiDi は大規模戦でゲームが 10 倍スロー�
   対象（Ship / Jump Gate）へ接近・指定半径で周回・指定距離を保つ。A / O / K キー、3者は相互排他。
   周回は被弾を減らす戦術として命中式（ADR-0012）と噛み合う。
 - **インベントリとランタイム換装** — 実装済み（ADR-0032）。`InventoryComp` / Fit / Unfit。
-  スポーン時に全モジュール1個ずつ所持し、いつでもスロットを組み替えられる（I キー）。
+  スポーン時に全モジュール1個ずつ所持し、ドッキング中のみスロットを組み替えられる
+  （I キー。2026-07-08、Station 登場を受けて「いつでもどこでも」から
+  ドッキング必須へ変更 -- ADR-0032 追記）。
 - **ローカルリペア（自己修理）** — 実装済み（ADR-0033）。Active な Shield Booster /
   Armor Repairer がサイクルごとに cap を消費して現在 HP を回復（`RepairApplied`）。
   cap を武器 / AB と取り合う判断を生む。
@@ -349,9 +351,10 @@ EVE の**グローバル** TiDi は大規模戦でゲームが 10 倍スロー�
   一般化。Scrap Metal は `ShipDestroyed` からの即時ドロップのみが取得経路（放置採掘に
   ならない、FBD-009 維持）。NPC Station への Dock/Undock（D / U キー）、Station 上で
   Scrap Metal を消費した Packaged Ship 建造（B キー）、無傷・未艤装確認つきの Disassemble
-  （Y キー）が機能する。プレイヤー間 Market（`dawn-market` クレート・指値注文帳・
-  `PlayerId` 単位の Currency 台帳）と Assemble（Packaged Ship → 稼働船）は
-  未実装（`docs/process/roadmap.md` §12 9D、ADR-0037 参照）。
+  （Y キー）、Packaged Ship から新しい稼働船を作る Assemble（ADR-0037、複数所有船
+  ロスターの SHIPS 列から選択）まで機能する。プレイヤー間 Market（`dawn-market`
+  クレート・指値注文帳・`PlayerId` 単位の Currency 台帳）は未実装
+  （`docs/process/roadmap.md` §12 9D 参照）。
 
 ### 4.2 将来検討する機能（優先順位付き・すべて未実装）
 

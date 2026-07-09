@@ -286,4 +286,4 @@ to the correct doc instead of expanding this guide.
 
 ---
 
-Last updated: 2026-07-06 / Covers ADR-0001 through ADR-0037
+Last updated: 2026-07-10 / Covers ADR-0001 through ADR-0038
