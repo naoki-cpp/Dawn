@@ -45,6 +45,7 @@ deepening、production outbound replication publisher deepening、Client admissi
 | R-4 `node/mod.rs` フィールド定義と補助impl分離 | 2026-07-07 | 座標合成アクセサ群を `node/coordinates.rs` へ純粋移動。 |
 | R-5 `dawn-actor/protocol.rs` 分割 | 2026-07-08 | `protocol/mod.rs` / `client_command.rs` / `server_event.rs` / `hello_resume.rs` へ分割。 |
 | Station operations module の deepening（`/improve-codebase-architecture`） | 2026-07-09 | `station.rs` を shared vocabulary に縮小し、実装を `station_lifecycle.rs` / `station_materialization.rs` へ分割。 |
+| PlayerLoadout projection module の deepening（`/improve-codebase-architecture`） | 2026-07-09 | `serialization.rs` から PlayerLoadout / owned ships / station inventory の JSON projection を `player_loadout_projection.rs` へ分離。 |
 | Owned ship / Active ship モデル実装（ADR-0037、Phase 9B-5 Assemble の前提） | 2026-07-07 | `owners` と `active_ship` を分離し、操縦系コマンドを active ship 解決に統一。 |
 | Phase 9B-5 Assemble コマンド実装 + RefreshFitting player_id 化（`/add-event`） | 2026-07-07 | `AssembleCommand` / `ShipAssembled` を実装し、followup を `PlayerId` 基準に修正。 |
 | DisembarkCommand 実装（ADR-0037、船を降りる操作の一級化） | 2026-07-07 | `DisembarkCommand` と `disembark_owned` を追加。 |

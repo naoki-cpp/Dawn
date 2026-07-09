@@ -40,22 +40,22 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 
 | テストファイル | 対象 | ケース数 |
 |---|---|---|
-| `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 13 |
+| `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 31 |
 | `ship_picking_test.gd` | `ShipPicking`（画面空間ピッキング含む） | 12 |
 | `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer`（選択リング含む） | 12 |
 | `input_decoder_test.gd` | `InputDecoder`。2026-07-07、`KEY_X`（Disembark）判定のケースを追加（+2） | 32 |
-| `hud_manager_test.gd` | `HudManager` | 21 |
+| `hud_manager_test.gd` | `HudManager` | 33 |
 | `hud_surface_test.gd` | `HudSurface`（HUD render frame / fitting更新 / inventory hit-test 委譲 / パネル dirty-tracking 判定。C-4 で `ModuleRow` の `clone()`/`equals()` ベース差分判定のケースを追加）。2026-07-08、station roster / `source` タグ付けのケースを追加（+2） | 16 |
 | `billboard_ring_test.gd` | `BillboardRing` | 3 |
 | `camera_controller_test.gd` | `CameraController`（orbit drag） | 2 |
 | `unit_format_test.gd` | `UnitFormat`（ADR-0029 速度/距離単位整形） | 8 |
 | `world_space_test.gd` | `WorldSpace`（ADR-0029 浮動原点リベース） | 4 |
 | `connection_test.gd` | `connection.gd`（URL正規化・module activated signal・PlayerLoadout wire message rename の回帰テスト） | 6 |
-| `player_loadout_test.gd` | `PlayerLoadout`（PR #33 起点、後に rename。C-4 で `ModuleRow`/`ItemRow` の `from_json()` 検証ケースを追加）。2026-07-07〜08、`active_ship_id`/`owned_ships` のケースを追加（+3） | 17 |
-| `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy / dock state） | 11 |
+| `player_loadout_test.gd` | `PlayerLoadout`（PR #33 起点、後に rename。C-4 で `ModuleRow`/`ItemRow` の `from_json()` 検証ケースを追加）。2026-07-07〜08、`active_ship_id`/`owned_ships` のケースを追加（+3） | 18 |
+| `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy / dock state） | 13 |
 | `world_interaction_test.gd` | `WorldInteraction`（selection ownership / double-click / lock intent / key action 解釈） | 8 |
 | `world_presentation_test.gd` | `WorldPresentation`（marker clamp / warp tunnel easing / sun state） | 6 |
-| **合計** | | **175**（`func test_` 実測、2026-07-08） |
+| **合計** | | **204**（`func test_` 実測、2026-07-09） |
 
 テスト導入で見つかった不具合・定着した手順（詳細: `docs/process/godot-client-testing.md`）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる

@@ -152,8 +152,9 @@ scene node generation / network send / HUD adapter のオーケストレーシ�
 
 2026-07-06 の再計測では `warp.rs` / `orbit.rs` / `commands.rs` / `station.rs` /
 `transit_flow.rs` が総行数で閾値帯に残っていた。2026-07-09 時点で `station.rs` は
-deepening により観察対象から外れ、残る主な watch は `commands.rs` 1460・`warp.rs` 1024・
-`orbit.rs` 790・`transit_flow.rs` 863。`spawner_logic.rs` は
+deepening により観察対象から外れ、さらに `serialization.rs` も
+`player_loadout_projection.rs` への分離で観察不要に戻った。残る主な watch は
+`commands.rs` 1460・`warp.rs` 1024・`orbit.rs` 790・`transit_flow.rs` 863。`spawner_logic.rs` は
 `/improve-codebase-architecture` 候補3（PR #69）で `process_bots`（Bot AI 決定ループ）を
 `node/bot_ai.rs` へ抽出済みで、下記トリガー一覧から外れたまま。R-1（navigation.rs 分割）後に積まれた
 Orbit/KeepAtRange（ADR-0031）・Inventory（ADR-0032）・Repair（ADR-0033）・Station（ADR-0034/9B）の
