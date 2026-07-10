@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-07-10（定期再計測。全ファイル行数を実測し直し drift を解消。新設 `station_inventory.rs`/`command_station.rs` を表に追加。server 総合 B+ 維持、client 側は別途 client.md 参照）
+date     : 2026-07-10（定期再計測 その2。ADR-0039/0040 で新設された `dawn-client-core`/`dawn-client-gdext` を表に追加。他の全ファイルは前回計測（同日）から変化なし。server 総合 B+ 維持、client 側は別途 client.md 参照）
 ---
 
 # Architecture Review — Dawn Codebase（構造評価）
@@ -31,7 +31,7 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
-| クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027）。M-7 解消で `ClientCommand` を `dawn-core` へ移動し DAG が整理された（`dawn-sector` が `dawn-actor` 非依存のまま dispatch を保持できるようになった）。Player Command Dispatch のための新 crate は引き続き不要 |
+| クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027）。M-7 解消で `ClientCommand` を `dawn-core` へ移動し DAG が整理された（`dawn-sector` が `dawn-actor` 非依存のまま dispatch を保持できるようになった）。Player Command Dispatch のための新 crate は引き続き不要。2026-07-10、`dawn-client-core`（Godot非依存クライアントドメインモデル、`dawn-core`のみに依存）と `dawn-client-gdext`（GDExtensionバインディング、cdylib、他クレートから依存されない葉ノード）を新設（ADR-0039/0040）。どちらもDAGの末端に追加され、既存クレートへの逆依存は発生していない |
 | ファイルサイズ | B+ | 2026-07-10 再計測。ADR-0038（station inventory SQLite 化）で新設された `station_inventory.rs`（378、bounded cache 層）・`command_station.rs`（164、station family dispatch）は責務単体で健全。一方 `commands.rs` 1573・`warp.rs` 1093・`transit_flow.rs` 949・`orbit.rs` 862・`mod.rs` 859・`inventory.rs` 851 は前回計測から軒並み70〜115行増え、watch 帯が強まった。R-3 のトリガー（impl 700行超）はまだ未発火（`commands.rs` が impl 約687で最も近い）ため軸の評価は B+ を維持するが、次回計測で `commands.rs` が最有力候補 |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。`InventoryComp`（ADR-0032）・`RepairLayer`/`RepairApplied`（ADR-0033）・`ItemId`（ADR-0034、`dawn-core/src/item.rs`）も既存型設計に整合 |
 | 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。AoI delivery、production runtime、Command dispatch は deep module 化済み（M-7 解消で `apply_client_command` が `SimulationNode` に集約）。2026-07-08、`ItemId -> ItemRow` JSON変換の重複（`serialization.rs` 2箇所）を `item_id_to_row_json` へ集約し解消済み。残る両バイナリ間グルー重複（M-6）・Fit経路のテール重複（M-8）は許容判断のまま |
@@ -42,14 +42,13 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 
 ## ファイルサイズ一覧（2026-07-10 時点）
 
-> **2026-07-10、全ファイル再計測（`/architecture-review`）。** ADR-0038（Station inventory
-> SQLite backing）と 9B UI 仕上げ（ドラッグ&ドロップ・ReorderFittedModule 等）を反映し、
-> `commands.rs` 1573・`warp.rs` 1093・`transit_flow.rs` 949・`apply_event.rs` 887・
-> `orbit.rs` 862・`mod.rs` 859・`inventory.rs` 851・`snapshot_io.rs` 710・
-> `spawner_logic.rs` 671・`player_loadout_projection.rs` 559・`serialization.rs` 485 に更新した。
-> ADR-0038 で新設された `station_inventory.rs`（378、bounded in-memory cache + SQLite
-> write-through seam）と `command_station.rs`（164、station family の command dispatch。
-> 前回レビューの本文では触れていたが表に未記載だった分をここで追加）を表に追加した。
+> **2026-07-10、全ファイル再計測（`/architecture-review`）。** 既存クレートの行数は前回
+> （同日、`/doc-sync` 経由の部分計測）から変化なし——`commands.rs` 1573・`warp.rs` 1093・
+> `transit_flow.rs` 949・`apply_event.rs` 887・`orbit.rs` 862・`mod.rs` 859・`inventory.rs` 851・
+> `snapshot_io.rs` 710・`spawner_logic.rs` 671・`player_loadout_projection.rs` 559・
+> `serialization.rs` 485。今回の差分は ADR-0039/0040 で新設された `dawn-client-core`
+> （5ファイル・652行、Godot非依存クライアントドメインモデル）と `dawn-client-gdext`
+> （4ファイル・658行、GDExtensionバインディング）を表へ追加したことのみ。
 > `dawn-actor` 側は `protocol/mod.rs` 798 / `client_command.rs` 398 / `server_event.rs` 257 /
 > `hello_resume.rs` 34 で、R-5 完了後の分割構造は維持されている。
 
@@ -66,7 +65,7 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 | `crates/dawn-sector/src/node/transit_flow.rs` | 949 | 🟢 `prepare_transit_commit`/`handle_transit_commit`（公開面 5→2 に集約）+ `rebase_after_transit`。大きいが責務は cohesive（impl 約368で700行未満） |
 | `crates/dawn-sector/src/node/station.rs` | 53 | 🟢 2026-07-09、Station operations deepening 後の shared vocabulary module。`StationOperationOutcome` / `StationOperationRejection` だけを持ち、実装は sibling module へ移動 |
 | `crates/dawn-sector/src/node/station_lifecycle.rs` | 407 | 🟢 2026-07-09 新設。dock / undock / active-ship selection / disembark / docked lock cleanup を所有する deep module |
-| `crates/dawn-sector/src/node/station_materialization.rs` | 432 | 🟢 2026-07-09 新設。build / assemble / disassemble を所有する deep module。Ship materialization の検証と event append がここに集約 |
+| `crates/dawn-sector/src/node/station_materialization.rs` | 692 | 🟢 2026-07-09 新設。build / assemble / disassemble を所有する deep module。Ship materialization の検証と event append がここに集約。2026-07-10、カーゴ salvage 修正 + 回帰テスト3件追加（432→692、テスト増分が大半）。次回 `/architecture-review` で全体再計測時に確定grading |
 | `crates/dawn-sector/src/node/station_inventory.rs` | 378 | 🟢 **新規記録**（本表に未記載だった）。ADR-0038（2026-07-08）新設。Station inventory の bounded in-memory cache + SQLite write-through seam。永続化の権威は `station_inventory_db.rs`、本ファイルは直近アクセスした player だけのキャッシュ層と `SimulationNode` 向けアクセサを所有 |
 | `crates/dawn-sector/src/node/command_station.rs` | 164 | 🟢 **新規記録**（本表に未記載だった）。2026-07-09 新設。Station family（dock/undock/build/disassemble/select-active/assemble/disembark/transfer-to-station）の command dispatch を専有し、`commands.rs` から分離済み |
 | `crates/dawn-sector/src/node/station_inventory_db.rs` | 328 | 🟢 ADR-0038（2026-07-08）新設。SQLite（rusqlite）による Station inventory の永続化権威 |
@@ -123,6 +122,25 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 | `crates/dawn-simulation/src/data_loader/ship_types.rs` | 192 | 🟢 P5-2 |
 | `crates/dawn-simulation/src/main.rs` | 77 | 🟢 |
 | `crates/dawn-simulation/src/data_loader/mod.rs` | 9 | 🟢 P5-2 |
+
+### dawn-client-core（Godot非依存クライアントドメインモデル・ADR-0039）
+
+| ファイル | 行数 | 判定 |
+|---|---|---|
+| `crates/dawn-client-core/src/loadout.rs` | 337 | 🟢 2026-07-10 新設。`PlayerLoadoutMsg`（旧 `player_loadout.gd`）+ capacitor シミュレーション/武器射程/activation toggle の純粋関数。ユニットテスト含む |
+| `crates/dawn-client-core/src/module_row.rs` | 126 | 🟢 2026-07-10 新設。`ModuleRow`/`ModuleKind`/`StatDelta`（旧 `module_row.gd`）。サーバーの `player_loadout_projection.rs` が送る wire 形状のミラー |
+| `crates/dawn-client-core/src/item_row.rs` | 61 | 🟢 2026-07-10 新設。`ItemRow`/`ItemType`（旧 `item_row.gd`） |
+| `crates/dawn-client-core/src/lib.rs` | 44 | 🟢 crate doc + re-export のみ。doctest 1件（C-EXAMPLE） |
+| `crates/dawn-client-core/tests/server_contract_test.rs` | 84 | 🟢 `dawn-sector` を dev-dependency に取り、実サーバーの `build_player_loadout_json()` 出力をこの crate の型でパースできることを確認する契約テスト（DAGには影響しない） |
+
+### dawn-client-gdext（GDExtensionバインディング・ADR-0040）
+
+| ファイル | 行数 | 判定 |
+|---|---|---|
+| `crates/dawn-client-gdext/src/loadout_gd.rs` | 271 | 🟢 2026-07-10 新設。`PlayerLoadout` GDExtension クラス。`dawn-client-core::PlayerLoadoutMsg` の薄いラッパー、Variant/GString ⇄ Rust 型変換のみでドメインロジックは持たない |
+| `crates/dawn-client-gdext/src/module_row_gd.rs` | 253 | 🟢 2026-07-10 新設。`ModuleRow` GDExtension クラス。旧 GDScript の `equals()`/`clone()` API を維持し `hud_surface.gd` の diffing 実装が無改修で動くようにしている |
+| `crates/dawn-client-gdext/src/item_row_gd.rs` | 115 | 🟢 2026-07-10 新設。`ItemRow` GDExtension クラス |
+| `crates/dawn-client-gdext/src/lib.rs` | 19 | 🟢 crate doc + `#[gdextension]` エントリポイントのみ |
 
 ### その他クレート
 

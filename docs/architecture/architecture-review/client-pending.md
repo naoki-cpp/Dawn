@@ -24,7 +24,7 @@ C-8（インベントリ行 Dictionary の stringly-typed 設計）も typed row
 
 サーバー側の `server-pending.md` にも記載されている項目。
 `WorldSession`・`WorldInteraction`・`WorldPresentation` 抽出で live world state /
-world interaction policy / world visual side effect を移動し、`main.gd` は 1210 行
+world interaction policy / world visual side effect を移動し、`main.gd` は 1217 行
 （client.md「ファイルサイズ一覧」参照。2026-07-10 再計測で前回1089から増加——
 ドラッグ&ドロップ状態機械・Disembark・SHIPS 列ハンドラの追加）。残る scene lifecycle /
 node generation / network send / HUD adapter は `.tscn` 化コンポーネントへのシーン参照切れ
@@ -33,9 +33,9 @@ node generation / network send / HUD adapter は `.tscn` 化コンポーネン�
 再評価トリガー: 下記「採らない方針」の前提（ヘッドレス実行だけではシーンツリー構成の妥当性を
 確認しきれない）が変わったとき、または `main.gd` が再び god object 的に肥大したとき。
 
-## C-9（新規・2026-07-10）: `hud_manager.gd` が watch 帯（852行）に到達
+## C-9（新規・2026-07-10）: `hud_manager.gd` が watch 帯（850行）に到達
 
-2026-07-10 再計測で `hud_manager.gd` が 729→852 行に増加し、grading の watch 目安
+2026-07-10 再計測で `hud_manager.gd` が 729→850 行に増加し、grading の watch 目安
 （~500+行で成長中）に該当した。
 
 **根本原因**: 全 HUD パネル（status/target/module bar/duel result/4列インベントリ&フィッティング）

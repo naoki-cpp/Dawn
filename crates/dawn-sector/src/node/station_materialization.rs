@@ -5,7 +5,7 @@ use dawn_core::{
     AssembleCommand, BuildPackagedShipCommand, DisassembleShipCommand, DomainEvent, ItemId,
     PlayerId, Position, ShipId, Velocity,
 };
-use dawn_ecs::components::{FittingComp, HullComp, IsNpcComp, ShipStatsComp};
+use dawn_ecs::components::{FittingComp, HullComp, InventoryComp, IsNpcComp, ShipStatsComp};
 use dawn_event_store::store::EventStore;
 
 use super::{
@@ -143,6 +143,22 @@ impl<S: EventStore> SimulationNode<S> {
                 reason: StationOperationRejection::ShipNotFound,
             };
         };
+
+        // Salvage the ship's unfitted cargo (ADR-0032/0034 InventoryComp)
+        // into the station before the entity is despawned below --
+        // Disassemble only requires an unfitted *hull* (the `is_fitted`
+        // check above), not an empty cargo hold, so any Module/ScrapMetal
+        // stacks riding along would otherwise silently vanish with the
+        // entity instead of following the ship into its packaged form.
+        let salvaged_cargo: Vec<(ItemId, u64)> = self
+            .world
+            .inner_mut()
+            .get::<&mut InventoryComp>(entity)
+            .map(|mut inventory| std::mem::take(&mut inventory.items).into_iter().collect())
+            .unwrap_or_default();
+        for (item_id, count) in salvaged_cargo {
+            self.credit_station_item(player_id, cmd.station_id, item_id, count);
+        }
 
         self.credit_station_item(
             player_id,
@@ -356,6 +372,250 @@ mod tests {
             2
         );
         assert!(!node.ships.index.contains_key(&ship_id));
+
+        // Regression: the three modules unfit above (now sitting in the
+        // ship's cargo hold, not fitted) must follow the ship into station
+        // inventory rather than vanishing with the despawned entity. Count
+        // is 2, not 1: `spawn_player_ship` seeds one of every registered
+        // module into cargo (ADR-0032) *and separately* fits one more of
+        // each via the privileged, non-inventory-consuming `fit_module`
+        // path -- unfitting returns that second copy to the same cargo
+        // stack the seed already populated.
+        assert_eq!(
+            node.station_item_count(
+                player_id,
+                station_id,
+                ItemId::Module(crate::modules::MODULE_RAILGUN_SMALL)
+            ),
+            2
+        );
+        assert_eq!(
+            node.station_item_count(
+                player_id,
+                station_id,
+                ItemId::Module(crate::modules::MODULE_AFTERBURNER)
+            ),
+            2
+        );
+        assert_eq!(
+            node.station_item_count(
+                player_id,
+                station_id,
+                ItemId::Module(crate::modules::MODULE_FOLD_DISRUPTOR)
+            ),
+            2
+        );
+    }
+
+    #[test]
+    fn disassemble_ship_salvages_scrap_metal_cargo_into_the_station() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station_id = StationId(0);
+        let station = node.station(station_id).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        assert!(accepted(node.dock_owned(
+            player_id,
+            ship_id,
+            DockCommand { station_id }
+        )));
+        // Fully unfit so the ship qualifies for Disassemble.
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::High,
+                module_id: crate::modules::MODULE_RAILGUN_SMALL,
+            }
+        ));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::Mid,
+                module_id: crate::modules::MODULE_AFTERBURNER,
+            }
+        ));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::Mid,
+                module_id: crate::modules::MODULE_FOLD_DISRUPTOR,
+            }
+        ));
+        // Scrap Metal earned from a kill, sitting in cargo alongside the
+        // unfit modules -- not just a Module stack.
+        let entity = *node.ships.index.get(&ship_id).expect("ship exists");
+        node.world
+            .inner_mut()
+            .get::<&mut dawn_ecs::components::InventoryComp>(entity)
+            .expect("player ship has an InventoryComp")
+            .add_item(ItemId::ScrapMetal, 5);
+
+        assert!(accepted(node.disassemble_ship_owned(
+            player_id,
+            DisassembleShipCommand {
+                ship_id,
+                station_id,
+            }
+        )));
+
+        assert_eq!(
+            node.station_item_count(player_id, station_id, ItemId::ScrapMetal),
+            5
+        );
+    }
+
+    #[test]
+    fn player_can_assemble_a_new_ship_right_after_disassembling_their_only_ship() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station_id = StationId(0);
+        let station = node.station(station_id).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        assert!(accepted(node.dock_owned(
+            player_id,
+            ship_id,
+            DockCommand { station_id }
+        )));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::High,
+                module_id: crate::modules::MODULE_RAILGUN_SMALL,
+            }
+        ));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::Mid,
+                module_id: crate::modules::MODULE_AFTERBURNER,
+            }
+        ));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::Mid,
+                module_id: crate::modules::MODULE_FOLD_DISRUPTOR,
+            }
+        ));
+        let ship_type_id = *node
+            .ships
+            .type_ids
+            .get(&ship_id)
+            .expect("player ship type is registered");
+
+        assert!(accepted(node.disassemble_ship_owned(
+            player_id,
+            DisassembleShipCommand {
+                ship_id,
+                station_id,
+            }
+        )));
+
+        // The player now owns zero live ships -- the exact "shipless docked
+        // player" state ownership.md §8 exists to make recoverable. Assemble
+        // should succeed using the PackagedShip Disassemble just credited.
+        assert!(
+            node.can_use_station(player_id, station_id),
+            "docked_players context must survive the ship entity being despawned"
+        );
+        let new_ship = node.assemble_ship_owned(
+            player_id,
+            AssembleCommand {
+                station_id,
+                ship_type_id,
+            },
+        );
+        assert!(
+            new_ship.is_ok(),
+            "Assemble must succeed right after Disassemble, got {new_ship:?}"
+        );
+    }
+
+    #[test]
+    fn disassembling_one_owned_ship_does_not_affect_a_second_owned_ship() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_a = node.spawn_player_ship(player_id);
+        let station_id = StationId(0);
+        let station = node.station(station_id).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_a, station.abs_m);
+        assert!(accepted(node.dock_owned(
+            player_id,
+            ship_a,
+            DockCommand { station_id }
+        )));
+
+        // Give the player a second, independent owned ship via Assemble
+        // (ADR-0037), same as a real "player has more than one ship" state.
+        node.credit_station_item(
+            player_id,
+            station_id,
+            ItemId::PackagedShip(ShipTypeId(1)),
+            1,
+        );
+        let ship_b = node
+            .assemble_ship_owned(
+                player_id,
+                AssembleCommand {
+                    station_id,
+                    ship_type_id: ShipTypeId(1),
+                },
+            )
+            .expect("assemble succeeds with a packaged hull in station inventory");
+
+        // Fully unfit ship_a so it qualifies for Disassemble.
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id: ship_a,
+                slot: SlotKind::High,
+                module_id: crate::modules::MODULE_RAILGUN_SMALL,
+            }
+        ));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id: ship_a,
+                slot: SlotKind::Mid,
+                module_id: crate::modules::MODULE_AFTERBURNER,
+            }
+        ));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id: ship_a,
+                slot: SlotKind::Mid,
+                module_id: crate::modules::MODULE_FOLD_DISRUPTOR,
+            }
+        ));
+
+        assert!(accepted(node.disassemble_ship_owned(
+            player_id,
+            DisassembleShipCommand {
+                ship_id: ship_a,
+                station_id,
+            }
+        )));
+
+        // ship_b must still be a live, owned ship -- untouched by ship_a's
+        // disassembly.
+        assert!(
+            node.ships.index.contains_key(&ship_b),
+            "ship_b's ECS entity must still exist"
+        );
+        assert_eq!(
+            node.ships.owners.get(&ship_b),
+            Some(&player_id),
+            "ship_b must still be owned by the same player"
+        );
     }
 
     #[test]
