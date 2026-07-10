@@ -20,7 +20,7 @@ pub(crate) fn kind_str(kind: ModuleKind) -> &'static str {
     }
 }
 
-/// Reverse of [`kind_str`] -- parses a wire-string kind name (as GDScript
+/// Reverse of `kind_str` -- parses a wire-string kind name (as GDScript
 /// passes into `PlayerLoadout.effective_range_for_activation` or a
 /// `from_json` payload) back into a [`ModuleKind`]. Any unrecognized string
 /// maps to `Unknown`, matching the old GDScript's permissive `_range_family()`
@@ -40,7 +40,7 @@ pub(crate) fn parse_kind(kind: &str) -> ModuleKind {
     }
 }
 
-/// Godot `Dictionary` value type used by [`ModuleRow::from_json`] --
+/// Godot `Dictionary` value type used by `ModuleRow::from_json` --
 /// matches `loadout_gd::Dict`.
 type Dict = Dictionary<Variant, Variant>;
 
@@ -66,7 +66,7 @@ fn stat_delta_f64(stat_delta: &Dict, key: &str) -> f64 {
 
 /// GDScript-facing view of one fitted module slot (`dawn_client_core::ModuleRow`).
 /// Exported `#[var]` fields are a flattened, display-ready snapshot taken at
-/// [`Self::wrap`] time; `inner` (kept for `equals()`/`clone()`) is the
+/// construction time (`wrap`); `inner` (kept for `equals()`/`clone()`) is the
 /// source of truth. Field names and `equals()`/`clone()` mirror the old
 /// `module_row.gd` so `hud_surface.gd`'s module-bar diffing needs no changes.
 #[derive(GodotClass)]
@@ -93,8 +93,8 @@ pub struct ModuleRow {
     #[var(get = get_forced_reason, set = set_forced_reason)]
     forced_reason: GString,
     /// Client-local runtime state (capacitor cycling), never read from the
-    /// wire. Mutated by [`crate::PlayerLoadout::apply_module_activation`] and
-    /// [`crate::PlayerLoadout::simulate_modules_capacitor_ticks`].
+    /// wire. Mutated by `PlayerLoadout::apply_module_activation` and
+    /// `PlayerLoadout::simulate_modules_capacitor_ticks`.
     #[var]
     cycle_remaining: i64,
 
@@ -118,7 +118,7 @@ impl ModuleRow {
     }
 
     /// A clone of the domain row this instance wraps, for callers (the
-    /// static [`crate::PlayerLoadout::simulate_modules_capacitor_ticks`])
+    /// static `PlayerLoadout::simulate_modules_capacitor_ticks`)
     /// that need to run `dawn_client_core` logic across a plain `Vec` rather
     /// than through `Gd` handles one at a time.
     pub(crate) fn inner_clone(&self) -> CoreModuleRow {
@@ -126,7 +126,7 @@ impl ModuleRow {
     }
 
     /// Writes back `cycle_remaining` after an external simulation pass
-    /// mutated a cloned copy of [`Self::inner_clone`] -- keeps the exported
+    /// mutated a cloned copy of `Self::inner_clone` -- keeps the exported
     /// `#[var]` and the internal `inner` copy in sync.
     pub(crate) fn apply_simulated_cycle_remaining(&mut self, value: u32) {
         self.inner.cycle_remaining = value;

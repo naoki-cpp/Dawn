@@ -22,7 +22,7 @@ fn parse_item_type(item_type: &str) -> ItemType {
     }
 }
 
-/// Godot `Dictionary` value type used by [`ItemRow::from_json`] -- matches
+/// Godot `Dictionary` value type used by `ItemRow::from_json` -- matches
 /// `loadout_gd::Dict`.
 type Dict = Dictionary<Variant, Variant>;
 

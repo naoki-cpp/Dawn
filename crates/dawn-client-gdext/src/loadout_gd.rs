@@ -237,7 +237,7 @@ impl PlayerLoadout {
         loadout.simulate_capacitor_ticks(cap_current, cap_max, cap_recharge, ticks)
     }
 
-    /// Static form of [`Self::simulate_capacitor_ticks`], operating on an
+    /// Static form of `simulate_capacitor_ticks`, operating on an
     /// ad-hoc module list instead of this instance's own state. Used by
     /// `world_session.gd::simulate_cap` for the "no `PlayerLoadout` instance
     /// yet, but I have a raw module list" case -- mirrors the old

@@ -28,6 +28,12 @@ allow = [
     "Unicode-3.0",
     "Unlicense",
     "Zlib",
+    # godot-rust (godot / godot-core / godot-ffi / godot-macros, ADR-0040's
+    # dawn-client-gdext) is MPL-2.0. Weak (file-level) copyleft, not
+    # project-wide -- and moot here regardless since this is a private,
+    # unpublished game (see `[licenses.private]` below), not distributed
+    # binaries subject to MPL's source-disclosure obligations.
+    "MPL-2.0",
 ]
 confidence-threshold = 0.8
 
