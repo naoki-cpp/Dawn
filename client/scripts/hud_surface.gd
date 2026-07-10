@@ -5,7 +5,8 @@
 ## interface for rendering HUD state and hit-testing HUD controls.
 extends RefCounted
 
-const ModuleRow = preload("res://scripts/module_row.gd")
+## ModuleRow is a GDExtension class (dawn-client-gdext, ADR-0039/ADR-0040) --
+## globally registered, no preload needed.
 const InventoryRow = preload("res://scripts/inventory_row.gd")
 
 var _stats_label: Label = null

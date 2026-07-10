@@ -53,12 +53,20 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 
 > **2026-07-10、全ファイル再計測（`/architecture-review`）。** 現在の実測は
 > `main.gd` 1210・`hud_manager.gd` 852・`connection.gd` 369・`world_session.gd` 357・
-> `ship_controller.gd` 342・`navigation_marker_renderer.gd` 227・`player_loadout.gd` 238・
-> `module_row.gd` 117・`item_row.gd` 49・`inventory_row.gd` 90・`hud_surface.gd` 233・
-> `input_decoder.gd` 147・`camera_controller.gd` 142・`world_interaction.gd` 133・
-> `world_presentation.gd` 311。前回記録（2026-07-09）から全ファイルが軒並み増加した
-> （ドラッグ&ドロップ状態機械・`ReorderFittedModuleCommand`・Disembark・双方向 Station 転送等）
-> が、補助モジュールへ責務が薄く保たれたまま整理は維持されている。
+> `ship_controller.gd` 342・`navigation_marker_renderer.gd` 227・`inventory_row.gd` 90・
+> `hud_surface.gd` 233・`input_decoder.gd` 147・`camera_controller.gd` 142・
+> `world_interaction.gd` 133・`world_presentation.gd` 311。前回記録（2026-07-09）から
+> 全ファイルが軒並み増加した（ドラッグ&ドロップ状態機械・`ReorderFittedModuleCommand`・
+> Disembark・双方向 Station 転送等）が、補助モジュールへ責務が薄く保たれたまま整理は
+> 維持されている。
+>
+> **同日、`player_loadout.gd`/`module_row.gd`/`item_row.gd` を削除**（ADR-0039/ADR-0040）。
+> Godot 非依存のドメインロジック（capacitor シミュレーション・武器射程計算・PlayerLoadout
+> wire row 型）は新設 `dawn-client-core`（純粋 Rust、`cargo test` 対象）へ移植し、
+> `dawn-client-gdext`（GDExtension バインディング）が `PlayerLoadout`/`ModuleRow`/`ItemRow`
+> という同名のグローバルクラスとして GDScript へ公開する。フィールド名・`equals()`/`clone()`を
+> 完全一致させたため、`hud_manager.gd`/`hud_surface.gd`/`world_session.gd` 側の変更は
+> `preload()` 行の削除のみで済んだ。
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
@@ -68,9 +76,6 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/world_session.gd` | 357 | 🟢 InitialState / AoI / HP / lock / tick-cap / dock state の client-side live world state |
 | `client/scripts/ship_controller.gd` | 342 | 🟢 単一船の視覚表現に専念。ロックオン枠は `BillboardRing` 共通化 |
 | `client/scripts/navigation_marker_renderer.gd` | 227 | 🟢 ゲート/惑星/ステーションマーカー生成 + スペクトル色 |
-| `client/scripts/player_loadout.gd` | 238 | 🟢 loadout/インベントリ正規化と capacitor 再現の純粋関数。main.gd は呼び出すのみで内部構造に触れない |
-| `client/scripts/module_row.gd` | 117 | 🟢 typed module row |
-| `client/scripts/item_row.gd` | 49 | 🟢 typed inventory row schema |
 | `client/scripts/inventory_row.gd` | 90 | 🟢 HUD インベントリパネル行の typed shape |
 | `client/scripts/hud_surface.gd` | 233 | 🟢 HUD Control 参照を所有し、`main.gd` からの render frame / hit-test 要求を `HudManager` へ委譲 |
 | `client/scripts/input_decoder.gd` | 147 | 🟢 キー入力→アクション決定の純粋関数。GdUnit4 テスト済み |
@@ -84,19 +89,20 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/unit_format.gd` | 38 | 🟢 速度/距離の適応的単位整形（m/s・km/s・AU/s） |
 | `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 ワープトンネル ColorRect の intensity ラッパー |
 
-合計 5,210 行（2026-07-10 実測、前回4,483から+727）のうち `main.gd` が23%を占める
-（C-1着手前69%から大幅低下、水準維持）。
+合計 4,806 行（2026-07-10 実測、`player_loadout.gd`/`module_row.gd`/`item_row.gd` 削除後。
+削除前は5,210行）のうち `main.gd` が25%を占める（C-1着手前69%から大幅低下、水準維持）。
 新設 static class 群（C-1 の5クラス + ADR-0029 の `world_space`/`unit_format`/`warp_tunnel_effect`
-+ PR #33 の `player_loadout` + `WorldSession` + `HudSurface` + `WorldInteraction` +
-`WorldPresentation` + C-4 の `ModuleRow`/`ItemRow` + C-8 の `InventoryRow`）は、
-`WorldSession` が ship registry と live world state、`HudSurface` が HUD Control 参照、
-`WorldInteraction` が selection と world interaction policy、`WorldPresentation` が
-world visual side effect、`ModuleRow`/`ItemRow` が PlayerLoadout の wire row schema、
-`InventoryRow` が HUD インベントリパネル行の shape を保持する。scene 生成と
-network send は `main.gd` 側。
++ `WorldSession` + `HudSurface` + `WorldInteraction` + `WorldPresentation` + C-8 の
+`InventoryRow`）は、`WorldSession` が ship registry と live world state、`HudSurface` が
+HUD Control 参照、`WorldInteraction` が selection と world interaction policy、
+`WorldPresentation` が world visual side effect、`InventoryRow` が HUD インベントリパネル行の
+shape を保持する。scene 生成と network send は `main.gd` 側。PlayerLoadout の wire row schema
+（旧 `ModuleRow`/`ItemRow`/`player_loadout.gd`、C-4）は 2026-07-10、`dawn-client-core`
+（純粋 Rust）+ `dawn-client-gdext`（GDExtension バインディング）へ移植した（ADR-0039/ADR-0040）。
 
-（`client/test/*.gd` は `world_presentation_test.gd` を含め 15 ファイル・合計 2,940 行
-（前回2,215から+725）。ケース数は204で変わらず。詳細な内訳は completed.md のテストカバレッジ表を参照）
+（`client/test/*.gd` は `world_presentation_test.gd` を含め 14 ファイル・合計 2,940 行
+（`player_loadout_test.gd` 削除前は15ファイル）。ケース数は204で変わらず。詳細な内訳は
+completed.md のテストカバレッジ表を参照）
 
 ---
 

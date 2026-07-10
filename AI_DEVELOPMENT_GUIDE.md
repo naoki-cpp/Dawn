@@ -155,6 +155,10 @@ Keep dependencies one-way. If a change needs a new dependency, check the
 workspace DAG and relevant ADR first.
 
 - `dawn-core`: domain types, commands, events. No network, ECS, storage, or IO.
+- `dawn-client-core`: Godot-independent client-side domain model (loadout,
+  wire row types). Depends only on `dawn-core` (ADR-0039).
+- `dawn-client-gdext`: GDExtension binding (cdylib) exposing `dawn-client-core`
+  to the Godot client. Thin type-conversion adapter only (ADR-0040).
 - `dawn-ecs`: components and systems. No event store or network ownership.
 - `dawn-event-store`: append-only persistence and snapshots.
 - `dawn-consensus`: Raft and consensus transport.
@@ -270,6 +274,7 @@ Use this guide as the router, then read the relevant long-form doc:
 - Client testing: `docs/process/godot-client-testing.md`
 - Raspberry Pi hardware flow: `docs/process/8d5-hardware-notes.md`
 - Commit convention: `docs/process/commit-convention.md`
+- Third-party license notes (non-permissive dependencies): `THIRD-PARTY-LICENSES.md`
 - EVE Online research notes: `docs/reference/eve-reference.md`
 - Carbon Engine comparison: `docs/reference/carbon-engine-comparison.md`
 
@@ -286,4 +291,4 @@ to the correct doc instead of expanding this guide.
 
 ---
 
-Last updated: 2026-07-10 / Covers ADR-0001 through ADR-0038
+Last updated: 2026-07-10 / Covers ADR-0001 through ADR-0040

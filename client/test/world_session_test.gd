@@ -5,7 +5,6 @@
 extends GdUnitTestSuite
 
 const WorldSession = preload("res://scripts/world_session.gd")
-const ModuleRow = preload("res://scripts/module_row.gd")
 
 var _session
 

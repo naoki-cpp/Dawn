@@ -5,7 +5,8 @@
 ## invariants that are updated by InitialState and DomainEvents.
 extends RefCounted
 
-const PlayerLoadout = preload("res://scripts/player_loadout.gd")
+## PlayerLoadout is a GDExtension class (dawn-client-gdext, ADR-0039/ADR-0040)
+## -- globally registered, no preload needed.
 
 var ships: Dictionary = {}
 var ship_hp: Dictionary = {}

@@ -24,7 +24,6 @@ extends Node
 # -- Constants ----------------------------------------------------------------
 
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
-const PlayerLoadoutScript = preload("res://scripts/player_loadout.gd")
 const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 const WorldSessionScript = preload("res://scripts/world_session.gd")
@@ -87,7 +86,9 @@ var _ship_hp : Dictionary = _session.ship_hp
 
 ## Duel mode: opponent player ship IDs (populated from InitialState is_player flag)
 var _opponent_ship_ids : Array = _session.opponent_ship_ids
-var _loadout := PlayerLoadoutScript.new()
+## PlayerLoadout is a GDExtension class (dawn-client-gdext, ADR-0039/ADR-0040)
+## -- no preload needed, same as any other globally registered class.
+var _loadout := PlayerLoadout.new()
 
 ## Client-side capacitor simulation (mirrors server CapacitorSystem logic).
 ## Populated from InitialState (cap_max, cap_recharge_per_tick) and
@@ -665,8 +666,14 @@ func _handle_aoi_leave(p: Dictionary) -> void:
 ## Sent on connect and again after every Fit/Unfit (ADR-0032), so the panel
 ## and module bar always reflect the server's authoritative fitting state --
 ## including a rejected Fit/Unfit attempt reverting visibly.
-func _on_player_fitting(payload: Dictionary) -> void:
-	_loadout.apply_payload(payload)
+func _on_player_fitting(raw_json: String) -> void:
+	## connection.gd hands the original wire JSON text (not a re-parsed
+	## Dictionary): GDScript's JSON.parse_string() always turns wire integers
+	## into float Variants, so JSON.stringify()-ing a parsed Dictionary back
+	## would corrupt e.g. active_ship_id (20 -> "20.0"), which
+	## PlayerLoadout.apply_payload (dawn-client-gdext, serde_json-backed)
+	## rejects for its u32/u64 fields.
+	_loadout.apply_payload(raw_json)
 
 	## Disembark/SelectActiveShip/Assemble (ADR-0037) can change which ship
 	## is active independently of any command this client sent. Only follow

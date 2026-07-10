@@ -23,8 +23,13 @@ signal welcomed(player_id: int, ship_id: int)
 ## On InitialState: notifies the full payload (ships + navigation map)
 signal initial_state_received(state: Dictionary)
 ## On PlayerLoadout (sent on connect and again after every Fit/Unfit, ADR-0032):
-## notifies the full payload (modules + inventory + slot_capacity).
-signal player_fitting_received(payload: Dictionary)
+## carries the raw JSON line, not a parsed Dictionary -- GDScript's
+## `JSON.parse_string()` always turns wire integers into `float` Variants, so
+## a Dictionary round-tripped back through `JSON.stringify()` would render
+## e.g. `active_ship_id: 20` as `"20.0"`, which `PlayerLoadout.apply_payload`
+## (dawn-client-gdext, serde_json-backed) rejects for its u32/u64 fields.
+## Handing the original wire text through avoids that lossy re-encoding.
+signal player_fitting_received(raw_json: String)
 ## ModuleActivated 受信時
 signal module_activated(ship_id: int, module_id: int, slot: String)
 ## ModuleDeactivated 受信時。reason は "cap" | "range" | ""（""=プレイヤー起因、ADR-0035）。
@@ -313,9 +318,9 @@ func _flush_buffer() -> void:
 			push_warning("[Connection] failed to parse JSON: " + line)
 			continue
 		var payload: Dictionary = result as Dictionary
-		_handle_message(payload)
+		_handle_message(payload, line)
 
-func _handle_message(payload: Dictionary) -> void:
+func _handle_message(payload: Dictionary, raw_line: String) -> void:
 	var msg_type: String = payload.get("type", "") as String
 	match msg_type:
 		"Welcome":
@@ -331,7 +336,7 @@ func _handle_message(payload: Dictionary) -> void:
 		"PlayerLoadout", "PlayerFitting":
 			var modules: Array = payload.get("modules", []) as Array
 			print("[Connection] PlayerLoadout: %d modules" % modules.size())
-			player_fitting_received.emit(payload)
+			player_fitting_received.emit(raw_line)
 		"Redirect":
 			_handle_redirect(payload)
 		"ModuleActivated":

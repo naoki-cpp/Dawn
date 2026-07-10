@@ -12,10 +12,8 @@
 class_name HudManager
 extends RefCounted
 
-## Typed PlayerLoadout row shapes -- preloaded rather than referenced by
-## global class_name, same as player_loadout.gd itself.
-const ModuleRow = preload("res://scripts/module_row.gd")
-const ItemRow = preload("res://scripts/item_row.gd")
+## ModuleRow/ItemRow are GDExtension classes (dawn-client-gdext,
+## ADR-0039/ADR-0040) -- globally registered, no preload needed.
 const InventoryRow = preload("res://scripts/inventory_row.gd")
 
 ## Layer colours for the three HP bands and the capacitor (EVE convention).

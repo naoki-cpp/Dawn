@@ -76,6 +76,10 @@ player stronger.
 ## Runtime Boundaries
 
 - `dawn-core` defines pure domain types, commands, and events.
+- `dawn-client-core` defines the Godot-independent client-side domain model
+  (loadout, wire row types), depending only on `dawn-core` (ADR-0039).
+- `dawn-client-gdext` is the GDExtension binding exposing `dawn-client-core`
+  to the Godot client (ADR-0040).
 - `dawn-ecs` defines components and systems without owning persistence.
 - `dawn-event-store` owns append-only persistence and snapshots.
 - `dawn-consensus` owns Raft and sector transit consensus.
