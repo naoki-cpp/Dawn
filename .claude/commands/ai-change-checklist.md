@@ -64,6 +64,9 @@ If the change touches `EventJson` or `ClientCommandJson` in
     generated, but that prose is hand-maintained
 [ ] Did not add a new pub type to dawn-core just to reuse it in protocol.rs
     (FBD-002: dawn-core must not depend on schemars)
+[ ] New/changed field is untrusted client input: ran /security-check (wire
+    scope) — closed-enum validation for strings, is_finite() for floats that
+    feed physics/geometry, no unbounded collection without a length cap
 ```
 
 ## Extra checks when adding a new crate
@@ -91,6 +94,8 @@ If the change touches `EventJson` or `ClientCommandJson` in
 [ ] client/scripts/ change that depends on the scene tree: manual Godot
     editor verification (or its absence) is stated in the PR description
 [ ] PR adds/changes a pub item: run /rust-api-audit before opening the PR
+[ ] PR adds a new client-facing command, a new SQL call site, or a new
+    `*_owned` handler: run /security-check before opening the PR
 [ ] PR adds a new logic-bearing .rs file, or adds match arms to event
     replay (node/apply_event.rs) or wire conversion (dawn-actor/src/
     protocol.rs): the new arms have direct tests, not just incidental

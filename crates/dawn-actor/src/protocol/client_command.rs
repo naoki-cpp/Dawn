@@ -14,6 +14,19 @@ pub struct PosJson {
     pub z: f32,
 }
 
+impl PosJson {
+    /// `false` if any component is NaN/Infinity. A client-supplied non-finite
+    /// coordinate would otherwise flow straight into position/velocity math
+    /// (`SimulationNode::apply_move_command`) and poison shared simulation
+    /// state -- NaN propagates through arithmetic silently and makes range
+    /// comparisons (`dist < range`) always false, so it's cheaper to reject
+    /// at the wire boundary than to guard every downstream consumer
+    /// (security-review.md SEC-5).
+    fn is_finite(&self) -> bool {
+        self.x.is_finite() && self.y.is_finite() && self.z.is_finite()
+    }
+}
+
 #[derive(Debug, Serialize, JsonSchema, Clone, Copy)]
 pub struct VelJson {
     pub dx: f32,
@@ -207,13 +220,18 @@ fn approach_target_from_gate_or_ship(
 
 fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
     match json {
-        ClientCommandJson::MoveCommand { target } => Some(ClientCommand::Move(MoveCommand {
-            target_position: Position {
-                x: target.x,
-                y: target.y,
-                z: target.z,
-            },
-        })),
+        ClientCommandJson::MoveCommand { target } => {
+            if !target.is_finite() {
+                return None;
+            }
+            Some(ClientCommand::Move(MoveCommand {
+                target_position: Position {
+                    x: target.x,
+                    y: target.y,
+                    z: target.z,
+                },
+            }))
+        }
         ClientCommandJson::LockOnCommand { target_id } => {
             Some(ClientCommand::LockOn(LockOnCommand {
                 ship_id: ShipId(EntityId::from_raw(0)),
@@ -271,6 +289,9 @@ fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
             target_id,
             radius,
         } => {
+            if radius.is_some_and(|r| !r.is_finite()) {
+                return None;
+            }
             let target = approach_target_from_gate_or_ship(gate_id, target_id)?;
             Some(ClientCommand::Orbit(dawn_core::OrbitCommand {
                 target,
@@ -282,6 +303,9 @@ fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
             target_id,
             range,
         } => {
+            if range.is_some_and(|r| !r.is_finite()) {
+                return None;
+            }
             let target = approach_target_from_gate_or_ship(gate_id, target_id)?;
             Some(ClientCommand::KeepAtRange(dawn_core::KeepAtRangeCommand {
                 target,
