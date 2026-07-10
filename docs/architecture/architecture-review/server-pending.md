@@ -191,7 +191,7 @@ P7 系で確立した「責務ごとに sibling モジュールへ抽出」方�
 
 | 項目 | 種別 | 状態・理由 |
 |---|---|---|
-| R-2 client `main.gd` 分割 | 品質・一部着手済み | `WorldSession`・`WorldInteraction`・`WorldPresentation` 抽出で live world state / world interaction policy / world visual side effect を移動し、`main.gd` は 1089 行（詳細・最新値は client.md）。残る scene lifecycle / node generation / network send / HUD adapter は `.tscn` 化コンポーネントへのシーン参照切れリスクが上回るため保留 |
+| R-2 client `main.gd` 分割 | 品質・一部着手済み | `WorldSession`・`WorldInteraction`・`WorldPresentation` 抽出で live world state / world interaction policy / world visual side effect を移動し、`main.gd` は 1217 行（詳細・最新値は client.md）。残る scene lifecycle / node generation / network send / HUD adapter は `.tscn` 化コンポーネントへのシーン参照切れリスクが上回るため保留 |
 | R-3 `node/` 系再肥大（warp/orbit/commands/transit_flow/inventory/apply_event/snapshot_io） | 品質・保留 | `station.rs` は 2026-07-09 の deepening で観察対象から外れた。2026-07-10 再計測で `inventory.rs`/`apply_event.rs`/`snapshot_io.rs` も watch 入り。総行数は閾値帯だが、少なくとも現時点では責務単位は保たれている。`commands.rs` の impl が約687で最も700行に近い。impl が 700 超、または test cluster を含めた見通し悪化が実害化した時点でファイル別に分割（トリガー付き・上記 R-3） |
 | M-3 `SectorSimulatorActor` 密結合 | 品質・保留 | 本番パス外（in-process テスト/ベンチ専用）。P9-1 撤回。優先度低 |
 | M-6 アプリ層 adapter 重複（`data_loader` / `spawn_npcs`） | 許容重複（縮小） | AoI / production runtime / Command dispatch は deep module 化済み（M-7 解消で Command dispatch 項目を削除）。残る data_loader / NPC spawn は低頻度 glue として許容。再評価トリガー付き |

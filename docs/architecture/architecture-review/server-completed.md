@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-pending.md（未完項目）
-date     : 2026-07-09
+date     : 2026-07-10
 ---
 
 # Architecture Review — Dawn Codebase（完了済みログ）
@@ -53,6 +53,9 @@ deepening、production outbound replication publisher deepening、Client admissi
 | 新規プレイヤーへのスターターPackagedShip付与 + 複数所有船切り替えUI | 2026-07-08 | starter packaged ship と owned ship roster UI を追加。 |
 | Ship cargo / Station inventory UI分離 + TransferToStationCommand実装 | 2026-07-08 | HUD を cargo/station 分離し、`TransferToStationCommand` を追加。 |
 | ItemId→ItemRow JSON変換の重複除去（`/improve-codebase-architecture`） | 2026-07-08 | `item_id_to_row_json` に集約して row schema drift を防止。 |
+| `dawn-client-core` クレート新設（ADR-0039） | 2026-07-10 | Godot非依存クライアントドメインモデル。`dawn-core`のみに依存。PlayerLoadoutMsg/ModuleRow/ItemRow + capacitorシミュレーション/武器射程等の純粋関数を移植。`dawn-sector`をdev-dependencyにした契約テストで実サーバーwireとの整合を担保。 |
+| `dawn-client-gdext` クレート新設（ADR-0040） | 2026-07-10 | GDExtensionバインディング（cdylib）。`dawn-client-core`の薄いラッパーで、旧GDScript（`player_loadout.gd`/`module_row.gd`/`item_row.gd`）と同名・同APIのグローバルクラスとしてGodotへ公開。呼び出し側（`main.gd`等）は`preload()`行の削除のみで移行完了。 |
+| Disassemble のカーゴ消失バグ修正 | 2026-07-10 | `disassemble_ship_owned` が船を`PackagedShip`へ変換する際、`InventoryComp`（船カーゴ）を救済せず despawn しており未艤装モジュール/Scrap Metalが消滅していたのを、他のStation操作と同じ`credit_station_item`経路で salvage するよう修正。回帰テスト3件追加。 |
 
 ---
 
