@@ -155,6 +155,21 @@ impl PlayerLoadoutMsg {
             })
     }
 
+    /// Applies a server-confirmed activation state to the module matching
+    /// `module_id`, resetting its cycle timer (mirrors the old
+    /// `player_loadout.gd::apply_module_activation`). No-op if no module
+    /// with that id is fitted.
+    pub fn apply_module_activation(&mut self, module_id: u32, active: bool, forced_reason: String) {
+        for row in &mut self.modules {
+            if row.module_id == module_id {
+                row.is_active = active;
+                row.cycle_remaining = 0;
+                row.forced_reason = forced_reason;
+                return;
+            }
+        }
+    }
+
     /// Advance every fitted module's capacitor cycle by `ticks`, mirroring
     /// the server's `CapacitorSystem` (`crates/dawn-ecs/src/systems/capacitor.rs`).
     /// Mutates `cycle_remaining` on each active module row and returns the
@@ -297,6 +312,27 @@ mod tests {
             loadout.effective_range_for_activation(ModuleKind::Propulsion, 1),
             None
         );
+    }
+
+    #[test]
+    fn apply_module_activation_updates_the_matching_module_and_resets_its_cycle() {
+        let mut row = weapon_row(1, false, 0.0, 0.0);
+        row.cycle_remaining = 7;
+        let mut loadout = empty_loadout(vec![row]);
+
+        loadout.apply_module_activation(1, true, "".to_string());
+
+        assert!(loadout.modules[0].is_active);
+        assert_eq!(loadout.modules[0].cycle_remaining, 0);
+    }
+
+    #[test]
+    fn apply_module_activation_is_a_no_op_for_an_unknown_module_id() {
+        let mut loadout = empty_loadout(vec![weapon_row(1, false, 0.0, 0.0)]);
+
+        loadout.apply_module_activation(999, true, "".to_string());
+
+        assert!(!loadout.modules[0].is_active);
     }
 
     #[test]

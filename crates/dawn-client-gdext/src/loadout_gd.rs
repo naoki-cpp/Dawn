@@ -161,14 +161,10 @@ impl PlayerLoadout {
         let Some(loadout) = &mut self.loadout else {
             return;
         };
-        for row in &mut loadout.modules {
-            if row.module_id as i64 == module_id {
-                row.is_active = active;
-                row.cycle_remaining = 0;
-                row.forced_reason = forced_reason.to_string();
-                return;
-            }
-        }
+        let Ok(module_id) = u32::try_from(module_id) else {
+            return;
+        };
+        loadout.apply_module_activation(module_id, active, forced_reason.to_string());
     }
 
     /// `{}` (empty Dictionary) if `active_index` is out of range, matching
