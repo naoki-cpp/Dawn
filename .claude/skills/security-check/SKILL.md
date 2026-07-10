@@ -46,9 +46,13 @@ Arguments (optional):
 
 ### Step 0: Diff against the standing findings doc
 
-Read `docs/architecture/security-review.md` (the living findings doc; if it
-doesn't exist yet, seed it from [references/baseline.md](references/baseline.md)).
-Then check what changed since the review date recorded in its front matter:
+Read `docs/architecture/security-review.md` (current state — entry points,
+verified-clean list, open findings; if it doesn't exist yet, seed it from
+[references/baseline.md](references/baseline.md)) and skim
+`docs/architecture/security-review-completed.md` (append-only log of what
+was already fixed, so you don't waste time re-discovering a resolved
+finding). Then check what changed since the review date recorded in
+`security-review.md`'s front matter:
 
 ```bash
 git log --oneline --since=<last-review-date> -- crates/
@@ -215,15 +219,23 @@ Finding — <file>:<line>: <what>
   Severity: high / medium / low (LAN-prototype context)
 ```
 
-Then update `docs/architecture/security-review.md`:
-- front-matter `date` → today, one-line summary of what changed
-- resolved findings move to its 解消済み section (append-only, dated)
-- new findings get an ID (`SEC-N`, next number, never renumber), root cause,
-  and a decision (Fix / Defer with trigger / Accept with reason) — the same
-  issue discipline as `/architecture-review`
-- keep the entry-point table and the verified-clean list current: they are
+Then update the two living docs, split by purpose the same way
+`architecture-review/server.md`/`server-completed.md` are:
+
+- **`docs/architecture/security-review.md`** (current state — entry points,
+  verified-clean list, open findings): front-matter `date` → today, one-line
+  summary of what changed. New findings get an ID (`SEC-N`, next number,
+  never renumber), root cause, and a decision (Fix / Defer with trigger /
+  Accept with reason) — the same issue discipline as `/architecture-review`.
+  Keep the entry-point table and the verified-clean list current: they are
   what make the next diff-based review cheap. Record what was verified
   clean, not just problems.
+- **`docs/architecture/security-review-completed.md`** (append-only audit
+  log): when a finding is fixed, move its full write-up here dated, and
+  leave nothing but the `security-review.md` finding entry deleted (not a
+  strikethrough pointer — unlike `architecture-review`'s issue IDs, nothing
+  in code comments cites a `SEC-N` ID, so there's no cross-reference to keep
+  resolvable). Never delete or rewrite past entries in this file.
 
 Every finding must say whether it is **actually exploitable by a malicious
 LAN client today** or theoretical hardening. Severity is judged in the
