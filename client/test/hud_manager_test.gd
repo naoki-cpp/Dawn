@@ -3,9 +3,9 @@
 ## Unit tests for hud_manager.gd's panel construction and update logic.
 ## Control node properties (Label.text, ProgressBar.value) can be read/
 ## written without scene-tree membership, so most of these don't need
-## add_child(). The exception is module_slot_at(), which calls
-## Control.get_global_rect() -- that needs the panel inside a live tree
-## with a flushed layout, so it gets its own add_child() + await.
+## add_child(). Hit-testing (module_slot_at, column_at, etc., which need
+## Control.get_global_rect() on a live tree with flushed layout) is tested
+## separately in hud_hit_test_test.gd.
 extends GdUnitTestSuite
 
 const __source: String = "res://scripts/hud_manager.gd"
@@ -180,18 +180,6 @@ func test_update_module_bar_marks_active_modules_on() -> void:
 	assert_str((slots[0]["state"] as Label).text).is_equal("ON")
 
 
-func test_module_slot_at_finds_the_slot_under_a_screen_position() -> void:
-	var module_bar: HBoxContainer = HudManager.build_module_bar(_hud)
-	var modules: Array[ModuleRow] = [_module({"name": "Gun", "is_active_module": true})]
-	var slots: Array = HudManager.rebuild_module_bar(module_bar, modules)
-	await get_tree().process_frame  ## let layout/anchors resolve global_rect
-
-	var panel: Panel = slots[0]["panel"]
-	var inside_point: Vector2 = panel.get_global_rect().get_center()
-	assert_int(HudManager.module_slot_at(slots, inside_point)).is_equal(0)
-	assert_int(HudManager.module_slot_at(slots, Vector2(-9999.0, -9999.0))).is_equal(-1)
-
-
 # -- duel result overlay -----------------------------------------------------------
 
 func test_show_duel_result_displays_victory_or_defeat() -> void:
@@ -322,72 +310,5 @@ func test_owned_ship_row_handles_null_docked_station_id_and_ship_type_name() -> 
 	assert_int(ship_rows[0].ship_id).is_equal(1)
 
 
-## Drag-and-drop's drop-target resolution (main.gd) needs to know which
-## column a point falls in even when it's empty space below the last row --
-## column_at() checks the *list* container's rect, not individual rows.
-func test_column_at_identifies_the_fitted_column() -> void:
-	var hud: CanvasLayer = auto_free(CanvasLayer.new())
-	add_child(hud)
-	var refs: Dictionary = HudManager.build_inventory_panel(hud)
-	HudManager.toggle_inventory_panel(refs)
-	await get_tree().process_frame
-
-	var fitted_list: VBoxContainer = refs["fitted_list"]
-	var result: String = HudManager.column_at(refs, fitted_list.get_global_rect().position + Vector2(2, 2))
-	assert_str(result).is_equal(InventoryRow.SOURCE_FITTED)
-
-
-func test_column_at_identifies_the_ship_cargo_column() -> void:
-	var hud: CanvasLayer = auto_free(CanvasLayer.new())
-	add_child(hud)
-	var refs: Dictionary = HudManager.build_inventory_panel(hud)
-	HudManager.toggle_inventory_panel(refs)
-	await get_tree().process_frame
-
-	var inventory_list: VBoxContainer = refs["inventory_list"]
-	var result: String = HudManager.column_at(refs, inventory_list.get_global_rect().position + Vector2(2, 2))
-	assert_str(result).is_equal(InventoryRow.SOURCE_SHIP_CARGO)
-
-
-func test_column_at_identifies_the_station_column() -> void:
-	var hud: CanvasLayer = auto_free(CanvasLayer.new())
-	add_child(hud)
-	var refs: Dictionary = HudManager.build_inventory_panel(hud)
-	HudManager.toggle_inventory_panel(refs)
-	await get_tree().process_frame
-
-	var station_list: VBoxContainer = refs["station_list"]
-	var result: String = HudManager.column_at(refs, station_list.get_global_rect().position + Vector2(2, 2))
-	assert_str(result).is_equal(InventoryRow.SOURCE_STATION)
-
-
-func test_column_at_identifies_the_ships_column() -> void:
-	var hud: CanvasLayer = auto_free(CanvasLayer.new())
-	add_child(hud)
-	var refs: Dictionary = HudManager.build_inventory_panel(hud)
-	HudManager.toggle_inventory_panel(refs)
-	await get_tree().process_frame
-
-	var ships_list: VBoxContainer = refs["ships_list"]
-	var result: String = HudManager.column_at(refs, ships_list.get_global_rect().position + Vector2(2, 2))
-	assert_str(result).is_equal(InventoryRow.SOURCE_SHIPS)
-
-
-func test_column_at_returns_empty_string_for_a_point_outside_every_column() -> void:
-	var hud: CanvasLayer = auto_free(CanvasLayer.new())
-	add_child(hud)
-	var refs: Dictionary = HudManager.build_inventory_panel(hud)
-	HudManager.toggle_inventory_panel(refs)
-	await get_tree().process_frame
-
-	var result: String = HudManager.column_at(refs, Vector2(-9999, -9999))
-	assert_str(result).is_equal("")
-
-
-func test_column_at_returns_empty_when_the_panel_is_hidden() -> void:
-	var hud: CanvasLayer = auto_free(CanvasLayer.new())
-	add_child(hud)
-	var refs: Dictionary = HudManager.build_inventory_panel(hud)
-	var fitted_list: VBoxContainer = refs["fitted_list"]
-
-	assert_str(HudManager.column_at(refs, fitted_list.get_global_rect().position)).is_equal("")
+## module_slot_at() and column_at() tests moved to hud_hit_test_test.gd
+## alongside hud_hit_test.gd (architecture-review/client.md C-9).

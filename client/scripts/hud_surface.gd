@@ -197,15 +197,15 @@ func toggle_inventory_panel() -> void:
 
 
 func inventory_panel_consumes(pos: Vector2) -> bool:
-	return HudManager.inventory_panel_consumes(_inventory_panel_refs, pos)
+	return HudHitTest.inventory_panel_consumes(_inventory_panel_refs, pos)
 
 
 func inventory_panel_row_at(pos: Vector2) -> InventoryRow:
-	return HudManager.inventory_panel_row_at(_inventory_panel_refs, pos)
+	return HudHitTest.inventory_panel_row_at(_inventory_panel_refs, pos)
 
 
 func inventory_panel_column_at(pos: Vector2) -> String:
-	return HudManager.column_at(_inventory_panel_refs, pos)
+	return HudHitTest.column_at(_inventory_panel_refs, pos)
 
 
 ## A small floating Label that follows the cursor while a row drag is in
@@ -223,7 +223,7 @@ func create_drag_ghost(text: String) -> Label:
 
 
 func module_slot_at(pos: Vector2) -> int:
-	return HudManager.module_slot_at(_module_slots, pos)
+	return HudHitTest.module_slot_at(_module_slots, pos)
 
 
 func show_duel_result(victory: bool) -> void:
