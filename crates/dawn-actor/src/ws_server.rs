@@ -35,10 +35,19 @@ use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
 // ── WsClientConnection ────────────────────────────────────────────────────────
 
+/// Cap on how many parsed commands a single connection may have queued
+/// waiting for the tick loop to drain them. At `TICK_MS` = 100ms this is
+/// several seconds of buffer even under total starvation -- generous for a
+/// normal player, but bounded, so a client sending commands faster than the
+/// server drains them applies TCP backpressure (the read task's `.await` on
+/// `send` stalls) instead of growing server memory without limit
+/// (security-review.md SEC-4).
+const COMMAND_QUEUE_CAP: usize = 256;
+
 #[derive(Debug)]
 pub struct WsClientConnection {
     event_tx: mpsc::UnboundedSender<String>,
-    command_rx: mpsc::UnboundedReceiver<ClientCommand>,
+    command_rx: mpsc::Receiver<ClientCommand>,
 }
 
 impl WsClientConnection {
@@ -112,7 +121,7 @@ impl HandshakeRequest {
         } = self;
 
         let (event_tx, event_rx) = mpsc::unbounded_channel::<String>();
-        let (command_tx, command_rx) = mpsc::unbounded_channel::<ClientCommand>();
+        let (command_tx, command_rx) = mpsc::channel::<ClientCommand>(COMMAND_QUEUE_CAP);
 
         // Send Welcome + InitialState + (optional) PlayerLoadout.
         let welcome = format!(
@@ -145,7 +154,10 @@ impl HandshakeRequest {
                 if let Message::Text(text) = msg {
                     for line in text.lines() {
                         if let Some(cmd) = parse_client_command(line) {
-                            if command_tx.send(cmd).is_err() {
+                            // Bounded send: blocks (backpressures the socket
+                            // read) once COMMAND_QUEUE_CAP is reached instead
+                            // of growing memory without limit.
+                            if command_tx.send(cmd).await.is_err() {
                                 return;
                             }
                         }

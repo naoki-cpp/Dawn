@@ -146,6 +146,31 @@ mod tests {
         }
     }
 
+    /// security-review.md SEC-5: a non-finite coordinate must be rejected at
+    /// the wire boundary instead of flowing into position/velocity math.
+    /// JSON has no `NaN`/`Infinity` literals, so the attack shape a real
+    /// client can actually send is a magnitude that overflows `f32` on
+    /// parse (`1e40` is valid JSON but exceeds `f32::MAX`, so serde_json
+    /// hands back `f32::INFINITY`) -- literal `NaN`/`Infinity` tokens would
+    /// just fail JSON parsing itself, which doesn't exercise `is_finite()`.
+    #[test]
+    fn move_command_json_with_an_overflowing_coordinate_fails_to_parse() {
+        let line = r#"{"type":"MoveCommand","target":{"x":1e40,"y":0.0,"z":0.0}}"#;
+        assert!(parse_client_command(line).is_none());
+    }
+
+    #[test]
+    fn orbit_command_json_with_an_overflowing_radius_fails_to_parse() {
+        let line = r#"{"type":"OrbitCommand","gate_id":2,"radius":1e40}"#;
+        assert!(parse_client_command(line).is_none());
+    }
+
+    #[test]
+    fn keep_at_range_command_json_with_an_overflowing_range_fails_to_parse() {
+        let line = r#"{"type":"KeepAtRangeCommand","gate_id":2,"range":1e40}"#;
+        assert!(parse_client_command(line).is_none());
+    }
+
     #[test]
     fn warp_command_json_is_parsed_into_client_command_warp() {
         let line = r#"{"type":"WarpCommand","gate_id":2}"#;
