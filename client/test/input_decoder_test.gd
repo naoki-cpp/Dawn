@@ -158,9 +158,14 @@ func test_i_key_toggles_the_inventory_panel() -> void:
 	assert_str(action.kind as String).is_equal("toggle_inventory_panel")
 
 
-func test_i_key_does_nothing_without_a_player_ship() -> void:
+## Regression: a docked player with no active ship (post-Disassemble/
+## Disembark, ownership.md §8) must still be able to open the panel -- it's
+## the only way to reach the STATION column's Assemble row, which is the
+## documented recovery path. Blocking this key here soft-locked a shipless
+## docked player who hadn't already had the panel open.
+func test_i_key_still_toggles_the_inventory_panel_without_a_player_ship() -> void:
 	var action: Dictionary = InputDecoder.decode_key(KEY_I, NO_SELECTION, -1, -1, -1, -1)
-	assert_str(action.kind as String).is_equal("none")
+	assert_str(action.kind as String).is_equal("toggle_inventory_panel")
 
 
 # -- D/U/B/Y keys -> station actions ---------------------------------------------------

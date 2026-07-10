@@ -19,8 +19,10 @@ extends RefCounted
 
 
 ## Decides the action for a single keypress. `player_ship_id` < 0 means no
-## player ship yet (only F-keys and Tab still work in that case, mirroring
-## main.gd's original per-branch `and _player_ship_id >= 0` guards).
+## player ship yet -- F-keys, Tab, and I (inventory panel, ownership.md §8's
+## shipless-docked recovery path) still work in that case, mirroring
+## main.gd's original per-branch `and _player_ship_id >= 0` guards for
+## everything else.
 static func decode_key(
 	keycode: Key,
 	player_ship_id: int,
@@ -91,8 +93,17 @@ static func decode_key(
 	if keycode == KEY_BRACKETRIGHT and player_ship_id >= 0:
 		return {"kind": "adjust_keep_at_range", "delta_km": 1.0}
 
-	## I key -> toggle the Inventory / Fitting panel (ADR-0032).
-	if keycode == KEY_I and player_ship_id >= 0:
+	## I key -> toggle the Inventory / Fitting panel (ADR-0032). No
+	## player_ship_id requirement, unlike the keys below: a docked player
+	## with no active ship (post-Disassemble/Disembark, ownership.md §8)
+	## must still be able to open this panel -- it's the only way to reach
+	## the STATION column's Assemble row or the SHIPS column's
+	## SelectActiveShip rows, both of which are the documented recovery path
+	## and neither of which requires an active ship (see main.gd's
+	## ACTION_ASSEMBLE/ACTION_SELECT_ACTIVE_SHIP handlers). Gating this key
+	## on player_ship_id would strand a shipless docked player: unable to
+	## open the panel, unable to Assemble a replacement.
+	if keycode == KEY_I:
 		return {"kind": "toggle_inventory_panel"}
 
 	## D key -> dock at the nearby station when in range.
