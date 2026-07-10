@@ -118,6 +118,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dawn-core",
+ "dawn-wire",
  "futures",
  "futures-util",
  "schemars",
@@ -145,6 +146,7 @@ name = "dawn-client-gdext"
 version = "0.1.0"
 dependencies = [
  "dawn-client-core",
+ "dawn-wire",
  "godot",
  "serde_json",
 ]
@@ -250,6 +252,16 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "dawn-wire"
+version = "0.1.0"
+dependencies = [
+ "dawn-core",
+ "schemars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

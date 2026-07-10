@@ -5,10 +5,12 @@
 
 use godot::prelude::*;
 
+mod client_command_gd;
 mod item_row_gd;
 mod loadout_gd;
 mod module_row_gd;
 
+pub use client_command_gd::ClientCommand;
 pub use item_row_gd::ItemRow;
 pub use loadout_gd::PlayerLoadout;
 pub use module_row_gd::ModuleRow;

@@ -1,0 +1,18 @@
+[package]
+name    = "dawn-wire"
+version = "0.1.0"
+edition = "2021"
+description = "Client<->server wire schema (ClientCommandJson), shared by dawn-actor (server, deserialize) and dawn-client-gdext (client, serialize). No transport/runtime dependencies (ADR-0041)."
+repository.workspace = true
+publish.workspace     = true
+
+# dawn-wire is a leaf schema crate: dawn-core + serde only. Anything that
+# would drag in a transport/runtime dependency (tokio, tungstenite, an async
+# executor) belongs in dawn-actor instead, since dawn-client-gdext (a Godot
+# GDExtension cdylib) depends on this crate directly and must not inherit a
+# server-side WebSocket stack it never uses (ADR-0041).
+[dependencies]
+dawn-core  = { path = "../dawn-core" }
+serde      = { workspace = true }
+serde_json = "1"
+schemars   = "0.8"

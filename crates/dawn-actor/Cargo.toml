@@ -12,6 +12,7 @@ publish.workspace     = true
 # protocol (DomainEvent <-> JSON <-> ClientCommand) shared by all binaries.
 [dependencies]
 dawn-core         = { path = "../dawn-core" }
+dawn-wire         = { path = "../dawn-wire" }
 tokio             = { workspace = true }
 thiserror         = { workspace = true }
 serde             = { workspace = true }

@@ -15,6 +15,9 @@ crate-type = ["cdylib"]
 # a Godot runtime.
 [dependencies]
 dawn-client-core = { path = "../dawn-client-core" }
+# Client->server wire schema only (ADR-0041) -- no transport/runtime
+# dependency, unlike dawn-actor which also depends on this crate.
+dawn-wire         = { path = "../dawn-wire" }
 # api-4-6 pins the GDExtension API level to match the repo's pinned Godot
 # build (.godot-version: 4.6.3-stable).
 godot             = { version = "0.5", features = ["api-4-6"] }
