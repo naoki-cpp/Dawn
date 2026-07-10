@@ -469,6 +469,156 @@ mod tests {
     }
 
     #[test]
+    fn player_can_assemble_a_new_ship_right_after_disassembling_their_only_ship() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station_id = StationId(0);
+        let station = node.station(station_id).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        assert!(accepted(node.dock_owned(
+            player_id,
+            ship_id,
+            DockCommand { station_id }
+        )));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::High,
+                module_id: crate::modules::MODULE_RAILGUN_SMALL,
+            }
+        ));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::Mid,
+                module_id: crate::modules::MODULE_AFTERBURNER,
+            }
+        ));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::Mid,
+                module_id: crate::modules::MODULE_FOLD_DISRUPTOR,
+            }
+        ));
+        let ship_type_id = *node
+            .ships
+            .type_ids
+            .get(&ship_id)
+            .expect("player ship type is registered");
+
+        assert!(accepted(node.disassemble_ship_owned(
+            player_id,
+            DisassembleShipCommand {
+                ship_id,
+                station_id,
+            }
+        )));
+
+        // The player now owns zero live ships -- the exact "shipless docked
+        // player" state ownership.md §8 exists to make recoverable. Assemble
+        // should succeed using the PackagedShip Disassemble just credited.
+        assert!(
+            node.can_use_station(player_id, station_id),
+            "docked_players context must survive the ship entity being despawned"
+        );
+        let new_ship = node.assemble_ship_owned(
+            player_id,
+            AssembleCommand {
+                station_id,
+                ship_type_id,
+            },
+        );
+        assert!(
+            new_ship.is_ok(),
+            "Assemble must succeed right after Disassemble, got {new_ship:?}"
+        );
+    }
+
+    #[test]
+    fn disassembling_one_owned_ship_does_not_affect_a_second_owned_ship() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_a = node.spawn_player_ship(player_id);
+        let station_id = StationId(0);
+        let station = node.station(station_id).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_a, station.abs_m);
+        assert!(accepted(node.dock_owned(
+            player_id,
+            ship_a,
+            DockCommand { station_id }
+        )));
+
+        // Give the player a second, independent owned ship via Assemble
+        // (ADR-0037), same as a real "player has more than one ship" state.
+        node.credit_station_item(
+            player_id,
+            station_id,
+            ItemId::PackagedShip(ShipTypeId(1)),
+            1,
+        );
+        let ship_b = node
+            .assemble_ship_owned(
+                player_id,
+                AssembleCommand {
+                    station_id,
+                    ship_type_id: ShipTypeId(1),
+                },
+            )
+            .expect("assemble succeeds with a packaged hull in station inventory");
+
+        // Fully unfit ship_a so it qualifies for Disassemble.
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id: ship_a,
+                slot: SlotKind::High,
+                module_id: crate::modules::MODULE_RAILGUN_SMALL,
+            }
+        ));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id: ship_a,
+                slot: SlotKind::Mid,
+                module_id: crate::modules::MODULE_AFTERBURNER,
+            }
+        ));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id: ship_a,
+                slot: SlotKind::Mid,
+                module_id: crate::modules::MODULE_FOLD_DISRUPTOR,
+            }
+        ));
+
+        assert!(accepted(node.disassemble_ship_owned(
+            player_id,
+            DisassembleShipCommand {
+                ship_id: ship_a,
+                station_id,
+            }
+        )));
+
+        // ship_b must still be a live, owned ship -- untouched by ship_a's
+        // disassembly.
+        assert!(
+            node.ships.index.contains_key(&ship_b),
+            "ship_b's ECS entity must still exist"
+        );
+        assert_eq!(
+            node.ships.owners.get(&ship_b),
+            Some(&player_id),
+            "ship_b must still be owned by the same player"
+        );
+    }
+
+    #[test]
     fn disassemble_ship_is_rejected_when_any_module_is_fitted() {
         let mut node = node();
         let player_id = node.next_player_id();
