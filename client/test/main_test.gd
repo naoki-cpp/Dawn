@@ -393,7 +393,7 @@ func test_switching_active_ship_to_a_known_ship_reattaches_the_camera() -> void:
 	## without the fix, since there'd be no previous ship to revert.
 	_main._set_as_player_ship(1, ship_a)
 
-	_main._on_player_fitting({"active_ship_id": 2})
+	_main._on_player_fitting(JSON.stringify({"active_ship_id": 2}))
 
 	assert_int(_main._player_ship_id).is_equal(2)
 	assert_int(_main._session.player_ship_id).is_equal(2)
@@ -424,7 +424,7 @@ func test_switching_active_ship_to_an_unknown_ship_leaves_the_camera_alone() -> 
 	_main._ships = _main._session.ships
 	camera.set_target(ship_a)
 
-	_main._on_player_fitting({"active_ship_id": 3})
+	_main._on_player_fitting(JSON.stringify({"active_ship_id": 3}))
 
 	assert_int(_main._player_ship_id).is_equal(1)
 	assert_object(camera._target_node).is_equal(ship_a)
@@ -451,7 +451,7 @@ func test_disembarking_reverts_the_old_ships_player_material() -> void:
 	_main._ships = _main._session.ships
 	_main._set_as_player_ship(1, ship_a)
 
-	_main._on_player_fitting({"active_ship_id": null})
+	_main._on_player_fitting(JSON.stringify({"active_ship_id": null}))
 
 	assert_int(_main._player_ship_id).is_equal(-1)
 	assert_int(_main._session.player_ship_id).is_equal(-1)

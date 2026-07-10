@@ -88,5 +88,16 @@ Phase 10 全体ではなく「ADR-0039 の Loadout モジュールを実際に G
       `cargo clippy --workspace --all-targets -- -D warnings` 全件通過
 - [x] Godot エディタでの手動検証: `--headless --editor --quit-after` で
       GDExtension ロード + `main.gd` パースエラーなしを確認。GdUnit4 全186ケース
-      （14スイート）実行 — 0 errors / 0 failures / 0 orphans（実際のゲームプレイ
-      による手動プレイテストは未実施、PR 説明に明記する）
+      （14スイート）実行 — 0 errors / 0 failures / 0 orphans。さらに実サーバー
+      （`dawn-simulation --serve`）に対してクライアントを実起動し接続確認。
+      **この過程で発見・修正したバグ**: `connection.gd` が受信 JSON を一度
+      `JSON.parse_string()` で Dictionary にパースしてから `main.gd` 側で
+      `JSON.stringify()` により再エンコードして `apply_payload` へ渡していたが、
+      GDScript の `JSON.parse_string()` は数値を常に `float` にするため、
+      再エンコード後は整数値が `"20.0"` のような浮動小数点表記になり、
+      `dawn-client-core` 側の `serde_json`（u32/u64フィールド）がパース失敗して
+      `PlayerLoadout.apply_payload` が例外を投げ、`active_ship_id` が更新されず
+      船を操縦できなくなっていた。`connection.gd` の `player_fitting_received`
+      シグナルを Dictionary ではなく生の wire JSON 文字列を運ぶ形に変更し、
+      再エンコードを経由しないようにして解消（`_flush_buffer`/`_handle_message`
+      が元の JSON テキスト行を保持して渡す）。
