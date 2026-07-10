@@ -37,5 +37,8 @@ mod loadout;
 mod module_row;
 
 pub use item_row::{ItemRow, ItemType};
-pub use loadout::{ActivationIntent, OwnedShipRow, PlayerLoadoutMsg, SlotCapacity};
+pub use loadout::{
+    simulate_modules_capacitor_ticks, ActivationIntent, OwnedShipRow, PlayerLoadoutMsg,
+    SlotCapacity,
+};
 pub use module_row::{ModuleKind, ModuleRow, StatDelta};

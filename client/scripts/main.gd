@@ -24,7 +24,6 @@ extends Node
 # -- Constants ----------------------------------------------------------------
 
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
-const PlayerLoadoutScript = preload("res://scripts/player_loadout.gd")
 const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 const WorldSessionScript = preload("res://scripts/world_session.gd")
@@ -87,7 +86,9 @@ var _ship_hp : Dictionary = _session.ship_hp
 
 ## Duel mode: opponent player ship IDs (populated from InitialState is_player flag)
 var _opponent_ship_ids : Array = _session.opponent_ship_ids
-var _loadout := PlayerLoadoutScript.new()
+## PlayerLoadout is a GDExtension class (dawn-client-gdext, ADR-0039/ADR-0040)
+## -- no preload needed, same as any other globally registered class.
+var _loadout := PlayerLoadout.new()
 
 ## Client-side capacitor simulation (mirrors server CapacitorSystem logic).
 ## Populated from InitialState (cap_max, cap_recharge_per_tick) and
@@ -666,7 +667,11 @@ func _handle_aoi_leave(p: Dictionary) -> void:
 ## and module bar always reflect the server's authoritative fitting state --
 ## including a rejected Fit/Unfit attempt reverting visibly.
 func _on_player_fitting(payload: Dictionary) -> void:
-	_loadout.apply_payload(payload)
+	## connection.gd already parsed this from wire JSON into a Dictionary for
+	## every message handler uniformly; PlayerLoadout (dawn-client-gdext)
+	## re-parses via serde_json on the Rust side, so re-encode it back to a
+	## JSON string here rather than changing connection.gd's dispatch shape.
+	_loadout.apply_payload(JSON.stringify(payload))
 
 	## Disembark/SelectActiveShip/Assemble (ADR-0037) can change which ship
 	## is active independently of any command this client sent. Only follow

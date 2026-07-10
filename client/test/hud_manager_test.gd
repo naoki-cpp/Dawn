@@ -9,7 +9,6 @@
 extends GdUnitTestSuite
 
 const __source: String = "res://scripts/hud_manager.gd"
-const ModuleRow = preload("res://scripts/module_row.gd")
 const InventoryRow = preload("res://scripts/inventory_row.gd")
 
 var _hud: CanvasLayer

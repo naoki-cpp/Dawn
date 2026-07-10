@@ -11,7 +11,6 @@
 extends GdUnitTestSuite
 
 const __source: String = "res://scripts/main.gd"
-const ModuleRow = preload("res://scripts/module_row.gd")
 const InventoryRow = preload("res://scripts/inventory_row.gd")
 const HudManager = preload("res://scripts/hud_manager.gd")
 
@@ -118,7 +117,7 @@ func before_test() -> void:
 	## functions under test touch them.
 	_main = load(__source).new()
 	_main._interaction = load("res://scripts/world_interaction.gd").new()
-	_main._loadout = load("res://scripts/player_loadout.gd").new()
+	_main._loadout = PlayerLoadout.new()
 
 
 func after_test() -> void:
@@ -141,7 +140,7 @@ func _module_fixture(module_id: int, slot: String, active: bool) -> Dictionary:
 
 
 func _set_loadout_modules(modules: Array) -> void:
-	_main._loadout.apply_payload({"modules": modules})
+	_main._loadout.apply_payload(JSON.stringify({"modules": modules}))
 
 
 # -- _server_to_godot_pos ------------------------------------------------------
@@ -452,7 +451,7 @@ func test_disembarking_reverts_the_old_ships_player_material() -> void:
 	_main._ships = _main._session.ships
 	_main._set_as_player_ship(1, ship_a)
 
-	_main._on_player_fitting({"active_ship_id": -1})
+	_main._on_player_fitting({"active_ship_id": null})
 
 	assert_int(_main._player_ship_id).is_equal(-1)
 	assert_int(_main._session.player_ship_id).is_equal(-1)

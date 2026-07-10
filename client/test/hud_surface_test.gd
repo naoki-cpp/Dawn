@@ -5,8 +5,6 @@
 extends GdUnitTestSuite
 
 const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
-const ModuleRow = preload("res://scripts/module_row.gd")
-const ItemRow = preload("res://scripts/item_row.gd")
 const InventoryRow = preload("res://scripts/inventory_row.gd")
 
 var _parent: Node

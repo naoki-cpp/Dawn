@@ -3,15 +3,15 @@
 ## Typed shape for one row of the HUD inventory panel (FITTED/SHIP CARGO/
 ## STATION/SHIPS columns), replacing the bare Dictionary `hud_manager.gd`
 ## used to hand back to `main.gd` (architecture-review/client.md C-8).
-## Unlike `ModuleRow`/`ItemRow` (typed PlayerLoadout wire rows), this is not
-## wire-sourced -- it wraps a UI `Panel` reference plus whichever of the
-## fields below a given row kind (module fit/unfit, ship cargo, station
-## inventory, ship roster) actually uses; unused fields keep their default.
+## Unlike `ModuleRow`/`ItemRow` (GDExtension classes for typed PlayerLoadout
+## wire rows, dawn-client-gdext/ADR-0039/ADR-0040), this is not wire-sourced
+## -- it wraps a UI `Panel` reference plus whichever of the fields below a
+## given row kind (module fit/unfit, ship cargo, station inventory, ship
+## roster) actually uses; unused fields keep their default.
 ##
 ## Note on typing: because this script has no class_name, it has no way to
-## name its own type inside its own body -- see module_row.gd's header for
-## the full explanation. Constructors below use bare `new()` and an untyped
-## return for that reason; external callers use
+## name its own type inside its own body. Constructors below use bare
+## `new()` and an untyped return for that reason; external callers use
 ## `const InventoryRow = preload(...)` + `-> InventoryRow` as normal.
 extends RefCounted
 

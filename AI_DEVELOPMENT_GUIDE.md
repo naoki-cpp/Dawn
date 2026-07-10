@@ -157,6 +157,8 @@ workspace DAG and relevant ADR first.
 - `dawn-core`: domain types, commands, events. No network, ECS, storage, or IO.
 - `dawn-client-core`: Godot-independent client-side domain model (loadout,
   wire row types). Depends only on `dawn-core` (ADR-0039).
+- `dawn-client-gdext`: GDExtension binding (cdylib) exposing `dawn-client-core`
+  to the Godot client. Thin type-conversion adapter only (ADR-0040).
 - `dawn-ecs`: components and systems. No event store or network ownership.
 - `dawn-event-store`: append-only persistence and snapshots.
 - `dawn-consensus`: Raft and consensus transport.
@@ -288,4 +290,4 @@ to the correct doc instead of expanding this guide.
 
 ---
 
-Last updated: 2026-07-10 / Covers ADR-0001 through ADR-0039
+Last updated: 2026-07-10 / Covers ADR-0001 through ADR-0040

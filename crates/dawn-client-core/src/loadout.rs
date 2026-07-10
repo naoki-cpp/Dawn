@@ -17,7 +17,7 @@ pub struct OwnedShipRow {
 /// Per-slot-kind fitted module capacity, keyed by slot name
 /// (`"High"`/`"Mid"`/`"Low"`/`"Rig"`). Mirrors the `slot_capacity` object in
 /// `player_loadout_projection.rs::build_player_loadout_json`.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Deserialize)]
 pub struct SlotCapacity {
     #[serde(rename = "High", default)]
     pub high: u32,
@@ -33,16 +33,30 @@ pub struct SlotCapacity {
 /// (ADR-0039). Owns the richer client concept behind it: fitted modules,
 /// ship/station inventory, dock context, and capacitor-cycle runtime
 /// simulation. Godot-independent port of the old `player_loadout.gd`.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+///
+/// Every field is `#[serde(default)]`: the old GDScript read this payload
+/// with `payload.get(key, default)` everywhere, tolerating a partial
+/// Dictionary (tests build minimal fixtures like `{"modules": [...]}`), and
+/// this type keeps that same tolerance rather than requiring every key.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct PlayerLoadoutMsg {
+    #[serde(default)]
     pub tick: u64,
+    #[serde(default)]
     pub modules: Vec<ModuleRow>,
+    #[serde(default)]
     pub inventory: Vec<ItemRow>,
+    #[serde(default)]
     pub station_inventory: Vec<ItemRow>,
+    #[serde(default)]
     pub docked_station_id: Option<u32>,
+    #[serde(default)]
     pub docked_station_name: Option<String>,
+    #[serde(default)]
     pub slot_capacity: SlotCapacity,
+    #[serde(default)]
     pub active_ship_id: Option<u64>,
+    #[serde(default)]
     pub owned_ships: Vec<OwnedShipRow>,
 }
 
@@ -152,26 +166,49 @@ impl PlayerLoadoutMsg {
         cap_recharge: f64,
         ticks: u32,
     ) -> f64 {
-        let mut cap = cap_current;
-        for _ in 0..ticks {
-            cap = (cap + cap_recharge).min(cap_max);
-            for row in &mut self.modules {
-                if !row.is_active_module || !row.is_active {
-                    continue;
-                }
-                if row.cycle_remaining == 0 {
-                    if row.cap_cost_per_cycle <= 0.0 || cap >= row.cap_cost_per_cycle {
-                        cap -= row.cap_cost_per_cycle;
-                        row.cycle_remaining = row.cycle_time_ticks;
-                    }
-                } else {
-                    row.cycle_remaining -= 1;
-                }
-            }
-            cap = cap.max(0.0);
-        }
-        cap
+        simulate_modules_capacitor_ticks(
+            &mut self.modules,
+            cap_current,
+            cap_max,
+            cap_recharge,
+            ticks,
+        )
     }
+}
+
+/// Advance an arbitrary set of module rows' capacitor cycles by `ticks`,
+/// mirroring the server's `CapacitorSystem`
+/// (`crates/dawn-ecs/src/systems/capacitor.rs`). This is the free-function
+/// form of [`PlayerLoadoutMsg::simulate_capacitor_ticks`] -- it exists
+/// separately (rather than requiring a full `PlayerLoadoutMsg`) for
+/// simulating a capacitor bar with an ad-hoc module list, or none at all
+/// (an empty slice just recharges/decays with no drain).
+pub fn simulate_modules_capacitor_ticks(
+    modules: &mut [ModuleRow],
+    cap_current: f64,
+    cap_max: f64,
+    cap_recharge: f64,
+    ticks: u32,
+) -> f64 {
+    let mut cap = cap_current;
+    for _ in 0..ticks {
+        cap = (cap + cap_recharge).min(cap_max);
+        for row in modules.iter_mut() {
+            if !row.is_active_module || !row.is_active {
+                continue;
+            }
+            if row.cycle_remaining == 0 {
+                if row.cap_cost_per_cycle <= 0.0 || cap >= row.cap_cost_per_cycle {
+                    cap -= row.cap_cost_per_cycle;
+                    row.cycle_remaining = row.cycle_time_ticks;
+                }
+            } else {
+                row.cycle_remaining -= 1;
+            }
+        }
+        cap = cap.max(0.0);
+    }
+    cap
 }
 
 #[cfg(test)]
