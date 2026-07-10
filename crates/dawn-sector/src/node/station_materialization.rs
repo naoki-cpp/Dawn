@@ -5,7 +5,7 @@ use dawn_core::{
     AssembleCommand, BuildPackagedShipCommand, DisassembleShipCommand, DomainEvent, ItemId,
     PlayerId, Position, ShipId, Velocity,
 };
-use dawn_ecs::components::{FittingComp, HullComp, IsNpcComp, ShipStatsComp};
+use dawn_ecs::components::{FittingComp, HullComp, InventoryComp, IsNpcComp, ShipStatsComp};
 use dawn_event_store::store::EventStore;
 
 use super::{
@@ -143,6 +143,22 @@ impl<S: EventStore> SimulationNode<S> {
                 reason: StationOperationRejection::ShipNotFound,
             };
         };
+
+        // Salvage the ship's unfitted cargo (ADR-0032/0034 InventoryComp)
+        // into the station before the entity is despawned below --
+        // Disassemble only requires an unfitted *hull* (the `is_fitted`
+        // check above), not an empty cargo hold, so any Module/ScrapMetal
+        // stacks riding along would otherwise silently vanish with the
+        // entity instead of following the ship into its packaged form.
+        let salvaged_cargo: Vec<(ItemId, u64)> = self
+            .world
+            .inner_mut()
+            .get::<&mut InventoryComp>(entity)
+            .map(|mut inventory| std::mem::take(&mut inventory.items).into_iter().collect())
+            .unwrap_or_default();
+        for (item_id, count) in salvaged_cargo {
+            self.credit_station_item(player_id, cmd.station_id, item_id, count);
+        }
 
         self.credit_station_item(
             player_id,
@@ -356,6 +372,100 @@ mod tests {
             2
         );
         assert!(!node.ships.index.contains_key(&ship_id));
+
+        // Regression: the three modules unfit above (now sitting in the
+        // ship's cargo hold, not fitted) must follow the ship into station
+        // inventory rather than vanishing with the despawned entity. Count
+        // is 2, not 1: `spawn_player_ship` seeds one of every registered
+        // module into cargo (ADR-0032) *and separately* fits one more of
+        // each via the privileged, non-inventory-consuming `fit_module`
+        // path -- unfitting returns that second copy to the same cargo
+        // stack the seed already populated.
+        assert_eq!(
+            node.station_item_count(
+                player_id,
+                station_id,
+                ItemId::Module(crate::modules::MODULE_RAILGUN_SMALL)
+            ),
+            2
+        );
+        assert_eq!(
+            node.station_item_count(
+                player_id,
+                station_id,
+                ItemId::Module(crate::modules::MODULE_AFTERBURNER)
+            ),
+            2
+        );
+        assert_eq!(
+            node.station_item_count(
+                player_id,
+                station_id,
+                ItemId::Module(crate::modules::MODULE_FOLD_DISRUPTOR)
+            ),
+            2
+        );
+    }
+
+    #[test]
+    fn disassemble_ship_salvages_scrap_metal_cargo_into_the_station() {
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        let station_id = StationId(0);
+        let station = node.station(station_id).expect("demo station exists");
+        node.set_spawn_anchor_abs(ship_id, station.abs_m);
+        assert!(accepted(node.dock_owned(
+            player_id,
+            ship_id,
+            DockCommand { station_id }
+        )));
+        // Fully unfit so the ship qualifies for Disassemble.
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::High,
+                module_id: crate::modules::MODULE_RAILGUN_SMALL,
+            }
+        ));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::Mid,
+                module_id: crate::modules::MODULE_AFTERBURNER,
+            }
+        ));
+        assert!(node.unfit_module_owned(
+            player_id,
+            UnfitModuleCommand {
+                ship_id,
+                slot: SlotKind::Mid,
+                module_id: crate::modules::MODULE_FOLD_DISRUPTOR,
+            }
+        ));
+        // Scrap Metal earned from a kill, sitting in cargo alongside the
+        // unfit modules -- not just a Module stack.
+        let entity = *node.ships.index.get(&ship_id).expect("ship exists");
+        node.world
+            .inner_mut()
+            .get::<&mut dawn_ecs::components::InventoryComp>(entity)
+            .expect("player ship has an InventoryComp")
+            .add_item(ItemId::ScrapMetal, 5);
+
+        assert!(accepted(node.disassemble_ship_owned(
+            player_id,
+            DisassembleShipCommand {
+                ship_id,
+                station_id,
+            }
+        )));
+
+        assert_eq!(
+            node.station_item_count(player_id, station_id, ItemId::ScrapMetal),
+            5
+        );
     }
 
     #[test]
