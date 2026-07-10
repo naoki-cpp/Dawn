@@ -75,7 +75,7 @@ const KEEP_AT_RANGE_MAX_KM : float = 200.0
 ## `_drag_row` is set on a left-press over a row and cleared on release;
 ## while non-null, a press+move past DRAG_THRESHOLD_PX is a drop instead of
 ## a click, resolved against whichever inventory-panel column is under the
-## release position (HudManager.column_at()).
+## release position (HudHitTest.column_at()).
 var _drag_row : InventoryRow = null
 var _drag_start_pos : Vector2 = Vector2.ZERO
 var _drag_ghost : Label = null

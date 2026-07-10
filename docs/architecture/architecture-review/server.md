@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-07-10（定期再計測 その2。ADR-0039/0040 で新設された `dawn-client-core`/`dawn-client-gdext` を表に追加。他の全ファイルは前回計測（同日）から変化なし。server 総合 B+ 維持、client 側は別途 client.md 参照）
+date     : 2026-07-10（定期再計測 その3。PR #129（`/improve-codebase-architecture` 候補）で `dawn-client-gdext::apply_module_activation` を `dawn-client-core` へ委譲、`loadout.rs` 337→373・`loadout_gd.rs` 271→267 を反映。他の全ファイルは前回計測（同日）から変化なし。server 総合 B+ 維持、client 側は別途 client.md 参照）
 ---
 
 # Architecture Review — Dawn Codebase（構造評価）
@@ -50,7 +50,9 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 > （5ファイル・652行、Godot非依存クライアントドメインモデル）と `dawn-client-gdext`
 > （4ファイル・658行、GDExtensionバインディング）を表へ追加したことのみ。
 > `dawn-actor` 側は `protocol/mod.rs` 798 / `client_command.rs` 398 / `server_event.rs` 257 /
-> `hello_resume.rs` 34 で、R-5 完了後の分割構造は維持されている。
+> `hello_resume.rs` 34 で、R-5 完了後の分割構造は維持されている。PR #129 で
+> `dawn-client-core/src/loadout.rs` 337→373（`apply_module_activation` 委譲先 + テスト2件）・
+> `dawn-client-gdext/src/loadout_gd.rs` 271→267（薄い委譲のみへ縮小）を反映。
 
 ### dawn-sector（ゲームロジック）
 
@@ -127,7 +129,7 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-client-core/src/loadout.rs` | 337 | 🟢 2026-07-10 新設。`PlayerLoadoutMsg`（旧 `player_loadout.gd`）+ capacitor シミュレーション/武器射程/activation toggle の純粋関数。ユニットテスト含む |
+| `crates/dawn-client-core/src/loadout.rs` | 373 | 🟢 2026-07-10 新設。`PlayerLoadoutMsg`（旧 `player_loadout.gd`）+ capacitor シミュレーション/武器射程/activation toggle の純粋関数。ユニットテスト含む。同日PR #129で `apply_module_activation`（`dawn-client-gdext` から委譲されたモジュール活性化状態の更新）を追加 |
 | `crates/dawn-client-core/src/module_row.rs` | 126 | 🟢 2026-07-10 新設。`ModuleRow`/`ModuleKind`/`StatDelta`（旧 `module_row.gd`）。サーバーの `player_loadout_projection.rs` が送る wire 形状のミラー |
 | `crates/dawn-client-core/src/item_row.rs` | 61 | 🟢 2026-07-10 新設。`ItemRow`/`ItemType`（旧 `item_row.gd`） |
 | `crates/dawn-client-core/src/lib.rs` | 44 | 🟢 crate doc + re-export のみ。doctest 1件（C-EXAMPLE） |
@@ -137,7 +139,7 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-client-gdext/src/loadout_gd.rs` | 271 | 🟢 2026-07-10 新設。`PlayerLoadout` GDExtension クラス。`dawn-client-core::PlayerLoadoutMsg` の薄いラッパー、Variant/GString ⇄ Rust 型変換のみでドメインロジックは持たない |
+| `crates/dawn-client-gdext/src/loadout_gd.rs` | 267 | 🟢 2026-07-10 新設。`PlayerLoadout` GDExtension クラス。`dawn-client-core::PlayerLoadoutMsg` の薄いラッパー、Variant/GString ⇄ Rust 型変換のみでドメインロジックは持たない。同日PR #129で `apply_module_activation` の状態変更ロジックを `dawn-client-core` へ委譲し、ADR-0040 の thin-adapter 方針に完全準拠 |
 | `crates/dawn-client-gdext/src/module_row_gd.rs` | 253 | 🟢 2026-07-10 新設。`ModuleRow` GDExtension クラス。旧 GDScript の `equals()`/`clone()` API を維持し `hud_surface.gd` の diffing 実装が無改修で動くようにしている |
 | `crates/dawn-client-gdext/src/item_row_gd.rs` | 115 | 🟢 2026-07-10 新設。`ItemRow` GDExtension クラス |
 | `crates/dawn-client-gdext/src/lib.rs` | 19 | 🟢 crate doc + `#[gdextension]` エントリポイントのみ |

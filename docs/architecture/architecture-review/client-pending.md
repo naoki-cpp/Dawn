@@ -9,8 +9,8 @@ date     : 2026-07-10
 
 # Architecture Review — Dawn Client（未完項目）
 
-C-1〜C-8 は解消済み（[client.md](./client.md) の Issue ID 登録簿を参照）。
-2026-07-10 再計測で `hud_manager.gd` が watch 帯（🟡）に入ったため C-9 として新規記録。
+C-1〜C-9 は解消済み（[client.md](./client.md) の Issue ID 登録簿を参照）。
+~~C-9~~ 解消済み — see [client-completed.md](./client-completed.md)。
 
 `main.gd` の god object 問題は実質解消し、C-4（PlayerLoadout dict のスキーマ非検証）も
 C-8（インベントリ行 Dictionary の stringly-typed 設計）も typed row 化で解消したため、
@@ -32,25 +32,6 @@ node generation / network send / HUD adapter は `.tscn` 化コンポーネン�
 
 再評価トリガー: 下記「採らない方針」の前提（ヘッドレス実行だけではシーンツリー構成の妥当性を
 確認しきれない）が変わったとき、または `main.gd` が再び god object 的に肥大したとき。
-
-## C-9（新規・2026-07-10）: `hud_manager.gd` が watch 帯（850行）に到達
-
-2026-07-10 再計測で `hud_manager.gd` が 729→850 行に増加し、grading の watch 目安
-（~500+行で成長中）に該当した。
-
-**根本原因**: 全 HUD パネル（status/target/module bar/duel result/4列インベントリ&フィッティング）
-の構築・更新を1つの static class に集約する設計（過去レビューで意図的に採用）が、
-インベントリパネルへのドラッグ&ドロップ hit-test（`column_at`/`inventory_panel_consumes`/
-`inventory_panel_row_at`/`module_slot_at`）追加のたびに線形に伸びている。
-
-**判断: 保留（トリガー付き）。** 現時点では「HUD 構築」という単一責務は保たれており、
-`build_*`/`update_*`のペア構造は崩れていない。ヒットテスト関数群だけを
-`hud_hit_test.gd`のような sibling moduleへ抽出する余地はあるが、抽出しても
-呼び出し側（`main.gd`）は変わらず、現時点では純粋な行数減らし以上の効果が薄い。
-
-再評価トリガー: 総行数が1000行を超えたとき、または「HUD構築」と「ヒットテスト判定」という
-2つの責務が実際に混線して見通しが悪化したとき（例: 新しいパネル種別の追加でbuild/hit-testの
-対応関係を追うのが困難になったとき）。
 
 ---
 

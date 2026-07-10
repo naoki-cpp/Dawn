@@ -56,6 +56,7 @@ deepening、production outbound replication publisher deepening、Client admissi
 | `dawn-client-core` クレート新設（ADR-0039） | 2026-07-10 | Godot非依存クライアントドメインモデル。`dawn-core`のみに依存。PlayerLoadoutMsg/ModuleRow/ItemRow + capacitorシミュレーション/武器射程等の純粋関数を移植。`dawn-sector`をdev-dependencyにした契約テストで実サーバーwireとの整合を担保。 |
 | `dawn-client-gdext` クレート新設（ADR-0040） | 2026-07-10 | GDExtensionバインディング（cdylib）。`dawn-client-core`の薄いラッパーで、旧GDScript（`player_loadout.gd`/`module_row.gd`/`item_row.gd`）と同名・同APIのグローバルクラスとしてGodotへ公開。呼び出し側（`main.gd`等）は`preload()`行の削除のみで移行完了。 |
 | Disassemble のカーゴ消失バグ修正 | 2026-07-10 | `disassemble_ship_owned` が船を`PackagedShip`へ変換する際、`InventoryComp`（船カーゴ）を救済せず despawn しており未艤装モジュール/Scrap Metalが消滅していたのを、他のStation操作と同じ`credit_station_item`経路で salvage するよう修正。回帰テスト3件追加。 |
+| `dawn-client-gdext` の `apply_module_activation` を thin adapter 化（`/improve-codebase-architecture`、PR #129） | 2026-07-10 | ADR-0040 が定めた「adapter only」に反し `apply_module_activation` だけがモジュール状態を直接変更していた（sibling の `toggle_at` は既に `dawn-client-core` へ委譲済み）のを是正。`PlayerLoadoutMsg::apply_module_activation` を `dawn-client-core` に新設（ユニットテスト2件）、`loadout_gd.rs` は id 変換 + 委譲のみに縮小（271→267行、`loadout.rs` 337→373行）。 |
 
 ---
 

@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / 新スク
 related  : docs/architecture/architecture-review/server.md（サーバー側）, docs/architecture/architecture.md, docs/process/playtest-guide.md,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-07-10（定期再計測 その2。ADR-0039/0040 での `player_loadout.gd` 系3ファイル削除・`input_decoder.gd` の shipless soft-lock 修正を反映し、他数ファイルの小さな drift も解消。構造評価と issue 状態に変化はなく、client 総合 A を維持）
+date     : 2026-07-10（定期再計測 その3。C-9 解消: `hud_manager.gd` のヒットテスト4関数（`module_slot_at`/`inventory_panel_row_at`/`column_at`/`inventory_panel_consumes`）を新設 `hud_hit_test.gd`（`HudHitTest`）へ分離、850→789行。テストも `hud_hit_test_test.gd` へ移動。GdUnit4 186/186 維持（テスト移動のみ、増減なし）。client 総合 A を維持）
 ---
 
 # Architecture Review — Dawn Client（Godot・構造評価）
@@ -53,7 +53,8 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 ## ファイルサイズ一覧（2026-07-10 時点）
 
 > **2026-07-10、全ファイル再計測（`/architecture-review`）。** 現在の実測は
-> `main.gd` 1217・`hud_manager.gd` 850・`connection.gd` 374・`world_session.gd` 358・
+> `main.gd` 1217・`hud_manager.gd` 789（C-9解消、850から-61）・`hud_hit_test.gd` 88（新設）・
+> `connection.gd` 374・`world_session.gd` 358・
 > `ship_controller.gd` 342・`navigation_marker_renderer.gd` 227・`inventory_row.gd` 90・
 > `hud_surface.gd` 234・`input_decoder.gd` 158・`camera_controller.gd` 142・
 > `world_interaction.gd` 133・`world_presentation.gd` 311。`input_decoder.gd` は
@@ -69,11 +70,20 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 > という同名のグローバルクラスとして GDScript へ公開する。フィールド名・`equals()`/`clone()`を
 > 完全一致させたため、`hud_manager.gd`/`hud_surface.gd`/`world_session.gd` 側の変更は
 > `preload()` 行の削除のみで済んだ。
+>
+> **同日、C-9（`hud_manager.gd` watch 帯）を解消**（`/improve-codebase-architecture` 候補2）。
+> ヒットテスト4関数（`module_slot_at`/`inventory_panel_row_at`/`column_at`/
+> `inventory_panel_consumes`）を新設 `hud_hit_test.gd`（`HudHitTest`）へ抽出し、
+> `hud_manager.gd` は HUD 構築・更新（`build_*`/`update_*`）専任に戻った。
+> `fitted_header.clip_text` インシデント（表示専用の変更がヒットテストを黙って壊した実例）が
+> 「今は変えない」判断を覆すトリガーになった。`hud_surface.gd` の4呼び出しを `HudHitTest.*`
+> へ更新、対応する GdUnit4 テストは `hud_hit_test_test.gd` へ移動（新規テストなし、186/186維持）。
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
 | `client/scripts/main.gd` | 1217 | 🟢 オーケストレーション層。scene lifecycle / node generation / event dispatch / network send / HUD frame assembly を保持 |
-| `client/scripts/hud_manager.gd` | 850 | 🟡 HUD 全パネルの構築・更新の stateless static class。責務は単一（HUD 構築）だが総行数が watch 帯に入った（前回729から+121、インベントリパネルのドラッグ&ドロップ hit-test 追加が主因） |
+| `client/scripts/hud_manager.gd` | 789 | 🟢 HUD 全パネルの構築・更新の stateless static class。C-9解消（2026-07-10）でヒットテスト4関数を `hud_hit_test.gd` へ分離し、850→789 |
+| `client/scripts/hud_hit_test.gd` | 88 | 🟢 **新設**（2026-07-10、C-9解消）。`HudManager` が構築した Control 群への画面座標ヒットテスト専任（`module_slot_at`/`inventory_panel_row_at`/`column_at`/`inventory_panel_consumes`） |
 | `client/scripts/connection.gd` | 374 | 🟢 WebSocket I/O とシグナル発行のみ。2026-07-10、`player_fitting_received` を生JSON文字列渡しに変更（Dictionary再エンコードによる整数→浮動小数点化バグの修正） |
 | `client/scripts/world_session.gd` | 358 | 🟢 InitialState / AoI / HP / lock / tick-cap / dock state の client-side live world state |
 | `client/scripts/ship_controller.gd` | 342 | 🟢 単一船の視覚表現に専念。ロックオン枠は `BillboardRing` 共通化 |
@@ -91,27 +101,28 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/unit_format.gd` | 38 | 🟢 速度/距離の適応的単位整形（m/s・km/s・AU/s） |
 | `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 ワープトンネル ColorRect の intensity ラッパー |
 
-合計 4,829 行（2026-07-10 実測、`player_loadout.gd`/`module_row.gd`/`item_row.gd` 削除後。
-削除前は5,210行）のうち `main.gd` が25%を占める（C-1着手前69%から大幅低下、水準維持）。
+合計 4,856 行（2026-07-10 実測、`player_loadout.gd`/`module_row.gd`/`item_row.gd` 削除 +
+`hud_hit_test.gd` 新設後。削除前は5,210行）のうち `main.gd` が25%を占める
+（C-1着手前69%から大幅低下、水準維持）。
 新設 static class 群（C-1 の5クラス + ADR-0029 の `world_space`/`unit_format`/`warp_tunnel_effect`
 + `WorldSession` + `HudSurface` + `WorldInteraction` + `WorldPresentation` + C-8 の
-`InventoryRow`）は、`WorldSession` が ship registry と live world state、`HudSurface` が
+`InventoryRow` + C-9 の `HudHitTest`）は、`WorldSession` が ship registry と live world state、`HudSurface` が
 HUD Control 参照、`WorldInteraction` が selection と world interaction policy、
 `WorldPresentation` が world visual side effect、`InventoryRow` が HUD インベントリパネル行の
 shape を保持する。scene 生成と network send は `main.gd` 側。PlayerLoadout の wire row schema
 （旧 `ModuleRow`/`ItemRow`/`player_loadout.gd`、C-4）は 2026-07-10、`dawn-client-core`
 （純粋 Rust）+ `dawn-client-gdext`（GDExtension バインディング）へ移植した（ADR-0039/ADR-0040）。
 
-（`client/test/*.gd` は `world_presentation_test.gd` を含め 14 ファイル・合計 2,679 行
-（`player_loadout_test.gd` 削除前は15ファイル・2,940行）。ケース数は186（`player_loadout_test.gd`
-削除で204から減少、GdUnit4実行で確認済み・0 errors/0 failures/0 orphans）。詳細な内訳は
-completed.md のテストカバレッジ表を参照）
+（`client/test/*.gd` は `hud_hit_test_test.gd`（C-9解消で新設）を含め 15 ファイル・合計 2,712 行
+（`player_loadout_test.gd` 削除前は15ファイル・2,940行）。ケース数は186で変化なし
+（C-9解消はテストの移動のみで新規追加なし。GdUnit4実行で確認済み・0 errors/0 failures/0 orphans）。
+詳細な内訳は completed.md のテストカバレッジ表を参照）
 
 ---
 
 ## main.gd 内部構造（行範囲別、C-1 完了後）
 
-> 注: 以下の行範囲は C-1 完了時点（1094行）のもの。現在の `main.gd` は 1210 行で、範囲には
+> 注: 以下の行範囲は C-1 完了時点（1094行）のもの。現在の `main.gd` は 1217 行で、範囲には
 > ずれがありうるが、区分
 > （責務のまとまり）の傾向は有効だが、正確な行番号は次回の構造リファクタ（R-2 着手時）に再計測する。
 
@@ -137,7 +148,7 @@ completed.md のテストカバレッジ表を参照）
 
 コード内コメントが参照する issue ID の一覧。詳細な解消経緯は
 [client-completed.md](./client-completed.md) を参照。
-open な issue は C-9（詳細は [client-pending.md](./client-pending.md) 参照）のみ。
+現在 open な issue はなし。
 
 | ID | 内容 | 状態 |
 |---|---|---|
@@ -149,7 +160,7 @@ open な issue は C-9（詳細は [client-pending.md](./client-pending.md) 参�
 | C-6 | client HUD Surface module | 解消済み |
 | C-7 | client World Interaction module | 解消済み |
 | C-8 | インベントリ行 Dictionary が stringly-typed のまま main.gd と合意している | 解消済み |
-| C-9 | `hud_manager.gd` が watch 帯（850行）に到達 | open（保留・トリガー付き） |
+| C-9 | `hud_manager.gd` が watch 帯（850行）に到達 | 解消済み |
 
 **運用上の注意**: `class_name` を新規追加した直後は Godot がプロジェクトを
 スキャンするまでグローバル識別子として認識されない（CLI テストが
@@ -172,7 +183,7 @@ open な issue は C-9（詳細は [client-pending.md](./client-pending.md) 参�
   1ヶ所にまとめることで、距離耐性や見た目の一貫性を保証する
 - `tactical_overlay.gd` — 射程リング描画のみ。受け取った値を描くだけで状態を持たない
 - `ship_picking.gd` / `navigation_marker_renderer.gd` / `input_decoder.gd` /
-  `hud_manager.gd` / `hud_surface.gd` / `world_interaction.gd` — C-1 以降に新設した HUD・入力・描画支援モジュール群。いずれも GdUnit4
+  `hud_manager.gd` / `hud_hit_test.gd` / `hud_surface.gd` / `world_interaction.gd` — C-1 以降に新設した HUD・入力・描画支援モジュール群。いずれも GdUnit4
   テスト付きで挙動が固定されている。他クラスへの依存はメソッド引数経由のみ
   （Camera3D・候補データ・Callable・refs Dictionary・`BillboardRing`・HUD root Control・正規化 input facts）で、main.tscn のノード構成
   変更の影響を受けにくい

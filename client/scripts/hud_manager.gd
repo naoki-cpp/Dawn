@@ -9,6 +9,9 @@
 ## take those refs back plus the live values to display. main.gd owns the
 ## refs (stored in its own member vars) and all game state; this class only
 ## knows how to build/refresh Control nodes from values handed to it.
+## Hit-testing (answering "what's under this screen position") is a
+## separate responsibility, split into HudHitTest (hud_hit_test.gd,
+## architecture-review/client.md C-9) -- see that file's doc comment.
 class_name HudManager
 extends RefCounted
 
@@ -437,17 +440,6 @@ static func update_module_bar(module_slots: Array, player_modules: Array) -> voi
 		(slot["style"] as StyleBoxFlat).border_color = col
 
 
-## Returns the F-key index (0-based, i.e. the position in module_slots) of
-## the module slot under a screen position, or -1. Used so a click on the
-## bar toggles the module instead of the world.
-static func module_slot_at(module_slots: Array, pos: Vector2) -> int:
-	for i: int in range(module_slots.size()):
-		var panel: Panel = module_slots[i]["panel"]
-		if panel.get_global_rect().has_point(pos):
-			return i
-	return -1
-
-
 # -- Duel result overlay -----------------------------------------------------------
 
 ## Builds the full-screen VICTORY/DEFEAT overlay (hidden by default) as a
@@ -792,59 +784,6 @@ static func toggle_inventory_panel(refs: Dictionary) -> void:
 	panel.visible = not panel.visible
 
 
-## Returns the row under `pos` from either column, or `null` if none.
-## "fit" sends FitModuleCommand, "unfit" sends UnfitModuleCommand (see
-## InventoryRow's action constants) -- callers distinguish a miss from a hit
-## with a plain `null` check instead of a sentinel-key lookup.
-static func inventory_panel_row_at(refs: Dictionary, pos: Vector2) -> InventoryRow:
-	var panel: Panel = refs["panel"]
-	if not panel.visible:
-		return null
-	for row: InventoryRow in (refs["fitted_rows"] as Array[InventoryRow]):
-		if row.panel.get_global_rect().has_point(pos):
-			return row
-	for row: InventoryRow in (refs["inventory_rows"] as Array[InventoryRow]):
-		if row.panel.get_global_rect().has_point(pos):
-			return row
-	for row: InventoryRow in (refs["station_rows"] as Array[InventoryRow]):
-		if row.panel.get_global_rect().has_point(pos):
-			return row
-	for row: InventoryRow in (refs["ship_rows"] as Array[InventoryRow]):
-		if row.panel.get_global_rect().has_point(pos):
-			return row
-	return null
-
-
-## Which of the four inventory-panel columns `pos` falls in (an
-## `InventoryRow.SOURCE_*` value), or `""` if outside all of them. Used by
-## the drag-and-drop drop-target resolution (main.gd) -- unlike
-## inventory_panel_row_at(), this matches empty space within a column's list
-## too (dropping below the last row must still count as a drop into that
-## column, not a miss).
-static func column_at(refs: Dictionary, pos: Vector2) -> String:
-	var panel: Panel = refs["panel"]
-	if not panel.visible:
-		return ""
-	var fitted_col: VBoxContainer = refs["fitted_col"]
-	if fitted_col.get_global_rect().has_point(pos):
-		return InventoryRow.SOURCE_FITTED
-	var inv_col: VBoxContainer = refs["inv_col"]
-	if inv_col.get_global_rect().has_point(pos):
-		return InventoryRow.SOURCE_SHIP_CARGO
-	var station_col: VBoxContainer = refs["station_col"]
-	if station_col.get_global_rect().has_point(pos):
-		return InventoryRow.SOURCE_STATION
-	var ships_col: VBoxContainer = refs["ships_col"]
-	if ships_col.get_global_rect().has_point(pos):
-		return InventoryRow.SOURCE_SHIPS
-	return ""
-
-
-## True when the inventory panel is open and `pos` falls anywhere inside it
-## (a row or its empty margin/header). Lets main.gd swallow the click so a
-## miss on the open panel doesn't fall through to the 3D world behind it
-## (thrust / select). Distinct from inventory_panel_row_at(), which only
-## reports actionable row hits.
-static func inventory_panel_consumes(refs: Dictionary, pos: Vector2) -> bool:
-	var panel: Panel = refs["panel"]
-	return panel.visible and panel.get_global_rect().has_point(pos)
+## Hit-testing (module_slot_at, inventory_panel_row_at, column_at,
+## inventory_panel_consumes) lives in hud_hit_test.gd (HudHitTest) -- see
+## that file's doc comment for why it was split out.
