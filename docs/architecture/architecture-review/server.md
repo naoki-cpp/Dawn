@@ -66,7 +66,7 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 | `crates/dawn-sector/src/node/transit_flow.rs` | 949 | 🟢 `prepare_transit_commit`/`handle_transit_commit`（公開面 5→2 に集約）+ `rebase_after_transit`。大きいが責務は cohesive（impl 約368で700行未満） |
 | `crates/dawn-sector/src/node/station.rs` | 53 | 🟢 2026-07-09、Station operations deepening 後の shared vocabulary module。`StationOperationOutcome` / `StationOperationRejection` だけを持ち、実装は sibling module へ移動 |
 | `crates/dawn-sector/src/node/station_lifecycle.rs` | 407 | 🟢 2026-07-09 新設。dock / undock / active-ship selection / disembark / docked lock cleanup を所有する deep module |
-| `crates/dawn-sector/src/node/station_materialization.rs` | 432 | 🟢 2026-07-09 新設。build / assemble / disassemble を所有する deep module。Ship materialization の検証と event append がここに集約 |
+| `crates/dawn-sector/src/node/station_materialization.rs` | 692 | 🟢 2026-07-09 新設。build / assemble / disassemble を所有する deep module。Ship materialization の検証と event append がここに集約。2026-07-10、カーゴ salvage 修正 + 回帰テスト3件追加（432→692、テスト増分が大半）。次回 `/architecture-review` で全体再計測時に確定grading |
 | `crates/dawn-sector/src/node/station_inventory.rs` | 378 | 🟢 **新規記録**（本表に未記載だった）。ADR-0038（2026-07-08）新設。Station inventory の bounded in-memory cache + SQLite write-through seam。永続化の権威は `station_inventory_db.rs`、本ファイルは直近アクセスした player だけのキャッシュ層と `SimulationNode` 向けアクセサを所有 |
 | `crates/dawn-sector/src/node/command_station.rs` | 164 | 🟢 **新規記録**（本表に未記載だった）。2026-07-09 新設。Station family（dock/undock/build/disassemble/select-active/assemble/disembark/transfer-to-station）の command dispatch を専有し、`commands.rs` から分離済み |
 | `crates/dawn-sector/src/node/station_inventory_db.rs` | 328 | 🟢 ADR-0038（2026-07-08）新設。SQLite（rusqlite）による Station inventory の永続化権威 |

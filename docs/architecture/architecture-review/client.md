@@ -78,7 +78,7 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/navigation_marker_renderer.gd` | 227 | 🟢 ゲート/惑星/ステーションマーカー生成 + スペクトル色 |
 | `client/scripts/inventory_row.gd` | 90 | 🟢 HUD インベントリパネル行の typed shape |
 | `client/scripts/hud_surface.gd` | 233 | 🟢 HUD Control 参照を所有し、`main.gd` からの render frame / hit-test 要求を `HudManager` へ委譲 |
-| `client/scripts/input_decoder.gd` | 147 | 🟢 キー入力→アクション決定の純粋関数。GdUnit4 テスト済み |
+| `client/scripts/input_decoder.gd` | 158 | 🟢 キー入力→アクション決定の純粋関数。GdUnit4 テスト済み。2026-07-10、`I`キーのshipless soft-lock修正（147→158） |
 | `client/scripts/camera_controller.gd` | 142 | 🟢 自己完結したオービットカメラ |
 | `client/scripts/world_interaction.gd` | 133 | 🟢 selection state、double-click timing、click→intent、lock intent、`InputDecoder` 連携を所有する deep module |
 | `client/scripts/world_presentation.gd` | 311 | 🟢 floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation を所有する deep module |
