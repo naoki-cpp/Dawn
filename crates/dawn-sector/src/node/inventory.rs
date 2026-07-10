@@ -231,6 +231,16 @@ impl<S: EventStore> SimulationNode<S> {
         if !self.can_use_station(player_id, cmd.station_id) {
             return false;
         }
+        // `can_use_station` only checks the *player's* docked context; under
+        // the multi-owned-ship model (ADR-0037) a player can be docked with
+        // their active ship while owning a different `cmd.ship_id` docked
+        // elsewhere (or undocked). Without this check that other ship's
+        // cargo could be moved into whichever station the player currently
+        // happens to be docked at (security-review.md SEC-3). Mirrors the
+        // same check `disassemble_ship_owned` already performs.
+        if self.docked_station(cmd.ship_id) != Some(cmd.station_id) {
+            return false;
+        }
         let Some(&entity) = self.ships.index.get(&cmd.ship_id) else {
             return false;
         };
@@ -674,6 +684,48 @@ mod tests {
                 direction: dawn_core::TransferDirection::ToStation,
             }
         ));
+    }
+
+    /// security-review.md SEC-3: `can_use_station` only checks the
+    /// *player's* docked context, so under the multi-owned-ship model
+    /// (ADR-0037) a player docked with their active ship must not be able
+    /// to transfer cargo from a *different* owned ship that isn't itself
+    /// docked at that station (e.g. still in open space, or docked
+    /// elsewhere).
+    #[test]
+    fn transfer_to_station_owned_is_rejected_when_the_ship_itself_is_not_docked_at_the_station() {
+        let mut node = node_with_modules();
+        let (player, active_ship, station_id) = spawn_and_dock_owned_player(&mut node);
+        let _ = active_ship;
+
+        // A second owned ship, never docked anywhere.
+        let other_ship = node.spawn_player_ship_at_pub(player, Position::ORIGIN);
+        assert!(node.owns_ship(player, other_ship));
+        let entity = *node.ships.index.get(&other_ship).unwrap();
+        node.world
+            .inner_mut()
+            .get::<&mut InventoryComp>(entity)
+            .unwrap()
+            .add_item(dawn_core::ItemId::ScrapMetal, 4);
+
+        // The player is docked (via `active_ship`) at `station_id`, so
+        // `can_use_station` alone would pass -- but `other_ship` itself
+        // isn't docked there.
+        assert!(!node.transfer_to_station_owned(
+            player,
+            TransferToStationCommand {
+                ship_id: other_ship,
+                station_id,
+                item_id: dawn_core::ItemId::ScrapMetal,
+                direction: dawn_core::TransferDirection::ToStation,
+            }
+        ));
+        let inv = node.world.inner().get::<&InventoryComp>(entity).unwrap();
+        assert_eq!(
+            inv.item_count(dawn_core::ItemId::ScrapMetal),
+            4,
+            "rejected transfer must not move the cargo"
+        );
     }
 
     #[test]
