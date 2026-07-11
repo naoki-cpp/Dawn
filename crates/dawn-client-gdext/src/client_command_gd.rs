@@ -71,7 +71,7 @@ fn non_negative_or_none(value: i64) -> Option<u64> {
 /// `gate_id` xor `target_id`) get a dedicated method, since that logic is
 /// domain semantics, not just field copying. Everything else -- a flat
 /// struct of scalar fields with no such semantics -- goes through the
-/// schema-driven [`Self::build`] instead, so adding one of those needs no
+/// schema-driven `build` method instead, so adding one of those needs no
 /// new method here (only a new `dawn-wire` variant and dispatch arm).
 #[derive(GodotClass)]
 #[class(init, base=RefCounted)]
