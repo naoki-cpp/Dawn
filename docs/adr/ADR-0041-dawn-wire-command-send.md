@@ -102,9 +102,14 @@ DomainEvent 受信（`connection.gd::_handle_message`のDictionaryディスパ�
 - [x] Godot エディタでの手動検証: `--headless --editor --quit-after`でGDExtensionロード確認。
       `--headless --script`での直接実行で`ClientCommand`の全代表メソッドが期待通りのJSON
       （例: `{"type":"MoveCommand","target":{"x":10.0,"y":0.0,"z":-5.0}}`）を返すことを確認。
-- [ ] **GdUnit4自動テスト実行は未達成** — この実装作業を行った環境で、GdUnit4のテスト
-      ランナー自体が本ADRの変更と無関係に（このセッションの変更を一切含まないtrue baseline、
-      および既存の無関係なテストファイル単体でも）SIGSEGVでクラッシュする状態だったため、
-      `client/test/client_command_gd_test.gd`を含む自動テストスイートの実行確認は次回
-      Godotエディタが正常な環境で改めて行うこと。上記の`--headless --script`による手動検証は
-      その代替として実施したもので、GdUnit4アサーションの網羅性までは担保しない。
+- [x] GdUnit4自動テスト実行: 197/197 pass、0 errors/0 failures/0 orphans（`client_command_gd_test.gd`
+      の11ケース含む）。**環境メモ**: `client/addons/gdUnit4/runtest.cmd`が実行する既定コマンドは
+      `--headless`を付けずウィンドウ表示を試みる設計（`GdUnitCmdTool.gd`自体が`--headless`単体では
+      明示的に実行を拒否する）。ディスプレイのないサンドボックス環境ではウィンドウ生成時に
+      SIGSEGVでクラッシュしたため、`--headless --ignoreHeadlessMode`の組み合わせで実行し解決した
+      （GdUnit4アドオンの再インストール・`.godot`キャッシュ削除はいずれも無関係だった）。
+      この過程で見つかったテスト側の2バグも修正済み: (1) GDScriptの`JSON.parse_string()`は
+      数値を常に`float`にするため`assert_int()`には`int(...)`キャストが必要、
+      (2) `Option::None`はserdeで明示的な`null`としてシリアライズされる（キー省略ではない）ため、
+      「省略される」ではなく「値が`null`」であることを検証するよう修正。`ClientCommand`実装
+      本体に問題はなかった。
