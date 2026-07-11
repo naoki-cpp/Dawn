@@ -34,6 +34,23 @@ pub fn json_value_to_variant(value: &serde_json::Value) -> Variant {
     }
 }
 
+/// Converts any `Serialize` struct into a `Dict`, logging a Godot error and
+/// returning an empty `Dict` if serialization fails (mirrors the empty-Dict-
+/// on-failure contract `ServerMessageDecoder::decode` already exposes to
+/// callers). `context` names the type being converted, for the error message
+/// -- callers still own tagging (`d.set("type", ...)`) and nesting (e.g.
+/// `AoiEnter`'s `"ship"` key) themselves, since those differ per caller and
+/// aren't part of what this function does.
+pub fn struct_to_dict(value: &impl serde::Serialize, context: &str) -> Dict {
+    match serde_json::to_value(value) {
+        Ok(v) => json_value_to_variant(&v).to::<Dict>(),
+        Err(err) => {
+            godot_error!("ServerMessageDecoder.decode: {context} -> JSON failed: {err}");
+            Dict::new()
+        }
+    }
+}
+
 /// Converts an externally tagged serde value (`{"<VariantName>": {...fields}}`,
 /// the shape `ClientCommandWire`/`EventWire` serialize to since ADR-0042
 /// dropped `#[serde(tag = "type")]` for postcard compatibility) into the
