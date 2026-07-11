@@ -10,16 +10,13 @@ related  : ADR-0005 (ClientConnection), ADR-0041 (dawn-wire), ADR-0042
 
 # Wire Protocol
 
-Transport is a single WebSocket connection per client. Since ADR-0042,
-messages with an already-fixed Rust type -- `Hello`/`Welcome`/`Redirect`/
-`DomainEvent`/`ClientCommand` -- travel as a **binary** frame, postcard-
-encoded via the `ClientMessage`/`ServerMessage` envelope in `dawn-wire`
-(one WebSocket frame always carries exactly one message; no length-prefix
-framing is needed on top). `InitialState`/`PlayerLoadout`/`AoiEnter` are
-still built as ad-hoc `serde_json::Value` server-side and travel as a
-**text** frame, one newline-delimited JSON object tagged by a `"type"` field
-(`{"type": "InitialState", ...}`) -- ADR-0042 stage 2, a follow-up task,
-would give them fixed types and fold them into the binary envelope too.
+Transport is a single WebSocket connection per client. Since ADR-0042 (all
+stages complete), every message -- `Hello`/`Welcome`/`Redirect`/`DomainEvent`/
+`ClientCommand`/`InitialState`/`PlayerLoadout`/`AoiEnter`/`AoiLeave`/
+`PositionSnap` -- travels as a **binary** frame, postcard-encoded via the
+`ClientMessage`/`ServerMessage` envelope in `dawn-wire` (one WebSocket frame
+always carries exactly one message; no length-prefix framing is needed on
+top). There is no more ad-hoc JSON text frame path.
 
 The field-level shape of `EventJson`/`ClientCommandJson` below is still
 generated from the Rust types and still useful as the schema-of-record for
@@ -169,9 +166,9 @@ them.
   `ClientMessage::Hello(HelloMessage { resume: Some(ResumeIdentity {
   player_id, ship_id }) })` to resume its identity on the new node instead of
   spawning fresh.
-- The server replies with `ServerMessage::Welcome { player_id, ship_id }`
-  (also binary), then `InitialState` (+ optional `PlayerLoadout`) as JSON
-  text frames.
+- The server replies with `ServerMessage::Welcome { player_id, ship_id }`,
+  then `ServerMessage::InitialState` (+ optional `ServerMessage::PlayerLoadout`),
+  all binary.
 
 `parse_hello()` (JSON-text parsing of `{"type":"Hello",...}`) still exists in
 `dawn-wire` for this crate's own tests/documentation, but is no longer the

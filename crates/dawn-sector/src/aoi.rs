@@ -20,6 +20,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_event_store::store::EventStore;
+use dawn_wire::{AbsPosJson, ServerMessage};
 
 use crate::node::SimulationNode;
 
@@ -137,13 +138,6 @@ pub fn event_visible_to(event: &DomainEvent, visible: &[ShipId]) -> bool {
         .any(|id| visible.binary_search(id).is_ok())
 }
 
-/// `AoiLeave` control message for a ship that left an observer's neighborhood
-/// (ADR-0019). The matching `AoiEnter` needs node state, so it lives on the node
-/// ([`crate::node::SimulationNode::aoi_enter_json`]).
-pub fn aoi_leave_json(ship_id: ShipId) -> String {
-    serde_json::json!({ "type": "AoiLeave", "ship_id": ship_id.raw() }).to_string()
-}
-
 /// The identity of one observer receiving a frame: which player, and which
 /// ship is theirs (excluded from its own Enter/Leave/snap messages).
 #[derive(Debug)]
@@ -161,8 +155,8 @@ pub struct Observer {
 /// implements this trait (orphan-rule friendly: the wrapper type is local to
 /// the calling crate even though the trait lives here).
 pub trait AoiSink {
-    fn send_raw(&mut self, msg: &str) -> bool;
     fn send_events(&mut self, events: &[DomainEvent]) -> bool;
+    fn send_message(&mut self, msg: &ServerMessage) -> bool;
 }
 
 /// Area-of-Interest delivery policy (ADR-0019): tracks each player's visible
@@ -238,8 +232,8 @@ impl AoiDelivery {
         self.seed_player(player_id, curr.clone());
 
         for &id in entered.iter().filter(|&&id| id != own_ship_id) {
-            if let Some(msg) = node.aoi_enter_json(id) {
-                if !sink.send_raw(&msg) {
+            if let Some(ship) = node.ship_state_json(id) {
+                if !sink.send_message(&ServerMessage::AoiEnter(ship)) {
                     return false;
                 }
             }
@@ -248,7 +242,7 @@ impl AoiDelivery {
             .iter()
             .filter(|&&id| id != own_ship_id && !destroyed_this_tick.contains(&id))
         {
-            if !sink.send_raw(&aoi_leave_json(id)) {
+            if !sink.send_message(&ServerMessage::AoiLeave { ship_id: id.raw() }) {
                 return false;
             }
         }
@@ -282,11 +276,15 @@ impl AoiDelivery {
             let relevant = sid == own_ship_id || curr.binary_search(&sid).is_ok();
             if relevant {
                 if let Some(abs) = node.ship_absolute(sid) {
-                    let msg = format!(
-                        "{{\"type\":\"PositionSnap\",\"ship_id\":{},\"position\":{{\"x\":{},\"y\":{},\"z\":{}}}}}",
-                        sid.raw(), abs[0], abs[1], abs[2]
-                    );
-                    if !sink.send_raw(&msg) {
+                    let msg = ServerMessage::PositionSnap {
+                        ship_id: sid.raw(),
+                        position: AbsPosJson {
+                            x: abs[0],
+                            y: abs[1],
+                            z: abs[2],
+                        },
+                    };
+                    if !sink.send_message(&msg) {
                         return false;
                     }
                 }
@@ -312,6 +310,7 @@ fn grid_cell(cell_size: f32, pos: [f64; 3]) -> Cell {
 mod tests {
     use super::*;
     use dawn_core::NodeId;
+    use dawn_wire::ShipStateJson;
 
     fn ship(n: u64) -> ShipId {
         ShipId::new(NodeId(0), n)
@@ -450,17 +449,26 @@ mod tests {
 
     #[derive(Default)]
     struct FakeSink {
-        raw: Vec<String>,
         events: Vec<DomainEvent>,
+        aoi_enters: Vec<ShipStateJson>,
+        aoi_leaves: Vec<u64>,
+        position_snaps: Vec<(u64, AbsPosJson)>,
     }
 
     impl AoiSink for FakeSink {
-        fn send_raw(&mut self, msg: &str) -> bool {
-            self.raw.push(msg.to_string());
-            true
-        }
         fn send_events(&mut self, events: &[DomainEvent]) -> bool {
             self.events.extend_from_slice(events);
+            true
+        }
+        fn send_message(&mut self, msg: &ServerMessage) -> bool {
+            match msg {
+                ServerMessage::AoiEnter(ship) => self.aoi_enters.push(ship.clone()),
+                ServerMessage::AoiLeave { ship_id } => self.aoi_leaves.push(*ship_id),
+                ServerMessage::PositionSnap { ship_id, position } => {
+                    self.position_snaps.push((*ship_id, *position))
+                }
+                _ => {}
+            }
             true
         }
     }
@@ -502,9 +510,12 @@ mod tests {
             &[],
         );
 
-        assert_eq!(sink.raw.len(), 1, "exactly one AoiEnter for the new ship");
-        let v: serde_json::Value = serde_json::from_str(&sink.raw[0]).unwrap();
-        assert_eq!(v["type"], "AoiEnter");
+        assert_eq!(
+            sink.aoi_enters.len(),
+            1,
+            "exactly one AoiEnter for the new ship"
+        );
+        assert_eq!(sink.aoi_enters[0].ship_id, other.raw());
     }
 
     #[test]
@@ -526,10 +537,7 @@ mod tests {
             &[],
             &[],
         );
-        assert_eq!(sink.raw.len(), 1);
-        let v: serde_json::Value = serde_json::from_str(&sink.raw[0]).unwrap();
-        assert_eq!(v["type"], "AoiLeave");
-        assert_eq!(v["ship_id"].as_u64().unwrap(), ship(2).raw());
+        assert_eq!(sink.aoi_leaves, vec![ship(2).raw()]);
 
         // Reseed, then ship(2) leaves because it was destroyed this tick -> no AoiLeave.
         delivery.seed_player(player(1), vec![ship(2), ship(3)]);
@@ -551,7 +559,7 @@ mod tests {
             &[],
         );
         assert!(
-            sink.raw.is_empty(),
+            sink.aoi_leaves.is_empty(),
             "a destroyed ship's own removal handles this client-side, no AoiLeave"
         );
     }
@@ -618,12 +626,11 @@ mod tests {
             &[arrived],
         );
 
-        let snap = sink
-            .raw
-            .iter()
-            .find(|m| m.contains("PositionSnap"))
-            .expect("a PositionSnap is sent for the visible warp arrival");
-        let v: serde_json::Value = serde_json::from_str(snap).unwrap();
-        assert_eq!(v["ship_id"].as_u64().unwrap(), arrived.raw());
+        assert_eq!(
+            sink.position_snaps.len(),
+            1,
+            "a PositionSnap is sent for the visible warp arrival"
+        );
+        assert_eq!(sink.position_snaps[0].0, arrived.raw());
     }
 }
