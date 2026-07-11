@@ -9,8 +9,13 @@ use hecs::Entity;
 
 /// Wraps `hecs::World` with a domain-aware API.
 ///
-/// Direct access to the inner `hecs::World` is available via `inner()` and
-/// `inner_mut()` for use by systems that need query flexibility.
+/// `get`/`get_mut`/`insert_one`/`remove_one`/`query` cover every access
+/// pattern `dawn-sector` needs (confirmed by migrating all 226 prior
+/// `inner()`/`inner_mut()` call sites there onto them). `inner()`/
+/// `inner_mut()` stay `pub(crate)` for this crate's own systems (e.g.
+/// `systems::movement`'s `query_mut` over a compound borrow, which the
+/// single-component wrappers can't express) -- they are not part of the
+/// public API other crates should reach for.
 pub struct SimWorld {
     inner: hecs::World,
     sector_id: SectorId,
@@ -123,13 +128,19 @@ impl SimWorld {
         self.inner.len() as usize
     }
 
-    /// Immutable access to the underlying `hecs::World` for read-only queries.
-    pub fn inner(&self) -> &hecs::World {
+    /// Escape hatch to the underlying `hecs::World`, for this crate's own
+    /// tests only (`get`/`get_mut`/`query` already cover every read-only
+    /// need production systems have) -- external callers should use those
+    /// wrappers instead.
+    #[cfg(test)]
+    pub(crate) fn inner(&self) -> &hecs::World {
         &self.inner
     }
 
-    /// Mutable access to the underlying `hecs::World` for systems.
-    pub fn inner_mut(&mut self) -> &mut hecs::World {
+    /// Mutable counterpart of [`Self::inner`], for compound-borrow queries
+    /// (e.g. `query_mut` over several components at once) the single-
+    /// component wrappers can't express.
+    pub(crate) fn inner_mut(&mut self) -> &mut hecs::World {
         &mut self.inner
     }
 
@@ -176,6 +187,20 @@ impl SimWorld {
     /// Returns `None` if the entity does not exist or lacks the component.
     pub fn get_mut<C: hecs::Component>(&mut self, entity: Entity) -> Option<hecs::RefMut<'_, C>> {
         self.inner.get::<&mut C>(entity).ok()
+    }
+
+    /// Add a component to an existing entity, replacing it if already present.
+    ///
+    /// Returns `false` if the entity does not exist.
+    pub fn insert_one<C: hecs::Component>(&mut self, entity: Entity, component: C) -> bool {
+        self.inner.insert_one(entity, component).is_ok()
+    }
+
+    /// Remove a component from an entity and return it.
+    ///
+    /// Returns `None` if the entity does not exist or lacks the component.
+    pub fn remove_one<C: hecs::Component>(&mut self, entity: Entity) -> Option<C> {
+        self.inner.remove_one::<C>(entity).ok()
     }
 }
 
@@ -281,6 +306,40 @@ mod tests {
             stats.max_speed = 9999.0;
         }
         assert_eq!(w.get::<ShipStatsComp>(e).unwrap().max_speed, 9999.0);
+    }
+
+    #[test]
+    fn insert_one_adds_a_component_not_present_at_spawn() {
+        let mut w = make_world();
+        let e = w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
+        assert!(!w.is_tackled(e), "ships spawn untackled");
+        assert!(w.insert_one(e, crate::components::TackledComp { tacklers: vec![] }));
+        assert!(w.is_tackled(e));
+    }
+
+    #[test]
+    fn insert_one_returns_false_for_a_nonexistent_entity() {
+        let mut w = make_world();
+        let e = w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
+        w.despawn_ship(e);
+        assert!(!w.insert_one(e, crate::components::TackledComp { tacklers: vec![] }));
+    }
+
+    #[test]
+    fn remove_one_takes_the_component_back_out() {
+        let mut w = make_world();
+        let e = w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
+        w.insert_one(e, crate::components::TackledComp { tacklers: vec![] });
+        let removed = w.remove_one::<crate::components::TackledComp>(e);
+        assert!(removed.is_some());
+        assert!(!w.is_tackled(e), "component is gone after remove_one");
+    }
+
+    #[test]
+    fn remove_one_returns_none_when_the_component_is_absent() {
+        let mut w = make_world();
+        let e = w.spawn_ship(make_ship_id(1), Position::ORIGIN, Velocity::ZERO);
+        assert!(w.remove_one::<crate::components::TackledComp>(e).is_none());
     }
 
     #[test]

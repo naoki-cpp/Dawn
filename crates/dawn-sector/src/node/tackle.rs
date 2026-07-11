@@ -22,15 +22,15 @@ impl<S: EventStore> SimulationNode<S> {
             .index
             .iter()
             .filter_map(|(&ship_id, &entity)| {
-                let stats = self.world.inner().get::<&ShipStatsComp>(entity).ok()?;
+                let stats = self.world.get::<ShipStatsComp>(entity)?;
                 if stats.tackle_range <= 0.0 {
                     return None;
                 }
-                let fitting = self.world.inner().get::<&FittingComp>(entity).ok()?;
+                let fitting = self.world.get::<FittingComp>(entity)?;
                 if !fitting.has_active_module_of_kind(ModuleKind::Tackle) {
                     return None;
                 }
-                let lock = self.world.inner().get::<&LockComp>(entity).ok()?;
+                let lock = self.world.get::<LockComp>(entity)?;
                 let locked: Vec<ShipId> = lock.locked_targets().collect();
                 if locked.is_empty() {
                     return None;
@@ -61,7 +61,7 @@ impl<S: EventStore> SimulationNode<S> {
             .index
             .iter()
             .filter_map(|(&sid, &entity)| {
-                let t = self.world.inner().get::<&TackledComp>(entity).ok()?;
+                let t = self.world.get::<TackledComp>(entity)?;
                 Some((sid, entity, t.tacklers.clone()))
             })
             .collect();
@@ -94,9 +94,9 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             if new_tacklers.is_empty() {
-                let _ = self.world.inner_mut().remove_one::<TackledComp>(entity);
+                let _ = self.world.remove_one::<TackledComp>(entity);
             } else {
-                if let Ok(mut tackled) = self.world.inner_mut().get::<&mut TackledComp>(entity) {
+                if let Some(mut tackled) = self.world.get_mut::<TackledComp>(entity) {
                     tackled.tacklers = new_tacklers;
                 }
             }
@@ -115,7 +115,7 @@ impl<S: EventStore> SimulationNode<S> {
                 }));
             }
             if let Some(&entity) = self.ships.index.get(&target_id) {
-                let _ = self.world.inner_mut().insert_one(
+                let _ = self.world.insert_one(
                     entity,
                     TackledComp {
                         tacklers: new_tacklers.clone(),

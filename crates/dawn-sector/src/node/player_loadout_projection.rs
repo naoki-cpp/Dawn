@@ -61,7 +61,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Fit/Unfit (ADR-0032).
     pub fn build_player_loadout_json(&self, ship_id: ShipId) -> Option<PlayerLoadoutWire> {
         let entity = self.ships.index.get(&ship_id)?;
-        let fitting = self.world.inner().get::<&FittingComp>(*entity).ok()?;
+        let fitting = self.world.get::<FittingComp>(*entity)?;
 
         let mut modules: Vec<ModuleRowWire> = Vec::new();
         let slot_names = [
@@ -92,9 +92,7 @@ impl<S: EventStore> SimulationNode<S> {
 
         let inventory: Vec<ItemRowWire> = self
             .world
-            .inner()
-            .get::<&InventoryComp>(*entity)
-            .ok()
+            .get::<InventoryComp>(*entity)
             .map(|inv| {
                 inv.items
                     .iter()
@@ -247,8 +245,7 @@ mod tests {
         let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
         let entity = *node.ships.index.get(&ship_id).unwrap();
         node.world
-            .inner_mut()
-            .get::<&mut InventoryComp>(entity)
+            .get_mut::<InventoryComp>(entity)
             .unwrap()
             .add_item(ItemId::ScrapMetal, 3);
 
@@ -291,8 +288,7 @@ mod tests {
 
         let entity = *node.ships.index.get(&ship_id).unwrap();
         node.world
-            .inner_mut()
-            .get::<&mut InventoryComp>(entity)
+            .get_mut::<InventoryComp>(entity)
             .unwrap()
             .add_item(ItemId::ScrapMetal, 1);
         node.unfit_module_owned(

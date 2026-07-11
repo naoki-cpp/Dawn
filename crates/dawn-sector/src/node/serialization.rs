@@ -168,8 +168,8 @@ impl<S: EventStore> SimulationNode<S> {
         // ship near the origin. The client renders absolute coords via its
         // floating origin.
         let pos = self.ship_absolute(ship_id)?;
-        let stats = self.world.inner().get::<&ShipStatsComp>(*entity).ok()?;
-        let hull = self.world.inner().get::<&HullComp>(*entity).ok()?;
+        let stats = self.world.get::<ShipStatsComp>(*entity)?;
+        let hull = self.world.get::<HullComp>(*entity)?;
         let is_player = self.ships.owners.contains_key(&ship_id);
         let ship_type_name = self
             .ships

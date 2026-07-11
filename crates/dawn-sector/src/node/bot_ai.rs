@@ -35,19 +35,19 @@ impl<S: EventStore> SimulationNode<S> {
 
         let mut bots: Vec<BotState> = Vec::new();
         for (&ship_id, &entity) in &self.ships.index {
-            if self.world.inner().get::<&IsBotComp>(entity).is_err() {
+            if self.world.get::<IsBotComp>(entity).is_none() {
                 continue;
             }
             let Some(&player_id) = self.ships.owners.get(&ship_id) else {
                 continue;
             };
-            let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else {
+            let Some(pos) = self.world.get::<PositionComp>(entity) else {
                 continue;
             };
-            let Ok(stats) = self.world.inner().get::<&ShipStatsComp>(entity) else {
+            let Some(stats) = self.world.get::<ShipStatsComp>(entity) else {
                 continue;
             };
-            let Ok(lock) = self.world.inner().get::<&LockComp>(entity) else {
+            let Some(lock) = self.world.get::<LockComp>(entity) else {
                 continue;
             };
             let locked: Vec<ShipId> = lock
@@ -61,8 +61,7 @@ impl<S: EventStore> SimulationNode<S> {
             // the bot is braking to hold its firing position.
             let weapon_modules = self
                 .world
-                .inner()
-                .get::<&FittingComp>(entity)
+                .get::<FittingComp>(entity)
                 .map(|f| {
                     f.iter_slots()
                         .filter(|s| s.def.kind == dawn_core::fitting::ModuleKind::Weapon)
@@ -70,7 +69,7 @@ impl<S: EventStore> SimulationNode<S> {
                         .collect()
                 })
                 .unwrap_or_default();
-            let hp_fraction = if let Ok(hull) = self.world.inner().get::<&HullComp>(entity) {
+            let hp_fraction = if let Some(hull) = self.world.get::<HullComp>(entity) {
                 let max_hp = stats.max_shield + stats.max_armor + stats.max_hull;
                 let cur_hp = hull.total_hp();
                 if max_hp > 0.0 {
@@ -81,7 +80,7 @@ impl<S: EventStore> SimulationNode<S> {
             } else {
                 1.0
             };
-            let is_warping = self.world.inner().get::<&WarpComp>(entity).is_ok();
+            let is_warping = self.world.get::<WarpComp>(entity).is_some();
             bots.push(BotState {
                 player_id,
                 ship_id,
@@ -103,16 +102,16 @@ impl<S: EventStore> SimulationNode<S> {
         }
         let mut targets: Vec<TargetInfo> = Vec::new();
         for (&ship_id, &entity) in &self.ships.index {
-            if self.world.inner().get::<&IsBotComp>(entity).is_ok() {
+            if self.world.get::<IsBotComp>(entity).is_some() {
                 continue;
             }
-            if self.world.inner().get::<&IsNpcComp>(entity).is_ok() {
+            if self.world.get::<IsNpcComp>(entity).is_some() {
                 continue;
             }
             if !self.ships.owners.contains_key(&ship_id) {
                 continue;
             }
-            let Ok(pos) = self.world.inner().get::<&PositionComp>(entity) else {
+            let Some(pos) = self.world.get::<PositionComp>(entity) else {
                 continue;
             };
             let abs = self.entity_absolute(entity, pos.0);

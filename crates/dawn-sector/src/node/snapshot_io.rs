@@ -20,31 +20,23 @@ impl<S: EventStore> SimulationNode<S> {
             .index
             .iter()
             .filter_map(|(&ship_id, &entity)| {
-                let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
-                let vel = self.world.inner().get::<&VelocityComp>(entity).ok()?.0;
-                let hull = self.world.inner().get::<&HullComp>(entity).ok()?;
-                let capacitor = self
-                    .world
-                    .inner()
-                    .get::<&CapacitorComp>(entity)
-                    .ok()
-                    .map(|c| c.current);
+                let pos = self.world.get::<PositionComp>(entity)?.0;
+                let vel = self.world.get::<VelocityComp>(entity)?.0;
+                let hull = self.world.get::<HullComp>(entity)?;
+                let capacitor = self.world.get::<CapacitorComp>(entity).map(|c| c.current);
                 let fitting = self
                     .world
-                    .inner()
-                    .get::<&FittingComp>(entity)
+                    .get::<FittingComp>(entity)
                     .map(|f| f.to_snapshot())
-                    .unwrap_or_else(|_| dawn_core::fitting::FittingSnapshot::empty());
+                    .unwrap_or_else(dawn_core::fitting::FittingSnapshot::empty);
                 let tackled_by = self
                     .world
-                    .inner()
-                    .get::<&TackledComp>(entity)
+                    .get::<TackledComp>(entity)
                     .map(|t| t.tacklers.clone())
                     .unwrap_or_default();
                 let inventory = self
                     .world
-                    .inner()
-                    .get::<&InventoryComp>(entity)
+                    .get::<InventoryComp>(entity)
                     .map(|inv| inv.items.clone())
                     .unwrap_or_default();
                 let ship_type_id = self

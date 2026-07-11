@@ -117,11 +117,11 @@ impl<S: EventStore> SimulationNode<S> {
         if self.is_warping(entity) {
             return;
         }
-        let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
+        let _ = self.world.remove_one::<WarpComp>(entity);
         // Manual thrust overrides any active steering mode (Approach ADR-0015
         // §4, Orbit / Keep at Range ADR-0031).
         self.clear_steering_modes(entity);
-        let pos = match self.world.inner().get::<&PositionComp>(entity).ok() {
+        let pos = match self.world.get::<PositionComp>(entity) {
             Some(c) => c.0,
             None => return,
         };
@@ -165,7 +165,7 @@ impl<S: EventStore> SimulationNode<S> {
         if self.is_warping(entity) {
             return;
         }
-        let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
+        let _ = self.world.remove_one::<WarpComp>(entity);
         // Stopping cancels any active steering mode (Approach ADR-0015 §4,
         // Orbit / Keep at Range ADR-0031).
         self.clear_steering_modes(entity);
@@ -387,8 +387,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// covers the aligning phase.
     pub(super) fn is_warping(&self, entity: Entity) -> bool {
         self.world
-            .inner()
-            .get::<&WarpComp>(entity)
+            .get::<WarpComp>(entity)
             .map(|w| w.is_warping())
             .unwrap_or(false)
     }
@@ -401,7 +400,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// explicitly (`is_warping` + removing `WarpComp`) rather than going
     /// through this check.
     pub(super) fn has_active_warp(&self, entity: Entity) -> bool {
-        self.world.inner().get::<&WarpComp>(entity).is_ok()
+        self.world.get::<WarpComp>(entity).is_some()
     }
 
     /// Point `entity`'s thrust at `to` from `from` (unit direction, not braking).
@@ -421,7 +420,7 @@ impl<S: EventStore> SimulationNode<S> {
         } else {
             Velocity::ZERO
         };
-        if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
+        if let Some(mut t) = self.world.get_mut::<ThrustComp>(entity) {
             t.direction = dir;
             t.is_braking = false;
         }
@@ -430,7 +429,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Set `entity`'s thrust to braking (decelerate toward zero velocity).
     /// Shared by `apply_stop_command` and the Approach/Warp Systems.
     pub(super) fn brake_thrust(&mut self, entity: Entity) {
-        if let Ok(mut t) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
+        if let Some(mut t) = self.world.get_mut::<ThrustComp>(entity) {
             t.direction = Velocity::ZERO;
             t.is_braking = true;
         }
@@ -509,16 +508,11 @@ impl<S: EventStore> SimulationNode<S> {
         };
 
         // Snapshot the slot's current state before mutating anything.
-        let current = self
-            .world
-            .inner()
-            .get::<&FittingComp>(entity)
-            .ok()
-            .and_then(|f| {
-                f.iter_slots()
-                    .find(|s| s.def.id == module_id && s.def.slot == slot)
-                    .map(|s| (s.def.kind, s.is_active, s.target_ship_id))
-            });
+        let current = self.world.get::<FittingComp>(entity).and_then(|f| {
+            f.iter_slots()
+                .find(|s| s.def.id == module_id && s.def.slot == slot)
+                .map(|s| (s.def.kind, s.is_active, s.target_ship_id))
+        });
         let (kind, prev_active, prev_target) = match current {
             Some(c) => c,
             None => return Err(SlotNotFound),
@@ -531,9 +525,7 @@ impl<S: EventStore> SimulationNode<S> {
             if let Some(target_id) = target {
                 let locked = self
                     .world
-                    .inner()
-                    .get::<&LockComp>(entity)
-                    .ok()
+                    .get::<LockComp>(entity)
                     .map(|lock| {
                         lock.entries
                             .iter()
@@ -622,9 +614,7 @@ impl<S: EventStore> SimulationNode<S> {
         target: Option<ShipId>,
     ) -> bool {
         self.world
-            .inner_mut()
-            .get::<&mut FittingComp>(entity)
-            .ok()
+            .get_mut::<FittingComp>(entity)
             .and_then(|mut f| {
                 f.find_slot_mut(module_id, slot).map(|s| {
                     if is_active {
@@ -662,7 +652,7 @@ impl<S: EventStore> SimulationNode<S> {
             ActivationMode::Passive => true,
             ActivationMode::Active => is_npc,
         };
-        if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(entity) {
+        if let Some(mut fitting) = self.world.get_mut::<FittingComp>(entity) {
             fitting.slot_mut(cmd.slot).push(FittedSlot {
                 def,
                 is_active,
@@ -1036,11 +1026,7 @@ mod tests {
         let anchor_abs = node.anchor_table().abs(anchor).expect("demo anchor exists");
         let local_pos = Position::new(250.0, 0.0, -100.0);
         node.world.set_ship_anchor(entity, anchor);
-        node.world
-            .inner_mut()
-            .get::<&mut PositionComp>(entity)
-            .unwrap()
-            .0 = local_pos;
+        node.world.get_mut::<PositionComp>(entity).unwrap().0 = local_pos;
 
         let target_abs = Position::new(
             (anchor_abs[0] + local_pos.x as f64) as f32,
@@ -1050,7 +1036,7 @@ mod tests {
 
         node.apply_move_command(ship_id, target_abs);
 
-        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
         assert!(
             thrust.direction.dy > 0.99,
             "move command should preserve the local +Y intent after an anchor rebase, got {:?}",
@@ -1139,8 +1125,7 @@ mod tests {
         let entity = *node.ships.index.get(&ship_id).unwrap();
         let is_active = node
             .world
-            .inner()
-            .get::<&FittingComp>(entity)
+            .get::<FittingComp>(entity)
             .unwrap()
             .iter_slots()
             .find(|s| s.def.id == MODULE_AFTERBURNER)
@@ -1194,8 +1179,7 @@ mod tests {
         let entity = *node.ships.index.get(&ship_id).unwrap();
         let is_active = node
             .world
-            .inner()
-            .get::<&FittingComp>(entity)
+            .get::<FittingComp>(entity)
             .unwrap()
             .iter_slots()
             .find(|s| s.def.id == MODULE_AFTERBURNER)
@@ -1219,7 +1203,7 @@ mod tests {
         let result =
             node.apply_client_command(player_id, ClientCommand::Stop(StopCommand), &mut locks);
         assert!(result.is_none(), "Stop must not produce a followup");
-        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
         assert!(
             thrust.is_braking,
             "Stop dispatch must brake the ship's thrust"
@@ -1250,7 +1234,7 @@ mod tests {
         assert!(result.is_none(), "Approach must not produce a followup");
         let entity = *node.ships.index.get(&ship_id).unwrap();
         assert!(
-            node.world.inner().get::<&ApproachComp>(entity).is_ok(),
+            node.world.get::<ApproachComp>(entity).is_some(),
             "Approach dispatch must attach ApproachComp to the caller's active ship"
         );
     }
@@ -1274,7 +1258,7 @@ mod tests {
         assert!(result.is_none(), "Warp must not produce a followup");
         let entity = *node.ships.index.get(&ship_id).unwrap();
         assert!(
-            node.world.inner().get::<&WarpComp>(entity).is_ok(),
+            node.world.get::<WarpComp>(entity).is_some(),
             "Warp dispatch must attach WarpComp to the caller's active ship"
         );
     }
@@ -1304,7 +1288,7 @@ mod tests {
         assert!(result.is_none(), "Orbit must not produce a followup");
         let entity = *node.ships.index.get(&ship_id).unwrap();
         assert!(
-            node.world.inner().get::<&OrbitComp>(entity).is_ok(),
+            node.world.get::<OrbitComp>(entity).is_some(),
             "Orbit dispatch must attach OrbitComp to the caller's active ship"
         );
     }
@@ -1334,7 +1318,7 @@ mod tests {
         assert!(result.is_none(), "KeepAtRange must not produce a followup");
         let entity = *node.ships.index.get(&ship_id).unwrap();
         assert!(
-            node.world.inner().get::<&KeepAtRangeComp>(entity).is_ok(),
+            node.world.get::<KeepAtRangeComp>(entity).is_some(),
             "KeepAtRange dispatch must attach KeepAtRangeComp to the caller's active ship"
         );
     }
@@ -1524,11 +1508,12 @@ mod tests {
         let mut node = node_with_modules();
         let (player_id, ship_id) = docked_owned_player(&mut node);
         let entity = *node.ships.index.get(&ship_id).unwrap();
-        node.world
-            .inner_mut()
-            .get::<&mut dawn_ecs::components::InventoryComp>(entity)
-            .map(|mut inv| inv.add_item(ItemId::ScrapMetal, 5))
-            .ok();
+        if let Some(mut inv) = node
+            .world
+            .get_mut::<dawn_ecs::components::InventoryComp>(entity)
+        {
+            inv.add_item(ItemId::ScrapMetal, 5);
+        }
 
         let mut locks = Vec::new();
         let result = node.apply_client_command(
