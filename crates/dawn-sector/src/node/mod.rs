@@ -549,6 +549,19 @@ impl<S: EventStore> SimulationNode<S> {
         self.docked_ships.remove(&ship_id);
     }
 
+    /// Undo a fresh player-ship spawn whose handshake never completed (the
+    /// client's WebSocket send failed after `spawn_player_ship_at_pub` had
+    /// already created the ship). Narrow, deliberately-named wrapper around
+    /// `remove_ship` -- not a general "despawn any ship" API. Callers
+    /// must only use this for a ship this same connection attempt just
+    /// spawned; it must never be called for a resumed ship (one that existed
+    /// before the attempt), since that ship's ownership predates this
+    /// connection and removing it would destroy state unrelated to the
+    /// failure.
+    pub fn despawn_incomplete_handshake_spawn(&mut self, ship_id: ShipId) {
+        self.remove_ship(ship_id);
+    }
+
     /// Recomputes `ShipStatsComp` from `ship_id`'s current `FittingComp`
     /// against its stored `base_stats` (falling back to `ShipStatsComp::NPC`
     /// if the ship has none, e.g. a bot). Callers still decide separately
@@ -685,6 +698,17 @@ mod tests {
         let unknown = dawn_core::ShipId::new(NodeId(99), 0);
         assert!(!node.adopt_player_ship(unknown, dawn_core::PlayerId(0)));
         assert!(!node.apply_stop_command_owned(dawn_core::PlayerId(0), unknown));
+    }
+
+    #[test]
+    fn despawn_incomplete_handshake_spawn_removes_the_ship() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_player_ship_at_pub(dawn_core::PlayerId(0), Position::ORIGIN);
+        assert_eq!(node.ship_count(), 1);
+
+        node.despawn_incomplete_handshake_spawn(ship_id);
+
+        assert_eq!(node.ship_count(), 0);
     }
 
     #[test]
