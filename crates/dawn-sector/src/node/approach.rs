@@ -47,7 +47,7 @@ impl<S: EventStore> SimulationNode<S> {
         let Some((entity, _)) = self.begin_maneuver(ship_id, target, None) else {
             return false;
         };
-        let _ = self.world.inner_mut().insert_one(
+        let _ = self.world.insert_one(
             entity,
             ApproachComp {
                 target,
@@ -95,7 +95,6 @@ impl<S: EventStore> SimulationNode<S> {
             Position,
         )> = self
             .world
-            .inner()
             .query::<(&ApproachComp, &PositionComp)>()
             .iter()
             .map(|(entity, (approach, pos))| {
@@ -124,13 +123,7 @@ impl<S: EventStore> SimulationNode<S> {
                     .index
                     .get(&target_id)
                     .copied()
-                    .and_then(|te| {
-                        self.world
-                            .inner()
-                            .get::<&PositionComp>(te)
-                            .ok()
-                            .map(|p| (te, p.0))
-                    })
+                    .and_then(|te| self.world.get::<PositionComp>(te).map(|p| (te, p.0)))
                     .map(|(te, off)| {
                         let target_abs = self.entity_absolute_f64(te, off);
                         (
@@ -151,7 +144,7 @@ impl<S: EventStore> SimulationNode<S> {
             match resolved {
                 // Target gone: drop the approach and brake (ADR-0015 §4).
                 None => {
-                    let _ = self.world.inner_mut().remove_one::<ApproachComp>(entity);
+                    let _ = self.world.remove_one::<ApproachComp>(entity);
                     self.brake_thrust(entity);
                 }
                 // Arrived: hold position, keep ApproachComp so the ship resumes
@@ -163,7 +156,7 @@ impl<S: EventStore> SimulationNode<S> {
                         {
                             self.pending_auto_jumps.push((ship_id, gate_id));
                         }
-                        let _ = self.world.inner_mut().remove_one::<ApproachComp>(entity);
+                        let _ = self.world.remove_one::<ApproachComp>(entity);
                     }
                     self.brake_thrust(entity)
                 }
@@ -337,7 +330,7 @@ mod tests {
 
         let entity = *node.ships.index.get(&chaser).unwrap();
         node.process_approach();
-        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
         assert!(
             thrust.direction.dx > 0.9,
             "thrust should point toward +X target, got {:?}",
@@ -462,11 +455,7 @@ mod tests {
         );
         let entity = *node.ships.index.get(&chaser).unwrap();
         assert!(
-            node.world
-                .inner()
-                .get::<&ThrustComp>(entity)
-                .unwrap()
-                .is_braking,
+            node.world.get::<ThrustComp>(entity).unwrap().is_braking,
             "ship should brake when target vanishes"
         );
     }

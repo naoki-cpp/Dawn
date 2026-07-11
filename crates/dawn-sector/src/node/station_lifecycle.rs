@@ -50,12 +50,12 @@ impl<S: EventStore> SimulationNode<S> {
         let Some(&entity) = self.ships.index.get(&ship_id) else {
             return;
         };
-        let _ = self.world.inner_mut().remove_one::<WarpComp>(entity);
+        let _ = self.world.remove_one::<WarpComp>(entity);
         self.clear_steering_modes(entity);
-        if let Ok(mut thrust) = self.world.inner_mut().get::<&mut ThrustComp>(entity) {
+        if let Some(mut thrust) = self.world.get_mut::<ThrustComp>(entity) {
             *thrust = ThrustComp::ZERO;
         }
-        if let Ok(mut velocity) = self.world.inner_mut().get::<&mut VelocityComp>(entity) {
+        if let Some(mut velocity) = self.world.get_mut::<VelocityComp>(entity) {
             velocity.0 = dawn_core::Velocity::ZERO;
         }
         self.place_entity_at_absolute(entity, station_abs);
@@ -191,8 +191,8 @@ impl<S: EventStore> SimulationNode<S> {
                 continue;
             };
             let locker_docked = self.is_ship_docked(ship_id);
-            let lost_targets: Vec<ShipId> = match self.world.inner().get::<&LockComp>(entity) {
-                Ok(lock) => lock
+            let lost_targets: Vec<ShipId> = match self.world.get::<LockComp>(entity) {
+                Some(lock) => lock
                     .entries
                     .iter()
                     .filter_map(|entry| {
@@ -203,12 +203,12 @@ impl<S: EventStore> SimulationNode<S> {
                         }
                     })
                     .collect(),
-                Err(_) => Vec::new(),
+                None => Vec::new(),
             };
             if lost_targets.is_empty() {
                 continue;
             }
-            if let Ok(mut lock) = self.world.inner_mut().get::<&mut LockComp>(entity) {
+            if let Some(mut lock) = self.world.get_mut::<LockComp>(entity) {
                 lock.entries
                     .retain(|entry| !lost_targets.contains(&entry.target_id));
             }
@@ -317,14 +317,14 @@ mod tests {
         let station = node.station(StationId(0)).expect("demo station exists");
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
         let entity = *node.ships.index.get(&ship_id).expect("ship entity");
-        if let Ok(mut velocity) = node.world.inner_mut().get::<&mut VelocityComp>(entity) {
+        if let Some(mut velocity) = node.world.get_mut::<VelocityComp>(entity) {
             velocity.0 = dawn_core::Velocity {
                 dx: 10.0,
                 dy: 0.0,
                 dz: 0.0,
             };
         }
-        if let Ok(mut thrust) = node.world.inner_mut().get::<&mut ThrustComp>(entity) {
+        if let Some(mut thrust) = node.world.get_mut::<ThrustComp>(entity) {
             thrust.direction = dawn_core::Velocity {
                 dx: 1.0,
                 dy: 0.0,
@@ -341,8 +341,8 @@ mod tests {
             }
         )));
 
-        let velocity = node.world.inner().get::<&VelocityComp>(entity).unwrap().0;
-        let thrust = *node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        let velocity = node.world.get::<VelocityComp>(entity).unwrap().0;
+        let thrust = *node.world.get::<ThrustComp>(entity).unwrap();
         assert_eq!(velocity, dawn_core::Velocity::ZERO);
         assert_eq!(thrust.direction, ThrustComp::ZERO.direction);
         assert_eq!(thrust.is_braking, ThrustComp::ZERO.is_braking);
@@ -364,13 +364,13 @@ mod tests {
             }
         )));
 
-        let before = *node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        let before = *node.world.get::<ThrustComp>(entity).unwrap();
         assert!(node.apply_move_command_owned(
             player_id,
             ship_id,
             dawn_core::Position::new(5000.0, 0.0, 0.0)
         ));
-        let after = *node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        let after = *node.world.get::<ThrustComp>(entity).unwrap();
         assert_eq!(
             before.direction, after.direction,
             "docked ships should ignore manual piloting"

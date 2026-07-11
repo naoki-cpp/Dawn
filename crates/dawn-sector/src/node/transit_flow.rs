@@ -174,10 +174,10 @@ impl<S: EventStore> SimulationNode<S> {
             TransitState::None => return None,
         };
 
-        let pos = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
-        let vel = self.world.inner().get::<&VelocityComp>(entity).ok()?.0;
+        let pos = self.world.get::<PositionComp>(entity)?.0;
+        let vel = self.world.get::<VelocityComp>(entity)?.0;
         let (current_shield, current_armor, current_hull, is_destroyed) = {
-            let hull = self.world.inner().get::<&HullComp>(entity).ok()?;
+            let hull = self.world.get::<HullComp>(entity)?;
             (
                 hull.shield(),
                 hull.armor(),
@@ -185,18 +185,12 @@ impl<S: EventStore> SimulationNode<S> {
                 hull.is_destroyed(),
             )
         };
-        let capacitor = self
-            .world
-            .inner()
-            .get::<&CapacitorComp>(entity)
-            .ok()
-            .map(|c| c.current);
+        let capacitor = self.world.get::<CapacitorComp>(entity).map(|c| c.current);
         let fitting = self
             .world
-            .inner()
-            .get::<&FittingComp>(entity)
+            .get::<FittingComp>(entity)
             .map(|f| f.to_snapshot())
-            .unwrap_or_else(|_| FittingSnapshot::empty());
+            .unwrap_or_else(FittingSnapshot::empty);
         let ship_type_id = self
             .ships
             .type_ids
@@ -207,8 +201,7 @@ impl<S: EventStore> SimulationNode<S> {
         // tackle, it's the pilot's possessions, not Sector-local state.
         let inventory = self
             .world
-            .inner()
-            .get::<&InventoryComp>(entity)
+            .get::<InventoryComp>(entity)
             .map(|inv| inv.items.clone())
             .unwrap_or_default();
 
@@ -351,7 +344,7 @@ impl<S: EventStore> SimulationNode<S> {
             (entry_pos_abs[2] - to_abs[2]) as f32,
         );
         self.world.set_ship_anchor(entity, to);
-        if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+        if let Some(mut p) = self.world.get_mut::<PositionComp>(entity) {
             p.0 = offset;
         }
         self.event_store.append(DomainEvent::AnchorRebased(
@@ -716,8 +709,7 @@ mod tests {
         let before_entity = *from_node.ships.index.get(&ship_id).unwrap();
         let before_len = from_node
             .world
-            .inner()
-            .get::<&dawn_ecs::components::InventoryComp>(before_entity)
+            .get::<dawn_ecs::components::InventoryComp>(before_entity)
             .unwrap()
             .items
             .values()
@@ -743,8 +735,7 @@ mod tests {
         let after_entity = *to_node.ships.index.get(&ship_id).unwrap();
         let after = to_node
             .world
-            .inner()
-            .get::<&dawn_ecs::components::InventoryComp>(after_entity)
+            .get::<dawn_ecs::components::InventoryComp>(after_entity)
             .unwrap();
         assert_eq!(
             after.items.values().copied().sum::<u64>(),

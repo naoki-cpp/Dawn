@@ -30,9 +30,7 @@ impl<S: EventStore> SimulationNode<S> {
     pub(super) fn entity_abs_pos(&self, entity: Entity) -> Position {
         let off = self
             .world
-            .inner()
-            .get::<&PositionComp>(entity)
-            .ok()
+            .get::<PositionComp>(entity)
             .map(|p| p.0)
             .unwrap_or(Position::ORIGIN);
         self.entity_absolute(entity, off)
@@ -45,9 +43,7 @@ impl<S: EventStore> SimulationNode<S> {
     pub(super) fn entity_abs_pos_f64(&self, entity: Entity) -> [f64; 3] {
         let off = self
             .world
-            .inner()
-            .get::<&PositionComp>(entity)
-            .ok()
+            .get::<PositionComp>(entity)
             .map(|p| p.0)
             .unwrap_or(Position::ORIGIN);
         self.entity_absolute_f64(entity, off)
@@ -110,7 +106,7 @@ impl<S: EventStore> SimulationNode<S> {
     fn ship_anchor_and_offset(&self, ship_id: ShipId) -> Option<(dawn_core::AnchorId, Position)> {
         let entity = *self.ships.index.get(&ship_id)?;
         let anchor = self.world.ship_anchor(entity)?;
-        let offset = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+        let offset = self.world.get::<PositionComp>(entity)?.0;
         Some((anchor, offset))
     }
 }

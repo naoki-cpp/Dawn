@@ -83,10 +83,9 @@ impl<S: EventStore> SimulationNode<S> {
             let Some(&killer_entity) = self.ships.index.get(&destroyed.killer_id) else {
                 continue;
             };
-            if let Ok(mut inventory) =
-                self.world
-                    .inner_mut()
-                    .get::<&mut dawn_ecs::components::InventoryComp>(killer_entity)
+            if let Some(mut inventory) = self
+                .world
+                .get_mut::<dawn_ecs::components::InventoryComp>(killer_entity)
             {
                 inventory.add_item(ItemId::ScrapMetal, SCRAP_METAL_PER_SHIP_DESTROYED);
             }
@@ -210,8 +209,7 @@ mod tests {
         let killer_entity = *node.ships.index.get(&killer).unwrap();
         let before = node
             .world
-            .inner()
-            .get::<&dawn_ecs::components::InventoryComp>(killer_entity)
+            .get::<dawn_ecs::components::InventoryComp>(killer_entity)
             .unwrap()
             .item_count(ItemId::ScrapMetal);
 
@@ -258,8 +256,7 @@ mod tests {
         );
         let after = node
             .world
-            .inner()
-            .get::<&dawn_ecs::components::InventoryComp>(killer_entity)
+            .get::<dawn_ecs::components::InventoryComp>(killer_entity)
             .unwrap()
             .item_count(ItemId::ScrapMetal);
         assert_eq!(after, before + SCRAP_METAL_PER_SHIP_DESTROYED);

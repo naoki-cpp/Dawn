@@ -38,10 +38,7 @@ impl<S: EventStore> SimulationNode<S> {
         let Some((entity, radius)) = self.begin_maneuver(ship_id, target, radius) else {
             return false;
         };
-        let _ = self
-            .world
-            .inner_mut()
-            .insert_one(entity, OrbitComp { target, radius });
+        let _ = self.world.insert_one(entity, OrbitComp { target, radius });
         true
     }
 
@@ -77,7 +74,6 @@ impl<S: EventStore> SimulationNode<S> {
         };
         let _ = self
             .world
-            .inner_mut()
             .insert_one(entity, KeepAtRangeComp { target, range });
         true
     }
@@ -117,8 +113,7 @@ impl<S: EventStore> SimulationNode<S> {
     fn default_maneuver_radius(&self, entity: Entity) -> f32 {
         let weapon_range = self
             .world
-            .inner()
-            .get::<&ShipStatsComp>(entity)
+            .get::<ShipStatsComp>(entity)
             .map(|s| s.weapon_range)
             .unwrap_or(0.0);
         if weapon_range > f32::EPSILON {
@@ -169,11 +164,10 @@ impl<S: EventStore> SimulationNode<S> {
     /// at a time. Does not touch `WarpComp`; warp rejects these commands
     /// outright via the transit/warp guards in each `apply_*` method's caller.
     pub(super) fn clear_steering_modes(&mut self, entity: Entity) {
-        let _ = self.world.inner_mut().remove_one::<OrbitComp>(entity);
-        let _ = self.world.inner_mut().remove_one::<KeepAtRangeComp>(entity);
+        let _ = self.world.remove_one::<OrbitComp>(entity);
+        let _ = self.world.remove_one::<KeepAtRangeComp>(entity);
         let _ = self
             .world
-            .inner_mut()
             .remove_one::<dawn_ecs::components::ApproachComp>(entity);
     }
 
@@ -184,7 +178,7 @@ impl<S: EventStore> SimulationNode<S> {
         match target {
             ApproachTarget::Ship(target_id) => {
                 let &te = self.ships.index.get(&target_id)?;
-                let off = self.world.inner().get::<&PositionComp>(te).ok()?.0;
+                let off = self.world.get::<PositionComp>(te)?.0;
                 let target_abs = self.entity_absolute_f64(te, off);
                 Some(self.dest_in_ship_frame_abs(entity, target_abs))
             }
@@ -204,7 +198,6 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn process_orbit(&mut self) {
         let orbiters: Vec<(Entity, ApproachTarget, f32, Position)> = self
             .world
-            .inner()
             .query::<(&OrbitComp, &PositionComp)>()
             .iter()
             .map(|(entity, (orbit, pos))| (entity, orbit.target, orbit.radius, pos.0))
@@ -212,7 +205,7 @@ impl<S: EventStore> SimulationNode<S> {
 
         for (entity, target, radius, ship_pos) in orbiters {
             let Some(target_pos) = self.resolve_maneuver_target(entity, target) else {
-                let _ = self.world.inner_mut().remove_one::<OrbitComp>(entity);
+                let _ = self.world.remove_one::<OrbitComp>(entity);
                 self.brake_thrust(entity);
                 continue;
             };
@@ -276,7 +269,6 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn process_keep_at_range(&mut self) {
         let holders: Vec<(Entity, ApproachTarget, f32, Position)> = self
             .world
-            .inner()
             .query::<(&KeepAtRangeComp, &PositionComp)>()
             .iter()
             .map(|(entity, (keep, pos))| (entity, keep.target, keep.range, pos.0))
@@ -284,7 +276,7 @@ impl<S: EventStore> SimulationNode<S> {
 
         for (entity, target, range, ship_pos) in holders {
             let Some(target_pos) = self.resolve_maneuver_target(entity, target) else {
-                let _ = self.world.inner_mut().remove_one::<KeepAtRangeComp>(entity);
+                let _ = self.world.remove_one::<KeepAtRangeComp>(entity);
                 self.brake_thrust(entity);
                 continue;
             };
@@ -471,7 +463,7 @@ mod tests {
 
         assert!(node.apply_orbit_command(chaser, dawn_core::ApproachTarget::Ship(target), None));
         let entity = *node.ships.index.get(&chaser).unwrap();
-        let radius = node.world.inner().get::<&OrbitComp>(entity).unwrap().radius;
+        let radius = node.world.get::<OrbitComp>(entity).unwrap().radius;
         assert_eq!(radius, super::super::DEFAULT_MANEUVER_RADIUS);
     }
 
@@ -488,7 +480,7 @@ mod tests {
 
         node.process_orbit();
         let entity = *node.ships.index.get(&chaser).unwrap();
-        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
         // Pure radial-only steering (straight at or away from the target)
         // would have dz == 0 here (target is directly along +X); a nonzero Z
         // component proves the tangential lead is contributing.
@@ -549,16 +541,10 @@ mod tests {
         node.process_orbit();
         let entity = *node.ships.index.get(&chaser).unwrap();
         assert!(
-            node.world.inner().get::<&OrbitComp>(entity).is_err(),
+            node.world.get::<OrbitComp>(entity).is_none(),
             "OrbitComp should be removed"
         );
-        assert!(
-            node.world
-                .inner()
-                .get::<&ThrustComp>(entity)
-                .unwrap()
-                .is_braking
-        );
+        assert!(node.world.get::<ThrustComp>(entity).unwrap().is_braking);
     }
 
     #[test]
@@ -575,7 +561,7 @@ mod tests {
         node.apply_move_command(chaser, Position::new(-2000.0, 0.0, 0.0));
         let entity = *node.ships.index.get(&chaser).unwrap();
         assert!(
-            node.world.inner().get::<&OrbitComp>(entity).is_err(),
+            node.world.get::<OrbitComp>(entity).is_none(),
             "move must cancel orbit"
         );
     }
@@ -600,7 +586,7 @@ mod tests {
         ));
         let entity = *node.ships.index.get(&chaser).unwrap();
         assert!(
-            node.world.inner().get::<&OrbitComp>(entity).is_err(),
+            node.world.get::<OrbitComp>(entity).is_none(),
             "approach must cancel orbit"
         );
     }
@@ -661,7 +647,7 @@ mod tests {
 
         node.process_keep_at_range();
         let entity = *node.ships.index.get(&chaser).unwrap();
-        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
         assert!(
             thrust.direction.dx > 0.9,
             "should thrust away from target (+X), got {:?}",
@@ -684,13 +670,7 @@ mod tests {
 
         node.process_keep_at_range();
         let entity = *node.ships.index.get(&chaser).unwrap();
-        assert!(
-            node.world
-                .inner()
-                .get::<&ThrustComp>(entity)
-                .unwrap()
-                .is_braking
-        );
+        assert!(node.world.get::<ThrustComp>(entity).unwrap().is_braking);
     }
 
     #[test]
@@ -706,7 +686,7 @@ mod tests {
 
         node.process_keep_at_range();
         let entity = *node.ships.index.get(&chaser).unwrap();
-        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
         assert!(
             thrust.direction.dx < -0.9,
             "should thrust toward target (-X) when farther than range, got {:?}",
@@ -793,14 +773,8 @@ mod tests {
 
         node.process_keep_at_range();
         let entity = *node.ships.index.get(&chaser).unwrap();
-        assert!(node.world.inner().get::<&KeepAtRangeComp>(entity).is_err());
-        assert!(
-            node.world
-                .inner()
-                .get::<&ThrustComp>(entity)
-                .unwrap()
-                .is_braking
-        );
+        assert!(node.world.get::<KeepAtRangeComp>(entity).is_none());
+        assert!(node.world.get::<ThrustComp>(entity).unwrap().is_braking);
     }
 
     #[test]
@@ -817,7 +791,7 @@ mod tests {
         node.apply_stop_command(chaser);
         let entity = *node.ships.index.get(&chaser).unwrap();
         assert!(
-            node.world.inner().get::<&KeepAtRangeComp>(entity).is_err(),
+            node.world.get::<KeepAtRangeComp>(entity).is_none(),
             "stop must cancel keep-at-range"
         );
     }
@@ -840,7 +814,7 @@ mod tests {
         ));
         let entity = *node.ships.index.get(&chaser).unwrap();
         assert!(
-            node.world.inner().get::<&KeepAtRangeComp>(entity).is_err(),
+            node.world.get::<KeepAtRangeComp>(entity).is_none(),
             "orbit must cancel keep-at-range"
         );
     }

@@ -45,11 +45,11 @@ impl<S: EventStore> SimulationNode<S> {
         // Update ShipStatsComp, HullComp, and CapacitorComp to match base stats.
         if let Some(&entity) = self.ships.index.get(&ship_id) {
             self.world.set_ship_stats(entity, base);
-            if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
+            if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
                 *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
             }
             // Initialize capacitor to full.
-            let _ = self.world.inner_mut().insert_one(
+            let _ = self.world.insert_one(
                 entity,
                 CapacitorComp {
                     current: base.cap_max,
@@ -137,16 +137,16 @@ impl<S: EventStore> SimulationNode<S> {
 
         if let Some(&entity) = self.ships.index.get(&ship_id) {
             self.world.set_ship_stats(entity, base);
-            if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
+            if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
                 *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
             }
-            let _ = self.world.inner_mut().insert_one(
+            let _ = self.world.insert_one(
                 entity,
                 CapacitorComp {
                     current: base.cap_max,
                 },
             );
-            let _ = self.world.inner_mut().remove_one::<IsNpcComp>(entity);
+            let _ = self.world.remove_one::<IsNpcComp>(entity);
         }
 
         // Record ownership before fit_module (needed for is_npc check).
@@ -226,7 +226,7 @@ impl<S: EventStore> SimulationNode<S> {
         let player_id = self.next_player_id();
         let ship_id = self.spawn_player_ship_at(player_id, spawn_pos);
         if let Some(&entity) = self.ships.index.get(&ship_id) {
-            let _ = self.world.inner_mut().insert_one(entity, IsBotComp);
+            let _ = self.world.insert_one(entity, IsBotComp);
         }
         (player_id, ship_id)
     }
@@ -309,7 +309,7 @@ impl<S: EventStore> SimulationNode<S> {
             }
         };
         self.world.set_ship_anchor(entity, anchor);
-        if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+        if let Some(mut p) = self.world.get_mut::<PositionComp>(entity) {
             p.0 = offset;
         }
     }
@@ -350,7 +350,7 @@ impl<S: EventStore> SimulationNode<S> {
             None => Position::new(world[0] as f32, world[1] as f32, world[2] as f32),
         };
         self.world.set_ship_anchor(entity, anchor);
-        if let Ok(mut p) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+        if let Some(mut p) = self.world.get_mut::<PositionComp>(entity) {
             p.0 = offset;
         }
     }
@@ -380,24 +380,23 @@ impl<S: EventStore> SimulationNode<S> {
             self.world.set_ship_stats(entity, base);
 
             let fitting = FittingComp::from_snapshot(&ship.fitting, &self.module_registry);
-            let _ = self.world.inner_mut().insert_one(entity, fitting);
+            let _ = self.world.insert_one(entity, fitting);
 
             // apply_fitting recomputes ShipStatsComp and rescales HullComp;
             // restore the exact HP layers from the snapshot afterwards.
             self.reapply_fitting(ship.ship_id);
-            if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
+            if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
                 hull.set_hp(ship.current_shield, ship.current_armor, ship.current_hull);
             }
 
             if let Some(cap) = ship.capacitor {
                 let _ = self
                     .world
-                    .inner_mut()
                     .insert_one(entity, CapacitorComp { current: cap });
             }
 
             if !ship.tackled_by.is_empty() {
-                let _ = self.world.inner_mut().insert_one(
+                let _ = self.world.insert_one(
                     entity,
                     TackledComp {
                         tacklers: ship.tackled_by.clone(),
@@ -408,7 +407,7 @@ impl<S: EventStore> SimulationNode<S> {
             // Inventory (ADR-0032): restore exactly what was persisted,
             // regardless of ship type -- post-spawn Fit/Unfit could have
             // emptied or refilled it differently from the deterministic seed.
-            let _ = self.world.inner_mut().insert_one(
+            let _ = self.world.insert_one(
                 entity,
                 dawn_ecs::components::InventoryComp {
                     items: ship.inventory.clone(),
@@ -426,7 +425,7 @@ impl<S: EventStore> SimulationNode<S> {
         if let Some(&entity) = self.ships.index.get(&ship_id) {
             self.base_stats.insert(ship_id, ShipStatsComp::PLAYER);
             self.world.set_ship_stats(entity, ShipStatsComp::PLAYER);
-            if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
+            if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
                 *hull = HullComp::new(
                     ShipStatsComp::PLAYER.max_shield,
                     ShipStatsComp::PLAYER.max_armor,

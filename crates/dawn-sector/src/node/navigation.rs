@@ -38,8 +38,7 @@ impl<S: EventStore> SimulationNode<S> {
         // precise at true-AU distances (ADR-0029 review R1 / #4).
         let offset = self
             .world
-            .inner()
-            .get::<&PositionComp>(entity)
+            .get::<PositionComp>(entity)
             .map(|p| p.0)
             .unwrap_or(Position::ORIGIN);
         gate.is_in_range_abs(self.entity_absolute_f64(entity, offset))
@@ -58,9 +57,8 @@ impl<S: EventStore> SimulationNode<S> {
         }
         if self
             .world
-            .inner()
-            .get::<&dawn_ecs::components::WarpComp>(entity)
-            .is_ok()
+            .get::<dawn_ecs::components::WarpComp>(entity)
+            .is_some()
         {
             return false;
         }
@@ -72,8 +70,7 @@ impl<S: EventStore> SimulationNode<S> {
         // and keep the distance precise at true-AU scale).
         let offset = self
             .world
-            .inner()
-            .get::<&PositionComp>(entity)
+            .get::<PositionComp>(entity)
             .map(|p| p.0)
             .unwrap_or(Position::ORIGIN);
         let ship_abs = self.entity_absolute_f64(entity, offset);

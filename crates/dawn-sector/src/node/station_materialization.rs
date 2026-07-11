@@ -98,7 +98,7 @@ impl<S: EventStore> SimulationNode<S> {
             };
         };
         let is_fitted = {
-            let Ok(fitting) = self.world.inner().get::<&FittingComp>(entity) else {
+            let Some(fitting) = self.world.get::<FittingComp>(entity) else {
                 return StationOperationOutcome::Rejected {
                     ship_id: cmd.ship_id,
                     reason: StationOperationRejection::ShipNotFound,
@@ -114,13 +114,13 @@ impl<S: EventStore> SimulationNode<S> {
             };
         }
         let is_damaged = {
-            let Ok(hull) = self.world.inner().get::<&HullComp>(entity) else {
+            let Some(hull) = self.world.get::<HullComp>(entity) else {
                 return StationOperationOutcome::Rejected {
                     ship_id: cmd.ship_id,
                     reason: StationOperationRejection::ShipNotFound,
                 };
             };
-            let Ok(stats) = self.world.inner().get::<&ShipStatsComp>(entity) else {
+            let Some(stats) = self.world.get::<ShipStatsComp>(entity) else {
                 return StationOperationOutcome::Rejected {
                     ship_id: cmd.ship_id,
                     reason: StationOperationRejection::ShipNotFound,
@@ -152,8 +152,7 @@ impl<S: EventStore> SimulationNode<S> {
         // entity instead of following the ship into its packaged form.
         let salvaged_cargo: Vec<(ItemId, u64)> = self
             .world
-            .inner_mut()
-            .get::<&mut InventoryComp>(entity)
+            .get_mut::<InventoryComp>(entity)
             .map(|mut inventory| std::mem::take(&mut inventory.items).into_iter().collect())
             .unwrap_or_default();
         for (item_id, count) in salvaged_cargo {
@@ -209,7 +208,7 @@ impl<S: EventStore> SimulationNode<S> {
         self.id_counter += 1;
         self.insert_ship_entity(ship_id, cmd.ship_type_id, Position::ORIGIN, Velocity::ZERO);
         if let Some(&entity) = self.ships.index.get(&ship_id) {
-            let _ = self.world.inner_mut().remove_one::<IsNpcComp>(entity);
+            let _ = self.world.remove_one::<IsNpcComp>(entity);
         }
         self.settle_ship_into_station(ship_id, cmd.station_id);
         self.docked_ships.insert(ship_id, cmd.station_id);
@@ -449,8 +448,7 @@ mod tests {
         // unfit modules -- not just a Module stack.
         let entity = *node.ships.index.get(&ship_id).expect("ship exists");
         node.world
-            .inner_mut()
-            .get::<&mut dawn_ecs::components::InventoryComp>(entity)
+            .get_mut::<dawn_ecs::components::InventoryComp>(entity)
             .expect("player ship has an InventoryComp")
             .add_item(ItemId::ScrapMetal, 5);
 

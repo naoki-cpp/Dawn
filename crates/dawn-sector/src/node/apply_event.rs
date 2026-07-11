@@ -26,7 +26,7 @@ impl<S: EventStore> SimulationNode<S> {
                     self.base_stats.insert(e.ship_id, base);
                     if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                         self.world.set_ship_stats(entity, base);
-                        if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
+                        if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
                             *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
                         }
                         // Starting inventory (ADR-0032) is a pure function of
@@ -54,17 +54,15 @@ impl<S: EventStore> SimulationNode<S> {
                         .saturating_sub(1);
                     let old_vel = self
                         .world
-                        .inner()
-                        .get::<&VelocityComp>(entity)
-                        .ok()
+                        .get::<VelocityComp>(entity)
                         .map(|v| v.0)
                         .unwrap_or(Velocity::ZERO);
-                    if let Ok(mut pos) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+                    if let Some(mut pos) = self.world.get_mut::<PositionComp>(entity) {
                         pos.0.x += old_vel.dx * gap_ticks as f32 + e.velocity.dx;
                         pos.0.y += old_vel.dy * gap_ticks as f32 + e.velocity.dy;
                         pos.0.z += old_vel.dz * gap_ticks as f32 + e.velocity.dz;
                     }
-                    if let Ok(mut vel) = self.world.inner_mut().get::<&mut VelocityComp>(entity) {
+                    if let Some(mut vel) = self.world.get_mut::<VelocityComp>(entity) {
                         vel.0 = e.velocity;
                     }
                 }
@@ -80,11 +78,11 @@ impl<S: EventStore> SimulationNode<S> {
             DomainEvent::ShipFitted(e) => {
                 if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     let fitting = FittingComp::from_snapshot(&e.fitting, &self.module_registry);
-                    let _ = self.world.inner_mut().insert_one(entity, fitting);
+                    let _ = self.world.insert_one(entity, fitting);
                     self.reapply_fitting(e.ship_id);
                     // Inventory snapshot (ADR-0032): always present alongside
                     // the fitting it changed together with.
-                    let _ = self.world.inner_mut().insert_one(
+                    let _ = self.world.insert_one(
                         entity,
                         dawn_ecs::components::InventoryComp {
                             items: e.inventory.iter().copied().fold(
@@ -101,8 +99,7 @@ impl<S: EventStore> SimulationNode<S> {
 
             DomainEvent::ModuleActivated(e) => {
                 if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(entity)
-                    {
+                    if let Some(mut fitting) = self.world.get_mut::<FittingComp>(entity) {
                         if let Some(slot) = fitting.find_slot_mut(e.module_id, e.slot) {
                             slot.is_active = true;
                             slot.target_ship_id = e.target_ship_id;
@@ -114,8 +111,7 @@ impl<S: EventStore> SimulationNode<S> {
 
             DomainEvent::ModuleDeactivated(e) => {
                 if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    if let Ok(mut fitting) = self.world.inner_mut().get::<&mut FittingComp>(entity)
-                    {
+                    if let Some(mut fitting) = self.world.get_mut::<FittingComp>(entity) {
                         if let Some(slot) = fitting.find_slot_mut(e.module_id, e.slot) {
                             slot.force_off();
                         }
@@ -128,7 +124,7 @@ impl<S: EventStore> SimulationNode<S> {
             DomainEvent::TargetLocked(e) => {
                 use dawn_ecs::components::{LockEntry, LockState};
                 if let Some(&entity) = self.ships.index.get(&e.locker_id) {
-                    if let Ok(mut lock) = self.world.inner_mut().get::<&mut LockComp>(entity) {
+                    if let Some(mut lock) = self.world.get_mut::<LockComp>(entity) {
                         if let Some(entry) = lock
                             .entries
                             .iter_mut()
@@ -148,7 +144,7 @@ impl<S: EventStore> SimulationNode<S> {
             // LockLost: remove the entry from LockComp
             DomainEvent::LockLost(e) => {
                 if let Some(&entity) = self.ships.index.get(&e.locker_id) {
-                    if let Ok(mut lock) = self.world.inner_mut().get::<&mut LockComp>(entity) {
+                    if let Some(mut lock) = self.world.get_mut::<LockComp>(entity) {
                         lock.entries.retain(|en| en.target_id != e.target_id);
                     }
                 }
@@ -158,7 +154,7 @@ impl<S: EventStore> SimulationNode<S> {
 
             DomainEvent::DamageTaken(e) => {
                 if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
+                    if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
                         hull.set_hp(e.current_shield, e.current_armor, e.current_hull);
                     }
                 }
@@ -166,7 +162,7 @@ impl<S: EventStore> SimulationNode<S> {
 
             DomainEvent::RepairApplied(e) => {
                 if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                    if let Ok(mut hull) = self.world.inner_mut().get::<&mut HullComp>(entity) {
+                    if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
                         hull.set_hp(e.current_shield, e.current_armor, e.current_hull);
                     }
                 }
@@ -191,9 +187,7 @@ impl<S: EventStore> SimulationNode<S> {
             DomainEvent::TackleApplied(e) => {
                 if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     let has_comp = {
-                        if let Ok(mut tackled) =
-                            self.world.inner_mut().get::<&mut TackledComp>(entity)
-                        {
+                        if let Some(mut tackled) = self.world.get_mut::<TackledComp>(entity) {
                             if !tackled.tacklers.contains(&e.by) {
                                 tackled.tacklers.push(e.by);
                             }
@@ -203,7 +197,7 @@ impl<S: EventStore> SimulationNode<S> {
                         }
                     };
                     if !has_comp {
-                        let _ = self.world.inner_mut().insert_one(
+                        let _ = self.world.insert_one(
                             entity,
                             TackledComp {
                                 tacklers: vec![e.by],
@@ -216,9 +210,7 @@ impl<S: EventStore> SimulationNode<S> {
             DomainEvent::TackleReleased(e) => {
                 if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     let should_remove = {
-                        if let Ok(mut tackled) =
-                            self.world.inner_mut().get::<&mut TackledComp>(entity)
-                        {
+                        if let Some(mut tackled) = self.world.get_mut::<TackledComp>(entity) {
                             tackled.tacklers.retain(|&id| id != e.by);
                             tackled.tacklers.is_empty()
                         } else {
@@ -226,7 +218,7 @@ impl<S: EventStore> SimulationNode<S> {
                         }
                     };
                     if should_remove {
-                        let _ = self.world.inner_mut().remove_one::<TackledComp>(entity);
+                        let _ = self.world.remove_one::<TackledComp>(entity);
                     }
                 }
             }
@@ -237,7 +229,7 @@ impl<S: EventStore> SimulationNode<S> {
                 // (anchor, offset) representation so replay stays consistent.
                 if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                     self.world.set_ship_anchor(entity, e.anchor);
-                    if let Ok(mut pos) = self.world.inner_mut().get::<&mut PositionComp>(entity) {
+                    if let Some(mut pos) = self.world.get_mut::<PositionComp>(entity) {
                         pos.0 = e.offset;
                     }
                 }
@@ -300,7 +292,6 @@ impl<S: EventStore> SimulationNode<S> {
                     if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                         let _ = self
                             .world
-                            .inner_mut()
                             .remove_one::<dawn_ecs::components::IsNpcComp>(entity);
                     }
                     self.settle_ship_into_station(e.ship_id, e.station_id);
@@ -398,11 +389,7 @@ mod tests {
         // is_active = true and cycle_remaining > 0.
         {
             let entity = *node.ships.index.get(&ship_id).unwrap();
-            let mut fitting = node
-                .world
-                .inner_mut()
-                .get::<&mut FittingComp>(entity)
-                .unwrap();
+            let mut fitting = node.world.get_mut::<FittingComp>(entity).unwrap();
             let slot = fitting
                 .find_slot_mut(modules::MODULE_RAILGUN_SMALL, SlotKind::High)
                 .unwrap();
@@ -421,11 +408,7 @@ mod tests {
         ));
 
         let entity = *node.ships.index.get(&ship_id).unwrap();
-        let mut fitting = node
-            .world
-            .inner_mut()
-            .get::<&mut FittingComp>(entity)
-            .unwrap();
+        let mut fitting = node.world.get_mut::<FittingComp>(entity).unwrap();
         let slot = fitting
             .find_slot_mut(modules::MODULE_RAILGUN_SMALL, SlotKind::High)
             .unwrap();
@@ -619,8 +602,7 @@ mod tests {
         let entity = *node.ships.index.get(&ship_id).unwrap();
         let inventory = node
             .world
-            .inner()
-            .get::<&dawn_ecs::components::InventoryComp>(entity)
+            .get::<dawn_ecs::components::InventoryComp>(entity)
             .expect("Magpie replay must seed starter inventory (ADR-0032)");
         assert_eq!(
             inventory.items.len(),
@@ -687,8 +669,7 @@ mod tests {
         let entity = *node.ships.index.get(&ship_id).unwrap();
         let vel = node
             .world
-            .inner()
-            .get::<&dawn_ecs::components::VelocityComp>(entity)
+            .get::<dawn_ecs::components::VelocityComp>(entity)
             .unwrap()
             .0;
         assert_eq!(vel.dx, 5.0);
@@ -710,8 +691,7 @@ mod tests {
         let entity = *node.ships.index.get(&ship_id).unwrap();
         let inventory = node
             .world
-            .inner()
-            .get::<&dawn_ecs::components::InventoryComp>(entity)
+            .get::<dawn_ecs::components::InventoryComp>(entity)
             .unwrap();
         assert_eq!(inventory.item_count(dawn_core::ItemId::ScrapMetal), 2);
     }
@@ -744,11 +724,7 @@ mod tests {
         ));
 
         let entity = *node.ships.index.get(&ship_id).unwrap();
-        let mut fitting = node
-            .world
-            .inner_mut()
-            .get::<&mut FittingComp>(entity)
-            .unwrap();
+        let mut fitting = node.world.get_mut::<FittingComp>(entity).unwrap();
         let slot = fitting
             .find_slot_mut(modules::MODULE_RAILGUN_SMALL, SlotKind::High)
             .unwrap();
@@ -772,8 +748,7 @@ mod tests {
         {
             let lock = node
                 .world
-                .inner()
-                .get::<&dawn_ecs::components::LockComp>(entity)
+                .get::<dawn_ecs::components::LockComp>(entity)
                 .unwrap();
             assert_eq!(lock.entries.len(), 1);
             assert_eq!(
@@ -790,8 +765,7 @@ mod tests {
 
         let lock = node
             .world
-            .inner()
-            .get::<&dawn_ecs::components::LockComp>(entity)
+            .get::<dawn_ecs::components::LockComp>(entity)
             .unwrap();
         assert!(
             lock.entries.is_empty(),
@@ -818,8 +792,7 @@ mod tests {
         {
             let tackled = node
                 .world
-                .inner()
-                .get::<&TackledComp>(entity)
+                .get::<TackledComp>(entity)
                 .expect("TackleApplied replay must insert TackledComp");
             assert_eq!(tackled.tacklers, vec![tackler_id]);
         }
@@ -833,7 +806,7 @@ mod tests {
         ));
 
         assert!(
-            node.world.inner().get::<&TackledComp>(entity).is_err(),
+            node.world.get::<TackledComp>(entity).is_none(),
             "releasing the only tackler must remove TackledComp entirely, \
              matching the live process_tackle behaviour"
         );

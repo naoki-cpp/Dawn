@@ -500,9 +500,7 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn approach_target(&self, ship_id: ShipId) -> Option<dawn_core::ApproachTarget> {
         let entity = self.ships.index.get(&ship_id)?;
         self.world
-            .inner()
-            .get::<&dawn_ecs::components::ApproachComp>(*entity)
-            .ok()
+            .get::<dawn_ecs::components::ApproachComp>(*entity)
             .map(|a| a.target)
     }
 
@@ -510,21 +508,13 @@ impl<S: EventStore> SimulationNode<S> {
     #[cfg(test)]
     pub fn warp_phase(&self, ship_id: ShipId) -> Option<dawn_ecs::components::WarpPhase> {
         let entity = self.ships.index.get(&ship_id)?;
-        self.world
-            .inner()
-            .get::<&WarpComp>(*entity)
-            .ok()
-            .map(|w| w.phase)
+        self.world.get::<WarpComp>(*entity).map(|w| w.phase)
     }
 
     /// Look up the current position of a Ship by its ID.
     pub fn get_ship_position(&self, ship_id: ShipId) -> Option<Position> {
         let entity = self.ships.index.get(&ship_id)?;
-        self.world
-            .inner()
-            .get::<&PositionComp>(*entity)
-            .ok()
-            .map(|c| c.0)
+        self.world.get::<PositionComp>(*entity).map(|c| c.0)
     }
 
     /// The coordinate anchor a Ship's position is relative to (ADR-0029).
@@ -544,7 +534,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// unknown (pre-anchor data / tests).
     pub fn ship_absolute(&self, ship_id: ShipId) -> Option<[f64; 3]> {
         let entity = *self.ships.index.get(&ship_id)?;
-        let offset = self.world.inner().get::<&PositionComp>(entity).ok()?.0;
+        let offset = self.world.get::<PositionComp>(entity)?.0;
         Some(self.entity_absolute_f64(entity, offset))
     }
 
@@ -586,14 +576,12 @@ impl<S: EventStore> SimulationNode<S> {
     pub(super) fn emit_ship_fitted(&mut self, ship_id: ShipId, entity: Entity) {
         let fitting = self
             .world
-            .inner()
-            .get::<&dawn_ecs::components::FittingComp>(entity)
+            .get::<dawn_ecs::components::FittingComp>(entity)
             .map(|f| f.to_snapshot())
-            .unwrap_or_else(|_| dawn_core::FittingSnapshot::empty());
+            .unwrap_or_else(dawn_core::FittingSnapshot::empty);
         let inventory = self
             .world
-            .inner()
-            .get::<&dawn_ecs::components::InventoryComp>(entity)
+            .get::<dawn_ecs::components::InventoryComp>(entity)
             .map(|inv| inv.items.clone())
             .map(|items| {
                 items
@@ -615,33 +603,21 @@ impl<S: EventStore> SimulationNode<S> {
     #[cfg(test)]
     pub fn get_ship_stats(&self, ship_id: ShipId) -> Option<ShipStatsComp> {
         let entity = self.ships.index.get(&ship_id)?;
-        self.world
-            .inner()
-            .get::<&ShipStatsComp>(*entity)
-            .ok()
-            .map(|c| *c)
+        self.world.get::<ShipStatsComp>(*entity).map(|c| *c)
     }
 
     /// Look up the current HP of a Ship by its ID. Test-only.
     #[cfg(test)]
     pub fn get_ship_hp(&self, ship_id: ShipId) -> Option<f32> {
         let entity = self.ships.index.get(&ship_id)?;
-        self.world
-            .inner()
-            .get::<&HullComp>(*entity)
-            .ok()
-            .map(|c| c.total_hp())
+        self.world.get::<HullComp>(*entity).map(|c| c.total_hp())
     }
 
     /// Look up the current `CapacitorComp.current` of a Ship by its ID.
     #[cfg(test)]
     pub fn get_ship_capacitor(&self, ship_id: ShipId) -> Option<f32> {
         let entity = self.ships.index.get(&ship_id)?;
-        self.world
-            .inner()
-            .get::<&CapacitorComp>(*entity)
-            .ok()
-            .map(|c| c.current)
+        self.world.get::<CapacitorComp>(*entity).map(|c| c.current)
     }
 
     /// Module identity and activation state for every fitted module on a Ship.
@@ -652,8 +628,7 @@ impl<S: EventStore> SimulationNode<S> {
             None => return Vec::new(),
         };
         self.world
-            .inner()
-            .get::<&FittingComp>(entity)
+            .get::<FittingComp>(entity)
             .map(|f| {
                 f.iter_slots()
                     .map(|s| FittedModuleStatus {
@@ -725,7 +700,7 @@ mod tests {
         );
 
         node.apply_move_command(ship_id, Position::new(10000.0, 0.0, 0.0));
-        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
         assert_eq!(
             thrust.direction,
             Velocity::ZERO,
@@ -745,12 +720,7 @@ mod tests {
         node.apply_move_command(ship_id, Position::new(10000.0, 0.0, 0.0));
 
         let entity = *node.ships.index.get(&ship_id).unwrap();
-        let direction_before = node
-            .world
-            .inner()
-            .get::<&ThrustComp>(entity)
-            .unwrap()
-            .direction;
+        let direction_before = node.world.get::<ThrustComp>(entity).unwrap().direction;
 
         node.world.set_transit_state(
             entity,
@@ -758,7 +728,7 @@ mod tests {
         );
         node.apply_stop_command(ship_id);
 
-        let thrust = node.world.inner().get::<&ThrustComp>(entity).unwrap();
+        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
         assert_eq!(
             thrust.direction, direction_before,
             "stop command must be rejected while in transit"
