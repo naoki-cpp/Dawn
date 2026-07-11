@@ -7,17 +7,26 @@
 //!   - `PlayerSession` mapping a connection to its PlayerId / ShipId
 //!   - `WsClientConnection`, the [`ClientConnection`] impl over a socket
 //!
-//! ## Protocol
+//! ## Protocol (ADR-0042)
+//!
+//! Messages with an already-fixed Rust type (Hello/Welcome/Redirect/
+//! DomainEvent/ClientCommand) travel as a binary WebSocket frame, postcard-
+//! encoded via the [`ClientMessage`]/[`ServerMessage`] envelope in
+//! `dawn-wire`. `InitialState`/`PlayerLoadout`/`AoiEnter` are still built as
+//! ad-hoc JSON (`dawn-sector`'s `serde_json::json!` projections) and travel
+//! as a text frame -- see ADR-0042 stage 2 for folding them in too. One
+//! WebSocket frame always carries exactly one message on both paths (no
+//! length-prefix framing needed; WebSocket already delimits frames).
 //!
 //! ```text
-//! Client → Server:  {"type":"Hello"}
-//! Server → Client:  {"type":"Welcome","player_id":N,"ship_id":N}
-//! Server → Client:  {"type":"InitialState","ships":[...]}
-//! Server → Client:  DomainEvent JSON (newline-delimited stream)
-//! Client → Server:  ClientCommand JSON
+//! Client → Server:  ClientMessage::Hello        (binary, postcard)
+//! Server → Client:  ServerMessage::Welcome       (binary, postcard)
+//! Server → Client:  {"type":"InitialState",...}  (text, JSON)
+//! Server → Client:  ServerMessage::Event(..)     (binary, postcard stream)
+//! Client → Server:  ClientMessage::Command(..)   (binary, postcard)
 //! ```
 
-use crate::protocol::{domain_event_to_json, parse_client_command, parse_hello, ResumeIdentity};
+use crate::protocol::{domain_event_to_event_json, ClientMessage, ResumeIdentity, ServerMessage};
 use crate::{ClientCommand, ClientConnection};
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use futures_util::{
@@ -33,6 +42,11 @@ use tokio::{
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
+/// Postcard-encode a [`ServerMessage`] and wrap it as a binary WS frame.
+fn server_message_frame(msg: &ServerMessage) -> Message {
+    Message::Binary(postcard::to_stdvec(msg).unwrap_or_default())
+}
+
 // ── WsClientConnection ────────────────────────────────────────────────────────
 
 /// Cap on how many parsed commands a single connection may have queued
@@ -46,23 +60,30 @@ const COMMAND_QUEUE_CAP: usize = 256;
 
 #[derive(Debug)]
 pub struct WsClientConnection {
-    event_tx: mpsc::UnboundedSender<String>,
+    event_tx: mpsc::UnboundedSender<Message>,
     command_rx: mpsc::Receiver<ClientCommand>,
 }
 
 impl WsClientConnection {
-    /// Send a raw JSON string directly (Welcome, InitialState, Redirect, etc.).
+    /// Send a raw JSON string directly, as a text frame (ADR-0042 stage 1:
+    /// `InitialState`/`PlayerLoadout`/`AoiEnter`, still ad-hoc JSON).
     pub fn send_raw(&self, msg: &str) -> bool {
-        self.event_tx.send(msg.to_string() + "\n").is_ok()
+        self.event_tx.send(Message::Text(msg.to_string())).is_ok()
+    }
+
+    /// Send a [`ServerMessage`] as a postcard-encoded binary frame
+    /// (ADR-0042: Welcome/Redirect/Event, the messages with a fixed type).
+    pub fn send_message(&self, msg: &ServerMessage) -> bool {
+        self.event_tx.send(server_message_frame(msg)).is_ok()
     }
 }
 
 impl ClientConnection for WsClientConnection {
     fn send_events(&self, events: &[DomainEvent]) -> Result<(), crate::ConnectionError> {
         for event in events {
-            if let Some(json) = domain_event_to_json(event) {
+            if let Some(json_event) = domain_event_to_event_json(event) {
                 self.event_tx
-                    .send(json + "\n")
+                    .send(server_message_frame(&ServerMessage::Event(json_event)))
                     .map_err(|_| crate::ConnectionError::Disconnected)?;
             }
         }
@@ -120,28 +141,29 @@ impl HandshakeRequest {
             ..
         } = self;
 
-        let (event_tx, event_rx) = mpsc::unbounded_channel::<String>();
+        let (event_tx, event_rx) = mpsc::unbounded_channel::<Message>();
         let (command_tx, command_rx) = mpsc::channel::<ClientCommand>(COMMAND_QUEUE_CAP);
 
-        // Send Welcome + InitialState + (optional) PlayerLoadout.
-        let welcome = format!(
-            "{{\"type\":\"Welcome\",\"player_id\":{},\"ship_id\":{}}}\n",
-            player_id.raw(),
-            ship_id.raw()
-        );
-        ws_sink.send(Message::Text(welcome)).await?;
+        // Send Welcome (binary, ADR-0042) + InitialState + (optional) PlayerLoadout
+        // (still ad-hoc JSON text, ADR-0042 stage 2).
         ws_sink
-            .send(Message::Text(initial_state.to_string() + "\n"))
+            .send(server_message_frame(&ServerMessage::Welcome {
+                player_id: player_id.raw(),
+                ship_id: ship_id.raw(),
+            }))
+            .await?;
+        ws_sink
+            .send(Message::Text(initial_state.to_string()))
             .await?;
         if let Some(loadout) = player_loadout {
-            ws_sink.send(Message::Text(loadout + "\n")).await?;
+            ws_sink.send(Message::Text(loadout)).await?;
         }
 
         // Event-send task.
         tokio::spawn(async move {
             let mut rx = event_rx;
             while let Some(msg) = rx.recv().await {
-                if ws_sink.send(Message::Text(msg)).await.is_err() {
+                if ws_sink.send(msg).await.is_err() {
                     break;
                 }
             }
@@ -151,9 +173,11 @@ impl HandshakeRequest {
         // Command-receive task.
         tokio::spawn(async move {
             while let Some(Ok(msg)) = ws_source.next().await {
-                if let Message::Text(text) = msg {
-                    for line in text.lines() {
-                        if let Some(cmd) = parse_client_command(line) {
+                if let Message::Binary(bytes) = msg {
+                    if let Ok(ClientMessage::Command(cmd_json)) =
+                        postcard::from_bytes::<ClientMessage>(&bytes)
+                    {
+                        if let Some(cmd) = crate::protocol::client_command_from_json(cmd_json) {
                             // Bounded send: blocks (backpressures the socket
                             // read) once COMMAND_QUEUE_CAP is reached instead
                             // of growing memory without limit.
@@ -198,6 +222,12 @@ impl PlayerSession {
     /// Fit/Unfit, ADR-0032 -- mirrors the one sent once at connect).
     pub fn send_raw(&self, msg: &str) -> bool {
         self.conn.send_raw(msg)
+    }
+
+    /// Send a [`ServerMessage`] as a postcard-encoded binary frame
+    /// (ADR-0042 -- e.g. `Redirect` on cross-node Sector Transit).
+    pub fn send_message(&self, msg: &ServerMessage) -> bool {
+        self.conn.send_message(msg)
     }
 }
 
@@ -257,14 +287,14 @@ impl WsServer {
         let ws_stream = accept_async(stream).await?;
         let (ws_sink, mut ws_source) = ws_stream.split();
 
-        // Wait for Hello (3s timeout).
+        // Wait for Hello (3s timeout, binary ClientMessage envelope -- ADR-0042).
         let hello_result = timeout(Duration::from_secs(3), async {
             while let Some(Ok(msg)) = ws_source.next().await {
-                if let Message::Text(text) = msg {
-                    for line in text.lines() {
-                        if let Some(hello) = parse_hello(line) {
-                            return Some(hello);
-                        }
+                if let Message::Binary(bytes) = msg {
+                    if let Ok(ClientMessage::Hello(hello)) =
+                        postcard::from_bytes::<ClientMessage>(&bytes)
+                    {
+                        return Some(hello);
                     }
                 }
             }

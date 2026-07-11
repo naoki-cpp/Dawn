@@ -1,11 +1,11 @@
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use super::{PosJson, VelJson};
+use crate::{PosJson, VelJson};
 
-/// Every message the server sends to a client over the WebSocket connection.
-/// Serialized as a single JSON line tagged by `"type"`.
+/// Every message the server sends to a client over the WebSocket connection,
+/// wrapped by `ServerMessage::Event` and postcard-encoded (ADR-0042).
 ///
 /// This enum is the schema-of-record for the server -> client half of the
 /// wire protocol: [`event_json_schema()`] renders it to a JSON Schema document that
@@ -13,8 +13,18 @@ use super::{PosJson, VelJson};
 /// or renaming a field here changes the wire format for every client
 /// (Godot today; any future client written against
 /// `docs/architecture/wire-protocol.md`).
-#[derive(Debug, Serialize, JsonSchema)]
-#[serde(tag = "type")]
+///
+/// Externally tagged (serde's default enum representation), not
+/// `#[serde(tag = "type")]` -- `postcard` cannot deserialize an internally
+/// tagged enum (no `deserialize_any`). `dawn-client-gdext`'s
+/// `ServerMessageDecoder` converts the externally tagged shape back into a
+/// `{"type": ..., ...}` Dictionary so existing GDScript consumers (written
+/// against the old JSON shape) don't need to change.
+///
+/// `Deserialize` (ADR-0042) exists so `dawn-client-gdext` can decode a
+/// `ServerMessage` it receives; the server itself only ever serializes this
+/// type, never parses it back.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub enum EventJson {
     ShipSpawned {
         ship_id: u64,
@@ -86,7 +96,7 @@ pub enum EventJson {
         module_id: u32,
         slot: String,
         /// Target of a targeted module (Weapon/Tackle), per ADR-0035.
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         target_ship_id: Option<u64>,
         tick: u64,
     },
@@ -96,7 +106,7 @@ pub enum EventJson {
         slot: String,
         /// Why the system forced this off ("cap" | "range"); omitted for a
         /// player-issued deactivation (ADR-0035).
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         reason: Option<String>,
         tick: u64,
     },
@@ -131,7 +141,14 @@ pub fn event_json_schema() -> schemars::schema::RootSchema {
 /// Returns `None` for internal events that are not forwarded to clients
 /// (transit internals, combat bookkeeping).
 pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
-    let j = match event {
+    domain_event_to_event_json(event).map(|j| serde_json::to_string(&j).unwrap_or_default())
+}
+
+/// Convert a [`DomainEvent`] to its [`EventJson`] wire representation.
+/// Returns `None` for internal events that are not forwarded to clients
+/// (transit internals, combat bookkeeping).
+pub fn domain_event_to_event_json(event: &DomainEvent) -> Option<EventJson> {
+    Some(match event {
         DomainEvent::ShipSpawned(e) => EventJson::ShipSpawned {
             ship_id: e.ship_id.raw(),
             position: e.initial_position.into(),
@@ -237,8 +254,7 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
         DomainEvent::AnchorRebased(_) => return None,
         DomainEvent::PackagedShipBuilt(_) => return None,
         DomainEvent::ShipDisassembled(_) => return None,
-    };
-    serde_json::to_string(&j).ok()
+    })
 }
 
 /// Build a `{"type":"Redirect","ws_addr":"..."}` JSON line for a client whose

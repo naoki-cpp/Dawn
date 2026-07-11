@@ -27,7 +27,7 @@ impl PosJson {
     }
 }
 
-#[derive(Debug, Serialize, JsonSchema, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy)]
 pub struct VelJson {
     pub dx: f32,
     pub dy: f32,
@@ -94,8 +94,16 @@ pub enum WarpTargetJson {
 /// constructs a variant directly from typed arguments and serializes it
 /// back out, replacing the old GDScript pattern of hand-building a
 /// `Dictionary` that had to match this schema by eye.
+///
+/// Externally tagged (serde's default enum representation, `{"VariantName":
+/// {...fields}}`), not `#[serde(tag = "type")]` -- `postcard` (the binary
+/// wire format since ADR-0042) cannot deserialize an internally tagged enum
+/// at all (it has no `deserialize_any`, which internal tagging requires).
+/// `parse_client_command`/JSON-text serialization of this type is no longer
+/// the runtime wire format (see [`postcard::to_stdvec`]/[`postcard::from_bytes`]
+/// via the `ClientMessage` envelope); it survives only for schema-generation
+/// tests and this crate's own unit tests.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type")]
 pub enum ClientCommandJson {
     MoveCommand {
         target: PosJson,
@@ -226,7 +234,11 @@ fn approach_target_from_gate_or_ship(
     }
 }
 
-fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
+/// Convert an already-decoded [`ClientCommandJson`] (e.g. from the binary
+/// `ClientMessage::Command` envelope, ADR-0042) into a [`ClientCommand`].
+/// Returns `None` for a value that fails domain validation (see each match
+/// arm below, e.g. non-finite coordinates).
+pub fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
     match json {
         ClientCommandJson::MoveCommand { target } => {
             if !target.is_finite() {
@@ -465,7 +477,7 @@ mod tests {
     /// check, not dawn-actor.
     #[test]
     fn move_command_json_with_an_overflowing_coordinate_fails_to_parse() {
-        let line = r#"{"type":"MoveCommand","target":{"x":1e40,"y":0.0,"z":0.0}}"#;
+        let line = r#"{"MoveCommand":{"target":{"x":1e+40,"y":0.0,"z":0.0}}}"#;
         assert!(parse_client_command(line).is_none());
     }
 }
