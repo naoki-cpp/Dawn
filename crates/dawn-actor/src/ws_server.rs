@@ -26,7 +26,7 @@
 //! ```
 
 use crate::protocol::{
-    domain_event_to_event_json, ClientMessage, InitialStateJson, PlayerLoadoutJson, ResumeIdentity,
+    domain_event_to_event_wire, ClientMessage, InitialStateWire, PlayerLoadoutWire, ResumeIdentity,
     ServerMessage,
 };
 use crate::{ClientCommand, ClientConnection};
@@ -78,9 +78,9 @@ impl WsClientConnection {
 impl ClientConnection for WsClientConnection {
     fn send_events(&self, events: &[DomainEvent]) -> Result<(), crate::ConnectionError> {
         for event in events {
-            if let Some(json_event) = domain_event_to_event_json(event) {
+            if let Some(event_wire) = domain_event_to_event_wire(event) {
                 self.event_tx
-                    .send(server_message_frame(&ServerMessage::Event(json_event)))
+                    .send(server_message_frame(&ServerMessage::Event(event_wire)))
                     .map_err(|_| crate::ConnectionError::Disconnected)?;
             }
         }
@@ -128,8 +128,8 @@ impl HandshakeRequest {
         self,
         player_id: PlayerId,
         ship_id: ShipId,
-        initial_state: InitialStateJson,
-        player_loadout: Option<PlayerLoadoutJson>,
+        initial_state: InitialStateWire,
+        player_loadout: Option<PlayerLoadoutWire>,
     ) -> anyhow::Result<PlayerSession> {
         let Self {
             peer_addr,
@@ -175,8 +175,8 @@ impl HandshakeRequest {
         tokio::spawn(async move {
             while let Some(Ok(msg)) = ws_source.next().await {
                 if let Message::Binary(bytes) = msg {
-                    if let Ok(ClientMessage::Command(cmd_json)) = ClientMessage::decode(&bytes) {
-                        if let Some(cmd) = crate::protocol::client_command_from_json(cmd_json) {
+                    if let Ok(ClientMessage::Command(cmd_wire)) = ClientMessage::decode(&bytes) {
+                        if let Some(cmd) = crate::protocol::client_command_from_wire(cmd_wire) {
                             // Bounded send: blocks (backpressures the socket
                             // read) once COMMAND_QUEUE_CAP is reached instead
                             // of growing memory without limit.
@@ -263,8 +263,8 @@ impl WsServer {
         peer_addr: SocketAddr,
         player_id: PlayerId,
         ship_id: ShipId,
-        initial_state: InitialStateJson,
-        player_loadout: Option<PlayerLoadoutJson>,
+        initial_state: InitialStateWire,
+        player_loadout: Option<PlayerLoadoutWire>,
     ) -> anyhow::Result<PlayerSession> {
         let request = Self::accept_handshake_request(stream, peer_addr).await?;
         request

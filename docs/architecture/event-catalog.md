@@ -140,7 +140,7 @@ The corresponding Command is `TransitCommand { ship_id, to }` (`dawn-core/src/co
 
 Corresponding Command: `JumpCommand { ship_id, gate_id }`, committed over the same Raft Log path as `TransitCommand` (ADR-0014). `TransitOp::Request`/`Commit` carries `gate_id: Option<JumpGateId>`; in Step 7.5 the destination node appends `JumpGateUsed` alongside `SectorTransitCompleted`, and appends `StarSystemChanged` too if `from`/`to` have different `StarSystemId` (`SimulationNode::append_jump_events`).
 
-Static topology (3 star systems, 4 jump gates) is defined in `dawn-sector/src/galaxy.rs` (ADR-0026). `protocol.rs`'s `domain_event_to_json` serializes both events to clients, and its JSON parser handles `JumpCommand`. The Godot client (`connection.gd`'s `send_jump_command`, `main.gd`'s `_handle_jump_gate_used` / `_handle_star_system_changed`) is also implemented (ADR-0009 checklist fully complete).
+Static topology (3 star systems, 4 jump gates) is defined in `dawn-sector/src/galaxy.rs` (ADR-0026). `dawn-wire`'s `domain_event_to_event_wire` serializes both events to clients over the postcard binary envelope (ADR-0042), and `client_command_from_wire` handles `JumpCommand`. The Godot client (`connection.gd`'s `send_jump_command`, `main.gd`'s `_handle_jump_gate_used` / `_handle_star_system_changed`) is also implemented (ADR-0009 checklist fully complete).
 
 ### 3.8 Tackle (ADR-0024)
 

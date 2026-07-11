@@ -103,7 +103,7 @@ issue の詳細・保留判断・トリガーは
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-actor/src/protocol/mod.rs` | 825 | 🟢 R-5 完了（2026-07-08）。wire protocol の公開面と統合テスト・schema freshness test を束ねる薄い入口に縮小。2026-07-11、`ClientCommandJson`/`EventJson`/Hello関連の実体は`dawn-wire`（下記）へ全面移動、ここは再エクスポートのみ（ADR-0041/0042） |
+| `crates/dawn-actor/src/protocol/mod.rs` | 825 | 🟢 R-5 完了（2026-07-08）。wire protocol の公開面と統合テスト・schema freshness test を束ねる薄い入口に縮小。2026-07-11、`ClientCommandWire`/`EventWire`/Hello関連の実体は`dawn-wire`（下記）へ全面移動、ここは再エクスポートのみ（ADR-0041/0042）。同日、命名規則を`*Json`→`*Wire`へ統一し、本番未使用だった`parse_client_command`/`parse_hello`/`redirect_json`/`domain_event_to_json`を削除（ADR-0042追記） |
 | `crates/dawn-actor/src/client_connection.rs` | 260 | 🟢 ClientConnection trait + InProcess/Ws 実装 |
 | `crates/dawn-actor/src/ws_server.rs` | 317 | 🟢 M-4 集約（WsServer / PlayerSession）。2026-07-11、Welcome/Redirect/Event/Hello/Commandをpostcardバイナリ化（ADR-0042） |
 | `crates/dawn-actor/src/lib.rs` | 41 | 🟢 |
@@ -112,8 +112,8 @@ issue の詳細・保留判断・トリガーは
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-wire/src/client_command.rs` | 483 | 🟢 client -> server wire translation の deep module。`ClientCommandJson` / `parse_client_command` / schema 出力を集約 |
-| `crates/dawn-wire/src/server_event.rs` | 273 | 🟢 server -> client wire translation の deep module。`EventJson` / `domain_event_to_json` / redirect payload を集約 |
+| `crates/dawn-wire/src/client_command.rs` | 483 | 🟢 client -> server wire translation の deep module。`ClientCommandWire` / `client_command_from_wire` / schema 出力を集約 |
+| `crates/dawn-wire/src/server_event.rs` | 273 | 🟢 server -> client wire translation の deep module。`EventWire` / `domain_event_to_event_wire` を集約 |
 | `crates/dawn-wire/src/hello_resume.rs` | 47 | 🟢 Hello / resume handshake の小さな補助モジュール |
 | `crates/dawn-wire/src/lib.rs` | 97 | 🟢 crate doc + `ServerMessage`/`ClientMessage` 統合 enum |
 
@@ -161,7 +161,7 @@ issue の詳細・保留判断・トリガーは
 | ファイル | 行数 | 判定 |
 |---|---|---|
 | `crates/dawn-consensus/src/state.rs` | 593 | 🟡 許容範囲（Raft 実装の核） |
-| `crates/dawn-sector-node/src/runtime.rs` | 259 | 🟢 production Node の jump fallback / tick stepping / replication publish 呼び出し / Redirect / AoI delivery を集約。本ファイルは orchestration のみ。2026-07-11、Redirect送信を`protocol::redirect_json`+`send_raw`から`ServerMessage::Redirect`+`send_message`（postcardバイナリ）に置換（ADR-0042） |
+| `crates/dawn-sector-node/src/runtime.rs` | 259 | 🟢 production Node の jump fallback / tick stepping / replication publish 呼び出し / Redirect / AoI delivery を集約。本ファイルは orchestration のみ。2026-07-11、Redirect送信を`ServerMessage::Redirect`+`send_message`（postcardバイナリ）に置換（ADR-0042） |
 | `crates/dawn-sector-node/src/client_admission.rs` | 236 | 🟢 client admission state machine |
 | `crates/dawn-sector-node/src/main.rs` | 338 | 🟢 8D-4 本番バイナリ。config / TCP transport / accept channel / data loading の配線に縮小 |
 | `crates/dawn-core/src/events.rs` | 694 | 🟡 domain event 定義の中核。大きいが責務は単一で、wire/schema 変換や apply は持ち込まない。継続的な variant 追加で700行に近づいており次回計測で watch 候補 |

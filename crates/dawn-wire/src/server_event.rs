@@ -1,17 +1,17 @@
-use dawn_core::{DomainEvent, PlayerId, ShipId};
+use dawn_core::DomainEvent;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{PosJson, VelJson};
+use crate::{PosWire, VelWire};
 
 /// Every message the server sends to a client over the WebSocket connection,
 /// wrapped by `ServerMessage::Event` and postcard-encoded (ADR-0042).
 ///
 /// This enum is the schema-of-record for the server -> client half of the
-/// wire protocol: [`event_json_schema()`] renders it to a JSON Schema document that
-/// `docs/architecture/wire-protocol.md` is generated from. Adding, removing,
-/// or renaming a field here changes the wire format for every client
-/// (Godot today; any future client written against
+/// wire protocol: [`event_wire_json_schema()`] renders it to a JSON Schema
+/// document that `docs/architecture/wire-protocol.md` is generated from.
+/// Adding, removing, or renaming a field here changes the wire format for
+/// every client (Godot today; any future client written against
 /// `docs/architecture/wire-protocol.md`).
 ///
 /// Externally tagged (serde's default enum representation), not
@@ -24,16 +24,16 @@ use crate::{PosJson, VelJson};
 /// `Deserialize` (ADR-0042) exists so `dawn-client-gdext` can decode a
 /// `ServerMessage` it receives; the server itself only ever serializes this
 /// type, never parses it back.
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub enum EventJson {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub enum EventWire {
     ShipSpawned {
         ship_id: u64,
-        position: PosJson,
+        position: PosWire,
         tick: u64,
     },
     VelocityChanged {
         ship_id: u64,
-        velocity: VelJson,
+        velocity: VelWire,
         tick: u64,
     },
     ShipDespawned {
@@ -115,7 +115,7 @@ pub enum EventJson {
         gate_id: u32,
         from_sector: u8,
         to_sector: u8,
-        entry_pos: PosJson,
+        entry_pos: PosWire,
         tick: u64,
     },
     StarSystemChanged {
@@ -124,62 +124,50 @@ pub enum EventJson {
         to_system: u32,
         tick: u64,
     },
-    Redirect {
-        ws_addr: String,
-        player_id: u64,
-        ship_id: u64,
-    },
 }
 
-/// Render the server -> client wire schema (see [`EventJson`]) as a JSON
+/// Render the server -> client wire schema (see [`EventWire`]) as a JSON
 /// Schema document.
-pub fn event_json_schema() -> schemars::schema::RootSchema {
-    schemars::schema_for!(EventJson)
+pub fn event_wire_json_schema() -> schemars::schema::RootSchema {
+    schemars::schema_for!(EventWire)
 }
 
-/// Serialize a [`DomainEvent`] to the JSON line the Godot client expects.
+/// Convert a [`DomainEvent`] to its [`EventWire`] wire representation.
 /// Returns `None` for internal events that are not forwarded to clients
 /// (transit internals, combat bookkeeping).
-pub fn domain_event_to_json(event: &DomainEvent) -> Option<String> {
-    domain_event_to_event_json(event).map(|j| serde_json::to_string(&j).unwrap_or_default())
-}
-
-/// Convert a [`DomainEvent`] to its [`EventJson`] wire representation.
-/// Returns `None` for internal events that are not forwarded to clients
-/// (transit internals, combat bookkeeping).
-pub fn domain_event_to_event_json(event: &DomainEvent) -> Option<EventJson> {
+pub fn domain_event_to_event_wire(event: &DomainEvent) -> Option<EventWire> {
     Some(match event {
-        DomainEvent::ShipSpawned(e) => EventJson::ShipSpawned {
+        DomainEvent::ShipSpawned(e) => EventWire::ShipSpawned {
             ship_id: e.ship_id.raw(),
             position: e.initial_position.into(),
             tick: e.tick.value(),
         },
-        DomainEvent::VelocityChanged(e) => EventJson::VelocityChanged {
+        DomainEvent::VelocityChanged(e) => EventWire::VelocityChanged {
             ship_id: e.ship_id.raw(),
             velocity: e.velocity.into(),
             tick: e.tick.value(),
         },
-        DomainEvent::ShipDespawned(e) => EventJson::ShipDespawned {
+        DomainEvent::ShipDespawned(e) => EventWire::ShipDespawned {
             ship_id: e.ship_id.raw(),
             tick: e.tick.value(),
         },
-        DomainEvent::ShipDocked(e) => EventJson::ShipDocked {
-            ship_id: e.ship_id.raw(),
-            station_id: e.station_id.0,
-            tick: e.tick.value(),
-        },
-        DomainEvent::ShipUndocked(e) => EventJson::ShipUndocked {
+        DomainEvent::ShipDocked(e) => EventWire::ShipDocked {
             ship_id: e.ship_id.raw(),
             station_id: e.station_id.0,
             tick: e.tick.value(),
         },
-        DomainEvent::ShipAssembled(e) => EventJson::ShipAssembled {
+        DomainEvent::ShipUndocked(e) => EventWire::ShipUndocked {
+            ship_id: e.ship_id.raw(),
+            station_id: e.station_id.0,
+            tick: e.tick.value(),
+        },
+        DomainEvent::ShipAssembled(e) => EventWire::ShipAssembled {
             ship_id: e.ship_id.raw(),
             station_id: e.station_id.0,
             ship_type_id: e.ship_type_id.0,
             tick: e.tick.value(),
         },
-        DomainEvent::DamageTaken(e) => EventJson::DamageTaken {
+        DomainEvent::DamageTaken(e) => EventWire::DamageTaken {
             ship_id: e.ship_id.raw(),
             damage: e.damage,
             current_shield: e.current_shield,
@@ -187,7 +175,7 @@ pub fn domain_event_to_event_json(event: &DomainEvent) -> Option<EventJson> {
             current_hull: e.current_hull,
             tick: e.tick.value(),
         },
-        DomainEvent::RepairApplied(e) => EventJson::RepairApplied {
+        DomainEvent::RepairApplied(e) => EventWire::RepairApplied {
             ship_id: e.ship_id.raw(),
             amount: e.amount,
             layer: format!("{:?}", e.layer),
@@ -196,29 +184,29 @@ pub fn domain_event_to_event_json(event: &DomainEvent) -> Option<EventJson> {
             current_hull: e.current_hull,
             tick: e.tick.value(),
         },
-        DomainEvent::ShipDestroyed(e) => EventJson::ShipDestroyed {
+        DomainEvent::ShipDestroyed(e) => EventWire::ShipDestroyed {
             ship_id: e.ship_id.raw(),
             killer_id: e.killer_id.raw(),
             tick: e.tick.value(),
         },
-        DomainEvent::TargetLocked(e) => EventJson::TargetLocked {
+        DomainEvent::TargetLocked(e) => EventWire::TargetLocked {
             locker_id: e.locker_id.raw(),
             target_id: e.target_id.raw(),
             tick: e.tick.value(),
         },
-        DomainEvent::LockLost(e) => EventJson::LockLost {
+        DomainEvent::LockLost(e) => EventWire::LockLost {
             locker_id: e.locker_id.raw(),
             target_id: e.target_id.raw(),
             tick: e.tick.value(),
         },
-        DomainEvent::ModuleActivated(e) => EventJson::ModuleActivated {
+        DomainEvent::ModuleActivated(e) => EventWire::ModuleActivated {
             ship_id: e.ship_id.raw(),
             module_id: e.module_id.0,
             slot: format!("{:?}", e.slot),
             target_ship_id: e.target_ship_id.map(|t| t.raw()),
             tick: e.tick.value(),
         },
-        DomainEvent::ModuleDeactivated(e) => EventJson::ModuleDeactivated {
+        DomainEvent::ModuleDeactivated(e) => EventWire::ModuleDeactivated {
             ship_id: e.ship_id.raw(),
             module_id: e.module_id.0,
             slot: format!("{:?}", e.slot),
@@ -230,7 +218,7 @@ pub fn domain_event_to_event_json(event: &DomainEvent) -> Option<EventJson> {
             }),
             tick: e.tick.value(),
         },
-        DomainEvent::JumpGateUsed(e) => EventJson::JumpGateUsed {
+        DomainEvent::JumpGateUsed(e) => EventWire::JumpGateUsed {
             ship_id: e.ship_id.raw(),
             gate_id: e.gate_id.0,
             from_sector: e.from_sector.0,
@@ -238,7 +226,7 @@ pub fn domain_event_to_event_json(event: &DomainEvent) -> Option<EventJson> {
             entry_pos: e.entry_pos.into(),
             tick: e.tick.value(),
         },
-        DomainEvent::StarSystemChanged(e) => EventJson::StarSystemChanged {
+        DomainEvent::StarSystemChanged(e) => EventWire::StarSystemChanged {
             ship_id: e.ship_id.raw(),
             from_system: e.from_system.0,
             to_system: e.to_system.0,
@@ -255,19 +243,4 @@ pub fn domain_event_to_event_json(event: &DomainEvent) -> Option<EventJson> {
         DomainEvent::PackagedShipBuilt(_) => return None,
         DomainEvent::ShipDisassembled(_) => return None,
     })
-}
-
-/// Build a `{"type":"Redirect","ws_addr":"..."}` JSON line for a client whose
-/// ship just jumped to a sector owned by a different physical node.
-pub fn redirect_json(
-    ws_addr: std::net::SocketAddr,
-    player_id: PlayerId,
-    ship_id: ShipId,
-) -> String {
-    let j = EventJson::Redirect {
-        ws_addr: ws_addr.to_string(),
-        player_id: player_id.raw(),
-        ship_id: ship_id.raw(),
-    };
-    serde_json::to_string(&j).unwrap_or_default()
 }

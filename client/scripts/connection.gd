@@ -101,7 +101,7 @@ func _process(delta: float) -> void:
 ## Commands with sentinel/exclusive-selection semantics (ADR-0031/ADR-0035)
 ## call a dedicated `_cmd.*_command()` method; everything else goes through
 ## `_cmd.build(type_tag, fields)`, which validates the field Dictionary by
-## deserializing it into `ClientCommandJson` itself. Every method returns
+## deserializing it into `ClientCommandWire` itself. Every method returns
 ## postcard-encoded bytes already wrapped in the `ClientMessage::Command`
 ## envelope (ADR-0042); `_send_bytes` only applies the welcomed guard.
 func send_move_command(target: Vector3) -> void:

@@ -35,7 +35,7 @@ pub fn json_value_to_variant(value: &serde_json::Value) -> Variant {
 }
 
 /// Converts an externally tagged serde value (`{"<VariantName>": {...fields}}`,
-/// the shape `ClientCommandJson`/`EventJson` serialize to since ADR-0042
+/// the shape `ClientCommandWire`/`EventWire` serialize to since ADR-0042
 /// dropped `#[serde(tag = "type")]` for postcard compatibility) into the
 /// `{"type": "<VariantName>", ...fields}` Dictionary shape GDScript
 /// consumers were already written against (back when these types were

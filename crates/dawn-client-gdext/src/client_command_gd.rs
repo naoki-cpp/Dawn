@@ -1,6 +1,6 @@
 use crate::json_variant::{externally_tagged_to_dict, json_value_to_variant, Dict};
 use dawn_wire::{
-    ClientCommandJson, ClientMessage, HelloMessage, PosJson, ResumeIdentity, WarpTargetJson,
+    ClientCommandWire, ClientMessage, HelloMessage, PosWire, ResumeIdentity, WarpTargetWire,
 };
 use godot::prelude::*;
 
@@ -10,7 +10,7 @@ fn to_wire_bytes(msg: &ClientMessage) -> PackedByteArray {
     PackedByteArray::from(msg.encode().as_slice())
 }
 
-fn command_wire_bytes(cmd: ClientCommandJson) -> PackedByteArray {
+fn command_wire_bytes(cmd: ClientCommandWire) -> PackedByteArray {
     to_wire_bytes(&ClientMessage::Command(cmd))
 }
 
@@ -86,8 +86,8 @@ pub struct ClientCommand {}
 impl ClientCommand {
     #[func]
     fn move_command(&self, x: f32, y: f32, z: f32) -> PackedByteArray {
-        command_wire_bytes(ClientCommandJson::MoveCommand {
-            target: PosJson { x, y, z },
+        command_wire_bytes(ClientCommandWire::MoveCommand {
+            target: PosWire { x, y, z },
         })
     }
 
@@ -100,7 +100,7 @@ impl ClientCommand {
         slot: GString,
         target_ship_id: i64,
     ) -> PackedByteArray {
-        command_wire_bytes(ClientCommandJson::ActivateModuleCommand {
+        command_wire_bytes(ClientCommandWire::ActivateModuleCommand {
             module_id: module_id as u32,
             slot: slot.to_string(),
             target_ship_id: non_negative_or_none(target_ship_id),
@@ -109,7 +109,7 @@ impl ClientCommand {
 
     #[func]
     fn approach_command(&self, target_id: i64) -> PackedByteArray {
-        command_wire_bytes(ClientCommandJson::ApproachCommand {
+        command_wire_bytes(ClientCommandWire::ApproachCommand {
             gate_id: None,
             target_id: Some(target_id as u64),
         })
@@ -117,7 +117,7 @@ impl ClientCommand {
 
     #[func]
     fn approach_gate_command(&self, gate_id: i64) -> PackedByteArray {
-        command_wire_bytes(ClientCommandJson::ApproachCommand {
+        command_wire_bytes(ClientCommandWire::ApproachCommand {
             gate_id: Some(gate_id as u32),
             target_id: None,
         })
@@ -125,16 +125,16 @@ impl ClientCommand {
 
     #[func]
     fn warp_command(&self, gate_id: i64) -> PackedByteArray {
-        command_wire_bytes(ClientCommandJson::WarpCommand {
-            target: Some(WarpTargetJson::Gate(gate_id as u32)),
+        command_wire_bytes(ClientCommandWire::WarpCommand {
+            target: Some(WarpTargetWire::Gate(gate_id as u32)),
             gate_id: None,
         })
     }
 
     #[func]
     fn warp_to_body_command(&self, body_id: i64) -> PackedByteArray {
-        command_wire_bytes(ClientCommandJson::WarpCommand {
-            target: Some(WarpTargetJson::Body(body_id as u32)),
+        command_wire_bytes(ClientCommandWire::WarpCommand {
+            target: Some(WarpTargetWire::Body(body_id as u32)),
             gate_id: None,
         })
     }
@@ -143,7 +143,7 @@ impl ClientCommand {
     /// range, ADR-0031).
     #[func]
     fn orbit_command(&self, target_id: i64, range_m: f32) -> PackedByteArray {
-        command_wire_bytes(ClientCommandJson::OrbitCommand {
+        command_wire_bytes(ClientCommandWire::OrbitCommand {
             gate_id: None,
             target_id: Some(target_id as u64),
             radius: positive_or_none(range_m),
@@ -152,7 +152,7 @@ impl ClientCommand {
 
     #[func]
     fn orbit_gate_command(&self, gate_id: i64, range_m: f32) -> PackedByteArray {
-        command_wire_bytes(ClientCommandJson::OrbitCommand {
+        command_wire_bytes(ClientCommandWire::OrbitCommand {
             gate_id: Some(gate_id as u32),
             target_id: None,
             radius: positive_or_none(range_m),
@@ -161,7 +161,7 @@ impl ClientCommand {
 
     #[func]
     fn keep_at_range_command(&self, target_id: i64, range_m: f32) -> PackedByteArray {
-        command_wire_bytes(ClientCommandJson::KeepAtRangeCommand {
+        command_wire_bytes(ClientCommandWire::KeepAtRangeCommand {
             gate_id: None,
             target_id: Some(target_id as u64),
             range: positive_or_none(range_m),
@@ -170,7 +170,7 @@ impl ClientCommand {
 
     #[func]
     fn keep_at_range_gate_command(&self, gate_id: i64, range_m: f32) -> PackedByteArray {
-        command_wire_bytes(ClientCommandJson::KeepAtRangeCommand {
+        command_wire_bytes(ClientCommandWire::KeepAtRangeCommand {
             gate_id: Some(gate_id as u32),
             target_id: None,
             range: positive_or_none(range_m),
@@ -180,9 +180,9 @@ impl ClientCommand {
     /// Schema-driven builder for commands whose wire shape is a flat
     /// scalar-fields-only struct (no sentinel/exclusive-selection semantics --
     /// see the dedicated methods above and below for those). `kind` is the
-    /// `ClientCommandJson` variant name (e.g. `"DockCommand"`); `fields`
+    /// `ClientCommandWire` variant name (e.g. `"DockCommand"`); `fields`
     /// supplies that variant's fields by name. Validates by deserializing
-    /// into `ClientCommandJson` itself, so an unknown `kind` or a wrong/
+    /// into `ClientCommandWire` itself, so an unknown `kind` or a wrong/
     /// missing field is caught here rather than producing a
     /// silently-malformed wire message.
     #[func]
@@ -190,11 +190,11 @@ impl ClientCommand {
         let Some(fields) = scalar_dict_to_json_object(&fields) else {
             return PackedByteArray::new();
         };
-        // ClientCommandJson is externally tagged (ADR-0042): the wire shape
+        // ClientCommandWire is externally tagged (ADR-0042): the wire shape
         // is `{"<VariantName>": {...fields}}`, not `{"type": "...", ...}`.
         let mut wrapper = serde_json::Map::with_capacity(1);
         wrapper.insert(kind.to_string(), serde_json::Value::Object(fields));
-        match serde_json::from_value::<ClientCommandJson>(serde_json::Value::Object(wrapper)) {
+        match serde_json::from_value::<ClientCommandWire>(serde_json::Value::Object(wrapper)) {
             Ok(cmd) => command_wire_bytes(cmd),
             Err(err) => {
                 godot_error!("ClientCommand.build({kind}): {err}");
@@ -276,7 +276,7 @@ impl ClientCommand {
         ship_type_id: i64,
         direction: &str,
     ) -> PackedByteArray {
-        command_wire_bytes(ClientCommandJson::TransferToStationCommand {
+        command_wire_bytes(ClientCommandWire::TransferToStationCommand {
             ship_id: ship_id as u64,
             station_id: station_id as u32,
             item_type: item_type.to_string(),
@@ -307,7 +307,7 @@ impl ClientMessageDecoder {
                 Ok(value) => externally_tagged_to_dict(&value),
                 Err(err) => {
                     godot_error!(
-                        "ClientMessageDecoder.decode: ClientCommandJson -> JSON failed: {err}"
+                        "ClientMessageDecoder.decode: ClientCommandWire -> JSON failed: {err}"
                     );
                     Dict::new()
                 }

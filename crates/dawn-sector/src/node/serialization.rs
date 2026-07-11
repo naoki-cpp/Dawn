@@ -8,8 +8,8 @@ use dawn_core::ShipId;
 use dawn_ecs::components::{HullComp, ShipStatsComp};
 use dawn_event_store::store::EventStore;
 use dawn_wire::{
-    AbsPosJson, BuildableShipTypeJson, CelestialBodyJson, InitialStateJson, JumpGateJson,
-    PlayerLoadoutJson, ShipStateJson, StationJson, SystemJson,
+    AbsPosWire, BuildableShipTypeWire, CelestialBodyWire, InitialStateWire, JumpGateWire,
+    PlayerLoadoutWire, ShipStateWire, StationWire, SystemWire,
 };
 
 use super::SimulationNode;
@@ -19,18 +19,18 @@ use super::SimulationNode;
 /// resumed. Both are typed wire messages (stage 2a/2b, ADR-0042).
 #[derive(Debug)]
 pub struct HandoffPayload {
-    pub initial_state: InitialStateJson,
-    pub player_loadout: Option<PlayerLoadoutJson>,
+    pub initial_state: InitialStateWire,
+    pub player_loadout: Option<PlayerLoadoutWire>,
 }
 
 /// Wire shape for an absolute (f64, ADR-0029) position. The one seam this
 /// file's three position-carrying messages (celestial body, jump gate, ship)
 /// go through, instead of each authoring the same literal. Kept local to
-/// `dawn-sector` rather than reusing `dawn-actor`'s `PosJson` -- `dawn-actor`
+/// `dawn-sector` rather than reusing `dawn-actor`'s `PosWire` -- `dawn-actor`
 /// sits one layer up in the crate DAG (CONTEXT.md Runtime Boundaries) and
 /// `dawn-sector` must not depend on it.
-fn abs_pos_json(p: [f64; 3]) -> AbsPosJson {
-    AbsPosJson {
+fn abs_pos_json(p: [f64; 3]) -> AbsPosWire {
+    AbsPosWire {
         x: p[0],
         y: p[1],
         z: p[2],
@@ -53,7 +53,7 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Full-world `InitialState` (every ship). Used for non-AoI callers.
-    pub fn build_initial_state_json(&self) -> InitialStateJson {
+    pub fn build_initial_state_json(&self) -> InitialStateWire {
         self.initial_state_json(self.ships.index.keys().copied())
     }
 
@@ -63,21 +63,21 @@ impl<S: EventStore> SimulationNode<S> {
         &self,
         observer_abs: [f64; 3],
         cell_size: f32,
-    ) -> InitialStateJson {
+    ) -> InitialStateWire {
         self.initial_state_json(self.ships_visible_to(observer_abs, cell_size).into_iter())
     }
 
     /// Build the given ships into an `InitialState` message.
-    fn initial_state_json(&self, ship_ids: impl Iterator<Item = ShipId>) -> InitialStateJson {
-        let ships: Vec<ShipStateJson> = ship_ids
+    fn initial_state_json(&self, ship_ids: impl Iterator<Item = ShipId>) -> InitialStateWire {
+        let ships: Vec<ShipStateWire> = ship_ids
             .filter_map(|ship_id| self.ship_state_json(ship_id))
             .collect();
 
-        let celestial_bodies: Vec<CelestialBodyJson> = self
+        let celestial_bodies: Vec<CelestialBodyWire> = self
             .sector_map
             .bodies
             .values()
-            .map(|b| CelestialBodyJson {
+            .map(|b| CelestialBodyWire {
                 id: b.id.0,
                 kind: b.kind,
                 name: b.name.clone(),
@@ -99,20 +99,20 @@ impl<S: EventStore> SimulationNode<S> {
                 .unwrap_or_else(|| "Unknown".to_string())
         };
 
-        let systems: Vec<SystemJson> = galaxy
+        let systems: Vec<SystemWire> = galaxy
             .systems
             .iter()
-            .map(|s| SystemJson {
+            .map(|s| SystemWire {
                 id: s.id.0,
                 name: s.name.clone(),
             })
             .collect();
 
-        let jump_gates: Vec<JumpGateJson> = self
+        let jump_gates: Vec<JumpGateWire> = self
             .sector_map
             .gates
             .values()
-            .map(|g| JumpGateJson {
+            .map(|g| JumpGateWire {
                 gate_id: g.id.0,
                 position: abs_pos_json(g.abs_m),
                 activation_radius: g.activation_radius,
@@ -120,11 +120,11 @@ impl<S: EventStore> SimulationNode<S> {
             })
             .collect();
 
-        let stations: Vec<StationJson> = self
+        let stations: Vec<StationWire> = self
             .sector_map
             .stations
             .values()
-            .map(|station| StationJson {
+            .map(|station| StationWire {
                 station_id: station.id.0,
                 name: station.name.clone(),
                 position: abs_pos_json(station.abs_m),
@@ -135,17 +135,17 @@ impl<S: EventStore> SimulationNode<S> {
         // Buildable Packaged Ship catalog (ADR-0034 9B): static registry data,
         // not per-tick, so it's cheapest to send once alongside the rest of
         // InitialState rather than as its own message type.
-        let buildable_ship_types: Vec<BuildableShipTypeJson> = self
+        let buildable_ship_types: Vec<BuildableShipTypeWire> = self
             .ship_type_registry
             .values()
             .filter(|def| def.buildable)
-            .map(|def| BuildableShipTypeJson {
+            .map(|def| BuildableShipTypeWire {
                 ship_type_id: def.id.0,
                 name: def.name.clone(),
             })
             .collect();
 
-        InitialStateJson {
+        InitialStateWire {
             ships,
             system_name: system_name_of(self.sector_id),
             systems,
@@ -160,7 +160,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// `InitialState` and `AoiEnter` (ADR-0019) -- `AoiEnter` wraps this
     /// directly (`ServerMessage::AoiEnter`), no separate wrapper needed.
     /// `None` if the ship is gone.
-    pub fn ship_state_json(&self, ship_id: ShipId) -> Option<ShipStateJson> {
+    pub fn ship_state_json(&self, ship_id: ShipId) -> Option<ShipStateWire> {
         let entity = self.ships.index.get(&ship_id)?;
         // Send the ABSOLUTE position (anchor + offset, f64), not the raw
         // anchor-relative offset (ADR-0029). After a warp rebase the offset is
@@ -178,7 +178,7 @@ impl<S: EventStore> SimulationNode<S> {
             .and_then(|tid| self.ship_type_registry.get(tid))
             .map(|def| def.name.as_str())
             .unwrap_or("Unknown");
-        Some(ShipStateJson {
+        Some(ShipStateWire {
             ship_id: ship_id.raw(),
             ship_type_name: ship_type_name.to_string(),
             position: abs_pos_json(pos),
