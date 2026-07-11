@@ -48,6 +48,12 @@ var _welcomed        : bool          = false   ## Welcome 受信済みか
 var _reconnect_timer : float         = 0.0
 var _buffer          : String        = ""
 var _server_url      : String        = SERVER_URL
+## ClientCommand is a GDExtension class (dawn-wire/dawn-client-gdext,
+## ADR-0041) -- globally registered, no preload needed. Its wire-line
+## builder methods take &self (matching every other GDExtension class in
+## this project, e.g. PlayerLoadout), so callers need an instance rather
+## than calling the class name directly.
+var _cmd             : ClientCommand = ClientCommand.new()
 
 var player_id : int = -1
 var ship_id   : int = -1
@@ -89,95 +95,77 @@ func _process(delta: float) -> void:
 ## no wire-representable way to name a ship the player isn't currently
 ## flying. Station inventory-management commands (Fit/Unfit/Dock/
 ## BuildPackagedShip/DisassembleShip) still carry an explicit ship_id.
+##
+## ADR-0041: every send_* function below builds its wire JSON line via
+## `ClientCommand` (a `dawn-wire`-backed GDExtension class, globally
+## registered like `PlayerLoadout`/`ModuleRow`/`ItemRow` -- no preload
+## needed), instead of hand-building a matching Dictionary + JSON.stringify.
+## The line already carries the correct "type" tag; _send_line only applies
+## the welcomed guard and the trailing newline.
 func send_move_command(target: Vector3) -> void:
-	_send_json("MoveCommand", {
-		"target": { "x": target.x, "y": target.y, "z": target.z },
-	})
+	_send_line(_cmd.move_command(target.x, target.y, target.z))
 
 func send_lock_on_command(target_id: int) -> void:
-	_send_json("LockOnCommand", { "target_id": target_id })
+	_send_line(_cmd.lock_on_command(target_id))
 
 ## Active モジュールをオンにする。p_target_ship_id は Weapon/Tackle など
 ## ターゲットを要求する種別のときだけ指定する（-1 = 指定なし、ADR-0035）。
 func send_activate_module(p_module_id: int, p_slot: String, p_target_ship_id: int = -1) -> void:
-	var extra: Dictionary = {
-		"module_id": p_module_id,
-		"slot"     : p_slot,
-	}
-	if p_target_ship_id >= 0:
-		extra["target_ship_id"] = p_target_ship_id
-	_send_json("ActivateModuleCommand", extra)
+	_send_line(_cmd.activate_module_command(p_module_id, p_slot, p_target_ship_id))
 
 ## Active モジュールをオフにする。
 func send_deactivate_module(p_module_id: int, p_slot: String) -> void:
-	_send_json("DeactivateModuleCommand", {
-		"module_id": p_module_id,
-		"slot"     : p_slot,
-	})
+	_send_line(_cmd.deactivate_module_command(p_module_id, p_slot))
 
 ## [S キー] 減速停止コマンド。サーバーが thrust を逆方向に掛けて速度ゼロまで減速する。
 func send_stop_command() -> void:
-	_send_json("StopCommand")
+	_send_line(_cmd.stop_command())
 
 ## ジャンプゲート経由の Sector 移動を要求する（ADR-0009）。
 func send_jump_command(p_gate_id: int) -> void:
-	_send_json("JumpCommand", { "gate_id": p_gate_id })
+	_send_line(_cmd.jump_command(p_gate_id))
 
 ## [A キー] アプローチ（半自動操船）。選択した船へ自動接近する（ADR-0015）。
 func send_approach_command(p_target_id: int) -> void:
-	_send_json("ApproachCommand", { "target_id": p_target_id })
+	_send_line(_cmd.approach_command(p_target_id))
 
 ## [A キー] ジャンプゲートへアプローチ（半自動操船）。射程内まで自動接近する（ADR-0015）。
 func send_approach_gate_command(p_gate_id: int) -> void:
-	_send_json("ApproachCommand", { "gate_id": p_gate_id })
+	_send_line(_cmd.approach_gate_command(p_gate_id))
 
 ## [W key] Warp (short-range Fold) to a Jump Gate (ADR-0022/ADR-0025).
 func send_warp_command(p_gate_id: int) -> void:
-	_send_json("WarpCommand", { "target": { "Gate": p_gate_id } })
+	_send_line(_cmd.warp_command(p_gate_id))
 
 ## [W key] Warp (short-range Fold) to a celestial body (ADR-0025).
 func send_warp_to_body_command(p_body_id: int) -> void:
-	_send_json("WarpCommand", { "target": { "Body": p_body_id } })
+	_send_line(_cmd.warp_to_body_command(p_body_id))
 
 ## [O key] Orbit a selected ship at its weapon range (server-side default, ADR-0031).
 func send_orbit_command(p_target_id: int) -> void:
-	_send_json("OrbitCommand", { "target_id": p_target_id })
+	_send_line(_cmd.orbit_command(p_target_id, -1.0))
 
 ## [O key] Orbit a selected Jump Gate at its weapon range (server-side default, ADR-0031).
 func send_orbit_gate_command(p_gate_id: int) -> void:
-	_send_json("OrbitCommand", { "gate_id": p_gate_id })
+	_send_line(_cmd.orbit_gate_command(p_gate_id, -1.0))
 
 ## [K key] Hold at least p_range_m metres from a selected ship; p_range_m <= 0
 ## falls back to the server-side default (weapon range, ADR-0031).
 func send_keep_at_range_command(p_target_id: int, p_range_m: float = -1.0) -> void:
-	var extra: Dictionary = { "target_id": p_target_id }
-	if p_range_m > 0.0:
-		extra["range"] = p_range_m
-	_send_json("KeepAtRangeCommand", extra)
+	_send_line(_cmd.keep_at_range_command(p_target_id, p_range_m))
 
 ## [K key] Hold at least p_range_m metres from a selected Jump Gate; p_range_m
 ## <= 0 falls back to the server-side default (weapon range, ADR-0031).
 func send_keep_at_range_gate_command(p_gate_id: int, p_range_m: float = -1.0) -> void:
-	var extra: Dictionary = { "gate_id": p_gate_id }
-	if p_range_m > 0.0:
-		extra["range"] = p_range_m
-	_send_json("KeepAtRangeCommand", extra)
+	_send_line(_cmd.keep_at_range_gate_command(p_gate_id, p_range_m))
 
 ## [Inventory panel] Move a module from inventory into a fitting slot (ADR-0032).
 func send_fit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
-	_send_json("FitModuleCommand", {
-		"ship_id"  : p_ship_id,
-		"module_id": p_module_id,
-		"slot"     : p_slot,
-	})
+	_send_line(_cmd.fit_module_command(p_ship_id, p_module_id, p_slot))
 
 ## [Inventory panel] Move a fitted module back into inventory (ADR-0032).
 func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
-	_send_json("UnfitModuleCommand", {
-		"ship_id"  : p_ship_id,
-		"module_id": p_module_id,
-		"slot"     : p_slot,
-	})
+	_send_line(_cmd.unfit_module_command(p_ship_id, p_module_id, p_slot))
 
 ## [Inventory panel] Reorder two fitted modules within the same slot kind
 ## (drag-and-drop reorder in the FITTED column). Persisted server-side since
@@ -186,48 +174,33 @@ func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String)
 func send_reorder_fitted_module_command(
 	p_ship_id: int, p_slot: String, p_from_index: int, p_to_index: int
 ) -> void:
-	_send_json("ReorderFittedModuleCommand", {
-		"ship_id"   : p_ship_id,
-		"slot"      : p_slot,
-		"from_index": p_from_index,
-		"to_index"  : p_to_index,
-	})
+	_send_line(_cmd.reorder_fitted_module_command(p_ship_id, p_slot, p_from_index, p_to_index))
 
 func send_dock_command(p_station_id: int) -> void:
-	_send_json("DockCommand", { "station_id": p_station_id })
+	_send_line(_cmd.dock_command(p_station_id))
 
 func send_undock_command() -> void:
-	_send_json("UndockCommand")
+	_send_line(_cmd.undock_command())
 
 func send_build_packaged_ship_command(p_ship_id: int, p_station_id: int, p_ship_type_id: int) -> void:
-	_send_json("BuildPackagedShipCommand", {
-		"ship_id"     : p_ship_id,
-		"station_id"  : p_station_id,
-		"ship_type_id": p_ship_type_id,
-	})
+	_send_line(_cmd.build_packaged_ship_command(p_ship_id, p_station_id, p_ship_type_id))
 
 func send_disassemble_ship_command(p_ship_id: int, p_station_id: int) -> void:
-	_send_json("DisassembleShipCommand", {
-		"ship_id"   : p_ship_id,
-		"station_id": p_station_id,
-	})
+	_send_line(_cmd.disassemble_ship_command(p_ship_id, p_station_id))
 
 ## Convert a station-inventory Packaged Ship item into a new live docked ship
 ## (ADR-0034 9B, ADR-0037). No ship_id -- the ship doesn't exist yet.
 func send_assemble_command(p_station_id: int, p_ship_type_id: int) -> void:
-	_send_json("AssembleCommand", {
-		"station_id"  : p_station_id,
-		"ship_type_id": p_ship_type_id,
-	})
+	_send_line(_cmd.assemble_command(p_station_id, p_ship_type_id))
 
 ## Leave the active ship while docked, without disassembling it (ADR-0037).
 func send_disembark_command() -> void:
-	_send_json("DisembarkCommand")
+	_send_line(_cmd.disembark_command())
 
 ## Make an owned, docked ship the caller's active ship (ADR-0037). This is
 ## how a player re-boards after Disembark, or switches between owned ships.
 func send_select_active_ship_command(p_ship_id: int) -> void:
-	_send_json("SelectActiveShipCommand", { "ship_id": p_ship_id })
+	_send_line(_cmd.select_active_ship_command(p_ship_id))
 
 ## Move the entire stack of an item out of a docked ship's own cargo into
 ## the caller's station inventory (ADR-0034 9B). p_item_type is one of
@@ -240,7 +213,8 @@ func send_transfer_to_station_command(
 	p_module_id: int = 0,
 	p_ship_type_id: int = 0
 ) -> void:
-	_send_transfer_command(p_ship_id, p_station_id, p_item_type, p_module_id, p_ship_type_id, "ToStation")
+	_send_line(_cmd.transfer_to_station_command(
+		p_ship_id, p_station_id, p_item_type, p_module_id, p_ship_type_id))
 
 ## The reverse of send_transfer_to_station_command: move the entire stack of
 ## an item out of the caller's station inventory back into the docked ship's
@@ -252,38 +226,22 @@ func send_transfer_from_station_command(
 	p_module_id: int = 0,
 	p_ship_type_id: int = 0
 ) -> void:
-	_send_transfer_command(p_ship_id, p_station_id, p_item_type, p_module_id, p_ship_type_id, "ToShip")
-
-func _send_transfer_command(
-	p_ship_id: int,
-	p_station_id: int,
-	p_item_type: String,
-	p_module_id: int,
-	p_ship_type_id: int,
-	p_direction: String
-) -> void:
-	_send_json("TransferToStationCommand", {
-		"ship_id"     : p_ship_id,
-		"station_id"  : p_station_id,
-		"item_type"   : p_item_type,
-		"module_id"   : p_module_id,
-		"ship_type_id": p_ship_type_id,
-		"direction"   : p_direction,
-	})
+	_send_line(_cmd.transfer_from_station_command(
+		p_ship_id, p_station_id, p_item_type, p_module_id, p_ship_type_id))
 
 func is_connected_to_server() -> bool:
 	return _connected and _welcomed
 
 # ── 内部処理 ──────────────────────────────────────────────────────────────────
 
-## welcomed ガード + "type" 注入 + JSON化 + 改行付与を一元化する send_* 系の共通ヘルパー。
-## Hello（welcomed 前に送る必要がある）はこのガードの対象外なので _send_hello は使わない。
-func _send_json(type: String, extra: Dictionary = {}) -> void:
+## welcomed ガード + 改行付与を一元化する send_* 系の共通ヘルパー。line は
+## _cmd.*_command() が返す、すでに "type" タグ済みの1行JSON
+## （ADR-0041）。Hello（welcomed 前に送る必要がある）はこのガードの対象外
+## なので _send_hello は使わない。
+func _send_line(line: String) -> void:
 	if not _welcomed:
 		return
-	var payload: Dictionary = { "type": type }
-	payload.merge(extra)
-	_ws.send_text(JSON.stringify(payload) + "\n")
+	_ws.send_text(line + "\n")
 
 func _send_hello() -> void:
 	var payload: Dictionary = { "type": "Hello" }

@@ -61,6 +61,32 @@ scripts/setup-godot.ps1 -RunTests
 > Once GdUnit4 ships a 4.6-compatible release, these patches become
 > unnecessary.
 
+> **Known issue on display-less/headless sandboxes (e.g. AI agent
+> environments with no GPU/window server)**: `runtest.sh`/`runtest.cmd`'s
+> default invocation of `GdUnitCmdTool.gd` does **not** pass `--headless` --
+> it expects a real window. `GdUnitCmdTool.gd` itself actively refuses to
+> run under plain `--headless` (prints "Headless mode is not supported!" and
+> exits) unless `--ignoreHeadlessMode` is also passed. On a machine with no
+> display, the tool's attempt to open a window segfaults (SIGSEGV) instead
+> of printing that message -- this looks identical to a real engine/addon
+> crash and is easy to misdiagnose as GdExtension or addon corruption (ADR-0041
+> lost significant time to exactly this before finding the real cause).
+> If GdUnit4 crashes with a native SIGSEGV backtrace ("no debug info in
+> PE/COFF executable" / similar) on every test file including ones that were
+> passing before, check this first, before suspecting the addon install,
+> `.godot` cache, or your own code changes. Bypass `runtest.sh`/`.cmd` and
+> invoke Godot directly with both flags:
+> ```bash
+> cd client
+> "$GODOT_BIN" --headless --path . -s -d res://addons/gdUnit4/bin/GdUnitCmdTool.gd -a test --ignoreHeadlessMode
+> ```
+> (`--headless` before `-s`, `--ignoreHeadlessMode` after the script path/args
+> -- it's parsed by `GdUnitCmdTool.gd` itself, not the engine.) UI-interaction
+> tests won't receive real `InputEvents` in this mode (same caveat the tool's
+> own warning states), but this project's client tests are already restricted
+> to scene-tree-free pure logic (see "What is testable vs out of scope"
+> below), so this doesn't lose coverage here.
+
 ## What is testable vs out of scope
 
 Unlike the server side (Rust crates), **not all client code can be tested**.

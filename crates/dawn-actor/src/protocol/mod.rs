@@ -11,11 +11,17 @@
 //! - [`redirect_json`]: tell a client to reconnect to another node's WS (multi-node jump).
 //! - [`parse_client_command`]: JSON line -> ClientCommand (client -> server).
 
-mod client_command;
 mod hello_resume;
 mod server_event;
 
-pub use client_command::{
+// The client -> server wire schema (ClientCommandJson and friends) lives in
+// dawn-wire (ADR-0041), not here -- dawn-client-gdext (a Godot GDExtension
+// cdylib) needs the same type to *construct and serialize* commands, and
+// must not inherit dawn-actor's transport dependencies (tokio,
+// tokio-tungstenite) just to reuse a schema definition. Re-exported under
+// the same names so every existing `dawn_actor::protocol::X` import site
+// (ws_server.rs, dawn-sector-node, tests) needed no changes.
+pub use dawn_wire::{
     client_command_json_schema, parse_client_command, ClientCommandJson, PosJson, VelJson,
     WarpTargetJson,
 };

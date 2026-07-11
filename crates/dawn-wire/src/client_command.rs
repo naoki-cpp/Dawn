@@ -57,7 +57,7 @@ impl From<dawn_core::Velocity> for VelJson {
 /// A `{"Gate": N}` or `{"Body": N}` warp destination, as sent by
 /// `WarpCommand`'s current wire format (externally tagged: the variant name
 /// is the JSON object's only key).
-#[derive(Debug, Deserialize, JsonSchema, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy)]
 pub enum WarpTargetJson {
     Gate(u32),
     Body(u32),
@@ -67,8 +67,9 @@ pub enum WarpTargetJson {
 /// connection. Serialized as a single JSON line tagged by `"type"`.
 ///
 /// This enum is the schema-of-record for the client -> server half of the
-/// wire protocol (see [`super::EventJson`] for the server -> client half). It
-/// intentionally mirrors the wire format exactly, including the two
+/// wire protocol (see `dawn_actor::protocol::EventJson` for the server ->
+/// client half, which stays in `dawn-actor` since only the server produces
+/// it). It intentionally mirrors the wire format exactly, including the two
 /// backward-compatible quirks below -- it does not enforce the "exactly one
 /// of these two fields" business rules those quirks involve; that
 /// validation still happens in [`parse_client_command`], same as before
@@ -86,7 +87,14 @@ pub enum WarpTargetJson {
 /// flying. Station inventory-management variants (Fit/Unfit/Dock/
 /// BuildPackagedShip/DisassembleShip) still carry an explicit `ship_id`,
 /// since they may target any owned docked ship, not just the active one.
-#[derive(Debug, Deserialize, JsonSchema)]
+///
+/// Derives both `Serialize` and `Deserialize` (ADR-0041): the server
+/// deserializes a wire-received line into this enum
+/// ([`parse_client_command`]); the Godot client (`dawn-client-gdext`)
+/// constructs a variant directly from typed arguments and serializes it
+/// back out, replacing the old GDScript pattern of hand-building a
+/// `Dictionary` that had to match this schema by eye.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type")]
 pub enum ClientCommandJson {
     MoveCommand {
@@ -418,5 +426,46 @@ fn parse_slot_kind(s: &str) -> Option<SlotKind> {
         "Low" => Some(SlotKind::Low),
         "Rig" => Some(SlotKind::Rig),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ADR-0041: `ClientCommandJson` gained `Serialize` so the Godot client
+    /// can construct a variant directly and serialize it out, instead of
+    /// hand-building a `Dictionary` that had to match this schema by eye.
+    /// This proves the round trip agrees with `parse_client_command`'s
+    /// existing deserialize path (both directions must describe the same
+    /// wire shape).
+    #[test]
+    fn move_command_json_round_trips_through_serialize_and_deserialize() {
+        let cmd = ClientCommandJson::MoveCommand {
+            target: PosJson {
+                x: 10.0,
+                y: 0.0,
+                z: -5.0,
+            },
+        };
+        let line = serde_json::to_string(&cmd).expect("serialize");
+
+        let parsed = parse_client_command(&line).expect("must parse the line we just produced");
+        match parsed {
+            ClientCommand::Move(c) => {
+                assert!((c.target_position.x - 10.0).abs() < 1e-6);
+                assert!((c.target_position.z - (-5.0)).abs() < 1e-6);
+            }
+            other => panic!("expected Move, got {other:?}"),
+        }
+    }
+
+    /// A non-finite coordinate must still be rejected after the move to
+    /// dawn-wire (security-review.md SEC-5) -- this crate now owns the
+    /// check, not dawn-actor.
+    #[test]
+    fn move_command_json_with_an_overflowing_coordinate_fails_to_parse() {
+        let line = r#"{"type":"MoveCommand","target":{"x":1e40,"y":0.0,"z":0.0}}"#;
+        assert!(parse_client_command(line).is_none());
     }
 }

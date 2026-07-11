@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/dawn-core",
+    "crates/dawn-wire",
     "crates/dawn-client-core",
     "crates/dawn-client-gdext",
     "crates/dawn-ecs",
