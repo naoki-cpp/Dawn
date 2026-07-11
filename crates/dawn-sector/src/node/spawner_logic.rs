@@ -656,14 +656,14 @@ mod tests {
         assert_eq!(node.ship_count(), 3);
 
         for &ship_id in node.ships.index.keys() {
-            let loadout_json = node
+            let loadout = node
                 .build_player_loadout_json(ship_id)
                 .expect("every spawned ship has a loadout");
-            let v: serde_json::Value = serde_json::from_str(&loadout_json).unwrap();
-            let modules = v["modules"].as_array().unwrap();
             assert!(
-                modules.iter().any(|m| m["slot"] == "High"
-                    && m["module_id"].as_u64().unwrap() == modules::MODULE_RAILGUN_SMALL.0 as u64),
+                loadout
+                    .modules
+                    .iter()
+                    .any(|m| m.slot == "High" && m.module_id == modules::MODULE_RAILGUN_SMALL.0),
                 "ship {ship_id:?} should have a Small Railgun in its High slot"
             );
         }

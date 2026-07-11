@@ -2,6 +2,7 @@
 
 use super::{build_serve_node, AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET};
 use crate::ws_server;
+use dawn_actor::protocol::ServerMessage;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
 use dawn_sector::dilation;
 use dawn_sector::node::ClientCommandFollowup;
@@ -164,8 +165,9 @@ pub(crate) async fn run_phase4_server(
                         );
                     }
                     Some(ClientCommandFollowup::RefreshFitting(player_id)) => {
-                        if let Some(json) = node.build_player_loadout_json_for_player(player_id) {
-                            sess.send_raw(&json);
+                        if let Some(loadout) = node.build_player_loadout_json_for_player(player_id)
+                        {
+                            sess.send_message(&ServerMessage::PlayerLoadout(loadout));
                         }
                     }
                     None => {}
@@ -184,8 +186,8 @@ pub(crate) async fn run_phase4_server(
                 )
             });
             if should_refresh {
-                if let Some(json) = node.build_player_loadout_json(sess.ship_id) {
-                    sess.send_raw(&json);
+                if let Some(loadout) = node.build_player_loadout_json(sess.ship_id) {
+                    sess.send_message(&ServerMessage::PlayerLoadout(loadout));
                 }
             }
         }

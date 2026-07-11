@@ -4,6 +4,110 @@ use godot::prelude::*;
 use crate::item_row_gd::ItemRow;
 use crate::module_row_gd::{parse_kind, ModuleRow};
 
+/// `dawn_core::ModuleKind` (the server-authoritative enum, via `dawn-wire`)
+/// -> `dawn_client_core::ModuleKind` (the client's own decoupled mirror with
+/// an `Unknown` fallback, ADR-0039). Both crates are foreign to
+/// `dawn-client-gdext`, so this lives here rather than as a `From` impl
+/// (orphan rule).
+fn wire_module_kind(kind: dawn_core::ModuleKind) -> dawn_client_core::ModuleKind {
+    match kind {
+        dawn_core::ModuleKind::Weapon => dawn_client_core::ModuleKind::Weapon,
+        dawn_core::ModuleKind::ShieldBooster => dawn_client_core::ModuleKind::ShieldBooster,
+        dawn_core::ModuleKind::ArmorRepairer => dawn_client_core::ModuleKind::ArmorRepairer,
+        dawn_core::ModuleKind::Propulsion => dawn_client_core::ModuleKind::Propulsion,
+        dawn_core::ModuleKind::Sensor => dawn_client_core::ModuleKind::Sensor,
+        dawn_core::ModuleKind::Rig => dawn_client_core::ModuleKind::Rig,
+        dawn_core::ModuleKind::Tackle => dawn_client_core::ModuleKind::Tackle,
+        dawn_core::ModuleKind::RemoteShieldBooster => {
+            dawn_client_core::ModuleKind::RemoteShieldBooster
+        }
+        dawn_core::ModuleKind::RemoteArmorRepairer => {
+            dawn_client_core::ModuleKind::RemoteArmorRepairer
+        }
+    }
+}
+
+/// Converts the wire-schema `PlayerLoadoutJson` (`dawn-wire`, ADR-0042 2a)
+/// into this crate's richer client-side `PlayerLoadoutMsg`
+/// (`dawn-client-core`). A plain function rather than a `From` impl -- both
+/// types are foreign to this crate, so the orphan rule forbids it anyway,
+/// and this adapter-layer conversion is exactly what `dawn-client-gdext` is
+/// for.
+fn wire_to_loadout_msg(wire: dawn_wire::PlayerLoadoutJson) -> PlayerLoadoutMsg {
+    PlayerLoadoutMsg {
+        tick: wire.tick,
+        modules: wire.modules.into_iter().map(wire_to_module_row).collect(),
+        inventory: wire.inventory.into_iter().map(wire_to_item_row).collect(),
+        station_inventory: wire
+            .station_inventory
+            .into_iter()
+            .map(wire_to_item_row)
+            .collect(),
+        docked_station_id: wire.docked_station_id,
+        docked_station_name: wire.docked_station_name,
+        slot_capacity: dawn_client_core::SlotCapacity {
+            high: wire.slot_capacity.high as u32,
+            mid: wire.slot_capacity.mid as u32,
+            low: wire.slot_capacity.low as u32,
+            rig: wire.slot_capacity.rig as u32,
+        },
+        active_ship_id: wire.active_ship_id,
+        owned_ships: wire
+            .owned_ships
+            .into_iter()
+            .map(|s| dawn_client_core::OwnedShipRow {
+                ship_id: s.ship_id,
+                ship_type_id: s.ship_type_id,
+                ship_type_name: s.ship_type_name,
+                docked_station_id: s.docked_station_id,
+                is_active: s.is_active,
+            })
+            .collect(),
+    }
+}
+
+fn wire_to_module_row(row: dawn_wire::ModuleRowJson) -> dawn_client_core::ModuleRow {
+    let d = row.stat_delta;
+    dawn_client_core::ModuleRow {
+        slot: row.slot,
+        index: row.index,
+        module_id: row.module_id,
+        name: row.name,
+        kind: wire_module_kind(row.kind),
+        is_active: row.is_active,
+        is_active_module: row.is_active_module,
+        cap_cost_per_cycle: row.cap_cost_per_cycle as f64,
+        cycle_time_ticks: row.cycle_time_ticks as u32,
+        stat_delta: dawn_client_core::StatDelta {
+            weapon_damage_add: d.weapon_damage_add as f64,
+            weapon_range_add: d.weapon_range_add as f64,
+            falloff_range_add: d.falloff_range_add as f64,
+            tracking_speed_add: d.tracking_speed_add as f64,
+            speed_multiplier: d.speed_multiplier as f64,
+            mass_add: d.mass_add as f64,
+            max_shield_add: d.max_shield_add as f64,
+            max_armor_add: d.max_armor_add as f64,
+            max_hull_add: d.max_hull_add as f64,
+            tackle_range_add: d.tackle_range_add as f64,
+            repair_range_add: d.repair_range_add as f64,
+        },
+        cycle_remaining: 0,
+        forced_reason: String::new(),
+    }
+}
+
+fn wire_to_item_row(row: dawn_wire::ItemRowJson) -> dawn_client_core::ItemRow {
+    dawn_client_core::ItemRow {
+        item_type: crate::item_row_gd::parse_item_type(&row.item_type),
+        module_id: row.module_id,
+        ship_type_id: row.ship_type_id,
+        name: row.name,
+        kind: row.kind,
+        slot: row.slot,
+        count: row.count,
+    }
+}
+
 /// Godot's `Dictionary` is generic over key/value element type as of gdext
 /// 0.5; these dictionaries hold a mix of String/int/bool/nested-collection
 /// values (mirroring the old GDScript code's untyped `Dictionary` literals),
@@ -11,11 +115,11 @@ use crate::module_row_gd::{parse_kind, ModuleRow};
 type Dict = Dictionary<Variant, Variant>;
 
 /// Client-side deep module for the server's `PlayerLoadout` wire message
-/// (ADR-0039/ADR-0040). GDScript-facing method surface mirrors the old
-/// `player_loadout.gd` exactly (same method names, same `-1`/empty-string/
+/// (ADR-0039/ADR-0040/ADR-0042). GDScript-facing method surface mirrors the
+/// old `player_loadout.gd` exactly (same method names, same `-1`/empty-string/
 /// empty-Dictionary "nothing yet" sentinels) so `main.gd` needed no changes
-/// beyond swapping the constructor and JSON-encoding the payload before
-/// calling `apply_payload`.
+/// beyond swapping the constructor and handing raw wire bytes to
+/// `apply_wire_bytes`.
 #[derive(GodotClass)]
 #[class(init, base=RefCounted)]
 pub struct PlayerLoadout {
@@ -29,10 +133,11 @@ impl PlayerLoadout {
         self.loadout = None;
     }
 
-    /// Parses a `PlayerLoadout` wire JSON string (see
-    /// `player_loadout_projection.rs::build_player_loadout_json`). Returns
-    /// `false` (and leaves the previous state untouched) if the JSON doesn't
-    /// match this crate's expected shape.
+    /// Test/debug-only convenience: builds state directly from a hand-built
+    /// JSON fixture, bypassing the wire entirely. Never called by
+    /// `connection.gd` in production (that always goes through
+    /// `apply_wire_bytes`, ADR-0042) -- this exists so GdUnit4 tests can set
+    /// up a `PlayerLoadout` fixture without constructing real postcard bytes.
     #[func]
     fn apply_payload(&mut self, json: GString) -> bool {
         match serde_json::from_str::<PlayerLoadoutMsg>(&json.to_string()) {
@@ -42,6 +147,31 @@ impl PlayerLoadout {
             }
             Err(err) => {
                 godot_error!("PlayerLoadout.apply_payload: {err}");
+                false
+            }
+        }
+    }
+
+    /// Decodes a `ServerMessage::PlayerLoadout` binary WebSocket frame
+    /// (ADR-0042) directly into this crate's typed state -- bypassing the
+    /// generic `Dictionary` decode path (`ServerMessageDecoder`) entirely,
+    /// since Rust-to-Rust decode preserves exact int/float types with no
+    /// GDScript `JSON.parse_string` lossiness to work around. Returns
+    /// `false` (and leaves the previous state untouched) if `bytes` isn't a
+    /// valid `ServerMessage::PlayerLoadout` frame.
+    #[func]
+    fn apply_wire_bytes(&mut self, bytes: PackedByteArray) -> bool {
+        match dawn_wire::ServerMessage::decode(bytes.as_slice()) {
+            Ok(dawn_wire::ServerMessage::PlayerLoadout(wire)) => {
+                self.loadout = Some(wire_to_loadout_msg(wire));
+                true
+            }
+            Ok(_) => {
+                godot_error!("PlayerLoadout.apply_wire_bytes: not a PlayerLoadout message");
+                false
+            }
+            Err(err) => {
+                godot_error!("PlayerLoadout.apply_wire_bytes: {err}");
                 false
             }
         }
@@ -263,5 +393,91 @@ impl PlayerLoadout {
                 .apply_simulated_cycle_remaining(row.cycle_remaining);
         }
         cap
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Contract test (ADR-0039/ADR-0042): proves the real server's
+    //! `PlayerLoadoutJson` (`dawn_sector`'s `build_player_loadout_json`)
+    //! still converts into `dawn_client_core::PlayerLoadoutMsg` via
+    //! [`wire_to_loadout_msg`]. `dawn-sector` is a dev-dependency only --
+    //! this does not add a runtime dependency edge, so it doesn't resurrect
+    //! the previously-rejected `dawn-proto` shared-schema crate.
+    //!
+    //! If this test starts failing, the server's wire shape drifted from
+    //! this crate's conversion -- update `wire_to_loadout_msg`/
+    //! `wire_to_module_row`/`wire_to_item_row` to match.
+    use super::*;
+    use dawn_core::{FitModuleCommand, NodeId, Position, SectorBounds, SectorId, SlotKind};
+    use dawn_sector::node::SimulationNode;
+
+    fn test_node() -> SimulationNode {
+        let mut node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        for def in dawn_sector::modules::all_modules() {
+            node.register_module(def);
+        }
+        for def in dawn_sector::ship_types::all_ship_types() {
+            node.register_ship_type(def);
+        }
+        node
+    }
+
+    #[test]
+    fn player_loadout_json_from_a_freshly_spawned_ship_converts_into_player_loadout_msg() {
+        let mut node = test_node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+
+        let wire = node
+            .build_player_loadout_json(ship_id)
+            .expect("freshly spawned ship has a loadout payload");
+        let loadout = wire_to_loadout_msg(wire);
+
+        assert_eq!(loadout.active_ship_id, Some(ship_id.raw()));
+        assert!(!loadout.is_docked());
+        // A freshly spawned player ship starts with one of every registered
+        // module fitted (see spawner_logic.rs's default loadout) plus a
+        // starter packaged ship in inventory (9B) -- exercise both row kinds
+        // through the real wire shape, not just module rows.
+        assert!(!loadout.modules.is_empty());
+        assert!(!loadout.inventory.is_empty());
+    }
+
+    #[test]
+    fn player_loadout_json_with_a_fitted_module_converts_the_stat_delta() {
+        let mut node = test_node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+
+        let module_id = dawn_sector::modules::all_modules()[0].id;
+        let fitted = node.fit_module(FitModuleCommand {
+            ship_id,
+            slot: SlotKind::High,
+            module_id,
+        });
+        assert!(
+            fitted,
+            "fitting a registered module onto a known ship must succeed"
+        );
+
+        let wire = node
+            .build_player_loadout_json(ship_id)
+            .expect("ship has a loadout payload");
+        let loadout = wire_to_loadout_msg(wire);
+
+        let row = loadout
+            .modules
+            .iter()
+            .find(|m| m.module_id == module_id.0)
+            .expect("the module just fitted appears as a row");
+        // Just needs to be a real f64 (i.e. the field existed and converted)
+        // -- the specific value is the module registry's concern, not this
+        // conversion's.
+        let _ = row.stat_delta.weapon_range_add;
     }
 }

@@ -13,7 +13,7 @@ fn item_type_str(item_type: ItemType) -> &'static str {
     }
 }
 
-fn parse_item_type(item_type: &str) -> ItemType {
+pub(crate) fn parse_item_type(item_type: &str) -> ItemType {
     match item_type {
         "Module" => ItemType::Module,
         "PackagedShip" => ItemType::PackagedShip,

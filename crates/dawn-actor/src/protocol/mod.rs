@@ -22,8 +22,8 @@
 pub use dawn_wire::{
     client_command_from_json, client_command_json_schema, domain_event_to_event_json,
     domain_event_to_json, event_json_schema, parse_client_command, parse_hello, redirect_json,
-    ClientCommandJson, ClientMessage, EventJson, HelloMessage, PosJson, ResumeIdentity,
-    ServerMessage, VelJson, WarpTargetJson,
+    ClientCommandJson, ClientMessage, EventJson, HelloMessage, PlayerLoadoutJson, PosJson,
+    ResumeIdentity, ServerMessage, VelJson, WarpTargetJson,
 };
 
 #[cfg(test)]

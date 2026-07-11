@@ -39,7 +39,7 @@ func test_module_activated_message_emits_module_signal() -> void:
 		"slot": "Mid",
 		"tick": 4,
 	}
-	connection._handle_message(payload, JSON.stringify(payload))
+	connection._handle_message(payload, PackedByteArray())
 
 	assert_int(received.size()).is_equal(1)
 	assert_int((received[0] as Dictionary)["ship_id"]).is_equal(11)
@@ -48,46 +48,38 @@ func test_module_activated_message_emits_module_signal() -> void:
 	connection.free()
 
 
-## player_fitting_received carries the raw JSON line (not a parsed
-## Dictionary) so PlayerLoadout.apply_payload (dawn-client-gdext) gets the
-## server's exact wire text -- round-tripping a Dictionary through
-## JSON.stringify() would corrupt integers into floats (e.g. 20 -> "20.0"),
-## which serde_json rejects for u32/u64 fields.
-func test_player_loadout_message_emits_player_fitting_signal() -> void:
+## player_fitting_received carries the raw postcard bytes (ADR-0042), not a
+## parsed Dictionary -- PlayerLoadout.apply_wire_bytes (dawn-client-gdext)
+## decodes them directly into typed Rust state, with no lossy Dictionary/
+## JSON round-trip in between. `_handle_message` just needs to forward
+## whatever bytes it was given unchanged.
+func test_player_loadout_message_emits_player_fitting_signal_with_the_raw_bytes() -> void:
 	var connection: Node = Connection.new()
 	var received: Array = []
-	connection.player_fitting_received.connect(func(raw_json: String) -> void:
-		received.append(raw_json)
+	connection.player_fitting_received.connect(func(bytes: PackedByteArray) -> void:
+		received.append(bytes)
 	)
 
-	var payload := {
-		"type": "PlayerLoadout",
-		"modules": [{"module_id": 3}],
-		"inventory": [],
-	}
-	connection._handle_message(payload, JSON.stringify(payload))
+	var payload := {"type": "PlayerLoadout"}
+	var bytes := PackedByteArray([1, 2, 3])
+	connection._handle_message(payload, bytes)
 
 	assert_int(received.size()).is_equal(1)
-	var parsed: Dictionary = JSON.parse_string(received[0] as String) as Dictionary
-	assert_int((((parsed["modules"] as Array)[0] as Dictionary)["module_id"] as float) as int).is_equal(3)
+	assert_that(received[0]).is_equal(bytes)
 	connection.free()
 
 
 func test_legacy_player_fitting_message_still_emits_player_fitting_signal() -> void:
 	var connection: Node = Connection.new()
 	var received: Array = []
-	connection.player_fitting_received.connect(func(raw_json: String) -> void:
-		received.append(raw_json)
+	connection.player_fitting_received.connect(func(bytes: PackedByteArray) -> void:
+		received.append(bytes)
 	)
 
-	var payload := {
-		"type": "PlayerFitting",
-		"modules": [{"module_id": 7}],
-		"inventory": [],
-	}
-	connection._handle_message(payload, JSON.stringify(payload))
+	var payload := {"type": "PlayerFitting"}
+	var bytes := PackedByteArray([4, 5, 6])
+	connection._handle_message(payload, bytes)
 
 	assert_int(received.size()).is_equal(1)
-	var parsed: Dictionary = JSON.parse_string(received[0] as String) as Dictionary
-	assert_int((((parsed["modules"] as Array)[0] as Dictionary)["module_id"] as float) as int).is_equal(7)
+	assert_that(received[0]).is_equal(bytes)
 	connection.free()

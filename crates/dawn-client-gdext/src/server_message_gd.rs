@@ -67,5 +67,16 @@ fn server_message_to_dict(msg: &ServerMessage) -> Dict {
                 Dict::new()
             }
         },
+        // PlayerLoadout is deliberately not materialized into a Dictionary
+        // here: `PlayerLoadout.apply_wire_bytes` (loadout_gd.rs) decodes the
+        // same raw bytes directly into typed Rust state for precision and
+        // richer behavior (capacitor simulation, etc). This is just the
+        // dispatch tag connection.gd's `_handle_message` needs to route the
+        // raw bytes there.
+        ServerMessage::PlayerLoadout(_) => {
+            let mut d = Dict::new();
+            d.set("type", "PlayerLoadout");
+            d
+        }
     }
 }

@@ -9,12 +9,14 @@ publish.workspace     = true
 # dawn-client-core must not depend on Godot/GDExtension, dawn-sector, or
 # dawn-actor at runtime -- it is a pure Rust library shared between the
 # (future) GDExtension binding and its own test suite. See ADR-0039.
+#
+# ADR-0042: the dawn-sector "server contract test" (proving the real
+# server's PlayerLoadout wire payload parses into this crate's types) moved
+# to dawn-client-gdext, since the conversion is now an explicit function
+# (wire_to_loadout_msg) living there, not a shared Deserialize impl this
+# crate could exercise directly against dawn-sector's JSON output.
 [dependencies]
-dawn-core = { path = "../dawn-core" }
-serde     = { workspace = true }
+serde = { workspace = true }
 
 [dev-dependencies]
-dawn-sector      = { path = "../dawn-sector" }
-dawn-ecs         = { path = "../dawn-ecs" }
-dawn-event-store = { path = "../dawn-event-store" }
-serde_json       = "1"
+serde_json = "1"

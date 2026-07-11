@@ -181,10 +181,52 @@ GDScript側の既存コンシューマ（`main.gd`/`hud_manager.gd`）には影�
 合わせて更新済み（実際のワイヤはpostcardバイナリなので、JSONスキーマは
 フィールド形状のドキュメントとしてのみ意味を持つ）。
 
-### 段階2（後続タスク・別PR）
+### 段階2a（`PlayerLoadout`、2026-07-11 完了）
 
-- [ ] `InitialState`/`AoiEnter`/`PlayerLoadout` を固定 Rust 構造体に起こす
-      （`serialization.rs`/`aoi.rs`/`ship_registry.rs`/`player_loadout_projection.rs`/
+- [x] `dawn-wire`: `PlayerLoadoutJson`/`ModuleRowJson`/`ItemRowJson`/
+      `SlotCapacityJson`/`OwnedShipRowJson` を新設。`ModuleKind`/`StatDelta`
+      は `dawn-core` の既存型を再利用（重複定義しない）
+      （`ClientCommandJson`/`EventJson` は独自の decoupled mirror 型を持つが、
+      `PlayerLoadoutJson` はサーバー専用の一方向シリアライズなので、
+      dawn-client-core 側の decoupled mirror -- `Unknown` フォールバック等
+      -- は据え置き、dawn-wire 側は re-evaluate 不要と判断）
+- [x] `ServerMessage::PlayerLoadout(PlayerLoadoutJson)` を追加
+- [x] `dawn-sector`: DAGに`dawn-wire`依存を追加（`dawn-core`+serde+postcard
+      のみの葉クレートで、既存の「dawn-actorへは依存しない」方針に反しない
+      と判断——`dawn-actor`とは違いトランスポート依存を一切持ち込まない）。
+      `player_loadout_projection.rs`/`serialization.rs`
+      (`HandoffPayload.player_loadout`) を `serde_json::Value` から
+      `PlayerLoadoutJson` 直接構築に書き換え
+- [x] `dawn-actor/src/ws_server.rs`: `HandshakeRequest::complete`/
+      `WsServer::handshake`の`player_loadout`引数を`Option<PlayerLoadoutJson>`
+      化し、`ServerMessage::PlayerLoadout`としてbinary送信。`RefreshFitting`
+      followup（`runtime.rs`/`cluster.rs`/`single.rs`）も同様に
+      `send_raw`→`send_message`
+- [x] `dawn-client-gdext`: `ServerMessageDecoder`のPlayerLoadout分岐は
+      `{"type":"PlayerLoadout"}`という素のタグのみ返す（実データは
+      Dictionary化しない）。`PlayerLoadout.apply_wire_bytes`（新設）が生バイト列を
+      直接`dawn_client_core::PlayerLoadoutMsg`へ変換（`wire_to_loadout_msg`、
+      手書きconversion関数——両型ともこのクレートにとって外部型なので
+      `From` implは orphan rule 違反、よってフリー関数）。旧`apply_payload`
+      （JSON文字列版）はテスト/デバッグ専用として維持（本番の`connection.gd`
+      からは呼ばれない）
+- [x] `connection.gd`: `player_fitting_received`シグナルをString(raw JSON)
+      から`PackedByteArray`(raw postcard bytes)に変更。`_handle_message`の
+      "PlayerLoadout"/"PlayerFitting"分岐は生バイト列をそのままemit
+- [x] `main.gd`: `_on_player_fitting`の実処理を`_apply_loadout_side_effects`
+      へ分離（テストが`_loadout.apply_payload()`経由でwireバイトなしに
+      駆動できるように）
+- [x] `dawn-client-core`: サーバーcontract testを`dawn-client-gdext`へ移設
+      （`wire_to_loadout_msg`はこのクレートに実在するため、旧テストの
+      `dawn-sector`依存はもう不要になり削除）
+- [x] `cargo fmt --all -- --check` / `cargo test --workspace` /
+      `cargo clippy --workspace -- -D warnings` / `cargo machete` 全件通過。
+      GdUnit4 202/202 pass
+
+### 段階2b/2c（後続タスク・別PR）
+
+- [ ] `InitialState`/`AoiEnter` を固定 Rust 構造体に起こす
+      （`serialization.rs`/`aoi.rs`/`ship_registry.rs`/
       `client_admission.rs`/`runtime.rs`/`aoi_delivery.rs`/`cluster.rs`/`single.rs`）
 - [ ] 上記を `ServerMessage` に合流させ、`send_raw`（JSON text）経路を撤去
 - [ ] `WsClientConnection::send_raw` の削除（全メッセージが `ServerMessage` 経由になった時点で）

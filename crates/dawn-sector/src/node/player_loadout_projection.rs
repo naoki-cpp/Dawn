@@ -6,65 +6,64 @@
 use dawn_core::{ItemId, PlayerId, ShipId};
 use dawn_ecs::components::{FittingComp, InventoryComp};
 use dawn_event_store::store::EventStore;
+use dawn_wire::{
+    ItemRowJson, ModuleRowJson, OwnedShipRowJson, PlayerLoadoutJson, SlotCapacityJson,
+};
 
 use super::SimulationNode;
 
 impl<S: EventStore> SimulationNode<S> {
-    /// The one seam every ItemRow wire row (ship cargo, station inventory)
-    /// goes through. The client's `ItemRow.from_json()` requires all of
-    /// `item_type`/`module_id`/`ship_type_id`/`name`/`kind`/`slot`/`count` on
-    /// every row and silently drops (push_error + null) any row missing one
-    /// -- `0`/`""` fill the fields a given `ItemId` variant doesn't use, so
-    /// the invariant is enforced here instead of copy-pasted at each call
-    /// site. `None` if the registry backing `item_id` no longer has a
+    /// The one seam every `ItemRowJson` (ship cargo, station inventory) goes
+    /// through. `0`/`""` fill the fields a given `ItemId` variant doesn't
+    /// use. `None` if the registry backing `item_id` no longer has a
     /// definition for it (stale/renamed module or ship type).
-    fn item_id_to_row_json(&self, item_id: ItemId, count: u64) -> Option<serde_json::Value> {
+    fn item_id_to_row_json(&self, item_id: ItemId, count: u64) -> Option<ItemRowJson> {
         match item_id {
-            ItemId::Module(module_id) => self.module_registry.get(&module_id).map(|def| {
-                serde_json::json!({
-                    "item_type": "Module",
-                    "module_id": def.id.0,
-                    "ship_type_id": 0,
-                    "name": def.name,
-                    "kind": format!("{:?}", def.kind),
-                    "slot": format!("{:?}", def.slot),
-                    "count": count,
-                })
-            }),
-            ItemId::PackagedShip(ship_type_id) => {
-                self.ship_type_registry.get(&ship_type_id).map(|def| {
-                    serde_json::json!({
-                        "item_type": "PackagedShip",
-                        "module_id": 0,
-                        "ship_type_id": def.id.0,
-                        "name": def.name,
-                        "kind": "",
-                        "slot": "",
-                        "count": count,
-                    })
+            ItemId::Module(module_id) => {
+                self.module_registry.get(&module_id).map(|def| ItemRowJson {
+                    item_type: "Module".to_string(),
+                    module_id: def.id.0,
+                    ship_type_id: 0,
+                    name: def.name.clone(),
+                    kind: format!("{:?}", def.kind),
+                    slot: format!("{:?}", def.slot),
+                    count,
                 })
             }
-            ItemId::ScrapMetal => Some(serde_json::json!({
-                "item_type": "ScrapMetal",
-                "module_id": 0,
-                "ship_type_id": 0,
-                "name": "Scrap Metal",
-                "kind": "",
-                "slot": "",
-                "count": count,
-            })),
+            ItemId::PackagedShip(ship_type_id) => {
+                self.ship_type_registry
+                    .get(&ship_type_id)
+                    .map(|def| ItemRowJson {
+                        item_type: "PackagedShip".to_string(),
+                        module_id: 0,
+                        ship_type_id: def.id.0,
+                        name: def.name.clone(),
+                        kind: String::new(),
+                        slot: String::new(),
+                        count,
+                    })
+            }
+            ItemId::ScrapMetal => Some(ItemRowJson {
+                item_type: "ScrapMetal".to_string(),
+                module_id: 0,
+                ship_type_id: 0,
+                name: "Scrap Metal".to_string(),
+                kind: String::new(),
+                slot: String::new(),
+                count,
+            }),
         }
     }
 
-    /// Return the player ship's loadout state as a PlayerLoadout JSON message.
+    /// Return the player ship's loadout state as a PlayerLoadout wire message.
     ///
     /// Sent after Welcome + InitialState on connect, and again after every
     /// Fit/Unfit (ADR-0032).
-    pub fn build_player_loadout_json(&self, ship_id: ShipId) -> Option<String> {
+    pub fn build_player_loadout_json(&self, ship_id: ShipId) -> Option<PlayerLoadoutJson> {
         let entity = self.ships.index.get(&ship_id)?;
         let fitting = self.world.inner().get::<&FittingComp>(*entity).ok()?;
 
-        let mut modules: Vec<serde_json::Value> = Vec::new();
+        let mut modules: Vec<ModuleRowJson> = Vec::new();
         let slot_names = [
             ("High", &fitting.high),
             ("Mid", &fitting.mid),
@@ -73,35 +72,25 @@ impl<S: EventStore> SimulationNode<S> {
         ];
         for (slot_name, slots) in &slot_names {
             for (i, slot) in slots.iter().enumerate() {
-                let d = &slot.def.stat_delta;
-                modules.push(serde_json::json!({
-                    "slot": slot_name,
-                    "index": i,
-                    "module_id": slot.def.id.0,
-                    "name": slot.def.name,
-                    "kind": format!("{:?}", slot.def.kind),
-                    "is_active": slot.is_active,
-                    "is_active_module": matches!(slot.def.activation_mode, dawn_core::ActivationMode::Active),
-                    "cap_cost_per_cycle": slot.def.cap_cost_per_cycle,
-                    "cycle_time_ticks": slot.def.cycle_time_ticks,
-                    "stat_delta": {
-                        "weapon_damage_add": d.weapon_damage_add,
-                        "weapon_range_add": d.weapon_range_add,
-                        "falloff_range_add": d.falloff_range_add,
-                        "tracking_speed_add": d.tracking_speed_add,
-                        "speed_multiplier": d.speed_multiplier,
-                        "mass_add": d.mass_add,
-                        "max_shield_add": d.max_shield_add,
-                        "max_armor_add": d.max_armor_add,
-                        "max_hull_add": d.max_hull_add,
-                        "tackle_range_add": d.tackle_range_add,
-                        "repair_range_add": d.repair_range_add,
-                    },
-                }));
+                modules.push(ModuleRowJson {
+                    slot: slot_name.to_string(),
+                    index: i as u32,
+                    module_id: slot.def.id.0,
+                    name: slot.def.name.clone(),
+                    kind: slot.def.kind,
+                    is_active: slot.is_active,
+                    is_active_module: matches!(
+                        slot.def.activation_mode,
+                        dawn_core::ActivationMode::Active
+                    ),
+                    cap_cost_per_cycle: slot.def.cap_cost_per_cycle,
+                    cycle_time_ticks: slot.def.cycle_time_ticks,
+                    stat_delta: slot.def.stat_delta,
+                });
             }
         }
 
-        let inventory: Vec<serde_json::Value> = self
+        let inventory: Vec<ItemRowJson> = self
             .world
             .inner()
             .get::<&InventoryComp>(*entity)
@@ -133,33 +122,32 @@ impl<S: EventStore> SimulationNode<S> {
             .get(&ship_id)
             .and_then(|t| self.ship_type_registry.get(t))
             .map(|d| d.slot_layout);
-        let slot_capacity = serde_json::json!({
-            "High": layout.map(|l| l.high).unwrap_or(0),
-            "Mid": layout.map(|l| l.mid).unwrap_or(0),
-            "Low": layout.map(|l| l.low).unwrap_or(0),
-            "Rig": layout.map(|l| l.rig).unwrap_or(0),
-        });
+        let slot_capacity = SlotCapacityJson {
+            high: layout.map(|l| l.high).unwrap_or(0),
+            mid: layout.map(|l| l.mid).unwrap_or(0),
+            low: layout.map(|l| l.low).unwrap_or(0),
+            rig: layout.map(|l| l.rig).unwrap_or(0),
+        };
 
-        Some(
-            serde_json::json!({
-                "type": "PlayerLoadout",
-                "tick": self.current_tick.value(),
-                "modules": modules,
-                "inventory": inventory,
-                "station_inventory": station_inventory,
-                "docked_station_id": docked_station_id.map(|id| id.0),
-                "docked_station_name": docked_station_name,
-                "slot_capacity": slot_capacity,
-                "active_ship_id": active_ship_id.map(|id| id.raw()),
-                "owned_ships": owned_ships,
-            })
-            .to_string(),
-        )
+        Some(PlayerLoadoutJson {
+            tick: self.current_tick.value(),
+            modules,
+            inventory,
+            station_inventory,
+            docked_station_id: docked_station_id.map(|id| id.0),
+            docked_station_name,
+            slot_capacity,
+            active_ship_id: active_ship_id.map(|id| id.raw()),
+            owned_ships,
+        })
     }
 
     /// Same wire message as [`Self::build_player_loadout_json`], keyed by
     /// `player_id` instead of a specific ship.
-    pub fn build_player_loadout_json_for_player(&self, player_id: PlayerId) -> Option<String> {
+    pub fn build_player_loadout_json_for_player(
+        &self,
+        player_id: PlayerId,
+    ) -> Option<PlayerLoadoutJson> {
         if let Some(ship_id) = self.ships.active_ship.get(&player_id).copied() {
             return self.build_player_loadout_json(ship_id);
         }
@@ -170,30 +158,26 @@ impl<S: EventStore> SimulationNode<S> {
         let station_inventory = self.station_inventory_json(player_id);
         let owned_ships = self.owned_ships_json(player_id);
 
-        Some(
-            serde_json::json!({
-                "type": "PlayerLoadout",
-                "tick": self.current_tick.value(),
-                "modules": Vec::<serde_json::Value>::new(),
-                "inventory": Vec::<serde_json::Value>::new(),
-                "station_inventory": station_inventory,
-                "docked_station_id": docked_station_id.map(|id| id.0),
-                "docked_station_name": docked_station_name,
-                "slot_capacity": serde_json::json!({
-                    "High": 0,
-                    "Mid": 0,
-                    "Low": 0,
-                    "Rig": 0,
-                }),
-                "active_ship_id": Option::<u64>::None,
-                "owned_ships": owned_ships,
-            })
-            .to_string(),
-        )
+        Some(PlayerLoadoutJson {
+            tick: self.current_tick.value(),
+            modules: Vec::new(),
+            inventory: Vec::new(),
+            station_inventory,
+            docked_station_id: docked_station_id.map(|id| id.0),
+            docked_station_name,
+            slot_capacity: SlotCapacityJson {
+                high: 0,
+                mid: 0,
+                low: 0,
+                rig: 0,
+            },
+            active_ship_id: None,
+            owned_ships,
+        })
     }
 
     /// Every ship `player_id` owns, active or not.
-    fn owned_ships_json(&self, player_id: PlayerId) -> Vec<serde_json::Value> {
+    fn owned_ships_json(&self, player_id: PlayerId) -> Vec<OwnedShipRowJson> {
         let active_ship_id = self.ships.active_ship.get(&player_id).copied();
         self.ships
             .owners
@@ -204,20 +188,20 @@ impl<S: EventStore> SimulationNode<S> {
                 let ship_type_name = ship_type_id
                     .and_then(|t| self.ship_type_registry.get(&t))
                     .map(|def| def.name.clone());
-                serde_json::json!({
-                    "ship_id": ship_id.raw(),
-                    "ship_type_id": ship_type_id.map(|t| t.0),
-                    "ship_type_name": ship_type_name,
-                    "docked_station_id": self.docked_station(ship_id).map(|id| id.0),
-                    "is_active": Some(ship_id) == active_ship_id,
-                })
+                OwnedShipRowJson {
+                    ship_id: ship_id.raw(),
+                    ship_type_id: ship_type_id.map(|t| t.0),
+                    ship_type_name,
+                    docked_station_id: self.docked_station(ship_id).map(|id| id.0),
+                    is_active: Some(ship_id) == active_ship_id,
+                }
             })
             .collect()
     }
 
     /// Station inventory as wire rows for `player_id`, empty if the player
     /// isn't currently docked anywhere.
-    fn station_inventory_json(&self, player_id: PlayerId) -> Vec<serde_json::Value> {
+    fn station_inventory_json(&self, player_id: PlayerId) -> Vec<ItemRowJson> {
         let Some(station_id) = self.player_docked_station(player_id) else {
             return Vec::new();
         };
@@ -268,29 +252,21 @@ mod tests {
             .unwrap()
             .add_item(ItemId::ScrapMetal, 3);
 
-        let json = node.build_player_loadout_json(ship_id).unwrap();
-        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let inventory = payload["inventory"].as_array().unwrap();
-        let scrap = inventory
+        let payload = node.build_player_loadout_json(ship_id).unwrap();
+        let scrap = payload
+            .inventory
             .iter()
-            .find(|row| row["item_type"] == "ScrapMetal")
+            .find(|row| row.item_type == "ScrapMetal")
             .unwrap();
-        assert_eq!(scrap["name"], "Scrap Metal");
-        assert_eq!(scrap["count"].as_u64().unwrap(), 3);
+        assert_eq!(scrap.name, "Scrap Metal");
+        assert_eq!(scrap.count, 3);
     }
 
+    /// `ItemRowJson` always carries every field by construction (the type
+    /// system enforces this now, not a runtime shape check) -- this test
+    /// only confirms the three `ItemId` variants each produce a row.
     #[test]
-    fn every_item_row_carries_all_the_keys_item_row_gd_requires() {
-        const REQUIRED_KEYS: &[&str] = &[
-            "item_type",
-            "module_id",
-            "ship_type_id",
-            "name",
-            "kind",
-            "slot",
-            "count",
-        ];
-
+    fn every_item_id_variant_produces_a_row_in_the_loadout_payload() {
         let mut node = mem_node();
         for def in crate::modules::all_modules() {
             node.register_module(def);
@@ -328,37 +304,17 @@ mod tests {
             },
         );
 
-        let json = node.build_player_loadout_json(ship_id).unwrap();
-        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let payload = node.build_player_loadout_json(ship_id).unwrap();
 
-        let mut rows: Vec<&serde_json::Value> =
-            payload["inventory"].as_array().unwrap().iter().collect();
-        rows.extend(payload["station_inventory"].as_array().unwrap().iter());
-        assert!(rows.iter().any(|r| r["item_type"] == "Module"));
-        assert!(rows.iter().any(|r| r["item_type"] == "ScrapMetal"));
-        assert!(rows.iter().any(|r| r["item_type"] == "PackagedShip"));
-        for row in &rows {
-            for key in REQUIRED_KEYS {
-                assert!(
-                    row.get(key).is_some(),
-                    "row {row:?} is missing required key '{key}'"
-                );
-            }
-        }
+        let mut rows: Vec<&ItemRowJson> = payload.inventory.iter().collect();
+        rows.extend(payload.station_inventory.iter());
+        assert!(rows.iter().any(|r| r.item_type == "Module"));
+        assert!(rows.iter().any(|r| r.item_type == "ScrapMetal"));
+        assert!(rows.iter().any(|r| r.item_type == "PackagedShip"));
     }
 
     #[test]
-    fn item_id_to_row_json_fills_every_required_key_for_every_item_id_variant() {
-        const REQUIRED_KEYS: &[&str] = &[
-            "item_type",
-            "module_id",
-            "ship_type_id",
-            "name",
-            "kind",
-            "slot",
-            "count",
-        ];
-
+    fn item_id_to_row_json_carries_the_count_for_every_item_id_variant() {
         let mut node = mem_node();
         for def in crate::modules::all_modules() {
             node.register_module(def);
@@ -375,10 +331,7 @@ mod tests {
             ItemId::ScrapMetal,
         ] {
             let row = node.item_id_to_row_json(item_id, 3).unwrap();
-            for key in REQUIRED_KEYS {
-                assert!(row.get(key).is_some());
-            }
-            assert_eq!(row["count"].as_u64().unwrap(), 3);
+            assert_eq!(row.count, 3);
         }
     }
 
@@ -418,16 +371,18 @@ mod tests {
             StationOperationOutcome::Accepted { .. }
         ));
 
-        let json = node.build_player_loadout_json(ship_id).unwrap();
-        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(payload["docked_station_id"].as_u64().unwrap(), 0);
-        assert_eq!(payload["docked_station_name"], "Forge Station");
-        let station_inventory = payload["station_inventory"].as_array().unwrap();
-        let scrap = station_inventory
+        let payload = node.build_player_loadout_json(ship_id).unwrap();
+        assert_eq!(payload.docked_station_id, Some(0));
+        assert_eq!(
+            payload.docked_station_name.as_deref(),
+            Some("Forge Station")
+        );
+        let scrap = payload
+            .station_inventory
             .iter()
-            .find(|row| row["item_type"] == "ScrapMetal")
+            .find(|row| row.item_type == "ScrapMetal")
             .unwrap();
-        assert_eq!(scrap["count"].as_u64().unwrap(), 5);
+        assert_eq!(scrap.count, 5);
     }
 
     #[test]
@@ -451,10 +406,9 @@ mod tests {
             StationOperationOutcome::Accepted { .. }
         ));
 
-        let json = node.build_player_loadout_json(ship_id).unwrap();
-        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(payload["docked_station_id"].is_null());
-        assert!(payload["docked_station_name"].is_null());
+        let payload = node.build_player_loadout_json(ship_id).unwrap();
+        assert_eq!(payload.docked_station_id, None);
+        assert_eq!(payload.docked_station_name, None);
     }
 
     #[test]
@@ -463,9 +417,8 @@ mod tests {
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship(player_id);
 
-        let json = node.build_player_loadout_json(ship_id).unwrap();
-        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(payload["active_ship_id"].as_u64().unwrap(), ship_id.raw());
+        let payload = node.build_player_loadout_json(ship_id).unwrap();
+        assert_eq!(payload.active_ship_id, Some(ship_id.raw()));
     }
 
     #[test]
@@ -474,12 +427,11 @@ mod tests {
         let player_id = node.next_player_id();
         node.docked_players.insert(player_id, StationId(0));
 
-        let json = node
+        let payload = node
             .build_player_loadout_json_for_player(player_id)
             .unwrap();
-        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(payload["active_ship_id"].is_null());
-        assert!(payload["modules"].as_array().unwrap().is_empty());
+        assert_eq!(payload.active_ship_id, None);
+        assert!(payload.modules.is_empty());
     }
 
     #[test]
@@ -500,11 +452,10 @@ mod tests {
         ));
         node.disembark_owned(player_id).unwrap();
 
-        let json = node
+        let payload = node
             .build_player_loadout_json_for_player(player_id)
             .unwrap();
-        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(payload["active_ship_id"].is_null());
+        assert_eq!(payload.active_ship_id, None);
     }
 
     #[test]
@@ -537,23 +488,23 @@ mod tests {
             )
             .unwrap();
 
-        let json = node.build_player_loadout_json(ship_id).unwrap();
-        let payload: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let owned_ships = payload["owned_ships"].as_array().unwrap();
-        assert_eq!(owned_ships.len(), 2);
+        let payload = node.build_player_loadout_json(ship_id).unwrap();
+        assert_eq!(payload.owned_ships.len(), 2);
 
-        let first_row = owned_ships
+        let first_row = payload
+            .owned_ships
             .iter()
-            .find(|row| row["ship_id"].as_u64().unwrap() == ship_id.raw())
+            .find(|row| row.ship_id == ship_id.raw())
             .unwrap();
-        assert!(first_row["is_active"].as_bool().unwrap());
-        assert_eq!(first_row["docked_station_id"].as_u64().unwrap(), 0);
+        assert!(first_row.is_active);
+        assert_eq!(first_row.docked_station_id, Some(0));
 
-        let second_row = owned_ships
+        let second_row = payload
+            .owned_ships
             .iter()
-            .find(|row| row["ship_id"].as_u64().unwrap() == second_ship_id.raw())
+            .find(|row| row.ship_id == second_ship_id.raw())
             .unwrap();
-        assert!(!second_row["is_active"].as_bool().unwrap());
-        assert_eq!(second_row["docked_station_id"].as_u64().unwrap(), 0);
+        assert!(!second_row.is_active);
+        assert_eq!(second_row.docked_station_id, Some(0));
     }
 }

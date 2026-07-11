@@ -132,10 +132,6 @@ dependencies = [
 name = "dawn-client-core"
 version = "0.1.0"
 dependencies = [
- "dawn-core",
- "dawn-ecs",
- "dawn-event-store",
- "dawn-sector",
  "serde",
  "serde_json",
 ]
@@ -146,6 +142,7 @@ version = "0.1.0"
 dependencies = [
  "dawn-client-core",
  "dawn-core",
+ "dawn-sector",
  "dawn-wire",
  "godot",
  "serde_json",
@@ -209,6 +206,7 @@ dependencies = [
  "dawn-core",
  "dawn-ecs",
  "dawn-event-store",
+ "dawn-wire",
  "postcard",
  "rand",
  "rusqlite",

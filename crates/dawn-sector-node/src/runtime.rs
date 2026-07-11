@@ -105,8 +105,9 @@ impl SectorNodeRuntime {
                         break;
                     }
                     Some(ClientCommandFollowup::RefreshFitting(player_id)) => {
-                        if let Some(json) = node.build_player_loadout_json_for_player(player_id) {
-                            sess.send_raw(&json);
+                        if let Some(loadout) = node.build_player_loadout_json_for_player(player_id)
+                        {
+                            sess.send_message(&ServerMessage::PlayerLoadout(loadout));
                         }
                     }
                     None => {}
