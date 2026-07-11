@@ -95,7 +95,29 @@ func test_transfer_from_station_command_sets_to_ship_direction() -> void:
 
 
 func test_undock_command_has_no_extra_fields() -> void:
-	var line: String = _cmd.undock_command()
+	var line: String = _cmd.build("UndockCommand", {})
 	var d: Dictionary = JSON.parse_string(line)
 	assert_str(d["type"]).is_equal("UndockCommand")
 	assert_int(d.size()).is_equal(1)
+
+
+## Contract tests for the schema-driven `build()` seam (added when the 14
+## flat-scalar commands were collapsed out of individual #[func] wrappers --
+## see ADR-0041's follow-up note). These exercise `build()` itself rather
+## than one specific command, since all 14 collapsed commands share this one
+## mechanism.
+func test_build_produces_the_tagged_json_line_for_a_simple_command() -> void:
+	var line: String = _cmd.build("DockCommand", {"station_id": 7})
+	var d: Dictionary = JSON.parse_string(line)
+	assert_str(d["type"]).is_equal("DockCommand")
+	assert_int(int(d["station_id"])).is_equal(7)
+
+
+func test_build_returns_empty_string_for_an_unknown_field_name() -> void:
+	var line: String = _cmd.build("DockCommand", {"statoin_id": 7})
+	assert_str(line).is_equal("")
+
+
+func test_build_returns_empty_string_for_a_missing_required_field() -> void:
+	var line: String = _cmd.build("DockCommand", {})
+	assert_str(line).is_equal("")
