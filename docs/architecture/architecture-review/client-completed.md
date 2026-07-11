@@ -37,7 +37,7 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 
 ---
 
-## テストカバレッジ（C-1 完了時点 + 以降の回帰テスト追加、2026-07-10 実測で更新）
+## テストカバレッジ（C-1 完了時点 + 以降の回帰テスト追加、2026-07-11 実測で更新）
 
 | テストファイル | 対象 | ケース数 |
 |---|---|---|
@@ -56,7 +56,8 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 | `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy / dock state） | 13 |
 | `world_interaction_test.gd` | `WorldInteraction`（selection ownership / double-click / lock intent / key action 解釈） | 8 |
 | `world_presentation_test.gd` | `WorldPresentation`（marker clamp / warp tunnel easing / sun state） | 6 |
-| **合計** | | **186**（`func test_` 実測、2026-07-10。`player_loadout_test.gd`（旧18ケース）は ADR-0039/0040 で `dawn-client-core` の Rust ユニットテストへ移植し削除。C-9解消でのファイル分割は移動のみで件数変化なし） |
+| `client_command_gd_test.gd` | `ClientCommand`/`ClientMessageDecoder`（ADR-0041、前回計測時に本表への記載漏れ）。2026-07-11、ADR-0042でpostcardバイナリ化に伴い`ClientMessageDecoder`（テスト専用デコーダ）経由のアサーションへ書き換え、`build()`契約テスト3件・`hello_command`テスト2件を追加 | 16 |
+| **合計** | | **202**（`func test_` 実測、2026-07-11。`player_loadout_test.gd`（旧18ケース）は ADR-0039/0040 で `dawn-client-core` の Rust ユニットテストへ移植し削除。C-9解消でのファイル分割は移動のみで件数変化なし。`client_command_gd_test.gd` の前回計測漏れ（11件）+ ADR-0042の新規テスト5件を今回追加） |
 
 テスト導入で見つかった不具合・定着した手順（詳細: `docs/process/godot-client-testing.md`）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる

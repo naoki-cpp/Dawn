@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-07-10（定期再計測 その3。PR #129（`/improve-codebase-architecture` 候補）で `dawn-client-gdext::apply_module_activation` を `dawn-client-core` へ委譲、`loadout.rs` 337→373・`loadout_gd.rs` 271→267 を反映。他の全ファイルは前回計測（同日）から変化なし。server 総合 B+ 維持、client 側は別途 client.md 参照）
+date     : 2026-07-11（定期再計測 その4。ADR-0041/0042（dawn-wire新設 + コマンド送信/ワイヤプロトコルのpostcardバイナリ化）を反映。`dawn-actor/src/protocol/{client_command,server_event,hello_resume}.rs` が `dawn-wire` へ全面移動（`protocol/mod.rs` は再エクスポートのみに縮小）。`dawn-client-gdext` に `client_command_gd.rs`（332、ADR-0041由来+今回`ClientMessageDecoder`追加）・`server_message_gd.rs`（71、新設）・`json_variant.rs`（55、新設）を追加記録。`inventory.rs` 851→903（PR #119/#121/#131の反映漏れ）・`ws_server.rs`/`runtime.rs` も再計測。server 総合 B+ 維持、client 側は別途 client.md 参照）
 ---
 
 # Architecture Review — Dawn Codebase（構造評価）
@@ -22,19 +22,22 @@ issue の詳細・保留判断・トリガーは
 
 ## 現状評価
 
-**総合: B+**（2026-07-10 再計測で維持。前回 2026-07-09 レビュー以降、ADR-0038
-station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573・`warp.rs`
-1024→1093・`transit_flow.rs` 863→949・`orbit.rs` 790→862・`mod.rs` 783→859・
-`inventory.rs` 783→851 と全面的に行数が伸びたが、impl（テスト除く）はどのファイルも
-700行未満（最大は `commands.rs` の約687）で、R-3 のトリガーはまだ未発火。責務単位の
-分割自体は保たれているため B+ を維持）
+**総合: B+**（2026-07-11 再計測で維持。ADR-0041/0042 で `dawn-actor/src/protocol/`
+配下の3ファイル（`client_command.rs`/`server_event.rs`/`hello_resume.rs`）が
+`dawn-wire`（新クレート、`dawn-core`+serde+postcardのみ依存）へ全面移動し、
+`protocol/mod.rs` は再エクスポートのみの薄い入口に縮小（825）。`dawn-client-gdext`
+にはワイヤ送受信のGDExtensionクラス3ファイルを追加記録（`client_command_gd.rs`
+332・`server_message_gd.rs`71・`json_variant.rs`55）。DAGへの逆依存なし、責務は
+既存の分割方針（M-4/R-5の系譜）に整合。`inventory.rs` 851→903 は前回計測時の
+反映漏れ（PR #119/#121/#131）を今回捕捉したのみで新規増分ではない。R-3
+（`commands.rs` 1573、impl約687）のトリガーは引き続き未発火）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
-| クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027）。M-7 解消で `ClientCommand` を `dawn-core` へ移動し DAG が整理された（`dawn-sector` が `dawn-actor` 非依存のまま dispatch を保持できるようになった）。Player Command Dispatch のための新 crate は引き続き不要。2026-07-10、`dawn-client-core`（Godot非依存クライアントドメインモデル、`dawn-core`のみに依存）と `dawn-client-gdext`（GDExtensionバインディング、cdylib、他クレートから依存されない葉ノード）を新設（ADR-0039/0040）。どちらもDAGの末端に追加され、既存クレートへの逆依存は発生していない |
-| ファイルサイズ | B+ | 2026-07-10 再計測。ADR-0038（station inventory SQLite 化）で新設された `station_inventory.rs`（378、bounded cache 層）・`command_station.rs`（164、station family dispatch）は責務単体で健全。一方 `commands.rs` 1573・`warp.rs` 1093・`transit_flow.rs` 949・`orbit.rs` 862・`mod.rs` 859・`inventory.rs` 851 は前回計測から軒並み70〜115行増え、watch 帯が強まった。R-3 のトリガー（impl 700行超）はまだ未発火（`commands.rs` が impl 約687で最も近い）ため軸の評価は B+ を維持するが、次回計測で `commands.rs` が最有力候補 |
+| クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027）。M-7 解消で `ClientCommand` を `dawn-core` へ移動し DAG が整理された（`dawn-sector` が `dawn-actor` 非依存のまま dispatch を保持できるようになった）。Player Command Dispatch のための新 crate は引き続き不要。2026-07-10、`dawn-client-core`（Godot非依存クライアントドメインモデル、`dawn-core`のみに依存）と `dawn-client-gdext`（GDExtensionバインディング、cdylib、他クレートから依存されない葉ノード）を新設（ADR-0039/0040）。2026-07-11、`dawn-wire`（client<->server wire schema、`dawn-core`+serde+postcardのみ依存、トランスポート/ランタイム依存なし）を新設（ADR-0041/0042）。`dawn-actor`（deserialize）と`dawn-client-gdext`（construct+serialize）の双方が同じ型を、不要な依存を持ち込まずに使える。3クレートともDAGの末端/葉ノードに追加され、既存クレートへの逆依存は発生していない |
+| ファイルサイズ | B+ | 2026-07-11 再計測。`dawn-actor/src/protocol/mod.rs` はADR-0041/0042で`dawn-wire`への実体移動が完了し825→再エクスポートのみ（実体は`dawn-wire`側の`client_command.rs`483/`server_event.rs`273/`hello_resume.rs`47が健全に保持）。`commands.rs` 1573・`warp.rs` 1093・`transit_flow.rs` 949・`orbit.rs` 862・`mod.rs` 859・`inventory.rs` 903 は前回計測から変化なし（`inventory.rs`のみ反映漏れ捕捉）。R-3 のトリガー（impl 700行超）はまだ未発火（`commands.rs` が impl 約687で最も近い）ため軸の評価は B+ を維持するが、次回計測で `commands.rs` が最有力候補 |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。`InventoryComp`（ADR-0032）・`RepairLayer`/`RepairApplied`（ADR-0033）・`ItemId`（ADR-0034、`dawn-core/src/item.rs`）も既存型設計に整合 |
-| 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。AoI delivery、production runtime、Command dispatch は deep module 化済み（M-7 解消で `apply_client_command` が `SimulationNode` に集約）。2026-07-08、`ItemId -> ItemRow` JSON変換の重複（`serialization.rs` 2箇所）を `item_id_to_row_json` へ集約し解消済み。残る両バイナリ間グルー重複（M-6）・Fit経路のテール重複（M-8）は許容判断のまま |
+| 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。AoI delivery、production runtime、Command dispatch は deep module 化済み（M-7 解消で `apply_client_command` が `SimulationNode` に集約）。2026-07-08、`ItemId -> ItemRow` JSON変換の重複（`serialization.rs` 2箇所）を `item_id_to_row_json` へ集約し解消済み。2026-07-11、M-10解消: postcard encode/decodeの3箇所分散呼び出しを`dawn-wire`の`ServerMessage`/`ClientMessage::encode/decode`へ集約。残る両バイナリ間グルー重複（M-6）・Fit経路のテール重複（M-8）は許容判断のまま |
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。`TransitOp::Commit` は ADR-0032 で `Box<ShipSnapshot>` 化しサイズ非対称を解消済み |
 | AI開発由来 | A− | 命名汚染なし。残る `SectorSimulatorActor` の密結合（M-3）は本番パス外の in-process 専用で実害小 |
 
@@ -72,14 +75,14 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 | `crates/dawn-sector/src/node/command_station.rs` | 164 | 🟢 **新規記録**（本表に未記載だった）。2026-07-09 新設。Station family（dock/undock/build/disassemble/select-active/assemble/disembark/transfer-to-station）の command dispatch を専有し、`commands.rs` から分離済み |
 | `crates/dawn-sector/src/node/station_inventory_db.rs` | 328 | 🟢 ADR-0038（2026-07-08）新設。SQLite（rusqlite）による Station inventory の永続化権威 |
 | `crates/dawn-sector/src/node/snapshot_io.rs` | 710 | 🟡 P7-pre + ADR-0032（inventory 永続化）。ほぼテストだが総行数が閾値を超えたため watch へ |
-| `crates/dawn-sector/src/node/inventory.rs` | 851 | 🟡 ADR-0032 新設。fit/unfit_module_owned + transfer + seed + テスト。大きいが責務は単一（impl 約283で700行未満）、総行数は watch 帯 |
+| `crates/dawn-sector/src/node/inventory.rs` | 903 | 🟡 ADR-0032 新設。fit/unfit_module_owned + transfer + seed + テスト。2026-07-08〜09、PR #119/#121/#131（drag-and-drop reorder・per-station inventory分割・SEC-3/4/5修正）で851→903。大きいが責務は単一（impl 約292で700行未満）、総行数は watch 帯 |
 | `crates/dawn-sector/src/node/commands.rs` | 1573 | 🟡 P7-1 + ADR-0032 + M-7（Issue #56）+ ADR-0035 + 9B station commands。command dispatch と操作検証の責務は保っているが、総行数は最大ファイルへ再肥大し続けている。impl（テスト除く）は約687で、R-3 のトリガー（700行超）に最も近い |
 | `crates/dawn-sector/src/node/player_loadout_projection.rs` | 559 | 🟢 2026-07-09 新設。PlayerLoadout / owned ships / station inventory の JSON projection を一元化した deep module。`item_id_to_row_json` もここで唯一化され、row schema drift を防ぐ |
 | `crates/dawn-sector/src/node/serialization.rs` | 485 | 🟢 InitialState / ship state / AoI / handoff payload の組み立てへ責務を縮小。PlayerLoadout projection を sibling module へ分離済み |
 | `crates/dawn-sector/src/galaxy.rs` | 459 | 🟢 ADR-0029 AU→units 変換・ゲート AU 化 |
 | `crates/dawn-sector/src/node/apply_event.rs` | 887 | 🟡 P7-pre + ADR-0032 + ADR-0035。replay apply の責務は単一。サイズは伸び続けており watch 帯だが、履歴再生の owner として一貫している（impl 約328で700行未満） |
 | `crates/dawn-sector/src/node/tackle.rs` | 345 | 🟢 P7-pre。ADR-0035（PR #62）で距離判定を `entity_absolute_f64` の f64 差分に修正（真 AU スケールでの f32 丸め対策・ADR-0029 パターン準拠）。PR #66 で手組みの delta 計算を `SimulationNode::ship_distance` 呼び出しに置換し未使用 `PositionComp` import を削除（358→345） |
-| `crates/dawn-sector/src/node/range_gate.rs` | 479（impl 150） | 🟢 ADR-0035 新設（PR #62）。Range Gate System（Step 5.5）— Weapon/Tackle/Remote Repair のターゲットが射程外に出たら強制 OFF（`ModuleDeactivated { forced_reason: OutOfRange }`）。PR #63 で flat-index 解決を `FittingComp::slot_at_flat_mut` に置換（403→382）。PR #66 で距離判定を `SimulationNode::ship_distance` 呼び出しに置換（382→362）。ADR-0036 で `effective_range_for_kind`/`process_range_gate` に Remote Repair 2 kind を追加 + 活性化/Range Gate/回復のテスト3件を追加（362→469） |
+| `crates/dawn-sector/src/node/range_gate.rs` | 478（impl 149） | 🟢 ADR-0035 新設（PR #62）。Range Gate System（Step 5.5）— Weapon/Tackle/Remote Repair のターゲットが射程外に出たら強制 OFF（`ModuleDeactivated { forced_reason: OutOfRange }`）。PR #63 で flat-index 解決を `FittingComp::slot_at_flat_mut` に置換（403→382）。PR #66 で距離判定を `SimulationNode::ship_distance` 呼び出しに置換（382→362）。ADR-0036 で `effective_range_for_kind`/`process_range_gate` に Remote Repair 2 kind を追加 + 活性化/Range Gate/回復のテスト3件を追加（362→469） |
 | `crates/dawn-sector/src/aoi.rs` | 629 | 🟢 `AoiDelivery`/`AoiSink`/`Observer`（旧 dawn-simulation・dawn-sector-node 重複の集約先）。半分弱はテスト。2026-07-01、`deliver_frame` を `<S: EventStore>` でジェネリック化 |
 | `crates/dawn-sector/src/anchor.rs` | 311 | 🟢 ADR-0029 新設（AnchorTable・静的 f64 アンカー絶対座標）。2026-07-07、`/improve-codebase-architecture` で `node/mod.rs` が再実装していた逆変換を `to_relative()` として新設し、`rebase()` をその合成に書き直し。座標合成代数の唯一の所有者になった（292→311） |
 | `crates/dawn-sector/src/transit.rs` | 419 | 🟢 PR #30 で `run_runtime_tick` / `RuntimeTickOutput` を追加。Request/Commit ハンドラが `prepare_transit_commit`/`handle_transit_commit` に委譲し Gate-lookup 知識を手放した。2026-07-02、`propose_jump` / `propose_auto_jump` を新設し、jump fallback outcome → `TransitOp::Request` 提案の組み立てを `dawn-sector-node`・`dawn-simulation` 双方の重複から集約 |
@@ -87,7 +90,7 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 | `crates/dawn-sector/src/persistence/snapshot.rs` | 201 | 🟢 ADR-0032 で `ShipSnapshot.inventory` 追加 |
 | `crates/dawn-sector/src/dilation.rs` | 164 | 🟢 |
 | `crates/dawn-sector/src/persistence/checkpoint.rs` | 174 | 🟢 |
-| `crates/dawn-sector/src/node/approach.rs` | 565（impl 182） | 🟢 R-1 新設（2026-06-23）。approach 系 + ADR-0031 で clear_steering_modes 連携。2026-07-01、独自の検証チェックリストを `orbit.rs` の `begin_maneuver` 呼び出しに置き換え、Orbit/KeepAtRange と完全に同じ経路を通るように統一。同日、`apply_approach_jump_fallback`（1行ラッパー）を `jump.rs` へ移設・削除し、`apply_approach_command_with_auto_jump` を `pub(super)` 化。PR #68（候補2）で `dest_in_ship_frame_abs` を `node/mod.rs` へ移設（4サブモジュールから呼ばれる共有アクセサのため、577→562） |
+| `crates/dawn-sector/src/node/approach.rs` | 566（impl 182） | 🟢 R-1 新設（2026-06-23）。approach 系 + ADR-0031 で clear_steering_modes 連携。2026-07-01、独自の検証チェックリストを `orbit.rs` の `begin_maneuver` 呼び出しに置き換え、Orbit/KeepAtRange と完全に同じ経路を通るように統一。同日、`apply_approach_jump_fallback`（1行ラッパー）を `jump.rs` へ移設・削除し、`apply_approach_command_with_auto_jump` を `pub(super)` 化。PR #68（候補2）で `dest_in_ship_frame_abs` を `node/mod.rs` へ移設（4サブモジュールから呼ばれる共有アクセサのため、577→562） |
 | `crates/dawn-sector/src/node/jump.rs` | 250（impl 89） | 🟢 新設（2026-07-01）。PR #54 で `apply_jump_with_fallback`（3択フォールバック）、PR #55 で `resolve_auto_jump`（auto-jump 判定）を追加。両 PR でテストも追加（186→250）。impl 88 行で健全 |
 | `crates/dawn-sector/src/node/tick.rs` | 267 | 🟢 P4-1 + ADR-0031 Step 2.55/2.56 + ADR-0033 Step 6.5 配線。PR #67 で cap-refit ループを `reapply_fitting` に、destroyed-ship 削除ループを `remove_ship` に置換（177→171） |
 | `crates/dawn-sector/src/spawner.rs` | 133 | 🟢 |
@@ -100,13 +103,19 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-actor/src/protocol/mod.rs` | 798 | 🟢 R-5 完了（2026-07-08）。wire protocol の公開面と統合テスト・schema freshness test を束ねる薄い入口に縮小 |
-| `crates/dawn-actor/src/protocol/client_command.rs` | 398 | 🟢 client -> server wire translation の deep module。`ClientCommandJson` / `parse_client_command` / schema 出力を集約 |
-| `crates/dawn-actor/src/protocol/server_event.rs` | 257 | 🟢 server -> client wire translation の deep module。`EventJson` / `domain_event_to_json` / redirect payload を集約 |
-| `crates/dawn-actor/src/protocol/hello_resume.rs` | 34 | 🟢 Hello / resume handshake の小さな補助モジュール |
+| `crates/dawn-actor/src/protocol/mod.rs` | 825 | 🟢 R-5 完了（2026-07-08）。wire protocol の公開面と統合テスト・schema freshness test を束ねる薄い入口に縮小。2026-07-11、`ClientCommandJson`/`EventJson`/Hello関連の実体は`dawn-wire`（下記）へ全面移動、ここは再エクスポートのみ（ADR-0041/0042） |
 | `crates/dawn-actor/src/client_connection.rs` | 260 | 🟢 ClientConnection trait + InProcess/Ws 実装 |
-| `crates/dawn-actor/src/ws_server.rs` | 275 | 🟢 M-4 集約（WsServer / PlayerSession）+ ADR-0032 `send_raw` |
+| `crates/dawn-actor/src/ws_server.rs` | 317 | 🟢 M-4 集約（WsServer / PlayerSession）。2026-07-11、Welcome/Redirect/Event/Hello/Commandをpostcardバイナリ化（ADR-0042） |
 | `crates/dawn-actor/src/lib.rs` | 41 | 🟢 |
+
+`dawn-wire`（ADR-0041/0042、client<->server wire schema、`dawn-core`+serde+postcardのみ依存）:
+
+| ファイル | 行数 | 判定 |
+|---|---|---|
+| `crates/dawn-wire/src/client_command.rs` | 483 | 🟢 client -> server wire translation の deep module。`ClientCommandJson` / `parse_client_command` / schema 出力を集約 |
+| `crates/dawn-wire/src/server_event.rs` | 273 | 🟢 server -> client wire translation の deep module。`EventJson` / `domain_event_to_json` / redirect payload を集約 |
+| `crates/dawn-wire/src/hello_resume.rs` | 47 | 🟢 Hello / resume handshake の小さな補助モジュール |
+| `crates/dawn-wire/src/lib.rs` | 97 | 🟢 crate doc + `ServerMessage`/`ClientMessage` 統合 enum |
 
 ### dawn-simulation（配線・起動）
 
@@ -142,14 +151,17 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 | `crates/dawn-client-gdext/src/loadout_gd.rs` | 267 | 🟢 2026-07-10 新設。`PlayerLoadout` GDExtension クラス。`dawn-client-core::PlayerLoadoutMsg` の薄いラッパー、Variant/GString ⇄ Rust 型変換のみでドメインロジックは持たない。同日PR #129で `apply_module_activation` の状態変更ロジックを `dawn-client-core` へ委譲し、ADR-0040 の thin-adapter 方針に完全準拠 |
 | `crates/dawn-client-gdext/src/module_row_gd.rs` | 253 | 🟢 2026-07-10 新設。`ModuleRow` GDExtension クラス。旧 GDScript の `equals()`/`clone()` API を維持し `hud_surface.gd` の diffing 実装が無改修で動くようにしている |
 | `crates/dawn-client-gdext/src/item_row_gd.rs` | 115 | 🟢 2026-07-10 新設。`ItemRow` GDExtension クラス |
-| `crates/dawn-client-gdext/src/lib.rs` | 19 | 🟢 crate doc + `#[gdextension]` エントリポイントのみ |
+| `crates/dawn-client-gdext/src/client_command_gd.rs` | 332 | 🟢 ADR-0041/0042。`ClientCommand` GDExtension クラス（コマンド送信、schema駆動`build()`）+ `ClientMessageDecoder`（テスト専用） |
+| `crates/dawn-client-gdext/src/server_message_gd.rs` | 71 | 🟢 2026-07-11新設（ADR-0042）。`ServerMessageDecoder`（postcardバイト列→Dictionary） |
+| `crates/dawn-client-gdext/src/json_variant.rs` | 55 | 🟢 2026-07-11新設（ADR-0042）。`ServerMessageDecoder`/`ClientMessageDecoder`共有のJSON⇄Variant変換ヘルパー |
+| `crates/dawn-client-gdext/src/lib.rs` | 24 | 🟢 crate doc + `#[gdextension]` エントリポイントのみ |
 
 ### その他クレート
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
 | `crates/dawn-consensus/src/state.rs` | 593 | 🟡 許容範囲（Raft 実装の核） |
-| `crates/dawn-sector-node/src/runtime.rs` | 256 | 🟢 production Node の jump fallback / tick stepping / replication publish 呼び出し / Redirect / AoI delivery を集約。本ファイルは orchestration のみ |
+| `crates/dawn-sector-node/src/runtime.rs` | 259 | 🟢 production Node の jump fallback / tick stepping / replication publish 呼び出し / Redirect / AoI delivery を集約。本ファイルは orchestration のみ。2026-07-11、Redirect送信を`protocol::redirect_json`+`send_raw`から`ServerMessage::Redirect`+`send_message`（postcardバイナリ）に置換（ADR-0042） |
 | `crates/dawn-sector-node/src/client_admission.rs` | 236 | 🟢 client admission state machine |
 | `crates/dawn-sector-node/src/main.rs` | 338 | 🟢 8D-4 本番バイナリ。config / TCP transport / accept channel / data loading の配線に縮小 |
 | `crates/dawn-core/src/events.rs` | 694 | 🟡 domain event 定義の中核。大きいが責務は単一で、wire/schema 変換や apply は持ち込まない。継続的な variant 追加で700行に近づいており次回計測で watch 候補 |

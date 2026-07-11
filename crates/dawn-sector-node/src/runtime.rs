@@ -5,7 +5,7 @@
 //! jump proposal fallback, runtime tick stepping, outbound replication,
 //! Redirect handling, and AoI delivery.
 
-use dawn_actor::{protocol, ws_server};
+use dawn_actor::{protocol::ServerMessage, ws_server};
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
@@ -216,8 +216,11 @@ impl SectorNodeRuntime {
         self.sessions.retain_mut(|sess| {
             if let Some(&dest) = jumped_ships.get(&sess.ship_id) {
                 if let Some(&ws_addr) = self.peer_ws.get(&dest) {
-                    let msg = protocol::redirect_json(ws_addr, sess.player_id, sess.ship_id);
-                    sess.conn.send_raw(&msg);
+                    sess.conn.send_message(&ServerMessage::Redirect {
+                        ws_addr: ws_addr.to_string(),
+                        player_id: sess.player_id.raw(),
+                        ship_id: sess.ship_id.raw(),
+                    });
                     println!("[Node] Redirect {:?} -> {ws_addr}", sess.player_id);
                 }
                 aoi_delivery.retain_players(|pid| pid != sess.player_id);

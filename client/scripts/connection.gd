@@ -46,14 +46,14 @@ var _ws              : WebSocketPeer = WebSocketPeer.new()
 var _connected       : bool          = false
 var _welcomed        : bool          = false   ## Welcome 受信済みか
 var _reconnect_timer : float         = 0.0
-var _buffer          : String        = ""
 var _server_url      : String        = SERVER_URL
-## ClientCommand is a GDExtension class (dawn-wire/dawn-client-gdext,
-## ADR-0041) -- globally registered, no preload needed. Its wire-line
-## builder methods take &self (matching every other GDExtension class in
-## this project, e.g. PlayerLoadout), so callers need an instance rather
+## ClientCommand/ServerMessageDecoder are GDExtension classes (dawn-wire/
+## dawn-client-gdext, ADR-0041/ADR-0042) -- globally registered, no preload
+## needed. Their methods take &self (matching every other GDExtension class
+## in this project, e.g. PlayerLoadout), so callers need an instance rather
 ## than calling the class name directly.
-var _cmd             : ClientCommand = ClientCommand.new()
+var _cmd             : ClientCommand         = ClientCommand.new()
+var _decoder         : ServerMessageDecoder  = ServerMessageDecoder.new()
 
 var player_id : int = -1
 var ship_id   : int = -1
@@ -96,82 +96,81 @@ func _process(delta: float) -> void:
 ## flying. Station inventory-management commands (Fit/Unfit/Dock/
 ## BuildPackagedShip/DisassembleShip) still carry an explicit ship_id.
 ##
-## ADR-0041: every send_* function below builds its wire JSON line via
-## `ClientCommand` (a `dawn-wire`-backed GDExtension class, globally
+## ADR-0041/ADR-0042: every send_* function below builds its wire message
+## via `ClientCommand` (a `dawn-wire`-backed GDExtension class, globally
 ## registered like `PlayerLoadout`/`ModuleRow`/`ItemRow` -- no preload
 ## needed), instead of hand-building a matching Dictionary + JSON.stringify.
 ## Commands with sentinel/exclusive-selection semantics (ADR-0031/ADR-0035)
 ## call a dedicated `_cmd.*_command()` method; everything else goes through
 ## `_cmd.build(type_tag, fields)`, which validates the field Dictionary by
-## deserializing it into `ClientCommandJson` itself (a later follow-up note
-## to ADR-0041 explains the split). The returned line already carries the
-## correct "type" tag; _send_line only applies the welcomed guard and the
-## trailing newline.
+## deserializing it into `ClientCommandJson` itself. Every method returns
+## postcard-encoded bytes already wrapped in the `ClientMessage::Command`
+## envelope (ADR-0042); `_send_bytes` only applies the welcomed guard.
 func send_move_command(target: Vector3) -> void:
-	_send_line(_cmd.move_command(target.x, target.y, target.z))
+	_send_bytes(_cmd.move_command(target.x, target.y, target.z))
 
 func send_lock_on_command(target_id: int) -> void:
-	_send_line(_cmd.build("LockOnCommand", {"target_id": target_id}))
+	_send_bytes(_cmd.build("LockOnCommand", {"target_id": target_id}))
 
 ## Active モジュールをオンにする。p_target_ship_id は Weapon/Tackle など
 ## ターゲットを要求する種別のときだけ指定する（-1 = 指定なし、ADR-0035）。
 func send_activate_module(p_module_id: int, p_slot: String, p_target_ship_id: int = -1) -> void:
-	_send_line(_cmd.activate_module_command(p_module_id, p_slot, p_target_ship_id))
+	_send_bytes(_cmd.activate_module_command(p_module_id, p_slot, p_target_ship_id))
 
 ## Active モジュールをオフにする。
 func send_deactivate_module(p_module_id: int, p_slot: String) -> void:
-	_send_line(_cmd.build("DeactivateModuleCommand", {"module_id": p_module_id, "slot": p_slot}))
+	_send_bytes(_cmd.build("DeactivateModuleCommand", {"module_id": p_module_id, "slot": p_slot}))
 
 ## [S キー] 減速停止コマンド。サーバーが thrust を逆方向に掛けて速度ゼロまで減速する。
 func send_stop_command() -> void:
-	_send_line(_cmd.build("StopCommand", {}))
+	_send_bytes(_cmd.build("StopCommand", {}))
 
 ## ジャンプゲート経由の Sector 移動を要求する（ADR-0009）。
 func send_jump_command(p_gate_id: int) -> void:
-	_send_line(_cmd.build("JumpCommand", {"gate_id": p_gate_id}))
+	_send_bytes(_cmd.build("JumpCommand", {"gate_id": p_gate_id}))
 
 ## [A キー] アプローチ（半自動操船）。選択した船へ自動接近する（ADR-0015）。
 func send_approach_command(p_target_id: int) -> void:
-	_send_line(_cmd.approach_command(p_target_id))
+	_send_bytes(_cmd.approach_command(p_target_id))
 
 ## [A キー] ジャンプゲートへアプローチ（半自動操船）。射程内まで自動接近する（ADR-0015）。
 func send_approach_gate_command(p_gate_id: int) -> void:
-	_send_line(_cmd.approach_gate_command(p_gate_id))
+	_send_bytes(_cmd.approach_gate_command(p_gate_id))
 
 ## [W key] Warp (short-range Fold) to a Jump Gate (ADR-0022/ADR-0025).
 func send_warp_command(p_gate_id: int) -> void:
-	_send_line(_cmd.warp_command(p_gate_id))
+	_send_bytes(_cmd.warp_command(p_gate_id))
 
 ## [W key] Warp (short-range Fold) to a celestial body (ADR-0025).
 func send_warp_to_body_command(p_body_id: int) -> void:
-	_send_line(_cmd.warp_to_body_command(p_body_id))
+	_send_bytes(_cmd.warp_to_body_command(p_body_id))
 
 ## [O key] Orbit a selected ship at its weapon range (server-side default, ADR-0031).
 func send_orbit_command(p_target_id: int) -> void:
-	_send_line(_cmd.orbit_command(p_target_id, -1.0))
+	_send_bytes(_cmd.orbit_command(p_target_id, -1.0))
 
 ## [O key] Orbit a selected Jump Gate at its weapon range (server-side default, ADR-0031).
 func send_orbit_gate_command(p_gate_id: int) -> void:
-	_send_line(_cmd.orbit_gate_command(p_gate_id, -1.0))
+	_send_bytes(_cmd.orbit_gate_command(p_gate_id, -1.0))
 
 ## [K key] Hold at least p_range_m metres from a selected ship; p_range_m <= 0
 ## falls back to the server-side default (weapon range, ADR-0031).
 func send_keep_at_range_command(p_target_id: int, p_range_m: float = -1.0) -> void:
-	_send_line(_cmd.keep_at_range_command(p_target_id, p_range_m))
+	_send_bytes(_cmd.keep_at_range_command(p_target_id, p_range_m))
 
 ## [K key] Hold at least p_range_m metres from a selected Jump Gate; p_range_m
 ## <= 0 falls back to the server-side default (weapon range, ADR-0031).
 func send_keep_at_range_gate_command(p_gate_id: int, p_range_m: float = -1.0) -> void:
-	_send_line(_cmd.keep_at_range_gate_command(p_gate_id, p_range_m))
+	_send_bytes(_cmd.keep_at_range_gate_command(p_gate_id, p_range_m))
 
 ## [Inventory panel] Move a module from inventory into a fitting slot (ADR-0032).
 func send_fit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
-	_send_line(_cmd.build("FitModuleCommand", {
+	_send_bytes(_cmd.build("FitModuleCommand", {
 		"ship_id": p_ship_id, "module_id": p_module_id, "slot": p_slot}))
 
 ## [Inventory panel] Move a fitted module back into inventory (ADR-0032).
 func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
-	_send_line(_cmd.build("UnfitModuleCommand", {
+	_send_bytes(_cmd.build("UnfitModuleCommand", {
 		"ship_id": p_ship_id, "module_id": p_module_id, "slot": p_slot}))
 
 ## [Inventory panel] Reorder two fitted modules within the same slot kind
@@ -181,38 +180,38 @@ func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String)
 func send_reorder_fitted_module_command(
 	p_ship_id: int, p_slot: String, p_from_index: int, p_to_index: int
 ) -> void:
-	_send_line(_cmd.build("ReorderFittedModuleCommand", {
+	_send_bytes(_cmd.build("ReorderFittedModuleCommand", {
 		"ship_id": p_ship_id, "slot": p_slot,
 		"from_index": p_from_index, "to_index": p_to_index}))
 
 func send_dock_command(p_station_id: int) -> void:
-	_send_line(_cmd.build("DockCommand", {"station_id": p_station_id}))
+	_send_bytes(_cmd.build("DockCommand", {"station_id": p_station_id}))
 
 func send_undock_command() -> void:
-	_send_line(_cmd.build("UndockCommand", {}))
+	_send_bytes(_cmd.build("UndockCommand", {}))
 
 func send_build_packaged_ship_command(p_ship_id: int, p_station_id: int, p_ship_type_id: int) -> void:
-	_send_line(_cmd.build("BuildPackagedShipCommand", {
+	_send_bytes(_cmd.build("BuildPackagedShipCommand", {
 		"ship_id": p_ship_id, "station_id": p_station_id, "ship_type_id": p_ship_type_id}))
 
 func send_disassemble_ship_command(p_ship_id: int, p_station_id: int) -> void:
-	_send_line(_cmd.build("DisassembleShipCommand", {
+	_send_bytes(_cmd.build("DisassembleShipCommand", {
 		"ship_id": p_ship_id, "station_id": p_station_id}))
 
 ## Convert a station-inventory Packaged Ship item into a new live docked ship
 ## (ADR-0034 9B, ADR-0037). No ship_id -- the ship doesn't exist yet.
 func send_assemble_command(p_station_id: int, p_ship_type_id: int) -> void:
-	_send_line(_cmd.build("AssembleCommand", {
+	_send_bytes(_cmd.build("AssembleCommand", {
 		"station_id": p_station_id, "ship_type_id": p_ship_type_id}))
 
 ## Leave the active ship while docked, without disassembling it (ADR-0037).
 func send_disembark_command() -> void:
-	_send_line(_cmd.build("DisembarkCommand", {}))
+	_send_bytes(_cmd.build("DisembarkCommand", {}))
 
 ## Make an owned, docked ship the caller's active ship (ADR-0037). This is
 ## how a player re-boards after Disembark, or switches between owned ships.
 func send_select_active_ship_command(p_ship_id: int) -> void:
-	_send_line(_cmd.build("SelectActiveShipCommand", {"ship_id": p_ship_id}))
+	_send_bytes(_cmd.build("SelectActiveShipCommand", {"ship_id": p_ship_id}))
 
 ## Move the entire stack of an item out of a docked ship's own cargo into
 ## the caller's station inventory (ADR-0034 9B). p_item_type is one of
@@ -225,7 +224,7 @@ func send_transfer_to_station_command(
 	p_module_id: int = 0,
 	p_ship_type_id: int = 0
 ) -> void:
-	_send_line(_cmd.transfer_to_station_command(
+	_send_bytes(_cmd.transfer_to_station_command(
 		p_ship_id, p_station_id, p_item_type, p_module_id, p_ship_type_id))
 
 ## The reverse of send_transfer_to_station_command: move the entire stack of
@@ -238,7 +237,7 @@ func send_transfer_from_station_command(
 	p_module_id: int = 0,
 	p_ship_type_id: int = 0
 ) -> void:
-	_send_line(_cmd.transfer_from_station_command(
+	_send_bytes(_cmd.transfer_from_station_command(
 		p_ship_id, p_station_id, p_item_type, p_module_id, p_ship_type_id))
 
 func is_connected_to_server() -> bool:
@@ -246,21 +245,17 @@ func is_connected_to_server() -> bool:
 
 # ── 内部処理 ──────────────────────────────────────────────────────────────────
 
-## welcomed ガード + 改行付与を一元化する send_* 系の共通ヘルパー。line は
-## _cmd.*_command() が返す、すでに "type" タグ済みの1行JSON
-## （ADR-0041）。Hello（welcomed 前に送る必要がある）はこのガードの対象外
-## なので _send_hello は使わない。
-func _send_line(line: String) -> void:
-	if not _welcomed:
+## welcomed ガードを一元化する send_* 系の共通ヘルパー。bytes は
+## _cmd.*_command()/_cmd.build() が返す、すでに `ClientMessage::Command`
+## envelope 済みの postcard バイト列（ADR-0042）。Hello（welcomed 前に送る
+## 必要がある）はこのガードの対象外なので _send_hello は使わない。
+func _send_bytes(bytes: PackedByteArray) -> void:
+	if not _welcomed or bytes.is_empty():
 		return
-	_ws.send_text(line + "\n")
+	_ws.send(bytes, WebSocketPeer.WRITE_MODE_BINARY)
 
 func _send_hello() -> void:
-	var payload: Dictionary = { "type": "Hello" }
-	if player_id >= 0 and ship_id >= 0:
-		payload["player_id"] = player_id
-		payload["ship_id"] = ship_id
-	_ws.send_text(JSON.stringify(payload) + "\n")
+	_ws.send(_cmd.hello_command(player_id, ship_id), WebSocketPeer.WRITE_MODE_BINARY)
 	print("[Connection] Hello sent")
 
 func _connect_to_server() -> void:
@@ -270,25 +265,30 @@ func _connect_to_server() -> void:
 	if err != OK:
 		push_warning("[Connection] connect_to_url failed: %s" % error_string(err))
 
+## One WebSocket frame always carries exactly one message (ADR-0042) --
+## text frames are still-JSON messages (InitialState/PlayerLoadout/AoiEnter,
+## ADR-0042 stage 2); binary frames are the postcard `ServerMessage`
+## envelope, decoded by `ServerMessageDecoder` into the same
+## `{"type": ..., ...}` Dictionary shape the JSON path already produced, so
+## `_handle_message` needs no branching on frame type.
 func _receive_messages() -> void:
 	while _ws.get_available_packet_count() > 0:
-		var raw: String = _ws.get_packet().get_string_from_utf8()
-		_buffer += raw
-		_flush_buffer()
-
-func _flush_buffer() -> void:
-	while "\n" in _buffer:
-		var idx : int    = _buffer.find("\n")
-		var line: String = _buffer.left(idx).strip_edges()
-		_buffer = _buffer.substr(idx + 1)
-		if line.is_empty():
-			continue
-		var result: Variant = JSON.parse_string(line)
-		if result == null:
-			push_warning("[Connection] failed to parse JSON: " + line)
-			continue
-		var payload: Dictionary = result as Dictionary
-		_handle_message(payload, line)
+		var packet: PackedByteArray = _ws.get_packet()
+		if _ws.was_string_packet():
+			var line: String = packet.get_string_from_utf8().strip_edges()
+			if line.is_empty():
+				continue
+			var result: Variant = JSON.parse_string(line)
+			if result == null:
+				push_warning("[Connection] failed to parse JSON: " + line)
+				continue
+			_handle_message(result as Dictionary, line)
+		else:
+			var payload: Dictionary = _decoder.decode(packet)
+			if payload.is_empty():
+				push_warning("[Connection] failed to decode binary ServerMessage")
+				continue
+			_handle_message(payload, "")
 
 func _handle_message(payload: Dictionary, raw_line: String) -> void:
 	var msg_type: String = payload.get("type", "") as String

@@ -14,6 +14,7 @@ crate-type = ["cdylib"]
 # lives here -- that stays in dawn-client-core so it's cargo-testable without
 # a Godot runtime.
 [dependencies]
+dawn-core         = { path = "../dawn-core" }
 dawn-client-core = { path = "../dawn-client-core" }
 # Client->server wire schema only (ADR-0041) -- no transport/runtime
 # dependency, unlike dawn-actor which also depends on this crate.

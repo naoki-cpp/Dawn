@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-pending.md（未完項目）
-date     : 2026-07-10
+date     : 2026-07-11
 ---
 
 # Architecture Review — Dawn Codebase（完了済みログ）
@@ -57,6 +57,8 @@ deepening、production outbound replication publisher deepening、Client admissi
 | `dawn-client-gdext` クレート新設（ADR-0040） | 2026-07-10 | GDExtensionバインディング（cdylib）。`dawn-client-core`の薄いラッパーで、旧GDScript（`player_loadout.gd`/`module_row.gd`/`item_row.gd`）と同名・同APIのグローバルクラスとしてGodotへ公開。呼び出し側（`main.gd`等）は`preload()`行の削除のみで移行完了。 |
 | Disassemble のカーゴ消失バグ修正 | 2026-07-10 | `disassemble_ship_owned` が船を`PackagedShip`へ変換する際、`InventoryComp`（船カーゴ）を救済せず despawn しており未艤装モジュール/Scrap Metalが消滅していたのを、他のStation操作と同じ`credit_station_item`経路で salvage するよう修正。回帰テスト3件追加。 |
 | `dawn-client-gdext` の `apply_module_activation` を thin adapter 化（`/improve-codebase-architecture`、PR #129） | 2026-07-10 | ADR-0040 が定めた「adapter only」に反し `apply_module_activation` だけがモジュール状態を直接変更していた（sibling の `toggle_at` は既に `dawn-client-core` へ委譲済み）のを是正。`PlayerLoadoutMsg::apply_module_activation` を `dawn-client-core` に新設（ユニットテスト2件）、`loadout_gd.rs` は id 変換 + 委譲のみに縮小（271→267行、`loadout.rs` 337→373行）。 |
+| `dawn-wire` 新設 + ワイヤプロトコルのpostcardバイナリ化（ADR-0041/0042） | 2026-07-11 | `dawn-actor/src/protocol/{client_command,server_event,hello_resume}.rs` を `dawn-wire` へ全面移動。`ServerMessage`/`ClientMessage` 統合enumを新設し、Welcome/Redirect/Event/Hello/Commandをpostcardバイナリフレーム化。`ClientCommandJson`/`EventJson` は postcardが内部タグ付きenumをデシリアライズできないため外部タグ付きへ変更（実装中に実際のデコード失敗で発覚）。`dawn-client-gdext` に `ServerMessageDecoder`/`ClientMessageDecoder`/`json_variant.rs` を新設し、外部タグ付き形状を既存の `{"type":...}` Dictionary形状へ変換。`connection.gd` の改行バッファリングを撤去（374→344）。 |
+| M-10解消: postcard encode/decode を `dawn-wire` に集約 | 2026-07-11 | `ServerMessage::encode/decode`・`ClientMessage::encode/decode` を `dawn-wire` に新設し、`ws_server.rs`（2箇所）・`client_command_gd.rs`・`server_message_gd.rs` の直接 `postcard::` 呼び出しをそちらに置換。`dawn-actor`/`dawn-client-gdext` の `postcard` 依存を削除（`dawn-wire` 経由の間接利用のみになったため）。副次効果として `dawn-wire` 自体が実コードで `postcard` を使うようになり、cargo macheteの「未使用依存」誤検知（doctestでしか使われていなかった）も解消。 |
 
 ---
 

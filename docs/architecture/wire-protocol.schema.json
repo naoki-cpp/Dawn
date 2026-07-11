@@ -1,592 +1,624 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "EventJson",
-  "description": "Every message the server sends to a client over the WebSocket connection. Serialized as a single JSON line tagged by `\"type\"`.\n\nThis enum is the schema-of-record for the server -> client half of the wire protocol: [`event_json_schema()`] renders it to a JSON Schema document that `docs/architecture/wire-protocol.md` is generated from. Adding, removing, or renaming a field here changes the wire format for every client (Godot today; any future client written against `docs/architecture/wire-protocol.md`).",
+  "description": "Every message the server sends to a client over the WebSocket connection, wrapped by `ServerMessage::Event` and postcard-encoded (ADR-0042).\n\nThis enum is the schema-of-record for the server -> client half of the wire protocol: [`event_json_schema()`] renders it to a JSON Schema document that `docs/architecture/wire-protocol.md` is generated from. Adding, removing, or renaming a field here changes the wire format for every client (Godot today; any future client written against `docs/architecture/wire-protocol.md`).\n\nExternally tagged (serde's default enum representation), not `#[serde(tag = \"type\")]` -- `postcard` cannot deserialize an internally tagged enum (no `deserialize_any`). `dawn-client-gdext`'s `ServerMessageDecoder` converts the externally tagged shape back into a `{\"type\": ..., ...}` Dictionary so existing GDScript consumers (written against the old JSON shape) don't need to change.\n\n`Deserialize` (ADR-0042) exists so `dawn-client-gdext` can decode a `ServerMessage` it receives; the server itself only ever serializes this type, never parses it back.",
   "oneOf": [
     {
       "type": "object",
       "required": [
-        "position",
-        "ship_id",
-        "tick",
-        "type"
+        "ShipSpawned"
       ],
       "properties": {
-        "position": {
-          "$ref": "#/definitions/PosJson"
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "ShipSpawned"
-          ]
+        "ShipSpawned": {
+          "type": "object",
+          "required": [
+            "position",
+            "ship_id",
+            "tick"
+          ],
+          "properties": {
+            "position": {
+              "$ref": "#/definitions/PosJson"
+            },
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
         }
-      }
+      },
+      "additionalProperties": false
     },
     {
       "type": "object",
       "required": [
-        "ship_id",
-        "tick",
-        "type",
-        "velocity"
+        "VelocityChanged"
       ],
       "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "VelocityChanged"
-          ]
-        },
-        "velocity": {
-          "$ref": "#/definitions/VelJson"
+        "VelocityChanged": {
+          "type": "object",
+          "required": [
+            "ship_id",
+            "tick",
+            "velocity"
+          ],
+          "properties": {
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "velocity": {
+              "$ref": "#/definitions/VelJson"
+            }
+          }
         }
-      }
+      },
+      "additionalProperties": false
     },
     {
       "type": "object",
       "required": [
-        "ship_id",
-        "tick",
-        "type"
+        "ShipDespawned"
       ],
       "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "ShipDespawned"
-          ]
+        "ShipDespawned": {
+          "type": "object",
+          "required": [
+            "ship_id",
+            "tick"
+          ],
+          "properties": {
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
         }
-      }
+      },
+      "additionalProperties": false
     },
     {
       "type": "object",
       "required": [
-        "ship_id",
-        "station_id",
-        "tick",
-        "type"
+        "ShipDocked"
       ],
       "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "station_id": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "ShipDocked"
-          ]
+        "ShipDocked": {
+          "type": "object",
+          "required": [
+            "ship_id",
+            "station_id",
+            "tick"
+          ],
+          "properties": {
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "station_id": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
         }
-      }
+      },
+      "additionalProperties": false
     },
     {
       "type": "object",
       "required": [
-        "ship_id",
-        "station_id",
-        "tick",
-        "type"
+        "ShipUndocked"
       ],
       "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "station_id": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "ShipUndocked"
-          ]
+        "ShipUndocked": {
+          "type": "object",
+          "required": [
+            "ship_id",
+            "station_id",
+            "tick"
+          ],
+          "properties": {
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "station_id": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
         }
-      }
+      },
+      "additionalProperties": false
     },
     {
       "description": "A station-inventory Packaged Ship item became a new live docked ship, owned by the caller (ADR-0034 9B, ADR-0037). `active_ship` is unchanged -- the client must send `SelectActiveShipCommand` to fly it.",
       "type": "object",
       "required": [
-        "ship_id",
-        "ship_type_id",
-        "station_id",
-        "tick",
-        "type"
+        "ShipAssembled"
       ],
       "properties": {
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "ship_type_id": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "station_id": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "ShipAssembled"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "current_armor",
-        "current_hull",
-        "current_shield",
-        "damage",
-        "ship_id",
-        "tick",
-        "type"
-      ],
-      "properties": {
-        "current_armor": {
-          "type": "number",
-          "format": "float"
-        },
-        "current_hull": {
-          "type": "number",
-          "format": "float"
-        },
-        "current_shield": {
-          "type": "number",
-          "format": "float"
-        },
-        "damage": {
-          "type": "number",
-          "format": "float"
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "DamageTaken"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "amount",
-        "current_armor",
-        "current_hull",
-        "current_shield",
-        "layer",
-        "ship_id",
-        "tick",
-        "type"
-      ],
-      "properties": {
-        "amount": {
-          "type": "number",
-          "format": "float"
-        },
-        "current_armor": {
-          "type": "number",
-          "format": "float"
-        },
-        "current_hull": {
-          "type": "number",
-          "format": "float"
-        },
-        "current_shield": {
-          "type": "number",
-          "format": "float"
-        },
-        "layer": {
-          "type": "string"
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "RepairApplied"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "killer_id",
-        "ship_id",
-        "tick",
-        "type"
-      ],
-      "properties": {
-        "killer_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "ShipDestroyed"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "locker_id",
-        "target_id",
-        "tick",
-        "type"
-      ],
-      "properties": {
-        "locker_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "target_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "TargetLocked"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "locker_id",
-        "target_id",
-        "tick",
-        "type"
-      ],
-      "properties": {
-        "locker_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "target_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "LockLost"
-          ]
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "module_id",
-        "ship_id",
-        "slot",
-        "tick",
-        "type"
-      ],
-      "properties": {
-        "module_id": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "slot": {
-          "type": "string"
-        },
-        "target_ship_id": {
-          "description": "Target of a targeted module (Weapon/Tackle), per ADR-0035.",
-          "type": [
-            "integer",
-            "null"
+        "ShipAssembled": {
+          "type": "object",
+          "required": [
+            "ship_id",
+            "ship_type_id",
+            "station_id",
+            "tick"
           ],
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "ModuleActivated"
-          ]
+          "properties": {
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "ship_type_id": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "station_id": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
         }
-      }
+      },
+      "additionalProperties": false
     },
     {
       "type": "object",
       "required": [
-        "module_id",
-        "ship_id",
-        "slot",
-        "tick",
-        "type"
+        "DamageTaken"
       ],
       "properties": {
-        "module_id": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "reason": {
-          "description": "Why the system forced this off (\"cap\" | \"range\"); omitted for a player-issued deactivation (ADR-0035).",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "slot": {
-          "type": "string"
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "ModuleDeactivated"
-          ]
+        "DamageTaken": {
+          "type": "object",
+          "required": [
+            "current_armor",
+            "current_hull",
+            "current_shield",
+            "damage",
+            "ship_id",
+            "tick"
+          ],
+          "properties": {
+            "current_armor": {
+              "type": "number",
+              "format": "float"
+            },
+            "current_hull": {
+              "type": "number",
+              "format": "float"
+            },
+            "current_shield": {
+              "type": "number",
+              "format": "float"
+            },
+            "damage": {
+              "type": "number",
+              "format": "float"
+            },
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
         }
-      }
+      },
+      "additionalProperties": false
     },
     {
       "type": "object",
       "required": [
-        "entry_pos",
-        "from_sector",
-        "gate_id",
-        "ship_id",
-        "tick",
-        "to_sector",
-        "type"
+        "RepairApplied"
       ],
       "properties": {
-        "entry_pos": {
-          "$ref": "#/definitions/PosJson"
-        },
-        "from_sector": {
-          "type": "integer",
-          "format": "uint8",
-          "minimum": 0.0
-        },
-        "gate_id": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "to_sector": {
-          "type": "integer",
-          "format": "uint8",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "JumpGateUsed"
-          ]
+        "RepairApplied": {
+          "type": "object",
+          "required": [
+            "amount",
+            "current_armor",
+            "current_hull",
+            "current_shield",
+            "layer",
+            "ship_id",
+            "tick"
+          ],
+          "properties": {
+            "amount": {
+              "type": "number",
+              "format": "float"
+            },
+            "current_armor": {
+              "type": "number",
+              "format": "float"
+            },
+            "current_hull": {
+              "type": "number",
+              "format": "float"
+            },
+            "current_shield": {
+              "type": "number",
+              "format": "float"
+            },
+            "layer": {
+              "type": "string"
+            },
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
         }
-      }
+      },
+      "additionalProperties": false
     },
     {
       "type": "object",
       "required": [
-        "from_system",
-        "ship_id",
-        "tick",
-        "to_system",
-        "type"
+        "ShipDestroyed"
       ],
       "properties": {
-        "from_system": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "tick": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "to_system": {
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "StarSystemChanged"
-          ]
+        "ShipDestroyed": {
+          "type": "object",
+          "required": [
+            "killer_id",
+            "ship_id",
+            "tick"
+          ],
+          "properties": {
+            "killer_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
         }
-      }
+      },
+      "additionalProperties": false
     },
     {
       "type": "object",
       "required": [
-        "player_id",
-        "ship_id",
-        "type",
-        "ws_addr"
+        "TargetLocked"
       ],
       "properties": {
-        "player_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "ship_id": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "type": {
-          "type": "string",
-          "enum": [
-            "Redirect"
-          ]
-        },
-        "ws_addr": {
-          "type": "string"
+        "TargetLocked": {
+          "type": "object",
+          "required": [
+            "locker_id",
+            "target_id",
+            "tick"
+          ],
+          "properties": {
+            "locker_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "target_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
         }
-      }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "LockLost"
+      ],
+      "properties": {
+        "LockLost": {
+          "type": "object",
+          "required": [
+            "locker_id",
+            "target_id",
+            "tick"
+          ],
+          "properties": {
+            "locker_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "target_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "ModuleActivated"
+      ],
+      "properties": {
+        "ModuleActivated": {
+          "type": "object",
+          "required": [
+            "module_id",
+            "ship_id",
+            "slot",
+            "tick"
+          ],
+          "properties": {
+            "module_id": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "slot": {
+              "type": "string"
+            },
+            "target_ship_id": {
+              "description": "Target of a targeted module (Weapon/Tackle), per ADR-0035.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "ModuleDeactivated"
+      ],
+      "properties": {
+        "ModuleDeactivated": {
+          "type": "object",
+          "required": [
+            "module_id",
+            "ship_id",
+            "slot",
+            "tick"
+          ],
+          "properties": {
+            "module_id": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "reason": {
+              "description": "Why the system forced this off (\"cap\" | \"range\"); omitted for a player-issued deactivation (ADR-0035).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "slot": {
+              "type": "string"
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "JumpGateUsed"
+      ],
+      "properties": {
+        "JumpGateUsed": {
+          "type": "object",
+          "required": [
+            "entry_pos",
+            "from_sector",
+            "gate_id",
+            "ship_id",
+            "tick",
+            "to_sector"
+          ],
+          "properties": {
+            "entry_pos": {
+              "$ref": "#/definitions/PosJson"
+            },
+            "from_sector": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "gate_id": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "to_sector": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "StarSystemChanged"
+      ],
+      "properties": {
+        "StarSystemChanged": {
+          "type": "object",
+          "required": [
+            "from_system",
+            "ship_id",
+            "tick",
+            "to_system"
+          ],
+          "properties": {
+            "from_system": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "tick": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "to_system": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "Redirect"
+      ],
+      "properties": {
+        "Redirect": {
+          "type": "object",
+          "required": [
+            "player_id",
+            "ship_id",
+            "ws_addr"
+          ],
+          "properties": {
+            "player_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "ship_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "ws_addr": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   ],
   "definitions": {

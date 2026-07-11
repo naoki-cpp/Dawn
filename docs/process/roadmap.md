@@ -359,9 +359,9 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
 | # | タスク | 備考 | 状態 |
 |---|---|---|---|
 | 1 | godot-rust プロジェクトを新設 | 2026-07-10、`crates/dawn-client-gdext`（`client/gdextension/` ではなくワークスペース crate として配置。技術選定の根拠は ADR-0004、配置決定は ADR-0040）として実装。`client/dawn_client_gdext.gdextension` で Godot 側に登録済み | ✅ |
-| 2 | `dawn-core` 型を GDExtension 経由で Godot へ直接公開（型共有の切り替え） | 2026-07-10、第一弾として PlayerLoadout（Loadout/ModuleRow/ItemRow）を `dawn-client-core`（ADR-0039、`dawn-core` にのみ依存する新クレート）+ `dawn-client-gdext`（ADR-0040）経由で公開し、旧 `player_loadout.gd`/`module_row.gd`/`item_row.gd` を置き換え済み。`dawn-core` 型を直接ではなく `dawn-client-core` が仲介する形（サーバー側 projection は現状 `serde_json::json!` のまま、契約テストで整合を担保）。残るチャンネル（Command 送信・DomainEvent 受信）は未着手 | 🔶 一部実装 |
+| 2 | `dawn-core` 型を GDExtension 経由で Godot へ直接公開（型共有の切り替え） | 2026-07-10、第一弾として PlayerLoadout（Loadout/ModuleRow/ItemRow）を `dawn-client-core`（ADR-0039、`dawn-core` にのみ依存する新クレート）+ `dawn-client-gdext`（ADR-0040）経由で公開し、旧 `player_loadout.gd`/`module_row.gd`/`item_row.gd` を置き換え済み。`dawn-core` 型を直接ではなく `dawn-client-core` が仲介する形（サーバー側 projection は現状 `serde_json::json!` のまま、契約テストで整合を担保）。2026-07-11、Command 送信（`ClientCommand`、ADR-0041）+ DomainEvent 受信のデコード（`ServerMessageDecoder`、ADR-0042）を追加済み。`InitialState`/`PlayerLoadout`/`AoiEnter` は引き続き `serde_json::json!` のJSONテキストのまま（ADR-0042 段階2） | 🔶 一部実装 |
 | 3 | Client-Side Prediction を Rust 側に実装（サーバー権威の再現ロジックをクライアントでも動かす） | `dawn-ecs` の Movement/Warp システムをクライアント側でも再利用できるかが鍵。サーバーとの分岐（reconciliation）設計が必要 | ⬜ 要 ADR |
-| 4 | WebSocket + JSON からの通信方式移行を再検討（gRPC 等） | ADR-0007 で「Phase 9 以降で再検討」と明記済み。GDExtension 導入で型共有が変わるため、このタイミングでの見直しが自然 | ⬜ 要 ADR |
+| 4 | WebSocket + JSON からの通信方式移行を再検討（gRPC 等） | 2026-07-11、ADR-0042で決定・実装（段階1）。調査の結果、ADR-0007の元のトリガー（分散ノード間通信）は既に`dawn-consensus`/`dawn-replication`のTCP+postcardで解決済みで、クライアント向けには当てはまらないと判明。WebSocketトランスポートは維持し、ペイロードをJSONテキストからpostcardバイナリへ移行（`ServerMessage`/`ClientMessage`）。`InitialState`/`AoiEnter`/`PlayerLoadout`はまだ固定型でないため段階2（別タスク）に分離 | 🔶 段階1実装済み |
 
 ---
 

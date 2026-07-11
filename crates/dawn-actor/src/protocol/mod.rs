@@ -11,22 +11,20 @@
 //! - [`redirect_json`]: tell a client to reconnect to another node's WS (multi-node jump).
 //! - [`parse_client_command`]: JSON line -> ClientCommand (client -> server).
 
-mod hello_resume;
-mod server_event;
-
-// The client -> server wire schema (ClientCommandJson and friends) lives in
-// dawn-wire (ADR-0041), not here -- dawn-client-gdext (a Godot GDExtension
-// cdylib) needs the same type to *construct and serialize* commands, and
-// must not inherit dawn-actor's transport dependencies (tokio,
+// The entire wire schema (ClientCommandJson, EventJson, Hello/Resume types,
+// and the ServerMessage/ClientMessage binary envelope) lives in dawn-wire
+// (ADR-0041, ADR-0042), not here -- dawn-client-gdext (a Godot GDExtension
+// cdylib) needs the same types to construct/serialize commands and decode
+// events, and must not inherit dawn-actor's transport dependencies (tokio,
 // tokio-tungstenite) just to reuse a schema definition. Re-exported under
 // the same names so every existing `dawn_actor::protocol::X` import site
 // (ws_server.rs, dawn-sector-node, tests) needed no changes.
 pub use dawn_wire::{
-    client_command_json_schema, parse_client_command, ClientCommandJson, PosJson, VelJson,
-    WarpTargetJson,
+    client_command_from_json, client_command_json_schema, domain_event_to_event_json,
+    domain_event_to_json, event_json_schema, parse_client_command, parse_hello, redirect_json,
+    ClientCommandJson, ClientMessage, EventJson, HelloMessage, PosJson, ResumeIdentity,
+    ServerMessage, VelJson, WarpTargetJson,
 };
-pub use hello_resume::{parse_hello, HelloMessage, ResumeIdentity};
-pub use server_event::{domain_event_to_json, event_json_schema, redirect_json, EventJson};
 
 #[cfg(test)]
 mod tests {
@@ -41,7 +39,7 @@ mod tests {
 
     #[test]
     fn lock_on_command_json_is_parsed_into_client_command_lock_on() {
-        let line = r#"{"type":"LockOnCommand","target_id":7}"#;
+        let line = r#"{"LockOnCommand":{"target_id":7}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::LockOn(c) => {
@@ -53,8 +51,7 @@ mod tests {
 
     #[test]
     fn activate_module_command_json_is_parsed_with_and_without_a_target() {
-        let line =
-            r#"{"type":"ActivateModuleCommand","module_id":3,"slot":"High","target_ship_id":9}"#;
+        let line = r#"{"ActivateModuleCommand":{"module_id":3,"slot":"High","target_ship_id":9}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::Activate(c) => {
@@ -65,7 +62,7 @@ mod tests {
             other => panic!("expected Activate, got {other:?}"),
         }
 
-        let line_no_target = r#"{"type":"ActivateModuleCommand","module_id":3,"slot":"High"}"#;
+        let line_no_target = r#"{"ActivateModuleCommand":{"module_id":3,"slot":"High"}}"#;
         let cmd_no_target = parse_client_command(line_no_target).expect("must parse");
         match cmd_no_target {
             dawn_core::ClientCommand::Activate(c) => assert_eq!(c.target_ship_id, None),
@@ -75,7 +72,7 @@ mod tests {
 
     #[test]
     fn deactivate_module_command_json_is_parsed_into_client_command_deactivate() {
-        let line = r#"{"type":"DeactivateModuleCommand","module_id":3,"slot":"Mid"}"#;
+        let line = r#"{"DeactivateModuleCommand":{"module_id":3,"slot":"Mid"}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::Deactivate(c) => {
@@ -88,7 +85,7 @@ mod tests {
 
     #[test]
     fn attack_command_json_is_parsed_into_client_command_attack() {
-        let line = r#"{"type":"AttackCommand","attacker_id":1,"target_id":2}"#;
+        let line = r#"{"AttackCommand":{"attacker_id":1,"target_id":2}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::Attack(c) => {
@@ -101,22 +98,21 @@ mod tests {
 
     #[test]
     fn stop_command_json_is_parsed_into_client_command_stop() {
-        let line = r#"{"type":"StopCommand"}"#;
+        let line = r#"{"StopCommand":{}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         assert!(matches!(cmd, dawn_core::ClientCommand::Stop(_)));
     }
 
     #[test]
     fn undock_command_json_is_parsed_into_client_command_undock() {
-        let line = r#"{"type":"UndockCommand"}"#;
+        let line = r#"{"UndockCommand":{}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         assert!(matches!(cmd, dawn_core::ClientCommand::Undock(_)));
     }
 
     #[test]
     fn build_packaged_ship_command_json_is_parsed_into_client_command_build_packaged_ship() {
-        let line =
-            r#"{"type":"BuildPackagedShipCommand","ship_id":1,"station_id":2,"ship_type_id":7}"#;
+        let line = r#"{"BuildPackagedShipCommand":{"ship_id":1,"station_id":2,"ship_type_id":7}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::BuildPackagedShip(c) => {
@@ -130,7 +126,7 @@ mod tests {
 
     #[test]
     fn select_active_ship_command_json_is_parsed_into_client_command_select_active_ship() {
-        let line = r#"{"type":"SelectActiveShipCommand","ship_id":5}"#;
+        let line = r#"{"SelectActiveShipCommand":{"ship_id":5}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::SelectActiveShip(c) => {
@@ -142,7 +138,7 @@ mod tests {
 
     #[test]
     fn move_command_json_is_parsed_into_client_command_move() {
-        let line = r#"{"type":"MoveCommand","target":{"x":10.0,"y":0.0,"z":-5.0}}"#;
+        let line = r#"{"MoveCommand":{"target":{"x":10.0,"y":0.0,"z":-5.0}}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::Move(c) => {
@@ -161,25 +157,25 @@ mod tests {
     /// just fail JSON parsing itself, which doesn't exercise `is_finite()`.
     #[test]
     fn move_command_json_with_an_overflowing_coordinate_fails_to_parse() {
-        let line = r#"{"type":"MoveCommand","target":{"x":1e40,"y":0.0,"z":0.0}}"#;
+        let line = r#"{"MoveCommand":{"target":{"x":1e+40,"y":0.0,"z":0.0}}}"#;
         assert!(parse_client_command(line).is_none());
     }
 
     #[test]
     fn orbit_command_json_with_an_overflowing_radius_fails_to_parse() {
-        let line = r#"{"type":"OrbitCommand","gate_id":2,"radius":1e40}"#;
+        let line = r#"{"OrbitCommand":{"gate_id":2,"radius":1e+40}}"#;
         assert!(parse_client_command(line).is_none());
     }
 
     #[test]
     fn keep_at_range_command_json_with_an_overflowing_range_fails_to_parse() {
-        let line = r#"{"type":"KeepAtRangeCommand","gate_id":2,"range":1e40}"#;
+        let line = r#"{"KeepAtRangeCommand":{"gate_id":2,"range":1e+40}}"#;
         assert!(parse_client_command(line).is_none());
     }
 
     #[test]
     fn warp_command_json_is_parsed_into_client_command_warp() {
-        let line = r#"{"type":"WarpCommand","gate_id":2}"#;
+        let line = r#"{"WarpCommand":{"gate_id":2}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::Warp(c) => {
@@ -188,7 +184,7 @@ mod tests {
             other => panic!("expected Warp, got {other:?}"),
         }
 
-        let line2 = r#"{"type":"WarpCommand","target":{"Gate":2}}"#;
+        let line2 = r#"{"WarpCommand":{"target":{"Gate":2}}}"#;
         let cmd2 = parse_client_command(line2).expect("must parse");
         match cmd2 {
             dawn_core::ClientCommand::Warp(c) => {
@@ -197,7 +193,7 @@ mod tests {
             other => panic!("expected Warp, got {other:?}"),
         }
 
-        let line3 = r#"{"type":"WarpCommand","target":{"Body":1}}"#;
+        let line3 = r#"{"WarpCommand":{"target":{"Body":1}}}"#;
         let cmd3 = parse_client_command(line3).expect("must parse");
         match cmd3 {
             dawn_core::ClientCommand::Warp(c) => {
@@ -212,7 +208,7 @@ mod tests {
 
     #[test]
     fn dock_command_json_is_parsed_into_client_command_dock() {
-        let line = r#"{"type":"DockCommand","station_id":2}"#;
+        let line = r#"{"DockCommand":{"station_id":2}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::Dock(c) => {
@@ -224,7 +220,7 @@ mod tests {
 
     #[test]
     fn disassemble_ship_command_json_is_parsed_into_client_command_disassemble_ship() {
-        let line = r#"{"type":"DisassembleShipCommand","ship_id":42,"station_id":2}"#;
+        let line = r#"{"DisassembleShipCommand":{"ship_id":42,"station_id":2}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::DisassembleShip(c) => {
@@ -237,7 +233,7 @@ mod tests {
 
     #[test]
     fn assemble_command_json_is_parsed_into_client_command_assemble() {
-        let line = r#"{"type":"AssembleCommand","station_id":2,"ship_type_id":1}"#;
+        let line = r#"{"AssembleCommand":{"station_id":2,"ship_type_id":1}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::Assemble(c) => {
@@ -250,14 +246,14 @@ mod tests {
 
     #[test]
     fn disembark_command_json_is_parsed_into_client_command_disembark() {
-        let line = r#"{"type":"DisembarkCommand"}"#;
+        let line = r#"{"DisembarkCommand":{}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         assert!(matches!(cmd, dawn_core::ClientCommand::Disembark(_)));
     }
 
     #[test]
     fn transfer_to_station_command_json_with_scrap_metal_is_parsed() {
-        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"ToStation"}"#;
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"ToStation"}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::TransferToStation(c) => {
@@ -272,7 +268,7 @@ mod tests {
 
     #[test]
     fn transfer_to_station_command_json_with_module_is_parsed() {
-        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"Module","module_id":7,"ship_type_id":0,"direction":"ToStation"}"#;
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"Module","module_id":7,"ship_type_id":0,"direction":"ToStation"}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::TransferToStation(c) => {
@@ -284,7 +280,7 @@ mod tests {
 
     #[test]
     fn transfer_to_station_command_json_with_to_ship_direction_is_parsed() {
-        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"ToShip"}"#;
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"ToShip"}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::TransferToStation(c) => {
@@ -296,19 +292,19 @@ mod tests {
 
     #[test]
     fn transfer_to_station_command_json_with_unknown_item_type_fails_to_parse() {
-        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"Bogus","module_id":0,"ship_type_id":0,"direction":"ToStation"}"#;
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"Bogus","module_id":0,"ship_type_id":0,"direction":"ToStation"}}"#;
         assert!(parse_client_command(line).is_none());
     }
 
     #[test]
     fn transfer_to_station_command_json_with_unknown_direction_fails_to_parse() {
-        let line = r#"{"type":"TransferToStationCommand","ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"Bogus"}"#;
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"Bogus"}}"#;
         assert!(parse_client_command(line).is_none());
     }
 
     #[test]
     fn reorder_fitted_module_command_json_is_parsed() {
-        let line = r#"{"type":"ReorderFittedModuleCommand","ship_id":1,"slot":"Mid","from_index":0,"to_index":1}"#;
+        let line = r#"{"ReorderFittedModuleCommand":{"ship_id":1,"slot":"Mid","from_index":0,"to_index":1}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::ReorderFittedModule(c) => {
@@ -323,7 +319,7 @@ mod tests {
 
     #[test]
     fn orbit_command_json_with_target_id_is_parsed_into_client_command_orbit() {
-        let line = r#"{"type":"OrbitCommand","target_id":2,"radius":3000.0}"#;
+        let line = r#"{"OrbitCommand":{"target_id":2,"radius":3000.0}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::Orbit(c) => {
@@ -336,7 +332,7 @@ mod tests {
 
     #[test]
     fn orbit_command_json_with_gate_id_and_no_radius_is_parsed() {
-        let line = r#"{"type":"OrbitCommand","gate_id":4}"#;
+        let line = r#"{"OrbitCommand":{"gate_id":4}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::Orbit(c) => {
@@ -349,7 +345,7 @@ mod tests {
 
     #[test]
     fn keep_at_range_command_json_is_parsed_into_client_command_keep_at_range() {
-        let line = r#"{"type":"KeepAtRangeCommand","target_id":2,"range":5000.0}"#;
+        let line = r#"{"KeepAtRangeCommand":{"target_id":2,"range":5000.0}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::KeepAtRange(c) => {
@@ -362,7 +358,7 @@ mod tests {
 
     #[test]
     fn fit_module_command_json_is_parsed_into_client_command_fit() {
-        let line = r#"{"type":"FitModuleCommand","ship_id":1,"module_id":2,"slot":"High"}"#;
+        let line = r#"{"FitModuleCommand":{"ship_id":1,"module_id":2,"slot":"High"}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::Fit(c) => {
@@ -376,7 +372,7 @@ mod tests {
 
     #[test]
     fn unfit_module_command_json_is_parsed_into_client_command_unfit() {
-        let line = r#"{"type":"UnfitModuleCommand","ship_id":1,"module_id":2,"slot":"Mid"}"#;
+        let line = r#"{"UnfitModuleCommand":{"ship_id":1,"module_id":2,"slot":"Mid"}}"#;
         let cmd = parse_client_command(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::Unfit(c) => {
@@ -390,7 +386,7 @@ mod tests {
 
     #[test]
     fn unknown_command_type_returns_none() {
-        let line = r#"{"type":"UnknownCommand","ship_id":1}"#;
+        let line = r#"{"UnknownCommand":{"ship_id":1}}"#;
         assert!(parse_client_command(line).is_none());
     }
 
@@ -403,7 +399,7 @@ mod tests {
         }))
         .expect("ShipDocked should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "ShipDocked");
+        let v = &v["ShipDocked"];
         assert_eq!(v["ship_id"], ship_id(42).raw());
         assert_eq!(v["station_id"], 3);
         assert_eq!(v["tick"], 9);
@@ -422,7 +418,7 @@ mod tests {
         ))
         .expect("ShipAssembled should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "ShipAssembled");
+        let v = &v["ShipAssembled"];
         assert_eq!(v["ship_id"], ship_id(99).raw());
         assert_eq!(v["station_id"], 3);
         assert_eq!(v["ship_type_id"], 1);
@@ -441,7 +437,7 @@ mod tests {
             }))
             .expect("ShipSpawned should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "ShipSpawned");
+        let v = &v["ShipSpawned"];
         assert_eq!(v["ship_id"], ship_id(1).raw());
         assert_eq!(v["position"]["x"], 1.0);
         assert_eq!(v["position"]["y"], 2.0);
@@ -465,7 +461,7 @@ mod tests {
         ))
         .expect("VelocityChanged should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "VelocityChanged");
+        let v = &v["VelocityChanged"];
         assert_eq!(v["velocity"]["dx"], 1.0);
         assert_eq!(v["velocity"]["dz"], -2.0);
     }
@@ -480,7 +476,7 @@ mod tests {
         ))
         .expect("ShipDespawned should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "ShipDespawned");
+        let v = &v["ShipDespawned"];
         assert_eq!(v["ship_id"], ship_id(5).raw());
     }
 
@@ -495,7 +491,7 @@ mod tests {
         ))
         .expect("ShipUndocked should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "ShipUndocked");
+        let v = &v["ShipUndocked"];
         assert_eq!(v["station_id"], 2);
     }
 
@@ -512,7 +508,7 @@ mod tests {
             }))
             .expect("DamageTaken should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "DamageTaken");
+        let v = &v["DamageTaken"];
         assert_eq!(v["damage"], 25.0);
         assert_eq!(v["current_hull"], 30.0);
     }
@@ -532,7 +528,7 @@ mod tests {
         ))
         .expect("RepairApplied should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "RepairApplied");
+        let v = &v["RepairApplied"];
         assert_eq!(v["layer"], "Armor");
         assert_eq!(v["current_armor"], 25.0);
     }
@@ -548,7 +544,7 @@ mod tests {
         ))
         .expect("ShipDestroyed should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "ShipDestroyed");
+        let v = &v["ShipDestroyed"];
         assert_eq!(v["killer_id"], ship_id(2).raw());
     }
 
@@ -563,7 +559,7 @@ mod tests {
         ))
         .expect("TargetLocked should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&locked).unwrap();
-        assert_eq!(v["type"], "TargetLocked");
+        let v = &v["TargetLocked"];
         assert_eq!(v["locker_id"], ship_id(1).raw());
         assert_eq!(v["target_id"], ship_id(2).raw());
 
@@ -574,7 +570,7 @@ mod tests {
         }))
         .expect("LockLost should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&lost).unwrap();
-        assert_eq!(v["type"], "LockLost");
+        assert!(v.get("LockLost").is_some());
     }
 
     #[test]
@@ -590,7 +586,7 @@ mod tests {
         ))
         .expect("ModuleActivated should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "ModuleActivated");
+        let v = &v["ModuleActivated"];
         assert_eq!(v["module_id"], 3);
         assert_eq!(v["slot"], "High");
         assert_eq!(v["target_ship_id"], ship_id(2).raw());
@@ -609,7 +605,7 @@ mod tests {
         ))
         .unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(v.get("target_ship_id").is_none());
+        assert!(v["ModuleActivated"].get("target_ship_id").is_none());
     }
 
     #[test]
@@ -627,7 +623,7 @@ mod tests {
         ))
         .unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["reason"], "cap");
+        assert_eq!(v["ModuleDeactivated"]["reason"], "cap");
 
         let json_range = domain_event_to_json(&DomainEvent::ModuleDeactivated(
             dawn_core::events::ModuleDeactivated {
@@ -640,7 +636,7 @@ mod tests {
         ))
         .unwrap();
         let v_range: serde_json::Value = serde_json::from_str(&json_range).unwrap();
-        assert_eq!(v_range["reason"], "range");
+        assert_eq!(v_range["ModuleDeactivated"]["reason"], "range");
 
         let json_player = domain_event_to_json(&DomainEvent::ModuleDeactivated(
             dawn_core::events::ModuleDeactivated {
@@ -653,7 +649,7 @@ mod tests {
         ))
         .unwrap();
         let v_player: serde_json::Value = serde_json::from_str(&json_player).unwrap();
-        assert!(v_player.get("reason").is_none());
+        assert!(v_player["ModuleDeactivated"].get("reason").is_none());
     }
 
     #[test]
@@ -670,7 +666,7 @@ mod tests {
         ))
         .expect("JumpGateUsed should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "JumpGateUsed");
+        let v = &v["JumpGateUsed"];
         assert_eq!(v["gate_id"], 4);
         assert_eq!(v["from_sector"], 0);
         assert_eq!(v["to_sector"], 1);
@@ -689,7 +685,7 @@ mod tests {
         ))
         .expect("StarSystemChanged should be forwarded");
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "StarSystemChanged");
+        let v = &v["StarSystemChanged"];
         assert_eq!(v["from_system"], 0);
         assert_eq!(v["to_system"], 2);
     }
@@ -775,7 +771,7 @@ mod tests {
         let addr: std::net::SocketAddr = "127.0.0.1:7880".parse().unwrap();
         let json = redirect_json(addr, dawn_core::PlayerId(7), ship_id(42));
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "Redirect");
+        let v = &v["Redirect"];
         assert_eq!(v["ws_addr"], "127.0.0.1:7880");
         assert_eq!(v["player_id"], 7);
         assert_eq!(v["ship_id"], ship_id(42).raw());

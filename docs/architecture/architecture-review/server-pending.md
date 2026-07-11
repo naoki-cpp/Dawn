@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で issue を起票・状態更新するたびに更新
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）
-date     : 2026-07-10
+date     : 2026-07-11
 ---
 
 # Architecture Review — Dawn Codebase（未完項目）
@@ -107,6 +107,8 @@ WS protocol は `dawn-actor` に、ゲームロジックは `dawn-sector` に、
 再評価トリガー: 3つ目の Fit 経路（例: NPC ループ内リフィット等）が必要になり、
 テール重複が3箇所に増えたとき。
 
+~~M-10~~ 解消済み（2026-07-11）— see completed.md
+
 #### M-9（保留・2026-07-01）: `EventStore::append` がinfallibleと偽る
 
 `/improve-codebase-architecture` の指摘: トレイト `EventStore::append` は `u64` を
@@ -197,6 +199,7 @@ P7 系で確立した「責務ごとに sibling モジュールへ抽出」方�
 | M-6 アプリ層 adapter 重複（`data_loader` / `spawn_npcs`） | 許容重複（縮小） | AoI / production runtime / Command dispatch は deep module 化済み（M-7 解消で Command dispatch 項目を削除）。残る data_loader / NPC spawn は低頻度 glue として許容。再評価トリガー付き |
 | M-8 `fit_module`/`fit_module_owned` 共有テール重複 | 許容（2026-07-01） | `inventory.rs` のモジュールコメントで意図的な分離と明記済み。テールのみの軽微な重複で優先度なし |
 | M-9 `EventStore::append` がinfallibleと偽る | 品質・保留（2026-07-01） | 永続化配線完了で実際に到達可能になったpanic経路。1プロセス1Sector構成ではcrash-only設計として不合理ではないため、全面Result化は見送り保留。実機クラッシュ発生 or マルチSectorプロセス化がトリガー |
+| ~~M-10~~ postcard encode/decode の呼び出し側分散 | 解消済み | 2026-07-11解消。詳細は completed.md 参照 |
 
 採らない方針（恒久）:
 

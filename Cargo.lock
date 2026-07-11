@@ -122,7 +122,6 @@ dependencies = [
  "futures",
  "futures-util",
  "schemars",
- "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
@@ -146,6 +145,7 @@ name = "dawn-client-gdext"
 version = "0.1.0"
 dependencies = [
  "dawn-client-core",
+ "dawn-core",
  "dawn-wire",
  "godot",
  "serde_json",
@@ -259,6 +259,7 @@ name = "dawn-wire"
 version = "0.1.0"
 dependencies = [
  "dawn-core",
+ "postcard",
  "schemars",
  "serde",
  "serde_json",

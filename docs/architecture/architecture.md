@@ -48,7 +48,10 @@ The goal is to build a game that **surpasses EVE Online** (ADR-0016). The distri
 ```
 Runtime          : multi-process (`dawn-sector-node` or `dawn-simulation`)
 Inter-node comms : TCP (TcpRaftTransport / TcpReplicationTransport, 8D-3/2c)
-Client comms     : WebSocket + JSON (Godot <-> WsServer, ADR-0007)
+Client comms     : WebSocket (Godot <-> WsServer, ADR-0007), postcard binary
+                    for messages with a fixed type (Welcome/Redirect/Event/
+                    Hello/Command, ADR-0042 stage 1); InitialState/
+                    PlayerLoadout/AoiEnter still JSON text (stage 2, TODO)
 Node             : a physical process (`sector-node config/node-N.toml`)
 Inter-node net   : TCP LAN plaintext (8D milestone; TLS is next phase)
 Persistence      : FileEventStore + checkpoint/restore wired into
@@ -76,6 +79,7 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/A
 | `dawn-core` | library | Pure domain model. Zero external dependencies |
 | `dawn-client-core` | library | Godot-independent client-side domain model (loadout, wire row types). Depends only on `dawn-core` (ADR-0039) |
 | `dawn-client-gdext` | library (cdylib) | GDExtension binding exposing `dawn-client-core` to the Godot client. Thin type-conversion adapter only (ADR-0040) |
+| `dawn-wire` | library | Client<->server wire schema (`ClientCommandJson`/`EventJson`, `ServerMessage`/`ClientMessage` binary envelope). Depends only on `dawn-core` + serde + postcard -- no transport/runtime dependency (ADR-0041, ADR-0042) |
 | `dawn-ecs` | library | ECS World wrapper. Component / System definitions |
 | `dawn-event-store` | library | Persistence/compaction of the two-tier Event Log (hot log + cold archive) (ADR-0017) |
 | `dawn-consensus` | library | Raft implementation (leader election, log replication, RaftActor; ADR-0014) |
@@ -92,12 +96,16 @@ dawn-core
     ^
     ├── dawn-client-core   <- Godot-independent client domain model (ADR-0039)
     │       ^
-    │       └── dawn-client-gdext   <- GDExtension binding to Godot (ADR-0040), cdylib, no other crate depends on it
+    │       └── dawn-client-gdext   <- GDExtension binding to Godot (ADR-0040), cdylib
+    │               ^                  also depends on dawn-wire directly (ADR-0041)
+    ├── dawn-wire          <- client<->server wire schema, no transport dep (ADR-0041, ADR-0042)
+    │       ^
+    │       └── dawn-actor (below) also depends on dawn-wire
     ├── dawn-ecs
     ├── dawn-consensus
     └── dawn-event-store
             ^
-            ├── dawn-actor
+            ├── dawn-actor           <- also depends on dawn-wire
             ├── dawn-replication
             └── dawn-sector          <- game logic (also depends on dawn-ecs / dawn-consensus, ADR-0026)
                     ^
@@ -165,12 +173,16 @@ The connection between client (Godot) and server (Rust) is abstracted behind a t
 ```
 Test:                             Production:
   InProcessConnection              WsClientConnection
-  via in-memory channel            via WebSocket + JSON (ADR-0007)
+  via in-memory channel            via WebSocket, postcard binary for
+                                    fixed-type messages (ADR-0007, ADR-0042)
 
   Both implement the same ClientConnection trait
 
-ADR-0007 ruled out a move to gRPC; revisit only once inter-node
-distributed comms need it.
+ADR-0007 ruled out a move to gRPC for the client-facing transport; that
+holds (ADR-0042). The inter-node distributed-comms trigger it named
+already fired, but was resolved by a separate TCP+postcard transport
+(TcpRaftTransport/TcpReplicationTransport) — it never applied to this
+client<->server connection.
 ```
 
 ### Trait responsibility (these two directions only)

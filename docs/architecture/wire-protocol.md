@@ -3,15 +3,33 @@ scope    : Client<->server wire format over the WebSocket connection. What an
            external (non-Godot) client would need to talk to a Dawn server.
 audience : AI Agent / Human Developer
 update   : Both halves are generated from the types; see "Keeping this in sync".
-related  : ADR-0005 (ClientConnection), docs/architecture/event-catalog.md,
-           crates/dawn-actor/src/protocol.rs
+related  : ADR-0005 (ClientConnection), ADR-0041 (dawn-wire), ADR-0042
+           (postcard binary envelope), docs/architecture/event-catalog.md,
+           crates/dawn-wire/src/lib.rs
 ---
 
 # Wire Protocol
 
-Transport is a single WebSocket connection per client. Every message in
-either direction is one newline-delimited JSON object tagged by a `"type"`
-field (`{"type": "ShipSpawned", ...}`).
+Transport is a single WebSocket connection per client. Since ADR-0042,
+messages with an already-fixed Rust type -- `Hello`/`Welcome`/`Redirect`/
+`DomainEvent`/`ClientCommand` -- travel as a **binary** frame, postcard-
+encoded via the `ClientMessage`/`ServerMessage` envelope in `dawn-wire`
+(one WebSocket frame always carries exactly one message; no length-prefix
+framing is needed on top). `InitialState`/`PlayerLoadout`/`AoiEnter` are
+still built as ad-hoc `serde_json::Value` server-side and travel as a
+**text** frame, one newline-delimited JSON object tagged by a `"type"` field
+(`{"type": "InitialState", ...}`) -- ADR-0042 stage 2, a follow-up task,
+would give them fixed types and fold them into the binary envelope too.
+
+The field-level shape of `EventJson`/`ClientCommandJson` below is still
+generated from the Rust types and still useful as the schema-of-record for
+what a message's fields mean -- but the **outer JSON shape shown in this
+doc's schema files no longer matches literally what's on the wire** for
+these two types: postcard cannot deserialize an internally tagged enum, so
+`EventJson`/`ClientCommandJson` are externally tagged (`{"VariantName":
+{...fields}}`), not `{"type": "VariantName", ...}`. An external
+(non-Godot) client talking to a Dawn server needs to speak postcard, not
+raw JSON, for the messages listed above.
 
 ## Server -> client: generated from `EventJson`
 
@@ -21,10 +39,11 @@ checked in at
 [`wire-protocol.schema.json`](./wire-protocol.schema.json) (JSON Schema,
 draft-07). It is produced by `dawn_actor::protocol::event_json_schema()`,
 which reflects the `EventJson` enum in
-[`crates/dawn-actor/src/protocol.rs`](../../crates/dawn-actor/src/protocol.rs).
+[`crates/dawn-wire/src/server_event.rs`](../../crates/dawn-wire/src/server_event.rs)
+(re-exported from `dawn_actor::protocol`, ADR-0041/ADR-0042).
 
 Read `wire-protocol.schema.json` for the exact contract. In summary, the
-`"type"` values are: `ShipSpawned`, `VelocityChanged`, `ShipDespawned`,
+variant names are: `ShipSpawned`, `VelocityChanged`, `ShipDespawned`,
 `ShipDocked`, `ShipUndocked`, `ShipAssembled`, `DamageTaken`, `RepairApplied`,
 `ShipDestroyed`, `TargetLocked`, `LockLost`, `ModuleActivated`,
 `ModuleDeactivated`, `JumpGateUsed`, `StarSystemChanged`, and `Redirect`
@@ -51,9 +70,9 @@ The full list of messages a client can send, with every field and its JSON
 type, is generated the same way and checked in at
 [`wire-protocol-commands.schema.json`](./wire-protocol-commands.schema.json).
 It is produced by `dawn_actor::protocol::client_command_json_schema()`,
-which reflects the `ClientCommandJson` enum in `protocol.rs`.
+which reflects the `ClientCommandJson` enum in `crates/dawn-wire/src/client_command.rs` (re-exported from `dawn_actor::protocol`).
 
-The `"type"` values are: `MoveCommand`, `LockOnCommand`,
+The variant names are: `MoveCommand`, `LockOnCommand`,
 `ActivateModuleCommand`, `DeactivateModuleCommand`, `AttackCommand`,
 `StopCommand`, `JumpCommand`, `ApproachCommand`, `WarpCommand`,
 `OrbitCommand`, `KeepAtRangeCommand`, `FitModuleCommand`,
@@ -129,7 +148,7 @@ requirement, not the wire schema.
 
 ## Keeping this in sync
 
-`wire_schema_doc_is_up_to_date` (a test in `protocol.rs`) fails the build if
+`wire_schema_doc_is_up_to_date` (a test in `dawn-actor/src/protocol/mod.rs`) fails the build if
 either checked-in schema file drifts from what `EventJson` /
 `ClientCommandJson` currently produce. After changing either enum (or a type
 either references -- `PosJson`, `VelJson`, `WarpTargetJson`), regenerate with:
@@ -144,8 +163,16 @@ them.
 
 ## Connection handshake
 
-- A fresh client sends `{"type":"Hello"}`.
+- A fresh client sends `ClientMessage::Hello(HelloMessage { resume: None })`,
+  postcard-encoded as a binary frame (ADR-0042).
 - A client resuming after a `Redirect` (cross-node jump) sends
-  `{"type":"Hello","player_id":N,"ship_id":N}` to resume its identity on the
-  new node instead of spawning fresh. See `parse_hello()` /
-  `ResumeIdentity` in `protocol.rs`.
+  `ClientMessage::Hello(HelloMessage { resume: Some(ResumeIdentity {
+  player_id, ship_id }) })` to resume its identity on the new node instead of
+  spawning fresh.
+- The server replies with `ServerMessage::Welcome { player_id, ship_id }`
+  (also binary), then `InitialState` (+ optional `PlayerLoadout`) as JSON
+  text frames.
+
+`parse_hello()` (JSON-text parsing of `{"type":"Hello",...}`) still exists in
+`dawn-wire` for this crate's own tests/documentation, but is no longer the
+runtime handshake path.

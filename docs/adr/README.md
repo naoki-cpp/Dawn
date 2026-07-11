@@ -39,6 +39,7 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 | [ADR-0039](ADR-0039-dawn-client-core-crate.md) | dawn-client-core クレート新設 — Godot非依存クライアントドメインモデルのRust抽出（Phase 1: Loadout） | Accepted |
 | [ADR-0040](ADR-0040-dawn-client-gdext-binding.md) | dawn-client-gdext — GDExtension バインディングで dawn-client-core を Godot へ公開 | Accepted |
 | [ADR-0041](ADR-0041-dawn-wire-command-send.md) | dawn-wire クレート新設 + コマンド送信の GDExtension 化 | Accepted |
+| [ADR-0042](ADR-0042-wire-postcard-protocol.md) | ワイヤプロトコルを WebSocket + postcard バイナリへ移行（段階1: Event/Command） | Accepted |
 
 ### Movement / Navigation
 
