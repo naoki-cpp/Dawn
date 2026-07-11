@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / 新スク
 related  : docs/architecture/architecture-review/server.md（サーバー側）, docs/architecture/architecture.md, docs/process/playtest-guide.md,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-07-10（定期再計測 その3。C-9 解消: `hud_manager.gd` のヒットテスト4関数（`module_slot_at`/`inventory_panel_row_at`/`column_at`/`inventory_panel_consumes`）を新設 `hud_hit_test.gd`（`HudHitTest`）へ分離、850→789行。テストも `hud_hit_test_test.gd` へ移動。GdUnit4 186/186 維持（テスト移動のみ、増減なし）。client 総合 A を維持）
+date     : 2026-07-11（定期再計測 その4。ADR-0042（ワイヤプロトコルのpostcardバイナリ化）で `connection.gd` の受信バッファリング（改行区切りテキストの想定）が不要になり撤去、374→344。GdUnit4テストは202/202（`client_command_gd_test.gd`に`ClientMessageDecoder`/`hello_command`関連のテストを追加）。他ファイルは変化なし。client 総合 A を維持）
 ---
 
 # Architecture Review — Dawn Client（Godot・構造評価）
@@ -31,8 +31,9 @@ date     : 2026-07-10（定期再計測 その3。C-9 解消: `hud_manager.gd` �
 `dawn-client-core`/`dawn-client-gdext` へ移植・削除し、`input_decoder.gd` の shipless
 soft-lock を修正したが、責務分担・結合度・保留課題の状態に新しい悪化はない。
 `main.gd` は 1217 行、補助モジュール群も引き続き 100〜370 行帯が中心で収まっている。
-GdUnit4 ケース数は実測186（`player_loadout_test.gd` 削除で204から減少）、
-テストコード総量は2,940→2,679行）
+GdUnit4 ケース数は実測202（2026-07-11、ADR-0042の`client_command_gd_test.gd`
+更新で`ClientMessageDecoder`/`hello_command`関連テストを追加し186→202）、
+テストコード総量は2,679→2,856行）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
@@ -41,7 +42,7 @@ GdUnit4 ケース数は実測186（`player_loadout_test.gd` 削除で204から�
 | 重複 | A− | マーカー生成・ピッキング・ワープ着地点計算の同型ロジックは解消済み（C-2） |
 | 結合度 | A | signal 経由の `connection.gd` ↔ `main.gd` 結合は良好。`@onready` のシーンツリー直パス参照はフェイルファストガードで解消（C-3）。modules/inventory dict のキー前提の脆さ（C-4）は `ModuleRow`/`ItemRow` typed row 化で解消済み。2026-07-08、`hud_manager.gd` のインベントリ行 Dictionary も `InventoryRow` typed class 化で解消（C-8） |
 | デッドコード | A | 残骸なし。コメントは ADR 参照付きで現状と一致 |
-| テストカバレッジ | A− | 新設クラス + main.gd残存ロジックの一部を GdUnit4 で計186ケース実行確認済み（2026-07-10実測・0 errors/0 failures/0 orphans。`player_loadout_test.gd` 削除で前回204から減少 -- 該当ロジックは `dawn-client-core` の Rust ユニットテストへ移った）。`WorldSession` / `HudSurface` / `WorldInteraction` / `WorldPresentation` は引き続き scene tree なしで単体テスト可能。scene-tree/ネットワーク依存の end-to-end 入力経路（ドラッグ&ドロップの実際のマウス操作等）だけが手動確認領域として残る |
+| テストカバレッジ | A− | 新設クラス + main.gd残存ロジックの一部を GdUnit4 で計202ケース実行確認済み（2026-07-11実測・0 errors/0 failures/0 orphans。ADR-0042で`ClientMessageDecoder`/`hello_command`テストを追加し186→202）。`WorldSession` / `HudSurface` / `WorldInteraction` / `WorldPresentation` は引き続き scene tree なしで単体テスト可能。scene-tree/ネットワーク依存の end-to-end 入力経路（ドラッグ&ドロップの実際のマウス操作等）だけが手動確認領域として残る |
 | サーバー側との対比 | — | サーバー側はクレート分割（A−）、クライアントはファイル分割（A）。テストカバレッジは依然サーバー側（カバレッジ80%要件）が厚い |
 
 サーバー側が長期にわたる分割リファクタ（Phase 2〜9）を経て A− に達したのに対し、
@@ -84,7 +85,7 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/main.gd` | 1217 | 🟢 オーケストレーション層。scene lifecycle / node generation / event dispatch / network send / HUD frame assembly を保持 |
 | `client/scripts/hud_manager.gd` | 789 | 🟢 HUD 全パネルの構築・更新の stateless static class。C-9解消（2026-07-10）でヒットテスト4関数を `hud_hit_test.gd` へ分離し、850→789 |
 | `client/scripts/hud_hit_test.gd` | 88 | 🟢 **新設**（2026-07-10、C-9解消）。`HudManager` が構築した Control 群への画面座標ヒットテスト専任（`module_slot_at`/`inventory_panel_row_at`/`column_at`/`inventory_panel_consumes`） |
-| `client/scripts/connection.gd` | 374 | 🟢 WebSocket I/O とシグナル発行のみ。2026-07-10、`player_fitting_received` を生JSON文字列渡しに変更（Dictionary再エンコードによる整数→浮動小数点化バグの修正） |
+| `client/scripts/connection.gd` | 344 | 🟢 WebSocket I/O とシグナル発行のみ。2026-07-10、`player_fitting_received` を生JSON文字列渡しに変更（Dictionary再エンコードによる整数→浮動小数点化バグの修正）。2026-07-11、ADR-0042でバイナリ送受信に対応、`_flush_buffer`の改行分割ロジックを撤去（374→344） |
 | `client/scripts/world_session.gd` | 358 | 🟢 InitialState / AoI / HP / lock / tick-cap / dock state の client-side live world state |
 | `client/scripts/ship_controller.gd` | 342 | 🟢 単一船の視覚表現に専念。ロックオン枠は `BillboardRing` 共通化 |
 | `client/scripts/navigation_marker_renderer.gd` | 227 | 🟢 ゲート/惑星/ステーションマーカー生成 + スペクトル色 |
@@ -101,8 +102,8 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/unit_format.gd` | 38 | 🟢 速度/距離の適応的単位整形（m/s・km/s・AU/s） |
 | `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 ワープトンネル ColorRect の intensity ラッパー |
 
-合計 4,856 行（2026-07-10 実測、`player_loadout.gd`/`module_row.gd`/`item_row.gd` 削除 +
-`hud_hit_test.gd` 新設後。削除前は5,210行）のうち `main.gd` が25%を占める
+合計 4,826 行（2026-07-11 実測。前回4,856から、ADR-0042で`connection.gd`の
+改行バッファリング撤去により-30）のうち `main.gd` が25%を占める
 （C-1着手前69%から大幅低下、水準維持）。
 新設 static class 群（C-1 の5クラス + ADR-0029 の `world_space`/`unit_format`/`warp_tunnel_effect`
 + `WorldSession` + `HudSurface` + `WorldInteraction` + `WorldPresentation` + C-8 の
@@ -113,9 +114,9 @@ shape を保持する。scene 生成と network send は `main.gd` 側。PlayerL
 （旧 `ModuleRow`/`ItemRow`/`player_loadout.gd`、C-4）は 2026-07-10、`dawn-client-core`
 （純粋 Rust）+ `dawn-client-gdext`（GDExtension バインディング）へ移植した（ADR-0039/ADR-0040）。
 
-（`client/test/*.gd` は `hud_hit_test_test.gd`（C-9解消で新設）を含め 15 ファイル・合計 2,712 行
-（`player_loadout_test.gd` 削除前は15ファイル・2,940行）。ケース数は186で変化なし
-（C-9解消はテストの移動のみで新規追加なし。GdUnit4実行で確認済み・0 errors/0 failures/0 orphans）。
+（`client/test/*.gd` は 16 ファイル・合計 2,856 行。2026-07-11、ADR-0042で
+`client_command_gd_test.gd`に`ClientMessageDecoder`/`hello_command`関連のテストを
+追加（ケース数186→202、GdUnit4実行で確認済み・0 errors/0 failures/0 orphans）。
 詳細な内訳は completed.md のテストカバレッジ表を参照）
 
 ---

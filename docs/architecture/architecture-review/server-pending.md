@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で issue を起票・状態更新するたびに更新
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）
-date     : 2026-07-10
+date     : 2026-07-11
 ---
 
 # Architecture Review — Dawn Codebase（未完項目）
@@ -107,6 +107,26 @@ WS protocol は `dawn-actor` に、ゲームロジックは `dawn-sector` に、
 再評価トリガー: 3つ目の Fit 経路（例: NPC ループ内リフィット等）が必要になり、
 テール重複が3箇所に増えたとき。
 
+#### M-10（着手予定・2026-07-11）: postcard encode/decode の呼び出し側分散
+
+ADR-0042（ワイヤプロトコルのpostcardバイナリ化）で、`postcard::to_stdvec`/
+`postcard::from_bytes` の呼び出しが3箇所に分散した: `dawn-actor/src/ws_server.rs`
+（`server_message_frame`関数 + 受信側2箇所）、`dawn-client-gdext/src/client_command_gd.rs`
+（`to_wire_bytes`関数 + `ClientMessageDecoder`）、`dawn-client-gdext/src/server_message_gd.rs`
+（`ServerMessageDecoder`）。`dawn-wire`自体はpostcardに依存しているが、実際の
+エンコード/デコード呼び出しは全て呼び出し側に委ねられている。
+
+**根本原因**: `dawn-wire`が`ServerMessage`/`ClientMessage`という型定義は
+提供するが、その型をpostcardでやり取りするための関数（`encode`/`decode`）を
+提供していない。結果として、CIの`cargo machete`が`dawn-wire`の`postcard`
+依存を「未使用」と誤検知する（実際はcrate doc内のdoctestでのみ使われている）。
+
+**判断: Fix。** `dawn-wire`に`pub fn encode_server_message(&ServerMessage) -> Vec<u8>`
+/`pub fn decode_server_message(&[u8]) -> Result<ServerMessage, postcard::Error>`
+（`ClientMessage`側も同様）を追加し、3箇所の呼び出し元をそちらに寄せる。
+`dawn-wire`自身が実コードでpostcardを使うようになり、cargo macheteの誤検知も
+解消される。次回計測時にこの項目は completed.md へ移動する見込み。
+
 #### M-9（保留・2026-07-01）: `EventStore::append` がinfallibleと偽る
 
 `/improve-codebase-architecture` の指摘: トレイト `EventStore::append` は `u64` を
@@ -197,6 +217,7 @@ P7 系で確立した「責務ごとに sibling モジュールへ抽出」方�
 | M-6 アプリ層 adapter 重複（`data_loader` / `spawn_npcs`） | 許容重複（縮小） | AoI / production runtime / Command dispatch は deep module 化済み（M-7 解消で Command dispatch 項目を削除）。残る data_loader / NPC spawn は低頻度 glue として許容。再評価トリガー付き |
 | M-8 `fit_module`/`fit_module_owned` 共有テール重複 | 許容（2026-07-01） | `inventory.rs` のモジュールコメントで意図的な分離と明記済み。テールのみの軽微な重複で優先度なし |
 | M-9 `EventStore::append` がinfallibleと偽る | 品質・保留（2026-07-01） | 永続化配線完了で実際に到達可能になったpanic経路。1プロセス1Sector構成ではcrash-only設計として不合理ではないため、全面Result化は見送り保留。実機クラッシュ発生 or マルチSectorプロセス化がトリガー |
+| M-10 postcard encode/decode の呼び出し側分散 | 品質・着手予定（2026-07-11） | `dawn-wire`に`encode`/`decode`ヘルパーがなく、3箇所（ws_server.rs / client_command_gd.rs / server_message_gd.rs）が直接`postcard::`を呼ぶ。cargo macheteの誤検知（postcard未使用判定）も併発。次のセッションで解消予定 |
 
 採らない方針（恒久）:
 
