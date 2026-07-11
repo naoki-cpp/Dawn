@@ -15,17 +15,20 @@
 //!
 //! ## Client transport
 //!
-//! `protocol` (DomainEvent <-> JSON <-> ClientCommand) and `ws_server`
+//! `protocol` (DomainEvent <-> `EventWire` <-> ClientCommand) and `ws_server`
 //! (`WsServer` / `WsClientConnection` / `PlayerSession`) are the production
 //! WebSocket transport, shared by both binaries (previously duplicated).
+//! Every message travels as a postcard-encoded binary frame (ADR-0042).
 //!
 //! ## Example
 //!
 //! ```
-//! use dawn_actor::protocol::parse_hello;
+//! use dawn_actor::protocol::{ClientMessage, HelloMessage};
 //!
-//! let hello = parse_hello(r#"{"type":"Hello"}"#).expect("valid Hello line");
-//! assert!(hello.resume.is_none());
+//! let msg = ClientMessage::Hello(HelloMessage { resume: None });
+//! let bytes = msg.encode();
+//! let decoded = ClientMessage::decode(&bytes).unwrap();
+//! assert!(matches!(decoded, ClientMessage::Hello(HelloMessage { resume: None })));
 //! ```
 
 // Rust API Guidelines C-DEBUG: catch new pub types that forget to derive

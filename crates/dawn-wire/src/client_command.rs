@@ -7,14 +7,14 @@ use dawn_core::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy)]
-pub struct PosJson {
+#[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema, Clone, Copy)]
+pub struct PosWire {
     pub x: f32,
     pub y: f32,
     pub z: f32,
 }
 
-impl PosJson {
+impl PosWire {
     /// `false` if any component is NaN/Infinity. A client-supplied non-finite
     /// coordinate would otherwise flow straight into position/velocity math
     /// (`SimulationNode::apply_move_command`) and poison shared simulation
@@ -27,14 +27,14 @@ impl PosJson {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy)]
-pub struct VelJson {
+#[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema, Clone, Copy)]
+pub struct VelWire {
     pub dx: f32,
     pub dy: f32,
     pub dz: f32,
 }
 
-impl From<Position> for PosJson {
+impl From<Position> for PosWire {
     fn from(p: Position) -> Self {
         Self {
             x: p.x,
@@ -44,7 +44,7 @@ impl From<Position> for PosJson {
     }
 }
 
-impl From<dawn_core::Velocity> for VelJson {
+impl From<dawn_core::Velocity> for VelWire {
     fn from(v: dawn_core::Velocity) -> Self {
         Self {
             dx: v.dx,
@@ -57,23 +57,21 @@ impl From<dawn_core::Velocity> for VelJson {
 /// A `{"Gate": N}` or `{"Body": N}` warp destination, as sent by
 /// `WarpCommand`'s current wire format (externally tagged: the variant name
 /// is the JSON object's only key).
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone, Copy)]
-pub enum WarpTargetJson {
+#[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema, Clone, Copy)]
+pub enum WarpTargetWire {
     Gate(u32),
     Body(u32),
 }
 
-/// Every message a client can send to the server over the WebSocket
-/// connection. Serialized as a single JSON line tagged by `"type"`.
+/// Every message a client can send to the server, as the postcard-encoded
+/// binary `ClientMessage::Command` envelope (ADR-0042).
 ///
 /// This enum is the schema-of-record for the client -> server half of the
-/// wire protocol (see `dawn_actor::protocol::EventJson` for the server ->
-/// client half, which stays in `dawn-actor` since only the server produces
-/// it). It intentionally mirrors the wire format exactly, including the two
+/// wire protocol (see [`crate::EventWire`] for the server -> client half). It
+/// intentionally mirrors the wire format exactly, including the two
 /// backward-compatible quirks below -- it does not enforce the "exactly one
 /// of these two fields" business rules those quirks involve; that
-/// validation still happens in [`parse_client_command`], same as before
-/// this enum existed.
+/// validation still happens in [`client_command_from_wire`].
 ///
 /// - `WarpCommand` accepts either `target` (current) or `gate_id` (legacy);
 ///   `target` wins if both are present.
@@ -89,24 +87,24 @@ pub enum WarpTargetJson {
 /// since they may target any owned docked ship, not just the active one.
 ///
 /// Derives both `Serialize` and `Deserialize` (ADR-0041): the server
-/// deserializes a wire-received line into this enum
-/// ([`parse_client_command`]); the Godot client (`dawn-client-gdext`)
-/// constructs a variant directly from typed arguments and serializes it
-/// back out, replacing the old GDScript pattern of hand-building a
-/// `Dictionary` that had to match this schema by eye.
+/// decodes a postcard-received `ClientMessage::Command` into this enum
+/// ([`client_command_from_wire`]); the Godot client (`dawn-client-gdext`)
+/// constructs a variant directly from typed arguments and encodes it back
+/// out, replacing the old GDScript pattern of hand-building a `Dictionary`
+/// that had to match this schema by eye.
 ///
 /// Externally tagged (serde's default enum representation, `{"VariantName":
 /// {...fields}}`), not `#[serde(tag = "type")]` -- `postcard` (the binary
 /// wire format since ADR-0042) cannot deserialize an internally tagged enum
 /// at all (it has no `deserialize_any`, which internal tagging requires).
-/// `parse_client_command`/JSON-text serialization of this type is no longer
-/// the runtime wire format (see [`postcard::to_stdvec`]/[`postcard::from_bytes`]
-/// via the `ClientMessage` envelope); it survives only for schema-generation
-/// tests and this crate's own unit tests.
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub enum ClientCommandJson {
+/// JSON-text serialization of this type is not the runtime wire format (see
+/// [`postcard::to_stdvec`]/[`postcard::from_bytes`] via the `ClientMessage`
+/// envelope); `serde_json` is used only by [`client_command_wire_json_schema`]
+/// (doc generation) and this crate's own unit tests.
+#[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub enum ClientCommandWire {
     MoveCommand {
-        target: PosJson,
+        target: PosWire,
     },
     LockOnCommand {
         target_id: u64,
@@ -135,7 +133,7 @@ pub enum ClientCommandJson {
         target_id: Option<u64>,
     },
     WarpCommand {
-        target: Option<WarpTargetJson>,
+        target: Option<WarpTargetWire>,
         /// Legacy form: `{"gate_id": N}` instead of `{"target": {"Gate": N}}`.
         gate_id: Option<u32>,
     },
@@ -210,17 +208,10 @@ pub enum ClientCommandJson {
     },
 }
 
-/// Render the client -> server wire schema (see [`ClientCommandJson`]) as a
+/// Render the client -> server wire schema (see [`ClientCommandWire`]) as a
 /// JSON Schema document.
-pub fn client_command_json_schema() -> schemars::schema::RootSchema {
-    schemars::schema_for!(ClientCommandJson)
-}
-
-/// Parse a newline-terminated JSON line from the Godot client into a
-/// [`ClientCommand`]. Returns `None` for unknown or malformed messages.
-pub fn parse_client_command(line: &str) -> Option<ClientCommand> {
-    let json: ClientCommandJson = serde_json::from_str(line).ok()?;
-    client_command_from_json(json)
+pub fn client_command_wire_json_schema() -> schemars::schema::RootSchema {
+    schemars::schema_for!(ClientCommandWire)
 }
 
 fn approach_target_from_gate_or_ship(
@@ -234,13 +225,13 @@ fn approach_target_from_gate_or_ship(
     }
 }
 
-/// Convert an already-decoded [`ClientCommandJson`] (e.g. from the binary
+/// Convert an already-decoded [`ClientCommandWire`] (from the binary
 /// `ClientMessage::Command` envelope, ADR-0042) into a [`ClientCommand`].
 /// Returns `None` for a value that fails domain validation (see each match
 /// arm below, e.g. non-finite coordinates).
-pub fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand> {
-    match json {
-        ClientCommandJson::MoveCommand { target } => {
+pub fn client_command_from_wire(wire: ClientCommandWire) -> Option<ClientCommand> {
+    match wire {
+        ClientCommandWire::MoveCommand { target } => {
             if !target.is_finite() {
                 return None;
             }
@@ -252,13 +243,13 @@ pub fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand
                 },
             }))
         }
-        ClientCommandJson::LockOnCommand { target_id } => {
+        ClientCommandWire::LockOnCommand { target_id } => {
             Some(ClientCommand::LockOn(LockOnCommand {
                 ship_id: ShipId(EntityId::from_raw(0)),
                 target_id: ShipId(EntityId::from_raw(target_id)),
             }))
         }
-        ClientCommandJson::ActivateModuleCommand {
+        ClientCommandWire::ActivateModuleCommand {
             module_id,
             slot,
             target_ship_id,
@@ -267,35 +258,35 @@ pub fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand
             slot: parse_slot_kind(&slot)?,
             target_ship_id: target_ship_id.map(|raw| ShipId(EntityId::from_raw(raw))),
         })),
-        ClientCommandJson::DeactivateModuleCommand { module_id, slot } => {
+        ClientCommandWire::DeactivateModuleCommand { module_id, slot } => {
             Some(ClientCommand::Deactivate(DeactivateModuleCommand {
                 module_id: ModuleId(module_id),
                 slot: parse_slot_kind(&slot)?,
             }))
         }
-        ClientCommandJson::AttackCommand {
+        ClientCommandWire::AttackCommand {
             attacker_id,
             target_id,
         } => Some(ClientCommand::Attack(AttackCommand {
             attacker_id: ShipId(EntityId::from_raw(attacker_id)),
             target_id: ShipId(EntityId::from_raw(target_id)),
         })),
-        ClientCommandJson::StopCommand {} => Some(ClientCommand::Stop(StopCommand)),
-        ClientCommandJson::JumpCommand { gate_id } => {
+        ClientCommandWire::StopCommand {} => Some(ClientCommand::Stop(StopCommand)),
+        ClientCommandWire::JumpCommand { gate_id } => {
             Some(ClientCommand::Jump(dawn_core::JumpCommand {
                 gate_id: dawn_core::JumpGateId(gate_id),
             }))
         }
-        ClientCommandJson::ApproachCommand { gate_id, target_id } => {
+        ClientCommandWire::ApproachCommand { gate_id, target_id } => {
             let target = approach_target_from_gate_or_ship(gate_id, target_id)?;
             Some(ClientCommand::Approach(ApproachCommand { target }))
         }
-        ClientCommandJson::WarpCommand { target, gate_id } => {
+        ClientCommandWire::WarpCommand { target, gate_id } => {
             let warp_target = match target {
-                Some(WarpTargetJson::Gate(gate)) => {
+                Some(WarpTargetWire::Gate(gate)) => {
                     dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(gate))
                 }
-                Some(WarpTargetJson::Body(body)) => {
+                Some(WarpTargetWire::Body(body)) => {
                     dawn_core::WarpTarget::Body(dawn_core::CelestialBodyId(body))
                 }
                 None => dawn_core::WarpTarget::Gate(dawn_core::JumpGateId(gate_id?)),
@@ -304,7 +295,7 @@ pub fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand
                 target: warp_target,
             }))
         }
-        ClientCommandJson::OrbitCommand {
+        ClientCommandWire::OrbitCommand {
             gate_id,
             target_id,
             radius,
@@ -318,7 +309,7 @@ pub fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand
                 radius,
             }))
         }
-        ClientCommandJson::KeepAtRangeCommand {
+        ClientCommandWire::KeepAtRangeCommand {
             gate_id,
             target_id,
             range,
@@ -332,7 +323,7 @@ pub fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand
                 range,
             }))
         }
-        ClientCommandJson::FitModuleCommand {
+        ClientCommandWire::FitModuleCommand {
             ship_id,
             module_id,
             slot,
@@ -341,7 +332,7 @@ pub fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand
             module_id: ModuleId(module_id),
             slot: parse_slot_kind(&slot)?,
         })),
-        ClientCommandJson::UnfitModuleCommand {
+        ClientCommandWire::UnfitModuleCommand {
             ship_id,
             module_id,
             slot,
@@ -350,7 +341,7 @@ pub fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand
             module_id: ModuleId(module_id),
             slot: parse_slot_kind(&slot)?,
         })),
-        ClientCommandJson::ReorderFittedModuleCommand {
+        ClientCommandWire::ReorderFittedModuleCommand {
             ship_id,
             slot,
             from_index,
@@ -363,11 +354,11 @@ pub fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand
                 to_index,
             },
         )),
-        ClientCommandJson::DockCommand { station_id } => Some(ClientCommand::Dock(DockCommand {
+        ClientCommandWire::DockCommand { station_id } => Some(ClientCommand::Dock(DockCommand {
             station_id: dawn_core::StationId(station_id),
         })),
-        ClientCommandJson::UndockCommand {} => Some(ClientCommand::Undock(UndockCommand)),
-        ClientCommandJson::BuildPackagedShipCommand {
+        ClientCommandWire::UndockCommand {} => Some(ClientCommand::Undock(UndockCommand)),
+        ClientCommandWire::BuildPackagedShipCommand {
             ship_id,
             station_id,
             ship_type_id,
@@ -376,29 +367,29 @@ pub fn client_command_from_json(json: ClientCommandJson) -> Option<ClientCommand
             station_id: dawn_core::StationId(station_id),
             ship_type_id: dawn_core::ShipTypeId(ship_type_id),
         })),
-        ClientCommandJson::DisassembleShipCommand {
+        ClientCommandWire::DisassembleShipCommand {
             ship_id,
             station_id,
         } => Some(ClientCommand::DisassembleShip(DisassembleShipCommand {
             ship_id: ShipId(EntityId::from_raw(ship_id)),
             station_id: dawn_core::StationId(station_id),
         })),
-        ClientCommandJson::SelectActiveShipCommand { ship_id } => Some(
+        ClientCommandWire::SelectActiveShipCommand { ship_id } => Some(
             ClientCommand::SelectActiveShip(dawn_core::SelectActiveShipCommand {
                 ship_id: ShipId(EntityId::from_raw(ship_id)),
             }),
         ),
-        ClientCommandJson::AssembleCommand {
+        ClientCommandWire::AssembleCommand {
             station_id,
             ship_type_id,
         } => Some(ClientCommand::Assemble(dawn_core::AssembleCommand {
             station_id: dawn_core::StationId(station_id),
             ship_type_id: dawn_core::ShipTypeId(ship_type_id),
         })),
-        ClientCommandJson::DisembarkCommand {} => {
+        ClientCommandWire::DisembarkCommand {} => {
             Some(ClientCommand::Disembark(dawn_core::DisembarkCommand))
         }
-        ClientCommandJson::TransferToStationCommand {
+        ClientCommandWire::TransferToStationCommand {
             ship_id,
             station_id,
             item_type,
@@ -445,24 +436,24 @@ fn parse_slot_kind(s: &str) -> Option<SlotKind> {
 mod tests {
     use super::*;
 
-    /// ADR-0041: `ClientCommandJson` gained `Serialize` so the Godot client
+    /// ADR-0041: `ClientCommandWire` gained `Serialize` so the Godot client
     /// can construct a variant directly and serialize it out, instead of
     /// hand-building a `Dictionary` that had to match this schema by eye.
-    /// This proves the round trip agrees with `parse_client_command`'s
-    /// existing deserialize path (both directions must describe the same
-    /// wire shape).
+    /// This proves the round trip agrees with `client_command_from_wire`'s
+    /// deserialize path (both directions must describe the same wire shape).
     #[test]
-    fn move_command_json_round_trips_through_serialize_and_deserialize() {
-        let cmd = ClientCommandJson::MoveCommand {
-            target: PosJson {
+    fn move_command_wire_round_trips_through_serialize_and_deserialize() {
+        let cmd = ClientCommandWire::MoveCommand {
+            target: PosWire {
                 x: 10.0,
                 y: 0.0,
                 z: -5.0,
             },
         };
         let line = serde_json::to_string(&cmd).expect("serialize");
+        let wire: ClientCommandWire = serde_json::from_str(&line).expect("deserialize");
 
-        let parsed = parse_client_command(&line).expect("must parse the line we just produced");
+        let parsed = client_command_from_wire(wire).expect("must convert");
         match parsed {
             ClientCommand::Move(c) => {
                 assert!((c.target_position.x - 10.0).abs() < 1e-6);
@@ -476,8 +467,9 @@ mod tests {
     /// dawn-wire (security-review.md SEC-5) -- this crate now owns the
     /// check, not dawn-actor.
     #[test]
-    fn move_command_json_with_an_overflowing_coordinate_fails_to_parse() {
+    fn move_command_wire_with_an_overflowing_coordinate_fails_to_convert() {
         let line = r#"{"MoveCommand":{"target":{"x":1e+40,"y":0.0,"z":0.0}}}"#;
-        assert!(parse_client_command(line).is_none());
+        let wire: ClientCommandWire = serde_json::from_str(line).expect("deserialize");
+        assert!(client_command_from_wire(wire).is_none());
     }
 }

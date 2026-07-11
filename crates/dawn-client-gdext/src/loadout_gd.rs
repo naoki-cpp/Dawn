@@ -27,13 +27,13 @@ fn wire_module_kind(kind: dawn_core::ModuleKind) -> dawn_client_core::ModuleKind
     }
 }
 
-/// Converts the wire-schema `PlayerLoadoutJson` (`dawn-wire`, ADR-0042 2a)
+/// Converts the wire-schema `PlayerLoadoutWire` (`dawn-wire`, ADR-0042 2a)
 /// into this crate's richer client-side `PlayerLoadoutMsg`
 /// (`dawn-client-core`). A plain function rather than a `From` impl -- both
 /// types are foreign to this crate, so the orphan rule forbids it anyway,
 /// and this adapter-layer conversion is exactly what `dawn-client-gdext` is
 /// for.
-fn wire_to_loadout_msg(wire: dawn_wire::PlayerLoadoutJson) -> PlayerLoadoutMsg {
+fn wire_to_loadout_msg(wire: dawn_wire::PlayerLoadoutWire) -> PlayerLoadoutMsg {
     PlayerLoadoutMsg {
         tick: wire.tick,
         modules: wire.modules.into_iter().map(wire_to_module_row).collect(),
@@ -66,7 +66,7 @@ fn wire_to_loadout_msg(wire: dawn_wire::PlayerLoadoutJson) -> PlayerLoadoutMsg {
     }
 }
 
-fn wire_to_module_row(row: dawn_wire::ModuleRowJson) -> dawn_client_core::ModuleRow {
+fn wire_to_module_row(row: dawn_wire::ModuleRowWire) -> dawn_client_core::ModuleRow {
     let d = row.stat_delta;
     dawn_client_core::ModuleRow {
         slot: row.slot,
@@ -96,7 +96,7 @@ fn wire_to_module_row(row: dawn_wire::ModuleRowJson) -> dawn_client_core::Module
     }
 }
 
-fn wire_to_item_row(row: dawn_wire::ItemRowJson) -> dawn_client_core::ItemRow {
+fn wire_to_item_row(row: dawn_wire::ItemRowWire) -> dawn_client_core::ItemRow {
     dawn_client_core::ItemRow {
         item_type: crate::item_row_gd::parse_item_type(&row.item_type),
         module_id: row.module_id,
@@ -399,7 +399,7 @@ impl PlayerLoadout {
 #[cfg(test)]
 mod tests {
     //! Contract test (ADR-0039/ADR-0042): proves the real server's
-    //! `PlayerLoadoutJson` (`dawn_sector`'s `build_player_loadout_json`)
+    //! `PlayerLoadoutWire` (`dawn_sector`'s `build_player_loadout_json`)
     //! still converts into `dawn_client_core::PlayerLoadoutMsg` via
     //! [`wire_to_loadout_msg`]. `dawn-sector` is a dev-dependency only --
     //! this does not add a runtime dependency edge, so it doesn't resurrect

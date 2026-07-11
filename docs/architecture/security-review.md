@@ -30,9 +30,9 @@ date     : 2026-07-11
 
 | 経路 | ファイル | 内容 |
 |---|---|---|
-| WebSocketフレーム受信 | `crates/dawn-actor/src/ws_server.rs` | 生テキストフレーム、行分割 |
-| コマンドJSONパース | `crates/dawn-actor/src/protocol/client_command.rs` | `ClientCommandJson` |
-| Hello/resumeハンドシェイク | `crates/dawn-actor/src/protocol/hello_resume.rs` | セッション識別（resume identity） |
+| WebSocketフレーム受信 | `crates/dawn-actor/src/ws_server.rs` | postcardバイナリフレーム（ADR-0042） |
+| コマンドデコード | `crates/dawn-wire/src/client_command.rs` | `ClientCommandWire` |
+| Hello/resumeハンドシェイク | `crates/dawn-wire/src/hello_resume.rs` | セッション識別（resume identity） |
 | コマンドディスパッチ | `crates/dawn-sector/src/node/commands.rs` + `command_station.rs` | 型付き`ClientCommand`適用 |
 | ノード間トランスポート | `crates/dawn-consensus/src/tcp_transport.rs`（Raft）, `crates/dawn-replication/src/tcp.rs`/`snapshot.rs`（レプリケーション） | フレーム長上限あり、無認証（LAN方針内） |
 
@@ -59,7 +59,7 @@ date     : 2026-07-11
 
 ### A04 コマンド層のアロケーション
 
-`ClientCommandJson`はスカラーのみ。クライアント供給カウントが駆動する無制限ループ/アロケーションなし。
+`ClientCommandWire`はスカラーのみ。クライアント供給カウントが駆動する無制限ループ/アロケーションなし。
 
 ### A08 データ整合性
 

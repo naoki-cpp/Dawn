@@ -55,7 +55,7 @@ fn server_message_to_dict(msg: &ServerMessage) -> Dict {
             d.set("ship_id", *ship_id as f64);
             d
         }
-        // EventJson serializes externally tagged (ADR-0042, postcard can't
+        // EventWire serializes externally tagged (ADR-0042, postcard can't
         // deserialize internal tagging), so converting to serde_json::Value
         // first and re-tagging it as {"type": ..., ...} reuses the existing
         // derive instead of hand-writing a match arm per DomainEvent variant
@@ -63,7 +63,7 @@ fn server_message_to_dict(msg: &ServerMessage) -> Dict {
         ServerMessage::Event(event) => match serde_json::to_value(event) {
             Ok(value) => externally_tagged_to_dict(&value),
             Err(err) => {
-                godot_error!("ServerMessageDecoder.decode: EventJson -> JSON failed: {err}");
+                godot_error!("ServerMessageDecoder.decode: EventWire -> JSON failed: {err}");
                 Dict::new()
             }
         },
@@ -78,7 +78,7 @@ fn server_message_to_dict(msg: &ServerMessage) -> Dict {
             d.set("type", "PlayerLoadout");
             d
         }
-        // InitialState is a plain struct (not an enum like EventJson), so it
+        // InitialState is a plain struct (not an enum like EventWire), so it
         // serializes to a flat JSON object with no wrapping variant name --
         // convert it directly and stamp "type" on, rather than going through
         // externally_tagged_to_dict (which expects a single-key wrapper).
@@ -89,7 +89,7 @@ fn server_message_to_dict(msg: &ServerMessage) -> Dict {
                 d
             }
             Err(err) => {
-                godot_error!("ServerMessageDecoder.decode: InitialStateJson -> JSON failed: {err}");
+                godot_error!("ServerMessageDecoder.decode: InitialStateWire -> JSON failed: {err}");
                 Dict::new()
             }
         },
@@ -103,7 +103,7 @@ fn server_message_to_dict(msg: &ServerMessage) -> Dict {
                 d
             }
             Err(err) => {
-                godot_error!("ServerMessageDecoder.decode: ShipStateJson -> JSON failed: {err}");
+                godot_error!("ServerMessageDecoder.decode: ShipStateWire -> JSON failed: {err}");
                 Dict::new()
             }
         },

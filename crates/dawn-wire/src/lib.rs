@@ -1,16 +1,15 @@
 //! Client <-> server wire schema for Dawn (ADR-0041, ADR-0042).
 //!
-//! [`ClientCommandJson`]/[`EventJson`] are the schema-of-record for every
+//! [`ClientCommandWire`]/[`EventWire`] are the schema-of-record for every
 //! message a client can send/receive over the WebSocket connection. They
 //! live in their own leaf crate (dawn-core + serde + postcard only, no
 //! transport/runtime dependency) so that both sides of the wire can depend
 //! on the *same* types instead of maintaining parallel copies that can
 //! drift:
 //!
-//! - `dawn-actor` (server) deserializes [`ClientMessage`] from the bytes a
-//!   client sent, via [`parse_client_command`] (legacy JSON path) or
-//!   `postcard::from_bytes` (binary envelope), and serializes
-//!   [`ServerMessage`] back out.
+//! - `dawn-actor` (server) decodes [`ClientMessage`] from the bytes a
+//!   client sent via `postcard::from_bytes` (the binary envelope) and
+//!   serializes [`ServerMessage`] back out.
 //! - `dawn-client-gdext` (Godot client) constructs [`ClientMessage`] directly
 //!   and serializes it out, and decodes a received [`ServerMessage`] back
 //!   into Godot-facing data -- replacing the old pattern of hand-building a
@@ -18,10 +17,10 @@
 //!   eye.
 //!
 //! ```
-//! use dawn_wire::{ClientCommandJson, PosJson};
+//! use dawn_wire::{ClientCommandWire, PosWire};
 //!
-//! let cmd = ClientCommandJson::MoveCommand {
-//!     target: PosJson { x: 10.0, y: 0.0, z: -5.0 },
+//! let cmd = ClientCommandWire::MoveCommand {
+//!     target: PosWire { x: 10.0, y: 0.0, z: -5.0 },
 //! };
 //! let json = serde_json::to_string(&cmd).unwrap();
 //! assert!(json.contains("\"MoveCommand\""));
@@ -31,7 +30,7 @@
 //!
 //! postcard has no self-describing type tag -- it can't deserialize an
 //! internally tagged enum at all (no `deserialize_any`), so
-//! `ClientCommandJson`/`EventJson` are externally tagged
+//! `ClientCommandWire`/`EventWire` are externally tagged
 //! (`{"VariantName": {...}}`, serde's default) rather than
 //! `#[serde(tag = "type")]`. The wire also needs one outer enum per
 //! direction that the receiver can decode without knowing the message kind
@@ -46,13 +45,37 @@
 //! assert!(matches!(decoded, ClientMessage::Hello(HelloMessage { resume: None })));
 //! ```
 //!
+//! The server -> client direction round-trips the same way through
+//! [`ServerMessage::Event`]:
+//!
+//! ```
+//! use dawn_wire::{EventWire, ServerMessage};
+//!
+//! let msg = ServerMessage::Event(EventWire::ShipDespawned { ship_id: 7, tick: 1 });
+//! let bytes = msg.encode();
+//! let decoded = ServerMessage::decode(&bytes).unwrap();
+//! assert!(matches!(
+//!     decoded,
+//!     ServerMessage::Event(EventWire::ShipDespawned { ship_id: 7, tick: 1 })
+//! ));
+//! ```
+//!
 //! Stage 1 covered the messages that already had a fixed Rust type:
 //! `Welcome`/`Redirect`/`Event` (server -> client) and `Hello`/`Command`
 //! (client -> server). Stage 2 folds in the remaining ad-hoc
-//! `serde_json::Value` messages one at a time; 2a ([`PlayerLoadoutJson`]),
-//! 2b ([`InitialStateJson`]), and 2c (`AoiEnter`/`AoiLeave`/`PositionSnap`)
+//! `serde_json::Value` messages one at a time; 2a ([`PlayerLoadoutWire`]),
+//! 2b ([`InitialStateWire`]), and 2c (`AoiEnter`/`AoiLeave`/`PositionSnap`)
 //! are done. Every server -> client message now travels through the binary
 //! envelope; there is no more ad-hoc JSON text path.
+//!
+//! # Naming convention
+//!
+//! Wire schema types use a `*Wire` suffix (`EventWire`, `ClientCommandWire`,
+//! `PosWire`, ...), not `*Json` -- ADR-0042 moved every message onto the
+//! postcard binary envelope, so a `Json` suffix would misdescribe what these
+//! types actually carry on the wire today. Real JSON-producing helpers (the
+//! `*_wire_json_schema()` doc-generation functions, which really do render a
+//! JSON Schema document) keep `json` in their names since that's accurate.
 
 mod client_command;
 mod hello_resume;
@@ -61,20 +84,18 @@ mod player_loadout;
 mod server_event;
 
 pub use client_command::{
-    client_command_from_json, client_command_json_schema, parse_client_command, ClientCommandJson,
-    PosJson, VelJson, WarpTargetJson,
+    client_command_from_wire, client_command_wire_json_schema, ClientCommandWire, PosWire, VelWire,
+    WarpTargetWire,
 };
-pub use hello_resume::{parse_hello, HelloMessage, ResumeIdentity};
+pub use hello_resume::{HelloMessage, ResumeIdentity};
 pub use initial_state::{
-    AbsPosJson, BuildableShipTypeJson, CelestialBodyJson, InitialStateJson, JumpGateJson,
-    ShipStateJson, StationJson, SystemJson,
+    AbsPosWire, BuildableShipTypeWire, CelestialBodyWire, InitialStateWire, JumpGateWire,
+    ShipStateWire, StationWire, SystemWire,
 };
 pub use player_loadout::{
-    ItemRowJson, ModuleRowJson, OwnedShipRowJson, PlayerLoadoutJson, SlotCapacityJson,
+    ItemRowWire, ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, SlotCapacityWire,
 };
-pub use server_event::{
-    domain_event_to_event_json, domain_event_to_json, event_json_schema, redirect_json, EventJson,
-};
+pub use server_event::{domain_event_to_event_wire, event_wire_json_schema, EventWire};
 
 use serde::{Deserialize, Serialize};
 
@@ -91,12 +112,12 @@ pub enum ServerMessage {
         player_id: u64,
         ship_id: u64,
     },
-    Event(EventJson),
-    PlayerLoadout(PlayerLoadoutJson),
-    InitialState(InitialStateJson),
+    Event(EventWire),
+    PlayerLoadout(PlayerLoadoutWire),
+    InitialState(InitialStateWire),
     /// A ship just entered an observer's Area-of-Interest neighborhood
     /// (ADR-0019/ADR-0042 stage 2c).
-    AoiEnter(ShipStateJson),
+    AoiEnter(ShipStateWire),
     /// A ship left an observer's Area-of-Interest neighborhood (ADR-0019/
     /// ADR-0042 stage 2c). Carries only the id -- the client already knows
     /// everything else about a ship it previously saw.
@@ -107,7 +128,7 @@ pub enum ServerMessage {
     /// (ADR-0029) to correct the client's capped warp-visual dead-reckoning.
     PositionSnap {
         ship_id: u64,
-        position: AbsPosJson,
+        position: AbsPosWire,
     },
 }
 
@@ -131,7 +152,7 @@ impl ServerMessage {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
     Hello(HelloMessage),
-    Command(ClientCommandJson),
+    Command(ClientCommandWire),
 }
 
 impl ClientMessage {

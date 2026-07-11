@@ -2,18 +2,18 @@
 //!
 //! Sent once per connection (fresh spawn, resume, or jump handoff) to give the
 //! client the navigation map plus every ship it can currently see. Absolute
-//! positions here are f64 (ADR-0029) -- [`PosJson`](crate::PosJson) is f32 and
+//! positions here are f64 (ADR-0029) -- [`PosWire`](crate::PosWire) is f32 and
 //! is used only for client command targets, so this module has its own
-//! `AbsPosJson`.
+//! `AbsPosWire`.
 
 use dawn_core::CelestialBodyKind;
 use serde::{Deserialize, Serialize};
 
 /// Absolute (Sector-frame, f64) position (ADR-0029). Distinct from
-/// [`crate::PosJson`] (f32), which carries client-authored command targets
+/// [`crate::PosWire`] (f32), which carries client-authored command targets
 /// rather than server-authoritative absolute coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct AbsPosJson {
+pub struct AbsPosWire {
     pub x: f64,
     pub y: f64,
     pub z: f64,
@@ -22,10 +22,10 @@ pub struct AbsPosJson {
 /// Per-ship state: position, stats, hull, ownership. Shared by `InitialState`
 /// and `AoiEnter` (ADR-0019).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ShipStateJson {
+pub struct ShipStateWire {
     pub ship_id: u64,
     pub ship_type_name: String,
-    pub position: AbsPosJson,
+    pub position: AbsPosWire,
     pub max_shield: f32,
     pub max_armor: f32,
     pub max_hull: f32,
@@ -38,34 +38,34 @@ pub struct ShipStateJson {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CelestialBodyJson {
+pub struct CelestialBodyWire {
     pub id: u32,
     pub kind: CelestialBodyKind,
     pub name: String,
-    pub position: AbsPosJson,
+    pub position: AbsPosWire,
     pub radius: f32,
     pub spectral_type: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SystemJson {
+pub struct SystemWire {
     pub id: u32,
     pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct JumpGateJson {
+pub struct JumpGateWire {
     pub gate_id: u32,
-    pub position: AbsPosJson,
+    pub position: AbsPosWire,
     pub activation_radius: f32,
     pub to_system_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StationJson {
+pub struct StationWire {
     pub station_id: u32,
     pub name: String,
-    pub position: AbsPosJson,
+    pub position: AbsPosWire,
     pub docking_radius: f32,
 }
 
@@ -73,18 +73,18 @@ pub struct StationJson {
 /// sent once alongside the rest of `InitialState` rather than as its own
 /// message type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BuildableShipTypeJson {
+pub struct BuildableShipTypeWire {
     pub ship_type_id: u32,
     pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct InitialStateJson {
-    pub ships: Vec<ShipStateJson>,
+pub struct InitialStateWire {
+    pub ships: Vec<ShipStateWire>,
     pub system_name: String,
-    pub systems: Vec<SystemJson>,
-    pub jump_gates: Vec<JumpGateJson>,
-    pub stations: Vec<StationJson>,
-    pub celestial_bodies: Vec<CelestialBodyJson>,
-    pub buildable_ship_types: Vec<BuildableShipTypeJson>,
+    pub systems: Vec<SystemWire>,
+    pub jump_gates: Vec<JumpGateWire>,
+    pub stations: Vec<StationWire>,
+    pub celestial_bodies: Vec<CelestialBodyWire>,
+    pub buildable_ship_types: Vec<BuildableShipTypeWire>,
 }

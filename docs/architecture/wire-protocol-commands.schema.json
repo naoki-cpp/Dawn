@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ClientCommandJson",
-  "description": "Every message a client can send to the server over the WebSocket connection. Serialized as a single JSON line tagged by `\"type\"`.\n\nThis enum is the schema-of-record for the client -> server half of the wire protocol (see `dawn_actor::protocol::EventJson` for the server -> client half, which stays in `dawn-actor` since only the server produces it). It intentionally mirrors the wire format exactly, including the two backward-compatible quirks below -- it does not enforce the \"exactly one of these two fields\" business rules those quirks involve; that validation still happens in [`parse_client_command`], same as before this enum existed.\n\n- `WarpCommand` accepts either `target` (current) or `gate_id` (legacy); `target` wins if both are present. - `ApproachCommand` / `OrbitCommand` / `KeepAtRangeCommand` select their target with either `gate_id` (a Jump Gate) or `target_id` (a Ship); `gate_id` wins if both are present.\n\nFlight/steering/module/Undock variants carry no `ship_id` (ADR-0037): the server always resolves them against the caller's active ship, so there is no wire-representable way to name a ship the player isn't currently flying. Station inventory-management variants (Fit/Unfit/Dock/ BuildPackagedShip/DisassembleShip) still carry an explicit `ship_id`, since they may target any owned docked ship, not just the active one.\n\nDerives both `Serialize` and `Deserialize` (ADR-0041): the server deserializes a wire-received line into this enum ([`parse_client_command`]); the Godot client (`dawn-client-gdext`) constructs a variant directly from typed arguments and serializes it back out, replacing the old GDScript pattern of hand-building a `Dictionary` that had to match this schema by eye.\n\nExternally tagged (serde's default enum representation, `{\"VariantName\": {...fields}}`), not `#[serde(tag = \"type\")]` -- `postcard` (the binary wire format since ADR-0042) cannot deserialize an internally tagged enum at all (it has no `deserialize_any`, which internal tagging requires). `parse_client_command`/JSON-text serialization of this type is no longer the runtime wire format (see [`postcard::to_stdvec`]/[`postcard::from_bytes`] via the `ClientMessage` envelope); it survives only for schema-generation tests and this crate's own unit tests.",
+  "title": "ClientCommandWire",
+  "description": "Every message a client can send to the server, as the postcard-encoded binary `ClientMessage::Command` envelope (ADR-0042).\n\nThis enum is the schema-of-record for the client -> server half of the wire protocol (see [`crate::EventWire`] for the server -> client half). It intentionally mirrors the wire format exactly, including the two backward-compatible quirks below -- it does not enforce the \"exactly one of these two fields\" business rules those quirks involve; that validation still happens in [`client_command_from_wire`].\n\n- `WarpCommand` accepts either `target` (current) or `gate_id` (legacy); `target` wins if both are present. - `ApproachCommand` / `OrbitCommand` / `KeepAtRangeCommand` select their target with either `gate_id` (a Jump Gate) or `target_id` (a Ship); `gate_id` wins if both are present.\n\nFlight/steering/module/Undock variants carry no `ship_id` (ADR-0037): the server always resolves them against the caller's active ship, so there is no wire-representable way to name a ship the player isn't currently flying. Station inventory-management variants (Fit/Unfit/Dock/ BuildPackagedShip/DisassembleShip) still carry an explicit `ship_id`, since they may target any owned docked ship, not just the active one.\n\nDerives both `Serialize` and `Deserialize` (ADR-0041): the server decodes a postcard-received `ClientMessage::Command` into this enum ([`client_command_from_wire`]); the Godot client (`dawn-client-gdext`) constructs a variant directly from typed arguments and encodes it back out, replacing the old GDScript pattern of hand-building a `Dictionary` that had to match this schema by eye.\n\nExternally tagged (serde's default enum representation, `{\"VariantName\": {...fields}}`), not `#[serde(tag = \"type\")]` -- `postcard` (the binary wire format since ADR-0042) cannot deserialize an internally tagged enum at all (it has no `deserialize_any`, which internal tagging requires). JSON-text serialization of this type is not the runtime wire format (see [`postcard::to_stdvec`]/[`postcard::from_bytes`] via the `ClientMessage` envelope); `serde_json` is used only by [`client_command_wire_json_schema`] (doc generation) and this crate's own unit tests.",
   "oneOf": [
     {
       "type": "object",
@@ -16,7 +16,7 @@
           ],
           "properties": {
             "target": {
-              "$ref": "#/definitions/PosJson"
+              "$ref": "#/definitions/PosWire"
             }
           }
         }
@@ -219,7 +219,7 @@
             "target": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/WarpTargetJson"
+                  "$ref": "#/definitions/WarpTargetWire"
                 },
                 {
                   "type": "null"
@@ -619,7 +619,7 @@
     }
   ],
   "definitions": {
-    "PosJson": {
+    "PosWire": {
       "type": "object",
       "required": [
         "x",
@@ -641,7 +641,7 @@
         }
       }
     },
-    "WarpTargetJson": {
+    "WarpTargetWire": {
       "description": "A `{\"Gate\": N}` or `{\"Body\": N}` warp destination, as sent by `WarpCommand`'s current wire format (externally tagged: the variant name is the JSON object's only key).",
       "oneOf": [
         {

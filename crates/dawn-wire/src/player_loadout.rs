@@ -1,8 +1,8 @@
 //! `PlayerLoadout` wire schema (ADR-0042 stage 2a).
 //!
 //! The server sends this after Welcome/InitialState and again after every
-//! Fit/Unfit (ADR-0032). Building block types (`ModuleRowJson`/`ItemRowJson`/
-//! `SlotCapacityJson`/`OwnedShipRowJson`) mirror exactly what
+//! Fit/Unfit (ADR-0032). Building block types (`ModuleRowWire`/`ItemRowWire`/
+//! `SlotCapacityWire`/`OwnedShipRowWire`) mirror exactly what
 //! `dawn-sector`'s `player_loadout_projection.rs` used to hand-assemble via
 //! `serde_json::json!`, and what `dawn-client-core`'s `PlayerLoadoutMsg`/
 //! `ModuleRow`/`ItemRow`/`SlotCapacity`/`OwnedShipRow` already expect to
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 /// One row of `PlayerLoadout`'s `modules` array (a fitted module slot).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ModuleRowJson {
+pub struct ModuleRowWire {
     pub slot: String,
     pub index: u32,
     pub module_id: u32,
@@ -32,7 +32,7 @@ pub struct ModuleRowJson {
 /// one shape every `ItemId` variant (Module/PackagedShip/ScrapMetal)
 /// projects into -- unused fields for a given variant are `0`/`""`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ItemRowJson {
+pub struct ItemRowWire {
     pub item_type: String,
     pub module_id: u32,
     pub ship_type_id: u32,
@@ -44,7 +44,7 @@ pub struct ItemRowJson {
 
 /// Per-slot-kind fitted module capacity.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct SlotCapacityJson {
+pub struct SlotCapacityWire {
     pub high: u8,
     pub mid: u8,
     pub low: u8,
@@ -54,7 +54,7 @@ pub struct SlotCapacityJson {
 /// One row of `PlayerLoadout`'s `owned_ships` array (ADR-0037's full
 /// owned-ship roster, active or not).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct OwnedShipRowJson {
+pub struct OwnedShipRowWire {
     pub ship_id: u64,
     pub ship_type_id: Option<u32>,
     pub ship_type_name: Option<String>,
@@ -64,14 +64,14 @@ pub struct OwnedShipRowJson {
 
 /// The full `PlayerLoadout` wire message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PlayerLoadoutJson {
+pub struct PlayerLoadoutWire {
     pub tick: u64,
-    pub modules: Vec<ModuleRowJson>,
-    pub inventory: Vec<ItemRowJson>,
-    pub station_inventory: Vec<ItemRowJson>,
+    pub modules: Vec<ModuleRowWire>,
+    pub inventory: Vec<ItemRowWire>,
+    pub station_inventory: Vec<ItemRowWire>,
     pub docked_station_id: Option<u32>,
     pub docked_station_name: Option<String>,
-    pub slot_capacity: SlotCapacityJson,
+    pub slot_capacity: SlotCapacityWire,
     pub active_ship_id: Option<u64>,
-    pub owned_ships: Vec<OwnedShipRowJson>,
+    pub owned_ships: Vec<OwnedShipRowWire>,
 }

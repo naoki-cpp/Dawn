@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_event_store::store::EventStore;
-use dawn_wire::{AbsPosJson, ServerMessage};
+use dawn_wire::{AbsPosWire, ServerMessage};
 
 use crate::node::SimulationNode;
 
@@ -278,7 +278,7 @@ impl AoiDelivery {
                 if let Some(abs) = node.ship_absolute(sid) {
                     let msg = ServerMessage::PositionSnap {
                         ship_id: sid.raw(),
-                        position: AbsPosJson {
+                        position: AbsPosWire {
                             x: abs[0],
                             y: abs[1],
                             z: abs[2],
@@ -310,7 +310,7 @@ fn grid_cell(cell_size: f32, pos: [f64; 3]) -> Cell {
 mod tests {
     use super::*;
     use dawn_core::NodeId;
-    use dawn_wire::ShipStateJson;
+    use dawn_wire::ShipStateWire;
 
     fn ship(n: u64) -> ShipId {
         ShipId::new(NodeId(0), n)
@@ -450,9 +450,9 @@ mod tests {
     #[derive(Default)]
     struct FakeSink {
         events: Vec<DomainEvent>,
-        aoi_enters: Vec<ShipStateJson>,
+        aoi_enters: Vec<ShipStateWire>,
         aoi_leaves: Vec<u64>,
-        position_snaps: Vec<(u64, AbsPosJson)>,
+        position_snaps: Vec<(u64, AbsPosWire)>,
     }
 
     impl AoiSink for FakeSink {

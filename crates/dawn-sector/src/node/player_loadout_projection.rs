@@ -7,20 +7,20 @@ use dawn_core::{ItemId, PlayerId, ShipId};
 use dawn_ecs::components::{FittingComp, InventoryComp};
 use dawn_event_store::store::EventStore;
 use dawn_wire::{
-    ItemRowJson, ModuleRowJson, OwnedShipRowJson, PlayerLoadoutJson, SlotCapacityJson,
+    ItemRowWire, ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, SlotCapacityWire,
 };
 
 use super::SimulationNode;
 
 impl<S: EventStore> SimulationNode<S> {
-    /// The one seam every `ItemRowJson` (ship cargo, station inventory) goes
+    /// The one seam every `ItemRowWire` (ship cargo, station inventory) goes
     /// through. `0`/`""` fill the fields a given `ItemId` variant doesn't
     /// use. `None` if the registry backing `item_id` no longer has a
     /// definition for it (stale/renamed module or ship type).
-    fn item_id_to_row_json(&self, item_id: ItemId, count: u64) -> Option<ItemRowJson> {
+    fn item_id_to_row_json(&self, item_id: ItemId, count: u64) -> Option<ItemRowWire> {
         match item_id {
             ItemId::Module(module_id) => {
-                self.module_registry.get(&module_id).map(|def| ItemRowJson {
+                self.module_registry.get(&module_id).map(|def| ItemRowWire {
                     item_type: "Module".to_string(),
                     module_id: def.id.0,
                     ship_type_id: 0,
@@ -33,7 +33,7 @@ impl<S: EventStore> SimulationNode<S> {
             ItemId::PackagedShip(ship_type_id) => {
                 self.ship_type_registry
                     .get(&ship_type_id)
-                    .map(|def| ItemRowJson {
+                    .map(|def| ItemRowWire {
                         item_type: "PackagedShip".to_string(),
                         module_id: 0,
                         ship_type_id: def.id.0,
@@ -43,7 +43,7 @@ impl<S: EventStore> SimulationNode<S> {
                         count,
                     })
             }
-            ItemId::ScrapMetal => Some(ItemRowJson {
+            ItemId::ScrapMetal => Some(ItemRowWire {
                 item_type: "ScrapMetal".to_string(),
                 module_id: 0,
                 ship_type_id: 0,
@@ -59,11 +59,11 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// Sent after Welcome + InitialState on connect, and again after every
     /// Fit/Unfit (ADR-0032).
-    pub fn build_player_loadout_json(&self, ship_id: ShipId) -> Option<PlayerLoadoutJson> {
+    pub fn build_player_loadout_json(&self, ship_id: ShipId) -> Option<PlayerLoadoutWire> {
         let entity = self.ships.index.get(&ship_id)?;
         let fitting = self.world.inner().get::<&FittingComp>(*entity).ok()?;
 
-        let mut modules: Vec<ModuleRowJson> = Vec::new();
+        let mut modules: Vec<ModuleRowWire> = Vec::new();
         let slot_names = [
             ("High", &fitting.high),
             ("Mid", &fitting.mid),
@@ -72,7 +72,7 @@ impl<S: EventStore> SimulationNode<S> {
         ];
         for (slot_name, slots) in &slot_names {
             for (i, slot) in slots.iter().enumerate() {
-                modules.push(ModuleRowJson {
+                modules.push(ModuleRowWire {
                     slot: slot_name.to_string(),
                     index: i as u32,
                     module_id: slot.def.id.0,
@@ -90,7 +90,7 @@ impl<S: EventStore> SimulationNode<S> {
             }
         }
 
-        let inventory: Vec<ItemRowJson> = self
+        let inventory: Vec<ItemRowWire> = self
             .world
             .inner()
             .get::<&InventoryComp>(*entity)
@@ -122,14 +122,14 @@ impl<S: EventStore> SimulationNode<S> {
             .get(&ship_id)
             .and_then(|t| self.ship_type_registry.get(t))
             .map(|d| d.slot_layout);
-        let slot_capacity = SlotCapacityJson {
+        let slot_capacity = SlotCapacityWire {
             high: layout.map(|l| l.high).unwrap_or(0),
             mid: layout.map(|l| l.mid).unwrap_or(0),
             low: layout.map(|l| l.low).unwrap_or(0),
             rig: layout.map(|l| l.rig).unwrap_or(0),
         };
 
-        Some(PlayerLoadoutJson {
+        Some(PlayerLoadoutWire {
             tick: self.current_tick.value(),
             modules,
             inventory,
@@ -147,7 +147,7 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn build_player_loadout_json_for_player(
         &self,
         player_id: PlayerId,
-    ) -> Option<PlayerLoadoutJson> {
+    ) -> Option<PlayerLoadoutWire> {
         if let Some(ship_id) = self.ships.active_ship.get(&player_id).copied() {
             return self.build_player_loadout_json(ship_id);
         }
@@ -158,14 +158,14 @@ impl<S: EventStore> SimulationNode<S> {
         let station_inventory = self.station_inventory_json(player_id);
         let owned_ships = self.owned_ships_json(player_id);
 
-        Some(PlayerLoadoutJson {
+        Some(PlayerLoadoutWire {
             tick: self.current_tick.value(),
             modules: Vec::new(),
             inventory: Vec::new(),
             station_inventory,
             docked_station_id: docked_station_id.map(|id| id.0),
             docked_station_name,
-            slot_capacity: SlotCapacityJson {
+            slot_capacity: SlotCapacityWire {
                 high: 0,
                 mid: 0,
                 low: 0,
@@ -177,7 +177,7 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Every ship `player_id` owns, active or not.
-    fn owned_ships_json(&self, player_id: PlayerId) -> Vec<OwnedShipRowJson> {
+    fn owned_ships_json(&self, player_id: PlayerId) -> Vec<OwnedShipRowWire> {
         let active_ship_id = self.ships.active_ship.get(&player_id).copied();
         self.ships
             .owners
@@ -188,7 +188,7 @@ impl<S: EventStore> SimulationNode<S> {
                 let ship_type_name = ship_type_id
                     .and_then(|t| self.ship_type_registry.get(&t))
                     .map(|def| def.name.clone());
-                OwnedShipRowJson {
+                OwnedShipRowWire {
                     ship_id: ship_id.raw(),
                     ship_type_id: ship_type_id.map(|t| t.0),
                     ship_type_name,
@@ -201,7 +201,7 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Station inventory as wire rows for `player_id`, empty if the player
     /// isn't currently docked anywhere.
-    fn station_inventory_json(&self, player_id: PlayerId) -> Vec<ItemRowJson> {
+    fn station_inventory_json(&self, player_id: PlayerId) -> Vec<ItemRowWire> {
         let Some(station_id) = self.player_docked_station(player_id) else {
             return Vec::new();
         };
@@ -262,7 +262,7 @@ mod tests {
         assert_eq!(scrap.count, 3);
     }
 
-    /// `ItemRowJson` always carries every field by construction (the type
+    /// `ItemRowWire` always carries every field by construction (the type
     /// system enforces this now, not a runtime shape check) -- this test
     /// only confirms the three `ItemId` variants each produce a row.
     #[test]
@@ -306,7 +306,7 @@ mod tests {
 
         let payload = node.build_player_loadout_json(ship_id).unwrap();
 
-        let mut rows: Vec<&ItemRowJson> = payload.inventory.iter().collect();
+        let mut rows: Vec<&ItemRowWire> = payload.inventory.iter().collect();
         rows.extend(payload.station_inventory.iter());
         assert!(rows.iter().any(|r| r.item_type == "Module"));
         assert!(rows.iter().any(|r| r.item_type == "ScrapMetal"));

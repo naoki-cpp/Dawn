@@ -79,13 +79,13 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/A
 | `dawn-core` | library | Pure domain model. Zero external dependencies |
 | `dawn-client-core` | library | Godot-independent client-side domain model (loadout, wire row types). Depends only on `dawn-core` (ADR-0039) |
 | `dawn-client-gdext` | library (cdylib) | GDExtension binding exposing `dawn-client-core` to the Godot client. Thin type-conversion adapter only (ADR-0040) |
-| `dawn-wire` | library | Client<->server wire schema (`ClientCommandJson`/`EventJson`, `ServerMessage`/`ClientMessage` binary envelope). Depends only on `dawn-core` + serde + postcard -- no transport/runtime dependency (ADR-0041, ADR-0042) |
+| `dawn-wire` | library | Client<->server wire schema (`ClientCommandWire`/`EventWire`, `ServerMessage`/`ClientMessage` binary envelope). Depends only on `dawn-core` + serde + postcard -- no transport/runtime dependency (ADR-0041, ADR-0042) |
 | `dawn-ecs` | library | ECS World wrapper. Component / System definitions |
 | `dawn-event-store` | library | Persistence/compaction of the two-tier Event Log (hot log + cold archive) (ADR-0017) |
 | `dawn-consensus` | library | Raft implementation (leader election, log replication, RaftActor; ADR-0014) |
 | `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
 | `dawn-replication` | library | Gossip distribution boundary for the append log (OutboundLogPublisher / InMemoryReplicationBus / ReplicationTransport / AntiEntropy / TcpReplicationTransport / SnapshotTransfer / ReplicaSet; ADR-0021/0027) |
-| `dawn-sector` | library | Per-Sector game logic (SimulationNode, Tick, Transit, Warp, Bot AI, AoI, Snapshot; ADR-0026). Also depends on `dawn-wire` to build typed wire messages (e.g. `PlayerLoadoutJson`, ADR-0042 stage 2a) |
+| `dawn-sector` | library | Per-Sector game logic (SimulationNode, Tick, Transit, Warp, Bot AI, AoI, Snapshot; ADR-0026). Also depends on `dawn-wire` to build typed wire messages (e.g. `PlayerLoadoutWire`, ADR-0042 stage 2a) |
 | `dawn-simulation` | binary | Wiring/bootstrap only. WsServer (Godot), Raft cluster wiring, load generation, TOML loader |
 | `dawn-sector-node` | binary | Production binary (8D-4). Wires TcpRaftTransport + TcpReplicationTransport from static TOML config. 3 processes = 3-Sector cluster |
 

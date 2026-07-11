@@ -18,24 +18,24 @@ stages complete), every message -- `Hello`/`Welcome`/`Redirect`/`DomainEvent`/
 always carries exactly one message; no length-prefix framing is needed on
 top). There is no more ad-hoc JSON text frame path.
 
-The field-level shape of `EventJson`/`ClientCommandJson` below is still
+The field-level shape of `EventWire`/`ClientCommandWire` below is still
 generated from the Rust types and still useful as the schema-of-record for
 what a message's fields mean -- but the **outer JSON shape shown in this
 doc's schema files no longer matches literally what's on the wire** for
 these two types: postcard cannot deserialize an internally tagged enum, so
-`EventJson`/`ClientCommandJson` are externally tagged (`{"VariantName":
+`EventWire`/`ClientCommandWire` are externally tagged (`{"VariantName":
 {...fields}}`), not `{"type": "VariantName", ...}`. An external
 (non-Godot) client talking to a Dawn server needs to speak postcard, not
 raw JSON, for the messages listed above.
 
-## Server -> client: generated from `EventJson`
+## Server -> client: generated from `EventWire`
 
 The full, authoritative list of messages the server can send, with every
 field and its JSON type, is generated straight from the Rust source and
 checked in at
 [`wire-protocol.schema.json`](./wire-protocol.schema.json) (JSON Schema,
-draft-07). It is produced by `dawn_actor::protocol::event_json_schema()`,
-which reflects the `EventJson` enum in
+draft-07). It is produced by `dawn_actor::protocol::event_wire_json_schema()`,
+which reflects the `EventWire` enum in
 [`crates/dawn-wire/src/server_event.rs`](../../crates/dawn-wire/src/server_event.rs)
 (re-exported from `dawn_actor::protocol`, ADR-0041/ADR-0042).
 
@@ -43,31 +43,31 @@ Read `wire-protocol.schema.json` for the exact contract. In summary, the
 variant names are: `ShipSpawned`, `VelocityChanged`, `ShipDespawned`,
 `ShipDocked`, `ShipUndocked`, `ShipAssembled`, `DamageTaken`, `RepairApplied`,
 `ShipDestroyed`, `TargetLocked`, `LockLost`, `ModuleActivated`,
-`ModuleDeactivated`, `JumpGateUsed`, `StarSystemChanged`, and `Redirect`
-(server-initiated reconnect to a different node on cross-node jump, see
-ADR-0026 / multi-node clusters).
+`ModuleDeactivated`, `JumpGateUsed`, `StarSystemChanged`. (A server-initiated
+reconnect to a different node on cross-node jump is `ServerMessage::Redirect`,
+a struct variant of the outer envelope, not an `EventWire` variant --
+see ADR-0026 / multi-node clusters.)
 
 `ShipAssembled` (Phase 9B-5, ADR-0034/ADR-0037) reports a new live docked
 ship created from a station-inventory `PackagedShip` item: `ship_id`,
 `station_id`, `ship_type_id`, `tick`. It does not imply the ship became the
 caller's `active_ship` -- send `SelectActiveShipCommand` to fly it.
 
-Every event carries `tick: u64` except `Redirect`, which is a transport
-control message rather than a domain fact.
+Every `EventWire` variant carries `tick: u64`.
 
-Not every `DomainEvent` reaches the wire -- `domain_event_to_json()` returns
-`None` for internal bookkeeping events (`ShipFitted`, `WeaponFired`,
+Not every `DomainEvent` reaches the wire -- `domain_event_to_event_wire()`
+returns `None` for internal bookkeeping events (`ShipFitted`, `WeaponFired`,
 `TackleApplied`, `TackleReleased`, the `SectorTransit*` family,
 `AnchorRebased`, `PackagedShipBuilt`, `ShipDisassembled`). See
 `docs/architecture/event-catalog.md` for what those events mean server-side.
 
-## Client -> server: generated from `ClientCommandJson`
+## Client -> server: generated from `ClientCommandWire`
 
 The full list of messages a client can send, with every field and its JSON
 type, is generated the same way and checked in at
 [`wire-protocol-commands.schema.json`](./wire-protocol-commands.schema.json).
-It is produced by `dawn_actor::protocol::client_command_json_schema()`,
-which reflects the `ClientCommandJson` enum in `crates/dawn-wire/src/client_command.rs` (re-exported from `dawn_actor::protocol`).
+It is produced by `dawn_actor::protocol::client_command_wire_json_schema()`,
+which reflects the `ClientCommandWire` enum in `crates/dawn-wire/src/client_command.rs` (re-exported from `dawn_actor::protocol`).
 
 The variant names are: `MoveCommand`, `LockOnCommand`,
 `ActivateModuleCommand`, `DeactivateModuleCommand`, `AttackCommand`,
@@ -127,9 +127,9 @@ may target any owned docked ship, not just the active one.
 ship is active (station-local switch only for now). See
 `docs/architecture/ownership.md` §7.
 
-`ClientCommandJson` mirrors the wire format exactly, including two
+`ClientCommandWire` mirrors the wire format exactly, including two
 backward-compatible quirks it does not itself resolve (that validation
-happens in `parse_client_command()`, same as before this enum existed):
+happens in `client_command_from_wire()`):
 
 - `WarpCommand` accepts a legacy `{"gate_id": N}` form and the current
   `{"target": {"Gate": N}}` / `{"target": {"Body": N}}` form. `target` wins
@@ -137,7 +137,7 @@ happens in `parse_client_command()`, same as before this enum existed):
 - `ApproachCommand`, `OrbitCommand`, and `KeepAtRangeCommand` select their
   target with either `gate_id` (a Jump Gate) or `target_id` (a Ship);
   `gate_id` wins if both are present, and the command is rejected
-  (`parse_client_command` returns `None`) if neither is present.
+  (`client_command_from_wire` returns `None`) if neither is present.
 
 `ActivateModuleCommand`'s `target_ship_id` is only required for targeted
 module kinds (Weapon/Tackle, ADR-0035); the server validates that
@@ -146,9 +146,9 @@ requirement, not the wire schema.
 ## Keeping this in sync
 
 `wire_schema_doc_is_up_to_date` (a test in `dawn-actor/src/protocol/mod.rs`) fails the build if
-either checked-in schema file drifts from what `EventJson` /
-`ClientCommandJson` currently produce. After changing either enum (or a type
-either references -- `PosJson`, `VelJson`, `WarpTargetJson`), regenerate with:
+either checked-in schema file drifts from what `EventWire` /
+`ClientCommandWire` currently produce. After changing either enum (or a type
+either references -- `PosWire`, `VelWire`, `WarpTargetWire`), regenerate with:
 
 ```bash
 cargo run -p dawn-actor --example gen_wire_schema
@@ -169,7 +169,3 @@ them.
 - The server replies with `ServerMessage::Welcome { player_id, ship_id }`,
   then `ServerMessage::InitialState` (+ optional `ServerMessage::PlayerLoadout`),
   all binary.
-
-`parse_hello()` (JSON-text parsing of `{"type":"Hello",...}`) still exists in
-`dawn-wire` for this crate's own tests/documentation, but is no longer the
-runtime handshake path.

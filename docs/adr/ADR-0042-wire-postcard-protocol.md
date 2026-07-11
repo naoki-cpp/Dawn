@@ -289,3 +289,51 @@ GDScript側の既存コンシューマ（`main.gd`/`hud_manager.gd`）には影�
 ADR-0042のワイヤ移行はこれで完了：クライアント↔サーバー間の全メッセージが
 postcardバイナリの`ServerMessage`/`ClientMessage`エンベロープ経由になり、
 ad-hoc JSON textフレーム経路（`send_raw`）は撤去された。
+
+### 命名規則の是正・死んだJSON経路の削除（2026-07-11 完了）
+
+段階2c完了直後の`/architecture-review`スキルで、`dawn-wire`のスキーマ型が
+全て`*Json`サフィックスを持つ一方、実際の配線はpostcardバイナリになっており
+名前が実態と食い違っている点が見つかった（併せて`domain_event_to_json`/
+`parse_client_command`/`parse_hello`/`redirect_json`が本番未使用の薄い
+JSON文字列ラッパーとして残っていることも判明）。以下を同一PRで実施:
+
+- [x] `dawn-wire`のスキーマ型16個を`*Json`→`*Wire`サフィックスへ一括リネーム
+      （`EventWire`、`ClientCommandWire`、`PosWire`、`VelWire`、
+      `WarpTargetWire`、`PlayerLoadoutWire`とその構成型、`InitialStateWire`
+      とその構成型）。実際に`serde_json::Value`を扱う`json_variant.rs`の
+      関数（`json_value_to_variant`/`externally_tagged_to_dict`）は対象外
+      （本物のJSON変換なので名前が実態と一致している）
+- [x] 本番で一切呼ばれていなかった4関数を削除:
+      `domain_event_to_json`（`domain_event_to_event_wire`のString版ラッパー）、
+      `parse_client_command`（`serde_json::from_str`+
+      `client_command_from_wire`のラッパー）、`parse_hello`（手書きJSON
+      パーサ、`HelloMessage`の`derive(Deserialize)`で代替可能）、
+      `redirect_json`（`EventWire::Redirect`のString化ラッパー -- この
+      variant自体も本番未使用と判明したため削除）
+- [x] 本番で使われているが名前が実態と食い違っていた関数をリネーム:
+      `client_command_from_json`→`client_command_from_wire`（実引数は
+      JSON文字列でなく既にpostcardデコード済みの`ClientCommandWire`値）、
+      `domain_event_to_event_json`→`domain_event_to_event_wire`、
+      `event_json_schema`/`client_command_json_schema`→
+      `event_wire_json_schema`/`client_command_wire_json_schema`（本物の
+      JSON Schema生成なので`json`は残すが、対象の型名変更に合わせて改名）
+- [x] `dawn-actor/src/protocol/mod.rs`のテスト（~30件）: 削除した
+      `parse_client_command`の代わりにテストモジュール内ローカルヘルパー
+      `command_from_json`を新設（`docs/architecture/wire-protocol-commands.schema.json`
+      が示す生JSONテキストの形をそのまま検証する価値があるため、
+      `ClientCommandWire`直接構築ではなくJSON文字列経由のテストを維持）
+- [x] `EventWire`に`PartialEq`/`Clone`を追加し、~20件のDomainEvent→wire
+      変換テストを`serde_json::Value`によるフィールド往復チェックから
+      `assert_eq!(wire, EventWire::Variant{...})`の直接比較へ書き換え
+      （JSON文字列経由は変換ロジックの検証に対して無関係な間接層だった）
+- [x] `dawn-wire/src/lib.rs`に`ServerMessage::Event`のencode/decode往復
+      doctestを新設（既存の`ClientMessage::Hello`doctestと対になる形。
+      この経路のテストが従来ゼロ件だったカバレッジの穴を埋める）
+- [x] `docs/architecture/wire-protocol.schema.json`/
+      `wire-protocol-commands.schema.json`を再生成（`EventWire::Redirect`
+      variant削除により`wire-protocol.schema.json`が縮小）、
+      `docs/architecture/wire-protocol.md`の型名言及を更新
+- [x] `CONTEXT.md`の Vocabulary Preferences に命名規則を追記
+- [x] `cargo fmt --all -- --check` / `cargo test --workspace` /
+      `cargo clippy --workspace -- -D warnings` / `cargo machete` 全件通過

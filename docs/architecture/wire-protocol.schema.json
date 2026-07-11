@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "EventJson",
-  "description": "Every message the server sends to a client over the WebSocket connection, wrapped by `ServerMessage::Event` and postcard-encoded (ADR-0042).\n\nThis enum is the schema-of-record for the server -> client half of the wire protocol: [`event_json_schema()`] renders it to a JSON Schema document that `docs/architecture/wire-protocol.md` is generated from. Adding, removing, or renaming a field here changes the wire format for every client (Godot today; any future client written against `docs/architecture/wire-protocol.md`).\n\nExternally tagged (serde's default enum representation), not `#[serde(tag = \"type\")]` -- `postcard` cannot deserialize an internally tagged enum (no `deserialize_any`). `dawn-client-gdext`'s `ServerMessageDecoder` converts the externally tagged shape back into a `{\"type\": ..., ...}` Dictionary so existing GDScript consumers (written against the old JSON shape) don't need to change.\n\n`Deserialize` (ADR-0042) exists so `dawn-client-gdext` can decode a `ServerMessage` it receives; the server itself only ever serializes this type, never parses it back.",
+  "title": "EventWire",
+  "description": "Every message the server sends to a client over the WebSocket connection, wrapped by `ServerMessage::Event` and postcard-encoded (ADR-0042).\n\nThis enum is the schema-of-record for the server -> client half of the wire protocol: [`event_wire_json_schema()`] renders it to a JSON Schema document that `docs/architecture/wire-protocol.md` is generated from. Adding, removing, or renaming a field here changes the wire format for every client (Godot today; any future client written against `docs/architecture/wire-protocol.md`).\n\nExternally tagged (serde's default enum representation), not `#[serde(tag = \"type\")]` -- `postcard` cannot deserialize an internally tagged enum (no `deserialize_any`). `dawn-client-gdext`'s `ServerMessageDecoder` converts the externally tagged shape back into a `{\"type\": ..., ...}` Dictionary so existing GDScript consumers (written against the old JSON shape) don't need to change.\n\n`Deserialize` (ADR-0042) exists so `dawn-client-gdext` can decode a `ServerMessage` it receives; the server itself only ever serializes this type, never parses it back.",
   "oneOf": [
     {
       "type": "object",
@@ -18,7 +18,7 @@
           ],
           "properties": {
             "position": {
-              "$ref": "#/definitions/PosJson"
+              "$ref": "#/definitions/PosWire"
             },
             "ship_id": {
               "type": "integer",
@@ -60,7 +60,7 @@
               "minimum": 0.0
             },
             "velocity": {
-              "$ref": "#/definitions/VelJson"
+              "$ref": "#/definitions/VelWire"
             }
           }
         }
@@ -516,7 +516,7 @@
           ],
           "properties": {
             "entry_pos": {
-              "$ref": "#/definitions/PosJson"
+              "$ref": "#/definitions/PosWire"
             },
             "from_sector": {
               "type": "integer",
@@ -587,42 +587,10 @@
         }
       },
       "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": [
-        "Redirect"
-      ],
-      "properties": {
-        "Redirect": {
-          "type": "object",
-          "required": [
-            "player_id",
-            "ship_id",
-            "ws_addr"
-          ],
-          "properties": {
-            "player_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            },
-            "ship_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            },
-            "ws_addr": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
     }
   ],
   "definitions": {
-    "PosJson": {
+    "PosWire": {
       "type": "object",
       "required": [
         "x",
@@ -644,7 +612,7 @@
         }
       }
     },
-    "VelJson": {
+    "VelWire": {
       "type": "object",
       "required": [
         "dx",
