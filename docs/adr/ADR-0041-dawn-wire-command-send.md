@@ -113,3 +113,35 @@ DomainEvent 受信（`connection.gd::_handle_message`のDictionaryディスパ�
       (2) `Option::None`はserdeで明示的な`null`としてシリアライズされる（キー省略ではない）ため、
       「省略される」ではなく「値が`null`」であることを検証するよう修正。`ClientCommand`実装
       本体に問題はなかった。
+
+## 追記（2026-07-11）: gdext ラッパーの3箇所複製を解消
+
+`/improve-codebase-architecture` によるレビューで、新規コマンド追加のたびに
+`client_command_gd.rs`（gdext `#[func]`ラッパー）・`dawn-wire`（`ClientCommandJson`
+バリアント）・`node/commands.rs`（`apply_client_command`のmatch arm）という
+3つの浅いモジュールを機械的に並行編集する必要がある、という編集面（edit-surface）
+の重複が指摘された。
+
+24メソッドのうち、sentinel値（`positive_or_none`/`non_negative_or_none`,
+ADR-0031/ADR-0035）や排他選択フィールド（`gate_id` xor `target_id`等）といった
+ドメイン意味論を持つ12個（+`move_command`、呼び出し頻度が高いため専用のまま）は
+専用メソッドとして維持し、残り14個（フラットなスカラーフィールドのみの単純な
+詰め替え）を `ClientCommand.build(kind: String, fields: Dictionary) -> String`
+という汎用メソッドに集約した。`build`は`fields`を`serde_json::Value`へ変換して
+`"type": kind`を注入し、`serde_json::from_value::<ClientCommandJson>`で
+デシリアライズを試みることで検証する（=dawn-wireの既存Deserialize実装を
+そのまま検証ロジックとして再利用）。フィールド名のtypoや必須フィールド欠落は
+デシリアライズ失敗として検出され、`push_error`を出し空文字列を返す
+（クラッシュせず、かつ黙って無視もしない）。
+
+`Dictionary`→JSON変換はスカラー値（Int/Float/String/Bool）のみ対応し、ネストした
+`Dictionary`/`Array`は`push_error`で明示的に弾く（今日の14コマンドは全てスカラー
+のみのため、ネスト対応は必要になった時点で追加する）。
+
+この結果、今後「単純な」新規コマンドを追加する場合は `dawn-wire` のバリアント追加
+と `node/commands.rs` のdispatch arm追加の2ファイルで済み、gdext側の編集は不要になる。
+`connection.gd`側の公開API（`send_*_command`関数のシグネチャ）は変更していない
+（内部実装だけが`_cmd.build(...)`呼び出しに変わった）。
+
+GdUnit4: 既存の個別テストは維持しつつ、`build()`自体の契約（正常系・フィールド名
+typo・必須フィールド欠落の3パターン）を検証する新規テストを追加。200/200 pass。

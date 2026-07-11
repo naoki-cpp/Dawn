@@ -100,13 +100,18 @@ func _process(delta: float) -> void:
 ## `ClientCommand` (a `dawn-wire`-backed GDExtension class, globally
 ## registered like `PlayerLoadout`/`ModuleRow`/`ItemRow` -- no preload
 ## needed), instead of hand-building a matching Dictionary + JSON.stringify.
-## The line already carries the correct "type" tag; _send_line only applies
-## the welcomed guard and the trailing newline.
+## Commands with sentinel/exclusive-selection semantics (ADR-0031/ADR-0035)
+## call a dedicated `_cmd.*_command()` method; everything else goes through
+## `_cmd.build(type_tag, fields)`, which validates the field Dictionary by
+## deserializing it into `ClientCommandJson` itself (a later follow-up note
+## to ADR-0041 explains the split). The returned line already carries the
+## correct "type" tag; _send_line only applies the welcomed guard and the
+## trailing newline.
 func send_move_command(target: Vector3) -> void:
 	_send_line(_cmd.move_command(target.x, target.y, target.z))
 
 func send_lock_on_command(target_id: int) -> void:
-	_send_line(_cmd.lock_on_command(target_id))
+	_send_line(_cmd.build("LockOnCommand", {"target_id": target_id}))
 
 ## Active モジュールをオンにする。p_target_ship_id は Weapon/Tackle など
 ## ターゲットを要求する種別のときだけ指定する（-1 = 指定なし、ADR-0035）。
@@ -115,15 +120,15 @@ func send_activate_module(p_module_id: int, p_slot: String, p_target_ship_id: in
 
 ## Active モジュールをオフにする。
 func send_deactivate_module(p_module_id: int, p_slot: String) -> void:
-	_send_line(_cmd.deactivate_module_command(p_module_id, p_slot))
+	_send_line(_cmd.build("DeactivateModuleCommand", {"module_id": p_module_id, "slot": p_slot}))
 
 ## [S キー] 減速停止コマンド。サーバーが thrust を逆方向に掛けて速度ゼロまで減速する。
 func send_stop_command() -> void:
-	_send_line(_cmd.stop_command())
+	_send_line(_cmd.build("StopCommand", {}))
 
 ## ジャンプゲート経由の Sector 移動を要求する（ADR-0009）。
 func send_jump_command(p_gate_id: int) -> void:
-	_send_line(_cmd.jump_command(p_gate_id))
+	_send_line(_cmd.build("JumpCommand", {"gate_id": p_gate_id}))
 
 ## [A キー] アプローチ（半自動操船）。選択した船へ自動接近する（ADR-0015）。
 func send_approach_command(p_target_id: int) -> void:
@@ -161,11 +166,13 @@ func send_keep_at_range_gate_command(p_gate_id: int, p_range_m: float = -1.0) ->
 
 ## [Inventory panel] Move a module from inventory into a fitting slot (ADR-0032).
 func send_fit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
-	_send_line(_cmd.fit_module_command(p_ship_id, p_module_id, p_slot))
+	_send_line(_cmd.build("FitModuleCommand", {
+		"ship_id": p_ship_id, "module_id": p_module_id, "slot": p_slot}))
 
 ## [Inventory panel] Move a fitted module back into inventory (ADR-0032).
 func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
-	_send_line(_cmd.unfit_module_command(p_ship_id, p_module_id, p_slot))
+	_send_line(_cmd.build("UnfitModuleCommand", {
+		"ship_id": p_ship_id, "module_id": p_module_id, "slot": p_slot}))
 
 ## [Inventory panel] Reorder two fitted modules within the same slot kind
 ## (drag-and-drop reorder in the FITTED column). Persisted server-side since
@@ -174,33 +181,38 @@ func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String)
 func send_reorder_fitted_module_command(
 	p_ship_id: int, p_slot: String, p_from_index: int, p_to_index: int
 ) -> void:
-	_send_line(_cmd.reorder_fitted_module_command(p_ship_id, p_slot, p_from_index, p_to_index))
+	_send_line(_cmd.build("ReorderFittedModuleCommand", {
+		"ship_id": p_ship_id, "slot": p_slot,
+		"from_index": p_from_index, "to_index": p_to_index}))
 
 func send_dock_command(p_station_id: int) -> void:
-	_send_line(_cmd.dock_command(p_station_id))
+	_send_line(_cmd.build("DockCommand", {"station_id": p_station_id}))
 
 func send_undock_command() -> void:
-	_send_line(_cmd.undock_command())
+	_send_line(_cmd.build("UndockCommand", {}))
 
 func send_build_packaged_ship_command(p_ship_id: int, p_station_id: int, p_ship_type_id: int) -> void:
-	_send_line(_cmd.build_packaged_ship_command(p_ship_id, p_station_id, p_ship_type_id))
+	_send_line(_cmd.build("BuildPackagedShipCommand", {
+		"ship_id": p_ship_id, "station_id": p_station_id, "ship_type_id": p_ship_type_id}))
 
 func send_disassemble_ship_command(p_ship_id: int, p_station_id: int) -> void:
-	_send_line(_cmd.disassemble_ship_command(p_ship_id, p_station_id))
+	_send_line(_cmd.build("DisassembleShipCommand", {
+		"ship_id": p_ship_id, "station_id": p_station_id}))
 
 ## Convert a station-inventory Packaged Ship item into a new live docked ship
 ## (ADR-0034 9B, ADR-0037). No ship_id -- the ship doesn't exist yet.
 func send_assemble_command(p_station_id: int, p_ship_type_id: int) -> void:
-	_send_line(_cmd.assemble_command(p_station_id, p_ship_type_id))
+	_send_line(_cmd.build("AssembleCommand", {
+		"station_id": p_station_id, "ship_type_id": p_ship_type_id}))
 
 ## Leave the active ship while docked, without disassembling it (ADR-0037).
 func send_disembark_command() -> void:
-	_send_line(_cmd.disembark_command())
+	_send_line(_cmd.build("DisembarkCommand", {}))
 
 ## Make an owned, docked ship the caller's active ship (ADR-0037). This is
 ## how a player re-boards after Disembark, or switches between owned ships.
 func send_select_active_ship_command(p_ship_id: int) -> void:
-	_send_line(_cmd.select_active_ship_command(p_ship_id))
+	_send_line(_cmd.build("SelectActiveShipCommand", {"ship_id": p_ship_id}))
 
 ## Move the entire stack of an item out of a docked ship's own cargo into
 ## the caller's station inventory (ADR-0034 9B). p_item_type is one of
