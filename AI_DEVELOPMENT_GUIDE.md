@@ -55,6 +55,20 @@ cargo run -p dawn-simulation --bin simulate --release -- --serve --duel --enemie
 cargo run -p dawn-simulation --bin simulate --release -- --aoi-bench
 ```
 
+**Playing the Godot client against a live server**: `client/dawn_client_gdext.gdextension`
+loads `target/debug/dawn_client_gdext.dll` (or the platform equivalent), which
+is only rebuilt by an explicit `cargo build`/`cargo test` touching that crate
+-- starting the Godot editor does **not** rebuild it. After any change to
+`dawn-wire`, `dawn-client-core`, or `dawn-client-gdext`, run
+`cargo build -p dawn-client-gdext` before opening/reloading the Godot editor,
+or the client silently runs against a stale binary. The symptom is subtle:
+the server logs a normal handshake and then a disconnect, while the client
+shows no error on screen -- `ServerMessageDecoder.decode` logs a `Serde
+Deserialization Error` to the Godot output console (not a crash), for
+whichever `ServerMessage` variant's shape moved since the `.dll` was last
+built. Check the Godot output console for that error before suspecting a
+wire-protocol or decode bug.
+
 Godot client tests:
 
 - Follow `docs/process/godot-client-testing.md`.
