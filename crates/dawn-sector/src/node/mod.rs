@@ -552,7 +552,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Undo a fresh player-ship spawn whose handshake never completed (the
     /// client's WebSocket send failed after `spawn_player_ship_at_pub` had
     /// already created the ship). Narrow, deliberately-named wrapper around
-    /// [`Self::remove_ship`] -- not a general "despawn any ship" API. Callers
+    /// `remove_ship` -- not a general "despawn any ship" API. Callers
     /// must only use this for a ship this same connection attempt just
     /// spawned; it must never be called for a resumed ship (one that existed
     /// before the attempt), since that ship's ownership predates this
