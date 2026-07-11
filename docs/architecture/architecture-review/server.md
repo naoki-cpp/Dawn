@@ -100,13 +100,19 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 
 | ファイル | 行数 | 判定 |
 |---|---|---|
-| `crates/dawn-actor/src/protocol/mod.rs` | 798 | 🟢 R-5 完了（2026-07-08）。wire protocol の公開面と統合テスト・schema freshness test を束ねる薄い入口に縮小 |
-| `crates/dawn-actor/src/protocol/client_command.rs` | 398 | 🟢 client -> server wire translation の deep module。`ClientCommandJson` / `parse_client_command` / schema 出力を集約 |
-| `crates/dawn-actor/src/protocol/server_event.rs` | 257 | 🟢 server -> client wire translation の deep module。`EventJson` / `domain_event_to_json` / redirect payload を集約 |
-| `crates/dawn-actor/src/protocol/hello_resume.rs` | 34 | 🟢 Hello / resume handshake の小さな補助モジュール |
+| `crates/dawn-actor/src/protocol/mod.rs` | 825 | 🟢 R-5 完了（2026-07-08）。wire protocol の公開面と統合テスト・schema freshness test を束ねる薄い入口に縮小。2026-07-11、`ClientCommandJson`/`EventJson`/Hello関連の実体は`dawn-wire`（下記）へ全面移動、ここは再エクスポートのみ（ADR-0041/0042） |
 | `crates/dawn-actor/src/client_connection.rs` | 260 | 🟢 ClientConnection trait + InProcess/Ws 実装 |
-| `crates/dawn-actor/src/ws_server.rs` | 275 | 🟢 M-4 集約（WsServer / PlayerSession）+ ADR-0032 `send_raw` |
+| `crates/dawn-actor/src/ws_server.rs` | 317 | 🟢 M-4 集約（WsServer / PlayerSession）。2026-07-11、Welcome/Redirect/Event/Hello/Commandをpostcardバイナリ化（ADR-0042） |
 | `crates/dawn-actor/src/lib.rs` | 41 | 🟢 |
+
+`dawn-wire`（ADR-0041/0042、client<->server wire schema、`dawn-core`+serde+postcardのみ依存）:
+
+| ファイル | 行数 | 判定 |
+|---|---|---|
+| `crates/dawn-wire/src/client_command.rs` | 483 | 🟢 client -> server wire translation の deep module。`ClientCommandJson` / `parse_client_command` / schema 出力を集約 |
+| `crates/dawn-wire/src/server_event.rs` | 273 | 🟢 server -> client wire translation の deep module。`EventJson` / `domain_event_to_json` / redirect payload を集約 |
+| `crates/dawn-wire/src/hello_resume.rs` | 47 | 🟢 Hello / resume handshake の小さな補助モジュール |
+| `crates/dawn-wire/src/lib.rs` | 97 | 🟢 crate doc + `ServerMessage`/`ClientMessage` 統合 enum |
 
 ### dawn-simulation（配線・起動）
 
@@ -142,7 +148,10 @@ station inventory SQLite 化と 9B UI の仕上げで `commands.rs` 1460→1573�
 | `crates/dawn-client-gdext/src/loadout_gd.rs` | 267 | 🟢 2026-07-10 新設。`PlayerLoadout` GDExtension クラス。`dawn-client-core::PlayerLoadoutMsg` の薄いラッパー、Variant/GString ⇄ Rust 型変換のみでドメインロジックは持たない。同日PR #129で `apply_module_activation` の状態変更ロジックを `dawn-client-core` へ委譲し、ADR-0040 の thin-adapter 方針に完全準拠 |
 | `crates/dawn-client-gdext/src/module_row_gd.rs` | 253 | 🟢 2026-07-10 新設。`ModuleRow` GDExtension クラス。旧 GDScript の `equals()`/`clone()` API を維持し `hud_surface.gd` の diffing 実装が無改修で動くようにしている |
 | `crates/dawn-client-gdext/src/item_row_gd.rs` | 115 | 🟢 2026-07-10 新設。`ItemRow` GDExtension クラス |
-| `crates/dawn-client-gdext/src/lib.rs` | 19 | 🟢 crate doc + `#[gdextension]` エントリポイントのみ |
+| `crates/dawn-client-gdext/src/client_command_gd.rs` | 332 | 🟢 ADR-0041/0042。`ClientCommand` GDExtension クラス（コマンド送信、schema駆動`build()`）+ `ClientMessageDecoder`（テスト専用） |
+| `crates/dawn-client-gdext/src/server_message_gd.rs` | 71 | 🟢 2026-07-11新設（ADR-0042）。`ServerMessageDecoder`（postcardバイト列→Dictionary） |
+| `crates/dawn-client-gdext/src/json_variant.rs` | 55 | 🟢 2026-07-11新設（ADR-0042）。`ServerMessageDecoder`/`ClientMessageDecoder`共有のJSON⇄Variant変換ヘルパー |
+| `crates/dawn-client-gdext/src/lib.rs` | 24 | 🟢 crate doc + `#[gdextension]` エントリポイントのみ |
 
 ### その他クレート
 

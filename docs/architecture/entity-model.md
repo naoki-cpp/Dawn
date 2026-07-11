@@ -183,7 +183,7 @@ Today, a Node is only a logical partition within one process; it's designed to l
 | Attribute | Current | Future |
 |---|---|---|
 | Identity | in-process logical identifier | independent process / machine |
-| Communication | in-memory channel | between Nodes: network RaftTransport + gossip (wire format reuses postcard); client boundary: WebSocket (ADR-0007); gRPC/protobuf not adopted |
+| Communication | in-memory channel | between Nodes: network RaftTransport + gossip (wire format reuses postcard); client boundary: WebSocket, postcard binary for fixed-type messages (ADR-0007, ADR-0042); gRPC/protobuf not adopted |
 | Failure | none | Node crash / network partition |
 
 `NodeId`'s role (unit of ID issuance) is unaffected by how Node is physically implemented.

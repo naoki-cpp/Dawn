@@ -136,11 +136,11 @@ that never happened.
 Use the `/add-event` skill when introducing a new event and `/remove-event`
 when deleting a deprecated one — they cover every pipeline touchpoint.
 
-### Wire protocol (client<->server JSON)
+### Wire protocol (client<->server)
 
-`EventJson` and `ClientCommandJson` in `crates/dawn-actor/src/protocol.rs` are
-the schema-of-record for the wire format and are generated into
-`docs/architecture/wire-protocol.schema.json` /
+`EventJson` and `ClientCommandJson` in `crates/dawn-wire/src/` (re-exported
+from `dawn_actor::protocol`) are the schema-of-record for the wire format and
+are generated into `docs/architecture/wire-protocol.schema.json` /
 `wire-protocol-commands.schema.json` (see `docs/architecture/wire-protocol.md`).
 After changing either enum (or a type either references), regenerate with
 `cargo run -p dawn-actor --example gen_wire_schema` and commit both updated
@@ -148,6 +148,14 @@ After changing either enum (or a type either references), regenerate with
 otherwise (`wire_schema_doc_is_up_to_date`). Never hand-edit the `.schema.json`
 files; never add a new domain type to `dawn-core` just to reuse it here
 (FBD-002 keeps `dawn-core` free of the `schemars` dependency).
+
+Since ADR-0042, the actual runtime transport for `Welcome`/`Redirect`/
+`Event`/`Hello`/`Command` is postcard binary (`ServerMessage`/
+`ClientMessage` in `dawn-wire`), not JSON text — both enums are therefore
+externally tagged (`{"VariantName": {...}}`), since postcard cannot
+deserialize `#[serde(tag = "type")]`. `InitialState`/`PlayerLoadout`/
+`AoiEnter` are still ad-hoc JSON text frames (ADR-0042 stage 2 would give
+them fixed types too).
 
 ## Crate Boundaries
 
@@ -159,6 +167,10 @@ workspace DAG and relevant ADR first.
   wire row types). Depends only on `dawn-core` (ADR-0039).
 - `dawn-client-gdext`: GDExtension binding (cdylib) exposing `dawn-client-core`
   to the Godot client. Thin type-conversion adapter only (ADR-0040).
+- `dawn-wire`: client<->server wire schema (`ClientCommandJson`/`EventJson`,
+  the `ServerMessage`/`ClientMessage` binary envelope). Depends only on
+  `dawn-core` + serde + postcard -- no transport/runtime dependency, so
+  `dawn-client-gdext` can depend on it directly (ADR-0041, ADR-0042).
 - `dawn-ecs`: components and systems. No event store or network ownership.
 - `dawn-event-store`: append-only persistence and snapshots.
 - `dawn-consensus`: Raft and consensus transport.
@@ -291,4 +303,4 @@ to the correct doc instead of expanding this guide.
 
 ---
 
-Last updated: 2026-07-10 / Covers ADR-0001 through ADR-0040
+Last updated: 2026-07-11 / Covers ADR-0001 through ADR-0042
