@@ -1,4 +1,4 @@
-use crate::json_variant::{externally_tagged_to_dict, json_value_to_variant, Dict};
+use crate::json_variant::{externally_tagged_to_dict, struct_to_dict, Dict};
 use dawn_wire::ServerMessage;
 use godot::prelude::*;
 
@@ -82,31 +82,19 @@ fn server_message_to_dict(msg: &ServerMessage) -> Dict {
         // serializes to a flat JSON object with no wrapping variant name --
         // convert it directly and stamp "type" on, rather than going through
         // externally_tagged_to_dict (which expects a single-key wrapper).
-        ServerMessage::InitialState(state) => match serde_json::to_value(state) {
-            Ok(value) => {
-                let mut d = json_value_to_variant(&value).to::<Dict>();
-                d.set("type", "InitialState");
-                d
-            }
-            Err(err) => {
-                godot_error!("ServerMessageDecoder.decode: InitialStateWire -> JSON failed: {err}");
-                Dict::new()
-            }
-        },
+        ServerMessage::InitialState(state) => {
+            let mut d = struct_to_dict(state, "InitialStateWire");
+            d.set("type", "InitialState");
+            d
+        }
         // Nested under "ship" to match the shape main.gd's _handle_aoi_enter
         // already expects (unchanged since the ADR-0042 stage 2c migration).
-        ServerMessage::AoiEnter(ship) => match serde_json::to_value(ship) {
-            Ok(value) => {
-                let mut d = Dict::new();
-                d.set("type", "AoiEnter");
-                d.set("ship", &json_value_to_variant(&value));
-                d
-            }
-            Err(err) => {
-                godot_error!("ServerMessageDecoder.decode: ShipStateWire -> JSON failed: {err}");
-                Dict::new()
-            }
-        },
+        ServerMessage::AoiEnter(ship) => {
+            let mut d = Dict::new();
+            d.set("type", "AoiEnter");
+            d.set("ship", &struct_to_dict(ship, "ShipStateWire"));
+            d
+        }
         ServerMessage::AoiLeave { ship_id } => {
             let mut d = Dict::new();
             d.set("type", "AoiLeave");
