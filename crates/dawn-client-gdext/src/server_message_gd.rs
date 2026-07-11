@@ -24,7 +24,7 @@ impl ServerMessageDecoder {
     /// result the same as a failed `JSON.parse_string`.
     #[func]
     fn decode(&self, bytes: PackedByteArray) -> Dict {
-        match postcard::from_bytes::<ServerMessage>(bytes.as_slice()) {
+        match ServerMessage::decode(bytes.as_slice()) {
             Ok(msg) => server_message_to_dict(&msg),
             Err(err) => {
                 godot_error!("ServerMessageDecoder.decode: {err}");

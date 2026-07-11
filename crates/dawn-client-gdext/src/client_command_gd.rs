@@ -7,7 +7,7 @@ use godot::prelude::*;
 /// Postcard-encode a [`ClientMessage`] into the bytes `connection.gd` sends
 /// as a binary WebSocket frame (ADR-0042).
 fn to_wire_bytes(msg: &ClientMessage) -> PackedByteArray {
-    PackedByteArray::from(postcard::to_stdvec(msg).unwrap_or_default().as_slice())
+    PackedByteArray::from(msg.encode().as_slice())
 }
 
 fn command_wire_bytes(cmd: ClientCommandJson) -> PackedByteArray {
@@ -302,7 +302,7 @@ pub struct ClientMessageDecoder {}
 impl ClientMessageDecoder {
     #[func]
     fn decode(&self, bytes: PackedByteArray) -> Dict {
-        match postcard::from_bytes::<ClientMessage>(bytes.as_slice()) {
+        match ClientMessage::decode(bytes.as_slice()) {
             Ok(ClientMessage::Command(cmd)) => match serde_json::to_value(&cmd) {
                 Ok(value) => externally_tagged_to_dict(&value),
                 Err(err) => {

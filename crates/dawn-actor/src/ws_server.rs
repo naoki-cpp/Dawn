@@ -44,7 +44,7 @@ use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
 /// Postcard-encode a [`ServerMessage`] and wrap it as a binary WS frame.
 fn server_message_frame(msg: &ServerMessage) -> Message {
-    Message::Binary(postcard::to_stdvec(msg).unwrap_or_default())
+    Message::Binary(msg.encode())
 }
 
 // ── WsClientConnection ────────────────────────────────────────────────────────
@@ -174,9 +174,7 @@ impl HandshakeRequest {
         tokio::spawn(async move {
             while let Some(Ok(msg)) = ws_source.next().await {
                 if let Message::Binary(bytes) = msg {
-                    if let Ok(ClientMessage::Command(cmd_json)) =
-                        postcard::from_bytes::<ClientMessage>(&bytes)
-                    {
+                    if let Ok(ClientMessage::Command(cmd_json)) = ClientMessage::decode(&bytes) {
                         if let Some(cmd) = crate::protocol::client_command_from_json(cmd_json) {
                             // Bounded send: blocks (backpressures the socket
                             // read) once COMMAND_QUEUE_CAP is reached instead
@@ -291,9 +289,7 @@ impl WsServer {
         let hello_result = timeout(Duration::from_secs(3), async {
             while let Some(Ok(msg)) = ws_source.next().await {
                 if let Message::Binary(bytes) = msg {
-                    if let Ok(ClientMessage::Hello(hello)) =
-                        postcard::from_bytes::<ClientMessage>(&bytes)
-                    {
+                    if let Ok(ClientMessage::Hello(hello)) = ClientMessage::decode(&bytes) {
                         return Some(hello);
                     }
                 }

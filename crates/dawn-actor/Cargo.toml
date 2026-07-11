@@ -21,7 +21,6 @@ futures-util      = "0.3"
 tokio-tungstenite = "0.24"
 anyhow            = "1"
 schemars          = "0.8"
-postcard          = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true }

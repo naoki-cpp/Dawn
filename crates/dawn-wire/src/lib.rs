@@ -41,8 +41,8 @@
 //! use dawn_wire::{ClientMessage, HelloMessage};
 //!
 //! let msg = ClientMessage::Hello(HelloMessage { resume: None });
-//! let bytes = postcard::to_stdvec(&msg).unwrap();
-//! let decoded: ClientMessage = postcard::from_bytes(&bytes).unwrap();
+//! let bytes = msg.encode();
+//! let decoded = ClientMessage::decode(&bytes).unwrap();
 //! assert!(matches!(decoded, ClientMessage::Hello(HelloMessage { resume: None })));
 //! ```
 //!
@@ -88,10 +88,39 @@ pub enum ServerMessage {
     Event(EventJson),
 }
 
+impl ServerMessage {
+    /// Postcard-encode this message into the bytes a binary WebSocket frame
+    /// carries (ADR-0042). The single call site for this crate's `postcard`
+    /// dependency on the server -> client side, so callers (`dawn-actor`,
+    /// `dawn-client-gdext`) never invoke `postcard` directly.
+    pub fn encode(&self) -> Vec<u8> {
+        postcard::to_stdvec(self).unwrap_or_default()
+    }
+
+    /// Decode a binary WebSocket frame back into a [`ServerMessage`].
+    pub fn decode(bytes: &[u8]) -> Result<Self, postcard::Error> {
+        postcard::from_bytes(bytes)
+    }
+}
+
 /// Every message a client sends over the binary WebSocket envelope
 /// (ADR-0042 stage 1).
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
     Hello(HelloMessage),
     Command(ClientCommandJson),
+}
+
+impl ClientMessage {
+    /// Postcard-encode this message into the bytes a binary WebSocket frame
+    /// carries (ADR-0042). The single call site for this crate's `postcard`
+    /// dependency on the client -> server side.
+    pub fn encode(&self) -> Vec<u8> {
+        postcard::to_stdvec(self).unwrap_or_default()
+    }
+
+    /// Decode a binary WebSocket frame back into a [`ClientMessage`].
+    pub fn decode(bytes: &[u8]) -> Result<Self, postcard::Error> {
+        postcard::from_bytes(bytes)
+    }
 }

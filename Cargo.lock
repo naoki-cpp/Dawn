@@ -121,7 +121,6 @@ dependencies = [
  "dawn-wire",
  "futures",
  "futures-util",
- "postcard",
  "schemars",
  "serde",
  "serde_json",
@@ -150,7 +149,6 @@ dependencies = [
  "dawn-core",
  "dawn-wire",
  "godot",
- "postcard",
  "serde_json",
 ]
 
