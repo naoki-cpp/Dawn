@@ -93,7 +93,7 @@ impl ClientAdmission {
                     .complete(
                         player_id,
                         ship_id,
-                        &payload.initial_state,
+                        payload.initial_state,
                         payload.player_loadout,
                     )
                     .await

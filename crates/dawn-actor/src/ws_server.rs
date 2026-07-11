@@ -10,24 +10,25 @@
 //! ## Protocol (ADR-0042)
 //!
 //! Messages with an already-fixed Rust type (Hello/Welcome/Redirect/
-//! DomainEvent/ClientCommand) travel as a binary WebSocket frame, postcard-
-//! encoded via the [`ClientMessage`]/[`ServerMessage`] envelope in
-//! `dawn-wire`. `InitialState`/`PlayerLoadout`/`AoiEnter` are still built as
-//! ad-hoc JSON (`dawn-sector`'s `serde_json::json!` projections) and travel
-//! as a text frame -- see ADR-0042 stage 2 for folding them in too. One
+//! DomainEvent/ClientCommand/InitialState/PlayerLoadout) travel as a binary
+//! WebSocket frame, postcard-encoded via the [`ClientMessage`]/
+//! [`ServerMessage`] envelope in `dawn-wire`. `AoiEnter` is still built as
+//! ad-hoc JSON (`dawn-sector`'s `serde_json::json!` projection) and travels
+//! as a text frame -- see ADR-0042 stage 2c for folding it in too. One
 //! WebSocket frame always carries exactly one message on both paths (no
 //! length-prefix framing needed; WebSocket already delimits frames).
 //!
 //! ```text
-//! Client → Server:  ClientMessage::Hello        (binary, postcard)
-//! Server → Client:  ServerMessage::Welcome       (binary, postcard)
-//! Server → Client:  {"type":"InitialState",...}  (text, JSON)
-//! Server → Client:  ServerMessage::Event(..)     (binary, postcard stream)
-//! Client → Server:  ClientMessage::Command(..)   (binary, postcard)
+//! Client → Server:  ClientMessage::Hello           (binary, postcard)
+//! Server → Client:  ServerMessage::Welcome         (binary, postcard)
+//! Server → Client:  ServerMessage::InitialState(..) (binary, postcard)
+//! Server → Client:  ServerMessage::Event(..)       (binary, postcard stream)
+//! Client → Server:  ClientMessage::Command(..)     (binary, postcard)
 //! ```
 
 use crate::protocol::{
-    domain_event_to_event_json, ClientMessage, PlayerLoadoutJson, ResumeIdentity, ServerMessage,
+    domain_event_to_event_json, ClientMessage, InitialStateJson, PlayerLoadoutJson, ResumeIdentity,
+    ServerMessage,
 };
 use crate::{ClientCommand, ClientConnection};
 use dawn_core::{DomainEvent, PlayerId, ShipId};
@@ -67,8 +68,8 @@ pub struct WsClientConnection {
 }
 
 impl WsClientConnection {
-    /// Send a raw JSON string directly, as a text frame (ADR-0042 stage 1:
-    /// `InitialState`/`PlayerLoadout`/`AoiEnter`, still ad-hoc JSON).
+    /// Send a raw JSON string directly, as a text frame (ADR-0042: `AoiEnter`,
+    /// still ad-hoc JSON).
     pub fn send_raw(&self, msg: &str) -> bool {
         self.event_tx.send(Message::Text(msg.to_string())).is_ok()
     }
@@ -133,7 +134,7 @@ impl HandshakeRequest {
         self,
         player_id: PlayerId,
         ship_id: ShipId,
-        initial_state: &str,
+        initial_state: InitialStateJson,
         player_loadout: Option<PlayerLoadoutJson>,
     ) -> anyhow::Result<PlayerSession> {
         let Self {
@@ -146,8 +147,8 @@ impl HandshakeRequest {
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Message>();
         let (command_tx, command_rx) = mpsc::channel::<ClientCommand>(COMMAND_QUEUE_CAP);
 
-        // Send Welcome + (optional) PlayerLoadout (both binary, ADR-0042) +
-        // InitialState (still ad-hoc JSON text, ADR-0042 stage 2b).
+        // Send Welcome + InitialState + (optional) PlayerLoadout, all binary
+        // (ADR-0042 stage 2b).
         ws_sink
             .send(server_message_frame(&ServerMessage::Welcome {
                 player_id: player_id.raw(),
@@ -155,7 +156,9 @@ impl HandshakeRequest {
             }))
             .await?;
         ws_sink
-            .send(Message::Text(initial_state.to_string()))
+            .send(server_message_frame(&ServerMessage::InitialState(
+                initial_state,
+            )))
             .await?;
         if let Some(loadout) = player_loadout {
             ws_sink
@@ -270,7 +273,7 @@ impl WsServer {
         peer_addr: SocketAddr,
         player_id: PlayerId,
         ship_id: ShipId,
-        initial_state: &str,
+        initial_state: InitialStateJson,
         player_loadout: Option<PlayerLoadoutJson>,
     ) -> anyhow::Result<PlayerSession> {
         let request = Self::accept_handshake_request(stream, peer_addr).await?;

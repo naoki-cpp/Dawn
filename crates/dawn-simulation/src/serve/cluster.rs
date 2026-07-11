@@ -112,7 +112,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     addr,
                     player_id,
                     ship_id,
-                    &initial_state,
+                    initial_state,
                     player_loadout,
                 )
                 .await

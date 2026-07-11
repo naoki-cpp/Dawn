@@ -2,6 +2,7 @@
 
 use super::{AoiDelivery, AOI_CELL_SIZE};
 use crate::ws_server;
+use dawn_actor::protocol::ServerMessage;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_sector::node::SimulationNode;
@@ -177,7 +178,7 @@ fn resend_jump_initial_state(
                 .ship_absolute_pos(sess.ship_id)
                 .map(|pos| nodes[*dest].build_initial_state_json_for(pos, AOI_CELL_SIZE))
                 .unwrap_or_else(|| nodes[*dest].build_initial_state_json());
-            sess.conn.send_raw(&initial_state);
+            sess.send_message(&ServerMessage::InitialState(initial_state));
         }
     }
 }
