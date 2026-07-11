@@ -9,14 +9,13 @@
 //!
 //! ## Protocol (ADR-0042)
 //!
-//! Messages with an already-fixed Rust type (Hello/Welcome/Redirect/
-//! DomainEvent/ClientCommand/InitialState/PlayerLoadout) travel as a binary
-//! WebSocket frame, postcard-encoded via the [`ClientMessage`]/
-//! [`ServerMessage`] envelope in `dawn-wire`. `AoiEnter` is still built as
-//! ad-hoc JSON (`dawn-sector`'s `serde_json::json!` projection) and travels
-//! as a text frame -- see ADR-0042 stage 2c for folding it in too. One
-//! WebSocket frame always carries exactly one message on both paths (no
-//! length-prefix framing needed; WebSocket already delimits frames).
+//! Every server -> client message (Hello/Welcome/Redirect/DomainEvent/
+//! ClientCommand/InitialState/PlayerLoadout/AoiEnter/AoiLeave/PositionSnap)
+//! travels as a binary WebSocket frame, postcard-encoded via the
+//! [`ClientMessage`]/[`ServerMessage`] envelope in `dawn-wire` (ADR-0042
+//! stages 1-2c). There is no more ad-hoc JSON text path. One WebSocket frame
+//! always carries exactly one message (no length-prefix framing needed;
+//! WebSocket already delimits frames).
 //!
 //! ```text
 //! Client → Server:  ClientMessage::Hello           (binary, postcard)
@@ -68,14 +67,9 @@ pub struct WsClientConnection {
 }
 
 impl WsClientConnection {
-    /// Send a raw JSON string directly, as a text frame (ADR-0042: `AoiEnter`,
-    /// still ad-hoc JSON).
-    pub fn send_raw(&self, msg: &str) -> bool {
-        self.event_tx.send(Message::Text(msg.to_string())).is_ok()
-    }
-
     /// Send a [`ServerMessage`] as a postcard-encoded binary frame
-    /// (ADR-0042: Welcome/Redirect/Event, the messages with a fixed type).
+    /// (ADR-0042: every server -> client message, now that stage 2c folded
+    /// in the last ad-hoc JSON messages).
     pub fn send_message(&self, msg: &ServerMessage) -> bool {
         self.event_tx.send(server_message_frame(msg)).is_ok()
     }
@@ -223,14 +217,10 @@ impl PlayerSession {
         self.conn.try_recv_command()
     }
 
-    /// Send a raw JSON string directly (e.g. a refreshed PlayerLoadout after
-    /// Fit/Unfit, ADR-0032 -- mirrors the one sent once at connect).
-    pub fn send_raw(&self, msg: &str) -> bool {
-        self.conn.send_raw(msg)
-    }
-
     /// Send a [`ServerMessage`] as a postcard-encoded binary frame
-    /// (ADR-0042 -- e.g. `Redirect` on cross-node Sector Transit).
+    /// (ADR-0042 -- e.g. `Redirect` on cross-node Sector Transit,
+    /// `PlayerLoadout` after Fit/Unfit ADR-0032, `AoiEnter`/`AoiLeave`/
+    /// `PositionSnap`).
     pub fn send_message(&self, msg: &ServerMessage) -> bool {
         self.conn.send_message(msg)
     }

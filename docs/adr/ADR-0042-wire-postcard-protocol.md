@@ -253,10 +253,39 @@ GDScript側の既存コンシューマ（`main.gd`/`hud_manager.gd`）には影�
 - [x] `cargo fmt --all -- --check` / `cargo test --workspace` /
       `cargo clippy --workspace -- -D warnings` / `cargo machete` 全件通過
 
-### 段階2c（後続タスク・別PR）
+### 段階2c（`AoiEnter`/`AoiLeave`/`PositionSnap`、2026-07-11 完了）
 
-- [ ] `AoiEnter` を `ServerMessage` に合流させる（`ship_state_json`は既に
-      段階2bで`ShipStateJson`型を返すようになっているので、残りは
-      `aoi_enter_json`のJSONテキスト化を`ServerMessage::AoiEnter(ShipStateJson)`
-      のような型に置き換えるだけ -- `aoi.rs`/`aoi_delivery.rs`も追随）
-- [ ] `WsClientConnection::send_raw` の削除（全メッセージが `ServerMessage` 経由になった時点で）
+- [x] `ServerMessage::AoiEnter(ShipStateJson)`/`AoiLeave { ship_id: u64 }` を
+      追加。`dawn-sector/src/node/serialization.rs`の`aoi_enter_json`ラッパー
+      （`ship_state_json`をJSON文字列に包むだけだった）を削除し、
+      `ship_state_json`をそのまま`ServerMessage::AoiEnter`へ渡す形に変更
+- [x] `dawn-sector/src/aoi.rs`: `aoi_leave_json`（自由関数）を削除。
+      `AoiSink`トレイトに`send_message(&mut self, msg: &ServerMessage) -> bool`
+      を追加し、`deliver_frame`のAoiEnter/AoiLeave送出を`sink.send_message`
+      経由に変更
+- [x] 当初スコープ外だった`PositionSnap`（ワープ着地の絶対位置補正）も本PRで
+      同時に折り込み：`ServerMessage::PositionSnap { ship_id: u64, position:
+      AbsPosJson }`を追加、`deliver_frame`のワープ着地通知を
+      `sink.send_message`経由に変更。これで全サーバー→クライアントメッセージが
+      binary化され、JSON textフレーム経路が完全になくなった
+- [x] `AoiSink::send_raw`を削除（`AoiEnter`/`AoiLeave`/`PositionSnap`の3つが
+      最後の`send_raw`呼び出し元だった）。`WsClientConnection::send_raw`/
+      `PlayerSession::send_raw`も削除（ADR-0042の元々のゴール「全メッセージが
+      `ServerMessage`経由になった時点でsend_rawを削除」を達成）
+- [x] `dawn-sector-node/src/runtime.rs`/`dawn-simulation/src/serve/aoi_delivery.rs`:
+      `AoiSink`実装から`send_raw`アームを削除
+- [x] `dawn-client-gdext/src/server_message_gd.rs`: `ServerMessageDecoder`に
+      `AoiEnter`（`{"type":"AoiEnter","ship":{...}}`、既存の`main.gd`
+      `_handle_aoi_enter`が期待する形に合わせて`"ship"`キーへネスト）、
+      `AoiLeave`、`PositionSnap`分岐を追加。全てDictionary形状はJSON時代と
+      同一なので`connection.gd`/`main.gd`側の変更は不要
+- [x] `dawn-sector`の`Cargo.toml`から`serde_json`を削除（`aoi_enter_json`/
+      `aoi_leave_json`/`initial_state_json`の`json!`呼び出しが全て消えたことで
+      非使用依存に -- `cargo machete`が検出）
+- [x] `cargo fmt --all -- --check` / `cargo test --workspace` /
+      `cargo clippy --workspace -- -D warnings` / `cargo machete` 全件通過。
+      GdUnit4 202/202 pass
+
+ADR-0042のワイヤ移行はこれで完了：クライアント↔サーバー間の全メッセージが
+postcardバイナリの`ServerMessage`/`ClientMessage`エンベロープ経由になり、
+ad-hoc JSON textフレーム経路（`send_raw`）は撤去された。

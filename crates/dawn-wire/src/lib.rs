@@ -49,11 +49,10 @@
 //! Stage 1 covered the messages that already had a fixed Rust type:
 //! `Welcome`/`Redirect`/`Event` (server -> client) and `Hello`/`Command`
 //! (client -> server). Stage 2 folds in the remaining ad-hoc
-//! `serde_json::Value` messages one at a time; 2a ([`PlayerLoadoutJson`]) and
-//! 2b ([`InitialStateJson`]) are done. `AoiEnter` is still built as ad-hoc
-//! `serde_json::Value` in `dawn-sector` and remains a JSON text frame for now
-//! (2c, follow-up task). WebSocket carries text and binary frames on the same
-//! connection without conflict, so this split is not a compatibility problem.
+//! `serde_json::Value` messages one at a time; 2a ([`PlayerLoadoutJson`]),
+//! 2b ([`InitialStateJson`]), and 2c (`AoiEnter`/`AoiLeave`/`PositionSnap`)
+//! are done. Every server -> client message now travels through the binary
+//! envelope; there is no more ad-hoc JSON text path.
 
 mod client_command;
 mod hello_resume;
@@ -80,7 +79,7 @@ pub use server_event::{
 use serde::{Deserialize, Serialize};
 
 /// Every message the server sends over the binary WebSocket envelope
-/// (ADR-0042). `AoiEnter` is not a member yet -- see the module docs.
+/// (ADR-0042).
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
     Welcome {
@@ -95,6 +94,21 @@ pub enum ServerMessage {
     Event(EventJson),
     PlayerLoadout(PlayerLoadoutJson),
     InitialState(InitialStateJson),
+    /// A ship just entered an observer's Area-of-Interest neighborhood
+    /// (ADR-0019/ADR-0042 stage 2c).
+    AoiEnter(ShipStateJson),
+    /// A ship left an observer's Area-of-Interest neighborhood (ADR-0019/
+    /// ADR-0042 stage 2c). Carries only the id -- the client already knows
+    /// everything else about a ship it previously saw.
+    AoiLeave {
+        ship_id: u64,
+    },
+    /// Authoritative absolute position for a ship, sent on warp arrival
+    /// (ADR-0029) to correct the client's capped warp-visual dead-reckoning.
+    PositionSnap {
+        ship_id: u64,
+        position: AbsPosJson,
+    },
 }
 
 impl ServerMessage {

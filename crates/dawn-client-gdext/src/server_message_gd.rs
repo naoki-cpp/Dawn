@@ -3,10 +3,10 @@ use dawn_wire::ServerMessage;
 use godot::prelude::*;
 
 /// Decodes the binary WebSocket envelope the server sends (ADR-0042) into a
-/// plain Godot `Dictionary` shaped exactly like the legacy JSON messages
-/// (`{"type": "...", ...fields}`), so `connection.gd::_handle_message`'s
-/// existing `"type"`-keyed dispatch needs no changes to consume either a
-/// binary or a (still-JSON, ADR-0042 stage 2) text message.
+/// plain Godot `Dictionary` shaped exactly like the pre-ADR-0042 JSON
+/// messages (`{"type": "...", ...fields}`), so `connection.gd::_handle_message`'s
+/// existing `"type"`-keyed dispatch needed no changes as each message kind
+/// migrated off ad-hoc JSON text onto this binary envelope.
 ///
 /// GDScript itself cannot decode postcard -- it has no self-describing type
 /// tag, unlike JSON, so the byte layout only makes sense once decoded
@@ -93,5 +93,36 @@ fn server_message_to_dict(msg: &ServerMessage) -> Dict {
                 Dict::new()
             }
         },
+        // Nested under "ship" to match the shape main.gd's _handle_aoi_enter
+        // already expects (unchanged since the ADR-0042 stage 2c migration).
+        ServerMessage::AoiEnter(ship) => match serde_json::to_value(ship) {
+            Ok(value) => {
+                let mut d = Dict::new();
+                d.set("type", "AoiEnter");
+                d.set("ship", &json_value_to_variant(&value));
+                d
+            }
+            Err(err) => {
+                godot_error!("ServerMessageDecoder.decode: ShipStateJson -> JSON failed: {err}");
+                Dict::new()
+            }
+        },
+        ServerMessage::AoiLeave { ship_id } => {
+            let mut d = Dict::new();
+            d.set("type", "AoiLeave");
+            d.set("ship_id", *ship_id as f64);
+            d
+        }
+        ServerMessage::PositionSnap { ship_id, position } => {
+            let mut d = Dict::new();
+            d.set("type", "PositionSnap");
+            d.set("ship_id", *ship_id as f64);
+            let mut pos = Dict::new();
+            pos.set("x", position.x);
+            pos.set("y", position.y);
+            pos.set("z", position.z);
+            d.set("position", &pos);
+            d
+        }
     }
 }

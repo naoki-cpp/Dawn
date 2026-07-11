@@ -251,10 +251,10 @@ impl SectorNodeRuntime {
 struct SessionSink<'a>(&'a mut ws_server::PlayerSession);
 
 impl AoiSink for SessionSink<'_> {
-    fn send_raw(&mut self, msg: &str) -> bool {
-        self.0.conn.send_raw(msg)
-    }
     fn send_events(&mut self, events: &[DomainEvent]) -> bool {
         self.0.send_events(events)
+    }
+    fn send_message(&mut self, msg: &ServerMessage) -> bool {
+        self.0.send_message(msg)
     }
 }

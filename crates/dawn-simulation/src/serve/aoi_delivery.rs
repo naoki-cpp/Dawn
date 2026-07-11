@@ -9,6 +9,7 @@
 //! dawn-actor — see AI_DEVELOPMENT_GUIDE.md crate boundaries).
 
 use crate::ws_server;
+use dawn_actor::protocol::ServerMessage;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_sector::aoi::{AoiSink, CellGrid};
 use dawn_sector::node::SimulationNode;
@@ -110,10 +111,10 @@ fn current_visible(node: &SimulationNode, grid: &CellGrid, ship_id: ShipId) -> V
 struct SessionSink<'a>(&'a mut ws_server::PlayerSession);
 
 impl AoiSink for SessionSink<'_> {
-    fn send_raw(&mut self, msg: &str) -> bool {
-        self.0.conn.send_raw(msg)
-    }
     fn send_events(&mut self, events: &[DomainEvent]) -> bool {
         self.0.send_events(events)
+    }
+    fn send_message(&mut self, msg: &ServerMessage) -> bool {
+        self.0.send_message(msg)
     }
 }

@@ -157,7 +157,9 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Per-ship state object (position, stats, hull, ownership). Shared by
-    /// `InitialState` and `AoiEnter` (ADR-0019). `None` if the ship is gone.
+    /// `InitialState` and `AoiEnter` (ADR-0019) -- `AoiEnter` wraps this
+    /// directly (`ServerMessage::AoiEnter`), no separate wrapper needed.
+    /// `None` if the ship is gone.
     pub fn ship_state_json(&self, ship_id: ShipId) -> Option<ShipStateJson> {
         let entity = self.ships.index.get(&ship_id)?;
         // Send the ABSOLUTE position (anchor + offset, f64), not the raw
@@ -190,15 +192,6 @@ impl<S: EventStore> SimulationNode<S> {
             cap_recharge_per_tick: stats.cap_recharge_per_tick,
             is_player,
         })
-    }
-
-    /// `AoiEnter` control message for a ship that just entered an observer's
-    /// neighborhood (ADR-0019). `None` if the ship is gone. The matching
-    /// `AoiLeave` is a free function ([`crate::aoi::aoi_leave_json`]) since it
-    /// needs no node state.
-    pub fn aoi_enter_json(&self, ship_id: ShipId) -> Option<String> {
-        let ship = self.ship_state_json(ship_id)?;
-        Some(serde_json::json!({ "type": "AoiEnter", "ship": ship }).to_string())
     }
 
     // ── Area of Interest (ADR-0019) ────────────────────────────────────────────
@@ -417,27 +410,28 @@ mod tests {
     }
 
     #[test]
-    fn aoi_enter_json_wraps_the_ship_state_for_a_known_ship() {
+    fn ship_state_json_reports_the_ships_own_id_and_absolute_position() {
+        // ship_state_json is what ServerMessage::AoiEnter (ADR-0042 stage 2c)
+        // wraps directly, so its own contract is tested here rather than
+        // through a removed AoiEnter-specific wrapper.
         let mut node = mem_node();
         let sid = node.spawn_ship(
             crate::ship_types::SHIP_TYPE_NPC_FRIGATE,
             Position::new(1.0, 2.0, 3.0),
             Velocity::ZERO,
         );
-        let json = node
-            .aoi_enter_json(sid)
-            .expect("known ship yields a message");
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(v["type"], "AoiEnter");
-        assert_eq!(v["ship"]["ship_id"].as_u64().unwrap(), sid.raw());
-        assert_eq!(v["ship"]["position"]["x"].as_f64().unwrap() as f32, 1.0);
+        let ship = node
+            .ship_state_json(sid)
+            .expect("known ship yields a state");
+        assert_eq!(ship.ship_id, sid.raw());
+        assert_eq!(ship.position.x as f32, 1.0);
     }
 
     #[test]
-    fn aoi_enter_json_is_none_for_an_unknown_ship() {
+    fn ship_state_json_is_none_for_an_unknown_ship() {
         let node = mem_node();
         let unknown = ShipId::new(NodeId(9), 999);
-        assert!(node.aoi_enter_json(unknown).is_none());
+        assert!(node.ship_state_json(unknown).is_none());
     }
 
     #[test]
