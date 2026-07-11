@@ -176,6 +176,10 @@ workspace DAG and relevant ADR first.
 - `dawn-consensus`: Raft and consensus transport.
 - `dawn-replication`: sector-local replication and anti-entropy.
 - `dawn-sector`: sector game logic, ownership, transit, warp, AoI, snapshots.
+  Depends on `dawn-wire` to build typed wire messages it hands to `dawn-actor`
+  (e.g. `PlayerLoadoutJson`, ADR-0042 stage 2a) -- `dawn-wire` has no
+  transport/runtime dependency of its own, so this doesn't pull tokio/
+  tungstenite into `dawn-sector`.
 - `dawn-actor`: client/server protocol and connection boundary.
 - `dawn-simulation`: runnable simulation wiring and demos.
 - `dawn-sector-node`: real hardware node binary and TOML config loading.

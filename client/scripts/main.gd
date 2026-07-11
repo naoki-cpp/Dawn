@@ -666,15 +666,17 @@ func _handle_aoi_leave(p: Dictionary) -> void:
 ## Sent on connect and again after every Fit/Unfit (ADR-0032), so the panel
 ## and module bar always reflect the server's authoritative fitting state --
 ## including a rejected Fit/Unfit attempt reverting visibly.
-func _on_player_fitting(raw_json: String) -> void:
-	## connection.gd hands the original wire JSON text (not a re-parsed
-	## Dictionary): GDScript's JSON.parse_string() always turns wire integers
-	## into float Variants, so JSON.stringify()-ing a parsed Dictionary back
-	## would corrupt e.g. active_ship_id (20 -> "20.0"), which
-	## PlayerLoadout.apply_payload (dawn-client-gdext, serde_json-backed)
-	## rejects for its u32/u64 fields.
-	_loadout.apply_payload(raw_json)
+func _on_player_fitting(bytes: PackedByteArray) -> void:
+	## connection.gd hands the raw postcard bytes (ADR-0042), not a parsed
+	## Dictionary: PlayerLoadout.apply_wire_bytes decodes them directly into
+	## typed Rust state, with no lossy Dictionary/JSON round-trip in between.
+	_loadout.apply_wire_bytes(bytes)
+	_apply_loadout_side_effects()
 
+## Everything `_on_player_fitting` does after the wire decode itself, split
+## out so tests can drive it via `_loadout.apply_payload()` (test/debug-only
+## JSON fixture path) without needing real postcard bytes.
+func _apply_loadout_side_effects() -> void:
 	## Disembark/SelectActiveShip/Assemble (ADR-0037) can change which ship
 	## is active independently of any command this client sent. Only follow
 	## it when it's -1 (no active ship) or a ship this client already knows

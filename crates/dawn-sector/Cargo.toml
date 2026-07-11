@@ -8,6 +8,7 @@ publish.workspace     = true
 
 [dependencies]
 dawn-core        = { path = "../dawn-core" }
+dawn-wire        = { path = "../dawn-wire" }
 dawn-ecs         = { path = "../dawn-ecs" }
 dawn-event-store = { path = "../dawn-event-store" }
 dawn-consensus   = { path = "../dawn-consensus" }

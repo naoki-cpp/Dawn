@@ -22,14 +22,12 @@ signal connection_changed(connected: bool)
 signal welcomed(player_id: int, ship_id: int)
 ## On InitialState: notifies the full payload (ships + navigation map)
 signal initial_state_received(state: Dictionary)
-## On PlayerLoadout (sent on connect and again after every Fit/Unfit, ADR-0032):
-## carries the raw JSON line, not a parsed Dictionary -- GDScript's
-## `JSON.parse_string()` always turns wire integers into `float` Variants, so
-## a Dictionary round-tripped back through `JSON.stringify()` would render
-## e.g. `active_ship_id: 20` as `"20.0"`, which `PlayerLoadout.apply_payload`
-## (dawn-client-gdext, serde_json-backed) rejects for its u32/u64 fields.
-## Handing the original wire text through avoids that lossy re-encoding.
-signal player_fitting_received(raw_json: String)
+## On PlayerLoadout (sent on connect and again after every Fit/Unfit,
+## ADR-0032): carries the raw postcard bytes (ADR-0042), not a parsed
+## Dictionary. `PlayerLoadout.apply_wire_bytes` (dawn-client-gdext) decodes
+## them directly into typed Rust state, with no lossy Dictionary/JSON
+## round-trip in between.
+signal player_fitting_received(bytes: PackedByteArray)
 ## ModuleActivated 受信時
 signal module_activated(ship_id: int, module_id: int, slot: String)
 ## ModuleDeactivated 受信時。reason は "cap" | "range" | ""（""=プレイヤー起因、ADR-0035）。
@@ -266,11 +264,14 @@ func _connect_to_server() -> void:
 		push_warning("[Connection] connect_to_url failed: %s" % error_string(err))
 
 ## One WebSocket frame always carries exactly one message (ADR-0042) --
-## text frames are still-JSON messages (InitialState/PlayerLoadout/AoiEnter,
-## ADR-0042 stage 2); binary frames are the postcard `ServerMessage`
-## envelope, decoded by `ServerMessageDecoder` into the same
-## `{"type": ..., ...}` Dictionary shape the JSON path already produced, so
-## `_handle_message` needs no branching on frame type.
+## text frames are still-JSON messages (InitialState/AoiEnter, ADR-0042
+## stage 2b/2c); binary frames are the postcard `ServerMessage` envelope.
+## `ServerMessageDecoder` converts most binary variants into the same
+## `{"type": ..., ...}` Dictionary shape the JSON path produces, except
+## `PlayerLoadout` (ADR-0042 2a), which it reduces to a bare `{"type":
+## "PlayerLoadout"}` dispatch tag -- the raw bytes go straight to
+## `PlayerLoadout.apply_wire_bytes` instead, bypassing the Dictionary
+## entirely for precision (see `player_fitting_received`).
 func _receive_messages() -> void:
 	while _ws.get_available_packet_count() > 0:
 		var packet: PackedByteArray = _ws.get_packet()
@@ -282,15 +283,15 @@ func _receive_messages() -> void:
 			if result == null:
 				push_warning("[Connection] failed to parse JSON: " + line)
 				continue
-			_handle_message(result as Dictionary, line)
+			_handle_message(result as Dictionary, PackedByteArray())
 		else:
 			var payload: Dictionary = _decoder.decode(packet)
 			if payload.is_empty():
 				push_warning("[Connection] failed to decode binary ServerMessage")
 				continue
-			_handle_message(payload, "")
+			_handle_message(payload, packet)
 
-func _handle_message(payload: Dictionary, raw_line: String) -> void:
+func _handle_message(payload: Dictionary, raw_bytes: PackedByteArray) -> void:
 	var msg_type: String = payload.get("type", "") as String
 	match msg_type:
 		"Welcome":
@@ -304,9 +305,8 @@ func _handle_message(payload: Dictionary, raw_line: String) -> void:
 			print("[Connection] InitialState: %d ships" % ships.size())
 			initial_state_received.emit(payload)
 		"PlayerLoadout", "PlayerFitting":
-			var modules: Array = payload.get("modules", []) as Array
-			print("[Connection] PlayerLoadout: %d modules" % modules.size())
-			player_fitting_received.emit(raw_line)
+			print("[Connection] PlayerLoadout received")
+			player_fitting_received.emit(raw_bytes)
 		"Redirect":
 			_handle_redirect(payload)
 		"ModuleActivated":

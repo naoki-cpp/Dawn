@@ -2,6 +2,7 @@
 
 use super::{build_serve_node, runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS};
 use crate::{cluster, ws_server};
+use dawn_actor::protocol::ServerMessage;
 use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
 use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
 use dawn_sector::transit;
@@ -151,10 +152,10 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 let (ship_id, j) = match followup {
                     Some(ClientCommandFollowup::Jump(ship_id, j)) => (ship_id, j),
                     Some(ClientCommandFollowup::RefreshFitting(player_id)) => {
-                        if let Some(json) =
+                        if let Some(loadout) =
                             nodes[sector].build_player_loadout_json_for_player(player_id)
                         {
-                            sess.send_raw(&json);
+                            sess.send_message(&ServerMessage::PlayerLoadout(loadout));
                         }
                         continue;
                     }
@@ -228,8 +229,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 )
             });
             if should_refresh {
-                if let Some(json) = nodes[sector].build_player_loadout_json(sess.ship_id) {
-                    sess.send_raw(&json);
+                if let Some(loadout) = nodes[sector].build_player_loadout_json(sess.ship_id) {
+                    sess.send_message(&ServerMessage::PlayerLoadout(loadout));
                 }
             }
         }

@@ -26,7 +26,9 @@
 //! Client → Server:  ClientMessage::Command(..)   (binary, postcard)
 //! ```
 
-use crate::protocol::{domain_event_to_event_json, ClientMessage, ResumeIdentity, ServerMessage};
+use crate::protocol::{
+    domain_event_to_event_json, ClientMessage, PlayerLoadoutJson, ResumeIdentity, ServerMessage,
+};
 use crate::{ClientCommand, ClientConnection};
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use futures_util::{
@@ -132,7 +134,7 @@ impl HandshakeRequest {
         player_id: PlayerId,
         ship_id: ShipId,
         initial_state: &str,
-        player_loadout: Option<String>,
+        player_loadout: Option<PlayerLoadoutJson>,
     ) -> anyhow::Result<PlayerSession> {
         let Self {
             peer_addr,
@@ -144,8 +146,8 @@ impl HandshakeRequest {
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Message>();
         let (command_tx, command_rx) = mpsc::channel::<ClientCommand>(COMMAND_QUEUE_CAP);
 
-        // Send Welcome (binary, ADR-0042) + InitialState + (optional) PlayerLoadout
-        // (still ad-hoc JSON text, ADR-0042 stage 2).
+        // Send Welcome + (optional) PlayerLoadout (both binary, ADR-0042) +
+        // InitialState (still ad-hoc JSON text, ADR-0042 stage 2b).
         ws_sink
             .send(server_message_frame(&ServerMessage::Welcome {
                 player_id: player_id.raw(),
@@ -156,7 +158,9 @@ impl HandshakeRequest {
             .send(Message::Text(initial_state.to_string()))
             .await?;
         if let Some(loadout) = player_loadout {
-            ws_sink.send(Message::Text(loadout)).await?;
+            ws_sink
+                .send(server_message_frame(&ServerMessage::PlayerLoadout(loadout)))
+                .await?;
         }
 
         // Event-send task.
@@ -267,7 +271,7 @@ impl WsServer {
         player_id: PlayerId,
         ship_id: ShipId,
         initial_state: &str,
-        player_loadout: Option<String>,
+        player_loadout: Option<PlayerLoadoutJson>,
     ) -> anyhow::Result<PlayerSession> {
         let request = Self::accept_handshake_request(stream, peer_addr).await?;
         request

@@ -46,18 +46,19 @@
 //! assert!(matches!(decoded, ClientMessage::Hello(HelloMessage { resume: None })));
 //! ```
 //!
-//! Stage 1 (this ADR) covers only the messages that already had a fixed Rust
-//! type: `Welcome`/`Redirect`/`Event` (server -> client) and `Hello`/
-//! `Command` (client -> server). `InitialState`/`AoiEnter`/`PlayerLoadout`
-//! are still built as ad-hoc `serde_json::Value` in `dawn-sector`/
-//! `dawn-simulation` and remain JSON text frames for now (stage 2, a
-//! follow-up task, would give them fixed types and fold them into
-//! [`ServerMessage`] too). WebSocket carries text and binary frames on the
-//! same connection without conflict, so this split is not a compatibility
-//! problem.
+//! Stage 1 covered the messages that already had a fixed Rust type:
+//! `Welcome`/`Redirect`/`Event` (server -> client) and `Hello`/`Command`
+//! (client -> server). Stage 2 folds in the remaining ad-hoc
+//! `serde_json::Value` messages one at a time; 2a ([`PlayerLoadoutJson`])
+//! is done. `InitialState`/`AoiEnter` are still built as ad-hoc
+//! `serde_json::Value` in `dawn-sector`/`dawn-simulation` and remain JSON
+//! text frames for now (2b/2c, follow-up tasks). WebSocket carries text and
+//! binary frames on the same connection without conflict, so this split is
+//! not a compatibility problem.
 
 mod client_command;
 mod hello_resume;
+mod player_loadout;
 mod server_event;
 
 pub use client_command::{
@@ -65,6 +66,9 @@ pub use client_command::{
     PosJson, VelJson, WarpTargetJson,
 };
 pub use hello_resume::{parse_hello, HelloMessage, ResumeIdentity};
+pub use player_loadout::{
+    ItemRowJson, ModuleRowJson, OwnedShipRowJson, PlayerLoadoutJson, SlotCapacityJson,
+};
 pub use server_event::{
     domain_event_to_event_json, domain_event_to_json, event_json_schema, redirect_json, EventJson,
 };
@@ -72,8 +76,8 @@ pub use server_event::{
 use serde::{Deserialize, Serialize};
 
 /// Every message the server sends over the binary WebSocket envelope
-/// (ADR-0042 stage 1). `InitialState`/`PlayerLoadout`/`AoiEnter` are not
-/// members yet -- see the module docs.
+/// (ADR-0042). `InitialState`/`AoiEnter` are not members yet -- see the
+/// module docs.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
     Welcome {
@@ -86,6 +90,7 @@ pub enum ServerMessage {
         ship_id: u64,
     },
     Event(EventJson),
+    PlayerLoadout(PlayerLoadoutJson),
 }
 
 impl ServerMessage {

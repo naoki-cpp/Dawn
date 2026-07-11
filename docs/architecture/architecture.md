@@ -85,7 +85,7 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/A
 | `dawn-consensus` | library | Raft implementation (leader election, log replication, RaftActor; ADR-0014) |
 | `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
 | `dawn-replication` | library | Gossip distribution boundary for the append log (OutboundLogPublisher / InMemoryReplicationBus / ReplicationTransport / AntiEntropy / TcpReplicationTransport / SnapshotTransfer / ReplicaSet; ADR-0021/0027) |
-| `dawn-sector` | library | Per-Sector game logic (SimulationNode, Tick, Transit, Warp, Bot AI, AoI, Snapshot; ADR-0026) |
+| `dawn-sector` | library | Per-Sector game logic (SimulationNode, Tick, Transit, Warp, Bot AI, AoI, Snapshot; ADR-0026). Also depends on `dawn-wire` to build typed wire messages (e.g. `PlayerLoadoutJson`, ADR-0042 stage 2a) |
 | `dawn-simulation` | binary | Wiring/bootstrap only. WsServer (Godot), Raft cluster wiring, load generation, TOML loader |
 | `dawn-sector-node` | binary | Production binary (8D-4). Wires TcpRaftTransport + TcpReplicationTransport from static TOML config. 3 processes = 3-Sector cluster |
 
@@ -100,14 +100,14 @@ dawn-core
     │               ^                  also depends on dawn-wire directly (ADR-0041)
     ├── dawn-wire          <- client<->server wire schema, no transport dep (ADR-0041, ADR-0042)
     │       ^
-    │       └── dawn-actor (below) also depends on dawn-wire
+    │       └── dawn-actor / dawn-sector (below) also depend on dawn-wire
     ├── dawn-ecs
     ├── dawn-consensus
     └── dawn-event-store
             ^
             ├── dawn-actor           <- also depends on dawn-wire
             ├── dawn-replication
-            └── dawn-sector          <- game logic (also depends on dawn-ecs / dawn-consensus, ADR-0026)
+            └── dawn-sector          <- game logic (also depends on dawn-ecs / dawn-consensus / dawn-wire, ADR-0026/0042)
                     ^
                     ├── dawn-simulation     (binary; also depends on dawn-actor / dawn-consensus)
                     └── dawn-sector-node    (production binary; also depends on dawn-actor / dawn-consensus / dawn-replication, 8D-4)

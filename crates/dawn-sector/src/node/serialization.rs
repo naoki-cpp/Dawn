@@ -7,16 +7,18 @@
 use dawn_core::{CelestialBodyKind, ShipId};
 use dawn_ecs::components::{HullComp, ShipStatsComp};
 use dawn_event_store::store::EventStore;
+use dawn_wire::PlayerLoadoutJson;
 
 use super::SimulationNode;
 
-/// The two JSON payloads sent to a client immediately after handshake
-/// (before Welcome), regardless of whether the identity was freshly spawned
-/// or resumed.
+/// The two payloads sent to a client immediately after handshake (before
+/// Welcome), regardless of whether the identity was freshly spawned or
+/// resumed. `initial_state` is still ad-hoc JSON text (ADR-0042 stage 2b);
+/// `player_loadout` is the typed wire message (stage 2a).
 #[derive(Debug)]
 pub struct HandoffPayload {
     pub initial_state: String,
-    pub player_loadout: Option<String>,
+    pub player_loadout: Option<PlayerLoadoutJson>,
 }
 
 /// Wire shape for an absolute (f64, ADR-0029) position: `{"x":...,"y":...,"z":...}`.
