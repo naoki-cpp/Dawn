@@ -4,31 +4,37 @@
 //! expects live here, keeping the core simulation logic in `mod.rs` separate
 //! from the presentation layer.
 
-use dawn_core::{CelestialBodyKind, ShipId};
+use dawn_core::ShipId;
 use dawn_ecs::components::{HullComp, ShipStatsComp};
 use dawn_event_store::store::EventStore;
-use dawn_wire::PlayerLoadoutJson;
+use dawn_wire::{
+    AbsPosJson, BuildableShipTypeJson, CelestialBodyJson, InitialStateJson, JumpGateJson,
+    PlayerLoadoutJson, ShipStateJson, StationJson, SystemJson,
+};
 
 use super::SimulationNode;
 
 /// The two payloads sent to a client immediately after handshake (before
 /// Welcome), regardless of whether the identity was freshly spawned or
-/// resumed. `initial_state` is still ad-hoc JSON text (ADR-0042 stage 2b);
-/// `player_loadout` is the typed wire message (stage 2a).
+/// resumed. Both are typed wire messages (stage 2a/2b, ADR-0042).
 #[derive(Debug)]
 pub struct HandoffPayload {
-    pub initial_state: String,
+    pub initial_state: InitialStateJson,
     pub player_loadout: Option<PlayerLoadoutJson>,
 }
 
-/// Wire shape for an absolute (f64, ADR-0029) position: `{"x":...,"y":...,"z":...}`.
-/// The one seam this file's three position-carrying messages (celestial body,
-/// jump gate, ship) go through, instead of each authoring the same literal.
-/// Kept local to `dawn-sector` rather than reusing `dawn-actor`'s `PosJson` --
-/// `dawn-actor` sits one layer up in the crate DAG (CONTEXT.md Runtime
-/// Boundaries) and `dawn-sector` must not depend on it.
-fn abs_pos_json(p: [f64; 3]) -> serde_json::Value {
-    serde_json::json!({ "x": p[0], "y": p[1], "z": p[2] })
+/// Wire shape for an absolute (f64, ADR-0029) position. The one seam this
+/// file's three position-carrying messages (celestial body, jump gate, ship)
+/// go through, instead of each authoring the same literal. Kept local to
+/// `dawn-sector` rather than reusing `dawn-actor`'s `PosJson` -- `dawn-actor`
+/// sits one layer up in the crate DAG (CONTEXT.md Runtime Boundaries) and
+/// `dawn-sector` must not depend on it.
+fn abs_pos_json(p: [f64; 3]) -> AbsPosJson {
+    AbsPosJson {
+        x: p[0],
+        y: p[1],
+        z: p[2],
+    }
 }
 
 impl<S: EventStore> SimulationNode<S> {
@@ -47,38 +53,37 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Full-world `InitialState` (every ship). Used for non-AoI callers.
-    pub fn build_initial_state_json(&self) -> String {
+    pub fn build_initial_state_json(&self) -> InitialStateJson {
         self.initial_state_json(self.ships.index.keys().copied())
     }
 
     /// `InitialState` scoped to an observer's Area of Interest: only ships in the
     /// 27-cell neighborhood of `observer_pos` (ADR-0019).
-    pub fn build_initial_state_json_for(&self, observer_abs: [f64; 3], cell_size: f32) -> String {
+    pub fn build_initial_state_json_for(
+        &self,
+        observer_abs: [f64; 3],
+        cell_size: f32,
+    ) -> InitialStateJson {
         self.initial_state_json(self.ships_visible_to(observer_abs, cell_size).into_iter())
     }
 
-    /// Serialise the given ships into an `InitialState` message.
-    fn initial_state_json(&self, ship_ids: impl Iterator<Item = ShipId>) -> String {
-        let ships: Vec<serde_json::Value> = ship_ids
+    /// Build the given ships into an `InitialState` message.
+    fn initial_state_json(&self, ship_ids: impl Iterator<Item = ShipId>) -> InitialStateJson {
+        let ships: Vec<ShipStateJson> = ship_ids
             .filter_map(|ship_id| self.ship_state_json(ship_id))
             .collect();
 
-        let bodies: Vec<serde_json::Value> = self
+        let celestial_bodies: Vec<CelestialBodyJson> = self
             .sector_map
             .bodies
             .values()
-            .map(|b| {
-                serde_json::json!({
-                    "id"           : b.id.0,
-                    "kind"         : match b.kind {
-                        CelestialBodyKind::Star   => "Star",
-                        CelestialBodyKind::Planet => "Planet",
-                    },
-                    "name"         : b.name,
-                    "position"     : abs_pos_json(b.abs_m),
-                    "radius"       : b.radius,
-                    "spectral_type": b.spectral_type,
-                })
+            .map(|b| CelestialBodyJson {
+                id: b.id.0,
+                kind: b.kind,
+                name: b.name.clone(),
+                position: abs_pos_json(b.abs_m),
+                radius: b.radius,
+                spectral_type: b.spectral_type,
             })
             .collect();
 
@@ -94,66 +99,66 @@ impl<S: EventStore> SimulationNode<S> {
                 .unwrap_or_else(|| "Unknown".to_string())
         };
 
-        let systems: Vec<serde_json::Value> = galaxy
+        let systems: Vec<SystemJson> = galaxy
             .systems
             .iter()
-            .map(|s| serde_json::json!({ "id": s.id.0, "name": s.name }))
-            .collect();
-
-        let gates: Vec<serde_json::Value> = self
-            .sector_map
-            .gates
-            .values()
-            .map(|g| {
-                serde_json::json!({
-                    "gate_id"          : g.id.0,
-                    "position"         : abs_pos_json(g.abs_m),
-                    "activation_radius": g.activation_radius,
-                    "to_system_name"   : system_name_of(g.to_sector),
-                })
+            .map(|s| SystemJson {
+                id: s.id.0,
+                name: s.name.clone(),
             })
             .collect();
 
-        let stations: Vec<serde_json::Value> = self
+        let jump_gates: Vec<JumpGateJson> = self
+            .sector_map
+            .gates
+            .values()
+            .map(|g| JumpGateJson {
+                gate_id: g.id.0,
+                position: abs_pos_json(g.abs_m),
+                activation_radius: g.activation_radius,
+                to_system_name: system_name_of(g.to_sector),
+            })
+            .collect();
+
+        let stations: Vec<StationJson> = self
             .sector_map
             .stations
             .values()
-            .map(|station| {
-                serde_json::json!({
-                    "station_id": station.id.0,
-                    "name": station.name,
-                    "position": abs_pos_json(station.abs_m),
-                    "docking_radius": station.docking_radius,
-                })
+            .map(|station| StationJson {
+                station_id: station.id.0,
+                name: station.name.clone(),
+                position: abs_pos_json(station.abs_m),
+                docking_radius: station.docking_radius,
             })
             .collect();
 
         // Buildable Packaged Ship catalog (ADR-0034 9B): static registry data,
         // not per-tick, so it's cheapest to send once alongside the rest of
         // InitialState rather than as its own message type.
-        let buildable_ship_types: Vec<serde_json::Value> = self
+        let buildable_ship_types: Vec<BuildableShipTypeJson> = self
             .ship_type_registry
             .values()
             .filter(|def| def.buildable)
-            .map(|def| serde_json::json!({ "ship_type_id": def.id.0, "name": def.name }))
+            .map(|def| BuildableShipTypeJson {
+                ship_type_id: def.id.0,
+                name: def.name.clone(),
+            })
             .collect();
 
-        serde_json::json!({
-            "type"                 : "InitialState",
-            "ships"                : ships,
-            "system_name"          : system_name_of(self.sector_id),
-            "systems"              : systems,
-            "jump_gates"           : gates,
-            "stations"             : stations,
-            "celestial_bodies"     : bodies,
-            "buildable_ship_types" : buildable_ship_types,
-        })
-        .to_string()
+        InitialStateJson {
+            ships,
+            system_name: system_name_of(self.sector_id),
+            systems,
+            jump_gates,
+            stations,
+            celestial_bodies,
+            buildable_ship_types,
+        }
     }
 
     /// Per-ship state object (position, stats, hull, ownership). Shared by
     /// `InitialState` and `AoiEnter` (ADR-0019). `None` if the ship is gone.
-    pub fn ship_state_json(&self, ship_id: ShipId) -> Option<serde_json::Value> {
+    pub fn ship_state_json(&self, ship_id: ShipId) -> Option<ShipStateJson> {
         let entity = self.ships.index.get(&ship_id)?;
         // Send the ABSOLUTE position (anchor + offset, f64), not the raw
         // anchor-relative offset (ADR-0029). After a warp rebase the offset is
@@ -171,20 +176,20 @@ impl<S: EventStore> SimulationNode<S> {
             .and_then(|tid| self.ship_type_registry.get(tid))
             .map(|def| def.name.as_str())
             .unwrap_or("Unknown");
-        Some(serde_json::json!({
-            "ship_id"              : ship_id.raw(),
-            "ship_type_name"       : ship_type_name,
-            "position"             : abs_pos_json(pos),
-            "max_shield"           : stats.max_shield,
-            "max_armor"            : stats.max_armor,
-            "max_hull"             : stats.max_hull,
-            "current_shield"       : hull.shield(),
-            "current_armor"        : hull.armor(),
-            "current_hull"         : hull.hull(),
-            "cap_max"              : stats.cap_max,
-            "cap_recharge_per_tick": stats.cap_recharge_per_tick,
-            "is_player"            : is_player,
-        }))
+        Some(ShipStateJson {
+            ship_id: ship_id.raw(),
+            ship_type_name: ship_type_name.to_string(),
+            position: abs_pos_json(pos),
+            max_shield: stats.max_shield,
+            max_armor: stats.max_armor,
+            max_hull: stats.max_hull,
+            current_shield: hull.shield(),
+            current_armor: hull.armor(),
+            current_hull: hull.hull(),
+            cap_max: stats.cap_max,
+            cap_recharge_per_tick: stats.cap_recharge_per_tick,
+            is_player,
+        })
     }
 
     /// `AoiEnter` control message for a ship that just entered an observer's
@@ -332,13 +337,7 @@ mod tests {
         );
 
         let json = node.build_initial_state_json_for([0.0, 0.0, 0.0], cell);
-        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let ids: Vec<u64> = v["ships"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|s| s["ship_id"].as_u64().unwrap())
-            .collect();
+        let ids: Vec<u64> = json.ships.iter().map(|s| s.ship_id).collect();
         assert!(
             ids.contains(&observer.raw()),
             "observer is in its own scoped state"
@@ -347,62 +346,53 @@ mod tests {
             !ids.contains(&far.raw()),
             "distant ship is excluded from scoped InitialState"
         );
-        let full: serde_json::Value =
-            serde_json::from_str(&node.build_initial_state_json()).unwrap();
-        assert_eq!(full["ships"].as_array().unwrap().len(), 2);
+        let full = node.build_initial_state_json();
+        assert_eq!(full.ships.len(), 2);
     }
 
     #[test]
     fn initial_state_carries_the_sector_navigation_map() {
         // mem_node() serves Sector 0, which the demo galaxy maps to "Alpha".
         let node = mem_node();
-        let v: serde_json::Value = serde_json::from_str(&node.build_initial_state_json()).unwrap();
+        let v = node.build_initial_state_json();
 
-        assert_eq!(v["system_name"], "Alpha");
-        assert_eq!(
-            v["systems"].as_array().unwrap().len(),
-            3,
-            "all star systems are listed"
-        );
+        assert_eq!(v.system_name, "Alpha");
+        assert_eq!(v.systems.len(), 3, "all star systems are listed");
 
-        let gates = v["jump_gates"].as_array().unwrap();
+        let gates = &v.jump_gates;
         assert_eq!(gates.len(), 1, "Sector 0 has exactly one gate");
-        assert_eq!(gates[0]["gate_id"].as_u64().unwrap(), 0);
-        assert_eq!(gates[0]["to_system_name"], "Beta", "gate 0 leads to Beta");
+        assert_eq!(gates[0].gate_id, 0);
+        assert_eq!(gates[0].to_system_name, "Beta", "gate 0 leads to Beta");
         let gate = node.jump_gate(dawn_core::JumpGateId(0)).unwrap();
         assert_eq!(
-            gates[0]["position"]["x"].as_f64().unwrap(),
-            gate.abs_m[0],
+            gates[0].position.x, gate.abs_m[0],
             "client gate marker/proximity source must match the f64 jump range source"
         );
         assert_eq!(
-            gates[0]["position"]["z"].as_f64().unwrap(),
-            gate.abs_m[2],
+            gates[0].position.z, gate.abs_m[2],
             "client gate marker/proximity source must match the f64 jump range source"
         );
 
-        let bodies_json = v["celestial_bodies"].as_array().unwrap();
+        let bodies_json = &v.celestial_bodies;
         assert_eq!(bodies_json.len(), 3, "Helios + Forge + Meridian");
         let first_body = node.sector_map.bodies.values().next().unwrap();
         let first_body_json = bodies_json
             .iter()
-            .find(|b| b["id"].as_u64().unwrap() == first_body.id.0 as u64)
+            .find(|b| b.id == first_body.id.0)
             .expect("every body in sector_map appears in the JSON");
         assert_eq!(
-            first_body_json["position"]["x"].as_f64().unwrap(),
-            first_body.abs_m[0],
+            first_body_json.position.x, first_body.abs_m[0],
             "client body marker source must match the f64 anchor source (abs_m), not the f32 position"
         );
         assert_eq!(
-            first_body_json["position"]["z"].as_f64().unwrap(),
-            first_body.abs_m[2],
+            first_body_json.position.z, first_body.abs_m[2],
             "client body marker source must match the f64 anchor source (abs_m), not the f32 position"
         );
 
-        let stations = v["stations"].as_array().unwrap();
+        let stations = &v.stations;
         assert_eq!(stations.len(), 1, "Sector 0 has exactly one NPC station");
-        assert_eq!(stations[0]["station_id"].as_u64().unwrap(), 0);
-        assert_eq!(stations[0]["name"], "Forge Station");
+        assert_eq!(stations[0].station_id, 0);
+        assert_eq!(stations[0].name, "Forge Station");
     }
 
     #[test]
@@ -411,19 +401,19 @@ mod tests {
         for def in crate::ship_types::all_ship_types() {
             node.register_ship_type(def);
         }
-        let v: serde_json::Value = serde_json::from_str(&node.build_initial_state_json()).unwrap();
+        let v = node.build_initial_state_json();
 
-        let buildable = v["buildable_ship_types"].as_array().unwrap();
+        let buildable = &v.buildable_ship_types;
         assert_eq!(
             buildable.len(),
             1,
             "only the Magpie is buildable, the NPC Frigate must not appear"
         );
         assert_eq!(
-            buildable[0]["ship_type_id"].as_u64().unwrap(),
-            crate::ship_types::SHIP_TYPE_MAGPIE.0 as u64
+            buildable[0].ship_type_id,
+            crate::ship_types::SHIP_TYPE_MAGPIE.0
         );
-        assert_eq!(buildable[0]["name"], "Magpie");
+        assert_eq!(buildable[0].name, "Magpie");
     }
 
     #[test]
@@ -467,12 +457,11 @@ mod tests {
 
         let payload = node.build_handoff_payload(ship_id, cell);
 
-        let v: serde_json::Value = serde_json::from_str(&payload.initial_state).unwrap();
-        let ids: Vec<u64> = v["ships"]
-            .as_array()
-            .unwrap()
+        let ids: Vec<u64> = payload
+            .initial_state
+            .ships
             .iter()
-            .map(|s| s["ship_id"].as_u64().unwrap())
+            .map(|s| s.ship_id)
             .collect();
         assert!(ids.contains(&ship_id.raw()), "ship sees its own state");
         assert!(

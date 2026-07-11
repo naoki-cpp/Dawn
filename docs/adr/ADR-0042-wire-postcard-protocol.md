@@ -223,10 +223,40 @@ GDScript側の既存コンシューマ（`main.gd`/`hud_manager.gd`）には影�
       `cargo clippy --workspace -- -D warnings` / `cargo machete` 全件通過。
       GdUnit4 202/202 pass
 
-### 段階2b/2c（後続タスク・別PR）
+### 段階2b（`InitialState`、2026-07-11 完了）
 
-- [ ] `InitialState`/`AoiEnter` を固定 Rust 構造体に起こす
-      （`serialization.rs`/`aoi.rs`/`ship_registry.rs`/
-      `client_admission.rs`/`runtime.rs`/`aoi_delivery.rs`/`cluster.rs`/`single.rs`）
-- [ ] 上記を `ServerMessage` に合流させ、`send_raw`（JSON text）経路を撤去
+- [x] `dawn-wire`: `InitialStateJson`/`ShipStateJson`/`CelestialBodyJson`/
+      `SystemJson`/`JumpGateJson`/`StationJson`/`BuildableShipTypeJson`/
+      `AbsPosJson`（f64 絶対座標、ADR-0029 -- 既存の`PosJson`はf32でクライアント
+      コマンド用途なので流用しない）を新設
+- [x] `ServerMessage::InitialState(InitialStateJson)` を追加
+- [x] `dawn-sector/src/node/serialization.rs`: `initial_state_json`/
+      `ship_state_json`（`InitialState`と`AoiEnter`共有）を`serde_json::Value`
+      から上記の型構築に書き換え。`HandoffPayload.initial_state`も
+      `InitialStateJson`型に変更。`AoiEnter`は`ship_state_json`の戻り値型が
+      変わっただけで、引き続き`serde_json::json!`でJSONテキスト化（段階2cで
+      対応）
+- [x] `dawn-actor/src/ws_server.rs`: `HandshakeRequest::complete`/
+      `WsServer::handshake`の`initial_state`引数を`InitialStateJson`化し、
+      `ServerMessage::InitialState`としてbinary送信（Welcome/InitialState/
+      PlayerLoadoutの3つとも同一frameでbinary送信に統一）
+- [x] `dawn-simulation`（`cluster.rs`/`runtime.rs`/`single.rs`）: jump時の
+      InitialState再送（`resend_jump_initial_state`）も`send_raw`から
+      `send_message(&ServerMessage::InitialState(..))`に変更
+- [x] `dawn-client-gdext/src/server_message_gd.rs`: `ServerMessageDecoder`に
+      `InitialState`分岐を追加。`InitialStateJson`はenumでなくstructなので
+      `EventJson`用の`externally_tagged_to_dict`は使わず、
+      `json_value_to_variant`で直接Dictionary化した上で`"type"`キーを付与
+      （Dictionaryの形状はJSON時代と完全に同一なので、`connection.gd`/
+      `main.gd`側の変更は不要 -- `_handle_message`の"InitialState"分岐は
+      既存のまま動く）
+- [x] `cargo fmt --all -- --check` / `cargo test --workspace` /
+      `cargo clippy --workspace -- -D warnings` / `cargo machete` 全件通過
+
+### 段階2c（後続タスク・別PR）
+
+- [ ] `AoiEnter` を `ServerMessage` に合流させる（`ship_state_json`は既に
+      段階2bで`ShipStateJson`型を返すようになっているので、残りは
+      `aoi_enter_json`のJSONテキスト化を`ServerMessage::AoiEnter(ShipStateJson)`
+      のような型に置き換えるだけ -- `aoi.rs`/`aoi_delivery.rs`も追随）
 - [ ] `WsClientConnection::send_raw` の削除（全メッセージが `ServerMessage` 経由になった時点で）

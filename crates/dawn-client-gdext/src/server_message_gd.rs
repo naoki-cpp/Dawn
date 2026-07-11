@@ -1,4 +1,4 @@
-use crate::json_variant::{externally_tagged_to_dict, Dict};
+use crate::json_variant::{externally_tagged_to_dict, json_value_to_variant, Dict};
 use dawn_wire::ServerMessage;
 use godot::prelude::*;
 
@@ -78,5 +78,20 @@ fn server_message_to_dict(msg: &ServerMessage) -> Dict {
             d.set("type", "PlayerLoadout");
             d
         }
+        // InitialState is a plain struct (not an enum like EventJson), so it
+        // serializes to a flat JSON object with no wrapping variant name --
+        // convert it directly and stamp "type" on, rather than going through
+        // externally_tagged_to_dict (which expects a single-key wrapper).
+        ServerMessage::InitialState(state) => match serde_json::to_value(state) {
+            Ok(value) => {
+                let mut d = json_value_to_variant(&value).to::<Dict>();
+                d.set("type", "InitialState");
+                d
+            }
+            Err(err) => {
+                godot_error!("ServerMessageDecoder.decode: InitialStateJson -> JSON failed: {err}");
+                Dict::new()
+            }
+        },
     }
 }

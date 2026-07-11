@@ -49,15 +49,15 @@
 //! Stage 1 covered the messages that already had a fixed Rust type:
 //! `Welcome`/`Redirect`/`Event` (server -> client) and `Hello`/`Command`
 //! (client -> server). Stage 2 folds in the remaining ad-hoc
-//! `serde_json::Value` messages one at a time; 2a ([`PlayerLoadoutJson`])
-//! is done. `InitialState`/`AoiEnter` are still built as ad-hoc
-//! `serde_json::Value` in `dawn-sector`/`dawn-simulation` and remain JSON
-//! text frames for now (2b/2c, follow-up tasks). WebSocket carries text and
-//! binary frames on the same connection without conflict, so this split is
-//! not a compatibility problem.
+//! `serde_json::Value` messages one at a time; 2a ([`PlayerLoadoutJson`]) and
+//! 2b ([`InitialStateJson`]) are done. `AoiEnter` is still built as ad-hoc
+//! `serde_json::Value` in `dawn-sector` and remains a JSON text frame for now
+//! (2c, follow-up task). WebSocket carries text and binary frames on the same
+//! connection without conflict, so this split is not a compatibility problem.
 
 mod client_command;
 mod hello_resume;
+mod initial_state;
 mod player_loadout;
 mod server_event;
 
@@ -66,6 +66,10 @@ pub use client_command::{
     PosJson, VelJson, WarpTargetJson,
 };
 pub use hello_resume::{parse_hello, HelloMessage, ResumeIdentity};
+pub use initial_state::{
+    AbsPosJson, BuildableShipTypeJson, CelestialBodyJson, InitialStateJson, JumpGateJson,
+    ShipStateJson, StationJson, SystemJson,
+};
 pub use player_loadout::{
     ItemRowJson, ModuleRowJson, OwnedShipRowJson, PlayerLoadoutJson, SlotCapacityJson,
 };
@@ -76,8 +80,7 @@ pub use server_event::{
 use serde::{Deserialize, Serialize};
 
 /// Every message the server sends over the binary WebSocket envelope
-/// (ADR-0042). `InitialState`/`AoiEnter` are not members yet -- see the
-/// module docs.
+/// (ADR-0042). `AoiEnter` is not a member yet -- see the module docs.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
     Welcome {
@@ -91,6 +94,7 @@ pub enum ServerMessage {
     },
     Event(EventJson),
     PlayerLoadout(PlayerLoadoutJson),
+    InitialState(InitialStateJson),
 }
 
 impl ServerMessage {

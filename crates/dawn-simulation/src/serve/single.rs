@@ -123,7 +123,7 @@ pub(crate) async fn run_phase4_server(
                     addr,
                     player_id,
                     ship_id,
-                    &payload.initial_state,
+                    payload.initial_state,
                     payload.player_loadout,
                 )
                 .await

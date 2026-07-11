@@ -264,11 +264,11 @@ func _connect_to_server() -> void:
 		push_warning("[Connection] connect_to_url failed: %s" % error_string(err))
 
 ## One WebSocket frame always carries exactly one message (ADR-0042) --
-## text frames are still-JSON messages (InitialState/AoiEnter, ADR-0042
-## stage 2b/2c); binary frames are the postcard `ServerMessage` envelope.
-## `ServerMessageDecoder` converts most binary variants into the same
-## `{"type": ..., ...}` Dictionary shape the JSON path produces, except
-## `PlayerLoadout` (ADR-0042 2a), which it reduces to a bare `{"type":
+## text frames are still-JSON messages (`AoiEnter`, ADR-0042 stage 2c);
+## binary frames are the postcard `ServerMessage` envelope. `ServerMessageDecoder`
+## converts most binary variants (including `InitialState`, ADR-0042 2b) into
+## the same `{"type": ..., ...}` Dictionary shape the JSON path produces,
+## except `PlayerLoadout` (ADR-0042 2a), which it reduces to a bare `{"type":
 ## "PlayerLoadout"}` dispatch tag -- the raw bytes go straight to
 ## `PlayerLoadout.apply_wire_bytes` instead, bypassing the Dictionary
 ## entirely for precision (see `player_fitting_received`).
