@@ -11,12 +11,12 @@ const InventoryRow = preload("res://scripts/inventory_row.gd")
 
 var _stats_label: Label = null
 var _duel_result_label: Label = null
-var _status_panel_refs: Dictionary = {}
-var _ship_status_refs: Dictionary = {}
-var _target_panel_refs: Dictionary = {}
+var _status_panel_refs: HudManager.StatusPanelRefs = null
+var _ship_status_refs: HudManager.ShipStatusPanelRefs = null
+var _target_panel_refs: HudManager.TargetPanelRefs = null
 var _module_bar: HBoxContainer = null
-var _module_slots: Array = []
-var _inventory_panel_refs: Dictionary = {}
+var _module_slots: Array[HudManager.ModuleSlotRefs] = []
+var _inventory_panel_refs: HudManager.InventoryPanelRefs = null
 var _hud: CanvasLayer = null
 
 ## Last frame's per-panel sub-Dictionary/Array, used by render() to skip
@@ -175,10 +175,9 @@ func set_player_fitting(
 ## snapshot to trigger a rebuild.
 func toggle_build_picker(modules: Array, inventory: Array, station_inventory: Array,
 		owned_ships: Array, buildable_ship_types: Array) -> void:
-	var refs: Dictionary = _inventory_panel_refs
-	refs["build_picker_open"] = not (refs.get("build_picker_open", false) as bool)
+	_inventory_panel_refs.build_picker_open = not _inventory_panel_refs.build_picker_open
 	HudManager.update_inventory_panel(
-		refs, modules, inventory, station_inventory, owned_ships, buildable_ship_types)
+		_inventory_panel_refs, modules, inventory, station_inventory, owned_ships, buildable_ship_types)
 
 
 ## Identity of the modules rebuild_module_bar() would render as slots, in

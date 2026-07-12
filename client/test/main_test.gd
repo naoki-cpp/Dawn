@@ -655,7 +655,7 @@ func test_drag_within_fitted_reorders_two_modules_of_the_same_slot_kind() -> voi
 	HudManager.toggle_inventory_panel(_main._hud_surface._inventory_panel_refs)
 	await get_tree().process_frame
 
-	var fitted_rows: Array = _main._hud_surface._inventory_panel_refs["fitted_rows"]
+	var fitted_rows: Array[InventoryRow] = _main._hud_surface._inventory_panel_refs.fitted_rows
 	var source_row: InventoryRow = fitted_rows[0]
 	var target_row: InventoryRow = fitted_rows[1]
 	var target_pos: Vector2 = (target_row.panel as Panel).get_global_rect().position + Vector2(2, 2)
@@ -686,7 +686,7 @@ func test_drag_within_fitted_across_different_slot_kinds_is_a_no_op() -> void:
 	HudManager.toggle_inventory_panel(_main._hud_surface._inventory_panel_refs)
 	await get_tree().process_frame
 
-	var fitted_rows: Array = _main._hud_surface._inventory_panel_refs["fitted_rows"]
+	var fitted_rows: Array[InventoryRow] = _main._hud_surface._inventory_panel_refs.fitted_rows
 	var source_row: InventoryRow = fitted_rows[0]
 	var target_row: InventoryRow = fitted_rows[1]
 	var target_pos: Vector2 = (target_row.panel as Panel).get_global_rect().position + Vector2(2, 2)
@@ -727,7 +727,7 @@ func test_release_past_threshold_is_treated_as_a_drop_not_a_click() -> void:
 	HudManager.toggle_inventory_panel(_main._hud_surface._inventory_panel_refs)
 	await get_tree().process_frame
 
-	var station_list: VBoxContainer = _main._hud_surface._inventory_panel_refs["station_list"]
+	var station_list: VBoxContainer = _main._hud_surface._inventory_panel_refs.station_list
 	var far_pos: Vector2 = station_list.get_global_rect().position + Vector2(2, 2)
 
 	_main._drag_row = InventoryRow.for_item(

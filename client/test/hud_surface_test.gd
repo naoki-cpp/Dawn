@@ -76,10 +76,10 @@ func test_render_updates_all_hud_panels_from_one_frame() -> void:
 		"stats_text": "Ships: 2",
 	})
 
-	assert_str((_surface._status_panel_refs["conn_label"] as Label).text).is_equal("ONLINE")
-	assert_float((_surface._ship_status_refs["bar_cap"]["bar"] as ProgressBar).value).is_equal_approx(75.0, 0.0001)
-	assert_str((_surface._target_panel_refs["dist_label"] as Label).text).is_equal("3.2 km")
-	assert_str((_surface._module_slots[0]["state"] as Label).text).is_equal("ON")
+	assert_str(_surface._status_panel_refs.conn_label.text).is_equal("ONLINE")
+	assert_float(_surface._ship_status_refs.bar_cap.bar.value).is_equal_approx(75.0, 0.0001)
+	assert_str(_surface._target_panel_refs.dist_label.text).is_equal("3.2 km")
+	assert_str(_surface._module_slots[0].state.text).is_equal("ON")
 	assert_str(_stats_label.text).is_equal("Ships: 2")
 
 
@@ -98,9 +98,9 @@ func test_set_player_fitting_rebuilds_module_slots_and_inventory_rows() -> void:
 	assert_int(_surface._module_slots.size()).is_equal(1)
 	## 2 module rows + 1 trailing "Unfit all" row (only appended when at
 	## least one module is fitted).
-	assert_int((_surface._inventory_panel_refs["fitted_rows"] as Array).size()).is_equal(3)
-	assert_int((_surface._inventory_panel_refs["inventory_rows"] as Array).size()).is_equal(2)
-	var rows: Array[InventoryRow] = _surface._inventory_panel_refs["inventory_rows"] as Array[InventoryRow]
+	assert_int(_surface._inventory_panel_refs.fitted_rows.size()).is_equal(3)
+	assert_int(_surface._inventory_panel_refs.inventory_rows.size()).is_equal(2)
+	var rows: Array[InventoryRow] = _surface._inventory_panel_refs.inventory_rows
 	assert_str(((rows[1].panel as Panel).get_child(0) as Label).text).is_equal("Scrap Metal x4")
 	## Every ship-cargo row is tagged "ship_cargo" (main.gd's right-click
 	## transfer-to-station handler keys off this to avoid firing on station/
@@ -125,14 +125,14 @@ func test_render_repaints_after_the_modules_array_is_mutated_in_place() -> void:
 	var frame: Dictionary = {"modules": modules}
 	_surface.set_player_fitting(modules, [])
 	_surface.render(frame)
-	assert_str((_surface._module_slots[0]["state"] as Label).text).is_equal("ON")
+	assert_str(_surface._module_slots[0].state.text).is_equal("ON")
 
 	## Mutate the very same ModuleRow object in place, exactly as
 	## PlayerLoadout.apply_module_activation does -- no new object is created.
 	(modules[0] as ModuleRow).is_active = false
 
 	_surface.render(frame)
-	assert_str((_surface._module_slots[0]["state"] as Label).text).is_equal("OFF")
+	assert_str(_surface._module_slots[0].state.text).is_equal("OFF")
 
 
 func test_set_player_fitting_reuses_slots_when_active_module_set_is_unchanged() -> void:
@@ -151,7 +151,7 @@ func test_set_player_fitting_reuses_slots_when_active_module_set_is_unchanged() 
 	_surface.set_player_fitting(modules_on, [])
 
 	assert_bool(_surface._module_slots == slots_before).is_true()
-	assert_str((_surface._module_slots[0]["state"] as Label).text).is_equal("ON")
+	assert_str(_surface._module_slots[0].state.text).is_equal("ON")
 
 
 func test_set_player_fitting_rebuilds_when_active_module_set_changes() -> void:
@@ -228,8 +228,8 @@ func test_render_called_twice_with_same_frame_does_not_change_painted_values() -
 	_surface.render(frame)
 	_surface.render(frame)
 
-	assert_str((_surface._status_panel_refs["conn_label"] as Label).text).is_equal("ONLINE")
-	assert_float((_surface._ship_status_refs["bar_cap"]["bar"] as ProgressBar).value).is_equal_approx(75.0, 0.0001)
+	assert_str(_surface._status_panel_refs.conn_label.text).is_equal("ONLINE")
+	assert_float(_surface._ship_status_refs.bar_cap.bar.value).is_equal_approx(75.0, 0.0001)
 
 
 func test_inventory_panel_hit_helpers_delegate_to_built_panel() -> void:
@@ -237,10 +237,10 @@ func test_inventory_panel_hit_helpers_delegate_to_built_panel() -> void:
 	_surface.toggle_inventory_panel()
 	await get_tree().process_frame
 
-	var panel: Panel = _surface._inventory_panel_refs["panel"]
+	var panel: Panel = _surface._inventory_panel_refs.panel
 	assert_bool(_surface.inventory_panel_consumes(panel.get_global_rect().get_center())).is_true()
 
-	var rows: Array[InventoryRow] = _surface._inventory_panel_refs["inventory_rows"] as Array[InventoryRow]
+	var rows: Array[InventoryRow] = _surface._inventory_panel_refs.inventory_rows
 	var row_panel: Panel = rows[0].panel
 	var hit: InventoryRow = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
 	assert_str(hit.action).is_equal(InventoryRow.ACTION_FIT)
@@ -253,7 +253,7 @@ func test_station_inventory_packaged_ship_row_is_clickable_to_assemble() -> void
 	_surface.toggle_inventory_panel()
 	await get_tree().process_frame
 
-	var rows: Array[InventoryRow] = _surface._inventory_panel_refs["station_rows"] as Array[InventoryRow]
+	var rows: Array[InventoryRow] = _surface._inventory_panel_refs.station_rows
 	var row_panel: Panel = rows[0].panel
 	var hit: InventoryRow = _surface.inventory_panel_row_at(row_panel.get_global_rect().get_center())
 	assert_str(hit.action).is_equal(InventoryRow.ACTION_ASSEMBLE)
@@ -268,7 +268,7 @@ func test_owned_ships_roster_lists_active_and_inactive_ships() -> void:
 	_surface.toggle_inventory_panel()
 	await get_tree().process_frame
 
-	var ship_rows: Array[InventoryRow] = _surface._inventory_panel_refs["ship_rows"] as Array[InventoryRow]
+	var ship_rows: Array[InventoryRow] = _surface._inventory_panel_refs.ship_rows
 	assert_int(ship_rows.size()).is_equal(2)
 
 	var active_row: InventoryRow = ship_rows[0]
