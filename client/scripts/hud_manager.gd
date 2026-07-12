@@ -4,11 +4,15 @@
 ## module bar, duel result overlay), extracted from main.gd
 ## (architecture-review/client.md C-1, final slice). Stateless static
 ## methods: build_* functions construct a Control subtree under the given
-## `hud` root and return a Dictionary of the node references the caller
-## needs to keep (mirroring main.gd's old member vars); update_* functions
-## take those refs back plus the live values to display. main.gd owns the
-## refs (stored in its own member vars) and all game state; this class only
-## knows how to build/refresh Control nodes from values handed to it.
+## `hud` root and return a typed *Refs object (StatusPanelRefs,
+## ShipStatusPanelRefs, TargetPanelRefs, InventoryPanelRefs, ModuleSlotRefs)
+## holding the node references the caller needs to keep (mirroring main.gd's
+## old member vars); update_* functions take those refs back plus the live
+## values to display. Typed fields, not a string-keyed Dictionary, so a
+## renamed/dropped field is a compile error instead of a silent null at
+## runtime. hud_surface.gd owns the refs (stored in its own member vars) and
+## all game state; this class only knows how to build/refresh Control nodes
+## from values handed to it.
 ## Hit-testing (answering "what's under this screen position") is a
 ## separate responsibility, split into HudHitTest (hud_hit_test.gd,
 ## architecture-review/client.md C-9) -- see that file's doc comment.
@@ -68,9 +72,22 @@ static func style_bar(bar: ProgressBar, fill_color: Color) -> void:
 	bar.add_theme_stylebox_override("background", bg)
 
 
-## Build a label/bar/value row. Returns {row, bar, value} so the caller can
-## update the bar and the numeric readout each frame.
-static func make_stat_bar(label_text: String, fill_color: Color) -> Dictionary:
+## Typed refs for one make_stat_bar() row, so update_ship_status_panel()
+## doesn't re-derive the {row, bar, value} shape from string keys.
+class StatBarRefs extends RefCounted:
+	var row: HBoxContainer
+	var bar: ProgressBar
+	var value: Label
+
+	func _init(row_: HBoxContainer, bar_: ProgressBar, value_: Label) -> void:
+		row = row_
+		bar = bar_
+		value = value_
+
+
+## Build a label/bar/value row. Returns the refs so the caller can update the
+## bar and the numeric readout each frame.
+static func make_stat_bar(label_text: String, fill_color: Color) -> StatBarRefs:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -96,7 +113,7 @@ static func make_stat_bar(label_text: String, fill_color: Color) -> Dictionary:
 	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	row.add_child(val_lbl)
 
-	return {"row": row, "bar": bar, "value": val_lbl}
+	return StatBarRefs.new(row, bar, val_lbl)
 
 
 ## A compact, label-less, number-less HP bar for the target panel.
@@ -112,11 +129,11 @@ static func make_mini_bar(fill_color: Color) -> ProgressBar:
 	return bar
 
 
-## Set a {bar, value} pair to cur/max: fill percentage + "cur / max" readout.
-static func set_stat_bar(entry: Dictionary, cur: float, mx: float) -> void:
+## Set a StatBarRefs pair to cur/max: fill percentage + "cur / max" readout.
+static func set_stat_bar(entry: StatBarRefs, cur: float, mx: float) -> void:
 	var pct: float = (cur / mx * 100.0) if mx > 0.0 else 0.0
-	(entry["bar"] as ProgressBar).value = clampf(pct, 0.0, 100.0)
-	(entry["value"] as Label).text = "%d / %d" % [int(round(cur)), int(round(mx))]
+	entry.bar.value = clampf(pct, 0.0, 100.0)
+	entry.value.text = "%d / %d" % [int(round(cur)), int(round(mx))]
 
 
 ## Set a number-less mini bar to a cur/max fill percentage.
@@ -126,9 +143,22 @@ static func set_mini_bar(bar: ProgressBar, cur: float, mx: float) -> void:
 
 # -- Top-left status panel ------------------------------------------------------
 
+## Typed refs for the top-left status panel.
+class StatusPanelRefs extends RefCounted:
+	var conn_dot: ColorRect
+	var conn_label: Label
+	var name_label: Label
+	var info_label: Label
+
+	func _init(conn_dot_: ColorRect, conn_label_: Label, name_label_: Label, info_label_: Label) -> void:
+		conn_dot = conn_dot_
+		conn_label = conn_label_
+		name_label = name_label_
+		info_label = info_label_
+
+
 ## Builds the connection dot + ship name + "System X · N m/s" panel.
-## Returns {conn_dot, conn_label, name_label, info_label}.
-static func build_status_panel(hud: CanvasLayer) -> Dictionary:
+static func build_status_panel(hud: CanvasLayer) -> StatusPanelRefs:
 	var panel := Panel.new()
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_theme_stylebox_override("panel", hud_box_style())
@@ -160,24 +190,35 @@ static func build_status_panel(hud: CanvasLayer) -> Dictionary:
 	var info_label := make_hud_label(11, Color(0.62, 0.69, 0.80))
 	vb.add_child(info_label)
 
-	return {"conn_dot": conn_dot, "conn_label": conn_label, "name_label": name_label, "info_label": info_label}
+	return StatusPanelRefs.new(conn_dot, conn_label, name_label, info_label)
 
 
 ## Refresh the status panel from current connection/ship state.
-static func update_status_panel(refs: Dictionary, connected: bool, ship_type_name: String, system_name: String, speed_str: String) -> void:
-	var conn_dot: ColorRect = refs["conn_dot"]
-	conn_dot.color = Color(0.25, 0.75, 0.42) if connected else Color(0.92, 0.66, 0.26)
-	(refs["conn_label"] as Label).text = "ONLINE" if connected else "CONNECTING..."
-	(refs["name_label"] as Label).text = ship_type_name if ship_type_name != "" else "—"
-	(refs["info_label"] as Label).text = "System %s · %s" % [system_name, speed_str]
+static func update_status_panel(refs: StatusPanelRefs, connected: bool, ship_type_name: String, system_name: String, speed_str: String) -> void:
+	refs.conn_dot.color = Color(0.25, 0.75, 0.42) if connected else Color(0.92, 0.66, 0.26)
+	refs.conn_label.text = "ONLINE" if connected else "CONNECTING..."
+	refs.name_label.text = ship_type_name if ship_type_name != "" else "—"
+	refs.info_label.text = "System %s · %s" % [system_name, speed_str]
 
 
 # -- Bottom-left ship-status panel ----------------------------------------------
 
+## Typed refs for the bottom-left Shield/Armor/Hull/Capacitor bars panel.
+class ShipStatusPanelRefs extends RefCounted:
+	var bar_shield: StatBarRefs
+	var bar_armor: StatBarRefs
+	var bar_hull: StatBarRefs
+	var bar_cap: StatBarRefs
+
+	func _init(bar_shield_: StatBarRefs, bar_armor_: StatBarRefs, bar_hull_: StatBarRefs, bar_cap_: StatBarRefs) -> void:
+		bar_shield = bar_shield_
+		bar_armor = bar_armor_
+		bar_hull = bar_hull_
+		bar_cap = bar_cap_
+
+
 ## Builds the Shield / Armor / Hull bars + capacitor bar panel.
-## Returns {bar_shield, bar_armor, bar_hull, bar_cap}, each itself the
-## {row, bar, value} Dictionary returned by make_stat_bar().
-static func build_ship_status_panel(hud: CanvasLayer) -> Dictionary:
+static func build_ship_status_panel(hud: CanvasLayer) -> ShipStatusPanelRefs:
 	var panel := Panel.new()
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_theme_stylebox_override("panel", hud_box_style())
@@ -198,41 +239,41 @@ static func build_ship_status_panel(hud: CanvasLayer) -> Dictionary:
 	header.text = "HULL INTEGRITY"
 	vb.add_child(header)
 
-	var bar_shield: Dictionary = make_stat_bar("SH", COLOR_SHIELD)
-	var bar_armor : Dictionary = make_stat_bar("AR", COLOR_ARMOR)
-	var bar_hull  : Dictionary = make_stat_bar("HU", COLOR_HULL)
-	vb.add_child(bar_shield["row"])
-	vb.add_child(bar_armor["row"])
-	vb.add_child(bar_hull["row"])
+	var bar_shield: StatBarRefs = make_stat_bar("SH", COLOR_SHIELD)
+	var bar_armor : StatBarRefs = make_stat_bar("AR", COLOR_ARMOR)
+	var bar_hull  : StatBarRefs = make_stat_bar("HU", COLOR_HULL)
+	vb.add_child(bar_shield.row)
+	vb.add_child(bar_armor.row)
+	vb.add_child(bar_hull.row)
 
 	var spacer := Control.new()
 	spacer.custom_minimum_size = Vector2(0.0, 2.0)
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(spacer)
 
-	var bar_cap: Dictionary = make_stat_bar("CAP", COLOR_CAP)
-	vb.add_child(bar_cap["row"])
+	var bar_cap: StatBarRefs = make_stat_bar("CAP", COLOR_CAP)
+	vb.add_child(bar_cap.row)
 
-	return {"bar_shield": bar_shield, "bar_armor": bar_armor, "bar_hull": bar_hull, "bar_cap": bar_cap}
+	return ShipStatusPanelRefs.new(bar_shield, bar_armor, bar_hull, bar_cap)
 
 
 ## Drive the Shield / Armor / Hull bars and the capacitor bar from current state.
 static func update_ship_status_panel(
-	bars: Dictionary, player_ship_id: int,
+	bars: ShipStatusPanelRefs, player_ship_id: int,
 	shield: float, max_shield: float, armor: float, max_armor: float, hull: float, max_hull: float,
 	cap_current: float, cap_max: float,
 ) -> void:
-	var bar_shield: Dictionary = bars["bar_shield"]
-	var bar_armor : Dictionary = bars["bar_armor"]
-	var bar_hull  : Dictionary = bars["bar_hull"]
-	var bar_cap   : Dictionary = bars["bar_cap"]
+	var bar_shield: StatBarRefs = bars.bar_shield
+	var bar_armor : StatBarRefs = bars.bar_armor
+	var bar_hull  : StatBarRefs = bars.bar_hull
+	var bar_cap   : StatBarRefs = bars.bar_cap
 
 	if player_ship_id < 0:
 		## Destroyed: empty bars, flag the hull row.
 		set_stat_bar(bar_shield, 0.0, max_shield)
 		set_stat_bar(bar_armor,  0.0, max_armor)
 		set_stat_bar(bar_hull,   0.0, max_hull)
-		(bar_hull["value"] as Label).text = "DESTROYED"
+		bar_hull.value.text = "DESTROYED"
 	elif shield < 0.0:
 		## State not yet received: assume full.
 		set_stat_bar(bar_shield, max_shield, max_shield)
@@ -244,8 +285,8 @@ static func update_ship_status_panel(
 		set_stat_bar(bar_hull,   hull,   max_hull)
 
 	if cap_current < 0.0:
-		(bar_cap["bar"] as ProgressBar).value = 0.0
-		(bar_cap["value"] as Label).text = "-"
+		bar_cap.bar.value = 0.0
+		bar_cap.value.text = "-"
 	else:
 		set_stat_bar(bar_cap, cap_current, cap_max)
 
@@ -256,7 +297,28 @@ static func update_ship_status_panel(
 ## Uses the same blue/amber/red colour coding as the self panel, but in
 ## compact bars with no numeric readout. Returns {panel, name_label,
 ## dist_label, bar_shield, bar_armor, bar_hull}.
-static func build_target_panel(hud: CanvasLayer) -> Dictionary:
+## Typed refs for the top-center lock-target panel.
+class TargetPanelRefs extends RefCounted:
+	var panel: Panel
+	var name_label: Label
+	var dist_label: Label
+	var bar_shield: ProgressBar
+	var bar_armor: ProgressBar
+	var bar_hull: ProgressBar
+
+	func _init(
+		panel_: Panel, name_label_: Label, dist_label_: Label,
+		bar_shield_: ProgressBar, bar_armor_: ProgressBar, bar_hull_: ProgressBar
+	) -> void:
+		panel = panel_
+		name_label = name_label_
+		dist_label = dist_label_
+		bar_shield = bar_shield_
+		bar_armor = bar_armor_
+		bar_hull = bar_hull_
+
+
+static func build_target_panel(hud: CanvasLayer) -> TargetPanelRefs:
 	var panel := Panel.new()
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_theme_stylebox_override("panel", hud_box_style(Color(0.82, 0.35, 0.35, 0.55)))
@@ -290,36 +352,32 @@ static func build_target_panel(hud: CanvasLayer) -> Dictionary:
 	vb.add_child(bar_armor)
 	vb.add_child(bar_hull)
 
-	return {
-		"panel": panel, "name_label": name_label, "dist_label": dist_label,
-		"bar_shield": bar_shield, "bar_armor": bar_armor, "bar_hull": bar_hull,
-	}
+	return TargetPanelRefs.new(panel, name_label, dist_label, bar_shield, bar_armor, bar_hull)
 
 
 ## Show / hide and populate the top-center target panel from the lock target.
 ## `hp` is {shield, max_shield, armor, max_armor, hull, max_hull} when
 ## `target_known` is true; ignored otherwise.
-static func update_target_panel(refs: Dictionary, lock_target_id: int, target_known: bool, dist_text: String, hp: Dictionary) -> void:
-	var panel: Panel = refs["panel"]
+static func update_target_panel(refs: TargetPanelRefs, lock_target_id: int, target_known: bool, dist_text: String, hp: Dictionary) -> void:
 	if lock_target_id < 0:
-		panel.visible = false
+		refs.panel.visible = false
 		return
-	panel.visible = true
-	(refs["name_label"] as Label).text = "◎ TARGET #%d" % lock_target_id
+	refs.panel.visible = true
+	refs.name_label.text = "◎ TARGET #%d" % lock_target_id
 
-	var bar_shield: ProgressBar = refs["bar_shield"]
-	var bar_armor : ProgressBar = refs["bar_armor"]
-	var bar_hull  : ProgressBar = refs["bar_hull"]
+	var bar_shield: ProgressBar = refs.bar_shield
+	var bar_armor : ProgressBar = refs.bar_armor
+	var bar_hull  : ProgressBar = refs.bar_hull
 
 	if not target_known:
 		## Target left the area but the lock has not been cleared yet.
-		(refs["dist_label"] as Label).text = "SIGNAL LOST"
+		refs.dist_label.text = "SIGNAL LOST"
 		set_mini_bar(bar_shield, 0.0, 1.0)
 		set_mini_bar(bar_armor,  0.0, 1.0)
 		set_mini_bar(bar_hull,   0.0, 1.0)
 		return
 
-	(refs["dist_label"] as Label).text = dist_text
+	refs.dist_label.text = dist_text
 
 	## HP bars, relative to the target's own maxima (recorded at spawn). If we
 	## have no HP record yet, leave the bars at their last known fill rather
@@ -351,31 +409,46 @@ static func build_module_bar(hud: CanvasLayer) -> HBoxContainer:
 	return module_bar
 
 
+## Typed refs for one module-bar slot (F-number/name/state box).
+class ModuleSlotRefs extends RefCounted:
+	var panel: Panel
+	var style: StyleBoxFlat
+	var name: Label
+	var state: Label
+	var module_index: int
+
+	func _init(panel_: Panel, style_: StyleBoxFlat, name_: Label, state_: Label, module_index_: int = -1) -> void:
+		panel = panel_
+		style = style_
+		name = name_
+		state = state_
+		module_index = module_index_
+
+
 ## Rebuild the slot boxes from the current fitting. One slot per *active*
 ## module (passive modules have no F-key), in declaration order. Returns
-## the new module_slots array (each entry: {panel, style, name, state,
-## module_index}).
-static func rebuild_module_bar(module_bar: HBoxContainer, player_modules: Array) -> Array:
+## the new module_slots array.
+static func rebuild_module_bar(module_bar: HBoxContainer, player_modules: Array) -> Array[ModuleSlotRefs]:
 	for child: Node in module_bar.get_children():
 		child.queue_free()
-	var module_slots: Array = []
+	var module_slots: Array[ModuleSlotRefs] = []
 
 	var f_number: int = 1
 	for i: int in range(player_modules.size()):
 		var row: ModuleRow = player_modules[i]
 		if not row.is_active_module:
 			continue  ## Skip Passive modules
-		var slot: Dictionary = make_module_slot(f_number, row.name)
-		slot["module_index"] = i
-		module_bar.add_child(slot["panel"])
+		var slot: ModuleSlotRefs = make_module_slot(f_number, row.name)
+		slot.module_index = i
+		module_bar.add_child(slot.panel)
 		module_slots.append(slot)
 		f_number += 1
 	return module_slots
 
 
-## Build one slot box (F-number / name / state). Returns {panel, style, name,
-## state, module_index} so update_module_bar() can refresh it each frame.
-static func make_module_slot(f_number: int, mod_name: String) -> Dictionary:
+## Build one slot box (F-number / name / state) so update_module_bar() can
+## refresh it each frame.
+static func make_module_slot(f_number: int, mod_name: String) -> ModuleSlotRefs:
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.03, 0.05, 0.09, 0.78)
 	style.set_corner_radius_all(5)
@@ -411,13 +484,13 @@ static func make_module_slot(f_number: int, mod_name: String) -> Dictionary:
 	state_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vb.add_child(state_lbl)
 
-	return {"panel": panel, "style": style, "name": name_lbl, "state": state_lbl, "module_index": -1}
+	return ModuleSlotRefs.new(panel, style, name_lbl, state_lbl)
 
 
 ## Refresh each module slot's state text + border colour (ON / OFF / CAP! / RANGE!).
-static func update_module_bar(module_slots: Array, player_modules: Array) -> void:
-	for slot: Dictionary in module_slots:
-		var idx: int = slot["module_index"]
+static func update_module_bar(module_slots: Array[ModuleSlotRefs], player_modules: Array) -> void:
+	for slot: ModuleSlotRefs in module_slots:
+		var idx: int = slot.module_index
 		if idx < 0 or idx >= player_modules.size():
 			continue
 		var row: ModuleRow = player_modules[idx]
@@ -434,10 +507,9 @@ static func update_module_bar(module_slots: Array, player_modules: Array) -> voi
 			col = MODULE_ON;    txt = "ON"
 		else:
 			col = MODULE_OFF;   txt = "OFF"
-		var state_lbl: Label = slot["state"]
-		state_lbl.text = txt
-		state_lbl.add_theme_color_override("font_color", col)
-		(slot["style"] as StyleBoxFlat).border_color = col
+		slot.state.text = txt
+		slot.state.add_theme_color_override("font_color", col)
+		slot.style.border_color = col
 
 
 # -- Duel result overlay -----------------------------------------------------------
@@ -492,7 +564,53 @@ const INVENTORY_ROW_HEIGHT := 22.0
 ## Hidden by default; toggled by the I key. Returns
 ## {panel, fitted_list, inventory_list, fitted_rows, inventory_rows}.
 ## *_rows are populated by update_inventory_panel() as Array[InventoryRow].
-static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
+## Typed refs for the four-column inventory panel (FITTED / SHIP CARGO /
+## STATION / SHIPS). `build_picker_open` is mutated after construction (see
+## toggle_build_picker in hud_surface.gd) -- everything else is set once at
+## build time, except the four `*_rows` arrays which update_inventory_panel()
+## replaces wholesale on every rebuild.
+class InventoryPanelRefs extends RefCounted:
+	var panel: Panel
+	var fitted_list: VBoxContainer
+	var inventory_list: VBoxContainer
+	var station_list: VBoxContainer
+	var ships_list: VBoxContainer
+	## The wrapping column (header + list) for each of the four columns --
+	## column_at() hit-tests these instead of the bare *_list containers,
+	## since a *_list with no rows yet (e.g. FITTED before any module is
+	## fitted) collapses to zero height, but the wrapping column always has
+	## nonzero height (the header Label).
+	var fitted_col: VBoxContainer
+	var inv_col: VBoxContainer
+	var station_col: VBoxContainer
+	var ships_col: VBoxContainer
+	var fitted_rows: Array[InventoryRow] = []
+	var inventory_rows: Array[InventoryRow] = []
+	var station_rows: Array[InventoryRow] = []
+	var ship_rows: Array[InventoryRow] = []
+	## Whether the Build ship-type picker (Phase 9B task 10) is expanded.
+	## Lives here, not as a local, since refs persists across the repeated
+	## update_inventory_panel() rebuilds and main.gd toggles it on click.
+	var build_picker_open: bool = false
+
+	func _init(
+		panel_: Panel, fitted_list_: VBoxContainer, inventory_list_: VBoxContainer,
+		station_list_: VBoxContainer, ships_list_: VBoxContainer,
+		fitted_col_: VBoxContainer, inv_col_: VBoxContainer,
+		station_col_: VBoxContainer, ships_col_: VBoxContainer
+	) -> void:
+		panel = panel_
+		fitted_list = fitted_list_
+		inventory_list = inventory_list_
+		station_list = station_list_
+		ships_list = ships_list_
+		fitted_col = fitted_col_
+		inv_col = inv_col_
+		station_col = station_col_
+		ships_col = ships_col_
+
+
+static func build_inventory_panel(hud: CanvasLayer) -> InventoryPanelRefs:
 	var panel := Panel.new()
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_theme_stylebox_override("panel", hud_box_style())
@@ -573,23 +691,9 @@ static func build_inventory_panel(hud: CanvasLayer) -> Dictionary:
 	ships_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	ships_col.add_child(ships_list)
 
-	return {
-		"panel": panel, "fitted_list": fitted_list, "inventory_list": inventory_list,
-		"station_list": station_list, "ships_list": ships_list,
-		## The wrapping column (header + list) for each of the four columns --
-		## column_at() hit-tests these instead of the bare *_list containers,
-		## since a *_list with no rows yet (e.g. FITTED before any module is
-		## fitted) collapses to zero height, but the wrapping column always
-		## has nonzero height (the header Label).
-		"fitted_col": fitted_col, "inv_col": inv_col,
-		"station_col": station_col, "ships_col": ships_col,
-		"fitted_rows": [] as Array[InventoryRow], "inventory_rows": [] as Array[InventoryRow],
-		"station_rows": [] as Array[InventoryRow], "ship_rows": [] as Array[InventoryRow],
-		## Whether the Build ship-type picker (Phase 9B task 10) is expanded.
-		## Lives here, not as a local, since refs persists across the repeated
-		## update_inventory_panel() rebuilds and main.gd toggles it on click.
-		"build_picker_open": false,
-	}
+	return InventoryPanelRefs.new(
+		panel, fitted_list, inventory_list, station_list, ships_list,
+		fitted_col, inv_col, station_col, ships_col)
 
 
 ## One inventory row (FITTED/SHIP CARGO/STATION). `action` is "fit"/"unfit"
@@ -658,13 +762,13 @@ static func _make_ship_row(text: String, ship_id: int, is_active: bool) -> Inven
 ## are never visually merged; `owned_ships` is the ADR-0037 roster
 ## (ship_id/ship_type_name/docked_station_id/is_active rows).
 static func update_inventory_panel(
-	refs: Dictionary, modules: Array, inventory: Array, station_inventory: Array = [],
+	refs: InventoryPanelRefs, modules: Array, inventory: Array, station_inventory: Array = [],
 	owned_ships: Array = [], buildable_ship_types: Array = []
 ) -> void:
-	var fitted_list: VBoxContainer = refs["fitted_list"]
-	var inventory_list: VBoxContainer = refs["inventory_list"]
-	var station_list: VBoxContainer = refs["station_list"]
-	var ships_list: VBoxContainer = refs["ships_list"]
+	var fitted_list: VBoxContainer = refs.fitted_list
+	var inventory_list: VBoxContainer = refs.inventory_list
+	var station_list: VBoxContainer = refs.station_list
+	var ships_list: VBoxContainer = refs.ships_list
 	for child: Node in fitted_list.get_children():
 		child.queue_free()
 	for child: Node in inventory_list.get_children():
@@ -694,7 +798,7 @@ static func update_inventory_panel(
 		fitted_list.add_child(unfit_all_row.panel)
 		fitted_rows.append(unfit_all_row)
 
-	refs["fitted_rows"] = fitted_rows
+	refs.fitted_rows = fitted_rows
 
 	var inventory_rows: Array[InventoryRow] = []
 	for entry: Variant in inventory:
@@ -711,7 +815,7 @@ static func update_inventory_panel(
 			item.item_type, item.count, InventoryRow.SOURCE_SHIP_CARGO)
 		inventory_list.add_child(row.panel)
 		inventory_rows.append(row)
-	refs["inventory_rows"] = inventory_rows
+	refs.inventory_rows = inventory_rows
 
 	var station_rows: Array[InventoryRow] = []
 	for entry: Variant in station_inventory:
@@ -740,7 +844,7 @@ static func update_inventory_panel(
 	station_list.add_child(disassemble_row.panel)
 	station_rows.append(disassemble_row)
 
-	var picker_open: bool = refs.get("build_picker_open", false) as bool
+	var picker_open: bool = refs.build_picker_open
 	var toggle_text := "Build Ship ▾" if picker_open else "Build Ship ▸"
 	var build_toggle_row := _make_inventory_row(
 		toggle_text, 0, "", InventoryRow.ACTION_BUILD_TOGGLE, 0, "", 0,
@@ -759,7 +863,7 @@ static func update_inventory_panel(
 			station_list.add_child(picker_row.panel)
 			station_rows.append(picker_row)
 
-	refs["station_rows"] = station_rows
+	refs.station_rows = station_rows
 
 	var ship_rows: Array[InventoryRow] = []
 	for entry: Variant in owned_ships:
@@ -776,12 +880,11 @@ static func update_inventory_panel(
 		var row := _make_ship_row(text, ship_id, is_active)
 		ships_list.add_child(row.panel)
 		ship_rows.append(row)
-	refs["ship_rows"] = ship_rows
+	refs.ship_rows = ship_rows
 
 
-static func toggle_inventory_panel(refs: Dictionary) -> void:
-	var panel: Panel = refs["panel"]
-	panel.visible = not panel.visible
+static func toggle_inventory_panel(refs: InventoryPanelRefs) -> void:
+	refs.panel.visible = not refs.panel.visible
 
 
 ## Hit-testing (module_slot_at, inventory_panel_row_at, column_at,

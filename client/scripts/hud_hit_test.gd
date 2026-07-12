@@ -9,8 +9,8 @@
 ## `fitted_header.clip_text` incident, where a display-only tweak silently
 ## broke a hit-test that shared the same node) shouldn't require touching the
 ## other. Stateless static methods, same calling convention as HudManager:
-## callers (hud_surface.gd) pass back the refs Dictionary HudManager handed
-## them when it built the panel.
+## callers (hud_surface.gd) pass back the typed refs HudManager handed them
+## when it built the panel.
 class_name HudHitTest
 extends RefCounted
 
@@ -22,10 +22,9 @@ const InventoryRow = preload("res://scripts/inventory_row.gd")
 ## Returns the F-key index (0-based, i.e. the position in module_slots) of
 ## the module slot under a screen position, or -1. Used so a click on the
 ## bar toggles the module instead of the world.
-static func module_slot_at(module_slots: Array, pos: Vector2) -> int:
+static func module_slot_at(module_slots: Array[HudManager.ModuleSlotRefs], pos: Vector2) -> int:
 	for i: int in range(module_slots.size()):
-		var panel: Panel = module_slots[i]["panel"]
-		if panel.get_global_rect().has_point(pos):
+		if module_slots[i].panel.get_global_rect().has_point(pos):
 			return i
 	return -1
 
@@ -34,20 +33,19 @@ static func module_slot_at(module_slots: Array, pos: Vector2) -> int:
 ## "fit" sends FitModuleCommand, "unfit" sends UnfitModuleCommand (see
 ## InventoryRow's action constants) -- callers distinguish a miss from a hit
 ## with a plain `null` check instead of a sentinel-key lookup.
-static func inventory_panel_row_at(refs: Dictionary, pos: Vector2) -> InventoryRow:
-	var panel: Panel = refs["panel"]
-	if not panel.visible:
+static func inventory_panel_row_at(refs: HudManager.InventoryPanelRefs, pos: Vector2) -> InventoryRow:
+	if not refs.panel.visible:
 		return null
-	for row: InventoryRow in (refs["fitted_rows"] as Array[InventoryRow]):
+	for row: InventoryRow in refs.fitted_rows:
 		if row.panel.get_global_rect().has_point(pos):
 			return row
-	for row: InventoryRow in (refs["inventory_rows"] as Array[InventoryRow]):
+	for row: InventoryRow in refs.inventory_rows:
 		if row.panel.get_global_rect().has_point(pos):
 			return row
-	for row: InventoryRow in (refs["station_rows"] as Array[InventoryRow]):
+	for row: InventoryRow in refs.station_rows:
 		if row.panel.get_global_rect().has_point(pos):
 			return row
-	for row: InventoryRow in (refs["ship_rows"] as Array[InventoryRow]):
+	for row: InventoryRow in refs.ship_rows:
 		if row.panel.get_global_rect().has_point(pos):
 			return row
 	return null
@@ -59,21 +57,16 @@ static func inventory_panel_row_at(refs: Dictionary, pos: Vector2) -> InventoryR
 ## inventory_panel_row_at(), this matches empty space within a column's list
 ## too (dropping below the last row must still count as a drop into that
 ## column, not a miss).
-static func column_at(refs: Dictionary, pos: Vector2) -> String:
-	var panel: Panel = refs["panel"]
-	if not panel.visible:
+static func column_at(refs: HudManager.InventoryPanelRefs, pos: Vector2) -> String:
+	if not refs.panel.visible:
 		return ""
-	var fitted_col: VBoxContainer = refs["fitted_col"]
-	if fitted_col.get_global_rect().has_point(pos):
+	if refs.fitted_col.get_global_rect().has_point(pos):
 		return InventoryRow.SOURCE_FITTED
-	var inv_col: VBoxContainer = refs["inv_col"]
-	if inv_col.get_global_rect().has_point(pos):
+	if refs.inv_col.get_global_rect().has_point(pos):
 		return InventoryRow.SOURCE_SHIP_CARGO
-	var station_col: VBoxContainer = refs["station_col"]
-	if station_col.get_global_rect().has_point(pos):
+	if refs.station_col.get_global_rect().has_point(pos):
 		return InventoryRow.SOURCE_STATION
-	var ships_col: VBoxContainer = refs["ships_col"]
-	if ships_col.get_global_rect().has_point(pos):
+	if refs.ships_col.get_global_rect().has_point(pos):
 		return InventoryRow.SOURCE_SHIPS
 	return ""
 
@@ -83,6 +76,5 @@ static func column_at(refs: Dictionary, pos: Vector2) -> String:
 ## miss on the open panel doesn't fall through to the 3D world behind it
 ## (thrust / select). Distinct from inventory_panel_row_at(), which only
 ## reports actionable row hits.
-static func inventory_panel_consumes(refs: Dictionary, pos: Vector2) -> bool:
-	var panel: Panel = refs["panel"]
-	return panel.visible and panel.get_global_rect().has_point(pos)
+static func inventory_panel_consumes(refs: HudManager.InventoryPanelRefs, pos: Vector2) -> bool:
+	return refs.panel.visible and refs.panel.get_global_rect().has_point(pos)

@@ -36,25 +36,25 @@ func _module(overrides: Dictionary) -> ModuleRow:
 # -- set_stat_bar / set_mini_bar (percentage math) -----------------------------
 
 func test_set_stat_bar_fills_proportionally_and_formats_the_readout() -> void:
-	var entry: Dictionary = HudManager.make_stat_bar("SH", Color.WHITE)
-	auto_free(entry["row"])  ## make_stat_bar() doesn't parent its row; free it directly
+	var entry: HudManager.StatBarRefs = HudManager.make_stat_bar("SH", Color.WHITE)
+	auto_free(entry.row)  ## make_stat_bar() doesn't parent its row; free it directly
 	HudManager.set_stat_bar(entry, 50.0, 200.0)
-	assert_float((entry["bar"] as ProgressBar).value).is_equal_approx(25.0, 0.0001)
-	assert_str((entry["value"] as Label).text).is_equal("50 / 200")
+	assert_float(entry.bar.value).is_equal_approx(25.0, 0.0001)
+	assert_str(entry.value.text).is_equal("50 / 200")
 
 
 func test_set_stat_bar_clamps_to_100_percent_when_cur_exceeds_max() -> void:
-	var entry: Dictionary = HudManager.make_stat_bar("SH", Color.WHITE)
-	auto_free(entry["row"])
+	var entry: HudManager.StatBarRefs = HudManager.make_stat_bar("SH", Color.WHITE)
+	auto_free(entry.row)
 	HudManager.set_stat_bar(entry, 999.0, 200.0)
-	assert_float((entry["bar"] as ProgressBar).value).is_equal_approx(100.0, 0.0001)
+	assert_float(entry.bar.value).is_equal_approx(100.0, 0.0001)
 
 
 func test_set_stat_bar_treats_zero_max_as_zero_percent() -> void:
-	var entry: Dictionary = HudManager.make_stat_bar("SH", Color.WHITE)
-	auto_free(entry["row"])
+	var entry: HudManager.StatBarRefs = HudManager.make_stat_bar("SH", Color.WHITE)
+	auto_free(entry.row)
 	HudManager.set_stat_bar(entry, 10.0, 0.0)
-	assert_float((entry["bar"] as ProgressBar).value).is_equal_approx(0.0, 0.0001)
+	assert_float(entry.bar.value).is_equal_approx(0.0, 0.0001)
 
 
 func test_set_mini_bar_fills_proportionally() -> void:
@@ -66,77 +66,77 @@ func test_set_mini_bar_fills_proportionally() -> void:
 # -- update_status_panel -------------------------------------------------------
 
 func test_update_status_panel_shows_online_when_connected() -> void:
-	var refs: Dictionary = HudManager.build_status_panel(_hud)
+	var refs: HudManager.StatusPanelRefs = HudManager.build_status_panel(_hud)
 	HudManager.update_status_panel(refs, true, "Magpie", "Alpha", "120 m/s")
-	assert_str((refs["conn_label"] as Label).text).is_equal("ONLINE")
-	assert_str((refs["name_label"] as Label).text).is_equal("Magpie")
-	assert_str((refs["info_label"] as Label).text).is_equal("System Alpha · 120 m/s")
+	assert_str(refs.conn_label.text).is_equal("ONLINE")
+	assert_str(refs.name_label.text).is_equal("Magpie")
+	assert_str(refs.info_label.text).is_equal("System Alpha · 120 m/s")
 
 
 func test_update_status_panel_shows_connecting_when_disconnected() -> void:
-	var refs: Dictionary = HudManager.build_status_panel(_hud)
+	var refs: HudManager.StatusPanelRefs = HudManager.build_status_panel(_hud)
 	HudManager.update_status_panel(refs, false, "", "Alpha", "-")
-	assert_str((refs["conn_label"] as Label).text).is_equal("CONNECTING...")
-	assert_str((refs["name_label"] as Label).text).is_equal("—")
+	assert_str(refs.conn_label.text).is_equal("CONNECTING...")
+	assert_str(refs.name_label.text).is_equal("—")
 
 
 # -- update_ship_status_panel ---------------------------------------------------
 
 func test_update_ship_status_panel_shows_destroyed_when_no_player_ship() -> void:
-	var refs: Dictionary = HudManager.build_ship_status_panel(_hud)
+	var refs: HudManager.ShipStatusPanelRefs = HudManager.build_ship_status_panel(_hud)
 	HudManager.update_ship_status_panel(refs, -1, 0.0, 500.0, 0.0, 300.0, 0.0, 200.0, -1.0, 500.0)
-	assert_str((refs["bar_hull"]["value"] as Label).text).is_equal("DESTROYED")
-	assert_float((refs["bar_shield"]["bar"] as ProgressBar).value).is_equal_approx(0.0, 0.0001)
+	assert_str(refs.bar_hull.value.text).is_equal("DESTROYED")
+	assert_float(refs.bar_shield.bar.value).is_equal_approx(0.0, 0.0001)
 
 
 func test_update_ship_status_panel_assumes_full_when_state_not_yet_received() -> void:
-	var refs: Dictionary = HudManager.build_ship_status_panel(_hud)
+	var refs: HudManager.ShipStatusPanelRefs = HudManager.build_ship_status_panel(_hud)
 	HudManager.update_ship_status_panel(refs, 1, -1.0, 500.0, -1.0, 300.0, -1.0, 200.0, -1.0, 500.0)
-	assert_float((refs["bar_shield"]["bar"] as ProgressBar).value).is_equal_approx(100.0, 0.0001)
+	assert_float(refs.bar_shield.bar.value).is_equal_approx(100.0, 0.0001)
 
 
 func test_update_ship_status_panel_shows_live_values() -> void:
-	var refs: Dictionary = HudManager.build_ship_status_panel(_hud)
+	var refs: HudManager.ShipStatusPanelRefs = HudManager.build_ship_status_panel(_hud)
 	HudManager.update_ship_status_panel(refs, 1, 250.0, 500.0, 600.0, 600.0, 50.0, 200.0, 80.0, 100.0)
-	assert_float((refs["bar_shield"]["bar"] as ProgressBar).value).is_equal_approx(50.0, 0.0001)
-	assert_float((refs["bar_cap"]["bar"] as ProgressBar).value).is_equal_approx(80.0, 0.0001)
+	assert_float(refs.bar_shield.bar.value).is_equal_approx(50.0, 0.0001)
+	assert_float(refs.bar_cap.bar.value).is_equal_approx(80.0, 0.0001)
 
 
 func test_update_ship_status_panel_shows_dash_when_cap_not_yet_received() -> void:
-	var refs: Dictionary = HudManager.build_ship_status_panel(_hud)
+	var refs: HudManager.ShipStatusPanelRefs = HudManager.build_ship_status_panel(_hud)
 	HudManager.update_ship_status_panel(refs, 1, 250.0, 500.0, 600.0, 600.0, 50.0, 200.0, -1.0, 100.0)
-	assert_str((refs["bar_cap"]["value"] as Label).text).is_equal("-")
+	assert_str(refs.bar_cap.value.text).is_equal("-")
 
 
 # -- update_target_panel ------------------------------------------------------------
 
 func test_update_target_panel_hides_when_no_lock_target() -> void:
-	var refs: Dictionary = HudManager.build_target_panel(_hud)
+	var refs: HudManager.TargetPanelRefs = HudManager.build_target_panel(_hud)
 	HudManager.update_target_panel(refs, -1, false, "—", {})
-	assert_bool((refs["panel"] as Panel).visible).is_false()
+	assert_bool(refs.panel.visible).is_false()
 
 
 func test_update_target_panel_shows_signal_lost_when_target_left_the_area() -> void:
-	var refs: Dictionary = HudManager.build_target_panel(_hud)
+	var refs: HudManager.TargetPanelRefs = HudManager.build_target_panel(_hud)
 	HudManager.update_target_panel(refs, 7, false, "—", {})
-	assert_bool((refs["panel"] as Panel).visible).is_true()
-	assert_str((refs["dist_label"] as Label).text).is_equal("SIGNAL LOST")
+	assert_bool(refs.panel.visible).is_true()
+	assert_str(refs.dist_label.text).is_equal("SIGNAL LOST")
 
 
 func test_update_target_panel_shows_distance_and_hp_when_target_is_known() -> void:
-	var refs: Dictionary = HudManager.build_target_panel(_hud)
+	var refs: HudManager.TargetPanelRefs = HudManager.build_target_panel(_hud)
 	var hp: Dictionary = {"shield": 50.0, "max_shield": 200.0, "armor": 600.0, "max_armor": 600.0, "hull": 200.0, "max_hull": 200.0}
 	HudManager.update_target_panel(refs, 7, true, "3.2 km", hp)
-	assert_str((refs["dist_label"] as Label).text).is_equal("3.2 km")
-	assert_float((refs["bar_shield"] as ProgressBar).value).is_equal_approx(25.0, 0.0001)
+	assert_str(refs.dist_label.text).is_equal("3.2 km")
+	assert_float(refs.bar_shield.value).is_equal_approx(25.0, 0.0001)
 
 
 func test_update_target_panel_leaves_bars_unchanged_when_no_hp_record_yet() -> void:
-	var refs: Dictionary = HudManager.build_target_panel(_hud)
+	var refs: HudManager.TargetPanelRefs = HudManager.build_target_panel(_hud)
 	HudManager.update_target_panel(refs, 7, true, "1.0 km", {"shield": 80.0, "max_shield": 100.0, "armor": 100.0, "max_armor": 100.0, "hull": 100.0, "max_hull": 100.0})
-	var before: float = (refs["bar_shield"] as ProgressBar).value
+	var before: float = refs.bar_shield.value
 	HudManager.update_target_panel(refs, 7, true, "1.0 km", {})  ## no HP data this frame
-	assert_float((refs["bar_shield"] as ProgressBar).value).is_equal_approx(before, 0.0001)
+	assert_float(refs.bar_shield.value).is_equal_approx(before, 0.0001)
 
 
 # -- module bar -----------------------------------------------------------------
@@ -148,36 +148,36 @@ func test_rebuild_module_bar_skips_passive_modules() -> void:
 		_module({"name": "Basic Shield Extender", "is_active_module": false}),
 		_module({"name": "1MN Afterburner", "is_active_module": true}),
 	]
-	var slots: Array = HudManager.rebuild_module_bar(module_bar, modules)
+	var slots: Array[HudManager.ModuleSlotRefs] = HudManager.rebuild_module_bar(module_bar, modules)
 	assert_int(slots.size()).is_equal(2)
-	assert_int(slots[0]["module_index"] as int).is_equal(0)
-	assert_int(slots[1]["module_index"] as int).is_equal(2)
+	assert_int(slots[0].module_index).is_equal(0)
+	assert_int(slots[1].module_index).is_equal(2)
 
 
 func test_update_module_bar_marks_cap_forced_off_modules() -> void:
 	var module_bar: HBoxContainer = HudManager.build_module_bar(_hud)
 	var modules: Array[ModuleRow] = [_module({"name": "Gun", "is_active_module": true, "is_active": true})]
 	modules[0].forced_reason = "cap"
-	var slots: Array = HudManager.rebuild_module_bar(module_bar, modules)
+	var slots: Array[HudManager.ModuleSlotRefs] = HudManager.rebuild_module_bar(module_bar, modules)
 	HudManager.update_module_bar(slots, modules)
-	assert_str((slots[0]["state"] as Label).text).is_equal("CAP!")
+	assert_str(slots[0].state.text).is_equal("CAP!")
 
 
 func test_update_module_bar_marks_range_forced_off_modules() -> void:
 	var module_bar: HBoxContainer = HudManager.build_module_bar(_hud)
 	var modules: Array[ModuleRow] = [_module({"name": "Gun", "is_active_module": true, "is_active": true})]
 	modules[0].forced_reason = "range"
-	var slots: Array = HudManager.rebuild_module_bar(module_bar, modules)
+	var slots: Array[HudManager.ModuleSlotRefs] = HudManager.rebuild_module_bar(module_bar, modules)
 	HudManager.update_module_bar(slots, modules)
-	assert_str((slots[0]["state"] as Label).text).is_equal("RANGE!")
+	assert_str(slots[0].state.text).is_equal("RANGE!")
 
 
 func test_update_module_bar_marks_active_modules_on() -> void:
 	var module_bar: HBoxContainer = HudManager.build_module_bar(_hud)
 	var modules: Array[ModuleRow] = [_module({"name": "Gun", "is_active_module": true, "is_active": true})]
-	var slots: Array = HudManager.rebuild_module_bar(module_bar, modules)
+	var slots: Array[HudManager.ModuleSlotRefs] = HudManager.rebuild_module_bar(module_bar, modules)
 	HudManager.update_module_bar(slots, modules)
-	assert_str((slots[0]["state"] as Label).text).is_equal("ON")
+	assert_str(slots[0].state.text).is_equal("ON")
 
 
 # -- duel result overlay -----------------------------------------------------------
@@ -215,7 +215,7 @@ func test_hide_duel_result_hides_the_label() -> void:
 func test_inventory_panel_columns_stay_within_the_panels_bounds() -> void:
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
-	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	var refs: HudManager.InventoryPanelRefs = HudManager.build_inventory_panel(hud)
 	HudManager.update_inventory_panel(refs, [], [], [], [
 		{"ship_id": 1, "ship_type_id": 7, "ship_type_name": "Magpie",
 			"docked_station_id": 0, "is_active": true},
@@ -223,38 +223,34 @@ func test_inventory_panel_columns_stay_within_the_panels_bounds() -> void:
 	HudManager.toggle_inventory_panel(refs)
 	await get_tree().process_frame
 
-	var panel_rect: Rect2 = (refs["panel"] as Panel).get_global_rect()
-	var ships_list: VBoxContainer = refs["ships_list"]
-	assert_bool(panel_rect.encloses(ships_list.get_global_rect())).is_true()
+	var panel_rect: Rect2 = refs.panel.get_global_rect()
+	assert_bool(panel_rect.encloses(refs.ships_list.get_global_rect())).is_true()
 
 
 func test_station_column_always_shows_disassemble_and_build_toggle_rows() -> void:
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
-	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	var refs: HudManager.InventoryPanelRefs = HudManager.build_inventory_panel(hud)
 	HudManager.update_inventory_panel(refs, [], [], [], [], [])
 
-	var station_rows: Array[InventoryRow] = refs["station_rows"]
-	var actions: Array = station_rows.map(func(r: InventoryRow) -> String: return r.action)
+	var actions: Array = refs.station_rows.map(func(r: InventoryRow) -> String: return r.action)
 	assert_array(actions).contains([InventoryRow.ACTION_DISASSEMBLE, InventoryRow.ACTION_BUILD_TOGGLE])
 
 
 func test_build_picker_is_collapsed_by_default_and_expands_when_toggled() -> void:
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
-	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	var refs: HudManager.InventoryPanelRefs = HudManager.build_inventory_panel(hud)
 	var buildable := [{"ship_type_id": 7, "name": "Magpie"}]
 
 	HudManager.update_inventory_panel(refs, [], [], [], [], buildable)
-	var collapsed_rows: Array[InventoryRow] = refs["station_rows"]
 	assert_bool(
-		collapsed_rows.any(func(r: InventoryRow) -> bool: return r.action == InventoryRow.ACTION_BUILD_SHIP_TYPE)
+		refs.station_rows.any(func(r: InventoryRow) -> bool: return r.action == InventoryRow.ACTION_BUILD_SHIP_TYPE)
 	).is_false()
 
-	refs["build_picker_open"] = true
+	refs.build_picker_open = true
 	HudManager.update_inventory_panel(refs, [], [], [], [], buildable)
-	var expanded_rows: Array[InventoryRow] = refs["station_rows"]
-	var picker_row: InventoryRow = expanded_rows.filter(
+	var picker_row: InventoryRow = refs.station_rows.filter(
 		func(r: InventoryRow) -> bool: return r.action == InventoryRow.ACTION_BUILD_SHIP_TYPE
 	)[0]
 	assert_int(picker_row.ship_type_id).is_equal(7)
@@ -263,27 +259,25 @@ func test_build_picker_is_collapsed_by_default_and_expands_when_toggled() -> voi
 func test_unfit_all_row_is_hidden_when_no_module_is_fitted() -> void:
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
-	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	var refs: HudManager.InventoryPanelRefs = HudManager.build_inventory_panel(hud)
 	HudManager.update_inventory_panel(refs, [], [], [], [], [])
 
-	var fitted_rows: Array[InventoryRow] = refs["fitted_rows"]
 	assert_bool(
-		fitted_rows.any(func(r: InventoryRow) -> bool: return r.action == InventoryRow.ACTION_UNFIT_ALL)
+		refs.fitted_rows.any(func(r: InventoryRow) -> bool: return r.action == InventoryRow.ACTION_UNFIT_ALL)
 	).is_false()
 
 
 func test_unfit_all_row_appears_after_the_fitted_modules_when_any_are_fitted() -> void:
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
-	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	var refs: HudManager.InventoryPanelRefs = HudManager.build_inventory_panel(hud)
 	var modules := [_module({"module_id": 1, "slot": "High", "name": "Gun"})]
 
 	HudManager.update_inventory_panel(refs, modules, [], [], [], [])
 
-	var fitted_rows: Array[InventoryRow] = refs["fitted_rows"]
-	assert_int(fitted_rows.size()).is_equal(2)
-	assert_str(fitted_rows[0].action).is_equal(InventoryRow.ACTION_UNFIT)
-	assert_str(fitted_rows[1].action).is_equal(InventoryRow.ACTION_UNFIT_ALL)
+	assert_int(refs.fitted_rows.size()).is_equal(2)
+	assert_str(refs.fitted_rows[0].action).is_equal(InventoryRow.ACTION_UNFIT)
+	assert_str(refs.fitted_rows[1].action).is_equal(InventoryRow.ACTION_UNFIT_ALL)
 
 
 ## Regression: owned_ships_json (serialization.rs) sends docked_station_id/
@@ -295,7 +289,7 @@ func test_unfit_all_row_appears_after_the_fitted_modules_when_any_are_fitted() -
 func test_owned_ship_row_handles_null_docked_station_id_and_ship_type_name() -> void:
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
-	var refs: Dictionary = HudManager.build_inventory_panel(hud)
+	var refs: HudManager.InventoryPanelRefs = HudManager.build_inventory_panel(hud)
 	var owned_ships := [
 		{
 			"ship_id": 1, "ship_type_id": null, "ship_type_name": null,
@@ -305,9 +299,8 @@ func test_owned_ship_row_handles_null_docked_station_id_and_ship_type_name() -> 
 
 	HudManager.update_inventory_panel(refs, [], [], [], owned_ships, [])
 
-	var ship_rows: Array[InventoryRow] = refs["ship_rows"]
-	assert_int(ship_rows.size()).is_equal(1)
-	assert_int(ship_rows[0].ship_id).is_equal(1)
+	assert_int(refs.ship_rows.size()).is_equal(1)
+	assert_int(refs.ship_rows[0].ship_id).is_equal(1)
 
 
 ## module_slot_at() and column_at() tests moved to hud_hit_test_test.gd
