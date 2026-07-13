@@ -188,6 +188,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dawn-market"
+version = "0.1.0"
+dependencies = [
+ "dawn-core",
+ "rusqlite",
+ "serde",
+]
+
+[[package]]
 name = "dawn-replication"
 version = "0.1.0"
 dependencies = [

@@ -331,7 +331,7 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
 
 | # | タスク | 備考 | 状態 |
 |---|---|---|---|
-| 1 | 新規クレート `dawn-market` の Dependency DAG 上の位置を確定 | SQL権威・Tick非依存の別ドメインとして切り離す（ADR-0034 §4） | ⬜ |
+| 1 | 新規クレート `dawn-market` の Dependency DAG 上の位置を確定 | 2026-07-13、`/grilling`で実行トポロジーを決定: まず`dawn-simulation`（インプロセス）にのみ組み込み、`dawn-sector-node`（本番マルチノード）への配線は別タスクへ後回し（8D方式と同じ順序）。DAG上は`dawn-wire`と同じ葉クレート（`dawn-core`+serde+rusqliteのみ、`dawn-ecs`/`dawn-event-store`/`dawn-sector`に非依存）。Market系`ClientCommand`バリアント（List/Bid/Cancel）は`dawn-simulation`の受信ループで`apply_client_command`を呼ぶ前に振り分け、`dawn-sector`は`dawn-market`を一切知らない。クレート自体は新設・ワークスペース登録・DAGドキュメント更新のみで、公開APIは9D-2以降 | ✅ |
 | 2 | SQLite バックエンドの指値注文帳（bid/ask マッチング） | アルゴリズム価格ではなくプレイヤーの指値で決まる（ADR-0034 §6） | ⬜ |
 | 3 | `PlayerId` 単位の Currency 台帳 | Itemではない。ShipDestroyedで失われない（ADR-0034 §5） | ⬜ |
 | 4 | `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand`（List/Cancel/Settle） | 常に片側1Sectorだけへ発行。Transit/Raft合意は不要（ADR-0034 §4） | ⬜ |
