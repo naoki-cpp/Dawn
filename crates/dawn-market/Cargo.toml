@@ -20,11 +20,8 @@ dawn-core = { path = "../dawn-core" }
 serde     = { workspace = true }
 rusqlite  = { workspace = true }
 
-# This crate's code is deliberately just the DAG-position placeholder for
-# 9D-1 (roadmap.md §12) -- no code uses these yet, so cargo-machete would
-# otherwise flag all three as unused. They're declared now because fixing
-# this crate's dependency set *is* the 9D-1 deliverable; the order
-# book/Currency ledger/bridging commands that actually use them land in
-# 9D-2/9D-3/9D-4.
+# dawn-core/rusqlite are used by the order book (9D-2, order_book.rs).
+# serde is still unused -- reserved for the Currency ledger / trade history
+# serialization landing in 9D-3 -- so cargo-machete would otherwise flag it.
 [package.metadata.cargo-machete]
-ignored = ["dawn-core", "serde", "rusqlite"]
+ignored = ["serde"]
