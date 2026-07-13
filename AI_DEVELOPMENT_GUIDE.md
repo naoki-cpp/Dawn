@@ -189,13 +189,22 @@ workspace DAG and relevant ADR first.
 - `dawn-event-store`: append-only persistence and snapshots.
 - `dawn-consensus`: Raft and consensus transport.
 - `dawn-replication`: sector-local replication and anti-entropy.
+- `dawn-market`: Market order book (bid/ask) + `PlayerId` Currency ledger,
+  its own SQLite authority independent of Sector tick determinism. Depends
+  only on `dawn-core` + serde + rusqlite -- no transport/runtime dependency,
+  same DAG position as `dawn-wire` (ADR-0034 §4/§5/§6). Only constructs
+  `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand`; never applies
+  them to a `SimulationNode` itself, so `dawn-sector` never depends on it.
 - `dawn-sector`: sector game logic, ownership, transit, warp, AoI, snapshots.
   Depends on `dawn-wire` to build typed wire messages it hands to `dawn-actor`
   (e.g. `PlayerLoadoutJson`, ADR-0042 stage 2a) -- `dawn-wire` has no
   transport/runtime dependency of its own, so this doesn't pull tokio/
   tungstenite into `dawn-sector`.
 - `dawn-actor`: client/server protocol and connection boundary.
-- `dawn-simulation`: runnable simulation wiring and demos.
+- `dawn-simulation`: runnable simulation wiring and demos. Will depend on
+  `dawn-market` to route Market-domain `ClientCommand` variants before they
+  reach `apply_client_command` once those land (ADR-0034 §4, roadmap.md §12
+  9D-4 -- not yet wired as of 9D-1).
 - `dawn-sector-node`: real hardware node binary and TOML config loading.
 
 ## Change Workflow

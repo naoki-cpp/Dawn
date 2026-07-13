@@ -9,6 +9,7 @@ members = [
     "crates/dawn-actor",
     "crates/dawn-consensus",
     "crates/dawn-replication",
+    "crates/dawn-market",
     "crates/dawn-sector",
     "crates/dawn-simulation",
     "crates/dawn-sector-node",

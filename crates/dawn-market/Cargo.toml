@@ -1,0 +1,30 @@
+[package]
+name    = "dawn-market"
+version = "0.1.0"
+edition = "2021"
+description = "Player-to-player Market: bid/ask order book + PlayerId Currency ledger, its own SQL authority independent of Sector tick determinism (ADR-0034 §4/§5/§6)."
+repository.workspace = true
+publish.workspace     = true
+
+# dawn-market is a leaf crate, same DAG position as dawn-wire: dawn-core (for
+# PlayerId/ItemId/ShipId and the RemoveItemCommand/ReturnItemCommand/
+# CreditItemCommand data shapes) + serde + rusqlite only. It must NOT depend
+# on dawn-ecs/dawn-event-store/dawn-sector -- ADR-0034 §4 deliberately keeps
+# Market's own state (order book, Currency ledger) outside the Sector tick's
+# determinism constraints (INV-001/002/005). dawn-market only *constructs*
+# the three bridging Commands; applying them to a SimulationNode is the
+# caller's job (dawn-simulation), so dawn-sector never needs to depend on
+# dawn-market either (ADR-0034 §4 implementation notes).
+[dependencies]
+dawn-core = { path = "../dawn-core" }
+serde     = { workspace = true }
+rusqlite  = { workspace = true }
+
+# This crate's code is deliberately just the DAG-position placeholder for
+# 9D-1 (roadmap.md §12) -- no code uses these yet, so cargo-machete would
+# otherwise flag all three as unused. They're declared now because fixing
+# this crate's dependency set *is* the 9D-1 deliverable; the order
+# book/Currency ledger/bridging commands that actually use them land in
+# 9D-2/9D-3/9D-4.
+[package.metadata.cargo-machete]
+ignored = ["dawn-core", "serde", "rusqlite"]
