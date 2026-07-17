@@ -237,11 +237,14 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 - [x] `dawn-market`: `PlayerId` 単位の Currency 台帳（Bid時エスクロー・約定時決済・Cancel時払い戻し、2026-07-13。roadmap.md §12 9D-3）
 - [x] `dawn-market`: `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` 発行経路（2026-07-17。Ask出品/キャンセル/約定の結果に対象`ShipId`付きで生成。MarketはSectorへ直接アクセスせず、呼び出し側が片側ずつ適用する。roadmap.md §12 9D-4）
 - [x] client: Dock/Undock + Station操作UI（入港状態の表示と `D` / `U` / `B` / `Y` 操作、Packaged Ship のインベントリ表示、Assemble/Disassemble/建造UI すべて実装済み。`main.gd` の `ACTION_ASSEMBLE`/`ACTION_DISASSEMBLE`、`connection.gd` の `send_assemble_command`/`send_disassemble_ship_command`/`send_build_packaged_ship_command`）
-- [ ] client: Market閲覧UI（指値注文の発注・Currency残高表示）
+- [x] client: Market閲覧UI（指値注文の発注・Currency残高表示、2026-07-17。Market専用postcard envelope、single/cluster runtime bridge、Godot `market_surface.gd` の板・Bid/Ask・発注・Cancel・Currency表示を実装。snapshotは最大200件）
 
 9D-4 の Sector 側適用も実装済み。`SimulationNode` が3つの bridge commandを
 所有権・数量検証の後に適用し、既存の `ShipFitted` インベントリスナップショットへ
 記録する。旧Market DBは `ship_id` をNULL許容で追加する移行を行い、旧注文に対して
-船を推測しない。新しい wire event は追加しない。
+船を推測しない。9D-5では`dawn-simulation::serve::market`がwire入力を検証し、
+single/cluster両方で所有船を検索してbridge commandを適用する。新しいwire eventは
+追加せず、Market専用のpostcard envelopeと`MarketSnapshot`を使う。`dawn-sector`は
+引き続き`dawn-market`を知らない。
 - [x] CONTEXT.md: `Item`/`Packaged Ship`/`Station`/`Scrap Metal`/`Currency` を追記済み（本セッション中）
 - [x] `cargo test --workspace` / `fmt` / `clippy -D warnings` 全緑

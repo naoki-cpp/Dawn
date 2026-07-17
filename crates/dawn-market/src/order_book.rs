@@ -52,6 +52,8 @@ use dawn_core::{
 };
 use rusqlite::{params, Connection, OptionalExtension};
 
+const MAX_OPEN_ORDER_VIEW: u64 = 200;
+
 /// Which side of the book an order rests on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OrderSide {
@@ -147,6 +149,21 @@ fn columns_to_side(side: &str) -> OrderSide {
         "Ask" => OrderSide::Ask,
         other => unreachable!("orders.side check constraint should forbid {other:?}"),
     }
+}
+
+/// One currently resting order read from the Market book.
+///
+/// The caller supplies the observing player to [`MarketDb::open_orders_for`]
+/// so the server can mark that player's orders without exposing ownership
+/// decisions to the client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MarketOrderView {
+    pub order_id: OrderId,
+    pub player_id: PlayerId,
+    pub item_id: ItemId,
+    pub side: OrderSide,
+    pub price: u64,
+    pub quantity_remaining: u64,
 }
 
 /// Current Currency balance for `player_id`, `0` if they have no row yet.
@@ -280,6 +297,44 @@ impl MarketDb {
     /// `place_order`/`cancel_order` move escrowed Currency internally.
     pub fn credit_currency(&mut self, player_id: PlayerId, amount: u64) -> rusqlite::Result<()> {
         credit_currency_raw(&self.conn, player_id.raw(), amount)
+    }
+
+    /// Read all currently resting orders in stable insertion order.
+    ///
+    /// The `player_id` argument is retained in the API name and call shape so
+    /// the server can use this as the caller-scoped Market snapshot boundary;
+    /// ownership is represented by each row's `player_id` and is intentionally
+    /// not inferred by the client.
+    pub fn open_orders_for(&self, _player_id: PlayerId) -> rusqlite::Result<Vec<MarketOrderView>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT order_id, player_id, item_type, module_id, ship_type_id,
+                    side, price, quantity_remaining
+             FROM orders
+             ORDER BY order_id ASC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![MAX_OPEN_ORDER_VIEW], |row| {
+            let item_type: String = row.get(2)?;
+            let module_id: u32 = row.get(3)?;
+            let ship_type_id: u32 = row.get(4)?;
+            let item_id =
+                columns_to_item_id(&item_type, module_id, ship_type_id).ok_or_else(|| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        2,
+                        rusqlite::types::Type::Text,
+                        format!("unknown Market item type {item_type:?}").into(),
+                    )
+                })?;
+            Ok(MarketOrderView {
+                order_id: OrderId(row.get(0)?),
+                player_id: PlayerId(row.get(1)?),
+                item_id,
+                side: columns_to_side(&row.get::<_, String>(5)?),
+                price: row.get(6)?,
+                quantity_remaining: row.get(7)?,
+            })
+        })?;
+        rows.collect()
     }
 
     /// Place a limit order. Matches immediately against any crossing resting
@@ -1026,5 +1081,48 @@ mod tests {
             .unwrap();
         // The remaining 500 escrow comes back on cancel.
         assert_eq!(market.currency_balance(PlayerId(2)).unwrap(), 700);
+    }
+
+    #[test]
+    fn open_orders_are_returned_in_insertion_order_with_owner_identity() {
+        let mut market = MarketDb::open_in_memory().unwrap();
+        market
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
+            .unwrap()
+            .unwrap();
+        market.credit_currency(PlayerId(2), 1000).unwrap();
+        market
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Bid, 90, 2)
+            .unwrap()
+            .unwrap();
+
+        let orders = market.open_orders_for(PlayerId(1)).unwrap();
+        assert_eq!(orders.len(), 2);
+        assert_eq!(orders[0].order_id, OrderId(1));
+        assert_eq!(orders[0].player_id, PlayerId(1));
+        assert_eq!(orders[0].side, OrderSide::Ask);
+        assert_eq!(orders[1].order_id, OrderId(2));
+        assert_eq!(orders[1].player_id, PlayerId(2));
+        assert_eq!(orders[1].side, OrderSide::Bid);
+    }
+
+    #[test]
+    fn open_order_views_are_bounded_at_the_database_boundary() {
+        let mut market = MarketDb::open_in_memory().unwrap();
+        for order in 0..=MAX_OPEN_ORDER_VIEW {
+            market
+                .place_order(
+                    PlayerId(1),
+                    ship(order + 1),
+                    scrap(),
+                    OrderSide::Ask,
+                    order + 1,
+                    1,
+                )
+                .unwrap()
+                .unwrap();
+        }
+
+        assert_eq!(market.open_orders_for(PlayerId(1)).unwrap().len(), 200);
     }
 }

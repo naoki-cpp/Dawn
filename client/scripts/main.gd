@@ -25,6 +25,7 @@ extends Node
 
 const SHIP_SCENE  := preload("res://scenes/ship.tscn")
 const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
+const MarketSurfaceScript = preload("res://scripts/market_surface.gd")
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 const WorldSessionScript = preload("res://scripts/world_session.gd")
 const WorldInteractionScript = preload("res://scripts/world_interaction.gd")
@@ -47,6 +48,7 @@ var _cap_tick_accumulator : float = 0.0
 var _session := WorldSessionScript.new()
 var _interaction := WorldInteractionScript.new()
 var _hud_surface := HudSurfaceScript.new()
+var _market_surface := MarketSurfaceScript.new()
 var _presentation := WorldPresentationScript.new()
 var _ships                 : Dictionary = _session.ships
 var _player_ship_id        : int        = -1
@@ -156,8 +158,14 @@ func _ready() -> void:
 	_connection.player_fitting_received.connect(_on_player_fitting)
 	_connection.module_activated.connect(_on_module_activated)
 	_connection.module_deactivated.connect(_on_module_deactivated)
+	_connection.market_snapshot_received.connect(_on_market_snapshot)
 	_presentation.build(self, _camera, _warp_tunnel, _gates_root, _bodies_root, _world, WORLD_SCALE)
 	_hud_surface.build(self, _hud, _stats_label)
+	_market_surface.build(
+		_hud,
+		Callable(self, "_on_market_refresh"),
+		Callable(self, "_on_market_place_order"),
+		Callable(self, "_on_market_cancel_order"))
 	_update_hud()
 	## Gate / body markers are spawned from the server's InitialState, not here.
 
@@ -249,6 +257,8 @@ func _input(event: InputEvent) -> void:
 	## (architecture-review/client.md C-1); this just performs the side
 	## effects (network sends, warp-snap-pos / overlay state writes).
 	if event is InputEventKey and event.pressed and not event.echo:
+		if _market_surface.keyboard_consumes():
+			return
 		var key: InputEventKey = event as InputEventKey
 		var dock_status: Dictionary = _session.dock_status()
 		var nearest_station_id: int = _nearby_station_ids[0] if not _nearby_station_ids.is_empty() else -1
@@ -293,6 +303,9 @@ func _input(event: InputEvent) -> void:
 				_presentation.toggle_tactical_overlay()
 			"toggle_inventory_panel":
 				_hud_surface.toggle_inventory_panel()
+			"toggle_market_panel":
+				if _market_surface.toggle():
+					_connection.send_market_refresh_command()
 			"dock":
 				_connection.send_dock_command(action.station_id as int)
 			"undock":
@@ -321,6 +334,8 @@ func _input(event: InputEvent) -> void:
 			_camera.call("end_orbit_drag")
 			return
 		if mb.pressed:
+			if _market_surface.panel_consumes(mb.position):
+				return
 			## A click on the open inventory panel fits/unfits (row hit) or is
 			## swallowed (margin/header) -- never a world click. Checked first
 			## since the panel can be open over anything.
@@ -593,7 +608,34 @@ func _on_connection_changed(connected: bool) -> void:
 ## Welcome received: just record player_id / ship_id.
 ## Ship nodes are spawned by the subsequent InitialState.
 func _on_welcomed(_p_player_id: int, _p_ship_id: int) -> void:
-	pass  ## connection.gd ship_id / player_id properties are already populated
+	## connection.gd ship_id / player_id properties are already populated.
+	_connection.send_market_refresh_command()
+
+
+func _on_market_refresh() -> void:
+	_connection.send_market_refresh_command()
+
+
+func _on_market_place_order(
+	item_type: String,
+	module_id: int,
+	ship_type_id: int,
+	side: String,
+	price: int,
+	quantity: int
+) -> void:
+	if _player_ship_id < 0:
+		return
+	_connection.send_market_place_order_command(
+		_player_ship_id, item_type, module_id, ship_type_id, side, price, quantity)
+
+
+func _on_market_cancel_order(order_id: int) -> void:
+	_connection.send_market_cancel_order_command(order_id)
+
+
+func _on_market_snapshot(snapshot: Dictionary) -> void:
+	_market_surface.apply_snapshot(snapshot)
 
 ## InitialState received: ingest the Sector's navigation map, then spawn all
 ## ship nodes in one pass. ShipSpawned events are not sent in Phase 5;
@@ -713,6 +755,7 @@ func _apply_loadout_side_effects() -> void:
 		snapshot.get("station_inventory", []) as Array,
 		snapshot.get("owned_ships", []) as Array,
 		_buildable_ship_types)
+	_market_surface.set_cargo(snapshot.get("inventory", []) as Array)
 	_recalc_weapon_range()
 
 func _recalc_weapon_range() -> void:

@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 dawn-core        = { path = "../dawn-core" }
 dawn-event-store = { path = "../dawn-event-store" }
+dawn-market      = { path = "../dawn-market" }
 dawn-actor       = { path = "../dawn-actor" }
 dawn-consensus   = { path = "../dawn-consensus" }
 dawn-replication = { path = "../dawn-replication" }
@@ -22,6 +23,7 @@ tokio            = { workspace = true }
 serde            = { workspace = true }
 serde_json       = "1"
 toml             = { version = "0.8", features = ["parse"] }
+rusqlite         = { workspace = true }
 tempfile         = "3"
 
 [dev-dependencies]

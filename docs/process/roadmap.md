@@ -335,13 +335,13 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
 | 2 | SQLite バックエンドの指値注文帳（bid/ask マッチング） | 2026-07-13実装完了。`dawn-market::MarketDb`（`order_book.rs`）。同価格内の優先順位はSQLiteの`rowid`（挿入順）にそのまま任せ、`Tick`は一切登場しない（`/grilling`で決定、dawn-marketをtick非決定性から独立させたまま）。約定は常にresting(maker)側の価格で成立。自己約定（同一PlayerIdのBid/Askが交差）は禁止せず通常通りマッチ（`/grilling`で決定）。部分約定対応（残数量は板に残る）。trades履歴テーブルは作らず`place_order`の戻り値（`Vec<Trade>`）のみ（9D-5で必要になれば追加）。テスト11件+doctest1件 | ✅ |
 | 3 | `PlayerId` 単位の Currency 台帳 | 2026-07-13実装完了。`dawn-market::MarketDb`の`currency`テーブル（`balance >= 0`をCHECK制約で保証）+`currency_balance`/`credit_currency`。`/grilling`で決定: BidはPlace時に`price×quantity`を即座にエスクロー（複数Bid同時発行での二重予約を防止、`orders.escrowed_currency`列）、Askはエスクロー不要（Itemは既にMarket側に渡っている前提）。約定は常にresting(maker)価格で決済し、Bidがエスクロー額より安く約定した差額は買い手へ即時払い戻し。Cancel時は残りエスクローを払い戻す。残高不足は`InsufficientBalance`として型で区別（SQLiteエラーとは別レイヤー）。テスト11件追加（22件+doctest1件） | ✅ |
 | 4 | `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand`（List/Cancel/Settle） | 2026-07-17実装完了。`dawn-market::MarketDb` は注文ごとに対象 `ShipId` を保持し、Ask出品時に `RemoveItemCommand`、Askキャンセル時に `ReturnItemCommand`、約定時に買い手ごとの `CreditItemCommand` を結果として返す。MarketはSectorへ直接アクセスせず、呼び出し側が所有Sectorへ片側ずつルーティングする。Transit/Raft合意は不要（ADR-0034 §4）。wire向けの`ClientCommand`ではない | ✅ |
-| 5 | client: Market閲覧UI（指値注文の発注・Currency残高表示） | | ⬜ |
+| 5 | client: Market閲覧UI（指値注文の発注・Currency残高表示） | 2026-07-17実装完了。`ClientMessage::Market` / `ServerMessage::MarketSnapshot`を既存のpostcard envelopeへ追加し、`dawn-simulation`のsingle/cluster serve loopに`MarketRuntime`を配線。Askは先に所有船cargoからRemoveし、DB拒否時だけReturn、約定したBidは所有ノードへCredit。Godotは`M`で開く独立`market_surface.gd`に板・Currency残高・Bid/Ask・発注・自分の注文Cancelを実装。板のsnapshotは最大200件。GdUnit4とRustの契約テストを追加。 | ✅ |
 
 9D-4 の Sector 側適用も実装済み。`SimulationNode` の
 `remove_item_owned` / `return_item_owned` / `credit_item_owned` が所有権と数量を
 検証し、既存の `ShipFitted` インベントリスナップショットへ記録する。Market は
 Sector へ直接アクセスせず、呼び出し側が所有 Sector へ片側ずつルーティングする。
-旧Market DBは `ship_id` をNULL許容で追加する移行を行い、旧注文に対して船を推測しない。
+旧Market DBは `ship_id` をNULL許容で追加する移行を行い、旧注文に対して船を推測しない。9D-5ではこのruntime bridgeをsingle/clusterの両serve loopへ接続し、Market専用wire envelopeとGodot Market surfaceを追加した。`dawn-sector`は`dawn-market`へ依存しない。
 
 ### 9E. 経済ループの検証・バランス
 

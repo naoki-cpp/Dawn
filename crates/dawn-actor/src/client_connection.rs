@@ -2,7 +2,8 @@
 //!
 //! ## Design (ADR-0005)
 //!
-//! The trait defines exactly **two directions**:
+//! The trait defines the server event direction plus two independent client
+//! input queues:
 //!
 //! ```text
 //! Server side                     Client side
@@ -11,8 +12,8 @@
 //!     │  send_events()                ↑  recv_event()
 //!     │                              │
 //!     └─── ClientConnection ─────────┘
-//!              │  try_recv_command() → ClientCommand
-//!              └──────── ←  command_tx.send()
+//!              │  try_recv_command() → ClientCommand (Sector)
+//!              └── try_recv_market_command() → MarketCommandWire
 //! ```
 //!
 //! Implementations:
@@ -21,16 +22,16 @@
 //! - `InProcessConnection` (below) — an in-memory `tokio::mpsc` pair used by
 //!   tests to drive the serve pipeline without a socket.
 //!
-//! ## Extending ClientCommand
+//! ## Extending client input
 //!
 //! Commands the client may send are variants of the `ClientCommand` enum
-//! (defined in `dawn-core`); the `ClientConnection` trait itself does not
-//! change. Adding a command = add a variant to `dawn_core::ClientCommand`
-//! (then update the `dawn-actor/protocol.rs` JSON parser and add a branch to
-//! `SimulationNode::apply_client_command` in `dawn-sector`).
+//! Sector commands remain variants of `dawn_core::ClientCommand`; Market
+//! requests remain `dawn_wire::MarketCommandWire` and never enter
+//! `SimulationNode::apply_client_command`.
 
 pub use dawn_core::ClientCommand;
 use dawn_core::DomainEvent;
+use dawn_wire::MarketCommandWire;
 use tokio::sync::mpsc;
 
 // ── Error ─────────────────────────────────────────────────────────────────────
@@ -60,6 +61,9 @@ pub trait ClientConnection: Send + 'static {
 
     /// Take one pending command from the client, non-blocking.
     fn try_recv_command(&mut self) -> Option<ClientCommand>;
+
+    /// Take one pending Market request from the client, non-blocking.
+    fn try_recv_market_command(&mut self) -> Option<MarketCommandWire>;
 }
 
 // ── InProcessConnection ───────────────────────────────────────────────────────
@@ -82,6 +86,7 @@ pub trait ClientConnection: Send + 'static {
 pub struct InProcessConnection {
     event_tx: mpsc::UnboundedSender<DomainEvent>,
     command_rx: mpsc::UnboundedReceiver<ClientCommand>,
+    market_command_rx: mpsc::UnboundedReceiver<MarketCommandWire>,
 }
 
 /// The client-side endpoint of an [`InProcessConnection`].
@@ -89,20 +94,24 @@ pub struct InProcessConnection {
 pub struct InProcessClientEndpoint {
     pub event_rx: mpsc::UnboundedReceiver<DomainEvent>,
     pub command_tx: mpsc::UnboundedSender<ClientCommand>,
+    pub market_command_tx: mpsc::UnboundedSender<MarketCommandWire>,
 }
 
 impl InProcessConnection {
     pub fn pair() -> (Self, InProcessClientEndpoint) {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let (command_tx, command_rx) = mpsc::unbounded_channel();
+        let (market_command_tx, market_command_rx) = mpsc::unbounded_channel();
         (
             InProcessConnection {
                 event_tx,
                 command_rx,
+                market_command_rx,
             },
             InProcessClientEndpoint {
                 event_rx,
                 command_tx,
+                market_command_tx,
             },
         )
     }
@@ -120,6 +129,10 @@ impl ClientConnection for InProcessConnection {
 
     fn try_recv_command(&mut self) -> Option<ClientCommand> {
         self.command_rx.try_recv().ok()
+    }
+
+    fn try_recv_market_command(&mut self) -> Option<MarketCommandWire> {
+        self.market_command_rx.try_recv().ok()
     }
 }
 
@@ -230,6 +243,19 @@ mod tests {
     fn try_recv_command_returns_none_when_no_command_pending() {
         let (mut server, _client) = InProcessConnection::pair();
         assert!(server.try_recv_command().is_none());
+    }
+
+    #[test]
+    fn market_command_is_received_by_server_connection() {
+        let (mut server, client) = InProcessConnection::pair();
+        client
+            .market_command_tx
+            .send(MarketCommandWire::RefreshMarketCommand {})
+            .unwrap();
+        assert!(matches!(
+            server.try_recv_market_command(),
+            Some(MarketCommandWire::RefreshMarketCommand {})
+        ));
     }
 
     #[test]

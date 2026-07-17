@@ -1,6 +1,9 @@
 //! Single-node WebSocket server (`--serve`, no Raft cluster).
 
-use super::{build_serve_node, AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET};
+use super::{
+    build_serve_node, market::MarketRuntime, AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS,
+    TIDI_BUDGET,
+};
 use crate::ws_server;
 use dawn_actor::protocol::ServerMessage;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
@@ -38,6 +41,8 @@ pub(crate) async fn run_phase4_server(
 
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
     let mut node = build_serve_node(NodeId(0), SectorId(0), bounds, pop_cap);
+    let mut market = MarketRuntime::open("data/market.sqlite")
+        .expect("failed to open Market database at data/market.sqlite");
 
     node.spawn_npc_frigates(ship_count);
     // Duel-mode player spawn: close enough to the Bot to be within weapon
@@ -154,6 +159,10 @@ pub(crate) async fn run_phase4_server(
 
         let mut lock_commands: Vec<dawn_core::LockOnCommand> = Vec::new();
         for sess in sessions.iter_mut() {
+            while let Some(market_command) = sess.try_recv_market_command() {
+                let snapshot = market.handle_single(sess.player_id, market_command, &mut node);
+                sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
+            }
             while let Some(cmd) = sess.try_recv_command() {
                 match node.apply_client_command(sess.player_id, cmd, &mut lock_commands) {
                     Some(ClientCommandFollowup::Jump { ship_id, command }) => {

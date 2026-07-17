@@ -1,6 +1,7 @@
 use crate::json_variant::{externally_tagged_to_dict, json_value_to_variant, Dict};
 use dawn_wire::{
-    ClientCommandWire, ClientMessage, HelloMessage, PosWire, ResumeIdentity, WarpTargetWire,
+    ClientCommandWire, ClientMessage, HelloMessage, MarketCommandWire, PosWire, ResumeIdentity,
+    WarpTargetWire,
 };
 use godot::prelude::*;
 
@@ -12,6 +13,10 @@ fn to_wire_bytes(msg: &ClientMessage) -> PackedByteArray {
 
 fn command_wire_bytes(cmd: ClientCommandWire) -> PackedByteArray {
     to_wire_bytes(&ClientMessage::Command(cmd))
+}
+
+fn market_command_wire_bytes(cmd: MarketCommandWire) -> PackedByteArray {
+    to_wire_bytes(&ClientMessage::Market(cmd))
 }
 
 /// Converts a flat GDScript `Dictionary` (scalar values only -- `int`/
@@ -203,6 +208,25 @@ impl ClientCommand {
         }
     }
 
+    /// Schema-driven builder for the Market-only request envelope. Market
+    /// requests intentionally do not enter `ClientCommandWire` or the Sector
+    /// command stream (ADR-0034).
+    #[func]
+    fn market_build(&self, kind: GString, fields: Dict) -> PackedByteArray {
+        let Some(fields) = scalar_dict_to_json_object(&fields) else {
+            return PackedByteArray::new();
+        };
+        let mut wrapper = serde_json::Map::with_capacity(1);
+        wrapper.insert(kind.to_string(), serde_json::Value::Object(fields));
+        match serde_json::from_value::<MarketCommandWire>(serde_json::Value::Object(wrapper)) {
+            Ok(command) => market_command_wire_bytes(command),
+            Err(err) => {
+                godot_error!("ClientCommand.market_build({kind}): {err}");
+                PackedByteArray::new()
+            }
+        }
+    }
+
     /// Move the entire stack of an item out of a docked ship's own cargo
     /// into the caller's station inventory (ADR-0034 9B). `item_type` is
     /// one of `"Module"`/`"PackagedShip"`/`"ScrapMetal"` (matches
@@ -308,6 +332,15 @@ impl ClientMessageDecoder {
                 Err(err) => {
                     godot_error!(
                         "ClientMessageDecoder.decode: ClientCommandWire -> JSON failed: {err}"
+                    );
+                    Dict::new()
+                }
+            },
+            Ok(ClientMessage::Market(command)) => match serde_json::to_value(&command) {
+                Ok(value) => externally_tagged_to_dict(&value),
+                Err(err) => {
+                    godot_error!(
+                        "ClientMessageDecoder.decode: MarketCommandWire -> JSON failed: {err}"
                     );
                     Dict::new()
                 }

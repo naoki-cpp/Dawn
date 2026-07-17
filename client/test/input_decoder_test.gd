@@ -168,6 +168,11 @@ func test_i_key_still_toggles_the_inventory_panel_without_a_player_ship() -> voi
 	assert_str(action.kind as String).is_equal("toggle_inventory_panel")
 
 
+func test_m_key_toggles_the_market_panel_without_a_player_ship() -> void:
+	var action: Dictionary = InputDecoder.decode_key(KEY_M, NO_SELECTION, -1, -1, -1, -1)
+	assert_str(action.kind as String).is_equal("toggle_market_panel")
+
+
 # -- D/U/B/Y keys -> station actions ---------------------------------------------------
 
 func test_d_key_docks_at_the_nearby_station_when_not_already_docked() -> void:

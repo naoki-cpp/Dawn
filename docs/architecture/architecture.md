@@ -87,7 +87,7 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/A
 | `dawn-replication` | library | Gossip distribution boundary for the append log (OutboundLogPublisher / InMemoryReplicationBus / ReplicationTransport / AntiEntropy / TcpReplicationTransport / SnapshotTransfer / ReplicaSet; ADR-0021/0027) |
 | `dawn-market` | library | Player-to-player Market: bid/ask order book + `PlayerId` Currency ledger, its own SQLite authority independent of Sector tick determinism. Depends only on `dawn-core` + serde + rusqlite -- no transport/runtime dependency, same DAG position as `dawn-wire` (ADR-0034 §4/§5/§6). Constructs `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` but never applies them; the caller (`dawn-simulation`) routes each to the SimulationNode that owns the affected ship |
 | `dawn-sector` | library | Per-Sector game logic (SimulationNode, Tick, Transit, Warp, Bot AI, AoI, Snapshot; ADR-0026). Also depends on `dawn-wire` to build typed wire messages (e.g. `PlayerLoadoutWire`, ADR-0042 stage 2a) |
-| `dawn-simulation` | binary | Wiring/bootstrap only. WsServer (Godot), Raft cluster wiring, load generation, TOML loader. Will depend on `dawn-market` to route Market-domain `ClientCommand` variants once those land (ADR-0034 §4, roadmap.md §12 9D-4 -- not yet wired as of 9D-1) |
+| `dawn-simulation` | binary | Wiring/bootstrap only. WsServer (Godot), Raft cluster wiring, load generation, TOML loader. Owns the `dawn-market` runtime bridge: drains the separate Market wire queue, applies one-sided cargo commands to the owning `SimulationNode`, and returns bounded snapshots (ADR-0034 §4, roadmap.md §12 9D-5) |
 | `dawn-sector-node` | binary | Production binary (8D-4). Wires TcpRaftTransport + TcpReplicationTransport from static TOML config. 3 processes = 3-Sector cluster |
 
 ### Dependency DAG
@@ -104,7 +104,7 @@ dawn-core
     │       └── dawn-actor / dawn-sector (below) also depend on dawn-wire
     ├── dawn-market        <- Market order book + Currency ledger, own SQLite, no transport dep (ADR-0034 §4)
     │       ^
-    │       └── dawn-simulation (below) will depend on dawn-market once 9D-4 wires it up
+    │       └── dawn-simulation (below) routes Market requests and bridge commands
     ├── dawn-ecs
     ├── dawn-consensus
     └── dawn-event-store

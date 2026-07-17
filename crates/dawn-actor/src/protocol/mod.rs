@@ -21,8 +21,9 @@
 // (ws_server.rs, dawn-sector-node, tests) needed no changes.
 pub use dawn_wire::{
     client_command_from_wire, client_command_wire_json_schema, domain_event_to_event_wire,
-    event_wire_json_schema, ClientCommandWire, ClientMessage, EventWire, HelloMessage,
-    InitialStateWire, PlayerLoadoutWire, PosWire, ResumeIdentity, ServerMessage, VelWire,
+    event_wire_json_schema, market_command_wire_json_schema, ClientCommandWire, ClientMessage,
+    EventWire, HelloMessage, InitialStateWire, MarketCommandWire, MarketOrderWire,
+    MarketSnapshotWire, PlayerLoadoutWire, PosWire, ResumeIdentity, ServerMessage, VelWire,
     WarpTargetWire,
 };
 
@@ -890,6 +891,13 @@ mod tests {
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../docs/architecture/wire-protocol-commands.schema.json"
+            ),
+        );
+        assert_schema_file_matches(
+            &market_command_wire_json_schema(),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/architecture/wire-protocol-market.schema.json"
             ),
         );
     }

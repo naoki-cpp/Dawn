@@ -69,6 +69,26 @@ func test_player_loadout_message_emits_player_fitting_signal_with_the_raw_bytes(
 	connection.free()
 
 
+func test_market_snapshot_message_emits_market_signal() -> void:
+	var connection: Node = Connection.new()
+	var received: Array = []
+	connection.market_snapshot_received.connect(func(snapshot: Dictionary) -> void:
+		received.append(snapshot)
+	)
+
+	connection._handle_message({
+		"type": "MarketSnapshot",
+		"balance": 250,
+		"orders": [],
+		"notice": "Order placed",
+	}, PackedByteArray())
+
+	assert_int(received.size()).is_equal(1)
+	assert_int((received[0] as Dictionary)["balance"]).is_equal(250)
+	assert_str((received[0] as Dictionary)["notice"]).is_equal("Order placed")
+	connection.free()
+
+
 func test_legacy_player_fitting_message_still_emits_player_fitting_signal() -> void:
 	var connection: Node = Connection.new()
 	var received: Array = []

@@ -48,5 +48,6 @@
 mod order_book;
 
 pub use order_book::{
-    CancelledOrder, InsufficientBalance, MarketDb, OrderId, OrderSide, PlaceOrderOutcome, Trade,
+    CancelledOrder, InsufficientBalance, MarketDb, MarketOrderView, OrderId, OrderSide,
+    PlaceOrderOutcome, Trade,
 };

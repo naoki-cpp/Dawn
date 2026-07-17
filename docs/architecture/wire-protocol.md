@@ -18,6 +18,13 @@ stages complete), every message -- `Hello`/`Welcome`/`Redirect`/`DomainEvent`/
 always carries exactly one message; no length-prefix framing is needed on
 top). There is no more ad-hoc JSON text frame path.
 
+Market requests and snapshots use the same binary envelope but remain a
+separate message family: `ClientMessage::Market(MarketCommandWire)` and
+`ServerMessage::MarketSnapshot(MarketSnapshotWire)`. They do not enter the
+Sector `ClientCommandWire` stream. This preserves the ADR-0034 boundary where
+the Market owns order matching and Currency, while `dawn-simulation` applies
+only the one-sided cargo bridge commands to the owning `SimulationNode`.
+
 The field-level shape of `EventWire`/`ClientCommandWire` below is still
 generated from the Rust types and still useful as the schema-of-record for
 what a message's fields mean -- but the **outer JSON shape shown in this
@@ -143,18 +150,36 @@ happens in `client_command_from_wire()`):
 module kinds (Weapon/Tackle, ADR-0035); the server validates that
 requirement, not the wire schema.
 
+## Market requests and snapshots
+
+The Market request schema is generated separately at
+[`wire-protocol-market.schema.json`](./wire-protocol-market.schema.json) by
+`dawn_actor::protocol::market_command_wire_json_schema()`. It contains
+`RefreshMarketCommand`, `PlaceMarketOrderCommand`, and
+`CancelMarketOrderCommand`. `PlaceMarketOrderCommand` carries an explicit
+`ship_id` because an Ask removes cargo from that owned ship and a Bid names the
+ship that receives a filled item. `price` and `quantity` must be positive and
+their product must fit in `u64`; the runtime rejects invalid input before
+calling `dawn-market`.
+
+`MarketSnapshotWire` contains the caller's Currency `balance`, a bounded list
+of open orders (maximum 200), and a short server `notice`. Each order includes
+`is_own`, which is calculated server-side and must not be trusted from client
+input. A client may submit an order or cancel only through the Market family;
+Sector does not parse these variants.
+
 ## Keeping this in sync
 
 `wire_schema_doc_is_up_to_date` (a test in `dawn-actor/src/protocol/mod.rs`) fails the build if
-either checked-in schema file drifts from what `EventWire` /
-`ClientCommandWire` currently produce. After changing either enum (or a type
-either references -- `PosWire`, `VelWire`, `WarpTargetWire`), regenerate with:
+any checked-in schema file drifts from what `EventWire`, `ClientCommandWire`,
+or `MarketCommandWire` currently produce. After changing any of those enums
+(or a type they reference), regenerate with:
 
 ```bash
 cargo run -p dawn-actor --example gen_wire_schema
 ```
 
-and commit both updated `.schema.json` files alongside the code change.
+and commit the updated `.schema.json` files alongside the code change.
 These files are documentation, generated from the types -- never hand-edit
 them.
 
