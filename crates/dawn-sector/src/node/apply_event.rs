@@ -262,7 +262,7 @@ impl<S: EventStore> SimulationNode<S> {
             DomainEvent::PackagedShipBuilt(e) => {
                 // ADR-0038: Station inventory is durable in SQLite, written
                 // through synchronously by the live command handler
-                // (`station.rs::build_packaged_ship_owned`) before this event
+                // (`station_operation_execution.rs`) before this event
                 // was even appended. Replaying the credit/debit here would
                 // double-apply it.
                 if e.tick > self.current_tick {

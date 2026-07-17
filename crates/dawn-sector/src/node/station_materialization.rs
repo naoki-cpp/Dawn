@@ -1,15 +1,14 @@
 //! Station-backed ship materialization rules.
 
 use dawn_core::{
-    events::{PackagedShipBuilt, ShipAssembled, ShipDisassembled},
-    AssembleCommand, BuildPackagedShipCommand, DisassembleShipCommand, DomainEvent, ItemId,
-    PlayerId, Position, ShipId, Velocity,
+    AssembleCommand, BuildPackagedShipCommand, DisassembleShipCommand, PlayerId, ShipId,
 };
-use dawn_ecs::components::{FittingComp, HullComp, InventoryComp, IsNpcComp, ShipStatsComp};
+use dawn_ecs::components::{FittingComp, HullComp, ShipStatsComp};
 use dawn_event_store::store::EventStore;
 
 use super::{
     station::{StationOperationOutcome, StationOperationRejection},
+    station_operation_execution::{StationOperationExecution, StationOperationPlan},
     SimulationNode,
 };
 
@@ -40,31 +39,21 @@ impl<S: EventStore> SimulationNode<S> {
             };
         }
         let scrap_cost = Self::SCRAP_METAL_COST_PER_PACKAGED_SHIP;
-        if let Err(reason) =
-            self.try_debit_station_item(player_id, cmd.station_id, ItemId::ScrapMetal, scrap_cost)
-        {
-            return StationOperationOutcome::Rejected {
+        match self.execute_station_operation(StationOperationPlan::BuildPackagedShip {
+            player_id,
+            ship_id: cmd.ship_id,
+            station_id: cmd.station_id,
+            ship_type_id: cmd.ship_type_id,
+            scrap_cost,
+        }) {
+            Ok(StationOperationExecution::Outcome(outcome)) => outcome,
+            Ok(StationOperationExecution::Assembled(_)) => {
+                unreachable!("Build plan cannot assemble a ship")
+            }
+            Err(reason) => StationOperationOutcome::Rejected {
                 ship_id: cmd.ship_id,
                 reason,
-            };
-        }
-        self.credit_station_item(
-            player_id,
-            cmd.station_id,
-            ItemId::PackagedShip(cmd.ship_type_id),
-            1,
-        );
-        self.event_store
-            .append(DomainEvent::PackagedShipBuilt(PackagedShipBuilt {
-                ship_id: cmd.ship_id,
-                player_id,
-                station_id: cmd.station_id,
-                ship_type_id: cmd.ship_type_id,
-                scrap_cost,
-                tick: self.current_tick,
-            }));
-        StationOperationOutcome::Accepted {
-            ship_id: cmd.ship_id,
+            },
         }
     }
 
@@ -144,38 +133,20 @@ impl<S: EventStore> SimulationNode<S> {
             };
         };
 
-        // Salvage the ship's unfitted cargo (ADR-0032/0034 InventoryComp)
-        // into the station before the entity is despawned below --
-        // Disassemble only requires an unfitted *hull* (the `is_fitted`
-        // check above), not an empty cargo hold, so any Module/ScrapMetal
-        // stacks riding along would otherwise silently vanish with the
-        // entity instead of following the ship into its packaged form.
-        let salvaged_cargo: Vec<(ItemId, u64)> = self
-            .world
-            .get_mut::<InventoryComp>(entity)
-            .map(|mut inventory| std::mem::take(&mut inventory.items).into_iter().collect())
-            .unwrap_or_default();
-        for (item_id, count) in salvaged_cargo {
-            self.credit_station_item(player_id, cmd.station_id, item_id, count);
-        }
-
-        self.credit_station_item(
+        match self.execute_station_operation(StationOperationPlan::DisassembleShip {
             player_id,
-            cmd.station_id,
-            ItemId::PackagedShip(ship_type_id),
-            1,
-        );
-        self.remove_ship(cmd.ship_id);
-        self.event_store
-            .append(DomainEvent::ShipDisassembled(ShipDisassembled {
-                ship_id: cmd.ship_id,
-                player_id,
-                station_id: cmd.station_id,
-                ship_type_id,
-                tick: self.current_tick,
-            }));
-        StationOperationOutcome::Accepted {
             ship_id: cmd.ship_id,
+            station_id: cmd.station_id,
+            ship_type_id,
+        }) {
+            Ok(StationOperationExecution::Outcome(outcome)) => outcome,
+            Ok(StationOperationExecution::Assembled(_)) => {
+                unreachable!("Disassemble plan cannot assemble a ship")
+            }
+            Err(reason) => StationOperationOutcome::Rejected {
+                ship_id: cmd.ship_id,
+                reason,
+            },
         }
     }
 
@@ -197,32 +168,16 @@ impl<S: EventStore> SimulationNode<S> {
         if !self.ship_type_registry.contains_key(&cmd.ship_type_id) {
             return Err(StationOperationRejection::UnknownShipType);
         }
-        self.try_debit_station_item(
+        match self.execute_station_operation(StationOperationPlan::AssembleShip {
             player_id,
-            cmd.station_id,
-            ItemId::PackagedShip(cmd.ship_type_id),
-            1,
-        )?;
-
-        let ship_id = ShipId::new(self.node_id, self.id_counter);
-        self.id_counter += 1;
-        self.insert_ship_entity(ship_id, cmd.ship_type_id, Position::ORIGIN, Velocity::ZERO);
-        if let Some(&entity) = self.ships.index.get(&ship_id) {
-            let _ = self.world.remove_one::<IsNpcComp>(entity);
+            station_id: cmd.station_id,
+            ship_type_id: cmd.ship_type_id,
+        })? {
+            StationOperationExecution::Assembled(ship_id) => Ok(ship_id),
+            StationOperationExecution::Outcome(_) => {
+                unreachable!("Assemble plan must return a new ship")
+            }
         }
-        self.settle_ship_into_station(ship_id, cmd.station_id);
-        self.docked_ships.insert(ship_id, cmd.station_id);
-        self.ships.owners.insert(ship_id, player_id);
-
-        self.event_store
-            .append(DomainEvent::ShipAssembled(ShipAssembled {
-                ship_id,
-                player_id,
-                station_id: cmd.station_id,
-                ship_type_id: cmd.ship_type_id,
-                tick: self.current_tick,
-            }));
-        Ok(ship_id)
     }
 }
 
