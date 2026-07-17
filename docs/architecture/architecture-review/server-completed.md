@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-pending.md（未完項目）
-date     : 2026-07-11
+date     : 2026-07-17
 ---
 
 # Architecture Review — Dawn Codebase（完了済みログ）
@@ -59,6 +59,8 @@ deepening、production outbound replication publisher deepening、Client admissi
 | `dawn-client-gdext` の `apply_module_activation` を thin adapter 化（`/improve-codebase-architecture`、PR #129） | 2026-07-10 | ADR-0040 が定めた「adapter only」に反し `apply_module_activation` だけがモジュール状態を直接変更していた（sibling の `toggle_at` は既に `dawn-client-core` へ委譲済み）のを是正。`PlayerLoadoutMsg::apply_module_activation` を `dawn-client-core` に新設（ユニットテスト2件）、`loadout_gd.rs` は id 変換 + 委譲のみに縮小（271→267行、`loadout.rs` 337→373行）。 |
 | `dawn-wire` 新設 + ワイヤプロトコルのpostcardバイナリ化（ADR-0041/0042） | 2026-07-11 | `dawn-actor/src/protocol/{client_command,server_event,hello_resume}.rs` を `dawn-wire` へ全面移動。`ServerMessage`/`ClientMessage` 統合enumを新設し、Welcome/Redirect/Event/Hello/Commandをpostcardバイナリフレーム化。`ClientCommandJson`/`EventJson` は postcardが内部タグ付きenumをデシリアライズできないため外部タグ付きへ変更（実装中に実際のデコード失敗で発覚）。`dawn-client-gdext` に `ServerMessageDecoder`/`ClientMessageDecoder`/`json_variant.rs` を新設し、外部タグ付き形状を既存の `{"type":...}` Dictionary形状へ変換。`connection.gd` の改行バッファリングを撤去（374→344）。 |
 | M-10解消: postcard encode/decode を `dawn-wire` に集約 | 2026-07-11 | `ServerMessage::encode/decode`・`ClientMessage::encode/decode` を `dawn-wire` に新設し、`ws_server.rs`（2箇所）・`client_command_gd.rs`・`server_message_gd.rs` の直接 `postcard::` 呼び出しをそちらに置換。`dawn-actor`/`dawn-client-gdext` の `postcard` 依存を削除（`dawn-wire` 経由の間接利用のみになったため）。副次効果として `dawn-wire` 自体が実コードで `postcard` を使うようになり、cargo macheteの「未使用依存」誤検知（doctestでしか使われていなかった）も解消。 |
+| Station operation execution seam の deepening | 2026-07-17 | PR #149で `station_operation_execution.rs`（281行）を新設。Dock/undock/active ship/build/assemble/disassembleのaccepted-operation副作用をこのモジュールへ集約し、`station_lifecycle.rs` / `station_materialization.rs` は検証・計画に縮小。速度停止、event append、snapshot更新、station inventory連携の入口を一つに揃え、直接回帰テストを保持。 |
+| Ship cargo ownership module の deepening | 2026-07-17 | `inventory.rs` から船cargoの初期seed、1個/スタック変更、Station transfer、Market片側bridgeを `ship_cargo.rs`（573行）へ分離。`inventory.rs` はFit/Unfit/Reorderの検証とFittingComp変更に専念し、既存の`ShipFitted`イベント・ADR-0034の片側Command・crate境界は維持。`dawn-sector` 314テスト、ship cargo moduleの直接テストを確認。 |
 
 ---
 

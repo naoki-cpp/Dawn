@@ -1,23 +1,12 @@
-//! Inventory and player-issued Fit/Unfit for `SimulationNode` (ADR-0032).
+//! Player-issued Fit/Unfit/Reorder for `SimulationNode` (ADR-0032).
 //!
-//! The existing `fit_module` (in `node::commands`) stays the privileged,
-//! unchecked path used internally to install a ship's starting loadout at
-//! spawn -- unchanged, to protect its existing behavior and tests. This
-//! module adds the player-facing pair that enforces slot capacity and
-//! consumes from `InventoryComp`:
-//!
-//! - `fit_module_owned` -- Inventory -> `FittingComp` slot.
-//! - `unfit_module_owned` -- `FittingComp` slot -> Inventory.
-//!
-//! Both emit the existing `ShipFitted` event (now carrying the resulting
-//! inventory snapshot too, ADR-0032 §5) -- no new event type.
+//! Ship cargo ownership and item movement live in `ship_cargo.rs`. This
+//! module owns the fitting-specific validation and the `FittingComp` changes;
+//! both modules use the existing `ShipFitted` snapshot event.
 
-use dawn_core::{
-    CreditItemCommand, FitModuleCommand, PlayerId, RemoveItemCommand, ReorderFittedModuleCommand,
-    ReturnItemCommand, TransferDirection, TransferToStationCommand, UnfitModuleCommand,
-};
+use dawn_core::{FitModuleCommand, PlayerId, ReorderFittedModuleCommand, UnfitModuleCommand};
 use dawn_ecs::{
-    components::{FittedSlot, FittingComp, InventoryComp},
+    components::{FittedSlot, FittingComp},
     Entity,
 };
 use dawn_event_store::store::EventStore;
@@ -25,118 +14,6 @@ use dawn_event_store::store::EventStore;
 use super::SimulationNode;
 
 impl<S: EventStore> SimulationNode<S> {
-    /// Seed `entity`'s starting inventory: one of every currently registered
-    /// module (ADR-0032 §1 -- a fixed initial set, no replenishment, until an
-    /// Economy/Loot phase adds other supply sources). Called from both the
-    /// live spawn path (`spawn_player_ship_at`) and `ShipSpawned` replay, so
-    /// it must be a pure function of `module_registry` (loaded once at node
-    /// startup, identically on every replay) to stay INV-002 compliant
-    /// without a dedicated event.
-    pub(super) fn seed_player_inventory(&mut self, entity: Entity) {
-        let mut inventory = InventoryComp::empty();
-        for module_id in self.module_registry.keys().copied() {
-            inventory.add(module_id);
-        }
-        let _ = self.world.insert_one(entity, inventory);
-    }
-
-    /// Remove `cmd.quantity` of `cmd.item_id` from the owned ship's cargo for
-    /// a Market Ask (ADR-0034 9D-4).
-    ///
-    /// The Market owns order matching and settlement, but it must not mutate a
-    /// Sector's ECS directly. The caller routes this bridge command to the
-    /// Sector that owns `cmd.ship_id`; this method performs the normal
-    /// ownership/inventory validation and persists the resulting inventory via
-    /// the existing `ShipFitted` snapshot event.
-    pub fn remove_item_owned(&mut self, cmd: RemoveItemCommand) -> bool {
-        self.apply_market_item_mutation(
-            cmd.player_id,
-            cmd.ship_id,
-            cmd.item_id,
-            cmd.quantity,
-            MarketItemMutation::Remove,
-        )
-    }
-
-    /// Return the remaining quantity of a cancelled Market Ask to the owned
-    /// ship's cargo (ADR-0034 9D-4).
-    pub fn return_item_owned(&mut self, cmd: ReturnItemCommand) -> bool {
-        self.apply_market_item_mutation(
-            cmd.player_id,
-            cmd.ship_id,
-            cmd.item_id,
-            cmd.quantity,
-            MarketItemMutation::Add,
-        )
-    }
-
-    /// Credit filled Market purchases to the owned ship's cargo
-    /// (ADR-0034 9D-4).
-    pub fn credit_item_owned(&mut self, cmd: CreditItemCommand) -> bool {
-        self.apply_market_item_mutation(
-            cmd.player_id,
-            cmd.ship_id,
-            cmd.item_id,
-            cmd.quantity,
-            MarketItemMutation::Add,
-        )
-    }
-
-    fn apply_market_item_mutation(
-        &mut self,
-        player_id: PlayerId,
-        ship_id: dawn_core::ShipId,
-        item_id: dawn_core::ItemId,
-        quantity: u64,
-        mutation: MarketItemMutation,
-    ) -> bool {
-        if quantity == 0 || !self.owns_ship(player_id, ship_id) {
-            return false;
-        }
-        let Some(&entity) = self.ships.index.get(&ship_id) else {
-            return false;
-        };
-
-        let changed = if let Some(mut inventory) = self.world.get_mut::<InventoryComp>(entity) {
-            match mutation {
-                MarketItemMutation::Remove => {
-                    let Some(current) = inventory.items.get(&item_id).copied() else {
-                        return false;
-                    };
-                    if current < quantity {
-                        return false;
-                    }
-                    if current == quantity {
-                        inventory.items.remove(&item_id);
-                    } else {
-                        inventory.items.insert(item_id, current - quantity);
-                    }
-                    true
-                }
-                MarketItemMutation::Add => {
-                    let current = inventory.item_count(item_id);
-                    let Some(next) = current.checked_add(quantity) else {
-                        return false;
-                    };
-                    inventory.items.insert(item_id, next);
-                    true
-                }
-            }
-        } else {
-            false
-        };
-
-        if !changed {
-            return false;
-        }
-
-        // ShipFitted is the existing full fitting/inventory snapshot event.
-        // Reuse it here so Market settlement remains replayable without a new
-        // wire event or a second partial inventory source of truth.
-        self.emit_ship_fitted(ship_id, entity);
-        true
-    }
-
     /// Move one instance of `cmd.module_id` from the owning player's
     /// inventory into `cmd.slot` (ADR-0032). Unlike `fit_module` (the
     /// internal spawn-time path), this enforces the module's own slot kind,
@@ -177,11 +54,7 @@ impl<S: EventStore> SimulationNode<S> {
         if current_count >= capacity as usize {
             return false;
         }
-        let took = self
-            .world
-            .get_mut::<InventoryComp>(entity)
-            .map(|mut inv| inv.take(cmd.module_id))
-            .unwrap_or(false);
+        let took = self.take_ship_module(entity, cmd.module_id);
         if !took {
             return false;
         }
@@ -203,9 +76,7 @@ impl<S: EventStore> SimulationNode<S> {
         if !fitted {
             // FittingComp is expected on every spawned ship; if it's somehow
             // missing, undo the inventory take so the module isn't lost.
-            if let Some(mut inv) = self.world.get_mut::<InventoryComp>(entity) {
-                inv.add(cmd.module_id);
-            }
+            self.add_ship_item(entity, dawn_core::ItemId::Module(cmd.module_id), 1);
             return false;
         }
 
@@ -242,21 +113,9 @@ impl<S: EventStore> SimulationNode<S> {
             return false;
         }
 
-        // Return to inventory. Ships without InventoryComp (NPCs) never reach
-        // here in practice (unowned), but insert a fresh one defensively
-        // rather than silently dropping the module.
-        let added = self
-            .world
-            .get_mut::<InventoryComp>(entity)
-            .map(|mut inv| inv.add(cmd.module_id))
-            .is_some();
-        if !added {
-            let _ = self.world.insert_one(entity, {
-                let mut inv = InventoryComp::empty();
-                inv.add(cmd.module_id);
-                inv
-            });
-        }
+        // `ship_cargo` owns the defensive component creation and item
+        // mutation so every cargo entry point shares the same semantics.
+        self.add_ship_item(entity, dawn_core::ItemId::Module(cmd.module_id), 1);
 
         self.apply_fitting_and_emit(cmd.ship_id, entity);
         true
@@ -305,71 +164,6 @@ impl<S: EventStore> SimulationNode<S> {
         true
     }
 
-    /// Move the entire stack of `cmd.item_id` between the docked ship's own
-    /// cargo (`InventoryComp`) and the caller's station inventory (ADR-0034
-    /// section 9B), in the direction `cmd.direction` says. Whole-stack only
-    /// -- no partial-count transfer. Rejected if the caller doesn't own
-    /// `cmd.ship_id`, isn't currently docked at `cmd.station_id`, or the
-    /// source side has none of `cmd.item_id`.
-    pub fn transfer_to_station_owned(
-        &mut self,
-        player_id: PlayerId,
-        cmd: TransferToStationCommand,
-    ) -> bool {
-        if !self.owns_ship(player_id, cmd.ship_id) {
-            return false;
-        }
-        if !self.can_use_station(player_id, cmd.station_id) {
-            return false;
-        }
-        // `can_use_station` only checks the *player's* docked context; under
-        // the multi-owned-ship model (ADR-0037) a player can be docked with
-        // their active ship while owning a different `cmd.ship_id` docked
-        // elsewhere (or undocked). Without this check that other ship's
-        // cargo could be moved into whichever station the player currently
-        // happens to be docked at (security-review.md SEC-3). Mirrors the
-        // same check `disassemble_ship_owned` already performs.
-        if self.docked_station(cmd.ship_id) != Some(cmd.station_id) {
-            return false;
-        }
-        let Some(&entity) = self.ships.index.get(&cmd.ship_id) else {
-            return false;
-        };
-        match cmd.direction {
-            TransferDirection::ToStation => {
-                let taken = self
-                    .world
-                    .get_mut::<InventoryComp>(entity)
-                    .map(|mut inv| inv.take_all(cmd.item_id))
-                    .unwrap_or(0);
-                if taken == 0 {
-                    return false;
-                }
-                self.credit_station_item(player_id, cmd.station_id, cmd.item_id, taken);
-                true
-            }
-            TransferDirection::ToShip => {
-                // Whole-stack here too, for symmetry with ToStation: how
-                // many the player currently has in Station inventory is
-                // exactly how many arrive in ship cargo.
-                let count = self.station_item_count(player_id, cmd.station_id, cmd.item_id);
-                if count == 0 {
-                    return false;
-                }
-                if self
-                    .try_debit_station_item(player_id, cmd.station_id, cmd.item_id, count)
-                    .is_err()
-                {
-                    return false;
-                }
-                if let Some(mut inv) = self.world.get_mut::<InventoryComp>(entity) {
-                    inv.add_item(cmd.item_id, count);
-                }
-                true
-            }
-        }
-    }
-
     /// Shared tail of `fit_module_owned`/`unfit_module_owned`: recompute
     /// `ShipStatsComp` from the new `FittingComp` (`reapply_fitting`), then
     /// tell the world about it (`emit_ship_fitted`, shared with
@@ -380,17 +174,15 @@ impl<S: EventStore> SimulationNode<S> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-enum MarketItemMutation {
-    Remove,
-    Add,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{modules, ship_types};
-    use dawn_core::{NodeId, Position, SectorBounds, SectorId, SlotKind};
+    use dawn_core::{
+        CreditItemCommand, NodeId, Position, RemoveItemCommand, ReturnItemCommand, SectorBounds,
+        SectorId, SlotKind, TransferToStationCommand,
+    };
+    use dawn_ecs::components::InventoryComp;
 
     fn total_items(inv: &InventoryComp) -> u64 {
         inv.items.values().copied().sum()

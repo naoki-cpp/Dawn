@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で issue を起票・状態更新するたびに更新
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）
-date     : 2026-07-11
+date     : 2026-07-17
 ---
 
 # Architecture Review — Dawn Codebase（未完項目）
@@ -152,25 +152,23 @@ scene node generation / network send / HUD adapter のオーケストレーシ�
 
 #### R-3（低優先・トリガー保留）: `node/` 系ファイルの再肥大（ADR-0031/0032/0033 後）
 
-2026-07-06 の再計測では `warp.rs` / `orbit.rs` / `commands.rs` / `station.rs` /
-`transit_flow.rs` が総行数で閾値帯に残っていた。2026-07-09 時点で `station.rs` は
-deepening により観察対象から外れ、さらに `serialization.rs` も
-`player_loadout_projection.rs` への分離で観察不要に戻った。2026-07-10 再計測では
-ADR-0038（Station inventory SQLite化）と 9B UI 仕上げの影響で watch 対象がさらに伸びた:
-`commands.rs` 1573（前回1460）・`warp.rs` 1093（前回1024）・`orbit.rs` 862（前回790）・
-`transit_flow.rs` 949（前回863）・`inventory.rs` 851（前回783）・`apply_event.rs` 887
-（前回806）・`snapshot_io.rs` 710（前回640、新たに watch 入り）。`spawner_logic.rs` は
-`/improve-codebase-architecture` 候補3（PR #69）で `process_bots`（Bot AI 決定ループ）を
+2026-07-17 の再計測では `commands.rs` 1642・`inventory.rs` 931・`ship_cargo.rs` 573・`warp.rs` 1088・
+`order_book.rs` 1030・`transit_flow.rs` 940・`apply_event.rs` 860・`node/mod.rs` 854・
+`orbit.rs` 836・`snapshot_io.rs` 702 がwatch帯に残った。Station operationsはPR #149で再整理され、
+`station_operation_execution.rs` 281へaccepted-operationの副作用を集約、`station_materialization.rs`
+は645、`station_lifecycle.rs`は410へ縮小したため、Stationの実装はR-3の観察対象から外す。
+さらにship cargo ownershipを`ship_cargo.rs`へ分離し、`inventory.rs`は931行のFit/Unfit/Reorder検証へ縮小した。
+`spawner_logic.rs` は `/improve-codebase-architecture` 候補3（PR #69）で `process_bots`（Bot AI 決定ループ）を
 `node/bot_ai.rs` へ抽出済みで、下記トリガー一覧から外れたまま。R-1（navigation.rs 分割）後に積まれた
 Orbit/KeepAtRange（ADR-0031）・Inventory（ADR-0032）・Repair（ADR-0033）・Station（ADR-0034/9B）の
-累積に加え、テストの増加がこれらのファイルの総行数を押し上げ続けている。
-**この watch 対象はいずれも impl（テスト除く）が700行未満か、少なくとも単一責務が保たれている**
-ため、下記トリガーは未発火。ただし `commands.rs` は impl 約687行まで迫っており、次回計測で
-最有力の着手候補になる見込み。
+累積に加え、テストと機能追加が総行数を押し上げ続けている。
+**watch対象のimplはいずれも700行未満で、単一責務も保たれている**ため、R-3の着手トリガーは未発火。
+ship cargo ownershipの次の設計候補は、`dawn-market/src/order_book.rs` とSector側bridgeの
+settlement順序を整理するMarket settlement module。ADR-0034の片側Command方針を維持し、新crateは前提にしない。
 `mod.rs` は同じ観察対象だったが、2026-07-06 の再計測で impl が700行を超えたため
 R-4 として切り出し着手判断へ格上げし、2026-07-07 に完了した（completed.md 参照）。その後
-2026-07-10 の再計測で `mod.rs` は 859 行（R-4 完了直後の821から38行増）に戻りつつあり、
-impl は約671行でまだ700行未満だが、R-4 と同じ蓄積パターンが再発しつつあることは記録しておく。
+2026-07-17 の再計測で `mod.rs` は854行、implは約443行。R-4と同じ再蓄積は観察対象として残すが、
+現時点で追加分割のトリガーには達していない。
 
 **根本原因**: 機能追加のたびに `node/` 直下へ impl + テストが積まれる構造。これ自体は
 P7 系で確立した「責務ごとに sibling モジュールへ抽出」方式の想定内の蓄積であり、
@@ -193,8 +191,8 @@ P7 系で確立した「責務ごとに sibling モジュールへ抽出」方�
 
 | 項目 | 種別 | 状態・理由 |
 |---|---|---|
-| R-2 client `main.gd` 分割 | 品質・一部着手済み | `WorldSession`・`WorldInteraction`・`WorldPresentation` 抽出で live world state / world interaction policy / world visual side effect を移動し、`main.gd` は 1217 行（詳細・最新値は client.md）。残る scene lifecycle / node generation / network send / HUD adapter は `.tscn` 化コンポーネントへのシーン参照切れリスクが上回るため保留 |
-| R-3 `node/` 系再肥大（warp/orbit/commands/transit_flow/inventory/apply_event/snapshot_io） | 品質・保留 | `station.rs` は 2026-07-09 の deepening で観察対象から外れた。2026-07-10 再計測で `inventory.rs`/`apply_event.rs`/`snapshot_io.rs` も watch 入り。総行数は閾値帯だが、少なくとも現時点では責務単位は保たれている。`commands.rs` の impl が約687で最も700行に近い。impl が 700 超、または test cluster を含めた見通し悪化が実害化した時点でファイル別に分割（トリガー付き・上記 R-3） |
+| R-2 client `main.gd` 分割 | 品質・一部着手済み | `WorldSession`・`WorldInteraction`・`WorldPresentation` 抽出で live world state / world interaction policy / world visual side effect を移動し、`main.gd` は 1219 行（詳細・最新値は client.md）。残る scene lifecycle / node generation / network send / HUD adapter は `.tscn` 化コンポーネントへのシーン参照切れリスクが上回るため保留 |
+| R-3 `node/` 系再肥大（warp/orbit/commands/transit_flow/inventory/apply_event/snapshot_io） | 品質・保留 | 2026-07-17再計測で `commands.rs` 1642・`inventory.rs` 931・`ship_cargo.rs` 573・`warp.rs` 1088・`order_book.rs` 1030などがwatch帯。Station operation executionとship cargo ownershipはdeep module化済み。各implは700行未満で責務単位も保たれるため保留し、次候補はMarket settlement。implが700超、またはtest clusterを含む見通し悪化が実害化した時点で分割 |
 | M-3 `SectorSimulatorActor` 密結合 | 品質・保留 | 本番パス外（in-process テスト/ベンチ専用）。P9-1 撤回。優先度低 |
 | M-6 アプリ層 adapter 重複（`data_loader` / `spawn_npcs`） | 許容重複（縮小） | AoI / production runtime / Command dispatch は deep module 化済み（M-7 解消で Command dispatch 項目を削除）。残る data_loader / NPC spawn は低頻度 glue として許容。再評価トリガー付き |
 | M-8 `fit_module`/`fit_module_owned` 共有テール重複 | 許容（2026-07-01） | `inventory.rs` のモジュールコメントで意図的な分離と明記済み。テールのみの軽微な重複で優先度なし |

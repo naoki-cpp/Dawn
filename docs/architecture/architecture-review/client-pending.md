@@ -4,13 +4,13 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で状態が変わるたびに更新
 related  : docs/architecture/architecture-review/client.md（構造評価）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）
-date     : 2026-07-10
+date     : 2026-07-17
 ---
 
 # Architecture Review — Dawn Client（未完項目）
 
-C-1〜C-9 は解消済み（[client.md](./client.md) の Issue ID 登録簿を参照）。
-~~C-9~~ 解消済み — see [client-completed.md](./client-completed.md)。
+C-1〜C-8 は解消済み。C-9は2026-07-17の再計測で再観測となった（[client.md](./client.md) の Issue ID 登録簿を参照）。
+過去の解消記録は [client-completed.md](./client-completed.md) に残し、現在の判断はこのファイルで管理する。
 
 `main.gd` の god object 問題は実質解消し、C-4（PlayerLoadout dict のスキーマ非検証）も
 C-8（インベントリ行 Dictionary の stringly-typed 設計）も typed row 化で解消したため、
@@ -20,11 +20,26 @@ C-8（インベントリ行 Dictionary の stringly-typed 設計）も typed row
 
 ---
 
+## C-9（再観測・2026-07-17）: `hud_manager.gd` のwatch帯再到達
+
+PR #143のtyped HUD refs導入で `hud_manager.gd` は789行から892行へ増加した。増分は
+`StatusPanelRefs` / `ShipStatusPanelRefs` / `TargetPanelRefs` / `InventoryPanelRefs` /
+`ModuleSlotRefs`など、HUD panelを構築・更新する同一責務の型定義と置換である。
+C-9を解消した `HudHitTest` の責務が戻ったわけではなく、HUD表示の変更理由も現時点では一つに保たれている。
+
+**判断: 再観測として保留。** 直ちにさらに分割すると、typed refsとpanel更新の対応関係を別ファイルへ散らし、
+今回得た型安全性を弱める。次のHUD機能追加で、panel構築・更新・typed refsに別々の変更理由が生じるかを確認する。
+
+再評価トリガー: `hud_manager.gd` がさらに増え、型定義・panel構築・panel更新のいずれかが独立して変更される状態に
+なったとき、または同ファイルのwatch帯超過が実害（変更時の回帰・テスト境界の不明瞭化）として現れたとき。
+
+---
+
 ## R-2 client `main.gd` 分割（サーバー側 pending.md と共通管理）
 
 サーバー側の `server-pending.md` にも記載されている項目。
 `WorldSession`・`WorldInteraction`・`WorldPresentation` 抽出で live world state /
-world interaction policy / world visual side effect を移動し、`main.gd` は 1217 行
+world interaction policy / world visual side effect を移動し、`main.gd` は 1219 行
 （client.md「ファイルサイズ一覧」参照。2026-07-10 再計測で前回1089から増加——
 ドラッグ&ドロップ状態機械・Disembark・SHIPS 列ハンドラの追加）。残る scene lifecycle /
 node generation / network send / HUD adapter は `.tscn` 化コンポーネントへのシーン参照切れ
