@@ -1,6 +1,8 @@
 //! Raft-cluster WebSocket server (`--serve --cluster`, ADR-0009/0014).
 
-use super::{build_serve_node, runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS};
+use super::{
+    build_serve_node, market::MarketRuntime, runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS,
+};
 use crate::{cluster, ws_server};
 use dawn_actor::protocol::ServerMessage;
 use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
@@ -51,6 +53,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         .iter()
         .map(|&id| build_serve_node(id, SectorId(id.0), bounds, pop_cap))
         .collect();
+    let mut market = MarketRuntime::open("data/market.sqlite")
+        .expect("failed to open Market database at data/market.sqlite");
 
     nodes[0].spawn_npc_frigates(ship_count);
 
@@ -142,6 +146,10 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         let mut lock_commands: Vec<Vec<dawn_core::LockOnCommand>> = vec![Vec::new(); SECTORS];
 
         for sess in sessions.iter_mut() {
+            while let Some(market_command) = sess.try_recv_market_command() {
+                let snapshot = market.handle_cluster(sess.player_id, market_command, &mut nodes);
+                sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
+            }
             let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
             while let Some(cmd) = sess.try_recv_command() {
                 let followup = nodes[sector].apply_client_command(

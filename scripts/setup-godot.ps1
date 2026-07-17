@@ -124,8 +124,9 @@ function Initialize-GdUnit {
 
 	Write-Output "Importing Godot project and warming script-class cache ..."
 	& $exePath --headless --editor --quit-after 3 --path $clientDir
-	if ($LASTEXITCODE -ne 0) {
-		throw "Godot project import failed with exit code $LASTEXITCODE"
+	$godotExitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+	if ($godotExitCode -ne 0) {
+		throw "Godot project import failed with exit code $godotExitCode"
 	}
 
 	if ($RunTests) {

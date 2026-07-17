@@ -10,8 +10,8 @@
 //! ## Protocol (ADR-0042)
 //!
 //! Every server -> client message (Hello/Welcome/Redirect/DomainEvent/
-//! ClientCommand/InitialState/PlayerLoadout/AoiEnter/AoiLeave/PositionSnap)
-//! travels as a binary WebSocket frame, postcard-encoded via the
+//! ClientCommand/Market/InitialState/PlayerLoadout/AoiEnter/AoiLeave/
+//! PositionSnap) travels as a binary WebSocket frame, postcard-encoded via the
 //! [`ClientMessage`]/[`ServerMessage`] envelope in `dawn-wire` (ADR-0042
 //! stages 1-2c). There is no more ad-hoc JSON text path. One WebSocket frame
 //! always carries exactly one message (no length-prefix framing needed;
@@ -23,11 +23,12 @@
 //! Server → Client:  ServerMessage::InitialState(..) (binary, postcard)
 //! Server → Client:  ServerMessage::Event(..)       (binary, postcard stream)
 //! Client → Server:  ClientMessage::Command(..)     (binary, postcard)
+//! Client → Server:  ClientMessage::Market(..)      (binary, postcard)
 //! ```
 
 use crate::protocol::{
-    domain_event_to_event_wire, ClientMessage, InitialStateWire, PlayerLoadoutWire, ResumeIdentity,
-    ServerMessage,
+    domain_event_to_event_wire, ClientMessage, InitialStateWire, MarketCommandWire,
+    PlayerLoadoutWire, ResumeIdentity, ServerMessage,
 };
 use crate::{ClientCommand, ClientConnection};
 use dawn_core::{DomainEvent, PlayerId, ShipId};
@@ -64,6 +65,7 @@ const COMMAND_QUEUE_CAP: usize = 256;
 pub struct WsClientConnection {
     event_tx: mpsc::UnboundedSender<Message>,
     command_rx: mpsc::Receiver<ClientCommand>,
+    market_command_rx: mpsc::Receiver<MarketCommandWire>,
 }
 
 impl WsClientConnection {
@@ -89,6 +91,10 @@ impl ClientConnection for WsClientConnection {
 
     fn try_recv_command(&mut self) -> Option<ClientCommand> {
         self.command_rx.try_recv().ok()
+    }
+
+    fn try_recv_market_command(&mut self) -> Option<MarketCommandWire> {
+        self.market_command_rx.try_recv().ok()
     }
 }
 
@@ -140,6 +146,8 @@ impl HandshakeRequest {
 
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Message>();
         let (command_tx, command_rx) = mpsc::channel::<ClientCommand>(COMMAND_QUEUE_CAP);
+        let (market_command_tx, market_command_rx) =
+            mpsc::channel::<MarketCommandWire>(COMMAND_QUEUE_CAP);
 
         // Send Welcome + InitialState + (optional) PlayerLoadout, all binary
         // (ADR-0042 stage 2b).
@@ -175,14 +183,26 @@ impl HandshakeRequest {
         tokio::spawn(async move {
             while let Some(Ok(msg)) = ws_source.next().await {
                 if let Message::Binary(bytes) = msg {
-                    if let Ok(ClientMessage::Command(cmd_wire)) = ClientMessage::decode(&bytes) {
-                        if let Some(cmd) = crate::protocol::client_command_from_wire(cmd_wire) {
-                            // Bounded send: blocks (backpressures the socket
-                            // read) once COMMAND_QUEUE_CAP is reached instead
-                            // of growing memory without limit.
-                            if command_tx.send(cmd).await.is_err() {
-                                return;
+                    if let Ok(message) = ClientMessage::decode(&bytes) {
+                        match message {
+                            ClientMessage::Command(cmd_wire) => {
+                                if let Some(cmd) =
+                                    crate::protocol::client_command_from_wire(cmd_wire)
+                                {
+                                    // Bounded send: blocks (backpressures the socket
+                                    // read) once COMMAND_QUEUE_CAP is reached instead
+                                    // of growing memory without limit.
+                                    if command_tx.send(cmd).await.is_err() {
+                                        return;
+                                    }
+                                }
                             }
+                            ClientMessage::Market(market_command) => {
+                                if market_command_tx.send(market_command).await.is_err() {
+                                    return;
+                                }
+                            }
+                            ClientMessage::Hello(_) => {}
                         }
                     }
                 }
@@ -193,6 +213,7 @@ impl HandshakeRequest {
         let conn = WsClientConnection {
             event_tx,
             command_rx,
+            market_command_rx,
         };
         println!(
             "[WsServer] {peer_addr} handshake complete: {player_id} ship={}",
@@ -215,6 +236,11 @@ impl PlayerSession {
     /// Pull one pending command, if any.
     pub fn try_recv_command(&mut self) -> Option<ClientCommand> {
         self.conn.try_recv_command()
+    }
+
+    /// Pull one pending Market request, if any.
+    pub fn try_recv_market_command(&mut self) -> Option<MarketCommandWire> {
+        self.conn.try_recv_market_command()
     }
 
     /// Send a [`ServerMessage`] as a postcard-encoded binary frame

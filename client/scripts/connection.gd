@@ -32,6 +32,8 @@ signal player_fitting_received(bytes: PackedByteArray)
 signal module_activated(ship_id: int, module_id: int, slot: String)
 ## ModuleDeactivated 受信時。reason は "cap" | "range" | ""（""=プレイヤー起因、ADR-0035）。
 signal module_deactivated(ship_id: int, module_id: int, slot: String, reason: String)
+## Current Market balance and bounded open-order snapshot.
+signal market_snapshot_received(snapshot: Dictionary)
 
 # ── 設定 ─────────────────────────────────────────────────────────────────────
 
@@ -238,6 +240,35 @@ func send_transfer_from_station_command(
 	_send_bytes(_cmd.transfer_from_station_command(
 		p_ship_id, p_station_id, p_item_type, p_module_id, p_ship_type_id))
 
+## Market requests use a separate wire envelope from Sector commands
+## (ADR-0034). The server answers each request with MarketSnapshot.
+func send_market_refresh_command() -> void:
+	_send_bytes(_cmd.market_build("RefreshMarketCommand", {}))
+
+func send_market_place_order_command(
+	p_ship_id: int,
+	p_item_type: String,
+	p_module_id: int,
+	p_ship_type_id: int,
+	p_side: String,
+	p_price: int,
+	p_quantity: int
+) -> void:
+	_send_bytes(_cmd.market_build("PlaceMarketOrderCommand", {
+		"ship_id": p_ship_id,
+		"item_type": p_item_type,
+		"module_id": p_module_id,
+		"ship_type_id": p_ship_type_id,
+		"side": p_side,
+		"price": p_price,
+		"quantity": p_quantity,
+	}))
+
+func send_market_cancel_order_command(p_order_id: int) -> void:
+	_send_bytes(_cmd.market_build("CancelMarketOrderCommand", {
+		"order_id": p_order_id,
+	}))
+
 func is_connected_to_server() -> bool:
 	return _connected and _welcomed
 
@@ -322,6 +353,8 @@ func _handle_message(payload: Dictionary, raw_bytes: PackedByteArray) -> void:
 			var slt: String = payload.get("slot",      "") as String
 			var rsn: String = payload.get("reason",    "") as String
 			module_deactivated.emit(sid, mid, slt, rsn)
+		"MarketSnapshot":
+			market_snapshot_received.emit(payload)
 		_:
 			event_received.emit(payload)
 

@@ -80,6 +80,7 @@
 mod client_command;
 mod hello_resume;
 mod initial_state;
+mod market;
 mod player_loadout;
 mod server_event;
 
@@ -91,6 +92,9 @@ pub use hello_resume::{HelloMessage, ResumeIdentity};
 pub use initial_state::{
     AbsPosWire, BuildableShipTypeWire, CelestialBodyWire, InitialStateWire, JumpGateWire,
     ShipStateWire, StationWire, SystemWire,
+};
+pub use market::{
+    market_command_wire_json_schema, MarketCommandWire, MarketOrderWire, MarketSnapshotWire,
 };
 pub use player_loadout::{
     ItemRowWire, ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, SlotCapacityWire,
@@ -130,6 +134,7 @@ pub enum ServerMessage {
         ship_id: u64,
         position: AbsPosWire,
     },
+    MarketSnapshot(MarketSnapshotWire),
 }
 
 impl ServerMessage {
@@ -153,6 +158,7 @@ impl ServerMessage {
 pub enum ClientMessage {
     Hello(HelloMessage),
     Command(ClientCommandWire),
+    Market(MarketCommandWire),
 }
 
 impl ClientMessage {

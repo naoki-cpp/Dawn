@@ -530,7 +530,10 @@ AI_DEVELOPMENT_GUIDE.md「Project North Star」に準拠。以下は EVE に存�
 > 「放置採掘」の対象外）、Station / Packaged Ship の Assemble・Disassemble。
 > 実装済み: `dawn-market` クレート（指値注文帳・`PlayerId` 単位の Currency 台帳、
 > List/Cancel/Settle の Item bridge command 生成）。未実装で ⬜なのは
-> クライアントMarket UIとSector側のruntime wiring（roadmap.md §12 9D）。方針として変わっていないのは
+> 2026-07-17、クライアントMarket UIとSector側のruntime wiringも実装済み。
+> `M`でMarket surfaceを開き、現在の板・Currency残高を確認し、所有船cargoから
+> Ask/Bidの指値発注と自分の注文のCancelを行う。Market専用wire envelopeを使い、
+> MarketはSectorへ直接アクセスしない。方針として変わっていないのは
 > 「能動的な判断を伴わない放置資源収集（採掘）」を入れないことのみ。
 
 ---

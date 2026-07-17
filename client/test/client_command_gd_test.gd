@@ -127,6 +127,23 @@ func test_build_returns_empty_bytes_for_a_missing_required_field() -> void:
 	assert_bool(bytes.is_empty()).is_true()
 
 
+func test_market_build_uses_the_market_envelope_and_preserves_order_fields() -> void:
+	var bytes := _cmd.market_build("PlaceMarketOrderCommand", {
+		"ship_id": 42,
+		"item_type": "ScrapMetal",
+		"module_id": 0,
+		"ship_type_id": 0,
+		"side": "Ask",
+		"price": 100,
+		"quantity": 3,
+	})
+	var d: Dictionary = _decoder.decode(bytes)
+	assert_str(d["type"]).is_equal("PlaceMarketOrderCommand")
+	assert_str(d["side"]).is_equal("Ask")
+	assert_int(int(d["ship_id"])).is_equal(42)
+	assert_int(int(d["quantity"])).is_equal(3)
+
+
 ## Hello (ADR-0007/ADR-0042): fresh connections carry no resume identity;
 ## clients following a Redirect resume with player_id/ship_id.
 func test_hello_command_carries_no_resume_identity_when_ids_are_negative() -> void:

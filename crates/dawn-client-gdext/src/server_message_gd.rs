@@ -112,5 +112,10 @@ fn server_message_to_dict(msg: &ServerMessage) -> Dict {
             d.set("position", &pos);
             d
         }
+        ServerMessage::MarketSnapshot(snapshot) => {
+            let mut d = struct_to_dict(snapshot, "MarketSnapshotWire");
+            d.set("type", "MarketSnapshot");
+            d
+        }
     }
 }

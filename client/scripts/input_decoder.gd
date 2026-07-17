@@ -106,6 +106,11 @@ static func decode_key(
 	if keycode == KEY_I:
 		return {"kind": "toggle_inventory_panel"}
 
+	## M key -> toggle the Market panel. The server still validates the active
+	## ship and item ownership when an order is submitted.
+	if keycode == KEY_M:
+		return {"kind": "toggle_market_panel"}
+
 	## D key -> dock at the nearby station when in range.
 	if keycode == KEY_D and player_ship_id >= 0:
 		if nearby_station_id >= 0 and docked_station_id < 0:

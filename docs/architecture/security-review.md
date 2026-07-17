@@ -6,10 +6,14 @@ related  : .claude/skills/security-check/SKILL.md,
            .claude/skills/security-check/references/owasp-map.md,
            .claude/skills/security-check/references/baseline.md（初回レビューの凍結記録）,
            docs/architecture/security-review-completed.md（解消済みfindingの作業ログ）
-date     : 2026-07-11
+date     : 2026-07-17
 ---
 
 # Security Review — Dawn Server（OWASP観点）
+
+2026-07-17 update: Market専用wire message、`dawn-simulation`のruntime
+bridge、`dawn-market`のopen-order snapshotをレビューした。ownership・入力値・SQL・
+queue/snapshot上限は健全。既存のSEC-1/SEC-2保留findingは変更なし。
 
 `/security-check`スキルによる、クライアントからの信頼できない入力がネットワークフレームから
 ゲーム状態変更に至るまでの経路レビュー。このファイルは「今どういう状態か」
@@ -32,8 +36,11 @@ date     : 2026-07-11
 |---|---|---|
 | WebSocketフレーム受信 | `crates/dawn-actor/src/ws_server.rs` | postcardバイナリフレーム（ADR-0042） |
 | コマンドデコード | `crates/dawn-wire/src/client_command.rs` | `ClientCommandWire` |
+| Marketデコード | `crates/dawn-wire/src/market.rs` | `MarketCommandWire`（Sector commandとは別queue） |
 | Hello/resumeハンドシェイク | `crates/dawn-wire/src/hello_resume.rs` | セッション識別（resume identity） |
 | コマンドディスパッチ | `crates/dawn-sector/src/node/commands.rs` + `command_station.rs` | 型付き`ClientCommand`適用 |
+| Market bridge | `crates/dawn-simulation/src/serve/market.rs` | 入力検証、所有船へのRemove/Return/Credit適用 |
+| Market SQL | `crates/dawn-market/src/order_book.rs` | `MarketDb`の注文帳/Currency台帳、全値をparameter binding |
 | ノード間トランスポート | `crates/dawn-consensus/src/tcp_transport.rs`（Raft）, `crates/dawn-replication/src/tcp.rs`/`snapshot.rs`（レプリケーション） | フレーム長上限あり、無認証（LAN方針内） |
 
 ---
@@ -51,20 +58,36 @@ date     : 2026-07-11
 クライアント文字列は全てclosedなmatchでenum化され、パス・シェル・フォーマット文字列への
 埋め込みなし。
 
+`dawn-market/src/order_book.rs`のmatching SQLも、`OrderSide`からサーバー内部で組み立てる
+比較・並び順以外の値は全て`params![]`で束縛する。クライアント文字列をSQL識別子へ
+通さず、Market item/sideもruntimeのclosed matchで変換する。
+
 ### A01 アクセス制御 — `_owned`ハンドラ群
 
 `fit_module_owned`/`unfit_module_owned`/`build_packaged_ship_owned`/`disassemble_ship_owned`は
 状態変更前に`owns_ship`+ドック状態を検証済み。`dock_owned`等は`active_ship`解決経由でそもそも
 クライアント供給IDを信頼しない設計。
 
+MarketのPlaceは`MarketRuntime`で`owns_ship(player_id, ship_id)`をRemove前に確認し、
+Cancelは`MarketDb`が注文所有者を確認した後、保存済みの船IDを`return_item_owned`へ渡す。
+single/clusterともCreditの宛先は`owns_ship`で検索したノードに限定される。
+
 ### A04 コマンド層のアロケーション
 
 `ClientCommandWire`はスカラーのみ。クライアント供給カウントが駆動する無制限ループ/アロケーションなし。
+
+`MarketCommandWire`もscalar-onlyで、per-sessionのMarket queueは既存command queueと同じ
+256件のbounded channel。`MarketSnapshot`は最大200注文で、DBの`open_orders_for`にも同じ
+LIMITを設定してからwireへ変換する。
 
 ### A08 データ整合性
 
 コマンドはID/意図のみを運び、コスト・数量はサーバー側定数。移動系コマンドは目標地点のみで
 物理演算はサーバーが権威を持つ。
+
+Marketのprice/quantityはプレイヤーの注文意図として受けるが、runtimeで0、
+`price * quantity`のu64 overflow、未知のitem/sideを拒否する。Currency escrowと
+matching結果は`MarketDb`が計算し、client supplied balance/trade resultは存在しない。
 
 ### A06 依存関係
 
