@@ -352,8 +352,10 @@ EVE の**グローバル** TiDi は大規模戦でゲームが 10 倍スロー�
   ならない、FBD-009 維持）。NPC Station への Dock/Undock（D / U キー）、Station 上で
   Scrap Metal を消費した Packaged Ship 建造（B キー）、無傷・未艤装確認つきの Disassemble
   （Y キー）、Packaged Ship から新しい稼働船を作る Assemble（ADR-0037、複数所有船
-  ロスターの SHIPS 列から選択）まで機能する。プレイヤー間 Market（`dawn-market`
-  クレート・指値注文帳・`PlayerId` 単位の Currency 台帳）は未実装
+  ロスターの SHIPS 列から選択）まで機能する。プレイヤー間 Market は基盤実装済み
+  （`dawn-market` クレート、SQLite 指値注文帳、`PlayerId` 単位の Currency 台帳、
+  List/Cancel/Settle の Item bridge command 生成）。クライアントからの発注UIと、
+  Sector側でbridge commandを適用するruntime wiringは未実装
   （`docs/process/roadmap.md` §12 9D 参照）。
 
 ### 4.2 将来検討する機能（優先順位付き・すべて未実装）
@@ -526,8 +528,9 @@ AI_DEVELOPMENT_GUIDE.md「Project North Star」に準拠。以下は EVE に存�
 > `docs/process/roadmap.md` §12 Phase 9 参照）。実装済み: `InventoryComp`
 > （Item 一般化・ADR-0034）、Scrap Metal（撃破からの即時ドロップのみ——
 > 「放置採掘」の対象外）、Station / Packaged Ship の Assemble・Disassemble。
-> 未実装で ⬜: `dawn-market` クレート（指値注文帳・`PlayerId` 単位の
-> Currency 台帳、roadmap.md §12 9D）。方針として変わっていないのは
+> 実装済み: `dawn-market` クレート（指値注文帳・`PlayerId` 単位の Currency 台帳、
+> List/Cancel/Settle の Item bridge command 生成）。未実装で ⬜なのは
+> クライアントMarket UIとSector側のruntime wiring（roadmap.md §12 9D）。方針として変わっていないのは
 > 「能動的な判断を伴わない放置資源収集（採掘）」を入れないことのみ。
 
 ---

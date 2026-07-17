@@ -13,19 +13,19 @@
 //! owns the affected ship.
 //!
 //! ```
-//! use dawn_core::{ItemId, ModuleId, PlayerId};
+//! use dawn_core::{ItemId, ModuleId, PlayerId, ShipId};
 //! use dawn_market::{MarketDb, OrderSide};
 //!
 //! let mut market = MarketDb::open_in_memory().unwrap();
 //! let item = ItemId::Module(ModuleId(1));
 //!
 //! // Seller lists 5 units at 100 -- no Currency required for an Ask.
-//! let listed = market.place_order(PlayerId(1), item, OrderSide::Ask, 100, 5).unwrap().unwrap();
+//! let listed = market.place_order(PlayerId(1), ShipId::new(dawn_core::NodeId(0), 1), item, OrderSide::Ask, 100, 5).unwrap().unwrap();
 //! assert!(listed.trades.is_empty());
 //!
 //! // Buyer needs Currency to place a Bid -- it's escrowed on placement.
 //! market.credit_currency(PlayerId(2), 1000).unwrap();
-//! let bought = market.place_order(PlayerId(2), item, OrderSide::Bid, 100, 3).unwrap().unwrap();
+//! let bought = market.place_order(PlayerId(2), ShipId::new(dawn_core::NodeId(0), 2), item, OrderSide::Bid, 100, 3).unwrap().unwrap();
 //! assert_eq!(bought.trades.len(), 1);
 //! assert_eq!(bought.trades[0].price, 100);
 //! assert_eq!(bought.trades[0].quantity, 3);
@@ -40,7 +40,10 @@
 //! 9D-1 established this crate's place in the Dependency DAG (leaf,
 //! `dawn-core` + serde + rusqlite only, same position as `dawn-wire`). 9D-2
 //! added the order book. 9D-3 (this slice) adds Currency escrow/settlement.
-//! The three bridging commands are 9D-4 follow-up work (roadmap.md §12).
+//! 9D-4 adds the three bridging command outputs: listing returns a
+//! `RemoveItemCommand`, Ask cancellation returns a `ReturnItemCommand`, and
+//! settlement returns one or more `CreditItemCommand`s. This crate still
+//! constructs those commands but never applies them itself.
 
 mod order_book;
 

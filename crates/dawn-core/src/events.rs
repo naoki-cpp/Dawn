@@ -38,7 +38,7 @@ pub enum DomainEvent {
     /// A Ship was permanently removed from the world.
     ShipDespawned(ShipDespawned),
 
-    /// A Ship's equipment loadout changed.
+    /// A Ship's equipment loadout and/or cargo projection changed.
     ShipFitted(ShipFitted),
 
     /// An Active module was turned on.
@@ -344,8 +344,8 @@ pub struct LockLost {
 
 // ── ShipFitted ────────────────────────────────────────────────────────────────
 
-/// 装備スロット全体のスナップショットを含む。
-/// Event Replay 時に FittingComp を完全復元するために必要（INV-002）。
+/// 装備スロット全体と船内インベントリ全体のスナップショットを含む。
+/// Event Replay 時に FittingComp / InventoryComp を完全復元するために必要（INV-002）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ShipFitted {
     pub ship_id: ShipId,
@@ -353,7 +353,8 @@ pub struct ShipFitted {
     pub fitting: FittingSnapshot,
     /// 変更後のインベントリ全体スナップショット（ADR-0032）。Fit/Unfit は常に
     /// 装備とインベントリの両方を同時に変えるため、新規イベント型を起こさず
-    /// 既存の ShipFitted に同梱する。
+    /// 既存の ShipFitted に同梱する。Market の片側 Item bridge command も
+    /// 装備を変えずにこのスナップショットを更新するため、同じイベントを再利用する。
     #[serde(default)]
     pub inventory: Vec<ItemId>,
     pub tick: Tick,
