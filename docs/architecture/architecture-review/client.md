@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / 新スク
 related  : docs/architecture/architecture-review/server.md（サーバー側）, docs/architecture/architecture.md, docs/process/playtest-guide.md,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-07-11（定期再計測 その4。ADR-0042（ワイヤプロトコルのpostcardバイナリ化）で `connection.gd` の受信バッファリング（改行区切りテキストの想定）が不要になり撤去、374→344。GdUnit4テストは202/202（`client_command_gd_test.gd`に`ClientMessageDecoder`/`hello_command`関連のテストを追加）。他ファイルは変化なし。client 総合 A を維持）
+date     : 2026-07-17（定期再計測 その5。PR #143のtyped HUD refsを反映。`hud_manager.gd` は789→892、`main.gd` は1217→1219、client/scripts合計は4924行。C-9を再観測としてclient-pendingへ戻し、GdUnit4 202ケース・テストコード2838行を確認。client総合はA−へ更新）
 ---
 
 # Architecture Review — Dawn Client（Godot・構造評価）
@@ -27,18 +27,16 @@ date     : 2026-07-11（定期再計測 その4。ADR-0042（ワイヤプロト�
 
 ## 現状評価
 
-**総合: A**（2026-07-10 再計測で維持。ADR-0039/0040 で `player_loadout.gd` 系3ファイルを
-`dawn-client-core`/`dawn-client-gdext` へ移植・削除し、`input_decoder.gd` の shipless
-soft-lock を修正したが、責務分担・結合度・保留課題の状態に新しい悪化はない。
-`main.gd` は 1217 行、補助モジュール群も引き続き 100〜370 行帯が中心で収まっている。
-GdUnit4 ケース数は実測202（2026-07-11、ADR-0042の`client_command_gd_test.gd`
-更新で`ClientMessageDecoder`/`hello_command`関連テストを追加し186→202）、
-テストコード総量は2,679→2,856行）
+**総合: A−**（2026-07-17 再計測。責務分担・結合度は健全で、`main.gd` のgod object化も再発していない。
+ただしPR #143のtyped HUD refs追加で `hud_manager.gd` が789→892行となり、C-9のwatch帯へ再到達した。
+この増加はHUD panel refsの型安全化という一貫した責務によるものだが、ファイルサイズ評価は一段下げる。
+`main.gd` は1219行、client/scripts合計は4924行。GdUnit4ケース数は202、テストコード総量は2838行で、
+既存の分割モジュールとテスト可能性は維持されている）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
 | ファイル分割 | A | `main.gd` から `HudManager`/`HudSurface`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder`/`WorldSession`/`WorldInteraction`/`WorldPresentation` を抽出。live world state は `WorldSession`、live HUD Control 参照は `HudSurface`、world interaction policy は `WorldInteraction`、world visual side effect は `WorldPresentation` が所有 |
-| `main.gd` の責務集約 | A | god object は実質解消。selection state・ダブルクリック・world selection 優先順位・dock/undock を含む action gating は `WorldInteraction` へ、floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation は `WorldPresentation` へ移動済み。`main.gd` に残るのは scene lifecycle / scene node generation / event dispatch / network send / HUD frame assembly。2026-07-08、複数所有船ロスター（SHIPS列）・右クリックでのTransferToStation送信ハンドラ・ドラッグ&ドロップ状態機械・Disembark（Xキー）を追加（1056→1210）が、既存の orchestration 層に自然に収まった |
+| `main.gd` の責務集約 | A | god object は実質解消。selection state・ダブルクリック・world selection 優先順位・dock/undock を含む action gating は `WorldInteraction` へ、floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation は `WorldPresentation` へ移動済み。`main.gd` に残るのは scene lifecycle / scene node generation / event dispatch / network send / HUD frame assembly。2026-07-08、複数所有船ロスター（SHIPS列）・右クリックでのTransferToStation送信ハンドラ・ドラッグ&ドロップ状態機械・Disembark（Xキー）を追加（1056→1219）が、既存の orchestration 層に自然に収まった |
 | 重複 | A− | マーカー生成・ピッキング・ワープ着地点計算の同型ロジックは解消済み（C-2） |
 | 結合度 | A | signal 経由の `connection.gd` ↔ `main.gd` 結合は良好。`@onready` のシーンツリー直パス参照はフェイルファストガードで解消（C-3）。modules/inventory dict のキー前提の脆さ（C-4）は `ModuleRow`/`ItemRow` typed row 化で解消済み。2026-07-08、`hud_manager.gd` のインベントリ行 Dictionary も `InventoryRow` typed class 化で解消（C-8） |
 | デッドコード | A | 残骸なし。コメントは ADR 参照付きで現状と一致 |
@@ -51,7 +49,35 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 
 ---
 
-## ファイルサイズ一覧（2026-07-10 時点）
+## 最新ファイルサイズ一覧（2026-07-17 再計測）
+
+| ファイル | 行数 | 判定 |
+|---|---:|---|
+| `client/scripts/main.gd` | 1219 | 🟢 orchestration層。scene lifecycle / node generation / event dispatch / network send / HUD frame assembly |
+| `client/scripts/hud_manager.gd` | 892 | 🟡 C-9再観測。HUD panel構築・更新とtyped refsに責務は揃うが、850行watch帯へ再到達 |
+| `client/scripts/world_session.gd` | 358 | 🟢 live world state専任 |
+| `client/scripts/connection.gd` | 346 | 🟢 WebSocket I/Oとsignal発行のみ |
+| `client/scripts/ship_controller.gd` | 342 | 🟢 単一船の視覚表現に専念 |
+| `client/scripts/world_presentation.gd` | 311 | 🟢 world visual side effect専任 |
+| `client/scripts/hud_surface.gd` | 233 | 🟢 HUD Control refsとrender frame委譲 |
+| `client/scripts/navigation_marker_renderer.gd` | 227 | 🟢 marker生成専任 |
+| `client/scripts/input_decoder.gd` | 158 | 🟢 input factsへの変換を行う純粋関数 |
+| `client/scripts/camera_controller.gd` | 142 | 🟢 orbit camera専任 |
+| `client/scripts/world_interaction.gd` | 133 | 🟢 selection / click→intent / key actionのdeep module |
+| `client/scripts/ship_picking.gd` | 104 | 🟢 画面空間ピッキング専任 |
+| `client/scripts/tactical_overlay.gd` | 93 | 🟢 射程リング描画専任 |
+| `client/scripts/inventory_row.gd` | 90 | 🟢 typed inventory row shape |
+| `client/scripts/world_space.gd` | 83 | 🟢 floating origin専任 |
+| `client/scripts/hud_hit_test.gd` | 80 | 🟢 HUD画面座標hit-test専任 |
+| `client/scripts/billboard_ring.gd` | 65 | 🟢 selection ring共通処理 |
+| `client/scripts/unit_format.gd` | 38 | 🟢 単位整形専任 |
+| `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 warp tunnel表示ラッパー |
+
+**client/scripts合計: 4,924行。** C-9の再到達は、hit-testの責務逆流ではなくPR #143のtyped refs追加による。
+`hud_manager.gd`を直ちに分割せず、型定義とpanel更新のcohesionを維持したまま、次のHUD機能追加で責務が
+複数の変更理由へ分かれた時点を再評価トリガーとする。
+
+## 前回ファイルサイズ一覧（2026-07-10 時点・履歴）
 
 > **2026-07-10、全ファイル再計測（`/architecture-review`）。** 現在の実測は
 > `main.gd` 1217・`hud_manager.gd` 789（C-9解消、850から-61）・`hud_hit_test.gd` 88（新設）・
@@ -102,7 +128,7 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/unit_format.gd` | 38 | 🟢 速度/距離の適応的単位整形（m/s・km/s・AU/s） |
 | `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 ワープトンネル ColorRect の intensity ラッパー |
 
-合計 4,826 行（2026-07-11 実測。前回4,856から、ADR-0042で`connection.gd`の
+合計 4,924 行（2026-07-17 実測。前回4,826から、PR #143のtyped HUD refs追加により増加。ADR-0042で`connection.gd`の
 改行バッファリング撤去により-30）のうち `main.gd` が25%を占める
 （C-1着手前69%から大幅低下、水準維持）。
 新設 static class 群（C-1 の5クラス + ADR-0029 の `world_space`/`unit_format`/`warp_tunnel_effect`
@@ -149,7 +175,8 @@ shape を保持する。scene 生成と network send は `main.gd` 側。PlayerL
 
 コード内コメントが参照する issue ID の一覧。詳細な解消経緯は
 [client-completed.md](./client-completed.md) を参照。
-現在 open な issue はなし。
+現在 open な issue は C-9 の再観測のみ。詳細な判断と再評価トリガーは
+[client-pending.md](./client-pending.md) を参照。
 
 | ID | 内容 | 状態 |
 |---|---|---|
@@ -161,7 +188,7 @@ shape を保持する。scene 生成と network send は `main.gd` 側。PlayerL
 | C-6 | client HUD Surface module | 解消済み |
 | C-7 | client World Interaction module | 解消済み |
 | C-8 | インベントリ行 Dictionary が stringly-typed のまま main.gd と合意している | 解消済み |
-| C-9 | `hud_manager.gd` が watch 帯（850行）に到達 | 解消済み |
+| C-9 | `hud_manager.gd` が watch 帯（850行）に到達 | 再観測（2026-07-17、892行）。hit-testの責務逆流ではなくtyped HUD refs追加による増加。 |
 
 **運用上の注意**: `class_name` を新規追加した直後は Godot がプロジェクトを
 スキャンするまでグローバル識別子として認識されない（CLI テストが
