@@ -13,8 +13,8 @@
 //! inventory snapshot too, ADR-0032 §5) -- no new event type.
 
 use dawn_core::{
-    FitModuleCommand, PlayerId, ReorderFittedModuleCommand, TransferDirection,
-    TransferToStationCommand, UnfitModuleCommand,
+    CreditItemCommand, FitModuleCommand, PlayerId, RemoveItemCommand, ReorderFittedModuleCommand,
+    ReturnItemCommand, TransferDirection, TransferToStationCommand, UnfitModuleCommand,
 };
 use dawn_ecs::{
     components::{FittedSlot, FittingComp, InventoryComp},
@@ -38,6 +38,103 @@ impl<S: EventStore> SimulationNode<S> {
             inventory.add(module_id);
         }
         let _ = self.world.insert_one(entity, inventory);
+    }
+
+    /// Remove `cmd.quantity` of `cmd.item_id` from the owned ship's cargo for
+    /// a Market Ask (ADR-0034 9D-4).
+    ///
+    /// The Market owns order matching and settlement, but it must not mutate a
+    /// Sector's ECS directly. The caller routes this bridge command to the
+    /// Sector that owns `cmd.ship_id`; this method performs the normal
+    /// ownership/inventory validation and persists the resulting inventory via
+    /// the existing `ShipFitted` snapshot event.
+    pub fn remove_item_owned(&mut self, cmd: RemoveItemCommand) -> bool {
+        self.apply_market_item_mutation(
+            cmd.player_id,
+            cmd.ship_id,
+            cmd.item_id,
+            cmd.quantity,
+            MarketItemMutation::Remove,
+        )
+    }
+
+    /// Return the remaining quantity of a cancelled Market Ask to the owned
+    /// ship's cargo (ADR-0034 9D-4).
+    pub fn return_item_owned(&mut self, cmd: ReturnItemCommand) -> bool {
+        self.apply_market_item_mutation(
+            cmd.player_id,
+            cmd.ship_id,
+            cmd.item_id,
+            cmd.quantity,
+            MarketItemMutation::Add,
+        )
+    }
+
+    /// Credit filled Market purchases to the owned ship's cargo
+    /// (ADR-0034 9D-4).
+    pub fn credit_item_owned(&mut self, cmd: CreditItemCommand) -> bool {
+        self.apply_market_item_mutation(
+            cmd.player_id,
+            cmd.ship_id,
+            cmd.item_id,
+            cmd.quantity,
+            MarketItemMutation::Add,
+        )
+    }
+
+    fn apply_market_item_mutation(
+        &mut self,
+        player_id: PlayerId,
+        ship_id: dawn_core::ShipId,
+        item_id: dawn_core::ItemId,
+        quantity: u64,
+        mutation: MarketItemMutation,
+    ) -> bool {
+        if quantity == 0 || !self.owns_ship(player_id, ship_id) {
+            return false;
+        }
+        let Some(&entity) = self.ships.index.get(&ship_id) else {
+            return false;
+        };
+
+        let changed = if let Some(mut inventory) = self.world.get_mut::<InventoryComp>(entity) {
+            match mutation {
+                MarketItemMutation::Remove => {
+                    let Some(current) = inventory.items.get(&item_id).copied() else {
+                        return false;
+                    };
+                    if current < quantity {
+                        return false;
+                    }
+                    if current == quantity {
+                        inventory.items.remove(&item_id);
+                    } else {
+                        inventory.items.insert(item_id, current - quantity);
+                    }
+                    true
+                }
+                MarketItemMutation::Add => {
+                    let current = inventory.item_count(item_id);
+                    let Some(next) = current.checked_add(quantity) else {
+                        return false;
+                    };
+                    inventory.items.insert(item_id, next);
+                    true
+                }
+            }
+        } else {
+            false
+        };
+
+        if !changed {
+            return false;
+        }
+
+        // ShipFitted is the existing full fitting/inventory snapshot event.
+        // Reuse it here so Market settlement remains replayable without a new
+        // wire event or a second partial inventory source of truth.
+        self.emit_ship_fitted(ship_id, entity);
+        true
     }
 
     /// Move one instance of `cmd.module_id` from the owning player's
@@ -283,6 +380,12 @@ impl<S: EventStore> SimulationNode<S> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum MarketItemMutation {
+    Remove,
+    Add,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,6 +455,156 @@ mod tests {
         let entity = *node.ships.index.get(&ship_id).unwrap();
         let inv = node.world.get::<InventoryComp>(entity).unwrap();
         assert_eq!(inv.items.len(), modules::all_modules().len());
+    }
+
+    #[test]
+    fn market_remove_item_owned_debits_exact_quantity_and_emits_snapshot() {
+        let mut node = node_with_modules();
+        let (player, ship_id) = spawn_owned_player(&mut node);
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.world
+            .get_mut::<InventoryComp>(entity)
+            .unwrap()
+            .add_item(dawn_core::ItemId::ScrapMetal, 5);
+
+        assert!(node.remove_item_owned(RemoveItemCommand {
+            player_id: player,
+            ship_id,
+            item_id: dawn_core::ItemId::ScrapMetal,
+            quantity: 2,
+        }));
+        assert_eq!(
+            node.world
+                .get::<InventoryComp>(entity)
+                .unwrap()
+                .item_count(dawn_core::ItemId::ScrapMetal),
+            3
+        );
+
+        let event = &node.event_store().all_records().last().unwrap().event;
+        let dawn_core::DomainEvent::ShipFitted(event) = event else {
+            panic!("market item removal must emit a ShipFitted snapshot");
+        };
+        assert_eq!(event.ship_id, ship_id);
+        assert_eq!(
+            event
+                .inventory
+                .iter()
+                .filter(|item| **item == dawn_core::ItemId::ScrapMetal)
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn market_return_and_credit_item_owned_add_to_the_same_cargo() {
+        let mut node = node_with_modules();
+        let (player, ship_id) = spawn_owned_player(&mut node);
+
+        assert!(node.return_item_owned(ReturnItemCommand {
+            player_id: player,
+            ship_id,
+            item_id: dawn_core::ItemId::ScrapMetal,
+            quantity: 2,
+        }));
+        assert!(node.credit_item_owned(CreditItemCommand {
+            player_id: player,
+            ship_id,
+            item_id: dawn_core::ItemId::ScrapMetal,
+            quantity: 3,
+        }));
+
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        assert_eq!(
+            node.world
+                .get::<InventoryComp>(entity)
+                .unwrap()
+                .item_count(dawn_core::ItemId::ScrapMetal),
+            5
+        );
+    }
+
+    #[test]
+    fn market_item_mutations_reject_invalid_owner_quantity_and_balance() {
+        let mut node = node_with_modules();
+        let (player, ship_id) = spawn_owned_player(&mut node);
+        let stranger = node.next_player_id();
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.world
+            .get_mut::<InventoryComp>(entity)
+            .unwrap()
+            .add_item(dawn_core::ItemId::ScrapMetal, 2);
+
+        let command = |player_id, quantity| RemoveItemCommand {
+            player_id,
+            ship_id,
+            item_id: dawn_core::ItemId::ScrapMetal,
+            quantity,
+        };
+        assert!(!node.remove_item_owned(command(stranger, 1)));
+        assert!(!node.remove_item_owned(command(player, 0)));
+        assert!(!node.remove_item_owned(command(player, 3)));
+        assert_eq!(
+            node.world
+                .get::<InventoryComp>(entity)
+                .unwrap()
+                .item_count(dawn_core::ItemId::ScrapMetal),
+            2
+        );
+
+        node.world
+            .get_mut::<InventoryComp>(entity)
+            .unwrap()
+            .items
+            .insert(dawn_core::ItemId::ScrapMetal, u64::MAX);
+        assert!(!node.credit_item_owned(CreditItemCommand {
+            player_id: player,
+            ship_id,
+            item_id: dawn_core::ItemId::ScrapMetal,
+            quantity: 1,
+        }));
+        assert_eq!(
+            node.world
+                .get::<InventoryComp>(entity)
+                .unwrap()
+                .item_count(dawn_core::ItemId::ScrapMetal),
+            u64::MAX
+        );
+    }
+
+    #[test]
+    fn market_item_snapshot_replay_restores_the_credited_cargo() {
+        let mut node = node_with_modules();
+        let (player, ship_id) = spawn_owned_player(&mut node);
+        assert!(node.credit_item_owned(CreditItemCommand {
+            player_id: player,
+            ship_id,
+            item_id: dawn_core::ItemId::ScrapMetal,
+            quantity: 4,
+        }));
+        let event = node
+            .event_store()
+            .all_records()
+            .last()
+            .unwrap()
+            .event
+            .clone();
+
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.world
+            .get_mut::<InventoryComp>(entity)
+            .unwrap()
+            .items
+            .clear();
+        node.apply_event_pub(event);
+
+        assert_eq!(
+            node.world
+                .get::<InventoryComp>(entity)
+                .unwrap()
+                .item_count(dawn_core::ItemId::ScrapMetal),
+            4
+        );
     }
 
     #[test]

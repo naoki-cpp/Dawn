@@ -16,7 +16,7 @@
 
 use crate::fitting::{ModuleId, SlotKind};
 use crate::navigation::{JumpGateId, StationId, WarpTarget};
-use crate::{ItemId, Position, SectorId, ShipId, ShipTypeId};
+use crate::{ItemId, PlayerId, Position, SectorId, ShipId, ShipTypeId};
 use serde::{Deserialize, Serialize};
 
 /// Request to move the caller's active ship to `target_position` within its
@@ -155,6 +155,40 @@ pub struct TransferToStationCommand {
     pub station_id: StationId,
     pub item_id: ItemId,
     pub direction: TransferDirection,
+}
+
+/// Request to remove an Item from a player's ship cargo for a Market listing
+/// (ADR-0034 §4, roadmap 9D-4).
+///
+/// This is an internal bridge command, not a client-facing `ClientCommand`.
+/// The caller routes it to the Sector that owns `ship_id` and applies the
+/// normal ownership and inventory validation there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoveItemCommand {
+    pub player_id: PlayerId,
+    pub ship_id: ShipId,
+    pub item_id: ItemId,
+    pub quantity: u64,
+}
+
+/// Request to return the remaining Item quantity from a cancelled Market Ask
+/// to the seller's ship cargo (ADR-0034 §4, roadmap 9D-4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReturnItemCommand {
+    pub player_id: PlayerId,
+    pub ship_id: ShipId,
+    pub item_id: ItemId,
+    pub quantity: u64,
+}
+
+/// Request to credit purchased Items to the buyer's ship cargo after Market
+/// settlement (ADR-0034 §4, roadmap 9D-4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreditItemCommand {
+    pub player_id: PlayerId,
+    pub ship_id: ShipId,
+    pub item_id: ItemId,
+    pub quantity: u64,
 }
 
 /// Which way `TransferToStationCommand` moves the stack.
@@ -574,6 +608,32 @@ mod tests {
         };
         assert_eq!(cmd.station_id, StationId(0));
         assert_eq!(cmd.ship_type_id, ShipTypeId(1));
+    }
+
+    #[test]
+    fn market_bridge_commands_carry_the_player_ship_item_and_quantity() {
+        let remove = RemoveItemCommand {
+            player_id: PlayerId(7),
+            ship_id: ship_id(3),
+            item_id: ItemId::ScrapMetal,
+            quantity: 2,
+        };
+        let returned = ReturnItemCommand {
+            player_id: remove.player_id,
+            ship_id: remove.ship_id,
+            item_id: remove.item_id,
+            quantity: remove.quantity,
+        };
+        let credited = CreditItemCommand {
+            player_id: PlayerId(8),
+            ship_id: ship_id(4),
+            item_id: remove.item_id,
+            quantity: remove.quantity,
+        };
+
+        assert_eq!(returned.player_id, remove.player_id);
+        assert_eq!(credited.ship_id, ship_id(4));
+        assert_eq!(credited.quantity, 2);
     }
 
     #[test]

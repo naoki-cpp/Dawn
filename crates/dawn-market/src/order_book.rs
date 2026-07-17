@@ -33,8 +33,23 @@
 //! immediately. When an Ask fills a resting Bid, the resting Bid's escrow
 //! already equals exactly `maker_price * quantity`, so it's paid out and
 //! consumed with no refund needed.
+//!
+//! # Sector bridge commands (9D-4)
+//!
+//! Each order records the ship whose cargo is the Item source or destination.
+//! `place_order` returns a `RemoveItemCommand` for an incoming Ask and one
+//! `CreditItemCommand` for each filled buyer. Cancelling an Ask returns a
+//! `ReturnItemCommand`. These are data-only outputs: applying them to a
+//! `SimulationNode` remains the caller's responsibility.
+//!
+//! Existing databases from before 9D-4 are migrated with a nullable `ship_id`.
+//! Those legacy rows remain matchable, but do not produce a bridge command
+//! because their cargo ship cannot be reconstructed safely.
 
-use dawn_core::{ItemId, ModuleId, PlayerId, ShipTypeId};
+use dawn_core::{
+    CreditItemCommand, EntityId, ItemId, ModuleId, PlayerId, RemoveItemCommand, ReturnItemCommand,
+    ShipId, ShipTypeId,
+};
 use rusqlite::{params, Connection, OptionalExtension};
 
 /// Which side of the book an order rests on.
@@ -88,15 +103,25 @@ pub struct Trade {
 pub struct PlaceOrderOutcome {
     pub trades: Vec<Trade>,
     pub resting_order_id: Option<OrderId>,
+    /// Remove the incoming Ask quantity from the seller's ship cargo.
+    pub remove_item_command: Option<RemoveItemCommand>,
+    /// Credit each buyer whose resting or incoming Bid was filled.
+    pub credit_item_commands: Vec<CreditItemCommand>,
 }
 
 /// The order a `cancel_order` call removed from the book.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CancelledOrder {
+    /// `None` only for an order created before 9D-4, when the legacy schema
+    /// did not retain the cargo ship. New orders always carry this identity.
+    pub ship_id: Option<ShipId>,
     pub item_id: ItemId,
     pub side: OrderSide,
     pub price: u64,
     pub quantity_remaining: u64,
+    /// Return the remaining Ask quantity to the seller's ship cargo. Bids
+    /// have no Item to return, so this is `None` for a cancelled Bid.
+    pub return_item_command: Option<ReturnItemCommand>,
 }
 
 fn item_id_to_columns(item_id: ItemId) -> (&'static str, u32, u32) {
@@ -175,6 +200,7 @@ fn try_debit_currency_raw(
 struct RestingOrder {
     order_id: i64,
     player_id: u64,
+    ship_id: Option<u64>,
     quantity_remaining: u64,
     price: u64,
     escrowed_currency: u64,
@@ -204,6 +230,7 @@ impl MarketDb {
             "CREATE TABLE IF NOT EXISTS orders (
                 order_id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 player_id           INTEGER NOT NULL,
+                ship_id             INTEGER,
                 side                TEXT    NOT NULL CHECK (side IN ('Bid', 'Ask')),
                 item_type           TEXT    NOT NULL,
                 module_id           INTEGER NOT NULL DEFAULT 0,
@@ -214,6 +241,20 @@ impl MarketDb {
             )",
             [],
         )?;
+        // 9D-4 added the cargo ship identity after the initial Market schema
+        // shipped. Keep existing orders readable: their identity is unknown,
+        // so they remain NULL and never produce a command for a guessed ship.
+        let has_ship_id: bool = conn.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM pragma_table_info('orders') WHERE name = 'ship_id'
+             )",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_ship_id {
+            conn.execute("ALTER TABLE orders ADD COLUMN ship_id INTEGER", [])?;
+        }
+
         conn.execute(
             "CREATE INDEX IF NOT EXISTS orders_matching_idx
                 ON orders (item_type, module_id, ship_type_id, side, price, order_id)",
@@ -252,6 +293,7 @@ impl MarketDb {
     pub fn place_order(
         &mut self,
         player_id: PlayerId,
+        ship_id: ShipId,
         item_id: ItemId,
         side: OrderSide,
         price: u64,
@@ -270,6 +312,7 @@ impl MarketDb {
         }
 
         let mut trades = Vec::new();
+        let mut credit_item_commands = Vec::new();
         let mut remaining = quantity;
         let mut refund_to_buyer: u64 = 0;
 
@@ -287,7 +330,7 @@ impl MarketDb {
                 OrderSide::Ask => ">=",
             };
             let query = format!(
-                "SELECT order_id, player_id, quantity_remaining, price, escrowed_currency
+                "SELECT order_id, player_id, ship_id, quantity_remaining, price, escrowed_currency
                  FROM orders
                  WHERE item_type = ?1 AND module_id = ?2 AND ship_type_id = ?3
                    AND side = ?4 AND price {cmp} ?5
@@ -308,9 +351,10 @@ impl MarketDb {
                 let resting = RestingOrder {
                     order_id: row.get(0)?,
                     player_id: row.get(1)?,
-                    quantity_remaining: row.get(2)?,
-                    price: row.get(3)?,
-                    escrowed_currency: row.get(4)?,
+                    ship_id: row.get(2)?,
+                    quantity_remaining: row.get(3)?,
+                    price: row.get(4)?,
+                    escrowed_currency: row.get(5)?,
                 };
                 let fill_qty = remaining.min(resting.quantity_remaining);
                 remaining -= fill_qty;
@@ -337,9 +381,13 @@ impl MarketDb {
                     )?;
                 }
 
-                let (buyer, seller) = match side {
-                    OrderSide::Bid => (player_id, PlayerId(resting.player_id)),
-                    OrderSide::Ask => (PlayerId(resting.player_id), player_id),
+                let (buyer, seller, buyer_ship_id) = match side {
+                    OrderSide::Bid => (player_id, PlayerId(resting.player_id), Some(ship_id)),
+                    OrderSide::Ask => (
+                        PlayerId(resting.player_id),
+                        player_id,
+                        resting.ship_id.map(|raw| ShipId(EntityId::from_raw(raw))),
+                    ),
                 };
                 let proceeds = resting.price * fill_qty;
                 credit_currency_raw(&tx, seller.raw(), proceeds)?;
@@ -359,6 +407,14 @@ impl MarketDb {
                     price: resting.price,
                     quantity: fill_qty,
                 });
+                if let Some(ship_id) = buyer_ship_id {
+                    credit_item_commands.push(CreditItemCommand {
+                        player_id: buyer,
+                        ship_id,
+                        item_id,
+                        quantity: fill_qty,
+                    });
+                }
             }
         }
 
@@ -374,10 +430,11 @@ impl MarketDb {
             };
             tx.execute(
                 "INSERT INTO orders
-                    (player_id, side, item_type, module_id, ship_type_id, price, quantity_remaining, escrowed_currency)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    (player_id, ship_id, side, item_type, module_id, ship_type_id, price, quantity_remaining, escrowed_currency)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     player_id.raw(),
+                    ship_id.raw(),
                     side.as_column_value(),
                     item_type,
                     module_id,
@@ -396,6 +453,15 @@ impl MarketDb {
         Ok(Ok(PlaceOrderOutcome {
             trades,
             resting_order_id,
+            remove_item_command: (side == OrderSide::Ask && quantity > 0).then_some(
+                RemoveItemCommand {
+                    player_id,
+                    ship_id,
+                    item_id,
+                    quantity,
+                },
+            ),
+            credit_item_commands,
         }))
     }
 
@@ -413,20 +479,21 @@ impl MarketDb {
         let tx = self.conn.transaction()?;
         let row = tx
             .query_row(
-                "SELECT player_id, side, item_type, module_id, ship_type_id, price,
+                "SELECT player_id, ship_id, side, item_type, module_id, ship_type_id, price,
                         quantity_remaining, escrowed_currency
                  FROM orders WHERE order_id = ?1",
                 params![order_id.0],
                 |row| {
                     Ok((
                         row.get::<_, u64>(0)?,
-                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<u64>>(1)?,
                         row.get::<_, String>(2)?,
-                        row.get::<_, u32>(3)?,
+                        row.get::<_, String>(3)?,
                         row.get::<_, u32>(4)?,
-                        row.get::<_, u64>(5)?,
+                        row.get::<_, u32>(5)?,
                         row.get::<_, u64>(6)?,
                         row.get::<_, u64>(7)?,
+                        row.get::<_, u64>(8)?,
                     ))
                 },
             )
@@ -434,6 +501,7 @@ impl MarketDb {
 
         let Some((
             owner,
+            ship_id,
             side,
             item_type,
             module_id,
@@ -461,11 +529,23 @@ impl MarketDb {
         let Some(item_id) = columns_to_item_id(&item_type, module_id, ship_type_id) else {
             return Ok(None);
         };
+        let side = columns_to_side(&side);
         Ok(Some(CancelledOrder {
+            ship_id: ship_id.map(|raw| ShipId(EntityId::from_raw(raw))),
             item_id,
-            side: columns_to_side(&side),
+            side,
             price,
             quantity_remaining,
+            return_item_command: (side == OrderSide::Ask)
+                .then(|| {
+                    ship_id.map(|ship_id| ReturnItemCommand {
+                        player_id,
+                        ship_id: ShipId(EntityId::from_raw(ship_id)),
+                        item_id,
+                        quantity: quantity_remaining,
+                    })
+                })
+                .flatten(),
         }))
     }
 }
@@ -478,22 +558,36 @@ mod tests {
         ItemId::ScrapMetal
     }
 
+    fn ship(n: u64) -> ShipId {
+        ShipId::new(dawn_core::NodeId(0), n)
+    }
+
     #[test]
     fn an_order_with_nothing_to_cross_just_rests_on_the_book() {
         let mut market = MarketDb::open_in_memory().unwrap();
         let outcome = market
-            .place_order(PlayerId(1), scrap(), OrderSide::Ask, 100, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
             .unwrap()
             .unwrap();
         assert!(outcome.trades.is_empty());
         assert!(outcome.resting_order_id.is_some());
+        assert_eq!(
+            outcome.remove_item_command,
+            Some(RemoveItemCommand {
+                player_id: PlayerId(1),
+                ship_id: ship(1),
+                item_id: scrap(),
+                quantity: 5,
+            })
+        );
+        assert!(outcome.credit_item_commands.is_empty());
     }
 
     #[test]
     fn a_crossing_order_fills_at_the_resting_orders_price() {
         let mut market = MarketDb::open_in_memory().unwrap();
         market
-            .place_order(PlayerId(1), scrap(), OrderSide::Ask, 100, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
             .unwrap()
             .unwrap();
 
@@ -501,7 +595,7 @@ mod tests {
         // Buyer bids higher than the ask -- fills at the resting Ask price
         // (100), not the bid price (120).
         let outcome = market
-            .place_order(PlayerId(2), scrap(), OrderSide::Bid, 120, 3)
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Bid, 120, 3)
             .unwrap()
             .unwrap();
 
@@ -512,19 +606,28 @@ mod tests {
         assert_eq!(trade.price, 100);
         assert_eq!(trade.quantity, 3);
         assert!(outcome.resting_order_id.is_none());
+        assert_eq!(
+            outcome.credit_item_commands,
+            vec![CreditItemCommand {
+                player_id: PlayerId(2),
+                ship_id: ship(2),
+                item_id: scrap(),
+                quantity: 3,
+            }]
+        );
     }
 
     #[test]
     fn partial_fill_leaves_the_remainder_resting() {
         let mut market = MarketDb::open_in_memory().unwrap();
         market
-            .place_order(PlayerId(1), scrap(), OrderSide::Ask, 100, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
             .unwrap()
             .unwrap();
 
         market.credit_currency(PlayerId(2), 1000).unwrap();
         let outcome = market
-            .place_order(PlayerId(2), scrap(), OrderSide::Bid, 100, 8)
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Bid, 100, 8)
             .unwrap()
             .unwrap();
 
@@ -539,17 +642,17 @@ mod tests {
         let mut market = MarketDb::open_in_memory().unwrap();
         // Two Asks: 110 first, then a cheaper 100.
         market
-            .place_order(PlayerId(1), scrap(), OrderSide::Ask, 110, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 110, 5)
             .unwrap()
             .unwrap();
         market
-            .place_order(PlayerId(2), scrap(), OrderSide::Ask, 100, 5)
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Ask, 100, 5)
             .unwrap()
             .unwrap();
 
         market.credit_currency(PlayerId(3), 1000).unwrap();
         let outcome = market
-            .place_order(PlayerId(3), scrap(), OrderSide::Bid, 110, 5)
+            .place_order(PlayerId(3), ship(3), scrap(), OrderSide::Bid, 110, 5)
             .unwrap()
             .unwrap();
 
@@ -564,17 +667,17 @@ mod tests {
     fn time_priority_breaks_ties_at_the_same_price() {
         let mut market = MarketDb::open_in_memory().unwrap();
         market
-            .place_order(PlayerId(1), scrap(), OrderSide::Ask, 100, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
             .unwrap()
             .unwrap();
         market
-            .place_order(PlayerId(2), scrap(), OrderSide::Ask, 100, 5)
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Ask, 100, 5)
             .unwrap()
             .unwrap();
 
         market.credit_currency(PlayerId(3), 1000).unwrap();
         let outcome = market
-            .place_order(PlayerId(3), scrap(), OrderSide::Bid, 100, 5)
+            .place_order(PlayerId(3), ship(3), scrap(), OrderSide::Bid, 100, 5)
             .unwrap()
             .unwrap();
 
@@ -588,14 +691,14 @@ mod tests {
     fn a_non_crossing_order_does_not_match() {
         let mut market = MarketDb::open_in_memory().unwrap();
         market
-            .place_order(PlayerId(1), scrap(), OrderSide::Ask, 100, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
             .unwrap()
             .unwrap();
 
         market.credit_currency(PlayerId(2), 1000).unwrap();
         // Bid below the Ask -- no cross.
         let outcome = market
-            .place_order(PlayerId(2), scrap(), OrderSide::Bid, 90, 5)
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Bid, 90, 5)
             .unwrap()
             .unwrap();
 
@@ -607,13 +710,13 @@ mod tests {
     fn self_trading_is_allowed_and_matches_like_any_other_pair() {
         let mut market = MarketDb::open_in_memory().unwrap();
         market
-            .place_order(PlayerId(1), scrap(), OrderSide::Ask, 100, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
             .unwrap()
             .unwrap();
 
         market.credit_currency(PlayerId(1), 1000).unwrap();
         let outcome = market
-            .place_order(PlayerId(1), scrap(), OrderSide::Bid, 100, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Bid, 100, 5)
             .unwrap()
             .unwrap();
 
@@ -628,6 +731,7 @@ mod tests {
         market
             .place_order(
                 PlayerId(1),
+                ship(1),
                 ItemId::PackagedShip(ShipTypeId(7)),
                 OrderSide::Ask,
                 100,
@@ -638,7 +742,7 @@ mod tests {
 
         market.credit_currency(PlayerId(2), 1000).unwrap();
         let outcome = market
-            .place_order(PlayerId(2), scrap(), OrderSide::Bid, 100, 5)
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Bid, 100, 5)
             .unwrap()
             .unwrap();
 
@@ -649,7 +753,7 @@ mod tests {
     fn cancel_order_removes_it_and_returns_its_details() {
         let mut market = MarketDb::open_in_memory().unwrap();
         let outcome = market
-            .place_order(PlayerId(1), scrap(), OrderSide::Ask, 100, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
             .unwrap()
             .unwrap();
         let order_id = outcome.resting_order_id.unwrap();
@@ -658,10 +762,17 @@ mod tests {
         assert_eq!(
             cancelled,
             Some(CancelledOrder {
+                ship_id: Some(ship(1)),
                 item_id: scrap(),
                 side: OrderSide::Ask,
                 price: 100,
                 quantity_remaining: 5,
+                return_item_command: Some(ReturnItemCommand {
+                    player_id: PlayerId(1),
+                    ship_id: ship(1),
+                    item_id: scrap(),
+                    quantity: 5,
+                }),
             })
         );
 
@@ -669,7 +780,7 @@ mod tests {
         // finds nothing to match.
         market.credit_currency(PlayerId(2), 1000).unwrap();
         let after = market
-            .place_order(PlayerId(2), scrap(), OrderSide::Bid, 100, 5)
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Bid, 100, 5)
             .unwrap()
             .unwrap();
         assert!(after.trades.is_empty());
@@ -679,7 +790,7 @@ mod tests {
     fn cancel_order_rejects_a_player_who_does_not_own_it() {
         let mut market = MarketDb::open_in_memory().unwrap();
         let outcome = market
-            .place_order(PlayerId(1), scrap(), OrderSide::Ask, 100, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
             .unwrap()
             .unwrap();
         let order_id = outcome.resting_order_id.unwrap();
@@ -693,6 +804,54 @@ mod tests {
         let mut market = MarketDb::open_in_memory().unwrap();
         let result = market.cancel_order(PlayerId(1), OrderId(999)).unwrap();
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn opening_a_pre_9d4_database_migrates_orders_without_guessing_ship_ids() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE orders (
+                order_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                player_id           INTEGER NOT NULL,
+                side                TEXT    NOT NULL,
+                item_type           TEXT    NOT NULL,
+                module_id           INTEGER NOT NULL DEFAULT 0,
+                ship_type_id        INTEGER NOT NULL DEFAULT 0,
+                price               INTEGER NOT NULL,
+                quantity_remaining  INTEGER NOT NULL,
+                escrowed_currency   INTEGER NOT NULL DEFAULT 0
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO orders
+                (player_id, side, item_type, module_id, ship_type_id, price,
+                 quantity_remaining, escrowed_currency)
+             VALUES (1, 'Ask', 'ScrapMetal', 0, 0, 100, 5, 0)",
+            [],
+        )
+        .unwrap();
+
+        let mut market = MarketDb::init(conn).unwrap();
+        let has_ship_id: bool = market
+            .conn
+            .query_row(
+                "SELECT EXISTS(
+                     SELECT 1 FROM pragma_table_info('orders') WHERE name = 'ship_id'
+                 )",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(has_ship_id);
+
+        let cancelled = market
+            .cancel_order(PlayerId(1), OrderId(1))
+            .unwrap()
+            .expect("legacy order should remain cancellable");
+        assert_eq!(cancelled.ship_id, None);
+        assert_eq!(cancelled.return_item_command, None);
     }
 
     // -- Currency escrow (9D-3) ---------------------------------------------
@@ -716,7 +875,7 @@ mod tests {
         let mut market = MarketDb::open_in_memory().unwrap();
         market.credit_currency(PlayerId(1), 1000).unwrap();
         market
-            .place_order(PlayerId(1), scrap(), OrderSide::Bid, 100, 4)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Bid, 100, 4)
             .unwrap()
             .unwrap();
         // 1000 - (100 * 4) = 600.
@@ -728,7 +887,7 @@ mod tests {
         let mut market = MarketDb::open_in_memory().unwrap();
         market.credit_currency(PlayerId(1), 100).unwrap();
         let result = market
-            .place_order(PlayerId(1), scrap(), OrderSide::Bid, 100, 4)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Bid, 100, 4)
             .unwrap();
         assert_eq!(result, Err(InsufficientBalance));
         // Balance untouched -- nothing was placed or escrowed.
@@ -740,7 +899,7 @@ mod tests {
         let mut market = MarketDb::open_in_memory().unwrap();
         // Seller has zero Currency -- an Ask must still be placeable.
         let outcome = market
-            .place_order(PlayerId(1), scrap(), OrderSide::Ask, 100, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
             .unwrap()
             .unwrap();
         assert!(outcome.resting_order_id.is_some());
@@ -752,14 +911,20 @@ mod tests {
         let mut market = MarketDb::open_in_memory().unwrap();
         market.credit_currency(PlayerId(1), 1000).unwrap();
         let outcome = market
-            .place_order(PlayerId(1), scrap(), OrderSide::Bid, 100, 4)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Bid, 100, 4)
             .unwrap()
             .unwrap();
         assert_eq!(market.currency_balance(PlayerId(1)).unwrap(), 600);
 
-        market
+        let cancelled = market
             .cancel_order(PlayerId(1), outcome.resting_order_id.unwrap())
             .unwrap();
+        assert_eq!(
+            cancelled
+                .expect("the resting Bid must exist")
+                .return_item_command,
+            None
+        );
         assert_eq!(market.currency_balance(PlayerId(1)).unwrap(), 1000);
     }
 
@@ -767,13 +932,13 @@ mod tests {
     fn a_fill_credits_the_seller_at_the_makers_price() {
         let mut market = MarketDb::open_in_memory().unwrap();
         market
-            .place_order(PlayerId(1), scrap(), OrderSide::Ask, 100, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
             .unwrap()
             .unwrap();
 
         market.credit_currency(PlayerId(2), 1000).unwrap();
         market
-            .place_order(PlayerId(2), scrap(), OrderSide::Bid, 100, 5)
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Bid, 100, 5)
             .unwrap()
             .unwrap();
 
@@ -785,7 +950,7 @@ mod tests {
     fn a_bid_crossing_a_cheaper_ask_is_refunded_the_price_improvement() {
         let mut market = MarketDb::open_in_memory().unwrap();
         market
-            .place_order(PlayerId(1), scrap(), OrderSide::Ask, 100, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
             .unwrap()
             .unwrap();
 
@@ -793,7 +958,7 @@ mod tests {
         // Bid at 120 crosses the 100 Ask -- escrows 600 (120*5) up front,
         // fills at 100, so 100 (5*(120-100)) should come back.
         market
-            .place_order(PlayerId(2), scrap(), OrderSide::Bid, 120, 5)
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Bid, 120, 5)
             .unwrap()
             .unwrap();
 
@@ -807,32 +972,50 @@ mod tests {
         let mut market = MarketDb::open_in_memory().unwrap();
         market.credit_currency(PlayerId(1), 1000).unwrap();
         market
-            .place_order(PlayerId(1), scrap(), OrderSide::Bid, 100, 5)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Bid, 100, 5)
             .unwrap()
             .unwrap();
         assert_eq!(market.currency_balance(PlayerId(1)).unwrap(), 500);
 
         // Seller's Ask at 90 still fills at the resting Bid's price (100).
-        market
-            .place_order(PlayerId(2), scrap(), OrderSide::Ask, 90, 5)
+        let outcome = market
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Ask, 90, 5)
             .unwrap()
             .unwrap();
 
         assert_eq!(market.currency_balance(PlayerId(1)).unwrap(), 500);
         assert_eq!(market.currency_balance(PlayerId(2)).unwrap(), 500);
+        assert_eq!(
+            outcome.remove_item_command,
+            Some(RemoveItemCommand {
+                player_id: PlayerId(2),
+                ship_id: ship(2),
+                item_id: scrap(),
+                quantity: 5,
+            })
+        );
+        assert_eq!(
+            outcome.credit_item_commands,
+            vec![CreditItemCommand {
+                player_id: PlayerId(1),
+                ship_id: ship(1),
+                item_id: scrap(),
+                quantity: 5,
+            }]
+        );
     }
 
     #[test]
     fn a_partially_filled_bids_leftover_escrow_matches_its_remaining_quantity() {
         let mut market = MarketDb::open_in_memory().unwrap();
         market
-            .place_order(PlayerId(1), scrap(), OrderSide::Ask, 100, 3)
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 3)
             .unwrap()
             .unwrap();
 
         market.credit_currency(PlayerId(2), 1000).unwrap();
         let outcome = market
-            .place_order(PlayerId(2), scrap(), OrderSide::Bid, 100, 8)
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Bid, 100, 8)
             .unwrap()
             .unwrap();
         // 3 filled at 100 (=300), 5 remain resting with 500 still escrowed.
