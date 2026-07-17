@@ -233,7 +233,9 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 - [x] dawn-sector: Disassemble コマンド・バリデーション（無傷・未艤装チェック、出力は Station inventory 上の `PackagedShip`、**docked 中のみ**）
 - [x] dawn-sector: Packaged Ship 建造（Scrap Metal 消費、入出力とも Station inventory、**docked 中のみ**。MVP コストは `1 Scrap Metal / 1 hull` の固定値）
 - [x] 新規クレート `dawn-market` の Dependency DAG 上の位置を確定（2026-07-13、`dawn-wire`と同じ葉クレート。`dawn-simulation`にのみ組み込み、`dawn-sector-node`への配線は別タスク。詳細は roadmap.md §12 9D-1）
-- [ ] `dawn-market`: SQLite バックエンドの指値注文帳（bid/ask マッチング）・`PlayerId` 単位の Currency 台帳・`RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` 発行経路
+- [x] `dawn-market`: SQLite バックエンドの指値注文帳（bid/ask マッチング、2026-07-13。roadmap.md §12 9D-2）
+- [x] `dawn-market`: `PlayerId` 単位の Currency 台帳（Bid時エスクロー・約定時決済・Cancel時払い戻し、2026-07-13。roadmap.md §12 9D-3）
+- [ ] `dawn-market`: `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` 発行経路（roadmap.md §12 9D-4）
 - [x] client: Dock/Undock + Station操作UI（入港状態の表示と `D` / `U` / `B` / `Y` 操作、Packaged Ship のインベントリ表示、Assemble/Disassemble/建造UI すべて実装済み。`main.gd` の `ACTION_ASSEMBLE`/`ACTION_DISASSEMBLE`、`connection.gd` の `send_assemble_command`/`send_disassemble_ship_command`/`send_build_packaged_ship_command`）
 - [ ] client: Market閲覧UI（指値注文の発注・Currency残高表示）
 - [x] CONTEXT.md: `Item`/`Packaged Ship`/`Station`/`Scrap Metal`/`Currency` を追記済み（本セッション中）
