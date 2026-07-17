@@ -333,7 +333,7 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
 |---|---|---|---|
 | 1 | 新規クレート `dawn-market` の Dependency DAG 上の位置を確定 | 2026-07-13、`/grilling`で実行トポロジーを決定: まず`dawn-simulation`（インプロセス）にのみ組み込み、`dawn-sector-node`（本番マルチノード）への配線は別タスクへ後回し（8D方式と同じ順序）。DAG上は`dawn-wire`と同じ葉クレート（`dawn-core`+serde+rusqliteのみ、`dawn-ecs`/`dawn-event-store`/`dawn-sector`に非依存）。Market系`ClientCommand`バリアント（List/Bid/Cancel）は`dawn-simulation`の受信ループで`apply_client_command`を呼ぶ前に振り分け、`dawn-sector`は`dawn-market`を一切知らない。クレート自体は新設・ワークスペース登録・DAGドキュメント更新のみで、公開APIは9D-2以降 | ✅ |
 | 2 | SQLite バックエンドの指値注文帳（bid/ask マッチング） | 2026-07-13実装完了。`dawn-market::MarketDb`（`order_book.rs`）。同価格内の優先順位はSQLiteの`rowid`（挿入順）にそのまま任せ、`Tick`は一切登場しない（`/grilling`で決定、dawn-marketをtick非決定性から独立させたまま）。約定は常にresting(maker)側の価格で成立。自己約定（同一PlayerIdのBid/Askが交差）は禁止せず通常通りマッチ（`/grilling`で決定）。部分約定対応（残数量は板に残る）。trades履歴テーブルは作らず`place_order`の戻り値（`Vec<Trade>`）のみ（9D-5で必要になれば追加）。テスト11件+doctest1件 | ✅ |
-| 3 | `PlayerId` 単位の Currency 台帳 | Itemではない。ShipDestroyedで失われない（ADR-0034 §5） | ⬜ |
+| 3 | `PlayerId` 単位の Currency 台帳 | 2026-07-13実装完了。`dawn-market::MarketDb`の`currency`テーブル（`balance >= 0`をCHECK制約で保証）+`currency_balance`/`credit_currency`。`/grilling`で決定: BidはPlace時に`price×quantity`を即座にエスクロー（複数Bid同時発行での二重予約を防止、`orders.escrowed_currency`列）、Askはエスクロー不要（Itemは既にMarket側に渡っている前提）。約定は常にresting(maker)価格で決済し、Bidがエスクロー額より安く約定した差額は買い手へ即時払い戻し。Cancel時は残りエスクローを払い戻す。残高不足は`InsufficientBalance`として型で区別（SQLiteエラーとは別レイヤー）。テスト11件追加（22件+doctest1件） | ✅ |
 | 4 | `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand`（List/Cancel/Settle） | 常に片側1Sectorだけへ発行。Transit/Raft合意は不要（ADR-0034 §4） | ⬜ |
 | 5 | client: Market閲覧UI（指値注文の発注・Currency残高表示） | | ⬜ |
 
