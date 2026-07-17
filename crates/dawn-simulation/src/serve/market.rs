@@ -1,27 +1,18 @@
 //! Market request handling for the WebSocket serve loops (ADR-0034 §4).
 //!
-//! This module is the runtime bridge between the Market authority and Sector
-//! cargo ownership. `dawn-market` decides matching and Currency; this module
-//! validates untrusted wire input, applies the one-sided cargo commands, and
-//! sends a bounded snapshot back to the client.
+//! This module is the request-facing bridge between the Market authority and
+//! Sector cargo ownership. `dawn-market` decides matching and Currency; the
+//! sibling `market_settlement` module owns the one-sided cargo handoff, while
+//! this module validates wire input and sends bounded snapshots to the client.
 
 use dawn_actor::protocol::{MarketCommandWire, MarketOrderWire, MarketSnapshotWire};
-use dawn_core::{EntityId, ItemId, PlayerId, RemoveItemCommand, ReturnItemCommand, ShipId};
-use dawn_market::{
-    InsufficientBalance, MarketDb, MarketOrderView, OrderId, OrderSide, PlaceOrderOutcome,
-};
+use dawn_core::{EntityId, ItemId, PlayerId, ShipId};
+use dawn_market::{MarketDb, MarketOrderView, OrderId, OrderSide};
 use dawn_sector::node::SimulationNode;
 
-const MAX_MARKET_ORDERS: usize = 200;
+use super::market_settlement::{MarketSettlement, ParsedOrder};
 
-#[derive(Debug, Clone, Copy)]
-struct ParsedOrder {
-    ship_id: ShipId,
-    item_id: ItemId,
-    side: OrderSide,
-    price: u64,
-    quantity: u64,
-}
+const MAX_MARKET_ORDERS: usize = 200;
 
 /// Owns the persistent Market database for one serve process.
 pub(crate) struct MarketRuntime {
@@ -116,50 +107,8 @@ impl MarketRuntime {
         order: ParsedOrder,
         node: &mut SimulationNode,
     ) -> MarketSnapshotWire {
-        if !node.owns_ship(player_id, order.ship_id) {
-            return self.snapshot(player_id, "Ship is not owned by this player");
-        }
-
-        let removed = if order.side == OrderSide::Ask {
-            node.remove_item_owned(RemoveItemCommand {
-                player_id,
-                ship_id: order.ship_id,
-                item_id: order.item_id,
-                quantity: order.quantity,
-            })
-        } else {
-            true
-        };
-        if !removed {
-            return self.snapshot(player_id, "Item not available");
-        }
-
-        let result = self.db.place_order(
-            player_id,
-            order.ship_id,
-            order.item_id,
-            order.side,
-            order.price,
-            order.quantity,
-        );
-        match result {
-            Ok(Ok(outcome)) => {
-                let settlement_ok = apply_settlement_single(node, &outcome);
-                if settlement_ok {
-                    self.snapshot(player_id, "Order placed")
-                } else {
-                    self.snapshot(player_id, "Order placed; settlement needs attention")
-                }
-            }
-            Ok(Err(InsufficientBalance)) => {
-                restore_ask_single(node, order, player_id);
-                self.snapshot(player_id, "Insufficient Currency")
-            }
-            Err(_) => {
-                restore_ask_single(node, order, player_id);
-                self.snapshot(player_id, "Market database error")
-            }
-        }
+        let result = MarketSettlement::place_single(&mut self.db, player_id, order, node);
+        self.snapshot(player_id, result.notice())
     }
 
     fn place_cluster(
@@ -168,52 +117,8 @@ impl MarketRuntime {
         order: ParsedOrder,
         nodes: &mut [SimulationNode],
     ) -> MarketSnapshotWire {
-        if find_node(nodes, player_id, order.ship_id).is_none() {
-            return self.snapshot(player_id, "Ship is not owned by this player");
-        }
-
-        let removed = if order.side == OrderSide::Ask {
-            find_node(nodes, player_id, order.ship_id).is_some_and(|node| {
-                node.remove_item_owned(RemoveItemCommand {
-                    player_id,
-                    ship_id: order.ship_id,
-                    item_id: order.item_id,
-                    quantity: order.quantity,
-                })
-            })
-        } else {
-            true
-        };
-        if !removed {
-            return self.snapshot(player_id, "Item not available");
-        }
-
-        let result = self.db.place_order(
-            player_id,
-            order.ship_id,
-            order.item_id,
-            order.side,
-            order.price,
-            order.quantity,
-        );
-        match result {
-            Ok(Ok(outcome)) => {
-                let settlement_ok = apply_settlement_cluster(nodes, &outcome);
-                if settlement_ok {
-                    self.snapshot(player_id, "Order placed")
-                } else {
-                    self.snapshot(player_id, "Order placed; settlement needs attention")
-                }
-            }
-            Ok(Err(InsufficientBalance)) => {
-                restore_ask_cluster(nodes, order, player_id);
-                self.snapshot(player_id, "Insufficient Currency")
-            }
-            Err(_) => {
-                restore_ask_cluster(nodes, order, player_id);
-                self.snapshot(player_id, "Market database error")
-            }
-        }
+        let result = MarketSettlement::place_cluster(&mut self.db, player_id, order, nodes);
+        self.snapshot(player_id, result.notice())
     }
 
     fn cancel_single(
@@ -225,20 +130,8 @@ impl MarketRuntime {
         let Some(order_id) = order_id_from_wire(raw_order_id) else {
             return self.snapshot(player_id, "Market order rejected");
         };
-        match self.db.cancel_order(player_id, order_id) {
-            Ok(Some(cancelled)) => {
-                let returned = cancelled
-                    .return_item_command
-                    .is_none_or(|command| node.return_item_owned(command));
-                if returned {
-                    self.snapshot(player_id, "Order cancelled")
-                } else {
-                    self.snapshot(player_id, "Order cancelled; item return needs attention")
-                }
-            }
-            Ok(None) => self.snapshot(player_id, "Order not found"),
-            Err(_) => self.snapshot(player_id, "Market database error"),
-        }
+        let result = MarketSettlement::cancel_single(&mut self.db, player_id, order_id, node);
+        self.snapshot(player_id, result.notice())
     }
 
     fn cancel_cluster(
@@ -250,21 +143,8 @@ impl MarketRuntime {
         let Some(order_id) = order_id_from_wire(raw_order_id) else {
             return self.snapshot(player_id, "Market order rejected");
         };
-        match self.db.cancel_order(player_id, order_id) {
-            Ok(Some(cancelled)) => {
-                let returned = cancelled.return_item_command.is_none_or(|command| {
-                    find_node(nodes, command.player_id, command.ship_id)
-                        .is_some_and(|node| node.return_item_owned(command))
-                });
-                if returned {
-                    self.snapshot(player_id, "Order cancelled")
-                } else {
-                    self.snapshot(player_id, "Order cancelled; item return needs attention")
-                }
-            }
-            Ok(None) => self.snapshot(player_id, "Order not found"),
-            Err(_) => self.snapshot(player_id, "Market database error"),
-        }
+        let result = MarketSettlement::cancel_cluster(&mut self.db, player_id, order_id, nodes);
+        self.snapshot(player_id, result.notice())
     }
 
     fn snapshot(&self, player_id: PlayerId, notice: &str) -> MarketSnapshotWire {
@@ -345,54 +225,6 @@ fn market_order_wire(order: MarketOrderView, player_id: PlayerId) -> Option<Mark
         quantity: order.quantity_remaining,
         is_own: order.player_id == player_id,
     })
-}
-
-fn apply_settlement_single(node: &mut SimulationNode, outcome: &PlaceOrderOutcome) -> bool {
-    outcome
-        .credit_item_commands
-        .iter()
-        .all(|command| node.credit_item_owned(*command))
-}
-
-fn apply_settlement_cluster(nodes: &mut [SimulationNode], outcome: &PlaceOrderOutcome) -> bool {
-    outcome.credit_item_commands.iter().all(|command| {
-        find_node(nodes, command.player_id, command.ship_id)
-            .is_some_and(|node| node.credit_item_owned(*command))
-    })
-}
-
-fn restore_ask_single(node: &mut SimulationNode, order: ParsedOrder, player_id: PlayerId) {
-    if order.side == OrderSide::Ask {
-        let _ = node.return_item_owned(ReturnItemCommand {
-            player_id,
-            ship_id: order.ship_id,
-            item_id: order.item_id,
-            quantity: order.quantity,
-        });
-    }
-}
-
-fn restore_ask_cluster(nodes: &mut [SimulationNode], order: ParsedOrder, player_id: PlayerId) {
-    if order.side == OrderSide::Ask {
-        if let Some(node) = find_node(nodes, player_id, order.ship_id) {
-            let _ = node.return_item_owned(ReturnItemCommand {
-                player_id,
-                ship_id: order.ship_id,
-                item_id: order.item_id,
-                quantity: order.quantity,
-            });
-        }
-    }
-}
-
-fn find_node(
-    nodes: &mut [SimulationNode],
-    player_id: PlayerId,
-    ship_id: ShipId,
-) -> Option<&mut SimulationNode> {
-    nodes
-        .iter_mut()
-        .find(|node| node.owns_ship(player_id, ship_id))
 }
 
 #[cfg(test)]

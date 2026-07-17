@@ -3,6 +3,7 @@
 mod aoi_delivery;
 mod cluster;
 mod market;
+mod market_settlement;
 mod runtime;
 mod single;
 
