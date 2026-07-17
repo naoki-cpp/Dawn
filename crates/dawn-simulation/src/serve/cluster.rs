@@ -150,12 +150,14 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     &mut lock_commands[sector],
                 );
                 let (ship_id, j) = match followup {
-                    Some(ClientCommandFollowup::Jump(ship_id, j)) => (ship_id, j),
-                    Some(ClientCommandFollowup::RefreshFitting(player_id)) => {
-                        if let Some(loadout) =
-                            nodes[sector].build_player_loadout_json_for_player(player_id)
-                        {
-                            sess.send_message(&ServerMessage::PlayerLoadout(loadout));
+                    Some(ClientCommandFollowup::Jump { ship_id, command }) => (ship_id, command),
+                    Some(followup @ ClientCommandFollowup::RefreshPlayerLoadout { .. }) => {
+                        if let Some(player_id) = followup.loadout_player_id() {
+                            if let Some(loadout) =
+                                nodes[sector].build_player_loadout_json_for_player(player_id)
+                            {
+                                sess.send_message(&ServerMessage::PlayerLoadout(loadout));
+                            }
                         }
                         continue;
                     }

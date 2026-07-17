@@ -156,18 +156,21 @@ pub(crate) async fn run_phase4_server(
         for sess in sessions.iter_mut() {
             while let Some(cmd) = sess.try_recv_command() {
                 match node.apply_client_command(sess.player_id, cmd, &mut lock_commands) {
-                    Some(ClientCommandFollowup::Jump(ship_id, j)) => {
+                    Some(ClientCommandFollowup::Jump { ship_id, command }) => {
                         eprintln!(
                             "[Server] JumpCommand ignored (ship #{} gate #{}): \
                              --serve runs a single-sector node without Raft",
                             ship_id.raw(),
-                            j.gate_id.0
+                            command.gate_id.0
                         );
                     }
-                    Some(ClientCommandFollowup::RefreshFitting(player_id)) => {
-                        if let Some(loadout) = node.build_player_loadout_json_for_player(player_id)
-                        {
-                            sess.send_message(&ServerMessage::PlayerLoadout(loadout));
+                    Some(followup @ ClientCommandFollowup::RefreshPlayerLoadout { .. }) => {
+                        if let Some(player_id) = followup.loadout_player_id() {
+                            if let Some(loadout) =
+                                node.build_player_loadout_json_for_player(player_id)
+                            {
+                                sess.send_message(&ServerMessage::PlayerLoadout(loadout));
+                            }
                         }
                     }
                     None => {}

@@ -5,7 +5,7 @@
 //! ## Unified client dispatch
 //! - `apply_client_command` — single entry point for all `ClientCommand`
 //!   variants; returns `Some(ClientCommandFollowup)` for commands that need
-//!   server-side follow-up (Jump proposal to Raft, fitting JSON resend).
+//!   server-side follow-up (Jump proposal to Raft, PlayerLoadout resend).
 //!
 //! ## Movement
 //! - `apply_move_command` / `apply_move_command_owned`
@@ -34,7 +34,10 @@ pub enum ClientCommandFollowup {
     /// `apply_jump_with_fallback` start a warp/approach fallback). Carries
     /// the caller's active ship explicitly, since `JumpCommand` itself no
     /// longer does (ADR-0037).
-    Jump(ShipId, JumpCommand),
+    Jump {
+        ship_id: ShipId,
+        command: JumpCommand,
+    },
     /// The player's fitting/station-inventory changed (or the attempt was
     /// rejected) — push a refreshed `PlayerLoadout` JSON to this player's
     /// session so the client's UI reflects the authoritative state. Carries
@@ -43,7 +46,20 @@ pub enum ClientCommandFollowup {
     /// at all, so a ship_id can't always be resolved back to a player, but a
     /// player_id always identifies the right session
     /// (`docs/architecture/ownership.md` §8).
-    RefreshFitting(PlayerId),
+    RefreshPlayerLoadout { player_id: PlayerId },
+}
+
+impl ClientCommandFollowup {
+    /// Returns the player whose authoritative loadout should be resent.
+    ///
+    /// Serving adapters use this to handle the common loadout-refresh path
+    /// while retaining their own Jump routing policy.
+    pub fn loadout_player_id(&self) -> Option<PlayerId> {
+        match self {
+            Self::RefreshPlayerLoadout { player_id } => Some(*player_id),
+            Self::Jump { .. } => None,
+        }
+    }
 }
 
 /// Why an Activate/Deactivate attempt was rejected (ADR-0006/0035).
@@ -91,8 +107,8 @@ impl<S: EventStore> SimulationNode<S> {
     ) -> Option<ClientCommandFollowup> {
         match outcome {
             StationDispatchOutcome::NoFollowup => None,
-            StationDispatchOutcome::RefreshFitting => {
-                Some(ClientCommandFollowup::RefreshFitting(player_id))
+            StationDispatchOutcome::RefreshPlayerLoadout => {
+                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })
             }
         }
     }
@@ -247,13 +263,13 @@ impl<S: EventStore> SimulationNode<S> {
                     // accepted one both need the client's optimistic HUD
                     // toggle corrected to the authoritative state (ADR-0035).
                     let _ = self.activate_module_owned(player_id, ship_id, c);
-                    return Some(ClientCommandFollowup::RefreshFitting(player_id));
+                    return Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id });
                 }
             }
             ClientCommand::Deactivate(c) => {
                 if let Some(ship_id) = active_ship {
                     let _ = self.deactivate_module_owned(player_id, ship_id, c);
-                    return Some(ClientCommandFollowup::RefreshFitting(player_id));
+                    return Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id });
                 }
             }
             // Combat is automatic (CombatSystem each tick); AttackCommand is
@@ -286,15 +302,15 @@ impl<S: EventStore> SimulationNode<S> {
             }
             ClientCommand::Fit(f) => {
                 self.fit_module_owned(player_id, f);
-                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+                return Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id });
             }
             ClientCommand::Unfit(u) => {
                 self.unfit_module_owned(player_id, u);
-                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+                return Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id });
             }
             ClientCommand::ReorderFittedModule(r) => {
                 self.reorder_fitted_module_owned(player_id, r);
-                return Some(ClientCommandFollowup::RefreshFitting(player_id));
+                return Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id });
             }
             ClientCommand::Dock(d) => {
                 return Self::station_followup(
@@ -331,7 +347,10 @@ impl<S: EventStore> SimulationNode<S> {
                     if self.is_ship_docked(ship_id) {
                         return None;
                     }
-                    return Some(ClientCommandFollowup::Jump(ship_id, j));
+                    return Some(ClientCommandFollowup::Jump {
+                        ship_id,
+                        command: j,
+                    });
                 }
             }
             ClientCommand::SelectActiveShip(s) => {
@@ -680,6 +699,27 @@ mod tests {
     use crate::node::station::StationOperationOutcome;
     use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, Velocity};
 
+    #[test]
+    fn loadout_followup_exposes_the_player_to_refresh() {
+        let followup = ClientCommandFollowup::RefreshPlayerLoadout {
+            player_id: PlayerId(7),
+        };
+
+        assert_eq!(followup.loadout_player_id(), Some(PlayerId(7)));
+    }
+
+    #[test]
+    fn jump_followup_does_not_request_a_loadout_refresh() {
+        let followup = ClientCommandFollowup::Jump {
+            ship_id: ShipId(dawn_core::EntityId::from_raw(3)),
+            command: JumpCommand {
+                gate_id: dawn_core::JumpGateId(0),
+            },
+        };
+
+        assert_eq!(followup.loadout_player_id(), None);
+    }
+
     fn mem_node() -> SimulationNode {
         SimulationNode::new(
             NodeId(0),
@@ -897,7 +937,7 @@ mod tests {
     }
 
     #[test]
-    fn fit_command_returns_refresh_fitting_followup() {
+    fn fit_command_returns_player_loadout_refresh_followup() {
         use crate::modules;
         use dawn_core::{ClientCommand, FitModuleCommand, ModuleId, SlotKind};
         let mut node = mem_node();
@@ -916,8 +956,12 @@ mod tests {
             &mut locks,
         );
         assert!(
-            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
-            "Fit must return RefreshFitting for the caller's player_id"
+            matches!(
+                result,
+                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id: id })
+                    if id == player_id
+            ),
+            "Fit must return RefreshPlayerLoadout for the caller's player_id"
         );
     }
 
@@ -935,7 +979,11 @@ mod tests {
             &mut locks,
         );
         assert!(
-            matches!(result, Some(ClientCommandFollowup::Jump(sid, j)) if sid == ship_id && j.gate_id == JumpGateId(0)),
+            matches!(
+                result,
+                Some(ClientCommandFollowup::Jump { ship_id: sid, command: j })
+                    if sid == ship_id && j.gate_id == JumpGateId(0)
+            ),
             "Jump must be handed back as a followup"
         );
     }
@@ -1119,8 +1167,12 @@ mod tests {
             &mut locks,
         );
         assert!(
-            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
-            "Activate must return RefreshFitting for the caller's player_id"
+            matches!(
+                result,
+                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id: id })
+                    if id == player_id
+            ),
+            "Activate must return RefreshPlayerLoadout for the caller's player_id"
         );
         let entity = *node.ships.index.get(&ship_id).unwrap();
         let is_active = node
@@ -1173,8 +1225,12 @@ mod tests {
             &mut locks,
         );
         assert!(
-            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
-            "Deactivate must return RefreshFitting for the caller's player_id"
+            matches!(
+                result,
+                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id: id })
+                    if id == player_id
+            ),
+            "Deactivate must return RefreshPlayerLoadout for the caller's player_id"
         );
         let entity = *node.ships.index.get(&ship_id).unwrap();
         let is_active = node
@@ -1349,8 +1405,12 @@ mod tests {
             &mut locks,
         );
         assert!(
-            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
-            "Unfit must return RefreshFitting for the caller's player_id"
+            matches!(
+                result,
+                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id: id })
+                    if id == player_id
+            ),
+            "Unfit must return RefreshPlayerLoadout for the caller's player_id"
         );
     }
 
@@ -1368,8 +1428,12 @@ mod tests {
             &mut locks,
         );
         assert!(
-            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
-            "Undock must return RefreshFitting for the caller's player_id"
+            matches!(
+                result,
+                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id: id })
+                    if id == player_id
+            ),
+            "Undock must return RefreshPlayerLoadout for the caller's player_id"
         );
         assert!(
             !node.is_ship_docked(ship_id),
@@ -1394,8 +1458,12 @@ mod tests {
             &mut locks,
         );
         assert!(
-            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
-            "Dock must return RefreshFitting for the caller's player_id"
+            matches!(
+                result,
+                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id: id })
+                    if id == player_id
+            ),
+            "Dock must return RefreshPlayerLoadout for the caller's player_id"
         );
         assert!(
             node.is_ship_docked(ship_id),
@@ -1421,8 +1489,12 @@ mod tests {
             &mut locks,
         );
         assert!(
-            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
-            "BuildPackagedShip must return RefreshFitting for the caller's player_id"
+            matches!(
+                result,
+                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id: id })
+                    if id == player_id
+            ),
+            "BuildPackagedShip must return RefreshPlayerLoadout for the caller's player_id"
         );
         assert_eq!(
             node.station_item_count(
@@ -1472,8 +1544,12 @@ mod tests {
             &mut locks,
         );
         assert!(
-            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
-            "SelectActiveShip must return RefreshFitting for the caller's player_id"
+            matches!(
+                result,
+                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id: id })
+                    if id == player_id
+            ),
+            "SelectActiveShip must return RefreshPlayerLoadout for the caller's player_id"
         );
         let _ = first_ship_id;
     }
@@ -1491,8 +1567,12 @@ mod tests {
             &mut locks,
         );
         assert!(
-            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
-            "Disembark must return RefreshFitting for the caller's player_id"
+            matches!(
+                result,
+                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id: id })
+                    if id == player_id
+            ),
+            "Disembark must return RefreshPlayerLoadout for the caller's player_id"
         );
         assert!(
             !node.is_active_ship(player_id, ship_id),
@@ -1527,8 +1607,12 @@ mod tests {
             &mut locks,
         );
         assert!(
-            matches!(result, Some(ClientCommandFollowup::RefreshFitting(id)) if id == player_id),
-            "TransferToStation must return RefreshFitting for the caller's player_id"
+            matches!(
+                result,
+                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id: id })
+                    if id == player_id
+            ),
+            "TransferToStation must return RefreshPlayerLoadout for the caller's player_id"
         );
         assert_eq!(
             node.station_item_count(player_id, StationId(0), ItemId::ScrapMetal),

@@ -28,7 +28,7 @@ pub(super) enum StationDispatchCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum StationDispatchOutcome {
     NoFollowup,
-    RefreshFitting,
+    RefreshPlayerLoadout,
 }
 
 impl<S: EventStore> SimulationNode<S> {
@@ -43,38 +43,38 @@ impl<S: EventStore> SimulationNode<S> {
                     return StationDispatchOutcome::NoFollowup;
                 };
                 self.dock_owned(player_id, ship_id, cmd);
-                StationDispatchOutcome::RefreshFitting
+                StationDispatchOutcome::RefreshPlayerLoadout
             }
             StationDispatchCommand::Undock(_) => {
                 let Some(ship_id) = self.ships.active_ship.get(&player_id).copied() else {
                     return StationDispatchOutcome::NoFollowup;
                 };
                 self.undock_owned(player_id, ship_id);
-                StationDispatchOutcome::RefreshFitting
+                StationDispatchOutcome::RefreshPlayerLoadout
             }
             StationDispatchCommand::BuildPackagedShip(cmd) => {
                 self.build_packaged_ship_owned(player_id, cmd);
-                StationDispatchOutcome::RefreshFitting
+                StationDispatchOutcome::RefreshPlayerLoadout
             }
             StationDispatchCommand::DisassembleShip(cmd) => {
                 self.disassemble_ship_owned(player_id, cmd);
-                StationDispatchOutcome::RefreshFitting
+                StationDispatchOutcome::RefreshPlayerLoadout
             }
             StationDispatchCommand::SelectActiveShip(cmd) => {
                 self.select_active_ship_owned(player_id, cmd);
-                StationDispatchOutcome::RefreshFitting
+                StationDispatchOutcome::RefreshPlayerLoadout
             }
             StationDispatchCommand::Assemble(cmd) => {
                 let _ = self.assemble_ship_owned(player_id, cmd);
-                StationDispatchOutcome::RefreshFitting
+                StationDispatchOutcome::RefreshPlayerLoadout
             }
             StationDispatchCommand::Disembark => {
                 let _ = self.disembark_owned(player_id);
-                StationDispatchOutcome::RefreshFitting
+                StationDispatchOutcome::RefreshPlayerLoadout
             }
             StationDispatchCommand::TransferToStation(cmd) => {
                 self.transfer_to_station_owned(player_id, cmd);
-                StationDispatchOutcome::RefreshFitting
+                StationDispatchOutcome::RefreshPlayerLoadout
             }
         }
     }
@@ -140,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn packaged_ship_build_dispatch_refreshes_fitting_after_station_operation() {
+    fn packaged_ship_build_dispatch_refreshes_player_loadout_after_station_operation() {
         let mut node = node();
         let (player_id, ship_id) = docked_owned_player(&mut node);
         node.credit_station_item(player_id, StationId(0), ItemId::ScrapMetal, 10);
@@ -154,7 +154,7 @@ mod tests {
             }),
         );
 
-        assert_eq!(outcome, StationDispatchOutcome::RefreshFitting);
+        assert_eq!(outcome, StationDispatchOutcome::RefreshPlayerLoadout);
         assert_eq!(
             node.station_item_count(player_id, StationId(0), ItemId::PackagedShip(ShipTypeId(1)),),
             1,

@@ -13,7 +13,7 @@ use dawn_core::ShipId;
 /// The station command seam: callers learn whether the operation was accepted
 /// and which ship should have its fitting/state resent to the client.
 ///
-/// Callers no longer extract `ship_id` for a `RefreshFitting` followup --
+/// Callers no longer extract `ship_id` for a `RefreshPlayerLoadout` followup --
 /// `apply_client_command` already has `player_id` in scope and uses that
 /// directly (a `ship_id` can't always be resolved back to a player, e.g.
 /// after Disassemble removes it; see `docs/architecture/ownership.md` §8).
