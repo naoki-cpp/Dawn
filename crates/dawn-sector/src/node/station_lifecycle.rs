@@ -1,14 +1,12 @@
 //! Ship-facing station lifecycle rules.
 
-use dawn_core::{
-    events::{ShipDocked, ShipUndocked},
-    DockCommand, DomainEvent, PlayerId, ShipId, StationId,
-};
+use dawn_core::{DockCommand, DomainEvent, PlayerId, ShipId, StationId};
 use dawn_ecs::components::{LockComp, ThrustComp, VelocityComp, WarpComp};
 use dawn_event_store::store::EventStore;
 
 use super::{
     station::{StationOperationOutcome, StationOperationRejection},
+    station_operation_execution::{StationOperationExecution, StationOperationPlan},
     SimulationNode,
 };
 
@@ -88,15 +86,17 @@ impl<S: EventStore> SimulationNode<S> {
                 reason: StationOperationRejection::OutOfDockRange,
             };
         }
-        self.settle_ship_into_station(ship_id, cmd.station_id);
-        self.docked_ships.insert(ship_id, cmd.station_id);
-        self.docked_players.insert(player_id, cmd.station_id);
-        self.event_store.append(DomainEvent::ShipDocked(ShipDocked {
+        match self.execute_station_operation(StationOperationPlan::Dock {
+            player_id,
             ship_id,
             station_id: cmd.station_id,
-            tick: self.current_tick,
-        }));
-        StationOperationOutcome::Accepted { ship_id }
+        }) {
+            Ok(StationOperationExecution::Outcome(outcome)) => outcome,
+            Ok(StationOperationExecution::Assembled(_)) => {
+                unreachable!("Dock plan cannot assemble a ship")
+            }
+            Err(reason) => StationOperationOutcome::Rejected { ship_id, reason },
+        }
     }
 
     /// Undock the caller's active ship (ADR-0037: only the active ship may
@@ -112,20 +112,23 @@ impl<S: EventStore> SimulationNode<S> {
                 reason: StationOperationRejection::NotOwned,
             };
         }
-        let Some(station_id) = self.docked_ships.remove(&ship_id) else {
+        let Some(station_id) = self.docked_ships.get(&ship_id).copied() else {
             return StationOperationOutcome::Rejected {
                 ship_id,
                 reason: StationOperationRejection::ShipNotDocked,
             };
         };
-        self.docked_players.remove(&player_id);
-        self.event_store
-            .append(DomainEvent::ShipUndocked(ShipUndocked {
-                ship_id,
-                station_id,
-                tick: self.current_tick,
-            }));
-        StationOperationOutcome::Accepted { ship_id }
+        match self.execute_station_operation(StationOperationPlan::Undock {
+            player_id,
+            ship_id,
+            station_id,
+        }) {
+            Ok(StationOperationExecution::Outcome(outcome)) => outcome,
+            Ok(StationOperationExecution::Assembled(_)) => {
+                unreachable!("Undock plan cannot assemble a ship")
+            }
+            Err(reason) => StationOperationOutcome::Rejected { ship_id, reason },
+        }
     }
 
     /// Switch the caller's active ship to another owned ship docked at the

@@ -2,11 +2,14 @@
 //!
 //! The implementation lives in two deepened sibling modules:
 //! - `station_lifecycle.rs` owns dock / undock / active-ship selection / disembark
-//! - `station_materialization.rs` owns build / assemble / disassemble
+//! - `station_materialization.rs` owns validation and plan creation for build
+//!   / assemble / disassemble
 //!
 //! Station inventory cache + SQLite write-through lives in
 //! `station_inventory.rs`; durable storage details live in
 //! `station_inventory_db.rs`.
+//! - `station_operation_execution.rs` owns accepted-operation side effects and
+//!   the final Event append ordering.
 
 use dawn_core::ShipId;
 
