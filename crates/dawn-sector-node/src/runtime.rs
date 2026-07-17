@@ -100,14 +100,17 @@ impl SectorNodeRuntime {
         for (i, sess) in self.sessions.iter_mut().enumerate() {
             while let Some(cmd) = sess.try_recv_command() {
                 match node.apply_client_command(sess.player_id, cmd, &mut lock_commands) {
-                    Some(ClientCommandFollowup::Jump(ship_id, j)) => {
-                        pending_jumps.push((i, ship_id, j));
+                    Some(ClientCommandFollowup::Jump { ship_id, command }) => {
+                        pending_jumps.push((i, ship_id, command));
                         break;
                     }
-                    Some(ClientCommandFollowup::RefreshFitting(player_id)) => {
-                        if let Some(loadout) = node.build_player_loadout_json_for_player(player_id)
-                        {
-                            sess.send_message(&ServerMessage::PlayerLoadout(loadout));
+                    Some(followup @ ClientCommandFollowup::RefreshPlayerLoadout { .. }) => {
+                        if let Some(player_id) = followup.loadout_player_id() {
+                            if let Some(loadout) =
+                                node.build_player_loadout_json_for_player(player_id)
+                            {
+                                sess.send_message(&ServerMessage::PlayerLoadout(loadout));
+                            }
                         }
                     }
                     None => {}

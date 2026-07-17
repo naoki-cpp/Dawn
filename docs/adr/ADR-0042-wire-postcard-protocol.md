@@ -199,7 +199,7 @@ GDScript側の既存コンシューマ（`main.gd`/`hud_manager.gd`）には影�
       `PlayerLoadoutJson` 直接構築に書き換え
 - [x] `dawn-actor/src/ws_server.rs`: `HandshakeRequest::complete`/
       `WsServer::handshake`の`player_loadout`引数を`Option<PlayerLoadoutJson>`
-      化し、`ServerMessage::PlayerLoadout`としてbinary送信。`RefreshFitting`
+      化し、`ServerMessage::PlayerLoadout`としてbinary送信。`RefreshPlayerLoadout`
       followup（`runtime.rs`/`cluster.rs`/`single.rs`）も同様に
       `send_raw`→`send_message`
 - [x] `dawn-client-gdext`: `ServerMessageDecoder`のPlayerLoadout分岐は

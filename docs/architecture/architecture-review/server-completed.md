@@ -47,7 +47,7 @@ deepening、production outbound replication publisher deepening、Client admissi
 | Station operations module の deepening（`/improve-codebase-architecture`） | 2026-07-09 | `station.rs` を shared vocabulary に縮小し、実装を `station_lifecycle.rs` / `station_materialization.rs` へ分割。 |
 | PlayerLoadout projection module の deepening（`/improve-codebase-architecture`） | 2026-07-09 | `serialization.rs` から PlayerLoadout / owned ships / station inventory の JSON projection を `player_loadout_projection.rs` へ分離。 |
 | Owned ship / Active ship モデル実装（ADR-0037、Phase 9B-5 Assemble の前提） | 2026-07-07 | `owners` と `active_ship` を分離し、操縦系コマンドを active ship 解決に統一。 |
-| Phase 9B-5 Assemble コマンド実装 + RefreshFitting player_id 化（`/add-event`） | 2026-07-07 | `AssembleCommand` / `ShipAssembled` を実装し、followup を `PlayerId` 基準に修正。 |
+| Phase 9B-5 Assemble コマンド実装 + RefreshPlayerLoadout player_id 化（`/add-event`） | 2026-07-07 | `AssembleCommand` / `ShipAssembled` を実装し、followup を `PlayerId` 基準に修正。 |
 | DisembarkCommand 実装（ADR-0037、船を降りる操作の一級化） | 2026-07-07 | `DisembarkCommand` と `disembark_owned` を追加。 |
 | Disembark後のクライアント可視性ギャップ修正 + station近接表示の複数化 | 2026-07-07 | `active_ship_id` を wire に追加し、HUD / station proximity 表示を追従。 |
 | 新規プレイヤーへのスターターPackagedShip付与 + 複数所有船切り替えUI | 2026-07-08 | starter packaged ship と owned ship roster UI を追加。 |
