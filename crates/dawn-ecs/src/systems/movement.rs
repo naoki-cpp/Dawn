@@ -1,18 +1,8 @@
-//! Movement system — EVE-style exponential-approach space physics (ADR-0023).
+//! Movement system adapter for the shared EVE-style movement policy (ADR-0023).
 //!
-//! # Physics model
-//!
-//! Every tick the ship's velocity moves toward `v_target` by a fraction α:
-//!
-//!   τ        = mass × inertia_modifier / MASS_SCALE   (time constant in ticks)
-//!   α        = 1 − exp(−1 / τ)                        (convergence per tick)
-//!   v(t+1)   = v(t) + (v_target − v(t)) × α
-//!
-//! When thrusting:  v_target = normalize(thrust_dir) × max_speed
-//! When braking:    v_target = ZERO
-//! When coasting:   thrust_dir = ZERO  →  v_target = v(t)  →  Δv = 0  (inertial)
-//!
-//! No explicit speed clamp is needed: the approach can never exceed v_target.
+//! `dawn_core::MovementProfile::step` owns the one-tick exponential approach
+//! calculation. This system supplies ECS state, integrates the returned
+//! displacement, skips committed warp, and emits `VelocityChanged` events.
 //!
 //! # Align time (EVE-compatible, ADR-0022 / ADR-0023)
 //!
@@ -25,12 +15,13 @@
 //!
 //! Emits `VelocityChanged` only when velocity actually differs from the previous tick.
 
-use crate::systems::fitting::MASS_SCALE;
 use crate::{
     components::{PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp, WarpComp},
     SimWorld,
 };
-use dawn_core::{events::VelocityChanged, DomainEvent, Tick, Velocity};
+use dawn_core::{
+    events::VelocityChanged, DomainEvent, MovementInput, MovementProfile, Tick, Velocity,
+};
 
 #[derive(Debug)]
 pub struct MovementSystem;
@@ -60,41 +51,23 @@ impl MovementSystem {
 
             let old_velocity = vel_comp.0;
 
-            // ── Compute τ and α ───────────────────────────────────────────────
-            let tau =
-                (stats_comp.mass * stats_comp.inertia_modifier / MASS_SCALE).max(f32::EPSILON);
-            let alpha = 1.0_f32 - (-1.0 / tau).exp();
-
-            // ── Determine v_target ────────────────────────────────────────────
-            let v_target = if thrust_comp.is_braking {
-                // Braking: approach zero (same τ as acceleration — EVE-faithful).
-                Velocity::ZERO
-            } else {
-                let mag = magnitude(thrust_comp.direction);
-                if mag > f32::EPSILON {
-                    // Thrusting: approach max_speed in the given direction.
-                    let scale = stats_comp.max_speed / mag;
-                    Velocity {
-                        dx: thrust_comp.direction.dx * scale,
-                        dy: thrust_comp.direction.dy * scale,
-                        dz: thrust_comp.direction.dz * scale,
-                    }
-                } else {
-                    // Coasting: v_target = current velocity → no change (inertial flight).
-                    vel_comp.0
-                }
+            let Ok(profile) = MovementProfile::new(
+                stats_comp.max_speed,
+                stats_comp.mass,
+                stats_comp.inertia_modifier,
+            ) else {
+                // Fitting and ship-type loading validate these values before
+                // they reach the hot path. Do not advance malformed state.
+                continue;
             };
-
-            // ── Exponential approach ──────────────────────────────────────────
-            vel_comp.0.dx += (v_target.dx - vel_comp.0.dx) * alpha;
-            vel_comp.0.dy += (v_target.dy - vel_comp.0.dy) * alpha;
-            vel_comp.0.dz += (v_target.dz - vel_comp.0.dz) * alpha;
-
-            // ── Braking stop guard ────────────────────────────────────────────
-            // Snap to exactly zero once the ship is slow enough that it would
-            // oscillate forever around zero due to floating-point rounding.
-            if thrust_comp.is_braking && magnitude(vel_comp.0) < 0.001 {
-                vel_comp.0 = Velocity::ZERO;
+            let input = if thrust_comp.is_braking {
+                MovementInput::Brake
+            } else {
+                MovementInput::Thrust(thrust_comp.direction)
+            };
+            let step = profile.step(vel_comp.0, input);
+            vel_comp.0 = step.velocity;
+            if step.braking_complete {
                 thrust_comp.is_braking = false;
             }
 
@@ -123,17 +96,13 @@ fn velocity_changed(old: Velocity, new: Velocity) -> bool {
         || (new.dz - old.dz).abs() > f32::EPSILON
 }
 
-fn magnitude(v: Velocity) -> f32 {
-    (v.dx * v.dx + v.dy * v.dy + v.dz * v.dz).sqrt()
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::components::ShipStatsComp;
-    use dawn_core::{NodeId, Position, SectorId, Velocity};
+    use dawn_core::{MovementInput, MovementProfile, NodeId, Position, SectorId, Velocity};
 
     fn spawn(world: &mut SimWorld, i: u64, pos: Position, vel: Velocity) {
         let id = dawn_core::ShipId::new(NodeId(0), i);
@@ -315,6 +284,30 @@ mod tests {
     }
 
     #[test]
+    fn adapter_matches_the_shared_policy_for_one_tick() {
+        let stats = ShipStatsComp::PLAYER;
+        let direction = Velocity::new(1.0, 0.0, 0.0);
+        let expected = MovementProfile::new(stats.max_speed, stats.mass, stats.inertia_modifier)
+            .unwrap()
+            .step(Velocity::ZERO, MovementInput::Thrust(direction))
+            .velocity;
+
+        let mut w = SimWorld::new(SectorId(0));
+        let id = dawn_core::ShipId::new(NodeId(0), 1);
+        let entity = w.spawn_ship(id, Position::ORIGIN, Velocity::ZERO);
+        w.set_ship_stats(entity, stats);
+        w.inner_mut()
+            .get::<&mut ThrustComp>(entity)
+            .unwrap()
+            .direction = direction;
+
+        MovementSystem::run(&mut w, Tick(1));
+
+        let actual = w.inner().get::<&VelocityComp>(entity).unwrap().0;
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn braking_decelerates_ship_and_stops_without_overshoot() {
         let mut w = SimWorld::new(SectorId(0));
         let id = dawn_core::ShipId::new(NodeId(0), 1);
@@ -368,8 +361,8 @@ mod tests {
             .unwrap()
             .direction = Velocity::new(1.0, 0.0, 0.0);
 
-        let tau_ticks =
-            ShipStatsComp::PLAYER.mass * ShipStatsComp::PLAYER.inertia_modifier / MASS_SCALE;
+        let tau_ticks = ShipStatsComp::PLAYER.mass * ShipStatsComp::PLAYER.inertia_modifier
+            / dawn_core::MASS_SCALE;
         let expected_align = (-0.25_f32.ln() * tau_ticks).ceil() as u32;
         let threshold = ShipStatsComp::PLAYER.max_speed * 0.75;
 
@@ -406,9 +399,9 @@ mod tests {
         let vel = *w.inner().get::<&VelocityComp>(entity).unwrap();
         let stats = *w.inner().get::<&ShipStatsComp>(entity).unwrap();
         assert!(
-            magnitude(vel.0) <= stats.max_speed + 0.001,
+            vel.0.speed() <= stats.max_speed + 0.001,
             "speed {} exceeds max_speed {}",
-            magnitude(vel.0),
+            vel.0.speed(),
             stats.max_speed
         );
     }

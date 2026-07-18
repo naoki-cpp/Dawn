@@ -17,7 +17,9 @@ use dawn_core::{fitting::StatDelta, ShipId};
 /// Converts (mass_kg × inertia_modifier) to τ in ticks.
 /// Tuned so that a Magpie (mass=12M kg, inertia=0.3) yields τ ≈ 36 ticks
 /// → align time ≈ 50 ticks ≈ 5 seconds at 10 ticks/s (ADR-0023 §5).
-pub const MASS_SCALE: f32 = 100_000.0;
+/// Compatibility re-export for callers that historically imported the tuning
+/// constant from the fitting system. The movement policy owns the value now.
+pub const MASS_SCALE: f32 = dawn_core::MASS_SCALE;
 
 /// Recompute `ShipStatsComp` for `ship_id` from its current `FittingComp`.
 ///

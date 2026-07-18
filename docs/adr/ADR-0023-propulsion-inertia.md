@@ -61,6 +61,18 @@ v(t+1) = v(t) + (v_target - v(t)) × α
 
 `MASS_SCALE` はゲームバランス調整定数（→ §5 具体値参照）。
 
+### 実装上の所有権（2026-07-18）
+
+この式の唯一の実装は `dawn-core/src/movement.rs` の
+`MovementProfile::step` とする。`dawn-ecs::MovementSystem` は ECS の状態を
+`MovementProfile` / `MovementInput` に変換し、返された速度を位置へ積分して
+`VelocityChanged` を発行する。`dawn-client-core::MotionPredictor` も同じ
+ポリシーを呼び出し、予測状態とサーバー補正だけを管理する。
+
+したがって `tau_ticks` は `ShipStatsComp` にキャッシュしない。`mass` と
+`inertia_modifier` から各論理 tick にポリシーが導出する。サーバーの実効計算は
+`f32` のまま維持し、絶対座標やワープのアンカー計算に使う `f64` とは責務を分ける。
+
 ### 2. 船体パラメータの変更
 
 #### 廃止
@@ -133,7 +145,7 @@ MASS_SCALE = mass × inertia_modifier / τ_ticks
 ```rust
 /// Converts (mass_kg × inertia_modifier) to τ in ticks.
 /// Derived so that a cruiser-class ship (mass=12M, inertia=0.3) has τ≈36 tick.
-const MASS_SCALE: f32 = 100_000.0;
+pub const MASS_SCALE: f32 = 100_000.0; // dawn-core::movement owns this constant.
 ```
 
 #### 船種パラメータ（data/ship_types.toml）
@@ -172,10 +184,9 @@ effective_max_speed  = 40.0 × 2.35 = 94.0 u/t    （AB ON 時）
 let total_mass: f32 = base_stats.mass
     + slots.iter().map(|s| s.module.stat_delta.mass_add).sum::<f32>();
 
-// τ and α for movement system.
-let tau_ticks = total_mass * stats.inertia_modifier / MASS_SCALE;
-// Store τ_ticks in ShipStatsComp so MovementSystem can read it.
-stats.tau_ticks = tau_ticks.max(1.0);  // clamp to avoid div-by-zero
+// Store the inputs used by dawn_core::MovementProfile.
+stats.mass = total_mass;
+stats.inertia_modifier = base_stats.inertia_modifier;
 
 // Effective max speed = base × product of active speed multipliers.
 let speed_mult: f32 = slots.iter()
@@ -190,11 +201,9 @@ stats.max_speed = base_stats.base_max_speed * speed_mult;
 ```rust
 pub struct ShipStatsComp {
     // ── Movement ──
-    pub base_max_speed    : f32,   // hull base (no modules)
     pub max_speed         : f32,   // effective (base × active multipliers)
-    pub mass              : f32,   // kg, base hull mass
+    pub mass              : f32,   // kg, including passive fitted mass
     pub inertia_modifier  : f32,
-    pub tau_ticks         : f32,   // precomputed τ; updated by apply_fitting()
 
     // ── (thrust_magnitude 削除) ──
 
@@ -203,35 +212,26 @@ pub struct ShipStatsComp {
 }
 ```
 
-`tau_ticks` は `apply_fitting()` が毎回再計算する派生値。
-MovementSystem は `tau_ticks` を読んで `α` を算出するだけ。
+`MovementProfile::step` が `mass` と `inertia_modifier` から τ と α を毎 tick
+導出する。`apply_fitting()` はプロフィールの入力である `mass` と `max_speed`
+を更新するだけである。
 
 ### 8. MovementSystem の更新
 
 ```rust
-// Compute α from precomputed τ.
-let alpha = 1.0_f32 - (-1.0 / stats.tau_ticks).exp();
-
-let v_target = if thrust_comp.is_braking {
-    Velocity::ZERO
-} else {
-    let mag = magnitude(thrust_comp.direction);
-    if mag > f32::EPSILON {
-        let scale = stats.max_speed / mag;
-        Velocity {
-            dx: thrust_comp.direction.dx * scale,
-            dy: thrust_comp.direction.dy * scale,
-            dz: thrust_comp.direction.dz * scale,
-        }
-    } else {
-        vel_comp.0  // no thrust → coast (v_target = current vel, no change)
-    }
+let Ok(profile) = MovementProfile::new(
+    stats.max_speed,
+    stats.mass,
+    stats.inertia_modifier,
+) else {
+    continue;
 };
-
-vel_comp.0.dx += (v_target.dx - vel_comp.0.dx) * alpha;
-vel_comp.0.dy += (v_target.dy - vel_comp.0.dy) * alpha;
-vel_comp.0.dz += (v_target.dz - vel_comp.0.dz) * alpha;
-// No explicit clamp needed — exponential approach cannot exceed v_target.
+let input = if thrust_comp.is_braking {
+    MovementInput::Brake
+} else {
+    MovementInput::Thrust(thrust_comp.direction)
+};
+vel_comp.0 = profile.step(vel_comp.0, input).velocity;
 ```
 
 **推力なし（コースト）の扱い**: `thrust_direction = ZERO` のとき `v_target = vel_comp.0`
@@ -288,8 +288,8 @@ align time の計算式 `1.386 × τ` が成立しなくなる。
 
 - [x] `dawn-core/src/ship_type.rs`: `ShipBaseStats` に `base_max_speed`, `mass`, `inertia_modifier` 追加、`thrust_magnitude` 削除
 - [x] `dawn-core/src/fitting.rs`: `StatDelta` に `speed_multiplier`, `mass_add` 追加
-- [x] `dawn-ecs/src/components/movement.rs`: `ShipStatsComp` を更新（`tau_ticks` 追加、`thrust_magnitude` 削除）
-- [x] `dawn-ecs/src/systems/fitting.rs`: `apply_fitting()` で `tau_ticks`, `max_speed` を再計算
+- [x] `dawn-ecs/src/components/movement.rs`: `ShipStatsComp` を更新（`thrust_magnitude` と `tau_ticks` のキャッシュを持たない）
+- [x] `dawn-ecs/src/systems/fitting.rs`: `apply_fitting()` で `mass`, `max_speed` を再計算
 - [x] `dawn-ecs/src/systems/movement.rs`: 指数接近モデルに変更、speed clamp 削除
 - [x] `data/ship_types.toml`: Magpie に `mass`, `inertia_modifier` 追加、`thrust_magnitude` 削除
 - [x] `data/modules.toml`: AB 各サイズに `speed_multiplier`, `mass_add` 追加
@@ -297,5 +297,5 @@ align time の計算式 `1.386 × τ` が成立しなくなる。
 - [x] `client/scripts/main.gd`: align time / speed 表示の更新（不要と判断 — 既存 HUD と互換）
 - [x] CLAUDE.md §1 Scope に `inertia_modifier`, `mass` を追記（ADR-0023 実装反映として同期済み）
 - [x] 全テストがゼロエラーで通過すること（`cargo test --workspace`）
-- [x] `ShipStatsComp::from_base()` テストで `tau_ticks` が正しく計算されることを確認
+- [x] `ShipStatsComp::from_base()` でポリシー入力（`mass`, `inertia_modifier`）を保持することを確認
 - [x] MovementSystem テストで指数接近モデルの align time が理論値 `1.386 × τ_ticks` と一致することを確認

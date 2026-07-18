@@ -132,6 +132,7 @@ dependencies = [
 name = "dawn-client-core"
 version = "0.1.0"
 dependencies = [
+ "dawn-core",
  "serde",
  "serde_json",
 ]

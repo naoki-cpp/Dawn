@@ -26,13 +26,21 @@ authoritative messages or domain events.
 
 ## Decision
 
-Add a `MotionPredictor` deep module to `dawn-client-core`. It mirrors the
-server's discrete EVE-style exponential approach rule from ADR-0023 and owns:
+Add a `MotionPredictor` deep module to `dawn-client-core`. The shared
+one-tick movement policy lives in `dawn-core::movement::MovementProfile` and
+is used by both the server and client adapters. `MotionPredictor` owns:
 
 - the effective movement profile (`max_speed`, `mass`, `inertia_modifier`),
 - local thrust/brake intent,
 - predicted position and velocity, and
 - tick-aware reconciliation against server state.
+
+`MovementProfile::step` is pure and stateless: it receives the current
+velocity and one `MovementInput`, then returns the next velocity and braking
+completion state. `dawn-ecs::MovementSystem` remains responsible for ECS
+updates, position integration, warp exclusion, and `VelocityChanged` emission;
+`MotionPredictor` remains responsible for client prediction and
+reconciliation. Neither adapter owns a second copy of the movement formula.
 
 The GDExtension exposes this module to `ship_controller.gd`; GDScript remains
 responsible only for coordinate conversion, rendering, and input routing.
@@ -63,7 +71,8 @@ continue to use the existing event-driven dead-reckoning path.
 
 - The server remains the sole authority for simulation position and velocity.
 - A client cannot use prediction to bypass command validation or movement rules.
-- The predictor's one-tick update matches `dawn-ecs::MovementSystem`.
+- The predictor and `dawn-ecs::MovementSystem` both delegate one-tick movement
+  to `dawn-core::movement::MovementProfile::step`.
 - A stale correction cannot move the local ship backwards in protocol time.
 - Warp and dock discontinuities clear local input and reset prediction.
 - No per-frame position stream or new DomainEvent is introduced.
@@ -79,6 +88,9 @@ continue to use the existing event-driven dead-reckoning path.
   changes.
 - **Keeping the predictor in GDScript:** duplicates server physics outside the
   Rust test boundary and makes the fitted movement profile harder to share.
+- **Keeping separate Rust formulas in the server and client:** allows small
+  numeric or edge-case differences to drift silently, so the pure one-tick
+  policy is shared from `dawn-core` instead.
 
 ## Implementation checklist
 
@@ -88,5 +100,7 @@ continue to use the existing event-driven dead-reckoning path.
 - [x] Bind prediction/reconciliation through `dawn-client-gdext`.
 - [x] Route local Move/Stop input into the predictor.
 - [x] Reset prediction for warp, docking, and jump discontinuities.
+- [x] Share the one-tick movement policy from `dawn-core` between server and
+  client adapters.
 - [ ] Verify the Godot playtest with the built GDExtension DLL.
 - [ ] Obtain human approval and change status from `proposed` to `accepted`.

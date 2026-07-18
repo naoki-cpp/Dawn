@@ -1,12 +1,14 @@
 //! Client-side ship motion prediction and reconciliation (Phase 10).
 //!
 //! The server remains authoritative. This module only advances the local
-//! player's presentation between authoritative corrections, using the same
-//! discrete exponential-approach rule as `dawn-ecs` (ADR-0023).
+//! player's presentation between authoritative corrections, delegating the
+//! one-tick movement policy to `dawn-core` (ADR-0023).
 
-const MASS_SCALE: f64 = 100_000.0;
-const BRAKE_STOP_EPSILON: f64 = 0.001;
 const VECTOR_EPSILON: f64 = f64::EPSILON;
+
+use dawn_core::{
+    MovementInput as CoreMovementInput, MovementProfile as CoreMovementProfile, Velocity,
+};
 
 /// The movement inputs that can be predicted locally.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -40,12 +42,21 @@ impl Default for MotionProfile {
 impl MotionProfile {
     /// Creates a profile when all movement values are finite and valid.
     pub fn new(max_speed: f64, mass: f64, inertia_modifier: f64) -> Option<Self> {
+        let core_max_speed = max_speed as f32;
+        let core_mass = mass as f32;
+        let core_inertia_modifier = inertia_modifier as f32;
+
         if !max_speed.is_finite()
             || max_speed < 0.0
             || !mass.is_finite()
             || mass <= 0.0
             || !inertia_modifier.is_finite()
             || inertia_modifier <= 0.0
+            || !core_max_speed.is_finite()
+            || !core_mass.is_finite()
+            || core_mass <= 0.0
+            || !core_inertia_modifier.is_finite()
+            || core_inertia_modifier <= 0.0
         {
             return None;
         }
@@ -69,9 +80,13 @@ impl MotionProfile {
         self.inertia_modifier
     }
 
-    fn alpha(self) -> f64 {
-        let tau = (self.mass * self.inertia_modifier / MASS_SCALE).max(f64::EPSILON);
-        1.0 - (-1.0 / tau).exp()
+    fn as_core(self) -> CoreMovementProfile {
+        CoreMovementProfile::new(
+            self.max_speed as f32,
+            self.mass as f32,
+            self.inertia_modifier as f32,
+        )
+        .expect("MotionProfile validates the shared movement profile")
     }
 }
 
@@ -133,7 +148,11 @@ impl MotionPredictor {
     }
 
     pub fn set_thrust(&mut self, direction: [f64; 3]) {
-        self.input = MotionInput::Thrust(normalize(direction));
+        self.input = if magnitude(direction) <= VECTOR_EPSILON {
+            MotionInput::Coast
+        } else {
+            MotionInput::Thrust(normalize(direction))
+        };
     }
 
     pub fn set_braking(&mut self) {
@@ -205,17 +224,20 @@ impl MotionPredictor {
     }
 
     fn step_tick(&mut self) {
-        let target = match self.input {
-            MotionInput::Brake => [0.0; 3],
-            MotionInput::Thrust(direction) => scale(direction, self.profile.max_speed),
-            MotionInput::Coast => self.velocity,
+        let input = match self.input {
+            MotionInput::Coast => CoreMovementInput::Coast,
+            MotionInput::Thrust(direction) => {
+                CoreMovementInput::Thrust(to_core_velocity(direction))
+            }
+            MotionInput::Brake => CoreMovementInput::Brake,
         };
-        let alpha = self.profile.alpha();
-        self.velocity = add(self.velocity, scale(sub(target, self.velocity), alpha));
 
-        if matches!(self.input, MotionInput::Brake) && magnitude(self.velocity) < BRAKE_STOP_EPSILON
-        {
-            self.velocity = [0.0; 3];
+        let step = self
+            .profile
+            .as_core()
+            .step(to_core_velocity(self.velocity), input);
+        self.velocity = from_core_velocity(step.velocity);
+        if step.braking_complete {
             self.input = MotionInput::Coast;
         }
 
@@ -245,8 +267,12 @@ fn add(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
     [left[0] + right[0], left[1] + right[1], left[2] + right[2]]
 }
 
-fn sub(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
-    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+fn to_core_velocity(vector: [f64; 3]) -> Velocity {
+    Velocity::new(vector[0] as f32, vector[1] as f32, vector[2] as f32)
+}
+
+fn from_core_velocity(vector: Velocity) -> [f64; 3] {
+    [vector.dx as f64, vector.dy as f64, vector.dz as f64]
 }
 
 fn scale(vector: [f64; 3], factor: f64) -> [f64; 3] {
@@ -264,8 +290,8 @@ mod tests {
         predictor.set_thrust([2.0, 0.0, 0.0]);
         predictor.advance(1.0);
 
-        let alpha = 1.0 - (-1.0 / 30.0_f64).exp();
-        assert!((predictor.velocity()[0] - 500.0 * alpha).abs() < 1e-10);
+        let alpha = 1.0_f32 - (-1.0 / 30.0_f32).exp();
+        assert!((predictor.velocity()[0] - f64::from(500.0 * alpha)).abs() < 1e-6);
         assert_eq!(predictor.position(), predictor.velocity());
     }
 
@@ -306,5 +332,12 @@ mod tests {
         assert!(MotionProfile::new(-1.0, 10_000_000.0, 0.3).is_none());
         assert!(MotionProfile::new(500.0, 0.0, 0.3).is_none());
         assert!(MotionProfile::new(500.0, 10_000_000.0, f64::NAN).is_none());
+        assert!(MotionProfile::new(f64::from(f32::MAX) * 2.0, 1.0, 0.3).is_none());
+        assert!(MotionProfile::new(
+            500.0,
+            f64::from(f32::MIN_POSITIVE) * f64::from(f32::MIN_POSITIVE),
+            0.3
+        )
+        .is_none());
     }
 }
