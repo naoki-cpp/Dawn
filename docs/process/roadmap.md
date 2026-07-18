@@ -30,21 +30,17 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 ## 2. 現在地
 
 ```
-現在のフェーズ : Phase 8 ほぼ完了（8A/8C/8D/8E 完了・8B 一区切り）— スケール基盤+分散インフラが稼働
-フェーズの状態 : 全 workspace グリーン。
-                - 8A（durability）: 2 層ログ + snapshot 圧縮 + CheckpointScheduler（ADR-0017）
-                - 8C（AoI）: 静的セルグリッド 3×3×3 + Enter/Leave 差分配信 + イベントフィルタ（ADR-0019）
-                - 8B（一区切り）: 局所 TiDi コア（決定論的・非破壊・自動回復）+ 入場バックストップ
-                  （生カウント・--pop-cap）。柱①の主要レバーが単一 Sector 内で出揃った（ADR-0018）。
-                - 8D（分散インフラ）: dawn-replication + ネットワーク RaftTransport + dawn-sector-node
-                  本番バイナリ + 永続化配線まで完了。**Raspberry Pi 3ノードクラスタでの実機検証を
-                  2026-07-01 に実施し、reachability / tick-sla / failover の3項目とも PASS**
-                  （docs/process/8d5-hardware-notes.md）。
-                残り 8B（Fission / LoD=ADR-0020 deferred / 越境 TiDi / SLA イベント化）は
-                いずれも現状は不要・§11 の負荷対応バックログへ切り出し済み。
-                戦闘の深み（ADR-0016 §5）は Logistics（遠隔修理、ADR-0036）完了で一巡。
-                次の前進先: Phase 9（Resource + Economy Context・§12）。
-                Sector キャパシティの悪用対策は docs/design/game-design.md §8 を参照。
+現在のフェーズ : Phase 9 基盤実装完了・9E 経済ループ検証中
+フェーズの状態 : Rust workspace はグリーン。Godot クライアントの実行・テストは、
+                client/dawn_client_gdext.gdextension が参照する DLL を
+                `cargo build -p dawn-client-gdext` で先に生成する環境前提がある。
+                9A（Scrap Metal）/9B（Station・Ship操作）/9D（Market・Currency）は実装済み。
+                9C（プレイヤー設置インフラ）は
+                新規 ADR が必要な設計タスクとして未着手。
+                9E-1 のプレイテスト手順は docs/process/playtest-guide.md に追加済みだが、
+                人間によるセッション実施と結果記録は未完了。9E-2 は引き続きチェック項目として保留。
+                Phase 8 の保留項目（Fission / LoD / 越境 TiDi 等）は §11 の負荷対応バックログで
+                トリガー待ち。Sector キャパシティの悪用対策は docs/design/game-design.md §8 を参照。
 ```
 
 ### 完了済みフェーズ
@@ -109,27 +105,13 @@ Phase 2（複数ノード）を実装すると、「動かない上に複雑」�
 
 ### 次に着手すべきタスク
 
-**Phase 8（8A/8C/8D/8E 完了・8B 一区切り）は完了。** 残る 8B 保留項目（Fission / LoD=ADR-0020
-deferred / 越境 TiDi / SLA イベント化）はいずれも現状は不要・**§11 負荷対応バックログ**へ
-切り出し済み（トリガー待ちで通常のスプリント計画からは外す）。
-8D（物理ノード分散）は Raspberry Pi 実機検証まで完了しており、次の前進先の選択肢からは外れた。
+**9E-1 — 経済ループのプレイテスト（手順準備済み・人間の実施待ち）**
 
-**戦闘システムの Logistics（遠隔修理）は完了（ADR-0036、2026-07-03）。**
-戦闘システム（§9 参照）は Warp（✅）→ Tackle（✅）→ Signature Resolution（✅）→
-Orbit/Keep at Range（✅）→ Local Repair（✅）→ **Remote Repair（✅）** と積み上がり、
-Phase 8 発案時点の近期ロードマップ（ADR-0016 §5）が一巡した。
-
-Logistics 本体は ADR-0035（Per-Slot Module Targeting、2026-07-02）の土台の上に、
-新規 `ModuleKind::RemoteShieldBooster`/`RemoteArmorRepairer`（`requires_target()`
-に追加）・`repair_range_add`/`ShipStatsComp.repair_range`（`tackle_range` と同じ
-集計経路）・`RepairCycle.target_ship_id`（Capacitor System が
-`slot.target_ship_id.unwrap_or(snap.ship_id)` で解決、Local/Remote 共通コード
-パス）を積むだけで乗った。Range Gate System（Step 5.5）は2行追加で
-Remote Repair にも対応。
-
-**次に着手するのは Phase 9（Resource + Economy Context・§12）。** ただし戦闘システムは
-Logistics で「完了」するわけではなく、§9 のとおりその後も継続的に深化していく対象であることに注意
-（クライアント表現・Bot AI の Remote Repair 活用は ADR-0036 のスコープ外として残っている）。
+9A（能動的な Scrap Metal 獲得）、9B（Station inventory と船の組み立て）、9D（Market の
+指値決済）が一つのプレイヤー行動ループとして成立しているかを、
+`docs/process/playtest-guide.md` の「Phase 9 — 経済ループ検証」手順で観測する。
+自動テストやコードレビューだけでは「希少資源が判断や対立を生んだか」は判定できないため、
+セッション結果を記録するまで 9E-1 は完了にしない。
 
 #### Phase 6 完了タスク一覧
 
@@ -335,7 +317,7 @@ Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み�
 | 2 | SQLite バックエンドの指値注文帳（bid/ask マッチング） | 2026-07-13実装完了。`dawn-market::MarketDb`（`order_book.rs`）。同価格内の優先順位はSQLiteの`rowid`（挿入順）にそのまま任せ、`Tick`は一切登場しない（`/grilling`で決定、dawn-marketをtick非決定性から独立させたまま）。約定は常にresting(maker)側の価格で成立。自己約定（同一PlayerIdのBid/Askが交差）は禁止せず通常通りマッチ（`/grilling`で決定）。部分約定対応（残数量は板に残る）。trades履歴テーブルは作らず`place_order`の戻り値（`Vec<Trade>`）のみ（9D-5で必要になれば追加）。テスト11件+doctest1件 | ✅ |
 | 3 | `PlayerId` 単位の Currency 台帳 | 2026-07-13実装完了。`dawn-market::MarketDb`の`currency`テーブル（`balance >= 0`をCHECK制約で保証）+`currency_balance`/`credit_currency`。`/grilling`で決定: BidはPlace時に`price×quantity`を即座にエスクロー（複数Bid同時発行での二重予約を防止、`orders.escrowed_currency`列）、Askはエスクロー不要（Itemは既にMarket側に渡っている前提）。約定は常にresting(maker)価格で決済し、Bidがエスクロー額より安く約定した差額は買い手へ即時払い戻し。Cancel時は残りエスクローを払い戻す。残高不足は`InsufficientBalance`として型で区別（SQLiteエラーとは別レイヤー）。テスト11件追加（22件+doctest1件） | ✅ |
 | 4 | `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand`（List/Cancel/Settle） | 2026-07-17実装完了。`dawn-market::MarketDb` は注文ごとに対象 `ShipId` を保持し、Ask出品時に `RemoveItemCommand`、Askキャンセル時に `ReturnItemCommand`、約定時に買い手ごとの `CreditItemCommand` を結果として返す。MarketはSectorへ直接アクセスせず、呼び出し側が所有Sectorへ片側ずつルーティングする。Transit/Raft合意は不要（ADR-0034 §4）。wire向けの`ClientCommand`ではない | ✅ |
-| 5 | client: Market閲覧UI（指値注文の発注・Currency残高表示） | 2026-07-17実装完了。`ClientMessage::Market` / `ServerMessage::MarketSnapshot`を既存のpostcard envelopeへ追加し、`dawn-simulation`のsingle/cluster serve loopに`MarketRuntime`を配線。Askは先に所有船cargoからRemoveし、DB拒否時だけReturn、約定したBidは所有ノードへCredit。Godotは`M`で開く独立`market_surface.gd`に板・Currency残高・Bid/Ask・発注・自分の注文Cancelを実装。板のsnapshotは最大200件。GdUnit4とRustの契約テストを追加。 | ✅ |
+| 5 | client: Market閲覧UI（指値注文の発注・Currency残高表示） | 2026-07-17実装完了。`ClientMessage::Market` / `ServerMessage::MarketSnapshot`を既存のpostcard envelopeへ追加し、`dawn-simulation`のsingle/cluster serve loopに`MarketRuntime`を配線。Askは先に所有船cargoからRemoveし、DB拒否時だけReturn、約定したBidは所有ノードへCredit。Godotは`M`で開く独立`market_surface.gd`に板・Currency残高・Bid/Ask・発注・自分の注文Cancelを実装。**2026-07-18、Marketの閲覧・発注・CancelをStation dock中だけに制限（サーバー側で強制、クライアントのMキーもdock状態に連動）。注文帳はundock後も存続し、再dockすれば管理できる。** 板のsnapshotは最大200件。GdUnit4とRustの契約テストを追加。 | ✅ |
 
 9D-4 の Sector 側適用も実装済み。`SimulationNode` の
 `remove_item_owned` / `return_item_owned` / `credit_item_owned` が所有権と数量を
@@ -347,7 +329,7 @@ Sector へ直接アクセスせず、呼び出し側が所有 Sector へ片側�
 
 | # | タスク | 備考 | 状態 |
 |---|---|---|---|
-| 1 | 資源希少性が実際に判断/対立を生んでいるかのプレイテスト（playtest-guide.md 拡張） | 「数値を積むだけ」になっていないかを人間の観察で判定 | ⬜ |
+| 1 | 資源希少性が実際に判断/対立を生んでいるかのプレイテスト（playtest-guide.md 拡張） | 手順と観測項目を追加済み。人間によるセッション実施と結果記録が残タスク | 🔶 |
 | 2 | 受動蓄積ゼロの回帰チェック | 9A-5 が「自動テストで守るべき性質」に育った段階で CI へ昇格する。現状はチェック項目として運用 | ⏸️ |
 
 ---

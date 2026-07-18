@@ -13,6 +13,7 @@ use dawn_sector::node::SimulationNode;
 use super::market_settlement::{MarketSettlement, ParsedOrder};
 
 const MAX_MARKET_ORDERS: usize = 200;
+const MARKET_DOCK_REQUIRED_NOTICE: &str = "Dock at a station to use the Market";
 
 /// Owns the persistent Market database for one serve process.
 pub(crate) struct MarketRuntime {
@@ -39,6 +40,9 @@ impl MarketRuntime {
         command: MarketCommandWire,
         node: &mut SimulationNode,
     ) -> MarketSnapshotWire {
+        if node.player_docked_station(player_id).is_none() {
+            return Self::market_unavailable_snapshot();
+        }
         match command {
             MarketCommandWire::RefreshMarketCommand {} => self.snapshot(player_id, ""),
             MarketCommandWire::PlaceMarketOrderCommand {
@@ -71,8 +75,15 @@ impl MarketRuntime {
         &mut self,
         player_id: PlayerId,
         command: MarketCommandWire,
+        player_sector: usize,
         nodes: &mut [SimulationNode],
     ) -> MarketSnapshotWire {
+        if !nodes
+            .get(player_sector)
+            .is_some_and(|node| node.player_docked_station(player_id).is_some())
+        {
+            return Self::market_unavailable_snapshot();
+        }
         match command {
             MarketCommandWire::RefreshMarketCommand {} => self.snapshot(player_id, ""),
             MarketCommandWire::PlaceMarketOrderCommand {
@@ -164,6 +175,14 @@ impl MarketRuntime {
             balance,
             orders,
             notice: notice.to_owned(),
+        }
+    }
+
+    fn market_unavailable_snapshot() -> MarketSnapshotWire {
+        MarketSnapshotWire {
+            balance: 0,
+            orders: Vec::new(),
+            notice: MARKET_DOCK_REQUIRED_NOTICE.to_owned(),
         }
     }
 }
@@ -258,5 +277,25 @@ mod tests {
         let snapshot = runtime.snapshot(PlayerId(1), "");
         assert_eq!(snapshot.orders.len(), 1);
         assert!(snapshot.orders[0].is_own);
+    }
+
+    #[test]
+    fn market_requests_are_rejected_when_the_player_is_not_docked() {
+        let mut runtime = MarketRuntime::open_in_memory();
+        let mut node = SimulationNode::new(
+            dawn_core::NodeId(0),
+            dawn_core::SectorId(0),
+            dawn_core::SectorBounds::centered(dawn_core::SectorBounds::DEFAULT_HALF),
+        );
+
+        let snapshot = runtime.handle_single(
+            PlayerId(1),
+            MarketCommandWire::RefreshMarketCommand {},
+            &mut node,
+        );
+
+        assert_eq!(snapshot.notice, MARKET_DOCK_REQUIRED_NOTICE);
+        assert_eq!(snapshot.balance, 0);
+        assert!(snapshot.orders.is_empty());
     }
 }

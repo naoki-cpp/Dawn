@@ -145,6 +145,13 @@ Assemble/Disassemble のループ自体には追加コストがかからない�
   Transit/Raft合意（INV-003）が一切不要になる（エンティティの所有権移転
   ではなく、単なるInventory内訳の増減のため）。
 
+Market は**Station に dock 中のプレイヤーだけが操作できる**。Market の注文帳は
+サーバー上で存続するが、閲覧・発注・Cancel の wire request は、プレイヤーの
+所有 Sector が保持する `docked_players` に現在の Station context がある場合だけ
+受理する。宇宙空間のクライアントがwireを直接送っても同じ境界で拒否する。
+MVP では複数 Station 間で同一の Market 注文帳を共有する。Station ごとの注文帳や
+遠隔注文管理は、Station/Market の地理的分離を決める別タスクで扱う。
+
 ### 5. Currency（通貨）は Market 側の台帳、Item ではない
 
 Currency は `ItemId` に含めず、**`dawn-market` の SQL 台帳に `PlayerId` 単位の

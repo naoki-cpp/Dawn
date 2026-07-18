@@ -106,9 +106,10 @@ static func decode_key(
 	if keycode == KEY_I:
 		return {"kind": "toggle_inventory_panel"}
 
-	## M key -> toggle the Market panel. The server still validates the active
-	## ship and item ownership when an order is submitted.
-	if keycode == KEY_M:
+	## M key -> toggle the Market panel while docked. Market access is a
+	## station operation, not a space-flight action; the server enforces the
+	## same boundary for clients that bypass this decoder.
+	if keycode == KEY_M and docked_station_id >= 0:
 		return {"kind": "toggle_market_panel"}
 
 	## D key -> dock at the nearby station when in range.

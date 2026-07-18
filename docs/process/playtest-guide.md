@@ -1,8 +1,8 @@
 ---
-scope    : Phase 6 プレイテスト計画。セッション設計・メトリクス・バランス判定基準
+scope    : Phase 6 戦闘 / Phase 9 経済プレイテスト計画。セッション設計・メトリクス・バランス判定基準
 audience : Human Developer / AI Agent
 update   : セッション実施後に結果を追記する / バランス調整のたびに基準を見直す
-related  : ../design/game-design.md, roadmap.md, data/ship_types.toml, data/modules.toml
+related  : ../design/game-design.md, ../adr/ADR-0034-economy-foundations.md, roadmap.md, data/ship_types.toml, data/modules.toml
 ---
 
 # Playtest Guide
@@ -131,6 +131,9 @@ Phase 6 の主目標は「ゲームが実際に面白いか」を人間から検
   ADR-0037）。船は所有・ドック状態のまま、操作対象から外れるだけ。インベントリ
   パネルの SHIPS 列から別の所有船をクリックすると `SelectActiveShipCommand` で
   再度乗り込める（同一ステーションにドック中の船のみ選択可）。
+- **Market（Phase 9D、ADR-0034）**: `M` でMarketを開けるのはStationにdock中だけ。
+  宇宙空間での閲覧・発注・Cancelは拒否される。発注済みの注文はundockしても残り、
+  再dock後に管理できる。
 - **移動ループ（クラスタモード）**: プレイヤーは Sector 原点付近（30,000, 0, 0、恒星から十分離れた安全距離）にスポーンする。
   Gate 0（x=600,000 付近、Sector の縁）のリングをクリックで選択 → **W でワープ**（または A で接近）→
   ゲート圏内に着いたら **J でジャンプ**。HUD に選択ゲートと「[W] Warp」/「[W] too close to warp」が出る
@@ -175,7 +178,61 @@ NPC + プレイヤー全員が同じ空間に配置する。
 | Session 2 | `data/ship_types.toml` を Session 1 の結果をもとに調整 | バランス変更の効果を測定する |
 | Session 3 | PvP フェーズを早める（フェーズ2 直後に混在） | 対人戦への反応を測定する |
 
-各セッションの結果は §8 の結果記録フォーマットに残す。
+### Phase 9 — 経済ループ検証（9E-1、45〜60分）
+
+目的は、Scrap Metal・Station・Packaged Ship・Market が「数値を増やすだけ」でなく、
+資源の使い道・在庫の置き場所・価格の選択をプレイヤーに要求しているかを確認すること。
+これは人間の観察タスクであり、自動テストの成功だけでは完了にしない。
+
+#### 実施条件
+
+- 2〜4名で実施する。1名の場合は、売り手と買い手の役割をセッション中に交代する。
+- 実施前に commit hash、使用した server/client の起動モード、初期 Currency、
+  初期の Packaged Ship と Scrap Metal の量を記録する。
+- 可能なら同じ条件で2セッション行い、資源量または初期残高だけを変えて比較する。
+- 観察者は操作方法を先回りして教えず、詰まった場合だけ「何をしようとしているか」を質問する。
+
+#### シナリオと確認項目
+
+| 順序 | シナリオ | 観測する事実 |
+|---|---|---|
+| 1 | NPCまたは他プレイヤーの船を撃破して Scrap Metal を得る | Scrap Metal が能動的な撃破の直後に船の cargo へ入り、受動的に増えないこと |
+| 2 | Station に dock し、船 cargo と Station inventory を確認する | どこに何があるかをプレイヤーが区別できること。cargo の Scrap Metal を Station へ移せること |
+| 3 | Scrap Metal で Packaged Ship を建造し、Assemble / SelectActiveShip / Undock を行う | 建造するか温存するか、どの船種にするかの理由が語られること。Station 操作が完了すること |
+| 4 | 余剰 Item を Ask に出し、別プレイヤーが Bid を出して約定・Cancel を試す | 価格、売る量、Cancel と再出品の判断が生まれること。Currency の escrow / refund / settlement が理解できること |
+| 5 | 不足資源・不足残高・未dock状態・他人の在庫で同じ操作を試す | 拒否理由が理解でき、失敗によって Item や Currency が消失しないこと |
+
+#### 観察者の質問
+
+- Scrap Metal をすぐ建造に使いましたか、それとも売買・温存しましたか。なぜですか。
+- 建造とMarketのどちらを選ぶか迷う場面はありましたか。
+- 船 cargo、Station inventory、Market escrow、Currency balance の違いを説明できますか。
+- 相手の在庫や注文価格を見て、自分の行動や価格を変えましたか。
+- 資源不足または価格競争が原因で、予定していた行動を諦めましたか。
+
+#### 記録する最小メトリクス
+
+| メトリクス | 記録方法 |
+|---|---|
+| 撃破数 / 獲得 Scrap Metal | セッションログと画面上の cargo を突合 |
+| Ship build / Assemble / Disassemble 数 | 操作回数と成功・拒否数 |
+| cargo ↔ Station の移動数 | 転送した Item 種別・数量 |
+| Ask / Bid / Fill / Cancel 数 | Market画面とサーバーログを突合 |
+| Currency の escrow / refund / settlement | 発注前後・Cancel後・約定後の残高 |
+| 最初の建造または取引までの時間 | セッション開始からの経過時間 |
+| 経済上の意思決定数 | 観察者が「理由付きの選択」として記録した回数 |
+
+#### 判定
+
+次のいずれかが確認できれば、資源希少性が意思決定を生んだ証拠として記録する。
+
+- 2名以上が、資源量・価格・相手の在庫を理由に異なる行動を選ぶ。
+- 1名以上が、建造・温存・売買の間で迷い、理由を説明する。
+- 不足資源または価格競争によって、当初の計画を変更する。
+
+確認できなかった場合は、取得量・建造コスト・初期残高・Market の板情報を変更候補として記録する。
+
+各セッションの結果は §9 の結果記録フォーマットに残す。
 
 ---
 
@@ -410,6 +467,42 @@ total_events_per_tick       — Tick あたりのイベント数（負荷確認�
 #### バランス調整方針
 
 - （次セッションで変更する内容）
+```
+
+経済ループのセッションは次の形式で同じ節に追記する。
+
+```markdown
+### Economy Session N — YYYY-MM-DD
+
+参加人数: N 名
+使用 server/client の commit hash: （hash）
+初期 Currency / Scrap Metal / Packaged Ship: （値）
+
+#### 定量結果
+
+| メトリクス | 値 |
+|---|---|
+| 撃破数 / 獲得 Scrap Metal | N / N |
+| Build / Assemble / Disassemble 成功数 | N / N / N |
+| cargo ↔ Station 転送数 | N |
+| Ask / Bid / Fill / Cancel | N / N / N / N |
+| Currency escrow / refund / settlement | N / N / N |
+| 最初の建造または取引まで | N 分 |
+| 理由付きの経済上の意思決定 | N 件 |
+
+#### 観察メモ
+
+- （どの資源・価格・在庫が行動を変えたか）
+
+#### 判定
+
+- [ ] 資源希少性が意思決定を生んだ
+- [ ] プレイヤーが cargo / Station / Market の所有境界を理解した
+- [ ] 拒否・Cancel・refund で Item / Currency が失われなかった
+
+#### 次の変更
+
+- （取得量、コスト、初期残高、板の流動性など）
 ```
 
 ---

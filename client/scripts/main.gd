@@ -609,10 +609,14 @@ func _on_connection_changed(connected: bool) -> void:
 ## Ship nodes are spawned by the subsequent InitialState.
 func _on_welcomed(_p_player_id: int, _p_ship_id: int) -> void:
 	## connection.gd ship_id / player_id properties are already populated.
-	_connection.send_market_refresh_command()
+	## Market access is station-gated, so do not query it while the player is
+	## still in open space after connecting.
+	return
 
 
 func _on_market_refresh() -> void:
+	if not _session.is_docked():
+		return
 	_connection.send_market_refresh_command()
 
 
@@ -624,13 +628,15 @@ func _on_market_place_order(
 	price: int,
 	quantity: int
 ) -> void:
-	if _player_ship_id < 0:
+	if _player_ship_id < 0 or not _session.is_docked():
 		return
 	_connection.send_market_place_order_command(
 		_player_ship_id, item_type, module_id, ship_type_id, side, price, quantity)
 
 
 func _on_market_cancel_order(order_id: int) -> void:
+	if not _session.is_docked():
+		return
 	_connection.send_market_cancel_order_command(order_id)
 
 
@@ -746,6 +752,8 @@ func _apply_loadout_side_effects() -> void:
 		_loadout.tick()
 	)
 	_sync_session_state()
+	if not _session.is_docked() and _market_surface.is_open():
+		_market_surface.set_open(false)
 	if _session.is_docked() and _player_ship_id >= 0:
 		_stop_ship_motion(_player_ship_id)
 	var snapshot: Dictionary = _loadout.hud_snapshot()
