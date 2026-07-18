@@ -16,6 +16,7 @@ publish.workspace     = true
 # (wire_to_loadout_msg) living there, not a shared Deserialize impl this
 # crate could exercise directly against dawn-sector's JSON output.
 [dependencies]
+dawn-core = { path = "../dawn-core" }
 serde = { workspace = true }
 
 [dev-dependencies]

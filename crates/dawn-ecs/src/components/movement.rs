@@ -163,7 +163,8 @@ impl ThrustComp {
 ///
 /// `max_speed`       = base_max_speed × Π(active speed_multipliers)
 /// `mass`            = hull_mass + Σ(ALL fitted mass_add)  [passive — always]
-/// τ (align time)    = mass × inertia_modifier / MASS_SCALE  [computed in MovementSystem]
+/// The one-tick policy derives τ from `mass` and `inertia_modifier` through
+/// `dawn_core::MovementProfile`; ECS keeps only the inputs and not a cached τ.
 #[derive(Debug, Clone, Copy)]
 pub struct ShipStatsComp {
     // ── Movement (ADR-0023) ───────────────────────────────────────────────────

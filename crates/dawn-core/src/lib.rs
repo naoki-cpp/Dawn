@@ -28,6 +28,7 @@ pub mod error;
 pub mod events;
 pub mod fitting;
 pub mod item;
+pub mod movement;
 pub mod navigation;
 pub mod player;
 pub mod position;
@@ -52,6 +53,10 @@ pub use fitting::{
     StatDelta,
 };
 pub use item::ItemId;
+pub use movement::{
+    MovementInput, MovementProfile, MovementProfileError, MovementStep, BRAKE_STOP_EPSILON,
+    MASS_SCALE,
+};
 pub use navigation::{
     AnchorId, CelestialBodyDef, CelestialBodyId, CelestialBodyKind, JumpGateDef, JumpGateId,
     StarSystemDef, StarSystemId, StationDef, StationId, WarpTarget,
