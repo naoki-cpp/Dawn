@@ -83,40 +83,31 @@ func _process(delta: float) -> void:
 	if not _is_init:
 		return
 
-	## The local player uses Rust prediction between authoritative corrections
-	## (ADR-0043). Remote ships retain the existing dead-reckoning path.
-	if _is_player and _motion_ready:
-		_motion.advance(delta * TICKS_PER_SEC)
-		_velocity = _motion.predicted_velocity()
-		var predicted_pos := _motion.predicted_position()
-		if _velocity.length() <= VISUAL_SPEED_CAP:
-			position = predicted_pos
-		else:
-			## Keep true warp motion inside the renderable visual cap. PositionSnap
-			## resets the predictor at the authoritative arrival.
-			var capped_vel := _velocity.normalized() * VISUAL_SPEED_CAP
-			position += capped_vel * delta * TICKS_PER_SEC
-		_vel_estimate = _velocity if _velocity.length() <= VISUAL_SPEED_CAP else _velocity.normalized() * VISUAL_SPEED_CAP
+	if not _motion_ready:
+		return
+
+	## Both local prediction and remote dead reckoning advance through the same
+	## Rust motion track. This adapter only decides how much of that state is
+	## renderable for the current ship.
+	_motion.advance(delta * TICKS_PER_SEC)
+	_velocity = _motion.predicted_velocity()
+	var speed := _velocity.length()
+	var predicted_pos := _motion.predicted_position()
+	if _is_player and speed > VISUAL_SPEED_CAP:
+		## Keep true warp motion inside the renderable visual cap. PositionSnap
+		## resets the motion track at the authoritative arrival.
+		_vel_estimate = _velocity.normalized() * VISUAL_SPEED_CAP
+		position += _vel_estimate * delta * TICKS_PER_SEC
 	else:
-		## VelocityChanged (ADR-0008): integrate velocity every frame to avoid
-		## visible position jumps at tick boundaries.
-		var spd := _velocity.length()
-		if _is_player:
-			## Keep the piloted ship's warp path bounded and renderable.
-			var integ_vel := _velocity
-			if spd > VISUAL_SPEED_CAP:
-				integ_vel = _velocity / spd * VISUAL_SPEED_CAP
-			position += integ_vel * delta * TICKS_PER_SEC
-			_vel_estimate = integ_vel
-		else:
-			## Other ships are hidden during the bulk of a warp and integrate the
-			## uncapped velocity so they reappear near the true position.
-			var in_tunnel := spd > VISUAL_SPEED_CAP
+		if not _is_player:
+			## Remote ships are hidden during the bulk of a warp while their shared
+			## track continues toward the true position.
+			var in_tunnel := speed > VISUAL_SPEED_CAP
 			if in_tunnel != _in_tunnel:
 				visible    = not in_tunnel
 				_in_tunnel = in_tunnel
-			position += _velocity * delta * TICKS_PER_SEC
-			_vel_estimate = _velocity
+		position = predicted_pos
+		_vel_estimate = _velocity
 
 	## Rotate the ship to face its velocity direction.
 	## The Hull mesh tip is in local -Z after its -90° X rotation, which
@@ -151,14 +142,15 @@ func initialize(id: int, godot_pos: Vector3) -> void:
 	_is_init   = true
 	_in_tunnel = false
 	visible    = true
-	_motion.configure(500.0 * WORLD_SCALE, 10_000_000.0, 0.3, godot_pos, Vector3.ZERO, 0)
+	_motion.configure_dead_reckoning(
+		500.0 * WORLD_SCALE, 10_000_000.0, 0.3, godot_pos, Vector3.ZERO, 0)
 	_motion_ready = true
 
 ## Seed the Rust predictor with the server's effective fitted movement profile.
 ## The predictor runs in local Godot units so it owns the same position that is
 ## rendered by this node.
 func configure_motion(max_speed: float, mass: float, inertia_modifier: float, server_vel: Vector3, tick: int = 0) -> void:
-	_motion.configure(
+	_motion.configure_dead_reckoning(
 		max_speed * WORLD_SCALE,
 		mass,
 		inertia_modifier,
@@ -177,13 +169,19 @@ func set_velocity(server_vel: Vector3) -> void:
 
 ## Snap the ship to a Godot-space position (jump-gate teleport, warp-arrival
 ## snap). main.gd converts from server space via its WorldSpace before calling.
-func update_target(godot_pos: Vector3) -> void:
-	position = godot_pos
+func update_target(godot_pos: Vector3, tick: int = 0) -> void:
+	reset_motion(godot_pos, Vector3.ZERO, tick)
+
+## Shift the Rust motion track with the rendered node during a floating-origin
+## rebase. The node position itself is moved by WorldPresentation.
+func rebase_motion(shift: Vector3) -> void:
+	if _motion_ready:
+		_motion.rebase(shift)
 
 func set_as_player() -> void:
 	_is_player    = true
 	if _motion_ready:
-		_motion.reset(global_position, _velocity, 0)
+		_motion.enable_prediction()
 	_vel_instance = _make_indicator(Color(0.0, 1.0, 0.4))
 	_vel_mesh     = _vel_instance.mesh as ImmediateMesh
 	_thr_instance = _make_indicator(Color(1.0, 0.55, 0.0))
@@ -195,6 +193,8 @@ func set_as_player() -> void:
 ## leaving them around would freeze their last-drawn arrows in place forever
 ## since _process() only redraws them while _is_player is true.
 func clear_as_player() -> void:
+	if _motion_ready:
+		_motion.enable_dead_reckoning()
 	_is_player = false
 	if _vel_instance != null:
 		_vel_instance.queue_free()
