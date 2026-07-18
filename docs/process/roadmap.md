@@ -403,4 +403,7 @@ postcard migration (including InitialState, PlayerLoadout, and AoI messages)
 are complete. The remaining Phase 10 work is Client-Side Prediction,
 implemented under proposed ADR-0043: Rust owns the predictor, the server sends
 owner-only normal-flight corrections, and warp/dock discontinuities keep their
-existing authoritative snap paths. Godot playtest verification remains open.
+existing authoritative snap paths. The client ship-motion deepening now uses
+one `dawn-client-core::MotionPredictor` track for local prediction and remote
+dead-reckoning, including floating-origin rebases. Automated Rust and Godot
+tests pass; Godot playtest verification remains open.
