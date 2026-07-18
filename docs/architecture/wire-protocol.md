@@ -13,7 +13,7 @@ related  : ADR-0005 (ClientConnection), ADR-0041 (dawn-wire), ADR-0042
 Transport is a single WebSocket connection per client. Since ADR-0042 (all
 stages complete), every message -- `Hello`/`Welcome`/`Redirect`/`DomainEvent`/
 `ClientCommand`/`InitialState`/`PlayerLoadout`/`AoiEnter`/`AoiLeave`/
-`PositionSnap` -- travels as a **binary** frame, postcard-encoded via the
+`PositionSnap`/`MotionCorrection` -- travels as a **binary** frame, postcard-encoded via the
 `ClientMessage`/`ServerMessage` envelope in `dawn-wire` (one WebSocket frame
 always carries exactly one message; no length-prefix framing is needed on
 top). There is no more ad-hoc JSON text frame path.
@@ -24,6 +24,11 @@ separate message family: `ClientMessage::Market(MarketCommandWire)` and
 Sector `ClientCommandWire` stream. This preserves the ADR-0034 boundary where
 the Market owns order matching and Currency, while `dawn-simulation` applies
 only the one-sided cargo bridge commands to the owning `SimulationNode`.
+
+`ServerMessage::MotionCorrection` (ADR-0043) is owner-only normal-flight
+authority for the local Rust predictor. It carries the ship's absolute
+position, current velocity, and server tick. Warp arrival continues to use
+`PositionSnap`; remote ships do not receive this owner-only correction.
 
 The field-level shape of `EventWire`/`ClientCommandWire` below is still
 generated from the Rust types and still useful as the schema-of-record for

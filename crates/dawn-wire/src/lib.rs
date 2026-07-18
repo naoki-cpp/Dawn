@@ -134,6 +134,15 @@ pub enum ServerMessage {
         ship_id: u64,
         position: AbsPosWire,
     },
+    /// Owner-only normal-flight correction for client-side prediction
+    /// (Phase 10 / ADR-0043). Warp and docking discontinuities use
+    /// `PositionSnap` or domain events instead.
+    MotionCorrection {
+        ship_id: u64,
+        position: AbsPosWire,
+        velocity: VelWire,
+        tick: u64,
+    },
     MarketSnapshot(MarketSnapshotWire),
 }
 
@@ -172,5 +181,38 @@ impl ClientMessage {
     /// Decode a binary WebSocket frame back into a [`ClientMessage`].
     pub fn decode(bytes: &[u8]) -> Result<Self, postcard::Error> {
         postcard::from_bytes(bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn motion_correction_round_trips_through_the_binary_envelope() {
+        let message = ServerMessage::MotionCorrection {
+            ship_id: 7,
+            position: AbsPosWire {
+                x: 1.0e12,
+                y: -2.0,
+                z: 3.5,
+            },
+            velocity: VelWire {
+                dx: 4.0,
+                dy: 5.0,
+                dz: -6.0,
+            },
+            tick: 42,
+        };
+
+        let decoded = ServerMessage::decode(&message.encode()).expect("valid postcard message");
+        assert!(matches!(
+            decoded,
+            ServerMessage::MotionCorrection {
+                ship_id: 7,
+                tick: 42,
+                ..
+            }
+        ));
     }
 }

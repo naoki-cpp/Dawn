@@ -395,3 +395,12 @@ Sector へ直接アクセスせず、呼び出し側が所有 Sector へ片側�
 2026-06-14（Phase 8 前提の3設計判断・ADR-0016/0017/0018）と 2026-06-04
 （Phase 4〜11 開発戦略の2段階変更）の詳細は **docs/process/roadmap-history.md** の
 「廃止・変更された計画の記録」を参照。
+## Phase 10 current status (2026-07-18)
+
+This section supersedes the stale completion labels in the original Phase 10
+table above. GDExtension setup, direct client-core projections, and the full
+postcard migration (including InitialState, PlayerLoadout, and AoI messages)
+are complete. The remaining Phase 10 work is Client-Side Prediction,
+implemented under proposed ADR-0043: Rust owns the predictor, the server sends
+owner-only normal-flight corrections, and warp/dock discontinuities keep their
+existing authoritative snap paths. Godot playtest verification remains open.

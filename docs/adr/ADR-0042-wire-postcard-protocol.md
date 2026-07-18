@@ -253,6 +253,15 @@ GDScript側の既存コンシューマ（`main.gd`/`hud_manager.gd`）には影�
 - [x] `cargo fmt --all -- --check` / `cargo test --workspace` /
       `cargo clippy --workspace -- -D warnings` / `cargo machete` 全件通過
 
+## Implementation reconciliation (2026-07-18)
+
+The historical stage labels above describe the migration while it was in
+progress. The implementation now uses the postcard `ServerMessage` and
+`ClientMessage` envelopes for InitialState, PlayerLoadout, AoI messages, and
+the newer MotionCorrection message as well. The Phase 10 status in
+`docs/process/roadmap.md` is the current summary; the original checklist is
+retained as migration history.
+
 ### 段階2c（`AoiEnter`/`AoiLeave`/`PositionSnap`、2026-07-11 完了）
 
 - [x] `ServerMessage::AoiEnter(ShipStateJson)`/`AoiLeave { ship_id: u64 }` を

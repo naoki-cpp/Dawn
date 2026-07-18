@@ -152,6 +152,7 @@ func _assert_scene_tree_refs() -> void:
 func _ready() -> void:
 	_assert_scene_tree_refs()
 	_connection.event_received.connect(_on_event_received)
+	_connection.motion_correction_received.connect(_handle_motion_correction)
 	_connection.connection_changed.connect(_on_connection_changed)
 	_connection.welcomed.connect(_on_welcomed)
 	_connection.initial_state_received.connect(_on_initial_state)
@@ -204,6 +205,14 @@ func _server_to_godot_pos(p: Vector3) -> Vector3:
 ## event/state handler that parses a position out of a payload dict.
 func _vec3_from_dict(d: Dictionary, key: String) -> Vector3:
 	return WorldSessionScript.vec3_from_dict(d, key)
+
+## Reads a {dx,dy,dz} velocity sub-dictionary from a wire payload.
+func _velocity_from_dict(d: Dictionary, key: String = "velocity") -> Vector3:
+	var velocity: Dictionary = d.get(key, {}) as Dictionary
+	return Vector3(
+		velocity.get("dx", 0.0) as float,
+		velocity.get("dy", 0.0) as float,
+		velocity.get("dz", 0.0) as float)
 
 ## Tracks whether the player ship is within activation range of a Jump Gate
 ## (ADR-0009). Distance is computed in server units (Godot units / WORLD_SCALE).
@@ -479,9 +488,9 @@ func _send_stop_command() -> void:
 	if _player_ship_id < 0:
 		return
 	_connection.send_stop_command()
-	## Clear thrust arrow on player ship
+	## Apply braking immediately in the local predictor, then clear the arrow.
 	if _ships.has(_player_ship_id):
-		(_ships[_player_ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
+		(_ships[_player_ship_id] as Node3D).call("set_braking")
 
 # -- Event handlers -----------------------------------------------------------
 
@@ -525,13 +534,13 @@ func _handle_position_snap(p: Dictionary) -> void:
 		# they are on screen and re-anchor the floating origin so that this same
 		# Godot position now represents the authoritative arrival `server_pos`:
 		# new_origin = server_pos - (ship's server-space offset from the origin).
-		var pg: Vector3 = (_ships[ship_id] as Node3D).global_position
+		var pg: Vector3 = _ship_position(_ships[ship_id] as Node3D)
 		var new_origin: Vector3 = server_pos - _world.dir_to_server(pg)
 		_presentation.apply_origin_rebase(new_origin, true, _player_ship_id, _ships)
 	else:
-		(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(server_pos)
-	(_ships[ship_id] as Node3D).call("set_velocity", Vector3.ZERO)
-	(_ships[ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
+		_set_ship_position(_ships[ship_id] as Node3D, _server_to_godot_pos(server_pos))
+	var ship := _ships[ship_id] as Node3D
+	ship.call("reset_motion", _ship_position(ship), Vector3.ZERO, _current_tick)
 
 ## Docking is authoritative server state. The server stops the ship
 ## immediately, but without an explicit client event the ship_controller keeps
@@ -548,9 +557,9 @@ func _handle_ship_docked(p: Dictionary) -> void:
 		var station: Dictionary = entry as Dictionary
 		if (station.get("station_id", -1) as int) != station_id:
 			continue
-		(_ships[ship_id] as Node3D).global_position = _server_to_godot_pos(
+		_set_ship_position(_ships[ship_id] as Node3D, _server_to_godot_pos(
 			station.get("position", Vector3.ZERO) as Vector3
-		)
+		))
 		if ship_id == _player_ship_id:
 			_session.apply_dock_event(ship_id, station_id, station.get("name", "") as String, tick)
 			_sync_session_state()
@@ -570,8 +579,17 @@ func _handle_ship_undocked(p: Dictionary) -> void:
 func _stop_ship_motion(ship_id: int) -> void:
 	if not _ships.has(ship_id):
 		return
-	(_ships[ship_id] as Node3D).call("set_velocity", Vector3.ZERO)
-	(_ships[ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
+	var ship := _ships[ship_id] as Node3D
+	ship.call("reset_motion", _ship_position(ship), Vector3.ZERO, _current_tick)
+
+func _ship_position(ship: Node3D) -> Vector3:
+	return ship.global_position if ship.is_inside_tree() else ship.position
+
+func _set_ship_position(ship: Node3D, godot_pos: Vector3) -> void:
+	if ship.is_inside_tree():
+		ship.global_position = godot_pos
+	else:
+		ship.position = godot_pos
 
 # -- Jump Gate (ADR-0009) -----------------------------------------------------
 
@@ -583,7 +601,9 @@ func _handle_jump_gate_used(p: Dictionary) -> void:
 	var entry_pos: Vector3 = _vec3_from_dict(p, "entry_pos")
 	(_ships[ship_id] as Node3D).call("update_target", _world.to_godot(entry_pos))
 	if ship_id == _player_ship_id:
-		(_ships[ship_id] as Node3D).call("set_thrust_direction", Vector3.ZERO)
+		(_ships[ship_id] as Node3D).call(
+			"reset_motion", _ship_position(_ships[ship_id] as Node3D), Vector3.ZERO,
+			p.get("tick", _current_tick) as int)
 		_jump_notice       = "Jumped via Gate #%d" % (p.get("gate_id", 0) as int)
 		_jump_notice_timer = 3.0
 
@@ -684,6 +704,13 @@ func _spawn_ship_from_data(d: Dictionary) -> void:
 	if _ships.has(sid):
 		return
 	var ship: Node3D = _instantiate_ship(sid, _vec3_from_dict(d, "position"))
+	ship.call(
+		"configure_motion",
+		d.get("max_speed", 500.0) as float,
+		d.get("mass", 10_000_000.0) as float,
+		d.get("inertia_modifier", 0.3) as float,
+		_velocity_from_dict(d),
+		_current_tick)
 	var result: Dictionary = _session.register_ship(sid, ship, d, _connection.ship_id)
 	_sync_session_state()
 	if result.get("became_player", false) as bool:
@@ -1038,12 +1065,7 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 	if not _ships.has(ship_id):
 		return
 
-	var vel_dict: Dictionary = p.get("velocity", {}) as Dictionary
-	var server_vel := Vector3(
-		(vel_dict.get("dx", 0.0) as float),
-		(vel_dict.get("dy", 0.0) as float),
-		(vel_dict.get("dz", 0.0) as float),
-	)
+	var server_vel := _velocity_from_dict(p)
 	(_ships[ship_id] as Node3D).call("set_velocity", server_vel)
 
 	## Warp arrival is corrected by the server's PositionSnap (ADR-0029), not by
@@ -1052,6 +1074,19 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 	var tick: int = p.get("tick", 0) as int
 	_session.advance_tick_from_event(tick, _loadout)
 	_sync_session_state()
+
+## Owner-only absolute correction for Rust client-side prediction (ADR-0043).
+## Other ships continue to use the event-driven dead-reckoning path.
+func _handle_motion_correction(p: Dictionary) -> void:
+	var ship_id: int = p.get("ship_id", 0) as int
+	if ship_id != _player_ship_id or not _ships.has(ship_id):
+		return
+	var tick: int = p.get("tick", 0) as int
+	(_ships[ship_id] as Node3D).call(
+		"reconcile_motion",
+		_server_to_godot_pos(_vec3_from_dict(p, "position")),
+		_velocity_from_dict(p),
+		tick)
 
 
 func _handle_ship_despawned(p: Dictionary) -> void:

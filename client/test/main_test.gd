@@ -24,6 +24,7 @@ class FakeShip:
 	var thrust_calls: Array[Vector3] = []
 	var set_as_player_calls: int = 0
 	var clear_as_player_calls: int = 0
+	var reconcile_calls: Array[Dictionary] = []
 
 	func set_velocity(v: Vector3) -> void:
 		velocity_calls.append(v)
@@ -41,6 +42,19 @@ class FakeShip:
 
 	func set_thrust_direction(v: Vector3) -> void:
 		thrust_calls.append(v)
+
+	func set_braking() -> void:
+		thrust_calls.append(Vector3.ZERO)
+
+	func reset_motion(p: Vector3, v: Vector3, _tick: int) -> void:
+		position = p
+		velocity_calls.append(v)
+		thrust_calls.append(Vector3.ZERO)
+
+	func reconcile_motion(p: Vector3, v: Vector3, _tick: int) -> void:
+		position = p
+		velocity_calls.append(v)
+		reconcile_calls.append({"position": p, "velocity": v, "tick": _tick})
 
 
 class FakeConnection:
@@ -211,6 +225,27 @@ func test_ship_docked_event_clears_residual_motion() -> void:
 	)
 	assert_vector(ship.velocity_calls.back()).is_equal(Vector3.ZERO)
 	assert_vector(ship.thrust_calls.back()).is_equal(Vector3.ZERO)
+	ship.free()
+
+
+func test_motion_correction_reconciles_the_active_ship() -> void:
+	var ship := FakeShip.new()
+	_main.add_child(ship)
+	_main._ships = {1: ship}
+	_main._player_ship_id = 1
+
+	_main._handle_motion_correction({
+		"ship_id": 1,
+		"position": {"x": 100.0, "y": 20.0, "z": 300.0},
+		"velocity": {"dx": 4.0, "dy": 5.0, "dz": -6.0},
+		"tick": 42,
+	})
+
+	assert_int(ship.reconcile_calls.size()).is_equal(1)
+	var motion_call: Dictionary = ship.reconcile_calls.back()
+	assert_vector(motion_call["position"]).is_equal(Vector3(10.0, 2.0, -30.0))
+	assert_vector(motion_call["velocity"]).is_equal(Vector3(4.0, 5.0, -6.0))
+	assert_int(motion_call["tick"]).is_equal(42)
 	ship.free()
 
 

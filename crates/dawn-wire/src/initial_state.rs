@@ -9,6 +9,8 @@
 use dawn_core::CelestialBodyKind;
 use serde::{Deserialize, Serialize};
 
+use crate::VelWire;
+
 /// Absolute (Sector-frame, f64) position (ADR-0029). Distinct from
 /// [`crate::PosWire`] (f32), which carries client-authored command targets
 /// rather than server-authoritative absolute coordinates.
@@ -26,6 +28,10 @@ pub struct ShipStateWire {
     pub ship_id: u64,
     pub ship_type_name: String,
     pub position: AbsPosWire,
+    pub velocity: VelWire,
+    pub max_speed: f32,
+    pub mass: f32,
+    pub inertia_modifier: f32,
     pub max_shield: f32,
     pub max_armor: f32,
     pub max_hull: f32,
