@@ -112,6 +112,28 @@ fn server_message_to_dict(msg: &ServerMessage) -> Dict {
             d.set("position", &pos);
             d
         }
+        ServerMessage::MotionCorrection {
+            ship_id,
+            position,
+            velocity,
+            tick,
+        } => {
+            let mut d = Dict::new();
+            d.set("type", "MotionCorrection");
+            d.set("ship_id", *ship_id as f64);
+            d.set("tick", *tick as f64);
+            let mut pos = Dict::new();
+            pos.set("x", position.x);
+            pos.set("y", position.y);
+            pos.set("z", position.z);
+            d.set("position", &pos);
+            let mut vel = Dict::new();
+            vel.set("dx", velocity.dx);
+            vel.set("dy", velocity.dy);
+            vel.set("dz", velocity.dz);
+            d.set("velocity", &vel);
+            d
+        }
         ServerMessage::MarketSnapshot(snapshot) => {
             let mut d = struct_to_dict(snapshot, "MarketSnapshotWire");
             d.set("type", "MarketSnapshot");

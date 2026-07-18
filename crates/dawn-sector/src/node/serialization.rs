@@ -5,7 +5,7 @@
 //! from the presentation layer.
 
 use dawn_core::ShipId;
-use dawn_ecs::components::{HullComp, ShipStatsComp};
+use dawn_ecs::components::{HullComp, ShipStatsComp, VelocityComp};
 use dawn_event_store::store::EventStore;
 use dawn_wire::{
     AbsPosWire, BuildableShipTypeWire, CelestialBodyWire, InitialStateWire, JumpGateWire,
@@ -182,6 +182,10 @@ impl<S: EventStore> SimulationNode<S> {
             ship_id: ship_id.raw(),
             ship_type_name: ship_type_name.to_string(),
             position: abs_pos_json(pos),
+            velocity: dawn_wire::VelWire::from(self.world.get::<VelocityComp>(*entity)?.0),
+            max_speed: stats.max_speed,
+            mass: stats.mass,
+            inertia_modifier: stats.inertia_modifier,
             max_shield: stats.max_shield,
             max_armor: stats.max_armor,
             max_hull: stats.max_hull,
@@ -425,6 +429,12 @@ mod tests {
             .expect("known ship yields a state");
         assert_eq!(ship.ship_id, sid.raw());
         assert_eq!(ship.position.x as f32, 1.0);
+        assert_eq!(ship.velocity.dx, 0.0);
+        assert_eq!(ship.velocity.dy, 0.0);
+        assert_eq!(ship.velocity.dz, 0.0);
+        assert!(ship.max_speed > 0.0);
+        assert!(ship.mass > 0.0);
+        assert!(ship.inertia_modifier > 0.0);
     }
 
     #[test]

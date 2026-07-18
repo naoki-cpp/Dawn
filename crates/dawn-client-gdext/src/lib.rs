@@ -10,12 +10,14 @@ mod item_row_gd;
 mod json_variant;
 mod loadout_gd;
 mod module_row_gd;
+mod motion_predictor_gd;
 mod server_message_gd;
 
 pub use client_command_gd::{ClientCommand, ClientMessageDecoder};
 pub use item_row_gd::ItemRow;
 pub use loadout_gd::PlayerLoadout;
 pub use module_row_gd::ModuleRow;
+pub use motion_predictor_gd::MotionPredictor;
 pub use server_message_gd::ServerMessageDecoder;
 
 struct DawnClientGdext;

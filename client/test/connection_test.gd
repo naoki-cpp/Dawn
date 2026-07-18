@@ -89,6 +89,28 @@ func test_market_snapshot_message_emits_market_signal() -> void:
 	connection.free()
 
 
+func test_motion_correction_message_emits_prediction_signal() -> void:
+	var connection: Node = Connection.new()
+	var received: Array = []
+	connection.motion_correction_received.connect(func(payload: Dictionary) -> void:
+		received.append(payload)
+	)
+
+	var payload := {
+		"type": "MotionCorrection",
+		"ship_id": 11,
+		"tick": 42,
+		"position": {"x": 100.0, "y": 20.0, "z": 300.0},
+		"velocity": {"dx": 4.0, "dy": 5.0, "dz": -6.0},
+	}
+	connection._handle_message(payload, PackedByteArray())
+
+	assert_int(received.size()).is_equal(1)
+	assert_int((received[0] as Dictionary)["ship_id"]).is_equal(11)
+	assert_int((received[0] as Dictionary)["tick"]).is_equal(42)
+	connection.free()
+
+
 func test_legacy_player_fitting_message_still_emits_player_fitting_signal() -> void:
 	var connection: Node = Connection.new()
 	var received: Array = []

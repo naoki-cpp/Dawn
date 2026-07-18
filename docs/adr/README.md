@@ -77,6 +77,12 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 |---|---|---|
 | [ADR-0013](ADR-0013-tactical-overlay.md) | タクティカルオーバーレイ（射程リング） | Accepted |
 
+### Phase 10 additions
+
+| ADR | Title | Status |
+|---|---|---|
+| [ADR-0043](ADR-0043-client-side-prediction.md) | Client-Side Prediction and Motion Reconciliation | Proposed |
+
 ## References
 
 - Creating a new ADR: `/new-adr` skill (`.claude/commands/new-adr.md`)

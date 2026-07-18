@@ -60,13 +60,13 @@ use dawn_core::{
     SectorBounds, SectorId, ShipId, StationDef, StationId, Tick,
 };
 use dawn_ecs::{
-    components::{PositionComp, ShipStatsComp},
+    components::{PositionComp, ShipStatsComp, WarpComp},
     Entity, SimWorld,
 };
 use dawn_event_store::{store::EventStore, InMemoryEventStore};
 
 #[cfg(test)]
-use dawn_ecs::components::{CapacitorComp, FittingComp, HullComp, WarpComp};
+use dawn_ecs::components::{CapacitorComp, FittingComp, HullComp};
 
 use crate::persistence::StateSnapshot;
 
@@ -538,6 +538,17 @@ impl<S: EventStore> SimulationNode<S> {
         let entity = *self.ships.index.get(&ship_id)?;
         let offset = self.world.get::<PositionComp>(entity)?.0;
         Some(self.entity_absolute_f64(entity, offset))
+    }
+
+    /// Whether a ship is in committed warp. AoI delivery uses this to keep
+    /// normal-flight prediction corrections separate from warp authority.
+    pub(crate) fn ship_is_warping(&self, ship_id: ShipId) -> bool {
+        let Some(entity) = self.ships.index.get(&ship_id) else {
+            return false;
+        };
+        self.world
+            .get::<WarpComp>(*entity)
+            .is_some_and(|warp| warp.is_warping())
     }
 
     /// Removes a ship entirely: despawns its ECS entity, clears it from every

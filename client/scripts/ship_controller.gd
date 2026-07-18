@@ -38,6 +38,8 @@ var _vel_estimate : Vector3 = Vector3.ZERO  ## 速度インジケーター用（
 var _is_init      : bool    = false
 var _is_player    : bool    = false
 var _thrust_dir   : Vector3 = Vector3.ZERO
+var _motion       := MotionPredictor.new()
+var _motion_ready : bool    = false
 ## Hidden while warping faster than VISUAL_SPEED_CAP (ADR-0029 lore pass,
 ## non-player ships only). Tracks the last applied visibility so we only
 ## toggle `visible` on the actual crossing, not every frame.
@@ -81,42 +83,40 @@ func _process(delta: float) -> void:
 	if not _is_init:
 		return
 
-	## VelocityChanged (ADR-0008): integrate velocity every frame to avoid
-	## visible position jumps at tick boundaries.
-	var spd := _velocity.length()
-
-	if _is_player:
-		## The piloted ship: keep streaking at a capped, renderable speed
-		## instead of the literal (often ~10^8 Godot units/tick) warp speed --
-		## the camera follows this node, so hiding it or flinging it past the
-		## far plane would be disorienting. Continuous visual feedback while
-		## actually flying matters more here than for an observed ship.
-		var integ_vel := _velocity
-		if spd > VISUAL_SPEED_CAP:
-			integ_vel = _velocity / spd * VISUAL_SPEED_CAP
-		position += integ_vel * delta * TICKS_PER_SEC
-		_vel_estimate = integ_vel
+	## The local player uses Rust prediction between authoritative corrections
+	## (ADR-0043). Remote ships retain the existing dead-reckoning path.
+	if _is_player and _motion_ready:
+		_motion.advance(delta * TICKS_PER_SEC)
+		_velocity = _motion.predicted_velocity()
+		var predicted_pos := _motion.predicted_position()
+		if _velocity.length() <= VISUAL_SPEED_CAP:
+			position = predicted_pos
+		else:
+			## Keep true warp motion inside the renderable visual cap. PositionSnap
+			## resets the predictor at the authoritative arrival.
+			var capped_vel := _velocity.normalized() * VISUAL_SPEED_CAP
+			position += capped_vel * delta * TICKS_PER_SEC
+		_vel_estimate = _velocity if _velocity.length() <= VISUAL_SPEED_CAP else _velocity.normalized() * VISUAL_SPEED_CAP
 	else:
-		## Other ships, as observed by any client (ADR-0029 lore pass,
-		## 2026-06-23): clamping to a constant capped speed for the whole
-		## (often many-tick) warp made it look like the ship cruised at one
-		## flat speed forever, since real speed exceeds the cap for nearly the
-		## entire transit and only dips below it right at the accel/decel
-		## edges. Instead, render normally (uncapped -- it's already under the
-		## cap by construction) while real speed is at or below the cap, which
-		## covers the perceptible accelerate-into-warp and decelerate-out-of-warp
-		## edges; hide the ship for the bulk of the transit where it's moving
-		## too fast to render sanely, rather than showing a flat, wrong-feeling
-		## cruise. Position keeps integrating the UNCAPPED velocity while
-		## hidden so the ship is near its true position when it reappears
-		## (instead of resuming from a stale frozen spot) -- the jump itself is
-		## invisible since the node isn't drawn.
-		var in_tunnel := spd > VISUAL_SPEED_CAP
-		if in_tunnel != _in_tunnel:
-			visible    = not in_tunnel
-			_in_tunnel = in_tunnel
-		position += _velocity * delta * TICKS_PER_SEC
-		_vel_estimate = _velocity
+		## VelocityChanged (ADR-0008): integrate velocity every frame to avoid
+		## visible position jumps at tick boundaries.
+		var spd := _velocity.length()
+		if _is_player:
+			## Keep the piloted ship's warp path bounded and renderable.
+			var integ_vel := _velocity
+			if spd > VISUAL_SPEED_CAP:
+				integ_vel = _velocity / spd * VISUAL_SPEED_CAP
+			position += integ_vel * delta * TICKS_PER_SEC
+			_vel_estimate = integ_vel
+		else:
+			## Other ships are hidden during the bulk of a warp and integrate the
+			## uncapped velocity so they reappear near the true position.
+			var in_tunnel := spd > VISUAL_SPEED_CAP
+			if in_tunnel != _in_tunnel:
+				visible    = not in_tunnel
+				_in_tunnel = in_tunnel
+			position += _velocity * delta * TICKS_PER_SEC
+			_vel_estimate = _velocity
 
 	## Rotate the ship to face its velocity direction.
 	## The Hull mesh tip is in local -Z after its -90° X rotation, which
@@ -151,12 +151,29 @@ func initialize(id: int, godot_pos: Vector3) -> void:
 	_is_init   = true
 	_in_tunnel = false
 	visible    = true
+	_motion.configure(500.0 * WORLD_SCALE, 10_000_000.0, 0.3, godot_pos, Vector3.ZERO, 0)
+	_motion_ready = true
+
+## Seed the Rust predictor with the server's effective fitted movement profile.
+## The predictor runs in local Godot units so it owns the same position that is
+## rendered by this node.
+func configure_motion(max_speed: float, mass: float, inertia_modifier: float, server_vel: Vector3, tick: int = 0) -> void:
+	_motion.configure(
+		max_speed * WORLD_SCALE,
+		mass,
+		inertia_modifier,
+		global_position,
+		_server_velocity_to_godot(server_vel),
+		tick)
+	_motion_ready = true
+	_velocity = _server_velocity_to_godot(server_vel)
 
 ## VelocityChanged イベントで速度を更新する（ADR-0008）。
 ## server_vel はサーバー座標系の速度ベクトル（units/tick）。
 func set_velocity(server_vel: Vector3) -> void:
-	## サーバー座標系 → Godot 座標系（Z 反転・スケール変換）
-	_velocity = Vector3(server_vel.x, server_vel.y, -server_vel.z) * WORLD_SCALE
+	_velocity = _server_velocity_to_godot(server_vel)
+	if _motion_ready:
+		_motion.set_velocity(_velocity)
 
 ## Snap the ship to a Godot-space position (jump-gate teleport, warp-arrival
 ## snap). main.gd converts from server space via its WorldSpace before calling.
@@ -165,6 +182,8 @@ func update_target(godot_pos: Vector3) -> void:
 
 func set_as_player() -> void:
 	_is_player    = true
+	if _motion_ready:
+		_motion.reset(global_position, _velocity, 0)
 	_vel_instance = _make_indicator(Color(0.0, 1.0, 0.4))
 	_vel_mesh     = _vel_instance.mesh as ImmediateMesh
 	_thr_instance = _make_indicator(Color(1.0, 0.55, 0.0))
@@ -186,8 +205,37 @@ func clear_as_player() -> void:
 		_thr_instance = null
 		_thr_mesh = null
 
+## Apply local prediction input for a MoveCommand.
 func set_thrust_direction(godot_dir: Vector3) -> void:
 	_thrust_dir = godot_dir.normalized() if godot_dir.length_squared() > 0.0 else Vector3.ZERO
+	if _motion_ready and _is_player:
+		if _thrust_dir.length_squared() > 0.0:
+			_motion.set_thrust_direction(_thrust_dir)
+		else:
+			_motion.clear_input()
+
+## Apply local prediction input for a StopCommand.
+func set_braking() -> void:
+	_thrust_dir = Vector3.ZERO
+	if _motion_ready and _is_player:
+		_motion.set_braking()
+
+## Reconcile normal flight to an authoritative state without discarding local
+## input. The Rust module ignores stale ticks.
+func reconcile_motion(godot_pos: Vector3, server_vel: Vector3, tick: int) -> void:
+	var godot_vel := _server_velocity_to_godot(server_vel)
+	_velocity = godot_vel
+	if _motion_ready and _is_player and _motion.reconcile(godot_pos, godot_vel, tick):
+		global_position = godot_pos
+
+## Reset prediction at a discontinuity such as warp arrival or docking.
+func reset_motion(godot_pos: Vector3, server_vel: Vector3, tick: int) -> void:
+	var godot_vel := _server_velocity_to_godot(server_vel)
+	global_position = godot_pos
+	_velocity = godot_vel
+	_thrust_dir = Vector3.ZERO
+	if _motion_ready:
+		_motion.reset(godot_pos, godot_vel, tick)
 
 func get_speed_server() -> float:
 	return _velocity.length() / WORLD_SCALE
@@ -198,6 +246,9 @@ func get_speed_server() -> float:
 ## the scale conversion at the call site.
 func get_speed_godot() -> float:
 	return _velocity.length()
+
+func _server_velocity_to_godot(server_vel: Vector3) -> Vector3:
+	return Vector3(server_vel.x, server_vel.y, -server_vel.z) * WORLD_SCALE
 
 ## ロック状態を設定する。
 ## state: "none" / "locking" / "locked"

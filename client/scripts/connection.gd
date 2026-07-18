@@ -17,6 +17,8 @@ extends Node
 # ── シグナル ──────────────────────────────────────────────────────────────────
 
 signal event_received(payload: Dictionary)
+## Owner-only authoritative normal-flight state for client prediction (ADR-0043).
+signal motion_correction_received(payload: Dictionary)
 signal connection_changed(connected: bool)
 ## Welcome 受信時: player_id と ship_id を通知
 signal welcomed(player_id: int, ship_id: int)
@@ -299,7 +301,7 @@ func _connect_to_server() -> void:
 ## envelope (ADR-0042 stages 1-2c); the text-frame/`JSON.parse_string` branch
 ## below is dead on the wire today but kept as a defensive fallback.
 ## `ServerMessageDecoder` converts most binary variants (including
-## `InitialState`, `AoiEnter`/`AoiLeave`, `PositionSnap`) into the same
+## `InitialState`, `AoiEnter`/`AoiLeave`, `PositionSnap`, `MotionCorrection`) into the same
 ## `{"type": ..., ...}` Dictionary shape the old JSON messages used, except
 ## `PlayerLoadout` (ADR-0042 2a), which it reduces to a bare `{"type":
 ## "PlayerLoadout"}` dispatch tag -- the raw bytes go straight to
@@ -355,6 +357,8 @@ func _handle_message(payload: Dictionary, raw_bytes: PackedByteArray) -> void:
 			module_deactivated.emit(sid, mid, slt, rsn)
 		"MarketSnapshot":
 			market_snapshot_received.emit(payload)
+		"MotionCorrection":
+			motion_correction_received.emit(payload)
 		_:
 			event_received.emit(payload)
 

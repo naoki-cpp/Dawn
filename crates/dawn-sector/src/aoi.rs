@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_event_store::store::EventStore;
-use dawn_wire::{AbsPosWire, ServerMessage};
+use dawn_wire::{AbsPosWire, ServerMessage, VelWire};
 
 use crate::node::SimulationNode;
 
@@ -269,6 +269,39 @@ impl AoiDelivery {
             return false;
         }
 
+        // Client-side prediction authority (ADR-0043): the owning client gets
+        // an exact normal-flight position/velocity correction alongside the
+        // velocity event. Committed warp is deliberately excluded because its
+        // visual path is capped and its arrival is corrected by PositionSnap.
+        let owner_motion = new_events.iter().rev().find_map(|event| match event {
+            DomainEvent::VelocityChanged(change) if change.ship_id == own_ship_id => {
+                Some((change.velocity, change.tick))
+            }
+            _ => None,
+        });
+        if !node.ship_is_warping(own_ship_id)
+            && !warp_arrivals.contains(&own_ship_id)
+            && owner_motion.is_some()
+        {
+            if let (Some(position), Some((velocity, tick))) =
+                (node.ship_absolute(own_ship_id), owner_motion)
+            {
+                let msg = ServerMessage::MotionCorrection {
+                    ship_id: own_ship_id.raw(),
+                    position: AbsPosWire {
+                        x: position[0],
+                        y: position[1],
+                        z: position[2],
+                    },
+                    velocity: VelWire::from(velocity),
+                    tick: tick.0,
+                };
+                if !sink.send_message(&msg) {
+                    return false;
+                }
+            }
+        }
+
         // Warp-arrival authority (ADR-0029): a warp ends with the client's
         // visual ship lagging behind. Push the server's absolute arrival as a
         // `PositionSnap` to the owner and any observer that can see the ship.
@@ -453,6 +486,7 @@ mod tests {
         aoi_enters: Vec<ShipStateWire>,
         aoi_leaves: Vec<u64>,
         position_snaps: Vec<(u64, AbsPosWire)>,
+        motion_corrections: Vec<(u64, AbsPosWire, VelWire, u64)>,
     }
 
     impl AoiSink for FakeSink {
@@ -467,6 +501,14 @@ mod tests {
                 ServerMessage::PositionSnap { ship_id, position } => {
                     self.position_snaps.push((*ship_id, *position))
                 }
+                ServerMessage::MotionCorrection {
+                    ship_id,
+                    position,
+                    velocity,
+                    tick,
+                } => self
+                    .motion_corrections
+                    .push((*ship_id, *position, *velocity, *tick)),
                 _ => {}
             }
             true
@@ -599,6 +641,45 @@ mod tests {
             vec![event],
             "the owning client must receive its own module event so HUD state updates"
         );
+    }
+
+    #[test]
+    fn deliver_frame_sends_motion_correction_for_the_own_ship() {
+        use dawn_core::{Position, Tick, Velocity};
+        let mut node = mem_node();
+        let own_ship = node.spawn_ship(
+            crate::ship_types::SHIP_TYPE_NPC_FRIGATE,
+            Position::new(10.0, 20.0, 30.0),
+            Velocity::ZERO,
+        );
+        let event = DomainEvent::VelocityChanged(dawn_core::events::VelocityChanged {
+            ship_id: own_ship,
+            velocity: Velocity::new(4.0, 5.0, 6.0),
+            tick: Tick(9),
+        });
+
+        let mut delivery = AoiDelivery::new();
+        let mut sink = FakeSink::default();
+        delivery.deliver_frame(
+            &mut sink,
+            &node,
+            Observer {
+                player_id: player(1),
+                ship_id: own_ship,
+            },
+            vec![],
+            std::slice::from_ref(&event),
+            &[],
+        );
+
+        assert_eq!(sink.motion_corrections.len(), 1);
+        assert_eq!(sink.motion_corrections[0].0, own_ship.raw());
+        assert_eq!(sink.motion_corrections[0].1.x, 10.0);
+        assert_eq!(
+            sink.motion_corrections[0].2,
+            VelWire::from(Velocity::new(4.0, 5.0, 6.0))
+        );
+        assert_eq!(sink.motion_corrections[0].3, 9);
     }
 
     #[test]
