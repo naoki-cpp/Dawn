@@ -1,7 +1,8 @@
 //! Client-side ship motion prediction and reconciliation (Phase 10).
 //!
-//! The server remains authoritative. This module only advances the local
-//! player's presentation between authoritative corrections, delegating the
+//! The server remains authoritative. This module advances each ship's client
+//! presentation between authoritative corrections, using prediction for the
+//! local ship and dead-reckoning for remote ships. Both modes delegate the
 //! one-tick movement policy to `dawn-core` (ADR-0023).
 
 const VECTOR_EPSILON: f64 = f64::EPSILON;
@@ -19,6 +20,12 @@ pub enum MotionInput {
     Thrust([f64; 3]),
     /// Decelerate toward zero using the ship's inertia.
     Brake,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MotionMode {
+    Prediction,
+    DeadReckoning,
 }
 
 /// Runtime movement values needed to mirror the server's movement system.
@@ -90,16 +97,18 @@ impl MotionProfile {
     }
 }
 
-/// A deterministic local predictor for one ship.
+/// A deterministic client motion track for one ship.
 ///
 /// `position` and `velocity` use server units. `advance` consumes fractional
 /// server ticks but applies the same whole-tick update as the authoritative
-/// movement system. The fractional remainder is exposed through
-/// [`Self::predicted_position`] so rendering stays smooth without changing
-/// the simulation rule.
+/// movement system. Local tracks apply `MotionInput`; remote tracks advance
+/// their last authoritative velocity. The fractional remainder is exposed
+/// through [`Self::predicted_position`] so rendering stays smooth without
+/// changing the simulation rule.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MotionPredictor {
     profile: MotionProfile,
+    mode: MotionMode,
     position: [f64; 3],
     velocity: [f64; 3],
     input: MotionInput,
@@ -118,6 +127,7 @@ impl MotionPredictor {
     pub fn new(profile: MotionProfile, position: [f64; 3], velocity: [f64; 3], tick: u64) -> Self {
         Self {
             profile,
+            mode: MotionMode::Prediction,
             position,
             velocity,
             input: MotionInput::Coast,
@@ -137,6 +147,36 @@ impl MotionPredictor {
         tick: u64,
     ) {
         *self = Self::new(profile, position, velocity, tick);
+    }
+
+    /// Configure the same motion track for a remote ship.
+    ///
+    /// Remote ships do not receive local steering input. They advance their
+    /// last authoritative velocity between `VelocityChanged` messages while
+    /// retaining the same fractional-tick presentation and reset behavior as
+    /// the local prediction path.
+    pub fn configure_dead_reckoning(
+        &mut self,
+        profile: MotionProfile,
+        position: [f64; 3],
+        velocity: [f64; 3],
+        tick: u64,
+    ) {
+        *self = Self::new(profile, position, velocity, tick);
+        self.mode = MotionMode::DeadReckoning;
+    }
+
+    /// Switch an existing track to local movement prediction without
+    /// discarding its authoritative position, velocity, or tick.
+    pub fn enable_prediction(&mut self) {
+        self.mode = MotionMode::Prediction;
+    }
+
+    /// Switch an existing track to remote constant-velocity dead reckoning.
+    /// Local input is cleared because it is not meaningful for remote ships.
+    pub fn enable_dead_reckoning(&mut self) {
+        self.mode = MotionMode::DeadReckoning;
+        self.input = MotionInput::Coast;
     }
 
     pub fn profile(&self) -> MotionProfile {
@@ -207,6 +247,14 @@ impl MotionPredictor {
         self.last_authoritative_tick = Some(tick);
     }
 
+    /// Shift the motion track when the Godot floating origin moves.
+    ///
+    /// Velocity and tick state are invariant under a coordinate-frame shift;
+    /// only the authoritative position needs to move with the rendered node.
+    pub fn rebase(&mut self, shift: [f64; 3]) {
+        self.position = add(self.position, shift);
+    }
+
     pub fn position(&self) -> [f64; 3] {
         self.position
     }
@@ -224,6 +272,12 @@ impl MotionPredictor {
     }
 
     fn step_tick(&mut self) {
+        if self.mode == MotionMode::DeadReckoning {
+            self.position = add(self.position, self.velocity);
+            self.tick = self.tick.saturating_add(1);
+            return;
+        }
+
         let input = match self.input {
             MotionInput::Coast => CoreMovementInput::Coast,
             MotionInput::Thrust(direction) => {
@@ -303,6 +357,51 @@ mod tests {
 
         assert_eq!(predictor.position(), [10.0, 0.0, 0.0]);
         assert_eq!(predictor.predicted_position(), [12.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn remote_track_dead_reckons_with_authoritative_velocity() {
+        let profile = MotionProfile::default();
+        let mut track = MotionPredictor::default();
+        track.configure_dead_reckoning(profile, [10.0, 0.0, 0.0], [4.0, 0.0, 0.0], 7);
+
+        track.advance(0.5);
+        assert_eq!(track.position(), [10.0, 0.0, 0.0]);
+        assert_eq!(track.predicted_position(), [12.0, 0.0, 0.0]);
+        assert_eq!(track.tick(), 7);
+
+        track.advance(0.5);
+        assert_eq!(track.position(), [14.0, 0.0, 0.0]);
+        assert_eq!(track.predicted_position(), [14.0, 0.0, 0.0]);
+        assert_eq!(track.tick(), 8);
+    }
+
+    #[test]
+    fn a_remote_track_can_become_a_local_prediction_track_without_losing_state() {
+        let profile = MotionProfile::new(500.0, 10_000_000.0, 0.3).expect("valid profile");
+        let mut track = MotionPredictor::default();
+        track.configure_dead_reckoning(profile, [10.0, 0.0, 0.0], [4.0, 0.0, 0.0], 7);
+        track.enable_prediction();
+        track.set_thrust([1.0, 0.0, 0.0]);
+        track.advance(1.0);
+
+        assert!(track.position()[0] > 10.0);
+        assert!(track.velocity()[0] > 4.0);
+        assert_eq!(track.tick(), 8);
+    }
+
+    #[test]
+    fn rebasing_shifts_authoritative_and_fractional_positions_only() {
+        let mut track = MotionPredictor::default();
+        track.reconcile([10.0, 0.0, 0.0], [4.0, 0.0, 0.0], 7);
+        track.advance(0.5);
+
+        track.rebase([100.0, 2.0, -3.0]);
+
+        assert_eq!(track.position(), [110.0, 2.0, -3.0]);
+        assert_eq!(track.predicted_position(), [112.0, 2.0, -3.0]);
+        assert_eq!(track.velocity(), [4.0, 0.0, 0.0]);
+        assert_eq!(track.tick(), 7);
     }
 
     #[test]

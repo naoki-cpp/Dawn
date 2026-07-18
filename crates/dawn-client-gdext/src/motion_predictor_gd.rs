@@ -33,6 +33,36 @@ impl MotionPredictor {
         );
     }
 
+    /// Configure a remote ship's shared motion track.
+    #[func]
+    fn configure_dead_reckoning(
+        &mut self,
+        max_speed: f64,
+        mass: f64,
+        inertia_modifier: f64,
+        position: Vector3,
+        velocity: Vector3,
+        tick: i64,
+    ) {
+        let profile = MotionProfile::new(max_speed, mass, inertia_modifier).unwrap_or_default();
+        self.core.configure_dead_reckoning(
+            profile,
+            to_array(position),
+            to_array(velocity),
+            tick.max(0) as u64,
+        );
+    }
+
+    #[func]
+    fn enable_prediction(&mut self) {
+        self.core.enable_prediction();
+    }
+
+    #[func]
+    fn enable_dead_reckoning(&mut self) {
+        self.core.enable_dead_reckoning();
+    }
+
     #[func]
     fn set_thrust_direction(&mut self, direction: Vector3) {
         self.core.set_thrust(to_array(direction));
@@ -69,6 +99,11 @@ impl MotionPredictor {
     fn reset(&mut self, position: Vector3, velocity: Vector3, tick: i64) {
         self.core
             .reset(to_array(position), to_array(velocity), tick.max(0) as u64);
+    }
+
+    #[func]
+    fn rebase(&mut self, shift: Vector3) {
+        self.core.rebase(to_array(shift));
     }
 
     #[func]

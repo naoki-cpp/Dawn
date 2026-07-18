@@ -599,11 +599,9 @@ func _handle_jump_gate_used(p: Dictionary) -> void:
 	if not _ships.has(ship_id):
 		return
 	var entry_pos: Vector3 = _vec3_from_dict(p, "entry_pos")
-	(_ships[ship_id] as Node3D).call("update_target", _world.to_godot(entry_pos))
+	var tick: int = p.get("tick", _current_tick) as int
+	(_ships[ship_id] as Node3D).call("update_target", _world.to_godot(entry_pos), tick)
 	if ship_id == _player_ship_id:
-		(_ships[ship_id] as Node3D).call(
-			"reset_motion", _ship_position(_ships[ship_id] as Node3D), Vector3.ZERO,
-			p.get("tick", _current_tick) as int)
 		_jump_notice       = "Jumped via Gate #%d" % (p.get("gate_id", 0) as int)
 		_jump_notice_timer = 3.0
 

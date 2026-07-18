@@ -87,7 +87,10 @@ func apply_origin_rebase(new_origin: Vector3, keep_player_fixed: bool, player_sh
 	for id: int in ships:
 		if keep_player_fixed and id == player_ship_id:
 			continue
-		(ships[id] as Node3D).position += shift
+		var ship := ships[id] as Node3D
+		ship.position += shift
+		if ship.has_method("rebase_motion"):
+			ship.call("rebase_motion", shift)
 	if not keep_player_fixed and _camera != null:
 		_camera.global_position += shift
 		_camera.call("on_origin_rebased", shift)

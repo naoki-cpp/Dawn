@@ -8,6 +8,24 @@ extends GdUnitTestSuite
 const WorldPresentation = preload("res://scripts/world_presentation.gd")
 
 
+class FakeWorld:
+	extends RefCounted
+
+	var rebase_shift := Vector3.ZERO
+
+	func rebase_to(_new_origin: Vector3) -> Vector3:
+		return rebase_shift
+
+
+class FakeShip:
+	extends Node3D
+
+	var motion_rebase_calls: Array[Vector3] = []
+
+	func rebase_motion(shift: Vector3) -> void:
+		motion_rebase_calls.append(shift)
+
+
 func test_clamped_marker_position_leaves_nearby_marker_unchanged() -> void:
 	var player := Vector3.ZERO
 	var marker := Vector3(100.0, 0.0, 0.0)
@@ -60,3 +78,20 @@ func test_sun_state_returns_direction_and_color_from_star_data() -> void:
 		.is_equal_approx(WorldPresentation.SUN_FAR_DIRECTION.normalized(), Vector3(0.0001, 0.0001, 0.0001))
 	assert_vector(state.get("color", Vector3.ZERO) as Vector3) \
 		.is_equal_approx(Vector3(0.55, 0.65, 1.00), Vector3(0.0001, 0.0001, 0.0001))
+
+
+func test_origin_rebase_moves_ship_and_motion_track_together() -> void:
+	var presentation := WorldPresentation.new()
+	var world := FakeWorld.new()
+	world.rebase_shift = Vector3(100.0, 2.0, -3.0)
+	presentation._world = world
+
+	var ship := FakeShip.new()
+	ship.position = Vector3(10.0, 20.0, 30.0)
+	presentation.apply_origin_rebase(Vector3.ZERO, false, -1, {7: ship})
+
+	assert_vector(ship.position).is_equal(Vector3(110.0, 22.0, 27.0))
+	assert_array(ship.motion_rebase_calls).contains_exactly([
+		Vector3(100.0, 2.0, -3.0),
+	])
+	ship.free()

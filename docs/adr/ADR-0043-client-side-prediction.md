@@ -31,6 +31,7 @@ one-tick movement policy lives in `dawn-core::movement::MovementProfile` and
 is used by both the server and client adapters. `MotionPredictor` owns:
 
 - the effective movement profile (`max_speed`, `mass`, `inertia_modifier`),
+- the motion mode (local prediction or remote dead-reckoning),
 - local thrust/brake intent,
 - predicted position and velocity, and
 - tick-aware reconciliation against server state.
@@ -40,10 +41,16 @@ velocity and one `MovementInput`, then returns the next velocity and braking
 completion state. `dawn-ecs::MovementSystem` remains responsible for ECS
 updates, position integration, warp exclusion, and `VelocityChanged` emission;
 `MotionPredictor` remains responsible for client prediction and
-reconciliation. Neither adapter owns a second copy of the movement formula.
+reconciliation. The same track also owns constant-velocity dead-reckoning for
+remote ships, so local and remote ships share reset, fractional-tick, and
+authoritative-state behavior. Neither adapter owns a second copy of the
+movement formula.
 
 The GDExtension exposes this module to `ship_controller.gd`; GDScript remains
-responsible only for coordinate conversion, rendering, and input routing.
+responsible only for coordinate conversion, rendering, visual speed capping,
+rotation, and input routing. A floating-origin rebase shifts the track's
+position together with the rendered node; velocity and protocol tick are
+unchanged by a coordinate-frame shift.
 
 The `ShipStateWire` spawn payload includes the movement profile and initial
 velocity. During normal flight, `AoiDelivery` sends an owner-only
@@ -64,8 +71,9 @@ message, not a new domain event or client command.
 
 Committed warp is excluded from normal-flight corrections. The existing
 `PositionSnap` remains the authority for warp arrival, and docking/jump
-handlers reset the predictor at their authoritative position. Remote ships
-continue to use the existing event-driven dead-reckoning path.
+handlers reset the shared motion track at their authoritative position. Remote
+ships use that same track in dead-reckoning mode between authoritative
+velocity updates.
 
 ## Invariants
 
@@ -74,7 +82,12 @@ continue to use the existing event-driven dead-reckoning path.
 - The predictor and `dawn-ecs::MovementSystem` both delegate one-tick movement
   to `dawn-core::movement::MovementProfile::step`.
 - A stale correction cannot move the local ship backwards in protocol time.
-- Warp and dock discontinuities clear local input and reset prediction.
+- Warp, dock, and jump discontinuities clear local input and reset the shared
+  motion track at the authoritative position.
+- Local prediction and remote dead-reckoning use one client motion track; the
+  GDScript ship controller is only its visual adapter.
+- Floating-origin rebases shift every affected ship's motion track and node
+  together, while preserving velocity and protocol tick.
 - No per-frame position stream or new DomainEvent is introduced.
 
 ## Rejected alternatives
@@ -91,6 +104,9 @@ continue to use the existing event-driven dead-reckoning path.
 - **Keeping separate Rust formulas in the server and client:** allows small
   numeric or edge-case differences to drift silently, so the pure one-tick
   policy is shared from `dawn-core` instead.
+- **Keeping separate local and remote client motion paths:** duplicates
+  discontinuity and coordinate-frame handling, making remote interpolation and
+  local prediction disagree after resets or floating-origin rebases.
 
 ## Implementation checklist
 
@@ -102,5 +118,8 @@ continue to use the existing event-driven dead-reckoning path.
 - [x] Reset prediction for warp, docking, and jump discontinuities.
 - [x] Share the one-tick movement policy from `dawn-core` between server and
   client adapters.
+- [x] Use one client motion track for local prediction and remote
+  dead-reckoning.
+- [x] Shift the motion track during floating-origin rebases.
 - [ ] Verify the Godot playtest with the built GDExtension DLL.
 - [ ] Obtain human approval and change status from `proposed` to `accepted`.
