@@ -146,11 +146,12 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         let mut lock_commands: Vec<Vec<dawn_core::LockOnCommand>> = vec![Vec::new(); SECTORS];
 
         for sess in sessions.iter_mut() {
+            let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
             while let Some(market_command) = sess.try_recv_market_command() {
-                let snapshot = market.handle_cluster(sess.player_id, market_command, &mut nodes);
+                let snapshot =
+                    market.handle_cluster(sess.player_id, market_command, sector, &mut nodes);
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
-            let sector = *player_sector.get(&sess.player_id).unwrap_or(&0);
             while let Some(cmd) = sess.try_recv_command() {
                 let followup = nodes[sector].apply_client_command(
                     sess.player_id,
