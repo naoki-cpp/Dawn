@@ -45,6 +45,7 @@
 //! settlement returns one or more `CreditItemCommand`s. This crate still
 //! constructs those commands but never applies them itself.
 
+mod matching;
 mod order_book;
 
 pub use order_book::{

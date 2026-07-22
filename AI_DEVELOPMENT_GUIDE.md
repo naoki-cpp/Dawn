@@ -190,9 +190,12 @@ workspace DAG and relevant ADR first.
 - `dawn-consensus`: Raft and consensus transport.
 - `dawn-replication`: sector-local replication and anti-entropy.
 - `dawn-market`: Market order book (bid/ask) + `PlayerId` Currency ledger,
-  its own SQLite authority independent of Sector tick determinism. Depends
-  only on `dawn-core` + serde + rusqlite -- no transport/runtime dependency,
-  same DAG position as `dawn-wire` (ADR-0034 §4/§5/§6). Only constructs
+  its own SQLite authority independent of Sector tick determinism. The SQLite
+  layer is an adapter; the private matching policy owns crossing, price-time
+  priority, partial fills, maker-price settlement, and Bid price-improvement
+  refunds. Depends only on `dawn-core` + serde + rusqlite -- no
+  transport/runtime dependency, same DAG position as `dawn-wire` (ADR-0034
+  §4/§5/§6). Only constructs
   `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand`; never applies
   them to a `SimulationNode` itself, so `dawn-sector` never depends on it.
 - `dawn-sector`: sector game logic, ownership, transit, warp, AoI, snapshots.
