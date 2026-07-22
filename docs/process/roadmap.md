@@ -1,409 +1,81 @@
 ---
-scope    : 何を・どの順番で・なぜその順番で作るか。現在地と次のステップの明示
+scope    : Roadmap compatibility entry and section index
 audience : AI Agent / Human Developer
-update   : フェーズ完了時 / タスクが完了するたびに更新する
-related  : ../architecture/architecture.md, AI_DEVELOPMENT_GUIDE.md, docs/process/roadmap-history.md（完了済みフェーズの詳細記録）
+update   : Keep links and compatibility headings aligned with docs/process/roadmap/
+related  : ./roadmap/README.md, ./roadmap/pending.md, ./roadmap/completed.md, ./roadmap/deferred.md, ./roadmap-history.md
 ---
 
 # Roadmap
 
-## 1. このドキュメントの使い方
+ロードマップの正典は [roadmap/README.md](./roadmap/README.md) と、その配下の分割ファイルである。
+architecture review と同じく、現在地・未完了・完了済み・条件待ちを分けている。
 
-### 現在地の確認
+## 入口
 
-「現在のフェーズ」セクションを見ること。  
-次に着手すべきタスクは **1 つだけ** 太字で明記される。
+- [現在地と読み方](./roadmap/README.md)
+- [未完了タスク](./roadmap/pending.md)
+- [完了済み（短縮）](./roadmap/completed.md)
+- [条件待ちバックログ](./roadmap/deferred.md)
+- [詳細な過去ログ](./roadmap-history.md)
 
-### フェーズを飛ばしてはならない理由
+## 1. 読み方
 
-各フェーズは次のフェーズの前提となる。  
-例: Phase 1 の完了（単一ノードで 10,000 ships が動く）なしに
-Phase 2（複数ノード）を実装すると、「動かない上に複雑」なコードになる。
-
-### 完了基準の意味
-
-完了基準は「感覚的に完成した」ではなく「このコマンドが成功する」で定義される。
-曖昧な基準は採用しない。
-
----
+次の1件は [roadmap/README.md](./roadmap/README.md) に、未完了タスクは
+[roadmap/pending.md](./roadmap/pending.md) にある。既存の§参照を壊さないため、
+以下の番号付き見出しは互換性用の索引として残す。
 
 ## 2. 現在地
 
-```
-現在のフェーズ : Phase 9 基盤実装完了・9E 経済ループ検証中
-フェーズの状態 : Rust workspace はグリーン。Godot クライアントの実行・テストは、
-                client/dawn_client_gdext.gdextension が参照する DLL を
-                `cargo build -p dawn-client-gdext` で先に生成する環境前提がある。
-                9A（Scrap Metal）/9B（Station・Ship操作）/9D（Market・Currency）は実装済み。
-                9C（プレイヤー設置インフラ）は
-                新規 ADR が必要な設計タスクとして未着手。
-                9E-1 のプレイテスト手順は docs/process/playtest-guide.md に追加済みだが、
-                人間によるセッション実施と結果記録は未完了。9E-2 は引き続きチェック項目として保留。
-                Phase 8 の保留項目（Fission / LoD / 越境 TiDi 等）は §11 の負荷対応バックログで
-                トリガー待ち。Sector キャパシティの悪用対策は docs/design/game-design.md §8 を参照。
-```
+**Phase 9 基盤実装完了・9E 経済ループ検証中**。次の1件は **9E-1 — 経済ループのプレイテスト**。
+詳細は [roadmap/README.md](./roadmap/README.md) を参照する。
 
-### 完了済みフェーズ
+## 3. TODO（未完了のみ）
 
-- ✅ Phase 0 — 基盤確立（`cargo test --workspace` 73テスト全パス）
-- ✅ Phase 1 — Single Node シミュレーション検証（max 11,847 µs ≤ 16,000 µs 目標達成）
-- ✅ Phase 2 — In-Memory Multi-Node（3ノード 63,000イベント整合性 ✓）
-- ✅ Phase 3 — Event 永続化（Snapshot + Replay 再起動後の状態完全復元 ✓）
-- ✅ Phase 4 — ゲーム開発ループ（Cycle 1〜3 完了 / 卒業基準 5/5 達成）
-- ✅ Phase 5 — マルチプレイヤー基盤（ADR-0007 チェックリスト全完了 / 138テスト全パス）
-- ✅ Phase 6 — ゲームループ改善（Capacitor / EVE命中率式 / タクティカルオーバーレイ / ボットAI / 154テスト全パス）
-- ✅ Phase 7 — 分散コンセンサス（Raft / ADR-0014 / リーダー障害中の Transit 完遂を検証 / 223テスト全パス）
-- ✅ Phase 7.5 — 星系間ナビゲーション（ADR-0009 / Jump Gate Raft パイプライン + Godot クライアント配線 / 241テスト全パス）
-- ✅ 戦闘の深み — Warp（ADR-0022）/ Propulsion Physics（ADR-0023）/ Tackle（ADR-0024）実装済み（316テスト全パス）
-- ✅ 天体（ADR-0025）— 恒星・惑星を静的天体として追加。WarpTarget::Body 対応、sun_direction シェーダー、Godot クライアント配線（W キー / クリック選択）まで完了。（316テスト全パス）
-- ✅ Orbit / Keep at Range（ADR-0031・2026-06-23）— OrbitComp/KeepAtRangeComp + process_orbit
-  /process_keep_at_range（Step 2.55/2.56）。Approach/Orbit/KeepAtRange 相互排他、Warp 中は拒否。
-  O/K キー配線済み。これで戦闘の深み（Tackle → Signature → Orbit/Keep at Range）が完了し、
-  Logistics の前段として Local Repair（ADR-0033）へ進んだ
-- ✅ Local Repair（ADR-0033・2026-06-24）— Active Shield Booster / Armor Repairer、
-  RepairSystem（Step 6.5）、RepairApplied、Godot 緑フラッシュまで実装済み
-- ✅ Remote Repair / Logistics（ADR-0036・2026-07-03）— `ModuleKind::RemoteShieldBooster`/
-  `RemoteArmorRepairer` を ADR-0035 の per-slot ターゲット・Range Gate System 基盤に乗せ、
-  `repair_range_add`/`RepairCycle.target_ship_id` を追加。これで戦闘の深み
-  （ADR-0016 §5）が一巡し、次は Phase 9（Resource + Economy Context）
-- ✅ Godot クライアント構造リファクタ + テスト基盤（2026-06-21）— `main.gd` の god object を
-  `HudManager`/`NavigationMarkerRenderer`/`ShipPicking`/`InputDecoder` の4クラスへ分割
-  （1661→1094行）。`scripts/setup-godot.*` で pin 済み Godot CLI を取得し GdUnit4 を導入、
-  計58ケースを実行確認（詳細: `docs/architecture/architecture-review/client.md`）。モジュール
-  ON/OFF→CAP!誤表示のバグ修正も含む。Rust側は343テスト全パス
-- ✅ Phase 8D — 分散インフラ（物理ノード）完了（2026-06-29）+ Raspberry Pi 実機検証（2026-07-01）—
-  `dawn-replication`（ゴシップ配布 + アンチエントロピー + スナップショット転送）・ネットワーク
-  `RaftTransport`・本番バイナリ `dawn-sector-node` を配線。**Pi 4/5 実機の3ノードクラスタで
-  reachability / tick-sla / failover の3項目とも PASS**（`scripts/verify-pi-cluster.sh` で自動化・
-  詳細は `docs/process/8d5-hardware-notes.md`）。永続化配線（FileEventStore + checkpoint +
-  起動時リカバリ）も含めて配線済み
+正典は [roadmap/pending.md](./roadmap/pending.md) である。
 
-### Phase 4 卒業記録（ADR-0007 §6）
+## 4. 完了済み（短縮）
 
-```
-✅ 2クライアントが同時に接続できる
-✅ 両クライアントの世界状態が同期している
-✅ プレイヤーのロックオン操作が機能する
-✅ 再接続後に InitialState で状態が復元される
-✅ 基本的なゲームループでクラッシュしない
-```
+正典は [roadmap/completed.md](./roadmap/completed.md) である。
 
-### Phase 5 完了記録（ADR-0007 実装チェックリスト）
+## 9. 継続的に開発するシステム
 
-```
-✅ dawn-core: PlayerId(u64) 型追加
-✅ dawn-core: DawnError::NotOwner 追加
-✅ dawn-simulation/node.rs: player_ships HashMap / spawn_player_ship / 全コマンド所有権チェック
-✅ dawn-simulation/ws_server.rs: Hello/Welcome/InitialState ハンドシェイク
-✅ dawn-simulation/ws_server.rs: PlayerSession 構造体 / 複数クライアント同時接続
-✅ dawn-simulation/ws_server.rs: AttackCommand JSON パーサー追加
-✅ dawn-simulation/main.rs: ORIGIN シグナル処理を削除
-✅ connection.gd: Hello 送信 / Welcome 受信 / InitialState 受信
-✅ main.gd: ORIGIN シグナル送信削除 / Welcome シグナル処理
-✅ 138テスト全パス
-```
+Combat System と Economy System の継続的な作業は [roadmap/pending.md](./roadmap/pending.md) を参照する。
 
-### 次に着手すべきタスク
+## 10. Phase 8 — スケール基盤 / 持続性
 
-**9E-1 — 経済ループのプレイテスト（手順準備済み・人間の実施待ち）**
+完了基準は満たしている。条件付きの項目は [roadmap/deferred.md](./roadmap/deferred.md) にある。
 
-9A（能動的な Scrap Metal 獲得）、9B（Station inventory と船の組み立て）、9D（Market の
-指値決済）が一つのプレイヤー行動ループとして成立しているかを、
-`docs/process/playtest-guide.md` の「Phase 9 — 経済ループ検証」手順で観測する。
-自動テストやコードレビューだけでは「希少資源が判断や対立を生んだか」は判定できないため、
-セッション結果を記録するまで 9E-1 は完了にしない。
+## 11. 負荷対応バックログ
 
-#### Phase 6 完了タスク一覧
-
-| 優先度 | タスク | 状況 | 理由 |
-|---|---|---|---|
-| ✅ 完了 | Capacitor 実装 | サイクルベース cap 管理まで完了（ADR-0011） | 「常時 ON で勝ち」問題の解消 |
-| ✅ 完了 | セッションメトリクス出力 | --duel モード限定で実装済み（勝敗・経過Tick・cap枯渇回数をstdout出力） | 数値でバランスを判断できるようにする |
-| ✅ 完了 | Godot: cap バー表示 | ProgressBar ウィジェット実装済み（青色バー + GJ表示） | cap 状態の視覚フィードバック |
-| ✅ 完了 | EVE 命中率式（ADR-0012） | tracking/falloff/sig_radius 追加。hit_chance = 0.5^(追跡項²+射程項²) | ポジション管理が実質的な意味を持つ |
-| ✅ 完了 | タクティカルオーバーレイ（ADR-0013） | Tab キーで射程リング（緑:最適/橙:フォールオフ）を表示 | 距離と射程の視覚的フィードバック |
-| ✅ 完了 | StopCommand（S キー） | 逆推力で減速停止。ボット AI にも使用 | 精密なポジション制御を可能にする |
-| ✅ 完了 | ボット AI 改善 | 射程内停止・ロックキュー・スポーン位置修正 | デュエルが成立するようにする |
-
----
-
-## 3. 完了済みフェーズの詳細記録（Phase 0〜7・アーカイブ）
-
-Phase 0〜7 は全て完了済み（要約は §2「完了済みフェーズ」参照）。各フェーズの完了基準・
-タスク表・計測結果・Cycle 詳細（Phase 4）は **docs/process/roadmap-history.md** を参照する
-（当時の判断根拠・計測値が必要なときだけ読む。常時の現在地確認は §2 で足りる）。
-
----
-
-## 9. 継続的に開発するシステム（フェーズと独立に進捗する）
-
-> 2026-07-02 追加。以下の §10〜§14 の「フェーズ」は**基盤構築の一度きりの通過点**であり、
-> 完了基準を満たせば次のフェーズへ進む。一方で **「システム」は基盤ができた後も終わりなく
-> 内容を追加し続ける対象**であり、特定フェーズの完了に縛られない。本節はこの2つの読み方を
-> 区別するための場所であり、以下のシステムは「一区切りついた」状態はあっても「完了した」
-> 状態にはならない。
-
-### 戦闘システム（Combat System）
-
-ADR-0016 §5（段階的拡張）で優先順位づけされ、Phase 6〜8 を跨いで継続的に深化してきた。
-現状: Tackle（ADR-0024）→ Signature Resolution（ADR-0012）→ Orbit/Keep at Range（ADR-0031）→
-Local Repair（ADR-0033）→ **Remote Repair / Logistics（ADR-0036）** まで実装済み。
-
-Logistics 完了後も、戦闘システムとしての拡張は終わらない想定（新モジュール種・新ダメージ
-タイプ・新戦術オプションなど）。個別の追加は都度 ADR を起票し、本節ではなく該当箇所
-（game-design.md §4.1 実装済み一覧・event-catalog.md 等）に反映していく。
-
-### 経済システム（Economy System）
-
-Phase 9（§12・Resource + Economy Context）は**基盤構築フェーズ**であり、その完了基準
-（Scrap Metal による建造コスト・Packaged Ship の Assemble/Disassemble・Market の指値
-マッチングが機能する等、ADR-0034 参照）を満たせば「Phase 9 完了」とはなるが、**経済
-システムとしての開発はそこで終わらない**。基盤ができた後も、新資源種・新構造物種
-（9C）・新しい市場メカニクスなどを継続的に追加していく対象になる想定。
-
-### 今後この節に加わりうる候補
-
-グラフィック（Phase 11・§14）は現状「見た目の作り込み」というフェーズ的なタスクリストで
-表現しているが、船種追加のたびに新モデルが要る等、実態としては継続的システムに近づく可能性
-がある。着手後の実態を見て、フェーズ表記のままにするか本節へ移すかを判断する。
-
----
-
-## 10. Phase 8 — スケール基盤 / 持続性（ADR-0017 / ADR-0018）— ほぼ完了
-
-> 2026-07-02、ほぼ完了したため詳細タスク表を **docs/process/roadmap-history.md**（Phase 8 節）へ
-> 移設し要約（Phase 0〜7 と同じ扱い）。保留中の項目のみ本節に残す。
-> 対応 ADR: ADR-0017（スナップショット圧縮・2層ログ）, ADR-0018（局所 TiDi）,
-> ADR-0019（AoI 静的セルグリッド）, ADR-0021/0027（複製）。
-
-**完了基準**: 通常負荷で論理 Tick が SLA（≤32ms）を満たす／空間分離可能な負荷は劣化ゼロで捌ける／
-分割不能な単一密戦闘は局所 TiDi で graceful に劣化し自動回復する／入場制限は最終バックストップのみ／
-創世記 replay なしで failover・再起動できる（詳細: roadmap-history.md）。
-
-| サブフェーズ | 状態 | 備考 |
-|---|---|---|
-| 8A イベントログ持続性 | ✅ 完了 | 2層ログ + snapshot 圧縮 + `CheckpointScheduler`（ADR-0017） |
-| 8B 負荷制御 / Anti-TiDi | 🔶 一区切り（2026-06-15） | 局所 TiDi コア + 入場バックストップで柱①の主要レバーは完了。残りは下表参照 |
-| 8C AoI 静的セルグリッド | ✅ ほぼ完了 | 3×3×3 隣接可視・Enter/Leave差分配信・イベントフィルタ（ADR-0019）。NPCオートロック連携のみ保留 |
-| 8D 分散インフラ（物理ノード） | ✅ 完了 | postcard ワイヤ + `dawn-replication` + ネットワーク RaftTransport + `dawn-sector-node`。**Raspberry Pi 3ノードクラスタでの実機検証を 2026-07-01 に実施し、reachability / tick-sla / failover の3項目とも PASS**（[8d5-hardware-notes.md](./8d5-hardware-notes.md)）。永続化配線（FileEventStore/checkpoint/起動時リカバリ）も配線済み |
-| 8E Transit consensus | ✅ 方針確定 | 単一 Raft グループ維持。バッチ提案は保留 |
-
-保留中の負荷系項目（Fission / LoD / 越境TiDi 等）は **§11 負荷対応バックログ** に切り出した。
-Phase 8 自体はこれらの着手を待たずに完了扱いとする。
-
-### Phase 9 以降
-
-```
-Phase 9 : Resource + Economy Context（dawn-economy / FBD-008 撤廃により ADR で解禁）
-Phase 10: Client 本格化（GDExtension 導入）
-```
-
-→ 詳細タスクは §12（Phase 9）/ §13（Phase 10）参照（2026-07-02 詳細化。旧版は方向性のみだった）。
-
-### クライアント技術スタック・リポジトリ構成
-
-2026-07-02、他ドキュメントとの重複のため本節から削除。参照先:
-
-- クライアント技術選定（Godot 4 / GDScript / godot-rust の根拠）: `docs/adr/ADR-0004-client-technology.md`
-- サーバー側 Cargo workspace のクレート構成・依存 DAG: `docs/architecture/architecture.md` §3
-- クライアント側 `client/scripts/` の現在のファイル構成・責務・行数: `docs/architecture/architecture-review/client.md`
-
-2026-07-02、「フェーズ横断の設計原則」節を削除（`AI_DEVELOPMENT_GUIDE.md`「Architecture Invariants」
-と重複・そちらが正典）。
-
----
-
-## 11. 負荷対応バックログ（低優先度・トリガー待ち）
-
-> 2026-07-02、§10 から切り出し。Phase 8 の完了基準はすでに満たされており、以下は
-> **いま着手する理由がない**、トリガーが来たときだけ拾う項目群。ロードマップの本流
-> （§9 継続的システム → 次の作業）を読むときはこの節を無視してよい。定期的に「トリガーが
-> 発火していないか」を確認する以外は、通常のスプリント計画の対象から外す。
-
-| 項目 | 状態 | トリガー |
-|---|---|---|
-| 8B-2 Dynamic Sector Fission | ⏸️ 未着手・現状は不要 | 2026-07-02 に「8D着手時に設計」という前提を確認したところ誤りと判明: 8Dは物理ノードの**静的**分散配置であり、Fission（1 Sectorの**動的**分割）とは別の問題で、8D完了はFissionの着手を要求しなかった。本来のトリガーは tick-model.md §8「population_cap の80%到達」（現行 `POPULATION_CAP=100,000` なので80,000隻/Sector）。実測は aoi-bench で n=20,000・実プレイテストは数十隻規模で、閾値まで実測で3桁近い開きがある。要ADRだが、今すぐ着手する理由はない |
-| 8B-3 Simulation LoD | ⏸️ deferred（ADR-0020） | go/no-go スパイク（idle反復がTick予算の有意割合か）次第 |
-| 8B-6 構造化 SLA イベント | 🔶 部分実装 | 係数・継続Tick・engage/recoverログは実装済み。イベント化は後回し可 |
-| 8B-8 差分 TiDi 越境 | ⬜ | 8B-2 Fission に依存（Fission 自体が不要な現状は着手不要） |
-| 8C-5 NPCオートロック連携 | ⬜ | 全走査版と同一結果になるテストを用意してから着手 |
-| 8D defer（Raftログ圧縮/InstallSnapshot・メンバーシップ変更・動的ノード発見・TLS/認証） | ⬜ ×4 | いずれも 2026-07-01 時点で未発火（詳細: roadmap-history.md） |
-| 8E-2 バッチ提案（fleet jump） | ⬜ 保留 | fleet-jumpレイテンシが実測で問題化したら着手 |
-
----
+正典は [roadmap/deferred.md](./roadmap/deferred.md) §3.5 である。
 
 ## 12. Phase 9 — Resource + Economy Context
 
-> 2026-07-02、`/grill-with-docs`（`/grilling` + `/domain-modeling`）で人間と対話しながら
-> 具体化し、**ADR-0034（Economy Foundations）として起票済み**。以下のタスク表は
-> ADR-0034 の決定を実装順に並べたもの。9C（プレイヤー設置インフラ）だけは ADR-0034 の
-> スコープ外でまだ方向性のみ。
->
-> 関連: ADR-0034（本節の決定はすべてここに記録）, ADR-0016 §4/§5（FBD-008 撤廃・段階的
-> 拡張方針）, ADR-0032（`InventoryComp` の初出・ADR-0034 が一般化する）, CONTEXT.md
-> （`Item`/`Packaged Ship`/`Station`/`Scrap Metal`/`Currency`）, ADR-0037（2026-07-05・
-> Docked Ship Ownership — 9B の `Assemble` が player-level の owned ship / active ship /
-> docked station context を要求すると判明したことを受けた決定。9B-5 参照）。
+ADR-0034の実装順を示す互換性用索引。
 
-**前提**: 戦闘の深み（ADR-0016 §5 items 1–5: Tackle → Signature Resolution → Orbit/Keep at
-Range → Local Repair → Logistics/Remote Repair・ADR-0036）は完了済み。Phase 9 はこの後に着手する。
+- 9A: Item / Scrap Metal — completed
+- 9B: Station / Packaged Ship / Assemble / Disassemble — completed
+- 9C: Player-built infrastructure — TODO（[pending.md](./roadmap/pending.md)）
+- 9D-1〜9D-3: Market crate、order book、Currency ledger — completed
+- 9D-4: Sector bridge commands — completed
+- 9D-5: Station限定Market UIとwire/runtime bridge — completed
+- 9E: Economy loop validation — 9E-1 in progress, 9E-2 deferred
 
-**完了基準**:
+9D-1〜9D-5の完了記録は [completed.md](./roadmap/completed.md) を参照する。
+9Cと9Eの残作業は [pending.md](./roadmap/pending.md) を参照する。
+9A-5と9E-2の保留理由は [deferred.md](./roadmap/deferred.md) を参照する。
 
-- Scrap Metal が**建造コストとして機能**する（Packaged Ship の新規建造でのみ消費）。**受動採取
-  （AFK 相当）は存在しない** — `ShipDestroyed` からの即時ドロップのみが取得経路（FBD-009 維持）。
-- Packaged Ship ⇄ Ship の Assemble/Disassemble が Station（NPC提供）で機能し、無料修理の
-  抜け穴（損傷した船のDisassemble）を防ぐバリデーションが効いている。
-  Station は**Packaged Ship / Scrap Metal を置く最小インベントリ**も持つ。
-- Market（`dawn-market` クレート）が SQL を独自の権威として持ち、指値（bid/ask）マッチングで
-  価格が決まる。Currency は Item ではなく `PlayerId` 単位の台帳（船を失っても消えない）。
-- プレイヤー設置インフラ（Smart Assembly 相当）のアクセス制御は、Tick パイプライン内で
-  決定論的に評価される **述語関数 `can_use(actor, structure) -> bool`** として表現される
-  （ブロックチェーン/wallet 不要・INV-005 決定論と整合。eve-reference §7.3。9Cはまだ未確定）。
+関連ADR: ADR-0034、ADR-0037、ADR-0038。
 
-### 9A. Item 一般化 + Scrap Metal（ADR-0034 §1/§3、資源シンクの基礎）
+## 13. Phase 10 — Client 本格化
 
-| # | タスク | 備考 | 状態 |
-|---|---|---|---|
-| 1 | `dawn-core`: `ItemId` enum（`Module`/`PackagedShip`/`ScrapMetal`） | Currency は含まない（ADR-0034 §5） | ✅ |
-| 2 | `dawn-ecs`: `InventoryComp.items` を `Vec<ModuleId>` → `BTreeMap<ItemId, u64>` へ一般化 | ADR-0032 のデータモデルを置き換え。既存の `fit_module_owned`/`unfit_module_owned` の呼び出し側修正を伴う | ✅ |
-| 3 | `dawn-sector`: `ShipDestroyed` 発生時に Scrap Metal を撃破者へ即時加算 | 新規 Wreck エンティティは作らない（ADR-0034 却下代替案）。**現状は MVP として 1 kill = 1 Scrap Metal の固定値** | ✅ |
-| 4 | スナップショット永続化（`ShipSnapshot.inventory` の型変更に追従） | ADR-0032 の `#[serde(default)]` 後方互換パターンを踏襲 | ✅ |
-| 5 | 「受動採取ではない」ことのチェック項目化 | **現状は不要**。取得経路が `ShipDestroyed` 以外にも増えたときに、AFK/受動導線が混入していないかを再点検する | ⏸️ |
-
-### 9B. Station / Packaged Ship / Assemble・Disassemble（ADR-0034 §2）
-
-| # | タスク | 備考 | 状態 |
-|---|---|---|---|
-| 1 | Station（NPC提供の最小実装） | `StationId` / `StationDef` と galaxy TOML の `npc_stations` を追加。各 sector に最小 NPC station を1つ配置 | ✅ |
-| 2 | Dock/Undock + Station 利用可否判定 | `DockCommand` / `UndockCommand` と docked 状態を追加。`can_use_station(player_id, station_id)` は「半径内」ではなく「その station に docked 済み」を見る。player-level の docked context を保持し、station access が active ship lookup に依存しないようにする | ✅ |
-| 3 | Station インベントリ（最小保管先） | `(PlayerId, StationId) -> BTreeMap<ItemId, u64>` の station-local inventory を追加。2026-07-09、player-global ではなく station ごとに分離し、現在 dock している station の在庫だけを参照する形へ修正。snapshot restore / SQLite backing 対応済み。 | ✅ |
-| 4 | Station系イベントの土台 | `ShipDocked` / `ShipUndocked` / `PackagedShipBuilt` / `ShipDisassembled` / `ShipAssembled` すべて実装済み | ✅ |
-| 5 | Assemble コマンド + バリデーション（Packaged Ship が未艤装であること） | 2026-07-07 実装完了。入力は Station インベントリ上の `PackagedShip`。**docked 中のみ**実行可。艤装情報は Packaged Ship 側に持たせず、Assemble 後に既存の Fit 経路で艤装する。`AssembleCommand`/`ShipAssembled`、`SimulationNode::assemble_ship_owned`（`Result<ShipId, StationOperationRejection>`）を新設。`active_ship` は自動変更しない（ADR-0037）ため、唯一の船をDisassembleして詰んだプレイヤーは Assemble → `SelectActiveShipCommand` → Undock で復帰可能に（詳細・修正した副次バグは `docs/architecture/ownership.md` §7-8 参照）。`cargo test --workspace` 全件通過・GdUnit4 未変更（クライアントUIはタスク8の方針通り未着手）。**2026-07-10、この復帰導線は実際には壊れていたと判明**——`input_decoder.gd` の `I` キー（インベントリパネル開閉）が `player_ship_id >= 0` を要求しており、唯一の船を失った直後（`player_ship_id == -1`）はパネル自体を開けず Assemble に辿り着けなかった（手動プレイテストで発見・修正、下記10のfollow-up参照） | ✅ |
-| 6 | Disassemble コマンド + バリデーション（Ship が無傷・未艤装であること） | 出力は Station インベントリ上の `PackagedShip`。**docked 中のみ**実行可。無傷チェックは無料修理の抜け穴防止（Local Repair・ADR-0033 の価値を守る）。**2026-07-10、カーゴ消失バグを修正**——`disassemble_ship_owned` は船を `PackagedShip` へ変換する際、艤装解除の前提（`is_fitted` チェック）はあっても**空カーゴの前提はない**にもかかわらず、`InventoryComp`（船カーゴ）の中身を一切救済せず ECS entity を despawn しており、カーゴ内の未艤装モジュール/Scrap Metal が消滅していた。他の Station 操作と同じ `credit_station_item` 経路でカーゴを Station inventory へ salvage してから despawn するよう修正（回帰テスト3件追加） | ✅ |
-| 7 | Packaged Ship 建造コマンド（Scrap Metal 消費 → Packaged Ship 生成） | Scrap Metal を Station インベントリから消費し、生成物も Station インベントリへ置く。**docked 中のみ**実行可能。現状コストは MVP として `1 Scrap Metal / 1 hull` の固定値 | ✅ |
-| 8 | client実装の開始条件を固定 | **基本方針: client UI は 5〜7 の server 側本体（Assemble / Disassemble / Build）が揃ってから実装する。** 先に UI だけ作って wire 先行にならないようにする。5〜7が✅済みかつ9/10のUIが実装済みのため、ゲート条件は満たされ完了 | ✅ |
-| 9 | client: Dock/Undock + Station操作UI | 入港状態の表示と `D` / `U` / `B` / `Y` 操作は実装済み。2026-07-08、「維持条件」として挙げていた2点（`ShipDocked`/`ShipUndocked`と`PlayerLoadout`の順序レース、`station_id=0`と未dockの混同）を調査した結果、`world_session.gd::_apply_dock_state`のtickガード（`tick < latest_dock_state_tick`）と`player_loadout.gd::apply_payload`の`!= null`判定（truthy判定ではない）で両方とも実装は既に正しいことを確認。GdUnit4回帰テストを4件追加して固定（`world_session_test.gd`の`test_dock_event_with_station_id_zero_is_treated_as_docked`/`test_stale_undock_event_does_not_revert_a_newer_dock_fitting_context`、`player_loadout_test.gd`の`test_apply_payload_treats_station_id_zero_as_docked`）。プロダクションコード変更なし | ✅ |
-| 10 | client: Packaged Ship のインベントリ表示・Assemble/Disassemble/建造UI | station UI の上に載せる。Ship側 inventory と Station側 inventory が混ざらないこと。2026-07-07、Station Inventory上の`PackagedShip`行クリックで`AssembleCommand`を送るところまで実装。2026-07-08、複数所有船の切り替えUI（インベントリパネル「SHIPS」列、`PlayerLoadout.owned_ships`から構築、クリックで`SelectActiveShipCommand`）を追加し、Disembark→Assemble→SelectActiveShip→Undockが一通りクライアントから完結。新規プレイヤーはspawn時にStation Inventoryへ`PackagedShip`を1隻自動付与（`spawn_player_ship_at`）。同日、Ship側cargoとStation Inventoryが同じ「INVENTORY」列に`[Station]`プレフィックスだけで同居していた（この行自体が明記する要件に反していた）ことが発覚し、「SHIP CARGO」「STATION」の別列に分離（`hud_manager.gd`のinventory panelを3列→4列に拡張）。同日、船のインベントリをStation Inventoryへ移す`TransferToStationCommand`（`Module`/`ScrapMetal`共通の汎用コマンド、docked中のみ、全量転送のみ）を追加し、SHIP CARGO列の行を右クリックで送信できるように（左クリックは既存の"fit"操作のため別ジェスチャーとした）。2026-07-08、`[Y]`/`[B]`キー止まりだったDisassemble/建造に専用ボタンUIを追加（キーは維持・併存）。`ShipTypeDefinition`に`buildable: bool`を新設（`dawn-core`、NPC Frigateはfalse・Magpieはtrue）し、`InitialState`の新フィールド`buildable_ship_types`（`serialization.rs`）でクライアントに公開。STATION列に常設の「Disassemble active ship」行と、クリックで展開する「Build Ship ▸」ピッカー行（`buildable_ship_types`から1隻種1行）を追加（`inventory_row.gd`に`ACTION_DISASSEMBLE`/`ACTION_BUILD_TOGGLE`/`ACTION_BUILD_SHIP_TYPE`を新設）。これにより`BUILDABLE_SHIP_TYPE_ID`固定值に頼らず船種を選んで建造できる。GdUnit4テスト6件追加（`hud_manager_test.gd`2件・`main_test.gd`3件、既存分含め183/183通過・0 orphans）。`cargo test --workspace`/`fmt`/`clippy -D warnings`全件通過。2026-07-08、インベントリパネルにドラッグ&ドロップを追加（SHIP CARGO⇄FITTED・SHIP CARGO⇄STATION・FITTED内並べ替え）。`TransferToStationCommand`を`direction`（ToStation/ToShip）で双方向化、`ReorderFittedModuleCommand`を新設（`ShipFitted`を再利用、新規イベント型なし）。Fit/Unfit/並べ替えはドッキング必須化（ADR-0032追記）。**2026-07-10、パネルを開く`I`キー自体が`player_ship_id >= 0`を要求しており、唯一の船をDisassembleした直後（船なし docked 状態）はパネルを開けずAssembleに到達できない soft-lock を修正**——D/U/B/Y/X（dock/undock/build/disassemble/disembark）は実際に船が要る操作なのでガード継続、`I`キーだけガードを外した（`input_decoder.gd`、回帰テスト追加） | ✅ |
-
-#### 9B 補足: Station inventory の保存戦略（2026-07-08、ADR-0038 で実装完了）
-
-- Market と違って、Station inventory は Sector command validation のホットパスにある。
-- そのため、即時の権威状態を毎回 SQL 直読みにする設計は採らない——
-  読み取りは直近に触れた player だけのbounded in-memory cache経由（ヒット時はDB往復なし）。
-- **実装済み**: SQLite（`crates/dawn-sector/src/node/station_inventory_db.rs`）を
-  永続化の権威とし、`StateSnapshot.station_inventories` は今後書かれなくなった
-  （旧形式スナップショット読み込み用の後方互換フィールドとしてのみ残る）。
-  再起動時に全プレイヤー分をメモリへ丸ごと読み込むコストが消え、
-  「全アイテムをロードしておく必要がある」問題を解消。
-- `credit_station_item`/`try_debit_station_item` は SQLiteへ同期書き込み
-  （Station操作はtickごとではなくプレイヤー起点の低頻度コマンドのため許容）。
-- 詳細・却下した代替案・リプレイとの二重適用を避ける設計は ADR-0038 参照。
-
-### 9C. プレイヤー設置インフラ（Smart Assembly 相当・ADR-0034 の範囲外）
-
-| # | タスク | 備考 | 状態 |
-|---|---|---|---|
-| 1 | 新規 ADR 起票（構造物エンティティ・所有権モデル） | 「キャラクター」同様、エンティティとしては解禁済み（ADR-0016 §4）。育成要素は持たせない | ⬜ 要 ADR |
-| 2 | アクセス制御を `can_use(actor, structure) -> bool` 述語として設計 | Tick パイプライン内で決定論的に評価。Smart Turret の「自トライブ以外を自動攻撃」は dawn の Bot System の設置型版として設計できる（eve-reference §7.3） | ⬜ 要 ADR |
-| 3 | 構造物の Sector 所有権・Transit との関係（構造物は Transit しない前提の確認） | ownership.md の状態遷移図に追記が必要 | ⬜ |
-| 4 | Station（9B）をプレイヤー建造可能にする | NPC提供の最小Stationから拡張。9C の構造物モデルが前提 | ⬜ |
-
-### 9D. Market / Currency（ADR-0034 §4/§5/§6）
-
-| # | タスク | 備考 | 状態 |
-|---|---|---|---|
-| 1 | 新規クレート `dawn-market` の Dependency DAG 上の位置を確定 | 2026-07-13、`/grilling`で実行トポロジーを決定: まず`dawn-simulation`（インプロセス）にのみ組み込み、`dawn-sector-node`（本番マルチノード）への配線は別タスクへ後回し（8D方式と同じ順序）。DAG上は`dawn-wire`と同じ葉クレート（`dawn-core`+serde+rusqliteのみ、`dawn-ecs`/`dawn-event-store`/`dawn-sector`に非依存）。Market系`ClientCommand`バリアント（List/Bid/Cancel）は`dawn-simulation`の受信ループで`apply_client_command`を呼ぶ前に振り分け、`dawn-sector`は`dawn-market`を一切知らない。クレート自体は新設・ワークスペース登録・DAGドキュメント更新のみで、公開APIは9D-2以降 | ✅ |
-| 2 | SQLite バックエンドの指値注文帳（bid/ask マッチング） | 2026-07-13実装完了。`dawn-market::MarketDb`（`order_book.rs`）。同価格内の優先順位はSQLiteの`rowid`（挿入順）にそのまま任せ、`Tick`は一切登場しない（`/grilling`で決定、dawn-marketをtick非決定性から独立させたまま）。約定は常にresting(maker)側の価格で成立。自己約定（同一PlayerIdのBid/Askが交差）は禁止せず通常通りマッチ（`/grilling`で決定）。部分約定対応（残数量は板に残る）。trades履歴テーブルは作らず`place_order`の戻り値（`Vec<Trade>`）のみ（9D-5で必要になれば追加）。テスト11件+doctest1件 | ✅ |
-| 3 | `PlayerId` 単位の Currency 台帳 | 2026-07-13実装完了。`dawn-market::MarketDb`の`currency`テーブル（`balance >= 0`をCHECK制約で保証）+`currency_balance`/`credit_currency`。`/grilling`で決定: BidはPlace時に`price×quantity`を即座にエスクロー（複数Bid同時発行での二重予約を防止、`orders.escrowed_currency`列）、Askはエスクロー不要（Itemは既にMarket側に渡っている前提）。約定は常にresting(maker)価格で決済し、Bidがエスクロー額より安く約定した差額は買い手へ即時払い戻し。Cancel時は残りエスクローを払い戻す。残高不足は`InsufficientBalance`として型で区別（SQLiteエラーとは別レイヤー）。テスト11件追加（22件+doctest1件） | ✅ |
-| 4 | `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand`（List/Cancel/Settle） | 2026-07-17実装完了。`dawn-market::MarketDb` は注文ごとに対象 `ShipId` を保持し、Ask出品時に `RemoveItemCommand`、Askキャンセル時に `ReturnItemCommand`、約定時に買い手ごとの `CreditItemCommand` を結果として返す。MarketはSectorへ直接アクセスせず、呼び出し側が所有Sectorへ片側ずつルーティングする。Transit/Raft合意は不要（ADR-0034 §4）。wire向けの`ClientCommand`ではない | ✅ |
-| 5 | client: Market閲覧UI（指値注文の発注・Currency残高表示） | 2026-07-17実装完了。`ClientMessage::Market` / `ServerMessage::MarketSnapshot`を既存のpostcard envelopeへ追加し、`dawn-simulation`のsingle/cluster serve loopに`MarketRuntime`を配線。Askは先に所有船cargoからRemoveし、DB拒否時だけReturn、約定したBidは所有ノードへCredit。Godotは`M`で開く独立`market_surface.gd`に板・Currency残高・Bid/Ask・発注・自分の注文Cancelを実装。**2026-07-18、Marketの閲覧・発注・CancelをStation dock中だけに制限（サーバー側で強制、クライアントのMキーもdock状態に連動）。注文帳はundock後も存続し、再dockすれば管理できる。** 板のsnapshotは最大200件。GdUnit4とRustの契約テストを追加。 | ✅ |
-
-9D-4 の Sector 側適用も実装済み。`SimulationNode` の
-`remove_item_owned` / `return_item_owned` / `credit_item_owned` が所有権と数量を
-検証し、既存の `ShipFitted` インベントリスナップショットへ記録する。Market は
-Sector へ直接アクセスせず、呼び出し側が所有 Sector へ片側ずつルーティングする。
-旧Market DBは `ship_id` をNULL許容で追加する移行を行い、旧注文に対して船を推測しない。9D-5ではこのruntime bridgeをsingle/clusterの両serve loopへ接続し、Market専用wire envelopeとGodot Market surfaceを追加した。`dawn-sector`は`dawn-market`へ依存しない。
-
-### 9E. 経済ループの検証・バランス
-
-| # | タスク | 備考 | 状態 |
-|---|---|---|---|
-| 1 | 資源希少性が実際に判断/対立を生んでいるかのプレイテスト（playtest-guide.md 拡張） | 手順と観測項目を追加済み。人間によるセッション実施と結果記録が残タスク | 🔶 |
-| 2 | 受動蓄積ゼロの回帰チェック | 9A-5 が「自動テストで守るべき性質」に育った段階で CI へ昇格する。現状はチェック項目として運用 | ⏸️ |
-
----
-
-## 13. Phase 10 — Client 本格化（GDExtension 導入）
-
-> ADR-0004（クライアント技術選定）で既定路線として決定済み。Phase 9 より独立して着手可能
-> （経済ループの有無に依らずクライアント性能の話のため）だが、優先度は Phase 9 より低い
-> （§10「戦闘の深み」「分散インフラ」が柱①②④に直結するのに対し、本フェーズは体験の
-> 滑らかさの改善であり新しいプレイヤー決定を増やさない）。
-
-**完了基準**: レイテンシを隠した滑らかな操作感（Client-Side Prediction 導入後、体感の
-入力遅延が軽減されたことをプレイテストで確認する）。
-
-| # | タスク | 備考 | 状態 |
-|---|---|---|---|
-| 1 | godot-rust プロジェクトを新設 | 2026-07-10、`crates/dawn-client-gdext`（`client/gdextension/` ではなくワークスペース crate として配置。技術選定の根拠は ADR-0004、配置決定は ADR-0040）として実装。`client/dawn_client_gdext.gdextension` で Godot 側に登録済み | ✅ |
-| 2 | `dawn-core` 型を GDExtension 経由で Godot へ直接公開（型共有の切り替え） | 2026-07-10、第一弾として PlayerLoadout（Loadout/ModuleRow/ItemRow）を `dawn-client-core`（ADR-0039、`dawn-core` にのみ依存する新クレート）+ `dawn-client-gdext`（ADR-0040）経由で公開し、旧 `player_loadout.gd`/`module_row.gd`/`item_row.gd` を置き換え済み。`dawn-core` 型を直接ではなく `dawn-client-core` が仲介する形（サーバー側 projection は現状 `serde_json::json!` のまま、契約テストで整合を担保）。2026-07-11、Command 送信（`ClientCommand`、ADR-0041）+ DomainEvent 受信のデコード（`ServerMessageDecoder`、ADR-0042）を追加済み。`InitialState`/`PlayerLoadout`/`AoiEnter` は引き続き `serde_json::json!` のJSONテキストのまま（ADR-0042 段階2） | 🔶 一部実装 |
-| 3 | Client-Side Prediction を Rust 側に実装（サーバー権威の再現ロジックをクライアントでも動かす） | `dawn-ecs` の Movement/Warp システムをクライアント側でも再利用できるかが鍵。サーバーとの分岐（reconciliation）設計が必要 | ⬜ 要 ADR |
-| 4 | WebSocket + JSON からの通信方式移行を再検討（gRPC 等） | 2026-07-11、ADR-0042で決定・実装（段階1）。調査の結果、ADR-0007の元のトリガー（分散ノード間通信）は既に`dawn-consensus`/`dawn-replication`のTCP+postcardで解決済みで、クライアント向けには当てはまらないと判明。WebSocketトランスポートは維持し、ペイロードをJSONテキストからpostcardバイナリへ移行（`ServerMessage`/`ClientMessage`）。`InitialState`/`AoiEnter`/`PlayerLoadout`はまだ固定型でないため段階2（別タスク）に分離 | 🔶 段階1実装済み |
-
----
+GDExtension導入と主要なwire移行は完了した。残作業は
+[pending.md](./roadmap/pending.md) §3.3 のみを正典とする。関連ADR: ADR-0039〜0043。
 
 ## 14. Phase 11 — グラフィックの深化
 
-> Phase 9（経済）/ Phase 10（GDExtension・Client-Side Prediction）とは独立した方向性として
-> 2026-07-02 に追加。**サーバー権威・イベントスキーマ・ゲームルールには触れない、純粋に
-> クライアント側の描画品質の話**であり、Phase 9/10 のように個別 ADR は必須ではない
-> （挙動変更を伴わない見た目の変更は AI_DEVELOPMENT_GUIDE.md の変更ワークフロー通りの
-> 小さな差分で進められる。ただしアセットパイプラインや外部ツール依存の追加など、
-> 判断の重い項目は軽量 ADR を起票する）。
->
-> 根拠: ADR-0004「EVE Online レベルの宇宙グラフィックス（宇宙船・ネビュラ・エフェクト）」を
-> Godot 4 選定の理由に掲げているが、現状の船は `client/scenes/ship.tscn` の
-> `CylinderMesh`（Hull）+ `SphereMesh`（EngineGlow）というプレースホルダ形状のままで、
-> この理由に見合う品質にはまだ到達していない。game-design.md の非スコープ「×
-> グラフィックスエンジン外部依存」は**エンジンの差し替えを禁じる**もので、Godot 内での
-> 描画品質向上（本フェーズ）とは矛盾しない。
->
-> 2026-07-01、EVE Online を動かす Carbon エンジンが MIT ライセンスで全面オープンソース化
-> （`github.com/carbonengine`）。グラフィックス側モジュール Trinity のシェーダー/エフェクト
-> 実装を参考に Godot 側を書き直す（コードの直接移植ではなく、表現手法の翻訳）。対象3件を
-> 優先度付きで下記タスク#3・#5・#1に注記する。
+残作業は [pending.md](./roadmap/pending.md) §3.4 のみを正典とする。
 
-**完了基準**: 主要な船種（`data/ship_types.toml`）が固有の3Dモデルで表示され、戦闘の主要
-アクション（発砲・被弾・爆発・ワープ・モジュール発動）に対応する視覚エフェクトが付く。
-既存の空間シェーダー（`space_sky.gdshader`）基準の見た目を壊さない。
+## 15. 廃止・変更された計画
 
-| # | タスク | 備考 | 状態 |
-|---|---|---|---|
-| 1 | 船種ごとの3Dモデル（glTF）を用意し `ship.tscn` のプレースホルダ形状を置き換え | `client/assets/models/` は Phase 4 のリポジトリ構成表に予約済みだが未使用。アセット調達方針（自作/外部アセット購入/AI生成）は軽量 ADR で決める。**Trinity参考・優先度3**: 船体マテリアル（金属質感・発光パターン）の表現手法を参照 | ⬜ |
-| 2 | 武器発射・被弾・爆発のパーティクルエフェクト | `WeaponFired`/`DamageTaken`/`ShipDestroyed` イベント受信時にトリガー。イベントスキーマ変更は不要（クライアント側の描画のみ） | ⬜ |
-| 3 | ワープ突入/離脱エフェクトの拡充 | 既存の `warp_tunnel_effect.gd`（フルスクリーン ColorRect シェーダー）を土台に、開始/終了の演出を追加。**Trinity参考・優先度1**: ワープトンネル表現の参照実装として最初に着手 | ⬜ |
-| 4 | モジュール発動時の視覚フィードバック拡充 | 現状は Local Repair の緑フラッシュ（`flash_repair`）のみ。他モジュール種（武器・推進）にも同様のフィードバックを広げる | ⬜ |
-| 5 | 天体（恒星・惑星）の見た目の作り込み | ADR-0025 で静的天体は導入済みだが、恒星は実体メッシュを撤廃し空シェーダーの方向ベース描画のみ。惑星の質感・大気表現などは今後の余地。**Trinity参考・優先度2**: ネビュラ背景の表現手法を参照 | ⬜ |
-| 6 | ライティング/ポストプロセッシング（Bloom・トーンマッピング等）の調整 | Godot 4 の WorldEnvironment 設定の調整のみで着手可能 | ⬜ |
-| 7 | パフォーマンス回帰の確認（多数の視覚エフェクトが密戦闘のフレームレートを壊さないか） | Phase 8B の局所 TiDi・AoI が支える大規模戦闘の体験を、クライアント側の描画負荷で壊さないことを確認 | ⬜ |
-
----
-
-## 15. 廃止・変更された計画の記録
-
-2026-06-14（Phase 8 前提の3設計判断・ADR-0016/0017/0018）と 2026-06-04
-（Phase 4〜11 開発戦略の2段階変更）の詳細は **docs/process/roadmap-history.md** の
-「廃止・変更された計画の記録」を参照。
-## Phase 10 current status (2026-07-18)
-
-This section supersedes the stale completion labels in the original Phase 10
-table above. GDExtension setup, direct client-core projections, and the full
-postcard migration (including InitialState, PlayerLoadout, and AoI messages)
-are complete. The remaining Phase 10 work is Client-Side Prediction,
-implemented under proposed ADR-0043: Rust owns the predictor, the server sends
-owner-only normal-flight corrections, and warp/dock discontinuities keep their
-existing authoritative snap paths. The client ship-motion deepening now uses
-one `dawn-client-core::MotionPredictor` track for local prediction and remote
-dead-reckoning, including floating-origin rebases. Automated Rust and Godot
-tests pass; Godot playtest verification remains open.
+廃止・変更の判断記録は [roadmap-history.md](./roadmap-history.md) と各ADRを参照する。
