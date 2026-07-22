@@ -1,0 +1,37 @@
+---
+scope    : 完了済みロードマップ項目の短い記録
+audience : AI Agent / Human Developer
+update   : フェーズまたは大きなマイルストーンの完了時
+related  : ./README.md, ../roadmap-history.md, ../../adr/
+---
+
+# Roadmap — Completed
+
+完了済みの詳細を常時読む必要はない。過去の判断・計測値は
+[roadmap-history.md](../roadmap-history.md)、ADR、各architecture documentへ分散している。
+
+## 4. 完了済み（短縮）
+
+### 基盤と分散実行
+
+- Phase 0〜3: workspace、Single Node、Multi-Node、Snapshot / Replay 完了。
+- Phase 4〜7.5: マルチプレイヤー、ゲームループ、Raft、Jump Gate 完了。
+- 戦闘の基礎: Warp、Propulsion、Tackle、Signature、Orbit、Keep at Range、Local Repair、Remote Repair / Logistics 完了。
+- Phase 8A / 8D: 永続化、Replication、物理ノード、ネットワークRaft、Piクラスタ検証完了。
+
+### Phase 9 の基盤
+
+- 9A: `ItemId` 一般化、Scrap Metalの撃破者加算、Snapshot対応完了。
+- 9B: NPC Station、Dock/Undock、Station-local inventory、Assemble / Disassemble、Packaged Ship建造、GodotのStation UI完了。Station inventoryはSQLite永続化 + bounded cache。
+- 9D: `dawn-market`、SQLite order book、Currency台帳、エスクロー、Sector bridge command、Station限定Market UI、Market order-book matching policy分離完了。
+- 9E: 9E-1のプレイテスト以外は、Phase 9基盤の自動検証を完了。
+
+### Phase 10 の基盤
+
+- GDExtension crate、`dawn-client-core`、PlayerLoadout projection、Command送信、postcardの主要移行、MotionPredictor基盤完了。
+- Godotの自動テストは通過。実行DLL生成と手動プレイテストは [pending.md](./pending.md) に残す。
+
+## 記録先
+
+完了項目の詳細な経緯は、既存の [roadmap-history.md](../roadmap-history.md) とGit履歴を参照する。
+完了済み項目を再実装候補として扱わず、変更が必要な場合は新しいTODOまたはADRを起票する。

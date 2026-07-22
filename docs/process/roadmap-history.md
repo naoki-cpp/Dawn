@@ -2,8 +2,8 @@
 scope    : 完了済みフェーズ（Phase 0〜7）の詳細記録、および廃止・変更された計画の記録
 audience : AI Agent / Human Developer
 update   : 通常は更新しない（完了済みフェーズの確定記録）。新たにフェーズが完了したら
-           docs/process/roadmap.md の §2「完了済みフェーズ」要約に追記後、本ファイルへ詳細を移すこと
-related  : docs/process/roadmap.md（現在地・進行中フェーズはこちらが正典）
+           docs/process/roadmap/completed.md の「完了済み」要約に追記後、本ファイルへ詳細を移すこと
+related  : docs/process/roadmap.md（互換入口）、docs/process/roadmap/README.md（現在地・進行中フェーズの正典）
 ---
 
 # Roadmap History
@@ -11,7 +11,7 @@ related  : docs/process/roadmap.md（現在地・進行中フェーズはこち�
 `docs/process/roadmap.md` から分離した完了済みフェーズの詳細記録（ADR-0030 と同じ理由 — 当時の
 判断根拠・計測値は時々参照する程度で、常時ロードする roadmap.md 本体には不要）。
 
-現在地・進行中フェーズ（Phase 8 以降）は `docs/process/roadmap.md` を参照すること。
+現在地・進行中フェーズ（Phase 8 以降）は `docs/process/roadmap/README.md` を参照すること。
 このファイルは確定済みの過去の記録であり、通常は更新しない。
 
 ---
