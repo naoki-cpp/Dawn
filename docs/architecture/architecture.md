@@ -2,7 +2,7 @@
 scope    : Map of the whole system. A bird's-eye view of what exists and how it connects
 audience : AI Agent / Human Developer
 update   : When crate composition changes / when a phase advances
-related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, ../process/roadmap.md, ../../CLAUDE.md
+related  : entity-model.md, event-catalog.md, ownership.md, tick-model.md, database-strategy.md, ../process/roadmap.md, ../../CLAUDE.md
 ---
 
 # Dawn Architecture
@@ -27,6 +27,7 @@ This file is the project's **entry point**. For details, always follow the link 
 | `docs/architecture/event-catalog.md` | What happens (Event specs) |
 | `docs/architecture/ownership.md` | Who manages what (ownership, state transitions) |
 | `docs/architecture/tick-model.md` | When and in what order things are processed |
+| `docs/architecture/database-strategy.md` | Which persistence engine owns each kind of data, and when to migrate |
 | `docs/process/roadmap.md` | What to build, and in what order |
 | `docs/design/game-design.md` | Why a feature exists / lessons from EVE, future candidates |
 | `docs/adr/` | Why a decision was made (immutable decision record) |
