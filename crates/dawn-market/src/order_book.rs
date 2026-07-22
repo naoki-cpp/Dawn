@@ -358,7 +358,7 @@ impl MarketDb {
             }
         }
 
-        let candidates = load_matching_orders(&tx, item_id, side)?;
+        let candidates = load_matching_orders(&tx, item_id, side, price, quantity)?;
         let plan = matching::plan_matches(
             IncomingOrder {
                 player_id,
@@ -545,20 +545,35 @@ fn load_matching_orders(
     tx: &rusqlite::Transaction<'_>,
     item_id: ItemId,
     incoming_side: OrderSide,
+    incoming_price: u64,
+    incoming_quantity: u64,
 ) -> rusqlite::Result<Vec<RestingOrder>> {
     let (item_type, module_id, ship_type_id) = item_id_to_columns(item_id);
-    let mut stmt = tx.prepare(
+    let price_comparison = match incoming_side {
+        OrderSide::Bid => "<=",
+        OrderSide::Ask => ">=",
+    };
+    let price_order = match incoming_side {
+        OrderSide::Bid => "ASC",
+        OrderSide::Ask => "DESC",
+    };
+    let mut stmt = tx.prepare(&format!(
         "SELECT order_id, player_id, ship_id, side, quantity_remaining, price, escrowed_currency
-         FROM orders
-         WHERE item_type = ?1 AND module_id = ?2 AND ship_type_id = ?3 AND side = ?4
-         ORDER BY order_id ASC",
-    )?;
+             FROM orders
+             WHERE item_type = ?1 AND module_id = ?2 AND ship_type_id = ?3 AND side = ?4
+               AND price {price_comparison} ?5
+               AND quantity_remaining > 0
+             ORDER BY price {price_order}, order_id ASC
+             LIMIT ?6"
+    ))?;
     let rows = stmt.query_map(
         params![
             item_type,
             module_id,
             ship_type_id,
-            incoming_side.opposite().as_column_value()
+            incoming_side.opposite().as_column_value(),
+            incoming_price,
+            incoming_quantity,
         ],
         |row| {
             Ok(RestingOrder {
@@ -732,6 +747,30 @@ mod tests {
 
         assert!(outcome.trades.is_empty());
         assert!(outcome.resting_order_id.is_some());
+    }
+
+    #[test]
+    fn matching_candidate_query_filters_price_and_bounds_requested_quantity() {
+        let mut market = MarketDb::open_in_memory().unwrap();
+        market
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 80, 1)
+            .unwrap()
+            .unwrap();
+        market
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Ask, 90, 1)
+            .unwrap()
+            .unwrap();
+        market
+            .place_order(PlayerId(3), ship(3), scrap(), OrderSide::Ask, 100, 1)
+            .unwrap()
+            .unwrap();
+
+        let tx = market.conn.transaction().unwrap();
+        let candidates = load_matching_orders(&tx, scrap(), OrderSide::Bid, 90, 1).unwrap();
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].price, 80);
+        tx.rollback().unwrap();
     }
 
     #[test]
