@@ -52,6 +52,8 @@ use dawn_core::{
 };
 use rusqlite::{params, Connection, OptionalExtension};
 
+use crate::matching::{self, IncomingOrder, RestingOrder};
+
 const MAX_OPEN_ORDER_VIEW: u64 = 200;
 
 /// Which side of the book an order rests on.
@@ -69,7 +71,7 @@ impl OrderSide {
         }
     }
 
-    fn opposite(self) -> OrderSide {
+    pub(super) fn opposite(self) -> OrderSide {
         match self {
             OrderSide::Bid => OrderSide::Ask,
             OrderSide::Ask => OrderSide::Bid,
@@ -211,16 +213,6 @@ fn try_debit_currency_raw(
         params![player_id, amount],
     )?;
     Ok(changed == 1)
-}
-
-/// One resting order row read back while matching.
-struct RestingOrder {
-    order_id: i64,
-    player_id: u64,
-    ship_id: Option<u64>,
-    quantity_remaining: u64,
-    price: u64,
-    escrowed_currency: u64,
 }
 
 /// The Market's limit order book + Currency ledger, backed by SQLite (its
@@ -366,120 +358,64 @@ impl MarketDb {
             }
         }
 
-        let mut trades = Vec::new();
-        let mut credit_item_commands = Vec::new();
-        let mut remaining = quantity;
-        let mut refund_to_buyer: u64 = 0;
-
-        {
-            let price_order = match side {
-                // A Bid crosses Asks priced at or below it; best (lowest)
-                // Ask first.
-                OrderSide::Bid => "ASC",
-                // An Ask crosses Bids priced at or above it; best (highest)
-                // Bid first.
-                OrderSide::Ask => "DESC",
-            };
-            let cmp = match side {
-                OrderSide::Bid => "<=",
-                OrderSide::Ask => ">=",
-            };
-            let query = format!(
-                "SELECT order_id, player_id, ship_id, quantity_remaining, price, escrowed_currency
-                 FROM orders
-                 WHERE item_type = ?1 AND module_id = ?2 AND ship_type_id = ?3
-                   AND side = ?4 AND price {cmp} ?5
-                 ORDER BY price {price_order}, order_id ASC"
-            );
-            let mut stmt = tx.prepare(&query)?;
-            let mut rows = stmt.query(params![
-                item_type,
-                module_id,
-                ship_type_id,
-                side.opposite().as_column_value(),
+        let candidates = load_matching_orders(&tx, item_id, side, price, quantity)?;
+        let plan = matching::plan_matches(
+            IncomingOrder {
+                player_id,
+                ship_id,
+                item_id,
+                side,
                 price,
-            ])?;
+                quantity,
+            },
+            candidates,
+        );
 
-            let mut fills: Vec<(RestingOrder, u64)> = Vec::new();
-            while remaining > 0 {
-                let Some(row) = rows.next()? else { break };
-                let resting = RestingOrder {
-                    order_id: row.get(0)?,
-                    player_id: row.get(1)?,
-                    ship_id: row.get(2)?,
-                    quantity_remaining: row.get(3)?,
-                    price: row.get(4)?,
-                    escrowed_currency: row.get(5)?,
-                };
-                let fill_qty = remaining.min(resting.quantity_remaining);
-                remaining -= fill_qty;
-                fills.push((resting, fill_qty));
+        let mut trades = Vec::with_capacity(plan.fills.len());
+        let mut credit_item_commands = Vec::new();
+        for fill in plan.fills {
+            if fill.resting_quantity_remaining == 0 {
+                tx.execute(
+                    "DELETE FROM orders WHERE order_id = ?1",
+                    params![fill.resting_order_id],
+                )?;
+            } else {
+                tx.execute(
+                    "UPDATE orders SET quantity_remaining = ?1, escrowed_currency = ?2
+                     WHERE order_id = ?3",
+                    params![
+                        fill.resting_quantity_remaining,
+                        fill.resting_escrowed_currency,
+                        fill.resting_order_id
+                    ],
+                )?;
             }
-            drop(rows);
-            drop(stmt);
 
-            for (resting, fill_qty) in fills {
-                let new_remaining = resting.quantity_remaining - fill_qty;
-                let new_escrowed = resting
-                    .escrowed_currency
-                    .saturating_sub(resting.price * fill_qty);
-                if new_remaining == 0 {
-                    tx.execute(
-                        "DELETE FROM orders WHERE order_id = ?1",
-                        params![resting.order_id],
-                    )?;
-                } else {
-                    tx.execute(
-                        "UPDATE orders SET quantity_remaining = ?1, escrowed_currency = ?2
-                         WHERE order_id = ?3",
-                        params![new_remaining, new_escrowed, resting.order_id],
-                    )?;
-                }
-
-                let (buyer, seller, buyer_ship_id) = match side {
-                    OrderSide::Bid => (player_id, PlayerId(resting.player_id), Some(ship_id)),
-                    OrderSide::Ask => (
-                        PlayerId(resting.player_id),
-                        player_id,
-                        resting.ship_id.map(|raw| ShipId(EntityId::from_raw(raw))),
-                    ),
-                };
-                let proceeds = resting.price * fill_qty;
-                credit_currency_raw(&tx, seller.raw(), proceeds)?;
-                if side == OrderSide::Bid {
-                    // The buyer escrowed at their own (possibly higher) bid
-                    // price; the resting Ask's price is always <= that, so
-                    // this is always >= 0.
-                    refund_to_buyer += (price - resting.price) * fill_qty;
-                }
-                // An incoming Ask fills at the resting Bid's own escrowed
-                // price exactly -- no refund side to compute.
-
-                trades.push(Trade {
-                    buyer,
-                    seller,
+            credit_currency_raw(&tx, fill.seller.raw(), fill.seller_proceeds)?;
+            trades.push(Trade {
+                buyer: fill.buyer,
+                seller: fill.seller,
+                item_id,
+                price: fill.price,
+                quantity: fill.quantity,
+            });
+            if let Some(ship_id) = fill.buyer_ship_id {
+                credit_item_commands.push(CreditItemCommand {
+                    player_id: fill.buyer,
+                    ship_id,
                     item_id,
-                    price: resting.price,
-                    quantity: fill_qty,
+                    quantity: fill.quantity,
                 });
-                if let Some(ship_id) = buyer_ship_id {
-                    credit_item_commands.push(CreditItemCommand {
-                        player_id: buyer,
-                        ship_id,
-                        item_id,
-                        quantity: fill_qty,
-                    });
-                }
             }
         }
 
-        if refund_to_buyer > 0 {
-            credit_currency_raw(&tx, player_id.raw(), refund_to_buyer)?;
+        if plan.buyer_refund > 0 {
+            credit_currency_raw(&tx, player_id.raw(), plan.buyer_refund)?;
         }
 
-        let resting_order_id = if remaining > 0 {
+        let resting_order_id = if plan.remaining_quantity > 0 {
             let escrowed_currency = if side == OrderSide::Bid {
-                price * remaining
+                price * plan.remaining_quantity
             } else {
                 0
             };
@@ -495,7 +431,7 @@ impl MarketDb {
                     module_id,
                     ship_type_id,
                     price,
-                    remaining,
+                    plan.remaining_quantity,
                     escrowed_currency,
                 ],
             )?;
@@ -603,6 +539,58 @@ impl MarketDb {
                 .flatten(),
         }))
     }
+}
+
+fn load_matching_orders(
+    tx: &rusqlite::Transaction<'_>,
+    item_id: ItemId,
+    incoming_side: OrderSide,
+    incoming_price: u64,
+    incoming_quantity: u64,
+) -> rusqlite::Result<Vec<RestingOrder>> {
+    let (item_type, module_id, ship_type_id) = item_id_to_columns(item_id);
+    let price_comparison = match incoming_side {
+        OrderSide::Bid => "<=",
+        OrderSide::Ask => ">=",
+    };
+    let price_order = match incoming_side {
+        OrderSide::Bid => "ASC",
+        OrderSide::Ask => "DESC",
+    };
+    let mut stmt = tx.prepare(&format!(
+        "SELECT order_id, player_id, ship_id, side, quantity_remaining, price, escrowed_currency
+             FROM orders
+             WHERE item_type = ?1 AND module_id = ?2 AND ship_type_id = ?3 AND side = ?4
+               AND price {price_comparison} ?5
+               AND quantity_remaining > 0
+             ORDER BY price {price_order}, order_id ASC
+             LIMIT ?6"
+    ))?;
+    let rows = stmt.query_map(
+        params![
+            item_type,
+            module_id,
+            ship_type_id,
+            incoming_side.opposite().as_column_value(),
+            incoming_price,
+            incoming_quantity,
+        ],
+        |row| {
+            Ok(RestingOrder {
+                order_id: row.get(0)?,
+                player_id: PlayerId(row.get(1)?),
+                ship_id: row
+                    .get::<_, Option<u64>>(2)?
+                    .map(|raw| ShipId(EntityId::from_raw(raw))),
+                item_id,
+                side: columns_to_side(&row.get::<_, String>(3)?),
+                quantity_remaining: row.get(4)?,
+                price: row.get(5)?,
+                escrowed_currency: row.get(6)?,
+            })
+        },
+    )?;
+    rows.collect()
 }
 
 #[cfg(test)]
@@ -759,6 +747,30 @@ mod tests {
 
         assert!(outcome.trades.is_empty());
         assert!(outcome.resting_order_id.is_some());
+    }
+
+    #[test]
+    fn matching_candidate_query_filters_price_and_bounds_requested_quantity() {
+        let mut market = MarketDb::open_in_memory().unwrap();
+        market
+            .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 80, 1)
+            .unwrap()
+            .unwrap();
+        market
+            .place_order(PlayerId(2), ship(2), scrap(), OrderSide::Ask, 90, 1)
+            .unwrap()
+            .unwrap();
+        market
+            .place_order(PlayerId(3), ship(3), scrap(), OrderSide::Ask, 100, 1)
+            .unwrap()
+            .unwrap();
+
+        let tx = market.conn.transaction().unwrap();
+        let candidates = load_matching_orders(&tx, scrap(), OrderSide::Bid, 90, 1).unwrap();
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].price, 80);
+        tx.rollback().unwrap();
     }
 
     #[test]
