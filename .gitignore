@@ -47,3 +47,4 @@ Desktop.ini
 
 # ── Playtest session logs (generated at runtime) ──────────────────────────────
 data/session_*.json
+*.sqlite
