@@ -7,6 +7,12 @@ extends GdUnitTestSuite
 const Connection = preload("res://scripts/connection.gd")
 
 
+func test_reconnect_logging_is_emitted_on_first_attempt_and_after_interval() -> void:
+	assert_bool(Connection.should_log_reconnect(1, 0.0, 30.0)).is_true()
+	assert_bool(Connection.should_log_reconnect(10, 29.9, 30.0)).is_false()
+	assert_bool(Connection.should_log_reconnect(10, 30.0, 30.0)).is_true()
+
+
 func test_normalize_ws_url_adds_ws_scheme_to_host_port() -> void:
 	var connection: Node = Connection.new()
 	assert_str(connection._normalize_ws_url("127.0.0.1:7880")).is_equal("ws://127.0.0.1:7880")

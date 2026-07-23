@@ -41,6 +41,10 @@ signal market_snapshot_received(snapshot: Dictionary)
 
 const SERVER_URL         := "ws://127.0.0.1:7878"
 const RECONNECT_INTERVAL := 2.0
+## Keep retry latency short without writing one log record per attempt while
+## the server is unavailable. Godot has no project-level log rotation setting,
+## so the client must bound its own reconnect diagnostics.
+const RECONNECT_LOG_INTERVAL := 30.0
 
 # ── 内部状態 ─────────────────────────────────────────────────────────────────
 
@@ -48,6 +52,8 @@ var _ws              : WebSocketPeer = WebSocketPeer.new()
 var _connected       : bool          = false
 var _welcomed        : bool          = false   ## Welcome 受信済みか
 var _reconnect_timer : float         = 0.0
+var _reconnect_log_elapsed : float  = RECONNECT_LOG_INTERVAL
+var _reconnect_attempts : int       = 0
 var _server_url      : String        = SERVER_URL
 ## ClientCommand/ServerMessageDecoder are GDExtension classes (dawn-wire/
 ## dawn-client-gdext, ADR-0041/ADR-0042) -- globally registered, no preload
@@ -73,6 +79,8 @@ func _process(delta: float) -> void:
 		if not _connected:
 			_connected = true
 			_welcomed  = false
+			_reconnect_attempts = 0
+			_reconnect_log_elapsed = 0.0
 			print("[Connection] connected to ", _server_url)
 			connection_changed.emit(true)
 			## 接続直後に Hello を送信する
@@ -86,6 +94,7 @@ func _process(delta: float) -> void:
 			print("[Connection] disconnected, reconnecting in %.1fs" % RECONNECT_INTERVAL)
 			connection_changed.emit(false)
 		_reconnect_timer += delta
+		_reconnect_log_elapsed += delta
 		if _reconnect_timer >= RECONNECT_INTERVAL:
 			_reconnect_timer = 0.0
 			_connect_to_server()
@@ -290,11 +299,25 @@ func _send_hello() -> void:
 	print("[Connection] Hello sent")
 
 func _connect_to_server() -> void:
-	print("[Connection] connecting to ", _server_url, " ...")
+	_reconnect_attempts += 1
+	var should_log_attempt := should_log_reconnect(
+		_reconnect_attempts,
+		_reconnect_log_elapsed,
+		RECONNECT_LOG_INTERVAL)
+	if should_log_attempt:
+		_reconnect_log_elapsed = 0.0
+		print("[Connection] connecting to %s ... (attempt %d)" % [
+			_server_url,
+			_reconnect_attempts])
 	_ws = WebSocketPeer.new()
 	var err: int = _ws.connect_to_url(_server_url)
-	if err != OK:
+	if err != OK and should_log_attempt:
 		push_warning("[Connection] connect_to_url failed: %s" % error_string(err))
+
+## Reconnect attempts remain frequent for responsiveness, but their diagnostics
+## are emitted only on the first attempt and at the bounded interval thereafter.
+static func should_log_reconnect(attempt: int, elapsed: float, interval: float) -> bool:
+	return attempt <= 1 or elapsed >= interval
 
 ## One WebSocket frame always carries exactly one message (ADR-0042). Every
 ## server -> client message is now the postcard `ServerMessage` binary
