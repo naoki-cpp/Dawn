@@ -101,12 +101,7 @@ impl AnchorTable {
 
     /// The anchor in `sector` nearest to the absolute point `world` (metres).
     /// Used to pick a ship's current anchor (e.g. on warp arrival).
-    pub fn nearest_anchor<P: Into<[f64; 3]>>(
-        &self,
-        sector: SectorId,
-        world: P,
-    ) -> Option<AnchorId> {
-        let world = world.into();
+    pub fn nearest_anchor(&self, sector: SectorId, world: [f64; 3]) -> Option<AnchorId> {
         self.abs
             .iter()
             .filter(|(id, _)| self.sector.get(id) == Some(&sector))
