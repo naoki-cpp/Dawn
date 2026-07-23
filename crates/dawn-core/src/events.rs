@@ -431,7 +431,8 @@ pub struct SectorTransitCompleted {
     pub ship_id: ShipId,
     pub from: SectorId,
     pub to: SectorId,
-    pub entry_pos: Position,
+    /// Authoritative destination-Sector entry position.
+    pub entry_pos: AbsolutePosition,
     pub velocity: Velocity,
     pub tick: Tick,
 }
@@ -607,13 +608,13 @@ mod tests {
             ship_id: id,
             from: SectorId(0),
             to: SectorId(1),
-            entry_pos: Position::new(100.0, 0.0, 0.0),
+            entry_pos: AbsolutePosition::new(100.0, 0.0, 0.0),
             velocity: Velocity::new(1.0, 0.0, 0.0),
             tick: Tick(8),
         });
         match event {
             DomainEvent::SectorTransitCompleted(e) => {
-                assert_eq!(e.entry_pos, Position::new(100.0, 0.0, 0.0));
+                assert_eq!(e.entry_pos, AbsolutePosition::new(100.0, 0.0, 0.0));
                 assert_eq!(e.to, SectorId(1));
             }
             _ => panic!("expected SectorTransitCompleted"),

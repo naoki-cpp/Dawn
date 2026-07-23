@@ -457,7 +457,7 @@ Sector Transit completed; ownership moved from `from` to `to`.
 | `ship_id` | `ShipId` | ✓ | Ship that transited |
 | `from` | `SectorId` | ✓ | previous owning Sector |
 | `to` | `SectorId` | ✓ | new owning Sector |
-| `entry_pos` | `Position` | ✓ | entry coordinates in the destination Sector |
+| `entry_pos` | `AbsolutePosition` | ✓ | authoritative entry coordinates in the destination Sector frame |
 | `velocity` | `Velocity` | ✓ | velocity on entry (required for full Replay reconstruction, INV-002) |
 | `tick` | `Tick` | ✓ | Tick of completion |
 

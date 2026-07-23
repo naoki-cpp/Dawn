@@ -109,7 +109,7 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|g| g.abs_m.as_array())
             .unwrap_or([0.0, 0.0, 0.0]);
 
-        let ship = self.export_transit(ship_id, entry_pos)?;
+        let ship = self.export_transit_with_abs(ship_id, entry_pos, Some(entry_pos_abs.into()))?;
         Some(TransitCommitData {
             ship: Box::new(ship),
             entry_pos,
@@ -170,6 +170,15 @@ impl<S: EventStore> SimulationNode<S> {
         ship_id: ShipId,
         entry_pos: Position,
     ) -> Option<ShipSnapshot> {
+        self.export_transit_with_abs(ship_id, entry_pos, None)
+    }
+
+    fn export_transit_with_abs(
+        &mut self,
+        ship_id: ShipId,
+        entry_pos: Position,
+        entry_pos_abs: Option<dawn_core::AbsolutePosition>,
+    ) -> Option<ShipSnapshot> {
         let &entity = self.ships.index.get(&ship_id)?;
         let to = match self.world.transit_state(entity) {
             TransitState::InTransit { to } => to,
@@ -209,6 +218,7 @@ impl<S: EventStore> SimulationNode<S> {
 
         // Tackle state is not transferred on sector transit (tacklers are in
         // this sector; they lose the tackle as the ship leaves).
+        let event_entry_pos = entry_pos_abs.unwrap_or_else(|| entry_pos.into());
         let snapshot = ShipSnapshot {
             ship_id,
             ship_type_id,
@@ -243,7 +253,7 @@ impl<S: EventStore> SimulationNode<S> {
                 ship_id,
                 from: self.sector_id,
                 to,
-                entry_pos,
+                entry_pos: event_entry_pos,
                 velocity: vel,
                 tick: self.current_tick,
             },
@@ -286,7 +296,7 @@ impl<S: EventStore> SimulationNode<S> {
                 ship_id: ship.ship_id,
                 from,
                 to: self.sector_id,
-                entry_pos,
+                entry_pos: entry_pos_abs.into(),
                 velocity: ship.velocity,
                 tick: self.current_tick,
             },
@@ -468,7 +478,7 @@ mod tests {
                 assert_eq!(e.ship_id, ship_id);
                 assert_eq!(e.from, node.sector_id());
                 assert_eq!(e.to, SectorId(1));
-                assert_eq!(e.entry_pos, entry_pos);
+                assert_eq!(e.entry_pos, entry_pos.into());
             }
             other => panic!("expected SectorTransitCompleted, got {other:?}"),
         }
@@ -559,7 +569,7 @@ mod tests {
                 assert_eq!(e.ship_id, ship_id);
                 assert_eq!(e.from, SectorId(0));
                 assert_eq!(e.to, SectorId(1));
-                assert_eq!(e.entry_pos, entry_pos);
+                assert_eq!(e.entry_pos, entry_pos.into());
             }
             other => panic!("expected SectorTransitCompleted, got {other:?}"),
         }
