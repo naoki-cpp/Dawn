@@ -116,12 +116,12 @@ impl JumpGateDef {
     /// The precise path: composes the separation in f64 against the f64 gate
     /// source, so it does not lose the ~16 km of f32 ulp at true-AU distances
     /// (ADR-0029 R1).
-    pub fn is_in_range_abs(&self, ship_abs: [f64; 3]) -> bool {
+    pub fn is_in_range_abs(&self, ship_abs: AbsolutePosition) -> bool {
         self.distance_abs(ship_abs) <= self.activation_radius as f64
     }
 
     /// True distance (metres, f64) from an absolute ship position to this gate.
-    pub fn distance_abs(&self, ship_abs: [f64; 3]) -> f64 {
+    pub fn distance_abs(&self, ship_abs: AbsolutePosition) -> f64 {
         let d = [
             ship_abs[0] - self.abs_m[0],
             ship_abs[1] - self.abs_m[1],
@@ -158,12 +158,12 @@ impl StationDef {
     }
 
     /// Whether an absolute (Sector-frame, f64) ship position is within range.
-    pub fn is_in_range_abs(&self, ship_abs: [f64; 3]) -> bool {
+    pub fn is_in_range_abs(&self, ship_abs: AbsolutePosition) -> bool {
         self.distance_abs(ship_abs) <= self.docking_radius as f64
     }
 
     /// True distance (metres, f64) from an absolute ship position to this station.
-    pub fn distance_abs(&self, ship_abs: [f64; 3]) -> f64 {
+    pub fn distance_abs(&self, ship_abs: AbsolutePosition) -> f64 {
         let d = [
             ship_abs[0] - self.abs_m[0],
             ship_abs[1] - self.abs_m[1],
@@ -205,11 +205,11 @@ mod tests {
             activation_radius: 50.0,
         };
         assert!(
-            g.is_in_range_abs([AU_M + 40.0, 0.0, 0.0]),
+            g.is_in_range_abs([AU_M + 40.0, 0.0, 0.0].into()),
             "40 m out is within the 50 m ring"
         );
         assert!(
-            !g.is_in_range_abs([AU_M + 60.0, 0.0, 0.0]),
+            !g.is_in_range_abs([AU_M + 60.0, 0.0, 0.0].into()),
             "60 m out is beyond the ring"
         );
     }
@@ -247,7 +247,7 @@ mod tests {
             abs_m: [AU_M, 0.0, 0.0].into(),
             docking_radius: 100.0,
         };
-        assert!(station.is_in_range_abs([AU_M + 80.0, 0.0, 0.0]));
-        assert!(!station.is_in_range_abs([AU_M + 120.0, 0.0, 0.0]));
+        assert!(station.is_in_range_abs([AU_M + 80.0, 0.0, 0.0].into()));
+        assert!(!station.is_in_range_abs([AU_M + 120.0, 0.0, 0.0].into()));
     }
 }

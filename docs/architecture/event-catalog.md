@@ -246,7 +246,7 @@ Ship generated within a Sector.
 |---|---|---|---|
 | `ship_id` | `ShipId` | ✓ | unique identifier of the spawned Ship |
 | `sector_id` | `SectorId` | ✓ | Sector it spawned into |
-| `initial_position` | `Position` | ✓ | spawn coordinates |
+| `initial_position` | `AbsolutePosition` | ✓ | authoritative Sector-frame spawn coordinates |
 | `ship_type_id` | `ShipTypeId` | ✓ | ship type ID (resolved via the `ShipTypeDefinition` registry) |
 | `tick` | `Tick` | ✓ | spawn Tick |
 
@@ -457,7 +457,7 @@ Sector Transit completed; ownership moved from `from` to `to`.
 | `ship_id` | `ShipId` | ✓ | Ship that transited |
 | `from` | `SectorId` | ✓ | previous owning Sector |
 | `to` | `SectorId` | ✓ | new owning Sector |
-| `entry_pos` | `Position` | ✓ | entry coordinates in the destination Sector |
+| `entry_pos` | `AbsolutePosition` | ✓ | authoritative entry coordinates in the destination Sector frame |
 | `velocity` | `Velocity` | ✓ | velocity on entry (required for full Replay reconstruction, INV-002) |
 | `tick` | `Tick` | ✓ | Tick of completion |
 
@@ -490,7 +490,7 @@ Ship passed through a Jump Gate to another Sector (ADR-0009). Does not replace `
 | `gate_id` | `JumpGateId` | ✓ | Jump Gate used |
 | `from_sector` | `SectorId` | ✓ | originating Sector |
 | `to_sector` | `SectorId` | ✓ | destination Sector |
-| `entry_pos` | `Position` | ✓ | spawn coordinates in the destination Sector |
+| `entry_pos` | `AbsolutePosition` | ✓ | authoritative spawn coordinates in the destination Sector frame |
 | `tick` | `Tick` | ✓ | Tick the gate transit was finalized |
 
 **Status:** ✅ implemented (Step 7.5 `append_jump_events`).

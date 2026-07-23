@@ -6,7 +6,8 @@
 //! is used only for client command targets, so this module has its own
 //! `AbsPosWire`.
 
-use dawn_core::CelestialBodyKind;
+use dawn_core::{AbsolutePosition, CelestialBodyKind};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::VelWire;
@@ -14,11 +15,21 @@ use crate::VelWire;
 /// Absolute (Sector-frame, f64) position (ADR-0029). Distinct from
 /// [`crate::PosWire`] (f32), which carries client-authored command targets
 /// rather than server-authoritative absolute coordinates.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AbsPosWire {
     pub x: f64,
     pub y: f64,
     pub z: f64,
+}
+
+impl From<AbsolutePosition> for AbsPosWire {
+    fn from(position: AbsolutePosition) -> Self {
+        Self {
+            x: position[0],
+            y: position[1],
+            z: position[2],
+        }
+    }
 }
 
 /// Per-ship state: position, stats, hull, ownership. Shared by `InitialState`

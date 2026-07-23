@@ -18,7 +18,7 @@
           ],
           "properties": {
             "position": {
-              "$ref": "#/definitions/PosWire"
+              "$ref": "#/definitions/AbsPosWire"
             },
             "ship_id": {
               "type": "integer",
@@ -516,7 +516,7 @@
           ],
           "properties": {
             "entry_pos": {
-              "$ref": "#/definitions/PosWire"
+              "$ref": "#/definitions/AbsPosWire"
             },
             "from_sector": {
               "type": "integer",
@@ -590,7 +590,8 @@
     }
   ],
   "definitions": {
-    "PosWire": {
+    "AbsPosWire": {
+      "description": "Absolute (Sector-frame, f64) position (ADR-0029). Distinct from [`crate::PosWire`] (f32), which carries client-authored command targets rather than server-authoritative absolute coordinates.",
       "type": "object",
       "required": [
         "x",
@@ -600,15 +601,15 @@
       "properties": {
         "x": {
           "type": "number",
-          "format": "float"
+          "format": "double"
         },
         "y": {
           "type": "number",
-          "format": "float"
+          "format": "double"
         },
         "z": {
           "type": "number",
-          "format": "float"
+          "format": "double"
         }
       }
     },

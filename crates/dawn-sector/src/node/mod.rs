@@ -534,7 +534,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// composing its anchor's absolute position with its f32 offset (ADR-0029).
     /// Falls back to treating the raw offset as absolute if the anchor is
     /// unknown (pre-anchor data / tests).
-    pub fn ship_absolute(&self, ship_id: ShipId) -> Option<[f64; 3]> {
+    pub fn ship_absolute(&self, ship_id: ShipId) -> Option<dawn_core::AbsolutePosition> {
         let entity = *self.ships.index.get(&ship_id)?;
         let offset = self.world.get::<PositionComp>(entity)?.0;
         Some(self.entity_absolute_f64(entity, offset))

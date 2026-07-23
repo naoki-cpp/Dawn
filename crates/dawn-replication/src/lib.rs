@@ -30,7 +30,7 @@
 //! ## Example
 //!
 //! ```
-//! use dawn_core::{DomainEvent, NodeId, Position, SectorId, ShipId, ShipTypeId, Tick};
+//! use dawn_core::{AbsolutePosition, DomainEvent, NodeId, SectorId, ShipId, ShipTypeId, Tick};
 //! use dawn_core::events::ShipSpawned;
 //! use dawn_replication::{Ingest, LogBatch, ReplicaSet};
 //!
@@ -38,7 +38,7 @@
 //! let event = DomainEvent::ShipSpawned(ShipSpawned {
 //!     ship_id,
 //!     sector_id: SectorId(0),
-//!     initial_position: Position::ORIGIN,
+//!     initial_position: AbsolutePosition::ORIGIN,
 //!     ship_type_id: ShipTypeId(1),
 //!     tick: Tick::ZERO,
 //! });

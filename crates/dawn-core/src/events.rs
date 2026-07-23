@@ -19,7 +19,7 @@ use crate::fitting::{FittingSnapshot, ModuleId, SlotKind};
 use crate::item::ItemId;
 use crate::navigation::{AnchorId, JumpGateId, StarSystemId, StationId};
 use crate::ship_type::ShipTypeId;
-use crate::{Position, SectorId, ShipId, Tick, Velocity};
+use crate::{AbsolutePosition, Position, SectorId, ShipId, Tick, Velocity};
 use serde::{Deserialize, Serialize};
 
 /// Every domain event that can be appended to the Event Log.
@@ -191,7 +191,8 @@ impl DomainEvent {
 pub struct ShipSpawned {
     pub ship_id: ShipId,
     pub sector_id: SectorId,
-    pub initial_position: Position,
+    /// Authoritative Sector-frame spawn position.
+    pub initial_position: AbsolutePosition,
     /// 船種 ID。Replay 時に base_stats を復元するために必須（INV-002）。
     pub ship_type_id: ShipTypeId,
     pub tick: Tick,
@@ -430,7 +431,8 @@ pub struct SectorTransitCompleted {
     pub ship_id: ShipId,
     pub from: SectorId,
     pub to: SectorId,
-    pub entry_pos: Position,
+    /// Authoritative destination-Sector entry position.
+    pub entry_pos: AbsolutePosition,
     pub velocity: Velocity,
     pub tick: Tick,
 }
@@ -462,7 +464,8 @@ pub struct JumpGateUsed {
     pub gate_id: JumpGateId,
     pub from_sector: SectorId,
     pub to_sector: SectorId,
-    pub entry_pos: Position,
+    /// Authoritative destination position in the destination Sector frame.
+    pub entry_pos: AbsolutePosition,
     pub tick: Tick,
 }
 
@@ -546,7 +549,7 @@ mod tests {
         let event = DomainEvent::ShipSpawned(ShipSpawned {
             ship_id: id,
             sector_id: SectorId(0),
-            initial_position: Position::ORIGIN,
+            initial_position: AbsolutePosition::ORIGIN,
             ship_type_id: crate::ship_type::ShipTypeId(1),
             tick: Tick::ZERO,
         });
@@ -605,13 +608,13 @@ mod tests {
             ship_id: id,
             from: SectorId(0),
             to: SectorId(1),
-            entry_pos: Position::new(100.0, 0.0, 0.0),
+            entry_pos: AbsolutePosition::new(100.0, 0.0, 0.0),
             velocity: Velocity::new(1.0, 0.0, 0.0),
             tick: Tick(8),
         });
         match event {
             DomainEvent::SectorTransitCompleted(e) => {
-                assert_eq!(e.entry_pos, Position::new(100.0, 0.0, 0.0));
+                assert_eq!(e.entry_pos, AbsolutePosition::new(100.0, 0.0, 0.0));
                 assert_eq!(e.to, SectorId(1));
             }
             _ => panic!("expected SectorTransitCompleted"),
@@ -639,7 +642,7 @@ mod tests {
             gate_id: crate::navigation::JumpGateId(0),
             from_sector: SectorId(0),
             to_sector: SectorId(1),
-            entry_pos: Position::new(0.0, 0.0, 0.0),
+            entry_pos: AbsolutePosition::ORIGIN,
             tick: Tick(10),
         });
         assert_eq!(event.ship_id(), id);

@@ -30,8 +30,8 @@
 use std::{fs, io, path::Path};
 
 use dawn_core::{
-    fitting::FittingSnapshot, NodeId, Position, SectorBounds, SectorId, ShipId, ShipTypeId, Tick,
-    Velocity,
+    fitting::FittingSnapshot, AbsolutePosition, NodeId, Position, SectorBounds, SectorId, ShipId,
+    ShipTypeId, Tick, Velocity,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -48,6 +48,15 @@ use std::collections::BTreeMap;
 pub struct ShipSnapshot {
     pub ship_id: ShipId,
     pub ship_type_id: ShipTypeId,
+    /// Authoritative Sector-frame position (ADR-0044).
+    ///
+    /// `None` is only used when reading a pre-ADR-0044 snapshot. New
+    /// snapshots always populate this field; restoration falls back to
+    /// `position` for those legacy files.
+    #[serde(default)]
+    pub absolute_position: Option<AbsolutePosition>,
+    /// Anchor-relative offset retained for legacy snapshot compatibility and
+    /// as the local simulation representation.
     pub position: Position,
     /// Coordinate anchor the `position` offset is relative to (ADR-0029).
     /// Defaults to the Sector-origin anchor (id 0) for pre-anchor snapshots.
@@ -72,6 +81,47 @@ pub struct ShipSnapshot {
     /// existed.
     #[serde(default)]
     pub inventory: std::collections::BTreeMap<dawn_core::ItemId, u64>,
+}
+
+/// ADR-0044 predecessor used for decoding snapshots written before
+/// `ShipSnapshot::absolute_position` existed. Postcard is positional, so the
+/// old shape must be decoded explicitly rather than relying on serde defaults.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct LegacyShipSnapshot {
+    pub ship_id: ShipId,
+    pub ship_type_id: ShipTypeId,
+    pub position: Position,
+    pub anchor: dawn_core::AnchorId,
+    pub velocity: Velocity,
+    pub current_shield: f32,
+    pub current_armor: f32,
+    pub current_hull: f32,
+    pub is_destroyed: bool,
+    pub capacitor: Option<f32>,
+    pub fitting: FittingSnapshot,
+    pub tackled_by: Vec<dawn_core::ShipId>,
+    pub inventory: std::collections::BTreeMap<dawn_core::ItemId, u64>,
+}
+
+impl From<LegacyShipSnapshot> for ShipSnapshot {
+    fn from(legacy: LegacyShipSnapshot) -> Self {
+        Self {
+            ship_id: legacy.ship_id,
+            ship_type_id: legacy.ship_type_id,
+            absolute_position: None,
+            position: legacy.position,
+            anchor: legacy.anchor,
+            velocity: legacy.velocity,
+            current_shield: legacy.current_shield,
+            current_armor: legacy.current_armor,
+            current_hull: legacy.current_hull,
+            is_destroyed: legacy.is_destroyed,
+            capacitor: legacy.capacitor,
+            fitting: legacy.fitting,
+            tackled_by: legacy.tackled_by,
+            inventory: legacy.inventory,
+        }
+    }
 }
 
 // ── Node-level snapshot ───────────────────────────────────────────────────────
@@ -111,6 +161,40 @@ pub struct StateSnapshot {
     pub docked_players: BTreeMap<dawn_core::PlayerId, dawn_core::StationId>,
 }
 
+/// ADR-0044 predecessor used for decoding the complete pre-ADR-0044 snapshot
+/// shape. The node-level fields intentionally mirror `StateSnapshot` so only
+/// the ship payload needs conversion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct LegacyStateSnapshot {
+    pub node_id: NodeId,
+    pub sector_id: SectorId,
+    pub bounds: SectorBounds,
+    pub log_index: u64,
+    pub tick: Tick,
+    pub id_counter: u64,
+    pub ships: Vec<LegacyShipSnapshot>,
+    pub station_inventories: BTreeMap<dawn_core::PlayerId, BTreeMap<dawn_core::ItemId, u64>>,
+    pub docked_ships: BTreeMap<dawn_core::ShipId, dawn_core::StationId>,
+    pub docked_players: BTreeMap<dawn_core::PlayerId, dawn_core::StationId>,
+}
+
+impl From<LegacyStateSnapshot> for StateSnapshot {
+    fn from(legacy: LegacyStateSnapshot) -> Self {
+        Self {
+            node_id: legacy.node_id,
+            sector_id: legacy.sector_id,
+            bounds: legacy.bounds,
+            log_index: legacy.log_index,
+            tick: legacy.tick,
+            id_counter: legacy.id_counter,
+            ships: legacy.ships.into_iter().map(Into::into).collect(),
+            station_inventories: legacy.station_inventories,
+            docked_ships: legacy.docked_ships,
+            docked_players: legacy.docked_players,
+        }
+    }
+}
+
 impl StateSnapshot {
     /// Serialise with `postcard` and write to `path`.
     pub fn save(&self, path: impl AsRef<Path>) -> io::Result<()> {
@@ -121,8 +205,17 @@ impl StateSnapshot {
     /// Read from `path` and deserialise.
     pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
         let bytes = fs::read(path)?;
-        postcard::from_bytes(&bytes)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+        match postcard::from_bytes(&bytes) {
+            Ok(snapshot) => Ok(snapshot),
+            Err(current_err) => postcard::from_bytes::<LegacyStateSnapshot>(&bytes)
+                .map(Into::into)
+                .map_err(|legacy_err| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("current snapshot: {current_err}; legacy snapshot: {legacy_err}"),
+                    )
+                }),
+        }
     }
 }
 
@@ -144,6 +237,7 @@ mod tests {
             ships: vec![ShipSnapshot {
                 ship_id: ShipId::new(NodeId(0), 0),
                 ship_type_id: ShipTypeId(1),
+                absolute_position: Some(AbsolutePosition::new(100.0, 200.0, 300.0)),
                 position: Position::new(100.0, 200.0, 300.0),
                 anchor: dawn_core::AnchorId(0),
                 velocity: dawn_core::Velocity::new(1.0, 0.0, 0.0),
@@ -197,5 +291,49 @@ mod tests {
         assert_eq!(restored.log_index, original.log_index);
         assert_eq!(restored.tick, original.tick);
         assert_eq!(restored.id_counter, original.id_counter);
+    }
+
+    #[test]
+    fn legacy_postcard_snapshot_loads_with_no_absolute_positions() {
+        let original = sample_snapshot();
+        let legacy = LegacyStateSnapshot {
+            node_id: original.node_id,
+            sector_id: original.sector_id,
+            bounds: original.bounds,
+            log_index: original.log_index,
+            tick: original.tick,
+            id_counter: original.id_counter,
+            ships: original
+                .ships
+                .iter()
+                .map(|ship| LegacyShipSnapshot {
+                    ship_id: ship.ship_id,
+                    ship_type_id: ship.ship_type_id,
+                    position: ship.position,
+                    anchor: ship.anchor,
+                    velocity: ship.velocity,
+                    current_shield: ship.current_shield,
+                    current_armor: ship.current_armor,
+                    current_hull: ship.current_hull,
+                    is_destroyed: ship.is_destroyed,
+                    capacitor: ship.capacitor,
+                    fitting: ship.fitting.clone(),
+                    tackled_by: ship.tackled_by.clone(),
+                    inventory: ship.inventory.clone(),
+                })
+                .collect(),
+            station_inventories: original.station_inventories.clone(),
+            docked_ships: original.docked_ships.clone(),
+            docked_players: original.docked_players.clone(),
+        };
+        let bytes = postcard::to_stdvec(&legacy).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.bin");
+        std::fs::write(&path, bytes).unwrap();
+
+        let restored = StateSnapshot::load(&path).unwrap();
+        assert_eq!(restored.ships[0].position, original.ships[0].position);
+        assert_eq!(restored.ships[0].absolute_position, None);
+        assert_eq!(restored.station_inventories, original.station_inventories);
     }
 }

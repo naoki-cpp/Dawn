@@ -21,8 +21,8 @@
 // (ws_server.rs, dawn-sector-node, tests) needed no changes.
 pub use dawn_wire::{
     client_command_from_wire, client_command_wire_json_schema, domain_event_to_event_wire,
-    event_wire_json_schema, market_command_wire_json_schema, ClientCommandWire, ClientMessage,
-    EventWire, HelloMessage, InitialStateWire, MarketCommandWire, MarketOrderWire,
+    event_wire_json_schema, market_command_wire_json_schema, AbsPosWire, ClientCommandWire,
+    ClientMessage, EventWire, HelloMessage, InitialStateWire, MarketCommandWire, MarketOrderWire,
     MarketSnapshotWire, PlayerLoadoutWire, PosWire, ResumeIdentity, ServerMessage, VelWire,
     WarpTargetWire,
 };
@@ -453,7 +453,7 @@ mod tests {
             domain_event_to_event_wire(&DomainEvent::ShipSpawned(dawn_core::events::ShipSpawned {
                 ship_id: ship_id(1),
                 sector_id: dawn_core::SectorId(0),
-                initial_position: dawn_core::Position::new(1.0, 2.0, 3.0),
+                initial_position: dawn_core::AbsolutePosition::new(1.0, 2.0, 3.0),
                 ship_type_id: dawn_core::ShipTypeId(7),
                 tick: dawn_core::Tick(1),
             }))
@@ -462,7 +462,7 @@ mod tests {
             wire,
             EventWire::ShipSpawned {
                 ship_id: ship_id(1).raw(),
-                position: PosWire {
+                position: AbsPosWire {
                     x: 1.0,
                     y: 2.0,
                     z: 3.0,
@@ -757,7 +757,7 @@ mod tests {
                 gate_id: JumpGateId(4),
                 from_sector: dawn_core::SectorId(0),
                 to_sector: dawn_core::SectorId(1),
-                entry_pos: dawn_core::Position::new(5.0, 6.0, 7.0),
+                entry_pos: dawn_core::AbsolutePosition::new(5.0, 6.0, 7.0),
                 tick: dawn_core::Tick(12),
             },
         ))
@@ -769,7 +769,7 @@ mod tests {
                 gate_id: 4,
                 from_sector: 0,
                 to_sector: 1,
-                entry_pos: PosWire {
+                entry_pos: AbsPosWire {
                     x: 5.0,
                     y: 6.0,
                     z: 7.0,
@@ -837,7 +837,7 @@ mod tests {
                 ship_id: ship_id(1),
                 from: dawn_core::SectorId(0),
                 to: dawn_core::SectorId(1),
-                entry_pos: dawn_core::Position::ORIGIN,
+                entry_pos: dawn_core::AbsolutePosition::ORIGIN,
                 velocity: dawn_core::Velocity::ZERO,
                 tick,
             }),

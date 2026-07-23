@@ -49,6 +49,7 @@ impl<S: EventStore> SimulationNode<S> {
                 Some(ShipSnapshot {
                     ship_id,
                     ship_type_id,
+                    absolute_position: self.ship_absolute_pos(ship_id),
                     position: pos,
                     anchor,
                     velocity: vel,

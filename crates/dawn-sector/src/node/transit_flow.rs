@@ -29,7 +29,7 @@ use super::SimulationNode;
 pub struct TransitCommitData {
     pub ship: Box<ShipSnapshot>,
     pub entry_pos: Position,
-    pub entry_pos_abs: [f64; 3],
+    pub entry_pos_abs: dawn_core::AbsolutePosition,
 }
 
 impl<S: EventStore> SimulationNode<S> {
@@ -106,10 +106,10 @@ impl<S: EventStore> SimulationNode<S> {
         });
         let entry_pos = arrival_gate.map(|g| g.position).unwrap_or(Position::ORIGIN);
         let entry_pos_abs = arrival_gate
-            .map(|g| g.abs_m.as_array())
-            .unwrap_or([0.0, 0.0, 0.0]);
+            .map(|g| g.abs_m)
+            .unwrap_or(dawn_core::AbsolutePosition::ORIGIN);
 
-        let ship = self.export_transit(ship_id, entry_pos)?;
+        let ship = self.export_transit_with_abs(ship_id, entry_pos, Some(entry_pos_abs))?;
         Some(TransitCommitData {
             ship: Box::new(ship),
             entry_pos,
@@ -133,7 +133,7 @@ impl<S: EventStore> SimulationNode<S> {
         gate_id: JumpGateId,
         from: SectorId,
         to: SectorId,
-        entry_pos: Position,
+        entry_pos: dawn_core::AbsolutePosition,
     ) {
         self.event_store
             .append(DomainEvent::JumpGateUsed(JumpGateUsed {
@@ -165,10 +165,20 @@ impl<S: EventStore> SimulationNode<S> {
     /// perspective. Returns `None` if `ship_id` is unknown or not currently
     /// `InTransit`. Folded into [`prepare_transit_commit`](Self::prepare_transit_commit);
     /// not called directly outside this module.
+    #[cfg(test)]
     pub(super) fn export_transit(
         &mut self,
         ship_id: ShipId,
         entry_pos: Position,
+    ) -> Option<ShipSnapshot> {
+        self.export_transit_with_abs(ship_id, entry_pos, None)
+    }
+
+    fn export_transit_with_abs(
+        &mut self,
+        ship_id: ShipId,
+        entry_pos: Position,
+        entry_pos_abs: Option<dawn_core::AbsolutePosition>,
     ) -> Option<ShipSnapshot> {
         let &entity = self.ships.index.get(&ship_id)?;
         let to = match self.world.transit_state(entity) {
@@ -209,9 +219,11 @@ impl<S: EventStore> SimulationNode<S> {
 
         // Tackle state is not transferred on sector transit (tacklers are in
         // this sector; they lose the tackle as the ship leaves).
+        let event_entry_pos = entry_pos_abs.unwrap_or_else(|| entry_pos.into());
         let snapshot = ShipSnapshot {
             ship_id,
             ship_type_id,
+            absolute_position: None,
             position: pos,
             // Placeholder only: `AnchorId(0)` is a real, specific anchor
             // (Helios, Sector 0's star — see `anchor.rs`), not a "this
@@ -242,7 +254,7 @@ impl<S: EventStore> SimulationNode<S> {
                 ship_id,
                 from: self.sector_id,
                 to,
-                entry_pos,
+                entry_pos: event_entry_pos,
                 velocity: vel,
                 tick: self.current_tick,
             },
@@ -273,7 +285,7 @@ impl<S: EventStore> SimulationNode<S> {
         ship: &ShipSnapshot,
         from: SectorId,
         entry_pos: Position,
-        entry_pos_abs: [f64; 3],
+        entry_pos_abs: dawn_core::AbsolutePosition,
     ) {
         let mut ship = ship.clone();
         ship.position = entry_pos;
@@ -285,7 +297,7 @@ impl<S: EventStore> SimulationNode<S> {
                 ship_id: ship.ship_id,
                 from,
                 to: self.sector_id,
-                entry_pos,
+                entry_pos: entry_pos_abs,
                 velocity: ship.velocity,
                 tick: self.current_tick,
             },
@@ -306,14 +318,14 @@ impl<S: EventStore> SimulationNode<S> {
         ship: &ShipSnapshot,
         from: SectorId,
         entry_pos: Position,
-        entry_pos_abs: [f64; 3],
+        entry_pos_abs: dawn_core::AbsolutePosition,
         gate_id: Option<JumpGateId>,
     ) {
         let ship_id = ship.ship_id;
         self.import_transit(ship, from, entry_pos, entry_pos_abs);
         if let Some(gate_id) = gate_id {
             let to = self.sector_id();
-            self.append_jump_events(ship_id, gate_id, from, to, entry_pos);
+            self.append_jump_events(ship_id, gate_id, from, to, entry_pos_abs);
         }
     }
 
@@ -327,7 +339,11 @@ impl<S: EventStore> SimulationNode<S> {
     /// here is always a deliberate absolute point — a Gate's `abs_m`, or the
     /// Sector origin for a non-Gate Transit — so there's no fallback-compose
     /// branch to skip.
-    fn rebase_after_transit(&mut self, ship_id: ShipId, entry_pos_abs: [f64; 3]) {
+    fn rebase_after_transit(
+        &mut self,
+        ship_id: ShipId,
+        entry_pos_abs: dawn_core::AbsolutePosition,
+    ) {
         let Some(&entity) = self.ships.index.get(&ship_id) else {
             return;
         };
@@ -467,7 +483,7 @@ mod tests {
                 assert_eq!(e.ship_id, ship_id);
                 assert_eq!(e.from, node.sector_id());
                 assert_eq!(e.to, SectorId(1));
-                assert_eq!(e.entry_pos, entry_pos);
+                assert_eq!(e.entry_pos, entry_pos.into());
             }
             other => panic!("expected SectorTransitCompleted, got {other:?}"),
         }
@@ -542,12 +558,7 @@ mod tests {
         let entry_pos = Position::new(500.0, 0.0, 0.0);
         let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
 
-        to_node.import_transit(
-            &snapshot,
-            SectorId(0),
-            entry_pos,
-            [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
-        );
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
 
         assert_eq!(to_node.ship_count(), 1);
         assert_eq!(to_node.get_ship_position(ship_id), Some(entry_pos));
@@ -558,7 +569,7 @@ mod tests {
                 assert_eq!(e.ship_id, ship_id);
                 assert_eq!(e.from, SectorId(0));
                 assert_eq!(e.to, SectorId(1));
-                assert_eq!(e.entry_pos, entry_pos);
+                assert_eq!(e.entry_pos, entry_pos.into());
             }
             other => panic!("expected SectorTransitCompleted, got {other:?}"),
         }
@@ -606,7 +617,7 @@ mod tests {
         // arrive at the return gate's position so the player can jump
         // straight back (ADR-0009).
         let entry_pos = return_gate.position;
-        let entry_pos_abs = return_gate.abs_m.as_array();
+        let entry_pos_abs = return_gate.abs_m;
         let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
         to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos_abs);
 
@@ -652,8 +663,7 @@ mod tests {
             .prepare_transit_commit(ship_id, SectorId(1), Some(outbound_gate.id))
             .expect("transit must be accepted and the ship exported");
         assert_eq!(
-            data.entry_pos_abs,
-            return_gate.abs_m.as_array(),
+            data.entry_pos_abs, return_gate.abs_m,
             "the arrival point must be the return gate's precise abs_m, not Sector 0's"
         );
 
@@ -728,12 +738,7 @@ mod tests {
             .unwrap();
         let entry_pos = Position::new(500.0, 0.0, 0.0);
         let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
-        to_node.import_transit(
-            &snapshot,
-            SectorId(0),
-            entry_pos,
-            [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
-        );
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
 
         let after_entity = *to_node.ships.index.get(&ship_id).unwrap();
         let after = to_node
@@ -769,7 +774,12 @@ mod tests {
             })
             .unwrap();
         let snapshot = from_node.export_transit(ship_id, Position::ORIGIN).unwrap();
-        to_node.import_transit(&snapshot, SectorId(0), Position::ORIGIN, [0.0, 0.0, 0.0]);
+        to_node.import_transit(
+            &snapshot,
+            SectorId(0),
+            Position::ORIGIN,
+            dawn_core::AbsolutePosition::ORIGIN,
+        );
 
         // Before the handoff, the destination node rejects owned commands.
         assert!(!to_node.apply_stop_command_owned(player_id, ship_id));
@@ -820,12 +830,7 @@ mod tests {
         assert_eq!(from_node.ship_count(), 0);
         assert_eq!(to_node.ship_count(), 0);
 
-        to_node.import_transit(
-            &snapshot,
-            SectorId(0),
-            entry_pos,
-            [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
-        );
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
 
         // Final state: destination sector owns the ship, exactly once overall.
         assert_eq!(from_node.ship_count(), 0);
@@ -868,12 +873,7 @@ mod tests {
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 store,
             );
-            to_node.import_transit(
-                &snapshot,
-                SectorId(0),
-                entry_pos,
-                [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
-            );
+            to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
 
             let snap = to_node.take_snapshot();
             snap.save(&snap_path).unwrap();
@@ -926,12 +926,7 @@ mod tests {
                 })
                 .unwrap();
             let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
-            to_node.import_transit(
-                &snapshot,
-                SectorId(0),
-                entry_pos,
-                [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
-            );
+            to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
             total += start.elapsed();
 
             let _ = i;

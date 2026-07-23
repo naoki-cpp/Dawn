@@ -56,11 +56,11 @@ impl<S: EventStore> SimulationNode<S> {
                 target,
                 phase: WarpPhase::Aligning,
                 auto_jump,
-                warp_start_abs: [0.0, 0.0, 0.0], // set when warp engages (Aligning -> Warping)
+                warp_start_abs: dawn_core::AbsolutePosition::ORIGIN, // set when warp engages (Aligning -> Warping)
                 warp_total: 0,
                 warp_elapsed: 0,
-                warp_arrival_abs: [0.0, 0.0, 0.0], // set at engage
-                warp_start_vel: Velocity::ZERO,    // set at engage
+                warp_arrival_abs: dawn_core::AbsolutePosition::ORIGIN, // set at engage
+                warp_start_vel: Velocity::ZERO,                        // set at engage
             },
         );
         true
@@ -141,8 +141,7 @@ impl<S: EventStore> SimulationNode<S> {
                         g.position,
                         g.activation_radius * WARP_ARRIVAL_FACTOR,
                         warp.auto_jump.then_some(gate_id),
-                        self.anchor_table
-                            .nearest_anchor(g.from_sector, g.abs_m.into()),
+                        self.anchor_table.nearest_anchor(g.from_sector, g.abs_m),
                         g.abs_m,
                     )
                 }),
@@ -211,7 +210,7 @@ impl<S: EventStore> SimulationNode<S> {
                     // snapping to near-zero before re-accelerating.
                     if let Some(mut w) = self.world.get_mut::<WarpComp>(entity) {
                         w.warp_start_abs = start_abs;
-                        w.warp_arrival_abs = arrival_abs;
+                        w.warp_arrival_abs = arrival_abs.into();
                         w.warp_start_vel = vel;
                     }
                     self.warp_step(
@@ -219,7 +218,7 @@ impl<S: EventStore> SimulationNode<S> {
                         ship_id,
                         pos,
                         vel,
-                        start_abs,
+                        start_abs.as_array(),
                         arrival_abs,
                         vel,
                         total,
@@ -237,8 +236,8 @@ impl<S: EventStore> SimulationNode<S> {
                         ship_id,
                         pos,
                         vel,
-                        warp.warp_start_abs,
-                        warp.warp_arrival_abs,
+                        warp.warp_start_abs.as_array(),
+                        warp.warp_arrival_abs.as_array(),
                         warp.warp_start_vel,
                         warp.warp_total,
                         warp.warp_elapsed + 1,
@@ -303,7 +302,7 @@ impl<S: EventStore> SimulationNode<S> {
             .world
             .ship_anchor(entity)
             .and_then(|a| self.anchor_table.abs(a))
-            .unwrap_or([0.0, 0.0, 0.0]);
+            .unwrap_or(dawn_core::AbsolutePosition::ORIGIN);
         let (new_pos, new_vel, arrived) = if elapsed > total {
             // One tick past the final step: settle and stop. The move tick at
             // `elapsed == total` already landed exactly on arrival_abs (below,
@@ -372,7 +371,7 @@ impl<S: EventStore> SimulationNode<S> {
             self.completed_warps.push(ship_id);
         } else if let Some(mut w) = self.world.get_mut::<WarpComp>(entity) {
             // Persist the plan + progress for the next tick.
-            w.warp_start_abs = start_abs;
+            w.warp_start_abs = start_abs.into();
             w.warp_total = total;
             w.warp_elapsed = elapsed;
         }
@@ -427,7 +426,7 @@ impl<S: EventStore> SimulationNode<S> {
         // f32 PositionComp, which is ~tens of km off near a true-AU anchor
         // (ADR-0029). Fall back to the offset compose if arrival is unset.
         let world = if arrival_abs != [0.0, 0.0, 0.0] {
-            arrival_abs
+            dawn_core::AbsolutePosition::from(arrival_abs)
         } else {
             let offset = self.world.get::<PositionComp>(entity)?.0;
             self.anchor_table.absolute(cur_anchor, offset)?
@@ -480,7 +479,7 @@ impl<S: EventStore> SimulationNode<S> {
         // the same case before this method became the sole flight target, not
         // just the rebase point — ADR-0029 absolute-frame transit).
         if len <= a || len <= f64::EPSILON {
-            return start;
+            return start.into();
         }
         [
             target_abs[0] - d[0] / len * a,
@@ -503,7 +502,8 @@ impl<S: EventStore> SimulationNode<S> {
                 dest_world.x as f64,
                 dest_world.y as f64,
                 dest_world.z as f64,
-            ],
+            ]
+            .into(),
         )
     }
 
@@ -991,7 +991,7 @@ mod tests {
             .expect("demo gate 0 exists");
         let expected_anchor = node
             .anchor_table()
-            .nearest_anchor(gate.from_sector, gate.abs_m.into())
+            .nearest_anchor(gate.from_sector, gate.abs_m)
             .expect("gate sector has at least one anchor");
         assert_eq!(
             node.get_ship_anchor(ship_id),

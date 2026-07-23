@@ -141,8 +141,10 @@ impl<S: EventStore> SimulationNode<S> {
             Some(c) => c.0,
             None => return,
         };
-        let target = self
-            .dest_in_ship_frame_abs(entity, [target.x as f64, target.y as f64, target.z as f64]);
+        let target = self.dest_in_ship_frame_abs(
+            entity,
+            [target.x as f64, target.y as f64, target.z as f64].into(),
+        );
         self.steer_thrust_toward(entity, pos, target);
     }
 

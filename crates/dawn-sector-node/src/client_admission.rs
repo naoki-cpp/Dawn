@@ -214,7 +214,7 @@ mod tests {
         assert_eq!(node.ship_count(), 1);
         assert_eq!(
             node.ship_absolute_pos(identity.ship_id),
-            Some([30_000.0, 0.0, 0.0])
+            Some(dawn_core::AbsolutePosition::new(30_000.0, 0.0, 0.0))
         );
     }
 

@@ -4,7 +4,7 @@
 //! Sector-frame absolute position (or the inverse), so gameplay code never
 //! reads a raw offset for cross-anchor geometry.
 
-use dawn_core::{Position, ShipId};
+use dawn_core::{AbsolutePosition, Position, ShipId};
 use dawn_ecs::{components::PositionComp, Entity};
 use dawn_event_store::store::EventStore;
 
@@ -40,7 +40,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// its anchor with its current `PositionComp` offset (ADR-0029). The f64
     /// counterpart of [`Self::entity_abs_pos`] — the AoI grid input that stays
     /// precise at true-AU distances (R2).
-    pub(super) fn entity_abs_pos_f64(&self, entity: Entity) -> [f64; 3] {
+    pub(super) fn entity_abs_pos_f64(&self, entity: Entity) -> AbsolutePosition {
         let off = self
             .world
             .get::<PositionComp>(entity)
@@ -52,13 +52,13 @@ impl<S: EventStore> SimulationNode<S> {
     /// Absolute position (Sector-frame, metres, f64) of a ship entity given its
     /// raw offset, composing its anchor (ADR-0029). Used by warp arrival math
     /// that must stay precise at true-AU distances.
-    pub(super) fn entity_absolute_f64(&self, entity: Entity, offset: Position) -> [f64; 3] {
+    pub(super) fn entity_absolute_f64(&self, entity: Entity, offset: Position) -> AbsolutePosition {
         let Some(anchor) = self.world.ship_anchor(entity) else {
-            return [offset.x as f64, offset.y as f64, offset.z as f64];
+            return offset.into();
         };
         let Some(abs) = self.anchor_table.absolute(anchor, offset) else {
             debug_assert_missing_anchor(anchor, "entity_absolute_f64");
-            return [offset.x as f64, offset.y as f64, offset.z as f64];
+            return offset.into();
         };
         abs
     }
@@ -70,7 +70,11 @@ impl<S: EventStore> SimulationNode<S> {
     /// `approach.rs`, `commands.rs`, `orbit.rs` (arrival is a tight radius
     /// check, needs full precision) and from `warp.rs::dest_in_ship_frame`
     /// (which only has an already-f32 source, so is only as precise as that).
-    pub(super) fn dest_in_ship_frame_abs(&self, entity: Entity, dest_abs: [f64; 3]) -> Position {
+    pub(super) fn dest_in_ship_frame_abs(
+        &self,
+        entity: Entity,
+        dest_abs: AbsolutePosition,
+    ) -> Position {
         let Some(anchor) = self.world.ship_anchor(entity) else {
             return Position::new(dest_abs[0] as f32, dest_abs[1] as f32, dest_abs[2] as f32);
         };

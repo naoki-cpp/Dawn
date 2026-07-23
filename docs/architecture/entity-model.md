@@ -66,9 +66,10 @@ today : fixed count, fixed assignment
 | `z` | `f32` | north-south |
 
 **Current representation:** ship ECS state remains `f32`, relative to `AnchorComp` (ADR-0029).
-Static navigation definitions now use `dawn_core::AbsolutePosition` for their authoritative
-sector-frame f64 coordinates. This is the first ADR-0044 migration slice; ship state,
-movement integration, and wire payloads remain on their existing paths until later slices.
+Static navigation definitions, authoritative spawn/transit events, snapshots, and server
+wire payloads use `dawn_core::AbsolutePosition` for sector-frame f64 coordinates. Ship ECS
+state remains `PositionComp` (an anchor-relative f32 offset) plus `AnchorComp`; absolute
+consumers must go through `AnchorTable`/`SimulationNode::ship_absolute`.
 
 ### Velocity
 
@@ -177,12 +178,13 @@ base_stats  : ShipBaseStats            velocity      : Velocity
 - Definitions are immutable; balance changes mean editing TOML + restarting the server (no rebuild)
 - `ShipTypeId` is defined in `dawn-core` and included in the `ShipSpawned` event
 
-### Coordinate policy (under review)
+### Coordinate policy (ADR-0044, accepted)
 
 Do not introduce new code that treats `Position` as both an absolute Sector coordinate and an
-anchor-relative offset. The current anchor-relative implementation remains governed by ADR-0029.
-The proposed target is recorded in [ADR-0044](../adr/ADR-0044-absolute-f64-coordinate-authority.md);
-no partial `f32` -> `f64` type change is permitted before that ADR is accepted.
+anchor-relative offset. `PositionComp` remains the local f32 representation governed by
+ADR-0029. New authoritative coordinates use `AbsolutePosition`; conversion is performed only
+at the anchor boundary. Client-authored command targets continue to use the separate f32
+`PosWire` type.
 
 ---
 
@@ -223,10 +225,11 @@ The unit by which Ships are spatially partitioned.
 
 ```
 allowed  : adding a field (as Option<T> only, must not break existing code)
-forbidden: removing a field
-forbidden: changing a field's type (e.g. f32 -> f64)
+allowed  : changing an authoritative coordinate field to `AbsolutePosition` under ADR-0044
+forbidden: removing a field without an explicit migration plan
 forbidden: renaming a field (changes the serialization key)
 forbidden: unwrapping a newtype
 ```
 
-Any necessary type change requires raising an ADR and getting human approval.
+Any coordinate type change still requires an ADR or an update to ADR-0044 and synchronized
+event, snapshot, wire-schema, and documentation changes.

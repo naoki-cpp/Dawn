@@ -13,10 +13,10 @@ impl<S: EventStore> SimulationNode<S> {
         match event {
             DomainEvent::ShipSpawned(e) => {
                 if !self.ships.index.contains_key(&e.ship_id) {
-                    self.insert_to_world(e.ship_id, e.initial_position, Velocity::ZERO);
+                    self.insert_to_world(e.ship_id, dawn_core::Position::ORIGIN, Velocity::ZERO);
                     // ADR-0029 review #1: anchor on the nearest body (deterministic
                     // — same initial_position reproduces the same anchor on replay).
-                    self.set_spawn_anchor(e.ship_id, e.initial_position);
+                    self.set_spawn_anchor_abs(e.ship_id, e.initial_position);
                     // Restore base_stats from ship type registry
                     let base = self
                         .ship_type_registry
@@ -586,7 +586,7 @@ mod tests {
         node.apply_event_pub(DomainEvent::ShipSpawned(dawn_core::events::ShipSpawned {
             ship_id,
             sector_id: SectorId(0),
-            initial_position: Position::new(10.0, 0.0, 0.0),
+            initial_position: dawn_core::AbsolutePosition::new(10.0, 0.0, 0.0),
             ship_type_id: crate::ship_types::SHIP_TYPE_MAGPIE,
             tick: Tick(1),
         }));
@@ -634,7 +634,7 @@ mod tests {
         node.apply_event_pub(DomainEvent::ShipSpawned(dawn_core::events::ShipSpawned {
             ship_id,
             sector_id: SectorId(0),
-            initial_position: Position::ORIGIN,
+            initial_position: dawn_core::AbsolutePosition::ORIGIN,
             ship_type_id: dawn_core::ShipTypeId(1),
             tick: Tick(2),
         }));

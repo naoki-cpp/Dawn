@@ -77,7 +77,7 @@ impl<S: EventStore> SimulationNode<S> {
             .append(DomainEvent::ShipSpawned(ShipSpawned {
                 ship_id,
                 sector_id: self.sector_id,
-                initial_position: position,
+                initial_position: position.into(),
                 ship_type_id,
                 tick: self.current_tick,
             }));
@@ -195,7 +195,7 @@ impl<S: EventStore> SimulationNode<S> {
             .append(DomainEvent::ShipSpawned(ShipSpawned {
                 ship_id,
                 sector_id: self.sector_id,
-                initial_position: pos,
+                initial_position: pos.into(),
                 ship_type_id: SHIP_TYPE_MAGPIE,
                 tick: self.current_tick,
             }));
@@ -295,7 +295,7 @@ impl<S: EventStore> SimulationNode<S> {
         let world = [abs_pos.x as f64, abs_pos.y as f64, abs_pos.z as f64];
         let anchor = self
             .anchor_table
-            .nearest_anchor(self.sector_id, world)
+            .nearest_anchor(self.sector_id, world.into())
             .unwrap_or(dawn_core::AnchorId(0));
         let offset = match self.anchor_table.abs(anchor) {
             Some(a) => Position::new(
@@ -314,7 +314,7 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    /// Test-only: re-anchor a ship from an absolute f64 point directly,
+    /// Re-anchor a ship from an absolute f64 point directly,
     /// bypassing the f32 `Position` round trip `set_spawn_anchor` takes.
     ///
     /// Real callers always go through `PositionComp` (f32) — that's the whole
@@ -326,7 +326,6 @@ impl<S: EventStore> SimulationNode<S> {
     /// vanish entirely to catastrophic cancellation. This sidesteps that by
     /// doing the anchor/offset split directly in f64, the same way production
     /// code's f64 paths (warp arrival, AnchorTable) already do.
-    #[cfg(test)]
     pub(crate) fn set_spawn_anchor_abs<P: Into<[f64; 3]>>(&mut self, ship_id: ShipId, world: P) {
         let Some(&entity) = self.ships.index.get(&ship_id) else {
             return;
@@ -340,7 +339,7 @@ impl<S: EventStore> SimulationNode<S> {
         let world = world.into();
         let anchor = self
             .anchor_table
-            .nearest_anchor(self.sector_id, world)
+            .nearest_anchor(self.sector_id, world.into())
             .unwrap_or(dawn_core::AnchorId(0));
         let offset = match self.anchor_table.abs(anchor) {
             Some(a) => Position::new(
@@ -367,7 +366,25 @@ impl<S: EventStore> SimulationNode<S> {
         // the Sector-origin anchor, but a rebased ship's `position` offset is
         // relative to its saved anchor, so restore that to keep absolute position.
         if let Some(&entity) = self.ships.index.get(&ship.ship_id) {
-            self.world.set_ship_anchor(entity, ship.anchor);
+            if let Some(absolute_position) = ship.absolute_position {
+                // New snapshots preserve the f64 authority. Keep the saved
+                // anchor when it is still known so restore does not silently
+                // change the representation of an anchored ship.
+                if let Some(offset) = self
+                    .anchor_table
+                    .to_relative(ship.anchor, absolute_position)
+                {
+                    self.world.set_ship_anchor(entity, ship.anchor);
+                    if let Some(mut position) = self.world.get_mut::<PositionComp>(entity) {
+                        position.0 = offset;
+                    }
+                } else {
+                    self.place_entity_at_absolute(entity, absolute_position);
+                }
+            } else {
+                // Pre-ADR-0044 snapshots only contain the local offset.
+                self.world.set_ship_anchor(entity, ship.anchor);
+            }
         }
 
         let base = self

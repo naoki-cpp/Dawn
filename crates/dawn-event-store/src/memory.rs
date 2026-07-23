@@ -56,7 +56,7 @@ mod tests {
     use super::*;
     use dawn_core::{
         events::{ShipSpawned, VelocityChanged},
-        NodeId, Position, SectorId, ShipId, Tick, Velocity,
+        NodeId, SectorId, ShipId, Tick, Velocity,
     };
 
     fn ship_id(n: u64) -> ShipId {
@@ -75,7 +75,7 @@ mod tests {
         DomainEvent::ShipSpawned(ShipSpawned {
             ship_id: ship_id(ship_n),
             sector_id: SectorId(0),
-            initial_position: Position::ORIGIN,
+            initial_position: dawn_core::AbsolutePosition::ORIGIN,
             ship_type_id: dawn_core::ShipTypeId(1),
             tick: Tick::ZERO,
         })

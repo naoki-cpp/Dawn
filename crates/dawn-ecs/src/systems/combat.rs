@@ -27,7 +27,7 @@ use crate::{
 };
 use dawn_core::{
     events::{DamageTaken, ShipDestroyed, WeaponFired},
-    AnchorId, DomainEvent, Position, ShipId, Tick, Velocity,
+    AbsolutePosition, AnchorId, DomainEvent, Position, ShipId, Tick, Velocity,
 };
 use rand::Rng;
 use std::collections::HashMap;
@@ -42,7 +42,7 @@ struct ShipSnapshot {
     /// difference between nearby ships stays precise even when anchors sit at
     /// true astronomical distances (ADR-0029). Differences are cast to f32 for
     /// the hit-chance math (the delta is small for ships in weapon range).
-    abs: [f64; 3],
+    abs: AbsolutePosition,
     velocity: Velocity,
     current_shield: f32,
     current_armor: f32,
@@ -66,14 +66,14 @@ pub struct CombatResult {
 fn absolute_position(
     offset: Position,
     anchor: AnchorId,
-    anchor_abs: &HashMap<AnchorId, [f64; 3]>,
-) -> [f64; 3] {
+    anchor_abs: &HashMap<AnchorId, AbsolutePosition>,
+) -> AbsolutePosition {
     match anchor_abs.get(&anchor) {
-        Some(a) => [
+        Some(a) => AbsolutePosition::new(
             a[0] + offset.x as f64,
             a[1] + offset.y as f64,
             a[2] + offset.z as f64,
-        ],
+        ),
         None => {
             // ADR-0029 R3: an anchor missing from a *populated* table is a data
             // bug — at true AU it silently misplaces the ship by the body's
@@ -84,7 +84,7 @@ fn absolute_position(
                 "combat: ship anchored on {anchor:?} absent from a populated anchor table \
                  — distance fell back to the raw offset (wrong frame at true AU)"
             );
-            [offset.x as f64, offset.y as f64, offset.z as f64]
+            AbsolutePosition::new(offset.x as f64, offset.y as f64, offset.z as f64)
         }
     }
 }
@@ -98,7 +98,7 @@ pub fn run(
     world: &mut SimWorld,
     tick: Tick,
     fire_triggers: &[ShipId],
-    anchor_abs: &HashMap<AnchorId, [f64; 3]>,
+    anchor_abs: &HashMap<AnchorId, AbsolutePosition>,
 ) -> CombatResult {
     // ── 1. 全 Ship をスナップショット ────────────────────────────────────────
     //
@@ -445,7 +445,7 @@ mod tests {
             entity: hecs::Entity::DANGLING,
             ship_id: id,
             stats,
-            abs: [pos.x as f64, pos.y as f64, pos.z as f64],
+            abs: AbsolutePosition::new(pos.x as f64, pos.y as f64, pos.z as f64),
             velocity: vel,
             current_shield: 100.0,
             current_armor: 100.0,

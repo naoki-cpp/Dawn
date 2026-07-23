@@ -4,7 +4,7 @@
 //! expects live here, keeping the core simulation logic in `mod.rs` separate
 //! from the presentation layer.
 
-use dawn_core::ShipId;
+use dawn_core::{AbsolutePosition, ShipId};
 use dawn_ecs::components::{HullComp, ShipStatsComp, VelocityComp};
 use dawn_event_store::store::EventStore;
 use dawn_wire::{
@@ -29,7 +29,7 @@ pub struct HandoffPayload {
 /// `dawn-sector` rather than reusing `dawn-actor`'s `PosWire` -- `dawn-actor`
 /// sits one layer up in the crate DAG (CONTEXT.md Runtime Boundaries) and
 /// `dawn-sector` must not depend on it.
-fn abs_pos_json(p: [f64; 3]) -> AbsPosWire {
+fn abs_pos_json(p: AbsolutePosition) -> AbsPosWire {
     AbsPosWire {
         x: p[0],
         y: p[1],
@@ -61,7 +61,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// 27-cell neighborhood of `observer_pos` (ADR-0019).
     pub fn build_initial_state_json_for(
         &self,
-        observer_abs: [f64; 3],
+        observer_abs: dawn_core::AbsolutePosition,
         cell_size: f32,
     ) -> InitialStateWire {
         self.initial_state_json(self.ships_visible_to(observer_abs, cell_size).into_iter())
@@ -81,7 +81,7 @@ impl<S: EventStore> SimulationNode<S> {
                 id: b.id.0,
                 kind: b.kind,
                 name: b.name.clone(),
-                position: abs_pos_json(b.abs_m.into()),
+                position: abs_pos_json(b.abs_m),
                 radius: b.radius,
                 spectral_type: b.spectral_type,
             })
@@ -114,7 +114,7 @@ impl<S: EventStore> SimulationNode<S> {
             .values()
             .map(|g| JumpGateWire {
                 gate_id: g.id.0,
-                position: abs_pos_json(g.abs_m.into()),
+                position: abs_pos_json(g.abs_m),
                 activation_radius: g.activation_radius,
                 to_system_name: system_name_of(g.to_sector),
             })
@@ -127,7 +127,7 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|station| StationWire {
                 station_id: station.id.0,
                 name: station.name.clone(),
-                position: abs_pos_json(station.abs_m.into()),
+                position: abs_pos_json(station.abs_m),
                 docking_radius: station.docking_radius,
             })
             .collect();
@@ -206,7 +206,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// same Sector-frame grid *and* the binning stays precise at true-AU
     /// distances (an f32 absolute would have a ~16 km ulp). `CellGrid` sorts each
     /// bucket, so query results are deterministic.
-    pub fn ship_absolute_positions(&self) -> Vec<(ShipId, [f64; 3])> {
+    pub fn ship_absolute_positions(&self) -> Vec<(ShipId, dawn_core::AbsolutePosition)> {
         self.ships
             .index
             .iter()
@@ -216,7 +216,7 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Absolute (Sector-frame, f64) position of a ship by id, or `None` if
     /// unknown. The observer position to pass to AoI queries (ADR-0029 R2).
-    pub fn ship_absolute_pos(&self, ship_id: ShipId) -> Option<[f64; 3]> {
+    pub fn ship_absolute_pos(&self, ship_id: ShipId) -> Option<dawn_core::AbsolutePosition> {
         self.ship_absolute(ship_id)
     }
 
@@ -224,7 +224,11 @@ impl<S: EventStore> SimulationNode<S> {
     /// f64 position): those in the 27-cell neighborhood of its cell (ADR-0019).
     /// Returned in `ShipId` order. The grid is built from absolute f64 positions
     /// so it is correct across anchors and precise at true AU (ADR-0029 R2).
-    pub fn ships_visible_to(&self, observer_abs: [f64; 3], cell_size: f32) -> Vec<ShipId> {
+    pub fn ships_visible_to(
+        &self,
+        observer_abs: dawn_core::AbsolutePosition,
+        cell_size: f32,
+    ) -> Vec<ShipId> {
         crate::aoi::CellGrid::build(cell_size, self.ship_absolute_positions())
             .neighbors_of(observer_abs)
     }
@@ -263,7 +267,7 @@ mod tests {
             Velocity::ZERO,
         );
 
-        let visible = node.ships_visible_to([0.0, 0.0, 0.0], cell);
+        let visible = node.ships_visible_to([0.0, 0.0, 0.0].into(), cell);
         assert!(
             visible.contains(&observer),
             "observer's own cell is visible"
@@ -311,7 +315,7 @@ mod tests {
         }));
         // Sanity: raw offsets differ wildly, but absolute positions coincide.
         assert_eq!(node.get_ship_anchor(b), Some(AnchorId(1)));
-        let visible = node.ships_visible_to([0.0, 0.0, 0.0], cell);
+        let visible = node.ships_visible_to([0.0, 0.0, 0.0].into(), cell);
         assert!(
             visible.contains(&a) && visible.contains(&b),
             "both ships share the origin cell in absolute coords despite different anchors"
@@ -333,7 +337,7 @@ mod tests {
             Velocity::ZERO,
         );
 
-        let json = node.build_initial_state_json_for([0.0, 0.0, 0.0], cell);
+        let json = node.build_initial_state_json_for([0.0, 0.0, 0.0].into(), cell);
         let ids: Vec<u64> = json.ships.iter().map(|s| s.ship_id).collect();
         assert!(
             ids.contains(&observer.raw()),
