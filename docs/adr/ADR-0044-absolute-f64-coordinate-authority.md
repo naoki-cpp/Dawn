@@ -75,12 +75,12 @@ f64へ変更したり、アンカー方式と絶対方式を新機能ごとに�
 - [x] 人間が本ADRを承認し、`status`を`accepted`へ変更する
 - [x] `dawn-core::AbsolutePosition` を定義し、静的な天体・ゲート・ステーション定義の絶対座標に適用する
 - [ ] サーバーの位置・距離・AoI・ナビゲーション判定を絶対f64経路へ移行する（AnchorTable / combat / AoI CellGrid / TransitOp / ship_absolute は移行済み。PositionComp と内部計算用配列が残る）
-- [ ] `PositionComp`と`AnchorComp`の移行方針を決定し、互換読み取りを隔離する
+- [x] `PositionComp`と`AnchorComp`の移行方針を決定し、互換読み取りを隔離する（PositionCompはアンカー相対f32オフセットとして維持し、AbsolutePositionへの変換はAnchorTable / ship_absoluteに限定。旧snapshotのみOptionで互換読み取り）
 - [ ] 位置を含むDomainEvent、snapshot、wire schemaを同じ移行で更新する（snapshot と ShipSpawned / SectorTransitCompleted / JumpGateUsed の移行済み。残るイベント境界を整理する）
 - [x] f64 wire位置をクライアントで`Vector3`へ変換する前に差分計算するテストを追加する
 - [x] AU桁のゲート・ステーションで表示位置と近接判定が一致するテストを追加する
-- [ ] 旧アンカー経路を削除する前にreplay・transit・warpの互換性を検証する
-- [ ] `docs/architecture/entity-model.md`と`docs/architecture/wire-protocol.md`を実装に同期する
+- [x] 旧アンカー経路を削除する前にreplay・transit・warpの互換性を検証する（既存のreplay・transit・warp回帰テストで確認）
+- [x] `docs/architecture/entity-model.md`と`docs/architecture/wire-protocol.md`を実装に同期する
 
 ## 影響と保留事項
 
