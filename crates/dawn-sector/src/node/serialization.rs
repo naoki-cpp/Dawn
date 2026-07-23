@@ -4,7 +4,7 @@
 //! expects live here, keeping the core simulation logic in `mod.rs` separate
 //! from the presentation layer.
 
-use dawn_core::ShipId;
+use dawn_core::{AbsolutePosition, ShipId};
 use dawn_ecs::components::{HullComp, ShipStatsComp, VelocityComp};
 use dawn_event_store::store::EventStore;
 use dawn_wire::{
@@ -29,7 +29,7 @@ pub struct HandoffPayload {
 /// `dawn-sector` rather than reusing `dawn-actor`'s `PosWire` -- `dawn-actor`
 /// sits one layer up in the crate DAG (CONTEXT.md Runtime Boundaries) and
 /// `dawn-sector` must not depend on it.
-fn abs_pos_json(p: [f64; 3]) -> AbsPosWire {
+fn abs_pos_json(p: AbsolutePosition) -> AbsPosWire {
     AbsPosWire {
         x: p[0],
         y: p[1],
@@ -81,7 +81,7 @@ impl<S: EventStore> SimulationNode<S> {
                 id: b.id.0,
                 kind: b.kind,
                 name: b.name.clone(),
-                position: abs_pos_json(b.abs_m.into()),
+                position: abs_pos_json(b.abs_m),
                 radius: b.radius,
                 spectral_type: b.spectral_type,
             })
@@ -114,7 +114,7 @@ impl<S: EventStore> SimulationNode<S> {
             .values()
             .map(|g| JumpGateWire {
                 gate_id: g.id.0,
-                position: abs_pos_json(g.abs_m.into()),
+                position: abs_pos_json(g.abs_m),
                 activation_radius: g.activation_radius,
                 to_system_name: system_name_of(g.to_sector),
             })
@@ -127,7 +127,7 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|station| StationWire {
                 station_id: station.id.0,
                 name: station.name.clone(),
-                position: abs_pos_json(station.abs_m.into()),
+                position: abs_pos_json(station.abs_m),
                 docking_radius: station.docking_radius,
             })
             .collect();
@@ -222,7 +222,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Absolute (Sector-frame, f64) position of a ship by id, or `None` if
     /// unknown. The observer position to pass to AoI queries (ADR-0029 R2).
     pub fn ship_absolute_pos(&self, ship_id: ShipId) -> Option<dawn_core::AbsolutePosition> {
-        self.ship_absolute(ship_id).map(Into::into)
+        self.ship_absolute(ship_id)
     }
 
     /// ShipIds visible to an observer at `observer_abs` (an ABSOLUTE Sector-frame

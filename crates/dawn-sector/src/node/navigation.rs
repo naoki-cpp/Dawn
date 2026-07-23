@@ -41,7 +41,7 @@ impl<S: EventStore> SimulationNode<S> {
             .get::<PositionComp>(entity)
             .map(|p| p.0)
             .unwrap_or(Position::ORIGIN);
-        gate.is_in_range_abs(self.entity_absolute_f64(entity, offset))
+        gate.is_in_range_abs(self.entity_absolute_f64(entity, offset).into())
     }
 
     /// Whether a `WarpCommand` for `ship_id` toward `target` would currently be
@@ -73,7 +73,7 @@ impl<S: EventStore> SimulationNode<S> {
             .get::<PositionComp>(entity)
             .map(|p| p.0)
             .unwrap_or(Position::ORIGIN);
-        let ship_abs = self.entity_absolute_f64(entity, offset);
+        let ship_abs = self.entity_absolute_f64(entity, offset).into();
         let min = super::MIN_WARP_DISTANCE as f64;
         match target {
             WarpTarget::Gate(gate_id) => {
