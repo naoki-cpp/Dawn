@@ -558,12 +558,7 @@ mod tests {
         let entry_pos = Position::new(500.0, 0.0, 0.0);
         let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
 
-        to_node.import_transit(
-            &snapshot,
-            SectorId(0),
-            entry_pos,
-            [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
-        );
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
 
         assert_eq!(to_node.ship_count(), 1);
         assert_eq!(to_node.get_ship_position(ship_id), Some(entry_pos));
@@ -622,7 +617,7 @@ mod tests {
         // arrive at the return gate's position so the player can jump
         // straight back (ADR-0009).
         let entry_pos = return_gate.position;
-        let entry_pos_abs = return_gate.abs_m.as_array();
+        let entry_pos_abs = return_gate.abs_m;
         let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
         to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos_abs);
 
@@ -668,8 +663,7 @@ mod tests {
             .prepare_transit_commit(ship_id, SectorId(1), Some(outbound_gate.id))
             .expect("transit must be accepted and the ship exported");
         assert_eq!(
-            data.entry_pos_abs,
-            return_gate.abs_m.as_array(),
+            data.entry_pos_abs, return_gate.abs_m,
             "the arrival point must be the return gate's precise abs_m, not Sector 0's"
         );
 
@@ -744,12 +738,7 @@ mod tests {
             .unwrap();
         let entry_pos = Position::new(500.0, 0.0, 0.0);
         let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
-        to_node.import_transit(
-            &snapshot,
-            SectorId(0),
-            entry_pos,
-            [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
-        );
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
 
         let after_entity = *to_node.ships.index.get(&ship_id).unwrap();
         let after = to_node
@@ -785,7 +774,12 @@ mod tests {
             })
             .unwrap();
         let snapshot = from_node.export_transit(ship_id, Position::ORIGIN).unwrap();
-        to_node.import_transit(&snapshot, SectorId(0), Position::ORIGIN, [0.0, 0.0, 0.0]);
+        to_node.import_transit(
+            &snapshot,
+            SectorId(0),
+            Position::ORIGIN,
+            dawn_core::AbsolutePosition::ORIGIN,
+        );
 
         // Before the handoff, the destination node rejects owned commands.
         assert!(!to_node.apply_stop_command_owned(player_id, ship_id));
@@ -836,12 +830,7 @@ mod tests {
         assert_eq!(from_node.ship_count(), 0);
         assert_eq!(to_node.ship_count(), 0);
 
-        to_node.import_transit(
-            &snapshot,
-            SectorId(0),
-            entry_pos,
-            [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
-        );
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
 
         // Final state: destination sector owns the ship, exactly once overall.
         assert_eq!(from_node.ship_count(), 0);
@@ -884,12 +873,7 @@ mod tests {
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 store,
             );
-            to_node.import_transit(
-                &snapshot,
-                SectorId(0),
-                entry_pos,
-                [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
-            );
+            to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
 
             let snap = to_node.take_snapshot();
             snap.save(&snap_path).unwrap();
@@ -942,12 +926,7 @@ mod tests {
                 })
                 .unwrap();
             let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
-            to_node.import_transit(
-                &snapshot,
-                SectorId(0),
-                entry_pos,
-                [entry_pos.x as f64, entry_pos.y as f64, entry_pos.z as f64],
-            );
+            to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
             total += start.elapsed();
 
             let _ = i;

@@ -56,11 +56,11 @@ impl<S: EventStore> SimulationNode<S> {
                 target,
                 phase: WarpPhase::Aligning,
                 auto_jump,
-                warp_start_abs: [0.0, 0.0, 0.0], // set when warp engages (Aligning -> Warping)
+                warp_start_abs: dawn_core::AbsolutePosition::ORIGIN, // set when warp engages (Aligning -> Warping)
                 warp_total: 0,
                 warp_elapsed: 0,
-                warp_arrival_abs: [0.0, 0.0, 0.0], // set at engage
-                warp_start_vel: Velocity::ZERO,    // set at engage
+                warp_arrival_abs: dawn_core::AbsolutePosition::ORIGIN, // set at engage
+                warp_start_vel: Velocity::ZERO,                        // set at engage
             },
         );
         true
@@ -210,8 +210,8 @@ impl<S: EventStore> SimulationNode<S> {
                     // flows continuously into the warp-speed ramp, instead of
                     // snapping to near-zero before re-accelerating.
                     if let Some(mut w) = self.world.get_mut::<WarpComp>(entity) {
-                        w.warp_start_abs = start_abs;
-                        w.warp_arrival_abs = arrival_abs;
+                        w.warp_start_abs = start_abs.into();
+                        w.warp_arrival_abs = arrival_abs.into();
                         w.warp_start_vel = vel;
                     }
                     self.warp_step(
@@ -237,8 +237,8 @@ impl<S: EventStore> SimulationNode<S> {
                         ship_id,
                         pos,
                         vel,
-                        warp.warp_start_abs,
-                        warp.warp_arrival_abs,
+                        warp.warp_start_abs.as_array(),
+                        warp.warp_arrival_abs.as_array(),
                         warp.warp_start_vel,
                         warp.warp_total,
                         warp.warp_elapsed + 1,
@@ -372,7 +372,7 @@ impl<S: EventStore> SimulationNode<S> {
             self.completed_warps.push(ship_id);
         } else if let Some(mut w) = self.world.get_mut::<WarpComp>(entity) {
             // Persist the plan + progress for the next tick.
-            w.warp_start_abs = start_abs;
+            w.warp_start_abs = start_abs.into();
             w.warp_total = total;
             w.warp_elapsed = elapsed;
         }

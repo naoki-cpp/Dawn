@@ -1,6 +1,8 @@
 //! Movement-related ECS components.
 
-use dawn_core::{AnchorId, ApproachTarget, JumpGateId, Position, Velocity, WarpTarget};
+use dawn_core::{
+    AbsolutePosition, AnchorId, ApproachTarget, JumpGateId, Position, Velocity, WarpTarget,
+};
 
 /// Persistent "approach" steering target (semi-automatic piloting, ADR-0015).
 ///
@@ -87,14 +89,14 @@ pub struct WarpComp {
     /// true-AU distance from it — only the per-tick f32 cast (offset relative
     /// to the ship's current anchor, written to `PositionComp`) is lossy, and
     /// that loss does not compound across ticks the way repeated f32 lerp did.
-    pub warp_start_abs: [f64; 3],
+    pub warp_start_abs: AbsolutePosition,
     pub warp_total: u32,
     pub warp_elapsed: u32,
     /// Exact arrival point in absolute (Sector-frame) metres, f64 (ADR-0029).
     /// Set at engage for Body warps from the f64 anchor source so the arrival
     /// rebase is precise at true-AU distances (the f32 `PositionComp` near a
     /// 7.5e11 anchor would be ~65 km coarse). `[0,0,0]` for Gate warps (no rebase).
-    pub warp_arrival_abs: [f64; 3],
+    pub warp_arrival_abs: AbsolutePosition,
     /// Ship's actual velocity at the moment warp engaged (end of `Aligning`,
     /// 2026-06-23 lore pass). The transit curve is a cubic Hermite spline with
     /// this as its start tangent and a zero end tangent, so the ship's speed

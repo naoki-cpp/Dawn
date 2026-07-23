@@ -74,7 +74,7 @@ f64へ変更したり、アンカー方式と絶対方式を新機能ごとに�
 
 - [x] 人間が本ADRを承認し、`status`を`accepted`へ変更する
 - [x] `dawn-core::AbsolutePosition` を定義し、静的な天体・ゲート・ステーション定義の絶対座標に適用する
-- [ ] サーバーの位置・距離・AoI・ナビゲーション判定を絶対f64経路へ移行する（AnchorTable / combat / AoI CellGrid / TransitOp / ship_absolute は移行済み。PositionComp と内部計算用配列が残る）
+- [ ] サーバーの位置・距離・AoI・ナビゲーション判定を絶対f64経路へ移行する（AnchorTable / combat / AoI CellGrid / TransitOp / ship_absolute / WarpComp は移行済み。PositionComp と内部計算用配列が残る）
 - [x] `PositionComp`と`AnchorComp`の移行方針を決定し、互換読み取りを隔離する（PositionCompはアンカー相対f32オフセットとして維持し、AbsolutePositionへの変換はAnchorTable / ship_absoluteに限定。旧snapshotのみOptionで互換読み取り）
 - [ ] 位置を含むDomainEvent、snapshot、wire schemaを同じ移行で更新する（snapshot と ShipSpawned / SectorTransitCompleted / JumpGateUsed の移行済み。残るイベント境界を整理する）
 - [x] f64 wire位置をクライアントで`Vector3`へ変換する前に差分計算するテストを追加する
