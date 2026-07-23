@@ -4,7 +4,7 @@
 //! These types describe the *static* navigation topology. They are not ECS
 //! entities and are not persisted as events.
 
-use crate::position::Position;
+use crate::position::{AbsolutePosition, Position};
 use crate::sector::SectorId;
 use serde::{Deserialize, Serialize};
 
@@ -33,7 +33,7 @@ pub struct CelestialBodyDef {
     /// (ADR-0029). Equals `position` numerically at compressed scale, but stays
     /// precise at true-AU distances where the f32 `position` would lose ~tens of
     /// km. `AnchorTable` is built from this, not from `position`.
-    pub abs_m: [f64; 3],
+    pub abs_m: AbsolutePosition,
     /// Logical radius (units). Warp arrival stops at `radius * 1.5` from centre.
     pub radius: f32,
     /// Blackbody spectral type [0=O/blue, 0.6=G/Sun-yellow, 1=M/red]. Planets: 0.0.
@@ -98,7 +98,7 @@ pub struct JumpGateDef {
     /// compressed scale, but stays precise at true-AU distances where the f32
     /// `position` is ~tens of km coarse (one f32 ulp at ~10^11 m). Gates are
     /// Sector-frame fixtures, so this *is* their absolute position.
-    pub abs_m: [f64; 3],
+    pub abs_m: AbsolutePosition,
     pub to_sector: SectorId,
     /// A Ship within this distance of `position` may use the gate.
     pub activation_radius: f32,
@@ -146,7 +146,7 @@ pub struct StationDef {
     pub name: String,
     pub position: Position,
     /// Absolute station position in metres as f64, matching gate/body authoring.
-    pub abs_m: [f64; 3],
+    pub abs_m: AbsolutePosition,
     /// A ship within this radius may use the station.
     pub docking_radius: f32,
 }
@@ -184,7 +184,7 @@ mod tests {
             id: JumpGateId(0),
             from_sector: SectorId(0),
             position: Position::new(100.0, 0.0, 0.0),
-            abs_m: [100.0, 0.0, 0.0],
+            abs_m: [100.0, 0.0, 0.0].into(),
             to_sector: SectorId(1),
             activation_radius: 50.0,
         }
@@ -200,7 +200,7 @@ mod tests {
             id: JumpGateId(0),
             from_sector: SectorId(0),
             position: Position::new(AU_M as f32, 0.0, 0.0),
-            abs_m: [AU_M, 0.0, 0.0],
+            abs_m: [AU_M, 0.0, 0.0].into(),
             to_sector: SectorId(1),
             activation_radius: 50.0,
         };
@@ -244,7 +244,7 @@ mod tests {
             sector: SectorId(0),
             name: "Forge Station".to_string(),
             position: Position::new(AU_M as f32, 0.0, 0.0),
-            abs_m: [AU_M, 0.0, 0.0],
+            abs_m: [AU_M, 0.0, 0.0].into(),
             docking_radius: 100.0,
         };
         assert!(station.is_in_range_abs([AU_M + 80.0, 0.0, 0.0]));

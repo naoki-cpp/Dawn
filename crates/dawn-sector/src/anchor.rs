@@ -37,7 +37,7 @@ impl AnchorTable {
             let id = AnchorId::from(b.id);
             // Use the f64 anchor source (ADR-0029), not the f32 `position`, so
             // anchors stay precise at true-AU distances.
-            abs.insert(id, b.abs_m);
+            abs.insert(id, b.abs_m.into());
             sector.insert(id, b.sector);
         }
         Self { abs, sector }
@@ -167,7 +167,8 @@ mod tests {
             .unwrap();
         let anchor_abs = t.abs(AnchorId(1)).unwrap();
         assert_eq!(
-            anchor_abs, forge.abs_m,
+            anchor_abs,
+            forge.abs_m.as_array(),
             "anchor must use the f64 abs_m source"
         );
     }

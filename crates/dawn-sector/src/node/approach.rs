@@ -135,7 +135,7 @@ impl<S: EventStore> SimulationNode<S> {
                 // jump prompt becomes available on arrival (ADR-0015).
                 ApproachTarget::Gate(gate_id) => self.jump_gate(gate_id).map(|g| {
                     (
-                        self.dest_in_ship_frame_abs(entity, g.abs_m),
+                        self.dest_in_ship_frame_abs(entity, g.abs_m.into()),
                         g.activation_radius * 0.8,
                     )
                 }),

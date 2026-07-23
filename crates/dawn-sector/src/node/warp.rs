@@ -141,7 +141,8 @@ impl<S: EventStore> SimulationNode<S> {
                         g.position,
                         g.activation_radius * WARP_ARRIVAL_FACTOR,
                         warp.auto_jump.then_some(gate_id),
-                        self.anchor_table.nearest_anchor(g.from_sector, g.abs_m),
+                        self.anchor_table
+                            .nearest_anchor(g.from_sector, g.abs_m.into()),
                         g.abs_m,
                     )
                 }),
@@ -454,7 +455,13 @@ impl<S: EventStore> SimulationNode<S> {
     /// `target_abs` along the ship's approach, using the f64 source for the
     /// warp target — a body centre (`CelestialBodyDef.abs_m`) or a gate
     /// (`JumpGateDef.abs_m`, ADR-0029 R1). Symmetric for Gate and Body targets.
-    fn warp_arrival_abs(&self, entity: Entity, target_abs: [f64; 3], arrival: f32) -> [f64; 3] {
+    fn warp_arrival_abs<P: Into<[f64; 3]>>(
+        &self,
+        entity: Entity,
+        target_abs: P,
+        arrival: f32,
+    ) -> [f64; 3] {
+        let target_abs = target_abs.into();
         let offset = self
             .world
             .get::<PositionComp>(entity)
@@ -984,7 +991,7 @@ mod tests {
             .expect("demo gate 0 exists");
         let expected_anchor = node
             .anchor_table()
-            .nearest_anchor(gate.from_sector, gate.abs_m)
+            .nearest_anchor(gate.from_sector, gate.abs_m.into())
             .expect("gate sector has at least one anchor");
         assert_eq!(
             node.get_ship_anchor(ship_id),
@@ -1004,7 +1011,7 @@ mod tests {
         // Tolerance is the f32 ulp at the rebased anchor's magnitude (the offset
         // composing ship_absolute is f32), not an exactness check — at true AU
         // this is a few hundred metres, dwarfed by the km-scale activation ring.
-        let anchor_mag = gate.abs_m.iter().map(|c| c.abs()).fold(0.0_f64, f64::max);
+        let anchor_mag = gate.abs_m.0.iter().map(|c| c.abs()).fold(0.0_f64, f64::max);
         let tolerance = (anchor_mag * f32::EPSILON as f64).max(5.0) * 4.0;
         assert!((dist - (gate.activation_radius * WARP_ARRIVAL_FACTOR) as f64).abs() < tolerance,
             "gate arrival distance from the f64 gate source should match the arrival ring (got {dist}, tolerance {tolerance})");

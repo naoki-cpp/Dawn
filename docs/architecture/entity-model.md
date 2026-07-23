@@ -65,10 +65,10 @@ today : fixed count, fixed assignment
 | `y` | `f32` | up-down |
 | `z` | `f32` | north-south |
 
-**Current representation:** `f32`, and currently relative to `AnchorComp` for ships (ADR-0029).
-This is a compatibility description of the current code, not the long-term target. ADR-0044
-proposes an explicit absolute f64 authority for server positions while keeping local movement
-and velocity f32 until the migration is approved and implemented.
+**Current representation:** ship ECS state remains `f32`, relative to `AnchorComp` (ADR-0029).
+Static navigation definitions now use `dawn_core::AbsolutePosition` for their authoritative
+sector-frame f64 coordinates. This is the first ADR-0044 migration slice; ship state,
+movement integration, and wire payloads remain on their existing paths until later slices.
 
 ### Velocity
 

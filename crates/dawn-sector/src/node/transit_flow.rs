@@ -105,7 +105,9 @@ impl<S: EventStore> SimulationNode<S> {
                 .find(|g| g.to_sector == self.sector_id())
         });
         let entry_pos = arrival_gate.map(|g| g.position).unwrap_or(Position::ORIGIN);
-        let entry_pos_abs = arrival_gate.map(|g| g.abs_m).unwrap_or([0.0, 0.0, 0.0]);
+        let entry_pos_abs = arrival_gate
+            .map(|g| g.abs_m.as_array())
+            .unwrap_or([0.0, 0.0, 0.0]);
 
         let ship = self.export_transit(ship_id, entry_pos)?;
         Some(TransitCommitData {
@@ -604,7 +606,7 @@ mod tests {
         // arrive at the return gate's position so the player can jump
         // straight back (ADR-0009).
         let entry_pos = return_gate.position;
-        let entry_pos_abs = return_gate.abs_m;
+        let entry_pos_abs = return_gate.abs_m.as_array();
         let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
         to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos_abs);
 
@@ -650,7 +652,8 @@ mod tests {
             .prepare_transit_commit(ship_id, SectorId(1), Some(outbound_gate.id))
             .expect("transit must be accepted and the ship exported");
         assert_eq!(
-            data.entry_pos_abs, return_gate.abs_m,
+            data.entry_pos_abs,
+            return_gate.abs_m.as_array(),
             "the arrival point must be the return gate's precise abs_m, not Sector 0's"
         );
 
