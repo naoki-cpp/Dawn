@@ -209,7 +209,7 @@ impl<S: EventStore> SimulationNode<S> {
                     // flows continuously into the warp-speed ramp, instead of
                     // snapping to near-zero before re-accelerating.
                     if let Some(mut w) = self.world.get_mut::<WarpComp>(entity) {
-                        w.warp_start_abs = start_abs.into();
+                        w.warp_start_abs = start_abs;
                         w.warp_arrival_abs = arrival_abs.into();
                         w.warp_start_vel = vel;
                     }

@@ -78,7 +78,7 @@ impl<S: EventStore> SimulationNode<S> {
         let Some(anchor) = self.world.ship_anchor(entity) else {
             return Position::new(dest_abs[0] as f32, dest_abs[1] as f32, dest_abs[2] as f32);
         };
-        let Some(rel) = self.anchor_table.to_relative(anchor, dest_abs.into()) else {
+        let Some(rel) = self.anchor_table.to_relative(anchor, dest_abs) else {
             debug_assert_missing_anchor(anchor, "dest_in_ship_frame_abs");
             return Position::new(dest_abs[0] as f32, dest_abs[1] as f32, dest_abs[2] as f32);
         };

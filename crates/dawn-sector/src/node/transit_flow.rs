@@ -109,7 +109,7 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|g| g.abs_m)
             .unwrap_or(dawn_core::AbsolutePosition::ORIGIN);
 
-        let ship = self.export_transit_with_abs(ship_id, entry_pos, Some(entry_pos_abs.into()))?;
+        let ship = self.export_transit_with_abs(ship_id, entry_pos, Some(entry_pos_abs))?;
         Some(TransitCommitData {
             ship: Box::new(ship),
             entry_pos,
@@ -297,7 +297,7 @@ impl<S: EventStore> SimulationNode<S> {
                 ship_id: ship.ship_id,
                 from,
                 to: self.sector_id,
-                entry_pos: entry_pos_abs.into(),
+                entry_pos: entry_pos_abs,
                 velocity: ship.velocity,
                 tick: self.current_tick,
             },
@@ -325,7 +325,7 @@ impl<S: EventStore> SimulationNode<S> {
         self.import_transit(ship, from, entry_pos, entry_pos_abs);
         if let Some(gate_id) = gate_id {
             let to = self.sector_id();
-            self.append_jump_events(ship_id, gate_id, from, to, entry_pos_abs.into());
+            self.append_jump_events(ship_id, gate_id, from, to, entry_pos_abs);
         }
     }
 
