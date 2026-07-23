@@ -13,7 +13,7 @@
 use crate::node::SimulationNode;
 use crate::persistence::ShipSnapshot;
 use dawn_consensus::RaftActorHandle;
-use dawn_core::{DomainEvent, JumpGateId, Position, SectorId, ShipId};
+use dawn_core::{AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -43,7 +43,7 @@ pub enum TransitOp {
         /// Precise f64 Sector-frame arrival point (ADR-0029): `entry_pos`
         /// alone is too coarse to re-anchor the Ship against at true-AU
         /// magnitudes (see `SimulationNode::import_transit`).
-        entry_pos_abs: [f64; 3],
+        entry_pos_abs: AbsolutePosition,
         gate_id: Option<JumpGateId>,
     },
 }
@@ -388,7 +388,7 @@ mod tests {
             from: SectorId(0),
             to: SectorId(1),
             entry_pos: Position::new(500.0, 0.0, 0.0),
-            entry_pos_abs: [500.0, 0.0, 0.0],
+            entry_pos_abs: AbsolutePosition::new(500.0, 0.0, 0.0),
             gate_id: None,
         };
         let decoded = TransitOp::decode(&op.encode()).expect("decode must succeed");
@@ -406,7 +406,7 @@ mod tests {
                 assert_eq!(from, SectorId(0));
                 assert_eq!(to, SectorId(1));
                 assert_eq!(entry_pos, Position::new(500.0, 0.0, 0.0));
-                assert_eq!(entry_pos_abs, [500.0, 0.0, 0.0]);
+                assert_eq!(entry_pos_abs, AbsolutePosition::new(500.0, 0.0, 0.0));
                 assert_eq!(gate_id, None);
             }
             other => panic!("expected Commit, got {other:?}"),

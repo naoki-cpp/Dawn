@@ -29,7 +29,7 @@ use super::SimulationNode;
 pub struct TransitCommitData {
     pub ship: Box<ShipSnapshot>,
     pub entry_pos: Position,
-    pub entry_pos_abs: [f64; 3],
+    pub entry_pos_abs: dawn_core::AbsolutePosition,
 }
 
 impl<S: EventStore> SimulationNode<S> {
@@ -106,8 +106,8 @@ impl<S: EventStore> SimulationNode<S> {
         });
         let entry_pos = arrival_gate.map(|g| g.position).unwrap_or(Position::ORIGIN);
         let entry_pos_abs = arrival_gate
-            .map(|g| g.abs_m.as_array())
-            .unwrap_or([0.0, 0.0, 0.0]);
+            .map(|g| g.abs_m)
+            .unwrap_or(dawn_core::AbsolutePosition::ORIGIN);
 
         let ship = self.export_transit_with_abs(ship_id, entry_pos, Some(entry_pos_abs.into()))?;
         Some(TransitCommitData {
@@ -165,6 +165,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// perspective. Returns `None` if `ship_id` is unknown or not currently
     /// `InTransit`. Folded into [`prepare_transit_commit`](Self::prepare_transit_commit);
     /// not called directly outside this module.
+    #[cfg(test)]
     pub(super) fn export_transit(
         &mut self,
         ship_id: ShipId,
@@ -284,7 +285,7 @@ impl<S: EventStore> SimulationNode<S> {
         ship: &ShipSnapshot,
         from: SectorId,
         entry_pos: Position,
-        entry_pos_abs: [f64; 3],
+        entry_pos_abs: dawn_core::AbsolutePosition,
     ) {
         let mut ship = ship.clone();
         ship.position = entry_pos;
@@ -317,7 +318,7 @@ impl<S: EventStore> SimulationNode<S> {
         ship: &ShipSnapshot,
         from: SectorId,
         entry_pos: Position,
-        entry_pos_abs: [f64; 3],
+        entry_pos_abs: dawn_core::AbsolutePosition,
         gate_id: Option<JumpGateId>,
     ) {
         let ship_id = ship.ship_id;
@@ -338,13 +339,17 @@ impl<S: EventStore> SimulationNode<S> {
     /// here is always a deliberate absolute point — a Gate's `abs_m`, or the
     /// Sector origin for a non-Gate Transit — so there's no fallback-compose
     /// branch to skip.
-    fn rebase_after_transit(&mut self, ship_id: ShipId, entry_pos_abs: [f64; 3]) {
+    fn rebase_after_transit(
+        &mut self,
+        ship_id: ShipId,
+        entry_pos_abs: dawn_core::AbsolutePosition,
+    ) {
         let Some(&entity) = self.ships.index.get(&ship_id) else {
             return;
         };
         let Some(to) = self
             .anchor_table
-            .nearest_anchor(self.sector_id, entry_pos_abs.into())
+            .nearest_anchor(self.sector_id, entry_pos_abs)
         else {
             return;
         };
