@@ -7,13 +7,11 @@
 //!   variants; returns `Some(ClientCommandFollowup)` for commands that need
 //!   server-side follow-up (Jump proposal to Raft, PlayerLoadout resend).
 //!
-//! ## Movement
-//! - `apply_move_command` / `apply_move_command_owned`
-//! - `apply_stop_command` / `apply_stop_command_owned`
+//! ## Shared ownership accessors
 //! - `owns_ship`
+//! - `is_active_ship`
 //!
-//! ## Private motion helpers (shared with `navigation`)
-//! - `is_warping`, `steer_thrust_toward`, `brake_thrust`
+//! Move/Stop and the shared steering helpers live in `movement_commands.rs`.
 //!
 //! ## Module commands
 //! - `activate_module` / `activate_module_owned`
@@ -23,7 +21,7 @@
 
 use dawn_core::{
     ClientCommand, DomainEvent, FitModuleCommand, JumpCommand, ModuleDefinition, ModuleId,
-    PlayerId, Position, ShipId, SlotKind, Velocity,
+    PlayerId, ShipId, SlotKind,
 };
 
 /// What `apply_client_command` hands back to the caller for commands that
@@ -88,9 +86,7 @@ pub enum ModuleActivationRejection {
     OutOfRange,
 }
 use dawn_ecs::{
-    components::{
-        FittedSlot, FittingComp, LockComp, LockState, PositionComp, ThrustComp, WarpComp,
-    },
+    components::{FittedSlot, FittingComp, LockComp, LockState},
     Entity,
 };
 use dawn_event_store::store::EventStore;
@@ -111,83 +107,6 @@ impl<S: EventStore> SimulationNode<S> {
                 Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })
             }
         }
-    }
-
-    // ── Movement commands ─────────────────────────────────────────────────────
-
-    /// Steer `ship_id` toward `target`. Cancels any active warp/approach.
-    /// No-op if the ship is unknown, in transit, or in committed warp.
-    pub fn apply_move_command(&mut self, ship_id: ShipId, target: Position) {
-        if self.is_ship_docked(ship_id) {
-            return;
-        }
-        let entity = match self.ships.index.get(&ship_id) {
-            Some(&e) => e,
-            None => return,
-        };
-        if self.world.transit_state(entity).is_in_transit() {
-            return;
-        }
-        // A committed warp cannot be interrupted; an aligning warp is cancelled
-        // (ADR-0022 §7).
-        if self.is_warping(entity) {
-            return;
-        }
-        let _ = self.world.remove_one::<WarpComp>(entity);
-        // Manual thrust overrides any active steering mode (Approach ADR-0015
-        // §4, Orbit / Keep at Range ADR-0031).
-        self.clear_steering_modes(entity);
-        let pos = match self.world.get::<PositionComp>(entity) {
-            Some(c) => c.0,
-            None => return,
-        };
-        let target = self.dest_in_ship_frame_abs(
-            entity,
-            [target.x as f64, target.y as f64, target.z as f64].into(),
-        );
-        self.steer_thrust_toward(entity, pos, target);
-    }
-
-    /// `apply_move_command` wrapped with an active-ship check (ADR-0037: only
-    /// the caller's active ship can be flown).
-    pub fn apply_move_command_owned(
-        &mut self,
-        player_id: PlayerId,
-        ship_id: ShipId,
-        target: Position,
-    ) -> bool {
-        if !self.is_active_ship(player_id, ship_id) {
-            return false;
-        }
-        self.apply_move_command(ship_id, target);
-        true
-    }
-
-    /// Begin decelerating the ship toward zero velocity using its thrust.
-    ///
-    /// The movement system applies thrust opposite to velocity each tick until
-    /// the ship stops. Cancels any active thrust direction.
-    pub fn apply_stop_command(&mut self, ship_id: ShipId) {
-        if self.is_ship_docked(ship_id) {
-            return;
-        }
-        let entity = match self.ships.index.get(&ship_id) {
-            Some(&e) => e,
-            None => return,
-        };
-        if self.world.transit_state(entity).is_in_transit() {
-            return;
-        }
-        // A committed warp cannot be interrupted; an aligning warp is cancelled
-        // (ADR-0022 §7).
-        if self.is_warping(entity) {
-            return;
-        }
-        let _ = self.world.remove_one::<WarpComp>(entity);
-        // Stopping cancels any active steering mode (Approach ADR-0015 §4,
-        // Orbit / Keep at Range ADR-0031).
-        self.clear_steering_modes(entity);
-        self.brake_thrust(entity);
     }
 
     /// Returns `true` if `player_id` owns `ship_id`.
@@ -387,73 +306,6 @@ impl<S: EventStore> SimulationNode<S> {
             }
         }
         None
-    }
-
-    /// `apply_stop_command` wrapped with an active-ship check (ADR-0037).
-    pub fn apply_stop_command_owned(&mut self, player_id: PlayerId, ship_id: ShipId) -> bool {
-        if !self.is_active_ship(player_id, ship_id) {
-            return false;
-        }
-        self.apply_stop_command(ship_id);
-        true
-    }
-
-    // ── Private motion helpers (shared with node::navigation) ─────────────────
-
-    /// True if the ship is in the committed warping phase (ADR-0022): its warp
-    /// cannot be interrupted by Move/Stop. Aligning or absent warp → false.
-    /// Used only by `apply_move_command`, which is the one command allowed to
-    /// cancel an *aligning* warp outright (ADR-0022 §7) -- every other
-    /// steering command must use `has_active_warp` instead, which also
-    /// covers the aligning phase.
-    pub(super) fn is_warping(&self, entity: Entity) -> bool {
-        self.world
-            .get::<WarpComp>(entity)
-            .map(|w| w.is_warping())
-            .unwrap_or(false)
-    }
-
-    /// True if `entity` has a `WarpComp` in *any* phase, aligning or
-    /// committed (ADR-0022/ADR-0031). Warp takes priority over Approach /
-    /// Orbit / Keep at Range: a new steering command must not silently race
-    /// an in-progress warp, whether or not it has engaged yet. Move/Stop are
-    /// the only commands that may interrupt an aligning warp, and they do so
-    /// explicitly (`is_warping` + removing `WarpComp`) rather than going
-    /// through this check.
-    pub(super) fn has_active_warp(&self, entity: Entity) -> bool {
-        self.world.get::<WarpComp>(entity).is_some()
-    }
-
-    /// Point `entity`'s thrust at `to` from `from` (unit direction, not braking).
-    /// Zero thrust if already at the target. Shared by `apply_move_command` and
-    /// the Approach System (ADR-0015) so the steering math lives in one place.
-    pub(super) fn steer_thrust_toward(&mut self, entity: Entity, from: Position, to: Position) {
-        let dx = to.x - from.x;
-        let dy = to.y - from.y;
-        let dz = to.z - from.z;
-        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-        let dir = if dist > f32::EPSILON {
-            Velocity {
-                dx: dx / dist,
-                dy: dy / dist,
-                dz: dz / dist,
-            }
-        } else {
-            Velocity::ZERO
-        };
-        if let Some(mut t) = self.world.get_mut::<ThrustComp>(entity) {
-            t.direction = dir;
-            t.is_braking = false;
-        }
-    }
-
-    /// Set `entity`'s thrust to braking (decelerate toward zero velocity).
-    /// Shared by `apply_stop_command` and the Approach/Warp Systems.
-    pub(super) fn brake_thrust(&mut self, entity: Entity) {
-        if let Some(mut t) = self.world.get_mut::<ThrustComp>(entity) {
-            t.direction = Velocity::ZERO;
-            t.is_braking = true;
-        }
     }
 
     // ── Module commands ───────────────────────────────────────────────────────
@@ -700,6 +552,7 @@ mod tests {
     use super::*;
     use crate::node::station::StationOperationOutcome;
     use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, Velocity};
+    use dawn_ecs::components::ThrustComp;
 
     #[test]
     fn loadout_followup_exposes_the_player_to_refresh() {
@@ -1062,40 +915,6 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, DomainEvent::DamageTaken(d) if d.ship_id == target_ship_id)),
             "docked targets must not take combat damage"
-        );
-    }
-
-    #[test]
-    fn move_command_target_is_interpreted_in_the_ships_current_anchor_frame() {
-        use dawn_core::AnchorId;
-
-        let mut node = mem_node();
-        let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-        let entity = *node.ships.index.get(&ship_id).unwrap();
-        let anchor = AnchorId(1);
-        let anchor_abs = node.anchor_table().abs(anchor).expect("demo anchor exists");
-        let local_pos = Position::new(250.0, 0.0, -100.0);
-        node.world.set_ship_anchor(entity, anchor);
-        node.world.get_mut::<PositionComp>(entity).unwrap().0 = local_pos;
-
-        let target_abs = Position::new(
-            (anchor_abs[0] + local_pos.x as f64) as f32,
-            (anchor_abs[1] + local_pos.y as f64 + 1_000_000.0) as f32,
-            (anchor_abs[2] + local_pos.z as f64) as f32,
-        );
-
-        node.apply_move_command(ship_id, target_abs);
-
-        let thrust = node.world.get::<ThrustComp>(entity).unwrap();
-        assert!(
-            thrust.direction.dy > 0.99,
-            "move command should preserve the local +Y intent after an anchor rebase, got {:?}",
-            thrust.direction
-        );
-        assert!(
-            thrust.direction.dx.abs() < 0.01 && thrust.direction.dz.abs() < 0.01,
-            "move command must not be dominated by the far anchor offset, got {:?}",
-            thrust.direction
         );
     }
 

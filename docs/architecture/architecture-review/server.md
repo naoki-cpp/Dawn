@@ -5,7 +5,7 @@ update   : 大規模リファクタ実施後 / 新クレート追加時
 related  : AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」, docs/architecture/architecture.md,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）,
            docs/architecture/architecture-review/server-pending.md（未完項目・issue一覧）
-date     : 2026-07-17（定期再計測 その5。PR #149のStation operation execution seamを反映。`station_operation_execution.rs`を新設し、station lifecycle/materializationから受理済み操作の副作用を集約。Rust実測値とserver-pendingを更新。server総合B+、client側は別途client.md参照）
+date     : 2026-07-24（定期再計測 その6。Player movement command moduleのdeepeningを反映。`movement_commands.rs`を新設し、Move/Stopと共有推進ヘルパーを`commands.rs`から分離。Rust実測値とserver-pendingを更新。server総合B+、client側は別途client.md参照）
 ---
 
 # Architecture Review — Dawn Codebase（構造評価）
@@ -22,18 +22,17 @@ issue の詳細・保留判断・トリガーは
 
 ## 現状評価
 
-**総合: B+**（2026-07-17 再計測で維持。PR #149で `station_operation_execution.rs` を新設し、
-Stationのaccepted-operation副作用（速度停止・イベントappend・snapshot更新・station inventory
-連携）を `station_lifecycle.rs` / `station_materialization.rs` から集約した。新モジュールは281行、
-implは約152行で単一責務と直接テストを保つ。`station_materialization.rs` は692→645行へ縮小した。
-一方、`commands.rs` 1642、`inventory.rs` 931、`ship_cargo.rs` 573、`warp.rs` 1088、
-`dawn-market/src/order_book.rs` 1030などのwatch対象は残るが、R-3の着手トリガーである各impl約700行超は未発火。`dawn-wire`への
-プロトコル移動とDAGの健全性も維持されている）
+**総合: B+**（2026-07-24 再計測で維持。Player movement command moduleのdeepeningとして、
+Move/Stopの実装、docked/transit/warp gating、共有推進ヘルパーを `movement_commands.rs` に集約し、
+`commands.rs` はルーター・所有権アクセサ・残りのcommand validationに縮小した。新モジュールは203行、
+implは約158行で単一責務と直接テストを保つ。Station operation executionとship cargo ownershipの分割も維持されている。
+一方、`inventory.rs` 931、`ship_cargo.rs` 573、`warp.rs` 1088、`dawn-market/src/order_book.rs` 1140などのwatch対象は残るが、
+R-3の着手トリガーである各impl約700行超は未発火。`dawn-wire`へのプロトコル移動とDAGの健全性も維持されている）
 
 | 観点 | 評価 | 理由 |
 |---|---|---|
 | クレート構成 | A− | DAG が設計通り。dawn-sector / dawn-replication が分離済み（ADR-0026/0027）。M-7 解消で `ClientCommand` を `dawn-core` へ移動し DAG が整理された（`dawn-sector` が `dawn-actor` 非依存のまま dispatch を保持できるようになった）。Player Command Dispatch のための新 crate は引き続き不要。2026-07-10、`dawn-client-core`（Godot非依存クライアントドメインモデル、`dawn-core`のみに依存）と `dawn-client-gdext`（GDExtensionバインディング、cdylib、他クレートから依存されない葉ノード）を新設（ADR-0039/0040）。2026-07-11、`dawn-wire`（client<->server wire schema、`dawn-core`+serde+postcardのみ依存、トランスポート/ランタイム依存なし）を新設（ADR-0041/0042）。`dawn-actor`（deserialize）と`dawn-client-gdext`（construct+serialize）の双方が同じ型を、不要な依存を持ち込まずに使える。3クレートともDAGの末端/葉ノードに追加され、既存クレートへの逆依存は発生していない |
-| ファイルサイズ | B+ | 2026-07-17再計測。Station operation executionとship cargo ownershipの副作用集約は完了したが、`commands.rs` 1642・`inventory.rs` 931・`warp.rs` 1088・`order_book.rs` 1030などのwatch対象が残る。各implは約700行未満でR-3の着手トリガーは未発火。 |
+| ファイルサイズ | B+ | 2026-07-24再計測。`commands.rs` 1459からMove/Stopと共有推進ヘルパーを203行の`movement_commands.rs`へ分離。`inventory.rs` 931・`warp.rs` 1088・`order_book.rs` 1140などのwatch対象は残るが、各implは約700行未満でR-3の着手トリガーは未発火。 |
 | 型設計 | A− | SectorMap・ShipRegistry 抽出 + P9-2 で `CelestialBodyDef.sector` 追加。`InventoryComp`（ADR-0032）・`RepairLayer`/`RepairApplied`（ADR-0033）・`ItemId`（ADR-0034、`dawn-core/src/item.rs`）も既存型設計に整合 |
 | 重複 | A− | WS 境界は dawn-actor へ集約（M-4 解消）。AoI delivery、production runtime、Command dispatch は deep module 化済み（M-7 解消で `apply_client_command` が `SimulationNode` に集約）。2026-07-08、`ItemId -> ItemRow` JSON変換の重複（`serialization.rs` 2箇所）を `item_id_to_row_json` へ集約し解消済み。2026-07-11、M-10解消: postcard encode/decodeの3箇所分散呼び出しを`dawn-wire`の`ServerMessage`/`ClientMessage::encode/decode`へ集約。残る両バイナリ間グルー重複（M-6）・Fit経路のテール重複（M-8）は許容判断のまま |
 | Rust固有 | A− | Box\<dyn\> ゼロ・Mutex 最小。`TransitOp::Commit` は ADR-0032 で `Box<ShipSnapshot>` 化しサイズ非対称を解消済み |
@@ -41,15 +40,16 @@ implは約152行で単一責務と直接テストを保つ。`station_materializ
 
 ---
 
-## 最新ファイルサイズ一覧（2026-07-17 再計測）
+## 最新ファイルサイズ一覧（2026-07-24 再計測）
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
-| `crates/dawn-sector/src/node/commands.rs` | 1642 | 🟡 R-3 watch。command dispatch と検証を保持するが、implは約593行でトリガー未発火 |
+| `crates/dawn-sector/src/node/commands.rs` | 1459 | 🟡 R-3 watch。ルーター・所有権アクセサ・残りのcommand validationを保持。Move/Stop実装と共有推進ヘルパーは`movement_commands.rs`へ分離済み、implは約549行 |
+| `crates/dawn-sector/src/node/movement_commands.rs` | 203 | 🟢 Player movement commandのdeep module。Move/Stop、docked/transit/warp gating、共有推進ヘルパーと直接回帰テストを専有。implは約158行 |
 | `crates/dawn-sector/src/node/inventory.rs` | 931 | 🟢 Fit/Unfit/Reorderの検証とFittingComp変更に専念。ship cargo ownershipを`ship_cargo.rs`へ分離 |
 | `crates/dawn-sector/src/node/ship_cargo.rs` | 573 | 🟢 ship cargo ownership、Station transfer、Market bridge、初期seedを集約。直接回帰テスト付き |
 | `crates/dawn-sector/src/node/warp.rs` | 1088 | 🟡 R-1系のwatch。implは約503行で、warp幾何・drain・proposalの境界を維持 |
-| `crates/dawn-market/src/order_book.rs` | 1030 | 🟡 Market settlement候補。order matching / persistence / bridge境界を次回判断 |
+| `crates/dawn-market/src/order_book.rs` | 1140 | 🟡 Market settlement候補。order matching / persistence / bridge境界を次回判断 |
 | `crates/dawn-sector/src/node/transit_flow.rs` | 940 | 🟡 Request/Commitの責務は分離済み。implは約326行 |
 | `crates/dawn-actor/src/protocol/mod.rs` | 922 | 🟡 R-5完了後の公開入口。実装本体は`dawn-wire`へ移動済みだが、統合テストを含む総量をwatch |
 | `crates/dawn-sector/src/node/apply_event.rs` | 860 | 🟡 replay applyの単一責務を維持。implは約310行 |
