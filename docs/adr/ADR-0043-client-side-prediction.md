@@ -12,9 +12,10 @@ related : ADR-0008 (VelocityChanged authority), ADR-0023 (movement physics),
 
 # ADR-0043 - Client-Side Prediction and Motion Reconciliation
 
-> **Follow-up:** ADR-0045 re-evaluates the ownership of warp presentation,
+> **Follow-up:** ADR-0045 accepts the ownership of warp presentation,
 > discontinuity resets, and the single-writer contract. This ADR remains the
-> current prediction baseline until that proposal is accepted.
+> prediction baseline, while ADR-0045 defines the unified client track's
+> integration boundary.
 
 ## Context
 
@@ -126,5 +127,9 @@ velocity updates.
 - [x] Use one client motion track for local prediction and remote
   dead-reckoning.
 - [x] Shift the motion track during floating-origin rebases.
+- [x] Pass `VelocityChanged.tick` into the shared motion track and reject stale
+  velocity updates without rewinding the presentation clock.
+- [x] Route normal-frame position application, discontinuity resets, and
+  floating-origin rebase through the ship controller's single Node3D writer.
 - [ ] Verify the Godot playtest with the built GDExtension DLL.
 - [ ] Obtain human approval and change status from `proposed` to `accepted`.

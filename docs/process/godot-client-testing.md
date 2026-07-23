@@ -58,6 +58,13 @@ scripts/setup-godot.ps1 -RunTests
 >   - `addons/gdUnit4/plugin.gd:17`: add the second argument `false`
 >     (default value) to
 >     `ProjectSettings.get_setting("debug/gdscript/warnings/exclude_addons")`
+>   - `addons/gdUnit4/src/monitor/GodotGdErrorMonitor.gd`: guard the
+>     `FileAccess.open()` calls in `collect_full_logs()` and
+>     `_collect_log_entries()` before calling `seek()`, and initialize `_eof` to
+>     `0`. Godot 4.6 can start the monitor before the configured log file
+>     exists, which otherwise causes `Cannot call method 'seek' on a null value`.
+>     `scripts/setup-godot.ps1` and `scripts/setup-godot.sh` apply this patch
+>     automatically and idempotently.
 > Once GdUnit4 ships a 4.6-compatible release, these patches become
 > unnecessary.
 

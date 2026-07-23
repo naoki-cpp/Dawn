@@ -36,7 +36,7 @@ func test_warp_visual_cap_does_not_switch_back_to_prediction_during_deceleration
 
 	## PositionSnap/reset is the only transition back to local prediction.
 	ship.reset_motion(Vector3(7.0, 0.0, 0.0), Vector3.ZERO, 12)
-	ship.set_velocity(Vector3(10.0, 0.0, 0.0))
+	ship.set_velocity(Vector3(10.0, 0.0, 0.0), 12)
 	ship._process(0.1)
 	assert_float(ship.position.x).is_equal_approx(8.0, 0.001)
 	ship.free()
@@ -53,4 +53,15 @@ func test_attaching_to_an_already_warping_ship_keeps_dead_reckoning() -> void:
 	ship.set_velocity(Vector3(10_000.0, 0.0, 0.0))
 	ship._process(0.01)
 	assert_float(ship.position.x).is_equal_approx(2_200.0, 0.001)
+	ship.free()
+
+
+func test_stale_velocity_event_is_rejected_by_the_motion_track() -> void:
+	var ship := ShipController.new()
+	add_child(ship)
+	ship.initialize(1, Vector3.ZERO)
+
+	assert_bool(ship.set_velocity(Vector3(10.0, 0.0, 0.0), 5)).is_true()
+	assert_bool(ship.set_velocity(Vector3(20.0, 0.0, 0.0), 4)).is_false()
+	assert_float(ship.get_speed_server()).is_equal_approx(10.0, 0.001)
 	ship.free()

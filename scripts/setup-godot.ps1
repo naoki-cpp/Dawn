@@ -99,6 +99,19 @@ function Initialize-GdUnit {
 		-From 'ProjectSettings.get_setting("debug/gdscript/warnings/exclude_addons")' `
 		-To 'ProjectSettings.get_setting("debug/gdscript/warnings/exclude_addons", false)'
 
+	Set-TextIfChanged `
+		-Path (Join-Path $gdUnitDir "src/monitor/GodotGdErrorMonitor.gd") `
+		-From "var _eof: int`n" `
+		-To "var _eof: int = 0`n"
+	Set-TextIfChanged `
+		-Path (Join-Path $gdUnitDir "src/monitor/GodotGdErrorMonitor.gd") `
+		-From "func collect_full_logs() -> PackedStringArray:`n`tawait (Engine.get_main_loop() as SceneTree).process_frame`n`tawait (Engine.get_main_loop() as SceneTree).physics_frame`n`n`tvar file := FileAccess.open(_godot_log_file, FileAccess.READ)`n`tfile.seek(_eof)" `
+		-To "func collect_full_logs() -> PackedStringArray:`n`tawait (Engine.get_main_loop() as SceneTree).process_frame`n`tawait (Engine.get_main_loop() as SceneTree).physics_frame`n`n`tvar file := FileAccess.open(_godot_log_file, FileAccess.READ)`n`tif file == null:`n`t`treturn PackedStringArray()`n`tfile.seek(_eof)"
+	Set-TextIfChanged `
+		-Path (Join-Path $gdUnitDir "src/monitor/GodotGdErrorMonitor.gd") `
+		-From "func _collect_log_entries(force_collect_reports: bool) -> Array[ErrorLogEntry]:`n`tvar file := FileAccess.open(_godot_log_file, FileAccess.READ)`n`tfile.seek(_eof)" `
+		-To "func _collect_log_entries(force_collect_reports: bool) -> Array[ErrorLogEntry]:`n`tvar file := FileAccess.open(_godot_log_file, FileAccess.READ)`n`tif file == null:`n`t`treturn []`n`tfile.seek(_eof)"
+
 	$logDir = Join-Path $clientDir ".godot-test-logs"
 	New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 

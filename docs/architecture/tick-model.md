@@ -260,6 +260,21 @@ Future: when the command queue supports it, multiple Commands targeting the
         same Ship will carry over to the next Tick (undecided).
 ```
 
+### Client motion-track ordering (ADR-0043 / ADR-0045)
+
+The client passes every `VelocityChanged.tick` to the ship's Rust motion track.
+Because `VelocityChanged` contains velocity but no position, applying it updates
+the track's authority-tick watermark and future integration velocity without
+rewinding the already-rendered position or presentation tick. The owner then
+reconciles the authoritative position through `MotionCorrection` at the same
+logical tick. A velocity event older than the watermark is ignored.
+
+Docked tracks reject velocity updates and remain at zero velocity until an
+authoritative undock transition. Normal-frame position application,
+`PositionSnap`, dock/undock resets, and floating-origin rebase all use the
+`ShipController` adapter's single Node3D position writer; `main.gd` and
+`WorldPresentation` do not write ship positions directly.
+
 ---
 
 ## 5. Tick Monotonicity Guarantee

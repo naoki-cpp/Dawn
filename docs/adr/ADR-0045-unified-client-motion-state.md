@@ -70,12 +70,15 @@ Node3Dへ適用する薄いアダプターに限定する。
 - [x] 人間が本ADRを承認し、`status`を`accepted`へ変更する
 - [x] `MotionTrack`の状態と遷移をRustの型または明示的な状態APIで表現する
 - [x] 通常移動・リモート移動・ワープ・dockを同じRustトラックでテストする
-- [ ] `VelocityChanged.tick`をクライアントのトラックへ渡す
-- [ ] GDScriptのワープ専用積分と直接的な競合位置書き込みを削除する
-- [ ] Node3D位置の単一writerをテストまたは構造で保証する
+- [x] `VelocityChanged.tick`をクライアントのトラックへ渡す。速度だけのイベントは
+  予測時計を巻き戻さず、authority tickのwatermarkを更新し、遅延イベントを拒否する
+- [x] GDScriptのワープ専用積分と直接的な競合位置書き込みを削除する。ワープ表示は
+  `MotionTrack`、discontinuityの適用は`ShipController`に集約した
+- [x] Node3D位置の単一writerを構造で保証する。通常フレーム、snap、dock/undock、
+  floating-origin rebaseはすべて`ShipController`の適用入口を通る
 - [x] 浮動原点rebase、遅延補正、warp arrival、dock/undockの回帰テストを追加する
 - [x] GDExtension APIを更新し、Godot側は薄い変換アダプターに戻す
-- [ ] ADR-0043の実装チェックリストと`docs/architecture/tick-model.md`を同期する
+- [x] ADR-0043の実装チェックリストと`docs/architecture/tick-model.md`を同期する
 
 ## 期待する結果
 

@@ -18,7 +18,7 @@ related  : ./README.md, ./deferred.md, ../roadmap.md, ../roadmap-history.md
 | 優先度 | ID | タスク | 状態 |
 |---|---|---|---|
 | NOW | 9E-1 | 経済ループの人間プレイテストと結果記録 | 手順済み・実施待ち |
-| NEXT | 10-3 | Client-Side PredictionをRust側へ実装 | ADR-0043/0045承認済み・実装継続 |
+| NEXT | 10-3 | Client-Side PredictionをRust側へ実装 | ADR-0043/0045承認済み・MotionTrackのtick/position writer実装完了。Godot playtestは10-5へ |
 | NEXT | 10-2/10-4 | 残る型共有・固定型メッセージ移行の整理 | 一部実装 |
 
 ### 3.2 Phase 9 の残作業
@@ -35,7 +35,7 @@ related  : ./README.md, ./deferred.md, ../roadmap.md, ../roadmap-history.md
 | ID | タスク | 状態 |
 |---|---|---|
 | 10-2 | `InitialState` / `PlayerLoadout` / `AoiEnter` の固定型移行を完了 | 一部実装 |
-| 10-3 | Client-Side Predictionとreconciliation | ADR-0043/0045承認済み・残作業あり |
+| 10-3 | Client-Side Predictionとreconciliation | ADR-0043/0045承認済み・MotionTrackのtick/position writer完了。Godot playtestは10-5へ |
 | 10-4 | WebSocket上のpostcard移行の段階2を完了 | 段階1完了・残作業あり |
 | 10-5 | Godot editorでのPrediction / dock / warpプレイテスト | 自動テスト済み・手動確認待ち |
 | 10-6 | 座標・クライアント移動設計の再評価（ADR-0044 / ADR-0045） | ADR承認済み・実装を10-3/10-5へ分離 |
