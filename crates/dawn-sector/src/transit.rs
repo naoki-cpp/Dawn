@@ -11,7 +11,7 @@
 //!   and appends `SectorTransitCompleted`. Other nodes ignore it.
 
 use crate::node::SimulationNode;
-use crate::persistence::ShipSnapshot;
+use crate::persistence::{snapshot::LegacyShipSnapshot, ShipSnapshot};
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
@@ -48,6 +48,57 @@ pub enum TransitOp {
     },
 }
 
+/// Pre-ADR-0044 transit payload used to decode committed Raft entries written
+/// before `ShipSnapshot::absolute_position` was added. Postcard is positional,
+/// so decoding the legacy nested ship requires a matching legacy enum.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum LegacyTransitOp {
+    Request {
+        ship_id: ShipId,
+        to: SectorId,
+        gate_id: Option<JumpGateId>,
+    },
+    Commit {
+        ship: Box<LegacyShipSnapshot>,
+        from: SectorId,
+        to: SectorId,
+        entry_pos: Position,
+        entry_pos_abs: [f64; 3],
+        gate_id: Option<JumpGateId>,
+    },
+}
+
+impl From<LegacyTransitOp> for TransitOp {
+    fn from(legacy: LegacyTransitOp) -> Self {
+        match legacy {
+            LegacyTransitOp::Request {
+                ship_id,
+                to,
+                gate_id,
+            } => Self::Request {
+                ship_id,
+                to,
+                gate_id,
+            },
+            LegacyTransitOp::Commit {
+                ship,
+                from,
+                to,
+                entry_pos,
+                entry_pos_abs,
+                gate_id,
+            } => Self::Commit {
+                ship: Box::new((*ship).into()),
+                from,
+                to,
+                entry_pos,
+                entry_pos_abs: entry_pos_abs.into(),
+                gate_id,
+            },
+        }
+    }
+}
+
 impl TransitOp {
     /// Serialize for a Raft `LogEntry` payload.
     pub fn encode(&self) -> Vec<u8> {
@@ -59,7 +110,11 @@ impl TransitOp {
     /// Returns `None` for payloads that are not a `TransitOp` (future
     /// proposal types share the same log).
     pub fn decode(payload: &[u8]) -> Option<Self> {
-        postcard::from_bytes(payload).ok()
+        postcard::from_bytes(payload).ok().or_else(|| {
+            postcard::from_bytes::<LegacyTransitOp>(payload)
+                .ok()
+                .map(Into::into)
+        })
     }
 }
 
@@ -416,5 +471,45 @@ mod tests {
     #[test]
     fn decode_returns_none_for_garbage_payload() {
         assert!(TransitOp::decode(&[0xFF, 0xFE, 0xFD]).is_none());
+    }
+
+    #[test]
+    fn legacy_commit_payload_decodes_without_absolute_position() {
+        let legacy = LegacyTransitOp::Commit {
+            ship: Box::new(LegacyShipSnapshot {
+                ship_id: ShipId::new(NodeId(0), 7),
+                ship_type_id: ShipTypeId(1),
+                position: Position::new(1.0, 2.0, 3.0),
+                anchor: dawn_core::AnchorId(0),
+                velocity: Velocity::new(4.0, 5.0, 6.0),
+                current_shield: 10.0,
+                current_armor: 20.0,
+                current_hull: 30.0,
+                is_destroyed: false,
+                capacitor: Some(50.0),
+                fitting: FittingSnapshot::empty(),
+                tackled_by: vec![],
+                inventory: std::collections::BTreeMap::new(),
+            }),
+            from: SectorId(0),
+            to: SectorId(1),
+            entry_pos: Position::new(500.0, 0.0, 0.0),
+            entry_pos_abs: [500.0, 0.0, 0.0],
+            gate_id: None,
+        };
+        let decoded = TransitOp::decode(&postcard::to_stdvec(&legacy).unwrap()).unwrap();
+
+        match decoded {
+            TransitOp::Commit {
+                ship,
+                entry_pos_abs,
+                ..
+            } => {
+                assert_eq!(ship.ship_id, ShipId::new(NodeId(0), 7));
+                assert_eq!(ship.absolute_position, None);
+                assert_eq!(entry_pos_abs, AbsolutePosition::new(500.0, 0.0, 0.0));
+            }
+            other => panic!("expected Commit, got {other:?}"),
+        }
     }
 }
