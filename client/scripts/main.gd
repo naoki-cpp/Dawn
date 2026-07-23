@@ -193,18 +193,26 @@ var _world := WorldSpaceScript.new()
 ## by global class_name for the same headless-test-cache reason as WorldSpace.
 const UnitFormat = preload("res://scripts/unit_format.gd")
 
-## Converts a server-space position (Y-up, +Z) into Godot world space (Y-up,
-## -Z), relative to the floating origin and scaled by WORLD_SCALE. Shared by
-## gate/body marker spawning and gate picking, which all place a Node3D at a
-## server-given position. Thin wrapper so it can be passed as a Callable.
+## Converts a legacy f32 server-space position (Y-up, +Z) into Godot world
+## space (Y-up, -Z), relative to the floating origin. Absolute wire positions
+## use `_server_components_to_godot` so they are narrowed only after subtraction.
+## Thin wrapper kept for legacy event payloads and tests.
 func _server_to_godot_pos(p: Vector3) -> Vector3:
 	return _world.to_godot(p)
 
-## Reads a {x,y,z} sub-dictionary -- the wire format for every server-space
-## Vector3 field (position/entry_pos/...) -- into a Vector3. Shared by every
-## event/state handler that parses a position out of a payload dict.
+## Reads a legacy f32 {x,y,z} sub-dictionary (for example PosWire event fields)
+## into a Vector3. Absolute f64 position fields use the component helper below.
 func _vec3_from_dict(d: Dictionary, key: String) -> Vector3:
 	return WorldSessionScript.vec3_from_dict(d, key)
+
+func _position_components_from_dict(d: Dictionary, key: String) -> PackedFloat64Array:
+	return WorldSessionScript.position_components_from_dict(d, key)
+
+func _position_components(value: Variant) -> PackedFloat64Array:
+	return WorldSessionScript.position_components(value)
+
+func _server_components_to_godot(position: PackedFloat64Array) -> Vector3:
+	return _world.to_godot_components(position[0], position[1], position[2])
 
 ## Reads a {dx,dy,dz} velocity sub-dictionary from a wire payload.
 func _velocity_from_dict(d: Dictionary, key: String = "velocity") -> Vector3:
@@ -220,11 +228,11 @@ func _update_gate_proximity() -> void:
 	_nearby_gate_id = -1
 	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return
-	var ship_pos: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
+	var ship_pos := _world.to_server_components((_ships[_player_ship_id] as Node3D).global_position)
 	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
-		var gate_pos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
-		if ship_pos.distance_to(gate_pos) <= (g.get("activation_radius", 0.0) as float):
+		var gate_pos := _position_components(g.get("position", PackedFloat64Array()))
+		if _world.distance_components(ship_pos, gate_pos) <= (g.get("activation_radius", 0.0) as float):
 			_nearby_gate_id = g.get("gate_id", -1) as int
 			return
 
@@ -237,12 +245,12 @@ func _update_station_proximity() -> void:
 	_nearby_station_ids.clear()
 	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return
-	var ship_pos: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
+	var ship_pos := _world.to_server_components((_ships[_player_ship_id] as Node3D).global_position)
 	var in_range: Array[Dictionary] = []
 	for station_entry: Variant in _stations:
 		var station: Dictionary = station_entry as Dictionary
-		var station_pos: Vector3 = station.get("position", Vector3.ZERO) as Vector3
-		var dist: float = ship_pos.distance_to(station_pos)
+		var station_pos := _position_components(station.get("position", PackedFloat64Array()))
+		var dist: float = _world.distance_components(ship_pos, station_pos)
 		if dist <= (station.get("docking_radius", 0.0) as float):
 			in_range.append({"station_id": station.get("station_id", -1) as int, "distance": dist})
 	in_range.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
@@ -432,13 +440,13 @@ func _selected_gate_distance() -> float:
 	var selected_gate_id: int = _interaction.selected_gate_id()
 	if selected_gate_id < 0 or _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return -1.0
-	var ship_server: Vector3 = _world.to_server((_ships[_player_ship_id] as Node3D).global_position)
+	var ship_server := _world.to_server_components((_ships[_player_ship_id] as Node3D).global_position)
 	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
 		if (g.get("gate_id", -1) as int) != selected_gate_id:
 			continue
-		var gpos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
-		return ship_server.distance_to(gpos)
+		var gpos := _position_components(g.get("position", PackedFloat64Array()))
+		return _world.distance_components(ship_server, gpos)
 	return -1.0
 
 # -- Right-click -> LockOnCommand ---------------------------------------------
@@ -526,7 +534,7 @@ func _handle_position_snap(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	if not _ships.has(ship_id):
 		return
-	var server_pos: Vector3 = _vec3_from_dict(p, "position")
+	var server_pos := _position_components_from_dict(p, "position")
 	if ship_id == _player_ship_id:
 		# A warp crosses ~1 AU but the player's visual ship lagged behind (its
 		# warp speed was capped). Correcting that by moving the ship would make
@@ -535,10 +543,14 @@ func _handle_position_snap(p: Dictionary) -> void:
 		# Godot position now represents the authoritative arrival `server_pos`:
 		# new_origin = server_pos - (ship's server-space offset from the origin).
 		var pg: Vector3 = _ship_position(_ships[ship_id] as Node3D)
-		var new_origin: Vector3 = server_pos - _world.dir_to_server(pg)
-		_presentation.apply_origin_rebase(new_origin, true, _player_ship_id, _ships)
+		var new_origin := PackedFloat64Array([
+			server_pos[0] - pg.x / WORLD_SCALE,
+			server_pos[1] - pg.y / WORLD_SCALE,
+			server_pos[2] + pg.z / WORLD_SCALE])
+		_presentation.apply_origin_rebase_components(new_origin, true, _player_ship_id, _ships)
 	else:
-		_set_ship_position(_ships[ship_id] as Node3D, _server_to_godot_pos(server_pos))
+		_set_ship_position(_ships[ship_id] as Node3D, _world.to_godot_components(
+			server_pos[0], server_pos[1], server_pos[2]))
 	var ship := _ships[ship_id] as Node3D
 	ship.call("reset_motion", _ship_position(ship), Vector3.ZERO, _current_tick)
 
@@ -557,9 +569,8 @@ func _handle_ship_docked(p: Dictionary) -> void:
 		var station: Dictionary = entry as Dictionary
 		if (station.get("station_id", -1) as int) != station_id:
 			continue
-		_set_ship_position(_ships[ship_id] as Node3D, _server_to_godot_pos(
-			station.get("position", Vector3.ZERO) as Vector3
-		))
+		var station_pos := _position_components(station.get("position", PackedFloat64Array()))
+		_set_ship_position(_ships[ship_id] as Node3D, _server_components_to_godot(station_pos))
 		if ship_id == _player_ship_id:
 			_session.apply_dock_event(ship_id, station_id, station.get("name", "") as String, tick)
 			_sync_session_state()
@@ -682,16 +693,19 @@ func _ingest_star_map(state: Dictionary) -> void:
 		_gates,
 		_bodies,
 		_stations,
-		_server_to_godot_pos,
+		_server_components_to_godot,
 		Callable(_interaction, "clear_navigation_selection")
 	)
 
 ## Instantiate a ship scene at `pos` (server-space) and return the node.
 ## WorldSession owns registry insertion; main.gd only creates the scene node.
 func _instantiate_ship(sid: int, pos: Vector3) -> Node3D:
+	return _instantiate_ship_at_godot(sid, _world.to_godot(pos))
+
+func _instantiate_ship_at_godot(sid: int, godot_pos: Vector3) -> Node3D:
 	var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
 	_ships_root.add_child(ship)
-	ship.call("initialize", sid, _world.to_godot(pos))
+	ship.call("initialize", sid, godot_pos)
 	ship.name = "Ship_%d" % sid
 	return ship
 
@@ -701,7 +715,9 @@ func _spawn_ship_from_data(d: Dictionary) -> void:
 	var sid: int = d.get("ship_id", 0) as int
 	if _ships.has(sid):
 		return
-	var ship: Node3D = _instantiate_ship(sid, _vec3_from_dict(d, "position"))
+	var server_pos := _position_components_from_dict(d, "position")
+	var ship: Node3D = _instantiate_ship_at_godot(sid, _world.to_godot_components(
+		server_pos[0], server_pos[1], server_pos[2]))
 	ship.call(
 		"configure_motion",
 		d.get("max_speed", 500.0) as float,
@@ -1080,9 +1096,13 @@ func _handle_motion_correction(p: Dictionary) -> void:
 	if ship_id != _player_ship_id or not _ships.has(ship_id):
 		return
 	var tick: int = p.get("tick", 0) as int
+	var server_pos := _position_components_from_dict(p, "position")
 	(_ships[ship_id] as Node3D).call(
 		"reconcile_motion",
-		_server_to_godot_pos(_vec3_from_dict(p, "position")),
+		_world.to_godot_components(
+			server_pos[0],
+			server_pos[1],
+			server_pos[2]),
 		_velocity_from_dict(p),
 		tick)
 

@@ -6,10 +6,15 @@ date    : 2026-07-18
 deciders: [human, ai-agent]
 related : ADR-0008 (VelocityChanged authority), ADR-0023 (movement physics),
           ADR-0029 (true-scale coordinates), ADR-0040 (GDExtension binding),
-          ADR-0042 (postcard wire envelope), docs/process/roadmap.md section 13
+          ADR-0042 (postcard wire envelope), ADR-0045 (unified client motion state),
+          docs/process/roadmap.md section 13
 ---
 
 # ADR-0043 - Client-Side Prediction and Motion Reconciliation
+
+> **Follow-up:** ADR-0045 re-evaluates the ownership of warp presentation,
+> discontinuity resets, and the single-writer contract. This ADR remains the
+> current prediction baseline until that proposal is accepted.
 
 ## Context
 

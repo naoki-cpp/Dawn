@@ -9,9 +9,12 @@ extends GdUnitTestSuite
 const __source: String = "res://scripts/navigation_marker_renderer.gd"
 
 
-## Mirrors main.gd's _server_to_godot_pos at world_scale=0.1.
-func _to_godot_pos(p: Vector3) -> Vector3:
-	return Vector3(p.x, p.y, -p.z) * 0.1
+## Mirrors main.gd's f64 component adapter at world_scale=0.1.
+func _to_godot_pos(p: PackedFloat64Array) -> Vector3:
+	return Vector3(p[0], p[1], -p[2]) * 0.1
+
+func _position(x: float, y: float, z: float) -> PackedFloat64Array:
+	return PackedFloat64Array([x, y, z])
 
 
 # -- spectral_color ---------------------------------------------------------------
@@ -51,7 +54,7 @@ func test_clear_children_removes_all_existing_children() -> void:
 func test_spawn_gate_markers_builds_one_marker_per_gate_with_position_and_label() -> void:
 	var gates_root: Node3D = auto_free(Node3D.new())
 	var gates: Array = [
-		{"gate_id": 5, "position": Vector3(10.0, 0.0, 20.0), "activation_radius": 2000.0, "to_system_name": "Beta"},
+		{"gate_id": 5, "position": _position(10.0, 0.0, 20.0), "activation_radius": 2000.0, "to_system_name": "Beta"},
 	]
 
 	NavigationMarkerRenderer.spawn_gate_markers(gates_root, gates, 0.1, _to_godot_pos)
@@ -67,8 +70,8 @@ func test_spawn_gate_markers_builds_one_marker_per_gate_with_position_and_label(
 func test_spawn_gate_markers_builds_one_marker_per_array_entry() -> void:
 	var gates_root: Node3D = auto_free(Node3D.new())
 	var gates: Array = [
-		{"gate_id": 0, "position": Vector3.ZERO, "activation_radius": 2000.0, "to_system_name": "Alpha"},
-		{"gate_id": 1, "position": Vector3(100.0, 0.0, 0.0), "activation_radius": 1500.0, "to_system_name": "Gamma"},
+		{"gate_id": 0, "position": _position(0.0, 0.0, 0.0), "activation_radius": 2000.0, "to_system_name": "Alpha"},
+		{"gate_id": 1, "position": _position(100.0, 0.0, 0.0), "activation_radius": 1500.0, "to_system_name": "Gamma"},
 	]
 
 	NavigationMarkerRenderer.spawn_gate_markers(gates_root, gates, 0.1, _to_godot_pos)
@@ -85,8 +88,8 @@ func test_spawn_body_markers_skips_stars_and_only_tags_planet_markers() -> void:
 	## ship moved. See the doc comment on spawn_body_markers().
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	var bodies: Array = [
-		{"body_id": 1, "kind": "Star", "name": "Helios", "position": Vector3.ZERO, "radius": 1000.0, "spectral_type": 0.5},
-		{"body_id": 2, "kind": "Planet", "name": "Forge", "position": Vector3(500.0, 0.0, 0.0), "radius": 200.0, "spectral_type": 0.0},
+		{"body_id": 1, "kind": "Star", "name": "Helios", "position": _position(0.0, 0.0, 0.0), "radius": 1000.0, "spectral_type": 0.5},
+		{"body_id": 2, "kind": "Planet", "name": "Forge", "position": _position(500.0, 0.0, 0.0), "radius": 200.0, "spectral_type": 0.0},
 	]
 
 	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
@@ -101,7 +104,7 @@ func test_spawn_body_markers_skips_stars_and_only_tags_planet_markers() -> void:
 func test_spawn_body_markers_uses_the_body_name_as_the_label_text() -> void:
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	var bodies: Array = [
-		{"body_id": 2, "kind": "Planet", "name": "Forge", "position": Vector3(500.0, 0.0, 0.0), "radius": 200.0, "spectral_type": 0.0},
+		{"body_id": 2, "kind": "Planet", "name": "Forge", "position": _position(500.0, 0.0, 0.0), "radius": 200.0, "spectral_type": 0.0},
 	]
 
 	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
@@ -114,7 +117,7 @@ func test_spawn_body_markers_uses_the_body_name_as_the_label_text() -> void:
 func test_spawn_body_markers_produces_no_markers_when_only_a_star_is_present() -> void:
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	var bodies: Array = [
-		{"body_id": 1, "kind": "Star", "name": "Helios", "position": Vector3.ZERO, "radius": 1000.0, "spectral_type": 0.5},
+		{"body_id": 1, "kind": "Star", "name": "Helios", "position": _position(0.0, 0.0, 0.0), "radius": 1000.0, "spectral_type": 0.5},
 	]
 
 	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
@@ -128,7 +131,7 @@ func test_spawn_body_markers_adds_a_fixed_size_selection_reticle_to_each_planet(
 	## a reticle that renders at a constant screen size (fixed_size).
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	var bodies: Array = [
-		{"body_id": 2, "kind": "Planet", "name": "Forge", "position": Vector3(500.0, 0.0, 0.0), "radius": 200.0, "spectral_type": 0.0},
+		{"body_id": 2, "kind": "Planet", "name": "Forge", "position": _position(500.0, 0.0, 0.0), "radius": 200.0, "spectral_type": 0.0},
 	]
 
 	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
@@ -145,7 +148,7 @@ func test_spawn_body_markers_adds_a_fixed_size_selection_reticle_to_each_planet(
 func test_spawn_station_markers_builds_one_marker_per_station_with_label_and_ring() -> void:
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	var stations: Array = [
-		{"station_id": 3, "name": "Forge Station", "position": Vector3(100.0, 0.0, 200.0), "docking_radius": 16000.0},
+		{"station_id": 3, "name": "Forge Station", "position": _position(100.0, 0.0, 200.0), "docking_radius": 16000.0},
 	]
 
 	NavigationMarkerRenderer.spawn_station_markers(bodies_root, stations, 0.1, _to_godot_pos)
@@ -161,11 +164,11 @@ func test_spawn_station_markers_builds_one_marker_per_station_with_label_and_rin
 func test_spawn_station_markers_appends_after_existing_body_markers() -> void:
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	NavigationMarkerRenderer.spawn_body_markers(bodies_root, [
-		{"body_id": 2, "kind": "Planet", "name": "Forge", "position": Vector3(500.0, 0.0, 0.0), "radius": 200.0, "spectral_type": 0.0},
+		{"body_id": 2, "kind": "Planet", "name": "Forge", "position": _position(500.0, 0.0, 0.0), "radius": 200.0, "spectral_type": 0.0},
 	], 0.1, _to_godot_pos)
 
 	NavigationMarkerRenderer.spawn_station_markers(bodies_root, [
-		{"station_id": 3, "name": "Forge Station", "position": Vector3(100.0, 0.0, 200.0), "docking_radius": 16000.0},
+		{"station_id": 3, "name": "Forge Station", "position": _position(100.0, 0.0, 200.0), "docking_radius": 16000.0},
 	], 0.1, _to_godot_pos)
 
 	assert_int(bodies_root.get_child_count()).is_equal(2)

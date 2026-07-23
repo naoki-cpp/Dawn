@@ -78,7 +78,7 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/A
 | Crate | Kind | Responsibility |
 |---|---|---|
 | `dawn-core` | library | Pure domain model and stateless simulation policies (including the shared one-tick movement policy). Zero network/I/O dependencies |
-| `dawn-client-core` | library | Godot-independent client-side domain model (loadout, wire row types, shared ship-motion prediction/dead-reckoning track). Depends only on `dawn-core` (ADR-0039, ADR-0043) |
+| `dawn-client-core` | library | Godot-independent client-side domain model (loadout, wire row types, shared ship-motion prediction/dead-reckoning track). The track is being reworked toward the single-owner model in ADR-0045. Depends only on `dawn-core` (ADR-0039, ADR-0043) |
 | `dawn-client-gdext` | library (cdylib) | GDExtension binding exposing `dawn-client-core` to the Godot client. Thin type-conversion adapter only (ADR-0040) |
 | `dawn-wire` | library | Client<->server wire schema (`ClientCommandWire`/`EventWire`, `ServerMessage`/`ClientMessage` binary envelope). Depends only on `dawn-core` + serde + postcard -- no transport/runtime dependency (ADR-0041, ADR-0042) |
 | `dawn-ecs` | library | ECS World wrapper. Component / System definitions |

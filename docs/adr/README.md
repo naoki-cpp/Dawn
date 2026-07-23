@@ -28,6 +28,7 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 | [ADR-0028](ADR-0028-large-world-coordinates.md) | 大規模座標系 — 真スケール座標の方式比較（スパイク GO：B＋C2） | Proposed |
 | [ADR-0029](ADR-0029-true-scale-coordinates-implementation.md) | 真スケール座標の実装 — アンカー相対 f32（サーバ B）＋ 浮動原点（クライアント C2） | Accepted |
 | [ADR-0030](ADR-0030-steering-files-restructure.md) | ステアリング系ファイルの再構成（常時ロード文脈の軽量化 — Hook + ガイド分割） | Accepted |
+| [ADR-0044](ADR-0044-absolute-f64-coordinate-authority.md) | サーバー権威座標を絶対 f64 に統一する方針 | Proposed |
 
 ### Client / Communication
 
@@ -82,6 +83,7 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 | ADR | Title | Status |
 |---|---|---|
 | [ADR-0043](ADR-0043-client-side-prediction.md) | Client-Side Prediction and Motion Reconciliation | Proposed |
+| [ADR-0045](ADR-0045-unified-client-motion-state.md) | クライアント移動状態と表示積分の統合 | Proposed |
 
 ## References
 
