@@ -212,7 +212,12 @@ impl MotionPredictor {
     }
 
     /// Snap the track into the docked state. Docked tracks do not integrate.
-    pub fn dock(&mut self, position: [f64; 3], tick: u64) {
+    /// Returns `false` when the event is older than the latest authoritative
+    /// state already accepted by this track.
+    pub fn dock(&mut self, position: [f64; 3], tick: u64) -> bool {
+        if self.last_authoritative_tick.is_some_and(|last| tick < last) {
+            return false;
+        }
         self.position = position;
         self.velocity = [0.0; 3];
         self.input = MotionInput::Coast;
@@ -224,22 +229,29 @@ impl MotionPredictor {
         self.has_rendered = false;
         self.warp_render_position = None;
         self.warp_visual_speed_cap = None;
+        true
     }
 
     /// Leave the docked state with an explicit local/remote motion mode.
+    /// Returns `false` when the event is older than the latest authoritative
+    /// state already accepted by this track.
     pub fn undock(
         &mut self,
         position: [f64; 3],
         velocity: [f64; 3],
         tick: u64,
         predict_locally: bool,
-    ) {
+    ) -> bool {
+        if self.last_authoritative_tick.is_some_and(|last| tick < last) {
+            return false;
+        }
         self.reset(position, velocity, tick);
         if predict_locally {
             self.enable_prediction();
         } else {
             self.enable_dead_reckoning();
         }
+        true
     }
 
     pub fn state(&self) -> MotionState {
@@ -504,17 +516,29 @@ mod tests {
     #[test]
     fn docking_stops_integration_until_explicit_undock() {
         let mut track = MotionPredictor::default();
-        track.dock([10.0, 0.0, 0.0], 12);
+        assert!(track.dock([10.0, 0.0, 0.0], 12));
 
         track.advance(5.0);
         assert_eq!(track.state(), MotionState::Docked);
         assert_eq!(track.position(), [10.0, 0.0, 0.0]);
         assert_eq!(track.velocity(), [0.0; 3]);
 
-        track.undock([10.0, 0.0, 0.0], [4.0, 0.0, 0.0], 13, true);
+        assert!(track.undock([10.0, 0.0, 0.0], [4.0, 0.0, 0.0], 13, true));
         track.advance(1.0);
         assert_eq!(track.state(), MotionState::Prediction);
         assert!(track.position()[0] > 10.0);
+    }
+
+    #[test]
+    fn stale_dock_transitions_are_ignored() {
+        let mut track = MotionPredictor::default();
+        assert!(track.dock([10.0, 0.0, 0.0], 12));
+        assert!(track.undock([10.0, 0.0, 0.0], [4.0, 0.0, 0.0], 13, true));
+
+        assert!(!track.dock([20.0, 0.0, 0.0], 12));
+        assert!(!track.undock([20.0, 0.0, 0.0], [8.0, 0.0, 0.0], 11, false));
+        assert_eq!(track.state(), MotionState::Prediction);
+        assert_eq!(track.position(), [10.0, 0.0, 0.0]);
     }
 
     #[test]

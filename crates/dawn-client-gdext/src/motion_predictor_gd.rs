@@ -69,18 +69,24 @@ impl MotionPredictor {
     }
 
     #[func]
-    fn dock(&mut self, position: Vector3, tick: i64) {
-        self.core.dock(to_array(position), tick.max(0) as u64);
+    fn dock(&mut self, position: Vector3, tick: i64) -> bool {
+        self.core.dock(to_array(position), tick.max(0) as u64)
     }
 
     #[func]
-    fn undock(&mut self, position: Vector3, velocity: Vector3, tick: i64, predict_locally: bool) {
+    fn undock(
+        &mut self,
+        position: Vector3,
+        velocity: Vector3,
+        tick: i64,
+        predict_locally: bool,
+    ) -> bool {
         self.core.undock(
             to_array(position),
             to_array(velocity),
             tick.max(0) as u64,
             predict_locally,
-        );
+        )
     }
 
     #[func]

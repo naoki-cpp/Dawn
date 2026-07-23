@@ -565,41 +565,51 @@ func _handle_ship_docked(p: Dictionary) -> void:
 	var tick: int = p.get("tick", 0) as int
 	if not _ships.has(ship_id):
 		return
+	if ship_id == _player_ship_id:
+		var latest_tick: int = _session.dock_status().get("latest_dock_state_tick", -1) as int
+		if tick < latest_tick:
+			return
+	var ship := _ships[ship_id] as Node3D
+	var dock_pos := _ship_position(ship)
+	var station_name := _station_name(station_id)
 	for entry: Variant in _stations:
 		var station: Dictionary = entry as Dictionary
 		if (station.get("station_id", -1) as int) != station_id:
 			continue
 		var station_pos := _position_components(station.get("position", PackedFloat64Array()))
-		(_ships[ship_id] as Node3D).call(
-			"dock_motion",
-			_server_components_to_godot(station_pos),
-			tick)
-		if ship_id == _player_ship_id:
-			_session.apply_dock_event(ship_id, station_id, station.get("name", "") as String, tick)
-			_sync_session_state()
+		dock_pos = _server_components_to_godot(station_pos)
+		station_name = station.get("name", "") as String
 		break
+	var motion_accepted: bool = ship.call("dock_motion", dock_pos, tick) as bool
+	if not motion_accepted:
+		return
+	if ship_id == _player_ship_id and _session.apply_dock_event(
+		ship_id, station_id, station_name, tick):
+		_sync_session_state()
 
 func _handle_ship_undocked(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
+	var tick: int = p.get("tick", _current_tick) as int
+	if ship_id == _player_ship_id:
+		var latest_tick: int = _session.dock_status().get("latest_dock_state_tick", -1) as int
+		if tick < latest_tick:
+			return
 	if _ships.has(ship_id):
-		(_ships[ship_id] as Node3D).call(
+		var ship := _ships[ship_id] as Node3D
+		var motion_accepted: bool = ship.call(
 			"undock_motion",
-			_ship_position(_ships[ship_id] as Node3D),
+			_ship_position(ship),
 			Vector3.ZERO,
-			p.get("tick", _current_tick) as int)
+			tick) as bool
+		if not motion_accepted:
+			return
 	if ship_id == _player_ship_id:
 		var station_id: int = p.get("station_id", -1) as int
 		_nearby_station_ids.clear()
 		if station_id >= 0:
 			_nearby_station_ids.append(station_id)
-		_session.apply_undock_event(ship_id, p.get("tick", 0) as int)
-		_sync_session_state()
-
-func _stop_ship_motion(ship_id: int) -> void:
-	if not _ships.has(ship_id):
-		return
-	var ship := _ships[ship_id] as Node3D
-	ship.call("reset_motion", _ship_position(ship), Vector3.ZERO, _current_tick)
+		if _session.apply_undock_event(ship_id, tick):
+			_sync_session_state()
 
 func _ship_position(ship: Node3D) -> Vector3:
 	return ship.global_position if ship.is_inside_tree() else ship.position
@@ -804,7 +814,9 @@ func _apply_loadout_side_effects() -> void:
 	if not _session.is_docked() and _market_surface.is_open():
 		_market_surface.set_open(false)
 	if _session.is_docked() and _player_ship_id >= 0:
-		_stop_ship_motion(_player_ship_id)
+		var docked_ship := _ships.get(_player_ship_id) as Node3D
+		if docked_ship != null:
+			docked_ship.call("dock_motion", _ship_position(docked_ship), _loadout.tick())
 	var snapshot: Dictionary = _loadout.hud_snapshot()
 	_hud_surface.set_player_fitting(
 		snapshot.get("modules", []) as Array,

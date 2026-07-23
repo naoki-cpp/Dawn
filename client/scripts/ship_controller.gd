@@ -254,22 +254,24 @@ func reset_motion(godot_pos: Vector3, server_vel: Vector3, tick: int) -> void:
 
 ## Enter the explicit docked state. The Rust track owns the zero-velocity and
 ## no-integration invariant; this adapter applies the authoritative position.
-func dock_motion(godot_pos: Vector3, tick: int) -> void:
+func dock_motion(godot_pos: Vector3, tick: int) -> bool:
+	if _motion_ready and not _motion.dock(godot_pos, tick):
+		return false
 	global_position = godot_pos
 	_velocity = Vector3.ZERO
 	_thrust_dir = Vector3.ZERO
-	if _motion_ready:
-		_motion.dock(godot_pos, tick)
+	return true
 
 ## Leave the explicit docked state and choose prediction/dead-reckoning based
 ## on which ship owns this controller.
-func undock_motion(godot_pos: Vector3, server_vel: Vector3, tick: int) -> void:
+func undock_motion(godot_pos: Vector3, server_vel: Vector3, tick: int) -> bool:
 	var godot_vel := _server_velocity_to_godot(server_vel)
+	if _motion_ready and not _motion.undock(godot_pos, godot_vel, tick, _is_player):
+		return false
 	global_position = godot_pos
 	_velocity = godot_vel
 	_thrust_dir = Vector3.ZERO
-	if _motion_ready:
-		_motion.undock(godot_pos, godot_vel, tick, _is_player)
+	return true
 
 func get_speed_server() -> float:
 	return _velocity.length() / WORLD_SCALE
