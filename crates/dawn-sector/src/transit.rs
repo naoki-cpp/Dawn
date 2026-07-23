@@ -372,6 +372,7 @@ mod tests {
             ship: Box::new(ShipSnapshot {
                 ship_id: ShipId::new(NodeId(0), 7),
                 ship_type_id: ShipTypeId(1),
+                absolute_position: None,
                 position: Position::new(1.0, 2.0, 3.0),
                 anchor: dawn_core::AnchorId(0),
                 velocity: Velocity::new(4.0, 5.0, 6.0),

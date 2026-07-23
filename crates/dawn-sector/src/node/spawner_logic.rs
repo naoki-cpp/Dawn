@@ -367,7 +367,25 @@ impl<S: EventStore> SimulationNode<S> {
         // the Sector-origin anchor, but a rebased ship's `position` offset is
         // relative to its saved anchor, so restore that to keep absolute position.
         if let Some(&entity) = self.ships.index.get(&ship.ship_id) {
-            self.world.set_ship_anchor(entity, ship.anchor);
+            if let Some(absolute_position) = ship.absolute_position {
+                // New snapshots preserve the f64 authority. Keep the saved
+                // anchor when it is still known so restore does not silently
+                // change the representation of an anchored ship.
+                if let Some(offset) = self
+                    .anchor_table
+                    .to_relative(ship.anchor, absolute_position)
+                {
+                    self.world.set_ship_anchor(entity, ship.anchor);
+                    if let Some(mut position) = self.world.get_mut::<PositionComp>(entity) {
+                        position.0 = offset;
+                    }
+                } else {
+                    self.place_entity_at_absolute(entity, absolute_position);
+                }
+            } else {
+                // Pre-ADR-0044 snapshots only contain the local offset.
+                self.world.set_ship_anchor(entity, ship.anchor);
+            }
         }
 
         let base = self

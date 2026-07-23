@@ -30,8 +30,8 @@
 use std::{fs, io, path::Path};
 
 use dawn_core::{
-    fitting::FittingSnapshot, NodeId, Position, SectorBounds, SectorId, ShipId, ShipTypeId, Tick,
-    Velocity,
+    fitting::FittingSnapshot, AbsolutePosition, NodeId, Position, SectorBounds, SectorId, ShipId,
+    ShipTypeId, Tick, Velocity,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -48,6 +48,15 @@ use std::collections::BTreeMap;
 pub struct ShipSnapshot {
     pub ship_id: ShipId,
     pub ship_type_id: ShipTypeId,
+    /// Authoritative Sector-frame position (ADR-0044).
+    ///
+    /// `None` is only used when reading a pre-ADR-0044 snapshot. New
+    /// snapshots always populate this field; restoration falls back to
+    /// `position` for those legacy files.
+    #[serde(default)]
+    pub absolute_position: Option<AbsolutePosition>,
+    /// Anchor-relative offset retained for legacy snapshot compatibility and
+    /// as the local simulation representation.
     pub position: Position,
     /// Coordinate anchor the `position` offset is relative to (ADR-0029).
     /// Defaults to the Sector-origin anchor (id 0) for pre-anchor snapshots.
@@ -144,6 +153,7 @@ mod tests {
             ships: vec![ShipSnapshot {
                 ship_id: ShipId::new(NodeId(0), 0),
                 ship_type_id: ShipTypeId(1),
+                absolute_position: Some(AbsolutePosition::new(100.0, 200.0, 300.0)),
                 position: Position::new(100.0, 200.0, 300.0),
                 anchor: dawn_core::AnchorId(0),
                 velocity: dawn_core::Velocity::new(1.0, 0.0, 0.0),

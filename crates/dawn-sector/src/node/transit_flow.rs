@@ -212,6 +212,7 @@ impl<S: EventStore> SimulationNode<S> {
         let snapshot = ShipSnapshot {
             ship_id,
             ship_type_id,
+            absolute_position: None,
             position: pos,
             // Placeholder only: `AnchorId(0)` is a real, specific anchor
             // (Helios, Sector 0's star — see `anchor.rs`), not a "this
