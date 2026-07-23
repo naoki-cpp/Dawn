@@ -19,7 +19,7 @@ use crate::fitting::{FittingSnapshot, ModuleId, SlotKind};
 use crate::item::ItemId;
 use crate::navigation::{AnchorId, JumpGateId, StarSystemId, StationId};
 use crate::ship_type::ShipTypeId;
-use crate::{Position, SectorId, ShipId, Tick, Velocity};
+use crate::{AbsolutePosition, Position, SectorId, ShipId, Tick, Velocity};
 use serde::{Deserialize, Serialize};
 
 /// Every domain event that can be appended to the Event Log.
@@ -462,7 +462,8 @@ pub struct JumpGateUsed {
     pub gate_id: JumpGateId,
     pub from_sector: SectorId,
     pub to_sector: SectorId,
-    pub entry_pos: Position,
+    /// Authoritative destination position in the destination Sector frame.
+    pub entry_pos: AbsolutePosition,
     pub tick: Tick,
 }
 
@@ -639,7 +640,7 @@ mod tests {
             gate_id: crate::navigation::JumpGateId(0),
             from_sector: SectorId(0),
             to_sector: SectorId(1),
-            entry_pos: Position::new(0.0, 0.0, 0.0),
+            entry_pos: AbsolutePosition::ORIGIN,
             tick: Tick(10),
         });
         assert_eq!(event.ship_id(), id);

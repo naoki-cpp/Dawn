@@ -133,7 +133,7 @@ impl<S: EventStore> SimulationNode<S> {
         gate_id: JumpGateId,
         from: SectorId,
         to: SectorId,
-        entry_pos: Position,
+        entry_pos: dawn_core::AbsolutePosition,
     ) {
         self.event_store
             .append(DomainEvent::JumpGateUsed(JumpGateUsed {
@@ -314,7 +314,7 @@ impl<S: EventStore> SimulationNode<S> {
         self.import_transit(ship, from, entry_pos, entry_pos_abs);
         if let Some(gate_id) = gate_id {
             let to = self.sector_id();
-            self.append_jump_events(ship_id, gate_id, from, to, entry_pos);
+            self.append_jump_events(ship_id, gate_id, from, to, entry_pos_abs.into());
         }
     }
 

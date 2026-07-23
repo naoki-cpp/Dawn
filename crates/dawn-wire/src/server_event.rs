@@ -2,7 +2,7 @@ use dawn_core::DomainEvent;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{PosWire, VelWire};
+use crate::{AbsPosWire, PosWire, VelWire};
 
 /// Every message the server sends to a client over the WebSocket connection,
 /// wrapped by `ServerMessage::Event` and postcard-encoded (ADR-0042).
@@ -115,7 +115,7 @@ pub enum EventWire {
         gate_id: u32,
         from_sector: u8,
         to_sector: u8,
-        entry_pos: PosWire,
+        entry_pos: AbsPosWire,
         tick: u64,
     },
     StarSystemChanged {

@@ -490,7 +490,7 @@ Ship passed through a Jump Gate to another Sector (ADR-0009). Does not replace `
 | `gate_id` | `JumpGateId` | ✓ | Jump Gate used |
 | `from_sector` | `SectorId` | ✓ | originating Sector |
 | `to_sector` | `SectorId` | ✓ | destination Sector |
-| `entry_pos` | `Position` | ✓ | spawn coordinates in the destination Sector |
+| `entry_pos` | `AbsolutePosition` | ✓ | authoritative spawn coordinates in the destination Sector frame |
 | `tick` | `Tick` | ✓ | Tick the gate transit was finalized |
 
 **Status:** ✅ implemented (Step 7.5 `append_jump_events`).

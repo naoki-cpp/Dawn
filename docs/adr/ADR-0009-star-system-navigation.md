@@ -102,7 +102,7 @@ pub struct JumpGateUsed {
     pub gate_id    : JumpGateId,
     pub from_sector: SectorId,
     pub to_sector  : SectorId,
-    pub entry_pos  : Position,   // 宛先 Sector の出現座標
+    pub entry_pos  : AbsolutePosition,   // 宛先 Sector の絶対出現座標
     pub tick       : Tick,
 }
 

@@ -21,8 +21,8 @@
 // (ws_server.rs, dawn-sector-node, tests) needed no changes.
 pub use dawn_wire::{
     client_command_from_wire, client_command_wire_json_schema, domain_event_to_event_wire,
-    event_wire_json_schema, market_command_wire_json_schema, ClientCommandWire, ClientMessage,
-    EventWire, HelloMessage, InitialStateWire, MarketCommandWire, MarketOrderWire,
+    event_wire_json_schema, market_command_wire_json_schema, AbsPosWire, ClientCommandWire,
+    ClientMessage, EventWire, HelloMessage, InitialStateWire, MarketCommandWire, MarketOrderWire,
     MarketSnapshotWire, PlayerLoadoutWire, PosWire, ResumeIdentity, ServerMessage, VelWire,
     WarpTargetWire,
 };
@@ -757,7 +757,7 @@ mod tests {
                 gate_id: JumpGateId(4),
                 from_sector: dawn_core::SectorId(0),
                 to_sector: dawn_core::SectorId(1),
-                entry_pos: dawn_core::Position::new(5.0, 6.0, 7.0),
+                entry_pos: dawn_core::AbsolutePosition::new(5.0, 6.0, 7.0),
                 tick: dawn_core::Tick(12),
             },
         ))
@@ -769,7 +769,7 @@ mod tests {
                 gate_id: 4,
                 from_sector: 0,
                 to_sector: 1,
-                entry_pos: PosWire {
+                entry_pos: AbsPosWire {
                     x: 5.0,
                     y: 6.0,
                     z: 7.0,
