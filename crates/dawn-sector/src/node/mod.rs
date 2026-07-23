@@ -537,7 +537,7 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn ship_absolute(&self, ship_id: ShipId) -> Option<dawn_core::AbsolutePosition> {
         let entity = *self.ships.index.get(&ship_id)?;
         let offset = self.world.get::<PositionComp>(entity)?.0;
-        Some(self.entity_absolute_f64(entity, offset).into())
+        Some(self.entity_absolute_f64(entity, offset))
     }
 
     /// Whether a ship is in committed warp. AoI delivery uses this to keep

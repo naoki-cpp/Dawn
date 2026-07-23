@@ -210,12 +210,7 @@ impl<S: EventStore> SimulationNode<S> {
         self.ships
             .index
             .iter()
-            .map(|(&id, &entity)| {
-                (
-                    id,
-                    dawn_core::AbsolutePosition::from(self.entity_abs_pos_f64(entity)),
-                )
-            })
+            .map(|(&id, &entity)| (id, self.entity_abs_pos_f64(entity)))
             .collect()
     }
 

@@ -141,8 +141,7 @@ impl<S: EventStore> SimulationNode<S> {
                         g.position,
                         g.activation_radius * WARP_ARRIVAL_FACTOR,
                         warp.auto_jump.then_some(gate_id),
-                        self.anchor_table
-                            .nearest_anchor(g.from_sector, g.abs_m.into()),
+                        self.anchor_table.nearest_anchor(g.from_sector, g.abs_m),
                         g.abs_m,
                     )
                 }),
@@ -219,7 +218,7 @@ impl<S: EventStore> SimulationNode<S> {
                         ship_id,
                         pos,
                         vel,
-                        start_abs,
+                        start_abs.as_array(),
                         arrival_abs,
                         vel,
                         total,
@@ -480,7 +479,7 @@ impl<S: EventStore> SimulationNode<S> {
         // the same case before this method became the sole flight target, not
         // just the rebase point — ADR-0029 absolute-frame transit).
         if len <= a || len <= f64::EPSILON {
-            return start;
+            return start.into();
         }
         [
             target_abs[0] - d[0] / len * a,
@@ -503,7 +502,8 @@ impl<S: EventStore> SimulationNode<S> {
                 dest_world.x as f64,
                 dest_world.y as f64,
                 dest_world.z as f64,
-            ],
+            ]
+            .into(),
         )
     }
 
@@ -991,7 +991,7 @@ mod tests {
             .expect("demo gate 0 exists");
         let expected_anchor = node
             .anchor_table()
-            .nearest_anchor(gate.from_sector, gate.abs_m.into())
+            .nearest_anchor(gate.from_sector, gate.abs_m)
             .expect("gate sector has at least one anchor");
         assert_eq!(
             node.get_ship_anchor(ship_id),
