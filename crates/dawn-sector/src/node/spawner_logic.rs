@@ -295,7 +295,7 @@ impl<S: EventStore> SimulationNode<S> {
         let world = [abs_pos.x as f64, abs_pos.y as f64, abs_pos.z as f64];
         let anchor = self
             .anchor_table
-            .nearest_anchor(self.sector_id, world)
+            .nearest_anchor(self.sector_id, world.into())
             .unwrap_or(dawn_core::AnchorId(0));
         let offset = match self.anchor_table.abs(anchor) {
             Some(a) => Position::new(
@@ -340,7 +340,7 @@ impl<S: EventStore> SimulationNode<S> {
         let world = world.into();
         let anchor = self
             .anchor_table
-            .nearest_anchor(self.sector_id, world)
+            .nearest_anchor(self.sector_id, world.into())
             .unwrap_or(dawn_core::AnchorId(0));
         let offset = match self.anchor_table.abs(anchor) {
             Some(a) => Position::new(

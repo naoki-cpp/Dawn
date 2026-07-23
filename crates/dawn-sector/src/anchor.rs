@@ -12,7 +12,7 @@
 //! Investigation B).
 
 use crate::galaxy::Galaxy;
-use dawn_core::{AnchorId, CelestialBodyId, Position, SectorId};
+use dawn_core::{AbsolutePosition, AnchorId, CelestialBodyId, Position, SectorId};
 use std::collections::HashMap;
 
 /// Maps each anchor (celestial body) to its absolute position in the
@@ -22,7 +22,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Default)]
 pub struct AnchorTable {
     /// Anchor absolute position (Sector-local, metres) keyed by anchor.
-    abs: HashMap<AnchorId, [f64; 3]>,
+    abs: HashMap<AnchorId, AbsolutePosition>,
     /// Which Sector each anchor belongs to (for nearest-anchor scoping).
     sector: HashMap<AnchorId, SectorId>,
 }
@@ -37,7 +37,7 @@ impl AnchorTable {
             let id = AnchorId::from(b.id);
             // Use the f64 anchor source (ADR-0029), not the f32 `position`, so
             // anchors stay precise at true-AU distances.
-            abs.insert(id, b.abs_m.into());
+            abs.insert(id, b.abs_m);
             sector.insert(id, b.sector);
         }
         Self { abs, sector }
@@ -45,26 +45,26 @@ impl AnchorTable {
 
     /// Absolute position (Sector-local, metres) of an anchor, or `None` if
     /// unknown.
-    pub fn abs(&self, anchor: AnchorId) -> Option<[f64; 3]> {
+    pub fn abs(&self, anchor: AnchorId) -> Option<AbsolutePosition> {
         self.abs.get(&anchor).copied()
     }
 
     /// The full anchor → absolute-position map (Sector-local, metres). Passed to
     /// the Combat System so it can resolve ships' absolute positions across
     /// different anchors (ADR-0029 step 3).
-    pub fn abs_map(&self) -> &HashMap<AnchorId, [f64; 3]> {
+    pub fn abs_map(&self) -> &HashMap<AnchorId, AbsolutePosition> {
         &self.abs
     }
 
     /// Absolute position of a ship given its anchor and f32 offset.
     /// `anchor_abs + offset`, computed in f64.
-    pub fn absolute(&self, anchor: AnchorId, offset: Position) -> Option<[f64; 3]> {
+    pub fn absolute(&self, anchor: AnchorId, offset: Position) -> Option<AbsolutePosition> {
         let a = self.abs(anchor)?;
-        Some([
+        Some(AbsolutePosition::new(
             a[0] + offset.x as f64,
             a[1] + offset.y as f64,
             a[2] + offset.z as f64,
-        ])
+        ))
     }
 
     /// Re-express a Sector-frame absolute point relative to `anchor`, i.e. the
@@ -72,7 +72,7 @@ impl AnchorTable {
     /// cast to f32 once. Exact when `abs` is near `anchor` (ship-scale
     /// offsets); ADR-0029's precision guarantee does not extend to points far
     /// from `anchor`.
-    pub fn to_relative(&self, anchor: AnchorId, abs: [f64; 3]) -> Option<Position> {
+    pub fn to_relative(&self, anchor: AnchorId, abs: AbsolutePosition) -> Option<Position> {
         let a = self.abs(anchor)?;
         Some(Position::new(
             (abs[0] - a[0]) as f32,
@@ -95,13 +95,12 @@ impl AnchorTable {
     pub fn distance(&self, a: (AnchorId, Position), b: (AnchorId, Position)) -> Option<f64> {
         let pa = self.absolute(a.0, a.1)?;
         let pb = self.absolute(b.0, b.1)?;
-        let d = [pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]];
-        Some((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt())
+        Some(pa.distance(pb))
     }
 
     /// The anchor in `sector` nearest to the absolute point `world` (metres).
     /// Used to pick a ship's current anchor (e.g. on warp arrival).
-    pub fn nearest_anchor(&self, sector: SectorId, world: [f64; 3]) -> Option<AnchorId> {
+    pub fn nearest_anchor(&self, sector: SectorId, world: AbsolutePosition) -> Option<AnchorId> {
         self.abs
             .iter()
             .filter(|(id, _)| self.sector.get(id) == Some(&sector))
@@ -117,7 +116,7 @@ impl AnchorTable {
     /// origin in `sector` — the star. Ships start anchored here (ADR-0029 §4
     /// step 2: all ships initially anchor on the star, a semantic no-op).
     pub fn sector_origin_anchor(&self, sector: SectorId) -> Option<AnchorId> {
-        self.nearest_anchor(sector, [0.0, 0.0, 0.0])
+        self.nearest_anchor(sector, AbsolutePosition::ORIGIN)
     }
 
     /// Anchor for a specific body (convenience over `AnchorId::from`).
@@ -126,9 +125,8 @@ impl AnchorTable {
     }
 }
 
-fn sq_dist(a: [f64; 3], b: [f64; 3]) -> f64 {
-    let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-    d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+fn sq_dist(a: AbsolutePosition, b: AbsolutePosition) -> f64 {
+    a.distance_squared(b)
 }
 
 #[cfg(test)]
@@ -167,8 +165,7 @@ mod tests {
             .unwrap();
         let anchor_abs = t.abs(AnchorId(1)).unwrap();
         assert_eq!(
-            anchor_abs,
-            forge.abs_m.as_array(),
+            anchor_abs, forge.abs_m,
             "anchor must use the f64 abs_m source"
         );
     }
@@ -239,8 +236,8 @@ mod tests {
         // Two anchors ~4.2 AU apart (Earth-ish and Jupiter-ish along x), in two
         // sectors' worth of magnitude — well into f32's lossy regime.
         let mut abs = HashMap::new();
-        abs.insert(AnchorId(10), [1.0 * AU_M, 0.0, 0.0]);
-        abs.insert(AnchorId(11), [5.2 * AU_M, 3.0e10, -2.0e10]);
+        abs.insert(AnchorId(10), [1.0 * AU_M, 0.0, 0.0].into());
+        abs.insert(AnchorId(11), [5.2 * AU_M, 3.0e10, -2.0e10].into());
         let mut sector = HashMap::new();
         sector.insert(AnchorId(10), SectorId(0));
         sector.insert(AnchorId(11), SectorId(0));

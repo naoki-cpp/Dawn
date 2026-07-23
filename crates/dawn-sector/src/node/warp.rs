@@ -303,7 +303,7 @@ impl<S: EventStore> SimulationNode<S> {
             .world
             .ship_anchor(entity)
             .and_then(|a| self.anchor_table.abs(a))
-            .unwrap_or([0.0, 0.0, 0.0]);
+            .unwrap_or(dawn_core::AbsolutePosition::ORIGIN);
         let (new_pos, new_vel, arrived) = if elapsed > total {
             // One tick past the final step: settle and stop. The move tick at
             // `elapsed == total` already landed exactly on arrival_abs (below,
@@ -427,7 +427,7 @@ impl<S: EventStore> SimulationNode<S> {
         // f32 PositionComp, which is ~tens of km off near a true-AU anchor
         // (ADR-0029). Fall back to the offset compose if arrival is unset.
         let world = if arrival_abs != [0.0, 0.0, 0.0] {
-            arrival_abs
+            dawn_core::AbsolutePosition::from(arrival_abs)
         } else {
             let offset = self.world.get::<PositionComp>(entity)?.0;
             self.anchor_table.absolute(cur_anchor, offset)?

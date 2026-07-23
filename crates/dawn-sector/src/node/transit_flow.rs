@@ -333,7 +333,7 @@ impl<S: EventStore> SimulationNode<S> {
         };
         let Some(to) = self
             .anchor_table
-            .nearest_anchor(self.sector_id, entry_pos_abs)
+            .nearest_anchor(self.sector_id, entry_pos_abs.into())
         else {
             return;
         };
