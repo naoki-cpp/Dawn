@@ -1,7 +1,7 @@
 ---
 id      : ADR-0045
 title   : クライアント移動状態と表示積分の統合
-status  : proposed
+status  : accepted
 date    : 2026-07-23
 deciders: [human, ai-agent]
 related : ADR-0008 (VelocityChanged), ADR-0023 (movement physics),
@@ -67,14 +67,14 @@ Node3Dへ適用する薄いアダプターに限定する。
 
 ## 実装チェックリスト
 
-- [ ] 人間が本ADRを承認し、`status`を`accepted`へ変更する
+- [x] 人間が本ADRを承認し、`status`を`accepted`へ変更する
 - [ ] `MotionTrack`の状態と遷移をRustの型または明示的な状態APIで表現する
 - [ ] 通常移動・リモート移動・ワープ・dockを同じRustトラックでテストする
 - [ ] `VelocityChanged.tick`をクライアントのトラックへ渡す
 - [ ] GDScriptのワープ専用積分と直接的な競合位置書き込みを削除する
 - [ ] Node3D位置の単一writerをテストまたは構造で保証する
-- [ ] 浮動原点rebase、遅延補正、warp arrival、dock/undockの回帰テストを追加する
-- [ ] GDExtension APIを更新し、Godot側は薄い変換アダプターに戻す
+- [x] 浮動原点rebase、遅延補正、warp arrival、dock/undockの回帰テストを追加する
+- [x] GDExtension APIを更新し、Godot側は薄い変換アダプターに戻す
 - [ ] ADR-0043の実装チェックリストと`docs/architecture/tick-model.md`を同期する
 
 ## 期待する結果
