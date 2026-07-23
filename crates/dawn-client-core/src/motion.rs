@@ -282,10 +282,28 @@ impl MotionPredictor {
         self.input = MotionInput::Coast;
     }
 
-    /// Apply a server velocity update without discarding the player's current
-    /// input. The following correction will still reconcile the exact position.
-    pub fn set_velocity(&mut self, velocity: [f64; 3]) {
+    /// Apply a server velocity update without rewinding the presentation clock.
+    ///
+    /// `VelocityChanged` carries no position, so the track cannot reconstruct a
+    /// past position from the event alone. It records the event's authority
+    /// tick for ordering, updates the velocity used by future integration, and
+    /// leaves the current predicted position/tick untouched. An accompanying
+    /// `MotionCorrection` supplies the authoritative position for the owner.
+    /// Returns `false` for stale events or events targeting a docked track.
+    pub fn set_velocity_at_tick(&mut self, velocity: [f64; 3], tick: u64) -> bool {
+        if self.state == MotionState::Docked
+            || self.last_authoritative_tick.is_some_and(|last| tick < last)
+        {
+            return false;
+        }
+        let rendered_position = self.has_rendered.then(|| self.predicted_position());
         self.velocity = velocity;
+        self.last_authoritative_tick = Some(tick);
+        if let Some(rendered_position) = rendered_position {
+            let base_position = add(self.position, scale(self.velocity, self.fractional_ticks));
+            self.render_correction = subtract(rendered_position, base_position);
+        }
+        true
     }
 
     /// Advance by a fractional number of server ticks.
@@ -577,6 +595,32 @@ mod tests {
         assert!(!predictor.reconcile([1.0, 0.0, 0.0], [9.0, 0.0, 0.0], 9));
         assert_eq!(predictor.position(), [5.0, 0.0, 0.0]);
         assert_eq!(predictor.velocity(), [1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn velocity_events_record_authority_tick_without_rewinding_prediction() {
+        let mut predictor = MotionPredictor::default();
+        predictor.reconcile([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], 10);
+        predictor.advance(2.5);
+        let rendered_before = predictor.predicted_position();
+
+        assert!(predictor.set_velocity_at_tick([2.0, 0.0, 0.0], 12));
+        assert_eq!(predictor.tick(), 12);
+        assert_eq!(predictor.velocity(), [2.0, 0.0, 0.0]);
+        assert_eq!(predictor.predicted_position(), rendered_before);
+
+        assert!(!predictor.set_velocity_at_tick([9.0, 0.0, 0.0], 11));
+        assert_eq!(predictor.velocity(), [2.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn velocity_events_do_not_reactivate_a_docked_track() {
+        let mut predictor = MotionPredictor::default();
+        assert!(predictor.dock([10.0, 0.0, 0.0], 12));
+
+        assert!(!predictor.set_velocity_at_tick([4.0, 0.0, 0.0], 13));
+        assert_eq!(predictor.velocity(), [0.0; 3]);
+        assert_eq!(predictor.state(), MotionState::Docked);
     }
 
     #[test]

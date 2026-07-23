@@ -111,9 +111,8 @@ func apply_origin_rebase_components(
 		if keep_player_fixed and id == player_ship_id:
 			continue
 		var ship := ships[id] as Node3D
-		ship.position += shift
-		if ship.has_method("rebase_motion"):
-			ship.call("rebase_motion", shift)
+		if ship.has_method("apply_origin_rebase"):
+			ship.call("apply_origin_rebase", shift)
 	if not keep_player_fixed and _camera != null:
 		_camera.global_position += shift
 		_camera.call("on_origin_rebased", shift)

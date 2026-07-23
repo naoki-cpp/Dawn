@@ -28,6 +28,10 @@ class FakeShip:
 	func rebase_motion(shift: Vector3) -> void:
 		motion_rebase_calls.append(shift)
 
+	func apply_origin_rebase(shift: Vector3) -> void:
+		position += shift
+		rebase_motion(shift)
+
 
 func test_clamped_marker_position_leaves_nearby_marker_unchanged() -> void:
 	var player := Vector3.ZERO

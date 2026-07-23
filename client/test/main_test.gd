@@ -22,6 +22,7 @@ class FakeShip:
 	extends Node3D
 
 	var velocity_calls: Array[Vector3] = []
+	var velocity_tick_calls: Array[int] = []
 	var thrust_calls: Array[Vector3] = []
 	var set_as_player_calls: int = 0
 	var clear_as_player_calls: int = 0
@@ -29,8 +30,10 @@ class FakeShip:
 	var dock_calls: Array[Dictionary] = []
 	var undock_calls: Array[Dictionary] = []
 
-	func set_velocity(v: Vector3) -> void:
+	func set_velocity(v: Vector3, tick: int = 0) -> bool:
 		velocity_calls.append(v)
+		velocity_tick_calls.append(tick)
+		return true
 
 	## WorldPresentation.attach_player_ship() calls this via ship.call(...);
 	## a real ship (ship_controller.gd) sets up player-only visuals here.
@@ -348,6 +351,21 @@ func test_motion_correction_reconciles_the_active_ship() -> void:
 	assert_vector(motion_call["position"]).is_equal(Vector3(10.0, 2.0, -30.0))
 	assert_vector(motion_call["velocity"]).is_equal(Vector3(4.0, 5.0, -6.0))
 	assert_int(motion_call["tick"]).is_equal(42)
+	ship.free()
+
+
+func test_velocity_changed_passes_the_authority_tick_to_the_ship() -> void:
+	var ship := FakeShip.new()
+	_main.add_child(ship)
+	_main._ships = {1: ship}
+
+	_main._handle_velocity_changed({
+		"ship_id": 1,
+		"velocity": {"dx": 4.0, "dy": 5.0, "dz": -6.0},
+		"tick": 42,
+	})
+
+	assert_array(ship.velocity_tick_calls).contains_exactly([42])
 	ship.free()
 
 

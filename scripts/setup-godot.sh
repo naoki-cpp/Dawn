@@ -106,6 +106,18 @@ initialize_gdunit() {
 		"$gdunit_dir/plugin.gd" \
 		'ProjectSettings.get_setting("debug/gdscript/warnings/exclude_addons")' \
 		'ProjectSettings.get_setting("debug/gdscript/warnings/exclude_addons", false)'
+	replace_if_present \
+		"$gdunit_dir/src/monitor/GodotGdErrorMonitor.gd" \
+		$'var _eof: int\n' \
+		$'var _eof: int = 0\n'
+	replace_if_present \
+		"$gdunit_dir/src/monitor/GodotGdErrorMonitor.gd" \
+		$'func collect_full_logs() -> PackedStringArray:\n\tawait (Engine.get_main_loop() as SceneTree).process_frame\n\tawait (Engine.get_main_loop() as SceneTree).physics_frame\n\n\tvar file := FileAccess.open(_godot_log_file, FileAccess.READ)\n\tfile.seek(_eof)' \
+		$'func collect_full_logs() -> PackedStringArray:\n\tawait (Engine.get_main_loop() as SceneTree).process_frame\n\tawait (Engine.get_main_loop() as SceneTree).physics_frame\n\n\tvar file := FileAccess.open(_godot_log_file, FileAccess.READ)\n\tif file == null:\n\t\treturn PackedStringArray()\n\tfile.seek(_eof)'
+	replace_if_present \
+		"$gdunit_dir/src/monitor/GodotGdErrorMonitor.gd" \
+		$'func _collect_log_entries(force_collect_reports: bool) -> Array[ErrorLogEntry]:\n\tvar file := FileAccess.open(_godot_log_file, FileAccess.READ)\n\tfile.seek(_eof)' \
+		$'func _collect_log_entries(force_collect_reports: bool) -> Array[ErrorLogEntry]:\n\tvar file := FileAccess.open(_godot_log_file, FileAccess.READ)\n\tif file == null:\n\t\treturn []\n\tfile.seek(_eof)'
 
 	mkdir -p "$client_dir/.godot-test-logs"
 

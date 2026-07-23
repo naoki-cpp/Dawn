@@ -105,8 +105,9 @@ impl MotionPredictor {
     }
 
     #[func]
-    fn set_velocity(&mut self, velocity: Vector3) {
-        self.core.set_velocity(to_array(velocity));
+    fn set_velocity(&mut self, velocity: Vector3, tick: i64) -> bool {
+        self.core
+            .set_velocity_at_tick(to_array(velocity), tick.max(0) as u64)
     }
 
     #[func]

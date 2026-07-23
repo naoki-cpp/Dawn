@@ -156,24 +156,28 @@ func configure_motion(max_speed: float, mass: float, inertia_modifier: float, se
 
 ## VelocityChanged イベントで速度を更新する（ADR-0008）。
 ## server_vel はサーバー座標系の速度ベクトル（units/tick）。
-func set_velocity(server_vel: Vector3) -> void:
-	_velocity = _server_velocity_to_godot(server_vel)
+func set_velocity(server_vel: Vector3, tick: int = 0) -> bool:
+	var godot_vel := _server_velocity_to_godot(server_vel)
 	if _motion_ready:
+		if not _motion.set_velocity(godot_vel, tick):
+			return false
 		## Warp velocity is not governed by the normal fitted movement profile.
 		## The shared Rust track owns the capped presentation until PositionSnap
 		## resets it.
-		if _is_player and _velocity.length() > VISUAL_SPEED_CAP:
+		if _is_player and godot_vel.length() > VISUAL_SPEED_CAP:
 			_motion.begin_warp(VISUAL_SPEED_CAP)
-		_motion.set_velocity(_velocity)
+	_velocity = godot_vel
+	return true
 
 ## Snap the ship to a Godot-space position (jump-gate teleport, warp-arrival
 ## snap). main.gd converts from server space via its WorldSpace before calling.
 func update_target(godot_pos: Vector3, tick: int = 0) -> void:
 	reset_motion(godot_pos, Vector3.ZERO, tick)
 
-## Shift the Rust motion track with the rendered node during a floating-origin
-## rebase. The node position itself is moved by WorldPresentation.
-func rebase_motion(shift: Vector3) -> void:
+## The only presentation seam that moves a ship for a floating-origin rebase.
+## Keep the Node3D and its Rust motion track in the same coordinate frame.
+func apply_origin_rebase(shift: Vector3) -> void:
+	position += shift
 	if _motion_ready:
 		_motion.rebase(shift)
 

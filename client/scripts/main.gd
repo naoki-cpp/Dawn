@@ -549,10 +549,14 @@ func _handle_position_snap(p: Dictionary) -> void:
 			server_pos[2] + pg.z / WORLD_SCALE])
 		_presentation.apply_origin_rebase_components(new_origin, true, _player_ship_id, _ships)
 	else:
-		_set_ship_position(_ships[ship_id] as Node3D, _world.to_godot_components(
-			server_pos[0], server_pos[1], server_pos[2]))
+		(_ships[ship_id] as Node3D).call(
+			"reset_motion",
+			_world.to_godot_components(server_pos[0], server_pos[1], server_pos[2]),
+			Vector3.ZERO,
+			_current_tick)
 	var ship := _ships[ship_id] as Node3D
-	ship.call("reset_motion", _ship_position(ship), Vector3.ZERO, _current_tick)
+	if ship_id == _player_ship_id:
+		ship.call("reset_motion", _ship_position(ship), Vector3.ZERO, _current_tick)
 
 ## Docking is authoritative server state. The server stops the ship
 ## immediately, but without an explicit client event the ship_controller keeps
@@ -613,12 +617,6 @@ func _handle_ship_undocked(p: Dictionary) -> void:
 
 func _ship_position(ship: Node3D) -> Vector3:
 	return ship.global_position if ship.is_inside_tree() else ship.position
-
-func _set_ship_position(ship: Node3D, godot_pos: Vector3) -> void:
-	if ship.is_inside_tree():
-		ship.global_position = godot_pos
-	else:
-		ship.position = godot_pos
 
 # -- Jump Gate (ADR-0009) -----------------------------------------------------
 
@@ -1100,12 +1098,12 @@ func _handle_velocity_changed(p: Dictionary) -> void:
 		return
 
 	var server_vel := _velocity_from_dict(p)
-	(_ships[ship_id] as Node3D).call("set_velocity", server_vel)
+	var tick: int = p.get("tick", 0) as int
+	(_ships[ship_id] as Node3D).call("set_velocity", server_vel, tick)
 
 	## Warp arrival is corrected by the server's PositionSnap (ADR-0029), not by
 	## client-side dead-reckoning detection.
 
-	var tick: int = p.get("tick", 0) as int
 	_session.advance_tick_from_event(tick, _loadout)
 	_sync_session_state()
 
