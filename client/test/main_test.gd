@@ -52,6 +52,16 @@ class FakeShip:
 		velocity_calls.append(v)
 		thrust_calls.append(Vector3.ZERO)
 
+	func dock_motion(p: Vector3, _tick: int) -> void:
+		position = p
+		velocity_calls.append(Vector3.ZERO)
+		thrust_calls.append(Vector3.ZERO)
+
+	func undock_motion(p: Vector3, v: Vector3, _tick: int) -> void:
+		position = p
+		velocity_calls.append(v)
+		thrust_calls.append(Vector3.ZERO)
+
 	func reconcile_motion(p: Vector3, v: Vector3, _tick: int) -> void:
 		position = p
 		velocity_calls.append(v)

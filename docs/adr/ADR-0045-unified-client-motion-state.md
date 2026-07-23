@@ -68,8 +68,8 @@ Node3Dへ適用する薄いアダプターに限定する。
 ## 実装チェックリスト
 
 - [x] 人間が本ADRを承認し、`status`を`accepted`へ変更する
-- [ ] `MotionTrack`の状態と遷移をRustの型または明示的な状態APIで表現する
-- [ ] 通常移動・リモート移動・ワープ・dockを同じRustトラックでテストする
+- [x] `MotionTrack`の状態と遷移をRustの型または明示的な状態APIで表現する
+- [x] 通常移動・リモート移動・ワープ・dockを同じRustトラックでテストする
 - [ ] `VelocityChanged.tick`をクライアントのトラックへ渡す
 - [ ] GDScriptのワープ専用積分と直接的な競合位置書き込みを削除する
 - [ ] Node3D位置の単一writerをテストまたは構造で保証する

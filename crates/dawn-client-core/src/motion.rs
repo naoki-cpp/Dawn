@@ -23,10 +23,13 @@ pub enum MotionInput {
     Brake,
 }
 
+/// The presentation state owned by one client motion track.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MotionMode {
+pub enum MotionState {
     Prediction,
     DeadReckoning,
+    WarpPresentation,
+    Docked,
 }
 
 /// Runtime movement values needed to mirror the server's movement system.
@@ -109,7 +112,7 @@ impl MotionProfile {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MotionPredictor {
     profile: MotionProfile,
-    mode: MotionMode,
+    state: MotionState,
     position: [f64; 3],
     velocity: [f64; 3],
     input: MotionInput,
@@ -118,6 +121,8 @@ pub struct MotionPredictor {
     last_authoritative_tick: Option<u64>,
     render_correction: [f64; 3],
     has_rendered: bool,
+    warp_render_position: Option<[f64; 3]>,
+    warp_visual_speed_cap: Option<f64>,
 }
 
 impl Default for MotionPredictor {
@@ -130,7 +135,7 @@ impl MotionPredictor {
     pub fn new(profile: MotionProfile, position: [f64; 3], velocity: [f64; 3], tick: u64) -> Self {
         Self {
             profile,
-            mode: MotionMode::Prediction,
+            state: MotionState::Prediction,
             position,
             velocity,
             input: MotionInput::Coast,
@@ -139,6 +144,8 @@ impl MotionPredictor {
             last_authoritative_tick: Some(tick),
             render_correction: [0.0; 3],
             has_rendered: false,
+            warp_render_position: None,
+            warp_visual_speed_cap: None,
         }
     }
 
@@ -168,20 +175,75 @@ impl MotionPredictor {
         tick: u64,
     ) {
         *self = Self::new(profile, position, velocity, tick);
-        self.mode = MotionMode::DeadReckoning;
+        self.state = MotionState::DeadReckoning;
     }
 
     /// Switch an existing track to local movement prediction without
     /// discarding its authoritative position, velocity, or tick.
     pub fn enable_prediction(&mut self) {
-        self.mode = MotionMode::Prediction;
+        self.state = MotionState::Prediction;
+        self.warp_render_position = None;
+        self.warp_visual_speed_cap = None;
     }
 
     /// Switch an existing track to remote constant-velocity dead reckoning.
     /// Local input is cleared because it is not meaningful for remote ships.
     pub fn enable_dead_reckoning(&mut self) {
-        self.mode = MotionMode::DeadReckoning;
+        self.state = MotionState::DeadReckoning;
         self.input = MotionInput::Coast;
+        self.warp_render_position = None;
+        self.warp_visual_speed_cap = None;
+    }
+
+    /// Enter the committed-warp presentation state.
+    ///
+    /// The authoritative track still advances at the reported velocity, but
+    /// rendering advances at a bounded speed until an authoritative reset
+    /// arrives. This keeps warp presentation policy in the shared Rust track.
+    pub fn begin_warp(&mut self, visual_speed_cap: f64) -> bool {
+        if !visual_speed_cap.is_finite() || visual_speed_cap <= 0.0 {
+            return false;
+        }
+        self.state = MotionState::WarpPresentation;
+        self.input = MotionInput::Coast;
+        self.warp_render_position = Some(self.predicted_position());
+        self.warp_visual_speed_cap = Some(visual_speed_cap);
+        true
+    }
+
+    /// Snap the track into the docked state. Docked tracks do not integrate.
+    pub fn dock(&mut self, position: [f64; 3], tick: u64) {
+        self.position = position;
+        self.velocity = [0.0; 3];
+        self.input = MotionInput::Coast;
+        self.state = MotionState::Docked;
+        self.tick = tick;
+        self.fractional_ticks = 0.0;
+        self.last_authoritative_tick = Some(tick);
+        self.render_correction = [0.0; 3];
+        self.has_rendered = false;
+        self.warp_render_position = None;
+        self.warp_visual_speed_cap = None;
+    }
+
+    /// Leave the docked state with an explicit local/remote motion mode.
+    pub fn undock(
+        &mut self,
+        position: [f64; 3],
+        velocity: [f64; 3],
+        tick: u64,
+        predict_locally: bool,
+    ) {
+        self.reset(position, velocity, tick);
+        if predict_locally {
+            self.enable_prediction();
+        } else {
+            self.enable_dead_reckoning();
+        }
+    }
+
+    pub fn state(&self) -> MotionState {
+        self.state
     }
 
     pub fn profile(&self) -> MotionProfile {
@@ -218,6 +280,23 @@ impl MotionPredictor {
     pub fn advance(&mut self, ticks: f64) {
         if !ticks.is_finite() || ticks <= 0.0 {
             return;
+        }
+
+        if self.state == MotionState::Docked {
+            return;
+        }
+
+        if self.state == MotionState::WarpPresentation {
+            let speed = magnitude(self.velocity);
+            if speed > VECTOR_EPSILON {
+                let direction = scale(self.velocity, 1.0 / speed);
+                let cap = self.warp_visual_speed_cap.unwrap_or(speed);
+                let render_position = self
+                    .warp_render_position
+                    .unwrap_or_else(|| self.predicted_position());
+                self.warp_render_position =
+                    Some(add(render_position, scale(direction, cap * ticks)));
+            }
         }
 
         self.has_rendered = true;
@@ -261,6 +340,8 @@ impl MotionPredictor {
         self.last_authoritative_tick = Some(tick);
         self.render_correction = [0.0; 3];
         self.has_rendered = false;
+        self.warp_render_position = None;
+        self.warp_visual_speed_cap = None;
     }
 
     /// Shift the motion track when the Godot floating origin moves.
@@ -269,6 +350,9 @@ impl MotionPredictor {
     /// only the authoritative position needs to move with the rendered node.
     pub fn rebase(&mut self, shift: [f64; 3]) {
         self.position = add(self.position, shift);
+        if let Some(render_position) = self.warp_render_position.as_mut() {
+            *render_position = add(*render_position, shift);
+        }
     }
 
     pub fn position(&self) -> [f64; 3] {
@@ -276,6 +360,11 @@ impl MotionPredictor {
     }
 
     pub fn predicted_position(&self) -> [f64; 3] {
+        if self.state == MotionState::WarpPresentation {
+            if let Some(render_position) = self.warp_render_position {
+                return render_position;
+            }
+        }
         add(
             add(self.position, scale(self.velocity, self.fractional_ticks)),
             self.render_correction,
@@ -291,7 +380,7 @@ impl MotionPredictor {
     }
 
     fn step_tick(&mut self) {
-        if self.mode == MotionMode::DeadReckoning {
+        if self.state != MotionState::Prediction {
             self.position = add(self.position, self.velocity);
             self.tick = self.tick.saturating_add(1);
             return;
@@ -397,6 +486,35 @@ mod tests {
         assert_eq!(track.position(), [14.0, 0.0, 0.0]);
         assert_eq!(track.predicted_position(), [14.0, 0.0, 0.0]);
         assert_eq!(track.tick(), 8);
+    }
+
+    #[test]
+    fn warp_state_caps_rendering_without_changing_authoritative_position() {
+        let mut track = MotionPredictor::default();
+        track.reconcile([0.0; 3], [3_000.0, 0.0, 0.0], 7);
+
+        assert!(track.begin_warp(2_000.0));
+        assert_eq!(track.state(), MotionState::WarpPresentation);
+        track.advance(1.0);
+
+        assert_eq!(track.position(), [3_000.0, 0.0, 0.0]);
+        assert_eq!(track.predicted_position(), [2_000.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn docking_stops_integration_until_explicit_undock() {
+        let mut track = MotionPredictor::default();
+        track.dock([10.0, 0.0, 0.0], 12);
+
+        track.advance(5.0);
+        assert_eq!(track.state(), MotionState::Docked);
+        assert_eq!(track.position(), [10.0, 0.0, 0.0]);
+        assert_eq!(track.velocity(), [0.0; 3]);
+
+        track.undock([10.0, 0.0, 0.0], [4.0, 0.0, 0.0], 13, true);
+        track.advance(1.0);
+        assert_eq!(track.state(), MotionState::Prediction);
+        assert!(track.position()[0] > 10.0);
     }
 
     #[test]

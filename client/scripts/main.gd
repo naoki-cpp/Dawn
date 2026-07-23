@@ -570,15 +570,23 @@ func _handle_ship_docked(p: Dictionary) -> void:
 		if (station.get("station_id", -1) as int) != station_id:
 			continue
 		var station_pos := _position_components(station.get("position", PackedFloat64Array()))
-		_set_ship_position(_ships[ship_id] as Node3D, _server_components_to_godot(station_pos))
+		(_ships[ship_id] as Node3D).call(
+			"dock_motion",
+			_server_components_to_godot(station_pos),
+			tick)
 		if ship_id == _player_ship_id:
 			_session.apply_dock_event(ship_id, station_id, station.get("name", "") as String, tick)
 			_sync_session_state()
 		break
-	_stop_ship_motion(ship_id)
 
 func _handle_ship_undocked(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
+	if _ships.has(ship_id):
+		(_ships[ship_id] as Node3D).call(
+			"undock_motion",
+			_ship_position(_ships[ship_id] as Node3D),
+			Vector3.ZERO,
+			p.get("tick", _current_tick) as int)
 	if ship_id == _player_ship_id:
 		var station_id: int = p.get("station_id", -1) as int
 		_nearby_station_ids.clear()

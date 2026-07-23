@@ -43,4 +43,4 @@ pub use loadout::{
     SlotCapacity,
 };
 pub use module_row::{ModuleKind, ModuleRow, StatDelta};
-pub use motion::{MotionInput, MotionPredictor, MotionProfile};
+pub use motion::{MotionInput, MotionPredictor, MotionProfile, MotionState};
