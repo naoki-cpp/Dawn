@@ -73,7 +73,7 @@ f64へ変更したり、アンカー方式と絶対方式を新機能ごとに�
 ## 実装チェックリスト
 
 - [x] 人間が本ADRを承認し、`status`を`accepted`へ変更する
-- [ ] `AbsolutePosition`（または同等の明示的な絶対座標型）を定義する
+- [x] `dawn-core::AbsolutePosition` を定義し、静的な天体・ゲート・ステーション定義の絶対座標に適用する
 - [ ] サーバーの位置・距離・AoI・ナビゲーション判定を絶対f64経路へ移行する
 - [ ] `PositionComp`と`AnchorComp`の移行方針を決定し、互換読み取りを隔離する
 - [ ] 位置を含むDomainEvent、snapshot、wire schemaを同じ移行で更新する

@@ -259,7 +259,7 @@ fn entry_to_gate(e: JumpGateEntry) -> JumpGateDef {
         id: JumpGateId(e.id),
         from_sector: SectorId(e.from_sector),
         position: Position::new(abs_m[0] as f32, abs_m[1] as f32, abs_m[2] as f32),
-        abs_m,
+        abs_m: abs_m.into(),
         to_sector: SectorId(e.to_sector),
         activation_radius: e.activation_radius,
     }
@@ -282,7 +282,7 @@ fn entry_to_body(e: CelestialBodyEntry) -> CelestialBodyDef {
         kind: parse_body_kind(&e.kind),
         name: e.name,
         position: Position::new(abs_m[0] as f32, abs_m[1] as f32, abs_m[2] as f32),
-        abs_m,
+        abs_m: abs_m.into(),
         radius: e.radius,
         spectral_type: e.spectral_type,
     }
@@ -300,7 +300,7 @@ fn entry_to_station(e: StationEntry) -> StationDef {
         sector: SectorId(e.sector),
         name: e.name,
         position: Position::new(abs_m[0] as f32, abs_m[1] as f32, abs_m[2] as f32),
-        abs_m,
+        abs_m: abs_m.into(),
         docking_radius: e.docking_radius,
     }
 }

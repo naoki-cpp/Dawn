@@ -184,7 +184,7 @@ impl<S: EventStore> SimulationNode<S> {
             }
             ApproachTarget::Gate(gate_id) => {
                 let gate = self.jump_gate(gate_id)?;
-                Some(self.dest_in_ship_frame_abs(entity, gate.abs_m))
+                Some(self.dest_in_ship_frame_abs(entity, gate.abs_m.into()))
             }
         }
     }

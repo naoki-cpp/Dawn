@@ -327,16 +327,17 @@ impl<S: EventStore> SimulationNode<S> {
     /// doing the anchor/offset split directly in f64, the same way production
     /// code's f64 paths (warp arrival, AnchorTable) already do.
     #[cfg(test)]
-    pub(crate) fn set_spawn_anchor_abs(&mut self, ship_id: ShipId, world: [f64; 3]) {
+    pub(crate) fn set_spawn_anchor_abs<P: Into<[f64; 3]>>(&mut self, ship_id: ShipId, world: P) {
         let Some(&entity) = self.ships.index.get(&ship_id) else {
             return;
         };
-        self.place_entity_at_absolute(entity, world);
+        self.place_entity_at_absolute(entity, world.into());
     }
 
     /// Re-anchor an existing entity to the nearest anchor for `world` and set
     /// its local offset so its absolute position becomes exactly `world`.
-    pub(super) fn place_entity_at_absolute(&mut self, entity: Entity, world: [f64; 3]) {
+    pub(super) fn place_entity_at_absolute<P: Into<[f64; 3]>>(&mut self, entity: Entity, world: P) {
+        let world = world.into();
         let anchor = self
             .anchor_table
             .nearest_anchor(self.sector_id, world)

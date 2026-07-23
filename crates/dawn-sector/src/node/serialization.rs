@@ -81,7 +81,7 @@ impl<S: EventStore> SimulationNode<S> {
                 id: b.id.0,
                 kind: b.kind,
                 name: b.name.clone(),
-                position: abs_pos_json(b.abs_m),
+                position: abs_pos_json(b.abs_m.into()),
                 radius: b.radius,
                 spectral_type: b.spectral_type,
             })
@@ -114,7 +114,7 @@ impl<S: EventStore> SimulationNode<S> {
             .values()
             .map(|g| JumpGateWire {
                 gate_id: g.id.0,
-                position: abs_pos_json(g.abs_m),
+                position: abs_pos_json(g.abs_m.into()),
                 activation_radius: g.activation_radius,
                 to_system_name: system_name_of(g.to_sector),
             })
@@ -127,7 +127,7 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|station| StationWire {
                 station_id: station.id.0,
                 name: station.name.clone(),
-                position: abs_pos_json(station.abs_m),
+                position: abs_pos_json(station.abs_m.into()),
                 docking_radius: station.docking_radius,
             })
             .collect();

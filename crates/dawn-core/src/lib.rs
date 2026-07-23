@@ -62,7 +62,7 @@ pub use navigation::{
     StarSystemDef, StarSystemId, StationDef, StationId, WarpTarget,
 };
 pub use player::PlayerId;
-pub use position::{Position, Velocity};
+pub use position::{AbsolutePosition, Position, Velocity};
 pub use sector::{SectorBounds, SectorId};
 pub use ship_type::{ShipBaseStats, ShipClass, ShipTypeDefinition, ShipTypeId, SlotLayout};
 pub use tick::Tick;
