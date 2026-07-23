@@ -41,6 +41,12 @@ impl From<[f64; 3]> for AbsolutePosition {
     }
 }
 
+impl From<Position> for AbsolutePosition {
+    fn from(value: Position) -> Self {
+        Self::new(value.x as f64, value.y as f64, value.z as f64)
+    }
+}
+
 impl From<AbsolutePosition> for [f64; 3] {
     fn from(value: AbsolutePosition) -> Self {
         value.0

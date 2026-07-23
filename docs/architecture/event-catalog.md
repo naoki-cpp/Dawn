@@ -246,7 +246,7 @@ Ship generated within a Sector.
 |---|---|---|---|
 | `ship_id` | `ShipId` | ✓ | unique identifier of the spawned Ship |
 | `sector_id` | `SectorId` | ✓ | Sector it spawned into |
-| `initial_position` | `Position` | ✓ | spawn coordinates |
+| `initial_position` | `AbsolutePosition` | ✓ | authoritative Sector-frame spawn coordinates |
 | `ship_type_id` | `ShipTypeId` | ✓ | ship type ID (resolved via the `ShipTypeDefinition` registry) |
 | `tick` | `Tick` | ✓ | spawn Tick |
 

@@ -453,7 +453,7 @@ mod tests {
             domain_event_to_event_wire(&DomainEvent::ShipSpawned(dawn_core::events::ShipSpawned {
                 ship_id: ship_id(1),
                 sector_id: dawn_core::SectorId(0),
-                initial_position: dawn_core::Position::new(1.0, 2.0, 3.0),
+                initial_position: dawn_core::AbsolutePosition::new(1.0, 2.0, 3.0),
                 ship_type_id: dawn_core::ShipTypeId(7),
                 tick: dawn_core::Tick(1),
             }))
@@ -462,7 +462,7 @@ mod tests {
             wire,
             EventWire::ShipSpawned {
                 ship_id: ship_id(1).raw(),
-                position: PosWire {
+                position: AbsPosWire {
                     x: 1.0,
                     y: 2.0,
                     z: 3.0,

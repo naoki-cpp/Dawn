@@ -70,6 +70,7 @@ Every `EventWire` variant carries `tick: u64`.
 `JumpGateUsed.entry_pos` is an absolute destination-Sector coordinate with
 f64 components. It uses the same `AbsPosWire` shape as `InitialState` and
 `PositionSnap`, not the f32 `PosWire` used for client-authored command targets.
+`ShipSpawned.position` is also an `AbsPosWire` absolute Sector-frame coordinate.
 
 Not every `DomainEvent` reaches the wire -- `domain_event_to_event_wire()`
 returns `None` for internal bookkeeping events (`ShipFitted`, `WeaponFired`,

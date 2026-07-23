@@ -143,17 +143,14 @@ mod tests {
     use super::*;
     use dawn_core::events::ShipSpawned;
     use dawn_core::{
-        DomainEvent, EntityId, LockOnCommand, MoveCommand, NodeId, Position, SectorId, ShipId, Tick,
+        AbsolutePosition, DomainEvent, EntityId, LockOnCommand, MoveCommand, NodeId, Position,
+        SectorId, ShipId, Tick,
     };
 
     fn make_ship_spawned() -> DomainEvent {
         DomainEvent::ShipSpawned(ShipSpawned {
             ship_id: ShipId(EntityId::new(NodeId(0), 1)),
-            initial_position: Position {
-                x: 1.0,
-                y: 2.0,
-                z: 3.0,
-            },
+            initial_position: AbsolutePosition::new(1.0, 2.0, 3.0),
             sector_id: SectorId(0),
             ship_type_id: dawn_core::ShipTypeId(1),
             tick: Tick::ZERO,

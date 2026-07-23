@@ -191,7 +191,8 @@ impl DomainEvent {
 pub struct ShipSpawned {
     pub ship_id: ShipId,
     pub sector_id: SectorId,
-    pub initial_position: Position,
+    /// Authoritative Sector-frame spawn position.
+    pub initial_position: AbsolutePosition,
     /// 船種 ID。Replay 時に base_stats を復元するために必須（INV-002）。
     pub ship_type_id: ShipTypeId,
     pub tick: Tick,
@@ -547,7 +548,7 @@ mod tests {
         let event = DomainEvent::ShipSpawned(ShipSpawned {
             ship_id: id,
             sector_id: SectorId(0),
-            initial_position: Position::ORIGIN,
+            initial_position: AbsolutePosition::ORIGIN,
             ship_type_id: crate::ship_type::ShipTypeId(1),
             tick: Tick::ZERO,
         });
