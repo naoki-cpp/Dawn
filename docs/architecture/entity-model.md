@@ -2,7 +2,7 @@
 scope    : Definition of the "things" that exist in the World. Schema spec for types, fields, and identifiers
 audience : AI Agent / Human Developer
 update   : When a type or field definition changes
-related  : event-catalog.md, ownership.md
+related  : event-catalog.md, ownership.md, ../adr/ADR-0044-absolute-f64-coordinate-authority.md
 ---
 
 # Entity Model
@@ -65,7 +65,10 @@ today : fixed count, fixed assignment
 | `y` | `f32` | up-down |
 | `z` | `f32` | north-south |
 
-**Why f32:** SIMD-friendly for ECS batch processing at ~10,000-entity scale; f64 astronomical precision isn't needed at this phase. Revisit via ADR if requirements change.
+**Current representation:** `f32`, and currently relative to `AnchorComp` for ships (ADR-0029).
+This is a compatibility description of the current code, not the long-term target. ADR-0044
+proposes an explicit absolute f64 authority for server positions while keeping local movement
+and velocity f32 until the migration is approved and implemented.
 
 ### Velocity
 
@@ -173,6 +176,13 @@ base_stats  : ShipBaseStats            velocity      : Velocity
 - Falls back to built-in defaults in `ship_types.rs` if the file is absent
 - Definitions are immutable; balance changes mean editing TOML + restarting the server (no rebuild)
 - `ShipTypeId` is defined in `dawn-core` and included in the `ShipSpawned` event
+
+### Coordinate policy (under review)
+
+Do not introduce new code that treats `Position` as both an absolute Sector coordinate and an
+anchor-relative offset. The current anchor-relative implementation remains governed by ADR-0029.
+The proposed target is recorded in [ADR-0044](../adr/ADR-0044-absolute-f64-coordinate-authority.md);
+no partial `f32` -> `f64` type change is permitted before that ADR is accepted.
 
 ---
 

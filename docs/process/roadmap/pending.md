@@ -38,6 +38,7 @@ related  : ./README.md, ./deferred.md, ../roadmap.md, ../roadmap-history.md
 | 10-3 | Client-Side Predictionとreconciliation | 要ADR-0043・TODO |
 | 10-4 | WebSocket上のpostcard移行の段階2を完了 | 段階1完了・残作業あり |
 | 10-5 | Godot editorでのPrediction / dock / warpプレイテスト | 自動テスト済み・手動確認待ち |
+| 10-6 | 座標・クライアント移動設計の再評価（ADR-0044 / ADR-0045） | 方針文書化済み・人間承認待ち |
 
 ### 3.4 Phase 11 のTODO
 

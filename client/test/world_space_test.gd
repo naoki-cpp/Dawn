@@ -32,6 +32,15 @@ func test_floating_origin_preserves_nearby_offset_at_true_au() -> void:
 	assert_float(abs(naive.x / WORLD_SCALE - nearby.x)).is_greater(1.0)
 
 
+func test_f64_wire_position_is_subtracted_before_vector3_narrowing() -> void:
+	var w := WorldSpaceScript.new()
+	w.rebase_to_components(5.0 * AU_M, 0.0, 0.0)
+
+	var rendered := w.to_godot_components(5.0 * AU_M + 10.0, 0.0, 0.0)
+
+	assert_float(rendered.x).is_equal_approx(1.0, 0.0001)
+
+
 ## to_godot and to_server are exact inverses even when the origin has moved -- the
 ## invariant the old ad-hoc `global_position / WORLD_SCALE` reads silently broke.
 func test_to_godot_and_to_server_are_mutual_inverses_with_a_moved_origin() -> void:

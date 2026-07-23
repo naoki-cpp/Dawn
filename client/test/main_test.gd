@@ -249,6 +249,26 @@ func test_motion_correction_reconciles_the_active_ship() -> void:
 	ship.free()
 
 
+func test_motion_correction_preserves_small_motion_near_a_true_au_origin() -> void:
+	var ship := FakeShip.new()
+	_main.add_child(ship)
+	_main._ships = {1: ship}
+	_main._player_ship_id = 1
+	_main._world.rebase_to_components(5.0 * 1.495978707e11, 0.0, 0.0)
+
+	_main._handle_motion_correction({
+		"ship_id": 1,
+		"position": {"x": 5.0 * 1.495978707e11 + 10.0, "y": 0.0, "z": 0.0},
+		"velocity": {"dx": 4.0, "dy": 0.0, "dz": 0.0},
+		"tick": 43,
+	})
+
+	var motion_call: Dictionary = ship.reconcile_calls.back()
+	assert_vector(motion_call["position"]).is_equal_approx(
+		Vector3(1.0, 0.0, 0.0), Vector3(0.0001, 0.0001, 0.0001))
+	ship.free()
+
+
 func test_player_ship_undocked_event_clears_docked_station_state() -> void:
 	_main._player_ship_id = 2
 	_main._nearby_station_ids = [] as Array[int]

@@ -40,6 +40,11 @@ var _is_player    : bool    = false
 var _thrust_dir   : Vector3 = Vector3.ZERO
 var _motion       := MotionPredictor.new()
 var _motion_ready : bool    = false
+## Once a player ship enters a committed warp, keep the visual path on the
+## capped integrator until the authoritative PositionSnap arrives. Switching
+## back to the predictor merely because warp velocity starts decelerating would
+## reveal the predictor's true AU-scale position and cause a visible jump.
+var _visual_warp_capped : bool = false
 ## Hidden while warping faster than VISUAL_SPEED_CAP (ADR-0029 lore pass,
 ## non-player ships only). Tracks the last applied visibility so we only
 ## toggle `visible` on the actual crossing, not every frame.
@@ -94,6 +99,8 @@ func _process(delta: float) -> void:
 	var speed := _velocity.length()
 	var predicted_pos := _motion.predicted_position()
 	if _is_player and speed > VISUAL_SPEED_CAP:
+		_visual_warp_capped = true
+	if _is_player and _visual_warp_capped:
 		## Keep true warp motion inside the renderable visual cap. PositionSnap
 		## resets the motion track at the authoritative arrival.
 		_vel_estimate = _velocity.normalized() * VISUAL_SPEED_CAP
@@ -141,6 +148,7 @@ func initialize(id: int, godot_pos: Vector3) -> void:
 	_velocity  = Vector3.ZERO
 	_is_init   = true
 	_in_tunnel = false
+	_visual_warp_capped = false
 	visible    = true
 	_motion.configure_dead_reckoning(
 		500.0 * WORLD_SCALE, 10_000_000.0, 0.3, godot_pos, Vector3.ZERO, 0)
@@ -165,6 +173,12 @@ func configure_motion(max_speed: float, mass: float, inertia_modifier: float, se
 func set_velocity(server_vel: Vector3) -> void:
 	_velocity = _server_velocity_to_godot(server_vel)
 	if _motion_ready:
+		## Warp velocity is not governed by the normal fitted movement profile.
+		## Keep the shared track in constant-velocity mode until PositionSnap
+		## resets it; otherwise the next whole predictor tick applies the normal
+		## max-speed formula to a warp velocity and the render path toggles.
+		if _is_player and _velocity.length() > VISUAL_SPEED_CAP:
+			_motion.enable_dead_reckoning()
 		_motion.set_velocity(_velocity)
 
 ## Snap the ship to a Godot-space position (jump-gate teleport, warp-arrival
@@ -181,7 +195,14 @@ func rebase_motion(shift: Vector3) -> void:
 func set_as_player() -> void:
 	_is_player    = true
 	if _motion_ready:
-		_motion.enable_prediction()
+		## A reconnect can materialize a ship that is already in committed warp,
+		## before any later VelocityChanged event gives us the high-speed hint.
+		## Preserve dead reckoning in that case instead of applying the normal
+		## fitted movement profile to the warp velocity on the next tick.
+		if _velocity.length() > VISUAL_SPEED_CAP:
+			_motion.enable_dead_reckoning()
+		else:
+			_motion.enable_prediction()
 	_vel_instance = _make_indicator(Color(0.0, 1.0, 0.4))
 	_vel_mesh     = _vel_instance.mesh as ImmediateMesh
 	_thr_instance = _make_indicator(Color(1.0, 0.55, 0.0))
@@ -225,7 +246,12 @@ func set_braking() -> void:
 func reconcile_motion(godot_pos: Vector3, server_vel: Vector3, tick: int) -> void:
 	var godot_vel := _server_velocity_to_godot(server_vel)
 	_velocity = godot_vel
-	if _motion_ready and _is_player and _motion.reconcile(godot_pos, godot_vel, tick):
+	if _motion_ready and _is_player:
+		## MotionPredictor keeps the authoritative base and smooths the visual
+		## correction. Writing global_position here would undo that smoothing and
+		## make every delayed correction visibly snap backwards.
+		_motion.reconcile(godot_pos, godot_vel, tick)
+	else:
 		global_position = godot_pos
 
 ## Reset prediction at a discontinuity such as warp arrival or docking.
@@ -236,6 +262,11 @@ func reset_motion(godot_pos: Vector3, server_vel: Vector3, tick: int) -> void:
 	_thrust_dir = Vector3.ZERO
 	if _motion_ready:
 		_motion.reset(godot_pos, godot_vel, tick)
+		if _is_player:
+			_motion.enable_prediction()
+		else:
+			_motion.enable_dead_reckoning()
+	_visual_warp_capped = false
 
 func get_speed_server() -> float:
 	return _velocity.length() / WORLD_SCALE

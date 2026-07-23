@@ -81,9 +81,28 @@ func respawn_navigation_markers(
 
 
 func apply_origin_rebase(new_origin: Vector3, keep_player_fixed: bool, player_ship_id: int, ships: Dictionary) -> void:
+	apply_origin_rebase_components(
+		PackedFloat64Array([new_origin.x, new_origin.y, new_origin.z]),
+		keep_player_fixed,
+		player_ship_id,
+		ships)
+
+
+func apply_origin_rebase_components(
+	new_origin: PackedFloat64Array,
+	keep_player_fixed: bool,
+	player_ship_id: int,
+	ships: Dictionary
+) -> void:
 	if _world == null:
 		return
-	var shift: Vector3 = _world.rebase_to(new_origin)
+	var shift: Vector3
+	if _world.has_method("rebase_to_components"):
+		shift = _world.rebase_to_components(new_origin[0], new_origin[1], new_origin[2])
+	else:
+		## Keep lightweight presentation tests and alternate world adapters working
+		## while the production WorldSpace owns the f64-safe implementation.
+		shift = _world.rebase_to(Vector3(new_origin[0], new_origin[1], new_origin[2]))
 	for id: int in ships:
 		if keep_player_fixed and id == player_ship_id:
 			continue
@@ -224,10 +243,11 @@ func _update_warp_tunnel_effect(delta: float, player_ship_id: int, ships: Dictio
 func _maybe_rebase_origin(player_ship_id: int, ships: Dictionary) -> void:
 	if _world == null or player_ship_id < 0 or not ships.has(player_ship_id):
 		return
-	var player_server: Vector3 = _world.to_server((ships[player_ship_id] as Node3D).global_position)
-	if not _world.should_rebase(player_server):
+	var player_server: PackedFloat64Array = _world.to_server_components(
+		(ships[player_ship_id] as Node3D).global_position)
+	if not _world.should_rebase_components(player_server[0], player_server[1], player_server[2]):
 		return
-	apply_origin_rebase(player_server, false, player_ship_id, ships)
+	apply_origin_rebase_components(player_server, false, player_ship_id, ships)
 
 
 func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array) -> void:

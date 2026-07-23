@@ -6,6 +6,7 @@
 //! one-tick movement policy to `dawn-core` (ADR-0023).
 
 const VECTOR_EPSILON: f64 = f64::EPSILON;
+const RENDER_CORRECTION_DECAY_PER_TICK: f64 = 0.35;
 
 use dawn_core::{
     MovementInput as CoreMovementInput, MovementProfile as CoreMovementProfile, Velocity,
@@ -115,6 +116,8 @@ pub struct MotionPredictor {
     tick: u64,
     fractional_ticks: f64,
     last_authoritative_tick: Option<u64>,
+    render_correction: [f64; 3],
+    has_rendered: bool,
 }
 
 impl Default for MotionPredictor {
@@ -134,6 +137,8 @@ impl MotionPredictor {
             tick,
             fractional_ticks: 0.0,
             last_authoritative_tick: Some(tick),
+            render_correction: [0.0; 3],
+            has_rendered: false,
         }
     }
 
@@ -215,6 +220,11 @@ impl MotionPredictor {
             return;
         }
 
+        self.has_rendered = true;
+        self.render_correction = scale(
+            self.render_correction,
+            (-RENDER_CORRECTION_DECAY_PER_TICK * ticks).exp(),
+        );
         self.fractional_ticks += ticks;
         while self.fractional_ticks >= 1.0 {
             self.step_tick();
@@ -229,11 +239,15 @@ impl MotionPredictor {
         if self.last_authoritative_tick.is_some_and(|last| tick < last) {
             return false;
         }
+        let rendered_position = self.has_rendered.then(|| self.predicted_position());
         self.position = position;
         self.velocity = velocity;
         self.tick = tick;
         self.fractional_ticks = 0.0;
         self.last_authoritative_tick = Some(tick);
+        self.render_correction = rendered_position
+            .map(|rendered| subtract(rendered, position))
+            .unwrap_or([0.0; 3]);
         true
     }
 
@@ -245,6 +259,8 @@ impl MotionPredictor {
         self.tick = tick;
         self.fractional_ticks = 0.0;
         self.last_authoritative_tick = Some(tick);
+        self.render_correction = [0.0; 3];
+        self.has_rendered = false;
     }
 
     /// Shift the motion track when the Godot floating origin moves.
@@ -260,7 +276,10 @@ impl MotionPredictor {
     }
 
     pub fn predicted_position(&self) -> [f64; 3] {
-        add(self.position, scale(self.velocity, self.fractional_ticks))
+        add(
+            add(self.position, scale(self.velocity, self.fractional_ticks)),
+            self.render_correction,
+        )
     }
 
     pub fn velocity(&self) -> [f64; 3] {
@@ -319,6 +338,10 @@ fn magnitude(vector: [f64; 3]) -> f64 {
 
 fn add(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
     [left[0] + right[0], left[1] + right[1], left[2] + right[2]]
+}
+
+fn subtract(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
 }
 
 fn to_core_velocity(vector: [f64; 3]) -> Velocity {
@@ -412,6 +435,25 @@ mod tests {
         assert!(!predictor.reconcile([1.0, 0.0, 0.0], [9.0, 0.0, 0.0], 9));
         assert_eq!(predictor.position(), [5.0, 0.0, 0.0]);
         assert_eq!(predictor.velocity(), [1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn late_correction_does_not_teleport_the_rendered_position_backwards() {
+        let mut predictor = MotionPredictor::default();
+        predictor.reconcile([0.0, 0.0, 0.0], [10.0, 0.0, 0.0], 0);
+        predictor.advance(3.25);
+        let rendered_before = predictor.predicted_position()[0];
+
+        // A correction for tick 1 arrives after the client has already
+        // rendered beyond tick 3. The authoritative base may move backwards,
+        // but the presentation position must converge instead of snapping.
+        predictor.reconcile([10.0, 0.0, 0.0], [10.0, 0.0, 0.0], 1);
+
+        assert!(
+            predictor.predicted_position()[0] >= rendered_before,
+            "late correction moved presentation backwards: before={rendered_before}, after={}",
+            predictor.predicted_position()[0]
+        );
     }
 
     #[test]

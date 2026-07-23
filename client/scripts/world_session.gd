@@ -45,6 +45,16 @@ static func vec3_from_dict(d: Dictionary, key: String) -> Vector3:
 		v.get("z", 0.0) as float)
 
 
+## Reads an absolute wire position without narrowing it to Godot's f32 Vector3.
+## MotionCorrection and InitialState use f64 coordinates at true-AU scale.
+static func position_components_from_dict(d: Dictionary, key: String) -> PackedFloat64Array:
+	var v: Dictionary = d.get(key, {}) as Dictionary
+	return PackedFloat64Array([
+		v.get("x", 0.0) as float,
+		v.get("y", 0.0) as float,
+		v.get("z", 0.0) as float])
+
+
 func reset() -> void:
 	ships.clear()
 	ship_hp.clear()

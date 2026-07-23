@@ -6,6 +6,13 @@ extends GdUnitTestSuite
 const CameraController = preload("res://scripts/camera_controller.gd")
 
 
+func test_camera_runs_after_ship_presentation() -> void:
+	var camera: Camera3D = auto_free(CameraController.new())
+	add_child(camera)
+
+	assert_int(camera.process_priority).is_equal(10)
+
+
 func test_horizontal_drag_rotates_the_orbit_offset_sideways() -> void:
 	var camera: Camera3D = auto_free(CameraController.new())
 	add_child(camera)

@@ -43,7 +43,10 @@ var _dragging    : bool    = false
 # ── ライフサイクル ────────────────────────────────────────────────────────────
 
 func _ready() -> void:
-	pass
+	## ShipController advances its render transform during the same idle frame.
+	## Run the camera afterwards so follow/look_at consume the current position,
+	## rather than alternating between the current and previous ship transforms.
+	process_priority = 10
 
 func _process(delta: float) -> void:
 	if _target_node != null and is_instance_valid(_target_node):
