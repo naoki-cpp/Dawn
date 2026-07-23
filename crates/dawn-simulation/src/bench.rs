@@ -446,16 +446,21 @@ pub(crate) fn run_aoi_benchmark() {
         let t = Instant::now();
         let grid = aoi::CellGrid::build(
             AOI_CELL_SIZE,
-            ships
-                .iter()
-                .map(|(id, p)| (*id, [p.x as f64, p.y as f64, p.z as f64])),
+            ships.iter().map(|(id, p)| {
+                (
+                    *id,
+                    dawn_core::AbsolutePosition::new(p.x as f64, p.y as f64, p.z as f64),
+                )
+            }),
         );
         let build = t.elapsed();
         let t = Instant::now();
         let mut aoi_vol = 0usize;
         for o in &observers {
             aoi_vol += grid
-                .neighbors_of([o.x as f64, o.y as f64, o.z as f64])
+                .neighbors_of(dawn_core::AbsolutePosition::new(
+                    o.x as f64, o.y as f64, o.z as f64,
+                ))
                 .len();
         }
         let query = t.elapsed();

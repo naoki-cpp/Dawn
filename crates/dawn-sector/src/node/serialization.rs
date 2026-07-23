@@ -61,7 +61,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// 27-cell neighborhood of `observer_pos` (ADR-0019).
     pub fn build_initial_state_json_for(
         &self,
-        observer_abs: [f64; 3],
+        observer_abs: dawn_core::AbsolutePosition,
         cell_size: f32,
     ) -> InitialStateWire {
         self.initial_state_json(self.ships_visible_to(observer_abs, cell_size).into_iter())
@@ -206,25 +206,34 @@ impl<S: EventStore> SimulationNode<S> {
     /// same Sector-frame grid *and* the binning stays precise at true-AU
     /// distances (an f32 absolute would have a ~16 km ulp). `CellGrid` sorts each
     /// bucket, so query results are deterministic.
-    pub fn ship_absolute_positions(&self) -> Vec<(ShipId, [f64; 3])> {
+    pub fn ship_absolute_positions(&self) -> Vec<(ShipId, dawn_core::AbsolutePosition)> {
         self.ships
             .index
             .iter()
-            .map(|(&id, &entity)| (id, self.entity_abs_pos_f64(entity)))
+            .map(|(&id, &entity)| {
+                (
+                    id,
+                    dawn_core::AbsolutePosition::from(self.entity_abs_pos_f64(entity)),
+                )
+            })
             .collect()
     }
 
     /// Absolute (Sector-frame, f64) position of a ship by id, or `None` if
     /// unknown. The observer position to pass to AoI queries (ADR-0029 R2).
-    pub fn ship_absolute_pos(&self, ship_id: ShipId) -> Option<[f64; 3]> {
-        self.ship_absolute(ship_id)
+    pub fn ship_absolute_pos(&self, ship_id: ShipId) -> Option<dawn_core::AbsolutePosition> {
+        self.ship_absolute(ship_id).map(Into::into)
     }
 
     /// ShipIds visible to an observer at `observer_abs` (an ABSOLUTE Sector-frame
     /// f64 position): those in the 27-cell neighborhood of its cell (ADR-0019).
     /// Returned in `ShipId` order. The grid is built from absolute f64 positions
     /// so it is correct across anchors and precise at true AU (ADR-0029 R2).
-    pub fn ships_visible_to(&self, observer_abs: [f64; 3], cell_size: f32) -> Vec<ShipId> {
+    pub fn ships_visible_to(
+        &self,
+        observer_abs: dawn_core::AbsolutePosition,
+        cell_size: f32,
+    ) -> Vec<ShipId> {
         crate::aoi::CellGrid::build(cell_size, self.ship_absolute_positions())
             .neighbors_of(observer_abs)
     }
@@ -263,7 +272,7 @@ mod tests {
             Velocity::ZERO,
         );
 
-        let visible = node.ships_visible_to([0.0, 0.0, 0.0], cell);
+        let visible = node.ships_visible_to([0.0, 0.0, 0.0].into(), cell);
         assert!(
             visible.contains(&observer),
             "observer's own cell is visible"
@@ -311,7 +320,7 @@ mod tests {
         }));
         // Sanity: raw offsets differ wildly, but absolute positions coincide.
         assert_eq!(node.get_ship_anchor(b), Some(AnchorId(1)));
-        let visible = node.ships_visible_to([0.0, 0.0, 0.0], cell);
+        let visible = node.ships_visible_to([0.0, 0.0, 0.0].into(), cell);
         assert!(
             visible.contains(&a) && visible.contains(&b),
             "both ships share the origin cell in absolute coords despite different anchors"
@@ -333,7 +342,7 @@ mod tests {
             Velocity::ZERO,
         );
 
-        let json = node.build_initial_state_json_for([0.0, 0.0, 0.0], cell);
+        let json = node.build_initial_state_json_for([0.0, 0.0, 0.0].into(), cell);
         let ids: Vec<u64> = json.ships.iter().map(|s| s.ship_id).collect();
         assert!(
             ids.contains(&observer.raw()),
