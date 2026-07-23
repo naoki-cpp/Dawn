@@ -1,7 +1,7 @@
 ---
 id      : ADR-0044
 title   : サーバー権威座標を絶対 f64 に統一する方針
-status  : proposed
+status  : accepted
 date    : 2026-07-23
 deciders: [human, ai-agent]
 related : ADR-0028 (大規模座標の方式比較), ADR-0029 (現行アンカー方式),
@@ -72,13 +72,13 @@ f64へ変更したり、アンカー方式と絶対方式を新機能ごとに�
 
 ## 実装チェックリスト
 
-- [ ] 人間が本ADRを承認し、`status`を`accepted`へ変更する
+- [x] 人間が本ADRを承認し、`status`を`accepted`へ変更する
 - [ ] `AbsolutePosition`（または同等の明示的な絶対座標型）を定義する
 - [ ] サーバーの位置・距離・AoI・ナビゲーション判定を絶対f64経路へ移行する
 - [ ] `PositionComp`と`AnchorComp`の移行方針を決定し、互換読み取りを隔離する
 - [ ] 位置を含むDomainEvent、snapshot、wire schemaを同じ移行で更新する
-- [ ] f64 wire位置をクライアントで`Vector3`へ変換する前に差分計算するテストを追加する
-- [ ] AU桁のゲート・ステーションで表示位置と近接判定が一致するテストを追加する
+- [x] f64 wire位置をクライアントで`Vector3`へ変換する前に差分計算するテストを追加する
+- [x] AU桁のゲート・ステーションで表示位置と近接判定が一致するテストを追加する
 - [ ] 旧アンカー経路を削除する前にreplay・transit・warpの互換性を検証する
 - [ ] `docs/architecture/entity-model.md`と`docs/architecture/wire-protocol.md`を実装に同期する
 

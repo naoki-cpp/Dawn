@@ -26,6 +26,8 @@ class FakeShip:
 	var set_as_player_calls: int = 0
 	var clear_as_player_calls: int = 0
 	var reconcile_calls: Array[Dictionary] = []
+	var dock_calls: Array[Dictionary] = []
+	var undock_calls: Array[Dictionary] = []
 
 	func set_velocity(v: Vector3) -> void:
 		velocity_calls.append(v)
@@ -51,6 +53,20 @@ class FakeShip:
 		position = p
 		velocity_calls.append(v)
 		thrust_calls.append(Vector3.ZERO)
+
+	func dock_motion(p: Vector3, _tick: int) -> bool:
+		position = p
+		velocity_calls.append(Vector3.ZERO)
+		thrust_calls.append(Vector3.ZERO)
+		dock_calls.append({"position": p, "tick": _tick})
+		return true
+
+	func undock_motion(p: Vector3, v: Vector3, _tick: int) -> bool:
+		position = p
+		velocity_calls.append(v)
+		thrust_calls.append(Vector3.ZERO)
+		undock_calls.append({"position": p, "velocity": v, "tick": _tick})
+		return true
 
 	func reconcile_motion(p: Vector3, v: Vector3, _tick: int) -> void:
 		position = p
@@ -227,6 +243,65 @@ func test_ship_docked_event_clears_residual_motion() -> void:
 	)
 	assert_vector(ship.velocity_calls.back()).is_equal(Vector3.ZERO)
 	assert_vector(ship.thrust_calls.back()).is_equal(Vector3.ZERO)
+	ship.free()
+
+
+func test_ship_docked_event_stops_ship_when_station_map_is_not_ready() -> void:
+	var ship := FakeShip.new()
+	_main.add_child(ship)
+	ship.position = Vector3(9.0, 8.0, 7.0)
+	_main._ships = {2: ship}
+	_main._stations = []
+
+	_main._handle_ship_docked({
+		"ship_id": 2,
+		"station_id": 99,
+		"tick": 12,
+	})
+
+	assert_int(ship.dock_calls.size()).is_equal(1)
+	assert_vector(ship.dock_calls[0]["position"]).is_equal(Vector3(9.0, 8.0, 7.0))
+	assert_vector(ship.velocity_calls.back()).is_equal(Vector3.ZERO)
+	ship.free()
+
+
+func test_stale_player_undock_event_does_not_leave_docked_state() -> void:
+	var ship := FakeShip.new()
+	_main.add_child(ship)
+	_main._ships = {2: ship}
+	_main._player_ship_id = 2
+	_main._session.player_ship_id = 2
+	_main._session.apply_dock_fitting(0, "Forge Station", 12)
+
+	_main._handle_ship_undocked({
+		"ship_id": 2,
+		"station_id": 0,
+		"tick": 11,
+	})
+
+	assert_int(ship.undock_calls.size()).is_equal(0)
+	assert_int(_main._session.dock_status()["docked_station_id"] as int).is_equal(0)
+	ship.free()
+
+
+func test_player_loadout_refresh_preserves_docked_motion_state() -> void:
+	var ship := FakeShip.new()
+	_main.add_child(ship)
+	_main._session.ships[2] = ship
+	_main._ships = _main._session.ships
+	_main._player_ship_id = 2
+	_main._session.player_ship_id = 2
+	_main._loadout.apply_payload(JSON.stringify({
+		"tick": 12,
+		"active_ship_id": 2,
+		"docked_station_id": 0,
+		"docked_station_name": "Forge Station",
+	}))
+
+	_main._apply_loadout_side_effects()
+
+	assert_int(ship.dock_calls.size()).is_equal(1)
+	assert_int(ship.undock_calls.size()).is_equal(0)
 	ship.free()
 
 

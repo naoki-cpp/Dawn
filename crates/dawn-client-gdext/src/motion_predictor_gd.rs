@@ -64,6 +64,32 @@ impl MotionPredictor {
     }
 
     #[func]
+    fn begin_warp(&mut self, visual_speed_cap: f64) -> bool {
+        self.core.begin_warp(visual_speed_cap)
+    }
+
+    #[func]
+    fn dock(&mut self, position: Vector3, tick: i64) -> bool {
+        self.core.dock(to_array(position), tick.max(0) as u64)
+    }
+
+    #[func]
+    fn undock(
+        &mut self,
+        position: Vector3,
+        velocity: Vector3,
+        tick: i64,
+        predict_locally: bool,
+    ) -> bool {
+        self.core.undock(
+            to_array(position),
+            to_array(velocity),
+            tick.max(0) as u64,
+            predict_locally,
+        )
+    }
+
+    #[func]
     fn set_thrust_direction(&mut self, direction: Vector3) {
         self.core.set_thrust(to_array(direction));
     }
