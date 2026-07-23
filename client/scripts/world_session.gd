@@ -55,6 +55,20 @@ static func position_components_from_dict(d: Dictionary, key: String) -> PackedF
 		v.get("z", 0.0) as float])
 
 
+## Normalizes a stored navigation position without narrowing the production
+## f64 path. The Vector3 fallback keeps older test doubles and legacy callers
+## readable while all InitialState navigation data is stored as components.
+static func position_components(value: Variant) -> PackedFloat64Array:
+	if value is PackedFloat64Array:
+		var packed := value as PackedFloat64Array
+		if packed.size() >= 3:
+			return packed
+	if value is Vector3:
+		var legacy := value as Vector3
+		return PackedFloat64Array([legacy.x, legacy.y, legacy.z])
+	return PackedFloat64Array([0.0, 0.0, 0.0])
+
+
 func reset() -> void:
 	ships.clear()
 	ship_hp.clear()
@@ -185,7 +199,7 @@ func ingest_navigation(state: Dictionary) -> void:
 		var g: Dictionary = entry as Dictionary
 		gates.append({
 			"gate_id": g.get("gate_id", -1) as int,
-			"position": vec3_from_dict(g, "position"),
+			"position": position_components_from_dict(g, "position"),
 			"activation_radius": g.get("activation_radius", 0.0) as float,
 			"to_system_name": g.get("to_system_name", "") as String,
 		})
@@ -196,7 +210,7 @@ func ingest_navigation(state: Dictionary) -> void:
 		stations.append({
 			"station_id": station.get("station_id", -1) as int,
 			"name": station.get("name", "") as String,
-			"position": vec3_from_dict(station, "position"),
+			"position": position_components_from_dict(station, "position"),
 			"docking_radius": station.get("docking_radius", 0.0) as float,
 		})
 
@@ -207,7 +221,7 @@ func ingest_navigation(state: Dictionary) -> void:
 			"body_id": b.get("id", -1) as int,
 			"kind": b.get("kind", "") as String,
 			"name": b.get("name", "") as String,
-			"position": vec3_from_dict(b, "position"),
+			"position": position_components_from_dict(b, "position"),
 			"radius": b.get("radius", 1.0) as float,
 			"spectral_type": b.get("spectral_type", 0.0) as float,
 		})

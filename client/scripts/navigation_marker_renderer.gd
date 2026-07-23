@@ -9,6 +9,8 @@
 class_name NavigationMarkerRenderer
 extends RefCounted
 
+const WorldSessionScript = preload("res://scripts/world_session.gd")
+
 const GATE_RING_INNER_RATIO    : float = 0.85
 const GATE_LABEL_HEIGHT_RATIO  : float = 0.3
 const PLANET_VISUAL_RADIUS_RATIO: float = 0.5
@@ -60,18 +62,18 @@ static func spectral_color(t: float) -> Color:
 
 ## Spawns a visual marker for every Jump Gate in the player's current Star
 ## System (ADR-0009). Re-run on Star System change to swap markers.
-## `to_godot_pos` converts a server-space position into Godot world space
-## (main.gd's _server_to_godot_pos).
-static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: float, to_godot_pos: Callable) -> void:
+## `to_godot_components` converts an absolute f64 position into Godot world
+## space after subtracting the floating origin (main.gd's component adapter).
+static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: float, to_godot_components: Callable) -> void:
 	clear_children(gates_root)
 
 	for gate: Variant in gates:
 		var g: Dictionary = gate as Dictionary
-		var gate_pos: Vector3 = g.get("position", Vector3.ZERO) as Vector3
+		var gate_pos := WorldSessionScript.position_components(g.get("position"))
 		var radius  : float   = g.get("activation_radius", 0.0) as float
 
 		var marker: Node3D = Node3D.new()
-		marker.position = to_godot_pos.call(gate_pos) as Vector3
+		marker.position = to_godot_components.call(gate_pos) as Vector3
 		marker.set_meta("gate_id",  g.get("gate_id", -1) as int)
 		marker.set_meta("gate_pos", gate_pos)  ## server coords, kept for per-frame clamping (main.gd)
 		marker.set_meta("nav_pos", gate_pos)
@@ -104,8 +106,8 @@ static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: fl
 
 ## Spawn visual nodes for celestial bodies in the current star system
 ## (planets only, ADR-0025 §5 superseded for stars -- see note below).
-## Re-called on system change. `to_godot_pos` converts a server-space
-## position into Godot world space.
+## Re-called on system change. `to_godot_components` converts an absolute f64
+## position into Godot world space after origin subtraction.
 ##
 ## Stars get no marker/mesh here: the sky shader (space_sky.gdshader) already
 ## draws the local star as a direction-based disc/corona/glow (main.gd's
@@ -116,7 +118,7 @@ static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: fl
 ## not, so the two drifted apart depending on viewing angle. Keeping only the
 ## skybox representation removes the duplicate and the seam, at the cost of
 ## the star no longer being a clickable warp target (planets are unaffected).
-static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: float, to_godot_pos: Callable) -> void:
+static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: float, to_godot_components: Callable) -> void:
 	clear_children(bodies_root)
 
 	for entry: Variant in bodies:
@@ -127,10 +129,10 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		var b_id    : int     = b.get("body_id",      -1) as int
 		var kind    : String  = b.get("kind",          "") as String
 		var name_str: String  = b.get("name",          "") as String
-		var b_pos   : Vector3 = b.get("position", Vector3.ZERO) as Vector3
+		var b_pos   := WorldSessionScript.position_components(b.get("position"))
 		var radius  : float   = b.get("radius",       1.0) as float
 
-		var godot_pos: Vector3 = to_godot_pos.call(b_pos) as Vector3
+		var godot_pos: Vector3 = to_godot_components.call(b_pos) as Vector3
 
 		var marker: Node3D = Node3D.new()
 		marker.position = godot_pos
@@ -172,17 +174,17 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 ## Appends visual markers for NPC stations in the current star system.
 ## Stations share the bodies root because they live in the same local spatial
 ## context as planets and should clamp the same way at true AU distances.
-static func spawn_station_markers(bodies_root: Node3D, stations: Array, world_scale: float, to_godot_pos: Callable) -> void:
+static func spawn_station_markers(bodies_root: Node3D, stations: Array, world_scale: float, to_godot_components: Callable) -> void:
 	for entry: Variant in stations:
 		var station: Dictionary = entry as Dictionary
 		var station_id: int = station.get("station_id", -1) as int
 		var name_str: String = station.get("name", "") as String
-		var station_pos: Vector3 = station.get("position", Vector3.ZERO) as Vector3
+		var station_pos := WorldSessionScript.position_components(station.get("position"))
 		var docking_radius: float = station.get("docking_radius", 0.0) as float
 		var visual_radius: float = STATION_VISUAL_RADIUS * world_scale
 
 		var marker: Node3D = Node3D.new()
-		marker.position = to_godot_pos.call(station_pos) as Vector3
+		marker.position = to_godot_components.call(station_pos) as Vector3
 		marker.set_meta("station_id", station_id)
 		marker.set_meta("station_pos", station_pos)
 		marker.set_meta("nav_pos", station_pos)

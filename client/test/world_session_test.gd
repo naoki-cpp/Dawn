@@ -7,6 +7,7 @@ extends GdUnitTestSuite
 const WorldSession = preload("res://scripts/world_session.gd")
 
 var _session
+const AU_M: float = 1.495978707e11
 
 
 func before_test() -> void:
@@ -17,27 +18,27 @@ func after_test() -> void:
 	_session = null
 
 
-func test_ingest_navigation_normalizes_server_vectors() -> void:
+func test_ingest_navigation_preserves_absolute_f64_positions() -> void:
 	_session.ingest_navigation({
 		"system_name": "Alpha",
 		"systems": [{"id": 2, "name": "Beta"}],
 		"jump_gates": [{
 			"gate_id": 7,
-			"position": {"x": 10.0, "y": 20.0, "z": 30.0},
+			"position": {"x": 5.0 * AU_M + 10.0, "y": 20.0, "z": 30.0},
 			"activation_radius": 1000.0,
 			"to_system_name": "Beta",
 		}],
 		"stations": [{
 			"station_id": 5,
 			"name": "Forge Station",
-			"position": {"x": 11.0, "y": 21.0, "z": 31.0},
+			"position": {"x": 5.0 * AU_M + 20.0, "y": 21.0, "z": 31.0},
 			"docking_radius": 5000.0,
 		}],
 		"celestial_bodies": [{
 			"id": 9,
 			"kind": "Star",
 			"name": "Sun",
-			"position": {"x": 1.0, "y": 2.0, "z": 3.0},
+			"position": {"x": 5.0 * AU_M + 30.0, "y": 2.0, "z": 3.0},
 			"radius": 42.0,
 			"spectral_type": 0.5,
 		}],
@@ -45,9 +46,14 @@ func test_ingest_navigation_normalizes_server_vectors() -> void:
 
 	assert_str(_session.current_system_name).is_equal("Alpha")
 	assert_str(_session.system_names[2]).is_equal("Beta")
-	assert_vector((_session.gates[0] as Dictionary)["position"]).is_equal(Vector3(10.0, 20.0, 30.0))
-	assert_vector((_session.stations[0] as Dictionary)["position"]).is_equal(Vector3(11.0, 21.0, 31.0))
-	assert_vector((_session.bodies[0] as Dictionary)["position"]).is_equal(Vector3(1.0, 2.0, 3.0))
+	var gate_pos: PackedFloat64Array = (_session.gates[0] as Dictionary)["position"]
+	var station_pos: PackedFloat64Array = (_session.stations[0] as Dictionary)["position"]
+	var body_pos: PackedFloat64Array = (_session.bodies[0] as Dictionary)["position"]
+	assert_float(gate_pos[0]).is_equal_approx(5.0 * AU_M + 10.0, 0.001)
+	assert_float(station_pos[0]).is_equal_approx(5.0 * AU_M + 20.0, 0.001)
+	assert_float(body_pos[0]).is_equal_approx(5.0 * AU_M + 30.0, 0.001)
+	assert_float(gate_pos[1]).is_equal_approx(20.0, 0.001)
+	assert_float(station_pos[2]).is_equal_approx(31.0, 0.001)
 
 
 func test_register_ship_promotes_connection_ship_to_player_state() -> void:

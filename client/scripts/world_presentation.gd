@@ -9,6 +9,7 @@ class_name WorldPresentation
 extends RefCounted
 
 const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_renderer.gd")
+const WorldSessionScript = preload("res://scripts/world_session.gd")
 
 const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
 const WARP_TUNNEL_THRESHOLD : float = 2_000.0
@@ -68,16 +69,19 @@ func respawn_navigation_markers(
 	gates: Array,
 	bodies: Array,
 	stations: Array,
-	server_to_godot_pos: Callable,
+	server_components_to_godot: Callable,
 	clear_navigation_selection: Callable
 ) -> void:
 	if _gates_root != null:
-		NavigationMarkerRendererScript.spawn_gate_markers(_gates_root, gates, _world_scale, server_to_godot_pos)
+		NavigationMarkerRendererScript.spawn_gate_markers(
+			_gates_root, gates, _world_scale, server_components_to_godot)
 	if _bodies_root == null:
 		return
 	clear_navigation_selection.call()
-	NavigationMarkerRendererScript.spawn_body_markers(_bodies_root, bodies, _world_scale, server_to_godot_pos)
-	NavigationMarkerRendererScript.spawn_station_markers(_bodies_root, stations, _world_scale, server_to_godot_pos)
+	NavigationMarkerRendererScript.spawn_body_markers(
+		_bodies_root, bodies, _world_scale, server_components_to_godot)
+	NavigationMarkerRendererScript.spawn_station_markers(
+		_bodies_root, stations, _world_scale, server_components_to_godot)
 
 
 func apply_origin_rebase(new_origin: Vector3, keep_player_fixed: bool, player_ship_id: int, ships: Dictionary) -> void:
@@ -188,15 +192,18 @@ static func next_warp_tunnel_amount(
 
 static func sun_state(
 	bodies: Array,
-	player_server: Vector3,
+	player_server: PackedFloat64Array,
 	dir_to_godot: Callable
 ) -> Dictionary:
 	var star: Dictionary = _find_star(bodies)
 	if star.is_empty():
 		return {"active": false}
-	var star_pos: Vector3 = star.get("position", Vector3.ZERO) as Vector3
-	var effective_star_pos: Vector3 = star_pos + SUN_FAR_DIRECTION.normalized() * SUN_EFFECTIVE_DISTANCE
-	var diff: Vector3 = effective_star_pos - player_server
+	var star_pos := WorldSessionScript.position_components(star.get("position"))
+	var far_direction := SUN_FAR_DIRECTION.normalized()
+	var diff := Vector3(
+		star_pos[0] + far_direction.x * SUN_EFFECTIVE_DISTANCE - player_server[0],
+		star_pos[1] + far_direction.y * SUN_EFFECTIVE_DISTANCE - player_server[1],
+		star_pos[2] + far_direction.z * SUN_EFFECTIVE_DISTANCE - player_server[2])
 	if diff.length_squared() < 1.0:
 		return {"active": false}
 	var godot_dir: Vector3 = (dir_to_godot.call(diff) as Vector3).normalized()
@@ -225,7 +232,9 @@ func _update_position_markers(root: Node3D, meta_key: String, player_ship_id: in
 		var marker: Node3D = child as Node3D
 		if marker == null or not marker.has_meta(meta_key):
 			continue
-		var marker_godot: Vector3 = _server_to_godot_pos(marker.get_meta(meta_key) as Vector3)
+		var marker_server := WorldSessionScript.position_components(marker.get_meta(meta_key))
+		var marker_godot: Vector3 = _world.to_godot_components(
+			marker_server[0], marker_server[1], marker_server[2])
 		marker.global_position = clamped_marker_position(player_godot, marker_godot)
 
 
@@ -254,7 +263,7 @@ func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array
 	if _sky_mat == null or player_ship_id < 0 or not ships.has(player_ship_id) or _world == null:
 		return
 	var ship_node: Node3D = ships[player_ship_id] as Node3D
-	var player_server: Vector3 = _world.to_server(ship_node.global_position)
+	var player_server: PackedFloat64Array = _world.to_server_components(ship_node.global_position)
 	var state: Dictionary = sun_state(bodies, player_server, Callable(_world, "dir_to_godot"))
 	if not (state.get("active", false) as bool):
 		_sky_mat.set_shader_parameter("sun_active", 0.0)

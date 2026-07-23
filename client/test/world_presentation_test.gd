@@ -7,6 +7,9 @@ extends GdUnitTestSuite
 
 const WorldPresentation = preload("res://scripts/world_presentation.gd")
 
+func _position(x: float, y: float, z: float) -> PackedFloat64Array:
+	return PackedFloat64Array([x, y, z])
+
 
 class FakeWorld:
 	extends RefCounted
@@ -58,8 +61,8 @@ func test_next_warp_tunnel_amount_eases_back_toward_zero_below_threshold() -> vo
 
 func test_sun_state_returns_inactive_when_no_star_exists() -> void:
 	var state: Dictionary = WorldPresentation.sun_state([
-		{"kind": "Planet", "position": Vector3(100.0, 0.0, 0.0), "spectral_type": 0.1},
-	], Vector3.ZERO, func(diff: Vector3) -> Vector3:
+		{"kind": "Planet", "position": _position(100.0, 0.0, 0.0), "spectral_type": 0.1},
+	], _position(0.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
 		return diff
 	)
 
@@ -68,8 +71,8 @@ func test_sun_state_returns_inactive_when_no_star_exists() -> void:
 
 func test_sun_state_returns_direction_and_color_from_star_data() -> void:
 	var state: Dictionary = WorldPresentation.sun_state([
-		{"kind": "Star", "position": Vector3.ZERO, "spectral_type": 0.0},
-	], Vector3.ZERO, func(diff: Vector3) -> Vector3:
+		{"kind": "Star", "position": _position(0.0, 0.0, 0.0), "spectral_type": 0.0},
+	], _position(0.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
 		return diff
 	)
 

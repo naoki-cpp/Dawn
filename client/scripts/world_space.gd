@@ -45,6 +45,8 @@ var _origin_y : float = 0.0
 var _origin_z : float = 0.0
 
 var origin: Vector3:
+	## Compatibility view only. New code must use component methods because this
+	## getter/setter necessarily narrows an AU-scale value to Vector3.
 	get:
 		return Vector3(_origin_x, _origin_y, _origin_z)
 	set(value):
@@ -55,6 +57,8 @@ var origin: Vector3:
 ## Server-space position -> Godot world position (origin-relative, Z-flipped,
 ## scaled). The subtraction happens in GDScript floats (f64) before narrowing to
 ## a Vector3, so a nearby object stays precise even at astronomical magnitudes.
+## Compatibility wrapper for legacy Vector3 payloads; absolute wire positions
+## must use `to_godot_components` instead.
 func to_godot(server_pos: Vector3) -> Vector3:
 	return to_godot_components(server_pos.x, server_pos.y, server_pos.z)
 
@@ -68,6 +72,8 @@ func to_godot_components(server_x: float, server_y: float, server_z: float) -> V
 		-(server_z - _origin_z) * WORLD_SCALE)
 
 ## Exact inverse of `to_godot`: Godot world position -> server-space position.
+## This compatibility wrapper returns a narrowed Vector3; use
+## `to_server_components` for authoritative coordinates.
 func to_server(godot_pos: Vector3) -> Vector3:
 	var precise := to_server_components(godot_pos)
 	return Vector3(precise[0], precise[1], precise[2])
@@ -93,6 +99,7 @@ func dir_to_server(godot_dir: Vector3) -> Vector3:
 ## Whether the player has drifted far enough from the origin that it should
 ## rebase to keep render coordinates small (and f32-precise).
 func should_rebase(player_server: Vector3) -> bool:
+	## Compatibility wrapper for legacy Vector3 callers.
 	return should_rebase_components(player_server.x, player_server.y, player_server.z)
 
 func should_rebase_components(player_x: float, player_y: float, player_z: float) -> bool:
@@ -101,11 +108,21 @@ func should_rebase_components(player_x: float, player_y: float, player_z: float)
 	var dz := player_z - _origin_z
 	return sqrt(dx * dx + dy * dy + dz * dz) >= REBASE_THRESHOLD
 
+## Distance between two absolute positions while keeping all arithmetic in
+## scalar f64 values. Callers should use this for range and proximity checks
+## instead of narrowing either position to Vector3 first.
+func distance_components(first: PackedFloat64Array, second: PackedFloat64Array) -> float:
+	var dx := first[0] - second[0]
+	var dy := first[1] - second[1]
+	var dz := first[2] - second[2]
+	return sqrt(dx * dx + dy * dy + dz * dz)
+
 ## Move the origin to `new_origin` and return the Godot-space delta to add to
 ## every world node so the move is invisible: a node whose server position is
 ## unchanged must keep its on-screen place, which means shifting it by
 ## (old_origin - new_origin) * scale (mirroring `to_godot`'s axis convention).
 func rebase_to(new_origin: Vector3) -> Vector3:
+	## Compatibility wrapper for legacy Vector3 callers.
 	return rebase_to_components(new_origin.x, new_origin.y, new_origin.z)
 
 func rebase_to_components(new_x: float, new_y: float, new_z: float) -> Vector3:
