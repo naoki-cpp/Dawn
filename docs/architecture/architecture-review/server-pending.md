@@ -152,9 +152,9 @@ scene node generation / network send / HUD adapter のオーケストレーシ�
 
 #### R-3（低優先・トリガー保留）: `node/` 系ファイルの再肥大（ADR-0031/0032/0033 後）
 
-2026-07-24 の再計測では `commands.rs` 1459・`movement_commands.rs` 203・`inventory.rs` 931・
-`ship_cargo.rs` 573・`warp.rs` 1088・`order_book.rs` 1140・`transit_flow.rs` 940・
-`apply_event.rs` 860・`node/mod.rs` 854・`orbit.rs` 836・`snapshot_io.rs` 702 がwatch帯に残った。
+2026-07-24 の再計測では `commands.rs` 1459・`inventory.rs` 931・`ship_cargo.rs` 573・
+`warp.rs` 1088・`order_book.rs` 1140・`transit_flow.rs` 940・`apply_event.rs` 860・
+`node/mod.rs` 854・`orbit.rs` 836・`snapshot_io.rs` 702 がwatch帯に残った。
 Player movement commandは今回再整理され、
 `movement_commands.rs`へMove/Stop、docked/transit/warp gating、共有推進ヘルパーを集約した。
 `commands.rs`はルーター・所有権アクセサ・残りのcommand validationに縮小した。Station operationsはPR #149で再整理され、
