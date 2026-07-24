@@ -29,6 +29,13 @@ date     : 2026-07-10
 | C-8 | インベントリ行 Dictionary が stringly-typed のまま main.gd と合意している | `InventoryRow` を導入し typed row 化。 |
 | C-9 | `hud_manager.gd` が watch 帯（850行）に到達 | 2026-07-10、`/improve-codebase-architecture` 候補2。ヒットテスト4関数（`module_slot_at`/`inventory_panel_row_at`/`column_at`/`inventory_panel_consumes`）を新設 `hud_hit_test.gd`（`HudHitTest`）へ抽出し、`hud_manager.gd` は HUD構築・更新専任に戻した（850→789）。`fitted_header.clip_text` インシデントが「今は変えない」判断を覆すトリガーになった。テストは `hud_hit_test_test.gd` へ移動（新規追加なし、GdUnit4 186/186 維持）。 |
 
+### 2026-07-24: client WorldSpace の座標計算をRustへ移管
+
+`dawn-client-core::WorldSpace` が絶対座標・浮動原点・軸変換・距離計算を `f64` で所有し、
+`dawn-client-gdext::WorldSpace` はGodot型への最終変換だけを担当する構成にした。
+`client/scripts/world_space.gd` は削除し、GDScript側にはNode3Dの配置と原点リベース時のシーンツリー更新だけを残した。
+Rust単体テスト33件と `world_space_test.gd` のGdUnit4 6件（6/6）で、true-AU近傍の精度・相互変換・リベース連続性を確認した。
+
 C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` / `HudManager`）と
 追加の deep modules（`WorldSession` / `HudSurface`）はいずれも GdUnit4 テスト付き。
 各規模は client.md の「ファイルサイズ一覧」を参照。

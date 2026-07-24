@@ -67,7 +67,8 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/ship_picking.gd` | 104 | 🟢 画面空間ピッキング専任 |
 | `client/scripts/tactical_overlay.gd` | 93 | 🟢 射程リング描画専任 |
 | `client/scripts/inventory_row.gd` | 90 | 🟢 typed inventory row shape |
-| `client/scripts/world_space.gd` | 83 | 🟢 floating origin専任 |
+| `crates/dawn-client-core/src/world_space.rs` | — | 🟢 absolute f64 / floating-origin coordinate model（2026-07-24 Rust移管） |
+| `crates/dawn-client-gdext/src/world_space_gd.rs` | — | 🟢 WorldSpaceのGodot型アダプター（最終Vector3変換のみ） |
 | `client/scripts/hud_hit_test.gd` | 80 | 🟢 HUD画面座標hit-test専任 |
 | `client/scripts/billboard_ring.gd` | 65 | 🟢 selection ring共通処理 |
 | `client/scripts/unit_format.gd` | 38 | 🟢 単位整形専任 |
@@ -122,7 +123,8 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/world_interaction.gd` | 133 | 🟢 selection state、double-click timing、click→intent、lock intent、`InputDecoder` 連携を所有する deep module |
 | `client/scripts/world_presentation.gd` | 311 | 🟢 floating origin / nav marker placement / sky sun update / warp tunnel / player ship presentation を所有する deep module |
 | `client/scripts/ship_picking.gd` | 104 | 🟢 船/ゲート/天体ピッキング3関数（画面空間ピッキング） |
-| `client/scripts/world_space.gd` | 83 | 🟢 浮動原点（真 AU 距離レンダリング用の WorldSpace リベース） |
+| `crates/dawn-client-core/src/world_space.rs` | — | 🟢 浮動原点・軸変換・距離計算をf64で所有（ADR-0029/0044） |
+| `crates/dawn-client-gdext/src/world_space_gd.rs` | — | 🟢 WorldSpaceをGodotグローバルクラスとして公開し、最終値だけVector3へ狭める |
 | `client/scripts/tactical_overlay.gd` | 93 | 🟢 射程リング描画のみ |
 | `client/scripts/billboard_ring.gd` | 65 | 🟢 固定画面サイズの選択リング billboard 共通 static class |
 | `client/scripts/unit_format.gd` | 38 | 🟢 速度/距離の適応的単位整形（m/s・km/s・AU/s） |

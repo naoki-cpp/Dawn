@@ -182,11 +182,9 @@ func _process(delta: float) -> void:
 	_update_hud()
 
 ## The client's single coordinate authority (ADR-0029 #3): owns the floating
-## origin and is the only place server<->Godot conversions happen. Preloaded
-## (not referenced by global class_name) so headless tests that load main.gd
-## resolve it without the editor's script-class cache.
-const WorldSpaceScript = preload("res://scripts/world_space.gd")
-var _world := WorldSpaceScript.new()
+## origin and is the only place server<->Godot conversions happen. WorldSpace
+## is provided by dawn-client-gdext; its coordinate math stays in Rust.
+var _world := WorldSpace.new()
 
 ## Real-unit (m/s, km/s, AU/s, ...) display formatting (ADR-0029 §1.5: single
 ## conversion module). Static methods only -- preloaded rather than referenced
