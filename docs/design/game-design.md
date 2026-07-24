@@ -354,9 +354,9 @@ EVE の**グローバル** TiDi は大規模戦でゲームが 10 倍スロー�
   （Y キー）、Packaged Ship から新しい稼働船を作る Assemble（ADR-0037、複数所有船
   ロスターの SHIPS 列から選択）まで機能する。プレイヤー間 Market は基盤実装済み
   （`dawn-market` クレート、SQLite 指値注文帳、`PlayerId` 単位の Currency 台帳、
-  List/Cancel/Settle の Item bridge command 生成）。クライアントからの発注UIと、
-  Sector側でbridge commandを適用するruntime wiringは未実装
-  （`docs/process/roadmap.md` §12 9D 参照）。
+  List/Cancel/Settle の Item bridge command 生成）。クライアントの発注UIとSector側の
+  bridge command適用runtime wiringも実装済み
+  （`docs/process/roadmap.md` §12 9D-4/5、Market専用wire envelope）。
 
 ### 4.2 将来検討する機能（優先順位付き・すべて未実装）
 
@@ -423,10 +423,11 @@ EM / Thermal / Kinetic / Explosive の 4 タイプと、各 HP 層への耐性�
 - **Web（速度低下）**: Tackler（実装済み・§4.1）の隣接機能。速度を落として追走/逃走の
   判断を生む — 未実装
 
-#### ステーション（拠点）— 種だけ・要検討（2026-06-23）
+#### ステーションの将来拡張
 
-未着手。検討する前に §7 の中心的な問い（「意図的な判断を下す機会を増やすか？」）に
-照らして範囲を絞る必要がある。EVE のステーションは複数機能（修理/リフィット・市場・
+NPC Station / Dock / Station inventory / Packaged Ship のMVPは §4.1 に実装済み。
+ここでは将来の追加サービスだけを扱う。検討する際は §7 の中心的な問い
+（「意図的な判断を下す機会を増やすか？」）に照らして範囲を絞る必要がある。EVE のステーションは複数機能（修理/リフィット・市場・
 docking 安全地帯・インダストリー）の複合体だが、そのまま輸入すると「何もせず留まれる
 安全な場所」になりやすく、FBD-009 の反グラインド方針（AFK 採掘禁止と同根の懸念）と
 相性が悪い。
@@ -529,8 +530,8 @@ AI_DEVELOPMENT_GUIDE.md「Project North Star」に準拠。以下は EVE に存�
 > （Item 一般化・ADR-0034）、Scrap Metal（撃破からの即時ドロップのみ——
 > 「放置採掘」の対象外）、Station / Packaged Ship の Assemble・Disassemble。
 > 実装済み: `dawn-market` クレート（指値注文帳・`PlayerId` 単位の Currency 台帳、
-> List/Cancel/Settle の Item bridge command 生成）。未実装で ⬜なのは
-> 2026-07-17、クライアントMarket UIとSector側のruntime wiringも実装済み。
+> List/Cancel/Settle の Item bridge command 生成）、クライアントMarket UI、
+> Sector側のruntime wiring（2026-07-24）。
 > `M`でMarket surfaceを開き、現在の板・Currency残高を確認し、所有船cargoから
 > Ask/Bidの指値発注と自分の注文のCancelを行う。Market専用wire envelopeを使い、
 > MarketはSectorへ直接アクセスしない。方針として変わっていないのは

@@ -9,7 +9,7 @@
 class_name NavigationMarkerRenderer
 extends RefCounted
 
-const WorldSessionScript = preload("res://scripts/world_session.gd")
+const PositionComponents = preload("res://scripts/position_components.gd")
 
 const GATE_RING_INNER_RATIO    : float = 0.85
 const GATE_LABEL_HEIGHT_RATIO  : float = 0.3
@@ -69,7 +69,7 @@ static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: fl
 
 	for gate: Variant in gates:
 		var g: Dictionary = gate as Dictionary
-		var gate_pos := WorldSessionScript.position_components(g.get("position"))
+		var gate_pos := PositionComponents.from_value(g.get("position"))
 		var radius  : float   = g.get("activation_radius", 0.0) as float
 
 		var marker: Node3D = Node3D.new()
@@ -129,7 +129,7 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		var b_id    : int     = b.get("body_id",      -1) as int
 		var kind    : String  = b.get("kind",          "") as String
 		var name_str: String  = b.get("name",          "") as String
-		var b_pos   := WorldSessionScript.position_components(b.get("position"))
+		var b_pos   := PositionComponents.from_value(b.get("position"))
 		var radius  : float   = b.get("radius",       1.0) as float
 
 		var godot_pos: Vector3 = to_godot_components.call(b_pos) as Vector3
@@ -179,7 +179,7 @@ static func spawn_station_markers(bodies_root: Node3D, stations: Array, world_sc
 		var station: Dictionary = entry as Dictionary
 		var station_id: int = station.get("station_id", -1) as int
 		var name_str: String = station.get("name", "") as String
-		var station_pos := WorldSessionScript.position_components(station.get("position"))
+		var station_pos := PositionComponents.from_value(station.get("position"))
 		var docking_radius: float = station.get("docking_radius", 0.0) as float
 		var visual_radius: float = STATION_VISUAL_RADIUS * world_scale
 

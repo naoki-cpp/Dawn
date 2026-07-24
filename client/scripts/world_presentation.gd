@@ -9,7 +9,7 @@ class_name WorldPresentation
 extends RefCounted
 
 const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_renderer.gd")
-const WorldSessionScript = preload("res://scripts/world_session.gd")
+const PositionComponents = preload("res://scripts/position_components.gd")
 
 const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
 const WARP_TUNNEL_THRESHOLD : float = 2_000.0
@@ -197,7 +197,7 @@ static func sun_state(
 	var star: Dictionary = _find_star(bodies)
 	if star.is_empty():
 		return {"active": false}
-	var star_pos := WorldSessionScript.position_components(star.get("position"))
+	var star_pos := PositionComponents.from_value(star.get("position"))
 	var far_direction := SUN_FAR_DIRECTION.normalized()
 	var diff := Vector3(
 		star_pos[0] + far_direction.x * SUN_EFFECTIVE_DISTANCE - player_server[0],
@@ -231,7 +231,7 @@ func _update_position_markers(root: Node3D, meta_key: String, player_ship_id: in
 		var marker: Node3D = child as Node3D
 		if marker == null or not marker.has_meta(meta_key):
 			continue
-		var marker_server := WorldSessionScript.position_components(marker.get_meta(meta_key))
+		var marker_server := PositionComponents.from_value(marker.get_meta(meta_key))
 		var marker_godot: Vector3 = _world.to_godot_components(
 			marker_server[0], marker_server[1], marker_server[2])
 		marker.global_position = clamped_marker_position(player_godot, marker_godot)

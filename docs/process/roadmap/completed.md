@@ -28,7 +28,7 @@ related  : ./README.md, ../roadmap-history.md, ../../adr/
 
 ### Phase 10 の基盤
 
-- GDExtension crate、`dawn-client-core`、PlayerLoadout projection、Command送信、postcardの主要移行、MotionPredictor基盤完了。
+- GDExtension crate、`dawn-client-core`、PlayerLoadout projection、WorldSession純粋状態、Command送信、postcardの主要移行、MotionPredictor基盤完了（ADR-0046）。
 - Godotの自動テストは通過。実行DLL生成と手動プレイテストは [pending.md](./pending.md) に残す。
 
 ## 記録先
