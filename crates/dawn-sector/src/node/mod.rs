@@ -22,6 +22,7 @@ mod commands;
 mod coordinates;
 mod inventory;
 mod jump;
+mod movement_commands;
 mod navigation;
 mod orbit;
 mod player_loadout_projection;
