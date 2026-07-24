@@ -48,6 +48,23 @@ func _item(overrides: Dictionary) -> ItemRow:
 	return ItemRow.from_json(base)
 
 
+func test_set_player_fitting_before_build_is_applied_after_build() -> void:
+	var unbuilt: RefCounted = HudSurfaceScript.new()
+	var modules: Array[ModuleRow] = [
+		_module({"module_id": 7, "name": "Railgun", "is_active_module": true}),
+	]
+	var inventory: Array[ItemRow] = [
+		_item({"item_type": "ScrapMetal", "name": "Scrap Metal", "count": 3}),
+	]
+
+	unbuilt.set_player_fitting(modules, inventory)
+	unbuilt.build(_parent, _hud, _stats_label)
+
+	assert_int(unbuilt._module_slots.size()).is_equal(1)
+	assert_int(unbuilt._inventory_panel_refs.inventory_rows.size()).is_equal(1)
+	assert_str(unbuilt._inventory_panel_refs.inventory_rows[0].item_type).is_equal("ScrapMetal")
+
+
 func test_render_updates_all_hud_panels_from_one_frame() -> void:
 	var modules: Array[ModuleRow] = [
 		_module({"name": "Afterburner", "is_active_module": true, "is_active": true}),

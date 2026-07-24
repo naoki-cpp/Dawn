@@ -92,7 +92,7 @@ AnchorTable（静的・スナップショット非対象）: AnchorId → 絶対
 | 3 | 絶対位置/距離をアンカー対応に。サーバの絶対位置アクセサ群（`entity_abs_pos`／`entity_absolute_f64`／`ship_distance`／`ship_absolute`）に一元化し、combat／approach／tackle／bot／navigation／AoI を同一フレームへ | ✅ |
 | 4 | ワープ到着で Body アンカーへリベース（`AnchorRebased` 権威イベント・apply/replay）。`WarpComp.warp_arrival_abs`＋`entity_absolute_f64` で f64 精密到着 | ✅ |
 | — | AoI を絶対位置ベースに（`ship_absolute_positions`／両 serve ループ／InitialState scoping／jump 再送） | ✅ |
-| 6 | クライアント浮動原点を単一 `WorldSpace`（`client/scripts/world_space.gd`）に集約。server↔Godot 変換を `to_godot`/`to_server`/`dir_*` 経由に統一し、原点が動くと前進/逆変換が食い違う潜在バグを排除。リベース2系統を `_apply_origin_rebase` に統合。`floating_origin.gd` 削除・`world_space_test.gd` 追加 | ✅ |
+| 6 | クライアント浮動原点を単一 `WorldSpace`（`dawn-client-core`のf64コア + `dawn-client-gdext`のGodotアダプター）に集約。server↔Godot 変換を `to_godot`/`to_server`/`dir_*` 経由に統一し、原点が動くと前進/逆変換が食い違う潜在バグを排除。リベース2系統を `_apply_origin_rebase` に統合。旧GDScript実装を削除・`world_space_test.gd` をGDExtension契約テストへ更新 | ✅ |
 | 7 | HUD 速度は既に実値表示（`METERS_PER_UNIT=1.0` の単一定数）。AU 距離フォーマッタは consumer が出た時に同一箇所へ足す（YAGNI） | ✅(速度) |
 | 8 | スナップショットに `anchor` を永続化（リベース済み船の絶対位置を復元）。スキーマ bump | ✅ |
 
@@ -260,8 +260,7 @@ ADR §1 決定 #5「実値表示（m/s・AU）の内部↔表示変換は単一�
 
 - `client/scripts/unit_format.gd`（新規）：`format_speed(mps)` / `format_distance(meters)` の static 関数のみ。
   しきい値は両者共通（< 1,000 → そのまま m/m・s、< 0.01 AU 相当 → km/km・s、それ以上 → AU/AU・s）。
-  `main.gd` は `WorldSpace` と同じ理由（headless テストのクラスキャッシュ依存回避）で `class_name` ではなく
-  `preload` で読み込む。
+  `main.gd` は `UnitFormat` を `preload` で読み込む。`WorldSpace` は GDExtension のグローバルクラスとして提供される。
 - `main.gd` の `_update_hud()` の速度・距離フォーマットをそれぞれ `UnitFormat.format_speed/format_distance`
   に置き換え（ハードコードの `"%d m/s"`／`"%.1f km"` を削除）。
 - テスト `client/test/unit_format_test.gd`（新規・8件）でしきい値境界・各帯（m/s, km/s, AU/s 相当）を確認。

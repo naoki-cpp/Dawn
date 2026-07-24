@@ -38,7 +38,7 @@ related  : ./README.md, ./deferred.md, ../roadmap.md, ../roadmap-history.md
 | 10-3 | Client-Side Predictionとreconciliation | ADR-0043/0045承認済み・MotionTrackのtick/position writer完了。Godot playtestは10-5へ |
 | 10-4 | WebSocket上のpostcard移行の段階2を完了 | 段階1完了・残作業あり |
 | 10-5 | Godot editorでのPrediction / dock / warpプレイテスト | 自動テスト済み・手動確認待ち |
-| 10-6 | 座標・クライアント移動設計の再評価（ADR-0044 / ADR-0045） | ADR承認済み・実装を10-3/10-5へ分離 |
+| 10-6 | 座標・クライアント移動設計の再評価（ADR-0044 / ADR-0045） | ADR承認済み・WorldSpaceの座標計算を`dawn-client-core`へ移管済み。Godot editorでの実機確認は10-5へ |
 
 ### 3.4 Phase 11 のTODO
 

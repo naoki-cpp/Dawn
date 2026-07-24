@@ -78,9 +78,14 @@ f64へ変更したり、アンカー方式と絶対方式を新機能ごとに�
 - [x] `PositionComp`と`AnchorComp`の移行方針を決定し、互換読み取りを隔離する（PositionCompはアンカー相対f32オフセットとして維持し、AbsolutePositionへの変換はAnchorTable / ship_absoluteに限定。旧snapshot / transit payloadは専用legacy decoderで読み取り、absolute_positionは`None`へ変換）
 - [ ] 位置を含むDomainEvent、snapshot、wire schemaを同じ移行で更新する（snapshot と ShipSpawned / SectorTransitCompleted / JumpGateUsed の移行済み。残るイベント境界を整理する）
 - [x] f64 wire位置をクライアントで`Vector3`へ変換する前に差分計算するテストを追加する
+
 - [x] AU桁のゲート・ステーションで表示位置と近接判定が一致するテストを追加する
 - [x] 旧アンカー経路を削除する前にreplay・transit・warpの互換性を検証する（既存のreplay・transit・warp回帰テストで確認）
 - [x] `docs/architecture/entity-model.md`と`docs/architecture/wire-protocol.md`を実装に同期する
+
+実装時は `dawn-client-core::WorldSpace` が絶対f64座標・浮動原点・軸変換を所有し、
+`dawn-client-gdext::WorldSpace` は最終的なGodot `Vector3`/`PackedFloat64Array`変換だけを担当する。
+GDScript側はNode3Dの配置・原点リベース時のシーンツリー更新を担当する。
 
 ## 影響と保留事項
 

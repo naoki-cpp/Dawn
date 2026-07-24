@@ -31,6 +31,10 @@ var _prev_status: Dictionary = {}
 var _prev_ship_status: Dictionary = {}
 var _prev_target: Dictionary = {}
 var _prev_modules: Array = []
+## A loadout can arrive before main.gd has finished building the HUD (notably
+## during headless tests). Keep the latest snapshot until the panel refs exist
+## so the first paint is not lost and no UI method touches null refs.
+var _pending_fitting: Dictionary = {}
 
 
 func build(parent: Node, hud: CanvasLayer, stats_label: Label) -> void:
@@ -42,6 +46,15 @@ func build(parent: Node, hud: CanvasLayer, stats_label: Label) -> void:
 	_target_panel_refs = HudManager.build_target_panel(hud)
 	_module_bar = HudManager.build_module_bar(hud)
 	_inventory_panel_refs = HudManager.build_inventory_panel(hud)
+	if not _pending_fitting.is_empty():
+		var pending := _pending_fitting
+		_pending_fitting = {}
+		set_player_fitting(
+			pending["modules"] as Array,
+			pending["inventory"] as Array,
+			pending["station_inventory"] as Array,
+			pending["owned_ships"] as Array,
+			pending["buildable_ship_types"] as Array)
 
 
 ## True when `next` differs from `prev` (deep value comparison). Pulled out
@@ -157,6 +170,15 @@ func set_player_fitting(
 	modules: Array, inventory: Array, station_inventory: Array = [], owned_ships: Array = [],
 	buildable_ship_types: Array = []
 ) -> void:
+	if _module_bar == null or _inventory_panel_refs == null:
+		_pending_fitting = {
+			"modules": modules.duplicate(),
+			"inventory": inventory.duplicate(),
+			"station_inventory": station_inventory.duplicate(),
+			"owned_ships": owned_ships.duplicate(),
+			"buildable_ship_types": buildable_ship_types.duplicate(),
+		}
+		return
 	if _active_module_signature(modules) != _active_module_signature(_prev_modules):
 		_module_slots = HudManager.rebuild_module_bar(_module_bar, modules)
 	## rebuild_module_bar() only builds each slot's F-number/name Controls --
