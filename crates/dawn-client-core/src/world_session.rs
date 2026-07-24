@@ -177,6 +177,9 @@ pub struct HealthEventInput {
 pub struct ShipState {
     pub ship_type_name: String,
     pub is_player: bool,
+    pub cap_current: f64,
+    pub cap_max: f64,
+    pub cap_recharge_per_tick: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -350,6 +353,17 @@ impl WorldSessionState {
 
     pub fn set_player_ship_id(&mut self, player_ship_id: i64) {
         self.player_ship_id = player_ship_id;
+        let Some(ship) = self.ships.get(&player_ship_id).cloned() else {
+            return;
+        };
+        let Some(health) = self.ship_hp.get(&player_ship_id).copied() else {
+            return;
+        };
+        self.player_ship_type_name = ship.ship_type_name;
+        self.player_health = health;
+        self.cap_current = ship.cap_current;
+        self.cap_max = ship.cap_max;
+        self.cap_recharge = ship.cap_recharge_per_tick;
     }
 
     pub fn player_ship_type_name(&self) -> &str {
@@ -474,6 +488,9 @@ impl WorldSessionState {
             ShipState {
                 ship_type_name: input.ship_type_name.clone(),
                 is_player: input.is_player,
+                cap_current: input.cap_max,
+                cap_max: input.cap_max,
+                cap_recharge_per_tick: input.cap_recharge_per_tick,
             },
         );
 
@@ -482,7 +499,7 @@ impl WorldSessionState {
             ..RegistrationOutcome::default()
         };
         if ship_id == connection_ship_id && self.player_ship_id < 0 {
-            self.set_player_ship(ship_id, &input, health);
+            self.set_player_ship_id(ship_id);
             outcome.became_player = true;
         } else if input.is_player && !self.opponent_ship_ids.contains(&ship_id) {
             self.opponent_ship_ids.push(ship_id);
@@ -638,15 +655,6 @@ impl WorldSessionState {
         self.apply_dock_state(station_id, station_name, tick)
     }
 
-    fn set_player_ship(&mut self, ship_id: i64, input: &ShipInput, health: HealthState) {
-        self.player_ship_id = ship_id;
-        self.player_ship_type_name = input.ship_type_name.clone();
-        self.player_health = health;
-        self.cap_max = input.cap_max;
-        self.cap_recharge = input.cap_recharge_per_tick;
-        self.cap_current = self.cap_max;
-    }
-
     fn apply_dock_state(&mut self, station_id: i64, station_name: String, tick: i64) -> bool {
         if tick < self.latest_dock_state_tick {
             return false;
@@ -662,7 +670,7 @@ impl WorldSessionState {
             return;
         }
         let ticks = u32::try_from(ticks).unwrap_or(0);
-        self.cap_current = match loadout {
+        let cap_current = match loadout {
             Some(loadout) => loadout.simulate_capacitor_ticks(
                 self.cap_current,
                 self.cap_max,
@@ -680,6 +688,10 @@ impl WorldSessionState {
                 )
             }
         };
+        self.cap_current = cap_current;
+        if let Some(ship) = self.ships.get_mut(&self.player_ship_id) {
+            ship.cap_current = cap_current;
+        }
     }
 }
 
@@ -739,6 +751,45 @@ mod tests {
         assert_eq!(state.player_ship_type_name(), "Magpie");
         assert_eq!(state.player_health().shield, 80.0);
         assert_eq!(state.cap_current(), 55.0);
+    }
+
+    #[test]
+    fn switching_to_a_registered_ship_refreshes_player_projection() {
+        let mut state = WorldSessionState::default();
+        state.register_ship(11, ship(true), 11);
+
+        let mut second = ship(false);
+        second.ship_type_name = "Venture".to_string();
+        second.max_shield = 250.0;
+        second.max_armor = 180.0;
+        second.max_hull = 120.0;
+        second.current_shield = Some(210.0);
+        second.current_armor = Some(160.0);
+        second.current_hull = Some(110.0);
+        second.cap_max = 80.0;
+        second.cap_recharge_per_tick = 4.0;
+        state.register_ship(22, second, 11);
+
+        state.cap_current = 17.0;
+        state.ships.get_mut(&11).unwrap().cap_current = 17.0;
+        state.set_player_ship_id(22);
+
+        assert_eq!(state.player_ship_type_name(), "Venture");
+        assert_eq!(state.player_health().shield, 210.0);
+        assert_eq!(state.player_health().max_shield, 250.0);
+        assert_eq!(state.cap_current(), 80.0);
+        assert_eq!(state.cap_max(), 80.0);
+        assert_eq!(state.cap_recharge(), 4.0);
+
+        state.cap_current = 31.0;
+        state.ships.get_mut(&22).unwrap().cap_current = 31.0;
+        state.set_player_ship_id(11);
+
+        assert_eq!(state.player_ship_type_name(), "Magpie");
+        assert_eq!(state.player_health().shield, 80.0);
+        assert_eq!(state.cap_current(), 17.0);
+        assert_eq!(state.cap_max(), 55.0);
+        assert_eq!(state.cap_recharge(), 3.0);
     }
 
     #[test]

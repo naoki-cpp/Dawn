@@ -559,6 +559,30 @@ func test_switching_active_ship_to_a_known_ship_reattaches_the_camera() -> void:
 	ship_b.global_position = Vector3(100.0, 0.0, 0.0)
 
 	_main._ships = {1: ship_a, 2: ship_b}
+	_main._session.register_ship(1, JSON.stringify({
+		"is_player": true,
+		"ship_type_name": "Magpie",
+		"current_shield": 80.0,
+		"current_armor": 70.0,
+		"current_hull": 60.0,
+		"max_shield": 100.0,
+		"max_armor": 90.0,
+		"max_hull": 80.0,
+		"cap_max": 55.0,
+		"cap_recharge_per_tick": 3.0,
+	}), 1)
+	_main._session.register_ship(2, JSON.stringify({
+		"is_player": false,
+		"ship_type_name": "Venture",
+		"current_shield": 210.0,
+		"current_armor": 160.0,
+		"current_hull": 110.0,
+		"max_shield": 250.0,
+		"max_armor": 180.0,
+		"max_hull": 120.0,
+		"cap_max": 80.0,
+		"cap_recharge_per_tick": 4.0,
+	}), 1)
 	_main._session.set_player_ship_id(1)
 	## Route through the real attach path (not a bare camera.set_target())
 	## so WorldPresentation._player_ship is seeded correctly -- otherwise the
@@ -570,7 +594,14 @@ func test_switching_active_ship_to_a_known_ship_reattaches_the_camera() -> void:
 	_main._apply_loadout_side_effects()
 
 	assert_int(_main._player_ship_id).is_equal(2)
-	assert_int(_main._session.snapshot().player_ship_id).is_equal(2)
+	var snapshot: Dictionary = _main._session.snapshot()
+	assert_int(snapshot.player_ship_id).is_equal(2)
+	assert_str(snapshot.player_ship_type_name).is_equal("Venture")
+	assert_float(snapshot.player_shield).is_equal_approx(210.0, 0.001)
+	assert_float(snapshot.player_max_shield).is_equal_approx(250.0, 0.001)
+	assert_float(snapshot.cap_current).is_equal_approx(80.0, 0.001)
+	assert_float(snapshot.cap_max).is_equal_approx(80.0, 0.001)
+	assert_float(snapshot.cap_recharge).is_equal_approx(4.0, 0.001)
 	assert_int(ship_b.set_as_player_calls).is_equal(1)
 	assert_object(camera._target_node).is_equal(ship_b)
 	## Regression: the old ship used to stay permanently player-colored
