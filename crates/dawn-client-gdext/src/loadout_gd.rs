@@ -128,6 +128,10 @@ pub struct PlayerLoadout {
 
 #[godot_api]
 impl PlayerLoadout {
+    pub(crate) fn core_mut(&mut self) -> Option<&mut PlayerLoadoutMsg> {
+        self.loadout.as_mut()
+    }
+
     #[func]
     fn reset(&mut self) {
         self.loadout = None;
@@ -365,7 +369,7 @@ impl PlayerLoadout {
 
     /// Static form of `simulate_capacitor_ticks`, operating on an
     /// ad-hoc module list instead of this instance's own state. Used by
-    /// `world_session.gd::simulate_cap` for the "no `PlayerLoadout` instance
+    /// `WorldSessionState::simulate_cap` for the "no `PlayerLoadout` instance
     /// yet, but I have a raw module list" case -- mirrors the old
     /// `player_loadout.gd::simulate_modules_capacitor_ticks` static function.
     #[func]

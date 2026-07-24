@@ -36,6 +36,7 @@ mod item_row;
 mod loadout;
 mod module_row;
 mod motion;
+mod world_session;
 mod world_space;
 
 pub use item_row::{ItemRow, ItemType};
@@ -45,4 +46,10 @@ pub use loadout::{
 };
 pub use module_row::{ModuleKind, ModuleRow, StatDelta};
 pub use motion::{MotionInput, MotionPredictor, MotionProfile, MotionState};
+pub use world_session::{
+    BuildableShipTypeInput, BuildableShipTypeRecord, CelestialBodyInput, CelestialBodyRecord,
+    DestructionOutcome, GateInput, GateRecord, HealthEventInput, HealthEventOutcome, HealthState,
+    NavigationInput, PositionInput, RegistrationOutcome, RemovalOutcome, ShipInput, ShipState,
+    StationInput, StationRecord, SystemNameInput, WorldSessionState,
+};
 pub use world_space::{WorldSpace, REBASE_THRESHOLD, WORLD_SCALE};

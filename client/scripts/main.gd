@@ -27,7 +27,7 @@ const SHIP_SCENE  := preload("res://scenes/ship.tscn")
 const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
 const MarketSurfaceScript = preload("res://scripts/market_surface.gd")
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
-const WorldSessionScript = preload("res://scripts/world_session.gd")
+const PositionComponents = preload("res://scripts/position_components.gd")
 const WorldInteractionScript = preload("res://scripts/world_interaction.gd")
 const InventoryRow = preload("res://scripts/inventory_row.gd")
 const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor
@@ -45,12 +45,13 @@ var _cap_tick_accumulator : float = 0.0
 
 # -- Internal state -----------------------------------------------------------
 
-var _session := WorldSessionScript.new()
+var _session := WorldSession.new()
 var _interaction := WorldInteractionScript.new()
 var _hud_surface := HudSurfaceScript.new()
 var _market_surface := MarketSurfaceScript.new()
 var _presentation := WorldPresentationScript.new()
-var _ships                 : Dictionary = _session.ships
+## Scene nodes stay in Godot; WorldSession owns the matching pure ship state.
+var _ships                 : Dictionary = {}
 var _player_ship_id        : int        = -1
 var _player_ship_type_name : String     = ""
 var _event_count     : int        = 0
@@ -84,10 +85,10 @@ var _drag_ghost : Label = null
 const DRAG_THRESHOLD_PX : float = 6.0
 
 ## Per-ship HP: { ship_id: {shield, armor, hull} }
-var _ship_hp : Dictionary = _session.ship_hp
+var _ship_hp : Dictionary = {}
 
 ## Duel mode: opponent player ship IDs (populated from InitialState is_player flag)
-var _opponent_ship_ids : Array = _session.opponent_ship_ids
+var _opponent_ship_ids : Array = []
 ## PlayerLoadout is a GDExtension class (dawn-client-gdext, ADR-0039/ADR-0040)
 ## -- no preload needed, same as any other globally registered class.
 var _loadout := PlayerLoadout.new()
@@ -110,13 +111,13 @@ var _weapon_falloff   : float  = 0.0   ## falloff range (u)
 ##             activation_radius:float, to_system_name:String}]
 ##   _bodies: [{body_id:int, kind:String, name:String,
 ##             position:Vector3 (server coords), radius:float, spectral_type:float}]
-var _gates        : Array      = _session.gates
-var _stations     : Array      = _session.stations
-var _bodies       : Array      = _session.bodies
+var _gates        : Array      = []
+var _stations     : Array      = []
+var _bodies       : Array      = []
 ## Buildable Packaged Ship catalog (ADR-0034 9B): [{ship_type_id:int, name:String}].
-var _buildable_ship_types : Array = _session.buildable_ship_types
+var _buildable_ship_types : Array = []
 ## Star System id -> name, used to resolve StarSystemChanged events.
-var _system_names : Dictionary = _session.system_names
+var _system_names : Dictionary = {}
 
 ## Placeholder until InitialState arrives -- never a real system name (was
 ## hardcoded to "Alpha", which looked like live data while still CONNECTING).
@@ -201,13 +202,17 @@ func _server_to_godot_pos(p: Vector3) -> Vector3:
 ## Reads a legacy f32 {x,y,z} sub-dictionary (for example PosWire event fields)
 ## into a Vector3. Absolute f64 position fields use the component helper below.
 func _vec3_from_dict(d: Dictionary, key: String) -> Vector3:
-	return WorldSessionScript.vec3_from_dict(d, key)
+	var value: Dictionary = d.get(key, {}) as Dictionary
+	return Vector3(
+		value.get("x", 0.0) as float,
+		value.get("y", 0.0) as float,
+		value.get("z", 0.0) as float)
 
 func _position_components_from_dict(d: Dictionary, key: String) -> PackedFloat64Array:
-	return WorldSessionScript.position_components_from_dict(d, key)
+	return PositionComponents.from_dict(d, key)
 
 func _position_components(value: Variant) -> PackedFloat64Array:
-	return WorldSessionScript.position_components(value)
+	return PositionComponents.from_value(value)
 
 func _server_components_to_godot(position: PackedFloat64Array) -> Vector3:
 	return _world.to_godot_components(position[0], position[1], position[2])
@@ -501,7 +506,7 @@ func _send_stop_command() -> void:
 # -- Event handlers -----------------------------------------------------------
 
 func _on_event_received(payload: Dictionary) -> void:
-	_session.event_count += 1
+	_session.increment_event_count()
 	_sync_session_state()
 	var event_type: String = payload.get("type", "") as String
 	match event_type:
@@ -701,7 +706,7 @@ func _on_initial_state(state: Dictionary) -> void:
 ## and bodies) and rebuild the gate / body markers from it. This replaces the
 ## previously hard-coded JUMP_GATES / CELESTIAL_BODIES / STAR_SYSTEM_NAMES.
 func _ingest_star_map(state: Dictionary) -> void:
-	_session.ingest_navigation(state)
+	_session.ingest_navigation(JSON.stringify(state))
 	_sync_session_state()
 	_presentation.respawn_navigation_markers(
 		_gates,
@@ -739,7 +744,9 @@ func _spawn_ship_from_data(d: Dictionary) -> void:
 		d.get("inertia_modifier", 0.3) as float,
 		_velocity_from_dict(d),
 		_current_tick)
-	var result: Dictionary = _session.register_ship(sid, ship, d, _connection.ship_id)
+	var result: Dictionary = _session.register_ship(
+		sid, JSON.stringify(d), _connection.ship_id)
+	_ships[sid] = ship
 	_sync_session_state()
 	if result.get("became_player", false) as bool:
 		_set_as_player_ship(sid, ship)
@@ -757,14 +764,16 @@ func _handle_aoi_leave(p: Dictionary) -> void:
 	## clear_lock=false: the ship is still alive server-side, just outside
 	## this player's AoI radius (ADR-0019) -- Lock has no distance-based
 	## expiry (lock.rs), so clearing player_lock_target here would desync
-	## from the server and strand the lock forever (see world_session.gd).
+	## from the server and strand the lock forever (see WorldSession state).
+	var ship: Node3D = _ships.get(sid) as Node3D
 	var result: Dictionary = _session.remove_ship(sid, false)
 	_sync_session_state()
 	if not (result.get("removed", false) as bool):
 		return
 	_interaction.clear_target_if_matches(sid)
-	var ship: Node3D = result.get("node") as Node3D
-	ship.queue_free()
+	_ships.erase(sid)
+	if ship != null:
+		ship.queue_free()
 
 ## Sent on connect and again after every Fit/Unfit (ADR-0032), so the panel
 ## and module bar always reflect the server's authoritative fitting state --
@@ -793,7 +802,7 @@ func _apply_loadout_side_effects() -> void:
 	var new_active_ship_id: int = _loadout.active_ship_id()
 	if new_active_ship_id != _player_ship_id \
 			and (new_active_ship_id < 0 or _ships.has(new_active_ship_id)):
-		_session.player_ship_id = new_active_ship_id
+		_session.set_player_ship_id(new_active_ship_id)
 		if new_active_ship_id >= 0:
 			_set_as_player_ship(new_active_ship_id, _ships[new_active_ship_id] as Node3D)
 		else:
@@ -1029,7 +1038,7 @@ func _toggle_module_by_index(f_index: int) -> void:
 		## Weapon/Tackle/Remote-repair require a Locked target (ADR-0035/0036);
 		## other kinds (self-only Active modules) must not carry one.
 		var requires_target: bool = toggle.get("requires_target", false) as bool
-		if requires_target and _session.player_lock_target < 0:
+		if requires_target and _player_lock_target < 0:
 			## Sending this without a target is rejected server-side outright
 			## (ADR-0035: requires_target() vs target.is_some() mismatch),
 			## which the client can only observe as an instant on-then-off
@@ -1039,11 +1048,11 @@ func _toggle_module_by_index(f_index: int) -> void:
 			_jump_notice = "No target locked"
 			_jump_notice_timer = 2.0
 			return
-		var target_id: int = _session.player_lock_target if requires_target else -1
+		var target_id: int = _player_lock_target if requires_target else -1
 		if requires_target and target_id >= 0 and _player_ship_id >= 0:
 			if not _ships.has(target_id) or not _ships.has(_player_ship_id):
 				## Locked target has left AoI (ADR-0019: Lock survives AoI
-				## leave via world_session.gd remove_ship(clear_lock=false))
+				## leave via WorldSession.remove_ship(clear_lock=false))
 				## -- its node is gone so there is no position to check range
 				## against. A target outside AoI is certain to be beyond any
 				## module's effective range, so refuse here too rather than
@@ -1083,7 +1092,9 @@ func _handle_ship_spawned(p: Dictionary) -> void:
 		return
 
 	var ship: Node3D = _instantiate_ship(ship_id, _vec3_from_dict(p, "position"))
-	var result: Dictionary = _session.register_ship(ship_id, ship, p, _connection.ship_id)
+	var result: Dictionary = _session.register_ship(
+		ship_id, JSON.stringify(p), _connection.ship_id)
+	_ships[ship_id] = ship
 	_sync_session_state()
 
 	## If this ship matches the player_id from Welcome, set it as the player ship
@@ -1125,16 +1136,18 @@ func _handle_motion_correction(p: Dictionary) -> void:
 
 func _handle_ship_despawned(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
-	var result: Dictionary = _session.remove_ship(ship_id)
+	var ship: Node3D = _ships.get(ship_id) as Node3D
+	var result: Dictionary = _session.remove_ship(ship_id, true)
 	_sync_session_state()
 	if not (result.get("removed", false) as bool):
 		return
-	var ship: Node3D = result.get("node") as Node3D
-	ship.queue_free()
+	_ships.erase(ship_id)
+	if ship != null:
+		ship.queue_free()
 	_interaction.clear_target_if_matches(ship_id)
 
 func _handle_damage_taken(p: Dictionary) -> void:
-	var result: Dictionary = _session.apply_hp_event(p)
+	var result: Dictionary = _session.apply_hp_event(JSON.stringify(p))
 	_sync_session_state()
 	var ship_id: int = result.get("ship_id", 0) as int
 	## Flash red on any ship that takes damage (visual hit feedback)
@@ -1142,7 +1155,7 @@ func _handle_damage_taken(p: Dictionary) -> void:
 		(_ships[ship_id] as Node3D).call("flash_damage")
 
 func _handle_repair_applied(p: Dictionary) -> void:
-	var result: Dictionary = _session.apply_hp_event(p)
+	var result: Dictionary = _session.apply_hp_event(JSON.stringify(p))
 	_sync_session_state()
 	var ship_id: int = result.get("ship_id", 0) as int
 	if _ships.has(ship_id):
@@ -1150,11 +1163,14 @@ func _handle_repair_applied(p: Dictionary) -> void:
 
 func _handle_ship_destroyed(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
+	var ship: Node3D = _ships.get(ship_id) as Node3D
 	var result: Dictionary = _session.destroy_ship(ship_id)
 	_sync_session_state()
 	if not (result.get("destroyed", false) as bool):
 		return
-	var ship: Node3D = result.get("node") as Node3D
+	_ships.erase(ship_id)
+	if ship == null:
+		return
 	_interaction.clear_target_if_matches(ship_id)
 	## Play destruction effect (queue_free happens inside play_destroy_effect)
 	ship.call("play_destroy_effect")
@@ -1306,6 +1322,7 @@ func _clear_all_ships() -> void:
 	for ship_node: Node3D in _ships.values():
 		if is_instance_valid(ship_node):
 			ship_node.queue_free()
+	_ships.clear()
 	_session.reset()
 	_sync_session_state()
 	_interaction.clear_selection()
@@ -1314,26 +1331,26 @@ func _clear_all_ships() -> void:
 
 
 func _sync_session_state() -> void:
-	_ships = _session.ships
-	_ship_hp = _session.ship_hp
-	_opponent_ship_ids = _session.opponent_ship_ids
-	_gates = _session.gates
-	_stations = _session.stations
-	_bodies = _session.bodies
-	_buildable_ship_types = _session.buildable_ship_types
-	_system_names = _session.system_names
-	_player_ship_id = _session.player_ship_id
-	_player_ship_type_name = _session.player_ship_type_name
-	_player_shield = _session.player_shield
-	_player_armor = _session.player_armor
-	_player_hull = _session.player_hull
-	_player_max_shield = _session.player_max_shield
-	_player_max_armor = _session.player_max_armor
-	_player_max_hull = _session.player_max_hull
-	_player_lock_target = _session.player_lock_target
-	_current_tick = _session.current_tick
-	_event_count = _session.event_count
-	_current_system_name = _session.current_system_name
-	_cap_current = _session.cap_current
-	_cap_max = _session.cap_max
-	_cap_recharge = _session.cap_recharge
+	var snapshot: Dictionary = _session.snapshot()
+	_ship_hp = snapshot.get("ship_hp", {}) as Dictionary
+	_opponent_ship_ids = snapshot.get("opponent_ship_ids", []) as Array
+	_gates = snapshot.get("gates", []) as Array
+	_stations = snapshot.get("stations", []) as Array
+	_bodies = snapshot.get("bodies", []) as Array
+	_buildable_ship_types = snapshot.get("buildable_ship_types", []) as Array
+	_system_names = snapshot.get("system_names", {}) as Dictionary
+	_player_ship_id = snapshot.get("player_ship_id", -1) as int
+	_player_ship_type_name = snapshot.get("player_ship_type_name", "") as String
+	_player_shield = snapshot.get("player_shield", -1.0) as float
+	_player_armor = snapshot.get("player_armor", -1.0) as float
+	_player_hull = snapshot.get("player_hull", -1.0) as float
+	_player_max_shield = snapshot.get("player_max_shield", 500.0) as float
+	_player_max_armor = snapshot.get("player_max_armor", 300.0) as float
+	_player_max_hull = snapshot.get("player_max_hull", 200.0) as float
+	_player_lock_target = snapshot.get("player_lock_target", -1) as int
+	_current_tick = snapshot.get("current_tick", 0) as int
+	_event_count = snapshot.get("event_count", 0) as int
+	_current_system_name = snapshot.get("current_system_name", "Unknown") as String
+	_cap_current = snapshot.get("cap_current", -1.0) as float
+	_cap_max = snapshot.get("cap_max", 500.0) as float
+	_cap_recharge = snapshot.get("cap_recharge", 10.0) as float
