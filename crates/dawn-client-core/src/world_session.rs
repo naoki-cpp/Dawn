@@ -758,8 +758,10 @@ mod tests {
 
     #[test]
     fn stale_dock_context_does_not_overwrite_a_newer_one() {
-        let mut state = WorldSessionState::default();
-        state.player_ship_id = 7;
+        let mut state = WorldSessionState {
+            player_ship_id: 7,
+            ..WorldSessionState::default()
+        };
         assert!(state.apply_dock_fitting(3, "Forge Station".to_string(), 20));
 
         assert!(!state.apply_undock_event(7, 19));
