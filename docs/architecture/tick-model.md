@@ -196,7 +196,8 @@ Step 7: Bot System (ships with IsBotComp only)
          Bot commands go through the same apply_*_owned() pipeline as player commands.
 
 Step 8: Append all events to the EventStore
-         event_store.append_batch(warp_events + move_events + cap_events + tackle_events + lock_events + combat_events + repair_events)
+         event_store.append_batch(warp_events + move_events + cap_events + tackle_events + lock_events
+                                  + docked_lock_lost + range_gate_events + combat_events + repair_events)
 
 Step 9: Notify the Replication Actor of the delta
          replication_tx.send(delta)

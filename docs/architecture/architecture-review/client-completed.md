@@ -20,7 +20,7 @@ date     : 2026-07-10
 | ID | 内容 | 解消内容 |
 |---|---|---|
 | C-1 | `main.gd` god object（13以上の異種責務） | 補助 module を抽出して orchestration 層へ縮小。 |
-| C-5 | client World Session module | `world_session.gd` に live world state を集約。 |
+| C-5 | client World Session module | 当時は `world_session.gd` に live world state を集約。現在は `dawn-client-core::WorldSessionState` と `dawn-client-gdext::WorldSession` adapter が所有（ADR-0046）。 |
 | C-6 | client HUD Surface module | `hud_surface.gd` を新設し、HUD 参照所有と dirty-tracking を集約。 |
 | C-7 | client World Interaction module | `world_interaction.gd` に selection / click→intent / key action を集約。 |
 | C-4 | PlayerLoadout dict のスキーマ非検証 | `ModuleRow` / `ItemRow` を導入し typed row 化。2026-07-10、GDScript実装をRustへさらに移植（ADR-0039/0040: `dawn-client-core`が型・純粋関数を所有、`dawn-client-gdext`が同名クラスとしてGDScriptへ公開、`cargo test`対象化）。 |

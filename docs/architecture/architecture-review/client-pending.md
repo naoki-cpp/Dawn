@@ -38,8 +38,8 @@ C-9を解消した `HudHitTest` の責務が戻ったわけではなく、HUD表
 ## R-2 client `main.gd` 分割（サーバー側 pending.md と共通管理）
 
 サーバー側の `server-pending.md` にも記載されている項目。
-`WorldSession`・`WorldInteraction`・`WorldPresentation` 抽出で live world state /
-world interaction policy / world visual side effect を移動し、`main.gd` は 1219 行
+`WorldInteraction`・`WorldPresentation` 抽出と `WorldSession` のRust移管で live world state /
+world interaction policy / world visual side effect を移動し、`main.gd` は 1356 行
 （client.md「ファイルサイズ一覧」参照。2026-07-10 再計測で前回1089から増加——
 ドラッグ&ドロップ状態機械・Disembark・SHIPS 列ハンドラの追加）。残る scene lifecycle /
 node generation / network send / HUD adapter は `.tscn` 化コンポーネントへのシーン参照切れ

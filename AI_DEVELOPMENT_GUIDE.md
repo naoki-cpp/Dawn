@@ -179,9 +179,10 @@ workspace DAG and relevant ADR first.
 - `dawn-core`: domain types, commands, events. No network, ECS, storage, or IO.
 - `dawn-client-core`: Godot-independent client-side domain model (loadout,
   wire row types, WorldSession state, and motion policy). It owns pure client
-  state and simulation; it depends only on `dawn-core` (ADR-0039, ADR-0045).
+  state and simulation; it depends only on `dawn-core` (ADR-0039, ADR-0045,
+  ADR-0046).
 - `dawn-client-gdext`: GDExtension binding (cdylib) exposing `dawn-client-core`
-  to the Godot client. Thin type-conversion adapter only (ADR-0040).
+  to the Godot client. Thin type-conversion adapter only (ADR-0040, ADR-0046).
 - `dawn-wire`: client<->server wire schema (`ClientCommandJson`/`EventJson`,
   the `ServerMessage`/`ClientMessage` binary envelope). Depends only on
   `dawn-core` + serde + postcard -- no transport/runtime dependency, so
@@ -205,10 +206,10 @@ workspace DAG and relevant ADR first.
   transport/runtime dependency of its own, so this doesn't pull tokio/
   tungstenite into `dawn-sector`.
 - `dawn-actor`: client/server protocol and connection boundary.
-- `dawn-simulation`: runnable simulation wiring and demos. Will depend on
-  `dawn-market` to route Market-domain `ClientCommand` variants before they
-  reach `apply_client_command` once those land (ADR-0034 §4, roadmap.md §12
-  9D-4 -- not yet wired as of 9D-1).
+- `dawn-simulation`: runnable simulation wiring and demos. Depends on
+  `dawn-market` to route Market-domain requests and bridge commands before
+  they reach the owning `SimulationNode` (ADR-0034 §4, roadmap.md §12
+  9D-4/5).
 - `dawn-sector-node`: real hardware node binary and TOML config loading.
 
 ## Change Workflow
@@ -312,7 +313,8 @@ Use this guide as the router, then read the relevant long-form doc:
 - Architecture overview: `docs/architecture/architecture.md`
 - Forbidden changes: `docs/architecture/forbidden-changes.md`
 - Event catalog: `docs/architecture/event-catalog.md`
-- Wire protocol (client<->server JSON over WebSocket): `docs/architecture/wire-protocol.md`
+- Wire protocol (postcard binary plus the remaining JSON frames at the
+  client/server boundary): `docs/architecture/wire-protocol.md`
 - Tick model: `docs/architecture/tick-model.md`
 - Client testing: `docs/process/godot-client-testing.md`
 - Raspberry Pi hardware flow: `docs/process/8d5-hardware-notes.md`
@@ -334,4 +336,4 @@ to the correct doc instead of expanding this guide.
 
 ---
 
-Last updated: 2026-07-11 / Covers ADR-0001 through ADR-0042
+Last updated: 2026-07-24 / Covers ADR-0001 through ADR-0046

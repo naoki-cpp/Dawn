@@ -228,10 +228,9 @@ making it active).
 Switching active ship is **session-local, not event-sourced**: it changes
 no Ship's authoritative state (HP, fitting, position), only which ship a
 connection's commands route to. Comparable to AoI delivery-control messages
-(`event-catalog.md` §3.12) -- no `DomainEvent` variant exists for it. It is
-still captured in `StateSnapshot` (`active_ship: BTreeMap<PlayerId, ShipId>`)
-so a reconnecting player's active ship survives restart/restore, the same
-tier as `docked_ships`/`docked_players`.
+(`event-catalog.md` §3.12) -- no `DomainEvent` variant exists for it. The
+current `StateSnapshot` does not yet include `active_ship`, so reconnecting
+active-ship restoration remains a persistence gap (see the Known gap below).
 
 `ShipRegistry::remove()` only clears a player's `active_ship` entry if the
 removed ship *was* that player's active ship -- removing a different owned
@@ -251,11 +250,11 @@ destroying anything) -- and simply has nothing to fly until:
   owned, docked ship (does not set it active), or
 - `SelectActiveShipCommand` makes an owned, docked ship active.
 
-Both `AssembleCommand` and `DisembarkCommand` are session-local, not
-event-sourced (same tier as `SelectActiveShipCommand`) -- no `DomainEvent`
-exists for either. Both return `Result<ShipId, StationOperationRejection>`
-rather than `StationOperationOutcome`, since a rejection may have no real
-`ship_id` to report.
+`DisembarkCommand` is session-local, not event-sourced (same tier as
+`SelectActiveShipCommand`) and has no `DomainEvent`. `AssembleCommand` is
+authoritative and emits `ShipAssembled`; the event creates the new docked ship
+without making it active. Both operations return a result that can report a
+new `ship_id` when one exists.
 
 `PlayerLoadout` carries `active_ship_id: Option<u64>` (`null` when shipless)
 and `owned_ships: [{ship_id, ship_type_id, ship_type_name,
@@ -263,10 +262,11 @@ docked_station_id, is_active}]`, so the client can render a shipless docked
 player and a full ship roster. The inventory panel has four columns --
 FITTED, SHIP CARGO, STATION, SHIPS -- kept strictly separate.
 
-`TransferToStationCommand { ship_id, station_id, item_id }` moves the
-entire stack of one item (`Module` or `ScrapMetal`) between a docked ship's
-cargo and the caller's inventory **at that station**; whole-stack only, no
-partial transfer. Client trigger: right-click a SHIP CARGO row.
+`TransferToStationCommand { ship_id, station_id, item_id, direction }` moves
+the entire stack of one item (`Module`, `PackagedShip`, or `ScrapMetal`)
+between a docked ship's cargo and the caller's inventory **at that station**;
+`direction` is `ToStation` or `ToShip`. It is whole-stack only, with no
+partial transfer. Client trigger: right-click a SHIP CARGO or STATION row.
 
 **Known gap:** `StateSnapshot` does not persist `ShipRegistry.owners`/
 `active_ship`.
