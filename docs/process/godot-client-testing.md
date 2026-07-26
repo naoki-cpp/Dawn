@@ -7,8 +7,9 @@
 
 ## Setup
 
-`client/addons/` is `.gitignore`d (each developer installs addons locally
-from the Godot editor's AssetLib), so **on first setup, search for "GdUnit4"
+`client/addons/` is `.gitignore`d. Local developers may install addons from
+the Godot editor's AssetLib, while CI restores the pinned GdUnit4 release with
+`scripts/install-gdunit.sh`. **On first local setup, search for "GdUnit4"
 in the editor's AssetLib tab, install it, and enable the plugin in
 `project.godot`** (`enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg")`
 is already committed; only the addon body needs per-machine installation).
@@ -22,11 +23,21 @@ it individually).
 
 ```bash
 scripts/setup-godot.sh             # fetch the pinned version into .tools/godot/ with SHA512 verification
+# Linux/CI:
+bash scripts/install-gdunit.sh      # restore the GdUnit4 version from .gdunit4-version
 # Windows PowerShell:
 scripts/setup-godot.ps1
 scripts/setup-godot.sh --run-tests
 scripts/setup-godot.ps1 -RunTests
 ```
+
+## GitHub Actions
+
+The `godot` job in `.github/workflows/rust-ci.yml` builds
+`dawn-client-gdext`, installs the pinned Godot and GdUnit4 versions, and runs
+the full GdUnit4 suite under `xvfb`. GdUnit4's normal CLI runner opens a
+window, so `xvfb-run` provides the display server on the Ubuntu runner; plain
+`--headless` is intentionally not used.
 
 ## Running from the CLI
 
@@ -45,14 +56,10 @@ directory and applies the pinned-version GdUnit4 compatibility patches:
 scripts/setup-godot.ps1 -RunTests
 ```
 
-> **Known compatibility issue (GdUnit4 v6.1.3 × Godot 4.6.x)**: GdUnit4
-> v6.1.3 (the AssetLib release) does not handle Godot 4.6's breaking changes
-> (removal of the `skip_cr` argument from `FileAccess.get_as_text()`, and
-> removal of the `debug/gdscript/warnings/exclude_addons` setting; upstream
-> issue GD-1004 — fixed on master but not in this tag), so CLI runs fail
-> out of the box. Because `client/addons/` is `.gitignore`d (per-machine
-> local install), **apply these two manual patches locally right after
-> installing from AssetLib** (re-apply after any reinstall):
+> **Compatibility patches (GdUnit4 v6.1.3 × Godot 4.6.x)**: the setup
+> scripts keep the following patches idempotent for local AssetLib installs
+> and the CI copy of the addon (re-apply after any reinstall if running the
+> test runner directly):
 >   - `addons/gdUnit4/src/core/GdUnitFileAccess.gd:199`:
 >     `file.get_as_text(true)` → `file.get_as_text()`
 >   - `addons/gdUnit4/plugin.gd:17`: add the second argument `false`
@@ -65,9 +72,6 @@ scripts/setup-godot.ps1 -RunTests
 >     exists, which otherwise causes `Cannot call method 'seek' on a null value`.
 >     `scripts/setup-godot.ps1` and `scripts/setup-godot.sh` apply this patch
 >     automatically and idempotently.
-> Once GdUnit4 ships a 4.6-compatible release, these patches become
-> unnecessary.
-
 > **Known issue on display-less/headless sandboxes (e.g. AI agent
 > environments with no GPU/window server)**: `runtest.sh`/`runtest.cmd`'s
 > default invocation of `GdUnitCmdTool.gd` does **not** pass `--headless` --
