@@ -391,7 +391,7 @@ pub struct WarpCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct OrbitCommand {
     pub target: ApproachTarget,
-    pub radius: Option<f32>,
+    pub radius: Option<f64>,
 }
 
 /// Request to hold at least `range` away from a Ship or a Jump Gate with the
@@ -410,7 +410,7 @@ pub struct OrbitCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct KeepAtRangeCommand {
     pub target: ApproachTarget,
-    pub range: Option<f32>,
+    pub range: Option<f64>,
 }
 
 /// All commands a client may send to the server.

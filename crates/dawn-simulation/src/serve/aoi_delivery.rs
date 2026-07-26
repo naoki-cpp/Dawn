@@ -16,12 +16,12 @@ use dawn_sector::node::SimulationNode;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) struct AoiDelivery {
-    cell_size: f32,
+    cell_size: f64,
     inner: dawn_sector::aoi::AoiDelivery,
 }
 
 impl AoiDelivery {
-    pub(crate) fn new(cell_size: f32) -> Self {
+    pub(crate) fn new(cell_size: f64) -> Self {
         Self {
             cell_size,
             inner: dawn_sector::aoi::AoiDelivery::new(),

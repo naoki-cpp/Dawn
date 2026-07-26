@@ -149,11 +149,11 @@ pub struct StatDelta {
     /// Multiplicative speed bonus applied when this module is active (default 1.0).
     /// EVE formula: Vmax = Vbase * (1 + Vbonus * Thrust/Mass) simplified to a
     /// single multiplier. 1MN AB ≈ 2.35, MWD ≈ 6.0.
-    pub speed_multiplier: f32,
+    pub speed_multiplier: f64,
     /// Mass added to the ship when fitted (kg). Passive — always applied
     /// regardless of active/inactive state. Increases τ → longer align time.
     /// This is what makes oversized ABs a meaningful trade-off (ADR-0023).
-    pub mass_add: f32,
+    pub mass_add: f64,
     /// Bonus to max Shield HP.
     pub max_shield_add: f32,
     /// Bonus to max Armor HP.

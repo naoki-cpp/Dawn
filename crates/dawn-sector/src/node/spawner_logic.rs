@@ -281,7 +281,7 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// Keeping each ship anchored to a nearby body is the invariant that makes
     /// method B work at true AU: a ship far from the star must not hold a ~10^11 m
-    /// star-relative f32 offset (which loses ~km of precision). At the compressed
+    /// star-relative offset when a nearer body anchor is available. At the compressed
     /// scale the star is the nearest body for all current spawns, so this is a
     /// no-op today; it becomes load-bearing once bodies sit at real AU.
     ///
@@ -292,17 +292,13 @@ impl<S: EventStore> SimulationNode<S> {
         let Some(&entity) = self.ships.index.get(&ship_id) else {
             return;
         };
-        let world = [abs_pos.x as f64, abs_pos.y as f64, abs_pos.z as f64];
+        let world = [abs_pos.x, abs_pos.y, abs_pos.z];
         let anchor = self
             .anchor_table
             .nearest_anchor(self.sector_id, world.into())
             .unwrap_or(dawn_core::AnchorId(0));
         let offset = match self.anchor_table.abs(anchor) {
-            Some(a) => Position::new(
-                (world[0] - a[0]) as f32,
-                (world[1] - a[1]) as f32,
-                (world[2] - a[2]) as f32,
-            ),
+            Some(a) => Position::new(world[0] - a[0], world[1] - a[1], world[2] - a[2]),
             None => {
                 super::debug_assert_missing_anchor(anchor, "set_spawn_anchor");
                 abs_pos
@@ -314,18 +310,13 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    /// Re-anchor a ship from an absolute f64 point directly,
-    /// bypassing the f32 `Position` round trip `set_spawn_anchor` takes.
+    /// Re-anchor a ship from an absolute f64 point directly, preserving the
+    /// anchor/offset split for a precise spawn location.
     ///
-    /// Real callers always go through `PositionComp` (f32) — that's the whole
-    /// method-B contract (ADR-0029 §1). But constructing an absolute test
-    /// fixture "near gate G" or "at body B" via f32 arithmetic at true-AU
-    /// magnitude is itself lossy in ways that don't reflect any real bug: a
-    /// single cast loses ~tens of km of ulp, and subtracting a small offset
-    /// (e.g. "12,000 m short of the gate") from an AU-scale f32 number can
-    /// vanish entirely to catastrophic cancellation. This sidesteps that by
-    /// doing the anchor/offset split directly in f64, the same way production
-    /// code's f64 paths (warp arrival, AnchorTable) already do.
+    /// This is also useful for tests that construct a fixture "near gate G" or
+    /// "at body B" from a true-AU absolute coordinate: the anchor/offset split
+    /// is performed directly in f64, the same way production code handles warp
+    /// arrival and `AnchorTable` composition.
     pub(crate) fn set_spawn_anchor_abs<P: Into<[f64; 3]>>(&mut self, ship_id: ShipId, world: P) {
         let Some(&entity) = self.ships.index.get(&ship_id) else {
             return;
@@ -342,12 +333,8 @@ impl<S: EventStore> SimulationNode<S> {
             .nearest_anchor(self.sector_id, world.into())
             .unwrap_or(dawn_core::AnchorId(0));
         let offset = match self.anchor_table.abs(anchor) {
-            Some(a) => Position::new(
-                (world[0] - a[0]) as f32,
-                (world[1] - a[1]) as f32,
-                (world[2] - a[2]) as f32,
-            ),
-            None => Position::new(world[0] as f32, world[1] as f32, world[2] as f32),
+            Some(a) => Position::new(world[0] - a[0], world[1] - a[1], world[2] - a[2]),
+            None => Position::new(world[0], world[1], world[2]),
         };
         self.world.set_ship_anchor(entity, anchor);
         if let Some(mut p) = self.world.get_mut::<PositionComp>(entity) {
@@ -515,10 +502,8 @@ mod tests {
 
         let forge_abs = node.anchor_table().abs(dawn_core::AnchorId(1)).unwrap();
         // Spawn anywhere, then re-anchor from the f64 source directly
-        // (set_spawn_anchor_abs) -- routing forge_abs through a single f32
-        // `Position` cast first would lose ~tens of km of ulp at true AU
-        // (not a bug; f32 simply can't hold an AU-scale absolute coordinate
-        // exactly), which isn't what this test is checking.
+        // (`set_spawn_anchor_abs`) so the fixture exercises the same precise
+        // anchor/offset split used by production code.
         let at_forge = node.spawn_ship(
             dawn_core::ShipTypeId(1),
             Position::ORIGIN,
@@ -579,9 +564,9 @@ mod tests {
         let world = node.ship_absolute(ship).unwrap();
         let forge = node.anchor_table().abs(AnchorId(1)).unwrap();
         let off = Position::new(
-            (world[0] - forge[0]) as f32,
-            (world[1] - forge[1]) as f32,
-            (world[2] - forge[2]) as f32,
+            world[0] - forge[0],
+            world[1] - forge[1],
+            world[2] - forge[2],
         );
         node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased {
             ship_id: ship,

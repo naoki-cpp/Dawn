@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// A sector-frame absolute coordinate in metres.
 ///
 /// This is distinct from [`Position`], which is the current anchor-relative
-/// f32 simulation offset (ADR-0044).
+/// f64 simulation offset (ADR-0044).
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AbsolutePosition(pub [f64; 3]);
@@ -43,7 +43,7 @@ impl From<[f64; 3]> for AbsolutePosition {
 
 impl From<Position> for AbsolutePosition {
     fn from(value: Position) -> Self {
-        Self::new(value.x as f64, value.y as f64, value.z as f64)
+        Self::new(value.x, value.y, value.z)
     }
 }
 
@@ -63,12 +63,16 @@ impl std::ops::Index<usize> for AbsolutePosition {
 
 // ── Position ─────────────────────────────────────────────────────────────────
 
-/// 3-D coordinates of an entity in world space.
+/// 3-D coordinates of an entity in its current simulation frame.
+///
+/// Components are `f64` so anchor-relative motion does not reintroduce the
+/// precision loss that absolute coordinates were moved to `AbsolutePosition`
+/// to avoid (ADR-0044).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Position {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
 }
 
 impl Position {
@@ -78,18 +82,18 @@ impl Position {
         z: 0.0,
     };
 
-    pub fn new(x: f32, y: f32, z: f32) -> Self {
+    pub const fn new(x: f64, y: f64, z: f64) -> Self {
         Self { x, y, z }
     }
 
-    pub fn distance_squared(self, other: Self) -> f32 {
+    pub fn distance_squared(self, other: Self) -> f64 {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
         let dz = self.z - other.z;
         dx * dx + dy * dy + dz * dz
     }
 
-    pub fn distance(self, other: Self) -> f32 {
+    pub fn distance(self, other: Self) -> f64 {
         self.distance_squared(other).sqrt()
     }
 }
@@ -102,12 +106,15 @@ impl std::fmt::Display for Position {
 
 // ── Velocity ─────────────────────────────────────────────────────────────────
 
-/// Per-tick displacement vector.  Units are world-space units per tick.
+/// Per-tick displacement vector. Units are world-space units per tick.
+///
+/// Movement stays in `f64` through integration and is narrowed only at an
+/// engine rendering boundary (ADR-0044/ADR-0045).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Velocity {
-    pub dx: f32,
-    pub dy: f32,
-    pub dz: f32,
+    pub dx: f64,
+    pub dy: f64,
+    pub dz: f64,
 }
 
 impl Velocity {
@@ -117,12 +124,12 @@ impl Velocity {
         dz: 0.0,
     };
 
-    pub fn new(dx: f32, dy: f32, dz: f32) -> Self {
+    pub const fn new(dx: f64, dy: f64, dz: f64) -> Self {
         Self { dx, dy, dz }
     }
 
     /// Magnitude of the velocity vector.
-    pub fn speed(self) -> f32 {
+    pub fn speed(self) -> f64 {
         (self.dx * self.dx + self.dy * self.dy + self.dz * self.dz).sqrt()
     }
 
@@ -186,7 +193,7 @@ mod tests {
     fn distance_satisfies_pythagorean_theorem_in_3d() {
         let a = Position::ORIGIN;
         let b = Position::new(3.0, 4.0, 0.0);
-        assert!((b.distance(a) - 5.0).abs() < 1e-5);
+        assert!((b.distance(a) - 5.0).abs() < 1e-12);
     }
 
     #[test]

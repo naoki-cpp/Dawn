@@ -34,9 +34,9 @@ struct ModuleEntry {
 #[derive(Deserialize, Default)]
 struct StatDeltaEntry {
     #[serde(default = "one")]
-    speed_multiplier: f32,
+    speed_multiplier: f64,
     #[serde(default)]
-    mass_add: f32,
+    mass_add: f64,
     #[serde(default)]
     max_shield_add: f32,
     #[serde(default)]
@@ -69,7 +69,7 @@ struct StatDeltaEntry {
     repair_range_add: f32,
 }
 
-fn one() -> f32 {
+fn one() -> f64 {
     1.0
 }
 
@@ -191,9 +191,9 @@ struct SlotLayoutEntry {
 
 #[derive(Deserialize)]
 struct BaseStatsEntry {
-    max_speed: f32,
-    mass: f32,
-    inertia_modifier: f32,
+    max_speed: f64,
+    mass: f64,
+    inertia_modifier: f64,
     max_shield: f32,
     max_armor: f32,
     max_hull: f32,

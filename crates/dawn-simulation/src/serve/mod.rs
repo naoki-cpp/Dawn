@@ -22,7 +22,7 @@ use dawn_sector::{galaxy::Galaxy, modules, ship_types};
 /// cell gives a 3×3×3 interest region reaching ~30,000–60,000 units from the
 /// observer, so most of the sector (including a gate ~49,000 away across a
 /// warp) is visible while still culling the far extremes.
-pub(crate) const AOI_CELL_SIZE: f32 = 30_000.0;
+pub(crate) const AOI_CELL_SIZE: f64 = 30_000.0;
 
 pub(crate) const P4_SHIPS_DEFAULT: usize = 20;
 

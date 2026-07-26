@@ -69,7 +69,9 @@ Every `EventWire` variant carries `tick: u64`.
 
 `JumpGateUsed.entry_pos` is an absolute destination-Sector coordinate with
 f64 components. It uses the same `AbsPosWire` shape as `InitialState` and
-`PositionSnap`, not the f32 `PosWire` used for client-authored command targets.
+`PositionSnap`, not the `PosWire` used for client-authored command targets. Both
+position and velocity command/event components are encoded as f64; only the Godot
+rendering boundary narrows to `Vector3`.
 `ShipSpawned.position` is also an `AbsPosWire` absolute Sector-frame coordinate.
 
 Not every `DomainEvent` reaches the wire -- `domain_event_to_event_wire()`

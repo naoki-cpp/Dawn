@@ -74,7 +74,7 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|p| p.0)
             .unwrap_or(Position::ORIGIN);
         let ship_abs = self.entity_absolute_f64(entity, offset);
-        let min = super::MIN_WARP_DISTANCE as f64;
+        let min = super::MIN_WARP_DISTANCE;
         match target {
             WarpTarget::Gate(gate_id) => {
                 let Some(gate) = self.sector_map.gates.get(&gate_id) else {
@@ -134,8 +134,7 @@ mod tests {
             gate.activation_radius < super::super::MIN_WARP_DISTANCE,
             "this test only makes sense while the gap exists"
         );
-        let gap_distance =
-            (gate.activation_radius as f64 + super::super::MIN_WARP_DISTANCE as f64) / 2.0;
+        let gap_distance = (gate.activation_radius + super::super::MIN_WARP_DISTANCE) / 2.0;
         let gap_abs = [gate.abs_m[0] - gap_distance, gate.abs_m[1], gate.abs_m[2]];
 
         let (player, ship) = spawn_owned_player_at(&mut node, Position::ORIGIN);

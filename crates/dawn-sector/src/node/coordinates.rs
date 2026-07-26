@@ -1,5 +1,5 @@
 //! Coordinate-composition accessors: `AnchorTable` (ADR-0029) callers on
-//! behalf of `SimulationNode`. Ships store position as an anchor-relative f32
+//! behalf of `SimulationNode`. Ships store position as an anchor-relative f64
 //! offset; every method here composes that with the ship's anchor into a
 //! Sector-frame absolute position (or the inverse), so gameplay code never
 //! reads a raw offset for cross-anchor geometry.
@@ -12,14 +12,10 @@ use super::SimulationNode;
 
 impl<S: EventStore> SimulationNode<S> {
     /// Absolute position (Sector-frame) of a ship entity given its raw offset,
-    /// composing its anchor (ADR-0029). f32 result (compressed-scale safe) —
-    /// resolved via the f64 core (`entity_absolute_f64`) and cast down once,
-    /// rather than composing in f32. Used by steering/AI code so positions
-    /// across anchors are comparable; not for cross-anchor distance at
-    /// true-AU scale (use `entity_absolute_f64`/`ship_distance` for that).
+    /// composing its anchor (ADR-0029) without narrowing the result.
     pub(super) fn entity_absolute(&self, entity: Entity, offset: Position) -> Position {
         let a = self.entity_absolute_f64(entity, offset);
-        Position::new(a[0] as f32, a[1] as f32, a[2] as f32)
+        Position::new(a[0], a[1], a[2])
     }
 
     /// Absolute (Sector-frame) position of a ship entity, composing its anchor
@@ -69,18 +65,18 @@ impl<S: EventStore> SimulationNode<S> {
     /// ship's anchor. The inverse of `entity_absolute_f64`. Called from
     /// `approach.rs`, `commands.rs`, `orbit.rs` (arrival is a tight radius
     /// check, needs full precision) and from `warp.rs::dest_in_ship_frame`
-    /// (which only has an already-f32 source, so is only as precise as that).
+    /// (which receives the same f64 source).
     pub(super) fn dest_in_ship_frame_abs(
         &self,
         entity: Entity,
         dest_abs: AbsolutePosition,
     ) -> Position {
         let Some(anchor) = self.world.ship_anchor(entity) else {
-            return Position::new(dest_abs[0] as f32, dest_abs[1] as f32, dest_abs[2] as f32);
+            return Position::new(dest_abs[0], dest_abs[1], dest_abs[2]);
         };
         let Some(rel) = self.anchor_table.to_relative(anchor, dest_abs) else {
             debug_assert_missing_anchor(anchor, "dest_in_ship_frame_abs");
-            return Position::new(dest_abs[0] as f32, dest_abs[1] as f32, dest_abs[2] as f32);
+            return Position::new(dest_abs[0], dest_abs[1], dest_abs[2]);
         };
         rel
     }
@@ -88,7 +84,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Distance from a Ship to a Sector-frame point (a gate/body position),
     /// composing the ship's anchor (ADR-0029). The accessor gameplay/tests use
     /// instead of comparing a raw offset to absolute data.
-    pub fn ship_distance_to_point(&self, ship_id: ShipId, point: Position) -> Option<f32> {
+    pub fn ship_distance_to_point(&self, ship_id: ShipId, point: Position) -> Option<f64> {
         let entity = *self.ships.index.get(&ship_id)?;
         Some(self.entity_abs_pos(entity).distance(point))
     }
@@ -158,9 +154,7 @@ mod tests {
         );
         // Rebase onto the star (AnchorId(0), abs [0,0,0]) so the expected
         // absolute position is exactly the offset -- ship_distance_to_point
-        // is f32 (this file's own doc comment: not precise at true-AU
-        // scale), so keep this near the origin rather than a far-away anchor
-        // where a 10m difference would vanish in the f32 cast.
+        // uses the same f64 composition as production range checks.
         node.apply_event_pub(DomainEvent::AnchorRebased(
             dawn_core::events::AnchorRebased {
                 ship_id: ship,

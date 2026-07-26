@@ -9,17 +9,17 @@ use thiserror::Error;
 use crate::Velocity;
 
 /// Converts `mass × inertia_modifier` into a time constant measured in ticks.
-pub const MASS_SCALE: f32 = 100_000.0;
+pub const MASS_SCALE: f64 = 100_000.0;
 
 /// Velocity magnitude below which braking snaps to exactly zero.
-pub const BRAKE_STOP_EPSILON: f32 = 0.001;
+pub const BRAKE_STOP_EPSILON: f64 = 0.001;
 
 /// Movement values required by the one-tick policy.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MovementProfile {
-    max_speed: f32,
-    mass: f32,
-    inertia_modifier: f32,
+    max_speed: f64,
+    mass: f64,
+    inertia_modifier: f64,
 }
 
 impl Default for MovementProfile {
@@ -35,9 +35,9 @@ impl Default for MovementProfile {
 impl MovementProfile {
     /// Creates a profile when all values are finite and physically valid.
     pub fn new(
-        max_speed: f32,
-        mass: f32,
-        inertia_modifier: f32,
+        max_speed: f64,
+        mass: f64,
+        inertia_modifier: f64,
     ) -> Result<Self, MovementProfileError> {
         if !max_speed.is_finite() {
             return Err(MovementProfileError::MaxSpeedNotFinite { value: max_speed });
@@ -70,17 +70,17 @@ impl MovementProfile {
     }
 
     /// Returns the effective maximum speed in units per tick.
-    pub fn max_speed(self) -> f32 {
+    pub fn max_speed(self) -> f64 {
         self.max_speed
     }
 
     /// Returns the total mass used to derive the time constant.
-    pub fn mass(self) -> f32 {
+    pub fn mass(self) -> f64 {
         self.mass
     }
 
     /// Returns the inertia modifier used to derive the time constant.
-    pub fn inertia_modifier(self) -> f32 {
+    pub fn inertia_modifier(self) -> f64 {
         self.inertia_modifier
     }
 
@@ -94,7 +94,7 @@ impl MovementProfile {
             MovementInput::Brake => Velocity::ZERO,
             MovementInput::Thrust(direction) => {
                 let magnitude = direction.speed();
-                if magnitude > f32::EPSILON {
+                if magnitude > f64::EPSILON {
                     let scale = self.max_speed / magnitude;
                     Velocity::new(
                         direction.dx * scale,
@@ -108,8 +108,8 @@ impl MovementProfile {
             MovementInput::Coast => velocity,
         };
 
-        let tau = (self.mass * self.inertia_modifier / MASS_SCALE).max(f32::EPSILON);
-        let alpha = 1.0_f32 - (-1.0 / tau).exp();
+        let tau = (self.mass * self.inertia_modifier / MASS_SCALE).max(f64::EPSILON);
+        let alpha = 1.0_f64 - (-1.0 / tau).exp();
         let mut next_velocity = Velocity::new(
             velocity.dx + (target.dx - velocity.dx) * alpha,
             velocity.dy + (target.dy - velocity.dy) * alpha,
@@ -153,17 +153,17 @@ pub struct MovementStep {
 #[derive(Debug, Clone, Copy, PartialEq, Error)]
 pub enum MovementProfileError {
     #[error("max_speed must be finite, got {value}")]
-    MaxSpeedNotFinite { value: f32 },
+    MaxSpeedNotFinite { value: f64 },
     #[error("max_speed must not be negative, got {value}")]
-    MaxSpeedNegative { value: f32 },
+    MaxSpeedNegative { value: f64 },
     #[error("mass must be finite, got {value}")]
-    MassNotFinite { value: f32 },
+    MassNotFinite { value: f64 },
     #[error("mass must be positive, got {value}")]
-    MassNotPositive { value: f32 },
+    MassNotPositive { value: f64 },
     #[error("inertia_modifier must be finite, got {value}")]
-    InertiaModifierNotFinite { value: f32 },
+    InertiaModifierNotFinite { value: f64 },
     #[error("inertia_modifier must be positive, got {value}")]
-    InertiaModifierNotPositive { value: f32 },
+    InertiaModifierNotPositive { value: f64 },
 }
 
 #[cfg(test)]
@@ -177,7 +177,7 @@ mod tests {
             Velocity::ZERO,
             MovementInput::Thrust(Velocity::new(2.0, 0.0, 0.0)),
         );
-        let alpha = 1.0_f32 - (-1.0 / 30.0_f32).exp();
+        let alpha = 1.0_f64 - (-1.0 / 30.0_f64).exp();
 
         assert!((step.velocity.dx - 500.0 * alpha).abs() < 1e-6);
         assert_eq!(step.velocity.dy, 0.0);
@@ -210,7 +210,7 @@ mod tests {
     #[test]
     fn invalid_profiles_return_descriptive_errors() {
         assert!(matches!(
-            MovementProfile::new(f32::NAN, 1.0, 0.3),
+            MovementProfile::new(f64::NAN, 1.0, 0.3),
             Err(MovementProfileError::MaxSpeedNotFinite { value }) if value.is_nan()
         ));
         assert!(matches!(
@@ -222,7 +222,7 @@ mod tests {
             Err(MovementProfileError::MassNotPositive { value }) if value == 0.0
         ));
         assert!(matches!(
-            MovementProfile::new(1.0, 1.0, f32::NAN),
+            MovementProfile::new(1.0, 1.0, f64::NAN),
             Err(MovementProfileError::InertiaModifierNotFinite { value }) if value.is_nan()
         ));
     }

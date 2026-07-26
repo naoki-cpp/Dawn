@@ -19,7 +19,7 @@ use tokio::sync::mpsc;
 
 pub(crate) struct SectorNodeRuntime {
     sector_id: SectorId,
-    aoi_cell_size: f32,
+    aoi_cell_size: f64,
     peer_ws: HashMap<SectorId, SocketAddr>,
     sessions: Vec<ws_server::PlayerSession>,
     aoi_delivery: aoi::AoiDelivery,
@@ -29,7 +29,7 @@ pub(crate) struct SectorNodeRuntime {
 impl SectorNodeRuntime {
     pub(crate) fn new<S: EventStore>(
         sector_id: SectorId,
-        aoi_cell_size: f32,
+        aoi_cell_size: f64,
         peer_ws: HashMap<SectorId, SocketAddr>,
         repl_transport: TcpReplicationTransport,
         event_store: &S,

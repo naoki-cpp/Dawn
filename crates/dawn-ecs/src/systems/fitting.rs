@@ -19,7 +19,7 @@ use dawn_core::{fitting::StatDelta, ShipId};
 /// → align time ≈ 50 ticks ≈ 5 seconds at 10 ticks/s (ADR-0023 §5).
 /// Compatibility re-export for callers that historically imported the tuning
 /// constant from the fitting system. The movement policy owns the value now.
-pub const MASS_SCALE: f32 = dawn_core::MASS_SCALE;
+pub const MASS_SCALE: f64 = dawn_core::MASS_SCALE;
 
 /// Recompute `ShipStatsComp` for `ship_id` from its current `FittingComp`.
 ///
@@ -38,10 +38,10 @@ pub fn apply_fitting(
         .get::<FittingComp>(entity)
         .map(|f| {
             // mass_add: passive — sum from ALL slots regardless of is_effective().
-            let mass_add: f32 = f.iter_slots().map(|s| s.def.stat_delta.mass_add).sum();
+            let mass_add: f64 = f.iter_slots().map(|s| s.def.stat_delta.mass_add).sum();
 
             // speed_multiplier: product of EFFECTIVE slots only (AB must be ON).
-            let speed_mult: f32 = f
+            let speed_mult: f64 = f
                 .iter_slots()
                 .filter(|s| s.is_effective())
                 .map(|s| s.def.stat_delta.speed_multiplier)

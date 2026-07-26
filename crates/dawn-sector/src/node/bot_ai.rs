@@ -190,7 +190,7 @@ impl<S: EventStore> SimulationNode<S> {
 
             // Move: approach until within 75% of weapon range, then brake to stop.
             let engage_range = (bot.weapon_range * 0.75).max(500.0);
-            if dist > engage_range {
+            if dist > f64::from(engage_range) {
                 let dx = target.position.x - bot.position.x;
                 let dy = target.position.y - bot.position.y;
                 let dz = target.position.z - bot.position.z;

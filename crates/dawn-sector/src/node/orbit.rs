@@ -33,7 +33,7 @@ impl<S: EventStore> SimulationNode<S> {
         &mut self,
         ship_id: ShipId,
         target: ApproachTarget,
-        radius: Option<f32>,
+        radius: Option<f64>,
     ) -> bool {
         let Some((entity, radius)) = self.begin_maneuver(ship_id, target, radius) else {
             return false;
@@ -67,7 +67,7 @@ impl<S: EventStore> SimulationNode<S> {
         &mut self,
         ship_id: ShipId,
         target: ApproachTarget,
-        range: Option<f32>,
+        range: Option<f64>,
     ) -> bool {
         let Some((entity, range)) = self.begin_maneuver(ship_id, target, range) else {
             return false;
@@ -110,14 +110,14 @@ impl<S: EventStore> SimulationNode<S> {
     /// weapon range, or `DEFAULT_MANEUVER_RADIUS` if unarmed (ADR-0031) --
     /// orbiting or holding at your own optimal range is the common case, so
     /// the unspecified default should already be a useful fighting distance.
-    fn default_maneuver_radius(&self, entity: Entity) -> f32 {
+    fn default_maneuver_radius(&self, entity: Entity) -> f64 {
         let weapon_range = self
             .world
             .get::<ShipStatsComp>(entity)
             .map(|s| s.weapon_range)
             .unwrap_or(0.0);
         if weapon_range > f32::EPSILON {
-            weapon_range
+            f64::from(weapon_range)
         } else {
             DEFAULT_MANEUVER_RADIUS
         }
@@ -137,8 +137,8 @@ impl<S: EventStore> SimulationNode<S> {
         &mut self,
         ship_id: ShipId,
         target: ApproachTarget,
-        distance: Option<f32>,
-    ) -> Option<(Entity, f32)> {
+        distance: Option<f64>,
+    ) -> Option<(Entity, f64)> {
         let &entity = self.ships.index.get(&ship_id)?;
         if self.world.transit_state(entity).is_in_transit() {
             return None;
@@ -196,7 +196,7 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// Runs at Step 2.55, after Approach and before Keep at Range / Warp.
     pub fn process_orbit(&mut self) {
-        let orbiters: Vec<(Entity, ApproachTarget, f32, Position)> = self
+        let orbiters: Vec<(Entity, ApproachTarget, f64, Position)> = self
             .world
             .query::<(&OrbitComp, &PositionComp)>()
             .iter()
@@ -218,21 +218,21 @@ impl<S: EventStore> SimulationNode<S> {
             let dist = (radial.x * radial.x + radial.y * radial.y + radial.z * radial.z).sqrt();
             // Arbitrary stable unit vector when sitting exactly on the target
             // (degenerate radial direction) -- avoids a NaN steering target.
-            let radial_unit = if dist > f32::EPSILON {
+            let radial_unit = if dist > f64::EPSILON {
                 Position::new(radial.x / dist, radial.y / dist, radial.z / dist)
             } else {
                 Position::new(1.0, 0.0, 0.0)
             };
             // Fixed UP axis (ADR-0031): a consistent, predictable sweep
             // direction rather than a true axis-free 3D orbit.
-            const UP: (f32, f32, f32) = (0.0, 1.0, 0.0);
+            const UP: (f64, f64, f64) = (0.0, 1.0, 0.0);
             let cross = (
                 UP.1 * radial_unit.z - UP.2 * radial_unit.y,
                 UP.2 * radial_unit.x - UP.0 * radial_unit.z,
                 UP.0 * radial_unit.y - UP.1 * radial_unit.x,
             );
             let cross_len = (cross.0 * cross.0 + cross.1 * cross.1 + cross.2 * cross.2).sqrt();
-            let tangent = if cross_len > f32::EPSILON {
+            let tangent = if cross_len > f64::EPSILON {
                 (
                     cross.0 / cross_len,
                     cross.1 / cross_len,
@@ -267,7 +267,7 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// Runs at Step 2.56, after Orbit and before Warp.
     pub fn process_keep_at_range(&mut self) {
-        let holders: Vec<(Entity, ApproachTarget, f32, Position)> = self
+        let holders: Vec<(Entity, ApproachTarget, f64, Position)> = self
             .world
             .query::<(&KeepAtRangeComp, &PositionComp)>()
             .iter()
@@ -300,7 +300,7 @@ impl<S: EventStore> SimulationNode<S> {
             // Steer straight away: aim at a point further out along the
             // current radial direction (steer_thrust_toward only needs the
             // direction, not an exact arrival point).
-            let radial_unit = if dist > f32::EPSILON {
+            let radial_unit = if dist > f64::EPSILON {
                 Position::new(dx / dist, dy / dist, dz / dist)
             } else {
                 Position::new(1.0, 0.0, 0.0)

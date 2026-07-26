@@ -59,7 +59,7 @@ pub(crate) async fn run_phase4_server(
         // (Small Railgun: 3000 + 2000 falloff = 5000) for --enemies N>1 too
         // (e.g. to practice locking/engaging more than one target at once).
         for i in 0..enemy_count.max(1) {
-            let bot_pos = Position::new(1200.0, i as f32 * 800.0, 0.0);
+            let bot_pos = Position::new(1200.0, i as f64 * 800.0, 0.0);
             let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
             println!(
                 "  [Server] Duel mode: Bot ship #{} ready at {:?}",

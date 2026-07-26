@@ -110,7 +110,7 @@ mod tests {
         let mut node = mem_node();
         let gate = *node.jump_gate(JumpGateId(0)).expect("Sector 0 has Gate 0");
         let near_gate_abs = [
-            gate.abs_m[0] - (gate.activation_radius as f64 * 0.5),
+            gate.abs_m[0] - (gate.activation_radius * 0.5),
             gate.abs_m[1],
             gate.abs_m[2],
         ];
@@ -214,7 +214,7 @@ mod tests {
         let mut node = mem_node();
         let gate = *node.jump_gate(JumpGateId(0)).expect("Sector 0 has Gate 0");
         let near_gate_abs = [
-            gate.abs_m[0] - (gate.activation_radius as f64 * 0.5),
+            gate.abs_m[0] - (gate.activation_radius * 0.5),
             gate.abs_m[1],
             gate.abs_m[2],
         ];

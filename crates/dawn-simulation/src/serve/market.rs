@@ -78,9 +78,9 @@ impl MarketRuntime {
         player_sector: usize,
         nodes: &mut [SimulationNode],
     ) -> MarketSnapshotWire {
-        if !nodes
+        if nodes
             .get(player_sector)
-            .is_some_and(|node| node.player_docked_station(player_id).is_some())
+            .is_none_or(|node| node.player_docked_station(player_id).is_none())
         {
             return Self::market_unavailable_snapshot();
         }

@@ -269,9 +269,8 @@ impl<S: EventStore> SimulationNode<S> {
     /// reuse, the same Ship simply changes Sector ownership).
     ///
     /// `restore_ship_from_snapshot` re-applies the Ship's *old* (source-Sector)
-    /// anchor, and `entry_pos` alone is too coarse (one f32 ulp is ~16 km at
-    /// true-AU magnitudes — far past a Gate's 2 km `activation_radius`) to use
-    /// as a raw offset against it. `entry_pos_abs` is the precise f64
+    /// anchor, and `entry_pos` alone does not carry the destination anchor
+    /// identity needed to use it as a raw offset. `entry_pos_abs` is the precise f64
     /// Sector-frame arrival point (the destination Gate's `abs_m`, or the
     /// origin for a non-Gate Transit); `rebase_after_transit` re-anchors
     /// against it (appending the authoritative `AnchorRebased` event, ADR-0029)
@@ -357,9 +356,9 @@ impl<S: EventStore> SimulationNode<S> {
             return;
         };
         let offset = Position::new(
-            (entry_pos_abs[0] - to_abs[0]) as f32,
-            (entry_pos_abs[1] - to_abs[1]) as f32,
-            (entry_pos_abs[2] - to_abs[2]) as f32,
+            entry_pos_abs[0] - to_abs[0],
+            entry_pos_abs[1] - to_abs[1],
+            entry_pos_abs[2] - to_abs[2],
         );
         self.world.set_ship_anchor(entity, to);
         if let Some(mut p) = self.world.get_mut::<PositionComp>(entity) {
@@ -577,8 +576,8 @@ mod tests {
 
     /// Regression: a Ship that jumps through a Gate must land within the
     /// *return* Gate's `activation_radius`, so it can jump straight back.
-    /// `entry_pos` alone (the f32 `JumpGateDef::position`) is too coarse to
-    /// re-anchor against at true-AU magnitudes — `import_transit` must use
+    /// `entry_pos` alone is not sufficient to re-anchor against the destination
+    /// body — `import_transit` must use
     /// the precise `entry_pos_abs` (the gate's `abs_m`) to set up the arriving
     /// Ship's anchor in the destination Sector (ADR-0029). Without that
     /// re-anchoring, the Ship keeps its *source*-Sector anchor and its
@@ -624,7 +623,7 @@ mod tests {
         assert!(
             to_node.can_propose_jump(ship_id, return_gate.id),
             "ship must land within the return gate's activation_radius, not just \
-             at its f32-coarse `position` interpreted against the wrong anchor"
+             at its `position` interpreted against the wrong anchor"
         );
     }
 

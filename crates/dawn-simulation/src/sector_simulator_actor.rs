@@ -456,7 +456,7 @@ mod tests {
 
         for i in 0..5 {
             actor
-                .spawn_ship(Position::new(i as f32 * 50.0, 0.0, 0.0), Velocity::ZERO)
+                .spawn_ship(Position::new(i as f64 * 50.0, 0.0, 0.0), Velocity::ZERO)
                 .await;
         }
 

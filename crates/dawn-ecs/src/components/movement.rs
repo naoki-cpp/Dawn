@@ -35,7 +35,7 @@ pub struct ApproachComp {
 #[derive(Debug, Clone, Copy)]
 pub struct OrbitComp {
     pub target: ApproachTarget,
-    pub radius: f32,
+    pub radius: f64,
 }
 
 /// Persistent "keep at range" steering target (ADR-0031).
@@ -48,7 +48,7 @@ pub struct OrbitComp {
 #[derive(Debug, Clone, Copy)]
 pub struct KeepAtRangeComp {
     pub target: ApproachTarget,
-    pub range: f32,
+    pub range: f64,
 }
 
 /// Two-phase intra-Sector warp state (short-range Fold, ADR-0022).
@@ -84,18 +84,18 @@ pub struct WarpComp {
     /// `phase == Warping`; the `Aligning` phase leaves them at their
     /// engage-time defaults (start/arrival = zero, total/elapsed = 0).
     /// Absolute (Sector-frame) f64, not anchor-relative (ADR-0029): the whole
-    /// transit is interpolated in one frame so it does not pick up f32 ulp
+    /// transit is interpolated in one frame so it does not pick up spatial ulp
     /// error from the ship's current anchor when the destination sits at
-    /// true-AU distance from it — only the per-tick f32 cast (offset relative
-    /// to the ship's current anchor, written to `PositionComp`) is lossy, and
-    /// that loss does not compound across ticks the way repeated f32 lerp did.
+    /// true-AU distance from it. The offset remains f64 throughout the
+    /// simulation, so the loss does not compound across ticks the way repeated
+    /// low-precision interpolation did.
     pub warp_start_abs: AbsolutePosition,
     pub warp_total: u32,
     pub warp_elapsed: u32,
     /// Exact arrival point in absolute (Sector-frame) metres, f64 (ADR-0029).
     /// Set at engage for Body warps from the f64 anchor source so the arrival
-    /// rebase is precise at true-AU distances (the f32 `PositionComp` near a
-    /// 7.5e11 anchor would be ~65 km coarse). `[0,0,0]` for Gate warps (no rebase).
+    /// rebase is precise at true-AU distances because `PositionComp` remains
+    /// f64 near the local anchor. `[0,0,0]` for Gate warps (no rebase).
     pub warp_arrival_abs: AbsolutePosition,
     /// Ship's actual velocity at the moment warp engaged (end of `Aligning`,
     /// 2026-06-23 lore pass). The transit curve is a cubic Hermite spline with
@@ -171,12 +171,12 @@ impl ThrustComp {
 pub struct ShipStatsComp {
     // ── Movement (ADR-0023) ───────────────────────────────────────────────────
     /// Effective max speed (units/tick) after active propulsion modules.
-    pub max_speed: f32,
+    pub max_speed: f64,
     /// Total mass including all fitted modules (kg). Always includes mass_add
     /// from all slots regardless of active/inactive state (passive behaviour).
-    pub mass: f32,
+    pub mass: f64,
     /// Inertia modifier (dimensionless). Controls align time; lower = more agile.
-    pub inertia_modifier: f32,
+    pub inertia_modifier: f64,
 
     // ── HP (3-layer) ──────────────────────────────────────────────────────────
     pub max_shield: f32,

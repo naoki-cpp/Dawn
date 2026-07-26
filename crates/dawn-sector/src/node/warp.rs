@@ -112,7 +112,7 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn process_warp(&mut self, tick: Tick) -> Vec<DomainEvent> {
         // Collect warpers up front so the ECS query borrow is released before
         // the mutable write pass below.
-        let warpers: Vec<(Entity, ShipId, WarpComp, Position, Velocity, f32)> = self
+        let warpers: Vec<(Entity, ShipId, WarpComp, Position, Velocity, f64)> = self
             .world
             .query::<(
                 &ShipIdComp,
@@ -178,7 +178,7 @@ impl<S: EventStore> SimulationNode<S> {
 
             // Engage warp once aligned: moving at ≥ 75% of max speed toward the
             // destination. While not yet aligned, keep steering/accelerating at it.
-            let aligned = max_speed > f32::EPSILON
+            let aligned = max_speed > f64::EPSILON
                 && speed_toward(vel, pos, dest_pos) >= WARP_ALIGN_FRACTION * max_speed;
 
             match warp.phase {
@@ -188,10 +188,9 @@ impl<S: EventStore> SimulationNode<S> {
                 // Aligned: engage warp. Fix the parametric plan (start = here,
                 // duration from distance) and take the first step this tick.
                 // The whole transit is planned in absolute f64 (ADR-0029 §1.3):
-                // unlike the old anchor-relative f32 plan, this does not pick up
+                // unlike the old low-precision anchor-relative plan, this does not pick up
                 // ulp error from the ship's anchor when the destination sits at
-                // true-AU distance from it (only the per-tick f32 cast back to
-                // PositionComp is lossy, and that loss does not compound).
+                // true-AU distance from it, and PositionComp remains f64 throughout.
                 WarpPhase::Aligning => {
                     self.set_warp_phase(entity, WarpPhase::Warping);
                     let start_abs = self.entity_absolute_f64(entity, pos);
@@ -202,7 +201,7 @@ impl<S: EventStore> SimulationNode<S> {
                         arrival_abs[2] - start_abs[2],
                     ];
                     let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-                    let total = warp_total_ticks(dist as f32);
+                    let total = warp_total_ticks(dist);
                     // Carry the ship's actual speed at engage into the transit
                     // curve (lore pass, ADR-0022/0029): warp_step blends this in
                     // as the curve's start tangent so the Aligning cruise speed
@@ -269,11 +268,9 @@ impl<S: EventStore> SimulationNode<S> {
     /// full stop exactly at `arrival_abs`, so the whole transit reads as one
     /// continuous accelerate → cruise → decelerate motion.
     ///
-    /// The eased point is computed in f64 and only cast to f32 once, relative
-    /// to the ship's CURRENT anchor, when writing `PositionComp` — so error
-    /// does not compound across ticks the way repeated f32 lerp did (it is
-    /// still ulp-bounded at true-AU distance from that anchor mid-transit, but
-    /// self-corrects at arrival via the precise rebase, and nothing reads a
+    /// The eased point is computed in f64 and written directly to the ship's
+    /// f64 `PositionComp`, so error does not compound across ticks the way
+    /// repeated low-precision interpolation did. Nothing reads a
     /// warping ship's exact position — Movement skips it, combat can't target
     /// it). Each tick sets `velocity = planned_point - current_pos` and emits
     /// a `VelocityChanged`, so replay reconstructs the same path purely by
@@ -325,9 +322,9 @@ impl<S: EventStore> SimulationNode<S> {
             // ship's actual entering speed (the curve parameter spans total
             // ticks over t in [0,1], so d(planned)/d(elapsed) = d(planned)/dt / total).
             let m0 = [
-                start_vel.dx as f64 * total as f64,
-                start_vel.dy as f64 * total as f64,
-                start_vel.dz as f64 * total as f64,
+                start_vel.dx * total as f64,
+                start_vel.dy * total as f64,
+                start_vel.dz * total as f64,
             ];
             let planned_abs = [
                 h00 * start_abs[0] + h10 * m0[0] + h01 * arrival_abs[0],
@@ -335,9 +332,9 @@ impl<S: EventStore> SimulationNode<S> {
                 h00 * start_abs[2] + h10 * m0[2] + h01 * arrival_abs[2],
             ];
             let planned = Position::new(
-                (planned_abs[0] - anchor_abs[0]) as f32,
-                (planned_abs[1] - anchor_abs[1]) as f32,
-                (planned_abs[2] - anchor_abs[2]) as f32,
+                planned_abs[0] - anchor_abs[0],
+                planned_abs[1] - anchor_abs[1],
+                planned_abs[2] - anchor_abs[2],
             );
             let v = Velocity {
                 dx: planned.x - pos.x,
@@ -377,9 +374,9 @@ impl<S: EventStore> SimulationNode<S> {
         }
 
         // Emit VelocityChanged only when velocity actually changed (INV-MOVE).
-        let changed = (new_vel.dx - old_vel.dx).abs() > f32::EPSILON
-            || (new_vel.dy - old_vel.dy).abs() > f32::EPSILON
-            || (new_vel.dz - old_vel.dz).abs() > f32::EPSILON;
+        let changed = (new_vel.dx - old_vel.dx).abs() > f64::EPSILON
+            || (new_vel.dy - old_vel.dy).abs() > f64::EPSILON
+            || (new_vel.dz - old_vel.dz).abs() > f64::EPSILON;
         if changed {
             events.push(DomainEvent::VelocityChanged(
                 dawn_core::events::VelocityChanged {
@@ -392,7 +389,7 @@ impl<S: EventStore> SimulationNode<S> {
 
         // On Body arrival, rebase the ship onto the destination body's anchor
         // (ADR-0029 step 4): keep the absolute position, re-express the offset
-        // relative to the new anchor so subsequent local f32 motion near the
+        // relative to the new anchor so subsequent local f64 motion near the
         // body stays precise at true-AU distances.
         if arrived {
             if let Some(to) = dest_anchor {
@@ -422,9 +419,9 @@ impl<S: EventStore> SimulationNode<S> {
             return None;
         }
         let to_abs = self.anchor_table.abs(to)?;
-        // Prefer the precise f64 arrival point (set at engage) over the coarse
-        // f32 PositionComp, which is ~tens of km off near a true-AU anchor
-        // (ADR-0029). Fall back to the offset compose if arrival is unset.
+        // Prefer the precise f64 arrival point (set at engage) over a position
+        // reconstructed from an unrelated anchor (ADR-0029). Fall back to the
+        // offset compose if arrival is unset.
         let world = if arrival_abs != [0.0, 0.0, 0.0] {
             dawn_core::AbsolutePosition::from(arrival_abs)
         } else {
@@ -432,9 +429,9 @@ impl<S: EventStore> SimulationNode<S> {
             self.anchor_table.absolute(cur_anchor, offset)?
         };
         let new_off = Position::new(
-            (world[0] - to_abs[0]) as f32,
-            (world[1] - to_abs[1]) as f32,
-            (world[2] - to_abs[2]) as f32,
+            world[0] - to_abs[0],
+            world[1] - to_abs[1],
+            world[2] - to_abs[2],
         );
         self.world.set_ship_anchor(entity, to);
         if let Some(mut p) = self.world.get_mut::<PositionComp>(entity) {
@@ -458,7 +455,7 @@ impl<S: EventStore> SimulationNode<S> {
         &self,
         entity: Entity,
         target_abs: P,
-        arrival: f32,
+        arrival: f64,
     ) -> [f64; 3] {
         let target_abs = target_abs.into();
         let offset = self
@@ -473,9 +470,9 @@ impl<S: EventStore> SimulationNode<S> {
             target_abs[2] - start[2],
         ];
         let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-        let a = arrival as f64;
+        let a = arrival;
         // Already inside the arrival ring: stay put rather than overshoot past
-        // `start` away from the target (the old f32 `warp_arrival_point` guarded
+        // `start` away from the target (the old `warp_arrival_point` guarded
         // the same case before this method became the sole flight target, not
         // just the rebase point — ADR-0029 absolute-frame transit).
         if len <= a || len <= f64::EPSILON {
@@ -490,21 +487,13 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Convert a Sector-frame (absolute) destination position into the ship's
     /// current anchor frame, so warp math stays in the same frame as the ship's
-    /// anchor-relative `PositionComp` (ADR-0029). Takes an f32 `dest_world`, so
-    /// it is only as precise as that input already is — fine for warp's
+    /// anchor-relative `PositionComp` (ADR-0029). Takes an f64 `dest_world`, so
+    /// it preserves the precision needed for warp's
     /// Aligning-phase steering (direction only, ADR-0029), not for anything
     /// needing arrival-radius precision (use `dest_in_ship_frame_abs` with an
     /// f64 source for that — this delegates to it after upcasting).
     fn dest_in_ship_frame(&self, entity: Entity, dest_world: Position) -> Position {
-        self.dest_in_ship_frame_abs(
-            entity,
-            [
-                dest_world.x as f64,
-                dest_world.y as f64,
-                dest_world.z as f64,
-            ]
-            .into(),
-        )
+        self.dest_in_ship_frame_abs(entity, [dest_world.x, dest_world.y, dest_world.z].into())
     }
 
     /// Overwrite the phase of a ship's `WarpComp` (no-op if absent).
@@ -517,19 +506,19 @@ impl<S: EventStore> SimulationNode<S> {
 
 /// Warp duration in ticks from the warp distance (start→arrival point), floored
 /// at `WARP_MIN_TICKS` so even a short warp reads as a warp. ADR-0022 amendment.
-fn warp_total_ticks(warp_dist: f32) -> u32 {
+fn warp_total_ticks(warp_dist: f64) -> u32 {
     let n = (warp_dist / WARP_SPEED).ceil().max(0.0) as u32;
     n.max(WARP_MIN_TICKS)
 }
 
 /// Component of velocity along the vector from `pos` toward `target`.
 /// Negative if moving away. Used by the warp alignment check.
-fn speed_toward(vel: Velocity, pos: Position, target: Position) -> f32 {
+fn speed_toward(vel: Velocity, pos: Position, target: Position) -> f64 {
     let dx = target.x - pos.x;
     let dy = target.y - pos.y;
     let dz = target.z - pos.z;
     let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-    if dist < f32::EPSILON {
+    if dist < f64::EPSILON {
         return 0.0;
     }
     (vel.dx * dx + vel.dy * dy + vel.dz * dz) / dist
@@ -559,9 +548,9 @@ mod tests {
 
     #[test]
     fn warp_is_rejected_when_the_gate_is_closer_than_the_minimum_warp_distance() {
-        // Spawning a ship via a raw f32 `Position` at the gate's AU-scale
-        // coordinate is itself lossy (one f32 ulp, tens of km at true AU) --
-        // real ships never get placed that way; they always end up at
+        // Spawning a ship via a raw absolute `Position` at the gate's AU-scale
+        // coordinate bypasses the normal anchor split -- real ships always end
+        // up at
         // anchor + small offset (spawn-near-body, warp-arrival rebase). So
         // drive the ship to the gate through the actual (precision-correct)
         // warp arrival instead of spawning "at" the gate directly, then
@@ -687,7 +676,7 @@ mod tests {
 
     #[test]
     fn warp_align_time_emerges_from_ship_agility() {
-        fn ticks_to_engage(mass: f32) -> u32 {
+        fn ticks_to_engage(mass: f64) -> u32 {
             let mut node = SimulationNode::new(
                 NodeId(0),
                 SectorId(0),
@@ -739,7 +728,7 @@ mod tests {
             let warping = node.warp_phase(ship) == Some(WarpPhase::Warping);
             let v = node.world.get::<VelocityComp>(entity).unwrap().0;
             let speed = (v.dx * v.dx + v.dy * v.dy + v.dz * v.dz).sqrt();
-            if warping && speed > f32::EPSILON && speed < WARP_SPEED * 0.9 {
+            if warping && speed > f64::EPSILON && speed < WARP_SPEED * 0.9 {
                 saw_decel_step = true;
             }
             if node.warp_phase(ship).is_none() {
@@ -771,7 +760,7 @@ mod tests {
         );
 
         let entity = *node.ships.index.get(&ship).unwrap();
-        let mut speed_before_engage = 0.0_f32;
+        let mut speed_before_engage = 0.0_f64;
         loop {
             let phase = node.warp_phase(ship);
             let v = node.world.get::<VelocityComp>(entity).unwrap().0;
@@ -964,7 +953,7 @@ mod tests {
         // ADR-0029 R1 remnant: a Gate warp must land via the gate's f64 `abs_m`
         // source and rebase onto the nearest body anchor on arrival, exactly
         // like a Body warp does -- not stay pinned to the star with a coarse
-        // f32 arrival point.
+        // precise f64 arrival point.
         let mut node = mem_node();
         let (player, ship_id) = spawn_owned_player_at(&mut node, Position::new(0.0, 0.0, 0.0));
         assert!(node.apply_warp_command_owned(
@@ -1000,7 +989,7 @@ mod tests {
         );
 
         // Arrival point must sit `activation_radius * WARP_ARRIVAL_FACTOR`
-        // from the gate's f64 source, not the coarse f32 `position`.
+        // from the gate's f64 source, not an anchor-relative `position`.
         let ship_abs = node.ship_absolute(ship_id).expect("ship exists");
         let d = [
             ship_abs[0] - gate.abs_m[0],
@@ -1008,12 +997,11 @@ mod tests {
             ship_abs[2] - gate.abs_m[2],
         ];
         let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-        // Tolerance is the f32 ulp at the rebased anchor's magnitude (the offset
-        // composing ship_absolute is f32), not an exactness check — at true AU
-        // this is a few hundred metres, dwarfed by the km-scale activation ring.
-        let anchor_mag = gate.abs_m.0.iter().map(|c| c.abs()).fold(0.0_f64, f64::max);
-        let tolerance = (anchor_mag * f32::EPSILON as f64).max(5.0) * 4.0;
-        assert!((dist - (gate.activation_radius * WARP_ARRIVAL_FACTOR) as f64).abs() < tolerance,
+        // The authoritative position and anchor-relative offset are both f64,
+        // so the assertion only needs a small numerical tolerance.
+        let expected = gate.activation_radius * WARP_ARRIVAL_FACTOR;
+        let tolerance = 1e-6_f64.max(expected * 1e-8);
+        assert!((dist - expected).abs() < tolerance,
             "gate arrival distance from the f64 gate source should match the arrival ring (got {dist}, tolerance {tolerance})");
     }
 
@@ -1064,10 +1052,10 @@ mod tests {
         // After a Body warp the ship is rebased onto the body's anchor (ADR-0029),
         // so its raw PositionComp is now body-relative. Compare in absolute terms.
         let ship_abs = node.ship_absolute(ship_id).expect("ship exists");
-        let dx = ship_abs[0] - body.position.x as f64;
-        let dy = ship_abs[1] - body.position.y as f64;
-        let dz = ship_abs[2] - body.position.z as f64;
-        let dist = (dx * dx + dy * dy + dz * dz).sqrt() as f32;
+        let dx = ship_abs[0] - body.position.x;
+        let dy = ship_abs[1] - body.position.y;
+        let dz = ship_abs[2] - body.position.z;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
         let arrival_max = body.radius * 1.5 * 1.05;
         assert!(
             dist <= arrival_max,

@@ -77,7 +77,8 @@ command-in / frame-out の境界で束ねる。公開する更新経路は `Moti
 
 既存の `MotionPredictor` / `WorldSpace` GDExtension wrapperは移行期間の互換shimとして
 残すが、productionの `ShipController` は `ShipMotion`だけを使用する。サーバー物理の
-`MovementProfile` は現時点では `f32`を維持し、clientの絶対座標・状態保持は`f64`で行う。
+`MovementProfile`、速度、位置、移動距離はサーバーとクライアントコアで`f64`を共有する。
+Godot `Vector3` は描画アダプターの最終境界にだけ残る。
 
 ## 採用しなかった選択肢
 

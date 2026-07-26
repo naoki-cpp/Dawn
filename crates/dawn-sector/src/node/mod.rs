@@ -82,7 +82,7 @@ pub const POPULATION_CAP: usize = 100_000;
 /// toward the gate (EVE-style 75% alignment, ADR-0022). Align time therefore
 /// emerges from ship agility (thrust / max_speed) - the tackle window
 /// (ADR-0023) is longer for sluggish ships.
-const WARP_ALIGN_FRACTION: f32 = 0.75;
+const WARP_ALIGN_FRACTION: f64 = 0.75;
 /// Reference warp speed (units/tick), far above any sublight `max_speed`. Used
 /// to derive the warp's duration: `total_ticks = max(WARP_MIN_TICKS,
 /// ceil(warp_distance / WARP_SPEED))`. Warp then follows a smoothstep ease
@@ -93,19 +93,19 @@ const WARP_ALIGN_FRACTION: f32 = 0.75;
 /// (galaxy::UNITS_PER_AU went from 200,000 to 1.495978707e11, a ×747,989.35
 /// jump), so every warp's tick count — and therefore its felt duration —
 /// is unchanged from the compressed scale (ADR-0029 true-AU reactivation).
-const WARP_SPEED: f32 = 7_479_893_535.0;
+const WARP_SPEED: f64 = 7_479_893_535.0;
 /// Floor on warp duration (ticks) so even a short warp reads as a warp rather
 /// than a blink. At 10 tick/s this is ~2 s.
 const WARP_MIN_TICKS: u32 = 20;
 /// Minimum distance to a gate for warp to be allowed (units). Closer than this,
 /// the `WarpCommand` is rejected and the player should approach instead.
-const MIN_WARP_DISTANCE: f32 = 3000.0;
+const MIN_WARP_DISTANCE: f64 = 3000.0;
 /// Stop this far inside the gate's activation radius on arrival, so the jump
 /// prompt is available immediately (mirrors approach, ADR-0015).
-const WARP_ARRIVAL_FACTOR: f32 = 0.8;
+const WARP_ARRIVAL_FACTOR: f64 = 0.8;
 /// Warp to a celestial body: arrive at this multiple of the body's radius from
 /// its centre (ADR-0025). 1.5 = orbit insertion outside the body surface.
-const BODY_WARP_ARRIVAL_FACTOR: f32 = 1.5;
+const BODY_WARP_ARRIVAL_FACTOR: f64 = 1.5;
 
 // -- Orbit / Keep at Range tuning (ADR-0031) --------------------------------
 
@@ -113,18 +113,18 @@ const BODY_WARP_ARRIVAL_FACTOR: f32 = 1.5;
 /// has no fitted weapon (`ShipStatsComp.weapon_range == 0.0`) and the command
 /// did not specify one explicitly. Otherwise the default is the ship's own
 /// weapon range, so the default distance is already a useful one to fight at.
-const DEFAULT_MANEUVER_RADIUS: f32 = 5000.0;
+const DEFAULT_MANEUVER_RADIUS: f64 = 5000.0;
 /// Tangential lead distance for orbit steering, as a fraction of the orbit
 /// radius (ADR-0031): the steering target is offset along the tangent by
 /// `radius * ORBIT_LEAD_FACTOR` so the ship sweeps around the target instead
 /// of just closing the radial gap. Larger = wider sweep, slower radius
 /// convergence; smaller = tighter radial correction, less visible orbiting.
-const ORBIT_LEAD_FACTOR: f32 = 0.5;
+const ORBIT_LEAD_FACTOR: f64 = 0.5;
 /// Keep at Range deadband, as a fraction of the chosen `range` (ADR-0031):
 /// thrust briefly toggling between "too close" and "too far" every tick once
 /// the ship settles near `range` would look like jitter, so brake instead
 /// while within this band of the target distance.
-const KEEP_AT_RANGE_DEADBAND_FRACTION: f32 = 0.05;
+const KEEP_AT_RANGE_DEADBAND_FRACTION: f64 = 0.05;
 
 // -- TickResult --------------------------------------------------------------
 
@@ -532,7 +532,7 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// A Ship's absolute position in the Sector-local frame (metres, f64),
-    /// composing its anchor's absolute position with its f32 offset (ADR-0029).
+    /// composing its anchor's absolute position with its f64 offset (ADR-0029).
     /// Falls back to treating the raw offset as absolute if the anchor is
     /// unknown (pre-anchor data / tests).
     pub fn ship_absolute(&self, ship_id: ShipId) -> Option<dawn_core::AbsolutePosition> {
@@ -799,7 +799,7 @@ mod tests {
         for i in 0..5 {
             node.spawn_ship(
                 dawn_core::ShipTypeId(1),
-                Position::new(i as f32 * 100.0, 0.0, 0.0),
+                Position::new(i as f64 * 100.0, 0.0, 0.0),
                 Velocity::new(1.0, 0.0, 0.0),
             );
         }

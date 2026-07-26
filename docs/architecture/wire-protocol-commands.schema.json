@@ -253,7 +253,7 @@
                 "number",
                 "null"
               ],
-              "format": "float"
+              "format": "double"
             },
             "target_id": {
               "type": [
@@ -290,7 +290,7 @@
                 "number",
                 "null"
               ],
-              "format": "float"
+              "format": "double"
             },
             "target_id": {
               "type": [
@@ -629,15 +629,15 @@
       "properties": {
         "x": {
           "type": "number",
-          "format": "float"
+          "format": "double"
         },
         "y": {
           "type": "number",
-          "format": "float"
+          "format": "double"
         },
         "z": {
           "type": "number",
-          "format": "float"
+          "format": "double"
         }
       }
     },

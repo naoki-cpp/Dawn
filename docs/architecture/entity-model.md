@@ -61,14 +61,14 @@ today : fixed count, fixed assignment
 
 | Field | Type | Description |
 |---|---|---|
-| `x` | `f32` | east-west |
-| `y` | `f32` | up-down |
-| `z` | `f32` | north-south |
+| `x` | `f64` | east-west |
+| `y` | `f64` | up-down |
+| `z` | `f64` | north-south |
 
-**Current representation:** ship ECS state remains `f32`, relative to `AnchorComp` (ADR-0029).
+**Current representation:** ship ECS state is an `f64` offset relative to `AnchorComp` (ADR-0029).
 Static navigation definitions, authoritative spawn/transit events, snapshots, and server
 wire payloads use `dawn_core::AbsolutePosition` for sector-frame f64 coordinates. Ship ECS
-state remains `PositionComp` (an anchor-relative f32 offset) plus `AnchorComp`; absolute
+state uses `PositionComp` (an anchor-relative f64 offset) plus `AnchorComp`; absolute
 consumers must go through `AnchorTable`/`SimulationNode::ship_absolute`.
 
 ### Velocity
@@ -77,9 +77,9 @@ Displacement vector per Tick, in distance-units / Tick.
 
 | Field | Type | Description |
 |---|---|---|
-| `dx` | `f32` | displacement along X |
-| `dy` | `f32` | displacement along Y |
-| `dz` | `f32` | displacement along Z |
+| `dx` | `f64` | displacement along X |
+| `dy` | `f64` | displacement along Y |
+| `dz` | `f64` | displacement along Z |
 
 `Velocity::ZERO` represents zero speed. A Ship at zero velocity does not emit `VelocityChanged`.
 
@@ -92,7 +92,7 @@ Axis-aligned bounding box (AABB) describing a Sector's spatial extent.
 | `min` | `Position` | min corner (origin side) |
 | `max` | `Position` | max corner |
 
-**Default:** `SectorBounds::centered(DEFAULT_HALF)` — a cube centered at the origin, 100,000 per side (DEFAULT_HALF = 50,000).
+**Default:** `SectorBounds::centered(DEFAULT_HALF)` — a cube centered at the origin, 1,400,000 per side (DEFAULT_HALF = 700,000).
 **Boundary crossing:** the Tick loop does not enforce bounds — space is infinite. `SectorBounds` is used only to generate spawn positions.
 
 ### Tick
@@ -181,9 +181,9 @@ base_stats  : ShipBaseStats            velocity      : Velocity
 ### Coordinate policy (ADR-0044, accepted)
 
 Do not introduce new code that treats `Position` as both an absolute Sector coordinate and an
-anchor-relative offset. `PositionComp` remains the local f32 representation governed by
+anchor-relative offset. `PositionComp` is the local f64 representation governed by
 ADR-0029. New authoritative coordinates use `AbsolutePosition`; conversion is performed only
-at the anchor boundary. Client-authored command targets continue to use the separate f32
+at the anchor boundary. Client-authored command targets use the separate f64
 `PosWire` type.
 
 ---

@@ -86,13 +86,13 @@ impl SlotLayout {
 pub struct ShipBaseStats {
     /// Base max speed without any modules (units/tick). AB/MWD multiply this
     /// via StatDelta.speed_multiplier to produce the effective max speed.
-    pub max_speed: f32,
+    pub max_speed: f64,
     /// Hull mass (kg). Together with inertia_modifier determines τ (time
     /// constant for velocity changes) and therefore align time (ADR-0023).
-    pub mass: f32,
+    pub mass: f64,
     /// Inertia modifier (dimensionless). Lower = more agile. Controls only
     /// align time; has no direct effect on max speed.
-    pub inertia_modifier: f32,
+    pub inertia_modifier: f64,
     /// Max Shield HP.
     pub max_shield: f32,
     /// Max Armor HP.

@@ -43,10 +43,7 @@ impl<S: EventStore> SimulationNode<S> {
             Some(c) => c.0,
             None => return,
         };
-        let target = self.dest_in_ship_frame_abs(
-            entity,
-            [target.x as f64, target.y as f64, target.z as f64].into(),
-        );
+        let target = self.dest_in_ship_frame_abs(entity, [target.x, target.y, target.z].into());
         self.steer_thrust_toward(entity, pos, target);
     }
 
@@ -131,7 +128,7 @@ impl<S: EventStore> SimulationNode<S> {
         let dy = to.y - from.y;
         let dz = to.z - from.z;
         let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-        let dir = if dist > f32::EPSILON {
+        let dir = if dist > f64::EPSILON {
             Velocity {
                 dx: dx / dist,
                 dy: dy / dist,
@@ -181,9 +178,9 @@ mod tests {
         node.world.get_mut::<PositionComp>(entity).unwrap().0 = local_pos;
 
         let target_abs = Position::new(
-            (anchor_abs[0] + local_pos.x as f64) as f32,
-            (anchor_abs[1] + local_pos.y as f64 + 1_000_000.0) as f32,
-            (anchor_abs[2] + local_pos.z as f64) as f32,
+            anchor_abs[0] + local_pos.x,
+            anchor_abs[1] + local_pos.y + 1_000_000.0,
+            anchor_abs[2] + local_pos.z,
         );
 
         node.apply_move_command(ship_id, target_abs);
