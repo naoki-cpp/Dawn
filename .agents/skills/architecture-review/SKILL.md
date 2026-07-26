@@ -5,7 +5,7 @@ description: Periodic senior-architect-style health review of Dawn's Rust crates
 
 # architecture-review
 
-Canonical procedure: [`.claude/commands/architecture-review.md`](../../../.claude/commands/architecture-review.md)
+Canonical procedure: [`.agents/commands/architecture-review.md`](../../commands/architecture-review.md)
 in this repo.
 
 Read that file and follow it exactly -- this file only carries the

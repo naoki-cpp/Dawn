@@ -5,7 +5,7 @@ description: Scaffold a new Architecture Decision Record for Dawn with the house
 
 # new-adr
 
-Canonical procedure: [`.claude/commands/new-adr.md`](../../../.claude/commands/new-adr.md)
+Canonical procedure: [`.agents/commands/new-adr.md`](../../commands/new-adr.md)
 in this repo.
 
 Read that file and follow it exactly -- this file only carries the

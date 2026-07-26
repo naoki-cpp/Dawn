@@ -61,7 +61,7 @@ ADR-0030 着手ブランチ（chore/steering-hooks）で 2 本導入済み:
 
 ### 2. 手続き的ワークフローの Skill 化
 
-着手前チェックの手続きである §9 AI Change Checklist を Skill（.claude/commands/）へ
+着手前チェックの手続きである §9 AI Change Checklist を Skill（.agents/commands/）へ
 抽出し、ガイド本体には「正典の所在を指す短い節」だけを残す。remove-event スキルが
 既にこのパターンの実証例である。
 

@@ -3,7 +3,7 @@ scope    : Dawnサーバーのセキュリティレビュー — 解消済みfin
 audience : AI Agent / Human Developer
 update   : /security-check がfindingを解消済みへ移動するたびに追記
 related  : docs/architecture/security-review.md（未解消のfinding・検証済み健全項目）,
-           .claude/skills/security-check/SKILL.md
+           .agents/skills/security-check/SKILL.md
 date     : 2026-07-11
 ---
 

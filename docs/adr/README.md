@@ -89,6 +89,6 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 
 ## References
 
-- Creating a new ADR: `/new-adr` skill (`.claude/commands/new-adr.md`)
+- Creating a new ADR: `/new-adr` skill (`.agents/commands/new-adr.md`)
 - Pre-change checks that decide when an ADR is required: `/ai-change-checklist`
-  skill (`.claude/commands/ai-change-checklist.md`)
+  skill (`.agents/commands/ai-change-checklist.md`)

@@ -5,7 +5,7 @@ description: Add a new domain Event/Command pair to Dawn end to end -- event-cat
 
 # add-event
 
-Canonical procedure: [`.claude/commands/add-event.md`](../../../.claude/commands/add-event.md)
+Canonical procedure: [`.agents/commands/add-event.md`](../../commands/add-event.md)
 in this repo.
 
 Read that file and follow it exactly -- this file only carries the
