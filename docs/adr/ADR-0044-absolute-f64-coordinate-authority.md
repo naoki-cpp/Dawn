@@ -95,7 +95,7 @@ GDScript側はNode3Dの配置・原点リベース時のシーンツリー更新
 - `FileEventStore` は新規ログに `DAWNEVT2` ヘッダーを書き、旧8バイト
   `base_index` ヘッダーのログも認識する。旧ログの `VelocityChanged`、
   `AnchorRebased`、`SectorTransitCompleted` は固定されたf32 legacy型からf64へ
-  widenして読み込む。読み込んだイベントは現行型として再保存される。
+  widenして読み込む。新規追記またはCompaction時には現行型として保存される。
 - `StateSnapshot` は新規ファイルに `DAWNSNP2` マーカーを付ける。マーカーのない
   旧snapshotは固定されたf32 `Position` / `Velocity` / `SectorBounds` 型で先に
   読み込み、f64へ変換する。旧形式のsnapshotでは`absolute_position`を`None`とする。
