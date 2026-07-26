@@ -12,7 +12,7 @@
 
 use crate::node::SimulationNode;
 use crate::persistence::{
-    snapshot::{LegacyPositionF32, LegacyShipSnapshot},
+    snapshot::{PreviousPositionF32, PreviousShipSnapshotF32},
     ShipSnapshot,
 };
 use dawn_consensus::RaftActorHandle;
@@ -20,6 +20,8 @@ use dawn_core::{AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, S
 use dawn_event_store::store::EventStore;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
+
+const TRANSIT_MAGIC: &[u8; 8] = b"DAWNTRN2";
 
 /// A Sector Transit proposal as it travels through the Raft Log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,30 +53,29 @@ pub enum TransitOp {
     },
 }
 
-/// Pre-ADR-0044 transit payload used to decode committed Raft entries written
-/// before `ShipSnapshot::absolute_position` was added. Postcard is positional,
-/// so decoding the legacy nested ship requires a matching legacy enum.
+/// Previous-main transit payload. Postcard is positional, so decoding the
+/// f32 spatial fields requires a matching previous-release enum.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum LegacyTransitOp {
+enum PreviousTransitOpF32 {
     Request {
         ship_id: ShipId,
         to: SectorId,
         gate_id: Option<JumpGateId>,
     },
     Commit {
-        ship: Box<LegacyShipSnapshot>,
+        ship: Box<PreviousShipSnapshotF32>,
         from: SectorId,
         to: SectorId,
-        entry_pos: LegacyPositionF32,
+        entry_pos: PreviousPositionF32,
         entry_pos_abs: [f64; 3],
         gate_id: Option<JumpGateId>,
     },
 }
 
-impl From<LegacyTransitOp> for TransitOp {
-    fn from(legacy: LegacyTransitOp) -> Self {
-        match legacy {
-            LegacyTransitOp::Request {
+impl From<PreviousTransitOpF32> for TransitOp {
+    fn from(previous: PreviousTransitOpF32) -> Self {
+        match previous {
+            PreviousTransitOpF32::Request {
                 ship_id,
                 to,
                 gate_id,
@@ -83,7 +84,7 @@ impl From<LegacyTransitOp> for TransitOp {
                 to,
                 gate_id,
             },
-            LegacyTransitOp::Commit {
+            PreviousTransitOpF32::Commit {
                 ship,
                 from,
                 to,
@@ -105,19 +106,28 @@ impl From<LegacyTransitOp> for TransitOp {
 impl TransitOp {
     /// Serialize for a Raft `LogEntry` payload.
     pub fn encode(&self) -> Vec<u8> {
-        postcard::to_stdvec(self).expect("TransitOp serialization cannot fail")
+        let payload = postcard::to_stdvec(self).expect("TransitOp serialization cannot fail");
+        let mut bytes = Vec::with_capacity(TRANSIT_MAGIC.len() + payload.len());
+        bytes.extend_from_slice(TRANSIT_MAGIC);
+        bytes.extend_from_slice(&payload);
+        bytes
     }
 
     /// Deserialize from a committed Raft `LogEntry` payload.
     ///
-    /// Returns `None` for payloads that are not a `TransitOp` (future
-    /// proposal types share the same log).
+    /// Current payloads are identified by `TRANSIT_MAGIC`. The unversioned
+    /// fallback is retained only for direct previous-main payloads.
+    /// Returns `None` for payloads that are not a `TransitOp` (future proposal
+    /// types share the same log).
     pub fn decode(payload: &[u8]) -> Option<Self> {
-        postcard::from_bytes(payload).ok().or_else(|| {
-            postcard::from_bytes::<LegacyTransitOp>(payload)
-                .ok()
-                .map(Into::into)
-        })
+        if let Some(payload) = payload.strip_prefix(TRANSIT_MAGIC) {
+            return postcard::from_bytes(payload).ok();
+        }
+
+        postcard::from_bytes::<PreviousTransitOpF32>(payload)
+            .ok()
+            .map(Into::into)
+            .or_else(|| postcard::from_bytes(payload).ok())
     }
 }
 
@@ -393,7 +403,9 @@ mod tests {
             to: SectorId(1),
             gate_id: None,
         };
-        let decoded = TransitOp::decode(&op.encode()).expect("decode must succeed");
+        let encoded = op.encode();
+        assert!(encoded.starts_with(TRANSIT_MAGIC));
+        let decoded = TransitOp::decode(&encoded).expect("decode must succeed");
         match decoded {
             TransitOp::Request {
                 ship_id,
@@ -477,11 +489,12 @@ mod tests {
     }
 
     #[test]
-    fn legacy_commit_payload_decodes_without_absolute_position() {
-        let legacy = LegacyTransitOp::Commit {
-            ship: Box::new(LegacyShipSnapshot {
+    fn previous_main_commit_payload_decodes_with_absolute_position() {
+        let previous = PreviousTransitOpF32::Commit {
+            ship: Box::new(PreviousShipSnapshotF32 {
                 ship_id: ShipId::new(NodeId(0), 7),
                 ship_type_id: ShipTypeId(1),
+                absolute_position: Some(AbsolutePosition::new(100.0, 200.0, 300.0)),
                 position: Position::new(1.0, 2.0, 3.0).into(),
                 anchor: dawn_core::AnchorId(0),
                 velocity: Velocity::new(4.0, 5.0, 6.0).into(),
@@ -500,7 +513,7 @@ mod tests {
             entry_pos_abs: [500.0, 0.0, 0.0],
             gate_id: None,
         };
-        let decoded = TransitOp::decode(&postcard::to_stdvec(&legacy).unwrap()).unwrap();
+        let decoded = TransitOp::decode(&postcard::to_stdvec(&previous).unwrap()).unwrap();
 
         match decoded {
             TransitOp::Commit {
@@ -509,7 +522,10 @@ mod tests {
                 ..
             } => {
                 assert_eq!(ship.ship_id, ShipId::new(NodeId(0), 7));
-                assert_eq!(ship.absolute_position, None);
+                assert_eq!(
+                    ship.absolute_position,
+                    Some(AbsolutePosition::new(100.0, 200.0, 300.0))
+                );
                 assert_eq!(entry_pos_abs, AbsolutePosition::new(500.0, 0.0, 0.0));
             }
             other => panic!("expected Commit, got {other:?}"),

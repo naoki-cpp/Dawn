@@ -75,7 +75,7 @@ f64へ変更したり、アンカー方式と絶対方式を新機能ごとに�
 - [x] 人間が本ADRを承認し、`status`を`accepted`へ変更する
 - [x] `dawn-core::AbsolutePosition` を定義し、静的な天体・ゲート・ステーション定義の絶対座標に適用する
 - [x] サーバーの位置・距離・AoI・ナビゲーション判定をf64経路へ移行する（AnchorTable / combat / AoI CellGrid / TransitOp / ship_absolute / WarpComp / entity_absolute_f64 / PositionComp / orbit / keep-at-range を含む）
-- [x] `PositionComp`と`AnchorComp`の移行方針を決定し、互換読み取りを隔離する（PositionCompはアンカー相対f64オフセットとして維持し、AbsolutePositionへの変換はAnchorTable / ship_absoluteに限定。旧snapshot / transit payloadは専用legacy decoderで読み取り、absolute_positionは`None`へ変換）
+- [x] `PositionComp`と`AnchorComp`の移行方針を決定し、互換読み取りを隔離する（PositionCompはアンカー相対f64オフセットとして維持し、AbsolutePositionへの変換はAnchorTable / ship_absoluteに限定。直前mainのsnapshot / transit payloadは専用previous decoderで読み取り、既存の`absolute_position`を保持したままf64へ拡張）
 - [x] 位置・速度を含むDomainEvent、snapshot、wire schemaを同じ移行で更新する（`AbsPosWire` / `PosWire` / `VelWire` と移動プロファイル値をf64化し、生成schemaを更新）
 - [x] f64 wire位置をクライアントで`Vector3`へ変換する前に差分計算するテストを追加する
 
@@ -94,9 +94,13 @@ GDScript側はNode3Dの配置・原点リベース時のシーンツリー更新
 
 - `FileEventStore` は新規ログに `DAWNEVT2` ヘッダーを書き、旧8バイト
   `base_index` ヘッダーのログも認識する。旧ログの `VelocityChanged`、
-  `AnchorRebased`、`SectorTransitCompleted` は固定されたf32 legacy型からf64へ
+  `AnchorRebased`、`SectorTransitCompleted` は固定された直前世代のf32型からf64へ
   widenして読み込む。新規追記またはCompaction時には現行型として保存される。
 - `StateSnapshot` は新規ファイルに `DAWNSNP2` マーカーを付ける。マーカーのない
-  旧snapshotは固定されたf32 `Position` / `Velocity` / `SectorBounds` 型で先に
-  読み込み、f64へ変換する。旧形式のsnapshotでは`absolute_position`を`None`とする。
-- 旧形式のイベントログとsnapshotを実バイト列で読み込む回帰テストを維持する。
+  直前mainのsnapshotは、`absolute_position`を含む固定されたf32
+  `Position` / `Velocity` / `SectorBounds` 型で先に読み込み、f64へ変換する。
+  Transit payloadも同じ直前世代のShipSnapshotとf32 `entry_pos`を専用型で読む。
+  さらに古いpre-ADR-0044形式は、この移行の互換対象に含めない。
+- `TransitOp` は新規payloadに `DAWNTRN2` マーカーを付け、マーカーなしの直前main
+  payloadだけをprevious decoderで読み込む。
+- 直前世代のイベントログ、snapshot、Transit payloadを実バイト列で読み込む回帰テストを維持する。
