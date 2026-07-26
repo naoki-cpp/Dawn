@@ -17,7 +17,6 @@ extends Node3D
 
 # ── 設定 ─────────────────────────────────────────────────────────────────────
 
-const WORLD_SCALE     : float = 0.1
 const LERP_SPEED      : float = 8.0
 const VEL_VIS_SCALE   : float = 4.0
 const THRUST_VIS_LEN  : float = 350.0
@@ -38,7 +37,7 @@ var _vel_estimate : Vector3 = Vector3.ZERO  ## 速度インジケーター用（
 var _is_init      : bool    = false
 var _is_player    : bool    = false
 var _thrust_dir   : Vector3 = Vector3.ZERO
-var _motion       := MotionPredictor.new()
+var _motion       := ShipMotion.new()
 var _motion_ready : bool    = false
 ## Hidden while warping faster than VISUAL_SPEED_CAP (ADR-0029 lore pass,
 ## non-player ships only). Tracks the last applied visibility so we only
@@ -90,9 +89,9 @@ func _process(delta: float) -> void:
 	## Rust motion track. This adapter only decides how much of that state is
 	## renderable for the current ship.
 	_motion.advance(delta * TICKS_PER_SEC)
-	_velocity = _motion.predicted_velocity()
+	_velocity = _motion.render_velocity()
 	var speed := _velocity.length()
-	var predicted_pos := _motion.predicted_position()
+	var predicted_pos := _motion.render_position()
 	if not _is_player:
 		## Remote ships are hidden during the bulk of a warp while their shared
 		## track continues toward the true position.
@@ -127,59 +126,73 @@ func _process(delta: float) -> void:
 
 # ── 公開 API ──────────────────────────────────────────────────────────────────
 
-## godot_pos is already in Godot world space (main.gd's WorldSpace converts at
-## the boundary, applying the floating origin). Ship nodes stay origin-agnostic.
-func initialize(id: int, godot_pos: Vector3) -> void:
+## server_pos remains an absolute f64 position until ShipMotion subtracts the
+## floating origin and narrows the final render position to Vector3.
+func initialize(
+	id: int,
+	server_pos: PackedFloat64Array,
+	world_origin: PackedFloat64Array
+) -> void:
 	ship_id    = id
-	position   = godot_pos
+	_motion_ready = _motion.configure_dead_reckoning(
+		500.0, 10_000_000.0, 0.3, server_pos, Vector3.ZERO, 0)
+	if not _motion_ready or world_origin.size() != 3:
+		_motion_ready = false
+		return
+	_motion.rebase_to_components(world_origin[0], world_origin[1], world_origin[2])
+	position   = _motion.render_position()
 	_velocity  = Vector3.ZERO
 	_is_init   = true
 	_in_tunnel = false
 	visible    = true
-	_motion.configure_dead_reckoning(
-		500.0 * WORLD_SCALE, 10_000_000.0, 0.3, godot_pos, Vector3.ZERO, 0)
 	_motion_ready = true
 
-## Seed the Rust predictor with the server's effective fitted movement profile.
-## The predictor runs in local Godot units so it owns the same position that is
-## rendered by this node.
-func configure_motion(max_speed: float, mass: float, inertia_modifier: float, server_vel: Vector3, tick: int = 0) -> void:
-	_motion.configure_dead_reckoning(
-		max_speed * WORLD_SCALE,
+## Seed the Rust motion surface with the server's fitted movement profile.
+## All positions and velocities remain in server space until frame sampling.
+func configure_motion(
+	max_speed: float,
+	mass: float,
+	inertia_modifier: float,
+	server_pos: PackedFloat64Array,
+	server_vel: Vector3,
+	tick: int = 0
+) -> void:
+	_motion_ready = _motion.configure_dead_reckoning(
+		max_speed,
 		mass,
 		inertia_modifier,
-		global_position,
-		_server_velocity_to_godot(server_vel),
+		server_pos,
+		server_vel,
 		tick)
-	_motion_ready = true
-	_velocity = _server_velocity_to_godot(server_vel)
+	if not _motion_ready:
+		return
+	position   = _motion.render_position()
+	_velocity  = _motion.render_velocity()
 
 ## VelocityChanged イベントで速度を更新する（ADR-0008）。
 ## server_vel はサーバー座標系の速度ベクトル（units/tick）。
 func set_velocity(server_vel: Vector3, tick: int = 0) -> bool:
-	var godot_vel := _server_velocity_to_godot(server_vel)
-	if _motion_ready:
-		if not _motion.set_velocity(godot_vel, tick):
-			return false
-		## Warp velocity is not governed by the normal fitted movement profile.
-		## The shared Rust track owns the capped presentation until PositionSnap
-		## resets it.
-		if _is_player and godot_vel.length() > VISUAL_SPEED_CAP:
-			_motion.begin_warp(VISUAL_SPEED_CAP)
-	_velocity = godot_vel
+	if not _motion_ready or not _motion.set_velocity(server_vel, tick):
+		return false
+	## Warp velocity is not governed by the normal fitted movement profile.
+	## The shared Rust track owns the capped presentation until PositionSnap
+	## resets it.
+	if _is_player and _motion.render_speed() > VISUAL_SPEED_CAP:
+		_motion.begin_warp(VISUAL_SPEED_CAP)
+	_velocity = _motion.render_velocity()
 	return true
 
-## Snap the ship to a Godot-space position (jump-gate teleport, warp-arrival
-## snap). main.gd converts from server space via its WorldSpace before calling.
-func update_target(godot_pos: Vector3, tick: int = 0) -> void:
-	reset_motion(godot_pos, Vector3.ZERO, tick)
+## Snap the ship to an absolute server-space position (jump-gate teleport or
+## warp-arrival snap).
+func update_target(server_pos: PackedFloat64Array, tick: int = 0) -> void:
+	reset_motion(server_pos, Vector3.ZERO, tick)
 
-## The only presentation seam that moves a ship for a floating-origin rebase.
-## Keep the Node3D and its Rust motion track in the same coordinate frame.
-func apply_origin_rebase(shift: Vector3) -> void:
-	position += shift
+## The only presentation seam that applies a floating-origin rebase. The Rust
+## motion surface updates its origin and returns the new render frame.
+func apply_origin_rebase(new_origin: PackedFloat64Array) -> void:
 	if _motion_ready:
-		_motion.rebase(shift)
+		_motion.rebase_to_components(new_origin[0], new_origin[1], new_origin[2])
+		position = _motion.render_position()
 
 func set_as_player() -> void:
 	_is_player    = true
@@ -232,63 +245,54 @@ func set_braking() -> void:
 
 ## Reconcile normal flight to an authoritative state without discarding local
 ## input. The Rust module ignores stale ticks.
-func reconcile_motion(godot_pos: Vector3, server_vel: Vector3, tick: int) -> void:
-	var godot_vel := _server_velocity_to_godot(server_vel)
-	_velocity = godot_vel
-	if _motion_ready and _is_player:
-		## MotionPredictor keeps the authoritative base and smooths the visual
-		## correction. Writing global_position here would undo that smoothing and
-		## make every delayed correction visibly snap backwards.
-		_motion.reconcile(godot_pos, godot_vel, tick)
-	else:
-		global_position = godot_pos
+func reconcile_motion(server_pos: PackedFloat64Array, server_vel: Vector3, tick: int) -> void:
+	if not _motion_ready:
+		return
+	## ShipMotion keeps the authoritative base and selects the correction policy
+	## for both local prediction and remote dead reckoning. Writing position here
+	## would bypass that policy; _process applies the next render frame.
+	if not _motion.reconcile(server_pos, server_vel, tick):
+		return
+	_velocity = _motion.render_velocity()
 
 ## Reset prediction at a discontinuity such as warp arrival or docking.
-func reset_motion(godot_pos: Vector3, server_vel: Vector3, tick: int) -> void:
-	var godot_vel := _server_velocity_to_godot(server_vel)
-	global_position = godot_pos
-	_velocity = godot_vel
+func reset_motion(server_pos: PackedFloat64Array, server_vel: Vector3, tick: int) -> void:
 	_thrust_dir = Vector3.ZERO
 	if _motion_ready:
-		_motion.reset(godot_pos, godot_vel, tick)
-		if _is_player:
-			_motion.enable_prediction()
-		else:
-			_motion.enable_dead_reckoning()
+		_motion.reset(server_pos, server_vel, tick, _is_player)
+		position  = _motion.render_position()
+		_velocity = _motion.render_velocity()
 
 ## Enter the explicit docked state. The Rust track owns the zero-velocity and
-## no-integration invariant; this adapter applies the authoritative position.
-func dock_motion(godot_pos: Vector3, tick: int) -> bool:
-	if _motion_ready and not _motion.dock(godot_pos, tick):
+## no-integration invariant and the adapter applies its render frame.
+func dock_motion(server_pos: PackedFloat64Array, tick: int) -> bool:
+	if _motion_ready and not _motion.dock(server_pos, tick):
 		return false
-	global_position = godot_pos
-	_velocity = Vector3.ZERO
+	position = _motion.render_position()
+	_velocity = _motion.render_velocity()
 	_thrust_dir = Vector3.ZERO
 	return true
 
 ## Leave the explicit docked state and choose prediction/dead-reckoning based
 ## on which ship owns this controller.
-func undock_motion(godot_pos: Vector3, server_vel: Vector3, tick: int) -> bool:
-	var godot_vel := _server_velocity_to_godot(server_vel)
-	if _motion_ready and not _motion.undock(godot_pos, godot_vel, tick, _is_player):
+func undock_motion(server_pos: PackedFloat64Array, server_vel: Vector3, tick: int) -> bool:
+	if _motion_ready and not _motion.undock(server_pos, server_vel, tick, _is_player):
 		return false
-	global_position = godot_pos
-	_velocity = godot_vel
+	position  = _motion.render_position()
+	_velocity = _motion.render_velocity()
 	_thrust_dir = Vector3.ZERO
 	return true
 
 func get_speed_server() -> float:
-	return _velocity.length() / WORLD_SCALE
+	return _motion.server_speed()
 
-## Godot-space speed (i.e. already * WORLD_SCALE, same units as
-## VISUAL_SPEED_CAP). Used by main.gd to drive the warp-tunnel overlay
-## (ADR-0029 lore pass) -- comparable to VISUAL_SPEED_CAP without re-deriving
-## the scale conversion at the call site.
+## Godot-space speed in the same units as VISUAL_SPEED_CAP. Used by main.gd
+## to drive the warp-tunnel overlay (ADR-0029 lore pass).
 func get_speed_godot() -> float:
-	return _velocity.length()
+	return _motion.render_speed()
 
-func _server_velocity_to_godot(server_vel: Vector3) -> Vector3:
-	return Vector3(server_vel.x, server_vel.y, -server_vel.z) * WORLD_SCALE
+func server_position() -> PackedFloat64Array:
+	return _motion.server_position()
 
 ## ロック状態を設定する。
 ## state: "none" / "locking" / "locked"

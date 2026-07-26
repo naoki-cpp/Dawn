@@ -23,6 +23,11 @@ impl WorldSpace {
     }
 
     #[func]
+    fn origin_components(&self) -> PackedFloat64Array {
+        self.core.origin().into()
+    }
+
+    #[func]
     fn to_godot_components(&self, server_x: f64, server_y: f64, server_z: f64) -> Vector3 {
         to_vector3(self.core.server_to_render([server_x, server_y, server_z]))
     }

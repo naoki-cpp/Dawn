@@ -56,6 +56,29 @@ Node3Dへ適用する薄いアダプターに限定する。
 6. `MotionTrack`の入力・出力はサーバー絶対座標と描画ローカル座標を混同しない。
    ADR-0044の絶対f64値は、原点差分を計算した後にのみGodot `Vector3`へ変換する。
 
+### 実装反映（2026-07-26）
+
+`dawn-client-core::ShipMotion` が、1隻分の `MotionPredictor` と `WorldSpace` を
+command-in / frame-out の境界で束ねる。公開する更新経路は `MotionCommand`、描画側が
+読む結果は `MotionFrame` とし、`main.gd` や `ShipController` が tick、補正方式、座標
+変換の順序を組み立てない。
+
+- `MotionCommand` は server-space の入力、権威サンプル、速度イベント、discontinuity、
+  rebaseを受け取る。stale tick、非有限値、無効なwarp値は境界で拒否する。
+- Godotの `VISUAL_SPEED_CAP` のようなrender-spaceの速度上限は、GDExtensionが
+  `WorldSpace` の単位変換を通してserver-spaceへ変換してから `MotionCommand` に渡す。
+  そのためコマンドの `server_speed_cap` は常にサーバー単位である。
+- `MotionFrame` は権威位置、予測位置、render位置、server/render速度、状態、tickを
+  明示的に分ける。warp中の表示位置を権威位置として扱わない。
+- `dawn-client-gdext::ShipMotion` は `PackedFloat64Array` の絶対座標をRustへ渡し、
+  `Vector3` への縮小はrender frameの最終境界だけで行う。
+- `WorldPresentation` は全船へ同じabsolute originを通知する。rebase後の船ノードを
+  `shift` 加算する処理は持たず、各 `ShipMotion` のrender frameを適用する。
+
+既存の `MotionPredictor` / `WorldSpace` GDExtension wrapperは移行期間の互換shimとして
+残すが、productionの `ShipController` は `ShipMotion`だけを使用する。サーバー物理の
+`MovementProfile` は現時点では `f32`を維持し、clientの絶対座標・状態保持は`f64`で行う。
+
 ## 採用しなかった選択肢
 
 - **現在の複数経路を個別に補正する:** 一時的なバグ修正はできるが、予測器・ワープ積分・

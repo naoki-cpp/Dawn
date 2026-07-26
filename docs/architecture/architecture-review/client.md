@@ -47,15 +47,15 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 
 ---
 
-## 最新ファイルサイズ一覧（2026-07-24 再計測）
+## 最新ファイルサイズ一覧（2026-07-26 再計測）
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
-| `client/scripts/main.gd` | 1356 | [green] orchestration層 |
+| `client/scripts/main.gd` | 1352 | [green] orchestration層 |
 | `client/scripts/hud_manager.gd` | 892 | [yellow] C-9 watch。HUD panel構築・更新とtyped refs |
 | `client/scripts/connection.gd` | 406 | [green] WebSocket I/Oとsignal発行 |
-| `client/scripts/ship_controller.gd` | 433 | [green] 単一船の視覚表現 |
-| `client/scripts/world_presentation.gd` | 342 | [green] world visual side effect |
+| `client/scripts/ship_controller.gd` | 434 | [green] 単一船の視覚表現 + ShipMotion frame適用 |
+| `client/scripts/world_presentation.gd` | 346 | [green] world visual side effect / origin通知 |
 | `client/scripts/hud_surface.gd` | 255 | [green] HUD Control refsとrender frame委譲 |
 | `client/scripts/navigation_marker_renderer.gd` | 229 | [green] marker生成 |
 | `client/scripts/input_decoder.gd` | 164 | [green] input factsへの変換 |
@@ -66,8 +66,10 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/inventory_row.gd` | 90 | [green] typed inventory row shape |
 | `client/scripts/market_surface.gd` | 270 | [green] market UI surface |
 | `client/scripts/position_components.gd` | 26 | [green] position component helpers |
-| `crates/dawn-client-core/src/world_space.rs` | 177 | [green] absolute f64 / floating-origin coordinate model |
-| `crates/dawn-client-gdext/src/world_space_gd.rs` | 110 | [green] WorldSpaceのGodot型アダプター |
+| `crates/dawn-client-core/src/world_space.rs` | 205 | [green] absolute f64 / floating-origin coordinate model |
+| `crates/dawn-client-core/src/ship_motion.rs` | 385 | [green] MotionCommand / MotionFrame / one-ship motion surface |
+| `crates/dawn-client-gdext/src/world_space_gd.rs` | 115 | [green] WorldSpaceのGodot型アダプター |
+| `crates/dawn-client-gdext/src/ship_motion_gd.rs` | 235 | [green] ShipMotionのGodot型アダプター |
 | `crates/dawn-client-core/src/world_session.rs` | 849 | [green] pure WorldSession state and typed transitions (ADR-0046) |
 | `crates/dawn-client-gdext/src/world_session_gd.rs` | 330 | [green] thin Godot adapter for WorldSession state (ADR-0046) |
 | `client/scripts/hud_hit_test.gd` | 80 | [green] HUD画面座標hit-test |

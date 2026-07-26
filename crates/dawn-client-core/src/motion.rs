@@ -122,7 +122,7 @@ pub struct MotionPredictor {
     render_correction: [f64; 3],
     has_rendered: bool,
     warp_render_position: Option<[f64; 3]>,
-    warp_visual_speed_cap: Option<f64>,
+    warp_server_speed_cap: Option<f64>,
 }
 
 impl Default for MotionPredictor {
@@ -145,7 +145,7 @@ impl MotionPredictor {
             render_correction: [0.0; 3],
             has_rendered: false,
             warp_render_position: None,
-            warp_visual_speed_cap: None,
+            warp_server_speed_cap: None,
         }
     }
 
@@ -183,7 +183,7 @@ impl MotionPredictor {
     pub fn enable_prediction(&mut self) {
         self.state = MotionState::Prediction;
         self.warp_render_position = None;
-        self.warp_visual_speed_cap = None;
+        self.warp_server_speed_cap = None;
     }
 
     /// Switch an existing track to remote constant-velocity dead reckoning.
@@ -192,7 +192,7 @@ impl MotionPredictor {
         self.state = MotionState::DeadReckoning;
         self.input = MotionInput::Coast;
         self.warp_render_position = None;
-        self.warp_visual_speed_cap = None;
+        self.warp_server_speed_cap = None;
     }
 
     /// Enter the committed-warp presentation state.
@@ -200,14 +200,15 @@ impl MotionPredictor {
     /// The authoritative track still advances at the reported velocity, but
     /// rendering advances at a bounded speed until an authoritative reset
     /// arrives. This keeps warp presentation policy in the shared Rust track.
-    pub fn begin_warp(&mut self, visual_speed_cap: f64) -> bool {
-        if !visual_speed_cap.is_finite() || visual_speed_cap <= 0.0 {
+    /// `server_speed_cap` is expressed in server-space units per tick.
+    pub fn begin_warp(&mut self, server_speed_cap: f64) -> bool {
+        if !server_speed_cap.is_finite() || server_speed_cap <= 0.0 {
             return false;
         }
         self.state = MotionState::WarpPresentation;
         self.input = MotionInput::Coast;
         self.warp_render_position = Some(self.predicted_position());
-        self.warp_visual_speed_cap = Some(visual_speed_cap);
+        self.warp_server_speed_cap = Some(server_speed_cap);
         true
     }
 
@@ -228,7 +229,7 @@ impl MotionPredictor {
         self.render_correction = [0.0; 3];
         self.has_rendered = false;
         self.warp_render_position = None;
-        self.warp_visual_speed_cap = None;
+        self.warp_server_speed_cap = None;
         true
     }
 
@@ -320,7 +321,7 @@ impl MotionPredictor {
             let speed = magnitude(self.velocity);
             if speed > VECTOR_EPSILON {
                 let direction = scale(self.velocity, 1.0 / speed);
-                let cap = self.warp_visual_speed_cap.unwrap_or(speed);
+                let cap = self.warp_server_speed_cap.unwrap_or(speed);
                 let render_position = self
                     .warp_render_position
                     .unwrap_or_else(|| self.predicted_position());
@@ -371,7 +372,7 @@ impl MotionPredictor {
         self.render_correction = [0.0; 3];
         self.has_rendered = false;
         self.warp_render_position = None;
-        self.warp_visual_speed_cap = None;
+        self.warp_server_speed_cap = None;
     }
 
     /// Shift the motion track when the Godot floating origin moves.

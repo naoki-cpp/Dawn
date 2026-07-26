@@ -554,12 +554,12 @@ func _handle_position_snap(p: Dictionary) -> void:
 	else:
 		(_ships[ship_id] as Node3D).call(
 			"reset_motion",
-			_world.to_godot_components(server_pos[0], server_pos[1], server_pos[2]),
+			server_pos,
 			Vector3.ZERO,
 			_current_tick)
 	var ship := _ships[ship_id] as Node3D
 	if ship_id == _player_ship_id:
-		ship.call("reset_motion", _ship_position(ship), Vector3.ZERO, _current_tick)
+		ship.call("reset_motion", server_pos, Vector3.ZERO, _current_tick)
 
 ## Docking is authoritative server state. The server stops the ship
 ## immediately, but without an explicit client event the ship_controller keeps
@@ -577,14 +577,14 @@ func _handle_ship_docked(p: Dictionary) -> void:
 		if tick < latest_tick:
 			return
 	var ship := _ships[ship_id] as Node3D
-	var dock_pos := _ship_position(ship)
+	var dock_pos: PackedFloat64Array = ship.call("server_position") as PackedFloat64Array
 	var station_name := _station_name(station_id)
 	for entry: Variant in _stations:
 		var station: Dictionary = entry as Dictionary
 		if (station.get("station_id", -1) as int) != station_id:
 			continue
 		var station_pos := _position_components(station.get("position", PackedFloat64Array()))
-		dock_pos = _server_components_to_godot(station_pos)
+		dock_pos = station_pos
 		station_name = station.get("name", "") as String
 		break
 	var motion_accepted: bool = ship.call("dock_motion", dock_pos, tick) as bool
@@ -605,7 +605,7 @@ func _handle_ship_undocked(p: Dictionary) -> void:
 		var ship := _ships[ship_id] as Node3D
 		var motion_accepted: bool = ship.call(
 			"undock_motion",
-			_ship_position(ship),
+			ship.call("server_position"),
 			Vector3.ZERO,
 			tick) as bool
 		if not motion_accepted:
@@ -628,9 +628,9 @@ func _handle_jump_gate_used(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	if not _ships.has(ship_id):
 		return
-	var entry_pos: Vector3 = _vec3_from_dict(p, "entry_pos")
+	var entry_pos := _position_components_from_dict(p, "entry_pos")
 	var tick: int = p.get("tick", _current_tick) as int
-	(_ships[ship_id] as Node3D).call("update_target", _world.to_godot(entry_pos), tick)
+	(_ships[ship_id] as Node3D).call("update_target", entry_pos, tick)
 	if ship_id == _player_ship_id:
 		_jump_notice       = "Jumped via Gate #%d" % (p.get("gate_id", 0) as int)
 		_jump_notice_timer = 3.0
@@ -716,15 +716,12 @@ func _ingest_star_map(state: Dictionary) -> void:
 		Callable(_interaction, "clear_navigation_selection")
 	)
 
-## Instantiate a ship scene at `pos` (server-space) and return the node.
+## Instantiate a ship scene at an absolute server-space position.
 ## WorldSession owns registry insertion; main.gd only creates the scene node.
-func _instantiate_ship(sid: int, pos: Vector3) -> Node3D:
-	return _instantiate_ship_at_godot(sid, _world.to_godot(pos))
-
-func _instantiate_ship_at_godot(sid: int, godot_pos: Vector3) -> Node3D:
+func _instantiate_ship(sid: int, server_pos: PackedFloat64Array) -> Node3D:
 	var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
 	_ships_root.add_child(ship)
-	ship.call("initialize", sid, godot_pos)
+	ship.call("initialize", sid, server_pos, _world.origin_components())
 	ship.name = "Ship_%d" % sid
 	return ship
 
@@ -735,13 +732,13 @@ func _spawn_ship_from_data(d: Dictionary) -> void:
 	if _ships.has(sid):
 		return
 	var server_pos := _position_components_from_dict(d, "position")
-	var ship: Node3D = _instantiate_ship_at_godot(sid, _world.to_godot_components(
-		server_pos[0], server_pos[1], server_pos[2]))
+	var ship: Node3D = _instantiate_ship(sid, server_pos)
 	ship.call(
 		"configure_motion",
 		d.get("max_speed", 500.0) as float,
 		d.get("mass", 10_000_000.0) as float,
 		d.get("inertia_modifier", 0.3) as float,
+		server_pos,
 		_velocity_from_dict(d),
 		_current_tick)
 	var result: Dictionary = _session.register_ship(
@@ -821,7 +818,7 @@ func _apply_loadout_side_effects() -> void:
 	if _session.is_docked() and _player_ship_id >= 0:
 		var docked_ship := _ships.get(_player_ship_id) as Node3D
 		if docked_ship != null:
-			docked_ship.call("dock_motion", _ship_position(docked_ship), _loadout.tick())
+			docked_ship.call("dock_motion", docked_ship.call("server_position"), _loadout.tick())
 	var snapshot: Dictionary = _loadout.hud_snapshot()
 	_hud_surface.set_player_fitting(
 		snapshot.get("modules", []) as Array,
@@ -1091,7 +1088,9 @@ func _handle_ship_spawned(p: Dictionary) -> void:
 	if _ships.has(ship_id):
 		return
 
-	var ship: Node3D = _instantiate_ship(ship_id, _vec3_from_dict(p, "position"))
+	var ship: Node3D = _instantiate_ship(
+		ship_id,
+		_position_components_from_dict(p, "position"))
 	var result: Dictionary = _session.register_ship(
 		ship_id, JSON.stringify(p), _connection.ship_id)
 	_ships[ship_id] = ship
@@ -1126,10 +1125,7 @@ func _handle_motion_correction(p: Dictionary) -> void:
 	var server_pos := _position_components_from_dict(p, "position")
 	(_ships[ship_id] as Node3D).call(
 		"reconcile_motion",
-		_world.to_godot_components(
-			server_pos[0],
-			server_pos[1],
-			server_pos[2]),
+		server_pos,
 		_velocity_from_dict(p),
 		tick)
 

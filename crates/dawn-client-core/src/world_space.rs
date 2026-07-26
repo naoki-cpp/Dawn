@@ -28,6 +28,11 @@ impl WorldSpace {
         Self { origin: [0.0; 3] }
     }
 
+    /// Returns the current floating origin in absolute server-space metres.
+    pub fn origin(&self) -> [f64; 3] {
+        self.origin
+    }
+
     /// Converts an absolute server position to origin-relative render units.
     pub fn server_to_render(&self, server_position: [f64; 3]) -> [f64; 3] {
         [
@@ -62,6 +67,11 @@ impl WorldSpace {
             render_direction[1] / WORLD_SCALE,
             -render_direction[2] / WORLD_SCALE,
         ]
+    }
+
+    /// Converts a non-negative render-space speed to server-space units.
+    pub fn render_speed_to_server(&self, render_speed: f64) -> Option<f64> {
+        (render_speed.is_finite() && render_speed >= 0.0).then_some(render_speed / WORLD_SCALE)
     }
 
     /// Returns whether a player position is far enough from the origin to rebase.
@@ -155,6 +165,15 @@ mod tests {
     }
 
     #[test]
+    fn exposes_the_current_origin_for_new_render_tracks() {
+        let mut world = WorldSpace::new();
+        let origin = [5.0 * AU_M, -2.0, 3.0];
+        world.rebase_to(origin);
+
+        assert_eq!(world.origin(), origin);
+    }
+
+    #[test]
     fn distance_preserves_large_absolute_coordinate_offsets() {
         let first = [5.0 * AU_M + 10.0, 0.0, 0.0];
         let second = [5.0 * AU_M + 30.0, 0.0, 0.0];
@@ -173,5 +192,14 @@ mod tests {
             world.render_direction_to_server(render_direction),
             server_direction
         );
+    }
+
+    #[test]
+    fn converts_render_speed_caps_to_server_units() {
+        let world = WorldSpace::new();
+
+        assert_eq!(world.render_speed_to_server(2_000.0), Some(20_000.0));
+        assert_eq!(world.render_speed_to_server(-1.0), None);
+        assert_eq!(world.render_speed_to_server(f64::NAN), None);
     }
 }

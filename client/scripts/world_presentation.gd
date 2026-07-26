@@ -84,12 +84,13 @@ func respawn_navigation_markers(
 		_bodies_root, stations, _world_scale, server_components_to_godot)
 
 
-func apply_origin_rebase(new_origin: Vector3, keep_player_fixed: bool, player_ship_id: int, ships: Dictionary) -> void:
-	apply_origin_rebase_components(
-		PackedFloat64Array([new_origin.x, new_origin.y, new_origin.z]),
-		keep_player_fixed,
-		player_ship_id,
-		ships)
+func apply_origin_rebase(
+	new_origin: PackedFloat64Array,
+	keep_player_fixed: bool,
+	player_ship_id: int,
+	ships: Dictionary
+) -> void:
+	apply_origin_rebase_components(new_origin, keep_player_fixed, player_ship_id, ships)
 
 
 func apply_origin_rebase_components(
@@ -108,11 +109,12 @@ func apply_origin_rebase_components(
 		## while the production WorldSpace owns the f64-safe implementation.
 		shift = _world.rebase_to(Vector3(new_origin[0], new_origin[1], new_origin[2]))
 	for id: int in ships:
-		if keep_player_fixed and id == player_ship_id:
-			continue
 		var ship := ships[id] as Node3D
 		if ship.has_method("apply_origin_rebase"):
-			ship.call("apply_origin_rebase", shift)
+			## Every track must adopt the same absolute origin, including the
+			## player track. The new render frame keeps the player fixed when the
+			## caller selected keep_player_fixed.
+			ship.call("apply_origin_rebase", new_origin)
 	if not keep_player_fixed and _camera != null:
 		_camera.global_position += shift
 		_camera.call("on_origin_rebased", shift)
@@ -251,8 +253,10 @@ func _update_warp_tunnel_effect(delta: float, player_ship_id: int, ships: Dictio
 func _maybe_rebase_origin(player_ship_id: int, ships: Dictionary) -> void:
 	if _world == null or player_ship_id < 0 or not ships.has(player_ship_id):
 		return
-	var player_server: PackedFloat64Array = _world.to_server_components(
-		(ships[player_ship_id] as Node3D).global_position)
+	var player_ship := ships[player_ship_id] as Node3D
+	if not player_ship.has_method("server_position"):
+		return
+	var player_server: PackedFloat64Array = player_ship.call("server_position") as PackedFloat64Array
 	if not _world.should_rebase_components(player_server[0], player_server[1], player_server[2]):
 		return
 	apply_origin_rebase_components(player_server, false, player_ship_id, ships)
