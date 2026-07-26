@@ -263,18 +263,22 @@ Future: when the command queue supports it, multiple Commands targeting the
 
 ### Client motion-track ordering (ADR-0043 / ADR-0045)
 
-The client passes every `VelocityChanged.tick` to the ship's Rust motion track.
-Because `VelocityChanged` contains velocity but no position, applying it updates
-the track's authority-tick watermark and future integration velocity without
-rewinding the already-rendered position or presentation tick. The owner then
-reconciles the authoritative position through `MotionCorrection` at the same
-logical tick. A velocity event older than the watermark is ignored.
+The client passes every `VelocityChanged.tick` to
+`dawn-client-core::ShipMotion` as a `MotionCommand`. Because `VelocityChanged`
+contains velocity but no position, applying it updates the track's
+authority-tick watermark and future integration velocity without rewinding the
+already-rendered position or presentation tick. The owner then reconciles the
+authoritative position through `MotionCorrection` at the same logical tick. A
+velocity event older than the watermark is ignored.
 
 Docked tracks reject velocity updates and remain at zero velocity until an
 authoritative undock transition. Normal-frame position application,
-`PositionSnap`, dock/undock resets, and floating-origin rebase all use the
-`ShipController` adapter's single Node3D position writer; `main.gd` and
-`WorldPresentation` do not write ship positions directly.
+`PositionSnap`, dock/undock resets, and floating-origin rebase all dispatch
+through the same `ShipMotion` surface and use the `ShipController` adapter's
+single Node3D position writer. `MotionFrame` keeps authoritative and predicted
+server positions separate; only its origin-relative render position is narrowed
+to Godot `Vector3`. `main.gd` and `WorldPresentation` do not write ship
+positions directly.
 
 ---
 

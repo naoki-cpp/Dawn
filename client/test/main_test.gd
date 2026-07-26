@@ -29,6 +29,7 @@ class FakeShip:
 	var reconcile_calls: Array[Dictionary] = []
 	var dock_calls: Array[Dictionary] = []
 	var undock_calls: Array[Dictionary] = []
+	var server_position_value := PackedFloat64Array([0.0, 0.0, 0.0])
 
 	func set_velocity(v: Vector3, tick: int = 0) -> bool:
 		velocity_calls.append(v)
@@ -52,29 +53,32 @@ class FakeShip:
 	func set_braking() -> void:
 		thrust_calls.append(Vector3.ZERO)
 
-	func reset_motion(p: Vector3, v: Vector3, _tick: int) -> void:
-		position = p
+	func reset_motion(p: PackedFloat64Array, v: Vector3, _tick: int) -> void:
+		server_position_value = p
 		velocity_calls.append(v)
 		thrust_calls.append(Vector3.ZERO)
 
-	func dock_motion(p: Vector3, _tick: int) -> bool:
-		position = p
+	func dock_motion(p: PackedFloat64Array, _tick: int) -> bool:
+		server_position_value = p
 		velocity_calls.append(Vector3.ZERO)
 		thrust_calls.append(Vector3.ZERO)
 		dock_calls.append({"position": p, "tick": _tick})
 		return true
 
-	func undock_motion(p: Vector3, v: Vector3, _tick: int) -> bool:
-		position = p
+	func undock_motion(p: PackedFloat64Array, v: Vector3, _tick: int) -> bool:
+		server_position_value = p
 		velocity_calls.append(v)
 		thrust_calls.append(Vector3.ZERO)
 		undock_calls.append({"position": p, "velocity": v, "tick": _tick})
 		return true
 
-	func reconcile_motion(p: Vector3, v: Vector3, _tick: int) -> void:
-		position = p
+	func reconcile_motion(p: PackedFloat64Array, v: Vector3, _tick: int) -> void:
+		server_position_value = p
 		velocity_calls.append(v)
 		reconcile_calls.append({"position": p, "velocity": v, "tick": _tick})
+
+	func server_position() -> PackedFloat64Array:
+		return server_position_value
 
 
 class FakeConnection:
@@ -214,7 +218,7 @@ func test_observed_ship_position_snap_clears_residual_warp_motion() -> void:
 		"position": {"x": 100.0, "y": 20.0, "z": 300.0},
 	})
 
-	assert_vector(ship.position).is_equal_approx(Vector3(10.0, 2.0, -30.0), Vector3(0.0001, 0.0001, 0.0001))
+	assert_array(ship.server_position_value).contains_exactly([100.0, 20.0, 300.0])
 	assert_vector(ship.velocity_calls.back()).is_equal(Vector3.ZERO)
 	assert_vector(ship.thrust_calls.back()).is_equal(Vector3.ZERO)
 	ship.free()
@@ -240,10 +244,9 @@ func test_ship_docked_event_clears_residual_motion() -> void:
 
 	## FakeShip is not attached to a live SceneTree here, so `position` is the
 	## stable seam for verifying the dock snap.
-	assert_vector(ship.position).is_equal_approx(
-		Vector3(1.0, 2.0, -30.0),
-		Vector3(0.0001, 0.0001, 0.0001)
-	)
+	assert_array(ship.server_position_value).contains_exactly([
+		5.0 * AU_M + 10.0, 20.0, 300.0,
+	])
 	assert_vector(ship.velocity_calls.back()).is_equal(Vector3.ZERO)
 	assert_vector(ship.thrust_calls.back()).is_equal(Vector3.ZERO)
 	ship.free()
@@ -252,7 +255,7 @@ func test_ship_docked_event_clears_residual_motion() -> void:
 func test_ship_docked_event_stops_ship_when_station_map_is_not_ready() -> void:
 	var ship := FakeShip.new()
 	_main.add_child(ship)
-	ship.position = Vector3(9.0, 8.0, 7.0)
+	ship.server_position_value = PackedFloat64Array([9.0, 8.0, 7.0])
 	_main._ships = {2: ship}
 	_main._stations = []
 
@@ -263,7 +266,7 @@ func test_ship_docked_event_stops_ship_when_station_map_is_not_ready() -> void:
 	})
 
 	assert_int(ship.dock_calls.size()).is_equal(1)
-	assert_vector(ship.dock_calls[0]["position"]).is_equal(Vector3(9.0, 8.0, 7.0))
+	assert_array(ship.dock_calls[0]["position"]).contains_exactly([9.0, 8.0, 7.0])
 	assert_vector(ship.velocity_calls.back()).is_equal(Vector3.ZERO)
 	ship.free()
 
@@ -347,7 +350,7 @@ func test_motion_correction_reconciles_the_active_ship() -> void:
 
 	assert_int(ship.reconcile_calls.size()).is_equal(1)
 	var motion_call: Dictionary = ship.reconcile_calls.back()
-	assert_vector(motion_call["position"]).is_equal(Vector3(10.0, 2.0, -30.0))
+	assert_array(motion_call["position"]).contains_exactly([100.0, 20.0, 300.0])
 	assert_vector(motion_call["velocity"]).is_equal(Vector3(4.0, 5.0, -6.0))
 	assert_int(motion_call["tick"]).is_equal(42)
 	ship.free()
@@ -383,8 +386,9 @@ func test_motion_correction_preserves_small_motion_near_a_true_au_origin() -> vo
 	})
 
 	var motion_call: Dictionary = ship.reconcile_calls.back()
-	assert_vector(motion_call["position"]).is_equal_approx(
-		Vector3(1.0, 0.0, 0.0), Vector3(0.0001, 0.0001, 0.0001))
+	assert_array(motion_call["position"]).contains_exactly([
+		5.0 * AU_M + 10.0, 0.0, 0.0,
+	])
 	ship.free()
 
 

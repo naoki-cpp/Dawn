@@ -36,6 +36,13 @@ date     : 2026-07-10
 `client/scripts/world_space.gd` は削除し、GDScript側にはNode3Dの配置と原点リベース時のシーンツリー更新だけを残した。
 Rust単体テスト33件と `world_space_test.gd` のGdUnit4 6件（6/6）で、true-AU近傍の精度・相互変換・リベース連続性を確認した。
 
+### 2026-07-26: client ship-motion / coordinate policy seam を深掘り
+
+`dawn-client-core::ShipMotion` を追加し、`MotionPredictor` と `WorldSpace` の順序制御を
+`MotionCommand` → `MotionFrame` に集約した。絶対位置は `PackedFloat64Array` でRustへ渡し、
+Godot側はrender frameのNode3D適用だけを担当する。Rustのclient-coreテスト44件と
+GDExtension buildを確認し、Godotの手動Prediction / dock / warp確認はPhase 10-5へ残した。
+
 C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` / `HudManager`）と
 追加の deep modules（`WorldSession` / `HudSurface`）はいずれも GdUnit4 テスト付き。
 各規模は client.md の「ファイルサイズ一覧」を参照。

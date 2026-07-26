@@ -23,14 +23,13 @@ class FakeWorld:
 class FakeShip:
 	extends Node3D
 
-	var motion_rebase_calls: Array[Vector3] = []
+	var motion_rebase_calls: Array[PackedFloat64Array] = []
 
-	func rebase_motion(shift: Vector3) -> void:
-		motion_rebase_calls.append(shift)
+	func rebase_motion(new_origin: PackedFloat64Array) -> void:
+		motion_rebase_calls.append(new_origin)
 
-	func apply_origin_rebase(shift: Vector3) -> void:
-		position += shift
-		rebase_motion(shift)
+	func apply_origin_rebase(new_origin: PackedFloat64Array) -> void:
+		rebase_motion(new_origin)
 
 
 func test_clamped_marker_position_leaves_nearby_marker_unchanged() -> void:
@@ -94,11 +93,11 @@ func test_origin_rebase_moves_ship_and_motion_track_together() -> void:
 	presentation._world = world
 
 	var ship := FakeShip.new()
-	ship.position = Vector3(10.0, 20.0, 30.0)
-	presentation.apply_origin_rebase(Vector3.ZERO, false, -1, {7: ship})
+	presentation.apply_origin_rebase(
+		PackedFloat64Array([100.0, 2.0, -3.0]), false, -1, {7: ship})
 
-	assert_vector(ship.position).is_equal(Vector3(110.0, 22.0, 27.0))
+	assert_array(ship.motion_rebase_calls[0]).contains_exactly([100.0, 2.0, -3.0])
 	assert_array(ship.motion_rebase_calls).contains_exactly([
-		Vector3(100.0, 2.0, -3.0),
+		PackedFloat64Array([100.0, 2.0, -3.0]),
 	])
 	ship.free()

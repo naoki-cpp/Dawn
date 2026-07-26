@@ -36,6 +36,7 @@ mod item_row;
 mod loadout;
 mod module_row;
 mod motion;
+mod ship_motion;
 mod world_session;
 mod world_space;
 
@@ -46,6 +47,7 @@ pub use loadout::{
 };
 pub use module_row::{ModuleKind, ModuleRow, StatDelta};
 pub use motion::{MotionInput, MotionPredictor, MotionProfile, MotionState};
+pub use ship_motion::{MotionCommand, MotionDispatch, MotionFrame, ShipMotion};
 pub use world_session::{
     BuildableShipTypeInput, BuildableShipTypeRecord, CelestialBodyInput, CelestialBodyRecord,
     DestructionOutcome, GateInput, GateRecord, HealthEventInput, HealthEventOutcome, HealthState,

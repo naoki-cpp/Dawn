@@ -28,6 +28,11 @@ impl WorldSpace {
         Self { origin: [0.0; 3] }
     }
 
+    /// Returns the current floating origin in absolute server-space metres.
+    pub fn origin(&self) -> [f64; 3] {
+        self.origin
+    }
+
     /// Converts an absolute server position to origin-relative render units.
     pub fn server_to_render(&self, server_position: [f64; 3]) -> [f64; 3] {
         [
@@ -152,6 +157,15 @@ mod tests {
 
         assert!(!world.should_rebase([REBASE_THRESHOLD / 2.0, 0.0, 0.0]));
         assert!(world.should_rebase([REBASE_THRESHOLD * 2.0, 0.0, 0.0]));
+    }
+
+    #[test]
+    fn exposes_the_current_origin_for_new_render_tracks() {
+        let mut world = WorldSpace::new();
+        let origin = [5.0 * AU_M, -2.0, 3.0];
+        world.rebase_to(origin);
+
+        assert_eq!(world.origin(), origin);
     }
 
     #[test]
