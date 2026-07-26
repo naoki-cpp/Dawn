@@ -5,7 +5,7 @@ description: Pre-change checklist for Dawn code changes -- crate boundaries, arc
 
 # ai-change-checklist
 
-Canonical procedure: [`.claude/commands/ai-change-checklist.md`](../../../.claude/commands/ai-change-checklist.md)
+Canonical procedure: [`.agents/commands/ai-change-checklist.md`](../../commands/ai-change-checklist.md)
 in this repo.
 
 Read that file and follow it exactly -- this file only carries the

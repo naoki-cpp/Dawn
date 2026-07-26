@@ -5,7 +5,7 @@ description: Audit changed pub items in Dawn's Rust crates against the Rust API 
 
 # rust-api-audit
 
-Canonical procedure: [`.claude/commands/rust-api-audit.md`](../../../.claude/commands/rust-api-audit.md)
+Canonical procedure: [`.agents/commands/rust-api-audit.md`](../../commands/rust-api-audit.md)
 in this repo.
 
 Read that file and follow it exactly -- this file only carries the

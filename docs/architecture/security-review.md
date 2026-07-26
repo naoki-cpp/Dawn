@@ -2,9 +2,9 @@
 scope    : Dawnサーバーの信頼できない入力経路のセキュリティレビュー（OWASP準拠）— 未解消のfinding・検証済み健全項目
 audience : AI Agent / Human Developer
 update   : /security-check で状態が変わるたびに更新
-related  : .claude/skills/security-check/SKILL.md,
-           .claude/skills/security-check/references/owasp-map.md,
-           .claude/skills/security-check/references/baseline.md（初回レビューの凍結記録）,
+related  : .agents/skills/security-check/SKILL.md,
+           .agents/skills/security-check/references/owasp-map.md,
+           .agents/skills/security-check/references/baseline.md（初回レビューの凍結記録）,
            docs/architecture/security-review-completed.md（解消済みfindingの作業ログ）
 date     : 2026-07-17
 ---
@@ -51,7 +51,7 @@ queue/snapshot上限は健全。既存のSEC-1/SEC-2保留findingは変更なし
 
 全5クエリが`params![]`によるパラメータ化済み。テーブル/カラム名はクライアント入力から
 導出されない（`item_id_to_columns`は`ItemId` enumへの閉じたmatch）。詳細は
-[baseline.md](../../.claude/skills/security-check/references/baseline.md)参照。
+[baseline.md](../../.agents/skills/security-check/references/baseline.md)参照。
 
 ### A03 非SQLインジェクション
 

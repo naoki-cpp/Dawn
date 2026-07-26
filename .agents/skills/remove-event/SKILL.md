@@ -5,7 +5,7 @@ description: Fully delete a deprecated DomainEvent variant from Dawn's codebase,
 
 # remove-event
 
-Canonical procedure: [`.claude/commands/remove-event.md`](../../../.claude/commands/remove-event.md)
+Canonical procedure: [`.agents/commands/remove-event.md`](../../commands/remove-event.md)
 in this repo.
 
 Read that file and follow it exactly -- this file only carries the

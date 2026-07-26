@@ -327,13 +327,19 @@ Use this guide as the router, then read the relevant long-form doc:
 
 This repo uses Matt Pocock's engineering skills configuration:
 
+- pinned upstream skill source: `.agents/vendor/mattpocock-skills/`
+- Dawn-specific procedures: `.agents/commands/`
+- Claude Code compatibility shims: `.claude/commands/` and `.claude/settings.json`
+- skill source and initialization: `docs/agents/skill-source.md`
 - issue tracker: `docs/agents/issue-tracker.md`
 - triage labels: `docs/agents/triage-labels.md`
 - domain docs layout: `docs/agents/domain.md`
 
-When a skill applies, use it. Keep this file short; add detailed project memory
-to the correct doc instead of expanding this guide.
+When a skill applies, use the pinned source or the Dawn-specific adapter named
+in `AGENTS.md`; do not assume the skill is installed globally. Keep this file
+short; add detailed project memory to the correct doc instead of expanding
+this guide.
 
 ---
 
-Last updated: 2026-07-24 / Covers ADR-0001 through ADR-0046
+Last updated: 2026-07-26 / Covers ADR-0001 through ADR-0046

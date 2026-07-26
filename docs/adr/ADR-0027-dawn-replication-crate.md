@@ -7,7 +7,7 @@ deciders: [human, ai-agent]
 related : ADR-0001（Event Sourcing）, ADR-0002（Actor）, ADR-0017（Snapshot / Compaction）,
           ADR-0021（Sector-local 複製戦略・追記ログのゴシップ配布）, ADR-0026（dawn-sector）,
           AI_DEVELOPMENT_GUIDE.md「Crate Boundaries」（Dependency DAG / Crate 別責務早見表）,
-          .claude/commands/ai-change-checklist.md（新クレート手順）
+          .agents/commands/ai-change-checklist.md（新クレート手順）
 ---
 
 # ADR-0027 — dawn-replication クレートの新設

@@ -5,7 +5,7 @@ description: Detect and fix drift between Dawn's documentation and its implement
 
 # doc-sync
 
-Canonical procedure: [`.claude/commands/doc-sync.md`](../../../.claude/commands/doc-sync.md)
+Canonical procedure: [`.agents/commands/doc-sync.md`](../../commands/doc-sync.md)
 in this repo.
 
 Read that file and follow it exactly -- this file only carries the
