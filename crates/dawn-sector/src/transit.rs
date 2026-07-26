@@ -11,17 +11,12 @@
 //!   and appends `SectorTransitCompleted`. Other nodes ignore it.
 
 use crate::node::SimulationNode;
-use crate::persistence::{
-    snapshot::{PreviousPositionF32, PreviousShipSnapshotF32},
-    ShipSnapshot,
-};
+use crate::persistence::ShipSnapshot;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-
-const TRANSIT_MAGIC: &[u8; 8] = b"DAWNTRN2";
 
 /// A Sector Transit proposal as it travels through the Raft Log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,81 +48,18 @@ pub enum TransitOp {
     },
 }
 
-/// Previous-main transit payload. Postcard is positional, so decoding the
-/// f32 spatial fields requires a matching previous-release enum.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum PreviousTransitOpF32 {
-    Request {
-        ship_id: ShipId,
-        to: SectorId,
-        gate_id: Option<JumpGateId>,
-    },
-    Commit {
-        ship: Box<PreviousShipSnapshotF32>,
-        from: SectorId,
-        to: SectorId,
-        entry_pos: PreviousPositionF32,
-        entry_pos_abs: [f64; 3],
-        gate_id: Option<JumpGateId>,
-    },
-}
-
-impl From<PreviousTransitOpF32> for TransitOp {
-    fn from(previous: PreviousTransitOpF32) -> Self {
-        match previous {
-            PreviousTransitOpF32::Request {
-                ship_id,
-                to,
-                gate_id,
-            } => Self::Request {
-                ship_id,
-                to,
-                gate_id,
-            },
-            PreviousTransitOpF32::Commit {
-                ship,
-                from,
-                to,
-                entry_pos,
-                entry_pos_abs,
-                gate_id,
-            } => Self::Commit {
-                ship: Box::new((*ship).into()),
-                from,
-                to,
-                entry_pos: entry_pos.into(),
-                entry_pos_abs: entry_pos_abs.into(),
-                gate_id,
-            },
-        }
-    }
-}
-
 impl TransitOp {
     /// Serialize for a Raft `LogEntry` payload.
     pub fn encode(&self) -> Vec<u8> {
-        let payload = postcard::to_stdvec(self).expect("TransitOp serialization cannot fail");
-        let mut bytes = Vec::with_capacity(TRANSIT_MAGIC.len() + payload.len());
-        bytes.extend_from_slice(TRANSIT_MAGIC);
-        bytes.extend_from_slice(&payload);
-        bytes
+        postcard::to_stdvec(self).expect("TransitOp serialization cannot fail")
     }
 
     /// Deserialize from a committed Raft `LogEntry` payload.
     ///
-    /// Current payloads are identified by `TRANSIT_MAGIC`. The unversioned
-    /// fallback is retained only for direct previous-main payloads.
     /// Returns `None` for payloads that are not a `TransitOp` (future proposal
     /// types share the same log).
     pub fn decode(payload: &[u8]) -> Option<Self> {
-        if let Some(payload) = payload.strip_prefix(TRANSIT_MAGIC) {
-            return postcard::from_bytes(payload).ok();
-        }
-
-        postcard::from_bytes::<PreviousTransitOpF32>(payload)
-            .ok()
-            .map(Into::into)
-            .or_else(|| postcard::from_bytes(payload).ok())
+        postcard::from_bytes(payload).ok()
     }
 }
 
@@ -403,9 +335,7 @@ mod tests {
             to: SectorId(1),
             gate_id: None,
         };
-        let encoded = op.encode();
-        assert!(encoded.starts_with(TRANSIT_MAGIC));
-        let decoded = TransitOp::decode(&encoded).expect("decode must succeed");
+        let decoded = TransitOp::decode(&op.encode()).expect("decode must succeed");
         match decoded {
             TransitOp::Request {
                 ship_id,
@@ -486,49 +416,5 @@ mod tests {
     #[test]
     fn decode_returns_none_for_garbage_payload() {
         assert!(TransitOp::decode(&[0xFF, 0xFE, 0xFD]).is_none());
-    }
-
-    #[test]
-    fn previous_main_commit_payload_decodes_with_absolute_position() {
-        let previous = PreviousTransitOpF32::Commit {
-            ship: Box::new(PreviousShipSnapshotF32 {
-                ship_id: ShipId::new(NodeId(0), 7),
-                ship_type_id: ShipTypeId(1),
-                absolute_position: Some(AbsolutePosition::new(100.0, 200.0, 300.0)),
-                position: Position::new(1.0, 2.0, 3.0).into(),
-                anchor: dawn_core::AnchorId(0),
-                velocity: Velocity::new(4.0, 5.0, 6.0).into(),
-                current_shield: 10.0,
-                current_armor: 20.0,
-                current_hull: 30.0,
-                is_destroyed: false,
-                capacitor: Some(50.0),
-                fitting: FittingSnapshot::empty(),
-                tackled_by: vec![],
-                inventory: std::collections::BTreeMap::new(),
-            }),
-            from: SectorId(0),
-            to: SectorId(1),
-            entry_pos: Position::new(500.0, 0.0, 0.0).into(),
-            entry_pos_abs: [500.0, 0.0, 0.0],
-            gate_id: None,
-        };
-        let decoded = TransitOp::decode(&postcard::to_stdvec(&previous).unwrap()).unwrap();
-
-        match decoded {
-            TransitOp::Commit {
-                ship,
-                entry_pos_abs,
-                ..
-            } => {
-                assert_eq!(ship.ship_id, ShipId::new(NodeId(0), 7));
-                assert_eq!(
-                    ship.absolute_position,
-                    Some(AbsolutePosition::new(100.0, 200.0, 300.0))
-                );
-                assert_eq!(entry_pos_abs, AbsolutePosition::new(500.0, 0.0, 0.0));
-            }
-            other => panic!("expected Commit, got {other:?}"),
-        }
     }
 }

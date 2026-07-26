@@ -36,8 +36,6 @@ use dawn_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-const SNAPSHOT_MAGIC: &[u8; 8] = b"DAWNSNP2";
-
 // ── Ship-level snapshot ───────────────────────────────────────────────────────
 
 /// State of a single Ship at the time of the snapshot.
@@ -84,123 +82,6 @@ pub struct ShipSnapshot {
     pub inventory: std::collections::BTreeMap<dawn_core::ItemId, u64>,
 }
 
-/// Fixed previous-release spatial shapes. These must not refer to the current
-/// `Position`/`Velocity` types because postcard is positional.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PreviousPositionF32 {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-impl From<PreviousPositionF32> for Position {
-    fn from(value: PreviousPositionF32) -> Self {
-        Self::new(f64::from(value.x), f64::from(value.y), f64::from(value.z))
-    }
-}
-
-impl From<Position> for PreviousPositionF32 {
-    fn from(value: Position) -> Self {
-        Self {
-            x: value.x as f32,
-            y: value.y as f32,
-            z: value.z as f32,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PreviousVelocityF32 {
-    pub dx: f32,
-    pub dy: f32,
-    pub dz: f32,
-}
-
-impl From<PreviousVelocityF32> for Velocity {
-    fn from(value: PreviousVelocityF32) -> Self {
-        Self::new(
-            f64::from(value.dx),
-            f64::from(value.dy),
-            f64::from(value.dz),
-        )
-    }
-}
-
-impl From<Velocity> for PreviousVelocityF32 {
-    fn from(value: Velocity) -> Self {
-        Self {
-            dx: value.dx as f32,
-            dy: value.dy as f32,
-            dz: value.dz as f32,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PreviousSectorBoundsF32 {
-    pub min: PreviousPositionF32,
-    pub max: PreviousPositionF32,
-}
-
-impl From<PreviousSectorBoundsF32> for SectorBounds {
-    fn from(value: PreviousSectorBoundsF32) -> Self {
-        Self {
-            min: value.min.into(),
-            max: value.max.into(),
-        }
-    }
-}
-
-impl From<SectorBounds> for PreviousSectorBoundsF32 {
-    fn from(value: SectorBounds) -> Self {
-        Self {
-            min: value.min.into(),
-            max: value.max.into(),
-        }
-    }
-}
-
-/// Previous-main snapshot shape. Postcard is positional, so the f32 spatial
-/// fields must be decoded explicitly rather than through current types.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PreviousShipSnapshotF32 {
-    pub ship_id: ShipId,
-    pub ship_type_id: ShipTypeId,
-    pub absolute_position: Option<AbsolutePosition>,
-    pub position: PreviousPositionF32,
-    pub anchor: dawn_core::AnchorId,
-    pub velocity: PreviousVelocityF32,
-    pub current_shield: f32,
-    pub current_armor: f32,
-    pub current_hull: f32,
-    pub is_destroyed: bool,
-    pub capacitor: Option<f32>,
-    pub fitting: FittingSnapshot,
-    pub tackled_by: Vec<dawn_core::ShipId>,
-    pub inventory: std::collections::BTreeMap<dawn_core::ItemId, u64>,
-}
-
-impl From<PreviousShipSnapshotF32> for ShipSnapshot {
-    fn from(previous: PreviousShipSnapshotF32) -> Self {
-        Self {
-            ship_id: previous.ship_id,
-            ship_type_id: previous.ship_type_id,
-            absolute_position: previous.absolute_position,
-            position: previous.position.into(),
-            anchor: previous.anchor,
-            velocity: previous.velocity.into(),
-            current_shield: previous.current_shield,
-            current_armor: previous.current_armor,
-            current_hull: previous.current_hull,
-            is_destroyed: previous.is_destroyed,
-            capacitor: previous.capacitor,
-            fitting: previous.fitting,
-            tackled_by: previous.tackled_by,
-            inventory: previous.inventory,
-        }
-    }
-}
-
 // ── Node-level snapshot ───────────────────────────────────────────────────────
 
 /// Complete state of a `SimulationNode` at a specific `log_index`.
@@ -238,67 +119,19 @@ pub struct StateSnapshot {
     pub docked_players: BTreeMap<dawn_core::PlayerId, dawn_core::StationId>,
 }
 
-/// Previous-main node snapshot shape. The node-level fields intentionally
-/// mirror `StateSnapshot` so only the spatial payload needs conversion.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct PreviousStateSnapshotF32 {
-    pub node_id: NodeId,
-    pub sector_id: SectorId,
-    pub bounds: PreviousSectorBoundsF32,
-    pub log_index: u64,
-    pub tick: Tick,
-    pub id_counter: u64,
-    pub ships: Vec<PreviousShipSnapshotF32>,
-    pub station_inventories: BTreeMap<dawn_core::PlayerId, BTreeMap<dawn_core::ItemId, u64>>,
-    pub docked_ships: BTreeMap<dawn_core::ShipId, dawn_core::StationId>,
-    pub docked_players: BTreeMap<dawn_core::PlayerId, dawn_core::StationId>,
-}
-
-impl From<PreviousStateSnapshotF32> for StateSnapshot {
-    fn from(previous: PreviousStateSnapshotF32) -> Self {
-        Self {
-            node_id: previous.node_id,
-            sector_id: previous.sector_id,
-            bounds: previous.bounds.into(),
-            log_index: previous.log_index,
-            tick: previous.tick,
-            id_counter: previous.id_counter,
-            ships: previous.ships.into_iter().map(Into::into).collect(),
-            station_inventories: previous.station_inventories,
-            docked_ships: previous.docked_ships,
-            docked_players: previous.docked_players,
-        }
-    }
-}
-
 impl StateSnapshot {
     /// Serialise with `postcard` and write to `path`.
     pub fn save(&self, path: impl AsRef<Path>) -> io::Result<()> {
-        let payload = postcard::to_stdvec(self).map_err(|e| io::Error::other(e.to_string()))?;
-        let mut bytes = Vec::with_capacity(SNAPSHOT_MAGIC.len() + payload.len());
-        bytes.extend_from_slice(SNAPSHOT_MAGIC);
-        bytes.extend_from_slice(&payload);
+        let bytes = postcard::to_stdvec(self).map_err(|e| io::Error::other(e.to_string()))?;
         fs::write(path, bytes)
     }
 
     /// Read from `path` and deserialise.
     pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
         let bytes = fs::read(path)?;
-        if let Some(payload) = bytes.strip_prefix(SNAPSHOT_MAGIC) {
-            return postcard::from_bytes(payload).map_err(|e| {
-                io::Error::new(io::ErrorKind::InvalidData, format!("current snapshot: {e}"))
-            });
-        }
-
-        match postcard::from_bytes::<PreviousStateSnapshotF32>(&bytes) {
-            Ok(snapshot) => Ok(snapshot.into()),
-            Err(legacy_err) => postcard::from_bytes::<StateSnapshot>(&bytes).map_err(|current_err| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("previous snapshot: {legacy_err}; unversioned current snapshot: {current_err}"),
-                )
-            }),
-        }
+        postcard::from_bytes(&bytes).map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("current snapshot: {e}"))
+        })
     }
 }
 
@@ -374,53 +207,5 @@ mod tests {
         assert_eq!(restored.log_index, original.log_index);
         assert_eq!(restored.tick, original.tick);
         assert_eq!(restored.id_counter, original.id_counter);
-    }
-
-    #[test]
-    fn previous_main_snapshot_loads_with_f64_spatial_projection() {
-        let original = sample_snapshot();
-        let previous = PreviousStateSnapshotF32 {
-            node_id: original.node_id,
-            sector_id: original.sector_id,
-            bounds: original.bounds.into(),
-            log_index: original.log_index,
-            tick: original.tick,
-            id_counter: original.id_counter,
-            ships: original
-                .ships
-                .iter()
-                .map(|ship| PreviousShipSnapshotF32 {
-                    ship_id: ship.ship_id,
-                    ship_type_id: ship.ship_type_id,
-                    absolute_position: ship.absolute_position,
-                    position: ship.position.into(),
-                    anchor: ship.anchor,
-                    velocity: ship.velocity.into(),
-                    current_shield: ship.current_shield,
-                    current_armor: ship.current_armor,
-                    current_hull: ship.current_hull,
-                    is_destroyed: ship.is_destroyed,
-                    capacitor: ship.capacitor,
-                    fitting: ship.fitting.clone(),
-                    tackled_by: ship.tackled_by.clone(),
-                    inventory: ship.inventory.clone(),
-                })
-                .collect(),
-            station_inventories: original.station_inventories.clone(),
-            docked_ships: original.docked_ships.clone(),
-            docked_players: original.docked_players.clone(),
-        };
-        let bytes = postcard::to_stdvec(&previous).unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("legacy.bin");
-        std::fs::write(&path, bytes).unwrap();
-
-        let restored = StateSnapshot::load(&path).unwrap();
-        assert_eq!(restored.ships[0].position, original.ships[0].position);
-        assert_eq!(
-            restored.ships[0].absolute_position,
-            original.ships[0].absolute_position
-        );
-        assert_eq!(restored.station_inventories, original.station_inventories);
     }
 }

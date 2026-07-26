@@ -9,7 +9,6 @@ publish.workspace     = true
 [dependencies]
 dawn-core = { path = "../dawn-core" }
 postcard  = { workspace = true }
-serde     = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
