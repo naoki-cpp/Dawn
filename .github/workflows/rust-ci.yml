@@ -125,13 +125,52 @@ jobs:
         with:
           baseline-rev: origin/main
 
+  godot:
+    name: Godot GdUnit4
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Godot test dependencies
+        run: sudo apt-get update && sudo apt-get install --yes unzip xvfb
+
+      - name: Restore GdUnit4 addon
+        id: gdunit-cache
+        uses: actions/cache@v4
+        with:
+          path: client/addons/gdUnit4
+          key: gdunit4-${{ hashFiles('.gdunit4-version') }}
+
+      - name: Install GdUnit4 addon
+        if: steps.gdunit-cache.outputs.cache-hit != 'true'
+        run: bash scripts/install-gdunit.sh
+
+      - name: Restore Godot editor
+        uses: actions/cache@v4
+        with:
+          path: .tools/godot
+          key: godot-${{ runner.os }}-${{ hashFiles('.godot-version') }}
+
+      - name: Build GDExtension
+        run: cargo build -p dawn-client-gdext
+
+      - name: Run GdUnit4 tests
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" bash scripts/setup-godot.sh --run-tests
+
   # Single required-status-check target for branch protection: succeeds only
   # if every job above succeeded, so protection rules don't need to list
   # lint/test/doc individually and stay correct as jobs are split further.
   ci-success:
     name: CI success
     runs-on: ubuntu-latest
-    needs: [lint, test, doc, deny, audit, machete, semver]
+    needs: [lint, test, doc, deny, audit, machete, semver, godot]
     if: always()
     steps:
       - name: Check all required jobs succeeded

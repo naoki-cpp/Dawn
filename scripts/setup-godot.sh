@@ -14,8 +14,20 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 version="$(tr -d '[:space:]' < "$repo_root/.godot-version")"
 install_dir="$repo_root/.tools/godot/$version"
-asset="Godot_v${version}_win64.exe.zip"
-exe_path="$install_dir/Godot_v${version}_win64.exe"
+case "$(uname -s)" in
+	Linux*)
+		asset="Godot_v${version}_linux.x86_64.zip"
+		exe_path="$install_dir/Godot_v${version}_linux.x86_64"
+		;;
+	Darwin*)
+		asset="Godot_v${version}_macos.universal.zip"
+		exe_path="$install_dir/Godot.app/Contents/MacOS/Godot"
+		;;
+	*)
+		asset="Godot_v${version}_win64.exe.zip"
+		exe_path="$install_dir/Godot_v${version}_win64.exe"
+		;;
+esac
 client_dir="$repo_root/client"
 gdunit_dir="$client_dir/addons/gdUnit4"
 run_tests=0
@@ -52,8 +64,8 @@ install_godot() {
 
 	base_url="https://github.com/godotengine/godot/releases/download/$version"
 	echo "Downloading $asset ($version) from godotengine/godot releases ..."
-	curl -sL "$base_url/$asset" -o "$tmp_dir/$asset"
-	curl -sL "$base_url/SHA512-SUMS.txt" -o "$tmp_dir/SHA512-SUMS.txt"
+	curl --fail --silent --show-error --location "$base_url/$asset" -o "$tmp_dir/$asset"
+	curl --fail --silent --show-error --location "$base_url/SHA512-SUMS.txt" -o "$tmp_dir/SHA512-SUMS.txt"
 
 	expected_sum="$(grep " $asset\$" "$tmp_dir/SHA512-SUMS.txt" | awk '{print $1}')"
 	if [ -z "$expected_sum" ]; then
@@ -61,7 +73,14 @@ install_godot() {
 		exit 1
 	fi
 
-	actual_sum="$(sha512sum "$tmp_dir/$asset" | awk '{print $1}')"
+	if command -v sha512sum >/dev/null 2>&1; then
+		actual_sum="$(sha512sum "$tmp_dir/$asset" | awk '{print $1}')"
+	elif command -v shasum >/dev/null 2>&1; then
+		actual_sum="$(shasum -a 512 "$tmp_dir/$asset" | awk '{print $1}')"
+	else
+		echo "Error: neither sha512sum nor shasum is available" >&2
+		exit 1
+	fi
 	if [ "$expected_sum" != "$actual_sum" ]; then
 		echo "Error: SHA512 mismatch for $asset" >&2
 		echo "  expected: $expected_sum" >&2
