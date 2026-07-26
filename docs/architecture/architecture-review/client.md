@@ -66,10 +66,10 @@ GdUnit4 テスト基盤の整備（`scripts/setup-godot.*` による pin 済み 
 | `client/scripts/inventory_row.gd` | 90 | [green] typed inventory row shape |
 | `client/scripts/market_surface.gd` | 270 | [green] market UI surface |
 | `client/scripts/position_components.gd` | 26 | [green] position component helpers |
-| `crates/dawn-client-core/src/world_space.rs` | 191 | [green] absolute f64 / floating-origin coordinate model |
-| `crates/dawn-client-core/src/ship_motion.rs` | 369 | [green] MotionCommand / MotionFrame / one-ship motion surface |
+| `crates/dawn-client-core/src/world_space.rs` | 205 | [green] absolute f64 / floating-origin coordinate model |
+| `crates/dawn-client-core/src/ship_motion.rs` | 385 | [green] MotionCommand / MotionFrame / one-ship motion surface |
 | `crates/dawn-client-gdext/src/world_space_gd.rs` | 115 | [green] WorldSpaceのGodot型アダプター |
-| `crates/dawn-client-gdext/src/ship_motion_gd.rs` | 232 | [green] ShipMotionのGodot型アダプター |
+| `crates/dawn-client-gdext/src/ship_motion_gd.rs` | 235 | [green] ShipMotionのGodot型アダプター |
 | `crates/dawn-client-core/src/world_session.rs` | 849 | [green] pure WorldSession state and typed transitions (ADR-0046) |
 | `crates/dawn-client-gdext/src/world_session_gd.rs` | 330 | [green] thin Godot adapter for WorldSession state (ADR-0046) |
 | `client/scripts/hud_hit_test.gd` | 80 | [green] HUD画面座標hit-test |

@@ -69,6 +69,11 @@ impl WorldSpace {
         ]
     }
 
+    /// Converts a non-negative render-space speed to server-space units.
+    pub fn render_speed_to_server(&self, render_speed: f64) -> Option<f64> {
+        (render_speed.is_finite() && render_speed >= 0.0).then_some(render_speed / WORLD_SCALE)
+    }
+
     /// Returns whether a player position is far enough from the origin to rebase.
     pub fn should_rebase(&self, player_server_position: [f64; 3]) -> bool {
         let delta = [
@@ -187,5 +192,14 @@ mod tests {
             world.render_direction_to_server(render_direction),
             server_direction
         );
+    }
+
+    #[test]
+    fn converts_render_speed_caps_to_server_units() {
+        let world = WorldSpace::new();
+
+        assert_eq!(world.render_speed_to_server(2_000.0), Some(20_000.0));
+        assert_eq!(world.render_speed_to_server(-1.0), None);
+        assert_eq!(world.render_speed_to_server(f64::NAN), None);
     }
 }

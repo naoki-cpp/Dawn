@@ -49,9 +49,12 @@ impl ShipMotion {
     }
 
     #[func]
-    fn begin_warp(&mut self, visual_speed_cap: f64) -> bool {
+    fn begin_warp(&mut self, render_speed_cap: f64) -> bool {
+        let Some(server_speed_cap) = self.core.render_speed_to_server(render_speed_cap) else {
+            return false;
+        };
         self.core
-            .dispatch(MotionCommand::BeginWarp { visual_speed_cap })
+            .dispatch(MotionCommand::BeginWarp { server_speed_cap })
             .accepted()
     }
 

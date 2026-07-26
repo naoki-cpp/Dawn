@@ -65,6 +65,9 @@ command-in / frame-out の境界で束ねる。公開する更新経路は `Moti
 
 - `MotionCommand` は server-space の入力、権威サンプル、速度イベント、discontinuity、
   rebaseを受け取る。stale tick、非有限値、無効なwarp値は境界で拒否する。
+- Godotの `VISUAL_SPEED_CAP` のようなrender-spaceの速度上限は、GDExtensionが
+  `WorldSpace` の単位変換を通してserver-spaceへ変換してから `MotionCommand` に渡す。
+  そのためコマンドの `server_speed_cap` は常にサーバー単位である。
 - `MotionFrame` は権威位置、予測位置、render位置、server/render速度、状態、tickを
   明示的に分ける。warp中の表示位置を権威位置として扱わない。
 - `dawn-client-gdext::ShipMotion` は `PackedFloat64Array` の絶対座標をRustへ渡し、

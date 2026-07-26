@@ -31,7 +31,10 @@ pub enum MotionCommand {
         tick: u64,
     },
     /// Enter the bounded-speed warp presentation state.
-    BeginWarp { visual_speed_cap: f64 },
+    ///
+    /// The cap is in server-space units. Godot render-space caps are converted
+    /// by the GDExtension adapter before dispatch.
+    BeginWarp { server_speed_cap: f64 },
     /// Enter the docked state at an authoritative position.
     Dock { position: [f64; 3], tick: u64 },
     /// Leave the docked state with an explicit local/remote mode.
@@ -180,8 +183,8 @@ impl ShipMotion {
                 MotionDispatch::Applied
             }
             MotionCommand::Reset { .. } => MotionDispatch::Ignored,
-            MotionCommand::BeginWarp { visual_speed_cap } => {
-                if self.track.begin_warp(visual_speed_cap) {
+            MotionCommand::BeginWarp { server_speed_cap } => {
+                if self.track.begin_warp(server_speed_cap) {
                     MotionDispatch::Applied
                 } else {
                     MotionDispatch::Ignored
@@ -255,6 +258,12 @@ impl ShipMotion {
     /// by the movement policy.
     pub fn render_direction_to_server(&self, direction: [f64; 3]) -> [f64; 3] {
         self.world.render_direction_to_server(direction)
+    }
+
+    /// Converts a render-space speed cap to the server-space units required by
+    /// [`MotionCommand::BeginWarp`].
+    pub fn render_speed_to_server(&self, speed: f64) -> Option<f64> {
+        self.world.render_speed_to_server(speed)
     }
 }
 
@@ -365,5 +374,12 @@ mod tests {
             MotionDispatch::Ignored
         );
         assert_eq!(motion.frame().server_velocity, [0.0; 3]);
+    }
+
+    #[test]
+    fn render_warp_caps_are_explicitly_converted_to_server_units() {
+        let motion = ShipMotion::default();
+
+        assert_eq!(motion.render_speed_to_server(2_000.0), Some(20_000.0));
     }
 }
