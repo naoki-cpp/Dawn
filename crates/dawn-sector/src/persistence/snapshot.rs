@@ -36,6 +36,8 @@ use dawn_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+const SNAPSHOT_MAGIC: &[u8; 8] = b"DAWNSNP2";
+
 // ── Ship-level snapshot ───────────────────────────────────────────────────────
 
 /// State of a single Ship at the time of the snapshot.
@@ -83,6 +85,82 @@ pub struct ShipSnapshot {
     pub inventory: std::collections::BTreeMap<dawn_core::ItemId, u64>,
 }
 
+/// Fixed pre-ADR-0044 spatial shapes. These must not refer to the current
+/// `Position`/`Velocity` types because postcard is positional.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct LegacyPositionF32 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+impl From<LegacyPositionF32> for Position {
+    fn from(value: LegacyPositionF32) -> Self {
+        Self::new(f64::from(value.x), f64::from(value.y), f64::from(value.z))
+    }
+}
+
+impl From<Position> for LegacyPositionF32 {
+    fn from(value: Position) -> Self {
+        Self {
+            x: value.x as f32,
+            y: value.y as f32,
+            z: value.z as f32,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct LegacyVelocityF32 {
+    pub dx: f32,
+    pub dy: f32,
+    pub dz: f32,
+}
+
+impl From<LegacyVelocityF32> for Velocity {
+    fn from(value: LegacyVelocityF32) -> Self {
+        Self::new(
+            f64::from(value.dx),
+            f64::from(value.dy),
+            f64::from(value.dz),
+        )
+    }
+}
+
+impl From<Velocity> for LegacyVelocityF32 {
+    fn from(value: Velocity) -> Self {
+        Self {
+            dx: value.dx as f32,
+            dy: value.dy as f32,
+            dz: value.dz as f32,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct LegacySectorBoundsF32 {
+    pub min: LegacyPositionF32,
+    pub max: LegacyPositionF32,
+}
+
+impl From<LegacySectorBoundsF32> for SectorBounds {
+    fn from(value: LegacySectorBoundsF32) -> Self {
+        Self {
+            min: value.min.into(),
+            max: value.max.into(),
+        }
+    }
+}
+
+impl From<SectorBounds> for LegacySectorBoundsF32 {
+    fn from(value: SectorBounds) -> Self {
+        Self {
+            min: value.min.into(),
+            max: value.max.into(),
+        }
+    }
+}
+
 /// ADR-0044 predecessor used for decoding snapshots written before
 /// `ShipSnapshot::absolute_position` existed. Postcard is positional, so the
 /// old shape must be decoded explicitly rather than relying on serde defaults.
@@ -90,9 +168,9 @@ pub struct ShipSnapshot {
 pub(crate) struct LegacyShipSnapshot {
     pub ship_id: ShipId,
     pub ship_type_id: ShipTypeId,
-    pub position: Position,
+    pub position: LegacyPositionF32,
     pub anchor: dawn_core::AnchorId,
-    pub velocity: Velocity,
+    pub velocity: LegacyVelocityF32,
     pub current_shield: f32,
     pub current_armor: f32,
     pub current_hull: f32,
@@ -109,9 +187,9 @@ impl From<LegacyShipSnapshot> for ShipSnapshot {
             ship_id: legacy.ship_id,
             ship_type_id: legacy.ship_type_id,
             absolute_position: None,
-            position: legacy.position,
+            position: legacy.position.into(),
             anchor: legacy.anchor,
-            velocity: legacy.velocity,
+            velocity: legacy.velocity.into(),
             current_shield: legacy.current_shield,
             current_armor: legacy.current_armor,
             current_hull: legacy.current_hull,
@@ -168,7 +246,7 @@ pub struct StateSnapshot {
 pub(crate) struct LegacyStateSnapshot {
     pub node_id: NodeId,
     pub sector_id: SectorId,
-    pub bounds: SectorBounds,
+    pub bounds: LegacySectorBoundsF32,
     pub log_index: u64,
     pub tick: Tick,
     pub id_counter: u64,
@@ -183,7 +261,7 @@ impl From<LegacyStateSnapshot> for StateSnapshot {
         Self {
             node_id: legacy.node_id,
             sector_id: legacy.sector_id,
-            bounds: legacy.bounds,
+            bounds: legacy.bounds.into(),
             log_index: legacy.log_index,
             tick: legacy.tick,
             id_counter: legacy.id_counter,
@@ -198,23 +276,30 @@ impl From<LegacyStateSnapshot> for StateSnapshot {
 impl StateSnapshot {
     /// Serialise with `postcard` and write to `path`.
     pub fn save(&self, path: impl AsRef<Path>) -> io::Result<()> {
-        let bytes = postcard::to_stdvec(self).map_err(|e| io::Error::other(e.to_string()))?;
+        let payload = postcard::to_stdvec(self).map_err(|e| io::Error::other(e.to_string()))?;
+        let mut bytes = Vec::with_capacity(SNAPSHOT_MAGIC.len() + payload.len());
+        bytes.extend_from_slice(SNAPSHOT_MAGIC);
+        bytes.extend_from_slice(&payload);
         fs::write(path, bytes)
     }
 
     /// Read from `path` and deserialise.
     pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
         let bytes = fs::read(path)?;
-        match postcard::from_bytes(&bytes) {
-            Ok(snapshot) => Ok(snapshot),
-            Err(current_err) => postcard::from_bytes::<LegacyStateSnapshot>(&bytes)
-                .map(Into::into)
-                .map_err(|legacy_err| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("current snapshot: {current_err}; legacy snapshot: {legacy_err}"),
-                    )
-                }),
+        if let Some(payload) = bytes.strip_prefix(SNAPSHOT_MAGIC) {
+            return postcard::from_bytes(payload).map_err(|e| {
+                io::Error::new(io::ErrorKind::InvalidData, format!("current snapshot: {e}"))
+            });
+        }
+
+        match postcard::from_bytes::<LegacyStateSnapshot>(&bytes) {
+            Ok(snapshot) => Ok(snapshot.into()),
+            Err(legacy_err) => postcard::from_bytes::<StateSnapshot>(&bytes).map_err(|current_err| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("legacy snapshot: {legacy_err}; unversioned current snapshot: {current_err}"),
+                )
+            }),
         }
     }
 }
@@ -299,7 +384,7 @@ mod tests {
         let legacy = LegacyStateSnapshot {
             node_id: original.node_id,
             sector_id: original.sector_id,
-            bounds: original.bounds,
+            bounds: original.bounds.into(),
             log_index: original.log_index,
             tick: original.tick,
             id_counter: original.id_counter,
@@ -309,9 +394,9 @@ mod tests {
                 .map(|ship| LegacyShipSnapshot {
                     ship_id: ship.ship_id,
                     ship_type_id: ship.ship_type_id,
-                    position: ship.position,
+                    position: ship.position.into(),
                     anchor: ship.anchor,
-                    velocity: ship.velocity,
+                    velocity: ship.velocity.into(),
                     current_shield: ship.current_shield,
                     current_armor: ship.current_armor,
                     current_hull: ship.current_hull,

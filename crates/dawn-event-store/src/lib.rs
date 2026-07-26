@@ -40,6 +40,7 @@
 #![warn(missing_debug_implementations)]
 
 pub mod file;
+mod legacy;
 pub mod memory;
 pub mod record;
 pub mod store;

@@ -89,6 +89,14 @@ GDScript側はNode3Dの配置・原点リベース時のシーンツリー更新
 
 ## 影響と保留事項
 
-これは既存イベントのフィールド型を変える可能性があるため、実装時にはイベント
-スキーマとsnapshotの移行戦略を先に決める。リリース前のため旧ログをそのまま維持
-するか、移行ツールを用意するかは実装PRで確定する。
+永続化されたpostcardデータは自己記述型ではないため、型変更だけで旧データを
+現行型へ直接deserializeしてはならない。実装では次の互換境界を採用した。
+
+- `FileEventStore` は新規ログに `DAWNEVT2` ヘッダーを書き、旧8バイト
+  `base_index` ヘッダーのログも認識する。旧ログの `VelocityChanged`、
+  `AnchorRebased`、`SectorTransitCompleted` は固定されたf32 legacy型からf64へ
+  widenして読み込む。読み込んだイベントは現行型として再保存される。
+- `StateSnapshot` は新規ファイルに `DAWNSNP2` マーカーを付ける。マーカーのない
+  旧snapshotは固定されたf32 `Position` / `Velocity` / `SectorBounds` 型で先に
+  読み込み、f64へ変換する。旧形式のsnapshotでは`absolute_position`を`None`とする。
+- 旧形式のイベントログとsnapshotを実バイト列で読み込む回帰テストを維持する。

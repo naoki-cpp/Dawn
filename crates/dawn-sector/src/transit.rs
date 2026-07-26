@@ -11,7 +11,10 @@
 //!   and appends `SectorTransitCompleted`. Other nodes ignore it.
 
 use crate::node::SimulationNode;
-use crate::persistence::{snapshot::LegacyShipSnapshot, ShipSnapshot};
+use crate::persistence::{
+    snapshot::{LegacyPositionF32, LegacyShipSnapshot},
+    ShipSnapshot,
+};
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
@@ -62,7 +65,7 @@ enum LegacyTransitOp {
         ship: Box<LegacyShipSnapshot>,
         from: SectorId,
         to: SectorId,
-        entry_pos: Position,
+        entry_pos: LegacyPositionF32,
         entry_pos_abs: [f64; 3],
         gate_id: Option<JumpGateId>,
     },
@@ -91,7 +94,7 @@ impl From<LegacyTransitOp> for TransitOp {
                 ship: Box::new((*ship).into()),
                 from,
                 to,
-                entry_pos,
+                entry_pos: entry_pos.into(),
                 entry_pos_abs: entry_pos_abs.into(),
                 gate_id,
             },
@@ -479,9 +482,9 @@ mod tests {
             ship: Box::new(LegacyShipSnapshot {
                 ship_id: ShipId::new(NodeId(0), 7),
                 ship_type_id: ShipTypeId(1),
-                position: Position::new(1.0, 2.0, 3.0),
+                position: Position::new(1.0, 2.0, 3.0).into(),
                 anchor: dawn_core::AnchorId(0),
-                velocity: Velocity::new(4.0, 5.0, 6.0),
+                velocity: Velocity::new(4.0, 5.0, 6.0).into(),
                 current_shield: 10.0,
                 current_armor: 20.0,
                 current_hull: 30.0,
@@ -493,7 +496,7 @@ mod tests {
             }),
             from: SectorId(0),
             to: SectorId(1),
-            entry_pos: Position::new(500.0, 0.0, 0.0),
+            entry_pos: Position::new(500.0, 0.0, 0.0).into(),
             entry_pos_abs: [500.0, 0.0, 0.0],
             gate_id: None,
         };

@@ -455,9 +455,7 @@ pub(crate) fn run_aoi_benchmark() {
         let mut aoi_vol = 0usize;
         for o in &observers {
             aoi_vol += grid
-                .neighbors_of(dawn_core::AbsolutePosition::new(
-                    o.x, o.y, o.z,
-                ))
+                .neighbors_of(dawn_core::AbsolutePosition::new(o.x, o.y, o.z))
                 .len();
         }
         let query = t.elapsed();

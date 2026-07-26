@@ -3,11 +3,15 @@
 //! # File format
 //!
 //! ```text
+//! [8 bytes: DAWNEVT2 magic]
 //! [8 bytes u64 LE: base_index]              ← log_index of the first record
 //! [4 bytes u32 LE: payload length][payload] ← record 0 (= base_index)
 //! [4 bytes u32 LE: payload length][payload] ← record 1 (= base_index + 1)
 //! ...
 //! ```
+//!
+//! Logs written before the versioned header used only the first `base_index`
+//! field. They remain readable through the legacy event decoder.
 //!
 //! Records are never modified or deleted (INV-001). The `EventStore` trait stays
 //! append-only (FBD-001).
@@ -42,12 +46,22 @@ use dawn_core::DomainEvent;
 
 use crate::{store::EventStore, EventRecord};
 
+use crate::legacy::decode_event;
+
+const EVENT_LOG_MAGIC: &[u8; 8] = b"DAWNEVT2";
+
 /// Write one `[u32 len][payload]` record to `w`.
 fn write_record(w: &mut impl Write, event: &DomainEvent) -> io::Result<()> {
     let payload = postcard::to_stdvec(event)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
     w.write_all(&(payload.len() as u32).to_le_bytes())?;
     w.write_all(&payload)?;
+    Ok(())
+}
+
+fn write_header(w: &mut impl Write, base_index: u64) -> io::Result<()> {
+    w.write_all(EVENT_LOG_MAGIC)?;
+    w.write_all(&base_index.to_le_bytes())?;
     Ok(())
 }
 
@@ -83,13 +97,13 @@ impl FileEventStore {
         let (base_index, records) = if path.exists() && std::fs::metadata(&path)?.len() > 0 {
             Self::scan_file(&path)?
         } else {
-            // Fresh log: write the base-index header (base = 0).
+            // Fresh log: write the versioned header (base = 0).
             let mut f = OpenOptions::new()
                 .create(true)
                 .write(true)
                 .truncate(true)
                 .open(&path)?;
-            f.write_all(&0u64.to_le_bytes())?;
+            write_header(&mut f, 0)?;
             f.sync_all()?;
             (0u64, Vec::new())
         };
@@ -109,7 +123,13 @@ impl FileEventStore {
 
         let mut header = [0u8; 8];
         reader.read_exact(&mut header)?;
-        let base_index = u64::from_le_bytes(header);
+        let base_index = if &header == EVENT_LOG_MAGIC {
+            let mut base = [0u8; 8];
+            reader.read_exact(&mut base)?;
+            u64::from_le_bytes(base)
+        } else {
+            u64::from_le_bytes(header)
+        };
 
         let mut records = Vec::new();
         let mut index = base_index;
@@ -126,7 +146,7 @@ impl FileEventStore {
             let mut data = vec![0u8; len];
             reader.read_exact(&mut data)?;
 
-            let event = postcard::from_bytes::<DomainEvent>(&data)
+            let event = decode_event(&data)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
             records.push(EventRecord::new(index, event));
@@ -192,7 +212,7 @@ impl FileEventStore {
                 .truncate(true)
                 .open(&tmp)?;
             let mut w = BufWriter::new(f);
-            w.write_all(&boundary.to_le_bytes())?;
+            write_header(&mut w, boundary)?;
             for rec in &self.records[cut..] {
                 write_record(&mut w, &rec.event)?;
             }
@@ -258,6 +278,7 @@ impl EventStore for FileEventStore {
 mod tests {
     use super::*;
     use dawn_core::{events::VelocityChanged, NodeId, ShipId, Tick, Velocity};
+    use serde::Serialize;
 
     fn moved_event(n: u64, tick: u64) -> DomainEvent {
         DomainEvent::VelocityChanged(VelocityChanged {
@@ -265,6 +286,68 @@ mod tests {
             velocity: Velocity::new(1.0, 0.0, 0.0),
             tick: Tick(tick),
         })
+    }
+
+    #[derive(Serialize)]
+    struct LegacyVelocityF32 {
+        dx: f32,
+        dy: f32,
+        dz: f32,
+    }
+
+    #[derive(Serialize)]
+    struct LegacyVelocityChanged {
+        ship_id: ShipId,
+        velocity: LegacyVelocityF32,
+        tick: Tick,
+    }
+
+    #[derive(Serialize)]
+    #[allow(dead_code)]
+    enum LegacyEvent {
+        ShipSpawned(dawn_core::events::ShipSpawned),
+        VelocityChanged(LegacyVelocityChanged),
+    }
+
+    #[test]
+    fn opens_an_unversioned_f32_event_log_and_upcasts_its_velocity() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy-events.log");
+        let ship_id = ShipId::new(NodeId(4), 8);
+        let payload = postcard::to_stdvec(&LegacyEvent::VelocityChanged(LegacyVelocityChanged {
+            ship_id,
+            velocity: LegacyVelocityF32 {
+                dx: 1.25,
+                dy: -2.5,
+                dz: 3.75,
+            },
+            tick: Tick(12),
+        }))
+        .unwrap();
+        let mut bytes = 0u64.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&payload);
+        std::fs::write(&path, bytes).unwrap();
+
+        let store = FileEventStore::open(&path).unwrap();
+        assert_eq!(store.len(), 1);
+        assert_eq!(
+            store.iter_from(0).next().unwrap().event,
+            DomainEvent::VelocityChanged(VelocityChanged {
+                ship_id,
+                velocity: Velocity::new(1.25, -2.5, 3.75),
+                tick: Tick(12),
+            })
+        );
+    }
+
+    #[test]
+    fn fresh_logs_write_a_versioned_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.log");
+        let _store = FileEventStore::open(&path).unwrap();
+        let bytes = std::fs::read(path).unwrap();
+        assert_eq!(&bytes[..EVENT_LOG_MAGIC.len()], EVENT_LOG_MAGIC);
     }
 
     /// Count records in a header-less archive stream (test helper).
