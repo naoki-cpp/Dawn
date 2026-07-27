@@ -57,6 +57,20 @@ const REQUIRED_KEYS: &[&str] = &[
     "stat_delta",
 ];
 
+fn stat_delta_f32(stat_delta: &Dict, key: &str) -> f32 {
+    stat_delta
+        .get(key)
+        .and_then(|v| v.try_to::<f64>().ok())
+        .unwrap_or(0.0) as f32
+}
+
+fn stat_delta_i32(stat_delta: &Dict, key: &str) -> i32 {
+    stat_delta
+        .get(key)
+        .and_then(|v| v.try_to::<i64>().ok())
+        .unwrap_or(0) as i32
+}
+
 fn stat_delta_f64(stat_delta: &Dict, key: &str) -> f64 {
     stat_delta
         .get(key)
@@ -226,10 +240,10 @@ impl ModuleRow {
             cap_cost_per_cycle: get_f64("cap_cost_per_cycle"),
             cycle_time_ticks: get_i64("cycle_time_ticks") as u32,
             stat_delta: StatDelta {
-                weapon_damage_add: stat_delta_f64(&stat_delta, "weapon_damage_add"),
-                weapon_range_add: stat_delta_f64(&stat_delta, "weapon_range_add"),
-                falloff_range_add: stat_delta_f64(&stat_delta, "falloff_range_add"),
-                tracking_speed_add: stat_delta_f64(&stat_delta, "tracking_speed_add"),
+                weapon_damage_add: stat_delta_f32(&stat_delta, "weapon_damage_add"),
+                weapon_range_add: stat_delta_f32(&stat_delta, "weapon_range_add"),
+                falloff_range_add: stat_delta_f32(&stat_delta, "falloff_range_add"),
+                tracking_speed_add: stat_delta_f32(&stat_delta, "tracking_speed_add"),
                 speed_multiplier: {
                     let v = stat_delta_f64(&stat_delta, "speed_multiplier");
                     if v == 0.0 {
@@ -239,11 +253,17 @@ impl ModuleRow {
                     }
                 },
                 mass_add: stat_delta_f64(&stat_delta, "mass_add"),
-                max_shield_add: stat_delta_f64(&stat_delta, "max_shield_add"),
-                max_armor_add: stat_delta_f64(&stat_delta, "max_armor_add"),
-                max_hull_add: stat_delta_f64(&stat_delta, "max_hull_add"),
-                tackle_range_add: stat_delta_f64(&stat_delta, "tackle_range_add"),
-                repair_range_add: stat_delta_f64(&stat_delta, "repair_range_add"),
+                max_shield_add: stat_delta_f32(&stat_delta, "max_shield_add"),
+                max_armor_add: stat_delta_f32(&stat_delta, "max_armor_add"),
+                max_hull_add: stat_delta_f32(&stat_delta, "max_hull_add"),
+                weapon_cooldown_add: stat_delta_i32(&stat_delta, "weapon_cooldown_add"),
+                lock_time_add: stat_delta_i32(&stat_delta, "lock_time_add"),
+                max_locks_add: stat_delta_i32(&stat_delta, "max_locks_add"),
+                cap_max_add: stat_delta_f32(&stat_delta, "cap_max_add"),
+                cap_recharge_add: stat_delta_f32(&stat_delta, "cap_recharge_add"),
+                tackle_range_add: stat_delta_f32(&stat_delta, "tackle_range_add"),
+                repair_amount: stat_delta_f32(&stat_delta, "repair_amount"),
+                repair_range_add: stat_delta_f32(&stat_delta, "repair_range_add"),
             },
             cycle_remaining: 0,
             forced_reason: String::new(),

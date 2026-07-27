@@ -40,12 +40,13 @@ mod ship_motion;
 mod world_session;
 mod world_space;
 
+pub use dawn_core::StatDelta;
 pub use item_row::{ItemRow, ItemType};
 pub use loadout::{
     simulate_modules_capacitor_ticks, ActivationIntent, OwnedShipRow, PlayerLoadoutMsg,
     SlotCapacity,
 };
-pub use module_row::{ModuleKind, ModuleRow, StatDelta};
+pub use module_row::{ModuleKind, ModuleRow};
 pub use motion::{MotionInput, MotionPredictor, MotionProfile, MotionState};
 pub use ship_motion::{MotionCommand, MotionDispatch, MotionFrame, ShipMotion};
 pub use world_session::{

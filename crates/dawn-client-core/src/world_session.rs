@@ -11,13 +11,14 @@ use serde::Deserialize;
 
 use crate::PlayerLoadoutMsg;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
+/// Built by `dawn-client-gdext`'s `navigation_gd::navigation_input_from_dict`
+/// (no `Deserialize` impl here -- `dawn-client-core` stays wire/JSON-agnostic
+/// per ADR-0039; a missing field there defaults to 0.0 the same way
+/// `#[serde(default)]` used to).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PositionInput {
-    #[serde(default)]
     pub x: f64,
-    #[serde(default)]
     pub y: f64,
-    #[serde(default)]
     pub z: f64,
 }
 
@@ -27,84 +28,68 @@ impl PositionInput {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct SystemNameInput {
-    #[serde(default)]
     pub id: i64,
-    #[serde(default)]
     pub name: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct GateInput {
-    #[serde(default)]
     pub gate_id: i64,
-    #[serde(default)]
     pub position: PositionInput,
-    #[serde(default)]
     pub activation_radius: f64,
-    #[serde(default)]
     pub to_system_name: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct StationInput {
-    #[serde(default)]
     pub station_id: i64,
-    #[serde(default)]
     pub name: String,
-    #[serde(default)]
     pub position: PositionInput,
-    #[serde(default)]
     pub docking_radius: f64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct CelestialBodyInput {
-    #[serde(default)]
     pub id: i64,
-    #[serde(default)]
     pub kind: String,
-    #[serde(default)]
     pub name: String,
-    #[serde(default)]
     pub position: PositionInput,
-    #[serde(default = "default_body_radius")]
+    /// Defaults to `1.0` (not `0.0`) when built from a Dict/JSON that omits
+    /// it -- a radius of 0 would make the body's docking/collision math
+    /// degenerate, matching the old `#[serde(default = "default_body_radius")]`.
     pub radius: f64,
-    #[serde(default)]
     pub spectral_type: f64,
 }
 
-fn default_body_radius() -> f64 {
-    1.0
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct BuildableShipTypeInput {
-    #[serde(default)]
     pub ship_type_id: i64,
-    #[serde(default)]
     pub name: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct NavigationInput {
-    #[serde(default = "default_system_name")]
     pub system_name: String,
-    #[serde(default)]
     pub systems: Vec<SystemNameInput>,
-    #[serde(default)]
     pub jump_gates: Vec<GateInput>,
-    #[serde(default)]
     pub stations: Vec<StationInput>,
-    #[serde(default)]
     pub celestial_bodies: Vec<CelestialBodyInput>,
-    #[serde(default)]
     pub buildable_ship_types: Vec<BuildableShipTypeInput>,
 }
 
-fn default_system_name() -> String {
-    "Unknown".to_string()
+impl Default for NavigationInput {
+    fn default() -> Self {
+        Self {
+            system_name: "Unknown".to_string(),
+            systems: Vec::new(),
+            jump_gates: Vec::new(),
+            stations: Vec::new(),
+            celestial_bodies: Vec::new(),
+            buildable_ship_types: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]

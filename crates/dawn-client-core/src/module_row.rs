@@ -20,39 +20,6 @@ pub enum ModuleKind {
     Unknown,
 }
 
-/// Wire-format mirror of `dawn_core::fitting::StatDelta`. Carries every field
-/// the server sends (`player_loadout_projection.rs::build_player_loadout_json`),
-/// not just the ones a given caller happens to read today.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
-pub struct StatDelta {
-    #[serde(default)]
-    pub weapon_damage_add: f64,
-    #[serde(default)]
-    pub weapon_range_add: f64,
-    #[serde(default)]
-    pub falloff_range_add: f64,
-    #[serde(default)]
-    pub tracking_speed_add: f64,
-    #[serde(default = "default_speed_multiplier")]
-    pub speed_multiplier: f64,
-    #[serde(default)]
-    pub mass_add: f64,
-    #[serde(default)]
-    pub max_shield_add: f64,
-    #[serde(default)]
-    pub max_armor_add: f64,
-    #[serde(default)]
-    pub max_hull_add: f64,
-    #[serde(default)]
-    pub tackle_range_add: f64,
-    #[serde(default)]
-    pub repair_range_add: f64,
-}
-
-fn default_speed_multiplier() -> f64 {
-    1.0
-}
-
 /// One row of `PlayerLoadout`'s `modules` array (a fitted module slot).
 /// Mirrors the shape `player_loadout_projection.rs::build_player_loadout_json`
 /// serializes for each `FittedSlot`.
@@ -67,7 +34,13 @@ pub struct ModuleRow {
     pub is_active_module: bool,
     pub cap_cost_per_cycle: f64,
     pub cycle_time_ticks: u32,
-    pub stat_delta: StatDelta,
+    /// `dawn_core::StatDelta` directly (not a client-side copy): the wire
+    /// already carries this exact type unchanged (`ModuleRowWire.stat_delta`,
+    /// `dawn-wire`), so a client-side mirror only risked silently dropping
+    /// fields as `dawn_core::StatDelta` grew -- it previously did, missing
+    /// `weapon_cooldown_add`/`lock_time_add`/`max_locks_add`/`cap_max_add`/
+    /// `cap_recharge_add`/`repair_amount`.
+    pub stat_delta: dawn_core::StatDelta,
 
     /// Client-local runtime state, never read from the wire. Mutated by
     /// [`crate::PlayerLoadoutMsg::simulate_capacitor_ticks`] and activation
@@ -111,7 +84,13 @@ mod tests {
                 "max_shield_add": 0.0,
                 "max_armor_add": 0.0,
                 "max_hull_add": 0.0,
+                "weapon_cooldown_add": 0,
+                "lock_time_add": 0,
+                "max_locks_add": 0,
+                "cap_max_add": 0.0,
+                "cap_recharge_add": 0.0,
                 "tackle_range_add": 0.0,
+                "repair_amount": 0.0,
                 "repair_range_add": 0.0
             }
         }"#;

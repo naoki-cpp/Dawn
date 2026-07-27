@@ -106,8 +106,8 @@ impl PlayerLoadoutMsg {
             if !row.is_active || row.kind != ModuleKind::Weapon {
                 continue;
             }
-            optimal += row.stat_delta.weapon_range_add;
-            falloff += row.stat_delta.falloff_range_add;
+            optimal += f64::from(row.stat_delta.weapon_range_add);
+            falloff += f64::from(row.stat_delta.falloff_range_add);
         }
         (optimal, falloff)
     }
@@ -126,13 +126,13 @@ impl PlayerLoadoutMsg {
             if range_family(row.kind) != Some(family) {
                 continue;
             }
-            total += match family {
+            total += f64::from(match family {
                 RangeFamily::Weapon => {
                     row.stat_delta.weapon_range_add + row.stat_delta.falloff_range_add
                 }
                 RangeFamily::Tackle => row.stat_delta.tackle_range_add,
                 RangeFamily::Repair => row.stat_delta.repair_range_add,
-            };
+            });
         }
         Some(total)
     }
@@ -231,22 +231,6 @@ mod tests {
     use super::*;
     use crate::StatDelta;
 
-    fn zero_stat_delta() -> StatDelta {
-        StatDelta {
-            weapon_damage_add: 0.0,
-            weapon_range_add: 0.0,
-            falloff_range_add: 0.0,
-            tracking_speed_add: 0.0,
-            speed_multiplier: 1.0,
-            mass_add: 0.0,
-            max_shield_add: 0.0,
-            max_armor_add: 0.0,
-            max_hull_add: 0.0,
-            tackle_range_add: 0.0,
-            repair_range_add: 0.0,
-        }
-    }
-
     fn weapon_row(module_id: u32, is_active: bool, range: f64, falloff: f64) -> ModuleRow {
         ModuleRow {
             slot: "High".to_string(),
@@ -259,9 +243,9 @@ mod tests {
             cap_cost_per_cycle: 5.0,
             cycle_time_ticks: 10,
             stat_delta: StatDelta {
-                weapon_range_add: range,
-                falloff_range_add: falloff,
-                ..zero_stat_delta()
+                weapon_range_add: range as f32,
+                falloff_range_add: falloff as f32,
+                ..StatDelta::ZERO
             },
             cycle_remaining: 0,
             forced_reason: String::new(),

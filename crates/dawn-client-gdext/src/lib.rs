@@ -10,6 +10,7 @@ mod item_row_gd;
 mod json_variant;
 mod loadout_gd;
 mod module_row_gd;
+mod navigation_gd;
 mod server_message_gd;
 mod ship_motion_gd;
 mod world_session_gd;

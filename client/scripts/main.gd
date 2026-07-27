@@ -706,7 +706,7 @@ func _on_initial_state(state: Dictionary) -> void:
 ## and bodies) and rebuild the gate / body markers from it. This replaces the
 ## previously hard-coded JUMP_GATES / CELESTIAL_BODIES / STAR_SYSTEM_NAMES.
 func _ingest_star_map(state: Dictionary) -> void:
-	_session.ingest_navigation(JSON.stringify(state))
+	_session.ingest_navigation(state)
 	_sync_session_state()
 	_presentation.respawn_navigation_markers(
 		_gates,
