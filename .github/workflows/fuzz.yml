@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: fuzz-${{ github.workflow }}-${{ github.ref }}
@@ -42,7 +42,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          ref: agent/dawn-wire-fuzz
+
+      - name: Regenerate wire schema
+        if: matrix.target == 'decode_client_message'
+        run: |
+          cargo run -p dawn-actor --example gen_wire_schema
+          if ! git diff --quiet -- docs/architecture/wire-protocol.schema.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add docs/architecture/wire-protocol.schema.json
+            git commit -m "docs(wire): regenerate event schema"
+            git push origin HEAD:agent/dawn-wire-fuzz
+          fi
 
       - name: Install nightly Rust
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
