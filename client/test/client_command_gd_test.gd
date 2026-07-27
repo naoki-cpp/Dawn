@@ -157,5 +157,7 @@ func test_hello_command_carries_a_resume_identity_when_ids_are_present() -> void
 	var bytes: PackedByteArray = _cmd.hello_command(7, 42)
 	var d: Dictionary = _decoder.decode(bytes)
 	var resume: Dictionary = d["resume"]
+	assert_int(typeof(resume["player_id"])).is_equal(TYPE_INT)
+	assert_int(typeof(resume["ship_id"])).is_equal(TYPE_INT)
 	assert_int(int(resume["player_id"])).is_equal(7)
 	assert_int(int(resume["ship_id"])).is_equal(42)
