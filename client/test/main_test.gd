@@ -253,13 +253,11 @@ func test_ship_docked_event_clears_residual_motion() -> void:
 	_main.add_child(ship)
 	ship.global_position = Vector3(99.0, 99.0, 99.0)
 	_main._ships = {2: ship}
-	_main._session.ingest_navigation({
-		"stations": [{
-			"station_id": 0,
-			"name": "Forge Station",
-			"position": {"x": 5.0 * AU_M + 10.0, "y": 20.0, "z": 300.0},
-		}],
-	})
+	_main._stations = [{
+		"station_id": 0,
+		"name": "Forge Station",
+		"position": PackedFloat64Array([5.0 * AU_M + 10.0, 20.0, 300.0]),
+	}]
 	_main._world.rebase_to_components(5.0 * AU_M, 0.0, 0.0)
 
 	_main._handle_ship_docked({
@@ -341,18 +339,16 @@ func test_au_navigation_proximity_uses_unquantized_positions() -> void:
 	_main._ships = {1: ship}
 	_main._player_ship_id = 1
 	_main._world.rebase_to_components(5.0 * AU_M, 0.0, 0.0)
-	_main._session.ingest_navigation({
-		"jump_gates": [{
-			"gate_id": 7,
-			"position": {"x": 5.0 * AU_M + 10.0, "y": 0.0, "z": 0.0},
-			"activation_radius": 20.0,
-		}],
-		"stations": [{
-			"station_id": 5,
-			"position": {"x": 5.0 * AU_M + 15.0, "y": 0.0, "z": 0.0},
-			"docking_radius": 20.0,
-		}],
-	})
+	_main._gates = [{
+		"gate_id": 7,
+		"position": PackedFloat64Array([5.0 * AU_M + 10.0, 0.0, 0.0]),
+		"activation_radius": 20.0,
+	}]
+	_main._stations = [{
+		"station_id": 5,
+		"position": PackedFloat64Array([5.0 * AU_M + 15.0, 0.0, 0.0]),
+		"docking_radius": 20.0,
+	}]
 
 	_main._update_gate_proximity()
 	_main._update_station_proximity()

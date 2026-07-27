@@ -86,13 +86,23 @@ var _loadout := PlayerLoadout.new()
 var _weapon_range     : float  = 0.0   ## optimal range (u), recalculated on fitting change
 var _weapon_falloff   : float  = 0.0   ## falloff range (u)
 
-## Ship HP, the capacitor status, the navigation map (gates/stations/bodies/
-## buildable ship types), and the current system name all live only in
-## WorldSession now (ADR-0046) -- read via _session.ship_hp(),
-## _session.capacitor_status(), _session.gates()/.stations()/.bodies()/
-## .buildable_ship_types(), and _session.current_system_name() at point of
-## use, instead of a member-var mirror kept in sync by a 21-field
-## _sync_session_state() call after every event.
+## Ship HP, the capacitor status, and the current system name live only in
+## WorldSession (ADR-0046) -- read via _session.ship_health(id)/
+## .capacitor_status()/.current_system_name() at point of use. They change
+## on essentially every event, so caching them would just reintroduce the
+## staleness risk this cleanup removed.
+##
+## The navigation map (gates/stations/bodies/buildable ship types) is
+## different: it's write-once per Sector, changing only inside
+## _ingest_star_map() below. _process() reads gates/stations/bodies every
+## frame (proximity checks, presentation refresh), so calling the
+## GDExtension accessor there would rebuild these collections from Rust
+## state 60x/sec for data that never changes between InitialState messages.
+## Cached here instead, refreshed only where _ingest_star_map() writes it.
+var _gates                 : Array = []
+var _stations              : Array = []
+var _bodies                : Array = []
+var _buildable_ship_types  : Array = []
 var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
 var _nearby_station_ids  : Array[int] = []  ## in-range stations, nearest first
 var _jump_notice         : String = ""
@@ -143,7 +153,7 @@ func _ready() -> void:
 	## Gate / body markers are spawned from the server's InitialState, not here.
 
 func _process(delta: float) -> void:
-	_presentation.refresh(delta, _player_ship_id, _ships, _session.bodies())
+	_presentation.refresh(delta, _player_ship_id, _ships, _bodies)
 	_update_gate_proximity()
 	_update_station_proximity()
 	_advance_client_cap_ticks(delta)
@@ -203,7 +213,7 @@ func _update_gate_proximity() -> void:
 	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return
 	var ship_pos := _world.to_server_components((_ships[_player_ship_id] as Node3D).global_position)
-	for gate: Variant in _session.gates():
+	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
 		var gate_pos := _position_components(g.get("position", PackedFloat64Array()))
 		if _world.distance_components(ship_pos, gate_pos) <= (g.get("activation_radius", 0.0) as float):
@@ -221,7 +231,7 @@ func _update_station_proximity() -> void:
 		return
 	var ship_pos := _world.to_server_components((_ships[_player_ship_id] as Node3D).global_position)
 	var in_range: Array[Dictionary] = []
-	for station_entry: Variant in _session.stations():
+	for station_entry: Variant in _stations:
 		var station: Dictionary = station_entry as Dictionary
 		var station_pos := _position_components(station.get("position", PackedFloat64Array()))
 		var dist: float = _world.distance_components(ship_pos, station_pos)
@@ -236,7 +246,7 @@ func _update_station_proximity() -> void:
 ## Display name for a station_id, falling back to "Station #N" if unnamed
 ## or not found in the galaxy map (e.g. between InitialState and StarMap sync).
 func _station_name(station_id: int) -> String:
-	for entry: Variant in _session.stations():
+	for entry: Variant in _stations:
 		var station: Dictionary = entry as Dictionary
 		if (station.get("station_id", -1) as int) == station_id:
 			var name: String = station.get("name", "") as String
@@ -415,7 +425,7 @@ func _selected_gate_distance() -> float:
 	if selected_gate_id < 0 or _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return -1.0
 	var ship_server := _world.to_server_components((_ships[_player_ship_id] as Node3D).global_position)
-	for gate: Variant in _session.gates():
+	for gate: Variant in _gates:
 		var g: Dictionary = gate as Dictionary
 		if (g.get("gate_id", -1) as int) != selected_gate_id:
 			continue
@@ -550,7 +560,7 @@ func _handle_ship_docked(p: Dictionary) -> void:
 	var ship := _ships[ship_id] as Node3D
 	var dock_pos: PackedFloat64Array = ship.call("server_position") as PackedFloat64Array
 	var station_name := _station_name(station_id)
-	for entry: Variant in _session.stations():
+	for entry: Variant in _stations:
 		var station: Dictionary = entry as Dictionary
 		if (station.get("station_id", -1) as int) != station_id:
 			continue
@@ -679,10 +689,17 @@ func _on_initial_state(state: Dictionary) -> void:
 func _ingest_star_map(state: Dictionary) -> void:
 	_session.ingest_navigation(state)
 	_sync_session_state()
+	## Navigation data is write-once per Sector (only this call changes it) --
+	## cached here so _process()'s per-frame proximity checks and HUD reads
+	## don't rebuild these collections from Rust state 60x/sec.
+	_gates = _session.gates()
+	_stations = _session.stations()
+	_bodies = _session.bodies()
+	_buildable_ship_types = _session.buildable_ship_types()
 	_presentation.respawn_navigation_markers(
-		_session.gates(),
-		_session.bodies(),
-		_session.stations(),
+		_gates,
+		_bodies,
+		_stations,
 		_server_components_to_godot,
 		Callable(_interaction, "clear_navigation_selection")
 	)
@@ -796,7 +813,7 @@ func _apply_loadout_side_effects() -> void:
 		snapshot.get("inventory", []) as Array,
 		snapshot.get("station_inventory", []) as Array,
 		snapshot.get("owned_ships", []) as Array,
-		_session.buildable_ship_types())
+		_buildable_ship_types)
 	_market_surface.set_cargo(snapshot.get("inventory", []) as Array)
 	_recalc_weapon_range()
 
@@ -876,7 +893,7 @@ func _handle_inventory_row_click(row: InventoryRow) -> void:
 				snapshot.get("inventory", []) as Array,
 				snapshot.get("station_inventory", []) as Array,
 				snapshot.get("owned_ships", []) as Array,
-				_session.buildable_ship_types())
+				_buildable_ship_types)
 		InventoryRow.ACTION_BUILD_SHIP_TYPE:
 			## Dedicated button alongside the existing [B] key (Phase 9B task
 			## 10), but lets the player pick which buildable type instead of
@@ -1185,7 +1202,7 @@ func _update_hud() -> void:
 		var dist_m: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
 			(_ships[_player_lock_target] as Node3D).global_position) / WORLD_SCALE
 		dist_text = UnitFormat.format_distance(dist_m * METERS_PER_UNIT)
-	var target_hp: Dictionary = _session.ship_hp().get(_player_lock_target, {}) as Dictionary
+	var target_hp: Dictionary = _session.ship_health(_player_lock_target)
 
 	var jump_line  : String = ""
 	if _nearby_gate_id >= 0:
@@ -1238,7 +1255,7 @@ func _update_hud() -> void:
 	elif selected_body_id >= 0:
 		## Look up body name for HUD.
 		var body_name: String = "Body #%d" % selected_body_id
-		for entry: Variant in _session.bodies():
+		for entry: Variant in _bodies:
 			var b: Dictionary = entry as Dictionary
 			if (b.get("body_id", -1) as int) == selected_body_id:
 				body_name = b.get("name", body_name) as String
@@ -1303,6 +1320,13 @@ func _clear_all_ships() -> void:
 	_ships.clear()
 	_session.reset()
 	_sync_session_state()
+	## _session.reset() clears WorldSession's navigation map too -- clear the
+	## caches to match, so a disconnect doesn't leave stale gate/station/body
+	## data sitting until the next InitialState's _ingest_star_map() call.
+	_gates = []
+	_stations = []
+	_bodies = []
+	_buildable_ship_types = []
 	_interaction.clear_selection()
 	_loadout.reset()
 	_cap_tick_accumulator = 0.0
@@ -1310,9 +1334,12 @@ func _clear_all_ships() -> void:
 
 ## Reconciles the two fields main.gd writes optimistically ahead of the
 ## server's confirming event (_player_ship_id, _player_lock_target) against
-## WorldSession's authoritative state. Every other field WorldSession tracks
-## is read directly at point of use (_session.ship_hp(), .gates(), .bodies(),
-## .capacitor_status(), etc.) instead of being mirrored here (ADR-0046).
+## WorldSession's authoritative state. Fast-changing fields (ship health,
+## capacitor status, current system name) are read directly at point of use
+## (_session.ship_health(id)/.capacitor_status()/.current_system_name())
+## instead of being mirrored here; the write-once navigation map
+## (gates/stations/bodies/buildable ship types) is cached separately in
+## _ingest_star_map() (ADR-0046).
 func _sync_session_state() -> void:
 	_player_ship_id = _session.player_ship_id() as int
 	_player_lock_target = _session.player_lock_target() as int

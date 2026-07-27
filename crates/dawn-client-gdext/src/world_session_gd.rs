@@ -295,6 +295,18 @@ impl WorldSession {
         result
     }
 
+    /// Single-ship lookup, for callers (the HUD's locked-target readout)
+    /// that only need one ship's HP -- `ship_hp()` rebuilds a `Dict` for
+    /// every ship in the Sector, which is wasteful when the caller runs
+    /// every frame and only reads one entry out of it.
+    #[func]
+    fn ship_health(&self, ship_id: i64) -> Dict {
+        match self.state.ship_hp().get(&ship_id) {
+            Some(health) => health_dict(ship_id, *health),
+            None => Dict::new(),
+        }
+    }
+
     fn opponent_ship_ids(&self) -> Array<i64> {
         self.state.opponent_ship_ids().iter().copied().collect()
     }
