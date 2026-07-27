@@ -75,8 +75,10 @@ command-in / frame-out の境界で束ねる。公開する更新経路は `Moti
 - `WorldPresentation` は全船へ同じabsolute originを通知する。rebase後の船ノードを
   `shift` 加算する処理は持たず、各 `ShipMotion` のrender frameを適用する。
 
-既存の `MotionPredictor` / `WorldSpace` GDExtension wrapperは移行期間の互換shimとして
-残すが、productionの `ShipController` は `ShipMotion`だけを使用する。サーバー物理の
+`WorldSpace` GDExtension wrapperは座標変換の互換境界として残すが、旧
+`MotionPredictor` GDExtension wrapperは削除する。coreの`MotionPredictor`は
+`ShipMotion`内部の予測器として残し、productionの `ShipController` は `ShipMotion`だけを
+使用する。サーバー物理の
 `MovementProfile`、速度、位置、移動距離はサーバーとクライアントコアで`f64`を共有する。
 Godot `Vector3` は描画アダプターの最終境界にだけ残る。
 
@@ -101,7 +103,8 @@ Godot `Vector3` は描画アダプターの最終境界にだけ残る。
 - [x] Node3D位置の単一writerを構造で保証する。通常フレーム、snap、dock/undock、
   floating-origin rebaseはすべて`ShipController`の適用入口を通る
 - [x] 浮動原点rebase、遅延補正、warp arrival、dock/undockの回帰テストを追加する
-- [x] GDExtension APIを更新し、Godot側は薄い変換アダプターに戻す
+- [x] GDExtension APIを更新し、旧`MotionPredictor` shimを削除してGodot側は
+  `ShipMotion`を使う薄い変換アダプターに戻す
 - [x] ADR-0043の実装チェックリストと`docs/architecture/tick-model.md`を同期する
 
 ## 期待する結果
