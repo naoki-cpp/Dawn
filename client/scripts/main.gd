@@ -1143,7 +1143,11 @@ func _handle_ship_despawned(p: Dictionary) -> void:
 	_interaction.clear_target_if_matches(ship_id)
 
 func _handle_damage_taken(p: Dictionary) -> void:
-	var result: Dictionary = _session.apply_hp_event(JSON.stringify(p))
+	var result: Dictionary = _session.apply_health_event(
+		p.get("ship_id", 0) as int,
+		p.get("current_shield", 0.0) as float,
+		p.get("current_armor", 0.0) as float,
+		p.get("current_hull", 0.0) as float)
 	_sync_session_state()
 	var ship_id: int = result.get("ship_id", 0) as int
 	## Flash red on any ship that takes damage (visual hit feedback)
@@ -1151,7 +1155,11 @@ func _handle_damage_taken(p: Dictionary) -> void:
 		(_ships[ship_id] as Node3D).call("flash_damage")
 
 func _handle_repair_applied(p: Dictionary) -> void:
-	var result: Dictionary = _session.apply_hp_event(JSON.stringify(p))
+	var result: Dictionary = _session.apply_health_event(
+		p.get("ship_id", 0) as int,
+		p.get("current_shield", 0.0) as float,
+		p.get("current_armor", 0.0) as float,
+		p.get("current_hull", 0.0) as float)
 	_sync_session_state()
 	var ship_id: int = result.get("ship_id", 0) as int
 	if _ships.has(ship_id):

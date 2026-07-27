@@ -50,8 +50,8 @@ pub use motion::{MotionInput, MotionPredictor, MotionProfile, MotionState};
 pub use ship_motion::{MotionCommand, MotionDispatch, MotionFrame, ShipMotion};
 pub use world_session::{
     BuildableShipTypeInput, BuildableShipTypeRecord, CelestialBodyInput, CelestialBodyRecord,
-    DestructionOutcome, GateInput, GateRecord, HealthEventInput, HealthEventOutcome, HealthState,
-    NavigationInput, PositionInput, RegistrationOutcome, RemovalOutcome, ShipInput, ShipState,
-    StationInput, StationRecord, SystemNameInput, WorldSessionState,
+    DestructionOutcome, GateInput, GateRecord, HealthEventOutcome, HealthState, NavigationInput,
+    PositionInput, RegistrationOutcome, RemovalOutcome, ShipInput, ShipState, StationInput,
+    StationRecord, SystemNameInput, WorldSessionState,
 };
 pub use world_space::{WorldSpace, REBASE_THRESHOLD, WORLD_SCALE};

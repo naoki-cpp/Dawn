@@ -1,6 +1,6 @@
 use dawn_client_core::{
-    BuildableShipTypeRecord, CelestialBodyRecord, GateRecord, HealthEventInput, HealthState,
-    NavigationInput, ShipInput, StationRecord, WorldSessionState,
+    BuildableShipTypeRecord, CelestialBodyRecord, GateRecord, HealthState, NavigationInput,
+    ShipInput, StationRecord, WorldSessionState,
 };
 use godot::prelude::*;
 use serde::de::DeserializeOwned;
@@ -92,17 +92,16 @@ impl WorldSession {
         result
     }
 
+    /// Applies a DamageTaken/RepairApplied health update. Takes plain typed
+    /// args rather than JSON: the caller (`main.gd`) already has these
+    /// values unpacked in the event `Dictionary` `ServerMessageDecoder`
+    /// produced from the decoded `EventWire` -- there is no JSON on either
+    /// side of this call, so building one here would only add a lossy
+    /// stringify/parse round trip (JSON can't represent `NaN`/`Infinity`,
+    /// which `f32`/`f64` can).
     #[func]
-    fn apply_hp_event(&mut self, json: GString) -> Dict {
-        let Some(input) = parse_json::<HealthEventInput>(&json, "HealthEventInput") else {
-            return Dict::new();
-        };
-        let outcome = self.state.apply_hp_event(
-            input.ship_id,
-            input.current_shield,
-            input.current_armor,
-            input.current_hull,
-        );
+    fn apply_health_event(&mut self, ship_id: i64, shield: f64, armor: f64, hull: f64) -> Dict {
+        let outcome = self.state.apply_hp_event(ship_id, shield, armor, hull);
         let mut result = Dict::new();
         result.set("ship_id", outcome.ship_id);
         result.set("changed_player", outcome.changed_player);
