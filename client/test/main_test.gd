@@ -15,6 +15,30 @@ const InventoryRow = preload("res://scripts/inventory_row.gd")
 const HudManager = preload("res://scripts/hud_manager.gd")
 const AU_M: float = 1.495978707e11
 
+## dawn_core::StatDelta (client-side, ADR-0039) requires every field --
+## unlike the client's former hand-copied mirror, it has no per-field
+## `#[serde(default)]`, so a JSON fixture built for
+## `PlayerLoadout.apply_payload` (test/debug-only) can no longer omit fields.
+const FULL_ZERO_STAT_DELTA: Dictionary = {
+	"weapon_damage_add": 0.0,
+	"weapon_range_add": 0.0,
+	"falloff_range_add": 0.0,
+	"tracking_speed_add": 0.0,
+	"speed_multiplier": 1.0,
+	"mass_add": 0.0,
+	"max_shield_add": 0.0,
+	"max_armor_add": 0.0,
+	"max_hull_add": 0.0,
+	"weapon_cooldown_add": 0,
+	"lock_time_add": 0,
+	"max_locks_add": 0,
+	"cap_max_add": 0.0,
+	"cap_recharge_add": 0.0,
+	"tackle_range_add": 0.0,
+	"repair_amount": 0.0,
+	"repair_range_add": 0.0,
+}
+
 var _main: Node
 
 
@@ -173,7 +197,7 @@ func _module_fixture(module_id: int, slot: String, active: bool) -> Dictionary:
 		"is_active_module": true,
 		"cap_cost_per_cycle": 0.0,
 		"cycle_time_ticks": 10,
-		"stat_delta": {},
+		"stat_delta": FULL_ZERO_STAT_DELTA,
 	}
 
 
@@ -455,7 +479,7 @@ func test_module_toggle_of_a_targeted_kind_without_a_locked_target_is_refused_cl
 	_set_loadout_modules([{
 		"slot": "High", "index": 0, "module_id": 5, "name": "Test Module", "kind": "Weapon",
 		"is_active": false, "is_active_module": true,
-		"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10, "stat_delta": {},
+		"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10, "stat_delta": FULL_ZERO_STAT_DELTA,
 	}])
 	## Fresh _main has no player lock target.
 
@@ -485,7 +509,7 @@ func test_module_toggle_of_a_targeted_kind_against_a_locked_but_out_of_aoi_targe
 	_set_loadout_modules([{
 		"slot": "High", "index": 0, "module_id": 5, "name": "Test Module", "kind": "Weapon",
 		"is_active": false, "is_active_module": true,
-		"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10, "stat_delta": {},
+		"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10, "stat_delta": FULL_ZERO_STAT_DELTA,
 	}])
 
 	_main._toggle_module_by_index(0)
