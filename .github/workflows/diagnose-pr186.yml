@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - dependabot/cargo/rust-dependencies-697640ec0a
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
