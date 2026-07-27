@@ -67,7 +67,6 @@ fn wire_to_loadout_msg(wire: dawn_wire::PlayerLoadoutWire) -> PlayerLoadoutMsg {
 }
 
 fn wire_to_module_row(row: dawn_wire::ModuleRowWire) -> dawn_client_core::ModuleRow {
-    let d = row.stat_delta;
     dawn_client_core::ModuleRow {
         slot: row.slot,
         index: row.index,
@@ -78,19 +77,10 @@ fn wire_to_module_row(row: dawn_wire::ModuleRowWire) -> dawn_client_core::Module
         is_active_module: row.is_active_module,
         cap_cost_per_cycle: row.cap_cost_per_cycle as f64,
         cycle_time_ticks: row.cycle_time_ticks as u32,
-        stat_delta: dawn_client_core::StatDelta {
-            weapon_damage_add: d.weapon_damage_add as f64,
-            weapon_range_add: d.weapon_range_add as f64,
-            falloff_range_add: d.falloff_range_add as f64,
-            tracking_speed_add: d.tracking_speed_add as f64,
-            speed_multiplier: d.speed_multiplier,
-            mass_add: d.mass_add,
-            max_shield_add: d.max_shield_add as f64,
-            max_armor_add: d.max_armor_add as f64,
-            max_hull_add: d.max_hull_add as f64,
-            tackle_range_add: d.tackle_range_add as f64,
-            repair_range_add: d.repair_range_add as f64,
-        },
+        // dawn_wire::ModuleRowWire.stat_delta is already dawn_core::StatDelta
+        // -- the same type dawn_client_core::ModuleRow.stat_delta now uses
+        // directly, so there's nothing to convert.
+        stat_delta: row.stat_delta,
         cycle_remaining: 0,
         forced_reason: String::new(),
     }

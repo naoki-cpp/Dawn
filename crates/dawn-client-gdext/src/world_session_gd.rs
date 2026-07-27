@@ -1,6 +1,6 @@
 use dawn_client_core::{
-    BuildableShipTypeRecord, CelestialBodyRecord, GateRecord, HealthState, NavigationInput,
-    ShipInput, StationRecord, WorldSessionState,
+    BuildableShipTypeRecord, CelestialBodyRecord, GateRecord, HealthState, ShipInput,
+    StationRecord, WorldSessionState,
 };
 use godot::prelude::*;
 use serde::de::DeserializeOwned;
@@ -45,15 +45,16 @@ impl WorldSession {
         self.state.set_player_ship_id(ship_id);
     }
 
-    /// Ingests the InitialState navigation portion. JSON is used only at this
-    /// Godot boundary; the core receives a typed `NavigationInput`.
+    /// Ingests the InitialState navigation portion. Takes the `Dictionary`
+    /// `ServerMessageDecoder` already produced from the decoded
+    /// `InitialStateWire` directly (`navigation_gd::navigation_input_from_dict`)
+    /// -- no JSON on either side of this call, since the caller already has
+    /// these values unpacked and the core just needs a typed
+    /// `NavigationInput`.
     #[func]
-    fn ingest_navigation(&mut self, json: GString) -> bool {
-        let Some(input) = parse_json::<NavigationInput>(&json, "NavigationInput") else {
-            return false;
-        };
-        self.state.ingest_navigation(input);
-        true
+    fn ingest_navigation(&mut self, state: Dict) {
+        self.state
+            .ingest_navigation(crate::navigation_gd::navigation_input_from_dict(&state));
     }
 
     /// Registers metadata for a ship. The corresponding Node3D is owned by

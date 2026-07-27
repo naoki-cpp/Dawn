@@ -17,7 +17,7 @@ func after_test() -> void:
 
 
 func test_ingest_navigation_preserves_absolute_f64_positions() -> void:
-	_session.ingest_navigation(JSON.stringify({
+	_session.ingest_navigation({
 		"system_name": "Alpha",
 		"systems": [{"id": 2, "name": "Beta"}],
 		"jump_gates": [{
@@ -40,7 +40,7 @@ func test_ingest_navigation_preserves_absolute_f64_positions() -> void:
 			"radius": 42.0,
 			"spectral_type": 0.5,
 		}],
-	}))
+	})
 	var snapshot: Dictionary = _session.snapshot()
 
 	assert_str(snapshot.current_system_name).is_equal("Alpha")
