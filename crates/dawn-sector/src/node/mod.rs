@@ -30,6 +30,7 @@ mod range_gate;
 mod sector_map;
 mod serialization;
 mod ship_cargo;
+mod ship_command;
 mod ship_registry;
 mod snapshot_io;
 mod spawner_logic;

@@ -20,24 +20,21 @@ impl<S: EventStore> SimulationNode<S> {
     /// the ship type's slot capacity, and that the module is actually present
     /// in `InventoryComp` -- rejecting (no state change) otherwise.
     pub fn fit_module_owned(&mut self, player_id: PlayerId, cmd: FitModuleCommand) -> bool {
-        if !self.owns_ship(player_id, cmd.ship_id) {
-            return false;
-        }
         // ADR-0032 amendment (2026-07-08): the §2 "anywhere, MVP" trigger
         // fired now that Station exists (ADR-0034/0037) -- refitting
-        // requires being docked.
-        if !self.is_ship_docked(cmd.ship_id) {
+        // requires being docked. resolve_fitting_command (ship_command.rs)
+        // checks ownership and dock state; it's not is_active_ship, since
+        // Fit/Unfit may target any owned docked ship, not just the active one.
+        let Ok(resolved) = self.resolve_fitting_command(player_id, cmd.ship_id) else {
             return false;
-        }
+        };
+        let entity = resolved.entity;
         let Some(def) = self.module_registry.get(&cmd.module_id).cloned() else {
             return false;
         };
         if def.slot != cmd.slot {
             return false;
         }
-        let Some(&entity) = self.ships.index.get(&cmd.ship_id) else {
-            return false;
-        };
         let Some(&type_id) = self.ships.type_ids.get(&cmd.ship_id) else {
             return false;
         };
@@ -87,16 +84,12 @@ impl<S: EventStore> SimulationNode<S> {
     /// Move one fitted instance of `cmd.module_id` out of `cmd.slot` and back
     /// into the owning player's inventory (ADR-0032).
     pub fn unfit_module_owned(&mut self, player_id: PlayerId, cmd: UnfitModuleCommand) -> bool {
-        if !self.owns_ship(player_id, cmd.ship_id) {
-            return false;
-        }
-        // ADR-0032 amendment (2026-07-08): see fit_module_owned above.
-        if !self.is_ship_docked(cmd.ship_id) {
-            return false;
-        }
-        let Some(&entity) = self.ships.index.get(&cmd.ship_id) else {
+        // See fit_module_owned above: resolve_fitting_command checks
+        // ownership and dock state (ADR-0032 amendment, 2026-07-08).
+        let Ok(resolved) = self.resolve_fitting_command(player_id, cmd.ship_id) else {
             return false;
         };
+        let entity = resolved.entity;
         let removed = if let Some(mut fitting) = self.world.get_mut::<FittingComp>(entity) {
             let slots = fitting.slot_mut(cmd.slot);
             match slots.iter().position(|s| s.def.id == cmd.module_id) {
@@ -132,15 +125,10 @@ impl<S: EventStore> SimulationNode<S> {
         player_id: PlayerId,
         cmd: ReorderFittedModuleCommand,
     ) -> bool {
-        if !self.owns_ship(player_id, cmd.ship_id) {
-            return false;
-        }
-        if !self.is_ship_docked(cmd.ship_id) {
-            return false;
-        }
-        let Some(&entity) = self.ships.index.get(&cmd.ship_id) else {
+        let Ok(resolved) = self.resolve_fitting_command(player_id, cmd.ship_id) else {
             return false;
         };
+        let entity = resolved.entity;
         let reordered = if let Some(mut fitting) = self.world.get_mut::<FittingComp>(entity) {
             let slots = fitting.slot_mut(cmd.slot);
             let (from, to) = (cmd.from_index as usize, cmd.to_index as usize);

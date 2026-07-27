@@ -57,17 +57,15 @@ impl<S: EventStore> SimulationNode<S> {
         true
     }
 
-    /// `apply_approach_command` wrapped with an active-ship check (ADR-0037).
+    /// `apply_approach_command` wrapped with the shared flight-command seam
+    /// (active-ship + undocked, ADR-0037; `ship_command.rs`).
     pub fn apply_approach_command_owned(
         &mut self,
         player_id: PlayerId,
         ship_id: ShipId,
         cmd: dawn_core::ApproachCommand,
     ) -> bool {
-        if !self.is_active_ship(player_id, ship_id) {
-            return false;
-        }
-        if self.is_ship_docked(ship_id) {
+        if self.resolve_flight_command(player_id, ship_id).is_err() {
             return false;
         }
         self.apply_approach_command(ship_id, cmd.target)

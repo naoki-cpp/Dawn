@@ -68,10 +68,13 @@ impl ClientCommandFollowup {
 /// ad hoc `eprintln!` calls one per branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModuleActivationRejection {
-    /// `player_id` does not own `ship_id` (checked by the `_owned` wrappers).
+    /// `player_id` does not own `ship_id`, or it isn't their active ship
+    /// (checked by the `_owned` wrappers via `resolve_flight_command`).
     NotOwned,
     /// `ship_id` has no entity in this Sector.
     ShipNotFound,
+    /// `ship_id` is docked; module activation requires being undocked.
+    ShipDocked,
     /// No fitted slot matches `module_id`/`slot`.
     SlotNotFound,
     /// `ModuleKind::requires_target()` and `target.is_some()` disagree —
@@ -84,6 +87,26 @@ pub enum ModuleActivationRejection {
     /// The target is Locked, but beyond the module's effective range
     /// (weapon range+falloff, tackle range, remote-repair range).
     OutOfRange,
+}
+
+/// Maps a `resolve_flight_command` rejection (`ship_command.rs`) onto the
+/// `ModuleActivationRejection` reported by `activate_module_owned`/
+/// `deactivate_module_owned`. `MustBeDocked` is fitting-only and can never
+/// be produced by `resolve_flight_command`.
+fn module_activation_rejection_from_flight(
+    rejection: super::ship_command::ShipCommandRejection,
+) -> ModuleActivationRejection {
+    use super::ship_command::ShipCommandRejection;
+    match rejection {
+        ShipCommandRejection::NotOwned | ShipCommandRejection::NotActiveShip => {
+            ModuleActivationRejection::NotOwned
+        }
+        ShipCommandRejection::ShipNotFound => ModuleActivationRejection::ShipNotFound,
+        ShipCommandRejection::MustBeUndocked => ModuleActivationRejection::ShipDocked,
+        ShipCommandRejection::MustBeDocked => {
+            unreachable!("resolve_flight_command never returns MustBeDocked (fitting-command only)")
+        }
+    }
 }
 use dawn_ecs::{
     components::{FittedSlot, FittingComp, LockComp, LockState},
@@ -326,34 +349,30 @@ impl<S: EventStore> SimulationNode<S> {
         self.set_module_active(ship_id, cmd.module_id, cmd.slot, false, None)
     }
 
-    /// `activate_module` wrapped with an active-ship check (ADR-0037).
+    /// `activate_module` wrapped with the shared flight-command seam
+    /// (active-ship + undocked, ADR-0037; `ship_command.rs`).
     pub fn activate_module_owned(
         &mut self,
         player_id: PlayerId,
         ship_id: ShipId,
         cmd: dawn_core::ActivateModuleCommand,
     ) -> Result<(), ModuleActivationRejection> {
-        if !self.is_active_ship(player_id, ship_id) {
-            return Err(ModuleActivationRejection::NotOwned);
-        }
-        if self.is_ship_docked(ship_id) {
-            return Err(ModuleActivationRejection::ShipNotFound);
+        if let Err(rejection) = self.resolve_flight_command(player_id, ship_id) {
+            return Err(module_activation_rejection_from_flight(rejection));
         }
         self.activate_module(ship_id, cmd)
     }
 
-    /// `deactivate_module` wrapped with an active-ship check (ADR-0037).
+    /// `deactivate_module` wrapped with the shared flight-command seam
+    /// (active-ship + undocked, ADR-0037; `ship_command.rs`).
     pub fn deactivate_module_owned(
         &mut self,
         player_id: PlayerId,
         ship_id: ShipId,
         cmd: dawn_core::DeactivateModuleCommand,
     ) -> Result<(), ModuleActivationRejection> {
-        if !self.is_active_ship(player_id, ship_id) {
-            return Err(ModuleActivationRejection::NotOwned);
-        }
-        if self.is_ship_docked(ship_id) {
-            return Err(ModuleActivationRejection::ShipNotFound);
+        if let Err(rejection) = self.resolve_flight_command(player_id, ship_id) {
+            return Err(module_activation_rejection_from_flight(rejection));
         }
         self.deactivate_module(ship_id, cmd)
     }
@@ -735,6 +754,41 @@ mod tests {
             ),
             Err(ModuleActivationRejection::SlotNotFound),
             "activating a module_id that isn't fitted in that slot must name the real reason"
+        );
+
+        let station = node
+            .station(dawn_core::StationId(0))
+            .expect("demo station exists")
+            .clone();
+        let docked_id = node.next_player_id();
+        let docked_ship = node.spawn_player_ship_at_pub(docked_id, station.position);
+        node.fit_module(FitModuleCommand {
+            ship_id: docked_ship,
+            slot: SlotKind::High,
+            module_id: MODULE_RAILGUN_SMALL,
+        });
+        assert!(matches!(
+            node.dock_owned(
+                docked_id,
+                docked_ship,
+                dawn_core::DockCommand {
+                    station_id: dawn_core::StationId(0),
+                },
+            ),
+            crate::node::station::StationOperationOutcome::Accepted { .. }
+        ));
+        assert_eq!(
+            node.activate_module_owned(
+                docked_id,
+                docked_ship,
+                dawn_core::ActivateModuleCommand {
+                    module_id: MODULE_RAILGUN_SMALL,
+                    slot: SlotKind::High,
+                    target_ship_id: None,
+                }
+            ),
+            Err(ModuleActivationRejection::ShipDocked),
+            "activating while docked must be distinguishable from not owning the ship"
         );
     }
 
