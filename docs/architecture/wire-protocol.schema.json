@@ -436,6 +436,7 @@
             },
             "target_ship_id": {
               "description": "Target of a targeted module (Weapon/Tackle), per ADR-0035.",
+              "default": null,
               "type": [
                 "integer",
                 "null"
@@ -474,7 +475,8 @@
               "minimum": 0.0
             },
             "reason": {
-              "description": "Why the system forced this off (\"cap\" | \"range\"); omitted for a player-issued deactivation (ADR-0035).",
+              "description": "Why the system forced this off (\"cap\" | \"range\"); `None` for a player-issued deactivation (ADR-0035).",
+              "default": null,
               "type": [
                 "string",
                 "null"
