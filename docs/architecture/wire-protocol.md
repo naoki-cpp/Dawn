@@ -46,10 +46,10 @@ The full, authoritative list of messages the server can send, with every
 field and its JSON type, is generated straight from the Rust source and
 checked in at
 [`wire-protocol.schema.json`](./wire-protocol.schema.json) (JSON Schema,
-draft-07). It is produced by `dawn_actor::protocol::event_wire_json_schema()`,
+draft-07). It is produced by `dawn_wire::event_wire_json_schema()`,
 which reflects the `EventWire` enum in
 [`crates/dawn-wire/src/server_event.rs`](../../crates/dawn-wire/src/server_event.rs)
-(re-exported from `dawn_actor::protocol`, ADR-0041/ADR-0042).
+(ADR-0041/ADR-0042).
 
 Read `wire-protocol.schema.json` for the exact contract. In summary, the
 variant names are: `ShipSpawned`, `VelocityChanged`, `ShipDespawned`,
@@ -85,8 +85,8 @@ returns `None` for internal bookkeeping events (`ShipFitted`, `WeaponFired`,
 The full list of messages a client can send, with every field and its JSON
 type, is generated the same way and checked in at
 [`wire-protocol-commands.schema.json`](./wire-protocol-commands.schema.json).
-It is produced by `dawn_actor::protocol::client_command_wire_json_schema()`,
-which reflects the `ClientCommandWire` enum in `crates/dawn-wire/src/client_command.rs` (re-exported from `dawn_actor::protocol`).
+It is produced by `dawn_wire::client_command_wire_json_schema()`,
+which reflects the `ClientCommandWire` enum in `crates/dawn-wire/src/client_command.rs`.
 
 The variant names are: `MoveCommand`, `LockOnCommand`,
 `ActivateModuleCommand`, `DeactivateModuleCommand`, `AttackCommand`,
@@ -166,7 +166,7 @@ requirement, not the wire schema.
 
 The Market request schema is generated separately at
 [`wire-protocol-market.schema.json`](./wire-protocol-market.schema.json) by
-`dawn_actor::protocol::market_command_wire_json_schema()`. It contains
+`dawn_wire::market_command_wire_json_schema()`. It contains
 `RefreshMarketCommand`, `PlaceMarketOrderCommand`, and
 `CancelMarketOrderCommand`. `PlaceMarketOrderCommand` carries an explicit
 `ship_id` because an Ask removes cargo from that owned ship and a Bid names the
@@ -182,7 +182,7 @@ Sector does not parse these variants.
 
 ## Keeping this in sync
 
-`wire_schema_doc_is_up_to_date` (a test in `dawn-actor/src/protocol/mod.rs`) fails the build if
+`wire_schema_doc_is_up_to_date` (a test in `dawn-wire/src/lib.rs`) fails the build if
 any checked-in schema file drifts from what `EventWire`, `ClientCommandWire`,
 or `MarketCommandWire` currently produce. After changing any of those enums
 (or a type they reference), regenerate with:

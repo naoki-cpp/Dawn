@@ -1,13 +1,13 @@
 //! Regenerate the checked-in wire-protocol schema files from
-//! [`dawn_actor::protocol::event_wire_json_schema`] (server -> client),
-//! [`dawn_actor::protocol::client_command_wire_json_schema`] (Sector client ->
-//! server), and [`dawn_actor::protocol::market_command_wire_json_schema`]
+//! [`dawn_wire::event_wire_json_schema`] (server -> client),
+//! [`dawn_wire::client_command_wire_json_schema`] (Sector client ->
+//! server), and [`dawn_wire::market_command_wire_json_schema`]
 //! (Market client -> server).
 //!
 //! Run with `cargo run -p dawn-actor --example gen_wire_schema` after
 //! changing any of those types (or any type they reference). The
-//! `wire_schema_doc_is_up_to_date` test in `protocol.rs` fails the build if a
-//! file is stale, so CI catches a forgotten regeneration.
+//! `wire_schema_doc_is_up_to_date` test in `dawn-wire/src/lib.rs` fails the
+//! build if a file is stale, so CI catches a forgotten regeneration.
 
 use std::path::PathBuf;
 
@@ -20,15 +20,15 @@ fn write_schema(schema: &schemars::schema::RootSchema, relative_path: &str) {
 
 fn main() {
     write_schema(
-        &dawn_actor::protocol::event_wire_json_schema(),
+        &dawn_wire::event_wire_json_schema(),
         "../../docs/architecture/wire-protocol.schema.json",
     );
     write_schema(
-        &dawn_actor::protocol::client_command_wire_json_schema(),
+        &dawn_wire::client_command_wire_json_schema(),
         "../../docs/architecture/wire-protocol-commands.schema.json",
     );
     write_schema(
-        &dawn_actor::protocol::market_command_wire_json_schema(),
+        &dawn_wire::market_command_wire_json_schema(),
         "../../docs/architecture/wire-protocol-market.schema.json",
     );
 }

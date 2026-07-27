@@ -435,6 +435,378 @@ fn parse_slot_kind(s: &str) -> Option<SlotKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dawn_core::{JumpGateId, NodeId};
+
+    fn ship_id(n: u64) -> ShipId {
+        ShipId(EntityId::new(NodeId(0), n))
+    }
+
+    /// Test-only convenience: `parse_client_command` (the old JSON-text
+    /// parser combining this deserialize + convert step) was deleted since
+    /// nothing at runtime called it -- production decodes `ClientCommandWire`
+    /// straight off the binary `ClientMessage::Command` envelope (ADR-0042).
+    /// These tests keep exercising literal JSON text (matching
+    /// `docs/architecture/wire-protocol-commands.schema.json`, the
+    /// documented shape for a hypothetical non-Godot client) rather than
+    /// constructing `ClientCommandWire` values directly, so this helper
+    /// stays local to the test module instead of becoming production API.
+    fn command_from_json(line: &str) -> Option<dawn_core::ClientCommand> {
+        let wire: ClientCommandWire = serde_json::from_str(line).ok()?;
+        client_command_from_wire(wire)
+    }
+
+    #[test]
+    fn lock_on_command_json_is_parsed_into_client_command_lock_on() {
+        let line = r#"{"LockOnCommand":{"target_id":7}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::LockOn(c) => {
+                assert_eq!(c.target_id, ship_id(7));
+            }
+            other => panic!("expected LockOn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn activate_module_command_json_is_parsed_with_and_without_a_target() {
+        let line = r#"{"ActivateModuleCommand":{"module_id":3,"slot":"High","target_ship_id":9}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Activate(c) => {
+                assert_eq!(c.module_id, ModuleId(3));
+                assert_eq!(c.slot, SlotKind::High);
+                assert_eq!(c.target_ship_id, Some(ship_id(9)));
+            }
+            other => panic!("expected Activate, got {other:?}"),
+        }
+
+        let line_no_target = r#"{"ActivateModuleCommand":{"module_id":3,"slot":"High"}}"#;
+        let cmd_no_target = command_from_json(line_no_target).expect("must parse");
+        match cmd_no_target {
+            dawn_core::ClientCommand::Activate(c) => assert_eq!(c.target_ship_id, None),
+            other => panic!("expected Activate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deactivate_module_command_json_is_parsed_into_client_command_deactivate() {
+        let line = r#"{"DeactivateModuleCommand":{"module_id":3,"slot":"Mid"}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Deactivate(c) => {
+                assert_eq!(c.module_id, ModuleId(3));
+                assert_eq!(c.slot, SlotKind::Mid);
+            }
+            other => panic!("expected Deactivate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn attack_command_json_is_parsed_into_client_command_attack() {
+        let line = r#"{"AttackCommand":{"attacker_id":1,"target_id":2}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Attack(c) => {
+                assert_eq!(c.attacker_id, ship_id(1));
+                assert_eq!(c.target_id, ship_id(2));
+            }
+            other => panic!("expected Attack, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stop_command_json_is_parsed_into_client_command_stop() {
+        let line = r#"{"StopCommand":{}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        assert!(matches!(cmd, dawn_core::ClientCommand::Stop(_)));
+    }
+
+    #[test]
+    fn undock_command_json_is_parsed_into_client_command_undock() {
+        let line = r#"{"UndockCommand":{}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        assert!(matches!(cmd, dawn_core::ClientCommand::Undock(_)));
+    }
+
+    #[test]
+    fn build_packaged_ship_command_json_is_parsed_into_client_command_build_packaged_ship() {
+        let line = r#"{"BuildPackagedShipCommand":{"ship_id":1,"station_id":2,"ship_type_id":7}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::BuildPackagedShip(c) => {
+                assert_eq!(c.ship_id, ship_id(1));
+                assert_eq!(c.station_id, dawn_core::StationId(2));
+                assert_eq!(c.ship_type_id, dawn_core::ShipTypeId(7));
+            }
+            other => panic!("expected BuildPackagedShip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn select_active_ship_command_json_is_parsed_into_client_command_select_active_ship() {
+        let line = r#"{"SelectActiveShipCommand":{"ship_id":5}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::SelectActiveShip(c) => {
+                assert_eq!(c.ship_id, ship_id(5));
+            }
+            other => panic!("expected SelectActiveShip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn move_command_json_is_parsed_into_client_command_move() {
+        let line = r#"{"MoveCommand":{"target":{"x":10.0,"y":0.0,"z":-5.0}}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Move(c) => {
+                assert!((c.target_position.x - 10.0).abs() < 1e-6);
+            }
+            other => panic!("expected Move, got {other:?}"),
+        }
+    }
+
+    /// security-review.md SEC-5: a non-finite coordinate must be rejected at
+    /// the wire boundary instead of flowing into position/velocity math.
+    /// JSON has no `NaN`/`Infinity` literals, so the attack shape a real
+    /// client can actually send is a magnitude that overflows `f64` on
+    /// parse (`1e400` exceeds `f64::MAX`, so serde_json rejects it) -- literal
+    /// `NaN`/`Infinity` tokens would
+    /// just fail JSON parsing itself, which doesn't exercise `is_finite()`.
+    #[test]
+    fn move_command_json_with_an_overflowing_coordinate_fails_to_parse() {
+        let line = r#"{"MoveCommand":{"target":{"x":1e+400,"y":0.0,"z":0.0}}}"#;
+        assert!(command_from_json(line).is_none());
+    }
+
+    #[test]
+    fn orbit_command_json_with_an_overflowing_radius_fails_to_parse() {
+        let line = r#"{"OrbitCommand":{"gate_id":2,"radius":1e+400}}"#;
+        assert!(command_from_json(line).is_none());
+    }
+
+    #[test]
+    fn keep_at_range_command_json_with_an_overflowing_range_fails_to_parse() {
+        let line = r#"{"KeepAtRangeCommand":{"gate_id":2,"range":1e+400}}"#;
+        assert!(command_from_json(line).is_none());
+    }
+
+    #[test]
+    fn warp_command_json_is_parsed_into_client_command_warp() {
+        let line = r#"{"WarpCommand":{"gate_id":2}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Warp(c) => {
+                assert_eq!(c.target, dawn_core::WarpTarget::Gate(JumpGateId(2)));
+            }
+            other => panic!("expected Warp, got {other:?}"),
+        }
+
+        let line2 = r#"{"WarpCommand":{"target":{"Gate":2}}}"#;
+        let cmd2 = command_from_json(line2).expect("must parse");
+        match cmd2 {
+            dawn_core::ClientCommand::Warp(c) => {
+                assert_eq!(c.target, dawn_core::WarpTarget::Gate(JumpGateId(2)));
+            }
+            other => panic!("expected Warp, got {other:?}"),
+        }
+
+        let line3 = r#"{"WarpCommand":{"target":{"Body":1}}}"#;
+        let cmd3 = command_from_json(line3).expect("must parse");
+        match cmd3 {
+            dawn_core::ClientCommand::Warp(c) => {
+                assert_eq!(
+                    c.target,
+                    dawn_core::WarpTarget::Body(dawn_core::CelestialBodyId(1))
+                );
+            }
+            other => panic!("expected Warp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dock_command_json_is_parsed_into_client_command_dock() {
+        let line = r#"{"DockCommand":{"station_id":2}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Dock(c) => {
+                assert_eq!(c.station_id, dawn_core::StationId(2));
+            }
+            other => panic!("expected Dock, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn disassemble_ship_command_json_is_parsed_into_client_command_disassemble_ship() {
+        let line = r#"{"DisassembleShipCommand":{"ship_id":42,"station_id":2}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::DisassembleShip(c) => {
+                assert_eq!(c.ship_id, ship_id(42));
+                assert_eq!(c.station_id, dawn_core::StationId(2));
+            }
+            other => panic!("expected DisassembleShip, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn assemble_command_json_is_parsed_into_client_command_assemble() {
+        let line = r#"{"AssembleCommand":{"station_id":2,"ship_type_id":1}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Assemble(c) => {
+                assert_eq!(c.station_id, dawn_core::StationId(2));
+                assert_eq!(c.ship_type_id, dawn_core::ShipTypeId(1));
+            }
+            other => panic!("expected Assemble, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn disembark_command_json_is_parsed_into_client_command_disembark() {
+        let line = r#"{"DisembarkCommand":{}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        assert!(matches!(cmd, dawn_core::ClientCommand::Disembark(_)));
+    }
+
+    #[test]
+    fn transfer_to_station_command_json_with_scrap_metal_is_parsed() {
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"ToStation"}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::TransferToStation(c) => {
+                assert_eq!(c.ship_id, ship_id(42));
+                assert_eq!(c.station_id, dawn_core::StationId(2));
+                assert_eq!(c.item_id, dawn_core::ItemId::ScrapMetal);
+                assert_eq!(c.direction, dawn_core::TransferDirection::ToStation);
+            }
+            other => panic!("expected TransferToStation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn transfer_to_station_command_json_with_module_is_parsed() {
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"Module","module_id":7,"ship_type_id":0,"direction":"ToStation"}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::TransferToStation(c) => {
+                assert_eq!(c.item_id, dawn_core::ItemId::Module(ModuleId(7)));
+            }
+            other => panic!("expected TransferToStation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn transfer_to_station_command_json_with_to_ship_direction_is_parsed() {
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"ToShip"}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::TransferToStation(c) => {
+                assert_eq!(c.direction, dawn_core::TransferDirection::ToShip);
+            }
+            other => panic!("expected TransferToStation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn transfer_to_station_command_json_with_unknown_item_type_fails_to_parse() {
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"Bogus","module_id":0,"ship_type_id":0,"direction":"ToStation"}}"#;
+        assert!(command_from_json(line).is_none());
+    }
+
+    #[test]
+    fn transfer_to_station_command_json_with_unknown_direction_fails_to_parse() {
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"Bogus"}}"#;
+        assert!(command_from_json(line).is_none());
+    }
+
+    #[test]
+    fn reorder_fitted_module_command_json_is_parsed() {
+        let line = r#"{"ReorderFittedModuleCommand":{"ship_id":1,"slot":"Mid","from_index":0,"to_index":1}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::ReorderFittedModule(c) => {
+                assert_eq!(c.ship_id, ship_id(1));
+                assert_eq!(c.slot, dawn_core::SlotKind::Mid);
+                assert_eq!(c.from_index, 0);
+                assert_eq!(c.to_index, 1);
+            }
+            other => panic!("expected ReorderFittedModule, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn orbit_command_json_with_target_id_is_parsed_into_client_command_orbit() {
+        let line = r#"{"OrbitCommand":{"target_id":2,"radius":3000.0}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Orbit(c) => {
+                assert_eq!(c.target, ApproachTarget::Ship(ship_id(2)));
+                assert_eq!(c.radius, Some(3000.0));
+            }
+            other => panic!("expected Orbit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn orbit_command_json_with_gate_id_and_no_radius_is_parsed() {
+        let line = r#"{"OrbitCommand":{"gate_id":4}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Orbit(c) => {
+                assert_eq!(c.target, ApproachTarget::Gate(JumpGateId(4)));
+                assert_eq!(c.radius, None);
+            }
+            other => panic!("expected Orbit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn keep_at_range_command_json_is_parsed_into_client_command_keep_at_range() {
+        let line = r#"{"KeepAtRangeCommand":{"target_id":2,"range":5000.0}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::KeepAtRange(c) => {
+                assert_eq!(c.target, ApproachTarget::Ship(ship_id(2)));
+                assert_eq!(c.range, Some(5000.0));
+            }
+            other => panic!("expected KeepAtRange, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fit_module_command_json_is_parsed_into_client_command_fit() {
+        let line = r#"{"FitModuleCommand":{"ship_id":1,"module_id":2,"slot":"High"}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Fit(c) => {
+                assert_eq!(c.ship_id, ship_id(1));
+                assert_eq!(c.module_id, ModuleId(2));
+                assert_eq!(c.slot, SlotKind::High);
+            }
+            other => panic!("expected Fit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unfit_module_command_json_is_parsed_into_client_command_unfit() {
+        let line = r#"{"UnfitModuleCommand":{"ship_id":1,"module_id":2,"slot":"Mid"}}"#;
+        let cmd = command_from_json(line).expect("must parse");
+        match cmd {
+            dawn_core::ClientCommand::Unfit(c) => {
+                assert_eq!(c.ship_id, ship_id(1));
+                assert_eq!(c.module_id, ModuleId(2));
+                assert_eq!(c.slot, SlotKind::Mid);
+            }
+            other => panic!("expected Unfit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_command_type_returns_none() {
+        let line = r#"{"UnknownCommand":{"ship_id":1}}"#;
+        assert!(command_from_json(line).is_none());
+    }
 
     /// ADR-0041: `ClientCommandWire` gained `Serialize` so the Godot client
     /// can construct a variant directly and serialize it out, instead of

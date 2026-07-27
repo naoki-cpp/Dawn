@@ -15,6 +15,7 @@ dawn-core        = { path = "../dawn-core" }
 dawn-event-store = { path = "../dawn-event-store" }
 dawn-market      = { path = "../dawn-market" }
 dawn-actor       = { path = "../dawn-actor" }
+dawn-wire        = { path = "../dawn-wire" }
 dawn-consensus   = { path = "../dawn-consensus" }
 dawn-replication = { path = "../dawn-replication" }
 dawn-sector      = { path = "../dawn-sector" }

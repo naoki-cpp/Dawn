@@ -5,10 +5,10 @@
 //! sibling `market_settlement` module owns the one-sided cargo handoff, while
 //! this module validates wire input and sends bounded snapshots to the client.
 
-use dawn_actor::protocol::{MarketCommandWire, MarketOrderWire, MarketSnapshotWire};
 use dawn_core::{EntityId, ItemId, PlayerId, ShipId};
 use dawn_market::{MarketDb, MarketOrderView, OrderId, OrderSide};
 use dawn_sector::node::SimulationNode;
+use dawn_wire::{MarketCommandWire, MarketOrderWire, MarketSnapshotWire};
 
 use super::market_settlement::{MarketSettlement, ParsedOrder};
 

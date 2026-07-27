@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 dawn-core        = { path = "../dawn-core" }
 dawn-actor       = { path = "../dawn-actor" }
+dawn-wire        = { path = "../dawn-wire" }
 dawn-event-store = { path = "../dawn-event-store" }
 dawn-sector      = { path = "../dawn-sector" }
 dawn-consensus   = { path = "../dawn-consensus" }

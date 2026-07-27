@@ -26,12 +26,12 @@
 //! Client → Server:  ClientMessage::Market(..)      (binary, postcard)
 //! ```
 
-use crate::protocol::{
+use crate::{ClientCommand, ClientConnection};
+use dawn_core::{DomainEvent, PlayerId, ShipId};
+use dawn_wire::{
     domain_event_to_event_wire, ClientMessage, InitialStateWire, MarketCommandWire,
     PlayerLoadoutWire, ResumeIdentity, ServerMessage,
 };
-use crate::{ClientCommand, ClientConnection};
-use dawn_core::{DomainEvent, PlayerId, ShipId};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
@@ -186,9 +186,7 @@ impl HandshakeRequest {
                     if let Ok(message) = ClientMessage::decode(&bytes) {
                         match message {
                             ClientMessage::Command(cmd_wire) => {
-                                if let Some(cmd) =
-                                    crate::protocol::client_command_from_wire(cmd_wire)
-                                {
+                                if let Some(cmd) = dawn_wire::client_command_from_wire(cmd_wire) {
                                     // Bounded send: blocks (backpressures the socket
                                     // read) once COMMAND_QUEUE_CAP is reached instead
                                     // of growing memory without limit.

@@ -9,10 +9,10 @@
 //! dawn-actor — see AI_DEVELOPMENT_GUIDE.md crate boundaries).
 
 use crate::ws_server;
-use dawn_actor::protocol::ServerMessage;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_sector::aoi::{AoiSink, CellGrid};
 use dawn_sector::node::SimulationNode;
+use dawn_wire::ServerMessage;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) struct AoiDelivery {

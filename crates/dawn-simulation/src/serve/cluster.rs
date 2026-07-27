@@ -4,10 +4,10 @@ use super::{
     build_serve_node, market::MarketRuntime, runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS,
 };
 use crate::{cluster, ws_server};
-use dawn_actor::protocol::ServerMessage;
 use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
 use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
 use dawn_sector::transit;
+use dawn_wire::ServerMessage;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 

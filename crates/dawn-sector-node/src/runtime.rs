@@ -5,7 +5,7 @@
 //! jump proposal fallback, runtime tick stepping, outbound replication,
 //! Redirect handling, and AoI delivery.
 
-use dawn_actor::{protocol::ServerMessage, ws_server};
+use dawn_actor::ws_server;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
@@ -13,6 +13,7 @@ use dawn_replication::{OutboundLogPublisher, TcpReplicationTransport};
 use dawn_sector::aoi::AoiSink;
 use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
 use dawn_sector::{aoi, transit};
+use dawn_wire::ServerMessage;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::sync::mpsc;

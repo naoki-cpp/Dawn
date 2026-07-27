@@ -215,4 +215,55 @@ mod tests {
             }
         ));
     }
+
+    #[test]
+    fn wire_schema_doc_is_up_to_date() {
+        assert_schema_file_matches(
+            &event_wire_json_schema(),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/architecture/wire-protocol.schema.json"
+            ),
+        );
+        assert_schema_file_matches(
+            &client_command_wire_json_schema(),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/architecture/wire-protocol-commands.schema.json"
+            ),
+        );
+        assert_schema_file_matches(
+            &market_command_wire_json_schema(),
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../docs/architecture/wire-protocol-market.schema.json"
+            ),
+        );
+    }
+
+    #[test]
+    fn schema_comparison_accepts_windows_line_endings() {
+        assert_eq!(
+            normalize_line_endings("{\r\n  \"ok\": true\r\n}\r\n"),
+            "{\n  \"ok\": true\n}\n"
+        );
+    }
+
+    fn assert_schema_file_matches(schema: &schemars::schema::RootSchema, path: &str) {
+        let current = serde_json::to_string_pretty(schema).unwrap() + "\n";
+        // Git may materialize checked-in JSON with CRLF on Windows, while
+        // serde_json and the generator intentionally produce LF.
+        let checked_in = normalize_line_endings(
+            &std::fs::read_to_string(path).unwrap_or_else(|_| panic!("{path} must exist")),
+        );
+        assert_eq!(
+            current, checked_in,
+            "{path} is stale -- regenerate with \
+             `cargo run -p dawn-actor --example gen_wire_schema`"
+        );
+    }
+
+    fn normalize_line_endings(text: &str) -> String {
+        text.replace("\r\n", "\n")
+    }
 }
