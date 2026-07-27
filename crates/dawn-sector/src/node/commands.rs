@@ -326,34 +326,30 @@ impl<S: EventStore> SimulationNode<S> {
         self.set_module_active(ship_id, cmd.module_id, cmd.slot, false, None)
     }
 
-    /// `activate_module` wrapped with an active-ship check (ADR-0037).
+    /// `activate_module` wrapped with the shared flight-command seam
+    /// (active-ship + undocked, ADR-0037; `ship_command.rs`).
     pub fn activate_module_owned(
         &mut self,
         player_id: PlayerId,
         ship_id: ShipId,
         cmd: dawn_core::ActivateModuleCommand,
     ) -> Result<(), ModuleActivationRejection> {
-        if !self.is_active_ship(player_id, ship_id) {
+        if self.resolve_flight_command(player_id, ship_id).is_err() {
             return Err(ModuleActivationRejection::NotOwned);
-        }
-        if self.is_ship_docked(ship_id) {
-            return Err(ModuleActivationRejection::ShipNotFound);
         }
         self.activate_module(ship_id, cmd)
     }
 
-    /// `deactivate_module` wrapped with an active-ship check (ADR-0037).
+    /// `deactivate_module` wrapped with the shared flight-command seam
+    /// (active-ship + undocked, ADR-0037; `ship_command.rs`).
     pub fn deactivate_module_owned(
         &mut self,
         player_id: PlayerId,
         ship_id: ShipId,
         cmd: dawn_core::DeactivateModuleCommand,
     ) -> Result<(), ModuleActivationRejection> {
-        if !self.is_active_ship(player_id, ship_id) {
+        if self.resolve_flight_command(player_id, ship_id).is_err() {
             return Err(ModuleActivationRejection::NotOwned);
-        }
-        if self.is_ship_docked(ship_id) {
-            return Err(ModuleActivationRejection::ShipNotFound);
         }
         self.deactivate_module(ship_id, cmd)
     }

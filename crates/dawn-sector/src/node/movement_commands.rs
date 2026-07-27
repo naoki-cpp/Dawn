@@ -49,6 +49,14 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// `apply_move_command` wrapped with an active-ship check (ADR-0037: only
     /// the caller's active ship can be flown).
+    ///
+    /// Unlike the other flight commands, Move/Stop do *not* reject a docked
+    /// ship at this layer -- `apply_move_command` already no-ops on a docked
+    /// ship internally and this wrapper's return value has always meant
+    /// "the caller's active ship" rather than "the command took effect", so
+    /// this only checks ownership, not dock state (`resolve_flight_command`
+    /// would additionally reject on dock state, which would flip this
+    /// method's return value for a docked ship and break that contract).
     pub fn apply_move_command_owned(
         &mut self,
         player_id: PlayerId,
