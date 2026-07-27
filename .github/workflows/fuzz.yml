@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: fuzz-${{ github.workflow }}-${{ github.ref }}
@@ -40,25 +40,9 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: agent/dawn-wire-fuzz
-
-      - name: Apply postcard optional-field fix
-        if: matrix.target == 'decode_client_message'
-        run: |
-          file=crates/dawn-wire/src/server_event.rs
-          test "$(grep -Fc '#[serde(skip_serializing_if = "Option::is_none", default)]' "$file")" -eq 2
-          sed -i 's/#\[serde(skip_serializing_if = "Option::is_none", default)\]/#[serde(default)]/g' "$file"
-          sed -i 's/; omitted for a$/; `None` for a/' "$file"
-          sed -i 's/module_activated_event_without_a_target_omits_the_field/module_activated_event_without_a_target_has_none_target/' "$file"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$file"
-          git rm .github/workflows/apply-wire-fuzz-fix.yml
-          git commit -m "fix(dawn-wire): preserve optional fields in postcard"
-          git push origin HEAD:agent/dawn-wire-fuzz
+          persist-credentials: false
 
       - name: Install nightly Rust
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
