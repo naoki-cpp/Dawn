@@ -113,6 +113,7 @@ impl<S: EventStore> SimulationNode<S> {
         let warpers: Vec<(Entity, ShipId, WarpComp, Position, Velocity, f64)> = self
             .world
             .query::<(
+                Entity,
                 &ShipIdComp,
                 &WarpComp,
                 &PositionComp,
@@ -120,7 +121,7 @@ impl<S: EventStore> SimulationNode<S> {
                 &ShipStatsComp,
             )>()
             .iter()
-            .map(|(e, (id, w, p, v, s))| (e, id.0, *w, p.0, v.0, s.max_speed))
+            .map(|(e, id, w, p, v, s)| (e, id.0, *w, p.0, v.0, s.max_speed))
             .collect();
 
         let mut events = Vec::new();

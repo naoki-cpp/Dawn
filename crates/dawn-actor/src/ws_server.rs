@@ -47,7 +47,7 @@ use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
 /// Postcard-encode a [`ServerMessage`] and wrap it as a binary WS frame.
 fn server_message_frame(msg: &ServerMessage) -> Message {
-    Message::Binary(msg.encode())
+    Message::Binary(msg.encode().into())
 }
 
 // ── WsClientConnection ────────────────────────────────────────────────────────

@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-fn write_schema(schema: &schemars::schema::RootSchema, relative_path: &str) {
+fn write_schema(schema: &schemars::Schema, relative_path: &str) {
     let json = serde_json::to_string_pretty(schema).expect("schema serializes");
     let out_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_path);
     std::fs::write(&out_path, format!("{json}\n")).expect("write schema file");

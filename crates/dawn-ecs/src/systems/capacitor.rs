@@ -77,9 +77,15 @@ struct ShipSnap {
 pub fn run(world: &mut SimWorld, tick: Tick) -> CapacitorResult {
     // ── 1. Read-only snapshot ─────────────────────────────────────────────────
     let snaps: Vec<ShipSnap> = world
-        .query::<(&ShipIdComp, &CapacitorComp, &ShipStatsComp, &FittingComp)>()
+        .query::<(
+            hecs::Entity,
+            &ShipIdComp,
+            &CapacitorComp,
+            &ShipStatsComp,
+            &FittingComp,
+        )>()
         .iter()
-        .map(|(entity, (sid, cap, stats, fit))| {
+        .map(|(entity, sid, cap, stats, fit)| {
             let slots: Vec<SlotInfo> = fit
                 .iter_slots()
                 .enumerate()
@@ -331,8 +337,8 @@ mod tests {
         world
             .query::<(&ShipIdComp, &CapacitorComp)>()
             .iter()
-            .find(|(_, (sid, _))| sid.0 == id)
-            .map(|(_, (_, cap))| cap.current)
+            .find(|(sid, _)| sid.0 == id)
+            .map(|(_, cap)| cap.current)
             .expect("ship not found")
     }
 

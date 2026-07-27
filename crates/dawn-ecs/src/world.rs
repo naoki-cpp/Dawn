@@ -161,7 +161,7 @@ impl SimWorld {
     /// O(n) linear scan — call once per operation, not per tick.
     pub fn find_entity(&self, ship_id: ShipId) -> Option<Entity> {
         self.inner
-            .query::<&ShipIdComp>()
+            .query::<(hecs::Entity, &ShipIdComp)>()
             .iter()
             .find(|(_, id)| id.0 == ship_id)
             .map(|(e, _)| e)
@@ -252,7 +252,7 @@ mod tests {
         let target = Position::new(1.0, 2.0, 3.0);
         w.spawn_ship(make_ship_id(1), target, Velocity::ZERO);
         let mut found = false;
-        for (_e, pos) in w.inner().query::<&PositionComp>().iter() {
+        for pos in w.inner().query::<&PositionComp>().iter() {
             assert_eq!(pos.0, target);
             found = true;
         }

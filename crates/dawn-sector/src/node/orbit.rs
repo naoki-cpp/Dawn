@@ -194,9 +194,9 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn process_orbit(&mut self) {
         let orbiters: Vec<(Entity, ApproachTarget, f64, Position)> = self
             .world
-            .query::<(&OrbitComp, &PositionComp)>()
+            .query::<(Entity, &OrbitComp, &PositionComp)>()
             .iter()
-            .map(|(entity, (orbit, pos))| (entity, orbit.target, orbit.radius, pos.0))
+            .map(|(entity, orbit, pos)| (entity, orbit.target, orbit.radius, pos.0))
             .collect();
 
         for (entity, target, radius, ship_pos) in orbiters {
@@ -265,9 +265,9 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn process_keep_at_range(&mut self) {
         let holders: Vec<(Entity, ApproachTarget, f64, Position)> = self
             .world
-            .query::<(&KeepAtRangeComp, &PositionComp)>()
+            .query::<(Entity, &KeepAtRangeComp, &PositionComp)>()
             .iter()
-            .map(|(entity, (keep, pos))| (entity, keep.target, keep.range, pos.0))
+            .map(|(entity, keep, pos)| (entity, keep.target, keep.range, pos.0))
             .collect();
 
         for (entity, target, range, ship_pos) in holders {

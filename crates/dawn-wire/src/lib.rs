@@ -249,7 +249,7 @@ mod tests {
         );
     }
 
-    fn assert_schema_file_matches(schema: &schemars::schema::RootSchema, path: &str) {
+    fn assert_schema_file_matches(schema: &schemars::Schema, path: &str) {
         let current = serde_json::to_string_pretty(schema).unwrap() + "\n";
         // Git may materialize checked-in JSON with CRLF on Windows, while
         // serde_json and the generator intentionally produce LF.
