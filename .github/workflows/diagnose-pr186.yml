@@ -1,0 +1,80 @@
+name: Diagnose PR 186
+
+on:
+  push:
+    branches:
+      - dependabot/cargo/rust-dependencies-697640ec0a
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workspace-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.1
+
+      - name: Capture workspace test output
+        run: |
+          set +e
+          cargo test --workspace -- --nocapture > workspace-test.log 2>&1
+          status=$?
+          echo "exit_status=${status}" >> workspace-test.log
+          exit 0
+
+      - name: Upload workspace test log
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr186-workspace-test-log
+          path: workspace-test.log
+          retention-days: 1
+
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - decode_client_message
+          - decode_server_message
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Capture fuzz output
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set +e
+          cargo fuzz run "${TARGET}" -- -max_total_time=30 -rss_limit_mb=2048 -timeout=10 > "${TARGET}.log" 2>&1
+          status=$?
+          echo "exit_status=${status}" >> "${TARGET}.log"
+          exit 0
+
+      - name: Upload fuzz log
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr186-${{ matrix.target }}-log
+          path: ${{ matrix.target }}.log
+          retention-days: 1
