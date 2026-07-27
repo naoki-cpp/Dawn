@@ -104,6 +104,9 @@ R-3の着手トリガーである各impl約700行超は未発火。`dawn-wire`�
 | `crates/dawn-sector/src/node/player_loadout_projection.rs` | 559 | 🟢 2026-07-09 新設。PlayerLoadout / owned ships / station inventory の JSON projection を一元化した deep module。`item_id_to_row_json` もここで唯一化され、row schema drift を防ぐ |
 | `crates/dawn-sector/src/node/serialization.rs` | 485 | 🟢 InitialState / ship state / AoI / handoff payload の組み立てへ責務を縮小。PlayerLoadout projection を sibling module へ分離済み |
 | `crates/dawn-sector/src/galaxy.rs` | 459 | 🟢 ADR-0029 AU→units 変換・ゲート AU 化 |
+| `crates/dawn-sector/src/data_loader/modules.rs` | 224 | 🟢 TOML module loader。simulation / sector-node から共有 |
+| `crates/dawn-sector/src/data_loader/ship_types.rs` | 192 | 🟢 TOML ship type loader。simulation / sector-node から共有 |
+| `crates/dawn-sector/src/data_loader/mod.rs` | 9 | 🟢 TOML loader の公開面 |
 | `crates/dawn-sector/src/node/apply_event.rs` | 887 | 🟡 P7-pre + ADR-0032 + ADR-0035。replay apply の責務は単一。サイズは伸び続けており watch 帯だが、履歴再生の owner として一貫している（impl 約328で700行未満） |
 | `crates/dawn-sector/src/node/tackle.rs` | 345 | 🟢 P7-pre。ADR-0035（PR #62）で距離判定を `entity_absolute_f64` の f64 差分に修正（真 AU スケールでの f32 丸め対策・ADR-0029 パターン準拠）。PR #66 で手組みの delta 計算を `SimulationNode::ship_distance` 呼び出しに置換し未使用 `PositionComp` import を削除（358→345） |
 | `crates/dawn-sector/src/node/range_gate.rs` | 478（impl 149） | 🟢 ADR-0035 新設（PR #62）。Range Gate System（Step 5.5）— Weapon/Tackle/Remote Repair のターゲットが射程外に出たら強制 OFF（`ModuleDeactivated { forced_reason: OutOfRange }`）。PR #63 で flat-index 解決を `FittingComp::slot_at_flat_mut` に置換（403→382）。PR #66 で距離判定を `SimulationNode::ship_distance` 呼び出しに置換（382→362）。ADR-0036 で `effective_range_for_kind`/`process_range_gate` に Remote Repair 2 kind を追加 + 活性化/Range Gate/回復のテスト3件を追加（362→469） |
@@ -152,11 +155,8 @@ R-3の着手トリガーである各impl約700行超は未発火。`dawn-wire`�
 | `crates/dawn-simulation/src/serve/cluster.rs` | 237 | 🟢 `AoiDelivery` を持ち、入力処理と runtime 呼び出し中心 |
 | `crates/dawn-simulation/src/serve/runtime.rs` | 183 | 🟢 auto-jump / ownership handoff / scoped InitialState resend を集約 |
 | `crates/dawn-simulation/src/serve/aoi_delivery.rs` | 119 | 🟢 配信ロジック本体を `dawn_sector::aoi::AoiDelivery` へ移動。残りは adapter のみ |
-| `crates/dawn-simulation/src/data_loader/modules.rs` | 224 | 🟢 P5-2 |
 | `crates/dawn-simulation/src/serve/single.rs` | 235 | 🟢 P5-1。AoI delivery 詳細を `AoiDelivery` に委譲 |
-| `crates/dawn-simulation/src/data_loader/ship_types.rs` | 192 | 🟢 P5-2 |
 | `crates/dawn-simulation/src/main.rs` | 77 | 🟢 |
-| `crates/dawn-simulation/src/data_loader/mod.rs` | 9 | 🟢 P5-2 |
 
 ### dawn-client-core（Godot非依存クライアントドメインモデル・ADR-0039）
 
@@ -206,7 +206,6 @@ R-3の着手トリガーである各impl約700行超は未発火。`dawn-wire`�
 | `crates/dawn-replication/src/tcp.rs` | 288 | 🟢 8D-2c |
 | `crates/dawn-ecs/src/components/movement.rs` | 291 | 🟢 movement component 群 |
 | `crates/dawn-ecs/src/world.rs` | 294 | 🟢 クエリヘルパー |
-| `crates/dawn-sector-node/src/data_loader.rs` | 286 | 🟢 module/ship type TOML ローダー |
 | `crates/dawn-ecs/src/components/fitting.rs` | 384 | 🟢 `FittedSlot` と fitting component 群の owner |
 | `crates/dawn-ecs/src/components/combat.rs` | 376 | 🟢 |
 | `crates/dawn-replication/src/anti_entropy.rs` | 216 | 🟢 8D-2b |

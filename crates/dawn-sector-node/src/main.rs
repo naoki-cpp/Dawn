@@ -18,7 +18,6 @@
 
 mod client_admission;
 mod config;
-mod data_loader;
 mod runtime;
 
 use dawn_actor::ws_server;
@@ -28,7 +27,7 @@ use dawn_event_store::FileEventStore;
 use dawn_replication::{Ingest, ReplicaSet, ReplicationTransport, TcpReplicationTransport};
 use dawn_sector::node::SimulationNode;
 use dawn_sector::persistence::{CheckpointConfig, CheckpointScheduler, StateSnapshot};
-use dawn_sector::{galaxy::Galaxy, transit};
+use dawn_sector::{data_loader, galaxy::Galaxy, modules, ship_types, transit};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -265,8 +264,9 @@ fn build_node(
     sector_id: SectorId,
     bounds: SectorBounds,
 ) -> (SimulationNode<FileEventStore>, bool) {
-    let modules = data_loader::load_modules("data/modules.toml");
-    let ship_types = data_loader::load_ship_types("data/ship_types.toml");
+    let modules = data_loader::load_modules("data/modules.toml", modules::all_modules());
+    let ship_types =
+        data_loader::load_ship_types("data/ship_types.toml", ship_types::all_ship_types());
 
     // FileEventStore::open does not create its parent directory, and a fresh
     // deployment has no `data/node-N/` yet -- create it (and the snapshot/

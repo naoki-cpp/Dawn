@@ -65,6 +65,7 @@ Sector 単位のゲームシミュレーションロジック。
 | `src/aoi.rs` | Area of Interest（CellGrid）|
 | `src/dilation.rs` | TiDi 計算ロジック |
 | `src/galaxy.rs` | 星系トポロジーデータ（Galaxy）と TOML schema parser |
+| `src/data_loader/` | `modules.toml` / `ship_types.toml` の共有TOML loader |
 | `src/persistence/` | StateSnapshot・CheckpointScheduler |
 
 **dawn-simulation に残すもの（配線・起動）:**
@@ -78,9 +79,8 @@ Sector 単位のゲームシミュレーションロジック。
 | `src/ws_server.rs` | WebSocket フレーム送受信 |
 | `src/protocol.rs` | JSON ⇔ コマンド変換 |
 | `src/sector_simulator_actor.rs` | Actor ラッパー |
-| `src/data_loader.rs` | TOML 読み込み |
-| `src/modules.rs` | モジュール定義デフォルト値 |
-| `src/ship_types.rs` | 船種定義デフォルト値 |
+| `src/modules.rs` | モジュール定義のfallback値 |
+| `src/ship_types.rs` | 船種定義のfallback値 |
 
 ### dawn-sector の依存関係
 

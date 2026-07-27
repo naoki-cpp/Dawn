@@ -257,11 +257,9 @@ dependencies = [
  "dawn-sector",
  "rand",
  "rusqlite",
- "serde",
  "serde_json",
  "tempfile",
  "tokio",
- "toml",
 ]
 
 [[package]]

@@ -25,6 +25,7 @@
 
 pub mod anchor;
 pub mod aoi;
+pub mod data_loader;
 pub mod dilation;
 pub mod galaxy;
 pub mod modules;
