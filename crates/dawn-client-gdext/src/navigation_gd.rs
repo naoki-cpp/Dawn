@@ -7,8 +7,14 @@
 //! `ServerMessageDecoder` already produced from the decoded `InitialStateWire`
 //! directly, so `main.gd` never needs to `JSON.stringify` it back into text
 //! only for `serde_json` to parse it again on this side of the FFI boundary.
-//! Missing or wrong-typed fields default the same way the old
-//! `#[serde(default)]` `Deserialize` impls did.
+//! Missing fields default the same way the old `#[serde(default)]`
+//! `Deserialize` impls did. Wrong-typed fields are *not* equivalent to the
+//! old behavior: the old JSON parse failed outright on a type mismatch and
+//! `ingest_navigation` returned `false` without touching state, whereas
+//! here a wrong-typed value quietly falls back to its default and the
+//! ingest still proceeds. Harmless today since production values always
+//! come from the typed `InitialStateWire`, not hand-built JSON, but a
+//! caller relying on the old fail-closed behavior would be surprised.
 
 use dawn_client_core::{
     BuildableShipTypeInput, CelestialBodyInput, GateInput, NavigationInput, PositionInput,

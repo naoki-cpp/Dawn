@@ -45,12 +45,12 @@ impl WorldSession {
         self.state.set_player_ship_id(ship_id);
     }
 
-    /// Ingests the InitialState navigation portion. Takes the `Dictionary`
+    /// Ingests the InitialState navigation portion. Consumes the `Dictionary`
     /// `ServerMessageDecoder` already produced from the decoded
-    /// `InitialStateWire` directly (`navigation_gd::navigation_input_from_dict`)
-    /// -- no JSON on either side of this call, since the caller already has
-    /// these values unpacked and the core just needs a typed
-    /// `NavigationInput`.
+    /// `InitialStateWire` directly (`navigation_gd::navigation_input_from_dict`),
+    /// avoiding an extra `JSON.stringify`/`from_str` round trip at the
+    /// GDScript-to-Rust boundary just to rebuild a `NavigationInput` that
+    /// same-process Dictionary already carries.
     #[func]
     fn ingest_navigation(&mut self, state: Dict) {
         self.state
