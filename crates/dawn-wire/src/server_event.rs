@@ -96,7 +96,7 @@ pub enum EventWire {
         module_id: u32,
         slot: String,
         /// Target of a targeted module (Weapon/Tackle), per ADR-0035.
-        #[serde(skip_serializing_if = "Option::is_none", default)]
+        #[serde(default)]
         target_ship_id: Option<u64>,
         tick: u64,
     },
@@ -104,9 +104,9 @@ pub enum EventWire {
         ship_id: u64,
         module_id: u32,
         slot: String,
-        /// Why the system forced this off ("cap" | "range"); omitted for a
+        /// Why the system forced this off ("cap" | "range"); `None` for a
         /// player-issued deactivation (ADR-0035).
-        #[serde(skip_serializing_if = "Option::is_none", default)]
+        #[serde(default)]
         reason: Option<String>,
         tick: u64,
     },
@@ -521,7 +521,7 @@ mod tests {
     }
 
     #[test]
-    fn module_activated_event_without_a_target_omits_the_field() {
+    fn module_activated_event_without_a_target_has_none_target() {
         let wire = domain_event_to_event_wire(&DomainEvent::ModuleActivated(
             dawn_core::events::ModuleActivated {
                 ship_id: ship_id(1),
