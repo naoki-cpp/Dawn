@@ -40,8 +40,8 @@ struct ShipSnapshot {
     stats: ShipStatsComp,
     /// Absolute (Sector-frame) position in metres, kept as f64 so the pairwise
     /// difference between nearby ships stays precise even when anchors sit at
-    /// true astronomical distances (ADR-0029). Differences are cast to f32 for
-    /// the hit-chance math (the delta is small for ships in weapon range).
+    /// true astronomical distances (ADR-0029). Hit-chance geometry is computed
+    /// in f64 before combining it with the existing f32 combat coefficients.
     abs: AbsolutePosition,
     velocity: Velocity,
     current_shield: f32,
@@ -69,11 +69,7 @@ fn absolute_position(
     anchor_abs: &HashMap<AnchorId, AbsolutePosition>,
 ) -> AbsolutePosition {
     match anchor_abs.get(&anchor) {
-        Some(a) => AbsolutePosition::new(
-            a[0] + offset.x as f64,
-            a[1] + offset.y as f64,
-            a[2] + offset.z as f64,
-        ),
+        Some(a) => AbsolutePosition::new(a[0] + offset.x, a[1] + offset.y, a[2] + offset.z),
         None => {
             // ADR-0029 R3: an anchor missing from a *populated* table is a data
             // bug — at true AU it silently misplaces the ship by the body's
@@ -84,7 +80,7 @@ fn absolute_position(
                 "combat: ship anchored on {anchor:?} absent from a populated anchor table \
                  — distance fell back to the raw offset (wrong frame at true AU)"
             );
-            AbsolutePosition::new(offset.x as f64, offset.y as f64, offset.z as f64)
+            AbsolutePosition::new(offset.x, offset.y, offset.z)
         }
     }
 }
@@ -106,7 +102,8 @@ pub fn run(
     // frame-invariant only if both ships are expressed in the same frame. Once
     // ships can anchor on different bodies, resolve each ship's ABSOLUTE position
     // (anchor_abs + offset) so pairwise differences are correct. At compressed
-    // scale the absolute fits in f32; true-AU will refine this to an f64 delta.
+    // Keep the absolute positions in f64 so pairwise geometry is precise at
+    // true-AU distances.
 
     let mut ships: Vec<ShipSnapshot> = world
         .query::<(
@@ -258,15 +255,15 @@ pub fn run(
 /// - opt = weapon optimal range
 /// - falloff = weapon falloff range (hit chance halves at opt+falloff)
 fn calc_hit_chance(attacker: &ShipSnapshot, target: &ShipSnapshot) -> f32 {
-    // Compute the separation in f64 (absolutes may be astronomically large) then
-    // cast the small in-range delta to f32 for the tracking/range math.
-    let dx = (target.abs[0] - attacker.abs[0]) as f32;
-    let dy = (target.abs[1] - attacker.abs[1]) as f32;
-    let dz = (target.abs[2] - attacker.abs[2]) as f32;
+    // Keep spatial separation and relative velocity in f64. Combat tuning
+    // values remain f32, so only the final probability crosses that boundary.
+    let dx = target.abs[0] - attacker.abs[0];
+    let dy = target.abs[1] - attacker.abs[1];
+    let dz = target.abs[2] - attacker.abs[2];
     let dist = (dx * dx + dy * dy + dz * dz).sqrt();
 
     // Avoid division by zero when ships overlap
-    if dist < f32::EPSILON {
+    if dist < f64::EPSILON {
         return 1.0;
     }
 
@@ -289,25 +286,25 @@ fn calc_hit_chance(attacker: &ShipSnapshot, target: &ShipSnapshot) -> f32 {
         // Angular velocity (rad/tick)
         let angular = transversal / dist;
 
-        angular / (attacker.stats.weapon_tracking * target.stats.sig_radius)
+        angular / (f64::from(attacker.stats.weapon_tracking) * f64::from(target.stats.sig_radius))
     } else {
         0.0
     };
 
     // ── Range term ────────────────────────────────────────────────────────────
     let range_term = if attacker.stats.weapon_falloff > f32::EPSILON {
-        let excess = (dist - attacker.stats.weapon_range).max(0.0);
-        excess / attacker.stats.weapon_falloff
-    } else if dist > attacker.stats.weapon_range {
+        let excess = (dist - f64::from(attacker.stats.weapon_range)).max(0.0);
+        excess / f64::from(attacker.stats.weapon_falloff)
+    } else if dist > f64::from(attacker.stats.weapon_range) {
         // No falloff defined: binary drop-off beyond optimal
-        f32::INFINITY
+        f64::INFINITY
     } else {
         0.0
     };
 
     // ── Combined hit chance ───────────────────────────────────────────────────
     let exponent = tracking_term * tracking_term + range_term * range_term;
-    (0.5f32).powf(exponent)
+    (0.5f64).powf(exponent) as f32
 }
 
 /// EVE Online 準拠のダメージ倍率。
@@ -445,7 +442,7 @@ mod tests {
             entity: hecs::Entity::DANGLING,
             ship_id: id,
             stats,
-            abs: AbsolutePosition::new(pos.x as f64, pos.y as f64, pos.z as f64),
+            abs: AbsolutePosition::new(pos.x, pos.y, pos.z),
             velocity: vel,
             current_shield: 100.0,
             current_armor: 100.0,
@@ -523,10 +520,10 @@ mod tests {
         // → target moving at tracking × sig perpendicular at dist=1000
         let tracking = 0.05_f32;
         let sig = 40.0_f32;
-        let dist = 1000.0_f32;
-        let transversal_needed = tracking * sig; // so angular = tracking*sig/dist*dist = tracking*sig... wait
-                                                 // angular = transversal / dist  →  for angular = tracking*sig: transversal = tracking*sig*dist
-        let perp_speed = tracking * sig * dist;
+        let dist = 1000.0_f64;
+        // angular = transversal / dist; choose a transversal velocity that
+        // makes angular equal to tracking × signature radius.
+        let perp_speed = f64::from(tracking) * f64::from(sig) * dist;
 
         let atk = make_snap(
             ship_id(1),
@@ -543,7 +540,6 @@ mod tests {
                 ..ShipStatsComp::NPC
             },
         );
-        let _ = transversal_needed;
         let h = calc_hit_chance(&atk, &tgt);
         assert!(
             (h - 0.5).abs() < 1e-4,

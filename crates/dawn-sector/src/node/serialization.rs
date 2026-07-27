@@ -40,7 +40,7 @@ fn abs_pos_json(p: AbsolutePosition) -> AbsPosWire {
 impl<S: EventStore> SimulationNode<S> {
     /// Build the `InitialState` + `PlayerLoadout` pair to hand a client once
     /// its identity (fresh or resumed) has already been decided by the caller.
-    pub fn build_handoff_payload(&self, ship_id: ShipId, aoi_cell_size: f32) -> HandoffPayload {
+    pub fn build_handoff_payload(&self, ship_id: ShipId, aoi_cell_size: f64) -> HandoffPayload {
         let initial_state = self
             .ship_absolute_pos(ship_id)
             .map(|pos| self.build_initial_state_json_for(pos, aoi_cell_size))
@@ -62,7 +62,7 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn build_initial_state_json_for(
         &self,
         observer_abs: dawn_core::AbsolutePosition,
-        cell_size: f32,
+        cell_size: f64,
     ) -> InitialStateWire {
         self.initial_state_json(self.ships_visible_to(observer_abs, cell_size).into_iter())
     }
@@ -227,7 +227,7 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn ships_visible_to(
         &self,
         observer_abs: dawn_core::AbsolutePosition,
-        cell_size: f32,
+        cell_size: f64,
     ) -> Vec<ShipId> {
         crate::aoi::CellGrid::build(cell_size, self.ship_absolute_positions())
             .neighbors_of(observer_abs)
@@ -306,7 +306,7 @@ mod tests {
         );
         // Rebase b onto Forge with an offset that returns it to absolute origin.
         let forge = node.anchor_table().abs(AnchorId(1)).unwrap();
-        let off = Position::new(-forge[0] as f32, -forge[1] as f32, -forge[2] as f32);
+        let off = Position::new(-forge[0], -forge[1], -forge[2]);
         node.apply_event_pub(DomainEvent::AnchorRebased(AnchorRebased {
             ship_id: b,
             anchor: AnchorId(1),
@@ -432,7 +432,7 @@ mod tests {
             .ship_state_json(sid)
             .expect("known ship yields a state");
         assert_eq!(ship.ship_id, sid.raw());
-        assert_eq!(ship.position.x as f32, 1.0);
+        assert_eq!(ship.position.x, 1.0);
         assert_eq!(ship.velocity.dx, 0.0);
         assert_eq!(ship.velocity.dy, 0.0);
         assert_eq!(ship.velocity.dz, 0.0);

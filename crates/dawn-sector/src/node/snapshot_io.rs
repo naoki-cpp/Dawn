@@ -151,7 +151,7 @@ mod tests {
         for i in 0..3 {
             node.spawn_ship(
                 dawn_core::ShipTypeId(1),
-                Position::new(i as f32 * 100.0, 0.0, 0.0),
+                Position::new(i as f64 * 100.0, 0.0, 0.0),
                 Velocity::new(1.0, 0.0, 0.0),
             );
         }
@@ -192,7 +192,7 @@ mod tests {
                 .map(|i| {
                     let id = node.spawn_ship(
                         dawn_core::ShipTypeId(1),
-                        Position::new(i as f32 * 100.0, 0.0, 0.0),
+                        Position::new(i as f64 * 100.0, 0.0, 0.0),
                         Velocity::ZERO,
                     );
                     node.set_player_ship(id);
@@ -264,7 +264,7 @@ mod tests {
         for i in 0..4u64 {
             let id = node.spawn_ship(
                 dawn_core::ShipTypeId(1),
-                Position::new(i as f32 * 50.0, 0.0, 0.0),
+                Position::new(i as f64 * 50.0, 0.0, 0.0),
                 Velocity::ZERO,
             );
             node.set_player_ship(id);
@@ -310,7 +310,7 @@ mod tests {
         for i in 0..3u64 {
             live.spawn_ship(
                 dawn_core::ShipTypeId(1),
-                Position::new(i as f32 * 100.0, 0.0, 0.0),
+                Position::new(i as f64 * 100.0, 0.0, 0.0),
                 Velocity::new(120.0, -40.0, 0.0),
             );
         }
@@ -376,7 +376,7 @@ mod tests {
             for i in 0..3u64 {
                 node.spawn_ship(
                     dawn_core::ShipTypeId(1),
-                    Position::new(i as f32 * 100.0, 0.0, 0.0),
+                    Position::new(i as f64 * 100.0, 0.0, 0.0),
                     Velocity::new(40.0, -15.0, 0.0),
                 );
             }

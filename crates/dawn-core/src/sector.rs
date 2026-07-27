@@ -33,10 +33,9 @@ impl SectorBounds {
     /// giving a total side length of 2 * DEFAULT_HALF = 1,400,000 units. Sized
     /// to contain a "wide" star system (planets at ~10^5 units, gates at the
     /// edge ~600,000) so bodies sit far enough that their bearing barely shifts
-    /// during sublight travel — which reads as distance (f32-safe; see ADR-0028:
-    /// f32 to ~10^7 units, i64 only for true AU). Bounds are soft (spawn-
+    /// during sublight travel — which reads as distance. Bounds are soft (spawn-
     /// placement range only; space is unbounded since Phase 4).
-    pub const DEFAULT_HALF: f32 = 700_000.0;
+    pub const DEFAULT_HALF: f64 = 700_000.0;
 
     /// # Panics
     /// Panics if `min` is not component-wise `<= max` (an inverted or
@@ -51,7 +50,7 @@ impl SectorBounds {
 
     /// Create a cubic sector centred on `(0,0,0)` with half-extent `half`,
     /// so that the spawn origin (0,0,0) sits in the middle of the playfield.
-    pub fn centered(half: f32) -> Self {
+    pub fn centered(half: f64) -> Self {
         Self {
             min: Position::new(-half, -half, -half),
             max: Position::new(half, half, half),

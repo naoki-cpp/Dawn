@@ -91,9 +91,9 @@ impl MovementSystem {
 }
 
 fn velocity_changed(old: Velocity, new: Velocity) -> bool {
-    (new.dx - old.dx).abs() > f32::EPSILON
-        || (new.dy - old.dy).abs() > f32::EPSILON
-        || (new.dz - old.dz).abs() > f32::EPSILON
+    (new.dx - old.dx).abs() > f64::EPSILON
+        || (new.dy - old.dy).abs() > f64::EPSILON
+        || (new.dz - old.dz).abs() > f64::EPSILON
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -241,7 +241,7 @@ mod tests {
         let mut w = SimWorld::new(SectorId(0));
         for i in 0..10 {
             let id = dawn_core::ShipId::new(NodeId(0), i);
-            let entity = w.spawn_ship(id, Position::new(i as f32 * 10.0, 0.0, 0.0), Velocity::ZERO);
+            let entity = w.spawn_ship(id, Position::new(i as f64 * 10.0, 0.0, 0.0), Velocity::ZERO);
             w.set_ship_stats(entity, ShipStatsComp::PLAYER);
             w.inner_mut()
                 .get::<&mut ThrustComp>(entity)
@@ -280,7 +280,7 @@ mod tests {
         assert_eq!(vel.0.dy, 0.0);
         assert_eq!(vel.0.dz, 0.0);
         // Must not exceed max_speed immediately.
-        assert!(vel.0.dx <= ShipStatsComp::PLAYER.max_speed + f32::EPSILON);
+        assert!(vel.0.dx <= ShipStatsComp::PLAYER.max_speed + f64::EPSILON);
     }
 
     #[test]
@@ -363,7 +363,7 @@ mod tests {
 
         let tau_ticks = ShipStatsComp::PLAYER.mass * ShipStatsComp::PLAYER.inertia_modifier
             / dawn_core::MASS_SCALE;
-        let expected_align = (-0.25_f32.ln() * tau_ticks).ceil() as u32;
+        let expected_align = (-0.25_f64.ln() * tau_ticks).ceil() as u32;
         let threshold = ShipStatsComp::PLAYER.max_speed * 0.75;
 
         let mut actual_align = 0u32;

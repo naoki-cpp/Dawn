@@ -30,13 +30,13 @@ pub type Cell = (i32, i32, i32);
 /// Static-cell spatial bucket for AoI queries.
 #[derive(Debug)]
 pub struct CellGrid {
-    cell_size: f32,
+    cell_size: f64,
     cells: BTreeMap<Cell, Vec<ShipId>>,
 }
 
 impl CellGrid {
     /// Create an empty grid with the given cell edge length.
-    pub fn new(cell_size: f32) -> Self {
+    pub fn new(cell_size: f64) -> Self {
         assert!(
             cell_size > 0.0,
             "cell_size must be positive, got {cell_size}"
@@ -53,7 +53,7 @@ impl CellGrid {
     /// ulp, which would fuzz the cell boundary (ADR-0029 R2). Each bucket is
     /// sorted by `ShipId` so neighborhood enumeration is deterministic.
     pub fn build(
-        cell_size: f32,
+        cell_size: f64,
         ships: impl IntoIterator<Item = (ShipId, AbsolutePosition)>,
     ) -> Self {
         let mut grid = Self::new(cell_size);
@@ -333,8 +333,8 @@ impl AoiDelivery {
 /// Map an absolute (f64) position to its integer cell via floor division
 /// (handles negatives: `-0.1` with size 100 → cell -1, not 0). The division is
 /// done in f64 so a ship near a true-AU anchor lands in the right cell.
-fn grid_cell(cell_size: f32, pos: [f64; 3]) -> Cell {
-    let size = cell_size as f64;
+fn grid_cell(cell_size: f64, pos: [f64; 3]) -> Cell {
+    let size = cell_size;
     (
         (pos[0] / size).floor() as i32,
         (pos[1] / size).floor() as i32,

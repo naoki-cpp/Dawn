@@ -58,9 +58,10 @@ impl<S: EventStore> SimulationNode<S> {
                         .map(|v| v.0)
                         .unwrap_or(Velocity::ZERO);
                     if let Some(mut pos) = self.world.get_mut::<PositionComp>(entity) {
-                        pos.0.x += old_vel.dx * gap_ticks as f32 + e.velocity.dx;
-                        pos.0.y += old_vel.dy * gap_ticks as f32 + e.velocity.dy;
-                        pos.0.z += old_vel.dz * gap_ticks as f32 + e.velocity.dz;
+                        let gap_ticks = gap_ticks as f64;
+                        pos.0.x += old_vel.dx * gap_ticks + e.velocity.dx;
+                        pos.0.y += old_vel.dy * gap_ticks + e.velocity.dy;
+                        pos.0.z += old_vel.dz * gap_ticks + e.velocity.dz;
                     }
                     if let Some(mut vel) = self.world.get_mut::<VelocityComp>(entity) {
                         vel.0 = e.velocity;

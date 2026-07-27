@@ -64,7 +64,7 @@ impl ClientAdmission {
         &mut self,
         node: &mut SimulationNode<S>,
         sector_id: SectorId,
-        aoi_cell_size: f32,
+        aoi_cell_size: f64,
     ) {
         while let Ok(ship_id) = self.failed_fresh_spawn_rx.try_recv() {
             node.despawn_incomplete_handshake_spawn(ship_id);

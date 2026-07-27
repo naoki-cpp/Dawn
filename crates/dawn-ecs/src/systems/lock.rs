@@ -165,10 +165,10 @@ pub fn run(world: &mut SimWorld, tick: Tick, pending_commands: &[LockOnCommand])
                     let dx = s.pos.x - origin.x;
                     let dy = s.pos.y - origin.y;
                     let dz = s.pos.z - origin.z;
-                    (dx * dx + dy * dy + dz * dz).sqrt() <= range
+                    (dx * dx + dy * dy + dz * dz).sqrt() <= f64::from(range)
                 })
                 .min_by(|a, b| {
-                    let dist = |s: &&ShipSnap| -> f32 {
+                    let dist = |s: &&ShipSnap| -> f64 {
                         let dx = s.pos.x - origin.x;
                         let dy = s.pos.y - origin.y;
                         let dz = s.pos.z - origin.z;

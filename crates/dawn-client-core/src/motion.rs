@@ -53,21 +53,12 @@ impl Default for MotionProfile {
 impl MotionProfile {
     /// Creates a profile when all movement values are finite and valid.
     pub fn new(max_speed: f64, mass: f64, inertia_modifier: f64) -> Option<Self> {
-        let core_max_speed = max_speed as f32;
-        let core_mass = mass as f32;
-        let core_inertia_modifier = inertia_modifier as f32;
-
         if !max_speed.is_finite()
             || max_speed < 0.0
             || !mass.is_finite()
             || mass <= 0.0
             || !inertia_modifier.is_finite()
             || inertia_modifier <= 0.0
-            || !core_max_speed.is_finite()
-            || !core_mass.is_finite()
-            || core_mass <= 0.0
-            || !core_inertia_modifier.is_finite()
-            || core_inertia_modifier <= 0.0
         {
             return None;
         }
@@ -92,12 +83,8 @@ impl MotionProfile {
     }
 
     fn as_core(self) -> CoreMovementProfile {
-        CoreMovementProfile::new(
-            self.max_speed as f32,
-            self.mass as f32,
-            self.inertia_modifier as f32,
-        )
-        .expect("MotionProfile validates the shared movement profile")
+        CoreMovementProfile::new(self.max_speed, self.mass, self.inertia_modifier)
+            .expect("MotionProfile validates the shared movement profile")
     }
 }
 
@@ -465,11 +452,11 @@ fn subtract(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
 }
 
 fn to_core_velocity(vector: [f64; 3]) -> Velocity {
-    Velocity::new(vector[0] as f32, vector[1] as f32, vector[2] as f32)
+    Velocity::new(vector[0], vector[1], vector[2])
 }
 
 fn from_core_velocity(vector: Velocity) -> [f64; 3] {
-    [vector.dx as f64, vector.dy as f64, vector.dz as f64]
+    [vector.dx, vector.dy, vector.dz]
 }
 
 fn scale(vector: [f64; 3], factor: f64) -> [f64; 3] {
@@ -487,8 +474,8 @@ mod tests {
         predictor.set_thrust([2.0, 0.0, 0.0]);
         predictor.advance(1.0);
 
-        let alpha = 1.0_f32 - (-1.0 / 30.0_f32).exp();
-        assert!((predictor.velocity()[0] - f64::from(500.0 * alpha)).abs() < 1e-6);
+        let alpha = 1.0_f64 - (-1.0 / 30.0_f64).exp();
+        assert!((predictor.velocity()[0] - (500.0 * alpha)).abs() < 1e-6);
         assert_eq!(predictor.position(), predictor.velocity());
     }
 
@@ -660,12 +647,7 @@ mod tests {
         assert!(MotionProfile::new(-1.0, 10_000_000.0, 0.3).is_none());
         assert!(MotionProfile::new(500.0, 0.0, 0.3).is_none());
         assert!(MotionProfile::new(500.0, 10_000_000.0, f64::NAN).is_none());
-        assert!(MotionProfile::new(f64::from(f32::MAX) * 2.0, 1.0, 0.3).is_none());
-        assert!(MotionProfile::new(
-            500.0,
-            f64::from(f32::MIN_POSITIVE) * f64::from(f32::MIN_POSITIVE),
-            0.3
-        )
-        .is_none());
+        assert!(MotionProfile::new(f64::INFINITY, 1.0, 0.3).is_none());
+        assert!(MotionProfile::new(500.0, f64::MIN_POSITIVE * f64::MIN_POSITIVE, 0.3).is_none());
     }
 }

@@ -276,7 +276,7 @@ mod tests {
         node.set_spawn_anchor_abs(
             ship_id,
             [
-                station.abs_m[0] + station.docking_radius as f64 + 5000.0,
+                station.abs_m[0] + station.docking_radius + 5000.0,
                 station.abs_m[1],
                 station.abs_m[2],
             ],

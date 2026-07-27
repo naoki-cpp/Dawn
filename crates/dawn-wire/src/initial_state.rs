@@ -2,7 +2,7 @@
 //!
 //! Sent once per connection (fresh spawn, resume, or jump handoff) to give the
 //! client the navigation map plus every ship it can currently see. Absolute
-//! positions here are f64 (ADR-0029) -- [`PosWire`](crate::PosWire) is f32 and
+//! positions here are f64 (ADR-0029) -- [`PosWire`](crate::PosWire) is also f64
 //! is used only for client command targets, so this module has its own
 //! `AbsPosWire`.
 
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::VelWire;
 
 /// Absolute (Sector-frame, f64) position (ADR-0029). Distinct from
-/// [`crate::PosWire`] (f32), which carries client-authored command targets
+/// [`crate::PosWire`] (f64), which carries client-authored command targets
 /// rather than server-authoritative absolute coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AbsPosWire {
@@ -40,9 +40,9 @@ pub struct ShipStateWire {
     pub ship_type_name: String,
     pub position: AbsPosWire,
     pub velocity: VelWire,
-    pub max_speed: f32,
-    pub mass: f32,
-    pub inertia_modifier: f32,
+    pub max_speed: f64,
+    pub mass: f64,
+    pub inertia_modifier: f64,
     pub max_shield: f32,
     pub max_armor: f32,
     pub max_hull: f32,
@@ -60,7 +60,7 @@ pub struct CelestialBodyWire {
     pub kind: CelestialBodyKind,
     pub name: String,
     pub position: AbsPosWire,
-    pub radius: f32,
+    pub radius: f64,
     pub spectral_type: f32,
 }
 
@@ -74,7 +74,7 @@ pub struct SystemWire {
 pub struct JumpGateWire {
     pub gate_id: u32,
     pub position: AbsPosWire,
-    pub activation_radius: f32,
+    pub activation_radius: f64,
     pub to_system_name: String,
 }
 
@@ -83,7 +83,7 @@ pub struct StationWire {
     pub station_id: u32,
     pub name: String,
     pub position: AbsPosWire,
-    pub docking_radius: f32,
+    pub docking_radius: f64,
 }
 
 /// Buildable Packaged Ship catalog entry (ADR-0034 9B). Static registry data,

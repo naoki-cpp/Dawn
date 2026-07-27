@@ -34,7 +34,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-const AOI_CELL_SIZE: f32 = 30_000.0;
+const AOI_CELL_SIZE: f64 = 30_000.0;
 const TICK_MS: u64 = 100;
 /// Cap on the suffix length an anti-entropy gap request may ask for.
 const MAX_REPL_SUFFIX: usize = 4096;

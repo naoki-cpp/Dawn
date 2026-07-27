@@ -14,7 +14,7 @@ pub struct SpawnConfig {
     /// Spatial bounds within which ships are scattered.
     pub bounds: SectorBounds,
     /// Absolute value cap for each velocity component (units/tick).
-    pub max_speed: f32,
+    pub max_speed: f64,
     /// Seed for the PRNG, enabling deterministic reproduction.
     pub seed: u64,
 }

@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema, Clone, Copy)]
 pub struct PosWire {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
 }
 
 impl PosWire {
@@ -29,9 +29,9 @@ impl PosWire {
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, JsonSchema, Clone, Copy)]
 pub struct VelWire {
-    pub dx: f32,
-    pub dy: f32,
-    pub dz: f32,
+    pub dx: f64,
+    pub dy: f64,
+    pub dz: f64,
 }
 
 impl From<Position> for PosWire {
@@ -140,12 +140,12 @@ pub enum ClientCommandWire {
     OrbitCommand {
         gate_id: Option<u32>,
         target_id: Option<u64>,
-        radius: Option<f32>,
+        radius: Option<f64>,
     },
     KeepAtRangeCommand {
         gate_id: Option<u32>,
         target_id: Option<u64>,
-        range: Option<f32>,
+        range: Option<f64>,
     },
     FitModuleCommand {
         ship_id: u64,
@@ -468,8 +468,13 @@ mod tests {
     /// check, not dawn-actor.
     #[test]
     fn move_command_wire_with_an_overflowing_coordinate_fails_to_convert() {
-        let line = r#"{"MoveCommand":{"target":{"x":1e+40,"y":0.0,"z":0.0}}}"#;
-        let wire: ClientCommandWire = serde_json::from_str(line).expect("deserialize");
+        let wire = ClientCommandWire::MoveCommand {
+            target: PosWire {
+                x: f64::INFINITY,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
         assert!(client_command_from_wire(wire).is_none());
     }
 }

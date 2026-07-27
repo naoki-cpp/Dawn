@@ -84,7 +84,7 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn process_approach(&mut self) {
         use dawn_core::ApproachTarget;
         /// Stop and hold once within this distance of a Ship target (units).
-        const SHIP_ARRIVAL_RADIUS: f32 = 500.0;
+        const SHIP_ARRIVAL_RADIUS: f64 = 500.0;
 
         // Collect approachers up front (entity, target, current position) so the
         // ECS query borrow is released before the mutable write pass below.
@@ -105,19 +105,14 @@ impl<S: EventStore> SimulationNode<S> {
         for (entity, target, auto_jump_gate, ship_offset) in approachers {
             // Work in the approacher's CURRENT anchor frame (small numbers),
             // not absolute Sector-frame Position (ADR-0029): composing the
-            // anchor (f64) and offset down to an absolute f32 `Position` loses
-            // the same ulp a far anchor's own coordinate has (tens of km at
-            // true AU) — fine for warp's broad alignment check, but not for
-            // this system's tight arrival-radius comparison. `ship_offset` is
-            // already anchor-relative, so it needs no conversion; the target's
-            // f64 absolute position is brought into the SAME frame via
-            // `dest_in_ship_frame_abs` (which does the subtraction in f64,
-            // casting to f32 only once, so the only loss is the final small
-            // offset's own ulp, not the anchor's).
+            // `ship_offset` is already anchor-relative. The target's f64
+            // absolute position is brought into the same frame via
+            // `dest_in_ship_frame_abs`, so the tight arrival-radius comparison
+            // stays in f64 throughout.
             let ship_pos = ship_offset;
             // Resolve the target's current position and the arrival distance.
             // `None` means the target no longer exists.
-            let resolved: Option<(Position, f32)> = match target {
+            let resolved: Option<(Position, f64)> = match target {
                 ApproachTarget::Ship(target_id) => self
                     .ships
                     .index
@@ -484,10 +479,8 @@ mod tests {
         // system and only sublight-approach over the last stretch (the gate is
         // far beyond sublight range in a test budget). Compute "12,000 m short
         // of the gate" in f64 and re-anchor directly (set_spawn_anchor_abs) --
-        // subtracting 12,000 from gate.position (f32) at true-AU magnitude would
-        // vanish entirely to catastrophic cancellation (the f32 ulp there is
-        // tens of km, far bigger than 12,000), landing the ship exactly on the
-        // (still-lossy) gate position instead of meaningfully short of it.
+        // subtracting 12,000 from the absolute gate position must remain in the
+        // f64 absolute frame, so the fixture stays meaningfully short of it.
         let near_gate_abs = [gate.abs_m[0] - 12_000.0, gate.abs_m[1], gate.abs_m[2]];
         let (player, chaser) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         node.set_spawn_anchor_abs(chaser, near_gate_abs);
@@ -504,9 +497,7 @@ mod tests {
             Some(dawn_core::ApproachTarget::Gate(dawn_core::JumpGateId(0)))
         );
 
-        // Distance via the f64 absolute accessors throughout (ship_distance_to_point
-        // composes a f32 Position with the ship's f32 position, which has the same
-        // AU-scale ulp problem as the spawn point above).
+        // Distance via the f64 absolute accessors throughout.
         let dist_to_gate = |node: &SimulationNode| {
             let abs = node.ship_absolute(chaser).unwrap();
             let d = [

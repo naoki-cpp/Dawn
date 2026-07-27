@@ -1,14 +1,14 @@
 //! Coordinate anchors — per-body local origins for ship positions (ADR-0029).
 //!
-//! A ship's authoritative position is `(AnchorId, f32 offset)`. The offset is a
-//! small displacement (the ship stays near its anchor), so f32 stays precise
+//! A ship's authoritative position is `(AnchorId, f64 offset)`. The offset is a
+//! small displacement (the ship stays near its anchor), so f64 preserves
 //! even when the anchor sits at a true astronomical distance from the Sector
 //! origin. The anchor's *absolute* position (Sector-local frame, star at origin)
 //! is held here as an `[f64; 3]` constant built from the static [`Galaxy`] map.
 //!
 //! This is the f64 in "method B": it is a static constant (identical on every
 //! node, never recomputed), so it does not affect replay determinism — replay
-//! still only recomputes the f32 offset integration (ADR-0029 §5, ADR-0028
+//! still only recomputes the f64 offset integration (ADR-0029 §5, ADR-0028
 //! Investigation B).
 
 use crate::galaxy::Galaxy;
@@ -56,34 +56,27 @@ impl AnchorTable {
         &self.abs
     }
 
-    /// Absolute position of a ship given its anchor and f32 offset.
+    /// Absolute position of a ship given its anchor and f64 offset.
     /// `anchor_abs + offset`, computed in f64.
     pub fn absolute(&self, anchor: AnchorId, offset: Position) -> Option<AbsolutePosition> {
         let a = self.abs(anchor)?;
         Some(AbsolutePosition::new(
-            a[0] + offset.x as f64,
-            a[1] + offset.y as f64,
-            a[2] + offset.z as f64,
+            a[0] + offset.x,
+            a[1] + offset.y,
+            a[2] + offset.z,
         ))
     }
 
     /// Re-express a Sector-frame absolute point relative to `anchor`, i.e. the
-    /// inverse of [`Self::absolute`]: `abs - anchor_abs`, computed in f64 then
-    /// cast to f32 once. Exact when `abs` is near `anchor` (ship-scale
-    /// offsets); ADR-0029's precision guarantee does not extend to points far
-    /// from `anchor`.
+    /// inverse of [`Self::absolute`]: `abs - anchor_abs`, computed in f64.
     pub fn to_relative(&self, anchor: AnchorId, abs: AbsolutePosition) -> Option<Position> {
         let a = self.abs(anchor)?;
-        Some(Position::new(
-            (abs[0] - a[0]) as f32,
-            (abs[1] - a[1]) as f32,
-            (abs[2] - a[2]) as f32,
-        ))
+        Some(Position::new(abs[0] - a[0], abs[1] - a[1], abs[2] - a[2]))
     }
 
     /// Re-express a ship currently anchored at `from` (with `offset`) relative
     /// to a new anchor `to`. The new offset is `(from_abs + offset) - to_abs`,
-    /// computed in f64 then stored as f32 — exact when the ship is near `to`
+    /// computed and stored in f64 — exact when the ship is near `to`
     /// (ADR-0029 §2: rebase at warp arrival, where the new offset is small).
     pub fn rebase(&self, from: AnchorId, offset: Position, to: AnchorId) -> Option<Position> {
         self.to_relative(to, self.absolute(from, offset)?)
@@ -265,7 +258,7 @@ mod tests {
         // f32-at-absolute would destroy): recover off_a from the composed point.
         let recovered_x = pa[0] - 1.0 * AU_M;
         assert!(
-            (recovered_x - off_a.x as f64).abs() < 1e-3,
+            (recovered_x - off_a.x).abs() < 1e-3,
             "near-anchor offset lost precision: {} vs {}",
             recovered_x,
             off_a.x

@@ -11,14 +11,14 @@ related : ADR-0028 (大規模座標の方式比較), ADR-0029 (現行アンカ�
 
 ## 背景
 
-ADR-0029 は、サーバー上の船を「アンカー + ローカル f32 オフセット」、
+ADR-0029 は、サーバー上の船を「アンカー + ローカルオフセット」、
 クライアントを浮動原点 + Godot `Vector3` とする方式をAcceptedにした。
 この方式は、近傍の戦闘演算をf32で処理しつつ真スケールの天体配置を扱うための
 実装方針として成立している。
 
 しかし現在の実装では、同じ「位置」が複数の意味で流れている。
 
-- `PositionComp` はアンカー相対のf32オフセット
+- `PositionComp` はアンカー相対のf64オフセット
 - `AnchorTable` は天体の絶対f64座標
 - `InitialState` / `AoiEnter` / `PositionSnap` / `MotionCorrection` は絶対f64
 - 一部の `EventWire` と互換用のクライアントイベント処理はf32の`Vector3`
@@ -40,14 +40,14 @@ ADR-0029 は、サーバー上の船を「アンカー + ローカル f32 オフ
 ```text
 AbsolutePosition  : Sectorフレームの絶対位置。f64。サーバー権威・wireの基準。
 LocalOffset       : 絶対位置 - 浮動原点。クライアント描画用。Godot Vector3。
-Velocity          : 1 tick あたりの変位。現段階では f32 を維持する。
+Velocity          : 1 tick あたりの変位。f64。サーバー物理・wire・クライアント予測の基準。
 ```
 
 移行完了までのルールは以下とする。
 
 1. 新しいサーバーコードは、絶対座標とアンカー相対オフセットを同じ型で表さない。
 2. 絶対距離、AoIセル判定、ゲート・ステーションの範囲判定、ワープ曲線はf64で行う。
-3. 速度と近傍の1 tick移動はf32を維持し、位置積分時に必要ならf64へ昇格する。
+3. 速度、近傍の1 tick移動、操船距離、AOIセル境界はf64で計算する。
 4. クライアントはサーバー座標を`Vector3`として保存しない。f64コンポーネントのまま
    `WorldSpace`で原点との差分を計算し、最後にだけGodotの`Vector3`へ変換する。
 5. `AnchorTable`、`AnchorComp`、`AnchorRebased`は移行期間の互換層とし、新しいゲーム
@@ -64,9 +64,9 @@ f64へ変更したり、アンカー方式と絶対方式を新機能ごとに�
 - **アンカー相対f32を長期方針として維持する:** 現行ADR-0029の実績は尊重するが、
   絶対値と相対値の境界を守るための変換箇所が増え、今回のような判定・表示の不一致を
   根本的には減らせない。
-- **速度・描画を含めて全てf64にする:** Godot標準の`Vector3`と既存のwire帯域に対して
-  必要以上の変更となる。位置の絶対精度が問題の中心であり、速度までf64にする根拠は
-  現時点ではない。
+- **描画まで全てf64にする:** Godot標準の`Vector3`を置き換える必要があり、状態と
+  シミュレーションをf64にする今回の目的を超える。f64からGodot `Vector3`への変換は
+  浮動原点との差分を取った最後の境界に限定する。
 - **i64固定小数点へ移行する:** 決定論上の利点はあるが、現在の物理・wire・表示の単位
   と合わず、f64の境界問題を解消するための変更としては過大である。
 
@@ -74,9 +74,9 @@ f64へ変更したり、アンカー方式と絶対方式を新機能ごとに�
 
 - [x] 人間が本ADRを承認し、`status`を`accepted`へ変更する
 - [x] `dawn-core::AbsolutePosition` を定義し、静的な天体・ゲート・ステーション定義の絶対座標に適用する
-- [ ] サーバーの位置・距離・AoI・ナビゲーション判定を絶対f64経路へ移行する（AnchorTable / combat / AoI CellGrid / TransitOp / ship_absolute / WarpComp / entity_absolute_f64 は移行済み。PositionComp と低レベル補間用配列が残る）
-- [x] `PositionComp`と`AnchorComp`の移行方針を決定し、互換読み取りを隔離する（PositionCompはアンカー相対f32オフセットとして維持し、AbsolutePositionへの変換はAnchorTable / ship_absoluteに限定。旧snapshot / transit payloadは専用legacy decoderで読み取り、absolute_positionは`None`へ変換）
-- [ ] 位置を含むDomainEvent、snapshot、wire schemaを同じ移行で更新する（snapshot と ShipSpawned / SectorTransitCompleted / JumpGateUsed の移行済み。残るイベント境界を整理する）
+- [x] サーバーの位置・距離・AoI・ナビゲーション判定をf64経路へ移行する（AnchorTable / combat / AoI CellGrid / TransitOp / ship_absolute / WarpComp / entity_absolute_f64 / PositionComp / orbit / keep-at-range を含む）
+- [x] `PositionComp`と`AnchorComp`の移行方針を決定し、PositionCompはアンカー相対f64オフセットとして維持する。AbsolutePositionへの変換はAnchorTable / ship_absoluteに限定する
+- [x] 位置・速度を含むDomainEvent、snapshot、wire schemaを同じ移行で更新する（`AbsPosWire` / `PosWire` / `VelWire` と移動プロファイル値をf64化し、生成schemaを更新）
 - [x] f64 wire位置をクライアントで`Vector3`へ変換する前に差分計算するテストを追加する
 
 - [x] AU桁のゲート・ステーションで表示位置と近接判定が一致するテストを追加する
@@ -89,6 +89,10 @@ GDScript側はNode3Dの配置・原点リベース時のシーンツリー更新
 
 ## 影響と保留事項
 
-これは既存イベントのフィールド型を変える可能性があるため、実装時にはイベント
-スキーマとsnapshotの移行戦略を先に決める。リリース前のため旧ログをそのまま維持
-するか、移行ツールを用意するかは実装PRで確定する。
+本リポジトリではまだサーバーを運用しておらず、移行対象となる永続データも存在しない。
+そのため、postcardのf32旧形式を読み戻す互換層やデータ移行処理は実装しない。
+
+- `FileEventStore`、`StateSnapshot`、`TransitOp` は現行f64型だけを保存・読込する。
+- 既存の保存形式を変更する必要が生じた場合は、その時点で形式バージョンと移行手順を
+  別のADRとして追加する。
+- 現在の回帰テストは、現行f64形式の保存・読込とラウンドトリップだけを検証する。

@@ -200,7 +200,7 @@ struct JumpGateEntry {
     /// Parsed as f64 so the authoring precision survives at true-AU scale —
     /// the f64 `abs_m` source (ADR-0029 R1).
     position: [f64; 3],
-    activation_radius: f32,
+    activation_radius: f64,
 }
 
 #[derive(Deserialize)]
@@ -213,7 +213,7 @@ struct CelestialBodyEntry {
     /// Parsed as f64 so the authoring precision survives at true-AU scale.
     position: [f64; 3],
     /// Visual radius in units (exaggerated for gameplay; not an AU distance).
-    radius: f32,
+    radius: f64,
     #[serde(default)]
     spectral_type: f32,
 }
@@ -225,7 +225,7 @@ struct StationEntry {
     name: String,
     /// Authored in AU and converted to metres on load.
     position: [f64; 3],
-    docking_radius: f32,
+    docking_radius: f64,
 }
 
 fn parse_body_kind(s: &str) -> CelestialBodyKind {
@@ -258,7 +258,7 @@ fn entry_to_gate(e: JumpGateEntry) -> JumpGateDef {
     JumpGateDef {
         id: JumpGateId(e.id),
         from_sector: SectorId(e.from_sector),
-        position: Position::new(abs_m[0] as f32, abs_m[1] as f32, abs_m[2] as f32),
+        position: Position::new(abs_m[0], abs_m[1], abs_m[2]),
         abs_m: abs_m.into(),
         to_sector: SectorId(e.to_sector),
         activation_radius: e.activation_radius,
@@ -281,7 +281,7 @@ fn entry_to_body(e: CelestialBodyEntry) -> CelestialBodyDef {
         sector: SectorId(e.sector),
         kind: parse_body_kind(&e.kind),
         name: e.name,
-        position: Position::new(abs_m[0] as f32, abs_m[1] as f32, abs_m[2] as f32),
+        position: Position::new(abs_m[0], abs_m[1], abs_m[2]),
         abs_m: abs_m.into(),
         radius: e.radius,
         spectral_type: e.spectral_type,
@@ -299,7 +299,7 @@ fn entry_to_station(e: StationEntry) -> StationDef {
         id: StationId(e.id),
         sector: SectorId(e.sector),
         name: e.name,
-        position: Position::new(abs_m[0] as f32, abs_m[1] as f32, abs_m[2] as f32),
+        position: Position::new(abs_m[0], abs_m[1], abs_m[2]),
         abs_m: abs_m.into(),
         docking_radius: e.docking_radius,
     }
@@ -350,7 +350,7 @@ mod tests {
         // f32 ulp bound at this magnitude, not an exactness check (true AU only).
         let ulp_bound = (0.72 * UNITS_PER_AU * f32::EPSILON as f64).abs().max(1.0);
         assert!(
-            (gate0.position.x as f64 - (-0.72) * UNITS_PER_AU).abs() < ulp_bound,
+            (gate0.position.x - (-0.72) * UNITS_PER_AU).abs() < ulp_bound,
             "x = {}",
             gate0.position.x
         );
@@ -384,7 +384,7 @@ mod tests {
         // this bound is the f32 ulp at Forge's magnitude, not an exactness check.
         let ulp_bound = (0.8 * UNITS_PER_AU * f32::EPSILON as f64).abs().max(1.0);
         assert!(
-            (forge.position.x as f64 - 0.8 * UNITS_PER_AU).abs() < ulp_bound,
+            (forge.position.x - 0.8 * UNITS_PER_AU).abs() < ulp_bound,
             "x = {}",
             forge.position.x
         );

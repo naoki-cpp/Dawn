@@ -591,7 +591,7 @@
   ],
   "definitions": {
     "AbsPosWire": {
-      "description": "Absolute (Sector-frame, f64) position (ADR-0029). Distinct from [`crate::PosWire`] (f32), which carries client-authored command targets rather than server-authoritative absolute coordinates.",
+      "description": "Absolute (Sector-frame, f64) position (ADR-0029). Distinct from [`crate::PosWire`] (f64), which carries client-authored command targets rather than server-authoritative absolute coordinates.",
       "type": "object",
       "required": [
         "x",
@@ -623,15 +623,15 @@
       "properties": {
         "dx": {
           "type": "number",
-          "format": "float"
+          "format": "double"
         },
         "dy": {
           "type": "number",
-          "format": "float"
+          "format": "double"
         },
         "dz": {
           "type": "number",
-          "format": "float"
+          "format": "double"
         }
       }
     }

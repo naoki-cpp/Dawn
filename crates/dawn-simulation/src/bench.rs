@@ -432,7 +432,7 @@ pub(crate) fn run_aoi_benchmark() {
         // Deterministic pseudo-uniform spread across the sector.
         let ships: Vec<(ShipId, Position)> = (0..n)
             .map(|i| {
-                let h = |k: usize| ((i.wrapping_mul(k)) % 100_000) as f32 - half;
+                let h = |k: usize| (i.wrapping_mul(k) % 100_000) as f64 - half;
                 (
                     ShipId::new(NodeId(0), i as u64),
                     Position::new(h(2_654_435_761), h(40_503), h(2_246_822_519)),
@@ -446,21 +446,16 @@ pub(crate) fn run_aoi_benchmark() {
         let t = Instant::now();
         let grid = aoi::CellGrid::build(
             AOI_CELL_SIZE,
-            ships.iter().map(|(id, p)| {
-                (
-                    *id,
-                    dawn_core::AbsolutePosition::new(p.x as f64, p.y as f64, p.z as f64),
-                )
-            }),
+            ships
+                .iter()
+                .map(|(id, p)| (*id, dawn_core::AbsolutePosition::new(p.x, p.y, p.z))),
         );
         let build = t.elapsed();
         let t = Instant::now();
         let mut aoi_vol = 0usize;
         for o in &observers {
             aoi_vol += grid
-                .neighbors_of(dawn_core::AbsolutePosition::new(
-                    o.x as f64, o.y as f64, o.z as f64,
-                ))
+                .neighbors_of(dawn_core::AbsolutePosition::new(o.x, o.y, o.z))
                 .len();
         }
         let query = t.elapsed();

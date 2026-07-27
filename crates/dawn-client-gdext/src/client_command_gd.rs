@@ -53,7 +53,7 @@ fn scalar_dict_to_json_object(fields: &Dict) -> Option<serde_json::Map<String, s
 /// `<= 0.0` means "no override, let the server pick its default"
 /// (ADR-0031). Kept as a free function so every `*_command` below applies
 /// the same rule instead of repeating the comparison.
-fn positive_or_none(value: f32) -> Option<f32> {
+fn positive_or_none(value: f64) -> Option<f64> {
     if value > 0.0 {
         Some(value)
     } else {
@@ -90,7 +90,7 @@ pub struct ClientCommand {}
 #[godot_api]
 impl ClientCommand {
     #[func]
-    fn move_command(&self, x: f32, y: f32, z: f32) -> PackedByteArray {
+    fn move_command(&self, x: f64, y: f64, z: f64) -> PackedByteArray {
         command_wire_bytes(ClientCommandWire::MoveCommand {
             target: PosWire { x, y, z },
         })
@@ -147,7 +147,7 @@ impl ClientCommand {
     /// `range_m <= 0.0` falls back to the server-side default (weapon
     /// range, ADR-0031).
     #[func]
-    fn orbit_command(&self, target_id: i64, range_m: f32) -> PackedByteArray {
+    fn orbit_command(&self, target_id: i64, range_m: f64) -> PackedByteArray {
         command_wire_bytes(ClientCommandWire::OrbitCommand {
             gate_id: None,
             target_id: Some(target_id as u64),
@@ -156,7 +156,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn orbit_gate_command(&self, gate_id: i64, range_m: f32) -> PackedByteArray {
+    fn orbit_gate_command(&self, gate_id: i64, range_m: f64) -> PackedByteArray {
         command_wire_bytes(ClientCommandWire::OrbitCommand {
             gate_id: Some(gate_id as u32),
             target_id: None,
@@ -165,7 +165,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn keep_at_range_command(&self, target_id: i64, range_m: f32) -> PackedByteArray {
+    fn keep_at_range_command(&self, target_id: i64, range_m: f64) -> PackedByteArray {
         command_wire_bytes(ClientCommandWire::KeepAtRangeCommand {
             gate_id: None,
             target_id: Some(target_id as u64),
@@ -174,7 +174,7 @@ impl ClientCommand {
     }
 
     #[func]
-    fn keep_at_range_gate_command(&self, gate_id: i64, range_m: f32) -> PackedByteArray {
+    fn keep_at_range_gate_command(&self, gate_id: i64, range_m: f64) -> PackedByteArray {
         command_wire_bytes(ClientCommandWire::KeepAtRangeCommand {
             gate_id: Some(gate_id as u32),
             target_id: None,

@@ -78,7 +78,7 @@ mod tests {
     fn event(n: u64) -> DomainEvent {
         DomainEvent::VelocityChanged(VelocityChanged {
             ship_id: ShipId::new(NodeId(0), n),
-            velocity: Velocity::new(n as f32, 0.0, 0.0),
+            velocity: Velocity::new(n as f64, 0.0, 0.0),
             tick: Tick(n),
         })
     }

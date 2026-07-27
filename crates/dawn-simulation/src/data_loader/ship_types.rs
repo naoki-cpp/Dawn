@@ -27,9 +27,9 @@ pub(super) struct SlotLayoutEntry {
 
 #[derive(Deserialize)]
 pub(super) struct BaseStatsEntry {
-    pub(super) max_speed: f32,
-    pub(super) mass: f32,
-    pub(super) inertia_modifier: f32,
+    pub(super) max_speed: f64,
+    pub(super) mass: f64,
+    pub(super) inertia_modifier: f64,
     pub(super) max_shield: f32,
     pub(super) max_armor: f32,
     pub(super) max_hull: f32,

@@ -31,11 +31,11 @@ pub struct CelestialBodyDef {
     pub position: Position,
     /// Absolute position in metres as f64 — the authoritative anchor source
     /// (ADR-0029). Equals `position` numerically at compressed scale, but stays
-    /// precise at true-AU distances where the f32 `position` would lose ~tens of
+    /// precise at true-AU distances where the old f32 `position` would lose ~tens of
     /// km. `AnchorTable` is built from this, not from `position`.
     pub abs_m: AbsolutePosition,
     /// Logical radius (units). Warp arrival stops at `radius * 1.5` from centre.
-    pub radius: f32,
+    pub radius: f64,
     /// Blackbody spectral type [0=O/blue, 0.6=G/Sun-yellow, 1=M/red]. Planets: 0.0.
     pub spectral_type: f32,
 }
@@ -45,9 +45,9 @@ pub struct CelestialBodyDef {
 /// Identifies a coordinate *anchor* — a celestial body that serves as a local
 /// origin for ship positions (ADR-0029). Anchors are per-body (§2), so an
 /// `AnchorId` is one-to-one with a [`CelestialBodyId`]: a ship's authoritative
-/// position is `(anchor, f32 offset)` and its absolute position is
+/// position is `(anchor, f64 offset)` and its absolute position is
 /// `anchor_abs(f64) + offset`. Keeping the offset small (the ship stays near
-/// its anchor) preserves f32 precision even when the anchor sits at a true
+/// its anchor) preserves precision even when the anchor sits at a true
 /// astronomical distance from the Sector origin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct AnchorId(pub u32);
@@ -95,19 +95,17 @@ pub struct JumpGateDef {
     pub position: Position,
     /// Absolute gate position in metres as f64 — the authoritative source for
     /// range/warp checks (ADR-0029 review R1). Equals `position` numerically at
-    /// compressed scale, but stays precise at true-AU distances where the f32
+    /// compressed scale, but stays precise at true-AU distances where the old f32
     /// `position` is ~tens of km coarse (one f32 ulp at ~10^11 m). Gates are
     /// Sector-frame fixtures, so this *is* their absolute position.
     pub abs_m: AbsolutePosition,
     pub to_sector: SectorId,
     /// A Ship within this distance of `position` may use the gate.
-    pub activation_radius: f32,
+    pub activation_radius: f64,
 }
 
 impl JumpGateDef {
-    /// Whether `ship_pos` is close enough to this gate to use it. f32 path kept
-    /// for tests / compressed-scale callers; gameplay routes through
-    /// [`Self::is_in_range_abs`] so the check stays precise at true AU.
+    /// Whether `ship_pos` is close enough to this gate to use it.
     pub fn is_in_range(&self, ship_pos: Position) -> bool {
         ship_pos.distance(self.position) <= self.activation_radius
     }
@@ -117,7 +115,7 @@ impl JumpGateDef {
     /// source, so it does not lose the ~16 km of f32 ulp at true-AU distances
     /// (ADR-0029 R1).
     pub fn is_in_range_abs(&self, ship_abs: AbsolutePosition) -> bool {
-        self.distance_abs(ship_abs) <= self.activation_radius as f64
+        self.distance_abs(ship_abs) <= self.activation_radius
     }
 
     /// True distance (metres, f64) from an absolute ship position to this gate.
@@ -148,7 +146,7 @@ pub struct StationDef {
     /// Absolute station position in metres as f64, matching gate/body authoring.
     pub abs_m: AbsolutePosition,
     /// A ship within this radius may use the station.
-    pub docking_radius: f32,
+    pub docking_radius: f64,
 }
 
 impl StationDef {
@@ -159,7 +157,7 @@ impl StationDef {
 
     /// Whether an absolute (Sector-frame, f64) ship position is within range.
     pub fn is_in_range_abs(&self, ship_abs: AbsolutePosition) -> bool {
-        self.distance_abs(ship_abs) <= self.docking_radius as f64
+        self.distance_abs(ship_abs) <= self.docking_radius
     }
 
     /// True distance (metres, f64) from an absolute ship position to this station.
@@ -199,7 +197,7 @@ mod tests {
         let g = JumpGateDef {
             id: JumpGateId(0),
             from_sector: SectorId(0),
-            position: Position::new(AU_M as f32, 0.0, 0.0),
+            position: Position::new(AU_M, 0.0, 0.0),
             abs_m: [AU_M, 0.0, 0.0].into(),
             to_sector: SectorId(1),
             activation_radius: 50.0,
@@ -243,7 +241,7 @@ mod tests {
             id: StationId(0),
             sector: SectorId(0),
             name: "Forge Station".to_string(),
-            position: Position::new(AU_M as f32, 0.0, 0.0),
+            position: Position::new(AU_M, 0.0, 0.0),
             abs_m: [AU_M, 0.0, 0.0].into(),
             docking_radius: 100.0,
         };

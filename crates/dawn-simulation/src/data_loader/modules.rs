@@ -26,9 +26,9 @@ pub(super) struct ModuleEntry {
 #[derive(Deserialize, Default)]
 pub(super) struct StatDeltaEntry {
     #[serde(default = "default_speed_multiplier")]
-    pub(super) speed_multiplier: f32,
+    pub(super) speed_multiplier: f64,
     #[serde(default)]
-    pub(super) mass_add: f32,
+    pub(super) mass_add: f64,
     #[serde(default)]
     pub(super) max_shield_add: f32,
     #[serde(default)]
@@ -61,7 +61,7 @@ pub(super) struct StatDeltaEntry {
     pub(super) repair_range_add: f32,
 }
 
-fn default_speed_multiplier() -> f32 {
+fn default_speed_multiplier() -> f64 {
     1.0
 }
 
