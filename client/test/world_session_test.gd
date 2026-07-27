@@ -89,12 +89,7 @@ func test_hp_event_updates_player_and_preserves_maxima() -> void:
 		"max_hull": 80.0,
 	}), 11)
 
-	_session.apply_hp_event(JSON.stringify({
-		"ship_id": 11,
-		"current_shield": 40.0,
-		"current_armor": 30.0,
-		"current_hull": 20.0,
-	}))
+	_session.apply_health_event(11, 40.0, 30.0, 20.0)
 	var snapshot: Dictionary = _session.snapshot()
 
 	var hp: Dictionary = (snapshot.ship_hp as Dictionary)[11] as Dictionary

@@ -161,18 +161,6 @@ pub struct HealthState {
     pub max_hull: f64,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
-pub struct HealthEventInput {
-    #[serde(default)]
-    pub ship_id: i64,
-    #[serde(default)]
-    pub current_shield: f64,
-    #[serde(default)]
-    pub current_armor: f64,
-    #[serde(default)]
-    pub current_hull: f64,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShipState {
     pub ship_type_name: String,
