@@ -1,112 +1,48 @@
-name: Diagnose PR 186
+name: Apply PR 186 CI fix
 
 on:
   push:
     branches:
       - dependabot/cargo/rust-dependencies-697640ec0a
-  pull_request:
-    branches:
-      - main
-  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  workspace-tests:
+  apply:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
-      - name: Checkout repository
+      - name: Checkout PR branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          ref: dependabot/cargo/rust-dependencies-697640ec0a
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
           toolchain: 1.97.1
 
-      - name: Capture workspace test output
+      - name: Apply fixes
         run: |
-          set +e
-          cargo test --workspace -- --nocapture > workspace-test.log 2>&1
-          status=$?
-          echo "exit_status=${status}" >> workspace-test.log
-          exit 0
+          cargo run -p dawn-actor --example gen_wire_schema
 
-      - name: Upload workspace test log
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: pr186-workspace-test-log
-          path: workspace-test.log
-          retention-days: 1
+          python3 - <<'PY'
+          from pathlib import Path
 
-  generated-schemas:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+          path = Path('.github/workflows/fuzz.yml')
+          text = path.read_text()
+          old = "    timeout-minutes: 15\n    strategy:"
+          new = "    timeout-minutes: 15\n    env:\n      RUSTUP_TOOLCHAIN: nightly\n    strategy:"
+          if text.count(old) != 1:
+              raise SystemExit('unexpected fuzz workflow layout')
+          path.write_text(text.replace(old, new))
+          PY
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
-        with:
-          toolchain: 1.97.1
-
-      - name: Regenerate schemas
-        run: cargo run -p dawn-actor --example gen_wire_schema
-
-      - name: Upload generated schemas
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: pr186-generated-schemas
-          path: |
-            docs/architecture/wire-protocol.schema.json
-            docs/architecture/wire-protocol-commands.schema.json
-            docs/architecture/wire-protocol-market.schema.json
-          retention-days: 1
-
-  fuzz:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      RUSTUP_TOOLCHAIN: nightly
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - decode_client_message
-          - decode_server_message
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install nightly Rust
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
-        with:
-          toolchain: nightly
-
-      - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
-
-      - name: Capture fuzz output
-        env:
-          TARGET: ${{ matrix.target }}
-        run: |
-          set +e
-          cargo fuzz run "${TARGET}" -- -max_total_time=30 -rss_limit_mb=2048 -timeout=10 > "${TARGET}.log" 2>&1
-          status=$?
-          echo "exit_status=${status}" >> "${TARGET}.log"
-          exit 0
-
-      - name: Upload fuzz log
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: pr186-${{ matrix.target }}-log
-          path: ${{ matrix.target }}.log
-          retention-days: 1
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/fuzz.yml docs/architecture/wire-protocol.schema.json docs/architecture/wire-protocol-commands.schema.json docs/architecture/wire-protocol-market.schema.json
+          git rm .github/workflows/diagnose-pr186.yml
+          git diff --cached --check
+          git commit -m "fix(ci): refresh schemas and force nightly fuzzing"
+          git push origin HEAD:dependabot/cargo/rust-dependencies-697640ec0a
