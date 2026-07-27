@@ -4,10 +4,13 @@ use godot::prelude::*;
 /// is generic over key/value element type).
 pub type Dict = Dictionary<Variant, Variant>;
 
-/// Mirrors the Variant shape `JSON.parse_string()` already produces on the
-/// GDScript side (numbers as `float`, per Godot's own JSON parser) so
-/// existing consumers (`main.gd`, `hud_manager.gd`, GdUnit4 tests) that were
-/// written against JSON-parsed Dictionaries need no changes. Shared by
+/// Mirrors the Variant shape `JSON.parse_string()` produces on the GDScript
+/// side: integer JSON numbers stay integers and fractional numbers become
+/// floats. Keeping integer identity matters because `WorldSession` deserializes
+/// IDs into `i64`; converting every number to `float` makes `JSON.stringify()`
+/// emit `1.0`, which serde will not accept as an integer. Existing consumers
+/// (`main.gd`, `hud_manager.gd`, GdUnit4 tests) can still use `as int`/`as float`
+/// at their existing call sites. Shared by
 /// [`crate::ServerMessageDecoder`] (server -> client) and
 /// [`crate::client_command_gd::ClientMessageDecoder`] (test-only,
 /// client -> server) since both decode a serde type into the same shape.
@@ -15,7 +18,15 @@ pub fn json_value_to_variant(value: &serde_json::Value) -> Variant {
     match value {
         serde_json::Value::Null => Variant::nil(),
         serde_json::Value::Bool(b) => Variant::from(*b),
-        serde_json::Value::Number(n) => Variant::from(n.as_f64().unwrap_or(0.0)),
+        serde_json::Value::Number(n) => {
+            if let Some(value) = n.as_i64() {
+                Variant::from(value)
+            } else if let Some(value) = n.as_u64().and_then(|value| i64::try_from(value).ok()) {
+                Variant::from(value)
+            } else {
+                Variant::from(n.as_f64().unwrap_or(0.0))
+            }
+        }
         serde_json::Value::String(s) => Variant::from(s.as_str()),
         serde_json::Value::Array(items) => {
             let mut arr = Array::<Variant>::new();
