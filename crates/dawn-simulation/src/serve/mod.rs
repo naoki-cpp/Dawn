@@ -10,11 +10,10 @@ mod single;
 pub(crate) use cluster::run_cluster_server;
 pub(crate) use single::run_phase4_server;
 
-use crate::data_loader;
 use aoi_delivery::AoiDelivery;
 use dawn_core::{NodeId, SectorBounds, SectorId, ShipId};
 use dawn_sector::node::SimulationNode;
-use dawn_sector::{galaxy::Galaxy, modules, ship_types};
+use dawn_sector::{data_loader, galaxy::Galaxy, modules, ship_types};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

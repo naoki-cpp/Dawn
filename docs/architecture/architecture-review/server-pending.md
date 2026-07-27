@@ -55,7 +55,6 @@ Sector Node runtime deepening、AoI delivery の dawn-sector への集約後も�
 | 重複 | dawn-simulation | dawn-sector-node | 備考 |
 |---|---|---|---|
 | ~~Player Command Dispatch~~ | ~~`serve/mod.rs::apply_common_command`~~ | ~~`runtime.rs::collect_player_commands`~~ | 解消済み（M-7・Issue #56）: `node.apply_client_command` に統一。詳細は completed.md |
-| `data_loader`（`load_modules` / `load_ship_types` / `parse_*`） | `data_loader/*.rs`（実装 ~280行）| `data_loader.rs`（278行）| TOML ローダー |
 | `spawn_npcs` / `spawn_npc_frigates` | `serve/mod.rs:278` | `main.rs:298` | 実質同一（~12行）|
 
 現在の実態では、`dawn-simulation` 側は `serve/runtime.rs` と `serve/aoi_delivery.rs` によって
@@ -66,10 +65,11 @@ production process model 固有の frame orchestration を集約済みである�
 WS protocol は `dawn-actor` に、ゲームロジックは `dawn-sector` に、両 runtime の frame policy は
 それぞれのローカル module に寄っており、残る重複は低頻度の glue に縮小している。
 
-`data_loader` / NPC spawn は I/O と demo wiring の低頻度 glue で、共有 crate へ
-押し込むほどの深さがない。
+NPC spawn は I/O と demo wiring の低頻度 glue で、共有 crate へ押し込むほどの深さがない。
+一方、`data_loader` は2026-07-27に `dawn-sector::data_loader` へ集約し、両runtimeが
+同じTOML loaderを利用する形へ変更した。
 
-**判断: 当面は許容する（新規 crate は作らない）。**
+**判断: 残るNPC spawnの重複は当面許容する（新規 crate は作らない）。**
 
 `dawn-server`（仮称）のような大きい共有 runtime crate を新設する案は、文書全体に照らして
 **過剰**と判断し採らない。理由:
@@ -81,10 +81,10 @@ WS protocol は `dawn-actor` に、ゲームロジックは `dawn-sector` に、
 - **前例との整合**: `dawn-proto` は「見返りが乏しい」と却下、P4-3 は `_owned` 統合を
   「統合コストが効果を上回る」とスキップ。現在残る安定したグルーの重複も同じ費用対効果で許容が妥当。
 - **残るドリフトの実害が限定的**: M-4 で直した `protocol`（18 variant・wire 境界・変更頻度高）と違い、
-  Player Command Dispatch / `data_loader` / NPC spawn は process model に近い adapter で、差分が見えやすい。
+  Player Command Dispatch / NPC spawn は process model に近い adapter で、差分が見えやすい。
 
 再評価トリガー（このいずれかが起きたら設計し直す）:
-- `data_loader` / NPC spawn が実際にドリフトしてバグを生んだとき
+- NPC spawn が実際にドリフトしてバグを生んだとき
 - 3つ目の serve バイナリが必要になったとき
 - 2バイナリの process モデル差を解消し1バイナリ化できる見込みが立ったとき
   （その場合は新規クレートではなくバイナリ統合を優先検討する）
@@ -200,7 +200,7 @@ P7 系で確立した「責務ごとに sibling モジュールへ抽出」方�
 | R-2 client `main.gd` 分割 | 品質・一部着手済み | `WorldInteraction`・`WorldPresentation` 抽出と `dawn-client-core::WorldSessionState` への移管で live world state / world interaction policy / world visual side effect を移動し、`main.gd` は1356行（詳細・最新値は client.md）。残る scene lifecycle / node generation / network send / HUD adapter は `.tscn` 化コンポーネントへのシーン参照切れリスクが上回るため保留 |
 | R-3 `node/` 系再肥大（warp/orbit/transit_flow/inventory/apply_event/snapshot_io/mod） | 品質・保留 | 2026-07-24再計測で `commands.rs` は1463行、Move/Stopと共有推進ヘルパーは`movement_commands.rs`へ分離済み。残るwatch帯は `inventory.rs` 931・`warp.rs` 1095・`transit_flow.rs` 938・`apply_event.rs` 860・`node/mod.rs` 867・`orbit.rs` 836・`snapshot_io.rs` 703。各implは700行未満で責務単位も保たれるため保留し、次候補はMarket settlement。implが700超、またはtest clusterを含む見通し悪化が実害化した時点で分割 |
 | M-3 `SectorSimulatorActor` 密結合 | 品質・保留 | 本番パス外（in-process テスト/ベンチ専用）。P9-1 撤回。優先度低 |
-| M-6 アプリ層 adapter 重複（`data_loader` / `spawn_npcs`） | 許容重複（縮小） | AoI / production runtime / Command dispatch は deep module 化済み（M-7 解消で Command dispatch 項目を削除）。残る data_loader / NPC spawn は低頻度 glue として許容。再評価トリガー付き |
+| M-6 アプリ層 adapter 重複（`spawn_npcs`） | 許容重複（縮小） | AoI / production runtime / Command dispatch / data_loader は deep module 化済み。残るNPC spawnは低頻度 glueとして許容。再評価トリガー付き |
 | M-8 `fit_module`/`fit_module_owned` 共有テール重複 | 許容（2026-07-01） | `inventory.rs` のモジュールコメントで意図的な分離と明記済み。テールのみの軽微な重複で優先度なし |
 | M-9 `EventStore::append` がinfallibleと偽る | 品質・保留（2026-07-01） | 永続化配線完了で実際に到達可能になったpanic経路。1プロセス1Sector構成ではcrash-only設計として不合理ではないため、全面Result化は見送り保留。実機クラッシュ発生 or マルチSectorプロセス化がトリガー |
 | ~~M-10~~ postcard encode/decode の呼び出し側分散 | 解消済み | 2026-07-11解消。詳細は completed.md 参照 |

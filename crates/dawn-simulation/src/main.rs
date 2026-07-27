@@ -13,7 +13,6 @@
 
 mod bench;
 mod cluster;
-mod data_loader;
 mod sector_simulator_actor;
 mod serve;
 
