@@ -1,0 +1,61 @@
+name: Rust stable canary
+
+on:
+  schedule:
+    # Wednesday 03:17 JST, separated from the Monday fuzz schedule.
+    - cron: "17 18 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-stable-canary
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Override rust-toolchain.toml so this job actually exercises moving stable.
+  RUSTUP_TOOLCHAIN: stable
+
+jobs:
+  latest-stable:
+    name: latest stable
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install latest stable Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+        with:
+          shared-key: rust-stable-canary
+
+      - name: Report toolchain versions
+        run: |
+          rustup show active-toolchain
+          rustc --version --verbose
+          cargo --version
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test --workspace
+        run: cargo test --workspace
+
+      - name: cargo doc --workspace --no-deps
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: "-D warnings"
