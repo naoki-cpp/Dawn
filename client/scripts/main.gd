@@ -52,17 +52,12 @@ var _market_surface := MarketSurfaceScript.new()
 var _presentation := WorldPresentationScript.new()
 ## Scene nodes stay in Godot; WorldSession owns the matching pure ship state.
 var _ships                 : Dictionary = {}
+## GDScript-owned optimistic state (ADR-0046): both are also mirrored inside
+## WorldSession, but main.gd writes these two directly ahead of the server's
+## confirming event for immediate UI feedback (_set_as_player_ship,
+## _handle_target_locked), so they don't read through _session like every
+## other field below did before this cleanup.
 var _player_ship_id        : int        = -1
-var _player_ship_type_name : String     = ""
-var _event_count     : int        = 0
-var _current_tick    : int        = 0
-## 3-layer HP tracking (Shield / Armor / Hull)
-var _player_shield     : float = -1.0
-var _player_armor      : float = -1.0
-var _player_hull       : float = -1.0
-var _player_max_shield : float = 500.0
-var _player_max_armor  : float = 300.0
-var _player_max_hull   : float = 200.0
 var _player_lock_target : int  = -1
 
 ## Stand-off distance (km) the next K-key press will send as KeepAtRangeCommand's
@@ -84,44 +79,30 @@ var _drag_start_pos : Vector2 = Vector2.ZERO
 var _drag_ghost : Label = null
 const DRAG_THRESHOLD_PX : float = 6.0
 
-## Per-ship HP: { ship_id: {shield, armor, hull} }
-var _ship_hp : Dictionary = {}
-
-## Duel mode: opponent player ship IDs (populated from InitialState is_player flag)
-var _opponent_ship_ids : Array = []
 ## PlayerLoadout is a GDExtension class (dawn-client-gdext, ADR-0039/ADR-0040)
 ## -- no preload needed, same as any other globally registered class.
 var _loadout := PlayerLoadout.new()
 
-## Client-side capacitor simulation (mirrors server CapacitorSystem logic).
-## Populated from InitialState (cap_max, cap_recharge_per_tick) and
-## PlayerLoadout (cap_cost_per_cycle, cycle_time_ticks per module).
-## Corrected by ModuleDeactivated events (cap-forced OFF).
-var _cap_current      : float = -1.0   ## -1 = not yet received
-var _cap_max          : float = 500.0
-var _cap_recharge     : float = 10.0   ## GJ per tick
-
 var _weapon_range     : float  = 0.0   ## optimal range (u), recalculated on fitting change
 var _weapon_falloff   : float  = 0.0   ## falloff range (u)
 
-## Navigation map for the *current* Sector, received from the server in the
-## InitialState message (ADR-0009/0025). No longer hard-coded: the server owns
-## the galaxy (data/galaxy.toml) and is the single source of truth.
-##   _gates : [{gate_id:int, position:Vector3 (server coords),
-##             activation_radius:float, to_system_name:String}]
-##   _bodies: [{body_id:int, kind:String, name:String,
-##             position:Vector3 (server coords), radius:float, spectral_type:float}]
-var _gates        : Array      = []
-var _stations     : Array      = []
-var _bodies       : Array      = []
-## Buildable Packaged Ship catalog (ADR-0034 9B): [{ship_type_id:int, name:String}].
-var _buildable_ship_types : Array = []
-## Star System id -> name, used to resolve StarSystemChanged events.
-var _system_names : Dictionary = {}
-
-## Placeholder until InitialState arrives -- never a real system name (was
-## hardcoded to "Alpha", which looked like live data while still CONNECTING).
-var _current_system_name : String = "Unknown"
+## Ship HP, the capacitor status, and the current system name live only in
+## WorldSession (ADR-0046) -- read via _session.ship_health(id)/
+## .capacitor_status()/.current_system_name() at point of use. They change
+## on essentially every event, so caching them would just reintroduce the
+## staleness risk this cleanup removed.
+##
+## The navigation map (gates/stations/bodies/buildable ship types) is
+## different: it's write-once per Sector, changing only inside
+## _ingest_star_map() below. _process() reads gates/stations/bodies every
+## frame (proximity checks, presentation refresh), so calling the
+## GDExtension accessor there would rebuild these collections from Rust
+## state 60x/sec for data that never changes between InitialState messages.
+## Cached here instead, refreshed only where _ingest_star_map() writes it.
+var _gates                 : Array = []
+var _stations              : Array = []
+var _bodies                : Array = []
+var _buildable_ship_types  : Array = []
 var _nearby_gate_id      : int    = -1  ## -1 = no gate in range
 var _nearby_station_ids  : Array[int] = []  ## in-range stations, nearest first
 var _jump_notice         : String = ""
@@ -556,10 +537,10 @@ func _handle_position_snap(p: Dictionary) -> void:
 			"reset_motion",
 			server_pos,
 			Vector3.ZERO,
-			_current_tick)
+			_session.current_tick())
 	var ship := _ships[ship_id] as Node3D
 	if ship_id == _player_ship_id:
-		ship.call("reset_motion", server_pos, Vector3.ZERO, _current_tick)
+		ship.call("reset_motion", server_pos, Vector3.ZERO, _session.current_tick())
 
 ## Docking is authoritative server state. The server stops the ship
 ## immediately, but without an explicit client event the ship_controller keeps
@@ -596,7 +577,7 @@ func _handle_ship_docked(p: Dictionary) -> void:
 
 func _handle_ship_undocked(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
-	var tick: int = p.get("tick", _current_tick) as int
+	var tick: int = p.get("tick", _session.current_tick()) as int
 	if ship_id == _player_ship_id:
 		var latest_tick: int = _session.dock_status().get("latest_dock_state_tick", -1) as int
 		if tick < latest_tick:
@@ -629,7 +610,7 @@ func _handle_jump_gate_used(p: Dictionary) -> void:
 	if not _ships.has(ship_id):
 		return
 	var entry_pos := _position_components_from_dict(p, "entry_pos")
-	var tick: int = p.get("tick", _current_tick) as int
+	var tick: int = p.get("tick", _session.current_tick()) as int
 	(_ships[ship_id] as Node3D).call("update_target", entry_pos, tick)
 	if ship_id == _player_ship_id:
 		_jump_notice       = "Jumped via Gate #%d" % (p.get("gate_id", 0) as int)
@@ -708,6 +689,13 @@ func _on_initial_state(state: Dictionary) -> void:
 func _ingest_star_map(state: Dictionary) -> void:
 	_session.ingest_navigation(state)
 	_sync_session_state()
+	## Navigation data is write-once per Sector (only this call changes it) --
+	## cached here so _process()'s per-frame proximity checks and HUD reads
+	## don't rebuild these collections from Rust state 60x/sec.
+	_gates = _session.gates()
+	_stations = _session.stations()
+	_bodies = _session.bodies()
+	_buildable_ship_types = _session.buildable_ship_types()
 	_presentation.respawn_navigation_markers(
 		_gates,
 		_bodies,
@@ -740,7 +728,7 @@ func _spawn_ship_from_data(d: Dictionary) -> void:
 		d.get("inertia_modifier", 0.3) as float,
 		server_pos,
 		_velocity_from_dict(d),
-		_current_tick)
+		_session.current_tick())
 	var result: Dictionary = _session.register_ship(
 		sid, JSON.stringify(d), _connection.ship_id)
 	_ships[sid] = ship
@@ -1214,7 +1202,7 @@ func _update_hud() -> void:
 		var dist_m: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
 			(_ships[_player_lock_target] as Node3D).global_position) / WORLD_SCALE
 		dist_text = UnitFormat.format_distance(dist_m * METERS_PER_UNIT)
-	var target_hp: Dictionary = _ship_hp.get(_player_lock_target, {}) as Dictionary
+	var target_hp: Dictionary = _session.ship_health(_player_lock_target)
 
 	var jump_line  : String = ""
 	if _nearby_gate_id >= 0:
@@ -1276,20 +1264,22 @@ func _update_hud() -> void:
 	elif selected_target_id >= 0:
 		approach_line = "\n[A] Approach #%d" % selected_target_id + keep_at_range_hint
 
+	var health: Dictionary = _session.player_health()
+	var cap: Dictionary = _session.capacitor_status()
 	_hud_surface.render({
 		"connected": _connection.is_connected_to_server(),
-		"ship_type_name": _player_ship_type_name,
-		"system_name": _current_system_name,
+		"ship_type_name": _session.player_ship_type_name(),
+		"system_name": _session.current_system_name(),
 		"speed": speed_str,
 		"player_ship_id": _player_ship_id,
-		"shield": _player_shield,
-		"max_shield": _player_max_shield,
-		"armor": _player_armor,
-		"max_armor": _player_max_armor,
-		"hull": _player_hull,
-		"max_hull": _player_max_hull,
-		"cap_current": _cap_current,
-		"cap_max": _cap_max,
+		"shield": health.get("shield", -1.0) as float,
+		"max_shield": health.get("max_shield", 500.0) as float,
+		"armor": health.get("armor", -1.0) as float,
+		"max_armor": health.get("max_armor", 300.0) as float,
+		"hull": health.get("hull", -1.0) as float,
+		"max_hull": health.get("max_hull", 200.0) as float,
+		"cap_current": cap.get("current", -1.0) as float,
+		"cap_max": cap.get("max", 500.0) as float,
 		"lock_target": _player_lock_target,
 		"target_known": target_known,
 		"target_distance": dist_text,
@@ -1297,7 +1287,7 @@ func _update_hud() -> void:
 		"modules": _loadout.modules(),
 		"stats_text": (
 			"Ships: %d\nTick: %d%s%s\n\n[Click] Select  [DoubleClick] Thrust\n[RightClick] Lock%s"
-			% [_ships.size(), _current_tick, approach_line, station_line, jump_line]
+			% [_ships.size(), _session.current_tick(), approach_line, station_line, jump_line]
 		),
 	})
 
@@ -1310,7 +1300,8 @@ func _simulate_cap(ticks: int) -> void:
 	_sync_session_state()
 
 func _advance_client_cap_ticks(delta: float) -> void:
-	if _player_ship_id < 0 or _cap_current < 0.0:
+	var cap_current: float = _session.capacitor_status().get("current", -1.0) as float
+	if _player_ship_id < 0 or cap_current < 0.0:
 		_cap_tick_accumulator = 0.0
 		return
 	_cap_tick_accumulator += delta * CLIENT_TICKS_PER_SEC
@@ -1329,32 +1320,26 @@ func _clear_all_ships() -> void:
 	_ships.clear()
 	_session.reset()
 	_sync_session_state()
+	## _session.reset() clears WorldSession's navigation map too -- clear the
+	## caches to match, so a disconnect doesn't leave stale gate/station/body
+	## data sitting until the next InitialState's _ingest_star_map() call.
+	_gates = []
+	_stations = []
+	_bodies = []
+	_buildable_ship_types = []
 	_interaction.clear_selection()
 	_loadout.reset()
 	_cap_tick_accumulator = 0.0
 
 
+## Reconciles the two fields main.gd writes optimistically ahead of the
+## server's confirming event (_player_ship_id, _player_lock_target) against
+## WorldSession's authoritative state. Fast-changing fields (ship health,
+## capacitor status, current system name) are read directly at point of use
+## (_session.ship_health(id)/.capacitor_status()/.current_system_name())
+## instead of being mirrored here; the write-once navigation map
+## (gates/stations/bodies/buildable ship types) is cached separately in
+## _ingest_star_map() (ADR-0046).
 func _sync_session_state() -> void:
-	var snapshot: Dictionary = _session.snapshot()
-	_ship_hp = snapshot.get("ship_hp", {}) as Dictionary
-	_opponent_ship_ids = snapshot.get("opponent_ship_ids", []) as Array
-	_gates = snapshot.get("gates", []) as Array
-	_stations = snapshot.get("stations", []) as Array
-	_bodies = snapshot.get("bodies", []) as Array
-	_buildable_ship_types = snapshot.get("buildable_ship_types", []) as Array
-	_system_names = snapshot.get("system_names", {}) as Dictionary
-	_player_ship_id = snapshot.get("player_ship_id", -1) as int
-	_player_ship_type_name = snapshot.get("player_ship_type_name", "") as String
-	_player_shield = snapshot.get("player_shield", -1.0) as float
-	_player_armor = snapshot.get("player_armor", -1.0) as float
-	_player_hull = snapshot.get("player_hull", -1.0) as float
-	_player_max_shield = snapshot.get("player_max_shield", 500.0) as float
-	_player_max_armor = snapshot.get("player_max_armor", 300.0) as float
-	_player_max_hull = snapshot.get("player_max_hull", 200.0) as float
-	_player_lock_target = snapshot.get("player_lock_target", -1) as int
-	_current_tick = snapshot.get("current_tick", 0) as int
-	_event_count = snapshot.get("event_count", 0) as int
-	_current_system_name = snapshot.get("current_system_name", "Unknown") as String
-	_cap_current = snapshot.get("cap_current", -1.0) as float
-	_cap_max = snapshot.get("cap_max", 500.0) as float
-	_cap_recharge = snapshot.get("cap_recharge", 10.0) as float
+	_player_ship_id = _session.player_ship_id() as int
+	_player_lock_target = _session.player_lock_target() as int

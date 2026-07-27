@@ -281,7 +281,6 @@ func test_ship_docked_event_stops_ship_when_station_map_is_not_ready() -> void:
 	_main.add_child(ship)
 	ship.server_position_value = PackedFloat64Array([9.0, 8.0, 7.0])
 	_main._ships = {2: ship}
-	_main._stations = []
 
 	_main._handle_ship_docked({
 		"ship_id": 2,

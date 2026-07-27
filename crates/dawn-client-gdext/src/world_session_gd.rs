@@ -45,6 +45,21 @@ impl WorldSession {
         self.state.set_player_ship_id(ship_id);
     }
 
+    /// `main.gd` writes `_player_ship_id`/`_player_lock_target` optimistically
+    /// ahead of the server's confirming event, then reconciles against these
+    /// after every event -- unlike every other field WorldSession tracks,
+    /// which main.gd now reads directly at point of use instead of mirroring
+    /// (ADR-0046).
+    #[func]
+    fn player_ship_id(&self) -> i64 {
+        self.state.player_ship_id()
+    }
+
+    #[func]
+    fn player_lock_target(&self) -> i64 {
+        self.state.player_lock_target()
+    }
+
     /// Ingests the InitialState navigation portion. Consumes the `Dictionary`
     /// `ServerMessageDecoder` already produced from the decoded
     /// `InitialStateWire` directly (`navigation_gd::navigation_input_from_dict`),
@@ -188,9 +203,53 @@ impl WorldSession {
         result
     }
 
-    /// Returns the complete state projection consumed by `main.gd` and HUD.
-    /// Keeping this as one snapshot prevents GDScript from maintaining aliases
-    /// into mutable state owned by the Rust object.
+    #[func]
+    fn player_ship_type_name(&self) -> GString {
+        self.state.player_ship_type_name().into()
+    }
+
+    /// Bundles the player's shield/armor/hull current and max values --
+    /// `main.gd`'s HUD always reads all six together, so this is one call
+    /// instead of six (matches the `dock_status()` precedent above: bundle
+    /// by cohesive concept, not one `#[func]` per scalar field).
+    #[func]
+    fn player_health(&self) -> Dict {
+        let health = self.state.player_health();
+        let mut result = Dict::new();
+        result.set("shield", health.shield);
+        result.set("armor", health.armor);
+        result.set("hull", health.hull);
+        result.set("max_shield", health.max_shield);
+        result.set("max_armor", health.max_armor);
+        result.set("max_hull", health.max_hull);
+        result
+    }
+
+    #[func]
+    fn current_tick(&self) -> i64 {
+        self.state.current_tick()
+    }
+
+    #[func]
+    fn current_system_name(&self) -> GString {
+        self.state.current_system_name().into()
+    }
+
+    /// Bundles the capacitor's current/max/recharge values -- always read
+    /// together by the HUD, same rationale as `player_health()`.
+    #[func]
+    fn capacitor_status(&self) -> Dict {
+        let mut result = Dict::new();
+        result.set("current", self.state.cap_current());
+        result.set("max", self.state.cap_max());
+        result.set("recharge", self.state.cap_recharge());
+        result
+    }
+
+    /// Returns the complete state projection consumed by test fixtures
+    /// (`world_session_test.gd`, `main_test.gd`) that need to assert on the
+    /// full session state in one call. Production code (`main.gd`) instead
+    /// reads the individual accessors above at point of use (ADR-0046).
     #[func]
     fn snapshot(&self) -> Dict {
         let mut result = Dict::new();
@@ -226,6 +285,7 @@ impl WorldSession {
         result
     }
 
+    #[func]
     fn ship_hp(&self) -> Dict {
         let mut result = Dict::new();
         for (ship_id, health) in self.state.ship_hp() {
@@ -235,22 +295,38 @@ impl WorldSession {
         result
     }
 
+    /// Single-ship lookup, for callers (the HUD's locked-target readout)
+    /// that only need one ship's HP -- `ship_hp()` rebuilds a `Dict` for
+    /// every ship in the Sector, which is wasteful when the caller runs
+    /// every frame and only reads one entry out of it.
+    #[func]
+    fn ship_health(&self, ship_id: i64) -> Dict {
+        match self.state.ship_hp().get(&ship_id) {
+            Some(health) => health_dict(ship_id, *health),
+            None => Dict::new(),
+        }
+    }
+
     fn opponent_ship_ids(&self) -> Array<i64> {
         self.state.opponent_ship_ids().iter().copied().collect()
     }
 
+    #[func]
     fn gates(&self) -> Array<Dict> {
         self.state.gates().iter().map(gate_dict).collect()
     }
 
+    #[func]
     fn stations(&self) -> Array<Dict> {
         self.state.stations().iter().map(station_dict).collect()
     }
 
+    #[func]
     fn bodies(&self) -> Array<Dict> {
         self.state.bodies().iter().map(body_dict).collect()
     }
 
+    #[func]
     fn buildable_ship_types(&self) -> Array<Dict> {
         self.state
             .buildable_ship_types()
