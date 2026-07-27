@@ -9,9 +9,16 @@
 //! flips between the two command families). `resolve_flight_command` and
 //! `resolve_fitting_command` are the one place that logic lives now.
 //!
-//! Command bodies (`apply_warp_command`, `fit_module_owned`'s inner logic,
-//! etc.) receive an already-resolved [`ResolvedShip`] and never re-check
-//! ownership or dock state themselves.
+//! Once a `resolve_*_command` call succeeds, nothing downstream re-checks
+//! ownership or dock state. The fitting methods (`fit_module_owned`,
+//! `unfit_module_owned`, `reorder_fitted_module_owned`) use the returned
+//! [`ResolvedShip`] directly for its `entity`. The flight `*_owned` wrappers
+//! (`apply_warp_command_owned`, etc.) only need the pass/fail outcome --
+//! `ship_id` is already in hand from their own parameter, and they delegate
+//! to the matching unchecked `apply_*_command` (`apply_warp_command`, ...),
+//! which re-derives `Entity` from `ship_id` itself. That's a cheap,
+//! side-effect-free HashMap lookup, not a re-check of anything
+//! `resolve_flight_command` already decided.
 
 use dawn_core::{PlayerId, ShipId};
 use dawn_ecs::Entity;
