@@ -2,11 +2,11 @@
 
 use super::{AoiDelivery, AOI_CELL_SIZE};
 use crate::ws_server;
-use dawn_actor::protocol::ServerMessage;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_sector::node::SimulationNode;
 use dawn_sector::transit;
+use dawn_wire::ServerMessage;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 

@@ -4,10 +4,11 @@
 //! machine: accept raw WebSocket sockets, read Hello, choose fresh vs. resume
 //! identity, complete Welcome/InitialState, and surface ready sessions.
 
-use dawn_actor::{protocol::ResumeIdentity, ws_server};
+use dawn_actor::ws_server;
 use dawn_core::{PlayerId, Position, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
 use dawn_sector::node::SimulationNode;
+use dawn_wire::ResumeIdentity;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 

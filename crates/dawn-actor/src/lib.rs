@@ -15,15 +15,19 @@
 //!
 //! ## Client transport
 //!
-//! `protocol` (DomainEvent <-> `EventWire` <-> ClientCommand) and `ws_server`
-//! (`WsServer` / `WsClientConnection` / `PlayerSession`) are the production
-//! WebSocket transport, shared by both binaries (previously duplicated).
-//! Every message travels as a postcard-encoded binary frame (ADR-0042).
+//! `ws_server` (`WsServer` / `WsClientConnection` / `PlayerSession`) is the
+//! production WebSocket transport, shared by both binaries (previously
+//! duplicated). Every message travels as a postcard-encoded binary frame
+//! (ADR-0042), using the `dawn-wire` schema (`ClientMessage`/`ServerMessage`,
+//! `domain_event_to_event_wire`, `client_command_from_wire`) directly --
+//! this crate no longer re-exports it under its own `protocol` module
+//! (deleted: it was 28 lines of `pub use` and 900 lines of tests that
+//! belonged in `dawn-wire`, where they now live).
 //!
 //! ## Example
 //!
 //! ```
-//! use dawn_actor::protocol::{ClientMessage, HelloMessage};
+//! use dawn_wire::{ClientMessage, HelloMessage};
 //!
 //! let msg = ClientMessage::Hello(HelloMessage { resume: None });
 //! let bytes = msg.encode();
@@ -36,7 +40,6 @@
 #![warn(missing_debug_implementations)]
 
 pub mod client_connection;
-pub mod protocol;
 pub mod ws_server;
 
 pub use client_connection::{

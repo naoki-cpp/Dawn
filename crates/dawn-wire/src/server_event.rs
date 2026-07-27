@@ -244,3 +244,485 @@ pub fn domain_event_to_event_wire(event: &DomainEvent) -> Option<EventWire> {
         DomainEvent::ShipDisassembled(_) => return None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dawn_core::{EntityId, JumpGateId, ModuleId, NodeId, ShipId, SlotKind};
+
+    fn ship_id(n: u64) -> ShipId {
+        ShipId(EntityId::new(NodeId(0), n))
+    }
+
+    #[test]
+    fn ship_docked_event_is_serialized_for_clients() {
+        let wire =
+            domain_event_to_event_wire(&DomainEvent::ShipDocked(dawn_core::events::ShipDocked {
+                ship_id: ship_id(42),
+                station_id: dawn_core::StationId(3),
+                tick: dawn_core::Tick(9),
+            }))
+            .expect("ShipDocked should be forwarded");
+        assert_eq!(
+            wire,
+            EventWire::ShipDocked {
+                ship_id: ship_id(42).raw(),
+                station_id: 3,
+                tick: 9,
+            }
+        );
+    }
+
+    #[test]
+    fn ship_assembled_event_is_serialized_for_clients() {
+        let wire = domain_event_to_event_wire(&DomainEvent::ShipAssembled(
+            dawn_core::events::ShipAssembled {
+                ship_id: ship_id(99),
+                player_id: dawn_core::PlayerId(1),
+                station_id: dawn_core::StationId(3),
+                ship_type_id: dawn_core::ShipTypeId(1),
+                tick: dawn_core::Tick(9),
+            },
+        ))
+        .expect("ShipAssembled should be forwarded");
+        assert_eq!(
+            wire,
+            EventWire::ShipAssembled {
+                ship_id: ship_id(99).raw(),
+                station_id: 3,
+                ship_type_id: 1,
+                tick: 9,
+            }
+        );
+    }
+
+    #[test]
+    fn ship_spawned_event_is_serialized_for_clients() {
+        let wire =
+            domain_event_to_event_wire(&DomainEvent::ShipSpawned(dawn_core::events::ShipSpawned {
+                ship_id: ship_id(1),
+                sector_id: dawn_core::SectorId(0),
+                initial_position: dawn_core::AbsolutePosition::new(1.0, 2.0, 3.0),
+                ship_type_id: dawn_core::ShipTypeId(7),
+                tick: dawn_core::Tick(1),
+            }))
+            .expect("ShipSpawned should be forwarded");
+        assert_eq!(
+            wire,
+            EventWire::ShipSpawned {
+                ship_id: ship_id(1).raw(),
+                position: AbsPosWire {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0,
+                },
+                tick: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn velocity_changed_event_is_serialized_for_clients() {
+        let wire = domain_event_to_event_wire(&DomainEvent::VelocityChanged(
+            dawn_core::events::VelocityChanged {
+                ship_id: ship_id(1),
+                velocity: dawn_core::Velocity {
+                    dx: 1.0,
+                    dy: 0.0,
+                    dz: -2.0,
+                },
+                tick: dawn_core::Tick(2),
+            },
+        ))
+        .expect("VelocityChanged should be forwarded");
+        assert_eq!(
+            wire,
+            EventWire::VelocityChanged {
+                ship_id: ship_id(1).raw(),
+                velocity: VelWire {
+                    dx: 1.0,
+                    dy: 0.0,
+                    dz: -2.0,
+                },
+                tick: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn ship_despawned_event_is_serialized_for_clients() {
+        let wire = domain_event_to_event_wire(&DomainEvent::ShipDespawned(
+            dawn_core::events::ShipDespawned {
+                ship_id: ship_id(5),
+                tick: dawn_core::Tick(3),
+            },
+        ))
+        .expect("ShipDespawned should be forwarded");
+        assert_eq!(
+            wire,
+            EventWire::ShipDespawned {
+                ship_id: ship_id(5).raw(),
+                tick: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn ship_undocked_event_is_serialized_for_clients() {
+        let wire = domain_event_to_event_wire(&DomainEvent::ShipUndocked(
+            dawn_core::events::ShipUndocked {
+                ship_id: ship_id(5),
+                station_id: dawn_core::StationId(2),
+                tick: dawn_core::Tick(4),
+            },
+        ))
+        .expect("ShipUndocked should be forwarded");
+        assert_eq!(
+            wire,
+            EventWire::ShipUndocked {
+                ship_id: ship_id(5).raw(),
+                station_id: 2,
+                tick: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn damage_taken_event_is_serialized_for_clients() {
+        let wire =
+            domain_event_to_event_wire(&DomainEvent::DamageTaken(dawn_core::events::DamageTaken {
+                ship_id: ship_id(1),
+                damage: 25.0,
+                current_shield: 10.0,
+                current_armor: 20.0,
+                current_hull: 30.0,
+                tick: dawn_core::Tick(5),
+            }))
+            .expect("DamageTaken should be forwarded");
+        assert_eq!(
+            wire,
+            EventWire::DamageTaken {
+                ship_id: ship_id(1).raw(),
+                damage: 25.0,
+                current_shield: 10.0,
+                current_armor: 20.0,
+                current_hull: 30.0,
+                tick: 5,
+            }
+        );
+    }
+
+    #[test]
+    fn repair_applied_event_is_serialized_for_clients() {
+        let wire = domain_event_to_event_wire(&DomainEvent::RepairApplied(
+            dawn_core::events::RepairApplied {
+                ship_id: ship_id(1),
+                amount: 15.0,
+                layer: dawn_core::events::RepairLayer::Armor,
+                current_shield: 10.0,
+                current_armor: 25.0,
+                current_hull: 30.0,
+                tick: dawn_core::Tick(6),
+            },
+        ))
+        .expect("RepairApplied should be forwarded");
+        assert_eq!(
+            wire,
+            EventWire::RepairApplied {
+                ship_id: ship_id(1).raw(),
+                amount: 15.0,
+                layer: "Armor".to_string(),
+                current_shield: 10.0,
+                current_armor: 25.0,
+                current_hull: 30.0,
+                tick: 6,
+            }
+        );
+    }
+
+    #[test]
+    fn ship_destroyed_event_is_serialized_for_clients() {
+        let wire = domain_event_to_event_wire(&DomainEvent::ShipDestroyed(
+            dawn_core::events::ShipDestroyed {
+                ship_id: ship_id(1),
+                killer_id: ship_id(2),
+                tick: dawn_core::Tick(7),
+            },
+        ))
+        .expect("ShipDestroyed should be forwarded");
+        assert_eq!(
+            wire,
+            EventWire::ShipDestroyed {
+                ship_id: ship_id(1).raw(),
+                killer_id: ship_id(2).raw(),
+                tick: 7,
+            }
+        );
+    }
+
+    #[test]
+    fn target_locked_and_lock_lost_events_are_serialized_for_clients() {
+        let locked = domain_event_to_event_wire(&DomainEvent::TargetLocked(
+            dawn_core::events::TargetLocked {
+                locker_id: ship_id(1),
+                target_id: ship_id(2),
+                tick: dawn_core::Tick(8),
+            },
+        ))
+        .expect("TargetLocked should be forwarded");
+        assert_eq!(
+            locked,
+            EventWire::TargetLocked {
+                locker_id: ship_id(1).raw(),
+                target_id: ship_id(2).raw(),
+                tick: 8,
+            }
+        );
+
+        let lost =
+            domain_event_to_event_wire(&DomainEvent::LockLost(dawn_core::events::LockLost {
+                locker_id: ship_id(1),
+                target_id: ship_id(2),
+                tick: dawn_core::Tick(9),
+            }))
+            .expect("LockLost should be forwarded");
+        assert_eq!(
+            lost,
+            EventWire::LockLost {
+                locker_id: ship_id(1).raw(),
+                target_id: ship_id(2).raw(),
+                tick: 9,
+            }
+        );
+    }
+
+    #[test]
+    fn module_activated_event_with_a_target_is_serialized_for_clients() {
+        let wire = domain_event_to_event_wire(&DomainEvent::ModuleActivated(
+            dawn_core::events::ModuleActivated {
+                ship_id: ship_id(1),
+                module_id: ModuleId(3),
+                slot: SlotKind::High,
+                target_ship_id: Some(ship_id(2)),
+                tick: dawn_core::Tick(10),
+            },
+        ))
+        .expect("ModuleActivated should be forwarded");
+        assert_eq!(
+            wire,
+            EventWire::ModuleActivated {
+                ship_id: ship_id(1).raw(),
+                module_id: 3,
+                slot: "High".to_string(),
+                target_ship_id: Some(ship_id(2).raw()),
+                tick: 10,
+            }
+        );
+    }
+
+    #[test]
+    fn module_activated_event_without_a_target_omits_the_field() {
+        let wire = domain_event_to_event_wire(&DomainEvent::ModuleActivated(
+            dawn_core::events::ModuleActivated {
+                ship_id: ship_id(1),
+                module_id: ModuleId(3),
+                slot: SlotKind::High,
+                target_ship_id: None,
+                tick: dawn_core::Tick(10),
+            },
+        ))
+        .unwrap();
+        match wire {
+            EventWire::ModuleActivated { target_ship_id, .. } => {
+                assert_eq!(target_ship_id, None)
+            }
+            other => panic!("expected ModuleActivated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn module_deactivated_event_carries_the_forced_reason_when_present() {
+        let cap = domain_event_to_event_wire(&DomainEvent::ModuleDeactivated(
+            dawn_core::events::ModuleDeactivated {
+                ship_id: ship_id(1),
+                module_id: ModuleId(3),
+                slot: SlotKind::High,
+                forced_reason: Some(
+                    dawn_core::events::ModuleDeactivationReason::CapacitorExhausted,
+                ),
+                tick: dawn_core::Tick(11),
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            cap,
+            EventWire::ModuleDeactivated {
+                ship_id: ship_id(1).raw(),
+                module_id: 3,
+                slot: "High".to_string(),
+                reason: Some("cap".to_string()),
+                tick: 11,
+            }
+        );
+
+        let range = domain_event_to_event_wire(&DomainEvent::ModuleDeactivated(
+            dawn_core::events::ModuleDeactivated {
+                ship_id: ship_id(1),
+                module_id: ModuleId(3),
+                slot: SlotKind::High,
+                forced_reason: Some(dawn_core::events::ModuleDeactivationReason::OutOfRange),
+                tick: dawn_core::Tick(11),
+            },
+        ))
+        .unwrap();
+        match range {
+            EventWire::ModuleDeactivated { reason, .. } => {
+                assert_eq!(reason, Some("range".to_string()))
+            }
+            other => panic!("expected ModuleDeactivated, got {other:?}"),
+        }
+
+        let player = domain_event_to_event_wire(&DomainEvent::ModuleDeactivated(
+            dawn_core::events::ModuleDeactivated {
+                ship_id: ship_id(1),
+                module_id: ModuleId(3),
+                slot: SlotKind::High,
+                forced_reason: None,
+                tick: dawn_core::Tick(11),
+            },
+        ))
+        .unwrap();
+        match player {
+            EventWire::ModuleDeactivated { reason, .. } => assert_eq!(reason, None),
+            other => panic!("expected ModuleDeactivated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn jump_gate_used_event_is_serialized_for_clients() {
+        let wire = domain_event_to_event_wire(&DomainEvent::JumpGateUsed(
+            dawn_core::events::JumpGateUsed {
+                ship_id: ship_id(1),
+                gate_id: JumpGateId(4),
+                from_sector: dawn_core::SectorId(0),
+                to_sector: dawn_core::SectorId(1),
+                entry_pos: dawn_core::AbsolutePosition::new(5.0, 6.0, 7.0),
+                tick: dawn_core::Tick(12),
+            },
+        ))
+        .expect("JumpGateUsed should be forwarded");
+        assert_eq!(
+            wire,
+            EventWire::JumpGateUsed {
+                ship_id: ship_id(1).raw(),
+                gate_id: 4,
+                from_sector: 0,
+                to_sector: 1,
+                entry_pos: AbsPosWire {
+                    x: 5.0,
+                    y: 6.0,
+                    z: 7.0,
+                },
+                tick: 12,
+            }
+        );
+    }
+
+    #[test]
+    fn star_system_changed_event_is_serialized_for_clients() {
+        let wire = domain_event_to_event_wire(&DomainEvent::StarSystemChanged(
+            dawn_core::events::StarSystemChanged {
+                ship_id: ship_id(1),
+                from_system: dawn_core::StarSystemId(0),
+                to_system: dawn_core::StarSystemId(2),
+                tick: dawn_core::Tick(13),
+            },
+        ))
+        .expect("StarSystemChanged should be forwarded");
+        assert_eq!(
+            wire,
+            EventWire::StarSystemChanged {
+                ship_id: ship_id(1).raw(),
+                from_system: 0,
+                to_system: 2,
+                tick: 13,
+            }
+        );
+    }
+
+    #[test]
+    fn internal_events_are_never_forwarded_to_clients() {
+        let tick = dawn_core::Tick(1);
+        let not_forwarded: Vec<DomainEvent> = vec![
+            DomainEvent::ShipFitted(dawn_core::events::ShipFitted {
+                ship_id: ship_id(1),
+                fitting: dawn_core::fitting::FittingSnapshot::empty(),
+                inventory: vec![],
+                tick,
+            }),
+            DomainEvent::WeaponFired(dawn_core::events::WeaponFired {
+                attacker_id: ship_id(1),
+                target_id: ship_id(2),
+                damage: 10.0,
+                tick,
+            }),
+            DomainEvent::TackleApplied(dawn_core::events::TackleApplied {
+                ship_id: ship_id(1),
+                by: ship_id(2),
+                tick,
+            }),
+            DomainEvent::TackleReleased(dawn_core::events::TackleReleased {
+                ship_id: ship_id(1),
+                by: ship_id(2),
+                tick,
+            }),
+            DomainEvent::SectorTransitRequested(dawn_core::events::SectorTransitRequested {
+                ship_id: ship_id(1),
+                from: dawn_core::SectorId(0),
+                to: dawn_core::SectorId(1),
+                tick,
+            }),
+            DomainEvent::SectorTransitCompleted(dawn_core::events::SectorTransitCompleted {
+                ship_id: ship_id(1),
+                from: dawn_core::SectorId(0),
+                to: dawn_core::SectorId(1),
+                entry_pos: dawn_core::AbsolutePosition::ORIGIN,
+                velocity: dawn_core::Velocity::ZERO,
+                tick,
+            }),
+            DomainEvent::SectorTransitAborted(dawn_core::events::SectorTransitAborted {
+                ship_id: ship_id(1),
+                from: dawn_core::SectorId(0),
+                to: dawn_core::SectorId(1),
+                tick,
+            }),
+            DomainEvent::AnchorRebased(dawn_core::events::AnchorRebased {
+                ship_id: ship_id(1),
+                anchor: dawn_core::AnchorId(0),
+                offset: dawn_core::Position::ORIGIN,
+                tick,
+            }),
+            DomainEvent::PackagedShipBuilt(dawn_core::events::PackagedShipBuilt {
+                ship_id: ship_id(1),
+                player_id: dawn_core::PlayerId(1),
+                station_id: dawn_core::StationId(0),
+                ship_type_id: dawn_core::ShipTypeId(1),
+                scrap_cost: 1,
+                tick,
+            }),
+            DomainEvent::ShipDisassembled(dawn_core::events::ShipDisassembled {
+                ship_id: ship_id(1),
+                player_id: dawn_core::PlayerId(1),
+                station_id: dawn_core::StationId(0),
+                ship_type_id: dawn_core::ShipTypeId(1),
+                tick,
+            }),
+        ];
+        for event in not_forwarded {
+            assert!(
+                domain_event_to_event_wire(&event).is_none(),
+                "{event:?} must not be forwarded to clients"
+            );
+        }
+    }
+}

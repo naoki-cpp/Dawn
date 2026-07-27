@@ -5,10 +5,10 @@ use super::{
     TIDI_BUDGET,
 };
 use crate::ws_server;
-use dawn_actor::protocol::ServerMessage;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
 use dawn_sector::dilation;
 use dawn_sector::node::ClientCommandFollowup;
+use dawn_wire::ServerMessage;
 use tokio::sync::mpsc;
 
 pub(crate) async fn run_phase4_server(
