@@ -1,9 +1,9 @@
 name: Apply wire fuzz fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/dawn-wire-fuzz
+      - main
     paths:
       - .github/workflows/apply-wire-fuzz-fix.yml
 
