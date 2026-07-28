@@ -299,49 +299,15 @@ impl<S: EventStore> SimulationNode<S> {
             .ship_anchor(entity)
             .and_then(|a| self.anchor_table.abs(a))
             .unwrap_or(dawn_core::AbsolutePosition::ORIGIN);
-        let (new_pos, new_vel, arrived) = if elapsed > total {
-            // One tick past the final step: settle and stop. The move tick at
-            // `elapsed == total` already landed exactly on arrival_abs (below,
-            // h01(1) = 1), so this just zeroes velocity — keeping the motion
-            // velocity-recorded (INV-MOVE) AND the arrival exact.
-            (pos, Velocity::ZERO, true)
-        } else {
-            // Cubic Hermite spline (start tangent = start_vel, end tangent =
-            // zero) along the segment this tick, in absolute f64; velocity
-            // carries the delta so the move is recorded by VelocityChanged
-            // (INV-MOVE). At elapsed == total, t = 1 → planned = arrival_abs
-            // exactly (h00(1)=h10(1)=0, h01(1)=1) regardless of start_vel.
-            let t = (elapsed as f64 / total as f64).clamp(0.0, 1.0);
-            let t2 = t * t;
-            let t3 = t2 * t;
-            let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
-            let h10 = t3 - 2.0 * t2 + t;
-            let h01 = -2.0 * t3 + 3.0 * t2;
-            // Tangent scaled by `total` so its per-tick rate at t=0 equals the
-            // ship's actual entering speed (the curve parameter spans total
-            // ticks over t in [0,1], so d(planned)/d(elapsed) = d(planned)/dt / total).
-            let m0 = [
-                start_vel.dx * total as f64,
-                start_vel.dy * total as f64,
-                start_vel.dz * total as f64,
-            ];
-            let planned_abs = [
-                h00 * start_abs[0] + h10 * m0[0] + h01 * arrival_abs[0],
-                h00 * start_abs[1] + h10 * m0[1] + h01 * arrival_abs[1],
-                h00 * start_abs[2] + h10 * m0[2] + h01 * arrival_abs[2],
-            ];
-            let planned = Position::new(
-                planned_abs[0] - anchor_abs[0],
-                planned_abs[1] - anchor_abs[1],
-                planned_abs[2] - anchor_abs[2],
-            );
-            let v = Velocity {
-                dx: planned.x - pos.x,
-                dy: planned.y - pos.y,
-                dz: planned.z - pos.z,
-            };
-            (planned, v, false)
-        };
+        let (new_pos, new_vel, arrived) = compute_warp_step(
+            pos,
+            start_abs,
+            arrival_abs,
+            start_vel,
+            anchor_abs.as_array(),
+            total,
+            elapsed,
+        );
 
         if let Some(mut p) = self.world.get_mut::<PositionComp>(entity) {
             p.0 = new_pos;
@@ -503,6 +469,66 @@ impl<S: EventStore> SimulationNode<S> {
     }
 }
 
+/// One warping-phase step's position/velocity/arrival (candidate 6): pure
+/// Hermite-spline math extracted from `warp_step`, given the ship's current
+/// anchor-relative position, the absolute-frame start/arrival points, the
+/// tangent start velocity, the current anchor's absolute position, and the
+/// segment's total/elapsed tick counts. No ECS/event-store access -- see
+/// `warp_step`'s doc comment for the curve rationale.
+#[allow(clippy::too_many_arguments)]
+fn compute_warp_step(
+    pos: Position,
+    start_abs: [f64; 3],
+    arrival_abs: [f64; 3],
+    start_vel: Velocity,
+    anchor_abs: [f64; 3],
+    total: u32,
+    elapsed: u32,
+) -> (Position, Velocity, bool) {
+    if elapsed > total {
+        // One tick past the final step: settle and stop. The move tick at
+        // `elapsed == total` already landed exactly on arrival_abs (below,
+        // h01(1) = 1), so this just zeroes velocity — keeping the motion
+        // velocity-recorded (INV-MOVE) AND the arrival exact.
+        return (pos, Velocity::ZERO, true);
+    }
+    // Cubic Hermite spline (start tangent = start_vel, end tangent = zero)
+    // along the segment this tick, in absolute f64; velocity carries the
+    // delta so the move is recorded by VelocityChanged (INV-MOVE). At
+    // elapsed == total, t = 1 → planned = arrival_abs exactly
+    // (h00(1)=h10(1)=0, h01(1)=1) regardless of start_vel.
+    let t = (elapsed as f64 / total as f64).clamp(0.0, 1.0);
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+    let h10 = t3 - 2.0 * t2 + t;
+    let h01 = -2.0 * t3 + 3.0 * t2;
+    // Tangent scaled by `total` so its per-tick rate at t=0 equals the
+    // ship's actual entering speed (the curve parameter spans total ticks
+    // over t in [0,1], so d(planned)/d(elapsed) = d(planned)/dt / total).
+    let m0 = [
+        start_vel.dx * total as f64,
+        start_vel.dy * total as f64,
+        start_vel.dz * total as f64,
+    ];
+    let planned_abs = [
+        h00 * start_abs[0] + h10 * m0[0] + h01 * arrival_abs[0],
+        h00 * start_abs[1] + h10 * m0[1] + h01 * arrival_abs[1],
+        h00 * start_abs[2] + h10 * m0[2] + h01 * arrival_abs[2],
+    ];
+    let planned = Position::new(
+        planned_abs[0] - anchor_abs[0],
+        planned_abs[1] - anchor_abs[1],
+        planned_abs[2] - anchor_abs[2],
+    );
+    let v = Velocity {
+        dx: planned.x - pos.x,
+        dy: planned.y - pos.y,
+        dz: planned.z - pos.z,
+    };
+    (planned, v, false)
+}
+
 /// Warp duration in ticks from the warp distance (start→arrival point), floored
 /// at `WARP_MIN_TICKS` so even a short warp reads as a warp. ADR-0022 amendment.
 fn warp_total_ticks(warp_dist: f64) -> u32 {
@@ -521,6 +547,69 @@ fn speed_toward(vel: Velocity, pos: Position, target: Position) -> f64 {
         return 0.0;
     }
     (vel.dx * dx + vel.dy * dy + vel.dz * dz) / dist
+}
+
+#[cfg(test)]
+mod compute_warp_step_tests {
+    use super::*;
+
+    #[test]
+    fn one_tick_past_total_settles_and_stops() {
+        let pos = Position::new(5.0, 0.0, 0.0);
+        let (new_pos, new_vel, arrived) = compute_warp_step(
+            pos,
+            [0.0, 0.0, 0.0],
+            [10_000.0, 0.0, 0.0],
+            Velocity::ZERO,
+            [0.0, 0.0, 0.0],
+            10,
+            11,
+        );
+        assert_eq!(new_pos, pos);
+        assert_eq!(new_vel, Velocity::ZERO);
+        assert!(arrived);
+    }
+
+    #[test]
+    fn final_tick_lands_exactly_on_arrival() {
+        let (new_pos, _new_vel, arrived) = compute_warp_step(
+            Position::new(9_000.0, 0.0, 0.0),
+            [0.0, 0.0, 0.0],
+            [10_000.0, 0.0, 0.0],
+            Velocity::ZERO,
+            [0.0, 0.0, 0.0],
+            10,
+            10,
+        );
+        assert!(!arrived, "the final move tick has not settled yet");
+        assert!(
+            (new_pos.x - 10_000.0).abs() < 1e-6,
+            "t=1 should land exactly on arrival_abs, got {new_pos:?}"
+        );
+    }
+
+    #[test]
+    fn first_tick_tangent_matches_the_start_velocity_rate() {
+        // At t=0 the Hermite tangent should equal start_vel (per-tick).
+        let start_vel = Velocity {
+            dx: 100.0,
+            dy: 0.0,
+            dz: 0.0,
+        };
+        let (_pos_t0, vel_t1, _arrived) = compute_warp_step(
+            Position::ORIGIN,
+            [0.0, 0.0, 0.0],
+            [1_000_000.0, 0.0, 0.0],
+            start_vel,
+            [0.0, 0.0, 0.0],
+            1000,
+            1,
+        );
+        assert!(
+            vel_t1.dx > 0.0,
+            "velocity should be moving toward arrival from the start tangent"
+        );
+    }
 }
 
 #[cfg(test)]

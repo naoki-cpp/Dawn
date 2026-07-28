@@ -206,47 +206,7 @@ impl<S: EventStore> SimulationNode<S> {
                 continue;
             };
 
-            let radial = Position::new(
-                ship_pos.x - target_pos.x,
-                ship_pos.y - target_pos.y,
-                ship_pos.z - target_pos.z,
-            );
-            let dist = (radial.x * radial.x + radial.y * radial.y + radial.z * radial.z).sqrt();
-            // Arbitrary stable unit vector when sitting exactly on the target
-            // (degenerate radial direction) -- avoids a NaN steering target.
-            let radial_unit = if dist > f64::EPSILON {
-                Position::new(radial.x / dist, radial.y / dist, radial.z / dist)
-            } else {
-                Position::new(1.0, 0.0, 0.0)
-            };
-            // Fixed UP axis (ADR-0031): a consistent, predictable sweep
-            // direction rather than a true axis-free 3D orbit.
-            const UP: (f64, f64, f64) = (0.0, 1.0, 0.0);
-            let cross = (
-                UP.1 * radial_unit.z - UP.2 * radial_unit.y,
-                UP.2 * radial_unit.x - UP.0 * radial_unit.z,
-                UP.0 * radial_unit.y - UP.1 * radial_unit.x,
-            );
-            let cross_len = (cross.0 * cross.0 + cross.1 * cross.1 + cross.2 * cross.2).sqrt();
-            let tangent = if cross_len > f64::EPSILON {
-                (
-                    cross.0 / cross_len,
-                    cross.1 / cross_len,
-                    cross.2 / cross_len,
-                )
-            } else {
-                // radial_unit is parallel to UP -- pick an arbitrary
-                // perpendicular axis instead of leaving the ship without a
-                // tangential pull.
-                (1.0, 0.0, 0.0)
-            };
-
-            let lead = radius * ORBIT_LEAD_FACTOR;
-            let target_point = Position::new(
-                target_pos.x + radial_unit.x * radius + tangent.0 * lead,
-                target_pos.y + radial_unit.y * radius + tangent.1 * lead,
-                target_pos.z + radial_unit.z * radius + tangent.2 * lead,
-            );
+            let target_point = compute_orbit_steering_point(ship_pos, target_pos, radius);
             self.steer_thrust_toward(entity, ship_pos, target_point);
         }
     }
@@ -277,36 +237,162 @@ impl<S: EventStore> SimulationNode<S> {
                 continue;
             };
 
-            let dx = ship_pos.x - target_pos.x;
-            let dy = ship_pos.y - target_pos.y;
-            let dz = ship_pos.z - target_pos.z;
-            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+            match compute_keep_at_range_step(ship_pos, target_pos, range) {
+                KeepAtRangeStepOutcome::Brake => self.brake_thrust(entity),
+                KeepAtRangeStepOutcome::CloseIn => {
+                    self.steer_thrust_toward(entity, ship_pos, target_pos)
+                }
+                KeepAtRangeStepOutcome::StepAway { toward } => {
+                    self.steer_thrust_toward(entity, ship_pos, toward)
+                }
+            }
+        }
+    }
+}
 
-            let deadband = (range * KEEP_AT_RANGE_DEADBAND_FRACTION).max(1.0);
-            if (dist - range).abs() <= deadband {
-                self.brake_thrust(entity);
-                continue;
+/// Steering aim point for an orbiting ship this tick (candidate 6): pure,
+/// given its current position, the target's resolved position, and the
+/// orbit radius. Sweeps around the target with a tangential lead so the
+/// ship doesn't just sit on the radial line (ADR-0031).
+fn compute_orbit_steering_point(ship_pos: Position, target_pos: Position, radius: f64) -> Position {
+    let radial = Position::new(
+        ship_pos.x - target_pos.x,
+        ship_pos.y - target_pos.y,
+        ship_pos.z - target_pos.z,
+    );
+    let dist = (radial.x * radial.x + radial.y * radial.y + radial.z * radial.z).sqrt();
+    // Arbitrary stable unit vector when sitting exactly on the target
+    // (degenerate radial direction) -- avoids a NaN steering target.
+    let radial_unit = if dist > f64::EPSILON {
+        Position::new(radial.x / dist, radial.y / dist, radial.z / dist)
+    } else {
+        Position::new(1.0, 0.0, 0.0)
+    };
+    // Fixed UP axis (ADR-0031): a consistent, predictable sweep direction
+    // rather than a true axis-free 3D orbit.
+    const UP: (f64, f64, f64) = (0.0, 1.0, 0.0);
+    let cross = (
+        UP.1 * radial_unit.z - UP.2 * radial_unit.y,
+        UP.2 * radial_unit.x - UP.0 * radial_unit.z,
+        UP.0 * radial_unit.y - UP.1 * radial_unit.x,
+    );
+    let cross_len = (cross.0 * cross.0 + cross.1 * cross.1 + cross.2 * cross.2).sqrt();
+    let tangent = if cross_len > f64::EPSILON {
+        (
+            cross.0 / cross_len,
+            cross.1 / cross_len,
+            cross.2 / cross_len,
+        )
+    } else {
+        // radial_unit is parallel to UP -- pick an arbitrary perpendicular
+        // axis instead of leaving the ship without a tangential pull.
+        (1.0, 0.0, 0.0)
+    };
+
+    let lead = radius * ORBIT_LEAD_FACTOR;
+    Position::new(
+        target_pos.x + radial_unit.x * radius + tangent.0 * lead,
+        target_pos.y + radial_unit.y * radius + tangent.1 * lead,
+        target_pos.z + radial_unit.z * radius + tangent.2 * lead,
+    )
+}
+
+/// What a Keep-at-Range ship should do this tick (candidate 6): pure,
+/// given its current position, the target's resolved position, and the
+/// held range.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum KeepAtRangeStepOutcome {
+    /// Within the deadband around `range`: hold position.
+    Brake,
+    /// Farther than `range`: close in, same steering as Approach.
+    CloseIn,
+    /// Closer than `range`: steer away, toward this point.
+    StepAway { toward: Position },
+}
+
+fn compute_keep_at_range_step(
+    ship_pos: Position,
+    target_pos: Position,
+    range: f64,
+) -> KeepAtRangeStepOutcome {
+    let dx = ship_pos.x - target_pos.x;
+    let dy = ship_pos.y - target_pos.y;
+    let dz = ship_pos.z - target_pos.z;
+    let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+
+    let deadband = (range * KEEP_AT_RANGE_DEADBAND_FRACTION).max(1.0);
+    if (dist - range).abs() <= deadband {
+        return KeepAtRangeStepOutcome::Brake;
+    }
+    if dist > range {
+        return KeepAtRangeStepOutcome::CloseIn;
+    }
+    // Steer straight away: aim at a point further out along the current
+    // radial direction (steer_thrust_toward only needs the direction, not
+    // an exact arrival point).
+    let radial_unit = if dist > f64::EPSILON {
+        Position::new(dx / dist, dy / dist, dz / dist)
+    } else {
+        Position::new(1.0, 0.0, 0.0)
+    };
+    KeepAtRangeStepOutcome::StepAway {
+        toward: Position::new(
+            ship_pos.x + radial_unit.x,
+            ship_pos.y + radial_unit.y,
+            ship_pos.z + radial_unit.z,
+        ),
+    }
+}
+
+#[cfg(test)]
+mod compute_step_tests {
+    use super::*;
+
+    #[test]
+    fn orbit_steering_point_lies_on_the_orbit_radius_from_the_target() {
+        let ship = Position::new(2000.0, 0.0, 0.0);
+        let target = Position::ORIGIN;
+        let point = compute_orbit_steering_point(ship, target, 2000.0);
+        // The pure radial component (ignoring tangential lead) should sit at
+        // distance ~radius from the target along some direction.
+        let radial_dist = ((point.x - target.x).powi(2) + (point.y - target.y).powi(2)).sqrt();
+        assert!(
+            radial_dist >= 2000.0,
+            "steering point should be at least the orbit radius out, got {radial_dist}"
+        );
+    }
+
+    #[test]
+    fn keep_at_range_within_deadband_brakes() {
+        // range 5000, deadband = 5000 * 0.05 = 250 -> 5100 sits inside it.
+        let ship = Position::new(5100.0, 0.0, 0.0);
+        let target = Position::ORIGIN;
+        assert_eq!(
+            compute_keep_at_range_step(ship, target, 5000.0),
+            KeepAtRangeStepOutcome::Brake
+        );
+    }
+
+    #[test]
+    fn keep_at_range_farther_than_range_closes_in() {
+        let ship = Position::new(20_000.0, 0.0, 0.0);
+        let target = Position::ORIGIN;
+        assert_eq!(
+            compute_keep_at_range_step(ship, target, 5000.0),
+            KeepAtRangeStepOutcome::CloseIn
+        );
+    }
+
+    #[test]
+    fn keep_at_range_closer_than_range_steps_away() {
+        let ship = Position::new(1000.0, 0.0, 0.0);
+        let target = Position::ORIGIN;
+        let outcome = compute_keep_at_range_step(ship, target, 5000.0);
+        match outcome {
+            KeepAtRangeStepOutcome::StepAway { toward } => {
+                assert!(toward.x > ship.x, "should aim further away along +X");
             }
-            if dist > range {
-                // Farther than the chosen distance -- close in, same steering
-                // the Approach System uses.
-                self.steer_thrust_toward(entity, ship_pos, target_pos);
-                continue;
-            }
-            // Steer straight away: aim at a point further out along the
-            // current radial direction (steer_thrust_toward only needs the
-            // direction, not an exact arrival point).
-            let radial_unit = if dist > f64::EPSILON {
-                Position::new(dx / dist, dy / dist, dz / dist)
-            } else {
-                Position::new(1.0, 0.0, 0.0)
-            };
-            let away_point = Position::new(
-                ship_pos.x + radial_unit.x,
-                ship_pos.y + radial_unit.y,
-                ship_pos.z + radial_unit.z,
-            );
-            self.steer_thrust_toward(entity, ship_pos, away_point);
+            other => panic!("expected StepAway, got {other:?}"),
         }
     }
 }
