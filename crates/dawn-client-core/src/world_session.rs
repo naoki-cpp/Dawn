@@ -7,8 +7,6 @@
 
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
-
 use crate::PlayerLoadoutMsg;
 
 /// Built by `dawn-client-gdext`'s `navigation_gd::navigation_input_from_dict`
@@ -92,47 +90,42 @@ impl Default for NavigationInput {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+/// Built by `dawn-client-gdext`'s `ship_gd::ship_input_from_dict` (no
+/// `Deserialize` impl here -- `dawn-client-core` stays wire/JSON-agnostic
+/// per ADR-0039, matching `NavigationInput` above). A missing field there
+/// defaults the same way `#[serde(default = ...)]` used to; the default
+/// values below are exposed so that conversion can reuse them verbatim.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ShipInput {
-    #[serde(default)]
     pub is_player: bool,
-    #[serde(default)]
     pub ship_type_name: String,
-    #[serde(default = "default_max_shield")]
     pub max_shield: f64,
-    #[serde(default = "default_max_armor")]
     pub max_armor: f64,
-    #[serde(default = "default_max_hull")]
     pub max_hull: f64,
-    #[serde(default)]
     pub current_shield: Option<f64>,
-    #[serde(default)]
     pub current_armor: Option<f64>,
-    #[serde(default)]
     pub current_hull: Option<f64>,
-    #[serde(default = "default_cap_max")]
     pub cap_max: f64,
-    #[serde(default = "default_cap_recharge")]
     pub cap_recharge_per_tick: f64,
 }
 
-fn default_max_shield() -> f64 {
+pub fn default_max_shield() -> f64 {
     200.0
 }
 
-fn default_max_armor() -> f64 {
+pub fn default_max_armor() -> f64 {
     150.0
 }
 
-fn default_max_hull() -> f64 {
+pub fn default_max_hull() -> f64 {
     150.0
 }
 
-fn default_cap_max() -> f64 {
+pub fn default_cap_max() -> f64 {
     500.0
 }
 
-fn default_cap_recharge() -> f64 {
+pub fn default_cap_recharge() -> f64 {
     10.0
 }
 

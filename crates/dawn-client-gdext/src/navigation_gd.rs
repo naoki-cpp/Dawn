@@ -24,38 +24,47 @@ use godot::prelude::*;
 
 use crate::json_variant::Dict;
 
-fn dict_f64(d: &Dict, key: &str, default: f64) -> f64 {
+pub(crate) fn dict_f64(d: &Dict, key: &str, default: f64) -> f64 {
     d.get(key)
         .and_then(|v| v.try_to::<f64>().ok())
         .unwrap_or(default)
 }
 
-fn dict_i64(d: &Dict, key: &str, default: i64) -> i64 {
+pub(crate) fn dict_i64(d: &Dict, key: &str, default: i64) -> i64 {
     d.get(key)
         .and_then(|v| v.try_to::<i64>().ok())
         .unwrap_or(default)
 }
 
-fn dict_string(d: &Dict, key: &str, default: &str) -> String {
+pub(crate) fn dict_string(d: &Dict, key: &str, default: &str) -> String {
     d.get(key)
         .and_then(|v| v.try_to::<GString>().ok())
         .map(|s| s.to_string())
         .unwrap_or_else(|| default.to_string())
 }
 
-fn dict_sub(d: &Dict, key: &str) -> Dict {
+/// Like `dict_f64`, but distinguishes "key absent" (`None`) from "key
+/// present" (`Some`) instead of collapsing both to a default value --
+/// mirrors the old `#[serde(default)] Option<f64>` semantics for fields
+/// where a caller-visible "unset" is meaningful (e.g. `ShipInput`'s
+/// `current_shield`/`current_armor`/`current_hull`).
+pub(crate) fn dict_f64_opt(d: &Dict, key: &str) -> Option<f64> {
+    d.get(key).and_then(|v| v.try_to::<f64>().ok())
+}
+
+pub(crate) fn dict_sub(d: &Dict, key: &str) -> Dict {
     d.get(key)
         .and_then(|v| v.try_to::<Dict>().ok())
         .unwrap_or_default()
 }
 
-fn dict_array(d: &Dict, key: &str) -> Array<Variant> {
+pub(crate) fn dict_array(d: &Dict, key: &str) -> Array<Variant> {
     d.get(key)
         .and_then(|v| v.try_to::<Array<Variant>>().ok())
         .unwrap_or_default()
 }
 
-fn vec_from_array<T>(arr: Array<Variant>, from_dict: impl Fn(&Dict) -> T) -> Vec<T> {
+pub(crate) fn vec_from_array<T>(arr: Array<Variant>, from_dict: impl Fn(&Dict) -> T) -> Vec<T> {
     arr.iter_shared()
         .filter_map(|v| v.try_to::<Dict>().ok())
         .map(|d| from_dict(&d))

@@ -586,7 +586,7 @@ func test_switching_active_ship_to_a_known_ship_reattaches_the_camera() -> void:
 	ship_b.global_position = Vector3(100.0, 0.0, 0.0)
 
 	_main._ships = {1: ship_a, 2: ship_b}
-	_main._session.register_ship(1, JSON.stringify({
+	_main._session.register_ship(1, {
 		"is_player": true,
 		"ship_type_name": "Magpie",
 		"current_shield": 80.0,
@@ -597,8 +597,8 @@ func test_switching_active_ship_to_a_known_ship_reattaches_the_camera() -> void:
 		"max_hull": 80.0,
 		"cap_max": 55.0,
 		"cap_recharge_per_tick": 3.0,
-	}), 1)
-	_main._session.register_ship(2, JSON.stringify({
+	}, 1)
+	_main._session.register_ship(2, {
 		"is_player": false,
 		"ship_type_name": "Venture",
 		"current_shield": 210.0,
@@ -609,7 +609,7 @@ func test_switching_active_ship_to_a_known_ship_reattaches_the_camera() -> void:
 		"max_hull": 120.0,
 		"cap_max": 80.0,
 		"cap_recharge_per_tick": 4.0,
-	}), 1)
+	}, 1)
 	_main._session.set_player_ship_id(1)
 	## Route through the real attach path (not a bare camera.set_target())
 	## so WorldPresentation._player_ship is seeded correctly -- otherwise the
