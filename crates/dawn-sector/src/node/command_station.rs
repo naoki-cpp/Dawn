@@ -197,7 +197,7 @@ mod tests {
     /// API rather than the private dispatcher: `SelectActiveShip` switches the
     /// active ship, and the *next* command must reach the newly selected one.
     #[test]
-    fn a_dock_after_select_active_ship_routes_to_the_newly_selected_ship() {
+    fn an_undock_after_select_active_ship_routes_to_the_newly_selected_ship() {
         use dawn_core::{ClientCommand, SelectActiveShipCommand, UndockCommand};
 
         let mut node = node();
@@ -216,6 +216,21 @@ mod tests {
         );
         assert_ne!(first_ship, second_ship);
 
+        // Spawning already makes a ship active (`spawn_player_ship_at`), so
+        // hand the active slot back to the first ship first. Without this the
+        // `SelectActiveShip` below is rejected as `AlreadyActive` and switches
+        // nothing, leaving the test green for the wrong reason.
+        node.select_active_ship_owned(
+            player_id,
+            SelectActiveShipCommand {
+                ship_id: first_ship,
+            },
+        );
+        assert!(
+            node.is_active_ship(player_id, first_ship),
+            "fixture precondition: the first ship is the active one"
+        );
+
         let mut locks = Vec::new();
         node.apply_client_command(
             player_id,
@@ -223,6 +238,10 @@ mod tests {
                 ship_id: second_ship,
             }),
             &mut locks,
+        );
+        assert!(
+            node.is_active_ship(player_id, second_ship),
+            "SelectActiveShip must actually switch the active ship"
         );
 
         // Undock routes to the active ship. If the entry point were still
