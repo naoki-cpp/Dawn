@@ -320,34 +320,23 @@ static func should_log_reconnect(attempt: int, elapsed: float, interval: float) 
 	return attempt <= 1 or elapsed >= interval
 
 ## One WebSocket frame always carries exactly one message (ADR-0042). Every
-## server -> client message is now the postcard `ServerMessage` binary
-## envelope (ADR-0042 stages 1-2c); the text-frame/`JSON.parse_string` branch
-## below is dead on the wire today but kept as a defensive fallback.
-## `ServerMessageDecoder` converts most binary variants (including
-## `InitialState`, `AoiEnter`/`AoiLeave`, `PositionSnap`, `MotionCorrection`) into the same
-## `{"type": ..., ...}` Dictionary shape the old JSON messages used, except
-## `PlayerLoadout` (ADR-0042 2a), which it reduces to a bare `{"type":
-## "PlayerLoadout"}` dispatch tag -- the raw bytes go straight to
-## `PlayerLoadout.apply_wire_bytes` instead, bypassing the Dictionary
-## entirely for precision (see `player_fitting_received`).
+## server -> client message is the postcard `ServerMessage` binary envelope
+## (ADR-0042 stages 1-2c, migration complete); there is no text-frame path
+## to fall back to (issue #179). `ServerMessageDecoder` converts most binary
+## variants (including `InitialState`, `AoiEnter`/`AoiLeave`, `PositionSnap`,
+## `MotionCorrection`) into the same `{"type": ..., ...}` Dictionary shape the
+## old JSON messages used, except `PlayerLoadout` (ADR-0042 2a), which it
+## reduces to a bare `{"type": "PlayerLoadout"}` dispatch tag -- the raw
+## bytes go straight to `PlayerLoadout.apply_wire_bytes` instead, bypassing
+## the Dictionary entirely for precision (see `player_fitting_received`).
 func _receive_messages() -> void:
 	while _ws.get_available_packet_count() > 0:
 		var packet: PackedByteArray = _ws.get_packet()
-		if _ws.was_string_packet():
-			var line: String = packet.get_string_from_utf8().strip_edges()
-			if line.is_empty():
-				continue
-			var result: Variant = JSON.parse_string(line)
-			if result == null:
-				push_warning("[Connection] failed to parse JSON: " + line)
-				continue
-			_handle_message(result as Dictionary, PackedByteArray())
-		else:
-			var payload: Dictionary = _decoder.decode(packet)
-			if payload.is_empty():
-				push_warning("[Connection] failed to decode binary ServerMessage")
-				continue
-			_handle_message(payload, packet)
+		var payload: Dictionary = _decoder.decode(packet)
+		if payload.is_empty():
+			push_warning("[Connection] failed to decode binary ServerMessage")
+			continue
+		_handle_message(payload, packet)
 
 func _handle_message(payload: Dictionary, raw_bytes: PackedByteArray) -> void:
 	var msg_type: String = payload.get("type", "") as String
