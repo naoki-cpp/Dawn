@@ -44,9 +44,9 @@ pub fn run(world: &mut SimWorld, tick: Tick, repair_cycles: &[RepairCycle]) -> R
     }
 
     let mut snaps: Vec<RepairSnap> = world
-        .query::<(&ShipIdComp, &ShipStatsComp, &HullComp)>()
+        .query::<(hecs::Entity, &ShipIdComp, &ShipStatsComp, &HullComp)>()
         .iter()
-        .map(|(entity, (id, stats, hull))| RepairSnap {
+        .map(|(entity, id, stats, hull)| RepairSnap {
             entity,
             ship_id: id.0,
             max_shield: stats.max_shield,

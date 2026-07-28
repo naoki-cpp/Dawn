@@ -50,6 +50,7 @@ pub fn run(world: &mut SimWorld, tick: Tick, pending_commands: &[LockOnCommand])
 
     let mut ships: Vec<ShipSnap> = world
         .query::<(
+            hecs::Entity,
             &ShipIdComp,
             &PositionComp,
             &ShipStatsComp,
@@ -57,7 +58,7 @@ pub fn run(world: &mut SimWorld, tick: Tick, pending_commands: &[LockOnCommand])
             Option<&IsNpcComp>,
         )>()
         .iter()
-        .map(|(entity, (id, pos, stats, lock, npc))| ShipSnap {
+        .map(|(entity, id, pos, stats, lock, npc)| ShipSnap {
             entity,
             ship_id: id.0,
             pos: pos.0,
@@ -251,7 +252,7 @@ mod tests {
         let any_locking = world
             .query::<&LockComp>()
             .iter()
-            .any(|(_, l)| !l.entries.is_empty());
+            .any(|l| !l.entries.is_empty());
         assert!(any_locking, "locking entry created when target is in range");
     }
 
@@ -266,7 +267,7 @@ mod tests {
         let any_locking = world
             .query::<&LockComp>()
             .iter()
-            .any(|(_, l)| !l.entries.is_empty());
+            .any(|l| !l.entries.is_empty());
         assert!(!any_locking, "no auto-lock when target is out of range");
     }
 
@@ -330,7 +331,7 @@ mod tests {
         let lock_started = world
             .query::<(&ShipIdComp, &LockComp)>()
             .iter()
-            .any(|(_, (id, l))| id.0 == ship_id(1) && !l.entries.is_empty());
+            .any(|(id, l)| id.0 == ship_id(1) && !l.entries.is_empty());
         assert!(lock_started, "lock initiated by LockOnCommand");
     }
 
@@ -364,8 +365,8 @@ mod tests {
         let lock_count = world
             .query::<(&ShipIdComp, &LockComp)>()
             .iter()
-            .find(|(_, (id, _))| id.0 == ship_id(1))
-            .map(|(_, (_, l))| l.entries.len())
+            .find(|(id, _)| id.0 == ship_id(1))
+            .map(|(_, l)| l.entries.len())
             .unwrap_or(0);
         assert_eq!(
             lock_count, 1,

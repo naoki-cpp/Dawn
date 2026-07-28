@@ -107,6 +107,7 @@ pub fn run(
 
     let mut ships: Vec<ShipSnapshot> = world
         .query::<(
+            hecs::Entity,
             &ShipIdComp,
             &ShipStatsComp,
             &PositionComp,
@@ -117,7 +118,7 @@ pub fn run(
         )>()
         .iter()
         .map(
-            |(entity, (id, stats, pos, vel, hull, lock, anchor))| ShipSnapshot {
+            |(entity, id, stats, pos, vel, hull, lock, anchor)| ShipSnapshot {
                 entity,
                 ship_id: id.0,
                 stats: *stats,

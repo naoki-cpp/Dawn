@@ -210,7 +210,7 @@ pub enum ClientCommandWire {
 
 /// Render the client -> server wire schema (see [`ClientCommandWire`]) as a
 /// JSON Schema document.
-pub fn client_command_wire_json_schema() -> schemars::schema::RootSchema {
+pub fn client_command_wire_json_schema() -> schemars::Schema {
     schemars::schema_for!(ClientCommandWire)
 }
 

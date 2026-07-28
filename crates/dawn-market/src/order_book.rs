@@ -170,14 +170,14 @@ pub struct MarketOrderView {
 
 /// Current Currency balance for `player_id`, `0` if they have no row yet.
 fn currency_balance_raw(conn: &Connection, player_id: u64) -> rusqlite::Result<u64> {
-    let balance = conn
+    let balance: Option<i64> = conn
         .query_row(
             "SELECT balance FROM currency WHERE player_id = ?1",
-            params![player_id],
+            params![player_id as i64],
             |row| row.get(0),
         )
         .optional()?;
-    Ok(balance.unwrap_or(0))
+    Ok(balance.unwrap_or(0) as u64)
 }
 
 fn credit_currency_raw(conn: &Connection, player_id: u64, amount: u64) -> rusqlite::Result<()> {
@@ -187,7 +187,7 @@ fn credit_currency_raw(conn: &Connection, player_id: u64, amount: u64) -> rusqli
     conn.execute(
         "INSERT INTO currency (player_id, balance) VALUES (?1, ?2)
          ON CONFLICT(player_id) DO UPDATE SET balance = balance + excluded.balance",
-        params![player_id, amount],
+        params![player_id as i64, amount as i64],
     )?;
     Ok(())
 }
@@ -206,11 +206,11 @@ fn try_debit_currency_raw(
     }
     conn.execute(
         "INSERT INTO currency (player_id, balance) VALUES (?1, 0) ON CONFLICT(player_id) DO NOTHING",
-        params![player_id],
+        params![player_id as i64],
     )?;
     let changed = conn.execute(
         "UPDATE currency SET balance = balance - ?2 WHERE player_id = ?1 AND balance >= ?2",
-        params![player_id, amount],
+        params![player_id as i64, amount as i64],
     )?;
     Ok(changed == 1)
 }
@@ -305,7 +305,7 @@ impl MarketDb {
              ORDER BY order_id ASC
              LIMIT ?1",
         )?;
-        let rows = stmt.query_map(params![MAX_OPEN_ORDER_VIEW], |row| {
+        let rows = stmt.query_map(params![MAX_OPEN_ORDER_VIEW as i64], |row| {
             let item_type: String = row.get(2)?;
             let module_id: u32 = row.get(3)?;
             let ship_type_id: u32 = row.get(4)?;
@@ -319,11 +319,11 @@ impl MarketDb {
                 })?;
             Ok(MarketOrderView {
                 order_id: OrderId(row.get(0)?),
-                player_id: PlayerId(row.get(1)?),
+                player_id: PlayerId(row.get::<_, i64>(1)? as u64),
                 item_id,
                 side: columns_to_side(&row.get::<_, String>(5)?),
-                price: row.get(6)?,
-                quantity_remaining: row.get(7)?,
+                price: row.get::<_, i64>(6)? as u64,
+                quantity_remaining: row.get::<_, i64>(7)? as u64,
             })
         })?;
         rows.collect()
@@ -384,8 +384,8 @@ impl MarketDb {
                     "UPDATE orders SET quantity_remaining = ?1, escrowed_currency = ?2
                      WHERE order_id = ?3",
                     params![
-                        fill.resting_quantity_remaining,
-                        fill.resting_escrowed_currency,
+                        fill.resting_quantity_remaining as i64,
+                        fill.resting_escrowed_currency as i64,
                         fill.resting_order_id
                     ],
                 )?;
@@ -424,15 +424,15 @@ impl MarketDb {
                     (player_id, ship_id, side, item_type, module_id, ship_type_id, price, quantity_remaining, escrowed_currency)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
-                    player_id.raw(),
-                    ship_id.raw(),
+                    player_id.raw() as i64,
+                    ship_id.raw() as i64,
                     side.as_column_value(),
                     item_type,
                     module_id,
                     ship_type_id,
-                    price,
-                    plan.remaining_quantity,
-                    escrowed_currency,
+                    price as i64,
+                    plan.remaining_quantity as i64,
+                    escrowed_currency as i64,
                 ],
             )?;
             Some(OrderId(tx.last_insert_rowid()))
@@ -476,15 +476,15 @@ impl MarketDb {
                 params![order_id.0],
                 |row| {
                     Ok((
-                        row.get::<_, u64>(0)?,
-                        row.get::<_, Option<u64>>(1)?,
+                        row.get::<_, i64>(0)? as u64,
+                        row.get::<_, Option<i64>>(1)?.map(|v| v as u64),
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, u32>(4)?,
                         row.get::<_, u32>(5)?,
-                        row.get::<_, u64>(6)?,
-                        row.get::<_, u64>(7)?,
-                        row.get::<_, u64>(8)?,
+                        row.get::<_, i64>(6)? as u64,
+                        row.get::<_, i64>(7)? as u64,
+                        row.get::<_, i64>(8)? as u64,
                     ))
                 },
             )
@@ -572,21 +572,21 @@ fn load_matching_orders(
             module_id,
             ship_type_id,
             incoming_side.opposite().as_column_value(),
-            incoming_price,
-            incoming_quantity,
+            incoming_price as i64,
+            incoming_quantity as i64,
         ],
         |row| {
             Ok(RestingOrder {
                 order_id: row.get(0)?,
-                player_id: PlayerId(row.get(1)?),
+                player_id: PlayerId(row.get::<_, i64>(1)? as u64),
                 ship_id: row
-                    .get::<_, Option<u64>>(2)?
-                    .map(|raw| ShipId(EntityId::from_raw(raw))),
+                    .get::<_, Option<i64>>(2)?
+                    .map(|raw| ShipId(EntityId::from_raw(raw as u64))),
                 item_id,
                 side: columns_to_side(&row.get::<_, String>(3)?),
-                quantity_remaining: row.get(4)?,
-                price: row.get(5)?,
-                escrowed_currency: row.get(6)?,
+                quantity_remaining: row.get::<_, i64>(4)? as u64,
+                price: row.get::<_, i64>(5)? as u64,
+                escrowed_currency: row.get::<_, i64>(6)? as u64,
             })
         },
     )?;

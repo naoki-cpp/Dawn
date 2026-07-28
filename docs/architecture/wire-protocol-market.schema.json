@@ -1,39 +1,27 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "MarketCommandWire",
-  "description": "A client request handled by the Market authority, outside the Sector command stream (ADR-0034).",
+  "description": "A client request handled by the Market authority, outside the Sector\ncommand stream (ADR-0034).",
   "oneOf": [
     {
       "description": "Request the caller's Currency balance and currently open orders.",
       "type": "object",
-      "required": [
-        "RefreshMarketCommand"
-      ],
       "properties": {
         "RefreshMarketCommand": {
           "type": "object"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "RefreshMarketCommand"
+      ]
     },
     {
       "description": "Place a limit Bid or Ask for one item stack.",
       "type": "object",
-      "required": [
-        "PlaceMarketOrderCommand"
-      ],
       "properties": {
         "PlaceMarketOrderCommand": {
           "type": "object",
-          "required": [
-            "item_type",
-            "module_id",
-            "price",
-            "quantity",
-            "ship_id",
-            "ship_type_id",
-            "side"
-          ],
           "properties": {
             "item_type": {
               "type": "string"
@@ -41,58 +29,70 @@
             "module_id": {
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0
             },
             "price": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "quantity": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "ship_type_id": {
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0
             },
             "side": {
               "type": "string"
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "item_type",
+            "module_id",
+            "ship_type_id",
+            "side",
+            "price",
+            "quantity"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "PlaceMarketOrderCommand"
+      ]
     },
     {
       "description": "Cancel one of the caller's own open orders.",
       "type": "object",
-      "required": [
-        "CancelMarketOrderCommand"
-      ],
       "properties": {
         "CancelMarketOrderCommand": {
           "type": "object",
-          "required": [
-            "order_id"
-          ],
           "properties": {
             "order_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "order_id"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "CancelMarketOrderCommand"
+      ]
     }
   ]
 }

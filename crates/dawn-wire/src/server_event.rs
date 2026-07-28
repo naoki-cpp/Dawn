@@ -128,7 +128,7 @@ pub enum EventWire {
 
 /// Render the server -> client wire schema (see [`EventWire`]) as a JSON
 /// Schema document.
-pub fn event_wire_json_schema() -> schemars::schema::RootSchema {
+pub fn event_wire_json_schema() -> schemars::Schema {
     schemars::schema_for!(EventWire)
 }
 

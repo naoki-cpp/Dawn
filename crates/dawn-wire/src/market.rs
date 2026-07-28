@@ -43,7 +43,7 @@ pub struct MarketSnapshotWire {
 }
 
 /// Render the Market request wire schema as JSON Schema.
-pub fn market_command_wire_json_schema() -> schemars::schema::RootSchema {
+pub fn market_command_wire_json_schema() -> schemars::Schema {
     schemars::schema_for!(MarketCommandWire)
 }
 

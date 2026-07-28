@@ -31,6 +31,10 @@ jobs:
     name: dawn-wire / ${{ matrix.target }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # rust-toolchain.toml pins required CI to stable; cargo-fuzz needs nightly
+    # for sanitizer and coverage instrumentation.
+    env:
+      RUSTUP_TOOLCHAIN: nightly
     strategy:
       fail-fast: false
       matrix:

@@ -33,7 +33,7 @@ impl MovementSystem {
     pub fn run(world: &mut SimWorld, tick: Tick) -> Vec<DomainEvent> {
         let mut events = Vec::new();
 
-        for (_entity, (id_comp, pos_comp, vel_comp, thrust_comp, stats_comp, warp_comp)) in
+        for (id_comp, pos_comp, vel_comp, thrust_comp, stats_comp, warp_comp) in
             world.inner_mut().query_mut::<(
                 &ShipIdComp,
                 &mut PositionComp,
@@ -212,7 +212,7 @@ mod tests {
         let mut w = SimWorld::new(SectorId(0));
         spawn(&mut w, 1, start, vel);
         MovementSystem::run(&mut w, Tick(1));
-        for (_, pos) in w.inner().query::<&PositionComp>().iter() {
+        for pos in w.inner().query::<&PositionComp>().iter() {
             assert!((pos.0.x - (start.x + vel.dx)).abs() < 0.001);
             assert!((pos.0.y - (start.y + vel.dy)).abs() < 0.001);
         }
@@ -228,7 +228,7 @@ mod tests {
             Velocity::new(100.0, 0.0, 0.0),
         );
         MovementSystem::run(&mut w, Tick(1));
-        for (_e, vel) in w.inner().query::<&VelocityComp>().iter() {
+        for vel in w.inner().query::<&VelocityComp>().iter() {
             assert!(
                 vel.0.dx > 0.0,
                 "velocity must not be reversed — no walls in space"

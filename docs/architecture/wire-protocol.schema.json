@@ -1,225 +1,214 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "EventWire",
-  "description": "Every message the server sends to a client over the WebSocket connection, wrapped by `ServerMessage::Event` and postcard-encoded (ADR-0042).\n\nThis enum is the schema-of-record for the server -> client half of the wire protocol: [`event_wire_json_schema()`] renders it to a JSON Schema document that `docs/architecture/wire-protocol.md` is generated from. Adding, removing, or renaming a field here changes the wire format for every client (Godot today; any future client written against `docs/architecture/wire-protocol.md`).\n\nExternally tagged (serde's default enum representation), not `#[serde(tag = \"type\")]` -- `postcard` cannot deserialize an internally tagged enum (no `deserialize_any`). `dawn-client-gdext`'s `ServerMessageDecoder` converts the externally tagged shape back into a `{\"type\": ..., ...}` Dictionary so existing GDScript consumers (written against the old JSON shape) don't need to change.\n\n`Deserialize` (ADR-0042) exists so `dawn-client-gdext` can decode a `ServerMessage` it receives; the server itself only ever serializes this type, never parses it back.",
+  "description": "Every message the server sends to a client over the WebSocket connection,\nwrapped by `ServerMessage::Event` and postcard-encoded (ADR-0042).\n\nThis enum is the schema-of-record for the server -> client half of the\nwire protocol: [`event_wire_json_schema()`] renders it to a JSON Schema\ndocument that `docs/architecture/wire-protocol.md` is generated from.\nAdding, removing, or renaming a field here changes the wire format for\nevery client (Godot today; any future client written against\n`docs/architecture/wire-protocol.md`).\n\nExternally tagged (serde's default enum representation), not\n`#[serde(tag = \"type\")]` -- `postcard` cannot deserialize an internally\ntagged enum (no `deserialize_any`). `dawn-client-gdext`'s\n`ServerMessageDecoder` converts the externally tagged shape back into a\n`{\"type\": ..., ...}` Dictionary so existing GDScript consumers (written\nagainst the old JSON shape) don't need to change.\n\n`Deserialize` (ADR-0042) exists so `dawn-client-gdext` can decode a\n`ServerMessage` it receives; the server itself only ever serializes this\ntype, never parses it back.",
   "oneOf": [
     {
       "type": "object",
-      "required": [
-        "ShipSpawned"
-      ],
       "properties": {
         "ShipSpawned": {
           "type": "object",
-          "required": [
-            "position",
-            "ship_id",
-            "tick"
-          ],
           "properties": {
             "position": {
-              "$ref": "#/definitions/AbsPosWire"
+              "$ref": "#/$defs/AbsPosWire"
             },
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "position",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "ShipSpawned"
+      ]
     },
     {
       "type": "object",
-      "required": [
-        "VelocityChanged"
-      ],
       "properties": {
         "VelocityChanged": {
           "type": "object",
-          "required": [
-            "ship_id",
-            "tick",
-            "velocity"
-          ],
           "properties": {
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "velocity": {
-              "$ref": "#/definitions/VelWire"
+              "$ref": "#/$defs/VelWire"
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "velocity",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "VelocityChanged"
+      ]
     },
     {
       "type": "object",
-      "required": [
-        "ShipDespawned"
-      ],
       "properties": {
         "ShipDespawned": {
           "type": "object",
-          "required": [
-            "ship_id",
-            "tick"
-          ],
           "properties": {
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "ShipDespawned"
+      ]
     },
     {
       "type": "object",
-      "required": [
-        "ShipDocked"
-      ],
       "properties": {
         "ShipDocked": {
           "type": "object",
-          "required": [
-            "ship_id",
-            "station_id",
-            "tick"
-          ],
           "properties": {
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "station_id": {
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "station_id",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "ShipDocked"
+      ]
     },
     {
       "type": "object",
-      "required": [
-        "ShipUndocked"
-      ],
       "properties": {
         "ShipUndocked": {
           "type": "object",
-          "required": [
-            "ship_id",
-            "station_id",
-            "tick"
-          ],
           "properties": {
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "station_id": {
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "station_id",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "ShipUndocked"
+      ]
     },
     {
-      "description": "A station-inventory Packaged Ship item became a new live docked ship, owned by the caller (ADR-0034 9B, ADR-0037). `active_ship` is unchanged -- the client must send `SelectActiveShipCommand` to fly it.",
+      "description": "A station-inventory Packaged Ship item became a new live docked ship,\nowned by the caller (ADR-0034 9B, ADR-0037). `active_ship` is\nunchanged -- the client must send `SelectActiveShipCommand` to fly it.",
       "type": "object",
-      "required": [
-        "ShipAssembled"
-      ],
       "properties": {
         "ShipAssembled": {
           "type": "object",
-          "required": [
-            "ship_id",
-            "ship_type_id",
-            "station_id",
-            "tick"
-          ],
           "properties": {
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "ship_type_id": {
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0
             },
             "station_id": {
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "station_id",
+            "ship_type_id",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "ShipAssembled"
+      ]
     },
     {
       "type": "object",
-      "required": [
-        "DamageTaken"
-      ],
       "properties": {
         "DamageTaken": {
           "type": "object",
-          "required": [
-            "current_armor",
-            "current_hull",
-            "current_shield",
-            "damage",
-            "ship_id",
-            "tick"
-          ],
           "properties": {
             "current_armor": {
               "type": "number",
@@ -240,35 +229,34 @@
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "damage",
+            "current_shield",
+            "current_armor",
+            "current_hull",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "DamageTaken"
+      ]
     },
     {
       "type": "object",
-      "required": [
-        "RepairApplied"
-      ],
       "properties": {
         "RepairApplied": {
           "type": "object",
-          "required": [
-            "amount",
-            "current_armor",
-            "current_hull",
-            "current_shield",
-            "layer",
-            "ship_id",
-            "tick"
-          ],
           "properties": {
             "amount": {
               "type": "number",
@@ -292,200 +280,203 @@
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "amount",
+            "layer",
+            "current_shield",
+            "current_armor",
+            "current_hull",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "RepairApplied"
+      ]
     },
     {
       "type": "object",
-      "required": [
-        "ShipDestroyed"
-      ],
       "properties": {
         "ShipDestroyed": {
           "type": "object",
-          "required": [
-            "killer_id",
-            "ship_id",
-            "tick"
-          ],
           "properties": {
             "killer_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "killer_id",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "ShipDestroyed"
+      ]
     },
     {
       "type": "object",
-      "required": [
-        "TargetLocked"
-      ],
       "properties": {
         "TargetLocked": {
           "type": "object",
-          "required": [
-            "locker_id",
-            "target_id",
-            "tick"
-          ],
           "properties": {
             "locker_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "target_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "locker_id",
+            "target_id",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "TargetLocked"
+      ]
     },
     {
       "type": "object",
-      "required": [
-        "LockLost"
-      ],
       "properties": {
         "LockLost": {
           "type": "object",
-          "required": [
-            "locker_id",
-            "target_id",
-            "tick"
-          ],
           "properties": {
             "locker_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "target_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "locker_id",
+            "target_id",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "LockLost"
+      ]
     },
     {
       "type": "object",
-      "required": [
-        "ModuleActivated"
-      ],
       "properties": {
         "ModuleActivated": {
           "type": "object",
-          "required": [
-            "module_id",
-            "ship_id",
-            "slot",
-            "tick"
-          ],
           "properties": {
             "module_id": {
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0
             },
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "slot": {
               "type": "string"
             },
             "target_ship_id": {
               "description": "Target of a targeted module (Weapon/Tackle), per ADR-0035.",
-              "default": null,
               "type": [
                 "integer",
                 "null"
               ],
               "format": "uint64",
-              "minimum": 0.0
+              "default": null,
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "module_id",
+            "slot",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "ModuleActivated"
+      ]
     },
     {
       "type": "object",
-      "required": [
-        "ModuleDeactivated"
-      ],
       "properties": {
         "ModuleDeactivated": {
           "type": "object",
-          "required": [
-            "module_id",
-            "ship_id",
-            "slot",
-            "tick"
-          ],
           "properties": {
             "module_id": {
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0
             },
             "reason": {
-              "description": "Why the system forced this off (\"cap\" | \"range\"); `None` for a player-issued deactivation (ADR-0035).",
-              "default": null,
+              "description": "Why the system forced this off (\"cap\" | \"range\"); `None` for a\nplayer-issued deactivation (ADR-0035).",
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "default": null
             },
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "slot": {
               "type": "string"
@@ -493,113 +484,119 @@
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "module_id",
+            "slot",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "ModuleDeactivated"
+      ]
     },
     {
       "type": "object",
-      "required": [
-        "JumpGateUsed"
-      ],
       "properties": {
         "JumpGateUsed": {
           "type": "object",
-          "required": [
-            "entry_pos",
-            "from_sector",
-            "gate_id",
-            "ship_id",
-            "tick",
-            "to_sector"
-          ],
           "properties": {
             "entry_pos": {
-              "$ref": "#/definitions/AbsPosWire"
+              "$ref": "#/$defs/AbsPosWire"
             },
             "from_sector": {
               "type": "integer",
               "format": "uint8",
-              "minimum": 0.0
+              "maximum": 255,
+              "minimum": 0
             },
             "gate_id": {
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0
             },
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "to_sector": {
               "type": "integer",
               "format": "uint8",
-              "minimum": 0.0
+              "maximum": 255,
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "gate_id",
+            "from_sector",
+            "to_sector",
+            "entry_pos",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "JumpGateUsed"
+      ]
     },
     {
       "type": "object",
-      "required": [
-        "StarSystemChanged"
-      ],
       "properties": {
         "StarSystemChanged": {
           "type": "object",
-          "required": [
-            "from_system",
-            "ship_id",
-            "tick",
-            "to_system"
-          ],
           "properties": {
             "from_system": {
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0
             },
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "tick": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0
             },
             "to_system": {
               "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0
             }
-          }
+          },
+          "required": [
+            "ship_id",
+            "from_system",
+            "to_system",
+            "tick"
+          ]
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "required": [
+        "StarSystemChanged"
+      ]
     }
   ],
-  "definitions": {
+  "$defs": {
     "AbsPosWire": {
-      "description": "Absolute (Sector-frame, f64) position (ADR-0029). Distinct from [`crate::PosWire`] (f64), which carries client-authored command targets rather than server-authoritative absolute coordinates.",
+      "description": "Absolute (Sector-frame, f64) position (ADR-0029). Distinct from\n[`crate::PosWire`] (f64), which carries client-authored command targets\nrather than server-authoritative absolute coordinates.",
       "type": "object",
-      "required": [
-        "x",
-        "y",
-        "z"
-      ],
       "properties": {
         "x": {
           "type": "number",
@@ -613,15 +610,15 @@
           "type": "number",
           "format": "double"
         }
-      }
+      },
+      "required": [
+        "x",
+        "y",
+        "z"
+      ]
     },
     "VelWire": {
       "type": "object",
-      "required": [
-        "dx",
-        "dy",
-        "dz"
-      ],
       "properties": {
         "dx": {
           "type": "number",
@@ -635,7 +632,12 @@
           "type": "number",
           "format": "double"
         }
-      }
+      },
+      "required": [
+        "dx",
+        "dy",
+        "dz"
+      ]
     }
   }
 }

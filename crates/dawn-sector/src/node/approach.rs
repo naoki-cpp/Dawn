@@ -93,9 +93,9 @@ impl<S: EventStore> SimulationNode<S> {
             Position,
         )> = self
             .world
-            .query::<(&ApproachComp, &PositionComp)>()
+            .query::<(Entity, &ApproachComp, &PositionComp)>()
             .iter()
-            .map(|(entity, (approach, pos))| {
+            .map(|(entity, approach, pos)| {
                 (entity, approach.target, approach.auto_jump_gate, pos.0)
             })
             .collect();
