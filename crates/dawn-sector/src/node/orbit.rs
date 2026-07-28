@@ -349,16 +349,47 @@ mod compute_step_tests {
     use super::*;
 
     #[test]
-    fn orbit_steering_point_lies_on_the_orbit_radius_from_the_target() {
+    fn orbit_steering_point_sits_radius_plus_lead_from_the_target() {
         let ship = Position::new(2000.0, 0.0, 0.0);
         let target = Position::ORIGIN;
-        let point = compute_orbit_steering_point(ship, target, 2000.0);
-        // The pure radial component (ignoring tangential lead) should sit at
-        // distance ~radius from the target along some direction.
-        let radial_dist = ((point.x - target.x).powi(2) + (point.y - target.y).powi(2)).sqrt();
+        let radius = 2000.0;
+        let point = compute_orbit_steering_point(ship, target, radius);
         assert!(
-            radial_dist >= 2000.0,
-            "steering point should be at least the orbit radius out, got {radial_dist}"
+            point.x.is_finite() && point.y.is_finite() && point.z.is_finite(),
+            "steering point must be finite, got {point:?}"
+        );
+        let dist = ((point.x - target.x).powi(2)
+            + (point.y - target.y).powi(2)
+            + (point.z - target.z).powi(2))
+        .sqrt();
+        let lead = radius * ORBIT_LEAD_FACTOR;
+        let expected = (radius * radius + lead * lead).sqrt();
+        assert!(
+            (dist - expected).abs() < 1e-6,
+            "steering point should be sqrt(radius^2 + lead^2) from the target: got {dist}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn orbit_steering_point_is_finite_when_the_ship_sits_exactly_on_the_target() {
+        // Degenerate radial direction (dist == 0): must not produce NaN.
+        let point = compute_orbit_steering_point(Position::ORIGIN, Position::ORIGIN, 2000.0);
+        assert!(
+            point.x.is_finite() && point.y.is_finite() && point.z.is_finite(),
+            "steering point must stay finite in the degenerate case, got {point:?}"
+        );
+    }
+
+    #[test]
+    fn orbit_steering_point_is_finite_when_radial_is_parallel_to_the_up_axis() {
+        // radial_unit == UP (0, 1, 0): the tangent cross-product degenerates
+        // and must fall back to a stable axis instead of NaN.
+        let ship = Position::new(0.0, 2000.0, 0.0);
+        let target = Position::ORIGIN;
+        let point = compute_orbit_steering_point(ship, target, 2000.0);
+        assert!(
+            point.x.is_finite() && point.y.is_finite() && point.z.is_finite(),
+            "steering point must stay finite when radial is parallel to UP, got {point:?}"
         );
     }
 

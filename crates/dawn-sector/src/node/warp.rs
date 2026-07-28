@@ -589,8 +589,11 @@ mod compute_warp_step_tests {
     }
 
     #[test]
-    fn first_tick_tangent_matches_the_start_velocity_rate() {
-        // At t=0 the Hermite tangent should equal start_vel (per-tick).
+    fn first_tick_velocity_is_close_to_the_start_velocity_rate() {
+        // Near t=0 the Hermite tangent should closely track start_vel
+        // (per-tick), not snap toward a different rate (the whole point of
+        // the Hermite blend over plain smoothstep -- see warp_step's doc
+        // comment).
         let start_vel = Velocity {
             dx: 100.0,
             dy: 0.0,
@@ -606,9 +609,13 @@ mod compute_warp_step_tests {
             1,
         );
         assert!(
-            vel_t1.dx > 0.0,
-            "velocity should be moving toward arrival from the start tangent"
+            (vel_t1.dx - start_vel.dx).abs() < start_vel.dx * 0.05,
+            "first-tick velocity {:?} should be within 5% of the start velocity {:?}",
+            vel_t1,
+            start_vel
         );
+        assert_eq!(vel_t1.dy, 0.0);
+        assert_eq!(vel_t1.dz, 0.0);
     }
 }
 
