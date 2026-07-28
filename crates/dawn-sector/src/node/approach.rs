@@ -134,15 +134,15 @@ impl<S: EventStore> SimulationNode<S> {
                 }),
             };
 
-            match resolved {
+            match compute_approach_step(ship_pos, resolved) {
                 // Target gone: drop the approach and brake (ADR-0015 §4).
-                None => {
+                ApproachStepOutcome::TargetGone => {
                     let _ = self.world.remove_one::<ApproachComp>(entity);
                     self.brake_thrust(entity);
                 }
                 // Arrived: hold position, keep ApproachComp so the ship resumes
                 // if a Ship target later drifts back out of range.
-                Some((tp, arrival)) if ship_pos.distance(tp) <= arrival => {
+                ApproachStepOutcome::Arrived => {
                     if let Some(gate_id) = auto_jump_gate {
                         if let Some((&ship_id, _)) =
                             self.ships.index.iter().find(|(_, &e)| e == entity)
@@ -154,7 +154,9 @@ impl<S: EventStore> SimulationNode<S> {
                     self.brake_thrust(entity)
                 }
                 // Still closing: steer toward the target's latest position.
-                Some((tp, _)) => self.steer_thrust_toward(entity, ship_pos, tp),
+                ApproachStepOutcome::Closing { toward } => {
+                    self.steer_thrust_toward(entity, ship_pos, toward)
+                }
             }
         }
     }
@@ -164,6 +166,74 @@ impl<S: EventStore> SimulationNode<S> {
     // family (`entity_absolute_f64`/`entity_absolute`/`ship_absolute`) — it's
     // called from here, `commands.rs`, `orbit.rs`, and `warp.rs`, so having
     // its one implementation live in a single submodule was arbitrary.
+}
+
+/// What an approaching ship should do this tick (candidate 6, ADR pending):
+/// pure decision, given its current position and the already-resolved
+/// target position/arrival radius. No ECS or event-store access -- callers
+/// resolve `resolved` from the world first, then apply the outcome.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ApproachStepOutcome {
+    /// The target no longer exists.
+    TargetGone,
+    /// Within the arrival radius: hold position.
+    Arrived,
+    /// Still closing: steer thrust toward this point.
+    Closing { toward: Position },
+}
+
+fn compute_approach_step(
+    ship_pos: Position,
+    resolved: Option<(Position, f64)>,
+) -> ApproachStepOutcome {
+    match resolved {
+        None => ApproachStepOutcome::TargetGone,
+        Some((tp, arrival)) if ship_pos.distance(tp) <= arrival => ApproachStepOutcome::Arrived,
+        Some((tp, _)) => ApproachStepOutcome::Closing { toward: tp },
+    }
+}
+
+#[cfg(test)]
+mod compute_approach_step_tests {
+    use super::*;
+
+    #[test]
+    fn no_resolved_target_means_the_target_is_gone() {
+        assert_eq!(
+            compute_approach_step(Position::ORIGIN, None),
+            ApproachStepOutcome::TargetGone
+        );
+    }
+
+    #[test]
+    fn within_arrival_radius_is_arrived() {
+        let ship = Position::ORIGIN;
+        let target = Position::new(100.0, 0.0, 0.0);
+        assert_eq!(
+            compute_approach_step(ship, Some((target, 500.0))),
+            ApproachStepOutcome::Arrived
+        );
+    }
+
+    #[test]
+    fn exactly_at_the_arrival_radius_is_arrived() {
+        let ship = Position::ORIGIN;
+        let target = Position::new(500.0, 0.0, 0.0);
+        assert_eq!(
+            compute_approach_step(ship, Some((target, 500.0))),
+            ApproachStepOutcome::Arrived
+        );
+    }
+
+    #[test]
+    fn outside_arrival_radius_is_closing_toward_the_target() {
+        let ship = Position::ORIGIN;
+        let target = Position::new(10_000.0, 0.0, 0.0);
+        assert_eq!(
+            compute_approach_step(ship, Some((target, 500.0))),
+            ApproachStepOutcome::Closing { toward: target }
+        );
+    }
 }
 
 #[cfg(test)]
