@@ -45,6 +45,41 @@ rejected because it would leave two state owners and preserve scene-tree
 coupling. Moving the entire scene registry to Rust was rejected because Rust
 must not own Godot scene nodes or presentation lifecycle.
 
+## 実装の変遷（2026-07-28 追記）
+
+上の「決定」節はこのADRを書いた時点の実装を具体的に描写しており、その後3点が
+事実と食い違ったまま残っていた。**決定そのもの**——`WorldSessionState`が純粋状態を
+所有し、`dawn-client-gdext::WorldSession`は薄いadapterで、`main.gd`がGodotの
+表示・ライフサイクルを持つ——は今も有効である。変わったのは実現手段だけなので、
+supersedeせずここに現状を記録する。
+
+| 決定節の記述 | 現状 | 変更した経緯 |
+|---|---|---|
+| 「JSONをGodot境界でのみパースする」 | JSONパースは無い | `register_ship`が受け取っていた`JSON.stringify`済み文字列を`Dictionary`直接受け取りへ（issue #178） |
+| 「`WorldSession.snapshot()`を通じてscalar/collection状態を同期する」 | `snapshot()`は削除 | まず`main.gd`が利用時点で個別accessorを読む形へ移行し、`snapshot()`はテスト専用として残っていた（本ADR candidate 5）。テストと本番で読み取り経路が2本あるとドリフトしても本番側が気づけないため、今回削除しテストも同じaccessorを使う |
+| 「Godot `Dictionary`のsnapshot/outcomeを返す」 | 型付きクラスを返す | `Dictionary`は呼び出し側にキー文字列と型キャストを要求し、レコードの形が`main.gd`側の記憶に置かれていた。`GateRecord`/`StationRecord`/`CelestialBodyRecord`/`BuildableShipType`/`ShipHealth`/`CapacitorStatus`/`DestructionOutcome`（`session_record_gd.rs`）へ移行。既存の`ItemRow`/`ModuleRow`と同じ形 |
+
+あわせて、outcomeに対してdeletion testを適用した。`RegistrationOutcome`（3
+フィールド）・`RemovalOutcome`（4）・`HealthEventOutcome`（3）は、GDScript側にも
+Rustテスト側にも**1フィールドしか読み手がいなかった**。残りは内部状態遷移を駆動する
+ローカル変数の値を外へエコーしていただけで、報告先が無かった。「内部で計算する」ことと
+「外へ報告する」ことは別で、荷重がかかっていたのは前者だけなので、これらの構造体は
+削除し、各メソッドは実際に消費されていた1つの値を返す（`register_ship -> bool`、
+`remove_ship -> bool`、`apply_hp_event -> ()`）。`DestructionOutcome`だけは
+3フィールドとも読み手がある——`destroyed`でシーンノードを解放し、
+`destroyed_player`/`destroyed_opponent`でHUDのDEFEAT/VICTORY表示を切り替える——ため
+そのまま残る。
+
+削除対象を選ぶ際は、フィールド名でgrepして本番・テスト両方の読み手を数えること。
+この作業中に`destroyed_player`を読み手なしと誤判定して一度削除し、Godot側の
+パースエラーで気づいた（`main.gd`の撃墜時DEFEAT表示が唯一の読み手だった）。
+呼び出し直後のブロックだけを見ると、同じ関数の後半にある読み手を見落とす。
+
+`dock_status()`は逆方向の是正で、4キーの`Dictionary`を返していたが9箇所の
+呼び出しのうち8箇所は1値しか読んでいなかった。`docked_station_id()` /
+`docked_station_name()` / `latest_dock_state_tick()`（既存の`is_docked()`と揃う）
+へ分解した。
+
 ## Implementation checklist
 
 - [x] Add `WorldSessionState` and typed input/record/outcome types to

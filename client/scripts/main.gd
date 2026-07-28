@@ -213,11 +213,11 @@ func _update_gate_proximity() -> void:
 	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return
 	var ship_pos := _world.to_server_components((_ships[_player_ship_id] as Node3D).global_position)
-	for gate: Variant in _gates:
-		var g: Dictionary = gate as Dictionary
-		var gate_pos := _position_components(g.get("position", PackedFloat64Array()))
-		if _world.distance_components(ship_pos, gate_pos) <= (g.get("activation_radius", 0.0) as float):
-			_nearby_gate_id = g.get("gate_id", -1) as int
+	for entry: Variant in _gates:
+		var gate: GateRecord = entry as GateRecord
+		var gate_pos := _position_components(gate.position)
+		if _world.distance_components(ship_pos, gate_pos) <= gate.activation_radius:
+			_nearby_gate_id = gate.gate_id
 			return
 
 
@@ -231,12 +231,12 @@ func _update_station_proximity() -> void:
 		return
 	var ship_pos := _world.to_server_components((_ships[_player_ship_id] as Node3D).global_position)
 	var in_range: Array[Dictionary] = []
-	for station_entry: Variant in _stations:
-		var station: Dictionary = station_entry as Dictionary
-		var station_pos := _position_components(station.get("position", PackedFloat64Array()))
+	for entry: Variant in _stations:
+		var station: StationRecord = entry as StationRecord
+		var station_pos := _position_components(station.position)
 		var dist: float = _world.distance_components(ship_pos, station_pos)
-		if dist <= (station.get("docking_radius", 0.0) as float):
-			in_range.append({"station_id": station.get("station_id", -1) as int, "distance": dist})
+		if dist <= station.docking_radius:
+			in_range.append({"station_id": station.station_id, "distance": dist})
 	in_range.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return (a.distance as float) < (b.distance as float))
 	for entry: Dictionary in in_range:
@@ -247,9 +247,9 @@ func _update_station_proximity() -> void:
 ## or not found in the galaxy map (e.g. between InitialState and StarMap sync).
 func _station_name(station_id: int) -> String:
 	for entry: Variant in _stations:
-		var station: Dictionary = entry as Dictionary
-		if (station.get("station_id", -1) as int) == station_id:
-			var name: String = station.get("name", "") as String
+		var station: StationRecord = entry as StationRecord
+		if station.station_id == station_id:
+			var name: String = station.name
 			return name if not name.is_empty() else "Station #%d" % station_id
 	return "Station #%d" % station_id
 
@@ -261,14 +261,13 @@ func _input(event: InputEvent) -> void:
 		if _market_surface.keyboard_consumes():
 			return
 		var key: InputEventKey = event as InputEventKey
-		var dock_status: Dictionary = _session.dock_status()
 		var nearest_station_id: int = _nearby_station_ids[0] if not _nearby_station_ids.is_empty() else -1
 		var action: Dictionary = _interaction.resolve_key_action(
 			key.keycode,
 			_player_ship_id,
 			_nearby_gate_id,
 			nearest_station_id,
-			dock_status.get("docked_station_id", -1) as int)
+			_session.docked_station_id())
 		match action.get("kind", "none") as String:
 			"toggle_module":
 				_toggle_module_by_index(action.module_index as int)
@@ -425,12 +424,11 @@ func _selected_gate_distance() -> float:
 	if selected_gate_id < 0 or _player_ship_id < 0 or not _ships.has(_player_ship_id):
 		return -1.0
 	var ship_server := _world.to_server_components((_ships[_player_ship_id] as Node3D).global_position)
-	for gate: Variant in _gates:
-		var g: Dictionary = gate as Dictionary
-		if (g.get("gate_id", -1) as int) != selected_gate_id:
+	for entry: Variant in _gates:
+		var gate: GateRecord = entry as GateRecord
+		if gate.gate_id != selected_gate_id:
 			continue
-		var gpos := _position_components(g.get("position", PackedFloat64Array()))
-		return _world.distance_components(ship_server, gpos)
+		return _world.distance_components(ship_server, _position_components(gate.position))
 	return -1.0
 
 # -- Right-click -> LockOnCommand ---------------------------------------------
@@ -554,19 +552,18 @@ func _handle_ship_docked(p: Dictionary) -> void:
 	if not _ships.has(ship_id):
 		return
 	if ship_id == _player_ship_id:
-		var latest_tick: int = _session.dock_status().get("latest_dock_state_tick", -1) as int
+		var latest_tick: int = _session.latest_dock_state_tick()
 		if tick < latest_tick:
 			return
 	var ship := _ships[ship_id] as Node3D
 	var dock_pos: PackedFloat64Array = ship.call("server_position") as PackedFloat64Array
 	var station_name := _station_name(station_id)
 	for entry: Variant in _stations:
-		var station: Dictionary = entry as Dictionary
-		if (station.get("station_id", -1) as int) != station_id:
+		var station: StationRecord = entry as StationRecord
+		if station.station_id != station_id:
 			continue
-		var station_pos := _position_components(station.get("position", PackedFloat64Array()))
-		dock_pos = station_pos
-		station_name = station.get("name", "") as String
+		dock_pos = _position_components(station.position)
+		station_name = station.name
 		break
 	var motion_accepted: bool = ship.call("dock_motion", dock_pos, tick) as bool
 	if not motion_accepted:
@@ -579,7 +576,7 @@ func _handle_ship_undocked(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	var tick: int = p.get("tick", _session.current_tick()) as int
 	if ship_id == _player_ship_id:
-		var latest_tick: int = _session.dock_status().get("latest_dock_state_tick", -1) as int
+		var latest_tick: int = _session.latest_dock_state_tick()
 		if tick < latest_tick:
 			return
 	if _ships.has(ship_id):
@@ -620,10 +617,9 @@ func _handle_jump_gate_used(p: Dictionary) -> void:
 func _handle_star_system_changed(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	var to_system: int = p.get("to_system", 0) as int
-	var result: Dictionary = _session.system_changed(ship_id, to_system)
+	var to_name: Variant = _session.system_changed(ship_id, to_system)
 	_sync_session_state()
-	if result.get("changed_player", false) as bool:
-		var to_name: String = result.get("system_name", "System %d" % to_system) as String
+	if to_name != null:
 		_jump_notice         = "Entered %s system" % to_name
 		_jump_notice_timer   = 3.0
 		_interaction.clear_navigation_selection()
@@ -729,10 +725,10 @@ func _spawn_ship_from_data(d: Dictionary) -> void:
 		server_pos,
 		_velocity_from_dict(d),
 		_session.current_tick())
-	var result: Dictionary = _session.register_ship(sid, d, _connection.ship_id)
+	var became_player: bool = _session.register_ship(sid, d, _connection.ship_id)
 	_ships[sid] = ship
 	_sync_session_state()
-	if result.get("became_player", false) as bool:
+	if became_player:
 		_set_as_player_ship(sid, ship)
 
 ## AoI: a ship entered the player's neighborhood -- materialize it (ADR-0019).
@@ -750,9 +746,9 @@ func _handle_aoi_leave(p: Dictionary) -> void:
 	## expiry (lock.rs), so clearing player_lock_target here would desync
 	## from the server and strand the lock forever (see WorldSession state).
 	var ship: Node3D = _ships.get(sid) as Node3D
-	var result: Dictionary = _session.remove_ship(sid, false)
+	var removed: bool = _session.remove_ship(sid, false)
 	_sync_session_state()
-	if not (result.get("removed", false) as bool):
+	if not removed:
 		return
 	_interaction.clear_target_if_matches(sid)
 	_ships.erase(sid)
@@ -868,7 +864,7 @@ func _handle_inventory_row_click(row: InventoryRow) -> void:
 		InventoryRow.ACTION_ASSEMBLE:
 			## No active-ship requirement: this is exactly the recovery path
 			## for a shipless docked player (docs/architecture/ownership.md §8).
-			var docked_station_id: int = _session.dock_status().get("docked_station_id", -1) as int
+			var docked_station_id: int = _session.docked_station_id()
 			if docked_station_id >= 0:
 				_connection.send_assemble_command(docked_station_id, row.ship_type_id)
 		InventoryRow.ACTION_SELECT_ACTIVE_SHIP:
@@ -879,7 +875,7 @@ func _handle_inventory_row_click(row: InventoryRow) -> void:
 			## Dedicated button alongside the existing [Y] key (Phase 9B task
 			## 10) -- same command, server validates docked/undamaged/unfitted.
 			if _player_ship_id >= 0:
-				var docked_station_id: int = _session.dock_status().get("docked_station_id", -1) as int
+				var docked_station_id: int = _session.docked_station_id()
 				if docked_station_id >= 0:
 					_connection.send_disassemble_ship_command(_player_ship_id, docked_station_id)
 		InventoryRow.ACTION_BUILD_TOGGLE:
@@ -898,7 +894,7 @@ func _handle_inventory_row_click(row: InventoryRow) -> void:
 			## 10), but lets the player pick which buildable type instead of
 			## always sending the hard-coded BUILDABLE_SHIP_TYPE_ID.
 			if _player_ship_id >= 0:
-				var docked_station_id: int = _session.dock_status().get("docked_station_id", -1) as int
+				var docked_station_id: int = _session.docked_station_id()
 				if docked_station_id >= 0:
 					_connection.send_build_packaged_ship_command(
 						_player_ship_id, docked_station_id, row.ship_type_id)
@@ -913,7 +909,7 @@ func _handle_inventory_row_right_click(row: InventoryRow) -> void:
 		return
 	if _player_ship_id < 0:
 		return
-	var docked_station_id: int = _session.dock_status().get("docked_station_id", -1) as int
+	var docked_station_id: int = _session.docked_station_id()
 	if docked_station_id < 0:
 		return
 	_connection.send_transfer_to_station_command(
@@ -997,7 +993,7 @@ func _handle_inventory_row_drop(row: InventoryRow, target_column: String, releas
 			match target_column:
 				InventoryRow.SOURCE_SHIP_CARGO:
 					if _player_ship_id >= 0:
-						var docked_station_id: int = _session.dock_status().get("docked_station_id", -1) as int
+						var docked_station_id: int = _session.docked_station_id()
 						if docked_station_id >= 0:
 							_connection.send_transfer_from_station_command(
 								_player_ship_id, docked_station_id, row.item_type, row.module_id,
@@ -1078,12 +1074,12 @@ func _handle_ship_spawned(p: Dictionary) -> void:
 	var ship: Node3D = _instantiate_ship(
 		ship_id,
 		_position_components_from_dict(p, "position"))
-	var result: Dictionary = _session.register_ship(ship_id, p, _connection.ship_id)
+	var became_player: bool = _session.register_ship(ship_id, p, _connection.ship_id)
 	_ships[ship_id] = ship
 	_sync_session_state()
 
 	## If this ship matches the player_id from Welcome, set it as the player ship
-	if result.get("became_player", false) as bool:
+	if became_player:
 		_set_as_player_ship(ship_id, ship)
 
 func _handle_velocity_changed(p: Dictionary) -> void:
@@ -1119,9 +1115,9 @@ func _handle_motion_correction(p: Dictionary) -> void:
 func _handle_ship_despawned(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	var ship: Node3D = _ships.get(ship_id) as Node3D
-	var result: Dictionary = _session.remove_ship(ship_id, true)
+	var removed: bool = _session.remove_ship(ship_id, true)
 	_sync_session_state()
-	if not (result.get("removed", false) as bool):
+	if not removed:
 		return
 	_ships.erase(ship_id)
 	if ship != null:
@@ -1129,34 +1125,34 @@ func _handle_ship_despawned(p: Dictionary) -> void:
 	_interaction.clear_target_if_matches(ship_id)
 
 func _handle_damage_taken(p: Dictionary) -> void:
-	var result: Dictionary = _session.apply_health_event(
-		p.get("ship_id", 0) as int,
+	var ship_id: int = p.get("ship_id", 0) as int
+	_session.apply_health_event(
+		ship_id,
 		p.get("current_shield", 0.0) as float,
 		p.get("current_armor", 0.0) as float,
 		p.get("current_hull", 0.0) as float)
 	_sync_session_state()
-	var ship_id: int = result.get("ship_id", 0) as int
 	## Flash red on any ship that takes damage (visual hit feedback)
 	if _ships.has(ship_id):
 		(_ships[ship_id] as Node3D).call("flash_damage")
 
 func _handle_repair_applied(p: Dictionary) -> void:
-	var result: Dictionary = _session.apply_health_event(
-		p.get("ship_id", 0) as int,
+	var ship_id: int = p.get("ship_id", 0) as int
+	_session.apply_health_event(
+		ship_id,
 		p.get("current_shield", 0.0) as float,
 		p.get("current_armor", 0.0) as float,
 		p.get("current_hull", 0.0) as float)
 	_sync_session_state()
-	var ship_id: int = result.get("ship_id", 0) as int
 	if _ships.has(ship_id):
 		(_ships[ship_id] as Node3D).call("flash_repair")
 
 func _handle_ship_destroyed(p: Dictionary) -> void:
 	var ship_id: int = p.get("ship_id", 0) as int
 	var ship: Node3D = _ships.get(ship_id) as Node3D
-	var result: Dictionary = _session.destroy_ship(ship_id)
+	var outcome: DestructionOutcome = _session.destroy_ship(ship_id)
 	_sync_session_state()
-	if not (result.get("destroyed", false) as bool):
+	if not outcome.destroyed:
 		return
 	_ships.erase(ship_id)
 	if ship == null:
@@ -1164,9 +1160,9 @@ func _handle_ship_destroyed(p: Dictionary) -> void:
 	_interaction.clear_target_if_matches(ship_id)
 	## Play destruction effect (queue_free happens inside play_destroy_effect)
 	ship.call("play_destroy_effect")
-	if result.get("destroyed_player", false) as bool:
+	if outcome.destroyed_player:
 		_hud_surface.show_duel_result(false)  ## DEFEAT
-	elif result.get("destroyed_opponent", false) as bool:
+	elif outcome.destroyed_opponent:
 		_hud_surface.show_duel_result(true)   ## VICTORY
 
 func _handle_target_locked(p: Dictionary) -> void:
@@ -1200,7 +1196,7 @@ func _update_hud() -> void:
 		var dist_m: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
 			(_ships[_player_lock_target] as Node3D).global_position) / WORLD_SCALE
 		dist_text = UnitFormat.format_distance(dist_m * METERS_PER_UNIT)
-	var target_hp: Dictionary = _session.ship_health(_player_lock_target)
+	var target_hp: Variant = _session.ship_health(_player_lock_target)
 
 	var jump_line  : String = ""
 	if _nearby_gate_id >= 0:
@@ -1210,9 +1206,8 @@ func _update_hud() -> void:
 
 	var station_line: String = ""
 	if _session.is_docked():
-		var status: Dictionary = _session.dock_status()
-		var docked_station_id: int = status.get("docked_station_id", -1) as int
-		var docked_station_name: String = status.get("docked_station_name", "") as String
+		var docked_station_id: int = _session.docked_station_id()
+		var docked_station_name: String = _session.docked_station_name()
 		var docked_name := docked_station_name if not docked_station_name.is_empty() else "Station #%d" % docked_station_id
 		if _player_ship_id >= 0:
 			station_line = (
@@ -1254,30 +1249,30 @@ func _update_hud() -> void:
 		## Look up body name for HUD.
 		var body_name: String = "Body #%d" % selected_body_id
 		for entry: Variant in _bodies:
-			var b: Dictionary = entry as Dictionary
-			if (b.get("body_id", -1) as int) == selected_body_id:
-				body_name = b.get("name", body_name) as String
+			var body: CelestialBodyRecord = entry as CelestialBodyRecord
+			if body.body_id == selected_body_id:
+				body_name = body.name
 				break
 		approach_line = "\n[W] Warp to %s" % body_name
 	elif selected_target_id >= 0:
 		approach_line = "\n[A] Approach #%d" % selected_target_id + keep_at_range_hint
 
-	var health: Dictionary = _session.player_health()
-	var cap: Dictionary = _session.capacitor_status()
+	var health: ShipHealth = _session.player_health()
+	var cap: CapacitorStatus = _session.capacitor_status()
 	_hud_surface.render({
 		"connected": _connection.is_connected_to_server(),
 		"ship_type_name": _session.player_ship_type_name(),
 		"system_name": _session.current_system_name(),
 		"speed": speed_str,
 		"player_ship_id": _player_ship_id,
-		"shield": health.get("shield", -1.0) as float,
-		"max_shield": health.get("max_shield", 500.0) as float,
-		"armor": health.get("armor", -1.0) as float,
-		"max_armor": health.get("max_armor", 300.0) as float,
-		"hull": health.get("hull", -1.0) as float,
-		"max_hull": health.get("max_hull", 200.0) as float,
-		"cap_current": cap.get("current", -1.0) as float,
-		"cap_max": cap.get("max", 500.0) as float,
+		"shield": health.shield,
+		"max_shield": health.max_shield,
+		"armor": health.armor,
+		"max_armor": health.max_armor,
+		"hull": health.hull,
+		"max_hull": health.max_hull,
+		"cap_current": cap.current,
+		"cap_max": cap.max,
 		"lock_target": _player_lock_target,
 		"target_known": target_known,
 		"target_distance": dist_text,
@@ -1298,7 +1293,7 @@ func _simulate_cap(ticks: int) -> void:
 	_sync_session_state()
 
 func _advance_client_cap_ticks(delta: float) -> void:
-	var cap_current: float = _session.capacitor_status().get("current", -1.0) as float
+	var cap_current: float = _session.capacitor_status().current
 	if _player_ship_id < 0 or cap_current < 0.0:
 		_cap_tick_accumulator = 0.0
 		return

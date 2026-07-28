@@ -196,10 +196,10 @@ static func sun_state(
 	player_server: PackedFloat64Array,
 	dir_to_godot: Callable
 ) -> Dictionary:
-	var star: Dictionary = _find_star(bodies)
-	if star.is_empty():
+	var star: CelestialBodyRecord = _find_star(bodies)
+	if star == null:
 		return {"active": false}
-	var star_pos := PositionComponents.from_value(star.get("position"))
+	var star_pos := PositionComponents.from_value(star.position)
 	var far_direction := SUN_FAR_DIRECTION.normalized()
 	var diff := Vector3(
 		star_pos[0] + far_direction.x * SUN_EFFECTIVE_DISTANCE - player_server[0],
@@ -208,7 +208,7 @@ static func sun_state(
 	if diff.length_squared() < 1.0:
 		return {"active": false}
 	var godot_dir: Vector3 = (dir_to_godot.call(diff) as Vector3).normalized()
-	var spec: float = star.get("spectral_type", 0.60) as float
+	var spec: float = star.spectral_type
 	var sun_col: Color = NavigationMarkerRendererScript.spectral_color(spec)
 	return {
 		"active": true,
@@ -217,12 +217,12 @@ static func sun_state(
 	}
 
 
-static func _find_star(bodies: Array) -> Dictionary:
+static func _find_star(bodies: Array) -> CelestialBodyRecord:
 	for entry: Variant in bodies:
-		var body: Dictionary = entry as Dictionary
-		if (body.get("kind", "") as String) == "Star":
+		var body: CelestialBodyRecord = entry as CelestialBodyRecord
+		if body.kind == "Star":
 			return body
-	return {}
+	return null
 
 
 func _update_position_markers(root: Node3D, meta_key: String, player_ship_id: int, ships: Dictionary) -> void:

@@ -1,11 +1,12 @@
-use dawn_client_core::{
-    BuildableShipTypeRecord, CelestialBodyRecord, GateRecord, HealthState, StationRecord,
-    WorldSessionState,
-};
+use dawn_client_core::WorldSessionState;
 use godot::prelude::*;
 
 use crate::json_variant::Dict;
 use crate::loadout_gd::PlayerLoadout;
+use crate::session_record_gd::{
+    BuildableShipType, CapacitorStatus, CelestialBodyRecord, DestructionOutcome, GateRecord,
+    ShipHealth, StationRecord,
+};
 use crate::ship_gd::ship_input_from_dict;
 
 /// Godot adapter for the pure `dawn-client-core::WorldSessionState` model.
@@ -73,37 +74,24 @@ impl WorldSession {
     }
 
     /// Registers metadata for a ship. The corresponding Node3D is owned by
-    /// `main.gd`, not by this state object.
+    /// `main.gd`, not by this state object. Returns whether this ship became
+    /// the player's own -- the caller's cue to attach the camera to it.
     #[func]
-    fn register_ship(&mut self, ship_id: i64, ship: Dict, connection_ship_id: i64) -> Dict {
+    fn register_ship(&mut self, ship_id: i64, ship: Dict, connection_ship_id: i64) -> bool {
         let input = ship_input_from_dict(&ship);
-        let outcome = self.state.register_ship(ship_id, input, connection_ship_id);
-        let mut result = Dict::new();
-        result.set("registered", outcome.registered);
-        result.set("became_player", outcome.became_player);
-        result.set("became_opponent", outcome.became_opponent);
-        result
+        self.state.register_ship(ship_id, input, connection_ship_id)
+    }
+
+    /// Returns whether the ship was there to remove -- the caller's cue to
+    /// free its Node3D.
+    #[func]
+    fn remove_ship(&mut self, ship_id: i64, clear_lock: bool) -> bool {
+        self.state.remove_ship(ship_id, clear_lock)
     }
 
     #[func]
-    fn remove_ship(&mut self, ship_id: i64, clear_lock: bool) -> Dict {
-        let outcome = self.state.remove_ship(ship_id, clear_lock);
-        let mut result = Dict::new();
-        result.set("removed", outcome.removed);
-        result.set("removed_player", outcome.removed_player);
-        result.set("removed_opponent", outcome.removed_opponent);
-        result.set("cleared_lock", outcome.cleared_lock);
-        result
-    }
-
-    #[func]
-    fn destroy_ship(&mut self, ship_id: i64) -> Dict {
-        let outcome = self.state.destroy_ship(ship_id);
-        let mut result = Dict::new();
-        result.set("destroyed", outcome.destroyed);
-        result.set("destroyed_player", outcome.destroyed_player);
-        result.set("destroyed_opponent", outcome.destroyed_opponent);
-        result
+    fn destroy_ship(&mut self, ship_id: i64) -> Gd<DestructionOutcome> {
+        DestructionOutcome::wrap(self.state.destroy_ship(ship_id))
     }
 
     /// Applies a DamageTaken/RepairApplied health update. Takes plain typed
@@ -113,14 +101,12 @@ impl WorldSession {
     /// side of this call, so building one here would only add a lossy
     /// stringify/parse round trip (JSON can't represent `NaN`/`Infinity`,
     /// which `f32`/`f64` can).
+    ///
+    /// Returns nothing: the caller passed `ship_id` in and still has it for
+    /// its own hit-flash feedback.
     #[func]
-    fn apply_health_event(&mut self, ship_id: i64, shield: f64, armor: f64, hull: f64) -> Dict {
-        let outcome = self.state.apply_hp_event(ship_id, shield, armor, hull);
-        let mut result = Dict::new();
-        result.set("ship_id", outcome.ship_id);
-        result.set("changed_player", outcome.changed_player);
-        result.set("has_ship", outcome.has_ship);
-        result
+    fn apply_health_event(&mut self, ship_id: i64, shield: f64, armor: f64, hull: f64) {
+        self.state.apply_hp_event(ship_id, shield, armor, hull);
     }
 
     #[func]
@@ -133,16 +119,16 @@ impl WorldSession {
         self.state.apply_lock_lost(locker_id, target_id)
     }
 
+    /// The system's display name if the moving ship was the player's, else
+    /// `null`. Mirrors the `Option<String>` the pure state already returns,
+    /// rather than flattening it into a `changed_player`/`system_name` pair
+    /// the caller has to recombine.
     #[func]
-    fn system_changed(&mut self, ship_id: i64, to_system: i64) -> Dict {
-        let mut result = Dict::new();
-        let Some(name) = self.state.system_changed(ship_id, to_system) else {
-            result.set("changed_player", false);
-            return result;
-        };
-        result.set("changed_player", true);
-        result.set("system_name", name);
-        result
+    fn system_changed(&mut self, ship_id: i64, to_system: i64) -> Variant {
+        match self.state.system_changed(ship_id, to_system) {
+            Some(name) => GString::from(&name).to_variant(),
+            None => Variant::nil(),
+        }
     }
 
     #[func]
@@ -185,20 +171,22 @@ impl WorldSession {
         self.state.is_docked()
     }
 
+    /// Split out of a former `dock_status()` `Dictionary`: of its nine call
+    /// sites, eight wanted exactly one of these values, so they now cost one
+    /// method call instead of building a four-key bag to read one key out of.
     #[func]
-    fn dock_status(&self) -> Dict {
-        let mut result = Dict::new();
-        result.set("docked_station_id", self.state.docked_station_id());
-        result.set(
-            "docked_station_name",
-            self.state.docked_station_name().to_string(),
-        );
-        result.set("is_docked", self.state.is_docked());
-        result.set(
-            "latest_dock_state_tick",
-            self.state.latest_dock_state_tick(),
-        );
-        result
+    fn docked_station_id(&self) -> i64 {
+        self.state.docked_station_id()
+    }
+
+    #[func]
+    fn docked_station_name(&self) -> GString {
+        self.state.docked_station_name().into()
+    }
+
+    #[func]
+    fn latest_dock_state_tick(&self) -> i64 {
+        self.state.latest_dock_state_tick()
     }
 
     #[func]
@@ -207,20 +195,12 @@ impl WorldSession {
     }
 
     /// Bundles the player's shield/armor/hull current and max values --
-    /// `main.gd`'s HUD always reads all six together, so this is one call
-    /// instead of six (matches the `dock_status()` precedent above: bundle
-    /// by cohesive concept, not one `#[func]` per scalar field).
+    /// the HUD always reads all six together, so this is one call instead of
+    /// six. Typed rather than a `Dictionary`: the HUD reads six fields off it
+    /// every frame, and key strings put the record's shape in the caller.
     #[func]
-    fn player_health(&self) -> Dict {
-        let health = self.state.player_health();
-        let mut result = Dict::new();
-        result.set("shield", health.shield);
-        result.set("armor", health.armor);
-        result.set("hull", health.hull);
-        result.set("max_shield", health.max_shield);
-        result.set("max_armor", health.max_armor);
-        result.set("max_hull", health.max_hull);
-        result
+    fn player_health(&self) -> Gd<ShipHealth> {
+        ShipHealth::wrap(self.state.player_ship_id(), self.state.player_health())
     }
 
     #[func]
@@ -236,103 +216,69 @@ impl WorldSession {
     /// Bundles the capacitor's current/max/recharge values -- always read
     /// together by the HUD, same rationale as `player_health()`.
     #[func]
-    fn capacitor_status(&self) -> Dict {
-        let mut result = Dict::new();
-        result.set("current", self.state.cap_current());
-        result.set("max", self.state.cap_max());
-        result.set("recharge", self.state.cap_recharge());
-        result
+    fn capacitor_status(&self) -> Gd<CapacitorStatus> {
+        CapacitorStatus::wrap(
+            self.state.cap_current(),
+            self.state.cap_max(),
+            self.state.cap_recharge(),
+        )
     }
 
-    /// Returns the complete state projection consumed by test fixtures
-    /// (`world_session_test.gd`, `main_test.gd`) that need to assert on the
-    /// full session state in one call. Production code (`main.gd`) instead
-    /// reads the individual accessors above at point of use (ADR-0046).
-    #[func]
-    fn snapshot(&self) -> Dict {
-        let mut result = Dict::new();
-        result.set("ship_hp", &self.ship_hp());
-        result.set("opponent_ship_ids", &self.opponent_ship_ids());
-        result.set("gates", &self.gates());
-        result.set("stations", &self.stations());
-        result.set("bodies", &self.bodies());
-        result.set("buildable_ship_types", &self.buildable_ship_types());
-        result.set("system_names", &self.system_names());
-        result.set("player_ship_id", self.state.player_ship_id());
-        result.set(
-            "player_ship_type_name",
-            self.state.player_ship_type_name().to_string(),
-        );
-        let player_health = self.state.player_health();
-        result.set("player_shield", player_health.shield);
-        result.set("player_armor", player_health.armor);
-        result.set("player_hull", player_health.hull);
-        result.set("player_max_shield", player_health.max_shield);
-        result.set("player_max_armor", player_health.max_armor);
-        result.set("player_max_hull", player_health.max_hull);
-        result.set("player_lock_target", self.state.player_lock_target());
-        result.set("current_tick", self.state.current_tick());
-        result.set("event_count", self.state.event_count());
-        result.set(
-            "current_system_name",
-            self.state.current_system_name().to_string(),
-        );
-        result.set("cap_current", self.state.cap_current());
-        result.set("cap_max", self.state.cap_max());
-        result.set("cap_recharge", self.state.cap_recharge());
-        result
-    }
+    // `snapshot()` is gone. It projected the whole session into one 22-key
+    // `Dictionary` for tests while production read the individual accessors,
+    // so the two read paths could drift and only the test side would notice.
+    // Tests now go through the same accessors production does (ADR-0046).
 
+    /// One ship's HP layers, or `null` if the session has no such ship.
+    ///
+    /// Deliberately per-ship rather than a whole-map `ship_hp()`: the HUD's
+    /// locked-target readout runs every frame and wants exactly one entry.
     #[func]
-    fn ship_hp(&self) -> Dict {
-        let mut result = Dict::new();
-        for (ship_id, health) in self.state.ship_hp() {
-            let health = health_dict(*ship_id, *health);
-            result.set(*ship_id, &health);
-        }
-        result
-    }
-
-    /// Single-ship lookup, for callers (the HUD's locked-target readout)
-    /// that only need one ship's HP -- `ship_hp()` rebuilds a `Dict` for
-    /// every ship in the Sector, which is wasteful when the caller runs
-    /// every frame and only reads one entry out of it.
-    #[func]
-    fn ship_health(&self, ship_id: i64) -> Dict {
+    fn ship_health(&self, ship_id: i64) -> Variant {
         match self.state.ship_hp().get(&ship_id) {
-            Some(health) => health_dict(ship_id, *health),
-            None => Dict::new(),
+            Some(health) => ShipHealth::wrap(ship_id, *health).to_variant(),
+            None => Variant::nil(),
         }
     }
 
+    #[func]
     fn opponent_ship_ids(&self) -> Array<i64> {
         self.state.opponent_ship_ids().iter().copied().collect()
     }
 
     #[func]
-    fn gates(&self) -> Array<Dict> {
-        self.state.gates().iter().map(gate_dict).collect()
+    fn gates(&self) -> Array<Gd<GateRecord>> {
+        self.state.gates().iter().map(GateRecord::wrap).collect()
     }
 
     #[func]
-    fn stations(&self) -> Array<Dict> {
-        self.state.stations().iter().map(station_dict).collect()
-    }
-
-    #[func]
-    fn bodies(&self) -> Array<Dict> {
-        self.state.bodies().iter().map(body_dict).collect()
-    }
-
-    #[func]
-    fn buildable_ship_types(&self) -> Array<Dict> {
+    fn stations(&self) -> Array<Gd<StationRecord>> {
         self.state
-            .buildable_ship_types()
+            .stations()
             .iter()
-            .map(buildable_ship_type_dict)
+            .map(StationRecord::wrap)
             .collect()
     }
 
+    #[func]
+    fn bodies(&self) -> Array<Gd<CelestialBodyRecord>> {
+        self.state
+            .bodies()
+            .iter()
+            .map(CelestialBodyRecord::wrap)
+            .collect()
+    }
+
+    #[func]
+    fn buildable_ship_types(&self) -> Array<Gd<BuildableShipType>> {
+        self.state
+            .buildable_ship_types()
+            .iter()
+            .map(BuildableShipType::wrap)
+            .collect()
+    }
+
+    #[func]
     fn system_names(&self) -> Dict {
         let mut result = Dict::new();
         for (id, name) in self.state.system_names() {
@@ -340,55 +286,4 @@ impl WorldSession {
         }
         result
     }
-}
-
-fn health_dict(ship_id: i64, health: HealthState) -> Dict {
-    let mut result = Dict::new();
-    result.set("ship_id", ship_id);
-    result.set("shield", health.shield);
-    result.set("armor", health.armor);
-    result.set("hull", health.hull);
-    result.set("max_shield", health.max_shield);
-    result.set("max_armor", health.max_armor);
-    result.set("max_hull", health.max_hull);
-    result
-}
-
-fn gate_dict(gate: &GateRecord) -> Dict {
-    let mut result = Dict::new();
-    result.set("gate_id", gate.gate_id);
-    let position = PackedFloat64Array::from(gate.position);
-    result.set("position", &position);
-    result.set("activation_radius", gate.activation_radius);
-    result.set("to_system_name", gate.to_system_name.clone());
-    result
-}
-
-fn station_dict(station: &StationRecord) -> Dict {
-    let mut result = Dict::new();
-    result.set("station_id", station.station_id);
-    result.set("name", station.name.clone());
-    let position = PackedFloat64Array::from(station.position);
-    result.set("position", &position);
-    result.set("docking_radius", station.docking_radius);
-    result
-}
-
-fn body_dict(body: &CelestialBodyRecord) -> Dict {
-    let mut result = Dict::new();
-    result.set("body_id", body.body_id);
-    result.set("kind", body.kind.clone());
-    result.set("name", body.name.clone());
-    let position = PackedFloat64Array::from(body.position);
-    result.set("position", &position);
-    result.set("radius", body.radius);
-    result.set("spectral_type", body.spectral_type);
-    result
-}
-
-fn buildable_ship_type_dict(ship: &BuildableShipTypeRecord) -> Dict {
-    let mut result = Dict::new();
-    result.set("ship_type_id", ship.ship_type_id);
-    result.set("name", ship.name.clone());
-    result
 }
