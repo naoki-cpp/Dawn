@@ -80,7 +80,7 @@ func test_ingest_navigation_preserves_absolute_f64_positions() -> void:
 
 
 func test_register_ship_promotes_connection_ship_to_player_state() -> void:
-	var result: Dictionary = _session.register_ship(11, JSON.stringify({
+	var result: Dictionary = _session.register_ship(11, {
 		"ship_id": 11,
 		"is_player": true,
 		"ship_type_name": "Magpie",
@@ -92,7 +92,7 @@ func test_register_ship_promotes_connection_ship_to_player_state() -> void:
 		"max_hull": 80.0,
 		"cap_max": 55.0,
 		"cap_recharge_per_tick": 3.0,
-	}), 11)
+	}, 11)
 	var snapshot: Dictionary = _session.snapshot()
 
 	assert_bool(result["became_player"]).is_true()
@@ -103,7 +103,7 @@ func test_register_ship_promotes_connection_ship_to_player_state() -> void:
 
 
 func test_hp_event_updates_player_and_preserves_maxima() -> void:
-	_session.register_ship(11, JSON.stringify({
+	_session.register_ship(11, {
 		"ship_id": 11,
 		"current_shield": 80.0,
 		"current_armor": 70.0,
@@ -111,7 +111,7 @@ func test_hp_event_updates_player_and_preserves_maxima() -> void:
 		"max_shield": 100.0,
 		"max_armor": 90.0,
 		"max_hull": 80.0,
-	}), 11)
+	}, 11)
 
 	_session.apply_health_event(11, 40.0, 30.0, 20.0)
 	var snapshot: Dictionary = _session.snapshot()
@@ -144,7 +144,7 @@ func test_remove_ship_with_clear_lock_false_preserves_the_lock_target() -> void:
 	## LockOnCommand the player sends afterward is silently ignored
 	## server-side (already has_target()==true), so the lock would never
 	## visibly complete again even once the target is back in view.
-	_session.register_ship(42, JSON.stringify({}), -1)
+	_session.register_ship(42, {}, -1)
 	_session.set_player_ship_id(1)
 	_session.apply_target_locked(1, 42)
 
@@ -156,7 +156,7 @@ func test_remove_ship_with_clear_lock_false_preserves_the_lock_target() -> void:
 
 
 func test_remove_ship_with_clear_lock_true_clears_the_lock_target() -> void:
-	_session.register_ship(42, JSON.stringify({}), -1)
+	_session.register_ship(42, {}, -1)
 	_session.set_player_ship_id(1)
 	_session.apply_target_locked(1, 42)
 
@@ -167,11 +167,11 @@ func test_remove_ship_with_clear_lock_true_clears_the_lock_target() -> void:
 
 
 func test_client_ticks_advance_capacitor_without_server_events() -> void:
-	_session.register_ship(11, JSON.stringify({
+	_session.register_ship(11, {
 		"ship_id": 11,
 		"cap_max": 100.0,
 		"cap_recharge_per_tick": 5.0,
-	}), 11)
+	}, 11)
 	var loadout := PlayerLoadout.new()
 	loadout.apply_payload(JSON.stringify({
 		"modules": [{
@@ -194,7 +194,7 @@ func test_client_ticks_advance_capacitor_without_server_events() -> void:
 
 
 func test_destroying_opponent_reports_victory_candidate() -> void:
-	_session.register_ship(22, JSON.stringify({"ship_id": 22, "is_player": true}), 11)
+	_session.register_ship(22, {"ship_id": 22, "is_player": true}, 11)
 
 	var result: Dictionary = _session.destroy_ship(22)
 

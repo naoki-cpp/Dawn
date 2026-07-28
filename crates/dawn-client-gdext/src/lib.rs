@@ -12,6 +12,7 @@ mod loadout_gd;
 mod module_row_gd;
 mod navigation_gd;
 mod server_message_gd;
+mod ship_gd;
 mod ship_motion_gd;
 mod world_session_gd;
 mod world_space_gd;

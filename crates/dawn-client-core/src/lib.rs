@@ -50,6 +50,7 @@ pub use module_row::{ModuleKind, ModuleRow};
 pub use motion::{MotionInput, MotionPredictor, MotionProfile, MotionState};
 pub use ship_motion::{MotionCommand, MotionDispatch, MotionFrame, ShipMotion};
 pub use world_session::{
+    default_cap_max, default_cap_recharge, default_max_armor, default_max_hull, default_max_shield,
     BuildableShipTypeInput, BuildableShipTypeRecord, CelestialBodyInput, CelestialBodyRecord,
     DestructionOutcome, GateInput, GateRecord, HealthEventOutcome, HealthState, NavigationInput,
     PositionInput, RegistrationOutcome, RemovalOutcome, ShipInput, ShipState, StationInput,

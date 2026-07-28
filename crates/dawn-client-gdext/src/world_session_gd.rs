@@ -1,12 +1,12 @@
 use dawn_client_core::{
-    BuildableShipTypeRecord, CelestialBodyRecord, GateRecord, HealthState, ShipInput,
-    StationRecord, WorldSessionState,
+    BuildableShipTypeRecord, CelestialBodyRecord, GateRecord, HealthState, StationRecord,
+    WorldSessionState,
 };
 use godot::prelude::*;
-use serde::de::DeserializeOwned;
 
 use crate::json_variant::Dict;
 use crate::loadout_gd::PlayerLoadout;
+use crate::ship_gd::ship_input_from_dict;
 
 /// Godot adapter for the pure `dawn-client-core::WorldSessionState` model.
 ///
@@ -75,10 +75,8 @@ impl WorldSession {
     /// Registers metadata for a ship. The corresponding Node3D is owned by
     /// `main.gd`, not by this state object.
     #[func]
-    fn register_ship(&mut self, ship_id: i64, ship_json: GString, connection_ship_id: i64) -> Dict {
-        let Some(input) = parse_json::<ShipInput>(&ship_json, "ShipInput") else {
-            return Dict::new();
-        };
+    fn register_ship(&mut self, ship_id: i64, ship: Dict, connection_ship_id: i64) -> Dict {
+        let input = ship_input_from_dict(&ship);
         let outcome = self.state.register_ship(ship_id, input, connection_ship_id);
         let mut result = Dict::new();
         result.set("registered", outcome.registered);
@@ -341,16 +339,6 @@ impl WorldSession {
             result.set(*id, name.clone());
         }
         result
-    }
-}
-
-fn parse_json<T: DeserializeOwned>(json: &GString, context: &str) -> Option<T> {
-    match serde_json::from_str(&json.to_string()) {
-        Ok(value) => Some(value),
-        Err(err) => {
-            godot_error!("WorldSession.{context}: {err}");
-            None
-        }
     }
 }
 

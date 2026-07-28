@@ -729,8 +729,7 @@ func _spawn_ship_from_data(d: Dictionary) -> void:
 		server_pos,
 		_velocity_from_dict(d),
 		_session.current_tick())
-	var result: Dictionary = _session.register_ship(
-		sid, JSON.stringify(d), _connection.ship_id)
+	var result: Dictionary = _session.register_ship(sid, d, _connection.ship_id)
 	_ships[sid] = ship
 	_sync_session_state()
 	if result.get("became_player", false) as bool:
@@ -1079,8 +1078,7 @@ func _handle_ship_spawned(p: Dictionary) -> void:
 	var ship: Node3D = _instantiate_ship(
 		ship_id,
 		_position_components_from_dict(p, "position"))
-	var result: Dictionary = _session.register_ship(
-		ship_id, JSON.stringify(p), _connection.ship_id)
+	var result: Dictionary = _session.register_ship(ship_id, p, _connection.ship_id)
 	_ships[ship_id] = ship
 	_sync_session_state()
 
