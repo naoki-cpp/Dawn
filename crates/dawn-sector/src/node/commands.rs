@@ -115,18 +115,18 @@ use dawn_ecs::{
 use dawn_event_store::store::EventStore;
 
 use super::{
-    command_station::{StationDispatchCommand, StationDispatchOutcome},
+    command_station::{StationDispatchCommand, StationDispatchEffect},
     SimulationNode,
 };
 
 impl<S: EventStore> SimulationNode<S> {
     fn station_followup(
         player_id: PlayerId,
-        outcome: StationDispatchOutcome,
+        effect: StationDispatchEffect,
     ) -> Option<ClientCommandFollowup> {
-        match outcome {
-            StationDispatchOutcome::NoFollowup => None,
-            StationDispatchOutcome::RefreshPlayerLoadout => {
+        match effect {
+            StationDispatchEffect::NoFollowup => None,
+            StationDispatchEffect::RefreshPlayerLoadout => {
                 Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })
             }
         }
@@ -170,13 +170,20 @@ impl<S: EventStore> SimulationNode<S> {
         cmd: ClientCommand,
         lock_commands: &mut Vec<dawn_core::LockOnCommand>,
     ) -> Option<ClientCommandFollowup> {
-        // Flight/steering/module/Undock commands never carry a ship_id of
-        // their own (ADR-0037) -- they always resolve to the caller's active
-        // ship here, so there is no wire-representable way to name a ship the
-        // player isn't currently flying. Station inventory-management
-        // commands (Fit/Unfit/Dock/BuildPackagedShip/DisassembleShip) still
-        // carry an explicit ship_id and check `owns_ship` instead, since they
-        // may target any owned docked ship.
+        // Which ship a command routes to is decided once, here, and passed
+        // down -- including into `dispatch_station_command` (ADR-0047), so no
+        // handler re-derives it.
+        //
+        // Two groups, split by where the target comes from:
+        //
+        // - Resolved from the active ship (ADR-0037): flight/steering, module
+        //   activation, and Dock/Undock. These carry no ship_id of their own,
+        //   so there is no wire-representable way to name a ship the player
+        //   isn't currently flying.
+        // - Named explicitly by the command: Fit/Unfit/BuildPackagedShip/
+        //   DisassembleShip and the rest of the station-inventory family.
+        //   These check `owns_ship` instead, since they may target any owned
+        //   docked ship -- not just the active one.
         let active_ship = self.ships.active_ship.get(&player_id).copied();
         match cmd {
             ClientCommand::Move(mv) => {
@@ -259,13 +266,21 @@ impl<S: EventStore> SimulationNode<S> {
             ClientCommand::Dock(d) => {
                 return Self::station_followup(
                     player_id,
-                    self.dispatch_station_command(player_id, StationDispatchCommand::Dock(d)),
+                    self.dispatch_station_command(
+                        player_id,
+                        active_ship,
+                        StationDispatchCommand::Dock(d),
+                    ),
                 );
             }
             ClientCommand::Undock(u) => {
                 return Self::station_followup(
                     player_id,
-                    self.dispatch_station_command(player_id, StationDispatchCommand::Undock(u)),
+                    self.dispatch_station_command(
+                        player_id,
+                        active_ship,
+                        StationDispatchCommand::Undock(u),
+                    ),
                 );
             }
             ClientCommand::BuildPackagedShip(b) => {
@@ -273,6 +288,7 @@ impl<S: EventStore> SimulationNode<S> {
                     player_id,
                     self.dispatch_station_command(
                         player_id,
+                        active_ship,
                         StationDispatchCommand::BuildPackagedShip(b),
                     ),
                 );
@@ -282,6 +298,7 @@ impl<S: EventStore> SimulationNode<S> {
                     player_id,
                     self.dispatch_station_command(
                         player_id,
+                        active_ship,
                         StationDispatchCommand::DisassembleShip(d),
                     ),
                 );
@@ -302,6 +319,7 @@ impl<S: EventStore> SimulationNode<S> {
                     player_id,
                     self.dispatch_station_command(
                         player_id,
+                        active_ship,
                         StationDispatchCommand::SelectActiveShip(s),
                     ),
                 );
@@ -309,13 +327,21 @@ impl<S: EventStore> SimulationNode<S> {
             ClientCommand::Assemble(a) => {
                 return Self::station_followup(
                     player_id,
-                    self.dispatch_station_command(player_id, StationDispatchCommand::Assemble(a)),
+                    self.dispatch_station_command(
+                        player_id,
+                        active_ship,
+                        StationDispatchCommand::Assemble(a),
+                    ),
                 );
             }
             ClientCommand::Disembark(_) => {
                 return Self::station_followup(
                     player_id,
-                    self.dispatch_station_command(player_id, StationDispatchCommand::Disembark),
+                    self.dispatch_station_command(
+                        player_id,
+                        active_ship,
+                        StationDispatchCommand::Disembark,
+                    ),
                 );
             }
             ClientCommand::TransferToStation(t) => {
@@ -323,6 +349,7 @@ impl<S: EventStore> SimulationNode<S> {
                     player_id,
                     self.dispatch_station_command(
                         player_id,
+                        active_ship,
                         StationDispatchCommand::TransferToStation(t),
                     ),
                 );
