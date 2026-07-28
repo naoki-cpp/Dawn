@@ -22,14 +22,16 @@ var _hud: CanvasLayer = null
 ## Last frame's per-panel sub-Dictionary/Array, used by render() to skip
 ## HudManager calls for panels that haven't changed since the previous
 ## frame. GDScript's Dictionary/Array `!=` is a deep (value) comparison, so
-## this also catches nested values like target_hp.
-## _prev_modules is the one exception: its elements are ModuleRow (an
-## Object), and Object's `!=` is reference identity, not value comparison --
-## see _modules_changed() below.
+## this catches nested plain values.
+## Objects are the exception: `!=` on them is reference identity, not value
+## comparison, and both ModuleRow and ShipHealth are minted fresh each frame.
+## They are diffed by their own `equals()` instead -- see _modules_changed()
+## and _target_hp_changed() below.
 ## All start empty so the very first render() always paints every panel.
 var _prev_status: Dictionary = {}
 var _prev_ship_status: Dictionary = {}
 var _prev_target: Dictionary = {}
+var _prev_target_hp: ShipHealth = null
 var _prev_modules: Array = []
 ## A loadout can arrive before main.gd has finished building the HUD (notably
 ## during headless tests). Keep the latest snapshot until the panel refs exist
@@ -67,6 +69,14 @@ func _panel_changed(prev: Variant, next: Variant) -> bool:
 ## Same purpose as _panel_changed(), but for Array[ModuleRow]: ModuleRow is
 ## an Object, so `!=` between arrays of them compares references, not the
 ## field values render() actually needs to notice changing.
+## Value comparison for the target HP panel. `null` means "no HP record this
+## frame", which is a state change in either direction.
+func _target_hp_changed(prev: ShipHealth, next: ShipHealth) -> bool:
+	if prev == null or next == null:
+		return prev != next
+	return not prev.equals(next)
+
+
 func _modules_changed(prev: Array, next: Array) -> bool:
 	if prev.size() != next.size():
 		return true
@@ -128,14 +138,15 @@ func render(frame: Dictionary) -> void:
 		"lock_target": frame.get("lock_target", -1) as int,
 		"target_known": frame.get("target_known", false) as bool,
 		"target_distance": frame.get("target_distance", "—") as String,
-		"target_hp": frame.get("target_hp", {}) as Dictionary,
 	}
-	if _panel_changed(_prev_target, target):
+	var target_hp: ShipHealth = frame.get("target_hp", null) as ShipHealth
+	if _panel_changed(_prev_target, target) or _target_hp_changed(_prev_target_hp, target_hp):
 		HudManager.update_target_panel(
 			_target_panel_refs,
-			target["lock_target"], target["target_known"], target["target_distance"], target["target_hp"]
+			target["lock_target"], target["target_known"], target["target_distance"], target_hp
 		)
 		_prev_target = target
+		_prev_target_hp = target_hp
 
 	## `modules` here is the *same* ModuleRow objects as the current
 	## PlayerLoadout snapshot (frame["modules"] is assigned by reference, not

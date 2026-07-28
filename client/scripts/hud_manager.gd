@@ -358,7 +358,7 @@ static func build_target_panel(hud: CanvasLayer) -> TargetPanelRefs:
 ## Show / hide and populate the top-center target panel from the lock target.
 ## `hp` is {shield, max_shield, armor, max_armor, hull, max_hull} when
 ## `target_known` is true; ignored otherwise.
-static func update_target_panel(refs: TargetPanelRefs, lock_target_id: int, target_known: bool, dist_text: String, hp: Dictionary) -> void:
+static func update_target_panel(refs: TargetPanelRefs, lock_target_id: int, target_known: bool, dist_text: String, hp: ShipHealth) -> void:
 	if lock_target_id < 0:
 		refs.panel.visible = false
 		return
@@ -382,11 +382,12 @@ static func update_target_panel(refs: TargetPanelRefs, lock_target_id: int, targ
 	## HP bars, relative to the target's own maxima (recorded at spawn). If we
 	## have no HP record yet, leave the bars at their last known fill rather
 	## than snapping to empty.
-	if hp.is_empty():
+	if not (hp is ShipHealth):
 		return
-	set_mini_bar(bar_shield, hp.get("shield", 0.0) as float, hp.get("max_shield", 1.0) as float)
-	set_mini_bar(bar_armor,  hp.get("armor",  0.0) as float, hp.get("max_armor",  1.0) as float)
-	set_mini_bar(bar_hull,   hp.get("hull",   0.0) as float, hp.get("max_hull",   1.0) as float)
+	var health: ShipHealth = hp as ShipHealth
+	set_mini_bar(bar_shield, health.shield, health.max_shield)
+	set_mini_bar(bar_armor,  health.armor,  health.max_armor)
+	set_mini_bar(bar_hull,   health.hull,   health.max_hull)
 
 
 # -- Bottom-center module bar ----------------------------------------------------
@@ -854,9 +855,9 @@ static func update_inventory_panel(
 
 	if picker_open:
 		for entry: Variant in buildable_ship_types:
-			var t: Dictionary = entry as Dictionary
-			var ship_type_id: int = t.get("ship_type_id", -1) as int
-			var name: String = t.get("name", "") as String
+			var t: BuildableShipType = entry as BuildableShipType
+			var ship_type_id: int = t.ship_type_id
+			var name: String = t.name
 			var picker_row := _make_inventory_row(
 				"  %s" % name, 0, "", InventoryRow.ACTION_BUILD_SHIP_TYPE, ship_type_id,
 				"", 0, InventoryRow.SOURCE_STATION)

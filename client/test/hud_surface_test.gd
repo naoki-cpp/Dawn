@@ -88,7 +88,7 @@ func test_render_updates_all_hud_panels_from_one_frame() -> void:
 		"lock_target": 7,
 		"target_known": true,
 		"target_distance": "3.2 km",
-		"target_hp": {"shield": 50.0, "max_shield": 100.0, "armor": 100.0, "max_armor": 100.0, "hull": 100.0, "max_hull": 100.0},
+		"target_hp": _health(50.0, 100.0, 100.0, 100.0, 100.0, 100.0),
 		"modules": modules,
 		"stats_text": "Ships: 2",
 	})
@@ -300,3 +300,16 @@ func test_owned_ships_roster_lists_active_and_inactive_ships() -> void:
 		(inactive_row.panel as Panel).get_global_rect().get_center())
 	assert_str(hit.action).is_equal(InventoryRow.ACTION_SELECT_ACTIVE_SHIP)
 	assert_int(hit.ship_id).is_equal(2)
+
+
+## Typed fixture builder (session_record_gd.rs): `render()` forwards the same
+## `ShipHealth` `WorldSession.ship_health()` returns.
+func _health(shield: float, max_shield: float, armor: float, max_armor: float, hull: float, max_hull: float) -> ShipHealth:
+	var h := ShipHealth.new()
+	h.shield = shield
+	h.max_shield = max_shield
+	h.armor = armor
+	h.max_armor = max_armor
+	h.hull = hull
+	h.max_hull = max_hull
+	return h

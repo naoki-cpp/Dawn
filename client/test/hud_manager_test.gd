@@ -112,20 +112,20 @@ func test_update_ship_status_panel_shows_dash_when_cap_not_yet_received() -> voi
 
 func test_update_target_panel_hides_when_no_lock_target() -> void:
 	var refs: HudManager.TargetPanelRefs = HudManager.build_target_panel(_hud)
-	HudManager.update_target_panel(refs, -1, false, "—", {})
+	HudManager.update_target_panel(refs, -1, false, "—", null)
 	assert_bool(refs.panel.visible).is_false()
 
 
 func test_update_target_panel_shows_signal_lost_when_target_left_the_area() -> void:
 	var refs: HudManager.TargetPanelRefs = HudManager.build_target_panel(_hud)
-	HudManager.update_target_panel(refs, 7, false, "—", {})
+	HudManager.update_target_panel(refs, 7, false, "—", null)
 	assert_bool(refs.panel.visible).is_true()
 	assert_str(refs.dist_label.text).is_equal("SIGNAL LOST")
 
 
 func test_update_target_panel_shows_distance_and_hp_when_target_is_known() -> void:
 	var refs: HudManager.TargetPanelRefs = HudManager.build_target_panel(_hud)
-	var hp: Dictionary = {"shield": 50.0, "max_shield": 200.0, "armor": 600.0, "max_armor": 600.0, "hull": 200.0, "max_hull": 200.0}
+	var hp: ShipHealth = _health(50.0, 200.0, 600.0, 600.0, 200.0, 200.0)
 	HudManager.update_target_panel(refs, 7, true, "3.2 km", hp)
 	assert_str(refs.dist_label.text).is_equal("3.2 km")
 	assert_float(refs.bar_shield.value).is_equal_approx(25.0, 0.0001)
@@ -133,9 +133,9 @@ func test_update_target_panel_shows_distance_and_hp_when_target_is_known() -> vo
 
 func test_update_target_panel_leaves_bars_unchanged_when_no_hp_record_yet() -> void:
 	var refs: HudManager.TargetPanelRefs = HudManager.build_target_panel(_hud)
-	HudManager.update_target_panel(refs, 7, true, "1.0 km", {"shield": 80.0, "max_shield": 100.0, "armor": 100.0, "max_armor": 100.0, "hull": 100.0, "max_hull": 100.0})
+	HudManager.update_target_panel(refs, 7, true, "1.0 km", _health(80.0, 100.0, 100.0, 100.0, 100.0, 100.0))
 	var before: float = refs.bar_shield.value
-	HudManager.update_target_panel(refs, 7, true, "1.0 km", {})  ## no HP data this frame
+	HudManager.update_target_panel(refs, 7, true, "1.0 km", null)  ## no HP data this frame
 	assert_float(refs.bar_shield.value).is_equal_approx(before, 0.0001)
 
 
@@ -241,7 +241,7 @@ func test_build_picker_is_collapsed_by_default_and_expands_when_toggled() -> voi
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
 	var refs: HudManager.InventoryPanelRefs = HudManager.build_inventory_panel(hud)
-	var buildable := [{"ship_type_id": 7, "name": "Magpie"}]
+	var buildable := [_buildable(7, "Magpie")]
 
 	HudManager.update_inventory_panel(refs, [], [], [], [], buildable)
 	assert_bool(
@@ -305,3 +305,24 @@ func test_owned_ship_row_handles_null_docked_station_id_and_ship_type_name() -> 
 
 ## module_slot_at() and column_at() tests moved to hud_hit_test_test.gd
 ## alongside hud_hit_test.gd (architecture-review/client.md C-9).
+
+
+## Typed fixture builders (session_record_gd.rs). `update_target_panel` takes
+## the same `ShipHealth` `WorldSession.ship_health()` returns, and `null` for
+## "no HP record this frame".
+func _health(shield: float, max_shield: float, armor: float, max_armor: float, hull: float, max_hull: float) -> ShipHealth:
+	var h := ShipHealth.new()
+	h.shield = shield
+	h.max_shield = max_shield
+	h.armor = armor
+	h.max_armor = max_armor
+	h.hull = hull
+	h.max_hull = max_hull
+	return h
+
+
+func _buildable(ship_type_id: int, name: String) -> BuildableShipType:
+	var b := BuildableShipType.new()
+	b.ship_type_id = ship_type_id
+	b.name = name
+	return b

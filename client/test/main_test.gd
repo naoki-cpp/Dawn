@@ -253,11 +253,8 @@ func test_ship_docked_event_clears_residual_motion() -> void:
 	_main.add_child(ship)
 	ship.global_position = Vector3(99.0, 99.0, 99.0)
 	_main._ships = {2: ship}
-	_main._stations = [{
-		"station_id": 0,
-		"name": "Forge Station",
-		"position": PackedFloat64Array([5.0 * AU_M + 10.0, 20.0, 300.0]),
-	}]
+	_main._stations = [_station(0, "Forge Station",
+		PackedFloat64Array([5.0 * AU_M + 10.0, 20.0, 300.0]), 0.0)]
 	_main._world.rebase_to_components(5.0 * AU_M, 0.0, 0.0)
 
 	_main._handle_ship_docked({
@@ -309,7 +306,7 @@ func test_stale_player_undock_event_does_not_leave_docked_state() -> void:
 	})
 
 	assert_int(ship.undock_calls.size()).is_equal(0)
-	assert_int(_main._session.dock_status()["docked_station_id"] as int).is_equal(0)
+	assert_int(_main._session.docked_station_id()).is_equal(0)
 	ship.free()
 
 
@@ -339,16 +336,10 @@ func test_au_navigation_proximity_uses_unquantized_positions() -> void:
 	_main._ships = {1: ship}
 	_main._player_ship_id = 1
 	_main._world.rebase_to_components(5.0 * AU_M, 0.0, 0.0)
-	_main._gates = [{
-		"gate_id": 7,
-		"position": PackedFloat64Array([5.0 * AU_M + 10.0, 0.0, 0.0]),
-		"activation_radius": 20.0,
-	}]
-	_main._stations = [{
-		"station_id": 5,
-		"position": PackedFloat64Array([5.0 * AU_M + 15.0, 0.0, 0.0]),
-		"docking_radius": 20.0,
-	}]
+	_main._gates = [_gate(7,
+		PackedFloat64Array([5.0 * AU_M + 10.0, 0.0, 0.0]), 20.0, "")]
+	_main._stations = [_station(5, "",
+		PackedFloat64Array([5.0 * AU_M + 15.0, 0.0, 0.0]), 20.0)]
 
 	_main._update_gate_proximity()
 	_main._update_station_proximity()
@@ -428,9 +419,8 @@ func test_player_ship_undocked_event_clears_docked_station_state() -> void:
 	})
 
 	assert_int(_main._nearby_station_ids[0]).is_equal(0)
-	var status: Dictionary = _main._session.dock_status()
-	assert_int(status["docked_station_id"] as int).is_equal(-1)
-	assert_str(status["docked_station_name"] as String).is_equal("")
+	assert_int(_main._session.docked_station_id()).is_equal(-1)
+	assert_str(_main._session.docked_station_name()).is_equal("")
 
 
 # -- _on_module_deactivated (manual OFF vs system-forced OFF) -----------------------
@@ -621,14 +611,15 @@ func test_switching_active_ship_to_a_known_ship_reattaches_the_camera() -> void:
 	_main._apply_loadout_side_effects()
 
 	assert_int(_main._player_ship_id).is_equal(2)
-	var snapshot: Dictionary = _main._session.snapshot()
-	assert_int(snapshot.player_ship_id).is_equal(2)
-	assert_str(snapshot.player_ship_type_name).is_equal("Venture")
-	assert_float(snapshot.player_shield).is_equal_approx(210.0, 0.001)
-	assert_float(snapshot.player_max_shield).is_equal_approx(250.0, 0.001)
-	assert_float(snapshot.cap_current).is_equal_approx(80.0, 0.001)
-	assert_float(snapshot.cap_max).is_equal_approx(80.0, 0.001)
-	assert_float(snapshot.cap_recharge).is_equal_approx(4.0, 0.001)
+	assert_int(_main._session.player_ship_id()).is_equal(2)
+	assert_str(_main._session.player_ship_type_name()).is_equal("Venture")
+	var health: ShipHealth = _main._session.player_health()
+	assert_float(health.shield).is_equal_approx(210.0, 0.001)
+	assert_float(health.max_shield).is_equal_approx(250.0, 0.001)
+	var cap: CapacitorStatus = _main._session.capacitor_status()
+	assert_float(cap.current).is_equal_approx(80.0, 0.001)
+	assert_float(cap.max).is_equal_approx(80.0, 0.001)
+	assert_float(cap.recharge).is_equal_approx(4.0, 0.001)
 	assert_int(ship_b.set_as_player_calls).is_equal(1)
 	assert_object(camera._target_node).is_equal(ship_b)
 	## Regression: the old ship used to stay permanently player-colored
@@ -686,7 +677,7 @@ func test_disembarking_reverts_the_old_ships_player_material() -> void:
 	_main._apply_loadout_side_effects()
 
 	assert_int(_main._player_ship_id).is_equal(-1)
-	assert_int(_main._session.snapshot().player_ship_id).is_equal(-1)
+	assert_int(_main._session.player_ship_id()).is_equal(-1)
 	assert_int(ship_a.clear_as_player_calls).is_equal(1)
 
 
@@ -966,3 +957,23 @@ func test_release_past_threshold_is_treated_as_a_drop_not_a_click() -> void:
 
 	assert_int(connection.transfer_to_station_calls.size()).is_equal(1)
 	connection.free()
+
+
+## Typed fixture builders for the navigation caches `main.gd` fills from
+## `WorldSession.gates()`/`.stations()` (session_record_gd.rs).
+func _gate(gate_id: int, pos: PackedFloat64Array, activation_radius: float, to_system_name: String) -> GateRecord:
+	var g := GateRecord.new()
+	g.gate_id = gate_id
+	g.position = pos
+	g.activation_radius = activation_radius
+	g.to_system_name = to_system_name
+	return g
+
+
+func _station(station_id: int, name: String, pos: PackedFloat64Array, docking_radius: float) -> StationRecord:
+	var st := StationRecord.new()
+	st.station_id = station_id
+	st.name = name
+	st.position = pos
+	st.docking_radius = docking_radius
+	return st

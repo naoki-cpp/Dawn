@@ -67,14 +67,14 @@ static func spectral_color(t: float) -> Color:
 static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: float, to_godot_components: Callable) -> void:
 	clear_children(gates_root)
 
-	for gate: Variant in gates:
-		var g: Dictionary = gate as Dictionary
-		var gate_pos := PositionComponents.from_value(g.get("position"))
-		var radius  : float   = g.get("activation_radius", 0.0) as float
+	for entry: Variant in gates:
+		var g: GateRecord = entry as GateRecord
+		var gate_pos := PositionComponents.from_value(g.position)
+		var radius  : float   = g.activation_radius
 
 		var marker: Node3D = Node3D.new()
 		marker.position = to_godot_components.call(gate_pos) as Vector3
-		marker.set_meta("gate_id",  g.get("gate_id", -1) as int)
+		marker.set_meta("gate_id",  g.gate_id)
 		marker.set_meta("gate_pos", gate_pos)  ## server coords, kept for per-frame clamping (main.gd)
 		marker.set_meta("nav_pos", gate_pos)
 		gates_root.add_child(marker)
@@ -96,7 +96,7 @@ static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: fl
 		marker.add_child(ring)
 
 		var label: Label3D = Label3D.new()
-		label.text             = "Gate #%d -> %s" % [g.get("gate_id", -1) as int, g.get("to_system_name", "") as String]
+		label.text             = "Gate #%d -> %s" % [g.gate_id, g.to_system_name]
 		label.position         = Vector3(0.0, radius * world_scale * GATE_LABEL_HEIGHT_RATIO, 0.0)
 		label.billboard        = BaseMaterial3D.BILLBOARD_ENABLED
 		label.no_depth_test    = true
@@ -122,15 +122,15 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 	clear_children(bodies_root)
 
 	for entry: Variant in bodies:
-		var b: Dictionary = entry as Dictionary
-		if (b.get("kind", "") as String) == "Star":
+		var b: CelestialBodyRecord = entry as CelestialBodyRecord
+		if b.kind == "Star":
 			continue
 
-		var b_id    : int     = b.get("body_id",      -1) as int
-		var kind    : String  = b.get("kind",          "") as String
-		var name_str: String  = b.get("name",          "") as String
-		var b_pos   := PositionComponents.from_value(b.get("position"))
-		var radius  : float   = b.get("radius",       1.0) as float
+		var b_id    : int     = b.body_id
+		var kind    : String  = b.kind
+		var name_str: String  = b.name
+		var b_pos   := PositionComponents.from_value(b.position)
+		var radius  : float   = b.radius
 
 		var godot_pos: Vector3 = to_godot_components.call(b_pos) as Vector3
 
@@ -176,11 +176,11 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 ## context as planets and should clamp the same way at true AU distances.
 static func spawn_station_markers(bodies_root: Node3D, stations: Array, world_scale: float, to_godot_components: Callable) -> void:
 	for entry: Variant in stations:
-		var station: Dictionary = entry as Dictionary
-		var station_id: int = station.get("station_id", -1) as int
-		var name_str: String = station.get("name", "") as String
-		var station_pos := PositionComponents.from_value(station.get("position"))
-		var docking_radius: float = station.get("docking_radius", 0.0) as float
+		var station: StationRecord = entry as StationRecord
+		var station_id: int = station.station_id
+		var name_str: String = station.name
+		var station_pos := PositionComponents.from_value(station.position)
+		var docking_radius: float = station.docking_radius
 		var visual_radius: float = STATION_VISUAL_RADIUS * world_scale
 
 		var marker: Node3D = Node3D.new()

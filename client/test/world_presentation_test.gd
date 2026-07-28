@@ -64,7 +64,7 @@ func test_next_warp_tunnel_amount_eases_back_toward_zero_below_threshold() -> vo
 
 func test_sun_state_returns_inactive_when_no_star_exists() -> void:
 	var state: Dictionary = WorldPresentation.sun_state([
-		{"kind": "Planet", "position": _position(100.0, 0.0, 0.0), "spectral_type": 0.1},
+		_body(2, "Planet", "Forge", _position(100.0, 0.0, 0.0), 200.0, 0.1),
 	], _position(0.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
 		return diff
 	)
@@ -74,7 +74,7 @@ func test_sun_state_returns_inactive_when_no_star_exists() -> void:
 
 func test_sun_state_returns_direction_and_color_from_star_data() -> void:
 	var state: Dictionary = WorldPresentation.sun_state([
-		{"kind": "Star", "position": _position(0.0, 0.0, 0.0), "spectral_type": 0.0},
+		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.0),
 	], _position(0.0, 0.0, 0.0), func(diff: Vector3) -> Vector3:
 		return diff
 	)
@@ -101,3 +101,16 @@ func test_origin_rebase_moves_ship_and_motion_track_together() -> void:
 		PackedFloat64Array([100.0, 2.0, -3.0]),
 	])
 	ship.free()
+
+
+## Typed fixture builder (session_record_gd.rs): `sun_state` walks the same
+## `CelestialBodyRecord` array `WorldSession.bodies()` returns.
+func _body(body_id: int, kind: String, name: String, pos: PackedFloat64Array, radius: float, spectral_type: float) -> CelestialBodyRecord:
+	var b := CelestialBodyRecord.new()
+	b.body_id = body_id
+	b.kind = kind
+	b.name = name
+	b.position = pos
+	b.radius = radius
+	b.spectral_type = spectral_type
+	return b

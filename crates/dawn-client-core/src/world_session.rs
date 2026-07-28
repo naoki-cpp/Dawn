@@ -180,33 +180,23 @@ pub struct BuildableShipTypeRecord {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct RegistrationOutcome {
-    pub registered: bool,
-    pub became_player: bool,
-    pub became_opponent: bool,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct RemovalOutcome {
-    pub removed: bool,
-    pub removed_player: bool,
-    pub removed_opponent: bool,
-    pub cleared_lock: bool,
-}
-
+/// What `destroy_ship` reports back. The only transition whose caller needs
+/// more than one bit: the client frees the scene node (`destroyed`) and then
+/// shows a duel result that depends on *whose* ship it was
+/// (`destroyed_player` -> defeat, `destroyed_opponent` -> victory).
+///
+/// The sibling transitions (`register_ship`, `remove_ship`, `apply_hp_event`)
+/// used to return structs of the same shape, but every field beyond the first
+/// went unread by both the Godot client and the tests -- they reported values
+/// that already drove internal state as locals. Reporting outward is not the
+/// same as computing internally, and only the latter was load-bearing, so
+/// those structs are gone and their methods return the one bit that was
+/// actually consumed.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct DestructionOutcome {
     pub destroyed: bool,
     pub destroyed_player: bool,
     pub destroyed_opponent: bool,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct HealthEventOutcome {
-    pub ship_id: i64,
-    pub changed_player: bool,
-    pub has_ship: bool,
 }
 
 /// The pure client-side state for one connected world session.
@@ -442,9 +432,9 @@ impl WorldSessionState {
         ship_id: i64,
         input: ShipInput,
         connection_ship_id: i64,
-    ) -> RegistrationOutcome {
+    ) -> bool {
         if self.ships.contains_key(&ship_id) {
-            return RegistrationOutcome::default();
+            return false;
         }
 
         let health = health_from_ship_input(&input);
@@ -460,40 +450,31 @@ impl WorldSessionState {
             },
         );
 
-        let mut outcome = RegistrationOutcome {
-            registered: true,
-            ..RegistrationOutcome::default()
-        };
         if ship_id == connection_ship_id && self.player_ship_id < 0 {
             self.set_player_ship_id(ship_id);
-            outcome.became_player = true;
-        } else if input.is_player && !self.opponent_ship_ids.contains(&ship_id) {
-            self.opponent_ship_ids.push(ship_id);
-            outcome.became_opponent = true;
+            return true;
         }
-        outcome
+        if input.is_player && !self.opponent_ship_ids.contains(&ship_id) {
+            self.opponent_ship_ids.push(ship_id);
+        }
+        false
     }
 
-    pub fn remove_ship(&mut self, ship_id: i64, clear_lock: bool) -> RemovalOutcome {
+    /// Drops `ship_id` from the session. Returns whether it was there to drop
+    /// -- the caller uses that to decide whether to free the scene node.
+    pub fn remove_ship(&mut self, ship_id: i64, clear_lock: bool) -> bool {
         if self.ships.remove(&ship_id).is_none() {
-            return RemovalOutcome::default();
+            return false;
         }
         self.ship_hp.remove(&ship_id);
-        let removed_player = ship_id == self.player_ship_id;
-        if removed_player {
+        if ship_id == self.player_ship_id {
             self.player_ship_id = -1;
         }
-        let removed_opponent = remove_id(&mut self.opponent_ship_ids, ship_id);
-        let cleared_lock = clear_lock && ship_id == self.player_lock_target;
-        if cleared_lock {
+        remove_id(&mut self.opponent_ship_ids, ship_id);
+        if clear_lock && ship_id == self.player_lock_target {
             self.player_lock_target = -1;
         }
-        RemovalOutcome {
-            removed: true,
-            removed_player,
-            removed_opponent,
-            cleared_lock,
-        }
+        true
     }
 
     pub fn destroy_ship(&mut self, ship_id: i64) -> DestructionOutcome {
@@ -533,27 +514,20 @@ impl WorldSessionState {
         Some(name)
     }
 
-    pub fn apply_hp_event(
-        &mut self,
-        ship_id: i64,
-        shield: f64,
-        armor: f64,
-        hull: f64,
-    ) -> HealthEventOutcome {
+    /// Records a DamageTaken/RepairApplied update. Returns nothing: the
+    /// caller passed `ship_id` in and already has it for its own visual
+    /// feedback, and neither of the other two values the old
+    /// `HealthEventOutcome` reported (`changed_player`, `has_ship`) had a
+    /// reader on either side of the Godot boundary.
+    pub fn apply_hp_event(&mut self, ship_id: i64, shield: f64, armor: f64, hull: f64) {
         let health = self.ship_hp.entry(ship_id).or_default();
         health.shield = shield;
         health.armor = armor;
         health.hull = hull;
-        let changed_player = ship_id == self.player_ship_id;
-        if changed_player {
+        if ship_id == self.player_ship_id {
             self.player_health.shield = shield;
             self.player_health.armor = armor;
             self.player_health.hull = hull;
-        }
-        HealthEventOutcome {
-            ship_id,
-            changed_player,
-            has_ship: self.has_ship(ship_id),
         }
     }
 
@@ -705,14 +679,7 @@ mod tests {
 
         let result = state.register_ship(11, ship(true), 11);
 
-        assert_eq!(
-            result,
-            RegistrationOutcome {
-                registered: true,
-                became_player: true,
-                became_opponent: false,
-            }
-        );
+        assert!(result, "the connection's own ship becomes the player ship");
         assert_eq!(state.player_ship_id(), 11);
         assert_eq!(state.player_ship_type_name(), "Magpie");
         assert_eq!(state.player_health().shield, 80.0);
@@ -768,7 +735,7 @@ mod tests {
 
         let result = state.remove_ship(42, false);
 
-        assert!(result.removed);
+        assert!(result);
         assert!(!state.has_ship(42));
         assert_eq!(state.player_lock_target(), 42);
     }
