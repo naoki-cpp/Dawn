@@ -43,6 +43,7 @@ When adding a new ADR, register it here too (the `/new-adr` skill does both).
 | [ADR-0042](ADR-0042-wire-postcard-protocol.md) | ワイヤプロトコルを WebSocket + postcard バイナリへ移行（段階1: Event/Command） | Accepted |
 
 | [ADR-0046](ADR-0046-world-session-state-ownership.md) | WorldSession pure state ownership in dawn-client-core | Accepted |
+| [ADR-0047](ADR-0047-client-command-dispatch-shape.md) | ClientCommand ディスパッチャの明示的 match を維持する | Accepted |
 
 ### Movement / Navigation
 

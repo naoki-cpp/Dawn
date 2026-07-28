@@ -115,18 +115,18 @@ use dawn_ecs::{
 use dawn_event_store::store::EventStore;
 
 use super::{
-    command_station::{StationDispatchCommand, StationDispatchOutcome},
+    command_station::{StationDispatchCommand, StationDispatchEffect},
     SimulationNode,
 };
 
 impl<S: EventStore> SimulationNode<S> {
     fn station_followup(
         player_id: PlayerId,
-        outcome: StationDispatchOutcome,
+        effect: StationDispatchEffect,
     ) -> Option<ClientCommandFollowup> {
-        match outcome {
-            StationDispatchOutcome::NoFollowup => None,
-            StationDispatchOutcome::RefreshPlayerLoadout => {
+        match effect {
+            StationDispatchEffect::NoFollowup => None,
+            StationDispatchEffect::RefreshPlayerLoadout => {
                 Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })
             }
         }
@@ -259,13 +259,21 @@ impl<S: EventStore> SimulationNode<S> {
             ClientCommand::Dock(d) => {
                 return Self::station_followup(
                     player_id,
-                    self.dispatch_station_command(player_id, StationDispatchCommand::Dock(d)),
+                    self.dispatch_station_command(
+                        player_id,
+                        active_ship,
+                        StationDispatchCommand::Dock(d),
+                    ),
                 );
             }
             ClientCommand::Undock(u) => {
                 return Self::station_followup(
                     player_id,
-                    self.dispatch_station_command(player_id, StationDispatchCommand::Undock(u)),
+                    self.dispatch_station_command(
+                        player_id,
+                        active_ship,
+                        StationDispatchCommand::Undock(u),
+                    ),
                 );
             }
             ClientCommand::BuildPackagedShip(b) => {
@@ -273,6 +281,7 @@ impl<S: EventStore> SimulationNode<S> {
                     player_id,
                     self.dispatch_station_command(
                         player_id,
+                        active_ship,
                         StationDispatchCommand::BuildPackagedShip(b),
                     ),
                 );
@@ -282,6 +291,7 @@ impl<S: EventStore> SimulationNode<S> {
                     player_id,
                     self.dispatch_station_command(
                         player_id,
+                        active_ship,
                         StationDispatchCommand::DisassembleShip(d),
                     ),
                 );
@@ -302,6 +312,7 @@ impl<S: EventStore> SimulationNode<S> {
                     player_id,
                     self.dispatch_station_command(
                         player_id,
+                        active_ship,
                         StationDispatchCommand::SelectActiveShip(s),
                     ),
                 );
@@ -309,13 +320,21 @@ impl<S: EventStore> SimulationNode<S> {
             ClientCommand::Assemble(a) => {
                 return Self::station_followup(
                     player_id,
-                    self.dispatch_station_command(player_id, StationDispatchCommand::Assemble(a)),
+                    self.dispatch_station_command(
+                        player_id,
+                        active_ship,
+                        StationDispatchCommand::Assemble(a),
+                    ),
                 );
             }
             ClientCommand::Disembark(_) => {
                 return Self::station_followup(
                     player_id,
-                    self.dispatch_station_command(player_id, StationDispatchCommand::Disembark),
+                    self.dispatch_station_command(
+                        player_id,
+                        active_ship,
+                        StationDispatchCommand::Disembark,
+                    ),
                 );
             }
             ClientCommand::TransferToStation(t) => {
@@ -323,6 +342,7 @@ impl<S: EventStore> SimulationNode<S> {
                     player_id,
                     self.dispatch_station_command(
                         player_id,
+                        active_ship,
                         StationDispatchCommand::TransferToStation(t),
                     ),
                 );
