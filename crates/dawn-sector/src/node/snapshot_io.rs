@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use dawn_ecs::components::{
     CapacitorComp, FittingComp, HullComp, InventoryComp, PositionComp, TackledComp, VelocityComp,
 };
@@ -14,38 +12,75 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// The snapshot covers all events with `log_index < event_store.len()`.
     /// Pair with the event log to reconstruct this exact state on restart.
+    ///
+    /// The node is destructured exhaustively (no `..`) on purpose: adding a
+    /// field to `SimulationNode` breaks this function until someone decides
+    /// whether it survives a restart. Deciding by memory is what silently lost
+    /// `player_id_counter` before. `apply_snapshot` is the matching read side.
     pub fn take_snapshot(&self) -> StateSnapshot {
-        let mut ships: Vec<ShipSnapshot> = self
-            .ships
+        let Self {
+            // ── persisted ──────────────────────────────────────────────────
+            node_id,
+            sector_id,
+            bounds,
+            current_tick,
+            id_counter,
+            player_id_counter,
+            docked_ships,
+            docked_players,
+            // `log_index` is derived from the store rather than persisted.
+            event_store,
+            // ── captured per ship, below ───────────────────────────────────
+            world,
+            ships: ship_registry,
+            // ── not persisted ──────────────────────────────────────────────
+            // Rebuilt by `restore_from` from the caller-supplied definitions.
+            module_registry: _,
+            ship_type_registry: _,
+            // Recomputed per ship from `ship_type_registry` during restore.
+            base_stats: _,
+            // Derived from the Galaxy at construction; `set_galaxy` rebuilds.
+            sector_map: _,
+            anchor_table: _,
+            // Configuration, re-applied after construction by the caller
+            // (`set_population_cap` / `open_station_inventory_db`).
+            population_cap: _,
+            // Independently durable in SQLite (ADR-0038), plus its cache.
+            station_inventory_db: _,
+            station_inventory_cache: _,
+            // Per-tick transients: drained by the serve loop every tick, so
+            // there is nothing meaningful to carry across a restart.
+            pending_bot_lock_commands: _,
+            pending_auto_jumps: _,
+            completed_warps: _,
+        } = self;
+
+        let mut ships: Vec<ShipSnapshot> = ship_registry
             .index
             .iter()
             .filter_map(|(&ship_id, &entity)| {
-                let pos = self.world.get::<PositionComp>(entity)?.0;
-                let vel = self.world.get::<VelocityComp>(entity)?.0;
-                let hull = self.world.get::<HullComp>(entity)?;
-                let capacitor = self.world.get::<CapacitorComp>(entity).map(|c| c.current);
-                let fitting = self
-                    .world
+                let pos = world.get::<PositionComp>(entity)?.0;
+                let vel = world.get::<VelocityComp>(entity)?.0;
+                let hull = world.get::<HullComp>(entity)?;
+                let capacitor = world.get::<CapacitorComp>(entity).map(|c| c.current);
+                let fitting = world
                     .get::<FittingComp>(entity)
                     .map(|f| f.to_snapshot())
                     .unwrap_or_else(dawn_core::fitting::FittingSnapshot::empty);
-                let tackled_by = self
-                    .world
+                let tackled_by = world
                     .get::<TackledComp>(entity)
                     .map(|t| t.tacklers.clone())
                     .unwrap_or_default();
-                let inventory = self
-                    .world
+                let inventory = world
                     .get::<InventoryComp>(entity)
                     .map(|inv| inv.items.clone())
                     .unwrap_or_default();
-                let ship_type_id = self
-                    .ships
+                let ship_type_id = ship_registry
                     .type_ids
                     .get(&ship_id)
                     .copied()
                     .unwrap_or(dawn_core::ShipTypeId(0));
-                let anchor = self.world.ship_anchor(entity).unwrap_or_default();
+                let anchor = world.ship_anchor(entity).unwrap_or_default();
                 Some(ShipSnapshot {
                     ship_id,
                     ship_type_id,
@@ -72,22 +107,54 @@ impl<S: EventStore> SimulationNode<S> {
         ships.sort_by_key(|s| s.ship_id);
 
         StateSnapshot {
-            node_id: self.node_id,
-            sector_id: self.sector_id,
-            bounds: self.bounds,
-            log_index: self.event_store.len() as u64,
-            tick: self.current_tick,
-            id_counter: self.id_counter,
+            node_id: *node_id,
+            sector_id: *sector_id,
+            bounds: *bounds,
+            log_index: event_store.len() as u64,
+            tick: *current_tick,
+            id_counter: *id_counter,
+            player_id_counter: *player_id_counter,
             ships,
-            // ADR-0038: Station inventory is durable in SQLite now, decoupled
-            // from the tick-log snapshot cadence -- never populated here
-            // going forward. Kept on `StateSnapshot` only so old snapshots
-            // (from before this change) still deserialize; `restore_from`
-            // migrates a non-empty one into SQLite once.
-            station_inventories: BTreeMap::new(),
-            docked_ships: self.docked_ships.clone(),
-            docked_players: self.docked_players.clone(),
+            docked_ships: docked_ships.clone(),
+            docked_players: docked_players.clone(),
         }
+    }
+
+    /// Apply the node-level scalars and maps carried by `snapshot`.
+    ///
+    /// The read half of the seam `take_snapshot` writes. Covers only the state
+    /// this struct owns directly — ships are materialised separately by
+    /// `restore_ship_from_snapshot`, and events after `log_index` are replayed
+    /// afterwards, both driven by `restore_from`.
+    ///
+    /// `StateSnapshot` is destructured exhaustively (no `..`) for the same
+    /// reason `take_snapshot` destructures the node: adding a field there must
+    /// not compile until it is read back somewhere.
+    pub(super) fn apply_snapshot(&mut self, snapshot: &StateSnapshot) {
+        let StateSnapshot {
+            node_id,
+            sector_id,
+            bounds,
+            tick,
+            id_counter,
+            player_id_counter,
+            docked_ships,
+            docked_players,
+            // Consumed by `restore_from`, not here: `ships` needs the module
+            // and ship-type registries in place first, and `log_index` selects
+            // the replay range once those ships exist.
+            ships: _,
+            log_index: _,
+        } = snapshot;
+
+        self.node_id = *node_id;
+        self.sector_id = *sector_id;
+        self.bounds = *bounds;
+        self.current_tick = *tick;
+        self.id_counter = *id_counter;
+        self.player_id_counter = *player_id_counter;
+        self.docked_ships = docked_ships.clone();
+        self.docked_players = docked_players.clone();
     }
 }
 
@@ -143,6 +210,121 @@ mod tests {
             node.register_ship_type(def);
         }
         node
+    }
+
+    /// Restoring a snapshot and re-capturing must reproduce it byte for byte.
+    ///
+    /// This is the read-side half of the seam's enforcement. `take_snapshot`
+    /// destructures the node exhaustively, so a field cannot silently fail to
+    /// be *written*; this covers the other direction, where a field is written
+    /// but `apply_snapshot` never reads it back — which is how
+    /// `player_id_counter` stayed at zero across a restart while `id_counter`
+    /// survived.
+    ///
+    /// Compared on the encoded bytes rather than field by field so the
+    /// assertion cannot go stale: `snapshot_fixture`'s struct literal is what
+    /// enforces coverage, and it stops compiling when `StateSnapshot` grows a
+    /// field.
+    #[test]
+    fn restoring_a_snapshot_and_recapturing_reproduces_it_exactly() {
+        use crate::{modules, ship_types};
+
+        // The store must already hold `log_index` events: `take_snapshot`
+        // derives that field from the store's length, and `restore_from`
+        // replays everything at or past it (nothing, here).
+        let mut store = InMemoryEventStore::new();
+        for i in 0..3 {
+            store.append(dawn_core::DomainEvent::ShipDespawned(
+                dawn_core::events::ShipDespawned {
+                    ship_id: ShipId::new(NodeId(0), 900 + i),
+                    tick: Tick(0),
+                },
+            ));
+        }
+
+        let original = snapshot_fixture(store.len() as u64);
+        let node = SimulationNode::restore_from(
+            store,
+            &original,
+            &modules::all_modules(),
+            &ship_types::all_ship_types(),
+        );
+
+        assert_eq!(
+            postcard::to_stdvec(&node.take_snapshot()).unwrap(),
+            postcard::to_stdvec(&original).unwrap(),
+            "restore lost or altered state that take_snapshot had captured"
+        );
+    }
+
+    /// A restarted node must not re-issue a `PlayerId` it already handed out.
+    ///
+    /// Ownership is not carried in the snapshot — a returning client
+    /// re-asserts it through `adopt_player_ship` (ADR-0007 §2-A resume) — so
+    /// the allocation counter is the only thing standing between a restart and
+    /// two live sessions sharing one `PlayerId`. `next_player_id` is on the
+    /// real admission path (`dawn-sector-node`'s `client_admission`), so this
+    /// is a live ownership hazard, not a bookkeeping detail.
+    #[test]
+    fn player_ids_are_not_reissued_after_a_restore() {
+        use crate::{modules, ship_types};
+
+        let mut node = node_with_modules();
+        let first = node.next_player_id();
+        let second = node.next_player_id();
+        let snapshot = node.take_snapshot();
+
+        let mut restored = SimulationNode::restore_from(
+            InMemoryEventStore::new(),
+            &snapshot,
+            &modules::all_modules(),
+            &ship_types::all_ship_types(),
+        );
+
+        let after_restart = restored.next_player_id();
+        assert!(
+            after_restart != first && after_restart != second,
+            "restart re-issued {after_restart:?}, already held by a restored player"
+        );
+    }
+
+    /// Every field non-default, so a field that fails to survive the round
+    /// trip above actually changes the encoded bytes. Exhaustive by
+    /// construction: a struct literal cannot omit a field.
+    fn snapshot_fixture(log_index: u64) -> StateSnapshot {
+        StateSnapshot {
+            node_id: NodeId(0),
+            sector_id: SectorId(0),
+            bounds: SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            log_index,
+            tick: Tick(17),
+            id_counter: 5,
+            player_id_counter: 3,
+            ships: vec![ShipSnapshot {
+                ship_id: ShipId::new(NodeId(0), 0),
+                ship_type_id: dawn_core::ShipTypeId(1),
+                absolute_position: Some(dawn_core::AbsolutePosition::new(100.0, 200.0, 300.0)),
+                position: Position::new(100.0, 200.0, 300.0),
+                anchor: dawn_core::AnchorId(0),
+                velocity: Velocity::new(1.0, 2.0, 3.0),
+                current_shield: 50.0,
+                current_armor: 60.0,
+                current_hull: 70.0,
+                is_destroyed: false,
+                capacitor: Some(250.0),
+                fitting: dawn_core::fitting::FittingSnapshot::empty(),
+                tackled_by: vec![ShipId::new(NodeId(0), 1)],
+                inventory: std::collections::BTreeMap::from([(dawn_core::ItemId::ScrapMetal, 4)]),
+            }],
+            docked_ships: std::collections::BTreeMap::from([(
+                ShipId::new(NodeId(0), 0),
+                dawn_core::StationId(0),
+            )]),
+            docked_players: std::collections::BTreeMap::from([(
+                dawn_core::PlayerId(9),
+                dawn_core::StationId(0),
+            )]),
+        }
     }
 
     #[test]
@@ -637,32 +819,12 @@ mod tests {
         );
     }
 
-    /// ADR-0038 back-compat: a `StateSnapshot` taken before this change still
-    /// carries a populated `station_inventories` field. `restore_from` must
-    /// migrate it into the (fresh, in-memory) SQLite database once.
-    #[test]
-    fn restore_from_migrates_a_pre_adr_0038_snapshots_station_inventories() {
-        use crate::{modules, ship_types};
-        use dawn_core::{ItemId, PlayerId, StationId};
-
-        let node = node_with_modules();
-        let mut snap = node.take_snapshot();
-        snap.station_inventories =
-            BTreeMap::from([(PlayerId(7), BTreeMap::from([(ItemId::ScrapMetal, 9)]))]);
-
-        let store2 = InMemoryEventStore::new();
-        let node2 = SimulationNode::restore_from(
-            store2,
-            &snap,
-            &modules::all_modules(),
-            &ship_types::all_ship_types(),
-        );
-
-        assert_eq!(
-            node2.station_item_count(PlayerId(7), StationId(0), ItemId::ScrapMetal),
-            9
-        );
-    }
+    // `restore_from_migrates_a_pre_adr_0038_snapshots_station_inventories` was
+    // deleted with the field it covered. It built the snapshot in memory and
+    // mutated the field directly, so it never crossed the `load` path it
+    // claimed to test — and a real pre-ADR-0038 snapshot cannot reach that
+    // branch at all, since postcard rejects the shorter buffer outright
+    // (ADR-0017 format compatibility).
 
     #[test]
     fn docked_station_state_survives_snapshot_restore() {

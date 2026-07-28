@@ -314,63 +314,14 @@ impl<S: EventStore> SimulationNode<S> {
         modules: &[ModuleDefinition],
         ship_types: &[ShipTypeDefinition],
     ) -> Self {
-        let mut node = Self {
-            node_id: snapshot.node_id,
-            sector_id: snapshot.sector_id,
-            bounds: snapshot.bounds,
-            world: SimWorld::new(snapshot.sector_id),
-            event_store: store,
-            current_tick: snapshot.tick,
-            id_counter: snapshot.id_counter,
-            ships: ShipRegistry::new(),
-            module_registry: HashMap::new(),
-            ship_type_registry: HashMap::new(),
-            base_stats: HashMap::new(),
-            player_id_counter: 0,
-            pending_bot_lock_commands: Vec::new(),
-            sector_map: {
-                let sm = Arc::new(crate::galaxy::Galaxy::demo());
-                SectorMap {
-                    gates: sm
-                        .gates_in_sector(snapshot.sector_id)
-                        .into_iter()
-                        .map(|g| (g.id, g))
-                        .collect(),
-                    bodies: sm
-                        .bodies_in_sector(snapshot.sector_id)
-                        .into_iter()
-                        .map(|b| (b.id, b))
-                        .collect(),
-                    stations: sm
-                        .stations_in_sector(snapshot.sector_id)
-                        .into_iter()
-                        .map(|s| (s.id, s))
-                        .collect(),
-                    galaxy: sm,
-                }
-            },
-            anchor_table: crate::anchor::AnchorTable::from_galaxy(&crate::galaxy::Galaxy::demo()),
-            population_cap: POPULATION_CAP,
-            station_inventory_db: station_inventory_db::StationInventoryDb::open_in_memory()
-                .expect("in-memory sqlite connection never fails to open"),
-            station_inventory_cache: std::cell::RefCell::new(
-                station_inventory::StationInventoryCache::new(),
-            ),
-            docked_ships: snapshot.docked_ships.clone(),
-            docked_players: snapshot.docked_players.clone(),
-            pending_auto_jumps: Vec::new(),
-            completed_warps: Vec::new(),
-        };
-
-        // ADR-0038 back-compat: snapshots taken before Station inventory
-        // moved to SQLite still carry the full map in this field. Migrate it
-        // once; snapshots taken from now on always leave it empty (SQLite is
-        // independently durable, so there's nothing to migrate on a fresh
-        // restore of a node that's already on the new format).
-        if !snapshot.station_inventories.is_empty() {
-            node.station_inventory_db
-                .migrate_from_snapshot(&snapshot.station_inventories);
-        }
+        // Build the same way `with_store` does, then overwrite exactly the
+        // state the snapshot carries. Duplicating the constructor here is what
+        // let the two drift: every field these two functions share was
+        // copy-pasted, and `player_id_counter` sat at 0 in this copy while
+        // `id_counter` was restored.
+        let mut node =
+            Self::with_store(snapshot.node_id, snapshot.sector_id, snapshot.bounds, store);
+        node.apply_snapshot(snapshot);
 
         for def in modules {
             node.register_module(def.clone());

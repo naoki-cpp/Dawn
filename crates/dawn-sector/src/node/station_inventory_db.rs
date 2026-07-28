@@ -209,17 +209,11 @@ impl StationInventoryDb {
         Ok(())
     }
 
-    /// One-time bulk import from an old-format `StateSnapshot.station_inventories`
-    /// (ADR-0038 back-compat: snapshots taken before this change still carry
-    /// the full map). Idempotent to call again (upserts), but callers only
-    /// need to call it once, right after restore, when the field is non-empty.
-    pub(super) fn migrate_from_snapshot(&self, old: &BTreeMap<PlayerId, BTreeMap<ItemId, u64>>) {
-        for (&player_id, inventory) in old {
-            for (&item_id, &count) in inventory {
-                self.credit(player_id, StationId(0), item_id, count);
-            }
-        }
-    }
+    // `migrate_from_snapshot` (one-time import from the old
+    // `StateSnapshot.station_inventories` field) is gone along with that field.
+    // It was unreachable: postcard reads struct fields positionally, so a
+    // snapshot written before the field existed fails to load outright rather
+    // than arriving here with a populated map (ADR-0017 format compatibility).
 }
 
 #[cfg(test)]
@@ -290,39 +284,6 @@ mod tests {
             db.get_all(PlayerId(1), StationId(7))
                 .get(&ItemId::ScrapMetal),
             Some(&3)
-        );
-    }
-
-    #[test]
-    fn migrate_from_snapshot_imports_every_player_and_item() {
-        let db = StationInventoryDb::open_in_memory().unwrap();
-        let old = BTreeMap::from([
-            (
-                PlayerId(1),
-                BTreeMap::from([(ItemId::ScrapMetal, 4), (ItemId::Module(ModuleId(1)), 1)]),
-            ),
-            (
-                PlayerId(2),
-                BTreeMap::from([(ItemId::PackagedShip(ShipTypeId(7)), 1)]),
-            ),
-        ]);
-
-        db.migrate_from_snapshot(&old);
-
-        assert_eq!(
-            db.get_all(PlayerId(1), StationId(0))
-                .get(&ItemId::ScrapMetal),
-            Some(&4)
-        );
-        assert_eq!(
-            db.get_all(PlayerId(1), StationId(0))
-                .get(&ItemId::Module(ModuleId(1))),
-            Some(&1)
-        );
-        assert_eq!(
-            db.get_all(PlayerId(2), StationId(0))
-                .get(&ItemId::PackagedShip(ShipTypeId(7))),
-            Some(&1)
         );
     }
 }
