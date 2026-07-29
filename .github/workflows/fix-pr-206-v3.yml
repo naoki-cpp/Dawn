@@ -1,15 +1,15 @@
 name: Apply PR 206 review fixes once
 
 on:
-  push:
-    branches:
-      - recoverable-sector-transit
+  pull_request:
+    types: [synchronize]
 
 permissions:
   contents: write
 
 jobs:
   fix:
+    if: github.event.pull_request.number == 206 && github.head_ref == 'recoverable-sector-transit'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
