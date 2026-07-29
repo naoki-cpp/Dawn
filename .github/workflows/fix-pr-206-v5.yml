@@ -1,0 +1,77 @@
+name: Apply PR 206 workspace fix
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.pull_request.number == 206 && github.head_ref == 'recoverable-sector-transit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: recoverable-sector-transit
+
+      - name: Complete dawn-wire transit event
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/dawn-wire/src/server_event.rs')
+          text = path.read_text()
+          old = (
+              '            DomainEvent::SectorTransitRequested(dawn_core::events::SectorTransitRequested {\n'
+              '                ship_id: ship_id(1),\n'
+              '                from: dawn_core::SectorId(0),\n'
+              '                to: dawn_core::SectorId(1),\n'
+              '                tick,\n'
+              '            }),\n'
+          )
+          new = (
+              '            DomainEvent::SectorTransitRequested(dawn_core::events::SectorTransitRequested {\n'
+              '                ship_id: ship_id(1),\n'
+              '                from: dawn_core::SectorId(0),\n'
+              '                to: dawn_core::SectorId(1),\n'
+              '                request_tick: tick,\n'
+              '                gate_id: None,\n'
+              '                entry_pos: dawn_core::Position::ORIGIN,\n'
+              '                entry_pos_abs: dawn_core::AbsolutePosition::ORIGIN,\n'
+              '                tick,\n'
+              '            }),\n'
+          )
+          if old not in text:
+              raise SystemExit('dawn-wire SectorTransitRequested literal not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Format
+        run: |
+          rustup default stable
+          rustup component add rustfmt clippy
+          cargo fmt --all
+          cargo fmt --all -- --check
+
+      - name: Test workspace
+        run: cargo test --workspace
+
+      - name: Clippy workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Commit fix and remove workflow
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          git rm .github/workflows/fix-pr-206-v5.yml
+          git add crates/dawn-wire/src/server_event.rs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(wire): update transit request test payload"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:recoverable-sector-transit
