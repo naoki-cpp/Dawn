@@ -1,0 +1,64 @@
+name: Apply PR 206 review fixes v2
+
+on:
+  push:
+    branches:
+      - recoverable-sector-transit
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          ref: recoverable-sector-transit
+
+      - name: Apply embedded repair script
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/fix-pr-206.yml').read_text()
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "          PY\n"
+          start = source.index(start_marker) + len(start_marker)
+          end = source.index(end_marker, start)
+          lines = source[start:end].splitlines()
+          script = "\n".join(line[10:] if line.startswith("          ") else line for line in lines)
+          exec(compile(script, 'fix-pr-206.py', 'exec'))
+          PY
+
+      - name: Format
+        run: |
+          rustup default stable
+          rustup component add rustfmt clippy
+          cargo fmt --all
+          cargo fmt --all -- --check
+
+      - name: Test affected crates
+        run: cargo test -p dawn-core -p dawn-sector
+
+      - name: Clippy affected crates
+        run: cargo clippy -p dawn-core -p dawn-sector --all-targets -- -D warnings
+
+      - name: Commit fixes and remove temporary files
+        shell: bash
+        run: |
+          git rm .github/workflows/fix-pr-206.yml
+          git rm .github/workflows/fix-pr-206-v2.yml
+          git rm .github/fix-pr-206-trigger
+          git add crates/dawn-core/src/events.rs \
+                  crates/dawn-sector/src/node/tick.rs \
+                  crates/dawn-sector/src/node/transit_flow.rs \
+                  crates/dawn-sector/src/transit.rs \
+                  docs/architecture/tick-model.md \
+                  docs/architecture/event-catalog.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(sector): address transit recovery review"
+          git push origin HEAD:recoverable-sector-transit
