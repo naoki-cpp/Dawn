@@ -1,4 +1,4 @@
-name: Apply PR 206 review fixes v2
+name: Apply PR 206 review fixes once
 
 on:
   push:
@@ -14,16 +14,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 0
+          fetch-depth: 2
+          persist-credentials: false
           ref: recoverable-sector-transit
 
-      - name: Apply embedded repair script
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Apply embedded repair script from parent
         shell: bash
         run: |
+          git show HEAD^:.github/workflows/fix-pr-206.yml > /tmp/fix-pr-206.yml
           python - <<'PY'
           from pathlib import Path
 
-          source = Path('.github/workflows/fix-pr-206.yml').read_text()
+          source = Path('/tmp/fix-pr-206.yml').read_text()
           start_marker = "          python - <<'PY'\n"
           end_marker = "          PY\n"
           start = source.index(start_marker) + len(start_marker)
@@ -35,8 +41,6 @@ jobs:
 
       - name: Format
         run: |
-          rustup default stable
-          rustup component add rustfmt clippy
           cargo fmt --all
           cargo fmt --all -- --check
 
@@ -46,12 +50,12 @@ jobs:
       - name: Clippy affected crates
         run: cargo clippy -p dawn-core -p dawn-sector --all-targets -- -D warnings
 
-      - name: Commit fixes and remove temporary files
+      - name: Commit fixes and remove one-shot workflow
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          git rm .github/workflows/fix-pr-206.yml
-          git rm .github/workflows/fix-pr-206-v2.yml
-          git rm .github/fix-pr-206-trigger
+          git rm .github/workflows/fix-pr-206-v3.yml
           git add crates/dawn-core/src/events.rs \
                   crates/dawn-sector/src/node/tick.rs \
                   crates/dawn-sector/src/node/transit_flow.rs \
@@ -61,4 +65,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "fix(sector): address transit recovery review"
-          git push origin HEAD:recoverable-sector-transit
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:recoverable-sector-transit
