@@ -41,15 +41,14 @@ impl<S: EventStore> SimulationNode<S> {
         to: dawn_core::SectorId,
         request_tick: dawn_core::Tick,
     ) {
-        self.event_store
-            .append(DomainEvent::SectorTransitRequested(
-                dawn_core::events::SectorTransitRequested {
-                    ship_id,
-                    from,
-                    to,
-                    tick: request_tick,
-                },
-            ));
+        self.event_store.append(DomainEvent::SectorTransitRequested(
+            dawn_core::events::SectorTransitRequested {
+                ship_id,
+                from,
+                to,
+                tick: request_tick,
+            },
+        ));
     }
 
     fn freeze_transit_components(&mut self) -> (HashSet<ShipId>, Vec<FrozenTransitComponents>) {
