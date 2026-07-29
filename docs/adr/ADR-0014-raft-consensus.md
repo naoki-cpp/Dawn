@@ -144,6 +144,39 @@ Replay に Raft は不要 — Replay は EventStore の
 > Ship除去／復元を行うよう修正した。これで「Replay は EventStore だけで
 > 完結する」という本節の記述が実装と一致する。
 
+> **実装の訂正（2026-07-29, issue #204 追加修正 / PR #206）**: 上の訂正が
+> 入れた最初の修正には、それ自体が新たなクラッシュウィンドウを持ち込む
+> 欠陥があった。ライブパスの `prepare_transit_commit` は `TransitOp::Commit`
+> が Raft に提案される**前**、`TransitOp::Request` がコミットされた時点で
+> 同期的に `export_transit_with_abs`（現 `snapshot_for_transit`）を呼び、
+> Ship を ECS から削除して `SectorTransitCompleted` を **source 自身の
+> EventStore に** Append していた。この Append と、宛先の
+> `TransitOp::Commit` が Raft でコミットされるまでの間にクラスタ全体が
+> 落ちると、source の log は「Ship は消えた」と記録済みなのに destination
+> の log には何もない状態になる。最初の訂正が実装した「source側のreplayが
+> 実際にShipを除去する」を前提にすると、この場合Shipはsource・destination
+> どちらの Sector にも存在しなくなる（旧: source に復活する誤りより悪化）。
+>
+> 修正: `TransitOp::Request` コミット時点では Ship を削除せず、
+> `TransitState::InTransit` にして**シミュレーションから凍結する**のみに
+> 変更した。凍結は `TransitComp` によるコマンド拒否（Move/Despawn/二重
+> Transit、既存）に加えて、`MovementSystem` / `CombatSystem` の毎 Tick
+> クエリでも `InTransit` な Ship をスキップするよう拡張した
+> （dawn-ecs、docs/architecture/ownership.md）。実際の Ship 除去・
+> `SectorTransitCompleted` の Append は、**同じ** `TransitOp::Commit` が
+> Raft でコミットされた時点まで遅延し、source 側 `complete_outgoing_transit`
+> と destination 側 `handle_transit_commit` が対称に（同じコミットに
+> 反応して）実行される。`apply_committed_raft_entries` の
+> `TransitOp::Commit` 分岐は `from == node.sector_id()` /
+> `to == node.sector_id()` の両方を独立に判定するようになった
+> （通常の Transit は `from != to` なので実際には片方のみ発火する）。
+>
+> これにより、Request コミット後 Commit コミット前にクラッシュしても
+> Ship は常に source 側の EventStore に存在し（`InTransit` のまま）、
+> 再起動後もリトライ可能な状態を保つ。回帰テスト
+> `a_ship_survives_a_restart_between_request_commit_and_transit_commit`
+> （crates/dawn-sector/src/node/transit_flow.rs）がこの窓を検証する。
+
 ### 4. 新規イベント（dawn-core/src/events.rs）
 
 ```rust
@@ -162,7 +195,7 @@ pub struct SectorTransitRequested {
 /// この 1 フィールドは to 側の tail replay だけが使う。from 側の replay は
 /// `ship_id` だけを読んで Ship を除去し、`ship_state` は無視する。
 /// イベント種別を from/to で分けるのではなく 1 種類のまま持たせているのは、
-/// from 側は `export_transit_with_abs` の時点で既に完全な状態を手元に
+/// from 側は `complete_outgoing_transit` の時点で既に完全な状態を手元に
 /// 持っており計算コストがゼロだから、というのが理由（詳細は
 /// `dawn_core::events::SectorTransitCompleted`/`TransitShipState` の
 /// doc comment）。
@@ -271,12 +304,19 @@ Step 2  : コマンドキューを処理する
           提出する（この時点ではイベントを発行しない。提案は非同期に
           コミットされる）
           Transit 中の Ship への Move / Despawn / 二重 Transit は拒否
+          （TransitState::InTransit によるコマンド拒否。加えて
+          MovementSystem / CombatSystem も毎 Tick InTransit な Ship を
+          スキップする — issue #204 追加修正、PR #206）
 
 Step 7.5: コミット済み Raft エントリを適用する（新規ステップ）
           RaftActor から受信したコミット済みエントリを ECS に適用し、
           SectorTransitRequested / Completed / Aborted イベントを生成する
-          - from ノード: Completed 適用時に Ship を自 ECS から削除
-          - to   ノード: Completed 適用時に Ship を entry_pos に追加
+          - Request コミット時: Ship は削除せず TransitState::InTransit に
+            設定するのみ（シミュレーションから凍結）
+          - Commit コミット時（from/to 双方が同じコミットを独立に観測）:
+            from ノード: Ship を自 ECS から削除し SectorTransitCompleted を
+            自分の EventStore に Append（`complete_outgoing_transit`）
+            to   ノード: Ship を entry_pos に追加（`handle_transit_commit`）
           ※ Step 8（Append）の前に行うこと — 同 Tick の Append に含めるため
           ※ 実装上は Tick ハンドラ冒頭（Step 1 の前）で実行する
             （SectorSimulatorActor::apply_committed_raft_entries()）。

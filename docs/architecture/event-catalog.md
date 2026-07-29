@@ -123,8 +123,8 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.m
 
 | Event | Description | Emitter | Status |
 |---|---|---|---|
-| `SectorTransitRequested` | Sector Transit proposed (ownership stays with `from`) | `SimulationNode::propose_transit()` | ✅ implemented |
-| `SectorTransitCompleted` | Sector Transit completed (ownership moved to `to`) | `SimulationNode::export_transit()` / `import_transit()` (both `from` and `to` append to their own log) | ✅ implemented |
+| `SectorTransitRequested` | Sector Transit proposed (ownership stays with `from`, Ship frozen `InTransit`) | `SimulationNode::propose_transit()` | ✅ implemented |
+| `SectorTransitCompleted` | Sector Transit completed (ownership moved to `to`) | `SimulationNode::complete_outgoing_transit()` / `handle_transit_commit()` (both `from` and `to` append to their own log, symmetrically, only once the same `TransitOp::Commit` is Raft-committed — issue #204 / PR #206) | ✅ implemented |
 | `SectorTransitAborted` | Transit aborted (ownership stays with `from`) | (destination node failure case; not wired) | type only |
 
 Validation-stage rejection is expressed via `CommandRejected`, not an event (INV-006); there is no `SectorTransitRejected` event. `propose_transit` returns `Err` without emitting an event if the Ship is absent or already in Transit.
@@ -435,7 +435,7 @@ currently a fixed `1` per kill, no Wreck entity).
 
 ### `SectorTransitRequested`
 
-Sector Transit committed via Raft. Ownership stays with `from` until `SectorTransitCompleted` (ADR-0014).
+Sector Transit committed via Raft. Ownership stays with `from` until `SectorTransitCompleted` (ADR-0014). The Ship is *not* removed at this point — it is frozen (`TransitState::InTransit`), rejecting Move/Despawn/double-Transit commands and, since PR #206, skipped by `MovementSystem`/`CombatSystem`'s per-Tick queries too. Actual removal is deferred to `SectorTransitCompleted`, once the corresponding `TransitOp::Commit` lands — see that event's entry below for why (issue #204 crash-window fix).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -451,6 +451,8 @@ Sector Transit committed via Raft. Ownership stays with `from` until `SectorTran
 ### `SectorTransitCompleted`
 
 Sector Transit completed; ownership moved from `from` to `to`. Self-contained (issue #204): `ship_state` carries everything the `to` Sector's replay needs to materialize the Ship from this event alone, without depending on the in-memory Raft actor surviving a restart (ADR-0014).
+
+Appended by both `from` and `to` only once the *same* `TransitOp::Commit` is Raft-committed (`SimulationNode::complete_outgoing_transit` / `handle_transit_commit`, called symmetrically from `transit::apply_committed_raft_entries`, gated on `from == node.sector_id()` / `to == node.sector_id()` respectively) — **not** at `TransitOp::Request`-commit time. An earlier version of the issue #204 fix appended this event on `from`'s side synchronously at Request-commit, which left a crash window where a whole-cluster restart between that Append and the destination's `TransitOp::Commit` landing would lose the Ship entirely (source log said "gone," destination log had nothing). Regression test: `a_ship_survives_a_restart_between_request_commit_and_transit_commit` (`crates/dawn-sector/src/node/transit_flow.rs`).
 
 | Field | Type | Required | Description |
 |---|---|---|---|

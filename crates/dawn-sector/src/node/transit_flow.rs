@@ -43,7 +43,7 @@ impl ShipSnapshot {
 /// self-contained `ship_state`, for the destination Sector's tail replay
 /// (`apply_event.rs`) to feed into `restore_ship_from_snapshot` the same way
 /// `import_transit` does for the live path. `anchor` is the same placeholder
-/// `export_transit_with_abs` uses -- overwritten by `rebase_after_transit`
+/// `snapshot_for_transit` uses -- overwritten by `rebase_after_transit`
 /// right after restore, so its value here never survives past that call.
 pub(super) fn ship_snapshot_from_transit(
     ship_id: dawn_core::ShipId,
@@ -131,9 +131,15 @@ impl<S: EventStore> SimulationNode<S> {
     /// and begin the Transit, work out where `ship_id` lands in `to` (a Jump
     /// Gate's `position`/`abs_m` leading back to this Sector, so the Ship can
     /// jump straight back — ADR-0009/0029 — or the Sector origin for a
-    /// non-Gate Transit), and export the Ship's state. Returns `None` if the
-    /// Transit can't begin (unknown Ship, already in transit) or the Ship
-    /// can't be found to export.
+    /// non-Gate Transit), and snapshot the Ship's state for the follow-up
+    /// `TransitOp::Commit` proposal. Returns `None` if the Transit can't begin
+    /// (unknown Ship, already in transit) or the Ship can't be found to
+    /// snapshot.
+    ///
+    /// Does **not** remove the Ship from this Sector's ECS (issue #204) --
+    /// only `propose_transit`'s `TransitState::InTransit` marker changes here,
+    /// which freezes the Ship out of Movement/Combat but keeps it durably
+    /// owned by this Sector until [`Self::complete_outgoing_transit`] runs.
     ///
     /// Replaces the orchestrator in `transit::apply_committed_raft_entries`
     /// needing to know the Gate-lookup/entry-point logic itself — it now
@@ -157,7 +163,7 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|g| g.abs_m)
             .unwrap_or(dawn_core::AbsolutePosition::ORIGIN);
 
-        let ship = self.export_transit_with_abs(ship_id, entry_pos, Some(entry_pos_abs))?;
+        let ship = self.snapshot_for_transit(ship_id)?;
         Some(TransitCommitData {
             ship: Box::new(ship),
             entry_pos,
@@ -206,33 +212,36 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    /// Complete an outgoing Sector Transit: remove the Ship from this node's
-    /// ECS and return a snapshot for the destination node to import.
+    /// Read-only export for the `TransitOp::Commit` proposal: snapshot the
+    /// Ship's current state without removing it from this Sector's ECS or
+    /// appending any event.
     ///
-    /// Appends `SectorTransitCompleted` from this (the `from`) Sector's
-    /// perspective. Returns `None` if `ship_id` is unknown or not currently
-    /// `InTransit`. Folded into [`prepare_transit_commit`](Self::prepare_transit_commit);
+    /// Issue #204: this used to also remove the Ship and append
+    /// `SectorTransitCompleted` here, at Request-commit time -- durably
+    /// recording "the Ship left `from`" on this Sector's own log *before*
+    /// the destination's `TransitOp::Commit` had even been proposed to Raft,
+    /// let alone committed. A crash in that window left `from`'s log saying
+    /// the Ship was gone while `to`'s log had nothing, so cluster-restart
+    /// recovery could lose the Ship entirely -- worse than the resurrection
+    /// bug replay recovery was fixing. The Ship now stays here, still
+    /// `InTransit` (frozen out of Movement/Combat, `dawn-ecs`'s
+    /// `TransitComp` guards), until [`complete_outgoing_transit`]
+    /// (Self::complete_outgoing_transit) actually removes it -- which only
+    /// runs once this same `TransitOp::Commit` is Raft-committed and this
+    /// Sector observes its own echo of it (`transit::apply_committed_raft_entries`).
+    /// Returns `None` if `ship_id` is unknown or not currently `InTransit`.
+    /// Folded into [`prepare_transit_commit`](Self::prepare_transit_commit);
     /// not called directly outside this module.
     #[cfg(test)]
-    pub(super) fn export_transit(
-        &mut self,
-        ship_id: ShipId,
-        entry_pos: Position,
-    ) -> Option<ShipSnapshot> {
-        self.export_transit_with_abs(ship_id, entry_pos, None)
+    pub(super) fn export_transit(&self, ship_id: ShipId) -> Option<ShipSnapshot> {
+        self.snapshot_for_transit(ship_id)
     }
 
-    fn export_transit_with_abs(
-        &mut self,
-        ship_id: ShipId,
-        entry_pos: Position,
-        entry_pos_abs: Option<dawn_core::AbsolutePosition>,
-    ) -> Option<ShipSnapshot> {
+    fn snapshot_for_transit(&self, ship_id: ShipId) -> Option<ShipSnapshot> {
         let &entity = self.ships.index.get(&ship_id)?;
-        let to = match self.world.transit_state(entity) {
-            TransitState::InTransit { to } => to,
-            TransitState::None => return None,
-        };
+        if !self.world.transit_state(entity).is_in_transit() {
+            return None;
+        }
 
         let pos = self.world.get::<PositionComp>(entity)?.0;
         let vel = self.world.get::<VelocityComp>(entity)?.0;
@@ -267,7 +276,6 @@ impl<S: EventStore> SimulationNode<S> {
 
         // Tackle state is not transferred on sector transit (tacklers are in
         // this sector; they lose the tackle as the ship leaves).
-        let event_entry_pos = entry_pos_abs.unwrap_or_else(|| entry_pos.into());
         let snapshot = ShipSnapshot {
             ship_id,
             ship_type_id,
@@ -292,24 +300,55 @@ impl<S: EventStore> SimulationNode<S> {
             inventory,
         };
 
+        Some(snapshot)
+    }
+
+    /// Stage 1.5 of a Sector Transit (issue #204): actually removes the Ship
+    /// from this (the `from`) Sector's ECS and appends `SectorTransitCompleted`
+    /// from this Sector's perspective. Called only once this Sector observes
+    /// its own `TransitOp::Commit` proposal get Raft-committed
+    /// (`transit::apply_committed_raft_entries`'s `from == node.sector_id()`
+    /// branch) — the durable removal is conditioned on the same fact the
+    /// destination's import is conditioned on, so a crash before that Commit
+    /// lands leaves the Ship exactly where `snapshot_for_transit` found it:
+    /// still owned by `from`, still `InTransit`.
+    ///
+    /// Takes `ship` (the same `ShipSnapshot` the `TransitOp::Commit` payload
+    /// carries, echoed back to this Sector along with everyone else's copy)
+    /// rather than re-reading the Ship's current ECS state: the Ship has been
+    /// frozen out of Movement/Combat since Request-commit
+    /// (`dawn-ecs`'s `TransitComp` guards), so nothing should have changed it
+    /// in the meantime, and using the one payload both `from` and `to` share
+    /// keeps their `SectorTransitCompleted.ship_state` identical by
+    /// construction instead of by coincidence.
+    ///
+    /// Idempotent: a no-op if the Ship is already gone (e.g. this Commit
+    /// entry were ever observed twice).
+    pub fn complete_outgoing_transit(
+        &mut self,
+        ship: &ShipSnapshot,
+        to: SectorId,
+        entry_pos_abs: dawn_core::AbsolutePosition,
+    ) {
+        if !self.ships.index.contains_key(&ship.ship_id) {
+            return;
+        }
         // remove_ship also clears owners/active_ship (ADR-0035 review: this used
         // to hand-roll index/type_ids/base_stats removal only, leaking a
         // dangling ownership entry for a transited player ship).
-        self.remove_ship(ship_id);
+        self.remove_ship(ship.ship_id);
 
         self.event_store.append(DomainEvent::SectorTransitCompleted(
             SectorTransitCompleted {
-                ship_id,
+                ship_id: ship.ship_id,
                 from: self.sector_id,
                 to,
-                entry_pos: event_entry_pos,
-                velocity: vel,
+                entry_pos: entry_pos_abs,
+                velocity: ship.velocity,
                 tick: self.current_tick,
-                ship_state: snapshot.to_transit_ship_state(),
+                ship_state: ship.to_transit_ship_state(),
             },
         ));
-
-        Some(snapshot)
     }
 
     /// Complete an incoming Sector Transit: restore `ship` (exported from the
@@ -481,7 +520,7 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// `self.sector_id` decides which half of the live effect this Sector's
     /// log recorded: the `from` Sector removed the Ship
-    /// (`export_transit_with_abs`); the `to` Sector materialized it
+    /// (`complete_outgoing_transit`); the `to` Sector materialized it
     /// (`import_transit`). The two are mutually exclusive since a Transit
     /// always crosses Sectors (`from != to`).
     ///
@@ -588,7 +627,14 @@ mod tests {
     }
 
     #[test]
-    fn export_transit_removes_ship_and_appends_completed_event() {
+    fn export_transit_snapshots_without_removing_the_ship_or_appending_an_event() {
+        // Issue #204: export no longer removes the Ship or appends
+        // SectorTransitCompleted -- that used to happen here, durably, before
+        // the destination's TransitOp::Commit had even been proposed to Raft.
+        // A crash in that window could lose the Ship (source's log said it
+        // left, destination's log had nothing). Now the Ship stays put,
+        // frozen (InTransit), until complete_outgoing_transit runs -- which
+        // only happens once this Sector observes its own Commit land.
         let mut node = mem_node();
         let ship_id = node.spawn_ship(
             ShipTypeId(1),
@@ -601,11 +647,40 @@ mod tests {
         })
         .unwrap();
 
-        let entry_pos = Position::new(500.0, 0.0, 0.0);
-        let snapshot = node
-            .export_transit(ship_id, entry_pos)
-            .expect("ship should export");
+        let snapshot = node.export_transit(ship_id).expect("ship should export");
         assert_eq!(snapshot.ship_id, ship_id);
+
+        assert!(
+            node.ships.index.contains_key(&ship_id),
+            "the ship must stay in this Sector's ECS until complete_outgoing_transit"
+        );
+        assert!(
+            !node
+                .event_store()
+                .all_records()
+                .iter()
+                .any(|r| matches!(r.event, DomainEvent::SectorTransitCompleted(_))),
+            "export alone must not append SectorTransitCompleted"
+        );
+    }
+
+    #[test]
+    fn complete_outgoing_transit_removes_ship_and_appends_completed_event() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(
+            ShipTypeId(1),
+            Position::ORIGIN,
+            Velocity::new(1.0, 0.0, 0.0),
+        );
+        node.propose_transit(TransitCommand {
+            ship_id,
+            to: SectorId(1),
+        })
+        .unwrap();
+        let snapshot = node.export_transit(ship_id).unwrap();
+
+        let entry_pos_abs = dawn_core::AbsolutePosition::new(500.0, 0.0, 0.0);
+        node.complete_outgoing_transit(&snapshot, SectorId(1), entry_pos_abs);
 
         assert!(
             !node.ships.index.contains_key(&ship_id),
@@ -619,10 +694,37 @@ mod tests {
                 assert_eq!(e.ship_id, ship_id);
                 assert_eq!(e.from, node.sector_id());
                 assert_eq!(e.to, SectorId(1));
-                assert_eq!(e.entry_pos, entry_pos.into());
+                assert_eq!(e.entry_pos, entry_pos_abs);
             }
             other => panic!("expected SectorTransitCompleted, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn complete_outgoing_transit_is_idempotent() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        node.propose_transit(TransitCommand {
+            ship_id,
+            to: SectorId(1),
+        })
+        .unwrap();
+        let snapshot = node.export_transit(ship_id).unwrap();
+        let entry_pos_abs = dawn_core::AbsolutePosition::ORIGIN;
+
+        node.complete_outgoing_transit(&snapshot, SectorId(1), entry_pos_abs);
+        node.complete_outgoing_transit(&snapshot, SectorId(1), entry_pos_abs);
+
+        let completed_count = node
+            .event_store()
+            .all_records()
+            .iter()
+            .filter(|r| matches!(r.event, DomainEvent::SectorTransitCompleted(_)))
+            .count();
+        assert_eq!(
+            completed_count, 1,
+            "a repeated Commit observation must not double-append"
+        );
     }
 
     #[test]
@@ -631,7 +733,8 @@ mod tests {
         // used to hand-roll index/type_ids/base_stats removal and forgot
         // owners/active_ship, leaving a dangling ownership entry for a
         // transited player ship. Now routed through ShipRegistry::remove
-        // via SimulationNode::remove_ship, which clears all four maps.
+        // via SimulationNode::remove_ship (called by complete_outgoing_transit,
+        // issue #204), which clears all four maps.
         let mut node = mem_node();
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
@@ -640,9 +743,13 @@ mod tests {
             to: SectorId(1),
         })
         .unwrap();
+        let snapshot = node.export_transit(ship_id).expect("ship should export");
 
-        node.export_transit(ship_id, Position::new(500.0, 0.0, 0.0))
-            .expect("ship should export");
+        node.complete_outgoing_transit(
+            &snapshot,
+            SectorId(1),
+            dawn_core::AbsolutePosition::new(500.0, 0.0, 0.0),
+        );
 
         assert!(
             !node.owns_ship(player_id, ship_id),
@@ -662,7 +769,7 @@ mod tests {
     fn export_transit_returns_none_for_ship_not_in_transit() {
         let mut node = mem_node();
         let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-        assert!(node.export_transit(ship_id, Position::ORIGIN).is_none());
+        assert!(node.export_transit(ship_id).is_none());
         assert_eq!(node.ship_count(), 1, "ship must remain when not in transit");
     }
 
@@ -692,7 +799,7 @@ mod tests {
             .unwrap();
 
         let entry_pos = Position::new(500.0, 0.0, 0.0);
-        let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
+        let snapshot = from_node.export_transit(ship_id).unwrap();
 
         to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
 
@@ -754,7 +861,7 @@ mod tests {
         // straight back (ADR-0009).
         let entry_pos = return_gate.position;
         let entry_pos_abs = return_gate.abs_m;
-        let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
+        let snapshot = from_node.export_transit(ship_id).unwrap();
         to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos_abs);
 
         assert!(
@@ -873,7 +980,7 @@ mod tests {
             })
             .unwrap();
         let entry_pos = Position::new(500.0, 0.0, 0.0);
-        let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
+        let snapshot = from_node.export_transit(ship_id).unwrap();
         to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
 
         let after_entity = *to_node.ships.index.get(&ship_id).unwrap();
@@ -909,7 +1016,7 @@ mod tests {
                 to: SectorId(1),
             })
             .unwrap();
-        let snapshot = from_node.export_transit(ship_id, Position::ORIGIN).unwrap();
+        let snapshot = from_node.export_transit(ship_id).unwrap();
         to_node.import_transit(
             &snapshot,
             SectorId(0),
@@ -928,6 +1035,14 @@ mod tests {
     /// and at no point do both Sectors hold the Ship at once (INV-003).
     #[test]
     fn transit_moves_ship_ownership_to_destination_sector_exactly_once() {
+        // Issue #204 strengthened this invariant: ownership now stays with
+        // exactly one Sector for the *entire* Transit, never dropping to zero
+        // in between. Before, `export_transit` removed the ship immediately
+        // at Request-commit time, so there was a real window (until the
+        // destination's Commit landed) where the sum below was 0 -- which is
+        // exactly the crash-loses-the-ship window this issue closed. Now the
+        // source keeps the ship (frozen out of Movement/Combat) until it
+        // observes its own Commit, so the sum is always 1.
         let mut from_node = SimulationNode::new(
             NodeId(0),
             SectorId(0),
@@ -960,13 +1075,21 @@ mod tests {
         assert_eq!(from_node.ship_count() + to_node.ship_count(), 1);
 
         let entry_pos = Position::new(500.0, 0.0, 0.0);
-        let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
+        let snapshot = from_node.export_transit(ship_id).unwrap();
 
-        // In flight: neither sector owns the ship (no split-brain double-ownership).
-        assert_eq!(from_node.ship_count(), 0);
+        // Exporting a snapshot for the Commit proposal does not move
+        // ownership either -- the ship is still durably owned by `from`,
+        // just frozen (`TransitState::InTransit`) until the Commit lands.
+        assert_eq!(
+            from_node.ship_count() + to_node.ship_count(),
+            1,
+            "export must not create a window where neither Sector owns the ship"
+        );
+        assert_eq!(from_node.ship_count(), 1);
         assert_eq!(to_node.ship_count(), 0);
 
         to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
+        from_node.complete_outgoing_transit(&snapshot, SectorId(1), entry_pos.into());
 
         // Final state: destination sector owns the ship, exactly once overall.
         assert_eq!(from_node.ship_count(), 0);
@@ -999,7 +1122,7 @@ mod tests {
             })
             .unwrap();
         let entry_pos = Position::new(500.0, 0.0, 0.0);
-        let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
+        let snapshot = from_node.export_transit(ship_id).unwrap();
 
         {
             let store = FileEventStore::open(&event_path).unwrap();
@@ -1061,7 +1184,7 @@ mod tests {
                     to: SectorId(1),
                 })
                 .unwrap();
-            let snapshot = from_node.export_transit(ship_id, entry_pos).unwrap();
+            let snapshot = from_node.export_transit(ship_id).unwrap();
             to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos.into());
             total += start.elapsed();
 
@@ -1257,8 +1380,14 @@ mod tests {
             .unwrap();
         let entry_pos = Position::new(500.0, 0.0, 0.0);
         let entry_pos_abs = dawn_core::AbsolutePosition::from(entry_pos);
-        let exported = from_node.export_transit(ship_id, entry_pos).unwrap();
+        let exported = from_node.export_transit(ship_id).unwrap();
         to_node.import_transit(&exported, SectorId(0), entry_pos, entry_pos_abs);
+        // The durability fix (issue #204) this test targets: `from_node` only
+        // removes the ship and records SectorTransitCompleted once it
+        // observes the *same* Commit the destination acted on -- mirroring
+        // `transit::apply_committed_raft_entries`'s `from == node.sector_id()`
+        // branch, not the old immediate removal at export time.
+        from_node.complete_outgoing_transit(&exported, SectorId(1), entry_pos_abs);
 
         // Simulate a restart of both Sectors: snapshot + tail-log replay,
         // exactly as `restore_from` is used in production recovery.
@@ -1318,6 +1447,68 @@ mod tests {
             restored_to.get_ship_anchor(ship_id),
             to_node.get_ship_anchor(ship_id),
             "the restored ship's anchor must match what the live import produced"
+        );
+    }
+
+    /// The crash window a review of the first version of this fix caught
+    /// (issue #204): a cluster restart between the source's `TransitOp::Request`
+    /// commit and the destination's `TransitOp::Commit` commit must not lose
+    /// the ship. Before deferring `complete_outgoing_transit` to Commit-time,
+    /// `export_transit` removed the ship and appended `SectorTransitCompleted`
+    /// immediately at Request-commit time -- durably, on the source's own
+    /// log -- before the destination's Commit had even been *proposed* to
+    /// Raft, let alone committed. A restart in that gap left the source log
+    /// saying the ship was gone and the destination log with nothing at all:
+    /// the ship existed nowhere. This test stops at exactly that point --
+    /// `export_transit` runs (building the Commit proposal payload) but
+    /// neither `complete_outgoing_transit` nor `import_transit` ever does --
+    /// and asserts the source Sector still owns the ship after a simulated
+    /// restart.
+    #[test]
+    fn a_ship_survives_a_restart_between_request_commit_and_transit_commit() {
+        let mut from_node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+
+        let ship_id = from_node.spawn_ship(
+            ShipTypeId(1),
+            Position::ORIGIN,
+            Velocity::new(1.0, 0.0, 0.0),
+        );
+        let snapshot_before = from_node.take_snapshot();
+
+        from_node
+            .propose_transit(TransitCommand {
+                ship_id,
+                to: SectorId(1),
+            })
+            .unwrap();
+        // Mirrors `prepare_transit_commit`'s snapshot step, run for a
+        // `TransitOp::Commit` that -- in this test -- is never proposed,
+        // never mind committed. Nothing past this point ever runs:
+        // no `complete_outgoing_transit`, no destination `import_transit`.
+        let _snapshot_for_commit_proposal = from_node.export_transit(ship_id).unwrap();
+
+        // Simulate a whole-cluster restart at exactly this point.
+        let mut store2 = InMemoryEventStore::new();
+        for rec in from_node.event_store().all_records() {
+            store2.append(rec.event.clone());
+        }
+        let restored = SimulationNode::restore_from(store2, &snapshot_before, &[], &[]);
+
+        assert!(
+            restored.ships.index.contains_key(&ship_id),
+            "a restart before the Commit lands must not lose the ship -- it \
+             is still owned by the source Sector, just pending"
+        );
+        let entity = *restored.ships.index.get(&ship_id).unwrap();
+        assert_eq!(
+            restored.world.transit_state(entity),
+            TransitState::InTransit { to: SectorId(1) },
+            "the ship must still be marked InTransit, so it stays frozen \
+             (Movement/Combat) and a retried Commit is still meaningful"
         );
     }
 }

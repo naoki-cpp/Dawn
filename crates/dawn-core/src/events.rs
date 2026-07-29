@@ -433,7 +433,7 @@ pub struct SectorTransitRequested {
 /// transit without the in-memory Raft actor surviving the restart (ADR-0014).
 /// The `from` Sector's replay only reads `ship_id` off this event (to remove
 /// it) and ignores `ship_state`; appending it there too is deliberate --
-/// `export_transit_with_abs` already has the full state in hand at that
+/// `complete_outgoing_transit` already has the full state in hand at that
 /// point, and keeping one event shape for both sides avoids growing the
 /// event catalog for a payload only one side reads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

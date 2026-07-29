@@ -115,6 +115,17 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                 entry_pos_abs,
                 gate_id,
             } => {
+                // Both branches can run on the same node in a same-node loopback
+                // (tests/single-node demos, `from == to`'s Sector); production
+                // Transit always has `from != to`, so ordinarily exactly one
+                // fires per node. Symmetric with the durability fix in
+                // `SimulationNode::complete_outgoing_transit`/`handle_transit_commit`
+                // (issue #204): the `from` Sector only removes the Ship, and the
+                // `to` Sector only materializes it, once *this* Commit is
+                // Raft-committed — never earlier, at Request-commit time.
+                if from == node.sector_id() {
+                    node.complete_outgoing_transit(&ship, to, entry_pos_abs);
+                }
                 if to == node.sector_id() {
                     node.handle_transit_commit(&ship, from, entry_pos, entry_pos_abs, gate_id);
                 }

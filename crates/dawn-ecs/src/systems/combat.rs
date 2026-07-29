@@ -21,7 +21,8 @@
 
 use crate::{
     components::{
-        AnchorComp, HullComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, VelocityComp,
+        AnchorComp, HullComp, LockComp, PositionComp, ShipIdComp, ShipStatsComp, TransitComp,
+        VelocityComp,
     },
     SimWorld,
 };
@@ -115,10 +116,18 @@ pub fn run(
             &HullComp,
             &LockComp,
             &AnchorComp,
+            Option<&TransitComp>,
         )>()
         .iter()
+        // A Ship pending Sector Transit is excluded from Combat entirely
+        // (ADR-0014, issue #204): it can neither fire (its own weapon cycles
+        // don't matter -- it isn't in `ships` to be looked up as an attacker)
+        // nor be damaged (nothing here can resolve a lock onto it as a
+        // target, since it never enters the snapshot list locks are matched
+        // against). Frozen the same way in `MovementSystem`.
+        .filter(|(_, _, _, _, _, _, _, _, transit)| !transit.is_some_and(|t| t.0.is_in_transit()))
         .map(
-            |(entity, id, stats, pos, vel, hull, lock, anchor)| ShipSnapshot {
+            |(entity, id, stats, pos, vel, hull, lock, anchor, _transit)| ShipSnapshot {
                 entity,
                 ship_id: id.0,
                 stats: *stats,
