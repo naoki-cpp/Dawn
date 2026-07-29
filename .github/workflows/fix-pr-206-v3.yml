@@ -34,23 +34,16 @@ jobs:
               for line in source[start:end].splitlines()
           )
           code = code.replace("Path('.github/workflows/fix-pr-206.yml')", "Path('/tmp/fix-pr-206.yml')")
-          code = code.replace("from pathlib import Path\nimport re", "from pathlib import Path\nimport re\nimport textwrap")
           code = code.replace(
-              "def replace_once(path: str, old: str, new: str) -> None:\n    p = Path(path)",
-              "def replace_once(path: str, old: str, new: str) -> None:\n    old = textwrap.dedent(old)\n    new = textwrap.dedent(new)\n    p = Path(path)",
-          )
-          code = code.replace(
-              "def replace_n(path: str, old: str, new: str, expected: int) -> None:\n    p = Path(path)",
-              "def replace_n(path: str, old: str, new: str, expected: int) -> None:\n    old = textwrap.dedent(old)\n    new = textwrap.dedent(new)\n    p = Path(path)",
-          )
-          code = code.replace(
-              "def sub_once(path: str, pattern: str, replacement: str) -> None:\n    p = Path(path)",
-              "def sub_once(path: str, pattern: str, replacement: str) -> None:\n    replacement = textwrap.dedent(replacement)\n    p = Path(path)",
-          )
-          code = code.replace(
-              "r'    fn freeze_transit_components\\(&mut self\\) -> .*?^    \\\}\\n\\n    fn restore_transit_components.*?^    \\\}\\n'",
-              "r'    fn freeze_transit_components\\(&mut self\\).*?(?=    pub fn tick_with_lock_commands)'",
+              "exec(compile(script, 'fix-pr-206.py', 'exec'))",
+              "legacy_scope = {}; exec(compile(script, 'fix-pr-206.py', 'exec'), legacy_scope, legacy_scope)",
               1,
+          )
+          code = "\n".join(
+              "    r'    fn freeze_transit_components\\(&mut self\\).*?(?=    pub fn tick_with_lock_commands)',"
+              if "r'    fn freeze_transit_components" in line
+              else line
+              for line in code.splitlines()
           )
           exec(compile(code, 'fix-pr-206.py', 'exec'))
           PY
@@ -75,6 +68,7 @@ jobs:
         run: |
           git rm -f --ignore-unmatch .github/workflows/fix-pr-206-v2.yml
           git rm -f --ignore-unmatch .github/workflows/fix-pr-206-v3.yml
+          git rm -f --ignore-unmatch .github/fix-pr-206-trigger
           git add crates/dawn-core/src/events.rs \
                   crates/dawn-sector/src/node/tick.rs \
                   crates/dawn-sector/src/node/transit_flow.rs \
