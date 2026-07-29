@@ -4,59 +4,40 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で状態が変わるたびに更新
 related  : docs/architecture/architecture-review/client.md（構造評価）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）
-date     : 2026-07-17
+date     : 2026-07-29
 ---
 
 # Architecture Review — Dawn Client（未完項目）
 
-C-1〜C-8 は解消済み。C-9は2026-07-17の再計測で再観測となった（[client.md](./client.md) の Issue ID 登録簿を参照）。
-過去の解消記録は [client-completed.md](./client-completed.md) に残し、現在の判断はこのファイルで管理する。
+C-1〜C-8は解消済み。実装詳細と完了条件は各GitHub Issueに置き、ここでは判断だけを保持する。
 
-`main.gd` の god object 問題は実質解消し、C-4（PlayerLoadout dict のスキーマ非検証）も
-C-8（インベントリ行 Dictionary の stringly-typed 設計）も typed row 化で解消したため、
-クライアント側の次の課題は構造リファクタではなく機能側（戦闘の深み、ADR-0016 §5）が妥当。
+## C-9（保留）: `hud_manager.gd` watch帯
 
-このファイルに残るのは、意図的に「今は変えない」と判断したものだけ。
+892行だが、増分はtyped refsとpanel build/updateという同一責務。直ちに分割しない。
+**再評価:** 型定義・panel構築・panel更新が独立して変化するか、回帰やtest境界の不明瞭化が起きた場合。
 
----
+## C-10（#200・P2）: render scale / warp thresholdのauthority重複
 
-## C-9（再観測・2026-07-17）: `hud_manager.gd` のwatch帯再到達
+`WORLD_SCALE`と`MIN_WARP_DISTANCE`がRust/Godot間で手動同期されている。
+**判断:** 既存のRust/GDExtension境界またはtyped initial stateを単一authorityにする。別のconstants fileは作らない。
 
-PR #143のtyped HUD refs導入で `hud_manager.gd` は789行から892行へ増加した。増分は
-`StatusPanelRefs` / `ShipStatusPanelRefs` / `TargetPanelRefs` / `InventoryPanelRefs` /
-`ModuleSlotRefs`など、HUD panelを構築・更新する同一責務の型定義と置換である。
-C-9を解消した `HudHitTest` の責務が戻ったわけではなく、HUD表示の変更理由も現時点では一つに保たれている。
+## C-11（#201・P2）: `PlayerLoadout`のDictionary再投影
 
-**判断: 再観測として保留。** 直ちにさらに分割すると、typed refsとpanel更新の対応関係を別ファイルへ散らし、
-今回得た型安全性を弱める。次のHUD機能追加で、panel構築・更新・typed refsに別々の変更理由が生じるかを確認する。
+`hud_snapshot()`は既存accessorをDictionaryへpackし、`main.gd`が即unpackする。dock status等にも同型境界が残る。
+**判断:** `hud_snapshot()`を先に削除し、残りをtyped recordまたはnarrow accessorへ段階移行する。
 
-再評価トリガー: `hud_manager.gd` がさらに増え、型定義・panel構築・panel更新のいずれかが独立して変更される状態に
-なったとき、または同ファイルのwatch帯超過が実害（変更時の回帰・テスト境界の不明瞭化）として現れたとき。
+## C-12（#202・P3）: selection read API二重化
 
----
+`selection_state() -> Dictionary`と3つのscalar accessorが同じ状態を公開する。
+**判断:** scalar accessorへ統一し、atomic snapshotが必要になった場合だけtyped stateを追加する。
 
-## R-2 client `main.gd` 分割（サーバー側 pending.md と共通管理）
+## R-2（保留）: `main.gd`追加分割
 
-サーバー側の `server-pending.md` にも記載されている項目。
-`WorldInteraction`・`WorldPresentation` 抽出と `WorldSession` のRust移管で live world state /
-world interaction policy / world visual side effect を移動し、`main.gd` は 1356 行
-（client.md「ファイルサイズ一覧」参照。2026-07-10 再計測で前回1089から増加——
-ドラッグ&ドロップ状態機械・Disembark・SHIPS 列ハンドラの追加）。残る scene lifecycle /
-node generation / network send / HUD adapter は `.tscn` 化コンポーネントへのシーン参照切れ
-リスクが上回るため保留。
+live state、interaction、presentationは既に分離済み。残るscene lifecycle / node generation / network send / HUD assemblyは凝集している。
+**再評価:** scene-tree構成を自動検証できるようになるか、独立した変更理由が再び混在する場合。
 
-再評価トリガー: 下記「採らない方針」の前提（ヘッドレス実行だけではシーンツリー構成の妥当性を
-確認しきれない）が変わったとき、または `main.gd` が再び god object 的に肥大したとき。
+採らない方針:
 
----
-
-## 採らない方針
-
-- main.gd を複数の `.tscn` 化されたコンポーネント（個別シーン+スクリプト）に分割することは、
-  シーン参照切れのリスクが高い。pin 済み Godot CLI で構文・実行エラーは検出できるようになったが、
-  シーンツリー構成の妥当性（ノードパスの解決・レイアウト）はヘッドレス実行だけでは確認しきれない。
-  GDScript ファイル内の `class_name` 抽出（同一シーンに留める）の方が安全で、C-1 では
-  実際にこの方式で4クラスを抽出し、GdUnit4 で検証できた。
-- raw `InputEvent` をそのまま deep module に飲ませることは当面行わない。`WorldInteraction` は
-  正規化された input facts を受けて intent を返す形に留め、Godot の scene-tree / `InputEvent`
-  依存を抱え込まない。これにより GdUnit4 での scene-tree なしテスト可能性を保っている。
+- `main.gd`の機械的な`.tscn`分割
+- raw `InputEvent`のdeep module流入
+- static値を別の手動同期constants fileへ移すだけの対応
