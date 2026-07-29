@@ -67,6 +67,48 @@ jobs:
           if count != 1:
               raise SystemExit(f'expected one v3 LockComp patch block, found {count}')
           exec(compile(code, 'fix-pr-206-v4.py', 'exec'))
+
+          # The Request arm must register the first Commit as in-flight before
+          # the end-of-function retry scan runs.
+          transit_path = Path('crates/dawn-sector/src/transit.rs')
+          transit = transit_path.read_text()
+          old_request = '''                if let Some(data) = node.prepare_transit_commit(ship_id, to, gate_id) {
+                    propose_commit(
+                        raft,
+                        *data.ship,
+                        node.sector_id(),
+                        to,
+                        data.entry_pos,
+                        data.entry_pos_abs,
+                        gate_id,
+                        node.current_tick(),
+                    );
+                }
+          '''
+          new_request = '''                if let Some(data) = node.prepare_transit_commit(ship_id, to, gate_id) {
+                    let request_tick = data.request_tick;
+                    node.note_transit_commit_proposed(ship_id, request_tick);
+                    propose_commit(
+                        raft,
+                        *data.ship,
+                        node.sector_id(),
+                        to,
+                        data.entry_pos,
+                        data.entry_pos_abs,
+                        gate_id,
+                        request_tick,
+                    );
+                }
+          '''
+          if old_request in transit:
+              transit = transit.replace(old_request, new_request, 1)
+          else:
+              request_start = transit.index('            TransitOp::Request {')
+              request_end = transit.index('            TransitOp::Commit {', request_start)
+              request_arm = transit[request_start:request_end]
+              if 'node.note_transit_commit_proposed(ship_id, request_tick);' not in request_arm:
+                  raise SystemExit('Request arm was not updated with initial retry state')
+          transit_path.write_text(transit)
           PY
 
       - name: Format
