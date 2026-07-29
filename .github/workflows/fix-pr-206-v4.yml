@@ -106,6 +106,30 @@ jobs:
           if request_count != 1:
               raise SystemExit(f'expected one Request arm, found {request_count}')
           transit_path.write_text(transit)
+
+          transit_flow_path = Path('crates/dawn-sector/src/node/transit_flow.rs')
+          transit_flow = transit_flow_path.read_text()
+          test_only = '    #[cfg(test)]\n    pub(super) fn propose_transit('
+          if test_only not in transit_flow:
+              needle = '    pub(super) fn propose_transit('
+              if needle not in transit_flow:
+                  raise SystemExit('propose_transit declaration not found')
+              transit_flow = transit_flow.replace(needle, test_only, 1)
+          transit_flow_path.write_text(transit_flow)
+
+          tick_path = Path('crates/dawn-sector/src/node/tick.rs')
+          tick = tick_path.read_text()
+          lint_allow = (
+              '    // Mirrors the durable SectorTransitRequested payload at the EventStore boundary.\n'
+              '    #[allow(clippy::too_many_arguments)]\n'
+              '    pub(crate) fn append_incoming_transit_marker('
+          )
+          if lint_allow not in tick:
+              needle = '    pub(crate) fn append_incoming_transit_marker('
+              if needle not in tick:
+                  raise SystemExit('append_incoming_transit_marker declaration not found')
+              tick = tick.replace(needle, lint_allow, 1)
+          tick_path.write_text(tick)
           PY
 
       - name: Format
