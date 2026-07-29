@@ -1,6 +1,6 @@
 use dawn_core::{DomainEvent, Velocity};
 use dawn_ecs::components::{
-    FittingComp, HullComp, LockComp, PositionComp, ShipStatsComp, TackledComp, VelocityComp,
+    FittingComp, HullComp, LockComp, PositionComp, TackledComp, VelocityComp,
 };
 use dawn_event_store::store::EventStore;
 
@@ -17,18 +17,15 @@ impl<S: EventStore> SimulationNode<S> {
                     // ADR-0029 review #1: anchor on the nearest body (deterministic
                     // — same initial_position reproduces the same anchor on replay).
                     self.set_spawn_anchor_abs(e.ship_id, e.initial_position);
-                    // Restore base_stats from ship type registry
-                    let base = self
-                        .ship_type_registry
-                        .get(&e.ship_type_id)
-                        .map(|def| ShipStatsComp::from_base(&def.base_stats))
-                        .unwrap_or(ShipStatsComp::NPC);
-                    self.base_stats.insert(e.ship_id, base);
+                    // Shared with the live spawn path (issue #197): this used
+                    // to be hand-rolled here and silently omitted the
+                    // `ships.type_ids` insertion and `CapacitorComp` init that
+                    // `materialize_ship_stats` (and therefore live spawning)
+                    // always did, so a ship spawned after the last snapshot
+                    // could come back from a snapshot + tail-log restore
+                    // missing state the live node had.
+                    self.materialize_ship_stats(e.ship_id, e.ship_type_id);
                     if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                        self.world.set_ship_stats(entity, base);
-                        if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
-                            *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
-                        }
                         // Starting inventory (ADR-0032) is a pure function of
                         // module_registry, loaded identically before replay
                         // starts -- reproduce it here exactly like the live
