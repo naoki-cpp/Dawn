@@ -37,16 +37,26 @@ impl<S: EventStore> SimulationNode<S> {
     /// `set_spawn_anchor_abs`; `ShipAssembled` starts at `Position::ORIGIN`
     /// and is placed by `settle_ship_into_station` instead), so each caller
     /// keeps doing it their own way before calling this.
+    ///
+    /// `unregistered_fallback` is the stats to fall back to if `ship_type_id`
+    /// isn't in `ship_type_registry` -- which callers hit routinely in tests
+    /// that spawn ships without registering any type. `insert_ship_entity`'s
+    /// callers (NPCs, assembled ships) pass `ShipStatsComp::NPC`;
+    /// `spawn_player_ship_at` passes `ShipStatsComp::PLAYER`, matching what it
+    /// used before this function existed -- collapsing both onto one fallback
+    /// would have quietly weakened every player ship spawned in a node that
+    /// hadn't registered `SHIP_TYPE_MAGPIE` yet.
     pub(super) fn materialize_ship_stats(
         &mut self,
         ship_id: ShipId,
         ship_type_id: dawn_core::ship_type::ShipTypeId,
+        unregistered_fallback: ShipStatsComp,
     ) {
         let base = self
             .ship_type_registry
             .get(&ship_type_id)
             .map(|def| ShipStatsComp::from_base(&def.base_stats))
-            .unwrap_or(ShipStatsComp::NPC);
+            .unwrap_or(unregistered_fallback);
 
         self.base_stats.insert(ship_id, base);
         self.ships.type_ids.insert(ship_id, ship_type_id);
@@ -81,7 +91,7 @@ impl<S: EventStore> SimulationNode<S> {
     ) {
         self.insert_to_world(ship_id, position, velocity);
         self.set_spawn_anchor(ship_id, position);
-        self.materialize_ship_stats(ship_id, ship_type_id);
+        self.materialize_ship_stats(ship_id, ship_type_id, ShipStatsComp::NPC);
     }
 
     /// Spawn a Ship, record it in the ECS, append a `ShipSpawned` event.
@@ -152,7 +162,7 @@ impl<S: EventStore> SimulationNode<S> {
 
         self.insert_to_world(ship_id, pos, Velocity::ZERO);
         self.set_spawn_anchor(ship_id, pos);
-        self.materialize_ship_stats(ship_id, SHIP_TYPE_MAGPIE);
+        self.materialize_ship_stats(ship_id, SHIP_TYPE_MAGPIE, ShipStatsComp::PLAYER);
 
         if let Some(&entity) = self.ships.index.get(&ship_id) {
             let _ = self.world.remove_one::<IsNpcComp>(entity);
@@ -470,6 +480,37 @@ mod tests {
             node.register_ship_type(def);
         }
         node
+    }
+
+    /// `spawn_player_ship_at` must still fall back to `ShipStatsComp::PLAYER`
+    /// (not `NPC`) when `SHIP_TYPE_MAGPIE` isn't registered -- unlike
+    /// `node_with_modules()` above, this uses a bare `SimulationNode::new()`,
+    /// matching the many existing `mem_node()`-style test fixtures elsewhere
+    /// in this crate that spawn a player ship without registering any ship
+    /// type. `materialize_ship_stats`'s shared core takes this fallback as a
+    /// parameter specifically so sharing it with the NPC/replay paths (issue
+    /// #197) didn't silently swap every such player ship onto the weaker NPC
+    /// stat profile.
+    #[test]
+    fn player_spawn_falls_back_to_player_stats_not_npc_when_the_ship_type_is_unregistered() {
+        let mut node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+
+        let stats = node
+            .get_ship_stats(ship_id)
+            .expect("spawned ship must have stats");
+        // max_shield distinguishes the two profiles (PLAYER 500.0 vs NPC
+        // 200.0); comparing one field since ShipStatsComp has no PartialEq.
+        assert_eq!(
+            stats.max_shield,
+            ShipStatsComp::PLAYER.max_shield,
+            "an unregistered ship type must fall back to PLAYER stats, not NPC"
+        );
     }
 
     #[test]

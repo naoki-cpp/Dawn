@@ -24,7 +24,11 @@ impl<S: EventStore> SimulationNode<S> {
                     // always did, so a ship spawned after the last snapshot
                     // could come back from a snapshot + tail-log restore
                     // missing state the live node had.
-                    self.materialize_ship_stats(e.ship_id, e.ship_type_id);
+                    self.materialize_ship_stats(
+                        e.ship_id,
+                        e.ship_type_id,
+                        dawn_ecs::components::ShipStatsComp::NPC,
+                    );
                     if let Some(&entity) = self.ships.index.get(&e.ship_id) {
                         // Starting inventory (ADR-0032) is a pure function of
                         // module_registry, loaded identically before replay
