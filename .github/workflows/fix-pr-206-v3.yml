@@ -19,8 +19,9 @@ jobs:
 
       - name: Apply review fixes
         shell: bash
-        run: >-
-          python -c "from pathlib import Path; s=Path('.github/workflows/fix-pr-206-v2.yml').read_text(); a=\"          python - <<'PY'\\n\"; b='          PY\\n'; i=s.index(a)+len(a); block=s[i:s.index(b,i)]; code='\\n'.join(line[10:] if line.startswith('          ') else line for line in block.splitlines()); exec(compile(code,'fix-pr-206.py','exec'))"
+        run: |
+          git show a5be40e955eff2748187dae1a85d6f9196b9aeb2:.github/workflows/fix-pr-206.yml > /tmp/fix-pr-206.yml
+          python -c "from pathlib import Path; s=Path('.github/workflows/fix-pr-206-v2.yml').read_text(); a=\"          python - <<'PY'\\n\"; b='          PY\\n'; i=s.index(a)+len(a); block=s[i:s.index(b,i)]; code='\\n'.join(line[10:] if line.startswith('          ') else line for line in block.splitlines()); code=code.replace(\"Path('.github/workflows/fix-pr-206.yml')\",\"Path('/tmp/fix-pr-206.yml')\"); exec(compile(code,'fix-pr-206.py','exec'))"
 
       - name: Format
         run: |
@@ -38,10 +39,10 @@ jobs:
       - name: Commit fixes and remove temporary files
         shell: bash
         run: |
-          git rm .github/workflows/fix-pr-206.yml
-          git rm .github/workflows/fix-pr-206-v2.yml
-          git rm .github/workflows/fix-pr-206-v3.yml
-          git rm .github/fix-pr-206-trigger
+          git rm -f --ignore-unmatch .github/workflows/fix-pr-206.yml
+          git rm -f --ignore-unmatch .github/workflows/fix-pr-206-v2.yml
+          git rm -f --ignore-unmatch .github/workflows/fix-pr-206-v3.yml
+          git rm -f --ignore-unmatch .github/fix-pr-206-trigger
           git add crates/dawn-core/src/events.rs \
                   crates/dawn-sector/src/node/tick.rs \
                   crates/dawn-sector/src/node/transit_flow.rs \
