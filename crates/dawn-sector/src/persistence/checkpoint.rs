@@ -11,10 +11,12 @@
 //! does no work until [`CheckpointScheduler::maybe_checkpoint`] is called with a
 //! node whose tick has advanced past the interval.
 
+use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
 
-use dawn_event_store::FileEventStore;
+use dawn_core::{DomainEvent, ShipId};
+use dawn_event_store::{store::EventStore, FileEventStore};
 
 use super::snapshot::StateSnapshot;
 use crate::node::SimulationNode;
@@ -38,6 +40,26 @@ pub struct CheckpointScheduler {
     last_checkpoint_tick: u64,
 }
 
+fn has_pending_outgoing_transit(node: &SimulationNode<FileEventStore>) -> bool {
+    let sector_id = node.sector_id();
+    let mut pending = HashSet::<ShipId>::new();
+    for record in node.event_store().iter_from(0) {
+        match &record.event {
+            DomainEvent::SectorTransitRequested(event) if event.from == sector_id => {
+                pending.insert(event.ship_id);
+            }
+            DomainEvent::SectorTransitCompleted(event) if event.from == sector_id => {
+                pending.remove(&event.ship_id);
+            }
+            DomainEvent::SectorTransitAborted(event) if event.from == sector_id => {
+                pending.remove(&event.ship_id);
+            }
+            _ => {}
+        }
+    }
+    !pending.is_empty()
+}
+
 impl CheckpointScheduler {
     pub fn new(config: CheckpointConfig) -> Self {
         Self {
@@ -49,15 +71,19 @@ impl CheckpointScheduler {
     /// Checkpoint the node iff at least `interval_ticks` logical ticks have
     /// elapsed since the last checkpoint.
     ///
-    /// Returns `Ok(Some(snapshot))` when a checkpoint was taken, `Ok(None)` when
-    /// the interval has not yet elapsed. Call this once per tick (e.g. right after
-    /// `node.tick()`); it is cheap when no checkpoint is due.
+    /// An unresolved outgoing Sector Transit is a durable outbox entry. Its
+    /// `SectorTransitRequested` event must stay in the hot log until an Ack
+    /// records `SectorTransitCompleted`; otherwise compaction could erase the
+    /// only information needed to retry after restart.
     pub fn maybe_checkpoint(
         &mut self,
         node: &mut SimulationNode<FileEventStore>,
     ) -> io::Result<Option<StateSnapshot>> {
         let tick = node.current_tick().value();
         if tick.saturating_sub(self.last_checkpoint_tick) < self.config.interval_ticks {
+            return Ok(None);
+        }
+        if has_pending_outgoing_transit(node) {
             return Ok(None);
         }
         let snapshot = node.checkpoint(&self.config.snapshot_path, &self.config.cold_path)?;
