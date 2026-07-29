@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: false
           ref: recoverable-sector-transit
 
@@ -22,10 +22,10 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Apply embedded repair script from parent
+      - name: Apply embedded repair script
         shell: bash
         run: |
-          git show HEAD^:.github/workflows/fix-pr-206.yml > /tmp/fix-pr-206.yml
+          git show a5be40e955eff2748187dae1a85d6f9196b9aeb2:.github/workflows/fix-pr-206.yml > /tmp/fix-pr-206.yml
           python - <<'PY'
           from pathlib import Path
 
