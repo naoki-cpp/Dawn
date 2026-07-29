@@ -17,38 +17,55 @@ use super::SimulationNode;
 impl<S: EventStore> SimulationNode<S> {
     // ── Spawn ─────────────────────────────────────────────────────────────────
 
-    /// Insert a ship entity into the ECS with stats derived from
-    /// `ship_type_id`, for a `ship_id` the caller has already allocated (or is
-    /// replaying from an event). The ECS/base-stats core shared by
-    /// `spawn_ship` (fresh ID, appends `ShipSpawned`) and
-    /// `assemble_ship_owned`/its replay arm (appends `ShipAssembled` instead) --
-    /// each call site appends its own event afterward since which event fits
-    /// depends on why the ship came into being.
-    pub(super) fn insert_ship_entity(
+    /// The base-stats/ECS-component portion of ship materialization: derives
+    /// `ShipStatsComp` from `ship_type_id`, records it in `base_stats` and
+    /// `ships.type_ids`, and writes `ShipStatsComp`/`HullComp`/`CapacitorComp`
+    /// onto the entity. Requires the entity and its `ships.index` mapping to
+    /// already exist (via `insert_to_world`).
+    ///
+    /// This is the single core shared by every path that brings a ship into
+    /// existence -- `insert_ship_entity` (live spawn/assemble),
+    /// `spawn_player_ship_at`, and `ShipSpawned` replay (`apply_event.rs`).
+    /// Before this was pulled out, `ShipSpawned` replay hand-rolled its own
+    /// copy that omitted the `ships.type_ids` insertion and the
+    /// `CapacitorComp` initialization -- both present on the live path -- so
+    /// a ship spawned after the last snapshot could come back from a
+    /// snapshot + tail-log restore missing state the live node had (issue
+    /// #197). Position/anchor setup is deliberately NOT part of this
+    /// function: it differs legitimately per caller (a fresh `ShipSpawned`
+    /// anchors at a real spawn position via `set_spawn_anchor`/
+    /// `set_spawn_anchor_abs`; `ShipAssembled` starts at `Position::ORIGIN`
+    /// and is placed by `settle_ship_into_station` instead), so each caller
+    /// keeps doing it their own way before calling this.
+    ///
+    /// `unregistered_fallback` is the stats to fall back to if `ship_type_id`
+    /// isn't in `ship_type_registry` -- which callers hit routinely in tests
+    /// that spawn ships without registering any type. `insert_ship_entity`'s
+    /// callers (NPCs, assembled ships) pass `ShipStatsComp::NPC`;
+    /// `spawn_player_ship_at` passes `ShipStatsComp::PLAYER`, matching what it
+    /// used before this function existed -- collapsing both onto one fallback
+    /// would have quietly weakened every player ship spawned in a node that
+    /// hadn't registered `SHIP_TYPE_MAGPIE` yet.
+    pub(super) fn materialize_ship_stats(
         &mut self,
         ship_id: ShipId,
         ship_type_id: dawn_core::ship_type::ShipTypeId,
-        position: Position,
-        velocity: Velocity,
+        unregistered_fallback: ShipStatsComp,
     ) {
         let base = self
             .ship_type_registry
             .get(&ship_type_id)
             .map(|def| ShipStatsComp::from_base(&def.base_stats))
-            .unwrap_or(ShipStatsComp::NPC);
+            .unwrap_or(unregistered_fallback);
 
-        self.insert_to_world(ship_id, position, velocity);
-        self.set_spawn_anchor(ship_id, position);
         self.base_stats.insert(ship_id, base);
         self.ships.type_ids.insert(ship_id, ship_type_id);
 
-        // Update ShipStatsComp, HullComp, and CapacitorComp to match base stats.
         if let Some(&entity) = self.ships.index.get(&ship_id) {
             self.world.set_ship_stats(entity, base);
             if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
                 *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
             }
-            // Initialize capacitor to full.
             let _ = self.world.insert_one(
                 entity,
                 CapacitorComp {
@@ -56,6 +73,25 @@ impl<S: EventStore> SimulationNode<S> {
                 },
             );
         }
+    }
+
+    /// Insert a ship entity into the ECS with stats derived from
+    /// `ship_type_id`, for a `ship_id` the caller has already allocated (or is
+    /// replaying from an event). Shared by `spawn_ship` (fresh ID, appends
+    /// `ShipSpawned`) and `assemble_ship_owned`/its replay arm (appends
+    /// `ShipAssembled` instead) -- each call site appends its own event
+    /// afterward since which event fits depends on why the ship came into
+    /// being.
+    pub(super) fn insert_ship_entity(
+        &mut self,
+        ship_id: ShipId,
+        ship_type_id: dawn_core::ship_type::ShipTypeId,
+        position: Position,
+        velocity: Velocity,
+    ) {
+        self.insert_to_world(ship_id, position, velocity);
+        self.set_spawn_anchor(ship_id, position);
+        self.materialize_ship_stats(ship_id, ship_type_id, ShipStatsComp::NPC);
     }
 
     /// Spawn a Ship, record it in the ECS, append a `ShipSpawned` event.
@@ -124,28 +160,11 @@ impl<S: EventStore> SimulationNode<S> {
         let ship_id = ShipId::new(self.node_id, self.id_counter);
         self.id_counter += 1;
 
-        let base = self
-            .ship_type_registry
-            .get(&SHIP_TYPE_MAGPIE)
-            .map(|def| ShipStatsComp::from_base(&def.base_stats))
-            .unwrap_or(ShipStatsComp::PLAYER);
-
         self.insert_to_world(ship_id, pos, Velocity::ZERO);
         self.set_spawn_anchor(ship_id, pos);
-        self.base_stats.insert(ship_id, base);
-        self.ships.type_ids.insert(ship_id, SHIP_TYPE_MAGPIE);
+        self.materialize_ship_stats(ship_id, SHIP_TYPE_MAGPIE, ShipStatsComp::PLAYER);
 
         if let Some(&entity) = self.ships.index.get(&ship_id) {
-            self.world.set_ship_stats(entity, base);
-            if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
-                *hull = HullComp::new(base.max_shield, base.max_armor, base.max_hull);
-            }
-            let _ = self.world.insert_one(
-                entity,
-                CapacitorComp {
-                    current: base.cap_max,
-                },
-            );
             let _ = self.world.remove_one::<IsNpcComp>(entity);
         }
 
@@ -461,6 +480,37 @@ mod tests {
             node.register_ship_type(def);
         }
         node
+    }
+
+    /// `spawn_player_ship_at` must still fall back to `ShipStatsComp::PLAYER`
+    /// (not `NPC`) when `SHIP_TYPE_MAGPIE` isn't registered -- unlike
+    /// `node_with_modules()` above, this uses a bare `SimulationNode::new()`,
+    /// matching the many existing `mem_node()`-style test fixtures elsewhere
+    /// in this crate that spawn a player ship without registering any ship
+    /// type. `materialize_ship_stats`'s shared core takes this fallback as a
+    /// parameter specifically so sharing it with the NPC/replay paths (issue
+    /// #197) didn't silently swap every such player ship onto the weaker NPC
+    /// stat profile.
+    #[test]
+    fn player_spawn_falls_back_to_player_stats_not_npc_when_the_ship_type_is_unregistered() {
+        let mut node = SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+
+        let stats = node
+            .get_ship_stats(ship_id)
+            .expect("spawned ship must have stats");
+        // max_shield distinguishes the two profiles (PLAYER 500.0 vs NPC
+        // 200.0); comparing one field since ShipStatsComp has no PartialEq.
+        assert_eq!(
+            stats.max_shield,
+            ShipStatsComp::PLAYER.max_shield,
+            "an unregistered ship type must fall back to PLAYER stats, not NPC"
+        );
     }
 
     #[test]

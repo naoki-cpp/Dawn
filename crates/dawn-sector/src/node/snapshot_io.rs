@@ -862,4 +862,57 @@ mod tests {
         assert_eq!(node2.docked_station(ship_id), Some(StationId(0)));
         assert_eq!(node2.player_docked_station(player_id), Some(StationId(0)));
     }
+
+    /// A ship spawned *after* the last snapshot must come back identically
+    /// through snapshot + tail-log replay (issue #197): live spawning and
+    /// `ShipSpawned` replay both go through `materialize_ship_stats` now, but
+    /// before that they diverged silently -- replay skipped the
+    /// `ships.type_ids` insertion and `CapacitorComp` init the live path did.
+    ///
+    /// Compares the *encoded* snapshot bytes rather than picking a few fields
+    /// to assert on, for the same reason `restoring_a_snapshot_and_recapturing_
+    /// reproduces_it_exactly` does above: a hand-picked field list is blind to
+    /// exactly the field this bug lived in.
+    #[test]
+    fn a_ship_spawned_after_the_snapshot_survives_snapshot_plus_tail_replay() {
+        use crate::{modules, ship_types};
+
+        let mut node = node_with_modules();
+        let snapshot_before = node.take_snapshot();
+
+        // Spawned after the snapshot: only reachable on restore via tail-log
+        // replay of its ShipSpawned event, not via restore_ship_from_snapshot.
+        // Velocity::ZERO: `ShipSpawned` carries no velocity field by design
+        // (INV-MOVE -- velocity is event-sourced only via `VelocityChanged`),
+        // so a nonzero spawn velocity here would never replay and would be a
+        // mismatch unrelated to the bug this test guards.
+        let ship_id = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(500.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+        let live_snapshot = node.take_snapshot();
+
+        let mut store2 = InMemoryEventStore::new();
+        for rec in node.event_store().all_records() {
+            store2.append(rec.event.clone());
+        }
+        let restored = SimulationNode::restore_from(
+            store2,
+            &snapshot_before,
+            &modules::all_modules(),
+            &ship_types::all_ship_types(),
+        );
+
+        assert!(
+            restored.ships.index.contains_key(&ship_id),
+            "the post-snapshot ship must exist after restore"
+        );
+        assert_eq!(
+            postcard::to_stdvec(&restored.take_snapshot()).unwrap(),
+            postcard::to_stdvec(&live_snapshot).unwrap(),
+            "a ship spawned after the snapshot must restore with the same \
+             state (type_ids, capacitor, stats) the live node has"
+        );
+    }
 }
