@@ -123,13 +123,13 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.m
 
 | Event | Description | Emitter | Status |
 |---|---|---|---|
-| `SectorTransitRequested` | Sector Transit proposed (ownership stays with `from`, Ship frozen `InTransit`) | `SimulationNode::propose_transit()` | ✅ implemented |
-| `SectorTransitCompleted` | Sector Transit completed (ownership moved to `to`) | `SimulationNode::complete_outgoing_transit()` / `handle_transit_commit()` (both `from` and `to` append to their own log, symmetrically, only once the same `TransitOp::Commit` is Raft-committed — issue #204 / PR #206) | ✅ implemented |
-| `SectorTransitAborted` | Transit aborted (ownership stays with `from`) | (destination node failure case; not wired) | type only |
+| `SectorTransitRequested` | Durable transfer request; source retains a frozen recovery copy until Ack | source `propose_transit()`; destination also records an incoming identity marker before materialization | ✅ implemented |
+| `SectorTransitCompleted` | Destination completed the import, or source removed its recovery copy after Ack | destination `handle_transit_commit()`; source `complete_outgoing_transit()` | ✅ implemented |
+| `SectorTransitAborted` | Transit aborted (ownership stays with `from`) | destination failure path (not wired) | type + Replay |
 
 Validation-stage rejection is expressed via `CommandRejected`, not an event (INV-006); there is no `SectorTransitRejected` event. `propose_transit` returns `Err` without emitting an event if the Ship is absent or already in Transit.
 
-The corresponding Command is `TransitCommand { ship_id, to }` (`dawn-core/src/commands.rs`). The Transit Proposal (`TransitOp::Request` / `Commit`) is committed via the Raft Log; each node applies it to ECS in Tick Step 7.5 (`apply_committed_raft_entries`) before appending the events above to its own EventStore.
+The corresponding command is `TransitCommand { ship_id, to }`. Raft carries `TransitOp::Request`, `Commit`, and `Ack`: Request freezes the source; Commit materializes the destination and durably records completion; Ack removes the source recovery copy. Unresolved source Requested events are retried from EventStore after restart, and checkpoint compaction is deferred while one is pending.
 
 ### 3.7 Jump Gate Navigation (ADR-0009, complete)
 
@@ -138,7 +138,7 @@ The corresponding Command is `TransitCommand { ship_id, to }` (`dawn-core/src/co
 | `JumpGateUsed` | Ship moved to another Sector via a Jump Gate | `SimulationNode::append_jump_events` (Step 7.5, destination node) | ✅ implemented (Raft pipeline) |
 | `StarSystemChanged` | Ship moved to a different star system (concurrent with `JumpGateUsed`) | `SimulationNode::append_jump_events` (Step 7.5, destination node) | ✅ implemented (Raft pipeline) |
 
-Corresponding Command: `JumpCommand { gate_id }`, committed over the same Raft Log path as `TransitCommand` (ADR-0014). The server resolves the command against the caller's active ship (ADR-0037). `TransitOp::Request`/`Commit` carries `gate_id: Option<JumpGateId>`; in Step 7.5 the destination node appends `JumpGateUsed` alongside `SectorTransitCompleted`, and appends `StarSystemChanged` too if `from`/`to` have different `StarSystemId` (`SimulationNode::append_jump_events`).
+Corresponding Command: `JumpCommand { gate_id }`, committed over the same Raft Log path as `TransitCommand` (ADR-0014). The server resolves the command against the caller's active ship (ADR-0037). `TransitOp::Request`/`Commit` carries `gate_id: Option<JumpGateId>`; after destination Commit, the destination appends `JumpGateUsed` alongside `SectorTransitCompleted`, appends `StarSystemChanged` if needed, and then proposes Ack.
 
 Static topology (3 star systems, 4 jump gates) is defined in `dawn-sector/src/galaxy.rs` (ADR-0026). `dawn-wire`'s `domain_event_to_event_wire` serializes both events to clients over the postcard binary envelope (ADR-0042), and `client_command_from_wire` handles `JumpCommand`. The Godot client (`connection.gd`'s `send_jump_command`, `main.gd`'s `_handle_jump_gate_used` / `_handle_star_system_changed`) is also implemented (ADR-0009 checklist fully complete).
 
@@ -435,36 +435,36 @@ currently a fixed `1` per kill, no Wreck entity).
 
 ### `SectorTransitRequested`
 
-Sector Transit committed via Raft. Ownership stays with `from` until `SectorTransitCompleted` (ADR-0014). The Ship is *not* removed at this point — it is frozen (`TransitState::InTransit`), rejecting Move/Despawn/double-Transit commands and, since PR #206, skipped by `MovementSystem`/`CombatSystem`'s per-Tick queries too. Actual removal is deferred to `SectorTransitCompleted`, once the corresponding `TransitOp::Commit` lands — see that event's entry below for why (issue #204 crash-window fix).
+A durable transfer request. On the source, ownership stays with `from`; the Ship remains as a frozen recovery copy until Ack. The freeze covers steering/warp/movement, capacitor and module cycles, lock admission, combat, and repair. On the destination, the same event shape is also used as an incoming transfer identity marker before materialization.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `ship_id` | `ShipId` | ✓ | Ship transiting |
-| `from` | `SectorId` | ✓ | current owning Sector |
+| `from` | `SectorId` | ✓ | source Sector |
 | `to` | `SectorId` | ✓ | destination Sector |
-| `tick` | `Tick` | ✓ | Tick the commit was applied |
+| `tick` | `Tick` | ✓ | source request Tick; part of transfer identity |
 
-**Replay:** set `TransitComp` to `InTransit { to }` (`SimulationNode::replay_sector_transit_requested`, issue #204 — this table row described the intended behavior before it was actually implemented; see that method's doc comment for the current, accurate description).
+**Replay:** if the Ship exists on this Sector, set `TransitComp` to `InTransit { to }`. An incoming destination marker may replay before the Ship exists and is intentionally a state no-op; it remains useful for duplicate-Commit detection.
 
 ---
 
 ### `SectorTransitCompleted`
 
-Sector Transit completed; ownership moved from `from` to `to`. Self-contained (issue #204): `ship_state` carries everything the `to` Sector's replay needs to materialize the Ship from this event alone, without depending on the in-memory Raft actor surviving a restart (ADR-0014).
+Self-contained completion event. `ship_state` carries the destination replay state without depending on the in-memory Raft actor surviving restart.
 
-Appended by both `from` and `to` only once the *same* `TransitOp::Commit` is Raft-committed (`SimulationNode::complete_outgoing_transit` / `handle_transit_commit`, called symmetrically from `transit::apply_committed_raft_entries`, gated on `from == node.sector_id()` / `to == node.sector_id()` respectively) — **not** at `TransitOp::Request`-commit time. An earlier version of the issue #204 fix appended this event on `from`'s side synchronously at Request-commit, which left a crash window where a whole-cluster restart between that Append and the destination's `TransitOp::Commit` landing would lose the Ship entirely (source log said "gone," destination log had nothing). Regression test: `a_ship_survives_a_restart_between_request_commit_and_transit_commit` (`crates/dawn-sector/src/node/transit_flow.rs`).
+The destination appends this event when Commit materialization succeeds, then proposes Ack. The source appends it only after Ack, when it removes the frozen recovery copy. Thus a crash can temporarily retain two ECS copies, but never zero durable copies; only the destination copy is active after Commit.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `ship_id` | `ShipId` | ✓ | Ship that transited |
-| `from` | `SectorId` | ✓ | previous owning Sector |
-| `to` | `SectorId` | ✓ | new owning Sector |
+| `from` | `SectorId` | ✓ | previous active Sector |
+| `to` | `SectorId` | ✓ | new active Sector |
 | `entry_pos` | `AbsolutePosition` | ✓ | authoritative entry coordinates in the destination Sector frame |
-| `velocity` | `Velocity` | ✓ | velocity on entry (required for full Replay reconstruction, INV-002) |
-| `tick` | `Tick` | ✓ | Tick of completion |
-| `ship_state` | `TransitShipState` | ✓ | ship type / HP / capacitor / fitting / inventory at the moment of transit; read only by the `to` Sector's Replay (see below) |
+| `velocity` | `Velocity` | ✓ | velocity on entry |
+| `tick` | `Tick` | ✓ | local completion Tick |
+| `ship_state` | `TransitShipState` | ✓ | type / HP / capacitor / fitting / inventory used by destination Replay |
 
-**Replay:** `SimulationNode::replay_sector_transit_completed` branches on `self.sector_id`. On the `from` node (`self.sector_id == from`), removes the Ship from ECS. On the `to` node (`self.sector_id == to`), rebuilds a `ShipSnapshot` from `ship_state` + `entry_pos` and materializes it, then redoes the anchor rebase directly (does not rely on the `AnchorRebased` entry the live path also logged — that entry appears *earlier* in this Sector's log than `SectorTransitCompleted`, so by the time Replay reaches it the Ship doesn't exist here yet and it silently no-ops).
+**Replay:** on `from`, remove the Ship. On `to`, rebuild a `ShipSnapshot` from `ship_state` + `entry_pos`, materialize it, and redo anchor rebase directly. The live `AnchorRebased` event precedes Completed and may replay before the destination Ship exists.
 
 ---
 
@@ -481,7 +481,7 @@ A committed Transit was aborted; ownership stays with `from`. Validation-stage r
 
 **Replay:** clears the `InTransit` marker `SectorTransitRequested` Replay set (`SimulationNode::replay_sector_transit_aborted`).
 
-**Status:** type + Replay implemented; nothing appends this event yet (emission on a post-commit abort path, e.g. destination-node failure, is not wired). Replay was implemented anyway (issue #204) so the event type doesn't ship with a known-wrong Replay the day something starts emitting it.
+**Status:** type + Replay implemented; nothing appends this event yet.
 
 ---
 
