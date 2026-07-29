@@ -62,27 +62,59 @@ fn pending_outgoing_transits<S: EventStore>(node: &SimulationNode<S>) -> Vec<Pen
     let mut pending = HashMap::<ShipId, PendingTransit>::new();
     for record in node.event_store().iter_from(0) {
         match &record.event {
-            DomainEvent::SectorTransitRequested(e) if e.from == sector_id => {
+            DomainEvent::SectorTransitRequested(event) if event.from == sector_id => {
                 pending.insert(
-                    e.ship_id,
+                    event.ship_id,
                     PendingTransit {
-                        ship_id: e.ship_id,
-                        from: e.from,
-                        to: e.to,
-                        request_tick: e.tick,
+                        ship_id: event.ship_id,
+                        from: event.from,
+                        to: event.to,
+                        request_tick: event.tick,
                     },
                 );
             }
-            DomainEvent::SectorTransitCompleted(e) if e.from == sector_id => {
-                pending.remove(&e.ship_id);
+            DomainEvent::SectorTransitCompleted(event) if event.from == sector_id => {
+                pending.remove(&event.ship_id);
             }
-            DomainEvent::SectorTransitAborted(e) if e.from == sector_id => {
-                pending.remove(&e.ship_id);
+            DomainEvent::SectorTransitAborted(event) if event.from == sector_id => {
+                pending.remove(&event.ship_id);
             }
             _ => {}
         }
     }
     pending.into_values().collect()
+}
+
+fn destination_completed_transfer<S: EventStore>(
+    node: &SimulationNode<S>,
+    ship_id: ShipId,
+    from: SectorId,
+    to: SectorId,
+    request_tick: Tick,
+) -> bool {
+    let mut marker_seen = false;
+    for record in node.event_store().iter_from(0) {
+        match &record.event {
+            DomainEvent::SectorTransitRequested(event)
+                if event.ship_id == ship_id
+                    && event.from == from
+                    && event.to == to
+                    && event.tick == request_tick =>
+            {
+                marker_seen = true;
+            }
+            DomainEvent::SectorTransitCompleted(event)
+                if marker_seen
+                    && event.ship_id == ship_id
+                    && event.from == from
+                    && event.to == to =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 fn inferred_gate_id<S: EventStore>(
@@ -110,8 +142,9 @@ fn transit_entry<S: EventStore>(
             .find(|gate| gate.to_sector == from)
     });
     (
-        gate.map(|g| g.position).unwrap_or(Position::ORIGIN),
-        gate.map(|g| g.abs_m).unwrap_or(AbsolutePosition::ORIGIN),
+        gate.map(|gate| gate.position).unwrap_or(Position::ORIGIN),
+        gate.map(|gate| gate.abs_m)
+            .unwrap_or(AbsolutePosition::ORIGIN),
     )
 }
 
@@ -168,8 +201,9 @@ fn retry_pending_transits<S: EventStore>(node: &mut SimulationNode<S>, raft: &Ra
         };
         let gate_id = inferred_gate_id(node, transit.from, transit.to);
 
-        // A checkpoint may cover the Requested event while ShipSnapshot does
-        // not carry TransitComp. Re-issuing Request restores the frozen marker.
+        // A checkpoint is normally deferred while a Request is pending. This
+        // fallback also repairs snapshots produced by older binaries, where
+        // ShipSnapshot did not carry TransitComp.
         if node.can_propose_transit(transit.ship_id) {
             raft.propose(
                 TransitOp::Request {
@@ -250,14 +284,29 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                 request_tick,
             } => {
                 if to == node.sector_id() {
-                    if node.get_ship_position(ship.ship_id).is_none() {
-                        node.handle_transit_commit(
-                            &ship,
+                    let completed = destination_completed_transfer(
+                        node,
+                        ship.ship_id,
+                        from,
+                        to,
+                        request_tick,
+                    );
+                    if !completed {
+                        node.append_incoming_transit_marker(
+                            ship.ship_id,
                             from,
-                            entry_pos,
-                            entry_pos_abs,
-                            gate_id,
+                            to,
+                            request_tick,
                         );
+                        if node.get_ship_position(ship.ship_id).is_none() {
+                            node.handle_transit_commit(
+                                &ship,
+                                from,
+                                entry_pos,
+                                entry_pos_abs,
+                                gate_id,
+                            );
+                        }
                     }
                     let ack_ship =
                         snapshot_ship(node, ship.ship_id).unwrap_or_else(|| (*ship).clone());
@@ -388,13 +437,18 @@ mod tests {
     use super::*;
     use dawn_core::fitting::FittingSnapshot;
     use dawn_core::{NodeId, SectorBounds, ShipTypeId, Velocity};
+    use dawn_event_store::InMemoryEventStore;
 
-    fn mem_node() -> SimulationNode {
+    fn node(node_id: u8, sector_id: u8) -> SimulationNode {
         SimulationNode::new(
-            NodeId(0),
-            SectorId(0),
+            NodeId(node_id),
+            SectorId(sector_id),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         )
+    }
+
+    fn mem_node() -> SimulationNode {
+        node(0, 0)
     }
 
     fn raft_handle() -> (
@@ -414,6 +468,25 @@ mod tests {
             other => panic!("expected Propose, got {other:?}"),
         };
         TransitOp::decode(&payload).expect("payload must decode as a TransitOp")
+    }
+
+    fn sample_ship() -> ShipSnapshot {
+        ShipSnapshot {
+            ship_id: ShipId::new(NodeId(0), 7),
+            ship_type_id: ShipTypeId(1),
+            absolute_position: None,
+            position: Position::new(1.0, 2.0, 3.0),
+            anchor: dawn_core::AnchorId(0),
+            velocity: Velocity::new(4.0, 5.0, 6.0),
+            current_shield: 10.0,
+            current_armor: 20.0,
+            current_hull: 30.0,
+            is_destroyed: false,
+            capacitor: Some(50.0),
+            fitting: FittingSnapshot::empty(),
+            tackled_by: vec![],
+            inventory: std::collections::BTreeMap::new(),
+        }
     }
 
     #[test]
@@ -475,25 +548,6 @@ mod tests {
         ));
     }
 
-    fn sample_ship() -> ShipSnapshot {
-        ShipSnapshot {
-            ship_id: ShipId::new(NodeId(0), 7),
-            ship_type_id: ShipTypeId(1),
-            absolute_position: None,
-            position: Position::new(1.0, 2.0, 3.0),
-            anchor: dawn_core::AnchorId(0),
-            velocity: Velocity::new(4.0, 5.0, 6.0),
-            current_shield: 10.0,
-            current_armor: 20.0,
-            current_hull: 30.0,
-            is_destroyed: false,
-            capacitor: Some(50.0),
-            fitting: FittingSnapshot::empty(),
-            tackled_by: vec![],
-            inventory: std::collections::BTreeMap::new(),
-        }
-    }
-
     #[test]
     fn commit_and_ack_round_trip() {
         let commit = TransitOp::Commit {
@@ -526,6 +580,115 @@ mod tests {
                 request_tick: Tick(12),
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn destination_commit_then_source_ack_moves_ownership_without_a_zero_owner_window() {
+        let mut source = node(0, 0);
+        let mut destination = node(1, 1);
+        let ship_id = source.spawn_ship(
+            ShipTypeId(1),
+            Position::ORIGIN,
+            Velocity::new(1.0, 0.0, 0.0),
+        );
+        let data = source
+            .prepare_transit_commit(ship_id, SectorId(1), None)
+            .unwrap();
+        let request_tick = source.current_tick();
+        let commit = TransitOp::Commit {
+            ship: data.ship,
+            from: SectorId(0),
+            to: SectorId(1),
+            entry_pos: data.entry_pos,
+            entry_pos_abs: data.entry_pos_abs,
+            gate_id: None,
+            request_tick,
+        };
+
+        let (ack_raft, mut ack_proposals) = raft_handle();
+        let (commit_tx, mut commit_rx) = mpsc::unbounded_channel();
+        commit_tx.send(commit.encode()).unwrap();
+        apply_committed_raft_entries(&mut destination, &ack_raft, &mut commit_rx);
+
+        assert!(source.get_ship_position(ship_id).is_some());
+        assert!(destination.get_ship_position(ship_id).is_some());
+        let ack = decode_proposed_transit(&mut ack_proposals);
+        assert!(matches!(ack, TransitOp::Ack { .. }));
+
+        let (noop_raft, _noop_rx) = raft_handle();
+        let (ack_tx, mut ack_rx) = mpsc::unbounded_channel();
+        ack_tx.send(ack.encode()).unwrap();
+        apply_committed_raft_entries(&mut source, &noop_raft, &mut ack_rx);
+
+        assert!(source.get_ship_position(ship_id).is_none());
+        assert!(destination.get_ship_position(ship_id).is_some());
+    }
+
+    #[test]
+    fn duplicate_destination_commit_is_idempotent_and_reissues_ack() {
+        let mut source = node(0, 0);
+        let mut destination = node(1, 1);
+        let ship_id = source.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let data = source
+            .prepare_transit_commit(ship_id, SectorId(1), None)
+            .unwrap();
+        let commit = TransitOp::Commit {
+            ship: data.ship,
+            from: SectorId(0),
+            to: SectorId(1),
+            entry_pos: data.entry_pos,
+            entry_pos_abs: data.entry_pos_abs,
+            gate_id: None,
+            request_tick: source.current_tick(),
+        };
+        let completed_before = destination
+            .event_store()
+            .iter_from(0)
+            .filter(|record| matches!(record.event, DomainEvent::SectorTransitCompleted(_)))
+            .count();
+        let (raft, mut proposals) = raft_handle();
+
+        for _ in 0..2 {
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            tx.send(commit.encode()).unwrap();
+            apply_committed_raft_entries(&mut destination, &raft, &mut rx);
+            assert!(matches!(
+                decode_proposed_transit(&mut proposals),
+                TransitOp::Ack { .. }
+            ));
+        }
+
+        let completed_after = destination
+            .event_store()
+            .iter_from(0)
+            .filter(|record| matches!(record.event, DomainEvent::SectorTransitCompleted(_)))
+            .count();
+        assert_eq!(destination.ship_count(), 1);
+        assert_eq!(completed_after, completed_before + 1);
+    }
+
+    #[test]
+    fn restored_requested_transit_reproposes_commit() {
+        let mut source = node(0, 0);
+        let ship_id = source.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let snapshot_before = source.take_snapshot();
+        source
+            .prepare_transit_commit(ship_id, SectorId(1), None)
+            .unwrap();
+
+        let mut store = InMemoryEventStore::new();
+        for record in source.event_store().iter_from(0) {
+            store.append(record.event.clone());
+        }
+        let mut restored = SimulationNode::restore_from(store, &snapshot_before, &[], &[]);
+        let (raft, mut proposals) = raft_handle();
+        let (_tx, mut committed_rx) = mpsc::unbounded_channel();
+        apply_committed_raft_entries(&mut restored, &raft, &mut committed_rx);
+
+        assert!(matches!(
+            decode_proposed_transit(&mut proposals),
+            TransitOp::Commit { ship, .. } if ship.ship_id == ship_id
         ));
     }
 
