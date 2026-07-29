@@ -9,7 +9,7 @@ use dawn_core::{
     commands::TransitCommand,
     events::{JumpGateUsed, SectorTransitCompleted, SectorTransitRequested, StarSystemChanged},
     fitting::FittingSnapshot,
-    DawnError, DomainEvent, JumpGateId, Position, SectorId, ShipId, ShipTypeId,
+    DawnError, DomainEvent, JumpGateId, Position, SectorId, ShipId, ShipTypeId, Tick,
 };
 use dawn_ecs::{
     components::{CapacitorComp, FittingComp, HullComp, InventoryComp, PositionComp, VelocityComp},
@@ -78,6 +78,21 @@ pub struct TransitCommitData {
     pub ship: Box<ShipSnapshot>,
     pub entry_pos: Position,
     pub entry_pos_abs: dawn_core::AbsolutePosition,
+    pub request_tick: Tick,
+}
+
+const TRANSIT_RETRY_INITIAL_TICKS: u64 = 10;
+const TRANSIT_RETRY_MAX_TICKS: u64 = 160;
+
+/// Process-local retry scheduling. The durable request and route live in the
+/// EventStore; this component only prevents an unresolved request from being
+/// proposed every Tick. It intentionally is not snapshotted, so restart causes
+/// one immediate retry and then resumes bounded exponential backoff.
+#[derive(Debug, Clone, Copy)]
+struct TransitRetryComp {
+    request_tick: Tick,
+    next_retry_tick: Tick,
+    backoff_ticks: u64,
 }
 
 impl<S: EventStore> SimulationNode<S> {
@@ -91,7 +106,24 @@ impl<S: EventStore> SimulationNode<S> {
     /// `TransitOp::Request` is applied at Step 7.5 — never directly from a
     /// client command. Folded into [`prepare_transit_commit`](Self::prepare_transit_commit);
     /// not called directly outside this module.
+    #[cfg(test)]
     pub(super) fn propose_transit(&mut self, cmd: TransitCommand) -> Result<(), DawnError> {
+        self.propose_transit_with_route(
+            cmd,
+            None,
+            Position::ORIGIN,
+            dawn_core::AbsolutePosition::ORIGIN,
+        )
+        .map(|_| ())
+    }
+
+    fn propose_transit_with_route(
+        &mut self,
+        cmd: TransitCommand,
+        gate_id: Option<JumpGateId>,
+        entry_pos: Position,
+        entry_pos_abs: dawn_core::AbsolutePosition,
+    ) -> Result<Tick, DawnError> {
         let &entity = self
             .ships
             .index
@@ -104,17 +136,20 @@ impl<S: EventStore> SimulationNode<S> {
 
         self.world
             .set_transit_state(entity, TransitState::InTransit { to: cmd.to });
-
+        let request_tick = self.current_tick;
         self.event_store.append(DomainEvent::SectorTransitRequested(
             SectorTransitRequested {
                 ship_id: cmd.ship_id,
                 from: self.sector_id,
                 to: cmd.to,
+                request_tick,
+                gate_id,
+                entry_pos,
+                entry_pos_abs,
                 tick: self.current_tick,
             },
         ));
-
-        Ok(())
+        Ok(request_tick)
     }
 
     /// Whether a `TransitCommand` for `ship_id` would currently be accepted
@@ -150,24 +185,32 @@ impl<S: EventStore> SimulationNode<S> {
         to: SectorId,
         gate_id: Option<JumpGateId>,
     ) -> Option<TransitCommitData> {
-        self.propose_transit(TransitCommand { ship_id, to }).ok()?;
-
         let arrival_gate = gate_id.and_then(|_| {
             self.galaxy()
                 .gates_in_sector(to)
                 .into_iter()
-                .find(|g| g.to_sector == self.sector_id())
+                .find(|gate| gate.to_sector == self.sector_id())
         });
-        let entry_pos = arrival_gate.map(|g| g.position).unwrap_or(Position::ORIGIN);
+        let entry_pos = arrival_gate
+            .map(|gate| gate.position)
+            .unwrap_or(Position::ORIGIN);
         let entry_pos_abs = arrival_gate
-            .map(|g| g.abs_m)
+            .map(|gate| gate.abs_m)
             .unwrap_or(dawn_core::AbsolutePosition::ORIGIN);
-
+        let request_tick = self
+            .propose_transit_with_route(
+                TransitCommand { ship_id, to },
+                gate_id,
+                entry_pos,
+                entry_pos_abs,
+            )
+            .ok()?;
         let ship = self.snapshot_for_transit(ship_id)?;
         Some(TransitCommitData {
             ship: Box::new(ship),
             entry_pos,
             entry_pos_abs,
+            request_tick,
         })
     }
 
@@ -301,6 +344,46 @@ impl<S: EventStore> SimulationNode<S> {
         };
 
         Some(snapshot)
+    }
+
+    pub(crate) fn transit_commit_retry_due(&self, ship_id: ShipId, request_tick: Tick) -> bool {
+        let Some(&entity) = self.ships.index.get(&ship_id) else {
+            return false;
+        };
+        self.world
+            .get::<TransitRetryComp>(entity)
+            .map(|state| {
+                state.request_tick != request_tick || self.current_tick >= state.next_retry_tick
+            })
+            .unwrap_or(true)
+    }
+
+    pub(crate) fn note_transit_commit_proposed(&mut self, ship_id: ShipId, request_tick: Tick) {
+        let Some(&entity) = self.ships.index.get(&ship_id) else {
+            return;
+        };
+        let existing = self
+            .world
+            .get::<TransitRetryComp>(entity)
+            .map(|state| *state);
+        let delay = existing
+            .filter(|state| state.request_tick == request_tick)
+            .map(|state| {
+                state
+                    .backoff_ticks
+                    .saturating_mul(2)
+                    .min(TRANSIT_RETRY_MAX_TICKS)
+            })
+            .unwrap_or(TRANSIT_RETRY_INITIAL_TICKS);
+        let _ = self.world.remove_one::<TransitRetryComp>(entity);
+        let _ = self.world.insert_one(
+            entity,
+            TransitRetryComp {
+                request_tick,
+                next_retry_tick: Tick(self.current_tick.value().saturating_add(delay)),
+                backoff_ticks: delay,
+            },
+        );
     }
 
     /// Stage 1.5 of a Sector Transit (issue #204): actually removes the Ship
@@ -1207,6 +1290,10 @@ mod tests {
                 ship_id,
                 from: SectorId(0),
                 to: SectorId(1),
+                request_tick: Tick(1),
+                gate_id: None,
+                entry_pos: dawn_core::Position::ORIGIN,
+                entry_pos_abs: dawn_core::AbsolutePosition::ORIGIN,
                 tick: Tick(1),
             },
         ));
@@ -1227,6 +1314,10 @@ mod tests {
                 ship_id,
                 from: SectorId(0),
                 to: SectorId(1),
+                request_tick: Tick(1),
+                gate_id: None,
+                entry_pos: dawn_core::Position::ORIGIN,
+                entry_pos_abs: dawn_core::AbsolutePosition::ORIGIN,
                 tick: Tick(1),
             },
         ));

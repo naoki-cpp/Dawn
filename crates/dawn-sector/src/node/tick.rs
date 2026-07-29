@@ -3,7 +3,8 @@ use std::collections::HashSet;
 use dawn_core::{DomainEvent, ItemId, ShipId};
 use dawn_ecs::{
     components::{
-        ApproachComp, CapacitorComp, FittingComp, KeepAtRangeComp, LockComp, OrbitComp, WarpComp,
+        ApproachComp, CapacitorComp, FittingComp, KeepAtRangeComp, LockComp, OrbitComp,
+        TackledComp, WarpComp,
     },
     systems::{CapacitorSystem, CombatSystem, LockSystem, MovementSystem, RepairSystem},
     Entity,
@@ -21,7 +22,7 @@ struct FrozenTransitComponents {
     entity: Entity,
     capacitor: Option<CapacitorComp>,
     fitting: Option<FittingComp>,
-    lock: Option<LockComp>,
+    tackled: Option<TackledComp>,
     warp: Option<WarpComp>,
     approach: Option<ApproachComp>,
     orbit: Option<OrbitComp>,
@@ -34,24 +35,39 @@ impl<S: EventStore> SimulationNode<S> {
         self.tick_with_lock_commands(&[])
     }
 
+    // Mirrors the durable SectorTransitRequested payload at the EventStore boundary.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn append_incoming_transit_marker(
         &mut self,
         ship_id: ShipId,
         from: dawn_core::SectorId,
         to: dawn_core::SectorId,
         request_tick: dawn_core::Tick,
+        gate_id: Option<dawn_core::JumpGateId>,
+        entry_pos: dawn_core::Position,
+        entry_pos_abs: dawn_core::AbsolutePosition,
     ) {
         self.event_store.append(DomainEvent::SectorTransitRequested(
             dawn_core::events::SectorTransitRequested {
                 ship_id,
                 from,
                 to,
-                tick: request_tick,
+                request_tick,
+                gate_id,
+                entry_pos,
+                entry_pos_abs,
+                tick: self.current_tick,
             },
         ));
     }
 
-    fn freeze_transit_components(&mut self) -> (HashSet<ShipId>, Vec<FrozenTransitComponents>) {
+    fn freeze_transit_components(
+        &mut self,
+    ) -> (
+        HashSet<ShipId>,
+        Vec<FrozenTransitComponents>,
+        Vec<(Entity, LockComp)>,
+    ) {
         let transit: Vec<(ShipId, Entity)> = self
             .ships
             .index
@@ -63,24 +79,42 @@ impl<S: EventStore> SimulationNode<S> {
                     .then_some((ship_id, entity))
             })
             .collect();
-        let ids = transit.iter().map(|(ship_id, _)| *ship_id).collect();
+        let ids: HashSet<_> = transit.iter().map(|(ship_id, _)| *ship_id).collect();
+        let related_locks = self
+            .ships
+            .index
+            .iter()
+            .filter_map(|(&ship_id, &entity)| {
+                let lock = self.world.get::<LockComp>(entity)?;
+                (ids.contains(&ship_id)
+                    || lock
+                        .entries
+                        .iter()
+                        .any(|entry| ids.contains(&entry.target_id)))
+                .then(|| (entity, (*lock).clone()))
+            })
+            .collect();
         let components = transit
             .into_iter()
             .map(|(_, entity)| FrozenTransitComponents {
                 entity,
                 capacitor: self.world.remove_one::<CapacitorComp>(entity),
                 fitting: self.world.remove_one::<FittingComp>(entity),
-                lock: self.world.remove_one::<LockComp>(entity),
+                tackled: self.world.remove_one::<TackledComp>(entity),
                 warp: self.world.remove_one::<WarpComp>(entity),
                 approach: self.world.remove_one::<ApproachComp>(entity),
                 orbit: self.world.remove_one::<OrbitComp>(entity),
                 keep_at_range: self.world.remove_one::<KeepAtRangeComp>(entity),
             })
             .collect();
-        (ids, components)
+        (ids, components, related_locks)
     }
 
-    fn restore_transit_components(&mut self, frozen: Vec<FrozenTransitComponents>) {
+    fn restore_transit_components(
+        &mut self,
+        frozen: Vec<FrozenTransitComponents>,
+        related_locks: Vec<(Entity, LockComp)>,
+    ) {
         for frozen in frozen {
             if let Some(component) = frozen.capacitor {
                 let _ = self.world.insert_one(frozen.entity, component);
@@ -88,7 +122,7 @@ impl<S: EventStore> SimulationNode<S> {
             if let Some(component) = frozen.fitting {
                 let _ = self.world.insert_one(frozen.entity, component);
             }
-            if let Some(component) = frozen.lock {
+            if let Some(component) = frozen.tackled {
                 let _ = self.world.insert_one(frozen.entity, component);
             }
             if let Some(component) = frozen.warp {
@@ -104,6 +138,10 @@ impl<S: EventStore> SimulationNode<S> {
                 let _ = self.world.insert_one(frozen.entity, component);
             }
         }
+        for (entity, component) in related_locks {
+            let _ = self.world.remove_one::<LockComp>(entity);
+            let _ = self.world.insert_one(entity, component);
+        }
     }
 
     pub fn tick_with_lock_commands(
@@ -112,7 +150,7 @@ impl<S: EventStore> SimulationNode<S> {
     ) -> TickResult {
         self.current_tick = self.current_tick.next();
         let tick = self.current_tick;
-        let (transit_ids, frozen_transit) = self.freeze_transit_components();
+        let (transit_ids, frozen_transit, frozen_related_locks) = self.freeze_transit_components();
 
         // 2.5 Approach System — re-aim thrust at approach targets (ADR-0015)
         self.process_approach();
@@ -141,7 +179,11 @@ impl<S: EventStore> SimulationNode<S> {
         }
 
         // 4.5 Tackle System — update TackledComp for active Tackle modules (ADR-0024)
-        let tackle_events = self.process_tackle(tick);
+        let tackle_events: Vec<_> = self
+            .process_tackle(tick)
+            .into_iter()
+            .filter(|event| !transit_ids.contains(&event.ship_id()))
+            .collect();
 
         // 5. Lock System — merge human commands with queued bot commands. A
         // pending Transit can neither acquire a lock nor become a new target.
@@ -152,7 +194,9 @@ impl<S: EventStore> SimulationNode<S> {
                 !transit_ids.contains(&command.ship_id) && !transit_ids.contains(&command.target_id)
             })
             .collect();
-        let lock = LockSystem(&mut self.world, tick, &merged_locks);
+        let mut lock = LockSystem(&mut self.world, tick, &merged_locks);
+        lock.events
+            .retain(|event| !transit_ids.contains(&event.ship_id()));
 
         // Docked ships are not valid space-combat participants: any lock held
         // by a docked ship, or onto a docked ship, is torn down before range
@@ -181,7 +225,7 @@ impl<S: EventStore> SimulationNode<S> {
             .collect();
         let repair = RepairSystem(&mut self.world, tick, &repair_cycles);
 
-        self.restore_transit_components(frozen_transit);
+        self.restore_transit_components(frozen_transit, frozen_related_locks);
 
         for event in &combat.events {
             let DomainEvent::ShipDestroyed(destroyed) = event else {
@@ -302,6 +346,12 @@ mod tests {
         );
         let entity = *node.ships.index.get(&ship_id).unwrap();
         node.world.get_mut::<CapacitorComp>(entity).unwrap().current = 1.0;
+        let _ = node.world.insert_one(
+            entity,
+            TackledComp {
+                tacklers: vec![dawn_core::ShipId::new(NodeId(9), 1)],
+            },
+        );
         node.propose_transit(TransitCommand {
             ship_id,
             to: SectorId(1),
@@ -314,7 +364,7 @@ mod tests {
             .into_iter()
             .find(|ship| ship.ship_id == ship_id)
             .unwrap();
-        node.tick();
+        let tick_result = node.tick();
         let after = node
             .take_snapshot()
             .ships
@@ -330,6 +380,22 @@ mod tests {
         assert_eq!(after.capacitor, before.capacitor);
         assert_eq!(after.inventory, before.inventory);
         assert_eq!(after.fitting, before.fitting);
+        assert_eq!(after.tackled_by, before.tackled_by);
+        assert!(tick_result.events.iter().all(|event| !matches!(
+            event,
+            DomainEvent::TackleApplied(_)
+                | DomainEvent::TackleReleased(_)
+                | DomainEvent::TargetLocked(_)
+                | DomainEvent::LockLost(_)
+        )));
+        assert_eq!(after.tackled_by, before.tackled_by);
+        assert!(tick_result.events.iter().all(|event| !matches!(
+            event,
+            DomainEvent::TackleApplied(_)
+                | DomainEvent::TackleReleased(_)
+                | DomainEvent::TargetLocked(_)
+                | DomainEvent::LockLost(_)
+        )));
     }
 
     #[test]

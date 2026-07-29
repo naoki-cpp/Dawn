@@ -422,6 +422,16 @@ pub struct SectorTransitRequested {
     pub ship_id: ShipId,
     pub from: SectorId,
     pub to: SectorId,
+    /// Source-Sector Tick that identifies this request. This is a source-local
+    /// nonce, not the Tick of every EventStore that records the transfer.
+    pub request_tick: Tick,
+    /// Original transfer kind. `None` is a non-Gate Sector Transit and must not
+    /// be inferred as a Jump after restart merely because topology has a Gate.
+    pub gate_id: Option<JumpGateId>,
+    /// Resolved destination entry point persisted by the source outbox.
+    pub entry_pos: Position,
+    pub entry_pos_abs: AbsolutePosition,
+    /// Tick local to the EventStore that appended this record.
     pub tick: Tick,
 }
 
@@ -610,6 +620,10 @@ mod tests {
             ship_id: id,
             from: SectorId(0),
             to: SectorId(1),
+            request_tick: Tick(7),
+            gate_id: None,
+            entry_pos: Position::ORIGIN,
+            entry_pos_abs: AbsolutePosition::ORIGIN,
             tick: Tick(7),
         });
         assert_eq!(event.ship_id(), id);

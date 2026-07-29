@@ -123,13 +123,13 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.m
 
 | Event | Description | Emitter | Status |
 |---|---|---|---|
-| `SectorTransitRequested` | Durable transfer request; source retains a frozen recovery copy until Ack | source `propose_transit()`; destination also records an incoming identity marker before materialization | ✅ implemented |
+| `SectorTransitRequested` | Durable transfer request carrying source-local request identity plus the resolved Gate/non-Gate route; source retains a frozen recovery copy until Ack | source `propose_transit()`; destination also records an incoming marker using its own local `tick` | ✅ implemented |
 | `SectorTransitCompleted` | Destination completed the import, or source removed its recovery copy after Ack | destination `handle_transit_commit()`; source `complete_outgoing_transit()` | ✅ implemented |
 | `SectorTransitAborted` | Transit aborted (ownership stays with `from`) | destination failure path (not wired) | type + Replay |
 
 Validation-stage rejection is expressed via `CommandRejected`, not an event (INV-006); there is no `SectorTransitRejected` event. `propose_transit` returns `Err` without emitting an event if the Ship is absent or already in Transit.
 
-The corresponding command is `TransitCommand { ship_id, to }`. Raft carries `TransitOp::Request`, `Commit`, and `Ack`: Request freezes the source; Commit materializes the destination and durably records completion; Ack removes the source recovery copy. Unresolved source Requested events are retried from EventStore after restart, and checkpoint compaction is deferred while one is pending.
+The corresponding command is `TransitCommand { ship_id, to }`. Raft carries `TransitOp::Request`, `Commit`, and `Ack`: Request freezes the source and persists `request_tick`, `gate_id`, `entry_pos`, and `entry_pos_abs`; Commit materializes the destination and durably records completion using a destination-local event `tick`; Ack removes the source recovery copy. Unresolved source Requested events are retried from EventStore after restart with bounded exponential backoff, and checkpoint compaction is deferred while one is pending.
 
 ### 3.7 Jump Gate Navigation (ADR-0009, complete)
 
