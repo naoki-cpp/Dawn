@@ -21,6 +21,7 @@ jobs:
       - name: Apply review fixes
         shell: bash
         run: |
+          git show a5be40e955eff2748187dae1a85d6f9196b9aeb2:.github/workflows/fix-pr-206.yml > /tmp/fix-pr-206.yml
           python - <<'PY'
           from pathlib import Path
           import re
