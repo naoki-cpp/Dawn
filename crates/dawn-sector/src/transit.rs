@@ -284,20 +284,10 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                 request_tick,
             } => {
                 if to == node.sector_id() {
-                    let completed = destination_completed_transfer(
-                        node,
-                        ship.ship_id,
-                        from,
-                        to,
-                        request_tick,
-                    );
+                    let completed =
+                        destination_completed_transfer(node, ship.ship_id, from, to, request_tick);
                     if !completed {
-                        node.append_incoming_transit_marker(
-                            ship.ship_id,
-                            from,
-                            to,
-                            request_tick,
-                        );
+                        node.append_incoming_transit_marker(ship.ship_id, from, to, request_tick);
                         if node.get_ship_position(ship.ship_id).is_none() {
                             node.handle_transit_commit(
                                 &ship,
