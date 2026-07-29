@@ -1,15 +1,92 @@
-use dawn_core::{DomainEvent, ItemId};
-use dawn_ecs::systems::{CapacitorSystem, CombatSystem, LockSystem, MovementSystem, RepairSystem};
+use std::collections::HashSet;
+
+use dawn_core::{DomainEvent, ItemId, ShipId};
+use dawn_ecs::{
+    components::{
+        ApproachComp, CapacitorComp, FittingComp, KeepAtRangeComp, LockComp, OrbitComp, WarpComp,
+    },
+    systems::{CapacitorSystem, CombatSystem, LockSystem, MovementSystem, RepairSystem},
+    Entity,
+};
 use dawn_event_store::store::EventStore;
 
 use super::{SimulationNode, TickResult};
 
 const SCRAP_METAL_PER_SHIP_DESTROYED: u64 = 1;
 
+/// Components whose per-tick mutation is suspended while ownership transfer is
+/// pending. Removing them from the ECS query surface keeps the existing systems
+/// simple; the exact values are restored after the tick.
+struct FrozenTransitComponents {
+    entity: Entity,
+    capacitor: Option<CapacitorComp>,
+    fitting: Option<FittingComp>,
+    lock: Option<LockComp>,
+    warp: Option<WarpComp>,
+    approach: Option<ApproachComp>,
+    orbit: Option<OrbitComp>,
+    keep_at_range: Option<KeepAtRangeComp>,
+}
+
 impl<S: EventStore> SimulationNode<S> {
     /// Execute one simulation tick.
     pub fn tick(&mut self) -> TickResult {
         self.tick_with_lock_commands(&[])
+    }
+
+    fn freeze_transit_components(&mut self) -> (HashSet<ShipId>, Vec<FrozenTransitComponents>) {
+        let transit: Vec<(ShipId, Entity)> = self
+            .ships
+            .index
+            .iter()
+            .filter_map(|(&ship_id, &entity)| {
+                self.world
+                    .transit_state(entity)
+                    .is_in_transit()
+                    .then_some((ship_id, entity))
+            })
+            .collect();
+        let ids = transit.iter().map(|(ship_id, _)| *ship_id).collect();
+        let components = transit
+            .into_iter()
+            .map(|(_, entity)| FrozenTransitComponents {
+                entity,
+                capacitor: self.world.remove_one::<CapacitorComp>(entity).ok(),
+                fitting: self.world.remove_one::<FittingComp>(entity).ok(),
+                lock: self.world.remove_one::<LockComp>(entity).ok(),
+                warp: self.world.remove_one::<WarpComp>(entity).ok(),
+                approach: self.world.remove_one::<ApproachComp>(entity).ok(),
+                orbit: self.world.remove_one::<OrbitComp>(entity).ok(),
+                keep_at_range: self.world.remove_one::<KeepAtRangeComp>(entity).ok(),
+            })
+            .collect();
+        (ids, components)
+    }
+
+    fn restore_transit_components(&mut self, frozen: Vec<FrozenTransitComponents>) {
+        for frozen in frozen {
+            if let Some(component) = frozen.capacitor {
+                let _ = self.world.insert_one(frozen.entity, component);
+            }
+            if let Some(component) = frozen.fitting {
+                let _ = self.world.insert_one(frozen.entity, component);
+            }
+            if let Some(component) = frozen.lock {
+                let _ = self.world.insert_one(frozen.entity, component);
+            }
+            if let Some(component) = frozen.warp {
+                let _ = self.world.insert_one(frozen.entity, component);
+            }
+            if let Some(component) = frozen.approach {
+                let _ = self.world.insert_one(frozen.entity, component);
+            }
+            if let Some(component) = frozen.orbit {
+                let _ = self.world.insert_one(frozen.entity, component);
+            }
+            if let Some(component) = frozen.keep_at_range {
+                let _ = self.world.insert_one(frozen.entity, component);
+            }
+        }
     }
 
     pub fn tick_with_lock_commands(
@@ -18,6 +95,7 @@ impl<S: EventStore> SimulationNode<S> {
     ) -> TickResult {
         self.current_tick = self.current_tick.next();
         let tick = self.current_tick;
+        let (transit_ids, frozen_transit) = self.freeze_transit_components();
 
         // 2.5 Approach System — re-aim thrust at approach targets (ADR-0015)
         self.process_approach();
@@ -48,10 +126,15 @@ impl<S: EventStore> SimulationNode<S> {
         // 4.5 Tackle System — update TackledComp for active Tackle modules (ADR-0024)
         let tackle_events = self.process_tackle(tick);
 
-        // 5. Lock System — merge human commands with queued bot commands
+        // 5. Lock System — merge human commands with queued bot commands. A
+        // pending Transit can neither acquire a lock nor become a new target.
         let merged_locks: Vec<dawn_core::LockOnCommand> = bot_locks
             .into_iter()
             .chain(lock_commands.iter().cloned())
+            .filter(|command| {
+                !transit_ids.contains(&command.ship_id)
+                    && !transit_ids.contains(&command.target_id)
+            })
             .collect();
         let lock = LockSystem(&mut self.world, tick, &merged_locks);
 
@@ -73,8 +156,16 @@ impl<S: EventStore> SimulationNode<S> {
             self.anchor_table.abs_map(),
         );
 
-        // 6.5 Repair System — apply local repairs after damage for this tick.
-        let repair = RepairSystem(&mut self.world, tick, &cap.repair_cycles_started);
+        // 6.5 Repair System — ignore repair cycles targeting a frozen Ship.
+        let repair_cycles: Vec<_> = cap
+            .repair_cycles_started
+            .iter()
+            .copied()
+            .filter(|cycle| !transit_ids.contains(&cycle.target_ship_id))
+            .collect();
+        let repair = RepairSystem(&mut self.world, tick, &repair_cycles);
+
+        self.restore_transit_components(frozen_transit);
 
         for event in &combat.events {
             let DomainEvent::ShipDestroyed(destroyed) = event else {
@@ -97,7 +188,7 @@ impl<S: EventStore> SimulationNode<S> {
             self.remove_ship(*ship_id);
         }
 
-        // 7. Bot System — bots issue the same commands as human players
+        // 7. Bot System — bot commands pass through the same InTransit guards.
         self.process_bots();
 
         // 8. Append to the EventStore
@@ -130,7 +221,7 @@ impl<S: EventStore> SimulationNode<S> {
 mod tests {
     use super::*;
     use crate::{modules, ship_types};
-    use dawn_core::{NodeId, Position, SectorBounds, SectorId, Tick, Velocity};
+    use dawn_core::{NodeId, Position, SectorBounds, SectorId, Tick, TransitCommand, Velocity};
 
     fn mem_node() -> SimulationNode {
         SimulationNode::new(
@@ -175,6 +266,55 @@ mod tests {
         let mut node = mem_node();
         node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
         assert_eq!(node.tick().events_emitted, 0);
+    }
+
+    #[test]
+    fn in_transit_ship_keeps_snapshot_state_across_ticks() {
+        let mut node = mem_node();
+        for def in modules::all_modules() {
+            node.register_module(def);
+        }
+        for def in ship_types::all_ship_types() {
+            node.register_ship_type(def);
+        }
+        let ship_id = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(100.0, 0.0, 0.0),
+            Velocity::new(10.0, 0.0, 0.0),
+        );
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.world
+            .get_mut::<CapacitorComp>(entity)
+            .unwrap()
+            .current = 1.0;
+        node.propose_transit(TransitCommand {
+            ship_id,
+            to: SectorId(1),
+        })
+        .unwrap();
+
+        let before = node
+            .take_snapshot()
+            .ships
+            .into_iter()
+            .find(|ship| ship.ship_id == ship_id)
+            .unwrap();
+        node.tick();
+        let after = node
+            .take_snapshot()
+            .ships
+            .into_iter()
+            .find(|ship| ship.ship_id == ship_id)
+            .unwrap();
+
+        assert_eq!(after.position, before.position);
+        assert_eq!(after.velocity, before.velocity);
+        assert_eq!(after.current_shield, before.current_shield);
+        assert_eq!(after.current_armor, before.current_armor);
+        assert_eq!(after.current_hull, before.current_hull);
+        assert_eq!(after.capacitor, before.capacitor);
+        assert_eq!(after.inventory, before.inventory);
+        assert_eq!(after.fitting, before.fitting);
     }
 
     #[test]
@@ -250,10 +390,7 @@ mod tests {
                     |e| matches!(e, DomainEvent::ShipDestroyed(d) if d.ship_id == victim && d.killer_id == killer),
                 )
         });
-        assert!(
-            destroyed,
-            "combat should eventually destroy the victim ship"
-        );
+        assert!(destroyed, "combat should eventually destroy the victim ship");
         let after = node
             .world
             .get::<dawn_ecs::components::InventoryComp>(killer_entity)
