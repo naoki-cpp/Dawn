@@ -21,7 +21,7 @@ jobs:
         shell: bash
         run: |
           git show a5be40e955eff2748187dae1a85d6f9196b9aeb2:.github/workflows/fix-pr-206.yml > /tmp/fix-pr-206.yml
-          python -c "from pathlib import Path; s=Path('.github/workflows/fix-pr-206-v2.yml').read_text(); a=\"          python - <<'PY'\\n\"; b='          PY\\n'; i=s.index(a)+len(a); block=s[i:s.index(b,i)]; code='\\n'.join(line[10:] if line.startswith('          ') else line for line in block.splitlines()); code=code.replace(\"Path('.github/workflows/fix-pr-206.yml')\",\"Path('/tmp/fix-pr-206.yml')\"); code=code.replace(\"exec(compile(script, 'fix-pr-206.py', 'exec'))\",\"legacy_scope = {}; exec(compile(script, 'fix-pr-206.py', 'exec'), legacy_scope, legacy_scope)\",1); exec(compile(code,'fix-pr-206.py','exec'))"
+          python -c "from pathlib import Path; s=Path('.github/workflows/fix-pr-206-v2.yml').read_text(); a=\"          python - <<'PY'\\n\"; b='          PY\\n'; i=s.index(a)+len(a); block=s[i:s.index(b,i)]; code='\\n'.join(line[10:] if line.startswith('          ') else line for line in block.splitlines()); code=code.replace(\"Path('.github/workflows/fix-pr-206.yml')\",\"Path('/tmp/fix-pr-206.yml')\"); code=code.replace(\"exec(compile(script, 'fix-pr-206.py', 'exec'))\",\"legacy_scope = {}; exec(compile(script, 'fix-pr-206.py', 'exec'), legacy_scope, legacy_scope)\",1); code=code.replace(\"r'    fn freeze_transit_components\\(&mut self\\) -> .*?^    \\\}\\n\\n    fn restore_transit_components.*?^    \\\}\\n'\",\"r'    fn freeze_transit_components\\(&mut self\\).*?(?=    pub fn tick_with_lock_commands)'\",1); exec(compile(code,'fix-pr-206.py','exec'))"
 
       - name: Format
         run: |
