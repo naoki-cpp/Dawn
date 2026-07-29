@@ -58,7 +58,7 @@ jobs:
           '''
           code, count = re.subn(
               r"old_lock_restore = '''.*?tick_path\.write_text\(tick\.replace\(old_lock_restore, new_lock_restore, 1\)\)\n",
-              replacement,
+              lambda _: replacement,
               code,
               count=1,
               flags=re.DOTALL,
