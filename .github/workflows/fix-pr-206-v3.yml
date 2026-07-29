@@ -15,13 +15,45 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
+          persist-credentials: false
           ref: recoverable-sector-transit
 
       - name: Apply review fixes
         shell: bash
         run: |
           git show a5be40e955eff2748187dae1a85d6f9196b9aeb2:.github/workflows/fix-pr-206.yml > /tmp/fix-pr-206.yml
-          python -c "from pathlib import Path; s=Path('.github/workflows/fix-pr-206-v2.yml').read_text(); a=\"          python - <<'PY'\\n\"; b='          PY\\n'; i=s.index(a)+len(a); block=s[i:s.index(b,i)]; code='\\n'.join(line[10:] if line.startswith('          ') else line for line in block.splitlines()); code=code.replace(\"Path('.github/workflows/fix-pr-206.yml')\",\"Path('/tmp/fix-pr-206.yml')\"); code=code.replace(\"exec(compile(script, 'fix-pr-206.py', 'exec'))\",\"legacy_scope = {}; exec(compile(script, 'fix-pr-206.py', 'exec'), legacy_scope, legacy_scope)\",1); code=code.replace(\"r'    fn freeze_transit_components\\(&mut self\\) -> .*?^    \\\}\\n\\n    fn restore_transit_components.*?^    \\\}\\n'\",\"r'    fn freeze_transit_components\\(&mut self\\).*?(?=    pub fn tick_with_lock_commands)'\",1); exec(compile(code,'fix-pr-206.py','exec'))"
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/fix-pr-206-v2.yml').read_text()
+          marker = "          python - <<'PY'\n"
+          start = source.index(marker) + len(marker)
+          end = source.index("          PY\n", start)
+          code = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in source[start:end].splitlines()
+          )
+          code = code.replace("Path('.github/workflows/fix-pr-206.yml')", "Path('/tmp/fix-pr-206.yml')")
+          code = code.replace("from pathlib import Path\nimport re", "from pathlib import Path\nimport re\nimport textwrap")
+          code = code.replace(
+              "def replace_once(path: str, old: str, new: str) -> None:\n    p = Path(path)",
+              "def replace_once(path: str, old: str, new: str) -> None:\n    old = textwrap.dedent(old)\n    new = textwrap.dedent(new)\n    p = Path(path)",
+          )
+          code = code.replace(
+              "def replace_n(path: str, old: str, new: str, expected: int) -> None:\n    p = Path(path)",
+              "def replace_n(path: str, old: str, new: str, expected: int) -> None:\n    old = textwrap.dedent(old)\n    new = textwrap.dedent(new)\n    p = Path(path)",
+          )
+          code = code.replace(
+              "def sub_once(path: str, pattern: str, replacement: str) -> None:\n    p = Path(path)",
+              "def sub_once(path: str, pattern: str, replacement: str) -> None:\n    replacement = textwrap.dedent(replacement)\n    p = Path(path)",
+          )
+          code = code.replace(
+              "r'    fn freeze_transit_components\\(&mut self\\) -> .*?^    \\\}\\n\\n    fn restore_transit_components.*?^    \\\}\\n'",
+              "r'    fn freeze_transit_components\\(&mut self\\).*?(?=    pub fn tick_with_lock_commands)'",
+              1,
+          )
+          exec(compile(code, 'fix-pr-206.py', 'exec'))
+          PY
 
       - name: Format
         run: |
@@ -38,11 +70,11 @@ jobs:
 
       - name: Commit fixes and remove temporary files
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          git rm -f --ignore-unmatch .github/workflows/fix-pr-206.yml
           git rm -f --ignore-unmatch .github/workflows/fix-pr-206-v2.yml
           git rm -f --ignore-unmatch .github/workflows/fix-pr-206-v3.yml
-          git rm -f --ignore-unmatch .github/fix-pr-206-trigger
           git add crates/dawn-core/src/events.rs \
                   crates/dawn-sector/src/node/tick.rs \
                   crates/dawn-sector/src/node/transit_flow.rs \
@@ -52,4 +84,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "fix(sector): address transit recovery review"
-          git push origin HEAD:recoverable-sector-transit
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:recoverable-sector-transit
