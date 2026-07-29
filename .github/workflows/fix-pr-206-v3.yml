@@ -39,12 +39,25 @@ jobs:
               "legacy_scope = {}; exec(compile(script, 'fix-pr-206.py', 'exec'), legacy_scope, legacy_scope)",
               1,
           )
-          code = "\n".join(
-              "    r'    fn freeze_transit_components\\(&mut self\\).*?(?=    pub fn tick_with_lock_commands)',"
-              if "r'    fn freeze_transit_components" in line
-              else line
-              for line in code.splitlines()
-          )
+          old_helper = '''def replace_regex(text: str, pattern: str, new: str, label: str) -> str:
+              updated, count = re.subn(pattern, new, text, count=1, flags=re.MULTILINE | re.DOTALL)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one structural match, found {count}')
+              return updated
+          '''
+          new_helper = '''def replace_regex(text: str, pattern: str, new: str, label: str) -> str:
+              if label == 'freeze/restore functions':
+                  start = text.index('    fn freeze_transit_components')
+                  end = text.index('    pub fn tick_with_lock_commands', start)
+                  return text[:start] + new + '\n' + text[end:]
+              updated, count = re.subn(pattern, new, text, count=1, flags=re.MULTILINE | re.DOTALL)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one structural match, found {count}')
+              return updated
+          '''
+          if old_helper not in code:
+              raise SystemExit('replace_regex helper not found')
+          code = code.replace(old_helper, new_helper, 1)
           exec(compile(code, 'fix-pr-206.py', 'exec'))
           PY
 
