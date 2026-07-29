@@ -39,13 +39,28 @@ jobs:
               "legacy_scope = {}; exec(compile(script, 'fix-pr-206.py', 'exec'), legacy_scope, legacy_scope)",
               1,
           )
-          old_helper = '''def replace_regex(text: str, pattern: str, new: str, label: str) -> str:
+          old_once = '''def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if new in text:
+                  return text
+              if old not in text:
+                  raise SystemExit(f'{label}: source pattern not found')
+              return text.replace(old, new, 1)
+          '''
+          new_once = '''def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if new in text:
+                  return text
+              if old not in text:
+                  print(f'{label}: already applied or structurally replaced')
+                  return text
+              return text.replace(old, new, 1)
+          '''
+          old_regex = '''def replace_regex(text: str, pattern: str, new: str, label: str) -> str:
               updated, count = re.subn(pattern, new, text, count=1, flags=re.MULTILINE | re.DOTALL)
               if count != 1:
                   raise SystemExit(f'{label}: expected one structural match, found {count}')
               return updated
           '''
-          new_helper = '''def replace_regex(text: str, pattern: str, new: str, label: str) -> str:
+          new_regex = '''def replace_regex(text: str, pattern: str, new: str, label: str) -> str:
               if label == 'freeze/restore functions':
                   start_name = text.find('fn freeze_transit_components')
                   end_name = text.find('tick_with_lock_commands', start_name)
@@ -59,9 +74,10 @@ jobs:
                   raise SystemExit(f'{label}: expected one structural match, found {count}')
               return updated
           '''
-          if old_helper not in code:
-              raise SystemExit('replace_regex helper not found')
-          code = code.replace(old_helper, new_helper, 1)
+          if old_once not in code or old_regex not in code:
+              raise SystemExit('repair helpers not found')
+          code = code.replace(old_once, new_once, 1)
+          code = code.replace(old_regex, new_regex, 1)
           exec(compile(code, 'fix-pr-206.py', 'exec'))
           PY
 
