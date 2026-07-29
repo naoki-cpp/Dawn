@@ -47,8 +47,12 @@ jobs:
           '''
           new_helper = '''def replace_regex(text: str, pattern: str, new: str, label: str) -> str:
               if label == 'freeze/restore functions':
-                  start = text.index('    fn freeze_transit_components')
-                  end = text.index('    pub fn tick_with_lock_commands', start)
+                  start_name = text.find('fn freeze_transit_components')
+                  end_name = text.find('tick_with_lock_commands', start_name)
+                  if start_name < 0 or end_name < 0:
+                      raise SystemExit('freeze function boundaries not found')
+                  start = text.rfind(chr(10), 0, start_name) + 1
+                  end = text.rfind(chr(10), 0, end_name) + 1
                   return text[:start] + new + chr(10) + text[end:]
               updated, count = re.subn(pattern, new, text, count=1, flags=re.MULTILINE | re.DOTALL)
               if count != 1:
