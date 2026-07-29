@@ -1,0 +1,803 @@
+name: Apply PR 206 review fixes
+
+on:
+  push:
+    branches:
+      - recoverable-sector-transit
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: recoverable-sector-transit
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Apply review fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one exact match, found {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          def replace_n(path: str, old: str, new: str, expected: int) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} exact matches, found {count}")
+              p.write_text(text.replace(old, new))
+
+          def sub_once(path: str, pattern: str, replacement: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one regex match, found {count}: {pattern}")
+              p.write_text(updated)
+
+          # Durable route metadata and source-local request identity.
+          replace_once(
+              "crates/dawn-core/src/events.rs",
+              """pub struct SectorTransitRequested {
+    pub ship_id: ShipId,
+    pub from: SectorId,
+    pub to: SectorId,
+    pub tick: Tick,
+}
+""",
+              """pub struct SectorTransitRequested {
+    pub ship_id: ShipId,
+    pub from: SectorId,
+    pub to: SectorId,
+    /// Source-Sector Tick that identifies this request. This is a source-local
+    /// nonce, not the Tick of every EventStore that records the transfer.
+    pub request_tick: Tick,
+    /// Original transfer kind. `None` is a non-Gate Sector Transit and must not
+    /// be inferred as a Jump after restart merely because topology has a Gate.
+    pub gate_id: Option<JumpGateId>,
+    /// Resolved destination entry point persisted by the source outbox.
+    pub entry_pos: Position,
+    pub entry_pos_abs: AbsolutePosition,
+    /// Tick local to the EventStore that appended this record.
+    pub tick: Tick,
+}
+""",
+          )
+          replace_once(
+              "crates/dawn-core/src/events.rs",
+              """            SectorTransitRequested {
+                ship_id: id,
+                from: SectorId(0),
+                to: SectorId(1),
+                tick: Tick(7),
+            },
+""",
+              """            SectorTransitRequested {
+                ship_id: id,
+                from: SectorId(0),
+                to: SectorId(1),
+                request_tick: Tick(7),
+                gate_id: None,
+                entry_pos: Position::ORIGIN,
+                entry_pos_abs: AbsolutePosition::ORIGIN,
+                tick: Tick(7),
+            },
+""",
+          )
+
+          # Source request recording, durable route replay, and per-ship retry state.
+          replace_once(
+              "crates/dawn-sector/src/node/transit_flow.rs",
+              """    DawnError, DomainEvent, JumpGateId, Position, SectorId, ShipId, ShipTypeId,
+""",
+              """    DawnError, DomainEvent, JumpGateId, Position, SectorId, ShipId, ShipTypeId, Tick,
+""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/transit_flow.rs",
+              """pub struct TransitCommitData {
+    pub ship: Box<ShipSnapshot>,
+    pub entry_pos: Position,
+    pub entry_pos_abs: dawn_core::AbsolutePosition,
+}
+""",
+              """pub struct TransitCommitData {
+    pub ship: Box<ShipSnapshot>,
+    pub entry_pos: Position,
+    pub entry_pos_abs: dawn_core::AbsolutePosition,
+    pub request_tick: Tick,
+}
+
+const TRANSIT_RETRY_INITIAL_TICKS: u64 = 10;
+const TRANSIT_RETRY_MAX_TICKS: u64 = 160;
+
+/// Process-local retry scheduling. The durable request and route live in the
+/// EventStore; this component only prevents an unresolved request from being
+/// proposed every Tick. It intentionally is not snapshotted, so restart causes
+/// one immediate retry and then resumes bounded exponential backoff.
+#[derive(Debug, Clone, Copy)]
+struct TransitRetryComp {
+    request_tick: Tick,
+    next_retry_tick: Tick,
+    backoff_ticks: u64,
+}
+""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/transit_flow.rs",
+              """    pub(super) fn propose_transit(&mut self, cmd: TransitCommand) -> Result<(), DawnError> {
+        let &entity = self
+            .ships
+            .index
+            .get(&cmd.ship_id)
+            .ok_or(DawnError::ShipNotFound(cmd.ship_id))?;
+
+        if self.world.transit_state(entity).is_in_transit() {
+            return Err(DawnError::ShipInTransit(cmd.ship_id));
+        }
+
+        self.world
+            .set_transit_state(entity, TransitState::InTransit { to: cmd.to });
+
+        self.event_store.append(DomainEvent::SectorTransitRequested(
+            SectorTransitRequested {
+                ship_id: cmd.ship_id,
+                from: self.sector_id,
+                to: cmd.to,
+                tick: self.current_tick,
+            },
+        ));
+
+        Ok(())
+    }
+""",
+              """    pub(super) fn propose_transit(&mut self, cmd: TransitCommand) -> Result<(), DawnError> {
+        self.propose_transit_with_route(
+            cmd,
+            None,
+            Position::ORIGIN,
+            dawn_core::AbsolutePosition::ORIGIN,
+        )
+        .map(|_| ())
+    }
+
+    fn propose_transit_with_route(
+        &mut self,
+        cmd: TransitCommand,
+        gate_id: Option<JumpGateId>,
+        entry_pos: Position,
+        entry_pos_abs: dawn_core::AbsolutePosition,
+    ) -> Result<Tick, DawnError> {
+        let &entity = self
+            .ships
+            .index
+            .get(&cmd.ship_id)
+            .ok_or(DawnError::ShipNotFound(cmd.ship_id))?;
+
+        if self.world.transit_state(entity).is_in_transit() {
+            return Err(DawnError::ShipInTransit(cmd.ship_id));
+        }
+
+        self.world
+            .set_transit_state(entity, TransitState::InTransit { to: cmd.to });
+
+        let request_tick = self.current_tick;
+        self.event_store.append(DomainEvent::SectorTransitRequested(
+            SectorTransitRequested {
+                ship_id: cmd.ship_id,
+                from: self.sector_id,
+                to: cmd.to,
+                request_tick,
+                gate_id,
+                entry_pos,
+                entry_pos_abs,
+                tick: self.current_tick,
+            },
+        ));
+
+        Ok(request_tick)
+    }
+""",
+          )
+          sub_once(
+              "crates/dawn-sector/src/node/transit_flow.rs",
+              r"    pub fn prepare_transit_commit\(\n        &mut self,\n        ship_id: ShipId,\n        to: SectorId,\n        gate_id: Option<JumpGateId>,\n    \) -> Option<TransitCommitData> \{.*?\n    \}\n\n    /// Append `JumpGateUsed`",
+              """    pub fn prepare_transit_commit(
+        &mut self,
+        ship_id: ShipId,
+        to: SectorId,
+        gate_id: Option<JumpGateId>,
+    ) -> Option<TransitCommitData> {
+        let arrival_gate = gate_id.and_then(|_| {
+            self.galaxy()
+                .gates_in_sector(to)
+                .into_iter()
+                .find(|g| g.to_sector == self.sector_id())
+        });
+        let entry_pos = arrival_gate.map(|g| g.position).unwrap_or(Position::ORIGIN);
+        let entry_pos_abs = arrival_gate
+            .map(|g| g.abs_m)
+            .unwrap_or(dawn_core::AbsolutePosition::ORIGIN);
+        let request_tick = self
+            .propose_transit_with_route(
+                TransitCommand { ship_id, to },
+                gate_id,
+                entry_pos,
+                entry_pos_abs,
+            )
+            .ok()?;
+
+        let ship = self.snapshot_for_transit(ship_id)?;
+        Some(TransitCommitData {
+            ship: Box::new(ship),
+            entry_pos,
+            entry_pos_abs,
+            request_tick,
+        })
+    }
+
+    /// Append `JumpGateUsed`""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/transit_flow.rs",
+              """        Some(snapshot)
+    }
+
+    /// Stage 1.5 of a Sector Transit""",
+              """        Some(snapshot)
+    }
+
+    pub(crate) fn transit_commit_retry_due(
+        &self,
+        ship_id: ShipId,
+        request_tick: Tick,
+    ) -> bool {
+        let Some(&entity) = self.ships.index.get(&ship_id) else {
+            return false;
+        };
+        self.world
+            .get::<TransitRetryComp>(entity)
+            .map(|state| {
+                state.request_tick != request_tick || self.current_tick >= state.next_retry_tick
+            })
+            .unwrap_or(true)
+    }
+
+    pub(crate) fn note_transit_commit_proposed(
+        &mut self,
+        ship_id: ShipId,
+        request_tick: Tick,
+    ) {
+        let Some(&entity) = self.ships.index.get(&ship_id) else {
+            return;
+        };
+        let existing = self
+            .world
+            .get::<TransitRetryComp>(entity)
+            .map(|state| *state);
+        let delay = existing
+            .filter(|state| state.request_tick == request_tick)
+            .map(|state| {
+                state
+                    .backoff_ticks
+                    .saturating_mul(2)
+                    .min(TRANSIT_RETRY_MAX_TICKS)
+            })
+            .unwrap_or(TRANSIT_RETRY_INITIAL_TICKS);
+        let _ = self.world.remove_one::<TransitRetryComp>(entity);
+        let _ = self.world.insert_one(
+            entity,
+            TransitRetryComp {
+                request_tick,
+                next_retry_tick: Tick(self.current_tick.value().saturating_add(delay)),
+                backoff_ticks: delay,
+            },
+        );
+    }
+
+    /// Stage 1.5 of a Sector Transit""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/transit_flow.rs",
+              """        if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+            self.world
+                .set_transit_state(entity, dawn_ecs::TransitState::None);
+        }
+""",
+              """        if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+            self.world
+                .set_transit_state(entity, dawn_ecs::TransitState::None);
+            let _ = self.world.remove_one::<TransitRetryComp>(entity);
+        }
+""",
+          )
+          replace_n(
+              "crates/dawn-sector/src/node/transit_flow.rs",
+              """                ship_id,
+                from: SectorId(0),
+                to: SectorId(1),
+                tick: Tick(1),
+""",
+              """                ship_id,
+                from: SectorId(0),
+                to: SectorId(1),
+                request_tick: Tick(1),
+                gate_id: None,
+                entry_pos: Position::ORIGIN,
+                entry_pos_abs: dawn_core::AbsolutePosition::ORIGIN,
+                tick: Tick(1),
+""",
+              2,
+          )
+
+          # Destination markers use destination-local Tick. Lock/tackle state is frozen without
+          # making the Ship disappear from LockSystem's alive set.
+          replace_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              """        ApproachComp, CapacitorComp, FittingComp, KeepAtRangeComp, LockComp, OrbitComp, WarpComp,
+""",
+              """        ApproachComp, CapacitorComp, FittingComp, KeepAtRangeComp, LockComp, OrbitComp,
+        TackledComp, WarpComp,
+""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              """    lock: Option<LockComp>,
+    warp: Option<WarpComp>,
+""",
+              """    lock: Option<LockComp>,
+    tackled: Option<TackledComp>,
+    warp: Option<WarpComp>,
+""",
+          )
+          sub_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              r"    pub\(crate\) fn append_incoming_transit_marker\(.*?\n    \}\n\n    fn freeze_transit_components",
+              """    pub(crate) fn append_incoming_transit_marker(
+        &mut self,
+        ship_id: ShipId,
+        from: dawn_core::SectorId,
+        to: dawn_core::SectorId,
+        request_tick: dawn_core::Tick,
+        gate_id: Option<dawn_core::JumpGateId>,
+        entry_pos: dawn_core::Position,
+        entry_pos_abs: dawn_core::AbsolutePosition,
+    ) {
+        self.event_store.append(DomainEvent::SectorTransitRequested(
+            dawn_core::events::SectorTransitRequested {
+                ship_id,
+                from,
+                to,
+                request_tick,
+                gate_id,
+                entry_pos,
+                entry_pos_abs,
+                tick: self.current_tick,
+            },
+        ));
+    }
+
+    fn freeze_transit_components""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              """                capacitor: self.world.remove_one::<CapacitorComp>(entity),
+                fitting: self.world.remove_one::<FittingComp>(entity),
+                lock: self.world.remove_one::<LockComp>(entity),
+                warp: self.world.remove_one::<WarpComp>(entity),
+""",
+              """                capacitor: self.world.remove_one::<CapacitorComp>(entity),
+                fitting: self.world.remove_one::<FittingComp>(entity),
+                lock: self.world.get::<LockComp>(entity).map(|lock| (*lock).clone()),
+                tackled: self.world.remove_one::<TackledComp>(entity),
+                warp: self.world.remove_one::<WarpComp>(entity),
+""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              """            if let Some(component) = frozen.lock {
+                let _ = self.world.insert_one(frozen.entity, component);
+            }
+            if let Some(component) = frozen.warp {
+""",
+              """            if let Some(component) = frozen.lock {
+                if let Some(mut current) = self.world.get_mut::<LockComp>(frozen.entity) {
+                    *current = component;
+                } else {
+                    let _ = self.world.insert_one(frozen.entity, component);
+                }
+            }
+            let _ = self.world.remove_one::<TackledComp>(frozen.entity);
+            if let Some(component) = frozen.tackled {
+                let _ = self.world.insert_one(frozen.entity, component);
+            }
+            if let Some(component) = frozen.warp {
+""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              """        let tackle_events = self.process_tackle(tick);
+""",
+              """        let tackle_events: Vec<_> = self
+            .process_tackle(tick)
+            .into_iter()
+            .filter(|event| !transit_ids.contains(&event.ship_id()))
+            .collect();
+""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              """        let lock = LockSystem(&mut self.world, tick, &merged_locks);
+""",
+              """        let mut lock = LockSystem(&mut self.world, tick, &merged_locks);
+        lock.events
+            .retain(|event| !transit_ids.contains(&event.ship_id()));
+""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              """        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.world.get_mut::<CapacitorComp>(entity).unwrap().current = 1.0;
+        node.propose_transit(TransitCommand {
+""",
+              """        let entity = *node.ships.index.get(&ship_id).unwrap();
+        node.world.get_mut::<CapacitorComp>(entity).unwrap().current = 1.0;
+        let _ = node.world.insert_one(
+            entity,
+            TackledComp {
+                tacklers: vec![dawn_core::ShipId::new(NodeId(9), 1)],
+            },
+        );
+        node.propose_transit(TransitCommand {
+""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              """        node.tick();
+        let after = node
+""",
+              """        let tick_result = node.tick();
+        let after = node
+""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              """        assert_eq!(after.inventory, before.inventory);
+        assert_eq!(after.fitting, before.fitting);
+""",
+              """        assert_eq!(after.inventory, before.inventory);
+        assert_eq!(after.fitting, before.fitting);
+        assert_eq!(after.tackled_by, before.tackled_by);
+        assert!(tick_result.events.iter().all(|event| !matches!(
+            event,
+            DomainEvent::TackleApplied(_)
+                | DomainEvent::TackleReleased(_)
+                | DomainEvent::TargetLocked(_)
+                | DomainEvent::LockLost(_)
+        )));
+""",
+          )
+
+          # Retry uses the durable route and a bounded per-ship backoff.
+          replace_once(
+              "crates/dawn-sector/src/transit.rs",
+              """struct PendingTransit {
+    ship_id: ShipId,
+    from: SectorId,
+    to: SectorId,
+    request_tick: Tick,
+}
+""",
+              """struct PendingTransit {
+    ship_id: ShipId,
+    from: SectorId,
+    to: SectorId,
+    request_tick: Tick,
+    gate_id: Option<JumpGateId>,
+    entry_pos: Position,
+    entry_pos_abs: AbsolutePosition,
+}
+""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/transit.rs",
+              """                        request_tick: event.tick,
+""",
+              """                        request_tick: event.request_tick,
+                        gate_id: event.gate_id,
+                        entry_pos: event.entry_pos,
+                        entry_pos_abs: event.entry_pos_abs,
+""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/transit.rs",
+              """                    && event.tick == request_tick =>
+""",
+              """                    && event.request_tick == request_tick =>
+""",
+          )
+          sub_once(
+              "crates/dawn-sector/src/transit.rs",
+              r"fn inferred_gate_id<.*?\nfn snapshot_ship",
+              "fn snapshot_ship",
+          )
+          sub_once(
+              "crates/dawn-sector/src/transit.rs",
+              r"fn retry_pending_transits<S: EventStore>\(node: &mut SimulationNode<S>, raft: &RaftActorHandle\) \{.*?\n\}\n\nfn request_matches",
+              """fn retry_pending_transits<S: EventStore>(node: &mut SimulationNode<S>, raft: &RaftActorHandle) {
+    let pending = pending_outgoing_transits(node);
+    if pending.is_empty() {
+        return;
+    }
+    let snapshot = node.take_snapshot();
+
+    for transit in pending {
+        if !node.transit_commit_retry_due(transit.ship_id, transit.request_tick) {
+            continue;
+        }
+        let Some(ship) = snapshot
+            .ships
+            .iter()
+            .find(|ship| ship.ship_id == transit.ship_id)
+            .cloned()
+        else {
+            continue;
+        };
+        propose_commit(
+            raft,
+            ship,
+            transit.from,
+            transit.to,
+            transit.entry_pos,
+            transit.entry_pos_abs,
+            transit.gate_id,
+            transit.request_tick,
+        );
+        node.note_transit_commit_proposed(transit.ship_id, transit.request_tick);
+    }
+}
+
+fn request_matches""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/transit.rs",
+              """                if let Some(data) = node.prepare_transit_commit(ship_id, to, gate_id) {
+                    propose_commit(
+                        raft,
+                        *data.ship,
+                        node.sector_id(),
+                        to,
+                        data.entry_pos,
+                        data.entry_pos_abs,
+                        gate_id,
+                        node.current_tick(),
+                    );
+                }
+""",
+              """                if let Some(data) = node.prepare_transit_commit(ship_id, to, gate_id) {
+                    let request_tick = data.request_tick;
+                    propose_commit(
+                        raft,
+                        *data.ship,
+                        node.sector_id(),
+                        to,
+                        data.entry_pos,
+                        data.entry_pos_abs,
+                        gate_id,
+                        request_tick,
+                    );
+                    node.note_transit_commit_proposed(ship_id, request_tick);
+                }
+""",
+          )
+          replace_once(
+              "crates/dawn-sector/src/transit.rs",
+              """                        node.append_incoming_transit_marker(ship.ship_id, from, to, request_tick);
+""",
+              """                        node.append_incoming_transit_marker(
+                            ship.ship_id,
+                            from,
+                            to,
+                            request_tick,
+                            gate_id,
+                            entry_pos,
+                            entry_pos_abs,
+                        );
+""",
+          )
+          sub_once(
+              "crates/dawn-sector/src/transit.rs",
+              r"    #\[test\]\n    fn restored_requested_transit_reproposes_commit\(\) \{.*?\n    \}\n\n    #\[test\]\n    fn decode_returns_none_for_garbage_payload",
+              """    #[test]
+    fn restored_requested_transit_reproposes_commit_with_the_durable_route() {
+        let mut source = node(0, 0);
+        let ship_id = source.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let snapshot_before = source.take_snapshot();
+        source
+            .prepare_transit_commit(ship_id, SectorId(1), None)
+            .unwrap();
+
+        let mut store = InMemoryEventStore::new();
+        for record in source.event_store().iter_from(0) {
+            store.append(record.event.clone());
+        }
+        let mut restored = SimulationNode::restore_from(store, &snapshot_before, &[], &[]);
+        let (raft, mut proposals) = raft_handle();
+        let (_tx, mut committed_rx) = mpsc::unbounded_channel();
+        apply_committed_raft_entries(&mut restored, &raft, &mut committed_rx);
+
+        match decode_proposed_transit(&mut proposals) {
+            TransitOp::Commit {
+                ship,
+                gate_id,
+                entry_pos,
+                entry_pos_abs,
+                request_tick,
+                ..
+            } => {
+                assert_eq!(ship.ship_id, ship_id);
+                assert_eq!(gate_id, None);
+                assert_eq!(entry_pos, Position::ORIGIN);
+                assert_eq!(entry_pos_abs, AbsolutePosition::ORIGIN);
+                assert_eq!(request_tick, Tick::ZERO);
+            }
+            other => panic!("expected Commit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn initial_request_proposes_one_commit_then_waits_for_the_retry_deadline() {
+        let mut source = node(0, 0);
+        let ship_id = source.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let (raft, mut proposals) = raft_handle();
+        let (tx, mut committed_rx) = mpsc::unbounded_channel();
+        tx.send(
+            TransitOp::Request {
+                ship_id,
+                to: SectorId(1),
+                gate_id: None,
+            }
+            .encode(),
+        )
+        .unwrap();
+        apply_committed_raft_entries(&mut source, &raft, &mut committed_rx);
+        assert!(matches!(
+            decode_proposed_transit(&mut proposals),
+            TransitOp::Commit { .. }
+        ));
+        assert!(proposals.try_recv().is_err(), "initial apply proposed Commit twice");
+
+        let (_empty_tx, mut empty_rx) = mpsc::unbounded_channel();
+        for _ in 0..9 {
+            source.tick();
+            apply_committed_raft_entries(&mut source, &raft, &mut empty_rx);
+            assert!(
+                proposals.try_recv().is_err(),
+                "Commit retried before the ten-Tick deadline"
+            );
+        }
+        source.tick();
+        apply_committed_raft_entries(&mut source, &raft, &mut empty_rx);
+        assert!(matches!(
+            decode_proposed_transit(&mut proposals),
+            TransitOp::Commit { .. }
+        ));
+        assert!(proposals.try_recv().is_err(), "retry emitted more than one Commit");
+    }
+
+    #[test]
+    fn destination_marker_keeps_destination_local_tick() {
+        let mut destination = node(1, 1);
+        let (raft, _proposals) = raft_handle();
+        let (tx, mut committed_rx) = mpsc::unbounded_channel();
+        tx.send(
+            TransitOp::Commit {
+                ship: Box::new(sample_ship()),
+                from: SectorId(0),
+                to: SectorId(1),
+                entry_pos: Position::ORIGIN,
+                entry_pos_abs: AbsolutePosition::ORIGIN,
+                gate_id: None,
+                request_tick: Tick(99),
+            }
+            .encode(),
+        )
+        .unwrap();
+        apply_committed_raft_entries(&mut destination, &raft, &mut committed_rx);
+
+        let marker = destination
+            .event_store()
+            .iter_from(0)
+            .find_map(|record| match &record.event {
+                DomainEvent::SectorTransitRequested(event) => Some(event),
+                _ => None,
+            })
+            .expect("destination marker");
+        assert_eq!(marker.request_tick, Tick(99));
+        assert_eq!(marker.tick, Tick::ZERO);
+        assert_eq!(destination.current_tick(), Tick::ZERO);
+    }
+
+    #[test]
+    fn decode_returns_none_for_garbage_payload""",
+          )
+
+          # Normative docs: request identity/route and the Ack/backoff phase.
+          replace_once(
+              "docs/architecture/tick-model.md",
+              """          -> Applies committed TransitOp to ECS:
+            TransitOp::Request -> owning node: marks InTransit, appends
+              SectorTransitRequested, exports Ship state, proposes TransitOp::Commit to Raft
+            TransitOp::Commit  -> destination node: imports at entry_pos, appends
+              SectorTransitCompleted; if gate_id is Some, also appends JumpGateUsed; if
+              from/to StarSystemId differ, also appends StarSystemChanged
+              (ADR-0009 / SimulationNode::append_jump_events)
+""",
+              """          -> Applies committed TransitOp to ECS:
+            TransitOp::Request -> owning node: resolves and durably records the exact route,
+              marks InTransit, keeps a frozen recovery copy, and proposes Commit once
+            TransitOp::Commit  -> destination node: records an incoming marker with its own
+              local Tick, imports idempotently, appends SectorTransitCompleted plus optional
+              JumpGateUsed / StarSystemChanged, and proposes Ack
+            TransitOp::Ack     -> source validates the source-local request identity, removes
+              its recovery copy, and appends SectorTransitCompleted
+          -> Unresolved source requests retry Commit with bounded exponential backoff;
+             route kind and entry point are read from EventStore, never inferred from topology
+""",
+          )
+          replace_once(
+              "docs/architecture/event-catalog.md",
+              """| `SectorTransitRequested` | Durable transfer request; source retains a frozen recovery copy until Ack | source `propose_transit()`; destination also records an incoming identity marker before materialization | ✅ implemented |
+""",
+              """| `SectorTransitRequested` | Durable transfer request carrying source-local request identity plus the resolved Gate/non-Gate route; source retains a frozen recovery copy until Ack | source `propose_transit()`; destination also records an incoming marker using its own local `tick` | ✅ implemented |
+""",
+          )
+          replace_once(
+              "docs/architecture/event-catalog.md",
+              """The corresponding command is `TransitCommand { ship_id, to }`. Raft carries `TransitOp::Request`, `Commit`, and `Ack`: Request freezes the source; Commit materializes the destination and durably records completion; Ack removes the source recovery copy. Unresolved source Requested events are retried from EventStore after restart, and checkpoint compaction is deferred while one is pending.
+""",
+              """The corresponding command is `TransitCommand { ship_id, to }`. Raft carries `TransitOp::Request`, `Commit`, and `Ack`: Request freezes the source and persists `request_tick`, `gate_id`, `entry_pos`, and `entry_pos_abs`; Commit materializes the destination and durably records completion using a destination-local event `tick`; Ack removes the source recovery copy. Unresolved source Requested events are retried from EventStore after restart with bounded exponential backoff, and checkpoint compaction is deferred while one is pending.
+""",
+          )
+          PY
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Test affected crates
+        run: cargo test -p dawn-core -p dawn-sector
+
+      - name: Clippy affected crates
+        run: cargo clippy -p dawn-core -p dawn-sector --all-targets -- -D warnings
+
+      - name: Commit fixes and remove temporary workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/fix-pr-206.yml
+          git add crates/dawn-core/src/events.rs \
+                  crates/dawn-sector/src/node/tick.rs \
+                  crates/dawn-sector/src/node/transit_flow.rs \
+                  crates/dawn-sector/src/transit.rs \
+                  docs/architecture/tick-model.md \
+                  docs/architecture/event-catalog.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(sector): address transit recovery review"
+          git push origin HEAD:recoverable-sector-transit
