@@ -51,13 +51,13 @@ impl<S: EventStore> SimulationNode<S> {
             .into_iter()
             .map(|(_, entity)| FrozenTransitComponents {
                 entity,
-                capacitor: self.world.remove_one::<CapacitorComp>(entity).ok(),
-                fitting: self.world.remove_one::<FittingComp>(entity).ok(),
-                lock: self.world.remove_one::<LockComp>(entity).ok(),
-                warp: self.world.remove_one::<WarpComp>(entity).ok(),
-                approach: self.world.remove_one::<ApproachComp>(entity).ok(),
-                orbit: self.world.remove_one::<OrbitComp>(entity).ok(),
-                keep_at_range: self.world.remove_one::<KeepAtRangeComp>(entity).ok(),
+                capacitor: self.world.remove_one::<CapacitorComp>(entity),
+                fitting: self.world.remove_one::<FittingComp>(entity),
+                lock: self.world.remove_one::<LockComp>(entity),
+                warp: self.world.remove_one::<WarpComp>(entity),
+                approach: self.world.remove_one::<ApproachComp>(entity),
+                orbit: self.world.remove_one::<OrbitComp>(entity),
+                keep_at_range: self.world.remove_one::<KeepAtRangeComp>(entity),
             })
             .collect();
         (ids, components)
@@ -221,7 +221,9 @@ impl<S: EventStore> SimulationNode<S> {
 mod tests {
     use super::*;
     use crate::{modules, ship_types};
-    use dawn_core::{NodeId, Position, SectorBounds, SectorId, Tick, TransitCommand, Velocity};
+    use dawn_core::{
+        commands::TransitCommand, NodeId, Position, SectorBounds, SectorId, Tick, Velocity,
+    };
 
     fn mem_node() -> SimulationNode {
         SimulationNode::new(
