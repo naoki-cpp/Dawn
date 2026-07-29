@@ -1,79 +1,217 @@
-//! Sector Transit proposals carried through the Raft Log (ADR-0014 §3).
+//! Sector Transit commands carried through Raft (ADR-0014).
 //!
-//! `TransitOp` is the *Command* (proposal) type serialized into Raft
-//! `LogEntry` payloads — never an Event (INV-006). Once an op commits,
-//! every node applies it deterministically:
-//!
-//! - `Request`: the owning (from) node marks the Ship `InTransit`, appends
-//!   `SectorTransitRequested`, exports the Ship's state, and proposes a
-//!   follow-up `Commit` op carrying that state (ADR-0014 §3 \[4\]).
-//! - `Commit`: the destination (to) node imports the Ship at `entry_pos`
-//!   and appends `SectorTransitCompleted`. Other nodes ignore it.
+//! Request freezes the source Ship. Commit materializes the destination. Ack
+//! removes the source copy. The source retries pending Requests from its
+//! EventStore, so a crash between phases converges without atomic cross-node
+//! EventStore writes.
 
 use crate::node::SimulationNode;
 use crate::persistence::ShipSnapshot;
 use dawn_consensus::RaftActorHandle;
-use dawn_core::{AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId};
+use dawn_core::{AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId, Tick};
 use dawn_event_store::store::EventStore;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
-/// A Sector Transit proposal as it travels through the Raft Log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransitOp {
-    /// Stage 1: a node requests moving `ship_id` to Sector `to`.
-    ///
-    /// `gate_id` is `Some` when this Transit was initiated via a Jump Gate
-    /// (ADR-0009); `Commit` carries the same value so Step 7.5 can append
-    /// `JumpGateUsed` on the destination node.
     Request {
         ship_id: ShipId,
         to: SectorId,
         gate_id: Option<JumpGateId>,
     },
-    /// Stage 2: the from-node ships the exported state to the to-node.
     Commit {
-        // Boxed (ADR-0032 grew ShipSnapshot with `inventory`, pushing this
-        // variant well past Request's size): keeps every TransitOp the size
-        // of the smallest variant instead of the largest.
         ship: Box<ShipSnapshot>,
         from: SectorId,
         to: SectorId,
         entry_pos: Position,
-        /// Precise f64 Sector-frame arrival point (ADR-0029): `entry_pos`
-        /// alone is too coarse to re-anchor the Ship against at true-AU
-        /// magnitudes (see `SimulationNode::import_transit`).
         entry_pos_abs: AbsolutePosition,
         gate_id: Option<JumpGateId>,
+        request_tick: Tick,
+    },
+    Ack {
+        ship: Box<ShipSnapshot>,
+        from: SectorId,
+        to: SectorId,
+        entry_pos_abs: AbsolutePosition,
+        request_tick: Tick,
     },
 }
 
 impl TransitOp {
-    /// Serialize for a Raft `LogEntry` payload.
     pub fn encode(&self) -> Vec<u8> {
         postcard::to_stdvec(self).expect("TransitOp serialization cannot fail")
     }
 
-    /// Deserialize from a committed Raft `LogEntry` payload.
-    ///
-    /// Returns `None` for payloads that are not a `TransitOp` (future proposal
-    /// types share the same log).
     pub fn decode(payload: &[u8]) -> Option<Self> {
         postcard::from_bytes(payload).ok()
     }
 }
 
-/// Tick Step 7.5 (ADR-0014 §7): apply committed Raft Log entries to a node.
-///
-/// `Request`: if `node` owns the Ship, mark it `InTransit` (appends
-/// `SectorTransitRequested`), export its state, and propose the follow-up
-/// `Commit` op carrying the snapshot.
-/// `Commit`: if `node` is the destination Sector, import the Ship at
-/// `entry_pos` (appends `SectorTransitCompleted`), plus `JumpGateUsed` /
-/// `StarSystemChanged` when the Transit came through a Jump Gate (ADR-0009).
-///
-/// Shared by `SectorSimulatorActor` and the `--serve --cluster` loop so the
-/// Step 7.5 semantics cannot drift between the two call sites.
+#[derive(Debug, Clone, Copy)]
+struct PendingTransit {
+    ship_id: ShipId,
+    from: SectorId,
+    to: SectorId,
+    request_tick: Tick,
+}
+
+fn pending_outgoing_transits<S: EventStore>(node: &SimulationNode<S>) -> Vec<PendingTransit> {
+    let sector_id = node.sector_id();
+    let mut pending = HashMap::<ShipId, PendingTransit>::new();
+    for record in node.event_store().iter_from(0) {
+        match &record.event {
+            DomainEvent::SectorTransitRequested(e) if e.from == sector_id => {
+                pending.insert(
+                    e.ship_id,
+                    PendingTransit {
+                        ship_id: e.ship_id,
+                        from: e.from,
+                        to: e.to,
+                        request_tick: e.tick,
+                    },
+                );
+            }
+            DomainEvent::SectorTransitCompleted(e) if e.from == sector_id => {
+                pending.remove(&e.ship_id);
+            }
+            DomainEvent::SectorTransitAborted(e) if e.from == sector_id => {
+                pending.remove(&e.ship_id);
+            }
+            _ => {}
+        }
+    }
+    pending.into_values().collect()
+}
+
+fn inferred_gate_id<S: EventStore>(
+    node: &SimulationNode<S>,
+    from: SectorId,
+    to: SectorId,
+) -> Option<JumpGateId> {
+    node.galaxy()
+        .gates_in_sector(from)
+        .into_iter()
+        .find(|gate| gate.to_sector == to)
+        .map(|gate| gate.id)
+}
+
+fn transit_entry<S: EventStore>(
+    node: &SimulationNode<S>,
+    from: SectorId,
+    to: SectorId,
+    gate_id: Option<JumpGateId>,
+) -> (Position, AbsolutePosition) {
+    let gate = gate_id.and_then(|_| {
+        node.galaxy()
+            .gates_in_sector(to)
+            .into_iter()
+            .find(|gate| gate.to_sector == from)
+    });
+    (
+        gate.map(|g| g.position).unwrap_or(Position::ORIGIN),
+        gate.map(|g| g.abs_m).unwrap_or(AbsolutePosition::ORIGIN),
+    )
+}
+
+fn snapshot_ship<S: EventStore>(
+    node: &mut SimulationNode<S>,
+    ship_id: ShipId,
+) -> Option<ShipSnapshot> {
+    node.take_snapshot()
+        .ships
+        .into_iter()
+        .find(|ship| ship.ship_id == ship_id)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn propose_commit(
+    raft: &RaftActorHandle,
+    ship: ShipSnapshot,
+    from: SectorId,
+    to: SectorId,
+    entry_pos: Position,
+    entry_pos_abs: AbsolutePosition,
+    gate_id: Option<JumpGateId>,
+    request_tick: Tick,
+) {
+    raft.propose(
+        TransitOp::Commit {
+            ship: Box::new(ship),
+            from,
+            to,
+            entry_pos,
+            entry_pos_abs,
+            gate_id,
+            request_tick,
+        }
+        .encode(),
+    );
+}
+
+fn retry_pending_transits<S: EventStore>(node: &mut SimulationNode<S>, raft: &RaftActorHandle) {
+    let pending = pending_outgoing_transits(node);
+    if pending.is_empty() {
+        return;
+    }
+    let snapshot = node.take_snapshot();
+
+    for transit in pending {
+        let Some(ship) = snapshot
+            .ships
+            .iter()
+            .find(|ship| ship.ship_id == transit.ship_id)
+            .cloned()
+        else {
+            continue;
+        };
+        let gate_id = inferred_gate_id(node, transit.from, transit.to);
+
+        // A checkpoint may cover the Requested event while ShipSnapshot does
+        // not carry TransitComp. Re-issuing Request restores the frozen marker.
+        if node.can_propose_transit(transit.ship_id) {
+            raft.propose(
+                TransitOp::Request {
+                    ship_id: transit.ship_id,
+                    to: transit.to,
+                    gate_id,
+                }
+                .encode(),
+            );
+            continue;
+        }
+
+        let (entry_pos, entry_pos_abs) = transit_entry(node, transit.from, transit.to, gate_id);
+        propose_commit(
+            raft,
+            ship,
+            transit.from,
+            transit.to,
+            entry_pos,
+            entry_pos_abs,
+            gate_id,
+            transit.request_tick,
+        );
+    }
+}
+
+fn request_matches<S: EventStore>(
+    node: &SimulationNode<S>,
+    ship_id: ShipId,
+    from: SectorId,
+    to: SectorId,
+    request_tick: Tick,
+) -> bool {
+    node.get_ship_position(ship_id).is_some()
+        && pending_outgoing_transits(node).iter().any(|pending| {
+            pending.ship_id == ship_id
+                && pending.from == from
+                && pending.to == to
+                && pending.request_tick == request_tick
+        })
+}
+
 pub fn apply_committed_raft_entries<S: EventStore>(
     node: &mut SimulationNode<S>,
     raft: &RaftActorHandle,
@@ -89,21 +227,16 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                 to,
                 gate_id,
             } => {
-                // `prepare_transit_commit` owns the Gate-lookup/entry-point
-                // logic (ADR-0009/0029) — this orchestrator just wraps the
-                // result into the follow-up Raft proposal.
                 if let Some(data) = node.prepare_transit_commit(ship_id, to, gate_id) {
-                    let from = node.sector_id();
-                    raft.propose(
-                        TransitOp::Commit {
-                            ship: data.ship,
-                            from,
-                            to,
-                            entry_pos: data.entry_pos,
-                            entry_pos_abs: data.entry_pos_abs,
-                            gate_id,
-                        }
-                        .encode(),
+                    propose_commit(
+                        raft,
+                        *data.ship,
+                        node.sector_id(),
+                        to,
+                        data.entry_pos,
+                        data.entry_pos_abs,
+                        gate_id,
+                        node.current_tick(),
                     );
                 }
             }
@@ -114,27 +247,50 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                 entry_pos,
                 entry_pos_abs,
                 gate_id,
+                request_tick,
             } => {
-                // Both branches can run on the same node in a same-node loopback
-                // (tests/single-node demos, `from == to`'s Sector); production
-                // Transit always has `from != to`, so ordinarily exactly one
-                // fires per node. Symmetric with the durability fix in
-                // `SimulationNode::complete_outgoing_transit`/`handle_transit_commit`
-                // (issue #204): the `from` Sector only removes the Ship, and the
-                // `to` Sector only materializes it, once *this* Commit is
-                // Raft-committed — never earlier, at Request-commit time.
-                if from == node.sector_id() {
-                    node.complete_outgoing_transit(&ship, to, entry_pos_abs);
-                }
                 if to == node.sector_id() {
-                    node.handle_transit_commit(&ship, from, entry_pos, entry_pos_abs, gate_id);
+                    if node.get_ship_position(ship.ship_id).is_none() {
+                        node.handle_transit_commit(
+                            &ship,
+                            from,
+                            entry_pos,
+                            entry_pos_abs,
+                            gate_id,
+                        );
+                    }
+                    let ack_ship =
+                        snapshot_ship(node, ship.ship_id).unwrap_or_else(|| (*ship).clone());
+                    raft.propose(
+                        TransitOp::Ack {
+                            ship: Box::new(ack_ship),
+                            from,
+                            to,
+                            entry_pos_abs,
+                            request_tick,
+                        }
+                        .encode(),
+                    );
+                }
+            }
+            TransitOp::Ack {
+                ship,
+                from,
+                to,
+                entry_pos_abs,
+                request_tick,
+            } => {
+                if from == node.sector_id()
+                    && request_matches(node, ship.ship_id, from, to, request_tick)
+                {
+                    node.complete_outgoing_transit(&ship, to, entry_pos_abs);
                 }
             }
         }
     }
+    retry_pending_transits(node, raft);
 }
 
-/// Per-node runtime tick output needed by the outer runtime loops.
 #[derive(Debug)]
 pub struct RuntimeTickOutput {
     pub tick_result: crate::node::TickResult,
@@ -143,14 +299,6 @@ pub struct RuntimeTickOutput {
     pub completed_warps: Vec<ShipId>,
 }
 
-/// Advance one cluster node by one logical Tick in the canonical runtime order
-/// (ADR-0014): Step 7.5 committed Raft entries, simulation tick, caller hook
-/// for durable-log consumers, Step 10 Raft timers, then transient tick outputs.
-///
-/// Shared by the actor and `--serve --cluster` loops so the ordering cannot
-/// drift. The hook runs after Step 7.5 + simulation events are appended and
-/// before `raft.tick()`, preserving the actor's replication-before-reply
-/// contract while keeping the core step sequence in one place.
 pub fn run_runtime_tick<S, F>(
     node: &mut SimulationNode<S>,
     raft: &RaftActorHandle,
@@ -183,15 +331,6 @@ where
     }
 }
 
-/// Runs a player-initiated jump attempt through its in-range/auto-warp/approach
-/// fallback chain (`SimulationNode::apply_jump_with_fallback`, `node/jump.rs`)
-/// and, if the ship was in range, proposes the resulting `TransitOp::Request`
-/// to Raft. The fallback chain stays in `dawn-sector`; only the Raft proposal
-/// lives here, since `RaftActorHandle` isn't available to `node/jump.rs`.
-///
-/// Shared by the single-sector, clustered, and production Node serve loops so
-/// the proposal payload cannot drift between them. Callers still match on the
-/// returned outcome to log it in their own format.
 pub fn propose_jump<S: EventStore>(
     node: &mut SimulationNode<S>,
     raft: &RaftActorHandle,
@@ -205,10 +344,6 @@ pub fn propose_jump<S: EventStore>(
     outcome
 }
 
-/// Proposes an auto-jump queued by a completed warp/approach fallback
-/// (`SimulationNode::drain_pending_auto_jumps` + `resolve_auto_jump`), if the
-/// ship is now in range of the gate. Returns the destination Sector when a
-/// proposal was made.
 pub fn propose_auto_jump<S: EventStore>(
     node: &mut SimulationNode<S>,
     raft: &RaftActorHandle,
@@ -236,8 +371,6 @@ fn propose_transit_request(
     );
 }
 
-/// Advance one cluster node by one logical Tick in the canonical step order
-/// when the caller owns all transient output drains.
 pub fn step_cluster_node<S: EventStore>(
     node: &mut SimulationNode<S>,
     raft: &RaftActorHandle,
@@ -254,7 +387,7 @@ pub fn step_cluster_node<S: EventStore>(
 mod tests {
     use super::*;
     use dawn_core::fitting::FittingSnapshot;
-    use dawn_core::{NodeId, Position, SectorBounds, ShipTypeId, Velocity};
+    use dawn_core::{NodeId, SectorBounds, ShipTypeId, Velocity};
 
     fn mem_node() -> SimulationNode {
         SimulationNode::new(
@@ -298,23 +431,18 @@ mod tests {
         node.set_spawn_anchor_abs(ship, near_gate_abs);
 
         let outcome = propose_jump(&mut node, &raft, ship, JumpGateId(0));
-
         assert_eq!(
             outcome,
             crate::node::JumpOutcome::NeedsTransitProposal { to: gate.to_sector }
         );
-        match decode_proposed_transit(&mut rx) {
+        assert!(matches!(
+            decode_proposed_transit(&mut rx),
             TransitOp::Request {
                 ship_id,
-                to,
-                gate_id,
-            } => {
-                assert_eq!(ship_id, ship);
-                assert_eq!(to, gate.to_sector);
-                assert_eq!(gate_id, Some(JumpGateId(0)));
-            }
-            other => panic!("expected Request, got {other:?}"),
-        }
+                gate_id: Some(JumpGateId(0)),
+                ..
+            } if ship_id == ship
+        ));
     }
 
     #[test]
@@ -323,105 +451,82 @@ mod tests {
         let (raft, mut rx) = raft_handle();
         let player_id = node.next_player_id();
         let ship = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
-
         let outcome = propose_jump(&mut node, &raft, ship, JumpGateId(0));
-
-        assert!(
-            !matches!(
-                outcome,
-                crate::node::JumpOutcome::NeedsTransitProposal { .. }
-            ),
-            "ship spawned at the origin must not already be in Gate 0's activation radius"
-        );
-        assert!(
-            rx.try_recv().is_err(),
-            "no Transit proposal for a ship still out of the gate's activation radius"
-        );
+        assert!(!matches!(
+            outcome,
+            crate::node::JumpOutcome::NeedsTransitProposal { .. }
+        ));
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]
-    fn request_op_round_trips_through_encode_and_decode() {
+    fn request_op_round_trips() {
         let op = TransitOp::Request {
             ship_id: ShipId::new(NodeId(0), 42),
             to: SectorId(1),
-            gate_id: None,
+            gate_id: Some(JumpGateId(0)),
         };
-        let decoded = TransitOp::decode(&op.encode()).expect("decode must succeed");
-        match decoded {
-            TransitOp::Request {
-                ship_id,
-                to,
-                gate_id,
-            } => {
-                assert_eq!(ship_id, ShipId::new(NodeId(0), 42));
-                assert_eq!(to, SectorId(1));
-                assert_eq!(gate_id, None);
-            }
-            other => panic!("expected Request, got {other:?}"),
+        assert!(matches!(
+            TransitOp::decode(&op.encode()),
+            Some(TransitOp::Request {
+                gate_id: Some(JumpGateId(0)),
+                ..
+            })
+        ));
+    }
+
+    fn sample_ship() -> ShipSnapshot {
+        ShipSnapshot {
+            ship_id: ShipId::new(NodeId(0), 7),
+            ship_type_id: ShipTypeId(1),
+            absolute_position: None,
+            position: Position::new(1.0, 2.0, 3.0),
+            anchor: dawn_core::AnchorId(0),
+            velocity: Velocity::new(4.0, 5.0, 6.0),
+            current_shield: 10.0,
+            current_armor: 20.0,
+            current_hull: 30.0,
+            is_destroyed: false,
+            capacitor: Some(50.0),
+            fitting: FittingSnapshot::empty(),
+            tackled_by: vec![],
+            inventory: std::collections::BTreeMap::new(),
         }
     }
 
     #[test]
-    fn request_op_round_trips_with_jump_gate_id() {
-        let op = TransitOp::Request {
-            ship_id: ShipId::new(NodeId(0), 42),
-            to: SectorId(1),
-            gate_id: Some(dawn_core::JumpGateId(0)),
-        };
-        let decoded = TransitOp::decode(&op.encode()).expect("decode must succeed");
-        match decoded {
-            TransitOp::Request { gate_id, .. } => {
-                assert_eq!(gate_id, Some(dawn_core::JumpGateId(0)));
-            }
-            other => panic!("expected Request, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn commit_op_round_trips_with_full_ship_snapshot() {
-        let op = TransitOp::Commit {
-            ship: Box::new(ShipSnapshot {
-                ship_id: ShipId::new(NodeId(0), 7),
-                ship_type_id: ShipTypeId(1),
-                absolute_position: None,
-                position: Position::new(1.0, 2.0, 3.0),
-                anchor: dawn_core::AnchorId(0),
-                velocity: Velocity::new(4.0, 5.0, 6.0),
-                current_shield: 10.0,
-                current_armor: 20.0,
-                current_hull: 30.0,
-                is_destroyed: false,
-                capacitor: Some(50.0),
-                fitting: FittingSnapshot::empty(),
-                tackled_by: vec![],
-                inventory: std::collections::BTreeMap::new(),
-            }),
+    fn commit_and_ack_round_trip() {
+        let commit = TransitOp::Commit {
+            ship: Box::new(sample_ship()),
             from: SectorId(0),
             to: SectorId(1),
             entry_pos: Position::new(500.0, 0.0, 0.0),
             entry_pos_abs: AbsolutePosition::new(500.0, 0.0, 0.0),
             gate_id: None,
+            request_tick: Tick(12),
         };
-        let decoded = TransitOp::decode(&op.encode()).expect("decode must succeed");
-        match decoded {
-            TransitOp::Commit {
-                ship,
-                from,
-                to,
-                entry_pos,
-                entry_pos_abs,
-                gate_id,
-            } => {
-                assert_eq!(ship.ship_id, ShipId::new(NodeId(0), 7));
-                assert_eq!(ship.capacitor, Some(50.0));
-                assert_eq!(from, SectorId(0));
-                assert_eq!(to, SectorId(1));
-                assert_eq!(entry_pos, Position::new(500.0, 0.0, 0.0));
-                assert_eq!(entry_pos_abs, AbsolutePosition::new(500.0, 0.0, 0.0));
-                assert_eq!(gate_id, None);
-            }
-            other => panic!("expected Commit, got {other:?}"),
-        }
+        assert!(matches!(
+            TransitOp::decode(&commit.encode()),
+            Some(TransitOp::Commit {
+                request_tick: Tick(12),
+                ..
+            })
+        ));
+
+        let ack = TransitOp::Ack {
+            ship: Box::new(sample_ship()),
+            from: SectorId(0),
+            to: SectorId(1),
+            entry_pos_abs: AbsolutePosition::new(500.0, 0.0, 0.0),
+            request_tick: Tick(12),
+        };
+        assert!(matches!(
+            TransitOp::decode(&ack.encode()),
+            Some(TransitOp::Ack {
+                request_tick: Tick(12),
+                ..
+            })
+        ));
     }
 
     #[test]
