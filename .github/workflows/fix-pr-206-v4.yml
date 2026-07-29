@@ -1,0 +1,102 @@
+name: Apply PR 206 review fixes v4
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.pull_request.number == 206 && github.head_ref == 'recoverable-sector-transit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: recoverable-sector-transit
+
+      - name: Apply review fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          source = Path('.github/workflows/fix-pr-206-v3.yml').read_text()
+          marker = "          python - <<'PY'\n"
+          start = source.index(marker) + len(marker)
+          end = source.index("          PY\n", start)
+          code = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in source[start:end].splitlines()
+          )
+
+          replacement = r'''lock_restore = re.compile(
+              r'(?m)^(?P<indent>[ \t]*)for \(entity, component\) in related_locks \{\n'
+              r'(?P=indent)[ \t]+if let Some\(mut current\) = self\.world\.get_mut::<LockComp>\(entity\) \{\n'
+              r'(?P=indent)[ \t]+\*current = component;\n'
+              r'(?P=indent)[ \t]+\} else \{\n'
+              r'(?P=indent)[ \t]+let _ = self\.world\.insert_one\(entity, component\);\n'
+              r'(?P=indent)[ \t]+\}\n'
+              r'(?P=indent)\}\n'
+          )
+          def replace_lock_restore(match):
+              indent = match.group('indent')
+              return (
+                  f'{indent}for (entity, component) in related_locks {{\n'
+                  f'{indent}    let _ = self.world.remove_one::<LockComp>(entity);\n'
+                  f'{indent}    let _ = self.world.insert_one(entity, component);\n'
+                  f'{indent}}}\n'
+              )
+          tick, lock_restore_count = lock_restore.subn(replace_lock_restore, tick, count=1)
+          if lock_restore_count != 1:
+              raise SystemExit(f'expected one LockComp restore block, found {lock_restore_count}')
+          tick_path.write_text(tick)
+          '''
+          code, count = re.subn(
+              r"old_lock_restore = '''.*?tick_path\.write_text\(tick\.replace\(old_lock_restore, new_lock_restore, 1\)\)\n",
+              replacement,
+              code,
+              count=1,
+              flags=re.DOTALL,
+          )
+          if count != 1:
+              raise SystemExit(f'expected one v3 LockComp patch block, found {count}')
+          exec(compile(code, 'fix-pr-206-v4.py', 'exec'))
+          PY
+
+      - name: Format
+        run: |
+          rustup default stable
+          rustup component add rustfmt clippy
+          cargo fmt --all
+          cargo fmt --all -- --check
+
+      - name: Test affected crates
+        run: cargo test -p dawn-core -p dawn-sector
+
+      - name: Clippy affected crates
+        run: cargo clippy -p dawn-core -p dawn-sector --all-targets -- -D warnings
+
+      - name: Commit fixes and remove temporary files
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          git rm -f --ignore-unmatch .github/workflows/fix-pr-206-v2.yml
+          git rm -f --ignore-unmatch .github/workflows/fix-pr-206-v3.yml
+          git rm -f --ignore-unmatch .github/workflows/fix-pr-206-v4.yml
+          git rm -f --ignore-unmatch .github/fix-pr-206-trigger
+          git add crates/dawn-core/src/events.rs \
+                  crates/dawn-sector/src/node/tick.rs \
+                  crates/dawn-sector/src/node/transit_flow.rs \
+                  crates/dawn-sector/src/transit.rs \
+                  docs/architecture/tick-model.md \
+                  docs/architecture/event-catalog.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix(sector): address transit recovery review"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:recoverable-sector-transit
