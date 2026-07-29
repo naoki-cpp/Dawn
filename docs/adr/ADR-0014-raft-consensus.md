@@ -125,6 +125,25 @@ EventStore のみが保持する（INV-001 / INV-002）。
 Replay に Raft は不要 — Replay は EventStore の
 `SectorTransitRequested` / `SectorTransitCompleted` だけで完結する。
 
+> **実装の訂正（2026-07-28, issue #204）**: 上記の「Replay は EventStore
+> だけで完結する」は、`apply_event`（`restore_from`が呼ぶtail replay関数）
+> がこの3イベントを2026-07-28まで**no-opとして扱っていた**ため、実際には
+> 成立していなかった。影響は次の2点:
+>
+> - source側: `SectorTransitCompleted`のreplayが何もしないため、
+>   snapshot取得後に完了したTransitがtail replayで巻き戻され、
+>   転送済みのShipがsource Sectorに復活しうる。
+> - destination側: `SectorTransitCompleted`は`entry_pos`/`velocity`しか
+>   運んでおらず、Shipの完全な状態（type/HP/capacitor/fitting/inventory）
+>   はRaftの`TransitOp::Commit`ペイロード（インメモリ、プロセス再起動で
+>   消える）にしか存在しなかったため、destination側のtail replayだけでは
+>   そもそも復元できなかった。
+>
+> `SectorTransitCompleted`に`ship_state: TransitShipState`（下記）を追加し、
+> `apply_event`が`self.sector_id`で`from`/`to`を判定して実際に
+> Ship除去／復元を行うよう修正した。これで「Replay は EventStore だけで
+> 完結する」という本節の記述が実装と一致する。
+
 ### 4. 新規イベント（dawn-core/src/events.rs）
 
 ```rust
@@ -137,13 +156,40 @@ pub struct SectorTransitRequested {
 }
 
 /// Sector Transit が完了した（所有権が to に移った）。
+///
+/// `ship_state` は issue #204 で追加: from/to 双方が同じ形のイベントを
+/// それぞれ自分の EventStore に Append するが（本節冒頭のフロー参照）、
+/// この 1 フィールドは to 側の tail replay だけが使う。from 側の replay は
+/// `ship_id` だけを読んで Ship を除去し、`ship_state` は無視する。
+/// イベント種別を from/to で分けるのではなく 1 種類のまま持たせているのは、
+/// from 側は `export_transit_with_abs` の時点で既に完全な状態を手元に
+/// 持っており計算コストがゼロだから、というのが理由（詳細は
+/// `dawn_core::events::SectorTransitCompleted`/`TransitShipState` の
+/// doc comment）。
 pub struct SectorTransitCompleted {
-    pub ship_id  : ShipId,
-    pub from     : SectorId,
-    pub to       : SectorId,
-    pub entry_pos: Position,   // 宛先 Sector での出現座標
-    pub velocity : Velocity,   // Transit をまたいで速度を保存（INV-MOVE）
-    pub tick     : Tick,
+    pub ship_id   : ShipId,
+    pub from      : SectorId,
+    pub to        : SectorId,
+    pub entry_pos : AbsolutePosition, // 宛先 Sector での出現座標（f64 authority, ADR-0044）
+    pub velocity  : Velocity,         // Transit をまたいで速度を保存（INV-MOVE）
+    pub tick      : Tick,
+    pub ship_state: TransitShipState, // to 側の tail replay が Ship を復元するのに使う
+}
+
+/// `ShipSnapshot`（dawn-sector）の縮小版。dawn-sector は dawn-core に
+/// 依存するが逆はしない（FBD-002）ため、同じ型を共有せず dawn-core 側に
+/// 専用の型を置く。`position`/`anchor`（常に `entry_pos` + anchor rebase で
+/// 上書きされる）・`velocity`（イベント側に既存）・`tackled_by`
+/// （Sector をまたいで転送しない設計）は含まない。
+pub struct TransitShipState {
+    pub ship_type_id   : ShipTypeId,
+    pub current_shield : f32,
+    pub current_armor  : f32,
+    pub current_hull   : f32,
+    pub is_destroyed   : bool,
+    pub capacitor      : Option<f32>,
+    pub fitting        : FittingSnapshot,
+    pub inventory       : BTreeMap<ItemId, u64>,
 }
 
 /// Sector Transit が中断された（宛先ノード障害など）。所有権は from に残る。

@@ -174,11 +174,13 @@ impl<S: EventStore> SimulationNode<S> {
                 self.remove_ship(e.ship_id);
             }
 
-            // Sector Transit (ADR-0014): TransitState component and ownership
-            // transfer are added in a later Phase 7 task.
-            DomainEvent::SectorTransitRequested(_)
-            | DomainEvent::SectorTransitCompleted(_)
-            | DomainEvent::SectorTransitAborted(_) => {}
+            // Sector Transit (ADR-0014, issue #204): replay must reproduce
+            // ownership transfer without the in-memory Raft actor surviving
+            // a restart, so it's driven entirely from these events -- see
+            // `transit_flow.rs`'s `replay_sector_transit_*` methods.
+            DomainEvent::SectorTransitRequested(e) => self.replay_sector_transit_requested(e),
+            DomainEvent::SectorTransitCompleted(e) => self.replay_sector_transit_completed(e),
+            DomainEvent::SectorTransitAborted(e) => self.replay_sector_transit_aborted(e),
 
             // Jump Gate Navigation (ADR-0009): Sector/StarSystem transfer on
             // Replay is added when the Jump pipeline is wired in dawn-simulation.

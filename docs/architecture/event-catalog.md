@@ -444,13 +444,13 @@ Sector Transit committed via Raft. Ownership stays with `from` until `SectorTran
 | `to` | `SectorId` | ✓ | destination Sector |
 | `tick` | `Tick` | ✓ | Tick the commit was applied |
 
-**Replay:** set `TransitComp` to `InTransit { to }`.
+**Replay:** set `TransitComp` to `InTransit { to }` (`SimulationNode::replay_sector_transit_requested`, issue #204 — this table row described the intended behavior before it was actually implemented; see that method's doc comment for the current, accurate description).
 
 ---
 
 ### `SectorTransitCompleted`
 
-Sector Transit completed; ownership moved from `from` to `to`.
+Sector Transit completed; ownership moved from `from` to `to`. Self-contained (issue #204): `ship_state` carries everything the `to` Sector's replay needs to materialize the Ship from this event alone, without depending on the in-memory Raft actor surviving a restart (ADR-0014).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -460,8 +460,9 @@ Sector Transit completed; ownership moved from `from` to `to`.
 | `entry_pos` | `AbsolutePosition` | ✓ | authoritative entry coordinates in the destination Sector frame |
 | `velocity` | `Velocity` | ✓ | velocity on entry (required for full Replay reconstruction, INV-002) |
 | `tick` | `Tick` | ✓ | Tick of completion |
+| `ship_state` | `TransitShipState` | ✓ | ship type / HP / capacitor / fitting / inventory at the moment of transit; read only by the `to` Sector's Replay (see below) |
 
-**Replay:** on the `from` node, remove the Ship from ECS; on the `to` node, add it at `entry_pos` / `velocity`.
+**Replay:** `SimulationNode::replay_sector_transit_completed` branches on `self.sector_id`. On the `from` node (`self.sector_id == from`), removes the Ship from ECS. On the `to` node (`self.sector_id == to`), rebuilds a `ShipSnapshot` from `ship_state` + `entry_pos` and materializes it, then redoes the anchor rebase directly (does not rely on the `AnchorRebased` entry the live path also logged — that entry appears *earlier* in this Sector's log than `SectorTransitCompleted`, so by the time Replay reaches it the Ship doesn't exist here yet and it silently no-ops).
 
 ---
 
@@ -476,7 +477,9 @@ A committed Transit was aborted; ownership stays with `from`. Validation-stage r
 | `to` | `SectorId` | ✓ | aborted destination Sector |
 | `tick` | `Tick` | ✓ | Tick the abort was finalized |
 
-**Status:** type only (emission on destination-node failure is not wired).
+**Replay:** clears the `InTransit` marker `SectorTransitRequested` Replay set (`SimulationNode::replay_sector_transit_aborted`).
+
+**Status:** type + Replay implemented; nothing appends this event yet (emission on a post-commit abort path, e.g. destination-node failure, is not wired). Replay was implemented anyway (issue #204) so the event type doesn't ship with a known-wrong Replay the day something starts emitting it.
 
 ---
 

@@ -689,6 +689,16 @@ mod tests {
                 entry_pos: dawn_core::AbsolutePosition::ORIGIN,
                 velocity: dawn_core::Velocity::ZERO,
                 tick,
+                ship_state: dawn_core::events::TransitShipState {
+                    ship_type_id: dawn_core::ShipTypeId(1),
+                    current_shield: 100.0,
+                    current_armor: 100.0,
+                    current_hull: 100.0,
+                    is_destroyed: false,
+                    capacitor: Some(50.0),
+                    fitting: dawn_core::fitting::FittingSnapshot::empty(),
+                    inventory: std::collections::BTreeMap::new(),
+                },
             }),
             DomainEvent::SectorTransitAborted(dawn_core::events::SectorTransitAborted {
                 ship_id: ship_id(1),
