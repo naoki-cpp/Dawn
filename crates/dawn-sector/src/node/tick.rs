@@ -34,6 +34,24 @@ impl<S: EventStore> SimulationNode<S> {
         self.tick_with_lock_commands(&[])
     }
 
+    pub(crate) fn append_incoming_transit_marker(
+        &mut self,
+        ship_id: ShipId,
+        from: dawn_core::SectorId,
+        to: dawn_core::SectorId,
+        request_tick: dawn_core::Tick,
+    ) {
+        self.event_store
+            .append(DomainEvent::SectorTransitRequested(
+                dawn_core::events::SectorTransitRequested {
+                    ship_id,
+                    from,
+                    to,
+                    tick: request_tick,
+                },
+            ));
+    }
+
     fn freeze_transit_components(&mut self) -> (HashSet<ShipId>, Vec<FrozenTransitComponents>) {
         let transit: Vec<(ShipId, Entity)> = self
             .ships
@@ -132,8 +150,7 @@ impl<S: EventStore> SimulationNode<S> {
             .into_iter()
             .chain(lock_commands.iter().cloned())
             .filter(|command| {
-                !transit_ids.contains(&command.ship_id)
-                    && !transit_ids.contains(&command.target_id)
+                !transit_ids.contains(&command.ship_id) && !transit_ids.contains(&command.target_id)
             })
             .collect();
         let lock = LockSystem(&mut self.world, tick, &merged_locks);
@@ -285,10 +302,7 @@ mod tests {
             Velocity::new(10.0, 0.0, 0.0),
         );
         let entity = *node.ships.index.get(&ship_id).unwrap();
-        node.world
-            .get_mut::<CapacitorComp>(entity)
-            .unwrap()
-            .current = 1.0;
+        node.world.get_mut::<CapacitorComp>(entity).unwrap().current = 1.0;
         node.propose_transit(TransitCommand {
             ship_id,
             to: SectorId(1),
@@ -392,7 +406,10 @@ mod tests {
                     |e| matches!(e, DomainEvent::ShipDestroyed(d) if d.ship_id == victim && d.killer_id == killer),
                 )
         });
-        assert!(destroyed, "combat should eventually destroy the victim ship");
+        assert!(
+            destroyed,
+            "combat should eventually destroy the victim ship"
+        );
         let after = node
             .world
             .get::<dawn_ecs::components::InventoryComp>(killer_entity)
