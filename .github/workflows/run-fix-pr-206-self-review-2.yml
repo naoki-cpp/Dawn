@@ -82,16 +82,23 @@ jobs:
 
           commands = Path('crates/dawn-sector/src/node/commands.rs')
           text = commands.read_text()
-          text = text.replace(
-              '            LockOnCommand, SlotKind, StationId, TransitCommand,\n',
-              '            LockOnCommand, SlotKind, StationId,\n',
-              1,
+          text, count = re.subn(
+              r'(\bStationId),\s*TransitCommand,',
+              r'\1,',
+              text,
+              count=1,
           )
-          text = text.replace(
-              '        use crate::modules::MODULE_AFTERBURNER;\n',
-              '        use crate::modules::MODULE_AFTERBURNER;\n        use dawn_core::commands::TransitCommand;\n',
-              1,
-          )
+          if count != 1:
+              raise SystemExit(f'TransitCommand root import matches: {count}')
+          if 'use dawn_core::commands::TransitCommand;' not in text:
+              text, count = re.subn(
+                  r'(\s+use crate::modules::MODULE_AFTERBURNER;\n)',
+                  r'\1        use dawn_core::commands::TransitCommand;\n',
+                  text,
+                  count=1,
+              )
+              if count != 1:
+                  raise SystemExit(f'TransitCommand module import anchors: {count}')
           commands.write_text(text)
 
           transit = Path('crates/dawn-sector/src/transit.rs')
