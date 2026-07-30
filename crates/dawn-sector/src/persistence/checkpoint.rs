@@ -145,13 +145,19 @@ mod tests {
 
         let snap = StateSnapshot::load(dir.path().join("snapshot.bin")).unwrap();
         let store = FileEventStore::open(dir.path().join("events.log")).unwrap();
-        assert!(store.base_index() > 0, "hot log was compacted behind the snapshot");
+        assert!(
+            store.base_index() > 0,
+            "hot log was compacted behind the snapshot"
+        );
         let mut restored = SimulationNode::restore_from(store, &snap, &[], &[]);
         assert_eq!(restored.current_tick(), snap.tick);
         for _ in 0..4 {
             restored.tick();
         }
         let restored_final = postcard::to_stdvec(&restored.take_snapshot()).unwrap();
-        assert_eq!(restored_final, live_final, "snapshot + tail catch-up == live");
+        assert_eq!(
+            restored_final, live_final,
+            "snapshot + tail catch-up == live"
+        );
     }
 }
