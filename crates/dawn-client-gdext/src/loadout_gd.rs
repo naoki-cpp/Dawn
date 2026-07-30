@@ -3,6 +3,7 @@ use godot::prelude::*;
 
 use crate::item_row_gd::ItemRow;
 use crate::module_row_gd::{parse_kind, ModuleRow};
+use crate::owned_ship_row_gd::OwnedShipRow;
 
 /// `dawn_core::ModuleKind` (the server-authoritative enum, via `dawn-wire`)
 /// -> `dawn_client_core::ModuleKind` (the client's own decoupled mirror with
@@ -98,10 +99,8 @@ fn wire_to_item_row(row: dawn_wire::ItemRowWire) -> dawn_client_core::ItemRow {
     }
 }
 
-/// Godot's `Dictionary` is generic over key/value element type as of gdext
-/// 0.5; these dictionaries hold a mix of String/int/bool/nested-collection
-/// values (mirroring the old GDScript code's untyped `Dictionary` literals),
-/// so both parameters are the type-erased `Variant`.
+/// Type-erased Dictionary retained only for `toggle_at()`'s small,
+/// closed activation-intent boundary.
 type Dict = Dictionary<Variant, Variant>;
 
 /// Client-side deep module for the server's `PlayerLoadout` wire message
@@ -186,65 +185,39 @@ impl PlayerLoadout {
     }
 
     #[func]
-    fn owned_ships(&self) -> Array<Dict> {
+    fn owned_ships(&self) -> Array<Gd<OwnedShipRow>> {
         let mut out = Array::new();
-        let Some(loadout) = &self.loadout else {
-            return out;
-        };
-        for ship in &loadout.owned_ships {
-            let mut d = Dict::new();
-            d.set("ship_id", ship.ship_id as i64);
-            d.set(
-                "ship_type_id",
-                ship.ship_type_id.map(|id| id as i64).unwrap_or(-1),
-            );
-            d.set(
-                "ship_type_name",
-                ship.ship_type_name.clone().unwrap_or_default(),
-            );
-            d.set(
-                "docked_station_id",
-                ship.docked_station_id.map(|id| id as i64).unwrap_or(-1),
-            );
-            d.set("is_active", ship.is_active);
-            out.push(&d);
+        if let Some(loadout) = &self.loadout {
+            for ship in &loadout.owned_ships {
+                out.push(&OwnedShipRow::wrap(ship.clone()));
+            }
         }
         out
     }
 
     #[func]
-    fn dock_status(&self) -> Dict {
-        let mut d = Dict::new();
-        match &self.loadout {
-            Some(loadout) => {
-                d.set(
-                    "docked_station_id",
-                    loadout.docked_station_id.map(|id| id as i64).unwrap_or(-1),
-                );
-                d.set(
-                    "docked_station_name",
-                    loadout.docked_station_name.clone().unwrap_or_default(),
-                );
-                d.set("is_docked", loadout.is_docked());
-            }
-            None => {
-                d.set("docked_station_id", -1_i64);
-                d.set("docked_station_name", "");
-                d.set("is_docked", false);
-            }
-        }
-        d
+    fn docked_station_id(&self) -> i64 {
+        self.loadout
+            .as_ref()
+            .and_then(|loadout| loadout.docked_station_id)
+            .map(i64::from)
+            .unwrap_or(-1)
     }
 
     #[func]
-    fn hud_snapshot(&self) -> Dict {
-        let mut d = Dict::new();
-        d.set("modules", &self.modules());
-        d.set("inventory", &self.inventory());
-        d.set("station_inventory", &self.station_inventory());
-        d.set("dock_status", &self.dock_status());
-        d.set("owned_ships", &self.owned_ships());
-        d
+    fn docked_station_name(&self) -> GString {
+        self.loadout
+            .as_ref()
+            .and_then(|loadout| loadout.docked_station_name.as_deref())
+            .unwrap_or_default()
+            .into()
+    }
+
+    #[func]
+    fn is_docked(&self) -> bool {
+        self.loadout
+            .as_ref()
+            .is_some_and(PlayerLoadoutMsg::is_docked)
     }
 
     #[func]
@@ -291,8 +264,8 @@ impl PlayerLoadout {
         loadout.apply_module_activation(module_id, active, forced_reason.to_string());
     }
 
-    /// `{}` (empty Dictionary) if `active_index` is out of range, matching
-    /// the old `player_loadout.gd::toggle_at`'s "nothing to toggle" sentinel.
+    /// Small closed intent boundary kept as a Dictionary deliberately:
+    /// `{}` means "nothing to toggle"; otherwise fixed keys describe one command.
     #[func]
     fn toggle_at(&self, active_index: i64) -> Dict {
         let mut d = Dict::new();
@@ -315,16 +288,21 @@ impl PlayerLoadout {
     }
 
     #[func]
-    fn weapon_ranges(&self) -> Dict {
-        let (optimal, falloff) = self
-            .loadout
+    fn weapon_optimal_range(&self) -> f64 {
+        self.loadout
             .as_ref()
-            .map(|l| l.weapon_ranges())
-            .unwrap_or((0.0, 0.0));
-        let mut d = Dict::new();
-        d.set("optimal", optimal);
-        d.set("falloff", falloff);
-        d
+            .map(PlayerLoadoutMsg::weapon_ranges)
+            .map(|(optimal, _)| optimal)
+            .unwrap_or(0.0)
+    }
+
+    #[func]
+    fn weapon_falloff_range(&self) -> f64 {
+        self.loadout
+            .as_ref()
+            .map(PlayerLoadoutMsg::weapon_ranges)
+            .map(|(_, falloff)| falloff)
+            .unwrap_or(0.0)
     }
 
     /// `-1.0` if `kind` has no range concept, matching the old

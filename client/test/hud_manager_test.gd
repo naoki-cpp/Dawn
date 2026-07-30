@@ -33,6 +33,19 @@ func _module(overrides: Dictionary) -> ModuleRow:
 	return ModuleRow.from_json(base)
 
 
+func _owned_ship(overrides: Dictionary) -> OwnedShipRow:
+	var base: Dictionary = {
+		"ship_id": 1,
+		"ship_type_id": 7,
+		"ship_type_name": "Magpie",
+		"docked_station_id": 0,
+		"is_active": true,
+	}
+	for key: String in overrides:
+		base[key] = overrides[key]
+	return OwnedShipRow.from_json(base)
+
+
 # -- set_stat_bar / set_mini_bar (percentage math) -----------------------------
 
 func test_set_stat_bar_fills_proportionally_and_formats_the_readout() -> void:
@@ -216,10 +229,7 @@ func test_inventory_panel_columns_stay_within_the_panels_bounds() -> void:
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
 	var refs: HudManager.InventoryPanelRefs = HudManager.build_inventory_panel(hud)
-	HudManager.update_inventory_panel(refs, [], [], [], [
-		{"ship_id": 1, "ship_type_id": 7, "ship_type_name": "Magpie",
-			"docked_station_id": 0, "is_active": true},
-	])
+	HudManager.update_inventory_panel(refs, [], [], [], [_owned_ship({})])
 	HudManager.toggle_inventory_panel(refs)
 	await get_tree().process_frame
 
@@ -290,12 +300,12 @@ func test_owned_ship_row_handles_null_docked_station_id_and_ship_type_name() -> 
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
 	var refs: HudManager.InventoryPanelRefs = HudManager.build_inventory_panel(hud)
-	var owned_ships := [
-		{
-			"ship_id": 1, "ship_type_id": null, "ship_type_name": null,
-			"docked_station_id": null, "is_active": false,
-		},
-	]
+	var owned_ships := [_owned_ship({
+		"ship_type_id": null,
+		"ship_type_name": null,
+		"docked_station_id": null,
+		"is_active": false,
+	})]
 
 	HudManager.update_inventory_panel(refs, [], [], [], owned_ships, [])
 

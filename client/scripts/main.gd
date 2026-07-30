@@ -788,10 +788,9 @@ func _apply_loadout_side_effects() -> void:
 			_player_ship_id = new_active_ship_id
 			_presentation.detach_player_ship()
 
-	var dock_status: Dictionary = _loadout.dock_status()
 	_session.apply_dock_fitting(
-		dock_status.get("docked_station_id", -1) as int,
-		dock_status.get("docked_station_name", "") as String,
+		_loadout.docked_station_id(),
+		_loadout.docked_station_name(),
 		_loadout.tick()
 	)
 	_sync_session_state()
@@ -801,20 +800,18 @@ func _apply_loadout_side_effects() -> void:
 		var docked_ship := _ships.get(_player_ship_id) as Node3D
 		if docked_ship != null:
 			docked_ship.call("dock_motion", docked_ship.call("server_position"), _loadout.tick())
-	var snapshot: Dictionary = _loadout.hud_snapshot()
+	var modules := _loadout.modules()
+	var inventory := _loadout.inventory()
+	var station_inventory := _loadout.station_inventory()
+	var owned_ships := _loadout.owned_ships()
 	_hud_surface.set_player_fitting(
-		snapshot.get("modules", []) as Array,
-		snapshot.get("inventory", []) as Array,
-		snapshot.get("station_inventory", []) as Array,
-		snapshot.get("owned_ships", []) as Array,
-		_buildable_ship_types)
-	_market_surface.set_cargo(snapshot.get("inventory", []) as Array)
+		modules, inventory, station_inventory, owned_ships, _buildable_ship_types)
+	_market_surface.set_cargo(inventory)
 	_recalc_weapon_range()
 
 func _recalc_weapon_range() -> void:
-	var ranges: Dictionary = _loadout.weapon_ranges()
-	_weapon_range = ranges["optimal"] as float
-	_weapon_falloff = ranges["falloff"] as float
+	_weapon_range = _loadout.weapon_optimal_range()
+	_weapon_falloff = _loadout.weapon_falloff_range()
 	_presentation.update_tactical_overlay_ranges(_weapon_range, _weapon_falloff)
 
 func _on_module_activated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
@@ -881,12 +878,11 @@ func _handle_inventory_row_click(row: InventoryRow) -> void:
 			## No command sent -- this only expands/collapses the ship-type
 			## picker rows below it, then forces an immediate panel redraw
 			## (there's no new PlayerLoadout snapshot to trigger one).
-			var snapshot: Dictionary = _loadout.hud_snapshot()
 			_hud_surface.toggle_build_picker(
-				snapshot.get("modules", []) as Array,
-				snapshot.get("inventory", []) as Array,
-				snapshot.get("station_inventory", []) as Array,
-				snapshot.get("owned_ships", []) as Array,
+				_loadout.modules(),
+				_loadout.inventory(),
+				_loadout.station_inventory(),
+				_loadout.owned_ships(),
 				_buildable_ship_types)
 		InventoryRow.ACTION_BUILD_SHIP_TYPE:
 			## Dedicated button alongside the existing [B] key (Phase 9B task
