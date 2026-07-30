@@ -41,6 +41,25 @@ impl<S: EventStore> SimulationNode<S> {
         self.docked_players.get(&player_id).copied()
     }
 
+    /// Re-adopt a restored ship for a resumed player and reconcile Station access.
+    ///
+    /// Ownership is intentionally not persisted in `StateSnapshot`, so tail
+    /// `ShipDocked`/`ShipUndocked` events replay before the resumed player is
+    /// known. `docked_ships` is still authoritative after replay; use it here to
+    /// repair the player-facing Station context once identity is re-established.
+    pub fn resume_player_ship(&mut self, ship_id: ShipId, player_id: PlayerId) -> bool {
+        if !self.adopt_player_ship(ship_id, player_id) {
+            return false;
+        }
+
+        if let Some(station_id) = self.docked_ships.get(&ship_id).copied() {
+            self.docked_players.insert(player_id, station_id);
+        } else {
+            self.docked_players.remove(&player_id);
+        }
+        true
+    }
+
     pub(super) fn settle_ship_into_station(&mut self, ship_id: ShipId, station_id: StationId) {
         let Some(station_abs) = self.station(station_id).map(|station| station.abs_m) else {
             return;
@@ -229,9 +248,12 @@ impl<S: EventStore> SimulationNode<S> {
 
 #[cfg(test)]
 mod tests {
-    use dawn_core::{DockCommand, NodeId, SectorBounds, SectorId, StationId, WarpTarget};
+    use dawn_core::{
+        events::{ShipDocked, ShipUndocked}, DockCommand, NodeId, SectorBounds, SectorId, StationId,
+        Tick, WarpTarget,
+    };
     use dawn_ecs::components::{ThrustComp, VelocityComp};
-    use dawn_event_store::InMemoryEventStore;
+    use dawn_event_store::{store::EventStore, InMemoryEventStore};
 
     use crate::{modules, ship_types};
 
@@ -254,6 +276,78 @@ mod tests {
             node.register_ship_type(def);
         }
         node
+    }
+
+    fn copied_store(node: &SimulationNode<InMemoryEventStore>) -> InMemoryEventStore {
+        let mut store = InMemoryEventStore::new();
+        for record in node.event_store.all_records() {
+            store.append(record.event.clone());
+        }
+        store
+    }
+
+    #[test]
+    fn resume_reconciles_a_dock_event_replayed_without_ownership() {
+        let mut original = node();
+        let player_id = original.next_player_id();
+        let ship_id = original.spawn_player_ship(player_id);
+        let snapshot = original.take_snapshot();
+        let mut store = copied_store(&original);
+        store.append(DomainEvent::ShipDocked(ShipDocked {
+            ship_id,
+            station_id: StationId(0),
+            tick: Tick(1),
+        }));
+
+        let mut restored = SimulationNode::restore_from(
+            store,
+            &snapshot,
+            &modules::all_modules(),
+            &ship_types::all_ship_types(),
+        );
+        assert_eq!(restored.docked_station(ship_id), Some(StationId(0)));
+        assert_eq!(restored.player_docked_station(player_id), None);
+
+        assert!(restored.resume_player_ship(ship_id, player_id));
+        assert_eq!(
+            restored.player_docked_station(player_id),
+            Some(StationId(0))
+        );
+    }
+
+    #[test]
+    fn resume_clears_stale_player_context_after_undock_tail_replay() {
+        let mut original = node();
+        let player_id = original.next_player_id();
+        let ship_id = original.spawn_player_ship(player_id);
+        original.apply_event_pub(DomainEvent::ShipDocked(ShipDocked {
+            ship_id,
+            station_id: StationId(0),
+            tick: Tick(1),
+        }));
+        let snapshot = original.take_snapshot();
+        let mut store = copied_store(&original);
+        store.append(DomainEvent::ShipUndocked(ShipUndocked {
+            ship_id,
+            station_id: StationId(0),
+            tick: Tick(2),
+        }));
+
+        let mut restored = SimulationNode::restore_from(
+            store,
+            &snapshot,
+            &modules::all_modules(),
+            &ship_types::all_ship_types(),
+        );
+        assert_eq!(restored.docked_station(ship_id), None);
+        assert_eq!(
+            restored.player_docked_station(player_id),
+            Some(StationId(0)),
+            "tail replay cannot identify the player before resume"
+        );
+
+        assert!(restored.resume_player_ship(ship_id, player_id));
+        assert_eq!(restored.player_docked_station(player_id), None);
     }
 
     #[test]
