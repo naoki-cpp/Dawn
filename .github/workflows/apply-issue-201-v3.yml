@@ -1,0 +1,416 @@
+name: Apply issue 201 robustly
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/type-player-loadout-reads'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/type-player-loadout-reads
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          components: rustfmt, clippy
+
+      - name: Apply source changes
+        id: apply
+        run: |
+          if test -f crates/dawn-client-gdext/src/owned_ship_row_gd.rs; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str, label: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f"{label}: expected one anchor, found {text.count(old)}")
+              p.write_text(text.replace(old, new, 1))
+
+          def replace_span(path: str, start: str, end: str, replacement: str, label: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              start_i = text.find(start)
+              if start_i < 0:
+                  raise SystemExit(f"{label}: start marker not found")
+              end_i = text.find(end, start_i + len(start))
+              if end_i < 0:
+                  raise SystemExit(f"{label}: end marker not found")
+              p.write_text(text[:start_i] + replacement + text[end_i:])
+
+          Path('crates/dawn-client-gdext/src/owned_ship_row_gd.rs').write_text('''use dawn_client_core::OwnedShipRow as CoreOwnedShipRow;
+use godot::prelude::*;
+
+type Dict = Dictionary<Variant, Variant>;
+
+const REQUIRED_KEYS: &[&str] = &[
+    "ship_id",
+    "ship_type_id",
+    "ship_type_name",
+    "docked_station_id",
+    "is_active",
+];
+
+/// GDScript-facing typed view of one owned-ship roster row (ADR-0037).
+/// Optional Rust fields preserve the existing Godot sentinels: `-1` for
+/// absent numeric ids and an empty string for an absent type name.
+#[derive(GodotClass)]
+#[class(no_init, base=RefCounted)]
+pub struct OwnedShipRow {
+    #[var]
+    ship_id: i64,
+    #[var]
+    ship_type_id: i64,
+    #[var]
+    ship_type_name: GString,
+    #[var]
+    docked_station_id: i64,
+    #[var]
+    is_active: bool,
+}
+
+impl OwnedShipRow {
+    pub(crate) fn wrap(row: CoreOwnedShipRow) -> Gd<Self> {
+        Gd::from_init_fn(|_base| Self {
+            ship_id: row.ship_id as i64,
+            ship_type_id: row.ship_type_id.map(i64::from).unwrap_or(-1),
+            ship_type_name: row.ship_type_name.unwrap_or_default().into(),
+            docked_station_id: row.docked_station_id.map(i64::from).unwrap_or(-1),
+            is_active: row.is_active,
+        })
+    }
+}
+
+#[godot_api]
+impl OwnedShipRow {
+    /// Test-fixture adapter matching the old Dictionary row shape.
+    /// Missing keys fail loudly; explicit `null` optional fields map to
+    /// the same sentinels as production Rust values.
+    #[func]
+    fn from_json(src: Dict) -> Variant {
+        for key in REQUIRED_KEYS {
+            if src.get(*key).is_none() {
+                godot_error!("OwnedShipRow.from_json: invalid row, missing '{key}'");
+                return Variant::nil();
+            }
+        }
+
+        let get_i64 = |key: &str, default: i64| -> i64 {
+            src.get(key)
+                .and_then(|value| value.try_to::<i64>().ok())
+                .unwrap_or(default)
+        };
+        let get_string = |key: &str| -> String {
+            src.get(key)
+                .and_then(|value| value.try_to::<GString>().ok())
+                .map(|value| value.to_string())
+                .unwrap_or_default()
+        };
+        let get_bool = |key: &str| -> bool {
+            src.get(key)
+                .and_then(|value| value.try_to::<bool>().ok())
+                .unwrap_or(false)
+        };
+
+        let ship_type_id = get_i64("ship_type_id", -1);
+        let ship_type_name = get_string("ship_type_name");
+        let docked_station_id = get_i64("docked_station_id", -1);
+        let row = CoreOwnedShipRow {
+            ship_id: get_i64("ship_id", 0).max(0) as u64,
+            ship_type_id: u32::try_from(ship_type_id).ok(),
+            ship_type_name: (!ship_type_name.is_empty()).then_some(ship_type_name),
+            docked_station_id: u32::try_from(docked_station_id).ok(),
+            is_active: get_bool("is_active"),
+        };
+        Self::wrap(row).to_variant()
+    }
+}
+''')
+
+          replace_once('crates/dawn-client-gdext/src/lib.rs',
+              'mod navigation_gd;\n',
+              'mod navigation_gd;\nmod owned_ship_row_gd;\n', 'lib module')
+          replace_once('crates/dawn-client-gdext/src/lib.rs',
+              'pub use module_row_gd::ModuleRow;\n',
+              'pub use module_row_gd::ModuleRow;\npub use owned_ship_row_gd::OwnedShipRow;\n', 'lib export')
+
+          replace_once('crates/dawn-client-gdext/src/loadout_gd.rs',
+              'use crate::module_row_gd::{parse_kind, ModuleRow};\n',
+              'use crate::module_row_gd::{parse_kind, ModuleRow};\nuse crate::owned_ship_row_gd::OwnedShipRow;\n', 'loadout import')
+          replace_span('crates/dawn-client-gdext/src/loadout_gd.rs',
+              "/// Godot's `Dictionary` is generic",
+              '/// Client-side deep module',
+              '''/// Type-erased Dictionary retained only for `toggle_at()`'s small,
+/// closed activation-intent boundary.
+type Dict = Dictionary<Variant, Variant>;
+
+''', 'dictionary comment')
+          replace_span('crates/dawn-client-gdext/src/loadout_gd.rs',
+              '    #[func]\n    fn owned_ships',
+              '    #[func]\n    fn modules',
+              '''    #[func]
+    fn owned_ships(&self) -> Array<Gd<OwnedShipRow>> {
+        let mut out = Array::new();
+        if let Some(loadout) = &self.loadout {
+            for ship in &loadout.owned_ships {
+                out.push(&OwnedShipRow::wrap(ship.clone()));
+            }
+        }
+        out
+    }
+
+    #[func]
+    fn docked_station_id(&self) -> i64 {
+        self.loadout
+            .as_ref()
+            .and_then(|loadout| loadout.docked_station_id)
+            .map(i64::from)
+            .unwrap_or(-1)
+    }
+
+    #[func]
+    fn docked_station_name(&self) -> GString {
+        self.loadout
+            .as_ref()
+            .and_then(|loadout| loadout.docked_station_name.as_deref())
+            .unwrap_or_default()
+            .into()
+    }
+
+    #[func]
+    fn is_docked(&self) -> bool {
+        self.loadout
+            .as_ref()
+            .is_some_and(PlayerLoadoutMsg::is_docked)
+    }
+
+''', 'typed roster and dock reads')
+          replace_span('crates/dawn-client-gdext/src/loadout_gd.rs',
+              '    #[func]\n    fn weapon_ranges',
+              '    /// `-1.0` if `kind`',
+              '''    #[func]
+    fn weapon_optimal_range(&self) -> f64 {
+        self.loadout
+            .as_ref()
+            .map(PlayerLoadoutMsg::weapon_ranges)
+            .map(|(optimal, _)| optimal)
+            .unwrap_or(0.0)
+    }
+
+    #[func]
+    fn weapon_falloff_range(&self) -> f64 {
+        self.loadout
+            .as_ref()
+            .map(PlayerLoadoutMsg::weapon_ranges)
+            .map(|(_, falloff)| falloff)
+            .unwrap_or(0.0)
+    }
+
+''', 'weapon scalar reads')
+          replace_once('crates/dawn-client-gdext/src/loadout_gd.rs',
+              '    /// `{}` (empty Dictionary) if `active_index` is out of range, matching\n    /// the old `player_loadout.gd::toggle_at`\'s "nothing to toggle" sentinel.\n',
+              '    /// Small closed intent boundary kept as a Dictionary deliberately:\n    /// `{}` means "nothing to toggle"; otherwise fixed keys describe one command.\n',
+              'toggle boundary comment')
+
+          replace_span('client/scripts/main.gd',
+              '\tvar dock_status: Dictionary = _loadout.dock_status()\n',
+              '\t_sync_session_state()\n',
+              '''\t_session.apply_dock_fitting(
+\t\t_loadout.docked_station_id(),
+\t\t_loadout.docked_station_name(),
+\t\t_loadout.tick()
+\t)
+''', 'main dock reads')
+          replace_span('client/scripts/main.gd',
+              '\tvar snapshot: Dictionary = _loadout.hud_snapshot()\n',
+              '\t_recalc_weapon_range()\n',
+              '''\tvar modules := _loadout.modules()
+\tvar inventory := _loadout.inventory()
+\tvar station_inventory := _loadout.station_inventory()
+\tvar owned_ships := _loadout.owned_ships()
+\t_hud_surface.set_player_fitting(
+\t\tmodules, inventory, station_inventory, owned_ships, _buildable_ship_types)
+\t_market_surface.set_cargo(inventory)
+''', 'main fitting reads')
+          replace_span('client/scripts/main.gd',
+              'func _recalc_weapon_range() -> void:\n',
+              'func _on_module_activated',
+              '''func _recalc_weapon_range() -> void:
+\t_weapon_range = _loadout.weapon_optimal_range()
+\t_weapon_falloff = _loadout.weapon_falloff_range()
+\t_presentation.update_tactical_overlay_ranges(_weapon_range, _weapon_falloff)
+
+''', 'main weapon reads')
+          replace_span('client/scripts/main.gd',
+              '\t\t\tvar snapshot: Dictionary = _loadout.hud_snapshot()\n',
+              '\t\tInventoryRow.ACTION_BUILD_SHIP_TYPE:',
+              '''\t\t\t_hud_surface.toggle_build_picker(
+\t\t\t\t_loadout.modules(),
+\t\t\t\t_loadout.inventory(),
+\t\t\t\t_loadout.station_inventory(),
+\t\t\t\t_loadout.owned_ships(),
+\t\t\t\t_buildable_ship_types)
+''', 'main build picker reads')
+
+          replace_once('client/scripts/hud_manager.gd',
+              '## ModuleRow/ItemRow are GDExtension classes (dawn-client-gdext,\n## ADR-0039/ADR-0040) -- globally registered, no preload needed.',
+              '## ModuleRow/ItemRow/OwnedShipRow are GDExtension classes\n## (dawn-client-gdext, ADR-0039/ADR-0040) -- globally registered, no preload needed.',
+              'hud class comment')
+          replace_span('client/scripts/hud_manager.gd',
+              '\tvar ship_rows: Array[InventoryRow] = []\n',
+              '\t\tvar text :=',
+              '''\tvar ship_rows: Array[InventoryRow] = []
+\tfor entry: Variant in owned_ships:
+\t\tvar ship: OwnedShipRow = entry as OwnedShipRow
+\t\tvar ship_id: int = ship.ship_id
+\t\tvar is_active: bool = ship.is_active
+\t\tvar name := ship.ship_type_name if not ship.ship_type_name.is_empty() else "Ship #%d" % ship_id
+\t\tvar status := "active" if is_active else ("docked" if ship.docked_station_id >= 0 else "away")
+''', 'hud owned row reads')
+
+          test_path = Path('client/test/hud_manager_test.gd')
+          test = test_path.read_text()
+          insertion = '''
+
+func _owned_ship(overrides: Dictionary) -> OwnedShipRow:
+\tvar base: Dictionary = {
+\t\t"ship_id": 1,
+\t\t"ship_type_id": 7,
+\t\t"ship_type_name": "Magpie",
+\t\t"docked_station_id": 0,
+\t\t"is_active": true,
+\t}
+\tfor key: String in overrides:
+\t\tbase[key] = overrides[key]
+\treturn OwnedShipRow.from_json(base)
+'''
+          marker = '\n\n# -- set_stat_bar / set_mini_bar'
+          if marker not in test:
+              raise SystemExit('hud test helper insertion marker missing')
+          test = test.replace(marker, insertion + marker, 1)
+          old = '''\tHudManager.update_inventory_panel(refs, [], [], [], [
+\t\t{"ship_id": 1, "ship_type_id": 7, "ship_type_name": "Magpie",
+\t\t\t"docked_station_id": 0, "is_active": true},
+\t])
+'''
+          if old not in test:
+              raise SystemExit('hud test roster fixture missing')
+          test = test.replace(old, '\tHudManager.update_inventory_panel(refs, [], [], [], [_owned_ship({})])\n', 1)
+          start = test.find('\tvar owned_ships := [\n')
+          end = test.find('\n\n\tHudManager.update_inventory_panel', start)
+          if start < 0 or end < 0:
+              raise SystemExit('hud test nullable roster fixture missing')
+          test = test[:start] + '''\tvar owned_ships := [_owned_ship({
+\t\t"ship_type_id": null,
+\t\t"ship_type_name": null,
+\t\t"docked_station_id": null,
+\t\t"is_active": false,
+\t})]''' + test[end:]
+          test_path.write_text(test)
+
+          Path('client/test/player_loadout_test.gd').write_text('''## player_loadout_test.gd
+## GDExtension-boundary contract tests for PlayerLoadout read accessors.
+extends GdUnitTestSuite
+
+const __source: String = "PlayerLoadout"
+
+func test_empty_state_preserves_explicit_scalar_sentinels() -> void:
+\tvar loadout := PlayerLoadout.new()
+\tassert_int(loadout.docked_station_id()).is_equal(-1)
+\tassert_str(loadout.docked_station_name()).is_empty()
+\tassert_bool(loadout.is_docked()).is_false()
+\tassert_float(loadout.weapon_optimal_range()).is_equal_approx(0.0, 0.0001)
+\tassert_float(loadout.weapon_falloff_range()).is_equal_approx(0.0, 0.0001)
+
+func test_owned_ships_cross_the_boundary_as_typed_rows() -> void:
+\tvar loadout := PlayerLoadout.new()
+\tassert_bool(loadout.apply_payload(JSON.stringify({
+\t\t"docked_station_id": 4,
+\t\t"docked_station_name": "Haven",
+\t\t"owned_ships": [{
+\t\t\t"ship_id": 9,
+\t\t\t"ship_type_id": null,
+\t\t\t"ship_type_name": null,
+\t\t\t"docked_station_id": null,
+\t\t\t"is_active": false,
+\t\t}],
+\t}))).is_true()
+\tvar rows: Array = loadout.owned_ships()
+\tassert_int(rows.size()).is_equal(1)
+\tassert_bool(rows[0] is OwnedShipRow).is_true()
+\tvar row: OwnedShipRow = rows[0]
+\tassert_int(row.ship_id).is_equal(9)
+\tassert_int(row.ship_type_id).is_equal(-1)
+\tassert_str(row.ship_type_name).is_empty()
+\tassert_int(row.docked_station_id).is_equal(-1)
+\tassert_bool(row.is_active).is_false()
+\tassert_int(loadout.docked_station_id()).is_equal(4)
+\tassert_str(loadout.docked_station_name()).is_equal("Haven")
+\tassert_bool(loadout.is_docked()).is_true()
+
+func test_dictionary_read_projections_are_removed_but_toggle_intent_remains_closed() -> void:
+\tvar loadout := PlayerLoadout.new()
+\tassert_bool(loadout.has_method("hud_snapshot")).is_false()
+\tassert_bool(loadout.has_method("dock_status")).is_false()
+\tassert_bool(loadout.has_method("weapon_ranges")).is_false()
+\tassert_bool(loadout.has_method("toggle_at")).is_true()
+\tassert_dict(loadout.toggle_at(0)).is_empty()
+''')
+
+          replace_once('docs/architecture/architecture-review/client-pending.md',
+              '''## C-11（#201・P2）: `PlayerLoadout`のDictionary再投影
+
+`hud_snapshot()`は既存accessorをDictionaryへpackし、`main.gd`が即unpackする。dock status等にも同型境界が残る。
+**判断:** `hud_snapshot()`を先に削除し、残りをtyped recordまたはnarrow accessorへ段階移行する。
+
+''', '', 'pending C-11')
+          completed = Path('docs/architecture/architecture-review/client-completed.md')
+          completed.write_text(completed.read_text().rstrip() + '''
+
+### 2026-07-30: C-11 / #201 PlayerLoadout read境界をtyped化
+
+`hud_snapshot()`のpack→即unpackを削除し、modules / inventory / station inventoryは
+既存のtyped accessorを直接利用するようにした。owned ship rosterは`OwnedShipRow`、
+dock contextとweapon rangeはnarrow scalar accessorとしてGDExtension境界を越える。
+`toggle_at()`だけは即座にcommandへ変換される小さな閉じたintent境界としてDictionaryを維持した。
+Rust testsとGdUnit4の境界契約テストでsentinel互換とtyped row shapeを固定する。
+''')
+          PY
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Format and focused checks
+        if: steps.apply.outputs.changed == 'true'
+        run: |
+          cargo fmt --all
+          cargo test -p dawn-client-gdext
+          cargo clippy -p dawn-client-gdext --all-targets -- -D warnings
+          git diff --check
+
+      - name: Commit and push source changes
+        if: steps.apply.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/dawn-client-gdext/src/lib.rs \
+            crates/dawn-client-gdext/src/loadout_gd.rs \
+            crates/dawn-client-gdext/src/owned_ship_row_gd.rs \
+            client/scripts/main.gd client/scripts/hud_manager.gd \
+            client/test/hud_manager_test.gd client/test/player_loadout_test.gd \
+            docs/architecture/architecture-review/client-pending.md \
+            docs/architecture/architecture-review/client-completed.md
+          git commit -m "refactor(client): type PlayerLoadout read projections"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:agent/type-player-loadout-reads
