@@ -88,4 +88,4 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 既存のtyped accessorを直接利用するようにした。owned ship rosterは`OwnedShipRow`、
 dock contextとweapon rangeはnarrow scalar accessorとしてGDExtension境界を越える。
 `toggle_at()`だけは即座にcommandへ変換される小さな閉じたintent境界としてDictionaryを維持した。
-Rust testsとGdUnit4の境界契約テストでsentinel互換とtyped row shapeを固定する。
+新設`player_loadout_test.gd`の3件と、既存HUD fixtureのtyped row移行でsentinel互換と境界shapeを固定した。
