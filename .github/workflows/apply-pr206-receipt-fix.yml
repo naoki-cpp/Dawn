@@ -19,60 +19,14 @@ jobs:
           ref: recoverable-sector-transit
           persist-credentials: false
 
-      - name: Relax receipt collection ordering
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("scripts/apply_pr206_receipt_fix.py")
-          text = path.read_text()
-          text = text.replace(
-              "use std::collections::{BTreeMap, BTreeSet};",
-              "use std::collections::BTreeMap;",
-          )
-          text = text.replace(
-              "PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize",
-              "PartialEq, Eq, Serialize, Deserialize",
-          )
-          text = text.replace(
-              "BTreeSet<CompletedIncomingTransit>",
-              "Vec<CompletedIncomingTransit>",
-          )
-          text = text.replace("BTreeSet::new()", "Vec::new()")
-          text = text.replace(
-              "std::collections::BTreeSet<CompletedIncomingTransit>",
-              "Vec<CompletedIncomingTransit>",
-          )
-          path.write_text(text)
-          PY
+      - name: Prepare code transformation
+        run: python3 scripts/prepare_pr206_fix.py
 
       - name: Apply code changes
         run: python3 scripts/apply_pr206_receipt_fix.py
 
-      - name: Correct generated Vec paths and test call
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          for name in (
-              "crates/dawn-sector/src/node/mod.rs",
-              "crates/dawn-sector/src/node/snapshot_io.rs",
-          ):
-              path = Path(name)
-              text = path.read_text().replace("std::collections::Vec", "Vec")
-              path.write_text(text)
-
-          path = Path("crates/dawn-sector/src/node/transit_flow.rs")
-          text = path.read_text()
-          old = """            Some(outbound_gate.id),
-        );"""
-          new = """            Some(outbound_gate.id),
-            data.request_tick,
-        );"""
-          if text.count(old) != 1:
-              raise SystemExit(f"direct commit test call: expected one match, found {text.count(old)}")
-          path.write_text(text.replace(old, new, 1))
-          PY
+      - name: Correct generated code
+        run: python3 scripts/fix_pr206_generated.py
 
       - name: Format
         run: cargo fmt --all
@@ -87,7 +41,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          rm -f scripts/prepare_pr206_fix.py
           rm -f scripts/apply_pr206_receipt_fix.py
+          rm -f scripts/fix_pr206_generated.py
           rm -f .github/workflows/apply-pr206-receipt-fix.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
