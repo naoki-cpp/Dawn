@@ -249,8 +249,8 @@ impl<S: EventStore> SimulationNode<S> {
 #[cfg(test)]
 mod tests {
     use dawn_core::{
-        events::{ShipDocked, ShipUndocked}, DockCommand, NodeId, SectorBounds, SectorId, StationId,
-        Tick, WarpTarget,
+        events::{ShipDocked, ShipUndocked},
+        DockCommand, NodeId, SectorBounds, SectorId, StationId, Tick, WarpTarget,
     };
     use dawn_ecs::components::{ThrustComp, VelocityComp};
     use dawn_event_store::{store::EventStore, InMemoryEventStore};
