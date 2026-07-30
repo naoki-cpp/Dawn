@@ -1,0 +1,51 @@
+name: Run PR 206 self-review fixes
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.pull_request.number == 206
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: recoverable-sector-transit
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Extract and apply fix script
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          lines = Path('.github/workflows/fix-pr-206-self-review-2.yml').read_text().splitlines()
+          start = next(i for i, line in enumerate(lines) if "python3 - <<'PY'" in line) + 1
+          end = next(i for i in range(start, len(lines)) if lines[i].strip() == 'PY')
+          Path('/tmp/fix_pr_206.py').write_text(textwrap.dedent('\n'.join(lines[start:end])) + '\n')
+          PY
+          python3 /tmp/fix_pr_206.py
+
+      - name: Format and test
+        run: |
+          cargo fmt --all -- --check
+          cargo test --workspace
+          cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Commit fixes and remove one-shot workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm .github/workflows/fix-pr-206-self-review-2.yml
+          rm .github/workflows/run-fix-pr-206-self-review-2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(sector): close remaining transit recovery gaps"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:${GITHUB_HEAD_REF}
