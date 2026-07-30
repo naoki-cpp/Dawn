@@ -145,7 +145,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// client command. Folded into [`prepare_transit_commit`](Self::prepare_transit_commit);
     /// not called directly outside this module.
     #[cfg(test)]
-    fn propose_transit(&mut self, cmd: TransitCommand) -> Result<(), DawnError> {
+    pub(super) fn propose_transit(&mut self, cmd: TransitCommand) -> Result<(), DawnError> {
         self.propose_transit_with_route(
             cmd,
             None,
