@@ -19,8 +19,8 @@
 class_name HudManager
 extends RefCounted
 
-## ModuleRow/ItemRow are GDExtension classes (dawn-client-gdext,
-## ADR-0039/ADR-0040) -- globally registered, no preload needed.
+## ModuleRow/ItemRow/OwnedShipRow are GDExtension classes
+## (dawn-client-gdext, ADR-0039/ADR-0040) -- globally registered, no preload needed.
 const InventoryRow = preload("res://scripts/inventory_row.gd")
 
 ## Layer colours for the three HP bands and the capacitor (EVE convention).
@@ -868,15 +868,11 @@ static func update_inventory_panel(
 
 	var ship_rows: Array[InventoryRow] = []
 	for entry: Variant in owned_ships:
-		var ship: Dictionary = entry as Dictionary
-		var ship_id: int = ship.get("ship_id", 0) as int
-		var is_active: bool = ship.get("is_active", false) as bool
-		var raw_ship_type_name: Variant = ship.get("ship_type_name", null)
-		var ship_type_name: String = "" if raw_ship_type_name == null else raw_ship_type_name as String
-		var name := ship_type_name if not ship_type_name.is_empty() else "Ship #%d" % ship_id
-		var raw_docked_station_id: Variant = ship.get("docked_station_id", null)
-		var docked_station_id: int = -1 if raw_docked_station_id == null else raw_docked_station_id as int
-		var status := "active" if is_active else ("docked" if docked_station_id >= 0 else "away")
+		var ship: OwnedShipRow = entry as OwnedShipRow
+		var ship_id: int = ship.ship_id
+		var is_active: bool = ship.is_active
+		var name := ship.ship_type_name if not ship.ship_type_name.is_empty() else "Ship #%d" % ship_id
+		var status := "active" if is_active else ("docked" if ship.docked_station_id >= 0 else "away")
 		var text := "%s (%s)" % [name, status]
 		var row := _make_ship_row(text, ship_id, is_active)
 		ships_list.add_child(row.panel)
