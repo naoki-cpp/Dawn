@@ -19,14 +19,6 @@ var _last_click_time: float = -1.0
 var _last_click_pos: Vector2 = Vector2.ZERO
 
 
-func selection_state() -> Dictionary:
-	return {
-		"selected_target_id": _selected_target_id,
-		"selected_gate_id": _selected_gate_id,
-		"selected_body_id": _selected_body_id,
-	}
-
-
 func selected_target_id() -> int:
 	return _selected_target_id
 
