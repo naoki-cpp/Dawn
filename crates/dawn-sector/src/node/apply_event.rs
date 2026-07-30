@@ -4,10 +4,7 @@ use dawn_ecs::components::{
 };
 use dawn_event_store::store::EventStore;
 
-use super::{
-    station_operation_execution::StationRuntimeState,
-    SimulationNode,
-};
+use super::{station_operation_execution::StationRuntimeState, SimulationNode};
 
 impl<S: EventStore> SimulationNode<S> {
     /// Apply a single domain event to the ECS World without appending it.
