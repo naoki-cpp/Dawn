@@ -48,6 +48,19 @@ func _item(overrides: Dictionary) -> ItemRow:
 	return ItemRow.from_json(base)
 
 
+func _owned_ship(overrides: Dictionary) -> OwnedShipRow:
+	var base: Dictionary = {
+		"ship_id": 1,
+		"ship_type_id": 7,
+		"ship_type_name": "Magpie",
+		"docked_station_id": 0,
+		"is_active": true,
+	}
+	for key: String in overrides:
+		base[key] = overrides[key]
+	return OwnedShipRow.from_json(base)
+
+
 func test_set_player_fitting_before_build_is_applied_after_build() -> void:
 	var unbuilt: RefCounted = HudSurfaceScript.new()
 	var modules: Array[ModuleRow] = [
@@ -279,8 +292,8 @@ func test_station_inventory_packaged_ship_row_is_clickable_to_assemble() -> void
 
 func test_owned_ships_roster_lists_active_and_inactive_ships() -> void:
 	_surface.set_player_fitting([], [], [], [
-		{"ship_id": 1, "ship_type_id": 7, "ship_type_name": "Magpie", "docked_station_id": 0, "is_active": true},
-		{"ship_id": 2, "ship_type_id": 7, "ship_type_name": "Magpie", "docked_station_id": 0, "is_active": false},
+		_owned_ship({}),
+		_owned_ship({"ship_id": 2, "is_active": false}),
 	])
 	_surface.toggle_inventory_panel()
 	await get_tree().process_frame
