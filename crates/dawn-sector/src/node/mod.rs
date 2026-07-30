@@ -253,6 +253,10 @@ impl<S: EventStore> SimulationNode<S> {
         bounds: SectorBounds,
         store: S,
     ) -> Self {
+        let galaxy = Arc::new(crate::galaxy::Galaxy::demo());
+        let sector_map = SectorMap::from_galaxy(sector_id, Arc::clone(&galaxy));
+        let anchor_table = crate::anchor::AnchorTable::from_galaxy(&galaxy);
+
         Self {
             node_id,
             sector_id,
@@ -267,28 +271,8 @@ impl<S: EventStore> SimulationNode<S> {
             base_stats: HashMap::new(),
             player_id_counter: 0,
             pending_bot_lock_commands: Vec::new(),
-            sector_map: {
-                let sm = Arc::new(crate::galaxy::Galaxy::demo());
-                SectorMap {
-                    gates: sm
-                        .gates_in_sector(sector_id)
-                        .into_iter()
-                        .map(|g| (g.id, g))
-                        .collect(),
-                    bodies: sm
-                        .bodies_in_sector(sector_id)
-                        .into_iter()
-                        .map(|b| (b.id, b))
-                        .collect(),
-                    stations: sm
-                        .stations_in_sector(sector_id)
-                        .into_iter()
-                        .map(|s| (s.id, s))
-                        .collect(),
-                    galaxy: sm,
-                }
-            },
-            anchor_table: crate::anchor::AnchorTable::from_galaxy(&crate::galaxy::Galaxy::demo()),
+            sector_map,
+            anchor_table,
             population_cap: POPULATION_CAP,
             station_inventory_db: station_inventory_db::StationInventoryDb::open_in_memory()
                 .expect("in-memory sqlite connection never fails to open"),
@@ -389,27 +373,13 @@ impl<S: EventStore> SimulationNode<S> {
         Ok(())
     }
 
-    /// Replace the navigation topology.  Updates `jump_gates` and
-    /// `celestial_bodies` for this node's Sector immediately.
-    pub fn set_galaxy(&mut self, map: Arc<crate::galaxy::Galaxy>) {
-        let sid = self.sector_id;
-        self.sector_map.gates = map
-            .gates_in_sector(sid)
-            .into_iter()
-            .map(|g| (g.id, g))
-            .collect();
-        self.sector_map.bodies = map
-            .bodies_in_sector(sid)
-            .into_iter()
-            .map(|b| (b.id, b))
-            .collect();
-        self.sector_map.stations = map
-            .stations_in_sector(sid)
-            .into_iter()
-            .map(|s| (s.id, s))
-            .collect();
-        self.anchor_table = crate::anchor::AnchorTable::from_galaxy(&map);
-        self.sector_map.galaxy = map;
+    /// Replace the navigation topology. Rebuilds this Sector's gates, bodies,
+    /// stations, and the shared body-anchor table from the same `Galaxy` value.
+    pub fn set_galaxy(&mut self, galaxy: Arc<crate::galaxy::Galaxy>) {
+        let anchor_table = crate::anchor::AnchorTable::from_galaxy(&galaxy);
+        let sector_map = SectorMap::from_galaxy(self.sector_id, galaxy);
+        self.sector_map = sector_map;
+        self.anchor_table = anchor_table;
     }
 
     /// Read access to the navigation topology.
@@ -637,6 +607,117 @@ mod tests {
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         )
+    }
+
+    #[test]
+    fn set_galaxy_rebuilds_all_sector_projections_and_anchors_from_one_value() {
+        let sector_id = SectorId(7);
+        let other_sector = SectorId(8);
+        let local_body = dawn_core::CelestialBodyDef {
+            id: dawn_core::CelestialBodyId(70),
+            sector: sector_id,
+            kind: dawn_core::CelestialBodyKind::Star,
+            name: "Local Star".to_string(),
+            position: Position::new(10.0, 20.0, 30.0),
+            abs_m: dawn_core::AbsolutePosition::new(10.0, 20.0, 30.0),
+            radius: 1000.0,
+            spectral_type: 0.5,
+        };
+        let remote_body = dawn_core::CelestialBodyDef {
+            id: dawn_core::CelestialBodyId(80),
+            sector: other_sector,
+            kind: dawn_core::CelestialBodyKind::Planet,
+            name: "Remote Planet".to_string(),
+            position: Position::new(40.0, 50.0, 60.0),
+            abs_m: dawn_core::AbsolutePosition::new(40.0, 50.0, 60.0),
+            radius: 500.0,
+            spectral_type: 0.0,
+        };
+        let galaxy = Arc::new(crate::galaxy::Galaxy::new(
+            vec![dawn_core::StarSystemDef {
+                id: dawn_core::StarSystemId(7),
+                name: "Replacement".to_string(),
+                sectors: vec![sector_id, other_sector],
+            }],
+            vec![
+                JumpGateDef {
+                    id: JumpGateId(70),
+                    from_sector: sector_id,
+                    position: Position::new(100.0, 0.0, 0.0),
+                    abs_m: dawn_core::AbsolutePosition::new(100.0, 0.0, 0.0),
+                    to_sector: other_sector,
+                    activation_radius: 2000.0,
+                },
+                JumpGateDef {
+                    id: JumpGateId(80),
+                    from_sector: other_sector,
+                    position: Position::new(200.0, 0.0, 0.0),
+                    abs_m: dawn_core::AbsolutePosition::new(200.0, 0.0, 0.0),
+                    to_sector: sector_id,
+                    activation_radius: 2000.0,
+                },
+            ],
+            vec![local_body.clone(), remote_body.clone()],
+            vec![
+                StationDef {
+                    id: StationId(70),
+                    sector: sector_id,
+                    name: "Local Station".to_string(),
+                    position: Position::new(300.0, 0.0, 0.0),
+                    abs_m: dawn_core::AbsolutePosition::new(300.0, 0.0, 0.0),
+                    docking_radius: 1000.0,
+                },
+                StationDef {
+                    id: StationId(80),
+                    sector: other_sector,
+                    name: "Remote Station".to_string(),
+                    position: Position::new(400.0, 0.0, 0.0),
+                    abs_m: dawn_core::AbsolutePosition::new(400.0, 0.0, 0.0),
+                    docking_radius: 1000.0,
+                },
+            ],
+        ));
+
+        let mut node = SimulationNode::new(
+            NodeId(7),
+            sector_id,
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        node.set_galaxy(Arc::clone(&galaxy));
+
+        assert!(Arc::ptr_eq(&node.sector_map.galaxy, &galaxy));
+        assert_eq!(
+            node.sector_map.gates,
+            galaxy
+                .gates_in_sector(sector_id)
+                .into_iter()
+                .map(|gate| (gate.id, gate))
+                .collect()
+        );
+        assert_eq!(
+            node.sector_map.bodies,
+            galaxy
+                .bodies_in_sector(sector_id)
+                .into_iter()
+                .map(|body| (body.id, body))
+                .collect()
+        );
+        assert_eq!(
+            node.sector_map.stations,
+            galaxy
+                .stations_in_sector(sector_id)
+                .into_iter()
+                .map(|station| (station.id, station))
+                .collect()
+        );
+
+        for body in &galaxy.bodies {
+            assert_eq!(
+                node.anchor_table.abs(dawn_core::AnchorId::from(body.id)),
+                Some(body.abs_m)
+            );
+        }
+        assert!(node.anchor_table.abs(dawn_core::AnchorId(0)).is_none());
     }
 
     // -- Existing behaviour (unchanged) --------------------------------------
