@@ -133,7 +133,8 @@ fn destination_completed_transfer<S: EventStore>(
                 if marker_seen
                     && event.ship_id == ship_id
                     && event.from == from
-                    && event.to == to =>
+                    && event.to == to
+                    && event.request_tick == request_tick =>
             {
                 return true;
             }
@@ -244,7 +245,7 @@ pub(crate) fn apply_ack<S: EventStore>(
     if from != node.sector_id() || !request_matches(node, ship.ship_id, from, to, request_tick) {
         return false;
     }
-    node.complete_outgoing_transit(ship, to, entry_pos_abs);
+    node.complete_outgoing_transit(ship, to, entry_pos_abs, request_tick);
     true
 }
 
@@ -277,7 +278,9 @@ pub(crate) fn due_retries<S: EventStore>(node: &mut SimulationNode<S>) -> Vec<Co
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dawn_core::events::{SectorTransitCompleted, SectorTransitRequested, TransitShipState};
     use dawn_core::{NodeId, SectorBounds, ShipTypeId, Velocity};
+    use dawn_event_store::InMemoryEventStore;
 
     fn node(sector: u8) -> SimulationNode {
         SimulationNode::new(
@@ -294,7 +297,12 @@ mod tests {
         let proposal = apply_request(&mut source, ship_id, SectorId(1), None).unwrap();
         assert!(has_pending_outgoing_transit(&source));
 
-        source.complete_outgoing_transit(&proposal.ship, proposal.to, proposal.entry_pos_abs);
+        source.complete_outgoing_transit(
+            &proposal.ship,
+            proposal.to,
+            proposal.entry_pos_abs,
+            proposal.request_tick,
+        );
         assert!(!has_pending_outgoing_transit(&source));
     }
 
@@ -330,5 +338,137 @@ mod tests {
         assert!(first.is_some() && second.is_some());
         assert_eq!(destination.total_event_count(), event_count);
         assert_eq!(destination.ship_count(), 1);
+    }
+
+    fn test_ship(ship_id: ShipId) -> ShipSnapshot {
+        ShipSnapshot {
+            ship_id,
+            ship_type_id: ShipTypeId(1),
+            absolute_position: None,
+            position: Position::ORIGIN,
+            anchor: dawn_core::AnchorId(0),
+            velocity: Velocity::ZERO,
+            current_shield: 100.0,
+            current_armor: 100.0,
+            current_hull: 100.0,
+            is_destroyed: false,
+            capacitor: Some(100.0),
+            fitting: dawn_core::fitting::FittingSnapshot::empty(),
+            tackled_by: Vec::new(),
+            inventory: std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn transit_state() -> TransitShipState {
+        TransitShipState {
+            ship_type_id: ShipTypeId(1),
+            current_shield: 100.0,
+            current_armor: 100.0,
+            current_hull: 100.0,
+            is_destroyed: false,
+            capacitor: Some(100.0),
+            fitting: dawn_core::fitting::FittingSnapshot::empty(),
+            inventory: std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn requested(
+        ship_id: ShipId,
+        from: SectorId,
+        to: SectorId,
+        request_tick: u64,
+        event_tick: u64,
+    ) -> DomainEvent {
+        DomainEvent::SectorTransitRequested(SectorTransitRequested {
+            ship_id,
+            from,
+            to,
+            request_tick: Tick(request_tick),
+            gate_id: None,
+            entry_pos: Position::ORIGIN,
+            entry_pos_abs: AbsolutePosition::ORIGIN,
+            tick: Tick(event_tick),
+        })
+    }
+
+    fn completed(
+        ship_id: ShipId,
+        from: SectorId,
+        to: SectorId,
+        request_tick: u64,
+        event_tick: u64,
+    ) -> DomainEvent {
+        DomainEvent::SectorTransitCompleted(SectorTransitCompleted {
+            ship_id,
+            from,
+            to,
+            request_tick: Tick(request_tick),
+            entry_pos: AbsolutePosition::ORIGIN,
+            velocity: Velocity::ZERO,
+            tick: Tick(event_tick),
+            ship_state: transit_state(),
+        })
+    }
+
+    #[test]
+    fn repeated_same_route_replay_preserves_each_attempt_receipt_after_checkpoint() {
+        let destination = node(1);
+        let snapshot_before = destination.take_snapshot();
+        let ship_id = ShipId::new(NodeId(0), 7);
+        let mut store = InMemoryEventStore::new();
+
+        // A -> B -> A -> B -> A in one post-snapshot tail. The two
+        // A -> B attempts must retain distinct source-local identities.
+        for event in [
+            requested(ship_id, SectorId(0), SectorId(1), 10, 1),
+            completed(ship_id, SectorId(0), SectorId(1), 10, 1),
+            requested(ship_id, SectorId(1), SectorId(0), 20, 2),
+            completed(ship_id, SectorId(1), SectorId(0), 20, 2),
+            requested(ship_id, SectorId(0), SectorId(1), 30, 3),
+            completed(ship_id, SectorId(0), SectorId(1), 30, 3),
+            requested(ship_id, SectorId(1), SectorId(0), 40, 4),
+            completed(ship_id, SectorId(1), SectorId(0), 40, 4),
+        ] {
+            store.append(event);
+        }
+
+        let restored = SimulationNode::restore_from(store, &snapshot_before, &[], &[]);
+        assert!(restored.get_ship_position(ship_id).is_none());
+
+        let checkpoint = restored.take_snapshot();
+        for request_tick in [Tick(10), Tick(30)] {
+            assert!(
+                checkpoint.completed_incoming_transits.contains(
+                    &crate::persistence::CompletedIncomingTransit {
+                        ship_id,
+                        from: SectorId(0),
+                        to: SectorId(1),
+                        request_tick,
+                    }
+                ),
+                "missing durable receipt for A -> B attempt {request_tick:?}"
+            );
+        }
+
+        // Simulate compaction: only the checkpoint survives. A delayed
+        // Commit from the first attempt must produce Ack only, never
+        // resurrecting the Ship after it has already left B again.
+        let mut compacted =
+            SimulationNode::restore_from(InMemoryEventStore::new(), &checkpoint, &[], &[]);
+        let events_before = compacted.total_event_count();
+        let ack = apply_commit(
+            &mut compacted,
+            &test_ship(ship_id),
+            SectorId(0),
+            SectorId(1),
+            Position::ORIGIN,
+            AbsolutePosition::ORIGIN,
+            None,
+            Tick(10),
+        );
+
+        assert!(ack.is_some());
+        assert!(compacted.get_ship_position(ship_id).is_none());
+        assert_eq!(compacted.total_event_count(), events_before);
     }
 }

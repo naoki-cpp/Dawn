@@ -451,6 +451,10 @@ pub struct SectorTransitCompleted {
     pub ship_id: ShipId,
     pub from: SectorId,
     pub to: SectorId,
+    /// Source-local identity of the Request this completion closes.
+    /// Required to correlate repeated transfers of the same Ship over
+    /// the same route during replay and delayed-Commit deduplication.
+    pub request_tick: Tick,
     /// Authoritative destination-Sector entry position.
     pub entry_pos: AbsolutePosition,
     pub velocity: Velocity,
@@ -657,6 +661,7 @@ mod tests {
             ship_id: id,
             from: SectorId(0),
             to: SectorId(1),
+            request_tick: dawn_core::Tick::ZERO,
             entry_pos: AbsolutePosition::new(100.0, 0.0, 0.0),
             velocity: Velocity::new(1.0, 0.0, 0.0),
             tick: Tick(8),
