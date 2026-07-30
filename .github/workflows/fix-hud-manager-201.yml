@@ -1,0 +1,37 @@
+name: Repair issue 201 HUD diff
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.head_ref == 'agent/type-player-loadout-reads'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/type-player-loadout-reads
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Restore the base file and apply the narrow typed-row edit
+        run: |
+          git fetch --depth=1 origin d9846778abc48fe0395f338fc1d6efc12192a914
+          python .github/scripts/fix_hud_manager_issue_201.py
+          git diff --check
+
+      - name: Commit and push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add client/scripts/hud_manager.gd
+          git commit -m "fix(client): preserve HUD inventory panel structure"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:agent/type-player-loadout-reads
