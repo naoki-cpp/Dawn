@@ -1,0 +1,56 @@
+name: Apply transit fix on PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: github.head_ref == 'agent/fix-transit-attempt-receipts' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/fix-transit-attempt-receipts
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: Apply and validate fix
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/fix-transit-attempt-receipts.yml').read_text()
+          marker = "          python3 <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY", start)
+          script = '\n'.join(
+              line[10:] if line.startswith('          ') else line
+              for line in workflow[start:end].splitlines()
+          )
+          exec(compile(script, 'transit-fix.py', 'exec'))
+          PY
+
+          cargo fmt --all
+          cargo check --workspace
+          cargo test -p dawn-sector repeated_same_route_replay_preserves_each_attempt_receipt_after_checkpoint
+          git diff --check
+
+      - name: Commit and push fix
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates docs/architecture/event-catalog.md
+          git commit -m "fix(sector): correlate transit receipts by attempt"
+          git push origin HEAD:agent/fix-transit-attempt-receipts
