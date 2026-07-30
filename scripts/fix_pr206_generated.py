@@ -11,6 +11,11 @@ for name in (
 
 path = Path("crates/dawn-sector/src/node/transit_flow.rs")
 text = path.read_text()
+text = text.replace(
+    ".insert(CompletedIncomingTransit {",
+    ".push(CompletedIncomingTransit {",
+    1,
+)
 old = """            Some(outbound_gate.id),
         );"""
 new = """            Some(outbound_gate.id),
