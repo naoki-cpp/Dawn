@@ -661,7 +661,7 @@ mod tests {
             ship_id: id,
             from: SectorId(0),
             to: SectorId(1),
-            request_tick: dawn_core::Tick::ZERO,
+            request_tick: Tick::ZERO,
             entry_pos: AbsolutePosition::new(100.0, 0.0, 0.0),
             velocity: Velocity::new(1.0, 0.0, 0.0),
             tick: Tick(8),
