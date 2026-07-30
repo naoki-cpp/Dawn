@@ -133,7 +133,8 @@ fn destination_completed_transfer<S: EventStore>(
                 if marker_seen
                     && event.ship_id == ship_id
                     && event.from == from
-                    && event.to == to =>
+                    && event.to == to
+                    && event.request_tick == request_tick =>
             {
                 return true;
             }
@@ -148,6 +149,37 @@ fn snapshot_ship<S: EventStore>(node: &SimulationNode<S>, ship_id: ShipId) -> Op
         .ships
         .into_iter()
         .find(|ship| ship.ship_id == ship_id)
+}
+
+/// Close a still-pending outgoing attempt before accepting the same Ship
+/// back into this Sector. This occurs when the Ship returns before the Ack
+/// for its previous departure reaches the source: the local ECS entry is a
+/// frozen recovery copy, not an active destination-side materialization.
+fn complete_superseded_outgoing_transit<S: EventStore>(
+    node: &mut SimulationNode<S>,
+    ship_id: ShipId,
+) -> bool {
+    if !node.is_ship_in_transit(ship_id) {
+        return false;
+    }
+
+    let Some(pending) = pending_outgoing_transits(node)
+        .into_iter()
+        .find(|pending| pending.ship_id == ship_id)
+    else {
+        return false;
+    };
+    let Some(frozen) = node.snapshot_for_transit(ship_id) else {
+        return false;
+    };
+
+    node.complete_outgoing_transit(
+        &frozen,
+        pending.to,
+        pending.entry_pos_abs,
+        pending.request_tick,
+    );
+    true
 }
 
 fn request_matches<S: EventStore>(
@@ -207,19 +239,30 @@ pub(crate) fn apply_commit<S: EventStore>(
         return None;
     }
 
-    let ship_present = node.get_ship_position(ship.ship_id).is_some();
     let completed = destination_completed_transfer(node, ship.ship_id, from, to, request_tick);
-    if !completed && !ship_present {
-        node.append_incoming_transit_marker(
-            ship.ship_id,
-            from,
-            to,
-            request_tick,
-            gate_id,
-            entry_pos,
-            entry_pos_abs,
-        );
-        node.handle_transit_commit(ship, from, entry_pos, entry_pos_abs, gate_id, request_tick);
+    if !completed {
+        // A Ship can return before the Ack for its previous departure reaches
+        // this Sector. In that case the existing entity is an InTransit frozen
+        // recovery copy. Close that older outbox first so the delayed Ack cannot
+        // later delete the newly returned active Ship.
+        if node.get_ship_position(ship.ship_id).is_some() && node.is_ship_in_transit(ship.ship_id) {
+            complete_superseded_outgoing_transit(node, ship.ship_id);
+        }
+
+        // A non-InTransit Ship with this ID is already the active materialization
+        // for this attempt (or a duplicate delivery), so it remains Ack-only.
+        if node.get_ship_position(ship.ship_id).is_none() {
+            node.append_incoming_transit_marker(
+                ship.ship_id,
+                from,
+                to,
+                request_tick,
+                gate_id,
+                entry_pos,
+                entry_pos_abs,
+            );
+            node.handle_transit_commit(ship, from, entry_pos, entry_pos_abs, gate_id, request_tick);
+        }
     }
 
     Some(AckProposal {
@@ -244,7 +287,7 @@ pub(crate) fn apply_ack<S: EventStore>(
     if from != node.sector_id() || !request_matches(node, ship.ship_id, from, to, request_tick) {
         return false;
     }
-    node.complete_outgoing_transit(ship, to, entry_pos_abs);
+    node.complete_outgoing_transit(ship, to, entry_pos_abs, request_tick);
     true
 }
 
@@ -277,7 +320,9 @@ pub(crate) fn due_retries<S: EventStore>(node: &mut SimulationNode<S>) -> Vec<Co
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dawn_core::events::{SectorTransitCompleted, SectorTransitRequested, TransitShipState};
     use dawn_core::{NodeId, SectorBounds, ShipTypeId, Velocity};
+    use dawn_event_store::InMemoryEventStore;
 
     fn node(sector: u8) -> SimulationNode {
         SimulationNode::new(
@@ -294,7 +339,12 @@ mod tests {
         let proposal = apply_request(&mut source, ship_id, SectorId(1), None).unwrap();
         assert!(has_pending_outgoing_transit(&source));
 
-        source.complete_outgoing_transit(&proposal.ship, proposal.to, proposal.entry_pos_abs);
+        source.complete_outgoing_transit(
+            &proposal.ship,
+            proposal.to,
+            proposal.entry_pos_abs,
+            proposal.request_tick,
+        );
         assert!(!has_pending_outgoing_transit(&source));
     }
 
@@ -330,5 +380,202 @@ mod tests {
         assert!(first.is_some() && second.is_some());
         assert_eq!(destination.total_event_count(), event_count);
         assert_eq!(destination.ship_count(), 1);
+    }
+
+    #[test]
+    fn incoming_return_replaces_unacked_frozen_copy() {
+        let mut sector_a = node(0);
+        let mut sector_b = node(1);
+        let ship_id = sector_a.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+
+        let outbound = apply_request(&mut sector_a, ship_id, SectorId(1), None).unwrap();
+        let delayed_outbound_ack = apply_commit(
+            &mut sector_b,
+            &outbound.ship,
+            outbound.from,
+            outbound.to,
+            outbound.entry_pos,
+            outbound.entry_pos_abs,
+            outbound.gate_id,
+            outbound.request_tick,
+        )
+        .unwrap();
+
+        assert!(sector_a.is_ship_in_transit(ship_id));
+        assert!(!sector_b.is_ship_in_transit(ship_id));
+
+        let returning = apply_request(&mut sector_b, ship_id, SectorId(0), None).unwrap();
+        let return_ack = apply_commit(
+            &mut sector_a,
+            &returning.ship,
+            returning.from,
+            returning.to,
+            returning.entry_pos,
+            returning.entry_pos_abs,
+            returning.gate_id,
+            returning.request_tick,
+        )
+        .unwrap();
+
+        assert_eq!(sector_a.ship_count(), 1);
+        assert!(!sector_a.is_ship_in_transit(ship_id));
+        assert!(!has_pending_outgoing_transit(&sector_a));
+
+        assert!(apply_ack(
+            &mut sector_b,
+            &return_ack.ship,
+            return_ack.from,
+            return_ack.to,
+            return_ack.entry_pos_abs,
+            return_ack.request_tick,
+        ));
+        assert_eq!(sector_b.ship_count(), 0);
+
+        // The late Ack for A -> B must no longer match an outgoing request
+        // and therefore cannot delete the active Ship that just returned to A.
+        assert!(!apply_ack(
+            &mut sector_a,
+            &delayed_outbound_ack.ship,
+            delayed_outbound_ack.from,
+            delayed_outbound_ack.to,
+            delayed_outbound_ack.entry_pos_abs,
+            delayed_outbound_ack.request_tick,
+        ));
+        assert_eq!(sector_a.ship_count(), 1);
+        assert!(!sector_a.is_ship_in_transit(ship_id));
+        assert!(!has_pending_outgoing_transit(&sector_a));
+        assert!(!has_pending_outgoing_transit(&sector_b));
+    }
+
+    fn test_ship(ship_id: ShipId) -> ShipSnapshot {
+        ShipSnapshot {
+            ship_id,
+            ship_type_id: ShipTypeId(1),
+            absolute_position: None,
+            position: Position::ORIGIN,
+            anchor: dawn_core::AnchorId(0),
+            velocity: Velocity::ZERO,
+            current_shield: 100.0,
+            current_armor: 100.0,
+            current_hull: 100.0,
+            is_destroyed: false,
+            capacitor: Some(100.0),
+            fitting: dawn_core::fitting::FittingSnapshot::empty(),
+            tackled_by: Vec::new(),
+            inventory: std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn transit_state() -> TransitShipState {
+        TransitShipState {
+            ship_type_id: ShipTypeId(1),
+            current_shield: 100.0,
+            current_armor: 100.0,
+            current_hull: 100.0,
+            is_destroyed: false,
+            capacitor: Some(100.0),
+            fitting: dawn_core::fitting::FittingSnapshot::empty(),
+            inventory: std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn requested(
+        ship_id: ShipId,
+        from: SectorId,
+        to: SectorId,
+        request_tick: u64,
+        event_tick: u64,
+    ) -> DomainEvent {
+        DomainEvent::SectorTransitRequested(SectorTransitRequested {
+            ship_id,
+            from,
+            to,
+            request_tick: Tick(request_tick),
+            gate_id: None,
+            entry_pos: Position::ORIGIN,
+            entry_pos_abs: AbsolutePosition::ORIGIN,
+            tick: Tick(event_tick),
+        })
+    }
+
+    fn completed(
+        ship_id: ShipId,
+        from: SectorId,
+        to: SectorId,
+        request_tick: u64,
+        event_tick: u64,
+    ) -> DomainEvent {
+        DomainEvent::SectorTransitCompleted(SectorTransitCompleted {
+            ship_id,
+            from,
+            to,
+            request_tick: Tick(request_tick),
+            entry_pos: AbsolutePosition::ORIGIN,
+            velocity: Velocity::ZERO,
+            tick: Tick(event_tick),
+            ship_state: transit_state(),
+        })
+    }
+
+    #[test]
+    fn repeated_same_route_replay_preserves_each_attempt_receipt_after_checkpoint() {
+        let destination = node(1);
+        let snapshot_before = destination.take_snapshot();
+        let ship_id = ShipId::new(NodeId(0), 7);
+        let mut store = InMemoryEventStore::new();
+
+        // A -> B -> A -> B -> A in one post-snapshot tail. The two
+        // A -> B attempts must retain distinct source-local identities.
+        for event in [
+            requested(ship_id, SectorId(0), SectorId(1), 10, 1),
+            completed(ship_id, SectorId(0), SectorId(1), 10, 1),
+            requested(ship_id, SectorId(1), SectorId(0), 20, 2),
+            completed(ship_id, SectorId(1), SectorId(0), 20, 2),
+            requested(ship_id, SectorId(0), SectorId(1), 30, 3),
+            completed(ship_id, SectorId(0), SectorId(1), 30, 3),
+            requested(ship_id, SectorId(1), SectorId(0), 40, 4),
+            completed(ship_id, SectorId(1), SectorId(0), 40, 4),
+        ] {
+            store.append(event);
+        }
+
+        let restored = SimulationNode::restore_from(store, &snapshot_before, &[], &[]);
+        assert!(restored.get_ship_position(ship_id).is_none());
+
+        let checkpoint = restored.take_snapshot();
+        for request_tick in [Tick(10), Tick(30)] {
+            assert!(
+                checkpoint.completed_incoming_transits.contains(
+                    &crate::persistence::CompletedIncomingTransit {
+                        ship_id,
+                        from: SectorId(0),
+                        to: SectorId(1),
+                        request_tick,
+                    }
+                ),
+                "missing durable receipt for A -> B attempt {request_tick:?}"
+            );
+        }
+
+        // Simulate compaction: only the checkpoint survives. A delayed
+        // Commit from the first attempt must produce Ack only, never
+        // resurrecting the Ship after it has already left B again.
+        let mut compacted =
+            SimulationNode::restore_from(InMemoryEventStore::new(), &checkpoint, &[], &[]);
+        let events_before = compacted.total_event_count();
+        let ack = apply_commit(
+            &mut compacted,
+            &test_ship(ship_id),
+            SectorId(0),
+            SectorId(1),
+            Position::ORIGIN,
+            AbsolutePosition::ORIGIN,
+            None,
+            Tick(10),
+        );
+
+        assert!(ack.is_some());
+        assert!(compacted.get_ship_position(ship_id).is_none());
+        assert_eq!(compacted.total_event_count(), events_before);
     }
 }

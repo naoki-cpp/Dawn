@@ -3,7 +3,7 @@ id      : ADR-0014
 title   : 分散コンセンサス — Raft による Sector Transit
 status  : accepted
 date    : 2026-06-12
-updated : 2026-07-29
+updated : 2026-07-30
 deciders: [human, ai-agent]
 related : ADR-0001, ADR-0002, ADR-0003, ADR-0009, ADR-0017, INV-002, INV-003, INV-006
 ---
@@ -81,6 +81,7 @@ pub struct SectorTransitCompleted {
     pub ship_id: ShipId,
     pub from: SectorId,
     pub to: SectorId,
+    pub request_tick: Tick,
     pub entry_pos: AbsolutePosition,
     pub velocity: Velocity,
     pub tick: Tick,
@@ -101,6 +102,8 @@ pub struct TransitShipState {
 
 `position`・`anchor`は`entry_pos`とdestination側rebaseがauthority、`velocity`はevent本体、
 `tackled_by`はSector-localなので`TransitShipState`へ重複させない。
+`request_tick`はsource-localなattempt identityであり、Request → Commit → Completed → Ackの
+全経路で変更せず伝播する。同じShipが同じ経路を複数回通っても別attemptとして照合する。
 
 ### 5. Replay
 
@@ -139,10 +142,11 @@ Raft timerもwall clockではなくlogical Tickで駆動する。
 
 ## 検証
 
-PR #206は次を固定する。
+PR #206とPR #210は次を固定する。
 
 - Request後Commit前の再起動でsource Shipが残り、Commitを再proposalする
 - destination Commit後にAckが発行され、Ack後source copyが消える
+- Ack待ちの往路frozen copyが残るSectorへShipが戻っても、旧outboxを先に閉じ、遅延Ackで返送Shipを消失させない
 - duplicate Commitが1回だけmaterializeしAckを再発行する
 - completed transitのsnapshot + tail replayでdestinationだけがactiveになる
 - InTransit中のposition・velocity・HP・capacitor・fitting・inventoryがtickで変化しない

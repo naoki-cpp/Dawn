@@ -690,6 +690,7 @@ mod tests {
                 ship_id: ship_id(1),
                 from: dawn_core::SectorId(0),
                 to: dawn_core::SectorId(1),
+                request_tick: dawn_core::Tick::ZERO,
                 entry_pos: dawn_core::AbsolutePosition::ORIGIN,
                 velocity: dawn_core::Velocity::ZERO,
                 tick,
