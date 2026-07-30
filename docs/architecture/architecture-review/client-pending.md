@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で状態が変わるたびに更新
 related  : docs/architecture/architecture-review/client.md（構造評価）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）
-date     : 2026-07-29
+date     : 2026-07-30
 ---
 
 # Architecture Review — Dawn Client（未完項目）
@@ -20,11 +20,6 @@ C-1〜C-8は解消済み。実装詳細と完了条件は各GitHub Issueに置�
 
 `WORLD_SCALE`と`MIN_WARP_DISTANCE`がRust/Godot間で手動同期されている。
 **判断:** 既存のRust/GDExtension境界またはtyped initial stateを単一authorityにする。別のconstants fileは作らない。
-
-## C-12（#202・P3）: selection read API二重化
-
-`selection_state() -> Dictionary`と3つのscalar accessorが同じ状態を公開する。
-**判断:** scalar accessorへ統一し、atomic snapshotが必要になった場合だけtyped stateを追加する。
 
 ## R-2（保留）: `main.gd`追加分割
 
