@@ -104,11 +104,11 @@ fn wire_to_item_row(row: dawn_wire::ItemRowWire) -> dawn_client_core::ItemRow {
 type Dict = Dictionary<Variant, Variant>;
 
 /// Client-side deep module for the server's `PlayerLoadout` wire message
-/// (ADR-0039/ADR-0040/ADR-0042). GDScript-facing method surface mirrors the
-/// old `player_loadout.gd` exactly (same method names, same `-1`/empty-string/
-/// empty-Dictionary "nothing yet" sentinels) so `main.gd` needed no changes
-/// beyond swapping the constructor and handing raw wire bytes to
-/// `apply_wire_bytes`.
+/// (ADR-0039/ADR-0040/ADR-0042). It owns typed Rust state and exposes typed
+/// Godot read projections through `ModuleRow`, `ItemRow`, `OwnedShipRow`, and
+/// narrow scalar accessors for dock context and weapon ranges. Existing
+/// boundary sentinels remain explicit; `toggle_at()` is the only deliberately
+/// retained Dictionary because it represents one small, closed command intent.
 #[derive(GodotClass)]
 #[class(init, base=RefCounted)]
 pub struct PlayerLoadout {
