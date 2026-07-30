@@ -1,10 +1,11 @@
 //! Durable Sector Transit recovery policy (ADR-0014).
 //!
-//! This is the deep module behind the thin Raft and checkpoint adapters. It
-//! owns the durable-outbox scan, retry scheduling decisions, destination
-//! idempotency, and source Ack validation. ECS mutation remains encapsulated by
-//! `SimulationNode`; transport code only turns the returned proposals into Raft
-//! payloads.
+//! This is the deep module behind the thin Raft, replay, and checkpoint
+//! adapters. It owns the durable-outbox scan, retry scheduling decisions,
+//! destination idempotency, source Ack validation, and classification of the
+//! Transit events consumed during snapshot-plus-tail replay. ECS mutation
+//! remains encapsulated by `SimulationNode`; adapters only execute the decision
+//! returned here.
 
 use std::collections::HashMap;
 
@@ -31,6 +32,28 @@ pub(crate) struct AckProposal {
     pub to: SectorId,
     pub entry_pos_abs: AbsolutePosition,
     pub request_tick: Tick,
+}
+
+/// Transit-specific action for the generic EventStore replay adapter.
+///
+/// Keeping this classification beside Request/Commit/Ack policy prevents
+/// `node::apply_event` from knowing the Transit event catalog. The node-side
+/// methods named by these variants remain the mechanism because they require
+/// private ECS state.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ReplayDirective<'a> {
+    Requested(&'a dawn_core::events::SectorTransitRequested),
+    Completed(&'a dawn_core::events::SectorTransitCompleted),
+    Aborted(&'a dawn_core::events::SectorTransitAborted),
+}
+
+pub(crate) fn replay_directive(event: &DomainEvent) -> Option<ReplayDirective<'_>> {
+    match event {
+        DomainEvent::SectorTransitRequested(event) => Some(ReplayDirective::Requested(event)),
+        DomainEvent::SectorTransitCompleted(event) => Some(ReplayDirective::Completed(event)),
+        DomainEvent::SectorTransitAborted(event) => Some(ReplayDirective::Aborted(event)),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -262,6 +285,31 @@ mod tests {
             SectorId(sector),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         )
+    }
+
+    #[test]
+    fn replay_directive_only_claims_transit_events() {
+        let ship_id = ShipId::new(NodeId(0), 1);
+        let event = DomainEvent::SectorTransitAborted(dawn_core::events::SectorTransitAborted {
+            ship_id,
+            from: SectorId(0),
+            to: SectorId(1),
+            reason: "test".into(),
+            tick: Tick(2),
+        });
+        assert!(matches!(
+            replay_directive(&event),
+            Some(ReplayDirective::Aborted(aborted)) if aborted.ship_id == ship_id
+        ));
+        assert!(replay_directive(&DomainEvent::WeaponFired(
+            dawn_core::events::WeaponFired {
+                ship_id,
+                target_id: ship_id,
+                damage: 0.0,
+                tick: Tick(2),
+            }
+        ))
+        .is_none());
     }
 
     #[test]
