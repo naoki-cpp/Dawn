@@ -24,28 +24,6 @@ env:
   RUST_VERSION: "1.97.1"
 
 jobs:
-  fix-pr217-review:
-    name: Apply PR 217 review fixes
-    if: github.head_ref == 'codex/deepen-transit-state-mutation'
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.head_ref }}
-          fetch-depth: 0
-      - name: Apply review fixes
-        run: python3 .github/scripts/fix_pr217_review.py
-      - name: Commit fixes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add crates/dawn-sector/src/node/transit.rs docs/architecture/architecture-review/server.md
-          git diff --cached --quiet && exit 0
-          git commit -m "fix(sector): preserve Transit module boundaries"
-          git push origin HEAD:${{ github.head_ref }}
-
   lint:
     name: fmt + clippy
     runs-on: ubuntu-latest
