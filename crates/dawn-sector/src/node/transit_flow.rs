@@ -152,6 +152,13 @@ impl<S: EventStore> SimulationNode<S> {
         Ok(request_tick)
     }
 
+    pub(crate) fn is_ship_in_transit(&self, ship_id: ShipId) -> bool {
+        self.ships
+            .index
+            .get(&ship_id)
+            .is_some_and(|&entity| self.world.transit_state(entity).is_in_transit())
+    }
+
     /// Whether a `TransitCommand` for `ship_id` would currently be accepted
     /// (Ship exists and is not already in transit). Used to reject commands
     /// up front, before proposing to the Raft Log (INV-006).
@@ -160,6 +167,19 @@ impl<S: EventStore> SimulationNode<S> {
             .index
             .get(&ship_id)
             .is_some_and(|&entity| !self.world.transit_state(entity).is_in_transit())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_tackled_by_for_test(&mut self, ship_id: ShipId, tacklers: Vec<ShipId>) {
+        let Some(&entity) = self.ships.index.get(&ship_id) else {
+            return;
+        };
+        let _ = self
+            .world
+            .remove_one::<dawn_ecs::components::TackledComp>(entity);
+        let _ = self
+            .world
+            .insert_one(entity, dawn_ecs::components::TackledComp { tacklers });
     }
 
     /// Stage 1 of a Sector Transit (ADR-0014 §3 \[4\]), as one action: validate
@@ -280,7 +300,7 @@ impl<S: EventStore> SimulationNode<S> {
         self.snapshot_for_transit(ship_id)
     }
 
-    fn snapshot_for_transit(&self, ship_id: ShipId) -> Option<ShipSnapshot> {
+    pub(crate) fn snapshot_for_transit(&self, ship_id: ShipId) -> Option<ShipSnapshot> {
         let &entity = self.ships.index.get(&ship_id)?;
         if !self.world.transit_state(entity).is_in_transit() {
             return None;
@@ -571,10 +591,13 @@ impl<S: EventStore> SimulationNode<S> {
         &mut self,
         e: &dawn_core::events::SectorTransitRequested,
     ) {
-        if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-            self.world
-                .set_transit_state(entity, dawn_ecs::TransitState::InTransit { to: e.to });
+        if e.from == self.sector_id {
+            if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+                self.world
+                    .set_transit_state(entity, dawn_ecs::TransitState::InTransit { to: e.to });
+            }
         }
+
         if e.tick > self.current_tick {
             self.current_tick = e.tick;
         }
@@ -1303,6 +1326,30 @@ mod tests {
             node.world.transit_state(entity),
             TransitState::InTransit { to: SectorId(1) }
         );
+    }
+
+    #[test]
+    fn replaying_an_incoming_request_marker_does_not_freeze_the_destination_ship() {
+        let mut node = SimulationNode::new(
+            NodeId(1),
+            SectorId(1),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        );
+        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        node.apply_event_pub(DomainEvent::SectorTransitRequested(
+            dawn_core::events::SectorTransitRequested {
+                ship_id,
+                from: SectorId(0),
+                to: SectorId(1),
+                request_tick: Tick(7),
+                gate_id: None,
+                entry_pos: Position::ORIGIN,
+                entry_pos_abs: dawn_core::AbsolutePosition::ORIGIN,
+                tick: Tick(3),
+            },
+        ));
+
+        assert!(node.can_propose_transit(ship_id));
     }
 
     #[test]

@@ -75,6 +75,8 @@ pub enum ModuleActivationRejection {
     ShipNotFound,
     /// `ship_id` is docked; module activation requires being undocked.
     ShipDocked,
+    /// `ship_id` is frozen while a Sector Transit handoff is pending.
+    ShipInTransit,
     /// No fitted slot matches `module_id`/`slot`.
     SlotNotFound,
     /// `ModuleKind::requires_target()` and `target.is_some()` disagree —
@@ -196,7 +198,7 @@ impl<S: EventStore> SimulationNode<S> {
                 // from the caller's active ship before the internal
                 // `LockOnCommand` (consumed by the Lock System) is built.
                 if let Some(ship_id) = active_ship {
-                    if !self.is_ship_docked(ship_id) {
+                    if !self.is_ship_docked(ship_id) && !self.is_ship_in_transit(ship_id) {
                         lock_commands.push(dawn_core::LockOnCommand {
                             ship_id,
                             target_id: lo.target_id,
@@ -264,6 +266,9 @@ impl<S: EventStore> SimulationNode<S> {
                 return Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id });
             }
             ClientCommand::Dock(d) => {
+                if active_ship.is_some_and(|ship_id| self.is_ship_in_transit(ship_id)) {
+                    return None;
+                }
                 return Self::station_followup(
                     player_id,
                     self.dispatch_station_command(
@@ -425,8 +430,12 @@ impl<S: EventStore> SimulationNode<S> {
             Some(e) => e,
             None => return Err(ShipNotFound),
         };
+        if self.world.transit_state(entity).is_in_transit() {
+            return Err(ShipInTransit);
+        }
 
         // Snapshot the slot's current state before mutating anything.
+
         let current = self.world.get::<FittingComp>(entity).and_then(|f| {
             f.iter_slots()
                 .find(|s| s.def.id == module_id && s.def.slot == slot)
@@ -817,6 +826,78 @@ mod tests {
             Err(ModuleActivationRejection::ShipDocked),
             "activating while docked must be distinguishable from not owning the ship"
         );
+    }
+
+    #[test]
+    fn in_transit_ship_rejects_module_lock_and_dock_mutations() {
+        use crate::modules::MODULE_AFTERBURNER;
+        use dawn_core::commands::TransitCommand;
+        use dawn_core::{
+            ActivateModuleCommand, ClientCommand, DeactivateModuleCommand, DockCommand,
+            LockOnCommand, SlotKind, StationId,
+        };
+
+        let mut node = node_with_modules();
+        let station = node.station(StationId(0)).unwrap().clone();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
+        let target = node.spawn_ship(
+            dawn_core::ShipTypeId(1),
+            Position::new(
+                station.position.x + 100.0,
+                station.position.y,
+                station.position.z,
+            ),
+            Velocity::ZERO,
+        );
+        node.propose_transit(TransitCommand {
+            ship_id,
+            to: SectorId(1),
+        })
+        .unwrap();
+        let events_before = node.total_event_count();
+
+        assert_eq!(
+            node.activate_module(
+                ship_id,
+                ActivateModuleCommand {
+                    module_id: MODULE_AFTERBURNER,
+                    slot: SlotKind::Mid,
+                    target_ship_id: None,
+                },
+            ),
+            Err(ModuleActivationRejection::ShipInTransit)
+        );
+        assert_eq!(
+            node.deactivate_module(
+                ship_id,
+                DeactivateModuleCommand {
+                    module_id: MODULE_AFTERBURNER,
+                    slot: SlotKind::Mid,
+                },
+            ),
+            Err(ModuleActivationRejection::ShipInTransit)
+        );
+
+        let mut locks = Vec::new();
+        node.apply_client_command(
+            player_id,
+            ClientCommand::LockOn(LockOnCommand {
+                ship_id,
+                target_id: target,
+            }),
+            &mut locks,
+        );
+        assert!(locks.is_empty());
+        node.apply_client_command(
+            player_id,
+            ClientCommand::Dock(DockCommand {
+                station_id: StationId(0),
+            }),
+            &mut locks,
+        );
+        assert!(!node.is_ship_docked(ship_id));
+        assert_eq!(node.total_event_count(), events_before);
     }
 
     // ── apply_client_command ─────────────────────────────────────────────────

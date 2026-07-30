@@ -15,6 +15,18 @@ use super::{SimulationNode, TickResult};
 
 const SCRAP_METAL_PER_SHIP_DESTROYED: u64 = 1;
 
+fn lock_event_touches_transit(event: &DomainEvent, transit_ids: &HashSet<ShipId>) -> bool {
+    match event {
+        DomainEvent::TargetLocked(event) => {
+            transit_ids.contains(&event.locker_id) || transit_ids.contains(&event.target_id)
+        }
+        DomainEvent::LockLost(event) => {
+            transit_ids.contains(&event.locker_id) || transit_ids.contains(&event.target_id)
+        }
+        _ => transit_ids.contains(&event.ship_id()),
+    }
+}
+
 /// Components whose per-tick mutation is suspended while ownership transfer is
 /// pending. Removing them from the ECS query surface keeps the existing systems
 /// simple; the exact values are restored after the tick.
@@ -196,7 +208,7 @@ impl<S: EventStore> SimulationNode<S> {
             .collect();
         let mut lock = LockSystem(&mut self.world, tick, &merged_locks);
         lock.events
-            .retain(|event| !transit_ids.contains(&event.ship_id()));
+            .retain(|event| !lock_event_touches_transit(event, &transit_ids));
 
         // Docked ships are not valid space-combat participants: any lock held
         // by a docked ship, or onto a docked ship, is torn down before range
@@ -284,6 +296,7 @@ mod tests {
     use dawn_core::{
         commands::TransitCommand, NodeId, Position, SectorBounds, SectorId, Tick, Velocity,
     };
+    use dawn_ecs::components::{LockEntry, LockState};
 
     fn mem_node() -> SimulationNode {
         SimulationNode::new(
@@ -388,14 +401,46 @@ mod tests {
                 | DomainEvent::TargetLocked(_)
                 | DomainEvent::LockLost(_)
         )));
-        assert_eq!(after.tackled_by, before.tackled_by);
-        assert!(tick_result.events.iter().all(|event| !matches!(
-            event,
-            DomainEvent::TackleApplied(_)
-                | DomainEvent::TackleReleased(_)
-                | DomainEvent::TargetLocked(_)
-                | DomainEvent::LockLost(_)
-        )));
+    }
+
+    #[test]
+    fn in_transit_target_freezes_existing_lock_progress_and_events() {
+        let mut node = mem_node();
+        let locker_player = node.next_player_id();
+        let locker = node.spawn_player_ship_at_pub(locker_player, Position::ORIGIN);
+        let target_player = node.next_player_id();
+        let target = node.spawn_player_ship_at_pub(target_player, Position::new(500.0, 0.0, 0.0));
+        let locker_entity = *node.ships.index.get(&locker).unwrap();
+        node.world
+            .get_mut::<LockComp>(locker_entity)
+            .unwrap()
+            .entries
+            .push(LockEntry {
+                target_id: target,
+                state: LockState::Locking { remaining_ticks: 1 },
+            });
+        node.propose_transit(TransitCommand {
+            ship_id: target,
+            to: SectorId(1),
+        })
+        .unwrap();
+
+        let result = node.tick();
+        let lock = node.world.get::<LockComp>(locker_entity).unwrap();
+        assert_eq!(lock.entries.len(), 1);
+        assert!(matches!(
+            lock.entries[0].state,
+            LockState::Locking { remaining_ticks: 1 }
+        ));
+        assert!(result.events.iter().all(|event| match event {
+            DomainEvent::TargetLocked(event) => {
+                event.locker_id != locker || event.target_id != target
+            }
+            DomainEvent::LockLost(event) => {
+                event.locker_id != locker || event.target_id != target
+            }
+            _ => true,
+        }));
     }
 
     #[test]

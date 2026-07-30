@@ -160,21 +160,11 @@ fn propose_commit(
 
 fn retry_pending_transits<S: EventStore>(node: &mut SimulationNode<S>, raft: &RaftActorHandle) {
     let pending = pending_outgoing_transits(node);
-    if pending.is_empty() {
-        return;
-    }
-    let snapshot = node.take_snapshot();
-
     for transit in pending {
         if !node.transit_commit_retry_due(transit.ship_id, transit.request_tick) {
             continue;
         }
-        let Some(ship) = snapshot
-            .ships
-            .iter()
-            .find(|ship| ship.ship_id == transit.ship_id)
-            .cloned()
-        else {
+        let Some(ship) = node.snapshot_for_transit(transit.ship_id) else {
             continue;
         };
         propose_commit(
@@ -247,9 +237,14 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                 request_tick,
             } => {
                 if to == node.sector_id() {
+                    let ship_present = node.get_ship_position(ship.ship_id).is_some();
                     let completed =
                         destination_completed_transfer(node, ship.ship_id, from, to, request_tick);
-                    if !completed {
+                    // A checkpointed destination can retain the materialized Ship while
+                    // its incoming Requested/Completed pair has moved to the cold archive.
+                    // In that case the Ship itself is the durable dedupe fact: do not append
+                    // a fresh Requested marker that replay could misread as a pending source.
+                    if !completed && !ship_present {
                         node.append_incoming_transit_marker(
                             ship.ship_id,
                             from,
@@ -259,16 +254,9 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                             entry_pos,
                             entry_pos_abs,
                         );
-                        if node.get_ship_position(ship.ship_id).is_none() {
-                            node.handle_transit_commit(
-                                &ship,
-                                from,
-                                entry_pos,
-                                entry_pos_abs,
-                                gate_id,
-                            );
-                        }
+                        node.handle_transit_commit(&ship, from, entry_pos, entry_pos_abs, gate_id);
                     }
+
                     let ack_ship =
                         snapshot_ship(node, ship.ship_id).unwrap_or_else(|| (*ship).clone());
                     raft.propose(
@@ -743,6 +731,72 @@ mod tests {
         assert_eq!(marker.request_tick, Tick(99));
         assert_eq!(marker.tick, Tick::ZERO);
         assert_eq!(destination.current_tick(), Tick::ZERO);
+    }
+
+    #[test]
+    fn retry_commit_uses_the_canonical_transit_snapshot_without_tackle_state() {
+        let mut source = node(0, 0);
+        let ship_id = source.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        source.set_tackled_by_for_test(ship_id, vec![ShipId::new(NodeId(9), 1)]);
+        source
+            .prepare_transit_commit(ship_id, SectorId(1), None)
+            .expect("request must be durable");
+
+        let (raft, mut proposals) = raft_handle();
+        let (_tx, mut committed_rx) = mpsc::unbounded_channel();
+        apply_committed_raft_entries(&mut source, &raft, &mut committed_rx);
+
+        match decode_proposed_transit(&mut proposals) {
+            TransitOp::Commit { ship, .. } => assert!(
+                ship.tackled_by.is_empty(),
+                "Sector-local tackle state must not cross the boundary on retry"
+            ),
+            other => panic!("expected Commit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn duplicate_commit_after_destination_checkpoint_does_not_append_a_pending_marker() {
+        let mut source = node(0, 0);
+        let mut destination = node(1, 1);
+        let ship_id = source.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let data = source
+            .prepare_transit_commit(ship_id, SectorId(1), None)
+            .unwrap();
+        let commit = TransitOp::Commit {
+            ship: data.ship,
+            from: SectorId(0),
+            to: SectorId(1),
+            entry_pos: data.entry_pos,
+            entry_pos_abs: data.entry_pos_abs,
+            gate_id: None,
+            request_tick: data.request_tick,
+        };
+
+        let (raft, _proposals) = raft_handle();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        tx.send(commit.encode()).unwrap();
+        apply_committed_raft_entries(&mut destination, &raft, &mut rx);
+
+        // Snapshot + empty hot tail models a destination checkpoint that
+        // compacted the incoming Requested/Completed pair to cold storage.
+        let checkpoint = destination.take_snapshot();
+        let mut restored =
+            SimulationNode::restore_from(InMemoryEventStore::new(), &checkpoint, &[], &[]);
+        let (dup_tx, mut dup_rx) = mpsc::unbounded_channel();
+        dup_tx.send(commit.encode()).unwrap();
+        apply_committed_raft_entries(&mut restored, &raft, &mut dup_rx);
+
+        assert!(restored.can_propose_transit(ship_id));
+        assert_eq!(
+            restored
+                .event_store()
+                .iter_from(0)
+                .filter(|record| matches!(record.event, DomainEvent::SectorTransitRequested(_)))
+                .count(),
+            0,
+            "an already materialized destination must only reissue Ack"
+        );
     }
 
     #[test]
