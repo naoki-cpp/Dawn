@@ -1,0 +1,45 @@
+name: Repair issue 201 helper import
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.head_ref == 'agent/type-player-loadout-reads'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/type-player-loadout-reads
+          persist-credentials: false
+
+      - name: Correct both import occurrences
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/apply-issue-201.yml')
+          text = path.read_text()
+          old = 'use crate::item_row_gd::{parse_item_type, ItemRow};'
+          new = 'use crate::item_row_gd::ItemRow;'
+          if text.count(old) != 2:
+              raise SystemExit(f'expected two stale imports, found {text.count(old)}')
+          path.write_text(text.replace(old, new))
+          Path('.github/workflows/fix-issue-201-anchor.yml').unlink()
+          Path('.github/workflows/fix-issue-201-anchor-v2.yml').unlink()
+          PY
+
+      - name: Commit and push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/apply-issue-201.yml .github/workflows/fix-issue-201-anchor.yml .github/workflows/fix-issue-201-anchor-v2.yml
+          git commit -m "chore: repair issue 201 helper import"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:agent/type-player-loadout-reads
