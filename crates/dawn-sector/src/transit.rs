@@ -4,7 +4,7 @@
 //! module owns only the wire payload and the translation between committed Raft
 //! entries and pipeline proposals.
 
-mod pipeline;
+pub(crate) mod pipeline;
 
 use crate::node::SimulationNode;
 use crate::persistence::ShipSnapshot;
@@ -286,7 +286,10 @@ mod tests {
             to: SectorId(1),
             gate_id: Some(JumpGateId(0)),
         };
-        assert!(matches!(TransitOp::decode(&request.encode()), Some(TransitOp::Request { .. })));
+        assert!(matches!(
+            TransitOp::decode(&request.encode()),
+            Some(TransitOp::Request { .. })
+        ));
 
         let commit = TransitOp::Commit {
             ship: Box::new(sample_ship()),
