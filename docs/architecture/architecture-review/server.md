@@ -27,7 +27,7 @@ Transitについては、Raftの回復判断とShipの状態変更を別module�
 | クレート構成 | A− | `dawn-core` / `dawn-sector` / `dawn-wire` / client 2 crateのDAGは健全。共有runtime crateは不要 |
 | 型設計 | A− | domain固有のResult/Outcomeを維持。dispatcher都合で共通型へ潰さない（ADR-0047） |
 | 重複 | A− | live/replayのShip materialization、Station runtime apply、SectorMap projectionを解消。Transit policy/state mutationも分離 |
-| 永続化 | B+ | snapshot seamは改善。post-snapshot tail replayとの同値性を#197で固定する |
+| 永続化 | A− | snapshot seamとpost-snapshot tail replayの同値性を#197で固定済み |
 | Rust固有 | A− | 網羅matchとexhaustive destructuringを変更検出器として利用 |
 
 ## 冗長性

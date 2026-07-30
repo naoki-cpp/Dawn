@@ -145,7 +145,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// client command. Folded into [`prepare_transit_commit`](Self::prepare_transit_commit);
     /// not called directly outside this module.
     #[cfg(test)]
-    pub(crate) fn propose_transit(&mut self, cmd: TransitCommand) -> Result<(), DawnError> {
+    fn propose_transit(&mut self, cmd: TransitCommand) -> Result<(), DawnError> {
         self.propose_transit_with_route(
             cmd,
             None,
@@ -293,7 +293,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// moved, in addition to (not instead of) `SectorTransitCompleted`.
     /// Folded into [`handle_transit_commit`](Self::handle_transit_commit);
     /// not called directly outside this module.
-    pub(crate) fn append_jump_events(
+    fn append_jump_events(
         &mut self,
         ship_id: ShipId,
         gate_id: JumpGateId,
@@ -357,7 +357,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Folded into [`prepare_transit_commit`](Self::prepare_transit_commit);
     /// not called directly outside this module.
     #[cfg(test)]
-    pub(crate) fn export_transit(&self, ship_id: ShipId) -> Option<ShipSnapshot> {
+    fn export_transit(&self, ship_id: ShipId) -> Option<ShipSnapshot> {
         self.snapshot_for_transit(ship_id)
     }
 
@@ -547,7 +547,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Appends `SectorTransitCompleted` from this (the `to`) Sector's
     /// perspective. Folded into [`handle_transit_commit`](Self::handle_transit_commit);
     /// not called directly outside this module.
-    pub(crate) fn import_transit(
+    fn import_transit(
         &mut self,
         ship: &ShipSnapshot,
         from: SectorId,
@@ -621,9 +621,10 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Re-anchor a Ship that just arrived in this Sector via Sector Transit
-    /// to the nearest body anchor to `entry_pos_abs`, appending the
-    /// authoritative `AnchorRebased` event (ADR-0029). No-op if the Ship or
-    /// an anchor candidate in this Sector can't be found.
+    /// to the nearest body anchor to `entry_pos_abs`, returning the
+    /// authoritative `AnchorRebased` event for the caller to append
+    /// (ADR-0029). Returns `None` if the Ship or an anchor candidate in this
+    /// Sector can't be found.
     ///
     /// Unlike `warp::rebase_arrival_event` (which uses an all-zero
     /// `[f64; 3]` as an "arrival not engaged yet" sentinel), `entry_pos_abs`
@@ -685,7 +686,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Transit was requested but not yet completed/aborted before a restart
     /// comes back marked `InTransit` instead of silently reverting to
     /// ordinary flight -- matching what the live node had.
-    pub(crate) fn replay_sector_transit_requested(
+    pub(super) fn replay_sector_transit_requested(
         &mut self,
         e: &dawn_core::events::SectorTransitRequested,
     ) {
@@ -707,7 +708,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// path not wired up today), but the replay side is written now rather
     /// than left a no-op, so the event type doesn't ship with a known-wrong
     /// replay the day something starts emitting it.
-    pub(crate) fn replay_sector_transit_aborted(
+    pub(super) fn replay_sector_transit_aborted(
         &mut self,
         e: &dawn_core::events::SectorTransitAborted,
     ) {
@@ -735,7 +736,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// and redoes the anchor rebase state directly via
     /// `rebase_ship_anchor_state` (see that method's doc comment for why the
     /// already-logged `AnchorRebased` entry can't do this on its own).
-    pub(crate) fn replay_sector_transit_completed(
+    pub(super) fn replay_sector_transit_completed(
         &mut self,
         e: &dawn_core::events::SectorTransitCompleted,
     ) {
