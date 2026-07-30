@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/client.md（構造評価）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-07-10
+date     : 2026-07-30
 ---
 
 # Architecture Review — Dawn Client（完了済みログ）
@@ -28,6 +28,7 @@ date     : 2026-07-10
 | C-3 | シーンツリー直パス参照の脆さ（`@onready` の `$Connection` 等8箇所、null チェックなし） | `_assert_scene_tree_refs()` による fail-fast 検証を追加。 |
 | C-8 | インベントリ行 Dictionary が stringly-typed のまま main.gd と合意している | `InventoryRow` を導入し typed row 化。 |
 | C-9 | `hud_manager.gd` が watch 帯（850行）に到達 | 2026-07-10、`/improve-codebase-architecture` 候補2。ヒットテスト4関数（`module_slot_at`/`inventory_panel_row_at`/`column_at`/`inventory_panel_consumes`）を新設 `hud_hit_test.gd`（`HudHitTest`）へ抽出し、`hud_manager.gd` は HUD構築・更新専任に戻した（850→789）。`fitted_header.clip_text` インシデントが「今は変えない」判断を覆すトリガーになった。テストは `hud_hit_test_test.gd` へ移動（新規追加なし、GdUnit4 186/186 維持）。 |
+| C-12 | `WorldInteraction` selection read API二重化（#202） | `selection_state() -> Dictionary` を削除し、`main.gd` とテストを `selected_target_id()` / `selected_gate_id()` / `selected_body_id()` のscalar accessorへ統一。選択の相互排他性を維持したままstring-keyed境界を除去。 |
 
 ### 2026-07-24: client WorldSpace の座標計算をRustへ移管
 
