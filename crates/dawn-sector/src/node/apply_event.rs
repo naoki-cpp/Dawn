@@ -4,7 +4,7 @@ use dawn_ecs::components::{
 };
 use dawn_event_store::store::EventStore;
 
-use super::SimulationNode;
+use super::{station_operation_execution::StationRuntimeState, SimulationNode};
 
 impl<S: EventStore> SimulationNode<S> {
     /// Apply a single domain event to the ECS World without appending it.
@@ -259,21 +259,19 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             DomainEvent::ShipDocked(e) => {
-                self.settle_ship_into_station(e.ship_id, e.station_id);
-                self.docked_ships.insert(e.ship_id, e.station_id);
-                if let Some(player_id) = self.ships.owners.get(&e.ship_id).copied() {
-                    self.docked_players.insert(player_id, e.station_id);
-                }
+                self.apply_station_runtime_state(StationRuntimeState::Dock {
+                    ship_id: e.ship_id,
+                    station_id: e.station_id,
+                });
                 if e.tick > self.current_tick {
                     self.current_tick = e.tick;
                 }
             }
 
             DomainEvent::ShipUndocked(e) => {
-                if let Some(player_id) = self.ships.owners.get(&e.ship_id).copied() {
-                    self.docked_players.remove(&player_id);
-                }
-                self.docked_ships.remove(&e.ship_id);
+                self.apply_station_runtime_state(StationRuntimeState::Undock {
+                    ship_id: e.ship_id,
+                });
                 if e.tick > self.current_tick {
                     self.current_tick = e.tick;
                 }
@@ -291,37 +289,27 @@ impl<S: EventStore> SimulationNode<S> {
             }
 
             DomainEvent::ShipDisassembled(e) => {
-                // ADR-0038: see PackagedShipBuilt above -- the credit already
-                // happened live in `disassemble_ship_owned`.
-                self.remove_ship(e.ship_id);
+                // ADR-0038: the Station inventory credit happened live before
+                // the event append. Replay applies only the shared runtime
+                // removal and must not repeat that SQLite write.
+                self.apply_station_runtime_state(StationRuntimeState::Disassemble {
+                    ship_id: e.ship_id,
+                });
                 if e.tick > self.current_tick {
                     self.current_tick = e.tick;
                 }
             }
 
             DomainEvent::ShipAssembled(e) => {
-                // ADR-0038: see PackagedShipBuilt above -- the debit already
-                // happened live in `assemble_ship_owned`.
-                if !self.ships.index.contains_key(&e.ship_id) {
-                    self.insert_ship_entity(
-                        e.ship_id,
-                        e.ship_type_id,
-                        dawn_core::Position::ORIGIN,
-                        Velocity::ZERO,
-                    );
-                    if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                        let _ = self
-                            .world
-                            .remove_one::<dawn_ecs::components::IsNpcComp>(entity);
-                    }
-                    self.settle_ship_into_station(e.ship_id, e.station_id);
-                }
-                self.docked_ships.insert(e.ship_id, e.station_id);
-                self.ships.owners.insert(e.ship_id, e.player_id);
-                let counter = e.ship_id.0.counter();
-                if counter >= self.id_counter {
-                    self.id_counter = counter + 1;
-                }
+                // ADR-0038: the packaged-ship debit happened live before the
+                // event append. Replay applies only the shared runtime
+                // materialization and must not repeat that SQLite write.
+                self.apply_station_runtime_state(StationRuntimeState::Assemble {
+                    player_id: e.player_id,
+                    ship_id: e.ship_id,
+                    station_id: e.station_id,
+                    ship_type_id: e.ship_type_id,
+                });
                 if e.tick > self.current_tick {
                     self.current_tick = e.tick;
                 }

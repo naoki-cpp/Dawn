@@ -154,7 +154,7 @@ fn select_handshake_identity<S: EventStore>(
     resume: Option<ResumeIdentity>,
 ) -> HandshakeSelection {
     if let Some(resume) = resume {
-        return if node.adopt_player_ship(resume.ship_id, resume.player_id) {
+        return if node.resume_player_ship(resume.ship_id, resume.player_id) {
             HandshakeSelection::Selected(HandshakeIdentity {
                 player_id: resume.player_id,
                 ship_id: resume.ship_id,
