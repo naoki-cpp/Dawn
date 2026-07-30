@@ -151,6 +151,37 @@ fn snapshot_ship<S: EventStore>(node: &SimulationNode<S>, ship_id: ShipId) -> Op
         .find(|ship| ship.ship_id == ship_id)
 }
 
+/// Close a still-pending outgoing attempt before accepting the same Ship
+/// back into this Sector. This occurs when the Ship returns before the Ack
+/// for its previous departure reaches the source: the local ECS entry is a
+/// frozen recovery copy, not an active destination-side materialization.
+fn complete_superseded_outgoing_transit<S: EventStore>(
+    node: &mut SimulationNode<S>,
+    ship_id: ShipId,
+) -> bool {
+    if !node.is_ship_in_transit(ship_id) {
+        return false;
+    }
+
+    let Some(pending) = pending_outgoing_transits(node)
+        .into_iter()
+        .find(|pending| pending.ship_id == ship_id)
+    else {
+        return false;
+    };
+    let Some(frozen) = node.snapshot_for_transit(ship_id) else {
+        return false;
+    };
+
+    node.complete_outgoing_transit(
+        &frozen,
+        pending.to,
+        pending.entry_pos_abs,
+        pending.request_tick,
+    );
+    true
+}
+
 fn request_matches<S: EventStore>(
     node: &SimulationNode<S>,
     ship_id: ShipId,
@@ -208,19 +239,30 @@ pub(crate) fn apply_commit<S: EventStore>(
         return None;
     }
 
-    let ship_present = node.get_ship_position(ship.ship_id).is_some();
     let completed = destination_completed_transfer(node, ship.ship_id, from, to, request_tick);
-    if !completed && !ship_present {
-        node.append_incoming_transit_marker(
-            ship.ship_id,
-            from,
-            to,
-            request_tick,
-            gate_id,
-            entry_pos,
-            entry_pos_abs,
-        );
-        node.handle_transit_commit(ship, from, entry_pos, entry_pos_abs, gate_id, request_tick);
+    if !completed {
+        // A Ship can return before the Ack for its previous departure reaches
+        // this Sector. In that case the existing entity is an InTransit frozen
+        // recovery copy. Close that older outbox first so the delayed Ack cannot
+        // later delete the newly returned active Ship.
+        if node.get_ship_position(ship.ship_id).is_some() && node.is_ship_in_transit(ship.ship_id) {
+            complete_superseded_outgoing_transit(node, ship.ship_id);
+        }
+
+        // A non-InTransit Ship with this ID is already the active materialization
+        // for this attempt (or a duplicate delivery), so it remains Ack-only.
+        if node.get_ship_position(ship.ship_id).is_none() {
+            node.append_incoming_transit_marker(
+                ship.ship_id,
+                from,
+                to,
+                request_tick,
+                gate_id,
+                entry_pos,
+                entry_pos_abs,
+            );
+            node.handle_transit_commit(ship, from, entry_pos, entry_pos_abs, gate_id, request_tick);
+        }
     }
 
     Some(AckProposal {
@@ -338,6 +380,71 @@ mod tests {
         assert!(first.is_some() && second.is_some());
         assert_eq!(destination.total_event_count(), event_count);
         assert_eq!(destination.ship_count(), 1);
+    }
+
+    #[test]
+    fn incoming_return_replaces_unacked_frozen_copy() {
+        let mut sector_a = node(0);
+        let mut sector_b = node(1);
+        let ship_id = sector_a.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+
+        let outbound = apply_request(&mut sector_a, ship_id, SectorId(1), None).unwrap();
+        let delayed_outbound_ack = apply_commit(
+            &mut sector_b,
+            &outbound.ship,
+            outbound.from,
+            outbound.to,
+            outbound.entry_pos,
+            outbound.entry_pos_abs,
+            outbound.gate_id,
+            outbound.request_tick,
+        )
+        .unwrap();
+
+        assert!(sector_a.is_ship_in_transit(ship_id));
+        assert!(!sector_b.is_ship_in_transit(ship_id));
+
+        let returning = apply_request(&mut sector_b, ship_id, SectorId(0), None).unwrap();
+        let return_ack = apply_commit(
+            &mut sector_a,
+            &returning.ship,
+            returning.from,
+            returning.to,
+            returning.entry_pos,
+            returning.entry_pos_abs,
+            returning.gate_id,
+            returning.request_tick,
+        )
+        .unwrap();
+
+        assert_eq!(sector_a.ship_count(), 1);
+        assert!(!sector_a.is_ship_in_transit(ship_id));
+        assert!(!has_pending_outgoing_transit(&sector_a));
+
+        assert!(apply_ack(
+            &mut sector_b,
+            &return_ack.ship,
+            return_ack.from,
+            return_ack.to,
+            return_ack.entry_pos_abs,
+            return_ack.request_tick,
+        ));
+        assert_eq!(sector_b.ship_count(), 0);
+
+        // The late Ack for A -> B must no longer match an outgoing request
+        // and therefore cannot delete the active Ship that just returned to A.
+        assert!(!apply_ack(
+            &mut sector_a,
+            &delayed_outbound_ack.ship,
+            delayed_outbound_ack.from,
+            delayed_outbound_ack.to,
+            delayed_outbound_ack.entry_pos_abs,
+            delayed_outbound_ack.request_tick,
+        ));
+        assert_eq!(sector_a.ship_count(), 1);
+        assert!(!sector_a.is_ship_in_transit(ship_id));
+        assert!(!has_pending_outgoing_transit(&sector_a));
+        assert!(!has_pending_outgoing_transit(&sector_b));
     }
 
     fn test_ship(ship_id: ShipId) -> ShipSnapshot {
