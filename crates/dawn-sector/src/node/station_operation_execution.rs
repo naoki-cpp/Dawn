@@ -440,12 +440,13 @@ mod tests {
             station_id,
         })
         .unwrap();
-        replay.execute_station_operation(StationOperationPlan::Dock {
-            player_id,
-            ship_id,
-            station_id,
-        })
-        .unwrap();
+        replay
+            .execute_station_operation(StationOperationPlan::Dock {
+                player_id,
+                ship_id,
+                station_id,
+            })
+            .unwrap();
 
         live.execute_station_operation(StationOperationPlan::Undock {
             player_id,
@@ -465,11 +466,8 @@ mod tests {
         let (mut live, mut replay, player_id, ship_id) = paired_player_nodes();
         let station_id = StationId(0);
         let ship_type_id = live.ships.type_ids[&ship_id];
-        let replay_packaged_before = replay.station_item_count(
-            player_id,
-            station_id,
-            ItemId::PackagedShip(ship_type_id),
-        );
+        let replay_packaged_before =
+            replay.station_item_count(player_id, station_id, ItemId::PackagedShip(ship_type_id));
 
         live.execute_station_operation(StationOperationPlan::DisassembleShip {
             player_id,
@@ -483,11 +481,7 @@ mod tests {
         replay.apply_event_pub(event);
 
         assert_eq!(
-            replay.station_item_count(
-                player_id,
-                station_id,
-                ItemId::PackagedShip(ship_type_id)
-            ),
+            replay.station_item_count(player_id, station_id, ItemId::PackagedShip(ship_type_id)),
             replay_packaged_before,
             "replay must not repeat the live SQLite credit"
         );
@@ -522,7 +516,10 @@ mod tests {
         replay.apply_event_pub(event.clone());
         replay.apply_event_pub(event);
 
-        assert_eq!(replay.station_item_count(player_id, station_id, packaged), 0);
+        assert_eq!(
+            replay.station_item_count(player_id, station_id, packaged),
+            0
+        );
         assert_eq!(replay.docked_station(ship_id), Some(station_id));
         assert_same_runtime_state(&live, &replay);
     }
