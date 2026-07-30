@@ -1,0 +1,531 @@
+name: Fix PR 206 self-review round 2
+
+on:
+  push:
+    branches:
+      - recoverable-sector-transit
+    paths:
+      - .github/workflows/fix-pr-206-self-review-2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: recoverable-sector-transit
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Apply review fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one exact match, found {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          def sub_once(path: str, pattern: str, replacement: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              new, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one regex match, found {count}")
+              p.write_text(new)
+
+          # Canonical retry snapshot and destination dedupe after checkpoint compaction.
+          sub_once(
+              "crates/dawn-sector/src/transit.rs",
+              r"fn retry_pending_transits<S: EventStore>\(node: &mut SimulationNode<S>, raft: &RaftActorHandle\) \{.*?\n\}\n\nfn request_matches",
+              '''fn retry_pending_transits<S: EventStore>(node: &mut SimulationNode<S>, raft: &RaftActorHandle) {
+              let pending = pending_outgoing_transits(node);
+              for transit in pending {
+                  if !node.transit_commit_retry_due(transit.ship_id, transit.request_tick) {
+                      continue;
+                  }
+                  let Some(ship) = node.snapshot_for_transit(transit.ship_id) else {
+                      continue;
+                  };
+                  propose_commit(
+                      raft,
+                      ship,
+                      transit.from,
+                      transit.to,
+                      transit.entry_pos,
+                      transit.entry_pos_abs,
+                      transit.gate_id,
+                      transit.request_tick,
+                  );
+                  node.note_transit_commit_proposed(transit.ship_id, transit.request_tick);
+              }
+          }
+
+          fn request_matches''',
+          )
+
+          replace_once(
+              "crates/dawn-sector/src/transit.rs",
+              '''                    let completed =
+                          destination_completed_transfer(node, ship.ship_id, from, to, request_tick);
+                      if !completed {
+                          node.append_incoming_transit_marker(
+                              ship.ship_id,
+                              from,
+                              to,
+                              request_tick,
+                              gate_id,
+                              entry_pos,
+                              entry_pos_abs,
+                          );
+                          if node.get_ship_position(ship.ship_id).is_none() {
+                              node.handle_transit_commit(
+                                  &ship,
+                                  from,
+                                  entry_pos,
+                                  entry_pos_abs,
+                                  gate_id,
+                              );
+                          }
+                      }
+          ''',
+              '''                    let ship_present = node.get_ship_position(ship.ship_id).is_some();
+                      let completed =
+                          destination_completed_transfer(node, ship.ship_id, from, to, request_tick);
+                      // A checkpointed destination can retain the materialized Ship while
+                      // its incoming Requested/Completed pair has moved to the cold archive.
+                      // In that case the Ship itself is the durable dedupe fact: do not append
+                      // a fresh Requested marker that replay could misread as a pending source.
+                      if !completed && !ship_present {
+                          node.append_incoming_transit_marker(
+                              ship.ship_id,
+                              from,
+                              to,
+                              request_tick,
+                              gate_id,
+                              entry_pos,
+                              entry_pos_abs,
+                          );
+                          node.handle_transit_commit(
+                              &ship,
+                              from,
+                              entry_pos,
+                              entry_pos_abs,
+                              gate_id,
+                          );
+                      }
+          ''',
+          )
+
+          replace_once(
+              "crates/dawn-sector/src/transit.rs",
+              "    use dawn_event_store::InMemoryEventStore;\n",
+              "    use dawn_ecs::components::TackledComp;\n    use dawn_event_store::InMemoryEventStore;\n",
+          )
+
+          replace_once(
+              "crates/dawn-sector/src/transit.rs",
+              '''    #[test]
+              fn decode_returns_none_for_garbage_payload() {
+          ''',
+              '''    #[test]
+              fn retry_commit_uses_the_canonical_transit_snapshot_without_tackle_state() {
+                  let mut source = node(0, 0);
+                  let ship_id = source.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+                  let entity = *source.ships.index.get(&ship_id).unwrap();
+                  let _ = source.world.insert_one(
+                      entity,
+                      TackledComp {
+                          tacklers: vec![ShipId::new(NodeId(9), 1)],
+                      },
+                  );
+                  source
+                      .prepare_transit_commit(ship_id, SectorId(1), None)
+                      .expect("request must be durable");
+
+                  let (raft, mut proposals) = raft_handle();
+                  let (_tx, mut committed_rx) = mpsc::unbounded_channel();
+                  apply_committed_raft_entries(&mut source, &raft, &mut committed_rx);
+
+                  match decode_proposed_transit(&mut proposals) {
+                      TransitOp::Commit { ship, .. } => assert!(
+                          ship.tackled_by.is_empty(),
+                          "Sector-local tackle state must not cross the boundary on retry"
+                      ),
+                      other => panic!("expected Commit, got {other:?}"),
+                  }
+              }
+
+              #[test]
+              fn duplicate_commit_after_destination_checkpoint_does_not_append_a_pending_marker() {
+                  let mut source = node(0, 0);
+                  let mut destination = node(1, 1);
+                  let ship_id = source.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+                  let data = source
+                      .prepare_transit_commit(ship_id, SectorId(1), None)
+                      .unwrap();
+                  let commit = TransitOp::Commit {
+                      ship: data.ship,
+                      from: SectorId(0),
+                      to: SectorId(1),
+                      entry_pos: data.entry_pos,
+                      entry_pos_abs: data.entry_pos_abs,
+                      gate_id: None,
+                      request_tick: data.request_tick,
+                  };
+
+                  let (raft, _proposals) = raft_handle();
+                  let (tx, mut rx) = mpsc::unbounded_channel();
+                  tx.send(commit.encode()).unwrap();
+                  apply_committed_raft_entries(&mut destination, &raft, &mut rx);
+
+                  // Snapshot + empty hot tail models a destination checkpoint that
+                  // compacted the incoming Requested/Completed pair to cold storage.
+                  let checkpoint = destination.take_snapshot();
+                  let mut restored = SimulationNode::restore_from(
+                      InMemoryEventStore::new(),
+                      &checkpoint,
+                      &[],
+                      &[],
+                  );
+                  let (dup_tx, mut dup_rx) = mpsc::unbounded_channel();
+                  dup_tx.send(commit.encode()).unwrap();
+                  apply_committed_raft_entries(&mut restored, &raft, &mut dup_rx);
+
+                  assert!(restored.can_propose_transit(ship_id));
+                  assert_eq!(
+                      restored
+                          .event_store()
+                          .iter_from(0)
+                          .filter(|record| matches!(record.event, DomainEvent::SectorTransitRequested(_)))
+                          .count(),
+                      0,
+                      "an already materialized destination must only reissue Ack"
+                  );
+              }
+
+              #[test]
+              fn decode_returns_none_for_garbage_payload() {
+          ''',
+          )
+
+          # Replay only freezes the source copy; incoming markers are destination-local dedupe records.
+          replace_once(
+              "crates/dawn-sector/src/node/transit_flow.rs",
+              "    fn snapshot_for_transit(&self, ship_id: ShipId) -> Option<ShipSnapshot> {",
+              "    pub(crate) fn snapshot_for_transit(&self, ship_id: ShipId) -> Option<ShipSnapshot> {",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/transit_flow.rs",
+              '''    /// Whether a `TransitCommand` for `ship_id` would currently be accepted
+          ''',
+              '''    pub(crate) fn is_ship_in_transit(&self, ship_id: ShipId) -> bool {
+                  self.ships
+                      .index
+                      .get(&ship_id)
+                      .is_some_and(|&entity| self.world.transit_state(entity).is_in_transit())
+              }
+
+              /// Whether a `TransitCommand` for `ship_id` would currently be accepted
+          ''',
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/transit_flow.rs",
+              '''        if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+                      self.world
+                          .set_transit_state(entity, dawn_ecs::TransitState::InTransit { to: e.to });
+                  }
+          ''',
+              '''        if e.from == self.sector_id {
+                      if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+                          self.world.set_transit_state(
+                              entity,
+                              dawn_ecs::TransitState::InTransit { to: e.to },
+                          );
+                      }
+                  }
+          ''',
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/transit_flow.rs",
+              '''    #[test]
+              fn replaying_aborted_clears_the_in_transit_marker() {
+          ''',
+              '''    #[test]
+              fn replaying_an_incoming_request_marker_does_not_freeze_the_destination_ship() {
+                  let mut node = SimulationNode::new(
+                      NodeId(1),
+                      SectorId(1),
+                      SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                  );
+                  let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+                  node.apply_event_pub(DomainEvent::SectorTransitRequested(
+                      dawn_core::events::SectorTransitRequested {
+                          ship_id,
+                          from: SectorId(0),
+                          to: SectorId(1),
+                          request_tick: Tick(7),
+                          gate_id: None,
+                          entry_pos: Position::ORIGIN,
+                          entry_pos_abs: dawn_core::AbsolutePosition::ORIGIN,
+                          tick: Tick(3),
+                      },
+                  ));
+
+                  assert!(node.can_propose_transit(ship_id));
+              }
+
+              #[test]
+              fn replaying_aborted_clears_the_in_transit_marker() {
+          ''',
+          )
+
+          # Lock events must be filtered by both locker and target identity.
+          replace_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              "const SCRAP_METAL_PER_SHIP_DESTROYED: u64 = 1;\n",
+              '''const SCRAP_METAL_PER_SHIP_DESTROYED: u64 = 1;
+
+              fn lock_event_touches_transit(event: &DomainEvent, transit_ids: &HashSet<ShipId>) -> bool {
+                  match event {
+                      DomainEvent::TargetLocked(event) => {
+                          transit_ids.contains(&event.locker_id) || transit_ids.contains(&event.target_id)
+                      }
+                      DomainEvent::LockLost(event) => {
+                          transit_ids.contains(&event.locker_id) || transit_ids.contains(&event.target_id)
+                      }
+                      _ => transit_ids.contains(&event.ship_id()),
+                  }
+              }
+          ''',
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              '''        lock.events
+                      .retain(|event| !transit_ids.contains(&event.ship_id()));
+          ''',
+              '''        lock.events
+                      .retain(|event| !lock_event_touches_transit(event, &transit_ids));
+          ''',
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              '''    use dawn_core::{
+                  commands::TransitCommand, NodeId, Position, SectorBounds, SectorId, Tick, Velocity,
+              };
+          ''',
+              '''    use dawn_core::{
+                  commands::TransitCommand, NodeId, Position, SectorBounds, SectorId, Tick, Velocity,
+              };
+              use dawn_ecs::components::{LockEntry, LockState};
+          ''',
+          )
+          # Remove the accidental duplicate assertion block from the previous fix.
+          sub_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              r"(        assert_eq!\(after\.tackled_by, before\.tackled_by\);\n        assert!\(tick_result\.events\.iter\(\)\.all\(\|event\| !matches!\(\n            event,\n            DomainEvent::TackleApplied\(_\)\n                \| DomainEvent::TackleReleased\(_\)\n                \| DomainEvent::TargetLocked\(_\)\n                \| DomainEvent::LockLost\(_\)\n        \)\)\);\n)\1",
+              r"\1",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/tick.rs",
+              '''    #[test]
+              fn velocity_changed_events_carry_the_current_tick_value() {
+          ''',
+              '''    #[test]
+              fn in_transit_target_freezes_existing_lock_progress_and_events() {
+                  let mut node = mem_node();
+                  let locker_player = node.next_player_id();
+                  let locker = node.spawn_player_ship_at_pub(locker_player, Position::ORIGIN);
+                  let target_player = node.next_player_id();
+                  let target = node.spawn_player_ship_at_pub(
+                      target_player,
+                      Position::new(500.0, 0.0, 0.0),
+                  );
+                  let locker_entity = *node.ships.index.get(&locker).unwrap();
+                  node.world
+                      .get_mut::<LockComp>(locker_entity)
+                      .unwrap()
+                      .entries
+                      .push(LockEntry {
+                          target_id: target,
+                          state: LockState::Locking { remaining_ticks: 1 },
+                      });
+                  node.propose_transit(TransitCommand {
+                      ship_id: target,
+                      to: SectorId(1),
+                  })
+                  .unwrap();
+
+                  let result = node.tick();
+                  let lock = node.world.get::<LockComp>(locker_entity).unwrap();
+                  assert_eq!(lock.entries.len(), 1);
+                  assert!(matches!(
+                      lock.entries[0].state,
+                      LockState::Locking { remaining_ticks: 1 }
+                  ));
+                  assert!(result.events.iter().all(|event| match event {
+                      DomainEvent::TargetLocked(event) => {
+                          event.locker_id != locker || event.target_id != target
+                      }
+                      DomainEvent::LockLost(event) => {
+                          event.locker_id != locker || event.target_id != target
+                      }
+                      _ => true,
+                  }));
+              }
+
+              #[test]
+              fn velocity_changed_events_carry_the_current_tick_value() {
+          ''',
+          )
+
+          # Reject direct module changes and queued Lock/Dock commands during handoff.
+          replace_once(
+              "crates/dawn-sector/src/node/commands.rs",
+              '''    /// `ship_id` is docked; module activation requires being undocked.
+                  ShipDocked,
+          ''',
+              '''    /// `ship_id` is docked; module activation requires being undocked.
+                  ShipDocked,
+                  /// `ship_id` is frozen while a Sector Transit handoff is pending.
+                  ShipInTransit,
+          ''',
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/commands.rs",
+              "                    if !self.is_ship_docked(ship_id) {",
+              "                    if !self.is_ship_docked(ship_id) && !self.is_ship_in_transit(ship_id) {",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/commands.rs",
+              '''            ClientCommand::Dock(d) => {
+                      return Self::station_followup(
+          ''',
+              '''            ClientCommand::Dock(d) => {
+                      if active_ship.is_some_and(|ship_id| self.is_ship_in_transit(ship_id)) {
+                          return None;
+                      }
+                      return Self::station_followup(
+          ''',
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/commands.rs",
+              '''        let entity = match self.ships.index.get(&ship_id).copied() {
+                      Some(e) => e,
+                      None => return Err(ShipNotFound),
+                  };
+
+                  // Snapshot the slot's current state before mutating anything.
+          ''',
+              '''        let entity = match self.ships.index.get(&ship_id).copied() {
+                      Some(e) => e,
+                      None => return Err(ShipNotFound),
+                  };
+                  if self.world.transit_state(entity).is_in_transit() {
+                      return Err(ShipInTransit);
+                  }
+
+                  // Snapshot the slot's current state before mutating anything.
+          ''',
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/commands.rs",
+              '''    // ── apply_client_command ─────────────────────────────────────────────────
+          ''',
+              '''    #[test]
+              fn in_transit_ship_rejects_module_lock_and_dock_mutations() {
+                  use crate::modules::MODULE_AFTERBURNER;
+                  use dawn_core::{
+                      ActivateModuleCommand, ClientCommand, DeactivateModuleCommand, DockCommand,
+                      LockOnCommand, SlotKind, StationId, TransitCommand,
+                  };
+
+                  let mut node = node_with_modules();
+                  let station = node.station(StationId(0)).unwrap().clone();
+                  let player_id = node.next_player_id();
+                  let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
+                  let target = node.spawn_ship(
+                      dawn_core::ShipTypeId(1),
+                      Position::new(station.position.x + 100.0, station.position.y, station.position.z),
+                      Velocity::ZERO,
+                  );
+                  node.propose_transit(TransitCommand {
+                      ship_id,
+                      to: SectorId(1),
+                  })
+                  .unwrap();
+                  let events_before = node.total_event_count();
+
+                  assert_eq!(
+                      node.activate_module(
+                          ship_id,
+                          ActivateModuleCommand {
+                              module_id: MODULE_AFTERBURNER,
+                              slot: SlotKind::Mid,
+                              target_ship_id: None,
+                          },
+                      ),
+                      Err(ModuleActivationRejection::ShipInTransit)
+                  );
+                  assert_eq!(
+                      node.deactivate_module(
+                          ship_id,
+                          DeactivateModuleCommand {
+                              module_id: MODULE_AFTERBURNER,
+                              slot: SlotKind::Mid,
+                          },
+                      ),
+                      Err(ModuleActivationRejection::ShipInTransit)
+                  );
+
+                  let mut locks = Vec::new();
+                  node.apply_client_command(
+                      player_id,
+                      ClientCommand::LockOn(LockOnCommand {
+                          ship_id,
+                          target_id: target,
+                      }),
+                      &mut locks,
+                  );
+                  assert!(locks.is_empty());
+                  node.apply_client_command(
+                      player_id,
+                      ClientCommand::Dock(DockCommand {
+                          station_id: StationId(0),
+                      }),
+                      &mut locks,
+                  );
+                  assert!(!node.is_ship_docked(ship_id));
+                  assert_eq!(node.total_event_count(), events_before);
+              }
+
+              // ── apply_client_command ─────────────────────────────────────────────────
+          ''',
+          )
+          PY
+
+      - name: Format and test
+        run: |
+          cargo fmt --all -- --check
+          cargo test --workspace
+          cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Commit fixes and remove one-shot workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm .github/workflows/fix-pr-206-self-review-2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(sector): close remaining transit recovery gaps"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:${GITHUB_REF_NAME}
