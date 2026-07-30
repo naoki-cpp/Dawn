@@ -1,8 +1,8 @@
 //! Sector Transit Raft adapter (ADR-0014).
 //!
-//! The durable recovery and idempotency policy lives in [`pipeline`]. This
-//! module owns only the wire payload and the translation between committed Raft
-//! entries and pipeline proposals.
+//! The durable recovery and idempotency policy lives in the internal pipeline
+//! module. This module owns only the wire payload and the translation between
+//! committed Raft entries and pipeline proposals.
 
 pub(crate) mod pipeline;
 
