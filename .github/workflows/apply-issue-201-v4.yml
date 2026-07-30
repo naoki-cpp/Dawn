@@ -30,6 +30,7 @@ jobs:
             exit 0
           fi
           python .github/scripts/apply_issue_201.py
+          python .github/scripts/fix_issue_201_compile.py
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Format and focused checks
