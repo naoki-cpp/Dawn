@@ -15,6 +15,10 @@ class FakeWorld:
 	extends RefCounted
 
 	var rebase_shift := Vector3.ZERO
+	var render_scale_value: float = 0.25
+
+	func render_scale() -> float:
+		return render_scale_value
 
 	func rebase_to(_new_origin: Vector3) -> Vector3:
 		return rebase_shift
@@ -30,6 +34,15 @@ class FakeShip:
 
 	func apply_origin_rebase(new_origin: PackedFloat64Array) -> void:
 		rebase_motion(new_origin)
+
+
+func test_render_scale_is_queried_from_world_space_authority() -> void:
+	var presentation := WorldPresentation.new()
+	var world := FakeWorld.new()
+	world.render_scale_value = 0.25
+	presentation._world = world
+
+	assert_float(presentation._render_scale()).is_equal_approx(0.25, 0.0001)
 
 
 func test_clamped_marker_position_leaves_nearby_marker_unchanged() -> void:

@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "<stdin>", line 181, in <module>
-  File "<stdin>", line 16, in replace_count
-RuntimeError: client/scripts/world_presentation.gd: expected 4 occurrences, found 5: '_world_scale'

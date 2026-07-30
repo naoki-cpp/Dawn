@@ -59,7 +59,7 @@ pub use movement::{
 };
 pub use navigation::{
     AnchorId, CelestialBodyDef, CelestialBodyId, CelestialBodyKind, JumpGateDef, JumpGateId,
-    StarSystemDef, StarSystemId, StationDef, StationId, WarpTarget,
+    StarSystemDef, StarSystemId, StationDef, StationId, WarpTarget, MIN_WARP_DISTANCE,
 };
 pub use player::PlayerId;
 pub use position::{AbsolutePosition, Position, Velocity};

@@ -18,7 +18,6 @@ const WARP_TUNNEL_FOV_BOOST : float = 15.0
 const SUN_EFFECTIVE_DISTANCE : float = 50_000_000.0
 const SUN_FAR_DIRECTION : Vector3 = Vector3(0.62, 0.31, 0.72)
 
-var _world_scale: float = 0.1
 var _world: RefCounted = null
 var _camera: Camera3D = null
 var _warp_tunnel: ColorRect = null
@@ -42,19 +41,21 @@ func build(
 	warp_tunnel: ColorRect,
 	gates_root: Node3D,
 	bodies_root: Node3D,
-	world: RefCounted,
-	world_scale: float
+	world: RefCounted
 ) -> void:
 	_camera = camera
 	_warp_tunnel = warp_tunnel
 	_gates_root = gates_root
 	_bodies_root = bodies_root
 	_world = world
-	_world_scale = world_scale
 	if _camera != null:
 		_camera_base_fov = _camera.fov
 	_build_player_material()
 	_setup_space_environment(parent)
+
+
+func _render_scale() -> float:
+	return _world.call("render_scale") as float
 
 
 func refresh(delta: float, player_ship_id: int, ships: Dictionary, bodies: Array) -> void:
@@ -74,14 +75,14 @@ func respawn_navigation_markers(
 ) -> void:
 	if _gates_root != null:
 		NavigationMarkerRendererScript.spawn_gate_markers(
-			_gates_root, gates, _world_scale, server_components_to_godot)
+			_gates_root, gates, _render_scale(), server_components_to_godot)
 	if _bodies_root == null:
 		return
 	clear_navigation_selection.call()
 	NavigationMarkerRendererScript.spawn_body_markers(
-		_bodies_root, bodies, _world_scale, server_components_to_godot)
+		_bodies_root, bodies, _render_scale(), server_components_to_godot)
 	NavigationMarkerRendererScript.spawn_station_markers(
-		_bodies_root, stations, _world_scale, server_components_to_godot)
+		_bodies_root, stations, _render_scale(), server_components_to_godot)
 
 
 func apply_origin_rebase(
@@ -160,7 +161,7 @@ func detach_player_ship() -> void:
 func update_tactical_overlay_ranges(weapon_range: float, weapon_falloff: float) -> void:
 	if _tactical_overlay == null:
 		return
-	_tactical_overlay.call("set_ranges", weapon_range * _world_scale, weapon_falloff * _world_scale)
+	_tactical_overlay.call("set_ranges", weapon_range * _render_scale(), weapon_falloff * _render_scale())
 
 
 func toggle_tactical_overlay() -> void:
