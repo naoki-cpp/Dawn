@@ -457,8 +457,7 @@ fn target_locked_then_lock_lost_event_replay_round_trips_lock_comp() {
 fn tackle_applied_then_released_event_replay_round_trips_tackled_comp() {
     let mut node = mem_node();
     let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-    let tackler_id =
-        node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+    let tackler_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
 
     node.apply_event_pub(DomainEvent::TackleApplied(
         dawn_core::events::TackleApplied {
