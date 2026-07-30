@@ -78,6 +78,7 @@ jobs:
           python3 /tmp/fix_pr_206.py
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           commands = Path('crates/dawn-sector/src/node/commands.rs')
           text = commands.read_text()
@@ -96,33 +97,35 @@ jobs:
           transit = Path('crates/dawn-sector/src/transit.rs')
           text = transit.read_text()
           text = text.replace('    use dawn_ecs::components::TackledComp;\n', '', 1)
-          old = '''        let entity = *source.ships.index.get(&ship_id).unwrap();
-                  let _ = source.world.insert_one(
-                      entity,
-                      TackledComp {
-                          tacklers: vec![ShipId::new(NodeId(9), 1)],
-                      },
-                  );
-          '''
-          new = '''        source.set_tackled_by_for_test(
-                      ship_id,
-                      vec![ShipId::new(NodeId(9), 1)],
-                  );
-          '''
-          if old not in text:
-              raise SystemExit('transit tackle fixture shape changed')
-          transit.write_text(text.replace(old, new, 1))
+          pattern = re.compile(
+              r"\s*let entity = \*source\.ships\.index\.get\(&ship_id\)\.unwrap\(\);"
+              r"\s*let _ = source\.world\.insert_one\("
+              r"\s*entity,"
+              r"\s*TackledComp \{"
+              r"\s*tacklers: vec!\[ShipId::new\(NodeId\(9\), 1\)\],"
+              r"\s*\},"
+              r"\s*\);",
+              re.S,
+          )
+          text, count = pattern.subn(
+              '\n        source.set_tackled_by_for_test(\n            ship_id,\n            vec![ShipId::new(NodeId(9), 1)],\n        );',
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f'transit tackle fixture matches: {count}')
+          transit.write_text(text)
 
           flow = Path('crates/dawn-sector/src/node/transit_flow.rs')
           text = flow.read_text()
-          marker = '''    pub(crate) fn is_ship_in_transit(&self, ship_id: ShipId) -> bool {
-                  self.ships
-                      .index
-                      .get(&ship_id)
-                      .is_some_and(|&entity| self.world.transit_state(entity).is_in_transit())
-              }
-          '''
-          helper = marker + '''
+          pattern = re.compile(
+              r"(\s+pub\(crate\) fn is_ship_in_transit\(&self, ship_id: ShipId\) -> bool \{"
+              r".*?"
+              r"\n\s+\})",
+              re.S,
+          )
+          helper = r'''\1
+
               #[cfg(test)]
               pub(crate) fn set_tackled_by_for_test(
                   &mut self,
@@ -132,16 +135,18 @@ jobs:
                   let Some(&entity) = self.ships.index.get(&ship_id) else {
                       return;
                   };
-                  let _ = self.world.remove_one::<dawn_ecs::components::TackledComp>(entity);
+                  let _ = self
+                      .world
+                      .remove_one::<dawn_ecs::components::TackledComp>(entity);
                   let _ = self.world.insert_one(
                       entity,
                       dawn_ecs::components::TackledComp { tacklers },
                   );
-              }
-          '''
-          if marker not in text:
-              raise SystemExit('is_ship_in_transit helper shape changed')
-          flow.write_text(text.replace(marker, helper, 1))
+              }'''
+          text, count = pattern.subn(helper, text, count=1)
+          if count != 1:
+              raise SystemExit(f'is_ship_in_transit helper matches: {count}')
+          flow.write_text(text)
           PY
 
       - name: Format and test
