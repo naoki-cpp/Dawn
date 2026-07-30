@@ -104,9 +104,15 @@ class FakeShip:
 	func server_position() -> PackedFloat64Array:
 		return server_position_value
 
+	func get_speed_server() -> float:
+		return 0.0
+
 
 class FakeConnection:
 	extends Node
+
+	func is_connected_to_server() -> bool:
+		return false
 
 	var activate_calls: Array[Dictionary] = []
 	var deactivate_calls: Array[Dictionary] = []
@@ -213,6 +219,38 @@ func _set_loadout_modules(modules: Array) -> void:
 func test_server_to_godot_pos_flips_z_and_scales() -> void:
 	var result: Vector3 = _main._server_to_godot_pos(Vector3(100.0, 20.0, 300.0))
 	assert_vector(result).is_equal_approx(Vector3(10.0, 2.0, -30.0), Vector3(0.0001, 0.0001, 0.0001))
+
+
+func test_warp_hud_guidance_uses_shared_minimum_distance_boundary() -> void:
+	var connection := FakeConnection.new()
+	_main._connection = connection
+	var hud: CanvasLayer = auto_free(CanvasLayer.new())
+	add_child(hud)
+	var stats_label: Label = auto_free(Label.new())
+	_main._hud_surface.build(auto_free(Node.new()), hud, stats_label)
+
+	var ship := FakeShip.new()
+	_main.add_child(ship)
+	_main._ships = {1: ship}
+	_main._player_ship_id = 1
+	var min_warp_distance: float = _main._client_rules.min_warp_distance()
+	var gate: GateRecord = _gate(7, PackedFloat64Array([
+		min_warp_distance - 1.0, 0.0, 0.0]), 2000.0, "Beta")
+	_main._gates = [gate]
+	_main._interaction.interpret_primary_click(
+		Vector2.ZERO, 1.0, false, _main._player_ship_id, -1, gate.gate_id, -1)
+
+	_main._update_hud()
+	assert_bool(stats_label.text.contains("[W] too close to warp")).is_true()
+	assert_bool(stats_label.text.contains("[J] Warp+Jump")).is_false()
+
+	gate.position = PackedFloat64Array([min_warp_distance, 0.0, 0.0])
+	_main._update_hud()
+	assert_bool(stats_label.text.contains("[W] too close to warp")).is_false()
+	assert_bool(stats_label.text.contains("[W] Warp  [J] Warp+Jump")).is_true()
+
+	ship.free()
+	connection.free()
 
 
 # -- _handle_position_snap ----------------------------------------------------

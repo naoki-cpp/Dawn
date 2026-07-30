@@ -45,6 +45,41 @@ func test_render_scale_is_queried_from_world_space_authority() -> void:
 	assert_float(presentation._render_scale()).is_equal_approx(0.25, 0.0001)
 
 
+func test_render_scale_authority_controls_spawned_navigation_geometry() -> void:
+	var presentation := WorldPresentation.new()
+	var world := FakeWorld.new()
+	world.render_scale_value = 0.25
+	presentation._world = world
+
+	var gates_root: Node3D = auto_free(Node3D.new())
+	var bodies_root: Node3D = auto_free(Node3D.new())
+	presentation._gates_root = gates_root
+	presentation._bodies_root = bodies_root
+	presentation.respawn_navigation_markers(
+		[_gate(7, _position(4.0, 0.0, 8.0), 40.0, "Beta")],
+		[_body(2, "Planet", "Forge", _position(12.0, 0.0, 16.0), 20.0, 0.0)],
+		[_station(3, "Forge Station", _position(20.0, 0.0, 24.0), 80.0)],
+		func(position: PackedFloat64Array) -> Vector3:
+			return Vector3(position[0], position[1], -position[2]) * world.render_scale_value,
+		func() -> void:
+			pass)
+
+	var gate_marker: Node3D = gates_root.get_child(0) as Node3D
+	var gate_ring: MeshInstance3D = gate_marker.get_child(0) as MeshInstance3D
+	var gate_mesh: TorusMesh = gate_ring.mesh as TorusMesh
+	assert_float(gate_mesh.outer_radius).is_equal_approx(10.0, 0.0001)
+
+	var planet_marker: Node3D = bodies_root.get_child(0) as Node3D
+	var planet_visual: MeshInstance3D = planet_marker.get_child(0) as MeshInstance3D
+	var planet_mesh: SphereMesh = planet_visual.mesh as SphereMesh
+	assert_float(planet_mesh.radius).is_equal_approx(2.5, 0.0001)
+
+	var station_marker: Node3D = bodies_root.get_child(1) as Node3D
+	var station_ring: MeshInstance3D = station_marker.get_child(1) as MeshInstance3D
+	var station_mesh: TorusMesh = station_ring.mesh as TorusMesh
+	assert_float(station_mesh.outer_radius).is_equal_approx(20.0, 0.0001)
+
+
 func test_clamped_marker_position_leaves_nearby_marker_unchanged() -> void:
 	var player := Vector3.ZERO
 	var marker := Vector3(100.0, 0.0, 0.0)
@@ -116,8 +151,25 @@ func test_origin_rebase_moves_ship_and_motion_track_together() -> void:
 	ship.free()
 
 
-## Typed fixture builder (session_record_gd.rs): `sun_state` walks the same
-## `CelestialBodyRecord` array `WorldSession.bodies()` returns.
+## Typed fixture builders matching the navigation records returned by WorldSession.
+func _gate(gate_id: int, pos: PackedFloat64Array, activation_radius: float, to_system_name: String) -> GateRecord:
+	var gate := GateRecord.new()
+	gate.gate_id = gate_id
+	gate.position = pos
+	gate.activation_radius = activation_radius
+	gate.to_system_name = to_system_name
+	return gate
+
+
+func _station(station_id: int, name: String, pos: PackedFloat64Array, docking_radius: float) -> StationRecord:
+	var station := StationRecord.new()
+	station.station_id = station_id
+	station.name = name
+	station.position = pos
+	station.docking_radius = docking_radius
+	return station
+
+
 func _body(body_id: int, kind: String, name: String, pos: PackedFloat64Array, radius: float, spectral_type: float) -> CelestialBodyRecord:
 	var b := CelestialBodyRecord.new()
 	b.body_id = body_id
