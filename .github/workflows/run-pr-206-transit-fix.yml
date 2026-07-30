@@ -1,0 +1,49 @@
+name: Run PR 206 transit receipt fix
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: recoverable-sector-transit
+          persist-credentials: false
+
+      - name: Extract and run fix script
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          workflow = Path('.github/workflows/fix-pr-206-transit-receipts.yml').read_text().splitlines()
+          start = next(i for i, line in enumerate(workflow) if "python3 <<'PY'" in line) + 1
+          end = next(i for i in range(start, len(workflow)) if workflow[i].strip() == 'PY')
+          code = '\n'.join(line[10:] if line.startswith('          ') else line for line in workflow[start:end]) + '\n'
+          Path('/tmp/fix_transit_receipts.py').write_text(code)
+          PY
+          python3 /tmp/fix_transit_receipts.py
+
+          cargo fmt --all
+          cargo check --workspace --all-targets
+          cargo test -p dawn-sector transit --lib
+
+      - name: Commit and push
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -f .github/workflows/fix-pr-206-transit-receipts.yml
+          rm -f .github/workflows/run-pr-206-transit-fix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(sector): persist destination transit receipts"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:recoverable-sector-transit
