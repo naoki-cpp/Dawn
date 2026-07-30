@@ -1,0 +1,51 @@
+name: Apply issue 200 GdUnit fix
+
+on:
+  push:
+    branches:
+      - agent/issue-200-single-source-rules
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Restore production presentation dependency in fixture
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("client/test/main_test.gd")
+          text = path.read_text()
+          old = (
+              '\t_main = load(__source).new()\n'
+              '\t_main._interaction = load("res://scripts/world_interaction.gd").new()\n'
+              '\t_main._loadout = PlayerLoadout.new()\n'
+          )
+          new = (
+              '\t_main = load(__source).new()\n'
+              '\t## _ready() normally injects WorldSpace through WorldPresentation.build().\n'
+              '\t## This fixture skips _ready(), so establish the same production dependency.\n'
+              '\t_main._presentation._world = _main._world\n'
+              '\t_main._interaction = load("res://scripts/world_interaction.gd").new()\n'
+              '\t_main._loadout = PlayerLoadout.new()\n'
+          )
+          if text.count(old) != 1:
+              raise SystemExit("main_test.gd fixture block did not match exactly once")
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+          rm -f .github/workflows/issue-200-gdunit-fix.yml .issue-200-gdunit-trigger
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "test(client): inject world authority in main fixture"
+          git push
