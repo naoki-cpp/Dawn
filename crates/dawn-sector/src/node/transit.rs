@@ -1,9 +1,15 @@
-//! `SimulationNode` state transitions for Sector Transit (ADR-0014).
+//! Transit state mutation for `SimulationNode` (ADR-0014).
 //!
-//! The top-level `dawn-sector::transit` module owns the Raft payload
-//! (`TransitOp`) and Step 7.5 orchestration. This module keeps the ECS and
-//! EventStore mutations close to `SimulationNode`, where the required private
-//! state already lives.
+//! This is the stateful half of the Transit deep module. The sibling
+//! `crate::transit::pipeline` decides when a Request, Commit, or Ack should be proposed; this module
+//! owns the Ship handoff lifecycle itself: freezing and snapshotting the
+//! source, materializing and re-anchoring the destination, finalizing the
+//! source after Ack, and applying the same facts during replay.
+//!
+//! The implementation remains an `impl` on `SimulationNode` because the ECS,
+//! ownership maps, and EventStore are private node state. The module boundary
+//! is nevertheless intentional: callers use Transit lifecycle operations and
+//! do not reach into individual component mutations.
 
 use dawn_core::{
     commands::TransitCommand,
@@ -149,13 +155,13 @@ impl<S: EventStore> SimulationNode<S> {
         .map(|_| ())
     }
 
-    fn propose_transit_with_route(
+    fn begin_transit_with_route(
         &mut self,
         cmd: TransitCommand,
         gate_id: Option<JumpGateId>,
         entry_pos: Position,
         entry_pos_abs: dawn_core::AbsolutePosition,
-    ) -> Result<Tick, DawnError> {
+    ) -> Result<(Tick, DomainEvent), DawnError> {
         let &entity = self
             .ships
             .index
@@ -169,18 +175,29 @@ impl<S: EventStore> SimulationNode<S> {
         self.world
             .set_transit_state(entity, TransitState::InTransit { to: cmd.to });
         let request_tick = self.current_tick;
-        self.event_store.append(DomainEvent::SectorTransitRequested(
-            SectorTransitRequested {
-                ship_id: cmd.ship_id,
-                from: self.sector_id,
-                to: cmd.to,
-                request_tick,
-                gate_id,
-                entry_pos,
-                entry_pos_abs,
-                tick: self.current_tick,
-            },
-        ));
+        let event = DomainEvent::SectorTransitRequested(SectorTransitRequested {
+            ship_id: cmd.ship_id,
+            from: self.sector_id,
+            to: cmd.to,
+            request_tick,
+            gate_id,
+            entry_pos,
+            entry_pos_abs,
+            tick: self.current_tick,
+        });
+        Ok((request_tick, event))
+    }
+
+    fn propose_transit_with_route(
+        &mut self,
+        cmd: TransitCommand,
+        gate_id: Option<JumpGateId>,
+        entry_pos: Position,
+        entry_pos_abs: dawn_core::AbsolutePosition,
+    ) -> Result<Tick, DawnError> {
+        let (request_tick, event) =
+            self.begin_transit_with_route(cmd, gate_id, entry_pos, entry_pos_abs)?;
+        self.event_store.append(event);
         Ok(request_tick)
     }
 
@@ -276,7 +293,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// moved, in addition to (not instead of) `SectorTransitCompleted`.
     /// Folded into [`handle_transit_commit`](Self::handle_transit_commit);
     /// not called directly outside this module.
-    pub(super) fn append_jump_events(
+    fn append_jump_events(
         &mut self,
         ship_id: ShipId,
         gate_id: JumpGateId,
@@ -284,27 +301,39 @@ impl<S: EventStore> SimulationNode<S> {
         to: SectorId,
         entry_pos: dawn_core::AbsolutePosition,
     ) {
-        self.event_store
-            .append(DomainEvent::JumpGateUsed(JumpGateUsed {
-                ship_id,
-                gate_id,
-                from_sector: from,
-                to_sector: to,
-                entry_pos,
-                tick: self.current_tick,
-            }));
+        for event in self.jump_events(ship_id, gate_id, from, to, entry_pos) {
+            self.event_store.append(event);
+        }
+    }
+
+    fn jump_events(
+        &self,
+        ship_id: ShipId,
+        gate_id: JumpGateId,
+        from: SectorId,
+        to: SectorId,
+        entry_pos: dawn_core::AbsolutePosition,
+    ) -> Vec<DomainEvent> {
+        let mut events = vec![DomainEvent::JumpGateUsed(JumpGateUsed {
+            ship_id,
+            gate_id,
+            from_sector: from,
+            to_sector: to,
+            entry_pos,
+            tick: self.current_tick,
+        })];
 
         let from_system = self.sector_map.galaxy.system_for_sector(from);
         let to_system = self.sector_map.galaxy.system_for_sector(to);
         if from_system != to_system {
-            self.event_store
-                .append(DomainEvent::StarSystemChanged(StarSystemChanged {
-                    ship_id,
-                    from_system,
-                    to_system,
-                    tick: self.current_tick,
-                }));
+            events.push(DomainEvent::StarSystemChanged(StarSystemChanged {
+                ship_id,
+                from_system,
+                to_system,
+                tick: self.current_tick,
+            }));
         }
+        events
     }
 
     /// Read-only export for the `TransitOp::Commit` proposal: snapshot the
@@ -328,7 +357,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Folded into [`prepare_transit_commit`](Self::prepare_transit_commit);
     /// not called directly outside this module.
     #[cfg(test)]
-    pub(super) fn export_transit(&self, ship_id: ShipId) -> Option<ShipSnapshot> {
+    fn export_transit(&self, ship_id: ShipId) -> Option<ShipSnapshot> {
         self.snapshot_for_transit(ship_id)
     }
 
@@ -466,15 +495,29 @@ impl<S: EventStore> SimulationNode<S> {
         entry_pos_abs: dawn_core::AbsolutePosition,
         request_tick: Tick,
     ) {
-        if !self.ships.index.contains_key(&ship.ship_id) {
+        let Some(event) = self.complete_outgoing_state(ship, to, entry_pos_abs, request_tick)
+        else {
             return;
+        };
+        self.event_store.append(event);
+    }
+
+    fn complete_outgoing_state(
+        &mut self,
+        ship: &ShipSnapshot,
+        to: SectorId,
+        entry_pos_abs: dawn_core::AbsolutePosition,
+        request_tick: Tick,
+    ) -> Option<DomainEvent> {
+        if !self.ships.index.contains_key(&ship.ship_id) {
+            return None;
         }
         // remove_ship also clears owners/active_ship (ADR-0035 review: this used
         // to hand-roll index/type_ids/base_stats removal only, leaking a
         // dangling ownership entry for a transited player ship).
         self.remove_ship(ship.ship_id);
 
-        self.event_store.append(DomainEvent::SectorTransitCompleted(
+        Some(DomainEvent::SectorTransitCompleted(
             SectorTransitCompleted {
                 ship_id: ship.ship_id,
                 from: self.sector_id,
@@ -485,7 +528,7 @@ impl<S: EventStore> SimulationNode<S> {
                 tick: self.current_tick,
                 ship_state: ship.to_transit_ship_state(),
             },
-        ));
+        ))
     }
 
     /// Complete an incoming Sector Transit: restore `ship` (exported from the
@@ -504,7 +547,7 @@ impl<S: EventStore> SimulationNode<S> {
     /// Appends `SectorTransitCompleted` from this (the `to`) Sector's
     /// perspective. Folded into [`handle_transit_commit`](Self::handle_transit_commit);
     /// not called directly outside this module.
-    pub(super) fn import_transit(
+    fn import_transit(
         &mut self,
         ship: &ShipSnapshot,
         from: SectorId,
@@ -512,12 +555,30 @@ impl<S: EventStore> SimulationNode<S> {
         entry_pos_abs: dawn_core::AbsolutePosition,
         request_tick: Tick,
     ) {
+        for event in
+            self.materialize_incoming_state(ship, from, entry_pos, entry_pos_abs, request_tick)
+        {
+            self.event_store.append(event);
+        }
+    }
+
+    fn materialize_incoming_state(
+        &mut self,
+        ship: &ShipSnapshot,
+        from: SectorId,
+        entry_pos: Position,
+        entry_pos_abs: dawn_core::AbsolutePosition,
+        request_tick: Tick,
+    ) -> Vec<DomainEvent> {
         let mut ship = ship.clone();
         ship.position = entry_pos;
         self.restore_ship_from_snapshot(&ship);
-        self.rebase_after_transit(ship.ship_id, entry_pos_abs);
+        let mut events = Vec::with_capacity(2);
+        if let Some(event) = self.rebase_after_transit(ship.ship_id, entry_pos_abs) {
+            events.push(event);
+        }
 
-        self.event_store.append(DomainEvent::SectorTransitCompleted(
+        events.push(DomainEvent::SectorTransitCompleted(
             SectorTransitCompleted {
                 ship_id: ship.ship_id,
                 from,
@@ -529,6 +590,7 @@ impl<S: EventStore> SimulationNode<S> {
                 ship_state: ship.to_transit_ship_state(),
             },
         ));
+        events
     }
 
     /// Stage 2 of a Sector Transit, as one action: import `ship` (from
@@ -559,9 +621,10 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Re-anchor a Ship that just arrived in this Sector via Sector Transit
-    /// to the nearest body anchor to `entry_pos_abs`, appending the
-    /// authoritative `AnchorRebased` event (ADR-0029). No-op if the Ship or
-    /// an anchor candidate in this Sector can't be found.
+    /// to the nearest body anchor to `entry_pos_abs`, returning the
+    /// authoritative `AnchorRebased` event for the caller to append
+    /// (ADR-0029). Returns `None` if the Ship or an anchor candidate in this
+    /// Sector can't be found.
     ///
     /// Unlike `warp::rebase_arrival_event` (which uses an all-zero
     /// `[f64; 3]` as an "arrival not engaged yet" sentinel), `entry_pos_abs`
@@ -572,18 +635,16 @@ impl<S: EventStore> SimulationNode<S> {
         &mut self,
         ship_id: ShipId,
         entry_pos_abs: dawn_core::AbsolutePosition,
-    ) {
-        let Some((anchor, offset)) = self.rebase_ship_anchor_state(ship_id, entry_pos_abs) else {
-            return;
-        };
-        self.event_store.append(DomainEvent::AnchorRebased(
+    ) -> Option<DomainEvent> {
+        let (anchor, offset) = self.rebase_ship_anchor_state(ship_id, entry_pos_abs)?;
+        Some(DomainEvent::AnchorRebased(
             dawn_core::events::AnchorRebased {
                 ship_id,
                 anchor,
                 offset,
                 tick: self.current_tick,
             },
-        ));
+        ))
     }
 
     /// The state-mutation half of `rebase_after_transit`, without appending

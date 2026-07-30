@@ -53,7 +53,7 @@ impl ShipRegistry {
     ///
     /// Before this existed, callers hand-rolled a 4-6 line removal sequence
     /// at each despawn site (combat death, ShipDespawned replay, Sector
-    /// Transit departure) and one of them (`transit_flow.rs`) silently
+    /// Transit departure) and one of them (`transit.rs`) silently
     /// forgot `owners`/`active_ship`, leaving a dangling ownership entry for
     /// a transited ship. Routing every removal through here makes that class
     /// of bug structurally impossible.
