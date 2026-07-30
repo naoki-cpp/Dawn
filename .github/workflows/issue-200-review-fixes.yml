@@ -1,0 +1,83 @@
+name: Apply issue 200 review fixes
+
+on:
+  push:
+    branches:
+      - agent/issue-200-single-source-rules
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Apply review test coverage
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f"expected one match in {path}, found {text.count(old)}")
+              target.write_text(text.replace(old, new, 1))
+
+          presentation_test = "client/test/world_presentation_test.gd"
+          replace_once(
+              presentation_test,
+              '''\tassert_float(presentation._render_scale()).is_equal_approx(0.25, 0.0001)\n\n\nfunc test_clamped_marker_position_leaves_nearby_marker_unchanged() -> void:\n''',
+              '''\tassert_float(presentation._render_scale()).is_equal_approx(0.25, 0.0001)\n\n\nfunc test_render_scale_authority_controls_spawned_navigation_geometry() -> void:\n\tvar presentation := WorldPresentation.new()\n\tvar world := FakeWorld.new()\n\tworld.render_scale_value = 0.25\n\tpresentation._world = world\n\n\tvar gates_root: Node3D = auto_free(Node3D.new())\n\tvar bodies_root: Node3D = auto_free(Node3D.new())\n\tpresentation._gates_root = gates_root\n\tpresentation._bodies_root = bodies_root\n\tpresentation.respawn_navigation_markers(\n\t\t[_gate(7, _position(4.0, 0.0, 8.0), 40.0, "Beta")],\n\t\t[_body(2, "Planet", "Forge", _position(12.0, 0.0, 16.0), 20.0, 0.0)],\n\t\t[_station(3, "Forge Station", _position(20.0, 0.0, 24.0), 80.0)],\n\t\tfunc(position: PackedFloat64Array) -> Vector3:\n\t\t\treturn Vector3(position[0], position[1], -position[2]) * world.render_scale_value,\n\t\tfunc() -> void:\n\t\t\tpass)\n\n\tvar gate_marker: Node3D = gates_root.get_child(0) as Node3D\n\tvar gate_ring: MeshInstance3D = gate_marker.get_child(0) as MeshInstance3D\n\tvar gate_mesh: TorusMesh = gate_ring.mesh as TorusMesh\n\tassert_float(gate_mesh.outer_radius).is_equal_approx(10.0, 0.0001)\n\n\tvar planet_marker: Node3D = bodies_root.get_child(0) as Node3D\n\tvar planet_visual: MeshInstance3D = planet_marker.get_child(0) as MeshInstance3D\n\tvar planet_mesh: SphereMesh = planet_visual.mesh as SphereMesh\n\tassert_float(planet_mesh.radius).is_equal_approx(2.5, 0.0001)\n\n\tvar station_marker: Node3D = bodies_root.get_child(1) as Node3D\n\tvar station_ring: MeshInstance3D = station_marker.get_child(1) as MeshInstance3D\n\tvar station_mesh: TorusMesh = station_ring.mesh as TorusMesh\n\tassert_float(station_mesh.outer_radius).is_equal_approx(20.0, 0.0001)\n\n\nfunc test_clamped_marker_position_leaves_nearby_marker_unchanged() -> void:\n''')
+
+          replace_once(
+              presentation_test,
+              '''## Typed fixture builder (session_record_gd.rs): `sun_state` walks the same\n## `CelestialBodyRecord` array `WorldSession.bodies()` returns.\nfunc _body(body_id: int, kind: String, name: String, pos: PackedFloat64Array, radius: float, spectral_type: float) -> CelestialBodyRecord:\n''',
+              '''## Typed fixture builders matching the navigation records returned by WorldSession.\nfunc _gate(gate_id: int, pos: PackedFloat64Array, activation_radius: float, to_system_name: String) -> GateRecord:\n\tvar gate := GateRecord.new()\n\tgate.gate_id = gate_id\n\tgate.position = pos\n\tgate.activation_radius = activation_radius\n\tgate.to_system_name = to_system_name\n\treturn gate\n\n\nfunc _station(station_id: int, name: String, pos: PackedFloat64Array, docking_radius: float) -> StationRecord:\n\tvar station := StationRecord.new()\n\tstation.station_id = station_id\n\tstation.name = name\n\tstation.position = pos\n\tstation.docking_radius = docking_radius\n\treturn station\n\n\nfunc _body(body_id: int, kind: String, name: String, pos: PackedFloat64Array, radius: float, spectral_type: float) -> CelestialBodyRecord:\n''')
+
+          main_test = "client/test/main_test.gd"
+          replace_once(
+              main_test,
+              '''\tfunc server_position() -> PackedFloat64Array:\n\t\treturn server_position_value\n\n\nclass FakeConnection:\n''',
+              '''\tfunc server_position() -> PackedFloat64Array:\n\t\treturn server_position_value\n\n\tfunc get_speed_server() -> float:\n\t\treturn 0.0\n\n\nclass FakeConnection:\n''')
+
+          replace_once(
+              main_test,
+              '''class FakeConnection:\n\textends Node\n\n\tvar activate_calls: Array[Dictionary] = []\n''',
+              '''class FakeConnection:\n\textends Node\n\n\tfunc is_connected_to_server() -> bool:\n\t\treturn false\n\n\tvar activate_calls: Array[Dictionary] = []\n''')
+
+          replace_once(
+              main_test,
+              '''func test_server_to_godot_pos_flips_z_and_scales() -> void:\n\tvar result: Vector3 = _main._server_to_godot_pos(Vector3(100.0, 20.0, 300.0))\n\tassert_vector(result).is_equal_approx(Vector3(10.0, 2.0, -30.0), Vector3(0.0001, 0.0001, 0.0001))\n\n\n# -- _handle_position_snap ----------------------------------------------------\n''',
+              '''func test_server_to_godot_pos_flips_z_and_scales() -> void:\n\tvar result: Vector3 = _main._server_to_godot_pos(Vector3(100.0, 20.0, 300.0))\n\tassert_vector(result).is_equal_approx(Vector3(10.0, 2.0, -30.0), Vector3(0.0001, 0.0001, 0.0001))\n\n\nfunc test_warp_hud_guidance_uses_shared_minimum_distance_boundary() -> void:\n\tvar connection := FakeConnection.new()\n\t_main._connection = connection\n\tvar hud: CanvasLayer = auto_free(CanvasLayer.new())\n\tadd_child(hud)\n\tvar stats_label: Label = auto_free(Label.new())\n\t_main._hud_surface.build(auto_free(Node.new()), hud, stats_label)\n\n\tvar ship := FakeShip.new()\n\t_main.add_child(ship)\n\t_main._ships = {1: ship}\n\t_main._player_ship_id = 1\n\tvar min_warp_distance: float = _main._client_rules.min_warp_distance()\n\tvar gate: GateRecord = _gate(7, PackedFloat64Array([\n\t\tmin_warp_distance - 1.0, 0.0, 0.0]), 2000.0, "Beta")\n\t_main._gates = [gate]\n\t_main._interaction.interpret_primary_click(\n\t\tVector2.ZERO, 1.0, false, _main._player_ship_id, -1, gate.gate_id, -1)\n\n\t_main._update_hud()\n\tassert_bool(stats_label.text.contains("[W] too close to warp")).is_true()\n\tassert_bool(stats_label.text.contains("[J] Warp+Jump")).is_false()\n\n\tgate.position = PackedFloat64Array([min_warp_distance, 0.0, 0.0])\n\t_main._update_hud()\n\tassert_bool(stats_label.text.contains("[W] too close to warp")).is_false()\n\tassert_bool(stats_label.text.contains("[W] Warp  [J] Warp+Jump")).is_true()\n\n\tship.free()\n\tconnection.free()\n\n\n# -- _handle_position_snap ----------------------------------------------------\n''')
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: "1.97.1"
+
+      - name: Install Godot test dependencies
+        run: sudo apt-get update && sudo apt-get install --yes unzip xvfb
+
+      - name: Install GdUnit4 addon
+        run: bash scripts/install-gdunit.sh
+
+      - name: Build GDExtension
+        run: cargo build -p dawn-client-gdext
+
+      - name: Run GdUnit4 tests
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" bash scripts/setup-godot.sh --run-tests
+
+      - name: Commit review fixes
+        run: |
+          rm .github/workflows/issue-200-review-fixes.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add client/test/main_test.gd client/test/world_presentation_test.gd .github/workflows/issue-200-review-fixes.yml
+          git commit -m "test(client): cover shared rule consumers"
+          git push
