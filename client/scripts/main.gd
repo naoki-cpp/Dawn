@@ -1232,10 +1232,9 @@ func _update_hud() -> void:
 	var keep_at_range_hint: String = "\n[O] Orbit  [K] Keep at %.0f km  ([/]  adjust)" % _keep_at_range_km
 
 	var approach_line: String = ""
-	var selection: Dictionary = _interaction.selection_state()
-	var selected_gate_id: int = selection.get("selected_gate_id", -1) as int
-	var selected_body_id: int = selection.get("selected_body_id", -1) as int
-	var selected_target_id: int = selection.get("selected_target_id", -1) as int
+	var selected_gate_id: int = _interaction.selected_gate_id()
+	var selected_body_id: int = _interaction.selected_body_id()
+	var selected_target_id: int = _interaction.selected_target_id()
 	if selected_gate_id >= 0:
 		approach_line = "\n[A] Approach Gate #%d" % selected_gate_id + keep_at_range_hint
 		## Warp is only valid beyond the minimum warp distance (ADR-0022).

@@ -26,10 +26,9 @@ func test_primary_click_selects_ship_over_other_candidates() -> void:
 	)
 
 	assert_str(action.kind as String).is_equal("selection_changed")
-	var selection: Dictionary = _interaction.selection_state()
-	assert_int(selection.selected_target_id as int).is_equal(42)
-	assert_int(selection.selected_gate_id as int).is_equal(-1)
-	assert_int(selection.selected_body_id as int).is_equal(-1)
+	assert_int(_interaction.selected_target_id()).is_equal(42)
+	assert_int(_interaction.selected_gate_id()).is_equal(-1)
+	assert_int(_interaction.selected_body_id()).is_equal(-1)
 
 
 func test_primary_click_selects_gate_when_no_ship_is_hit() -> void:
