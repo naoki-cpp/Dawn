@@ -1,16 +1,15 @@
 name: Sync issue 201 branch with main
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - agent/type-player-loadout-reads
 
 permissions:
   contents: write
 
 jobs:
   sync:
-    if: github.head_ref == 'agent/type-player-loadout-reads'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
