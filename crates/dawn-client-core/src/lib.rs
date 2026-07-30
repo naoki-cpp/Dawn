@@ -32,6 +32,7 @@
 //! assert_eq!(loadout.active_ship_id, Some(7));
 //! ```
 
+mod client_rules;
 mod item_row;
 mod loadout;
 mod module_row;
@@ -40,6 +41,7 @@ mod ship_motion;
 mod world_session;
 mod world_space;
 
+pub use client_rules::ClientRules;
 pub use dawn_core::StatDelta;
 pub use item_row::{ItemRow, ItemType};
 pub use loadout::{

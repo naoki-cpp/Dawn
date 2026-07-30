@@ -33,6 +33,12 @@ impl WorldSpace {
         self.origin
     }
 
+    /// Returns the authoritative server-to-render scale used by every transform.
+    #[must_use]
+    pub const fn render_scale() -> f64 {
+        WORLD_SCALE
+    }
+
     /// Converts an absolute server position to origin-relative render units.
     pub fn server_to_render(&self, server_position: [f64; 3]) -> [f64; 3] {
         [
@@ -179,6 +185,11 @@ mod tests {
         let second = [5.0 * AU_M + 30.0, 0.0, 0.0];
 
         assert!((WorldSpace::distance(first, second) - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn exposes_the_authoritative_render_scale() {
+        assert_eq!(WorldSpace::render_scale(), WORLD_SCALE);
     }
 
     #[test]

@@ -23,6 +23,11 @@ impl WorldSpace {
     }
 
     #[func]
+    fn render_scale(&self) -> f64 {
+        CoreWorldSpace::render_scale()
+    }
+
+    #[func]
     fn origin_components(&self) -> PackedFloat64Array {
         self.core.origin().into()
     }
@@ -112,4 +117,17 @@ fn to_vector3(components: [f64; 3]) -> Vector3 {
         components[1] as f32,
         components[2] as f32,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exposes_the_core_render_scale() {
+        let world = WorldSpace {
+            core: CoreWorldSpace::new(),
+        };
+        assert_eq!(world.render_scale(), dawn_client_core::WORLD_SCALE);
+    }
 }

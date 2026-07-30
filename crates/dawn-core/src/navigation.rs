@@ -8,6 +8,12 @@ use crate::position::{AbsolutePosition, Position};
 use crate::sector::SectorId;
 use serde::{Deserialize, Serialize};
 
+// -- Shared navigation rules -----------------------------------------------
+
+/// Minimum server-space distance required before a ship may enter warp.
+/// Closer targets must be approached under sublight movement instead.
+pub const MIN_WARP_DISTANCE: f64 = 3_000.0;
+
 // -- CelestialBodyId / Kind / Def -------------------------------------------
 
 /// Identifies a star, planet, or other celestial body within a Sector (ADR-0025).

@@ -56,6 +56,7 @@ use ship_registry::ShipRegistry;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+use dawn_core::MIN_WARP_DISTANCE;
 use dawn_core::{
     ship_type::{ShipTypeDefinition, ShipTypeId},
     DomainEvent, JumpGateDef, JumpGateId, ModuleDefinition, ModuleId, NodeId, PlayerId, Position,
@@ -98,9 +99,6 @@ const WARP_SPEED: f64 = 7_479_893_535.0;
 /// Floor on warp duration (ticks) so even a short warp reads as a warp rather
 /// than a blink. At 10 tick/s this is ~2 s.
 const WARP_MIN_TICKS: u32 = 20;
-/// Minimum distance to a gate for warp to be allowed (units). Closer than this,
-/// the `WarpCommand` is rejected and the player should approach instead.
-const MIN_WARP_DISTANCE: f64 = 3000.0;
 /// Stop this far inside the gate's activation radius on arrival, so the jump
 /// prompt is available immediately (mirrors approach, ADR-0015).
 const WARP_ARRIVAL_FACTOR: f64 = 0.8;

@@ -30,8 +30,6 @@ const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
 const PositionComponents = preload("res://scripts/position_components.gd")
 const WorldInteractionScript = preload("res://scripts/world_interaction.gd")
 const InventoryRow = preload("res://scripts/inventory_row.gd")
-const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor
-const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is rejected for gates closer than this (ADR-0022).
 ## Unit-to-metre scale: real metres = (units/tick or units) * METERS_PER_UNIT,
 ## fed into UnitFormat for display (m/s, km/s, AU/s, ... -- whichever reads
 ## best at the given magnitude). Change this one constant to rescale all
@@ -142,7 +140,7 @@ func _ready() -> void:
 	_connection.module_activated.connect(_on_module_activated)
 	_connection.module_deactivated.connect(_on_module_deactivated)
 	_connection.market_snapshot_received.connect(_on_market_snapshot)
-	_presentation.build(self, _camera, _warp_tunnel, _gates_root, _bodies_root, _world, WORLD_SCALE)
+	_presentation.build(self, _camera, _warp_tunnel, _gates_root, _bodies_root, _world)
 	_hud_surface.build(self, _hud, _stats_label)
 	_market_surface.build(
 		_hud,
@@ -167,6 +165,7 @@ func _process(delta: float) -> void:
 ## origin and is the only place server<->Godot conversions happen. WorldSpace
 ## is provided by dawn-client-gdext; its coordinate math stays in Rust.
 var _world := WorldSpace.new()
+var _client_rules := ClientRules.new()
 
 ## Real-unit (m/s, km/s, AU/s, ...) display formatting (ADR-0029 §1.5: single
 ## conversion module). Static methods only -- preloaded rather than referenced
@@ -207,7 +206,7 @@ func _velocity_from_dict(d: Dictionary, key: String = "velocity") -> Vector3:
 		velocity.get("dz", 0.0) as float)
 
 ## Tracks whether the player ship is within activation range of a Jump Gate
-## (ADR-0009). Distance is computed in server units (Godot units / WORLD_SCALE).
+## (ADR-0009). Distance is computed in server units by WorldSpace.
 func _update_gate_proximity() -> void:
 	_nearby_gate_id = -1
 	if _player_ship_id < 0 or not _ships.has(_player_ship_id):
@@ -526,9 +525,9 @@ func _handle_position_snap(p: Dictionary) -> void:
 		# new_origin = server_pos - (ship's server-space offset from the origin).
 		var pg: Vector3 = _ship_position(_ships[ship_id] as Node3D)
 		var new_origin := PackedFloat64Array([
-			server_pos[0] - pg.x / WORLD_SCALE,
-			server_pos[1] - pg.y / WORLD_SCALE,
-			server_pos[2] + pg.z / WORLD_SCALE])
+			server_pos[0] - pg.x / _world.render_scale(),
+			server_pos[1] - pg.y / _world.render_scale(),
+			server_pos[2] + pg.z / _world.render_scale()])
 		_presentation.apply_origin_rebase_components(new_origin, true, _player_ship_id, _ships)
 	else:
 		(_ships[ship_id] as Node3D).call(
@@ -1052,7 +1051,7 @@ func _toggle_module_by_index(f_index: int) -> void:
 			var range: float = toggle.get("effective_range", -1.0) as float
 			if range >= 0.0:
 				var dist_u: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
-					(_ships[target_id] as Node3D).global_position) / WORLD_SCALE
+					(_ships[target_id] as Node3D).global_position) / _world.render_scale()
 				if dist_u > range:
 					_jump_notice = "Target out of range"
 					_jump_notice_timer = 2.0
@@ -1194,7 +1193,7 @@ func _update_hud() -> void:
 	var dist_text: String = "—"
 	if target_known and _player_ship_id >= 0 and _ships.has(_player_ship_id):
 		var dist_m: float = (_ships[_player_ship_id] as Node3D).global_position.distance_to(
-			(_ships[_player_lock_target] as Node3D).global_position) / WORLD_SCALE
+			(_ships[_player_lock_target] as Node3D).global_position) / _world.render_scale()
 		dist_text = UnitFormat.format_distance(dist_m * METERS_PER_UNIT)
 	var target_hp: Variant = _session.ship_health(_player_lock_target)
 
@@ -1241,7 +1240,7 @@ func _update_hud() -> void:
 		approach_line = "\n[A] Approach Gate #%d" % selected_gate_id + keep_at_range_hint
 		## Warp is only valid beyond the minimum warp distance (ADR-0022).
 		var gate_dist: float = _selected_gate_distance()
-		if gate_dist >= MIN_WARP_DISTANCE:
+		if gate_dist >= _client_rules.min_warp_distance():
 			approach_line += "\n[W] Warp  [J] Warp+Jump"
 		elif gate_dist >= 0.0:
 			approach_line += "\n[W] too close to warp"
