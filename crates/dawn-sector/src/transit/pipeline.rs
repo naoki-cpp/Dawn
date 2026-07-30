@@ -10,9 +10,7 @@ use std::collections::HashMap;
 
 use crate::node::SimulationNode;
 use crate::persistence::ShipSnapshot;
-use dawn_core::{
-    AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId, Tick,
-};
+use dawn_core::{AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId, Tick};
 use dawn_event_store::store::EventStore;
 
 #[derive(Debug)]
@@ -122,10 +120,7 @@ fn destination_completed_transfer<S: EventStore>(
     false
 }
 
-fn snapshot_ship<S: EventStore>(
-    node: &SimulationNode<S>,
-    ship_id: ShipId,
-) -> Option<ShipSnapshot> {
+fn snapshot_ship<S: EventStore>(node: &SimulationNode<S>, ship_id: ShipId) -> Option<ShipSnapshot> {
     node.take_snapshot()
         .ships
         .into_iter()
@@ -201,14 +196,7 @@ pub(crate) fn apply_commit<S: EventStore>(
             entry_pos,
             entry_pos_abs,
         );
-        node.handle_transit_commit(
-            ship,
-            from,
-            entry_pos,
-            entry_pos_abs,
-            gate_id,
-            request_tick,
-        );
+        node.handle_transit_commit(ship, from, entry_pos, entry_pos_abs, gate_id, request_tick);
     }
 
     Some(AckProposal {
@@ -230,9 +218,7 @@ pub(crate) fn apply_ack<S: EventStore>(
     entry_pos_abs: AbsolutePosition,
     request_tick: Tick,
 ) -> bool {
-    if from != node.sector_id()
-        || !request_matches(node, ship.ship_id, from, to, request_tick)
-    {
+    if from != node.sector_id() || !request_matches(node, ship.ship_id, from, to, request_tick) {
         return false;
     }
     node.complete_outgoing_transit(ship, to, entry_pos_abs);
@@ -242,9 +228,7 @@ pub(crate) fn apply_ack<S: EventStore>(
 /// Return only retry Commit proposals whose bounded backoff deadline is due.
 /// The durable route and canonical transit snapshot are reconstructed from the
 /// source EventStore and frozen ECS state, respectively.
-pub(crate) fn due_retries<S: EventStore>(
-    node: &mut SimulationNode<S>,
-) -> Vec<CommitProposal> {
+pub(crate) fn due_retries<S: EventStore>(node: &mut SimulationNode<S>) -> Vec<CommitProposal> {
     let mut proposals = Vec::new();
     for transit in pending_outgoing_transits(node) {
         if !node.transit_commit_retry_due(transit.ship_id, transit.request_tick) {
@@ -287,11 +271,7 @@ mod tests {
         let proposal = apply_request(&mut source, ship_id, SectorId(1), None).unwrap();
         assert!(has_pending_outgoing_transit(&source));
 
-        source.complete_outgoing_transit(
-            &proposal.ship,
-            proposal.to,
-            proposal.entry_pos_abs,
-        );
+        source.complete_outgoing_transit(&proposal.ship, proposal.to, proposal.entry_pos_abs);
         assert!(!has_pending_outgoing_transit(&source));
     }
 
