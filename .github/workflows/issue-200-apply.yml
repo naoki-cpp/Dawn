@@ -1,0 +1,287 @@
+name: Apply issue 200 implementation
+
+on:
+  push:
+    branches:
+      - agent/issue-200-single-source-rules
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+
+      - name: Apply patch
+        shell: bash
+        run: |
+          set +e
+          python3 > /tmp/issue-200-patch.log 2>&1 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{path}: expected one occurrence, found {count}: {old!r}")
+              file.write_text(text.replace(old, new, 1))
+
+          def replace_count(path: str, old: str, new: str, expected: int) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise RuntimeError(f"{path}: expected {expected} occurrences, found {count}: {old!r}")
+              file.write_text(text.replace(old, new))
+
+          replace_once(
+              "crates/dawn-core/src/navigation.rs",
+              "use serde::{Deserialize, Serialize};\n\n",
+              "use serde::{Deserialize, Serialize};\n\n"
+              "// -- Shared navigation rules -----------------------------------------------\n\n"
+              "/// Minimum server-space distance required before a ship may enter warp.\n"
+              "/// Closer targets must be approached under sublight movement instead.\n"
+              "pub const MIN_WARP_DISTANCE: f64 = 3_000.0;\n\n",
+          )
+          replace_once(
+              "crates/dawn-core/src/lib.rs",
+              "    StarSystemDef, StarSystemId, StationDef, StationId, WarpTarget,\n",
+              "    StarSystemDef, StarSystemId, StationDef, StationId, WarpTarget, MIN_WARP_DISTANCE,\n",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/mod.rs",
+              "use dawn_ecs::{\n",
+              "use dawn_core::MIN_WARP_DISTANCE;\nuse dawn_ecs::{\n",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/mod.rs",
+              "/// Minimum distance to a gate for warp to be allowed (units). Closer than this,\n"
+              "/// the `WarpCommand` is rejected and the player should approach instead.\n"
+              "const MIN_WARP_DISTANCE: f64 = 3000.0;\n",
+              "",
+          )
+
+          Path("crates/dawn-client-core/src/client_rules.rs").write_text(
+              "use dawn_core::MIN_WARP_DISTANCE;\n\n"
+              "/// Client-visible gameplay rules sourced from the shared Rust domain model.\n"
+              "#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]\n"
+              "pub struct ClientRules;\n\n"
+              "impl ClientRules {\n"
+              "    /// Returns the server-authoritative minimum distance for entering warp.\n"
+              "    #[must_use]\n"
+              "    pub const fn min_warp_distance() -> f64 {\n"
+              "        MIN_WARP_DISTANCE\n"
+              "    }\n"
+              "}\n\n"
+              "#[cfg(test)]\n"
+              "mod tests {\n"
+              "    use super::ClientRules;\n"
+              "    use dawn_core::MIN_WARP_DISTANCE;\n\n"
+              "    #[test]\n"
+              "    fn warp_distance_is_the_shared_navigation_rule() {\n"
+              "        assert_eq!(ClientRules::min_warp_distance(), MIN_WARP_DISTANCE);\n"
+              "    }\n"
+              "}\n"
+          )
+          replace_once("crates/dawn-client-core/src/lib.rs", "mod item_row;\n", "mod client_rules;\nmod item_row;\n")
+          replace_once(
+              "crates/dawn-client-core/src/lib.rs",
+              "pub use dawn_core::StatDelta;\n",
+              "pub use client_rules::ClientRules;\npub use dawn_core::StatDelta;\n",
+          )
+          replace_once(
+              "crates/dawn-client-core/src/world_space.rs",
+              "    /// Converts an absolute server position to origin-relative render units.\n",
+              "    /// Returns the authoritative server-to-render scale used by every transform.\n"
+              "    #[must_use]\n"
+              "    pub const fn render_scale() -> f64 {\n"
+              "        WORLD_SCALE\n"
+              "    }\n\n"
+              "    /// Converts an absolute server position to origin-relative render units.\n",
+          )
+          replace_once(
+              "crates/dawn-client-core/src/world_space.rs",
+              "    #[test]\n    fn direction_transforms_flip_depth_axis_and_round_trip() {\n",
+              "    #[test]\n"
+              "    fn exposes_the_authoritative_render_scale() {\n"
+              "        assert_eq!(WorldSpace::render_scale(), WORLD_SCALE);\n"
+              "    }\n\n"
+              "    #[test]\n    fn direction_transforms_flip_depth_axis_and_round_trip() {\n",
+          )
+          replace_once(
+              "crates/dawn-client-gdext/src/world_space_gd.rs",
+              "    #[func]\n    fn origin_components(&self) -> PackedFloat64Array {\n",
+              "    #[func]\n"
+              "    fn render_scale(&self) -> f64 {\n"
+              "        CoreWorldSpace::render_scale()\n"
+              "    }\n\n"
+              "    #[func]\n    fn origin_components(&self) -> PackedFloat64Array {\n",
+          )
+          replace_once(
+              "crates/dawn-client-gdext/src/world_space_gd.rs",
+              "fn to_vector3(components: [f64; 3]) -> Vector3 {\n"
+              "    Vector3::new(\n"
+              "        components[0] as f32,\n"
+              "        components[1] as f32,\n"
+              "        components[2] as f32,\n"
+              "    )\n"
+              "}\n",
+              "fn to_vector3(components: [f64; 3]) -> Vector3 {\n"
+              "    Vector3::new(\n"
+              "        components[0] as f32,\n"
+              "        components[1] as f32,\n"
+              "        components[2] as f32,\n"
+              "    )\n"
+              "}\n\n"
+              "#[cfg(test)]\n"
+              "mod tests {\n"
+              "    use super::*;\n\n"
+              "    #[test]\n"
+              "    fn exposes_the_core_render_scale() {\n"
+              "        let world = WorldSpace {\n"
+              "            core: CoreWorldSpace::new(),\n"
+              "        };\n"
+              "        assert_eq!(world.render_scale(), dawn_client_core::WORLD_SCALE);\n"
+              "    }\n"
+              "}\n",
+          )
+
+          Path("crates/dawn-client-gdext/src/client_rules_gd.rs").write_text(
+              "use dawn_client_core::ClientRules as CoreClientRules;\n"
+              "use godot::prelude::*;\n\n"
+              "/// Godot adapter for gameplay rules shared by the server and client.\n"
+              "#[derive(GodotClass)]\n"
+              "#[class(init, base=RefCounted)]\n"
+              "pub struct ClientRules {}\n\n"
+              "#[godot_api]\n"
+              "impl ClientRules {\n"
+              "    #[func]\n"
+              "    fn min_warp_distance(&self) -> f64 {\n"
+              "        CoreClientRules::min_warp_distance()\n"
+              "    }\n"
+              "}\n\n"
+              "#[cfg(test)]\n"
+              "mod tests {\n"
+              "    use super::*;\n\n"
+              "    #[test]\n"
+              "    fn exposes_the_shared_warp_distance() {\n"
+              "        let rules = ClientRules {};\n"
+              "        assert_eq!(rules.min_warp_distance(), dawn_core::MIN_WARP_DISTANCE);\n"
+              "    }\n"
+              "}\n"
+          )
+          replace_once("crates/dawn-client-gdext/src/lib.rs", "mod client_command_gd;\n", "mod client_command_gd;\nmod client_rules_gd;\n")
+          replace_once(
+              "crates/dawn-client-gdext/src/lib.rs",
+              "pub use client_command_gd::{ClientCommand, ClientMessageDecoder};\n",
+              "pub use client_command_gd::{ClientCommand, ClientMessageDecoder};\npub use client_rules_gd::ClientRules;\n",
+          )
+
+          replace_once("client/scripts/world_presentation.gd", "var _world_scale: float = 0.1\n", "")
+          replace_once(
+              "client/scripts/world_presentation.gd",
+              "\tworld: RefCounted,\n\tworld_scale: float\n",
+              "\tworld: RefCounted\n",
+          )
+          replace_once(
+              "client/scripts/world_presentation.gd",
+              "\t_world = world\n\t_world_scale = world_scale\n",
+              "\t_world = world\n",
+          )
+          replace_once(
+              "client/scripts/world_presentation.gd",
+              "\t_setup_space_environment(parent)\n\n\nfunc refresh",
+              "\t_setup_space_environment(parent)\n\n\n"
+              "func _render_scale() -> float:\n"
+              "\treturn _world.call(\"render_scale\") as float\n\n\n"
+              "func refresh",
+          )
+          replace_count("client/scripts/world_presentation.gd", "_world_scale", "_render_scale()", 4)
+
+          replace_once(
+              "client/scripts/main.gd",
+              "const WORLD_SCALE : float = 0.1   ## Server-to-Godot coordinate scale factor\n"
+              "const MIN_WARP_DISTANCE : float = 3000.0  ## Server units. WarpCommand is rejected for gates closer than this (ADR-0022).\n",
+              "",
+          )
+          replace_once(
+              "client/scripts/main.gd",
+              "\t_presentation.build(self, _camera, _warp_tunnel, _gates_root, _bodies_root, _world, WORLD_SCALE)\n",
+              "\t_presentation.build(self, _camera, _warp_tunnel, _gates_root, _bodies_root, _world)\n",
+          )
+          replace_once(
+              "client/scripts/main.gd",
+              "## (ADR-0009). Distance is computed in server units (Godot units / WORLD_SCALE).\n",
+              "## (ADR-0009). Distance is computed in server units by WorldSpace.\n",
+          )
+          replace_once(
+              "client/scripts/main.gd",
+              "var _world := WorldSpace.new()\n",
+              "var _world := WorldSpace.new()\nvar _client_rules := ClientRules.new()\n",
+          )
+          replace_count("client/scripts/main.gd", "/ WORLD_SCALE", "/ _world.render_scale()", 5)
+          replace_once(
+              "client/scripts/main.gd",
+              "\t\tif gate_dist >= MIN_WARP_DISTANCE:\n",
+              "\t\tif gate_dist >= _client_rules.min_warp_distance():\n",
+          )
+
+          replace_once(
+              "client/test/world_presentation_test.gd",
+              "\tvar rebase_shift := Vector3.ZERO\n\n\tfunc rebase_to",
+              "\tvar rebase_shift := Vector3.ZERO\n"
+              "\tvar render_scale_value: float = 0.25\n\n"
+              "\tfunc render_scale() -> float:\n"
+              "\t\treturn render_scale_value\n\n"
+              "\tfunc rebase_to",
+          )
+          replace_once(
+              "client/test/world_presentation_test.gd",
+              "func test_clamped_marker_position_leaves_nearby_marker_unchanged() -> void:\n",
+              "func test_render_scale_is_queried_from_world_space_authority() -> void:\n"
+              "\tvar presentation := WorldPresentation.new()\n"
+              "\tvar world := FakeWorld.new()\n"
+              "\tworld.render_scale_value = 0.25\n"
+              "\tpresentation._world = world\n\n"
+              "\tassert_float(presentation._render_scale()).is_equal_approx(0.25, 0.0001)\n\n\n"
+              "func test_clamped_marker_position_leaves_nearby_marker_unchanged() -> void:\n",
+          )
+
+          main = Path("client/scripts/main.gd").read_text()
+          assert "WORLD_SCALE" not in main
+          assert "MIN_WARP_DISTANCE" not in main
+          print("issue 200 patch applied")
+          PY
+          status=$?
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [[ $status -ne 0 ]]; then
+            git reset --hard HEAD
+            cp /tmp/issue-200-patch.log .issue-200-patch-error.log
+            rm -f .github/workflows/issue-200-apply.yml .issue-200-apply-trigger
+            git add -A
+            git commit -m "chore: record issue 200 patch failure"
+            git push
+            exit 1
+          fi
+
+          cargo fmt --all
+          rm -f .github/workflows/issue-200-apply.yml .issue-200-apply-trigger
+          git add -A
+          git commit -m "refactor(client): single-source render and warp rules"
+          git push
