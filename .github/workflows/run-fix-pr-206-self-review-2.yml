@@ -76,6 +76,73 @@ jobs:
           Path('/tmp/fix_pr_206.py').write_text(code)
           PY
           python3 /tmp/fix_pr_206.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          commands = Path('crates/dawn-sector/src/node/commands.rs')
+          text = commands.read_text()
+          text = text.replace(
+              '            LockOnCommand, SlotKind, StationId, TransitCommand,\n',
+              '            LockOnCommand, SlotKind, StationId,\n',
+              1,
+          )
+          text = text.replace(
+              '        use crate::modules::MODULE_AFTERBURNER;\n',
+              '        use crate::modules::MODULE_AFTERBURNER;\n        use dawn_core::commands::TransitCommand;\n',
+              1,
+          )
+          commands.write_text(text)
+
+          transit = Path('crates/dawn-sector/src/transit.rs')
+          text = transit.read_text()
+          text = text.replace('    use dawn_ecs::components::TackledComp;\n', '', 1)
+          old = '''        let entity = *source.ships.index.get(&ship_id).unwrap();
+                  let _ = source.world.insert_one(
+                      entity,
+                      TackledComp {
+                          tacklers: vec![ShipId::new(NodeId(9), 1)],
+                      },
+                  );
+          '''
+          new = '''        source.set_tackled_by_for_test(
+                      ship_id,
+                      vec![ShipId::new(NodeId(9), 1)],
+                  );
+          '''
+          if old not in text:
+              raise SystemExit('transit tackle fixture shape changed')
+          transit.write_text(text.replace(old, new, 1))
+
+          flow = Path('crates/dawn-sector/src/node/transit_flow.rs')
+          text = flow.read_text()
+          marker = '''    pub(crate) fn is_ship_in_transit(&self, ship_id: ShipId) -> bool {
+                  self.ships
+                      .index
+                      .get(&ship_id)
+                      .is_some_and(|&entity| self.world.transit_state(entity).is_in_transit())
+              }
+          '''
+          helper = marker + '''
+              #[cfg(test)]
+              pub(crate) fn set_tackled_by_for_test(
+                  &mut self,
+                  ship_id: ShipId,
+                  tacklers: Vec<ShipId>,
+              ) {
+                  let Some(&entity) = self.ships.index.get(&ship_id) else {
+                      return;
+                  };
+                  let _ = self.world.remove_one::<dawn_ecs::components::TackledComp>(entity);
+                  let _ = self.world.insert_one(
+                      entity,
+                      dawn_ecs::components::TackledComp { tacklers },
+                  );
+              }
+          '''
+          if marker not in text:
+              raise SystemExit('is_ship_in_transit helper shape changed')
+          flow.write_text(text.replace(marker, helper, 1))
+          PY
 
       - name: Format and test
         run: |
