@@ -1,0 +1,35 @@
+name: Update issue 201 HUD surface fixture
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: github.head_ref == 'agent/type-player-loadout-reads'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/type-player-loadout-reads
+          persist-credentials: false
+
+      - name: Update the remaining owned-ship fixture
+        run: |
+          python .github/scripts/fix_hud_surface_test_201.py
+          git diff --check
+
+      - name: Commit and push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add client/test/hud_surface_test.gd
+          git commit -m "test(client): use typed owned-ship HUD fixtures"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:agent/type-player-loadout-reads
