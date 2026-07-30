@@ -81,3 +81,11 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 
 `main.gd` に残るのは input event の配線、イベント dispatch、scene spawning といった
 シーンインスタンス化やネットワーク接続が絡む領域で、ここは引き続き視覚的な確認が主な検証手段になる。
+
+### 2026-07-30: C-11 / #201 PlayerLoadout read境界をtyped化
+
+`hud_snapshot()`のpack→即unpackを削除し、modules / inventory / station inventoryは
+既存のtyped accessorを直接利用するようにした。owned ship rosterは`OwnedShipRow`、
+dock contextとweapon rangeはnarrow scalar accessorとしてGDExtension境界を越える。
+`toggle_at()`だけは即座にcommandへ変換される小さな閉じたintent境界としてDictionaryを維持した。
+Rust testsとGdUnit4の境界契約テストでsentinel互換とtyped row shapeを固定する。

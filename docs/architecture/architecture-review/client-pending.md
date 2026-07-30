@@ -21,11 +21,6 @@ C-1〜C-8は解消済み。実装詳細と完了条件は各GitHub Issueに置�
 `WORLD_SCALE`と`MIN_WARP_DISTANCE`がRust/Godot間で手動同期されている。
 **判断:** 既存のRust/GDExtension境界またはtyped initial stateを単一authorityにする。別のconstants fileは作らない。
 
-## C-11（#201・P2）: `PlayerLoadout`のDictionary再投影
-
-`hud_snapshot()`は既存accessorをDictionaryへpackし、`main.gd`が即unpackする。dock status等にも同型境界が残る。
-**判断:** `hud_snapshot()`を先に削除し、残りをtyped recordまたはnarrow accessorへ段階移行する。
-
 ## C-12（#202・P3）: selection read API二重化
 
 `selection_state() -> Dictionary`と3つのscalar accessorが同じ状態を公開する。

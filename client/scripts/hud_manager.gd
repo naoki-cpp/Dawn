@@ -19,8 +19,8 @@
 class_name HudManager
 extends RefCounted
 
-## ModuleRow/ItemRow are GDExtension classes (dawn-client-gdext,
-## ADR-0039/ADR-0040) -- globally registered, no preload needed.
+## ModuleRow/ItemRow/OwnedShipRow are GDExtension classes
+## (dawn-client-gdext, ADR-0039/ADR-0040) -- globally registered, no preload needed.
 const InventoryRow = preload("res://scripts/inventory_row.gd")
 
 ## Layer colours for the three HP bands and the capacitor (EVE convention).
@@ -589,199 +589,12 @@ class InventoryPanelRefs extends RefCounted:
 	var inventory_rows: Array[InventoryRow] = []
 	var station_rows: Array[InventoryRow] = []
 	var ship_rows: Array[InventoryRow] = []
-	## Whether the Build ship-type picker (Phase 9B task 10) is expanded.
-	## Lives here, not as a local, since refs persists across the repeated
-	## update_inventory_panel() rebuilds and main.gd toggles it on click.
-	var build_picker_open: bool = false
-
-	func _init(
-		panel_: Panel, fitted_list_: VBoxContainer, inventory_list_: VBoxContainer,
-		station_list_: VBoxContainer, ships_list_: VBoxContainer,
-		fitted_col_: VBoxContainer, inv_col_: VBoxContainer,
-		station_col_: VBoxContainer, ships_col_: VBoxContainer
-	) -> void:
-		panel = panel_
-		fitted_list = fitted_list_
-		inventory_list = inventory_list_
-		station_list = station_list_
-		ships_list = ships_list_
-		fitted_col = fitted_col_
-		inv_col = inv_col_
-		station_col = station_col_
-		ships_col = ships_col_
-
-
-static func build_inventory_panel(hud: CanvasLayer) -> InventoryPanelRefs:
-	var panel := Panel.new()
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_theme_stylebox_override("panel", hud_box_style())
-	panel.anchor_left = 0.5; panel.anchor_right = 0.5
-	panel.anchor_top = 0.5; panel.anchor_bottom = 0.5
-	panel.offset_left = -340.0; panel.offset_right = 340.0
-	panel.offset_top = -180.0; panel.offset_bottom = 180.0
-	panel.visible = false
-	hud.add_child(panel)
-
-	var columns := HBoxContainer.new()
-	columns.set_anchors_preset(Control.PRESET_FULL_RECT)
-	columns.offset_left = 10.0; columns.offset_top = 10.0
-	columns.offset_right = -10.0; columns.offset_bottom = -10.0
-	columns.add_theme_constant_override("separation", 12)
-	columns.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.add_child(columns)
-
-	var fitted_col := VBoxContainer.new()
-	fitted_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	fitted_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	columns.add_child(fitted_col)
-	var fitted_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
-	fitted_header.text = "FITTED (unfit)"
-	## clip_text keeps a long header from setting the Label's minimum width to
-	## its full unwrapped text extent -- without it, a long header forces
-	## HBoxContainer to grow this column past its fair share, pushing later
-	## columns (SHIPS is last) past the panel's own right edge. Rows rendered
-	## there are visually outside the panel, and inventory_panel_consumes()
-	## (which tests only the outer panel's rect) never registers a click on
-	## them, so they silently stop being interactable.
-	fitted_header.clip_text = true
-	fitted_col.add_child(fitted_header)
-	var fitted_list := VBoxContainer.new()
-	fitted_list.add_theme_constant_override("separation", 2)
-	fitted_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	fitted_col.add_child(fitted_list)
-
-	var inv_col := VBoxContainer.new()
-	inv_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	inv_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	columns.add_child(inv_col)
-	var inv_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
-	inv_header.text = "SHIP CARGO (fit / →station)"
-	inv_header.clip_text = true
-	inv_col.add_child(inv_header)
-	var inventory_list := VBoxContainer.new()
-	inventory_list.add_theme_constant_override("separation", 2)
-	inventory_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	inv_col.add_child(inventory_list)
-
-	## Separate from SHIP CARGO above -- station inventory (ADR-0034 9B) is
-	## per-player, not per-ship, and must not be visually merged with a
-	## specific ship's cargo (roadmap.md §12 task 10's own stated requirement).
-	var station_col := VBoxContainer.new()
-	station_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	station_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	columns.add_child(station_col)
-	var station_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
-	station_header.text = "STATION (assemble)"
-	station_header.clip_text = true
-	station_col.add_child(station_header)
-	var station_list := VBoxContainer.new()
-	station_list.add_theme_constant_override("separation", 2)
-	station_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	station_col.add_child(station_list)
-
-	var ships_col := VBoxContainer.new()
-	ships_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ships_col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	columns.add_child(ships_col)
-	var ships_header := make_hud_label(12, Color(0.85, 0.89, 0.95))
-	ships_header.text = "SHIPS (select)"
-	ships_header.clip_text = true
-	ships_col.add_child(ships_header)
-	var ships_list := VBoxContainer.new()
-	ships_list.add_theme_constant_override("separation", 2)
-	ships_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ships_col.add_child(ships_list)
-
-	return InventoryPanelRefs.new(
-		panel, fitted_list, inventory_list, station_list, ships_list,
-		fitted_col, inv_col, station_col, ships_col)
-
-
-## One inventory row (FITTED/SHIP CARGO/STATION). `action` is "fit"/"unfit"
-## for ship-inventory modules, "assemble" for a station-inventory PackagedShip
-## stack, and "" for passive item stacks (e.g. Scrap Metal) that are only
-## informational today. `source` tags which column the row belongs to
-## ("ship_cargo" or "station") so main.gd can tell a right-click-to-transfer
-## target (ship_cargo only) from a similarly-actionless station row without
-## relying on `action`, which collides ("" means different things in each
-## column).
-static func _make_inventory_row(
-	text: String, module_id: int, slot: String, action: String, ship_type_id: int = 0,
-	item_type: String = "", count: int = 0, source: String = InventoryRow.SOURCE_NONE,
-	slot_index: int = 0
-) -> InventoryRow:
-	var row := Panel.new()
-	row.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.05, 0.07, 0.11, 0.6)
-	style.set_corner_radius_all(3)
-	row.add_theme_stylebox_override("panel", style)
-
-	var lbl := make_hud_label(11, Color(0.82, 0.87, 0.94))
-	lbl.text = text
-	lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
-	lbl.offset_left = 6.0
-	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(lbl)
-
-	return InventoryRow.for_item(
-		row, module_id, slot, action, ship_type_id, item_type, count, source, slot_index)
-
-
-## One owned-ship row (ADR-0037 roster). `action` is "" for the already-active
-## ship (nothing to do -- clicking it would just re-select itself) and
-## "select_active_ship" for any other owned ship, docked at the same station
-## or not (the server validates that; a miss here just gets rejected).
-static func _make_ship_row(text: String, ship_id: int, is_active: bool) -> InventoryRow:
-	var row := Panel.new()
-	row.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
-	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.09, 0.14, 0.09, 0.6) if is_active else Color(0.05, 0.07, 0.11, 0.6)
-	style.set_corner_radius_all(3)
-	row.add_theme_stylebox_override("panel", style)
-
-	var lbl := make_hud_label(11, Color(0.82, 0.87, 0.94))
-	lbl.text = text
-	lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
-	lbl.offset_left = 6.0
-	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(lbl)
-
-	var action := InventoryRow.ACTION_NONE if is_active else InventoryRow.ACTION_SELECT_ACTIVE_SHIP
-	return InventoryRow.for_ship(row, ship_id, action)
-
-
-## Rebuild all four columns from the latest PlayerLoadout snapshot. `modules`
-## is the flat fitted-module array (slot/module_id/name fields, same shape
-## the module bar already consumes); `inventory` is the active ship's own
-## unfitted cargo; `station_inventory` is the player-level (not per-ship)
-## station inventory (ADR-0034 9B) and is kept in its own column so the two
-## are never visually merged; `owned_ships` is the ADR-0037 roster
-## (ship_id/ship_type_name/docked_station_id/is_active rows).
-static func update_inventory_panel(
-	refs: InventoryPanelRefs, modules: Array, inventory: Array, station_inventory: Array = [],
-	owned_ships: Array = [], buildable_ship_types: Array = []
-) -> void:
-	var fitted_list: VBoxContainer = refs.fitted_list
-	var inventory_list: VBoxContainer = refs.inventory_list
-	var station_list: VBoxContainer = refs.station_list
-	var ships_list: VBoxContainer = refs.ships_list
-	for child: Node in fitted_list.get_children():
-		child.queue_free()
-	for child: Node in inventory_list.get_children():
-		child.queue_free()
-	for child: Node in station_list.get_children():
-		child.queue_free()
-	for child: Node in ships_list.get_children():
-		child.queue_free()
-
-	var fitted_rows: Array[InventoryRow] = []
-	for entry: Variant in modules:
-		var m: ModuleRow = entry
+	for entry: Variant in owned_ships:
+		var ship: OwnedShipRow = entry as OwnedShipRow
+		var ship_id: int = ship.ship_id
+		var is_active: bool = ship.is_active
+		var name := ship.ship_type_name if not ship.ship_type_name.is_empty() else "Ship #%d" % ship_id
+		var status := "active" if is_active else ("docked" if ship.docked_station_id >= 0 else "away")
 		var text := "%s: %s" % [m.slot, m.name]
 		var row := _make_inventory_row(
 			text, m.module_id, m.slot, InventoryRow.ACTION_UNFIT, 0, "", 0,
