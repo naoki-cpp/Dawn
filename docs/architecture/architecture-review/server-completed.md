@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review が issue を解消済みへ移動するたびに追記
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-pending.md（未完項目）
-date     : 2026-07-24
+date     : 2026-07-30
 ---
 
 # Architecture Review — Dawn Codebase（完了済みログ）
@@ -16,6 +16,16 @@ date     : 2026-07-24
 ---
 
 ## 改善ロードマップ > 完了済み
+
+### 2026-07-30: Transit state mutation module の deepening
+
+Raftのretry・idempotency・recovery policyを持つ`transit/pipeline.rs`と、
+Shipのfreeze・snapshot・materialize・re-anchor・source finalize・replayを持つ
+`node/transit.rs`を明確に分離した。旧`node/transit_flow.rs`は削除し、
+`SimulationNode`のprivate ECS stateはnode module内に閉じたまま維持した。
+Transit protocol、Event schema、crate境界、live/replayの挙動は変更していない。
+`cargo test -p dawn-sector`（377 passed、1 ignored）で既存のretry、duplicate、
+snapshot + tail replay、Ack前帰還の回帰を確認した。
 
 **Phase 2〜8D（2026-06-19〜2026-06-30、アーカイブ済み）**: node.rs のサブモジュール化
 （commands/navigation/serialization/sector_map/ship_registry/tick/spawner_logic/tackle/

@@ -4,31 +4,14 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で issue を起票・状態更新するたびに更新
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）
-date     : 2026-07-29
+date     : 2026-07-30
 ---
 
 # Architecture Review — Dawn Codebase（未完項目）
 
 実装詳細と完了条件は各GitHub Issueに置き、この文書は判断と再評価triggerだけを保持する。
 
-## High
-
-### M-11（#197・P0）: Ship生成のlive/replay materialization二重化
-
-`spawn_ship`は`insert_ship_entity`でtype index・Hull・Capacitor等を初期化するが、`ShipSpawned` replayは一部を手実装している。
-**判断:** eventをappendしないmaterialization coreを共有し、snapshot + tail replayの同値性testを追加する。
-
 ## Medium
-
-### M-12（#198・P1）: Station runtime stateのlive/replay二重化
-
-Dock / Undock / Disassemble / AssembleのECS・map・index更新がlive executionとreplayに分かれている。
-**判断:** SQLite effectはlive-onlyのまま、runtime-state applyだけを共有する。
-
-### M-13（#199・P1）: `Galaxy` → `SectorMap` projection二重化
-
-`with_store`と`set_galaxy`がgates / bodies / stationsを別々にcollectする。
-**判断:** projectionを`SectorMap`側へ一元化し、同じGalaxyから`AnchorTable`も構築する。
 
 ### M-3（保留）: `SectorSimulatorActor`と`SimulationNode`の密結合
 
@@ -68,9 +51,7 @@ live state、interaction、presentationは分離済み。残るscene lifecycle /
 
 | 項目 | 状態 |
 |---|---|
-| M-11 / #197 Ship materialization | P0・最優先 |
-| M-12 / #198 Station runtime apply | P1 |
-| M-13 / #199 SectorMap projection | P1 |
+| Transit state mutation | 解消済み。`node::transit`へ集約 |
 | R-2 / R-3 | 保留・trigger付き |
 | M-3 / M-9 | 保留・trigger付き |
 | M-6 / M-8 / M-10 | 解消済み |

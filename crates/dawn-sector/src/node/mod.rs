@@ -42,7 +42,7 @@ mod station_materialization;
 mod station_operation_execution;
 mod tackle;
 mod tick;
-mod transit_flow;
+mod transit;
 mod warp;
 
 pub use commands::{ClientCommandFollowup, ModuleActivationRejection};
