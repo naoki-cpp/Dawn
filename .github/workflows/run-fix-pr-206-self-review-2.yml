@@ -59,7 +59,7 @@ jobs:
           '''
           code, count = re.subn(
               r"def replace_once\(.*?(?=# Canonical retry snapshot)",
-              helpers,
+              lambda _: helpers,
               code,
               count=1,
               flags=re.S,
