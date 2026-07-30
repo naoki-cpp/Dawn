@@ -28,6 +28,87 @@ jobs:
         shell: bash
         run: |
           python3 .github/scripts/apply_transit_attempt_fix.py
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one match, found {count}")
+              return text.replace(old, new, 1)
+
+          flow_path = Path('crates/dawn-sector/src/node/transit_flow.rs')
+          flow = flow_path.read_text()
+          flow = replace_once(
+              flow,
+              """    pub fn complete_outgoing_transit(
+                  &mut self,
+                  ship: &ShipSnapshot,
+                  to: SectorId,
+                  entry_pos_abs: dawn_core::AbsolutePosition,
+              ) {
+          """,
+              """    pub fn complete_outgoing_transit(
+                  &mut self,
+                  ship: &ShipSnapshot,
+                  to: SectorId,
+                  entry_pos_abs: dawn_core::AbsolutePosition,
+                  request_tick: Tick,
+              ) {
+          """,
+              'complete_outgoing_transit signature',
+          )
+          flow = replace_once(
+              flow,
+              """    pub(super) fn import_transit(
+                  &mut self,
+                  ship: &ShipSnapshot,
+                  from: SectorId,
+                  entry_pos: Position,
+                  entry_pos_abs: dawn_core::AbsolutePosition,
+              ) {
+          """,
+              """    pub(super) fn import_transit(
+                  &mut self,
+                  ship: &ShipSnapshot,
+                  from: SectorId,
+                  entry_pos: Position,
+                  entry_pos_abs: dawn_core::AbsolutePosition,
+                  request_tick: Tick,
+              ) {
+          """,
+              'import_transit signature',
+          )
+          flow = replace_once(
+              flow,
+              '        self.import_transit(ship, from, entry_pos, entry_pos_abs);\n',
+              '        self.import_transit(ship, from, entry_pos, entry_pos_abs, request_tick);\n',
+              'import_transit call',
+          )
+          flow_path.write_text(flow)
+
+          pipeline_path = Path('crates/dawn-sector/src/transit/pipeline.rs')
+          pipeline = pipeline_path.read_text()
+          pipeline = replace_once(
+              pipeline,
+              '    node.complete_outgoing_transit(ship, to, entry_pos_abs);\n',
+              '    node.complete_outgoing_transit(ship, to, entry_pos_abs, request_tick);\n',
+              'Ack completion call',
+          )
+          pipeline = replace_once(
+              pipeline,
+              '        source.complete_outgoing_transit(&proposal.ship, proposal.to, proposal.entry_pos_abs);\n',
+              """        source.complete_outgoing_transit(
+              &proposal.ship,
+              proposal.to,
+              proposal.entry_pos_abs,
+              proposal.request_tick,
+          );
+          """,
+              'pipeline checkpoint-gate test call',
+          )
+          pipeline_path.write_text(pipeline)
+          PY
           cargo fmt --all
           cargo check --workspace
           cargo test -p dawn-sector repeated_same_route_replay_preserves_each_attempt_receipt_after_checkpoint
