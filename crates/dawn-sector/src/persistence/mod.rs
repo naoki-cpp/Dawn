@@ -9,4 +9,4 @@ pub mod checkpoint;
 pub mod snapshot;
 
 pub use checkpoint::{CheckpointConfig, CheckpointScheduler};
-pub use snapshot::{ShipSnapshot, StateSnapshot};
+pub use snapshot::{CompletedIncomingTransit, ShipSnapshot, StateSnapshot};

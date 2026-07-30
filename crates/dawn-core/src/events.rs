@@ -422,10 +422,30 @@ pub struct SectorTransitRequested {
     pub ship_id: ShipId,
     pub from: SectorId,
     pub to: SectorId,
+    /// Source-Sector Tick that identifies this request. This is a source-local
+    /// nonce, not the Tick of every EventStore that records the transfer.
+    pub request_tick: Tick,
+    /// Original transfer kind. `None` is a non-Gate Sector Transit and must not
+    /// be inferred as a Jump after restart merely because topology has a Gate.
+    pub gate_id: Option<JumpGateId>,
+    /// Resolved destination entry point persisted by the source outbox.
+    pub entry_pos: Position,
+    pub entry_pos_abs: AbsolutePosition,
+    /// Tick local to the EventStore that appended this record.
     pub tick: Tick,
 }
 
 /// A Sector Transit completed; ownership of `ship_id` moved from `from` to `to`.
+///
+/// Self-contained (issue #204): `ship_state` carries everything the
+/// destination Sector needs to materialize the ship from this event alone,
+/// so `restore_from` (snapshot + tail replay) can recover a completed
+/// transit without the in-memory Raft actor surviving the restart (ADR-0014).
+/// The `from` Sector's replay only reads `ship_id` off this event (to remove
+/// it) and ignores `ship_state`; appending it there too is deliberate --
+/// `complete_outgoing_transit` already has the full state in hand at that
+/// point, and keeping one event shape for both sides avoids growing the
+/// event catalog for a payload only one side reads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SectorTransitCompleted {
     pub ship_id: ShipId,
@@ -435,6 +455,31 @@ pub struct SectorTransitCompleted {
     pub entry_pos: AbsolutePosition,
     pub velocity: Velocity,
     pub tick: Tick,
+    /// Everything about the ship the destination Sector's tail replay needs
+    /// beyond what this event already carries elsewhere (`ship_id`,
+    /// `entry_pos`, `velocity`). Excludes fields that are transit-specific
+    /// dead weight here: `position`/`anchor` are always superseded by
+    /// `entry_pos` + the post-import anchor rebase, and tackle state is
+    /// intentionally not transferred across Sectors (the tacklers stay
+    /// behind).
+    pub ship_state: TransitShipState,
+}
+
+/// The ship state a Sector Transit carries across the Sector boundary
+/// (issue #204). A trimmed mirror of `dawn-sector`'s `ShipSnapshot` --
+/// `dawn-sector` depends on `dawn-core`, not the reverse (FBD-002), so this
+/// type lives here in its own right rather than being the same type;
+/// `dawn-sector` converts between the two at the export/import seam.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransitShipState {
+    pub ship_type_id: ShipTypeId,
+    pub current_shield: f32,
+    pub current_armor: f32,
+    pub current_hull: f32,
+    pub is_destroyed: bool,
+    pub capacitor: Option<f32>,
+    pub fitting: FittingSnapshot,
+    pub inventory: std::collections::BTreeMap<ItemId, u64>,
 }
 
 /// A committed Sector Transit was aborted after `SectorTransitRequested`.
@@ -575,6 +620,10 @@ mod tests {
             ship_id: id,
             from: SectorId(0),
             to: SectorId(1),
+            request_tick: Tick(7),
+            gate_id: None,
+            entry_pos: Position::ORIGIN,
+            entry_pos_abs: AbsolutePosition::ORIGIN,
             tick: Tick(7),
         });
         assert_eq!(event.ship_id(), id);
@@ -611,6 +660,16 @@ mod tests {
             entry_pos: AbsolutePosition::new(100.0, 0.0, 0.0),
             velocity: Velocity::new(1.0, 0.0, 0.0),
             tick: Tick(8),
+            ship_state: TransitShipState {
+                ship_type_id: ShipTypeId(1),
+                current_shield: 100.0,
+                current_armor: 100.0,
+                current_hull: 100.0,
+                is_destroyed: false,
+                capacitor: Some(50.0),
+                fitting: FittingSnapshot::empty(),
+                inventory: std::collections::BTreeMap::new(),
+            },
         });
         match event {
             DomainEvent::SectorTransitCompleted(e) => {

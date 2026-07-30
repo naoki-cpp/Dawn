@@ -16,7 +16,9 @@
 //! Emits `VelocityChanged` only when velocity actually differs from the previous tick.
 
 use crate::{
-    components::{PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, VelocityComp, WarpComp},
+    components::{
+        PositionComp, ShipIdComp, ShipStatsComp, ThrustComp, TransitComp, VelocityComp, WarpComp,
+    },
     SimWorld,
 };
 use dawn_core::{
@@ -33,7 +35,7 @@ impl MovementSystem {
     pub fn run(world: &mut SimWorld, tick: Tick) -> Vec<DomainEvent> {
         let mut events = Vec::new();
 
-        for (id_comp, pos_comp, vel_comp, thrust_comp, stats_comp, warp_comp) in
+        for (id_comp, pos_comp, vel_comp, thrust_comp, stats_comp, warp_comp, transit_comp) in
             world.inner_mut().query_mut::<(
                 &ShipIdComp,
                 &mut PositionComp,
@@ -41,11 +43,23 @@ impl MovementSystem {
                 &mut ThrustComp,
                 &ShipStatsComp,
                 Option<&WarpComp>,
+                Option<&TransitComp>,
             )>()
         {
             // Ships in the committed warping phase are owned by process_warp;
             // skip them so warp speed is not clamped (ADR-0022 §6).
             if warp_comp.is_some_and(|w| w.is_warping()) {
+                continue;
+            }
+            // A Ship pending Sector Transit is frozen until the destination
+            // Commit lands (ADR-0014, issue #204): it stays in this Sector's
+            // ECS between Request and Commit so a crash in that window loses
+            // nothing (the source only removes it once its own copy of the
+            // Commit is durably recorded), but it must not keep moving while
+            // it waits -- `TransitComp`'s own doc comment already says a
+            // `InTransit` Ship rejects further Move commands; this closes the
+            // matching gap on the per-tick systems, which aren't commands.
+            if transit_comp.is_some_and(|t| t.0.is_in_transit()) {
                 continue;
             }
 

@@ -70,7 +70,7 @@ use dawn_event_store::{store::EventStore, InMemoryEventStore};
 #[cfg(test)]
 use dawn_ecs::components::{CapacitorComp, FittingComp, HullComp};
 
-use crate::persistence::StateSnapshot;
+use crate::persistence::{CompletedIncomingTransit, StateSnapshot};
 
 /// Per-Sector population backstop (ADR-0018 final resort). Set far above the
 /// TiDi budget so dynamic split / LoD / local TiDi all engage first; only
@@ -215,6 +215,8 @@ where
     /// whether the arrival changed the ship's anchor, so it covers every warp
     /// (gate / body / same-anchor) with one mechanism.
     completed_warps: Vec<ShipId>,
+    /// Durable destination-side transit receipts used for Commit deduplication.
+    completed_incoming_transits: Vec<CompletedIncomingTransit>,
 }
 
 impl<S: EventStore> std::fmt::Debug for SimulationNode<S> {
@@ -297,6 +299,7 @@ impl<S: EventStore> SimulationNode<S> {
             docked_players: BTreeMap::new(),
             pending_auto_jumps: Vec::new(),
             completed_warps: Vec::new(),
+            completed_incoming_transits: Vec::new(),
         }
     }
 
