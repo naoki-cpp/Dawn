@@ -178,6 +178,9 @@ func before_test() -> void:
 	## the @onready scene-path vars stay null -- fine, since none of the
 	## functions under test touch them.
 	_main = load(__source).new()
+	## _ready() normally injects WorldSpace through WorldPresentation.build().
+	## This fixture skips _ready(), so establish the same production dependency.
+	_main._presentation._world = _main._world
 	_main._interaction = load("res://scripts/world_interaction.gd").new()
 	_main._loadout = PlayerLoadout.new()
 
