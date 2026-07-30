@@ -73,6 +73,18 @@ pub struct ShipSnapshot {
     pub inventory: std::collections::BTreeMap<dawn_core::ItemId, u64>,
 }
 
+/// Durable destination-side receipt for an imported Sector Transit.
+///
+/// Ship presence is not a valid deduplication marker because the imported Ship
+/// may be destroyed or transit onward before an old Commit retry arrives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompletedIncomingTransit {
+    pub ship_id: ShipId,
+    pub from: SectorId,
+    pub to: SectorId,
+    pub request_tick: Tick,
+}
+
 // ── Node-level snapshot ───────────────────────────────────────────────────────
 
 /// Complete state of a `SimulationNode` at a specific `log_index`.
@@ -120,6 +132,9 @@ pub struct StateSnapshot {
     pub player_id_counter: u64,
     /// State of every Ship in the Sector at the snapshot instant.
     pub ships: Vec<ShipSnapshot>,
+    /// Destination-side receipts that survive checkpoint compaction.
+    #[serde(default)]
+    pub completed_incoming_transits: Vec<CompletedIncomingTransit>,
     /// Current docked station per ship.
     pub docked_ships: BTreeMap<dawn_core::ShipId, dawn_core::StationId>,
     /// Current docked station context per player.
@@ -177,6 +192,7 @@ mod tests {
                     1,
                 )]),
             }],
+            completed_incoming_transits: Vec::new(),
             docked_ships: BTreeMap::from([(ShipId::new(NodeId(0), 0), dawn_core::StationId(0))]),
             docked_players: BTreeMap::from([(dawn_core::PlayerId(9), dawn_core::StationId(0))]),
         }

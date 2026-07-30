@@ -17,7 +17,7 @@ use dawn_ecs::{
 };
 use dawn_event_store::store::EventStore;
 
-use crate::persistence::ShipSnapshot;
+use crate::persistence::{CompletedIncomingTransit, ShipSnapshot};
 
 use super::SimulationNode;
 
@@ -96,6 +96,57 @@ struct TransitRetryComp {
 }
 
 impl<S: EventStore> SimulationNode<S> {
+    pub(crate) fn has_completed_incoming_transit(
+        &self,
+        ship_id: ShipId,
+        from: SectorId,
+        to: SectorId,
+        request_tick: Tick,
+    ) -> bool {
+        self.completed_incoming_transits
+            .contains(&CompletedIncomingTransit {
+                ship_id,
+                from,
+                to,
+                request_tick,
+            })
+    }
+
+    fn record_completed_incoming_transit(
+        &mut self,
+        ship_id: ShipId,
+        from: SectorId,
+        to: SectorId,
+        request_tick: Tick,
+    ) {
+        self.completed_incoming_transits
+            .push(CompletedIncomingTransit {
+                ship_id,
+                from,
+                to,
+                request_tick,
+            });
+    }
+
+    fn replayed_transit_request_tick(
+        &self,
+        ship_id: ShipId,
+        from: SectorId,
+        to: SectorId,
+    ) -> Option<Tick> {
+        self.event_store
+            .iter_from(0)
+            .filter_map(|record| match &record.event {
+                DomainEvent::SectorTransitRequested(event)
+                    if event.ship_id == ship_id && event.from == from && event.to == to =>
+                {
+                    Some(event.request_tick)
+                }
+                _ => None,
+            })
+            .last()
+    }
+
     /// Validate and begin a Sector Transit (CLAUDE.md §4 Step 2).
     ///
     /// On success, marks the Ship `TransitState::InTransit` and appends a
@@ -511,8 +562,10 @@ impl<S: EventStore> SimulationNode<S> {
         entry_pos: Position,
         entry_pos_abs: dawn_core::AbsolutePosition,
         gate_id: Option<JumpGateId>,
+        request_tick: Tick,
     ) {
         let ship_id = ship.ship_id;
+        self.record_completed_incoming_transit(ship_id, from, self.sector_id, request_tick);
         self.import_transit(ship, from, entry_pos, entry_pos_abs);
         if let Some(gate_id) = gate_id {
             let to = self.sector_id();
@@ -643,7 +696,17 @@ impl<S: EventStore> SimulationNode<S> {
     ) {
         if self.sector_id == e.from {
             self.remove_ship(e.ship_id);
-        } else if self.sector_id == e.to && !self.ships.index.contains_key(&e.ship_id) {
+        } else if self.sector_id == e.to {
+            if let Some(request_tick) = self.replayed_transit_request_tick(e.ship_id, e.from, e.to)
+            {
+                self.record_completed_incoming_transit(e.ship_id, e.from, e.to, request_tick);
+            }
+            if self.ships.index.contains_key(&e.ship_id) {
+                if e.tick > self.current_tick {
+                    self.current_tick = e.tick;
+                }
+                return;
+            }
             let entry_pos = Position::new(e.entry_pos[0], e.entry_pos[1], e.entry_pos[2]);
             let snapshot =
                 ship_snapshot_from_transit(e.ship_id, &e.ship_state, entry_pos, e.velocity);
@@ -1022,6 +1085,7 @@ mod tests {
             data.entry_pos,
             data.entry_pos_abs,
             Some(outbound_gate.id),
+            data.request_tick,
         );
 
         assert!(

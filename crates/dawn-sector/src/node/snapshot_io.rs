@@ -28,6 +28,7 @@ impl<S: EventStore> SimulationNode<S> {
             player_id_counter,
             docked_ships,
             docked_players,
+            completed_incoming_transits,
             // `log_index` is derived from the store rather than persisted.
             event_store,
             // ── captured per ship, below ───────────────────────────────────
@@ -117,6 +118,7 @@ impl<S: EventStore> SimulationNode<S> {
             ships,
             docked_ships: docked_ships.clone(),
             docked_players: docked_players.clone(),
+            completed_incoming_transits: completed_incoming_transits.clone(),
         }
     }
 
@@ -140,6 +142,7 @@ impl<S: EventStore> SimulationNode<S> {
             player_id_counter,
             docked_ships,
             docked_players,
+            completed_incoming_transits,
             // Consumed by `restore_from`, not here: `ships` needs the module
             // and ship-type registries in place first, and `log_index` selects
             // the replay range once those ships exist.
@@ -155,6 +158,7 @@ impl<S: EventStore> SimulationNode<S> {
         self.player_id_counter = *player_id_counter;
         self.docked_ships = docked_ships.clone();
         self.docked_players = docked_players.clone();
+        self.completed_incoming_transits = completed_incoming_transits.clone();
     }
 }
 
@@ -316,6 +320,7 @@ mod tests {
                 tackled_by: vec![ShipId::new(NodeId(0), 1)],
                 inventory: std::collections::BTreeMap::from([(dawn_core::ItemId::ScrapMetal, 4)]),
             }],
+            completed_incoming_transits: Vec::new(),
             docked_ships: std::collections::BTreeMap::from([(
                 ShipId::new(NodeId(0), 0),
                 dawn_core::StationId(0),
