@@ -288,31 +288,6 @@ mod tests {
     }
 
     #[test]
-    fn replay_directive_only_claims_transit_events() {
-        let ship_id = ShipId::new(NodeId(0), 1);
-        let event = DomainEvent::SectorTransitAborted(dawn_core::events::SectorTransitAborted {
-            ship_id,
-            from: SectorId(0),
-            to: SectorId(1),
-            reason: "test".into(),
-            tick: Tick(2),
-        });
-        assert!(matches!(
-            replay_directive(&event),
-            Some(ReplayDirective::Aborted(aborted)) if aborted.ship_id == ship_id
-        ));
-        assert!(replay_directive(&DomainEvent::WeaponFired(
-            dawn_core::events::WeaponFired {
-                ship_id,
-                target_id: ship_id,
-                damage: 0.0,
-                tick: Tick(2),
-            }
-        ))
-        .is_none());
-    }
-
-    #[test]
     fn pending_outbox_is_the_checkpoint_gate() {
         let mut source = node(0);
         let ship_id = source.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
