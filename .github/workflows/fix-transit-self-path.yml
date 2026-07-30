@@ -1,0 +1,38 @@
+name: Fix transit self path
+
+on:
+  pull_request:
+    branches: [main]
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.head_ref == 'agent/fix-transit-attempt-receipts' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/fix-transit-attempt-receipts
+      - name: Fix and validate
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/dawn-core/src/events.rs')
+          text = path.read_text()
+          old = 'request_tick: dawn_core::Tick::ZERO,'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one self path, found {text.count(old)}')
+          path.write_text(text.replace(old, 'request_tick: Tick::ZERO,', 1))
+          PY
+          cargo test -p dawn-core --lib
+          cargo clippy --workspace --all-targets
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/dawn-core/src/events.rs
+          git commit -m "fix(core): use local Tick path in event test"
+          git push origin HEAD:agent/fix-transit-attempt-receipts
