@@ -64,7 +64,7 @@ impl CheckpointScheduler {
 mod tests {
     use super::*;
     use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipTypeId, Velocity};
-    use dawn_event_store::{store::EventStore, FileEventStore};
+    use dawn_event_store::FileEventStore;
 
     fn file_node(dir: &std::path::Path) -> SimulationNode<FileEventStore> {
         let store = FileEventStore::open(dir.join("events.log")).unwrap();
