@@ -27,20 +27,7 @@ jobs:
       - name: Apply and validate fix
         shell: bash
         run: |
-          python3 <<'PY'
-          from pathlib import Path
-
-          workflow = Path('.github/workflows/fix-transit-attempt-receipts.yml').read_text()
-          marker = "          python3 <<'PY'\n"
-          start = workflow.index(marker) + len(marker)
-          end = workflow.index("\n          PY", start)
-          script = '\n'.join(
-              line[10:] if line.startswith('          ') else line
-              for line in workflow[start:end].splitlines()
-          )
-          exec(compile(script, 'transit-fix.py', 'exec'))
-          PY
-
+          python3 .github/scripts/apply_transit_attempt_fix.py
           cargo fmt --all
           cargo check --workspace
           cargo test -p dawn-sector repeated_same_route_replay_preserves_each_attempt_receipt_after_checkpoint
