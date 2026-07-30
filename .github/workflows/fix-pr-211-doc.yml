@@ -1,0 +1,49 @@
+name: Fix PR 211 documentation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ github.head_ref == 'agent/centralize-sector-map' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/centralize-sector-map
+          persist-credentials: false
+
+      - name: Update documentation and remove helper
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/dawn-sector/src/node/mod.rs')
+          text = path.read_text()
+          old = '''    /// Replace the navigation topology.  Updates `jump_gates` and
+              /// `celestial_bodies` for this node's Sector immediately.
+          '''
+          new = '''    /// Replace the navigation topology. Rebuilds this Sector's gates, bodies,
+              /// stations, and the shared body-anchor table from the same `Galaxy` value.
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('set_galaxy documentation anchor not found exactly once')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          rm .github/workflows/fix-pr-211-doc.yml
+
+      - name: Commit and push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/dawn-sector/src/node/mod.rs .github/workflows/fix-pr-211-doc.yml
+          git commit -m "docs(sector): describe set_galaxy projections"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:agent/centralize-sector-map
