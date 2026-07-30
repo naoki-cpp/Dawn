@@ -17,18 +17,221 @@ jobs:
           ref: recoverable-sector-transit
           persist-credentials: false
 
-      - name: Extract and run fix script
+      - name: Apply durable transit receipt fix
         shell: bash
         run: |
           python3 <<'PY'
           from pathlib import Path
-          workflow = Path('.github/workflows/fix-pr-206-transit-receipts.yml').read_text().splitlines()
-          start = next(i for i, line in enumerate(workflow) if "python3 <<'PY'" in line) + 1
-          end = next(i for i in range(start, len(workflow)) if workflow[i].strip() == 'PY')
-          code = '\n'.join(line[10:] if line.startswith('          ') else line for line in workflow[start:end]) + '\n'
-          Path('/tmp/fix_transit_receipts.py').write_text(code)
+          import re
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one match, found {count}")
+              return text.replace(old, new, 1)
+
+          def write(path: str, transform):
+              p = Path(path)
+              old = p.read_text()
+              new = transform(old)
+              if new == old:
+                  raise SystemExit(f"{path}: no change")
+              p.write_text(new)
+
+          def patch_snapshot(s: str) -> str:
+              s = replace_once(
+                  s,
+                  'use std::collections::BTreeMap;',
+                  'use std::collections::{BTreeMap, BTreeSet};',
+                  'snapshot imports',
+              )
+              marker = '// ── Node-level snapshot ───────────────────────────────────────────────────────\n'
+              receipt = '''/// Durable destination-side receipt for an imported Sector Transit.\n///\n/// The Ship itself cannot serve as the dedupe marker: it may be destroyed or\n/// leave for another Sector before an old Commit retry arrives.\n#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]\npub struct CompletedIncomingTransit {\n    pub ship_id: ShipId,\n    pub from: SectorId,\n    pub to: SectorId,\n    pub request_tick: Tick,\n}\n\n'''
+              s = replace_once(s, marker, receipt + marker, 'receipt type')
+              s = replace_once(
+                  s,
+                  '    /// Current docked station per ship.\n    pub docked_ships:',
+                  '    /// Destination-side receipts that survive checkpoint compaction.\n    pub completed_incoming_transits: BTreeSet<CompletedIncomingTransit>,\n    /// Current docked station per ship.\n    pub docked_ships:',
+                  'snapshot receipt field',
+              )
+              s = replace_once(
+                  s,
+                  '            docked_ships: BTreeMap::from([',
+                  '            completed_incoming_transits: BTreeSet::from([CompletedIncomingTransit {\n                ship_id: ShipId::new(NodeId(9), 4),\n                from: SectorId(2),\n                to: SectorId(0),\n                request_tick: Tick(8),\n            }]),\n            docked_ships: BTreeMap::from([',
+                  'snapshot test fixture receipt',
+              )
+              return s
+
+          write('crates/dawn-sector/src/persistence/snapshot.rs', patch_snapshot)
+
+          def patch_persistence_mod(s: str) -> str:
+              return replace_once(
+                  s,
+                  'pub use snapshot::{ShipSnapshot, StateSnapshot};',
+                  'pub use snapshot::{CompletedIncomingTransit, ShipSnapshot, StateSnapshot};',
+                  'snapshot export',
+              )
+
+          write('crates/dawn-sector/src/persistence/mod.rs', patch_persistence_mod)
+
+          def patch_node_mod(s: str) -> str:
+              s = replace_once(
+                  s,
+                  'use crate::persistence::StateSnapshot;',
+                  'use crate::persistence::{CompletedIncomingTransit, StateSnapshot};',
+                  'node receipt import',
+              )
+              s = replace_once(
+                  s,
+                  '    completed_warps: Vec<ShipId>,\n}',
+                  '    completed_warps: Vec<ShipId>,\n    /// Durable destination-side transit receipts used for Commit deduplication.\n    completed_incoming_transits: std::collections::BTreeSet<CompletedIncomingTransit>,\n}',
+                  'node receipt field',
+              )
+              s = replace_once(
+                  s,
+                  '            completed_warps: Vec::new(),\n        }',
+                  '            completed_warps: Vec::new(),\n            completed_incoming_transits: std::collections::BTreeSet::new(),\n        }',
+                  'node receipt init',
+              )
+              return s
+
+          write('crates/dawn-sector/src/node/mod.rs', patch_node_mod)
+
+          def patch_snapshot_io(s: str) -> str:
+              s = replace_once(
+                  s,
+                  '            docked_players,\n            // `log_index` is derived',
+                  '            docked_players,\n            completed_incoming_transits,\n            // `log_index` is derived',
+                  'take_snapshot destructure',
+              )
+              s = replace_once(
+                  s,
+                  '            docked_players: docked_players.clone(),\n        }',
+                  '            docked_players: docked_players.clone(),\n            completed_incoming_transits: completed_incoming_transits.clone(),\n        }',
+                  'take_snapshot output',
+              )
+              s = replace_once(
+                  s,
+                  '            docked_players,\n            // Consumed by `restore_from`',
+                  '            docked_players,\n            completed_incoming_transits,\n            // Consumed by `restore_from`',
+                  'apply_snapshot destructure',
+              )
+              s = replace_once(
+                  s,
+                  '        self.docked_players = docked_players.clone();\n',
+                  '        self.docked_players = docked_players.clone();\n        self.completed_incoming_transits = completed_incoming_transits.clone();\n',
+                  'apply_snapshot receipt assignment',
+              )
+              s = replace_once(
+                  s,
+                  '            docked_ships: std::collections::BTreeMap::from([',
+                  '            completed_incoming_transits: std::collections::BTreeSet::from([\n                crate::persistence::CompletedIncomingTransit {\n                    ship_id: ShipId::new(NodeId(8), 3),\n                    from: SectorId(2),\n                    to: SectorId(0),\n                    request_tick: Tick(11),\n                },\n            ]),\n            docked_ships: std::collections::BTreeMap::from([',
+                  'snapshot_io fixture receipt',
+              )
+              return s
+
+          write('crates/dawn-sector/src/node/snapshot_io.rs', patch_snapshot_io)
+
+          def patch_events(s: str) -> str:
+              return replace_once(
+                  s,
+                  '    pub to: SectorId,\n    /// Authoritative destination-Sector entry position.\n',
+                  '    pub to: SectorId,\n    /// Source-local request identity used for durable destination deduplication.\n    pub request_tick: Tick,\n    /// Authoritative destination-Sector entry position.\n',
+                  'completed request identity',
+              )
+
+          write('crates/dawn-core/src/events.rs', patch_events)
+
+          # Populate the new field in every explicit Completed event literal.
+          for p in Path('crates').rglob('*.rs'):
+              s = p.read_text()
+              pos = 0
+              out = []
+              changed = False
+              pattern = re.compile(r'SectorTransitCompleted\s*\{')
+              while True:
+                  m = pattern.search(s, pos)
+                  if not m:
+                      out.append(s[pos:])
+                      break
+                  out.append(s[pos:m.end()])
+                  i = m.end()
+                  depth = 1
+                  j = i
+                  while j < len(s) and depth:
+                      if s[j] == '{':
+                          depth += 1
+                      elif s[j] == '}':
+                          depth -= 1
+                      j += 1
+                  body = s[i:j - 1]
+                  if 'request_tick:' not in body:
+                      to_match = re.search(r'(\n\s*to:\s*[^,]+,)', body)
+                      if not to_match:
+                          raise SystemExit(f'{p}: cannot place request_tick')
+                      value = 'crate::Tick::ZERO' if p.as_posix() == 'crates/dawn-core/src/events.rs' else 'dawn_core::Tick::ZERO'
+                      indent = re.match(r'\n(\s*)to:', to_match.group(1)).group(1)
+                      body = body[:to_match.end()] + f'\n{indent}request_tick: {value},' + body[to_match.end():]
+                      changed = True
+                  out.append(body + '}')
+                  pos = j
+              if changed:
+                  p.write_text(''.join(out))
+
+          def patch_transit_flow(s: str) -> str:
+              s = replace_once(
+                  s,
+                  'use crate::persistence::ShipSnapshot;',
+                  'use crate::persistence::{CompletedIncomingTransit, ShipSnapshot};',
+                  'transit receipt import',
+              )
+              impl_anchor = 'impl<S: EventStore> SimulationNode<S> {\n'
+              methods = '''impl<S: EventStore> SimulationNode<S> {\n    pub(crate) fn has_completed_incoming_transit(\n        &self,\n        ship_id: ShipId,\n        from: SectorId,\n        to: SectorId,\n        request_tick: Tick,\n    ) -> bool {\n        self.completed_incoming_transits\n            .contains(&CompletedIncomingTransit { ship_id, from, to, request_tick })\n    }\n\n    fn record_completed_incoming_transit(\n        &mut self,\n        ship_id: ShipId,\n        from: SectorId,\n        to: SectorId,\n        request_tick: Tick,\n    ) {\n        self.completed_incoming_transits\n            .insert(CompletedIncomingTransit { ship_id, from, to, request_tick });\n    }\n\n    fn transit_request_tick(&self, ship_id: ShipId, from: SectorId, to: SectorId) -> Tick {\n        self.event_store\n            .iter_from(0)\n            .filter_map(|record| match &record.event {\n                DomainEvent::SectorTransitRequested(event)\n                    if event.ship_id == ship_id && event.from == from && event.to == to =>\n                {\n                    Some(event.request_tick)\n                }\n                _ => None,\n            })\n            .last()\n            .unwrap_or(self.current_tick)\n    }\n\n'''
+              s = replace_once(s, impl_anchor, methods, 'transit receipt methods')
+
+              # Source Completed derives the durable request identity from the pending outbox.
+              source_anchor = '''        self.remove_ship(ship.ship_id);\n\n        self.event_store.append(DomainEvent::SectorTransitCompleted('''
+              source_replacement = '''        let request_tick =\n            self.transit_request_tick(ship.ship_id, self.sector_id, to);\n        self.remove_ship(ship.ship_id);\n\n        self.event_store.append(DomainEvent::SectorTransitCompleted('''
+              s = replace_once(s, source_anchor, source_replacement, 'source receipt identity')
+
+              # Destination import records its receipt before appending Completed.
+              destination_anchor = '''        self.restore_ship_from_snapshot(&ship);\n        self.rebase_after_transit(ship.ship_id, entry_pos_abs);\n\n        self.event_store.append(DomainEvent::SectorTransitCompleted('''
+              destination_replacement = '''        self.restore_ship_from_snapshot(&ship);\n        self.rebase_after_transit(ship.ship_id, entry_pos_abs);\n        let request_tick =\n            self.transit_request_tick(ship.ship_id, from, self.sector_id);\n        self.record_completed_incoming_transit(\n            ship.ship_id,\n            from,\n            self.sector_id,\n            request_tick,\n        );\n\n        self.event_store.append(DomainEvent::SectorTransitCompleted('''
+              s = replace_once(s, destination_anchor, destination_replacement, 'destination receipt recording')
+
+              # Replace the auto-added zero values in the two live event constructors.
+              live_zero = '                request_tick: dawn_core::Tick::ZERO,\n                entry_pos: entry_pos_abs,'
+              if s.count(live_zero) != 2:
+                  raise SystemExit(f'live Completed identities: expected 2, found {s.count(live_zero)}')
+              s = s.replace(live_zero, '                request_tick,\n                entry_pos: entry_pos_abs,', 2)
+
+              replay_old = '        } else if self.sector_id == e.to && !self.ships.index.contains_key(&e.ship_id) {'
+              replay_new = '''        } else if self.sector_id == e.to {\n            self.record_completed_incoming_transit(e.ship_id, e.from, e.to, e.request_tick);\n            if self.ships.index.contains_key(&e.ship_id) {\n                if e.tick > self.current_tick {\n                    self.current_tick = e.tick;\n                }\n                return;\n            }'''
+              s = replace_once(s, replay_old, replay_new, 'completed replay receipt')
+              return s
+
+          write('crates/dawn-sector/src/node/transit_flow.rs', patch_transit_flow)
+
+          def patch_transit(s: str) -> str:
+              s = replace_once(
+                  s,
+                  '    let mut marker_seen = false;\n',
+                  '    if node.has_completed_incoming_transit(ship_id, from, to, request_tick) {\n        return true;\n    }\n    let mut marker_seen = false;\n',
+                  'durable receipt lookup',
+              )
+              s = replace_once(
+                  s,
+                  '                    && event.to == to =>',
+                  '                    && event.to == to\n                    && event.request_tick == request_tick =>',
+                  'hot Completed identity match',
+              )
+              needle = '''    #[test]\n    fn decode_returns_none_for_garbage_payload() {'''
+              test = '''    #[test]\n    fn duplicate_commit_after_checkpoint_does_not_resurrect_a_ship_that_has_left() {\n        let mut source = node(0, 0);\n        let mut destination = node(1, 1);\n        let ship_id = source.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);\n        let data = source\n            .prepare_transit_commit(ship_id, SectorId(1), None)\n            .unwrap();\n        let commit = TransitOp::Commit {\n            ship: data.ship,\n            from: SectorId(0),\n            to: SectorId(1),\n            entry_pos: data.entry_pos,\n            entry_pos_abs: data.entry_pos_abs,\n            gate_id: None,\n            request_tick: data.request_tick,\n        };\n\n        let (raft, mut proposals) = raft_handle();\n        let (tx, mut rx) = mpsc::unbounded_channel();\n        tx.send(commit.encode()).unwrap();\n        apply_committed_raft_entries(&mut destination, &raft, &mut rx);\n        assert!(matches!(\n            decode_proposed_transit(&mut proposals),\n            TransitOp::Ack { .. }\n        ));\n\n        let mut checkpoint = destination.take_snapshot();\n        checkpoint.ships.retain(|ship| ship.ship_id != ship_id);\n        let mut restored =\n            SimulationNode::restore_from(InMemoryEventStore::new(), &checkpoint, &[], &[]);\n        assert!(restored.get_ship_position(ship_id).is_none());\n\n        let (dup_tx, mut dup_rx) = mpsc::unbounded_channel();\n        dup_tx.send(commit.encode()).unwrap();\n        apply_committed_raft_entries(&mut restored, &raft, &mut dup_rx);\n\n        assert!(matches!(\n            decode_proposed_transit(&mut proposals),\n            TransitOp::Ack { .. }\n        ));\n        assert!(restored.get_ship_position(ship_id).is_none());\n        assert_eq!(restored.event_store().len(), 0);\n\n        let after_crash = restored.take_snapshot();\n        let replayed = SimulationNode::restore_from(\n            InMemoryEventStore::new(),\n            &after_crash,\n            &[],\n            &[],\n        );\n        assert!(replayed.get_ship_position(ship_id).is_none());\n    }\n\n'''
+              s = replace_once(s, needle, test + needle, 'resurrection regression test')
+              return s
+
+          write('crates/dawn-sector/src/transit.rs', patch_transit)
           PY
-          python3 /tmp/fix_transit_receipts.py
 
           cargo fmt --all
           cargo check --workspace --all-targets
