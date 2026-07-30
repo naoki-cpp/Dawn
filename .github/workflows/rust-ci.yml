@@ -26,7 +26,7 @@ env:
 jobs:
   fix-pr217-review:
     name: Apply PR 217 review fixes
-    if: github.event.pull_request.head.sha == '3694882c9c1320b0883cada1fed9efdd2582122b'
+    if: github.head_ref == 'codex/deepen-transit-state-mutation'
     permissions:
       contents: write
     runs-on: ubuntu-latest
