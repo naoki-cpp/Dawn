@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use dawn_core::{
-    CelestialBodyDef, CelestialBodyId, JumpGateDef, JumpGateId, StationDef, StationId,
+    CelestialBodyDef, CelestialBodyId, JumpGateDef, JumpGateId, SectorId, StationDef, StationId,
 };
 
 use crate::galaxy::Galaxy;
@@ -25,4 +25,32 @@ pub(super) struct SectorMap {
     pub(super) bodies: HashMap<CelestialBodyId, CelestialBodyDef>,
     /// NPC stations in this node's Sector (ADR-0034 9B foundation).
     pub(super) stations: HashMap<StationId, StationDef>,
+}
+
+impl SectorMap {
+    /// Project one Sector's static topology from the shared Galaxy value.
+    pub(super) fn from_galaxy(sector_id: SectorId, galaxy: Arc<Galaxy>) -> Self {
+        let gates = galaxy
+            .gates_in_sector(sector_id)
+            .into_iter()
+            .map(|gate| (gate.id, gate))
+            .collect();
+        let bodies = galaxy
+            .bodies_in_sector(sector_id)
+            .into_iter()
+            .map(|body| (body.id, body))
+            .collect();
+        let stations = galaxy
+            .stations_in_sector(sector_id)
+            .into_iter()
+            .map(|station| (station.id, station))
+            .collect();
+
+        Self {
+            galaxy,
+            gates,
+            bodies,
+            stations,
+        }
+    }
 }
