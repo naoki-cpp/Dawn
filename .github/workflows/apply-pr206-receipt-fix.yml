@@ -1,0 +1,45 @@
+name: Apply PR 206 receipt fix
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: recoverable-sector-transit
+          persist-credentials: false
+
+      - name: Apply code changes
+        run: python3 scripts/apply_pr206_receipt_fix.py
+
+      - name: Format
+        run: cargo fmt --all
+
+      - name: Check workspace
+        run: cargo check --workspace --all-targets
+
+      - name: Run transit tests
+        run: cargo test -p dawn-sector transit --lib
+
+      - name: Commit and push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -f scripts/apply_pr206_receipt_fix.py
+          rm -f .github/workflows/apply-pr206-receipt-fix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(sector): persist destination transit receipts"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:recoverable-sector-transit
