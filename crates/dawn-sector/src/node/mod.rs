@@ -373,8 +373,8 @@ impl<S: EventStore> SimulationNode<S> {
         Ok(())
     }
 
-    /// Replace the navigation topology.  Updates `jump_gates` and
-    /// `celestial_bodies` for this node's Sector immediately.
+    /// Replace the navigation topology. Rebuilds this Sector's gates, bodies,
+    /// stations, and the shared body-anchor table from the same `Galaxy` value.
     pub fn set_galaxy(&mut self, galaxy: Arc<crate::galaxy::Galaxy>) {
         let anchor_table = crate::anchor::AnchorTable::from_galaxy(&galaxy);
         let sector_map = SectorMap::from_galaxy(self.sector_id, galaxy);
