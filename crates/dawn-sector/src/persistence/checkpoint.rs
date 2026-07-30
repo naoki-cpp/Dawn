@@ -1,22 +1,14 @@
 //! Snapshot-cadence orchestration (ADR-0017 8A-7).
 //!
 //! [`SimulationNode::checkpoint`](crate::node::SimulationNode::checkpoint) is the
-//! mechanism: snapshot -> persist -> compact. This module is the *policy* around
-//! it: a [`CheckpointScheduler`] that fires a checkpoint every `interval_ticks`
-//! logical ticks.
-//!
-//! The cadence is driven by the **logical tick** (INV-005 / FBD-003), never by
-//! wall-clock time, so checkpointing is deterministic and replay-stable. The
-//! scheduler holds no state beyond the last checkpoint tick and its paths; it
-//! does no work until [`CheckpointScheduler::maybe_checkpoint`] is called with a
-//! node whose tick has advanced past the interval.
+//! mechanism: snapshot -> persist -> compact. This module is the cadence adapter;
+//! Sector Transit recovery policy, including whether compaction is currently
+//! safe, lives in `transit::pipeline`.
 
-use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
 
-use dawn_core::{DomainEvent, ShipId};
-use dawn_event_store::{store::EventStore, FileEventStore};
+use dawn_event_store::FileEventStore;
 
 use super::snapshot::StateSnapshot;
 use crate::node::SimulationNode;
@@ -40,26 +32,6 @@ pub struct CheckpointScheduler {
     last_checkpoint_tick: u64,
 }
 
-fn has_pending_outgoing_transit(node: &SimulationNode<FileEventStore>) -> bool {
-    let sector_id = node.sector_id();
-    let mut pending = HashSet::<ShipId>::new();
-    for record in node.event_store().iter_from(0) {
-        match &record.event {
-            DomainEvent::SectorTransitRequested(event) if event.from == sector_id => {
-                pending.insert(event.ship_id);
-            }
-            DomainEvent::SectorTransitCompleted(event) if event.from == sector_id => {
-                pending.remove(&event.ship_id);
-            }
-            DomainEvent::SectorTransitAborted(event) if event.from == sector_id => {
-                pending.remove(&event.ship_id);
-            }
-            _ => {}
-        }
-    }
-    !pending.is_empty()
-}
-
 impl CheckpointScheduler {
     pub fn new(config: CheckpointConfig) -> Self {
         Self {
@@ -69,12 +41,8 @@ impl CheckpointScheduler {
     }
 
     /// Checkpoint the node iff at least `interval_ticks` logical ticks have
-    /// elapsed since the last checkpoint.
-    ///
-    /// An unresolved outgoing Sector Transit is a durable outbox entry. Its
-    /// `SectorTransitRequested` event must stay in the hot log until an Ack
-    /// records `SectorTransitCompleted`; otherwise compaction could erase the
-    /// only information needed to retry after restart.
+    /// elapsed since the last checkpoint and Transit recovery says compaction
+    /// cannot erase an unresolved durable outbox request.
     pub fn maybe_checkpoint(
         &mut self,
         node: &mut SimulationNode<FileEventStore>,
@@ -83,7 +51,7 @@ impl CheckpointScheduler {
         if tick.saturating_sub(self.last_checkpoint_tick) < self.config.interval_ticks {
             return Ok(None);
         }
-        if has_pending_outgoing_transit(node) {
+        if crate::transit::pipeline::has_pending_outgoing_transit(node) {
             return Ok(None);
         }
         let snapshot = node.checkpoint(&self.config.snapshot_path, &self.config.cold_path)?;
@@ -95,8 +63,8 @@ impl CheckpointScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::SimulationNode;
     use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipTypeId, Velocity};
+    use dawn_event_store::FileEventStore;
 
     fn file_node(dir: &std::path::Path) -> SimulationNode<FileEventStore> {
         let store = FileEventStore::open(dir.join("events.log")).unwrap();
@@ -150,7 +118,6 @@ mod tests {
 
         let snap = snapshot.expect("a checkpoint fires at tick 5");
         assert_eq!(snap.tick.value(), 5);
-        // Snapshot is persisted and the hot log is compacted behind it.
         assert!(dir.path().join("snapshot.bin").exists());
         assert_eq!(node.event_store().base_index(), snap.log_index);
         assert_eq!(node.event_store().records_on_disk(), 0);
@@ -167,7 +134,6 @@ mod tests {
         );
         let mut sched = CheckpointScheduler::new(cfg(dir.path()));
 
-        // Run past one checkpoint, then a few more ticks (the post-snapshot tail).
         for _ in 0..5 {
             node.tick();
             sched.maybe_checkpoint(&mut node).unwrap();
@@ -177,7 +143,6 @@ mod tests {
         }
         let live_final = postcard::to_stdvec(&node.take_snapshot()).unwrap();
 
-        // Recover from the persisted snapshot + the compacted hot log's tail.
         let snap = StateSnapshot::load(dir.path().join("snapshot.bin")).unwrap();
         let store = FileEventStore::open(dir.path().join("events.log")).unwrap();
         assert!(
@@ -186,8 +151,6 @@ mod tests {
         );
         let mut restored = SimulationNode::restore_from(store, &snap, &[], &[]);
         assert_eq!(restored.current_tick(), snap.tick);
-        // Re-run the same post-snapshot tail. Transient state (position) is not
-        // event-sourced, so it is recomputed by stepping the sim forward.
         for _ in 0..4 {
             restored.tick();
         }
