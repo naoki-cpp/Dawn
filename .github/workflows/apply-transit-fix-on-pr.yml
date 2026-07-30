@@ -109,6 +109,7 @@ jobs:
           )
           pipeline_path.write_text(pipeline)
           PY
+          python3 .github/scripts/fix_transit_test_calls.py
           cargo fmt --all
           cargo check --workspace
           cargo test -p dawn-sector repeated_same_route_replay_preserves_each_attempt_receipt_after_checkpoint
