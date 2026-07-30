@@ -51,7 +51,13 @@ jobs:
               p = Path(path)
               text = p.read_text()
               replacement = textwrap.dedent(replacement)
-              new, count = re.subn(pattern, lambda _: replacement, text, count=1, flags=re.S)
+              new, count = re.subn(
+                  pattern,
+                  lambda match: match.expand(replacement),
+                  text,
+                  count=1,
+                  flags=re.S,
+              )
               if count != 1:
                   raise SystemExit(f"{path}: expected one regex match, found {count}")
               p.write_text(new)
