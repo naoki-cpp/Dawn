@@ -15,9 +15,9 @@ date     : 2026-07-30（Transit state mutation deepening後の再計測）
 
 ## 現状評価
 
-**総合: B+。** crate DAGとdeep module境界は健全。直近では、protocol shim削除（#183）、
-操船step decisionのpure core化（#190）、snapshot read/write seam（#194）、
-ClientCommand入口でのactive ship一回解決（#196 / ADR-0047）が完了した。
+**総合: B+。** crate DAGとdeep module境界は健全。直近では、live/replayのShip materialization、
+Station runtime apply、SectorMap projection、client read APIのtyped化、
+Transit state mutation deepeningが完了した。
 
 2026-07-30の調査では、行数よりも**同じ状態・projection・authorityの二重所有**を優先課題とした。
 Transitについては、Raftの回復判断とShipの状態変更を別moduleに分け、後者を`node::transit`へ集約した。

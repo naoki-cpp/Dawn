@@ -7,7 +7,7 @@ An event-sourced, distributed space-combat sandbox: a Rust simulation server wit
 ## Layout
 - **Server** — Cargo workspace in `crates/`: `dawn-core` (domain types/events), `dawn-ecs` (systems), `dawn-sector` (game logic), `dawn-simulation` / `dawn-sector-node` (server binaries), `dawn-consensus` (Raft), `dawn-replication` (log gossip).
 - **Client** — Godot 4 / GDScript in `client/`.
-- **Docs** — decisions in `docs/adr/`; contributor entry point is `AI_AGENT_BRIEF.md`.
+- **Docs** — design decisions in `docs/adr/`, architecture in `docs/architecture/`, and development process in `docs/process/`.
 
 ## Build & run
 ```bash
