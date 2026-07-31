@@ -1,7 +1,7 @@
 use crate::json_variant::{externally_tagged_to_dict, json_value_to_variant, Dict};
 use dawn_wire::{
-    ClientCommandWire, ClientMessage, HelloMessage, MarketCommandWire, PosWire, ResumeIdentity,
-    WarpTargetWire,
+    ClientCommandWire, ClientMessage, HelloMessage, MarketCommandWire, NavigationTargetWire,
+    PosWire, ResumeIdentity, WarpTargetWire,
 };
 use godot::prelude::*;
 
@@ -77,9 +77,9 @@ fn non_negative_or_none(value: i64) -> Option<u64> {
 /// should hand to `WebSocketPeer.send` with `WRITE_MODE_BINARY`.
 ///
 /// Commands whose wire shape carries sentinel values (e.g. `<= 0.0` meaning
-/// "server default", ADR-0031) or an exclusive-selection field pair (e.g.
-/// `gate_id` xor `target_id`) get a dedicated method, since that logic is
-/// domain semantics, not just field copying. Everything else -- a flat
+/// "server default", ADR-0031) or a tagged navigation target get a dedicated
+/// method, since that logic is domain semantics, not just field copying.
+/// Everything else -- a flat
 /// struct of scalar fields with no such semantics -- goes through the
 /// schema-driven `build` method instead, so adding one of those needs no
 /// new method here (only a new `dawn-wire` variant and dispatch arm).
@@ -115,32 +115,28 @@ impl ClientCommand {
     #[func]
     fn approach_command(&self, target_id: i64) -> PackedByteArray {
         command_wire_bytes(ClientCommandWire::ApproachCommand {
-            gate_id: None,
-            target_id: Some(target_id as u64),
+            target: NavigationTargetWire::Ship(target_id as u64),
         })
     }
 
     #[func]
     fn approach_gate_command(&self, gate_id: i64) -> PackedByteArray {
         command_wire_bytes(ClientCommandWire::ApproachCommand {
-            gate_id: Some(gate_id as u32),
-            target_id: None,
+            target: NavigationTargetWire::Gate(gate_id as u32),
         })
     }
 
     #[func]
     fn warp_command(&self, gate_id: i64) -> PackedByteArray {
         command_wire_bytes(ClientCommandWire::WarpCommand {
-            target: Some(WarpTargetWire::Gate(gate_id as u32)),
-            gate_id: None,
+            target: WarpTargetWire::Gate(gate_id as u32),
         })
     }
 
     #[func]
     fn warp_to_body_command(&self, body_id: i64) -> PackedByteArray {
         command_wire_bytes(ClientCommandWire::WarpCommand {
-            target: Some(WarpTargetWire::Body(body_id as u32)),
-            gate_id: None,
+            target: WarpTargetWire::Body(body_id as u32),
         })
     }
 
@@ -149,8 +145,7 @@ impl ClientCommand {
     #[func]
     fn orbit_command(&self, target_id: i64, range_m: f64) -> PackedByteArray {
         command_wire_bytes(ClientCommandWire::OrbitCommand {
-            gate_id: None,
-            target_id: Some(target_id as u64),
+            target: NavigationTargetWire::Ship(target_id as u64),
             radius: positive_or_none(range_m),
         })
     }
@@ -158,8 +153,7 @@ impl ClientCommand {
     #[func]
     fn orbit_gate_command(&self, gate_id: i64, range_m: f64) -> PackedByteArray {
         command_wire_bytes(ClientCommandWire::OrbitCommand {
-            gate_id: Some(gate_id as u32),
-            target_id: None,
+            target: NavigationTargetWire::Gate(gate_id as u32),
             radius: positive_or_none(range_m),
         })
     }
@@ -167,8 +161,7 @@ impl ClientCommand {
     #[func]
     fn keep_at_range_command(&self, target_id: i64, range_m: f64) -> PackedByteArray {
         command_wire_bytes(ClientCommandWire::KeepAtRangeCommand {
-            gate_id: None,
-            target_id: Some(target_id as u64),
+            target: NavigationTargetWire::Ship(target_id as u64),
             range: positive_or_none(range_m),
         })
     }
@@ -176,14 +169,13 @@ impl ClientCommand {
     #[func]
     fn keep_at_range_gate_command(&self, gate_id: i64, range_m: f64) -> PackedByteArray {
         command_wire_bytes(ClientCommandWire::KeepAtRangeCommand {
-            gate_id: Some(gate_id as u32),
-            target_id: None,
+            target: NavigationTargetWire::Gate(gate_id as u32),
             range: positive_or_none(range_m),
         })
     }
 
     /// Schema-driven builder for commands whose wire shape is a flat
-    /// scalar-fields-only struct (no sentinel/exclusive-selection semantics --
+    /// scalar-fields-only struct (no sentinel/tagged-target semantics --
     /// see the dedicated methods above and below for those). `kind` is the
     /// `ClientCommandWire` variant name (e.g. `"DockCommand"`); `fields`
     /// supplies that variant's fields by name. Validates by deserializing

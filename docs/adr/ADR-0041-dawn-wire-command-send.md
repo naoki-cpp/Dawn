@@ -123,7 +123,7 @@ DomainEvent 受信（`connection.gd::_handle_message`のDictionaryディスパ�
 の重複が指摘された。
 
 24メソッドのうち、sentinel値（`positive_or_none`/`non_negative_or_none`,
-ADR-0031/ADR-0035）や排他選択フィールド（`gate_id` xor `target_id`等）といった
+ADR-0031/ADR-0035）やタグ付きナビゲーション target の構築といった
 ドメイン意味論を持つ12個（+`move_command`、呼び出し頻度が高いため専用のまま）は
 専用メソッドとして維持し、残り14個（フラットなスカラーフィールドのみの単純な
 詰め替え）を `ClientCommand.build(kind: String, fields: Dictionary) -> String`
@@ -137,6 +137,11 @@ ADR-0031/ADR-0035）や排他選択フィールド（`gate_id` xor `target_id`�
 `Dictionary`→JSON変換はスカラー値（Int/Float/String/Bool）のみ対応し、ネストした
 `Dictionary`/`Array`は`push_error`で明示的に弾く（今日の14コマンドは全てスカラー
 のみのため、ネスト対応は必要になった時点で追加する）。
+
+その後、Issue #222 で `gate_id` xor `target_id` の排他フィールドと
+Warp の legacy `gate_id` fallback は削除され、必須のタグ付き target enum に
+置き換えられた。専用メソッドを維持する現在の理由は、この target enum を
+型安全に構築するためである。
 
 この結果、今後「単純な」新規コマンドを追加する場合は `dawn-wire` のバリアント追加
 と `node/commands.rs` のdispatch arm追加の2ファイルで済み、gdext側の編集は不要になる。

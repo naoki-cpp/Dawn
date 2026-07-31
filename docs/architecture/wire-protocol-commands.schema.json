@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "ClientCommandWire",
-  "description": "Every message a client can send to the server, as the postcard-encoded\nbinary `ClientMessage::Command` envelope (ADR-0042).\n\nThis enum is the schema-of-record for the client -> server half of the\nwire protocol (see [`crate::EventWire`] for the server -> client half). It\nintentionally mirrors the wire format exactly, including the two\nbackward-compatible quirks below -- it does not enforce the \"exactly one\nof these two fields\" business rules those quirks involve; that\nvalidation still happens in [`client_command_from_wire`].\n\n- `WarpCommand` accepts either `target` (current) or `gate_id` (legacy);\n  `target` wins if both are present.\n- `ApproachCommand` / `OrbitCommand` / `KeepAtRangeCommand` select their\n  target with either `gate_id` (a Jump Gate) or `target_id` (a Ship);\n  `gate_id` wins if both are present.\n\nFlight/steering/module/Undock variants carry no `ship_id` (ADR-0037): the\nserver always resolves them against the caller's active ship, so there is\nno wire-representable way to name a ship the player isn't currently\nflying. Station inventory-management variants (Fit/Unfit/Dock/\nBuildPackagedShip/DisassembleShip) still carry an explicit `ship_id`,\nsince they may target any owned docked ship, not just the active one.\n\nDerives both `Serialize` and `Deserialize` (ADR-0041): the server\ndecodes a postcard-received `ClientMessage::Command` into this enum\n([`client_command_from_wire`]); the Godot client (`dawn-client-gdext`)\nconstructs a variant directly from typed arguments and encodes it back\nout, replacing the old GDScript pattern of hand-building a `Dictionary`\nthat had to match this schema by eye.\n\nExternally tagged (serde's default enum representation, `{\"VariantName\":\n{...fields}}`), not `#[serde(tag = \"type\")]` -- `postcard` (the binary\nwire format since ADR-0042) cannot deserialize an internally tagged enum\nat all (it has no `deserialize_any`, which internal tagging requires).\nJSON-text serialization of this type is not the runtime wire format (see\n[`postcard::to_stdvec`]/[`postcard::from_bytes`] via the `ClientMessage`\nenvelope); `serde_json` is used only by [`client_command_wire_json_schema`]\n(doc generation) and this crate's own unit tests.",
+  "description": "Every message a client can send to the server, as the postcard-encoded\nbinary `ClientMessage::Command` envelope (ADR-0042).\n\nThis enum is the schema-of-record for the client -> server half of the\nwire protocol (see [`crate::EventWire`] for the server -> client half).\nNavigation commands use required tagged target enums, so invalid states\nsuch as a missing target or simultaneous Ship/Gate targets cannot be\nrepresented after successful decoding.\n\nFlight/steering/module/Undock variants carry no `ship_id` (ADR-0037): the\nserver always resolves them against the caller's active ship, so there is\nno wire-representable way to name a ship the player isn't currently\nflying. Station inventory-management variants (Fit/Unfit/Dock/\nBuildPackagedShip/DisassembleShip) still carry an explicit `ship_id`,\nsince they may target any owned docked ship, not just the active one.\n\nDerives both `Serialize` and `Deserialize` (ADR-0041): the server\ndecodes a postcard-received `ClientMessage::Command` into this enum\n([`client_command_from_wire`]); the Godot client (`dawn-client-gdext`)\nconstructs a variant directly from typed arguments and encodes it back\nout, replacing the old GDScript pattern of hand-building a `Dictionary`\nthat had to match this schema by eye.\n\nExternally tagged (serde's default enum representation, `{\"VariantName\":\n{...fields}}`), not `#[serde(tag = \"type\")]` -- `postcard` (the binary\nwire format since ADR-0042) cannot deserialize an internally tagged enum\nat all (it has no `deserialize_any`, which internal tagging requires).\nJSON-text serialization of this type is not the runtime wire format (see\n[`postcard::to_stdvec`]/[`postcard::from_bytes`] via the `ClientMessage`\nenvelope); `serde_json` is used only by [`client_command_wire_json_schema`]\n(doc generation) and this crate's own unit tests.",
   "oneOf": [
     {
       "type": "object",
@@ -174,23 +174,13 @@
         "ApproachCommand": {
           "type": "object",
           "properties": {
-            "gate_id": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "uint32",
-              "minimum": 0
-            },
-            "target_id": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "uint64",
-              "minimum": 0
+            "target": {
+              "$ref": "#/$defs/NavigationTargetWire"
             }
-          }
+          },
+          "required": [
+            "target"
+          ]
         }
       },
       "additionalProperties": false,
@@ -204,26 +194,13 @@
         "WarpCommand": {
           "type": "object",
           "properties": {
-            "gate_id": {
-              "description": "Legacy form: `{\"gate_id\": N}` instead of `{\"target\": {\"Gate\": N}}`.",
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "uint32",
-              "minimum": 0
-            },
             "target": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/WarpTargetWire"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+              "$ref": "#/$defs/WarpTargetWire"
             }
-          }
+          },
+          "required": [
+            "target"
+          ]
         }
       },
       "additionalProperties": false,
@@ -237,14 +214,6 @@
         "OrbitCommand": {
           "type": "object",
           "properties": {
-            "gate_id": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "uint32",
-              "minimum": 0
-            },
             "radius": {
               "type": [
                 "number",
@@ -252,15 +221,13 @@
               ],
               "format": "double"
             },
-            "target_id": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "uint64",
-              "minimum": 0
+            "target": {
+              "$ref": "#/$defs/NavigationTargetWire"
             }
-          }
+          },
+          "required": [
+            "target"
+          ]
         }
       },
       "additionalProperties": false,
@@ -274,14 +241,6 @@
         "KeepAtRangeCommand": {
           "type": "object",
           "properties": {
-            "gate_id": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "uint32",
-              "minimum": 0
-            },
             "range": {
               "type": [
                 "number",
@@ -289,15 +248,13 @@
               ],
               "format": "double"
             },
-            "target_id": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "uint64",
-              "minimum": 0
+            "target": {
+              "$ref": "#/$defs/NavigationTargetWire"
             }
-          }
+          },
+          "required": [
+            "target"
+          ]
         }
       },
       "additionalProperties": false,
@@ -619,6 +576,39 @@
     }
   ],
   "$defs": {
+    "NavigationTargetWire": {
+      "description": "A `{\"Ship\": N}` or `{\"Gate\": N}` navigation target for Approach,\nOrbit, and KeepAtRange (externally tagged: the variant name is the JSON\nobject's only key).",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "Ship": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Ship"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Gate": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Gate"
+          ]
+        }
+      ]
+    },
     "PosWire": {
       "type": "object",
       "properties": {
@@ -642,7 +632,7 @@
       ]
     },
     "WarpTargetWire": {
-      "description": "A `{\"Gate\": N}` or `{\"Body\": N}` warp destination, as sent by\n`WarpCommand`'s current wire format (externally tagged: the variant name\nis the JSON object's only key).",
+      "description": "A `{\"Gate\": N}` or `{\"Body\": N}` warp destination, as sent by\n`WarpCommand` (externally tagged: the variant name is the JSON object's\nonly key).",
       "oneOf": [
         {
           "type": "object",

@@ -45,11 +45,27 @@ func test_activate_module_command_includes_target_ship_id_when_present() -> void
 	assert_int(int(d["target_ship_id"])).is_equal(9)
 
 
+func test_approach_command_wraps_the_ship_id_in_the_target_tag() -> void:
+	var bytes: PackedByteArray = _cmd.approach_command(7)
+	var d: Dictionary = _decoder.decode(bytes)
+	assert_str(d["type"]).is_equal("ApproachCommand")
+	var target: Dictionary = d["target"]
+	assert_int(int(target["Ship"])).is_equal(7)
+
+
+func test_approach_gate_command_wraps_the_gate_id_in_the_target_tag() -> void:
+	var bytes: PackedByteArray = _cmd.approach_gate_command(4)
+	var d: Dictionary = _decoder.decode(bytes)
+	var target: Dictionary = d["target"]
+	assert_int(int(target["Gate"])).is_equal(4)
+
+
 func test_orbit_command_omits_radius_when_not_positive() -> void:
 	var bytes: PackedByteArray = _cmd.orbit_command(7, -1.0)
 	var d: Dictionary = _decoder.decode(bytes)
 	assert_str(d["type"]).is_equal("OrbitCommand")
-	assert_int(int(d["target_id"])).is_equal(7)
+	var target: Dictionary = d["target"]
+	assert_int(int(target["Ship"])).is_equal(7)
 	assert_object(d["radius"]).is_null()
 
 
@@ -59,12 +75,12 @@ func test_orbit_command_includes_radius_when_positive() -> void:
 	assert_float(d["radius"]).is_equal_approx(2500.0, 0.0001)
 
 
-func test_keep_at_range_gate_command_uses_gate_id_not_target_id() -> void:
+func test_keep_at_range_gate_command_uses_a_tagged_gate_target() -> void:
 	var bytes: PackedByteArray = _cmd.keep_at_range_gate_command(4, 1000.0)
 	var d: Dictionary = _decoder.decode(bytes)
 	assert_str(d["type"]).is_equal("KeepAtRangeCommand")
-	assert_int(int(d["gate_id"])).is_equal(4)
-	assert_object(d["target_id"]).is_null()
+	var target: Dictionary = d["target"]
+	assert_int(int(target["Gate"])).is_equal(4)
 	assert_float(d["range"]).is_equal_approx(1000.0, 0.0001)
 
 

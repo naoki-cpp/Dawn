@@ -105,8 +105,10 @@ Movement System から自然に発行される。**Approach 専用のイベン�
 ### 6. 対象の選択はクライアント側で行う
 
 ロックオンとは独立に、プレイヤーが**クリックで選択した船またはゲート**を対象にする。
-クライアントは選択中の対象（船 ID / ゲート ID・排他）を保持し、A キーで
-`ApproachCommand` を送る（船は `target_id`、ゲートは `gate_id` を JSON に含める）。
+クライアントは選択中の対象を保持し、A キーで
+`ClientMessage::Command(ClientCommandWire::ApproachCommand { target })` を
+postcard エンコードした binary frame として送る。`target` は船なら
+`NavigationTargetWire::Ship`、ゲートなら `NavigationTargetWire::Gate` である。
 サーバーは所有権（`ship_owners`）を確認してから `ApproachComp` を付与する。
 
 ---
