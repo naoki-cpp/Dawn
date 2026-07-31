@@ -133,6 +133,7 @@ pub fn runtime_catalog() -> Result<&'static GameDataCatalog, &'static CatalogErr
         .as_ref()
 }
 
+#[cfg(test)]
 impl GameDataCatalog {
     pub(crate) fn load_repository_data() -> Result<Self, CatalogError> {
         Self::load_runtime()
