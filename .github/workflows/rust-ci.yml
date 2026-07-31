@@ -200,30 +200,6 @@ jobs:
       - name: Run GdUnit4 tests
         run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" bash scripts/setup-godot.sh --run-tests
 
-  align-transit-docs:
-    name: Align Transit documentation
-    if: github.event_name == 'pull_request' && github.head_ref == 'agent/align-documentation-after-transit'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: agent/align-documentation-after-transit
-          fetch-depth: 0
-      - name: Apply documentation alignment
-        run: python3 .github/scripts/align_transit_docs.py
-      - name: Commit documentation alignment
-        run: |
-          if git diff --quiet; then
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md crates/dawn-sector/src/node/transit.rs docs/architecture/architecture-review/server.md docs/architecture/architecture-review/server-pending.md
-          git commit -m "docs: align Transit architecture records"
-          git push origin HEAD:agent/align-documentation-after-transit
-
   # Single required-status-check target for branch protection: succeeds only
   # if every job above succeeded, so protection rules don't need to list
   # lint/test/doc individually and stay correct as jobs are split further.
