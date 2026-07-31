@@ -1,7 +1,27 @@
 //! Receiver side of log-shipping gossip (ADR-0021 decision 1, 8D-2b).
 //!
-//! [`ReplicaSet`] holds foreign Sector recovery data only. It never applies
-//! replicated events or snapshots to the live local world.
+//! [`ReplicaSet`] is the consumer half of the gossip the owner broadcasts via
+//! [`crate::ReplicationTransport::broadcast`]. For each *foreign* Sector it
+//! holds an ordered, gap-checked, idempotent recovery copy of that Sector's
+//! append-only event log, advancing a per-Sector cursor as contiguous batches
+//! arrive.
+//!
+//! ## Scope
+//!
+//! This realizes the safe, append-only core of ADR-0021: "ship the owner
+//! node's append-only log to other nodes and apply it in logical-tick order".
+//! When the requested prefix has been compacted, an opaque recovery snapshot
+//! replaces that prefix and the retained event suffix resumes at the snapshot
+//! log index.
+//!
+//! It deliberately does **not**:
+//! - apply foreign events or snapshots into a live `SimulationNode` world —
+//!   those records carry another Sector's state and would corrupt the owner's
+//!   AoI and collision state, and
+//! - perform failover takeover (promoting a replica to owner).
+//!
+//! Both are separate features that need their own design. Holding the
+//! authoritative snapshot plus ordered suffix is the prerequisite for either.
 
 use crate::{AntiEntropy, BatchApplyPlan, LogBatch, MissingLogRequest};
 use dawn_core::{DomainEvent, SectorId};
@@ -38,29 +58,43 @@ pub enum SnapshotInstall {
 /// Outcome of ingesting one [`LogBatch`] into a [`ReplicaSet`].
 #[derive(Debug, PartialEq)]
 pub enum Ingest {
+    /// The contiguous suffix was appended to the Sector's recovery log.
     Applied {
         sector_id: SectorId,
+        /// Number of events newly appended (may be fewer than the batch when
+        /// the batch overlapped already-held entries).
         applied: usize,
+        /// The receiver's cursor after applying — the next index it expects.
         next_index: u64,
     },
+    /// The batch was entirely below the cursor; dropped idempotently.
     Duplicate,
+    /// The batch starts ahead of the cursor, leaving a hole. The replica is
+    /// unchanged; the caller should send `request` to the owner and may need a
+    /// snapshot when the requested prefix has been compacted.
     Gap(MissingLogRequest),
 }
 
 /// One foreign Sector's recovery replica.
 #[derive(Debug, Default)]
 struct SectorReplica {
-    /// First index represented by `events`. Zero before snapshot fallback.
+    /// First global log index represented by `events`. Zero before snapshot
+    /// fallback; equal to the installed snapshot boundary afterwards.
     base_index: u64,
+    /// Next global log index this replica expects.
     next_index: u64,
-    /// Retained suffix after `base_index`; a snapshot covers the earlier prefix.
+    /// Ordered retained suffix after `base_index`.
     events: Vec<DomainEvent>,
+    /// Opaque snapshot covering all indices below `base_index`.
     snapshot: Option<ReplicaSnapshot>,
 }
 
-/// Gap-checked, idempotent recovery replicas for foreign Sectors.
+/// Holds a gap-checked, idempotent recovery replica of one or more foreign
+/// Sectors, fed by gossiped [`LogBatch`]es and optional snapshots.
 #[derive(Debug)]
 pub struct ReplicaSet {
+    /// Cap on the suffix length a gap request may ask for (passed through to
+    /// [`AntiEntropy::plan_batch`]).
     max_events: usize,
     sectors: HashMap<SectorId, SectorReplica>,
 }
@@ -73,8 +107,9 @@ impl ReplicaSet {
         }
     }
 
-    /// Ingest one batch. Duplicate and gapped batches leave recovery data
-    /// unchanged; overlapping batches append only their new suffix.
+    /// Ingest one gossiped batch, returning what happened. Duplicate and
+    /// gapped batches leave the replica unchanged; overlapping batches append
+    /// only their new suffix.
     pub fn ingest(&mut self, batch: &LogBatch) -> Ingest {
         let replica = self.sectors.entry(batch.sector_id).or_default();
         match AntiEntropy::plan_batch(replica.next_index, batch.sector_id, batch, self.max_events) {
@@ -124,15 +159,17 @@ impl ReplicaSet {
         self.sectors.get(&sector_id).map_or(0, |r| r.events.len())
     }
 
+    /// First global log index represented by [`Self::events`].
     pub fn base_index(&self, sector_id: SectorId) -> u64 {
         self.sectors.get(&sector_id).map_or(0, |r| r.base_index)
     }
 
+    /// The next global log index expected for `sector_id` (0 if never seen).
     pub fn next_index(&self, sector_id: SectorId) -> u64 {
         self.sectors.get(&sector_id).map_or(0, |r| r.next_index)
     }
 
-    /// Retained suffix events in global index order.
+    /// The retained suffix for `sector_id`, in global index order.
     pub fn events(&self, sector_id: SectorId) -> &[DomainEvent] {
         self.sectors
             .get(&sector_id)
@@ -171,27 +208,74 @@ mod tests {
     #[test]
     fn contiguous_batches_are_applied_in_order() {
         let mut set = ReplicaSet::new(128);
-        set.ingest(&batch(1, 0, 3));
-        set.ingest(&batch(1, 3, 2));
+
+        assert_eq!(
+            set.ingest(&batch(1, 0, 3)),
+            Ingest::Applied {
+                sector_id: SectorId(1),
+                applied: 3,
+                next_index: 3
+            },
+        );
+        assert_eq!(
+            set.ingest(&batch(1, 3, 2)),
+            Ingest::Applied {
+                sector_id: SectorId(1),
+                applied: 2,
+                next_index: 5
+            },
+        );
         assert_eq!(set.replicated_len(SectorId(1)), 5);
         assert_eq!(set.next_index(SectorId(1)), 5);
     }
 
     #[test]
-    fn stale_and_overlapping_batches_are_idempotent() {
+    fn a_fully_stale_batch_is_dropped_idempotently() {
+        let mut set = ReplicaSet::new(128);
+        set.ingest(&batch(1, 0, 5));
+
+        assert_eq!(set.ingest(&batch(1, 0, 3)), Ingest::Duplicate);
+        assert_eq!(
+            set.replicated_len(SectorId(1)),
+            5,
+            "duplicate must not grow the log"
+        );
+    }
+
+    #[test]
+    fn an_overlapping_batch_appends_only_the_new_suffix() {
         let mut set = ReplicaSet::new(128);
         set.ingest(&batch(1, 0, 3));
-        assert_eq!(set.ingest(&batch(1, 0, 3)), Ingest::Duplicate);
-        set.ingest(&batch(1, 2, 3));
+
+        // Indices 2,3,4 — index 2 already held, 3 and 4 are new.
+        assert_eq!(
+            set.ingest(&batch(1, 2, 3)),
+            Ingest::Applied {
+                sector_id: SectorId(1),
+                applied: 2,
+                next_index: 5
+            },
+        );
         assert_eq!(set.replicated_len(SectorId(1)), 5);
     }
 
     #[test]
-    fn a_gap_leaves_the_replica_unchanged() {
+    fn a_gap_leaves_the_replica_unchanged_and_requests_the_missing_suffix() {
         let mut set = ReplicaSet::new(64);
         set.ingest(&batch(1, 0, 2));
-        assert!(matches!(set.ingest(&batch(1, 4, 2)), Ingest::Gap(_)));
-        assert_eq!(set.replicated_len(SectorId(1)), 2);
+
+        // Cursor is at 2, but this batch starts at 4 → hole at 2,3.
+        match set.ingest(&batch(1, 4, 2)) {
+            Ingest::Gap(req) => {
+                assert_eq!(req, MissingLogRequest::new(SectorId(1), 2, 64));
+            }
+            other => panic!("expected Gap, got {other:?}"),
+        }
+        assert_eq!(
+            set.replicated_len(SectorId(1)),
+            2,
+            "gapped batch must not be applied"
+        );
     }
 
     #[test]
@@ -223,8 +307,13 @@ mod tests {
         let mut set = ReplicaSet::new(128);
         set.ingest(&batch(1, 0, 3));
         set.ingest(&batch(2, 0, 1));
-        assert_eq!(set.next_index(SectorId(1)), 3);
-        assert_eq!(set.next_index(SectorId(2)), 1);
-        assert_eq!(set.next_index(SectorId(99)), 0);
+
+        assert_eq!(set.replicated_len(SectorId(1)), 3);
+        assert_eq!(set.replicated_len(SectorId(2)), 1);
+        assert_eq!(
+            set.next_index(SectorId(99)),
+            0,
+            "unseen sector reads as empty"
+        );
     }
 }
