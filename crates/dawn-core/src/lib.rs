@@ -52,7 +52,7 @@ pub use fitting::{
     ActivationMode, FittingSnapshot, ModuleDefinition, ModuleId, ModuleKind, SlotEntry, SlotKind,
     StatDelta,
 };
-pub use item::ItemId;
+pub use item::{ItemId, ItemIdentityError, ItemStorageColumns};
 pub use movement::{
     MovementInput, MovementProfile, MovementProfileError, MovementStep, BRAKE_STOP_EPSILON,
     MASS_SCALE,

@@ -7,36 +7,25 @@
 //! `SimulationNode` only keeps a bounded in-memory cache of recently-touched
 //! players on top of it (`node/station.rs`).
 //!
-//! Column encoding mirrors the flat `item_type`/`module_id`/`ship_type_id`
-//! shape `serialization.rs::item_id_to_row_json` already uses for the wire
-//! format, rather than inventing a new one -- easier to eyeball with a
-//! sqlite3 CLI, and one fewer encoding to keep in sync.
+//! The existing flat SQLite columns are preserved for on-disk compatibility,
+//! but their meaning is owned by `dawn_core::ItemId` rather than duplicated
+//! here.
 
 use std::collections::BTreeMap;
 
-use dawn_core::{ItemId, ModuleId, PlayerId, ShipTypeId, StationId};
+use dawn_core::{ItemId, PlayerId, StationId};
+#[cfg(test)]
+use dawn_core::{ModuleId, ShipTypeId};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::station::StationOperationRejection;
 
-/// One row's flat encoding: `(item_type, module_id, ship_type_id)`.
-/// `module_id`/`ship_type_id` are `0` for whichever doesn't apply, matching
-/// `item_id_to_row_json`'s convention.
 fn item_id_to_columns(item_id: ItemId) -> (&'static str, u32, u32) {
-    match item_id {
-        ItemId::Module(module_id) => ("Module", module_id.0, 0),
-        ItemId::PackagedShip(ship_type_id) => ("PackagedShip", 0, ship_type_id.0),
-        ItemId::ScrapMetal => ("ScrapMetal", 0, 0),
-    }
+    item_id.storage_columns().into_tuple()
 }
 
 fn columns_to_item_id(item_type: &str, module_id: u32, ship_type_id: u32) -> Option<ItemId> {
-    match item_type {
-        "Module" => Some(ItemId::Module(ModuleId(module_id))),
-        "PackagedShip" => Some(ItemId::PackagedShip(ShipTypeId(ship_type_id))),
-        "ScrapMetal" => Some(ItemId::ScrapMetal),
-        _ => None,
-    }
+    ItemId::from_storage_columns(item_type, module_id, ship_type_id).ok()
 }
 
 /// Durable Station inventory store for one Sector node. Wraps a single
@@ -225,10 +214,17 @@ mod tests {
         let db = StationInventoryDb::open_in_memory().unwrap();
         db.credit(PlayerId(1), StationId(7), ItemId::ScrapMetal, 5);
         db.credit(PlayerId(1), StationId(7), ItemId::Module(ModuleId(3)), 2);
+        db.credit(
+            PlayerId(1),
+            StationId(7),
+            ItemId::PackagedShip(ShipTypeId(7)),
+            1,
+        );
 
         let inv = db.get_all(PlayerId(1), StationId(7));
         assert_eq!(inv.get(&ItemId::ScrapMetal), Some(&5));
         assert_eq!(inv.get(&ItemId::Module(ModuleId(3))), Some(&2));
+        assert_eq!(inv.get(&ItemId::PackagedShip(ShipTypeId(7))), Some(&1));
     }
 
     #[test]

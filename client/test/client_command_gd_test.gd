@@ -104,14 +104,16 @@ func test_transfer_to_station_command_sets_to_station_direction() -> void:
 	var d: Dictionary = _decoder.decode(bytes)
 	assert_str(d["type"]).is_equal("TransferToStationCommand")
 	assert_str(d["direction"]).is_equal("ToStation")
-	assert_str(d["item_type"]).is_equal("ScrapMetal")
+	assert_str(d["item_id"]).is_equal("ScrapMetal")
 
 
 func test_transfer_from_station_command_sets_to_ship_direction() -> void:
 	var bytes: PackedByteArray = _cmd.transfer_from_station_command(1, 2, "Module", 5, 0)
 	var d: Dictionary = _decoder.decode(bytes)
 	assert_str(d["direction"]).is_equal("ToShip")
-	assert_int(int(d["module_id"])).is_equal(5)
+	var item_id: Dictionary = d["item_id"]
+	var module: Dictionary = item_id["Module"]
+	assert_int(int(module["module_id"])).is_equal(5)
 
 
 func test_undock_command_has_no_extra_fields() -> void:
@@ -143,8 +145,8 @@ func test_build_returns_empty_bytes_for_a_missing_required_field() -> void:
 	assert_bool(bytes.is_empty()).is_true()
 
 
-func test_market_build_uses_the_market_envelope_and_preserves_order_fields() -> void:
-	var bytes := _cmd.market_build("PlaceMarketOrderCommand", {
+func test_market_command_preserves_the_typed_item_identity() -> void:
+	var bytes := _cmd.market_place_order_command({
 		"ship_id": 42,
 		"item_type": "ScrapMetal",
 		"module_id": 0,
@@ -158,6 +160,7 @@ func test_market_build_uses_the_market_envelope_and_preserves_order_fields() -> 
 	assert_str(d["side"]).is_equal("Ask")
 	assert_int(int(d["ship_id"])).is_equal(42)
 	assert_int(int(d["quantity"])).is_equal(3)
+	assert_str(d["item_id"]).is_equal("ScrapMetal")
 
 
 ## Hello (ADR-0007/ADR-0042): fresh connections carry no resume identity;

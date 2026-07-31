@@ -6,6 +6,8 @@
 use dawn_core::{ItemId, PlayerId, ShipId};
 use dawn_ecs::components::{FittingComp, InventoryComp};
 use dawn_event_store::store::EventStore;
+#[cfg(test)]
+use dawn_wire::ItemWire;
 use dawn_wire::{
     ItemRowWire, ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, SlotCapacityWire,
 };
@@ -14,16 +16,14 @@ use super::SimulationNode;
 
 impl<S: EventStore> SimulationNode<S> {
     /// The one seam every `ItemRowWire` (ship cargo, station inventory) goes
-    /// through. `0`/`""` fill the fields a given `ItemId` variant doesn't
-    /// use. `None` if the registry backing `item_id` no longer has a
+    /// through. The Item variant remains typed; only presentation metadata is
+    /// added here. `None` if the registry backing `item_id` no longer has a
     /// definition for it (stale/renamed module or ship type).
     fn item_id_to_row_json(&self, item_id: ItemId, count: u64) -> Option<ItemRowWire> {
         match item_id {
             ItemId::Module(module_id) => {
                 self.module_registry.get(&module_id).map(|def| ItemRowWire {
-                    item_type: "Module".to_string(),
-                    module_id: def.id.0,
-                    ship_type_id: 0,
+                    item_id: item_id.into(),
                     name: def.name.clone(),
                     kind: format!("{:?}", def.kind),
                     slot: format!("{:?}", def.slot),
@@ -34,9 +34,7 @@ impl<S: EventStore> SimulationNode<S> {
                 self.ship_type_registry
                     .get(&ship_type_id)
                     .map(|def| ItemRowWire {
-                        item_type: "PackagedShip".to_string(),
-                        module_id: 0,
-                        ship_type_id: def.id.0,
+                        item_id: item_id.into(),
                         name: def.name.clone(),
                         kind: String::new(),
                         slot: String::new(),
@@ -44,9 +42,7 @@ impl<S: EventStore> SimulationNode<S> {
                     })
             }
             ItemId::ScrapMetal => Some(ItemRowWire {
-                item_type: "ScrapMetal".to_string(),
-                module_id: 0,
-                ship_type_id: 0,
+                item_id: item_id.into(),
                 name: "Scrap Metal".to_string(),
                 kind: String::new(),
                 slot: String::new(),
@@ -253,7 +249,7 @@ mod tests {
         let scrap = payload
             .inventory
             .iter()
-            .find(|row| row.item_type == "ScrapMetal")
+            .find(|row| row.item_id == ItemWire::ScrapMetal)
             .unwrap();
         assert_eq!(scrap.name, "Scrap Metal");
         assert_eq!(scrap.count, 3);
@@ -304,9 +300,13 @@ mod tests {
 
         let mut rows: Vec<&ItemRowWire> = payload.inventory.iter().collect();
         rows.extend(payload.station_inventory.iter());
-        assert!(rows.iter().any(|r| r.item_type == "Module"));
-        assert!(rows.iter().any(|r| r.item_type == "ScrapMetal"));
-        assert!(rows.iter().any(|r| r.item_type == "PackagedShip"));
+        assert!(rows
+            .iter()
+            .any(|r| matches!(r.item_id, ItemWire::Module { .. })));
+        assert!(rows.iter().any(|r| r.item_id == ItemWire::ScrapMetal));
+        assert!(rows
+            .iter()
+            .any(|r| matches!(r.item_id, ItemWire::PackagedShip { .. })));
     }
 
     #[test]
@@ -376,7 +376,7 @@ mod tests {
         let scrap = payload
             .station_inventory
             .iter()
-            .find(|row| row.item_type == "ScrapMetal")
+            .find(|row| row.item_id == ItemWire::ScrapMetal)
             .unwrap();
         assert_eq!(scrap.count, 5);
     }

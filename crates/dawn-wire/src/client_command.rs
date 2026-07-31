@@ -1,3 +1,4 @@
+use crate::ItemWire;
 use dawn_core::{
     ActivateModuleCommand, ApproachCommand, ApproachTarget, AttackCommand,
     BuildPackagedShipCommand, ClientCommand, DeactivateModuleCommand, DisassembleShipCommand,
@@ -210,17 +211,13 @@ pub enum ClientCommandWire {
     /// ship, like `UndockCommand`.
     DisembarkCommand {},
     /// Move the entire stack of an item between a docked ship's own cargo
-    /// and the caller's station inventory (ADR-0034 9B), in the direction
-    /// `direction` says (`"ToStation"` or `"ToShip"`). `item_type` is one of
-    /// `"Module"`, `"PackagedShip"`, `"ScrapMetal"` (matching `ItemRow`'s
-    /// wire shape) with `module_id`/`ship_type_id` populated only for the
-    /// variant that uses them (`0` otherwise).
+    /// and the caller's station inventory (ADR-0034 9B). `item_id` is a
+    /// variant-preserving identity, so unrelated ID combinations cannot be
+    /// represented on the wire.
     TransferToStationCommand {
         ship_id: u64,
         station_id: u32,
-        item_type: String,
-        module_id: u32,
-        ship_type_id: u32,
+        item_id: ItemWire,
         direction: String,
     },
 }
@@ -380,19 +377,10 @@ pub fn client_command_from_wire(wire: ClientCommandWire) -> Option<ClientCommand
         ClientCommandWire::TransferToStationCommand {
             ship_id,
             station_id,
-            item_type,
-            module_id,
-            ship_type_id,
+            item_id,
             direction,
         } => {
-            let item_id = match item_type.as_str() {
-                "Module" => dawn_core::ItemId::Module(ModuleId(module_id)),
-                "PackagedShip" => {
-                    dawn_core::ItemId::PackagedShip(dawn_core::ShipTypeId(ship_type_id))
-                }
-                "ScrapMetal" => dawn_core::ItemId::ScrapMetal,
-                _ => return None,
-            };
+            let item_id = dawn_core::ItemId::try_from(item_id).ok()?;
             let direction = match direction.as_str() {
                 "ToStation" => dawn_core::TransferDirection::ToStation,
                 "ToShip" => dawn_core::TransferDirection::ToShip,
@@ -656,7 +644,7 @@ mod tests {
 
     #[test]
     fn transfer_to_station_command_json_with_scrap_metal_is_parsed() {
-        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"ToStation"}}"#;
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_id":"ScrapMetal","direction":"ToStation"}}"#;
         let cmd = command_from_json(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::TransferToStation(c) => {
@@ -671,7 +659,7 @@ mod tests {
 
     #[test]
     fn transfer_to_station_command_json_with_module_is_parsed() {
-        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"Module","module_id":7,"ship_type_id":0,"direction":"ToStation"}}"#;
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_id":{"Module":{"module_id":7}},"direction":"ToStation"}}"#;
         let cmd = command_from_json(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::TransferToStation(c) => {
@@ -683,7 +671,7 @@ mod tests {
 
     #[test]
     fn transfer_to_station_command_json_with_to_ship_direction_is_parsed() {
-        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"ToShip"}}"#;
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_id":"ScrapMetal","direction":"ToShip"}}"#;
         let cmd = command_from_json(line).expect("must parse");
         match cmd {
             dawn_core::ClientCommand::TransferToStation(c) => {
@@ -694,14 +682,14 @@ mod tests {
     }
 
     #[test]
-    fn transfer_to_station_command_json_with_unknown_item_type_fails_to_parse() {
-        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"Bogus","module_id":0,"ship_type_id":0,"direction":"ToStation"}}"#;
+    fn transfer_to_station_command_json_with_invalid_item_identity_fails_to_convert() {
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_id":{"Module":{"module_id":0}},"direction":"ToStation"}}"#;
         assert!(command_from_json(line).is_none());
     }
 
     #[test]
     fn transfer_to_station_command_json_with_unknown_direction_fails_to_parse() {
-        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_type":"ScrapMetal","module_id":0,"ship_type_id":0,"direction":"Bogus"}}"#;
+        let line = r#"{"TransferToStationCommand":{"ship_id":42,"station_id":2,"item_id":"ScrapMetal","direction":"Bogus"}}"#;
         assert!(command_from_json(line).is_none());
     }
 

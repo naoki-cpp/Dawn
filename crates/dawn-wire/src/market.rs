@@ -1,3 +1,4 @@
+use crate::ItemWire;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -10,9 +11,7 @@ pub enum MarketCommandWire {
     /// Place a limit Bid or Ask for one item stack.
     PlaceMarketOrderCommand {
         ship_id: u64,
-        item_type: String,
-        module_id: u32,
-        ship_type_id: u32,
+        item_id: ItemWire,
         side: String,
         price: u64,
         quantity: u64,
@@ -25,9 +24,7 @@ pub enum MarketCommandWire {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MarketOrderWire {
     pub order_id: u64,
-    pub item_type: String,
-    pub module_id: u32,
-    pub ship_type_id: u32,
+    pub item_id: ItemWire,
     pub side: String,
     pub price: u64,
     pub quantity: u64,
@@ -52,31 +49,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn place_order_round_trips_through_json() {
-        let command = MarketCommandWire::PlaceMarketOrderCommand {
-            ship_id: 42,
-            item_type: "ScrapMetal".to_owned(),
-            module_id: 0,
-            ship_type_id: 0,
-            side: "Ask".to_owned(),
-            price: 100,
-            quantity: 3,
-        };
+    fn place_order_round_trips_every_item_variant_through_json() {
+        for item_id in [
+            ItemWire::Module { module_id: 3 },
+            ItemWire::PackagedShip { ship_type_id: 7 },
+            ItemWire::ScrapMetal,
+        ] {
+            let command = MarketCommandWire::PlaceMarketOrderCommand {
+                ship_id: 42,
+                item_id,
+                side: "Ask".to_owned(),
+                price: 100,
+                quantity: 3,
+            };
 
-        let json = serde_json::to_string(&command).expect("serialize");
-        let decoded: MarketCommandWire = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(decoded, command);
+            let json = serde_json::to_string(&command).expect("serialize");
+            let decoded: MarketCommandWire = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(decoded, command);
+        }
     }
 
     #[test]
-    fn snapshot_preserves_order_ownership_for_the_client() {
+    fn snapshot_preserves_item_variant_and_order_ownership_for_the_client() {
         let snapshot = MarketSnapshotWire {
             balance: 500,
             orders: vec![MarketOrderWire {
                 order_id: 7,
-                item_type: "Module".to_owned(),
-                module_id: 12,
-                ship_type_id: 0,
+                item_id: ItemWire::Module { module_id: 12 },
                 side: "Bid".to_owned(),
                 price: 25,
                 quantity: 2,

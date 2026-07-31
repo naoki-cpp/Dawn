@@ -42,9 +42,7 @@ impl TryFrom<ItemWire> for ItemId {
         match item {
             ItemWire::Module { module_id: 0 } => Err(ItemWireError::ZeroModuleId),
             ItemWire::Module { module_id } => Ok(Self::Module(ModuleId(module_id))),
-            ItemWire::PackagedShip { ship_type_id: 0 } => {
-                Err(ItemWireError::ZeroShipTypeId)
-            }
+            ItemWire::PackagedShip { ship_type_id: 0 } => Err(ItemWireError::ZeroShipTypeId),
             ItemWire::PackagedShip { ship_type_id } => {
                 Ok(Self::PackagedShip(ShipTypeId(ship_type_id)))
             }

@@ -1,29 +1,12 @@
-use dawn_client_core::{ItemRow as CoreItemRow, ItemType};
+use dawn_client_core::ItemRow as CoreItemRow;
+use dawn_core::ItemId;
 use godot::prelude::*;
 
-/// `ItemType`'s wire-string name, exactly matching what the server sends
-/// (`player_loadout_projection.rs::item_id_to_row_json`'s `"item_type"`
-/// field), spelled out explicitly rather than relying on `Debug`.
-fn item_type_str(item_type: ItemType) -> &'static str {
-    match item_type {
-        ItemType::Module => "Module",
-        ItemType::PackagedShip => "PackagedShip",
-        ItemType::ScrapMetal => "ScrapMetal",
-        ItemType::Unknown => "",
-    }
+fn item_type_str(item_id: ItemId) -> &'static str {
+    item_id.storage_columns().item_type()
 }
 
-pub(crate) fn parse_item_type(item_type: &str) -> ItemType {
-    match item_type {
-        "Module" => ItemType::Module,
-        "PackagedShip" => ItemType::PackagedShip,
-        "ScrapMetal" => ItemType::ScrapMetal,
-        _ => ItemType::Unknown,
-    }
-}
-
-/// Godot `Dictionary` value type used by `ItemRow::from_json` -- matches
-/// `loadout_gd::Dict`.
+/// Godot `Dictionary` value type used by `ItemRow::from_json`.
 type Dict = Dictionary<Variant, Variant>;
 
 const REQUIRED_KEYS: &[&str] = &[
@@ -36,10 +19,11 @@ const REQUIRED_KEYS: &[&str] = &[
     "count",
 ];
 
-/// GDScript-facing view of one row shared by `PlayerLoadout`'s `inventory`
-/// and `station_inventory` arrays (`dawn_client_core::ItemRow`). Field names
-/// mirror the old `item_row.gd` so `hud_manager.gd`'s dot-access reads
-/// (`item.item_type`, `item.slot`, ...) need no changes.
+/// GDScript-facing compatibility view of one typed client Item row.
+///
+/// Rust state keeps a canonical `ItemId`. The existing scalar properties are
+/// derived read projections so current HUD code can migrate independently;
+/// they are never used to reconstruct identity on the wire.
 #[derive(GodotClass)]
 #[class(no_init, base=RefCounted)]
 pub struct ItemRow {
@@ -62,9 +46,9 @@ pub struct ItemRow {
 impl ItemRow {
     pub(crate) fn wrap(row: CoreItemRow) -> Gd<Self> {
         Gd::from_init_fn(|_base| Self {
-            item_type: item_type_str(row.item_type).into(),
-            module_id: row.module_id as i64,
-            ship_type_id: row.ship_type_id as i64,
+            item_type: item_type_str(row.item_id).into(),
+            module_id: row.module_id() as i64,
+            ship_type_id: row.ship_type_id() as i64,
             name: (&row.name).into(),
             kind: (&row.kind).into(),
             slot: (&row.slot).into(),
@@ -75,11 +59,9 @@ impl ItemRow {
 
 #[godot_api]
 impl ItemRow {
-    /// Parses one item row out of a plain (non-wire-JSON) `Dictionary` --
-    /// used directly by `hud_surface_test.gd`, mirroring the old
-    /// `item_row.gd::from_json`. Returns `null` (after an error log) if a
-    /// required key is missing, same "fail loudly, drop the row" contract as
-    /// before.
+    /// Parses the legacy plain Dictionary fixture used by GdUnit tests. The
+    /// three identity fields are validated together before a typed ItemId is
+    /// created; contradictory combinations are rejected.
     #[func]
     fn from_json(src: Dict) -> Variant {
         for key in REQUIRED_KEYS {
@@ -101,10 +83,18 @@ impl ItemRow {
                 .unwrap_or(0)
         };
 
+        let item_type = get_gstring("item_type");
+        let Ok(item_id) = ItemId::from_storage_columns(
+            &item_type,
+            get_i64("module_id") as u32,
+            get_i64("ship_type_id") as u32,
+        ) else {
+            godot_error!("ItemRow.from_json: invalid Item identity");
+            return Variant::nil();
+        };
+
         let row = CoreItemRow {
-            item_type: parse_item_type(&get_gstring("item_type")),
-            module_id: get_i64("module_id") as u32,
-            ship_type_id: get_i64("ship_type_id") as u32,
+            item_id,
             name: get_gstring("name"),
             kind: get_gstring("kind"),
             slot: get_gstring("slot"),

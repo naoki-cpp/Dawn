@@ -8,7 +8,7 @@
 use dawn_core::{EntityId, ItemId, PlayerId, ShipId};
 use dawn_market::{MarketDb, MarketOrderView, OrderId, OrderSide};
 use dawn_sector::node::SimulationNode;
-use dawn_wire::{MarketCommandWire, MarketOrderWire, MarketSnapshotWire};
+use dawn_wire::{ItemWire, MarketCommandWire, MarketOrderWire, MarketSnapshotWire};
 
 use super::market_settlement::{MarketSettlement, ParsedOrder};
 
@@ -47,21 +47,11 @@ impl MarketRuntime {
             MarketCommandWire::RefreshMarketCommand {} => self.snapshot(player_id, ""),
             MarketCommandWire::PlaceMarketOrderCommand {
                 ship_id,
-                item_type,
-                module_id,
-                ship_type_id,
+                item_id,
                 side,
                 price,
                 quantity,
-            } => match parse_order(
-                ship_id,
-                &item_type,
-                module_id,
-                ship_type_id,
-                &side,
-                price,
-                quantity,
-            ) {
+            } => match parse_order(ship_id, item_id, &side, price, quantity) {
                 Some(order) => self.place_single(player_id, order, node),
                 None => self.snapshot(player_id, "Market order rejected"),
             },
@@ -88,21 +78,11 @@ impl MarketRuntime {
             MarketCommandWire::RefreshMarketCommand {} => self.snapshot(player_id, ""),
             MarketCommandWire::PlaceMarketOrderCommand {
                 ship_id,
-                item_type,
-                module_id,
-                ship_type_id,
+                item_id,
                 side,
                 price,
                 quantity,
-            } => match parse_order(
-                ship_id,
-                &item_type,
-                module_id,
-                ship_type_id,
-                &side,
-                price,
-                quantity,
-            ) {
+            } => match parse_order(ship_id, item_id, &side, price, quantity) {
                 Some(order) => self.place_cluster(player_id, order, nodes),
                 None => self.snapshot(player_id, "Market order rejected"),
             },
@@ -189,9 +169,7 @@ impl MarketRuntime {
 
 fn parse_order(
     raw_ship_id: u64,
-    item_type: &str,
-    module_id: u32,
-    ship_type_id: u32,
+    item_id: ItemWire,
     side: &str,
     price: u64,
     quantity: u64,
@@ -199,12 +177,7 @@ fn parse_order(
     if price == 0 || quantity == 0 || price.checked_mul(quantity).is_none() {
         return None;
     }
-    let item_id = match item_type {
-        "Module" => ItemId::Module(dawn_core::ModuleId(module_id)),
-        "PackagedShip" => ItemId::PackagedShip(dawn_core::ShipTypeId(ship_type_id)),
-        "ScrapMetal" => ItemId::ScrapMetal,
-        _ => return None,
-    };
+    let item_id = ItemId::try_from(item_id).ok()?;
     let order_side = match side {
         "Bid" => OrderSide::Bid,
         "Ask" => OrderSide::Ask,
@@ -224,17 +197,10 @@ fn order_id_from_wire(raw_order_id: u64) -> Option<OrderId> {
 }
 
 fn market_order_wire(order: MarketOrderView, player_id: PlayerId) -> Option<MarketOrderWire> {
-    let (item_type, module_id, ship_type_id) = match order.item_id {
-        ItemId::Module(module_id) => ("Module", module_id.0, 0),
-        ItemId::PackagedShip(ship_type_id) => ("PackagedShip", 0, ship_type_id.0),
-        ItemId::ScrapMetal => ("ScrapMetal", 0, 0),
-    };
     let order_id = u64::try_from(order.order_id.0).ok()?;
     Some(MarketOrderWire {
         order_id,
-        item_type: item_type.to_owned(),
-        module_id,
-        ship_type_id,
+        item_id: order.item_id.into(),
         side: match order.side {
             OrderSide::Bid => "Bid",
             OrderSide::Ask => "Ask",
@@ -252,10 +218,10 @@ mod tests {
 
     #[test]
     fn order_validation_rejects_zero_and_overflowing_values() {
-        assert!(parse_order(1, "ScrapMetal", 0, 0, "Ask", 0, 1).is_none());
-        assert!(parse_order(1, "ScrapMetal", 0, 0, "Ask", 1, 0).is_none());
-        assert!(parse_order(1, "ScrapMetal", 0, 0, "Ask", u64::MAX, 2).is_none());
-        assert!(parse_order(1, "Unknown", 0, 0, "Ask", 1, 1).is_none());
+        assert!(parse_order(1, ItemWire::ScrapMetal, "Ask", 0, 1).is_none());
+        assert!(parse_order(1, ItemWire::ScrapMetal, "Ask", 1, 0).is_none());
+        assert!(parse_order(1, ItemWire::ScrapMetal, "Ask", u64::MAX, 2).is_none());
+        assert!(parse_order(1, ItemWire::Module { module_id: 0 }, "Ask", 1, 1).is_none());
     }
 
     #[test]

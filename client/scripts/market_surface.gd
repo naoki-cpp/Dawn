@@ -258,10 +258,17 @@ func _render_orders() -> void:
 
 
 func _order_item_name(order: Dictionary) -> String:
-	match order.get("item_type", "") as String:
-		"Module": return "Module #%d" % (order.get("module_id", 0) as int)
-		"PackagedShip": return "Ship #%d" % (order.get("ship_type_id", 0) as int)
-		"ScrapMetal": return "Scrap Metal"
+	var item_id: Variant = order.get("item_id", null)
+	if item_id is String and item_id as String == "ScrapMetal":
+		return "Scrap Metal"
+	if item_id is Dictionary:
+		var tagged := item_id as Dictionary
+		if tagged.has("Module"):
+			var module: Dictionary = tagged["Module"] as Dictionary
+			return "Module #%d" % (module.get("module_id", 0) as int)
+		if tagged.has("PackagedShip"):
+			var ship: Dictionary = tagged["PackagedShip"] as Dictionary
+			return "Ship #%d" % (ship.get("ship_type_id", 0) as int)
 	return "Unknown item"
 
 

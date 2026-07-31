@@ -43,7 +43,7 @@ mod world_space;
 
 pub use client_rules::ClientRules;
 pub use dawn_core::StatDelta;
-pub use item_row::{ItemRow, ItemType};
+pub use item_row::ItemRow;
 pub use loadout::{
     simulate_modules_capacitor_ticks, ActivationIntent, OwnedShipRow, PlayerLoadoutMsg,
     SlotCapacity,

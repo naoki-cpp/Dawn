@@ -1,7 +1,7 @@
 use crate::json_variant::{externally_tagged_to_dict, json_value_to_variant, Dict};
 use dawn_wire::{
-    ClientCommandWire, ClientMessage, HelloMessage, MarketCommandWire, NavigationTargetWire,
-    PosWire, ResumeIdentity, WarpTargetWire,
+    ClientCommandWire, ClientMessage, HelloMessage, ItemWire, MarketCommandWire,
+    NavigationTargetWire, PosWire, ResumeIdentity, WarpTargetWire,
 };
 use godot::prelude::*;
 
@@ -69,6 +69,20 @@ fn non_negative_or_none(value: i64) -> Option<u64> {
     } else {
         None
     }
+}
+
+fn item_wire_from_legacy_fields(
+    item_type: &str,
+    module_id: i64,
+    ship_type_id: i64,
+) -> Option<ItemWire> {
+    dawn_core::ItemId::from_storage_columns(
+        item_type,
+        u32::try_from(module_id).ok()?,
+        u32::try_from(ship_type_id).ok()?,
+    )
+    .ok()
+    .map(Into::into)
 }
 
 /// Builds the client -> server wire message for every command the Godot
@@ -219,11 +233,9 @@ impl ClientCommand {
         }
     }
 
-    /// Move the entire stack of an item out of a docked ship's own cargo
-    /// into the caller's station inventory (ADR-0034 9B). `item_type` is
-    /// one of `"Module"`/`"PackagedShip"`/`"ScrapMetal"` (matches
-    /// `ItemRow.item_type`); `module_id`/`ship_type_id` are only meaningful
-    /// for the matching variant (`0` otherwise).
+    /// Compatibility adapter for the existing Godot inventory surface.
+    /// The legacy scalar arguments are validated and collapsed into one
+    /// `ItemWire` before any bytes are encoded.
     #[func]
     fn transfer_to_station_command(
         &self,
@@ -264,6 +276,54 @@ impl ClientCommand {
         )
     }
 
+    #[func]
+    fn market_place_order_command(&self, fields: Dict) -> PackedByteArray {
+        let Some(fields) = scalar_dict_to_json_object(&fields) else {
+            return PackedByteArray::new();
+        };
+        let (
+            Some(ship_id),
+            Some(item_type),
+            Some(module_id),
+            Some(ship_type_id),
+            Some(side),
+            Some(price),
+            Some(quantity),
+        ) = (
+            fields.get("ship_id").and_then(serde_json::Value::as_i64),
+            fields.get("item_type").and_then(serde_json::Value::as_str),
+            fields.get("module_id").and_then(serde_json::Value::as_i64),
+            fields
+                .get("ship_type_id")
+                .and_then(serde_json::Value::as_i64),
+            fields.get("side").and_then(serde_json::Value::as_str),
+            fields.get("price").and_then(serde_json::Value::as_i64),
+            fields.get("quantity").and_then(serde_json::Value::as_i64),
+        )
+        else {
+            godot_error!("ClientCommand.market_place_order_command: missing or invalid field");
+            return PackedByteArray::new();
+        };
+        let Some(item_id) = item_wire_from_legacy_fields(item_type, module_id, ship_type_id) else {
+            godot_error!("ClientCommand.market_place_order_command: invalid Item identity");
+            return PackedByteArray::new();
+        };
+        let (Ok(ship_id), Ok(price), Ok(quantity)) = (
+            u64::try_from(ship_id),
+            u64::try_from(price),
+            u64::try_from(quantity),
+        ) else {
+            return PackedByteArray::new();
+        };
+        market_command_wire_bytes(MarketCommandWire::PlaceMarketOrderCommand {
+            ship_id,
+            item_id,
+            side: side.to_owned(),
+            price,
+            quantity,
+        })
+    }
+
     /// Build the `ClientMessage::Hello` binary frame `connection.gd` sends
     /// on connect/reconnect (ADR-0007 §2, ADR-0042). `player_id < 0` means a
     /// fresh connection (no resume identity); both `player_id`/`ship_id`
@@ -292,12 +352,16 @@ impl ClientCommand {
         ship_type_id: i64,
         direction: &str,
     ) -> PackedByteArray {
+        let Some(item_id) =
+            item_wire_from_legacy_fields(&item_type.to_string(), module_id, ship_type_id)
+        else {
+            godot_error!("ClientCommand.transfer_command: invalid Item identity");
+            return PackedByteArray::new();
+        };
         command_wire_bytes(ClientCommandWire::TransferToStationCommand {
             ship_id: ship_id as u64,
             station_id: station_id as u32,
-            item_type: item_type.to_string(),
-            module_id: module_id as u32,
-            ship_type_id: ship_type_id as u32,
+            item_id,
             direction: direction.to_string(),
         })
     }
