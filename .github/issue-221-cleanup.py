@@ -15,6 +15,11 @@ replace(
     "ItemRowWire, ModuleRowWire",
 )
 replace(
+    "crates/dawn-sector/src/node/player_loadout_projection.rs",
+    "};\n\nuse super::SimulationNode;",
+    "};\n#[cfg(test)]\nuse dawn_wire::ItemWire;\n\nuse super::SimulationNode;",
+)
+replace(
     "crates/dawn-sector/src/node/station_inventory_db.rs",
     "use dawn_core::{ItemId, ModuleId, PlayerId, ShipTypeId, StationId};",
     "use dawn_core::{ItemId, PlayerId, StationId};\n#[cfg(test)]\nuse dawn_core::{ModuleId, ShipTypeId};",
