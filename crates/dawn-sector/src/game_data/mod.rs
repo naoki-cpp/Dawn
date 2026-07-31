@@ -109,17 +109,24 @@ impl GameDataCatalog {
         let runtime_modules = Path::new(PRODUCTION_MODULES_PATH);
         let runtime_ship_types = Path::new(PRODUCTION_SHIP_TYPES_PATH);
 
-        if !runtime_modules.exists() && !runtime_ship_types.exists() {
+        if path_is_missing(runtime_modules) && path_is_missing(runtime_ship_types) {
             let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
             let source_modules = root.join(PRODUCTION_MODULES_PATH);
             let source_ship_types = root.join(PRODUCTION_SHIP_TYPES_PATH);
-            if source_modules.exists() && source_ship_types.exists() {
+            if source_modules.is_file() && source_ship_types.is_file() {
                 return Self::load_from_paths(source_modules, source_ship_types);
             }
         }
 
         Self::load_from_paths(runtime_modules, runtime_ship_types)
     }
+}
+
+fn path_is_missing(path: &Path) -> bool {
+    matches!(
+        std::fs::metadata(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    )
 }
 
 /// Return the process-wide runtime catalog, loading and validating both TOML files once.
