@@ -106,20 +106,19 @@ impl GameDataCatalog {
     /// This keeps deployed startup tied to its `data/` directory while allowing
     /// tests that temporarily change their working directory to reuse repository data.
     pub fn load_runtime() -> Result<Self, CatalogError> {
-        let runtime_result = Self::load_production();
-        if matches!(
-            &runtime_result,
-            Err(CatalogError::Read { source, .. })
-                if source.kind() == std::io::ErrorKind::NotFound
-        ) {
+        let runtime_modules = Path::new(PRODUCTION_MODULES_PATH);
+        let runtime_ship_types = Path::new(PRODUCTION_SHIP_TYPES_PATH);
+
+        if !runtime_modules.exists() && !runtime_ship_types.exists() {
             let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-            let modules = root.join(PRODUCTION_MODULES_PATH);
-            let ship_types = root.join(PRODUCTION_SHIP_TYPES_PATH);
-            if modules.exists() && ship_types.exists() {
-                return Self::load_from_paths(modules, ship_types);
+            let source_modules = root.join(PRODUCTION_MODULES_PATH);
+            let source_ship_types = root.join(PRODUCTION_SHIP_TYPES_PATH);
+            if source_modules.exists() && source_ship_types.exists() {
+                return Self::load_from_paths(source_modules, source_ship_types);
             }
         }
-        runtime_result
+
+        Self::load_from_paths(runtime_modules, runtime_ship_types)
     }
 }
 
