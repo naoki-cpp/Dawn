@@ -45,7 +45,7 @@ pub enum CatalogError {
         category: &'static str,
         path: PathBuf,
         #[source]
-        source: toml::de::Error,
+        source: Box<toml::de::Error>,
     },
     #[error("invalid {category} game data in '{path}': {message}")]
     Validation {
@@ -155,7 +155,7 @@ pub(super) fn parse_required<T: DeserializeOwned>(
     toml::from_str(source).map_err(|source| CatalogError::Parse {
         category,
         path: path.to_path_buf(),
-        source,
+        source: Box::new(source),
     })
 }
 
