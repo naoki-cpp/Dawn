@@ -100,7 +100,10 @@ fn negative_ship_mass_is_rejected() {
 #[test]
 fn production_repository_catalog_loads_and_preserves_known_values() {
     let catalog = GameDataCatalog::load_repository_data().expect("production data is valid");
-    assert_eq!(catalog.modules.len(), crate::modules::REQUIRED_MODULE_IDS.len());
+    assert_eq!(
+        catalog.modules.len(),
+        crate::modules::REQUIRED_MODULE_IDS.len()
+    );
     assert_eq!(
         catalog.ship_types.len(),
         crate::ship_types::REQUIRED_SHIP_TYPE_IDS.len()

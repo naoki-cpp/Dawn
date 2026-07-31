@@ -67,7 +67,10 @@ impl GameDataCatalog {
         let modules = load_modules_file(modules_path)?;
         let ship_types = load_ship_types_file(ship_types_path)?;
         validate_required_ids(&modules, &ship_types, modules_path, ship_types_path)?;
-        Ok(Self { modules, ship_types })
+        Ok(Self {
+            modules,
+            ship_types,
+        })
     }
 
     pub fn modules(&self) -> &[ModuleDefinition] {
@@ -104,10 +107,7 @@ impl GameDataCatalog {
     }
 }
 
-pub(super) fn read_required(
-    category: &'static str,
-    path: &Path,
-) -> Result<String, CatalogError> {
+pub(super) fn read_required(category: &'static str, path: &Path) -> Result<String, CatalogError> {
     std::fs::read_to_string(path).map_err(|source| CatalogError::Read {
         category,
         path: path.to_path_buf(),

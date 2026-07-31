@@ -4,9 +4,7 @@
 //! implementation through these functions. The fallback arguments remain only
 //! for source compatibility and are deliberately ignored.
 
-use crate::game_data::{
-    GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH,
-};
+use crate::game_data::{GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH};
 use dawn_core::fitting::ModuleDefinition;
 use dawn_core::ship_type::ShipTypeDefinition;
 
@@ -24,10 +22,7 @@ pub fn load_modules(path: &str, _fallback: Vec<ModuleDefinition>) -> Vec<ModuleD
 ///
 /// Missing, malformed, or invalid required data aborts startup instead of
 /// selecting different built-in balance rules.
-pub fn load_ship_types(
-    path: &str,
-    _fallback: Vec<ShipTypeDefinition>,
-) -> Vec<ShipTypeDefinition> {
+pub fn load_ship_types(path: &str, _fallback: Vec<ShipTypeDefinition>) -> Vec<ShipTypeDefinition> {
     GameDataCatalog::load_from_paths(PRODUCTION_MODULES_PATH, path)
         .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}"))
         .into_ship_types()

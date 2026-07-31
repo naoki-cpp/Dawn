@@ -12,7 +12,11 @@ pub(crate) fn load_modules_file(
     let path = path.as_ref();
     let source = read_required("module", path)?;
     let parsed: ModulesFile = parse_required("module", path, &source)?;
-    let modules = parsed.modules.into_iter().map(Into::into).collect::<Vec<_>>();
+    let modules = parsed
+        .modules
+        .into_iter()
+        .map(Into::into)
+        .collect::<Vec<_>>();
     validate_modules(&modules, path)?;
     Ok(modules)
 }

@@ -1,7 +1,5 @@
 use super::{parse_required, read_required, validation::*, CatalogError};
-use dawn_core::ship_type::{
-    ShipBaseStats, ShipClass, ShipTypeDefinition, ShipTypeId, SlotLayout,
-};
+use dawn_core::ship_type::{ShipBaseStats, ShipClass, ShipTypeDefinition, ShipTypeId, SlotLayout};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::Path;
@@ -93,11 +91,7 @@ impl From<ShipTypeEntry> for ShipTypeDefinition {
     }
 }
 
-
-fn validate_ship_types(
-    ship_types: &[ShipTypeDefinition],
-    path: &Path,
-) -> Result<(), CatalogError> {
+fn validate_ship_types(ship_types: &[ShipTypeDefinition], path: &Path) -> Result<(), CatalogError> {
     if ship_types.is_empty() {
         return validation_error(
             "ship-type",
@@ -173,4 +167,3 @@ fn validate_ship_types(
     }
     Ok(())
 }
-
