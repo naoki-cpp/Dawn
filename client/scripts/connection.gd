@@ -111,7 +111,7 @@ func _process(delta: float) -> void:
 ## via `ClientCommand` (a `dawn-wire`-backed GDExtension class, globally
 ## registered like `PlayerLoadout`/`ModuleRow`/`ItemRow` -- no preload
 ## needed), instead of hand-building a matching Dictionary + JSON.stringify.
-## Commands with sentinel/exclusive-selection semantics (ADR-0031/ADR-0035)
+## Commands with sentinel/tagged-target semantics (ADR-0031/ADR-0035)
 ## call a dedicated `_cmd.*_command()` method; everything else goes through
 ## `_cmd.build(type_tag, fields)`, which validates the field Dictionary by
 ## deserializing it into `ClientCommandWire` itself. Every method returns

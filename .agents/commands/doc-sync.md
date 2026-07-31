@@ -35,9 +35,10 @@ The schema files are machine-checked; the prose in
 `docs/architecture/wire-protocol.md` is not. Check it separately:
 
 - The `"type"` value lists for both halves match the current enum variants
-- The documented quirks (`WarpCommand`'s legacy `gate_id` vs `target` form,
-  the `gate_id`/`target_id` selection on `ApproachCommand`/`OrbitCommand`/
-  `KeepAtRangeCommand`) still match `client_command_from_json`
+- Navigation commands use required tagged targets: `WarpCommand` carries a
+  `Gate` or `Body` target, while `ApproachCommand`/`OrbitCommand`/
+  `KeepAtRangeCommand` carry a `Ship` or `Gate` target; no legacy
+  `gate_id`/`target_id` fallback fields remain in `client_command_from_wire`
 - The list of `DomainEvent` variants that never reach the wire (return `None`
   from `domain_event_to_json`) is still accurate
 
