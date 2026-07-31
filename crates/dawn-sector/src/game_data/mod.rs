@@ -14,6 +14,7 @@ use dawn_core::ship_type::ShipTypeDefinition;
 use dawn_event_store::store::EventStore;
 use serde::de::DeserializeOwned;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 pub(crate) use module_file::load_modules_file;
 pub(crate) use ship_type_file::load_ship_types_file;
@@ -21,6 +22,8 @@ use validation::validate_required_ids;
 
 pub const PRODUCTION_MODULES_PATH: &str = "data/modules.toml";
 pub const PRODUCTION_SHIP_TYPES_PATH: &str = "data/ship_types.toml";
+
+static RUNTIME_CATALOG: OnceLock<Result<GameDataCatalog, CatalogError>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct GameDataCatalog {
@@ -102,7 +105,7 @@ impl GameDataCatalog {
     /// when both packaged files are absent and the checkout is actually present.
     /// This keeps deployed startup tied to its `data/` directory while allowing
     /// tests that temporarily change their working directory to reuse repository data.
-    pub(crate) fn load_repository_data() -> Result<Self, CatalogError> {
+    pub fn load_runtime() -> Result<Self, CatalogError> {
         let runtime_result = Self::load_production();
         if matches!(
             &runtime_result,
@@ -117,6 +120,22 @@ impl GameDataCatalog {
             }
         }
         runtime_result
+    }
+}
+
+/// Return the process-wide runtime catalog, loading and validating both TOML files once.
+///
+/// Every production accessor shares this exact catalog instance, so module and ship-type
+/// definitions cannot come from different reads or different fallback rules.
+pub fn runtime_catalog() -> Result<&'static GameDataCatalog, &'static CatalogError> {
+    RUNTIME_CATALOG
+        .get_or_init(GameDataCatalog::load_runtime)
+        .as_ref()
+}
+
+impl GameDataCatalog {
+    pub(crate) fn load_repository_data() -> Result<Self, CatalogError> {
+        Self::load_runtime()
     }
 }
 

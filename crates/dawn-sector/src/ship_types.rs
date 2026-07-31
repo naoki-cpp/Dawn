@@ -25,9 +25,10 @@ pub(crate) const REQUIRED_SHIP_TYPE_IDS: &[ShipTypeId] = &[
 /// definitions in tests or tooling. Runtime startup should load one
 /// [`crate::game_data::GameDataCatalog`] and register it as a unit.
 pub fn all_ship_types() -> Vec<ShipTypeDefinition> {
-    crate::game_data::GameDataCatalog::load_repository_data()
+    crate::game_data::runtime_catalog()
         .unwrap_or_else(|error| panic!("failed to load authoritative game-data catalog: {error}"))
-        .into_ship_types()
+        .ship_types()
+        .to_vec()
 }
 
 #[cfg(test)]

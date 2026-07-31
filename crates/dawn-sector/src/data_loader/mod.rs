@@ -4,7 +4,9 @@
 //! implementation through these functions. The fallback arguments remain only
 //! for source compatibility and are deliberately ignored.
 
-use crate::game_data::{GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH};
+use crate::game_data::{
+    runtime_catalog, GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH,
+};
 use dawn_core::fitting::ModuleDefinition;
 use dawn_core::ship_type::ShipTypeDefinition;
 use std::path::{Path, PathBuf};
@@ -14,6 +16,13 @@ use std::path::{Path, PathBuf};
 /// Missing, malformed, or invalid required data aborts startup instead of
 /// selecting different built-in balance rules.
 pub fn load_modules(path: &str, _fallback: Vec<ModuleDefinition>) -> Vec<ModuleDefinition> {
+    if path == PRODUCTION_MODULES_PATH {
+        return runtime_catalog()
+            .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}"))
+            .modules()
+            .to_vec();
+    }
+
     GameDataCatalog::load_from_paths(
         resolve_catalog_path(path),
         resolve_catalog_path(PRODUCTION_SHIP_TYPES_PATH),
@@ -27,6 +36,13 @@ pub fn load_modules(path: &str, _fallback: Vec<ModuleDefinition>) -> Vec<ModuleD
 /// Missing, malformed, or invalid required data aborts startup instead of
 /// selecting different built-in balance rules.
 pub fn load_ship_types(path: &str, _fallback: Vec<ShipTypeDefinition>) -> Vec<ShipTypeDefinition> {
+    if path == PRODUCTION_SHIP_TYPES_PATH {
+        return runtime_catalog()
+            .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}"))
+            .ship_types()
+            .to_vec();
+    }
+
     GameDataCatalog::load_from_paths(
         resolve_catalog_path(PRODUCTION_MODULES_PATH),
         resolve_catalog_path(path),
