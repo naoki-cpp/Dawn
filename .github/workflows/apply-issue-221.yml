@@ -1,0 +1,46 @@
+name: Apply issue 221 migration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-issue-221.yml
+      - .github/issue-221-migrate.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'agent/unify-item-identity'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out implementation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/unify-item-identity
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply Item identity migration
+        run: python3 .github/issue-221-migrate.py
+
+      - name: Format and generate schemas
+        run: |
+          cargo fmt --all
+          cargo run -p dawn-actor --example gen_wire_schema
+
+      - name: Validate affected crates
+        run: |
+          cargo test -p dawn-core -p dawn-wire -p dawn-market -p dawn-sector \
+            -p dawn-client-core -p dawn-client-gdext -p dawn-simulation
+          cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Commit implementation and remove temporary files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-issue-221.yml .github/issue-221-migrate.py
+          git add -A
+          git commit -m "Unify Item identity across storage wire and client"
+          git push origin HEAD:agent/unify-item-identity
