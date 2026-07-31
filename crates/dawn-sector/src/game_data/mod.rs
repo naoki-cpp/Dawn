@@ -98,12 +98,25 @@ impl GameDataCatalog {
         }
     }
 
+    /// Load the runtime-relative catalog, resolving to the source checkout only
+    /// when both packaged files are absent and the checkout is actually present.
+    /// This keeps deployed startup tied to its `data/` directory while allowing
+    /// tests that temporarily change their working directory to reuse repository data.
     pub(crate) fn load_repository_data() -> Result<Self, CatalogError> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        Self::load_from_paths(
-            root.join(PRODUCTION_MODULES_PATH),
-            root.join(PRODUCTION_SHIP_TYPES_PATH),
-        )
+        let runtime_result = Self::load_production();
+        if matches!(
+            &runtime_result,
+            Err(CatalogError::Read { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound
+        ) {
+            let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let modules = root.join(PRODUCTION_MODULES_PATH);
+            let ship_types = root.join(PRODUCTION_SHIP_TYPES_PATH);
+            if modules.exists() && ship_types.exists() {
+                return Self::load_from_paths(modules, ship_types);
+            }
+        }
+        runtime_result
     }
 }
 
