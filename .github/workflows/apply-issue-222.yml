@@ -7,12 +7,19 @@ on:
     paths:
       - tools/apply_issue_222.py
       - .github/workflows/apply-issue-222.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - tools/apply_issue_222.py
+      - .github/workflows/apply-issue-222.yml
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.event_name == 'push' || github.head_ref == 'agent/remove-legacy-navigation-target-wire-shapes'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
