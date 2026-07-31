@@ -205,17 +205,18 @@ Step 9: Notify the Replication Actor of the delta
 Step 10: Send TickElapsed to RaftActor (ADR-0014)
          raft.tick()
          -> advances election-timeout / heartbeat timers by 1 Tick (INV-005 / FBD-003)
-         Both the actor path and the clustered serve path share
-         `transit::run_runtime_tick` (7.5 apply -> node.tick -> Step 9 hook -> raft.tick
-         -> transient outputs). `serve::runtime::run_cluster_runtime_tick` additionally
-         handles clustered-serve auto-jump / ownership handoff / AoI delivery / scoped
-         InitialState resend. `transit::step_cluster_node` is a thin entry point that
-         drains transients for callers such as `dawn-sector-node`.
+         Actor-backed simulation, clustered serve, and the production Sector Node
+         all call `transit::run_runtime_tick`. It is the sole authoritative frame
+         pipeline: Step 7.5 apply -> node.tick -> collect the Event tail -> Step 9
+         replication hook -> raft.tick -> drain and propose auto-jumps -> drain
+         completed-warp outputs. Runtime adapters only perform command/session,
+         transport, ownership-handoff, Redirect, and AoI delivery work around that
+         common output contract.
 
 Step 7.5: Apply committed Raft entries (ADR-0014 §7)
          transit::apply_committed_raft_entries()
-         Shared via `transit::run_runtime_tick()` for actor / clustered serve;
-         `dawn-sector-node` runs it via `transit::step_cluster_node()`.
+         Shared via `transit::run_runtime_tick()` for actor-backed simulation,
+         clustered serve, and the production `dawn-sector-node` runtime.
          -> Applies committed TransitOp to ECS:
            TransitOp::Request -> owning node: marks InTransit, appends
              SectorTransitRequested, exports Ship state, proposes TransitOp::Commit to Raft
@@ -326,10 +327,12 @@ cargo run -p dawn-simulation --bin simulate --release
 
 ## 7. Tick Loop Implementation Ownership
 
-`run_phase4_server()` (single node) / `run_cluster_server()` (3-node Raft) in
-`main.rs` drive the loop via a fixed-interval `tokio::time::interval`
-(100 ms/tick). `SimulationNode::tick_with_lock_commands()` itself is
-synchronous; the caller's interval controls pacing.
+`run_phase4_server()` (single node), `run_cluster_server()` (3-node Raft),
+and the production `dawn-sector-node` process drive their loops via a
+fixed-interval `tokio::time::interval` (100 ms/tick). Every server path enters
+`transit::run_runtime_tick()` for the authoritative frame order;
+`SimulationNode::tick_with_lock_commands()` remains synchronous and each
+process adapter controls only pacing and transport/session-specific work.
 
 ---
 

@@ -139,33 +139,57 @@ pub fn apply_committed_raft_entries<S: EventStore>(
 pub struct RuntimeTickOutput {
     pub tick_result: crate::node::TickResult,
     pub events: Vec<DomainEvent>,
+    /// Auto-jump triggers that passed final validation and were proposed to Raft.
+    /// Rejected one-shot triggers are drained but deliberately omitted.
     pub pending_auto_jumps: Vec<(ShipId, JumpGateId)>,
     pub completed_warps: Vec<ShipId>,
 }
 
+/// Execute the authoritative server frame pipeline.
+///
+/// Ordering is deliberately centralized here for every runtime adapter:
+/// committed Raft entries -> simulation Tick -> Event collection ->
+/// replication hook -> Raft clock advancement -> auto-jump proposal ->
+/// transient warp-output drain.
 pub fn run_runtime_tick<S, F>(
     node: &mut SimulationNode<S>,
     raft: &RaftActorHandle,
     committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
     lock_commands: &[dawn_core::LockOnCommand],
-    after_events_appended: F,
+    after_events_collected: F,
 ) -> RuntimeTickOutput
 where
     S: EventStore,
-    F: FnOnce(&mut SimulationNode<S>, &crate::node::TickResult),
+    F: FnOnce(&SimulationNode<S>, &crate::node::TickResult, &[DomainEvent]),
 {
     let events_before = node.total_event_count() as u64;
     apply_committed_raft_entries(node, raft, committed_rx);
     let result = node.tick_with_lock_commands(lock_commands);
-    after_events_appended(node, &result);
-    raft.tick();
-    let pending_auto_jumps = node.drain_pending_auto_jumps();
-    let completed_warps = node.drain_completed_warps();
-    let events = node
+    let events: Vec<_> = node
         .event_store()
         .iter_from(events_before)
         .map(|record| record.event.clone())
         .collect();
+
+    // Replication must observe the newly appended Event tail before the
+    // consensus clock advances. The immutable node reference keeps this hook
+    // publication-only so the collected output cannot diverge from the log.
+    after_events_collected(node, &result, &events);
+    raft.tick();
+
+    // Auto-jump is a simulation transient, not adapter-owned Tick ordering.
+    // Drain and propose it here so actor, clustered serve, and production Node
+    // paths all complete the same-frame handoff. Only successful proposals are
+    // surfaced to adapters; rejected one-shot attempts retain their historical
+    // silent-drop behavior.
+    let pending_auto_jumps = node
+        .drain_pending_auto_jumps()
+        .into_iter()
+        .filter_map(|(ship_id, gate_id)| {
+            propose_auto_jump(node, raft, ship_id, gate_id).map(|_| (ship_id, gate_id))
+        })
+        .collect();
+    let completed_warps = node.drain_completed_warps();
 
     RuntimeTickOutput {
         tick_result: result,
@@ -215,17 +239,7 @@ fn propose_transit_request(
     );
 }
 
-pub fn step_cluster_node<S: EventStore>(
-    node: &mut SimulationNode<S>,
-    raft: &RaftActorHandle,
-    committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
-    lock_commands: &[dawn_core::LockOnCommand],
-) -> crate::node::TickResult {
-    apply_committed_raft_entries(node, raft, committed_rx);
-    let result = node.tick_with_lock_commands(lock_commands);
-    raft.tick();
-    result
-}
-
+#[cfg(test)]
+mod runtime_tick_review_tests;
 #[cfg(test)]
 mod tests;

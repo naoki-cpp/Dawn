@@ -61,8 +61,13 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     // Warm up: tick until a Raft leader is elected (election timeout ≤ 20 ticks).
     for _ in 0..30 {
         for i in 0..SECTORS {
-            let _ =
-                transit::step_cluster_node(&mut nodes[i], &rafts[i], &mut committed_rxs[i], &[]);
+            let _ = transit::run_runtime_tick(
+                &mut nodes[i],
+                &rafts[i],
+                &mut committed_rxs[i],
+                &[],
+                |_, _, _| {},
+            );
         }
     }
     println!("  [Server] Raft warm-up complete. Waiting for players...");
