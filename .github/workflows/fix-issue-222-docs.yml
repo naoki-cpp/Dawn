@@ -1,0 +1,49 @@
+name: Fix issue 222 docs
+
+on:
+  push:
+    branches:
+      - agent/remove-legacy-navigation-target-wire-shapes
+    paths:
+      - tools/fix_issue_222_docs.py
+      - .github/workflows/fix-issue-222-docs.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/remove-legacy-navigation-target-wire-shapes
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Apply documentation fixes
+        run: python tools/fix_issue_222_docs.py
+
+      - name: Verify stale wire-shape wording is gone
+        run: |
+          set -euo pipefail
+          ! grep -F "exclusive-selection semantics" client/scripts/connection.gd
+          ! grep -F "WarpCommand's legacy" .agents/commands/doc-sync.md
+          ! grep -F '船は `target_id`、ゲートは `gate_id`' docs/adr/ADR-0015-approach-piloting.md
+          git diff --check
+
+      - name: Remove temporary files and commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -f tools/fix_issue_222_docs.py
+          rm -f .github/workflows/fix-issue-222-docs.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "docs: align navigation target references"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:agent/remove-legacy-navigation-target-wire-shapes
