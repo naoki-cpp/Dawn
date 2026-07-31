@@ -1,0 +1,51 @@
+name: Apply issue 220 fast
+
+on:
+  push:
+    branches:
+      - agent/single-authority-game-data-catalog
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out implementation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/single-authority-game-data-catalog
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Recover and apply migration
+        shell: bash
+        run: |
+          git show 941b5c0d7adf04c9430370244833f4fbc3104f27:.github/workflows/apply-issue-220.yml > /tmp/original-workflow.yml
+          python3 - <<'PY'
+          import base64
+          import pathlib
+          import re
+          import zlib
+
+          text = pathlib.Path('/tmp/original-workflow.yml').read_text()
+          match = re.search(r'payload = """([^\"]+)"""', text)
+          if match is None:
+              raise SystemExit('compressed migration payload not found')
+          script = zlib.decompress(base64.b64decode(match.group(1)))
+          pathlib.Path('/tmp/apply_issue_220.py').write_bytes(script)
+          PY
+          python3 /tmp/apply_issue_220.py
+
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-issue-220-fast.yml
+          git add -A
+          git commit -m "Make game-data catalog single-authority"
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git push origin HEAD:agent/single-authority-game-data-catalog
