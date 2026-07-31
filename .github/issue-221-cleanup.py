@@ -21,6 +21,6 @@ replace(
 )
 replace(
     "crates/dawn-market/src/order_book.rs",
-    "    CreditItemCommand, EntityId, ItemId, ModuleId, PlayerId, RemoveItemCommand, ReturnItemCommand,\n    ShipId, ShipTypeId,\n",
-    "    CreditItemCommand, EntityId, ItemId, PlayerId, RemoveItemCommand, ReturnItemCommand, ShipId,\n};\n#[cfg(test)]\nuse dawn_core::{ModuleId, ShipTypeId};\nuse dawn_core::{",
+    "use dawn_core::{\n    CreditItemCommand, EntityId, ItemId, ModuleId, PlayerId, RemoveItemCommand, ReturnItemCommand,\n    ShipId, ShipTypeId,\n};",
+    "use dawn_core::{\n    CreditItemCommand, EntityId, ItemId, PlayerId, RemoveItemCommand, ReturnItemCommand, ShipId,\n};\n#[cfg(test)]\nuse dawn_core::{ModuleId, ShipTypeId};",
 )
