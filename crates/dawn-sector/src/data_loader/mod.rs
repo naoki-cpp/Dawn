@@ -4,9 +4,7 @@
 //! implementation through these functions. The fallback arguments remain only
 //! for source compatibility and are deliberately ignored.
 
-use crate::game_data::{
-    GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH,
-};
+use crate::game_data::{GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH};
 use dawn_core::fitting::ModuleDefinition;
 use dawn_core::ship_type::ShipTypeDefinition;
 use std::path::{Path, PathBuf};
