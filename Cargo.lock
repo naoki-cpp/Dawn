@@ -215,6 +215,7 @@ dependencies = [
  "dawn-event-store",
  "postcard",
  "serde",
+ "tempfile",
  "thiserror",
  "tokio",
 ]
