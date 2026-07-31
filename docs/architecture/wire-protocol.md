@@ -146,17 +146,15 @@ may target any owned docked ship, not just the active one.
 ship is active (station-local switch only for now). See
 `docs/architecture/ownership.md` §7.
 
-`ClientCommandWire` mirrors the wire format exactly, including two
-backward-compatible quirks it does not itself resolve (that validation
-happens in `client_command_from_wire()`):
+Navigation commands use one required tagged target representation:
 
-- `WarpCommand` accepts a legacy `{"gate_id": N}` form and the current
-  `{"target": {"Gate": N}}` / `{"target": {"Body": N}}` form. `target` wins
-  if both are present; prefer it for new clients.
-- `ApproachCommand`, `OrbitCommand`, and `KeepAtRangeCommand` select their
-  target with either `gate_id` (a Jump Gate) or `target_id` (a Ship);
-  `gate_id` wins if both are present, and the command is rejected
-  (`client_command_from_wire` returns `None`) if neither is present.
+- `ApproachCommand`, `OrbitCommand`, and `KeepAtRangeCommand` carry
+  `target: {"Ship": N}` or `target: {"Gate": N}`.
+- `WarpCommand` carries `target: {"Gate": N}` or `target: {"Body": N}`.
+
+After successful wire decoding, exactly one target is present. The legacy
+`gate_id`/`target_id` field pairs and Warp's legacy `gate_id` fallback are no
+longer part of the protocol.
 
 `ActivateModuleCommand`'s `target_ship_id` is only required for targeted
 module kinds (Weapon/Tackle, ADR-0035); the server validates that

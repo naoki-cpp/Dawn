@@ -85,8 +85,8 @@ mod player_loadout;
 mod server_event;
 
 pub use client_command::{
-    client_command_from_wire, client_command_wire_json_schema, ClientCommandWire, PosWire, VelWire,
-    WarpTargetWire,
+    client_command_from_wire, client_command_wire_json_schema, ClientCommandWire,
+    NavigationTargetWire, PosWire, VelWire, WarpTargetWire,
 };
 pub use hello_resume::{HelloMessage, ResumeIdentity};
 pub use initial_state::{
