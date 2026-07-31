@@ -97,6 +97,16 @@ impl<S: EventStore> SimulationNode<S> {
         std::mem::take(&mut self.completed_warps)
     }
 
+    #[cfg(test)]
+    pub(crate) fn queue_runtime_transients_for_test(
+        &mut self,
+        auto_jump: (ShipId, JumpGateId),
+        completed_warp: ShipId,
+    ) {
+        self.pending_auto_jumps.push(auto_jump);
+        self.completed_warps.push(completed_warp);
+    }
+
     /// Warp System (ADR-0022 §6): advance every ship carrying a `WarpComp`.
     ///
     /// Runs each tick as Step 2.6 (after Approach, before Movement). The

@@ -461,3 +461,62 @@ fn duplicate_commit_after_checkpoint_does_not_resurrect_removed_ship() {
 fn decode_returns_none_for_garbage_payload() {
     assert!(TransitOp::decode(&[0xFF, 0xFE, 0xFD]).is_none());
 }
+
+#[test]
+fn runtime_tick_owns_replication_raft_and_transient_order() {
+    let mut node = mem_node();
+    let gate = *node.jump_gate(JumpGateId(0)).expect("Sector 0 has Gate 0");
+    let near_gate_abs = [
+        gate.abs_m[0] - (gate.activation_radius * 0.5),
+        gate.abs_m[1],
+        gate.abs_m[2],
+    ];
+    let player_id = node.next_player_id();
+    let ship = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
+    node.set_spawn_anchor_abs(ship, near_gate_abs);
+    node.queue_runtime_transients_for_test((ship, JumpGateId(0)), ship);
+
+    let event_cursor = node.total_event_count() as u64;
+    let (raft, mut raft_messages) = raft_handle();
+    let (_committed_tx, mut committed_rx) = mpsc::unbounded_channel();
+    let mut replication_hook_called = false;
+
+    let output = run_runtime_tick(
+        &mut node,
+        &raft,
+        &mut committed_rx,
+        &[],
+        |node, _, events| {
+            replication_hook_called = true;
+            assert!(
+                raft_messages.try_recv().is_err(),
+                "replication hook must run before raft.tick()"
+            );
+            let collected = node.event_store().iter_from(event_cursor).count();
+            assert_eq!(
+                events.len(),
+                collected,
+                "hook receives the collected Event tail"
+            );
+        },
+    );
+
+    assert!(replication_hook_called);
+    assert_eq!(output.pending_auto_jumps, vec![(ship, JumpGateId(0))]);
+    assert_eq!(output.completed_warps, vec![ship]);
+    assert!(node.drain_pending_auto_jumps().is_empty());
+    assert!(node.drain_completed_warps().is_empty());
+
+    assert!(matches!(
+        raft_messages.try_recv(),
+        Ok(dawn_consensus::RaftActorMessage::TickElapsed)
+    ));
+    assert!(matches!(
+        decode_proposed_transit(&mut raft_messages),
+        TransitOp::Request {
+            ship_id,
+            gate_id: Some(JumpGateId(0)),
+            ..
+        } if ship_id == ship
+    ));
+}

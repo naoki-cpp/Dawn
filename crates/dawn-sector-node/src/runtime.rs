@@ -72,20 +72,19 @@ impl SectorNodeRuntime {
         raft: &RaftActorHandle,
         committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
     ) {
-        let event_cursor = node.total_event_count() as u64;
         let (lock_commands, pending_jumps) = self.collect_player_commands(node);
-
         self.propose_player_jumps(node, raft, pending_jumps);
-        self.propose_auto_jumps(node, raft);
 
-        transit::step_cluster_node(node, raft, committed_rx, &lock_commands);
+        let sector_id = self.sector_id;
+        let outbound_replication = &mut self.outbound_replication;
+        let output =
+            transit::run_runtime_tick(node, raft, committed_rx, &lock_commands, |node, _, _| {
+                outbound_replication.publish_new_events(sector_id, node.event_store());
+            });
 
-        let new_events = self.collect_new_events(node, event_cursor);
-        self.outbound_replication
-            .publish_new_events(self.sector_id, node.event_store());
-
-        let jumped_ships = self.jumped_ships(&new_events);
-        self.deliver_frames(node, &new_events, &jumped_ships);
+        self.log_auto_jumps(&output.pending_auto_jumps);
+        let jumped_ships = self.jumped_ships(&output.events);
+        self.deliver_frames(node, &output.events, &output.completed_warps, &jumped_ships);
     }
 
     fn collect_player_commands<S: EventStore>(
@@ -163,32 +162,14 @@ impl SectorNodeRuntime {
         }
     }
 
-    fn propose_auto_jumps<S: EventStore>(
-        &self,
-        node: &mut SimulationNode<S>,
-        raft: &RaftActorHandle,
-    ) {
-        for (ship_id, gate_id) in node.drain_pending_auto_jumps() {
-            if let Some(to) = transit::propose_auto_jump(node, raft, ship_id, gate_id) {
-                println!(
-                    "[Node] Auto-jump proposed: ship #{} gate #{} (-> S{})",
-                    ship_id.raw(),
-                    gate_id.0,
-                    to.0
-                );
-            }
+    fn log_auto_jumps(&self, auto_jumps: &[(ShipId, dawn_core::JumpGateId)]) {
+        for (ship_id, gate_id) in auto_jumps {
+            println!(
+                "[Node] Auto-jump proposed: ship #{} gate #{}",
+                ship_id.raw(),
+                gate_id.0
+            );
         }
-    }
-
-    fn collect_new_events<S: EventStore>(
-        &self,
-        node: &SimulationNode<S>,
-        event_cursor: u64,
-    ) -> Vec<DomainEvent> {
-        node.event_store()
-            .iter_from(event_cursor)
-            .map(|r| r.event.clone())
-            .collect()
     }
 
     fn jumped_ships(&self, new_events: &[DomainEvent]) -> HashMap<ShipId, SectorId> {
@@ -210,12 +191,12 @@ impl SectorNodeRuntime {
 
     fn deliver_frames<S: EventStore>(
         &mut self,
-        node: &mut SimulationNode<S>,
+        node: &SimulationNode<S>,
         new_events: &[DomainEvent],
+        warp_arrivals: &[ShipId],
         jumped_ships: &HashMap<ShipId, SectorId>,
     ) {
         let grid = aoi::CellGrid::build(self.aoi_cell_size, node.ship_absolute_positions());
-        let warp_arrivals = node.drain_completed_warps();
         let aoi_delivery = &mut self.aoi_delivery;
 
         self.sessions.retain_mut(|sess| {
@@ -241,7 +222,7 @@ impl SectorNodeRuntime {
                 ship_id: sess.ship_id,
             };
             let mut sink = SessionSink(sess);
-            aoi_delivery.deliver_frame(&mut sink, node, observer, curr, new_events, &warp_arrivals)
+            aoi_delivery.deliver_frame(&mut sink, node, observer, curr, new_events, warp_arrivals)
         });
         let live: std::collections::HashSet<_> =
             self.sessions.iter().map(|s| s.player_id).collect();

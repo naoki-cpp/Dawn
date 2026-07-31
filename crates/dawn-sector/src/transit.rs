@@ -143,29 +143,45 @@ pub struct RuntimeTickOutput {
     pub completed_warps: Vec<ShipId>,
 }
 
+/// Execute the authoritative server frame pipeline.
+///
+/// Ordering is deliberately centralized here for every runtime adapter:
+/// committed Raft entries -> simulation Tick -> Event collection ->
+/// replication hook -> Raft clock advancement -> auto-jump proposal ->
+/// transient warp-output drain.
 pub fn run_runtime_tick<S, F>(
     node: &mut SimulationNode<S>,
     raft: &RaftActorHandle,
     committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
     lock_commands: &[dawn_core::LockOnCommand],
-    after_events_appended: F,
+    after_events_collected: F,
 ) -> RuntimeTickOutput
 where
     S: EventStore,
-    F: FnOnce(&mut SimulationNode<S>, &crate::node::TickResult),
+    F: FnOnce(&mut SimulationNode<S>, &crate::node::TickResult, &[DomainEvent]),
 {
     let events_before = node.total_event_count() as u64;
     apply_committed_raft_entries(node, raft, committed_rx);
     let result = node.tick_with_lock_commands(lock_commands);
-    after_events_appended(node, &result);
-    raft.tick();
-    let pending_auto_jumps = node.drain_pending_auto_jumps();
-    let completed_warps = node.drain_completed_warps();
-    let events = node
+    let events: Vec<_> = node
         .event_store()
         .iter_from(events_before)
         .map(|record| record.event.clone())
         .collect();
+
+    // Replication must observe the newly appended Event tail before the
+    // consensus clock advances. All runtime paths supply their publisher here.
+    after_events_collected(node, &result, &events);
+    raft.tick();
+
+    // Auto-jump is a simulation transient, not adapter-owned Tick ordering.
+    // Drain and propose it here so actor, clustered serve, and production Node
+    // paths all complete the same-frame handoff.
+    let pending_auto_jumps = node.drain_pending_auto_jumps();
+    for &(ship_id, gate_id) in &pending_auto_jumps {
+        let _ = propose_auto_jump(node, raft, ship_id, gate_id);
+    }
+    let completed_warps = node.drain_completed_warps();
 
     RuntimeTickOutput {
         tick_result: result,
@@ -213,18 +229,6 @@ fn propose_transit_request(
         }
         .encode(),
     );
-}
-
-pub fn step_cluster_node<S: EventStore>(
-    node: &mut SimulationNode<S>,
-    raft: &RaftActorHandle,
-    committed_rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
-    lock_commands: &[dawn_core::LockOnCommand],
-) -> crate::node::TickResult {
-    apply_committed_raft_entries(node, raft, committed_rx);
-    let result = node.tick_with_lock_commands(lock_commands);
-    raft.tick();
-    result
 }
 
 #[cfg(test)]

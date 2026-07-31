@@ -36,12 +36,10 @@ pub(crate) fn run_cluster_runtime_tick(
                 &ctx.rafts[i],
                 &mut ctx.committed_rxs[i],
                 &lock_commands[i],
-                |_, _| {},
+                |_, _, _| {},
             )
         })
         .collect();
-
-    propose_auto_jumps(ctx.nodes, ctx.rafts, &tick_outputs);
 
     let warp_arrivals_by_sector: Vec<Vec<ShipId>> = tick_outputs
         .iter()
@@ -74,28 +72,6 @@ pub(crate) fn run_cluster_runtime_tick(
 struct JumpHandoff {
     jumped_players: Vec<(PlayerId, usize)>,
     own_events: HashMap<PlayerId, Vec<DomainEvent>>,
-}
-
-fn propose_auto_jumps(
-    nodes: &mut [SimulationNode],
-    rafts: &[RaftActorHandle],
-    tick_outputs: &[transit::RuntimeTickOutput],
-) {
-    for (i, output) in tick_outputs.iter().enumerate() {
-        for (ship_id, gate_id) in &output.pending_auto_jumps {
-            if let Some(to) =
-                transit::propose_auto_jump(&mut nodes[i], &rafts[i], *ship_id, *gate_id)
-            {
-                println!(
-                    "  [Server] Auto-jump proposed: ship #{} gate #{} (S{} -> S{})",
-                    ship_id.raw(),
-                    gate_id.0,
-                    i,
-                    to.0
-                );
-            }
-        }
-    }
 }
 
 fn apply_jump_handoffs(

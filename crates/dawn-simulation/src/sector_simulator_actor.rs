@@ -141,7 +141,7 @@ impl SectorSimulatorActor {
                         &self.raft,
                         &mut self.raft_committed_rx,
                         &[],
-                        |node, _| {
+                        |node, _, _| {
                             replication.publish_new_events(node.sector_id(), node.event_store());
                         },
                     );
