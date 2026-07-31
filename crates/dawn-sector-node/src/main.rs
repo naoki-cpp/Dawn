@@ -27,7 +27,7 @@ use dawn_event_store::FileEventStore;
 use dawn_replication::{Ingest, ReplicaSet, ReplicationTransport, TcpReplicationTransport};
 use dawn_sector::node::SimulationNode;
 use dawn_sector::persistence::{CheckpointConfig, CheckpointScheduler, StateSnapshot};
-use dawn_sector::{data_loader, galaxy::Galaxy, modules, ship_types, transit};
+use dawn_sector::{galaxy::Galaxy, game_data::runtime_catalog, transit};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -264,9 +264,8 @@ fn build_node(
     sector_id: SectorId,
     bounds: SectorBounds,
 ) -> (SimulationNode<FileEventStore>, bool) {
-    let modules = data_loader::load_modules("data/modules.toml", modules::all_modules());
-    let ship_types =
-        data_loader::load_ship_types("data/ship_types.toml", ship_types::all_ship_types());
+    let catalog = runtime_catalog()
+        .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}"));
 
     // FileEventStore::open does not create its parent directory, and a fresh
     // deployment has no `data/node-N/` yet -- create it (and the snapshot/
@@ -296,7 +295,12 @@ fn build_node(
                 snapshot.log_index
             );
             (
-                SimulationNode::restore_from(store, &snapshot, &modules, &ship_types),
+                SimulationNode::restore_from(
+                    store,
+                    &snapshot,
+                    catalog.modules(),
+                    catalog.ship_types(),
+                ),
                 false,
             )
         }
@@ -306,12 +310,7 @@ fn build_node(
                 cfg.snapshot_path
             );
             let mut node = SimulationNode::with_store(node_id, sector_id, bounds, store);
-            for def in &modules {
-                node.register_module(def.clone());
-            }
-            for def in &ship_types {
-                node.register_ship_type(def.clone());
-            }
+            catalog.register_into(&mut node);
             (node, true)
         }
         Err(e) => panic!(
