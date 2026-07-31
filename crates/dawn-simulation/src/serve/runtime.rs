@@ -12,9 +12,9 @@ use tokio::sync::mpsc;
 
 /// Run one clustered serve tick and deliver the resulting client frames.
 ///
-/// This module owns the ordering around runtime tick outputs: auto-jump
-/// proposals, jump ownership handoff, AOI delivery, and scoped InitialState
-/// resend for players that changed Sector.
+/// The shared runtime tick owns simulation, replication-hook, Raft-clock, and
+/// transient-output ordering. This adapter only performs jump ownership handoff,
+/// AOI delivery, and scoped InitialState resend for players that changed Sector.
 pub(crate) struct ClusterRuntimeTickContext<'a> {
     pub(crate) nodes: &'a mut [SimulationNode],
     pub(crate) rafts: &'a [RaftActorHandle],
