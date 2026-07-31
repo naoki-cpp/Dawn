@@ -6,12 +6,14 @@ on:
       - agent/collapse-production-runtime-tick-pipeline
     paths:
       - tools/apply_issue_219.py
+      - tools/issue_219_trigger.txt
       - .github/workflows/apply-issue-219.yml
   pull_request:
     branches:
       - main
     paths:
       - tools/apply_issue_219.py
+      - tools/issue_219_trigger.txt
       - .github/workflows/apply-issue-219.yml
 
 permissions:
@@ -66,6 +68,7 @@ jobs:
       - name: Remove temporary migration files
         run: |
           rm -f tools/apply_issue_219.py
+          rm -f tools/issue_219_trigger.txt
           rm -f .github/workflows/apply-issue-219.yml
 
       - name: Commit implementation
