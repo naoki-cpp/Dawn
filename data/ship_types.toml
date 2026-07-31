@@ -1,10 +1,11 @@
 # ============================================================
-# ship_types.toml — ship balance data
+# ship_types.toml — authoritative ship balance data
 #
-# Loaded at server startup. No rebuild needed to adjust values.
-# Falls back to hardcoded defaults if file is missing.
+# Required at server startup. Missing or invalid data is a fatal startup error.
+# No Rust balance fallback exists.
 #
 # class: "Frigate" | "Cruiser" | "Battleship"
+# buildable: whether players may build this packaged hull
 # slot_layout: { high, mid, low, rig }
 # base_stats:
 #   max_speed             — base max speed without modules (units/tick)
@@ -25,12 +26,13 @@
 #   Cruiser mass=30M inertia=0.25 → τ=75 → align≈104tick≈10.4s
 # ============================================================
 
-# ── NPC ship types ───────────────────────────────────────────
+# ── NPC ship types ─────────────────────────────────────────
 
 [[ship_types]]
-id    = 1
-name  = "NPC Frigate"
-class = "Frigate"
+id        = 1
+name      = "NPC Frigate"
+class     = "Frigate"
+buildable = false
 
 [ship_types.slot_layout]
 high = 3
@@ -54,9 +56,10 @@ sig_radius            = 40.0
 # ----
 
 [[ship_types]]
-id    = 3
-name  = "NPC Destroyer"
-class = "Frigate"
+id        = 3
+name      = "NPC Destroyer"
+class     = "Frigate"
+buildable = false
 
 [ship_types.slot_layout]
 high = 4
@@ -80,9 +83,10 @@ sig_radius            = 60.0
 # ----
 
 [[ship_types]]
-id    = 4
-name  = "NPC Cruiser"
-class = "Cruiser"
+id        = 4
+name      = "NPC Cruiser"
+class     = "Cruiser"
+buildable = false
 
 [ship_types.slot_layout]
 high = 5
@@ -106,9 +110,10 @@ sig_radius            = 125.0
 # ── Voral Drift ship types ───────────────────────────────────
 
 [[ship_types]]
-id    = 7
-name  = "Magpie"
-class = "Frigate"
+id        = 7
+name      = "Magpie"
+class     = "Frigate"
+buildable = true
 
 [ship_types.slot_layout]
 high = 2   # small weapon + utility
@@ -130,12 +135,13 @@ cap_recharge_per_tick = 8.0            # AB (100 GJ / 10 tick = 10/tick) > recha
                                         # gun alone (60 GJ / 10 tick = 6/tick) → sustainable
 sig_radius            = 35.0
 
-# ── Player ship types ────────────────────────────────────────
+# ── Player ship types ───────────────────────────────────────
 
 [[ship_types]]
-id    = 5
-name  = "Player Destroyer"
-class = "Frigate"
+id        = 5
+name      = "Player Destroyer"
+class     = "Frigate"
+buildable = false
 
 [ship_types.slot_layout]
 high = 4
@@ -159,9 +165,10 @@ sig_radius            = 60.0
 # ----
 
 [[ship_types]]
-id    = 6
-name  = "Player Cruiser"
-class = "Cruiser"
+id        = 6
+name      = "Player Cruiser"
+class     = "Cruiser"
+buildable = false
 
 [ship_types.slot_layout]
 high = 5

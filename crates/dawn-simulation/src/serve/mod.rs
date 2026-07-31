@@ -13,7 +13,7 @@ pub(crate) use single::run_phase4_server;
 use aoi_delivery::AoiDelivery;
 use dawn_core::{NodeId, SectorBounds, SectorId, ShipId};
 use dawn_sector::node::SimulationNode;
-use dawn_sector::{data_loader, galaxy::Galaxy, modules, ship_types};
+use dawn_sector::{galaxy::Galaxy, game_data::runtime_catalog};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -197,12 +197,9 @@ pub(crate) fn build_serve_node(
 }
 
 fn register_data_driven_definitions(node: &mut SimulationNode) {
-    for def in data_loader::load_modules("data/modules.toml", modules::all_modules()) {
-        node.register_module(def);
-    }
-    for def in data_loader::load_ship_types("data/ship_types.toml", ship_types::all_ship_types()) {
-        node.register_ship_type(def);
-    }
+    let catalog = runtime_catalog()
+        .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}"));
+    catalog.register_into(node);
 }
 
 // ── Integration tests ─────────────────────────────────────────────────────────
@@ -226,7 +223,13 @@ mod serve_pipeline_tests {
         let mut node = SimulationNode::new(id, sector, bounds);
         node.set_population_cap(pop_cap);
         node.set_galaxy(std::sync::Arc::new(Galaxy::demo()));
-        register_data_driven_definitions(&mut node);
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let catalog = dawn_sector::game_data::GameDataCatalog::load_from_paths(
+            root.join(dawn_sector::game_data::PRODUCTION_MODULES_PATH),
+            root.join(dawn_sector::game_data::PRODUCTION_SHIP_TYPES_PATH),
+        )
+        .expect("repository game-data catalog");
+        catalog.register_into(&mut node);
         node
     }
 

@@ -264,10 +264,13 @@ verify_runtime_inputs() {
 		exit 1
 	fi
 
-	if [[ ! -f "$repo_root/data/galaxy.toml" ]]; then
-		echo "Required runtime data file missing: $repo_root/data/galaxy.toml" >&2
-		exit 1
-	fi
+	local data_file
+	for data_file in galaxy.toml modules.toml ship_types.toml; do
+		if [[ ! -f "$repo_root/data/$data_file" ]]; then
+			echo "Required runtime data file missing: $repo_root/data/$data_file" >&2
+			exit 1
+		fi
+	done
 }
 
 rewrite_cluster_configs() {
@@ -373,12 +376,8 @@ stage_runtime_bundle() {
 
 	mkdir -p "$stage_dir/data"
 	cp "$repo_root/data/galaxy.toml" "$stage_dir/data/galaxy.toml"
-	if [[ -f "$repo_root/data/modules.toml" ]]; then
-		cp "$repo_root/data/modules.toml" "$stage_dir/data/modules.toml"
-	fi
-	if [[ -f "$repo_root/data/ship_types.toml" ]]; then
-		cp "$repo_root/data/ship_types.toml" "$stage_dir/data/ship_types.toml"
-	fi
+	cp "$repo_root/data/modules.toml" "$stage_dir/data/modules.toml"
+	cp "$repo_root/data/ship_types.toml" "$stage_dir/data/ship_types.toml"
 
 	rewrite_cluster_configs "${node_ips[0]}" "${node_ips[1]}" "${node_ips[2]}"
 }

@@ -233,6 +233,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "tempfile",
+ "thiserror",
  "tokio",
  "toml",
 ]

@@ -1,8 +1,9 @@
-//! 標準モジュール定義カタログ。
+//! Stable module identifiers.
+//!
+//! Balance values are authoritative in `data/modules.toml` and are loaded by
+//! [`crate::game_data::GameDataCatalog`].
 
-use dawn_core::fitting::{
-    ActivationMode, ModuleDefinition, ModuleId, ModuleKind, SlotKind, StatDelta,
-};
+use dawn_core::fitting::{ModuleDefinition, ModuleId};
 
 pub const MODULE_RAILGUN_SMALL: ModuleId = ModuleId(1);
 pub const MODULE_RAILGUN_MEDIUM: ModuleId = ModuleId(2);
@@ -10,205 +11,69 @@ pub const MODULE_SHIELD_BASIC: ModuleId = ModuleId(3);
 pub const MODULE_ARMOR_BASIC: ModuleId = ModuleId(4);
 pub const MODULE_AFTERBURNER: ModuleId = ModuleId(5);
 pub const MODULE_SENSOR_BOOSTER: ModuleId = ModuleId(6);
+pub const MODULE_RAILGUN_HEAVY: ModuleId = ModuleId(7);
+pub const MODULE_SHIELD_LARGE: ModuleId = ModuleId(8);
+pub const MODULE_ARMOR_REINFORCED: ModuleId = ModuleId(9);
+pub const MODULE_AFTERBURNER_10MN: ModuleId = ModuleId(10);
+pub const MODULE_SIGNAL_AMPLIFIER: ModuleId = ModuleId(11);
 pub const MODULE_FOLD_DISRUPTOR: ModuleId = ModuleId(12);
 pub const MODULE_SMALL_SHIELD_BOOSTER: ModuleId = ModuleId(13);
 pub const MODULE_SMALL_ARMOR_REPAIRER: ModuleId = ModuleId(14);
 pub const MODULE_SMALL_REMOTE_SHIELD_BOOSTER: ModuleId = ModuleId(15);
 pub const MODULE_SMALL_REMOTE_ARMOR_REPAIRER: ModuleId = ModuleId(16);
 
+pub(crate) const REQUIRED_MODULE_IDS: &[ModuleId] = &[
+    MODULE_RAILGUN_SMALL,
+    MODULE_RAILGUN_MEDIUM,
+    MODULE_SHIELD_BASIC,
+    MODULE_ARMOR_BASIC,
+    MODULE_AFTERBURNER,
+    MODULE_SENSOR_BOOSTER,
+    MODULE_RAILGUN_HEAVY,
+    MODULE_SHIELD_LARGE,
+    MODULE_ARMOR_REINFORCED,
+    MODULE_AFTERBURNER_10MN,
+    MODULE_SIGNAL_AMPLIFIER,
+    MODULE_FOLD_DISRUPTOR,
+    MODULE_SMALL_SHIELD_BOOSTER,
+    MODULE_SMALL_ARMOR_REPAIRER,
+    MODULE_SMALL_REMOTE_SHIELD_BOOSTER,
+    MODULE_SMALL_REMOTE_ARMOR_REPAIRER,
+];
+
+/// Compatibility accessor for callers that need the repository's production
+/// definitions in tests or tooling. Runtime startup should load one
+/// [`crate::game_data::GameDataCatalog`] and register it as a unit.
 pub fn all_modules() -> Vec<ModuleDefinition> {
-    vec![
-        // ── Weapons (High / Active) ──────────────────────────────────────────
-        // Frigate recharge 10 GJ/tick → 100 GJ per 10-tick cycle.
-        // Gun alone: 100 - 60 = +40/cycle (sustainable).
-        // Gun + AB:  100 - 60 - 80 = -40/cycle → drains in ~12 cycles (12 s).
-        ModuleDefinition {
-            id: MODULE_RAILGUN_SMALL,
-            name: "Small Railgun I".to_string(),
-            kind: ModuleKind::Weapon,
-            slot: SlotKind::High,
-            activation_mode: ActivationMode::Active,
-            cap_cost_per_cycle: 60.0,
-            cycle_time_ticks: 10,
-            stat_delta: StatDelta {
-                weapon_damage_add: 25.0,
-                weapon_range_add: 3_000.0,
-                falloff_range_add: 2_000.0,
-                tracking_speed_add: 0.035,
-                ..StatDelta::ZERO
-            },
-        },
-        ModuleDefinition {
-            id: MODULE_RAILGUN_MEDIUM,
-            name: "Medium Railgun I".to_string(),
-            kind: ModuleKind::Weapon,
-            slot: SlotKind::High,
-            activation_mode: ActivationMode::Active,
-            cap_cost_per_cycle: 100.0,
-            cycle_time_ticks: 14,
-            stat_delta: StatDelta {
-                weapon_damage_add: 50.0,
-                weapon_range_add: 2_500.0,
-                weapon_cooldown_add: 4,
-                ..StatDelta::ZERO
-            },
-        },
-        // ── Shield (Mid / Passive) ───────────────────────────────────────────
-        ModuleDefinition {
-            id: MODULE_SHIELD_BASIC,
-            name: "Basic Shield Extender".to_string(),
-            kind: ModuleKind::ShieldBooster,
-            slot: SlotKind::Mid,
-            activation_mode: ActivationMode::Passive,
-            cap_cost_per_cycle: 0.0,
-            cycle_time_ticks: 0,
-            stat_delta: StatDelta {
-                max_shield_add: 300.0,
-                ..StatDelta::ZERO
-            },
-        },
-        // ── Armor (Low / Passive) ────────────────────────────────────────────
-        ModuleDefinition {
-            id: MODULE_ARMOR_BASIC,
-            name: "Basic Armor Plate".to_string(),
-            kind: ModuleKind::ArmorRepairer,
-            slot: SlotKind::Low,
-            activation_mode: ActivationMode::Passive,
-            cap_cost_per_cycle: 0.0,
-            cycle_time_ticks: 0,
-            stat_delta: StatDelta {
-                max_armor_add: 200.0,
-                ..StatDelta::ZERO
-            },
-        },
-        ModuleDefinition {
-            id: MODULE_SMALL_SHIELD_BOOSTER,
-            name: "Small Shield Booster I".to_string(),
-            kind: ModuleKind::ShieldBooster,
-            slot: SlotKind::Mid,
-            activation_mode: ActivationMode::Active,
-            cap_cost_per_cycle: 45.0,
-            cycle_time_ticks: 8,
-            stat_delta: StatDelta {
-                repair_amount: 60.0,
-                ..StatDelta::ZERO
-            },
-        },
-        ModuleDefinition {
-            id: MODULE_SMALL_ARMOR_REPAIRER,
-            name: "Small Armor Repairer I".to_string(),
-            kind: ModuleKind::ArmorRepairer,
-            slot: SlotKind::Low,
-            activation_mode: ActivationMode::Active,
-            cap_cost_per_cycle: 40.0,
-            cycle_time_ticks: 8,
-            stat_delta: StatDelta {
-                repair_amount: 55.0,
-                ..StatDelta::ZERO
-            },
-        },
-        // ── Propulsion (Mid / Active) ────────────────────────────────────────
-        ModuleDefinition {
-            id: MODULE_AFTERBURNER,
-            name: "1MN Afterburner".to_string(),
-            kind: ModuleKind::Propulsion,
-            slot: SlotKind::Mid,
-            activation_mode: ActivationMode::Active,
-            cap_cost_per_cycle: 100.0, // 10 GJ/tick — must exceed Magpie's 8 GJ/tick recharge
-            cycle_time_ticks: 10,
-            stat_delta: StatDelta {
-                speed_multiplier: 2.35,
-                ..StatDelta::ZERO
-            },
-        },
-        // ── Sensor (Mid / Passive) ───────────────────────────────────────────
-        ModuleDefinition {
-            id: MODULE_SENSOR_BOOSTER,
-            name: "Sensor Booster I".to_string(),
-            kind: ModuleKind::Sensor,
-            slot: SlotKind::Mid,
-            activation_mode: ActivationMode::Passive,
-            cap_cost_per_cycle: 0.0,
-            cycle_time_ticks: 0,
-            stat_delta: StatDelta {
-                lock_time_add: -2,
-                max_locks_add: 1,
-                ..StatDelta::ZERO
-            },
-        },
-        // ── Tackle (Mid / Active) — ADR-0024 ────────────────────────────────
-        ModuleDefinition {
-            id: MODULE_FOLD_DISRUPTOR,
-            name: "Fold Disruptor I".to_string(),
-            kind: ModuleKind::Tackle,
-            slot: SlotKind::Mid,
-            activation_mode: ActivationMode::Active,
-            cap_cost_per_cycle: 30.0,
-            cycle_time_ticks: 10,
-            stat_delta: StatDelta {
-                tackle_range_add: 20_000.0,
-                ..StatDelta::ZERO
-            },
-        },
-        // ── Remote Repair / Logistics (Mid+Low / Active) — ADR-0036 ─────────
-        // Targeted at a Locked ally (never self, unlike ShieldBooster/
-        // ArmorRepairer). Slightly less cap-efficient than the local repair
-        // equivalents and range-limited (15 km), trading self-sufficiency for
-        // the ability to support a fleet from beyond weapon range.
-        ModuleDefinition {
-            id: MODULE_SMALL_REMOTE_SHIELD_BOOSTER,
-            name: "Small Remote Shield Booster I".to_string(),
-            kind: ModuleKind::RemoteShieldBooster,
-            slot: SlotKind::Mid,
-            activation_mode: ActivationMode::Active,
-            cap_cost_per_cycle: 55.0,
-            cycle_time_ticks: 8,
-            stat_delta: StatDelta {
-                repair_amount: 50.0,
-                repair_range_add: 15_000.0,
-                ..StatDelta::ZERO
-            },
-        },
-        ModuleDefinition {
-            id: MODULE_SMALL_REMOTE_ARMOR_REPAIRER,
-            name: "Small Remote Armor Repairer I".to_string(),
-            kind: ModuleKind::RemoteArmorRepairer,
-            slot: SlotKind::Low,
-            activation_mode: ActivationMode::Active,
-            cap_cost_per_cycle: 50.0,
-            cycle_time_ticks: 8,
-            stat_delta: StatDelta {
-                repair_amount: 45.0,
-                repair_range_add: 15_000.0,
-                ..StatDelta::ZERO
-            },
-        },
-    ]
+    crate::game_data::repository_catalog()
+        .unwrap_or_else(|error| panic!("failed to load repository game-data catalog: {error}"))
+        .modules()
+        .to_vec()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::fitting::ActivationMode;
+    use dawn_core::fitting::{ActivationMode, ModuleKind, SlotKind};
     use dawn_ecs::components::ShipStatsComp;
 
     #[test]
-    fn all_modules_have_unique_ids() {
+    fn all_required_module_ids_are_unique() {
         use std::collections::HashSet;
-        let ids: HashSet<u32> = all_modules().iter().map(|m| m.id.0).collect();
-        assert_eq!(ids.len(), all_modules().len());
+        let ids: HashSet<_> = REQUIRED_MODULE_IDS.iter().copied().collect();
+        assert_eq!(ids.len(), REQUIRED_MODULE_IDS.len());
     }
 
     #[test]
     fn weapon_modules_are_active_and_in_high_slot() {
-        for m in all_modules() {
-            if m.kind == ModuleKind::Weapon {
-                assert_eq!(m.slot, SlotKind::High);
+        for module in all_modules() {
+            if module.kind == ModuleKind::Weapon {
+                assert_eq!(module.slot, SlotKind::High);
                 assert_eq!(
-                    m.activation_mode,
+                    module.activation_mode,
                     ActivationMode::Active,
                     "weapon '{}' must be Active",
-                    m.name
+                    module.name
                 );
             }
         }
@@ -216,13 +81,13 @@ mod tests {
 
     #[test]
     fn passive_modules_are_not_weapons() {
-        for m in all_modules() {
-            if m.activation_mode == ActivationMode::Passive {
+        for module in all_modules() {
+            if module.activation_mode == ActivationMode::Passive {
                 assert_ne!(
-                    m.kind,
+                    module.kind,
                     ModuleKind::Weapon,
                     "passive module '{}' should not be a weapon",
-                    m.name
+                    module.name
                 );
             }
         }
@@ -236,10 +101,10 @@ mod tests {
 
     #[test]
     fn weapon_modules_provide_positive_damage_and_range() {
-        for m in all_modules() {
-            if m.kind == ModuleKind::Weapon {
-                assert!(m.stat_delta.weapon_damage_add > 0.0);
-                assert!(m.stat_delta.weapon_range_add > 0.0);
+        for module in all_modules() {
+            if module.kind == ModuleKind::Weapon {
+                assert!(module.stat_delta.weapon_damage_add > 0.0);
+                assert!(module.stat_delta.weapon_range_add > 0.0);
             }
         }
     }
