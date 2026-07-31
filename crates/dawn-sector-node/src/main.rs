@@ -127,8 +127,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| {
             anyhow::anyhow!(
                 "failed to bind replication transport on {}: {}",
-                cfg.repl_addr,
-                e
+                cfg.repl_addr, e
             )
         })?;
 
@@ -154,7 +153,7 @@ async fn main() -> anyhow::Result<()> {
     // Raft warm-up: tick until a leader is elected (≤ 20 ticks election timeout).
     println!("[Node] Raft warm-up (30 ticks)...");
     for _ in 0..30 {
-        transit::step_cluster_node(&mut node, &raft, &mut committed_rx, &[]);
+        let _ = transit::run_runtime_tick(&mut node, &raft, &mut committed_rx, &[], |_, _, _| {});
     }
     println!("[Node] warm-up done. Waiting for players...");
 
