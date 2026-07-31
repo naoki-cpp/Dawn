@@ -1,0 +1,109 @@
+name: Apply issue 220 runtime call sites
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/single-authority-game-data-catalog' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out implementation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/single-authority-game-data-catalog
+          persist-credentials: false
+
+      - name: Use the unified catalog at both runtime entry points
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}: {old!r}")
+              file.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "crates/dawn-sector-node/src/main.rs",
+              "use dawn_sector::{data_loader, galaxy::Galaxy, modules, ship_types, transit};",
+              "use dawn_sector::{game_data::runtime_catalog, galaxy::Galaxy, transit};",
+          )
+          replace_once(
+              "crates/dawn-sector-node/src/main.rs",
+              '''    let modules = data_loader::load_modules("data/modules.toml", modules::all_modules());
+              let ship_types =
+                  data_loader::load_ship_types("data/ship_types.toml", ship_types::all_ship_types());
+          ''',
+              '''    let catalog = runtime_catalog()
+                  .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}"));
+          ''',
+          )
+          replace_once(
+              "crates/dawn-sector-node/src/main.rs",
+              "SimulationNode::restore_from(store, &snapshot, &modules, &ship_types)",
+              "SimulationNode::restore_from(store, &snapshot, catalog.modules(), catalog.ship_types())",
+          )
+          replace_once(
+              "crates/dawn-sector-node/src/main.rs",
+              '''            for def in &modules {
+                          node.register_module(def.clone());
+                      }
+                      for def in &ship_types {
+                          node.register_ship_type(def.clone());
+                      }
+          ''',
+              '''            catalog.register_into(&mut node);
+          ''',
+          )
+
+          replace_once(
+              "crates/dawn-simulation/src/serve/mod.rs",
+              "use dawn_sector::{data_loader, galaxy::Galaxy, modules, ship_types};",
+              "use dawn_sector::{game_data::runtime_catalog, galaxy::Galaxy};",
+          )
+          replace_once(
+              "crates/dawn-simulation/src/serve/mod.rs",
+              '''fn register_data_driven_definitions(node: &mut SimulationNode) {
+              for def in data_loader::load_modules("data/modules.toml", modules::all_modules()) {
+                  node.register_module(def);
+              }
+              for def in data_loader::load_ship_types("data/ship_types.toml", ship_types::all_ship_types()) {
+                  node.register_ship_type(def);
+              }
+          }
+          ''',
+              '''fn register_data_driven_definitions(node: &mut SimulationNode) {
+              let catalog = runtime_catalog()
+                  .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}"));
+              catalog.register_into(node);
+          }
+          ''',
+          )
+          PY
+
+      - name: Format and test workspace
+        run: |
+          cargo fmt --all
+          cargo test --workspace
+
+      - name: Commit implementation and remove this workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-issue-220-call-sites.yml
+          git add -A
+          git commit -m "Route server startup through the unified game-data catalog"
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git push origin HEAD:agent/single-authority-game-data-catalog
