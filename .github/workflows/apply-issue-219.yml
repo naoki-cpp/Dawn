@@ -34,6 +34,29 @@ jobs:
       - name: Apply authoritative Runtime Tick migration
         run: python tools/apply_issue_219.py
 
+      - name: Migrate clustered warm-up path
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/dawn-simulation/src/serve/cluster.rs")
+          text = path.read_text()
+          old = '''            let _ =
+                transit::step_cluster_node(&mut nodes[i], &rafts[i], &mut committed_rxs[i], &[]);
+'''
+          new = '''            let _ = transit::run_runtime_tick(
+                &mut nodes[i],
+                &rafts[i],
+                &mut committed_rxs[i],
+                &[],
+                |_, _, _| {},
+            );
+'''
+          if text.count(old) != 1:
+              raise SystemExit("cluster warm-up path did not match exactly once")
+          path.write_text(text.replace(old, new, 1))
+          PY
+
       - name: Format Rust
         run: cargo fmt --all
 
