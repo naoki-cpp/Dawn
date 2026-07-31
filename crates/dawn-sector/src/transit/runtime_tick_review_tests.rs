@@ -20,13 +20,7 @@ fn rejected_auto_jump_is_drained_without_being_reported_as_proposed() {
     let raft = RaftActorHandle::new(raft_tx);
     let (_committed_tx, mut committed_rx) = mpsc::unbounded_channel();
 
-    let output = run_runtime_tick(
-        &mut node,
-        &raft,
-        &mut committed_rx,
-        &[],
-        |_, _, _| {},
-    );
+    let output = run_runtime_tick(&mut node, &raft, &mut committed_rx, &[], |_, _, _| {});
 
     assert!(
         output.pending_auto_jumps.is_empty(),
