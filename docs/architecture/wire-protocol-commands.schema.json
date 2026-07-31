@@ -526,7 +526,7 @@
       ]
     },
     {
-      "description": "Move the entire stack of an item between a docked ship's own cargo\nand the caller's station inventory (ADR-0034 9B), in the direction\n`direction` says (`\"ToStation\"` or `\"ToShip\"`). `item_type` is one of\n`\"Module\"`, `\"PackagedShip\"`, `\"ScrapMetal\"` (matching `ItemRow`'s\nwire shape) with `module_id`/`ship_type_id` populated only for the\nvariant that uses them (`0` otherwise).",
+      "description": "Move the entire stack of an item between a docked ship's own cargo\nand the caller's station inventory (ADR-0034 9B). `item_id` is a\nvariant-preserving identity, so unrelated ID combinations cannot be\nrepresented on the wire.",
       "type": "object",
       "properties": {
         "TransferToStationCommand": {
@@ -535,22 +535,12 @@
             "direction": {
               "type": "string"
             },
-            "item_type": {
-              "type": "string"
-            },
-            "module_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
+            "item_id": {
+              "$ref": "#/$defs/ItemWire"
             },
             "ship_id": {
               "type": "integer",
               "format": "uint64",
-              "minimum": 0
-            },
-            "ship_type_id": {
-              "type": "integer",
-              "format": "uint32",
               "minimum": 0
             },
             "station_id": {
@@ -562,9 +552,7 @@
           "required": [
             "ship_id",
             "station_id",
-            "item_type",
-            "module_id",
-            "ship_type_id",
+            "item_id",
             "direction"
           ]
         }
@@ -576,6 +564,61 @@
     }
   ],
   "$defs": {
+    "ItemWire": {
+      "description": "Variant-preserving Item identity used by every client/server wire surface.\n\nThe externally tagged representation is postcard-compatible and carries\nonly the identifier owned by the selected variant:\n`{\"Module\":{\"module_id\":3}}`,\n`{\"PackagedShip\":{\"ship_type_id\":7}}`, or `\"ScrapMetal\"` in JSON.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "ScrapMetal"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Module": {
+              "type": "object",
+              "properties": {
+                "module_id": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "module_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Module"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "PackagedShip": {
+              "type": "object",
+              "properties": {
+                "ship_type_id": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "ship_type_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "PackagedShip"
+          ]
+        }
+      ]
+    },
     "NavigationTargetWire": {
       "description": "A `{\"Ship\": N}` or `{\"Gate\": N}` navigation target for Approach,\nOrbit, and KeepAtRange (externally tagged: the variant name is the JSON\nobject's only key).",
       "oneOf": [

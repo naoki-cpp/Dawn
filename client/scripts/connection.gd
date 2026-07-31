@@ -265,7 +265,7 @@ func send_market_place_order_command(
 	p_price: int,
 	p_quantity: int
 ) -> void:
-	_send_bytes(_cmd.market_build("PlaceMarketOrderCommand", {
+	_send_bytes(_cmd.market_place_order_command({
 		"ship_id": p_ship_id,
 		"item_type": p_item_type,
 		"module_id": p_module_id,

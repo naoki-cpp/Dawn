@@ -23,13 +23,8 @@
         "PlaceMarketOrderCommand": {
           "type": "object",
           "properties": {
-            "item_type": {
-              "type": "string"
-            },
-            "module_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
+            "item_id": {
+              "$ref": "#/$defs/ItemWire"
             },
             "price": {
               "type": "integer",
@@ -46,20 +41,13 @@
               "format": "uint64",
               "minimum": 0
             },
-            "ship_type_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
             "side": {
               "type": "string"
             }
           },
           "required": [
             "ship_id",
-            "item_type",
-            "module_id",
-            "ship_type_id",
+            "item_id",
             "side",
             "price",
             "quantity"
@@ -94,5 +82,62 @@
         "CancelMarketOrderCommand"
       ]
     }
-  ]
+  ],
+  "$defs": {
+    "ItemWire": {
+      "description": "Variant-preserving Item identity used by every client/server wire surface.\n\nThe externally tagged representation is postcard-compatible and carries\nonly the identifier owned by the selected variant:\n`{\"Module\":{\"module_id\":3}}`,\n`{\"PackagedShip\":{\"ship_type_id\":7}}`, or `\"ScrapMetal\"` in JSON.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "ScrapMetal"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Module": {
+              "type": "object",
+              "properties": {
+                "module_id": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "module_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Module"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "PackagedShip": {
+              "type": "object",
+              "properties": {
+                "ship_type_id": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "ship_type_id"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "PackagedShip"
+          ]
+        }
+      ]
+    }
+  }
 }

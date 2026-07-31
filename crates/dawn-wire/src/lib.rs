@@ -80,6 +80,7 @@
 mod client_command;
 mod hello_resume;
 mod initial_state;
+mod item;
 mod market;
 mod player_loadout;
 mod server_event;
@@ -93,6 +94,7 @@ pub use initial_state::{
     AbsPosWire, BuildableShipTypeWire, CelestialBodyWire, InitialStateWire, JumpGateWire,
     ShipStateWire, StationWire, SystemWire,
 };
+pub use item::{ItemWire, ItemWireError};
 pub use market::{
     market_command_wire_json_schema, MarketCommandWire, MarketOrderWire, MarketSnapshotWire,
 };

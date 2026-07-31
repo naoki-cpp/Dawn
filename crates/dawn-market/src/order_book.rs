@@ -1,11 +1,9 @@
 //! SQLite-backed limit order book + Currency escrow (ADR-0034 §5/§6).
 //!
-//! Column encoding for `ItemId` mirrors the flat `item_type`/`module_id`/
-//! `ship_type_id` shape `dawn-sector`'s `station_inventory_db.rs` already
-//! uses -- easier to eyeball with a sqlite3 CLI, and one fewer encoding to
-//! keep in sync. This module can't reuse that code directly (`dawn-market`
-//! must not depend on `dawn-sector`, ADR-0034 §4), so the encoding is
-//! duplicated here.
+//! The existing flat SQLite columns remain unchanged for compatibility,
+//! while their encoding and validation are shared through `dawn_core::ItemId`.
+//! The Market therefore stays independent of `dawn-sector` without carrying
+//! a second Item mapping.
 //!
 //! Same-price priority is time priority: SQLite's own `rowid` (auto-
 //! incrementing insertion order) is time priority for free, so orders carry
@@ -47,9 +45,10 @@
 //! because their cargo ship cannot be reconstructed safely.
 
 use dawn_core::{
-    CreditItemCommand, EntityId, ItemId, ModuleId, PlayerId, RemoveItemCommand, ReturnItemCommand,
-    ShipId, ShipTypeId,
+    CreditItemCommand, EntityId, ItemId, PlayerId, RemoveItemCommand, ReturnItemCommand, ShipId,
 };
+#[cfg(test)]
+use dawn_core::{ModuleId, ShipTypeId};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::matching::{self, IncomingOrder, RestingOrder};
@@ -129,20 +128,11 @@ pub struct CancelledOrder {
 }
 
 fn item_id_to_columns(item_id: ItemId) -> (&'static str, u32, u32) {
-    match item_id {
-        ItemId::Module(module_id) => ("Module", module_id.0, 0),
-        ItemId::PackagedShip(ship_type_id) => ("PackagedShip", 0, ship_type_id.0),
-        ItemId::ScrapMetal => ("ScrapMetal", 0, 0),
-    }
+    item_id.storage_columns().into_tuple()
 }
 
 fn columns_to_item_id(item_type: &str, module_id: u32, ship_type_id: u32) -> Option<ItemId> {
-    match item_type {
-        "Module" => Some(ItemId::Module(ModuleId(module_id))),
-        "PackagedShip" => Some(ItemId::PackagedShip(ShipTypeId(ship_type_id))),
-        "ScrapMetal" => Some(ItemId::ScrapMetal),
-        _ => None,
-    }
+    ItemId::from_storage_columns(item_type, module_id, ship_type_id).ok()
 }
 
 fn columns_to_side(side: &str) -> OrderSide {
@@ -1136,5 +1126,31 @@ mod tests {
         }
 
         assert_eq!(market.open_orders_for(PlayerId(1)).unwrap().len(), 200);
+    }
+
+    #[test]
+    fn every_item_variant_round_trips_through_market_persistence() {
+        let mut db = MarketDb::open_in_memory().unwrap();
+        let player = PlayerId(1);
+        let ship = ShipId(EntityId::from_raw(1));
+        let expected = vec![
+            ItemId::Module(ModuleId(3)),
+            ItemId::PackagedShip(ShipTypeId(7)),
+            ItemId::ScrapMetal,
+        ];
+
+        for item_id in &expected {
+            db.place_order(player, ship, *item_id, OrderSide::Ask, 10, 1)
+                .unwrap()
+                .unwrap();
+        }
+
+        let actual: Vec<ItemId> = db
+            .open_orders_for(player)
+            .unwrap()
+            .into_iter()
+            .map(|order| order.item_id)
+            .collect();
+        assert_eq!(actual, expected);
     }
 }

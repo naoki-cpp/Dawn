@@ -10,6 +10,7 @@
 //! e.g. a `Unknown` fallback for `ModuleKind` -- so this crate's types stay
 //! the exact current schema without needing that tolerance).
 
+use crate::ItemWire;
 use dawn_core::{ModuleKind, StatDelta};
 use serde::{Deserialize, Serialize};
 
@@ -28,14 +29,11 @@ pub struct ModuleRowWire {
     pub stat_delta: StatDelta,
 }
 
-/// One row of `PlayerLoadout`'s `inventory`/`station_inventory` arrays. The
-/// one shape every `ItemId` variant (Module/PackagedShip/ScrapMetal)
-/// projects into -- unused fields for a given variant are `0`/`""`.
+/// One row of `PlayerLoadout`'s `inventory`/`station_inventory` arrays.
+/// `item_id` preserves the Item variant and carries only its owned ID.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ItemRowWire {
-    pub item_type: String,
-    pub module_id: u32,
-    pub ship_type_id: u32,
+    pub item_id: ItemWire,
     pub name: String,
     pub kind: String,
     pub slot: String,

@@ -89,9 +89,8 @@ fn wire_to_module_row(row: dawn_wire::ModuleRowWire) -> dawn_client_core::Module
 
 fn wire_to_item_row(row: dawn_wire::ItemRowWire) -> dawn_client_core::ItemRow {
     dawn_client_core::ItemRow {
-        item_type: crate::item_row_gd::parse_item_type(&row.item_type),
-        module_id: row.module_id,
-        ship_type_id: row.ship_type_id,
+        item_id: dawn_core::ItemId::try_from(row.item_id)
+            .expect("server emitted an invalid Item wire identity"),
         name: row.name,
         kind: row.kind,
         slot: row.slot,
