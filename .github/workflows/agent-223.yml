@@ -1,0 +1,59 @@
+name: Agent 223 Migration
+
+on:
+  push:
+    branches: [agent/replica-catch-up]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-223-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: "1.97.1"
+
+jobs:
+  migrate-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: true
+          ref: agent/replica-catch-up
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
+
+      - name: Apply issue 223 migration
+        run: python3 tools/agent_223.py
+
+      - name: Format
+        run: cargo fmt --all
+
+      - name: Check generated diff
+        run: git diff --check
+
+      - name: Test replication catch-up
+        run: cargo test -p dawn-replication
+
+      - name: Test workspace
+        run: cargo test --workspace
+
+      - name: Clippy workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Commit verified implementation
+        run: |
+          rm tools/agent_223.py
+          rm .github/workflows/agent-223.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Complete replica catch-up"
+          git push origin HEAD:agent/replica-catch-up
