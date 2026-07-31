@@ -23,18 +23,6 @@ date     : 2026-07-30
 `FileEventStore`はwrite/flush失敗時にpanicするが、1 Sector = 1 processのcrash-only recoveryと整合する。
 **再評価:** disk-full crashが運用問題になるか、1 processが複数Sectorを所有する場合。
 
-### ~~M-6~~ serve adapter / NPC spawn重複
-
-解消済み。NPC spawn loopは`SimulationNode::spawn_npc_frigates`へ集約。process model固有の薄いadapterは維持する。
-
-### ~~M-8~~ fitting emission tail重複
-
-解消済み。入口の異なるvalidationは維持し、共通tailを`reapply_fitting` / `emit_ship_fitted`へ集約した。
-
-### ~~M-10~~ postcard encode/decode分散
-
-2026-07-11解消。詳細はcompleted.md。
-
 ## リファクタロードマップ
 
 ### R-2（保留）: client `main.gd`追加分割
@@ -45,15 +33,12 @@ live state、interaction、presentationは分離済み。残るscene lifecycle /
 ### R-3（保留）: `node/`系ファイルの再肥大
 
 総行数だけでは分割しない。実装部分約700行超、独立した変更理由の混在、またはdriftの実害をtriggerとする。
-#197〜#199をファイル分割より優先する。
 
 ## 一覧
 
 | 項目 | 状態 |
 |---|---|
-| Transit state mutation | 解消済み。`node::transit`へ集約 |
 | R-2 / R-3 | 保留・trigger付き |
 | M-3 / M-9 | 保留・trigger付き |
-| M-6 / M-8 / M-10 | 解消済み |
 
 採らない方針: CRDT/LWW、protobuf、薄いadapterのための共有runtime crate、行数削減目的の網羅match・domain型の破壊、初回LAN検証でのTLS/認証。

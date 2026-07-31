@@ -541,8 +541,9 @@ impl<S: EventStore> SimulationNode<S> {
     /// identity needed to use it as a raw offset. `entry_pos_abs` is the precise f64
     /// Sector-frame arrival point (the destination Gate's `abs_m`, or the
     /// origin for a non-Gate Transit); `rebase_after_transit` re-anchors
-    /// against it (appending the authoritative `AnchorRebased` event, ADR-0029)
-    /// so the Ship can immediately jump back out (ADR-0009).
+    /// against it and returns the authoritative `AnchorRebased` event for
+    /// `import_transit` to append (ADR-0029), so the Ship can immediately
+    /// jump back out (ADR-0009).
     ///
     /// Appends `SectorTransitCompleted` from this (the `to`) Sector's
     /// perspective. Folded into [`handle_transit_commit`](Self::handle_transit_commit);
