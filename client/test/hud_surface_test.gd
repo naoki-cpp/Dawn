@@ -45,6 +45,10 @@ func _item(overrides: Dictionary) -> ItemRow:
 	}
 	for key: String in overrides:
 		base[key] = overrides[key]
+	if not overrides.has("module_id"):
+		base["module_id"] = 1 if base["item_type"] == "Module" else 0
+	if not overrides.has("ship_type_id"):
+		base["ship_type_id"] = 1 if base["item_type"] == "PackagedShip" else 0
 	return ItemRow.from_json(base)
 
 
