@@ -22,7 +22,9 @@ jobs:
           persist-credentials: true
 
       - name: Apply review fixes
-        run: python3 .github/fix-issue-220-review.py
+        run: |
+          python3 .github/fix-issue-220-review.py
+          python3 .github/fix-issue-220-gdext.py
 
       - name: Format and validate
         run: |
@@ -34,12 +36,16 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/fix-issue-220-review.yml .github/fix-issue-220-review.py
+          git rm \
+            .github/workflows/fix-issue-220-review.yml \
+            .github/fix-issue-220-review.py \
+            .github/fix-issue-220-gdext.py
           git add \
             crates/dawn-sector/src/game_data/mod.rs \
             crates/dawn-sector/src/game_data/tests.rs \
             crates/dawn-sector/src/data_loader/mod.rs \
             crates/dawn-simulation/src/serve/mod.rs \
+            crates/dawn-client-gdext/src/loadout_gd.rs \
             scripts/deploy-pi-cluster.sh \
             docs/architecture/entity-model.md \
             docs/architecture/game-data-catalog.md
