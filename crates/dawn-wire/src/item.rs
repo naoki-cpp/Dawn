@@ -15,11 +15,9 @@ pub enum ItemWire {
     ScrapMetal,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemWireError {
-    #[error("Module item identity requires a non-zero module_id")]
     ZeroModuleId,
-    #[error("PackagedShip item identity requires a non-zero ship_type_id")]
     ZeroShipTypeId,
 }
 
