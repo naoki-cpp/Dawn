@@ -1,9 +1,62 @@
 //! # dawn-replication
 //!
-//! Sector-local event-log gossip and bounded replica recovery (ADR-0021,
-//! ADR-0027). Foreign replicas are recovery data only and are never applied to
-//! a live local world.
+//! Sector-local event log replication (ADR-0021, ADR-0027).
+//!
+//! Strategy: gossip-based append-log shipping, not CRDT / LWW. Single ownership
+//! means there are no concurrent writes to merge. Events are idempotent
+//! (INV-004) and ordered by logical tick (INV-005), so receivers can detect
+//! duplicate, overlapping, or missing log ranges by index.
+//!
+//! ## Current scope (8D-2a / 8D-2b / 8D-2c)
+//!
+//! - `LogBatch`: the unit of sector-local append-log shipping.
+//! - `ReplicationTransport`: wire-format-agnostic ordinary log transport.
+//! - `CatchUpTransport`: bounded suffix/snapshot recovery control traffic.
+//! - `InMemoryReplicationBus`: single-process implementation for tests and the
+//!   existing multi-node bench. This replaces `dawn_actor::ReplicationBus`.
+//! - `AntiEntropy`: request missing events by log index range.
+//! - `CatchUpManager`: owns gap detection, suffix requests, compacted-prefix
+//!   snapshot fallback, retries, and resumption from the snapshot log index.
+//! - `TcpReplicationTransport`: LAN plaintext transport using length-prefixed
+//!   postcard frames for both gossip and catch-up control messages.
+//!
+//! ## (8D-2d)
+//!
+//! - `SnapshotTransfer`: transfer raw snapshot bytes over a dedicated TCP
+//!   connection; callers handle snapshot serialization.
+//!
+//! ## Consumer side
+//!
+//! - `ReplicaSet`: holds a gap-checked, idempotent, ordered recovery replica of
+//!   each foreign Sector. A replica may contain an opaque snapshot plus the
+//!   retained event suffix after that snapshot boundary.
+//! - Foreign replicas are recovery data only. This crate never applies them to
+//!   the live local world.
+//!
+//! ## Example
+//!
+//! ```
+//! use dawn_core::{AbsolutePosition, DomainEvent, NodeId, SectorId, ShipId, ShipTypeId, Tick};
+//! use dawn_core::events::ShipSpawned;
+//! use dawn_replication::{Ingest, LogBatch, ReplicaSet};
+//!
+//! let ship_id = ShipId::new(NodeId(1), 1);
+//! let event = DomainEvent::ShipSpawned(ShipSpawned {
+//!     ship_id,
+//!     sector_id: SectorId(0),
+//!     initial_position: AbsolutePosition::ORIGIN,
+//!     ship_type_id: ShipTypeId(1),
+//!     tick: Tick::ZERO,
+//! });
+//! let batch = LogBatch::new(SectorId(0), 0, vec![event]);
+//!
+//! let mut replica = ReplicaSet::new(128);
+//! assert!(matches!(replica.ingest(&batch), Ingest::Applied { applied: 1, next_index: 1, .. }));
+//! assert_eq!(replica.next_index(SectorId(0)), 1);
+//! ```
 
+// Rust API Guidelines C-DEBUG: catch new pub types that forget to derive
+// Debug at compile time instead of relying on periodic audits (see #83).
 #![warn(missing_debug_implementations)]
 
 pub mod anti_entropy;
@@ -31,6 +84,10 @@ pub use snapshot::SnapshotTransfer;
 pub use tcp::{TcpReplicationError, TcpReplicationTransport};
 
 /// A single gossip payload from a Sector owner's append-only log.
+///
+/// `from_index` is the first log index represented by `events`. Receivers use
+/// `(sector_id, from_index)` to detect gaps and to drop duplicate deliveries
+/// idempotently in the anti-entropy step (ADR-0027 / 8D-2b).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogBatch {
     pub sector_id: SectorId,
@@ -53,7 +110,14 @@ impl LogBatch {
 }
 
 /// Wire-format-agnostic ordinary log-gossip transport.
+///
+/// TCP gossip implements this interface with length-prefixed postcard frames;
+/// the in-memory implementation keeps tests single-process. Catch-up control
+/// messages use the separate [`CatchUpTransport`] interface.
 pub trait ReplicationTransport: Send + Sync {
+    /// Send a batch of events to interested peers.
     fn broadcast(&self, batch: LogBatch);
+
+    /// Subscribe to incoming batches from peers.
     fn subscribe(&self) -> broadcast::Receiver<LogBatch>;
 }
