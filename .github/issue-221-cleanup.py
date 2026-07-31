@@ -11,8 +11,8 @@ def replace(path: str, old: str, new: str) -> None:
 
 replace(
     "crates/dawn-sector/src/node/player_loadout_projection.rs",
-    "    ItemRowWire, ItemWire, ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, SlotCapacityWire,\n",
-    "    ItemRowWire, ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, SlotCapacityWire,\n",
+    "ItemRowWire, ItemWire, ModuleRowWire",
+    "ItemRowWire, ModuleRowWire",
 )
 replace(
     "crates/dawn-sector/src/node/station_inventory_db.rs",
