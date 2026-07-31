@@ -1,6 +1,8 @@
-//! TCP transport for ordinary log gossip and catch-up control traffic.
+//! TCP transport for Sector-local log shipping and catch-up control traffic
+//! (ADR-0027 / 8D-2c).
 //!
-//! Wire format: `[u32 little-endian payload length][postcard frame]`.
+//! Wire format: `[u32 little-endian payload length][postcard ReplicationFrame]`.
+//! The transport is plaintext by design for the Phase 8D LAN milestone.
 
 use crate::{CatchUpMessage, CatchUpTransport, LogBatch, ReplicationTransport};
 use serde::{Deserialize, Serialize};
@@ -37,6 +39,14 @@ pub enum TcpReplicationError {
     FrameTooLarge { actual: usize, max: usize },
 }
 
+/// Plain TCP implementation of [`ReplicationTransport`] and
+/// [`CatchUpTransport`].
+///
+/// Ordinary batches and catch-up control messages share one framed connection
+/// but are delivered to separate bounded inbound channels. Outbound frames are
+/// published to every currently connected peer; the catch-up protocol carries
+/// requester/owner Sector IDs and request IDs so unrelated peers safely ignore
+/// directed control messages.
 #[derive(Debug, Clone)]
 pub struct TcpReplicationTransport {
     local_addr: SocketAddr,
@@ -46,6 +56,7 @@ pub struct TcpReplicationTransport {
 }
 
 impl TcpReplicationTransport {
+    /// Bind a listener and start accepting peer connections.
     pub async fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self, TcpReplicationError> {
         let listener = TcpListener::bind(addr).await?;
         let local_addr = listener.local_addr()?;
@@ -72,6 +83,7 @@ impl TcpReplicationTransport {
         self.local_addr
     }
 
+    /// Connect to one peer and start bidirectional frame forwarding.
     pub async fn connect_peer(&self, addr: SocketAddr) -> Result<(), TcpReplicationError> {
         let stream = TcpStream::connect(addr).await?;
         spawn_connection(
@@ -248,22 +260,53 @@ mod tests {
         let writer = tokio::spawn(async move {
             write_frame(&mut client, &sent).await.unwrap();
         });
-        assert_eq!(read_frame(&mut server).await.unwrap(), Some(frame));
+
+        let received = read_frame(&mut server).await.unwrap().unwrap();
         writer.await.unwrap();
+
+        assert_eq!(received, frame);
+    }
+
+    #[tokio::test]
+    async fn frame_round_trips_catch_up_control() {
+        let (mut client, mut server) = duplex(4096);
+        let frame = ReplicationFrame::CatchUp(CatchUpMessage::Request(CatchUpRequest {
+            request_id: 9,
+            requester_sector_id: SectorId(2),
+            owner_sector_id: SectorId(1),
+            from_index: 5,
+            max_events: 32,
+        }));
+        let sent = frame.clone();
+        let writer = tokio::spawn(async move {
+            write_frame(&mut client, &sent).await.unwrap();
+        });
+
+        let received = read_frame(&mut server).await.unwrap().unwrap();
+        writer.await.unwrap();
+
+        assert_eq!(received, frame);
     }
 
     #[tokio::test]
     async fn oversized_frame_is_rejected() {
         let (mut client, mut server) = duplex(8);
+
         let writer = tokio::spawn(async move {
             client
                 .write_all(&((MAX_FRAME_LEN as u32) + 1).to_le_bytes())
                 .await
                 .unwrap();
         });
+
         let err = read_frame(&mut server).await.unwrap_err();
         writer.await.unwrap();
-        assert!(matches!(err, TcpReplicationError::FrameTooLarge { .. }));
+
+        assert!(matches!(
+            err,
+            TcpReplicationError::FrameTooLarge { actual, max }
+                if actual == MAX_FRAME_LEN + 1 && max == MAX_FRAME_LEN
+        ));
     }
 
     #[tokio::test]
@@ -272,6 +315,7 @@ mod tests {
         let b = TcpReplicationTransport::bind("127.0.0.1:0").await.unwrap();
         let mut batch_rx = b.subscribe();
         let mut catch_up_rx = b.subscribe_catch_up();
+
         a.connect_peer(b.local_addr()).await.unwrap();
 
         let batch = make_batch(SectorId(1), 5, 3);
@@ -290,7 +334,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_wire_batch_is_ingested_into_a_foreign_replica() {
+    async fn a_batch_received_over_the_wire_is_ingested_into_a_replica() {
+        // End-to-end consumer side: owner broadcasts, peer receives over TCP
+        // and feeds the batch into its ReplicaSet, which retains the log.
         let owner = TcpReplicationTransport::bind("127.0.0.1:0").await.unwrap();
         let peer = TcpReplicationTransport::bind("127.0.0.1:0").await.unwrap();
         let mut rx = peer.subscribe();
@@ -299,10 +345,14 @@ mod tests {
 
         owner.broadcast(make_batch(SectorId(1), 0, 3));
         let batch = rx.recv().await.unwrap();
-        assert!(matches!(
+        assert_eq!(
             replicas.ingest(&batch),
-            crate::Ingest::Applied { .. }
-        ));
+            crate::Ingest::Applied {
+                sector_id: SectorId(1),
+                applied: 3,
+                next_index: 3
+            },
+        );
         assert_eq!(replicas.replicated_len(SectorId(1)), 3);
     }
 }
