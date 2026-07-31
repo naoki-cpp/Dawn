@@ -19,4 +19,9 @@ new = '''        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).joi
 '''
 if old not in text:
     raise SystemExit("gdext test catalog block not found")
-path.write_text(text.replace(old, new, 1))
+text = text.replace(old, new, 1)
+old_module = "        let module_id = dawn_sector::modules::all_modules()[0].id;\n"
+new_module = "        let module_id = dawn_sector::modules::MODULE_RAILGUN_SMALL;\n"
+if old_module not in text:
+    raise SystemExit("gdext module lookup not found")
+path.write_text(text.replace(old_module, new_module, 1))
