@@ -173,8 +173,9 @@ base_stats  : ShipBaseStats            velocity      : Velocity
 ```
 
 **Current implementation:**
-- Loaded at startup from `data/ship_types.toml` (DataLoader)
-- Falls back to built-in defaults in `ship_types.rs` if the file is absent
+- Loaded together with module definitions through `GameDataCatalog`
+- `data/ship_types.toml` is the only ship-balance authority
+- Missing or invalid required game data is a fatal startup error; no Rust fallback exists
 - Definitions are immutable; balance changes mean editing TOML + restarting the server (no rebuild)
 - `ShipTypeId` is defined in `dawn-core` and included in the `ShipSpawned` event
 

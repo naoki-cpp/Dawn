@@ -15,6 +15,12 @@ as `modules::all_modules()` and `ship_types::all_ship_types()` read the same
 repository TOML through `GameDataCatalog`; they do not contain fallback balance
 definitions.
 
+Production startup resolves `data/` only relative to the process working
+directory. It never searches the compile-time source checkout. Category-level
+compatibility loaders still accept custom paths for tests and tooling, but they
+strictly validate only the requested category and never use their legacy
+fallback argument.
+
 When adding or changing game data:
 
 1. Edit the appropriate file under `data/`.

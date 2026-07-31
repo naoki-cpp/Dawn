@@ -24,6 +24,7 @@ pub const PRODUCTION_MODULES_PATH: &str = "data/modules.toml";
 pub const PRODUCTION_SHIP_TYPES_PATH: &str = "data/ship_types.toml";
 
 static RUNTIME_CATALOG: OnceLock<Result<GameDataCatalog, CatalogError>> = OnceLock::new();
+static REPOSITORY_CATALOG: OnceLock<Result<GameDataCatalog, CatalogError>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct GameDataCatalog {
@@ -101,32 +102,13 @@ impl GameDataCatalog {
         }
     }
 
-    /// Load the runtime-relative catalog, resolving to the source checkout only
-    /// when both packaged files are absent and the checkout is actually present.
-    /// This keeps deployed startup tied to its `data/` directory while allowing
-    /// tests that temporarily change their working directory to reuse repository data.
+    /// Load the required runtime-relative production catalog.
+    ///
+    /// Paths are resolved only from the process working directory. Production
+    /// startup never falls back to files from the source checkout.
     pub fn load_runtime() -> Result<Self, CatalogError> {
-        let runtime_modules = Path::new(PRODUCTION_MODULES_PATH);
-        let runtime_ship_types = Path::new(PRODUCTION_SHIP_TYPES_PATH);
-
-        if path_is_missing(runtime_modules) && path_is_missing(runtime_ship_types) {
-            let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-            let source_modules = root.join(PRODUCTION_MODULES_PATH);
-            let source_ship_types = root.join(PRODUCTION_SHIP_TYPES_PATH);
-            if source_modules.is_file() && source_ship_types.is_file() {
-                return Self::load_from_paths(source_modules, source_ship_types);
-            }
-        }
-
-        Self::load_from_paths(runtime_modules, runtime_ship_types)
+        Self::load_production()
     }
-}
-
-fn path_is_missing(path: &Path) -> bool {
-    matches!(
-        std::fs::metadata(path),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound
-    )
 }
 
 /// Return the process-wide runtime catalog, loading and validating both TOML files once.
@@ -135,14 +117,41 @@ fn path_is_missing(path: &Path) -> bool {
 /// definitions cannot come from different reads or different fallback rules.
 pub fn runtime_catalog() -> Result<&'static GameDataCatalog, &'static CatalogError> {
     RUNTIME_CATALOG
-        .get_or_init(GameDataCatalog::load_runtime)
+        .get_or_init(GameDataCatalog::load_production)
+        .as_ref()
+}
+
+/// Return the source-checkout catalog for compatibility helpers and test tooling.
+///
+/// Production startup must use [`runtime_catalog`] instead. Keeping this path
+/// explicit prevents missing deployment data from being masked by build inputs.
+pub(crate) fn repository_catalog() -> Result<&'static GameDataCatalog, &'static CatalogError> {
+    REPOSITORY_CATALOG
+        .get_or_init(|| {
+            let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            GameDataCatalog::load_from_paths(
+                root.join(PRODUCTION_MODULES_PATH),
+                root.join(PRODUCTION_SHIP_TYPES_PATH),
+            )
+        })
         .as_ref()
 }
 
 #[cfg(test)]
 impl GameDataCatalog {
     pub(crate) fn load_repository_data() -> Result<Self, CatalogError> {
-        Self::load_runtime()
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        Self::load_from_paths(
+            root.join(PRODUCTION_MODULES_PATH),
+            root.join(PRODUCTION_SHIP_TYPES_PATH),
+        )
+    }
+
+    pub(crate) fn load_test_runtime_directory(root: &Path) -> Result<Self, CatalogError> {
+        Self::load_from_paths(
+            root.join(PRODUCTION_MODULES_PATH),
+            root.join(PRODUCTION_SHIP_TYPES_PATH),
+        )
     }
 }
 

@@ -45,8 +45,8 @@ pub(crate) const REQUIRED_MODULE_IDS: &[ModuleId] = &[
 /// definitions in tests or tooling. Runtime startup should load one
 /// [`crate::game_data::GameDataCatalog`] and register it as a unit.
 pub fn all_modules() -> Vec<ModuleDefinition> {
-    crate::game_data::runtime_catalog()
-        .unwrap_or_else(|error| panic!("failed to load authoritative game-data catalog: {error}"))
+    crate::game_data::repository_catalog()
+        .unwrap_or_else(|error| panic!("failed to load repository game-data catalog: {error}"))
         .modules()
         .to_vec()
 }

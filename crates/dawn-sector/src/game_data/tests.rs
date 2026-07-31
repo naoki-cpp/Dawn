@@ -115,6 +115,21 @@ fn missing_required_ship_type_file_is_reported() {
 }
 
 #[test]
+fn missing_runtime_directory_does_not_fallback_to_repository_data() {
+    let directory = tempfile::tempdir().expect("temp runtime directory");
+    let error = GameDataCatalog::load_test_runtime_directory(directory.path())
+        .expect_err("missing packaged data must remain fatal");
+
+    match error {
+        CatalogError::Read { path, source, .. } => {
+            assert_eq!(path, directory.path().join(PRODUCTION_MODULES_PATH));
+            assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
+        }
+        other => panic!("expected read error, got {other:?}"),
+    }
+}
+
+#[test]
 fn production_repository_catalog_loads_and_preserves_known_values() {
     let catalog = GameDataCatalog::load_repository_data().expect("production data is valid");
     assert_eq!(

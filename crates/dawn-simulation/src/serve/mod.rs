@@ -223,7 +223,13 @@ mod serve_pipeline_tests {
         let mut node = SimulationNode::new(id, sector, bounds);
         node.set_population_cap(pop_cap);
         node.set_galaxy(std::sync::Arc::new(Galaxy::demo()));
-        register_data_driven_definitions(&mut node);
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let catalog = dawn_sector::game_data::GameDataCatalog::load_from_paths(
+            root.join(dawn_sector::game_data::PRODUCTION_MODULES_PATH),
+            root.join(dawn_sector::game_data::PRODUCTION_SHIP_TYPES_PATH),
+        )
+        .expect("repository game-data catalog");
+        catalog.register_into(&mut node);
         node
     }
 

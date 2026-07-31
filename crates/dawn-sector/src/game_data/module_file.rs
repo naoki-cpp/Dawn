@@ -39,7 +39,7 @@ struct ModuleEntry {
     cap_cost_per_cycle: f32,
     #[serde(default)]
     cycle_time_ticks: u64,
-    #[serde(default)]
+    #[serde(default = "default_stat_delta")]
     stat_delta: StatDeltaEntry,
 }
 
@@ -84,6 +84,13 @@ struct StatDeltaEntry {
 
 fn default_speed_multiplier() -> f64 {
     1.0
+}
+
+fn default_stat_delta() -> StatDeltaEntry {
+    StatDeltaEntry {
+        speed_multiplier: default_speed_multiplier(),
+        ..StatDeltaEntry::default()
+    }
 }
 
 impl From<ModuleEntry> for ModuleDefinition {

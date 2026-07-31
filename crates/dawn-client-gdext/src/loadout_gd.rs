@@ -390,12 +390,13 @@ mod tests {
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         );
-        for def in dawn_sector::modules::all_modules() {
-            node.register_module(def);
-        }
-        for def in dawn_sector::ship_types::all_ship_types() {
-            node.register_ship_type(def);
-        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let catalog = dawn_sector::game_data::GameDataCatalog::load_from_paths(
+            root.join(dawn_sector::game_data::PRODUCTION_MODULES_PATH),
+            root.join(dawn_sector::game_data::PRODUCTION_SHIP_TYPES_PATH),
+        )
+        .expect("repository game-data catalog");
+        catalog.register_into(&mut node);
         node
     }
 
@@ -426,7 +427,7 @@ mod tests {
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
 
-        let module_id = dawn_sector::modules::all_modules()[0].id;
+        let module_id = dawn_sector::modules::MODULE_RAILGUN_SMALL;
         let fitted = node.fit_module(FitModuleCommand {
             ship_id,
             slot: SlotKind::High,
