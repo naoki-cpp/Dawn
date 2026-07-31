@@ -98,6 +98,23 @@ fn negative_ship_mass_is_rejected() {
 }
 
 #[test]
+fn missing_required_ship_type_file_is_reported() {
+    let modules = write_temp(VALID_MODULE);
+    let directory = tempfile::tempdir().expect("temp directory");
+    let missing_ship_types = directory.path().join("missing-ship-types.toml");
+
+    let error = GameDataCatalog::load_from_paths(modules.path(), &missing_ship_types)
+        .expect_err("missing required data must fail");
+    match error {
+        CatalogError::Read { path, source, .. } => {
+            assert_eq!(path, missing_ship_types);
+            assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
+        }
+        other => panic!("expected read error, got {other:?}"),
+    }
+}
+
+#[test]
 fn production_repository_catalog_loads_and_preserves_known_values() {
     let catalog = GameDataCatalog::load_repository_data().expect("production data is valid");
     assert_eq!(
