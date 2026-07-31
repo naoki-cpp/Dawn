@@ -21,301 +21,200 @@ jobs:
       - name: Apply review fixes
         shell: bash
         run: |
-          python3 <<'PY'
-          from pathlib import Path
-
-          def replace_once(path: str, old: str, new: str) -> None:
-              file = Path(path)
-              text = file.read_text()
-              if old not in text:
-                  raise SystemExit(f"expected block not found in {path}: {old[:80]!r}")
-              file.write_text(text.replace(old, new, 1))
-
-          # Production runtime resolution must never fall back to the build checkout.
-          path = Path("crates/dawn-sector/src/game_data/mod.rs")
-          text = path.read_text()
-          start = text.index("    /// Load the runtime-relative catalog")
-          end = text.index("\n/// Return the process-wide runtime catalog", start)
-          replacement = '''    /// Load the required runtime-relative production catalog.
-    ///
-    /// Paths are resolved only from the process working directory. Production
-    /// startup never falls back to files from the source checkout.
-    pub fn load_runtime() -> Result<Self, CatalogError> {
-        Self::load_production()
-    }
-}
-'''
-          text = text[:start] + replacement + text[end:]
-          text = text.replace(
-              ".get_or_init(GameDataCatalog::load_runtime)",
-              ".get_or_init(GameDataCatalog::load_production)",
-              1,
-          )
-          old_test_impl = '''#[cfg(test)]
-impl GameDataCatalog {
-    pub(crate) fn load_repository_data() -> Result<Self, CatalogError> {
-        Self::load_runtime()
-    }
-}
-'''
-          new_test_impl = '''#[cfg(test)]
-impl GameDataCatalog {
-    pub(crate) fn load_repository_data() -> Result<Self, CatalogError> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        Self::load_from_paths(
-            root.join(PRODUCTION_MODULES_PATH),
-            root.join(PRODUCTION_SHIP_TYPES_PATH),
-        )
-    }
-
-    pub(crate) fn load_test_runtime_directory(root: &Path) -> Result<Self, CatalogError> {
-        Self::load_from_paths(
-            root.join(PRODUCTION_MODULES_PATH),
-            root.join(PRODUCTION_SHIP_TYPES_PATH),
-        )
-    }
-}
-'''
-          if old_test_impl not in text:
-              raise SystemExit("expected test impl not found in game_data/mod.rs")
-          path.write_text(text.replace(old_test_impl, new_test_impl, 1))
-
-          # Compatibility category loaders remain strict, but custom paths load only
-          # the requested category rather than requiring a complete production catalog.
-          Path("crates/dawn-sector/src/data_loader/mod.rs").write_text(r'''//! Backward-compatible game-data loading entry points.
-//!
-//! Production paths reach the process-wide strict
-//! [`crate::game_data::GameDataCatalog`]. Custom paths retain the historical
-//! category-only loading behavior, but validation is strict and fallback values
-//! are deliberately ignored.
-
-use crate::game_data::{
-    load_modules_file, load_ship_types_file, runtime_catalog, PRODUCTION_MODULES_PATH,
-    PRODUCTION_SHIP_TYPES_PATH,
-};
-use dawn_core::fitting::ModuleDefinition;
-use dawn_core::ship_type::ShipTypeDefinition;
-
-/// Load authoritative module definitions.
-///
-/// The production path returns the module half of the process-wide catalog.
-/// A custom path strictly parses and validates that module file by itself.
-/// Missing, malformed, or invalid data aborts instead of selecting `fallback`.
-pub fn load_modules(path: &str, _fallback: Vec<ModuleDefinition>) -> Vec<ModuleDefinition> {
-    if path == PRODUCTION_MODULES_PATH {
-        return runtime_catalog()
-            .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}"))
-            .modules()
-            .to_vec();
-    }
-
-    load_modules_file(path)
-        .unwrap_or_else(|error| panic!("failed to load required module game data: {error}"))
-}
-
-/// Load authoritative ship-type definitions.
-///
-/// The production path returns the ship-type half of the process-wide catalog.
-/// A custom path strictly parses and validates that ship-type file by itself.
-/// Missing, malformed, or invalid data aborts instead of selecting `fallback`.
-pub fn load_ship_types(path: &str, _fallback: Vec<ShipTypeDefinition>) -> Vec<ShipTypeDefinition> {
-    if path == PRODUCTION_SHIP_TYPES_PATH {
-        return runtime_catalog()
-            .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}"))
-            .ship_types()
-            .to_vec();
-    }
-
-    load_ship_types_file(path)
-        .unwrap_or_else(|error| panic!("failed to load required ship-type game data: {error}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-
-    #[test]
-    fn custom_module_path_loads_one_strict_category() {
-        let mut file = tempfile::NamedTempFile::new().expect("temp module file");
-        write!(
-            file,
-            r#"
-[[modules]]
-id = 999
-name = "Custom Sensor"
-kind = "Sensor"
-slot = "Mid"
-activation_mode = "Passive"
-"#
-        )
-        .expect("write module TOML");
-
-        let modules = load_modules(file.path().to_str().expect("UTF-8 path"), Vec::new());
-        assert_eq!(modules.len(), 1);
-        assert_eq!(modules[0].id.0, 999);
-    }
-
-    #[test]
-    fn custom_ship_type_path_loads_one_strict_category() {
-        let mut file = tempfile::NamedTempFile::new().expect("temp ship-type file");
-        write!(
-            file,
-            r#"
-[[ship_types]]
-id = 999
-name = "Custom Frigate"
-class = "Frigate"
-buildable = false
-
-[ship_types.slot_layout]
-high = 1
-mid = 1
-low = 1
-rig = 1
-
-[ship_types.base_stats]
-max_speed = 100.0
-mass = 1000.0
-inertia_modifier = 0.5
-max_shield = 10.0
-max_armor = 10.0
-max_hull = 10.0
-lock_time = 1
-max_locks = 1
-cap_max = 10.0
-cap_recharge_per_tick = 1.0
-sig_radius = 10.0
-"#
-        )
-        .expect("write ship-type TOML");
-
-        let ship_types = load_ship_types(file.path().to_str().expect("UTF-8 path"), Vec::new());
-        assert_eq!(ship_types.len(), 1);
-        assert_eq!(ship_types[0].id.0, 999);
-    }
-}
-''')
-
-          # Lock in the no-source-checkout-fallback behavior without mutating process cwd.
-          tests_path = Path("crates/dawn-sector/src/game_data/tests.rs")
-          tests = tests_path.read_text()
-          marker = '''#[test]
-fn production_repository_catalog_loads_and_preserves_known_values() {
-'''
-          new_test = '''#[test]
-fn missing_runtime_directory_does_not_fallback_to_repository_data() {
-    let directory = tempfile::tempdir().expect("temp runtime directory");
-    let error = GameDataCatalog::load_test_runtime_directory(directory.path())
-        .expect_err("missing packaged data must remain fatal");
-
-    match error {
-        CatalogError::Read { path, source, .. } => {
-            assert_eq!(path, directory.path().join(PRODUCTION_MODULES_PATH));
-            assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
-        }
-        other => panic!("expected read error, got {other:?}"),
-    }
-}
-
-#[test]
-fn production_repository_catalog_loads_and_preserves_known_values() {
-'''
-          if marker not in tests:
-              raise SystemExit("production catalog test marker not found")
-          tests_path.write_text(tests.replace(marker, new_test, 1))
-
-          # Simulation tests that deliberately change cwd use an explicit repository path;
-          # production continues to call runtime_catalog().
-          replace_once(
-              "crates/dawn-simulation/src/serve/mod.rs",
-              '''        node.set_galaxy(std::sync::Arc::new(Galaxy::demo()));
-        register_data_driven_definitions(&mut node);
-        node
-''',
-              '''        node.set_galaxy(std::sync::Arc::new(Galaxy::demo()));
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let catalog = dawn_sector::game_data::GameDataCatalog::load_from_paths(
-            root.join(dawn_sector::game_data::PRODUCTION_MODULES_PATH),
-            root.join(dawn_sector::game_data::PRODUCTION_SHIP_TYPES_PATH),
-        )
-        .expect("repository game-data catalog");
-        catalog.register_into(&mut node);
-        node
-''',
-          )
-
-          # Deployment must fail before transfer when either new required file is absent.
-          deploy = Path("scripts/deploy-pi-cluster.sh")
-          deploy_text = deploy.read_text()
-          old_verify = '''	if [[ ! -f "$repo_root/data/galaxy.toml" ]]; then
-		echo "Required runtime data file missing: $repo_root/data/galaxy.toml" >&2
-		exit 1
-	fi
-'''
-          new_verify = '''	local data_file
-	for data_file in galaxy.toml modules.toml ship_types.toml; do
-		if [[ ! -f "$repo_root/data/$data_file" ]]; then
-			echo "Required runtime data file missing: $repo_root/data/$data_file" >&2
-			exit 1
-		fi
-	done
-'''
-          if old_verify not in deploy_text:
-              raise SystemExit("deploy verification block not found")
-          deploy_text = deploy_text.replace(old_verify, new_verify, 1)
-          old_copy = '''	cp "$repo_root/data/galaxy.toml" "$stage_dir/data/galaxy.toml"
-	if [[ -f "$repo_root/data/modules.toml" ]]; then
-		cp "$repo_root/data/modules.toml" "$stage_dir/data/modules.toml"
-	fi
-	if [[ -f "$repo_root/data/ship_types.toml" ]]; then
-		cp "$repo_root/data/ship_types.toml" "$stage_dir/data/ship_types.toml"
-	fi
-'''
-          new_copy = '''	cp "$repo_root/data/galaxy.toml" "$stage_dir/data/galaxy.toml"
-	cp "$repo_root/data/modules.toml" "$stage_dir/data/modules.toml"
-	cp "$repo_root/data/ship_types.toml" "$stage_dir/data/ship_types.toml"
-'''
-          if old_copy not in deploy_text:
-              raise SystemExit("deploy copy block not found")
-          deploy.write_text(deploy_text.replace(old_copy, new_copy, 1))
-
-          # Synchronize the existing normative entity documentation.
-          replace_once(
-              "docs/architecture/entity-model.md",
-              '''**Current implementation:**
-- Loaded at startup from `data/ship_types.toml` (DataLoader)
-- Falls back to built-in defaults in `ship_types.rs` if the file is absent
-- Definitions are immutable; balance changes mean editing TOML + restarting the server (no rebuild)
-- `ShipTypeId` is defined in `dawn-core` and included in the `ShipSpawned` event
-''',
-              '''**Current implementation:**
-- Loaded together with module definitions through `GameDataCatalog`
-- `data/ship_types.toml` is the only ship-balance authority
-- Missing or invalid required game data is a fatal startup error; no Rust fallback exists
-- Definitions are immutable; balance changes mean editing TOML + restarting the server (no rebuild)
-- `ShipTypeId` is defined in `dawn-core` and included in the `ShipSpawned` event
-''',
-          )
-
-          catalog_doc = Path("docs/architecture/game-data-catalog.md")
-          doc_text = catalog_doc.read_text()
-          marker = '''Rust retains stable IDs and simulation invariants. Compatibility functions such
-as `modules::all_modules()` and `ship_types::all_ship_types()` read the same
-repository TOML through `GameDataCatalog`; they do not contain fallback balance
-definitions.
-'''
-          replacement = marker + '''
-Production startup resolves `data/` only relative to the process working
-directory. It never searches the compile-time source checkout. Category-level
-compatibility loaders still accept custom paths for tests and tooling, but they
-strictly validate only the requested category and never use their legacy
-fallback argument.
-'''
-          if marker not in doc_text:
-              raise SystemExit("game-data catalog documentation marker not found")
-          catalog_doc.write_text(doc_text.replace(marker, replacement, 1))
-          PY
+          cat > /tmp/fix220.b64 <<'B64'
+          ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgoKZGVmIHJlcGxhY2Vfb25jZShwYXRoOiBzdHIsIG9s
+          ZDogc3RyLCBuZXc6IHN0cikgLT4gTm9uZToKICAgIGZpbGUgPSBQYXRoKHBhdGgpCiAgICB0ZXh0
+          ID0gZmlsZS5yZWFkX3RleHQoKQogICAgaWYgb2xkIG5vdCBpbiB0ZXh0OgogICAgICAgIHJhaXNl
+          IFN5c3RlbUV4aXQoZiJleHBlY3RlZCBibG9jayBub3QgZm91bmQgaW4ge3BhdGh9OiB7b2xkWzo4
+          MF0hcn0iKQogICAgZmlsZS53cml0ZV90ZXh0KHRleHQucmVwbGFjZShvbGQsIG5ldywgMSkpCgoK
+          IyBQcm9kdWN0aW9uIHJ1bnRpbWUgcmVzb2x1dGlvbiBtdXN0IG5ldmVyIGZhbGwgYmFjayB0byB0
+          aGUgYnVpbGQgY2hlY2tvdXQuCnBhdGggPSBQYXRoKCJjcmF0ZXMvZGF3bi1zZWN0b3Ivc3JjL2dh
+          bWVfZGF0YS9tb2QucnMiKQp0ZXh0ID0gcGF0aC5yZWFkX3RleHQoKQpzdGFydCA9IHRleHQuaW5k
+          ZXgoIiAgICAvLy8gTG9hZCB0aGUgcnVudGltZS1yZWxhdGl2ZSBjYXRhbG9nIikKZW5kID0gdGV4
+          dC5pbmRleCgiXG4vLy8gUmV0dXJuIHRoZSBwcm9jZXNzLXdpZGUgcnVudGltZSBjYXRhbG9nIiwg
+          c3RhcnQpCnJlcGxhY2VtZW50ID0gJycnICAgIC8vLyBMb2FkIHRoZSByZXF1aXJlZCBydW50aW1l
+          LXJlbGF0aXZlIHByb2R1Y3Rpb24gY2F0YWxvZy4KICAgIC8vLwogICAgLy8vIFBhdGhzIGFyZSBy
+          ZXNvbHZlZCBvbmx5IGZyb20gdGhlIHByb2Nlc3Mgd29ya2luZyBkaXJlY3RvcnkuIFByb2R1Y3Rp
+          b24KICAgIC8vLyBzdGFydHVwIG5ldmVyIGZhbGxzIGJhY2sgdG8gZmlsZXMgZnJvbSB0aGUgc291
+          cmNlIGNoZWNrb3V0LgogICAgcHViIGZuIGxvYWRfcnVudGltZSgpIC0+IFJlc3VsdDxTZWxmLCBD
+          YXRhbG9nRXJyb3I+IHsKICAgICAgICBTZWxmOjpsb2FkX3Byb2R1Y3Rpb24oKQogICAgfQp9Cicn
+          Jwp0ZXh0ID0gdGV4dFs6c3RhcnRdICsgcmVwbGFjZW1lbnQgKyB0ZXh0W2VuZDpdCnRleHQgPSB0
+          ZXh0LnJlcGxhY2UoCiAgICAiLmdldF9vcl9pbml0KEdhbWVEYXRhQ2F0YWxvZzo6bG9hZF9ydW50
+          aW1lKSIsCiAgICAiLmdldF9vcl9pbml0KEdhbWVEYXRhQ2F0YWxvZzo6bG9hZF9wcm9kdWN0aW9u
+          KSIsCiAgICAxLAopCm9sZF90ZXN0X2ltcGwgPSAnJycjW2NmZyh0ZXN0KV0KaW1wbCBHYW1lRGF0
+          YUNhdGFsb2cgewogICAgcHViKGNyYXRlKSBmbiBsb2FkX3JlcG9zaXRvcnlfZGF0YSgpIC0+IFJl
+          c3VsdDxTZWxmLCBDYXRhbG9nRXJyb3I+IHsKICAgICAgICBTZWxmOjpsb2FkX3J1bnRpbWUoKQog
+          ICAgfQp9CicnJwpuZXdfdGVzdF9pbXBsID0gJycnI1tjZmcodGVzdCldCmltcGwgR2FtZURhdGFD
+          YXRhbG9nIHsKICAgIHB1YihjcmF0ZSkgZm4gbG9hZF9yZXBvc2l0b3J5X2RhdGEoKSAtPiBSZXN1
+          bHQ8U2VsZiwgQ2F0YWxvZ0Vycm9yPiB7CiAgICAgICAgbGV0IHJvb3QgPSBQYXRoOjpuZXcoZW52
+          ISgiQ0FSR09fTUFOSUZFU1RfRElSIikpLmpvaW4oIi4uLy4uIik7CiAgICAgICAgU2VsZjo6bG9h
+          ZF9mcm9tX3BhdGhzKAogICAgICAgICAgICByb290LmpvaW4oUFJPRFVDVElPTl9NT0RVTEVTX1BB
+          VEgpLAogICAgICAgICAgICByb290LmpvaW4oUFJPRFVDVElPTl9TSElQX1RZUEVTX1BBVEgpLAog
+          ICAgICAgICkKICAgIH0KCiAgICBwdWIoY3JhdGUpIGZuIGxvYWRfdGVzdF9ydW50aW1lX2RpcmVj
+          dG9yeShyb290OiAmUGF0aCkgLT4gUmVzdWx0PFNlbGYsIENhdGFsb2dFcnJvcj4gewogICAgICAg
+          IFNlbGY6OmxvYWRfZnJvbV9wYXRocygKICAgICAgICAgICAgcm9vdC5qb2luKFBST0RVQ1RJT05f
+          TU9EVUxFU19QQVRIKSwKICAgICAgICAgICAgcm9vdC5qb2luKFBST0RVQ1RJT05fU0hJUF9UWVBF
+          U19QQVRIKSwKICAgICAgICApCiAgICB9Cn0KJycnCmlmIG9sZF90ZXN0X2ltcGwgbm90IGluIHRl
+          eHQ6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCJleHBlY3RlZCB0ZXN0IGltcGwgbm90IGZvdW5kIGlu
+          IGdhbWVfZGF0YS9tb2QucnMiKQpwYXRoLndyaXRlX3RleHQodGV4dC5yZXBsYWNlKG9sZF90ZXN0
+          X2ltcGwsIG5ld190ZXN0X2ltcGwsIDEpKQoKIyBDb21wYXRpYmlsaXR5IGNhdGVnb3J5IGxvYWRl
+          cnMgcmVtYWluIHN0cmljdCwgYnV0IGN1c3RvbSBwYXRocyBsb2FkIG9ubHkKIyB0aGUgcmVxdWVz
+          dGVkIGNhdGVnb3J5IHJhdGhlciB0aGFuIHJlcXVpcmluZyBhIGNvbXBsZXRlIHByb2R1Y3Rpb24g
+          Y2F0YWxvZy4KUGF0aCgiY3JhdGVzL2Rhd24tc2VjdG9yL3NyYy9kYXRhX2xvYWRlci9tb2QucnMi
+          KS53cml0ZV90ZXh0KHInJycvLyEgQmFja3dhcmQtY29tcGF0aWJsZSBnYW1lLWRhdGEgbG9hZGlu
+          ZyBlbnRyeSBwb2ludHMuCi8vIQovLyEgUHJvZHVjdGlvbiBwYXRocyByZWFjaCB0aGUgcHJvY2Vz
+          cy13aWRlIHN0cmljdAovLyEgW2BjcmF0ZTo6Z2FtZV9kYXRhOjpHYW1lRGF0YUNhdGFsb2dgXS4g
+          Q3VzdG9tIHBhdGhzIHJldGFpbiB0aGUgaGlzdG9yaWNhbAovLyEgY2F0ZWdvcnktb25seSBsb2Fk
+          aW5nIGJlaGF2aW9yLCBidXQgdmFsaWRhdGlvbiBpcyBzdHJpY3QgYW5kIGZhbGxiYWNrIHZhbHVl
+          cwovLyEgYXJlIGRlbGliZXJhdGVseSBpZ25vcmVkLgoKdXNlIGNyYXRlOjpnYW1lX2RhdGE6OnsK
+          ICAgIGxvYWRfbW9kdWxlc19maWxlLCBsb2FkX3NoaXBfdHlwZXNfZmlsZSwgcnVudGltZV9jYXRh
+          bG9nLCBQUk9EVUNUSU9OX01PRFVMRVNfUEFUSCwKICAgIFBST0RVQ1RJT05fU0hJUF9UWVBFU19Q
+          QVRILAp9Owp1c2UgZGF3bl9jb3JlOjpmaXR0aW5nOjpNb2R1bGVEZWZpbml0aW9uOwp1c2UgZGF3
+          bl9jb3JlOjpzaGlwX3R5cGU6OlNoaXBUeXBlRGVmaW5pdGlvbjsKCi8vLyBMb2FkIGF1dGhvcml0
+          YXRpdmUgbW9kdWxlIGRlZmluaXRpb25zLgovLy8KLy8vIFRoZSBwcm9kdWN0aW9uIHBhdGggcmV0
+          dXJucyB0aGUgbW9kdWxlIGhhbGYgb2YgdGhlIHByb2Nlc3Mtd2lkZSBjYXRhbG9nLgovLy8gQSBj
+          dXN0b20gcGF0aCBzdHJpY3RseSBwYXJzZXMgYW5kIHZhbGlkYXRlcyB0aGF0IG1vZHVsZSBmaWxl
+          IGJ5IGl0c2VsZi4KLy8vIE1pc3NpbmcsIG1hbGZvcm1lZCwgb3IgaW52YWxpZCBkYXRhIGFib3J0
+          cyBpbnN0ZWFkIG9mIHNlbGVjdGluZyBgZmFsbGJhY2tgLgpwdWIgZm4gbG9hZF9tb2R1bGVzKHBh
+          dGg6ICZzdHIsIF9mYWxsYmFjazogVmVjPE1vZHVsZURlZmluaXRpb24+KSAtPiBWZWM8TW9kdWxl
+          RGVmaW5pdGlvbj4gewogICAgaWYgcGF0aCA9PSBQUk9EVUNUSU9OX01PRFVMRVNfUEFUSCB7CiAg
+          ICAgICAgcmV0dXJuIHJ1bnRpbWVfY2F0YWxvZygpCiAgICAgICAgICAgIC51bndyYXBfb3JfZWxz
+          ZSh8ZXJyb3J8IHBhbmljISgiZmFpbGVkIHRvIGxvYWQgcmVxdWlyZWQgZ2FtZS1kYXRhIGNhdGFs
+          b2c6IHtlcnJvcn0iKSkKICAgICAgICAgICAgLm1vZHVsZXMoKQogICAgICAgICAgICAudG9fdmVj
+          KCk7CiAgICB9CgogICAgbG9hZF9tb2R1bGVzX2ZpbGUocGF0aCkKICAgICAgICAudW53cmFwX29y
+          X2Vsc2UofGVycm9yfCBwYW5pYyEoImZhaWxlZCB0byBsb2FkIHJlcXVpcmVkIG1vZHVsZSBnYW1l
+          IGRhdGE6IHtlcnJvcn0iKSkKfQoKLy8vIExvYWQgYXV0aG9yaXRhdGl2ZSBzaGlwLXR5cGUgZGVm
+          aW5pdGlvbnMuCi8vLwovLy8gVGhlIHByb2R1Y3Rpb24gcGF0aCByZXR1cm5zIHRoZSBzaGlwLXR5
+          cGUgaGFsZiBvZiB0aGUgcHJvY2Vzcy13aWRlIGNhdGFsb2cuCi8vLyBBIGN1c3RvbSBwYXRoIHN0
+          cmljdGx5IHBhcnNlcyBhbmQgdmFsaWRhdGVzIHRoYXQgc2hpcC10eXBlIGZpbGUgYnkgaXRzZWxm
+          LgovLy8gTWlzc2luZywgbWFsZm9ybWVkLCBvciBpbnZhbGlkIGRhdGEgYWJvcnRzIGluc3RlYWQg
+          b2Ygc2VsZWN0aW5nIGBmYWxsYmFja2AuCnB1YiBmbiBsb2FkX3NoaXBfdHlwZXMocGF0aDogJnN0
+          ciwgX2ZhbGxiYWNrOiBWZWM8U2hpcFR5cGVEZWZpbml0aW9uPikgLT4gVmVjPFNoaXBUeXBlRGVm
+          aW5pdGlvbj4gewogICAgaWYgcGF0aCA9PSBQUk9EVUNUSU9OX1NISVBfVFlQRVNfUEFUSCB7CiAg
+          ICAgICAgcmV0dXJuIHJ1bnRpbWVfY2F0YWxvZygpCiAgICAgICAgICAgIC51bndyYXBfb3JfZWxz
+          ZSh8ZXJyb3J8IHBhbmljISgiZmFpbGVkIHRvIGxvYWQgcmVxdWlyZWQgZ2FtZS1kYXRhIGNhdGFs
+          b2c6IHtlcnJvcn0iKSkKICAgICAgICAgICAgLnNoaXBfdHlwZXMoKQogICAgICAgICAgICAudG9f
+          dmVjKCk7CiAgICB9CgogICAgbG9hZF9zaGlwX3R5cGVzX2ZpbGUocGF0aCkKICAgICAgICAudW53
+          cmFwX29yX2Vsc2UofGVycm9yfCBwYW5pYyEoImZhaWxlZCB0byBsb2FkIHJlcXVpcmVkIHNoaXAt
+          dHlwZSBnYW1lIGRhdGE6IHtlcnJvcn0iKSkKfQoKI1tjZmcodGVzdCldCm1vZCB0ZXN0cyB7CiAg
+          ICB1c2Ugc3VwZXI6Oio7CiAgICB1c2Ugc3RkOjppbzo6V3JpdGU7CgogICAgI1t0ZXN0XQogICAg
+          Zm4gY3VzdG9tX21vZHVsZV9wYXRoX2xvYWRzX29uZV9zdHJpY3RfY2F0ZWdvcnkoKSB7CiAgICAg
+          ICAgbGV0IG11dCBmaWxlID0gdGVtcGZpbGU6Ok5hbWVkVGVtcEZpbGU6Om5ldygpLmV4cGVjdCgi
+          dGVtcCBtb2R1bGUgZmlsZSIpOwogICAgICAgIHdyaXRlISgKICAgICAgICAgICAgZmlsZSwKICAg
+          ICAgICAgICAgciMiCltbbW9kdWxlc11dCmlkID0gOTk5Cm5hbWUgPSAiQ3VzdG9tIFNlbnNvciIK
+          a2luZCA9ICJTZW5zb3IiCnNsb3QgPSAiTWlkIgphY3RpdmF0aW9uX21vZGUgPSAiUGFzc2l2ZSIK
+          IiMKICAgICAgICApCiAgICAgICAgLmV4cGVjdCgid3JpdGUgbW9kdWxlIFRPTUwiKTsKCiAgICAg
+          ICAgbGV0IG1vZHVsZXMgPSBsb2FkX21vZHVsZXMoZmlsZS5wYXRoKCkudG9fc3RyKCkuZXhwZWN0
+          KCJVVEYtOCBwYXRoIiksIFZlYzo6bmV3KCkpOwogICAgICAgIGFzc2VydF9lcSEobW9kdWxlcy5s
+          ZW4oKSwgMSk7CiAgICAgICAgYXNzZXJ0X2VxIShtb2R1bGVzWzBdLmlkLjAsIDk5OSk7CiAgICB9
+          CgogICAgI1t0ZXN0XQogICAgZm4gY3VzdG9tX3NoaXBfdHlwZV9wYXRoX2xvYWRzX29uZV9zdHJp
+          Y3RfY2F0ZWdvcnkoKSB7CiAgICAgICAgbGV0IG11dCBmaWxlID0gdGVtcGZpbGU6Ok5hbWVkVGVt
+          cEZpbGU6Om5ldygpLmV4cGVjdCgidGVtcCBzaGlwLXR5cGUgZmlsZSIpOwogICAgICAgIHdyaXRl
+          ISgKICAgICAgICAgICAgZmlsZSwKICAgICAgICAgICAgciMiCltbc2hpcF90eXBlc11dCmlkID0g
+          OTk5Cm5hbWUgPSAiQ3VzdG9tIEZyaWdhdGUiCmNsYXNzID0gIkZyaWdhdGUiCmJ1aWxkYWJsZSA9
+          IGZhbHNlCgpbc2hpcF90eXBlcy5zbG90X2xheW91dF0KaGlnaCA9IDEKbWlkID0gMQpsb3cgPSAx
+          CnJpZyA9IDEKCltzaGlwX3R5cGVzLmJhc2Vfc3RhdHNdCm1heF9zcGVlZCA9IDEwMC4wCm1hc3Mg
+          PSAxMDAwLjAKaW5lcnRpYV9tb2RpZmllciA9IDAuNQptYXhfc2hpZWxkID0gMTAuMAptYXhfYXJt
+          b3IgPSAxMC4wCm1heF9odWxsID0gMTAuMApsb2NrX3RpbWUgPSAxCm1heF9sb2NrcyA9IDEKY2Fw
+          X21heCA9IDEwLjAKY2FwX3JlY2hhcmdlX3Blcl90aWNrID0gMS4wCnNpZ19yYWRpdXMgPSAxMC4w
+          CiIjCiAgICAgICAgKQogICAgICAgIC5leHBlY3QoIndyaXRlIHNoaXAtdHlwZSBUT01MIik7Cgog
+          ICAgICAgIGxldCBzaGlwX3R5cGVzID0gbG9hZF9zaGlwX3R5cGVzKGZpbGUucGF0aCgpLnRvX3N0
+          cigpLmV4cGVjdCgiVVRGLTggcGF0aCIpLCBWZWM6Om5ldygpKTsKICAgICAgICBhc3NlcnRfZXEh
+          KHNoaXBfdHlwZXMubGVuKCksIDEpOwogICAgICAgIGFzc2VydF9lcSEoc2hpcF90eXBlc1swXS5p
+          ZC4wLCA5OTkpOwogICAgfQp9CicnJykKCiMgTG9jayBpbiB0aGUgbm8tc291cmNlLWNoZWNrb3V0
+          LWZhbGxiYWNrIGJlaGF2aW9yIHdpdGhvdXQgbXV0YXRpbmcgcHJvY2VzcyBjd2QuCnRlc3RzX3Bh
+          dGggPSBQYXRoKCJjcmF0ZXMvZGF3bi1zZWN0b3Ivc3JjL2dhbWVfZGF0YS90ZXN0cy5ycyIpCnRl
+          c3RzID0gdGVzdHNfcGF0aC5yZWFkX3RleHQoKQptYXJrZXIgPSAnJycjW3Rlc3RdCmZuIHByb2R1
+          Y3Rpb25fcmVwb3NpdG9yeV9jYXRhbG9nX2xvYWRzX2FuZF9wcmVzZXJ2ZXNfa25vd25fdmFsdWVz
+          KCkgewonJycKbmV3X3Rlc3QgPSAnJycjW3Rlc3RdCmZuIG1pc3NpbmdfcnVudGltZV9kaXJlY3Rv
+          cnlfZG9lc19ub3RfZmFsbGJhY2tfdG9fcmVwb3NpdG9yeV9kYXRhKCkgewogICAgbGV0IGRpcmVj
+          dG9yeSA9IHRlbXBmaWxlOjp0ZW1wZGlyKCkuZXhwZWN0KCJ0ZW1wIHJ1bnRpbWUgZGlyZWN0b3J5
+          Iik7CiAgICBsZXQgZXJyb3IgPSBHYW1lRGF0YUNhdGFsb2c6OmxvYWRfdGVzdF9ydW50aW1lX2Rp
+          cmVjdG9yeShkaXJlY3RvcnkucGF0aCgpKQogICAgICAgIC5leHBlY3RfZXJyKCJtaXNzaW5nIHBh
+          Y2thZ2VkIGRhdGEgbXVzdCByZW1haW4gZmF0YWwiKTsKCiAgICBtYXRjaCBlcnJvciB7CiAgICAg
+          ICAgQ2F0YWxvZ0Vycm9yOjpSZWFkIHsgcGF0aCwgc291cmNlLCAuLiB9ID0+IHsKICAgICAgICAg
+          ICAgYXNzZXJ0X2VxIShwYXRoLCBkaXJlY3RvcnkucGF0aCgpLmpvaW4oUFJPRFVDVElPTl9NT0RV
+          TEVTX1BBVEgpKTsKICAgICAgICAgICAgYXNzZXJ0X2VxIShzb3VyY2Uua2luZCgpLCBzdGQ6Omlv
+          OjpFcnJvcktpbmQ6Ok5vdEZvdW5kKTsKICAgICAgICB9CiAgICAgICAgb3RoZXIgPT4gcGFuaWMh
+          KCJleHBlY3RlZCByZWFkIGVycm9yLCBnb3Qge290aGVyOj99IiksCiAgICB9Cn0KCiNbdGVzdF0K
+          Zm4gcHJvZHVjdGlvbl9yZXBvc2l0b3J5X2NhdGFsb2dfbG9hZHNfYW5kX3ByZXNlcnZlc19rbm93
+          bl92YWx1ZXMoKSB7CicnJwppZiBtYXJrZXIgbm90IGluIHRlc3RzOgogICAgcmFpc2UgU3lzdGVt
+          RXhpdCgicHJvZHVjdGlvbiBjYXRhbG9nIHRlc3QgbWFya2VyIG5vdCBmb3VuZCIpCnRlc3RzX3Bh
+          dGgud3JpdGVfdGV4dCh0ZXN0cy5yZXBsYWNlKG1hcmtlciwgbmV3X3Rlc3QsIDEpKQoKIyBTaW11
+          bGF0aW9uIHRlc3RzIHVzZSBleHBsaWNpdCByZXBvc2l0b3J5IHBhdGhzOyBwcm9kdWN0aW9uIHVz
+          ZXMgcnVudGltZV9jYXRhbG9nKCkuCnJlcGxhY2Vfb25jZSgKICAgICJjcmF0ZXMvZGF3bi1zaW11
+          bGF0aW9uL3NyYy9zZXJ2ZS9tb2QucnMiLAogICAgJycnICAgICAgICBub2RlLnNldF9nYWxheHko
+          c3RkOjpzeW5jOjpBcmM6Om5ldyhHYWxheHk6OmRlbW8oKSkpOwogICAgICAgIHJlZ2lzdGVyX2Rh
+          dGFfZHJpdmVuX2RlZmluaXRpb25zKCZtdXQgbm9kZSk7CiAgICAgICAgbm9kZQonJycsCiAgICAn
+          JycgICAgICAgIG5vZGUuc2V0X2dhbGF4eShzdGQ6OnN5bmM6OkFyYzo6bmV3KEdhbGF4eTo6ZGVt
+          bygpKSk7CiAgICAgICAgbGV0IHJvb3QgPSBzdGQ6OnBhdGg6OlBhdGg6Om5ldyhlbnYhKCJDQVJH
+          T19NQU5JRkVTVF9ESVIiKSkuam9pbigiLi4vLi4iKTsKICAgICAgICBsZXQgY2F0YWxvZyA9IGRh
+          d25fc2VjdG9yOjpnYW1lX2RhdGE6OkdhbWVEYXRhQ2F0YWxvZzo6bG9hZF9mcm9tX3BhdGhzKAog
+          ICAgICAgICAgICByb290LmpvaW4oZGF3bl9zZWN0b3I6OmdhbWVfZGF0YTo6UFJPRFVDVElPTl9N
+          T0RVTEVTX1BBVEgpLAogICAgICAgICAgICByb290LmpvaW4oZGF3bl9zZWN0b3I6OmdhbWVfZGF0
+          YTo6UFJPRFVDVElPTl9TSElQX1RZUEVTX1BBVEgpLAogICAgICAgICkKICAgICAgICAuZXhwZWN0
+          KCJyZXBvc2l0b3J5IGdhbWUtZGF0YSBjYXRhbG9nIik7CiAgICAgICAgY2F0YWxvZy5yZWdpc3Rl
+          cl9pbnRvKCZtdXQgbm9kZSk7CiAgICAgICAgbm9kZQonJycsCikKCiMgRGVwbG95bWVudCBtdXN0
+          IGZhaWwgYmVmb3JlIHRyYW5zZmVyIHdoZW4gZWl0aGVyIG5ldyByZXF1aXJlZCBmaWxlIGlzIGFi
+          c2VudC4KZGVwbG95ID0gUGF0aCgic2NyaXB0cy9kZXBsb3ktcGktY2x1c3Rlci5zaCIpCmRlcGxv
+          eV90ZXh0ID0gZGVwbG95LnJlYWRfdGV4dCgpCm9sZF92ZXJpZnkgPSAnJydcdGlmIFtbICEgLWYg
+          IiRyZXBvX3Jvb3QvZGF0YS9nYWxheHkudG9tbCIgXV07IHRoZW4KXHRcdGVjaG8gIlJlcXVpcmVk
+          IHJ1bnRpbWUgZGF0YSBmaWxlIG1pc3Npbmc6ICRyZXBvX3Jvb3QvZGF0YS9nYWxheHkudG9tbCIg
+          PiYyClx0XHRleGl0IDEKXHRmaQonJycKbmV3X3ZlcmlmeSA9ICcnJ1x0bG9jYWwgZGF0YV9maWxl
+          Clx0Zm9yIGRhdGFfZmlsZSBpbiBnYWxheHkudG9tbCBtb2R1bGVzLnRvbWwgc2hpcF90eXBlcy50
+          b21sOyBkbwpcdFx0aWYgW1sgISAtZiAiJHJlcG9fcm9vdC9kYXRhLyRkYXRhX2ZpbGUiIF1dOyB0
+          aGVuClx0XHRcdGVjaG8gIlJlcXVpcmVkIHJ1bnRpbWUgZGF0YSBmaWxlIG1pc3Npbmc6ICRyZXBv
+          X3Jvb3QvZGF0YS8kZGF0YV9maWxlIiA+JjIKXHRcdFx0ZXhpdCAxClx0XHRmaQpcdGRvbmUKJycn
+          CmlmIG9sZF92ZXJpZnkgbm90IGluIGRlcGxveV90ZXh0OgogICAgcmFpc2UgU3lzdGVtRXhpdCgi
+          ZGVwbG95IHZlcmlmaWNhdGlvbiBibG9jayBub3QgZm91bmQiKQpkZXBsb3lfdGV4dCA9IGRlcGxv
+          eV90ZXh0LnJlcGxhY2Uob2xkX3ZlcmlmeSwgbmV3X3ZlcmlmeSwgMSkKb2xkX2NvcHkgPSAnJydc
+          dGNwICIkcmVwb19yb290L2RhdGEvZ2FsYXh5LnRvbWwiICIkc3RhZ2VfZGlyL2RhdGEvZ2FsYXh5
+          LnRvbWwiClx0aWYgW1sgLWYgIiRyZXBvX3Jvb3QvZGF0YS9tb2R1bGVzLnRvbWwiIF1dOyB0aGVu
+          Clx0XHRjcCAiJHJlcG9fcm9vdC9kYXRhL21vZHVsZXMudG9tbCIgIiRzdGFnZV9kaXIvZGF0YS9t
+          b2R1bGVzLnRvbWwiClx0ZmkKXHRpZiBbWyAtZiAiJHJlcG9fcm9vdC9kYXRhL3NoaXBfdHlwZXMu
+          dG9tbCIgXV07IHRoZW4KXHRcdGNwICIkcmVwb19yb290L2RhdGEvc2hpcF90eXBlcy50b21sIiAi
+          JHN0YWdlX2Rpci9kYXRhL3NoaXBfdHlwZXMudG9tbCIKXHRmaQonJycKbmV3X2NvcHkgPSAnJydc
+          dGNwICIkcmVwb19yb290L2RhdGEvZ2FsYXh5LnRvbWwiICIkc3RhZ2VfZGlyL2RhdGEvZ2FsYXh5
+          LnRvbWwiClx0Y3AgIiRyZXBvX3Jvb3QvZGF0YS9tb2R1bGVzLnRvbWwiICIkc3RhZ2VfZGlyL2Rh
+          dGEvbW9kdWxlcy50b21sIgpcdGNwICIkcmVwb19yb290L2RhdGEvc2hpcF90eXBlcy50b21sIiAi
+          JHN0YWdlX2Rpci9kYXRhL3NoaXBfdHlwZXMudG9tbCIKJycnCmlmIG9sZF9jb3B5IG5vdCBpbiBk
+          ZXBsb3lfdGV4dDoKICAgIHJhaXNlIFN5c3RlbUV4aXQoImRlcGxveSBjb3B5IGJsb2NrIG5vdCBm
+          b3VuZCIpCmRlcGxveS53cml0ZV90ZXh0KGRlcGxveV90ZXh0LnJlcGxhY2Uob2xkX2NvcHksIG5l
+          d19jb3B5LCAxKSkKCiMgU3luY2hyb25pemUgdGhlIGV4aXN0aW5nIG5vcm1hdGl2ZSBlbnRpdHkg
+          ZG9jdW1lbnRhdGlvbi4KcmVwbGFjZV9vbmNlKAogICAgImRvY3MvYXJjaGl0ZWN0dXJlL2VudGl0
+          eS1tb2RlbC5tZCIsCiAgICAnJycqKkN1cnJlbnQgaW1wbGVtZW50YXRpb246KioKLSBMb2FkZWQg
+          YXQgc3RhcnR1cCBmcm9tIGBkYXRhL3NoaXBfdHlwZXMudG9tbGAgKERhdGFMb2FkZXIpCi0gRmFs
+          bHMgYmFjayB0byBidWlsdC1pbiBkZWZhdWx0cyBpbiBgc2hpcF90eXBlcy5yc2AgaWYgdGhlIGZp
+          bGUgaXMgYWJzZW50Ci0gRGVmaW5pdGlvbnMgYXJlIGltbXV0YWJsZTsgYmFsYW5jZSBjaGFuZ2Vz
+          IG1lYW4gZWRpdGluZyBUT01MICsgcmVzdGFydGluZyB0aGUgc2VydmVyIChubyByZWJ1aWxkKQot
+          IGBTaGlwVHlwZUlkYCBpcyBkZWZpbmVkIGluIGBkYXduLWNvcmVgIGFuZCBpbmNsdWRlZCBpbiB0
+          aGUgYFNoaXBTcGF3bmVkYCBldmVudAonJycsCiAgICAnJycqKkN1cnJlbnQgaW1wbGVtZW50YXRp
+          b246KioKLSBMb2FkZWQgdG9nZXRoZXIgd2l0aCBtb2R1bGUgZGVmaW5pdGlvbnMgdGhyb3VnaCBg
+          R2FtZURhdGFDYXRhbG9nYAotIGBkYXRhL3NoaXBfdHlwZXMudG9tbGAgaXMgdGhlIG9ubHkgc2hp
+          cC1iYWxhbmNlIGF1dGhvcml0eQotIE1pc3Npbmcgb3IgaW52YWxpZCByZXF1aXJlZCBnYW1lIGRh
+          dGEgaXMgYSBmYXRhbCBzdGFydHVwIGVycm9yOyBubyBSdXN0IGZhbGxiYWNrIGV4aXN0cwotIERl
+          ZmluaXRpb25zIGFyZSBpbW11dGFibGU7IGJhbGFuY2UgY2hhbmdlcyBtZWFuIGVkaXRpbmcgVE9N
+          TCArIHJlc3RhcnRpbmcgdGhlIHNlcnZlciAobm8gcmVidWlsZCkKLSBgU2hpcFR5cGVJZGAgaXMg
+          ZGVmaW5lZCBpbiBgZGF3bi1jb3JlYCBhbmQgaW5jbHVkZWQgaW4gdGhlIGBTaGlwU3Bhd25lZGAg
+          ZXZlbnQKJycnLAopCgpjYXRhbG9nX2RvYyA9IFBhdGgoImRvY3MvYXJjaGl0ZWN0dXJlL2dhbWUt
+          ZGF0YS1jYXRhbG9nLm1kIikKZG9jX3RleHQgPSBjYXRhbG9nX2RvYy5yZWFkX3RleHQoKQptYXJr
+          ZXIgPSAnJydSdXN0IHJldGFpbnMgc3RhYmxlIElEcyBhbmQgc2ltdWxhdGlvbiBpbnZhcmlhbnRz
+          LiBDb21wYXRpYmlsaXR5IGZ1bmN0aW9ucyBzdWNoCmFzIGBtb2R1bGVzOjphbGxfbW9kdWxlcygp
+          YCBhbmQgYHNoaXBfdHlwZXM6OmFsbF9zaGlwX3R5cGVzKClgIHJlYWQgdGhlIHNhbWUKcmVwb3Np
+          dG9yeSBUT01MIHRocm91Z2ggYEdhbWVEYXRhQ2F0YWxvZ2A7IHRoZXkgZG8gbm90IGNvbnRhaW4g
+          ZmFsbGJhY2sgYmFsYW5jZQpkZWZpbml0aW9ucy4KJycnCnJlcGxhY2VtZW50ID0gbWFya2VyICsg
+          JycnClByb2R1Y3Rpb24gc3RhcnR1cCByZXNvbHZlcyBgZGF0YS9gIG9ubHkgcmVsYXRpdmUgdG8g
+          dGhlIHByb2Nlc3Mgd29ya2luZwpkaXJlY3RvcnkuIEl0IG5ldmVyIHNlYXJjaGVzIHRoZSBjb21w
+          aWxlLXRpbWUgc291cmNlIGNoZWNrb3V0LiBDYXRlZ29yeS1sZXZlbApjb21wYXRpYmlsaXR5IGxv
+          YWRlcnMgc3RpbGwgYWNjZXB0IGN1c3RvbSBwYXRocyBmb3IgdGVzdHMgYW5kIHRvb2xpbmcsIGJ1
+          dCB0aGV5CnN0cmljdGx5IHZhbGlkYXRlIG9ubHkgdGhlIHJlcXVlc3RlZCBjYXRlZ29yeSBhbmQg
+          bmV2ZXIgdXNlIHRoZWlyIGxlZ2FjeQpmYWxsYmFjayBhcmd1bWVudC4KJycnCmlmIG1hcmtlciBu
+          b3QgaW4gZG9jX3RleHQ6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCJnYW1lLWRhdGEgY2F0YWxvZyBk
+          b2N1bWVudGF0aW9uIG1hcmtlciBub3QgZm91bmQiKQpjYXRhbG9nX2RvYy53cml0ZV90ZXh0KGRv
+          Y190ZXh0LnJlcGxhY2UobWFya2VyLCByZXBsYWNlbWVudCwgMSkpCg==
+          B64
+          base64 -d /tmp/fix220.b64 > /tmp/fix220.py
+          python3 /tmp/fix220.py
 
       - name: Format and validate
         shell: bash
