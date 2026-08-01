@@ -1,0 +1,93 @@
+name: Issue 232 restore docs fix
+
+on:
+  push:
+    branches:
+      - agent/delete-game-data-compat
+    paths:
+      - .github/workflows/issue-232-doc-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Update restore documentation and remove this workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          from urllib.parse import quote
+          from urllib.request import Request, urlopen
+
+          token = os.environ["GH_TOKEN"]
+          repository = os.environ["REPOSITORY"]
+          branch = os.environ["BRANCH"]
+
+          def api(method, path, payload=None):
+              data = None if payload is None else json.dumps(payload).encode()
+              request = Request(
+                  f"https://api.github.com{path}",
+                  data=data,
+                  method=method,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {token}",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "User-Agent": "issue-232-doc-fix",
+                  },
+              )
+              with urlopen(request) as response:
+                  body = response.read()
+              return json.loads(body) if body else None
+
+          target_path = "crates/dawn-sector/src/node/mod.rs"
+          target = api(
+              "GET",
+              f"/repos/{repository}/contents/{target_path}?ref={quote(branch)}",
+          )
+          source = base64.b64decode(target["content"]).decode()
+          old = """    /// `modules` and `ship_types` are the same data-driven definitions the
+    /// node was originally configured with (e.g. `crate::game_data::test_catalog().modules().to_vec()` /
+    /// `crate::game_data::test_catalog().ship_types().to_vec()`). They are needed to resolve
+"""
+          new = """    /// `modules` and `ship_types` must come from the same
+    /// [`crate::game_data::GameDataCatalog`] used to configure the node, for
+    /// example `catalog.modules()` and `catalog.ship_types()`. They are needed to resolve
+"""
+          if source.count(old) != 1:
+              raise RuntimeError("expected restore_from documentation block exactly once")
+          updated = source.replace(old, new)
+          api(
+              "PUT",
+              f"/repos/{repository}/contents/{target_path}",
+              {
+                  "message": "Fix restore_from catalog documentation",
+                  "content": base64.b64encode(updated.encode()).decode(),
+                  "sha": target["sha"],
+                  "branch": branch,
+              },
+          )
+
+          workflow_path = ".github/workflows/issue-232-doc-fix.yml"
+          workflow = api(
+              "GET",
+              f"/repos/{repository}/contents/{workflow_path}?ref={quote(branch)}",
+          )
+          api(
+              "DELETE",
+              f"/repos/{repository}/contents/{workflow_path}",
+              {
+                  "message": "Remove one-shot restore docs fix",
+                  "sha": workflow["sha"],
+                  "branch": branch,
+              },
+          )
+          PY
