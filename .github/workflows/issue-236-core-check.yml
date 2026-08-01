@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/issue-236-core.py'
       - '.github/issue-236-core-fix.py'
+      - '.github/issue-236-core-fix2.py'
       - '.github/workflows/issue-236-core-check.yml'
 
 permissions:
@@ -27,6 +28,7 @@ jobs:
       - name: Apply core transformation
         run: |
           python3 .github/issue-236-core-fix.py
+          python3 .github/issue-236-core-fix2.py
           python3 .github/issue-236-core.py
       - name: Format
         run: cargo fmt --all
