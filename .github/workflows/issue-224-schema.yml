@@ -1,0 +1,33 @@
+name: Issue 224 schema refresh
+
+on:
+  pull_request:
+    types: [synchronize]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.head_ref == 'agent/typed-server-message-outcomes'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/typed-server-message-outcomes
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+      - name: Regenerate wire schema
+        run: cargo run -p dawn-actor --example gen_wire_schema
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/issue-224-schema.yml
+      - name: Commit schema refresh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Regenerate typed server wire schema"
+          git push origin HEAD:agent/typed-server-message-outcomes
