@@ -1,0 +1,92 @@
+name: Issue 236 doc fix
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/issue-236-doc-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: Correct stale Transit wording
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, expected=1):
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f'{path}: expected {expected}, found {count}: {old[:100]!r}')
+              file.write_text(text.replace(old, new))
+
+          replace(
+              'crates/dawn-sector/src/node/transit.rs',
+              '''    /// Stage 1.5 of a Sector Transit (issue #204): actually removes the Ship
+              /// from this (the `from`) Sector's ECS and appends `SectorTransitCompleted`
+              /// from this Sector's perspective. Called only once this Sector observes
+              /// its own `TransitOp::Commit` proposal get Raft-committed
+              /// (`transit::apply_committed_raft_entries`'s `from == node.sector_id()`
+              /// branch) — the durable removal is conditioned on the same fact the
+              /// destination's import is conditioned on, so a crash before that Commit
+              /// lands leaves the Ship exactly where `handoff_for_transit` found it:
+              /// still owned by `from`, still `InTransit`.
+              ''',
+              '''    /// Finalize the source half of a Sector Transit by removing the frozen
+              /// recovery copy and appending `SectorTransitCompleted` to the source log.
+              /// Normal completion calls this only after a committed Ack matches the
+              /// durable Request identity. The superseded-outgoing path also uses it
+              /// before accepting the same Ship back into this Sector. Until either
+              /// condition is durable, the Ship remains owned by `from` and frozen as
+              /// `InTransit`, so a crash cannot leave both logs without a recoverable copy.
+              ''',
+          )
+          replace(
+              'crates/dawn-sector/src/transit/pipeline.rs',
+              '''/// The durable route and canonical transit snapshot are reconstructed from the
+              /// source EventStore and frozen ECS state, respectively.
+              ''',
+              '''/// The durable route and canonical Transit handoff state are reconstructed from
+              /// the source EventStore and frozen ECS state, respectively.
+              ''',
+          )
+          replace(
+              'crates/dawn-sector/src/node/transit.rs',
+              'fn export_transit_snapshots_without_removing_the_ship_or_appending_an_event()',
+              'fn export_transit_handoff_without_removing_the_ship_or_appending_an_event()',
+          )
+          replace(
+              'crates/dawn-sector/src/node/transit.rs',
+              '''        let snapshot = node.export_transit(ship_id).expect("ship should export");
+                      assert_eq!(snapshot.ship_id, ship_id);
+              ''',
+              '''        let handoff = node.export_transit(ship_id).expect("ship should export");
+                      assert_eq!(handoff.ship_id, ship_id);
+              ''',
+          )
+          PY
+          cargo fmt --all
+          cargo test -p dawn-sector transit
+          git diff --check
+      - name: Publish correction
+        run: |
+          rm -f .github/workflows/issue-236-doc-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Clarify Transit handoff completion semantics'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
