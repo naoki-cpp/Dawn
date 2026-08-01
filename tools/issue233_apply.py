@@ -1,0 +1,242 @@
+from pathlib import Path
+import re
+
+
+def once(text, old, new):
+    if text.count(old) != 1:
+        raise RuntimeError(f"expected one match: {old[:80]!r}")
+    return text.replace(old, new)
+
+
+path = Path("crates/dawn-market/src/order_book.rs")
+text = path.read_text()
+text = once(
+    text,
+    "//! The existing flat SQLite columns remain unchanged for compatibility,\n"
+    "//! while their encoding and validation are shared through `dawn_core::ItemId`.\n",
+    "//! The flat SQLite columns use the shared `dawn_core::ItemId` encoding and\n"
+    "//! validation.\n",
+)
+text = once(
+    text,
+    "//! Existing databases from before 9D-4 are migrated with a nullable `ship_id`.\n"
+    "//! Those legacy rows remain matchable, but do not produce a bridge command\n"
+    "//! because their cargo ship cannot be reconstructed safely.\n",
+    "//! Every persisted order has a required cargo ship owner. Pre-9D-4 database\n"
+    "//! files are unsupported and must be recreated with the current schema.\n",
+)
+text = once(
+    text,
+    "    /// `None` only for an order created before 9D-4, when the legacy schema\n"
+    "    /// did not retain the cargo ship. New orders always carry this identity.\n"
+    "    pub ship_id: Option<ShipId>,\n",
+    "    /// Ship whose cargo owns this order.\n"
+    "    pub ship_id: ShipId,\n",
+)
+text = once(
+    text,
+    "                ship_id             INTEGER,\n",
+    "                ship_id             INTEGER NOT NULL,\n",
+)
+text, count = re.subn(
+    r"        // 9D-4 added the cargo ship identity.*?"
+    r"        if !has_ship_id \{\n"
+    r"            conn\.execute\(\"ALTER TABLE orders ADD COLUMN ship_id INTEGER\", \[\]\)\?;\n"
+    r"        \}\n\n",
+    "",
+    text,
+    flags=re.S,
+)
+if count != 1:
+    raise RuntimeError(f"migration block matches: {count}")
+text = once(
+    text,
+    "            if let Some(ship_id) = fill.buyer_ship_id {\n"
+    "                credit_item_commands.push(CreditItemCommand {\n"
+    "                    player_id: fill.buyer,\n"
+    "                    ship_id,\n"
+    "                    item_id,\n"
+    "                    quantity: fill.quantity,\n"
+    "                });\n"
+    "            }\n",
+    "            credit_item_commands.push(CreditItemCommand {\n"
+    "                player_id: fill.buyer,\n"
+    "                ship_id: fill.buyer_ship_id,\n"
+    "                item_id,\n"
+    "                quantity: fill.quantity,\n"
+    "            });\n",
+)
+text = once(
+    text,
+    "                        row.get::<_, Option<i64>>(1)?.map(|v| v as u64),\n",
+    "                        row.get::<_, i64>(1)? as u64,\n",
+)
+text = once(
+    text,
+    "        let side = columns_to_side(&side);\n"
+    "        Ok(Some(CancelledOrder {\n"
+    "            ship_id: ship_id.map(|raw| ShipId(EntityId::from_raw(raw))),\n"
+    "            item_id,\n"
+    "            side,\n"
+    "            price,\n"
+    "            quantity_remaining,\n"
+    "            return_item_command: (side == OrderSide::Ask)\n"
+    "                .then(|| {\n"
+    "                    ship_id.map(|ship_id| ReturnItemCommand {\n"
+    "                        player_id,\n"
+    "                        ship_id: ShipId(EntityId::from_raw(ship_id)),\n"
+    "                        item_id,\n"
+    "                        quantity: quantity_remaining,\n"
+    "                    })\n"
+    "                })\n"
+    "                .flatten(),\n"
+    "        }))\n",
+    "        let side = columns_to_side(&side);\n"
+    "        let ship_id = ShipId(EntityId::from_raw(ship_id));\n"
+    "        Ok(Some(CancelledOrder {\n"
+    "            ship_id,\n"
+    "            item_id,\n"
+    "            side,\n"
+    "            price,\n"
+    "            quantity_remaining,\n"
+    "            return_item_command: (side == OrderSide::Ask).then_some(ReturnItemCommand {\n"
+    "                player_id,\n"
+    "                ship_id,\n"
+    "                item_id,\n"
+    "                quantity: quantity_remaining,\n"
+    "            }),\n"
+    "        }))\n",
+)
+text = once(
+    text,
+    "                ship_id: row\n"
+    "                    .get::<_, Option<i64>>(2)?\n"
+    "                    .map(|raw| ShipId(EntityId::from_raw(raw as u64))),\n",
+    "                ship_id: ShipId(EntityId::from_raw(row.get::<_, i64>(2)? as u64)),\n",
+)
+text = once(
+    text,
+    "                ship_id: Some(ship(1)),\n",
+    "                ship_id: ship(1),\n",
+)
+
+replacement_tests = r'''    #[test]
+    fn fresh_orders_schema_requires_a_ship_owner() {
+        let market = MarketDb::open_in_memory().unwrap();
+        market
+            .conn
+            .execute(
+                "INSERT INTO orders
+                    (player_id, ship_id, side, item_type, module_id, ship_type_id, price,
+                     quantity_remaining, escrowed_currency)
+                 VALUES (1, NULL, 'Ask', 'ScrapMetal', 0, 0, 100, 1, 0)",
+                [],
+            )
+            .expect_err("ship_id must be required");
+    }
+
+    #[test]
+    fn fresh_database_reopens_with_ship_ownership_intact() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("market.sqlite");
+        let path = path.to_str().unwrap();
+        let order_id = {
+            let mut market = MarketDb::open(path).unwrap();
+            market
+                .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
+                .unwrap()
+                .unwrap()
+                .resting_order_id
+                .unwrap()
+        };
+        let mut reopened = MarketDb::open(path).unwrap();
+        let cancelled = reopened
+            .cancel_order(PlayerId(1), order_id)
+            .unwrap()
+            .expect("reopened order");
+        assert_eq!(cancelled.ship_id, ship(1));
+        assert_eq!(
+            cancelled.return_item_command,
+            Some(ReturnItemCommand {
+                player_id: PlayerId(1),
+                ship_id: ship(1),
+                item_id: scrap(),
+                quantity: 5,
+            })
+        );
+    }
+
+'''
+text, count = re.subn(
+    r"    #\[test\]\n"
+    r"    fn opening_a_pre_9d4_database_migrates_orders_without_guessing_ship_ids\(\) \{.*?"
+    r"\n    \}\n\n",
+    replacement_tests,
+    text,
+    count=1,
+    flags=re.S,
+)
+if count != 1:
+    raise RuntimeError(f"legacy test matches: {count}")
+path.write_text(text)
+
+path = Path("crates/dawn-market/src/matching.rs")
+text = path.read_text()
+text = once(
+    text,
+    "    pub(super) ship_id: Option<ShipId>,\n",
+    "    pub(super) ship_id: ShipId,\n",
+)
+text = once(
+    text,
+    "    pub(super) buyer_ship_id: Option<ShipId>,\n",
+    "    pub(super) buyer_ship_id: ShipId,\n",
+)
+text = once(
+    text,
+    "                Some(incoming.ship_id),\n",
+    "                incoming.ship_id,\n",
+)
+text = once(
+    text,
+    "            ship_id: Some(ship(player_id)),\n",
+    "            ship_id: ship(player_id),\n",
+)
+path.write_text(text)
+
+path = Path("docs/adr/ADR-0034-economy-foundations.md")
+text = path.read_text()
+text = once(
+    text,
+    "記録する。旧Market DBは `ship_id` をNULL許容で追加する移行を行い、旧注文に対して\n"
+    "船を推測しない。",
+    "記録する。Marketのorders schemaでは`ship_id`を必須とし、全注文がbridge commandの\n"
+    "対象船を保持する。pre-9D-4 SQLite schemaは非対応であり、pre-release DBは削除して\n"
+    "current schemaで作り直す。",
+)
+path.write_text(text)
+
+path = Path("docs/architecture/database-strategy.md")
+text = path.read_text()
+text = once(
+    text,
+    "制約になっていない。Market が `dawn-simulation` 内の単一 runtime である間は、この単純さを\n"
+    "維持する。\n",
+    "制約になっていない。Market が `dawn-simulation` 内の単一 runtime である間は、この単純さを\n"
+    "維持する。現行の `orders` schemaでは `ship_id` を `NOT NULL` で保持する。9D-4以前の\n"
+    "pre-release SQLiteファイルは移行対象にせず、削除してcurrent schemaで再作成する。\n",
+)
+path.write_text(text)
+
+for source_path in [
+    Path("crates/dawn-market/src/order_book.rs"),
+    Path("crates/dawn-market/src/matching.rs"),
+]:
+    source = source_path.read_text()
+    for marker in [
+        "Option<ShipId>",
+        "ALTER TABLE orders ADD COLUMN ship_id",
+        "opening_a_pre_9d4_database",
+    ]:
+        if marker in source:
+            raise RuntimeError(f"{source_path}: {marker} remains")
