@@ -4,7 +4,8 @@
 //! applied to `WorldSessionState` before presentation callbacks run; domain
 //! state and rules remain in the Godot-independent client/core crates. Raw
 //! frame bytes are retained only where an existing typed decoder consumes
-//! them directly.
+//! them directly. Presentation callbacks therefore observe already-committed
+//! client state rather than driving a second state transition.
 
 use godot::prelude::*;
 
