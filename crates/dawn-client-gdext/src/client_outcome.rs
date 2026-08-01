@@ -1,6 +1,6 @@
 use dawn_wire::{
-    AbsPosWire, EventWire, InitialStateWire, MarketSnapshotWire, ServerMessage, ShipStateWire,
-    VelWire,
+    AbsPosWire, EventWire, InitialStateWire, MarketSnapshotWire, PlayerLoadoutWire, ServerMessage,
+    ShipStateWire, VelWire,
 };
 
 /// Godot-independent result of decoding one server frame.
@@ -124,6 +124,12 @@ fn ensure_godot_int(value: u64, field: &str) -> Result<(), String> {
         .map_err(|_| format!("{field}={value} exceeds Godot's signed 64-bit integer range"))
 }
 
+fn ensure_client_u32(value: u64, field: &str) -> Result<(), String> {
+    u32::try_from(value)
+        .map(|_| ())
+        .map_err(|_| format!("{field}={value} exceeds the client-side u32 range"))
+}
+
 fn validate_event(event: &EventWire) -> Result<(), String> {
     match event {
         EventWire::ShipSpawned { ship_id, tick, .. }
@@ -179,6 +185,28 @@ fn validate_event(event: &EventWire) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn validate_player_loadout_godot_ranges(
+    loadout: &PlayerLoadoutWire,
+) -> Result<(), String> {
+    ensure_godot_int(loadout.tick, "player_loadout.tick")?;
+    if let Some(active_ship_id) = loadout.active_ship_id {
+        ensure_godot_int(active_ship_id, "player_loadout.active_ship_id")?;
+    }
+    for ship in &loadout.owned_ships {
+        ensure_godot_int(ship.ship_id, "player_loadout.owned_ships.ship_id")?;
+    }
+    for module in &loadout.modules {
+        ensure_client_u32(
+            module.cycle_time_ticks,
+            "player_loadout.modules.cycle_time_ticks",
+        )?;
+    }
+    for item in loadout.inventory.iter().chain(&loadout.station_inventory) {
+        ensure_godot_int(item.count, "player_loadout.inventory.count")?;
+    }
+    Ok(())
+}
+
 fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
     match message {
         ServerMessage::Welcome { player_id, ship_id }
@@ -189,7 +217,9 @@ fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
             ensure_godot_int(*ship_id, "ship_id")?;
         }
         ServerMessage::Event(event) => validate_event(event)?,
-        ServerMessage::PlayerLoadout(_) => {}
+        ServerMessage::PlayerLoadout(loadout) => {
+            validate_player_loadout_godot_ranges(loadout)?;
+        }
         ServerMessage::InitialState(state) => {
             for ship in &state.ships {
                 ensure_godot_int(ship.ship_id, "initial_state.ship_id")?;
@@ -220,7 +250,10 @@ fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_wire::{PlayerLoadoutWire, SlotCapacityWire};
+    use dawn_core::{ModuleKind, StatDelta};
+    use dawn_wire::{
+        ItemRowWire, ItemWire, ModuleRowWire, PlayerLoadoutWire, SlotCapacityWire,
+    };
 
     fn decode(message: ServerMessage) -> ClientOutcome {
         ClientOutcome::decode(&message.encode()).expect("valid raw ServerMessage frame")
@@ -409,6 +442,52 @@ mod tests {
         )
         .expect_err("out-of-range ids must not be saturated");
         assert!(error.contains("ship_id"));
+    }
+
+    #[test]
+    fn player_loadout_rejects_every_narrowing_overflow() {
+        let invalid_godot_int = (i64::MAX as u64) + 1;
+
+        let mut invalid_tick = loadout();
+        invalid_tick.tick = invalid_godot_int;
+        let error = ClientOutcome::decode(&ServerMessage::PlayerLoadout(invalid_tick).encode())
+            .expect_err("loadout tick must fit Godot int");
+        assert!(error.contains("player_loadout.tick"));
+
+        let mut invalid_ship = loadout();
+        invalid_ship.active_ship_id = Some(invalid_godot_int);
+        let error = ClientOutcome::decode(&ServerMessage::PlayerLoadout(invalid_ship).encode())
+            .expect_err("active ship ID must fit Godot int");
+        assert!(error.contains("player_loadout.active_ship_id"));
+
+        let mut invalid_count = loadout();
+        invalid_count.inventory.push(ItemRowWire {
+            item_id: ItemWire::ScrapMetal,
+            name: "Scrap Metal".to_owned(),
+            kind: "Commodity".to_owned(),
+            slot: String::new(),
+            count: invalid_godot_int,
+        });
+        let error = ClientOutcome::decode(&ServerMessage::PlayerLoadout(invalid_count).encode())
+            .expect_err("inventory count must fit Godot int");
+        assert!(error.contains("player_loadout.inventory.count"));
+
+        let mut invalid_cycle = loadout();
+        invalid_cycle.modules.push(ModuleRowWire {
+            slot: "High".to_owned(),
+            index: 0,
+            module_id: 3,
+            name: "Test Module".to_owned(),
+            kind: ModuleKind::Weapon,
+            is_active: false,
+            is_active_module: true,
+            cap_cost_per_cycle: 1.0,
+            cycle_time_ticks: (u32::MAX as u64) + 1,
+            stat_delta: StatDelta::ZERO,
+        });
+        let error = ClientOutcome::decode(&ServerMessage::PlayerLoadout(invalid_cycle).encode())
+            .expect_err("module cycle length must fit client u32");
+        assert!(error.contains("player_loadout.modules.cycle_time_ticks"));
     }
 
     #[test]
