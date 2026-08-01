@@ -10,16 +10,17 @@ TOML, duplicate IDs, unknown enum values, missing required IDs, and invalid
 numeric ranges are fatal startup errors. A runtime must never substitute a
 built-in balance catalog.
 
-Rust retains stable IDs and simulation invariants. Compatibility functions such
-as `modules::all_modules()` and `ship_types::all_ship_types()` read the same
-repository TOML through `GameDataCatalog`; they do not contain fallback balance
-definitions.
+`GameDataCatalog` is the only interface for loading module and ship-type
+definitions. The stable identifiers in `dawn_sector::modules` and
+`dawn_sector::ship_types` remain available to domain code, but those modules do
+not expose definition catalogs. There are no category-only loaders, fallback
+vectors, compatibility accessors, or deprecated aliases.
 
 Production startup resolves `data/` only relative to the process working
-directory. It never searches the compile-time source checkout. Category-level
-compatibility loaders still accept custom paths for tests and tooling, but they
-strictly validate only the requested category and never use their legacy
-fallback argument.
+directory. It never searches the compile-time source checkout. Tests either
+construct a `GameDataCatalog` with explicit paths or, inside `dawn-sector`, use
+the test-only repository catalog fixture. That fixture is not compiled into the
+production crate interface.
 
 When adding or changing game data:
 
