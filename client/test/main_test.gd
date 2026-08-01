@@ -161,21 +161,17 @@ class FakeConnection:
 	var transfer_from_station_calls: Array[Dictionary] = []
 
 	func send_transfer_to_station_command(
-		p_ship_id: int, p_station_id: int, p_item_type: String, p_module_id: int = 0,
-		p_ship_type_id: int = 0
+		p_ship_id: int, p_station_id: int, p_item_id: ItemIdentity
 	) -> void:
 		transfer_to_station_calls.append({
-			"ship_id": p_ship_id, "station_id": p_station_id, "item_type": p_item_type,
-			"module_id": p_module_id, "ship_type_id": p_ship_type_id,
+			"ship_id": p_ship_id, "station_id": p_station_id, "item_id": p_item_id,
 		})
 
 	func send_transfer_from_station_command(
-		p_ship_id: int, p_station_id: int, p_item_type: String, p_module_id: int = 0,
-		p_ship_type_id: int = 0
+		p_ship_id: int, p_station_id: int, p_item_id: ItemIdentity
 	) -> void:
 		transfer_from_station_calls.append({
-			"ship_id": p_ship_id, "station_id": p_station_id, "item_type": p_item_type,
-			"module_id": p_module_id, "ship_type_id": p_ship_type_id,
+			"ship_id": p_ship_id, "station_id": p_station_id, "item_id": p_item_id,
 		})
 
 
@@ -811,7 +807,7 @@ func test_drag_from_ship_cargo_to_fitted_sends_fit_command() -> void:
 	_main._session.apply_dock_fitting(3, "Forge Station", 12)
 
 	var row: InventoryRow = InventoryRow.for_item(
-		null, 5, "High", InventoryRow.ACTION_FIT, 0, "Module", 1, InventoryRow.SOURCE_SHIP_CARGO)
+		null, 0, "High", InventoryRow.ACTION_FIT, 0, ItemIdentity.module(5) as ItemIdentity, 1, InventoryRow.SOURCE_SHIP_CARGO)
 	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_FITTED, Vector2.ZERO)
 
 	assert_int(connection.fit_calls.size()).is_equal(1)
@@ -827,7 +823,7 @@ func test_drag_from_ship_cargo_to_fitted_is_a_no_op_when_undocked() -> void:
 	_main._session.apply_dock_fitting(-1, "", 0)
 
 	var row: InventoryRow = InventoryRow.for_item(
-		null, 5, "High", InventoryRow.ACTION_FIT, 0, "Module", 1, InventoryRow.SOURCE_SHIP_CARGO)
+		null, 0, "High", InventoryRow.ACTION_FIT, 0, ItemIdentity.module(5) as ItemIdentity, 1, InventoryRow.SOURCE_SHIP_CARGO)
 	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_FITTED, Vector2.ZERO)
 
 	assert_int(connection.fit_calls.size()).is_equal(0)
@@ -841,7 +837,7 @@ func test_drag_from_fitted_to_ship_cargo_sends_unfit_command() -> void:
 	_main._session.apply_dock_fitting(3, "Forge Station", 12)
 
 	var row: InventoryRow = InventoryRow.for_item(
-		null, 5, "High", InventoryRow.ACTION_UNFIT, 0, "", 0, InventoryRow.SOURCE_FITTED)
+		null, 5, "High", InventoryRow.ACTION_UNFIT, 0, null, 0, InventoryRow.SOURCE_FITTED)
 	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_SHIP_CARGO, Vector2.ZERO)
 
 	assert_int(connection.unfit_calls.size()).is_equal(1)
@@ -856,11 +852,11 @@ func test_drag_from_ship_cargo_to_station_sends_transfer_to_station_command() ->
 	_main._session.apply_dock_fitting(3, "Forge Station", 12)
 
 	var row: InventoryRow = InventoryRow.for_item(
-		null, 0, "", InventoryRow.ACTION_NONE, 0, "ScrapMetal", 4, InventoryRow.SOURCE_SHIP_CARGO)
+		null, 0, "", InventoryRow.ACTION_NONE, 0, ItemIdentity.scrap_metal(), 4, InventoryRow.SOURCE_SHIP_CARGO)
 	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_STATION, Vector2.ZERO)
 
 	assert_int(connection.transfer_to_station_calls.size()).is_equal(1)
-	assert_str(connection.transfer_to_station_calls[0]["item_type"] as String).is_equal("ScrapMetal")
+	assert_bool((connection.transfer_to_station_calls[0]["item_id"] as ItemIdentity).is_scrap_metal()).is_true()
 	connection.free()
 
 
@@ -871,12 +867,12 @@ func test_drag_from_station_to_ship_cargo_sends_transfer_from_station_command() 
 	_main._session.apply_dock_fitting(3, "Forge Station", 12)
 
 	var row: InventoryRow = InventoryRow.for_item(
-		null, 0, "", InventoryRow.ACTION_NONE, 0, "ScrapMetal", 4, InventoryRow.SOURCE_STATION)
+		null, 0, "", InventoryRow.ACTION_NONE, 0, ItemIdentity.scrap_metal(), 4, InventoryRow.SOURCE_STATION)
 	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_SHIP_CARGO, Vector2.ZERO)
 
 	assert_int(connection.transfer_from_station_calls.size()).is_equal(1)
 	assert_int(connection.transfer_from_station_calls[0]["station_id"] as int).is_equal(3)
-	assert_str(connection.transfer_from_station_calls[0]["item_type"] as String).is_equal("ScrapMetal")
+	assert_bool((connection.transfer_from_station_calls[0]["item_id"] as ItemIdentity).is_scrap_metal()).is_true()
 	connection.free()
 
 
@@ -887,7 +883,7 @@ func test_drag_dropped_back_onto_its_own_column_is_a_no_op() -> void:
 	_main._session.apply_dock_fitting(3, "Forge Station", 12)
 
 	var row: InventoryRow = InventoryRow.for_item(
-		null, 0, "", InventoryRow.ACTION_NONE, 0, "ScrapMetal", 4, InventoryRow.SOURCE_SHIP_CARGO)
+		null, 0, "", InventoryRow.ACTION_NONE, 0, ItemIdentity.scrap_metal(), 4, InventoryRow.SOURCE_SHIP_CARGO)
 	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_SHIP_CARGO, Vector2.ZERO)
 
 	assert_int(connection.transfer_to_station_calls.size()).is_equal(0)
@@ -967,7 +963,7 @@ func test_release_within_threshold_of_press_is_treated_as_a_plain_click() -> voi
 	_main._session.apply_dock_fitting(3, "Forge Station", 12)
 
 	_main._drag_row = InventoryRow.for_item(
-		null, 5, "High", InventoryRow.ACTION_UNFIT, 0, "", 0, InventoryRow.SOURCE_FITTED)
+		null, 5, "High", InventoryRow.ACTION_UNFIT, 0, null, 0, InventoryRow.SOURCE_FITTED)
 	_main._drag_start_pos = Vector2(100, 100)
 	_main._end_inventory_drag(Vector2(102, 101))  # well within DRAG_THRESHOLD_PX
 
@@ -992,7 +988,7 @@ func test_release_past_threshold_is_treated_as_a_drop_not_a_click() -> void:
 	var far_pos: Vector2 = station_list.get_global_rect().position + Vector2(2, 2)
 
 	_main._drag_row = InventoryRow.for_item(
-		null, 0, "", InventoryRow.ACTION_NONE, 0, "ScrapMetal", 4, InventoryRow.SOURCE_SHIP_CARGO)
+		null, 0, "", InventoryRow.ACTION_NONE, 0, ItemIdentity.scrap_metal(), 4, InventoryRow.SOURCE_SHIP_CARGO)
 	_main._drag_start_pos = far_pos + Vector2(500, 500)  # far past DRAG_THRESHOLD_PX
 	_main._end_inventory_drag(far_pos)
 

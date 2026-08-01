@@ -631,17 +631,15 @@ func _on_market_refresh() -> void:
 
 
 func _on_market_place_order(
-	item_type: String,
-	module_id: int,
-	ship_type_id: int,
+	item_id: ItemIdentity,
 	side: String,
 	price: int,
 	quantity: int
 ) -> void:
-	if _player_ship_id < 0 or not _session.is_docked():
+	if _player_ship_id < 0 or not _session.is_docked() or item_id == null:
 		return
 	_connection.send_market_place_order_command(
-		_player_ship_id, item_type, module_id, ship_type_id, side, price, quantity)
+		_player_ship_id, item_id, side, price, quantity)
 
 
 func _on_market_cancel_order(order_id: int) -> void:
@@ -825,12 +823,12 @@ func _apply_player_module_activation(module_id: int, active: bool, forced_reason
 func _handle_inventory_row_click(row: InventoryRow) -> void:
 	match row.action:
 		InventoryRow.ACTION_FIT:
-			## ADR-0032's 2026-07-08 amendment: refitting requires being
-			## docked. Guarded client-side too (not just server-side) so this
-			## reads as an obvious no-op rather than a silent-failure resync,
-			## the same UX lesson learned from Disassemble earlier this phase.
-			if _player_ship_id >= 0 and _session.is_docked():
-				_connection.send_fit_module_command(_player_ship_id, row.module_id, row.slot)
+			## Refitting requires being docked. The module ID is extracted
+			## from the canonical Item identity only at this command seam.
+			if row.item_id != null and row.item_id.is_module() \
+					and _player_ship_id >= 0 and _session.is_docked():
+				_connection.send_fit_module_command(
+					_player_ship_id, row.item_id.module_id() as int, row.slot)
 		InventoryRow.ACTION_UNFIT:
 			if _player_ship_id >= 0 and _session.is_docked():
 				_connection.send_unfit_module_command(_player_ship_id, row.module_id, row.slot)
@@ -847,8 +845,10 @@ func _handle_inventory_row_click(row: InventoryRow) -> void:
 			## No active-ship requirement: this is exactly the recovery path
 			## for a shipless docked player (docs/architecture/ownership.md §8).
 			var docked_station_id: int = _session.docked_station_id()
-			if docked_station_id >= 0:
-				_connection.send_assemble_command(docked_station_id, row.ship_type_id)
+			if docked_station_id >= 0 and row.item_id != null \
+					and row.item_id.is_packaged_ship():
+				_connection.send_assemble_command(
+					docked_station_id, row.item_id.ship_type_id() as int)
 		InventoryRow.ACTION_SELECT_ACTIVE_SHIP:
 			## Also no active-ship requirement -- this is how a player re-boards
 			## after Disembark, or switches to a different owned ship.
@@ -893,8 +893,9 @@ func _handle_inventory_row_right_click(row: InventoryRow) -> void:
 	var docked_station_id: int = _session.docked_station_id()
 	if docked_station_id < 0:
 		return
-	_connection.send_transfer_to_station_command(
-		_player_ship_id, docked_station_id, row.item_type, row.module_id, row.ship_type_id)
+	if row.item_id != null:
+		_connection.send_transfer_to_station_command(
+			_player_ship_id, docked_station_id, row.item_id)
 
 
 ## Lazily creates the drag ghost once the cursor has moved past
@@ -961,8 +962,10 @@ func _handle_inventory_row_drop(row: InventoryRow, target_column: String, releas
 		InventoryRow.SOURCE_SHIP_CARGO:
 			match target_column:
 				InventoryRow.SOURCE_FITTED:
-					if row.item_type == "Module" and _player_ship_id >= 0 and _session.is_docked():
-						_connection.send_fit_module_command(_player_ship_id, row.module_id, row.slot)
+					if row.item_id != null and row.item_id.is_module() \
+							and _player_ship_id >= 0 and _session.is_docked():
+						_connection.send_fit_module_command(
+							_player_ship_id, row.item_id.module_id() as int, row.slot)
 				InventoryRow.SOURCE_STATION:
 					_handle_inventory_row_right_click(row)
 		InventoryRow.SOURCE_FITTED:
@@ -973,12 +976,11 @@ func _handle_inventory_row_drop(row: InventoryRow, target_column: String, releas
 		InventoryRow.SOURCE_STATION:
 			match target_column:
 				InventoryRow.SOURCE_SHIP_CARGO:
-					if _player_ship_id >= 0:
+					if _player_ship_id >= 0 and row.item_id != null:
 						var docked_station_id: int = _session.docked_station_id()
 						if docked_station_id >= 0:
 							_connection.send_transfer_from_station_command(
-								_player_ship_id, docked_station_id, row.item_type, row.module_id,
-								row.ship_type_id)
+								_player_ship_id, docked_station_id, row.item_id)
 		## else: SHIPS column, or anything else -- not a meaningful drag target.
 
 
