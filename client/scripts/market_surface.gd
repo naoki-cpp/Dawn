@@ -187,23 +187,21 @@ func _refresh_item_options() -> void:
 		_item_select.add_item("Scrap Metal")
 
 
+## Returns one canonical Item identity plus the selected cargo count. The empty
+## cargo fallback preserves the existing ability to place a Scrap Metal bid.
 func _selected_item() -> Dictionary:
 	if _cargo.is_empty():
 		return {
-			"item_type": "ScrapMetal",
-			"module_id": 0,
-			"ship_type_id": 0,
+			"item_id": ItemIdentity.scrap_metal(),
 			"count": 0,
 		}
 	var index := _item_select.get_selected()
 	if index < 0 or index >= _cargo.size():
 		return {}
-	var item: Variant = _cargo[index]
+	var item: ItemRow = _cargo[index] as ItemRow
 	return {
-		"item_type": item.item_type as String,
-		"module_id": item.module_id as int,
-		"ship_type_id": item.ship_type_id as int,
-		"count": item.count as int,
+		"item_id": item.item_id,
+		"count": item.count,
 	}
 
 
@@ -211,6 +209,10 @@ func _place_order() -> void:
 	var item := _selected_item()
 	if item.is_empty():
 		_notice_label.text = "No ship cargo selected"
+		return
+	var item_id: ItemIdentity = item.get("item_id") as ItemIdentity
+	if item_id == null:
+		_notice_label.text = "Invalid item selection"
 		return
 	var price := _price_edit.text.to_int()
 	var quantity := _quantity_edit.text.to_int()
@@ -221,13 +223,7 @@ func _place_order() -> void:
 	if side == "Ask" and quantity > (item.count as int):
 		_notice_label.text = "Quantity exceeds ship cargo"
 		return
-	_on_place.call(
-		item.item_type as String,
-		item.module_id as int,
-		item.ship_type_id as int,
-		side,
-		price,
-		quantity)
+	_on_place.call(item_id, side, price, quantity)
 
 
 func _render_orders() -> void:
@@ -259,6 +255,14 @@ func _render_orders() -> void:
 
 func _order_item_name(order: Dictionary) -> String:
 	var item_id: Variant = order.get("item_id", null)
+	if item_id is ItemIdentity:
+		var identity := item_id as ItemIdentity
+		if identity.is_scrap_metal():
+			return "Scrap Metal"
+		if identity.is_module():
+			return "Module #%d" % (identity.module_id() as int)
+		if identity.is_packaged_ship():
+			return "Ship #%d" % (identity.ship_type_id() as int)
 	if item_id is String and item_id as String == "ScrapMetal":
 		return "Scrap Metal"
 	if item_id is Dictionary:
