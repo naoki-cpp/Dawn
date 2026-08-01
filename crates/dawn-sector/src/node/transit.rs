@@ -16,72 +16,26 @@ use dawn_core::{
     events::{JumpGateUsed, SectorTransitCompleted, SectorTransitRequested, StarSystemChanged},
     fitting::FittingSnapshot,
     DawnError, DomainEvent, JumpGateId, Position, SectorId, ShipId, ShipTypeId, Tick,
+    TransitHandoffState,
 };
 use dawn_ecs::{
-    components::{CapacitorComp, FittingComp, HullComp, InventoryComp, PositionComp, VelocityComp},
+    components::{
+        CapacitorComp, FittingComp, HullComp, InventoryComp, PositionComp, ShipStatsComp,
+        VelocityComp,
+    },
     TransitState,
 };
 use dawn_event_store::store::EventStore;
 
-use crate::persistence::{CompletedIncomingTransit, ShipSnapshot};
+use crate::persistence::CompletedIncomingTransit;
 
 use super::SimulationNode;
 
-impl ShipSnapshot {
-    /// The subset of this snapshot a Sector Transit carries across the
-    /// Sector boundary (issue #204) -- see `TransitShipState`'s doc comment
-    /// for why `position`/`anchor`/`velocity`/`tackled_by` are excluded.
-    fn to_transit_ship_state(&self) -> dawn_core::events::TransitShipState {
-        dawn_core::events::TransitShipState {
-            ship_type_id: self.ship_type_id,
-            current_shield: self.current_shield,
-            current_armor: self.current_armor,
-            current_hull: self.current_hull,
-            is_destroyed: self.is_destroyed,
-            capacitor: self.capacitor,
-            fitting: self.fitting.clone(),
-            inventory: self.inventory.clone(),
-        }
-    }
-}
-
-/// Rebuilds a `ShipSnapshot` from a `SectorTransitCompleted` event's
-/// self-contained `ship_state`, for the destination Sector's tail replay
-/// (`apply_event.rs`) to feed into `restore_ship_from_snapshot` the same way
-/// `import_transit` does for the live path. `anchor` is the same placeholder
-/// `snapshot_for_transit` uses -- overwritten by `rebase_after_transit`
-/// right after restore, so its value here never survives past that call.
-pub(super) fn ship_snapshot_from_transit(
-    ship_id: dawn_core::ShipId,
-    state: &dawn_core::events::TransitShipState,
-    entry_pos: dawn_core::Position,
-    velocity: dawn_core::Velocity,
-) -> ShipSnapshot {
-    ShipSnapshot {
-        ship_id,
-        ship_type_id: state.ship_type_id,
-        absolute_position: None,
-        position: entry_pos,
-        anchor: dawn_core::AnchorId(0),
-        velocity,
-        current_shield: state.current_shield,
-        current_armor: state.current_armor,
-        current_hull: state.current_hull,
-        is_destroyed: state.is_destroyed,
-        capacitor: state.capacitor,
-        fitting: state.fitting.clone(),
-        tackled_by: Vec::new(),
-        inventory: state.inventory.clone(),
-    }
-}
-
 /// Everything the Raft layer needs to propose a `TransitOp::Commit`, produced
-/// by [`SimulationNode::prepare_transit_commit`]. `ship` is boxed for the same
-/// reason `TransitOp::Commit` boxes it (ADR-0032 grew `ShipSnapshot` with
-/// `inventory`).
+/// by [`SimulationNode::prepare_transit_commit`].
 #[derive(Debug)]
 pub struct TransitCommitData {
-    pub ship: Box<ShipSnapshot>,
+    pub handoff: Box<TransitHandoffState>,
     pub entry_pos: Position,
     pub entry_pos_abs: dawn_core::AbsolutePosition,
     pub request_tick: Tick,
@@ -274,9 +228,9 @@ impl<S: EventStore> SimulationNode<S> {
                 entry_pos_abs,
             )
             .ok()?;
-        let ship = self.snapshot_for_transit(ship_id)?;
+        let handoff = self.handoff_for_transit(ship_id)?;
         Some(TransitCommitData {
-            ship: Box::new(ship),
+            handoff: Box::new(handoff),
             entry_pos,
             entry_pos_abs,
             request_tick,
@@ -336,39 +290,18 @@ impl<S: EventStore> SimulationNode<S> {
         events
     }
 
-    /// Read-only export for the `TransitOp::Commit` proposal: snapshot the
-    /// Ship's current state without removing it from this Sector's ECS or
-    /// appending any event.
-    ///
-    /// Issue #204: this used to also remove the Ship and append
-    /// `SectorTransitCompleted` here, at Request-commit time -- durably
-    /// recording "the Ship left `from`" on this Sector's own log *before*
-    /// the destination's `TransitOp::Commit` had even been proposed to Raft,
-    /// let alone committed. A crash in that window left `from`'s log saying
-    /// the Ship was gone while `to`'s log had nothing, so cluster-restart
-    /// recovery could lose the Ship entirely -- worse than the resurrection
-    /// bug replay recovery was fixing. The Ship now stays here, still
-    /// `InTransit` (frozen out of Movement/Combat, `dawn-ecs`'s
-    /// `TransitComp` guards), until [`complete_outgoing_transit`]
-    /// (Self::complete_outgoing_transit) actually removes it -- which only
-    /// runs once this same `TransitOp::Commit` is Raft-committed and this
-    /// Sector observes its own echo of it (`transit::apply_committed_raft_entries`).
-    /// Returns `None` if `ship_id` is unknown or not currently `InTransit`.
-    /// Folded into [`prepare_transit_commit`](Self::prepare_transit_commit);
-    /// not called directly outside this module.
+    /// Read-only export for the `TransitOp::Commit` proposal.
     #[cfg(test)]
-    fn export_transit(&self, ship_id: ShipId) -> Option<ShipSnapshot> {
-        self.snapshot_for_transit(ship_id)
+    fn export_transit(&self, ship_id: ShipId) -> Option<TransitHandoffState> {
+        self.handoff_for_transit(ship_id)
     }
 
-    pub(crate) fn snapshot_for_transit(&self, ship_id: ShipId) -> Option<ShipSnapshot> {
+    pub(crate) fn handoff_for_transit(&self, ship_id: ShipId) -> Option<TransitHandoffState> {
         let &entity = self.ships.index.get(&ship_id)?;
         if !self.world.transit_state(entity).is_in_transit() {
             return None;
         }
-
-        let pos = self.world.get::<PositionComp>(entity)?.0;
-        let vel = self.world.get::<VelocityComp>(entity)?.0;
+        let velocity = self.world.get::<VelocityComp>(entity)?.0;
         let (current_shield, current_armor, current_hull, is_destroyed) = {
             let hull = self.world.get::<HullComp>(entity)?;
             (
@@ -390,41 +323,23 @@ impl<S: EventStore> SimulationNode<S> {
             .get(&ship_id)
             .copied()
             .unwrap_or(ShipTypeId(0));
-        // Inventory must follow the ship across Sectors (ADR-0032) -- unlike
-        // tackle, it's the pilot's possessions, not Sector-local state.
         let inventory = self
             .world
             .get::<InventoryComp>(entity)
             .map(|inv| inv.items.clone())
             .unwrap_or_default();
-
-        // Tackle state is not transferred on sector transit (tacklers are in
-        // this sector; they lose the tackle as the ship leaves).
-        let snapshot = ShipSnapshot {
+        Some(TransitHandoffState {
             ship_id,
             ship_type_id,
-            absolute_position: None,
-            position: pos,
-            // Placeholder only: `AnchorId(0)` is a real, specific anchor
-            // (Helios, Sector 0's star — see `anchor.rs`), not a "this
-            // Sector's star" sentinel, so it is only ever correct by
-            // coincidence for a transit out of Sector 0. `import_transit`'s
-            // `rebase_after_transit` overwrites both this and `position`
-            // with the real destination anchor before anything reads them
-            // (ADR-0029), so the value here never survives past restore.
-            anchor: dawn_core::AnchorId(0),
-            velocity: vel,
+            velocity,
             current_shield,
             current_armor,
             current_hull,
             is_destroyed,
             capacitor,
             fitting,
-            tackled_by: Vec::new(),
             inventory,
-        };
-
-        Some(snapshot)
+        })
     }
 
     pub(crate) fn transit_commit_retry_due(&self, ship_id: ShipId, request_tick: Tick) -> bool {
@@ -467,35 +382,34 @@ impl<S: EventStore> SimulationNode<S> {
         );
     }
 
-    /// Stage 1.5 of a Sector Transit (issue #204): actually removes the Ship
-    /// from this (the `from`) Sector's ECS and appends `SectorTransitCompleted`
-    /// from this Sector's perspective. Called only once this Sector observes
-    /// its own `TransitOp::Commit` proposal get Raft-committed
-    /// (`transit::apply_committed_raft_entries`'s `from == node.sector_id()`
-    /// branch) — the durable removal is conditioned on the same fact the
-    /// destination's import is conditioned on, so a crash before that Commit
-    /// lands leaves the Ship exactly where `snapshot_for_transit` found it:
-    /// still owned by `from`, still `InTransit`.
+    /// Finalize the source half of a Sector Transit by removing the frozen
+    /// recovery copy and appending `SectorTransitCompleted` to the source log.
+    /// Normal completion calls this only after a committed Ack matches the
+    /// durable Request identity. The superseded-outgoing path also uses it
+    /// before accepting the same Ship back into this Sector. Until either
+    /// condition is durable, the Ship remains owned by `from` and frozen as
+    /// `InTransit`, so a crash cannot leave both logs without a recoverable copy.
     ///
-    /// Takes `ship` (the same `ShipSnapshot` the `TransitOp::Commit` payload
-    /// carries, echoed back to this Sector along with everyone else's copy)
-    /// rather than re-reading the Ship's current ECS state: the Ship has been
-    /// frozen out of Movement/Combat since Request-commit
-    /// (`dawn-ecs`'s `TransitComp` guards), so nothing should have changed it
-    /// in the meantime, and using the one payload both `from` and `to` share
-    /// keeps their `SectorTransitCompleted.ship_state` identical by
-    /// construction instead of by coincidence.
+    /// Ack carries only the transfer identity. The source re-reads the
+    /// canonical handoff state from its frozen recovery copy before removal;
+    /// `TransitComp` guards guarantee that state has not changed since Request.
+    /// The resulting `SectorTransitCompleted.handoff` therefore matches the
+    /// state previously proposed to the destination without coupling Ack to a
+    /// second copy of the Ship payload.
     ///
     /// Idempotent: a no-op if the Ship is already gone (e.g. this Commit
     /// entry were ever observed twice).
     pub fn complete_outgoing_transit(
         &mut self,
-        ship: &ShipSnapshot,
+        ship_id: ShipId,
         to: SectorId,
         entry_pos_abs: dawn_core::AbsolutePosition,
         request_tick: Tick,
     ) {
-        let Some(event) = self.complete_outgoing_state(ship, to, entry_pos_abs, request_tick)
+        let Some(handoff) = self.handoff_for_transit(ship_id) else {
+            return;
+        };
+        let Some(event) = self.complete_outgoing_state(&handoff, to, entry_pos_abs, request_tick)
         else {
             return;
         };
@@ -504,117 +418,117 @@ impl<S: EventStore> SimulationNode<S> {
 
     fn complete_outgoing_state(
         &mut self,
-        ship: &ShipSnapshot,
+        handoff: &TransitHandoffState,
         to: SectorId,
         entry_pos_abs: dawn_core::AbsolutePosition,
         request_tick: Tick,
     ) -> Option<DomainEvent> {
-        if !self.ships.index.contains_key(&ship.ship_id) {
+        if !self.ships.index.contains_key(&handoff.ship_id) {
             return None;
         }
-        // remove_ship also clears owners/active_ship (ADR-0035 review: this used
-        // to hand-roll index/type_ids/base_stats removal only, leaking a
-        // dangling ownership entry for a transited player ship).
-        self.remove_ship(ship.ship_id);
-
+        self.remove_ship(handoff.ship_id);
         Some(DomainEvent::SectorTransitCompleted(
             SectorTransitCompleted {
-                ship_id: ship.ship_id,
+                handoff: handoff.clone(),
                 from: self.sector_id,
                 to,
                 request_tick,
                 entry_pos: entry_pos_abs,
-                velocity: ship.velocity,
                 tick: self.current_tick,
-                ship_state: ship.to_transit_ship_state(),
             },
         ))
     }
 
-    /// Complete an incoming Sector Transit: restore `ship` (exported from the
-    /// `from` Sector via [`export_transit`](Self::export_transit)) into this
-    /// node's ECS at `entry_pos`, preserving its `ShipId` (INV-004 — no ID
-    /// reuse, the same Ship simply changes Sector ownership).
-    ///
-    /// `restore_ship_from_snapshot` re-applies the Ship's *old* (source-Sector)
-    /// anchor, and `entry_pos` alone does not carry the destination anchor
-    /// identity needed to use it as a raw offset. `entry_pos_abs` is the precise f64
-    /// Sector-frame arrival point (the destination Gate's `abs_m`, or the
-    /// origin for a non-Gate Transit); `rebase_after_transit` re-anchors
-    /// against it and returns the authoritative `AnchorRebased` event for
-    /// `import_transit` to append (ADR-0029), so the Ship can immediately
-    /// jump back out (ADR-0009).
-    ///
-    /// Appends `SectorTransitCompleted` from this (the `to`) Sector's
-    /// perspective. Folded into [`handle_transit_commit`](Self::handle_transit_commit);
-    /// not called directly outside this module.
+    /// Complete an incoming Sector Transit from canonical handoff state.
     fn import_transit(
         &mut self,
-        ship: &ShipSnapshot,
+        handoff: &TransitHandoffState,
         from: SectorId,
         entry_pos: Position,
         entry_pos_abs: dawn_core::AbsolutePosition,
         request_tick: Tick,
     ) {
         for event in
-            self.materialize_incoming_state(ship, from, entry_pos, entry_pos_abs, request_tick)
+            self.materialize_incoming_state(handoff, from, entry_pos, entry_pos_abs, request_tick)
         {
             self.event_store.append(event);
         }
     }
 
+    /// The single mapping from Transit handoff state into destination ECS.
+    fn restore_ship_from_handoff(&mut self, handoff: &TransitHandoffState, entry_pos: Position) {
+        self.insert_to_world(handoff.ship_id, entry_pos, handoff.velocity);
+        self.ships
+            .type_ids
+            .insert(handoff.ship_id, handoff.ship_type_id);
+        let base = self
+            .ship_type_registry
+            .get(&handoff.ship_type_id)
+            .map(|def| ShipStatsComp::from_base(&def.base_stats))
+            .unwrap_or(ShipStatsComp::NPC);
+        self.base_stats.insert(handoff.ship_id, base);
+        if let Some(&entity) = self.ships.index.get(&handoff.ship_id) {
+            self.world.set_ship_stats(entity, base);
+            let fitting = FittingComp::from_snapshot(&handoff.fitting, &self.module_registry);
+            let _ = self.world.insert_one(entity, fitting);
+            self.reapply_fitting(handoff.ship_id);
+            if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
+                hull.set_hp(
+                    handoff.current_shield,
+                    handoff.current_armor,
+                    handoff.current_hull,
+                );
+            }
+            if let Some(current) = handoff.capacitor {
+                let _ = self.world.insert_one(entity, CapacitorComp { current });
+            }
+            let _ = self.world.insert_one(
+                entity,
+                InventoryComp {
+                    items: handoff.inventory.clone(),
+                },
+            );
+        }
+    }
+
     fn materialize_incoming_state(
         &mut self,
-        ship: &ShipSnapshot,
+        handoff: &TransitHandoffState,
         from: SectorId,
         entry_pos: Position,
         entry_pos_abs: dawn_core::AbsolutePosition,
         request_tick: Tick,
     ) -> Vec<DomainEvent> {
-        let mut ship = ship.clone();
-        ship.position = entry_pos;
-        self.restore_ship_from_snapshot(&ship);
+        self.restore_ship_from_handoff(handoff, entry_pos);
         let mut events = Vec::with_capacity(2);
-        if let Some(event) = self.rebase_after_transit(ship.ship_id, entry_pos_abs) {
+        if let Some(event) = self.rebase_after_transit(handoff.ship_id, entry_pos_abs) {
             events.push(event);
         }
-
         events.push(DomainEvent::SectorTransitCompleted(
             SectorTransitCompleted {
-                ship_id: ship.ship_id,
+                handoff: handoff.clone(),
                 from,
                 to: self.sector_id,
                 request_tick,
                 entry_pos: entry_pos_abs,
-                velocity: ship.velocity,
                 tick: self.current_tick,
-                ship_state: ship.to_transit_ship_state(),
             },
         ));
         events
     }
 
-    /// Stage 2 of a Sector Transit, as one action: import `ship` (from
-    /// [`prepare_transit_commit`](Self::prepare_transit_commit) on the `from`
-    /// Sector), then append `JumpGateUsed`/`StarSystemChanged` if this
-    /// Transit came through a Jump Gate (ADR-0009). Callers no longer need to
-    /// know that the Gate-event append is conditional and comes after import.
-    ///
-    /// The caller (`transit::apply_committed_raft_entries`) must already have
-    /// checked `to == self.sector_id()` before calling — this only runs the
-    /// import/event sequence, it doesn't re-check ownership of the Commit.
     pub fn handle_transit_commit(
         &mut self,
-        ship: &ShipSnapshot,
+        handoff: &TransitHandoffState,
         from: SectorId,
         entry_pos: Position,
         entry_pos_abs: dawn_core::AbsolutePosition,
         gate_id: Option<JumpGateId>,
         request_tick: Tick,
     ) {
-        let ship_id = ship.ship_id;
+        let ship_id = handoff.ship_id;
         self.record_completed_incoming_transit(ship_id, from, self.sector_id, request_tick);
-        self.import_transit(ship, from, entry_pos, entry_pos_abs, request_tick);
+        self.import_transit(handoff, from, entry_pos, entry_pos_abs, request_tick);
         if let Some(gate_id) = gate_id {
             let to = self.sector_id();
             self.append_jump_events(ship_id, gate_id, from, to, entry_pos_abs);
@@ -730,11 +644,9 @@ impl<S: EventStore> SimulationNode<S> {
     /// (`import_transit`). The two are mutually exclusive since a Transit
     /// always crosses Sectors (`from != to`).
     ///
-    /// The `to` branch does not call `restore_ship_from_snapshot` through
-    /// `import_transit` (which also appends events) -- replay must not
-    /// append anything it didn't already record, so it rebuilds a
-    /// `ShipSnapshot` from `e.ship_state` via `ship_snapshot_from_transit`
-    /// and redoes the anchor rebase state directly via
+    /// The `to` branch feeds `e.handoff` through the same direct
+    /// handoff-to-ECS mapping as live import, without appending new events.
+    /// It then redoes the anchor rebase state directly via
     /// `rebase_ship_anchor_state` (see that method's doc comment for why the
     /// already-logged `AnchorRebased` entry can't do this on its own).
     pub(super) fn replay_sector_transit_completed(
@@ -742,20 +654,18 @@ impl<S: EventStore> SimulationNode<S> {
         e: &dawn_core::events::SectorTransitCompleted,
     ) {
         if self.sector_id == e.from {
-            self.remove_ship(e.ship_id);
+            self.remove_ship(e.handoff.ship_id);
         } else if self.sector_id == e.to {
-            self.record_completed_incoming_transit(e.ship_id, e.from, e.to, e.request_tick);
-            if self.ships.index.contains_key(&e.ship_id) {
+            self.record_completed_incoming_transit(e.handoff.ship_id, e.from, e.to, e.request_tick);
+            if self.ships.index.contains_key(&e.handoff.ship_id) {
                 if e.tick > self.current_tick {
                     self.current_tick = e.tick;
                 }
                 return;
             }
             let entry_pos = Position::new(e.entry_pos[0], e.entry_pos[1], e.entry_pos[2]);
-            let snapshot =
-                ship_snapshot_from_transit(e.ship_id, &e.ship_state, entry_pos, e.velocity);
-            self.restore_ship_from_snapshot(&snapshot);
-            self.rebase_ship_anchor_state(e.ship_id, e.entry_pos);
+            self.restore_ship_from_handoff(&e.handoff, entry_pos);
+            self.rebase_ship_anchor_state(e.handoff.ship_id, e.entry_pos);
         }
         if e.tick > self.current_tick {
             self.current_tick = e.tick;
@@ -841,14 +751,14 @@ mod tests {
     }
 
     #[test]
-    fn export_transit_snapshots_without_removing_the_ship_or_appending_an_event() {
+    fn export_transit_handoff_without_removing_the_ship_or_appending_an_event() {
         // Issue #204: export no longer removes the Ship or appends
         // SectorTransitCompleted -- that used to happen here, durably, before
         // the destination's TransitOp::Commit had even been proposed to Raft.
         // A crash in that window could lose the Ship (source's log said it
         // left, destination's log had nothing). Now the Ship stays put,
-        // frozen (InTransit), until complete_outgoing_transit runs -- which
-        // only happens once this Sector observes its own Commit land.
+        // frozen (InTransit), until a matching Ack is committed and
+        // complete_outgoing_transit finalizes the source half.
         let mut node = mem_node();
         let ship_id = node.spawn_ship(
             ShipTypeId(1),
@@ -894,7 +804,7 @@ mod tests {
         let snapshot = node.export_transit(ship_id).unwrap();
 
         let entry_pos_abs = dawn_core::AbsolutePosition::new(500.0, 0.0, 0.0);
-        node.complete_outgoing_transit(&snapshot, SectorId(1), entry_pos_abs, Tick::ZERO);
+        node.complete_outgoing_transit(snapshot.ship_id, SectorId(1), entry_pos_abs, Tick::ZERO);
 
         assert!(
             !node.ships.index.contains_key(&ship_id),
@@ -905,7 +815,7 @@ mod tests {
         let last = node.event_store().all_records().last().unwrap();
         match &last.event {
             DomainEvent::SectorTransitCompleted(e) => {
-                assert_eq!(e.ship_id, ship_id);
+                assert_eq!(e.handoff.ship_id, ship_id);
                 assert_eq!(e.from, node.sector_id());
                 assert_eq!(e.to, SectorId(1));
                 assert_eq!(e.entry_pos, entry_pos_abs);
@@ -926,8 +836,8 @@ mod tests {
         let snapshot = node.export_transit(ship_id).unwrap();
         let entry_pos_abs = dawn_core::AbsolutePosition::ORIGIN;
 
-        node.complete_outgoing_transit(&snapshot, SectorId(1), entry_pos_abs, Tick::ZERO);
-        node.complete_outgoing_transit(&snapshot, SectorId(1), entry_pos_abs, Tick::ZERO);
+        node.complete_outgoing_transit(snapshot.ship_id, SectorId(1), entry_pos_abs, Tick::ZERO);
+        node.complete_outgoing_transit(snapshot.ship_id, SectorId(1), entry_pos_abs, Tick::ZERO);
 
         let completed_count = node
             .event_store()
@@ -960,7 +870,7 @@ mod tests {
         let snapshot = node.export_transit(ship_id).expect("ship should export");
 
         node.complete_outgoing_transit(
-            &snapshot,
+            snapshot.ship_id,
             SectorId(1),
             dawn_core::AbsolutePosition::new(500.0, 0.0, 0.0),
             Tick::ZERO,
@@ -1032,7 +942,7 @@ mod tests {
         let last = to_node.event_store().all_records().last().unwrap();
         match &last.event {
             DomainEvent::SectorTransitCompleted(e) => {
-                assert_eq!(e.ship_id, ship_id);
+                assert_eq!(e.handoff.ship_id, ship_id);
                 assert_eq!(e.from, SectorId(0));
                 assert_eq!(e.to, SectorId(1));
                 assert_eq!(e.entry_pos, entry_pos.into());
@@ -1138,7 +1048,7 @@ mod tests {
         );
 
         to_node.handle_transit_commit(
-            &data.ship,
+            &data.handoff,
             SectorId(0),
             data.entry_pos,
             data.entry_pos_abs,
@@ -1336,7 +1246,12 @@ mod tests {
             entry_pos.into(),
             Tick::ZERO,
         );
-        from_node.complete_outgoing_transit(&snapshot, SectorId(1), entry_pos.into(), Tick::ZERO);
+        from_node.complete_outgoing_transit(
+            snapshot.ship_id,
+            SectorId(1),
+            entry_pos.into(),
+            Tick::ZERO,
+        );
 
         // Final state: destination sector owns the ship, exactly once overall.
         assert_eq!(from_node.ship_count(), 0);
@@ -1553,14 +1468,12 @@ mod tests {
 
         node.apply_event_pub(DomainEvent::SectorTransitCompleted(
             dawn_core::events::SectorTransitCompleted {
-                ship_id,
+                handoff: sample_transit_handoff(ship_id, Velocity::ZERO),
                 from: SectorId(0), // matches node.sector_id() -- this is the source
                 to: SectorId(1),
                 request_tick: dawn_core::Tick::ZERO,
                 entry_pos: dawn_core::AbsolutePosition::ORIGIN,
-                velocity: Velocity::ZERO,
                 tick: Tick(1),
-                ship_state: sample_transit_ship_state(),
             },
         ));
 
@@ -1583,14 +1496,12 @@ mod tests {
 
         node.apply_event_pub(DomainEvent::SectorTransitCompleted(
             dawn_core::events::SectorTransitCompleted {
-                ship_id,
+                handoff: sample_transit_handoff(ship_id, Velocity::new(1.0, 0.0, 0.0)),
                 from: SectorId(0),
                 to: SectorId(1),
                 request_tick: dawn_core::Tick::ZERO,
                 entry_pos: dawn_core::AbsolutePosition::new(500.0, 0.0, 0.0),
-                velocity: Velocity::new(1.0, 0.0, 0.0),
                 tick: Tick(1),
-                ship_state: sample_transit_ship_state(),
             },
         ));
 
@@ -1621,14 +1532,12 @@ mod tests {
         let ship_id = ShipId::new(NodeId(0), 7);
         let event =
             DomainEvent::SectorTransitCompleted(dawn_core::events::SectorTransitCompleted {
-                ship_id,
+                handoff: sample_transit_handoff(ship_id, Velocity::ZERO),
                 from: SectorId(0),
                 to: SectorId(1),
                 request_tick: dawn_core::Tick::ZERO,
                 entry_pos: dawn_core::AbsolutePosition::new(500.0, 0.0, 0.0),
-                velocity: Velocity::ZERO,
                 tick: Tick(1),
-                ship_state: sample_transit_ship_state(),
             });
 
         node.apply_event_pub(event.clone());
@@ -1637,9 +1546,11 @@ mod tests {
         assert_eq!(node.ship_count(), 1);
     }
 
-    fn sample_transit_ship_state() -> dawn_core::events::TransitShipState {
-        dawn_core::events::TransitShipState {
+    fn sample_transit_handoff(ship_id: ShipId, velocity: Velocity) -> TransitHandoffState {
+        TransitHandoffState {
+            ship_id,
             ship_type_id: ShipTypeId(1),
+            velocity,
             current_shield: 80.0,
             current_armor: 90.0,
             current_hull: 100.0,
@@ -1696,7 +1607,12 @@ mod tests {
         // observes the *same* Commit the destination acted on -- mirroring
         // `transit::apply_committed_raft_entries`'s `from == node.sector_id()`
         // branch, not the old immediate removal at export time.
-        from_node.complete_outgoing_transit(&exported, SectorId(1), entry_pos_abs, Tick::ZERO);
+        from_node.complete_outgoing_transit(
+            exported.ship_id,
+            SectorId(1),
+            entry_pos_abs,
+            Tick::ZERO,
+        );
 
         // Simulate a restart of both Sectors: snapshot + tail-log replay,
         // exactly as `restore_from` is used in production recovery.

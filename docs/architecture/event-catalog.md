@@ -450,21 +450,23 @@ A durable transfer request. On the source, ownership stays with `from`; the Ship
 
 ### `SectorTransitCompleted`
 
-Self-contained completion event. `ship_state` carries the destination replay state without depending on the in-memory Raft actor surviving restart.
+Self-contained completion event. `handoff` is the same canonical
+`TransitHandoffState` carried by the Raft Commit, so destination replay does not
+depend on an in-memory Raft actor or on persistence `ShipSnapshot` surviving the
+protocol boundary.
 
-The destination appends this event when Commit materialization succeeds, then proposes Ack. The source appends it only after Ack, when it removes the frozen recovery copy. Thus a crash can temporarily retain two ECS copies, but never zero durable copies; only the destination copy is active after Commit.
+The destination appends this event when Commit materialization succeeds, then proposes a minimal identity-only Ack. The source appends it only after Ack, when it removes the frozen recovery copy. Thus a crash can temporarily retain two ECS copies, but never zero durable copies; only the destination copy is active after Commit.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `ship_id` | `ShipId` | ✓ | Ship that transited |
+| `handoff` | `TransitHandoffState` | ✓ | Ship identity, type, velocity, HP, capacitor, fitting, and inventory |
 | `from` | `SectorId` | ✓ | previous active Sector |
 | `to` | `SectorId` | ✓ | new active Sector |
+| `request_tick` | `Tick` | ✓ | source-local attempt identity |
 | `entry_pos` | `AbsolutePosition` | ✓ | authoritative entry coordinates in the destination Sector frame |
-| `velocity` | `Velocity` | ✓ | velocity on entry |
 | `tick` | `Tick` | ✓ | local completion Tick |
-| `ship_state` | `TransitShipState` | ✓ | type / HP / capacitor / fitting / inventory used by destination Replay |
 
-**Replay:** on `from`, remove the Ship. On `to`, rebuild a `ShipSnapshot` from `ship_state` + `entry_pos`, materialize it, and redo anchor rebase directly. The live `AnchorRebased` event precedes Completed and may replay before the destination Ship exists.
+**Replay:** on `from`, remove `handoff.ship_id`. On `to`, feed `handoff` through the same direct destination-ECS mapping used by live Commit import, then redo anchor rebase from `entry_pos`. No fake `ShipSnapshot`, placeholder source anchor, or source position is reconstructed. The live `AnchorRebased` event precedes Completed and may replay before the destination Ship exists.
 
 ---
 

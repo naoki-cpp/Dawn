@@ -35,6 +35,7 @@ pub mod position;
 pub mod sector;
 pub mod ship_type;
 pub mod tick;
+pub mod transit;
 
 // Re-export the most commonly used types at crate root for ergonomics.
 pub use commands::{
@@ -66,3 +67,4 @@ pub use position::{AbsolutePosition, Position, Velocity};
 pub use sector::{SectorBounds, SectorId};
 pub use ship_type::{ShipBaseStats, ShipClass, ShipTypeDefinition, ShipTypeId, SlotLayout};
 pub use tick::Tick;
+pub use transit::TransitHandoffState;

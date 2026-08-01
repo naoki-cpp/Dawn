@@ -137,7 +137,7 @@ impl DomainEvent {
             Self::RepairApplied(e) => e.ship_id,
             Self::ShipDestroyed(e) => e.ship_id,
             Self::SectorTransitRequested(e) => e.ship_id,
-            Self::SectorTransitCompleted(e) => e.ship_id,
+            Self::SectorTransitCompleted(e) => e.handoff.ship_id,
             Self::SectorTransitAborted(e) => e.ship_id,
             Self::JumpGateUsed(e) => e.ship_id,
             Self::StarSystemChanged(e) => e.ship_id,
@@ -435,55 +435,24 @@ pub struct SectorTransitRequested {
     pub tick: Tick,
 }
 
-/// A Sector Transit completed; ownership of `ship_id` moved from `from` to `to`.
+/// A Sector Transit completed; ownership of `handoff.ship_id` moved from
+/// `from` to `to`.
 ///
-/// Self-contained (issue #204): `ship_state` carries everything the
-/// destination Sector needs to materialize the ship from this event alone,
-/// so `restore_from` (snapshot + tail replay) can recover a completed
-/// transit without the in-memory Raft actor surviving the restart (ADR-0014).
-/// The `from` Sector's replay only reads `ship_id` off this event (to remove
-/// it) and ignores `ship_state`; appending it there too is deliberate --
-/// `complete_outgoing_transit` already has the full state in hand at that
-/// point, and keeping one event shape for both sides avoids growing the
-/// event catalog for a payload only one side reads.
+/// `handoff` is the same Transit-owned state carried by the consensus Commit,
+/// so destination snapshot-plus-tail replay can materialize the Ship without
+/// an in-memory Raft actor. Persistence `ShipSnapshot` does not cross this
+/// protocol boundary.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SectorTransitCompleted {
-    pub ship_id: ShipId,
+    pub handoff: crate::transit::TransitHandoffState,
     pub from: SectorId,
     pub to: SectorId,
     /// Source-local identity of the Request this completion closes.
-    /// Required to correlate repeated transfers of the same Ship over
-    /// the same route during replay and delayed-Commit deduplication.
     pub request_tick: Tick,
     /// Authoritative destination-Sector entry position.
     pub entry_pos: AbsolutePosition,
-    pub velocity: Velocity,
+    /// Tick local to the EventStore that appended this record.
     pub tick: Tick,
-    /// Everything about the ship the destination Sector's tail replay needs
-    /// beyond what this event already carries elsewhere (`ship_id`,
-    /// `entry_pos`, `velocity`). Excludes fields that are transit-specific
-    /// dead weight here: `position`/`anchor` are always superseded by
-    /// `entry_pos` + the post-import anchor rebase, and tackle state is
-    /// intentionally not transferred across Sectors (the tacklers stay
-    /// behind).
-    pub ship_state: TransitShipState,
-}
-
-/// The ship state a Sector Transit carries across the Sector boundary
-/// (issue #204). A trimmed mirror of `dawn-sector`'s `ShipSnapshot` --
-/// `dawn-sector` depends on `dawn-core`, not the reverse (FBD-002), so this
-/// type lives here in its own right rather than being the same type;
-/// `dawn-sector` converts between the two at the export/import seam.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TransitShipState {
-    pub ship_type_id: ShipTypeId,
-    pub current_shield: f32,
-    pub current_armor: f32,
-    pub current_hull: f32,
-    pub is_destroyed: bool,
-    pub capacitor: Option<f32>,
-    pub fitting: FittingSnapshot,
-    pub inventory: std::collections::BTreeMap<ItemId, u64>,
 }
 
 /// A committed Sector Transit was aborted after `SectorTransitRequested`.
@@ -658,15 +627,10 @@ mod tests {
     fn sector_transit_completed_event_carries_entry_position_and_velocity() {
         let id = ship_id();
         let event = DomainEvent::SectorTransitCompleted(SectorTransitCompleted {
-            ship_id: id,
-            from: SectorId(0),
-            to: SectorId(1),
-            request_tick: Tick::ZERO,
-            entry_pos: AbsolutePosition::new(100.0, 0.0, 0.0),
-            velocity: Velocity::new(1.0, 0.0, 0.0),
-            tick: Tick(8),
-            ship_state: TransitShipState {
+            handoff: crate::TransitHandoffState {
+                ship_id: id,
                 ship_type_id: ShipTypeId(1),
+                velocity: Velocity::new(1.0, 0.0, 0.0),
                 current_shield: 100.0,
                 current_armor: 100.0,
                 current_hull: 100.0,
@@ -675,6 +639,11 @@ mod tests {
                 fitting: FittingSnapshot::empty(),
                 inventory: std::collections::BTreeMap::new(),
             },
+            from: SectorId(0),
+            to: SectorId(1),
+            request_tick: Tick::ZERO,
+            entry_pos: AbsolutePosition::new(100.0, 0.0, 0.0),
+            tick: Tick(8),
         });
         match event {
             DomainEvent::SectorTransitCompleted(e) => {
