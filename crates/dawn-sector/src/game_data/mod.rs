@@ -24,7 +24,6 @@ pub const PRODUCTION_MODULES_PATH: &str = "data/modules.toml";
 pub const PRODUCTION_SHIP_TYPES_PATH: &str = "data/ship_types.toml";
 
 static RUNTIME_CATALOG: OnceLock<Result<GameDataCatalog, CatalogError>> = OnceLock::new();
-static REPOSITORY_CATALOG: OnceLock<Result<GameDataCatalog, CatalogError>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct GameDataCatalog {
@@ -121,32 +120,21 @@ pub fn runtime_catalog() -> Result<&'static GameDataCatalog, &'static CatalogErr
         .as_ref()
 }
 
-/// Return the source-checkout catalog for compatibility helpers and test tooling.
-///
-/// Production startup must use [`runtime_catalog`] instead. Keeping this path
-/// explicit prevents missing deployment data from being masked by build inputs.
-pub(crate) fn repository_catalog() -> Result<&'static GameDataCatalog, &'static CatalogError> {
-    REPOSITORY_CATALOG
-        .get_or_init(|| {
-            let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-            GameDataCatalog::load_from_paths(
-                root.join(PRODUCTION_MODULES_PATH),
-                root.join(PRODUCTION_SHIP_TYPES_PATH),
-            )
-        })
-        .as_ref()
+#[cfg(test)]
+pub(crate) fn test_catalog() -> &'static GameDataCatalog {
+    static TEST_CATALOG: OnceLock<GameDataCatalog> = OnceLock::new();
+    TEST_CATALOG.get_or_init(|| {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        GameDataCatalog::load_from_paths(
+            root.join(PRODUCTION_MODULES_PATH),
+            root.join(PRODUCTION_SHIP_TYPES_PATH),
+        )
+        .expect("repository game-data catalog")
+    })
 }
 
 #[cfg(test)]
 impl GameDataCatalog {
-    pub(crate) fn load_repository_data() -> Result<Self, CatalogError> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        Self::load_from_paths(
-            root.join(PRODUCTION_MODULES_PATH),
-            root.join(PRODUCTION_SHIP_TYPES_PATH),
-        )
-    }
-
     pub(crate) fn load_test_runtime_directory(root: &Path) -> Result<Self, CatalogError> {
         Self::load_from_paths(
             root.join(PRODUCTION_MODULES_PATH),
