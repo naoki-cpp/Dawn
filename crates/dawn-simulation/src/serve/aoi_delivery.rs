@@ -115,8 +115,7 @@ impl AoiDelivery {
 
     fn ensure_frame_count(&mut self, count: usize) {
         let cell_size = self.cell_size;
-        self.frames
-            .resize_with(count, || AoiFrame::new(cell_size));
+        self.frames.resize_with(count, || AoiFrame::new(cell_size));
     }
 }
 
