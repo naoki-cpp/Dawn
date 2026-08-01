@@ -151,15 +151,11 @@ text = text.replace("TransitOp::Commit { ship, .. }", "TransitOp::Commit { hando
 text = text.replace("TransitOp::Commit {\n            ship,", "TransitOp::Commit {\n            handoff,")
 text = text.replace("assert_eq!(ship.ship_id, ship_id);", "assert_eq!(handoff.ship_id, ship_id);")
 text = text.replace(
-    '''        TransitOp::Commit { handoff, .. } => assert!(
-            handoff.tackled_by.is_empty(),
+    '''            ship.tackled_by.is_empty(),
             "Sector-local tackle state must not cross the boundary on retry"
-        ),
 ''',
-    '''        TransitOp::Commit { handoff, .. } => {
-            assert_eq!(handoff.ship_id, ship_id);
-            // TransitHandoffState has no source-local tackle field by construction.
-        }
+    '''            handoff.ship_id == ship_id,
+            "retry handoff must preserve the canonical Ship identity"
 ''',
 )
 old_ack = '''    let ack = TransitOp::Ack {
@@ -187,6 +183,10 @@ write(path, text)
 path = "crates/dawn-sector/src/node/transit.rs"
 text = read(path)
 text = text.replace("complete_outgoing_transit(&snapshot,", "complete_outgoing_transit(snapshot.ship_id,")
+text = text.replace(
+    "complete_outgoing_transit(\n            &snapshot,",
+    "complete_outgoing_transit(\n            snapshot.ship_id,",
+)
 text = text.replace("complete_outgoing_transit(&exported,", "complete_outgoing_transit(exported.ship_id,")
 text = text.replace(
     "DomainEvent::SectorTransitCompleted(e) => {\n                assert_eq!(e.ship_id, ship_id);",
