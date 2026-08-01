@@ -46,9 +46,7 @@ impl TryFrom<UncheckedTransitHandoffState> for TransitHandoffState {
 
     fn try_from(value: UncheckedTransitHandoffState) -> Result<Self, Self::Error> {
         if value.is_destroyed != (value.current_hull <= 0.0) {
-            return Err(
-                "TransitHandoffState.is_destroyed must equal (current_hull <= 0.0)",
-            );
+            return Err("TransitHandoffState.is_destroyed must equal (current_hull <= 0.0)");
         }
 
         Ok(Self {
