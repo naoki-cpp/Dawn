@@ -10,13 +10,15 @@
 use std::collections::HashMap;
 
 use crate::node::SimulationNode;
-use crate::persistence::ShipSnapshot;
-use dawn_core::{AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId, Tick};
+use dawn_core::{
+    AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId, Tick,
+    TransitHandoffState,
+};
 use dawn_event_store::store::EventStore;
 
 #[derive(Debug)]
 pub(crate) struct CommitProposal {
-    pub ship: ShipSnapshot,
+    pub handoff: TransitHandoffState,
     pub from: SectorId,
     pub to: SectorId,
     pub entry_pos: Position,
@@ -27,10 +29,9 @@ pub(crate) struct CommitProposal {
 
 #[derive(Debug)]
 pub(crate) struct AckProposal {
-    pub ship: ShipSnapshot,
+    pub ship_id: ShipId,
     pub from: SectorId,
     pub to: SectorId,
-    pub entry_pos_abs: AbsolutePosition,
     pub request_tick: Tick,
 }
 
@@ -87,7 +88,7 @@ fn pending_outgoing_transits<S: EventStore>(node: &SimulationNode<S>) -> Vec<Pen
                 );
             }
             DomainEvent::SectorTransitCompleted(event) if event.from == sector_id => {
-                pending.remove(&event.ship_id);
+                pending.remove(&event.handoff.ship_id);
             }
             DomainEvent::SectorTransitAborted(event) if event.from == sector_id => {
                 pending.remove(&event.ship_id);
@@ -131,7 +132,7 @@ fn destination_completed_transfer<S: EventStore>(
             }
             DomainEvent::SectorTransitCompleted(event)
                 if marker_seen
-                    && event.ship_id == ship_id
+                    && event.handoff.ship_id == ship_id
                     && event.from == from
                     && event.to == to
                     && event.request_tick == request_tick =>
@@ -142,13 +143,6 @@ fn destination_completed_transfer<S: EventStore>(
         }
     }
     false
-}
-
-fn snapshot_ship<S: EventStore>(node: &SimulationNode<S>, ship_id: ShipId) -> Option<ShipSnapshot> {
-    node.take_snapshot()
-        .ships
-        .into_iter()
-        .find(|ship| ship.ship_id == ship_id)
 }
 
 /// Close a still-pending outgoing attempt before accepting the same Ship
@@ -169,12 +163,8 @@ fn complete_superseded_outgoing_transit<S: EventStore>(
     else {
         return false;
     };
-    let Some(frozen) = node.snapshot_for_transit(ship_id) else {
-        return false;
-    };
-
     node.complete_outgoing_transit(
-        &frozen,
+        ship_id,
         pending.to,
         pending.entry_pos_abs,
         pending.request_tick,
@@ -182,20 +172,20 @@ fn complete_superseded_outgoing_transit<S: EventStore>(
     true
 }
 
-fn request_matches<S: EventStore>(
+fn matching_request<S: EventStore>(
     node: &SimulationNode<S>,
     ship_id: ShipId,
     from: SectorId,
     to: SectorId,
     request_tick: Tick,
-) -> bool {
-    node.get_ship_position(ship_id).is_some()
-        && pending_outgoing_transits(node).iter().any(|pending| {
-            pending.ship_id == ship_id
-                && pending.from == from
-                && pending.to == to
-                && pending.request_tick == request_tick
-        })
+) -> Option<PendingTransit> {
+    node.get_ship_position(ship_id)?;
+    pending_outgoing_transits(node).into_iter().find(|pending| {
+        pending.ship_id == ship_id
+            && pending.from == from
+            && pending.to == to
+            && pending.request_tick == request_tick
+    })
 }
 
 /// Apply a committed Request and return the one Commit proposal the Raft
@@ -211,7 +201,7 @@ pub(crate) fn apply_request<S: EventStore>(
     let request_tick = data.request_tick;
     node.note_transit_commit_proposed(ship_id, request_tick);
     Some(CommitProposal {
-        ship: *data.ship,
+        handoff: *data.handoff,
         from: node.sector_id(),
         to,
         entry_pos: data.entry_pos,
@@ -227,7 +217,7 @@ pub(crate) fn apply_request<S: EventStore>(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_commit<S: EventStore>(
     node: &mut SimulationNode<S>,
-    ship: &ShipSnapshot,
+    handoff: &TransitHandoffState,
     from: SectorId,
     to: SectorId,
     entry_pos: Position,
@@ -239,21 +229,23 @@ pub(crate) fn apply_commit<S: EventStore>(
         return None;
     }
 
-    let completed = destination_completed_transfer(node, ship.ship_id, from, to, request_tick);
+    let completed = destination_completed_transfer(node, handoff.ship_id, from, to, request_tick);
     if !completed {
         // A Ship can return before the Ack for its previous departure reaches
         // this Sector. In that case the existing entity is an InTransit frozen
         // recovery copy. Close that older outbox first so the delayed Ack cannot
         // later delete the newly returned active Ship.
-        if node.get_ship_position(ship.ship_id).is_some() && node.is_ship_in_transit(ship.ship_id) {
-            complete_superseded_outgoing_transit(node, ship.ship_id);
+        if node.get_ship_position(handoff.ship_id).is_some()
+            && node.is_ship_in_transit(handoff.ship_id)
+        {
+            complete_superseded_outgoing_transit(node, handoff.ship_id);
         }
 
         // A non-InTransit Ship with this ID is already the active materialization
         // for this attempt (or a duplicate delivery), so it remains Ack-only.
-        if node.get_ship_position(ship.ship_id).is_none() {
+        if node.get_ship_position(handoff.ship_id).is_none() {
             node.append_incoming_transit_marker(
-                ship.ship_id,
+                handoff.ship_id,
                 from,
                 to,
                 request_tick,
@@ -261,15 +253,21 @@ pub(crate) fn apply_commit<S: EventStore>(
                 entry_pos,
                 entry_pos_abs,
             );
-            node.handle_transit_commit(ship, from, entry_pos, entry_pos_abs, gate_id, request_tick);
+            node.handle_transit_commit(
+                handoff,
+                from,
+                entry_pos,
+                entry_pos_abs,
+                gate_id,
+                request_tick,
+            );
         }
     }
 
     Some(AckProposal {
-        ship: snapshot_ship(node, ship.ship_id).unwrap_or_else(|| ship.clone()),
+        ship_id: handoff.ship_id,
         from,
         to,
-        entry_pos_abs,
         request_tick,
     })
 }
@@ -278,16 +276,23 @@ pub(crate) fn apply_commit<S: EventStore>(
 /// the frozen source copy. Returns whether the Ack completed the handoff.
 pub(crate) fn apply_ack<S: EventStore>(
     node: &mut SimulationNode<S>,
-    ship: &ShipSnapshot,
+    ship_id: ShipId,
     from: SectorId,
     to: SectorId,
-    entry_pos_abs: AbsolutePosition,
     request_tick: Tick,
 ) -> bool {
-    if from != node.sector_id() || !request_matches(node, ship.ship_id, from, to, request_tick) {
+    if from != node.sector_id() {
         return false;
     }
-    node.complete_outgoing_transit(ship, to, entry_pos_abs, request_tick);
+    let Some(pending) = matching_request(node, ship_id, from, to, request_tick) else {
+        return false;
+    };
+    node.complete_outgoing_transit(
+        ship_id,
+        pending.to,
+        pending.entry_pos_abs,
+        pending.request_tick,
+    );
     true
 }
 
@@ -300,12 +305,12 @@ pub(crate) fn due_retries<S: EventStore>(node: &mut SimulationNode<S>) -> Vec<Co
         if !node.transit_commit_retry_due(transit.ship_id, transit.request_tick) {
             continue;
         }
-        let Some(ship) = node.snapshot_for_transit(transit.ship_id) else {
+        let Some(handoff) = node.handoff_for_transit(transit.ship_id) else {
             continue;
         };
         node.note_transit_commit_proposed(transit.ship_id, transit.request_tick);
         proposals.push(CommitProposal {
-            ship,
+            handoff,
             from: transit.from,
             to: transit.to,
             entry_pos: transit.entry_pos,
@@ -320,7 +325,7 @@ pub(crate) fn due_retries<S: EventStore>(node: &mut SimulationNode<S>) -> Vec<Co
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::events::{SectorTransitCompleted, SectorTransitRequested, TransitShipState};
+    use dawn_core::events::{SectorTransitCompleted, SectorTransitRequested};
     use dawn_core::{NodeId, SectorBounds, ShipTypeId, Velocity};
     use dawn_event_store::InMemoryEventStore;
 
@@ -341,7 +346,7 @@ mod tests {
         assert!(has_pending_outgoing_transit(&source));
 
         source.complete_outgoing_transit(
-            &proposal.ship,
+            proposal.handoff.ship_id,
             proposal.to,
             proposal.entry_pos_abs,
             proposal.request_tick,
@@ -358,7 +363,7 @@ mod tests {
 
         let first = apply_commit(
             &mut destination,
-            &proposal.ship,
+            &proposal.handoff,
             proposal.from,
             proposal.to,
             proposal.entry_pos,
@@ -369,7 +374,7 @@ mod tests {
         let event_count = destination.total_event_count();
         let second = apply_commit(
             &mut destination,
-            &proposal.ship,
+            &proposal.handoff,
             proposal.from,
             proposal.to,
             proposal.entry_pos,
@@ -392,7 +397,7 @@ mod tests {
         let outbound = apply_request(&mut sector_a, ship_id, SectorId(1), None).unwrap();
         let delayed_outbound_ack = apply_commit(
             &mut sector_b,
-            &outbound.ship,
+            &outbound.handoff,
             outbound.from,
             outbound.to,
             outbound.entry_pos,
@@ -408,7 +413,7 @@ mod tests {
         let returning = apply_request(&mut sector_b, ship_id, SectorId(0), None).unwrap();
         let return_ack = apply_commit(
             &mut sector_a,
-            &returning.ship,
+            &returning.handoff,
             returning.from,
             returning.to,
             returning.entry_pos,
@@ -424,10 +429,9 @@ mod tests {
 
         assert!(apply_ack(
             &mut sector_b,
-            &return_ack.ship,
+            return_ack.ship_id,
             return_ack.from,
             return_ack.to,
-            return_ack.entry_pos_abs,
             return_ack.request_tick,
         ));
         assert_eq!(sector_b.ship_count(), 0);
@@ -436,10 +440,9 @@ mod tests {
         // and therefore cannot delete the active Ship that just returned to A.
         assert!(!apply_ack(
             &mut sector_a,
-            &delayed_outbound_ack.ship,
+            delayed_outbound_ack.ship_id,
             delayed_outbound_ack.from,
             delayed_outbound_ack.to,
-            delayed_outbound_ack.entry_pos_abs,
             delayed_outbound_ack.request_tick,
         ));
         assert_eq!(sector_a.ship_count(), 1);
@@ -448,28 +451,11 @@ mod tests {
         assert!(!has_pending_outgoing_transit(&sector_b));
     }
 
-    fn test_ship(ship_id: ShipId) -> ShipSnapshot {
-        ShipSnapshot {
+    fn test_handoff(ship_id: ShipId) -> TransitHandoffState {
+        TransitHandoffState {
             ship_id,
             ship_type_id: ShipTypeId(1),
-            absolute_position: None,
-            position: Position::ORIGIN,
-            anchor: dawn_core::AnchorId(0),
             velocity: Velocity::ZERO,
-            current_shield: 100.0,
-            current_armor: 100.0,
-            current_hull: 100.0,
-            is_destroyed: false,
-            capacitor: Some(100.0),
-            fitting: dawn_core::fitting::FittingSnapshot::empty(),
-            tackled_by: Vec::new(),
-            inventory: std::collections::BTreeMap::new(),
-        }
-    }
-
-    fn transit_state() -> TransitShipState {
-        TransitShipState {
-            ship_type_id: ShipTypeId(1),
             current_shield: 100.0,
             current_armor: 100.0,
             current_hull: 100.0,
@@ -507,14 +493,12 @@ mod tests {
         event_tick: u64,
     ) -> DomainEvent {
         DomainEvent::SectorTransitCompleted(SectorTransitCompleted {
-            ship_id,
+            handoff: test_handoff(ship_id),
             from,
             to,
             request_tick: Tick(request_tick),
             entry_pos: AbsolutePosition::ORIGIN,
-            velocity: Velocity::ZERO,
             tick: Tick(event_tick),
-            ship_state: transit_state(),
         })
     }
 
@@ -577,7 +561,7 @@ mod tests {
         let events_before = compacted.total_event_count();
         let ack = apply_commit(
             &mut compacted,
-            &test_ship(ship_id),
+            &test_handoff(ship_id),
             SectorId(0),
             SectorId(1),
             Position::ORIGIN,

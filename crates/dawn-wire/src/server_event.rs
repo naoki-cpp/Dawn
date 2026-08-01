@@ -686,15 +686,10 @@ mod tests {
                 tick,
             }),
             DomainEvent::SectorTransitCompleted(dawn_core::events::SectorTransitCompleted {
-                ship_id: ship_id(1),
-                from: dawn_core::SectorId(0),
-                to: dawn_core::SectorId(1),
-                request_tick: dawn_core::Tick::ZERO,
-                entry_pos: dawn_core::AbsolutePosition::ORIGIN,
-                velocity: dawn_core::Velocity::ZERO,
-                tick,
-                ship_state: dawn_core::events::TransitShipState {
+                handoff: dawn_core::TransitHandoffState {
+                    ship_id: ship_id(1),
                     ship_type_id: dawn_core::ShipTypeId(1),
+                    velocity: dawn_core::Velocity::ZERO,
                     current_shield: 100.0,
                     current_armor: 100.0,
                     current_hull: 100.0,
@@ -703,6 +698,11 @@ mod tests {
                     fitting: dawn_core::fitting::FittingSnapshot::empty(),
                     inventory: std::collections::BTreeMap::new(),
                 },
+                from: dawn_core::SectorId(0),
+                to: dawn_core::SectorId(1),
+                request_tick: dawn_core::Tick::ZERO,
+                entry_pos: dawn_core::AbsolutePosition::ORIGIN,
+                tick,
             }),
             DomainEvent::SectorTransitAborted(dawn_core::events::SectorTransitAborted {
                 ship_id: ship_id(1),

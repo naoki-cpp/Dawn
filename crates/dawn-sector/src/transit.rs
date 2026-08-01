@@ -7,9 +7,11 @@
 pub(crate) mod pipeline;
 
 use crate::node::SimulationNode;
-use crate::persistence::ShipSnapshot;
 use dawn_consensus::RaftActorHandle;
-use dawn_core::{AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId, Tick};
+use dawn_core::{
+    AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId, Tick,
+    TransitHandoffState,
+};
 use dawn_event_store::store::EventStore;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -22,7 +24,7 @@ pub enum TransitOp {
         gate_id: Option<JumpGateId>,
     },
     Commit {
-        ship: Box<ShipSnapshot>,
+        handoff: Box<TransitHandoffState>,
         from: SectorId,
         to: SectorId,
         entry_pos: Position,
@@ -31,10 +33,9 @@ pub enum TransitOp {
         request_tick: Tick,
     },
     Ack {
-        ship: Box<ShipSnapshot>,
+        ship_id: ShipId,
         from: SectorId,
         to: SectorId,
-        entry_pos_abs: AbsolutePosition,
         request_tick: Tick,
     },
 }
@@ -52,7 +53,7 @@ impl TransitOp {
 fn propose_commit(raft: &RaftActorHandle, proposal: pipeline::CommitProposal) {
     raft.propose(
         TransitOp::Commit {
-            ship: Box::new(proposal.ship),
+            handoff: Box::new(proposal.handoff),
             from: proposal.from,
             to: proposal.to,
             entry_pos: proposal.entry_pos,
@@ -67,10 +68,9 @@ fn propose_commit(raft: &RaftActorHandle, proposal: pipeline::CommitProposal) {
 fn propose_ack(raft: &RaftActorHandle, proposal: pipeline::AckProposal) {
     raft.propose(
         TransitOp::Ack {
-            ship: Box::new(proposal.ship),
+            ship_id: proposal.ship_id,
             from: proposal.from,
             to: proposal.to,
-            entry_pos_abs: proposal.entry_pos_abs,
             request_tick: proposal.request_tick,
         }
         .encode(),
@@ -97,7 +97,7 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                 }
             }
             TransitOp::Commit {
-                ship,
+                handoff,
                 from,
                 to,
                 entry_pos,
@@ -107,7 +107,7 @@ pub fn apply_committed_raft_entries<S: EventStore>(
             } => {
                 if let Some(proposal) = pipeline::apply_commit(
                     node,
-                    &ship,
+                    &handoff,
                     from,
                     to,
                     entry_pos,
@@ -119,13 +119,12 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                 }
             }
             TransitOp::Ack {
-                ship,
+                ship_id,
                 from,
                 to,
-                entry_pos_abs,
                 request_tick,
             } => {
-                pipeline::apply_ack(node, &ship, from, to, entry_pos_abs, request_tick);
+                pipeline::apply_ack(node, ship_id, from, to, request_tick);
             }
         }
     }

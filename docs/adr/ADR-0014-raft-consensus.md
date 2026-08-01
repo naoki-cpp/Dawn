@@ -40,7 +40,7 @@ Request committed
   source:
     SectorTransitRequested をappend
     ShipをInTransitとしてsource ECSに保持
-    ShipSnapshotを含むCommitをproposal
+    TransitHandoffStateを含むCommitをproposal
 
 Commit committed
   destination:
@@ -65,7 +65,7 @@ source copyは凍結された復旧用でありsimulationへ参加しない。ac
 source側の未解決`SectorTransitRequested`をdurable outboxとして扱う。
 
 - `Requested - Completed/Aborted`をEventStoreから再構築する
-- 再起動後は同じShip snapshotを使ってCommitを再proposalする
+- 再起動後はfrozen Shipから同じ`TransitHandoffState`を再生成してCommitを再proposalする
 - duplicate Commitはdestinationでmaterializeし直さずAckだけ再発行する
 - duplicate Ackはsourceでno-opになる
 - outgoing Requestが未解決の間はcheckpoint compactionを延期し、retry recordをhot logに残す
@@ -77,19 +77,10 @@ Raft stateの永続化やプロセス生存を前提にしない。
 `SectorTransitCompleted`はdestination replayに必要な状態を自己完結で持つ。
 
 ```rust
-pub struct SectorTransitCompleted {
+pub struct TransitHandoffState {
     pub ship_id: ShipId,
-    pub from: SectorId,
-    pub to: SectorId,
-    pub request_tick: Tick,
-    pub entry_pos: AbsolutePosition,
-    pub velocity: Velocity,
-    pub tick: Tick,
-    pub ship_state: TransitShipState,
-}
-
-pub struct TransitShipState {
     pub ship_type_id: ShipTypeId,
+    pub velocity: Velocity,
     pub current_shield: f32,
     pub current_armor: f32,
     pub current_hull: f32,
@@ -98,10 +89,22 @@ pub struct TransitShipState {
     pub fitting: FittingSnapshot,
     pub inventory: BTreeMap<ItemId, u64>,
 }
+
+pub struct SectorTransitCompleted {
+    pub handoff: TransitHandoffState,
+    pub from: SectorId,
+    pub to: SectorId,
+    pub request_tick: Tick,
+    pub entry_pos: AbsolutePosition,
+    pub tick: Tick,
+}
 ```
 
-`position`・`anchor`は`entry_pos`とdestination側rebaseがauthority、`velocity`はevent本体、
-`tackled_by`はSector-localなので`TransitShipState`へ重複させない。
+同じ`TransitHandoffState`をRaft Commitと`SectorTransitCompleted`が共有する。
+永続化用`ShipSnapshot`はsnapshot/restore境界だけに留まり、consensus payloadへ流用しない。
+`position`・`anchor`は`entry_pos`とdestination側rebaseがauthorityであり、`tackled_by`も
+Sector-localなのでhandoffへ含めない。AckはShip stateを返さず、
+`ship_id + from + to + request_tick`だけでattemptを照合する。
 `request_tick`はsource-localなattempt identityであり、Request → Commit → Completed → Ackの
 全経路で変更せず伝播する。同じShipが同じ経路を複数回通っても別attemptとして照合する。
 
@@ -109,7 +112,7 @@ pub struct TransitShipState {
 
 - `SectorTransitRequested`: sourceにShipが存在すれば`InTransit { to }`へ戻す
 - `SectorTransitCompleted` on source: Shipを削除する
-- `SectorTransitCompleted` on destination: `ship_state`からmaterializeし、`entry_pos`へre-anchorする
+- `SectorTransitCompleted` on destination: `handoff`をlive importと同じ直接mappingでmaterializeし、`entry_pos`へre-anchorする
 - `SectorTransitAborted`: `InTransit`を解除する
 
 live importでは`AnchorRebased`が`SectorTransitCompleted`より先に記録されるため、destination

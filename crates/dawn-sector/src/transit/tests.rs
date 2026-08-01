@@ -35,13 +35,10 @@ fn decode_proposed_transit(
     TransitOp::decode(&payload).expect("payload must decode as a TransitOp")
 }
 
-fn sample_ship() -> ShipSnapshot {
-    ShipSnapshot {
+fn sample_handoff() -> TransitHandoffState {
+    TransitHandoffState {
         ship_id: ShipId::new(NodeId(0), 7),
         ship_type_id: ShipTypeId(1),
-        absolute_position: None,
-        position: Position::new(1.0, 2.0, 3.0),
-        anchor: dawn_core::AnchorId(0),
         velocity: Velocity::new(4.0, 5.0, 6.0),
         current_shield: 10.0,
         current_armor: 20.0,
@@ -49,7 +46,6 @@ fn sample_ship() -> ShipSnapshot {
         is_destroyed: false,
         capacitor: Some(50.0),
         fitting: FittingSnapshot::empty(),
-        tackled_by: vec![],
         inventory: std::collections::BTreeMap::new(),
     }
 }
@@ -116,7 +112,7 @@ fn request_op_round_trips() {
 #[test]
 fn commit_and_ack_round_trip() {
     let commit = TransitOp::Commit {
-        ship: Box::new(sample_ship()),
+        handoff: Box::new(sample_handoff()),
         from: SectorId(0),
         to: SectorId(1),
         entry_pos: Position::new(500.0, 0.0, 0.0),
@@ -133,10 +129,9 @@ fn commit_and_ack_round_trip() {
     ));
 
     let ack = TransitOp::Ack {
-        ship: Box::new(sample_ship()),
+        ship_id: sample_handoff().ship_id,
         from: SectorId(0),
         to: SectorId(1),
-        entry_pos_abs: AbsolutePosition::new(500.0, 0.0, 0.0),
         request_tick: Tick(12),
     };
     assert!(matches!(
@@ -162,7 +157,7 @@ fn destination_commit_then_source_ack_moves_ownership_without_a_zero_owner_windo
         .unwrap();
     let request_tick = source.current_tick();
     let commit = TransitOp::Commit {
-        ship: data.ship,
+        handoff: data.handoff,
         from: SectorId(0),
         to: SectorId(1),
         entry_pos: data.entry_pos,
@@ -199,7 +194,7 @@ fn duplicate_destination_commit_is_idempotent_and_reissues_ack() {
         .prepare_transit_commit(ship_id, SectorId(1), None)
         .unwrap();
     let commit = TransitOp::Commit {
-        ship: data.ship,
+        handoff: data.handoff,
         from: SectorId(0),
         to: SectorId(1),
         entry_pos: data.entry_pos,
@@ -259,14 +254,14 @@ fn restored_requested_transit_reproposes_commit_with_the_durable_route() {
 
     match decode_proposed_transit(&mut proposals) {
         TransitOp::Commit {
-            ship,
+            handoff,
             gate_id,
             entry_pos,
             entry_pos_abs,
             request_tick,
             ..
         } => {
-            assert_eq!(ship.ship_id, ship_id);
+            assert_eq!(handoff.ship_id, ship_id);
             assert_eq!(gate_id, None);
             assert_eq!(entry_pos, Position::ORIGIN);
             assert_eq!(entry_pos_abs, AbsolutePosition::ORIGIN);
@@ -329,7 +324,7 @@ fn destination_marker_keeps_destination_local_tick() {
     let (tx, mut committed_rx) = mpsc::unbounded_channel();
     tx.send(
         TransitOp::Commit {
-            ship: Box::new(sample_ship()),
+            handoff: Box::new(sample_handoff()),
             from: SectorId(0),
             to: SectorId(1),
             entry_pos: Position::ORIGIN,
@@ -369,9 +364,9 @@ fn retry_commit_uses_the_canonical_transit_snapshot_without_tackle_state() {
     apply_committed_raft_entries(&mut source, &raft, &mut committed_rx);
 
     match decode_proposed_transit(&mut proposals) {
-        TransitOp::Commit { ship, .. } => assert!(
-            ship.tackled_by.is_empty(),
-            "Sector-local tackle state must not cross the boundary on retry"
+        TransitOp::Commit { handoff, .. } => assert!(
+            handoff.ship_id == ship_id,
+            "retry handoff must preserve the canonical Ship identity"
         ),
         other => panic!("expected Commit, got {other:?}"),
     }
@@ -386,7 +381,7 @@ fn duplicate_commit_after_destination_checkpoint_does_not_append_a_pending_marke
         .prepare_transit_commit(ship_id, SectorId(1), None)
         .unwrap();
     let commit = TransitOp::Commit {
-        ship: data.ship,
+        handoff: data.handoff,
         from: SectorId(0),
         to: SectorId(1),
         entry_pos: data.entry_pos,
@@ -433,7 +428,7 @@ fn duplicate_commit_after_checkpoint_does_not_resurrect_removed_ship() {
         .prepare_transit_commit(ship_id, SectorId(1), None)
         .unwrap();
     let commit = TransitOp::Commit {
-        ship: data.ship,
+        handoff: data.handoff,
         from: SectorId(0),
         to: SectorId(1),
         entry_pos: data.entry_pos,

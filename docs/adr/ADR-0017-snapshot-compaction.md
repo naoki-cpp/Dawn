@@ -91,7 +91,7 @@ recharge・イベント無し）が純粋なイベント replay で再構築で�
 | 用途 | 必要な機構 | genesis replay 要否 |
 |---|---|---|
 | クラッシュ再起動 / failover（ADR-0014） | スナップショット + 末尾 catch-up | 不要（末尾のみ） |
-| Sector Transit（ADR-0014） | ShipSnapshot を Raft で転送 | 不要（replay ですらない） |
+| Sector Transit（ADR-0014） | Transit専用`TransitHandoffState`をRaftで転送し、Completed tailにも保存 | snapshot + tailで復旧 |
 | ノード間収束（Gossip/CRDT・将来） | 受信イベントを live 状態に apply | 不要（apply であって再構築ではない） |
 | タイムトラベル / 監査（ADR-0001 の価値） | イベント履歴 + 任意時点の再構築 | 経路外（デバッグ時のみ） |
 

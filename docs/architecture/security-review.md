@@ -122,15 +122,16 @@ matching結果は`MarketDb`が計算し、client supplied balance/trade result�
 船を指定するだけで所有権を奪取でき、以降の`owns_ship`ベースの検証は全て素通しになる。
 
 **根本原因（設計レベル）**: 調査の結果、これは単純な検証漏れではなく、より深い設計上の
-ギャップだと判明した。ノード間転送（Sector Transit）で運ばれる`ShipSnapshot`
-（`crates/dawn-sector/src/persistence/snapshot.rs`）は`player_id`/所有権情報を一切含んでいない。
+ギャップだと判明した。ノード間転送（Sector Transit）で運ばれる
+`TransitHandoffState`は`player_id`/所有権情報を一切含んでいない。
+永続化用`ShipSnapshot`も同様にownership authorityではない。
 つまり転送先ノードでは、船が実際に誰の所有かという情報がどこにも存在せず、
 **クライアントのHello resumeが最初に主張した内容がそのまま所有権の確立になる** —
 これは`adopt_player_ship`のdocコメント通りの意図された設計であり、認証なしという
 既存方針の必然的な帰結である。
 
 修正案を2段階で検討した:
-1. **狭い修正**: `ShipSnapshot`にトランジット元ノードの正規`owners`から`player_id`を
+1. **狭い修正**: `TransitHandoffState`にトランジット元ノードの正規`owners`から`player_id`を
    載せて転送先へ引き継ぎ、resume時は「そのペアが一致するか」だけを検証する。
    存在しないship_idや無関係なペアでの乗っ取りは防げるが、player_id/ship_idはワイヤ上で
    観測可能なため、正しいペアを知っている攻撃者はなお成りすませる — 部分的な緩和に留まる。
