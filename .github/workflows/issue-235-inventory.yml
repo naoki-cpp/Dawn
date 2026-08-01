@@ -18,10 +18,10 @@ jobs:
       - name: List topology construction call sites
         run: |
           echo '=== SimulationNode::new ==='
-          rg -n -C 3 'SimulationNode::new\(' crates || true
+          grep -RIn -C 3 'SimulationNode::new(' crates || true
           echo '=== SimulationNode::with_store ==='
-          rg -n -C 3 'SimulationNode::with_store\(' crates || true
+          grep -RIn -C 3 'SimulationNode::with_store(' crates || true
           echo '=== SimulationNode::restore_from ==='
-          rg -n -C 3 'SimulationNode::restore_from\(' crates || true
+          grep -RIn -C 3 'SimulationNode::restore_from(' crates || true
           echo '=== set_galaxy ==='
-          rg -n -C 5 '\.set_galaxy\(' crates || true
+          grep -RIn -C 5 '.set_galaxy(' crates || true
