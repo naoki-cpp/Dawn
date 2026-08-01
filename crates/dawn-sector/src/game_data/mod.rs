@@ -120,6 +120,10 @@ pub fn runtime_catalog() -> Result<&'static GameDataCatalog, &'static CatalogErr
         .as_ref()
 }
 
+/// Return the repository catalog used by `dawn-sector` unit tests.
+///
+/// This fixture is compiled only for this crate's tests; production callers
+/// must choose [`runtime_catalog`] or construct [`GameDataCatalog`] explicitly.
 #[cfg(test)]
 pub(crate) fn test_catalog() -> &'static GameDataCatalog {
     static TEST_CATALOG: OnceLock<GameDataCatalog> = OnceLock::new();
