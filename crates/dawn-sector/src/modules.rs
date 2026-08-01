@@ -3,7 +3,7 @@
 //! Balance values are authoritative in `data/modules.toml` and are loaded by
 //! [`crate::game_data::GameDataCatalog`].
 
-use dawn_core::fitting::{ModuleDefinition, ModuleId};
+use dawn_core::fitting::ModuleId;
 
 pub const MODULE_RAILGUN_SMALL: ModuleId = ModuleId(1);
 pub const MODULE_RAILGUN_MEDIUM: ModuleId = ModuleId(2);
@@ -41,19 +41,10 @@ pub(crate) const REQUIRED_MODULE_IDS: &[ModuleId] = &[
     MODULE_SMALL_REMOTE_ARMOR_REPAIRER,
 ];
 
-/// Compatibility accessor for callers that need the repository's production
-/// definitions in tests or tooling. Runtime startup should load one
-/// [`crate::game_data::GameDataCatalog`] and register it as a unit.
-pub fn all_modules() -> Vec<ModuleDefinition> {
-    crate::game_data::repository_catalog()
-        .unwrap_or_else(|error| panic!("failed to load repository game-data catalog: {error}"))
-        .modules()
-        .to_vec()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game_data::test_catalog;
     use dawn_core::fitting::{ActivationMode, ModuleKind, SlotKind};
     use dawn_ecs::components::ShipStatsComp;
 
@@ -66,7 +57,7 @@ mod tests {
 
     #[test]
     fn weapon_modules_are_active_and_in_high_slot() {
-        for module in all_modules() {
+        for module in test_catalog().modules() {
             if module.kind == ModuleKind::Weapon {
                 assert_eq!(module.slot, SlotKind::High);
                 assert_eq!(
@@ -81,7 +72,7 @@ mod tests {
 
     #[test]
     fn passive_modules_are_not_weapons() {
-        for module in all_modules() {
+        for module in test_catalog().modules() {
             if module.activation_mode == ActivationMode::Passive {
                 assert_ne!(
                     module.kind,
@@ -101,7 +92,7 @@ mod tests {
 
     #[test]
     fn weapon_modules_provide_positive_damage_and_range() {
-        for module in all_modules() {
+        for module in test_catalog().modules() {
             if module.kind == ModuleKind::Weapon {
                 assert!(module.stat_delta.weapon_damage_add > 0.0);
                 assert!(module.stat_delta.weapon_range_add > 0.0);
