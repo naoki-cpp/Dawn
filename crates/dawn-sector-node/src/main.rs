@@ -139,7 +139,8 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| {
             anyhow::anyhow!(
                 "failed to bind replication transport on {}: {}",
-                cfg.repl_addr, e
+                cfg.repl_addr,
+                e
             )
         })?;
 
@@ -218,11 +219,7 @@ async fn main() -> anyhow::Result<()> {
         let tick_started = std::time::Instant::now();
         let retry_step =
             advance_catch_up_failure_retries(&mut catch_up, &mut catch_up_failure_retries);
-        emit_catch_up_step(
-            &repl_transport,
-            &mut catch_up_failure_retries,
-            retry_step,
-        );
+        emit_catch_up_step(&repl_transport, &mut catch_up_failure_retries, retry_step);
 
         admission.advance_handshakes(&mut node, sector_id, AOI_CELL_SIZE);
 
@@ -381,9 +378,7 @@ fn advance_catch_up_failure_retries(
             continue;
         };
         let Some(probe_from) = cursor.checked_add(1) else {
-            eprintln!(
-                "[Repl] sector={sector_id:?} cannot restart catch-up at u64::MAX cursor"
-            );
+            eprintln!("[Repl] sector={sector_id:?} cannot restart catch-up at u64::MAX cursor");
             continue;
         };
 
