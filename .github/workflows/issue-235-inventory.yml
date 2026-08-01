@@ -1,4 +1,4 @@
-name: Issue 235 inventory
+name: Issue 235 implementation
 
 on:
   pull_request:
@@ -6,22 +6,42 @@ on:
       - main
     paths:
       - '.github/workflows/issue-235-inventory.yml'
+      - '.github/issue-235-apply.py'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  inventory:
+  apply:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - name: List topology construction call sites
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Apply topology construction change
+        run: python3 .github/issue-235-apply.py
+      - name: Format and verify
         run: |
-          echo '=== SimulationNode::new ==='
-          grep -RIn -C 3 'SimulationNode::new(' crates || true
-          echo '=== SimulationNode::with_store ==='
-          grep -RIn -C 3 'SimulationNode::with_store(' crates || true
-          echo '=== SimulationNode::restore_from ==='
-          grep -RIn -C 3 'SimulationNode::restore_from(' crates || true
-          echo '=== set_galaxy ==='
-          grep -RIn -C 5 '.set_galaxy(' crates || true
+          cargo fmt --all
+          git diff --check
+          if grep -RIn --exclude='issue-235-apply.py' --exclude='issue-235-inventory.yml' 'set_galaxy' crates docs; then
+            echo 'set_galaxy references remain' >&2
+            exit 1
+          fi
+          cargo test -p dawn-sector
+          cargo test -p dawn-simulation
+          cargo test -p dawn-sector-node
+          cargo clippy --workspace --all-targets -- -D warnings
+      - name: Publish verified changes
+        run: |
+          rm -f .github/issue-235-apply.py .github/workflows/issue-235-inventory.yml
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Require topology when constructing SimulationNode'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
