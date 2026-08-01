@@ -292,7 +292,7 @@ impl<S: EventStore> SimulationNode<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{modules, ship_types};
+
     use dawn_core::{
         commands::TransitCommand, NodeId, Position, SectorBounds, SectorId, Tick, Velocity,
     };

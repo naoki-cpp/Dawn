@@ -134,7 +134,6 @@ mod tests {
     use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId};
 
     fn node_with_modules() -> SimulationNode {
-        use crate::{modules, ship_types};
         let mut node = SimulationNode::new(
             NodeId(0),
             SectorId(0),

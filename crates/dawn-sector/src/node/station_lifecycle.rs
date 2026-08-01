@@ -255,8 +255,6 @@ mod tests {
     use dawn_ecs::components::{ThrustComp, VelocityComp};
     use dawn_event_store::{store::EventStore, InMemoryEventStore};
 
-    use crate::{modules, ship_types};
-
     use super::*;
 
     fn accepted(outcome: StationOperationOutcome) -> bool {
@@ -302,8 +300,8 @@ mod tests {
         let mut restored = SimulationNode::restore_from(
             store,
             &snapshot,
-            &crate::game_data::test_catalog().modules().to_vec(),
-            &crate::game_data::test_catalog().ship_types().to_vec(),
+            crate::game_data::test_catalog().modules(),
+            crate::game_data::test_catalog().ship_types(),
         );
         assert_eq!(restored.docked_station(ship_id), Some(StationId(0)));
         assert_eq!(restored.player_docked_station(player_id), None);
@@ -336,8 +334,8 @@ mod tests {
         let mut restored = SimulationNode::restore_from(
             store,
             &snapshot,
-            &crate::game_data::test_catalog().modules().to_vec(),
-            &crate::game_data::test_catalog().ship_types().to_vec(),
+            crate::game_data::test_catalog().modules(),
+            crate::game_data::test_catalog().ship_types(),
         );
         assert_eq!(restored.docked_station(ship_id), None);
         assert_eq!(

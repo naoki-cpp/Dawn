@@ -115,8 +115,6 @@ mod tests {
     };
     use dawn_event_store::InMemoryEventStore;
 
-    use crate::{modules, ship_types};
-
     use super::*;
 
     fn node() -> SimulationNode<InMemoryEventStore> {

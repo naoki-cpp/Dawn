@@ -231,7 +231,6 @@ mod tests {
     use dawn_ecs::components::WarpPhase;
 
     fn node_with_modules() -> SimulationNode {
-        use crate::{modules, ship_types};
         let mut node = SimulationNode::new(
             NodeId(0),
             SectorId(0),

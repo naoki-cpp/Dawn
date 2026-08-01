@@ -205,7 +205,6 @@ mod tests {
     }
 
     fn node_with_modules() -> SimulationNode {
-        use crate::{modules, ship_types};
         let mut node = mem_node();
         for def in crate::game_data::test_catalog().modules().to_vec() {
             node.register_module(def);
@@ -231,8 +230,6 @@ mod tests {
     /// field.
     #[test]
     fn restoring_a_snapshot_and_recapturing_reproduces_it_exactly() {
-        use crate::{modules, ship_types};
-
         // The store must already hold `log_index` events: `take_snapshot`
         // derives that field from the store's length, and `restore_from`
         // replays everything at or past it (nothing, here).
@@ -250,8 +247,8 @@ mod tests {
         let node = SimulationNode::restore_from(
             store,
             &original,
-            &crate::game_data::test_catalog().modules().to_vec(),
-            &crate::game_data::test_catalog().ship_types().to_vec(),
+            crate::game_data::test_catalog().modules(),
+            crate::game_data::test_catalog().ship_types(),
         );
 
         assert_eq!(
@@ -271,8 +268,6 @@ mod tests {
     /// is a live ownership hazard, not a bookkeeping detail.
     #[test]
     fn player_ids_are_not_reissued_after_a_restore() {
-        use crate::{modules, ship_types};
-
         let mut node = node_with_modules();
         let first = node.next_player_id();
         let second = node.next_player_id();
@@ -281,8 +276,8 @@ mod tests {
         let mut restored = SimulationNode::restore_from(
             InMemoryEventStore::new(),
             &snapshot,
-            &crate::game_data::test_catalog().modules().to_vec(),
-            &crate::game_data::test_catalog().ship_types().to_vec(),
+            crate::game_data::test_catalog().modules(),
+            crate::game_data::test_catalog().ship_types(),
         );
 
         let after_restart = restored.next_player_id();
@@ -444,8 +439,6 @@ mod tests {
     /// restoring it and snapshotting again yields a byte-identical snapshot.
     #[test]
     fn snapshot_round_trips_through_restore_byte_for_byte() {
-        use crate::{modules, ship_types};
-
         let mut node = node_with_modules();
 
         for i in 0..4u64 {
@@ -470,8 +463,8 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             store2,
             &snap1,
-            &crate::game_data::test_catalog().modules().to_vec(),
-            &crate::game_data::test_catalog().ship_types().to_vec(),
+            crate::game_data::test_catalog().modules(),
+            crate::game_data::test_catalog().ship_types(),
         );
         let snap2 = node2.take_snapshot();
 
@@ -490,8 +483,6 @@ mod tests {
     /// coast identically, isolating the snapshot round-trip property.
     #[test]
     fn snapshot_plus_tail_tick_reexecution_matches_live_including_capacitor() {
-        use crate::{modules, ship_types};
-
         let mut live = node_with_modules();
 
         for i in 0..3u64 {
@@ -526,8 +517,8 @@ mod tests {
         let mut restored = SimulationNode::restore_from(
             store2,
             &snap,
-            &crate::game_data::test_catalog().modules().to_vec(),
-            &crate::game_data::test_catalog().ship_types().to_vec(),
+            crate::game_data::test_catalog().modules(),
+            crate::game_data::test_catalog().ship_types(),
         );
         for _ in 0..4 {
             restored.tick();
@@ -674,8 +665,8 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             store2,
             &snap,
-            &crate::game_data::test_catalog().modules().to_vec(),
-            &crate::game_data::test_catalog().ship_types().to_vec(),
+            crate::game_data::test_catalog().modules(),
+            crate::game_data::test_catalog().ship_types(),
         );
 
         let hp = node2.get_ship_hp(ship_id).unwrap();
@@ -713,7 +704,6 @@ mod tests {
     /// new-schema check the pre-anchor round-trip tests can't make.
     #[test]
     fn warp_arrival_anchor_and_absolute_position_survive_snapshot_restore() {
-        use crate::{modules, ship_types};
         use dawn_core::WarpTarget;
 
         let mut node = node_with_modules();
@@ -753,8 +743,8 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             store2,
             &snap,
-            &crate::game_data::test_catalog().modules().to_vec(),
-            &crate::game_data::test_catalog().ship_types().to_vec(),
+            crate::game_data::test_catalog().modules(),
+            crate::game_data::test_catalog().ship_types(),
         );
 
         assert_eq!(
@@ -781,7 +771,6 @@ mod tests {
     /// at the same on-disk file.
     #[test]
     fn station_inventory_survives_snapshot_restore() {
-        use crate::{modules, ship_types};
         use dawn_core::{ItemId, PlayerId, StationId};
 
         let db_path = tempfile::NamedTempFile::new().unwrap();
@@ -805,8 +794,8 @@ mod tests {
         let mut node2 = SimulationNode::restore_from(
             store2,
             &snap,
-            &crate::game_data::test_catalog().modules().to_vec(),
-            &crate::game_data::test_catalog().ship_types().to_vec(),
+            crate::game_data::test_catalog().modules(),
+            crate::game_data::test_catalog().ship_types(),
         );
         node2.open_station_inventory_db(db_path).unwrap();
 
@@ -833,7 +822,6 @@ mod tests {
 
     #[test]
     fn docked_station_state_survives_snapshot_restore() {
-        use crate::{modules, ship_types};
         use dawn_core::{DockCommand, StationId};
 
         let mut node = node_with_modules();
@@ -860,8 +848,8 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             store2,
             &snap,
-            &crate::game_data::test_catalog().modules().to_vec(),
-            &crate::game_data::test_catalog().ship_types().to_vec(),
+            crate::game_data::test_catalog().modules(),
+            crate::game_data::test_catalog().ship_types(),
         );
 
         assert_eq!(node2.docked_station(ship_id), Some(StationId(0)));
@@ -880,8 +868,6 @@ mod tests {
     /// exactly the field this bug lived in.
     #[test]
     fn a_ship_spawned_after_the_snapshot_survives_snapshot_plus_tail_replay() {
-        use crate::{modules, ship_types};
-
         let mut node = node_with_modules();
         let snapshot_before = node.take_snapshot();
 
@@ -905,8 +891,8 @@ mod tests {
         let restored = SimulationNode::restore_from(
             store2,
             &snapshot_before,
-            &crate::game_data::test_catalog().modules().to_vec(),
-            &crate::game_data::test_catalog().ship_types().to_vec(),
+            crate::game_data::test_catalog().modules(),
+            crate::game_data::test_catalog().ship_types(),
         );
 
         assert!(

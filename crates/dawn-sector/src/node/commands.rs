@@ -639,7 +639,6 @@ mod tests {
     }
 
     fn node_with_modules() -> SimulationNode {
-        use crate::{modules, ship_types};
         let mut node = mem_node();
         for def in crate::game_data::test_catalog().modules().to_vec() {
             node.register_module(def);
@@ -955,7 +954,6 @@ mod tests {
 
     #[test]
     fn fit_command_returns_player_loadout_refresh_followup() {
-        use crate::modules;
         use dawn_core::{ClientCommand, FitModuleCommand, ModuleId, SlotKind};
         let mut node = mem_node();
         for def in crate::game_data::test_catalog().modules().to_vec() {
@@ -1364,7 +1362,6 @@ mod tests {
 
     #[test]
     fn unfit_command_dispatches_through_and_returns_refresh_fitting_followup() {
-        use crate::modules;
         use dawn_core::{ClientCommand, FitModuleCommand, ModuleId, SlotKind, UnfitModuleCommand};
         let mut node = mem_node();
         for def in crate::game_data::test_catalog().modules().to_vec() {

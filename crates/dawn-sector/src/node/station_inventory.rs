@@ -243,8 +243,6 @@ mod tests {
     use dawn_core::{ItemId, NodeId, SectorBounds, SectorId};
     use dawn_event_store::InMemoryEventStore;
 
-    use crate::{modules, ship_types};
-
     use super::*;
 
     const TEST_STATION_ID: StationId = StationId(0);

@@ -289,8 +289,6 @@ mod tests {
     use dawn_core::{ItemId, NodeId, SectorBounds, SectorId, ShipTypeId, StationId};
     use dawn_event_store::{store::EventStore, InMemoryEventStore};
 
-    use crate::{modules, ship_types};
-
     use super::*;
 
     fn node() -> SimulationNode<InMemoryEventStore> {

@@ -201,7 +201,7 @@ enum MarketItemMutation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{modules, ship_types};
+    use crate::modules;
     use dawn_core::{DockCommand, NodeId, SectorBounds, SectorId, StationId};
 
     fn node_with_modules() -> SimulationNode {
