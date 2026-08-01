@@ -1,0 +1,27 @@
+name: Issue 235 inventory
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/issue-235-inventory.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: List topology construction call sites
+        run: |
+          echo '=== SimulationNode::new ==='
+          rg -n -C 3 'SimulationNode::new\(' crates || true
+          echo '=== SimulationNode::with_store ==='
+          rg -n -C 3 'SimulationNode::with_store\(' crates || true
+          echo '=== SimulationNode::restore_from ==='
+          rg -n -C 3 'SimulationNode::restore_from\(' crates || true
+          echo '=== set_galaxy ==='
+          rg -n -C 5 '\.set_galaxy\(' crates || true
