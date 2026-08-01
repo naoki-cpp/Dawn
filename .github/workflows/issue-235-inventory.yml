@@ -28,12 +28,18 @@ jobs:
           from pathlib import Path
           path = Path('.github/issue-235-apply.py')
           text = path.read_text()
-          old = "elif ch == \"'\":"
-          new = "elif False and ch == \"'\":"
-          count = text.count(old)
-          if count != 4:
-              raise SystemExit(f'expected four single-quote parser branches, found {count}')
-          path.write_text(text.replace(old, new))
+          quote_old = "elif ch == \"'\":"
+          quote_new = "elif False and ch == \"'\":"
+          quote_count = text.count(quote_old)
+          if quote_count != 4:
+              raise SystemExit(f'expected four single-quote parser branches, found {quote_count}')
+          text = text.replace(quote_old, quote_new)
+          find_old = "        close_index = find_matching_paren(text, open_index)\n"
+          find_new = """        try:\n            close_index = find_matching_paren(text, open_index)\n        except RuntimeError as error:\n            raise RuntimeError(\n                f\"{path}: unmatched call near {text[index:index + 240]!r}\"\n            ) from error\n"""
+          find_count = text.count(find_old)
+          if find_count != 1:
+              raise SystemExit(f'expected one call parser site, found {find_count}')
+          path.write_text(text.replace(find_old, find_new))
           PY
           python3 .github/issue-235-apply.py
       - name: Format and verify
