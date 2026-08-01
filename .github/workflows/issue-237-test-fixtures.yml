@@ -19,11 +19,10 @@ jobs:
       - name: Migrate ItemRow GdUnit fixtures
         run: |
           python3 - <<'PY'
-          import re
           from pathlib import Path
 
           path = Path('client/test/hud_surface_test.gd')
-          text = path.read_text()
+          text = path.read_text().replace('\r\n', '\n')
 
           new_helper = '''func _item(item_id: ItemIdentity, overrides: Dictionary = {}) -> ItemRow:
           \treturn ItemRow.test_fixture(
@@ -33,15 +32,9 @@ jobs:
           \t\toverrides.get("slot", "") as String,
           \t\toverrides.get("count", 1) as int,
           \t) as ItemRow'''
-          text, count = re.subn(
-              r'func _item\(overrides: Dictionary\) -> ItemRow:\n.*?(?=\n\nfunc _owned_ship)',
-              new_helper,
-              text,
-              count=1,
-              flags=re.S,
-          )
-          if count != 1:
-              raise SystemExit(f'expected one old helper block, found {count}')
+          start = text.index('func _item(')
+          end = text.index('func _owned_ship', start)
+          text = text[:start] + new_helper + '\n\n' + text[end:]
 
           replacements = {
               '_item({"item_id": "ScrapMetal", "name": "Scrap Metal", "count": 3})':
