@@ -1,0 +1,23 @@
+name: Issue 238 source export
+
+on:
+  push:
+    branches:
+      - agent/typed-world-session-outcomes
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create source archive
+        run: |
+          tar --exclude=.git --exclude=target -czf /tmp/dawn-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dawn-source
+          path: /tmp/dawn-source.tar.gz
+          retention-days: 1
