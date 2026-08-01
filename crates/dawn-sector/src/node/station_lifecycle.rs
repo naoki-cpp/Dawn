@@ -269,10 +269,10 @@ mod tests {
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         );
-        for def in modules::all_modules() {
+        for def in crate::game_data::test_catalog().modules().to_vec() {
             node.register_module(def);
         }
-        for def in ship_types::all_ship_types() {
+        for def in crate::game_data::test_catalog().ship_types().to_vec() {
             node.register_ship_type(def);
         }
         node
@@ -302,8 +302,8 @@ mod tests {
         let mut restored = SimulationNode::restore_from(
             store,
             &snapshot,
-            &modules::all_modules(),
-            &ship_types::all_ship_types(),
+            &crate::game_data::test_catalog().modules().to_vec(),
+            &crate::game_data::test_catalog().ship_types().to_vec(),
         );
         assert_eq!(restored.docked_station(ship_id), Some(StationId(0)));
         assert_eq!(restored.player_docked_station(player_id), None);
@@ -336,8 +336,8 @@ mod tests {
         let mut restored = SimulationNode::restore_from(
             store,
             &snapshot,
-            &modules::all_modules(),
-            &ship_types::all_ship_types(),
+            &crate::game_data::test_catalog().modules().to_vec(),
+            &crate::game_data::test_catalog().ship_types().to_vec(),
         );
         assert_eq!(restored.docked_station(ship_id), None);
         assert_eq!(

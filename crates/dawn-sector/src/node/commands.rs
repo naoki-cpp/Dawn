@@ -641,10 +641,10 @@ mod tests {
     fn node_with_modules() -> SimulationNode {
         use crate::{modules, ship_types};
         let mut node = mem_node();
-        for def in modules::all_modules() {
+        for def in crate::game_data::test_catalog().modules().to_vec() {
             node.register_module(def);
         }
-        for def in ship_types::all_ship_types() {
+        for def in crate::game_data::test_catalog().ship_types().to_vec() {
             node.register_ship_type(def);
         }
         node
@@ -958,7 +958,7 @@ mod tests {
         use crate::modules;
         use dawn_core::{ClientCommand, FitModuleCommand, ModuleId, SlotKind};
         let mut node = mem_node();
-        for def in modules::all_modules() {
+        for def in crate::game_data::test_catalog().modules().to_vec() {
             node.register_module(def);
         }
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
@@ -1367,7 +1367,7 @@ mod tests {
         use crate::modules;
         use dawn_core::{ClientCommand, FitModuleCommand, ModuleId, SlotKind, UnfitModuleCommand};
         let mut node = mem_node();
-        for def in modules::all_modules() {
+        for def in crate::game_data::test_catalog().modules().to_vec() {
             node.register_module(def);
         }
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);

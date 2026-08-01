@@ -140,10 +140,10 @@ mod tests {
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         );
-        for def in modules::all_modules() {
+        for def in crate::game_data::test_catalog().modules().to_vec() {
             node.register_module(def);
         }
-        for def in ship_types::all_ship_types() {
+        for def in crate::game_data::test_catalog().ship_types().to_vec() {
             node.register_ship_type(def);
         }
         node
@@ -334,8 +334,8 @@ mod tests {
         );
 
         let store2 = dawn_event_store::InMemoryEventStore::new();
-        let modules: Vec<_> = crate::modules::all_modules();
-        let ship_types: Vec<_> = crate::ship_types::all_ship_types();
+        let modules: Vec<_> = crate::game_data::test_catalog().modules().to_vec();
+        let ship_types: Vec<_> = crate::game_data::test_catalog().ship_types().to_vec();
         let node2 = SimulationNode::restore_from(store2, &snapshot, &modules, &ship_types);
         assert!(
             !node2.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)),

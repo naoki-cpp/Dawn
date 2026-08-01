@@ -288,8 +288,8 @@ impl<S: EventStore> SimulationNode<S> {
     /// Restore a node from a `StateSnapshot` plus the events appended since.
     ///
     /// `modules` and `ship_types` are the same data-driven definitions the
-    /// node was originally configured with (e.g. `modules::all_modules()` /
-    /// `ship_types::all_ship_types()`). They are needed to resolve
+    /// node was originally configured with (e.g. `crate::game_data::test_catalog().modules().to_vec()` /
+    /// `crate::game_data::test_catalog().ship_types().to_vec()`). They are needed to resolve
     /// `FittingSnapshot` entries back into `FittedSlot`s and to recompute
     /// `base_stats` for `apply_fitting` (INV-002: snapshot + registries +
     /// log replay must fully reproduce the pre-shutdown ECS state).

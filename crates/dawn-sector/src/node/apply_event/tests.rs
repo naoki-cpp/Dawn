@@ -54,7 +54,7 @@ fn module_deactivated_event_replay_resets_cycle_remaining() {
     use dawn_core::{FitModuleCommand, SlotKind};
 
     let mut node = mem_node();
-    for def in modules::all_modules() {
+    for def in crate::game_data::test_catalog().modules().to_vec() {
         node.register_module(def);
     }
     let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
@@ -255,10 +255,10 @@ fn ship_assembled_event_replay_does_not_double_debit_station_inventory() {
 #[test]
 fn ship_spawned_event_replay_reconstructs_the_ship_from_scratch() {
     let mut node = mem_node();
-    for def in crate::modules::all_modules() {
+    for def in crate::game_data::test_catalog().modules().to_vec() {
         node.register_module(def);
     }
-    for def in crate::ship_types::all_ship_types() {
+    for def in crate::game_data::test_catalog().ship_types().to_vec() {
         node.register_ship_type(def);
     }
     let ship_id = dawn_core::ShipId::new(NodeId(0), 42);
@@ -286,7 +286,7 @@ fn ship_spawned_event_replay_reconstructs_the_ship_from_scratch() {
         .expect("Magpie replay must seed starter inventory (ADR-0032)");
     assert_eq!(
         inventory.items.len(),
-        crate::modules::all_modules().len(),
+        crate::game_data::test_catalog().modules().to_vec().len(),
         "starter inventory replay must be a pure function of module_registry, \
          matching the live spawn path exactly (INV-002)"
     );
@@ -298,7 +298,7 @@ fn ship_spawned_event_replay_is_a_no_op_for_an_already_reconstructed_ship() {
     // spawned then later touched by another event before the snapshot's
     // log_index, ShipSpawned must not double-insert or reset it.
     let mut node = mem_node();
-    for def in crate::ship_types::all_ship_types() {
+    for def in crate::game_data::test_catalog().ship_types().to_vec() {
         node.register_ship_type(def);
     }
     let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
@@ -382,7 +382,7 @@ fn module_activated_event_replay_marks_the_slot_active_with_its_target() {
     use dawn_core::{FitModuleCommand, SlotKind};
 
     let mut node = mem_node();
-    for def in modules::all_modules() {
+    for def in crate::game_data::test_catalog().modules().to_vec() {
         node.register_module(def);
     }
     let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);

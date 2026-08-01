@@ -207,10 +207,10 @@ mod tests {
     fn node_with_modules() -> SimulationNode {
         use crate::{modules, ship_types};
         let mut node = mem_node();
-        for def in modules::all_modules() {
+        for def in crate::game_data::test_catalog().modules().to_vec() {
             node.register_module(def);
         }
-        for def in ship_types::all_ship_types() {
+        for def in crate::game_data::test_catalog().ship_types().to_vec() {
             node.register_ship_type(def);
         }
         node
@@ -250,8 +250,8 @@ mod tests {
         let node = SimulationNode::restore_from(
             store,
             &original,
-            &modules::all_modules(),
-            &ship_types::all_ship_types(),
+            &crate::game_data::test_catalog().modules().to_vec(),
+            &crate::game_data::test_catalog().ship_types().to_vec(),
         );
 
         assert_eq!(
@@ -281,8 +281,8 @@ mod tests {
         let mut restored = SimulationNode::restore_from(
             InMemoryEventStore::new(),
             &snapshot,
-            &modules::all_modules(),
-            &ship_types::all_ship_types(),
+            &crate::game_data::test_catalog().modules().to_vec(),
+            &crate::game_data::test_catalog().ship_types().to_vec(),
         );
 
         let after_restart = restored.next_player_id();
@@ -470,8 +470,8 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             store2,
             &snap1,
-            &modules::all_modules(),
-            &ship_types::all_ship_types(),
+            &crate::game_data::test_catalog().modules().to_vec(),
+            &crate::game_data::test_catalog().ship_types().to_vec(),
         );
         let snap2 = node2.take_snapshot();
 
@@ -526,8 +526,8 @@ mod tests {
         let mut restored = SimulationNode::restore_from(
             store2,
             &snap,
-            &modules::all_modules(),
-            &ship_types::all_ship_types(),
+            &crate::game_data::test_catalog().modules().to_vec(),
+            &crate::game_data::test_catalog().ship_types().to_vec(),
         );
         for _ in 0..4 {
             restored.tick();
@@ -628,10 +628,10 @@ mod tests {
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 store,
             );
-            for def in modules::all_modules() {
+            for def in crate::game_data::test_catalog().modules().to_vec() {
                 node.register_module(def);
             }
-            for def in ship_types::all_ship_types() {
+            for def in crate::game_data::test_catalog().ship_types().to_vec() {
                 node.register_ship_type(def);
             }
 
@@ -674,8 +674,8 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             store2,
             &snap,
-            &modules::all_modules(),
-            &ship_types::all_ship_types(),
+            &crate::game_data::test_catalog().modules().to_vec(),
+            &crate::game_data::test_catalog().ship_types().to_vec(),
         );
 
         let hp = node2.get_ship_hp(ship_id).unwrap();
@@ -753,8 +753,8 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             store2,
             &snap,
-            &modules::all_modules(),
-            &ship_types::all_ship_types(),
+            &crate::game_data::test_catalog().modules().to_vec(),
+            &crate::game_data::test_catalog().ship_types().to_vec(),
         );
 
         assert_eq!(
@@ -805,8 +805,8 @@ mod tests {
         let mut node2 = SimulationNode::restore_from(
             store2,
             &snap,
-            &modules::all_modules(),
-            &ship_types::all_ship_types(),
+            &crate::game_data::test_catalog().modules().to_vec(),
+            &crate::game_data::test_catalog().ship_types().to_vec(),
         );
         node2.open_station_inventory_db(db_path).unwrap();
 
@@ -860,8 +860,8 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             store2,
             &snap,
-            &modules::all_modules(),
-            &ship_types::all_ship_types(),
+            &crate::game_data::test_catalog().modules().to_vec(),
+            &crate::game_data::test_catalog().ship_types().to_vec(),
         );
 
         assert_eq!(node2.docked_station(ship_id), Some(StationId(0)));
@@ -905,8 +905,8 @@ mod tests {
         let restored = SimulationNode::restore_from(
             store2,
             &snapshot_before,
-            &modules::all_modules(),
-            &ship_types::all_ship_types(),
+            &crate::game_data::test_catalog().modules().to_vec(),
+            &crate::game_data::test_catalog().ship_types().to_vec(),
         );
 
         assert!(
