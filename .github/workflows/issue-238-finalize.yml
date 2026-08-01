@@ -1,0 +1,48 @@
+name: Finalize issue 238 typed client path
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - scripts/issue238-final.part.*
+      - .github/workflows/issue-238-finalize.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.1
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+      - name: Apply final implementation and test migration
+        run: |
+          cat scripts/issue238-final.part.* | base64 --decode | gzip --decompress > /tmp/issue-238-final.patch
+          test "$(sha256sum /tmp/issue-238-final.patch | cut -d' ' -f1)" = "c2028f156d0cc7c46951496a32083e0e411db7871c64d6d2d84fd4c685e305fe"
+          git apply --index /tmp/issue-238-final.patch
+          cargo fmt --all
+      - name: Validate typed client layers
+        run: |
+          cargo fmt --all -- --check
+          cargo test -p dawn-client-core
+          cargo test -p dawn-client-gdext
+          cargo build -p dawn-client-gdext
+          cargo clippy -p dawn-client-core -p dawn-client-gdext --all-targets -- -D warnings
+      - name: Publish final implementation
+        run: |
+          rm scripts/issue238-final.part.*
+          rm .github/workflows/issue-238-finalize.yml
+          git add -A
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Complete typed inbound WorldSession path"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
