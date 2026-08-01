@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / architect
 related  : docs/architecture/architecture-review/server.md（サーバー側）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-07-29（PR #181〜#195と冗長性レビューを反映した部分再計測）
+date     : 2026-08-02（issue #238 typed outcome適用経路を反映）
 ---
 
 # Architecture Review — Dawn Client（現行構造評価）
@@ -15,24 +15,26 @@ date     : 2026-07-29（PR #181〜#195と冗長性レビューを反映した部
 
 ## 現状評価
 
-**総合: A−。** `main.gd`は長いがgod objectには戻っていない。state、interaction、presentation、HUD、wire adapterの所有者は分離済み。
+**総合: A。** `main.gd`は長いがgod objectには戻っていない。state、interaction、presentation、HUD、wire adapterの所有者は分離済み。
 
-直近ではhealth/navigation/register_shipのJSON往復、`main.gd`のWorldSession shadow state、
-WebSocket text fallbackを削除し、PR #195でWorldSessionのDictionary returnをtyped recordへ置換した。
+直近ではissue #238で、復号済みwire型を一度Godot `Dictionary`へ投影してから
+`WorldSession`へ戻す経路を削除した。`ServerMessageOutcome::dispatch`が
+`WorldSessionUpdate`を直接Rust-owned stateへ適用し、その後にtyped presentation recordを
+GDScriptへ渡す。PlayerLoadoutとMarketも同じ順序で処理される。
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
 | ファイル分割 | A | `WorldSession` / `WorldInteraction` / `WorldPresentation` / HUD各層の所有者が明確 |
 | `main.gd`責務 | A− | scene lifecycle、node generation、event dispatch、network send、HUD assemblyに限定 |
-| 型境界 | A− | WorldSessionはtyped化済み。PlayerLoadoutの残件を#201で整理 |
-| 重複 | A− | shadow stateとJSON往復は解消。残るauthority/API重複は#200〜#202 |
+| 型境界 | A | wire decode → Rust state mutation → typed presentationの単一経路。Dictionary再入力なし |
+| 重複 | A− | shadow state、JSON往復、server outcomeのDictionary往復は解消。残るauthority/API重複は#200・#202 |
 | デッドコード | A | text-frame fallbackと旧shimを削除 |
-| テスト可能性 | A− | pure Rust client core + GdUnit4。scene-tree/実WebSocket E2Eのみ手動領域 |
+| テスト可能性 | A | pure Rust transition test + typed outcome fixtureを使うGdUnit4。scene-tree/実WebSocket E2Eのみ手動領域 |
 
 ## State ownership
 
-- `WorldSessionState`: live world stateとtyped transition
-- `WorldSession`: Godot adapter
+- `WorldSessionState`: live world stateと`WorldSessionUpdate`のtyped transition
+- `WorldSession`: Godot adapter。state更新はserver outcome dispatch内でGDScript callbackより先に適用
 - `PlayerLoadout`: fitting/inventory/capacitor表示用state
 - `main.gd`: scene node registryと短命なoptimistic state
 - `WorldInteraction`: selection / input facts → intent
@@ -59,7 +61,8 @@ navigation map cacheはSector内でwrite-onceに近いpresentation cacheとし�
 | C-1〜C-8 | — | god object、同型ロジック、scene refs、typed rows、各deep module抽出 | 解消済み |
 | C-9 | — | `hud_manager.gd` watch帯 | 再観測・保留 |
 | C-10 | #200 | render scale / warp thresholdのauthority重複 | P2 |
-| C-11 | #201 | `PlayerLoadout`のDictionary再投影 | P2 |
+| C-11 | #201 | `PlayerLoadout`のDictionary再投影 | 解消済み |
 | C-12 | #202 | selection read API二重化 | P3 |
+| C-13 | #238 | server outcomeのtyped stateをDictionary経由でRustへ戻す二重変換 | 解消済み |
 
 `main.gd`の機械的な`.tscn`分割、raw `InputEvent`のdeep module流入、typed recordのDictionary回帰は行わない。

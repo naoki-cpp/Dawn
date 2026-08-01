@@ -96,7 +96,7 @@ impl InitialStatePresentation {
 impl InitialStatePresentation {}
 
 #[derive(GodotClass)]
-#[class(no_init, base=RefCounted)]
+#[class(init, base=RefCounted)]
 pub struct MotionCorrectionPresentation {
     #[var]
     ship_id: i64,

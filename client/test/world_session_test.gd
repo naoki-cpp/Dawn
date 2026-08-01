@@ -1,16 +1,14 @@
 ## world_session_test.gd
 ##
-## Tests for the client WorldSession seam. These exercise live-world state
-## ingestion without loading main.tscn or opening a WebSocket.
+## Tests for the Rust-owned client WorldSession seam. Initial world data is
+## applied through a typed ServerMessageOutcome rather than a Dictionary.
 extends GdUnitTestSuite
 
 var _session
 const AU_M: float = 1.495978707e11
 
-## dawn_core::StatDelta (client-side, ADR-0039) requires every field --
-## unlike the client's former hand-copied mirror, it has no per-field
-## `#[serde(default)]`, so a JSON fixture built for
-## `PlayerLoadout.apply_payload` (test/debug-only) can no longer omit fields.
+## dawn_core::StatDelta requires every field in the debug JSON helper used by
+## the remaining PlayerLoadout unit test below.
 const FULL_ZERO_STAT_DELTA: Dictionary = {
 	"weapon_damage_add": 0.0,
 	"weapon_range_add": 0.0,
@@ -32,6 +30,14 @@ const FULL_ZERO_STAT_DELTA: Dictionary = {
 }
 
 
+class InitialStateTarget:
+	extends RefCounted
+	var presentation: InitialStatePresentation
+
+	func _accept_initial_state(state: InitialStatePresentation) -> void:
+		presentation = state
+
+
 func before_test() -> void:
 	_session = WorldSession.new()
 
@@ -40,77 +46,40 @@ func after_test() -> void:
 	_session = null
 
 
-func test_ingest_navigation_preserves_absolute_f64_positions() -> void:
-	_session.ingest_navigation({
-		"system_name": "Alpha",
-		"systems": [{"id": 2, "name": "Beta"}],
-		"jump_gates": [{
-			"gate_id": 7,
-			"position": {"x": 5.0 * AU_M + 10.0, "y": 20.0, "z": 30.0},
-			"activation_radius": 1000.0,
-			"to_system_name": "Beta",
-		}],
-		"stations": [{
-			"station_id": 5,
-			"name": "Forge Station",
-			"position": {"x": 5.0 * AU_M + 20.0, "y": 21.0, "z": 31.0},
-			"docking_radius": 5000.0,
-		}],
-		"celestial_bodies": [{
-			"id": 9,
-			"kind": "Star",
-			"name": "Sun",
-			"position": {"x": 5.0 * AU_M + 30.0, "y": 2.0, "z": 3.0},
-			"radius": 42.0,
-			"spectral_type": 0.5,
-		}],
-	})
+func _apply_initial_state(connection_ship_id: int = 11) -> InitialStatePresentation:
+	var outcome: ServerMessageOutcome = ServerMessageDecoder.new().test_outcome("InitialState")
+	var target := InitialStateTarget.new()
+	var loadout := PlayerLoadout.new()
+	assert_bool(outcome.dispatch(target, _session, loadout, connection_ship_id)).is_true()
+	return target.presentation
+
+
+func test_typed_initial_state_preserves_absolute_f64_navigation_positions() -> void:
+	var presentation := _apply_initial_state()
+	assert_int(presentation.ships.size()).is_equal(2)
 	assert_str(_session.current_system_name()).is_equal("Alpha")
 	assert_str((_session.system_names() as Dictionary)[2]).is_equal("Beta")
 	var gate_pos: PackedFloat64Array = (_session.gates()[0] as GateRecord).position
 	var station_pos: PackedFloat64Array = (_session.stations()[0] as StationRecord).position
 	var body_pos: PackedFloat64Array = (_session.bodies()[0] as CelestialBodyRecord).position
 	assert_float(gate_pos[0]).is_equal_approx(5.0 * AU_M + 10.0, 0.001)
-	assert_float(station_pos[0]).is_equal_approx(5.0 * AU_M + 20.0, 0.001)
-	assert_float(body_pos[0]).is_equal_approx(5.0 * AU_M + 30.0, 0.001)
+	assert_float(station_pos[0]).is_equal_approx(5.0 * AU_M + 10.0, 0.001)
+	assert_float(body_pos[0]).is_equal_approx(5.0 * AU_M + 10.0, 0.001)
 	assert_float(gate_pos[1]).is_equal_approx(20.0, 0.001)
-	assert_float(station_pos[2]).is_equal_approx(31.0, 0.001)
+	assert_float(station_pos[2]).is_equal_approx(30.0, 0.001)
 
 
-func test_register_ship_promotes_connection_ship_to_player_state() -> void:
-	var result: bool = _session.register_ship(11, {
-		"ship_id": 11,
-		"is_player": true,
-		"ship_type_name": "Magpie",
-		"current_shield": 80.0,
-		"current_armor": 70.0,
-		"current_hull": 60.0,
-		"max_shield": 100.0,
-		"max_armor": 90.0,
-		"max_hull": 80.0,
-		"cap_max": 55.0,
-		"cap_recharge_per_tick": 3.0,
-	}, 11)
-	assert_bool(result).is_true()
+func test_typed_initial_state_promotes_connection_ship_to_player_state() -> void:
+	_apply_initial_state(11)
 	assert_int(_session.player_ship_id()).is_equal(11)
 	assert_str(_session.player_ship_type_name()).is_equal("Magpie")
-	assert_float(_session.player_health().shield).is_equal_approx(80.0, 0.001)
-	assert_float(_session.capacitor_status().current).is_equal_approx(55.0, 0.001)
+	assert_float(_session.player_health().shield).is_equal_approx(70.0, 0.001)
+	assert_float(_session.capacitor_status().current).is_equal_approx(40.0, 0.001)
 
 
 func test_hp_event_updates_player_and_preserves_maxima() -> void:
-	_session.register_ship(11, {
-		"ship_id": 11,
-		"current_shield": 80.0,
-		"current_armor": 70.0,
-		"current_hull": 60.0,
-		"max_shield": 100.0,
-		"max_armor": 90.0,
-		"max_hull": 80.0,
-	}, 11)
-
+	_apply_initial_state(11)
 	_session.apply_health_event(11, 40.0, 30.0, 20.0)
-
 	var hp: ShipHealth = _session.ship_health(11)
 	assert_float(hp.shield).is_equal_approx(40.0, 0.001)
 	assert_float(hp.max_shield).is_equal_approx(100.0, 0.001)
@@ -119,52 +88,35 @@ func test_hp_event_updates_player_and_preserves_maxima() -> void:
 
 func test_lock_events_only_change_player_locks() -> void:
 	_session.set_player_ship_id(1)
-
 	assert_bool(_session.apply_target_locked(2, 99)).is_false()
 	assert_int(_session.player_lock_target()).is_equal(-1)
-
 	assert_bool(_session.apply_target_locked(1, 99)).is_true()
 	assert_int(_session.player_lock_target()).is_equal(99)
-
 	assert_bool(_session.apply_lock_lost(1, 99)).is_true()
 	assert_int(_session.player_lock_target()).is_equal(-1)
 
 
 func test_remove_ship_with_clear_lock_false_preserves_the_lock_target() -> void:
-	## AoI leave (ADR-0019): the ship is still alive and still Locked
-	## server-side (Lock has no distance-based expiry, lock.rs). Clearing
-	## player_lock_target here would desync from the server -- a fresh
-	## LockOnCommand the player sends afterward is silently ignored
-	## server-side (already has_target()==true), so the lock would never
-	## visibly complete again even once the target is back in view.
-	_session.register_ship(42, {}, -1)
+	_apply_initial_state(-1)
 	_session.set_player_ship_id(1)
-	_session.apply_target_locked(1, 42)
-
-	var result: bool = _session.remove_ship(42, false)
-
+	_session.apply_target_locked(1, 11)
+	var result: bool = _session.remove_ship(11, false)
 	assert_bool(result).is_true()
-	assert_int(_session.player_lock_target()).is_equal(42)
-	assert_bool(_session.has_ship(42)).is_false()
+	assert_int(_session.player_lock_target()).is_equal(11)
+	assert_bool(_session.has_ship(11)).is_false()
 
 
 func test_remove_ship_with_clear_lock_true_clears_the_lock_target() -> void:
-	_session.register_ship(42, {}, -1)
+	_apply_initial_state(-1)
 	_session.set_player_ship_id(1)
-	_session.apply_target_locked(1, 42)
-
-	var result: bool = _session.remove_ship(42, true)
-
+	_session.apply_target_locked(1, 11)
+	var result: bool = _session.remove_ship(11, true)
 	assert_bool(result).is_true()
 	assert_int(_session.player_lock_target()).is_equal(-1)
 
 
 func test_client_ticks_advance_capacitor_without_server_events() -> void:
-	_session.register_ship(11, {
-		"ship_id": 11,
-		"cap_max": 100.0,
-		"cap_recharge_per_tick": 5.0,
-	}, 11)
+	_apply_initial_state(11)
 	var loadout := PlayerLoadout.new()
 	loadout.apply_payload(JSON.stringify({
 		"modules": [{
@@ -176,23 +128,19 @@ func test_client_ticks_advance_capacitor_without_server_events() -> void:
 			"stat_delta": FULL_ZERO_STAT_DELTA,
 		}],
 	}))
-
 	_session.advance_client_ticks(1, loadout)
-
 	var modules: Array = loadout.modules()
 	assert_int(_session.current_tick()).is_equal(1)
-	assert_float(_session.capacitor_status().current).is_equal_approx(80.0, 0.001)
+	assert_float(_session.capacitor_status().current).is_equal_approx(20.0, 0.001)
 	assert_int((modules[0] as ModuleRow).cycle_remaining).is_equal(10)
 
 
 func test_destroying_opponent_reports_victory_candidate() -> void:
-	_session.register_ship(22, {"ship_id": 22, "is_player": true}, 11)
-
-	var result: DestructionOutcome = _session.destroy_ship(22)
-
+	_apply_initial_state(-1)
+	var result: DestructionOutcome = _session.destroy_ship(11)
 	assert_bool(result.destroyed).is_true()
 	assert_bool(result.destroyed_opponent).is_true()
-	assert_bool(_session.has_ship(22)).is_false()
+	assert_bool(_session.has_ship(11)).is_false()
 
 
 func test_dock_event_updates_player_dock_status() -> void:

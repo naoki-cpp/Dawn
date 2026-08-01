@@ -80,6 +80,34 @@ Rustテスト側にも**1フィールドしか読み手がいなかった**。�
 `docked_station_name()` / `latest_dock_state_tick()`（既存の`is_docked()`と揃う）
 へ分解した。
 
+## Typed server-outcome application（2026-08-02、issue #238）
+
+`WorldSessionState` の所有権を徹底するため、サーバー受信経路も型付きの単一経路へ
+移行した。`ServerMessageDecoder` は postcard を Rust の wire 型へ復号し、
+`ServerMessageOutcome::dispatch` が `WorldSessionUpdate` へ変換して
+`WorldSessionState::apply_update` を呼ぶ。状態更新は GDScript callback より前に完了する。
+
+この境界では次を禁止する。
+
+- Rust の wire 型を Godot `Dictionary` に投影し、GDScript が同じ値を
+  `WorldSession` に戻して Rust 型を再構築すること。
+- `main.gd` の presentation handler が `WorldSession` の authoritative state を
+  二重に更新すること。
+- `PlayerLoadout` や Market payload を string-keyed bag として受け渡すこと。
+
+GDScript が受け取るのは、scene/HUD 更新に必要な primitive または
+`ShipPresentation` / `InitialStatePresentation` /
+`MotionCorrectionPresentation` / `MarketSnapshot` などの型付き presentation record
+だけである。`PlayerLoadoutWire` は callback 発火前に Rust 側で `PlayerLoadout` へ
+置換される。navigation、ship lifecycle/AoI、health/lock、tick/capacitor、dock/system、
+loadout、market の state mutation はすべて Rust-owned model に集約する。
+
+これに伴い `navigation_gd.rs` / `ship_gd.rs` の Dictionary-to-core 変換、
+`WorldSession.ingest_navigation(Dictionary)`、
+`WorldSession.register_ship(..., Dictionary, ...)` を削除した。GdUnit も
+hand-built Dictionary ではなく、実際の typed outcome fixture を dispatch して
+本番と同じ state-application path を検証する。
+
 ## Implementation checklist
 
 - [x] Add `WorldSessionState` and typed input/record/outcome types to

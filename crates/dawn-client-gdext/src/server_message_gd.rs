@@ -39,7 +39,8 @@ impl ServerMessageDecoder {
         use dawn_core::CelestialBodyKind;
         use dawn_wire::{
             AbsPosWire, BuildableShipTypeWire, CelestialBodyWire, JumpGateWire, MarketOrderWire,
-            MarketSnapshotWire, StationWire, SystemWire, VelWire,
+            MarketSnapshotWire, PlayerLoadoutWire, SlotCapacityWire, StationWire, SystemWire,
+            VelWire,
         };
 
         let position = AbsPosWire {
@@ -69,6 +70,18 @@ impl ServerMessageDecoder {
             cap_recharge_per_tick: 1.0,
             is_player: true,
         };
+        let mut other_ship = ship.clone();
+        other_ship.ship_id = 22;
+        other_ship.ship_type_name = "Venture".to_owned();
+        other_ship.max_shield = 250.0;
+        other_ship.max_armor = 180.0;
+        other_ship.max_hull = 120.0;
+        other_ship.current_shield = 210.0;
+        other_ship.current_armor = 160.0;
+        other_ship.current_hull = 110.0;
+        other_ship.cap_max = 80.0;
+        other_ship.cap_recharge_per_tick = 4.0;
+
         let message = match kind.to_string().as_str() {
             "Welcome" => ServerMessage::Welcome {
                 player_id: 5,
@@ -81,7 +94,7 @@ impl ServerMessageDecoder {
             },
             "AoiLeave" => ServerMessage::AoiLeave { ship_id: 19 },
             "InitialState" => ServerMessage::InitialState(InitialStateWire {
-                ships: vec![ship],
+                ships: vec![ship, other_ship],
                 system_name: "Alpha".to_owned(),
                 systems: vec![SystemWire {
                     id: 2,
@@ -111,6 +124,69 @@ impl ServerMessageDecoder {
                     ship_type_id: 7,
                     name: "Magpie".to_owned(),
                 }],
+            }),
+            "PlayerLoadoutSwitch" => ServerMessage::PlayerLoadout(PlayerLoadoutWire {
+                tick: 12,
+                modules: Vec::new(),
+                inventory: Vec::new(),
+                station_inventory: Vec::new(),
+                docked_station_id: None,
+                docked_station_name: None,
+                slot_capacity: SlotCapacityWire {
+                    high: 0,
+                    mid: 0,
+                    low: 0,
+                    rig: 0,
+                },
+                active_ship_id: Some(22),
+                owned_ships: Vec::new(),
+            }),
+            "PlayerLoadoutUnknown" => ServerMessage::PlayerLoadout(PlayerLoadoutWire {
+                tick: 13,
+                modules: Vec::new(),
+                inventory: Vec::new(),
+                station_inventory: Vec::new(),
+                docked_station_id: None,
+                docked_station_name: None,
+                slot_capacity: SlotCapacityWire {
+                    high: 0,
+                    mid: 0,
+                    low: 0,
+                    rig: 0,
+                },
+                active_ship_id: Some(33),
+                owned_ships: Vec::new(),
+            }),
+            "PlayerLoadoutDisembark" => ServerMessage::PlayerLoadout(PlayerLoadoutWire {
+                tick: 14,
+                modules: Vec::new(),
+                inventory: Vec::new(),
+                station_inventory: Vec::new(),
+                docked_station_id: None,
+                docked_station_name: None,
+                slot_capacity: SlotCapacityWire {
+                    high: 0,
+                    mid: 0,
+                    low: 0,
+                    rig: 0,
+                },
+                active_ship_id: None,
+                owned_ships: Vec::new(),
+            }),
+            "MotionCorrection" => ServerMessage::MotionCorrection {
+                ship_id: 11,
+                position,
+                velocity: VelWire {
+                    dx: 4.0,
+                    dy: 5.0,
+                    dz: -6.0,
+                },
+                tick: 42,
+            },
+            "ShipDocked" => ServerMessage::Event(EventWire::ShipDocked {
+                ship_id: 11,
+                station_id: 5,
+                tick: 12,
             }),
             "MarketSnapshot" => ServerMessage::MarketSnapshot(MarketSnapshotWire {
                 balance: 250,
@@ -190,20 +266,17 @@ impl ServerMessageOutcome {
                 );
             }
             ClientOutcome::Event(event) => {
+                let presentation =
+                    apply_event(&mut session, &mut loadout, event, connection_ship_id);
                 if !ensure_handler(&mut target, "_accept_event") {
                     return false;
                 }
-                let presentation =
-                    apply_event(&mut session, &mut loadout, event, connection_ship_id);
                 target.call(
                     "_accept_event",
                     vslice![Gd::from_object(ServerEventOutcome { presentation })],
                 );
             }
             ClientOutcome::PlayerLoadout(wire) => {
-                if !ensure_handler(&mut target, "_accept_player_loadout") {
-                    return false;
-                }
                 {
                     let mut loadout = loadout.bind_mut();
                     loadout.replace_wire(wire.clone());
@@ -215,17 +288,20 @@ impl ServerMessageOutcome {
                     tick: godot_i64(wire.tick),
                 };
                 apply_update(&mut session, &mut loadout, update);
+                if !ensure_handler(&mut target, "_accept_player_loadout") {
+                    return false;
+                }
                 target.call("_accept_player_loadout", vslice![]);
             }
             ClientOutcome::InitialState(state) => {
-                if !ensure_handler(&mut target, "_accept_initial_state") {
-                    return false;
-                }
                 apply_update(
                     &mut session,
                     &mut loadout,
                     initial_state_update(state, connection_ship_id),
                 );
+                if !ensure_handler(&mut target, "_accept_initial_state") {
+                    return false;
+                }
                 target.call(
                     "_accept_initial_state",
                     vslice![InitialStatePresentation::wrap(&state.ships)],
@@ -236,12 +312,12 @@ impl ServerMessageOutcome {
                 module_id,
                 slot,
             } => {
-                if !ensure_handler(&mut target, "_accept_module_activated") {
-                    return false;
-                }
                 loadout
                     .bind_mut()
                     .apply_activation(*module_id, true, String::new());
+                if !ensure_handler(&mut target, "_accept_module_activated") {
+                    return false;
+                }
                 target.call(
                     "_accept_module_activated",
                     vslice![godot_i64(*ship_id), i64::from(*module_id), slot.as_str()],
@@ -253,13 +329,13 @@ impl ServerMessageOutcome {
                 slot,
                 reason,
             } => {
-                if !ensure_handler(&mut target, "_accept_module_deactivated") {
-                    return false;
-                }
                 let reason = reason.as_deref().unwrap_or("");
                 loadout
                     .bind_mut()
                     .apply_activation(*module_id, false, reason.to_owned());
+                if !ensure_handler(&mut target, "_accept_module_deactivated") {
+                    return false;
+                }
                 target.call(
                     "_accept_module_deactivated",
                     vslice![
