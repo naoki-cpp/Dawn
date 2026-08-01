@@ -42,4 +42,14 @@ mod tests {
             assert_eq!(row.item_id, expected);
         }
     }
+
+    #[test]
+    fn zero_identities_are_rejected_in_fixture_deserialization() {
+        for json in [
+            r#"{"item_id":{"Module":0},"name":"Invalid","count":1}"#,
+            r#"{"item_id":{"PackagedShip":0},"name":"Invalid","count":1}"#,
+        ] {
+            assert!(serde_json::from_str::<ItemRow>(json).is_err());
+        }
+    }
 }
