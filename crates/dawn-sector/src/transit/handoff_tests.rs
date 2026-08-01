@@ -82,7 +82,10 @@ fn retry_commit_recreates_the_complete_canonical_handoff() {
         + expected.fitting.mid.len()
         + expected.fitting.low.len()
         + expected.fitting.rig.len();
-    assert!(fitted_count > 0, "fixture must carry non-empty fitting state");
+    assert!(
+        fitted_count > 0,
+        "fixture must carry non-empty fitting state"
+    );
     assert!(
         !expected.inventory.is_empty(),
         "fixture must carry non-empty inventory state"
