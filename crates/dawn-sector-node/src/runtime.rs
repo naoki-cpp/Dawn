@@ -220,16 +220,13 @@ impl SectorNodeRuntime {
                 ship_id: sess.ship_id,
             };
             let mut sink = SessionSink(sess);
-            aoi_frame.deliver_observer(
-                &mut sink,
-                node,
-                observer,
-                new_events,
-                warp_arrivals,
-            )
+            aoi_frame.deliver_observer(&mut sink, node, observer, new_events, warp_arrivals)
         });
-        let live: std::collections::HashSet<_> =
-            self.sessions.iter().map(|session| session.player_id).collect();
+        let live: std::collections::HashSet<_> = self
+            .sessions
+            .iter()
+            .map(|session| session.player_id)
+            .collect();
         self.aoi_frame
             .retain_players(|player_id| live.contains(&player_id));
     }
