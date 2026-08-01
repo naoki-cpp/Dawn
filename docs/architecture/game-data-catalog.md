@@ -19,8 +19,9 @@ vectors, compatibility accessors, or deprecated aliases.
 Production startup resolves `data/` only relative to the process working
 directory. It never searches the compile-time source checkout. Tests either
 construct a `GameDataCatalog` with explicit paths or, inside `dawn-sector`, use
-the test-only repository catalog fixture. That fixture is not compiled into the
-production crate interface.
+the test-only repository catalog fixture. The fixture is crate-private, exists
+only to remove repeated test setup, and is not compiled into the production
+crate interface.
 
 When adding or changing game data:
 
