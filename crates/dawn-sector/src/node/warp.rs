@@ -642,6 +642,7 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         )
     }
 
@@ -786,6 +787,7 @@ mod tests {
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             );
             let player_id = node.next_player_id();
             let ship = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);

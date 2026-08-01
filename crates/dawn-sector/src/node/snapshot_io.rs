@@ -40,7 +40,7 @@ impl<S: EventStore> SimulationNode<S> {
             ship_type_registry: _,
             // Recomputed per ship from `ship_type_registry` during restore.
             base_stats: _,
-            // Derived from the Galaxy at construction; `set_galaxy` rebuilds.
+            // Derived from the Galaxy supplied at construction.
             sector_map: _,
             anchor_table: _,
             // Configuration, re-applied after construction by the caller
@@ -201,6 +201,7 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         )
     }
 
@@ -247,6 +248,7 @@ mod tests {
         let node = SimulationNode::restore_from(
             store,
             &original,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             crate::game_data::test_catalog().modules(),
             crate::game_data::test_catalog().ship_types(),
         );
@@ -276,6 +278,7 @@ mod tests {
         let mut restored = SimulationNode::restore_from(
             InMemoryEventStore::new(),
             &snapshot,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             crate::game_data::test_catalog().modules(),
             crate::game_data::test_catalog().ship_types(),
         );
@@ -363,6 +366,7 @@ mod tests {
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
                 store,
             );
 
@@ -406,7 +410,13 @@ mod tests {
         // then we re-run the remaining ticks to reach the exact final position.
         let snap = StateSnapshot::load(&snapshot_path).unwrap();
         let store2 = FileEventStore::open(&event_path).unwrap();
-        let mut node2 = SimulationNode::restore_from(store2, &snap, &[], &[]);
+        let mut node2 = SimulationNode::restore_from(
+            store2,
+            &snap,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+            &[],
+            &[],
+        );
 
         let remaining = final_tick.value() - node2.current_tick().value();
         for _ in 0..remaining {
@@ -463,6 +473,7 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             store2,
             &snap1,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             crate::game_data::test_catalog().modules(),
             crate::game_data::test_catalog().ship_types(),
         );
@@ -517,6 +528,7 @@ mod tests {
         let mut restored = SimulationNode::restore_from(
             store2,
             &snap,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             crate::game_data::test_catalog().modules(),
             crate::game_data::test_catalog().ship_types(),
         );
@@ -549,6 +561,7 @@ mod tests {
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
                 store,
             );
             for i in 0..3u64 {
@@ -585,7 +598,13 @@ mod tests {
             snap.log_index,
             "hot log holds no genesis events"
         );
-        let mut restored = SimulationNode::restore_from(store2, &snap, &[], &[]);
+        let mut restored = SimulationNode::restore_from(
+            store2,
+            &snap,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+            &[],
+            &[],
+        );
         assert_eq!(restored.current_tick(), snap.tick);
         for _ in 0..4 {
             restored.tick();
@@ -617,6 +636,7 @@ mod tests {
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
                 store,
             );
             for def in crate::game_data::test_catalog().modules().to_vec() {
@@ -665,6 +685,7 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             store2,
             &snap,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             crate::game_data::test_catalog().modules(),
             crate::game_data::test_catalog().ship_types(),
         );
@@ -743,6 +764,7 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             store2,
             &snap,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             crate::game_data::test_catalog().modules(),
             crate::game_data::test_catalog().ship_types(),
         );
@@ -794,6 +816,7 @@ mod tests {
         let mut node2 = SimulationNode::restore_from(
             store2,
             &snap,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             crate::game_data::test_catalog().modules(),
             crate::game_data::test_catalog().ship_types(),
         );
@@ -848,6 +871,7 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             store2,
             &snap,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             crate::game_data::test_catalog().modules(),
             crate::game_data::test_catalog().ship_types(),
         );
@@ -891,6 +915,7 @@ mod tests {
         let restored = SimulationNode::restore_from(
             store2,
             &snapshot_before,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             crate::game_data::test_catalog().modules(),
             crate::game_data::test_catalog().ship_types(),
         );

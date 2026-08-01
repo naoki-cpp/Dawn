@@ -138,6 +138,7 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         for def in crate::game_data::test_catalog().modules().to_vec() {
             node.register_module(def);
@@ -335,7 +336,13 @@ mod tests {
         let store2 = dawn_event_store::InMemoryEventStore::new();
         let modules: Vec<_> = crate::game_data::test_catalog().modules().to_vec();
         let ship_types: Vec<_> = crate::game_data::test_catalog().ship_types().to_vec();
-        let node2 = SimulationNode::restore_from(store2, &snapshot, &modules, &ship_types);
+        let node2 = SimulationNode::restore_from(
+            store2,
+            &snapshot,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+            &modules,
+            &ship_types,
+        );
         assert!(
             !node2.can_propose_warp(ship_b, dawn_core::WarpTarget::Gate(gate_id)),
             "restored node must still prevent tackled ship from warping"

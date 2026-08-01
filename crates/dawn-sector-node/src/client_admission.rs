@@ -215,6 +215,7 @@ mod tests {
             NodeId(7),
             SectorId(3),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
         )
     }
 

@@ -329,6 +329,7 @@ mod tests {
             NodeId(sector),
             SectorId(sector),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         )
     }
 
@@ -539,7 +540,13 @@ mod tests {
             store.append(event);
         }
 
-        let restored = SimulationNode::restore_from(store, &snapshot_before, &[], &[]);
+        let restored = SimulationNode::restore_from(
+            store,
+            &snapshot_before,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+            &[],
+            &[],
+        );
         assert!(restored.get_ship_position(ship_id).is_none());
 
         let checkpoint = restored.take_snapshot();
@@ -560,8 +567,13 @@ mod tests {
         // Simulate compaction: only the checkpoint survives. A delayed
         // Commit from the first attempt must produce Ack only, never
         // resurrecting the Ship after it has already left B again.
-        let mut compacted =
-            SimulationNode::restore_from(InMemoryEventStore::new(), &checkpoint, &[], &[]);
+        let mut compacted = SimulationNode::restore_from(
+            InMemoryEventStore::new(),
+            &checkpoint,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+            &[],
+            &[],
+        );
         let events_before = compacted.total_event_count();
         let ack = apply_commit(
             &mut compacted,

@@ -402,6 +402,7 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
         );
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let catalog = dawn_sector::game_data::GameDataCatalog::load_from_paths(

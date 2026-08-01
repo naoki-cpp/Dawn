@@ -8,6 +8,7 @@ fn node(node_id: u8, sector_id: u8) -> SimulationNode {
         NodeId(node_id),
         SectorId(sector_id),
         SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
     )
 }
 
@@ -245,7 +246,13 @@ fn restored_requested_transit_reproposes_commit_with_the_durable_route() {
     for record in source.event_store().iter_from(0) {
         store.append(record.event.clone());
     }
-    let mut restored = SimulationNode::restore_from(store, &snapshot_before, &[], &[]);
+    let mut restored = SimulationNode::restore_from(
+        store,
+        &snapshot_before,
+        std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+        &[],
+        &[],
+    );
     let (raft, mut proposals) = raft_handle();
     let (_tx, mut committed_rx) = mpsc::unbounded_channel();
     apply_committed_raft_entries(&mut restored, &raft, &mut committed_rx);
@@ -394,8 +401,13 @@ fn duplicate_commit_after_destination_checkpoint_does_not_append_a_pending_marke
     apply_committed_raft_entries(&mut destination, &raft, &mut rx);
 
     let checkpoint = destination.take_snapshot();
-    let mut restored =
-        SimulationNode::restore_from(InMemoryEventStore::new(), &checkpoint, &[], &[]);
+    let mut restored = SimulationNode::restore_from(
+        InMemoryEventStore::new(),
+        &checkpoint,
+        std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+        &[],
+        &[],
+    );
     let (dup_tx, mut dup_rx) = mpsc::unbounded_channel();
     dup_tx.send(commit.encode()).unwrap();
     apply_committed_raft_entries(&mut restored, &raft, &mut dup_rx);
@@ -441,8 +453,13 @@ fn duplicate_commit_after_checkpoint_does_not_resurrect_removed_ship() {
 
     let mut checkpoint = destination.take_snapshot();
     checkpoint.ships.retain(|ship| ship.ship_id != ship_id);
-    let mut restored =
-        SimulationNode::restore_from(InMemoryEventStore::new(), &checkpoint, &[], &[]);
+    let mut restored = SimulationNode::restore_from(
+        InMemoryEventStore::new(),
+        &checkpoint,
+        std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+        &[],
+        &[],
+    );
     assert!(restored.get_ship_position(ship_id).is_none());
 
     let (dup_tx, mut dup_rx) = mpsc::unbounded_channel();

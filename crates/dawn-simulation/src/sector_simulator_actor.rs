@@ -257,6 +257,7 @@ impl std::fmt::Debug for SectorSimulatorHandle {
 impl SectorSimulatorHandle {
     /// Spawn a `SectorSimulatorActor` and return a handle.
     ///
+    /// `galaxy` is the authoritative topology used to build this node.
     /// `replication` publishes this node's append-log suffix after mutations.
     /// `raft` is this node's `RaftActorHandle` (ADR-0014), already wired to
     /// its peers via `RaftTransport`. `raft_committed_rx` is the matching
@@ -265,12 +266,13 @@ impl SectorSimulatorHandle {
         node_id: NodeId,
         sector_id: SectorId,
         bounds: SectorBounds,
+        galaxy: std::sync::Arc<dawn_sector::galaxy::Galaxy>,
         replication: OutboundLogPublisher<InMemoryReplicationBus>,
         raft: RaftActorHandle,
         raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(256);
-        let node = SimulationNode::new(node_id, sector_id, bounds);
+        let node = SimulationNode::new(node_id, sector_id, bounds, galaxy);
         tokio::spawn(
             SectorSimulatorActor::new(rx, node, replication, raft, raft_committed_rx).run(),
         );
@@ -385,6 +387,7 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
             OutboundLogPublisher::new(bus.clone()),
             raft,
             committed_rx,
