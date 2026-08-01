@@ -68,7 +68,8 @@ SQL検索や複数 writer を必要としていないため、「他の状態が
 
 現在は一つの `MarketRuntime` が一つの接続を所有するので、SQLite の single-writer 特性は
 制約になっていない。Market が `dawn-simulation` 内の単一 runtime である間は、この単純さを
-維持する。
+維持する。現行の `orders` schemaでは `ship_id` を `NOT NULL` で保持する。9D-4以前の
+pre-release SQLiteファイルは移行対象にせず、削除してcurrent schemaで再作成する。
 
 ## 3. SQLite の限界と移行トリガー
 

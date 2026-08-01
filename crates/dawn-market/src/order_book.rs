@@ -1,7 +1,7 @@
 //! SQLite-backed limit order book + Currency escrow (ADR-0034 §5/§6).
 //!
-//! The existing flat SQLite columns remain unchanged for compatibility,
-//! while their encoding and validation are shared through `dawn_core::ItemId`.
+//! The flat SQLite columns use the shared `dawn_core::ItemId` encoding and
+//! validation.
 //! The Market therefore stays independent of `dawn-sector` without carrying
 //! a second Item mapping.
 //!
@@ -40,9 +40,8 @@
 //! `ReturnItemCommand`. These are data-only outputs: applying them to a
 //! `SimulationNode` remains the caller's responsibility.
 //!
-//! Existing databases from before 9D-4 are migrated with a nullable `ship_id`.
-//! Those legacy rows remain matchable, but do not produce a bridge command
-//! because their cargo ship cannot be reconstructed safely.
+//! Every persisted order has a required cargo ship owner. Pre-9D-4 database
+//! files are unsupported and must be recreated with the current schema.
 
 use dawn_core::{
     CreditItemCommand, EntityId, ItemId, PlayerId, RemoveItemCommand, ReturnItemCommand, ShipId,
@@ -115,9 +114,8 @@ pub struct PlaceOrderOutcome {
 /// The order a `cancel_order` call removed from the book.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CancelledOrder {
-    /// `None` only for an order created before 9D-4, when the legacy schema
-    /// did not retain the cargo ship. New orders always carry this identity.
-    pub ship_id: Option<ShipId>,
+    /// Ship whose cargo owns this order.
+    pub ship_id: ShipId,
     pub item_id: ItemId,
     pub side: OrderSide,
     pub price: u64,
@@ -229,7 +227,7 @@ impl MarketDb {
             "CREATE TABLE IF NOT EXISTS orders (
                 order_id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 player_id           INTEGER NOT NULL,
-                ship_id             INTEGER,
+                ship_id             INTEGER NOT NULL,
                 side                TEXT    NOT NULL CHECK (side IN ('Bid', 'Ask')),
                 item_type           TEXT    NOT NULL,
                 module_id           INTEGER NOT NULL DEFAULT 0,
@@ -240,20 +238,6 @@ impl MarketDb {
             )",
             [],
         )?;
-        // 9D-4 added the cargo ship identity after the initial Market schema
-        // shipped. Keep existing orders readable: their identity is unknown,
-        // so they remain NULL and never produce a command for a guessed ship.
-        let has_ship_id: bool = conn.query_row(
-            "SELECT EXISTS(
-                 SELECT 1 FROM pragma_table_info('orders') WHERE name = 'ship_id'
-             )",
-            [],
-            |row| row.get(0),
-        )?;
-        if !has_ship_id {
-            conn.execute("ALTER TABLE orders ADD COLUMN ship_id INTEGER", [])?;
-        }
-
         conn.execute(
             "CREATE INDEX IF NOT EXISTS orders_matching_idx
                 ON orders (item_type, module_id, ship_type_id, side, price, order_id)",
@@ -389,14 +373,12 @@ impl MarketDb {
                 price: fill.price,
                 quantity: fill.quantity,
             });
-            if let Some(ship_id) = fill.buyer_ship_id {
-                credit_item_commands.push(CreditItemCommand {
-                    player_id: fill.buyer,
-                    ship_id,
-                    item_id,
-                    quantity: fill.quantity,
-                });
-            }
+            credit_item_commands.push(CreditItemCommand {
+                player_id: fill.buyer,
+                ship_id: fill.buyer_ship_id,
+                item_id,
+                quantity: fill.quantity,
+            });
         }
 
         if plan.buyer_refund > 0 {
@@ -467,7 +449,7 @@ impl MarketDb {
                 |row| {
                     Ok((
                         row.get::<_, i64>(0)? as u64,
-                        row.get::<_, Option<i64>>(1)?.map(|v| v as u64),
+                        row.get::<_, i64>(1)? as u64,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, u32>(4)?,
@@ -511,22 +493,19 @@ impl MarketDb {
             return Ok(None);
         };
         let side = columns_to_side(&side);
+        let ship_id = ShipId(EntityId::from_raw(ship_id));
         Ok(Some(CancelledOrder {
-            ship_id: ship_id.map(|raw| ShipId(EntityId::from_raw(raw))),
+            ship_id,
             item_id,
             side,
             price,
             quantity_remaining,
-            return_item_command: (side == OrderSide::Ask)
-                .then(|| {
-                    ship_id.map(|ship_id| ReturnItemCommand {
-                        player_id,
-                        ship_id: ShipId(EntityId::from_raw(ship_id)),
-                        item_id,
-                        quantity: quantity_remaining,
-                    })
-                })
-                .flatten(),
+            return_item_command: (side == OrderSide::Ask).then_some(ReturnItemCommand {
+                player_id,
+                ship_id,
+                item_id,
+                quantity: quantity_remaining,
+            }),
         }))
     }
 }
@@ -569,9 +548,7 @@ fn load_matching_orders(
             Ok(RestingOrder {
                 order_id: row.get(0)?,
                 player_id: PlayerId(row.get::<_, i64>(1)? as u64),
-                ship_id: row
-                    .get::<_, Option<i64>>(2)?
-                    .map(|raw| ShipId(EntityId::from_raw(raw as u64))),
+                ship_id: ShipId(EntityId::from_raw(row.get::<_, i64>(2)? as u64)),
                 item_id,
                 side: columns_to_side(&row.get::<_, String>(3)?),
                 quantity_remaining: row.get::<_, i64>(4)? as u64,
@@ -819,7 +796,7 @@ mod tests {
         assert_eq!(
             cancelled,
             Some(CancelledOrder {
-                ship_id: Some(ship(1)),
+                ship_id: ship(1),
                 item_id: scrap(),
                 side: OrderSide::Ask,
                 price: 100,
@@ -864,51 +841,57 @@ mod tests {
     }
 
     #[test]
-    fn opening_a_pre_9d4_database_migrates_orders_without_guessing_ship_ids() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute(
-            "CREATE TABLE orders (
-                order_id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                player_id           INTEGER NOT NULL,
-                side                TEXT    NOT NULL,
-                item_type           TEXT    NOT NULL,
-                module_id           INTEGER NOT NULL DEFAULT 0,
-                ship_type_id        INTEGER NOT NULL DEFAULT 0,
-                price               INTEGER NOT NULL,
-                quantity_remaining  INTEGER NOT NULL,
-                escrowed_currency   INTEGER NOT NULL DEFAULT 0
-            )",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO orders
-                (player_id, side, item_type, module_id, ship_type_id, price,
-                 quantity_remaining, escrowed_currency)
-             VALUES (1, 'Ask', 'ScrapMetal', 0, 0, 100, 5, 0)",
-            [],
-        )
-        .unwrap();
-
-        let mut market = MarketDb::init(conn).unwrap();
-        let has_ship_id: bool = market
+    fn fresh_orders_schema_requires_a_ship_owner() {
+        let market = MarketDb::open_in_memory().unwrap();
+        market
             .conn
-            .query_row(
-                "SELECT EXISTS(
-                     SELECT 1 FROM pragma_table_info('orders') WHERE name = 'ship_id'
-                 )",
+            .execute(
+                "INSERT INTO orders
+                    (player_id, ship_id, side, item_type, module_id, ship_type_id, price,
+                     quantity_remaining, escrowed_currency)
+                 VALUES (1, NULL, 'Ask', 'ScrapMetal', 0, 0, 100, 1, 0)",
                 [],
-                |row| row.get(0),
             )
-            .unwrap();
-        assert!(has_ship_id);
+            .expect_err("ship_id must be required");
+    }
 
-        let cancelled = market
-            .cancel_order(PlayerId(1), OrderId(1))
+    #[test]
+    fn fresh_database_reopens_with_ship_ownership_intact() {
+        let path = std::env::temp_dir().join(format!(
+            "dawn-market-reopen-{}-{}.sqlite",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path_string = path.to_string_lossy().into_owned();
+        let order_id = {
+            let mut market = MarketDb::open(&path_string).unwrap();
+            market
+                .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
+                .unwrap()
+                .unwrap()
+                .resting_order_id
+                .unwrap()
+        };
+        let mut reopened = MarketDb::open(&path_string).unwrap();
+        let cancelled = reopened
+            .cancel_order(PlayerId(1), order_id)
             .unwrap()
-            .expect("legacy order should remain cancellable");
-        assert_eq!(cancelled.ship_id, None);
-        assert_eq!(cancelled.return_item_command, None);
+            .expect("reopened order");
+        assert_eq!(cancelled.ship_id, ship(1));
+        assert_eq!(
+            cancelled.return_item_command,
+            Some(ReturnItemCommand {
+                player_id: PlayerId(1),
+                ship_id: ship(1),
+                item_id: scrap(),
+                quantity: 5,
+            })
+        );
+        drop(reopened);
+        std::fs::remove_file(path).unwrap();
     }
 
     // -- Currency escrow (9D-3) ---------------------------------------------

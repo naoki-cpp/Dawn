@@ -248,8 +248,9 @@ Market は固定価格やアルゴリズム式（AMM/Bonding curve）で価格�
 
 9D-4 の Sector 側適用も実装済み。`SimulationNode` が3つの bridge commandを
 所有権・数量検証の後に適用し、既存の `ShipFitted` インベントリスナップショットへ
-記録する。旧Market DBは `ship_id` をNULL許容で追加する移行を行い、旧注文に対して
-船を推測しない。9D-5では`dawn-simulation::serve::market`がwire入力を検証し、
+記録する。Marketのorders schemaでは`ship_id`を必須とし、全注文がbridge commandの
+対象船を保持する。pre-9D-4 SQLite schemaは非対応であり、pre-release DBは削除して
+current schemaで作り直す。9D-5では`dawn-simulation::serve::market`がwire入力を検証し、
 single/cluster両方で所有船を検索してbridge commandを適用する。新しいwire eventは
 追加せず、Market専用のpostcard envelopeと`MarketSnapshot`を使う。`dawn-sector`は
 引き続き`dawn-market`を知らない。
