@@ -26,7 +26,7 @@ use dawn_core::{NodeId, SectorBounds, SectorId};
 use dawn_event_store::FileEventStore;
 use dawn_replication::{
     CatchUpConfig, CatchUpEvent, CatchUpFailureKind, CatchUpManager, CatchUpStep, CatchUpTransport,
-    CatchUpUnavailable, ReplicaSnapshot, ReplicationTransport, TcpReplicationTransport,
+    CatchUpUnavailable, LogBatch, ReplicaSnapshot, ReplicationTransport, TcpReplicationTransport,
 };
 use dawn_sector::node::SimulationNode;
 use dawn_sector::persistence::{CheckpointConfig, CheckpointScheduler, StateSnapshot};
@@ -47,8 +47,7 @@ const CATCH_UP_MAX_REQUESTS: u32 = 1024;
 const CATCH_UP_MAX_SNAPSHOT_BYTES: usize = 256 * 1024 * 1024;
 /// Prevent a peer flood from monopolising one simulation tick.
 const MAX_CATCH_UP_MESSAGES_PER_TICK: usize = 32;
-/// Retry transient terminal failures after 30 seconds. A later gossip batch
-/// observes the cleared failure cursor and starts a fresh bounded session.
+/// Retry transient terminal failures after 30 seconds.
 const CATCH_UP_FAILURE_RETRY_TICKS: u32 = 300;
 const PRODUCTION_GALAXY_PATH: &str = "data/galaxy.toml";
 
@@ -140,8 +139,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| {
             anyhow::anyhow!(
                 "failed to bind replication transport on {}: {}",
-                cfg.repl_addr,
-                e
+                cfg.repl_addr, e
             )
         })?;
 
@@ -218,7 +216,13 @@ async fn main() -> anyhow::Result<()> {
     loop {
         interval.tick().await;
         let tick_started = std::time::Instant::now();
-        advance_catch_up_failure_retries(&mut catch_up, &mut catch_up_failure_retries);
+        let retry_step =
+            advance_catch_up_failure_retries(&mut catch_up, &mut catch_up_failure_retries);
+        emit_catch_up_step(
+            &repl_transport,
+            &mut catch_up_failure_retries,
+            retry_step,
+        );
 
         admission.advance_handshakes(&mut node, sector_id, AOI_CELL_SIZE);
 
@@ -360,7 +364,8 @@ fn is_transient_catch_up_failure(kind: CatchUpFailureKind) -> bool {
 fn advance_catch_up_failure_retries(
     catch_up: &mut CatchUpManager,
     failure_retries: &mut HashMap<SectorId, u32>,
-) {
+) -> CatchUpStep {
+    let mut step = CatchUpStep::default();
     let sectors: Vec<_> = failure_retries.keys().copied().collect();
     for sector_id in sectors {
         let Some(remaining) = failure_retries.get_mut(&sector_id) else {
@@ -370,12 +375,30 @@ fn advance_catch_up_failure_retries(
             *remaining -= 1;
             continue;
         }
+
         failure_retries.remove(&sector_id);
+        let Some(cursor) = catch_up.failure_cursor(sector_id) else {
+            continue;
+        };
+        let Some(probe_from) = cursor.checked_add(1) else {
+            eprintln!(
+                "[Repl] sector={sector_id:?} cannot restart catch-up at u64::MAX cursor"
+            );
+            continue;
+        };
+
         catch_up.reset_failure(sector_id);
+        // Re-enter the normal gap detector with an empty future batch. It
+        // cannot append data, but it deterministically issues a fresh bounded
+        // request from the replica's current cursor even when the owner is idle.
+        let restart = catch_up.ingest_batch(LogBatch::new(sector_id, probe_from, Vec::new()));
+        step.outbound.extend(restart.outbound);
+        step.events.extend(restart.events);
         eprintln!(
-            "[Repl] sector={sector_id:?} transient failure cooldown expired; next gossip may restart catch-up"
+            "[Repl] sector={sector_id:?} transient failure cooldown expired; restarting catch-up"
         );
     }
+    step
 }
 
 fn load_replica_snapshot(
