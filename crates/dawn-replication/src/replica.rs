@@ -2,33 +2,65 @@
 //!
 //! [`ReplicaSet`] is the consumer half of the gossip the owner broadcasts via
 //! [`crate::ReplicationTransport::broadcast`]. For each *foreign* Sector it
-//! holds an ordered, gap-checked, idempotent copy of that Sector's
-//! append-only event log, advancing a per-Sector cursor as contiguous
-//! batches arrive.
+//! holds an ordered, gap-checked, idempotent recovery copy of that Sector's
+//! append-only event log, advancing a per-Sector cursor as contiguous batches
+//! arrive.
 //!
 //! ## Scope
 //!
 //! This realizes the safe, append-only core of ADR-0021: "ship the owner
 //! node's append-only log to other nodes and apply it in logical-tick order".
-//! It deliberately stops there.
-//! It does **not**:
-//! - apply foreign events into a live `SimulationNode` world — those events
-//!   carry another Sector's coordinates and would corrupt the owner's AoI and
-//!   collision state, and
+//! When the requested prefix has been compacted, an opaque recovery snapshot
+//! replaces that prefix and the retained event suffix resumes at the snapshot
+//! log index.
+//!
+//! It deliberately does **not**:
+//! - apply foreign events or snapshots into a live `SimulationNode` world —
+//!   those records carry another Sector's state and would corrupt the owner's
+//!   AoI and collision state, and
 //! - perform failover takeover (promoting a replica to owner).
 //!
 //! Both are separate features that need their own design. Holding the
-//! authoritative ordered log is the prerequisite for either, and is what a
-//! future read/failover path consumes.
+//! authoritative snapshot plus ordered suffix is the prerequisite for either.
 
 use crate::{AntiEntropy, BatchApplyPlan, LogBatch, MissingLogRequest};
 use dawn_core::{DomainEvent, SectorId};
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, sync::Arc};
+
+/// Opaque recovery snapshot for one foreign Sector.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplicaSnapshot {
+    pub sector_id: SectorId,
+    /// All owner log entries below this index are covered by `bytes`.
+    pub log_index: u64,
+    /// Caller-defined serialized snapshot bytes (normally `StateSnapshot`).
+    /// Shared ownership keeps request retries and cached owner snapshots from
+    /// duplicating a potentially large allocation.
+    pub bytes: Arc<Vec<u8>>,
+}
+
+impl ReplicaSnapshot {
+    pub fn new(sector_id: SectorId, log_index: u64, bytes: Vec<u8>) -> Self {
+        Self {
+            sector_id,
+            log_index,
+            bytes: Arc::new(bytes),
+        }
+    }
+}
+
+/// Result of installing an opaque recovery snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotInstall {
+    Installed { next_index: u64 },
+    Duplicate { next_index: u64 },
+}
 
 /// Outcome of ingesting one [`LogBatch`] into a [`ReplicaSet`].
 #[derive(Debug, PartialEq)]
 pub enum Ingest {
-    /// The contiguous suffix was appended to the Sector's replica log.
+    /// The contiguous suffix was appended to the Sector's recovery log.
     Applied {
         sector_id: SectorId,
         /// Number of events newly appended (may be fewer than the batch when
@@ -40,22 +72,27 @@ pub enum Ingest {
     /// The batch was entirely below the cursor; dropped idempotently.
     Duplicate,
     /// The batch starts ahead of the cursor, leaving a hole. The replica is
-    /// unchanged; the caller should send `request` to the owner (or fall back
-    /// to SnapshotTransfer when the prefix has been compacted away).
+    /// unchanged; the caller should send `request` to the owner and may need a
+    /// snapshot when the requested prefix has been compacted.
     Gap(MissingLogRequest),
 }
 
-/// One foreign Sector's replicated log.
+/// One foreign Sector's recovery replica.
 #[derive(Debug, Default)]
 struct SectorReplica {
-    /// Next log index this replica expects (== number of events held).
+    /// First global log index represented by `events`. Zero before snapshot
+    /// fallback; equal to the installed snapshot boundary afterwards.
+    base_index: u64,
+    /// Next global log index this replica expects.
     next_index: u64,
-    /// The ordered event log, index 0 first.
+    /// Ordered retained suffix after `base_index`.
     events: Vec<DomainEvent>,
+    /// Opaque snapshot covering all indices below `base_index`.
+    snapshot: Option<ReplicaSnapshot>,
 }
 
-/// Holds a gap-checked, idempotent replica of one or more foreign Sectors'
-/// append-only logs, fed by gossiped [`LogBatch`]es.
+/// Holds a gap-checked, idempotent recovery replica of one or more foreign
+/// Sectors, fed by gossiped [`LogBatch`]es and optional snapshots.
 #[derive(Debug)]
 pub struct ReplicaSet {
     /// Cap on the suffix length a gap request may ask for (passed through to
@@ -73,7 +110,8 @@ impl ReplicaSet {
     }
 
     /// Ingest one gossiped batch, returning what happened. Duplicate and
-    /// gapped batches leave the replica unchanged (idempotent).
+    /// gapped batches leave the replica unchanged; overlapping batches append
+    /// only their new suffix.
     pub fn ingest(&mut self, batch: &LogBatch) -> Ingest {
         let replica = self.sectors.entry(batch.sector_id).or_default();
         match AntiEntropy::plan_batch(replica.next_index, batch.sector_id, batch, self.max_events) {
@@ -96,21 +134,55 @@ impl ReplicaSet {
         }
     }
 
-    /// Number of events held for `sector_id` (0 if never seen).
+    /// Install a newer snapshot atomically as recovery data and reset the
+    /// retained suffix cursor to its `log_index`. Older/repeated snapshots are
+    /// idempotent no-ops.
+    pub fn install_snapshot(&mut self, snapshot: ReplicaSnapshot) -> SnapshotInstall {
+        let replica = self.sectors.entry(snapshot.sector_id).or_default();
+        if snapshot.log_index < replica.next_index
+            || (snapshot.log_index == replica.next_index && replica.snapshot.is_some())
+        {
+            return SnapshotInstall::Duplicate {
+                next_index: replica.next_index,
+            };
+        }
+
+        replica.base_index = snapshot.log_index;
+        replica.next_index = snapshot.log_index;
+        replica.events.clear();
+        replica.snapshot = Some(snapshot);
+        SnapshotInstall::Installed {
+            next_index: replica.next_index,
+        }
+    }
+
+    /// Number of retained suffix events after the current snapshot boundary.
     pub fn replicated_len(&self, sector_id: SectorId) -> usize {
         self.sectors.get(&sector_id).map_or(0, |r| r.events.len())
     }
 
-    /// The next log index expected for `sector_id` (0 if never seen).
+    /// First global log index represented by [`Self::events`].
+    pub fn base_index(&self, sector_id: SectorId) -> u64 {
+        self.sectors.get(&sector_id).map_or(0, |r| r.base_index)
+    }
+
+    /// The next global log index expected for `sector_id` (0 if never seen).
     pub fn next_index(&self, sector_id: SectorId) -> u64 {
         self.sectors.get(&sector_id).map_or(0, |r| r.next_index)
     }
 
-    /// The replicated event log for `sector_id`, in index order.
+    /// The retained suffix for `sector_id`, in global index order.
     pub fn events(&self, sector_id: SectorId) -> &[DomainEvent] {
         self.sectors
             .get(&sector_id)
             .map_or(&[], |r| r.events.as_slice())
+    }
+
+    /// Opaque recovery snapshot, if catch-up crossed a compacted prefix.
+    pub fn snapshot(&self, sector_id: SectorId) -> Option<&ReplicaSnapshot> {
+        self.sectors
+            .get(&sector_id)
+            .and_then(|replica| replica.snapshot.as_ref())
     }
 }
 
@@ -206,6 +278,38 @@ mod tests {
             2,
             "gapped batch must not be applied"
         );
+    }
+
+    #[test]
+    fn snapshot_replaces_the_prefix_and_suffix_resumes_at_its_log_index() {
+        let mut set = ReplicaSet::new(64);
+        set.ingest(&batch(1, 0, 3));
+        let snapshot = ReplicaSnapshot::new(SectorId(1), 6, vec![1, 2, 3]);
+
+        assert_eq!(
+            set.install_snapshot(snapshot.clone()),
+            SnapshotInstall::Installed { next_index: 6 }
+        );
+        assert_eq!(set.base_index(SectorId(1)), 6);
+        assert_eq!(set.replicated_len(SectorId(1)), 0);
+        assert_eq!(set.snapshot(SectorId(1)), Some(&snapshot));
+
+        set.ingest(&batch(1, 6, 2));
+        assert_eq!(set.next_index(SectorId(1)), 8);
+        assert_eq!(set.replicated_len(SectorId(1)), 2);
+        assert_eq!(
+            set.install_snapshot(snapshot),
+            SnapshotInstall::Duplicate { next_index: 8 }
+        );
+        assert_eq!(set.replicated_len(SectorId(1)), 2);
+    }
+
+    #[test]
+    fn snapshot_clones_share_the_payload() {
+        let snapshot = ReplicaSnapshot::new(SectorId(1), 6, vec![1, 2, 3]);
+        let clone = snapshot.clone();
+
+        assert!(Arc::ptr_eq(&snapshot.bytes, &clone.bytes));
     }
 
     #[test]

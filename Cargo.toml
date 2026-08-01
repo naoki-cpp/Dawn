@@ -23,7 +23,7 @@ repository = "https://github.com/naoki-cpp/Dawn"
 publish = false
 
 [workspace.dependencies]
-serde      = { version = "1", features = ["derive"] }
+serde      = { version = "1", features = ["derive", "rc"] }
 thiserror  = "2"
 hecs       = "0.11"
 rand       = "0.8"

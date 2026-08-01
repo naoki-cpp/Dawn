@@ -8,9 +8,10 @@
 //! sleep or explicit flush needed in tests.
 //!
 //! TCP gossip callers can switch to `TcpReplicationTransport` behind the same
-//! logical interface.
+//! logical interface. Catch-up control traffic uses a separate bounded
+//! broadcast channel so it does not affect event ordering or `event_count()`.
 
-use crate::{LogBatch, ReplicationTransport};
+use crate::{CatchUpMessage, CatchUpTransport, LogBatch, ReplicationTransport};
 use dawn_event_store::{store::EventStore, InMemoryEventStore};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -69,6 +70,7 @@ impl BusActor {
 pub struct InMemoryReplicationBus {
     tx: mpsc::Sender<BusMessage>,
     broadcast_tx: broadcast::Sender<LogBatch>,
+    catch_up_tx: broadcast::Sender<CatchUpMessage>,
 }
 
 impl InMemoryReplicationBus {
@@ -76,8 +78,13 @@ impl InMemoryReplicationBus {
     pub fn spawn() -> Self {
         let (tx, rx) = mpsc::channel(10_000);
         let (broadcast_tx, _) = broadcast::channel(10_000);
+        let (catch_up_tx, _) = broadcast::channel(10_000);
         tokio::spawn(BusActor::new(rx, broadcast_tx.clone()).run());
-        Self { tx, broadcast_tx }
+        Self {
+            tx,
+            broadcast_tx,
+            catch_up_tx,
+        }
     }
 
     /// Returns a `Sender` for Sector actors to forward their event batches.
@@ -113,11 +120,22 @@ impl ReplicationTransport for InMemoryReplicationBus {
     }
 }
 
+impl CatchUpTransport for InMemoryReplicationBus {
+    fn send_catch_up(&self, message: CatchUpMessage) {
+        let _ = self.catch_up_tx.send(message);
+    }
+
+    fn subscribe_catch_up(&self) -> broadcast::Receiver<CatchUpMessage> {
+        self.catch_up_tx.subscribe()
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CatchUpRequest;
     use dawn_core::{events::VelocityChanged, NodeId, SectorId, ShipId, Tick, Velocity};
 
     fn make_batch(sector_id: SectorId, from_index: u64, count: usize) -> LogBatch {
@@ -232,6 +250,28 @@ mod tests {
         assert_eq!(received, batch);
         assert_eq!(received.next_index(), 44);
 
+        bus.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn catch_up_control_does_not_change_event_count() {
+        let bus = InMemoryReplicationBus::spawn();
+        let mut control_rx = bus.subscribe_catch_up();
+
+        bus.broadcast(make_batch(SectorId(0), 0, 5));
+        bus.send_catch_up(CatchUpMessage::Request(CatchUpRequest {
+            request_id: 1,
+            requester_sector_id: SectorId(1),
+            owner_sector_id: SectorId(0),
+            from_index: 0,
+            max_events: 10,
+        }));
+
+        assert!(matches!(
+            control_rx.recv().await.unwrap(),
+            CatchUpMessage::Request(_)
+        ));
+        assert_eq!(bus.event_count().await, 5);
         bus.shutdown().await;
     }
 }

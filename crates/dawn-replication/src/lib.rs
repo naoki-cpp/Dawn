@@ -10,22 +10,28 @@
 //! ## Current scope (8D-2a / 8D-2b / 8D-2c)
 //!
 //! - `LogBatch`: the unit of sector-local append-log shipping.
-//! - `ReplicationTransport`: wire-format-agnostic transport interface.
+//! - `ReplicationTransport`: wire-format-agnostic ordinary log transport.
+//! - `CatchUpTransport`: bounded suffix/snapshot recovery control traffic.
 //! - `InMemoryReplicationBus`: single-process implementation for tests and the
 //!   existing multi-node bench. This replaces `dawn_actor::ReplicationBus`.
 //! - `AntiEntropy`: request missing events by log index range.
+//! - `CatchUpManager`: owns gap detection, suffix requests, compacted-prefix
+//!   snapshot fallback, retries, and resumption from the snapshot log index.
 //! - `TcpReplicationTransport`: LAN plaintext transport using length-prefixed
-//!   postcard frames.
+//!   postcard frames for both gossip and catch-up control messages.
 //!
 //! ## (8D-2d)
 //!
-//! - `SnapshotTransfer`: catch up far-behind replicas via snapshot (raw-bytes
-//!   TCP transfer; caller handles postcard serialisation).
+//! - `SnapshotTransfer`: transfer raw snapshot bytes over a dedicated TCP
+//!   connection; callers handle snapshot serialization.
 //!
 //! ## Consumer side
 //!
-//! - `ReplicaSet`: holds a gap-checked, idempotent, ordered replica of each
-//!   foreign Sector's log, fed by gossiped `LogBatch`es via `AntiEntropy`.
+//! - `ReplicaSet`: holds a gap-checked, idempotent, ordered recovery replica of
+//!   each foreign Sector. A replica may contain an opaque snapshot plus the
+//!   retained event suffix after that snapshot boundary.
+//! - Foreign replicas are recovery data only. This crate never applies them to
+//!   the live local world.
 //!
 //! ## Example
 //!
@@ -55,6 +61,7 @@
 
 pub mod anti_entropy;
 pub mod bus;
+pub mod catch_up;
 pub mod outbound;
 pub mod replica;
 pub mod snapshot;
@@ -66,8 +73,13 @@ use tokio::sync::broadcast;
 
 pub use anti_entropy::{AntiEntropy, BatchApplyPlan, MissingLogRequest};
 pub use bus::{BusMessage, InMemoryReplicationBus};
+pub use catch_up::{
+    CatchUpConfig, CatchUpEvent, CatchUpFailure, CatchUpFailureKind, CatchUpManager,
+    CatchUpMessage, CatchUpPayload, CatchUpRequest, CatchUpResponse, CatchUpStep, CatchUpTransport,
+    CatchUpUnavailable,
+};
 pub use outbound::OutboundLogPublisher;
-pub use replica::{Ingest, ReplicaSet};
+pub use replica::{Ingest, ReplicaSet, ReplicaSnapshot, SnapshotInstall};
 pub use snapshot::SnapshotTransfer;
 pub use tcp::{TcpReplicationError, TcpReplicationTransport};
 
@@ -97,10 +109,11 @@ impl LogBatch {
     }
 }
 
-/// Wire-format-agnostic replication transport.
+/// Wire-format-agnostic ordinary log-gossip transport.
 ///
-/// TCP gossip (8D-2c) implements this same interface with length-prefixed
-/// postcard frames; the in-memory implementation keeps tests single-process.
+/// TCP gossip implements this interface with length-prefixed postcard frames;
+/// the in-memory implementation keeps tests single-process. Catch-up control
+/// messages use the separate [`CatchUpTransport`] interface.
 pub trait ReplicationTransport: Send + Sync {
     /// Send a batch of events to interested peers.
     fn broadcast(&self, batch: LogBatch);

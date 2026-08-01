@@ -24,12 +24,16 @@ use dawn_actor::ws_server;
 use dawn_consensus::{RaftActor, RaftActorHandle, RaftActorMessage, RaftState, TcpRaftTransport};
 use dawn_core::{NodeId, SectorBounds, SectorId};
 use dawn_event_store::FileEventStore;
-use dawn_replication::{Ingest, ReplicaSet, ReplicationTransport, TcpReplicationTransport};
+use dawn_replication::{
+    CatchUpConfig, CatchUpEvent, CatchUpFailureKind, CatchUpManager, CatchUpStep, CatchUpTransport,
+    CatchUpUnavailable, LogBatch, ReplicaSnapshot, ReplicationTransport, TcpReplicationTransport,
+};
 use dawn_sector::node::SimulationNode;
 use dawn_sector::persistence::{CheckpointConfig, CheckpointScheduler, StateSnapshot};
 use dawn_sector::{galaxy::Galaxy, game_data::runtime_catalog, transit};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -37,6 +41,14 @@ const AOI_CELL_SIZE: f64 = 30_000.0;
 const TICK_MS: u64 = 100;
 /// Cap on the suffix length an anti-entropy gap request may ask for.
 const MAX_REPL_SUFFIX: usize = 4096;
+const CATCH_UP_RETRY_TICKS: u32 = 10;
+const CATCH_UP_MAX_RETRIES: u32 = 5;
+const CATCH_UP_MAX_REQUESTS: u32 = 1024;
+const CATCH_UP_MAX_SNAPSHOT_BYTES: usize = 256 * 1024 * 1024;
+/// Prevent a peer flood from monopolising one simulation tick.
+const MAX_CATCH_UP_MESSAGES_PER_TICK: usize = 32;
+/// Retry transient terminal failures after 30 seconds.
+const CATCH_UP_FAILURE_RETRY_TICKS: u32 = 300;
 const PRODUCTION_GALAXY_PATH: &str = "data/galaxy.toml";
 
 #[tokio::main]
@@ -133,7 +145,10 @@ async fn main() -> anyhow::Result<()> {
         })?;
 
     for peer in &cfg.peers {
-        if let Err(e) = repl_transport.connect_peer(peer.repl_addr).await {
+        if let Err(e) = repl_transport
+            .connect_peer(SectorId(peer.node_id), peer.repl_addr)
+            .await
+        {
             eprintln!(
                 "[Node] warning: could not connect to peer replication at {}: {}",
                 peer.repl_addr, e
@@ -141,10 +156,31 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     let mut repl_rx = repl_transport.subscribe();
-    // Consumer side of log-shipping gossip: holds a gap-checked, idempotent
-    // replica of each peer Sector's log (ADR-0021). Held but not yet applied
-    // to a live world — see the drain loop below.
-    let mut replicas = ReplicaSet::new(MAX_REPL_SUFFIX);
+    let mut catch_up_rx = repl_transport.subscribe_catch_up();
+    // The manager owns all foreign recovery state. It never applies foreign
+    // events or snapshots to this node's live SimulationNode world.
+    let mut catch_up = CatchUpManager::new(
+        sector_id,
+        CatchUpConfig {
+            max_events: MAX_REPL_SUFFIX,
+            retry_interval_ticks: CATCH_UP_RETRY_TICKS,
+            max_retries: CATCH_UP_MAX_RETRIES,
+            max_requests_per_session: CATCH_UP_MAX_REQUESTS,
+            max_snapshot_bytes: CATCH_UP_MAX_SNAPSHOT_BYTES,
+        },
+    );
+    let mut catch_up_failure_retries = HashMap::new();
+    // Load and validate the durable snapshot once. Requests clone only the
+    // Arc-backed payload; they never synchronously re-read the file in the tick
+    // loop.
+    let mut replica_snapshot =
+        match load_replica_snapshot(&cfg.snapshot_path, sector_id, CATCH_UP_MAX_SNAPSHOT_BYTES) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                eprintln!("[Repl] snapshot fallback unavailable at startup: {error}");
+                None
+            }
+        };
 
     // ── WebSocket server ──────────────────────────────────────────────────────
 
@@ -181,6 +217,9 @@ async fn main() -> anyhow::Result<()> {
     loop {
         interval.tick().await;
         let tick_started = std::time::Instant::now();
+        let retry_step =
+            advance_catch_up_failure_retries(&mut catch_up, &mut catch_up_failure_retries);
+        emit_catch_up_step(&repl_transport, &mut catch_up_failure_retries, retry_step);
 
         admission.advance_handshakes(&mut node, sector_id, AOI_CELL_SIZE);
 
@@ -189,36 +228,32 @@ async fn main() -> anyhow::Result<()> {
             runtime.promote_ready_session(&node, sess);
         }
 
-        // Drain incoming replication batches from peers into the per-Sector
-        // replica (gap-checked, idempotent). This is log-shipping's consumer
-        // side (ADR-0021): the replica retains each peer Sector's ordered log.
-        // Applying those events to a live world (and failover takeover) is a
-        // separate feature — see ReplicaSet docs.
+        // Ordinary gossip is ingested into foreign recovery replicas. A gap
+        // immediately produces a bounded directed suffix request.
         while let Ok(batch) = repl_rx.try_recv() {
-            match replicas.ingest(&batch) {
-                Ingest::Applied {
-                    sector_id,
-                    applied,
-                    next_index,
-                } => {
-                    if applied > 0 {
-                        eprintln!(
-                            "[Repl] sector={sector_id:?} +{applied} → next_index={next_index}"
-                        );
-                    }
-                }
-                Ingest::Duplicate => {} // idempotent drop; nothing to do
-                Ingest::Gap(req) => {
-                    // The owner's prefix is missing; a future SnapshotTransfer /
-                    // anti-entropy request path (ADR-0017) will fill it. Log so
-                    // physical-node packet loss shows up during 8D-5.
-                    eprintln!(
-                        "[Repl] sector={:?} gap: expected from_index={}, awaiting catch-up",
-                        req.sector_id, req.from_index
-                    );
-                }
-            }
+            emit_catch_up_step(
+                &repl_transport,
+                &mut catch_up_failure_retries,
+                catch_up.ingest_batch(batch),
+            );
         }
+
+        // Bound owner/requester catch-up work per simulation tick. The cached
+        // Arc-backed snapshot makes retries cheap and avoids synchronous disk
+        // I/O on this path.
+        for _ in 0..MAX_CATCH_UP_MESSAGES_PER_TICK {
+            let Ok(message) = catch_up_rx.try_recv() else {
+                break;
+            };
+            let step =
+                catch_up.handle_message(message, node.event_store(), || replica_snapshot.clone());
+            emit_catch_up_step(&repl_transport, &mut catch_up_failure_retries, step);
+        }
+        emit_catch_up_step(
+            &repl_transport,
+            &mut catch_up_failure_retries,
+            catch_up.tick(),
+        );
 
         runtime.run_frame(&mut node, &raft, &mut committed_rx);
 
@@ -234,6 +269,13 @@ async fn main() -> anyhow::Result<()> {
                     snapshot.tick.value(),
                     snapshot.log_index
                 );
+                match replica_snapshot_from_state(&snapshot, CATCH_UP_MAX_SNAPSHOT_BYTES) {
+                    Ok(cached) => replica_snapshot = Some(cached),
+                    Err(error) => {
+                        replica_snapshot = None;
+                        eprintln!("[Repl] new snapshot cannot be served for catch-up: {error}");
+                    }
+                }
             }
             Ok(None) => {}
             Err(e) => eprintln!("[Node] checkpoint failed, will retry next interval: {e}"),
@@ -248,6 +290,158 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("[Node] tick overrun: {elapsed:?} (budget {TICK_MS}ms)");
         }
     }
+}
+
+fn emit_catch_up_step<T: CatchUpTransport>(
+    transport: &T,
+    failure_retries: &mut HashMap<SectorId, u32>,
+    step: CatchUpStep,
+) {
+    for message in step.outbound {
+        transport.send_catch_up(message);
+    }
+    for event in step.events {
+        match event {
+            CatchUpEvent::Applied {
+                sector_id,
+                applied,
+                next_index,
+            } => {
+                failure_retries.remove(&sector_id);
+                eprintln!(
+                    "[Repl] sector={sector_id:?} +{applied} -> next_index={next_index}"
+                );
+            }
+            CatchUpEvent::RequestIssued {
+                owner_sector_id,
+                from_index,
+                request_id,
+                attempt,
+            } => eprintln!(
+                "[Repl] catch-up request owner={owner_sector_id:?} from={from_index} id={request_id} attempt={attempt}"
+            ),
+            CatchUpEvent::SnapshotInstalled {
+                sector_id,
+                log_index,
+                bytes,
+            } => {
+                failure_retries.remove(&sector_id);
+                eprintln!(
+                    "[Repl] sector={sector_id:?} installed recovery snapshot log_index={log_index} bytes={bytes}"
+                );
+            }
+            CatchUpEvent::Completed {
+                sector_id,
+                next_index,
+            } => {
+                failure_retries.remove(&sector_id);
+                eprintln!(
+                    "[Repl] sector={sector_id:?} catch-up complete next_index={next_index}"
+                );
+            }
+            CatchUpEvent::Failed(failure) => {
+                if is_transient_catch_up_failure(failure.kind) {
+                    failure_retries.insert(failure.sector_id, CATCH_UP_FAILURE_RETRY_TICKS);
+                }
+                eprintln!("[Repl] catch-up failed: {failure:?}")
+            }
+        }
+    }
+}
+
+fn is_transient_catch_up_failure(kind: CatchUpFailureKind) -> bool {
+    matches!(
+        kind,
+        CatchUpFailureKind::RetryExhausted
+            | CatchUpFailureKind::Remote(CatchUpUnavailable::SnapshotUnavailable)
+            | CatchUpFailureKind::Remote(CatchUpUnavailable::RetainedSuffixUnavailable)
+    )
+}
+
+fn advance_catch_up_failure_retries(
+    catch_up: &mut CatchUpManager,
+    failure_retries: &mut HashMap<SectorId, u32>,
+) -> CatchUpStep {
+    let mut step = CatchUpStep::default();
+    let sectors: Vec<_> = failure_retries.keys().copied().collect();
+    for sector_id in sectors {
+        let Some(remaining) = failure_retries.get_mut(&sector_id) else {
+            continue;
+        };
+        if *remaining > 1 {
+            *remaining -= 1;
+            continue;
+        }
+
+        failure_retries.remove(&sector_id);
+        let Some(cursor) = catch_up.failure_cursor(sector_id) else {
+            continue;
+        };
+        let Some(probe_from) = cursor.checked_add(1) else {
+            eprintln!("[Repl] sector={sector_id:?} cannot restart catch-up at u64::MAX cursor");
+            continue;
+        };
+
+        catch_up.reset_failure(sector_id);
+        // Re-enter the normal gap detector with an empty future batch. It
+        // cannot append data, but it deterministically issues a fresh bounded
+        // request from the replica's current cursor even when the owner is idle.
+        let restart = catch_up.ingest_batch(LogBatch::new(sector_id, probe_from, Vec::new()));
+        step.outbound.extend(restart.outbound);
+        step.events.extend(restart.events);
+        eprintln!(
+            "[Repl] sector={sector_id:?} transient failure cooldown expired; restarting catch-up"
+        );
+    }
+    step
+}
+
+fn load_replica_snapshot(
+    path: impl AsRef<Path>,
+    expected_sector_id: SectorId,
+    max_bytes: usize,
+) -> anyhow::Result<Option<ReplicaSnapshot>> {
+    let path = path.as_ref();
+    if !path.exists() {
+        return Ok(None);
+    }
+    let file_len = usize::try_from(std::fs::metadata(path)?.len())
+        .map_err(|_| anyhow::anyhow!("snapshot length does not fit usize"))?;
+    if file_len > max_bytes {
+        anyhow::bail!("snapshot is {file_len} bytes, limit is {max_bytes}");
+    }
+
+    let bytes = std::fs::read(path)?;
+    let snapshot: StateSnapshot = postcard::from_bytes(&bytes)
+        .map_err(|error| anyhow::anyhow!("cannot decode current snapshot: {error}"))?;
+    if snapshot.sector_id != expected_sector_id {
+        anyhow::bail!(
+            "snapshot sector {:?} does not match local sector {:?}",
+            snapshot.sector_id,
+            expected_sector_id
+        );
+    }
+    Ok(Some(ReplicaSnapshot::new(
+        snapshot.sector_id,
+        snapshot.log_index,
+        bytes,
+    )))
+}
+
+fn replica_snapshot_from_state(
+    snapshot: &StateSnapshot,
+    max_bytes: usize,
+) -> anyhow::Result<ReplicaSnapshot> {
+    let bytes = postcard::to_stdvec(snapshot)
+        .map_err(|error| anyhow::anyhow!("cannot encode current snapshot: {error}"))?;
+    if bytes.len() > max_bytes {
+        anyhow::bail!("snapshot is {} bytes, limit is {max_bytes}", bytes.len());
+    }
+    Ok(ReplicaSnapshot::new(
+        snapshot.sector_id,
+        snapshot.log_index,
+        bytes,
+    ))
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
