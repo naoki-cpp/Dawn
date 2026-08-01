@@ -9,6 +9,7 @@ use godot::prelude::*;
 mod client_command_gd;
 mod client_outcome;
 mod client_rules_gd;
+mod item_identity_gd;
 mod item_row_gd;
 mod json_variant;
 mod loadout_gd;
@@ -24,6 +25,7 @@ mod world_space_gd;
 
 pub use client_command_gd::{ClientCommand, ClientMessageDecoder};
 pub use client_rules_gd::ClientRules;
+pub use item_identity_gd::ItemIdentity;
 pub use item_row_gd::ItemRow;
 pub use loadout_gd::PlayerLoadout;
 pub use module_row_gd::ModuleRow;
