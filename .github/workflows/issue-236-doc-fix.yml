@@ -49,15 +49,13 @@ jobs:
               old_name,
               'fn export_transit_handoff_without_removing_the_ship_or_appending_an_event()',
           )
-          old_line = '        let snapshot = node.export_transit(ship_id).expect("ship should export");'
-          old_assert = '        assert_eq!(snapshot.ship_id, ship_id);'
-          if text.count(old_line) != 1 or text.count(old_assert) != 1:
-              raise SystemExit('expected one old export test variable')
-          text = text.replace(
-              old_line,
-              '        let handoff = node.export_transit(ship_id).expect("ship should export");',
-          ).replace(old_assert, '        assert_eq!(handoff.ship_id, ship_id);')
-          path.write_text(text)
+          old_comment = '''        // frozen (InTransit), until complete_outgoing_transit runs -- which
+                  // only happens once this Sector observes its own Commit land.'''
+          new_comment = '''        // frozen (InTransit), until a matching Ack is committed and
+                  // complete_outgoing_transit finalizes the source half.'''
+          if text.count(old_comment) != 1:
+              raise SystemExit(f'expected one stale export comment, found {text.count(old_comment)}')
+          path.write_text(text.replace(old_comment, new_comment))
 
           path = Path('crates/dawn-sector/src/transit/pipeline.rs')
           text = path.read_text()
