@@ -140,12 +140,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 sess.player_id,
                 sess.ship_id.raw()
             );
-            aoi_delivery.seed_cluster_player(
-                &nodes,
-                0,
-                sess.player_id,
-                sess.ship_id,
-            );
+            aoi_delivery.seed_cluster_player(&nodes, 0, sess.player_id, sess.ship_id);
             sessions.push(sess);
         }
 
