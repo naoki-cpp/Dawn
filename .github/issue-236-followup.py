@@ -12,11 +12,23 @@ def exact(path, old, new, expected=1):
 
 exact(
     'crates/dawn-sector/src/transit/pipeline.rs',
-    'pending.remove(&event.ship_id);',
-    'pending.remove(&event.handoff.ship_id);',
+    '''            DomainEvent::SectorTransitCompleted(event) if event.from == sector_id => {
+                pending.remove(&event.ship_id);
+            }
+''',
+    '''            DomainEvent::SectorTransitCompleted(event) if event.from == sector_id => {
+                pending.remove(&event.handoff.ship_id);
+            }
+''',
 )
 exact(
     'crates/dawn-sector/src/transit/pipeline.rs',
-    '&& event.ship_id == ship_id',
-    '&& event.handoff.ship_id == ship_id',
+    '''            DomainEvent::SectorTransitCompleted(event)
+                if marker_seen
+                    && event.ship_id == ship_id
+''',
+    '''            DomainEvent::SectorTransitCompleted(event)
+                if marker_seen
+                    && event.handoff.ship_id == ship_id
+''',
 )
