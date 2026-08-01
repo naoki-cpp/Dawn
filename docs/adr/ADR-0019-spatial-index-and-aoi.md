@@ -60,6 +60,8 @@ index lifecycle:
 所属判定     : 船位置 → セル座標を床除算 O(1) で求め、セルごとに ShipId を保持する。
 可視範囲     : プレイヤー自船セルを中心とする 3×3×3（27 セル）の在籍船。
 InitialState : 全 Ship ではなく、その 27 セルの船のみを送る。
+observer失敗 : 自船を解決できない admission / resume / handoff は明示的に失敗させ、
+               空 payload や全 Ship payload へフォールバックしない。
 購読更新     : 前 frame の可視集合と現在の可視集合を比較し、Enter/Leave を ShipId 順に送る。
 配信順序     : Enter → Leave → filtered DomainEvent → MotionCorrection → PositionSnap。
 配信フィルタ : 関与 Ship が観測者の現在可視集合に含まれる DomainEvent のみを送る。
@@ -101,6 +103,8 @@ runtime adapter に残すのは Sector routing、Redirect、session retention、
 - **セルbucketは派生・非永続**。復旧後は権威ある位置から再構築してから session をseedする。
 - **Sector 内に閉じる**。Sector 越えは引き続き Raft と Redirect/resume が担当する。
 - **27セル規則を全runtimeで共有する**。runtime独自のvisible-set policyを禁止する。
+- **observer identityを成功payloadで隠さない**。自船を解決できなければ接続・resume・
+  post-transit handoffを拒否し、全world InitialStateを送らない。
 - **戦闘の射程判定は厳密距離のまま**。AoI候補集合は権威判定を置き換えない。
 
 ### 計測で閾値の上昇を実証する
@@ -160,9 +164,10 @@ AoI が効くのは空間的に散らばった負荷である。全員が同一 
 - [x] single-process、clustered simulation、production Sector Nodeを同じ`AoiFrame`へ移行
 - [x] index policyをframeごとの全再構築と明記し、incremental policyを不採用と記録
 - [x] admission/resume/recovery時に権威状態から再構築してseedするテストを追加
+- [x] missing observerをfresh/resume/post-transitで明示拒否し、full-world fallbackを削除
 - [x] runtime-path equivalenceを共有frame出力で検証
 - [x] `--aoi-bench`でAoI有無の処理時間・配信量を比較
 
 ---
 
-*提案: 2026-06-15。人間承認済み 2026-06-15。AoI frame lifecycle 統合: 2026-08-01（Issue #225）。*
+*提案: 2026-06-15。人間承認済み 2026-06-15。AoI frame lifecycle 統合: 2026-08-01（Issue #225）。missing observer拒否: 2026-08-01（Issue #234）。*

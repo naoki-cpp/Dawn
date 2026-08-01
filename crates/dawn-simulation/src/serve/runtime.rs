@@ -4,9 +4,10 @@ use super::{AoiDelivery, AOI_CELL_SIZE};
 use crate::ws_server;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, PlayerId, ShipId};
+use dawn_event_store::store::EventStore;
 use dawn_sector::node::SimulationNode;
 use dawn_sector::transit;
-use dawn_wire::ServerMessage;
+use dawn_wire::{InitialStateWire, ServerMessage};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 
@@ -65,7 +66,10 @@ pub(crate) fn run_cluster_runtime_tick(
         &warp_arrivals_by_sector,
         &handoff,
     );
-    resend_jump_initial_state(ctx.nodes, ctx.sessions, &handoff);
+    let failed_players = resend_jump_initial_state(ctx.nodes, ctx.sessions, &handoff);
+    for player_id in failed_players {
+        ctx.player_sector.remove(&player_id);
+    }
     tick_outputs
 }
 
@@ -140,21 +144,160 @@ fn deliver_cluster_frames(
     );
 }
 
-fn resend_jump_initial_state(
-    nodes: &[SimulationNode],
-    sessions: &[ws_server::PlayerSession],
+trait JumpHandoffSession {
+    fn player_id(&self) -> PlayerId;
+    fn ship_id(&self) -> ShipId;
+    fn send_events(&mut self, events: &[DomainEvent]);
+    fn send_initial_state(&mut self, initial_state: InitialStateWire);
+}
+
+impl JumpHandoffSession for ws_server::PlayerSession {
+    fn player_id(&self) -> PlayerId {
+        self.player_id
+    }
+
+    fn ship_id(&self) -> ShipId {
+        self.ship_id
+    }
+
+    fn send_events(&mut self, events: &[DomainEvent]) {
+        let _ = ws_server::PlayerSession::send_events(self, events);
+    }
+
+    fn send_initial_state(&mut self, initial_state: InitialStateWire) {
+        let _ = self.send_message(&ServerMessage::InitialState(initial_state));
+    }
+}
+
+fn resend_jump_initial_state<S: EventStore, T: JumpHandoffSession>(
+    nodes: &[SimulationNode<S>],
+    sessions: &mut Vec<T>,
     handoff: &JumpHandoff,
-) {
-    for (player_id, dest) in &handoff.jumped_players {
-        if let Some(sess) = sessions.iter().find(|s| s.player_id == *player_id) {
-            if let Some(events) = handoff.own_events.get(player_id) {
-                sess.send_events(events);
+) -> Vec<PlayerId> {
+    let destinations: HashMap<PlayerId, usize> = handoff.jumped_players.iter().copied().collect();
+    let mut failed_players = Vec::new();
+
+    sessions.retain_mut(|session| {
+        let player_id = session.player_id();
+        let Some(&dest) = destinations.get(&player_id) else {
+            return true;
+        };
+
+        let initial_state = match nodes[dest]
+            .build_initial_state_for_observer(session.ship_id(), AOI_CELL_SIZE)
+        {
+            Ok(initial_state) => initial_state,
+            Err(error) => {
+                eprintln!(
+                    "[Server] post-transit handoff failed for {player_id:?} in Sector {dest}: {error}"
+                );
+                failed_players.push(player_id);
+                return false;
             }
-            let initial_state = nodes[*dest]
-                .ship_absolute_pos(sess.ship_id)
-                .map(|pos| nodes[*dest].build_initial_state_json_for(pos, AOI_CELL_SIZE))
-                .unwrap_or_else(|| nodes[*dest].build_initial_state_json());
-            sess.send_message(&ServerMessage::InitialState(initial_state));
+        };
+
+        if let Some(events) = handoff.own_events.get(&player_id) {
+            session.send_events(events);
         }
+        session.send_initial_state(initial_state);
+        true
+    });
+
+    failed_players
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dawn_core::{NodeId, Position, SectorBounds, SectorId, Velocity};
+    use dawn_sector::ship_types::SHIP_TYPE_NPC_FRIGATE;
+
+    struct FakeSession {
+        player_id: PlayerId,
+        ship_id: ShipId,
+        initial_state_ship_ids: Vec<Vec<u64>>,
+    }
+
+    impl FakeSession {
+        fn new(player_id: PlayerId, ship_id: ShipId) -> Self {
+            Self {
+                player_id,
+                ship_id,
+                initial_state_ship_ids: Vec::new(),
+            }
+        }
+    }
+
+    impl JumpHandoffSession for FakeSession {
+        fn player_id(&self) -> PlayerId {
+            self.player_id
+        }
+
+        fn ship_id(&self) -> ShipId {
+            self.ship_id
+        }
+
+        fn send_events(&mut self, _events: &[DomainEvent]) {}
+
+        fn send_initial_state(&mut self, initial_state: InitialStateWire) {
+            self.initial_state_ship_ids.push(
+                initial_state
+                    .ships
+                    .into_iter()
+                    .map(|ship| ship.ship_id)
+                    .collect(),
+            );
+        }
+    }
+
+    fn node() -> SimulationNode {
+        SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        )
+    }
+
+    fn jump_handoff(player_id: PlayerId, dest: usize) -> JumpHandoff {
+        JumpHandoff {
+            jumped_players: vec![(player_id, dest)],
+            own_events: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn post_transit_handoff_drops_a_session_with_a_missing_observer() {
+        let player_id = PlayerId(1);
+        let missing = ShipId::new(NodeId(9), 999);
+        let nodes = vec![node()];
+        let mut sessions = vec![FakeSession::new(player_id, missing)];
+
+        let failed = resend_jump_initial_state(&nodes, &mut sessions, &jump_handoff(player_id, 0));
+
+        assert_eq!(failed, vec![player_id]);
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn post_transit_handoff_keeps_valid_observer_state_scoped() {
+        let player_id = PlayerId(1);
+        let mut destination = node();
+        let observer =
+            destination.spawn_ship(SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
+        let far = destination.spawn_ship(
+            SHIP_TYPE_NPC_FRIGATE,
+            Position::new(100_000.0, 0.0, 0.0),
+            Velocity::ZERO,
+        );
+        let nodes = vec![destination];
+        let mut sessions = vec![FakeSession::new(player_id, observer)];
+
+        let failed = resend_jump_initial_state(&nodes, &mut sessions, &jump_handoff(player_id, 0));
+
+        assert!(failed.is_empty());
+        assert_eq!(sessions.len(), 1);
+        let ids = &sessions[0].initial_state_ship_ids[0];
+        assert!(ids.contains(&observer.raw()));
+        assert!(!ids.contains(&far.raw()));
     }
 }

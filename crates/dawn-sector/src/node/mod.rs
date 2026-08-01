@@ -47,6 +47,7 @@ mod warp;
 
 pub use commands::{ClientCommandFollowup, ModuleActivationRejection};
 pub use jump::JumpOutcome;
+pub use serialization::{HandoffPayload, MissingObserverShip};
 
 use coordinates::debug_assert_missing_anchor;
 

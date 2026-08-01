@@ -46,7 +46,8 @@ Phase 6 の主目標は「ゲームが実際に面白いか」を人間から検
 ```
 [実装済み] InitialState にプレイヤー船識別フラグ（is_player）
   → Godot が「相手プレイヤーの船」と NPC を区別するために使用
-  → node.rs の build_initial_state_json() が is_player を出力する
+  → node/serialization.rs の observer-scoped handoff が 27 セル内の船だけを出力する
+  → observer shipを解決できない接続・resume・handoffは失敗し、全world状態を送らない
 
 [必須] Godot に勝敗画面を追加
   → ShipDestroyed 受信時に自分/相手の船かを判定して表示

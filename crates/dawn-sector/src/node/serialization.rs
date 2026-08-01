@@ -23,6 +23,27 @@ pub struct HandoffPayload {
     pub player_loadout: Option<PlayerLoadoutWire>,
 }
 
+/// The observer ship needed to scope an InitialState could not be resolved.
+///
+/// Network admission, resume, and post-transit handoff must reject this
+/// condition instead of substituting an empty or full-world payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MissingObserverShip {
+    pub ship_id: ShipId,
+}
+
+impl std::fmt::Display for MissingObserverShip {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "observer ship #{} could not be resolved",
+            self.ship_id.raw()
+        )
+    }
+}
+
+impl std::error::Error for MissingObserverShip {}
+
 /// Wire shape for an absolute (f64, ADR-0029) position. The one seam this
 /// file's three position-carrying messages (celestial body, jump gate, ship)
 /// go through, instead of each authoring the same literal. Kept local to
@@ -38,21 +59,37 @@ fn abs_pos_json(p: AbsolutePosition) -> AbsPosWire {
 }
 
 impl<S: EventStore> SimulationNode<S> {
-    /// Build the `InitialState` + `PlayerLoadout` pair to hand a client once
-    /// its identity (fresh or resumed) has already been decided by the caller.
-    pub fn build_handoff_payload(&self, ship_id: ShipId, aoi_cell_size: f64) -> HandoffPayload {
-        let initial_state = self
-            .ship_absolute_pos(ship_id)
-            .map(|pos| self.build_initial_state_json_for(pos, aoi_cell_size))
-            .unwrap_or_else(|| self.build_initial_state_json());
+    /// Build the observer-scoped `InitialState` + `PlayerLoadout` pair to
+    /// hand a client once its identity (fresh or resumed) has been selected.
+    pub fn build_handoff_payload(
+        &self,
+        ship_id: ShipId,
+        aoi_cell_size: f64,
+    ) -> Result<HandoffPayload, MissingObserverShip> {
+        let initial_state = self.build_initial_state_for_observer(ship_id, aoi_cell_size)?;
         let player_loadout = self.build_player_loadout_json(ship_id);
-        HandoffPayload {
+        Ok(HandoffPayload {
             initial_state,
             player_loadout,
-        }
+        })
     }
 
-    /// Full-world `InitialState` (every ship). Used for non-AoI callers.
+    /// Build an `InitialState` scoped to `observer_ship`'s 27-cell AoI.
+    pub fn build_initial_state_for_observer(
+        &self,
+        observer_ship: ShipId,
+        cell_size: f64,
+    ) -> Result<InitialStateWire, MissingObserverShip> {
+        let observer_abs = self
+            .ship_absolute_pos(observer_ship)
+            .ok_or(MissingObserverShip {
+                ship_id: observer_ship,
+            })?;
+        Ok(self.build_initial_state_json_for(observer_abs, cell_size))
+    }
+
+    /// Full-world state for diagnostics and non-network tests. Admission,
+    /// resume, and handoff paths must use the observer-scoped builders above.
     pub fn build_initial_state_json(&self) -> InitialStateWire {
         self.initial_state_json(self.ships.index.keys().copied())
     }
@@ -463,7 +500,9 @@ mod tests {
             Velocity::ZERO,
         );
 
-        let payload = node.build_handoff_payload(ship_id, cell);
+        let payload = node
+            .build_handoff_payload(ship_id, cell)
+            .expect("known observer ship");
 
         let ids: Vec<u64> = payload
             .initial_state
@@ -480,5 +519,17 @@ mod tests {
             payload.player_loadout.is_some(),
             "every ship with a FittingComp gets a PlayerLoadout payload"
         );
+    }
+
+    #[test]
+    fn handoff_payload_rejects_an_unresolved_observer() {
+        let node = mem_node();
+        let missing = ShipId::new(NodeId(9), 999);
+
+        let error = node
+            .build_handoff_payload(missing, 1_000.0)
+            .expect_err("missing observer must not receive full-world state");
+
+        assert_eq!(error, MissingObserverShip { ship_id: missing });
     }
 }
