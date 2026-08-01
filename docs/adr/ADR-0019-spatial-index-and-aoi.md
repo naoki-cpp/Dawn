@@ -9,10 +9,10 @@ related : ADR-0018（負荷ヒエラルキー / 局所 TiDi）, ADR-0016（柱�
 
 # ADR-0019 — AoI のための静的セルグリッド（3×3×3 隣接可視）
 
-> **ステータス注記**: 本 ADR は **accepted**（人間承認済み・2026-06-15）。実装は別タスク（roadmap §8C）で段階的に行う。
-> 新クレートを作らず Dependency DAG を変更しない（静的グリッド + AoI フィルタは `dawn-simulation`、
-> 必要なら `dawn-actor` の差分配信を最小拡張）。CLAUDE.md 不変条件の**改訂は伴わない**
-> （INV-002 / INV-MOVE / INV-003 と整合する範囲に設計を限定）。実装は別タスクで段階的に行う。
+> **ステータス注記**: 本 ADR は **accepted**（人間承認済み・2026-06-15）。
+> 実装は `dawn-sector::aoi` と `dawn-sector::aoi_frame::AoiFrame` に置き、
+> single-process、clustered simulation、production Sector Node の全経路が同じ配信実装を使う。
+> 新クレートを作らず Dependency DAG は変更しない。
 
 ## 背景
 
@@ -30,77 +30,91 @@ ADR-0018 は過負荷対応をヒエラルキー化したが、「単一 Sector 
 | 武器発射 | No。自分の `locked_targets`（既知リスト）を撃つ | O(自分のロック数) |
 | Orbit / Keep at Range | No。特定の 1 ターゲットとの距離を保つ | O(1) |
 | signature resolution | No。命中式内で既ロック対象の sig を使うスカラー計算 | O(1) |
-| NPC オートロック（`lock.rs:140-178`） | Yes（唯一の常時近傍探索） | #NPC 有限 → **O(n)** |
+| NPC オートロック | Yes（唯一の常時近傍探索） | #NPC 有限 → **O(n)** |
 | 将来の AoE / スマートボム | Yes だが発生源が少数（∝ n でない） | #emitter 有限 → **O(n)** |
 
-数少ない近傍探索（NPC ロック・AoE）も**回数が n に比例しない**ため O(n) どまり。よって専用の
-「exact 半径加速グリッド」は不要。
-
 真に **O(n²)** になるのは **AoI（配信側）**である。各プレイヤーに自分の周囲だけを配信するには、
-接続プレイヤー**全員**（回数 ∝ p）が毎 Tick「周囲に誰がいるか」（1 回 O(n)）を問う必要があり、
-プレイヤー密戦闘では p ≈ n なので全体 **O(p·n) ≈ O(n²)**。現状の `ws_server.rs` は AoI を持たず、
-全 Ship を `InitialState` で送り全 `DomainEvent` を全セッションへ送る（帯域もグローバル n に比例）。
-architecture.md §5-B は Interest Management を「最重要。これなしでは実際のゲームにならない」と既に明記。
+接続プレイヤー全員が毎 Tick「周囲に誰がいるか」を問う必要がある。全 Ship を毎回走査すれば
+プレイヤー密戦闘では O(p·n) ≈ O(n²) になる。帯域も全世界配信ではグローバル n に比例する。
 
 ### EVE の知見と、その一歩先
 
-EVE は「グリッド = 興味範囲そのもの」とし、**静的・大きなセル**でバケツ化する。興味判定は
-「同じグリッドにいるか」の **O(1)** 参照で済み、毎 Tick の半径クエリ（O(p·n)）を**そもそも発生させない**。
-代償はセル境界での不連続（pop-in/out）だが、セルが大きく跨ぎが稀なので許容している（20 年の実績）。
-
-本 ADR はこの発想を採り、**不連続を一段改善**する: 純・静的セル（自セルのみ可視）ではなく、
-**自セル + 各軸隣接 26 セル（= 3×3×3 = 27 セル）を可視範囲**にする。`Position` は 3 次元なので
-近傍は 27 セル（自セル含む）になる。不連続は自分の位置ではなく 27 セル外殻（1.5 セル先）に
-押し出され、体感が EVE より良い。半径 R の真円 Bubble を毎 Tick 計算する案は、O(p·n) を**自ら作り出す**
-ため採らない。
+EVE は「グリッド = 興味範囲そのもの」とし、静的・大きなセルでバケツ化する。本 ADR はこの発想を採り、
+純・静的セル（自セルのみ可視）ではなく、**自セル + 各軸隣接 26 セル（3×3×3 = 27 セル）**を
+可視範囲にする。不連続を観測者の位置ではなく 27 セル外殻へ押し出す。
 
 ---
 
 ## 決定
 
-### AoI を「静的セルグリッド + 3×3×3 隣接可視」で実装する（`dawn-simulation`）
+### AoI を「固定セル境界 + 3×3×3 隣接可視」で実装する（`dawn-sector`）
 
-各プレイヤーの興味範囲を、自船が属する**静的セル + その各軸隣接セル**とする。`Position` は 3 次元なので
-近傍は各軸 ±1 の **3×3×3 = 27 セル**（自セル含む / `aoi.rs::CellGrid::neighbors_of`）。
+各プレイヤーの興味範囲を、自船が属するセルと各軸 ±1 の隣接セル、合計 27 セルとする。
+セル座標は固定された空間分割であり、所属判定は絶対座標の床除算で決まる。
 
 ```
-セル         : 空間を固定境界で分割した静的グリッド（毎 Tick 再構築しない）。
-               セルサイズは「跨ぎが稀」かつ「27 セルが妥当な可視範囲」になる大きさに取る。
-所属判定     : 船位置 → セル座標は床除算 O(1)。各セルに在籍 ShipId をバケツ保持。
+セル境界     : 空間を固定境界で分割する。境界自体は Tick 間で変化しない。
+index lifecycle:
+               配信 frame ごとに、権威ある現在位置から CellGrid の bucket を全再構築する。
+               incremental update は行わず、index は永続化しない。
+所属判定     : 船位置 → セル座標を床除算 O(1) で求め、セルごとに ShipId を保持する。
 可視範囲     : プレイヤー自船セルを中心とする 3×3×3（27 セル）の在籍船。
 InitialState : 全 Ship ではなく、その 27 セルの船のみを送る。
-購読更新     : プレイヤーがセル境界を跨いだら 27 セル窓が 1 セルずれる → 新たに入る/出る
-               外周セルの船だけ Enter/Leave を送る（churn は外周殻のみ・有界）。
-配信フィルタ : 各 DomainEvent は、関与 Ship のセルが観測者の 27 セル近傍に含まれるときのみ送る。
+購読更新     : 前 frame の可視集合と現在の可視集合を比較し、Enter/Leave を ShipId 順に送る。
+配信順序     : Enter → Leave → filtered DomainEvent → MotionCorrection → PositionSnap。
+配信フィルタ : 関与 Ship が観測者の現在可視集合に含まれる DomainEvent のみを送る。
 ```
 
-設計上の制約（INV との整合）:
+### index は incremental ではなく frame ごとに再構築する
 
-- **配信レイヤーの関心事であり権威ある状態に触れない**。AoI は EventStore への Append 後にかかる
-  フィルタ（Event Workflow §4 の [7]）。サーバの真の状態・因果順序・決定性は不変
-  （ADR-0018 の TiDi 非破壊性と同じ立て付け）。可視判定が変わっても誰が誰を撃つか等は一切変わらない。
-- **セルバケツは派生・非永続**。船位置（派生・transient / INV-MOVE・INV-002）から導く。スナップショットに
-  入れず、復旧後は live の Tick で埋め直す。
-- **Sector 内に閉じる**。AoI は Sector ローカルの配信フィルタ。Sector 境界を越える移動は引き続き
-  Raft（ADR-0014 / INV-003）。
-- **数少ないサーバ側近傍探索はこの同じ静的セルを再利用する**。NPC オートロックや将来の AoE が
-  「半径内の船」を要するときは、対象セルの 27 セル候補を走査し距離で厳密フィルタする。専用の加速構造は
-  作らない（戦闘の射程判定は厳密距離のまま）。
+`AoiFrame::rebuild` は各 runtime の共通 Runtime Tick 出力を受けた後、`SimulationNode` の権威ある絶対位置から
+`CellGrid` を再構築する。この方針を採る理由は次の通りである。
+
+- CellGrid は配信専用の派生状態であり、snapshot や EventStore に含めない。
+- 移動、spawn、destroy、warp、Sector handoff の更新漏れを runtime ごとに管理する必要がない。
+- recovery 後も通常時と同じ `rebuild` を通るため、配信再開前に必ず権威状態と一致する。
+- bucket と近傍列挙を ShipId 順に整列するため、挿入履歴に依存せず決定的である。
+
+全再構築は「セル境界が静的」であることと矛盾しない。静的なのは空間の区切り方であり、
+その時点の在籍 Ship を表す bucket は frame ごとに作り直す。
+
+### 一つの deep AoI frame module が配信policyを所有する
+
+`dawn-sector::aoi_frame::AoiFrame` が以下を一括所有する。
+
+1. CellGrid の再構築
+2. observer ship の解決と 27 セル可視集合の計算
+3. player ごとの前回可視集合
+4. Enter/Leave 差分
+5. Event filtering
+6. owner MotionCorrection
+7. warp-arrival PositionSnap
+8. 上記メッセージの決定的な順序
+
+single-process runtime、clustered runtime、production Sector Node はこの同じ実装を使う。
+runtime adapter に残すのは Sector routing、Redirect、session retention、および crate dependency 方向を守る
+`AoiSink` adapter のみである。
+
+### 設計上の制約
+
+- **配信レイヤーの関心事であり権威ある状態に触れない**。AoI は EventStore append 後のフィルタである。
+- **セルbucketは派生・非永続**。復旧後は権威ある位置から再構築してから session をseedする。
+- **Sector 内に閉じる**。Sector 越えは引き続き Raft と Redirect/resume が担当する。
+- **27セル規則を全runtimeで共有する**。runtime独自のvisible-set policyを禁止する。
+- **戦闘の射程判定は厳密距離のまま**。AoI候補集合は権威判定を置き換えない。
 
 ### 計測で閾値の上昇を実証する
 
-「O(n²) を消した」ではなく「単一 Sector の容量が上がった」を示す。ベンチ（`benches/`）で
-**プレイヤー数 p を増やしながら**（AoI クエリ回数 ∝ p）AoI 有無の 1 Tick 処理時間・配信量を比較し、
-16ms 予算を満たす最大エンティティ数の上昇を記録する。
+「O(n²) を消した」ではなく「単一 Sector の容量が上がった」を示す。`--aoi-bench` で
+プレイヤー数を増やしながら AoI 有無の処理時間・配信量を比較する。
 
 ---
 
-## 単一密戦闘では空間索引は効かない（重要）
+## 単一密戦闘では空間索引は効かない
 
-AoI（静的セルでも真円でも）が効くのは**空間的に散らばった負荷**である。3000 人が一点に集まれば
-全員が同一セル / 同一 27 セル近傍に入り、相互作用は **O(n²) に戻る**。一点集中は空間分割では救えない。
-そこは EVE も諦めて TiDi に落とす ── Dawn でも同じく ADR-0018（局所 TiDi）に落ちる。
-**AoI は容量を上げて TiDi 閾値を押し上げるが、TiDi を不要にはしない。**
+AoI が効くのは空間的に散らばった負荷である。全員が同一 27 セル近傍に集まれば全員が相互可視となり、
+配信量は O(n²) に戻る。一点集中は ADR-0018 の局所 TiDi に落とす。
+**AoI は TiDi 閾値を押し上げるが、TiDi を不要にはしない。**
 
 ---
 
@@ -108,53 +122,47 @@ AoI（静的セルでも真円でも）が効くのは**空間的に散らばっ
 
 | 不変条件 | 関係 |
 |---|---|
-| INV-002 | セルバケツは派生・非永続。スナップショット round-trip / 末尾 catch-up に影響しない |
-| INV-MOVE | セル所属は位置から算出。位置は派生状態でありイベント化しない方針を維持 |
-| INV-005 | 所属判定・フィルタは論理 Tick 内の純粋計算。物理時刻不使用 |
-| INV-003 | AoI は Sector 内の配信フィルタ。Sector 越えは引き続き Raft（ADR-0014） |
-| ADR-0018 | 容量↑で TiDi / 入場制限の閾値を引き上げる。ただし一点集中は依然 TiDi に落ちる |
+| INV-002 | CellGrid は派生・非永続。snapshot round-trip / catch-up に含めない |
+| INV-MOVE | セル所属は権威ある現在位置から再計算し、位置をイベント化しない方針を維持 |
+| INV-005 | index構築とfilterは論理 Tick 出力後の決定的計算。物理時刻不使用 |
+| INV-003 | AoI は Sector 内の配信filter。Sector 越えは Raft + Redirect/resume |
+| ADR-0018 | 容量向上で TiDi 閾値を上げる。一点集中は依然 TiDi に落ちる |
 
 ---
 
 ## 代替案
 
-- **純・静的セル（自セルのみ可視・EVE 同様）**: 最小実装だが不連続が自分の位置で出る。3×3×3 にすると
-  不連続を 1.5 セル先へ押し出せて体感が明確に良く、コスト差も小さいため 3×3×3 を採る。
-- **真円 R の Bubble を毎 Tick 計算**: 連続だが O(p·n) を自ら作る。静的セルが避けている計算量を
-  わざわざ生むため却下（密戦闘では結局 TiDi に落ちる点も同じ）。
-- **exact 半径加速グリッドを別途用意（旧ドラフトの決定1）**: サーバ側に O(n²) 近傍探索が実在しないため
-  不要。数少ない近傍探索は本 ADR の静的セルを再利用すれば足りる。**撤回。**
-- **AoI を持たず帯域を増やす**: 柱①（大規模戦闘）と矛盾。10 万体規模で破綻するため却下。
-- **空間構造を新クレート化**: 現時点で `dawn-simulation` 内に収まる。DAG を増やす利得がないため見送る。
+- **incremental CellGrid**: 通常時の更新量は小さくなるが、spawn/destroy/warp/recovery/handoffの全経路で
+  bucket更新を正しく同期する必要がある。runtime間のpolicy重複とstale entryの危険を増やすため不採用。
+- **純・静的セル（自セルのみ可視）**: 最小実装だが不連続が自分の位置で出るため不採用。
+- **真円 R の Bubble を毎 Tick 全走査**: 連続だが O(p·n) を自ら作るため不採用。
+- **exact 半径加速グリッドを別途用意**: 常時必要な権威近傍探索がないため不採用。
+- **AoI を持たず帯域を増やす**: 大規模戦闘の目標と矛盾するため不採用。
+- **空間構造を新クレート化**: `dawn-sector` 内で全runtimeから共有でき、DAGを増やす利得がない。
 
 ---
 
-## スコープ外（本 ADR では決めない）
+## スコープ外
 
-- セルサイズの具体値・チューニング — 実装時にベンチで決める。
-- LoD（遠方/非戦闘の更新間引き）— ADR-0018 第2手として別途。
-- クライアント側予測・補正（Prediction / Reconciliation）— architecture.md §5-B の別トピック。
-- Sector の動的分割 — ADR-0018 の別タスク。
+- セルサイズの具体値・チューニング
+- LoD（遠方/非戦闘の更新間引き）
+- クライアント側 prediction / reconciliation
+- Sector の動的分割
 
 ---
 
 ## 実装チェックリスト
 
-- [x] `dawn-simulation` に静的セルグリッド（床除算でのセル所属 + セル→在籍 ShipId バケツ）を追加し、
-      所属判定・近傍列挙のテストを書く（決定性: 列挙は ShipId 順）— `aoi.rs`（`CellGrid`）+ 6 テスト（2026-06-15）
-- [ ] セルバケツが派生・非永続であることの確認（スナップショットに含めない / 復旧で埋め直すテスト）
-- [x] `ws_server` の `InitialState` を 3×3×3 スコープに変更し、27 セル内/外の購読テストを書く — `build_initial_state_json_for` + 2 node テスト、両 serve ループ配線（2026-06-15）
-- [x] セル境界跨ぎで外周帯のみ Enter/Leave が出る（churn 有界）配信を実装しテストする — `aoi::aoi_delta` + `AoiEnter`/`AoiLeave` 新メッセージ、client main.gd 配線（2026-06-15）
-- [x] `DomainEvent` 配信フィルタ（関与 Ship が観測者の 27 セル近傍に含まれるときのみ送る）を実装しテストする — `aoi::event_visible_to`（主船+副次船）+ テスト、per-session フィルタ（2026-06-15）
-- [ ] （副次）NPC オートロック / 将来 AoE が半径内探索を要する箇所を、同じ静的セルの 27 セル候補走査 +
-      厳密距離フィルタに載せ替え、全走査版と同一結果のテストを書く
-- [x] p を増やしながら AoI 有無の 1 Tick 時間・配信量を比較し閾値上昇を記録する — `--aoi-bench`
-      バイナリサブコマンド（benches 基盤が未整備で `aoi` がバイナリ内モジュールのため、Phase 1/3 と同じ
-      バイナリ内ベンチ慣習に合わせた）。n=1k→20k で naive scan 770µs→315ms に対し AoI query ~16ms、
-      速度比 3→19.5x、配信量 ~45x 削減（2026-06-15）
-- [x] docs 反映: architecture.md §5-B（設計→実装済みへ）/ event-catalog.md §3.10（AoI は配信フィルタで
-      新イベント無しの旨・AoiEnter/Leave は WebSocket 配信メッセージであり EventStore に Append されない）
+- [x] `dawn-sector::aoi::CellGrid` に床除算、27セル近傍、ShipId順列挙を実装
+- [x] InitialState を 27 セルスコープに限定
+- [x] Enter/Leave、Event filtering、MotionCorrection、warp PositionSnapを実装・テスト
+- [x] `AoiFrame`へindex lifecycle、observer resolution、visible-set memory、ordered deliveryを統合
+- [x] single-process、clustered simulation、production Sector Nodeを同じ`AoiFrame`へ移行
+- [x] index policyをframeごとの全再構築と明記し、incremental policyを不採用と記録
+- [x] admission/resume/recovery時に権威状態から再構築してseedするテストを追加
+- [x] runtime-path equivalenceを共有frame出力で検証
+- [x] `--aoi-bench`でAoI有無の処理時間・配信量を比較
 
 ---
 
-*提案: 2026-06-15。人間承認済み 2026-06-15（accepted）。README インデックス・roadmap §8C 反映済み。*
+*提案: 2026-06-15。人間承認済み 2026-06-15。AoI frame lifecycle 統合: 2026-08-01（Issue #225）。*
