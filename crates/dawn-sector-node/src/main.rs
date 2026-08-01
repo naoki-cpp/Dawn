@@ -25,8 +25,9 @@ use dawn_consensus::{RaftActor, RaftActorHandle, RaftActorMessage, RaftState, Tc
 use dawn_core::{NodeId, SectorBounds, SectorId};
 use dawn_event_store::FileEventStore;
 use dawn_replication::{
-    CatchUpConfig, CatchUpEvent, CatchUpManager, CatchUpStep, CatchUpTransport, ReplicaSnapshot,
-    ReplicationTransport, TcpReplicationTransport,
+    CatchUpConfig, CatchUpEvent, CatchUpFailureKind, CatchUpManager, CatchUpStep,
+    CatchUpTransport, CatchUpUnavailable, ReplicaSnapshot, ReplicationTransport,
+    TcpReplicationTransport,
 };
 use dawn_sector::node::SimulationNode;
 use dawn_sector::persistence::{CheckpointConfig, CheckpointScheduler, StateSnapshot};
@@ -45,6 +46,11 @@ const CATCH_UP_RETRY_TICKS: u32 = 10;
 const CATCH_UP_MAX_RETRIES: u32 = 5;
 const CATCH_UP_MAX_REQUESTS: u32 = 1024;
 const CATCH_UP_MAX_SNAPSHOT_BYTES: usize = 256 * 1024 * 1024;
+/// Prevent a peer flood from monopolising one simulation tick.
+const MAX_CATCH_UP_MESSAGES_PER_TICK: usize = 32;
+/// Retry transient terminal failures after 30 seconds. A later gossip batch
+/// observes the cleared failure cursor and starts a fresh bounded session.
+const CATCH_UP_FAILURE_RETRY_TICKS: u32 = 300;
 const PRODUCTION_GALAXY_PATH: &str = "data/galaxy.toml";
 
 #[tokio::main]
@@ -141,7 +147,10 @@ async fn main() -> anyhow::Result<()> {
         })?;
 
     for peer in &cfg.peers {
-        if let Err(e) = repl_transport.connect_peer(peer.repl_addr).await {
+        if let Err(e) = repl_transport
+            .connect_peer(SectorId(peer.node_id), peer.repl_addr)
+            .await
+        {
             eprintln!(
                 "[Node] warning: could not connect to peer replication at {}: {}",
                 peer.repl_addr, e
@@ -162,6 +171,21 @@ async fn main() -> anyhow::Result<()> {
             max_snapshot_bytes: CATCH_UP_MAX_SNAPSHOT_BYTES,
         },
     );
+    let mut catch_up_failure_retries = HashMap::new();
+    // Load and validate the durable snapshot once. Requests clone only the
+    // Arc-backed payload; they never synchronously re-read the file in the tick
+    // loop.
+    let mut replica_snapshot = match load_replica_snapshot(
+        &cfg.snapshot_path,
+        sector_id,
+        CATCH_UP_MAX_SNAPSHOT_BYTES,
+    ) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            eprintln!("[Repl] snapshot fallback unavailable at startup: {error}");
+            None
+        }
+    };
 
     // ── WebSocket server ──────────────────────────────────────────────────────
 
@@ -198,6 +222,7 @@ async fn main() -> anyhow::Result<()> {
     loop {
         interval.tick().await;
         let tick_started = std::time::Instant::now();
+        advance_catch_up_failure_retries(&mut catch_up, &mut catch_up_failure_retries);
 
         admission.advance_handshakes(&mut node, sector_id, AOI_CELL_SIZE);
 
@@ -209,28 +234,34 @@ async fn main() -> anyhow::Result<()> {
         // Ordinary gossip is ingested into foreign recovery replicas. A gap
         // immediately produces a bounded directed suffix request.
         while let Ok(batch) = repl_rx.try_recv() {
-            emit_catch_up_step(&repl_transport, catch_up.ingest_batch(batch));
+            emit_catch_up_step(
+                &repl_transport,
+                &mut catch_up_failure_retries,
+                catch_up.ingest_batch(batch),
+            );
         }
 
-        // Owners serve retained suffixes. If the requested prefix was compacted,
-        // the latest durable StateSnapshot is sent as opaque recovery data and
-        // the receiver resumes from snapshot.log_index.
-        while let Ok(message) = catch_up_rx.try_recv() {
-            let step =
-                catch_up.handle_message(
-                    message,
-                    node.event_store(),
-                    || match load_replica_snapshot(&cfg.snapshot_path, sector_id) {
-                        Ok(snapshot) => snapshot,
-                        Err(error) => {
-                            eprintln!("[Repl] snapshot fallback unavailable: {error}");
-                            None
-                        }
-                    },
-                );
-            emit_catch_up_step(&repl_transport, step);
+        // Bound owner/requester catch-up work per simulation tick. The cached
+        // Arc-backed snapshot makes retries cheap and avoids synchronous disk
+        // I/O on this path.
+        for _ in 0..MAX_CATCH_UP_MESSAGES_PER_TICK {
+            let Ok(message) = catch_up_rx.try_recv() else {
+                break;
+            };
+            let step = catch_up.handle_message(message, node.event_store(), || {
+                replica_snapshot.clone()
+            });
+            emit_catch_up_step(
+                &repl_transport,
+                &mut catch_up_failure_retries,
+                step,
+            );
         }
-        emit_catch_up_step(&repl_transport, catch_up.tick());
+        emit_catch_up_step(
+            &repl_transport,
+            &mut catch_up_failure_retries,
+            catch_up.tick(),
+        );
 
         runtime.run_frame(&mut node, &raft, &mut committed_rx);
 
@@ -246,6 +277,13 @@ async fn main() -> anyhow::Result<()> {
                     snapshot.tick.value(),
                     snapshot.log_index
                 );
+                match replica_snapshot_from_state(&snapshot, CATCH_UP_MAX_SNAPSHOT_BYTES) {
+                    Ok(cached) => replica_snapshot = Some(cached),
+                    Err(error) => {
+                        replica_snapshot = None;
+                        eprintln!("[Repl] new snapshot cannot be served for catch-up: {error}");
+                    }
+                }
             }
             Ok(None) => {}
             Err(e) => eprintln!("[Node] checkpoint failed, will retry next interval: {e}"),
@@ -262,7 +300,11 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-fn emit_catch_up_step<T: CatchUpTransport>(transport: &T, step: CatchUpStep) {
+fn emit_catch_up_step<T: CatchUpTransport>(
+    transport: &T,
+    failure_retries: &mut HashMap<SectorId, u32>,
+    step: CatchUpStep,
+) {
     for message in step.outbound {
         transport.send_catch_up(message);
     }
@@ -272,9 +314,12 @@ fn emit_catch_up_step<T: CatchUpTransport>(transport: &T, step: CatchUpStep) {
                 sector_id,
                 applied,
                 next_index,
-            } => eprintln!(
-                "[Repl] sector={sector_id:?} +{applied} -> next_index={next_index}"
-            ),
+            } => {
+                failure_retries.remove(&sector_id);
+                eprintln!(
+                    "[Repl] sector={sector_id:?} +{applied} -> next_index={next_index}"
+                );
+            }
             CatchUpEvent::RequestIssued {
                 owner_sector_id,
                 from_index,
@@ -287,31 +332,79 @@ fn emit_catch_up_step<T: CatchUpTransport>(transport: &T, step: CatchUpStep) {
                 sector_id,
                 log_index,
                 bytes,
-            } => eprintln!(
-                "[Repl] sector={sector_id:?} installed recovery snapshot log_index={log_index} bytes={bytes}"
-            ),
+            } => {
+                failure_retries.remove(&sector_id);
+                eprintln!(
+                    "[Repl] sector={sector_id:?} installed recovery snapshot log_index={log_index} bytes={bytes}"
+                );
+            }
             CatchUpEvent::Completed {
                 sector_id,
                 next_index,
-            } => eprintln!(
-                "[Repl] sector={sector_id:?} catch-up complete next_index={next_index}"
-            ),
+            } => {
+                failure_retries.remove(&sector_id);
+                eprintln!(
+                    "[Repl] sector={sector_id:?} catch-up complete next_index={next_index}"
+                );
+            }
             CatchUpEvent::Failed(failure) => {
+                if is_transient_catch_up_failure(failure.kind) {
+                    failure_retries.insert(failure.sector_id, CATCH_UP_FAILURE_RETRY_TICKS);
+                }
                 eprintln!("[Repl] catch-up failed: {failure:?}")
             }
         }
     }
 }
 
+fn is_transient_catch_up_failure(kind: CatchUpFailureKind) -> bool {
+    matches!(
+        kind,
+        CatchUpFailureKind::RetryExhausted
+            | CatchUpFailureKind::Remote(CatchUpUnavailable::SnapshotUnavailable)
+            | CatchUpFailureKind::Remote(CatchUpUnavailable::RetainedSuffixUnavailable)
+    )
+}
+
+fn advance_catch_up_failure_retries(
+    catch_up: &mut CatchUpManager,
+    failure_retries: &mut HashMap<SectorId, u32>,
+) {
+    let sectors: Vec<_> = failure_retries.keys().copied().collect();
+    for sector_id in sectors {
+        let Some(remaining) = failure_retries.get_mut(&sector_id) else {
+            continue;
+        };
+        if *remaining > 1 {
+            *remaining -= 1;
+            continue;
+        }
+        failure_retries.remove(&sector_id);
+        catch_up.reset_failure(sector_id);
+        eprintln!(
+            "[Repl] sector={sector_id:?} transient failure cooldown expired; next gossip may restart catch-up"
+        );
+    }
+}
+
 fn load_replica_snapshot(
     path: impl AsRef<Path>,
     expected_sector_id: SectorId,
+    max_bytes: usize,
 ) -> anyhow::Result<Option<ReplicaSnapshot>> {
     let path = path.as_ref();
     if !path.exists() {
         return Ok(None);
     }
-    let snapshot = StateSnapshot::load(path)?;
+    let file_len = usize::try_from(std::fs::metadata(path)?.len())
+        .map_err(|_| anyhow::anyhow!("snapshot length does not fit usize"))?;
+    if file_len > max_bytes {
+        anyhow::bail!("snapshot is {file_len} bytes, limit is {max_bytes}");
+    }
+
+    let bytes = std::fs::read(path)?;
+    let snapshot: StateSnapshot = postcard::from_bytes(&bytes)
+        .map_err(|error| anyhow::anyhow!("cannot decode current snapshot: {error}"))?;
     if snapshot.sector_id != expected_sector_id {
         anyhow::bail!(
             "snapshot sector {:?} does not match local sector {:?}",
@@ -319,12 +412,30 @@ fn load_replica_snapshot(
             expected_sector_id
         );
     }
-    let bytes = std::fs::read(path)?;
     Ok(Some(ReplicaSnapshot::new(
         snapshot.sector_id,
         snapshot.log_index,
         bytes,
     )))
+}
+
+fn replica_snapshot_from_state(
+    snapshot: &StateSnapshot,
+    max_bytes: usize,
+) -> anyhow::Result<ReplicaSnapshot> {
+    let bytes = postcard::to_stdvec(snapshot)
+        .map_err(|error| anyhow::anyhow!("cannot encode current snapshot: {error}"))?;
+    if bytes.len() > max_bytes {
+        anyhow::bail!(
+            "snapshot is {} bytes, limit is {max_bytes}",
+            bytes.len()
+        );
+    }
+    Ok(ReplicaSnapshot::new(
+        snapshot.sector_id,
+        snapshot.log_index,
+        bytes,
+    ))
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
