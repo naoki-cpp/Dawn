@@ -1,9 +1,11 @@
 name: Issue 238 source export
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/typed-world-session-outcomes
+      - main
+    paths:
+      - .github/workflows/issue-238-export.yml
 
 permissions:
   contents: read
