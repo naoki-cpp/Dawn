@@ -32,7 +32,8 @@ pub struct OwnedShipRow {
 impl OwnedShipRow {
     pub(crate) fn wrap(row: CoreOwnedShipRow) -> Gd<Self> {
         Gd::from_init_fn(|_base| Self {
-            ship_id: row.ship_id as i64,
+            ship_id: i64::try_from(row.ship_id)
+                .expect("PlayerLoadout range validation covers owned ship IDs"),
             ship_type_id: row.ship_type_id.map(i64::from).unwrap_or(-1),
             ship_type_name: row.ship_type_name.as_deref().unwrap_or_default().into(),
             docked_station_id: row.docked_station_id.map(i64::from).unwrap_or(-1),
