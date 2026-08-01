@@ -467,16 +467,15 @@ mod tests {
     use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, Tick};
 
     fn node_with_modules() -> SimulationNode {
-        use crate::{modules, ship_types};
         let mut node = SimulationNode::new(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         );
-        for def in modules::all_modules() {
+        for def in crate::game_data::test_catalog().modules().to_vec() {
             node.register_module(def);
         }
-        for def in ship_types::all_ship_types() {
+        for def in crate::game_data::test_catalog().ship_types().to_vec() {
             node.register_ship_type(def);
         }
         node
@@ -640,8 +639,8 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             InMemoryEventStore::new(),
             &snap,
-            &crate::modules::all_modules(),
-            &crate::ship_types::all_ship_types(),
+            crate::game_data::test_catalog().modules(),
+            crate::game_data::test_catalog().ship_types(),
         );
         assert_eq!(
             node2.get_ship_anchor(ship),

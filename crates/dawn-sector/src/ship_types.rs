@@ -3,7 +3,7 @@
 //! Balance values are authoritative in `data/ship_types.toml` and are loaded by
 //! [`crate::game_data::GameDataCatalog`].
 
-use dawn_core::ship_type::{ShipTypeDefinition, ShipTypeId};
+use dawn_core::ship_type::ShipTypeId;
 
 pub const SHIP_TYPE_NPC_FRIGATE: ShipTypeId = ShipTypeId(1);
 pub const SHIP_TYPE_NPC_DESTROYER: ShipTypeId = ShipTypeId(3);
@@ -21,19 +21,10 @@ pub(crate) const REQUIRED_SHIP_TYPE_IDS: &[ShipTypeId] = &[
     SHIP_TYPE_MAGPIE,
 ];
 
-/// Compatibility accessor for callers that need the repository's production
-/// definitions in tests or tooling. Runtime startup should load one
-/// [`crate::game_data::GameDataCatalog`] and register it as a unit.
-pub fn all_ship_types() -> Vec<ShipTypeDefinition> {
-    crate::game_data::repository_catalog()
-        .unwrap_or_else(|error| panic!("failed to load repository game-data catalog: {error}"))
-        .ship_types()
-        .to_vec()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game_data::test_catalog;
 
     #[test]
     fn all_required_ship_type_ids_are_unique() {
@@ -44,8 +35,9 @@ mod tests {
 
     #[test]
     fn npc_frigate_has_positive_mass_and_inertia() {
-        let npc = all_ship_types()
-            .into_iter()
+        let npc = test_catalog()
+            .ship_types()
+            .iter()
             .find(|definition| definition.id == SHIP_TYPE_NPC_FRIGATE)
             .expect("NPC Frigate");
         assert!(npc.base_stats.mass > 0.0);
@@ -54,8 +46,8 @@ mod tests {
 
     #[test]
     fn only_the_magpie_is_buildable() {
-        let ship_types = all_ship_types();
-        let buildable: Vec<_> = ship_types
+        let buildable: Vec<_> = test_catalog()
+            .ship_types()
             .iter()
             .filter(|definition| definition.buildable)
             .map(|definition| definition.id)
@@ -65,8 +57,9 @@ mod tests {
 
     #[test]
     fn magpie_has_three_layer_hp() {
-        let magpie = all_ship_types()
-            .into_iter()
+        let magpie = test_catalog()
+            .ship_types()
+            .iter()
             .find(|definition| definition.id == SHIP_TYPE_MAGPIE)
             .expect("Magpie");
         assert!(magpie.base_stats.max_shield > 0.0);

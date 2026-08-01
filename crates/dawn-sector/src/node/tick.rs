@@ -292,7 +292,7 @@ impl<S: EventStore> SimulationNode<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{modules, ship_types};
+
     use dawn_core::{
         commands::TransitCommand, NodeId, Position, SectorBounds, SectorId, Tick, Velocity,
     };
@@ -346,10 +346,10 @@ mod tests {
     #[test]
     fn in_transit_ship_keeps_snapshot_state_across_ticks() {
         let mut node = mem_node();
-        for def in modules::all_modules() {
+        for def in crate::game_data::test_catalog().modules().to_vec() {
             node.register_module(def);
         }
-        for def in ship_types::all_ship_types() {
+        for def in crate::game_data::test_catalog().ship_types().to_vec() {
             node.register_ship_type(def);
         }
         let ship_id = node.spawn_ship(
@@ -462,10 +462,10 @@ mod tests {
     #[test]
     fn ship_destroyed_immediately_credits_scrap_metal_to_the_killer_inventory() {
         let mut node = mem_node();
-        for def in modules::all_modules() {
+        for def in crate::game_data::test_catalog().modules().to_vec() {
             node.register_module(def);
         }
-        for def in ship_types::all_ship_types() {
+        for def in crate::game_data::test_catalog().ship_types().to_vec() {
             node.register_ship_type(def);
         }
 
