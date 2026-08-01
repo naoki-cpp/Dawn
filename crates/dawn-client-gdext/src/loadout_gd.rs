@@ -35,7 +35,7 @@ fn wire_module_kind(kind: dawn_core::ModuleKind) -> dawn_client_core::ModuleKind
 /// types are foreign to this crate, so the orphan rule forbids it anyway,
 /// and this adapter-layer conversion is exactly what `dawn-client-gdext` is
 /// for.
-fn wire_to_loadout_msg(wire: dawn_wire::PlayerLoadoutWire) -> PlayerLoadoutMsg {
+pub(crate) fn wire_to_loadout_msg(wire: dawn_wire::PlayerLoadoutWire) -> PlayerLoadoutMsg {
     PlayerLoadoutMsg {
         tick: wire.tick,
         modules: wire.modules.into_iter().map(wire_to_module_row).collect(),
@@ -120,6 +120,16 @@ pub struct PlayerLoadout {
 impl PlayerLoadout {
     pub(crate) fn core_mut(&mut self) -> Option<&mut PlayerLoadoutMsg> {
         self.loadout.as_mut()
+    }
+
+    pub(crate) fn replace_wire(&mut self, wire: dawn_wire::PlayerLoadoutWire) {
+        self.loadout = Some(wire_to_loadout_msg(wire));
+    }
+
+    pub(crate) fn apply_activation(&mut self, module_id: u32, active: bool, forced_reason: String) {
+        if let Some(loadout) = &mut self.loadout {
+            loadout.apply_module_activation(module_id, active, forced_reason);
+        }
     }
 
     #[func]

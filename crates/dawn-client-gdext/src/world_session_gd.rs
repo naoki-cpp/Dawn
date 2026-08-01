@@ -1,13 +1,13 @@
-use dawn_client_core::WorldSessionState;
+use dawn_client_core::{WorldSessionEffect, WorldSessionState, WorldSessionUpdate};
 use godot::prelude::*;
 
 use crate::json_variant::Dict;
+
 use crate::loadout_gd::PlayerLoadout;
 use crate::session_record_gd::{
     BuildableShipType, CapacitorStatus, CelestialBodyRecord, DestructionOutcome, GateRecord,
     ShipHealth, StationRecord,
 };
-use crate::ship_gd::ship_input_from_dict;
 
 /// Godot adapter for the pure `dawn-client-core::WorldSessionState` model.
 ///
@@ -17,6 +17,20 @@ use crate::ship_gd::ship_input_from_dict;
 #[class(init, base=RefCounted)]
 pub struct WorldSession {
     state: WorldSessionState,
+}
+
+impl WorldSession {
+    pub(crate) fn apply_update(
+        &mut self,
+        update: WorldSessionUpdate,
+        loadout: Option<&mut dawn_client_core::PlayerLoadoutMsg>,
+    ) -> WorldSessionEffect {
+        self.state.apply_update(update, loadout)
+    }
+
+    pub(crate) fn station_name(&self, station_id: i64) -> String {
+        self.state.station_name(station_id)
+    }
 }
 
 #[godot_api]
@@ -61,27 +75,6 @@ impl WorldSession {
         self.state.player_lock_target()
     }
 
-    /// Ingests the InitialState navigation portion. Consumes the `Dictionary`
-    /// `ServerMessageDecoder` already produced from the decoded
-    /// `InitialStateWire` directly (`navigation_gd::navigation_input_from_dict`),
-    /// avoiding an extra `JSON.stringify`/`from_str` round trip at the
-    /// GDScript-to-Rust boundary just to rebuild a `NavigationInput` that
-    /// same-process Dictionary already carries.
-    #[func]
-    fn ingest_navigation(&mut self, state: Dict) {
-        self.state
-            .ingest_navigation(crate::navigation_gd::navigation_input_from_dict(&state));
-    }
-
-    /// Registers metadata for a ship. The corresponding Node3D is owned by
-    /// `main.gd`, not by this state object. Returns whether this ship became
-    /// the player's own -- the caller's cue to attach the camera to it.
-    #[func]
-    fn register_ship(&mut self, ship_id: i64, ship: Dict, connection_ship_id: i64) -> bool {
-        let input = ship_input_from_dict(&ship);
-        self.state.register_ship(ship_id, input, connection_ship_id)
-    }
-
     /// Returns whether the ship was there to remove -- the caller's cue to
     /// free its Node3D.
     #[func]
@@ -94,13 +87,8 @@ impl WorldSession {
         DestructionOutcome::wrap(self.state.destroy_ship(ship_id))
     }
 
-    /// Applies a DamageTaken/RepairApplied health update. Takes plain typed
-    /// args rather than JSON: the caller (`main.gd`) already has these
-    /// values unpacked in the event `Dictionary` `ServerMessageDecoder`
-    /// produced from the decoded `EventWire` -- there is no JSON on either
-    /// side of this call, so building one here would only add a lossy
-    /// stringify/parse round trip (JSON can't represent `NaN`/`Infinity`,
-    /// which `f32`/`f64` can).
+    /// Applies a DamageTaken/RepairApplied health update for optimistic or
+    /// test-only callers. Production server outcomes use `apply_update` above.
     ///
     /// Returns nothing: the caller passed `ship_id` in and still has it for
     /// its own hit-flash feedback.

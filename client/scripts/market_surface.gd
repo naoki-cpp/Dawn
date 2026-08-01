@@ -145,10 +145,10 @@ func set_cargo(cargo: Array) -> void:
 	_refresh_item_options()
 
 
-func apply_snapshot(snapshot: Dictionary) -> void:
-	_balance_label.text = "Currency: %d" % (snapshot.get("balance", 0) as int)
-	_notice_label.text = snapshot.get("notice", "") as String
-	_orders = snapshot.get("orders", []) as Array
+func apply_snapshot(snapshot: MarketSnapshot) -> void:
+	_balance_label.text = "Currency: %d" % snapshot.balance
+	_notice_label.text = snapshot.notice
+	_orders = snapshot.orders
 	_render_orders()
 
 
@@ -232,29 +232,29 @@ func _render_orders() -> void:
 	for child: Node in _orders_list.get_children():
 		child.queue_free()
 	for order_entry: Variant in _orders:
-		var order: Dictionary = order_entry as Dictionary
+		var order: MarketOrder = order_entry as MarketOrder
 		var row := HBoxContainer.new()
 		row.custom_minimum_size = Vector2(0.0, 24.0)
 		var text := "%s %s x%d @ %d" % [
-			order.get("side", "?") as String,
-			_order_item_name(order as Dictionary),
-			order.get("quantity", 0) as int,
-			order.get("price", 0) as int,
+			order.side,
+			_order_item_name(order),
+			order.quantity,
+			order.price,
 		]
 		var label := HudManager.make_hud_label(11, Color(0.82, 0.87, 0.94))
 		label.text = text
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(label)
-		if order.get("is_own", false) as bool:
+		if order.is_own:
 			var cancel := Button.new()
 			cancel.text = "Cancel"
-			cancel.pressed.connect(_cancel_order.bind(order.get("order_id", -1) as int))
+			cancel.pressed.connect(_cancel_order.bind(order.order_id))
 			row.add_child(cancel)
 		_orders_list.add_child(row)
 
 
-func _order_item_name(order: Dictionary) -> String:
-	var item_id: ItemIdentity = order.get("item_id", null) as ItemIdentity
+func _order_item_name(order: MarketOrder) -> String:
+	var item_id: ItemIdentity = order.item_id
 	if item_id == null:
 		return "Unknown item"
 	if item_id.is_scrap_metal():

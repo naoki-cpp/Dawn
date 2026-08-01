@@ -21,7 +21,7 @@ pub(crate) enum ClientOutcome {
         ship_id: u64,
     },
     Event(ClientEventOutcome),
-    PlayerLoadout,
+    PlayerLoadout(PlayerLoadoutWire),
     InitialState(InitialStateWire),
     ModuleActivated {
         ship_id: u64,
@@ -94,7 +94,7 @@ impl ClientOutcome {
                 reason,
             },
             ServerMessage::Event(event) => Self::Event(ClientEventOutcome::Domain(event)),
-            ServerMessage::PlayerLoadout(_) => Self::PlayerLoadout,
+            ServerMessage::PlayerLoadout(loadout) => Self::PlayerLoadout(loadout),
             ServerMessage::InitialState(state) => Self::InitialState(state),
             ServerMessage::AoiEnter(ship) => Self::Event(ClientEventOutcome::AoiEnter(ship)),
             ServerMessage::AoiLeave { ship_id } => {
@@ -354,7 +354,7 @@ mod tests {
         ));
         assert!(matches!(
             decode(ServerMessage::PlayerLoadout(loadout())),
-            ClientOutcome::PlayerLoadout
+            ClientOutcome::PlayerLoadout(_)
         ));
         assert!(matches!(
             decode(ServerMessage::InitialState(InitialStateWire {

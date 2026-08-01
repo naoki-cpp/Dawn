@@ -52,11 +52,7 @@ impl ShipPresentation {
         Gd::from_init_fn(|_base| Self {
             ship_id: godot_i64(ship.ship_id),
             ship_type_name: ship.ship_type_name.as_str().into(),
-            position: PackedFloat64Array::from([
-                ship.position.x,
-                ship.position.y,
-                ship.position.z,
-            ]),
+            position: PackedFloat64Array::from([ship.position.x, ship.position.y, ship.position.z]),
             velocity: PackedFloat64Array::from([
                 ship.velocity.dx,
                 ship.velocity.dy,

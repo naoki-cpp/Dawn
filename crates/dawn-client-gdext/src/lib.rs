@@ -1,6 +1,6 @@
 //! GDExtension binding exposing `dawn-client-core` to the Godot client
-//! (ADR-0040). This crate adapts Godot's Variant/GString/Dictionary types and
-//! projects `dawn-wire` messages into typed client outcomes; domain state and
+//! (ADR-0040). This crate converts `dawn-wire` messages into typed client
+//! updates and Godot presentation records; domain state and
 //! rules remain in the Godot-independent client/core crates. Raw frame bytes
 //! are retained only where an existing typed decoder consumes them directly.
 
@@ -14,11 +14,10 @@ mod item_row_gd;
 mod json_variant;
 mod loadout_gd;
 mod module_row_gd;
-mod navigation_gd;
 mod owned_ship_row_gd;
+mod presentation_gd;
 mod server_message_gd;
 mod session_record_gd;
-mod ship_gd;
 mod ship_motion_gd;
 mod world_session_gd;
 mod world_space_gd;
@@ -30,6 +29,10 @@ pub use item_row_gd::ItemRow;
 pub use loadout_gd::PlayerLoadout;
 pub use module_row_gd::ModuleRow;
 pub use owned_ship_row_gd::OwnedShipRow;
+pub use presentation_gd::{
+    InitialStatePresentation, MarketOrder, MarketSnapshot, MotionCorrectionPresentation,
+    ShipPresentation,
+};
 pub use server_message_gd::{ServerEventOutcome, ServerMessageDecoder, ServerMessageOutcome};
 pub use ship_motion_gd::ShipMotion;
 pub use world_session_gd::WorldSession;

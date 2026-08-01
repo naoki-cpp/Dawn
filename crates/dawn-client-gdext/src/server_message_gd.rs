@@ -1,18 +1,20 @@
 use crate::client_outcome::{ClientEventOutcome, ClientOutcome};
-use crate::item_identity_gd::ItemIdentity;
-use crate::json_variant::Dict;
-use dawn_core::ItemId;
-use dawn_wire::{
-    AbsPosWire, EventWire, InitialStateWire, ItemWire, MarketOrderWire, MarketSnapshotWire,
-    ServerMessage, ShipStateWire, VelWire,
+use crate::loadout_gd::PlayerLoadout;
+use crate::presentation_gd::{
+    godot_i64, position_components, velocity_components, InitialStatePresentation, MarketSnapshot,
+    MotionCorrectionPresentation, ShipPresentation,
 };
+use crate::session_record_gd::DestructionOutcome;
+use crate::world_session_gd::WorldSession;
+use dawn_client_core::{
+    BuildableShipTypeInput, CelestialBodyInput, GateInput, NavigationInput, PositionInput,
+    ShipInput, ShipRegistration, StationInput, SystemNameInput, WorldSessionEffect,
+    WorldSessionUpdate,
+};
+use dawn_wire::{EventWire, InitialStateWire, ServerMessage, ShipStateWire};
 use godot::prelude::*;
 
 /// Decodes one binary WebSocket frame into a typed client outcome.
-///
-/// The decoder no longer builds a compatibility Dictionary or a string
-/// `"type"` tag. The returned outcome owns the Rust-side projection and
-/// dispatches it to a fixed GDScript receiver method.
 #[derive(GodotClass)]
 #[class(init, base=RefCounted)]
 pub struct ServerMessageDecoder {}
@@ -22,10 +24,7 @@ impl ServerMessageDecoder {
     #[func]
     fn decode(&self, bytes: PackedByteArray) -> Option<Gd<ServerMessageOutcome>> {
         match ClientOutcome::decode(bytes.as_slice()) {
-            Ok(outcome) => Some(Gd::from_object(ServerMessageOutcome {
-                outcome,
-                raw_bytes: bytes,
-            })),
+            Ok(outcome) => Some(Gd::from_object(ServerMessageOutcome { outcome })),
             Err(error) => {
                 godot_error!("ServerMessageDecoder.decode: {error}");
                 None
@@ -33,11 +32,43 @@ impl ServerMessageDecoder {
         }
     }
 
-    /// Debug-build fixture used by GdUnit to exercise the actual
-    /// raw-frame -> typed-outcome -> dispatch boundary.
+    /// Debug-build fixture used by GdUnit to exercise the real binary path.
     #[cfg(debug_assertions)]
     #[func]
     fn test_outcome(&self, kind: GString) -> Option<Gd<ServerMessageOutcome>> {
+        use dawn_core::CelestialBodyKind;
+        use dawn_wire::{
+            AbsPosWire, BuildableShipTypeWire, CelestialBodyWire, JumpGateWire, MarketOrderWire,
+            MarketSnapshotWire, StationWire, SystemWire, VelWire,
+        };
+
+        let position = AbsPosWire {
+            x: 5.0 * 149_597_870_700.0 + 10.0,
+            y: 20.0,
+            z: 30.0,
+        };
+        let ship = ShipStateWire {
+            ship_id: 11,
+            ship_type_name: "Magpie".to_owned(),
+            position,
+            velocity: VelWire {
+                dx: 4.0,
+                dy: 5.0,
+                dz: 6.0,
+            },
+            max_speed: 500.0,
+            mass: 10_000.0,
+            inertia_modifier: 0.3,
+            max_shield: 100.0,
+            max_armor: 90.0,
+            max_hull: 80.0,
+            current_shield: 70.0,
+            current_armor: 60.0,
+            current_hull: 50.0,
+            cap_max: 40.0,
+            cap_recharge_per_tick: 1.0,
+            is_player: true,
+        };
         let message = match kind.to_string().as_str() {
             "Welcome" => ServerMessage::Welcome {
                 player_id: 5,
@@ -50,20 +81,43 @@ impl ServerMessageDecoder {
             },
             "AoiLeave" => ServerMessage::AoiLeave { ship_id: 19 },
             "InitialState" => ServerMessage::InitialState(InitialStateWire {
-                ships: Vec::new(),
+                ships: vec![ship],
                 system_name: "Alpha".to_owned(),
-                systems: Vec::new(),
-                jump_gates: Vec::new(),
-                stations: Vec::new(),
-                celestial_bodies: Vec::new(),
-                buildable_ship_types: Vec::new(),
+                systems: vec![SystemWire {
+                    id: 2,
+                    name: "Beta".to_owned(),
+                }],
+                jump_gates: vec![JumpGateWire {
+                    gate_id: 7,
+                    position,
+                    activation_radius: 1000.0,
+                    to_system_name: "Beta".to_owned(),
+                }],
+                stations: vec![StationWire {
+                    station_id: 5,
+                    name: "Forge Station".to_owned(),
+                    position,
+                    docking_radius: 5000.0,
+                }],
+                celestial_bodies: vec![CelestialBodyWire {
+                    id: 9,
+                    kind: CelestialBodyKind::Star,
+                    name: "Sun".to_owned(),
+                    position,
+                    radius: 42.0,
+                    spectral_type: 0.5,
+                }],
+                buildable_ship_types: vec![BuildableShipTypeWire {
+                    ship_type_id: 7,
+                    name: "Magpie".to_owned(),
+                }],
             }),
             "MarketSnapshot" => ServerMessage::MarketSnapshot(MarketSnapshotWire {
                 balance: 250,
                 orders: vec![
                     MarketOrderWire {
                         order_id: 1,
-                        item_id: ItemWire::ScrapMetal,
+                        item_id: dawn_wire::ItemWire::ScrapMetal,
                         side: "Ask".to_owned(),
                         price: 10,
                         quantity: 2,
@@ -71,7 +125,7 @@ impl ServerMessageDecoder {
                     },
                     MarketOrderWire {
                         order_id: 2,
-                        item_id: ItemWire::Module { module_id: 3 },
+                        item_id: dawn_wire::ItemWire::Module { module_id: 3 },
                         side: "Bid".to_owned(),
                         price: 20,
                         quantity: 1,
@@ -79,7 +133,7 @@ impl ServerMessageDecoder {
                     },
                     MarketOrderWire {
                         order_id: 3,
-                        item_id: ItemWire::PackagedShip { ship_type_id: 7 },
+                        item_id: dawn_wire::ItemWire::PackagedShip { ship_type_id: 7 },
                         side: "Ask".to_owned(),
                         price: 30,
                         quantity: 1,
@@ -94,25 +148,29 @@ impl ServerMessageDecoder {
     }
 }
 
-/// One typed top-level server outcome.
+/// One typed top-level server outcome. Applying it mutates the Rust-owned
+/// session/loadout before any presentation callback runs.
 #[derive(GodotClass)]
 #[class(no_init)]
 pub struct ServerMessageOutcome {
     outcome: ClientOutcome,
-    raw_bytes: PackedByteArray,
 }
 
 #[godot_api]
 impl ServerMessageOutcome {
-    /// Dispatch to `connection.gd` without exposing wire variant names or
-    /// field-key matching to GDScript.
     #[func]
-    fn dispatch(&self, mut target: Gd<Object>) -> bool {
-        if !ensure_handler(&mut target, server_outcome_handler(&self.outcome)) {
-            return false;
-        }
+    fn dispatch(
+        &self,
+        mut target: Gd<Object>,
+        mut session: Gd<WorldSession>,
+        mut loadout: Gd<PlayerLoadout>,
+        connection_ship_id: i64,
+    ) -> bool {
         match &self.outcome {
             ClientOutcome::Welcome { player_id, ship_id } => {
+                if !ensure_handler(&mut target, "_accept_welcome") {
+                    return false;
+                }
                 target.call(
                     "_accept_welcome",
                     vslice![godot_i64(*player_id), godot_i64(*ship_id)],
@@ -123,24 +181,54 @@ impl ServerMessageOutcome {
                 player_id,
                 ship_id,
             } => {
+                if !ensure_handler(&mut target, "_accept_redirect") {
+                    return false;
+                }
                 target.call(
                     "_accept_redirect",
                     vslice![ws_addr.as_str(), godot_i64(*player_id), godot_i64(*ship_id)],
                 );
             }
             ClientOutcome::Event(event) => {
-                let event = Gd::from_object(ServerEventOutcome {
-                    outcome: event.clone(),
-                });
-                target.call("_accept_event", vslice![event]);
+                if !ensure_handler(&mut target, "_accept_event") {
+                    return false;
+                }
+                let presentation =
+                    apply_event(&mut session, &mut loadout, event, connection_ship_id);
+                target.call(
+                    "_accept_event",
+                    vslice![Gd::from_object(ServerEventOutcome { presentation })],
+                );
             }
-            ClientOutcome::PlayerLoadout => {
-                target.call("_accept_player_loadout", vslice![self.raw_bytes.clone()]);
+            ClientOutcome::PlayerLoadout(wire) => {
+                if !ensure_handler(&mut target, "_accept_player_loadout") {
+                    return false;
+                }
+                {
+                    let mut loadout = loadout.bind_mut();
+                    loadout.replace_wire(wire.clone());
+                }
+                let update = WorldSessionUpdate::PlayerLoadout {
+                    active_ship_id: wire.active_ship_id.map(godot_i64),
+                    docked_station_id: wire.docked_station_id.map(i64::from),
+                    docked_station_name: wire.docked_station_name.clone(),
+                    tick: godot_i64(wire.tick),
+                };
+                apply_update(&mut session, &mut loadout, update);
+                target.call("_accept_player_loadout", vslice![]);
             }
             ClientOutcome::InitialState(state) => {
+                if !ensure_handler(&mut target, "_accept_initial_state") {
+                    return false;
+                }
+                apply_update(
+                    &mut session,
+                    &mut loadout,
+                    initial_state_update(state, connection_ship_id),
+                );
                 target.call(
                     "_accept_initial_state",
-                    vslice![initial_state_to_dict(state)],
+                    vslice![InitialStatePresentation::wrap(&state.ships)],
                 );
             }
             ClientOutcome::ModuleActivated {
@@ -148,6 +236,12 @@ impl ServerMessageOutcome {
                 module_id,
                 slot,
             } => {
+                if !ensure_handler(&mut target, "_accept_module_activated") {
+                    return false;
+                }
+                loadout
+                    .bind_mut()
+                    .apply_activation(*module_id, true, String::new());
                 target.call(
                     "_accept_module_activated",
                     vslice![godot_i64(*ship_id), i64::from(*module_id), slot.as_str()],
@@ -159,13 +253,20 @@ impl ServerMessageOutcome {
                 slot,
                 reason,
             } => {
+                if !ensure_handler(&mut target, "_accept_module_deactivated") {
+                    return false;
+                }
+                let reason = reason.as_deref().unwrap_or("");
+                loadout
+                    .bind_mut()
+                    .apply_activation(*module_id, false, reason.to_owned());
                 target.call(
                     "_accept_module_deactivated",
                     vslice![
                         godot_i64(*ship_id),
                         i64::from(*module_id),
                         slot.as_str(),
-                        reason.as_deref().unwrap_or("")
+                        reason
                     ],
                 );
             }
@@ -175,17 +276,23 @@ impl ServerMessageOutcome {
                 velocity,
                 tick,
             } => {
-                let mut payload = Dict::new();
-                payload.set("ship_id", godot_i64(*ship_id));
-                payload.set("position", &position_to_dict(position));
-                payload.set("velocity", &velocity_to_dict(velocity));
-                payload.set("tick", godot_i64(*tick));
-                target.call("_accept_motion_correction", vslice![payload]);
+                if !ensure_handler(&mut target, "_accept_motion_correction") {
+                    return false;
+                }
+                target.call(
+                    "_accept_motion_correction",
+                    vslice![MotionCorrectionPresentation::wrap(
+                        *ship_id, *position, *velocity, *tick
+                    )],
+                );
             }
             ClientOutcome::MarketSnapshot(snapshot) => {
+                if !ensure_handler(&mut target, "_accept_market_snapshot") {
+                    return false;
+                }
                 target.call(
                     "_accept_market_snapshot",
-                    vslice![market_snapshot_to_dict(snapshot)],
+                    vslice![MarketSnapshot::wrap(snapshot)],
                 );
             }
         }
@@ -193,87 +300,635 @@ impl ServerMessageOutcome {
     }
 }
 
-/// One typed world/event outcome.
+enum EventPresentation {
+    ShipSpawned {
+        ship_id: i64,
+        position: PackedFloat64Array,
+        registered: bool,
+        became_player: bool,
+    },
+    VelocityChanged {
+        ship_id: i64,
+        velocity: PackedFloat64Array,
+        tick: i64,
+    },
+    ShipDespawned {
+        ship_id: i64,
+        removed: bool,
+    },
+    ShipDocked {
+        ship_id: i64,
+        station_id: i64,
+        tick: i64,
+        session_accepted: bool,
+    },
+    ShipUndocked {
+        ship_id: i64,
+        station_id: i64,
+        tick: i64,
+        session_accepted: bool,
+    },
+    ShipAssembled,
+    DamageTaken {
+        ship_id: i64,
+    },
+    RepairApplied {
+        ship_id: i64,
+    },
+    ShipDestroyed {
+        ship_id: i64,
+        outcome: Gd<DestructionOutcome>,
+    },
+    TargetLocked {
+        locker_id: i64,
+        target_id: i64,
+        changed: bool,
+    },
+    LockLost {
+        locker_id: i64,
+        target_id: i64,
+        changed: bool,
+    },
+    JumpGateUsed {
+        ship_id: i64,
+        gate_id: i64,
+        entry_pos: PackedFloat64Array,
+        tick: i64,
+    },
+    StarSystemChanged {
+        ship_id: i64,
+        to_system: i64,
+        name: Option<String>,
+    },
+    AoiEnter {
+        ship: Gd<ShipPresentation>,
+        registered: bool,
+        became_player: bool,
+    },
+    AoiLeave {
+        ship_id: i64,
+        removed: bool,
+    },
+    PositionSnap {
+        ship_id: i64,
+        position: PackedFloat64Array,
+    },
+}
+
 #[derive(GodotClass)]
 #[class(no_init)]
 pub struct ServerEventOutcome {
-    outcome: ClientEventOutcome,
+    presentation: EventPresentation,
 }
 
 #[godot_api]
 impl ServerEventOutcome {
-    /// Dispatch to the established world handler for this concrete event.
-    /// GDScript never reads a variant-name string.
     #[func]
     fn dispatch(&self, mut target: Gd<Object>) -> bool {
-        if let Some(method) = event_outcome_handler(&self.outcome) {
-            if !ensure_handler(&mut target, method) {
-                return false;
-            }
+        let Some(method) = event_handler(&self.presentation) else {
+            return true;
+        };
+        if !ensure_handler(&mut target, method) {
+            return false;
         }
-        match &self.outcome {
-            ClientEventOutcome::Domain(event) => dispatch_domain_event(&mut target, event),
-            ClientEventOutcome::AoiEnter(ship) => {
-                let mut payload = Dict::new();
-                payload.set("ship", &ship_state_to_dict(ship));
-                call_dict(&mut target, "_handle_aoi_enter", payload);
+        match &self.presentation {
+            EventPresentation::ShipSpawned {
+                ship_id,
+                position,
+                registered,
+                became_player,
+            } => {
+                target.call(
+                    method,
+                    vslice![*ship_id, position.clone(), *registered, *became_player],
+                );
             }
-            ClientEventOutcome::AoiLeave { ship_id } => {
-                let mut payload = Dict::new();
-                payload.set("ship_id", godot_i64(*ship_id));
-                call_dict(&mut target, "_handle_aoi_leave", payload);
+            EventPresentation::VelocityChanged {
+                ship_id,
+                velocity,
+                tick,
+            } => {
+                target.call(method, vslice![*ship_id, velocity.clone(), *tick]);
             }
-            ClientEventOutcome::PositionSnap { ship_id, position } => {
-                let mut payload = Dict::new();
-                payload.set("ship_id", godot_i64(*ship_id));
-                payload.set("position", &position_to_dict(position));
-                call_dict(&mut target, "_handle_position_snap", payload);
+            EventPresentation::ShipDespawned { ship_id, removed }
+            | EventPresentation::AoiLeave { ship_id, removed } => {
+                target.call(method, vslice![*ship_id, *removed]);
+            }
+            EventPresentation::ShipDocked {
+                ship_id,
+                station_id,
+                tick,
+                session_accepted,
+            }
+            | EventPresentation::ShipUndocked {
+                ship_id,
+                station_id,
+                tick,
+                session_accepted,
+            } => {
+                target.call(
+                    method,
+                    vslice![*ship_id, *station_id, *tick, *session_accepted],
+                );
+            }
+            EventPresentation::ShipAssembled => {}
+            EventPresentation::DamageTaken { ship_id }
+            | EventPresentation::RepairApplied { ship_id } => {
+                target.call(method, vslice![*ship_id]);
+            }
+            EventPresentation::ShipDestroyed { ship_id, outcome } => {
+                target.call(method, vslice![*ship_id, outcome.clone()]);
+            }
+            EventPresentation::TargetLocked {
+                locker_id,
+                target_id,
+                changed,
+            }
+            | EventPresentation::LockLost {
+                locker_id,
+                target_id,
+                changed,
+            } => {
+                target.call(method, vslice![*locker_id, *target_id, *changed]);
+            }
+            EventPresentation::JumpGateUsed {
+                ship_id,
+                gate_id,
+                entry_pos,
+                tick,
+            } => {
+                target.call(
+                    method,
+                    vslice![*ship_id, *gate_id, entry_pos.clone(), *tick],
+                );
+            }
+            EventPresentation::StarSystemChanged {
+                ship_id,
+                to_system,
+                name,
+            } => {
+                let name = name
+                    .as_ref()
+                    .map(|name| GString::from(name).to_variant())
+                    .unwrap_or_else(Variant::nil);
+                target.call(method, vslice![*ship_id, *to_system, name]);
+            }
+            EventPresentation::AoiEnter {
+                ship,
+                registered,
+                became_player,
+            } => {
+                target.call(method, vslice![ship.clone(), *registered, *became_player]);
+            }
+            EventPresentation::PositionSnap { ship_id, position } => {
+                target.call(method, vslice![*ship_id, position.clone()]);
             }
         }
         true
     }
 }
 
-fn server_outcome_handler(outcome: &ClientOutcome) -> &'static str {
-    match outcome {
-        ClientOutcome::Welcome { .. } => "_accept_welcome",
-        ClientOutcome::Redirect { .. } => "_accept_redirect",
-        ClientOutcome::Event(_) => "_accept_event",
-        ClientOutcome::PlayerLoadout => "_accept_player_loadout",
-        ClientOutcome::InitialState(_) => "_accept_initial_state",
-        ClientOutcome::ModuleActivated { .. } => "_accept_module_activated",
-        ClientOutcome::ModuleDeactivated { .. } => "_accept_module_deactivated",
-        ClientOutcome::MotionCorrection { .. } => "_accept_motion_correction",
-        ClientOutcome::MarketSnapshot(_) => "_accept_market_snapshot",
+fn apply_event(
+    session: &mut Gd<WorldSession>,
+    loadout: &mut Gd<PlayerLoadout>,
+    event: &ClientEventOutcome,
+    connection_ship_id: i64,
+) -> EventPresentation {
+    match event {
+        ClientEventOutcome::Domain(event) => {
+            apply_domain_event(session, loadout, event, connection_ship_id)
+        }
+        ClientEventOutcome::AoiEnter(ship) => {
+            let effect = apply_update(
+                session,
+                loadout,
+                WorldSessionUpdate::ShipEntered {
+                    ship: ship_registration(ship),
+                    connection_ship_id,
+                },
+            );
+            let (registered, became_player) = registered_effect(effect);
+            EventPresentation::AoiEnter {
+                ship: ShipPresentation::wrap(ship),
+                registered,
+                became_player,
+            }
+        }
+        ClientEventOutcome::AoiLeave { ship_id } => {
+            let effect = apply_update(
+                session,
+                loadout,
+                WorldSessionUpdate::ShipLeft {
+                    ship_id: godot_i64(*ship_id),
+                    clear_lock: false,
+                },
+            );
+            EventPresentation::AoiLeave {
+                ship_id: godot_i64(*ship_id),
+                removed: removed_effect(effect),
+            }
+        }
+        ClientEventOutcome::PositionSnap { ship_id, position } => {
+            apply_update(session, loadout, WorldSessionUpdate::ObservedEvent);
+            EventPresentation::PositionSnap {
+                ship_id: godot_i64(*ship_id),
+                position: position_components(*position),
+            }
+        }
     }
 }
 
-fn event_outcome_handler(outcome: &ClientEventOutcome) -> Option<&'static str> {
-    match outcome {
-        ClientEventOutcome::Domain(event) => domain_event_handler(event),
-        ClientEventOutcome::AoiEnter(_) => Some("_handle_aoi_enter"),
-        ClientEventOutcome::AoiLeave { .. } => Some("_handle_aoi_leave"),
-        ClientEventOutcome::PositionSnap { .. } => Some("_handle_position_snap"),
+fn apply_domain_event(
+    session: &mut Gd<WorldSession>,
+    loadout: &mut Gd<PlayerLoadout>,
+    event: &EventWire,
+    connection_ship_id: i64,
+) -> EventPresentation {
+    match event {
+        EventWire::ShipSpawned {
+            ship_id, position, ..
+        } => {
+            let effect = apply_update(
+                session,
+                loadout,
+                WorldSessionUpdate::ShipSpawned {
+                    ship_id: godot_i64(*ship_id),
+                    connection_ship_id,
+                },
+            );
+            let (registered, became_player) = registered_effect(effect);
+            EventPresentation::ShipSpawned {
+                ship_id: godot_i64(*ship_id),
+                position: position_components(*position),
+                registered,
+                became_player,
+            }
+        }
+        EventWire::VelocityChanged {
+            ship_id,
+            velocity,
+            tick,
+        } => {
+            apply_update(
+                session,
+                loadout,
+                WorldSessionUpdate::Tick {
+                    tick: godot_i64(*tick),
+                },
+            );
+            EventPresentation::VelocityChanged {
+                ship_id: godot_i64(*ship_id),
+                velocity: velocity_components(*velocity),
+                tick: godot_i64(*tick),
+            }
+        }
+        EventWire::ShipDespawned { ship_id, .. } => {
+            let effect = apply_update(
+                session,
+                loadout,
+                WorldSessionUpdate::ShipLeft {
+                    ship_id: godot_i64(*ship_id),
+                    clear_lock: true,
+                },
+            );
+            EventPresentation::ShipDespawned {
+                ship_id: godot_i64(*ship_id),
+                removed: removed_effect(effect),
+            }
+        }
+        EventWire::ShipDocked {
+            ship_id,
+            station_id,
+            tick,
+        } => {
+            let station_id = i64::from(*station_id);
+            let station_name = session.bind().station_name(station_id);
+            let effect = apply_update(
+                session,
+                loadout,
+                WorldSessionUpdate::Docked {
+                    ship_id: godot_i64(*ship_id),
+                    station_id,
+                    station_name,
+                    tick: godot_i64(*tick),
+                },
+            );
+            EventPresentation::ShipDocked {
+                ship_id: godot_i64(*ship_id),
+                station_id,
+                tick: godot_i64(*tick),
+                session_accepted: dock_effect(effect),
+            }
+        }
+        EventWire::ShipUndocked {
+            ship_id,
+            station_id,
+            tick,
+        } => {
+            let effect = apply_update(
+                session,
+                loadout,
+                WorldSessionUpdate::Undocked {
+                    ship_id: godot_i64(*ship_id),
+                    tick: godot_i64(*tick),
+                },
+            );
+            EventPresentation::ShipUndocked {
+                ship_id: godot_i64(*ship_id),
+                station_id: i64::from(*station_id),
+                tick: godot_i64(*tick),
+                session_accepted: dock_effect(effect),
+            }
+        }
+        EventWire::ShipAssembled { .. } => {
+            apply_update(session, loadout, WorldSessionUpdate::ObservedEvent);
+            EventPresentation::ShipAssembled
+        }
+        EventWire::DamageTaken {
+            ship_id,
+            current_shield,
+            current_armor,
+            current_hull,
+            ..
+        } => {
+            apply_update(
+                session,
+                loadout,
+                WorldSessionUpdate::HealthChanged {
+                    ship_id: godot_i64(*ship_id),
+                    shield: f64::from(*current_shield),
+                    armor: f64::from(*current_armor),
+                    hull: f64::from(*current_hull),
+                },
+            );
+            EventPresentation::DamageTaken {
+                ship_id: godot_i64(*ship_id),
+            }
+        }
+        EventWire::RepairApplied {
+            ship_id,
+            current_shield,
+            current_armor,
+            current_hull,
+            ..
+        } => {
+            apply_update(
+                session,
+                loadout,
+                WorldSessionUpdate::HealthChanged {
+                    ship_id: godot_i64(*ship_id),
+                    shield: f64::from(*current_shield),
+                    armor: f64::from(*current_armor),
+                    hull: f64::from(*current_hull),
+                },
+            );
+            EventPresentation::RepairApplied {
+                ship_id: godot_i64(*ship_id),
+            }
+        }
+        EventWire::ShipDestroyed { ship_id, .. } => {
+            let effect = apply_update(
+                session,
+                loadout,
+                WorldSessionUpdate::ShipDestroyed {
+                    ship_id: godot_i64(*ship_id),
+                },
+            );
+            let outcome = match effect {
+                WorldSessionEffect::ShipDestroyed(outcome) => outcome,
+                _ => unreachable!("ShipDestroyed update must return its outcome"),
+            };
+            EventPresentation::ShipDestroyed {
+                ship_id: godot_i64(*ship_id),
+                outcome: DestructionOutcome::wrap(outcome),
+            }
+        }
+        EventWire::TargetLocked {
+            locker_id,
+            target_id,
+            ..
+        } => {
+            let effect = apply_update(
+                session,
+                loadout,
+                WorldSessionUpdate::TargetLocked {
+                    locker_id: godot_i64(*locker_id),
+                    target_id: godot_i64(*target_id),
+                },
+            );
+            EventPresentation::TargetLocked {
+                locker_id: godot_i64(*locker_id),
+                target_id: godot_i64(*target_id),
+                changed: lock_effect(effect),
+            }
+        }
+        EventWire::LockLost {
+            locker_id,
+            target_id,
+            ..
+        } => {
+            let effect = apply_update(
+                session,
+                loadout,
+                WorldSessionUpdate::LockLost {
+                    locker_id: godot_i64(*locker_id),
+                    target_id: godot_i64(*target_id),
+                },
+            );
+            EventPresentation::LockLost {
+                locker_id: godot_i64(*locker_id),
+                target_id: godot_i64(*target_id),
+                changed: lock_effect(effect),
+            }
+        }
+        EventWire::ModuleActivated { .. } | EventWire::ModuleDeactivated { .. } => {
+            unreachable!("module events project to top-level ClientOutcome variants")
+        }
+        EventWire::JumpGateUsed {
+            ship_id,
+            gate_id,
+            entry_pos,
+            tick,
+            ..
+        } => {
+            apply_update(session, loadout, WorldSessionUpdate::ObservedEvent);
+            EventPresentation::JumpGateUsed {
+                ship_id: godot_i64(*ship_id),
+                gate_id: i64::from(*gate_id),
+                entry_pos: position_components(*entry_pos),
+                tick: godot_i64(*tick),
+            }
+        }
+        EventWire::StarSystemChanged {
+            ship_id, to_system, ..
+        } => {
+            let effect = apply_update(
+                session,
+                loadout,
+                WorldSessionUpdate::SystemChanged {
+                    ship_id: godot_i64(*ship_id),
+                    to_system: i64::from(*to_system),
+                },
+            );
+            EventPresentation::StarSystemChanged {
+                ship_id: godot_i64(*ship_id),
+                to_system: i64::from(*to_system),
+                name: system_effect(effect),
+            }
+        }
     }
 }
 
-fn domain_event_handler(event: &EventWire) -> Option<&'static str> {
+fn apply_update(
+    session: &mut Gd<WorldSession>,
+    loadout: &mut Gd<PlayerLoadout>,
+    update: WorldSessionUpdate,
+) -> WorldSessionEffect {
+    let mut session = session.bind_mut();
+    let mut loadout = loadout.bind_mut();
+    session.apply_update(update, loadout.core_mut())
+}
+
+fn initial_state_update(state: &InitialStateWire, connection_ship_id: i64) -> WorldSessionUpdate {
+    WorldSessionUpdate::InitialState {
+        navigation: NavigationInput {
+            system_name: state.system_name.clone(),
+            systems: state
+                .systems
+                .iter()
+                .map(|system| SystemNameInput {
+                    id: i64::from(system.id),
+                    name: system.name.clone(),
+                })
+                .collect(),
+            jump_gates: state
+                .jump_gates
+                .iter()
+                .map(|gate| GateInput {
+                    gate_id: i64::from(gate.gate_id),
+                    position: position_input(gate.position),
+                    activation_radius: gate.activation_radius,
+                    to_system_name: gate.to_system_name.clone(),
+                })
+                .collect(),
+            stations: state
+                .stations
+                .iter()
+                .map(|station| StationInput {
+                    station_id: i64::from(station.station_id),
+                    name: station.name.clone(),
+                    position: position_input(station.position),
+                    docking_radius: station.docking_radius,
+                })
+                .collect(),
+            celestial_bodies: state
+                .celestial_bodies
+                .iter()
+                .map(|body| CelestialBodyInput {
+                    id: i64::from(body.id),
+                    kind: format!("{:?}", body.kind),
+                    name: body.name.clone(),
+                    position: position_input(body.position),
+                    radius: body.radius,
+                    spectral_type: f64::from(body.spectral_type),
+                })
+                .collect(),
+            buildable_ship_types: state
+                .buildable_ship_types
+                .iter()
+                .map(|ship| BuildableShipTypeInput {
+                    ship_type_id: i64::from(ship.ship_type_id),
+                    name: ship.name.clone(),
+                })
+                .collect(),
+        },
+        ships: state.ships.iter().map(ship_registration).collect(),
+        connection_ship_id,
+    }
+}
+
+fn ship_registration(ship: &ShipStateWire) -> ShipRegistration {
+    ShipRegistration {
+        ship_id: godot_i64(ship.ship_id),
+        ship: ShipInput {
+            is_player: ship.is_player,
+            ship_type_name: ship.ship_type_name.clone(),
+            max_shield: f64::from(ship.max_shield),
+            max_armor: f64::from(ship.max_armor),
+            max_hull: f64::from(ship.max_hull),
+            current_shield: Some(f64::from(ship.current_shield)),
+            current_armor: Some(f64::from(ship.current_armor)),
+            current_hull: Some(f64::from(ship.current_hull)),
+            cap_max: f64::from(ship.cap_max),
+            cap_recharge_per_tick: f64::from(ship.cap_recharge_per_tick),
+        },
+    }
+}
+
+fn position_input(position: dawn_wire::AbsPosWire) -> PositionInput {
+    PositionInput {
+        x: position.x,
+        y: position.y,
+        z: position.z,
+    }
+}
+
+fn registered_effect(effect: WorldSessionEffect) -> (bool, bool) {
+    match effect {
+        WorldSessionEffect::ShipRegistered {
+            registered,
+            became_player,
+        } => (registered, became_player),
+        _ => unreachable!("Ship registration update must return registration state"),
+    }
+}
+
+fn removed_effect(effect: WorldSessionEffect) -> bool {
+    match effect {
+        WorldSessionEffect::ShipRemoved { removed } => removed,
+        _ => unreachable!("Ship removal update must return removal state"),
+    }
+}
+
+fn lock_effect(effect: WorldSessionEffect) -> bool {
+    match effect {
+        WorldSessionEffect::LockChanged { changed } => changed,
+        _ => unreachable!("Lock update must return lock state"),
+    }
+}
+
+fn dock_effect(effect: WorldSessionEffect) -> bool {
+    match effect {
+        WorldSessionEffect::DockState { accepted } => accepted,
+        _ => unreachable!("Dock update must return acceptance state"),
+    }
+}
+
+fn system_effect(effect: WorldSessionEffect) -> Option<String> {
+    match effect {
+        WorldSessionEffect::SystemChanged { name } => name,
+        _ => unreachable!("System update must return the display name"),
+    }
+}
+
+fn event_handler(event: &EventPresentation) -> Option<&'static str> {
     Some(match event {
-        EventWire::ShipSpawned { .. } => "_handle_ship_spawned",
-        EventWire::VelocityChanged { .. } => "_handle_velocity_changed",
-        EventWire::ShipDespawned { .. } => "_handle_ship_despawned",
-        EventWire::ShipDocked { .. } => "_handle_ship_docked",
-        EventWire::ShipUndocked { .. } => "_handle_ship_undocked",
-        EventWire::ShipAssembled { .. } => return None,
-        EventWire::DamageTaken { .. } => "_handle_damage_taken",
-        EventWire::RepairApplied { .. } => "_handle_repair_applied",
-        EventWire::ShipDestroyed { .. } => "_handle_ship_destroyed",
-        EventWire::TargetLocked { .. } => "_handle_target_locked",
-        EventWire::LockLost { .. } => "_handle_lock_lost",
-        EventWire::ModuleActivated { .. } => "_on_module_activated",
-        EventWire::ModuleDeactivated { .. } => "_on_module_deactivated",
-        EventWire::JumpGateUsed { .. } => "_handle_jump_gate_used",
-        EventWire::StarSystemChanged { .. } => "_handle_star_system_changed",
+        EventPresentation::ShipSpawned { .. } => "_handle_ship_spawned",
+        EventPresentation::VelocityChanged { .. } => "_handle_velocity_changed",
+        EventPresentation::ShipDespawned { .. } => "_handle_ship_despawned",
+        EventPresentation::ShipDocked { .. } => "_handle_ship_docked",
+        EventPresentation::ShipUndocked { .. } => "_handle_ship_undocked",
+        EventPresentation::ShipAssembled => return None,
+        EventPresentation::DamageTaken { .. } => "_handle_damage_taken",
+        EventPresentation::RepairApplied { .. } => "_handle_repair_applied",
+        EventPresentation::ShipDestroyed { .. } => "_handle_ship_destroyed",
+        EventPresentation::TargetLocked { .. } => "_handle_target_locked",
+        EventPresentation::LockLost { .. } => "_handle_lock_lost",
+        EventPresentation::JumpGateUsed { .. } => "_handle_jump_gate_used",
+        EventPresentation::StarSystemChanged { .. } => "_handle_star_system_changed",
+        EventPresentation::AoiEnter { .. } => "_handle_aoi_enter",
+        EventPresentation::AoiLeave { .. } => "_handle_aoi_leave",
+        EventPresentation::PositionSnap { .. } => "_handle_position_snap",
     })
 }
 
@@ -286,332 +941,4 @@ fn ensure_handler(target: &mut Gd<Object>, method: &str) -> bool {
         godot_warn!("typed ServerMessage dispatch target is missing method '{method}'");
     }
     exists
-}
-
-fn dispatch_domain_event(target: &mut Gd<Object>, event: &EventWire) {
-    match event {
-        EventWire::ShipSpawned {
-            ship_id,
-            position,
-            tick,
-        } => {
-            let mut payload = Dict::new();
-            payload.set("ship_id", godot_i64(*ship_id));
-            payload.set("position", &position_to_dict(position));
-            payload.set("tick", godot_i64(*tick));
-            call_dict(target, "_handle_ship_spawned", payload);
-        }
-        EventWire::VelocityChanged {
-            ship_id,
-            velocity,
-            tick,
-        } => {
-            let mut payload = Dict::new();
-            payload.set("ship_id", godot_i64(*ship_id));
-            payload.set("velocity", &velocity_to_dict(velocity));
-            payload.set("tick", godot_i64(*tick));
-            call_dict(target, "_handle_velocity_changed", payload);
-        }
-        EventWire::ShipDespawned { ship_id, tick } => {
-            let mut payload = Dict::new();
-            payload.set("ship_id", godot_i64(*ship_id));
-            payload.set("tick", godot_i64(*tick));
-            call_dict(target, "_handle_ship_despawned", payload);
-        }
-        EventWire::ShipDocked {
-            ship_id,
-            station_id,
-            tick,
-        } => {
-            let mut payload = Dict::new();
-            payload.set("ship_id", godot_i64(*ship_id));
-            payload.set("station_id", i64::from(*station_id));
-            payload.set("tick", godot_i64(*tick));
-            call_dict(target, "_handle_ship_docked", payload);
-        }
-        EventWire::ShipUndocked {
-            ship_id,
-            station_id,
-            tick,
-        } => {
-            let mut payload = Dict::new();
-            payload.set("ship_id", godot_i64(*ship_id));
-            payload.set("station_id", i64::from(*station_id));
-            payload.set("tick", godot_i64(*tick));
-            call_dict(target, "_handle_ship_undocked", payload);
-        }
-        // Existing GDScript intentionally has no direct ShipAssembled handler.
-        // The following PlayerLoadout refresh owns the visible roster update.
-        EventWire::ShipAssembled { .. } => {}
-        EventWire::DamageTaken {
-            ship_id,
-            damage,
-            current_shield,
-            current_armor,
-            current_hull,
-            tick,
-        } => {
-            let mut payload = Dict::new();
-            payload.set("ship_id", godot_i64(*ship_id));
-            payload.set("damage", f64::from(*damage));
-            payload.set("current_shield", f64::from(*current_shield));
-            payload.set("current_armor", f64::from(*current_armor));
-            payload.set("current_hull", f64::from(*current_hull));
-            payload.set("tick", godot_i64(*tick));
-            call_dict(target, "_handle_damage_taken", payload);
-        }
-        EventWire::RepairApplied {
-            ship_id,
-            amount,
-            layer,
-            current_shield,
-            current_armor,
-            current_hull,
-            tick,
-        } => {
-            let mut payload = Dict::new();
-            payload.set("ship_id", godot_i64(*ship_id));
-            payload.set("amount", f64::from(*amount));
-            payload.set("layer", layer.as_str());
-            payload.set("current_shield", f64::from(*current_shield));
-            payload.set("current_armor", f64::from(*current_armor));
-            payload.set("current_hull", f64::from(*current_hull));
-            payload.set("tick", godot_i64(*tick));
-            call_dict(target, "_handle_repair_applied", payload);
-        }
-        EventWire::ShipDestroyed {
-            ship_id,
-            killer_id,
-            tick,
-        } => {
-            let mut payload = Dict::new();
-            payload.set("ship_id", godot_i64(*ship_id));
-            payload.set("killer_id", godot_i64(*killer_id));
-            payload.set("tick", godot_i64(*tick));
-            call_dict(target, "_handle_ship_destroyed", payload);
-        }
-        EventWire::TargetLocked {
-            locker_id,
-            target_id,
-            tick,
-        } => {
-            let mut payload = Dict::new();
-            payload.set("locker_id", godot_i64(*locker_id));
-            payload.set("target_id", godot_i64(*target_id));
-            payload.set("tick", godot_i64(*tick));
-            call_dict(target, "_handle_target_locked", payload);
-        }
-        EventWire::LockLost {
-            locker_id,
-            target_id,
-            tick,
-        } => {
-            let mut payload = Dict::new();
-            payload.set("locker_id", godot_i64(*locker_id));
-            payload.set("target_id", godot_i64(*target_id));
-            payload.set("tick", godot_i64(*tick));
-            call_dict(target, "_handle_lock_lost", payload);
-        }
-        // These normally project to dedicated top-level outcomes before a
-        // ServerEventOutcome is built. Keep the exhaustive fallback safe.
-        EventWire::ModuleActivated {
-            ship_id,
-            module_id,
-            slot,
-            ..
-        } => {
-            target.call(
-                "_on_module_activated",
-                vslice![godot_i64(*ship_id), i64::from(*module_id), slot.as_str()],
-            );
-        }
-        EventWire::ModuleDeactivated {
-            ship_id,
-            module_id,
-            slot,
-            reason,
-            ..
-        } => {
-            target.call(
-                "_on_module_deactivated",
-                vslice![
-                    godot_i64(*ship_id),
-                    i64::from(*module_id),
-                    slot.as_str(),
-                    reason.as_deref().unwrap_or("")
-                ],
-            );
-        }
-        EventWire::JumpGateUsed {
-            ship_id,
-            gate_id,
-            from_sector,
-            to_sector,
-            entry_pos,
-            tick,
-        } => {
-            let mut payload = Dict::new();
-            payload.set("ship_id", godot_i64(*ship_id));
-            payload.set("gate_id", i64::from(*gate_id));
-            payload.set("from_sector", i64::from(*from_sector));
-            payload.set("to_sector", i64::from(*to_sector));
-            payload.set("entry_pos", &position_to_dict(entry_pos));
-            payload.set("tick", godot_i64(*tick));
-            call_dict(target, "_handle_jump_gate_used", payload);
-        }
-        EventWire::StarSystemChanged {
-            ship_id,
-            from_system,
-            to_system,
-            tick,
-        } => {
-            let mut payload = Dict::new();
-            payload.set("ship_id", godot_i64(*ship_id));
-            payload.set("from_system", i64::from(*from_system));
-            payload.set("to_system", i64::from(*to_system));
-            payload.set("tick", godot_i64(*tick));
-            call_dict(target, "_handle_star_system_changed", payload);
-        }
-    }
-}
-
-fn initial_state_to_dict(state: &InitialStateWire) -> Dict {
-    let mut payload = Dict::new();
-
-    let mut ships = Array::<Variant>::new();
-    for ship in &state.ships {
-        ships.push(&Variant::from(ship_state_to_dict(ship)));
-    }
-    payload.set("ships", &ships);
-    payload.set("system_name", state.system_name.as_str());
-
-    let mut systems = Array::<Variant>::new();
-    for system in &state.systems {
-        let mut item = Dict::new();
-        item.set("id", i64::from(system.id));
-        item.set("name", system.name.as_str());
-        systems.push(&Variant::from(item));
-    }
-    payload.set("systems", &systems);
-
-    let mut gates = Array::<Variant>::new();
-    for gate in &state.jump_gates {
-        let mut item = Dict::new();
-        item.set("gate_id", i64::from(gate.gate_id));
-        item.set("position", &position_to_dict(&gate.position));
-        item.set("activation_radius", gate.activation_radius);
-        item.set("to_system_name", gate.to_system_name.as_str());
-        gates.push(&Variant::from(item));
-    }
-    payload.set("jump_gates", &gates);
-
-    let mut stations = Array::<Variant>::new();
-    for station in &state.stations {
-        let mut item = Dict::new();
-        item.set("station_id", i64::from(station.station_id));
-        item.set("name", station.name.as_str());
-        item.set("position", &position_to_dict(&station.position));
-        item.set("docking_radius", station.docking_radius);
-        stations.push(&Variant::from(item));
-    }
-    payload.set("stations", &stations);
-
-    let mut bodies = Array::<Variant>::new();
-    for body in &state.celestial_bodies {
-        let mut item = Dict::new();
-        item.set("id", i64::from(body.id));
-        let kind = format!("{:?}", body.kind);
-        item.set("kind", kind.as_str());
-        item.set("name", body.name.as_str());
-        item.set("position", &position_to_dict(&body.position));
-        item.set("radius", body.radius);
-        item.set("spectral_type", f64::from(body.spectral_type));
-        bodies.push(&Variant::from(item));
-    }
-    payload.set("celestial_bodies", &bodies);
-
-    let mut buildable = Array::<Variant>::new();
-    for ship_type in &state.buildable_ship_types {
-        let mut item = Dict::new();
-        item.set("ship_type_id", i64::from(ship_type.ship_type_id));
-        item.set("name", ship_type.name.as_str());
-        buildable.push(&Variant::from(item));
-    }
-    payload.set("buildable_ship_types", &buildable);
-
-    payload
-}
-
-fn ship_state_to_dict(ship: &ShipStateWire) -> Dict {
-    let mut payload = Dict::new();
-    payload.set("ship_id", godot_i64(ship.ship_id));
-    payload.set("ship_type_name", ship.ship_type_name.as_str());
-    payload.set("position", &position_to_dict(&ship.position));
-    payload.set("velocity", &velocity_to_dict(&ship.velocity));
-    payload.set("max_speed", ship.max_speed);
-    payload.set("mass", ship.mass);
-    payload.set("inertia_modifier", ship.inertia_modifier);
-    payload.set("max_shield", f64::from(ship.max_shield));
-    payload.set("max_armor", f64::from(ship.max_armor));
-    payload.set("max_hull", f64::from(ship.max_hull));
-    payload.set("current_shield", f64::from(ship.current_shield));
-    payload.set("current_armor", f64::from(ship.current_armor));
-    payload.set("current_hull", f64::from(ship.current_hull));
-    payload.set("cap_max", f64::from(ship.cap_max));
-    payload.set(
-        "cap_recharge_per_tick",
-        f64::from(ship.cap_recharge_per_tick),
-    );
-    payload.set("is_player", ship.is_player);
-    payload
-}
-
-fn market_snapshot_to_dict(snapshot: &MarketSnapshotWire) -> Dict {
-    let mut payload = Dict::new();
-    payload.set("balance", godot_i64(snapshot.balance));
-    payload.set("notice", snapshot.notice.as_str());
-
-    let mut orders = Array::<Variant>::new();
-    for order in &snapshot.orders {
-        let mut item = Dict::new();
-        item.set("order_id", godot_i64(order.order_id));
-        item.set("item_id", &item_to_variant(&order.item_id));
-        item.set("side", order.side.as_str());
-        item.set("price", godot_i64(order.price));
-        item.set("quantity", godot_i64(order.quantity));
-        item.set("is_own", order.is_own);
-        orders.push(&Variant::from(item));
-    }
-    payload.set("orders", &orders);
-    payload
-}
-
-fn item_to_variant(item: &ItemWire) -> Variant {
-    let item_id =
-        ItemId::try_from(*item).expect("ClientOutcome validates every Godot-facing Item identity");
-    ItemIdentity::wrap(item_id).to_variant()
-}
-
-fn position_to_dict(position: &AbsPosWire) -> Dict {
-    let mut value = Dict::new();
-    value.set("x", position.x);
-    value.set("y", position.y);
-    value.set("z", position.z);
-    value
-}
-
-fn velocity_to_dict(velocity: &VelWire) -> Dict {
-    let mut value = Dict::new();
-    value.set("dx", velocity.dx);
-    value.set("dy", velocity.dy);
-    value.set("dz", velocity.dz);
-    value
-}
-
-fn call_dict(target: &mut Gd<Object>, method: &str, payload: Dict) {
-    target.call(method, vslice![payload]);
-}
-
-fn godot_i64(value: u64) -> i64 {
-    i64::try_from(value).expect("ClientOutcome validates every Godot-facing u64")
 }
