@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - scripts/issue-238.patch.gz.b64
+      - scripts/issue238.part.*
       - .github/workflows/issue-238-apply.yml
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
           components: rustfmt, clippy
       - name: Apply implementation
         run: |
-          base64 --decode scripts/issue-238.patch.gz.b64 | gzip --decompress > /tmp/issue-238.patch
+          cat scripts/issue238.part.* | base64 --decode | gzip --decompress > /tmp/issue-238.patch
           git apply --index /tmp/issue-238.patch
           cargo fmt --all
       - name: Validate Rust client layers
@@ -36,6 +36,7 @@ jobs:
       - name: Publish implementation
         run: |
           rm scripts/issue-238.patch.gz.b64
+          rm scripts/issue238.part.*
           rm .github/workflows/issue-238-export.yml
           rm .github/workflows/issue-238-apply.yml
           git add -A
