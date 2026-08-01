@@ -108,14 +108,15 @@ func _process(delta: float) -> void:
 ##
 ## ADR-0041/ADR-0042: every send_* function below builds its wire message
 ## via `ClientCommand` (a `dawn-wire`-backed GDExtension class, globally
-## registered like `PlayerLoadout`/`ModuleRow`/`ItemRow` -- no preload
-## needed), instead of hand-building a matching Dictionary + JSON.stringify.
-## Commands with sentinel/tagged-target semantics (ADR-0031/ADR-0035)
-## call a dedicated `_cmd.*_command()` method; everything else goes through
-## `_cmd.build(type_tag, fields)`, which validates the field Dictionary by
-## deserializing it into `ClientCommandWire` itself. Every method returns
-## postcard-encoded bytes already wrapped in the `ClientMessage::Command`
-## envelope (ADR-0042); `_send_bytes` only applies the welcomed guard.
+## registered like `PlayerLoadout`/`ModuleRow`/`ItemRow`/`ItemIdentity` -- no
+## preload needed), instead of hand-building a matching Dictionary +
+## JSON.stringify. Commands with sentinel/tagged-target semantics
+## (ADR-0031/ADR-0035) call a dedicated `_cmd.*_command()` method; everything
+## else goes through `_cmd.build(type_tag, fields)`, which validates the field
+## Dictionary by deserializing it into `ClientCommandWire` itself. Every method
+## returns postcard-encoded bytes already wrapped in the
+## `ClientMessage::Command` envelope (ADR-0042); `_send_bytes` only applies the
+## welcomed guard.
 func send_move_command(target: Vector3) -> void:
 	_send_bytes(_cmd.move_command(target.x, target.y, target.z))
 
@@ -223,32 +224,23 @@ func send_disembark_command() -> void:
 func send_select_active_ship_command(p_ship_id: int) -> void:
 	_send_bytes(_cmd.build("SelectActiveShipCommand", {"ship_id": p_ship_id}))
 
-## Move the entire stack of an item out of a docked ship's own cargo into
-## the caller's station inventory (ADR-0034 9B). p_item_type is one of
-## "Module", "PackagedShip", "ScrapMetal" (matches ItemRow.item_type);
-## p_module_id/p_ship_type_id are only meaningful for the matching variant.
+## Move the entire stack of one canonical Item identity out of a docked ship's
+## cargo into the caller's station inventory (ADR-0034 9B).
 func send_transfer_to_station_command(
 	p_ship_id: int,
 	p_station_id: int,
-	p_item_type: String,
-	p_module_id: int = 0,
-	p_ship_type_id: int = 0
+	p_item_id: ItemIdentity
 ) -> void:
-	_send_bytes(_cmd.transfer_to_station_command(
-		p_ship_id, p_station_id, p_item_type, p_module_id, p_ship_type_id))
+	_send_bytes(_cmd.transfer_to_station_command(p_ship_id, p_station_id, p_item_id))
 
-## The reverse of send_transfer_to_station_command: move the entire stack of
-## an item out of the caller's station inventory back into the docked ship's
-## own cargo.
+## The reverse of send_transfer_to_station_command: move the entire stack from
+## station inventory back into the docked ship's cargo.
 func send_transfer_from_station_command(
 	p_ship_id: int,
 	p_station_id: int,
-	p_item_type: String,
-	p_module_id: int = 0,
-	p_ship_type_id: int = 0
+	p_item_id: ItemIdentity
 ) -> void:
-	_send_bytes(_cmd.transfer_from_station_command(
-		p_ship_id, p_station_id, p_item_type, p_module_id, p_ship_type_id))
+	_send_bytes(_cmd.transfer_from_station_command(p_ship_id, p_station_id, p_item_id))
 
 ## Market requests use a separate wire envelope from Sector commands
 ## (ADR-0034). The server answers each request with MarketSnapshot.
@@ -257,22 +249,13 @@ func send_market_refresh_command() -> void:
 
 func send_market_place_order_command(
 	p_ship_id: int,
-	p_item_type: String,
-	p_module_id: int,
-	p_ship_type_id: int,
+	p_item_id: ItemIdentity,
 	p_side: String,
 	p_price: int,
 	p_quantity: int
 ) -> void:
-	_send_bytes(_cmd.market_place_order_command({
-		"ship_id": p_ship_id,
-		"item_type": p_item_type,
-		"module_id": p_module_id,
-		"ship_type_id": p_ship_type_id,
-		"side": p_side,
-		"price": p_price,
-		"quantity": p_quantity,
-	}))
+	_send_bytes(_cmd.market_place_order_command(
+		p_ship_id, p_item_id, p_side, p_price, p_quantity))
 
 func send_market_cancel_order_command(p_order_id: int) -> void:
 	_send_bytes(_cmd.market_build("CancelMarketOrderCommand", {
