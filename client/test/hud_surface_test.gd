@@ -38,17 +38,14 @@ func _module(overrides: Dictionary) -> ModuleRow:
 	return ModuleRow.from_json(base)
 
 
-func _item(overrides: Dictionary) -> ItemRow:
-	var base: Dictionary = {
-		"item_id": {"Module": 1},
-		"name": "Test Item", "kind": "", "slot": "", "count": 1,
-	}
-	for key: String in overrides:
-		base[key] = overrides[key]
-	var loadout := PlayerLoadout.new()
-	if not loadout.apply_payload(JSON.stringify({"inventory": [base]})):
-		return null
-	return loadout.inventory()[0] as ItemRow
+func _item(item_id: ItemIdentity, overrides: Dictionary = {}) -> ItemRow:
+	return ItemRow.test_fixture(
+		item_id,
+		overrides.get("name", "Test Item") as String,
+		overrides.get("kind", "") as String,
+		overrides.get("slot", "") as String,
+		overrides.get("count", 1) as int,
+	) as ItemRow
 
 
 func _owned_ship(overrides: Dictionary) -> OwnedShipRow:
@@ -70,7 +67,7 @@ func test_set_player_fitting_before_build_is_applied_after_build() -> void:
 		_module({"module_id": 7, "name": "Railgun", "is_active_module": true}),
 	]
 	var inventory: Array[ItemRow] = [
-		_item({"item_id": "ScrapMetal", "name": "Scrap Metal", "count": 3}),
+		_item(ItemIdentity.scrap_metal(), {"name": "Scrap Metal", "count": 3}),
 	]
 
 	unbuilt.set_player_fitting(modules, inventory)
@@ -122,8 +119,8 @@ func test_set_player_fitting_rebuilds_module_slots_and_inventory_rows() -> void:
 		_module({"module_id": 2, "slot": "Low", "name": "Plate", "is_active_module": false}),
 	]
 	var inventory: Array[ItemRow] = [
-		_item({"item_id": {"Module": 3}, "slot": "Mid", "name": "Afterburner", "count": 2}),
-		_item({"item_id": "ScrapMetal", "name": "Scrap Metal", "count": 4}),
+		_item(ItemIdentity.module(3) as ItemIdentity, {"slot": "Mid", "name": "Afterburner", "count": 2}),
+		_item(ItemIdentity.scrap_metal(), {"name": "Scrap Metal", "count": 4}),
 	]
 
 	_surface.set_player_fitting(modules, inventory)
@@ -266,7 +263,7 @@ func test_render_called_twice_with_same_frame_does_not_change_painted_values() -
 
 
 func test_inventory_panel_hit_helpers_delegate_to_built_panel() -> void:
-	_surface.set_player_fitting([], [_item({"module_id": 3, "slot": "Mid", "name": "Afterburner"})])
+	_surface.set_player_fitting([], [_item(ItemIdentity.module(3) as ItemIdentity, {"slot": "Mid", "name": "Afterburner"})])
 	_surface.toggle_inventory_panel()
 	await get_tree().process_frame
 
@@ -281,7 +278,7 @@ func test_inventory_panel_hit_helpers_delegate_to_built_panel() -> void:
 
 func test_station_inventory_packaged_ship_row_is_clickable_to_assemble() -> void:
 	_surface.set_player_fitting([], [], [
-		_item({"item_id": {"PackagedShip": 7}, "name": "Magpie", "count": 1}),
+		_item(ItemIdentity.packaged_ship(7) as ItemIdentity, {"name": "Magpie", "count": 1}),
 	])
 	_surface.toggle_inventory_panel()
 	await get_tree().process_frame
