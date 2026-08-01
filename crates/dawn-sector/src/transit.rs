@@ -239,6 +239,8 @@ fn propose_transit_request(
 }
 
 #[cfg(test)]
+mod handoff_tests;
+#[cfg(test)]
 mod runtime_tick_review_tests;
 #[cfg(test)]
 mod tests;
