@@ -1,0 +1,34 @@
+name: Issue 224 migration
+
+on:
+  push:
+    branches:
+      - agent/typed-server-message-outcomes
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.event.head_commit.message == 'chore: stage issue 224 migration'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/typed-server-message-outcomes
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+      - name: Apply typed outcome migration
+        run: python .github/scripts/issue_224_migration.py
+      - name: Format Rust
+        run: cargo fmt --all
+      - name: Commit migration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Replace inbound Dictionary dispatch with typed outcomes"
+          git push origin HEAD:agent/typed-server-message-outcomes
