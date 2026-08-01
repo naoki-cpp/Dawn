@@ -4,6 +4,7 @@
 //! describes which sector it owns, its own listen addresses, and how to reach
 //! every peer node for Raft consensus and log replication.
 
+use dawn_core::entity::MAX_GODOT_COMPATIBLE_NODE_ID;
 use serde::Deserialize;
 use std::net::SocketAddr;
 
@@ -99,21 +100,25 @@ pub fn load(path: &str) -> anyhow::Result<NodeConfig> {
     Ok(config)
 }
 
+/// The current Godot client stores packed entity IDs in its signed 64-bit
+/// `int`, while [`dawn_core::EntityId`] reserves the upper eight bits for the
+/// node ID. Keep the deployment in the range that preserves the full 56-bit
+/// counter without setting the sign bit. The domain/wire format still supports
+/// all `u8` node IDs for future clients with a wider ID projection.
 fn validate_godot_node_ids(config: &NodeConfig) -> anyhow::Result<()> {
-    const MAX_GODOT_NODE_ID: u8 = 127;
-    if config.node_id > MAX_GODOT_NODE_ID {
+    if config.node_id > MAX_GODOT_COMPATIBLE_NODE_ID {
         anyhow::bail!(
-            "node_id {} exceeds {}; entity IDs must fit Godot's signed 64-bit int",
+            "node_id {} exceeds the Godot-compatible maximum {}; use a wider client ID projection before assigning this node ID",
             config.node_id,
-            MAX_GODOT_NODE_ID
+            MAX_GODOT_COMPATIBLE_NODE_ID
         );
     }
     for peer in &config.peers {
-        if peer.node_id > MAX_GODOT_NODE_ID {
+        if peer.node_id > MAX_GODOT_COMPATIBLE_NODE_ID {
             anyhow::bail!(
-                "peer node_id {} exceeds {}; entity IDs must fit Godot's signed 64-bit int",
+                "peer node_id {} exceeds the Godot-compatible maximum {}; use a wider client ID projection before assigning this node ID",
                 peer.node_id,
-                MAX_GODOT_NODE_ID
+                MAX_GODOT_COMPATIBLE_NODE_ID
             );
         }
     }
@@ -148,13 +153,18 @@ mod tests {
     }
 
     #[test]
-    fn accepts_node_ids_that_fit_godot_ints() {
-        assert!(validate_godot_node_ids(&config(127, 127)).is_ok());
+    fn accepts_the_documented_godot_compatible_maximum() {
+        assert!(validate_godot_node_ids(&config(
+            MAX_GODOT_COMPATIBLE_NODE_ID,
+            MAX_GODOT_COMPATIBLE_NODE_ID
+        ))
+        .is_ok());
     }
 
     #[test]
-    fn rejects_local_or_peer_node_ids_with_the_sign_bit_set() {
-        assert!(validate_godot_node_ids(&config(128, 1)).is_err());
-        assert!(validate_godot_node_ids(&config(1, 128)).is_err());
+    fn rejects_local_or_peer_node_ids_that_set_the_sign_bit() {
+        let first_incompatible = MAX_GODOT_COMPATIBLE_NODE_ID + 1;
+        assert!(validate_godot_node_ids(&config(first_incompatible, 1)).is_err());
+        assert!(validate_godot_node_ids(&config(1, first_incompatible)).is_err());
     }
 }
