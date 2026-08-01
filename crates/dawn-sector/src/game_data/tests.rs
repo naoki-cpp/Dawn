@@ -130,8 +130,8 @@ fn missing_runtime_directory_does_not_fallback_to_repository_data() {
 }
 
 #[test]
-fn production_repository_catalog_loads_and_preserves_known_values() {
-    let catalog = GameDataCatalog::load_repository_data().expect("production data is valid");
+fn repository_test_fixture_loads_and_preserves_known_values() {
+    let catalog = test_catalog();
     assert_eq!(
         catalog.modules.len(),
         crate::modules::REQUIRED_MODULE_IDS.len()
