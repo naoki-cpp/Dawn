@@ -10,9 +10,10 @@ use dawn_consensus::RaftActorHandle;
 use dawn_core::{DomainEvent, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
 use dawn_replication::{OutboundLogPublisher, TcpReplicationTransport};
-use dawn_sector::aoi::AoiSink;
+use dawn_sector::aoi::{AoiSink, Observer};
+use dawn_sector::aoi_frame::AoiFrame;
 use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
-use dawn_sector::{aoi, transit};
+use dawn_sector::transit;
 use dawn_wire::ServerMessage;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -20,10 +21,9 @@ use tokio::sync::mpsc;
 
 pub(crate) struct SectorNodeRuntime {
     sector_id: SectorId,
-    aoi_cell_size: f64,
     peer_ws: HashMap<SectorId, SocketAddr>,
     sessions: Vec<ws_server::PlayerSession>,
-    aoi_delivery: aoi::AoiDelivery,
+    aoi_frame: AoiFrame,
     outbound_replication: OutboundLogPublisher<TcpReplicationTransport>,
 }
 
@@ -37,10 +37,9 @@ impl SectorNodeRuntime {
     ) -> Self {
         Self {
             sector_id,
-            aoi_cell_size,
             peer_ws,
             sessions: Vec::new(),
-            aoi_delivery: aoi::AoiDelivery::new(),
+            aoi_frame: AoiFrame::new(aoi_cell_size),
             outbound_replication: OutboundLogPublisher::from_store_tail(
                 repl_transport,
                 event_store,
@@ -58,11 +57,13 @@ impl SectorNodeRuntime {
             sess.player_id,
             sess.ship_id.raw()
         );
-        let seed = node
-            .ship_absolute_pos(sess.ship_id)
-            .map(|pos| node.ships_visible_to(pos, self.aoi_cell_size))
-            .unwrap_or_default();
-        self.aoi_delivery.seed_player(sess.player_id, seed);
+        self.aoi_frame.seed_observer(
+            node,
+            Observer {
+                player_id: sess.player_id,
+                ship_id: sess.ship_id,
+            },
+        );
         self.sessions.push(sess);
     }
 
@@ -196,12 +197,13 @@ impl SectorNodeRuntime {
         warp_arrivals: &[ShipId],
         jumped_ships: &HashMap<ShipId, SectorId>,
     ) {
-        let grid = aoi::CellGrid::build(self.aoi_cell_size, node.ship_absolute_positions());
-        let aoi_delivery = &mut self.aoi_delivery;
+        self.aoi_frame.rebuild(node);
+        let aoi_frame = &mut self.aoi_frame;
+        let peer_ws = &self.peer_ws;
 
         self.sessions.retain_mut(|sess| {
             if let Some(&dest) = jumped_ships.get(&sess.ship_id) {
-                if let Some(&ws_addr) = self.peer_ws.get(&dest) {
+                if let Some(&ws_addr) = peer_ws.get(&dest) {
                     sess.conn.send_message(&ServerMessage::Redirect {
                         ws_addr: ws_addr.to_string(),
                         player_id: sess.player_id.raw(),
@@ -209,24 +211,27 @@ impl SectorNodeRuntime {
                     });
                     println!("[Node] Redirect {:?} -> {ws_addr}", sess.player_id);
                 }
-                aoi_delivery.retain_players(|pid| pid != sess.player_id);
+                aoi_frame.retain_players(|player_id| player_id != sess.player_id);
                 return false;
             }
 
-            let curr = node
-                .ship_absolute_pos(sess.ship_id)
-                .map(|pos| grid.neighbors_of(pos))
-                .unwrap_or_default();
-            let observer = aoi::Observer {
+            let observer = Observer {
                 player_id: sess.player_id,
                 ship_id: sess.ship_id,
             };
             let mut sink = SessionSink(sess);
-            aoi_delivery.deliver_frame(&mut sink, node, observer, curr, new_events, warp_arrivals)
+            aoi_frame.deliver_observer(
+                &mut sink,
+                node,
+                observer,
+                new_events,
+                warp_arrivals,
+            )
         });
         let live: std::collections::HashSet<_> =
-            self.sessions.iter().map(|s| s.player_id).collect();
-        self.aoi_delivery.retain_players(|pid| live.contains(&pid));
+            self.sessions.iter().map(|session| session.player_id).collect();
+        self.aoi_frame
+            .retain_players(|player_id| live.contains(&player_id));
     }
 }
 
@@ -239,6 +244,7 @@ impl AoiSink for SessionSink<'_> {
     fn send_events(&mut self, events: &[DomainEvent]) -> bool {
         self.0.send_events(events)
     }
+
     fn send_message(&mut self, msg: &ServerMessage) -> bool {
         self.0.send_message(msg)
     }
