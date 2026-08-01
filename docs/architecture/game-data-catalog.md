@@ -24,6 +24,10 @@ only to remove repeated test setup, and is not compiled into the production
 crate interface. Test callers consume the fixture's catalog slices directly
 rather than reconstructing category-specific definition vectors.
 
+Snapshot recovery uses definitions from the same catalog that configured the
+node: callers pass `catalog.modules()` and `catalog.ship_types()` to
+`SimulationNode::restore_from`.
+
 When adding or changing game data:
 
 1. Edit the appropriate file under `data/`.
