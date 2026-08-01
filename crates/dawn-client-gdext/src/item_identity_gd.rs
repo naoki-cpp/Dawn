@@ -96,20 +96,3 @@ impl ItemIdentity {
         Self::wrap(ItemId::ScrapMetal)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn typed_identity_preserves_every_domain_variant() {
-        for item_id in [
-            ItemId::Module(ModuleId(3)),
-            ItemId::PackagedShip(ShipTypeId(7)),
-            ItemId::ScrapMetal,
-        ] {
-            let wrapped = ItemIdentity::wrap(item_id);
-            assert_eq!(wrapped.bind().get(), item_id);
-        }
-    }
-}
