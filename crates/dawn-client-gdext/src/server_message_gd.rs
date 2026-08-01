@@ -1,7 +1,8 @@
 use crate::client_outcome::{ClientEventOutcome, ClientOutcome};
 use crate::json_variant::Dict;
 use dawn_wire::{
-    AbsPosWire, EventWire, InitialStateWire, ItemWire, MarketSnapshotWire, ShipStateWire, VelWire,
+    AbsPosWire, EventWire, InitialStateWire, ItemWire, MarketOrderWire, MarketSnapshotWire,
+    ServerMessage, ShipStateWire, VelWire,
 };
 use godot::prelude::*;
 
@@ -29,6 +30,66 @@ impl ServerMessageDecoder {
             }
         }
     }
+
+    /// Debug-build fixture used by GdUnit to exercise the actual
+    /// raw-frame -> typed-outcome -> dispatch boundary.
+    #[cfg(debug_assertions)]
+    #[func]
+    fn test_outcome(&self, kind: GString) -> Option<Gd<ServerMessageOutcome>> {
+        let message = match kind.to_string().as_str() {
+            "Welcome" => ServerMessage::Welcome {
+                player_id: 5,
+                ship_id: 11,
+            },
+            "Redirect" => ServerMessage::Redirect {
+                ws_addr: "127.0.0.1:7880".to_owned(),
+                player_id: 5,
+                ship_id: 11,
+            },
+            "AoiLeave" => ServerMessage::AoiLeave { ship_id: 19 },
+            "InitialState" => ServerMessage::InitialState(InitialStateWire {
+                ships: Vec::new(),
+                system_name: "Alpha".to_owned(),
+                systems: Vec::new(),
+                jump_gates: Vec::new(),
+                stations: Vec::new(),
+                celestial_bodies: Vec::new(),
+                buildable_ship_types: Vec::new(),
+            }),
+            "MarketSnapshot" => ServerMessage::MarketSnapshot(MarketSnapshotWire {
+                balance: 250,
+                orders: vec![
+                    MarketOrderWire {
+                        order_id: 1,
+                        item_id: ItemWire::ScrapMetal,
+                        side: "Ask".to_owned(),
+                        price: 10,
+                        quantity: 2,
+                        is_own: true,
+                    },
+                    MarketOrderWire {
+                        order_id: 2,
+                        item_id: ItemWire::Module { module_id: 3 },
+                        side: "Bid".to_owned(),
+                        price: 20,
+                        quantity: 1,
+                        is_own: false,
+                    },
+                    MarketOrderWire {
+                        order_id: 3,
+                        item_id: ItemWire::PackagedShip { ship_type_id: 7 },
+                        side: "Ask".to_owned(),
+                        price: 30,
+                        quantity: 1,
+                        is_own: false,
+                    },
+                ],
+                notice: "Ready".to_owned(),
+            }),
+            _ => return None,
+        };
+        self.decode(PackedByteArray::from(message.encode().as_slice()))
+    }
 }
 
 /// One typed top-level server outcome.
@@ -45,6 +106,9 @@ impl ServerMessageOutcome {
     /// field-key matching to GDScript.
     #[func]
     fn dispatch(&self, mut target: Gd<Object>) -> bool {
+        if !ensure_handler(&mut target, server_outcome_handler(&self.outcome)) {
+            return false;
+        }
         match &self.outcome {
             ClientOutcome::Welcome { player_id, ship_id } => {
                 target.call(
@@ -140,6 +204,11 @@ impl ServerEventOutcome {
     /// GDScript never reads a variant-name string.
     #[func]
     fn dispatch(&self, mut target: Gd<Object>) -> bool {
+        if let Some(method) = event_outcome_handler(&self.outcome) {
+            if !ensure_handler(&mut target, method) {
+                return false;
+            }
+        }
         match &self.outcome {
             ClientEventOutcome::Domain(event) => dispatch_domain_event(&mut target, event),
             ClientEventOutcome::AoiEnter(ship) => {
@@ -161,6 +230,60 @@ impl ServerEventOutcome {
         }
         true
     }
+}
+
+fn server_outcome_handler(outcome: &ClientOutcome) -> &'static str {
+    match outcome {
+        ClientOutcome::Welcome { .. } => "_accept_welcome",
+        ClientOutcome::Redirect { .. } => "_accept_redirect",
+        ClientOutcome::Event(_) => "_accept_event",
+        ClientOutcome::PlayerLoadout => "_accept_player_loadout",
+        ClientOutcome::InitialState(_) => "_accept_initial_state",
+        ClientOutcome::ModuleActivated { .. } => "_accept_module_activated",
+        ClientOutcome::ModuleDeactivated { .. } => "_accept_module_deactivated",
+        ClientOutcome::MotionCorrection { .. } => "_accept_motion_correction",
+        ClientOutcome::MarketSnapshot(_) => "_accept_market_snapshot",
+    }
+}
+
+fn event_outcome_handler(outcome: &ClientEventOutcome) -> Option<&'static str> {
+    match outcome {
+        ClientEventOutcome::Domain(event) => domain_event_handler(event),
+        ClientEventOutcome::AoiEnter(_) => Some("_handle_aoi_enter"),
+        ClientEventOutcome::AoiLeave { .. } => Some("_handle_aoi_leave"),
+        ClientEventOutcome::PositionSnap { .. } => Some("_handle_position_snap"),
+    }
+}
+
+fn domain_event_handler(event: &EventWire) -> Option<&'static str> {
+    Some(match event {
+        EventWire::ShipSpawned { .. } => "_handle_ship_spawned",
+        EventWire::VelocityChanged { .. } => "_handle_velocity_changed",
+        EventWire::ShipDespawned { .. } => "_handle_ship_despawned",
+        EventWire::ShipDocked { .. } => "_handle_ship_docked",
+        EventWire::ShipUndocked { .. } => "_handle_ship_undocked",
+        EventWire::ShipAssembled { .. } => return None,
+        EventWire::DamageTaken { .. } => "_handle_damage_taken",
+        EventWire::RepairApplied { .. } => "_handle_repair_applied",
+        EventWire::ShipDestroyed { .. } => "_handle_ship_destroyed",
+        EventWire::TargetLocked { .. } => "_handle_target_locked",
+        EventWire::LockLost { .. } => "_handle_lock_lost",
+        EventWire::ModuleActivated { .. } => "_on_module_activated",
+        EventWire::ModuleDeactivated { .. } => "_on_module_deactivated",
+        EventWire::JumpGateUsed { .. } => "_handle_jump_gate_used",
+        EventWire::StarSystemChanged { .. } => "_handle_star_system_changed",
+    })
+}
+
+fn ensure_handler(target: &mut Gd<Object>, method: &str) -> bool {
+    let exists = target
+        .call("has_method", vslice![method])
+        .try_to::<bool>()
+        .unwrap_or(false);
+    if !exists {
+        godot_error!("typed ServerMessage dispatch target is missing method '{method}'");
+    }
+    exists
 }
 
 fn dispatch_domain_event(target: &mut Gd<Object>, event: &EventWire) {
@@ -502,5 +625,5 @@ fn call_dict(target: &mut Gd<Object>, method: &str, payload: Dict) {
 }
 
 fn godot_i64(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
+    i64::try_from(value).expect("ClientOutcome validates every Godot-facing u64")
 }

@@ -93,6 +93,68 @@ pub struct PeerConfig {
 pub fn load(path: &str) -> anyhow::Result<NodeConfig> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("cannot read config file '{}': {}", path, e))?;
-    toml::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("cannot parse config file '{}': {}", path, e))
+    let config: NodeConfig = toml::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("cannot parse config file '{}': {}", path, e))?;
+    validate_godot_node_ids(&config)?;
+    Ok(config)
+}
+
+fn validate_godot_node_ids(config: &NodeConfig) -> anyhow::Result<()> {
+    const MAX_GODOT_NODE_ID: u8 = 127;
+    if config.node_id > MAX_GODOT_NODE_ID {
+        anyhow::bail!(
+            "node_id {} exceeds {}; entity IDs must fit Godot's signed 64-bit int",
+            config.node_id,
+            MAX_GODOT_NODE_ID
+        );
+    }
+    for peer in &config.peers {
+        if peer.node_id > MAX_GODOT_NODE_ID {
+            anyhow::bail!(
+                "peer node_id {} exceeds {}; entity IDs must fit Godot's signed 64-bit int",
+                peer.node_id,
+                MAX_GODOT_NODE_ID
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(node_id: u8, peer_node_id: u8) -> NodeConfig {
+        NodeConfig {
+            node_id,
+            sector_id: 0,
+            ws_addr: "127.0.0.1:7878".parse().unwrap(),
+            raft_addr: "127.0.0.1:7879".parse().unwrap(),
+            repl_addr: "127.0.0.1:7880".parse().unwrap(),
+            npc_ships: 0,
+            pop_cap: 1,
+            peers: vec![PeerConfig {
+                node_id: peer_node_id,
+                raft_addr: "127.0.0.1:7881".parse().unwrap(),
+                repl_addr: "127.0.0.1:7882".parse().unwrap(),
+                ws_addr: "127.0.0.1:7883".parse().unwrap(),
+            }],
+            event_log_path: String::new(),
+            snapshot_path: String::new(),
+            cold_path: String::new(),
+            checkpoint_interval_ticks: 1,
+            station_inventory_db_path: String::new(),
+        }
+    }
+
+    #[test]
+    fn accepts_node_ids_that_fit_godot_ints() {
+        assert!(validate_godot_node_ids(&config(127, 127)).is_ok());
+    }
+
+    #[test]
+    fn rejects_local_or_peer_node_ids_with_the_sign_bit_set() {
+        assert!(validate_godot_node_ids(&config(128, 1)).is_err());
+        assert!(validate_godot_node_ids(&config(1, 128)).is_err());
+    }
 }

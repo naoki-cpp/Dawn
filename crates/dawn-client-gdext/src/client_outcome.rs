@@ -53,9 +53,9 @@ pub(crate) enum ClientEventOutcome {
 
 impl ClientOutcome {
     pub(crate) fn decode(bytes: &[u8]) -> Result<Self, String> {
-        ServerMessage::decode(bytes)
-            .map(Self::from_message)
-            .map_err(|error| error.to_string())
+        let message = ServerMessage::decode(bytes).map_err(|error| error.to_string())?;
+        validate_godot_integer_range(&message)?;
+        Ok(Self::from_message(message))
     }
 
     fn from_message(message: ServerMessage) -> Self {
@@ -116,6 +116,105 @@ impl ClientOutcome {
             ServerMessage::MarketSnapshot(snapshot) => Self::MarketSnapshot(snapshot),
         }
     }
+}
+
+fn ensure_godot_int(value: u64, field: &str) -> Result<(), String> {
+    i64::try_from(value)
+        .map(|_| ())
+        .map_err(|_| format!("{field}={value} exceeds Godot's signed 64-bit integer range"))
+}
+
+fn validate_event(event: &EventWire) -> Result<(), String> {
+    match event {
+        EventWire::ShipSpawned { ship_id, tick, .. }
+        | EventWire::VelocityChanged { ship_id, tick, .. }
+        | EventWire::ShipDespawned { ship_id, tick }
+        | EventWire::ShipDocked { ship_id, tick, .. }
+        | EventWire::ShipUndocked { ship_id, tick, .. }
+        | EventWire::ShipAssembled { ship_id, tick, .. }
+        | EventWire::DamageTaken { ship_id, tick, .. }
+        | EventWire::RepairApplied { ship_id, tick, .. }
+        | EventWire::ModuleDeactivated { ship_id, tick, .. }
+        | EventWire::JumpGateUsed { ship_id, tick, .. }
+        | EventWire::StarSystemChanged { ship_id, tick, .. } => {
+            ensure_godot_int(*ship_id, "event.ship_id")?;
+            ensure_godot_int(*tick, "event.tick")?;
+        }
+        EventWire::ShipDestroyed {
+            ship_id,
+            killer_id,
+            tick,
+        } => {
+            ensure_godot_int(*ship_id, "event.ship_id")?;
+            ensure_godot_int(*killer_id, "event.killer_id")?;
+            ensure_godot_int(*tick, "event.tick")?;
+        }
+        EventWire::TargetLocked {
+            locker_id,
+            target_id,
+            tick,
+        }
+        | EventWire::LockLost {
+            locker_id,
+            target_id,
+            tick,
+        } => {
+            ensure_godot_int(*locker_id, "event.locker_id")?;
+            ensure_godot_int(*target_id, "event.target_id")?;
+            ensure_godot_int(*tick, "event.tick")?;
+        }
+        EventWire::ModuleActivated {
+            ship_id,
+            target_ship_id,
+            tick,
+            ..
+        } => {
+            ensure_godot_int(*ship_id, "event.ship_id")?;
+            if let Some(target_ship_id) = target_ship_id {
+                ensure_godot_int(*target_ship_id, "event.target_ship_id")?;
+            }
+            ensure_godot_int(*tick, "event.tick")?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
+    match message {
+        ServerMessage::Welcome { player_id, ship_id }
+        | ServerMessage::Redirect {
+            player_id, ship_id, ..
+        } => {
+            ensure_godot_int(*player_id, "player_id")?;
+            ensure_godot_int(*ship_id, "ship_id")?;
+        }
+        ServerMessage::Event(event) => validate_event(event)?,
+        ServerMessage::PlayerLoadout(_) => {}
+        ServerMessage::InitialState(state) => {
+            for ship in &state.ships {
+                ensure_godot_int(ship.ship_id, "initial_state.ship_id")?;
+            }
+        }
+        ServerMessage::AoiEnter(ship) => {
+            ensure_godot_int(ship.ship_id, "aoi_enter.ship_id")?;
+        }
+        ServerMessage::AoiLeave { ship_id } | ServerMessage::PositionSnap { ship_id, .. } => {
+            ensure_godot_int(*ship_id, "ship_id")?;
+        }
+        ServerMessage::MotionCorrection { ship_id, tick, .. } => {
+            ensure_godot_int(*ship_id, "motion_correction.ship_id")?;
+            ensure_godot_int(*tick, "motion_correction.tick")?;
+        }
+        ServerMessage::MarketSnapshot(snapshot) => {
+            ensure_godot_int(snapshot.balance, "market.balance")?;
+            for order in &snapshot.orders {
+                ensure_godot_int(order.order_id, "market.order_id")?;
+                ensure_godot_int(order.price, "market.price")?;
+                ensure_godot_int(order.quantity, "market.quantity")?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -296,6 +395,20 @@ mod tests {
                 ..
             } if reason == "range"
         ));
+    }
+
+    #[test]
+    fn unsigned_ids_outside_godot_int_range_are_rejected() {
+        let invalid_ship_id = (i64::MAX as u64) + 1;
+        let error = ClientOutcome::decode(
+            &ServerMessage::Welcome {
+                player_id: 1,
+                ship_id: invalid_ship_id,
+            }
+            .encode(),
+        )
+        .expect_err("out-of-range ids must not be saturated");
+        assert!(error.contains("ship_id"));
     }
 
     #[test]
