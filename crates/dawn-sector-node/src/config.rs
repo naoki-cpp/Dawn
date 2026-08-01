@@ -4,6 +4,7 @@
 //! describes which sector it owns, its own listen addresses, and how to reach
 //! every peer node for Raft consensus and log replication.
 
+use dawn_core::entity::MAX_GODOT_COMPATIBLE_NODE_ID;
 use serde::Deserialize;
 use std::net::SocketAddr;
 
@@ -93,6 +94,77 @@ pub struct PeerConfig {
 pub fn load(path: &str) -> anyhow::Result<NodeConfig> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("cannot read config file '{}': {}", path, e))?;
-    toml::from_str(&content)
-        .map_err(|e| anyhow::anyhow!("cannot parse config file '{}': {}", path, e))
+    let config: NodeConfig = toml::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("cannot parse config file '{}': {}", path, e))?;
+    validate_godot_node_ids(&config)?;
+    Ok(config)
+}
+
+/// The current Godot client stores packed entity IDs in its signed 64-bit
+/// `int`, while [`dawn_core::EntityId`] reserves the upper eight bits for the
+/// node ID. Keep the deployment in the range that preserves the full 56-bit
+/// counter without setting the sign bit. The domain/wire format still supports
+/// all `u8` node IDs for future clients with a wider ID projection.
+fn validate_godot_node_ids(config: &NodeConfig) -> anyhow::Result<()> {
+    if config.node_id > MAX_GODOT_COMPATIBLE_NODE_ID {
+        anyhow::bail!(
+            "node_id {} exceeds the Godot-compatible maximum {}; use a wider client ID projection before assigning this node ID",
+            config.node_id,
+            MAX_GODOT_COMPATIBLE_NODE_ID
+        );
+    }
+    for peer in &config.peers {
+        if peer.node_id > MAX_GODOT_COMPATIBLE_NODE_ID {
+            anyhow::bail!(
+                "peer node_id {} exceeds the Godot-compatible maximum {}; use a wider client ID projection before assigning this node ID",
+                peer.node_id,
+                MAX_GODOT_COMPATIBLE_NODE_ID
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(node_id: u8, peer_node_id: u8) -> NodeConfig {
+        NodeConfig {
+            node_id,
+            sector_id: 0,
+            ws_addr: "127.0.0.1:7878".parse().unwrap(),
+            raft_addr: "127.0.0.1:7879".parse().unwrap(),
+            repl_addr: "127.0.0.1:7880".parse().unwrap(),
+            npc_ships: 0,
+            pop_cap: 1,
+            peers: vec![PeerConfig {
+                node_id: peer_node_id,
+                raft_addr: "127.0.0.1:7881".parse().unwrap(),
+                repl_addr: "127.0.0.1:7882".parse().unwrap(),
+                ws_addr: "127.0.0.1:7883".parse().unwrap(),
+            }],
+            event_log_path: String::new(),
+            snapshot_path: String::new(),
+            cold_path: String::new(),
+            checkpoint_interval_ticks: 1,
+            station_inventory_db_path: String::new(),
+        }
+    }
+
+    #[test]
+    fn accepts_the_documented_godot_compatible_maximum() {
+        assert!(validate_godot_node_ids(&config(
+            MAX_GODOT_COMPATIBLE_NODE_ID,
+            MAX_GODOT_COMPATIBLE_NODE_ID
+        ))
+        .is_ok());
+    }
+
+    #[test]
+    fn rejects_local_or_peer_node_ids_that_set_the_sign_bit() {
+        let first_incompatible = MAX_GODOT_COMPATIBLE_NODE_ID + 1;
+        assert!(validate_godot_node_ids(&config(first_incompatible, 1)).is_err());
+        assert!(validate_godot_node_ids(&config(1, first_incompatible)).is_err());
+    }
 }

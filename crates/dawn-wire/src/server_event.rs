@@ -16,10 +16,9 @@ use crate::{AbsPosWire, VelWire};
 ///
 /// Externally tagged (serde's default enum representation), not
 /// `#[serde(tag = "type")]` -- `postcard` cannot deserialize an internally
-/// tagged enum (no `deserialize_any`). `dawn-client-gdext`'s
-/// `ServerMessageDecoder` converts the externally tagged shape back into a
-/// `{"type": ..., ...}` Dictionary so existing GDScript consumers (written
-/// against the old JSON shape) don't need to change.
+/// tagged enum (no `deserialize_any`). `dawn-client-gdext` decodes this
+/// enum into a typed client outcome and performs all variant dispatch in
+/// Rust; GDScript never reconstructs this enum from a string tag.
 ///
 /// `Deserialize` (ADR-0042) exists so `dawn-client-gdext` can decode a
 /// `ServerMessage` it receives; the server itself only ever serializes this

@@ -2,11 +2,10 @@
 //!
 //! `InitialState`'s navigation payload (system names, jump gates, stations,
 //! celestial bodies, buildable ship types) is a nested structure, not flat
-//! scalars, so it can't take the same "just pass typed args" fix as
-//! `WorldSession::apply_health_event`. Instead this walks the `Dictionary`
-//! `ServerMessageDecoder` already produced from the decoded `InitialStateWire`
-//! directly, so `main.gd` never needs to `JSON.stringify` it back into text
-//! only for `serde_json` to parse it again on this side of the FFI boundary.
+//! scalars. The inbound typed outcome projects it directly from
+//! `InitialStateWire` into this Godot-facing `Dictionary`; this module then
+//! converts that boundary object into the pure Rust client model. No JSON
+//! value or text round-trip exists on the runtime path.
 //! Missing fields default the same way the old `#[serde(default)]`
 //! `Deserialize` impls did. Wrong-typed fields are *not* equivalent to the
 //! old behavior: the old JSON parse failed outright on a type mismatch and

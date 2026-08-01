@@ -3,12 +3,23 @@
 //! # ID encoding
 //!
 //! `EntityId` packs `NodeId` into the upper 8 bits and a monotonic counter
-//! into the lower 56 bits.  This guarantees global uniqueness across nodes
+//! into the lower 56 bits. This guarantees global uniqueness across nodes
 //! without coordination, as long as each node owns its own counter.
 //!
-//! IDs are **never reused**.  See CLAUDE.md INV-004 and FBD-005.
+//! The wire/domain representation supports all 256 `NodeId` values. The
+//! current Godot client exposes entity IDs through its signed 64-bit `int`, so
+//! deployments serving that client must keep node IDs in `0..=127`; see
+//! [`MAX_GODOT_COMPATIBLE_NODE_ID`]. Nodes above that range remain representable
+//! in the domain and persistence formats, but require a non-scalar client ID
+//! projection before they can be exposed to Godot.
+//!
+//! IDs are **never reused**. See CLAUDE.md INV-004 and FBD-005.
 
 use serde::{Deserialize, Serialize};
+
+/// Largest node ID whose packed [`EntityId`] always fits Godot's signed
+/// 64-bit `int` while retaining the full 56-bit per-node counter space.
+pub const MAX_GODOT_COMPATIBLE_NODE_ID: u8 = i8::MAX as u8;
 
 // ── EntityId ─────────────────────────────────────────────────────────────────
 
@@ -23,7 +34,7 @@ use serde::{Deserialize, Serialize};
 pub struct EntityId(u64);
 
 impl EntityId {
-    /// Create a new ID.  `counter` must be monotonically increasing within a
+    /// Create a new ID. `counter` must be monotonically increasing within a
     /// given `node_id` across the entire lifetime of the world.
     pub fn new(node_id: NodeId, counter: u64) -> Self {
         debug_assert!(
@@ -82,6 +93,10 @@ impl std::fmt::Display for ShipId {
 // ── NodeId ───────────────────────────────────────────────────────────────────
 
 /// Identifies a simulation node in the cluster.
+///
+/// The domain supports the full `u8` range. A deployment that sends packed
+/// entity IDs to the current Godot client must use node IDs no greater than
+/// [`MAX_GODOT_COMPATIBLE_NODE_ID`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeId(pub u8);
 
@@ -124,6 +139,19 @@ mod tests {
         let id = EntityId::new(NodeId(255), max_counter);
         assert_eq!(id.counter(), max_counter);
         assert_eq!(id.node_id(), NodeId(255));
+    }
+
+    #[test]
+    fn maximum_godot_compatible_node_fits_signed_64_bits() {
+        let max_counter = (1u64 << 56) - 1;
+        let id = EntityId::new(NodeId(MAX_GODOT_COMPATIBLE_NODE_ID), max_counter);
+        assert!(i64::try_from(id.raw()).is_ok());
+    }
+
+    #[test]
+    fn next_node_sets_the_signed_integer_sign_bit() {
+        let id = EntityId::new(NodeId(MAX_GODOT_COMPATIBLE_NODE_ID + 1), 0);
+        assert!(i64::try_from(id.raw()).is_err());
     }
 
     #[test]

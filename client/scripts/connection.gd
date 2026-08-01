@@ -16,7 +16,7 @@ extends Node
 
 # ── シグナル ──────────────────────────────────────────────────────────────────
 
-signal event_received(payload: Dictionary)
+signal event_received(outcome: ServerEventOutcome)
 ## Owner-only authoritative normal-flight state for client prediction (ADR-0043).
 signal motion_correction_received(payload: Dictionary)
 signal connection_changed(connected: bool)
@@ -57,9 +57,8 @@ var _reconnect_attempts : int       = 0
 var _server_url      : String        = SERVER_URL
 ## ClientCommand/ServerMessageDecoder are GDExtension classes (dawn-wire/
 ## dawn-client-gdext, ADR-0041/ADR-0042) -- globally registered, no preload
-## needed. Their methods take &self (matching every other GDExtension class
-## in this project, e.g. PlayerLoadout), so callers need an instance rather
-## than calling the class name directly.
+## needed. The decoder returns a typed ServerMessageOutcome that owns all
+## Rust-side variant projection.
 var _cmd             : ClientCommand         = ClientCommand.new()
 var _decoder         : ServerMessageDecoder  = ServerMessageDecoder.new()
 
@@ -319,75 +318,81 @@ func _connect_to_server() -> void:
 static func should_log_reconnect(attempt: int, elapsed: float, interval: float) -> bool:
 	return attempt <= 1 or elapsed >= interval
 
-## One WebSocket frame always carries exactly one message (ADR-0042). Every
-## server -> client message is the postcard `ServerMessage` binary envelope
-## (ADR-0042 stages 1-2c, migration complete); there is no text-frame path
-## to fall back to (issue #179). `ServerMessageDecoder` converts most binary
-## variants (including `InitialState`, `AoiEnter`/`AoiLeave`, `PositionSnap`,
-## `MotionCorrection`) into the same `{"type": ..., ...}` Dictionary shape the
-## old JSON messages used, except `PlayerLoadout` (ADR-0042 2a), which it
-## reduces to a bare `{"type": "PlayerLoadout"}` dispatch tag -- the raw
-## bytes go straight to `PlayerLoadout.apply_wire_bytes` instead, bypassing
-## the Dictionary entirely for precision (see `player_fitting_received`).
+## One WebSocket frame always carries exactly one postcard `ServerMessage`
+## (ADR-0042). `ServerMessageDecoder` returns a typed Rust outcome; the
+## outcome itself owns variant projection and calls one fixed `_accept_*`
+## method below. No runtime path rebuilds the wire enum as a Dictionary or
+## dispatches by a string `"type"` field.
 func _receive_messages() -> void:
 	while _ws.get_available_packet_count() > 0:
 		var packet: PackedByteArray = _ws.get_packet()
-		var payload: Dictionary = _decoder.decode(packet)
-		if payload.is_empty():
+		var outcome: ServerMessageOutcome = _decoder.decode(packet)
+		if outcome == null:
 			push_warning("[Connection] failed to decode binary ServerMessage")
 			continue
-		_handle_message(payload, packet)
+		if not outcome.dispatch(self):
+			push_warning("[Connection] failed to dispatch typed ServerMessage outcome")
 
-func _handle_message(payload: Dictionary, raw_bytes: PackedByteArray) -> void:
-	var msg_type: String = payload.get("type", "") as String
-	match msg_type:
-		"Welcome":
-			player_id = payload.get("player_id", -1) as int
-			ship_id   = payload.get("ship_id",   -1) as int
-			_welcomed = true
-			print("[Connection] Welcome: player_id=%d ship_id=%d" % [player_id, ship_id])
-			welcomed.emit(player_id, ship_id)
-		"InitialState":
-			var ships: Array = payload.get("ships", []) as Array
-			print("[Connection] InitialState: %d ships" % ships.size())
-			initial_state_received.emit(payload)
-		"PlayerLoadout", "PlayerFitting":
-			print("[Connection] PlayerLoadout received")
-			player_fitting_received.emit(raw_bytes)
-		"Redirect":
-			_handle_redirect(payload)
-		"ModuleActivated":
-			var sid: int    = payload.get("ship_id",   0)  as int
-			var mid: int    = payload.get("module_id", 0)  as int
-			var slt: String = payload.get("slot",      "") as String
-			module_activated.emit(sid, mid, slt)
-		"ModuleDeactivated":
-			var sid: int    = payload.get("ship_id",   0)  as int
-			var mid: int    = payload.get("module_id", 0)  as int
-			var slt: String = payload.get("slot",      "") as String
-			var rsn: String = payload.get("reason",    "") as String
-			module_deactivated.emit(sid, mid, slt, rsn)
-		"MarketSnapshot":
-			market_snapshot_received.emit(payload)
-		"MotionCorrection":
-			motion_correction_received.emit(payload)
-		_:
-			event_received.emit(payload)
 
-func _handle_redirect(payload: Dictionary) -> void:
-	var ws_addr: String = payload.get("ws_addr", "") as String
+func _accept_welcome(p_player_id: int, p_ship_id: int) -> void:
+	player_id = p_player_id
+	ship_id = p_ship_id
+	_welcomed = true
+	print("[Connection] Welcome: player_id=%d ship_id=%d" % [player_id, ship_id])
+	welcomed.emit(player_id, ship_id)
+
+
+func _accept_initial_state(state: Dictionary) -> void:
+	var ships: Array = state.get("ships", []) as Array
+	print("[Connection] InitialState: %d ships" % ships.size())
+	initial_state_received.emit(state)
+
+
+func _accept_event(outcome: ServerEventOutcome) -> void:
+	event_received.emit(outcome)
+
+
+func _accept_player_loadout(bytes: PackedByteArray) -> void:
+	print("[Connection] PlayerLoadout received")
+	player_fitting_received.emit(bytes)
+
+
+func _accept_redirect(ws_addr: String, p_player_id: int, p_ship_id: int) -> void:
 	if ws_addr.is_empty():
 		push_warning("[Connection] Redirect without ws_addr")
 		return
-	player_id = payload.get("player_id", player_id) as int
-	ship_id = payload.get("ship_id", ship_id) as int
+	player_id = p_player_id
+	ship_id = p_ship_id
 	_server_url = _normalize_ws_url(ws_addr)
 	_welcomed = false
 	_connected = false
 	_reconnect_timer = RECONNECT_INTERVAL
-	print("[Connection] Redirect: reconnecting to %s as player_id=%d ship_id=%d" % [_server_url, player_id, ship_id])
+	print("[Connection] Redirect: reconnecting to %s as player_id=%d ship_id=%d" % [
+		_server_url, player_id, ship_id])
 	connection_changed.emit(false)
 	_ws.close()
+
+
+func _accept_module_activated(p_ship_id: int, p_module_id: int, slot: String) -> void:
+	module_activated.emit(p_ship_id, p_module_id, slot)
+
+
+func _accept_module_deactivated(
+	p_ship_id: int,
+	p_module_id: int,
+	slot: String,
+	reason: String
+) -> void:
+	module_deactivated.emit(p_ship_id, p_module_id, slot, reason)
+
+
+func _accept_market_snapshot(snapshot: Dictionary) -> void:
+	market_snapshot_received.emit(snapshot)
+
+
+func _accept_motion_correction(payload: Dictionary) -> void:
+	motion_correction_received.emit(payload)
+
 
 func _normalize_ws_url(addr: String) -> String:
 	if addr.begins_with("ws://") or addr.begins_with("wss://"):

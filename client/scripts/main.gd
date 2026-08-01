@@ -483,26 +483,12 @@ func _send_stop_command() -> void:
 
 # -- Event handlers -----------------------------------------------------------
 
-func _on_event_received(payload: Dictionary) -> void:
+func _on_event_received(outcome: ServerEventOutcome) -> void:
 	_session.increment_event_count()
 	_sync_session_state()
-	var event_type: String = payload.get("type", "") as String
-	match event_type:
-		"ShipSpawned"      : _handle_ship_spawned(payload)
-		"VelocityChanged"  : _handle_velocity_changed(payload)
-		"ShipDespawned"    : _handle_ship_despawned(payload)
-		"ShipDocked"       : _handle_ship_docked(payload)
-		"ShipUndocked"     : _handle_ship_undocked(payload)
-		"DamageTaken"   : _handle_damage_taken(payload)
-		"RepairApplied" : _handle_repair_applied(payload)
-		"ShipDestroyed" : _handle_ship_destroyed(payload)
-		"TargetLocked"  : _handle_target_locked(payload)
-		"LockLost"      : _handle_lock_lost(payload)
-		"JumpGateUsed"      : _handle_jump_gate_used(payload)
-		"StarSystemChanged" : _handle_star_system_changed(payload)
-		"AoiEnter"          : _handle_aoi_enter(payload)
-		"AoiLeave"          : _handle_aoi_leave(payload)
-		"PositionSnap"      : _handle_position_snap(payload)
+	if not outcome.dispatch(self):
+		push_warning("[World] failed to dispatch typed server event outcome")
+
 
 # -- Position snap (ADR-0029) -------------------------------------------------
 

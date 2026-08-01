@@ -156,7 +156,6 @@ dependencies = [
  "dawn-sector",
  "dawn-wire",
  "godot",
- "serde",
  "serde_json",
 ]
 
@@ -251,6 +250,7 @@ dependencies = [
  "dawn-replication",
  "dawn-sector",
  "dawn-wire",
+ "postcard",
  "rand 0.8.6",
  "serde",
  "tokio",
