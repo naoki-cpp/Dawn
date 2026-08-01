@@ -2,10 +2,7 @@ name: Issue 232 restore docs fix
 
 on:
   push:
-    branches:
-      - agent/delete-game-data-compat
-    paths:
-      - .github/workflows/issue-232-doc-fix.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
