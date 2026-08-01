@@ -9,6 +9,7 @@ on:
       - '.github/issue-236-core-fix.py'
       - '.github/issue-236-core-fix2.py'
       - '.github/issue-236-followup.py'
+      - '.github/issue-236-tests.py'
       - '.github/workflows/issue-236-core-check.yml'
 
 permissions:
@@ -32,6 +33,7 @@ jobs:
           python3 .github/issue-236-core-fix2.py
           python3 .github/issue-236-core.py
           python3 .github/issue-236-followup.py
+          python3 .github/issue-236-tests.py
       - name: Format
         run: cargo fmt --all
       - name: Check affected crates
