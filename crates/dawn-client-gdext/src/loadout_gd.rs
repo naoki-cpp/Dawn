@@ -1,6 +1,7 @@
 use dawn_client_core::PlayerLoadoutMsg;
 use godot::prelude::*;
 
+use crate::client_outcome::validate_player_loadout_godot_ranges;
 use crate::item_row_gd::ItemRow;
 use crate::module_row_gd::{parse_kind, ModuleRow};
 use crate::owned_ship_row_gd::OwnedShipRow;
@@ -77,7 +78,8 @@ fn wire_to_module_row(row: dawn_wire::ModuleRowWire) -> dawn_client_core::Module
         is_active: row.is_active,
         is_active_module: row.is_active_module,
         cap_cost_per_cycle: row.cap_cost_per_cycle as f64,
-        cycle_time_ticks: row.cycle_time_ticks as u32,
+        cycle_time_ticks: u32::try_from(row.cycle_time_ticks)
+            .expect("PlayerLoadout range validation covers cycle_time_ticks"),
         // dawn_wire::ModuleRowWire.stat_delta is already dawn_core::StatDelta
         // -- the same type dawn_client_core::ModuleRow.stat_delta now uses
         // directly, so there's nothing to convert.
@@ -148,13 +150,18 @@ impl PlayerLoadout {
     /// (ADR-0042) directly into this crate's typed state -- bypassing the
     /// generic `Dictionary` decode path (`ServerMessageDecoder`) entirely,
     /// since Rust-to-Rust decode preserves exact int/float types with no
-    /// GDScript `JSON.parse_string` lossiness to work around. Returns
-    /// `false` (and leaves the previous state untouched) if `bytes` isn't a
-    /// valid `ServerMessage::PlayerLoadout` frame.
+    /// GDScript `JSON.parse_string` lossiness to work around. The decoded
+    /// values are checked against every narrower Godot/client representation
+    /// before state is replaced. Returns `false` and leaves the previous state
+    /// untouched if the frame or one of those boundary values is invalid.
     #[func]
     fn apply_wire_bytes(&mut self, bytes: PackedByteArray) -> bool {
         match dawn_wire::ServerMessage::decode(bytes.as_slice()) {
             Ok(dawn_wire::ServerMessage::PlayerLoadout(wire)) => {
+                if let Err(error) = validate_player_loadout_godot_ranges(&wire) {
+                    godot_error!("PlayerLoadout.apply_wire_bytes: {error}");
+                    return false;
+                }
                 self.loadout = Some(wire_to_loadout_msg(wire));
                 true
             }
@@ -171,15 +178,24 @@ impl PlayerLoadout {
 
     #[func]
     fn tick(&self) -> i64 {
-        self.loadout.as_ref().map(|l| l.tick as i64).unwrap_or(0)
+        self.loadout
+            .as_ref()
+            .map(|loadout| {
+                i64::try_from(loadout.tick)
+                    .expect("PlayerLoadout range validation covers the tick")
+            })
+            .unwrap_or(0)
     }
 
     #[func]
     fn active_ship_id(&self) -> i64 {
         self.loadout
             .as_ref()
-            .and_then(|l| l.active_ship_id)
-            .map(|id| id as i64)
+            .and_then(|loadout| loadout.active_ship_id)
+            .map(|id| {
+                i64::try_from(id)
+                    .expect("PlayerLoadout range validation covers the active ship ID")
+            })
             .unwrap_or(-1)
     }
 
@@ -408,6 +424,7 @@ mod tests {
         let wire = node
             .build_player_loadout_json(ship_id)
             .expect("freshly spawned ship has a loadout payload");
+        validate_player_loadout_godot_ranges(&wire).expect("production loadout fits client ranges");
         let loadout = wire_to_loadout_msg(wire);
 
         assert_eq!(loadout.active_ship_id, Some(ship_id.raw()));
@@ -440,6 +457,7 @@ mod tests {
         let wire = node
             .build_player_loadout_json(ship_id)
             .expect("ship has a loadout payload");
+        validate_player_loadout_godot_ranges(&wire).expect("production loadout fits client ranges");
         let loadout = wire_to_loadout_msg(wire);
 
         let row = loadout
