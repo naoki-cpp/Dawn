@@ -1,17 +1,43 @@
 use crate::fitting::ModuleId;
 use crate::ship_type::ShipTypeId;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// Canonical identity for every inventory and Market item (ADR-0034).
 ///
 /// The variant owns the only identifier that is valid for that item kind, so
 /// impossible combinations such as a Module carrying a ShipTypeId cannot be
 /// represented in domain code.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum ItemId {
     Module(ModuleId),
     PackagedShip(ShipTypeId),
     ScrapMetal,
+}
+
+impl<'de> Deserialize<'de> for ItemId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        enum ItemIdRepr {
+            Module(ModuleId),
+            PackagedShip(ShipTypeId),
+            ScrapMetal,
+        }
+
+        match ItemIdRepr::deserialize(deserializer)? {
+            ItemIdRepr::Module(ModuleId(0)) => Err(serde::de::Error::custom(
+                "Module Item identity must be non-zero",
+            )),
+            ItemIdRepr::PackagedShip(ShipTypeId(0)) => Err(serde::de::Error::custom(
+                "PackagedShip Item identity must be non-zero",
+            )),
+            ItemIdRepr::Module(module_id) => Ok(Self::Module(module_id)),
+            ItemIdRepr::PackagedShip(ship_type_id) => Ok(Self::PackagedShip(ship_type_id)),
+            ItemIdRepr::ScrapMetal => Ok(Self::ScrapMetal),
+        }
+    }
 }
 
 /// The legacy SQLite column representation used by both Station inventory and

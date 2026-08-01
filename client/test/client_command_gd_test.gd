@@ -7,9 +7,8 @@
 ## reverse of what ClientCommand builds) and check the fields a real server
 ## would read, proving the shape matches
 ## docs/architecture/wire-protocol-commands.schema.json without needing a
-## live connection. ClientCommand/ClientMessageDecoder are globally
-## registered GDExtension classes (no preload needed, same as
-## PlayerLoadout/ModuleRow/ItemRow).
+## live connection. ClientCommand/ClientMessageDecoder/ItemIdentity are
+## globally registered GDExtension classes.
 extends GdUnitTestSuite
 
 var _cmd: ClientCommand = ClientCommand.new()
@@ -99,21 +98,32 @@ func test_warp_to_body_command_wraps_the_body_id_in_the_target_tag() -> void:
 	assert_int(int(target["Body"])).is_equal(5)
 
 
-func test_transfer_to_station_command_sets_to_station_direction() -> void:
-	var bytes: PackedByteArray = _cmd.transfer_to_station_command(1, 2, "ScrapMetal", 0, 0)
+func test_transfer_to_station_command_preserves_scrap_identity() -> void:
+	var bytes: PackedByteArray = _cmd.transfer_to_station_command(
+		1, 2, ItemIdentity.scrap_metal())
 	var d: Dictionary = _decoder.decode(bytes)
 	assert_str(d["type"]).is_equal("TransferToStationCommand")
 	assert_str(d["direction"]).is_equal("ToStation")
 	assert_str(d["item_id"]).is_equal("ScrapMetal")
 
 
-func test_transfer_from_station_command_sets_to_ship_direction() -> void:
-	var bytes: PackedByteArray = _cmd.transfer_from_station_command(1, 2, "Module", 5, 0)
+func test_transfer_from_station_command_preserves_module_identity() -> void:
+	var module_id: ItemIdentity = ItemIdentity.module(5) as ItemIdentity
+	var bytes: PackedByteArray = _cmd.transfer_from_station_command(1, 2, module_id)
 	var d: Dictionary = _decoder.decode(bytes)
 	assert_str(d["direction"]).is_equal("ToShip")
 	var item_id: Dictionary = d["item_id"]
 	var module: Dictionary = item_id["Module"]
 	assert_int(int(module["module_id"])).is_equal(5)
+
+
+func test_transfer_preserves_packaged_ship_identity() -> void:
+	var ship_item: ItemIdentity = ItemIdentity.packaged_ship(7) as ItemIdentity
+	var bytes: PackedByteArray = _cmd.transfer_to_station_command(1, 2, ship_item)
+	var d: Dictionary = _decoder.decode(bytes)
+	var item_id: Dictionary = d["item_id"]
+	var packaged_ship: Dictionary = item_id["PackagedShip"]
+	assert_int(int(packaged_ship["ship_type_id"])).is_equal(7)
 
 
 func test_undock_command_has_no_extra_fields() -> void:
@@ -125,9 +135,7 @@ func test_undock_command_has_no_extra_fields() -> void:
 
 ## Contract tests for the schema-driven `build()` seam (added when the 14
 ## flat-scalar commands were collapsed out of individual #[func] wrappers --
-## see ADR-0041's follow-up note). These exercise `build()` itself rather
-## than one specific command, since all 14 collapsed commands share this one
-## mechanism.
+## see ADR-0041's follow-up note).
 func test_build_produces_the_tagged_message_for_a_simple_command() -> void:
 	var bytes: PackedByteArray = _cmd.build("DockCommand", {"station_id": 7})
 	var d: Dictionary = _decoder.decode(bytes)
@@ -146,15 +154,8 @@ func test_build_returns_empty_bytes_for_a_missing_required_field() -> void:
 
 
 func test_market_command_preserves_the_typed_item_identity() -> void:
-	var bytes := _cmd.market_place_order_command({
-		"ship_id": 42,
-		"item_type": "ScrapMetal",
-		"module_id": 0,
-		"ship_type_id": 0,
-		"side": "Ask",
-		"price": 100,
-		"quantity": 3,
-	})
+	var bytes := _cmd.market_place_order_command(
+		42, ItemIdentity.scrap_metal(), "Ask", 100, 3)
 	var d: Dictionary = _decoder.decode(bytes)
 	assert_str(d["type"]).is_equal("PlaceMarketOrderCommand")
 	assert_str(d["side"]).is_equal("Ask")

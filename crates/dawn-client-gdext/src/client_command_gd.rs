@@ -1,4 +1,7 @@
-use crate::json_variant::{externally_tagged_to_dict, json_value_to_variant, Dict};
+use crate::{
+    item_identity_gd::ItemIdentity,
+    json_variant::{externally_tagged_to_dict, json_value_to_variant, Dict},
+};
 use dawn_wire::{
     ClientCommandWire, ClientMessage, HelloMessage, ItemWire, MarketCommandWire,
     NavigationTargetWire, PosWire, ResumeIdentity, WarpTargetWire,
@@ -71,18 +74,8 @@ fn non_negative_or_none(value: i64) -> Option<u64> {
     }
 }
 
-fn item_wire_from_legacy_fields(
-    item_type: &str,
-    module_id: i64,
-    ship_type_id: i64,
-) -> Option<ItemWire> {
-    dawn_core::ItemId::from_storage_columns(
-        item_type,
-        u32::try_from(module_id).ok()?,
-        u32::try_from(ship_type_id).ok()?,
-    )
-    .ok()
-    .map(Into::into)
+fn item_wire(item_id: &Gd<ItemIdentity>) -> ItemWire {
+    item_id.bind().get().into()
 }
 
 /// Builds the client -> server wire message for every command the Godot
@@ -93,10 +86,8 @@ fn item_wire_from_legacy_fields(
 /// Commands whose wire shape carries sentinel values (e.g. `<= 0.0` meaning
 /// "server default", ADR-0031) or a tagged navigation target get a dedicated
 /// method, since that logic is domain semantics, not just field copying.
-/// Everything else -- a flat
-/// struct of scalar fields with no such semantics -- goes through the
-/// schema-driven `build` method instead, so adding one of those needs no
-/// new method here (only a new `dawn-wire` variant and dispatch arm).
+/// Everything else -- a flat struct of scalar fields with no such semantics --
+/// goes through the schema-driven `build` method instead.
 #[derive(GodotClass)]
 #[class(init, base=RefCounted)]
 pub struct ClientCommand {}
@@ -192,17 +183,12 @@ impl ClientCommand {
     /// scalar-fields-only struct (no sentinel/tagged-target semantics --
     /// see the dedicated methods above and below for those). `kind` is the
     /// `ClientCommandWire` variant name (e.g. `"DockCommand"`); `fields`
-    /// supplies that variant's fields by name. Validates by deserializing
-    /// into `ClientCommandWire` itself, so an unknown `kind` or a wrong/
-    /// missing field is caught here rather than producing a
-    /// silently-malformed wire message.
+    /// supplies that variant's fields by name.
     #[func]
     fn build(&self, kind: GString, fields: Dict) -> PackedByteArray {
         let Some(fields) = scalar_dict_to_json_object(&fields) else {
             return PackedByteArray::new();
         };
-        // ClientCommandWire is externally tagged (ADR-0042): the wire shape
-        // is `{"<VariantName>": {...fields}}`, not `{"type": "...", ...}`.
         let mut wrapper = serde_json::Map::with_capacity(1);
         wrapper.insert(kind.to_string(), serde_json::Value::Object(fields));
         match serde_json::from_value::<ClientCommandWire>(serde_json::Value::Object(wrapper)) {
@@ -233,26 +219,14 @@ impl ClientCommand {
         }
     }
 
-    /// Compatibility adapter for the existing Godot inventory surface.
-    /// The legacy scalar arguments are validated and collapsed into one
-    /// `ItemWire` before any bytes are encoded.
     #[func]
     fn transfer_to_station_command(
         &self,
         ship_id: i64,
         station_id: i64,
-        item_type: GString,
-        module_id: i64,
-        ship_type_id: i64,
+        item_id: Gd<ItemIdentity>,
     ) -> PackedByteArray {
-        self.transfer_command(
-            ship_id,
-            station_id,
-            item_type,
-            module_id,
-            ship_type_id,
-            "ToStation",
-        )
+        self.transfer_command(ship_id, station_id, item_id, "ToStation")
     }
 
     /// The reverse of `transfer_to_station_command`: move the entire stack
@@ -262,63 +236,34 @@ impl ClientCommand {
         &self,
         ship_id: i64,
         station_id: i64,
-        item_type: GString,
-        module_id: i64,
-        ship_type_id: i64,
+        item_id: Gd<ItemIdentity>,
     ) -> PackedByteArray {
-        self.transfer_command(
-            ship_id,
-            station_id,
-            item_type,
-            module_id,
-            ship_type_id,
-            "ToShip",
-        )
+        self.transfer_command(ship_id, station_id, item_id, "ToShip")
     }
 
     #[func]
-    fn market_place_order_command(&self, fields: Dict) -> PackedByteArray {
-        let Some(fields) = scalar_dict_to_json_object(&fields) else {
-            return PackedByteArray::new();
-        };
-        let (
-            Some(ship_id),
-            Some(item_type),
-            Some(module_id),
-            Some(ship_type_id),
-            Some(side),
-            Some(price),
-            Some(quantity),
-        ) = (
-            fields.get("ship_id").and_then(serde_json::Value::as_i64),
-            fields.get("item_type").and_then(serde_json::Value::as_str),
-            fields.get("module_id").and_then(serde_json::Value::as_i64),
-            fields
-                .get("ship_type_id")
-                .and_then(serde_json::Value::as_i64),
-            fields.get("side").and_then(serde_json::Value::as_str),
-            fields.get("price").and_then(serde_json::Value::as_i64),
-            fields.get("quantity").and_then(serde_json::Value::as_i64),
-        )
-        else {
-            godot_error!("ClientCommand.market_place_order_command: missing or invalid field");
-            return PackedByteArray::new();
-        };
-        let Some(item_id) = item_wire_from_legacy_fields(item_type, module_id, ship_type_id) else {
-            godot_error!("ClientCommand.market_place_order_command: invalid Item identity");
-            return PackedByteArray::new();
-        };
+    fn market_place_order_command(
+        &self,
+        ship_id: i64,
+        item_id: Gd<ItemIdentity>,
+        side: GString,
+        price: i64,
+        quantity: i64,
+    ) -> PackedByteArray {
         let (Ok(ship_id), Ok(price), Ok(quantity)) = (
             u64::try_from(ship_id),
             u64::try_from(price),
             u64::try_from(quantity),
         ) else {
+            godot_error!(
+                "ClientCommand.market_place_order_command: ship, price, and quantity must be non-negative"
+            );
             return PackedByteArray::new();
         };
         market_command_wire_bytes(MarketCommandWire::PlaceMarketOrderCommand {
             ship_id,
-            item_id,
-            side: side.to_owned(),
+            item_id: item_wire(&item_id),
+            side: side.to_string(),
             price,
             quantity,
         })
@@ -347,21 +292,18 @@ impl ClientCommand {
         &self,
         ship_id: i64,
         station_id: i64,
-        item_type: GString,
-        module_id: i64,
-        ship_type_id: i64,
+        item_id: Gd<ItemIdentity>,
         direction: &str,
     ) -> PackedByteArray {
-        let Some(item_id) =
-            item_wire_from_legacy_fields(&item_type.to_string(), module_id, ship_type_id)
+        let (Ok(ship_id), Ok(station_id)) = (u64::try_from(ship_id), u32::try_from(station_id))
         else {
-            godot_error!("ClientCommand.transfer_command: invalid Item identity");
+            godot_error!("ClientCommand.transfer_command: invalid ship or station ID");
             return PackedByteArray::new();
         };
         command_wire_bytes(ClientCommandWire::TransferToStationCommand {
-            ship_id: ship_id as u64,
-            station_id: station_id as u32,
-            item_id,
+            ship_id,
+            station_id,
+            item_id: item_wire(&item_id),
             direction: direction.to_string(),
         })
     }
@@ -372,8 +314,7 @@ impl ClientCommand {
 /// reverse of what `ClientCommand`'s methods build. `connection.gd` never
 /// needs this (the client only ever sends `ClientMessage`, never decodes
 /// one), but GdUnit4 needs a way to verify what `ClientCommand`'s domain
-/// semantics (sentinels, exclusive-selection fields) actually produced
-/// without a live connection -- see `client_command_gd_test.gd`.
+/// semantics produced without a live connection.
 #[derive(GodotClass)]
 #[class(init, base=RefCounted)]
 pub struct ClientMessageDecoder {}

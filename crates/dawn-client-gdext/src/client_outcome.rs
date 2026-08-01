@@ -1,6 +1,7 @@
+use dawn_core::ItemId;
 use dawn_wire::{
-    AbsPosWire, EventWire, InitialStateWire, MarketSnapshotWire, PlayerLoadoutWire, ServerMessage,
-    ShipStateWire, VelWire,
+    AbsPosWire, EventWire, InitialStateWire, ItemWire, MarketSnapshotWire, PlayerLoadoutWire,
+    ServerMessage, ShipStateWire, VelWire,
 };
 
 /// Godot-independent result of decoding one server frame.
@@ -130,6 +131,12 @@ fn ensure_client_u32(value: u64, field: &str) -> Result<(), String> {
         .map_err(|_| format!("{field}={value} exceeds the client-side u32 range"))
 }
 
+fn ensure_canonical_item(item: ItemWire, field: &str) -> Result<(), String> {
+    ItemId::try_from(item)
+        .map(|_| ())
+        .map_err(|error| format!("{field} has invalid canonical Item identity: {error:?}"))
+}
+
 fn validate_event(event: &EventWire) -> Result<(), String> {
     match event {
         EventWire::ShipSpawned { ship_id, tick, .. }
@@ -202,6 +209,7 @@ pub(crate) fn validate_player_loadout_godot_ranges(
         )?;
     }
     for item in loadout.inventory.iter().chain(&loadout.station_inventory) {
+        ensure_canonical_item(item.item_id, "player_loadout.inventory.item_id")?;
         ensure_godot_int(item.count, "player_loadout.inventory.count")?;
     }
     Ok(())
@@ -238,6 +246,7 @@ fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
         ServerMessage::MarketSnapshot(snapshot) => {
             ensure_godot_int(snapshot.balance, "market.balance")?;
             for order in &snapshot.orders {
+                ensure_canonical_item(order.item_id, "market.item_id")?;
                 ensure_godot_int(order.order_id, "market.order_id")?;
                 ensure_godot_int(order.price, "market.price")?;
                 ensure_godot_int(order.quantity, "market.quantity")?;
@@ -486,6 +495,39 @@ mod tests {
         let error = ClientOutcome::decode(&ServerMessage::PlayerLoadout(invalid_cycle).encode())
             .expect_err("module cycle length must fit client u32");
         assert!(error.contains("player_loadout.modules.cycle_time_ticks"));
+    }
+
+    #[test]
+    fn invalid_item_identities_are_rejected_before_projection() {
+        let mut invalid_loadout = loadout();
+        invalid_loadout.inventory.push(ItemRowWire {
+            item_id: ItemWire::Module { module_id: 0 },
+            name: "Invalid".to_owned(),
+            kind: String::new(),
+            slot: String::new(),
+            count: 1,
+        });
+        let error = ClientOutcome::decode(&ServerMessage::PlayerLoadout(invalid_loadout).encode())
+            .expect_err("zero module IDs must not reach Godot");
+        assert!(error.contains("player_loadout.inventory.item_id"));
+
+        let error = ClientOutcome::decode(
+            &ServerMessage::MarketSnapshot(MarketSnapshotWire {
+                balance: 0,
+                orders: vec![dawn_wire::MarketOrderWire {
+                    order_id: 1,
+                    item_id: ItemWire::PackagedShip { ship_type_id: 0 },
+                    side: "Bid".to_owned(),
+                    price: 1,
+                    quantity: 1,
+                    is_own: false,
+                }],
+                notice: String::new(),
+            })
+            .encode(),
+        )
+        .expect_err("zero ship type IDs must not reach Godot");
+        assert!(error.contains("market.item_id"));
     }
 
     #[test]

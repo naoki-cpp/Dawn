@@ -21,6 +21,11 @@ rows, including unrelated non-zero ID columns, never become an `ItemId`.
 
 `dawn_wire::ItemWire` is the postcard-compatible externally tagged projection
 of `ItemId`. Item-bearing commands, Market snapshots, and PlayerLoadout rows
-carry this variant directly. `dawn-client-core::ItemRow` stores `ItemId`, while
-the Godot wrapper derives the old scalar properties only as a temporary UI
-compatibility view.
+carry this variant directly. `dawn-client-core::ItemRow` stores `ItemId`.
+
+At the Godot boundary, `ItemIdentity` wraps that same canonical enum as one
+typed object. `ItemRow.item_id`, inventory transfer commands, and Market order
+commands pass the object directly. GDScript may inspect the selected variant
+through typed methods, but it does not receive or reconstruct the persistence
+columns. There is no client compatibility parser, sentinel-based pseudo-union,
+or parallel scalar identity interface.

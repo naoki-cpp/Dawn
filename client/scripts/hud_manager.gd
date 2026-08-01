@@ -707,7 +707,7 @@ static func build_inventory_panel(hud: CanvasLayer) -> InventoryPanelRefs:
 ## column).
 static func _make_inventory_row(
 	text: String, module_id: int, slot: String, action: String, ship_type_id: int = 0,
-	item_type: String = "", count: int = 0, source: String = InventoryRow.SOURCE_NONE,
+	item_id: ItemIdentity = null, count: int = 0, source: String = InventoryRow.SOURCE_NONE,
 	slot_index: int = 0
 ) -> InventoryRow:
 	var row := Panel.new()
@@ -727,7 +727,7 @@ static func _make_inventory_row(
 	row.add_child(lbl)
 
 	return InventoryRow.for_item(
-		row, module_id, slot, action, ship_type_id, item_type, count, source, slot_index)
+		row, module_id, slot, action, ship_type_id, item_id, count, source, slot_index)
 
 
 ## One owned-ship row (ADR-0037 roster). `action` is "" for the already-active
@@ -755,13 +755,9 @@ static func _make_ship_row(text: String, ship_id: int, is_active: bool) -> Inven
 	return InventoryRow.for_ship(row, ship_id, action)
 
 
-## Rebuild all four columns from the latest PlayerLoadout snapshot. `modules`
-## is the flat fitted-module array (slot/module_id/name fields, same shape
-## the module bar already consumes); `inventory` is the active ship's own
-## unfitted cargo; `station_inventory` is the player-level (not per-ship)
-## station inventory (ADR-0034 9B) and is kept in its own column so the two
-## are never visually merged; `owned_ships` is the ADR-0037 roster
-## (ship_id/ship_type_name/docked_station_id/is_active rows).
+## Rebuild all four columns from the latest PlayerLoadout snapshot. Item rows
+## retain their canonical ItemIdentity object through the presentation layer;
+## action-specific numeric IDs are extracted only when a command needs one.
 static func update_inventory_panel(
 	refs: InventoryPanelRefs, modules: Array, inventory: Array, station_inventory: Array = [],
 	owned_ships: Array = [], buildable_ship_types: Array = []
@@ -784,17 +780,14 @@ static func update_inventory_panel(
 		var m: ModuleRow = entry
 		var text := "%s: %s" % [m.slot, m.name]
 		var row := _make_inventory_row(
-			text, m.module_id, m.slot, InventoryRow.ACTION_UNFIT, 0, "", 0,
+			text, m.module_id, m.slot, InventoryRow.ACTION_UNFIT, 0, null, 0,
 			InventoryRow.SOURCE_FITTED, m.index)
 		fitted_list.add_child(row.panel)
 		fitted_rows.append(row)
 
-	## "Unfit All" (e.g. to clear the way for Disassemble, which requires a
-	## fully unfitted ship) -- only meaningful, and only shown, when at least
-	## one module is actually fitted.
 	if not fitted_rows.is_empty():
 		var unfit_all_row := _make_inventory_row(
-			"Unfit all", 0, "", InventoryRow.ACTION_UNFIT_ALL, 0, "", 0,
+			"Unfit all", 0, "", InventoryRow.ACTION_UNFIT_ALL, 0, null, 0,
 			InventoryRow.SOURCE_FITTED)
 		fitted_list.add_child(unfit_all_row.panel)
 		fitted_rows.append(unfit_all_row)
@@ -806,14 +799,14 @@ static func update_inventory_panel(
 		var item: ItemRow = entry
 		var text: String
 		var action := InventoryRow.ACTION_NONE
-		if item.item_type == "Module":
+		if item.item_id.is_module():
 			text = "%s: %s x%d" % [item.slot, item.name, item.count]
 			action = InventoryRow.ACTION_FIT
 		else:
 			text = "%s x%d" % [item.name, item.count]
 		var row := _make_inventory_row(
-			text, item.module_id, item.slot, action, item.ship_type_id,
-			item.item_type, item.count, InventoryRow.SOURCE_SHIP_CARGO)
+			text, 0, item.slot, action, 0, item.item_id, item.count,
+			InventoryRow.SOURCE_SHIP_CARGO)
 		inventory_list.add_child(row.panel)
 		inventory_rows.append(row)
 	refs.inventory_rows = inventory_rows
@@ -823,24 +816,19 @@ static func update_inventory_panel(
 		var item: ItemRow = entry
 		var text: String
 		var action := InventoryRow.ACTION_NONE
-		if item.item_type == "PackagedShip":
+		if item.item_id.is_packaged_ship():
 			text = "%s x%d (click to assemble)" % [item.name, item.count]
 			action = InventoryRow.ACTION_ASSEMBLE
 		else:
 			text = "%s x%d" % [item.name, item.count]
 		var row := _make_inventory_row(
-			text, 0, "", action, item.ship_type_id, item.item_type, item.count,
+			text, 0, "", action, 0, item.item_id, item.count,
 			InventoryRow.SOURCE_STATION)
 		station_list.add_child(row.panel)
 		station_rows.append(row)
 
-	## Disassemble/Build action rows (Phase 9B task 10) -- dedicated buttons
-	## alongside the existing [Y]/[B] keyboard shortcuts, which keep working
-	## unchanged. Always shown; the server validates docked/ownership context
-	## and rejects if not applicable (same pattern as SHIPS-column
-	## select_active_ship rows, which rely on server-side validation too).
 	var disassemble_row := _make_inventory_row(
-		"Disassemble active ship", 0, "", InventoryRow.ACTION_DISASSEMBLE, 0, "", 0,
+		"Disassemble active ship", 0, "", InventoryRow.ACTION_DISASSEMBLE, 0, null, 0,
 		InventoryRow.SOURCE_STATION)
 	station_list.add_child(disassemble_row.panel)
 	station_rows.append(disassemble_row)
@@ -848,7 +836,7 @@ static func update_inventory_panel(
 	var picker_open: bool = refs.build_picker_open
 	var toggle_text := "Build Ship ▾" if picker_open else "Build Ship ▸"
 	var build_toggle_row := _make_inventory_row(
-		toggle_text, 0, "", InventoryRow.ACTION_BUILD_TOGGLE, 0, "", 0,
+		toggle_text, 0, "", InventoryRow.ACTION_BUILD_TOGGLE, 0, null, 0,
 		InventoryRow.SOURCE_STATION)
 	station_list.add_child(build_toggle_row.panel)
 	station_rows.append(build_toggle_row)
@@ -860,7 +848,7 @@ static func update_inventory_panel(
 			var name: String = t.name
 			var picker_row := _make_inventory_row(
 				"  %s" % name, 0, "", InventoryRow.ACTION_BUILD_SHIP_TYPE, ship_type_id,
-				"", 0, InventoryRow.SOURCE_STATION)
+				null, 0, InventoryRow.SOURCE_STATION)
 			station_list.add_child(picker_row.panel)
 			station_rows.append(picker_row)
 
