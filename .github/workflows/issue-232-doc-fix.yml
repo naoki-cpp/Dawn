@@ -51,14 +51,16 @@ jobs:
               f"/repos/{repository}/contents/{target_path}?ref={quote(branch)}",
           )
           source = base64.b64decode(target["content"]).decode()
-          old = """    /// `modules` and `ship_types` are the same data-driven definitions the
-    /// node was originally configured with (e.g. `crate::game_data::test_catalog().modules().to_vec()` /
-    /// `crate::game_data::test_catalog().ship_types().to_vec()`). They are needed to resolve
-"""
-          new = """    /// `modules` and `ship_types` must come from the same
-    /// [`crate::game_data::GameDataCatalog`] used to configure the node, for
-    /// example `catalog.modules()` and `catalog.ship_types()`. They are needed to resolve
-"""
+          old = "\n".join([
+              "    /// `modules` and `ship_types` are the same data-driven definitions the",
+              "    /// node was originally configured with (e.g. `crate::game_data::test_catalog().modules().to_vec()` /",
+              "    /// `crate::game_data::test_catalog().ship_types().to_vec()`). They are needed to resolve",
+          ]) + "\n"
+          new = "\n".join([
+              "    /// `modules` and `ship_types` must come from the same",
+              "    /// [`crate::game_data::GameDataCatalog`] used to configure the node, for",
+              "    /// example `catalog.modules()` and `catalog.ship_types()`. They are needed to resolve",
+          ]) + "\n"
           if source.count(old) != 1:
               raise RuntimeError("expected restore_from documentation block exactly once")
           updated = source.replace(old, new)
