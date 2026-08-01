@@ -26,7 +26,7 @@
 use crate::{AntiEntropy, BatchApplyPlan, LogBatch, MissingLogRequest};
 use dawn_core::{DomainEvent, SectorId};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 /// Opaque recovery snapshot for one foreign Sector.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,7 +35,9 @@ pub struct ReplicaSnapshot {
     /// All owner log entries below this index are covered by `bytes`.
     pub log_index: u64,
     /// Caller-defined serialized snapshot bytes (normally `StateSnapshot`).
-    pub bytes: Vec<u8>,
+    /// Shared ownership keeps request retries and cached owner snapshots from
+    /// duplicating a potentially large allocation.
+    pub bytes: Arc<Vec<u8>>,
 }
 
 impl ReplicaSnapshot {
@@ -43,7 +45,7 @@ impl ReplicaSnapshot {
         Self {
             sector_id,
             log_index,
-            bytes,
+            bytes: Arc::new(bytes),
         }
     }
 }
@@ -300,6 +302,14 @@ mod tests {
             SnapshotInstall::Duplicate { next_index: 8 }
         );
         assert_eq!(set.replicated_len(SectorId(1)), 2);
+    }
+
+    #[test]
+    fn snapshot_clones_share_the_payload() {
+        let snapshot = ReplicaSnapshot::new(SectorId(1), 6, vec![1, 2, 3]);
+        let clone = snapshot.clone();
+
+        assert!(Arc::ptr_eq(&snapshot.bytes, &clone.bytes));
     }
 
     #[test]
