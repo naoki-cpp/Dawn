@@ -1,5 +1,7 @@
 use crate::client_outcome::{ClientEventOutcome, ClientOutcome};
+use crate::item_identity_gd::ItemIdentity;
 use crate::json_variant::Dict;
+use dawn_core::ItemId;
 use dawn_wire::{
     AbsPosWire, EventWire, InitialStateWire, ItemWire, MarketOrderWire, MarketSnapshotWire,
     ServerMessage, ShipStateWire, VelWire,
@@ -585,23 +587,9 @@ fn market_snapshot_to_dict(snapshot: &MarketSnapshotWire) -> Dict {
 }
 
 fn item_to_variant(item: &ItemWire) -> Variant {
-    match item {
-        ItemWire::ScrapMetal => Variant::from("ScrapMetal"),
-        ItemWire::Module { module_id } => {
-            let mut fields = Dict::new();
-            fields.set("module_id", i64::from(*module_id));
-            let mut tagged = Dict::new();
-            tagged.set("Module", &fields);
-            Variant::from(tagged)
-        }
-        ItemWire::PackagedShip { ship_type_id } => {
-            let mut fields = Dict::new();
-            fields.set("ship_type_id", i64::from(*ship_type_id));
-            let mut tagged = Dict::new();
-            tagged.set("PackagedShip", &fields);
-            Variant::from(tagged)
-        }
-    }
+    let item_id =
+        ItemId::try_from(*item).expect("ClientOutcome validates every Godot-facing Item identity");
+    ItemIdentity::wrap(item_id).to_variant()
 }
 
 fn position_to_dict(position: &AbsPosWire) -> Dict {

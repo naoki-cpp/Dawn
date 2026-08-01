@@ -184,7 +184,12 @@ func test_real_market_outcome_preserves_every_item_variant() -> void:
 	assert_bool(outcome.dispatch(connection)).is_true()
 	var orders: Array = (snapshots[0] as Dictionary).get("orders", []) as Array
 	assert_int(orders.size()).is_equal(3)
-	assert_str((orders[0] as Dictionary).get("item_id", "") as String).is_equal("ScrapMetal")
-	assert_bool(((orders[1] as Dictionary).get("item_id", {}) as Dictionary).has("Module")).is_true()
-	assert_bool(((orders[2] as Dictionary).get("item_id", {}) as Dictionary).has("PackagedShip")).is_true()
+	var scrap: ItemIdentity = (orders[0] as Dictionary).get("item_id") as ItemIdentity
+	var module: ItemIdentity = (orders[1] as Dictionary).get("item_id") as ItemIdentity
+	var ship: ItemIdentity = (orders[2] as Dictionary).get("item_id") as ItemIdentity
+	assert_bool(scrap.is_scrap_metal()).is_true()
+	assert_bool(module.is_module()).is_true()
+	assert_int(module.module_id() as int).is_equal(3)
+	assert_bool(ship.is_packaged_ship()).is_true()
+	assert_int(ship.ship_type_id() as int).is_equal(7)
 	connection.free()

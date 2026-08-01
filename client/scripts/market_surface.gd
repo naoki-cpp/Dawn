@@ -254,27 +254,16 @@ func _render_orders() -> void:
 
 
 func _order_item_name(order: Dictionary) -> String:
-	var item_id: Variant = order.get("item_id", null)
-	if item_id is ItemIdentity:
-		var identity := item_id as ItemIdentity
-		if identity.is_scrap_metal():
-			return "Scrap Metal"
-		if identity.is_module():
-			return "Module #%d" % (identity.module_id() as int)
-		if identity.is_packaged_ship():
-			return "Ship #%d" % (identity.ship_type_id() as int)
-	if item_id is String and item_id as String == "ScrapMetal":
+	var item_id: ItemIdentity = order.get("item_id", null) as ItemIdentity
+	if item_id == null:
+		return "Unknown item"
+	if item_id.is_scrap_metal():
 		return "Scrap Metal"
-	if item_id is Dictionary:
-		var tagged := item_id as Dictionary
-		if tagged.has("Module"):
-			var module: Dictionary = tagged["Module"] as Dictionary
-			return "Module #%d" % (module.get("module_id", 0) as int)
-		if tagged.has("PackagedShip"):
-			var ship: Dictionary = tagged["PackagedShip"] as Dictionary
-			return "Ship #%d" % (ship.get("ship_type_id", 0) as int)
+	if item_id.is_module():
+		return "Module #%d" % (item_id.module_id() as int)
+	if item_id.is_packaged_ship():
+		return "Ship #%d" % (item_id.ship_type_id() as int)
 	return "Unknown item"
-
 
 func _cancel_order(order_id: int) -> void:
 	if order_id >= 0:
