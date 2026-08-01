@@ -1,9 +1,9 @@
 name: Issue 236 inventory
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/separate-transit-handoff-state
+      - main
     paths:
       - '.github/workflows/issue-236-inventory.yml'
 
