@@ -28,12 +28,21 @@ jobs:
           from pathlib import Path
           path = Path('.github/issue-235-apply.py')
           text = path.read_text()
+
           quote_old = "elif ch == \"'\":"
           quote_new = "elif False and ch == \"'\":"
           quote_count = text.count(quote_old)
           if quote_count != 4:
               raise SystemExit(f'expected four single-quote parser branches, found {quote_count}')
           text = text.replace(quote_old, quote_new)
+
+          open_old = "        open_index = index + len(needle) - 1\n"
+          open_new = """        line_start = text.rfind(\"\\n\", 0, index) + 1\n        if text[line_start:index].lstrip().startswith(\"//\"):\n            pos = index + len(needle)\n            continue\n        open_index = index + len(needle) - 1\n"""
+          open_count = text.count(open_old)
+          if open_count != 1:
+              raise SystemExit(f'expected one call parser opening site, found {open_count}')
+          text = text.replace(open_old, open_new)
+
           find_old = "        close_index = find_matching_paren(text, open_index)\n"
           find_new = """        try:\n            close_index = find_matching_paren(text, open_index)\n        except RuntimeError as error:\n            raise RuntimeError(\n                f\"{path}: unmatched call near {text[index:index + 240]!r}\"\n            ) from error\n"""
           find_count = text.count(find_old)
@@ -41,7 +50,20 @@ jobs:
               raise SystemExit(f'expected one call parser site, found {find_count}')
           path.write_text(text.replace(find_old, find_new))
           PY
+
           python3 .github/issue-235-apply.py
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/dawn-sector/src/lib.rs')
+          text = path.read_text()
+          old = """//!     SectorBounds::centered(SectorBounds::DEFAULT_HALF),\n//! );\n"""
+          new = """//!     SectorBounds::centered(SectorBounds::DEFAULT_HALF),\n//!     std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),\n//! );\n"""
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected one public constructor example, found {count}')
+          path.write_text(text.replace(old, new))
+          PY
       - name: Format and verify
         run: |
           cargo fmt --all
