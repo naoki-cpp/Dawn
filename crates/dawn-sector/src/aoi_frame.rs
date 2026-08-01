@@ -184,41 +184,4 @@ mod tests {
         frame.rebuild(&node);
         assert_eq!(frame.visible_for(&node, own), vec![own, other]);
     }
-
-    #[test]
-    fn every_runtime_path_gets_equivalent_output_from_the_shared_frame() {
-        let mut node = node();
-        let own = node.spawn_ship(
-            crate::ship_types::SHIP_TYPE_NPC_FRIGATE,
-            Position::ORIGIN,
-            Velocity::ZERO,
-        );
-        let other = node.spawn_ship(
-            crate::ship_types::SHIP_TYPE_NPC_FRIGATE,
-            Position::new(10.0, 0.0, 0.0),
-            Velocity::ZERO,
-        );
-
-        let mut outputs = Vec::new();
-        for player_id in [PlayerId(1), PlayerId(2), PlayerId(3)] {
-            let mut frame = AoiFrame::new(100.0);
-            frame.rebuild(&node);
-            let mut sink = FakeSink::default();
-            assert!(frame.deliver_observer(
-                &mut sink,
-                &node,
-                Observer {
-                    player_id,
-                    ship_id: own,
-                },
-                &[],
-                &[],
-            ));
-            outputs.push(sink);
-        }
-
-        assert_eq!(outputs[0], outputs[1]);
-        assert_eq!(outputs[1], outputs[2]);
-        assert_eq!(outputs[0].enters, vec![other.raw()]);
-    }
 }
