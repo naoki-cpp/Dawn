@@ -25,9 +25,8 @@ use dawn_consensus::{RaftActor, RaftActorHandle, RaftActorMessage, RaftState, Tc
 use dawn_core::{NodeId, SectorBounds, SectorId};
 use dawn_event_store::FileEventStore;
 use dawn_replication::{
-    CatchUpConfig, CatchUpEvent, CatchUpFailureKind, CatchUpManager, CatchUpStep,
-    CatchUpTransport, CatchUpUnavailable, ReplicaSnapshot, ReplicationTransport,
-    TcpReplicationTransport,
+    CatchUpConfig, CatchUpEvent, CatchUpFailureKind, CatchUpManager, CatchUpStep, CatchUpTransport,
+    CatchUpUnavailable, ReplicaSnapshot, ReplicationTransport, TcpReplicationTransport,
 };
 use dawn_sector::node::SimulationNode;
 use dawn_sector::persistence::{CheckpointConfig, CheckpointScheduler, StateSnapshot};
@@ -141,8 +140,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| {
             anyhow::anyhow!(
                 "failed to bind replication transport on {}: {}",
-                cfg.repl_addr,
-                e
+                cfg.repl_addr, e
             )
         })?;
 
@@ -175,17 +173,14 @@ async fn main() -> anyhow::Result<()> {
     // Load and validate the durable snapshot once. Requests clone only the
     // Arc-backed payload; they never synchronously re-read the file in the tick
     // loop.
-    let mut replica_snapshot = match load_replica_snapshot(
-        &cfg.snapshot_path,
-        sector_id,
-        CATCH_UP_MAX_SNAPSHOT_BYTES,
-    ) {
-        Ok(snapshot) => snapshot,
-        Err(error) => {
-            eprintln!("[Repl] snapshot fallback unavailable at startup: {error}");
-            None
-        }
-    };
+    let mut replica_snapshot =
+        match load_replica_snapshot(&cfg.snapshot_path, sector_id, CATCH_UP_MAX_SNAPSHOT_BYTES) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                eprintln!("[Repl] snapshot fallback unavailable at startup: {error}");
+                None
+            }
+        };
 
     // ── WebSocket server ──────────────────────────────────────────────────────
 
@@ -248,14 +243,9 @@ async fn main() -> anyhow::Result<()> {
             let Ok(message) = catch_up_rx.try_recv() else {
                 break;
             };
-            let step = catch_up.handle_message(message, node.event_store(), || {
-                replica_snapshot.clone()
-            });
-            emit_catch_up_step(
-                &repl_transport,
-                &mut catch_up_failure_retries,
-                step,
-            );
+            let step =
+                catch_up.handle_message(message, node.event_store(), || replica_snapshot.clone());
+            emit_catch_up_step(&repl_transport, &mut catch_up_failure_retries, step);
         }
         emit_catch_up_step(
             &repl_transport,
@@ -426,10 +416,7 @@ fn replica_snapshot_from_state(
     let bytes = postcard::to_stdvec(snapshot)
         .map_err(|error| anyhow::anyhow!("cannot encode current snapshot: {error}"))?;
     if bytes.len() > max_bytes {
-        anyhow::bail!(
-            "snapshot is {} bytes, limit is {max_bytes}",
-            bytes.len()
-        );
+        anyhow::bail!("snapshot is {} bytes, limit is {max_bytes}", bytes.len());
     }
     Ok(ReplicaSnapshot::new(
         snapshot.sector_id,
