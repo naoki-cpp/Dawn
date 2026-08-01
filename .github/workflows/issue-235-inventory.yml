@@ -31,8 +31,8 @@ jobs:
           old = "elif ch == \"'\":"
           new = "elif False and ch == \"'\":"
           count = text.count(old)
-          if count != 2:
-              raise SystemExit(f'expected two single-quote parser branches, found {count}')
+          if count != 4:
+              raise SystemExit(f'expected four single-quote parser branches, found {count}')
           path.write_text(text.replace(old, new))
           PY
           python3 .github/issue-235-apply.py
