@@ -297,8 +297,8 @@ pub(crate) fn apply_ack<S: EventStore>(
 }
 
 /// Return only retry Commit proposals whose bounded backoff deadline is due.
-/// The durable route and canonical transit snapshot are reconstructed from the
-/// source EventStore and frozen ECS state, respectively.
+/// The durable route and canonical Transit handoff state are reconstructed from
+/// the source EventStore and frozen ECS state, respectively.
 pub(crate) fn due_retries<S: EventStore>(node: &mut SimulationNode<S>) -> Vec<CommitProposal> {
     let mut proposals = Vec::new();
     for transit in pending_outgoing_transits(node) {

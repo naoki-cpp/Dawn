@@ -382,15 +382,13 @@ impl<S: EventStore> SimulationNode<S> {
         );
     }
 
-    /// Stage 1.5 of a Sector Transit (issue #204): actually removes the Ship
-    /// from this (the `from`) Sector's ECS and appends `SectorTransitCompleted`
-    /// from this Sector's perspective. Called only once this Sector observes
-    /// its own `TransitOp::Commit` proposal get Raft-committed
-    /// (`transit::apply_committed_raft_entries`'s `from == node.sector_id()`
-    /// branch) — the durable removal is conditioned on the same fact the
-    /// destination's import is conditioned on, so a crash before that Commit
-    /// lands leaves the Ship exactly where `handoff_for_transit` found it:
-    /// still owned by `from`, still `InTransit`.
+    /// Finalize the source half of a Sector Transit by removing the frozen
+    /// recovery copy and appending `SectorTransitCompleted` to the source log.
+    /// Normal completion calls this only after a committed Ack matches the
+    /// durable Request identity. The superseded-outgoing path also uses it
+    /// before accepting the same Ship back into this Sector. Until either
+    /// condition is durable, the Ship remains owned by `from` and frozen as
+    /// `InTransit`, so a crash cannot leave both logs without a recoverable copy.
     ///
     /// Ack carries only the transfer identity. The source re-reads the
     /// canonical handoff state from its frozen recovery copy before removal;
@@ -753,14 +751,14 @@ mod tests {
     }
 
     #[test]
-    fn export_transit_snapshots_without_removing_the_ship_or_appending_an_event() {
+    fn export_transit_handoff_without_removing_the_ship_or_appending_an_event() {
         // Issue #204: export no longer removes the Ship or appends
         // SectorTransitCompleted -- that used to happen here, durably, before
         // the destination's TransitOp::Commit had even been proposed to Raft.
         // A crash in that window could lose the Ship (source's log said it
         // left, destination's log had nothing). Now the Ship stays put,
-        // frozen (InTransit), until complete_outgoing_transit runs -- which
-        // only happens once this Sector observes its own Commit land.
+        // frozen (InTransit), until a matching Ack is committed and
+        // complete_outgoing_transit finalizes the source half.
         let mut node = mem_node();
         let ship_id = node.spawn_ship(
             ShipTypeId(1),
