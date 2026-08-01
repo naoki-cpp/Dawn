@@ -234,7 +234,10 @@ mod tests {
         let (_player, ship_id) = spawn_owned_player(&mut node);
         let entity = *node.ships.index.get(&ship_id).unwrap();
         let inv = node.world.get::<InventoryComp>(entity).unwrap();
-        assert_eq!(inv.items.len(), crate::game_data::test_catalog().modules().to_vec().len());
+        assert_eq!(
+            inv.items.len(),
+            crate::game_data::test_catalog().modules().to_vec().len()
+        );
     }
 
     #[test]
