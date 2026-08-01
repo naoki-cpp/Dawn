@@ -251,9 +251,7 @@ fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
 mod tests {
     use super::*;
     use dawn_core::{ModuleKind, StatDelta};
-    use dawn_wire::{
-        ItemRowWire, ItemWire, ModuleRowWire, PlayerLoadoutWire, SlotCapacityWire,
-    };
+    use dawn_wire::{ItemRowWire, ItemWire, ModuleRowWire, PlayerLoadoutWire, SlotCapacityWire};
 
     fn decode(message: ServerMessage) -> ClientOutcome {
         ClientOutcome::decode(&message.encode()).expect("valid raw ServerMessage frame")
