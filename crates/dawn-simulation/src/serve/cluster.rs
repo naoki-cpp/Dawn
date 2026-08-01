@@ -140,11 +140,12 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 sess.player_id,
                 sess.ship_id.raw()
             );
-            let seed = nodes[0]
-                .ship_absolute_pos(sess.ship_id)
-                .map(|pos| nodes[0].ships_visible_to(pos, AOI_CELL_SIZE))
-                .unwrap_or_default();
-            aoi_delivery.seed_player(sess.player_id, seed);
+            aoi_delivery.seed_cluster_player(
+                &nodes,
+                0,
+                sess.player_id,
+                sess.ship_id,
+            );
             sessions.push(sess);
         }
 
