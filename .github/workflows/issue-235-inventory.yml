@@ -55,14 +55,32 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('crates/dawn-sector/src/lib.rs')
-          text = path.read_text()
+
+          lib_path = Path('crates/dawn-sector/src/lib.rs')
+          text = lib_path.read_text()
           old = """//!     SectorBounds::centered(SectorBounds::DEFAULT_HALF),\n//! );\n"""
           new = """//!     SectorBounds::centered(SectorBounds::DEFAULT_HALF),\n//!     std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),\n//! );\n"""
           count = text.count(old)
           if count != 1:
               raise SystemExit(f'expected one public constructor example, found {count}')
-          path.write_text(text.replace(old, new))
+          lib_path.write_text(text.replace(old, new))
+
+          replacements = {
+              Path('crates/dawn-sector/src/node/mod.rs'): (
+                  'in f64, derived from `sector_map.galaxy`. Rebuilt on `set_galaxy`.',
+                  'in f64, derived from the topology supplied at construction.',
+              ),
+              Path('crates/dawn-sector/src/node/snapshot_io.rs'): (
+                  'Derived from the Galaxy at construction; `set_galaxy` rebuilds.',
+                  'Derived from the Galaxy supplied at construction.',
+              ),
+          }
+          for path, (old, new) in replacements.items():
+              text = path.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one stale topology comment, found {count}')
+              path.write_text(text.replace(old, new))
           PY
       - name: Format and verify
         run: |
