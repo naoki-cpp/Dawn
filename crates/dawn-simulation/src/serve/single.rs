@@ -147,11 +147,7 @@ pub(crate) async fn run_phase4_server(
                 sess.player_id,
                 sess.ship_id.raw()
             );
-            let seed = node
-                .ship_absolute_pos(sess.ship_id)
-                .map(|pos| node.ships_visible_to(pos, AOI_CELL_SIZE))
-                .unwrap_or_default();
-            aoi_delivery.seed_player(sess.player_id, seed);
+            aoi_delivery.seed_single_player(&node, sess.player_id, sess.ship_id);
             sessions.push(sess);
         }
 
