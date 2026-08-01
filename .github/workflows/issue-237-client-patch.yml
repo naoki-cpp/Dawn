@@ -1,0 +1,400 @@
+name: Issue 237 client patch
+
+on:
+  push:
+    branches:
+      - agent/canonical-client-item-identity
+    paths:
+      - .github/workflows/issue-237-client-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Migrate large GDScript callers and fixtures
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              return text.replace(old, new, 1)
+
+          # Replace the complete inventory projection block rather than relying
+          # on shifting line numbers.
+          path = Path("client/scripts/hud_manager.gd")
+          text = path.read_text()
+          start = text.index("static func _make_inventory_row(")
+          end = text.index("\n\nstatic func toggle_inventory_panel", start)
+          block = '''static func _make_inventory_row(
+          \ttext: String, module_id: int, slot: String, action: String, ship_type_id: int = 0,
+          \titem_id: ItemIdentity = null, count: int = 0, source: String = InventoryRow.SOURCE_NONE,
+          \tslot_index: int = 0
+          ) -> InventoryRow:
+          \tvar row := Panel.new()
+          \trow.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
+          \trow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+          \tvar style := StyleBoxFlat.new()
+          \tstyle.bg_color = Color(0.05, 0.07, 0.11, 0.6)
+          \tstyle.set_corner_radius_all(3)
+          \trow.add_theme_stylebox_override("panel", style)
+
+          \tvar lbl := make_hud_label(11, Color(0.82, 0.87, 0.94))
+          \tlbl.text = text
+          \tlbl.set_anchors_preset(Control.PRESET_FULL_RECT)
+          \tlbl.offset_left = 6.0
+          \tlbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+          \tlbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+          \trow.add_child(lbl)
+
+          \treturn InventoryRow.for_item(
+          \t\trow, module_id, slot, action, ship_type_id, item_id, count, source, slot_index)
+
+
+          ## One owned-ship row (ADR-0037 roster). `action` is "" for the already-active
+          ## ship (nothing to do -- clicking it would just re-select itself) and
+          ## "select_active_ship" for any other owned ship, docked at the same station
+          ## or not (the server validates that; a miss here just gets rejected).
+          static func _make_ship_row(text: String, ship_id: int, is_active: bool) -> InventoryRow:
+          \tvar row := Panel.new()
+          \trow.custom_minimum_size = Vector2(0.0, INVENTORY_ROW_HEIGHT)
+          \trow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+          \tvar style := StyleBoxFlat.new()
+          \tstyle.bg_color = Color(0.09, 0.14, 0.09, 0.6) if is_active else Color(0.05, 0.07, 0.11, 0.6)
+          \tstyle.set_corner_radius_all(3)
+          \trow.add_theme_stylebox_override("panel", style)
+
+          \tvar lbl := make_hud_label(11, Color(0.82, 0.87, 0.94))
+          \tlbl.text = text
+          \tlbl.set_anchors_preset(Control.PRESET_FULL_RECT)
+          \tlbl.offset_left = 6.0
+          \tlbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+          \tlbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+          \trow.add_child(lbl)
+
+          \tvar action := InventoryRow.ACTION_NONE if is_active else InventoryRow.ACTION_SELECT_ACTIVE_SHIP
+          \treturn InventoryRow.for_ship(row, ship_id, action)
+
+
+          ## Rebuild all four columns from the latest PlayerLoadout snapshot. Item rows
+          ## retain their canonical ItemIdentity object through the presentation layer;
+          ## action-specific numeric IDs are extracted only when a command needs one.
+          static func update_inventory_panel(
+          \trefs: InventoryPanelRefs, modules: Array, inventory: Array, station_inventory: Array = [],
+          \towned_ships: Array = [], buildable_ship_types: Array = []
+          ) -> void:
+          \tvar fitted_list: VBoxContainer = refs.fitted_list
+          \tvar inventory_list: VBoxContainer = refs.inventory_list
+          \tvar station_list: VBoxContainer = refs.station_list
+          \tvar ships_list: VBoxContainer = refs.ships_list
+          \tfor child: Node in fitted_list.get_children():
+          \t\tchild.queue_free()
+          \tfor child: Node in inventory_list.get_children():
+          \t\tchild.queue_free()
+          \tfor child: Node in station_list.get_children():
+          \t\tchild.queue_free()
+          \tfor child: Node in ships_list.get_children():
+          \t\tchild.queue_free()
+
+          \tvar fitted_rows: Array[InventoryRow] = []
+          \tfor entry: Variant in modules:
+          \t\tvar m: ModuleRow = entry
+          \t\tvar text := "%s: %s" % [m.slot, m.name]
+          \t\tvar row := _make_inventory_row(
+          \t\t\ttext, m.module_id, m.slot, InventoryRow.ACTION_UNFIT, 0, null, 0,
+          \t\t\tInventoryRow.SOURCE_FITTED, m.index)
+          \t\tfitted_list.add_child(row.panel)
+          \t\tfitted_rows.append(row)
+
+          \tif not fitted_rows.is_empty():
+          \t\tvar unfit_all_row := _make_inventory_row(
+          \t\t\t"Unfit all", 0, "", InventoryRow.ACTION_UNFIT_ALL, 0, null, 0,
+          \t\t\tInventoryRow.SOURCE_FITTED)
+          \t\tfitted_list.add_child(unfit_all_row.panel)
+          \t\tfitted_rows.append(unfit_all_row)
+
+          \trefs.fitted_rows = fitted_rows
+
+          \tvar inventory_rows: Array[InventoryRow] = []
+          \tfor entry: Variant in inventory:
+          \t\tvar item: ItemRow = entry
+          \t\tvar text: String
+          \t\tvar action := InventoryRow.ACTION_NONE
+          \t\tif item.item_id.is_module():
+          \t\t\ttext = "%s: %s x%d" % [item.slot, item.name, item.count]
+          \t\t\taction = InventoryRow.ACTION_FIT
+          \t\telse:
+          \t\t\ttext = "%s x%d" % [item.name, item.count]
+          \t\tvar row := _make_inventory_row(
+          \t\t\ttext, 0, item.slot, action, 0, item.item_id, item.count,
+          \t\t\tInventoryRow.SOURCE_SHIP_CARGO)
+          \t\tinventory_list.add_child(row.panel)
+          \t\tinventory_rows.append(row)
+          \trefs.inventory_rows = inventory_rows
+
+          \tvar station_rows: Array[InventoryRow] = []
+          \tfor entry: Variant in station_inventory:
+          \t\tvar item: ItemRow = entry
+          \t\tvar text: String
+          \t\tvar action := InventoryRow.ACTION_NONE
+          \t\tif item.item_id.is_packaged_ship():
+          \t\t\ttext = "%s x%d (click to assemble)" % [item.name, item.count]
+          \t\t\taction = InventoryRow.ACTION_ASSEMBLE
+          \t\telse:
+          \t\t\ttext = "%s x%d" % [item.name, item.count]
+          \t\tvar row := _make_inventory_row(
+          \t\t\ttext, 0, "", action, 0, item.item_id, item.count,
+          \t\t\tInventoryRow.SOURCE_STATION)
+          \t\tstation_list.add_child(row.panel)
+          \t\tstation_rows.append(row)
+
+          \tvar disassemble_row := _make_inventory_row(
+          \t\t"Disassemble active ship", 0, "", InventoryRow.ACTION_DISASSEMBLE, 0, null, 0,
+          \t\tInventoryRow.SOURCE_STATION)
+          \tstation_list.add_child(disassemble_row.panel)
+          \tstation_rows.append(disassemble_row)
+
+          \tvar picker_open: bool = refs.build_picker_open
+          \tvar toggle_text := "Build Ship ▾" if picker_open else "Build Ship ▸"
+          \tvar build_toggle_row := _make_inventory_row(
+          \t\ttoggle_text, 0, "", InventoryRow.ACTION_BUILD_TOGGLE, 0, null, 0,
+          \t\tInventoryRow.SOURCE_STATION)
+          \tstation_list.add_child(build_toggle_row.panel)
+          \tstation_rows.append(build_toggle_row)
+
+          \tif picker_open:
+          \t\tfor entry: Variant in buildable_ship_types:
+          \t\t\tvar t: BuildableShipType = entry as BuildableShipType
+          \t\t\tvar ship_type_id: int = t.ship_type_id
+          \t\t\tvar name: String = t.name
+          \t\t\tvar picker_row := _make_inventory_row(
+          \t\t\t\t"  %s" % name, 0, "", InventoryRow.ACTION_BUILD_SHIP_TYPE, ship_type_id,
+          \t\t\t\tnull, 0, InventoryRow.SOURCE_STATION)
+          \t\t\tstation_list.add_child(picker_row.panel)
+          \t\t\tstation_rows.append(picker_row)
+
+          \trefs.station_rows = station_rows
+
+          \tvar ship_rows: Array[InventoryRow] = []
+          \tfor entry: Variant in owned_ships:
+          \t\tvar ship: OwnedShipRow = entry as OwnedShipRow
+          \t\tvar ship_id: int = ship.ship_id
+          \t\tvar is_active: bool = ship.is_active
+          \t\tvar name := ship.ship_type_name if not ship.ship_type_name.is_empty() else "Ship #%d" % ship_id
+          \t\tvar status := "active" if is_active else ("docked" if ship.docked_station_id >= 0 else "away")
+          \t\tvar text := "%s (%s)" % [name, status]
+          \t\tvar row := _make_ship_row(text, ship_id, is_active)
+          \t\tships_list.add_child(row.panel)
+          \t\tship_rows.append(row)
+          \trefs.ship_rows = ship_rows
+          '''
+          path.write_text(text[:start] + block + text[end:])
+
+          # Migrate main.gd command/action seams.
+          path = Path("client/scripts/main.gd")
+          text = path.read_text()
+          text = replace_once(text, '''func _on_market_place_order(
+          \titem_type: String,
+          \tmodule_id: int,
+          \tship_type_id: int,
+          \tside: String,
+          \tprice: int,
+          \tquantity: int
+          ) -> void:
+          \tif _player_ship_id < 0 or not _session.is_docked():
+          \t\treturn
+          \t_connection.send_market_place_order_command(
+          \t\t_player_ship_id, item_type, module_id, ship_type_id, side, price, quantity)
+          ''', '''func _on_market_place_order(
+          \titem_id: ItemIdentity,
+          \tside: String,
+          \tprice: int,
+          \tquantity: int
+          ) -> void:
+          \tif _player_ship_id < 0 or not _session.is_docked() or item_id == null:
+          \t\treturn
+          \t_connection.send_market_place_order_command(
+          \t\t_player_ship_id, item_id, side, price, quantity)
+          ''', "market callback")
+          text = replace_once(text, '''\t\tInventoryRow.ACTION_FIT:
+          \t\t\t## ADR-0032's 2026-07-08 amendment: refitting requires being
+          \t\t\t## docked. Guarded client-side too (not just server-side) so this
+          \t\t\t## reads as an obvious no-op rather than a silent-failure resync,
+          \t\t\t## the same UX lesson learned from Disassemble earlier this phase.
+          \t\t\tif _player_ship_id >= 0 and _session.is_docked():
+          \t\t\t\t_connection.send_fit_module_command(_player_ship_id, row.module_id, row.slot)
+          ''', '''\t\tInventoryRow.ACTION_FIT:
+          \t\t\t## Refitting requires being docked. The module ID is extracted
+          \t\t\t## from the canonical Item identity only at this command seam.
+          \t\t\tif row.item_id != null and row.item_id.is_module() \\
+          \t\t\t\t\tand _player_ship_id >= 0 and _session.is_docked():
+          \t\t\t\t_connection.send_fit_module_command(
+          \t\t\t\t\t_player_ship_id, row.item_id.module_id() as int, row.slot)
+          ''', "fit action")
+          text = replace_once(text, '''\t\tInventoryRow.ACTION_ASSEMBLE:
+          \t\t\t## No active-ship requirement: this is exactly the recovery path
+          \t\t\t## for a shipless docked player (docs/architecture/ownership.md §8).
+          \t\t\tvar docked_station_id: int = _session.docked_station_id()
+          \t\t\tif docked_station_id >= 0:
+          \t\t\t\t_connection.send_assemble_command(docked_station_id, row.ship_type_id)
+          ''', '''\t\tInventoryRow.ACTION_ASSEMBLE:
+          \t\t\t## No active-ship requirement: this is exactly the recovery path
+          \t\t\t## for a shipless docked player (docs/architecture/ownership.md §8).
+          \t\t\tvar docked_station_id: int = _session.docked_station_id()
+          \t\t\tif docked_station_id >= 0 and row.item_id != null \\
+          \t\t\t\t\tand row.item_id.is_packaged_ship():
+          \t\t\t\t_connection.send_assemble_command(
+          \t\t\t\t\tdocked_station_id, row.item_id.ship_type_id() as int)
+          ''', "assemble action")
+          text = replace_once(text, '''\t_connection.send_transfer_to_station_command(
+          \t\t_player_ship_id, docked_station_id, row.item_type, row.module_id, row.ship_type_id)
+          ''', '''\tif row.item_id != null:
+          \t\t_connection.send_transfer_to_station_command(
+          \t\t\t_player_ship_id, docked_station_id, row.item_id)
+          ''', "right-click transfer")
+          text = replace_once(text, '''\t\t\t\tInventoryRow.SOURCE_FITTED:
+          \t\t\t\t\tif row.item_type == "Module" and _player_ship_id >= 0 and _session.is_docked():
+          \t\t\t\t\t\t_connection.send_fit_module_command(_player_ship_id, row.module_id, row.slot)
+          ''', '''\t\t\t\tInventoryRow.SOURCE_FITTED:
+          \t\t\t\t\tif row.item_id != null and row.item_id.is_module() \\
+          \t\t\t\t\t\t\tand _player_ship_id >= 0 and _session.is_docked():
+          \t\t\t\t\t\t_connection.send_fit_module_command(
+          \t\t\t\t\t\t\t_player_ship_id, row.item_id.module_id() as int, row.slot)
+          ''', "drag fit")
+          text = replace_once(text, '''\t\tInventoryRow.SOURCE_STATION:
+          \t\t\tmatch target_column:
+          \t\t\t\tInventoryRow.SOURCE_SHIP_CARGO:
+          \t\t\t\t\tif _player_ship_id >= 0:
+          \t\t\t\t\t\tvar docked_station_id: int = _session.docked_station_id()
+          \t\t\t\t\t\tif docked_station_id >= 0:
+          \t\t\t\t\t\t\t_connection.send_transfer_from_station_command(
+          \t\t\t\t\t\t\t\t_player_ship_id, docked_station_id, row.item_type, row.module_id,
+          \t\t\t\t\t\t\t\trow.ship_type_id)
+          ''', '''\t\tInventoryRow.SOURCE_STATION:
+          \t\t\tmatch target_column:
+          \t\t\t\tInventoryRow.SOURCE_SHIP_CARGO:
+          \t\t\t\t\tif _player_ship_id >= 0 and row.item_id != null:
+          \t\t\t\t\t\tvar docked_station_id: int = _session.docked_station_id()
+          \t\t\t\t\t\tif docked_station_id >= 0:
+          \t\t\t\t\t\t\t_connection.send_transfer_from_station_command(
+          \t\t\t\t\t\t\t\t_player_ship_id, docked_station_id, row.item_id)
+          ''', "drag station transfer")
+          if "row.item_type" in text:
+              raise SystemExit("main.gd still contains row.item_type")
+          path.write_text(text)
+
+          # Replace the legacy ItemRow fixture constructor with a canonical
+          # PlayerLoadout-backed fixture and update all identity literals.
+          path = Path("client/test/hud_surface_test.gd")
+          text = path.read_text()
+          start = text.index("func _item(overrides: Dictionary) -> ItemRow:")
+          end = text.index("\n\nfunc _owned_ship", start)
+          helper = '''func _item(overrides: Dictionary) -> ItemRow:
+          \tvar base: Dictionary = {
+          \t\t"item_id": {"Module": 1},
+          \t\t"name": "Test Item", "kind": "", "slot": "", "count": 1,
+          \t}
+          \tfor key: String in overrides:
+          \t\tbase[key] = overrides[key]
+          \tvar loadout := PlayerLoadout.new()
+          \tif not loadout.apply_payload(JSON.stringify({"inventory": [base]})):
+          \t\treturn null
+          \treturn loadout.inventory()[0] as ItemRow
+          '''
+          text = text[:start] + helper + text[end:]
+          text = text.replace('"item_type": "ScrapMetal"', '"item_id": "ScrapMetal"')
+          text = re.sub(
+              r'"item_type": "Module", "module_id": ([0-9]+)',
+              r'"item_id": {"Module": \1}', text)
+          text = re.sub(
+              r'"item_type": "PackagedShip", "ship_type_id": ([0-9]+)',
+              r'"item_id": {"PackagedShip": \1}', text)
+          text = text.replace(
+              'assert_str(unbuilt._inventory_panel_refs.inventory_rows[0].item_type).is_equal("ScrapMetal")',
+              'assert_bool(unbuilt._inventory_panel_refs.inventory_rows[0].item_id.is_scrap_metal()).is_true()')
+          text = text.replace(
+              'assert_str(rows[1].item_type).is_equal("ScrapMetal")',
+              'assert_bool(rows[1].item_id.is_scrap_metal()).is_true()')
+          text = text.replace(
+              'assert_int(hit.ship_type_id).is_equal(7)',
+              'assert_int(hit.item_id.ship_type_id() as int).is_equal(7)')
+          if "item_type" in text or "ItemRow.from_json" in text:
+              raise SystemExit("hud_surface_test.gd still contains a legacy Item fixture")
+          path.write_text(text)
+
+          # Update main's fake connection and direct InventoryRow fixtures.
+          path = Path("client/test/main_test.gd")
+          text = path.read_text()
+          start = text.index("\tvar transfer_to_station_calls: Array[Dictionary] = []")
+          end = text.index("\n\nfunc before_test()", start)
+          fake = '''\tvar transfer_to_station_calls: Array[Dictionary] = []
+          \tvar transfer_from_station_calls: Array[Dictionary] = []
+
+          \tfunc send_transfer_to_station_command(
+          \t\tp_ship_id: int, p_station_id: int, p_item_id: ItemIdentity
+          \t) -> void:
+          \t\ttransfer_to_station_calls.append({
+          \t\t\t"ship_id": p_ship_id, "station_id": p_station_id, "item_id": p_item_id,
+          \t\t})
+
+          \tfunc send_transfer_from_station_command(
+          \t\tp_ship_id: int, p_station_id: int, p_item_id: ItemIdentity
+          \t) -> void:
+          \t\ttransfer_from_station_calls.append({
+          \t\t\t"ship_id": p_ship_id, "station_id": p_station_id, "item_id": p_item_id,
+          \t\t})
+          '''
+          text = text[:start] + fake + text[end:]
+          text = text.replace(
+              'null, 5, "High", InventoryRow.ACTION_FIT, 0, "Module", 1, InventoryRow.SOURCE_SHIP_CARGO)',
+              'null, 0, "High", InventoryRow.ACTION_FIT, 0, ItemIdentity.module(5) as ItemIdentity, 1, InventoryRow.SOURCE_SHIP_CARGO)')
+          text = text.replace(
+              'null, 5, "High", InventoryRow.ACTION_UNFIT, 0, "", 0, InventoryRow.SOURCE_FITTED)',
+              'null, 5, "High", InventoryRow.ACTION_UNFIT, 0, null, 0, InventoryRow.SOURCE_FITTED)')
+          text = text.replace(
+              'null, 0, "", InventoryRow.ACTION_NONE, 0, "ScrapMetal", 4, InventoryRow.SOURCE_SHIP_CARGO)',
+              'null, 0, "", InventoryRow.ACTION_NONE, 0, ItemIdentity.scrap_metal(), 4, InventoryRow.SOURCE_SHIP_CARGO)')
+          text = text.replace(
+              'null, 0, "", InventoryRow.ACTION_NONE, 0, "ScrapMetal", 4, InventoryRow.SOURCE_STATION)',
+              'null, 0, "", InventoryRow.ACTION_NONE, 0, ItemIdentity.scrap_metal(), 4, InventoryRow.SOURCE_STATION)')
+          text = text.replace(
+              'assert_str(connection.transfer_to_station_calls[0]["item_type"] as String).is_equal("ScrapMetal")',
+              'assert_bool((connection.transfer_to_station_calls[0]["item_id"] as ItemIdentity).is_scrap_metal()).is_true()')
+          text = text.replace(
+              'assert_str(connection.transfer_from_station_calls[0]["item_type"] as String).is_equal("ScrapMetal")',
+              'assert_bool((connection.transfer_from_station_calls[0]["item_id"] as ItemIdentity).is_scrap_metal()).is_true()')
+          if "p_item_type" in text or '["item_type"]' in text:
+              raise SystemExit("main_test.gd still contains legacy transfer identity")
+          if re.search(r'InventoryRow\.for_item\([^)]*"(?:Module|ScrapMetal|PackagedShip)"', text, re.S):
+              raise SystemExit("main_test.gd still constructs sentinel Item identity")
+          path.write_text(text)
+          PY
+
+      - name: Check removed compatibility references
+        run: |
+          ! grep -R "ItemRow.from_json" crates/dawn-client-gdext client/test
+          ! grep -R "row.item_type\|item\.item_type" client/scripts client/test
+          ! grep -R "p_item_type" client/scripts client/test
+          ! grep -R "item_wire_from_legacy_fields" crates/dawn-client-gdext
+
+      - name: Commit migrated callers
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git add client/scripts/hud_manager.gd client/scripts/main.gd client/test/hud_surface_test.gd client/test/main_test.gd
+          git commit -m "Migrate client Item identity callers"
+          git push origin HEAD:${GITHUB_REF_NAME}
