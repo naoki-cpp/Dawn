@@ -181,8 +181,7 @@ impl PlayerLoadout {
         self.loadout
             .as_ref()
             .map(|loadout| {
-                i64::try_from(loadout.tick)
-                    .expect("PlayerLoadout range validation covers the tick")
+                i64::try_from(loadout.tick).expect("PlayerLoadout range validation covers the tick")
             })
             .unwrap_or(0)
     }
@@ -193,8 +192,7 @@ impl PlayerLoadout {
             .as_ref()
             .and_then(|loadout| loadout.active_ship_id)
             .map(|id| {
-                i64::try_from(id)
-                    .expect("PlayerLoadout range validation covers the active ship ID")
+                i64::try_from(id).expect("PlayerLoadout range validation covers the active ship ID")
             })
             .unwrap_or(-1)
     }
