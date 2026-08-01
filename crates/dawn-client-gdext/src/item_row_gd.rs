@@ -35,3 +35,31 @@ impl ItemRow {
         })
     }
 }
+
+#[godot_api]
+impl ItemRow {
+    /// Debug-only typed fixture for GdUnit. Production callers receive ItemRow
+    /// values only from the PlayerLoadout projection and cannot reconstruct a
+    /// legacy scalar identity shape.
+    #[cfg(debug_assertions)]
+    #[func]
+    fn test_fixture(
+        item_id: Gd<ItemIdentity>,
+        name: GString,
+        kind: GString,
+        slot: GString,
+        count: i64,
+    ) -> Variant {
+        let Ok(count) = u64::try_from(count) else {
+            return Variant::nil();
+        };
+        Self::wrap(CoreItemRow {
+            item_id: item_id.bind().get(),
+            name: name.to_string(),
+            kind: kind.to_string(),
+            slot: slot.to_string(),
+            count,
+        })
+        .to_variant()
+    }
+}
