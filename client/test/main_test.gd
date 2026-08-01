@@ -342,7 +342,7 @@ func test_stale_player_undock_event_does_not_leave_docked_state() -> void:
 	_main._session.set_player_ship_id(2)
 	_main._session.apply_dock_fitting(0, "Forge Station", 12)
 
-	var accepted := _main._session.apply_undock_event(2, 11)
+	var accepted: bool = _main._session.apply_undock_event(2, 11)
 	_main._handle_ship_undocked(2, 0, 11, accepted)
 
 	assert_int(ship.undock_calls.size()).is_equal(0)
@@ -450,7 +450,7 @@ func test_player_ship_undocked_event_clears_docked_station_state() -> void:
 	_main._session.set_player_ship_id(2)
 	_main._session.apply_dock_fitting(0, "Forge Station", 12)
 
-	var accepted := _main._session.apply_undock_event(2, 13)
+	var accepted: bool = _main._session.apply_undock_event(2, 13)
 	_main._handle_ship_undocked(2, 0, 13, accepted)
 
 	assert_int(_main._nearby_station_ids[0]).is_equal(0)
