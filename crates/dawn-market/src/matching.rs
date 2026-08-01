@@ -24,7 +24,7 @@ pub(super) struct IncomingOrder {
 pub(super) struct RestingOrder {
     pub(super) order_id: i64,
     pub(super) player_id: PlayerId,
-    pub(super) ship_id: Option<ShipId>,
+    pub(super) ship_id: ShipId,
     pub(super) item_id: ItemId,
     pub(super) side: OrderSide,
     pub(super) quantity_remaining: u64,
@@ -41,7 +41,7 @@ pub(super) struct MatchFill {
     pub(super) resting_escrowed_currency: u64,
     pub(super) buyer: PlayerId,
     pub(super) seller: PlayerId,
-    pub(super) buyer_ship_id: Option<ShipId>,
+    pub(super) buyer_ship_id: ShipId,
     pub(super) price: u64,
     pub(super) seller_proceeds: u64,
 }
@@ -96,11 +96,7 @@ pub(super) fn plan_matches(
         remaining_quantity -= quantity;
 
         let (buyer, seller, buyer_ship_id) = match incoming.side {
-            OrderSide::Bid => (
-                incoming.player_id,
-                resting.player_id,
-                Some(incoming.ship_id),
-            ),
+            OrderSide::Bid => (incoming.player_id, resting.player_id, incoming.ship_id),
             OrderSide::Ask => (resting.player_id, incoming.player_id, resting.ship_id),
         };
         let seller_proceeds = resting.price * quantity;
@@ -175,7 +171,7 @@ mod tests {
         RestingOrder {
             order_id,
             player_id: PlayerId(player_id),
-            ship_id: Some(ship(player_id)),
+            ship_id: ship(player_id),
             item_id: item(),
             side,
             quantity_remaining: quantity,
