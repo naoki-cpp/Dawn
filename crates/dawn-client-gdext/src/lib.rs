@@ -1,8 +1,10 @@
 //! GDExtension binding exposing `dawn-client-core` to the Godot client
 //! (ADR-0040). This crate converts `dawn-wire` messages into typed client
-//! updates and Godot presentation records; domain state and
-//! rules remain in the Godot-independent client/core crates. Raw frame bytes
-//! are retained only where an existing typed decoder consumes them directly.
+//! updates and Godot presentation records. Every inbound state mutation is
+//! applied to `WorldSessionState` before presentation callbacks run; domain
+//! state and rules remain in the Godot-independent client/core crates. Raw
+//! frame bytes are retained only where an existing typed decoder consumes
+//! them directly.
 
 use godot::prelude::*;
 
