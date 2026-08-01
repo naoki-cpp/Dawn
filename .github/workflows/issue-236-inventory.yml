@@ -25,6 +25,10 @@ jobs:
           grep -RIn --include='*.rs' --include='*.md' 'ShipSnapshot' crates/dawn-sector crates/dawn-core docs | grep -Ei 'transit|event-catalog|ADR-0014' || true
           echo '=== TransitShipState references ==='
           grep -RIn --include='*.rs' --include='*.md' 'TransitShipState' crates docs || true
+          echo '=== SectorTransitCompleted constructors ==='
+          grep -RIn --include='*.rs' 'SectorTransitCompleted {' crates || true
+          echo '=== complete/import/handle calls ==='
+          grep -RIn --include='*.rs' 'complete_outgoing_transit\|handle_transit_commit\|apply_ack(' crates/dawn-sector/src || true
           echo '=== Transit Ack references ==='
           grep -RIn --include='*.rs' --include='*.md' 'AckProposal\|TransitOp::Ack\|Ack {' crates/dawn-sector docs || true
           echo '=== fake snapshot helpers ==='
