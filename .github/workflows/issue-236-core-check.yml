@@ -11,6 +11,7 @@ on:
       - '.github/issue-236-followup.py'
       - '.github/issue-236-tests.py'
       - '.github/issue-236-docs.py'
+      - '.github/issue-236-clippy.py'
       - '.github/workflows/issue-236-core-check.yml'
 
 permissions:
@@ -36,6 +37,7 @@ jobs:
           python3 .github/issue-236-followup.py
           python3 .github/issue-236-tests.py
           python3 .github/issue-236-docs.py
+          python3 .github/issue-236-clippy.py
       - name: Format and inspect boundaries
         run: |
           cargo fmt --all
