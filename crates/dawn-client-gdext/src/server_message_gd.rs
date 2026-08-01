@@ -281,7 +281,7 @@ fn ensure_handler(target: &mut Gd<Object>, method: &str) -> bool {
         .try_to::<bool>()
         .unwrap_or(false);
     if !exists {
-        godot_error!("typed ServerMessage dispatch target is missing method '{method}'");
+        godot_warn!("typed ServerMessage dispatch target is missing method '{method}'");
     }
     exists
 }

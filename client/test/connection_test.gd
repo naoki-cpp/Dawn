@@ -119,72 +119,72 @@ func test_motion_correction_outcome_emits_prediction_signal() -> void:
 
 
 class EventDispatchTarget:
-    extends RefCounted
-    var left_ship_id: int = -1
+	extends RefCounted
+	var left_ship_id: int = -1
 
-    func _handle_aoi_leave(payload: Dictionary) -> void:
-        left_ship_id = payload.get("ship_id", -1) as int
+	func _handle_aoi_leave(payload: Dictionary) -> void:
+		left_ship_id = payload.get("ship_id", -1) as int
 
 
 func test_real_outcome_dispatches_welcome_and_detects_missing_handler() -> void:
-    var decoder := ServerMessageDecoder.new()
-    var outcome: ServerMessageOutcome = decoder.test_outcome("Welcome")
-    assert_object(outcome).is_not_null()
+	var decoder := ServerMessageDecoder.new()
+	var outcome: ServerMessageOutcome = decoder.test_outcome("Welcome")
+	assert_object(outcome).is_not_null()
 
-    var missing_target := Node.new()
-    assert_bool(outcome.dispatch(missing_target)).is_false()
-    missing_target.free()
+	var missing_target := Node.new()
+	assert_bool(outcome.dispatch(missing_target)).is_false()
+	missing_target.free()
 
-    var connection: Node = Connection.new()
-    assert_bool(outcome.dispatch(connection)).is_true()
-    assert_int(connection.player_id).is_equal(5)
-    assert_int(connection.ship_id).is_equal(11)
-    connection.free()
+	var connection: Node = Connection.new()
+	assert_bool(outcome.dispatch(connection)).is_true()
+	assert_int(connection.player_id).is_equal(5)
+	assert_int(connection.ship_id).is_equal(11)
+	connection.free()
 
 
 func test_real_world_event_outcome_dispatches_to_handler() -> void:
-    var decoder := ServerMessageDecoder.new()
-    var top_level: ServerMessageOutcome = decoder.test_outcome("AoiLeave")
-    var connection: Node = Connection.new()
-    var events: Array = []
-    connection.event_received.connect(func(event: ServerEventOutcome) -> void:
-        events.append(event)
-    )
-    assert_bool(top_level.dispatch(connection)).is_true()
-    assert_int(events.size()).is_equal(1)
+	var decoder := ServerMessageDecoder.new()
+	var top_level: ServerMessageOutcome = decoder.test_outcome("AoiLeave")
+	var connection: Node = Connection.new()
+	var events: Array = []
+	connection.event_received.connect(func(event: ServerEventOutcome) -> void:
+		events.append(event)
+	)
+	assert_bool(top_level.dispatch(connection)).is_true()
+	assert_int(events.size()).is_equal(1)
 
-    var target := EventDispatchTarget.new()
-    assert_bool((events[0] as ServerEventOutcome).dispatch(target)).is_true()
-    assert_int(target.left_ship_id).is_equal(19)
-    connection.free()
+	var target := EventDispatchTarget.new()
+	assert_bool((events[0] as ServerEventOutcome).dispatch(target)).is_true()
+	assert_int(target.left_ship_id).is_equal(19)
+	connection.free()
 
 
 func test_real_initial_state_outcome_preserves_nested_payload() -> void:
-    var decoder := ServerMessageDecoder.new()
-    var outcome: ServerMessageOutcome = decoder.test_outcome("InitialState")
-    var connection: Node = Connection.new()
-    var states: Array = []
-    connection.initial_state_received.connect(func(state: Dictionary) -> void:
-        states.append(state)
-    )
-    assert_bool(outcome.dispatch(connection)).is_true()
-    assert_int(states.size()).is_equal(1)
-    assert_str((states[0] as Dictionary).get("system_name", "") as String).is_equal("Alpha")
-    connection.free()
+	var decoder := ServerMessageDecoder.new()
+	var outcome: ServerMessageOutcome = decoder.test_outcome("InitialState")
+	var connection: Node = Connection.new()
+	var states: Array = []
+	connection.initial_state_received.connect(func(state: Dictionary) -> void:
+		states.append(state)
+	)
+	assert_bool(outcome.dispatch(connection)).is_true()
+	assert_int(states.size()).is_equal(1)
+	assert_str((states[0] as Dictionary).get("system_name", "") as String).is_equal("Alpha")
+	connection.free()
 
 
 func test_real_market_outcome_preserves_every_item_variant() -> void:
-    var decoder := ServerMessageDecoder.new()
-    var outcome: ServerMessageOutcome = decoder.test_outcome("MarketSnapshot")
-    var connection: Node = Connection.new()
-    var snapshots: Array = []
-    connection.market_snapshot_received.connect(func(snapshot: Dictionary) -> void:
-        snapshots.append(snapshot)
-    )
-    assert_bool(outcome.dispatch(connection)).is_true()
-    var orders: Array = (snapshots[0] as Dictionary).get("orders", []) as Array
-    assert_int(orders.size()).is_equal(3)
-    assert_str((orders[0] as Dictionary).get("item_id", "") as String).is_equal("ScrapMetal")
-    assert_bool(((orders[1] as Dictionary).get("item_id", {}) as Dictionary).has("Module")).is_true()
-    assert_bool(((orders[2] as Dictionary).get("item_id", {}) as Dictionary).has("PackagedShip")).is_true()
-    connection.free()
+	var decoder := ServerMessageDecoder.new()
+	var outcome: ServerMessageOutcome = decoder.test_outcome("MarketSnapshot")
+	var connection: Node = Connection.new()
+	var snapshots: Array = []
+	connection.market_snapshot_received.connect(func(snapshot: Dictionary) -> void:
+		snapshots.append(snapshot)
+	)
+	assert_bool(outcome.dispatch(connection)).is_true()
+	var orders: Array = (snapshots[0] as Dictionary).get("orders", []) as Array
+	assert_int(orders.size()).is_equal(3)
+	assert_str((orders[0] as Dictionary).get("item_id", "") as String).is_equal("ScrapMetal")
+	assert_bool(((orders[1] as Dictionary).get("item_id", {}) as Dictionary).has("Module")).is_true()
+	assert_bool(((orders[2] as Dictionary).get("item_id", {}) as Dictionary).has("PackagedShip")).is_true()
+	connection.free()
