@@ -26,9 +26,23 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
       - name: Apply final implementation and test migration
         run: |
-          cat scripts/issue238-final.part.* | base64 --decode | gzip --decompress > /tmp/issue-238-final.patch
-          test "$(sha256sum /tmp/issue-238-final.patch | cut -d' ' -f1)" = "14f822dd3287255abd96b7fc98aa6dd37f54495533db7b325b0c7ba43e9b4fe6"
+          git show 7e04f95b0a73a885eb18a863c8065d92b5052a50:scripts/issue238-final.part.00 > /tmp/issue238.part.00
+          git show 7e04f95b0a73a885eb18a863c8065d92b5052a50:scripts/issue238-final.part.01 > /tmp/issue238.part.01
+          cat /tmp/issue238.part.* | base64 --decode | gzip --decompress > /tmp/issue-238-final.patch
+          test "$(sha256sum /tmp/issue-238-final.patch | cut -d' ' -f1)" = "c2028f156d0cc7c46951496a32083e0e411db7871c64d6d2d84fd4c685e305fe"
           git apply --index /tmp/issue-238-final.patch
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('crates/dawn-client-gdext/src/loadout_gd.rs')
+          source = path.read_text()
+          source = source.replace(
+              'use crate::client_outcome::validate_player_loadout_godot_ranges;',
+              '#[cfg(test)]\nuse crate::client_outcome::validate_player_loadout_godot_ranges;',
+              1,
+          )
+          path.write_text(source)
+          PY
+          git add crates/dawn-client-gdext/src/loadout_gd.rs
           cargo fmt --all
       - name: Validate typed client layers
         run: |
