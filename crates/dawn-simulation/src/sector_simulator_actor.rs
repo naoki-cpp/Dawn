@@ -270,7 +270,12 @@ impl SectorSimulatorHandle {
         raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(256);
-        let node = SimulationNode::new(node_id, sector_id, bounds);
+        let node = SimulationNode::new(
+            node_id,
+            sector_id,
+            bounds,
+            std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+        );
         tokio::spawn(
             SectorSimulatorActor::new(rx, node, replication, raft, raft_committed_rx).run(),
         );

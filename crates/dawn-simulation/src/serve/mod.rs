@@ -187,11 +187,12 @@ pub(crate) fn build_serve_node(
     bounds: SectorBounds,
     pop_cap: usize,
 ) -> SimulationNode {
-    let mut node = SimulationNode::new(id, sector, bounds);
+    let galaxy = std::sync::Arc::new(
+        Galaxy::load_from_file(PRODUCTION_GALAXY_PATH)
+            .unwrap_or_else(|e| panic!("failed to load production galaxy map: {e}")),
+    );
+    let mut node = SimulationNode::new(id, sector, bounds, galaxy);
     node.set_population_cap(pop_cap);
-    let star_map = Galaxy::load_from_file(PRODUCTION_GALAXY_PATH)
-        .unwrap_or_else(|e| panic!("failed to load production galaxy map: {e}"));
-    node.set_galaxy(std::sync::Arc::new(star_map));
     register_data_driven_definitions(&mut node);
     node
 }
@@ -220,9 +221,8 @@ mod serve_pipeline_tests {
         bounds: SectorBounds,
         pop_cap: usize,
     ) -> SimulationNode {
-        let mut node = SimulationNode::new(id, sector, bounds);
+        let mut node = SimulationNode::new(id, sector, bounds, std::sync::Arc::new(Galaxy::demo()));
         node.set_population_cap(pop_cap);
-        node.set_galaxy(std::sync::Arc::new(Galaxy::demo()));
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let catalog = dawn_sector::game_data::GameDataCatalog::load_from_paths(
             root.join(dawn_sector::game_data::PRODUCTION_MODULES_PATH),

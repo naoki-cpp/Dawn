@@ -72,6 +72,7 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             store,
         )
     }
@@ -149,7 +150,13 @@ mod tests {
             store.base_index() > 0,
             "hot log was compacted behind the snapshot"
         );
-        let mut restored = SimulationNode::restore_from(store, &snap, &[], &[]);
+        let mut restored = SimulationNode::restore_from(
+            store,
+            &snap,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+            &[],
+            &[],
+        );
         assert_eq!(restored.current_tick(), snap.tick);
         for _ in 0..4 {
             restored.tick();

@@ -460,6 +460,10 @@ fn build_node(
 ) -> (SimulationNode<FileEventStore>, bool) {
     let catalog = runtime_catalog()
         .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}"));
+    let galaxy = Arc::new(
+        Galaxy::load_from_file(PRODUCTION_GALAXY_PATH)
+            .unwrap_or_else(|e| panic!("failed to load production galaxy map: {e}")),
+    );
 
     // FileEventStore::open does not create its parent directory, and a fresh
     // deployment has no `data/node-N/` yet -- create it (and the snapshot/
@@ -492,6 +496,7 @@ fn build_node(
                 SimulationNode::restore_from(
                     store,
                     &snapshot,
+                    Arc::clone(&galaxy),
                     catalog.modules(),
                     catalog.ship_types(),
                 ),
@@ -503,7 +508,8 @@ fn build_node(
                 "[Node] no snapshot at '{}', starting fresh",
                 cfg.snapshot_path
             );
-            let mut node = SimulationNode::with_store(node_id, sector_id, bounds, store);
+            let mut node =
+                SimulationNode::with_store(node_id, sector_id, bounds, Arc::clone(&galaxy), store);
             catalog.register_into(&mut node);
             (node, true)
         }
@@ -514,9 +520,6 @@ fn build_node(
     };
 
     node.set_population_cap(cfg.pop_cap);
-    let star_map = Galaxy::load_from_file(PRODUCTION_GALAXY_PATH)
-        .unwrap_or_else(|e| panic!("failed to load production galaxy map: {e}"));
-    node.set_galaxy(Arc::new(star_map));
     // ADR-0038: Station inventory's durability is independent of the event
     // log / snapshot lifecycle above -- opening it is just pointing at the
     // (persistent, on-disk) file, whether this node is fresh or restored.

@@ -471,6 +471,7 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         for def in crate::game_data::test_catalog().modules().to_vec() {
             node.register_module(def);
@@ -496,6 +497,7 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship(player_id);
@@ -639,6 +641,7 @@ mod tests {
         let node2 = SimulationNode::restore_from(
             InMemoryEventStore::new(),
             &snap,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             crate::game_data::test_catalog().modules(),
             crate::game_data::test_catalog().ship_types(),
         );

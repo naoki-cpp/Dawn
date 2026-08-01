@@ -776,6 +776,7 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         )
     }
 
@@ -993,11 +994,13 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         let mut to_node = SimulationNode::new(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
 
         let ship_id = from_node.spawn_ship(
@@ -1055,11 +1058,13 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         let mut to_node = SimulationNode::new(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
 
         let return_gate = galaxy
@@ -1102,11 +1107,13 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         let mut to_node = SimulationNode::new(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
 
         let outbound_gate = crate::galaxy::Galaxy::demo()
@@ -1168,11 +1175,13 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         let mut to_node = SimulationNode::new(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
 
         for def in crate::game_data::test_catalog().modules().to_vec() {
@@ -1228,11 +1237,13 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         let mut to_node = SimulationNode::new(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
 
         let player_id = from_node.next_player_id();
@@ -1275,11 +1286,13 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         let mut to_node = SimulationNode::new(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
 
         let ship_id = from_node.spawn_ship(
@@ -1343,6 +1356,7 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         let ship_id = from_node.spawn_ship(
             ShipTypeId(1),
@@ -1364,6 +1378,7 @@ mod tests {
                 NodeId(1),
                 SectorId(1),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
                 store,
             );
             to_node.import_transit(
@@ -1380,7 +1395,13 @@ mod tests {
 
         let snap = StateSnapshot::load(&snap_path).unwrap();
         let store2 = FileEventStore::open(&event_path).unwrap();
-        let restored = SimulationNode::restore_from(store2, &snap, &[], &[]);
+        let restored = SimulationNode::restore_from(
+            store2,
+            &snap,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+            &[],
+            &[],
+        );
 
         assert_eq!(restored.ship_count(), 1);
         assert_eq!(restored.get_ship_position(ship_id), Some(entry_pos));
@@ -1404,11 +1425,13 @@ mod tests {
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             );
             let mut to_node = SimulationNode::new(
                 NodeId(1),
                 SectorId(1),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             );
             let ship_id = from_node.spawn_ship(
                 ShipTypeId(1),
@@ -1474,6 +1497,7 @@ mod tests {
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
         node.apply_event_pub(DomainEvent::SectorTransitRequested(
@@ -1553,6 +1577,7 @@ mod tests {
             NodeId(1),
             SectorId(1), // matches `to` below -- this is the destination
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         let ship_id = ShipId::new(NodeId(0), 7);
 
@@ -1591,6 +1616,7 @@ mod tests {
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         let ship_id = ShipId::new(NodeId(0), 7);
         let event =
@@ -1635,11 +1661,13 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         let mut to_node = SimulationNode::new(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
 
         // Snapshot both Sectors *before* the transit -- the ship only exists
@@ -1676,14 +1704,25 @@ mod tests {
         for rec in from_node.event_store().all_records() {
             from_store2.append(rec.event.clone());
         }
-        let restored_from =
-            SimulationNode::restore_from(from_store2, &from_snapshot_before, &[], &[]);
+        let restored_from = SimulationNode::restore_from(
+            from_store2,
+            &from_snapshot_before,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+            &[],
+            &[],
+        );
 
         let mut to_store2 = InMemoryEventStore::new();
         for rec in to_node.event_store().all_records() {
             to_store2.append(rec.event.clone());
         }
-        let restored_to = SimulationNode::restore_from(to_store2, &to_snapshot_before, &[], &[]);
+        let restored_to = SimulationNode::restore_from(
+            to_store2,
+            &to_snapshot_before,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+            &[],
+            &[],
+        );
 
         let owned_by_source = restored_from.ships.index.contains_key(&ship_id);
         let owned_by_destination = restored_to.ships.index.contains_key(&ship_id);
@@ -1751,6 +1790,7 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
 
         let ship_id = from_node.spawn_ship(
@@ -1777,7 +1817,13 @@ mod tests {
         for rec in from_node.event_store().all_records() {
             store2.append(rec.event.clone());
         }
-        let restored = SimulationNode::restore_from(store2, &snapshot_before, &[], &[]);
+        let restored = SimulationNode::restore_from(
+            store2,
+            &snapshot_before,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+            &[],
+            &[],
+        );
 
         assert!(
             restored.ships.index.contains_key(&ship_id),

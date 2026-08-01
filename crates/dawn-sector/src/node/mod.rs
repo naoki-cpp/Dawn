@@ -10,7 +10,7 @@
 //!
 //! ```text
 //! node.take_snapshot()           -> StateSnapshot (ECS state at log_index N)
-//! SimulationNode::restore_from(store, &snapshot, &modules, &ship_types)
+//! SimulationNode::restore_from(store, &snapshot, galaxy, &modules, &ship_types)
 //!     -> reconstruct ECS from snapshot, replay events from log_index N onward
 //! ```
 
@@ -185,7 +185,7 @@ where
     /// Static navigation topology for this Sector (gates, bodies, star map).
     sector_map: SectorMap,
     /// Per-body coordinate anchors (ADR-0029): absolute Sector-local positions
-    /// in f64, derived from `sector_map.galaxy`. Rebuilt on `set_galaxy`.
+    /// in f64, derived from the topology supplied at construction.
     anchor_table: crate::anchor::AnchorTable,
     /// Per-Sector population backstop (ADR-0018). Defaults to [`POPULATION_CAP`];
     /// tunable via [`Self::set_population_cap`].
@@ -237,8 +237,19 @@ impl<S: EventStore> std::fmt::Debug for SimulationNode<S> {
 
 impl SimulationNode<InMemoryEventStore> {
     /// Create a node backed by an in-memory event store (Phase 0 default).
-    pub fn new(node_id: NodeId, sector_id: SectorId, bounds: SectorBounds) -> Self {
-        Self::with_store(node_id, sector_id, bounds, InMemoryEventStore::new())
+    pub fn new(
+        node_id: NodeId,
+        sector_id: SectorId,
+        bounds: SectorBounds,
+        galaxy: Arc<crate::galaxy::Galaxy>,
+    ) -> Self {
+        Self::with_store(
+            node_id,
+            sector_id,
+            bounds,
+            galaxy,
+            InMemoryEventStore::new(),
+        )
     }
 }
 
@@ -250,9 +261,9 @@ impl<S: EventStore> SimulationNode<S> {
         node_id: NodeId,
         sector_id: SectorId,
         bounds: SectorBounds,
+        galaxy: Arc<crate::galaxy::Galaxy>,
         store: S,
     ) -> Self {
-        let galaxy = Arc::new(crate::galaxy::Galaxy::demo());
         let sector_map = SectorMap::from_galaxy(sector_id, Arc::clone(&galaxy));
         let anchor_table = crate::anchor::AnchorTable::from_galaxy(&galaxy);
 
@@ -288,6 +299,7 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Restore a node from a `StateSnapshot` plus the events appended since.
     ///
+    /// `galaxy` is the authoritative topology for the restored process.
     /// `modules` and `ship_types` must come from the same
     /// [`crate::game_data::GameDataCatalog`] used to configure the node, for
     /// example `catalog.modules()` and `catalog.ship_types()`. They are needed to resolve
@@ -297,6 +309,7 @@ impl<S: EventStore> SimulationNode<S> {
     pub fn restore_from(
         store: S,
         snapshot: &StateSnapshot,
+        galaxy: Arc<crate::galaxy::Galaxy>,
         modules: &[ModuleDefinition],
         ship_types: &[ShipTypeDefinition],
     ) -> Self {
@@ -305,8 +318,13 @@ impl<S: EventStore> SimulationNode<S> {
         // let the two drift: every field these two functions share was
         // copy-pasted, and `player_id_counter` sat at 0 in this copy while
         // `id_counter` was restored.
-        let mut node =
-            Self::with_store(snapshot.node_id, snapshot.sector_id, snapshot.bounds, store);
+        let mut node = Self::with_store(
+            snapshot.node_id,
+            snapshot.sector_id,
+            snapshot.bounds,
+            galaxy,
+            store,
+        );
         node.apply_snapshot(snapshot);
 
         for def in modules {
@@ -361,24 +379,15 @@ impl<S: EventStore> SimulationNode<S> {
     /// Point Station inventory persistence at a real on-disk SQLite file
     /// (ADR-0038) instead of the private in-memory database `new`/`with_store`/
     /// `restore_from` default to. Production wiring (`dawn-sector-node`'s
-    /// `build_node`) calls this once after construction, mirroring
-    /// `set_galaxy`'s "construct generically, configure production specifics
-    /// afterward" shape. Replaces the cache too, since it would otherwise
+    /// `build_node`) calls this once after construction because the database
+    /// path is process-local; topology is already fixed by construction.
+    /// Replaces the cache too, since it would otherwise
     /// still hold entries read from the old (in-memory) database.
     pub fn open_station_inventory_db(&mut self, path: &str) -> rusqlite::Result<()> {
         self.station_inventory_db = station_inventory_db::StationInventoryDb::open(path)?;
         self.station_inventory_cache
             .replace(station_inventory::StationInventoryCache::new());
         Ok(())
-    }
-
-    /// Replace the navigation topology. Rebuilds this Sector's gates, bodies,
-    /// stations, and the shared body-anchor table from the same `Galaxy` value.
-    pub fn set_galaxy(&mut self, galaxy: Arc<crate::galaxy::Galaxy>) {
-        let anchor_table = crate::anchor::AnchorTable::from_galaxy(&galaxy);
-        let sector_map = SectorMap::from_galaxy(self.sector_id, galaxy);
-        self.sector_map = sector_map;
-        self.anchor_table = anchor_table;
     }
 
     /// Read access to the navigation topology.
@@ -605,11 +614,12 @@ mod tests {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         )
     }
 
     #[test]
-    fn set_galaxy_rebuilds_all_sector_projections_and_anchors_from_one_value() {
+    fn construction_builds_all_sector_projections_and_anchors_from_supplied_topology() {
         let sector_id = SectorId(7);
         let other_sector = SectorId(8);
         let local_body = dawn_core::CelestialBodyDef {
@@ -677,12 +687,12 @@ mod tests {
             ],
         ));
 
-        let mut node = SimulationNode::new(
+        let node = SimulationNode::new(
             NodeId(7),
             sector_id,
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            Arc::clone(&galaxy),
         );
-        node.set_galaxy(Arc::clone(&galaxy));
 
         assert!(Arc::ptr_eq(&node.sector_map.galaxy, &galaxy));
         assert_eq!(
@@ -717,6 +727,27 @@ mod tests {
             );
         }
         assert!(node.anchor_table.abs(dawn_core::AnchorId(0)).is_none());
+
+        let snapshot = node.take_snapshot();
+        let restored = SimulationNode::restore_from(
+            InMemoryEventStore::new(),
+            &snapshot,
+            Arc::clone(&galaxy),
+            &[],
+            &[],
+        );
+        assert!(Arc::ptr_eq(&restored.sector_map.galaxy, &galaxy));
+        assert_eq!(restored.sector_map.gates, node.sector_map.gates);
+        assert_eq!(restored.sector_map.bodies, node.sector_map.bodies);
+        assert_eq!(restored.sector_map.stations, node.sector_map.stations);
+        for body in &galaxy.bodies {
+            assert_eq!(
+                restored
+                    .anchor_table
+                    .abs(dawn_core::AnchorId::from(body.id)),
+                Some(body.abs_m)
+            );
+        }
     }
 
     // -- Existing behaviour (unchanged) --------------------------------------

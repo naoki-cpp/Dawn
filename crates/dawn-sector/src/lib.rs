@@ -15,6 +15,7 @@
 //!     dawn_core::NodeId(0),
 //!     SectorId(0),
 //!     SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+//!     std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
 //! );
 //! assert_eq!(node.sector_id(), SectorId(0));
 //! ```

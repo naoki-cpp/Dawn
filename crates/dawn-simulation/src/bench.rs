@@ -146,7 +146,12 @@ pub(crate) fn run_phase1_benchmark() {
     println!();
 
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
-    let mut node = SimulationNode::new(NodeId(0), SectorId(0), bounds);
+    let mut node = SimulationNode::new(
+        NodeId(0),
+        SectorId(0),
+        bounds,
+        std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+    );
 
     let config = SpawnConfig::default_for_node(NodeId(0));
     let ships = generate_ships(P1_SHIPS, &config, 0);
@@ -302,6 +307,7 @@ pub(crate) fn run_phase3_demo() {
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
             store,
         );
 
@@ -352,7 +358,13 @@ pub(crate) fn run_phase3_demo() {
     // ── Session 2 (simulated restart) ────────────────────────────────────────
     let snap = StateSnapshot::load(&snapshot_path).expect("failed to load snapshot");
     let store2 = FileEventStore::open(&event_path).expect("failed to reopen event log");
-    let mut node2 = SimulationNode::restore_from(store2, &snap, &[], &[]);
+    let mut node2 = SimulationNode::restore_from(
+        store2,
+        &snap,
+        std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+        &[],
+        &[],
+    );
 
     // ADR-0008: these NPC ships move at a constant velocity and never emit
     // VelocityChanged, so there is nothing to replay past the snapshot's
