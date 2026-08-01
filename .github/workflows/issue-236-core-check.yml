@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - '.github/issue-236-core.py'
+      - '.github/issue-236-core-fix.py'
       - '.github/workflows/issue-236-core-check.yml'
 
 permissions:
@@ -24,7 +25,9 @@ jobs:
           toolchain: stable
           components: rustfmt
       - name: Apply core transformation
-        run: python3 .github/issue-236-core.py
+        run: |
+          python3 .github/issue-236-core-fix.py
+          python3 .github/issue-236-core.py
       - name: Format
         run: cargo fmt --all
       - name: Check affected crates
