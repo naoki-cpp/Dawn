@@ -59,11 +59,7 @@ impl ServerMessageOutcome {
             } => {
                 target.call(
                     "_accept_redirect",
-                    vslice![
-                        ws_addr.as_str(),
-                        godot_i64(*player_id),
-                        godot_i64(*ship_id)
-                    ],
+                    vslice![ws_addr.as_str(), godot_i64(*player_id), godot_i64(*ship_id)],
                 );
             }
             ClientOutcome::Event(event) => {
@@ -73,10 +69,7 @@ impl ServerMessageOutcome {
                 target.call("_accept_event", vslice![event]);
             }
             ClientOutcome::PlayerLoadout => {
-                target.call(
-                    "_accept_player_loadout",
-                    vslice![self.raw_bytes.clone()],
-                );
+                target.call("_accept_player_loadout", vslice![self.raw_bytes.clone()]);
             }
             ClientOutcome::InitialState(state) => {
                 target.call(

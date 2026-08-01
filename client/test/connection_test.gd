@@ -1,7 +1,8 @@
 ## connection_test.gd
 ##
-## Pure tests for connection.gd redirect helpers. WebSocket I/O itself stays
-## manual per docs/process/godot-client-testing.md.
+## Signal and redirect wiring tests for connection.gd. Wire decoding and
+## variant projection are covered in Rust; these tests intentionally call the
+## typed `_accept_*` boundary instead of hand-building wire-shaped Dictionaries.
 extends GdUnitTestSuite
 
 const Connection = preload("res://scripts/connection.gd")
@@ -31,21 +32,30 @@ func test_normalize_ws_url_keeps_existing_wss_scheme() -> void:
 	connection.free()
 
 
-func test_module_activated_message_emits_module_signal() -> void:
+func test_welcome_outcome_updates_identity_and_emits_signal() -> void:
+	var connection: Node = Connection.new()
+	var received: Array = []
+	connection.welcomed.connect(func(player_id: int, ship_id: int) -> void:
+		received.append({"player_id": player_id, "ship_id": ship_id})
+	)
+
+	connection._accept_welcome(5, 11)
+
+	assert_int(connection.player_id).is_equal(5)
+	assert_int(connection.ship_id).is_equal(11)
+	assert_bool(connection._welcomed).is_true()
+	assert_int(received.size()).is_equal(1)
+	connection.free()
+
+
+func test_module_activated_outcome_emits_module_signal() -> void:
 	var connection: Node = Connection.new()
 	var received: Array = []
 	connection.module_activated.connect(func(ship_id: int, module_id: int, slot: String) -> void:
 		received.append({"ship_id": ship_id, "module_id": module_id, "slot": slot})
 	)
 
-	var payload := {
-		"type": "ModuleActivated",
-		"ship_id": 11,
-		"module_id": 7,
-		"slot": "Mid",
-		"tick": 4,
-	}
-	connection._handle_message(payload, PackedByteArray())
+	connection._accept_module_activated(11, 7, "Mid")
 
 	assert_int(received.size()).is_equal(1)
 	assert_int((received[0] as Dictionary)["ship_id"]).is_equal(11)
@@ -54,40 +64,33 @@ func test_module_activated_message_emits_module_signal() -> void:
 	connection.free()
 
 
-## player_fitting_received carries the raw postcard bytes (ADR-0042), not a
-## parsed Dictionary -- PlayerLoadout.apply_wire_bytes (dawn-client-gdext)
-## decodes them directly into typed Rust state, with no lossy Dictionary/
-## JSON round-trip in between. `_handle_message` just needs to forward
-## whatever bytes it was given unchanged.
-func test_player_loadout_message_emits_player_fitting_signal_with_the_raw_bytes() -> void:
+func test_player_loadout_outcome_emits_raw_bytes_unchanged() -> void:
 	var connection: Node = Connection.new()
 	var received: Array = []
 	connection.player_fitting_received.connect(func(bytes: PackedByteArray) -> void:
 		received.append(bytes)
 	)
 
-	var payload := {"type": "PlayerLoadout"}
 	var bytes := PackedByteArray([1, 2, 3])
-	connection._handle_message(payload, bytes)
+	connection._accept_player_loadout(bytes)
 
 	assert_int(received.size()).is_equal(1)
 	assert_that(received[0]).is_equal(bytes)
 	connection.free()
 
 
-func test_market_snapshot_message_emits_market_signal() -> void:
+func test_market_snapshot_outcome_emits_market_signal() -> void:
 	var connection: Node = Connection.new()
 	var received: Array = []
 	connection.market_snapshot_received.connect(func(snapshot: Dictionary) -> void:
 		received.append(snapshot)
 	)
 
-	connection._handle_message({
-		"type": "MarketSnapshot",
+	connection._accept_market_snapshot({
 		"balance": 250,
 		"orders": [],
 		"notice": "Order placed",
-	}, PackedByteArray())
+	})
 
 	assert_int(received.size()).is_equal(1)
 	assert_int((received[0] as Dictionary)["balance"]).is_equal(250)
@@ -95,39 +98,21 @@ func test_market_snapshot_message_emits_market_signal() -> void:
 	connection.free()
 
 
-func test_motion_correction_message_emits_prediction_signal() -> void:
+func test_motion_correction_outcome_emits_prediction_signal() -> void:
 	var connection: Node = Connection.new()
 	var received: Array = []
 	connection.motion_correction_received.connect(func(payload: Dictionary) -> void:
 		received.append(payload)
 	)
 
-	var payload := {
-		"type": "MotionCorrection",
+	connection._accept_motion_correction({
 		"ship_id": 11,
 		"tick": 42,
 		"position": {"x": 100.0, "y": 20.0, "z": 300.0},
 		"velocity": {"dx": 4.0, "dy": 5.0, "dz": -6.0},
-	}
-	connection._handle_message(payload, PackedByteArray())
+	})
 
 	assert_int(received.size()).is_equal(1)
 	assert_int((received[0] as Dictionary)["ship_id"]).is_equal(11)
 	assert_int((received[0] as Dictionary)["tick"]).is_equal(42)
-	connection.free()
-
-
-func test_legacy_player_fitting_message_still_emits_player_fitting_signal() -> void:
-	var connection: Node = Connection.new()
-	var received: Array = []
-	connection.player_fitting_received.connect(func(bytes: PackedByteArray) -> void:
-		received.append(bytes)
-	)
-
-	var payload := {"type": "PlayerFitting"}
-	var bytes := PackedByteArray([4, 5, 6])
-	connection._handle_message(payload, bytes)
-
-	assert_int(received.size()).is_equal(1)
-	assert_that(received[0]).is_equal(bytes)
 	connection.free()

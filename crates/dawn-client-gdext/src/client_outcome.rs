@@ -47,13 +47,8 @@ pub(crate) enum ClientOutcome {
 pub(crate) enum ClientEventOutcome {
     Domain(EventWire),
     AoiEnter(ShipStateWire),
-    AoiLeave {
-        ship_id: u64,
-    },
-    PositionSnap {
-        ship_id: u64,
-        position: AbsPosWire,
-    },
+    AoiLeave { ship_id: u64 },
+    PositionSnap { ship_id: u64, position: AbsPosWire },
 }
 
 impl ClientOutcome {
@@ -65,10 +60,7 @@ impl ClientOutcome {
 
     fn from_message(message: ServerMessage) -> Self {
         match message {
-            ServerMessage::Welcome { player_id, ship_id } => Self::Welcome {
-                player_id,
-                ship_id,
-            },
+            ServerMessage::Welcome { player_id, ship_id } => Self::Welcome { player_id, ship_id },
             ServerMessage::Redirect {
                 ws_addr,
                 player_id,
@@ -216,12 +208,10 @@ mod tests {
                 ship_id: 7,
                 tick: 2
             })),
-            ClientOutcome::Event(ClientEventOutcome::Domain(
-                EventWire::ShipDespawned {
-                    ship_id: 7,
-                    tick: 2
-                }
-            ))
+            ClientOutcome::Event(ClientEventOutcome::Domain(EventWire::ShipDespawned {
+                ship_id: 7,
+                tick: 2
+            }))
         ));
         assert!(matches!(
             decode(ServerMessage::PlayerLoadout(loadout())),
@@ -252,10 +242,7 @@ mod tests {
                 ship_id: 7,
                 position: position()
             }),
-            ClientOutcome::Event(ClientEventOutcome::PositionSnap {
-                ship_id: 7,
-                ..
-            })
+            ClientOutcome::Event(ClientEventOutcome::PositionSnap { ship_id: 7, .. })
         ));
         assert!(matches!(
             decode(ServerMessage::MotionCorrection {

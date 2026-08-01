@@ -6,6 +6,7 @@
 use godot::prelude::*;
 
 mod client_command_gd;
+mod client_outcome;
 mod client_rules_gd;
 mod item_row_gd;
 mod json_variant;
@@ -26,7 +27,7 @@ pub use item_row_gd::ItemRow;
 pub use loadout_gd::PlayerLoadout;
 pub use module_row_gd::ModuleRow;
 pub use owned_ship_row_gd::OwnedShipRow;
-pub use server_message_gd::ServerMessageDecoder;
+pub use server_message_gd::{ServerEventOutcome, ServerMessageDecoder, ServerMessageOutcome};
 pub use ship_motion_gd::ShipMotion;
 pub use world_session_gd::WorldSession;
 pub use world_space_gd::WorldSpace;
