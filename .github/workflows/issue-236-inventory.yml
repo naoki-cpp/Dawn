@@ -1,0 +1,33 @@
+name: Issue 236 inventory
+
+on:
+  push:
+    branches:
+      - agent/separate-transit-handoff-state
+    paths:
+      - '.github/workflows/issue-236-inventory.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Locate Transit handoff representations
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== ShipSnapshot references near Transit ==='
+          grep -RIn --include='*.rs' --include='*.md' 'ShipSnapshot' crates/dawn-sector crates/dawn-core docs | grep -Ei 'transit|event-catalog|ADR-0014' || true
+          echo '=== TransitShipState references ==='
+          grep -RIn --include='*.rs' --include='*.md' 'TransitShipState' crates docs || true
+          echo '=== Transit Ack references ==='
+          grep -RIn --include='*.rs' --include='*.md' 'AckProposal\|TransitOp::Ack\|Ack {' crates/dawn-sector docs || true
+          echo '=== fake snapshot helpers ==='
+          grep -RIn --include='*.rs' 'ship_snapshot_from_transit\|snapshot_for_transit\|restore_ship_from_snapshot' crates/dawn-sector/src || true
+          echo '=== Transit docs ==='
+          grep -RIl --include='*.md' 'TransitShipState\|ShipSnapshot\|Sector Transit\|TransitOp' docs | sort || true
