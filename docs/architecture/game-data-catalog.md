@@ -21,7 +21,8 @@ directory. It never searches the compile-time source checkout. Tests either
 construct a `GameDataCatalog` with explicit paths or, inside `dawn-sector`, use
 the test-only repository catalog fixture. The fixture is crate-private, exists
 only to remove repeated test setup, and is not compiled into the production
-crate interface.
+crate interface. Test callers consume the fixture's catalog slices directly
+rather than reconstructing category-specific definition vectors.
 
 When adding or changing game data:
 
