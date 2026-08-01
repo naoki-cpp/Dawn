@@ -1,0 +1,222 @@
+name: Issue 237 Market identity
+
+on:
+  pull_request:
+    types: [ready_for_review]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.event.pull_request.head.ref == 'agent/canonical-client-item-identity'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/canonical-client-item-identity
+
+      - name: Type Market Item identity
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one replacement, found {count}: {old[:80]!r}')
+              file.write_text(text.replace(old, new))
+
+          # Validate canonical ItemWire identities before any Godot projection.
+          path = Path('crates/dawn-client-gdext/src/client_outcome.rs')
+          text = path.read_text()
+          text = text.replace(
+              'use dawn_wire::{\n    AbsPosWire, EventWire, InitialStateWire, MarketSnapshotWire, PlayerLoadoutWire, ServerMessage,\n    ShipStateWire, VelWire,\n};',
+              'use dawn_core::ItemId;\nuse dawn_wire::{\n    AbsPosWire, EventWire, InitialStateWire, ItemWire, MarketSnapshotWire, PlayerLoadoutWire,\n    ServerMessage, ShipStateWire, VelWire,\n};',
+              1,
+          )
+          marker = '''fn ensure_client_u32(value: u64, field: &str) -> Result<(), String> {
+              u32::try_from(value)
+                  .map(|_| ())
+                  .map_err(|_| format!("{field}={value} exceeds the client-side u32 range"))
+          }
+          '''
+          insertion = marker + '''
+          fn ensure_canonical_item(item: ItemWire, field: &str) -> Result<(), String> {
+              ItemId::try_from(item)
+                  .map(|_| ())
+                  .map_err(|error| format!("{field} has invalid canonical Item identity: {error:?}"))
+          }
+          '''
+          if text.count(marker) != 1:
+              raise SystemExit('client_outcome: ensure_client_u32 marker mismatch')
+          text = text.replace(marker, insertion)
+          old = '''    for item in loadout.inventory.iter().chain(&loadout.station_inventory) {
+                  ensure_godot_int(item.count, "player_loadout.inventory.count")?;
+              }
+          '''
+          new = '''    for item in loadout.inventory.iter().chain(&loadout.station_inventory) {
+                  ensure_canonical_item(item.item_id, "player_loadout.inventory.item_id")?;
+                  ensure_godot_int(item.count, "player_loadout.inventory.count")?;
+              }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('client_outcome: loadout item validation marker mismatch')
+          text = text.replace(old, new)
+          old = '''            for order in &snapshot.orders {
+                          ensure_godot_int(order.order_id, "market.order_id")?;
+                          ensure_godot_int(order.price, "market.price")?;
+                          ensure_godot_int(order.quantity, "market.quantity")?;
+                      }
+          '''
+          new = '''            for order in &snapshot.orders {
+                          ensure_canonical_item(order.item_id, "market.item_id")?;
+                          ensure_godot_int(order.order_id, "market.order_id")?;
+                          ensure_godot_int(order.price, "market.price")?;
+                          ensure_godot_int(order.quantity, "market.quantity")?;
+                      }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('client_outcome: market validation marker mismatch')
+          text = text.replace(old, new)
+          test_marker = '''    #[test]
+              fn corrupted_raw_frame_is_rejected_before_projection() {
+          '''
+          test = '''    #[test]
+              fn invalid_item_identities_are_rejected_before_projection() {
+                  let mut invalid_loadout = loadout();
+                  invalid_loadout.inventory.push(ItemRowWire {
+                      item_id: ItemWire::Module { module_id: 0 },
+                      name: "Invalid".to_owned(),
+                      kind: String::new(),
+                      slot: String::new(),
+                      count: 1,
+                  });
+                  let error = ClientOutcome::decode(
+                      &ServerMessage::PlayerLoadout(invalid_loadout).encode(),
+                  )
+                  .expect_err("zero module IDs must not reach Godot");
+                  assert!(error.contains("player_loadout.inventory.item_id"));
+
+                  let error = ClientOutcome::decode(
+                      &ServerMessage::MarketSnapshot(MarketSnapshotWire {
+                          balance: 0,
+                          orders: vec![dawn_wire::MarketOrderWire {
+                              order_id: 1,
+                              item_id: ItemWire::PackagedShip { ship_type_id: 0 },
+                              side: "Bid".to_owned(),
+                              price: 1,
+                              quantity: 1,
+                              is_own: false,
+                          }],
+                          notice: String::new(),
+                      })
+                      .encode(),
+                  )
+                  .expect_err("zero ship type IDs must not reach Godot");
+                  assert!(error.contains("market.item_id"));
+              }
+
+          ''' + test_marker
+          if text.count(test_marker) != 1:
+              raise SystemExit('client_outcome: test marker mismatch')
+          path.write_text(text.replace(test_marker, test))
+
+          # Project Market Item identity as ItemIdentity, not String/Dictionary.
+          path = Path('crates/dawn-client-gdext/src/server_message_gd.rs')
+          text = path.read_text()
+          old = '''use crate::client_outcome::{ClientEventOutcome, ClientOutcome};
+          use crate::json_variant::Dict;
+          '''
+          new = '''use crate::client_outcome::{ClientEventOutcome, ClientOutcome};
+          use crate::item_identity_gd::ItemIdentity;
+          use crate::json_variant::Dict;
+          use dawn_core::ItemId;
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('server_message: import marker mismatch')
+          text = text.replace(old, new)
+          old = '''fn item_to_variant(item: &ItemWire) -> Variant {
+              match item {
+                  ItemWire::ScrapMetal => Variant::from("ScrapMetal"),
+                  ItemWire::Module { module_id } => {
+                      let mut fields = Dict::new();
+                      fields.set("module_id", i64::from(*module_id));
+                      let mut tagged = Dict::new();
+                      tagged.set("Module", &fields);
+                      Variant::from(tagged)
+                  }
+                  ItemWire::PackagedShip { ship_type_id } => {
+                      let mut fields = Dict::new();
+                      fields.set("ship_type_id", i64::from(*ship_type_id));
+                      let mut tagged = Dict::new();
+                      tagged.set("PackagedShip", &fields);
+                      Variant::from(tagged)
+                  }
+              }
+          }
+          '''
+          new = '''fn item_to_variant(item: &ItemWire) -> Variant {
+              let item_id = ItemId::try_from(*item)
+                  .expect("ClientOutcome validates every Godot-facing Item identity");
+              ItemIdentity::wrap(item_id).to_variant()
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('server_message: item_to_variant marker mismatch')
+          path.write_text(text.replace(old, new))
+
+          # Remove the UI compatibility fallback.
+          path = Path('client/scripts/market_surface.gd')
+          text = path.read_text()
+          start = text.index('func _order_item_name(order: Dictionary) -> String:')
+          end = text.index('\n\nfunc _cancel_order', start)
+          replacement = '''func _order_item_name(order: Dictionary) -> String:
+          \tvar item_id: ItemIdentity = order.get("item_id", null) as ItemIdentity
+          \tif item_id == null:
+          \t\treturn "Unknown item"
+          \tif item_id.is_scrap_metal():
+          \t\treturn "Scrap Metal"
+          \tif item_id.is_module():
+          \t\treturn "Module #%d" % (item_id.module_id() as int)
+          \tif item_id.is_packaged_ship():
+          \t\treturn "Ship #%d" % (item_id.ship_type_id() as int)
+          \treturn "Unknown item"'''
+          path.write_text(text[:start] + replacement + text[end:])
+
+          # Exercise typed Market projection end-to-end.
+          path = Path('client/test/connection_test.gd')
+          text = path.read_text()
+          old = '''\tassert_str((orders[0] as Dictionary).get("item_id", "") as String).is_equal("ScrapMetal")
+          \tassert_bool(((orders[1] as Dictionary).get("item_id", {}) as Dictionary).has("Module")).is_true()
+          \tassert_bool(((orders[2] as Dictionary).get("item_id", {}) as Dictionary).has("PackagedShip")).is_true()
+          '''
+          new = '''\tvar scrap: ItemIdentity = (orders[0] as Dictionary).get("item_id") as ItemIdentity
+          \tvar module: ItemIdentity = (orders[1] as Dictionary).get("item_id") as ItemIdentity
+          \tvar ship: ItemIdentity = (orders[2] as Dictionary).get("item_id") as ItemIdentity
+          \tassert_bool(scrap.is_scrap_metal()).is_true()
+          \tassert_bool(module.is_module()).is_true()
+          \tassert_int(module.module_id() as int).is_equal(3)
+          \tassert_bool(ship.is_packaged_ship()).is_true()
+          \tassert_int(ship.ship_type_id() as int).is_equal(7)
+          '''
+          if text.count(old) != 1:
+              raise SystemExit('connection_test: Market assertion marker mismatch')
+          path.write_text(text.replace(old, new))
+          PY
+
+          cargo fmt --all
+          git diff --check
+          git diff --stat
+
+      - name: Commit Market identity migration
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/dawn-client-gdext/src/client_outcome.rs \
+            crates/dawn-client-gdext/src/server_message_gd.rs \
+            client/scripts/market_surface.gd client/test/connection_test.gd
+          git commit -m "Type Market Item identity"
+          git push origin HEAD:agent/canonical-client-item-identity
