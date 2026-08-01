@@ -7,7 +7,7 @@
 use dawn_actor::ws_server;
 use dawn_core::{PlayerId, Position, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
-use dawn_sector::node::SimulationNode;
+use dawn_sector::node::{HandoffPayload, MissingObserverShip, SimulationNode};
 use dawn_wire::ResumeIdentity;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -103,7 +103,20 @@ impl ClientAdmission {
 
             let player_id = handshake_identity.player_id;
             let ship_id = handshake_identity.ship_id;
-            let payload = node.build_handoff_payload(ship_id, aoi_cell_size);
+            let payload = match build_handshake_payload(node, &handshake_identity, aoi_cell_size) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    eprintln!(
+                        "[Node] handshake refused from {}: {error}",
+                        request.peer_addr
+                    );
+                    if let Some(ship_id) = should_despawn_on_completion_failure(&handshake_identity)
+                    {
+                        node.despawn_incomplete_handshake_spawn(ship_id);
+                    }
+                    continue;
+                }
+            };
             let tx = self.ready_sess_tx.clone();
             let despawn_on_failure = should_despawn_on_completion_failure(&handshake_identity);
             let failed_fresh_spawn_tx = self.failed_fresh_spawn_tx.clone();
@@ -184,6 +197,14 @@ fn select_handshake_identity<S: EventStore>(
 /// predates the failure and is a separate concern (ADR-0007 §2-A resume;
 /// the ownership-hijack risk on resume is already tracked as a security
 /// finding, not something this cleanup should also touch).
+fn build_handshake_payload<S: EventStore>(
+    node: &SimulationNode<S>,
+    identity: &HandshakeIdentity,
+    aoi_cell_size: f64,
+) -> Result<HandoffPayload, MissingObserverShip> {
+    node.build_handoff_payload(identity.ship_id, aoi_cell_size)
+}
+
 fn should_despawn_on_completion_failure(identity: &HandshakeIdentity) -> Option<ShipId> {
     (!identity.resumed).then_some(identity.ship_id)
 }
@@ -256,6 +277,36 @@ mod tests {
         };
         assert_eq!(rejected, resume);
         assert_eq!(node.ship_count(), 0);
+    }
+
+    #[test]
+    fn fresh_handshake_payload_rejects_a_missing_observer() {
+        let node = test_node();
+        let identity = HandshakeIdentity {
+            player_id: PlayerId(1),
+            ship_id: ShipId::new(NodeId(7), 999),
+            resumed: false,
+        };
+
+        let error = build_handshake_payload(&node, &identity, 1_000.0)
+            .expect_err("fresh identity without an observer must be refused");
+
+        assert_eq!(error.ship_id, identity.ship_id);
+    }
+
+    #[test]
+    fn resumed_handshake_payload_rejects_a_missing_observer() {
+        let node = test_node();
+        let identity = HandshakeIdentity {
+            player_id: PlayerId(12),
+            ship_id: ShipId::new(NodeId(7), 999),
+            resumed: true,
+        };
+
+        let error = build_handshake_payload(&node, &identity, 1_000.0)
+            .expect_err("resume identity without an observer must be refused");
+
+        assert_eq!(error.ship_id, identity.ship_id);
     }
 
     #[test]

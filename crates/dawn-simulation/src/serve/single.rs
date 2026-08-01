@@ -112,7 +112,15 @@ pub(crate) async fn run_phase4_server(
             } else {
                 node.spawn_player_ship(player_id)
             };
-            let payload = node.build_handoff_payload(ship_id, AOI_CELL_SIZE);
+            let payload = match node.build_handoff_payload(ship_id, AOI_CELL_SIZE) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    eprintln!("[Server] fresh handshake from {addr} refused: {error}");
+                    node.despawn_incomplete_handshake_spawn(ship_id);
+                    drop(stream);
+                    continue;
+                }
+            };
             let tx = ready_sess_tx.clone();
 
             if duel_mode && player_ship_id.is_none() {

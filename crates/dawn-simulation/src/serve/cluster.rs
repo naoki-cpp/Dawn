@@ -106,11 +106,15 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             }
             let player_id = nodes[0].next_player_id();
             let ship_id = nodes[0].spawn_player_ship_at_pub(player_id, PLAYER_SPAWN);
-            let initial_state = match nodes[0].ship_absolute_pos(ship_id) {
-                Some(pos) => nodes[0].build_initial_state_json_for(pos, AOI_CELL_SIZE),
-                None => nodes[0].build_initial_state_json(),
+            let payload = match nodes[0].build_handoff_payload(ship_id, AOI_CELL_SIZE) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    eprintln!("[Server] clustered fresh handshake from {addr} refused: {error}");
+                    nodes[0].despawn_incomplete_handshake_spawn(ship_id);
+                    drop(stream);
+                    continue;
+                }
             };
-            let player_loadout = nodes[0].build_player_loadout_json(ship_id);
             let tx = ready_sess_tx.clone();
             player_sector.insert(player_id, 0);
             ship_player.insert(ship_id, player_id);
@@ -121,8 +125,8 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     addr,
                     player_id,
                     ship_id,
-                    initial_state,
-                    player_loadout,
+                    payload.initial_state,
+                    payload.player_loadout,
                 )
                 .await
                 {
