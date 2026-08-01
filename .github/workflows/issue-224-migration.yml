@@ -1,16 +1,16 @@
 name: Issue 224 migration
 
 on:
-  push:
-    branches:
-      - agent/typed-server-message-outcomes
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
   migrate:
-    if: github.event.head_commit.message == 'chore: stage issue 224 migration'
+    if: github.head_ref == 'agent/typed-server-message-outcomes'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
