@@ -23,7 +23,19 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
       - name: Apply topology construction change
-        run: python3 .github/issue-235-apply.py
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/issue-235-apply.py')
+          text = path.read_text()
+          old = "elif ch == \"'\":"
+          new = "elif False and ch == \"'\":"
+          count = text.count(old)
+          if count != 2:
+              raise SystemExit(f'expected two single-quote parser branches, found {count}')
+          path.write_text(text.replace(old, new))
+          PY
+          python3 .github/issue-235-apply.py
       - name: Format and verify
         run: |
           cargo fmt --all
