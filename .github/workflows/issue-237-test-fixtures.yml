@@ -1,0 +1,84 @@
+name: Issue 237 test fixtures
+
+on:
+  push:
+    branches: [agent/canonical-client-item-identity]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/canonical-client-item-identity
+
+      - name: Migrate ItemRow GdUnit fixtures
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('client/test/hud_surface_test.gd')
+          text = path.read_text()
+
+          old_helper = '''func _item(overrides: Dictionary) -> ItemRow:
+          \tvar base: Dictionary = {
+          \t\t"item_id": {"Module": 1},
+          \t\t"name": "Test Item", "kind": "", "slot": "", "count": 1,
+          \t}
+          \tfor key: String in overrides:
+          \t\tbase[key] = overrides[key]
+          \tvar loadout := PlayerLoadout.new()
+          \tif not loadout.apply_payload(JSON.stringify({"inventory": [base]})):
+          \t\treturn null
+          \treturn loadout.inventory()[0] as ItemRow
+          '''
+          new_helper = '''func _item(item_id: ItemIdentity, overrides: Dictionary = {}) -> ItemRow:
+          \treturn ItemRow.test_fixture(
+          \t\titem_id,
+          \t\toverrides.get("name", "Test Item") as String,
+          \t\toverrides.get("kind", "") as String,
+          \t\toverrides.get("slot", "") as String,
+          \t\toverrides.get("count", 1) as int,
+          \t) as ItemRow
+          '''
+          if text.count(old_helper) != 1:
+              raise SystemExit(f'expected one old helper, found {text.count(old_helper)}')
+          text = text.replace(old_helper, new_helper)
+
+          replacements = {
+              '_item({"item_id": "ScrapMetal", "name": "Scrap Metal", "count": 3})':
+                  '_item(ItemIdentity.scrap_metal(), {"name": "Scrap Metal", "count": 3})',
+              '_item({"item_id": {"Module": 3}, "slot": "Mid", "name": "Afterburner", "count": 2})':
+                  '_item(ItemIdentity.module(3) as ItemIdentity, {"slot": "Mid", "name": "Afterburner", "count": 2})',
+              '_item({"item_id": "ScrapMetal", "name": "Scrap Metal", "count": 4})':
+                  '_item(ItemIdentity.scrap_metal(), {"name": "Scrap Metal", "count": 4})',
+              '_item({"module_id": 3, "slot": "Mid", "name": "Afterburner"})':
+                  '_item(ItemIdentity.module(3) as ItemIdentity, {"slot": "Mid", "name": "Afterburner"})',
+              '_item({"item_id": {"PackagedShip": 7}, "name": "Magpie", "count": 1})':
+                  '_item(ItemIdentity.packaged_ship(7) as ItemIdentity, {"name": "Magpie", "count": 1})',
+          }
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one occurrence of {old!r}, found {count}')
+              text = text.replace(old, new)
+
+          if 'loadout.apply_payload(JSON.stringify({"inventory":' in text:
+              raise SystemExit('legacy ItemRow JSON fixture remains')
+          path.write_text(text)
+          PY
+
+          git diff --check
+          git diff -- client/test/hud_surface_test.gd
+
+      - name: Commit fixture migration
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add client/test/hud_surface_test.gd
+          git commit -m "Migrate ItemRow test fixtures"
+          git push origin HEAD:agent/canonical-client-item-identity
