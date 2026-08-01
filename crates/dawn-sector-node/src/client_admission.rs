@@ -110,15 +110,14 @@ impl ClientAdmission {
                         "[Node] handshake refused from {}: {error}",
                         request.peer_addr
                     );
-                    if let Some(ship_id) = should_despawn_on_completion_failure(&handshake_identity)
-                    {
+                    if let Some(ship_id) = fresh_spawn_for_failed_handshake(&handshake_identity) {
                         node.despawn_incomplete_handshake_spawn(ship_id);
                     }
                     continue;
                 }
             };
             let tx = self.ready_sess_tx.clone();
-            let despawn_on_failure = should_despawn_on_completion_failure(&handshake_identity);
+            let despawn_on_failure = fresh_spawn_for_failed_handshake(&handshake_identity);
             let failed_fresh_spawn_tx = self.failed_fresh_spawn_tx.clone();
 
             tokio::spawn(async move {
@@ -191,12 +190,6 @@ fn select_handshake_identity<S: EventStore>(
     })
 }
 
-/// Whether a `HandshakeRequest::complete` failure for `identity` leaves a
-/// ghost ship that must be despawned. Only a fresh spawn qualifies: a
-/// resumed ship existed before this connection attempt, so its ownership
-/// predates the failure and is a separate concern (ADR-0007 §2-A resume;
-/// the ownership-hijack risk on resume is already tracked as a security
-/// finding, not something this cleanup should also touch).
 fn build_handshake_payload<S: EventStore>(
     node: &SimulationNode<S>,
     identity: &HandshakeIdentity,
@@ -205,7 +198,10 @@ fn build_handshake_payload<S: EventStore>(
     node.build_handoff_payload(identity.ship_id, aoi_cell_size)
 }
 
-fn should_despawn_on_completion_failure(identity: &HandshakeIdentity) -> Option<ShipId> {
+/// Return the fresh-spawn ship that must be removed when a handshake cannot
+/// complete. A resumed ship predates this attempt and must never be removed as
+/// cleanup for an admission or transport failure (ADR-0007 §2-A resume).
+fn fresh_spawn_for_failed_handshake(identity: &HandshakeIdentity) -> Option<ShipId> {
     (!identity.resumed).then_some(identity.ship_id)
 }
 
@@ -330,7 +326,7 @@ mod tests {
             resumed: false,
         };
         assert_eq!(
-            should_despawn_on_completion_failure(&identity),
+            fresh_spawn_for_failed_handshake(&identity),
             Some(identity.ship_id)
         );
     }
@@ -342,7 +338,7 @@ mod tests {
             ship_id: ShipId::new(NodeId(0), 1),
             resumed: true,
         };
-        assert_eq!(should_despawn_on_completion_failure(&identity), None);
+        assert_eq!(fresh_spawn_for_failed_handshake(&identity), None);
     }
 
     #[test]
