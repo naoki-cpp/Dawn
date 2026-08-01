@@ -570,9 +570,11 @@ mod tests {
             b_rx.recv().await.unwrap(),
             CatchUpMessage::Request(_)
         ));
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(25), c_rx.recv())
-            .await
-            .is_err());
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), c_rx.recv())
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
