@@ -1,0 +1,437 @@
+name: Issue 233 apply
+
+on:
+  push:
+    branches:
+      - agent/drop-market-schema-compat
+    paths:
+      - .github/workflows/issue-233-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/drop-market-schema-compat
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+
+      - name: Remove Market schema compatibility
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          def replace_once(source, old, new, label):
+              count = source.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{label}: expected exactly one match, found {count}")
+              return source.replace(old, new)
+
+          order_path = Path("crates/dawn-market/src/order_book.rs")
+          order = order_path.read_text()
+
+          order = replace_once(
+              order,
+              "//! The existing flat SQLite columns remain unchanged for compatibility,\n"
+              "//! while their encoding and validation are shared through `dawn_core::ItemId`.\n",
+              "//! The flat SQLite columns use the shared `dawn_core::ItemId` encoding and\n"
+              "//! validation.\n",
+              "order-book Item storage documentation",
+          )
+          order = replace_once(
+              order,
+              "//! Existing databases from before 9D-4 are migrated with a nullable `ship_id`.\n"
+              "//! Those legacy rows remain matchable, but do not produce a bridge command\n"
+              "//! because their cargo ship cannot be reconstructed safely.\n",
+              "//! Every persisted order has a required cargo ship owner. Pre-9D-4 database\n"
+              "//! files are unsupported and must be recreated with the current schema.\n",
+              "order-book legacy schema documentation",
+          )
+          order = replace_once(
+              order,
+              "    /// `None` only for an order created before 9D-4, when the legacy schema\n"
+              "    /// did not retain the cargo ship. New orders always carry this identity.\n"
+              "    pub ship_id: Option<ShipId>,\n",
+              "    /// Ship whose cargo owns this order.\n"
+              "    pub ship_id: ShipId,\n",
+              "CancelledOrder ship ownership",
+          )
+          order = replace_once(
+              order,
+              "                ship_id             INTEGER,\n",
+              "                ship_id             INTEGER NOT NULL,\n",
+              "orders ship_id constraint",
+          )
+          order = replace_once(
+              order,
+              "        // 9D-4 added the cargo ship identity after the initial Market schema\n"
+              "        // shipped. Keep existing orders readable: their identity is unknown,\n"
+              "        // so they remain NULL and never produce a command for a guessed ship.\n"
+              "        let has_ship_id: bool = conn.query_row(\n"
+              "            \"SELECT EXISTS(\n"
+              "                 SELECT 1 FROM pragma_table_info('orders') WHERE name = 'ship_id'\n"
+              "             )\",\n"
+              "            [],\n"
+              "            |row| row.get(0),\n"
+              "        )?;\n"
+              "        if !has_ship_id {\n"
+              "            conn.execute(\"ALTER TABLE orders ADD COLUMN ship_id INTEGER\", [])?;\n"
+              "        }\n"
+              "\n",
+              "",
+              "pre-9D-4 schema migration",
+          )
+          order = replace_once(
+              order,
+              "            if let Some(ship_id) = fill.buyer_ship_id {\n"
+              "                credit_item_commands.push(CreditItemCommand {\n"
+              "                    player_id: fill.buyer,\n"
+              "                    ship_id,\n"
+              "                    item_id,\n"
+              "                    quantity: fill.quantity,\n"
+              "                });\n"
+              "            }\n",
+              "            credit_item_commands.push(CreditItemCommand {\n"
+              "                player_id: fill.buyer,\n"
+              "                ship_id: fill.buyer_ship_id,\n"
+              "                item_id,\n"
+              "                quantity: fill.quantity,\n"
+              "            });\n",
+              "buyer credit command legacy branch",
+          )
+          order = replace_once(
+              order,
+              "                        row.get::<_, Option<i64>>(1)?.map(|v| v as u64),\n",
+              "                        row.get::<_, i64>(1)? as u64,\n",
+              "cancelled order nullable ship read",
+          )
+          order = replace_once(
+              order,
+              "        let side = columns_to_side(&side);\n"
+              "        Ok(Some(CancelledOrder {\n"
+              "            ship_id: ship_id.map(|raw| ShipId(EntityId::from_raw(raw))),\n"
+              "            item_id,\n"
+              "            side,\n"
+              "            price,\n"
+              "            quantity_remaining,\n"
+              "            return_item_command: (side == OrderSide::Ask)\n"
+              "                .then(|| {\n"
+              "                    ship_id.map(|ship_id| ReturnItemCommand {\n"
+              "                        player_id,\n"
+              "                        ship_id: ShipId(EntityId::from_raw(ship_id)),\n"
+              "                        item_id,\n"
+              "                        quantity: quantity_remaining,\n"
+              "                    })\n"
+              "                })\n"
+              "                .flatten(),\n"
+              "        }))\n",
+              "        let side = columns_to_side(&side);\n"
+              "        let ship_id = ShipId(EntityId::from_raw(ship_id));\n"
+              "        Ok(Some(CancelledOrder {\n"
+              "            ship_id,\n"
+              "            item_id,\n"
+              "            side,\n"
+              "            price,\n"
+              "            quantity_remaining,\n"
+              "            return_item_command: (side == OrderSide::Ask).then_some(ReturnItemCommand {\n"
+              "                player_id,\n"
+              "                ship_id,\n"
+              "                item_id,\n"
+              "                quantity: quantity_remaining,\n"
+              "            }),\n"
+              "        }))\n",
+              "cancelled order legacy command branch",
+          )
+          order = replace_once(
+              order,
+              "                ship_id: row\n"
+              "                    .get::<_, Option<i64>>(2)?\n"
+              "                    .map(|raw| ShipId(EntityId::from_raw(raw as u64))),\n",
+              "                ship_id: ShipId(EntityId::from_raw(row.get::<_, i64>(2)? as u64)),\n",
+              "matching row nullable ship read",
+          )
+          order = replace_once(
+              order,
+              "                ship_id: Some(ship(1)),\n",
+              "                ship_id: ship(1),\n",
+              "cancel test ship owner",
+          )
+
+          legacy_test_pattern = re.compile(
+              r"\n    #\[test\]\n"
+              r"    fn opening_a_pre_9d4_database_migrates_orders_without_guessing_ship_ids\(\) \{"
+              r".*?"
+              r"\n    \}\n"
+              r"\n    // -- Currency escrow \(9D-3\) -+\n",
+              re.S,
+          )
+          replacement_tests = """
+          \n    #[test]
+              fn fresh_orders_schema_requires_a_ship_owner() {
+                  let market = MarketDb::open_in_memory().unwrap();
+                  let error = market
+                      .conn
+                      .execute(
+                          "INSERT INTO orders
+                              (player_id, ship_id, side, item_type, module_id, ship_type_id, price,
+                               quantity_remaining, escrowed_currency)
+                           VALUES (1, NULL, 'Ask', 'ScrapMetal', 0, 0, 100, 1, 0)",
+                          [],
+                      )
+                      .expect_err("ship_id must be required");
+
+                  assert!(matches!(
+                      error,
+                      rusqlite::Error::SqliteFailure(ref failure, _)
+                          if failure.code == rusqlite::ErrorCode::ConstraintViolation
+                  ));
+              }
+
+              #[test]
+              fn fresh_database_reopens_with_ship_ownership_intact() {
+                  let directory = tempfile::tempdir().unwrap();
+                  let path = directory.path().join("market.sqlite");
+                  let path = path.to_str().unwrap();
+
+                  let order_id = {
+                      let mut market = MarketDb::open(path).unwrap();
+                      market
+                          .place_order(PlayerId(1), ship(1), scrap(), OrderSide::Ask, 100, 5)
+                          .unwrap()
+                          .unwrap()
+                          .resting_order_id
+                          .unwrap()
+                  };
+
+                  let mut reopened = MarketDb::open(path).unwrap();
+                  let cancelled = reopened
+                      .cancel_order(PlayerId(1), order_id)
+                      .unwrap()
+                      .expect("reopened order");
+
+                  assert_eq!(cancelled.ship_id, ship(1));
+                  assert_eq!(
+                      cancelled.return_item_command,
+                      Some(ReturnItemCommand {
+                          player_id: PlayerId(1),
+                          ship_id: ship(1),
+                          item_id: scrap(),
+                          quantity: 5,
+                      })
+                  );
+              }
+
+              // -- Currency escrow (9D-3) ---------------------------------------------
+          """
+          replacement_tests = textwrap.dedent(replacement_tests)
+          order, count = legacy_test_pattern.subn(replacement_tests, order)
+          if count != 1:
+              raise RuntimeError(f"legacy migration fixture: expected one match, found {count}")
+
+          order_path.write_text(order)
+
+          matching_path = Path("crates/dawn-market/src/matching.rs")
+          matching = matching_path.read_text()
+          matching = replace_once(
+              matching,
+              "    pub(super) ship_id: Option<ShipId>,\n",
+              "    pub(super) ship_id: ShipId,\n",
+              "RestingOrder ship owner",
+          )
+          matching = replace_once(
+              matching,
+              "    pub(super) buyer_ship_id: Option<ShipId>,\n",
+              "    pub(super) buyer_ship_id: ShipId,\n",
+              "MatchFill buyer ship owner",
+          )
+          matching = replace_once(
+              matching,
+              "            OrderSide::Bid => (\n"
+              "                incoming.player_id,\n"
+              "                resting.player_id,\n"
+              "                Some(incoming.ship_id),\n"
+              "            ),\n"
+              "            OrderSide::Ask => (resting.player_id, incoming.player_id, resting.ship_id),\n",
+              "            OrderSide::Bid => (\n"
+              "                incoming.player_id,\n"
+              "                resting.player_id,\n"
+              "                incoming.ship_id,\n"
+              "            ),\n"
+              "            OrderSide::Ask => (resting.player_id, incoming.player_id, resting.ship_id),\n",
+              "matching buyer ship selection",
+          )
+          matching = replace_once(
+              matching,
+              "            ship_id: Some(ship(player_id)),\n",
+              "            ship_id: ship(player_id),\n",
+              "matching test ship owner",
+          )
+          matching_path.write_text(matching)
+
+          adr_path = Path("docs/adr/ADR-0034-economy-foundations.md")
+          adr = adr_path.read_text()
+          adr = replace_once(
+              adr,
+              "記録する。旧Market DBは `ship_id` をNULL許容で追加する移行を行い、旧注文に対して\n"
+              "船を推測しない。9D-5では`dawn-simulation::serve::market`がwire入力を検証し、\n",
+              "記録する。Marketのorders schemaでは`ship_id`を必須とし、全注文がbridge commandの\n"
+              "対象船を保持する。pre-9D-4 SQLite schemaは非対応であり、pre-release DBは削除して\n"
+              "current schemaで作り直す。9D-5では`dawn-simulation::serve::market`がwire入力を検証し、\n",
+              "ADR-0034 Market schema compatibility",
+          )
+          adr_path.write_text(adr)
+
+          strategy_path = Path("docs/architecture/database-strategy.md")
+          strategy = strategy_path.read_text()
+          strategy = replace_once(
+              strategy,
+              "現在は一つの `MarketRuntime` が一つの接続を所有するので、SQLite の single-writer 特性は\n"
+              "制約になっていない。Market が `dawn-simulation` 内の単一 runtime である間は、この単純さを\n"
+              "維持する。\n",
+              "現在は一つの `MarketRuntime` が一つの接続を所有するので、SQLite の single-writer 特性は\n"
+              "制約になっていない。Market が `dawn-simulation` 内の単一 runtime である間は、この単純さを\n"
+              "維持する。現行の `orders` schemaでは `ship_id` を `NOT NULL` で保持する。9D-4以前の\n"
+              "pre-release SQLiteファイルは移行対象にせず、削除してcurrent schemaで再作成する。\n",
+              "Market database strategy schema support",
+          )
+          strategy_path.write_text(strategy)
+
+          forbidden = {
+              "crates/dawn-market/src/order_book.rs": [
+                  "ALTER TABLE orders ADD COLUMN ship_id",
+                  "opening_a_pre_9d4_database",
+                  "Option<ShipId>",
+                  "if let Some(ship_id) = fill.buyer_ship_id",
+              ],
+              "crates/dawn-market/src/matching.rs": [
+                  "Option<ShipId>",
+                  "Some(incoming.ship_id)",
+                  "Some(ship(player_id))",
+              ],
+          }
+          for path, needles in forbidden.items():
+              source = Path(path).read_text()
+              for needle in needles:
+                  if needle in source:
+                      raise RuntimeError(f"{path}: legacy marker remains: {needle}")
+          PY
+
+      - name: Format and verify Market changes
+        run: |
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo test -p dawn-market
+          cargo test -p dawn-simulation market
+          cargo clippy -p dawn-market --all-targets -- -D warnings
+
+      - name: Commit verified changes and remove this workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import quote
+          from urllib.request import Request, urlopen
+
+          token = os.environ["GH_TOKEN"]
+          repository = os.environ["REPOSITORY"]
+          branch = os.environ["BRANCH"]
+          expected_head = os.environ["EXPECTED_HEAD"]
+
+          def api(method, path, payload=None):
+              data = None if payload is None else json.dumps(payload).encode()
+              request = Request(
+                  f"https://api.github.com{path}",
+                  data=data,
+                  method=method,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {token}",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "User-Agent": "issue-233-apply",
+                  },
+              )
+              with urlopen(request) as response:
+                  body = response.read()
+              return json.loads(body) if body else None
+
+          ref = api("GET", f"/repos/{repository}/git/ref/heads/{quote(branch, safe='')}")
+          head = ref["object"]["sha"]
+          if head != expected_head:
+              raise RuntimeError(f"branch moved during verification: {head} != {expected_head}")
+
+          commit = api("GET", f"/repos/{repository}/git/commits/{head}")
+          entries = []
+          for path in [
+              "crates/dawn-market/src/order_book.rs",
+              "crates/dawn-market/src/matching.rs",
+              "docs/adr/ADR-0034-economy-foundations.md",
+              "docs/architecture/database-strategy.md",
+          ]:
+              blob = api(
+                  "POST",
+                  f"/repos/{repository}/git/blobs",
+                  {
+                      "content": Path(path).read_text(),
+                      "encoding": "utf-8",
+                  },
+              )
+              entries.append(
+                  {
+                      "path": path,
+                      "mode": "100644",
+                      "type": "blob",
+                      "sha": blob["sha"],
+                  }
+              )
+
+          entries.append(
+              {
+                  "path": ".github/workflows/issue-233-apply.yml",
+                  "mode": "100644",
+                  "type": "blob",
+                  "sha": None,
+              }
+          )
+          tree = api(
+              "POST",
+              f"/repos/{repository}/git/trees",
+              {
+                  "base_tree": commit["tree"]["sha"],
+                  "tree": entries,
+              },
+          )
+          new_commit = api(
+              "POST",
+              f"/repos/{repository}/git/commits",
+              {
+                  "message": "Drop pre-release Market schema compatibility",
+                  "tree": tree["sha"],
+                  "parents": [head],
+              },
+          )
+          api(
+              "PATCH",
+              f"/repos/{repository}/git/refs/heads/{quote(branch, safe='')}",
+              {
+                  "sha": new_commit["sha"],
+                  "force": False,
+              },
+          )
+          print(new_commit["sha"])
+          PY
