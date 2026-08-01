@@ -27,7 +27,7 @@ jobs:
       - name: Apply final implementation and test migration
         run: |
           cat scripts/issue238-final.part.* | base64 --decode | gzip --decompress > /tmp/issue-238-final.patch
-          test "$(sha256sum /tmp/issue-238-final.patch | cut -d' ' -f1)" = "c2028f156d0cc7c46951496a32083e0e411db7871c64d6d2d84fd4c685e305fe"
+          test "$(sha256sum /tmp/issue-238-final.patch | cut -d' ' -f1)" = "14f822dd3287255abd96b7fc98aa6dd37f54495533db7b325b0c7ba43e9b4fe6"
           git apply --index /tmp/issue-238-final.patch
           cargo fmt --all
       - name: Validate typed client layers
