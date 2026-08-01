@@ -19,6 +19,8 @@ jobs:
       - name: Migrate ItemRow GdUnit fixtures
         run: |
           python3 - <<'PY'
+          import json
+          import re
           from pathlib import Path
 
           path = Path('client/test/hud_surface_test.gd')
@@ -36,26 +38,27 @@ jobs:
           end = text.index('func _owned_ship', start)
           text = text[:start] + new_helper + '\n\n' + text[end:]
 
-          replacements = {
-              '_item({"item_id": "ScrapMetal", "name": "Scrap Metal", "count": 3})':
-                  '_item(ItemIdentity.scrap_metal(), {"name": "Scrap Metal", "count": 3})',
-              '_item({"item_id": {"Module": 3}, "slot": "Mid", "name": "Afterburner", "count": 2})':
-                  '_item(ItemIdentity.module(3) as ItemIdentity, {"slot": "Mid", "name": "Afterburner", "count": 2})',
-              '_item({"item_id": "ScrapMetal", "name": "Scrap Metal", "count": 4})':
-                  '_item(ItemIdentity.scrap_metal(), {"name": "Scrap Metal", "count": 4})',
-              '_item({"module_id": 3, "slot": "Mid", "name": "Afterburner"})':
-                  '_item(ItemIdentity.module(3) as ItemIdentity, {"slot": "Mid", "name": "Afterburner"})',
-              '_item({"item_id": {"PackagedShip": 7}, "name": "Magpie", "count": 1})':
-                  '_item(ItemIdentity.packaged_ship(7) as ItemIdentity, {"name": "Magpie", "count": 1})',
-          }
-          for old, new in replacements.items():
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'expected one occurrence of {old!r}, found {count}')
-              text = text.replace(old, new)
+          def migrate_call(match: re.Match[str]) -> str:
+              fields = json.loads(match.group(1))
+              item_id = fields.pop('item_id', None)
+              if item_id == 'ScrapMetal':
+                  identity = 'ItemIdentity.scrap_metal()'
+              elif isinstance(item_id, dict) and set(item_id) == {'Module'}:
+                  identity = f'ItemIdentity.module({item_id["Module"]}) as ItemIdentity'
+              elif isinstance(item_id, dict) and set(item_id) == {'PackagedShip'}:
+                  identity = f'ItemIdentity.packaged_ship({item_id["PackagedShip"]}) as ItemIdentity'
+              elif item_id is None and 'module_id' in fields:
+                  identity = f'ItemIdentity.module({fields.pop("module_id")}) as ItemIdentity'
+              else:
+                  raise SystemExit(f'unsupported Item fixture identity: {item_id!r}')
+              overrides = json.dumps(fields, separators=(', ', ': '))
+              return f'_item({identity}, {overrides})'
 
-          if 'loadout.apply_payload(JSON.stringify({"inventory":' in text:
-              raise SystemExit('legacy ItemRow JSON fixture remains')
+          text, count = re.subn(r'_item\((\{[^\n]*\})\)', migrate_call, text)
+          if count != 5:
+              raise SystemExit(f'expected five Item fixture calls, migrated {count}')
+          if 'loadout.apply_payload(JSON.stringify({"inventory":' in text or '_item({' in text:
+              raise SystemExit('legacy ItemRow fixture remains')
           path.write_text(text)
           PY
 
