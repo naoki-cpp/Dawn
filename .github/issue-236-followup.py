@@ -75,3 +75,39 @@ exact(
             }),
 ''',
 )
+exact(
+    'crates/dawn-sector/src/node/transit.rs',
+    '''    /// Takes `ship` (the same `ShipSnapshot` the `TransitOp::Commit` payload
+    /// carries, echoed back to this Sector along with everyone else's copy)
+    /// rather than re-reading the Ship's current ECS state: the Ship has been
+    /// frozen out of Movement/Combat since Request-commit
+    /// (`dawn-ecs`'s `TransitComp` guards), so nothing should have changed it
+    /// in the meantime, and using the one payload both `from` and `to` share
+    /// keeps their `SectorTransitCompleted.ship_state` identical by
+    /// construction instead of by coincidence.
+''',
+    '''    /// Ack carries only the transfer identity. The source re-reads the
+    /// canonical handoff state from its frozen recovery copy before removal;
+    /// `TransitComp` guards guarantee that state has not changed since Request.
+    /// The resulting `SectorTransitCompleted.handoff` therefore matches the
+    /// state previously proposed to the destination without coupling Ack to a
+    /// second copy of the Ship payload.
+''',
+)
+exact(
+    'crates/dawn-sector/src/node/transit.rs',
+    '''    /// The `to` branch does not call `restore_ship_from_snapshot` through
+    /// `import_transit` (which also appends events) -- replay must not
+    /// append anything it didn't already record, so it rebuilds a
+    /// `ShipSnapshot` from `e.ship_state` via `ship_snapshot_from_transit`
+    /// and redoes the anchor rebase state directly via
+    /// `rebase_ship_anchor_state` (see that method's doc comment for why the
+    /// already-logged `AnchorRebased` entry can't do this on its own).
+''',
+    '''    /// The `to` branch feeds `e.handoff` through the same direct
+    /// handoff-to-ECS mapping as live import, without appending new events.
+    /// It then redoes the anchor rebase state directly via
+    /// `rebase_ship_anchor_state` (see that method's doc comment for why the
+    /// already-logged `AnchorRebased` entry can't do this on its own).
+''',
+)
