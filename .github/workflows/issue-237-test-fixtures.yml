@@ -19,23 +19,12 @@ jobs:
       - name: Migrate ItemRow GdUnit fixtures
         run: |
           python3 - <<'PY'
+          import re
           from pathlib import Path
 
           path = Path('client/test/hud_surface_test.gd')
           text = path.read_text()
 
-          old_helper = '''func _item(overrides: Dictionary) -> ItemRow:
-          \tvar base: Dictionary = {
-          \t\t"item_id": {"Module": 1},
-          \t\t"name": "Test Item", "kind": "", "slot": "", "count": 1,
-          \t}
-          \tfor key: String in overrides:
-          \t\tbase[key] = overrides[key]
-          \tvar loadout := PlayerLoadout.new()
-          \tif not loadout.apply_payload(JSON.stringify({"inventory": [base]})):
-          \t\treturn null
-          \treturn loadout.inventory()[0] as ItemRow
-          '''
           new_helper = '''func _item(item_id: ItemIdentity, overrides: Dictionary = {}) -> ItemRow:
           \treturn ItemRow.test_fixture(
           \t\titem_id,
@@ -43,11 +32,16 @@ jobs:
           \t\toverrides.get("kind", "") as String,
           \t\toverrides.get("slot", "") as String,
           \t\toverrides.get("count", 1) as int,
-          \t) as ItemRow
-          '''
-          if text.count(old_helper) != 1:
-              raise SystemExit(f'expected one old helper, found {text.count(old_helper)}')
-          text = text.replace(old_helper, new_helper)
+          \t) as ItemRow'''
+          text, count = re.subn(
+              r'func _item\(overrides: Dictionary\) -> ItemRow:\n.*?(?=\n\nfunc _owned_ship)',
+              new_helper,
+              text,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit(f'expected one old helper block, found {count}')
 
           replacements = {
               '_item({"item_id": "ScrapMetal", "name": "Scrap Metal", "count": 3})':
