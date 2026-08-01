@@ -21,6 +21,65 @@ jobs:
 
       - name: Apply and verify issue 233
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("tools/issue233_apply.py")
+          source = path.read_text()
+          old = '''        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("market.sqlite");
+        let path = path.to_str().unwrap();
+        let order_id = {
+            let mut market = MarketDb::open(path).unwrap();
+'''
+          new = '''        let path = std::env::temp_dir().join(format!(
+            "dawn-market-reopen-{}-{}.sqlite",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path_string = path.to_string_lossy().into_owned();
+        let order_id = {
+            let mut market = MarketDb::open(&path_string).unwrap();
+'''
+          if source.count(old) != 1:
+              raise RuntimeError("expected tempfile reopen fixture exactly once")
+          source = source.replace(old, new)
+          source = source.replace(
+              "        let mut reopened = MarketDb::open(path).unwrap();\n",
+              "        let mut reopened = MarketDb::open(&path_string).unwrap();\n",
+              1,
+          )
+          old_tail = '''        assert_eq!(
+            cancelled.return_item_command,
+            Some(ReturnItemCommand {
+                player_id: PlayerId(1),
+                ship_id: ship(1),
+                item_id: scrap(),
+                quantity: 5,
+            })
+        );
+    }
+'''
+          new_tail = '''        assert_eq!(
+            cancelled.return_item_command,
+            Some(ReturnItemCommand {
+                player_id: PlayerId(1),
+                ship_id: ship(1),
+                item_id: scrap(),
+                quantity: 5,
+            })
+        );
+        drop(reopened);
+        std::fs::remove_file(path).unwrap();
+    }
+'''
+          if source.count(old_tail) != 1:
+              raise RuntimeError("expected reopen fixture tail exactly once")
+          path.write_text(source.replace(old_tail, new_tail))
+          PY
           python3 tools/issue233_apply.py
           cargo fmt --all
           cargo fmt --all -- --check
