@@ -1,0 +1,505 @@
+name: Apply issue 224 review fixes
+
+on:
+  pull_request:
+    types: [ready_for_review]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.number == 231
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Apply fixes
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f"expected one match in {path}, found {text.count(old)}")
+              p.write_text(text.replace(old, new, 1))
+
+          path = "crates/dawn-client-gdext/src/client_outcome.rs"
+          replace_once(path,
+          '''    pub(crate) fn decode(bytes: &[u8]) -> Result<Self, String> {
+                  ServerMessage::decode(bytes)
+                      .map(Self::from_message)
+                      .map_err(|error| error.to_string())
+              }
+          ''',
+          '''    pub(crate) fn decode(bytes: &[u8]) -> Result<Self, String> {
+                  let message = ServerMessage::decode(bytes).map_err(|error| error.to_string())?;
+                  validate_godot_integer_range(&message)?;
+                  Ok(Self::from_message(message))
+              }
+          ''')
+
+          validation = r'''
+          fn ensure_godot_int(value: u64, field: &str) -> Result<(), String> {
+              i64::try_from(value)
+                  .map(|_| ())
+                  .map_err(|_| format!("{field}={value} exceeds Godot's signed 64-bit integer range"))
+          }
+
+          fn validate_event(event: &EventWire) -> Result<(), String> {
+              match event {
+                  EventWire::ShipSpawned { ship_id, tick, .. }
+                  | EventWire::VelocityChanged { ship_id, tick, .. }
+                  | EventWire::ShipDespawned { ship_id, tick }
+                  | EventWire::ShipDocked { ship_id, tick, .. }
+                  | EventWire::ShipUndocked { ship_id, tick, .. }
+                  | EventWire::ShipAssembled { ship_id, tick, .. }
+                  | EventWire::DamageTaken { ship_id, tick, .. }
+                  | EventWire::RepairApplied { ship_id, tick, .. }
+                  | EventWire::ModuleDeactivated { ship_id, tick, .. }
+                  | EventWire::JumpGateUsed { ship_id, tick, .. }
+                  | EventWire::StarSystemChanged { ship_id, tick, .. } => {
+                      ensure_godot_int(*ship_id, "event.ship_id")?;
+                      ensure_godot_int(*tick, "event.tick")?;
+                  }
+                  EventWire::ShipDestroyed {
+                      ship_id,
+                      killer_id,
+                      tick,
+                  } => {
+                      ensure_godot_int(*ship_id, "event.ship_id")?;
+                      ensure_godot_int(*killer_id, "event.killer_id")?;
+                      ensure_godot_int(*tick, "event.tick")?;
+                  }
+                  EventWire::TargetLocked {
+                      locker_id,
+                      target_id,
+                      tick,
+                  }
+                  | EventWire::LockLost {
+                      locker_id,
+                      target_id,
+                      tick,
+                  } => {
+                      ensure_godot_int(*locker_id, "event.locker_id")?;
+                      ensure_godot_int(*target_id, "event.target_id")?;
+                      ensure_godot_int(*tick, "event.tick")?;
+                  }
+                  EventWire::ModuleActivated {
+                      ship_id,
+                      target_ship_id,
+                      tick,
+                      ..
+                  } => {
+                      ensure_godot_int(*ship_id, "event.ship_id")?;
+                      if let Some(target_ship_id) = target_ship_id {
+                          ensure_godot_int(*target_ship_id, "event.target_ship_id")?;
+                      }
+                      ensure_godot_int(*tick, "event.tick")?;
+                  }
+              }
+              Ok(())
+          }
+
+          fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
+              match message {
+                  ServerMessage::Welcome { player_id, ship_id }
+                  | ServerMessage::Redirect {
+                      player_id, ship_id, ..
+                  } => {
+                      ensure_godot_int(*player_id, "player_id")?;
+                      ensure_godot_int(*ship_id, "ship_id")?;
+                  }
+                  ServerMessage::Event(event) => validate_event(event)?,
+                  ServerMessage::PlayerLoadout(_) => {}
+                  ServerMessage::InitialState(state) => {
+                      for ship in &state.ships {
+                          ensure_godot_int(ship.ship_id, "initial_state.ship_id")?;
+                      }
+                  }
+                  ServerMessage::AoiEnter(ship) => {
+                      ensure_godot_int(ship.ship_id, "aoi_enter.ship_id")?;
+                  }
+                  ServerMessage::AoiLeave { ship_id }
+                  | ServerMessage::PositionSnap { ship_id, .. } => {
+                      ensure_godot_int(*ship_id, "ship_id")?;
+                  }
+                  ServerMessage::MotionCorrection { ship_id, tick, .. } => {
+                      ensure_godot_int(*ship_id, "motion_correction.ship_id")?;
+                      ensure_godot_int(*tick, "motion_correction.tick")?;
+                  }
+                  ServerMessage::MarketSnapshot(snapshot) => {
+                      ensure_godot_int(snapshot.balance, "market.balance")?;
+                      for order in &snapshot.orders {
+                          ensure_godot_int(order.order_id, "market.order_id")?;
+                          ensure_godot_int(order.price, "market.price")?;
+                          ensure_godot_int(order.quantity, "market.quantity")?;
+                      }
+                  }
+              }
+              Ok(())
+          }
+
+          '''
+          replace_once(path, "\n#[cfg(test)]\nmod tests {", "\n" + validation + "#[cfg(test)]\nmod tests {")
+          replace_once(path,
+          '''    #[test]
+              fn corrupted_raw_frame_is_rejected_before_projection() {
+          ''',
+          '''    #[test]
+              fn unsigned_ids_outside_godot_int_range_are_rejected() {
+                  let invalid_ship_id = (i64::MAX as u64) + 1;
+                  let error = ClientOutcome::decode(
+                      &ServerMessage::Welcome {
+                          player_id: 1,
+                          ship_id: invalid_ship_id,
+                      }
+                      .encode(),
+                  )
+                  .expect_err("out-of-range ids must not be saturated");
+                  assert!(error.contains("ship_id"));
+              }
+
+              #[test]
+              fn corrupted_raw_frame_is_rejected_before_projection() {
+          ''')
+
+          path = "crates/dawn-client-gdext/src/server_message_gd.rs"
+          replace_once(path,
+          '''    AbsPosWire, EventWire, InitialStateWire, ItemWire, MarketSnapshotWire, ShipStateWire, VelWire,
+          ''',
+          '''    AbsPosWire, EventWire, InitialStateWire, ItemWire, MarketOrderWire, MarketSnapshotWire,
+              ServerMessage, ShipStateWire, VelWire,
+          ''')
+          replace_once(path,
+          '''    }
+          }
+
+          /// One typed top-level server outcome.
+          ''',
+          '''    }
+
+              /// Debug-build fixture used by GdUnit to exercise the actual
+              /// raw-frame -> typed-outcome -> dispatch boundary.
+              #[cfg(debug_assertions)]
+              #[func]
+              fn test_outcome(&self, kind: GString) -> Option<Gd<ServerMessageOutcome>> {
+                  let message = match kind.to_string().as_str() {
+                      "Welcome" => ServerMessage::Welcome {
+                          player_id: 5,
+                          ship_id: 11,
+                      },
+                      "Redirect" => ServerMessage::Redirect {
+                          ws_addr: "127.0.0.1:7880".to_owned(),
+                          player_id: 5,
+                          ship_id: 11,
+                      },
+                      "AoiLeave" => ServerMessage::AoiLeave { ship_id: 19 },
+                      "InitialState" => ServerMessage::InitialState(InitialStateWire {
+                          ships: Vec::new(),
+                          system_name: "Alpha".to_owned(),
+                          systems: Vec::new(),
+                          jump_gates: Vec::new(),
+                          stations: Vec::new(),
+                          celestial_bodies: Vec::new(),
+                          buildable_ship_types: Vec::new(),
+                      }),
+                      "MarketSnapshot" => ServerMessage::MarketSnapshot(MarketSnapshotWire {
+                          balance: 250,
+                          orders: vec![
+                              MarketOrderWire {
+                                  order_id: 1,
+                                  item_id: ItemWire::ScrapMetal,
+                                  side: "Ask".to_owned(),
+                                  price: 10,
+                                  quantity: 2,
+                                  is_own: true,
+                              },
+                              MarketOrderWire {
+                                  order_id: 2,
+                                  item_id: ItemWire::Module { module_id: 3 },
+                                  side: "Bid".to_owned(),
+                                  price: 20,
+                                  quantity: 1,
+                                  is_own: false,
+                              },
+                              MarketOrderWire {
+                                  order_id: 3,
+                                  item_id: ItemWire::PackagedShip { ship_type_id: 7 },
+                                  side: "Ask".to_owned(),
+                                  price: 30,
+                                  quantity: 1,
+                                  is_own: false,
+                              },
+                          ],
+                          notice: "Ready".to_owned(),
+                      }),
+                      _ => return None,
+                  };
+                  self.decode(PackedByteArray::from(message.encode().as_slice()))
+              }
+          }
+
+          /// One typed top-level server outcome.
+          ''')
+          replace_once(path,
+          '''    fn dispatch(&self, mut target: Gd<Object>) -> bool {
+                  match &self.outcome {
+          ''',
+          '''    fn dispatch(&self, mut target: Gd<Object>) -> bool {
+                  if !ensure_handler(&mut target, server_outcome_handler(&self.outcome)) {
+                      return false;
+                  }
+                  match &self.outcome {
+          ''')
+          replace_once(path,
+          '''    fn dispatch(&self, mut target: Gd<Object>) -> bool {
+                  match &self.outcome {
+                      ClientEventOutcome::Domain(event) => dispatch_domain_event(&mut target, event),
+          ''',
+          '''    fn dispatch(&self, mut target: Gd<Object>) -> bool {
+                  if let Some(method) = event_outcome_handler(&self.outcome) {
+                      if !ensure_handler(&mut target, method) {
+                          return false;
+                      }
+                  }
+                  match &self.outcome {
+                      ClientEventOutcome::Domain(event) => dispatch_domain_event(&mut target, event),
+          ''')
+
+          handlers = r'''
+          fn server_outcome_handler(outcome: &ClientOutcome) -> &'static str {
+              match outcome {
+                  ClientOutcome::Welcome { .. } => "_accept_welcome",
+                  ClientOutcome::Redirect { .. } => "_accept_redirect",
+                  ClientOutcome::Event(_) => "_accept_event",
+                  ClientOutcome::PlayerLoadout => "_accept_player_loadout",
+                  ClientOutcome::InitialState(_) => "_accept_initial_state",
+                  ClientOutcome::ModuleActivated { .. } => "_accept_module_activated",
+                  ClientOutcome::ModuleDeactivated { .. } => "_accept_module_deactivated",
+                  ClientOutcome::MotionCorrection { .. } => "_accept_motion_correction",
+                  ClientOutcome::MarketSnapshot(_) => "_accept_market_snapshot",
+              }
+          }
+
+          fn event_outcome_handler(outcome: &ClientEventOutcome) -> Option<&'static str> {
+              match outcome {
+                  ClientEventOutcome::Domain(event) => domain_event_handler(event),
+                  ClientEventOutcome::AoiEnter(_) => Some("_handle_aoi_enter"),
+                  ClientEventOutcome::AoiLeave { .. } => Some("_handle_aoi_leave"),
+                  ClientEventOutcome::PositionSnap { .. } => Some("_handle_position_snap"),
+              }
+          }
+
+          fn domain_event_handler(event: &EventWire) -> Option<&'static str> {
+              Some(match event {
+                  EventWire::ShipSpawned { .. } => "_handle_ship_spawned",
+                  EventWire::VelocityChanged { .. } => "_handle_velocity_changed",
+                  EventWire::ShipDespawned { .. } => "_handle_ship_despawned",
+                  EventWire::ShipDocked { .. } => "_handle_ship_docked",
+                  EventWire::ShipUndocked { .. } => "_handle_ship_undocked",
+                  EventWire::ShipAssembled { .. } => return None,
+                  EventWire::DamageTaken { .. } => "_handle_damage_taken",
+                  EventWire::RepairApplied { .. } => "_handle_repair_applied",
+                  EventWire::ShipDestroyed { .. } => "_handle_ship_destroyed",
+                  EventWire::TargetLocked { .. } => "_handle_target_locked",
+                  EventWire::LockLost { .. } => "_handle_lock_lost",
+                  EventWire::ModuleActivated { .. } => "_on_module_activated",
+                  EventWire::ModuleDeactivated { .. } => "_on_module_deactivated",
+                  EventWire::JumpGateUsed { .. } => "_handle_jump_gate_used",
+                  EventWire::StarSystemChanged { .. } => "_handle_star_system_changed",
+              })
+          }
+
+          fn ensure_handler(target: &mut Gd<Object>, method: &str) -> bool {
+              let exists = target
+                  .call("has_method", vslice![method])
+                  .try_to::<bool>()
+                  .unwrap_or(false);
+              if !exists {
+                  godot_error!("typed ServerMessage dispatch target is missing method '{method}'");
+              }
+              exists
+          }
+
+          '''
+          replace_once(path, "\nfn dispatch_domain_event(target: &mut Gd<Object>, event: &EventWire) {", "\n" + handlers + "fn dispatch_domain_event(target: &mut Gd<Object>, event: &EventWire) {")
+          replace_once(path,
+          '''fn godot_i64(value: u64) -> i64 {
+              i64::try_from(value).unwrap_or(i64::MAX)
+          }
+          ''',
+          '''fn godot_i64(value: u64) -> i64 {
+              i64::try_from(value).expect("ClientOutcome validates every Godot-facing u64")
+          }
+          ''')
+
+          path = "crates/dawn-sector-node/src/config.rs"
+          replace_once(path,
+          '''pub fn load(path: &str) -> anyhow::Result<NodeConfig> {
+              let content = std::fs::read_to_string(path)
+                  .map_err(|e| anyhow::anyhow!("cannot read config file '{}': {}", path, e))?;
+              toml::from_str(&content)
+                  .map_err(|e| anyhow::anyhow!("cannot parse config file '{}': {}", path, e))
+          }
+          ''',
+          '''pub fn load(path: &str) -> anyhow::Result<NodeConfig> {
+              let content = std::fs::read_to_string(path)
+                  .map_err(|e| anyhow::anyhow!("cannot read config file '{}': {}", path, e))?;
+              let config: NodeConfig = toml::from_str(&content)
+                  .map_err(|e| anyhow::anyhow!("cannot parse config file '{}': {}", path, e))?;
+              validate_godot_node_ids(&config)?;
+              Ok(config)
+          }
+
+          fn validate_godot_node_ids(config: &NodeConfig) -> anyhow::Result<()> {
+              const MAX_GODOT_NODE_ID: u8 = 127;
+              if config.node_id > MAX_GODOT_NODE_ID {
+                  anyhow::bail!(
+                      "node_id {} exceeds {}; entity IDs must fit Godot's signed 64-bit int",
+                      config.node_id,
+                      MAX_GODOT_NODE_ID
+                  );
+              }
+              for peer in &config.peers {
+                  if peer.node_id > MAX_GODOT_NODE_ID {
+                      anyhow::bail!(
+                          "peer node_id {} exceeds {}; entity IDs must fit Godot's signed 64-bit int",
+                          peer.node_id,
+                          MAX_GODOT_NODE_ID
+                      );
+                  }
+              }
+              Ok(())
+          }
+
+          #[cfg(test)]
+          mod tests {
+              use super::*;
+
+              fn config(node_id: u8, peer_node_id: u8) -> NodeConfig {
+                  NodeConfig {
+                      node_id,
+                      sector_id: 0,
+                      ws_addr: "127.0.0.1:7878".parse().unwrap(),
+                      raft_addr: "127.0.0.1:7879".parse().unwrap(),
+                      repl_addr: "127.0.0.1:7880".parse().unwrap(),
+                      npc_ships: 0,
+                      pop_cap: 1,
+                      peers: vec![PeerConfig {
+                          node_id: peer_node_id,
+                          raft_addr: "127.0.0.1:7881".parse().unwrap(),
+                          repl_addr: "127.0.0.1:7882".parse().unwrap(),
+                          ws_addr: "127.0.0.1:7883".parse().unwrap(),
+                      }],
+                      event_log_path: String::new(),
+                      snapshot_path: String::new(),
+                      cold_path: String::new(),
+                      checkpoint_interval_ticks: 1,
+                      station_inventory_db_path: String::new(),
+                  }
+              }
+
+              #[test]
+              fn accepts_node_ids_that_fit_godot_ints() {
+                  assert!(validate_godot_node_ids(&config(127, 127)).is_ok());
+              }
+
+              #[test]
+              fn rejects_local_or_peer_node_ids_with_the_sign_bit_set() {
+                  assert!(validate_godot_node_ids(&config(128, 1)).is_err());
+                  assert!(validate_godot_node_ids(&config(1, 128)).is_err());
+              }
+          }
+          ''')
+
+          path = "client/test/connection_test.gd"
+          p = Path(path)
+          text = p.read_text()
+          text += r'''
+
+          class EventDispatchTarget:
+              extends RefCounted
+              var left_ship_id: int = -1
+
+              func _handle_aoi_leave(payload: Dictionary) -> void:
+                  left_ship_id = payload.get("ship_id", -1) as int
+
+
+          func test_real_outcome_dispatches_welcome_and_detects_missing_handler() -> void:
+              var decoder := ServerMessageDecoder.new()
+              var outcome: ServerMessageOutcome = decoder.test_outcome("Welcome")
+              assert_object(outcome).is_not_null()
+
+              var missing_target := Node.new()
+              assert_bool(outcome.dispatch(missing_target)).is_false()
+              missing_target.free()
+
+              var connection: Node = Connection.new()
+              assert_bool(outcome.dispatch(connection)).is_true()
+              assert_int(connection.player_id).is_equal(5)
+              assert_int(connection.ship_id).is_equal(11)
+              connection.free()
+
+
+          func test_real_world_event_outcome_dispatches_to_handler() -> void:
+              var decoder := ServerMessageDecoder.new()
+              var top_level: ServerMessageOutcome = decoder.test_outcome("AoiLeave")
+              var connection: Node = Connection.new()
+              var events: Array = []
+              connection.event_received.connect(func(event: ServerEventOutcome) -> void:
+                  events.append(event)
+              )
+              assert_bool(top_level.dispatch(connection)).is_true()
+              assert_int(events.size()).is_equal(1)
+
+              var target := EventDispatchTarget.new()
+              assert_bool((events[0] as ServerEventOutcome).dispatch(target)).is_true()
+              assert_int(target.left_ship_id).is_equal(19)
+              connection.free()
+
+
+          func test_real_initial_state_outcome_preserves_nested_payload() -> void:
+              var decoder := ServerMessageDecoder.new()
+              var outcome: ServerMessageOutcome = decoder.test_outcome("InitialState")
+              var connection: Node = Connection.new()
+              var states: Array = []
+              connection.initial_state_received.connect(func(state: Dictionary) -> void:
+                  states.append(state)
+              )
+              assert_bool(outcome.dispatch(connection)).is_true()
+              assert_int(states.size()).is_equal(1)
+              assert_str((states[0] as Dictionary).get("system_name", "") as String).is_equal("Alpha")
+              connection.free()
+
+
+          func test_real_market_outcome_preserves_every_item_variant() -> void:
+              var decoder := ServerMessageDecoder.new()
+              var outcome: ServerMessageOutcome = decoder.test_outcome("MarketSnapshot")
+              var connection: Node = Connection.new()
+              var snapshots: Array = []
+              connection.market_snapshot_received.connect(func(snapshot: Dictionary) -> void:
+                  snapshots.append(snapshot)
+              )
+              assert_bool(outcome.dispatch(connection)).is_true()
+              var orders: Array = (snapshots[0] as Dictionary).get("orders", []) as Array
+              assert_int(orders.size()).is_equal(3)
+              assert_str((orders[0] as Dictionary).get("item_id", "") as String).is_equal("ScrapMetal")
+              assert_bool(((orders[1] as Dictionary).get("item_id", {}) as Dictionary).has("Module")).is_true()
+              assert_bool(((orders[2] as Dictionary).get("item_id", {}) as Dictionary).has("PackagedShip")).is_true()
+              connection.free()
+          '''
+          p.write_text(text)
+          PY
+          cargo fmt --all
+          rm .github/workflows/issue-224-review-fixes.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: harden typed server outcome boundary"
+          git push
