@@ -108,6 +108,7 @@ impl MultiNodeCluster {
         let ids: Vec<NodeId> = (0..node_count as u8).map(NodeId).collect();
 
         let (endpoints, partitioned) = spawn_raft_actors(&ids);
+        let galaxy = Arc::new(dawn_sector::galaxy::Galaxy::demo());
 
         let nodes = ids
             .iter()
@@ -117,6 +118,7 @@ impl MultiNodeCluster {
                     id,
                     SectorId(id.0),
                     SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                    Arc::clone(&galaxy),
                     OutboundLogPublisher::new(bus.clone()),
                     raft,
                     committed_rx,
