@@ -1,7 +1,8 @@
 //! GDExtension binding exposing `dawn-client-core` to the Godot client
 //! (ADR-0040). This crate adapts Godot's Variant/GString/Dictionary types and
 //! projects `dawn-wire` messages into typed client outcomes; domain state and
-//! rules remain in the Godot-independent client/core crates.
+//! rules remain in the Godot-independent client/core crates. Raw frame bytes
+//! are retained only where an existing typed decoder consumes them directly.
 
 use godot::prelude::*;
 
