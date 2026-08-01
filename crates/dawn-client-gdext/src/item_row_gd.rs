@@ -52,7 +52,8 @@ impl ItemRow {
             name: (&row.name).into(),
             kind: (&row.kind).into(),
             slot: (&row.slot).into(),
-            count: row.count as i64,
+            count: i64::try_from(row.count)
+                .expect("PlayerLoadout range validation covers item counts"),
         })
     }
 }
