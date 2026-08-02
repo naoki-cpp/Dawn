@@ -11,6 +11,7 @@
 extends GdUnitTestSuite
 
 const __source: String = "res://scripts/main.gd"
+const MainScript = preload("res://scripts/main.gd")
 const InventoryRow = preload("res://scripts/inventory_row.gd")
 const HudManager = preload("res://scripts/hud_manager.gd")
 const AU_M: float = 1.495978707e11
@@ -42,6 +43,15 @@ func _dispatch_fixture(kind: String, connection_ship_id: int = -1) -> void:
 	)).is_true()
 
 
+func _dispatch_to_main(kind: String, connection_ship_id: int = -1) -> void:
+	var outcome: ServerMessageOutcome = ServerMessageDecoder.new().test_outcome(kind)
+	assert_object(outcome).is_not_null()
+	var connection_target := TypedOutcomeTarget.new()
+	assert_bool(outcome.dispatch(
+		connection_target, _main, _main._session, _main._loadout, connection_ship_id
+	)).is_true()
+
+
 func _setup_docked_session() -> void:
 	## Server-derived session state must use the same typed inbound path as
 	## production. The fixture's player ship is 11 and station is 5; tests may
@@ -62,6 +72,17 @@ class FakeShip:
 	var dock_calls: Array[Dictionary] = []
 	var undock_calls: Array[Dictionary] = []
 	var server_position_value := PackedFloat64Array([0.0, 0.0, 0.0])
+
+	func configure_motion(
+		_max_speed: float,
+		_mass: float,
+		_inertia_modifier: float,
+		p: PackedFloat64Array,
+		v: Vector3,
+		_tick: int = 0
+	) -> void:
+		server_position_value = p
+		velocity_calls.append(v)
 
 	func set_velocity(v: Vector3, tick: int = 0) -> bool:
 		velocity_calls.append(v)
@@ -114,6 +135,20 @@ class FakeShip:
 
 	func get_speed_server() -> float:
 		return 0.0
+
+
+class TestableMain:
+	extends MainScript
+
+	var instantiated_ships: Array[Node3D] = []
+
+	func _instantiate_ship(sid: int, server_pos: PackedFloat64Array) -> Node3D:
+		var ship := FakeShip.new()
+		ship.name = "Ship_%d" % sid
+		ship.server_position_value = server_pos
+		add_child(ship)
+		instantiated_ships.append(ship)
+		return ship
 
 
 class FakeConnection:
@@ -190,9 +225,19 @@ func before_test() -> void:
 	_main = load(__source).new()
 	## _ready() normally injects WorldSpace through WorldPresentation.build().
 	## This fixture skips _ready(), so establish the same production dependency.
+	_initialize_main_dependencies()
+
+
+func _initialize_main_dependencies() -> void:
 	_main._presentation._world = _main._world
 	_main._interaction = load("res://scripts/world_interaction.gd").new()
 	_main._loadout = PlayerLoadout.new()
+
+
+func _replace_with_testable_main() -> void:
+	_main.free()
+	_main = TestableMain.new()
+	_initialize_main_dependencies()
 
 
 func after_test() -> void:
@@ -218,6 +263,20 @@ func _set_loadout_modules(modules: Array[ModuleRow]) -> void:
 	)).is_true()
 
 
+func _setup_pending_docked_switch() -> FakeShip:
+	_replace_with_testable_main()
+	var old_ship := FakeShip.new()
+	_main.add_child(old_ship)
+	_main._ships = {11: old_ship}
+	_dispatch_fixture("InitialState", 11)
+	_main._set_as_player_ship(11, old_ship)
+	_dispatch_fixture("ShipDocked", 11)
+	_dispatch_fixture("PlayerLoadoutUnknownDocked", 11)
+	_main._apply_loadout_side_effects()
+	assert_int(_main._session.player_ship_id()).is_equal(11)
+	assert_bool(_main._session.is_docked()).is_true()
+	assert_int(old_ship.dock_calls.size()).is_equal(1)
+	return old_ship
 
 
 func test_warp_hud_guidance_uses_shared_minimum_distance_boundary() -> void:
@@ -637,6 +696,38 @@ func test_switching_active_ship_to_an_unknown_ship_leaves_the_camera_alone() -> 
 
 	assert_int(_main._player_ship_id).is_equal(11)
 	assert_object(camera._target_node).is_equal(ship_a)
+
+
+func test_pending_docked_switch_reapplies_dock_after_aoi_enter() -> void:
+	var old_ship := _setup_pending_docked_switch()
+
+	_dispatch_to_main("AoiEnterPending", 11)
+
+	assert_int(_main._session.player_ship_id()).is_equal(33)
+	assert_int(_main._player_ship_id).is_equal(33)
+	assert_bool(_main._session.is_docked()).is_true()
+	assert_bool(_main._ships.has(33)).is_true()
+	var new_ship := _main._ships[33] as FakeShip
+	assert_int(new_ship.set_as_player_calls).is_equal(1)
+	assert_int(new_ship.dock_calls.size()).is_equal(1)
+	assert_int(new_ship.dock_calls[0]["tick"] as int).is_equal(13)
+	assert_int(old_ship.clear_as_player_calls).is_equal(1)
+
+
+func test_pending_docked_switch_reapplies_dock_after_ship_spawned() -> void:
+	var old_ship := _setup_pending_docked_switch()
+
+	_dispatch_to_main("ShipSpawnedPending", 11)
+
+	assert_int(_main._session.player_ship_id()).is_equal(33)
+	assert_int(_main._player_ship_id).is_equal(33)
+	assert_bool(_main._session.is_docked()).is_true()
+	assert_bool(_main._ships.has(33)).is_true()
+	var new_ship := _main._ships[33] as FakeShip
+	assert_int(new_ship.set_as_player_calls).is_equal(1)
+	assert_int(new_ship.dock_calls.size()).is_equal(1)
+	assert_int(new_ship.dock_calls[0]["tick"] as int).is_equal(13)
+	assert_int(old_ship.clear_as_player_calls).is_equal(1)
 
 
 ## Disembarking is also applied by the typed PlayerLoadout outcome before the

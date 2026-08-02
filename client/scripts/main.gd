@@ -641,19 +641,20 @@ func _on_player_fitting() -> void:
 	_apply_loadout_side_effects()
 func _apply_loadout_side_effects() -> void:
 	var new_active_ship_id: int = _session.player_ship_id()
+	var attached_new_player := false
 	if new_active_ship_id != _player_ship_id:
 		if new_active_ship_id >= 0 and _ships.has(new_active_ship_id):
 			_set_as_player_ship(new_active_ship_id, _ships[new_active_ship_id] as Node3D)
+			attached_new_player = true
 		elif new_active_ship_id < 0:
 			_player_ship_id = new_active_ship_id
 			_presentation.detach_player_ship()
 	_sync_session_state()
 	if not _session.is_docked() and _market_surface.is_open():
 		_market_surface.set_open(false)
-	if _session.is_docked() and _player_ship_id >= 0:
-		var docked_ship := _ships.get(_player_ship_id) as Node3D
-		if docked_ship != null:
-			docked_ship.call("dock_motion", docked_ship.call("server_position"), _loadout.tick())
+	if not attached_new_player and _player_ship_id >= 0:
+		_apply_current_dock_state_to_player_ship(
+			_ships.get(_player_ship_id) as Node3D)
 	var modules := _loadout.modules()
 	var inventory := _loadout.inventory()
 	var station_inventory := _loadout.station_inventory()
@@ -912,6 +913,16 @@ func _toggle_module_by_index(f_index: int) -> void:
 func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 	_player_ship_id = p_ship_id
 	_presentation.attach_player_ship(ship, _weapon_range, _weapon_falloff)
+	_apply_current_dock_state_to_player_ship(ship)
+
+
+func _apply_current_dock_state_to_player_ship(ship: Node3D) -> void:
+	if ship == null or not _session.is_docked():
+		return
+	ship.call(
+		"dock_motion",
+		ship.call("server_position"),
+		_session.latest_dock_state_tick())
 
 # -- Domain event handlers ----------------------------------------------------
 

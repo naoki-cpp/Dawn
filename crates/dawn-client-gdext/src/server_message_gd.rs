@@ -79,6 +79,9 @@ impl ServerMessageDecoder {
         other_ship.current_hull = 110.0;
         other_ship.cap_max = 80.0;
         other_ship.cap_recharge_per_tick = 4.0;
+        let mut pending_ship = other_ship.clone();
+        pending_ship.ship_id = 33;
+        pending_ship.ship_type_name = "Prospect".to_owned();
 
         let loadout = |tick, active_ship_id| PlayerLoadoutWire {
             tick,
@@ -96,6 +99,12 @@ impl ServerMessageDecoder {
             active_ship_id,
             owned_ships: Vec::new(),
         };
+        let docked_loadout = |tick, active_ship_id| {
+            let mut result = loadout(tick, active_ship_id);
+            result.docked_station_id = Some(5);
+            result.docked_station_name = Some("Forge Station".to_owned());
+            result
+        };
 
         let message = match kind.to_string().as_str() {
             "Welcome" => ServerMessage::Welcome {
@@ -108,6 +117,7 @@ impl ServerMessageDecoder {
                 ship_id: 11,
             },
             "AoiLeave" => ServerMessage::AoiLeave { ship_id: 19 },
+            "AoiEnterPending" => ServerMessage::AoiEnter(pending_ship.clone()),
             "InitialState" => ServerMessage::InitialState(InitialStateWire {
                 ships: vec![ship, other_ship],
                 system_name: "Alpha".to_owned(),
@@ -142,6 +152,9 @@ impl ServerMessageDecoder {
             }),
             "PlayerLoadoutSwitch" => ServerMessage::PlayerLoadout(loadout(12, Some(22))),
             "PlayerLoadoutUnknown" => ServerMessage::PlayerLoadout(loadout(13, Some(33))),
+            "PlayerLoadoutUnknownDocked" => {
+                ServerMessage::PlayerLoadout(docked_loadout(13, Some(33)))
+            }
             "PlayerLoadoutDisembark" => ServerMessage::PlayerLoadout(loadout(14, None)),
             "MotionCorrection" => ServerMessage::MotionCorrection {
                 ship_id: 11,
@@ -157,6 +170,11 @@ impl ServerMessageDecoder {
                 ship_id: 11,
                 station_id: 5,
                 tick: 12,
+            }),
+            "ShipSpawnedPending" => ServerMessage::Event(EventWire::ShipSpawned {
+                ship_id: 33,
+                position,
+                tick: 14,
             }),
             "MarketSnapshot" => ServerMessage::MarketSnapshot(MarketSnapshotWire {
                 balance: 250,
