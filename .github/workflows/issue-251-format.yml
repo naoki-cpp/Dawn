@@ -1,0 +1,38 @@
+name: Format issue 251 branch
+
+on:
+  push:
+    branches:
+      - issue-251-client-fact-policy
+    paths:
+      - .github/workflows/issue-251-format.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: issue-251-client-fact-policy
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+
+      - name: Format and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/issue-251-format.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "style: format issue 251 after main reconciliation"
+          git push origin HEAD:issue-251-client-fact-policy
