@@ -5,9 +5,9 @@ text = read("client/test/planet_visibility_test.gd")
 text = replace_once(
     text,
     '''\t\tCallable(_main, "_server_components_to_godot"),
-\t\tCallable(_main._interaction, "clear_navigation_selection"),
+\t\tCallable(_main._interaction, "clear_navigation_selection")
 ''',
-    '''\t\tCallable(_main._interaction, "clear_navigation_selection"),
+    '''\t\tCallable(_main._interaction, "clear_navigation_selection")
 ''',
     "remove planet visibility coordinate callback",
 )
