@@ -1,0 +1,69 @@
+name: Capture pending dock GdUnit failure
+
+on:
+  push:
+    branches:
+      - issue-251-client-fact-policy
+    paths:
+      - .github/workflows/issue-251-gdunit-diagnose.yml
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Godot dependencies
+        run: sudo apt-get update && sudo apt-get install --yes unzip xvfb
+
+      - name: Restore GdUnit4 addon
+        uses: actions/cache@v4
+        with:
+          path: client/addons/gdUnit4
+          key: gdunit4-${{ hashFiles('.gdunit4-version') }}
+
+      - name: Install GdUnit4 addon if needed
+        run: |
+          if [ ! -f client/addons/gdUnit4/runtest.sh ]; then
+            bash scripts/install-gdunit.sh
+          fi
+
+      - name: Restore Godot editor
+        uses: actions/cache@v4
+        with:
+          path: .tools/godot
+          key: godot-${{ runner.os }}-${{ hashFiles('.godot-version') }}
+
+      - name: Build GDExtension
+        run: cargo build -p dawn-client-gdext
+
+      - name: Capture GdUnit output
+        shell: bash
+        run: |
+          set +e
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" bash scripts/setup-godot.sh --run-tests > /tmp/gdunit-command.log 2>&1
+          status=$?
+          {
+            echo "exit_status=$status"
+            echo "===== command output ====="
+            cat /tmp/gdunit-command.log
+            echo "===== gdunit.log ====="
+            cat client/.godot-test-logs/gdunit.log 2>/dev/null || true
+            echo "===== gdunit-copy.log ====="
+            cat client/.godot-test-logs/gdunit-copy.log 2>/dev/null || true
+          } > .github/gdunit-diagnostic.log
+          exit 0
+
+      - name: Commit diagnostic log and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/issue-251-gdunit-diagnose.yml
+          git add .github/gdunit-diagnostic.log
+          git commit -m "Capture pending dock GdUnit failure"
+          git push
