@@ -237,6 +237,7 @@ impl ServerMessageOutcome {
                     &mut session,
                     &mut loadout,
                     ClientFact::ModuleActivation {
+                        ship_id: godot_i64(*ship_id),
                         module_id: *module_id,
                         active: true,
                         forced_reason: String::new(),
@@ -260,6 +261,7 @@ impl ServerMessageOutcome {
                     &mut session,
                     &mut loadout,
                     ClientFact::ModuleActivation {
+                        ship_id: godot_i64(*ship_id),
                         module_id: *module_id,
                         active: false,
                         forced_reason: reason.to_owned(),

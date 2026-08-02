@@ -71,6 +71,7 @@ pub enum ClientFact {
     },
     PlayerLoadout(PlayerLoadoutMsg),
     ModuleActivation {
+        ship_id: i64,
         module_id: u32,
         active: bool,
         forced_reason: String,
@@ -190,12 +191,15 @@ impl<'a> ClientState<'a> {
             ClientFact::Tick { tick } => WorldSessionUpdate::Tick { tick },
             ClientFact::PlayerLoadout(loadout) => return self.replace_loadout(loadout),
             ClientFact::ModuleActivation {
+                ship_id,
                 module_id,
                 active,
                 forced_reason,
             } => {
-                if let Some(loadout) = self.loadout.as_mut() {
-                    loadout.apply_module_activation(module_id, active, forced_reason);
+                if ship_id == self.session.player_ship_id() {
+                    if let Some(loadout) = self.loadout.as_mut() {
+                        loadout.apply_module_activation(module_id, active, forced_reason);
+                    }
                 }
                 return Ok(WorldSessionEffect::None);
             }
@@ -429,6 +433,7 @@ mod tests {
 
         ClientState::new(&mut session, &mut loadout)
             .apply(ClientFact::ModuleActivation {
+                ship_id: 1,
                 module_id: 7,
                 active: true,
                 forced_reason: String::new(),
@@ -438,6 +443,30 @@ mod tests {
         let row = &loadout.as_ref().unwrap().modules[0];
         assert!(row.is_active);
         assert_eq!(row.cycle_remaining, 0);
+    }
+
+    #[test]
+    fn foreign_ship_module_activation_does_not_mutate_player_loadout() {
+        let (mut session, _) = setup();
+        let mut loadout = Some(PlayerLoadoutMsg {
+            active_ship_id: Some(1),
+            modules: vec![module(7, false)],
+            ..PlayerLoadoutMsg::default()
+        });
+
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::ModuleActivation {
+                ship_id: 2,
+                module_id: 7,
+                active: true,
+                forced_reason: "foreign".to_owned(),
+            })
+            .unwrap();
+
+        let row = &loadout.as_ref().unwrap().modules[0];
+        assert!(!row.is_active);
+        assert_eq!(row.cycle_remaining, 7);
+        assert!(row.forced_reason.is_empty());
     }
 
     #[test]
