@@ -45,8 +45,9 @@ impl OwnedShipRow {
 
 #[godot_api]
 impl OwnedShipRow {
-    /// Typed fixture boundary for GdUnit. Negative optional IDs and an empty
+    /// Debug-only typed fixture for GdUnit. Negative optional IDs and an empty
     /// type name represent absent values at the Godot boundary.
+    #[cfg(debug_assertions)]
     #[func]
     fn test_fixture(
         ship_id: i64,
@@ -54,10 +55,8 @@ impl OwnedShipRow {
         ship_type_name: GString,
         docked_station_id: i64,
         is_active: bool,
-    ) -> Variant {
-        let Ok(ship_id) = u64::try_from(ship_id) else {
-            return Variant::nil();
-        };
+    ) -> Gd<OwnedShipRow> {
+        let ship_id = u64::try_from(ship_id).expect("fixture ship ID must fit u64");
         Self::wrap(CoreOwnedShipRow {
             ship_id,
             ship_type_id: u32::try_from(ship_type_id).ok(),
@@ -65,6 +64,5 @@ impl OwnedShipRow {
             docked_station_id: u32::try_from(docked_station_id).ok(),
             is_active,
         })
-        .to_variant()
     }
 }

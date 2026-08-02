@@ -138,8 +138,9 @@ impl PlayerLoadout {
         self.loadout = None;
     }
 
-    /// Typed fixture boundary for focused GdUnit tests. Production state is
+    /// Debug-only typed fixture for focused GdUnit tests. Production state is
     /// replaced only from a decoded `PlayerLoadoutWire`.
+    #[cfg(debug_assertions)]
     #[func]
     fn test_fixture(
         &mut self,

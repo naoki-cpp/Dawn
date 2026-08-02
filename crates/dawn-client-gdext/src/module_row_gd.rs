@@ -150,8 +150,9 @@ impl ModuleRow {
         Self::wrap(self.inner.clone())
     }
 
-    /// Typed fixture boundary for GdUnit. Production rows are created only
+    /// Debug-only typed fixture for GdUnit. Production rows are created only
     /// from the typed PlayerLoadout projection.
+    #[cfg(debug_assertions)]
     #[allow(clippy::too_many_arguments)]
     #[func]
     fn test_fixture(
@@ -164,14 +165,11 @@ impl ModuleRow {
         is_active_module: bool,
         cap_cost_per_cycle: f64,
         cycle_time_ticks: i64,
-    ) -> Variant {
-        let (Ok(index), Ok(module_id), Ok(cycle_time_ticks)) = (
-            u32::try_from(index),
-            u32::try_from(module_id),
-            u32::try_from(cycle_time_ticks),
-        ) else {
-            return Variant::nil();
-        };
+    ) -> Gd<ModuleRow> {
+        let index = u32::try_from(index).expect("fixture index must fit u32");
+        let module_id = u32::try_from(module_id).expect("fixture module ID must fit u32");
+        let cycle_time_ticks =
+            u32::try_from(cycle_time_ticks).expect("fixture cycle time must fit u32");
         Self::wrap(CoreModuleRow {
             slot: slot.to_string(),
             index,
@@ -186,6 +184,5 @@ impl ModuleRow {
             cycle_remaining: 0,
             forced_reason: String::new(),
         })
-        .to_variant()
     }
 }
