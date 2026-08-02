@@ -17,33 +17,49 @@ jobs:
         with:
           ref: agent/delete-legacy-client-adapters
       - name: Inventory legacy client adapters
-        shell: bash
+        shell: python
         run: |
-          mkdir -p .agent
-          {
-            echo '# Issue 239 inventory'
-            echo
-            for pattern in \
-              'ClientMessageDecoder' \
-              'json_variant' \
-              'from_json' \
-              'apply_payload' \
-              'PositionComponents' \
-              '_server_to_godot_pos' \
-              '_vec3_from_dict' \
-              '_position_components_from_dict' \
-              '_position_components' \
-              '_server_components_to_godot' \
-              '_velocity_components_to_vec3' \
-              '_velocity_from_dict' \
-              'rebase_to(' \
-              'Vector3.*position' \
-              'nav_pos'; do
-              echo "## $pattern"
-              rg -n --hidden --glob '!.git/**' --glob '!.agent/**' "$pattern" . || true
-              echo
-            done
-          } > .agent/issue239-inventory.txt
+          from pathlib import Path
+
+          patterns = [
+              'ClientMessageDecoder',
+              'json_variant',
+              'from_json',
+              'apply_payload',
+              'PositionComponents',
+              '_server_to_godot_pos',
+              '_vec3_from_dict',
+              '_position_components_from_dict',
+              '_position_components',
+              '_server_components_to_godot',
+              '_velocity_components_to_vec3',
+              '_velocity_from_dict',
+              'rebase_to(',
+              'nav_pos',
+          ]
+          suffixes = {'.rs', '.gd', '.md', '.json', '.toml', '.yml', '.yaml'}
+          files = [
+              path for path in Path('.').rglob('*')
+              if path.is_file()
+              and '.git' not in path.parts
+              and '.agent' not in path.parts
+              and path.suffix in suffixes
+          ]
+          out = ['# Issue 239 inventory', '']
+          for pattern in patterns:
+              out.append(f'## {pattern}')
+              for path in sorted(files):
+                  try:
+                      lines = path.read_text(encoding='utf-8').splitlines()
+                  except UnicodeDecodeError:
+                      continue
+                  for number, line in enumerate(lines, 1):
+                      if pattern in line:
+                          out.append(f'{path}:{number}:{line}')
+              out.append('')
+          Path('.agent').mkdir(exist_ok=True)
+          Path('.agent/issue239-inventory.txt').write_text(
+              '\n'.join(out) + '\n', encoding='utf-8')
       - name: Commit inventory
         shell: bash
         run: |
@@ -51,5 +67,5 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add .agent/issue239-inventory.txt
           git diff --cached --quiet && exit 0
-          git commit -m 'Inventory issue 239 legacy adapters'
+          git commit -m 'Refresh issue 239 legacy adapter inventory'
           git push origin HEAD:agent/delete-legacy-client-adapters
