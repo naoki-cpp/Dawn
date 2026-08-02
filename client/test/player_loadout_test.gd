@@ -16,9 +16,12 @@ func test_empty_state_preserves_explicit_scalar_sentinels() -> void:
 
 func test_owned_ships_cross_the_boundary_as_typed_rows() -> void:
 	var loadout := PlayerLoadout.new()
-	var owned_ship := OwnedShipRow.test_fixture(9, -1, "", -1, false)
+	var modules: Array[ModuleRow] = []
+	var owned_ships: Array[OwnedShipRow] = [
+		OwnedShipRow.test_fixture(9, -1, "", -1, false),
+	]
 	assert_bool(loadout.test_fixture(
-		0, [], 4, "Haven", -1, [owned_ship]
+		0, modules, 4, "Haven", -1, owned_ships
 	)).is_true()
 	var rows: Array = loadout.owned_ships()
 	assert_int(rows.size()).is_equal(1)

@@ -305,20 +305,17 @@ func test_unfit_all_row_appears_after_the_fitted_modules_when_any_are_fitted() -
 	assert_str(refs.fitted_rows[1].action).is_equal(InventoryRow.ACTION_UNFIT_ALL)
 
 
-## Regression: owned_ships_json (serialization.rs) sends docked_station_id/
-## ship_type_name as JSON null (not an absent key) for an away/undocked ship
-## or an unregistered ship type. Dictionary.get(key, default) only falls back
-## to default when the key is absent, not when it's present with a null
-## value -- `as int`/`as String` on that null value crashed with "Invalid
-## cast: could not convert value to 'int'".
-func test_owned_ship_row_handles_null_docked_station_id_and_ship_type_name() -> void:
+## Regression: the typed Rust adapter maps absent optional owned-ship values to
+## `-1`/empty-string sentinels before they cross into GDScript. Keep this test
+## at that typed boundary rather than recreating the removed JSON null shape.
+func test_owned_ship_row_handles_absent_optional_values() -> void:
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
 	var refs: HudManager.InventoryPanelRefs = HudManager.build_inventory_panel(hud)
 	var owned_ships := [_owned_ship({
-		"ship_type_id": null,
-		"ship_type_name": null,
-		"docked_station_id": null,
+		"ship_type_id": -1,
+		"ship_type_name": "",
+		"docked_station_id": -1,
 		"is_active": false,
 	})]
 

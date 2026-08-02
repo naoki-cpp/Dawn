@@ -198,8 +198,9 @@ func _module_fixture(
 
 
 func _set_loadout_modules(modules: Array[ModuleRow]) -> void:
+	var owned_ships: Array[OwnedShipRow] = []
 	assert_bool(_main._loadout.test_fixture(
-		0, modules, -1, "", -1, []
+		0, modules, -1, "", -1, owned_ships
 	)).is_true()
 
 
@@ -326,8 +327,10 @@ func test_player_loadout_refresh_preserves_docked_motion_state() -> void:
 	_main._ships = {2: ship}
 	_main._player_ship_id = 2
 	_main._session.set_player_ship_id(2)
+	var modules: Array[ModuleRow] = []
+	var owned_ships: Array[OwnedShipRow] = []
 	assert_bool(_main._loadout.test_fixture(
-		12, [], 0, "Forge Station", 2, []
+		12, modules, 0, "Forge Station", 2, owned_ships
 	)).is_true()
 	_main._session.apply_dock_fitting(0, "Forge Station", 12)
 

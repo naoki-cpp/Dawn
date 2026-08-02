@@ -99,7 +99,11 @@ func test_client_ticks_advance_capacitor_without_server_events() -> void:
 	var module := ModuleRow.test_fixture(
 		"High", 0, 1, "Gun", "Weapon", true, true, 20.0, 10
 	)
-	assert_bool(loadout.test_fixture(0, [module], -1, "", -1, [])).is_true()
+	var fixture_modules: Array[ModuleRow] = [module]
+	var owned_ships: Array[OwnedShipRow] = []
+	assert_bool(loadout.test_fixture(
+		0, fixture_modules, -1, "", -1, owned_ships
+	)).is_true()
 	_session.advance_client_ticks(1, loadout)
 	var modules: Array = loadout.modules()
 	assert_int(_session.current_tick()).is_equal(1)
