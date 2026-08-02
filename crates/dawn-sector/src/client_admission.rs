@@ -371,7 +371,7 @@ mod tests {
                 },
                 AOI_CELL_SIZE,
             )
-            .expect("abort must release the population reservation");
+            .expect("abort must release capacity despite the retained watermark");
         retry.abort(&mut node);
     }
 
