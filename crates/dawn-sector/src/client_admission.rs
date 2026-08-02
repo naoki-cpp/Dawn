@@ -225,6 +225,13 @@ impl<S: EventStore> SimulationNode<S> {
                     observer.is_player = true;
                 }
 
+                // `PlayerLoadout` depends on committed ownership and docked-player
+                // context. Do not send a structurally-valid but incomplete
+                // snapshot during the pre-commit handoff; the runtime sends the
+                // authoritative loadout immediately after commit and before
+                // publishing the session.
+                handoff.player_loadout = None;
+
                 Ok(ClientAdmissionAttempt {
                     player_id,
                     ship_id,
@@ -325,6 +332,7 @@ mod tests {
             )
             .expect("existing ship may begin resume");
         let handoff = attempt.take_handoff_payload();
+        assert!(handoff.player_loadout.is_none());
         assert!(handoff
             .initial_state
             .ships
@@ -335,6 +343,14 @@ mod tests {
         let committed = attempt.commit(&mut node).expect("resume commit");
 
         assert!(committed.resumed);
+        let loadout = node
+            .build_player_loadout_json(committed.ship_id)
+            .expect("committed resume has a complete loadout");
+        assert_eq!(loadout.active_ship_id, Some(ship_id.raw()));
+        assert!(loadout
+            .owned_ships
+            .iter()
+            .any(|ship| ship.ship_id == ship_id.raw() && ship.is_active));
         assert!(node.apply_stop_command_owned(player_id, ship_id));
     }
 

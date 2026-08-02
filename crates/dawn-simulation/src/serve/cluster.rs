@@ -8,6 +8,7 @@ use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId,
 use dawn_event_store::store::EventStore;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal,
+    CommittedClientAdmission,
 };
 use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
 use dawn_sector::transit;
@@ -117,13 +118,14 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         // Commit Sector ownership before publishing cluster routing. A failed
         // or disconnected handshake therefore leaves neither route map visible.
         while let Ok((attempt, result)) = completion_rx.try_recv() {
-            if let Some(sess) = finish_cluster_admission(
+            if let Some((sess, committed)) = finish_cluster_admission(
                 &mut nodes[0],
                 &mut player_sector,
                 &mut ship_player,
                 attempt,
                 result,
             ) {
+                send_post_commit_loadout(&nodes[0], &sess, committed);
                 println!(
                     "  [Server] {} joined with ship #{}",
                     sess.player_id,
@@ -298,13 +300,13 @@ fn finish_cluster_admission<S: EventStore, T>(
     ship_player: &mut HashMap<ShipId, PlayerId>,
     attempt: ClientAdmissionAttempt,
     result: Result<T, String>,
-) -> Option<T> {
+) -> Option<(T, CommittedClientAdmission)> {
     match result {
         Ok(value) => match attempt.commit(node) {
             Ok(committed) => {
                 player_sector.insert(committed.player_id, 0);
                 ship_player.insert(committed.ship_id, committed.player_id);
-                Some(value)
+                Some((value, committed))
             }
             Err(error) => {
                 eprintln!("[Server] {error}");
@@ -316,6 +318,19 @@ fn finish_cluster_admission<S: EventStore, T>(
             eprintln!("[Server] handshake failed: {error}");
             None
         }
+    }
+}
+
+fn send_post_commit_loadout<S: EventStore>(
+    node: &SimulationNode<S>,
+    session: &ws_server::PlayerSession,
+    committed: CommittedClientAdmission,
+) {
+    if !committed.resumed {
+        return;
+    }
+    if let Some(loadout) = node.build_player_loadout_json(committed.ship_id) {
+        session.send_message(&ServerMessage::PlayerLoadout(loadout));
     }
 }
 
@@ -357,7 +372,8 @@ mod tests {
                 &mut ship_player,
                 attempt,
                 Ok::<_, String>(()),
-            ),
+            )
+            .map(|(value, _)| value),
             Some(())
         );
 

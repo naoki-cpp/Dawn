@@ -9,8 +9,10 @@ use dawn_core::{Position, SectorId};
 use dawn_event_store::store::EventStore;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal,
+    CommittedClientAdmission,
 };
 use dawn_sector::node::SimulationNode;
+use dawn_wire::ServerMessage;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -69,7 +71,8 @@ impl ClientAdmission {
         // Socket tasks report only their outcome. The tick-loop thread resolves
         // the Sector-owned attempt so authoritative mutation stays single-owner.
         while let Ok((attempt, result)) = self.completion_rx.try_recv() {
-            if let Some(session) = finish_admission(node, attempt, result) {
+            if let Some((session, committed)) = finish_admission(node, attempt, result) {
+                send_post_commit_loadout(node, &session, committed);
                 let _ = self.ready_sess_tx.send(session);
             }
         }
@@ -150,10 +153,10 @@ fn finish_admission<S: EventStore, T>(
     node: &mut SimulationNode<S>,
     attempt: ClientAdmissionAttempt,
     result: Result<T, String>,
-) -> Option<T> {
+) -> Option<(T, CommittedClientAdmission)> {
     match result {
         Ok(value) => match attempt.commit(node) {
-            Ok(_) => Some(value),
+            Ok(committed) => Some((value, committed)),
             Err(error) => {
                 eprintln!("[Node] {error}");
                 None
@@ -164,6 +167,19 @@ fn finish_admission<S: EventStore, T>(
             eprintln!("[Node] handshake failed: {error}");
             None
         }
+    }
+}
+
+fn send_post_commit_loadout<S: EventStore>(
+    node: &SimulationNode<S>,
+    session: &ws_server::PlayerSession,
+    committed: CommittedClientAdmission,
+) {
+    if !committed.resumed {
+        return;
+    }
+    if let Some(loadout) = node.build_player_loadout_json(committed.ship_id) {
+        session.send_message(&ServerMessage::PlayerLoadout(loadout));
     }
 }
 
@@ -196,7 +212,7 @@ mod tests {
             .expect("fresh attempt");
 
         assert_eq!(
-            finish_admission(&mut node, attempt, Ok::<_, String>(())),
+            finish_admission(&mut node, attempt, Ok::<_, String>(())).map(|(value, _)| value),
             Some(())
         );
         assert_eq!(node.ship_count(), 1);

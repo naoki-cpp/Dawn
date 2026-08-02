@@ -59,11 +59,14 @@ A consumed ID or event-log history is not reused; INV-004 still applies.
 ## Resume admission (ADR-0007)
 
 Resume names an exact `(PlayerId, ShipId)`. A missing Ship is refused and never
-falls back to fresh spawn. Begin validates the Ship and builds its handoff but
-does not change player ownership yet.
+falls back to fresh spawn. Begin validates the Ship and builds the observer-
+scoped `InitialState`, but leaves the ownership-dependent `PlayerLoadout` out
+of the pre-commit handoff.
 
 - **Commit:** calls `resume_player_ship`, establishing active/owned and docked
-  player context only after the socket handoff succeeded.
+  player context only after the socket handoff succeeded. The Sector then builds
+  and sends the complete `PlayerLoadout` before publishing the session to command
+  routing or AoI delivery.
 - **Abort:** does nothing to authoritative state. The resumed Ship predates the
   connection attempt and must never be removed as handshake cleanup.
 

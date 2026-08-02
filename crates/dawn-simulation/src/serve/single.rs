@@ -9,6 +9,7 @@ use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal,
+    CommittedClientAdmission,
 };
 use dawn_sector::dilation;
 use dawn_sector::node::{ClientCommandFollowup, SimulationNode};
@@ -118,7 +119,8 @@ pub(crate) async fn run_phase4_server(
         // visible to AoI delivery or command routing until its Sector attempt
         // commits successfully.
         while let Ok((attempt, result)) = completion_rx.try_recv() {
-            if let Some(sess) = finish_single_admission(&mut node, attempt, result) {
+            if let Some((sess, committed)) = finish_single_admission(&mut node, attempt, result) {
+                send_post_commit_loadout(&node, &sess, committed);
                 println!(
                     "  [Server] {} joined with ship #{}",
                     sess.player_id,
@@ -291,10 +293,10 @@ fn finish_single_admission<S: EventStore, T>(
     node: &mut SimulationNode<S>,
     attempt: ClientAdmissionAttempt,
     result: Result<T, String>,
-) -> Option<T> {
+) -> Option<(T, CommittedClientAdmission)> {
     match result {
         Ok(value) => match attempt.commit(node) {
-            Ok(_) => Some(value),
+            Ok(committed) => Some((value, committed)),
             Err(error) => {
                 eprintln!("[Server] {error}");
                 None
@@ -305,6 +307,19 @@ fn finish_single_admission<S: EventStore, T>(
             eprintln!("[Server] handshake failed: {error}");
             None
         }
+    }
+}
+
+fn send_post_commit_loadout<S: EventStore>(
+    node: &SimulationNode<S>,
+    session: &ws_server::PlayerSession,
+    committed: CommittedClientAdmission,
+) {
+    if !committed.resumed {
+        return;
+    }
+    if let Some(loadout) = node.build_player_loadout_json(committed.ship_id) {
+        session.send_message(&ServerMessage::PlayerLoadout(loadout));
     }
 }
 
@@ -335,7 +350,8 @@ mod tests {
             .expect("fresh attempt");
 
         assert_eq!(
-            finish_single_admission(&mut node, attempt, Ok::<_, String>(())),
+            finish_single_admission(&mut node, attempt, Ok::<_, String>(()))
+                .map(|(value, _)| value),
             Some(())
         );
         assert_eq!(node.ship_count(), 1);
