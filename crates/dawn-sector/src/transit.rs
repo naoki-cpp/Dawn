@@ -9,8 +9,7 @@ pub(crate) mod pipeline;
 use crate::node::SimulationNode;
 use dawn_consensus::RaftActorHandle;
 use dawn_core::{
-    AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId, Tick,
-    TransitHandoffState,
+    AbsolutePosition, DomainEvent, JumpGateId, SectorId, ShipId, Tick, TransitHandoffState,
 };
 use dawn_event_store::store::EventStore;
 use serde::{Deserialize, Serialize};
@@ -27,8 +26,7 @@ pub enum TransitOp {
         handoff: Box<TransitHandoffState>,
         from: SectorId,
         to: SectorId,
-        entry_pos: Position,
-        entry_pos_abs: AbsolutePosition,
+        entry_pos: AbsolutePosition,
         gate_id: Option<JumpGateId>,
         request_tick: Tick,
     },
@@ -57,7 +55,6 @@ fn propose_commit(raft: &RaftActorHandle, proposal: pipeline::CommitProposal) {
             from: proposal.from,
             to: proposal.to,
             entry_pos: proposal.entry_pos,
-            entry_pos_abs: proposal.entry_pos_abs,
             gate_id: proposal.gate_id,
             request_tick: proposal.request_tick,
         }
@@ -101,7 +98,6 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                 from,
                 to,
                 entry_pos,
-                entry_pos_abs,
                 gate_id,
                 request_tick,
             } => {
@@ -111,7 +107,6 @@ pub fn apply_committed_raft_entries<S: EventStore>(
                     from,
                     to,
                     entry_pos,
-                    entry_pos_abs,
                     gate_id,
                     request_tick,
                 ) {
