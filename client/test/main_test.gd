@@ -185,9 +185,15 @@ func after_test() -> void:
 	_main.free()
 
 
-func _module_fixture(module_id: int, slot: String, active: bool) -> ModuleRow:
+func _module_fixture(
+	module_id: int,
+	slot: String,
+	active: bool,
+	kind: String = "",
+	index: int = 0
+) -> ModuleRow:
 	return ModuleRow.test_fixture(
-		slot, 0, module_id, "Test Module", "", active, true, 0.0, 10
+		slot, index, module_id, "Test Module", kind, active, true, 0.0, 10
 	) as ModuleRow
 
 
@@ -464,11 +470,7 @@ func test_module_toggle_of_a_targeted_kind_without_a_locked_target_is_refused_cl
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_set_loadout_modules([{
-		"slot": "High", "index": 0, "module_id": 5, "name": "Test Module", "kind": "Weapon",
-		"is_active": false, "is_active_module": true,
-		"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10, "stat_delta": FULL_ZERO_STAT_DELTA,
-	}])
+	_set_loadout_modules([_module_fixture(5, "High", false, "Weapon")])
 	## Fresh _main has no player lock target.
 
 	_main._toggle_module_by_index(0)
@@ -494,11 +496,7 @@ func test_module_toggle_of_a_targeted_kind_against_a_locked_but_out_of_aoi_targe
 	_main._session.set_player_ship_id(1)
 	_main._session.apply_target_locked(1, 99)
 	_main._ships = {} # target 99 is not in AoI; player ship 1 isn't either.
-	_set_loadout_modules([{
-		"slot": "High", "index": 0, "module_id": 5, "name": "Test Module", "kind": "Weapon",
-		"is_active": false, "is_active_module": true,
-		"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10, "stat_delta": FULL_ZERO_STAT_DELTA,
-	}])
+	_set_loadout_modules([_module_fixture(5, "High", false, "Weapon")])
 
 	_main._toggle_module_by_index(0)
 
@@ -835,9 +833,8 @@ func test_drag_within_fitted_reorders_two_modules_of_the_same_slot_kind() -> voi
 	add_child(hud)
 	_main._hud_surface.build(auto_free(Node.new()), hud, auto_free(Label.new()))
 
-	var mid_1: Dictionary = _module_fixture(1, "Mid", false)
-	var mid_2: Dictionary = _module_fixture(2, "Mid", false)
-	mid_2["index"] = 1  # ModuleRow.index is the per-slot-kind position; _module_fixture defaults to 0
+	var mid_1: ModuleRow = _module_fixture(1, "Mid", false)
+	var mid_2: ModuleRow = _module_fixture(2, "Mid", false, "", 1)
 	_set_loadout_modules([mid_1, mid_2])
 	_main._hud_surface.set_player_fitting(_main._loadout.modules(), [])
 	## inventory_panel_row_at() (used by the reorder branch) short-circuits
