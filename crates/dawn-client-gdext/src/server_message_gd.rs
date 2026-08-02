@@ -299,11 +299,7 @@ impl ServerMessageOutcome {
                     &mut loadout,
                     ClientFact::PlayerLoadout(wire_to_loadout_msg(wire.clone())),
                 );
-                call_connection(
-                    &mut connection_target,
-                    "_accept_player_loadout",
-                    vslice![],
-                )
+                call_connection(&mut connection_target, "_accept_player_loadout", vslice![])
             }
             ServerMessage::InitialState(state) => {
                 apply_fact(
@@ -384,7 +380,11 @@ impl ServerMessageOutcome {
     }
 }
 
-fn call_connection(target: &mut Gd<Object>, method: &str, arguments: &[Variant]) -> bool {
+fn call_connection(
+    target: &mut Gd<Object>,
+    method: &str,
+    arguments: &[&dyn ToGodot],
+) -> bool {
     if !ensure_handler(target, method) {
         return false;
     }
