@@ -25,8 +25,28 @@ jobs:
         run: |
           git fetch origin main
           git merge --no-edit origin/main
-      - name: Apply review fixes
-        run: python3 .github/scripts/issue_251_review_fix.py
+      - name: Repair and apply review script
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/issue_251_review_fix.py')
+          text = path.read_text()
+          old = '''if not text.endswith("\\n}"):
+              raise SystemExit("client_state module terminator missing")
+          text = text[:-2] + tests + "\\n}\\n"
+          path.write_text(text)
+          '''
+          new = '''closing = text.rfind("}")
+          if closing < 0 or text[closing + 1:].strip():
+              raise SystemExit("client_state module terminator missing")
+          text = text[:closing] + tests + "\\n}\\n"
+          path.write_text(text)
+          '''
+          if old not in text:
+              raise SystemExit('review script terminator anchor missing')
+          path.write_text(text.replace(old, new))
+          PY
+          python3 .github/scripts/issue_251_review_fix.py
       - name: Format and focused tests
         run: |
           cargo fmt --all
