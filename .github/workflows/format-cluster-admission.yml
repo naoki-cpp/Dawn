@@ -1,0 +1,38 @@
+name: Format cluster admission fix
+
+on:
+  push:
+    branches: [agent/transactional-client-admission-253]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: format-cluster-admission-260
+  cancel-in-progress: true
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/transactional-client-admission-253
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: "1.97.1"
+          components: rustfmt
+      - name: Format and publish clean head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cargo fmt --all
+          git rm .github/workflows/format-cluster-admission.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/dawn-simulation/src/serve/cluster.rs
+          git commit -m "style(simulation): format cluster admission recovery"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:agent/transactional-client-admission-253
