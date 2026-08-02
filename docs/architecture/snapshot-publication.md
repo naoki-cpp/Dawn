@@ -7,23 +7,23 @@
 `StateSnapshot::save` owns the complete protocol:
 
 1. Encode the unchanged postcard snapshot schema and decode it once to validate the payload.
-2. Open the destination directory before replacement.
-3. Create a uniquely named temporary file beside the authoritative snapshot.
+2. Open the destination directory before replacement and capture the existing snapshot's protection metadata.
+3. Create a uniquely named temporary file beside the authoritative snapshot. On Unix it is created with the existing mode, or `0600` for a first publication. On Windows it receives the existing snapshot's DACL before snapshot bytes are written.
 4. Write the complete payload, flush it, call `sync_all`, then reread and decode it.
-5. If an authoritative snapshot already exists, copy it to a fixed sibling rollback path, sync the rollback file, and sync the directory entry before replacement.
+5. If an authoritative snapshot already exists, copy it to a fixed sibling rollback path using the same protection metadata, sync the rollback file, and sync the directory entry before replacement.
 6. Replace the authoritative snapshot with the new sibling file.
-7. Make the replacement durable: on Unix, sync the already-open parent directory; on Windows, use the replacement primitive's write-through semantics.
+7. Make the replacement durable: on Unix, sync the already-open parent directory. On Windows, use `ReplaceFileW` for an existing destination so the original DACL, encryption, compression, attributes, and named streams are merged into the replacement; first publication uses `MoveFileExW(MOVEFILE_WRITE_THROUGH)`.
 8. Remove the rollback copy after the new authoritative path is durable.
 
 Temporary files and rollback copies are removed after normal success and handled failure. The rollback path has a fixed name, so even a cleanup failure cannot accumulate an unbounded set. A process or machine crash can still leave one stale temporary or rollback file; recovery ignores these artifacts because only the configured authoritative path is loaded. A later publication removes a stale rollback copy only when the authoritative snapshot is readable.
 
-## Platform replacement semantics
+## Platform replacement and protection semantics
 
-- **Unix:** same-directory `rename` atomically replaces an existing destination. The parent directory is opened before replacement and synced afterwards. An existing snapshot remains available through the synced rollback copy until that directory sync succeeds.
-- **Windows:** Rust's `std::fs::rename` does not replace an existing destination. Dawn therefore calls `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH`. The sibling files keep every move on the same volume, and the rollback copy remains available until the write-through replacement succeeds.
+- **Unix:** same-directory `rename` atomically replaces an existing destination. Temporary and rollback files are created with the existing snapshot mode before they become visible; a first publication defaults to owner-only `0600`. The parent directory is opened before replacement and synced afterwards. An existing snapshot remains available through the synced rollback copy until that directory sync succeeds.
+- **Windows:** temporary and rollback files receive the existing snapshot's DACL before data is exposed through them. `ReplaceFileW` atomically replaces an existing destination while preserving its DACL and other protection-related file metadata. A first publication has no previous ACL to preserve and inherits the destination directory's normal Windows security policy before `MoveFileExW(MOVEFILE_WRITE_THROUGH)` publishes it.
 - **Other platforms:** publication returns `Unsupported` rather than claiming an atomic replacement guarantee that has not been implemented.
 
-The atomicity and durability guarantees ultimately depend on the filesystem honoring the platform's same-volume replacement and flush primitives.
+The atomicity, durability, and metadata guarantees ultimately depend on the filesystem honoring the platform's same-volume replacement, security, and flush primitives.
 
 ## Failure and checkpoint ordering
 
