@@ -27,9 +27,6 @@ class TypedOutcomeTarget:
 	func _accept_player_loadout() -> void:
 		pass
 
-	func _accept_event(event: ServerEventOutcome) -> void:
-		event.dispatch(self)
-
 	func _handle_ship_docked(
 		_ship_id: int, _station_id: int, _tick: int, _session_accepted: bool
 	) -> void:
@@ -39,8 +36,9 @@ class TypedOutcomeTarget:
 func _dispatch_fixture(kind: String, connection_ship_id: int = -1) -> void:
 	var outcome: ServerMessageOutcome = ServerMessageDecoder.new().test_outcome(kind)
 	assert_object(outcome).is_not_null()
+	var target := TypedOutcomeTarget.new()
 	assert_bool(outcome.dispatch(
-		TypedOutcomeTarget.new(), _main._session, _main._loadout, connection_ship_id
+		target, target, _main._session, _main._loadout, connection_ship_id
 	)).is_true()
 
 

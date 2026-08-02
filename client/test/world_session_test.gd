@@ -17,9 +17,6 @@ class TypedOutcomeTarget:
 	func _accept_initial_state(state: InitialStatePresentation) -> void:
 		presentation = state
 
-	func _accept_event(event: ServerEventOutcome) -> void:
-		event.dispatch(self)
-
 	func _handle_ship_docked(
 		_ship_id: int, _station_id: int, _tick: int, session_accepted: bool
 	) -> void:
@@ -39,7 +36,9 @@ func _dispatch(kind: String, connection_ship_id: int = 11) -> TypedOutcomeTarget
 	var target := TypedOutcomeTarget.new()
 	var loadout := PlayerLoadout.new()
 	assert_object(outcome).is_not_null()
-	assert_bool(outcome.dispatch(target, _session, loadout, connection_ship_id)).is_true()
+	assert_bool(outcome.dispatch(
+		target, target, _session, loadout, connection_ship_id
+	)).is_true()
 	return target
 
 
