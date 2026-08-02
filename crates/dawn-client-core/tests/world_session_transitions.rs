@@ -153,10 +153,7 @@ fn aoi_leave_preserves_lock_while_despawn_clears_it() {
 fn destroying_an_opponent_reports_the_presentation_outcome() {
     let mut state = session();
 
-    let effect = state.apply_update(
-        WorldSessionUpdate::ShipDestroyed { ship_id: 22 },
-        None,
-    );
+    let effect = state.apply_update(WorldSessionUpdate::ShipDestroyed { ship_id: 22 }, None);
 
     let WorldSessionEffect::ShipDestroyed(outcome) = effect else {
         panic!("ship destruction must return its typed outcome");
