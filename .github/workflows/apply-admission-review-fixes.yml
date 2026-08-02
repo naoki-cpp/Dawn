@@ -66,4 +66,31 @@ jobs:
           if snapshot.count(marker) != 1:
               raise SystemExit("snapshot non-durable field marker missing or duplicated")
           snapshot_path.write_text(snapshot.replace(marker, replacement, 1))
+
+          replay_path = Path("crates/dawn-sector/tests/client_admission_replay.rs")
+          replay = replay_path.read_text()
+          old_import = "use dawn_event_store::{store::EventStore, InMemoryEventStore};"
+          new_import = "use dawn_event_store::InMemoryEventStore;"
+          if replay.count(old_import) != 1:
+              raise SystemExit("replay EventStore import marker missing or duplicated")
+          replay_path.write_text(replay.replace(old_import, new_import, 1))
+
+          production_path = Path("crates/dawn-sector-node/src/client_admission.rs")
+          production = production_path.read_text()
+          old_completion = "if let Some((session, committed)) = finish_admission(node, attempt, result) {"
+          new_completion = "if let Some((session, _committed)) = finish_admission(node, attempt, result) {"
+          if production.count(old_completion) != 1:
+              raise SystemExit("production completion marker missing or duplicated")
+          production_path.write_text(production.replace(old_completion, new_completion, 1))
+
+          for simulation_path in [
+              Path("crates/dawn-simulation/src/serve/single.rs"),
+              Path("crates/dawn-simulation/src/serve/cluster.rs"),
+          ]:
+              simulation = simulation_path.read_text()
+              import_marker = "use dawn_sector::transit;\n" if simulation_path.name == "cluster.rs" else "use dawn_sector::dilation;\n"
+              replacement_import = import_marker + "use dawn_wire::ServerMessage;\n"
+              if simulation.count(import_marker) != 1:
+                  raise SystemExit(f"{simulation_path}: ServerMessage import marker missing or duplicated")
+              simulation_path.write_text(simulation.replace(import_marker, replacement_import, 1))
           PY
