@@ -3,7 +3,7 @@ id      : ADR-0014
 title   : 分散コンセンサス — Raft による Sector Transit
 status  : accepted
 date    : 2026-06-12
-updated : 2026-07-30
+updated : 2026-08-02
 deciders: [human, ai-agent]
 related : ADR-0001, ADR-0002, ADR-0003, ADR-0009, ADR-0017, INV-002, INV-003, INV-006
 ---
@@ -101,8 +101,11 @@ pub struct SectorTransitCompleted {
 ```
 
 同じ`TransitHandoffState`をRaft Commitと`SectorTransitCompleted`が共有する。
+`SectorTransitRequested`、retry reconstruction、Raft Commit、`SectorTransitCompleted`は
+到着事実を一つの`entry_pos: AbsolutePosition`として伝播する。destinationはこの絶対座標から
+anchorとlocal offsetをmaterialization時に導出し、live Commitとreplayは同じ実装を通る。
 永続化用`ShipSnapshot`はsnapshot/restore境界だけに留まり、consensus payloadへ流用しない。
-`position`・`anchor`は`entry_pos`とdestination側rebaseがauthorityであり、`tackled_by`も
+`position`・`anchor`はdestination-localな派生表現であり、`tackled_by`も
 Sector-localなのでhandoffへ含めない。AckはShip stateを返さず、
 `ship_id + from + to + request_tick`だけでattemptを照合する。
 `request_tick`はsource-localなattempt identityであり、Request → Commit → Completed → Ackの
@@ -112,11 +115,11 @@ Sector-localなのでhandoffへ含めない。AckはShip stateを返さず、
 
 - `SectorTransitRequested`: sourceにShipが存在すれば`InTransit { to }`へ戻す
 - `SectorTransitCompleted` on source: Shipを削除する
-- `SectorTransitCompleted` on destination: `handoff`をlive importと同じ直接mappingでmaterializeし、`entry_pos`へre-anchorする
+- `SectorTransitCompleted` on destination: `handoff`と絶対`entry_pos`をlive importと同じmaterialization seamへ渡し、同じanchor・offsetを導出する
 - `SectorTransitAborted`: `InTransit`を解除する
 
-live importでは`AnchorRebased`が`SectorTransitCompleted`より先に記録されるため、destination
-replayはCompleted適用時にrebase stateを直接再構築する。
+live importはmaterialization seamが返す`AnchorRebased`を`SectorTransitCompleted`より先に記録する。
+destination replayは同じseamで状態だけを再構築し、既にlogにあるeventは再appendしない。
 
 ### 6. InTransit freeze
 

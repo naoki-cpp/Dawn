@@ -1,6 +1,6 @@
 use super::*;
 use dawn_core::fitting::FittingSnapshot;
-use dawn_core::{NodeId, SectorBounds, ShipTypeId, Velocity};
+use dawn_core::{NodeId, Position, SectorBounds, ShipTypeId, Velocity};
 
 fn node(node_id: u8, sector_id: u8) -> SimulationNode {
     SimulationNode::new(
@@ -50,8 +50,7 @@ fn commit_with(handoff: TransitHandoffState) -> TransitOp {
         handoff: Box::new(handoff),
         from: SectorId(0),
         to: SectorId(1),
-        entry_pos: Position::ORIGIN,
-        entry_pos_abs: AbsolutePosition::ORIGIN,
+        entry_pos: AbsolutePosition::ORIGIN,
         gate_id: None,
         request_tick: Tick(12),
     }
