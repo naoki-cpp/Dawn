@@ -1,0 +1,106 @@
+ictionary = {
+\t\t"slot": "High", "index": 0, "module_id": 1, "name": "Test Module", "kind": "Weapon",
+\t\t"is_active": false, "is_active_module": true,
+\t\t"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10,
+\t}
+\tfor key: String in overrides:
+\t\tbase[key] = overrides[key]
+\treturn ModuleRow.test_fixture(
+\t\tbase.slot as String,
+\t\tbase.index as int,
+\t\tbase.module_id as int,
+\t\tbase.name as String,
+\t\tbase.kind as String,
+\t\tbase.is_active as bool,
+\t\tbase.is_active_module as bool,
+\t\tbase.cap_cost_per_cycle as float,
+\t\tbase.cycle_time_ticks as int,
+\t) as ModuleRow
+'''
+    source = replace_once(source, old, new, f"{filename} typed module helper")
+    write(filename, source)
+
+
+replace_module_helper("client/test/hud_hit_test_test.gd")
+replace_module_helper("client/test/hud_manager_test.gd")
+replace_module_helper("client/test/hud_surface_test.gd")
+
+
+def replace_owned_helper(filename: str) -> None:
+    source = read(filename)
+    old = '''func _owned_ship(overrides: Dictionary) -> OwnedShipRow:
+\tvar base: Dictionary = {
+\t\t"ship_id": 1,
+\t\t"ship_type_id": 7,
+\t\t"ship_type_name": "Magpie",
+\t\t"docked_station_id": 0,
+\t\t"is_active": true,
+\t}
+\tfor key: String in overrides:
+\t\tbase[key] = overrides[key]
+\treturn OwnedShipRow.from_json(base)
+'''
+    new = '''func _owned_ship(overrides: Dictionary) -> OwnedShipRow:
+\tvar base: Dictionary = {
+\t\t"ship_id": 1,
+\t\t"ship_type_id": 7,
+\t\t"ship_type_name": "Magpie",
+\t\t"docked_station_id": 0,
+\t\t"is_active": true,
+\t}
+\tfor key: String in overrides:
+\t\tbase[key] = overrides[key]
+\treturn OwnedShipRow.test_fixture(
+\t\tbase.ship_id as int,
+\t\tbase.ship_type_id as int,
+\t\tbase.ship_type_name as String,
+\t\tbase.docked_station_id as int,
+\t\tbase.is_active as bool,
+\t) as OwnedShipRow
+'''
+    source = replace_once(source, old, new, f"{filename} typed owned ship helper")
+    write(filename, source)
+
+
+replace_owned_helper("client/test/hud_manager_test.gd")
+replace_owned_helper("client/test/hud_surface_test.gd")
+
+text = read("client/test/player_loadout_test.gd")
+text = sub_once(
+    text,
+    r"func test_owned_ships_cross_the_boundary_as_typed_rows\(\) -> void:\n[\s\S]*?(?=\n\nfunc test_dictionary_read_projections)",
+    '''func test_owned_ships_cross_the_boundary_as_typed_rows() -> void:
+\tvar loadout := PlayerLoadout.new()
+\tvar owned_ship := OwnedShipRow.test_fixture(9, -1, "", -1, false) as OwnedShipRow
+\tassert_bool(loadout.test_fixture(
+\t\t0, [], 4, "Haven", -1, [owned_ship]
+\t)).is_true()
+\tvar rows: Array = loadout.owned_ships()
+\tassert_int(rows.size()).is_equal(1)
+\tassert_bool(rows[0] is OwnedShipRow).is_true()
+\tvar row: OwnedShipRow = rows[0]
+\tassert_int(row.ship_id).is_equal(9)
+\tassert_int(row.ship_type_id).is_equal(-1)
+\tassert_str(row.ship_type_name).is_equal("")
+\tassert_int(row.docked_station_id).is_equal(-1)
+\tassert_bool(row.is_active).is_false()
+\tassert_int(loadout.docked_station_id()).is_equal(4)
+\tassert_str(loadout.docked_station_name()).is_equal("Haven")
+\tassert_bool(loadout.is_docked()).is_true()
+''',
+    "migrate player loadout typed fixture",
+)
+write("client/test/player_loadout_test.gd", text)
+
+text = read("client/test/world_session_test.gd")
+text = sub_once(
+    text,
+    r"\n## dawn_core::StatDelta requires every field[\s\S]*?\n\}\n\n",
+    "\n",
+    "remove world session JSON fixture constant",
+)
+text = sub_once(
+    text,
+    r"func test_client_ticks_advance_capacitor_without_server_events\(\) -> void:\n[\s\S]*?(?=\n\nfunc test_destroying_opponent)",
+    '''func test_client_ticks_advance_capacitor_without_server_events() -> void:
+\t
