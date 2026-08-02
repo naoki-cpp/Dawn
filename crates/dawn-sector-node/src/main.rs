@@ -139,7 +139,8 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| {
             anyhow::anyhow!(
                 "failed to bind replication transport on {}: {}",
-                cfg.repl_addr, e
+                cfg.repl_addr,
+                e
             )
         })?;
 
