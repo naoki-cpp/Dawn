@@ -536,7 +536,7 @@ mod tests {
 
         let error = attempt
             .commit(&mut node)
-            .expect_err("disappeared ship cannot commit");
+            .expect_err("lost reservation cannot commit");
 
         assert_eq!(error.ship_id, ship_id);
     }
