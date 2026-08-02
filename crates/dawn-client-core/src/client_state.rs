@@ -196,8 +196,11 @@ impl<'a> ClientState<'a> {
                 active,
                 forced_reason,
             } => {
-                if ship_id == self.session.player_ship_id() {
-                    if let Some(loadout) = self.loadout.as_mut() {
+                if let Some(loadout) = self.loadout.as_mut() {
+                    let belongs_to_loadout = u64::try_from(ship_id)
+                        .ok()
+                        .is_some_and(|ship_id| loadout.active_ship_id == Some(ship_id));
+                    if belongs_to_loadout {
                         loadout.apply_module_activation(module_id, active, forced_reason);
                     }
                 }
@@ -427,6 +430,7 @@ mod tests {
     fn module_activation_updates_loadout_state_and_resets_cycle() {
         let (mut session, _) = setup();
         let mut loadout = Some(PlayerLoadoutMsg {
+            active_ship_id: Some(1),
             modules: vec![module(7, false)],
             ..PlayerLoadoutMsg::default()
         });
@@ -467,6 +471,83 @@ mod tests {
         assert!(!row.is_active);
         assert_eq!(row.cycle_remaining, 7);
         assert!(row.forced_reason.is_empty());
+    }
+
+    #[test]
+    fn known_active_ship_switch_routes_module_events_to_new_loadout_owner() {
+        let (mut session, mut loadout) = setup();
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::PlayerLoadout(PlayerLoadoutMsg {
+                active_ship_id: Some(2),
+                modules: vec![module(7, false)],
+                ..PlayerLoadoutMsg::default()
+            }))
+            .unwrap();
+        assert_eq!(session.player_ship_id(), 2);
+
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::ModuleActivation {
+                ship_id: 1,
+                module_id: 7,
+                active: true,
+                forced_reason: "old ship".to_owned(),
+            })
+            .unwrap();
+        let row = &loadout.as_ref().unwrap().modules[0];
+        assert!(!row.is_active);
+        assert_eq!(row.cycle_remaining, 7);
+        assert!(row.forced_reason.is_empty());
+
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::ModuleActivation {
+                ship_id: 2,
+                module_id: 7,
+                active: true,
+                forced_reason: String::new(),
+            })
+            .unwrap();
+        let row = &loadout.as_ref().unwrap().modules[0];
+        assert!(row.is_active);
+        assert_eq!(row.cycle_remaining, 0);
+    }
+
+    #[test]
+    fn unknown_active_ship_switch_uses_loadout_owner_for_module_events() {
+        let (mut session, mut loadout) = setup();
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::PlayerLoadout(PlayerLoadoutMsg {
+                active_ship_id: Some(33),
+                modules: vec![module(7, false)],
+                ..PlayerLoadoutMsg::default()
+            }))
+            .unwrap();
+        assert_eq!(session.player_ship_id(), 1);
+        assert_eq!(loadout.as_ref().unwrap().active_ship_id, Some(33));
+
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::ModuleActivation {
+                ship_id: 1,
+                module_id: 7,
+                active: true,
+                forced_reason: "old ship".to_owned(),
+            })
+            .unwrap();
+        let row = &loadout.as_ref().unwrap().modules[0];
+        assert!(!row.is_active);
+        assert_eq!(row.cycle_remaining, 7);
+        assert!(row.forced_reason.is_empty());
+
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::ModuleActivation {
+                ship_id: 33,
+                module_id: 7,
+                active: true,
+                forced_reason: String::new(),
+            })
+            .unwrap();
+        let row = &loadout.as_ref().unwrap().modules[0];
+        assert!(row.is_active);
+        assert_eq!(row.cycle_remaining, 0);
     }
 
     #[test]
