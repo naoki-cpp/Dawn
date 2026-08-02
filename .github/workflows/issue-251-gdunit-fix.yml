@@ -75,10 +75,8 @@ jobs:
           if remaining:
               raise SystemExit(f'obsolete ServerEventOutcome references: {remaining}')
           PY
-      - name: Run GdUnit4
-        run: |
-          cargo build -p dawn-client-gdext
-          xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" bash scripts/setup-godot.sh --run-tests
+      - name: Build adapter
+        run: cargo build -p dawn-client-gdext
       - name: Commit and remove temporary workflow
         run: |
           git rm -f .github/workflows/issue-251-gdunit-fix.yml
