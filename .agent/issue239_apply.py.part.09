@@ -1,0 +1,69 @@
+ndering.
+'''
+write("docs/architecture/architecture-review/client-completed.md", text)
+
+text = read("docs/architecture/architecture-review/server-completed.md")
+text += '''
+
+### 2026-08-02 — client binary test boundary cleanup (#239)
+
+The client-side legacy JSON reconstruction decoder introduced during the
+postcard migration was removed. `dawn-wire` now owns client command/message
+round-trip tests directly, without reproducing the deprecated Dictionary shape.
+'''
+write("docs/architecture/architecture-review/server-completed.md", text)
+
+text = read("docs/process/godot-client-testing.md")
+text = text.replace(
+    "  - e.g. _server_to_godot_pos() / _ray_point_distance() / _spectral_color() /",
+    "  - e.g. WorldSpace.to_godot_components() / _ray_point_distance() / _spectral_color() /",
+)
+text += '''
+
+Typed client fixtures must not recreate wire JSON/Dictionary shapes. Prefer
+debug-only typed record factories for focused UI tests and
+`ServerMessageDecoder.test_outcome()` when testing the real binary inbound path.
+'''
+write("docs/process/godot-client-testing.md", text)
+
+# Delete obsolete production/test adapters.
+for filename in [
+    "crates/dawn-client-gdext/src/json_variant.rs",
+    "client/scripts/position_components.gd",
+    "client/test/client_command_gd_test.gd",
+]:
+    target = path(filename)
+    if not target.exists():
+        raise RuntimeError(f"{filename}: expected file to delete")
+    target.unlink()
+
+# Search guard for deleted APIs. Historical prose may mention them only in
+# dated removal notes; live code must have no caller or registration.
+live_suffixes = {".rs", ".gd"}
+for needle in [
+    "ClientMessageDecoder",
+    "PositionComponents",
+    ".from_json(",
+    "apply_payload(",
+    "_server_to_godot_pos",
+    "_vec3_from_dict",
+    "_position_components_from_dict",
+    "_position_components(",
+    "_server_components_to_godot",
+    "_velocity_from_dict",
+]:
+    matches: list[str] = []
+    for candidate in ROOT.rglob("*"):
+        if (
+            candidate.is_file()
+            and ".git" not in candidate.parts
+            and ".agent" not in candidate.parts
+            and candidate.suffix in live_suffixes
+        ):
+            for line_number, line in enumerate(
+                candidate.read_text(encoding="utf-8").splitlines(), 1
+            ):
+                if needle in line:
+                    matches.append(f"{candidate.relative_to(ROOT)}:{line_number}:{line}")
+    if matches:
+        raise RuntimeError(f"live legacy reference {needle!r} remains:\n" + "\n".join(matches))
