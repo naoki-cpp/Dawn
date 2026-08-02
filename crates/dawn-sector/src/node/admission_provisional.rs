@@ -1,10 +1,11 @@
 //! Non-durable fresh-admission preview and commit materialization.
 //!
 //! A fresh handshake needs a real observer-shaped payload before the socket
-//! succeeds, but no Ship, event, or Station inventory may survive a process
-//! crash before commit. This module reserves identity, materializes the Ship
-//! only long enough to build the wire payload, removes it immediately, and
-//! performs the durable spawn only after the handshake completes.
+//! succeeds. Begin durably records only the consumed identity watermark; no
+//! Ship, fitting, ownership, or Station inventory becomes authoritative before
+//! commit. This module materializes the Ship only long enough to build the wire
+//! payload, removes it immediately, and performs the durable spawn after the
+//! handshake completes.
 
 use dawn_core::{
     events::{ClientAdmissionIdentityReserved, ShipSpawned},
@@ -18,7 +19,9 @@ use super::{HandoffPayload, MissingObserverShip, SimulationNode};
 
 impl<S: EventStore> SimulationNode<S> {
     /// Reserve identities for one in-flight fresh admission without creating
-    /// any snapshot- or event-replay-visible Ship state.
+    /// any snapshot- or event-replay-visible Ship state. The allocation
+    /// watermark is appended first so a crash cannot cause either ID to be
+    /// issued again.
     pub(crate) fn reserve_fresh_admission_identity(&mut self) -> (PlayerId, ShipId) {
         let player_id = self.next_player_id();
         let ship_id = ShipId::new(self.node_id, self.id_counter);
@@ -43,7 +46,7 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// The Ship exists only during this call. It is removed before returning,
     /// so periodic snapshots and process crashes cannot persist an uncommitted
-    /// admission. The reserved ID remains counted against the population cap.
+    /// Ship. The reserved ID remains counted against the population cap.
     pub(crate) fn build_fresh_admission_handoff(
         &mut self,
         player_id: PlayerId,
@@ -60,8 +63,8 @@ impl<S: EventStore> SimulationNode<S> {
     /// Materialize and persist a previously-reserved fresh admission.
     ///
     /// This is the first point that appends Ship events or writes the starter
-    /// Station inventory. A crash before this call therefore leaves no durable
-    /// admission residue.
+    /// Station inventory. A crash before this call leaves only the intentional
+    /// identity watermark, never durable Ship or gameplay state.
     pub(crate) fn commit_reserved_fresh_admission(
         &mut self,
         player_id: PlayerId,
@@ -96,7 +99,8 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Release a non-durable fresh-admission reservation after handshake
-    /// failure. There is intentionally no ECS, event-log, or SQLite rollback.
+    /// failure. The durable allocation watermark is intentionally retained;
+    /// there is no ECS or SQLite state to roll back.
     pub(crate) fn abort_reserved_fresh_admission(&mut self, ship_id: ShipId) {
         self.pending_fresh_admissions.remove(&ship_id);
         debug_assert!(
