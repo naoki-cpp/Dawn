@@ -328,10 +328,10 @@ fn find_resume_sector<S: EventStore>(
     nodes: &[SimulationNode<S>],
     ship_id: ShipId,
 ) -> Option<usize> {
-    let mut sectors = nodes.iter().enumerate().filter_map(|(sector, node)| {
-        node.hosts_client_resume_identity(ship_id)
-            .then_some(sector)
-    });
+    let mut sectors = nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(sector, node)| node.hosts_client_resume_identity(ship_id).then_some(sector));
     let sector = sectors.next()?;
     if sectors.next().is_some() {
         None
