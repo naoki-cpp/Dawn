@@ -1,0 +1,68 @@
+name: Apply pending dock GdUnit fixture fix
+
+on:
+  push:
+    branches:
+      - issue-251-client-fact-policy
+    paths:
+      - .github/workflows/issue-251-pending-dock-gdunit-fix.yml
+      - .github/apply_pending_dock_gdunit_fix.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Apply fixture patch
+        run: python .github/apply_pending_dock_gdunit_fix.py
+
+      - name: Check patch
+        run: git diff --check
+
+      - name: Test GDExtension adapter
+        run: cargo test -p dawn-client-gdext
+
+      - name: Install Godot dependencies
+        run: sudo apt-get update && sudo apt-get install --yes unzip xvfb
+
+      - name: Restore GdUnit4 addon
+        uses: actions/cache@v4
+        with:
+          path: client/addons/gdUnit4
+          key: gdunit4-${{ hashFiles('.gdunit4-version') }}
+
+      - name: Install GdUnit4 addon if needed
+        run: |
+          if [ ! -f client/addons/gdUnit4/runtest.sh ]; then
+            bash scripts/install-gdunit.sh
+          fi
+
+      - name: Restore Godot editor
+        uses: actions/cache@v4
+        with:
+          path: .tools/godot
+          key: godot-${{ runner.os }}-${{ hashFiles('.godot-version') }}
+
+      - name: Build GDExtension
+        run: cargo build -p dawn-client-gdext
+
+      - name: Run GdUnit4 tests
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" bash scripts/setup-godot.sh --run-tests
+
+      - name: Commit clean fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/apply_pending_dock_gdunit_fix.py
+          git rm .github/workflows/issue-251-pending-dock-gdunit-fix.yml
+          git rm .github/gdunit-diagnostic.log
+          git add client/test/main_test.gd
+          git commit -m "Stabilize pending dock promotion regression tests"
+          git push
