@@ -555,6 +555,7 @@ impl WorldSessionState {
 
     pub fn set_player_ship_id(&mut self, player_ship_id: i64) {
         self.player_ship_id = player_ship_id;
+        remove_id(&mut self.opponent_ship_ids, player_ship_id);
         let Some(ship) = self.ships.get(&player_ship_id).cloned() else {
             return;
         };

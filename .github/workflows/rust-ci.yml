@@ -1,51 +1,236 @@
 name: Rust CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
-    types: [synchronize]
 
+# Least-privilege default (zizmor excessive-permissions): every job here only
+# reads the repo. Jobs that need more escalate explicitly per-job instead.
 permissions:
-  contents: write
+  contents: read
+
+# Cancel a still-running CI run for the same branch/PR when a new push
+# supersedes it, instead of burning minutes on output nobody will look at.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep this synchronized with rust-toolchain.toml. Required CI intentionally
+  # uses a fixed compiler; the separate stable-canary workflow tracks releases.
+  RUST_VERSION: "1.97.1"
 
 jobs:
-  apply-pending-active-ship-fix:
-    if: github.head_ref == 'issue-251-client-fact-policy'
+  lint:
+    name: fmt + clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: issue-251-client-fact-policy
-          fetch-depth: 0
           persist-credentials: false
 
       - name: Install pinned Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
-          toolchain: "1.97.1"
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt, clippy
 
-      - name: Apply pending active ship reconciliation
-        run: |
-          python .github/apply_pending_active_ship_fix.py
-          cargo fmt --all
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
-      - name: Test reconciliation
-        run: |
-          cargo test -p dawn-client-core client_state
-          cargo test --workspace
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo fmt --all -- --check
+      # Enforced locally by .claude/hooks/check-rust-fmt.py on every edit
+      # (AI_DEVELOPMENT_GUIDE.md §8) -- CI is the hard gate behind that
+      # advisory hook.
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
 
-      - name: Restore CI and publish tested fix
+      # -D warnings turns every clippy lint (including pedantic ones already
+      # clean across the workspace as of this workflow's introduction) into a
+      # hard failure, so new lint violations can't sneak in silently.
+      - name: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: cargo build --workspace
+        run: cargo build --workspace --all-targets
+
+      - name: cargo test --workspace
+        run: cargo test --workspace
+
+  doc:
+    name: cargo doc (deny warnings)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      # Catches broken intra-doc links and other rustdoc warnings (Rust API
+      # Guidelines C-LINK) that `cargo test --workspace`'s doctests don't
+      # surface -- doctests only fail on wrong/panicking *code*, not on
+      # rustdoc itself warning about e.g. an unresolved `[Foo]` reference.
+      - name: cargo doc --workspace --no-deps
+        run: cargo doc --workspace --no-deps
         env:
-          GH_TOKEN: ${{ github.token }}
+          RUSTDOCFLAGS: "-D warnings"
+
+  deny:
+    name: cargo deny (licenses, bans, advisories, sources)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Rules live in deny.toml at the repo root.
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+
+  audit:
+    name: cargo audit (RUSTSEC advisories)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: taiki-e/install-action@f1b61bf3a1373bccc1ebdc11506122709bd40dee # cargo-audit
+      - run: cargo audit
+
+  machete:
+    name: cargo machete (unused dependencies)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: taiki-e/install-action@47fd9beedbcb763c4fc524c0a4791caac26e2907 # cargo-machete
+      - run: cargo machete
+
+  semver:
+    name: cargo semver-checks (public API vs main)
+    runs-on: ubuntu-latest
+    # Workspace crates aren't published to crates.io (FBD-002-adjacent: this
+    # is a private game workspace, not a library ecosystem), so the baseline
+    # is the main branch tip rather than the default crates.io lookup.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
+        with:
+          baseline-rev: origin/main
+
+  windows-check:
+    name: dawn-sector Windows check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Check Windows snapshot publication path
+        run: cargo check -p dawn-sector --all-targets
+
+  godot:
+    name: Godot GdUnit4
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Install Godot test dependencies
+        run: sudo apt-get update && sudo apt-get install --yes unzip xvfb
+
+      - name: Restore GdUnit4 addon
+        id: gdunit-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: client/addons/gdUnit4
+          key: gdunit4-${{ hashFiles('.gdunit4-version') }}
+
+      - name: Install GdUnit4 addon
+        if: steps.gdunit-cache.outputs.cache-hit != 'true'
+        run: bash scripts/install-gdunit.sh
+
+      - name: Restore Godot editor
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .tools/godot
+          key: godot-${{ runner.os }}-${{ hashFiles('.godot-version') }}
+
+      - name: Build GDExtension
+        run: cargo build -p dawn-client-gdext
+
+      - name: Run GdUnit4 tests
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" bash scripts/setup-godot.sh --run-tests
+
+  # Single required-status-check target for branch protection: succeeds only
+  # if every job above succeeded, so protection rules don't need to list
+  # lint/test/doc individually and stay correct as jobs are split further.
+  ci-success:
+    name: CI success
+    runs-on: ubuntu-latest
+    needs: [lint, test, doc, deny, audit, machete, semver, windows-check, godot]
+    if: always()
+    steps:
+      - name: Check all required jobs succeeded
         run: |
-          git fetch origin main
-          git show origin/main:.github/workflows/rust-ci.yml > .github/workflows/rust-ci.yml
-          rm .github/apply_pending_active_ship_fix.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "fix(client): reconcile pending active ship registration"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:issue-251-client-fact-policy
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more required jobs failed."
+            exit 1
+          fi
