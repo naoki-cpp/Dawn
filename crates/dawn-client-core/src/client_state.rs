@@ -238,7 +238,9 @@ fn client_i64(value: u64, field: &'static str) -> Result<i64, ClientStateError> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{PositionInput, ShipInput, StationInput, SystemNameInput};
+    use crate::{
+        ModuleKind, ModuleRow, PositionInput, ShipInput, StatDelta, StationInput, SystemNameInput,
+    };
 
     fn ship(ship_id: i64, is_player: bool) -> ShipRegistration {
         ShipRegistration {
@@ -255,6 +257,23 @@ mod tests {
                 cap_max: 100.0,
                 cap_recharge_per_tick: 10.0,
             },
+        }
+    }
+
+    fn module(module_id: u32, active: bool) -> ModuleRow {
+        ModuleRow {
+            slot: "High".to_owned(),
+            index: 0,
+            module_id,
+            name: "Test module".to_owned(),
+            kind: ModuleKind::Weapon,
+            is_active: active,
+            is_active_module: true,
+            cap_cost_per_cycle: 5.0,
+            cycle_time_ticks: 10,
+            stat_delta: StatDelta::ZERO,
+            cycle_remaining: 7,
+            forced_reason: String::new(),
         }
     }
 
@@ -374,5 +393,124 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.field, "player_loadout.tick");
         assert!(loadout.is_none());
+    }
+
+    #[test]
+    fn tick_advances_session_and_capacitor_through_the_shared_loadout() {
+        let (mut session, _) = setup();
+        let mut active_module = module(7, true);
+        active_module.cycle_remaining = 0;
+        let mut loadout = Some(PlayerLoadoutMsg {
+            active_ship_id: Some(1),
+            modules: vec![active_module],
+            ..PlayerLoadoutMsg::default()
+        });
+
+        let effect = ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::Tick { tick: 1 })
+            .unwrap();
+
+        assert_eq!(
+            effect,
+            WorldSessionEffect::TickAdvanced { ticks_elapsed: 1 }
+        );
+        assert_eq!(session.current_tick(), 1);
+        assert_eq!(session.cap_current(), 95.0);
+        assert_eq!(loadout.as_ref().unwrap().modules[0].cycle_remaining, 10);
+    }
+
+    #[test]
+    fn module_activation_updates_loadout_state_and_resets_cycle() {
+        let (mut session, _) = setup();
+        let mut loadout = Some(PlayerLoadoutMsg {
+            modules: vec![module(7, false)],
+            ..PlayerLoadoutMsg::default()
+        });
+
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::ModuleActivation {
+                module_id: 7,
+                active: true,
+                forced_reason: String::new(),
+            })
+            .unwrap();
+
+        let row = &loadout.as_ref().unwrap().modules[0];
+        assert!(row.is_active);
+        assert_eq!(row.cycle_remaining, 0);
+    }
+
+    #[test]
+    fn system_change_updates_only_the_player_system() {
+        let (mut session, mut loadout) = setup();
+        let effect = ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::SystemChanged {
+                ship_id: 1,
+                to_system: 2,
+            })
+            .unwrap();
+
+        assert_eq!(
+            effect,
+            WorldSessionEffect::SystemChanged {
+                name: Some("Beta".to_owned())
+            }
+        );
+        assert_eq!(session.current_system_name(), "Beta");
+    }
+
+    #[test]
+    fn initial_state_resets_old_state_before_registering_new_ships() {
+        let (mut session, mut loadout) = setup();
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::TargetLocked {
+                locker_id: 1,
+                target_id: 2,
+            })
+            .unwrap();
+
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::InitialState {
+                navigation: NavigationInput {
+                    system_name: "Gamma".to_owned(),
+                    ..NavigationInput::default()
+                },
+                ships: vec![ship(3, true)],
+                connection_ship_id: 3,
+            })
+            .unwrap();
+
+        assert_eq!(session.current_system_name(), "Gamma");
+        assert_eq!(session.player_ship_id(), 3);
+        assert_eq!(session.player_lock_target(), -1);
+        assert_eq!(session.event_count(), 0);
+        assert_eq!(session.ship_count(), 1);
+    }
+
+    #[test]
+    fn ship_spawn_and_destroy_lifecycle_is_reported_by_effects() {
+        let (mut session, mut loadout) = setup();
+        assert_eq!(
+            ClientState::new(&mut session, &mut loadout)
+                .apply(ClientFact::ShipSpawned {
+                    ship_id: 4,
+                    connection_ship_id: 1,
+                })
+                .unwrap(),
+            WorldSessionEffect::ShipRegistered {
+                registered: true,
+                became_player: false,
+            }
+        );
+        assert!(session.has_ship(4));
+
+        let effect = ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::ShipDestroyed { ship_id: 4 })
+            .unwrap();
+        let WorldSessionEffect::ShipDestroyed(outcome) = effect else {
+            panic!("expected destruction effect");
+        };
+        assert!(outcome.destroyed);
+        assert!(!session.has_ship(4));
     }
 }

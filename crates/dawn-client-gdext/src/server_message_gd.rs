@@ -207,23 +207,11 @@ impl ServerMessageOutcome {
     fn dispatch(
         &self,
         mut connection_target: Gd<Object>,
+        mut world_target: Gd<Object>,
         mut session: Gd<WorldSession>,
         mut loadout: Gd<PlayerLoadout>,
         connection_ship_id: i64,
     ) -> bool {
-        let has_parent = connection_target
-            .call("has_method", vslice!["get_parent"])
-            .try_to::<bool>()
-            .unwrap_or(false);
-        let mut world_target = if has_parent {
-            connection_target
-                .call("get_parent", vslice![])
-                .try_to::<Gd<Object>>()
-                .unwrap_or_else(|_| connection_target.clone())
-        } else {
-            connection_target.clone()
-        };
-
         match &self.message {
             ServerMessage::Welcome { player_id, ship_id } => call_connection(
                 &mut connection_target,

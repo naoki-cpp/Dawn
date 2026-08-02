@@ -130,8 +130,7 @@ func _assert_scene_tree_refs() -> void:
 
 func _ready() -> void:
 	_assert_scene_tree_refs()
-	_connection.bind_client_state(_session, _loadout)
-	_connection.event_received.connect(_on_event_received)
+	_connection.bind_client_state(_session, _loadout, self)
 	_connection.motion_correction_received.connect(_handle_motion_correction)
 	_connection.connection_changed.connect(_on_connection_changed)
 	_connection.welcomed.connect(_on_welcomed)
@@ -451,10 +450,6 @@ func _send_stop_command() -> void:
 
 # -- Event handlers -----------------------------------------------------------
 
-func _on_event_received(outcome: ServerEventOutcome) -> void:
-	_sync_session_state()
-	if not outcome.dispatch(self):
-		push_warning("[World] failed to dispatch typed server event outcome")
 func _handle_position_snap(ship_id: int, server_pos: PackedFloat64Array) -> void:
 	if not _ships.has(ship_id):
 		return

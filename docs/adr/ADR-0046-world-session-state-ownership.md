@@ -99,9 +99,9 @@ core-owned navigation stateから解決する。
 
 presentation seamは`ServerMessageOutcome::dispatch`の1箇所だけである。decode結果は検証済みの
 `dawn_wire::ServerMessage`をそのまま保持し、同型の`ClientOutcome` mirrorは削除した。
-world eventは最終`_handle_*` callbackへ直接dispatchし、以前の
-`ServerEventOutcome`生成→signal→再dispatchという二段経路は実行時から削除した。
-旧GDScript型注釈を段階的に外す間だけ、生成されないparse compatibility classを残す。
+world eventはGDScriptが明示したscene ownerの最終`_handle_*` callbackへ直接dispatchする。
+Rust adapterは`get_parent()`などでscene tree構造を推測しない。以前の
+`ServerEventOutcome`生成→signal→再dispatchという二段経路と互換classは削除した。
 
 ## Implementation checklist
 

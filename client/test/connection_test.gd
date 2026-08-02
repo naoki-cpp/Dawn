@@ -83,11 +83,11 @@ func test_real_outcome_dispatches_welcome_and_detects_missing_handler() -> void:
 	var state := _state()
 
 	var missing_target := Node.new()
-	assert_bool(outcome.dispatch(missing_target, state[0], state[1], -1)).is_false()
+	assert_bool(outcome.dispatch(missing_target, missing_target, state[0], state[1], -1)).is_false()
 	missing_target.free()
 
 	var connection: Node = Connection.new()
-	assert_bool(outcome.dispatch(connection, state[0], state[1], -1)).is_true()
+	assert_bool(outcome.dispatch(connection, connection, state[0], state[1], -1)).is_true()
 	assert_int(connection.player_id).is_equal(5)
 	assert_int(connection.ship_id).is_equal(11)
 	connection.free()
@@ -107,8 +107,11 @@ func test_real_world_event_dispatches_directly_to_final_handler() -> void:
 	var decoder := ServerMessageDecoder.new()
 	var outcome: ServerMessageOutcome = decoder.test_outcome("AoiLeave")
 	var state := _state()
+	var connection_target := RefCounted.new()
 	var target := EventDispatchTarget.new()
-	assert_bool(outcome.dispatch(target, state[0], state[1], -1)).is_true()
+	assert_bool(outcome.dispatch(
+		connection_target, target, state[0], state[1], -1
+	)).is_true()
 	assert_int(target.left_ship_id).is_equal(19)
 	assert_bool(target.removed).is_false()
 
@@ -118,7 +121,7 @@ func test_initial_state_updates_session_even_when_presentation_handler_is_missin
 	var outcome: ServerMessageOutcome = decoder.test_outcome("InitialState")
 	var target := RefCounted.new()
 	var state := _state()
-	assert_bool(outcome.dispatch(target, state[0], state[1], 11)).is_false()
+	assert_bool(outcome.dispatch(target, target, state[0], state[1], 11)).is_false()
 	assert_str((state[0] as WorldSession).current_system_name()).is_equal("Alpha")
 	assert_int((state[0] as WorldSession).player_ship_id()).is_equal(11)
 
@@ -132,7 +135,7 @@ func test_real_initial_state_updates_session_before_typed_signal() -> void:
 	connection.initial_state_received.connect(func(initial: InitialStatePresentation) -> void:
 		states.append(initial)
 	)
-	assert_bool(outcome.dispatch(connection, state[0], state[1], 11)).is_true()
+	assert_bool(outcome.dispatch(connection, connection, state[0], state[1], 11)).is_true()
 	assert_int(states.size()).is_equal(1)
 	assert_int((states[0] as InitialStatePresentation).ships.size()).is_equal(2)
 	assert_str((state[0] as WorldSession).current_system_name()).is_equal("Alpha")
@@ -149,7 +152,7 @@ func test_real_market_outcome_preserves_every_item_variant() -> void:
 	connection.market_snapshot_received.connect(func(snapshot: MarketSnapshot) -> void:
 		snapshots.append(snapshot)
 	)
-	assert_bool(outcome.dispatch(connection, state[0], state[1], -1)).is_true()
+	assert_bool(outcome.dispatch(connection, connection, state[0], state[1], -1)).is_true()
 	var snapshot := snapshots[0] as MarketSnapshot
 	assert_int(snapshot.balance).is_equal(250)
 	assert_str(snapshot.notice).is_equal("Ready")
@@ -175,7 +178,7 @@ func test_real_motion_correction_emits_typed_presentation() -> void:
 		func(correction: MotionCorrectionPresentation) -> void:
 			corrections.append(correction)
 	)
-	assert_bool(outcome.dispatch(connection, state[0], state[1], 11)).is_true()
+	assert_bool(outcome.dispatch(connection, connection, state[0], state[1], 11)).is_true()
 	assert_int(corrections.size()).is_equal(1)
 	var correction := corrections[0] as MotionCorrectionPresentation
 	assert_int(correction.ship_id).is_equal(11)
@@ -210,7 +213,7 @@ func test_real_motion_correction_reaches_main_scene_handler() -> void:
 	main._player_ship_id = 11
 	main.add_child(ship)
 	connection.motion_correction_received.connect(Callable(main, "_handle_motion_correction"))
-	assert_bool(outcome.dispatch(connection, main._session, main._loadout, 11)).is_true()
+	assert_bool(outcome.dispatch(connection, main, main._session, main._loadout, 11)).is_true()
 	assert_int(ship.reconcile_calls.size()).is_equal(1)
 	var call: Dictionary = ship.reconcile_calls[0]
 	assert_array(call["position"]).contains_exactly([
@@ -241,8 +244,8 @@ func test_real_dock_event_updates_session_before_final_handler() -> void:
 	var docked: ServerMessageOutcome = decoder.test_outcome("ShipDocked")
 	var target := DockEventTarget.new()
 	var state := _state()
-	assert_bool(initial.dispatch(target, state[0], state[1], 11)).is_true()
-	assert_bool(docked.dispatch(target, state[0], state[1], 11)).is_true()
+	assert_bool(initial.dispatch(target, target, state[0], state[1], 11)).is_true()
+	assert_bool(docked.dispatch(target, target, state[0], state[1], 11)).is_true()
 	assert_bool((state[0] as WorldSession).is_docked()).is_true()
 	assert_int((state[0] as WorldSession).docked_station_id()).is_equal(5)
 	assert_str((state[0] as WorldSession).docked_station_name()).is_equal("Forge Station")

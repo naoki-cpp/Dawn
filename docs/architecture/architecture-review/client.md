@@ -32,7 +32,7 @@ Godot公開のserver-state mutation backdoorは、#251との統合後も復活�
 | `main.gd`責務 | A− | scene lifecycle、node generation、event dispatch、network send、HUD assemblyに限定 |
 | 型境界 | A | wire decode → `ClientFact` → Rust state commit → typed presentationの単一経路。Dictionary再入力なし |
 | 重複 | A− | shadow state、JSON往復、adapter内domain policy、二段event dispatchは解消。残るauthority/API重複は#200・#202 |
-| デッドコード | A | `ClientOutcome` mirrorを削除。`ServerEventOutcome`は旧GDScript型注釈用の生成されない互換classのみ |
+| デッドコード | A | `ClientOutcome` mirrorと旧`ServerEventOutcome`互換classを削除 |
 | テスト可能性 | A | pure Rust `ClientState` transition test + typed outcome fixtureを使うGdUnit4。scene-tree/実WebSocket E2Eのみ手動領域 |
 
 ## State ownership
@@ -41,7 +41,7 @@ Godot公開のserver-state mutation backdoorは、#251との統合後も復活�
 - `WorldSessionState`: live world stateと低レベルtyped transition
 - `WorldSession`: Godot adapter。公開write面はreset/client prediction tickに限定
 - `PlayerLoadout`: fitting/inventory/capacitor state。server replacement/module activationは`ClientState`経由
-- `ServerMessageOutcome::dispatch`: state commit後に一度だけpresentationを渡す境界
+- `ServerMessageOutcome::dispatch`: GDScriptが明示したconnection/world targetへ、state commit後に一度だけpresentationを渡す境界
 - `main.gd`: scene node registryと短命なoptimistic state
 - `WorldInteraction`: selection / input facts → intent
 - `WorldPresentation`: floating originとvisual effects
