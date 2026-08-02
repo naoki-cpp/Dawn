@@ -859,6 +859,14 @@ impl WorldSessionState {
         if self.cap_current < 0.0 || self.player_ship_id < 0 {
             return;
         }
+        if loadout.as_ref().is_some_and(|loadout| {
+            loadout
+                .active_ship_id
+                .and_then(|ship_id| i64::try_from(ship_id).ok())
+                != Some(self.player_ship_id)
+        }) {
+            return;
+        }
         let ticks = u32::try_from(ticks).unwrap_or(0);
         let cap_current = match loadout {
             Some(loadout) => loadout.simulate_capacitor_ticks(

@@ -593,6 +593,55 @@ mod tests {
     }
 
     #[test]
+    fn pending_active_ship_switch_pauses_capacitor_until_registration() {
+        let (mut session, mut loadout) = setup();
+        let mut active_module = module(7, true);
+        active_module.cycle_remaining = 0;
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::PlayerLoadout(PlayerLoadoutMsg {
+                active_ship_id: Some(33),
+                modules: vec![active_module],
+                ..PlayerLoadoutMsg::default()
+            }))
+            .unwrap();
+        assert_eq!(session.player_ship_id(), 1);
+        assert_eq!(session.cap_current(), 100.0);
+
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::Tick { tick: 1 })
+            .unwrap();
+        assert_eq!(session.current_tick(), 1);
+        assert_eq!(session.cap_current(), 100.0);
+        assert_eq!(loadout.as_ref().unwrap().modules[0].cycle_remaining, 0);
+
+        session.advance_client_ticks(1, loadout.as_mut());
+        assert_eq!(session.current_tick(), 2);
+        assert_eq!(session.cap_current(), 100.0);
+        assert_eq!(loadout.as_ref().unwrap().modules[0].cycle_remaining, 0);
+
+        let effect = ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::ShipEntered {
+                ship: ship(33, true),
+                connection_ship_id: 1,
+            })
+            .unwrap();
+        assert_eq!(
+            effect,
+            WorldSessionEffect::ShipRegistered {
+                registered: true,
+                became_player: true,
+            }
+        );
+        assert_eq!(session.player_ship_id(), 33);
+
+        ClientState::new(&mut session, &mut loadout)
+            .apply(ClientFact::Tick { tick: 3 })
+            .unwrap();
+        assert_eq!(session.cap_current(), 95.0);
+        assert_eq!(loadout.as_ref().unwrap().modules[0].cycle_remaining, 10);
+    }
+
+    #[test]
     fn unknown_active_ship_switch_completes_when_ship_enters() {
         let (mut session, mut loadout) = setup();
         ClientState::new(&mut session, &mut loadout)
