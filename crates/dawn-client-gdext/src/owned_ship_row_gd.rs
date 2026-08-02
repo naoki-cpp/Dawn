@@ -1,16 +1,6 @@
 use dawn_client_core::OwnedShipRow as CoreOwnedShipRow;
 use godot::prelude::*;
 
-type Dict = Dictionary<Variant, Variant>;
-
-const REQUIRED_KEYS: &[&str] = &[
-    "ship_id",
-    "ship_type_id",
-    "ship_type_name",
-    "docked_station_id",
-    "is_active",
-];
-
 /// GDScript-facing typed view of one owned-ship roster row (ADR-0037).
 /// Optional Rust fields preserve the existing Godot sentinels: `-1` for
 /// absent numeric ids and an empty string for an absent type name.
@@ -40,49 +30,42 @@ impl OwnedShipRow {
             is_active: row.is_active,
         })
     }
+
+    pub(crate) fn inner_clone(&self) -> CoreOwnedShipRow {
+        CoreOwnedShipRow {
+            ship_id: u64::try_from(self.ship_id).expect("OwnedShipRow stores a validated ship ID"),
+            ship_type_id: u32::try_from(self.ship_type_id).ok(),
+            ship_type_name: (!self.ship_type_name.is_empty())
+                .then(|| self.ship_type_name.to_string()),
+            docked_station_id: u32::try_from(self.docked_station_id).ok(),
+            is_active: self.is_active,
+        }
+    }
 }
 
 #[godot_api]
 impl OwnedShipRow {
-    /// Test-fixture adapter matching the old Dictionary row shape.
-    /// Missing keys fail loudly; explicit `null` optional fields map to
-    /// the same sentinels as production Rust values.
+    /// Debug-only typed fixture for GdUnit. Negative optional IDs and an empty
+    /// type name represent absent values at the Godot boundary.
+    #[cfg(debug_assertions)]
     #[func]
-    fn from_json(src: Dict) -> Variant {
-        for key in REQUIRED_KEYS {
-            if src.get(*key).is_none() {
-                godot_error!("OwnedShipRow.from_json: invalid row, missing '{key}'");
-                return Variant::nil();
-            }
-        }
-
-        let get_i64 = |key: &str, default: i64| -> i64 {
-            src.get(key)
-                .and_then(|value| value.try_to::<i64>().ok())
-                .unwrap_or(default)
+    fn test_fixture(
+        ship_id: i64,
+        ship_type_id: i64,
+        ship_type_name: GString,
+        docked_station_id: i64,
+        is_active: bool,
+    ) -> Variant {
+        let Ok(ship_id) = u64::try_from(ship_id) else {
+            return Variant::nil();
         };
-        let get_string = |key: &str| -> String {
-            src.get(key)
-                .and_then(|value| value.try_to::<GString>().ok())
-                .map(|value| value.to_string())
-                .unwrap_or_default()
-        };
-        let get_bool = |key: &str| -> bool {
-            src.get(key)
-                .and_then(|value| value.try_to::<bool>().ok())
-                .unwrap_or(false)
-        };
-
-        let ship_type_id = get_i64("ship_type_id", -1);
-        let ship_type_name = get_string("ship_type_name");
-        let docked_station_id = get_i64("docked_station_id", -1);
-        let row = CoreOwnedShipRow {
-            ship_id: get_i64("ship_id", 0).max(0) as u64,
+        Self::wrap(CoreOwnedShipRow {
+            ship_id,
             ship_type_id: u32::try_from(ship_type_id).ok(),
-            ship_type_name: (!ship_type_name.is_empty()).then_some(ship_type_name),
+            ship_type_name: (!ship_type_name.is_empty()).then(|| ship_type_name.to_string()),
             docked_station_id: u32::try_from(docked_station_id).ok(),
-            is_active: get_bool("is_active"),
-        };
-        Self::wrap(row).to_variant()
+            is_active,
+        })
+        .to_variant()
     }
 }

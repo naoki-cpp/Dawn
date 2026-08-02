@@ -14,15 +14,6 @@ pub struct WorldSpace {
 #[godot_api]
 impl WorldSpace {
     #[func]
-    fn to_godot(&self, server_position: Vector3) -> Vector3 {
-        self.to_godot_components(
-            f64::from(server_position.x),
-            f64::from(server_position.y),
-            f64::from(server_position.z),
-        )
-    }
-
-    #[func]
     fn render_scale(&self) -> f64 {
         CoreWorldSpace::render_scale()
     }
@@ -64,11 +55,6 @@ impl WorldSpace {
     }
 
     #[func]
-    fn should_rebase(&self, player_server_position: Vector3) -> bool {
-        self.core.should_rebase(to_array(player_server_position))
-    }
-
-    #[func]
     fn should_rebase_components(&self, player_x: f64, player_y: f64, player_z: f64) -> bool {
         self.core.should_rebase([player_x, player_y, player_z])
     }
@@ -82,15 +68,6 @@ impl WorldSpace {
             return f64::NAN;
         };
         CoreWorldSpace::distance(first, second)
-    }
-
-    #[func]
-    fn rebase_to(&mut self, new_origin: Vector3) -> Vector3 {
-        self.rebase_to_components(
-            f64::from(new_origin.x),
-            f64::from(new_origin.y),
-            f64::from(new_origin.z),
-        )
     }
 
     #[func]

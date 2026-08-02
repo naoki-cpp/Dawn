@@ -346,3 +346,11 @@ JSON文字列ラッパーとして残っていることも判明）。以下を�
 - [x] `CONTEXT.md`の Vocabulary Preferences に命名規則を追記
 - [x] `cargo fmt --all -- --check` / `cargo test --workspace` /
       `cargo clippy --workspace -- -D warnings` / `cargo machete` 全件通過
+
+
+## 2026-08-02: typed client test boundary (#239)
+
+The temporary `ClientMessageDecoder` and `json_variant.rs` compatibility layer
+were deleted after the typed `WorldSession` path became authoritative. Client
+command postcard semantics are now covered by Rust round-trip tests. GdUnit no
+longer reconstructs the former externally tagged JSON/Dictionary shape.

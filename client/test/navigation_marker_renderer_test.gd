@@ -9,9 +9,9 @@ extends GdUnitTestSuite
 const __source: String = "res://scripts/navigation_marker_renderer.gd"
 
 
-## Mirrors main.gd's f64 component adapter at world_scale=0.1.
-func _to_godot_pos(p: PackedFloat64Array) -> Vector3:
-	return Vector3(p[0], p[1], -p[2]) * 0.1
+## Canonical f64 WorldSpace rendering seam at world_scale=0.1.
+func _to_godot_components(x: float, y: float, z: float) -> Vector3:
+	return Vector3(x, y, -z) * 0.1
 
 func _position(x: float, y: float, z: float) -> PackedFloat64Array:
 	return PackedFloat64Array([x, y, z])
@@ -90,7 +90,7 @@ func test_spawn_gate_markers_builds_one_marker_per_gate_with_position_and_label(
 		_gate(5, _position(10.0, 0.0, 20.0), 2000.0, "Beta"),
 	]
 
-	NavigationMarkerRenderer.spawn_gate_markers(gates_root, gates, 0.1, _to_godot_pos)
+	NavigationMarkerRenderer.spawn_gate_markers(gates_root, gates, 0.1, _to_godot_components)
 
 	assert_int(gates_root.get_child_count()).is_equal(1)
 	var marker: Node3D = gates_root.get_child(0) as Node3D
@@ -107,7 +107,7 @@ func test_spawn_gate_markers_builds_one_marker_per_array_entry() -> void:
 		_gate(1, _position(100.0, 0.0, 0.0), 1500.0, "Gamma"),
 	]
 
-	NavigationMarkerRenderer.spawn_gate_markers(gates_root, gates, 0.1, _to_godot_pos)
+	NavigationMarkerRenderer.spawn_gate_markers(gates_root, gates, 0.1, _to_godot_components)
 
 	assert_int(gates_root.get_child_count()).is_equal(2)
 
@@ -125,7 +125,7 @@ func test_spawn_body_markers_skips_stars_and_only_tags_planet_markers() -> void:
 		_body(2, "Planet", "Forge", _position(500.0, 0.0, 0.0), 200.0, 0.0),
 	]
 
-	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
+	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_components)
 
 	assert_int(bodies_root.get_child_count()).is_equal(1)
 
@@ -140,7 +140,7 @@ func test_spawn_body_markers_uses_the_body_name_as_the_label_text() -> void:
 		_body(2, "Planet", "Forge", _position(500.0, 0.0, 0.0), 200.0, 0.0),
 	]
 
-	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
+	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_components)
 
 	var marker: Node3D = bodies_root.get_child(0) as Node3D
 	var label: Label3D = marker.get_child(1) as Label3D  ## index 0 = mesh, index 1 = label
@@ -153,7 +153,7 @@ func test_spawn_body_markers_produces_no_markers_when_only_a_star_is_present() -
 		_body(1, "Star", "Helios", _position(0.0, 0.0, 0.0), 1000.0, 0.5),
 	]
 
-	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
+	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_components)
 
 	assert_int(bodies_root.get_child_count()).is_equal(0)
 
@@ -167,7 +167,7 @@ func test_spawn_body_markers_adds_a_fixed_size_selection_reticle_to_each_planet(
 		_body(2, "Planet", "Forge", _position(500.0, 0.0, 0.0), 200.0, 0.0),
 	]
 
-	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_pos)
+	NavigationMarkerRenderer.spawn_body_markers(bodies_root, bodies, 0.1, _to_godot_components)
 
 	var marker: Node3D = bodies_root.get_child(0) as Node3D
 	var reticle: Sprite3D = marker.get_child(2) as Sprite3D  ## index 0=mesh, 1=label, 2=reticle
@@ -184,7 +184,7 @@ func test_spawn_station_markers_builds_one_marker_per_station_with_label_and_rin
 		_station(3, "Forge Station", _position(100.0, 0.0, 200.0), 16000.0),
 	]
 
-	NavigationMarkerRenderer.spawn_station_markers(bodies_root, stations, 0.1, _to_godot_pos)
+	NavigationMarkerRenderer.spawn_station_markers(bodies_root, stations, 0.1, _to_godot_components)
 
 	assert_int(bodies_root.get_child_count()).is_equal(1)
 	var marker: Node3D = bodies_root.get_child(0) as Node3D
@@ -198,10 +198,10 @@ func test_spawn_station_markers_appends_after_existing_body_markers() -> void:
 	var bodies_root: Node3D = auto_free(Node3D.new())
 	NavigationMarkerRenderer.spawn_body_markers(bodies_root, [
 		_body(2, "Planet", "Forge", _position(500.0, 0.0, 0.0), 200.0, 0.0),
-	], 0.1, _to_godot_pos)
+	], 0.1, _to_godot_components)
 
 	NavigationMarkerRenderer.spawn_station_markers(bodies_root, [
 		_station(3, "Forge Station", _position(100.0, 0.0, 200.0), 16000.0),
-	], 0.1, _to_godot_pos)
+	], 0.1, _to_godot_components)
 
 	assert_int(bodies_root.get_child_count()).is_equal(2)

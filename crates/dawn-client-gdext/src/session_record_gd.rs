@@ -28,8 +28,8 @@ use godot::prelude::*;
 pub struct GateRecord {
     #[var]
     gate_id: i64,
-    /// Server-space components, the same `PackedFloat64Array` shape
-    /// `main.gd`'s `_position_components` already consumes.
+    /// Canonical f64 server-space components. This remains a
+    /// `PackedFloat64Array` until the final WorldSpace rendering conversion.
     #[var]
     position: PackedFloat64Array,
     #[var]

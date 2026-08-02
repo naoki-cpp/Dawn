@@ -106,7 +106,7 @@ Unlike the server side (Rust crates), **not all client code can be tested**.
 Testable (pure functions/logic with no scene-tree dependency):
   - coordinate conversion, ray/distance math, computations over arrays and
     dictionaries
-  - e.g. _server_to_godot_pos() / _ray_point_distance() / _spectral_color() /
+  - e.g. WorldSpace.to_godot_components() / _ray_point_distance() / _spectral_color() /
     _compute_warp_snap_pos_core() (see client/test/main_test.gd)
   - instantiating a script with .new() without adding it to the scene tree
     never calls _ready(), so functions that avoid @onready variables are
@@ -126,3 +126,8 @@ its test in the same change.** Conversely, when changing scene-tree-dependent
 logic, state in the PR description what was verified in the Godot editor in
 place of a test (for AI sessions that cannot run the editor, state that fact
 and the recommended manual verification steps).
+
+
+Typed client fixtures must not recreate wire JSON/Dictionary shapes. Prefer
+debug-only typed record factories for focused UI tests and
+`ServerMessageDecoder.test_outcome()` when testing the real binary inbound path.

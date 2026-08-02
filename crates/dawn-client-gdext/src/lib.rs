@@ -14,7 +14,6 @@ mod client_outcome;
 mod client_rules_gd;
 mod item_identity_gd;
 mod item_row_gd;
-mod json_variant;
 mod loadout_gd;
 mod module_row_gd;
 mod owned_ship_row_gd;
@@ -25,7 +24,7 @@ mod ship_motion_gd;
 mod world_session_gd;
 mod world_space_gd;
 
-pub use client_command_gd::{ClientCommand, ClientMessageDecoder};
+pub use client_command_gd::ClientCommand;
 pub use client_rules_gd::ClientRules;
 pub use item_identity_gd::ItemIdentity;
 pub use item_row_gd::ItemRow;

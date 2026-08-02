@@ -17,7 +17,7 @@ related : ADR-0004（クライアント技術選定・GDExtension既定路線）
 `client/scripts/player_loadout.gd`・`module_row.gd`・`item_row.gd` の3ファイルが
 「削除すると複雑さが複数箇所に再出現する」唯一の候補と判定された。具体的には:
 
-- `ModuleRow.from_json()`/`ItemRow.from_json()` はサーバーの `PlayerLoadout` wire
+- `ModuleRow`/`ItemRow` は typed `PlayerLoadout` projection
   payload（`crates/dawn-sector/src/node/player_loadout_projection.rs`）が
   `serde_json::json!` マクロで非型付きに組み立てるフィールド形状を、GDScript側で
   手書きの `REQUIRED_KEYS` チェックとして**独立に再実装**している。サーバー側の

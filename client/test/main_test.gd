@@ -15,30 +15,6 @@ const InventoryRow = preload("res://scripts/inventory_row.gd")
 const HudManager = preload("res://scripts/hud_manager.gd")
 const AU_M: float = 1.495978707e11
 
-## dawn_core::StatDelta (client-side, ADR-0039) requires every field --
-## unlike the client's former hand-copied mirror, it has no per-field
-## `#[serde(default)]`, so a JSON fixture built for
-## `PlayerLoadout.apply_payload` (test/debug-only) can no longer omit fields.
-const FULL_ZERO_STAT_DELTA: Dictionary = {
-	"weapon_damage_add": 0.0,
-	"weapon_range_add": 0.0,
-	"falloff_range_add": 0.0,
-	"tracking_speed_add": 0.0,
-	"speed_multiplier": 1.0,
-	"mass_add": 0.0,
-	"max_shield_add": 0.0,
-	"max_armor_add": 0.0,
-	"max_hull_add": 0.0,
-	"weapon_cooldown_add": 0,
-	"lock_time_add": 0,
-	"max_locks_add": 0,
-	"cap_max_add": 0.0,
-	"cap_recharge_add": 0.0,
-	"tackle_range_add": 0.0,
-	"repair_amount": 0.0,
-	"repair_range_add": 0.0,
-}
-
 var _main: Node
 
 
@@ -209,30 +185,18 @@ func after_test() -> void:
 	_main.free()
 
 
-func _module_fixture(module_id: int, slot: String, active: bool) -> Dictionary:
-	return {
-		"slot": slot,
-		"index": 0,
-		"module_id": module_id,
-		"name": "Test Module",
-		"kind": "",
-		"is_active": active,
-		"is_active_module": true,
-		"cap_cost_per_cycle": 0.0,
-		"cycle_time_ticks": 10,
-		"stat_delta": FULL_ZERO_STAT_DELTA,
-	}
+func _module_fixture(module_id: int, slot: String, active: bool) -> ModuleRow:
+	return ModuleRow.test_fixture(
+		slot, 0, module_id, "Test Module", "", active, true, 0.0, 10
+	) as ModuleRow
 
 
-func _set_loadout_modules(modules: Array) -> void:
-	_main._loadout.apply_payload(JSON.stringify({"modules": modules}))
+func _set_loadout_modules(modules: Array[ModuleRow]) -> void:
+	assert_bool(_main._loadout.test_fixture(
+		0, modules, -1, "", -1, []
+	)).is_true()
 
 
-# -- _server_to_godot_pos ------------------------------------------------------
-
-func test_server_to_godot_pos_flips_z_and_scales() -> void:
-	var result: Vector3 = _main._server_to_godot_pos(Vector3(100.0, 20.0, 300.0))
-	assert_vector(result).is_equal_approx(Vector3(10.0, 2.0, -30.0), Vector3(0.0001, 0.0001, 0.0001))
 
 
 func test_warp_hud_guidance_uses_shared_minimum_distance_boundary() -> void:
@@ -356,12 +320,9 @@ func test_player_loadout_refresh_preserves_docked_motion_state() -> void:
 	_main._ships = {2: ship}
 	_main._player_ship_id = 2
 	_main._session.set_player_ship_id(2)
-	_main._loadout.apply_payload(JSON.stringify({
-		"tick": 12,
-		"active_ship_id": 2,
-		"docked_station_id": 0,
-		"docked_station_name": "Forge Station",
-	}))
+	assert_bool(_main._loadout.test_fixture(
+		12, [], 0, "Forge Station", 2, []
+	)).is_true()
 	_main._session.apply_dock_fitting(0, "Forge Station", 12)
 
 	_main._apply_loadout_side_effects()

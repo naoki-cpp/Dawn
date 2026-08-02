@@ -20,8 +20,11 @@ class FakeWorld:
 	func render_scale() -> float:
 		return render_scale_value
 
-	func rebase_to(_new_origin: Vector3) -> Vector3:
+	func rebase_to_components(_x: float, _y: float, _z: float) -> Vector3:
 		return rebase_shift
+
+	func to_godot_components(x: float, y: float, z: float) -> Vector3:
+		return Vector3(x, y, -z) * render_scale_value
 
 
 class FakeShip:
@@ -59,8 +62,6 @@ func test_render_scale_authority_controls_spawned_navigation_geometry() -> void:
 		[_gate(7, _position(4.0, 0.0, 8.0), 40.0, "Beta")],
 		[_body(2, "Planet", "Forge", _position(12.0, 0.0, 16.0), 20.0, 0.0)],
 		[_station(3, "Forge Station", _position(20.0, 0.0, 24.0), 80.0)],
-		func(position: PackedFloat64Array) -> Vector3:
-			return Vector3(position[0], position[1], -position[2]) * world.render_scale_value,
 		func() -> void:
 			pass)
 

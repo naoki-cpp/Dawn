@@ -9,7 +9,6 @@ class_name WorldPresentation
 extends RefCounted
 
 const NavigationMarkerRendererScript = preload("res://scripts/navigation_marker_renderer.gd")
-const PositionComponents = preload("res://scripts/position_components.gd")
 
 const NAV_MARKER_CLAMP_DISTANCE : float = 30_000.0
 const WARP_TUNNEL_THRESHOLD : float = 2_000.0
@@ -70,19 +69,18 @@ func respawn_navigation_markers(
 	gates: Array,
 	bodies: Array,
 	stations: Array,
-	server_components_to_godot: Callable,
 	clear_navigation_selection: Callable
 ) -> void:
 	if _gates_root != null:
 		NavigationMarkerRendererScript.spawn_gate_markers(
-			_gates_root, gates, _render_scale(), server_components_to_godot)
+			_gates_root, gates, _render_scale(), Callable(_world, "to_godot_components"))
 	if _bodies_root == null:
 		return
 	clear_navigation_selection.call()
 	NavigationMarkerRendererScript.spawn_body_markers(
-		_bodies_root, bodies, _render_scale(), server_components_to_godot)
+		_bodies_root, bodies, _render_scale(), Callable(_world, "to_godot_components"))
 	NavigationMarkerRendererScript.spawn_station_markers(
-		_bodies_root, stations, _render_scale(), server_components_to_godot)
+		_bodies_root, stations, _render_scale(), Callable(_world, "to_godot_components"))
 
 
 func apply_origin_rebase(
@@ -102,13 +100,8 @@ func apply_origin_rebase_components(
 ) -> void:
 	if _world == null:
 		return
-	var shift: Vector3
-	if _world.has_method("rebase_to_components"):
-		shift = _world.rebase_to_components(new_origin[0], new_origin[1], new_origin[2])
-	else:
-		## Keep lightweight presentation tests and alternate world adapters working
-		## while the production WorldSpace owns the f64-safe implementation.
-		shift = _world.rebase_to(Vector3(new_origin[0], new_origin[1], new_origin[2]))
+	var shift: Vector3 = _world.call(
+		"rebase_to_components", new_origin[0], new_origin[1], new_origin[2]) as Vector3
 	for id: int in ships:
 		var ship := ships[id] as Node3D
 		if ship.has_method("apply_origin_rebase"):
@@ -200,7 +193,7 @@ static func sun_state(
 	var star: CelestialBodyRecord = _find_star(bodies)
 	if star == null:
 		return {"active": false}
-	var star_pos := PositionComponents.from_value(star.position)
+	var star_pos: PackedFloat64Array = star.position
 	var far_direction := SUN_FAR_DIRECTION.normalized()
 	var diff := Vector3(
 		star_pos[0] + far_direction.x * SUN_EFFECTIVE_DISTANCE - player_server[0],
@@ -234,7 +227,7 @@ func _update_position_markers(root: Node3D, meta_key: String, player_ship_id: in
 		var marker: Node3D = child as Node3D
 		if marker == null or not marker.has_meta(meta_key):
 			continue
-		var marker_server := PositionComponents.from_value(marker.get_meta(meta_key))
+		var marker_server := marker.get_meta(meta_key) as PackedFloat64Array
 		var marker_godot: Vector3 = _world.to_godot_components(
 			marker_server[0], marker_server[1], marker_server[2])
 		marker.global_position = clamped_marker_position(player_godot, marker_godot)
@@ -276,9 +269,6 @@ func _update_sun_direction(player_ship_id: int, ships: Dictionary, bodies: Array
 	_sky_mat.set_shader_parameter("sun_active", 1.0)
 	_sky_mat.set_shader_parameter("sun_color", state.get("color", Vector3.ONE) as Vector3)
 
-
-func _server_to_godot_pos(p: Vector3) -> Vector3:
-	return _world.to_godot(p)
 
 
 func _setup_space_environment(parent: Node) -> void:

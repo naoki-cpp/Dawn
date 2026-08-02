@@ -91,3 +91,12 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 dock contextとweapon rangeはnarrow scalar accessorとしてGDExtension境界を越える。
 `toggle_at()`だけは即座にcommandへ変換される小さな閉じたintent境界としてDictionaryを維持した。
 新設`player_loadout_test.gd`の3件と、既存HUD fixtureのtyped row移行でsentinel互換と境界shapeを固定した。
+
+
+### 2026-08-02 — legacy client adapter removal (#239)
+
+Removed `ClientMessageDecoder`, `json_variant.rs`, JSON row constructors,
+`PlayerLoadout.apply_payload`, `PositionComponents`, and duplicate
+Dictionary/Vector3 coordinate helpers. GdUnit fixtures now use typed records or
+the real binary decoder; postcard command round trips live in `dawn-wire`
+tests. Absolute positions remain f64 components until rendering.

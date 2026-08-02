@@ -1,7 +1,7 @@
 use dawn_client_core::{WorldSessionEffect, WorldSessionState, WorldSessionUpdate};
 use godot::prelude::*;
 
-use crate::json_variant::Dict;
+type Dict = Dictionary<Variant, Variant>;
 
 use crate::loadout_gd::PlayerLoadout;
 use crate::session_record_gd::{

@@ -27,7 +27,6 @@ const SHIP_SCENE  := preload("res://scenes/ship.tscn")
 const HudSurfaceScript = preload("res://scripts/hud_surface.gd")
 const MarketSurfaceScript = preload("res://scripts/market_surface.gd")
 const WorldPresentationScript = preload("res://scripts/world_presentation.gd")
-const PositionComponents = preload("res://scripts/position_components.gd")
 const WorldInteractionScript = preload("res://scripts/world_interaction.gd")
 const InventoryRow = preload("res://scripts/inventory_row.gd")
 ## Unit-to-metre scale: real metres = (units/tick or units) * METERS_PER_UNIT,
@@ -173,41 +172,6 @@ var _client_rules := ClientRules.new()
 ## by global class_name for the same headless-test-cache reason as WorldSpace.
 const UnitFormat = preload("res://scripts/unit_format.gd")
 
-## Converts a legacy f32 server-space position (Y-up, +Z) into Godot world
-## space (Y-up, -Z), relative to the floating origin. Absolute wire positions
-## use `_server_components_to_godot` so they are narrowed only after subtraction.
-## Thin wrapper kept for legacy event payloads and tests.
-func _server_to_godot_pos(p: Vector3) -> Vector3:
-	return _world.to_godot(p)
-
-## Reads a legacy f32 {x,y,z} sub-dictionary (for example PosWire event fields)
-## into a Vector3. Absolute f64 position fields use the component helper below.
-func _vec3_from_dict(d: Dictionary, key: String) -> Vector3:
-	var value: Dictionary = d.get(key, {}) as Dictionary
-	return Vector3(
-		value.get("x", 0.0) as float,
-		value.get("y", 0.0) as float,
-		value.get("z", 0.0) as float)
-
-func _position_components_from_dict(d: Dictionary, key: String) -> PackedFloat64Array:
-	return PositionComponents.from_dict(d, key)
-
-func _position_components(value: Variant) -> PackedFloat64Array:
-	return PositionComponents.from_value(value)
-
-func _server_components_to_godot(position: PackedFloat64Array) -> Vector3:
-	return _world.to_godot_components(position[0], position[1], position[2])
-
-func _velocity_components_to_vec3(velocity: PackedFloat64Array) -> Vector3:
-	return Vector3(velocity[0], velocity[1], velocity[2])
-
-## Reads a {dx,dy,dz} velocity sub-dictionary from a wire payload.
-func _velocity_from_dict(d: Dictionary, key: String = "velocity") -> Vector3:
-	var velocity: Dictionary = d.get(key, {}) as Dictionary
-	return Vector3(
-		velocity.get("dx", 0.0) as float,
-		velocity.get("dy", 0.0) as float,
-		velocity.get("dz", 0.0) as float)
 
 ## Tracks whether the player ship is within activation range of a Jump Gate
 ## (ADR-0009). Distance is computed in server units by WorldSpace.
@@ -218,7 +182,7 @@ func _update_gate_proximity() -> void:
 	var ship_pos := _world.to_server_components((_ships[_player_ship_id] as Node3D).global_position)
 	for entry: Variant in _gates:
 		var gate: GateRecord = entry as GateRecord
-		var gate_pos := _position_components(gate.position)
+		var gate_pos := gate.position
 		if _world.distance_components(ship_pos, gate_pos) <= gate.activation_radius:
 			_nearby_gate_id = gate.gate_id
 			return
@@ -236,7 +200,7 @@ func _update_station_proximity() -> void:
 	var in_range: Array[Dictionary] = []
 	for entry: Variant in _stations:
 		var station: StationRecord = entry as StationRecord
-		var station_pos := _position_components(station.position)
+		var station_pos := station.position
 		var dist: float = _world.distance_components(ship_pos, station_pos)
 		if dist <= station.docking_radius:
 			in_range.append({"station_id": station.station_id, "distance": dist})
@@ -431,7 +395,7 @@ func _selected_gate_distance() -> float:
 		var gate: GateRecord = entry as GateRecord
 		if gate.gate_id != selected_gate_id:
 			continue
-		return _world.distance_components(ship_server, _position_components(gate.position))
+		return _world.distance_components(ship_server, gate.position)
 	return -1.0
 
 # -- Right-click -> LockOnCommand ---------------------------------------------
@@ -522,7 +486,7 @@ func _handle_ship_docked(
 	for entry: Variant in _stations:
 		var station: StationRecord = entry as StationRecord
 		if station.station_id == station_id:
-			dock_pos = _position_components(station.position)
+			dock_pos = station.position
 			break
 	if not (ship.call("dock_motion", dock_pos, tick) as bool):
 		return
@@ -633,7 +597,6 @@ func _ingest_star_map() -> void:
 		_gates,
 		_bodies,
 		_stations,
-		_server_components_to_godot,
 		Callable(_interaction, "clear_navigation_selection")
 	)
 func _instantiate_ship(sid: int, server_pos: PackedFloat64Array) -> Node3D:
@@ -657,7 +620,7 @@ func _spawn_ship_from_record(record: ShipPresentation, became_player: bool) -> v
 		record.mass,
 		record.inertia_modifier,
 		server_pos,
-		_velocity_components_to_vec3(record.velocity),
+		Vector3(record.velocity[0], record.velocity[1], record.velocity[2]),
 		_session.current_tick())
 	_ships[sid] = ship
 	_sync_session_state()
@@ -978,7 +941,7 @@ func _handle_velocity_changed(
 	if not _ships.has(ship_id):
 		return
 	(_ships[ship_id] as Node3D).call(
-		"set_velocity", _velocity_components_to_vec3(velocity), tick)
+		"set_velocity", Vector3(velocity[0], velocity[1], velocity[2]), tick)
 	_sync_session_state()
 func _handle_motion_correction(correction: MotionCorrectionPresentation) -> void:
 	if correction.ship_id != _player_ship_id or not _ships.has(correction.ship_id):
@@ -986,7 +949,7 @@ func _handle_motion_correction(correction: MotionCorrectionPresentation) -> void
 	(_ships[correction.ship_id] as Node3D).call(
 		"reconcile_motion",
 		correction.position,
-		_velocity_components_to_vec3(correction.velocity),
+		Vector3(correction.velocity[0], correction.velocity[1], correction.velocity[2]),
 		correction.tick)
 func _handle_ship_despawned(ship_id: int, removed: bool) -> void:
 	var ship: Node3D = _ships.get(ship_id) as Node3D
