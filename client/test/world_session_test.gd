@@ -117,7 +117,7 @@ func test_client_ticks_advance_capacitor_without_server_events() -> void:
 	var fixture_modules: Array[ModuleRow] = [module]
 	var owned_ships: Array[OwnedShipRow] = []
 	assert_bool(loadout.test_fixture(
-		0, fixture_modules, -1, "", -1, owned_ships
+		0, fixture_modules, -1, "", 11, owned_ships
 	)).is_true()
 
 	_session.advance_client_ticks(1, loadout)
