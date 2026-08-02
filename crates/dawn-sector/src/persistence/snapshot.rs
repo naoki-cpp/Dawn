@@ -499,10 +499,7 @@ struct SnapshotBackup {
 }
 
 impl SnapshotBackup {
-    fn capture(
-        destination: &Path,
-        protection: &SnapshotProtection,
-    ) -> io::Result<Option<Self>> {
+    fn capture(destination: &Path, protection: &SnapshotProtection) -> io::Result<Option<Self>> {
         let backup_path = snapshot_sibling(destination, ".rollback")?;
         match fs::metadata(&backup_path) {
             Ok(_) => {
@@ -621,7 +618,6 @@ fn publish_snapshot(
     destination: &Path,
     replacing_existing: bool,
 ) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
     use std::ptr;
 
     const MOVE_FILE_WRITE_THROUGH: u32 = 0x0000_0008;
