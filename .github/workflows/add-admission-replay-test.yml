@@ -101,3 +101,5 @@ jobs:
           git commit -m 'test(admission): verify abort survives event replay'
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push origin HEAD:agent/transactional-client-admission-253
+
+# Triggered after workflow registration.
