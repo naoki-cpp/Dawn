@@ -1,0 +1,51 @@
+name: Fix issue 251 callback argument type
+
+on:
+  push:
+    branches:
+      - issue-251-client-fact-policy
+    paths:
+      - .github/workflows/issue-251-type-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: issue-251-client-fact-policy
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.1
+          components: rustfmt, clippy
+
+      - name: Fix, validate, and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/dawn-client-gdext/src/server_message_gd.rs")
+          text = path.read_text()
+          old = "fn call_connection(target: &mut Gd<Object>, method: &str, arguments: &[&dyn ToGodot]) -> bool {"
+          new = "fn call_connection(target: &mut Gd<Object>, method: &str, arguments: &[Variant]) -> bool {"
+          if text.count(old) != 1:
+              raise SystemExit("call_connection signature anchor not found exactly once")
+          path.write_text(text.replace(old, new))
+          PY
+          cargo fmt --all
+          cargo check -p dawn-client-gdext --all-targets
+          cargo clippy -p dawn-client-gdext --all-targets -- -D warnings
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/issue-251-type-fix.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: use Variant arguments at the Godot call seam"
+          git push origin HEAD:issue-251-client-fact-policy
