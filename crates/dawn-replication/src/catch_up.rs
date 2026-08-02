@@ -676,8 +676,8 @@ impl CatchUpManager {
         step: &mut CatchUpStep,
     ) {
         self.sessions.remove(&sector_id);
-        let ticks_until_restart = Self::is_transient_failure(kind)
-            .then_some(self.config.failure_retry_interval_ticks);
+        let ticks_until_restart =
+            Self::is_transient_failure(kind).then_some(self.config.failure_retry_interval_ticks);
         self.failures.insert(
             sector_id,
             CatchUpFailureState {
@@ -957,9 +957,7 @@ mod tests {
         assert!(matches!(
             failed.events.as_slice(),
             [CatchUpEvent::Failed(CatchUpFailure {
-                kind: CatchUpFailureKind::Remote(
-                    CatchUpUnavailable::RetainedSuffixUnavailable
-                ),
+                kind: CatchUpFailureKind::Remote(CatchUpUnavailable::RetainedSuffixUnavailable),
                 ..
             })]
         ));
@@ -998,11 +996,7 @@ mod tests {
         let mut manager = CatchUpManager::new(SectorId(2), config(2));
         let receiver_store = InMemoryEventStore::new();
 
-        manager.ingest_batch(LogBatch::new(
-            owner_sector,
-            0,
-            vec![event(0), event(1)],
-        ));
+        manager.ingest_batch(LogBatch::new(owner_sector, 0, vec![event(0), event(1)]));
         let gap = manager.ingest_batch(LogBatch::new(owner_sector, 4, vec![event(4)]));
         let request = only_request(&gap);
         manager.handle_message(
@@ -1011,11 +1005,8 @@ mod tests {
             || None,
         );
 
-        let progress = manager.ingest_batch(LogBatch::new(
-            owner_sector,
-            2,
-            vec![event(2), event(3)],
-        ));
+        let progress =
+            manager.ingest_batch(LogBatch::new(owner_sector, 2, vec![event(2), event(3)]));
         assert!(matches!(
             progress.events.as_slice(),
             [CatchUpEvent::Applied {
