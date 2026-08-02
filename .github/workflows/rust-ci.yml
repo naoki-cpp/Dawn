@@ -215,3 +215,48 @@ jobs:
             echo "One or more required jobs failed."
             exit 1
           fi
+
+  apply-admission-review-2:
+    name: Apply admission review 2 fixes
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 260 && github.head_ref == 'agent/transactional-client-admission-253'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/transactional-client-admission-253
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Apply fixes
+        run: python3 .github/apply-admission-review-2.py
+
+      - name: Format and validate
+        run: |
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test -p dawn-sector -p dawn-sector-node -p dawn-simulation
+          cargo test --workspace --all-targets
+
+      - name: Commit clean result
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/rust-ci.yml')
+          text = path.read_text()
+          marker = '\n  apply-admission-review-2:\n'
+          if text.count(marker) != 1:
+              raise SystemExit('temporary job marker missing or duplicated')
+          path.write_text(text.split(marker, 1)[0] + '\n')
+          PY
+          rm .github/apply-admission-review-2.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(admission): persist ids and serialize resumes"
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:agent/transactional-client-admission-253
