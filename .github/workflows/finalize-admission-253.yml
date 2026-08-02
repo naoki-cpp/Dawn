@@ -42,6 +42,17 @@ jobs:
           Path('/tmp/fix_admission.py').write_text(textwrap.dedent(body))
           PY
           python3 /tmp/fix_admission.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/dawn-sector/src/node/mod.rs')
+          text = path.read_text()
+          old = '        node.despawn_incomplete_handshake_spawn(ship_id);\n'
+          new = '        node.despawn_incomplete_handshake_spawn(dawn_core::PlayerId(0), ship_id);\n'
+          if text.count(old) != 1:
+              raise SystemExit(f'rollback unit test call: expected one match, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
           cargo fmt --all
 
       - name: Check formatting
