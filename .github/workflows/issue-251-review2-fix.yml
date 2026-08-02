@@ -1,9 +1,11 @@
 name: Issue 251 review follow-up fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - issue-251-client-fact-policy
+      - main
+    types:
+      - synchronize
     paths:
       - .github/workflows/issue-251-review2-fix.yml
 
@@ -12,6 +14,7 @@ permissions:
 
 jobs:
   fix-and-test:
+    if: github.head_ref == 'issue-251-client-fact-policy'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
