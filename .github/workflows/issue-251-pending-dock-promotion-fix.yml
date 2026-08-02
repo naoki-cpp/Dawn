@@ -1,0 +1,47 @@
+name: Apply pending dock promotion fix
+
+on:
+  push:
+    branches:
+      - issue-251-client-fact-policy
+    paths:
+      - .github/workflows/issue-251-pending-dock-promotion-fix.yml
+      - .github/apply_pending_dock_promotion_fix.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Apply patch
+        run: python .github/apply_pending_dock_promotion_fix.py
+
+      - name: Format Rust
+        run: cargo fmt --all
+
+      - name: Check patch
+        run: git diff --check
+
+      - name: Test client core
+        run: cargo test -p dawn-client-core
+
+      - name: Test GDExtension adapter
+        run: cargo test -p dawn-client-gdext
+
+      - name: Commit production fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/apply_pending_dock_promotion_fix.py
+          git rm .github/workflows/issue-251-pending-dock-promotion-fix.yml
+          git add client/scripts/main.gd client/test/main_test.gd crates/dawn-client-gdext/src/server_message_gd.rs
+          git commit -m "Preserve dock state when pending ship becomes active"
+          git push
