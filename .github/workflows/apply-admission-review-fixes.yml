@@ -31,5 +31,31 @@ jobs:
           script = "\n".join(
               line[10:] if line.startswith("          ") else line for line in lines
           )
+          old_abort_rewrite = """replace_once(
+              admission,
+              '''    pub fn abort<S: EventStore>(self, node: &mut SimulationNode<S>) {
+        if self.origin == AdmissionOrigin::Fresh {
+            node.despawn_incomplete_handshake_spawn(self.player_id, self.ship_id);
+        }
+    }''',
+              '''    pub fn abort<S: EventStore>(self, node: &mut SimulationNode<S>) {
+        if matches!(self.origin, AdmissionOrigin::Fresh { .. }) {
+            node.abort_reserved_fresh_admission(self.ship_id);
+        }
+    }''',
+          )"""
+          new_abort_rewrite = """replace_regex(
+              admission,
+              r'    pub fn abort<S: EventStore>\\(self, node: &mut SimulationNode<S>\\) \\{.*?\\n    }\\n',
+              '''    pub fn abort<S: EventStore>(self, node: &mut SimulationNode<S>) {
+        if matches!(self.origin, AdmissionOrigin::Fresh { .. }) {
+            node.abort_reserved_fresh_admission(self.ship_id);
+        }
+    }
+''',
+          )"""
+          if old_abort_rewrite not in script:
+              raise SystemExit("historical abort rewrite source not found")
+          script = script.replace(old_abort_rewrite, new_abort_rewrite, 1)
           exec(compile(script, "<admission-review-fix>", "exec"))
           PY
