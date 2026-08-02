@@ -33,6 +33,7 @@
 //! ```
 
 mod client_rules;
+mod client_state;
 mod item_row;
 mod loadout;
 mod module_row;
@@ -42,6 +43,7 @@ mod world_session;
 mod world_space;
 
 pub use client_rules::ClientRules;
+pub use client_state::{ClientFact, ClientState, ClientStateError, ShipLeaveReason};
 pub use dawn_core::StatDelta;
 pub use item_row::ItemRow;
 pub use loadout::{
