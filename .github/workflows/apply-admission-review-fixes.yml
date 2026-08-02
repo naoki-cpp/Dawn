@@ -27,26 +27,18 @@ jobs:
           )
           start = source.index("          python3 <<'PY'\n") + len("          python3 <<'PY'\n")
           end = source.index("\n          PY\n", start)
-          lines = source[start:end].splitlines()
-          script = "\n".join(
-              line[10:] if line.startswith("          ") else line for line in lines
-          )
-          abort_start = script.index(
-              "replace_once(\n    admission,\n    '''    pub fn abort<S: EventStore>"
-          )
-          abort_end = script.index("\nreplace_regex(", abort_start)
-          abort_rewrite = (
-              "replace_regex(\n"
-              "    admission,\n"
-              "    r'    pub fn abort<S: EventStore>\\(self, node: &mut SimulationNode<S>\\) \\{.*?\\n    }\\n',\n"
-              "    '''    pub fn abort<S: EventStore>(self, node: &mut SimulationNode<S>) {\n"
-              "        if matches!(self.origin, AdmissionOrigin::Fresh { .. }) {\n"
-              "            node.abort_reserved_fresh_admission(self.ship_id);\n"
-              "        }\n"
-              "    }\n"
-              "''',\n"
-              ")"
-          )
-          script = script[:abort_start] + abort_rewrite + script[abort_end:]
+          output = []
+          in_triple = False
+          for raw_line in source[start:end].splitlines():
+              if in_triple:
+                  line = raw_line
+              else:
+                  line = raw_line[10:] if raw_line.startswith("          ") else raw_line
+              output.append(line)
+              if line.count("'''") % 2 == 1:
+                  in_triple = not in_triple
+          if in_triple:
+              raise SystemExit("unterminated triple-quoted literal in historical patch")
+          script = "\n".join(output)
           exec(compile(script, "<admission-review-fix>", "exec"))
           PY
