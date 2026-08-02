@@ -11,8 +11,7 @@ use std::collections::HashMap;
 
 use crate::node::SimulationNode;
 use dawn_core::{
-    AbsolutePosition, DomainEvent, JumpGateId, Position, SectorId, ShipId, Tick,
-    TransitHandoffState,
+    AbsolutePosition, DomainEvent, JumpGateId, SectorId, ShipId, Tick, TransitHandoffState,
 };
 use dawn_event_store::store::EventStore;
 
@@ -21,8 +20,7 @@ pub(crate) struct CommitProposal {
     pub handoff: TransitHandoffState,
     pub from: SectorId,
     pub to: SectorId,
-    pub entry_pos: Position,
-    pub entry_pos_abs: AbsolutePosition,
+    pub entry_pos: AbsolutePosition,
     pub gate_id: Option<JumpGateId>,
     pub request_tick: Tick,
 }
@@ -64,8 +62,7 @@ struct PendingTransit {
     to: SectorId,
     request_tick: Tick,
     gate_id: Option<JumpGateId>,
-    entry_pos: Position,
-    entry_pos_abs: AbsolutePosition,
+    entry_pos: AbsolutePosition,
 }
 
 fn pending_outgoing_transits<S: EventStore>(node: &SimulationNode<S>) -> Vec<PendingTransit> {
@@ -83,7 +80,6 @@ fn pending_outgoing_transits<S: EventStore>(node: &SimulationNode<S>) -> Vec<Pen
                         request_tick: event.request_tick,
                         gate_id: event.gate_id,
                         entry_pos: event.entry_pos,
-                        entry_pos_abs: event.entry_pos_abs,
                     },
                 );
             }
@@ -163,12 +159,7 @@ fn complete_superseded_outgoing_transit<S: EventStore>(
     else {
         return false;
     };
-    node.complete_outgoing_transit(
-        ship_id,
-        pending.to,
-        pending.entry_pos_abs,
-        pending.request_tick,
-    );
+    node.complete_outgoing_transit(ship_id, pending.to, pending.entry_pos, pending.request_tick);
     true
 }
 
@@ -205,7 +196,6 @@ pub(crate) fn apply_request<S: EventStore>(
         from: node.sector_id(),
         to,
         entry_pos: data.entry_pos,
-        entry_pos_abs: data.entry_pos_abs,
         gate_id,
         request_tick,
     })
@@ -220,8 +210,7 @@ pub(crate) fn apply_commit<S: EventStore>(
     handoff: &TransitHandoffState,
     from: SectorId,
     to: SectorId,
-    entry_pos: Position,
-    entry_pos_abs: AbsolutePosition,
+    entry_pos: AbsolutePosition,
     gate_id: Option<JumpGateId>,
     request_tick: Tick,
 ) -> Option<AckProposal> {
@@ -251,16 +240,8 @@ pub(crate) fn apply_commit<S: EventStore>(
                 request_tick,
                 gate_id,
                 entry_pos,
-                entry_pos_abs,
             );
-            node.handle_transit_commit(
-                handoff,
-                from,
-                entry_pos,
-                entry_pos_abs,
-                gate_id,
-                request_tick,
-            );
+            node.handle_transit_commit(handoff, from, entry_pos, gate_id, request_tick);
         }
     }
 
@@ -287,12 +268,7 @@ pub(crate) fn apply_ack<S: EventStore>(
     let Some(pending) = matching_request(node, ship_id, from, to, request_tick) else {
         return false;
     };
-    node.complete_outgoing_transit(
-        ship_id,
-        pending.to,
-        pending.entry_pos_abs,
-        pending.request_tick,
-    );
+    node.complete_outgoing_transit(ship_id, pending.to, pending.entry_pos, pending.request_tick);
     true
 }
 
@@ -314,7 +290,6 @@ pub(crate) fn due_retries<S: EventStore>(node: &mut SimulationNode<S>) -> Vec<Co
             from: transit.from,
             to: transit.to,
             entry_pos: transit.entry_pos,
-            entry_pos_abs: transit.entry_pos_abs,
             gate_id: transit.gate_id,
             request_tick: transit.request_tick,
         });
@@ -326,7 +301,7 @@ pub(crate) fn due_retries<S: EventStore>(node: &mut SimulationNode<S>) -> Vec<Co
 mod tests {
     use super::*;
     use dawn_core::events::{SectorTransitCompleted, SectorTransitRequested};
-    use dawn_core::{NodeId, SectorBounds, ShipTypeId, Velocity};
+    use dawn_core::{NodeId, Position, SectorBounds, ShipTypeId, Velocity};
     use dawn_event_store::InMemoryEventStore;
 
     fn node(sector: u8) -> SimulationNode {
@@ -348,7 +323,7 @@ mod tests {
         source.complete_outgoing_transit(
             proposal.handoff.ship_id,
             proposal.to,
-            proposal.entry_pos_abs,
+            proposal.entry_pos,
             proposal.request_tick,
         );
         assert!(!has_pending_outgoing_transit(&source));
@@ -367,7 +342,6 @@ mod tests {
             proposal.from,
             proposal.to,
             proposal.entry_pos,
-            proposal.entry_pos_abs,
             proposal.gate_id,
             proposal.request_tick,
         );
@@ -378,7 +352,6 @@ mod tests {
             proposal.from,
             proposal.to,
             proposal.entry_pos,
-            proposal.entry_pos_abs,
             proposal.gate_id,
             proposal.request_tick,
         );
@@ -401,7 +374,6 @@ mod tests {
             outbound.from,
             outbound.to,
             outbound.entry_pos,
-            outbound.entry_pos_abs,
             outbound.gate_id,
             outbound.request_tick,
         )
@@ -417,7 +389,6 @@ mod tests {
             returning.from,
             returning.to,
             returning.entry_pos,
-            returning.entry_pos_abs,
             returning.gate_id,
             returning.request_tick,
         )
@@ -479,8 +450,7 @@ mod tests {
             to,
             request_tick: Tick(request_tick),
             gate_id: None,
-            entry_pos: Position::ORIGIN,
-            entry_pos_abs: AbsolutePosition::ORIGIN,
+            entry_pos: AbsolutePosition::ORIGIN,
             tick: Tick(event_tick),
         })
     }
@@ -564,7 +534,6 @@ mod tests {
             &test_handoff(ship_id),
             SectorId(0),
             SectorId(1),
-            Position::ORIGIN,
             AbsolutePosition::ORIGIN,
             None,
             Tick(10),

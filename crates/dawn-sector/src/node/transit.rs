@@ -36,8 +36,7 @@ use super::SimulationNode;
 #[derive(Debug)]
 pub struct TransitCommitData {
     pub handoff: Box<TransitHandoffState>,
-    pub entry_pos: Position,
-    pub entry_pos_abs: dawn_core::AbsolutePosition,
+    pub entry_pos: dawn_core::AbsolutePosition,
     pub request_tick: Tick,
 }
 
@@ -100,21 +99,15 @@ impl<S: EventStore> SimulationNode<S> {
     /// not called directly outside this module.
     #[cfg(test)]
     pub(super) fn propose_transit(&mut self, cmd: TransitCommand) -> Result<(), DawnError> {
-        self.propose_transit_with_route(
-            cmd,
-            None,
-            Position::ORIGIN,
-            dawn_core::AbsolutePosition::ORIGIN,
-        )
-        .map(|_| ())
+        self.propose_transit_with_route(cmd, None, dawn_core::AbsolutePosition::ORIGIN)
+            .map(|_| ())
     }
 
     fn begin_transit_with_route(
         &mut self,
         cmd: TransitCommand,
         gate_id: Option<JumpGateId>,
-        entry_pos: Position,
-        entry_pos_abs: dawn_core::AbsolutePosition,
+        entry_pos: dawn_core::AbsolutePosition,
     ) -> Result<(Tick, DomainEvent), DawnError> {
         let &entity = self
             .ships
@@ -136,7 +129,6 @@ impl<S: EventStore> SimulationNode<S> {
             request_tick,
             gate_id,
             entry_pos,
-            entry_pos_abs,
             tick: self.current_tick,
         });
         Ok((request_tick, event))
@@ -146,11 +138,9 @@ impl<S: EventStore> SimulationNode<S> {
         &mut self,
         cmd: TransitCommand,
         gate_id: Option<JumpGateId>,
-        entry_pos: Position,
-        entry_pos_abs: dawn_core::AbsolutePosition,
+        entry_pos: dawn_core::AbsolutePosition,
     ) -> Result<Tick, DawnError> {
-        let (request_tick, event) =
-            self.begin_transit_with_route(cmd, gate_id, entry_pos, entry_pos_abs)?;
+        let (request_tick, event) = self.begin_transit_with_route(cmd, gate_id, entry_pos)?;
         self.event_store.append(event);
         Ok(request_tick)
     }
@@ -208,31 +198,22 @@ impl<S: EventStore> SimulationNode<S> {
         to: SectorId,
         gate_id: Option<JumpGateId>,
     ) -> Option<TransitCommitData> {
-        let arrival_gate = gate_id.and_then(|_| {
-            self.galaxy()
-                .gates_in_sector(to)
-                .into_iter()
-                .find(|gate| gate.to_sector == self.sector_id())
-        });
-        let entry_pos = arrival_gate
-            .map(|gate| gate.position)
-            .unwrap_or(Position::ORIGIN);
-        let entry_pos_abs = arrival_gate
+        let entry_pos = gate_id
+            .and_then(|_| {
+                self.galaxy()
+                    .gates_in_sector(to)
+                    .into_iter()
+                    .find(|gate| gate.to_sector == self.sector_id())
+            })
             .map(|gate| gate.abs_m)
             .unwrap_or(dawn_core::AbsolutePosition::ORIGIN);
         let request_tick = self
-            .propose_transit_with_route(
-                TransitCommand { ship_id, to },
-                gate_id,
-                entry_pos,
-                entry_pos_abs,
-            )
+            .propose_transit_with_route(TransitCommand { ship_id, to }, gate_id, entry_pos)
             .ok()?;
         let handoff = self.handoff_for_transit(ship_id)?;
         Some(TransitCommitData {
             handoff: Box::new(handoff),
             entry_pos,
-            entry_pos_abs,
             request_tick,
         })
     }
@@ -403,13 +384,13 @@ impl<S: EventStore> SimulationNode<S> {
         &mut self,
         ship_id: ShipId,
         to: SectorId,
-        entry_pos_abs: dawn_core::AbsolutePosition,
+        entry_pos: dawn_core::AbsolutePosition,
         request_tick: Tick,
     ) {
         let Some(handoff) = self.handoff_for_transit(ship_id) else {
             return;
         };
-        let Some(event) = self.complete_outgoing_state(&handoff, to, entry_pos_abs, request_tick)
+        let Some(event) = self.complete_outgoing_state(&handoff, to, entry_pos, request_tick)
         else {
             return;
         };
@@ -420,7 +401,7 @@ impl<S: EventStore> SimulationNode<S> {
         &mut self,
         handoff: &TransitHandoffState,
         to: SectorId,
-        entry_pos_abs: dawn_core::AbsolutePosition,
+        entry_pos: dawn_core::AbsolutePosition,
         request_tick: Tick,
     ) -> Option<DomainEvent> {
         if !self.ships.index.contains_key(&handoff.ship_id) {
@@ -433,7 +414,7 @@ impl<S: EventStore> SimulationNode<S> {
                 from: self.sector_id,
                 to,
                 request_tick,
-                entry_pos: entry_pos_abs,
+                entry_pos,
                 tick: self.current_tick,
             },
         ))
@@ -444,20 +425,45 @@ impl<S: EventStore> SimulationNode<S> {
         &mut self,
         handoff: &TransitHandoffState,
         from: SectorId,
-        entry_pos: Position,
-        entry_pos_abs: dawn_core::AbsolutePosition,
+        entry_pos: dawn_core::AbsolutePosition,
         request_tick: Tick,
     ) {
-        for event in
-            self.materialize_incoming_state(handoff, from, entry_pos, entry_pos_abs, request_tick)
-        {
+        for event in self.materialize_incoming_state(
+            handoff,
+            from,
+            entry_pos,
+            request_tick,
+            self.current_tick,
+        ) {
             self.event_store.append(event);
         }
     }
 
-    /// The single mapping from Transit handoff state into destination ECS.
-    fn restore_ship_from_handoff(&mut self, handoff: &TransitHandoffState, entry_pos: Position) {
-        self.insert_to_world(handoff.ship_id, entry_pos, handoff.velocity);
+    /// The single mapping from Transit handoff state and its absolute
+    /// destination arrival into destination ECS. Anchor selection and
+    /// relative-offset derivation stay local to this seam.
+    fn restore_ship_from_handoff(
+        &mut self,
+        handoff: &TransitHandoffState,
+        entry_pos: dawn_core::AbsolutePosition,
+    ) -> (dawn_core::AnchorId, Position) {
+        self.insert_to_world(handoff.ship_id, Position::ORIGIN, handoff.velocity);
+        let entity = *self
+            .ships
+            .index
+            .get(&handoff.ship_id)
+            .expect("inserted Transit handoff must have an ECS entity");
+        self.place_entity_at_absolute(entity, entry_pos);
+        let anchor = self
+            .world
+            .ship_anchor(entity)
+            .expect("Transit ships always carry AnchorComp");
+        let offset = self
+            .world
+            .get::<PositionComp>(entity)
+            .expect("Transit ships always carry PositionComp")
+            .0;
+
         self.ships
             .type_ids
             .insert(handoff.ship_id, handoff.ship_type_id);
@@ -467,133 +473,71 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|def| ShipStatsComp::from_base(&def.base_stats))
             .unwrap_or(ShipStatsComp::NPC);
         self.base_stats.insert(handoff.ship_id, base);
-        if let Some(&entity) = self.ships.index.get(&handoff.ship_id) {
-            self.world.set_ship_stats(entity, base);
-            let fitting = FittingComp::from_snapshot(&handoff.fitting, &self.module_registry);
-            let _ = self.world.insert_one(entity, fitting);
-            self.reapply_fitting(handoff.ship_id);
-            if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
-                hull.set_hp(
-                    handoff.current_shield,
-                    handoff.current_armor,
-                    handoff.current_hull,
-                );
-            }
-            if let Some(current) = handoff.capacitor {
-                let _ = self.world.insert_one(entity, CapacitorComp { current });
-            }
-            let _ = self.world.insert_one(
-                entity,
-                InventoryComp {
-                    items: handoff.inventory.clone(),
-                },
+        self.world.set_ship_stats(entity, base);
+        let fitting = FittingComp::from_snapshot(&handoff.fitting, &self.module_registry);
+        let _ = self.world.insert_one(entity, fitting);
+        self.reapply_fitting(handoff.ship_id);
+        if let Some(mut hull) = self.world.get_mut::<HullComp>(entity) {
+            hull.set_hp(
+                handoff.current_shield,
+                handoff.current_armor,
+                handoff.current_hull,
             );
         }
+        if let Some(current) = handoff.capacitor {
+            let _ = self.world.insert_one(entity, CapacitorComp { current });
+        }
+        let _ = self.world.insert_one(
+            entity,
+            InventoryComp {
+                items: handoff.inventory.clone(),
+            },
+        );
+        (anchor, offset)
     }
 
     fn materialize_incoming_state(
         &mut self,
         handoff: &TransitHandoffState,
         from: SectorId,
-        entry_pos: Position,
-        entry_pos_abs: dawn_core::AbsolutePosition,
+        entry_pos: dawn_core::AbsolutePosition,
         request_tick: Tick,
-    ) -> Vec<DomainEvent> {
-        self.restore_ship_from_handoff(handoff, entry_pos);
-        let mut events = Vec::with_capacity(2);
-        if let Some(event) = self.rebase_after_transit(handoff.ship_id, entry_pos_abs) {
-            events.push(event);
-        }
-        events.push(DomainEvent::SectorTransitCompleted(
-            SectorTransitCompleted {
+        tick: Tick,
+    ) -> [DomainEvent; 2] {
+        let (anchor, offset) = self.restore_ship_from_handoff(handoff, entry_pos);
+        [
+            DomainEvent::AnchorRebased(dawn_core::events::AnchorRebased {
+                ship_id: handoff.ship_id,
+                anchor,
+                offset,
+                tick,
+            }),
+            DomainEvent::SectorTransitCompleted(SectorTransitCompleted {
                 handoff: handoff.clone(),
                 from,
                 to: self.sector_id,
                 request_tick,
-                entry_pos: entry_pos_abs,
-                tick: self.current_tick,
-            },
-        ));
-        events
+                entry_pos,
+                tick,
+            }),
+        ]
     }
 
     pub fn handle_transit_commit(
         &mut self,
         handoff: &TransitHandoffState,
         from: SectorId,
-        entry_pos: Position,
-        entry_pos_abs: dawn_core::AbsolutePosition,
+        entry_pos: dawn_core::AbsolutePosition,
         gate_id: Option<JumpGateId>,
         request_tick: Tick,
     ) {
         let ship_id = handoff.ship_id;
         self.record_completed_incoming_transit(ship_id, from, self.sector_id, request_tick);
-        self.import_transit(handoff, from, entry_pos, entry_pos_abs, request_tick);
+        self.import_transit(handoff, from, entry_pos, request_tick);
         if let Some(gate_id) = gate_id {
             let to = self.sector_id();
-            self.append_jump_events(ship_id, gate_id, from, to, entry_pos_abs);
+            self.append_jump_events(ship_id, gate_id, from, to, entry_pos);
         }
-    }
-
-    /// Re-anchor a Ship that just arrived in this Sector via Sector Transit
-    /// to the nearest body anchor to `entry_pos_abs`, returning the
-    /// authoritative `AnchorRebased` event for the caller to append
-    /// (ADR-0029). Returns `None` if the Ship or an anchor candidate in this
-    /// Sector can't be found.
-    ///
-    /// Unlike `warp::rebase_arrival_event` (which uses an all-zero
-    /// `[f64; 3]` as an "arrival not engaged yet" sentinel), `entry_pos_abs`
-    /// here is always a deliberate absolute point — a Gate's `abs_m`, or the
-    /// Sector origin for a non-Gate Transit — so there's no fallback-compose
-    /// branch to skip.
-    fn rebase_after_transit(
-        &mut self,
-        ship_id: ShipId,
-        entry_pos_abs: dawn_core::AbsolutePosition,
-    ) -> Option<DomainEvent> {
-        let (anchor, offset) = self.rebase_ship_anchor_state(ship_id, entry_pos_abs)?;
-        Some(DomainEvent::AnchorRebased(
-            dawn_core::events::AnchorRebased {
-                ship_id,
-                anchor,
-                offset,
-                tick: self.current_tick,
-            },
-        ))
-    }
-
-    /// The state-mutation half of `rebase_after_transit`, without appending
-    /// `AnchorRebased`. Returns the `(anchor, offset)` that was set, or
-    /// `None` if the Ship or an anchor candidate couldn't be found.
-    ///
-    /// Needed as its own step for tail replay of `SectorTransitCompleted`
-    /// (issue #204): `import_transit` records `AnchorRebased` *before*
-    /// `SectorTransitCompleted` in the log, so by the time a destination
-    /// Sector's replay reaches the `AnchorRebased` entry the Ship doesn't
-    /// exist there yet — that replay silently no-ops (`apply_event`'s
-    /// `AnchorRebased` arm guards on the Ship already being present). The
-    /// `SectorTransitCompleted` replay redoes this rebase itself, once the
-    /// Ship exists, instead of appending a second `AnchorRebased`.
-    fn rebase_ship_anchor_state(
-        &mut self,
-        ship_id: ShipId,
-        entry_pos_abs: dawn_core::AbsolutePosition,
-    ) -> Option<(dawn_core::AnchorId, Position)> {
-        let &entity = self.ships.index.get(&ship_id)?;
-        let to = self
-            .anchor_table
-            .nearest_anchor(self.sector_id, entry_pos_abs)?;
-        let to_abs = self.anchor_table.abs(to)?;
-        let offset = Position::new(
-            entry_pos_abs[0] - to_abs[0],
-            entry_pos_abs[1] - to_abs[1],
-            entry_pos_abs[2] - to_abs[2],
-        );
-        self.world.set_ship_anchor(entity, to);
-        if let Some(mut p) = self.world.get_mut::<PositionComp>(entity) {
-            p.0 = offset;
-        }
-        Some((to, offset))
     }
 
     /// Tail replay of `SectorTransitRequested` (issue #204): mirrors
@@ -638,17 +582,9 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Tail replay of `SectorTransitCompleted` (issue #204).
     ///
-    /// `self.sector_id` decides which half of the live effect this Sector's
-    /// log recorded: the `from` Sector removed the Ship
-    /// (`complete_outgoing_transit`); the `to` Sector materialized it
-    /// (`import_transit`). The two are mutually exclusive since a Transit
-    /// always crosses Sectors (`from != to`).
-    ///
-    /// The `to` branch feeds `e.handoff` through the same direct
-    /// handoff-to-ECS mapping as live import, without appending new events.
-    /// It then redoes the anchor rebase state directly via
-    /// `rebase_ship_anchor_state` (see that method's doc comment for why the
-    /// already-logged `AnchorRebased` entry can't do this on its own).
+    /// The destination uses the exact same absolute-arrival materialization
+    /// seam as live Commit handling, but discards the events that are
+    /// already present in the replayed log.
     pub(super) fn replay_sector_transit_completed(
         &mut self,
         e: &dawn_core::events::SectorTransitCompleted,
@@ -663,9 +599,13 @@ impl<S: EventStore> SimulationNode<S> {
                 }
                 return;
             }
-            let entry_pos = Position::new(e.entry_pos[0], e.entry_pos[1], e.entry_pos[2]);
-            self.restore_ship_from_handoff(&e.handoff, entry_pos);
-            self.rebase_ship_anchor_state(e.handoff.ship_id, e.entry_pos);
+            let _ = self.materialize_incoming_state(
+                &e.handoff,
+                e.from,
+                e.entry_pos,
+                e.request_tick,
+                e.tick,
+            );
         }
         if e.tick > self.current_tick {
             self.current_tick = e.tick;
@@ -803,8 +743,8 @@ mod tests {
         .unwrap();
         let snapshot = node.export_transit(ship_id).unwrap();
 
-        let entry_pos_abs = dawn_core::AbsolutePosition::new(500.0, 0.0, 0.0);
-        node.complete_outgoing_transit(snapshot.ship_id, SectorId(1), entry_pos_abs, Tick::ZERO);
+        let entry_pos = dawn_core::AbsolutePosition::new(500.0, 0.0, 0.0);
+        node.complete_outgoing_transit(snapshot.ship_id, SectorId(1), entry_pos, Tick::ZERO);
 
         assert!(
             !node.ships.index.contains_key(&ship_id),
@@ -818,7 +758,7 @@ mod tests {
                 assert_eq!(e.handoff.ship_id, ship_id);
                 assert_eq!(e.from, node.sector_id());
                 assert_eq!(e.to, SectorId(1));
-                assert_eq!(e.entry_pos, entry_pos_abs);
+                assert_eq!(e.entry_pos, entry_pos);
             }
             other => panic!("expected SectorTransitCompleted, got {other:?}"),
         }
@@ -834,10 +774,10 @@ mod tests {
         })
         .unwrap();
         let snapshot = node.export_transit(ship_id).unwrap();
-        let entry_pos_abs = dawn_core::AbsolutePosition::ORIGIN;
+        let entry_pos = dawn_core::AbsolutePosition::ORIGIN;
 
-        node.complete_outgoing_transit(snapshot.ship_id, SectorId(1), entry_pos_abs, Tick::ZERO);
-        node.complete_outgoing_transit(snapshot.ship_id, SectorId(1), entry_pos_abs, Tick::ZERO);
+        node.complete_outgoing_transit(snapshot.ship_id, SectorId(1), entry_pos, Tick::ZERO);
+        node.complete_outgoing_transit(snapshot.ship_id, SectorId(1), entry_pos, Tick::ZERO);
 
         let completed_count = node
             .event_store()
@@ -928,13 +868,7 @@ mod tests {
         let entry_pos = Position::new(500.0, 0.0, 0.0);
         let snapshot = from_node.export_transit(ship_id).unwrap();
 
-        to_node.import_transit(
-            &snapshot,
-            SectorId(0),
-            entry_pos,
-            entry_pos.into(),
-            Tick::ZERO,
-        );
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos.into(), Tick::ZERO);
 
         assert_eq!(to_node.ship_count(), 1);
         assert_eq!(to_node.get_ship_position(ship_id), Some(entry_pos));
@@ -955,7 +889,7 @@ mod tests {
     /// *return* Gate's `activation_radius`, so it can jump straight back.
     /// `entry_pos` alone is not sufficient to re-anchor against the destination
     /// body — `import_transit` must use
-    /// the precise `entry_pos_abs` (the gate's `abs_m`) to set up the arriving
+    /// the precise `entry_pos` (the gate's `abs_m`) to set up the arriving
     /// Ship's anchor in the destination Sector (ADR-0029). Without that
     /// re-anchoring, the Ship keeps its *source*-Sector anchor and its
     /// absolute position computes to nonsense, so `can_propose_jump` for the
@@ -994,10 +928,9 @@ mod tests {
         // Mirrors `transit::apply_committed_raft_entries`'s Request handler:
         // arrive at the return gate's position so the player can jump
         // straight back (ADR-0009).
-        let entry_pos = return_gate.position;
-        let entry_pos_abs = return_gate.abs_m;
+        let entry_pos = return_gate.abs_m;
         let snapshot = from_node.export_transit(ship_id).unwrap();
-        to_node.import_transit(&snapshot, SectorId(0), entry_pos, entry_pos_abs, Tick::ZERO);
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos, Tick::ZERO);
 
         assert!(
             to_node.can_propose_jump(ship_id, return_gate.id),
@@ -1043,7 +976,7 @@ mod tests {
             .prepare_transit_commit(ship_id, SectorId(1), Some(outbound_gate.id))
             .expect("transit must be accepted and the ship exported");
         assert_eq!(
-            data.entry_pos_abs, return_gate.abs_m,
+            data.entry_pos, return_gate.abs_m,
             "the arrival point must be the return gate's precise abs_m, not Sector 0's"
         );
 
@@ -1051,7 +984,6 @@ mod tests {
             &data.handoff,
             SectorId(0),
             data.entry_pos,
-            data.entry_pos_abs,
             Some(outbound_gate.id),
             data.request_tick,
         );
@@ -1121,13 +1053,7 @@ mod tests {
             .unwrap();
         let entry_pos = Position::new(500.0, 0.0, 0.0);
         let snapshot = from_node.export_transit(ship_id).unwrap();
-        to_node.import_transit(
-            &snapshot,
-            SectorId(0),
-            entry_pos,
-            entry_pos.into(),
-            Tick::ZERO,
-        );
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos.into(), Tick::ZERO);
 
         let after_entity = *to_node.ships.index.get(&ship_id).unwrap();
         let after = to_node
@@ -1168,7 +1094,6 @@ mod tests {
         to_node.import_transit(
             &snapshot,
             SectorId(0),
-            Position::ORIGIN,
             dawn_core::AbsolutePosition::ORIGIN,
             Tick::ZERO,
         );
@@ -1239,13 +1164,7 @@ mod tests {
         assert_eq!(from_node.ship_count(), 1);
         assert_eq!(to_node.ship_count(), 0);
 
-        to_node.import_transit(
-            &snapshot,
-            SectorId(0),
-            entry_pos,
-            entry_pos.into(),
-            Tick::ZERO,
-        );
+        to_node.import_transit(&snapshot, SectorId(0), entry_pos.into(), Tick::ZERO);
         from_node.complete_outgoing_transit(
             snapshot.ship_id,
             SectorId(1),
@@ -1296,13 +1215,7 @@ mod tests {
                 std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
                 store,
             );
-            to_node.import_transit(
-                &snapshot,
-                SectorId(0),
-                entry_pos,
-                entry_pos.into(),
-                Tick::ZERO,
-            );
+            to_node.import_transit(&snapshot, SectorId(0), entry_pos.into(), Tick::ZERO);
 
             let snap = to_node.take_snapshot();
             snap.save(&snap_path).unwrap();
@@ -1363,13 +1276,7 @@ mod tests {
                 })
                 .unwrap();
             let snapshot = from_node.export_transit(ship_id).unwrap();
-            to_node.import_transit(
-                &snapshot,
-                SectorId(0),
-                entry_pos,
-                entry_pos.into(),
-                Tick::ZERO,
-            );
+            to_node.import_transit(&snapshot, SectorId(0), entry_pos.into(), Tick::ZERO);
             total += start.elapsed();
 
             let _ = i;
@@ -1393,8 +1300,7 @@ mod tests {
                 to: SectorId(1),
                 request_tick: Tick(1),
                 gate_id: None,
-                entry_pos: dawn_core::Position::ORIGIN,
-                entry_pos_abs: dawn_core::AbsolutePosition::ORIGIN,
+                entry_pos: dawn_core::AbsolutePosition::ORIGIN,
                 tick: Tick(1),
             },
         ));
@@ -1422,8 +1328,7 @@ mod tests {
                 to: SectorId(1),
                 request_tick: Tick(7),
                 gate_id: None,
-                entry_pos: Position::ORIGIN,
-                entry_pos_abs: dawn_core::AbsolutePosition::ORIGIN,
+                entry_pos: dawn_core::AbsolutePosition::ORIGIN,
                 tick: Tick(3),
             },
         ));
@@ -1442,8 +1347,7 @@ mod tests {
                 to: SectorId(1),
                 request_tick: Tick(1),
                 gate_id: None,
-                entry_pos: dawn_core::Position::ORIGIN,
-                entry_pos_abs: dawn_core::AbsolutePosition::ORIGIN,
+                entry_pos: dawn_core::AbsolutePosition::ORIGIN,
                 tick: Tick(1),
             },
         ));
@@ -1598,21 +1502,16 @@ mod tests {
                 to: SectorId(1),
             })
             .unwrap();
-        let entry_pos = Position::new(500.0, 0.0, 0.0);
-        let entry_pos_abs = dawn_core::AbsolutePosition::from(entry_pos);
+        let entry_offset = Position::new(500.0, 0.0, 0.0);
+        let entry_pos = dawn_core::AbsolutePosition::from(entry_offset);
         let exported = from_node.export_transit(ship_id).unwrap();
-        to_node.import_transit(&exported, SectorId(0), entry_pos, entry_pos_abs, Tick::ZERO);
+        to_node.import_transit(&exported, SectorId(0), entry_pos, Tick::ZERO);
         // The durability fix (issue #204) this test targets: `from_node` only
         // removes the ship and records SectorTransitCompleted once it
         // observes the *same* Commit the destination acted on -- mirroring
         // `transit::apply_committed_raft_entries`'s `from == node.sector_id()`
         // branch, not the old immediate removal at export time.
-        from_node.complete_outgoing_transit(
-            exported.ship_id,
-            SectorId(1),
-            entry_pos_abs,
-            Tick::ZERO,
-        );
+        from_node.complete_outgoing_transit(exported.ship_id, SectorId(1), entry_pos, Tick::ZERO);
 
         // Simulate a restart of both Sectors: snapshot + tail-log replay,
         // exactly as `restore_from` is used in production recovery.
@@ -1665,7 +1564,7 @@ mod tests {
         );
         assert_eq!(
             restored_to.get_ship_position(ship_id),
-            Some(entry_pos),
+            Some(entry_offset),
             "the imported ship must land at the transit entry position, \
              the same as the live import_transit path"
         );

@@ -54,6 +54,9 @@ Velocity          : 1 tick あたりの変位。f64。サーバー物理・wire�
    ロジックがこれらを直接読むことは許可しない。
 6. wireの位置フィールドは「絶対」か「クライアント向けローカル」かを型と名前で
    明示し、同じ`PosWire`を意味の異なる座標に使い回さない。
+7. Sector Transitの到着事実は一つの`AbsolutePosition`だけをEvent、retry、Raft payloadで
+   伝播する。anchor選択とlocal offset導出はdestination materializationに閉じ、
+   live importとreplayで同じ変換実装を使う。
 
 最終的な型変更は、`dawn-core::Position`の意味・型、イベント、スナップショット、
 wireスキーマを一括した移行として扱う。ADRの承認前に、既存の`Position`を部分的に

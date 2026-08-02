@@ -23,6 +23,12 @@ Post-release (once production logs exist):
 
 **We are currently in Phase 6 (pre-release). Breaking changes are permitted.**
 
+Current pre-release schema simplifications must still be atomic across code and documentation.
+For example, the Sector Transit arrival schema carries only one authoritative
+`AbsolutePosition`; removing the former paired relative/absolute fields requires no
+Upcaster because no production persistence exists, but the Event Catalog and ADRs must
+change in the same pull request.
+
 ---
 
 ## Post-release basic principle
