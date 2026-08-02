@@ -1,0 +1,109 @@
+t-gdext/src/session_record_gd.rs", text)
+
+# Coordinate adapter deletion in GDScript.
+text = read("client/scripts/navigation_marker_renderer.gd")
+text = replace_once(
+    text,
+    'const PositionComponents = preload("res://scripts/position_components.gd")\n\n',
+    "",
+    "remove marker PositionComponents preload",
+)
+text = replace_once(
+    text,
+    "\t\tvar gate_pos := PositionComponents.from_value(g.position)",
+    "\t\tvar gate_pos: PackedFloat64Array = g.position",
+    "typed gate position",
+)
+text = replace_once(
+    text,
+    "\t\tmarker.position = to_godot_components.call(gate_pos) as Vector3",
+    "\t\tmarker.position = to_godot_components.call(gate_pos[0], gate_pos[1], gate_pos[2]) as Vector3",
+    "render gate position",
+)
+text = replace_once(
+    text,
+    "\t\tvar b_pos   := PositionComponents.from_value(b.position)",
+    "\t\tvar b_pos: PackedFloat64Array = b.position",
+    "typed body position",
+)
+text = replace_once(
+    text,
+    "\t\tvar godot_pos: Vector3 = to_godot_components.call(b_pos) as Vector3",
+    "\t\tvar godot_pos: Vector3 = to_godot_components.call(b_pos[0], b_pos[1], b_pos[2]) as Vector3",
+    "render body position",
+)
+text = replace_once(
+    text,
+    "\t\tvar station_pos := PositionComponents.from_value(station.position)",
+    "\t\tvar station_pos: PackedFloat64Array = station.position",
+    "typed station position",
+)
+text = replace_once(
+    text,
+    "\t\tmarker.position = to_godot_components.call(station_pos) as Vector3",
+    "\t\tmarker.position = to_godot_components.call(station_pos[0], station_pos[1], station_pos[2]) as Vector3",
+    "render station position",
+)
+write("client/scripts/navigation_marker_renderer.gd", text)
+
+text = read("client/scripts/world_presentation.gd")
+text = replace_once(
+    text,
+    'const PositionComponents = preload("res://scripts/position_components.gd")\n',
+    "",
+    "remove presentation PositionComponents preload",
+)
+text = replace_once(
+    text,
+    '''func respawn_navigation_markers(
+\tgates: Array,
+\tbodies: Array,
+\tstations: Array,
+\tserver_components_to_godot: Callable,
+\tclear_navigation_selection: Callable
+) -> void:
+''',
+    '''func respawn_navigation_markers(
+\tgates: Array,
+\tbodies: Array,
+\tstations: Array,
+\tclear_navigation_selection: Callable
+) -> void:
+''',
+    "remove presentation coordinate callback",
+)
+text = replace_once(
+    text,
+    '''\t\tNavigationMarkerRendererScript.spawn_gate_markers(
+\t\t\t_gates_root, gates, _render_scale(), server_components_to_godot)
+''',
+    '''\t\tNavigationMarkerRendererScript.spawn_gate_markers(
+\t\t\t_gates_root, gates, _render_scale(), Callable(_world, "to_godot_components"))
+''',
+    "pass world to gate markers",
+)
+text = replace_once(
+    text,
+    '''\tNavigationMarkerRendererScript.spawn_body_markers(
+\t\t_bodies_root, bodies, _render_scale(), server_components_to_godot)
+''',
+    '''\tNavigationMarkerRendererScript.spawn_body_markers(
+\t\t_bodies_root, bodies, _render_scale(), Callable(_world, "to_godot_components"))
+''',
+    "pass world to body markers",
+)
+text = replace_once(
+    text,
+    '''\tNavigationMarkerRendererScript.spawn_station_markers(
+\t\t_bodies_root, stations, _render_scale(), server_components_to_godot)
+''',
+    '''\tNavigationMarkerRendererScript.spawn_station_markers(
+\t\t_bodies_root, stations, _render_scale(), Callable(_world, "to_godot_components"))
+''',
+    "pass world to station markers",
+)
+text = replace_once(
+    text,
+    '''\tvar shift: Vector3
+\tif _world.has_method("rebase_to_components"):
+\t\tshift = _worl
