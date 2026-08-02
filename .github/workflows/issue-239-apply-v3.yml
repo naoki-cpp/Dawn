@@ -1,9 +1,13 @@
 name: Apply issue 239 cleanup v3
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/delete-legacy-client-adapters
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
