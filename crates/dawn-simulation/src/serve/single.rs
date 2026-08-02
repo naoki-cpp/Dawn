@@ -118,25 +118,23 @@ pub(crate) async fn run_phase4_server(
         // Resolve socket outcomes on the tick-loop thread. A session is not
         // visible to AoI delivery or command routing until its Sector attempt
         // commits successfully.
-        while let Ok((attempt, result)) = completion_rx.try_recv() {
-            if let Some((sess, committed)) = finish_single_admission(&mut node, attempt, result) {
-                send_post_commit_loadout(&node, &sess, committed);
-                println!(
-                    "  [Server] {} joined with ship #{}",
-                    sess.player_id,
-                    sess.ship_id.raw()
-                );
-                aoi_delivery.seed_single_player(&node, sess.player_id, sess.ship_id);
+        for (sess, committed) in drain_single_admission_completions(&mut node, &mut completion_rx) {
+            send_post_commit_loadout(&node, &sess, committed);
+            println!(
+                "  [Server] {} joined with ship #{}",
+                sess.player_id,
+                sess.ship_id.raw()
+            );
+            aoi_delivery.seed_single_player(&node, sess.player_id, sess.ship_id);
 
-                if duel_mode && player_ship_id.is_none() {
-                    player_ship_id = Some(sess.ship_id);
-                    let tick = node.current_tick().value();
-                    duel_metrics = Some(DuelMetrics::new(tick));
-                    println!("  [Duel] metrics collection started at tick {tick}");
-                }
-
-                sessions.push(sess);
+            if duel_mode && player_ship_id.is_none() {
+                player_ship_id = Some(sess.ship_id);
+                let tick = node.current_tick().value();
+                duel_metrics = Some(DuelMetrics::new(tick));
+                println!("  [Duel] metrics collection started at tick {tick}");
             }
+
+            sessions.push(sess);
         }
 
         while let Ok(request) = handshake_req_rx.try_recv() {
@@ -289,6 +287,19 @@ fn log_single_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefusa
     }
 }
 
+fn drain_single_admission_completions<S: EventStore>(
+    node: &mut SimulationNode<S>,
+    completion_rx: &mut mpsc::UnboundedReceiver<HandshakeCompletion>,
+) -> Vec<(ws_server::PlayerSession, CommittedClientAdmission)> {
+    let mut ready = Vec::new();
+    while let Ok((attempt, result)) = completion_rx.try_recv() {
+        if let Some(completed) = finish_single_admission(node, attempt, result) {
+            ready.push(completed);
+        }
+    }
+    ready
+}
+
 fn finish_single_admission<S: EventStore, T>(
     node: &mut SimulationNode<S>,
     attempt: ClientAdmissionAttempt,
@@ -377,6 +388,28 @@ mod tests {
             ),
             None
         );
+        assert_eq!(node.ship_count(), 0);
+    }
+
+    #[test]
+    fn single_adapter_drains_async_disconnect_completion() {
+        let mut node = node();
+        let attempt = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh attempt");
+        let (completion_tx, mut completion_rx) = mpsc::unbounded_channel::<HandshakeCompletion>();
+        completion_tx
+            .send((attempt, Err("client disconnected".to_string())))
+            .expect("completion receiver alive");
+
+        let ready = drain_single_admission_completions(&mut node, &mut completion_rx);
+
+        assert!(ready.is_empty());
         assert_eq!(node.ship_count(), 0);
     }
 

@@ -50,7 +50,9 @@ and builds `InitialState`/`PlayerLoadout` from that Ship's observer-scoped AoI.
 
 - **Commit:** verifies that the Ship still exists, then makes the session
   eligible for promotion.
-- **Abort:** removes the freshly-spawned Ship and its ownership/AoI presence.
+- **Abort:** removes the freshly-spawned Ship and its ownership/AoI presence,
+      debits the starter packaged Ship from durable Station inventory, and appends
+      `ShipDespawned` so event replay cannot resurrect the provisional Ship.
 - **Missing observer while beginning:** removes the fresh Ship before returning
   the refusal.
 
@@ -77,8 +79,10 @@ commit.
 ## Cluster routing
 
 `player_sector` and `ship_player` are runtime routing indexes, not admission
-authority. Cluster mode inserts both entries only after
-`ClientAdmissionAttempt::commit` succeeds. Failed or disconnected attempts
-therefore expose neither routing entry. Sector Transit continues to use the
-ADR-0014 Raft-owned transit path; client admission cannot move a Ship between
-Sectors or bypass transit ownership.
+authority. Fresh admission begins in Sector 0; resume locates the exact Ship
+across all cluster Sectors and carries that Sector index through asynchronous
+handoff completion. Cluster mode inserts both routing entries only after
+`ClientAdmissionAttempt::commit` succeeds in that same Sector. Failed or
+disconnected attempts therefore expose neither routing entry. Sector Transit
+continues to use the ADR-0014 Raft-owned transit path; client admission cannot
+move a Ship between Sectors or bypass transit ownership.

@@ -496,17 +496,38 @@ impl<S: EventStore> SimulationNode<S> {
         self.docked_ships.remove(&ship_id);
     }
 
-    /// Undo a fresh player-ship spawn whose handshake never completed (the
-    /// client's WebSocket send failed after `spawn_player_ship_at_pub` had
-    /// already created the ship). Narrow, deliberately-named wrapper around
-    /// `remove_ship` -- not a general "despawn any ship" API. Callers
-    /// must only use this for a ship this same connection attempt just
-    /// spawned; it must never be called for a resumed ship (one that existed
-    /// before the attempt), since that ship's ownership predates this
-    /// connection and removing it would destroy state unrelated to the
-    /// failure.
-    pub fn despawn_incomplete_handshake_spawn(&mut self, ship_id: ShipId) {
-        self.remove_ship(ship_id);
+    /// Roll back a fresh player-ship spawn whose handshake never completed.
+    ///
+    /// Fresh admission creates ECS/ownership state, appends spawn/fitting
+    /// events, and credits the starter packaged Ship in durable Station
+    /// inventory before the socket handoff. Abort compensates all of those
+    /// effects: it removes the live Ship, debits the starter item, and appends
+    /// `ShipDespawned` so snapshot + tail-log replay cannot resurrect it.
+    ///
+    /// This operation is idempotent for one attempt. It must never be used for
+    /// a resumed Ship, whose state predates the connection attempt.
+    pub fn despawn_incomplete_handshake_spawn(&mut self, player_id: PlayerId, ship_id: ShipId) {
+        let starter_ship = dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE);
+        if self.station_item_count(player_id, StationId(0), starter_ship) > 0 {
+            if let Err(error) =
+                self.try_debit_station_item(player_id, StationId(0), starter_ship, 1)
+            {
+                eprintln!(
+                    "[Sector] failed to roll back starter inventory for {player_id}: {error:?}"
+                );
+            }
+        }
+
+        self.docked_players.remove(&player_id);
+        if self.ships.index.contains_key(&ship_id) {
+            self.remove_ship(ship_id);
+            self.event_store.append(DomainEvent::ShipDespawned(
+                dawn_core::events::ShipDespawned {
+                    ship_id,
+                    tick: self.current_tick,
+                },
+            ));
+        }
     }
 
     /// Recomputes `ShipStatsComp` from `ship_id`'s current `FittingComp`
@@ -786,7 +807,7 @@ mod tests {
         let ship_id = node.spawn_player_ship_at_pub(dawn_core::PlayerId(0), Position::ORIGIN);
         assert_eq!(node.ship_count(), 1);
 
-        node.despawn_incomplete_handshake_spawn(ship_id);
+        node.despawn_incomplete_handshake_spawn(dawn_core::PlayerId(0), ship_id);
 
         assert_eq!(node.ship_count(), 0);
     }

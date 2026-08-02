@@ -143,6 +143,9 @@ impl ClientAdmissionAttempt {
             AdmissionOrigin::Resume => node.resume_player_ship(self.ship_id, self.player_id),
         };
         if !present {
+            if self.origin == AdmissionOrigin::Fresh {
+                node.despawn_incomplete_handshake_spawn(self.player_id, self.ship_id);
+            }
             return Err(ClientAdmissionCommitError {
                 player_id: self.player_id,
                 ship_id: self.ship_id,
@@ -162,7 +165,7 @@ impl ClientAdmissionAttempt {
     /// connection and is deliberately left untouched (ADR-0007).
     pub fn abort<S: EventStore>(self, node: &mut SimulationNode<S>) {
         if self.origin == AdmissionOrigin::Fresh {
-            node.despawn_incomplete_handshake_spawn(self.ship_id);
+            node.despawn_incomplete_handshake_spawn(self.player_id, self.ship_id);
         }
     }
 }
@@ -190,7 +193,7 @@ impl<S: EventStore> SimulationNode<S> {
                 let handoff = match self.build_handoff_payload(ship_id, aoi_cell_size) {
                     Ok(handoff) => handoff,
                     Err(error) => {
-                        self.despawn_incomplete_handshake_spawn(ship_id);
+                        self.despawn_incomplete_handshake_spawn(player_id, ship_id);
                         return Err(ClientAdmissionRefusal::MissingObserver(error));
                     }
                 };
@@ -280,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_abort_removes_spawn_and_ownership() {
+    fn fresh_abort_removes_spawn_ownership_inventory_and_replay_state() {
         let mut node = node();
         let attempt = node
             .begin_client_admission(
@@ -292,14 +295,26 @@ mod tests {
             .expect("fresh admission should begin");
         let player_id = attempt.player_id();
         let ship_id = attempt.ship_id();
+        let starter_ship = dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE);
         assert!(node.apply_stop_command_owned(player_id, ship_id));
+        assert_eq!(
+            node.station_item_count(player_id, dawn_core::StationId(0), starter_ship),
+            1
+        );
 
         attempt.abort(&mut node);
 
         assert_eq!(node.ship_count(), 0);
         assert!(!node.apply_stop_command_owned(player_id, ship_id));
+        assert_eq!(
+            node.station_item_count(player_id, dawn_core::StationId(0), starter_ship),
+            0
+        );
+        assert!(matches!(
+            node.event_store().all_records().last().map(|record| &record.event),
+            Some(dawn_core::DomainEvent::ShipDespawned(event)) if event.ship_id == ship_id
+        ));
     }
-
     #[test]
     fn failed_resume_leaves_pre_existing_ship_unowned_and_intact() {
         let mut node = node();
@@ -404,7 +419,7 @@ mod tests {
             )
             .expect("fresh admission should begin");
         let ship_id = attempt.ship_id();
-        node.despawn_incomplete_handshake_spawn(ship_id);
+        node.despawn_incomplete_handshake_spawn(attempt.player_id(), ship_id);
 
         let error = attempt
             .commit(&mut node)
