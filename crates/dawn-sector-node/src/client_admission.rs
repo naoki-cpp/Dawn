@@ -238,11 +238,7 @@ mod tests {
             .expect("resume attempt");
 
         assert_eq!(
-            finish_admission::<_, ()>(
-                &mut node,
-                attempt,
-                Err("client disconnected".to_string()),
-            ),
+            finish_admission::<_, ()>(&mut node, attempt, Err("client disconnected".to_string()),),
             None
         );
         assert_eq!(node.ship_count(), 1);

@@ -16,7 +16,10 @@ pub enum ClientAdmissionIntent {
     /// Allocate a new player identity and spawn a new Ship at this position.
     Fresh { spawn_position: Position },
     /// Resume a Ship that must already exist in this Sector.
-    Resume { player_id: PlayerId, ship_id: ShipId },
+    Resume {
+        player_id: PlayerId,
+        ship_id: ShipId,
+    },
 }
 
 /// Why a client admission attempt could not begin.
@@ -26,7 +29,10 @@ pub enum ClientAdmissionRefusal {
     FreshAtPopulationCap,
     /// ADR-0007: a requested resume Ship is absent and must not fall back to a
     /// fresh spawn.
-    ResumeShipMissing { player_id: PlayerId, ship_id: ShipId },
+    ResumeShipMissing {
+        player_id: PlayerId,
+        ship_id: ShipId,
+    },
     /// A freshly-created observer could not be used to construct its scoped
     /// handoff. The fresh Ship has already been removed before this is returned.
     MissingObserver(MissingObserverShip),
@@ -41,7 +47,7 @@ impl std::fmt::Display for ClientAdmissionRefusal {
                 "resume refused for {player_id}: ship #{} is not present in this Sector",
                 ship_id.raw()
             ),
-            Self::MissingObserver(error) => error.fmt(f),
+            Self::MissingObserver(error) => write!(f, "{error}"),
         }
     }
 }
@@ -200,9 +206,12 @@ impl<S: EventStore> SimulationNode<S> {
                 // ADR-0007: validate the exact requested Ship and never fall
                 // back to a fresh spawn. Ownership is intentionally deferred
                 // until commit so a failed socket handshake leaves no residue.
-                let mut handoff = self.build_handoff_payload(ship_id, aoi_cell_size).map_err(|_| {
-                    ClientAdmissionRefusal::ResumeShipMissing { player_id, ship_id }
-                })?;
+                let mut handoff =
+                    self.build_handoff_payload(ship_id, aoi_cell_size)
+                        .map_err(|_| ClientAdmissionRefusal::ResumeShipMissing {
+                            player_id,
+                            ship_id,
+                        })?;
 
                 // Restored ships have no persisted ownership until resume
                 // commits. The connecting client must still see its observer as
