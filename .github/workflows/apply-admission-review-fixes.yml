@@ -81,7 +81,20 @@ jobs:
           new_completion = "if let Some((session, _committed)) = finish_admission(node, attempt, result) {"
           if production.count(old_completion) != 1:
               raise SystemExit("production completion marker missing or duplicated")
-          production_path.write_text(production.replace(old_completion, new_completion, 1))
+          production = production.replace(old_completion, new_completion, 1)
+          old_async_assertion = (
+              '            .expect("fresh attempt");\n'
+              '        assert_eq!(node.ship_count(), 1);\n\n'
+              '        let (_request_tx, handshake_req_rx) ='
+          )
+          new_async_assertion = (
+              '            .expect("fresh attempt");\n'
+              '        assert_eq!(node.ship_count(), 0);\n\n'
+              '        let (_request_tx, handshake_req_rx) ='
+          )
+          if production.count(old_async_assertion) != 1:
+              raise SystemExit("production async provisional assertion marker missing or duplicated")
+          production_path.write_text(production.replace(old_async_assertion, new_async_assertion, 1))
 
           single_path = Path("crates/dawn-simulation/src/serve/single.rs")
           single = single_path.read_text()
