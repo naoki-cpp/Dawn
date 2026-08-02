@@ -36,44 +36,44 @@ jobs:
           text = path.read_text()
 
           old_start = '''    fn fresh_abort_removes_spawn_ownership_inventory_and_replay_state() {
-              let mut node = node();
-              let attempt = node
+        let mut node = node();
+        let attempt = node
           '''
           new_start = '''    fn fresh_abort_removes_spawn_ownership_inventory_and_replay_state() {
-              let mut node = node();
-              let empty_snapshot = node.take_snapshot();
-              let attempt = node
+        let mut node = node();
+        let empty_snapshot = node.take_snapshot();
+        let attempt = node
           '''
           if text.count(old_start) != 1:
               raise SystemExit(f'test start: expected one match, found {text.count(old_start)}')
           text = text.replace(old_start, new_start, 1)
 
-          old_end = '''              assert!(matches!(
-                  node.event_store().all_records().last().map(|record| &record.event),
-                  Some(dawn_core::DomainEvent::ShipDespawned(event)) if event.ship_id == ship_id
-              ));
-          }
+          old_end = '''        assert!(matches!(
+            node.event_store().all_records().last().map(|record| &record.event),
+            Some(dawn_core::DomainEvent::ShipDespawned(event)) if event.ship_id == ship_id
+        ));
+    }
           '''
-          new_end = '''              assert!(matches!(
-                  node.event_store().all_records().last().map(|record| &record.event),
-                  Some(dawn_core::DomainEvent::ShipDespawned(event)) if event.ship_id == ship_id
-              ));
+          new_end = '''        assert!(matches!(
+            node.event_store().all_records().last().map(|record| &record.event),
+            Some(dawn_core::DomainEvent::ShipDespawned(event)) if event.ship_id == ship_id
+        ));
 
-              let mut replay_store = dawn_event_store::InMemoryEventStore::new();
-              for record in node.event_store().all_records() {
-                  replay_store.append(record.event.clone());
-              }
-              let restored = SimulationNode::restore_from(
-                  replay_store,
-                  &empty_snapshot,
-                  std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-                  crate::game_data::test_catalog().modules(),
-                  crate::game_data::test_catalog().ship_types(),
-              );
+        let mut replay_store = dawn_event_store::InMemoryEventStore::new();
+        for record in node.event_store().all_records() {
+            replay_store.append(record.event.clone());
+        }
+        let restored = SimulationNode::restore_from(
+            replay_store,
+            &empty_snapshot,
+            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+            crate::game_data::test_catalog().modules(),
+            crate::game_data::test_catalog().ship_types(),
+        );
 
-              assert_eq!(restored.ship_count(), 0);
-              assert!(restored.ship_absolute_pos(ship_id).is_none());
-          }
+        assert_eq!(restored.ship_count(), 0);
+        assert!(restored.ship_absolute_pos(ship_id).is_none());
+    }
           '''
           if text.count(old_end) != 1:
               raise SystemExit(f'test end: expected one match, found {text.count(old_end)}')
@@ -102,4 +102,4 @@ jobs:
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push origin HEAD:agent/transactional-client-admission-253
 
-# Triggered after workflow registration.
+# Triggered after workflow registration with source-matched indentation.
