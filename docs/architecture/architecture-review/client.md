@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / architect
 related  : docs/architecture/architecture-review/server.md（サーバー側）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-08-02（#251 server-fact policy ownership反映）
+date     : 2026-08-02（#251 server-fact policy ownership、#258統合反映）
 ---
 
 # Architecture Review — Dawn Client（現行構造評価）
@@ -22,7 +22,8 @@ issue #238で復号済みwire型をGodot `Dictionary`へ投影してRustへ戻�
 ship lifecycleのwire非依存policyを`dawn-client-core::ClientState`へ移した。
 GDExtensionはwire検証、wire→`ClientFact`変換、fact適用、presentation変換だけを行う。
 `ServerMessageOutcome::dispatch`が唯一のpresentation seamであり、state commit後に
-connection callbackまたは最終world handlerを一度だけ呼ぶ。
+connection callbackまたは最終world handlerを一度だけ呼ぶ。#258で削除した
+Godot公開のserver-state mutation backdoorは、#251との統合後も復活させない。
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
