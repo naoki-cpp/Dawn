@@ -354,3 +354,8 @@ The temporary `ClientMessageDecoder` and `json_variant.rs` compatibility layer
 were deleted after the typed `WorldSession` path became authoritative. Client
 command postcard semantics are now covered by Rust round-trip tests. GdUnit no
 longer reconstructs the former externally tagged JSON/Dictionary shape.
+
+The migration notes above intentionally retain the `*Json` names and the
+intermediate JSON-frame description as historical records. The current type
+names are `*Wire`, and every client/server message uses the postcard
+`ServerMessage`/`ClientMessage` envelope.

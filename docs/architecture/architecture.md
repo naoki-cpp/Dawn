@@ -44,15 +44,14 @@ The goal is to build a game that **surpasses EVE Online** (ADR-0016). The distri
 - Full causal traceability and world reproducibility via Event Sourcing
 - High throughput via separation of concerns between the Actor model and ECS
 
-### Current scope (Phase 8D — TCP distributed wiring complete)
+### Current scope (Phase 10 client integration / Phase 9 economy validation)
 
 ```
 Runtime          : multi-process (`dawn-sector-node` or `dawn-simulation`)
 Inter-node comms : TCP (TcpRaftTransport / TcpReplicationTransport, 8D-3/2c)
 Client comms     : WebSocket (Godot <-> WsServer, ADR-0007), postcard binary
-                    for messages with a fixed type (Welcome/Redirect/Event/
-                    Hello/Command, ADR-0042 stage 1); InitialState/
-                    PlayerLoadout/AoiEnter still JSON text (stage 2, TODO)
+                    for every ServerMessage/ClientMessage envelope, including
+                    InitialState/PlayerLoadout/AoI/PositionSnap (ADR-0042)
 Node             : a physical process (`sector-node config/node-N.toml`)
 Inter-node net   : TCP LAN plaintext (8D milestone; TLS is next phase)
 Persistence      : FileEventStore + checkpoint/restore wired into
@@ -87,7 +86,7 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/A
 | `dawn-actor` | library | Client transport boundary (`ClientConnection` trait) |
 | `dawn-replication` | library | Gossip distribution boundary for the append log (OutboundLogPublisher / InMemoryReplicationBus / ReplicationTransport / AntiEntropy / TcpReplicationTransport / SnapshotTransfer / ReplicaSet; ADR-0021/0027) |
 | `dawn-market` | library | Player-to-player Market: bid/ask order book + `PlayerId` Currency ledger, its own SQLite authority independent of Sector tick determinism. The SQLite layer is an adapter around a private matching policy that owns crossing, price-time priority, partial fills, maker-price settlement, and Bid price-improvement refunds. Depends only on `dawn-core` + serde + rusqlite -- no transport/runtime dependency, same DAG position as `dawn-wire` (ADR-0034 §4/§5/§6). Constructs `RemoveItemCommand`/`ReturnItemCommand`/`CreditItemCommand` but never applies them; the caller (`dawn-simulation`) routes each to the SimulationNode that owns the affected ship |
-| `dawn-sector` | library | Per-Sector game logic (SimulationNode, Tick, Transit, Warp, Bot AI, AoI, Snapshot; ADR-0026). Also depends on `dawn-wire` to build typed wire messages (e.g. `PlayerLoadoutWire`, ADR-0042 stage 2a) |
+| `dawn-sector` | library | Per-Sector game logic (SimulationNode, Tick, Transit, Warp, Bot AI, AoI, Snapshot; ADR-0026). Also depends on `dawn-wire` to build typed wire messages (e.g. `PlayerLoadoutWire`, ADR-0042) |
 | `dawn-simulation` | binary | Wiring/bootstrap only. WsServer (Godot), Raft cluster wiring, load generation, TOML loader. Owns the `dawn-market` runtime bridge: drains the separate Market wire queue, applies one-sided cargo commands to the owning `SimulationNode`, and returns bounded snapshots (ADR-0034 §4, roadmap.md §12 9D-5) |
 | `dawn-sector-node` | binary | Production binary (8D-4). Wires TcpRaftTransport + TcpReplicationTransport from static TOML config. 3 processes = 3-Sector cluster |
 
