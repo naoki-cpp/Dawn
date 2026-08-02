@@ -5,11 +5,20 @@ use super::{
 };
 use crate::{cluster, ws_server};
 use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
+use dawn_event_store::store::EventStore;
+use dawn_sector::client_admission::{
+    ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal,
+};
 use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
 use dawn_sector::transit;
 use dawn_wire::ServerMessage;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
+
+type HandshakeCompletion = (
+    ClientAdmissionAttempt,
+    Result<ws_server::PlayerSession, String>,
+);
 
 pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     const SECTORS: usize = 3;
@@ -72,16 +81,24 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     }
     println!("  [Server] Raft warm-up complete. Waiting for players...");
 
-    let (new_conn_tx, mut new_conn_rx) =
-        mpsc::unbounded_channel::<(tokio::net::TcpStream, std::net::SocketAddr)>();
-    let (ready_sess_tx, mut ready_sess_rx) = mpsc::unbounded_channel::<ws_server::PlayerSession>();
+    let (handshake_req_tx, mut handshake_req_rx) =
+        mpsc::unbounded_channel::<ws_server::HandshakeRequest>();
+    let (completion_tx, mut completion_rx) = mpsc::unbounded_channel::<HandshakeCompletion>();
 
     let server_arc = std::sync::Arc::new(server);
     let server_clone = server_arc.clone();
     tokio::spawn(async move {
         loop {
             if let Some((stream, addr)) = server_clone.try_accept_raw().await {
-                let _ = new_conn_tx.send((stream, addr));
+                let tx = handshake_req_tx.clone();
+                tokio::spawn(async move {
+                    match ws_server::WsServer::accept_handshake_request(stream, addr).await {
+                        Ok(request) => {
+                            let _ = tx.send(request);
+                        }
+                        Err(error) => eprintln!("[Server] handshake request failed: {error}"),
+                    }
+                });
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
@@ -97,55 +114,60 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     loop {
         interval.tick().await;
 
-        while let Ok((stream, addr)) = new_conn_rx.try_recv() {
-            if nodes[0].at_population_cap() {
-                eprintln!("[Server] connection from {addr} refused: Sector 0 at population cap ({} ships)",
-                    nodes[0].ship_count());
-                drop(stream);
-                continue;
+        // Commit Sector ownership before publishing cluster routing. A failed
+        // or disconnected handshake therefore leaves neither route map visible.
+        while let Ok((attempt, result)) = completion_rx.try_recv() {
+            if let Some(sess) = finish_cluster_admission(
+                &mut nodes[0],
+                &mut player_sector,
+                &mut ship_player,
+                attempt,
+                result,
+            ) {
+                println!(
+                    "  [Server] {} joined with ship #{}",
+                    sess.player_id,
+                    sess.ship_id.raw()
+                );
+                aoi_delivery.seed_cluster_player(&nodes, 0, sess.player_id, sess.ship_id);
+                sessions.push(sess);
             }
-            let player_id = nodes[0].next_player_id();
-            let ship_id = nodes[0].spawn_player_ship_at_pub(player_id, PLAYER_SPAWN);
-            let payload = match nodes[0].build_handoff_payload(ship_id, AOI_CELL_SIZE) {
-                Ok(payload) => payload,
-                Err(error) => {
-                    eprintln!("[Server] clustered fresh handshake from {addr} refused: {error}");
-                    nodes[0].despawn_incomplete_handshake_spawn(ship_id);
-                    drop(stream);
+        }
+
+        while let Ok(request) = handshake_req_rx.try_recv() {
+            let intent = match request.resume {
+                Some(resume) => ClientAdmissionIntent::Resume {
+                    player_id: resume.player_id,
+                    ship_id: resume.ship_id,
+                },
+                None => ClientAdmissionIntent::Fresh {
+                    spawn_position: PLAYER_SPAWN,
+                },
+            };
+            let mut attempt = match nodes[0].begin_client_admission(intent, AOI_CELL_SIZE) {
+                Ok(attempt) => attempt,
+                Err(refusal) => {
+                    log_cluster_refusal(request.peer_addr, refusal);
                     continue;
                 }
             };
-            let tx = ready_sess_tx.clone();
-            player_sector.insert(player_id, 0);
-            ship_player.insert(ship_id, player_id);
+            let player_id = attempt.player_id();
+            let ship_id = attempt.ship_id();
+            let payload = attempt.take_handoff_payload();
+            let tx = completion_tx.clone();
 
             tokio::spawn(async move {
-                match ws_server::WsServer::handshake(
-                    stream,
-                    addr,
-                    player_id,
-                    ship_id,
-                    payload.initial_state,
-                    payload.player_loadout,
-                )
-                .await
-                {
-                    Ok(sess) => {
-                        let _ = tx.send(sess);
-                    }
-                    Err(e) => eprintln!("[Server] handshake failed: {e}"),
-                }
+                let result = request
+                    .complete(
+                        player_id,
+                        ship_id,
+                        payload.initial_state,
+                        payload.player_loadout,
+                    )
+                    .await
+                    .map_err(|error| error.to_string());
+                let _ = tx.send((attempt, result));
             });
-        }
-
-        while let Ok(sess) = ready_sess_rx.try_recv() {
-            println!(
-                "  [Server] {} joined with ship #{}",
-                sess.player_id,
-                sess.ship_id.raw()
-            );
-            aoi_delivery.seed_cluster_player(&nodes, 0, sess.player_id, sess.ship_id);
-            sessions.push(sess);
         }
 
         let mut lock_commands: Vec<Vec<dawn_core::LockOnCommand>> = vec![Vec::new(); SECTORS];
@@ -250,5 +272,158 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 }
             }
         }
+    }
+}
+
+fn log_cluster_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefusal) {
+    match refusal {
+        ClientAdmissionRefusal::FreshAtPopulationCap => {
+            eprintln!("[Server] connection from {addr} refused: Sector 0 at population cap");
+        }
+        ClientAdmissionRefusal::ResumeShipMissing { ship_id, .. } => {
+            eprintln!(
+                "[Server] clustered resume from {addr} refused: ship #{} is not in Sector 0",
+                ship_id.raw()
+            );
+        }
+        ClientAdmissionRefusal::MissingObserver(error) => {
+            eprintln!("[Server] clustered handshake from {addr} refused: {error}");
+        }
+    }
+}
+
+fn finish_cluster_admission<S: EventStore, T>(
+    node: &mut SimulationNode<S>,
+    player_sector: &mut HashMap<PlayerId, usize>,
+    ship_player: &mut HashMap<ShipId, PlayerId>,
+    attempt: ClientAdmissionAttempt,
+    result: Result<T, String>,
+) -> Option<T> {
+    match result {
+        Ok(value) => match attempt.commit(node) {
+            Ok(committed) => {
+                player_sector.insert(committed.player_id, 0);
+                ship_player.insert(committed.ship_id, committed.player_id);
+                Some(value)
+            }
+            Err(error) => {
+                eprintln!("[Server] {error}");
+                None
+            }
+        },
+        Err(error) => {
+            attempt.abort(node);
+            eprintln!("[Server] handshake failed: {error}");
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dawn_core::{ShipTypeId, Velocity};
+
+    fn node() -> SimulationNode {
+        SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+        )
+    }
+
+    #[test]
+    fn cluster_adapter_publishes_routes_only_after_commit() {
+        let mut node = node();
+        let attempt = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh attempt");
+        let player_id = attempt.player_id();
+        let ship_id = attempt.ship_id();
+        let mut player_sector = HashMap::new();
+        let mut ship_player = HashMap::new();
+        assert!(player_sector.is_empty() && ship_player.is_empty());
+
+        assert_eq!(
+            finish_cluster_admission(
+                &mut node,
+                &mut player_sector,
+                &mut ship_player,
+                attempt,
+                Ok::<_, String>(()),
+            ),
+            Some(())
+        );
+
+        assert_eq!(player_sector.get(&player_id), Some(&0));
+        assert_eq!(ship_player.get(&ship_id), Some(&player_id));
+        assert_eq!(node.ship_count(), 1);
+    }
+
+    #[test]
+    fn cluster_adapter_disconnect_rolls_back_fresh_spawn_and_routes() {
+        let mut node = node();
+        let attempt = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh attempt");
+        let mut player_sector = HashMap::new();
+        let mut ship_player = HashMap::new();
+
+        assert_eq!(
+            finish_cluster_admission::<_, ()>(
+                &mut node,
+                &mut player_sector,
+                &mut ship_player,
+                attempt,
+                Err("client disconnected".to_string()),
+            ),
+            None
+        );
+
+        assert_eq!(node.ship_count(), 0);
+        assert!(player_sector.is_empty());
+        assert!(ship_player.is_empty());
+    }
+
+    #[test]
+    fn cluster_adapter_failed_resume_keeps_ship_and_routes_absent() {
+        let mut node = node();
+        let player_id = PlayerId(12);
+        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let attempt = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume { player_id, ship_id },
+                AOI_CELL_SIZE,
+            )
+            .expect("resume attempt");
+        let mut player_sector = HashMap::new();
+        let mut ship_player = HashMap::new();
+
+        assert_eq!(
+            finish_cluster_admission::<_, ()>(
+                &mut node,
+                &mut player_sector,
+                &mut ship_player,
+                attempt,
+                Err("client disconnected".to_string()),
+            ),
+            None
+        );
+
+        assert_eq!(node.ship_count(), 1);
+        assert!(node.ship_absolute_pos(ship_id).is_some());
+        assert!(player_sector.is_empty());
+        assert!(ship_player.is_empty());
     }
 }
