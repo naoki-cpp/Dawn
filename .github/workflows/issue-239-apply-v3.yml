@@ -21,6 +21,21 @@ jobs:
       - name: Reconstruct verified transformation
         shell: bash
         run: |
+          sha256sum .agent/issue239_apply.py.part.*
+          cat > /tmp/issue239-parts.sha256 <<'EOF'
+          8612ff50a7ab77f254a2a44b3622553be4868560ebc9d1cedd9359b018412673  .agent/issue239_apply.py.part.00
+          5aebfdd950c3fb16b6cc6935a2875ed82403b656aaf99991fa27b28ba09a6b1b  .agent/issue239_apply.py.part.01
+          12ed21874b3b50bd782e69f583e130c8d6dd6dcdff989dbba2dd0f7bc3a5cd32  .agent/issue239_apply.py.part.02
+          fa78d56caa7e87db6a31d33b5f648fdf38814791f2cff9780dc562b446362812  .agent/issue239_apply.py.part.03
+          8b9f76a64348c3d830e730f467271b3aab5d07fcd2a1da26d5488fd08a723fa8  .agent/issue239_apply.py.part.04
+          427df492b8ed2a210fb1f2e7b92de035e52ad1260f87b39fdeb2ea812d6e4dae  .agent/issue239_apply.py.part.05
+          013f288ea100eac3161b9f08a2a6719a5401242e38187b0c217802847ac8276b  .agent/issue239_apply.py.part.06
+          4a659efb7bd7eb5742a2a8a91e48958cec506a7050c769a45d2601b102bad75d  .agent/issue239_apply.py.part.07
+          32125abb180edb8d3ac8c5a786ced337494876d1ea9112a493b0d24c5cbfd897  .agent/issue239_apply.py.part.08
+          adfe4b2bf6ab2c3b5c8e00ea948128adc2f69b959d9f2e2b1dc11125ca1bd40f  .agent/issue239_apply.py.part.09
+          EOF
+          sed -i 's/^          //' /tmp/issue239-parts.sha256
+          sha256sum --check --strict /tmp/issue239-parts.sha256
           cat .agent/issue239_apply.py.part.* > .agent/issue239_apply.py
           echo 'fd30b4b5626235ae94dc2d5ee0b0a1af6ea667ae775ce902de7a3afd0b054c3e  .agent/issue239_apply.py' \
             | sha256sum --check --strict
