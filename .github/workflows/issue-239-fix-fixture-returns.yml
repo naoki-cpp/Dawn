@@ -24,101 +24,102 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          import re
           from pathlib import Path
 
-          def replace_once(path: Path, old: str, new: str) -> None:
-              text = path.read_text(encoding="utf-8")
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
               count = text.count(old)
               if count != 1:
-                  raise RuntimeError(f"{path}: expected one match, found {count}: {old[:100]!r}")
-              path.write_text(text.replace(old, new), encoding="utf-8")
+                  raise RuntimeError(f"{label}: expected one match, found {count}")
+              return text.replace(old, new, 1)
 
-          module = Path("crates/dawn-client-gdext/src/module_row_gd.rs")
-          replace_once(
-              module,
-              '''    /// Typed fixture boundary for GdUnit. Production rows are created only
-              /// from the typed PlayerLoadout projection.
-              #[allow(clippy::too_many_arguments)]
-              #[func]
-              ''',
-              '''    /// Debug-only typed fixture for GdUnit. Production rows are created only
-              /// from the typed PlayerLoadout projection.
-              #[cfg(debug_assertions)]
-              #[allow(clippy::too_many_arguments)]
-              #[func]
-              ''',
-          )
-          replace_once(module, ") -> Variant {\n", ") -> Gd<ModuleRow> {\n")
-          replace_once(
-              module,
-              '''        let (Ok(index), Ok(module_id), Ok(cycle_time_ticks)) = (
-                  u32::try_from(index),
-                  u32::try_from(module_id),
-                  u32::try_from(cycle_time_ticks),
-              ) else {
-                  return Variant::nil();
-              };
-              ''',
-              '''        let index = u32::try_from(index).expect("fixture index must fit u32");
-              let module_id = u32::try_from(module_id).expect("fixture module ID must fit u32");
-              let cycle_time_ticks =
-                  u32::try_from(cycle_time_ticks).expect("fixture cycle time must fit u32");
-              ''',
-          )
-          replace_once(
-              module,
-              '''        })
-              .to_variant()
-              ''',
-              '''        })
-              ''',
-          )
+          def regex_once(text: str, pattern: str, replacement: str, label: str) -> str:
+              text, count = re.subn(pattern, replacement, text, count=1, flags=re.DOTALL)
+              if count != 1:
+                  raise RuntimeError(f"{label}: expected one regex match, found {count}")
+              return text
 
-          owned = Path("crates/dawn-client-gdext/src/owned_ship_row_gd.rs")
-          replace_once(
-              owned,
-              '''    /// Typed fixture boundary for GdUnit. Negative optional IDs and an empty
-              /// type name represent absent values at the Godot boundary.
-              #[func]
-              ''',
-              '''    /// Debug-only typed fixture for GdUnit. Negative optional IDs and an empty
-              /// type name represent absent values at the Godot boundary.
-              #[cfg(debug_assertions)]
-              #[func]
-              ''',
+          module_path = Path("crates/dawn-client-gdext/src/module_row_gd.rs")
+          module = module_path.read_text(encoding="utf-8")
+          module = replace_once(
+              module,
+              "    #[allow(clippy::too_many_arguments)]\n    #[func]\n    fn test_fixture(\n",
+              "    #[cfg(debug_assertions)]\n    #[allow(clippy::too_many_arguments)]\n    #[func]\n    fn test_fixture(\n",
+              "module fixture cfg",
           )
-          replace_once(owned, ") -> Variant {\n", ") -> Gd<OwnedShipRow> {\n")
-          replace_once(
-              owned,
-              '''        let Ok(ship_id) = u64::try_from(ship_id) else {
-                  return Variant::nil();
-              };
-              ''',
-              '''        let ship_id = u64::try_from(ship_id).expect("fixture ship ID must fit u64");
-              ''',
+          module = replace_once(
+              module,
+              "    /// Typed fixture boundary for GdUnit. Production rows are created only\n",
+              "    /// Debug-only typed fixture for GdUnit. Production rows are created only\n",
+              "module fixture comment",
           )
-          replace_once(
-              owned,
-              '''        })
-              .to_variant()
-              ''',
-              '''        })
-              ''',
+          module = replace_once(module, ") -> Variant {\n", ") -> Gd<ModuleRow> {\n", "module return")
+          module = regex_once(
+              module,
+              r"        let \(Ok\(index\), Ok\(module_id\), Ok\(cycle_time_ticks\)\) = \(.*?        \};\n",
+              "        let index = u32::try_from(index).expect(\"fixture index must fit u32\");\n"
+              "        let module_id = u32::try_from(module_id).expect(\"fixture module ID must fit u32\");\n"
+              "        let cycle_time_ticks =\n"
+              "            u32::try_from(cycle_time_ticks).expect(\"fixture cycle time must fit u32\");\n",
+              "module conversions",
           )
+          module = replace_once(
+              module,
+              "        })\n        .to_variant()\n",
+              "        })\n",
+              "module typed return",
+          )
+          module_path.write_text(module, encoding="utf-8")
 
-          loadout = Path("crates/dawn-client-gdext/src/loadout_gd.rs")
-          replace_once(
+          owned_path = Path("crates/dawn-client-gdext/src/owned_ship_row_gd.rs")
+          owned = owned_path.read_text(encoding="utf-8")
+          owned = replace_once(
+              owned,
+              "    #[func]\n    fn test_fixture(\n        ship_id: i64,\n",
+              "    #[cfg(debug_assertions)]\n    #[func]\n    fn test_fixture(\n        ship_id: i64,\n",
+              "owned fixture cfg",
+          )
+          owned = replace_once(
+              owned,
+              "    /// Typed fixture boundary for GdUnit. Negative optional IDs and an empty\n",
+              "    /// Debug-only typed fixture for GdUnit. Negative optional IDs and an empty\n",
+              "owned fixture comment",
+          )
+          owned = replace_once(
+              owned,
+              ") -> Variant {\n",
+              ") -> Gd<OwnedShipRow> {\n",
+              "owned return",
+          )
+          owned = regex_once(
+              owned,
+              r"        let Ok\(ship_id\) = u64::try_from\(ship_id\) else \{.*?        \};\n",
+              "        let ship_id = u64::try_from(ship_id).expect(\"fixture ship ID must fit u64\");\n",
+              "owned conversion",
+          )
+          owned = replace_once(
+              owned,
+              "        })\n        .to_variant()\n",
+              "        })\n",
+              "owned typed return",
+          )
+          owned_path.write_text(owned, encoding="utf-8")
+
+          loadout_path = Path("crates/dawn-client-gdext/src/loadout_gd.rs")
+          loadout = loadout_path.read_text(encoding="utf-8")
+          loadout = replace_once(
               loadout,
-              '''    /// Typed fixture boundary for focused GdUnit tests. Production state is
-              /// replaced only from a decoded `PlayerLoadoutWire`.
-              #[func]
-              ''',
-              '''    /// Debug-only typed fixture for focused GdUnit tests. Production state is
-              /// replaced only from a decoded `PlayerLoadoutWire`.
-              #[cfg(debug_assertions)]
-              #[func]
-              ''',
+              "    #[func]\n    fn test_fixture(\n        &mut self,\n",
+              "    #[cfg(debug_assertions)]\n    #[func]\n    fn test_fixture(\n        &mut self,\n",
+              "loadout fixture cfg",
           )
+          loadout = replace_once(
+              loadout,
+              "    /// Typed fixture boundary for focused GdUnit tests. Production state is\n",
+              "    /// Debug-only typed fixture for focused GdUnit tests. Production state is\n",
+              "loadout fixture comment",
+          )
+          loadout_path.write_text(loadout, encoding="utf-8")
           PY
           cargo fmt --all
           cargo check -p dawn-client-gdext --all-targets
