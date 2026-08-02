@@ -1,0 +1,1755 @@
+exit_status=100
+===== command output =====
+Godot 4.6.3-stable already installed: /home/runner/work/Dawn/Dawn/.tools/godot/4.6.3-stable/Godot_v4.6.3-stable_linux.x86_64
+Patched: /home/runner/work/Dawn/Dawn/client/addons/gdUnit4/src/monitor/GodotGdErrorMonitor.gd
+Patched: /home/runner/work/Dawn/Dawn/client/addons/gdUnit4/src/monitor/GodotGdErrorMonitor.gd
+Importing Godot project and warming script-class cache ...
+Godot Engine v4.6.3.stable.official.7d41c59c4 - https://godotengine.org
+
+[   0% ] [90m[1mfirst_scan_filesystem[22m | Started Project initialization (5 steps)[39m[0m
+[   0% ] [90m[1mfirst_scan_filesystem[22m | Scanning file structure...[39m[0m
+[  16% ] [90m[1mfirst_scan_filesystem[22m | Loading global class names...[39m[0m
+[  33% ] [90m[1mfirst_scan_filesystem[22m | Verifying GDExtensions...[39m[0m
+Initialize godot-rust (API v4.6.stable.official, runtime v4.6.3.stable.official, safeguards strict)
+[  50% ] [90m[1mfirst_scan_filesystem[22m | Creating autoload scripts...[39m[0m
+[  66% ] [90m[1mfirst_scan_filesystem[22m | Initializing plugins...[39m[0m
+[38;2;218;165;32mIt was recognized that GdUnit4 is running in a test environment, therefore the GdUnit4 plugin will not be executed![0m
+[  83% ] [90m[1mfirst_scan_filesystem[22m | Starting file scan...[39m[0m
+[92m[ DONE ][39m [1mfirst_scan_filesystem[22m
+[0m
+[   0% ] [90m[1mupdate_scripts_classes[22m | Started Registering global classes... (264 steps)[39m[0m
+[   0% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   0% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   0% ] [90m[1mupdate_scripts_classes[22m | CallBackValueProvider[39m[0m
+[   1% ] [90m[1mupdate_scripts_classes[22m | DefaultValueProvider[39m[0m
+[   1% ] [90m[1mupdate_scripts_classes[22m | GdAssertMessages[39m[0m
+[   1% ] [90m[1mupdate_scripts_classes[22m | GdAssertReports[39m[0m
+[   2% ] [90m[1mupdate_scripts_classes[22m | GdUnitArrayAssertImpl[39m[0m
+[   2% ] [90m[1mupdate_scripts_classes[22m | GdUnitAssertImpl[39m[0m
+[   3% ] [90m[1mupdate_scripts_classes[22m | GdUnitAssertions[39m[0m
+[   3% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   3% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   4% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   4% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   4% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   5% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   5% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   6% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   6% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   6% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   7% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   7% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   7% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[   8% ] [90m[1mupdate_scripts_classes[22m | ValueProvider[39m[0m
+[   8% ] [90m[1mupdate_scripts_classes[22m | CmdArgumentParser[39m[0m
+[   9% ] [90m[1mupdate_scripts_classes[22m | CmdCommand[39m[0m
+[   9% ] [90m[1mupdate_scripts_classes[22m | CmdCommandHandler[39m[0m
+[   9% ] [90m[1mupdate_scripts_classes[22m | CmdOption[39m[0m
+[  10% ] [90m[1mupdate_scripts_classes[22m | CmdOptions[39m[0m
+[  10% ] [90m[1mupdate_scripts_classes[22m | TestCaseAttribute[39m[0m
+[  10% ] [90m[1mupdate_scripts_classes[22m | GdUnitBaseCommand[39m[0m
+[  11% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandFileSystem[39m[0m
+[  11% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandFileSystemDebugTests[39m[0m
+[  12% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandFileSystemRunTests[39m[0m
+[  12% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandHandler[39m[0m
+[  12% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandInspectorDebugTests[39m[0m
+[  13% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandInspectorRerunTestsUntilFailure[39m[0m
+[  13% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandInspectorRunTests[39m[0m
+[  13% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandInspectorTreeCollapse[39m[0m
+[  14% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandInspectorTreeExpand[39m[0m
+[  14% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandRunTestsOverall[39m[0m
+[  15% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandScriptEditor[39m[0m
+[  15% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandScriptEditorCreateTest[39m[0m
+[  15% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandScriptEditorDebugTests[39m[0m
+[  16% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandScriptEditorRunTests[39m[0m
+[  16% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandStopTestSession[39m[0m
+[  16% ] [90m[1mupdate_scripts_classes[22m | GdUnitCommandTestSession[39m[0m
+[  17% ] [90m[1mupdate_scripts_classes[22m | GdUnitShortcut[39m[0m
+[  17% ] [90m[1mupdate_scripts_classes[22m | GdUnitGUID[39m[0m
+[  18% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestCase[39m[0m
+[  18% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestDiscoverer[39m[0m
+[  18% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestDiscoverGuard[39m[0m
+[  19% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestDiscoverSink[39m[0m
+[  19% ] [90m[1mupdate_scripts_classes[22m | GdUnitEvent[39m[0m
+[  20% ] [90m[1mupdate_scripts_classes[22m | GdUnitInit[39m[0m
+[  20% ] [90m[1mupdate_scripts_classes[22m | GdUnitStop[39m[0m
+[  20% ] [90m[1mupdate_scripts_classes[22m | GdUnitEventTestDiscoverEnd[39m[0m
+[  21% ] [90m[1mupdate_scripts_classes[22m | GdUnitEventTestDiscoverStart[39m[0m
+[  21% ] [90m[1mupdate_scripts_classes[22m | GdUnitSessionClose[39m[0m
+[  21% ] [90m[1mupdate_scripts_classes[22m | GdUnitSessionStart[39m[0m
+[  22% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestCaseFuzzedExecutionStage[39m[0m
+[  22% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestCaseFuzzedTestStage[39m[0m
+[  23% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestCaseSingleExecutionStage[39m[0m
+[  23% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestCaseSingleTestStage[39m[0m
+[  23% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestCaseAfterStage[39m[0m
+[  24% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestCaseBeforeStage[39m[0m
+[  24% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestCaseExecutionStage[39m[0m
+[  24% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestSuiteAfterStage[39m[0m
+[  25% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestSuiteBeforeStage[39m[0m
+[  25% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestSuiteExecutionStage[39m[0m
+[  26% ] [90m[1mupdate_scripts_classes[22m | IGdUnitExecutionStage[39m[0m
+[  26% ] [90m[1mupdate_scripts_classes[22m | GdUnitExecutionContext[39m[0m
+[  26% ] [90m[1mupdate_scripts_classes[22m | GdUnitMemoryObserver[39m[0m
+[  27% ] [90m[1mupdate_scripts_classes[22m | GdUnitProjectSettingsSnapshot[39m[0m
+[  27% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestReportCollector[39m[0m
+[  27% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestSuiteExecutor[39m[0m
+[  28% ] [90m[1mupdate_scripts_classes[22m | GdUnitBaseReporterTestSessionHook[39m[0m
+[  28% ] [90m[1mupdate_scripts_classes[22m | GdUnitHtmlReporterTestSessionHook[39m[0m
+[  29% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestSessionHook[39m[0m
+[  29% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestSessionHookService[39m[0m
+[  29% ] [90m[1mupdate_scripts_classes[22m | GdUnitXMLReporterTestSessionHook[39m[0m
+[  30% ] [90m[1mupdate_scripts_classes[22m | GdClassDescriptor[39m[0m
+[  30% ] [90m[1mupdate_scripts_classes[22m | GdDefaultValueDecoder[39m[0m
+[  30% ] [90m[1mupdate_scripts_classes[22m | GdFunctionArgument[39m[0m
+[  31% ] [90m[1mupdate_scripts_classes[22m | GdFunctionDescriptor[39m[0m
+[  31% ] [90m[1mupdate_scripts_classes[22m | GdFunctionParameterSetResolver[39m[0m
+[  32% ] [90m[1mupdate_scripts_classes[22m | GdScriptParser[39m[0m
+[  32% ] [90m[1mupdate_scripts_classes[22m | GdUnitExpressionRunner[39m[0m
+[  32% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestParameterSetResolver[39m[0m
+[  33% ] [90m[1mupdate_scripts_classes[22m | GdUnitReport[39m[0m
+[  33% ] [90m[1mupdate_scripts_classes[22m | GdUnitScriptErrorCollector[39m[0m
+[  33% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestCIRunner[39m[0m
+[  34% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  34% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestSession[39m[0m
+[  35% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  35% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestSuiteDefaultTemplate[39m[0m
+[  35% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestSuiteTemplate[39m[0m
+[  36% ] [90m[1mupdate_scripts_classes[22m | GdUnitThreadContext[39m[0m
+[  36% ] [90m[1mupdate_scripts_classes[22m | GdUnitThreadManager[39m[0m
+[  36% ] [90m[1mupdate_scripts_classes[22m | GdUnitCSIMessageWriter[39m[0m
+[  37% ] [90m[1mupdate_scripts_classes[22m | GdUnitMessageWriter[39m[0m
+[  37% ] [90m[1mupdate_scripts_classes[22m | GdUnitRichTextMessageWriter[39m[0m
+[  38% ] [90m[1mupdate_scripts_classes[22m | _TestCase[39m[0m
+[  38% ] [90m[1mupdate_scripts_classes[22m | GdArrayTools[39m[0m
+[  38% ] [90m[1mupdate_scripts_classes[22m | GdDiffTool[39m[0m
+[  39% ] [90m[1mupdate_scripts_classes[22m | GdObjects[39m[0m
+[  39% ] [90m[1mupdate_scripts_classes[22m | GdUnit4Version[39m[0m
+[  40% ] [90m[1mupdate_scripts_classes[22m | GdUnitFileAccess[39m[0m
+[  40% ] [90m[1mupdate_scripts_classes[22m | GdUnitProperty[39m[0m
+[  40% ] [90m[1mupdate_scripts_classes[22m | GdUnitResult[39m[0m
+[  41% ] [90m[1mupdate_scripts_classes[22m | GdUnitRunnerConfig[39m[0m
+[  41% ] [90m[1mupdate_scripts_classes[22m | GdUnitSceneRunnerImpl[39m[0m
+[  41% ] [90m[1mupdate_scripts_classes[22m | GdUnitSettings[39m[0m
+[  42% ] [90m[1mupdate_scripts_classes[22m | GdUnitSignalAwaiter[39m[0m
+[  42% ] [90m[1mupdate_scripts_classes[22m | GdUnitSignalCollector[39m[0m
+[  43% ] [90m[1mupdate_scripts_classes[22m | GdUnitSignals[39m[0m
+[  43% ] [90m[1mupdate_scripts_classes[22m | GdUnitSingleton[39m[0m
+[  43% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestResourceLoader[39m[0m
+[  44% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestSuiteBuilder[39m[0m
+[  44% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestSuiteScanner[39m[0m
+[  44% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  45% ] [90m[1mupdate_scripts_classes[22m | GodotVersionFixures[39m[0m
+[  45% ] [90m[1mupdate_scripts_classes[22m | LocalTime[39m[0m
+[  46% ] [90m[1mupdate_scripts_classes[22m | GdUnit4CSharpApiLoader[39m[0m
+[  46% ] [90m[1mupdate_scripts_classes[22m | CallableDoubler[39m[0m
+[  46% ] [90m[1mupdate_scripts_classes[22m | GdFunctionDoubler[39m[0m
+[  47% ] [90m[1mupdate_scripts_classes[22m | GdUnitClassDoubler[39m[0m
+[  47% ] [90m[1mupdate_scripts_classes[22m | GdUnitFunctionDoublerBuilder[39m[0m
+[  47% ] [90m[1mupdate_scripts_classes[22m | GdUnitMockFunctionDoubler[39m[0m
+[  48% ] [90m[1mupdate_scripts_classes[22m | GdUnitObjectInteractions[39m[0m
+[  48% ] [90m[1mupdate_scripts_classes[22m | GdUnitObjectInteractionsVerifier[39m[0m
+[  49% ] [90m[1mupdate_scripts_classes[22m | GdUnitSpyFunctionDoubler[39m[0m
+[  49% ] [90m[1mupdate_scripts_classes[22m | GdUnitFuncValueExtractor[39m[0m
+[  49% ] [90m[1mupdate_scripts_classes[22m | BoolFuzzer[39m[0m
+[  50% ] [90m[1mupdate_scripts_classes[22m | FloatFuzzer[39m[0m
+[  50% ] [90m[1mupdate_scripts_classes[22m | Fuzzer[39m[0m
+[  50% ] [90m[1mupdate_scripts_classes[22m | IntFuzzer[39m[0m
+[  51% ] [90m[1mupdate_scripts_classes[22m | StringFuzzer[39m[0m
+[  51% ] [90m[1mupdate_scripts_classes[22m | Vector2Fuzzer[39m[0m
+[  52% ] [90m[1mupdate_scripts_classes[22m | Vector3Fuzzer[39m[0m
+[  52% ] [90m[1mupdate_scripts_classes[22m | AnyArgumentMatcher[39m[0m
+[  52% ] [90m[1mupdate_scripts_classes[22m | AnyBuildInTypeArgumentMatcher[39m[0m
+[  53% ] [90m[1mupdate_scripts_classes[22m | AnyClazzArgumentMatcher[39m[0m
+[  53% ] [90m[1mupdate_scripts_classes[22m | ChainedArgumentMatcher[39m[0m
+[  53% ] [90m[1mupdate_scripts_classes[22m | EqualsArgumentMatcher[39m[0m
+[  54% ] [90m[1mupdate_scripts_classes[22m | GdUnitArgumentMatcher[39m[0m
+[  54% ] [90m[1mupdate_scripts_classes[22m | GdUnitArgumentMatchers[39m[0m
+[  55% ] [90m[1mupdate_scripts_classes[22m | GdUnitMock[39m[0m
+[  55% ] [90m[1mupdate_scripts_classes[22m | GdUnitMockBuilder[39m[0m
+[  55% ] [90m[1mupdate_scripts_classes[22m | DoubledMockClassSourceClassName[39m[0m
+[  56% ] [90m[1mupdate_scripts_classes[22m | ErrorLogEntry[39m[0m
+[  56% ] [90m[1mupdate_scripts_classes[22m | GdUnitMonitor[39m[0m
+[  56% ] [90m[1mupdate_scripts_classes[22m | GdUnitOrphanNodeInfo[39m[0m
+[  57% ] [90m[1mupdate_scripts_classes[22m | GdUnitOrphanNodesMonitor[39m[0m
+[  57% ] [90m[1mupdate_scripts_classes[22m | GodotGdErrorMonitor[39m[0m
+[  58% ] [90m[1mupdate_scripts_classes[22m | RPC[39m[0m
+[  58% ] [90m[1mupdate_scripts_classes[22m | RPCClientConnect[39m[0m
+[  58% ] [90m[1mupdate_scripts_classes[22m | RPCClientDisconnect[39m[0m
+[  59% ] [90m[1mupdate_scripts_classes[22m | RPCGdUnitEvent[39m[0m
+[  59% ] [90m[1mupdate_scripts_classes[22m | RPCMessage[39m[0m
+[  60% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  60% ] [90m[1mupdate_scripts_classes[22m | GdUnitServerConstants[39m[0m
+[  60% ] [90m[1mupdate_scripts_classes[22m | GdUnitTask[39m[0m
+[  61% ] [90m[1mupdate_scripts_classes[22m | GdUnitTcpClient[39m[0m
+[  61% ] [90m[1mupdate_scripts_classes[22m | GdUnitTcpNode[39m[0m
+[  61% ] [90m[1mupdate_scripts_classes[22m | GdUnitTcpServer[39m[0m
+[  62% ] [90m[1mupdate_scripts_classes[22m | GdUnitConsoleTestReporter[39m[0m
+[  62% ] [90m[1mupdate_scripts_classes[22m | GdUnitByPathReport[39m[0m
+[  63% ] [90m[1mupdate_scripts_classes[22m | GdUnitHtmlPatterns[39m[0m
+[  63% ] [90m[1mupdate_scripts_classes[22m | GdUnitHtmlReportWriter[39m[0m
+[  63% ] [90m[1mupdate_scripts_classes[22m | JUnitXmlReportWriter[39m[0m
+[  64% ] [90m[1mupdate_scripts_classes[22m | XmlElement[39m[0m
+[  64% ] [90m[1mupdate_scripts_classes[22m | GdUnitReportSummary[39m[0m
+[  64% ] [90m[1mupdate_scripts_classes[22m | GdUnitReportWriter[39m[0m
+[  65% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestCaseReport[39m[0m
+[  65% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestReporter[39m[0m
+[  66% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestSuiteReport[39m[0m
+[  66% ] [90m[1mupdate_scripts_classes[22m | GdUnitSpyBuilder[39m[0m
+[  66% ] [90m[1mupdate_scripts_classes[22m | DoubledSpyClassSourceClassName[39m[0m
+[  67% ] [90m[1mupdate_scripts_classes[22m | GdUnitContextMenuItem[39m[0m
+[  67% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  67% ] [90m[1mupdate_scripts_classes[22m | GdUnitInspectorContextMenu[39m[0m
+[  68% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  68% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  69% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  69% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  69% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  70% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  70% ] [90m[1mupdate_scripts_classes[22m | GdUnitInputCapture[39m[0m
+[  70% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  71% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  71% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  72% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  72% ] [90m[1mupdate_scripts_classes[22m | GdUnitFonts[39m[0m
+[  72% ] [90m[1mupdate_scripts_classes[22m | GdUnitInspecor[39m[0m
+[  73% ] [90m[1mupdate_scripts_classes[22m | GdUnitInspectorTreeConstants[39m[0m
+[  73% ] [90m[1mupdate_scripts_classes[22m | GdUnitUiTools[39m[0m
+[  73% ] [90m[1mupdate_scripts_classes[22m | ScriptEditorControls[39m[0m
+[  74% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  74% ] [90m[1mupdate_scripts_classes[22m | GdUnitPatch[39m[0m
+[  75% ] [90m[1mupdate_scripts_classes[22m | GdUnitPatcher[39m[0m
+[  75% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  75% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  76% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  76% ] [90m[1mupdate_scripts_classes[22m | Comparator[39m[0m
+[  76% ] [90m[1mupdate_scripts_classes[22m | Fuzzers[39m[0m
+[  77% ] [90m[1mupdate_scripts_classes[22m | GdUnitArrayAssert[39m[0m
+[  77% ] [90m[1mupdate_scripts_classes[22m | GdUnitAssert[39m[0m
+[  78% ] [90m[1mupdate_scripts_classes[22m | GdUnitAwaiter[39m[0m
+[  78% ] [90m[1mupdate_scripts_classes[22m | GdUnitBoolAssert[39m[0m
+[  78% ] [90m[1mupdate_scripts_classes[22m | GdUnitConstants[39m[0m
+[  79% ] [90m[1mupdate_scripts_classes[22m | GdUnitDictionaryAssert[39m[0m
+[  79% ] [90m[1mupdate_scripts_classes[22m | GdUnitFailureAssert[39m[0m
+[  80% ] [90m[1mupdate_scripts_classes[22m | GdUnitFileAssert[39m[0m
+[  80% ] [90m[1mupdate_scripts_classes[22m | GdUnitFloatAssert[39m[0m
+[  80% ] [90m[1mupdate_scripts_classes[22m | GdUnitFuncAssert[39m[0m
+[  81% ] [90m[1mupdate_scripts_classes[22m | GdUnitGodotErrorAssert[39m[0m
+[  81% ] [90m[1mupdate_scripts_classes[22m | GdUnitIntAssert[39m[0m
+[  81% ] [90m[1mupdate_scripts_classes[22m | GdUnitObjectAssert[39m[0m
+[  82% ] [90m[1mupdate_scripts_classes[22m | GdUnitResultAssert[39m[0m
+[  82% ] [90m[1mupdate_scripts_classes[22m | GdUnitSceneRunner[39m[0m
+[  83% ] [90m[1mupdate_scripts_classes[22m | GdUnitSignalAssert[39m[0m
+[  83% ] [90m[1mupdate_scripts_classes[22m | GdUnitStringAssert[39m[0m
+[  83% ] [90m[1mupdate_scripts_classes[22m | GdUnitTestSuite[39m[0m
+[  84% ] [90m[1mupdate_scripts_classes[22m | GdUnitTuple[39m[0m
+[  84% ] [90m[1mupdate_scripts_classes[22m | GdUnitValueExtractor[39m[0m
+[  84% ] [90m[1mupdate_scripts_classes[22m | GdUnitVectorAssert[39m[0m
+[  85% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  85% ] [90m[1mupdate_scripts_classes[22m | BillboardRing[39m[0m
+[  86% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  86% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  86% ] [90m[1mupdate_scripts_classes[22m | HudHitTest[39m[0m
+[  87% ] [90m[1mupdate_scripts_classes[22m | HudManager[39m[0m
+[  87% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  87% ] [90m[1mupdate_scripts_classes[22m | InputDecoder[39m[0m
+[  88% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  88% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  89% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  89% ] [90m[1mupdate_scripts_classes[22m | NavigationMarkerRenderer[39m[0m
+[  89% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  90% ] [90m[1mupdate_scripts_classes[22m | ShipPicking[39m[0m
+[  90% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  90% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  91% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  91% ] [90m[1mupdate_scripts_classes[22m | WorldInteraction[39m[0m
+[  92% ] [90m[1mupdate_scripts_classes[22m | WorldPresentation[39m[0m
+[  92% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  92% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  93% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  93% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  93% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  94% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  94% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  95% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  95% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  95% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  96% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  96% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  96% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  97% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  97% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  98% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  98% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  98% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[  99% ] [90m[1mupdate_scripts_classes[22m | [39m[0m
+[92m[ DONE ][39m [1mupdate_scripts_classes[22m
+[0m
+[   0% ] [90m[1m_update_scan_actions[22m | Started Scanning actions... (8 steps)[39m[0m
+[   0% ] [90m[1m_update_scan_actions[22m | touch-button.png[39m[0m
+[  11% ] [90m[1m_update_scan_actions[22m | logo.png[39m[0m
+[  22% ] [90m[1m_update_scan_actions[22m | border_bottom.png[39m[0m
+[  33% ] [90m[1m_update_scan_actions[22m | border_top.png[39m[0m
+[  44% ] [90m[1m_update_scan_actions[22m | dot1.png[39m[0m
+[  55% ] [90m[1m_update_scan_actions[22m | dot2.png[39m[0m
+[  66% ] [90m[1m_update_scan_actions[22m | embedded.png[39m[0m
+[  77% ] [90m[1m_update_scan_actions[22m | horizontal-line2.png[39m[0m
+[92m[ DONE ][39m [1m_update_scan_actions[22m
+[0m
+[   0% ] [90m[1mreimport[22m | Started (Re)Importing Assets (8 steps)[39m[0m
+[   0% ] [90m[1mreimport[22m | Preparing files to reimport...[39m[0m
+[  11% ] [90m[1mreimport[22m | Preparing files to reimport...[39m[0m
+[  22% ] [90m[1mreimport[22m | Preparing files to reimport...[39m[0m
+[  33% ] [90m[1mreimport[22m | Preparing files to reimport...[39m[0m
+[  44% ] [90m[1mreimport[22m | Preparing files to reimport...[39m[0m
+[  55% ] [90m[1mreimport[22m | Preparing files to reimport...[39m[0m
+[  66% ] [90m[1mreimport[22m | Preparing files to reimport...[39m[0m
+[  77% ] [90m[1mreimport[22m | Preparing files to reimport...[39m[0m
+[   0% ] [90m[1mreimport[22m | Executing pre-reimport operations...[39m[0m
+[   0% ] [90m[1mreimport[22m | touch-button.png[39m[0m
+[  11% ] [90m[1mreimport[22m | logo.png[39m[0m
+[  22% ] [90m[1mreimport[22m | border_bottom.png[39m[0m
+[  33% ] [90m[1mreimport[22m | border_top.png[39m[0m
+[  44% ] [90m[1mreimport[22m | dot1.png[39m[0m
+[  55% ] [90m[1mreimport[22m | dot2.png[39m[0m
+[  66% ] [90m[1mreimport[22m | embedded.png[39m[0m
+[  77% ] [90m[1mreimport[22m | horizontal-line2.png[39m[0m
+[  88% ] [90m[1mreimport[22m | Finalizing Asset Import...[39m[0m
+[92m[ DONE ][39m [1mreimport[22m
+[0m
+[   0% ] [90m[1mreimport[22m | Started (Re)Importing Assets (8 steps)[39m[0m
+[   0% ] [90m[1mreimport[22m | Executing post-reimport operations...[39m[0m
+[92m[ DONE ][39m [1mreimport[22m
+[0m
+[   0% ] [90m[1mloading_editor_layout[22m | Started Loading editor (5 steps)[39m[0m
+[   0% ] [90m[1mloading_editor_layout[22m | Loading editor layout...[39m[0m
+[  16% ] [90m[1mloading_editor_layout[22m | Loading docks...[39m[0m
+[92m[ DONE ][39m [1mloading_editor_layout[22m
+[0m
+Running GdUnit4 tests ...
+Initialize godot-rust (API v4.6.stable.official, runtime v4.6.3.stable.official, safeguards strict)
+ERROR: The remote port number must be between 1 and 65535 (inclusive).
+   at: connect_to_host (core/io/stream_peer_tcp.cpp:67)
+ERROR: Remote Debugger: Unable to connect to host '127.0.0.1:0'.
+   at: create_tcp (core/debugger/remote_debugger_peer.cpp:244)
+Godot Engine v4.6.3.stable.official.7d41c59c4 - https://godotengine.org
+ERROR: Required extension VK_KHR_surface not found.
+   at: _initialize_instance_extensions (drivers/vulkan/rendering_context_driver_vulkan.cpp:487)
+ERROR: Condition "err != OK" is true. Returning: err
+   at: initialize (drivers/vulkan/rendering_context_driver_vulkan.cpp:928)
+WARNING: Your video card drivers seem not to support the required Vulkan version, switching to OpenGL 3.
+     at: DisplayServerX11 (platform/linuxbsd/x11/display_server_x11.cpp:7046)
+WARNING: Could not set V-Sync mode, as changing V-Sync mode is not supported by the graphics driver.
+     at: set_use_vsync (platform/linuxbsd/x11/gl_manager_x11.cpp:364)
+OpenGL API 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2 - Compatibility - Using Device: Mesa - llvmpipe (LLVM 20.1.2, 256 bits)
+libpulse.so.0: cannot open shared object file: No such file or directory
+libpulse.so.0: cannot open shared object file: No such file or directory
+ALSA lib confmisc.c:855:(parse_card) cannot find card '0'
+ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_card_inum returned error: No such file or directory
+ALSA lib confmisc.c:422:(snd_func_concat) error evaluating strings
+ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_concat returned error: No such file or directory
+ALSA lib confmisc.c:1342:(snd_func_refer) error evaluating name
+ALSA lib conf.c:5208:(_snd_config_evaluate) function snd_func_refer returned error: No such file or directory
+ALSA lib conf.c:5731:(snd_config_expand) Evaluate error: No such file or directory
+ALSA lib pcm.c:2721:(snd_pcm_open_noupdate) Unknown PCM default
+ERROR: Condition "status < 0" is true. Returning: ERR_CANT_OPEN
+   at: init_output_device (drivers/alsa/audio_driver_alsa.cpp:90)
+WARNING: All audio drivers failed, falling back to the dummy driver.
+     at: initialize (servers/audio/audio_server.cpp:247)
+
+[2J[H[38;2;233;150;122m
+--------------------------------------------------------------------------------------------------
+GdUnit4 Comandline Tool
+--------------------------------------------------------------------------------------------------[0m
+Scanning for test suites in: test
+[38;2;100;149;237mInstalling GdUnit4 session system hooks.[0m
+[38;2;100;149;237mSession hook 'GdUnitHtmlTestReporter' installed.[0m
+[38;2;100;149;237mSession hook 'GdUnitXMLTestReporter' installed.[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/world_presentation_test.gd[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_render_scale_is_queried_from_world_space_authority[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_render_scale_is_queried_from_world_space_authority[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_render_scale_authority_controls_spawned_navigation_geometry[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_render_scale_authority_controls_spawned_navigation_geometry[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 24ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_clamped_marker_position_leaves_nearby_marker_unchanged[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_clamped_marker_position_leaves_nearby_marker_unchanged[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_clamped_marker_position_pulls_far_marker_back_to_clamp_radius[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_clamped_marker_position_pulls_far_marker_back_to_clamp_radius[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_next_warp_tunnel_amount_eases_toward_one_above_threshold[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_next_warp_tunnel_amount_eases_toward_one_above_threshold[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_next_warp_tunnel_amount_eases_back_toward_zero_below_threshold[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_next_warp_tunnel_amount_eases_back_toward_zero_below_threshold[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_sun_state_returns_inactive_when_no_star_exists[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_sun_state_returns_inactive_when_no_star_exists[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_sun_state_returns_direction_and_color_from_star_data[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_sun_state_returns_direction_and_color_from_star_data[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_origin_rebase_moves_ship_and_motion_track_together[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_presentation_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_origin_rebase_moves_ship_and_motion_track_together[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 9 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 96ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/hud_manager_test.gd[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_stat_bar_fills_proportionally_and_formats_the_readout[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_stat_bar_fills_proportionally_and_formats_the_readout[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 13ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_stat_bar_clamps_to_100_percent_when_cur_exceeds_max[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_stat_bar_clamps_to_100_percent_when_cur_exceeds_max[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 12ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_stat_bar_treats_zero_max_as_zero_percent[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_stat_bar_treats_zero_max_as_zero_percent[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 12ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_mini_bar_fills_proportionally[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_mini_bar_fills_proportionally[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 11ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_status_panel_shows_online_when_connected[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_status_panel_shows_online_when_connected[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 360ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_status_panel_shows_connecting_when_disconnected[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_status_panel_shows_connecting_when_disconnected[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 11ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_ship_status_panel_shows_destroyed_when_no_player_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_ship_status_panel_shows_destroyed_when_no_player_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 15ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_ship_status_panel_assumes_full_when_state_not_yet_received[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_ship_status_panel_assumes_full_when_state_not_yet_received[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 12ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_ship_status_panel_shows_live_values[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_ship_status_panel_shows_live_values[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 12ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_ship_status_panel_shows_dash_when_cap_not_yet_received[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_ship_status_panel_shows_dash_when_cap_not_yet_received[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 12ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_target_panel_hides_when_no_lock_target[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_target_panel_hides_when_no_lock_target[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 9ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_target_panel_shows_signal_lost_when_target_left_the_area[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_target_panel_shows_signal_lost_when_target_left_the_area[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 18ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_target_panel_shows_distance_and_hp_when_target_is_known[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_target_panel_shows_distance_and_hp_when_target_is_known[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 13ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_target_panel_leaves_bars_unchanged_when_no_hp_record_yet[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_target_panel_leaves_bars_unchanged_when_no_hp_record_yet[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 12ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_rebuild_module_bar_skips_passive_modules[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_rebuild_module_bar_skips_passive_modules[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 15ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_module_bar_marks_cap_forced_off_modules[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_module_bar_marks_cap_forced_off_modules[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 13ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_module_bar_marks_range_forced_off_modules[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_module_bar_marks_range_forced_off_modules[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 11ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_module_bar_marks_active_modules_on[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_update_module_bar_marks_active_modules_on[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 11ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_show_duel_result_displays_victory_or_defeat[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_show_duel_result_displays_victory_or_defeat[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 19ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_hide_duel_result_hides_the_label[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_hide_duel_result_hides_the_label[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 13ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_inventory_panel_columns_stay_within_the_panels_bounds[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_inventory_panel_columns_stay_within_the_panels_bounds[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 30ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_station_column_always_shows_disassemble_and_build_toggle_rows[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_station_column_always_shows_disassemble_and_build_toggle_rows[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 16ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_build_picker_is_collapsed_by_default_and_expands_when_toggled[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_build_picker_is_collapsed_by_default_and_expands_when_toggled[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 18ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_unfit_all_row_is_hidden_when_no_module_is_fitted[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_unfit_all_row_is_hidden_when_no_module_is_fitted[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 18ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_unfit_all_row_appears_after_the_fitted_modules_when_any_are_fitted[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_unfit_all_row_appears_after_the_fitted_modules_when_any_are_fitted[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 17ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_owned_ship_row_handles_absent_optional_values[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_manager_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_owned_ship_row_handles_absent_optional_values[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 16ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 26 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 778ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/billboard_ring_test.gd[0m
+  [38;2;250;235;215mres://test/billboard_ring_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_build_returns_a_fixed_size_billboard_sprite[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/billboard_ring_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_build_returns_a_fixed_size_billboard_sprite[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/billboard_ring_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_build_applies_the_requested_pixel_size_and_color[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/billboard_ring_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_build_applies_the_requested_pixel_size_and_color[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/billboard_ring_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_build_reuses_the_same_cached_texture_across_calls[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/billboard_ring_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_build_reuses_the_same_cached_texture_across_calls[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 3 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 30ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/unit_format_test.gd[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_speed_under_1000_mps_displays_as_meters_per_second[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_speed_under_1000_mps_displays_as_meters_per_second[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_speed_in_the_kilometers_per_second_range_displays_as_km_s[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_speed_in_the_kilometers_per_second_range_displays_as_km_s[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_warp_speed_displays_as_au_per_second[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_warp_speed_displays_as_au_per_second[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_speed_just_under_the_mps_threshold_does_not_escalate[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_speed_just_under_the_mps_threshold_does_not_escalate[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_speed_just_at_the_mps_threshold_escalates_to_km_s[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_speed_just_at_the_mps_threshold_escalates_to_km_s[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_distance_under_1000_m_displays_as_meters[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_distance_under_1000_m_displays_as_meters[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_distance_in_the_kilometer_range_displays_as_km[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_distance_in_the_kilometer_range_displays_as_km[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_distance_at_au_scale_displays_as_au[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/unit_format_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_distance_at_au_scale_displays_as_au[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 8 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 66ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/market_surface_test.gd[0m
+  [38;2;250;235;215mres://test/market_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_market_surface_can_open_and_apply_a_snapshot[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/market_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_market_surface_can_open_and_apply_a_snapshot[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 13ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 1 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 20ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spectral_color_at_t_zero_is_coolest_blue[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spectral_color_at_t_zero_is_coolest_blue[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spectral_color_at_t_one_is_warmest_red[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spectral_color_at_t_one_is_warmest_red[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spectral_color_is_continuous_across_the_010_segment_boundary[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spectral_color_is_continuous_across_the_010_segment_boundary[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_clear_children_removes_all_existing_children[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_clear_children_removes_all_existing_children[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 11ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_gate_markers_builds_one_marker_per_gate_with_position_and_label[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_gate_markers_builds_one_marker_per_gate_with_position_and_label[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 11ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_gate_markers_builds_one_marker_per_array_entry[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_gate_markers_builds_one_marker_per_array_entry[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 11ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_body_markers_skips_stars_and_only_tags_planet_markers[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_body_markers_skips_stars_and_only_tags_planet_markers[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 10ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_body_markers_uses_the_body_name_as_the_label_text[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_body_markers_uses_the_body_name_as_the_label_text[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 11ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_body_markers_produces_no_markers_when_only_a_star_is_present[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_body_markers_produces_no_markers_when_only_a_star_is_present[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 9ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_body_markers_adds_a_fixed_size_selection_reticle_to_each_planet[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_body_markers_adds_a_fixed_size_selection_reticle_to_each_planet[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 10ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_station_markers_builds_one_marker_per_station_with_label_and_ring[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_station_markers_builds_one_marker_per_station_with_label_and_ring[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 12ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_station_markers_appends_after_existing_body_markers[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/navigation_marker_renderer_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_spawn_station_markers_appends_after_existing_body_markers[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 12ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 12 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 146ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/world_session_test.gd[0m
+  [38;2;250;235;215mres://test/world_session_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_typed_initial_state_preserves_absolute_f64_navigation_positions[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_session_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_typed_initial_state_preserves_absolute_f64_navigation_positions[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_session_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_typed_initial_state_promotes_connection_ship_to_player_state[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_session_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_typed_initial_state_promotes_connection_ship_to_player_state[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_session_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_ship_health_accessor_returns_typed_health_or_null[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_session_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_ship_health_accessor_returns_typed_health_or_null[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_session_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_typed_dock_event_uses_the_production_state_application_path[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_session_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_typed_dock_event_uses_the_production_state_application_path[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_session_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_reset_clears_server_derived_state_and_restores_defaults[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_session_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_reset_clears_server_derived_state_and_restores_defaults[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_session_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_client_ticks_advance_capacitor_without_server_events[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_session_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_client_ticks_advance_capacitor_without_server_events[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 6 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 59ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/ship_controller_test.gd[0m
+  [38;2;250;235;215mres://test/ship_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_motion_correction_keeps_the_rendered_transform_for_smoothing[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_motion_correction_keeps_the_rendered_transform_for_smoothing[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 11ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_warp_visual_cap_does_not_switch_back_to_prediction_during_deceleration[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_warp_visual_cap_does_not_switch_back_to_prediction_during_deceleration[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_attaching_to_an_already_warping_ship_keeps_dead_reckoning[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_attaching_to_an_already_warping_ship_keeps_dead_reckoning[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_stale_velocity_event_is_rejected_by_the_motion_track[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_stale_velocity_event_is_rejected_by_the_motion_track[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 4 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 45ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/ship_picking_test.gd[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_ray_point_distance_returns_perpendicular_distance_and_ray_parameter[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_ray_point_distance_returns_perpendicular_distance_and_ray_parameter[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_ray_point_distance_reports_negative_t_when_point_is_behind_the_ray_origin[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_ray_point_distance_reports_negative_t_when_point_is_behind_the_ray_origin[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_ship_at_returns_the_ship_directly_on_the_camera_ray[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_ship_at_returns_the_ship_directly_on_the_camera_ray[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 10ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_ship_at_excludes_the_given_id_even_when_it_is_the_only_candidate[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_ship_at_excludes_the_given_id_even_when_it_is_the_only_candidate[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 10ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_ship_at_returns_minus_one_when_nothing_is_within_pick_radius[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_ship_at_returns_minus_one_when_nothing_is_within_pick_radius[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 11ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_gate_at_returns_the_gate_whose_marker_is_on_the_ray[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_gate_at_returns_the_gate_whose_marker_is_on_the_ray[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 10ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_gate_at_ignores_children_without_a_gate_id_meta[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_gate_at_ignores_children_without_a_gate_id_meta[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 9ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_screen_point_distance_is_near_zero_for_a_point_dead_ahead[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_screen_point_distance_is_near_zero_for_a_point_dead_ahead[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 9ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_screen_point_distance_reports_negative_front_when_point_is_behind_the_camera[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_screen_point_distance_reports_negative_front_when_point_is_behind_the_camera[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 10ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_body_at_returns_the_body_whose_marker_is_on_screen_at_the_click[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_body_at_returns_the_body_whose_marker_is_on_screen_at_the_click[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 10ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_body_at_ignores_children_without_a_body_id_meta[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_body_at_ignores_children_without_a_body_id_meta[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 10ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_body_at_returns_minus_one_when_marker_is_behind_the_camera[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/ship_picking_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pick_body_at_returns_minus_one_when_marker_is_behind_the_camera[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 9ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 12 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 141ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/world_interaction_test.gd[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_primary_click_selects_ship_over_other_candidates[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_primary_click_selects_ship_over_other_candidates[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_primary_click_selects_gate_when_no_ship_is_hit[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_primary_click_selects_gate_when_no_ship_is_hit[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_primary_click_selects_body_when_it_is_the_only_hit[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_primary_click_selects_body_when_it_is_the_only_hit[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_double_click_returns_move_intent_and_does_not_change_selection[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_double_click_returns_move_intent_and_does_not_change_selection[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_dragging_suppresses_double_click_move_intent[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_dragging_suppresses_double_click_move_intent[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_resolve_key_action_uses_internal_selection_state[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_resolve_key_action_uses_internal_selection_state[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_clear_target_if_matches_clears_only_the_selected_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_clear_target_if_matches_clears_only_the_selected_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_interpret_lock_click_returns_lock_intent_for_hit_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_interaction_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_interpret_lock_click_returns_lock_intent_for_hit_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 8 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 73ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/planet_visibility_test.gd[0m
+  [38;2;250;235;215mres://test/planet_visibility_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_initial_state_planet_is_rendered_near_the_player_at_true_au_scale[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+[Connection] connecting to ws://127.0.0.1:7878 ... (attempt 1)
+[Connection] InitialState: 2 ships
+  [38;2;250;235;215mres://test/planet_visibility_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_initial_state_planet_is_rendered_near_the_player_at_true_au_scale[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 4s 31ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 1 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 4s 37ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/input_decoder_test.gd[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_f_keys_map_to_toggle_module_with_zero_based_index[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_f_keys_map_to_toggle_module_with_zero_based_index[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_f8_maps_to_module_index_seven[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_f8_maps_to_module_index_seven[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_f_keys_work_even_without_a_player_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_f_keys_work_even_without_a_player_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_s_key_stops_when_a_player_ship_exists[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_s_key_stops_when_a_player_ship_exists[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_s_key_does_nothing_without_a_player_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_s_key_does_nothing_without_a_player_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_j_key_jumps_to_the_selected_gate_over_the_nearby_one[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_j_key_jumps_to_the_selected_gate_over_the_nearby_one[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_j_key_falls_back_to_the_nearby_gate_when_none_is_selected[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_j_key_falls_back_to_the_nearby_gate_when_none_is_selected[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_j_key_does_nothing_when_no_gate_is_selected_or_nearby[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_j_key_does_nothing_when_no_gate_is_selected_or_nearby[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_a_key_approaches_the_selected_gate_over_a_selected_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_a_key_approaches_the_selected_gate_over_a_selected_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_a_key_approaches_the_selected_ship_when_no_gate_is_selected[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_a_key_approaches_the_selected_ship_when_no_gate_is_selected[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_a_key_does_nothing_without_a_selection[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_a_key_does_nothing_without_a_selection[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_w_key_warps_to_the_selected_gate_over_a_selected_body[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_w_key_warps_to_the_selected_gate_over_a_selected_body[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_w_key_warps_to_the_selected_body_when_no_gate_is_selected[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_w_key_warps_to_the_selected_body_when_no_gate_is_selected[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_o_key_orbits_the_selected_gate_over_a_selected_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_o_key_orbits_the_selected_gate_over_a_selected_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_o_key_orbits_the_selected_ship_when_no_gate_is_selected[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_o_key_orbits_the_selected_ship_when_no_gate_is_selected[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_o_key_does_nothing_without_a_selection[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_o_key_does_nothing_without_a_selection[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_k_key_keeps_range_from_the_selected_gate_over_a_selected_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_k_key_keeps_range_from_the_selected_gate_over_a_selected_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_k_key_keeps_range_from_the_selected_ship_when_no_gate_is_selected[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_k_key_keeps_range_from_the_selected_ship_when_no_gate_is_selected[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_k_key_does_nothing_without_a_selection[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_k_key_does_nothing_without_a_selection[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_bracket_left_decreases_keep_at_range_distance[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_bracket_left_decreases_keep_at_range_distance[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_bracket_right_increases_keep_at_range_distance[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_bracket_right_increases_keep_at_range_distance[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_bracket_keys_do_nothing_without_a_player_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_bracket_keys_do_nothing_without_a_player_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_i_key_toggles_the_inventory_panel[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_i_key_toggles_the_inventory_panel[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_i_key_still_toggles_the_inventory_panel_without_a_player_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_i_key_still_toggles_the_inventory_panel_without_a_player_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_m_key_toggles_the_market_panel_only_while_docked[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_m_key_toggles_the_market_panel_only_while_docked[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_d_key_docks_at_the_nearby_station_when_not_already_docked[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_d_key_docks_at_the_nearby_station_when_not_already_docked[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_u_key_undocks_when_currently_docked[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_u_key_undocks_when_currently_docked[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_b_key_builds_a_packaged_ship_when_currently_docked[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_b_key_builds_a_packaged_ship_when_currently_docked[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_y_key_disassembles_the_current_ship_when_docked[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_y_key_disassembles_the_current_ship_when_docked[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_x_key_disembarks_when_currently_docked[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_x_key_disembarks_when_currently_docked[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_x_key_does_nothing_when_not_docked[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_x_key_does_nothing_when_not_docked[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_tab_key_toggles_the_tactical_overlay_even_without_a_player_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_tab_key_toggles_the_tactical_overlay_even_without_a_player_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_unmapped_key_does_nothing[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/input_decoder_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_unmapped_key_does_nothing[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 33 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 289ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/player_loadout_test.gd[0m
+  [38;2;250;235;215mres://test/player_loadout_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_empty_state_preserves_explicit_scalar_sentinels[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/player_loadout_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_empty_state_preserves_explicit_scalar_sentinels[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/player_loadout_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_owned_ships_cross_the_boundary_as_typed_rows[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/player_loadout_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_owned_ships_cross_the_boundary_as_typed_rows[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/player_loadout_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_dictionary_read_projections_are_removed_but_toggle_intent_remains_closed[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/player_loadout_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_dictionary_read_projections_are_removed_but_toggle_intent_remains_closed[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 3 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 33ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/connection_test.gd[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_reconnect_logging_is_emitted_on_first_attempt_and_after_interval[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_reconnect_logging_is_emitted_on_first_attempt_and_after_interval[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_normalize_ws_url_adds_ws_scheme_to_host_port[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_normalize_ws_url_adds_ws_scheme_to_host_port[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_normalize_ws_url_keeps_existing_ws_scheme[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_normalize_ws_url_keeps_existing_ws_scheme[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_normalize_ws_url_keeps_existing_wss_scheme[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_normalize_ws_url_keeps_existing_wss_scheme[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_welcome_outcome_updates_identity_and_emits_signal[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+[Connection] Welcome: player_id=5 ship_id=11
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_welcome_outcome_updates_identity_and_emits_signal[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_activated_outcome_emits_module_signal[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_activated_outcome_emits_module_signal[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_player_loadout_outcome_emits_after_typed_state_replacement[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+[Connection] PlayerLoadout received
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_player_loadout_outcome_emits_after_typed_state_replacement[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_outcome_dispatches_welcome_and_detects_missing_handler[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+WARNING: typed ServerMessage dispatch target is missing method '_accept_welcome'
+     at: dawn_client_gdext::server_message_gd::ensure_handler (crates/dawn-client-gdext/src/server_message_gd.rs:972)
+     GDScript backtrace (most recent call first):
+         [0] test_real_outcome_dispatches_welcome_and_detects_missing_handler (res://test/connection_test.gd:86)
+         [1] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+         [2] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+         [3] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+         [4] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+         [5] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+         [6] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+         [7] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+         [8] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+         [9] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+         [10] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+         [11] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+         [12] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+         [13] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+         [14] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+         [15] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+         [16] execute (res://addons/gdUnit4/src/core/_TestCase.gd:40)
+         [17] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:98)
+[Connection] Welcome: player_id=5 ship_id=11
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_outcome_dispatches_welcome_and_detects_missing_handler[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_world_event_dispatches_directly_to_final_handler[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_world_event_dispatches_directly_to_final_handler[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_initial_state_updates_session_even_when_presentation_handler_is_missing[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+WARNING: typed ServerMessage dispatch target is missing method '_accept_initial_state'
+     at: dawn_client_gdext::server_message_gd::ensure_handler (crates/dawn-client-gdext/src/server_message_gd.rs:972)
+     GDScript backtrace (most recent call first):
+         [0] test_initial_state_updates_session_even_when_presentation_handler_is_missing (res://test/connection_test.gd:124)
+         [1] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+         [2] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+         [3] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+         [4] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+         [5] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+         [6] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+         [7] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+         [8] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+         [9] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+         [10] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+         [11] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+         [12] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+         [13] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+         [14] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+         [15] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+         [16] execute (res://addons/gdUnit4/src/core/_TestCase.gd:40)
+         [17] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:98)
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_initial_state_updates_session_even_when_presentation_handler_is_missing[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_initial_state_updates_session_before_typed_signal[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+[Connection] InitialState: 2 ships
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_initial_state_updates_session_before_typed_signal[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_market_outcome_preserves_every_item_variant[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_market_outcome_preserves_every_item_variant[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_motion_correction_emits_typed_presentation[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_motion_correction_emits_typed_presentation[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_motion_correction_reaches_main_scene_handler[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_motion_correction_reaches_main_scene_handler[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_dock_event_updates_session_before_final_handler[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/connection_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_real_dock_event_updates_session_before_final_handler[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 15 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 145ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/main_test.gd[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_warp_hud_guidance_uses_shared_minimum_distance_boundary[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+ERROR: Condition "!is_inside_tree()" is true. Returning: Transform3D()
+   at: get_global_transform (scene/3d/node_3d.cpp:642)
+   GDScript backtrace (most recent call first):
+       [0] _selected_gate_distance (res://scripts/main.gd:392)
+       [1] _update_hud (res://scripts/main.gd:1053)
+       [2] test_warp_hud_guidance_uses_shared_minimum_distance_boundary (res://test/main_test.gd:301)
+       [3] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+       [4] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+       [5] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+       [6] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [7] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+       [8] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [9] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+       [10] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [11] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+       [12] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [13] run_and_wait (res://addons/gdUnit4/src/core/execution/GdUnitTestSuiteExecutor.gd:47)
+       [14] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [15] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:46)
+ERROR: Condition "!is_inside_tree()" is true. Returning: Transform3D()
+   at: get_global_transform (scene/3d/node_3d.cpp:642)
+   GDScript backtrace (most recent call first):
+       [0] _selected_gate_distance (res://scripts/main.gd:392)
+       [1] _update_hud (res://scripts/main.gd:1053)
+       [2] test_warp_hud_guidance_uses_shared_minimum_distance_boundary (res://test/main_test.gd:306)
+       [3] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+       [4] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+       [5] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+       [6] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [7] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+       [8] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [9] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+       [10] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [11] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+       [12] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [13] run_and_wait (res://addons/gdUnit4/src/core/execution/GdUnitTestSuiteExecutor.gd:47)
+       [14] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [15] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:46)
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_warp_hud_guidance_uses_shared_minimum_distance_boundary[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 18ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_player_position_snap_clears_residual_warp_motion[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+ERROR: Condition "!is_inside_tree()" is true. Returning: Transform3D()
+   at: get_global_transform (scene/3d/node_3d.cpp:642)
+   GDScript backtrace (most recent call first):
+       [0] test_player_position_snap_clears_residual_warp_motion (res://test/main_test.gd:319)
+       [1] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+       [2] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+       [3] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+       [4] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [5] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+       [6] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [7] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+       [8] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [9] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+       [10] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [11] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+       [12] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [13] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+       [14] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [15] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+       [16] gc (res://addons/gdUnit4/src/core/execution/GdUnitExecutionContext.gd:282)
+       [17] gc (res://addons/gdUnit4/src/core/execution/GdUnitMemoryObserver.gd:129)
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_player_position_snap_clears_residual_warp_motion[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_observed_ship_position_snap_clears_residual_warp_motion[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_observed_ship_position_snap_clears_residual_warp_motion[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_ship_docked_event_clears_residual_motion[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+ERROR: Condition "!is_inside_tree()" is true. Returning: Transform3D()
+   at: get_global_transform (scene/3d/node_3d.cpp:642)
+   GDScript backtrace (most recent call first):
+       [0] test_ship_docked_event_clears_residual_motion (res://test/main_test.gd:349)
+       [1] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+       [2] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+       [3] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+       [4] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [5] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+       [6] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [7] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+       [8] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [9] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+       [10] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [11] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+       [12] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [13] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+       [14] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [15] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+       [16] execute (res://addons/gdUnit4/src/core/_TestCase.gd:40)
+       [17] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:98)
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_ship_docked_event_clears_residual_motion[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_ship_docked_event_stops_ship_when_station_map_is_not_ready[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_ship_docked_event_stops_ship_when_station_map_is_not_ready[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_rejected_player_undock_event_does_not_move_the_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_rejected_player_undock_event_does_not_move_the_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 9ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_player_loadout_refresh_preserves_docked_motion_state[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_player_loadout_refresh_preserves_docked_motion_state[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_au_navigation_proximity_uses_unquantized_positions[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+ERROR: Condition "!is_inside_tree()" is true. Returning: Transform3D()
+   at: get_global_transform (scene/3d/node_3d.cpp:642)
+   GDScript backtrace (most recent call first):
+       [0] _update_gate_proximity (res://scripts/main.gd:181)
+       [1] test_au_navigation_proximity_uses_unquantized_positions (res://test/main_test.gd:425)
+       [2] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+       [3] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+       [4] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+       [5] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [6] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+       [7] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [8] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+       [9] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [10] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+       [11] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [12] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+       [13] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [14] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+       [15] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [16] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+       [17] execute (res://addons/gdUnit4/src/core/_TestCase.gd:40)
+       [18] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:98)
+ERROR: Condition "!is_inside_tree()" is true. Returning: Transform3D()
+   at: get_global_transform (scene/3d/node_3d.cpp:642)
+   GDScript backtrace (most recent call first):
+       [0] _update_station_proximity (res://scripts/main.gd:198)
+       [1] test_au_navigation_proximity_uses_unquantized_positions (res://test/main_test.gd:426)
+       [2] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+       [3] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+       [4] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+       [5] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [6] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+       [7] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [8] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+       [9] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [10] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+       [11] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [12] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+       [13] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [14] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+       [15] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+       [16] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+       [17] execute (res://addons/gdUnit4/src/core/_TestCase.gd:40)
+       [18] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:98)
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_au_navigation_proximity_uses_unquantized_positions[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_motion_correction_reconciles_the_active_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_motion_correction_reconciles_the_active_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_velocity_changed_passes_the_authority_tick_to_the_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_velocity_changed_passes_the_authority_tick_to_the_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_motion_correction_preserves_small_motion_near_a_true_au_origin[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_motion_correction_preserves_small_motion_near_a_true_au_origin[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_accepted_player_undock_event_updates_presentation_state[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_accepted_player_undock_event_updates_presentation_state[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_activated_marks_matching_player_module_active[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_activated_marks_matching_player_module_active[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_toggle_marks_module_active_before_server_echo[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_toggle_marks_module_active_before_server_echo[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_toggle_of_a_targeted_kind_without_a_locked_target_is_refused_client_side[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_toggle_of_a_targeted_kind_without_a_locked_target_is_refused_client_side[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_toggle_of_a_targeted_kind_against_a_locked_but_out_of_aoi_target_is_refused_client_side[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_toggle_of_a_targeted_kind_against_a_locked_but_out_of_aoi_target_is_refused_client_side[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_toggle_marks_module_inactive_before_server_echo[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_toggle_marks_module_inactive_before_server_echo[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_deactivated_with_no_reason_is_a_plain_off[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_deactivated_with_no_reason_is_a_plain_off[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_deactivated_with_cap_reason_flags_forced_reason[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_deactivated_with_cap_reason_flags_forced_reason[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_deactivated_with_range_reason_flags_forced_reason[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_deactivated_with_range_reason_flags_forced_reason[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_switching_active_ship_to_a_known_ship_reattaches_the_camera[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_switching_active_ship_to_a_known_ship_reattaches_the_camera[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 19ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_switching_active_ship_to_an_unknown_ship_leaves_the_camera_alone[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_switching_active_ship_to_an_unknown_ship_leaves_the_camera_alone[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 18ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pending_docked_switch_reapplies_dock_after_aoi_enter[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+SCRIPT ERROR: Invalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.
+          at: _draw_ring (res://scripts/tactical_overlay.gd:71)
+          GDScript backtrace (most recent call first):
+              [0] _draw_ring (res://scripts/tactical_overlay.gd:71)
+              [1] _redraw (res://scripts/tactical_overlay.gd:63)
+              [2] set_ranges (res://scripts/tactical_overlay.gd:42)
+              [3] update_tactical_overlay_ranges (res://scripts/world_presentation.gd:157)
+              [4] attach_player_ship (res://scripts/world_presentation.gd:138)
+              [5] _set_as_player_ship (res://scripts/main.gd:915)
+              [6] _setup_pending_docked_switch (res://test/main_test.gd:272)
+              [7] test_pending_docked_switch_reapplies_dock_after_aoi_enter (res://test/main_test.gd:702)
+              [8] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+              [9] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+              [10] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+              [11] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [12] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+              [13] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [14] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+              [15] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [16] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+              [17] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [18] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+              [19] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [20] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+              [21] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [22] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+              [23] gc (res://addons/gdUnit4/src/core/execution/GdUnitExecutionContext.gd:282)
+              [24] gc (res://addons/gdUnit4/src/core/execution/GdUnitMemoryObserver.gd:129)
+SCRIPT ERROR: Invalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.
+          at: _draw_ring (res://scripts/tactical_overlay.gd:71)
+          GDScript backtrace (most recent call first):
+              [0] _draw_ring (res://scripts/tactical_overlay.gd:71)
+              [1] _redraw (res://scripts/tactical_overlay.gd:65)
+              [2] set_ranges (res://scripts/tactical_overlay.gd:42)
+              [3] update_tactical_overlay_ranges (res://scripts/world_presentation.gd:157)
+              [4] attach_player_ship (res://scripts/world_presentation.gd:138)
+              [5] _set_as_player_ship (res://scripts/main.gd:915)
+              [6] _setup_pending_docked_switch (res://test/main_test.gd:272)
+              [7] test_pending_docked_switch_reapplies_dock_after_aoi_enter (res://test/main_test.gd:702)
+              [8] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+              [9] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+              [10] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+              [11] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [12] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+              [13] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [14] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+              [15] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [16] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+              [17] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [18] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+              [19] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [20] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+              [21] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [22] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+              [23] gc (res://addons/gdUnit4/src/core/execution/GdUnitExecutionContext.gd:282)
+              [24] gc (res://addons/gdUnit4/src/core/execution/GdUnitMemoryObserver.gd:129)
+SCRIPT ERROR: Invalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.
+          at: _draw_ring (res://scripts/tactical_overlay.gd:71)
+          GDScript backtrace (most recent call first):
+              [0] _draw_ring (res://scripts/tactical_overlay.gd:71)
+              [1] _redraw (res://scripts/tactical_overlay.gd:63)
+              [2] set_ranges (res://scripts/tactical_overlay.gd:42)
+              [3] update_tactical_overlay_ranges (res://scripts/world_presentation.gd:157)
+              [4] _recalc_weapon_range (res://scripts/main.gd:669)
+              [5] _apply_loadout_side_effects (res://scripts/main.gd:665)
+              [6] _setup_pending_docked_switch (res://test/main_test.gd:275)
+              [7] test_pending_docked_switch_reapplies_dock_after_aoi_enter (res://test/main_test.gd:702)
+              [8] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+              [9] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+              [10] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+              [11] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [12] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+              [13] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [14] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+              [15] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [16] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+              [17] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [18] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+              [19] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [20] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+              [21] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [22] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+              [23] gc (res://addons/gdUnit4/src/core/execution/GdUnitExecutionContext.gd:282)
+              [24] gc (res://addons/gdUnit4/src/core/execution/GdUnitMemoryObserver.gd:129)
+SCRIPT ERROR: Invalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.
+          at: _draw_ring (res://scripts/tactical_overlay.gd:71)
+          GDScript backtrace (most recent call first):
+              [0] _draw_ring (res://scripts/tactical_overlay.gd:71)
+              [1] _redraw (res://scripts/tactical_overlay.gd:65)
+              [2] set_ranges (res://scripts/tactical_overlay.gd:42)
+              [3] update_tactical_overlay_ranges (res://scripts/world_presentation.gd:157)
+              [4] _recalc_weapon_range (res://scripts/main.gd:669)
+              [5] _apply_loadout_side_effects (res://scripts/main.gd:665)
+              [6] _setup_pending_docked_switch (res://test/main_test.gd:275)
+              [7] test_pending_docked_switch_reapplies_dock_after_aoi_enter (res://test/main_test.gd:702)
+              [8] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+              [9] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+              [10] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+              [11] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [12] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+              [13] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [14] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+              [15] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [16] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+              [17] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [18] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+              [19] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [20] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+              [21] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [22] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+              [23] gc (res://addons/gdUnit4/src/core/execution/GdUnitExecutionContext.gd:282)
+              [24] gc (res://addons/gdUnit4/src/core/execution/GdUnitMemoryObserver.gd:129)
+SCRIPT ERROR: Invalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.
+          at: _draw_ring (res://scripts/tactical_overlay.gd:71)
+          GDScript backtrace (most recent call first):
+              [0] _draw_ring (res://scripts/tactical_overlay.gd:71)
+              [1] _redraw (res://scripts/tactical_overlay.gd:63)
+              [2] set_ranges (res://scripts/tactical_overlay.gd:42)
+              [3] update_tactical_overlay_ranges (res://scripts/world_presentation.gd:157)
+              [4] attach_player_ship (res://scripts/world_presentation.gd:138)
+              [5] _set_as_player_ship (res://scripts/main.gd:915)
+              [6] _spawn_ship_from_record (res://scripts/main.gd:623)
+              [7] _handle_aoi_enter (res://scripts/main.gd:630)
+              [8] _dispatch_to_main (res://test/main_test.gd:50)
+              [9] test_pending_docked_switch_reapplies_dock_after_aoi_enter (res://test/main_test.gd:704)
+              [10] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+              [11] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+              [12] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+              [13] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [14] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+              [15] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [16] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+              [17] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [18] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+              [19] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [20] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+              [21] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [22] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+              [23] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [24] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+              [25] gc (res://addons/gdUnit4/src/core/execution/GdUnitExecutionContext.gd:282)
+              [26] gc (res://addons/gdUnit4/src/core/execution/GdUnitMemoryObserver.gd:129)
+SCRIPT ERROR: Invalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.
+          at: _draw_ring (res://scripts/tactical_overlay.gd:71)
+          GDScript backtrace (most recent call first):
+              [0] _draw_ring (res://scripts/tactical_overlay.gd:71)
+              [1] _redraw (res://scripts/tactical_overlay.gd:65)
+              [2] set_ranges (res://scripts/tactical_overlay.gd:42)
+              [3] update_tactical_overlay_ranges (res://scripts/world_presentation.gd:157)
+              [4] attach_player_ship (res://scripts/world_presentation.gd:138)
+              [5] _set_as_player_ship (res://scripts/main.gd:915)
+              [6] _spawn_ship_from_record (res://scripts/main.gd:623)
+              [7] _handle_aoi_enter (res://scripts/main.gd:630)
+              [8] _dispatch_to_main (res://test/main_test.gd:50)
+              [9] test_pending_docked_switch_reapplies_dock_after_aoi_enter (res://test/main_test.gd:704)
+              [10] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+              [11] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+              [12] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+              [13] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [14] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+              [15] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [16] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+              [17] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [18] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+              [19] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [20] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+              [21] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [22] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+              [23] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [24] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+              [25] gc (res://addons/gdUnit4/src/core/execution/GdUnitExecutionContext.gd:282)
+              [26] gc (res://addons/gdUnit4/src/core/execution/GdUnitMemoryObserver.gd:129)
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pending_docked_switch_reapplies_dock_after_aoi_enter[0m[38;2;178;34;34m[1m FAILED[0m[38;2;100;149;237m 12ms[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m702:[0m [38;2;205;92;92mGodot Runtime Error ![0m[0m
+    [38;2;0;206;209m[38;2;205;92;92mError:[0m '[38;2;30;144;255mInvalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.[0m'[0m
+    [38;2;0;206;209m[38;2;30;144;255m	at res://scripts/tactical_overlay.gd:71[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:63[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:42[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:157[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:138[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:915[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:272[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:702[0m[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m702:[0m [38;2;205;92;92mGodot Runtime Error ![0m[0m
+    [38;2;0;206;209m[38;2;205;92;92mError:[0m '[38;2;30;144;255mInvalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.[0m'[0m
+    [38;2;0;206;209m[38;2;30;144;255m	at res://scripts/tactical_overlay.gd:71[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:65[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:42[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:157[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:138[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:915[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:272[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:702[0m[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m702:[0m [38;2;205;92;92mGodot Runtime Error ![0m[0m
+    [38;2;0;206;209m[38;2;205;92;92mError:[0m '[38;2;30;144;255mInvalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.[0m'[0m
+    [38;2;0;206;209m[38;2;30;144;255m	at res://scripts/tactical_overlay.gd:71[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:63[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:42[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:157[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:669[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:665[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:275[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:702[0m[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m702:[0m [38;2;205;92;92mGodot Runtime Error ![0m[0m
+    [38;2;0;206;209m[38;2;205;92;92mError:[0m '[38;2;30;144;255mInvalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.[0m'[0m
+    [38;2;0;206;209m[38;2;30;144;255m	at res://scripts/tactical_overlay.gd:71[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:65[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:42[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:157[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:669[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:665[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:275[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:702[0m[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m704:[0m [38;2;205;92;92mGodot Runtime Error ![0m[0m
+    [38;2;0;206;209m[38;2;205;92;92mError:[0m '[38;2;30;144;255mInvalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.[0m'[0m
+    [38;2;0;206;209m[38;2;30;144;255m	at res://scripts/tactical_overlay.gd:71[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:63[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:42[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:157[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:138[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:915[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:623[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:630[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:50[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:704[0m[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m704:[0m [38;2;205;92;92mGodot Runtime Error ![0m[0m
+    [38;2;0;206;209m[38;2;205;92;92mError:[0m '[38;2;30;144;255mInvalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.[0m'[0m
+    [38;2;0;206;209m[38;2;30;144;255m	at res://scripts/tactical_overlay.gd:71[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:65[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:42[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:157[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:138[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:915[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:623[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:630[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:50[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:704[0m[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m701:[0m [38;2;239;248;131mWARNING:[0m: Found [38;2;205;92;92m4[0m possible orphan nodes.[0m
+    [38;2;0;206;209m	Add '[38;2;30;144;255mcollect_orphan_node_details()[0m' to the end of the test to collect details.[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pending_docked_switch_reapplies_dock_after_ship_spawned[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+SCRIPT ERROR: Invalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.
+          at: _draw_ring (res://scripts/tactical_overlay.gd:71)
+          GDScript backtrace (most recent call first):
+              [0] _draw_ring (res://scripts/tactical_overlay.gd:71)
+              [1] _redraw (res://scripts/tactical_overlay.gd:63)
+              [2] set_ranges (res://scripts/tactical_overlay.gd:42)
+              [3] update_tactical_overlay_ranges (res://scripts/world_presentation.gd:157)
+              [4] attach_player_ship (res://scripts/world_presentation.gd:138)
+              [5] _set_as_player_ship (res://scripts/main.gd:915)
+              [6] _setup_pending_docked_switch (res://test/main_test.gd:272)
+              [7] test_pending_docked_switch_reapplies_dock_after_ship_spawned (res://test/main_test.gd:718)
+              [8] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+              [9] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+              [10] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+              [11] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [12] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+              [13] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [14] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+              [15] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [16] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+              [17] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [18] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+              [19] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [20] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+              [21] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [22] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+              [23] execute (res://addons/gdUnit4/src/core/_TestCase.gd:40)
+              [24] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:98)
+SCRIPT ERROR: Invalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.
+          at: _draw_ring (res://scripts/tactical_overlay.gd:71)
+          GDScript backtrace (most recent call first):
+              [0] _draw_ring (res://scripts/tactical_overlay.gd:71)
+              [1] _redraw (res://scripts/tactical_overlay.gd:65)
+              [2] set_ranges (res://scripts/tactical_overlay.gd:42)
+              [3] update_tactical_overlay_ranges (res://scripts/world_presentation.gd:157)
+              [4] attach_player_ship (res://scripts/world_presentation.gd:138)
+              [5] _set_as_player_ship (res://scripts/main.gd:915)
+              [6] _setup_pending_docked_switch (res://test/main_test.gd:272)
+              [7] test_pending_docked_switch_reapplies_dock_after_ship_spawned (res://test/main_test.gd:718)
+              [8] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+              [9] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+              [10] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+              [11] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [12] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+              [13] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [14] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+              [15] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [16] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+              [17] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [18] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+              [19] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [20] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+              [21] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [22] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+              [23] execute (res://addons/gdUnit4/src/core/_TestCase.gd:40)
+              [24] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:98)
+SCRIPT ERROR: Invalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.
+          at: _draw_ring (res://scripts/tactical_overlay.gd:71)
+          GDScript backtrace (most recent call first):
+              [0] _draw_ring (res://scripts/tactical_overlay.gd:71)
+              [1] _redraw (res://scripts/tactical_overlay.gd:63)
+              [2] set_ranges (res://scripts/tactical_overlay.gd:42)
+              [3] update_tactical_overlay_ranges (res://scripts/world_presentation.gd:157)
+              [4] _recalc_weapon_range (res://scripts/main.gd:669)
+              [5] _apply_loadout_side_effects (res://scripts/main.gd:665)
+              [6] _setup_pending_docked_switch (res://test/main_test.gd:275)
+              [7] test_pending_docked_switch_reapplies_dock_after_ship_spawned (res://test/main_test.gd:718)
+              [8] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+              [9] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+              [10] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+              [11] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [12] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+              [13] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [14] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+              [15] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [16] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+              [17] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [18] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+              [19] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [20] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+              [21] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [22] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+              [23] execute (res://addons/gdUnit4/src/core/_TestCase.gd:40)
+              [24] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:98)
+SCRIPT ERROR: Invalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.
+          at: _draw_ring (res://scripts/tactical_overlay.gd:71)
+          GDScript backtrace (most recent call first):
+              [0] _draw_ring (res://scripts/tactical_overlay.gd:71)
+              [1] _redraw (res://scripts/tactical_overlay.gd:65)
+              [2] set_ranges (res://scripts/tactical_overlay.gd:42)
+              [3] update_tactical_overlay_ranges (res://scripts/world_presentation.gd:157)
+              [4] _recalc_weapon_range (res://scripts/main.gd:669)
+              [5] _apply_loadout_side_effects (res://scripts/main.gd:665)
+              [6] _setup_pending_docked_switch (res://test/main_test.gd:275)
+              [7] test_pending_docked_switch_reapplies_dock_after_ship_spawned (res://test/main_test.gd:718)
+              [8] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+              [9] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+              [10] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+              [11] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [12] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+              [13] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [14] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+              [15] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [16] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+              [17] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [18] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+              [19] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [20] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+              [21] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [22] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+              [23] execute (res://addons/gdUnit4/src/core/_TestCase.gd:40)
+              [24] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:98)
+SCRIPT ERROR: Invalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.
+          at: _draw_ring (res://scripts/tactical_overlay.gd:71)
+          GDScript backtrace (most recent call first):
+              [0] _draw_ring (res://scripts/tactical_overlay.gd:71)
+              [1] _redraw (res://scripts/tactical_overlay.gd:63)
+              [2] set_ranges (res://scripts/tactical_overlay.gd:42)
+              [3] update_tactical_overlay_ranges (res://scripts/world_presentation.gd:157)
+              [4] attach_player_ship (res://scripts/world_presentation.gd:138)
+              [5] _set_as_player_ship (res://scripts/main.gd:915)
+              [6] _handle_ship_spawned (res://scripts/main.gd:941)
+              [7] _dispatch_to_main (res://test/main_test.gd:50)
+              [8] test_pending_docked_switch_reapplies_dock_after_ship_spawned (res://test/main_test.gd:720)
+              [9] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+              [10] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+              [11] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+              [12] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [13] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+              [14] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [15] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+              [16] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [17] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+              [18] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [19] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+              [20] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [21] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+              [22] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [23] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+              [24] execute (res://addons/gdUnit4/src/core/_TestCase.gd:40)
+              [25] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:98)
+SCRIPT ERROR: Invalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.
+          at: _draw_ring (res://scripts/tactical_overlay.gd:71)
+          GDScript backtrace (most recent call first):
+              [0] _draw_ring (res://scripts/tactical_overlay.gd:71)
+              [1] _redraw (res://scripts/tactical_overlay.gd:65)
+              [2] set_ranges (res://scripts/tactical_overlay.gd:42)
+              [3] update_tactical_overlay_ranges (res://scripts/world_presentation.gd:157)
+              [4] attach_player_ship (res://scripts/world_presentation.gd:138)
+              [5] _set_as_player_ship (res://scripts/main.gd:915)
+              [6] _handle_ship_spawned (res://scripts/main.gd:941)
+              [7] _dispatch_to_main (res://test/main_test.gd:50)
+              [8] test_pending_docked_switch_reapplies_dock_after_ship_spawned (res://test/main_test.gd:720)
+              [9] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:94)
+              [10] execute (res://addons/gdUnit4/src/core/_TestCase.gd:39)
+              [11] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:10)
+              [12] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [13] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:17)
+              [14] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [15] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:25)
+              [16] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [17] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestSuiteExecutionStage.gd:33)
+              [18] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [19] _execute (res://addons/gdUnit4/src/core/execution/stages/GdUnitTestCaseExecutionStage.gd:33)
+              [20] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [21] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleExecutionStage.gd:28)
+              [22] execute (res://addons/gdUnit4/src/core/execution/stages/IGdUnitExecutionStage.gd:19)
+              [23] _execute (res://addons/gdUnit4/src/core/execution/stages/single/GdUnitTestCaseSingleTestStage.gd:11)
+              [24] execute (res://addons/gdUnit4/src/core/_TestCase.gd:40)
+              [25] _execute_test_case (res://addons/gdUnit4/src/core/_TestCase.gd:98)
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_pending_docked_switch_reapplies_dock_after_ship_spawned[0m[38;2;178;34;34m[1m FAILED[0m[38;2;100;149;237m 10ms[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m718:[0m [38;2;205;92;92mGodot Runtime Error ![0m[0m
+    [38;2;0;206;209m[38;2;205;92;92mError:[0m '[38;2;30;144;255mInvalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.[0m'[0m
+    [38;2;0;206;209m[38;2;30;144;255m	at res://scripts/tactical_overlay.gd:71[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:63[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:42[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:157[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:138[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:915[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:272[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:718[0m[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m718:[0m [38;2;205;92;92mGodot Runtime Error ![0m[0m
+    [38;2;0;206;209m[38;2;205;92;92mError:[0m '[38;2;30;144;255mInvalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.[0m'[0m
+    [38;2;0;206;209m[38;2;30;144;255m	at res://scripts/tactical_overlay.gd:71[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:65[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:42[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:157[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:138[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:915[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:272[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:718[0m[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m718:[0m [38;2;205;92;92mGodot Runtime Error ![0m[0m
+    [38;2;0;206;209m[38;2;205;92;92mError:[0m '[38;2;30;144;255mInvalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.[0m'[0m
+    [38;2;0;206;209m[38;2;30;144;255m	at res://scripts/tactical_overlay.gd:71[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:63[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:42[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:157[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:669[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:665[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:275[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:718[0m[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m718:[0m [38;2;205;92;92mGodot Runtime Error ![0m[0m
+    [38;2;0;206;209m[38;2;205;92;92mError:[0m '[38;2;30;144;255mInvalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.[0m'[0m
+    [38;2;0;206;209m[38;2;30;144;255m	at res://scripts/tactical_overlay.gd:71[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:65[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:42[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:157[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:669[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:665[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:275[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:718[0m[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m720:[0m [38;2;205;92;92mGodot Runtime Error ![0m[0m
+    [38;2;0;206;209m[38;2;205;92;92mError:[0m '[38;2;30;144;255mInvalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.[0m'[0m
+    [38;2;0;206;209m[38;2;30;144;255m	at res://scripts/tactical_overlay.gd:71[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:63[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:42[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:157[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:138[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:915[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:941[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:50[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:720[0m[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m720:[0m [38;2;205;92;92mGodot Runtime Error ![0m[0m
+    [38;2;0;206;209m[38;2;205;92;92mError:[0m '[38;2;30;144;255mInvalid assignment of property or key 'mesh' with value of type 'Nil' on a base object of type 'Nil'.[0m'[0m
+    [38;2;0;206;209m[38;2;30;144;255m	at res://scripts/tactical_overlay.gd:71[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:65[0m
+    [38;2;0;206;209m	at res://scripts/tactical_overlay.gd:42[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:157[0m
+    [38;2;0;206;209m	at res://scripts/world_presentation.gd:138[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:915[0m
+    [38;2;0;206;209m	at res://scripts/main.gd:941[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:50[0m
+    [38;2;0;206;209m	at res://test/main_test.gd:720[0m[0m
+  [38;2;0;206;209m[1m[4mReport:[0m
+    [38;2;0;206;209m[38;2;0;255;0mline [0m[38;2;0;255;255m717:[0m [38;2;239;248;131mWARNING:[0m: Found [38;2;205;92;92m4[0m possible orphan nodes.[0m
+    [38;2;0;206;209m	Add '[38;2;30;144;255mcollect_orphan_node_details()[0m' to the end of the test to collect details.[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_disembarking_reverts_the_old_ships_player_material[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_disembarking_reverts_the_old_ships_player_material[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 15ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_disassemble_row_click_sends_disassemble_command_for_the_docked_ship[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_disassemble_row_click_sends_disassemble_command_for_the_docked_ship[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_disassemble_row_click_is_a_no_op_when_not_docked[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_disassemble_row_click_is_a_no_op_when_not_docked[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_build_ship_type_row_click_sends_the_picked_ship_type_not_the_hardcoded_default[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_build_ship_type_row_click_sends_the_picked_ship_type_not_the_hardcoded_default[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_unfit_all_row_click_sends_one_unfit_command_per_fitted_module[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_unfit_all_row_click_sends_one_unfit_command_per_fitted_module[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_unfit_all_row_click_is_a_no_op_when_no_module_is_fitted[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_unfit_all_row_click_is_a_no_op_when_no_module_is_fitted[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_from_ship_cargo_to_fitted_sends_fit_command[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_from_ship_cargo_to_fitted_sends_fit_command[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_from_ship_cargo_to_fitted_is_a_no_op_when_undocked[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_from_ship_cargo_to_fitted_is_a_no_op_when_undocked[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_from_fitted_to_ship_cargo_sends_unfit_command[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_from_fitted_to_ship_cargo_sends_unfit_command[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_from_ship_cargo_to_station_sends_transfer_to_station_command[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_from_ship_cargo_to_station_sends_transfer_to_station_command[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_from_station_to_ship_cargo_sends_transfer_from_station_command[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_from_station_to_ship_cargo_sends_transfer_from_station_command[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_dropped_back_onto_its_own_column_is_a_no_op[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_dropped_back_onto_its_own_column_is_a_no_op[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_within_fitted_reorders_two_modules_of_the_same_slot_kind[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_within_fitted_reorders_two_modules_of_the_same_slot_kind[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 33ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_within_fitted_across_different_slot_kinds_is_a_no_op[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_drag_within_fitted_across_different_slot_kinds_is_a_no_op[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 31ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_release_within_threshold_of_press_is_treated_as_a_plain_click[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_release_within_threshold_of_press_is_treated_as_a_plain_click[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 8ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_release_past_threshold_is_treated_as_a_drop_not_a_click[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/main_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_release_past_threshold_is_treated_as_a_drop_not_a_click[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 31ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 40 test cases | 12 errors | 0 failures | 0 flaky | 0 skipped | 8 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 518ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/world_space_test.gd[0m
+  [38;2;250;235;215mres://test/world_space_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_floating_origin_preserves_nearby_offset_at_true_au[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_space_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_floating_origin_preserves_nearby_offset_at_true_au[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_space_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_f64_wire_position_is_subtracted_before_vector3_narrowing[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_space_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_f64_wire_position_is_subtracted_before_vector3_narrowing[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_space_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_component_transforms_are_mutual_inverses_with_a_moved_origin[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_space_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_component_transforms_are_mutual_inverses_with_a_moved_origin[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_space_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_rebase_preserves_relative_render_position[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_space_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_rebase_preserves_relative_render_position[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_space_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_should_rebase_respects_threshold[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_space_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_should_rebase_respects_threshold[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 6ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_space_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_distance_components_preserves_au_scale_offsets[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/world_space_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_distance_components_preserves_au_scale_offsets[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 7ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 6 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 59ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/hud_surface_test.gd[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_player_fitting_before_build_is_applied_after_build[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_player_fitting_before_build_is_applied_after_build[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 27ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_render_updates_all_hud_panels_from_one_frame[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_render_updates_all_hud_panels_from_one_frame[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 22ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_player_fitting_rebuilds_module_slots_and_inventory_rows[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_player_fitting_rebuilds_module_slots_and_inventory_rows[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 21ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_render_repaints_after_the_modules_array_is_mutated_in_place[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_render_repaints_after_the_modules_array_is_mutated_in_place[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 23ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_player_fitting_reuses_slots_when_active_module_set_is_unchanged[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_player_fitting_reuses_slots_when_active_module_set_is_unchanged[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 23ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_player_fitting_rebuilds_when_active_module_set_changes[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_set_player_fitting_rebuilds_when_active_module_set_changes[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 25ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_panel_changed_is_false_for_equal_dictionaries[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_panel_changed_is_false_for_equal_dictionaries[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 17ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_panel_changed_is_true_when_a_value_differs[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_panel_changed_is_true_when_a_value_differs[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 19ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_panel_changed_is_true_for_nested_dictionary_difference[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_panel_changed_is_true_for_nested_dictionary_difference[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 19ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_panel_changed_is_true_for_array_difference[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_panel_changed_is_true_for_array_difference[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 18ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_modules_changed_is_false_for_equal_module_rows[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_modules_changed_is_false_for_equal_module_rows[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 17ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_modules_changed_is_true_when_a_field_differs[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_modules_changed_is_true_when_a_field_differs[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 18ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_modules_changed_is_true_when_size_differs[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_modules_changed_is_true_when_size_differs[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 17ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_render_called_twice_with_same_frame_does_not_change_painted_values[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_render_called_twice_with_same_frame_does_not_change_painted_values[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 19ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_inventory_panel_hit_helpers_delegate_to_built_panel[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_inventory_panel_hit_helpers_delegate_to_built_panel[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 30ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_station_inventory_packaged_ship_row_is_clickable_to_assemble[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_station_inventory_packaged_ship_row_is_clickable_to_assemble[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 29ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_owned_ships_roster_lists_active_and_inactive_ships[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_surface_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_owned_ships_roster_lists_active_and_inactive_ships[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 31ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 17 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 430ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/camera_controller_test.gd[0m
+  [38;2;250;235;215mres://test/camera_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_camera_runs_after_ship_presentation[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/camera_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_camera_runs_after_ship_presentation[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 11ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/camera_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_horizontal_drag_rotates_the_orbit_offset_sideways[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/camera_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_horizontal_drag_rotates_the_orbit_offset_sideways[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 11ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/camera_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_main_input_can_seed_orbit_drag_before_unhandled_motion[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/camera_controller_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_main_input_can_seed_orbit_drag_before_unhandled_motion[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 11ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 3 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 47ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;0;206;209mRun Test Suite: [0m[38;2;250;235;215mres://test/hud_hit_test_test.gd[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_slot_at_finds_the_slot_under_a_screen_position[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_module_slot_at_finds_the_slot_under_a_screen_position[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 16ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_column_at_identifies_the_fitted_column[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_column_at_identifies_the_fitted_column[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 25ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_column_at_identifies_the_ship_cargo_column[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_column_at_identifies_the_ship_cargo_column[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 25ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_column_at_identifies_the_station_column[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_column_at_identifies_the_station_column[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 24ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_column_at_identifies_the_ships_column[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_column_at_identifies_the_ships_column[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 25ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_column_at_returns_empty_string_for_a_point_outside_every_column[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_column_at_returns_empty_string_for_a_point_outside_every_column[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 25ms[0m
+[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_column_at_returns_empty_when_the_panel_is_hidden[0m[38;2;34;139;34m STARTED[0m[38;2;250;235;215m[0m
+  [38;2;250;235;215mres://test/hud_hit_test_test.gd[0m[38;2;250;235;215m > [0m[38;2;250;235;215mtest_column_at_returns_empty_when_the_panel_is_hidden[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 16ms[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mStatistics:[0m[38;2;250;235;215m 7 test cases | 0 errors | 0 failures | 0 flaky | 0 skipped | 0 orphans |[0m[38;2;34;139;34m PASSED[0m[38;2;100;149;237m 179ms[0m
+[38;2;250;235;215m[0m
+[38;2;250;235;215m[0m
+[38;2;30;144;255mOverall Summary:[0m[38;2;255;255;255m 214 test cases | 12 errors | 0 failures | 0 flaky | 0 skipped | 8 orphans |[0m
+[38;2;233;150;122mExecuted test suites: (19/19)[0m
+[38;2;233;150;122mExecuted test cases : (214/214)[0m
+[38;2;233;150;122mTotal execution time: 7s 191ms[0m
+[38;2;255;255;255m [0m[38;2;100;149;237mOpen XML Report at: file:///home/runner/work/Dawn/Dawn/client/reports/report_1/results.xml[0m
+[38;2;100;149;237mOpen HTML Report at: file:///home/runner/work/Dawn/Dawn/client/reports/report_1/index.html[0m
+[38;2;178;34;34mExit code: 100[0m
+Finallize .. done
+Run tests ends with 100
+===== gdunit.log =====
+===== gdunit-copy.log =====
