@@ -12,8 +12,8 @@
 4. Write the complete payload, flush it, call `sync_all`, then reread and decode it.
 5. If an authoritative snapshot already exists, copy it to a fixed sibling rollback path using the same protection metadata, sync the rollback file, and sync the directory entry before replacement.
 6. Replace the authoritative snapshot with the new sibling file.
-7. Make the replacement durable: on Unix, sync the already-open parent directory. On Windows, use `ReplaceFileW` for an existing destination so the original DACL, encryption, compression, attributes, and named streams are merged into the replacement; first publication uses `MoveFileExW(MOVEFILE_WRITE_THROUGH)`.
-8. Remove the rollback copy after the new authoritative path is durable.
+7. On Unix, sync the already-open parent directory after replacement. On Windows, the replacement file was synced before publication; `ReplaceFileW` preserves the existing destination's metadata during replacement, while first publication uses `MoveFileExW(MOVEFILE_WRITE_THROUGH)`.
+8. Remove the rollback copy after the new authoritative path is published successfully.
 
 Temporary files and rollback copies are removed after normal success and handled failure. The rollback path has a fixed name, so even a cleanup failure cannot accumulate an unbounded set. A process or machine crash can still leave one stale temporary or rollback file; recovery ignores these artifacts because only the configured authoritative path is loaded. A later publication removes a stale rollback copy only when the authoritative snapshot is readable.
 
