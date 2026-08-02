@@ -1,10 +1,11 @@
 name: Fix admission review
 
 on:
-  push:
-    branches: [agent/transactional-client-admission-253]
+  pull_request:
+    branches: [main]
     paths:
       - .github/workflows/fix-admission-review.yml
+      - .github/fix_admission_review.py
 
 permissions:
   contents: write
