@@ -39,7 +39,7 @@ func _module(overrides: Dictionary) -> ModuleRow:
 		base.is_active_module as bool,
 		base.cap_cost_per_cycle as float,
 		base.cycle_time_ticks as int,
-	) as ModuleRow
+	)
 
 
 func _owned_ship(overrides: Dictionary) -> OwnedShipRow:
@@ -58,7 +58,7 @@ func _owned_ship(overrides: Dictionary) -> OwnedShipRow:
 		base.ship_type_name as String,
 		base.docked_station_id as int,
 		base.is_active as bool,
-	) as OwnedShipRow
+	)
 
 
 # -- set_stat_bar / set_mini_bar (percentage math) -----------------------------

@@ -112,4 +112,4 @@ func _module(overrides: Dictionary) -> ModuleRow:
 		base.is_active_module as bool,
 		base.cap_cost_per_cycle as float,
 		base.cycle_time_ticks as int,
-	) as ModuleRow
+	)

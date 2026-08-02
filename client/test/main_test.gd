@@ -194,7 +194,7 @@ func _module_fixture(
 ) -> ModuleRow:
 	return ModuleRow.test_fixture(
 		slot, index, module_id, "Test Module", kind, active, true, 0.0, 10
-	) as ModuleRow
+	)
 
 
 func _set_loadout_modules(modules: Array[ModuleRow]) -> void:
