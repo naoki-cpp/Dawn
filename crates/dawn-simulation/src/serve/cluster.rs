@@ -7,8 +7,7 @@ use crate::{cluster, ws_server};
 use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
 use dawn_sector::client_admission::{
-    ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal,
-    CommittedClientAdmission,
+    ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
 use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
 use dawn_sector::transit;
@@ -397,7 +396,7 @@ mod tests {
         let mut ship_player = HashMap::new();
 
         assert_eq!(
-            finish_cluster_admission::<_, ()>(
+            finish_cluster_admission.:<_, ()>(
                 &mut node,
                 &mut player_sector,
                 &mut ship_player,

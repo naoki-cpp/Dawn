@@ -8,8 +8,7 @@ use dawn_actor::ws_server;
 use dawn_core::{Position, SectorId};
 use dawn_event_store::store::EventStore;
 use dawn_sector::client_admission::{
-    ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal,
-    CommittedClientAdmission,
+    ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
 use dawn_sector::node::SimulationNode;
 use dawn_wire::ServerMessage;

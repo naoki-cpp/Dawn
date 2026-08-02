@@ -8,8 +8,7 @@ use crate::ws_server;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
 use dawn_event_store::store::EventStore;
 use dawn_sector::client_admission::{
-    ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal,
-    CommittedClientAdmission,
+    ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
 use dawn_sector::dilation;
 use dawn_sector::node::{ClientCommandFollowup, SimulationNode};
