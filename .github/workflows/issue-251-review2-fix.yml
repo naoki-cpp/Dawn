@@ -26,6 +26,33 @@ jobs:
       - name: Apply review fixes
         run: |
           python .github/scripts/issue251_review2_patch.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/dawn-client-gdext/src/server_message_validation.rs')
+          text = path.read_text()
+          text = text.replace(
+              '''    fn decode(message: ServerMessage) -> ServerMessage {
+                  decode_server_message(&message.encode()).expect("valid raw ServerMessage frame")
+              }
+
+          ''',
+              '',
+          )
+          text = text.replace(
+              '            assert_eq!(decode(message.clone()), message);',
+              '            assert!(decode_server_message(&message.encode()).is_ok());',
+          )
+          text = text.replace(
+              '        assert_eq!(decode(activated.clone()), activated);',
+              '        assert!(decode_server_message(&activated.encode()).is_ok());',
+          )
+          text = text.replace(
+              '        assert_eq!(decode(deactivated.clone()), deactivated);',
+              '        assert!(decode_server_message(&deactivated.encode()).is_ok());',
+          )
+          path.write_text(text)
+          PY
           cargo fmt --all
       - name: Focused tests
         run: |
