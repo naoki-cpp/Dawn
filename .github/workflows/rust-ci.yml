@@ -157,6 +157,25 @@ jobs:
         with:
           baseline-rev: origin/main
 
+  windows-check:
+    name: dawn-sector Windows check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Check Windows snapshot publication path
+        run: cargo check -p dawn-sector --all-targets
+
   godot:
     name: Godot GdUnit4
     runs-on: ubuntu-latest
@@ -206,7 +225,7 @@ jobs:
   ci-success:
     name: CI success
     runs-on: ubuntu-latest
-    needs: [lint, test, doc, deny, audit, machete, semver, godot]
+    needs: [lint, test, doc, deny, audit, machete, semver, windows-check, godot]
     if: always()
     steps:
       - name: Check all required jobs succeeded
