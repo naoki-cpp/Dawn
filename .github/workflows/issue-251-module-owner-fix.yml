@@ -183,3 +183,5 @@ jobs:
             --arg branch "$branch" \
             '{message: $message, content: $content, sha: $sha, branch: $branch}' \
             | gh api --method PUT "repos/naoki-cpp/Dawn/contents/${path}" --input -
+
+# Retrigger after workflow registration.
