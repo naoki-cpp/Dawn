@@ -1,0 +1,55 @@
+name: Issue 239 adapter inventory
+
+on:
+  push:
+    branches:
+      - agent/delete-legacy-client-adapters
+
+permissions:
+  contents: write
+
+jobs:
+  inventory:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/delete-legacy-client-adapters
+      - name: Inventory legacy client adapters
+        shell: bash
+        run: |
+          mkdir -p .agent
+          {
+            echo '# Issue 239 inventory'
+            echo
+            for pattern in \
+              'ClientMessageDecoder' \
+              'json_variant' \
+              'from_json' \
+              'apply_payload' \
+              'PositionComponents' \
+              '_server_to_godot_pos' \
+              '_vec3_from_dict' \
+              '_position_components_from_dict' \
+              '_position_components' \
+              '_server_components_to_godot' \
+              '_velocity_components_to_vec3' \
+              '_velocity_from_dict' \
+              'rebase_to(' \
+              'Vector3.*position' \
+              'nav_pos'; do
+              echo "## $pattern"
+              rg -n --hidden --glob '!.git/**' --glob '!.agent/**' "$pattern" . || true
+              echo
+            done
+          } > .agent/issue239-inventory.txt
+      - name: Commit inventory
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .agent/issue239-inventory.txt
+          git diff --cached --quiet && exit 0
+          git commit -m 'Inventory issue 239 legacy adapters'
+          git push origin HEAD:agent/delete-legacy-client-adapters
