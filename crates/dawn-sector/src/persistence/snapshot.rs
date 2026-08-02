@@ -307,10 +307,7 @@ impl SnapshotDirectory {
     }
 }
 
-fn sync_snapshot_directory(
-    directory: &SnapshotDirectory,
-    _destination: &Path,
-) -> io::Result<()> {
+fn sync_snapshot_directory(directory: &SnapshotDirectory, _destination: &Path) -> io::Result<()> {
     #[cfg(test)]
     if should_fail_directory_sync(_destination) {
         return Err(io::Error::other(
@@ -436,15 +433,15 @@ impl SnapshotBackup {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
-        let mut backup_file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&backup_path)?;
         let backup = Self {
             path: backup_path,
             armed: true,
         };
+        let mut backup_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(backup.path())?;
         io::copy(&mut source, &mut backup_file)?;
         backup_file.flush()?;
         backup_file.sync_all()?;
