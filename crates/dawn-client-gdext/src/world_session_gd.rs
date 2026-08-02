@@ -5,8 +5,7 @@ type Dict = Dictionary<Variant, Variant>;
 
 use crate::loadout_gd::PlayerLoadout;
 use crate::session_record_gd::{
-    BuildableShipType, CapacitorStatus, CelestialBodyRecord, DestructionOutcome, GateRecord,
-    ShipHealth, StationRecord,
+    BuildableShipType, CapacitorStatus, CelestialBodyRecord, GateRecord, ShipHealth, StationRecord,
 };
 
 /// Godot adapter for the pure `dawn-client-core::WorldSessionState` model.
@@ -50,16 +49,6 @@ impl WorldSession {
         self.state.ship_count() as i64
     }
 
-    #[func]
-    fn increment_event_count(&mut self) {
-        self.state.increment_event_count();
-    }
-
-    #[func]
-    fn set_player_ship_id(&mut self, ship_id: i64) {
-        self.state.set_player_ship_id(ship_id);
-    }
-
     /// `main.gd` writes `_player_ship_id`/`_player_lock_target` optimistically
     /// ahead of the server's confirming event, then reconciles against these
     /// after every event -- unlike every other field WorldSession tracks,
@@ -75,83 +64,12 @@ impl WorldSession {
         self.state.player_lock_target()
     }
 
-    /// Returns whether the ship was there to remove -- the caller's cue to
-    /// free its Node3D.
-    #[func]
-    fn remove_ship(&mut self, ship_id: i64, clear_lock: bool) -> bool {
-        self.state.remove_ship(ship_id, clear_lock)
-    }
-
-    #[func]
-    fn destroy_ship(&mut self, ship_id: i64) -> Gd<DestructionOutcome> {
-        DestructionOutcome::wrap(self.state.destroy_ship(ship_id))
-    }
-
-    /// Applies a DamageTaken/RepairApplied health update for optimistic or
-    /// test-only callers. Production server outcomes use `apply_update` above.
-    ///
-    /// Returns nothing: the caller passed `ship_id` in and still has it for
-    /// its own hit-flash feedback.
-    #[func]
-    fn apply_health_event(&mut self, ship_id: i64, shield: f64, armor: f64, hull: f64) {
-        self.state.apply_hp_event(ship_id, shield, armor, hull);
-    }
-
-    #[func]
-    fn apply_target_locked(&mut self, locker_id: i64, target_id: i64) -> bool {
-        self.state.apply_target_locked(locker_id, target_id)
-    }
-
-    #[func]
-    fn apply_lock_lost(&mut self, locker_id: i64, target_id: i64) -> bool {
-        self.state.apply_lock_lost(locker_id, target_id)
-    }
-
-    /// The system's display name if the moving ship was the player's, else
-    /// `null`. Mirrors the `Option<String>` the pure state already returns,
-    /// rather than flattening it into a `changed_player`/`system_name` pair
-    /// the caller has to recombine.
-    #[func]
-    fn system_changed(&mut self, ship_id: i64, to_system: i64) -> Variant {
-        match self.state.system_changed(ship_id, to_system) {
-            Some(name) => GString::from(&name).to_variant(),
-            None => Variant::nil(),
-        }
-    }
-
-    #[func]
-    fn advance_tick_from_event(&mut self, tick: i64, mut loadout: Gd<PlayerLoadout>) -> i64 {
-        let mut loadout = loadout.bind_mut();
-        self.state.advance_tick_from_event(tick, loadout.core_mut())
-    }
-
+    /// Advances explicitly client-owned prediction time. Server-driven tick
+    /// changes remain internal to `ServerMessageOutcome::dispatch`.
     #[func]
     fn advance_client_ticks(&mut self, ticks: i64, mut loadout: Gd<PlayerLoadout>) {
         let mut loadout = loadout.bind_mut();
         self.state.advance_client_ticks(ticks, loadout.core_mut());
-    }
-
-    #[func]
-    fn apply_dock_event(
-        &mut self,
-        ship_id: i64,
-        station_id: i64,
-        station_name: GString,
-        tick: i64,
-    ) -> bool {
-        self.state
-            .apply_dock_event(ship_id, station_id, station_name.to_string(), tick)
-    }
-
-    #[func]
-    fn apply_undock_event(&mut self, ship_id: i64, tick: i64) -> bool {
-        self.state.apply_undock_event(ship_id, tick)
-    }
-
-    #[func]
-    fn apply_dock_fitting(&mut self, station_id: i64, station_name: GString, tick: i64) -> bool {
-        self.state
-            .apply_dock_fitting(station_id, station_name.to_string(), tick)
     }
 
     #[func]
