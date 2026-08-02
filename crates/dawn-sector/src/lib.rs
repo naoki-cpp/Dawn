@@ -23,6 +23,9 @@
 // Rust API Guidelines C-DEBUG: catch new pub types that forget to derive
 // Debug at compile time instead of relying on periodic audits (see #83).
 #![warn(missing_debug_implementations)]
+// Admission types keep the explicit `ClientAdmission` prefix so imports into
+// runtime adapters remain unambiguous (`Intent` and `Attempt` are too generic).
+#![allow(clippy::module_name_repetitions)]
 
 pub mod anchor;
 pub mod aoi;
