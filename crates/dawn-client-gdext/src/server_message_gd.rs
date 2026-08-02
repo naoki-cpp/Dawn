@@ -380,7 +380,7 @@ impl ServerMessageOutcome {
     }
 }
 
-fn call_connection(target: &mut Gd<Object>, method: &str, arguments: &[&dyn ToGodot]) -> bool {
+fn call_connection(target: &mut Gd<Object>, method: &str, arguments: &[Variant]) -> bool {
     if !ensure_handler(target, method) {
         return false;
     }
