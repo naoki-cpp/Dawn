@@ -5,7 +5,7 @@ update   : クライアント側で大規模リファクタ実施後 / architect
 related  : docs/architecture/architecture-review/server.md（サーバー側）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）,
            docs/architecture/architecture-review/client-pending.md（未完項目）
-date     : 2026-08-02（issue #238 typed outcome適用経路を反映）
+date     : 2026-08-02（#248 legacy adapter removal後の再計測）
 ---
 
 # Architecture Review — Dawn Client（現行構造評価）
@@ -18,17 +18,17 @@ date     : 2026-08-02（issue #238 typed outcome適用経路を反映）
 **総合: A。** `main.gd`は長いがgod objectには戻っていない。state、interaction、presentation、HUD、wire adapterの所有者は分離済み。
 
 直近ではissue #238で、復号済みwire型を一度Godot `Dictionary`へ投影してから
-`WorldSession`へ戻す経路を削除した。`ServerMessageOutcome::dispatch`が
+`WorldSession`へ戻す経路を削除し、#248で旧client adapterを削除した。`ServerMessageOutcome::dispatch`が
 `WorldSessionUpdate`を直接Rust-owned stateへ適用し、その後にtyped presentation recordを
 GDScriptへ渡す。PlayerLoadoutとMarketも同じ順序で処理される。
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
-| ファイル分割 | A | `WorldSession` / `WorldInteraction` / `WorldPresentation` / HUD各層の所有者が明確 |
-| `main.gd`責務 | A− | scene lifecycle、node generation、event dispatch、network send、HUD assemblyに限定 |
+| ファイル分割 | A | `WorldSession` / `WorldInteraction` / `WorldPresentation` / HUD各層の所有者が明確。18スクリプトへ分割済み |
+| `main.gd`責務 | A− | 1054行。scene lifecycle、node generation、event dispatch、network send、HUD assemblyに限定 |
 | 型境界 | A | wire decode → Rust state mutation → typed presentationの単一経路。Dictionary再入力なし |
 | 重複 | A− | shadow state、JSON往復、server outcomeのDictionary往復は解消。残るauthority/API重複は#200・#202 |
-| デッドコード | A | text-frame fallbackと旧shimを削除 |
+| デッドコード | A | text-frame fallback、旧shim、JSON/Dictionary再構築adapterを削除 |
 | テスト可能性 | A | pure Rust transition test + typed outcome fixtureを使うGdUnit4。scene-tree/実WebSocket E2Eのみ手動領域 |
 
 ## State ownership
@@ -43,16 +43,29 @@ GDScriptへ渡す。PlayerLoadoutとMarketも同じ順序で処理される。
 
 navigation map cacheはSector内でwrite-onceに近いpresentation cacheとして許容し、毎frameのRust→Godot再構築は行わない。
 
-## ファイルサイズ（部分再計測）
+## ファイルサイズ（2026-08-02、`client/scripts`全18ファイル）
 
 | ファイル | 行数 | 判定 |
 |---|---:|---|
-| `client/scripts/main.gd` | 1338 | 🟢 orchestration |
-| `client/scripts/hud_manager.gd` | 892 | 🟡 C-9 watch |
-| `client/scripts/connection.gd` | 395 | 🟢 binary WebSocket I/O |
-| `client/scripts/world_interaction.gd` | 133 | 🟢 selection / click→intent |
-
-全`client/scripts`合計は今回再計測していない。2026-07-26の5131行を最後の全面計測値とする。
+| `client/scripts/main.gd` | 1146 | 🟡 orchestration。R-2の再評価trigger内 |
+| `client/scripts/hud_manager.gd` | 877 | 🟡 HUD type/build/updateの凝集。C-9は再観測・保留 |
+| `client/scripts/ship_controller.gd` | 437 | 🟢 ShipMotion適用とNode3D writer |
+| `client/scripts/connection.gd` | 388 | 🟢 binary WebSocket I/O |
+| `client/scripts/world_presentation.gd` | 337 | 🟢 floating origin / visual presentation |
+| `client/scripts/market_surface.gd` | 270 | 🟢 Market surface |
+| `client/scripts/hud_surface.gd` | 266 | 🟢 HUD surface |
+| `client/scripts/navigation_marker_renderer.gd` | 227 | 🟢 navigation marker rendering |
+| `client/scripts/input_decoder.gd` | 164 | 🟢 input facts → intents |
+| `client/scripts/camera_controller.gd` | 145 | 🟢 camera orbit input |
+| `client/scripts/world_interaction.gd` | 125 | 🟢 selection / click→intent |
+| `client/scripts/ship_picking.gd` | 104 | 🟢 screen-space picking |
+| `client/scripts/tactical_overlay.gd` | 93 | 🟢 tactical overlay |
+| `client/scripts/inventory_row.gd` | 87 | 🟢 typed inventory row |
+| `client/scripts/hud_hit_test.gd` | 80 | 🟢 HUD hit testing |
+| `client/scripts/billboard_ring.gd` | 65 | 🟢 selection ring presentation |
+| `client/scripts/unit_format.gd` | 38 | 🟢 unit formatting |
+| `client/scripts/warp_tunnel_effect.gd` | 10 | 🟢 warp effect |
+| **合計** | **4859** | **18ファイル** |
 
 ## Issue登録簿
 

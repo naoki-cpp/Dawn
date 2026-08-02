@@ -4,7 +4,7 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で issue を起票・状態更新するたびに更新
 related  : docs/architecture/architecture-review/server.md（構造評価）,
            docs/architecture/architecture-review/server-completed.md（完了済みログ）
-date     : 2026-07-30
+date     : 2026-08-02
 ---
 
 # Architecture Review — Dawn Codebase（未完項目）
@@ -32,7 +32,11 @@ live state、interaction、presentationは分離済み。残るscene lifecycle /
 
 ### R-3（保留）: `node/`系ファイルの再肥大
 
-総行数だけでは分割しない。実装部分約700行超、独立した変更理由の混在、またはdriftの実害をtriggerとする。
+2026-08-02再計測では`node/commands.rs`が1623行、`node/transit.rs`が1757行、
+`node/warp.rs`が1190行だった。ただし前二者はdispatcher/state mutationと回帰テストが
+同居し、warpは単一のgeometry/state-machine責務である。現時点では即時分割しない。
+**再評価:** テストを除く実装部分が約700行を超え、かつ独立した変更理由が混在する、または
+module間のdriftが実害になる場合。行数だけでは発火させない。
 
 ## 一覧
 

@@ -4,16 +4,16 @@ audience : AI Agent / Human Developer
 update   : /architecture-review で状態が変わるたびに更新
 related  : docs/architecture/architecture-review/client.md（構造評価）,
            docs/architecture/architecture-review/client-completed.md（完了済みログ）
-date     : 2026-07-30
+date     : 2026-08-02
 ---
 
 # Architecture Review — Dawn Client（未完項目）
 
-C-1〜C-8は解消済み。実装詳細と完了条件は各GitHub Issueに置き、ここでは判断だけを保持する。
+C-1〜C-8、C-11、C-13は解消済み。実装詳細と完了条件は各GitHub Issueに置き、ここでは判断だけを保持する。
 
 ## C-9（保留）: `hud_manager.gd` watch帯
 
-892行だが、増分はtyped refsとpanel build/updateという同一責務。直ちに分割しない。
+877行で、増分はtyped refsとpanel build/updateという同一責務。直ちに分割しない。
 **再評価:** 型定義・panel構築・panel更新が独立して変化するか、回帰やtest境界の不明瞭化が起きた場合。
 
 ## C-10（#200・P2）: render scale / warp thresholdのauthority重複
