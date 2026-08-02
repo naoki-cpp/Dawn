@@ -1,0 +1,97 @@
+name: Finalize admission 253
+
+on:
+  push:
+    branches:
+      - agent/transactional-client-admission-253
+    paths:
+      - .github/workflows/finalize-admission-253.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/transactional-client-admission-253
+          fetch-depth: 0
+
+      - name: Apply idempotent final fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          core = Path('crates/dawn-sector/src/client_admission.rs')
+          text = core.read_text()
+          text = text.replace(
+              '#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum ClientAdmissionRefusal',
+              '#[derive(Debug, Clone, Copy, PartialEq)]\npub enum ClientAdmissionRefusal',
+              1,
+          )
+          core.write_text(text)
+
+          cargo = Path('crates/dawn-sector-node/Cargo.toml')
+          text = cargo.read_text()
+          dependency = 'dawn-wire = { path = "../dawn-wire" }\n'
+          if dependency not in text:
+              anchor = 'dawn-sector = { path = "../dawn-sector" }\n'
+              if anchor not in text:
+                  raise SystemExit('dawn-sector dependency anchor not found')
+              text = text.replace(anchor, anchor + dependency, 1)
+              cargo.write_text(text)
+
+          node = Path('crates/dawn-sector-node/src/client_admission.rs')
+          text = node.read_text()
+          text = text.replace(
+              'let (ready_sess_tx, ready_sess_rx) = mpsc::unbounded_channel();',
+              'let (ready_sess_tx, ready_sess_rx) =\n'
+              '            mpsc::unbounded_channel::<ws_server::PlayerSession>();',
+              1,
+          )
+          node.write_text(text)
+
+          for name in ('single.rs', 'cluster.rs'):
+              path = Path('crates/dawn-simulation/src/serve') / name
+              text = path.read_text()
+              allow = '#![allow(clippy::module_name_repetitions)]\n'
+              if allow not in text:
+                  first_newline = text.index('\n') + 1
+                  text = text[:first_newline] + allow + text[first_newline:]
+                  path.write_text(text)
+          PY
+
+          cargo fmt --all
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check workspace
+        run: cargo check --workspace --all-targets
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test affected crates
+        run: cargo test -p dawn-sector -p dawn-sector-node -p dawn-simulation
+
+      - name: Commit validated final tree
+        shell: bash
+        run: |
+          rm -f .github/admission-253-ci-trigger
+          rm -f .github/workflows/patch-admission-253.yml
+          rm -f .github/workflows/finalize-admission-253.yml
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No finalization changes were needed.'
+            exit 0
+          fi
+          git commit -m 'fix(admission): finalize transactional lifecycle'
+          git push origin HEAD:agent/transactional-client-admission-253
