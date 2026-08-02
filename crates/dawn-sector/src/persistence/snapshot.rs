@@ -348,7 +348,7 @@ impl SnapshotProtection {
         Ok(file)
     }
 
-    fn apply_to_new_file(&self, file: &File, path: &Path) -> io::Result<()> {
+    fn apply_to_new_file(&self, file: &File, _path: &Path) -> io::Result<()> {
         #[cfg(unix)]
         {
             file.set_permissions(fs::Permissions::from_mode(self.mode))
@@ -356,14 +356,14 @@ impl SnapshotProtection {
         #[cfg(windows)]
         {
             if let Some(source) = &self.source {
-                copy_windows_dacl(source, path)?;
+                copy_windows_dacl(source, _path)?;
             }
             let _ = file;
             Ok(())
         }
         #[cfg(all(not(unix), not(windows)))]
         {
-            let _ = (file, path);
+            let _ = (file, _path);
             Ok(())
         }
     }
