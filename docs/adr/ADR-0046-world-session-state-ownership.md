@@ -108,6 +108,20 @@ loadout、market の state mutation はすべて Rust-owned model に集約す�
 hand-built Dictionary ではなく、実際の typed outcome fixture を dispatch して
 本番と同じ state-application path を検証する。
 
+## Single test surface（2026-08-02、issue #255）
+
+`WorldSession` の Godot 公開面から、ship 選択、health、lock、ship removal/destruction、
+system、server tick、dock/undock、loadout dock context を直接書き換える pass-through
+method を削除した。これらは本番受信経路では使われず、GdUnit が本番では生成できない
+状態や順序を作るためだけに残っていた。
+
+Godot から公開する操作は、read accessor、接続切断時の `reset()`、および明示的に
+client-owned な予測時計を進める `advance_client_ticks()` に限る。server-driven state
+は production と test のどちらも `ServerMessageOutcome::dispatch` から
+`WorldSessionUpdate` を通して適用する。順序・拒否・遷移結果の細部は
+`dawn-client-core` の `WorldSessionState` テストで直接検証し、GdUnit は typed inbound
+wiring と Godot 公開 read/reset/client-clock surface を検証する。
+
 ## Implementation checklist
 
 - [x] Add `WorldSessionState` and typed input/record/outcome types to
