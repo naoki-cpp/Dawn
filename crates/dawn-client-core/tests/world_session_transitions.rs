@@ -3,10 +3,12 @@ use dawn_client_core::{
     WorldSessionUpdate,
 };
 
-fn ship(is_player: bool) -> ShipInput {
+fn player_ship(ship_type_name: &str) -> ShipInput {
     ShipInput {
-        is_player,
-        ship_type_name: if is_player { "Magpie" } else { "Venture" }.to_string(),
+        // `is_player` distinguishes player-controlled ships from non-player
+        // entities. The connection ship ID selects which player ship is local.
+        is_player: true,
+        ship_type_name: ship_type_name.to_string(),
         max_shield: 100.0,
         max_armor: 90.0,
         max_hull: 80.0,
@@ -26,11 +28,11 @@ fn session() -> WorldSessionState {
             ships: vec![
                 ShipRegistration {
                     ship_id: 11,
-                    ship: ship(true),
+                    ship: player_ship("Magpie"),
                 },
                 ShipRegistration {
                     ship_id: 22,
-                    ship: ship(false),
+                    ship: player_ship("Venture"),
                 },
             ],
             connection_ship_id: 11,
