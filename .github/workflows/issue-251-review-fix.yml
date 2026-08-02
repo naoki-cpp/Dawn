@@ -49,33 +49,16 @@ jobs:
           python3 .github/scripts/issue_251_review_fix.py
           python3 - <<'PY'
           from pathlib import Path
+          import re
           path = Path('crates/dawn-client-core/src/client_state.rs')
           text = path.read_text()
-          old_tick = '''        let (mut session, mut loadout) = setup();
-          loadout = Some(PlayerLoadoutMsg {
-              active_ship_id: Some(1),
-              modules: vec![module(7, true)],
-          '''
-          new_tick = '''        let (mut session, _) = setup();
-          let mut active_module = module(7, true);
-          active_module.cycle_remaining = 0;
-          let mut loadout = Some(PlayerLoadoutMsg {
-              active_ship_id: Some(1),
-              modules: vec![active_module],
-          '''
-          old_module = '''        let (mut session, mut loadout) = setup();
-          loadout = Some(PlayerLoadoutMsg {
-              modules: vec![module(7, false)],
-          '''
-          new_module = '''        let (mut session, _) = setup();
-          let mut loadout = Some(PlayerLoadoutMsg {
-              modules: vec![module(7, false)],
-          '''
-          if text.count(old_tick) != 1:
-              raise SystemExit(f'tick fixture anchor count: {text.count(old_tick)}')
-          if text.count(old_module) != 1:
-              raise SystemExit(f'module fixture anchor count: {text.count(old_module)}')
-          path.write_text(text.replace(old_tick, new_tick).replace(old_module, new_module))
+          tick_pattern = re.compile(r'(?P<i>^[ \t]*)let \(mut session, mut loadout\) = setup\(\);\n(?P=i)loadout = Some\(PlayerLoadoutMsg \{\n(?P=i)    active_ship_id: Some\(1\),\n(?P=i)    modules: vec!\[module\(7, true\)\],', re.MULTILINE)
+          module_pattern = re.compile(r'(?P<i>^[ \t]*)let \(mut session, mut loadout\) = setup\(\);\n(?P=i)loadout = Some\(PlayerLoadoutMsg \{\n(?P=i)    modules: vec!\[module\(7, false\)\],', re.MULTILINE)
+          text, tick_count = tick_pattern.subn(lambda m: f'{m.group("i")}let (mut session, _) = setup();\n{m.group("i")}let mut active_module = module(7, true);\n{m.group("i")}active_module.cycle_remaining = 0;\n{m.group("i")}let mut loadout = Some(PlayerLoadoutMsg {{\n{m.group("i")}    active_ship_id: Some(1),\n{m.group("i")}    modules: vec![active_module],', text)
+          text, module_count = module_pattern.subn(lambda m: f'{m.group("i")}let (mut session, _) = setup();\n{m.group("i")}let mut loadout = Some(PlayerLoadoutMsg {{\n{m.group("i")}    modules: vec![module(7, false)],', text)
+          if tick_count != 1 or module_count != 1:
+              raise SystemExit(f'fixture replacement counts: tick={tick_count}, module={module_count}')
+          path.write_text(text)
           PY
       - name: Format and focused tests
         run: |
