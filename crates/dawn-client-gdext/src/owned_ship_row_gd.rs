@@ -45,9 +45,8 @@ impl OwnedShipRow {
 
 #[godot_api]
 impl OwnedShipRow {
-    /// Debug-only typed fixture for GdUnit. Negative optional IDs and an empty
+    /// Typed fixture boundary for GdUnit. Negative optional IDs and an empty
     /// type name represent absent values at the Godot boundary.
-    #[cfg(debug_assertions)]
     #[func]
     fn test_fixture(
         ship_id: i64,

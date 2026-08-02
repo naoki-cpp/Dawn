@@ -150,9 +150,8 @@ impl ModuleRow {
         Self::wrap(self.inner.clone())
     }
 
-    /// Debug-only typed fixture for GdUnit. Production rows are created only
+    /// Typed fixture boundary for GdUnit. Production rows are created only
     /// from the typed PlayerLoadout projection.
-    #[cfg(debug_assertions)]
     #[allow(clippy::too_many_arguments)]
     #[func]
     fn test_fixture(
