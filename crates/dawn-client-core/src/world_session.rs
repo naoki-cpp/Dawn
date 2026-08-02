@@ -766,6 +766,9 @@ impl WorldSessionState {
     /// `HealthEventOutcome` reported (`changed_player`, `has_ship`) had a
     /// reader on either side of the Godot boundary.
     pub fn apply_hp_event(&mut self, ship_id: i64, shield: f64, armor: f64, hull: f64) {
+        if !self.ships.contains_key(&ship_id) {
+            return;
+        }
         let health = self.ship_hp.entry(ship_id).or_default();
         health.shield = shield;
         health.armor = armor;
@@ -1169,5 +1172,22 @@ mod tests {
         );
         assert_eq!(state.player_ship_id(), 11);
         assert_eq!(state.docked_station_id(), 3);
+    }
+
+    #[test]
+    fn typed_health_update_ignores_unknown_ship() {
+        let mut state = WorldSessionState::default();
+
+        state.apply_update(
+            WorldSessionUpdate::HealthChanged {
+                ship_id: 99,
+                shield: 1.0,
+                armor: 2.0,
+                hull: 3.0,
+            },
+            None,
+        );
+
+        assert!(!state.ship_hp().contains_key(&99));
     }
 }

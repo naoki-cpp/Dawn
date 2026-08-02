@@ -6,6 +6,7 @@
 extends GdUnitTestSuite
 
 const Connection = preload("res://scripts/connection.gd")
+const Main = preload("res://scripts/main.gd")
 
 
 func _state() -> Array:
@@ -108,6 +109,20 @@ class EventDispatchTarget:
 		removed = was_removed
 
 
+class MotionPathShip:
+	extends Node3D
+	var reconcile_calls: Array[Dictionary] = []
+
+	func reconcile_motion(
+		position: PackedFloat64Array, velocity: Vector3, tick: int
+	) -> void:
+		reconcile_calls.append({
+			"position": position,
+			"velocity": velocity,
+			"tick": tick,
+		})
+
+
 func test_real_world_event_outcome_dispatches_to_typed_handler() -> void:
 	var decoder := ServerMessageDecoder.new()
 	var top_level: ServerMessageOutcome = decoder.test_outcome("AoiLeave")
@@ -199,6 +214,31 @@ func test_real_motion_correction_emits_typed_presentation() -> void:
 	assert_array(correction.position).contains_exactly([
 		5.0 * 1.495978707e11 + 10.0, 20.0, 30.0,
 	])
+	connection.free()
+
+
+func test_real_motion_correction_reaches_main_scene_handler() -> void:
+	var decoder := ServerMessageDecoder.new()
+	var outcome: ServerMessageOutcome = decoder.test_outcome("MotionCorrection")
+	var connection: Node = Connection.new()
+	var main: Node = Main.new()
+	var ship := MotionPathShip.new()
+	main._ships = {11: ship}
+	main._player_ship_id = 11
+	main.add_child(ship)
+	connection.motion_correction_received.connect(
+		Callable(main, "_handle_motion_correction"))
+
+	assert_bool(outcome.dispatch(connection, main._session, main._loadout, 11)).is_true()
+	assert_int(ship.reconcile_calls.size()).is_equal(1)
+	var call: Dictionary = ship.reconcile_calls[0]
+	assert_array(call["position"]).contains_exactly([
+		5.0 * 1.495978707e11 + 10.0, 20.0, 30.0,
+	])
+	assert_vector(call["velocity"]).is_equal(Vector3(4.0, 5.0, -6.0))
+	assert_int(call["tick"]).is_equal(42)
+
+	main.free()
 	connection.free()
 
 
