@@ -24,7 +24,8 @@ GDExtensionはwire検証、wire→`ClientFact`変換、fact適用、presentation
 `ServerMessageOutcome::dispatch`が唯一のpresentation seamであり、state commit後に
 connection callbackまたは最終world handlerを一度だけ呼ぶ。#258で削除した
 Godot公開のserver-state mutation backdoorは、#251との統合後も復活させない。
-統合後のGDExtension境界は、固定Rust 1.97.1でformat、focused check、clippyを検証した。
+review修正後のGDExtension境界と追加したClientState回帰testは、固定Rust 1.97.1で
+format、client-core/gdext test、clippyを検証した。
 
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
