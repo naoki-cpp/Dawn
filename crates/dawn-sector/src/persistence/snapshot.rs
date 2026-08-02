@@ -210,9 +210,8 @@ impl StateSnapshot {
     }
 
     fn decode(bytes: &[u8], context: &str) -> io::Result<Self> {
-        postcard::from_bytes(bytes).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, format!("{context}: {e}"))
-        })
+        postcard::from_bytes(bytes)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{context}: {e}")))
     }
 }
 
