@@ -118,8 +118,8 @@ pub(crate) async fn run_phase4_server(
         // Resolve socket outcomes on the tick-loop thread. A session is not
         // visible to AoI delivery or command routing until its Sector attempt
         // commits successfully.
-        for (sess, committed) in drain_single_admission_completions(&mut node, &mut completion_rx) {
-            send_post_commit_loadout(&node, &sess, committed);
+        for (sess, _committed) in drain_single_admission_completions(&mut node, &mut completion_rx)
+        {
             println!(
                 "  [Server] {} joined with ship #{}",
                 sess.player_id,
@@ -318,19 +318,6 @@ fn finish_single_admission<S: EventStore, T>(
             eprintln!("[Server] handshake failed: {error}");
             None
         }
-    }
-}
-
-fn send_post_commit_loadout<S: EventStore>(
-    node: &SimulationNode<S>,
-    session: &ws_server::PlayerSession,
-    committed: CommittedClientAdmission,
-) {
-    if !committed.resumed {
-        return;
-    }
-    if let Some(loadout) = node.build_player_loadout_json(committed.ship_id) {
-        session.send_message(&ServerMessage::PlayerLoadout(loadout));
     }
 }
 

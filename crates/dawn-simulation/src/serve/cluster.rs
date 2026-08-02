@@ -118,13 +118,12 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
 
         // Commit Sector ownership before publishing cluster routing. A failed
         // or disconnected handshake therefore leaves neither route map visible.
-        for (sector, sess, committed) in drain_cluster_admission_completions(
+        for (sector, sess, _committed) in drain_cluster_admission_completions(
             &mut nodes,
             &mut player_sector,
             &mut ship_player,
             &mut completion_rx,
         ) {
-            send_post_commit_loadout(&nodes[sector], &sess, committed);
             println!(
                 "  [Server] {} joined with ship #{} in Sector {}",
                 sess.player_id,
@@ -371,19 +370,6 @@ fn finish_cluster_admission<S: EventStore, T>(
             eprintln!("[Server] handshake failed: {error}");
             None
         }
-    }
-}
-
-fn send_post_commit_loadout<S: EventStore>(
-    node: &SimulationNode<S>,
-    session: &ws_server::PlayerSession,
-    committed: CommittedClientAdmission,
-) {
-    if !committed.resumed {
-        return;
-    }
-    if let Some(loadout) = node.build_player_loadout_json(committed.ship_id) {
-        session.send_message(&ServerMessage::PlayerLoadout(loadout));
     }
 }
 

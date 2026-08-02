@@ -83,9 +83,9 @@ impl std::fmt::Display for ClientAdmissionCommitError {
 
 impl std::error::Error for ClientAdmissionCommitError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum AdmissionOrigin {
-    Fresh,
+    Fresh { spawn_position: Position },
     Resume,
 }
 
@@ -118,7 +118,7 @@ impl ClientAdmissionAttempt {
     }
 
     pub fn is_resumed(&self) -> bool {
-        self.origin == AdmissionOrigin::Resume
+        matches!(self.origin, AdmissionOrigin::Resume)
     }
 
     /// Move the observer-scoped wire payload into the asynchronous socket task
@@ -139,12 +139,14 @@ impl ClientAdmissionAttempt {
         node: &mut SimulationNode<S>,
     ) -> Result<CommittedClientAdmission, ClientAdmissionCommitError> {
         let present = match self.origin {
-            AdmissionOrigin::Fresh => node.ship_absolute_pos(self.ship_id).is_some(),
+            AdmissionOrigin::Fresh { spawn_position } => {
+                node.commit_reserved_fresh_admission(self.player_id, self.ship_id, spawn_position)
+            }
             AdmissionOrigin::Resume => node.resume_player_ship(self.ship_id, self.player_id),
         };
         if !present {
-            if self.origin == AdmissionOrigin::Fresh {
-                node.despawn_incomplete_handshake_spawn(self.player_id, self.ship_id);
+            if matches!(self.origin, AdmissionOrigin::Fresh { .. }) {
+                node.abort_reserved_fresh_admission(self.ship_id);
             }
             return Err(ClientAdmissionCommitError {
                 player_id: self.player_id,
@@ -155,7 +157,7 @@ impl ClientAdmissionAttempt {
         Ok(CommittedClientAdmission {
             player_id: self.player_id,
             ship_id: self.ship_id,
-            resumed: self.origin == AdmissionOrigin::Resume,
+            resumed: matches!(self.origin, AdmissionOrigin::Resume),
         })
     }
 
@@ -164,8 +166,8 @@ impl ClientAdmissionAttempt {
     /// Only a fresh attempt owns rollback state. A resumed Ship predates this
     /// connection and is deliberately left untouched (ADR-0007).
     pub fn abort<S: EventStore>(self, node: &mut SimulationNode<S>) {
-        if self.origin == AdmissionOrigin::Fresh {
-            node.despawn_incomplete_handshake_spawn(self.player_id, self.ship_id);
+        if matches!(self.origin, AdmissionOrigin::Fresh { .. }) {
+            node.abort_reserved_fresh_admission(self.ship_id);
         }
     }
 }
@@ -188,12 +190,16 @@ impl<S: EventStore> SimulationNode<S> {
                     return Err(ClientAdmissionRefusal::FreshAtPopulationCap);
                 }
 
-                let player_id = self.next_player_id();
-                let ship_id = self.spawn_player_ship_at_pub(player_id, spawn_position);
-                let handoff = match self.build_handoff_payload(ship_id, aoi_cell_size) {
+                let (player_id, ship_id) = self.reserve_fresh_admission_identity();
+                let handoff = match self.build_fresh_admission_handoff(
+                    player_id,
+                    ship_id,
+                    spawn_position,
+                    aoi_cell_size,
+                ) {
                     Ok(handoff) => handoff,
                     Err(error) => {
-                        self.despawn_incomplete_handshake_spawn(player_id, ship_id);
+                        self.abort_reserved_fresh_admission(ship_id);
                         return Err(ClientAdmissionRefusal::MissingObserver(error));
                     }
                 };
@@ -201,7 +207,7 @@ impl<S: EventStore> SimulationNode<S> {
                 Ok(ClientAdmissionAttempt {
                     player_id,
                     ship_id,
-                    origin: AdmissionOrigin::Fresh,
+                    origin: AdmissionOrigin::Fresh { spawn_position },
                     handoff: Some(handoff),
                 })
             }
@@ -228,12 +234,14 @@ impl<S: EventStore> SimulationNode<S> {
                     observer.is_player = true;
                 }
 
-                // `PlayerLoadout` depends on committed ownership and docked-player
-                // context. Do not send a structurally-valid but incomplete
-                // snapshot during the pre-commit handoff; the runtime sends the
-                // authoritative loadout immediately after commit and before
-                // publishing the session.
-                handoff.player_loadout = None;
+                // Project the requested identity without mutating ownership. The
+                // socket task await-sends this loadout as part of handshake
+                // completion, so commit cannot publish ownership after a failed
+                // loadout frame.
+                let loadout = self
+                    .build_player_loadout_json_for_admission(player_id, ship_id)
+                    .ok_or(ClientAdmissionRefusal::ResumeShipMissing { player_id, ship_id })?;
+                handoff.player_loadout = Some(loadout);
 
                 Ok(ClientAdmissionAttempt {
                     player_id,
@@ -274,6 +282,8 @@ mod tests {
             )
             .expect("fresh admission should begin");
         let ship_id = attempt.ship_id();
+        assert_eq!(node.ship_count(), 0);
+        assert!(node.event_store().all_records().is_empty());
 
         let committed = attempt.commit(&mut node).expect("fresh commit");
 
@@ -283,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_abort_removes_spawn_ownership_inventory_and_replay_state() {
+    fn fresh_begin_is_non_durable_and_abort_releases_the_reservation() {
         let mut node = node();
         let attempt = node
             .begin_client_admission(
@@ -296,13 +306,6 @@ mod tests {
         let player_id = attempt.player_id();
         let ship_id = attempt.ship_id();
         let starter_ship = dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE);
-        assert!(node.apply_stop_command_owned(player_id, ship_id));
-        assert_eq!(
-            node.station_item_count(player_id, dawn_core::StationId(0), starter_ship),
-            1
-        );
-
-        attempt.abort(&mut node);
 
         assert_eq!(node.ship_count(), 0);
         assert!(!node.apply_stop_command_owned(player_id, ship_id));
@@ -310,10 +313,22 @@ mod tests {
             node.station_item_count(player_id, dawn_core::StationId(0), starter_ship),
             0
         );
-        assert!(matches!(
-            node.event_store().all_records().last().map(|record| &record.event),
-            Some(dawn_core::DomainEvent::ShipDespawned(event)) if event.ship_id == ship_id
-        ));
+        assert!(node.event_store().all_records().is_empty());
+
+        attempt.abort(&mut node);
+
+        assert_eq!(node.ship_count(), 0);
+        assert!(node.event_store().all_records().is_empty());
+        node.set_population_cap(1);
+        let retry = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("abort must release the population reservation");
+        retry.abort(&mut node);
     }
     #[test]
     fn failed_resume_leaves_pre_existing_ship_unowned_and_intact() {
@@ -347,7 +362,14 @@ mod tests {
             )
             .expect("existing ship may begin resume");
         let handoff = attempt.take_handoff_payload();
-        assert!(handoff.player_loadout.is_none());
+        let loadout = handoff
+            .player_loadout
+            .expect("resume handoff must include an await-sent projected loadout");
+        assert_eq!(loadout.active_ship_id, Some(ship_id.raw()));
+        assert!(loadout
+            .owned_ships
+            .iter()
+            .any(|ship| ship.ship_id == ship_id.raw() && ship.is_active));
         assert!(handoff
             .initial_state
             .ships
@@ -408,7 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn commit_rejects_a_ship_removed_during_async_handshake() {
+    fn commit_rejects_a_lost_fresh_reservation() {
         let mut node = node();
         let attempt = node
             .begin_client_admission(
@@ -419,7 +441,7 @@ mod tests {
             )
             .expect("fresh admission should begin");
         let ship_id = attempt.ship_id();
-        node.despawn_incomplete_handshake_spawn(attempt.player_id(), ship_id);
+        node.abort_reserved_fresh_admission(ship_id);
 
         let error = attempt
             .commit(&mut node)

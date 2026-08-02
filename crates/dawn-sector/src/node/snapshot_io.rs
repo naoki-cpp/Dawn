@@ -46,6 +46,8 @@ impl<S: EventStore> SimulationNode<S> {
             // Configuration, re-applied after construction by the caller
             // (`set_population_cap` / `open_station_inventory_db`).
             population_cap: _,
+            // Fresh admission reservations exist only while this process is alive.
+            pending_fresh_admissions: _,
             // Independently durable in SQLite (ADR-0038), plus its cache.
             station_inventory_db: _,
             station_inventory_cache: _,

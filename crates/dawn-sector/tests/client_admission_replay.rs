@@ -1,5 +1,5 @@
 use dawn_core::{NodeId, Position, SectorBounds, SectorId};
-use dawn_event_store::{store::EventStore, InMemoryEventStore};
+use dawn_event_store::InMemoryEventStore;
 use dawn_sector::{
     client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal},
     galaxy::Galaxy,
@@ -20,7 +20,7 @@ fn repository_catalog() -> GameDataCatalog {
 }
 
 #[test]
-fn aborted_fresh_admission_does_not_reappear_after_event_replay() {
+fn in_flight_fresh_admission_is_absent_from_snapshot_and_event_replay() {
     let galaxy = Arc::new(Galaxy::demo());
     let mut node = SimulationNode::new(
         NodeId(0),
@@ -28,7 +28,6 @@ fn aborted_fresh_admission_does_not_reappear_after_event_replay() {
         SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         Arc::clone(&galaxy),
     );
-    let empty_snapshot = node.take_snapshot();
 
     let attempt = node
         .begin_client_admission(
@@ -39,19 +38,21 @@ fn aborted_fresh_admission_does_not_reappear_after_event_replay() {
         )
         .expect("fresh admission should begin");
     let ship_id = attempt.ship_id();
-
-    attempt.abort(&mut node);
+    let snapshot_during_handshake = node.take_snapshot();
 
     assert_eq!(node.ship_count(), 0);
-    let mut replay_store = InMemoryEventStore::new();
-    for record in node.event_store().all_records() {
-        replay_store.append(record.event.clone());
-    }
+    assert!(node.event_store().all_records().is_empty());
+    assert!(snapshot_during_handshake.ships.is_empty());
 
+    // Simulate process loss before either commit or abort: the in-memory
+    // attempt and reservation disappear with the process, while durable state
+    // consists only of this snapshot and event log.
+    drop(attempt);
+    let replay_store = InMemoryEventStore::new();
     let catalog = repository_catalog();
     let restored = SimulationNode::restore_from(
         replay_store,
-        &empty_snapshot,
+        &snapshot_during_handshake,
         galaxy,
         catalog.modules(),
         catalog.ship_types(),

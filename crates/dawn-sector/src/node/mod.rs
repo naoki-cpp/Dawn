@@ -14,6 +14,7 @@
 //!     -> reconstruct ECS from snapshot, replay events from log_index N onward
 //! ```
 
+mod admission_provisional;
 mod apply_event;
 mod approach;
 mod bot_ai;
@@ -54,7 +55,7 @@ use coordinates::debug_assert_missing_anchor;
 use sector_map::SectorMap;
 use ship_registry::ShipRegistry;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use dawn_core::MIN_WARP_DISTANCE;
@@ -176,6 +177,9 @@ where
     base_stats: HashMap<ShipId, ShipStatsComp>,
     /// PlayerId allocation counter.
     player_id_counter: u64,
+    /// Non-durable Ship IDs reserved by in-flight fresh admissions.
+    /// Counted against the population cap but intentionally omitted from snapshots.
+    pending_fresh_admissions: HashSet<ShipId>,
     /// Lock-on commands queued by the bot AI during `process_bots()`.
     ///
     /// Bot AI runs after the LockSystem each tick.  These commands are held
@@ -280,6 +284,7 @@ impl<S: EventStore> SimulationNode<S> {
             ship_type_registry: HashMap::new(),
             base_stats: HashMap::new(),
             player_id_counter: 0,
+            pending_fresh_admissions: HashSet::new(),
             pending_bot_lock_commands: Vec::new(),
             sector_map,
             anchor_table,
@@ -368,7 +373,9 @@ impl<S: EventStore> SimulationNode<S> {
     /// LoD (8B-3) as lowered fidelity, not in a count that pretends they are
     /// absent.
     pub fn at_population_cap(&self) -> bool {
-        self.ship_count() >= self.population_cap
+        self.ship_count()
+            .saturating_add(self.pending_fresh_admissions.len())
+            >= self.population_cap
     }
 
     /// Override the per-Sector population backstop (default [`POPULATION_CAP`]).
@@ -494,40 +501,6 @@ impl<S: EventStore> SimulationNode<S> {
         self.ships.remove(ship_id, &mut self.world);
         self.base_stats.remove(&ship_id);
         self.docked_ships.remove(&ship_id);
-    }
-
-    /// Roll back a fresh player-ship spawn whose handshake never completed.
-    ///
-    /// Fresh admission creates ECS/ownership state, appends spawn/fitting
-    /// events, and credits the starter packaged Ship in durable Station
-    /// inventory before the socket handoff. Abort compensates all of those
-    /// effects: it removes the live Ship, debits the starter item, and appends
-    /// `ShipDespawned` so snapshot + tail-log replay cannot resurrect it.
-    ///
-    /// This operation is idempotent for one attempt. It must never be used for
-    /// a resumed Ship, whose state predates the connection attempt.
-    pub fn despawn_incomplete_handshake_spawn(&mut self, player_id: PlayerId, ship_id: ShipId) {
-        let starter_ship = dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE);
-        if self.station_item_count(player_id, StationId(0), starter_ship) > 0 {
-            if let Err(error) =
-                self.try_debit_station_item(player_id, StationId(0), starter_ship, 1)
-            {
-                eprintln!(
-                    "[Sector] failed to roll back starter inventory for {player_id}: {error:?}"
-                );
-            }
-        }
-
-        self.docked_players.remove(&player_id);
-        if self.ships.index.contains_key(&ship_id) {
-            self.remove_ship(ship_id);
-            self.event_store.append(DomainEvent::ShipDespawned(
-                dawn_core::events::ShipDespawned {
-                    ship_id,
-                    tick: self.current_tick,
-                },
-            ));
-        }
     }
 
     /// Recomputes `ShipStatsComp` from `ship_id`'s current `FittingComp`
@@ -799,17 +772,6 @@ mod tests {
         let unknown = dawn_core::ShipId::new(NodeId(99), 0);
         assert!(!node.adopt_player_ship(unknown, dawn_core::PlayerId(0)));
         assert!(!node.apply_stop_command_owned(dawn_core::PlayerId(0), unknown));
-    }
-
-    #[test]
-    fn despawn_incomplete_handshake_spawn_removes_the_ship() {
-        let mut node = mem_node();
-        let ship_id = node.spawn_player_ship_at_pub(dawn_core::PlayerId(0), Position::ORIGIN);
-        assert_eq!(node.ship_count(), 1);
-
-        node.despawn_incomplete_handshake_spawn(dawn_core::PlayerId(0), ship_id);
-
-        assert_eq!(node.ship_count(), 0);
     }
 
     #[test]

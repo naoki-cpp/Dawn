@@ -136,6 +136,55 @@ impl<S: EventStore> SimulationNode<S> {
         })
     }
 
+    /// Build the loadout for an exact resume identity before ownership commits.
+    ///
+    /// Fitting and cargo come from `ship_id`; ownership-dependent fields are
+    /// projected from `(player_id, ship_id)` and the ship's persisted dock
+    /// state. This keeps `PlayerLoadout` inside the await-sent handshake while
+    /// leaving authoritative ownership untouched until commit.
+    pub fn build_player_loadout_json_for_admission(
+        &self,
+        player_id: PlayerId,
+        ship_id: ShipId,
+    ) -> Option<PlayerLoadoutWire> {
+        let mut loadout = self.build_player_loadout_json(ship_id)?;
+        let docked_station_id = self.docked_station(ship_id);
+        loadout.docked_station_id = docked_station_id.map(|id| id.0);
+        loadout.docked_station_name = docked_station_id
+            .and_then(|station_id| self.station(station_id))
+            .map(|station| station.name.clone());
+        loadout.station_inventory = docked_station_id
+            .and_then(|station_id| self.station_inventory(player_id, station_id))
+            .map(|inventory| {
+                inventory
+                    .into_iter()
+                    .filter_map(|(item_id, count)| self.item_id_to_row_json(item_id, count))
+                    .collect()
+            })
+            .unwrap_or_default();
+        loadout.active_ship_id = Some(ship_id.raw());
+
+        let mut owned_ships = self.owned_ships_json(player_id);
+        for ship in &mut owned_ships {
+            ship.is_active = ship.ship_id == ship_id.raw();
+        }
+        if !owned_ships.iter().any(|ship| ship.ship_id == ship_id.raw()) {
+            let ship_type_id = self.ships.type_ids.get(&ship_id).copied();
+            let ship_type_name = ship_type_id
+                .and_then(|type_id| self.ship_type_registry.get(&type_id))
+                .map(|definition| definition.name.clone());
+            owned_ships.push(OwnedShipRowWire {
+                ship_id: ship_id.raw(),
+                ship_type_id: ship_type_id.map(|type_id| type_id.0),
+                ship_type_name,
+                docked_station_id: docked_station_id.map(|id| id.0),
+                is_active: true,
+            });
+        }
+        loadout.owned_ships = owned_ships;
+        Some(loadout)
+    }
+
     /// Same wire message as [`Self::build_player_loadout_json`], keyed by
     /// `player_id` instead of a specific ship.
     pub fn build_player_loadout_json_for_player(

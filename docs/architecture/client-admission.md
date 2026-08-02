@@ -44,17 +44,19 @@ result. The owning tick thread performs `commit` or `abort`, keeping all
 
 ## Fresh admission
 
-Begin checks the population cap before allocating identity. Below the cap it
-allocates a `PlayerId`, spawns the player Ship at the runtime-provided position,
-and builds `InitialState`/`PlayerLoadout` from that Ship's observer-scoped AoI.
+Begin checks the population cap, reserves `PlayerId`/`ShipId`, and counts the
+reservation against the cap. It materializes the Ship only inside the begin call
+to build observer-scoped `InitialState`/`PlayerLoadout`, then removes that preview
+before returning. The reservation is non-durable and snapshots never include it.
 
-- **Commit:** verifies that the Ship still exists, then makes the session
-  eligible for promotion.
-- **Abort:** removes the freshly-spawned Ship and its ownership/AoI presence,
-  debits the starter packaged Ship from durable Station inventory, and appends
-  `ShipDespawned` so event replay cannot resurrect the provisional Ship.
-- **Missing observer while beginning:** removes the fresh Ship before returning
-  the refusal.
+- **Commit:** materializes the reserved Ship, appends its spawn/fitting events,
+  and credits the starter packaged Ship in durable Station inventory.
+- **Abort:** releases only the in-memory reservation; no authoritative mutation
+  exists to roll back.
+- **Process loss before resolution:** loses the non-durable reservation and
+  cannot resurrect a Ship from either snapshot or event replay.
+- **Missing observer while beginning:** removes the temporary preview and
+  releases the reservation before returning the refusal.
 
 A consumed ID or event-log history is not reused; INV-004 still applies.
 
@@ -65,10 +67,13 @@ falls back to fresh spawn. Begin validates the Ship and builds the observer-
 scoped `InitialState`, but leaves the ownership-dependent `PlayerLoadout` out
 of the pre-commit handoff.
 
+- **Begin/handoff:** projects a complete `PlayerLoadout` from the exact
+  `(PlayerId, ShipId)` and persisted dock state without changing ownership. The
+  socket task await-sends it with `Welcome` and `InitialState`; any failed frame
+  fails the handshake.
 - **Commit:** calls `resume_player_ship`, establishing active/owned and docked
-  player context only after the socket handoff succeeded. The Sector then builds
-  and sends the complete `PlayerLoadout` before publishing the session to command
-  routing or AoI delivery.
+  player context only after every handshake frame succeeded, then publishes the
+  session to command routing or AoI delivery.
 - **Abort:** does nothing to authoritative state. The resumed Ship predates the
   connection attempt and must never be removed as handshake cleanup.
 

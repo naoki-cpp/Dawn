@@ -11,7 +11,6 @@ use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
 use dawn_sector::node::SimulationNode;
-use dawn_wire::ServerMessage;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -70,8 +69,7 @@ impl ClientAdmission {
         // Socket tasks report only their outcome. The tick-loop thread resolves
         // the Sector-owned attempt so authoritative mutation stays single-owner.
         while let Ok((attempt, result)) = self.completion_rx.try_recv() {
-            if let Some((session, committed)) = finish_admission(node, attempt, result) {
-                send_post_commit_loadout(node, &session, committed);
+            if let Some((session, _committed)) = finish_admission(node, attempt, result) {
                 let _ = self.ready_sess_tx.send(session);
             }
         }
@@ -169,19 +167,6 @@ fn finish_admission<S: EventStore, T>(
     }
 }
 
-fn send_post_commit_loadout<S: EventStore>(
-    node: &SimulationNode<S>,
-    session: &ws_server::PlayerSession,
-    committed: CommittedClientAdmission,
-) {
-    if !committed.resumed {
-        return;
-    }
-    if let Some(loadout) = node.build_player_loadout_json(committed.ship_id) {
-        session.send_message(&ServerMessage::PlayerLoadout(loadout));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,7 +257,7 @@ mod tests {
                 AOI_CELL_SIZE,
             )
             .expect("fresh attempt");
-        assert_eq!(node.ship_count(), 1);
+        assert_eq!(node.ship_count(), 0);
 
         let (_request_tx, handshake_req_rx) =
             mpsc::unbounded_channel::<ws_server::HandshakeRequest>();
