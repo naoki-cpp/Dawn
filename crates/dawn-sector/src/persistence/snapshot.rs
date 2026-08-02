@@ -23,9 +23,9 @@
 //! then replace the authoritative path. Before replacement, the persistence
 //! layer opens the parent directory and durably preserves a readable rollback
 //! copy of any existing snapshot. Unix uses same-directory `rename` plus parent-
-//! directory sync; Windows uses `MoveFileExW` with replace-existing and write-
-//! through flags. A handled failure at any publication stage restores the prior
-//! authoritative snapshot (or restores absence for a failed first publication).
+//! directory sync; Windows uses `ReplaceFileW` for metadata-preserving replacement.
+//! A handled failure at any publication stage restores the prior authoritative
+//! snapshot (or restores absence for a failed first publication).
 //!
 //! Derived / transient state (position, capacitor, lock countdowns) is persisted
 //! in the snapshot. It is a per-tick pure function (position = velocity integral,
@@ -46,6 +46,9 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
 use dawn_core::{
     fitting::FittingSnapshot, AbsolutePosition, NodeId, Position, SectorBounds, SectorId, ShipId,
     ShipTypeId, Tick, Velocity,
@@ -53,6 +56,8 @@ use dawn_core::{
 use serde::{Deserialize, Serialize};
 
 const TEMP_FILE_CREATE_ATTEMPTS: usize = 128;
+#[cfg(unix)]
+const INITIAL_SNAPSHOT_MODE: u32 = 0o600;
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
@@ -194,8 +199,9 @@ impl StateSnapshot {
         // Open the parent before replacement. On Unix this preserves a usable
         // directory handle even if a path lookup would fail after the rename.
         let directory = SnapshotDirectory::open(path)?;
+        let protection = SnapshotProtection::capture(path)?;
 
-        let mut temp = SnapshotTempFile::create(path)?;
+        let mut temp = SnapshotTempFile::create(path, &protection)?;
         {
             let file = temp.file_mut();
             file.write_all(&bytes)?;
@@ -215,13 +221,14 @@ impl StateSnapshot {
         }
         temp.close();
 
-        let previous = SnapshotBackup::capture(path)?;
+        let previous = SnapshotBackup::capture(path, &protection)?;
         if previous.is_some() {
             sync_snapshot_directory(&directory, path)?;
         }
 
         before_publish(temp.path())?;
-        if let Err(error) = publish_snapshot(temp.path(), path) {
+        let replacing_existing = previous.is_some();
+        if let Err(error) = publish_snapshot(temp.path(), path, replacing_existing) {
             let rollback = rollback_publication(previous, path, &directory);
             return Err(publication_error(error, rollback));
         }
@@ -274,6 +281,94 @@ fn snapshot_sibling(destination: &Path, suffix: &str) -> io::Result<PathBuf> {
     Ok(snapshot_parent(destination).join(sibling_name))
 }
 
+#[derive(Debug, Clone)]
+struct SnapshotProtection {
+    #[cfg(unix)]
+    mode: u32,
+    #[cfg(windows)]
+    source: Option<PathBuf>,
+}
+
+impl SnapshotProtection {
+    fn capture(destination: &Path) -> io::Result<Self> {
+        match fs::metadata(destination) {
+            Ok(metadata) => {
+                #[cfg(unix)]
+                {
+                    Ok(Self {
+                        mode: metadata.permissions().mode() & 0o7777,
+                    })
+                }
+                #[cfg(windows)]
+                {
+                    let _ = metadata;
+                    Ok(Self {
+                        source: Some(destination.to_path_buf()),
+                    })
+                }
+                #[cfg(all(not(unix), not(windows)))]
+                {
+                    let _ = metadata;
+                    Ok(Self {})
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                #[cfg(unix)]
+                {
+                    Ok(Self {
+                        mode: INITIAL_SNAPSHOT_MODE,
+                    })
+                }
+                #[cfg(windows)]
+                {
+                    Ok(Self { source: None })
+                }
+                #[cfg(all(not(unix), not(windows)))]
+                {
+                    Ok(Self {})
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn create_new(&self, path: &Path) -> io::Result<File> {
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(self.mode);
+
+        let file = options.open(path)?;
+        let protection_result = self.apply_to_new_file(&file, path);
+        if let Err(error) = protection_result {
+            drop(file);
+            let _ = fs::remove_file(path);
+            return Err(error);
+        }
+        Ok(file)
+    }
+
+    fn apply_to_new_file(&self, file: &File, path: &Path) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            file.set_permissions(fs::Permissions::from_mode(self.mode))
+        }
+        #[cfg(windows)]
+        {
+            if let Some(source) = &self.source {
+                copy_windows_dacl(source, path)?;
+            }
+            let _ = file;
+            Ok(())
+        }
+        #[cfg(all(not(unix), not(windows)))]
+        {
+            let _ = (file, path);
+            Ok(())
+        }
+    }
+}
+
 struct SnapshotDirectory {
     #[cfg(unix)]
     handle: File,
@@ -300,8 +395,8 @@ impl SnapshotDirectory {
         }
         #[cfg(not(unix))]
         {
-            // Windows publication itself requests write-through. Other
-            // platforms are rejected by `publish_snapshot`.
+            // Windows replacement uses the operating system's atomic file
+            // replacement primitive. Other platforms are rejected below.
             Ok(())
         }
     }
@@ -345,18 +440,13 @@ struct SnapshotTempFile {
 }
 
 impl SnapshotTempFile {
-    fn create(destination: &Path) -> io::Result<Self> {
+    fn create(destination: &Path, protection: &SnapshotProtection) -> io::Result<Self> {
         for _ in 0..TEMP_FILE_CREATE_ATTEMPTS {
             let sequence = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
             let suffix = format!(".{}.{}.tmp", process::id(), sequence);
             let path = snapshot_sibling(destination, &suffix)?;
 
-            match OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
+            match protection.create_new(&path) {
                 Ok(file) => {
                     return Ok(Self {
                         path,
@@ -409,7 +499,10 @@ struct SnapshotBackup {
 }
 
 impl SnapshotBackup {
-    fn capture(destination: &Path) -> io::Result<Option<Self>> {
+    fn capture(
+        destination: &Path,
+        protection: &SnapshotProtection,
+    ) -> io::Result<Option<Self>> {
         let backup_path = snapshot_sibling(destination, ".rollback")?;
         match fs::metadata(&backup_path) {
             Ok(_) => {
@@ -437,11 +530,7 @@ impl SnapshotBackup {
             path: backup_path,
             armed: true,
         };
-        let mut backup_file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(backup.path())?;
+        let mut backup_file = protection.create_new(backup.path())?;
         io::copy(&mut source, &mut backup_file)?;
         backup_file.flush()?;
         backup_file.sync_all()?;
@@ -455,7 +544,7 @@ impl SnapshotBackup {
     }
 
     fn restore(mut self, destination: &Path) -> io::Result<()> {
-        if let Err(error) = publish_snapshot(&self.path, destination) {
+        if let Err(error) = publish_snapshot(&self.path, destination, true) {
             self.armed = false;
             return Err(io::Error::new(
                 error.kind(),
@@ -518,15 +607,23 @@ fn publication_error(publication: io::Error, rollback: io::Result<()>) -> io::Er
 }
 
 #[cfg(unix)]
-fn publish_snapshot(temp_path: &Path, destination: &Path) -> io::Result<()> {
+fn publish_snapshot(
+    temp_path: &Path,
+    destination: &Path,
+    _replacing_existing: bool,
+) -> io::Result<()> {
     fs::rename(temp_path, destination)
 }
 
 #[cfg(windows)]
-fn publish_snapshot(temp_path: &Path, destination: &Path) -> io::Result<()> {
+fn publish_snapshot(
+    temp_path: &Path,
+    destination: &Path,
+    replacing_existing: bool,
+) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
+    use std::ptr;
 
-    const MOVE_FILE_REPLACE_EXISTING: u32 = 0x0000_0001;
     const MOVE_FILE_WRITE_THROUGH: u32 = 0x0000_0008;
 
     #[link(name = "Kernel32")]
@@ -536,25 +633,31 @@ fn publish_snapshot(temp_path: &Path, destination: &Path) -> io::Result<()> {
             new_file_name: *const u16,
             flags: u32,
         ) -> i32;
+        fn ReplaceFileW(
+            replaced_file_name: *const u16,
+            replacement_file_name: *const u16,
+            backup_file_name: *const u16,
+            replace_flags: u32,
+            exclude: *mut std::ffi::c_void,
+            reserved: *mut std::ffi::c_void,
+        ) -> i32;
     }
 
-    let existing: Vec<u16> = temp_path
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    let new: Vec<u16> = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-
-    let result = unsafe {
-        MoveFileExW(
-            existing.as_ptr(),
-            new.as_ptr(),
-            MOVE_FILE_REPLACE_EXISTING | MOVE_FILE_WRITE_THROUGH,
-        )
+    let temp = wide_path(temp_path);
+    let destination = wide_path(destination);
+    let result = if replacing_existing {
+        unsafe {
+            ReplaceFileW(
+                destination.as_ptr(),
+                temp.as_ptr(),
+                ptr::null(),
+                0,
+                ptr::null_mut(),
+                ptr::null_mut(),
+            )
+        }
+    } else {
+        unsafe { MoveFileExW(temp.as_ptr(), destination.as_ptr(), MOVE_FILE_WRITE_THROUGH) }
     };
     if result == 0 {
         Err(io::Error::last_os_error())
@@ -563,8 +666,95 @@ fn publish_snapshot(temp_path: &Path, destination: &Path) -> io::Result<()> {
     }
 }
 
+#[cfg(windows)]
+fn copy_windows_dacl(source: &Path, destination: &Path) -> io::Result<()> {
+    use std::ptr;
+
+    const DACL_SECURITY_INFORMATION: u32 = 0x0000_0004;
+    const ERROR_INSUFFICIENT_BUFFER: i32 = 122;
+
+    #[link(name = "Advapi32")]
+    unsafe extern "system" {
+        fn GetFileSecurityW(
+            file_name: *const u16,
+            requested_information: u32,
+            security_descriptor: *mut std::ffi::c_void,
+            length: u32,
+            length_needed: *mut u32,
+        ) -> i32;
+        fn SetFileSecurityW(
+            file_name: *const u16,
+            security_information: u32,
+            security_descriptor: *mut std::ffi::c_void,
+        ) -> i32;
+    }
+
+    let source = wide_path(source);
+    let destination = wide_path(destination);
+    let mut length_needed = 0;
+    let first = unsafe {
+        GetFileSecurityW(
+            source.as_ptr(),
+            DACL_SECURITY_INFORMATION,
+            ptr::null_mut(),
+            0,
+            &mut length_needed,
+        )
+    };
+    if first != 0 {
+        return Err(io::Error::other(
+            "GetFileSecurityW unexpectedly succeeded without a descriptor buffer",
+        ));
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER) {
+        return Err(error);
+    }
+
+    let mut descriptor = vec![0_u8; length_needed as usize];
+    let fetched = unsafe {
+        GetFileSecurityW(
+            source.as_ptr(),
+            DACL_SECURITY_INFORMATION,
+            descriptor.as_mut_ptr().cast(),
+            length_needed,
+            &mut length_needed,
+        )
+    };
+    if fetched == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let applied = unsafe {
+        SetFileSecurityW(
+            destination.as_ptr(),
+            DACL_SECURITY_INFORMATION,
+            descriptor.as_mut_ptr().cast(),
+        )
+    };
+    if applied == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn wide_path(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
 #[cfg(all(not(unix), not(windows)))]
-fn publish_snapshot(_temp_path: &Path, _destination: &Path) -> io::Result<()> {
+fn publish_snapshot(
+    _temp_path: &Path,
+    _destination: &Path,
+    _replacing_existing: bool,
+) -> io::Result<()> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "atomic snapshot publication is not implemented on this platform",
@@ -577,6 +767,11 @@ fn publish_snapshot(_temp_path: &Path, _destination: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
     use dawn_core::Position;
+
+    #[cfg(unix)]
+    fn file_mode(path: &Path) -> u32 {
+        fs::metadata(path).unwrap().permissions().mode() & 0o7777
+    }
 
     fn sample_snapshot() -> StateSnapshot {
         StateSnapshot {
@@ -671,6 +866,8 @@ mod tests {
         assert_eq!(restored.log_index, original.log_index);
         assert_eq!(restored.tick, original.tick);
         assert_eq!(restored.id_counter, original.id_counter);
+        #[cfg(unix)]
+        assert_eq!(file_mode(&path), INITIAL_SNAPSHOT_MODE);
         assert_no_publication_artifacts(dir.path());
     }
 
@@ -692,6 +889,32 @@ mod tests {
         let restored = StateSnapshot::load(&path).unwrap();
         assert_eq!(restored.log_index, replacement.log_index);
         assert_eq!(restored.tick, replacement.tick);
+        assert_no_publication_artifacts(dir.path());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_preserves_existing_mode_on_all_publication_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snapshot.bin");
+
+        let mut previous = sample_snapshot();
+        previous.log_index = 7;
+        previous.save(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let mut replacement = sample_snapshot();
+        replacement.log_index = 99;
+        replacement
+            .save_with_before_publish(&path, |temp_path| {
+                assert_eq!(file_mode(temp_path), 0o600);
+                let rollback_path = snapshot_sibling(&path, ".rollback").unwrap();
+                assert_eq!(file_mode(&rollback_path), 0o600);
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(file_mode(&path), 0o600);
         assert_no_publication_artifacts(dir.path());
     }
 
