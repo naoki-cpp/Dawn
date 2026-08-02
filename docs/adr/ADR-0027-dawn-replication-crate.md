@@ -34,6 +34,12 @@ ADR-0021 は Sector-local 複製の戦略を「追記ログのゴシップ配布
 3. スナップショット転送（遅れた複製が snapshot + tail catch-up で追いつく）
 ```
 
+受信側の catch-up 状態機械もこのクレートの責務とする。`CatchUpManager` が replica
+cursor、gap 検出、suffix/snapshot 要求、bounded retry、terminal failure 分類、logical-tick
+cooldown、および現在の replica cursor からの再開を所有する。本番・In-Memory の runtime
+adapter は batch/message/tick を渡し、返された outbound message を送信し、observable event
+を記録するだけとし、並行する failure retry map や合成 `LogBatch` を持たない。
+
 クレートは **ワイヤ層（トランスポート）を抽象化する trait** を提供し、
 In-Memory（テスト用・`ReplicationBus` の後継）と TCP（本番用）の
 2 実装を持つ。postcard + serde を wire 形式に再利用する（§3 方針）。
@@ -168,6 +174,7 @@ thiserror        = "1"
 - [x] `AntiEntropy`（iter_from ベース）を実装しテストを書く
 - [x] `TcpReplicationTransport`（LAN plaintext）を実装
 - [x] `SnapshotTransfer` を実装しテストを書く
+- [x] `CatchUpManager` に failure cooldown と current-cursor restart を集約
 - [x] `cargo test --workspace` がゼロエラーで通過する
 - [x] AI_DEVELOPMENT_GUIDE.md §3（Dependency DAG）§11（Crate 別責務早見表）を更新する
 - [x] architecture-review/server.md のファイルサイズ一覧を更新する（P7-1 テスト移動後の実数値に修正）
