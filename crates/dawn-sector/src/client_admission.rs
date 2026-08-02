@@ -374,6 +374,7 @@ mod tests {
             .expect("abort must release the population reservation");
         retry.abort(&mut node);
     }
+
     #[test]
     fn failed_resume_leaves_pre_existing_ship_unowned_and_intact() {
         let mut node = node();
