@@ -31,11 +31,20 @@ func _module(overrides: Dictionary) -> ModuleRow:
 		"slot": "High", "index": 0, "module_id": 1, "name": "Test Module", "kind": "Weapon",
 		"is_active": false, "is_active_module": true,
 		"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10,
-		"stat_delta": {},
 	}
 	for key: String in overrides:
 		base[key] = overrides[key]
-	return ModuleRow.from_json(base)
+	return ModuleRow.test_fixture(
+		base.slot as String,
+		base.index as int,
+		base.module_id as int,
+		base.name as String,
+		base.kind as String,
+		base.is_active as bool,
+		base.is_active_module as bool,
+		base.cap_cost_per_cycle as float,
+		base.cycle_time_ticks as int,
+	)
 
 
 func _item(item_id: ItemIdentity, overrides: Dictionary = {}) -> ItemRow:
@@ -58,7 +67,13 @@ func _owned_ship(overrides: Dictionary) -> OwnedShipRow:
 	}
 	for key: String in overrides:
 		base[key] = overrides[key]
-	return OwnedShipRow.from_json(base)
+	return OwnedShipRow.test_fixture(
+		base.ship_id as int,
+		base.ship_type_id as int,
+		base.ship_type_name as String,
+		base.docked_station_id as int,
+		base.is_active as bool,
+	)
 
 
 func test_set_player_fitting_before_build_is_applied_after_build() -> void:

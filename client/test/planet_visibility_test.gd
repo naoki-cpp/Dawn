@@ -45,7 +45,6 @@ func test_initial_state_planet_is_rendered_near_the_player_at_true_au_scale() ->
 		[],
 		[planet],
 		[],
-		Callable(_main, "_server_components_to_godot"),
 		Callable(_main._interaction, "clear_navigation_selection")
 	)
 	await get_tree().process_frame

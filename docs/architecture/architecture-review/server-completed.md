@@ -149,3 +149,10 @@ ADR-0029後の再肥大はR-1で解消済み。
 - P9-2（`CelestialBodyDef.sector`）完了。
 - P9-1（M-3解消）は撤回（詳細は pending.md 参照 — `SectorSimulatorActor` は本番パス外で
   8D-5はこの境界を経由しないため前提が崩れた）。
+
+
+### 2026-08-02 — client binary test boundary cleanup (#239)
+
+The client-side legacy JSON reconstruction decoder introduced during the
+postcard migration was removed. `dawn-wire` now owns client command/message
+round-trip tests directly, without reproducing the deprecated Dictionary shape.

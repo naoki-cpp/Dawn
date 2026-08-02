@@ -20,9 +20,9 @@ pub(crate) fn kind_str(kind: ModuleKind) -> &'static str {
     }
 }
 
-/// Reverse of `kind_str` -- parses a wire-string kind name (as GDScript
-/// passes into `PlayerLoadout.effective_range_for_activation` or a
-/// `from_json` payload) back into a [`ModuleKind`]. Any unrecognized string
+/// Reverse of `kind_str` -- parses a wire-string kind name passed into
+/// `PlayerLoadout.effective_range_for_activation` back into a [`ModuleKind`].
+/// Any unrecognized string
 /// maps to `Unknown`, matching the old GDScript's permissive `_range_family()`
 /// default.
 pub(crate) fn parse_kind(kind: &str) -> ModuleKind {
@@ -38,44 +38,6 @@ pub(crate) fn parse_kind(kind: &str) -> ModuleKind {
         "RemoteArmorRepairer" => ModuleKind::RemoteArmorRepairer,
         _ => ModuleKind::Unknown,
     }
-}
-
-/// Godot `Dictionary` value type used by `ModuleRow::from_json` --
-/// matches `loadout_gd::Dict`.
-type Dict = Dictionary<Variant, Variant>;
-
-const REQUIRED_KEYS: &[&str] = &[
-    "slot",
-    "index",
-    "module_id",
-    "name",
-    "kind",
-    "is_active",
-    "is_active_module",
-    "cap_cost_per_cycle",
-    "cycle_time_ticks",
-    "stat_delta",
-];
-
-fn stat_delta_f32(stat_delta: &Dict, key: &str) -> f32 {
-    stat_delta
-        .get(key)
-        .and_then(|v| v.try_to::<f64>().ok())
-        .unwrap_or(0.0) as f32
-}
-
-fn stat_delta_i32(stat_delta: &Dict, key: &str) -> i32 {
-    stat_delta
-        .get(key)
-        .and_then(|v| v.try_to::<i64>().ok())
-        .unwrap_or(0) as i32
-}
-
-fn stat_delta_f64(stat_delta: &Dict, key: &str) -> f64 {
-    stat_delta
-        .get(key)
-        .and_then(|v| v.try_to::<f64>().ok())
-        .unwrap_or(0.0)
 }
 
 /// GDScript-facing view of one fitted module slot (`dawn_client_core::ModuleRow`).
@@ -188,86 +150,39 @@ impl ModuleRow {
         Self::wrap(self.inner.clone())
     }
 
-    /// Parses one module row out of a plain (non-wire-JSON) `Dictionary` --
-    /// used directly by GdUnit4 tests that build a module list by hand
-    /// (`world_session_test.gd`), mirroring the old `module_row.gd::from_json`.
-    /// Returns `null` (after an error log) if a required key is missing,
-    /// same "fail loudly, drop the row" contract as before.
+    /// Debug-only typed fixture for GdUnit. Production rows are created only
+    /// from the typed PlayerLoadout projection.
+    #[cfg(debug_assertions)]
+    #[allow(clippy::too_many_arguments)]
     #[func]
-    fn from_json(src: Dict) -> Variant {
-        for key in REQUIRED_KEYS {
-            if src.get(*key).is_none() {
-                godot_error!("ModuleRow.from_json: invalid module row, missing '{key}'");
-                return Variant::nil();
-            }
-        }
-
-        let get_gstring = |key: &str| -> String {
-            src.get(key)
-                .and_then(|v| v.try_to::<GString>().ok())
-                .map(|s| s.to_string())
-                .unwrap_or_default()
-        };
-        let get_i64 = |key: &str| -> i64 {
-            src.get(key)
-                .and_then(|v| v.try_to::<i64>().ok())
-                .unwrap_or(0)
-        };
-        let get_f64 = |key: &str| -> f64 {
-            src.get(key)
-                .and_then(|v| v.try_to::<f64>().ok())
-                .unwrap_or(0.0)
-        };
-        let get_bool = |key: &str| -> bool {
-            src.get(key)
-                .and_then(|v| v.try_to::<bool>().ok())
-                .unwrap_or(false)
-        };
-
-        let stat_delta: Dict = src
-            .get("stat_delta")
-            .and_then(|v| v.try_to::<Dict>().ok())
-            .unwrap_or_default();
-
-        let row = CoreModuleRow {
-            slot: get_gstring("slot"),
-            index: get_i64("index") as u32,
-            module_id: get_i64("module_id") as u32,
-            name: get_gstring("name"),
-            kind: parse_kind(&get_gstring("kind")),
-            is_active: get_bool("is_active"),
-            is_active_module: get_bool("is_active_module"),
-            cap_cost_per_cycle: get_f64("cap_cost_per_cycle"),
-            cycle_time_ticks: get_i64("cycle_time_ticks") as u32,
-            stat_delta: StatDelta {
-                weapon_damage_add: stat_delta_f32(&stat_delta, "weapon_damage_add"),
-                weapon_range_add: stat_delta_f32(&stat_delta, "weapon_range_add"),
-                falloff_range_add: stat_delta_f32(&stat_delta, "falloff_range_add"),
-                tracking_speed_add: stat_delta_f32(&stat_delta, "tracking_speed_add"),
-                speed_multiplier: {
-                    let v = stat_delta_f64(&stat_delta, "speed_multiplier");
-                    if v == 0.0 {
-                        1.0
-                    } else {
-                        v
-                    }
-                },
-                mass_add: stat_delta_f64(&stat_delta, "mass_add"),
-                max_shield_add: stat_delta_f32(&stat_delta, "max_shield_add"),
-                max_armor_add: stat_delta_f32(&stat_delta, "max_armor_add"),
-                max_hull_add: stat_delta_f32(&stat_delta, "max_hull_add"),
-                weapon_cooldown_add: stat_delta_i32(&stat_delta, "weapon_cooldown_add"),
-                lock_time_add: stat_delta_i32(&stat_delta, "lock_time_add"),
-                max_locks_add: stat_delta_i32(&stat_delta, "max_locks_add"),
-                cap_max_add: stat_delta_f32(&stat_delta, "cap_max_add"),
-                cap_recharge_add: stat_delta_f32(&stat_delta, "cap_recharge_add"),
-                tackle_range_add: stat_delta_f32(&stat_delta, "tackle_range_add"),
-                repair_amount: stat_delta_f32(&stat_delta, "repair_amount"),
-                repair_range_add: stat_delta_f32(&stat_delta, "repair_range_add"),
-            },
+    fn test_fixture(
+        slot: GString,
+        index: i64,
+        module_id: i64,
+        name: GString,
+        kind: GString,
+        is_active: bool,
+        is_active_module: bool,
+        cap_cost_per_cycle: f64,
+        cycle_time_ticks: i64,
+    ) -> Gd<ModuleRow> {
+        let index = u32::try_from(index).expect("fixture index must fit u32");
+        let module_id = u32::try_from(module_id).expect("fixture module ID must fit u32");
+        let cycle_time_ticks =
+            u32::try_from(cycle_time_ticks).expect("fixture cycle time must fit u32");
+        Self::wrap(CoreModuleRow {
+            slot: slot.to_string(),
+            index,
+            module_id,
+            name: name.to_string(),
+            kind: parse_kind(&kind.to_string()),
+            is_active,
+            is_active_module,
+            cap_cost_per_cycle,
+            cycle_time_ticks,
+            stat_delta: StatDelta::ZERO,
             cycle_remaining: 0,
             forced_reason: String::new(),
-        };
-        Self::wrap(row).to_variant()
+        })
     }
 }

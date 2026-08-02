@@ -138,23 +138,46 @@ impl PlayerLoadout {
         self.loadout = None;
     }
 
-    /// Test/debug-only convenience: builds state directly from a hand-built
-    /// JSON fixture, bypassing the wire entirely. Never called by
-    /// `connection.gd` in production (that always goes through the typed
-    /// `ServerMessageOutcome` path, ADR-0042/ADR-0046) -- this exists so
-    /// focused GdUnit4 tests can set up a `PlayerLoadout` fixture.
+    /// Debug-only typed fixture for focused GdUnit tests. Production state is
+    /// replaced only from a decoded `PlayerLoadoutWire`.
+    #[cfg(debug_assertions)]
     #[func]
-    fn apply_payload(&mut self, json: GString) -> bool {
-        match serde_json::from_str::<PlayerLoadoutMsg>(&json.to_string()) {
-            Ok(loadout) => {
-                self.loadout = Some(loadout);
-                true
-            }
-            Err(err) => {
-                godot_error!("PlayerLoadout.apply_payload: {err}");
-                false
-            }
-        }
+    fn test_fixture(
+        &mut self,
+        tick: i64,
+        modules: Array<Gd<ModuleRow>>,
+        docked_station_id: i64,
+        docked_station_name: GString,
+        active_ship_id: i64,
+        owned_ships: Array<Gd<OwnedShipRow>>,
+    ) -> bool {
+        let Ok(tick) = u64::try_from(tick) else {
+            return false;
+        };
+        self.loadout = Some(PlayerLoadoutMsg {
+            tick,
+            modules: modules
+                .iter_shared()
+                .map(|row| row.bind().inner_clone())
+                .collect(),
+            inventory: Vec::new(),
+            station_inventory: Vec::new(),
+            docked_station_id: u32::try_from(docked_station_id).ok(),
+            docked_station_name: (!docked_station_name.is_empty())
+                .then(|| docked_station_name.to_string()),
+            slot_capacity: dawn_client_core::SlotCapacity {
+                high: 0,
+                mid: 0,
+                low: 0,
+                rig: 0,
+            },
+            active_ship_id: u64::try_from(active_ship_id).ok(),
+            owned_ships: owned_ships
+                .iter_shared()
+                .map(|row| row.bind().inner_clone())
+                .collect(),
+        });
+        true
     }
 
     #[func]

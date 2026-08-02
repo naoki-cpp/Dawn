@@ -41,12 +41,12 @@ Phase 10 全体ではなく「ADR-0039 の Loadout モジュールを実際に G
   ビルド成果物の配置スクリプト化は将来必要になれば追加する（現状は
   `cargo build -p dawn-client-gdext` を手動実行し、Godot 側は `compatibility_minimum`
   と `reloadable = true` でホットリロードする前提）。
-- `PlayerLoadout.apply_payload()` は JSON 文字列を受け取る（`dawn-client-core`
+- `PlayerLoadout` は decoded `PlayerLoadoutWire` からのみ状態を置換する（`dawn-client-core`
   の `serde_json` 経路をそのまま使うため）。`connection.gd` は既に全メッセージを
   Dictionary へパースしてから各ハンドラへ配っているため、そのディスパッチ形状は
   変えず、`main.gd::_on_player_fitting` 側で `JSON.stringify(payload)` して
   渡す1行変換のみで済ませた。
-- `ModuleRow`/`ItemRow` の `from_json(dict: Dictionary) -> Variant` 静的コンストラクタと
+- `ModuleRow`/`ItemRow`/`OwnedShipRow` は typed projection と debug-only typed fixture を持ち、
   `PlayerLoadout.simulate_modules_capacitor_ticks(modules: Array, ...)` 静的関数を、
   旧 GDScript 版と同じ契約（必須キー欠落時は `null` を返しエラーログ）で維持した。
   これらは wire JSON 経由ではなく GdUnit4 テストが直接 Dictionary からモジュール行を
@@ -101,3 +101,13 @@ Phase 10 全体ではなく「ADR-0039 の Loadout モジュールを実際に G
       シグナルを Dictionary ではなく生の wire JSON 文字列を運ぶ形に変更し、
       再エンコードを経由しないようにして解消（`_flush_buffer`/`_handle_message`
       が元の JSON テキスト行を保持して渡す）。
+
+
+## 2026-08-02: legacy adapter removal (#239)
+
+Typed `WorldSession` migration completion after #238 made the JSON fixture seam
+unnecessary. `ClientMessageDecoder`, `json_variant.rs`, row `from_json`
+constructors, and `PlayerLoadout.apply_payload` were removed. GdUnit uses typed
+debug fixtures or the real binary `ServerMessageDecoder` path. Absolute
+positions cross the Rust/Godot boundary as `PackedFloat64Array`; narrowing to
+`Vector3` happens only at the rendering seam.

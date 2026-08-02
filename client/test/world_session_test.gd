@@ -7,28 +7,6 @@ extends GdUnitTestSuite
 var _session
 const AU_M: float = 1.495978707e11
 
-## dawn_core::StatDelta requires every field in the debug JSON helper used by
-## the remaining PlayerLoadout unit test below.
-const FULL_ZERO_STAT_DELTA: Dictionary = {
-	"weapon_damage_add": 0.0,
-	"weapon_range_add": 0.0,
-	"falloff_range_add": 0.0,
-	"tracking_speed_add": 0.0,
-	"speed_multiplier": 1.0,
-	"mass_add": 0.0,
-	"max_shield_add": 0.0,
-	"max_armor_add": 0.0,
-	"max_hull_add": 0.0,
-	"weapon_cooldown_add": 0,
-	"lock_time_add": 0,
-	"max_locks_add": 0,
-	"cap_max_add": 0.0,
-	"cap_recharge_add": 0.0,
-	"tackle_range_add": 0.0,
-	"repair_amount": 0.0,
-	"repair_range_add": 0.0,
-}
-
 
 class InitialStateTarget:
 	extends RefCounted
@@ -118,16 +96,14 @@ func test_remove_ship_with_clear_lock_true_clears_the_lock_target() -> void:
 func test_client_ticks_advance_capacitor_without_server_events() -> void:
 	_apply_initial_state(11)
 	var loadout := PlayerLoadout.new()
-	loadout.apply_payload(JSON.stringify({
-		"modules": [{
-			"slot": "High", "index": 0, "module_id": 1, "name": "Gun", "kind": "Weapon",
-			"is_active_module": true,
-			"is_active": true,
-			"cap_cost_per_cycle": 20.0,
-			"cycle_time_ticks": 10,
-			"stat_delta": FULL_ZERO_STAT_DELTA,
-		}],
-	}))
+	var module := ModuleRow.test_fixture(
+		"High", 0, 1, "Gun", "Weapon", true, true, 20.0, 10
+	)
+	var fixture_modules: Array[ModuleRow] = [module]
+	var owned_ships: Array[OwnedShipRow] = []
+	assert_bool(loadout.test_fixture(
+		0, fixture_modules, -1, "", -1, owned_ships
+	)).is_true()
 	_session.advance_client_ticks(1, loadout)
 	var modules: Array = loadout.modules()
 	assert_int(_session.current_tick()).is_equal(1)

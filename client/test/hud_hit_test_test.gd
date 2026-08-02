@@ -99,8 +99,17 @@ func _module(overrides: Dictionary) -> ModuleRow:
 		"slot": "High", "index": 0, "module_id": 1, "name": "Test Module", "kind": "Weapon",
 		"is_active": false, "is_active_module": true,
 		"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10,
-		"stat_delta": {},
 	}
 	for key: String in overrides:
 		base[key] = overrides[key]
-	return ModuleRow.from_json(base)
+	return ModuleRow.test_fixture(
+		base.slot as String,
+		base.index as int,
+		base.module_id as int,
+		base.name as String,
+		base.kind as String,
+		base.is_active as bool,
+		base.is_active_module as bool,
+		base.cap_cost_per_cycle as float,
+		base.cycle_time_ticks as int,
+	)

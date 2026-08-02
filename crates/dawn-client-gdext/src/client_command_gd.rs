@@ -1,12 +1,11 @@
-use crate::{
-    item_identity_gd::ItemIdentity,
-    json_variant::{externally_tagged_to_dict, json_value_to_variant, Dict},
-};
+use crate::item_identity_gd::ItemIdentity;
 use dawn_wire::{
     ClientCommandWire, ClientMessage, HelloMessage, ItemWire, MarketCommandWire,
     NavigationTargetWire, PosWire, ResumeIdentity, WarpTargetWire,
 };
 use godot::prelude::*;
+
+type Dict = Dictionary<Variant, Variant>;
 
 /// Postcard-encode a [`ClientMessage`] into the bytes `connection.gd` sends
 /// as a binary WebSocket frame (ADR-0042).
@@ -306,57 +305,5 @@ impl ClientCommand {
             item_id: item_wire(&item_id),
             direction: direction.to_string(),
         })
-    }
-}
-
-/// Decodes a `ClientMessage` binary frame back into a Dictionary
-/// (`{"type": ..., ...fields}`, matching the legacy JSON shape) -- the
-/// reverse of what `ClientCommand`'s methods build. `connection.gd` never
-/// needs this (the client only ever sends `ClientMessage`, never decodes
-/// one), but GdUnit4 needs a way to verify what `ClientCommand`'s domain
-/// semantics produced without a live connection.
-#[derive(GodotClass)]
-#[class(init, base=RefCounted)]
-pub struct ClientMessageDecoder {}
-
-#[godot_api]
-impl ClientMessageDecoder {
-    #[func]
-    fn decode(&self, bytes: PackedByteArray) -> Dict {
-        match ClientMessage::decode(bytes.as_slice()) {
-            Ok(ClientMessage::Command(cmd)) => match serde_json::to_value(&cmd) {
-                Ok(value) => externally_tagged_to_dict(&value),
-                Err(err) => {
-                    godot_error!(
-                        "ClientMessageDecoder.decode: ClientCommandWire -> JSON failed: {err}"
-                    );
-                    Dict::new()
-                }
-            },
-            Ok(ClientMessage::Market(command)) => match serde_json::to_value(&command) {
-                Ok(value) => externally_tagged_to_dict(&value),
-                Err(err) => {
-                    godot_error!(
-                        "ClientMessageDecoder.decode: MarketCommandWire -> JSON failed: {err}"
-                    );
-                    Dict::new()
-                }
-            },
-            Ok(ClientMessage::Hello(hello)) => match serde_json::to_value(hello) {
-                Ok(value) => {
-                    let mut d = json_value_to_variant(&value).to::<Dict>();
-                    d.set("type", "Hello");
-                    d
-                }
-                Err(err) => {
-                    godot_error!("ClientMessageDecoder.decode: HelloMessage -> JSON failed: {err}");
-                    Dict::new()
-                }
-            },
-            Err(err) => {
-                godot_error!("ClientMessageDecoder.decode: {err}");
-                Dict::new()
-            }
-        }
     }
 }

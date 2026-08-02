@@ -26,11 +26,20 @@ func _module(overrides: Dictionary) -> ModuleRow:
 		"slot": "High", "index": 0, "module_id": 1, "name": "Test Module", "kind": "Weapon",
 		"is_active": false, "is_active_module": true,
 		"cap_cost_per_cycle": 0.0, "cycle_time_ticks": 10,
-		"stat_delta": {},
 	}
 	for key: String in overrides:
 		base[key] = overrides[key]
-	return ModuleRow.from_json(base)
+	return ModuleRow.test_fixture(
+		base.slot as String,
+		base.index as int,
+		base.module_id as int,
+		base.name as String,
+		base.kind as String,
+		base.is_active as bool,
+		base.is_active_module as bool,
+		base.cap_cost_per_cycle as float,
+		base.cycle_time_ticks as int,
+	)
 
 
 func _owned_ship(overrides: Dictionary) -> OwnedShipRow:
@@ -43,7 +52,13 @@ func _owned_ship(overrides: Dictionary) -> OwnedShipRow:
 	}
 	for key: String in overrides:
 		base[key] = overrides[key]
-	return OwnedShipRow.from_json(base)
+	return OwnedShipRow.test_fixture(
+		base.ship_id as int,
+		base.ship_type_id as int,
+		base.ship_type_name as String,
+		base.docked_station_id as int,
+		base.is_active as bool,
+	)
 
 
 # -- set_stat_bar / set_mini_bar (percentage math) -----------------------------
@@ -290,20 +305,17 @@ func test_unfit_all_row_appears_after_the_fitted_modules_when_any_are_fitted() -
 	assert_str(refs.fitted_rows[1].action).is_equal(InventoryRow.ACTION_UNFIT_ALL)
 
 
-## Regression: owned_ships_json (serialization.rs) sends docked_station_id/
-## ship_type_name as JSON null (not an absent key) for an away/undocked ship
-## or an unregistered ship type. Dictionary.get(key, default) only falls back
-## to default when the key is absent, not when it's present with a null
-## value -- `as int`/`as String` on that null value crashed with "Invalid
-## cast: could not convert value to 'int'".
-func test_owned_ship_row_handles_null_docked_station_id_and_ship_type_name() -> void:
+## Regression: the typed Rust adapter maps absent optional owned-ship values to
+## `-1`/empty-string sentinels before they cross into GDScript. Keep this test
+## at that typed boundary rather than recreating the removed JSON null shape.
+func test_owned_ship_row_handles_absent_optional_values() -> void:
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
 	var refs: HudManager.InventoryPanelRefs = HudManager.build_inventory_panel(hud)
 	var owned_ships := [_owned_ship({
-		"ship_type_id": null,
-		"ship_type_name": null,
-		"docked_station_id": null,
+		"ship_type_id": -1,
+		"ship_type_name": "",
+		"docked_station_id": -1,
 		"is_active": false,
 	})]
 

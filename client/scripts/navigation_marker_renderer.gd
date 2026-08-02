@@ -9,8 +9,6 @@
 class_name NavigationMarkerRenderer
 extends RefCounted
 
-const PositionComponents = preload("res://scripts/position_components.gd")
-
 const GATE_RING_INNER_RATIO    : float = 0.85
 const GATE_LABEL_HEIGHT_RATIO  : float = 0.3
 const PLANET_VISUAL_RADIUS_RATIO: float = 0.5
@@ -69,11 +67,11 @@ static func spawn_gate_markers(gates_root: Node3D, gates: Array, world_scale: fl
 
 	for entry: Variant in gates:
 		var g: GateRecord = entry as GateRecord
-		var gate_pos := PositionComponents.from_value(g.position)
+		var gate_pos: PackedFloat64Array = g.position
 		var radius  : float   = g.activation_radius
 
 		var marker: Node3D = Node3D.new()
-		marker.position = to_godot_components.call(gate_pos) as Vector3
+		marker.position = to_godot_components.call(gate_pos[0], gate_pos[1], gate_pos[2]) as Vector3
 		marker.set_meta("gate_id",  g.gate_id)
 		marker.set_meta("gate_pos", gate_pos)  ## server coords, kept for per-frame clamping (main.gd)
 		marker.set_meta("nav_pos", gate_pos)
@@ -129,10 +127,10 @@ static func spawn_body_markers(bodies_root: Node3D, bodies: Array, world_scale: 
 		var b_id    : int     = b.body_id
 		var kind    : String  = b.kind
 		var name_str: String  = b.name
-		var b_pos   := PositionComponents.from_value(b.position)
+		var b_pos: PackedFloat64Array = b.position
 		var radius  : float   = b.radius
 
-		var godot_pos: Vector3 = to_godot_components.call(b_pos) as Vector3
+		var godot_pos: Vector3 = to_godot_components.call(b_pos[0], b_pos[1], b_pos[2]) as Vector3
 
 		var marker: Node3D = Node3D.new()
 		marker.position = godot_pos
@@ -179,12 +177,12 @@ static func spawn_station_markers(bodies_root: Node3D, stations: Array, world_sc
 		var station: StationRecord = entry as StationRecord
 		var station_id: int = station.station_id
 		var name_str: String = station.name
-		var station_pos := PositionComponents.from_value(station.position)
+		var station_pos: PackedFloat64Array = station.position
 		var docking_radius: float = station.docking_radius
 		var visual_radius: float = STATION_VISUAL_RADIUS * world_scale
 
 		var marker: Node3D = Node3D.new()
-		marker.position = to_godot_components.call(station_pos) as Vector3
+		marker.position = to_godot_components.call(station_pos[0], station_pos[1], station_pos[2]) as Vector3
 		marker.set_meta("station_id", station_id)
 		marker.set_meta("station_pos", station_pos)
 		marker.set_meta("nav_pos", station_pos)

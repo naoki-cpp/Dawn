@@ -269,3 +269,119 @@ mod tests {
         text.replace("\r\n", "\n")
     }
 }
+
+#[cfg(test)]
+mod client_message_roundtrip_tests {
+    use super::*;
+    use dawn_core::{PlayerId, ShipId};
+
+    fn roundtrip(message: &ClientMessage) -> ClientMessage {
+        ClientMessage::decode(&message.encode()).expect("postcard ClientMessage round trip")
+    }
+
+    #[test]
+    fn move_command_preserves_f64_target_components() {
+        let message = ClientMessage::Command(ClientCommandWire::MoveCommand {
+            target: PosWire {
+                x: 10.0,
+                y: 0.0,
+                z: -5.0,
+            },
+        });
+        assert!(matches!(
+            roundtrip(&message),
+            ClientMessage::Command(ClientCommandWire::MoveCommand {
+                target: PosWire {
+                    x: 10.0,
+                    y: 0.0,
+                    z: -5.0
+                }
+            })
+        ));
+    }
+
+    #[test]
+    fn module_activation_preserves_optional_target() {
+        for target_ship_id in [None, Some(9)] {
+            let message = ClientMessage::Command(ClientCommandWire::ActivateModuleCommand {
+                module_id: 3,
+                slot: "High".to_owned(),
+                target_ship_id,
+            });
+            match roundtrip(&message) {
+                ClientMessage::Command(ClientCommandWire::ActivateModuleCommand {
+                    module_id,
+                    slot,
+                    target_ship_id: decoded_target,
+                }) => {
+                    assert_eq!(module_id, 3);
+                    assert_eq!(slot, "High");
+                    assert_eq!(decoded_target, target_ship_id);
+                }
+                _ => panic!("unexpected decoded message"),
+            }
+        }
+    }
+
+    #[test]
+    fn navigation_targets_keep_their_wire_variants() {
+        let approach = ClientMessage::Command(ClientCommandWire::ApproachCommand {
+            target: NavigationTargetWire::Ship(7),
+        });
+        assert!(matches!(
+            roundtrip(&approach),
+            ClientMessage::Command(ClientCommandWire::ApproachCommand {
+                target: NavigationTargetWire::Ship(7)
+            })
+        ));
+
+        let warp = ClientMessage::Command(ClientCommandWire::WarpCommand {
+            target: WarpTargetWire::Body(5),
+        });
+        assert!(matches!(
+            roundtrip(&warp),
+            ClientMessage::Command(ClientCommandWire::WarpCommand {
+                target: WarpTargetWire::Body(5)
+            })
+        ));
+    }
+
+    #[test]
+    fn market_command_preserves_typed_item_identity() {
+        let message = ClientMessage::Market(MarketCommandWire::PlaceMarketOrderCommand {
+            ship_id: 42,
+            item_id: ItemWire::Module { module_id: 5 },
+            side: "Ask".to_owned(),
+            price: 100,
+            quantity: 3,
+        });
+        assert!(matches!(
+            roundtrip(&message),
+            ClientMessage::Market(MarketCommandWire::PlaceMarketOrderCommand {                ship_id: 42,
+                item_id: ItemWire::Module { module_id: 5 },
+                side,
+                price: 100,
+                quantity: 3
+            }) if side == "Ask"
+        ));
+    }
+
+    #[test]
+    fn hello_preserves_resume_identity() {
+        let message = ClientMessage::Hello(HelloMessage {
+            resume: Some(ResumeIdentity {
+                player_id: PlayerId(7),
+                ship_id: ShipId(dawn_core::EntityId::from_raw(42)),
+            }),
+        });
+        assert!(matches!(
+            roundtrip(&message),
+            ClientMessage::Hello(HelloMessage {
+                resume: Some(ResumeIdentity {
+                    player_id: PlayerId(7),
+                    ship_id
+                })
+            }) if ship_id == ShipId(dawn_core::EntityId::from_raw(42))
+        ));
+    }
+}
