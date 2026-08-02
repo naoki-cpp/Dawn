@@ -18,6 +18,14 @@
 //! recovery and failover (ADR-0014) rely on: load the latest snapshot, then
 //! catch up the tail of events.
 //!
+//! Publication is write-new-then-replace: encode and validate the postcard
+//! payload, write it to a uniquely named sibling file, flush and sync that file,
+//! then replace the authoritative path. Unix uses same-directory `rename` plus
+//! a parent-directory sync; Windows uses `MoveFileExW` with replace-existing and
+//! write-through flags because `std::fs::rename` does not replace an existing
+//! destination there. Before the replacement step succeeds, every handled
+//! failure leaves the previously published snapshot readable.
+//!
 //! Derived / transient state (position, capacitor, lock countdowns) is persisted
 //! in the snapshot. It is a per-tick pure function (position = velocity integral,
 //! cap = recharge) and is NOT event-sourced, so it cannot be rebuilt from events
@@ -27,14 +35,24 @@
 //! events to rebuild authoritative state, then let transient state recompute. No
 //! operational path depends on it.
 
-use std::{fs, io, path::Path};
+use std::{
+    collections::BTreeMap,
+    ffi::OsString,
+    fs::{self, File, OpenOptions},
+    io::{self, Read, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
+    process,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use dawn_core::{
     fitting::FittingSnapshot, AbsolutePosition, NodeId, Position, SectorBounds, SectorId, ShipId,
     ShipTypeId, Tick, Velocity,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+
+const TEMP_FILE_CREATE_ATTEMPTS: usize = 128;
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 // ── Ship-level snapshot ───────────────────────────────────────────────────────
 
@@ -142,19 +160,207 @@ pub struct StateSnapshot {
 }
 
 impl StateSnapshot {
-    /// Serialise with `postcard` and write to `path`.
+    /// Encode, validate, durably write, and atomically publish this snapshot.
+    ///
+    /// The temporary file is a sibling of `path`, so the final replacement is
+    /// same-filesystem. A handled error before replacement removes the temporary
+    /// file and leaves any previously published snapshot untouched.
     pub fn save(&self, path: impl AsRef<Path>) -> io::Result<()> {
+        self.save_with_before_publish(path.as_ref(), |_| Ok(()))
+    }
+
+    fn save_with_before_publish<F>(&self, path: &Path, before_publish: F) -> io::Result<()>
+    where
+        F: FnOnce(&Path) -> io::Result<()>,
+    {
         let bytes = postcard::to_stdvec(self).map_err(|e| io::Error::other(e.to_string()))?;
-        fs::write(path, bytes)
+        Self::decode(&bytes, "encoded snapshot")?;
+
+        let mut temp = SnapshotTempFile::create(path)?;
+        {
+            let file = temp.file_mut();
+            file.write_all(&bytes)?;
+            file.flush()?;
+            file.sync_all()?;
+            file.seek(SeekFrom::Start(0))?;
+
+            let mut persisted = Vec::with_capacity(bytes.len());
+            file.read_to_end(&mut persisted)?;
+            if persisted != bytes {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "temporary snapshot bytes differ from the encoded snapshot",
+                ));
+            }
+            Self::decode(&persisted, "temporary snapshot")?;
+        }
+        temp.close();
+
+        before_publish(temp.path())?;
+        publish_snapshot(temp.path(), path)?;
+        sync_published_directory(path)?;
+        temp.disarm();
+        Ok(())
     }
 
     /// Read from `path` and deserialise.
     pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
         let bytes = fs::read(path)?;
-        postcard::from_bytes(&bytes).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, format!("current snapshot: {e}"))
+        Self::decode(&bytes, "current snapshot")
+    }
+
+    fn decode(bytes: &[u8], context: &str) -> io::Result<Self> {
+        postcard::from_bytes(bytes).map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidData, format!("{context}: {e}"))
         })
     }
+}
+
+struct SnapshotTempFile {
+    path: PathBuf,
+    file: Option<File>,
+}
+
+impl SnapshotTempFile {
+    fn create(destination: &Path) -> io::Result<Self> {
+        let parent = destination
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let file_name = destination.file_name().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "snapshot destination must include a file name",
+            )
+        })?;
+
+        for _ in 0..TEMP_FILE_CREATE_ATTEMPTS {
+            let sequence = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let mut temp_name = OsString::from(".");
+            temp_name.push(file_name);
+            temp_name.push(format!(".{}.{}.tmp", process::id(), sequence));
+            let path = parent.join(temp_name);
+
+            match OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(file) => {
+                    return Ok(Self {
+                        path,
+                        file: Some(file),
+                    });
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not allocate a unique temporary snapshot file",
+        ))
+    }
+
+    fn file_mut(&mut self) -> &mut File {
+        self.file
+            .as_mut()
+            .expect("temporary snapshot file is open while it is written")
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn close(&mut self) {
+        self.file.take();
+    }
+
+    fn disarm(mut self) {
+        self.file.take();
+        self.path = PathBuf::new();
+    }
+}
+
+impl Drop for SnapshotTempFile {
+    fn drop(&mut self) {
+        self.file.take();
+        if !self.path.as_os_str().is_empty() {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+#[cfg(unix)]
+fn publish_snapshot(temp_path: &Path, destination: &Path) -> io::Result<()> {
+    fs::rename(temp_path, destination)
+}
+
+#[cfg(windows)]
+fn publish_snapshot(temp_path: &Path, destination: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVE_FILE_REPLACE_EXISTING: u32 = 0x0000_0001;
+    const MOVE_FILE_WRITE_THROUGH: u32 = 0x0000_0008;
+
+    #[link(name = "Kernel32")]
+    unsafe extern "system" {
+        fn MoveFileExW(
+            existing_file_name: *const u16,
+            new_file_name: *const u16,
+            flags: u32,
+        ) -> i32;
+    }
+
+    let existing: Vec<u16> = temp_path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let new: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let result = unsafe {
+        MoveFileExW(
+            existing.as_ptr(),
+            new.as_ptr(),
+            MOVE_FILE_REPLACE_EXISTING | MOVE_FILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn publish_snapshot(_temp_path: &Path, _destination: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "atomic snapshot publication is not implemented on this platform",
+    ))
+}
+
+#[cfg(unix)]
+fn sync_published_directory(destination: &Path) -> io::Result<()> {
+    let parent = destination
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    File::open(parent)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_published_directory(_destination: &Path) -> io::Result<()> {
+    // Windows publication requests write-through from MoveFileExW. Other
+    // platforms are rejected by `publish_snapshot` before reaching here.
+    Ok(())
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -198,6 +404,18 @@ mod tests {
         }
     }
 
+    fn assert_no_temporary_files(dir: &Path) {
+        let leftovers: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name.to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "temporary snapshot files were not cleaned up: {leftovers:?}"
+        );
+    }
+
     /// Re-encoding what postcard decoded must reproduce the original bytes.
     ///
     /// Asserted on the encoded form rather than field by field on purpose: a
@@ -231,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_survives_save_and_load_from_disk() {
+    fn first_publication_survives_save_and_load_from_disk() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("snapshot.bin");
 
@@ -242,5 +460,51 @@ mod tests {
         assert_eq!(restored.log_index, original.log_index);
         assert_eq!(restored.tick, original.tick);
         assert_eq!(restored.id_counter, original.id_counter);
+        assert_no_temporary_files(dir.path());
+    }
+
+    #[test]
+    fn publication_replaces_an_existing_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snapshot.bin");
+
+        let mut previous = sample_snapshot();
+        previous.log_index = 7;
+        previous.tick = Tick(3);
+        previous.save(&path).unwrap();
+
+        let mut replacement = sample_snapshot();
+        replacement.log_index = 99;
+        replacement.tick = Tick(25);
+        replacement.save(&path).unwrap();
+
+        let restored = StateSnapshot::load(&path).unwrap();
+        assert_eq!(restored.log_index, replacement.log_index);
+        assert_eq!(restored.tick, replacement.tick);
+        assert_no_temporary_files(dir.path());
+    }
+
+    #[test]
+    fn failure_before_replacement_preserves_the_previous_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snapshot.bin");
+
+        let mut previous = sample_snapshot();
+        previous.log_index = 7;
+        previous.save(&path).unwrap();
+        let previous_bytes = fs::read(&path).unwrap();
+
+        let mut replacement = sample_snapshot();
+        replacement.log_index = 99;
+        let error = replacement
+            .save_with_before_publish(&path, |_| {
+                Err(io::Error::other("injected failure before replacement"))
+            })
+            .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(fs::read(&path).unwrap(), previous_bytes);
+        assert_eq!(StateSnapshot::load(&path).unwrap().log_index, 7);
+        assert_no_temporary_files(dir.path());
     }
 }
