@@ -83,14 +83,27 @@ jobs:
               raise SystemExit("production completion marker missing or duplicated")
           production_path.write_text(production.replace(old_completion, new_completion, 1))
 
-          for simulation_path in [
-              Path("crates/dawn-simulation/src/serve/single.rs"),
-              Path("crates/dawn-simulation/src/serve/cluster.rs"),
-          ]:
-              simulation = simulation_path.read_text()
-              import_marker = "use dawn_sector::transit;\n" if simulation_path.name == "cluster.rs" else "use dawn_sector::dilation;\n"
-              replacement_import = import_marker + "use dawn_wire::ServerMessage;\n"
-              if simulation.count(import_marker) != 1:
-                  raise SystemExit(f"{simulation_path}: ServerMessage import marker missing or duplicated")
-              simulation_path.write_text(simulation.replace(import_marker, replacement_import, 1))
+          single_path = Path("crates/dawn-simulation/src/serve/single.rs")
+          single = single_path.read_text()
+          old_single_loop = "for (sess, committed) in drain_single_admission_completions(&mut node, &mut completion_rx) {"
+          new_single_loop = "for (sess, _committed) in drain_single_admission_completions(&mut node, &mut completion_rx) {"
+          if single.count(old_single_loop) != 1:
+              raise SystemExit("single completion binding marker missing or duplicated")
+          single = single.replace(old_single_loop, new_single_loop, 1)
+          single_import = "use dawn_sector::dilation;\n"
+          if single.count(single_import) != 1:
+              raise SystemExit("single ServerMessage import marker missing or duplicated")
+          single_path.write_text(single.replace(single_import, single_import + "use dawn_wire::ServerMessage;\n", 1))
+
+          cluster_path = Path("crates/dawn-simulation/src/serve/cluster.rs")
+          cluster = cluster_path.read_text()
+          old_cluster_loop = "for (sector, sess, committed) in drain_cluster_admission_completions("
+          new_cluster_loop = "for (sector, sess, _committed) in drain_cluster_admission_completions("
+          if cluster.count(old_cluster_loop) != 1:
+              raise SystemExit("cluster completion binding marker missing or duplicated")
+          cluster = cluster.replace(old_cluster_loop, new_cluster_loop, 1)
+          cluster_import = "use dawn_sector::transit;\n"
+          if cluster.count(cluster_import) != 1:
+              raise SystemExit("cluster ServerMessage import marker missing or duplicated")
+          cluster_path.write_text(cluster.replace(cluster_import, cluster_import + "use dawn_wire::ServerMessage;\n", 1))
           PY
