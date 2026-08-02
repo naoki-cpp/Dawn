@@ -85,7 +85,8 @@ impl std::fmt::Display for ClientAdmissionCommitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "admission commit refused for {}: ship #{} or its reservation disappeared during handshake",
+            "admission commit refused for {}: ship #{} or its reservation \
+             disappeared during handshake",
             self.player_id,
             self.ship_id.raw()
         )
