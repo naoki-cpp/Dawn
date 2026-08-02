@@ -16,7 +16,8 @@
 //!   existing multi-node bench. This replaces `dawn_actor::ReplicationBus`.
 //! - `AntiEntropy`: request missing events by log index range.
 //! - `CatchUpManager`: owns gap detection, suffix requests, compacted-prefix
-//!   snapshot fallback, retries, and resumption from the snapshot log index.
+//!   snapshot fallback, bounded retries, transient-failure classification,
+//!   logical-tick cooldowns, and restart from the current replica cursor.
 //! - `TcpReplicationTransport`: LAN plaintext transport using length-prefixed
 //!   postcard frames for both gossip and catch-up control messages.
 //!
