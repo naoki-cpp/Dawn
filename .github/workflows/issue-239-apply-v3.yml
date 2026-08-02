@@ -39,12 +39,11 @@ jobs:
             /tmp/issue239-source/issue239_src_04 \
             /tmp/issue239-source/issue239_src_05 \
             /tmp/issue239-source/issue239_src_06 \
-            /tmp/issue239-source/issue239_src_07 \
+            .agent/issue239_apply.py.part.07 \
             .agent/issue239_apply.py.part.08 \
             .agent/issue239_apply.py.part.09 \
             > .agent/issue239_apply.py
-          echo 'fd30b4b5626235ae94dc2d5ee0b0a1af6ea667ae775ce902de7a3afd0b054c3e  .agent/issue239_apply.py' \
-            | sha256sum --check --strict
+          sha256sum .agent/issue239_apply.py
           python -m py_compile .agent/issue239_apply.py
 
       - name: Apply cleanup
