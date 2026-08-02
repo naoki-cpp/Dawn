@@ -328,10 +328,10 @@ fn find_resume_sector<S: EventStore>(
     nodes: &[SimulationNode<S>],
     ship_id: ShipId,
 ) -> Option<usize> {
-    let mut sectors = nodes
-        .iter()
-        .enumerate()
-        .filter_map(|(sector, node)| node.ship_absolute_pos(ship_id).is_some().then_some(sector));
+    let mut sectors = nodes.iter().enumerate().filter_map(|(sector, node)| {
+        node.hosts_client_resume_identity(ship_id)
+            .then_some(sector)
+    });
     let sector = sectors.next()?;
     if sectors.next().is_some() {
         None
@@ -538,6 +538,34 @@ mod tests {
         assert_eq!(sector, 1);
         assert_eq!(player_sector.get(&player_id), Some(&1));
         assert_eq!(ship_player.get(&ship_id), Some(&player_id));
+    }
+
+    #[test]
+    fn cluster_adapter_routes_prepared_fresh_identity_to_its_sector() {
+        let mut nodes = vec![node_at(0), node_at(1)];
+        let attempt = nodes[1]
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::new(30_000.0, 0.0, 0.0),
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh attempt");
+        let player_id = attempt.player_id();
+        let ship_id = attempt.ship_id();
+        attempt.abort(&mut nodes[1]);
+        assert!(nodes[1].ship_absolute_pos(ship_id).is_none());
+
+        let sector = find_resume_sector(&nodes, ship_id).expect("prepared identity Sector");
+        assert_eq!(sector, 1);
+        let recovered = nodes[sector]
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume { player_id, ship_id },
+                AOI_CELL_SIZE,
+            )
+            .expect("exact prepared identity resumes in its Sector");
+        assert!(!recovered.is_resumed());
+        recovered.abort(&mut nodes[sector]);
     }
 
     #[test]

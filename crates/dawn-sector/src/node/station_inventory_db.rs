@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use dawn_core::{ItemId, PlayerId, StationId};
+use dawn_core::{ItemId, PlayerId, Position, ShipId, StationId};
 #[cfg(test)]
 use dawn_core::{ModuleId, ShipTypeId};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -26,6 +26,12 @@ fn item_id_to_columns(item_id: ItemId) -> (&'static str, u32, u32) {
 
 fn columns_to_item_id(item_type: &str, module_id: u32, ship_type_id: u32) -> Option<ItemId> {
     ItemId::from_storage_columns(item_type, module_id, ship_type_id).ok()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct PreparedClientAdmission {
+    pub player_id: PlayerId,
+    pub spawn_position: Position,
 }
 
 /// Durable Station inventory store for one Sector node. Wraps a single
@@ -75,7 +81,91 @@ impl StationInventoryDb {
             )",
             [],
         )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS client_admission_prepared (
+                ship_id       TEXT PRIMARY KEY,
+                player_id     INTEGER NOT NULL UNIQUE,
+                spawn_x       REAL NOT NULL,
+                spawn_y       REAL NOT NULL,
+                spawn_z       REAL NOT NULL
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS client_ship_ownership (
+                ship_id       TEXT PRIMARY KEY,
+                player_id     INTEGER NOT NULL
+            )",
+            [],
+        )?;
         Ok(Self { conn })
+    }
+
+    /// Persist the spawn input for a fresh identity before any handshake frame
+    /// can expose the pair to the client. The event log remains the allocation
+    /// watermark; this row makes the exact attempt retryable after restart.
+    pub(super) fn reserve_client_admission(
+        &self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        spawn_position: Position,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO client_admission_prepared
+             (ship_id, player_id, spawn_x, spawn_y, spawn_z)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                ship_id.raw().to_string(),
+                player_id.0 as i64,
+                spawn_position.x,
+                spawn_position.y,
+                spawn_position.z,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(super) fn prepared_client_admission(
+        &self,
+        ship_id: ShipId,
+    ) -> rusqlite::Result<Option<PreparedClientAdmission>> {
+        self.conn
+            .query_row(
+                "SELECT player_id, spawn_x, spawn_y, spawn_z
+                 FROM client_admission_prepared WHERE ship_id = ?1",
+                params![ship_id.raw().to_string()],
+                |row| {
+                    Ok(PreparedClientAdmission {
+                        player_id: PlayerId(row.get::<_, i64>(0)? as u64),
+                        spawn_position: Position::new(row.get(1)?, row.get(2)?, row.get(3)?),
+                    })
+                },
+            )
+            .optional()
+    }
+
+    pub(super) fn client_owner(&self, ship_id: ShipId) -> rusqlite::Result<Option<PlayerId>> {
+        self.conn
+            .query_row(
+                "SELECT player_id FROM client_ship_ownership WHERE ship_id = ?1",
+                params![ship_id.raw().to_string()],
+                |row| Ok(PlayerId(row.get::<_, i64>(0)? as u64)),
+            )
+            .optional()
+    }
+
+    pub(super) fn record_client_ownership(
+        &self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO client_ship_ownership (ship_id, player_id)
+             VALUES (?1, ?2)
+             ON CONFLICT (ship_id) DO UPDATE SET player_id = excluded.player_id",
+            params![ship_id.raw().to_string(), player_id.0 as i64],
+        )?;
+        Ok(())
     }
 
     /// Every item stack this player currently owns at `station_id`.
@@ -142,10 +232,11 @@ impl StationInventoryDb {
     }
 
     /// Apply a starter grant exactly once, keyed by the committed ShipId.
-    /// The ledger marker and inventory upsert share one SQLite transaction.
+    /// The ledger marker, inventory upsert, ownership binding, and prepared-row
+    /// cleanup share one SQLite transaction.
     pub(super) fn ensure_client_admission_grant(
         &mut self,
-        ship_id: dawn_core::ShipId,
+        ship_id: ShipId,
         player_id: PlayerId,
         station_id: StationId,
         item_id: ItemId,
@@ -184,6 +275,16 @@ impl StationInventoryDb {
                 ],
             )?;
         }
+        tx.execute(
+            "INSERT INTO client_ship_ownership (ship_id, player_id)
+             VALUES (?1, ?2)
+             ON CONFLICT (ship_id) DO UPDATE SET player_id = excluded.player_id",
+            params![ship_id.raw().to_string(), player_id.0 as i64],
+        )?;
+        tx.execute(
+            "DELETE FROM client_admission_prepared WHERE ship_id = ?1",
+            params![ship_id.raw().to_string()],
+        )?;
         tx.commit()?;
         Ok(inserted == 1)
     }
@@ -300,9 +401,32 @@ mod tests {
     }
 
     #[test]
+    fn prepared_admission_and_ownership_round_trip() {
+        let mut db = StationInventoryDb::open_in_memory().unwrap();
+        let ship_id = ShipId::new(dawn_core::NodeId(2), 7);
+        let player_id = PlayerId(1);
+        let spawn = Position::new(10.0, 20.0, 30.0);
+        db.reserve_client_admission(ship_id, player_id, spawn)
+            .unwrap();
+        assert_eq!(
+            db.prepared_client_admission(ship_id).unwrap(),
+            Some(PreparedClientAdmission {
+                player_id,
+                spawn_position: spawn,
+            })
+        );
+
+        let item = ItemId::PackagedShip(ShipTypeId(7));
+        db.ensure_client_admission_grant(ship_id, player_id, StationId(7), item, 1)
+            .unwrap();
+        assert_eq!(db.prepared_client_admission(ship_id).unwrap(), None);
+        assert_eq!(db.client_owner(ship_id).unwrap(), Some(player_id));
+    }
+
+    #[test]
     fn client_admission_grant_is_idempotent() {
         let mut db = StationInventoryDb::open_in_memory().unwrap();
-        let ship_id = dawn_core::ShipId::new(dawn_core::NodeId(2), 7);
+        let ship_id = ShipId::new(dawn_core::NodeId(2), 7);
         let item = ItemId::PackagedShip(ShipTypeId(7));
         assert!(db
             .ensure_client_admission_grant(ship_id, PlayerId(1), StationId(7), item, 1,)

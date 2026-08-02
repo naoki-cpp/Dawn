@@ -1,8 +1,10 @@
-//! Non-durable fresh-admission preview and atomic commit materialization.
+//! Durable fresh-admission preparation and atomic commit materialization.
 //!
-//! Begin records only an identity watermark. Commit appends one replay-complete
-//! `ClientAdmissionCommitted` event and applies its Station grant through an
-//! idempotent SQLite ledger, so every crash boundary converges to the same state.
+//! Begin records an allocation watermark in the event log and the exact spawn
+//! input in SQLite before any handshake frame can expose the identity. Commit
+//! appends one replay-complete `ClientAdmissionCommitted` event and applies its
+//! Station grant, ownership binding, and prepared-row cleanup in one idempotent
+//! SQLite transaction.
 
 use dawn_core::{
     events::{ClientAdmissionCommitted, ClientAdmissionIdentityReserved},
@@ -15,17 +17,17 @@ use dawn_event_store::store::EventStore;
 use super::{HandoffPayload, MissingObserverShip, SimulationNode};
 
 impl<S: EventStore> SimulationNode<S> {
-    /// Reserve identities without materializing a durable Ship. The watermark
-    /// is appended before any handshake frame can expose either ID.
-    pub(crate) fn reserve_fresh_admission_identity(&mut self) -> (PlayerId, ShipId) {
+    /// Reserve identities without materializing a durable Ship. The allocation
+    /// watermark is appended first; then SQLite records the spawn input. This
+    /// method returns only after both durable writes complete, so a returned
+    /// identity is safe for `Welcome` to expose.
+    pub(crate) fn reserve_fresh_admission_identity(
+        &mut self,
+        spawn_position: Position,
+    ) -> (PlayerId, ShipId) {
         let player_id = self.next_player_id();
         let ship_id = ShipId::new(self.node_id, self.id_counter);
         self.id_counter += 1;
-        let inserted = self.pending_fresh_admissions.insert(ship_id);
-        debug_assert!(
-            inserted,
-            "fresh admission ShipId reservation must be unique"
-        );
         self.event_store
             .append(DomainEvent::ClientAdmissionIdentityReserved(
                 ClientAdmissionIdentityReserved {
@@ -34,7 +36,45 @@ impl<S: EventStore> SimulationNode<S> {
                     tick: self.current_tick,
                 },
             ));
+        self.station_inventory_db
+            .reserve_client_admission(ship_id, player_id, spawn_position)
+            .expect("client admission preparation transaction");
+        let inserted = self.pending_fresh_admissions.insert(ship_id);
+        debug_assert!(
+            inserted,
+            "fresh admission ShipId reservation must be unique"
+        );
         (player_id, ship_id)
+    }
+
+    pub(crate) fn prepared_fresh_admission(&self, ship_id: ShipId) -> Option<(PlayerId, Position)> {
+        self.station_inventory_db
+            .prepared_client_admission(ship_id)
+            .expect("client admission prepared query")
+            .map(|prepared| (prepared.player_id, prepared.spawn_position))
+    }
+
+    /// True when this Sector can authoritatively handle a resume identity.
+    /// Besides materialized Ships, this includes a client-visible fresh
+    /// identity whose durable prepared row survived a disconnect or restart.
+    pub fn hosts_client_resume_identity(&self, ship_id: ShipId) -> bool {
+        self.ship_absolute_pos(ship_id).is_some()
+            || self.prepared_fresh_admission(ship_id).is_some()
+    }
+
+    pub(crate) fn claim_prepared_fresh_admission(
+        &mut self,
+        player_id: PlayerId,
+        ship_id: ShipId,
+    ) -> bool {
+        if self.pending_fresh_admissions.contains(&ship_id)
+            || self
+                .prepared_fresh_admission(ship_id)
+                .is_none_or(|(prepared_player, _)| prepared_player != player_id)
+        {
+            return false;
+        }
+        self.pending_fresh_admissions.insert(ship_id)
     }
 
     /// Build a fresh handoff from a temporary in-memory Ship and remove it
@@ -53,8 +93,9 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Commit a fresh admission as one replay-complete event plus an idempotent
-    /// Station-inventory grant. The reservation remains held until the event is
-    /// durably appended; a crash after append is repaired by replay/reconcile.
+    /// Station-inventory/identity transaction. The live claim remains held until
+    /// the event is durably appended; a crash after append is repaired by
+    /// replay/reconcile.
     pub(crate) fn commit_reserved_fresh_admission(
         &mut self,
         player_id: PlayerId,
@@ -63,6 +104,11 @@ impl<S: EventStore> SimulationNode<S> {
     ) -> bool {
         if !self.pending_fresh_admissions.contains(&ship_id)
             || self.ships.index.contains_key(&ship_id)
+            || self.prepared_fresh_admission(ship_id).is_none_or(
+                |(prepared_player, prepared_position)| {
+                    prepared_player != player_id || prepared_position != spawn_position
+                },
+            )
         {
             return false;
         }
@@ -109,7 +155,7 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Replay one atomic fresh-admission commit. This method is idempotent for
-    /// both ECS state and the Station grant ledger.
+    /// both ECS state and the SQLite Station/identity ledger.
     pub(super) fn replay_client_admission_commit(&mut self, event: &ClientAdmissionCommitted) {
         if !self.ships.index.contains_key(&event.ship_id) {
             self.insert_to_world(event.ship_id, Position::ORIGIN, Velocity::ZERO);
@@ -144,8 +190,9 @@ impl<S: EventStore> SimulationNode<S> {
         self.ensure_client_admission_grant(event);
     }
 
-    /// Release only the live capacity reservation. The consumed IDs remain in
-    /// the append-only watermark event and are never reused.
+    /// Release only the live capacity claim. The consumed IDs remain in the
+    /// event log and the SQLite prepared row remains retryable because a partial
+    /// handshake may already have exposed the identity.
     pub(crate) fn abort_reserved_fresh_admission(&mut self, ship_id: ShipId) {
         self.pending_fresh_admissions.remove(&ship_id);
         debug_assert!(
@@ -155,17 +202,23 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// True when the requested resume would overwrite a different established
-    /// Player/Ship relationship. The same exact identity may reconnect and
-    /// replace its old runtime session.
+    /// Player/Ship relationship. SQLite is consulted as the durable fallback
+    /// after checkpoint compaction, while the live maps retain session-local
+    /// active-Ship constraints.
     pub(crate) fn resume_admission_identity_conflicts(
         &self,
         player_id: PlayerId,
         ship_id: ShipId,
     ) -> bool {
-        self.ships
-            .owners
-            .get(&ship_id)
-            .is_some_and(|owner| *owner != player_id)
+        self.station_inventory_db
+            .client_owner(ship_id)
+            .expect("client ownership query")
+            .is_some_and(|owner| owner != player_id)
+            || self
+                .ships
+                .owners
+                .get(&ship_id)
+                .is_some_and(|owner| *owner != player_id)
             || self
                 .ships
                 .active_ship
@@ -199,20 +252,24 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    /// Compare-and-set the exact identity captured at begin. Ownership may be
-    /// absent after restart or already equal during a reconnect, but it may not
-    /// have changed to a different Player/Ship while the socket was in flight.
+    /// Compare-and-set the exact identity captured at begin. The durable owner
+    /// is written before the live ownership maps are exposed, closing the crash
+    /// window where a process loss could otherwise forget the binding.
     pub(crate) fn commit_reserved_resume_admission(
         &mut self,
         player_id: PlayerId,
         ship_id: ShipId,
     ) -> bool {
         if self.pending_resume_admissions.get(&ship_id) != Some(&player_id)
+            || !self.ships.index.contains_key(&ship_id)
             || self.resume_admission_identity_conflicts(player_id, ship_id)
         {
             self.release_resume_admission(player_id, ship_id);
             return false;
         }
+        self.station_inventory_db
+            .record_client_ownership(ship_id, player_id)
+            .expect("client ownership upsert");
         let committed = self.resume_player_ship(ship_id, player_id);
         self.release_resume_admission(player_id, ship_id);
         committed

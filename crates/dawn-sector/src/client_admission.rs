@@ -15,7 +15,8 @@ use crate::node::{HandoffPayload, MissingObserverShip, SimulationNode};
 pub enum ClientAdmissionIntent {
     /// Allocate a new player identity and spawn a new Ship at this position.
     Fresh { spawn_position: Position },
-    /// Resume a Ship that must already exist in this Sector.
+    /// Resume an exact identity. Usually the Ship already exists; after a
+    /// process loss it may instead name a durable prepared fresh admission.
     Resume {
         player_id: PlayerId,
         ship_id: ShipId,
@@ -27,13 +28,13 @@ pub enum ClientAdmissionIntent {
 pub enum ClientAdmissionRefusal {
     /// A fresh spawn would exceed the Sector population backstop.
     FreshAtPopulationCap,
-    /// ADR-0007: a requested resume Ship is absent and must not fall back to a
-    /// fresh spawn.
+    /// ADR-0007: a requested resume Ship is absent and has no exact prepared
+    /// fresh admission; it must not fall back to a newly allocated identity.
     ResumeShipMissing {
         player_id: PlayerId,
         ship_id: ShipId,
     },
-    /// Another handshake already holds the Ship-level resume lock.
+    /// Another handshake already holds the Ship/Player or prepared-fresh claim.
     ResumeAlreadyPending {
         player_id: PlayerId,
         ship_id: ShipId,
@@ -118,10 +119,11 @@ enum AdmissionOrigin {
 /// - [`Self::commit`] after the socket successfully receives the handoff;
 /// - [`Self::abort`] after any handshake failure or disconnect.
 ///
-/// Fresh attempts hold only a durable identity watermark plus a non-durable
-/// reservation; abort releases the reservation and never creates a Ship. Resume
-/// attempts hold a non-authoritative Ship lock until commit; abort releases that
-/// lock and never removes the pre-existing Ship.
+/// Fresh attempts hold a durable allocation watermark and SQLite prepared row
+/// plus a live capacity claim. Abort releases only the live claim because a
+/// partial handshake may already have exposed the pair. Resume attempts hold a
+/// non-authoritative Ship/Player lock until commit; abort releases that lock and
+/// never removes the pre-existing Ship.
 #[derive(Debug)]
 pub struct ClientAdmissionAttempt {
     player_id: PlayerId,
@@ -192,10 +194,10 @@ impl ClientAdmissionAttempt {
 
     /// Abort after any handshake error or disconnect.
     ///
-    /// A fresh attempt releases its non-durable capacity reservation while
-    /// retaining the consumed identity watermark. A resume attempt releases
-    /// only its non-authoritative Ship lock. Neither path removes a committed
-    /// or pre-existing Ship.
+    /// A fresh attempt releases its live capacity claim while retaining the
+    /// consumed identity and prepared row for an exact retry. A resume attempt
+    /// releases only its non-authoritative Ship/Player lock. Neither path
+    /// removes a committed or pre-existing Ship.
     pub fn abort<S: EventStore>(self, node: &mut SimulationNode<S>) {
         match self.origin {
             AdmissionOrigin::Fresh { .. } => {
@@ -226,7 +228,7 @@ impl<S: EventStore> SimulationNode<S> {
                     return Err(ClientAdmissionRefusal::FreshAtPopulationCap);
                 }
 
-                let (player_id, ship_id) = self.reserve_fresh_admission_identity();
+                let (player_id, ship_id) = self.reserve_fresh_admission_identity(spawn_position);
                 let handoff = match self.build_fresh_admission_handoff(
                     player_id,
                     ship_id,
@@ -248,9 +250,47 @@ impl<S: EventStore> SimulationNode<S> {
                 })
             }
             ClientAdmissionIntent::Resume { player_id, ship_id } => {
+                // A successful Welcome may have outlived the process before the
+                // fresh Ship committed. Reclaim only that exact SQLite-prepared
+                // pair; this is not ADR-0007 fresh fallback and allocates no ID.
+                if let Some((prepared_player, spawn_position)) =
+                    self.prepared_fresh_admission(ship_id)
+                {
+                    if prepared_player != player_id {
+                        return Err(ClientAdmissionRefusal::ResumeIdentityConflict {
+                            player_id,
+                            ship_id,
+                        });
+                    }
+                    if !self.claim_prepared_fresh_admission(player_id, ship_id) {
+                        return Err(ClientAdmissionRefusal::ResumeAlreadyPending {
+                            player_id,
+                            ship_id,
+                        });
+                    }
+                    let handoff = match self.build_fresh_admission_handoff(
+                        player_id,
+                        ship_id,
+                        spawn_position,
+                        aoi_cell_size,
+                    ) {
+                        Ok(handoff) => handoff,
+                        Err(error) => {
+                            self.abort_reserved_fresh_admission(ship_id);
+                            return Err(ClientAdmissionRefusal::MissingObserver(error));
+                        }
+                    };
+                    return Ok(ClientAdmissionAttempt {
+                        player_id,
+                        ship_id,
+                        origin: AdmissionOrigin::Fresh { spawn_position },
+                        handoff: Some(handoff),
+                    });
+                }
+
                 // ADR-0007: validate the exact requested Ship and never fall
-                // back to a fresh spawn. A Ship-level reservation serializes
-                // concurrent resume handshakes until this attempt commits or aborts.
+                // back to a newly allocated identity. A Ship/Player reservation
+                // serializes concurrent resume handshakes until resolution.
                 if self.ship_absolute_pos(ship_id).is_none() {
                     return Err(ClientAdmissionRefusal::ResumeShipMissing { player_id, ship_id });
                 }
@@ -387,8 +427,34 @@ mod tests {
                 },
                 AOI_CELL_SIZE,
             )
-            .expect("abort must release capacity despite the retained watermark");
+            .expect("abort must release capacity despite the retained prepared identity");
         retry.abort(&mut node);
+    }
+
+    #[test]
+    fn aborted_fresh_identity_can_resume_the_exact_prepared_attempt() {
+        let mut node = node();
+        let attempt = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::new(30_000.0, 0.0, 0.0),
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh admission");
+        let player_id = attempt.player_id();
+        let ship_id = attempt.ship_id();
+        attempt.abort(&mut node);
+
+        let recovered = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume { player_id, ship_id },
+                AOI_CELL_SIZE,
+            )
+            .expect("exact prepared identity is retryable");
+        assert!(!recovered.is_resumed());
+        recovered.commit(&mut node).expect("recovered fresh commit");
+        assert!(node.apply_stop_command_owned(player_id, ship_id));
     }
 
     #[test]
