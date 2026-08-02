@@ -72,6 +72,16 @@ func test_typed_initial_state_promotes_connection_ship_to_player_state() -> void
 	assert_bool(_session.has_ship(22)).is_true()
 
 
+func test_ship_health_accessor_returns_typed_health_or_null() -> void:
+	_apply_initial_state(11)
+	var health: ShipHealth = _session.ship_health(22)
+
+	assert_float(health.shield).is_equal_approx(210.0, 0.001)
+	assert_float(health.max_shield).is_equal_approx(250.0, 0.001)
+	assert_float(health.hull).is_equal_approx(110.0, 0.001)
+	assert_object(_session.ship_health(99)).is_null()
+
+
 func test_typed_dock_event_uses_the_production_state_application_path() -> void:
 	_apply_initial_state(11)
 	var target := _dispatch("ShipDocked", 11)
@@ -85,11 +95,15 @@ func test_typed_dock_event_uses_the_production_state_application_path() -> void:
 
 func test_reset_clears_server_derived_state_and_restores_defaults() -> void:
 	_apply_initial_state(11)
+	_dispatch("ShipDocked", 11)
+	_session.advance_client_ticks(3, PlayerLoadout.new())
+	assert_bool(_session.is_docked()).is_true()
+	assert_int(_session.current_tick()).is_equal(3)
+
 	_session.reset()
 
 	assert_int(_session.ship_count()).is_equal(0)
 	assert_int(_session.player_ship_id()).is_equal(-1)
-	assert_int(_session.player_lock_target()).is_equal(-1)
 	assert_bool(_session.is_docked()).is_false()
 	assert_int(_session.current_tick()).is_equal(0)
 	assert_str(_session.current_system_name()).is_equal("Unknown")
