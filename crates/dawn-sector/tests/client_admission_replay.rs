@@ -2,8 +2,8 @@ use dawn_core::{NodeId, Position, SectorBounds, SectorId};
 use dawn_event_store::{store::EventStore, InMemoryEventStore};
 use dawn_sector::{
     client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal},
-    game_data::{GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH},
     galaxy::Galaxy,
+    game_data::{GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH},
     node::SimulationNode,
 };
 use std::{path::Path, sync::Arc};
