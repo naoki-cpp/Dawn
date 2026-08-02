@@ -1,0 +1,642 @@
+name: Apply admission review fixes
+
+on:
+  push:
+    branches:
+      - agent/transactional-client-admission-253
+    paths:
+      - .github/workflows/fix-admission-review.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/transactional-client-admission-253
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.1
+          components: rustfmt, clippy
+
+      - name: Apply source changes
+        shell: bash
+        run: |
+          cat > /tmp/fix_admission.py <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          def block(indent: int, text: str) -> str:
+              body = textwrap.dedent(text).strip("\n")
+              return textwrap.indent(body, " " * indent) + "\n"
+
+          def replace_exact(label: str, path: str, old: str, new: str, count: int = 1) -> None:
+              file = Path(path)
+              text = file.read_text()
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f"{label}: expected {count} matches in {path}, found {actual}")
+              file.write_text(text.replace(old, new))
+
+          def replace_regex(label: str, path: str, pattern: str, replacement: str, count: int = 1) -> None:
+              file = Path(path)
+              text = file.read_text()
+              updated, actual = re.subn(pattern, replacement, text, count=count, flags=re.S)
+              if actual != count:
+                  raise SystemExit(f"{label}: expected {count} matches in {path}, found {actual}")
+              file.write_text(updated)
+
+          # Durable rollback for fresh admission.
+          replace_regex(
+              "durable fresh rollback",
+              "crates/dawn-sector/src/node/mod.rs",
+              r"    /// Undo a fresh player-ship spawn whose handshake never completed \(the\n.*?    pub fn despawn_incomplete_handshake_spawn\(&mut self, ship_id: ShipId\) \{\n        self\.remove_ship\(ship_id\);\n    \}\n",
+              block(4, """
+              /// Roll back a fresh player-ship spawn whose handshake never completed.
+              ///
+              /// Fresh admission creates ECS/ownership state, appends spawn/fitting
+              /// events, and credits the starter packaged Ship in durable Station
+              /// inventory before the socket handoff. Abort compensates all of those
+              /// effects: it removes the live Ship, debits the starter item, and appends
+              /// `ShipDespawned` so snapshot + tail-log replay cannot resurrect it.
+              ///
+              /// This operation is idempotent for one attempt. It must never be used for
+              /// a resumed Ship, whose state predates the connection attempt.
+              pub fn despawn_incomplete_handshake_spawn(
+                  &mut self,
+                  player_id: PlayerId,
+                  ship_id: ShipId,
+              ) {
+                  let starter_ship =
+                      dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE);
+                  if self.station_item_count(player_id, StationId(0), starter_ship) > 0 {
+                      if let Err(error) =
+                          self.try_debit_station_item(player_id, StationId(0), starter_ship, 1)
+                      {
+                          eprintln!(
+                              "[Sector] failed to roll back starter inventory for {player_id}: {error:?}"
+                          );
+                      }
+                  }
+
+                  self.docked_players.remove(&player_id);
+                  if self.ships.index.contains_key(&ship_id) {
+                      self.remove_ship(ship_id);
+                      self.event_store.append(DomainEvent::ShipDespawned(
+                          dawn_core::events::ShipDespawned {
+                              ship_id,
+                              tick: self.current_tick,
+                          },
+                      ));
+                  }
+              }
+              """),
+          )
+
+          client = "crates/dawn-sector/src/client_admission.rs"
+          replace_exact(
+              "fresh commit disappearance cleanup",
+              client,
+              block(8, """
+              if !present {
+                  return Err(ClientAdmissionCommitError {
+                      player_id: self.player_id,
+                      ship_id: self.ship_id,
+                  });
+              }
+              """),
+              block(8, """
+              if !present {
+                  if self.origin == AdmissionOrigin::Fresh {
+                      node.despawn_incomplete_handshake_spawn(self.player_id, self.ship_id);
+                  }
+                  return Err(ClientAdmissionCommitError {
+                      player_id: self.player_id,
+                      ship_id: self.ship_id,
+                  });
+              }
+              """),
+          )
+          replace_exact(
+              "fresh abort identity",
+              client,
+              "            node.despawn_incomplete_handshake_spawn(self.ship_id);\n",
+              "            node.despawn_incomplete_handshake_spawn(self.player_id, self.ship_id);\n",
+          )
+          replace_exact(
+              "missing observer cleanup identity",
+              client,
+              "                        self.despawn_incomplete_handshake_spawn(ship_id);\n",
+              "                        self.despawn_incomplete_handshake_spawn(player_id, ship_id);\n",
+          )
+          replace_exact(
+              "disappeared ship test identity",
+              client,
+              "        node.despawn_incomplete_handshake_spawn(ship_id);\n",
+              "        node.despawn_incomplete_handshake_spawn(attempt.player_id(), ship_id);\n",
+          )
+          replace_regex(
+              "fresh abort durable assertions",
+              client,
+              r"    #\[test\]\n    fn fresh_abort_removes_spawn_and_ownership\(\) \{.*?\n    \}\n\n(?=    #\[test\])",
+              block(4, """
+              #[test]
+              fn fresh_abort_removes_spawn_ownership_inventory_and_replay_state() {
+                  let mut node = node();
+                  let attempt = node
+                      .begin_client_admission(
+                          ClientAdmissionIntent::Fresh {
+                              spawn_position: Position::ORIGIN,
+                          },
+                          AOI_CELL_SIZE,
+                      )
+                      .expect("fresh admission should begin");
+                  let player_id = attempt.player_id();
+                  let ship_id = attempt.ship_id();
+                  let starter_ship =
+                      dawn_core::ItemId::PackagedShip(crate::ship_types::SHIP_TYPE_MAGPIE);
+                  assert!(node.apply_stop_command_owned(player_id, ship_id));
+                  assert_eq!(
+                      node.station_item_count(player_id, dawn_core::StationId(0), starter_ship),
+                      1
+                  );
+
+                  attempt.abort(&mut node);
+
+                  assert_eq!(node.ship_count(), 0);
+                  assert!(!node.apply_stop_command_owned(player_id, ship_id));
+                  assert_eq!(
+                      node.station_item_count(player_id, dawn_core::StationId(0), starter_ship),
+                      0
+                  );
+                  assert!(matches!(
+                      node.event_store().all_records().last().map(|record| &record.event),
+                      Some(dawn_core::DomainEvent::ShipDespawned(event)) if event.ship_id == ship_id
+                  ));
+              }
+
+              """),
+          )
+
+          # Exercise the real single-runtime completion queue.
+          single = "crates/dawn-simulation/src/serve/single.rs"
+          replace_exact(
+              "single runtime completion drain",
+              single,
+              block(8, """
+              while let Ok((attempt, result)) = completion_rx.try_recv() {
+                  if let Some((sess, committed)) = finish_single_admission(&mut node, attempt, result) {
+                      send_post_commit_loadout(&node, &sess, committed);
+                      println!(
+                          "  [Server] {} joined with ship #{}",
+                          sess.player_id,
+                          sess.ship_id.raw()
+                      );
+                      aoi_delivery.seed_single_player(&node, sess.player_id, sess.ship_id);
+
+                      if duel_mode && player_ship_id.is_none() {
+                          player_ship_id = Some(sess.ship_id);
+                          let tick = node.current_tick().value();
+                          duel_metrics = Some(DuelMetrics::new(tick));
+                          println!("  [Duel] metrics collection started at tick {tick}");
+                      }
+
+                      sessions.push(sess);
+                  }
+              }
+              """),
+              block(8, """
+              for (sess, committed) in
+                  drain_single_admission_completions(&mut node, &mut completion_rx)
+              {
+                  send_post_commit_loadout(&node, &sess, committed);
+                  println!(
+                      "  [Server] {} joined with ship #{}",
+                      sess.player_id,
+                      sess.ship_id.raw()
+                  );
+                  aoi_delivery.seed_single_player(&node, sess.player_id, sess.ship_id);
+
+                  if duel_mode && player_ship_id.is_none() {
+                      player_ship_id = Some(sess.ship_id);
+                      let tick = node.current_tick().value();
+                      duel_metrics = Some(DuelMetrics::new(tick));
+                      println!("  [Duel] metrics collection started at tick {tick}");
+                  }
+
+                  sessions.push(sess);
+              }
+              """),
+          )
+          replace_exact(
+              "single drain helper",
+              single,
+              "fn finish_single_admission<S: EventStore, T>(\n",
+              """fn drain_single_admission_completions<S: EventStore>(
+              node: &mut SimulationNode<S>,
+              completion_rx: &mut mpsc::UnboundedReceiver<HandshakeCompletion>,
+          ) -> Vec<(ws_server::PlayerSession, CommittedClientAdmission)> {
+              let mut ready = Vec::new();
+              while let Ok((attempt, result)) = completion_rx.try_recv() {
+                  if let Some(completed) = finish_single_admission(node, attempt, result) {
+                      ready.push(completed);
+                  }
+              }
+              ready
+          }
+
+          fn finish_single_admission<S: EventStore, T>(
+          """,
+          )
+          replace_exact(
+              "single async drain test",
+              single,
+              "    #[test]\n    fn single_adapter_disconnect_does_not_remove_resumed_ship() {\n",
+              block(4, """
+              #[test]
+              fn single_adapter_drains_async_disconnect_completion() {
+                  let mut node = node();
+                  let attempt = node
+                      .begin_client_admission(
+                          ClientAdmissionIntent::Fresh {
+                              spawn_position: Position::ORIGIN,
+                          },
+                          AOI_CELL_SIZE,
+                      )
+                      .expect("fresh attempt");
+                  let (completion_tx, mut completion_rx) =
+                      mpsc::unbounded_channel::<HandshakeCompletion>();
+                  completion_tx
+                      .send((attempt, Err("client disconnected".to_string())))
+                      .expect("completion receiver alive");
+
+                  let ready = drain_single_admission_completions(&mut node, &mut completion_rx);
+
+                  assert!(ready.is_empty());
+                  assert_eq!(node.ship_count(), 0);
+              }
+
+              #[test]
+              fn single_adapter_disconnect_does_not_remove_resumed_ship() {
+              """),
+          )
+
+          # Preserve the owning Sector across clustered asynchronous completion.
+          cluster = "crates/dawn-simulation/src/serve/cluster.rs"
+          replace_exact(
+              "cluster completion carries sector",
+              cluster,
+              """type HandshakeCompletion = (
+              ClientAdmissionAttempt,
+              Result<ws_server::PlayerSession, String>,
+          );
+          """,
+              """type HandshakeCompletion = (
+              usize,
+              ClientAdmissionAttempt,
+              Result<ws_server::PlayerSession, String>,
+          );
+          """,
+          )
+          replace_regex(
+              "cluster runtime completion drain",
+              cluster,
+              r"        // Commit Sector ownership before publishing cluster routing\. A failed\n        // or disconnected handshake therefore leaves neither route map visible\.\n        while let Ok\(\(attempt, result\)\) = completion_rx\.try_recv\(\) \{.*?\n        \}\n\n(?=        while let Ok\(request\))",
+              block(8, """
+              // Commit Sector ownership before publishing cluster routing. A failed
+              // or disconnected handshake therefore leaves neither route map visible.
+              for (sector, sess, committed) in drain_cluster_admission_completions(
+                  &mut nodes,
+                  &mut player_sector,
+                  &mut ship_player,
+                  &mut completion_rx,
+              ) {
+                  send_post_commit_loadout(&nodes[sector], &sess, committed);
+                  println!(
+                      "  [Server] {} joined with ship #{} in Sector {}",
+                      sess.player_id,
+                      sess.ship_id.raw(),
+                      sector
+                  );
+                  aoi_delivery.seed_cluster_player(&nodes, sector, sess.player_id, sess.ship_id);
+                  sessions.push(sess);
+              }
+
+              """),
+          )
+          replace_exact(
+              "cluster request selects sector",
+              cluster,
+              block(12, """
+              let intent = match request.resume {
+                  Some(resume) => ClientAdmissionIntent::Resume {
+                      player_id: resume.player_id,
+                      ship_id: resume.ship_id,
+                  },
+                  None => ClientAdmissionIntent::Fresh {
+                      spawn_position: PLAYER_SPAWN,
+                  },
+              };
+              let mut attempt = match nodes[0].begin_client_admission(intent, AOI_CELL_SIZE) {
+              """),
+              block(12, """
+              let (sector, intent) = match request.resume {
+                  Some(resume) => {
+                      let Some(sector) = find_resume_sector(&nodes, resume.ship_id) else {
+                          log_cluster_refusal(
+                              request.peer_addr,
+                              ClientAdmissionRefusal::ResumeShipMissing {
+                                  player_id: resume.player_id,
+                                  ship_id: resume.ship_id,
+                              },
+                          );
+                          continue;
+                      };
+                      (
+                          sector,
+                          ClientAdmissionIntent::Resume {
+                              player_id: resume.player_id,
+                              ship_id: resume.ship_id,
+                          },
+                      )
+                  }
+                  None => (
+                      0,
+                      ClientAdmissionIntent::Fresh {
+                          spawn_position: PLAYER_SPAWN,
+                      },
+                  ),
+              };
+              let mut attempt = match nodes[sector].begin_client_admission(intent, AOI_CELL_SIZE) {
+              """),
+          )
+          replace_exact(
+              "cluster completion send sector",
+              cluster,
+              "                let _ = tx.send((attempt, result));\n",
+              "                let _ = tx.send((sector, attempt, result));\n",
+          )
+          replace_exact(
+              "cluster refusal wording",
+              cluster,
+              '                "[Server] clustered resume from {addr} refused: ship #{} is not in Sector 0",\n',
+              '                "[Server] clustered resume from {addr} refused: ship #{} is not present in exactly one cluster Sector",\n',
+          )
+          replace_exact(
+              "cluster helper insertion",
+              cluster,
+              "fn finish_cluster_admission<S: EventStore, T>(\n",
+              """fn find_resume_sector<S: EventStore>(
+              nodes: &[SimulationNode<S>],
+              ship_id: ShipId,
+          ) -> Option<usize> {
+              let mut sectors = nodes.iter().enumerate().filter_map(|(sector, node)| {
+                  node.ship_absolute_pos(ship_id).is_some().then_some(sector)
+              });
+              let sector = sectors.next()?;
+              if sectors.next().is_some() {
+                  None
+              } else {
+                  Some(sector)
+              }
+          }
+
+          fn drain_cluster_admission_completions<S: EventStore>(
+              nodes: &mut [SimulationNode<S>],
+              player_sector: &mut HashMap<PlayerId, usize>,
+              ship_player: &mut HashMap<ShipId, PlayerId>,
+              completion_rx: &mut mpsc::UnboundedReceiver<HandshakeCompletion>,
+          ) -> Vec<(usize, ws_server::PlayerSession, CommittedClientAdmission)> {
+              let mut ready = Vec::new();
+              while let Ok((sector, attempt, result)) = completion_rx.try_recv() {
+                  let node = nodes
+                      .get_mut(sector)
+                      .expect("admission completion Sector must still exist");
+                  if let Some((session, committed)) = finish_cluster_admission(
+                      node,
+                      sector,
+                      player_sector,
+                      ship_player,
+                      attempt,
+                      result,
+                  ) {
+                      ready.push((sector, session, committed));
+                  }
+              }
+              ready
+          }
+
+          fn finish_cluster_admission<S: EventStore, T>(
+          """,
+          )
+          replace_exact(
+              "cluster finish sector parameter",
+              cluster,
+              """fn finish_cluster_admission<S: EventStore, T>(
+              node: &mut SimulationNode<S>,
+              player_sector: &mut HashMap<PlayerId, usize>,
+          """,
+              """fn finish_cluster_admission<S: EventStore, T>(
+              node: &mut SimulationNode<S>,
+              sector: usize,
+              player_sector: &mut HashMap<PlayerId, usize>,
+          """,
+          )
+          replace_exact(
+              "cluster route actual sector",
+              cluster,
+              "                player_sector.insert(committed.player_id, 0);\n",
+              "                player_sector.insert(committed.player_id, sector);\n",
+          )
+          replace_exact(
+              "cluster compile typo",
+              cluster,
+              "finish_cluster_admission.:<_, ()>(",
+              "finish_cluster_admission::<_, ()>(",
+          )
+
+          file = Path(cluster)
+          text = file.read_text()
+          old = "&mut node,\n                &mut player_sector,"
+          actual = text.count(old)
+          if actual != 3:
+              raise SystemExit(f"cluster test sector args: expected 3 matches, found {actual}")
+          text = text.replace(old, "&mut node,\n                0,\n                &mut player_sector,")
+          file.write_text(text)
+
+          replace_exact(
+              "cluster test node helper",
+              cluster,
+              block(4, """
+              fn node() -> SimulationNode {
+                  SimulationNode::new(
+                      NodeId(0),
+                      SectorId(0),
+                      SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                      std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+                  )
+              }
+              """),
+              block(4, """
+              fn node_at(sector: u8) -> SimulationNode {
+                  SimulationNode::new(
+                      NodeId(sector),
+                      SectorId(sector),
+                      SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                      std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+                  )
+              }
+
+              fn node() -> SimulationNode {
+                  node_at(0)
+              }
+              """),
+          )
+          replace_exact(
+              "cluster async and nonzero resume tests",
+              cluster,
+              "    #[test]\n    fn cluster_adapter_failed_resume_keeps_ship_and_routes_absent() {\n",
+              block(4, """
+              #[test]
+              fn cluster_adapter_drains_async_disconnect_completion() {
+                  let mut nodes = vec![node()];
+                  let attempt = nodes[0]
+                      .begin_client_admission(
+                          ClientAdmissionIntent::Fresh {
+                              spawn_position: Position::ORIGIN,
+                          },
+                          AOI_CELL_SIZE,
+                      )
+                      .expect("fresh attempt");
+                  let (completion_tx, mut completion_rx) =
+                      mpsc::unbounded_channel::<HandshakeCompletion>();
+                  completion_tx
+                      .send((0, attempt, Err("client disconnected".to_string())))
+                      .expect("completion receiver alive");
+                  let mut player_sector = HashMap::new();
+                  let mut ship_player = HashMap::new();
+
+                  let ready = drain_cluster_admission_completions(
+                      &mut nodes,
+                      &mut player_sector,
+                      &mut ship_player,
+                      &mut completion_rx,
+                  );
+
+                  assert!(ready.is_empty());
+                  assert_eq!(nodes[0].ship_count(), 0);
+                  assert!(player_sector.is_empty());
+                  assert!(ship_player.is_empty());
+              }
+
+              #[test]
+              fn cluster_adapter_resumes_ship_in_its_current_sector() {
+                  let mut nodes = vec![node_at(0), node_at(1)];
+                  let player_id = PlayerId(12);
+                  let ship_id =
+                      nodes[1].spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+                  let sector = find_resume_sector(&nodes, ship_id).expect("unique owning Sector");
+                  let attempt = nodes[sector]
+                      .begin_client_admission(
+                          ClientAdmissionIntent::Resume { player_id, ship_id },
+                          AOI_CELL_SIZE,
+                      )
+                      .expect("resume attempt");
+                  let mut player_sector = HashMap::new();
+                  let mut ship_player = HashMap::new();
+
+                  assert_eq!(
+                      finish_cluster_admission(
+                          &mut nodes[sector],
+                          sector,
+                          &mut player_sector,
+                          &mut ship_player,
+                          attempt,
+                          Ok::<_, String>(()),
+                      )
+                      .map(|(value, _)| value),
+                      Some(())
+                  );
+
+                  assert_eq!(sector, 1);
+                  assert_eq!(player_sector.get(&player_id), Some(&1));
+                  assert_eq!(ship_player.get(&ship_id), Some(&player_id));
+              }
+
+              #[test]
+              fn cluster_adapter_failed_resume_keeps_ship_and_routes_absent() {
+              """),
+          )
+
+          docs = "docs/architecture/client-admission.md"
+          replace_exact(
+              "document durable abort",
+              docs,
+              "- **Abort:** removes the freshly-spawned Ship and its ownership/AoI presence.\n",
+              """- **Abort:** removes the freshly-spawned Ship and its ownership/AoI presence,
+                debits the starter packaged Ship from durable Station inventory, and appends
+                `ShipDespawned` so event replay cannot resurrect the provisional Ship.
+          """,
+          )
+          replace_exact(
+              "document cluster sector resume",
+              docs,
+              """`player_sector` and `ship_player` are runtime routing indexes, not admission
+          authority. Cluster mode inserts both entries only after
+          `ClientAdmissionAttempt::commit` succeeds. Failed or disconnected attempts
+          therefore expose neither routing entry. Sector Transit continues to use the
+          ADR-0014 Raft-owned transit path; client admission cannot move a Ship between
+          Sectors or bypass transit ownership.
+          """,
+              """`player_sector` and `ship_player` are runtime routing indexes, not admission
+          authority. Fresh admission begins in Sector 0; resume locates the exact Ship
+          across all cluster Sectors and carries that Sector index through asynchronous
+          handoff completion. Cluster mode inserts both routing entries only after
+          `ClientAdmissionAttempt::commit` succeeds in that same Sector. Failed or
+          disconnected attempts therefore expose neither routing entry. Sector Transit
+          continues to use the ADR-0014 Raft-owned transit path; client admission cannot
+          move a Ship between Sectors or bypass transit ownership.
+          """,
+          )
+          PY
+          python3 /tmp/fix_admission.py
+          cargo fmt --all
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check workspace
+        run: cargo check --workspace --all-targets
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test affected crates
+        run: cargo test -p dawn-sector -p dawn-sector-node -p dawn-simulation
+
+      - name: Test workspace
+        run: cargo test --workspace --all-targets
+
+      - name: Commit fixes and remove temporary tooling
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -f .github/admission-253-ci-trigger
+          rm -f .github/workflows/patch-admission-253.yml
+          rm -f .github/workflows/finalize-admission-253.yml
+          rm -f .github/workflows/fix-admission-review.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'fix(admission): address transactional review findings'
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin HEAD:agent/transactional-client-admission-253
