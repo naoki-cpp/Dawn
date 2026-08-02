@@ -16,6 +16,7 @@ jobs:
         run: |
           python3 <<'PY'
           import subprocess
+          from pathlib import Path
 
           source = subprocess.check_output(
               [
@@ -41,4 +42,28 @@ jobs:
               raise SystemExit("unterminated triple-quoted literal in historical patch")
           script = "\n".join(output)
           exec(compile(script, "<admission-review-fix>", "exec"))
+
+          admission_path = Path("crates/dawn-sector/src/client_admission.rs")
+          admission = admission_path.read_text()
+          old_derive = "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\nenum AdmissionOrigin"
+          new_derive = "#[derive(Debug, Clone, Copy, PartialEq)]\nenum AdmissionOrigin"
+          if admission.count(old_derive) != 1:
+              raise SystemExit("AdmissionOrigin derive marker missing or duplicated")
+          admission_path.write_text(admission.replace(old_derive, new_derive, 1))
+
+          snapshot_path = Path("crates/dawn-sector/src/node/snapshot_io.rs")
+          snapshot = snapshot_path.read_text()
+          marker = (
+              "            population_cap: _,\n"
+              "            // Independently durable in SQLite (ADR-0038), plus its cache.\n"
+          )
+          replacement = (
+              "            population_cap: _,\n"
+              "            // Fresh admission reservations exist only while this process is alive.\n"
+              "            pending_fresh_admissions: _,\n"
+              "            // Independently durable in SQLite (ADR-0038), plus its cache.\n"
+          )
+          if snapshot.count(marker) != 1:
+              raise SystemExit("snapshot non-durable field marker missing or duplicated")
+          snapshot_path.write_text(snapshot.replace(marker, replacement, 1))
           PY
