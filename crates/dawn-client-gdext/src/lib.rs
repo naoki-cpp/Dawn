@@ -1,33 +1,36 @@
 //! GDExtension binding exposing `dawn-client-core` to the Godot client
 //! (ADR-0040). This crate converts `dawn-wire` messages into typed client
-//! updates and Godot presentation records. Every inbound state mutation is
-//! applied to `WorldSessionState` before presentation callbacks run; domain
-//! state and rules remain in the Godot-independent client/core crates. Raw
-//! frame bytes are retained only where an existing typed decoder consumes
-//! them directly. Presentation callbacks therefore observe already-committed
-//! client state rather than driving a second state transition.
+//! facts and Godot presentation records. Every inbound state mutation is
+//! applied before the single presentation dispatch seam invokes GDScript.
 
 use godot::prelude::*;
 
 mod client_command_gd;
-mod client_outcome;
 mod client_rules_gd;
 mod item_identity_gd;
 mod item_row_gd;
+mod legacy_server_event_outcome;
 mod loadout_gd;
 mod module_row_gd;
 mod owned_ship_row_gd;
 mod presentation_gd;
 mod server_message_gd;
+mod server_message_validation;
 mod session_record_gd;
 mod ship_motion_gd;
 mod world_session_gd;
 mod world_space_gd;
 
+#[cfg(test)]
+mod client_outcome {
+    pub(crate) use crate::server_message_validation::validate_player_loadout_godot_ranges;
+}
+
 pub use client_command_gd::ClientCommand;
 pub use client_rules_gd::ClientRules;
 pub use item_identity_gd::ItemIdentity;
 pub use item_row_gd::ItemRow;
+pub use legacy_server_event_outcome::ServerEventOutcome;
 pub use loadout_gd::PlayerLoadout;
 pub use module_row_gd::ModuleRow;
 pub use owned_ship_row_gd::OwnedShipRow;
@@ -35,7 +38,7 @@ pub use presentation_gd::{
     InitialStatePresentation, MarketOrder, MarketSnapshot, MotionCorrectionPresentation,
     ShipPresentation,
 };
-pub use server_message_gd::{ServerEventOutcome, ServerMessageDecoder, ServerMessageOutcome};
+pub use server_message_gd::{ServerMessageDecoder, ServerMessageOutcome};
 pub use ship_motion_gd::ShipMotion;
 pub use world_session_gd::WorldSession;
 pub use world_space_gd::WorldSpace;
