@@ -1,9 +1,9 @@
 name: Apply issue 239 cleanup v3
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - agent/delete-legacy-client-adapters
 
 permissions:
   contents: write
@@ -84,6 +84,7 @@ jobs:
               .agent/issue239_apply.overrides_03_07.tgz.b64 \
               .agent/issue239-inventory.txt \
               .agent/issue239-trigger-v2 \
+              .agent/__pycache__/issue239_apply.cpython-312.pyc \
               .github/workflows/issue-239-apply-v3.yml
           fi
 
