@@ -1,4 +1,5 @@
 //! Raft-cluster WebSocket server (`--serve --cluster`, ADR-0009/0014).
+#![allow(clippy::module_name_repetitions)]
 
 use super::{
     build_serve_node, market::MarketRuntime, runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS,

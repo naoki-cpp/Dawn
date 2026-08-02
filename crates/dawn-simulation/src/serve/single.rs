@@ -1,4 +1,5 @@
 //! Single-node WebSocket server (`--serve`, no Raft cluster).
+#![allow(clippy::module_name_repetitions)]
 
 use super::{
     build_serve_node, market::MarketRuntime, AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS,

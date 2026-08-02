@@ -277,7 +277,7 @@ mod tests {
         let (_request_tx, handshake_req_rx) =
             mpsc::unbounded_channel::<ws_server::HandshakeRequest>();
         let (completion_tx, completion_rx) = mpsc::unbounded_channel::<HandshakeCompletion>();
-        let (ready_sess_tx, ready_sess_rx) = mpsc::unbounded_channel();
+        let (ready_sess_tx, ready_sess_rx) = mpsc::unbounded_channel::<ws_server::PlayerSession>();
         completion_tx
             .send((attempt, Err("client disconnected".to_string())))
             .expect("completion receiver alive");

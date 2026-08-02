@@ -23,7 +23,7 @@ pub enum ClientAdmissionIntent {
 }
 
 /// Why a client admission attempt could not begin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ClientAdmissionRefusal {
     /// A fresh spawn would exceed the Sector population backstop.
     FreshAtPopulationCap,
