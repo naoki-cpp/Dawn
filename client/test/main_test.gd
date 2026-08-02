@@ -469,6 +469,9 @@ func test_module_activated_marks_matching_player_module_active() -> void:
 	_main._player_ship_id = 1
 	_set_loadout_modules([_module_fixture(5, "Mid", false)])
 
+	## ServerMessageOutcome commits authoritative loadout state before the
+	## presentation callback recalculates derived ranges.
+	_main._loadout.apply_module_activation(5, true, "")
 	_main._on_module_activated(1, 5, "Mid")
 
 	var mod_dict: ModuleRow = _main._loadout.modules()[0]
