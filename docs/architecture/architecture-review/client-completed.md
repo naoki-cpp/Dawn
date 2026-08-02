@@ -53,27 +53,30 @@ C-1 の抽出先（`ShipPicking` / `NavigationMarkerRenderer` / `InputDecoder` /
 
 ---
 
-## テストカバレッジ（C-1 完了時点 + 以降の回帰テスト追加、2026-07-11 実測で更新）
+## テストカバレッジ（C-1 完了時点 + 以降の回帰テスト追加、2026-08-02 実測で更新）
 
 | テストファイル | 対象 | ケース数 |
 |---|---|---|
-| `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 31 |
+| `main_test.gd` | main.gd 残存純粋関数 + モジュールdeactivate判定の回帰テスト | 38 |
 | `ship_picking_test.gd` | `ShipPicking`（画面空間ピッキング含む） | 12 |
 | `navigation_marker_renderer_test.gd` | `NavigationMarkerRenderer`（選択リング含む） | 12 |
-| `input_decoder_test.gd` | `InputDecoder`。2026-07-07、`KEY_X`（Disembark）判定のケースを追加（+2）。2026-07-10、`I`キーのshipless soft-lockケースを修正（既存ケースの動作を反転、件数は変わらず） | 32 |
+| `input_decoder_test.gd` | `InputDecoder`。2026-07-07、`KEY_X`（Disembark）判定のケースを追加（+2）。2026-07-10、`I`キーのshipless soft-lockケースを修正（既存ケースの動作を反転、件数は変わらず） | 33 |
 | `hud_manager_test.gd` | `HudManager`（2026-07-10、C-9解消でヒットテスト系4ケースを `hud_hit_test_test.gd` へ移動） | 26 |
 | `hud_hit_test_test.gd` | `HudHitTest`（2026-07-10新設、C-9解消。`module_slot_at`/`column_at` のヒットテストケース） | 7 |
-| `hud_surface_test.gd` | `HudSurface`（HUD render frame / fitting更新 / inventory hit-test 委譲 / パネル dirty-tracking 判定。C-4 で `ModuleRow` の `clone()`/`equals()` ベース差分判定のケースを追加）。2026-07-08、station roster / `source` タグ付けのケースを追加（+2） | 16 |
+| `hud_surface_test.gd` | `HudSurface`（HUD render frame / fitting更新 / inventory hit-test 委譲 / パネル dirty-tracking 判定。C-4 で `ModuleRow` の `clone()`/`equals()` ベース差分判定のケースを追加）。2026-07-08、station roster / `source` タグ付けのケースを追加（+2） | 17 |
 | `billboard_ring_test.gd` | `BillboardRing` | 3 |
-| `camera_controller_test.gd` | `CameraController`（orbit drag） | 2 |
+| `camera_controller_test.gd` | `CameraController`（orbit drag） | 3 |
 | `unit_format_test.gd` | `UnitFormat`（ADR-0029 速度/距離単位整形） | 8 |
-| `world_space_test.gd` | `WorldSpace`（ADR-0029 浮動原点リベース） | 4 |
-| `connection_test.gd` | `connection.gd`（URL正規化・module activated signal・PlayerLoadout wire message rename の回帰テスト）。2026-07-10、`player_fitting_received`が生JSON文字列を運ぶ変更に伴い既存2ケースを更新（件数は変わらず） | 6 |
+| `world_space_test.gd` | `WorldSpace`（ADR-0029 浮動原点リベース） | 6 |
+| `connection_test.gd` | `connection.gd`（URL正規化・module activated signal・typed PlayerLoadout message の回帰テスト） | 15 |
+| `market_surface_test.gd` | `MarketSurface` | 1 |
+| `planet_visibility_test.gd` | `PlanetVisibility` | 1 |
+| `player_loadout_test.gd` | `PlayerLoadout` typed GDExtension boundary | 3 |
+| `ship_controller_test.gd` | `ShipController` | 4 |
 | `world_session_test.gd` | `WorldSession`（InitialState / ship registry / HP / lock / tick-cap / destroy / dock state） | 13 |
 | `world_interaction_test.gd` | `WorldInteraction`（selection ownership / double-click / lock intent / key action 解釈） | 8 |
-| `world_presentation_test.gd` | `WorldPresentation`（marker clamp / warp tunnel easing / sun state） | 6 |
-| `client_command_gd_test.gd` | `ClientCommand`/`ClientMessageDecoder`（ADR-0041、前回計測時に本表への記載漏れ）。2026-07-11、ADR-0042でpostcardバイナリ化に伴い`ClientMessageDecoder`（テスト専用デコーダ）経由のアサーションへ書き換え、`build()`契約テスト3件・`hello_command`テスト2件を追加 | 16 |
-| **合計** | | **202**（`func test_` 実測、2026-07-11。`player_loadout_test.gd`（旧18ケース）は ADR-0039/0040 で `dawn-client-core` の Rust ユニットテストへ移植し削除。C-9解消でのファイル分割は移動のみで件数変化なし。`client_command_gd_test.gd` の前回計測漏れ（11件）+ ADR-0042の新規テスト5件を今回追加） |
+| `world_presentation_test.gd` | `WorldPresentation`（marker clamp / warp tunnel easing / sun state） | 9 |
+| **合計** | | **219**（`func test_` 実測、2026-08-02。削除した `client_command_gd_test.gd` の postcard コマンド往復は `dawn-wire` の Rust ユニットテストへ移行） |
 
 テスト導入で見つかった不具合・定着した手順（詳細: `docs/process/godot-client-testing.md`）:
 - `Node3D` をシーンツリーに追加せず `global_position` を読むと `(0,0,0)` 固定になる
