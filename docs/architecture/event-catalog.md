@@ -88,6 +88,7 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.m
 |---|---|---|---|
 | `ShipSpawned` | Ship appeared in the world | `SimulationNode::spawn_ship()` | ✅ implemented |
 | `ClientAdmissionIdentityReserved` | Fresh admission durably consumed a `PlayerId`/`ShipId` pair without materializing a Ship; Replay advances allocation watermarks only | `SimulationNode::reserve_fresh_admission_identity()` | ✅ implemented |
+| `ClientAdmissionCommitted` | Atomic fresh-admission starter state: Ship, fitting/cargo snapshot, ownership identity, and idempotent Station grant description; Replay restores all of them from one event | `SimulationNode::commit_reserved_fresh_admission()` | ✅ implemented |
 | `ShipDespawned` | Ship manually removed from the world | `SimulationNode` | type only (no emission site; Replay supported) |
 | `ShipDestroyed` | Ship destroyed in combat | `CombatSystem` | ✅ implemented |
 

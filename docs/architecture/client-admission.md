@@ -9,92 +9,57 @@ related  : ownership.md, ADR-0007, ADR-0014
 
 ## Single lifecycle owner
 
-`dawn-sector::client_admission` is the only owner of authoritative client
-admission mutation and rollback. Production `dawn-sector-node`, single-Sector
-`dawn-simulation --serve`, and clustered `dawn-simulation --serve --cluster`
-are socket adapters only: they wait for `Hello`, pass fresh/resume intent into
-`SimulationNode::begin_client_admission`, complete the WebSocket handoff, and
-promote a session only after the returned attempt commits.
-
-Runtime code must not independently allocate a `PlayerId`, spawn/adopt a Ship,
-build an observer-scoped handoff, or decide which Ship to remove after failure.
-Those rules belong to `ClientAdmissionAttempt`.
+`dawn-sector::client_admission` owns authoritative begin/commit/abort behavior.
+Production, single-Sector simulation, and clustered simulation are socket
+adapters: they pass intent, await the handoff, resolve the attempt on the Sector
+thread, and publish only a committed session.
 
 ## State machine
 
 ```text
-socket Hello
-    |
-    v
-begin_client_admission(intent, AoI cell size)
-    |
-    +-- refusal --------------------------> drop socket; no session
-    |
-    v
-ClientAdmissionAttempt
-    |
-    +-- WebSocket handoff succeeds ------> commit(node) --> promote session
-    |
-    +-- error / disconnect --------------> abort(node)  --> drop socket
+Hello -> begin -> await Welcome/InitialState/PlayerLoadout
+                    | success -> commit -> publish/replace session
+                    | failure -> abort  -> drop socket
 ```
-
-The asynchronous socket task carries the attempt token with its completion
-result. The owning tick thread performs `commit` or `abort`, keeping all
-`SimulationNode` mutation on the Sector thread.
 
 ## Fresh admission
 
-Begin checks the population cap, reserves `PlayerId`/`ShipId`, and counts the
-reservation against the cap. The consumed `PlayerId`/`ShipId` watermark is appended
-durably before any frame can be sent. Begin materializes the Ship only inside the
-call to build observer-scoped `InitialState`/`PlayerLoadout`, then removes that
-preview before returning. The in-flight reservation is non-durable and snapshots
-never include it; the allocation watermark survives through snapshot or event replay.
+Begin appends `ClientAdmissionIdentityReserved`, permanently consuming the
+`PlayerId`/`ShipId`, then uses a temporary in-memory Ship to construct the
+observer-scoped handoff. The preview is removed before begin returns. Therefore
+an in-flight attempt has one durable allocation-watermark event but no durable
+Ship, fitting, ownership, AoI, or Station inventory.
 
-- **Commit:** materializes the reserved Ship, appends its spawn/fitting events,
-  and credits the starter packaged Ship in durable Station inventory.
-- **Abort:** releases only the in-memory reservation; no authoritative mutation
-  exists to roll back.
-- **Process loss before resolution:** loses the non-durable reservation and
-  cannot resurrect a Ship, while the durable watermark prevents either ID
-  from being issued to a later client.
-- **Missing observer while beginning:** removes the temporary preview and
-  releases the reservation before returning the refusal.
+Commit materializes the starter state and appends exactly one
+`ClientAdmissionCommitted` event containing the Ship creation, fitting/cargo
+snapshot, ownership identity, and starter Station grant description. The
+Station grant is applied through a SQLite ledger keyed by `ShipId`; the ledger
+marker and inventory upsert share one SQLite transaction. If the process dies
+after the event append but before the SQLite write, snapshot+tail replay and
+`open_station_inventory_db` reconciliation apply the missing grant exactly once.
+No checkpoint can cover a partially-returned commit because commit runs
+synchronously on the owning Sector thread.
 
-A consumed ID or event-log history is not reused; INV-004 still applies.
+Abort releases only the live capacity reservation. The watermark remains and
+IDs are never reused (INV-004).
 
-## Resume admission (ADR-0007)
+## Resume admission
 
-Resume names an exact `(PlayerId, ShipId)`. A missing Ship is refused and never
-falls back to fresh spawn. Begin first acquires a non-durable Ship-level resume
-reservation; a concurrent attempt for the same Ship is refused until the first
-attempt commits or aborts. Begin then validates the Ship and builds the observer-
-scoped `InitialState`, but leaves the ownership-dependent `PlayerLoadout` out
-of the pre-commit handoff.
+Resume names an exact `(PlayerId, ShipId)` and never falls back to fresh spawn.
+Begin reserves both sides of the identity: no other in-flight attempt may use
+the same Ship or Player. Existing ownership is compare-and-set compatible only
+when absent after restoration or already equal to the exact reconnect identity;
+a different owner or a different active Ship is refused.
 
-- **Begin/handoff:** projects a complete `PlayerLoadout` from the exact
-  `(PlayerId, ShipId)` and persisted dock state without changing ownership. The
-  socket task await-sends it with `Welcome` and `InitialState`; any failed frame
-  fails the handshake.
-- **Commit:** calls `resume_player_ship`, establishing active/owned and docked
-  player context only after every handshake frame succeeded, then publishes the
-  session to command routing or AoI delivery.
-- **Abort:** does nothing to authoritative state. The resumed Ship predates the
-  connection attempt and must never be removed as handshake cleanup.
-
-The handoff marks the observer as a player Ship even when ownership was absent
-from a restored snapshot; authoritative ownership is still deferred until
-commit.
+Ownership changes only after every handshake frame has been await-sent. Abort
+releases the reservation without touching the pre-existing Ship. A successful
+reconnect for the same exact identity replaces any older runtime session and
+its routing/AoI publication, so only one command source remains live.
 
 ## Cluster routing
 
-`player_sector` and `ship_player` are runtime routing indexes, not admission
-authority. Fresh admission begins in Sector 0; resume locates the exact Ship
-across all cluster Sectors and carries that Sector index through asynchronous
-handoff completion. A missing Ship or a duplicate `ShipId` visible in more than
-one Sector is refused rather than choosing an ambiguous owner. Cluster mode
-inserts both routing entries only after `ClientAdmissionAttempt::commit`
-succeeds in that same Sector. Failed or disconnected attempts therefore expose
-neither routing entry. Sector Transit continues to use the ADR-0014 Raft-owned
-transit path; client admission cannot move a Ship between Sectors or bypass
-transit ownership.
+Fresh admission starts in Sector 0. Resume locates the exact authoritative
+Sector and carries that index through asynchronous completion. `player_sector`
+and `ship_player` are replaced only after commit and are kept one-to-one with
+the published session. Admission cannot move a Ship between Sectors or bypass
+the ADR-0014 Transit pipeline.

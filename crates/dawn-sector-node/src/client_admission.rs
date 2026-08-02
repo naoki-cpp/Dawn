@@ -104,6 +104,14 @@ impl ClientAdmission {
                     );
                     continue;
                 }
+                Err(ClientAdmissionRefusal::ResumeIdentityConflict { ship_id, .. }) => {
+                    eprintln!(
+                        "[Node] resume refused from {}: ship #{} conflicts with established ownership",
+                        request.peer_addr,
+                        ship_id.raw()
+                    );
+                    continue;
+                }
                 Err(ClientAdmissionRefusal::FreshAtPopulationCap) => {
                     eprintln!(
                         "[Node] connection from {} refused: at population cap",
@@ -230,6 +238,63 @@ mod tests {
             ),
             None
         );
+        assert_eq!(node.ship_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn production_adapter_aborts_after_real_socket_disconnect() {
+        use futures_util::SinkExt;
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+        use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move {
+            let (mut socket, _) = connect_async(format!("ws://{address}")).await.unwrap();
+            socket
+                .send(Message::Binary(
+                    dawn_wire::ClientMessage::Hello(dawn_wire::HelloMessage { resume: None })
+                        .encode()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+            socket.get_mut().shutdown().await.unwrap();
+        });
+        let (stream, peer_addr) = listener.accept().await.unwrap();
+        let request = ws_server::WsServer::accept_handshake_request(stream, peer_addr)
+            .await
+            .unwrap();
+        client.await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let mut node = test_node();
+        let mut attempt = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh attempt");
+        let player_id = attempt.player_id();
+        let ship_id = attempt.ship_id();
+        let payload = attempt.take_handoff_payload();
+        let result = request
+            .complete(
+                player_id,
+                ship_id,
+                payload.initial_state,
+                payload.player_loadout,
+            )
+            .await
+            .map_err(|error| error.to_string());
+        assert!(
+            result.is_err(),
+            "closed socket must fail the awaited handoff"
+        );
+        assert!(finish_admission(&mut node, attempt, result).is_none());
         assert_eq!(node.ship_count(), 0);
     }
 

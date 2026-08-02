@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
-use dawn_core::{ItemId, PlayerId, StationId};
+use dawn_core::{events::ClientAdmissionCommitted, DomainEvent, ItemId, PlayerId, StationId};
 use dawn_event_store::store::EventStore;
 
 use super::{station::StationOperationRejection, SimulationNode};
@@ -153,6 +153,55 @@ impl<S: EventStore> SimulationNode<S> {
         self.station_inventory_cache
             .get_mut()
             .insert(player_id, station_id, inventory);
+    }
+
+    pub(super) fn ensure_client_admission_grant(&mut self, event: &ClientAdmissionCommitted) {
+        self.station_inventory_db
+            .ensure_client_admission_grant(
+                event.ship_id,
+                event.player_id,
+                event.starter_station_id,
+                event.starter_item_id,
+                event.starter_item_count,
+            )
+            .expect("client admission Station grant transaction");
+        let inventory = self
+            .station_inventory_db
+            .get_all(event.player_id, event.starter_station_id);
+        self.station_inventory_cache.get_mut().insert(
+            event.player_id,
+            event.starter_station_id,
+            inventory,
+        );
+    }
+
+    pub(super) fn reconcile_client_admission_grants(&mut self) -> rusqlite::Result<()> {
+        let grants: Vec<ClientAdmissionCommitted> = self
+            .event_store
+            .iter_from(0)
+            .filter_map(|record| match &record.event {
+                DomainEvent::ClientAdmissionCommitted(event) => Some(event.clone()),
+                _ => None,
+            })
+            .collect();
+        for event in grants {
+            self.station_inventory_db.ensure_client_admission_grant(
+                event.ship_id,
+                event.player_id,
+                event.starter_station_id,
+                event.starter_item_id,
+                event.starter_item_count,
+            )?;
+            let inventory = self
+                .station_inventory_db
+                .get_all(event.player_id, event.starter_station_id);
+            self.station_inventory_cache.get_mut().insert(
+                event.player_id,
+                event.starter_station_id,
+                inventory,
+            );
+        }
+        Ok(())
     }
 
     /// Add `count` of `item_id` to the player's station inventory. Writes

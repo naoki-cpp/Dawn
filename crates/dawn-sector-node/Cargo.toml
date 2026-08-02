@@ -24,3 +24,7 @@ rand             = { workspace = true }
 tokio            = { workspace = true }
 anyhow           = "1"
 toml             = { version = "1.1", features = ["parse"] }
+
+[dev-dependencies]
+futures-util      = "0.3"
+tokio-tungstenite = "0.30"

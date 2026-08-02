@@ -123,6 +123,11 @@ pub enum DomainEvent {
     /// No Ship is materialized by this event; replay only advances the
     /// allocation watermarks so identities are never reused after a crash.
     ClientAdmissionIdentityReserved(ClientAdmissionIdentityReserved),
+
+    /// A fresh client admission committed its complete starter state.
+    /// Replay materializes the Ship, fitting/cargo projection, ownership, and
+    /// idempotent Station-inventory grant from this single durable fact.
+    ClientAdmissionCommitted(ClientAdmissionCommitted),
 }
 
 impl DomainEvent {
@@ -155,6 +160,7 @@ impl DomainEvent {
             Self::ShipDisassembled(e) => e.ship_id,
             Self::ShipAssembled(e) => e.ship_id,
             Self::ClientAdmissionIdentityReserved(e) => e.ship_id,
+            Self::ClientAdmissionCommitted(e) => e.ship_id,
         }
     }
 
@@ -188,6 +194,7 @@ impl DomainEvent {
             Self::ShipDisassembled(e) => e.tick,
             Self::ShipAssembled(e) => e.tick,
             Self::ClientAdmissionIdentityReserved(e) => e.tick,
+            Self::ClientAdmissionCommitted(e) => e.tick,
         }
     }
 }
@@ -210,6 +217,22 @@ pub struct ShipSpawned {
 pub struct ClientAdmissionIdentityReserved {
     pub player_id: PlayerId,
     pub ship_id: ShipId,
+    pub tick: Tick,
+}
+
+/// Atomic, replay-complete starter state for one successful fresh admission.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClientAdmissionCommitted {
+    pub player_id: PlayerId,
+    pub ship_id: ShipId,
+    pub sector_id: SectorId,
+    pub initial_position: AbsolutePosition,
+    pub ship_type_id: ShipTypeId,
+    pub fitting: FittingSnapshot,
+    pub inventory: Vec<ItemId>,
+    pub starter_station_id: StationId,
+    pub starter_item_id: ItemId,
+    pub starter_item_count: u64,
     pub tick: Tick,
 }
 

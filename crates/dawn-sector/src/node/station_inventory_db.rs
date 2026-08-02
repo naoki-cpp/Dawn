@@ -63,6 +63,18 @@ impl StationInventoryDb {
             )",
             [],
         )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS client_admission_grants (
+                ship_id       TEXT PRIMARY KEY,
+                player_id     INTEGER NOT NULL,
+                station_id    INTEGER NOT NULL,
+                item_type     TEXT    NOT NULL,
+                module_id     INTEGER NOT NULL DEFAULT 0,
+                ship_type_id  INTEGER NOT NULL DEFAULT 0,
+                count         INTEGER NOT NULL
+            )",
+            [],
+        )?;
         Ok(Self { conn })
     }
 
@@ -127,6 +139,53 @@ impl StationInventoryDb {
                 ],
             )
             .expect("station_inventory upsert");
+    }
+
+    /// Apply a starter grant exactly once, keyed by the committed ShipId.
+    /// The ledger marker and inventory upsert share one SQLite transaction.
+    pub(super) fn ensure_client_admission_grant(
+        &mut self,
+        ship_id: dawn_core::ShipId,
+        player_id: PlayerId,
+        station_id: StationId,
+        item_id: ItemId,
+        count: u64,
+    ) -> rusqlite::Result<bool> {
+        let (item_type, module_id, ship_type_id) = item_id_to_columns(item_id);
+        let tx = self.conn.transaction()?;
+        let inserted = tx.execute(
+            "INSERT OR IGNORE INTO client_admission_grants
+             (ship_id, player_id, station_id, item_type, module_id, ship_type_id, count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                ship_id.raw().to_string(),
+                player_id.0 as i64,
+                station_id.0 as i64,
+                item_type,
+                module_id,
+                ship_type_id,
+                count as i64,
+            ],
+        )?;
+        if inserted == 1 {
+            tx.execute(
+                "INSERT INTO station_inventory
+                 (player_id, station_id, item_type, module_id, ship_type_id, count)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT (player_id, station_id, item_type, module_id, ship_type_id)
+                 DO UPDATE SET count = count + excluded.count",
+                params![
+                    player_id.0 as i64,
+                    station_id.0 as i64,
+                    item_type,
+                    module_id,
+                    ship_type_id,
+                    count as i64,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(inserted == 1)
     }
 
     /// Subtract `count` from `player_id`'s stack at `station_id`, rejecting rather than going
@@ -238,6 +297,20 @@ mod tests {
                 .get(&ItemId::ScrapMetal),
             Some(&5)
         );
+    }
+
+    #[test]
+    fn client_admission_grant_is_idempotent() {
+        let mut db = StationInventoryDb::open_in_memory().unwrap();
+        let ship_id = dawn_core::ShipId::new(dawn_core::NodeId(2), 7);
+        let item = ItemId::PackagedShip(ShipTypeId(7));
+        assert!(db
+            .ensure_client_admission_grant(ship_id, PlayerId(1), StationId(7), item, 1,)
+            .unwrap());
+        assert!(!db
+            .ensure_client_admission_grant(ship_id, PlayerId(1), StationId(7), item, 1,)
+            .unwrap());
+        assert_eq!(db.get_all(PlayerId(1), StationId(7)).get(&item), Some(&1));
     }
 
     #[test]

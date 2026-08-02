@@ -57,6 +57,11 @@ impl SectorNodeRuntime {
             sess.player_id,
             sess.ship_id.raw()
         );
+        self.sessions.retain(|existing| {
+            existing.player_id != sess.player_id && existing.ship_id != sess.ship_id
+        });
+        self.aoi_frame
+            .retain_players(|player_id| player_id != sess.player_id);
         seed_runtime_session(&mut self.aoi_frame, node, &sess);
         self.sessions.push(sess);
     }

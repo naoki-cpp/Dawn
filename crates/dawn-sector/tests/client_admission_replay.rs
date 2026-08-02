@@ -85,6 +85,80 @@ fn in_flight_fresh_admission_keeps_only_a_durable_identity_watermark() {
 }
 
 #[test]
+fn committed_fresh_admission_replays_complete_state_and_grants_starter_once() {
+    let galaxy = Arc::new(Galaxy::demo());
+    let catalog = repository_catalog();
+    let mut node = SimulationNode::new(
+        NodeId(0),
+        SectorId(0),
+        SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+        Arc::clone(&galaxy),
+    );
+    for definition in catalog.modules() {
+        node.register_module(definition.clone());
+    }
+    for definition in catalog.ship_types() {
+        node.register_ship_type(definition.clone());
+    }
+    let pre_commit_snapshot = node.take_snapshot();
+    let attempt = node
+        .begin_client_admission(
+            ClientAdmissionIntent::Fresh {
+                spawn_position: Position::ORIGIN,
+            },
+            AOI_CELL_SIZE,
+        )
+        .expect("fresh admission");
+    let player_id = attempt.player_id();
+    let ship_id = attempt.ship_id();
+    attempt.commit(&mut node).expect("fresh commit");
+
+    let records = node.event_store().all_records();
+    assert_eq!(records.len(), 2);
+    assert!(matches!(
+        records.last().map(|record| &record.event),
+        Some(dawn_core::DomainEvent::ClientAdmissionCommitted(event))
+            if event.player_id == player_id
+                && event.ship_id == ship_id
+                && event.fitting.high.len() == 1
+                && event.fitting.mid.len() == 2
+    ));
+    assert!(!records.iter().any(|record| matches!(
+        record.event,
+        dawn_core::DomainEvent::ShipSpawned(_) | dawn_core::DomainEvent::ShipFitted(_)
+    )));
+
+    let mut replay_store = InMemoryEventStore::new();
+    for record in records {
+        replay_store.append(record.event.clone());
+    }
+    let mut restored = SimulationNode::restore_from(
+        replay_store,
+        &pre_commit_snapshot,
+        galaxy,
+        catalog.modules(),
+        catalog.ship_types(),
+    );
+    assert_eq!(restored.ship_count(), 1);
+    assert!(restored.ship_absolute_pos(ship_id).is_some());
+
+    let directory = tempfile::tempdir().unwrap();
+    let db_path = directory.path().join("station.sqlite");
+    let db_path = db_path.to_str().unwrap();
+    restored.open_station_inventory_db(db_path).unwrap();
+    let starter = dawn_core::ItemId::PackagedShip(dawn_sector::ship_types::SHIP_TYPE_MAGPIE);
+    assert_eq!(
+        restored.station_item_count(player_id, dawn_core::StationId(0), starter),
+        1
+    );
+    restored.open_station_inventory_db(db_path).unwrap();
+    assert_eq!(
+        restored.station_item_count(player_id, dawn_core::StationId(0), starter),
+        1
+    );
+}
+
+#[test]
 fn missing_resume_still_refuses_without_creating_replayable_state() {
     let galaxy = Arc::new(Galaxy::demo());
     let mut node = SimulationNode::new(

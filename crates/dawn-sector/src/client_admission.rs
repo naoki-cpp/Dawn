@@ -38,6 +38,11 @@ pub enum ClientAdmissionRefusal {
         player_id: PlayerId,
         ship_id: ShipId,
     },
+    /// The requested pair would overwrite a different established identity.
+    ResumeIdentityConflict {
+        player_id: PlayerId,
+        ship_id: ShipId,
+    },
     /// A freshly-created observer could not be used to construct its scoped
     /// handoff. The fresh Ship has already been removed before this is returned.
     MissingObserver(MissingObserverShip),
@@ -54,7 +59,12 @@ impl std::fmt::Display for ClientAdmissionRefusal {
             ),
             Self::ResumeAlreadyPending { player_id, ship_id } => write!(
                 f,
-                "resume refused for {player_id}: ship #{} already has an in-flight resume",
+                "resume refused for {player_id}: ship #{} or player already has an in-flight resume",
+                ship_id.raw()
+            ),
+            Self::ResumeIdentityConflict { player_id, ship_id } => write!(
+                f,
+                "resume refused for {player_id}: ship #{} conflicts with established ownership",
                 ship_id.raw()
             ),
             Self::MissingObserver(error) => write!(f, "{error}"),
@@ -243,6 +253,12 @@ impl<S: EventStore> SimulationNode<S> {
                 // concurrent resume handshakes until this attempt commits or aborts.
                 if self.ship_absolute_pos(ship_id).is_none() {
                     return Err(ClientAdmissionRefusal::ResumeShipMissing { player_id, ship_id });
+                }
+                if self.resume_admission_identity_conflicts(player_id, ship_id) {
+                    return Err(ClientAdmissionRefusal::ResumeIdentityConflict {
+                        player_id,
+                        ship_id,
+                    });
                 }
                 if !self.reserve_resume_admission(player_id, ship_id) {
                     return Err(ClientAdmissionRefusal::ResumeAlreadyPending {
@@ -480,6 +496,92 @@ mod tests {
             )
             .expect("abort releases the Ship-level resume lock");
         retry.abort(&mut node);
+    }
+
+    #[test]
+    fn one_player_cannot_hold_two_concurrent_resume_attempts() {
+        let mut node = node();
+        let player_id = PlayerId(12);
+        let first_ship = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let second_ship = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let first = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    player_id,
+                    ship_id: first_ship,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("first resume obtains the Player lock");
+        assert_eq!(
+            node.begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    player_id,
+                    ship_id: second_ship,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect_err("same Player cannot concurrently resume another Ship"),
+            ClientAdmissionRefusal::ResumeAlreadyPending {
+                player_id,
+                ship_id: second_ship,
+            }
+        );
+        first.abort(&mut node);
+    }
+
+    #[test]
+    fn established_owner_cannot_be_overwritten_by_another_player() {
+        let mut node = node();
+        let owner = PlayerId(12);
+        let attacker = PlayerId(13);
+        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        node.begin_client_admission(
+            ClientAdmissionIntent::Resume {
+                player_id: owner,
+                ship_id,
+            },
+            AOI_CELL_SIZE,
+        )
+        .expect("owner resume")
+        .commit(&mut node)
+        .expect("owner commit");
+
+        assert_eq!(
+            node.begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    player_id: attacker,
+                    ship_id,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect_err("different Player cannot take an owned Ship"),
+            ClientAdmissionRefusal::ResumeIdentityConflict {
+                player_id: attacker,
+                ship_id,
+            }
+        );
+    }
+
+    #[test]
+    fn exact_resume_identity_may_reconnect() {
+        let mut node = node();
+        let player_id = PlayerId(12);
+        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        node.begin_client_admission(
+            ClientAdmissionIntent::Resume { player_id, ship_id },
+            AOI_CELL_SIZE,
+        )
+        .expect("first resume")
+        .commit(&mut node)
+        .expect("first commit");
+        let reconnect = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume { player_id, ship_id },
+                AOI_CELL_SIZE,
+            )
+            .expect("same identity reconnects and replaces its runtime session");
+        reconnect.abort(&mut node);
     }
 
     #[test]

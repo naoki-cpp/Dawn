@@ -130,6 +130,9 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                 sess.ship_id.raw(),
                 sector
             );
+            sessions.retain(|existing| {
+                existing.player_id != sess.player_id && existing.ship_id != sess.ship_id
+            });
             aoi_delivery.seed_cluster_player(&nodes, sector, sess.player_id, sess.ship_id);
             sessions.push(sess);
         }
@@ -309,6 +312,12 @@ fn log_cluster_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefus
                 ship_id.raw()
             );
         }
+        ClientAdmissionRefusal::ResumeIdentityConflict { ship_id, .. } => {
+            eprintln!(
+                "[Server] clustered resume from {addr} refused: ship #{} conflicts with established ownership",
+                ship_id.raw()
+            );
+        }
         ClientAdmissionRefusal::MissingObserver(error) => {
             eprintln!("[Server] clustered handshake from {addr} refused: {error}");
         }
@@ -362,6 +371,10 @@ fn finish_cluster_admission<S: EventStore, T>(
     match result {
         Ok(value) => match attempt.commit(node) {
             Ok(committed) => {
+                player_sector.retain(|player_id, _| *player_id != committed.player_id);
+                ship_player.retain(|ship_id, player_id| {
+                    *ship_id != committed.ship_id && *player_id != committed.player_id
+                });
                 player_sector.insert(committed.player_id, sector);
                 ship_player.insert(committed.ship_id, committed.player_id);
                 Some((value, committed))

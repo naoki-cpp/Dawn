@@ -242,6 +242,7 @@ pub fn domain_event_to_event_wire(event: &DomainEvent) -> Option<EventWire> {
         DomainEvent::PackagedShipBuilt(_) => return None,
         DomainEvent::ShipDisassembled(_) => return None,
         DomainEvent::ClientAdmissionIdentityReserved(_) => return None,
+        DomainEvent::ClientAdmissionCommitted(_) => return None,
     })
 }
 

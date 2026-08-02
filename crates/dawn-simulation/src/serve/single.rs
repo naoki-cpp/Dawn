@@ -125,6 +125,9 @@ pub(crate) async fn run_phase4_server(
                 sess.player_id,
                 sess.ship_id.raw()
             );
+            sessions.retain(|existing| {
+                existing.player_id != sess.player_id && existing.ship_id != sess.ship_id
+            });
             aoi_delivery.seed_single_player(&node, sess.player_id, sess.ship_id);
 
             if duel_mode && player_ship_id.is_none() {
@@ -284,6 +287,12 @@ fn log_single_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefusa
         ClientAdmissionRefusal::ResumeAlreadyPending { ship_id, .. } => {
             eprintln!(
                 "[Server] resume from {addr} refused: ship #{} already has an in-flight resume",
+                ship_id.raw()
+            );
+        }
+        ClientAdmissionRefusal::ResumeIdentityConflict { ship_id, .. } => {
+            eprintln!(
+                "[Server] resume from {addr} refused: ship #{} conflicts with established ownership",
                 ship_id.raw()
             );
         }

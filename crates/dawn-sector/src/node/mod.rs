@@ -398,6 +398,7 @@ impl<S: EventStore> SimulationNode<S> {
         self.station_inventory_db = station_inventory_db::StationInventoryDb::open(path)?;
         self.station_inventory_cache
             .replace(station_inventory::StationInventoryCache::new());
+        self.reconcile_client_admission_grants()?;
         Ok(())
     }
 
