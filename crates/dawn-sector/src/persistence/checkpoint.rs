@@ -125,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_snapshot_publication_does_not_compact_the_hot_log() {
+    fn post_replacement_sync_failure_rolls_back_and_does_not_compact_the_hot_log() {
         let dir = tempfile::tempdir().unwrap();
         let mut node = file_node(dir.path());
         node.spawn_ship(
@@ -134,15 +134,25 @@ mod tests {
             Velocity::new(30.0, 0.0, 0.0),
         );
 
+        let snapshot_path = dir.path().join("snapshot.bin");
+        let cold_path = dir.path().join("cold.log");
+        let previous = node.take_snapshot();
+        previous.save(&snapshot_path).unwrap();
+        let previous_bytes = std::fs::read(&snapshot_path).unwrap();
+        node.tick();
+
         let base_index_before = node.event_store().base_index();
         let records_before = node.event_store().records_on_disk();
         assert!(records_before > 0, "the test needs a non-empty hot log");
 
-        let snapshot_path = dir.path().join("missing-parent").join("snapshot.bin");
-        let cold_path = dir.path().join("cold.log");
+        // Existing-snapshot publication syncs once after preserving the rollback
+        // copy, then again after replacing the authoritative path. Fail the
+        // second call to exercise replacement-success -> durability-failure.
+        crate::persistence::snapshot::inject_directory_sync_failure(&snapshot_path, 2);
         let error = node.checkpoint(&snapshot_path, &cold_path).unwrap_err();
 
-        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(std::fs::read(&snapshot_path).unwrap(), previous_bytes);
         assert_eq!(node.event_store().base_index(), base_index_before);
         assert_eq!(node.event_store().records_on_disk(), records_before);
         assert!(!cold_path.exists());
