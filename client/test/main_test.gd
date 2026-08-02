@@ -566,6 +566,9 @@ func test_module_deactivated_with_no_reason_is_a_plain_off() -> void:
 	_main._player_ship_id = 1
 	_set_loadout_modules([_module_fixture(5, "High", true)])
 
+	## ServerMessageOutcome commits authoritative loadout state before the
+	## presentation callback recalculates derived ranges.
+	_main._loadout.apply_module_activation(5, false, "")
 	_main._on_module_deactivated(1, 5, "High", "")
 
 	var mod_dict: ModuleRow = _main._loadout.modules()[0]
@@ -577,6 +580,7 @@ func test_module_deactivated_with_cap_reason_flags_forced_reason() -> void:
 	_main._player_ship_id = 1
 	_set_loadout_modules([_module_fixture(5, "High", true)])
 
+	_main._loadout.apply_module_activation(5, false, "cap")
 	_main._on_module_deactivated(1, 5, "High", "cap")
 
 	var mod_dict: ModuleRow = _main._loadout.modules()[0]
@@ -587,6 +591,7 @@ func test_module_deactivated_with_range_reason_flags_forced_reason() -> void:
 	_main._player_ship_id = 1
 	_set_loadout_modules([_module_fixture(5, "High", true)])
 
+	_main._loadout.apply_module_activation(5, false, "range")
 	_main._on_module_deactivated(1, 5, "High", "range")
 
 	var mod_dict: ModuleRow = _main._loadout.modules()[0]
