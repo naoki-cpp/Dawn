@@ -180,6 +180,9 @@ where
     /// Non-durable Ship IDs reserved by in-flight fresh admissions.
     /// Counted against the population cap but intentionally omitted from snapshots.
     pending_fresh_admissions: HashSet<ShipId>,
+    /// Ship-level lock held by an in-flight resume handshake.
+    /// Non-durable: authoritative ownership is still unchanged until commit.
+    pending_resume_admissions: HashMap<ShipId, PlayerId>,
     /// Lock-on commands queued by the bot AI during `process_bots()`.
     ///
     /// Bot AI runs after the LockSystem each tick.  These commands are held
@@ -285,6 +288,7 @@ impl<S: EventStore> SimulationNode<S> {
             base_stats: HashMap::new(),
             player_id_counter: 0,
             pending_fresh_admissions: HashSet::new(),
+            pending_resume_admissions: HashMap::new(),
             pending_bot_lock_commands: Vec::new(),
             sector_map,
             anchor_table,

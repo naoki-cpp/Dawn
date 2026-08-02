@@ -303,6 +303,12 @@ fn log_cluster_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefus
                 ship_id.raw()
             );
         }
+        ClientAdmissionRefusal::ResumeAlreadyPending { ship_id, .. } => {
+            eprintln!(
+                "[Server] clustered resume from {addr} refused: ship #{} already has an in-flight resume",
+                ship_id.raw()
+            );
+        }
         ClientAdmissionRefusal::MissingObserver(error) => {
             eprintln!("[Server] clustered handshake from {addr} refused: {error}");
         }

@@ -281,6 +281,12 @@ fn log_single_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefusa
                 ship_id.raw()
             );
         }
+        ClientAdmissionRefusal::ResumeAlreadyPending { ship_id, .. } => {
+            eprintln!(
+                "[Server] resume from {addr} refused: ship #{} already has an in-flight resume",
+                ship_id.raw()
+            );
+        }
         ClientAdmissionRefusal::MissingObserver(error) => {
             eprintln!("[Server] handshake from {addr} refused: {error}");
         }

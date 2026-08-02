@@ -7,8 +7,9 @@
 //! performs the durable spawn only after the handshake completes.
 
 use dawn_core::{
-    events::ShipSpawned, fitting::ActivationMode, DomainEvent, ItemId, PlayerId, Position, ShipId,
-    SlotKind, StationId, Velocity,
+    events::{ClientAdmissionIdentityReserved, ShipSpawned},
+    fitting::ActivationMode,
+    DomainEvent, ItemId, PlayerId, Position, ShipId, SlotKind, StationId, Velocity,
 };
 use dawn_ecs::components::{FittedSlot, FittingComp, IsNpcComp};
 use dawn_event_store::store::EventStore;
@@ -27,6 +28,14 @@ impl<S: EventStore> SimulationNode<S> {
             inserted,
             "fresh admission ShipId reservation must be unique"
         );
+        self.event_store
+            .append(DomainEvent::ClientAdmissionIdentityReserved(
+                ClientAdmissionIdentityReserved {
+                    player_id,
+                    ship_id,
+                    tick: self.current_tick,
+                },
+            ));
         (player_id, ship_id)
     }
 
@@ -94,6 +103,39 @@ impl<S: EventStore> SimulationNode<S> {
             !self.ships.index.contains_key(&ship_id),
             "fresh admission preview must not survive begin"
         );
+    }
+
+    /// Acquire a Ship-level lock for one in-flight resume handshake.
+    pub(crate) fn reserve_resume_admission(
+        &mut self,
+        player_id: PlayerId,
+        ship_id: ShipId,
+    ) -> bool {
+        if !self.ships.index.contains_key(&ship_id)
+            || self.pending_resume_admissions.contains_key(&ship_id)
+        {
+            return false;
+        }
+        self.pending_resume_admissions.insert(ship_id, player_id);
+        true
+    }
+
+    pub(crate) fn release_resume_admission(&mut self, player_id: PlayerId, ship_id: ShipId) {
+        if self.pending_resume_admissions.get(&ship_id) == Some(&player_id) {
+            self.pending_resume_admissions.remove(&ship_id);
+        }
+    }
+
+    pub(crate) fn commit_reserved_resume_admission(
+        &mut self,
+        player_id: PlayerId,
+        ship_id: ShipId,
+    ) -> bool {
+        if self.pending_resume_admissions.get(&ship_id) != Some(&player_id) {
+            return false;
+        }
+        self.pending_resume_admissions.remove(&ship_id);
+        self.resume_player_ship(ship_id, player_id)
     }
 
     fn materialize_admission_player_ship(

@@ -87,6 +87,7 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.m
 | Event | Description | Emitter | Status |
 |---|---|---|---|
 | `ShipSpawned` | Ship appeared in the world | `SimulationNode::spawn_ship()` | ✅ implemented |
+| `ClientAdmissionIdentityReserved` | Fresh admission durably consumed a `PlayerId`/`ShipId` pair without materializing a Ship; Replay advances allocation watermarks only | `SimulationNode::reserve_fresh_admission_identity()` | ✅ implemented |
 | `ShipDespawned` | Ship manually removed from the world | `SimulationNode` | type only (no emission site; Replay supported) |
 | `ShipDestroyed` | Ship destroyed in combat | `CombatSystem` | ✅ implemented |
 

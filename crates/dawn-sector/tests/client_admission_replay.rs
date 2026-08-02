@@ -1,5 +1,5 @@
 use dawn_core::{NodeId, Position, SectorBounds, SectorId};
-use dawn_event_store::InMemoryEventStore;
+use dawn_event_store::{store::EventStore, InMemoryEventStore};
 use dawn_sector::{
     client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal},
     galaxy::Galaxy,
@@ -20,7 +20,7 @@ fn repository_catalog() -> GameDataCatalog {
 }
 
 #[test]
-fn in_flight_fresh_admission_is_absent_from_snapshot_and_event_replay() {
+fn in_flight_fresh_admission_keeps_only_a_durable_identity_watermark() {
     let galaxy = Arc::new(Galaxy::demo());
     let mut node = SimulationNode::new(
         NodeId(0),
@@ -28,6 +28,7 @@ fn in_flight_fresh_admission_is_absent_from_snapshot_and_event_replay() {
         SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         Arc::clone(&galaxy),
     );
+    let pre_begin_snapshot = node.take_snapshot();
 
     let attempt = node
         .begin_client_admission(
@@ -37,29 +38,50 @@ fn in_flight_fresh_admission_is_absent_from_snapshot_and_event_replay() {
             AOI_CELL_SIZE,
         )
         .expect("fresh admission should begin");
-    let ship_id = attempt.ship_id();
+    let reserved_player_id = attempt.player_id();
+    let reserved_ship_id = attempt.ship_id();
     let snapshot_during_handshake = node.take_snapshot();
 
     assert_eq!(node.ship_count(), 0);
-    assert!(node.event_store().all_records().is_empty());
     assert!(snapshot_during_handshake.ships.is_empty());
+    assert!(matches!(
+        node.event_store().all_records(),
+        [record]
+            if matches!(
+                &record.event,
+                dawn_core::DomainEvent::ClientAdmissionIdentityReserved(event)
+                    if event.player_id == reserved_player_id && event.ship_id == reserved_ship_id
+            )
+    ));
 
-    // Simulate process loss before either commit or abort: the in-memory
-    // attempt and reservation disappear with the process, while durable state
-    // consists only of this snapshot and event log.
+    let mut replay_store = InMemoryEventStore::new();
+    for record in node.event_store().all_records() {
+        replay_store.append(record.event.clone());
+    }
     drop(attempt);
-    let replay_store = InMemoryEventStore::new();
+
     let catalog = repository_catalog();
-    let restored = SimulationNode::restore_from(
+    let mut restored = SimulationNode::restore_from(
         replay_store,
-        &snapshot_during_handshake,
+        &pre_begin_snapshot,
         galaxy,
         catalog.modules(),
         catalog.ship_types(),
     );
 
     assert_eq!(restored.ship_count(), 0);
-    assert!(restored.ship_absolute_pos(ship_id).is_none());
+    assert!(restored.ship_absolute_pos(reserved_ship_id).is_none());
+    let retry = restored
+        .begin_client_admission(
+            ClientAdmissionIntent::Fresh {
+                spawn_position: Position::ORIGIN,
+            },
+            AOI_CELL_SIZE,
+        )
+        .expect("restored node may admit a new client");
+    assert_ne!(retry.player_id(), reserved_player_id);
+    assert_ne!(retry.ship_id(), reserved_ship_id);
+    retry.abort(&mut restored);
 }
 
 #[test]

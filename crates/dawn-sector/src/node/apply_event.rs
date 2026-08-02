@@ -29,6 +29,11 @@ impl<S: EventStore> SimulationNode<S> {
         }
 
         match event {
+            DomainEvent::ClientAdmissionIdentityReserved(e) => {
+                self.player_id_counter = self.player_id_counter.max(e.player_id.0 + 1);
+                self.id_counter = self.id_counter.max(e.ship_id.0.counter() + 1);
+            }
+
             DomainEvent::ShipSpawned(e) => {
                 if !self.ships.index.contains_key(&e.ship_id) {
                     self.insert_to_world(e.ship_id, dawn_core::Position::ORIGIN, Velocity::ZERO);

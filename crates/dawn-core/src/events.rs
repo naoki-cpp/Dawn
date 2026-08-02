@@ -19,7 +19,7 @@ use crate::fitting::{FittingSnapshot, ModuleId, SlotKind};
 use crate::item::ItemId;
 use crate::navigation::{AnchorId, JumpGateId, StarSystemId, StationId};
 use crate::ship_type::ShipTypeId;
-use crate::{AbsolutePosition, Position, SectorId, ShipId, Tick, Velocity};
+use crate::{AbsolutePosition, PlayerId, Position, SectorId, ShipId, Tick, Velocity};
 use serde::{Deserialize, Serialize};
 
 /// Every domain event that can be appended to the Event Log.
@@ -118,6 +118,11 @@ pub enum DomainEvent {
     /// A station-inventory packaged ship item was converted into a new live
     /// docked ship (ADR-0034 9B, ADR-0037).
     ShipAssembled(ShipAssembled),
+
+    /// A fresh client admission durably consumed a PlayerId/ShipId pair.
+    /// No Ship is materialized by this event; replay only advances the
+    /// allocation watermarks so identities are never reused after a crash.
+    ClientAdmissionIdentityReserved(ClientAdmissionIdentityReserved),
 }
 
 impl DomainEvent {
@@ -149,6 +154,7 @@ impl DomainEvent {
             Self::PackagedShipBuilt(e) => e.ship_id,
             Self::ShipDisassembled(e) => e.ship_id,
             Self::ShipAssembled(e) => e.ship_id,
+            Self::ClientAdmissionIdentityReserved(e) => e.ship_id,
         }
     }
 
@@ -181,6 +187,7 @@ impl DomainEvent {
             Self::PackagedShipBuilt(e) => e.tick,
             Self::ShipDisassembled(e) => e.tick,
             Self::ShipAssembled(e) => e.tick,
+            Self::ClientAdmissionIdentityReserved(e) => e.tick,
         }
     }
 }
@@ -195,6 +202,14 @@ pub struct ShipSpawned {
     pub initial_position: AbsolutePosition,
     /// 船種 ID。Replay 時に base_stats を復元するために必須（INV-002）。
     pub ship_type_id: ShipTypeId,
+    pub tick: Tick,
+}
+
+/// Durable allocation watermark for one fresh client admission.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClientAdmissionIdentityReserved {
+    pub player_id: PlayerId,
+    pub ship_id: ShipId,
     pub tick: Tick,
 }
 

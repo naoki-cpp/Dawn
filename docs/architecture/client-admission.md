@@ -45,16 +45,19 @@ result. The owning tick thread performs `commit` or `abort`, keeping all
 ## Fresh admission
 
 Begin checks the population cap, reserves `PlayerId`/`ShipId`, and counts the
-reservation against the cap. It materializes the Ship only inside the begin call
-to build observer-scoped `InitialState`/`PlayerLoadout`, then removes that preview
-before returning. The reservation is non-durable and snapshots never include it.
+reservation against the cap. The consumed `PlayerId`/`ShipId` watermark is appended
+durably before any frame can be sent. Begin materializes the Ship only inside the
+call to build observer-scoped `InitialState`/`PlayerLoadout`, then removes that
+preview before returning. The in-flight reservation is non-durable and snapshots
+never include it; the allocation watermark survives through snapshot or event replay.
 
 - **Commit:** materializes the reserved Ship, appends its spawn/fitting events,
   and credits the starter packaged Ship in durable Station inventory.
 - **Abort:** releases only the in-memory reservation; no authoritative mutation
   exists to roll back.
 - **Process loss before resolution:** loses the non-durable reservation and
-  cannot resurrect a Ship from either snapshot or event replay.
+  cannot resurrect a Ship, while the durable watermark prevents either ID
+  from being issued to a later client.
 - **Missing observer while beginning:** removes the temporary preview and
   releases the reservation before returning the refusal.
 
@@ -63,7 +66,9 @@ A consumed ID or event-log history is not reused; INV-004 still applies.
 ## Resume admission (ADR-0007)
 
 Resume names an exact `(PlayerId, ShipId)`. A missing Ship is refused and never
-falls back to fresh spawn. Begin validates the Ship and builds the observer-
+falls back to fresh spawn. Begin first acquires a non-durable Ship-level resume
+reservation; a concurrent attempt for the same Ship is refused until the first
+attempt commits or aborts. Begin then validates the Ship and builds the observer-
 scoped `InitialState`, but leaves the ownership-dependent `PlayerLoadout` out
 of the pre-commit handoff.
 

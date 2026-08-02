@@ -96,6 +96,14 @@ impl ClientAdmission {
                     );
                     continue;
                 }
+                Err(ClientAdmissionRefusal::ResumeAlreadyPending { ship_id, .. }) => {
+                    eprintln!(
+                        "[Node] resume refused from {}: ship #{} already has an in-flight resume",
+                        request.peer_addr,
+                        ship_id.raw()
+                    );
+                    continue;
+                }
                 Err(ClientAdmissionRefusal::FreshAtPopulationCap) => {
                     eprintln!(
                         "[Node] connection from {} refused: at population cap",

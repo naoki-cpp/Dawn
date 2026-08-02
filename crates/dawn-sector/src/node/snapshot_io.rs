@@ -48,6 +48,8 @@ impl<S: EventStore> SimulationNode<S> {
             population_cap: _,
             // Fresh admission reservations exist only while this process is alive.
             pending_fresh_admissions: _,
+            // Resume locks protect only live asynchronous handshakes.
+            pending_resume_admissions: _,
             // Independently durable in SQLite (ADR-0038), plus its cache.
             station_inventory_db: _,
             station_inventory_cache: _,
