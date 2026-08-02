@@ -334,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_begin_persists_only_the_identity_watermark_and_abort_releases_capacity() {
+    fn fresh_begin_persists_identity_watermark_and_abort_releases_capacity() {
         let mut node = node();
         let attempt = node
             .begin_client_admission(
