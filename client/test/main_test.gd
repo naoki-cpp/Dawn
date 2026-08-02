@@ -137,6 +137,26 @@ class FakeShip:
 		return 0.0
 
 
+class FakeWorldPresentation:
+	extends WorldPresentation
+
+	func attach_player_ship(ship: Node3D, _weapon_range: float, _weapon_falloff: float) -> void:
+		if ship == null:
+			return
+		if _player_ship != ship:
+			detach_player_ship()
+		_player_ship = ship
+		ship.call("set_as_player")
+
+	func detach_player_ship() -> void:
+		if _player_ship != null and is_instance_valid(_player_ship):
+			_player_ship.call("clear_as_player")
+		_player_ship = null
+
+	func update_tactical_overlay_ranges(_weapon_range: float, _weapon_falloff: float) -> void:
+		pass
+
+
 class TestableMain:
 	extends MainScript
 
@@ -237,6 +257,7 @@ func _initialize_main_dependencies() -> void:
 func _replace_with_testable_main() -> void:
 	_main.free()
 	_main = TestableMain.new()
+	_main._presentation = FakeWorldPresentation.new()
 	_initialize_main_dependencies()
 
 
@@ -272,7 +293,7 @@ func _setup_pending_docked_switch() -> FakeShip:
 	_main._set_as_player_ship(11, old_ship)
 	_dispatch_fixture("ShipDocked", 11)
 	_dispatch_fixture("PlayerLoadoutUnknownDocked", 11)
-	_main._apply_loadout_side_effects()
+	_main._apply_current_dock_state_to_player_ship(old_ship)
 	assert_int(_main._session.player_ship_id()).is_equal(11)
 	assert_bool(_main._session.is_docked()).is_true()
 	assert_int(old_ship.dock_calls.size()).is_equal(1)
