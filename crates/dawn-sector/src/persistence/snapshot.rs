@@ -20,11 +20,12 @@
 //!
 //! Publication is write-new-then-replace: encode and validate the postcard
 //! payload, write it to a uniquely named sibling file, flush and sync that file,
-//! then replace the authoritative path. Unix uses same-directory `rename` plus
-//! a parent-directory sync; Windows uses `MoveFileExW` with replace-existing and
-//! write-through flags because `std::fs::rename` does not replace an existing
-//! destination there. Before the replacement step succeeds, every handled
-//! failure leaves the previously published snapshot readable.
+//! then replace the authoritative path. Before replacement, the persistence
+//! layer opens the parent directory and durably preserves a readable rollback
+//! copy of any existing snapshot. Unix uses same-directory `rename` plus parent-
+//! directory sync; Windows uses `MoveFileExW` with replace-existing and write-
+//! through flags. A handled failure at any publication stage restores the prior
+//! authoritative snapshot (or restores absence for a failed first publication).
 //!
 //! Derived / transient state (position, capacitor, lock countdowns) is persisted
 //! in the snapshot. It is a per-tick pure function (position = velocity integral,
@@ -53,6 +54,20 @@ use serde::{Deserialize, Serialize};
 
 const TEMP_FILE_CREATE_ATTEMPTS: usize = 128;
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+thread_local! {
+    static DIRECTORY_SYNC_FAILURE: std::cell::RefCell<Option<(PathBuf, usize)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn inject_directory_sync_failure(destination: impl AsRef<Path>, call_number: usize) {
+    assert!(call_number > 0, "directory sync call numbers are one-based");
+    DIRECTORY_SYNC_FAILURE.with(|failure| {
+        *failure.borrow_mut() = Some((destination.as_ref().to_path_buf(), call_number));
+    });
+}
 
 // ── Ship-level snapshot ───────────────────────────────────────────────────────
 
@@ -162,9 +177,9 @@ pub struct StateSnapshot {
 impl StateSnapshot {
     /// Encode, validate, durably write, and atomically publish this snapshot.
     ///
-    /// The temporary file is a sibling of `path`, so the final replacement is
-    /// same-filesystem. A handled error before replacement removes the temporary
-    /// file and leaves any previously published snapshot untouched.
+    /// The temporary file and rollback copy are siblings of `path`, so every
+    /// replacement stays on the same filesystem. A handled error restores the
+    /// previously readable authoritative snapshot before this function returns.
     pub fn save(&self, path: impl AsRef<Path>) -> io::Result<()> {
         self.save_with_before_publish(path.as_ref(), |_| Ok(()))
     }
@@ -175,6 +190,10 @@ impl StateSnapshot {
     {
         let bytes = postcard::to_stdvec(self).map_err(|e| io::Error::other(e.to_string()))?;
         Self::decode(&bytes, "encoded snapshot")?;
+
+        // Open the parent before replacement. On Unix this preserves a usable
+        // directory handle even if a path lookup would fail after the rename.
+        let directory = SnapshotDirectory::open(path)?;
 
         let mut temp = SnapshotTempFile::create(path)?;
         {
@@ -196,10 +215,30 @@ impl StateSnapshot {
         }
         temp.close();
 
+        let previous = SnapshotBackup::capture(path)?;
+        if previous.is_some() {
+            sync_snapshot_directory(&directory, path)?;
+        }
+
         before_publish(temp.path())?;
-        publish_snapshot(temp.path(), path)?;
-        sync_published_directory(path)?;
+        if let Err(error) = publish_snapshot(temp.path(), path) {
+            let rollback = rollback_publication(previous, path, &directory);
+            return Err(publication_error(error, rollback));
+        }
         temp.disarm();
+
+        if let Err(error) = sync_snapshot_directory(&directory, path) {
+            let rollback = rollback_publication(previous, path, &directory);
+            return Err(publication_error(error, rollback));
+        }
+
+        if let Some(backup) = previous {
+            let _ = backup.cleanup();
+            // The authoritative replacement is already durable. Cleanup is
+            // best-effort and uses one fixed rollback name, so it cannot grow
+            // an unbounded set of artifacts if removal itself is unavailable.
+            let _ = directory.sync();
+        }
         Ok(())
     }
 
@@ -215,6 +254,94 @@ impl StateSnapshot {
     }
 }
 
+fn snapshot_parent(destination: &Path) -> &Path {
+    destination
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+fn snapshot_sibling(destination: &Path, suffix: &str) -> io::Result<PathBuf> {
+    let file_name = destination.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "snapshot destination must include a file name",
+        )
+    })?;
+    let mut sibling_name = OsString::from(".");
+    sibling_name.push(file_name);
+    sibling_name.push(suffix);
+    Ok(snapshot_parent(destination).join(sibling_name))
+}
+
+struct SnapshotDirectory {
+    #[cfg(unix)]
+    handle: File,
+}
+
+impl SnapshotDirectory {
+    fn open(destination: &Path) -> io::Result<Self> {
+        #[cfg(unix)]
+        {
+            let handle = File::open(snapshot_parent(destination))?;
+            Ok(Self { handle })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = destination;
+            Ok(Self {})
+        }
+    }
+
+    fn sync(&self) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            self.handle.sync_all()
+        }
+        #[cfg(not(unix))]
+        {
+            // Windows publication itself requests write-through. Other
+            // platforms are rejected by `publish_snapshot`.
+            Ok(())
+        }
+    }
+}
+
+fn sync_snapshot_directory(
+    directory: &SnapshotDirectory,
+    _destination: &Path,
+) -> io::Result<()> {
+    #[cfg(test)]
+    if should_fail_directory_sync(_destination) {
+        return Err(io::Error::other(
+            "injected failure while syncing the snapshot directory",
+        ));
+    }
+    directory.sync()
+}
+
+#[cfg(test)]
+fn should_fail_directory_sync(destination: &Path) -> bool {
+    DIRECTORY_SYNC_FAILURE.with(|failure| {
+        let mut failure = failure.borrow_mut();
+        let should_fail = match failure.as_mut() {
+            Some((configured_path, remaining)) if configured_path == destination => {
+                if *remaining == 1 {
+                    true
+                } else {
+                    *remaining -= 1;
+                    false
+                }
+            }
+            _ => false,
+        };
+        if should_fail {
+            *failure = None;
+        }
+        should_fail
+    })
+}
+
 struct SnapshotTempFile {
     path: PathBuf,
     file: Option<File>,
@@ -222,23 +349,10 @@ struct SnapshotTempFile {
 
 impl SnapshotTempFile {
     fn create(destination: &Path) -> io::Result<Self> {
-        let parent = destination
-            .parent()
-            .filter(|path| !path.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."));
-        let file_name = destination.file_name().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "snapshot destination must include a file name",
-            )
-        })?;
-
         for _ in 0..TEMP_FILE_CREATE_ATTEMPTS {
             let sequence = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let mut temp_name = OsString::from(".");
-            temp_name.push(file_name);
-            temp_name.push(format!(".{}.{}.tmp", process::id(), sequence));
-            let path = parent.join(temp_name);
+            let suffix = format!(".{}.{}.tmp", process::id(), sequence);
+            let path = snapshot_sibling(destination, &suffix)?;
 
             match OpenOptions::new()
                 .read(true)
@@ -277,7 +391,7 @@ impl SnapshotTempFile {
         self.file.take();
     }
 
-    fn disarm(mut self) {
+    fn disarm(&mut self) {
         self.file.take();
         self.path = PathBuf::new();
     }
@@ -289,6 +403,120 @@ impl Drop for SnapshotTempFile {
         if !self.path.as_os_str().is_empty() {
             let _ = fs::remove_file(&self.path);
         }
+    }
+}
+
+struct SnapshotBackup {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl SnapshotBackup {
+    fn capture(destination: &Path) -> io::Result<Option<Self>> {
+        let backup_path = snapshot_sibling(destination, ".rollback")?;
+        match fs::metadata(&backup_path) {
+            Ok(_) => {
+                if StateSnapshot::load(destination).is_err() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::AlreadyExists,
+                        format!(
+                            "rollback snapshot {} exists while the authoritative snapshot is unreadable",
+                            backup_path.display()
+                        ),
+                    ));
+                }
+                fs::remove_file(&backup_path)?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+
+        let mut source = match File::open(destination) {
+            Ok(source) => source,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut backup_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&backup_path)?;
+        let backup = Self {
+            path: backup_path,
+            armed: true,
+        };
+        io::copy(&mut source, &mut backup_file)?;
+        backup_file.flush()?;
+        backup_file.sync_all()?;
+        drop(backup_file);
+        StateSnapshot::load(backup.path())?;
+        Ok(Some(backup))
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn restore(mut self, destination: &Path) -> io::Result<()> {
+        if let Err(error) = publish_snapshot(&self.path, destination) {
+            self.armed = false;
+            return Err(io::Error::new(
+                error.kind(),
+                format!(
+                    "could not restore the previous snapshot; rollback retained at {}: {error}",
+                    self.path.display()
+                ),
+            ));
+        }
+        self.armed = false;
+        Ok(())
+    }
+
+    fn cleanup(mut self) -> io::Result<()> {
+        match fs::remove_file(&self.path) {
+            Ok(()) => {
+                self.armed = false;
+                Ok(())
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                self.armed = false;
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+impl Drop for SnapshotBackup {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn rollback_publication(
+    previous: Option<SnapshotBackup>,
+    destination: &Path,
+    directory: &SnapshotDirectory,
+) -> io::Result<()> {
+    match previous {
+        Some(backup) => backup.restore(destination)?,
+        None => match fs::remove_file(destination) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        },
+    }
+    sync_snapshot_directory(directory, destination)
+}
+
+fn publication_error(publication: io::Error, rollback: io::Result<()>) -> io::Error {
+    match rollback {
+        Ok(()) => publication,
+        Err(rollback_error) => io::Error::other(format!(
+            "snapshot publication failed: {publication}; rollback failed: {rollback_error}"
+        )),
     }
 }
 
@@ -346,22 +574,6 @@ fn publish_snapshot(_temp_path: &Path, _destination: &Path) -> io::Result<()> {
     ))
 }
 
-#[cfg(unix)]
-fn sync_published_directory(destination: &Path) -> io::Result<()> {
-    let parent = destination
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    File::open(parent)?.sync_all()
-}
-
-#[cfg(not(unix))]
-fn sync_published_directory(_destination: &Path) -> io::Result<()> {
-    // Windows publication requests write-through from MoveFileExW. Other
-    // platforms are rejected by `publish_snapshot` before reaching here.
-    Ok(())
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -403,15 +615,18 @@ mod tests {
         }
     }
 
-    fn assert_no_temporary_files(dir: &Path) {
+    fn assert_no_publication_artifacts(dir: &Path) {
         let leftovers: Vec<_> = fs::read_dir(dir)
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
-            .filter(|name| name.to_string_lossy().ends_with(".tmp"))
+            .filter(|name| {
+                let name = name.to_string_lossy();
+                name.ends_with(".tmp") || name.ends_with(".rollback")
+            })
             .collect();
         assert!(
             leftovers.is_empty(),
-            "temporary snapshot files were not cleaned up: {leftovers:?}"
+            "snapshot publication artifacts were not cleaned up: {leftovers:?}"
         );
     }
 
@@ -459,7 +674,7 @@ mod tests {
         assert_eq!(restored.log_index, original.log_index);
         assert_eq!(restored.tick, original.tick);
         assert_eq!(restored.id_counter, original.id_counter);
-        assert_no_temporary_files(dir.path());
+        assert_no_publication_artifacts(dir.path());
     }
 
     #[test]
@@ -480,7 +695,7 @@ mod tests {
         let restored = StateSnapshot::load(&path).unwrap();
         assert_eq!(restored.log_index, replacement.log_index);
         assert_eq!(restored.tick, replacement.tick);
-        assert_no_temporary_files(dir.path());
+        assert_no_publication_artifacts(dir.path());
     }
 
     #[test]
@@ -504,6 +719,42 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::Other);
         assert_eq!(fs::read(&path).unwrap(), previous_bytes);
         assert_eq!(StateSnapshot::load(&path).unwrap().log_index, 7);
-        assert_no_temporary_files(dir.path());
+        assert_no_publication_artifacts(dir.path());
+    }
+
+    #[test]
+    fn directory_sync_failure_after_replacement_restores_the_previous_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snapshot.bin");
+
+        let mut previous = sample_snapshot();
+        previous.log_index = 7;
+        previous.tick = Tick(3);
+        previous.save(&path).unwrap();
+        let previous_bytes = fs::read(&path).unwrap();
+
+        let mut replacement = sample_snapshot();
+        replacement.log_index = 99;
+        replacement.tick = Tick(25);
+        inject_directory_sync_failure(&path, 2);
+        let error = replacement.save(&path).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(fs::read(&path).unwrap(), previous_bytes);
+        assert_eq!(StateSnapshot::load(&path).unwrap().log_index, 7);
+        assert_no_publication_artifacts(dir.path());
+    }
+
+    #[test]
+    fn directory_sync_failure_during_first_publication_restores_absence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("snapshot.bin");
+
+        inject_directory_sync_failure(&path, 1);
+        let error = sample_snapshot().save(&path).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert!(!path.exists());
+        assert_no_publication_artifacts(dir.path());
     }
 }
