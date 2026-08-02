@@ -1,0 +1,136 @@
+name: Fix issue 239 fixture returns
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  fix-fixture-returns:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/delete-legacy-client-adapters
+          fetch-depth: 0
+
+      - name: Return typed Godot fixture objects
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{path}: expected one match, found {count}: {old[:100]!r}")
+              path.write_text(text.replace(old, new), encoding="utf-8")
+
+          module = Path("crates/dawn-client-gdext/src/module_row_gd.rs")
+          replace_once(
+              module,
+              '''    /// Typed fixture boundary for GdUnit. Production rows are created only
+              /// from the typed PlayerLoadout projection.
+              #[allow(clippy::too_many_arguments)]
+              #[func]
+              ''',
+              '''    /// Debug-only typed fixture for GdUnit. Production rows are created only
+              /// from the typed PlayerLoadout projection.
+              #[cfg(debug_assertions)]
+              #[allow(clippy::too_many_arguments)]
+              #[func]
+              ''',
+          )
+          replace_once(module, ") -> Variant {\n", ") -> Gd<ModuleRow> {\n")
+          replace_once(
+              module,
+              '''        let (Ok(index), Ok(module_id), Ok(cycle_time_ticks)) = (
+                  u32::try_from(index),
+                  u32::try_from(module_id),
+                  u32::try_from(cycle_time_ticks),
+              ) else {
+                  return Variant::nil();
+              };
+              ''',
+              '''        let index = u32::try_from(index).expect("fixture index must fit u32");
+              let module_id = u32::try_from(module_id).expect("fixture module ID must fit u32");
+              let cycle_time_ticks =
+                  u32::try_from(cycle_time_ticks).expect("fixture cycle time must fit u32");
+              ''',
+          )
+          replace_once(
+              module,
+              '''        })
+              .to_variant()
+              ''',
+              '''        })
+              ''',
+          )
+
+          owned = Path("crates/dawn-client-gdext/src/owned_ship_row_gd.rs")
+          replace_once(
+              owned,
+              '''    /// Typed fixture boundary for GdUnit. Negative optional IDs and an empty
+              /// type name represent absent values at the Godot boundary.
+              #[func]
+              ''',
+              '''    /// Debug-only typed fixture for GdUnit. Negative optional IDs and an empty
+              /// type name represent absent values at the Godot boundary.
+              #[cfg(debug_assertions)]
+              #[func]
+              ''',
+          )
+          replace_once(owned, ") -> Variant {\n", ") -> Gd<OwnedShipRow> {\n")
+          replace_once(
+              owned,
+              '''        let Ok(ship_id) = u64::try_from(ship_id) else {
+                  return Variant::nil();
+              };
+              ''',
+              '''        let ship_id = u64::try_from(ship_id).expect("fixture ship ID must fit u64");
+              ''',
+          )
+          replace_once(
+              owned,
+              '''        })
+              .to_variant()
+              ''',
+              '''        })
+              ''',
+          )
+
+          loadout = Path("crates/dawn-client-gdext/src/loadout_gd.rs")
+          replace_once(
+              loadout,
+              '''    /// Typed fixture boundary for focused GdUnit tests. Production state is
+              /// replaced only from a decoded `PlayerLoadoutWire`.
+              #[func]
+              ''',
+              '''    /// Debug-only typed fixture for focused GdUnit tests. Production state is
+              /// replaced only from a decoded `PlayerLoadoutWire`.
+              #[cfg(debug_assertions)]
+              #[func]
+              ''',
+          )
+          PY
+          cargo fmt --all
+          cargo check -p dawn-client-gdext --all-targets
+          cargo clippy -p dawn-client-gdext --all-targets -- -D warnings
+
+      - name: Commit fixture return fix
+        shell: bash
+        run: |
+          rm -f .github/workflows/issue-239-fix-fixture-returns.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'Return typed GdUnit fixture objects'
+          git push origin HEAD:agent/delete-legacy-client-adapters
