@@ -47,28 +47,28 @@ jobs:
           text = text.replace(old, new)
           text = text.replace(
               '''        let (mut session, mut loadout) = setup();
-                  loadout = Some(PlayerLoadoutMsg {
-                      active_ship_id: Some(1),
-                      modules: vec![module(7, true)],
-              ''',
+          loadout = Some(PlayerLoadoutMsg {
+              active_ship_id: Some(1),
+              modules: vec![module(7, true)],
+          ''',
               '''        let (mut session, _) = setup();
-                  let mut active_module = module(7, true);
-                  active_module.cycle_remaining = 0;
-                  let mut loadout = Some(PlayerLoadoutMsg {
-                      active_ship_id: Some(1),
-                      modules: vec![active_module],
-              ''',
+          let mut active_module = module(7, true);
+          active_module.cycle_remaining = 0;
+          let mut loadout = Some(PlayerLoadoutMsg {
+              active_ship_id: Some(1),
+              modules: vec![active_module],
+          ''',
               1,
           )
           text = text.replace(
               '''        let (mut session, mut loadout) = setup();
-                  loadout = Some(PlayerLoadoutMsg {
-                      modules: vec![module(7, false)],
-              ''',
+          loadout = Some(PlayerLoadoutMsg {
+              modules: vec![module(7, false)],
+          ''',
               '''        let (mut session, _) = setup();
-                  let mut loadout = Some(PlayerLoadoutMsg {
-                      modules: vec![module(7, false)],
-              ''',
+          let mut loadout = Some(PlayerLoadoutMsg {
+              modules: vec![module(7, false)],
+          ''',
               1,
           )
           path.write_text(text)
@@ -82,8 +82,8 @@ jobs:
           cargo clippy -p dawn-client-core -p dawn-client-gdext --all-targets -- -D warnings
       - name: Commit fixes and remove temporary files
         run: |
-          git rm .github/workflows/issue-251-review-fix.yml
-          git rm .github/scripts/issue_251_review_fix.py
+          git rm -f .github/workflows/issue-251-review-fix.yml
+          git rm -f .github/scripts/issue_251_review_fix.py
           git add -A
           git commit -m "fix: address issue 251 review feedback"
           git push origin HEAD:${{ github.head_ref }}
