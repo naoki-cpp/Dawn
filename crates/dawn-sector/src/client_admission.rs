@@ -72,8 +72,8 @@ pub struct CommittedClientAdmission {
     pub resumed: bool,
 }
 
-/// A successful WebSocket handshake could not be committed because its Ship
-/// disappeared while the asynchronous handshake was in flight.
+/// A successful WebSocket handshake could not be committed because the
+/// reserved Ship or admission token disappeared while the handshake was in flight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientAdmissionCommitError {
     pub player_id: PlayerId,
@@ -84,7 +84,7 @@ impl std::fmt::Display for ClientAdmissionCommitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "admission commit refused for {}: ship #{} disappeared during handshake",
+            "admission commit refused for {}: ship #{} or its reservation disappeared during handshake",
             self.player_id,
             self.ship_id.raw()
         )
@@ -107,9 +107,10 @@ enum AdmissionOrigin {
 /// - [`Self::commit`] after the socket successfully receives the handoff;
 /// - [`Self::abort`] after any handshake failure or disconnect.
 ///
-/// Fresh attempts already own a newly-spawned Ship and abort removes it. Resume
-/// attempts do not mutate ownership until commit, so abort is a no-op and can
-/// never remove the pre-existing Ship.
+/// Fresh attempts hold only a durable identity watermark plus a non-durable
+/// reservation; abort releases the reservation and never creates a Ship. Resume
+/// attempts hold a non-authoritative Ship lock until commit; abort releases that
+/// lock and never removes the pre-existing Ship.
 #[derive(Debug)]
 pub struct ClientAdmissionAttempt {
     player_id: PlayerId,
@@ -143,7 +144,7 @@ impl ClientAdmissionAttempt {
     ///
     /// Resume ownership is established here, not at begin, so a failed resume
     /// handshake cannot leave ownership or docked-player state behind. Fresh
-    /// ownership was created by the spawn and only needs a liveness check.
+    /// Ship and gameplay state are materialized here from the reserved identity.
     pub fn commit<S: EventStore>(
         self,
         node: &mut SimulationNode<S>,
@@ -180,8 +181,10 @@ impl ClientAdmissionAttempt {
 
     /// Abort after any handshake error or disconnect.
     ///
-    /// Only a fresh attempt owns rollback state. A resumed Ship predates this
-    /// connection and is deliberately left untouched (ADR-0007).
+    /// A fresh attempt releases its non-durable capacity reservation while
+    /// retaining the consumed identity watermark. A resume attempt releases
+    /// only its non-authoritative Ship lock. Neither path removes a committed
+    /// or pre-existing Ship.
     pub fn abort<S: EventStore>(self, node: &mut SimulationNode<S>) {
         match self.origin {
             AdmissionOrigin::Fresh { .. } => {
@@ -330,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_begin_is_non_durable_and_abort_releases_the_reservation() {
+    fn fresh_begin_persists_only_the_identity_watermark_and_abort_releases_capacity() {
         let mut node = node();
         let attempt = node
             .begin_client_admission(
