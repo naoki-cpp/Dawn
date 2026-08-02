@@ -1,0 +1,32 @@
+# Issue 239 inventory
+
+## ClientMessageDecoder
+
+## json_variant
+
+## from_json
+
+## apply_payload
+
+## PositionComponents
+
+## _server_to_godot_pos
+
+## _vec3_from_dict
+
+## _position_components_from_dict
+
+## _position_components
+
+## _server_components_to_godot
+
+## _velocity_components_to_vec3
+
+## _velocity_from_dict
+
+## rebase_to(
+
+## Vector3.*position
+
+## nav_pos
+
