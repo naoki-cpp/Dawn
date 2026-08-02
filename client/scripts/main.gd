@@ -131,6 +131,7 @@ func _assert_scene_tree_refs() -> void:
 
 func _ready() -> void:
 	_assert_scene_tree_refs()
+	_connection.bind_client_state(_session, _loadout)
 	_connection.event_received.connect(_on_event_received)
 	_connection.motion_correction_received.connect(_handle_motion_correction)
 	_connection.connection_changed.connect(_on_connection_changed)
@@ -196,6 +197,9 @@ func _position_components(value: Variant) -> PackedFloat64Array:
 
 func _server_components_to_godot(position: PackedFloat64Array) -> Vector3:
 	return _world.to_godot_components(position[0], position[1], position[2])
+
+func _velocity_components_to_vec3(velocity: PackedFloat64Array) -> Vector3:
+	return Vector3(velocity[0], velocity[1], velocity[2])
 
 ## Reads a {dx,dy,dz} velocity sub-dictionary from a wire payload.
 func _velocity_from_dict(d: Dictionary, key: String = "velocity") -> Vector3:
@@ -484,31 +488,13 @@ func _send_stop_command() -> void:
 # -- Event handlers -----------------------------------------------------------
 
 func _on_event_received(outcome: ServerEventOutcome) -> void:
-	_session.increment_event_count()
 	_sync_session_state()
 	if not outcome.dispatch(self):
 		push_warning("[World] failed to dispatch typed server event outcome")
-
-
-# -- Position snap (ADR-0029) -------------------------------------------------
-
-## Authoritative absolute-position snap (server → client), e.g. on warp arrival
-## after an anchor rebase. The client maps the server-absolute position through
-## the CURRENT floating origin and snaps the ship there, correcting the large
-## dead-reckoning drift a true-AU warp accumulates. Supersedes the client's
-## pre-computed (and now origin-stale) warp snap for body warps.
-func _handle_position_snap(p: Dictionary) -> void:
-	var ship_id: int = p.get("ship_id", 0) as int
+func _handle_position_snap(ship_id: int, server_pos: PackedFloat64Array) -> void:
 	if not _ships.has(ship_id):
 		return
-	var server_pos := _position_components_from_dict(p, "position")
 	if ship_id == _player_ship_id:
-		# A warp crosses ~1 AU but the player's visual ship lagged behind (its
-		# warp speed was capped). Correcting that by moving the ship would make
-		# the camera pan/swing. Instead, keep the ship (and camera) exactly where
-		# they are on screen and re-anchor the floating origin so that this same
-		# Godot position now represents the authoritative arrival `server_pos`:
-		# new_origin = server_pos - (ship's server-space offset from the origin).
 		var pg: Vector3 = _ship_position(_ships[ship_id] as Node3D)
 		var new_origin := PackedFloat64Array([
 			server_pos[0] - pg.x / _world.render_scale(),
@@ -517,100 +503,79 @@ func _handle_position_snap(p: Dictionary) -> void:
 		_presentation.apply_origin_rebase_components(new_origin, true, _player_ship_id, _ships)
 	else:
 		(_ships[ship_id] as Node3D).call(
-			"reset_motion",
-			server_pos,
-			Vector3.ZERO,
-			_session.current_tick())
-	var ship := _ships[ship_id] as Node3D
+			"reset_motion", server_pos, Vector3.ZERO, _session.current_tick())
 	if ship_id == _player_ship_id:
-		ship.call("reset_motion", server_pos, Vector3.ZERO, _session.current_tick())
-
-## Docking is authoritative server state. The server stops the ship
-## immediately, but without an explicit client event the ship_controller keeps
-## integrating the last VelocityChanged it saw and visually drifts. Treat a
-## ShipDocked like a motion snap-to-station from the client's perspective:
-## zero residual velocity/thrust at once.
-func _handle_ship_docked(p: Dictionary) -> void:
-	var ship_id: int = p.get("ship_id", 0) as int
-	var station_id: int = p.get("station_id", -1) as int
-	var tick: int = p.get("tick", 0) as int
+		(_ships[ship_id] as Node3D).call(
+			"reset_motion", server_pos, Vector3.ZERO, _session.current_tick())
+func _handle_ship_docked(
+	ship_id: int,
+	station_id: int,
+	tick: int,
+	session_accepted: bool
+) -> void:
 	if not _ships.has(ship_id):
 		return
-	if ship_id == _player_ship_id:
-		var latest_tick: int = _session.latest_dock_state_tick()
-		if tick < latest_tick:
-			return
+	if ship_id == _player_ship_id and not session_accepted:
+		return
 	var ship := _ships[ship_id] as Node3D
 	var dock_pos: PackedFloat64Array = ship.call("server_position") as PackedFloat64Array
-	var station_name := _station_name(station_id)
 	for entry: Variant in _stations:
 		var station: StationRecord = entry as StationRecord
-		if station.station_id != station_id:
-			continue
-		dock_pos = _position_components(station.position)
-		station_name = station.name
-		break
-	var motion_accepted: bool = ship.call("dock_motion", dock_pos, tick) as bool
-	if not motion_accepted:
+		if station.station_id == station_id:
+			dock_pos = _position_components(station.position)
+			break
+	if not (ship.call("dock_motion", dock_pos, tick) as bool):
 		return
-	if ship_id == _player_ship_id and _session.apply_dock_event(
-		ship_id, station_id, station_name, tick):
-		_sync_session_state()
-
-func _handle_ship_undocked(p: Dictionary) -> void:
-	var ship_id: int = p.get("ship_id", 0) as int
-	var tick: int = p.get("tick", _session.current_tick()) as int
-	if ship_id == _player_ship_id:
-		var latest_tick: int = _session.latest_dock_state_tick()
-		if tick < latest_tick:
-			return
+	_sync_session_state()
+func _handle_ship_undocked(
+	ship_id: int,
+	station_id: int,
+	tick: int,
+	session_accepted: bool
+) -> void:
+	if ship_id == _player_ship_id and not session_accepted:
+		return
 	if _ships.has(ship_id):
 		var ship := _ships[ship_id] as Node3D
-		var motion_accepted: bool = ship.call(
+		if not (ship.call(
 			"undock_motion",
 			ship.call("server_position"),
 			Vector3.ZERO,
-			tick) as bool
-		if not motion_accepted:
+			tick) as bool):
 			return
 	if ship_id == _player_ship_id:
-		var station_id: int = p.get("station_id", -1) as int
 		_nearby_station_ids.clear()
 		if station_id >= 0:
 			_nearby_station_ids.append(station_id)
-		if _session.apply_undock_event(ship_id, tick):
-			_sync_session_state()
-
+	_sync_session_state()
 func _ship_position(ship: Node3D) -> Vector3:
 	return ship.global_position if ship.is_inside_tree() else ship.position
 
 # -- Jump Gate (ADR-0009) -----------------------------------------------------
 
 ## Ship passed through a Jump Gate -- teleport to entry_pos.
-func _handle_jump_gate_used(p: Dictionary) -> void:
-	var ship_id: int = p.get("ship_id", 0) as int
+func _handle_jump_gate_used(
+	ship_id: int,
+	gate_id: int,
+	entry_pos: PackedFloat64Array,
+	tick: int
+) -> void:
 	if not _ships.has(ship_id):
 		return
-	var entry_pos := _position_components_from_dict(p, "entry_pos")
-	var tick: int = p.get("tick", _session.current_tick()) as int
 	(_ships[ship_id] as Node3D).call("update_target", entry_pos, tick)
 	if ship_id == _player_ship_id:
-		_jump_notice       = "Jumped via Gate #%d" % (p.get("gate_id", 0) as int)
+		_jump_notice = "Jumped via Gate #%d" % gate_id
 		_jump_notice_timer = 3.0
-
-## Ship moved to a different star system -- show HUD notification.
-func _handle_star_system_changed(p: Dictionary) -> void:
-	var ship_id: int = p.get("ship_id", 0) as int
-	var to_system: int = p.get("to_system", 0) as int
-	var to_name: Variant = _session.system_changed(ship_id, to_system)
+func _handle_star_system_changed(
+	_ship_id: int,
+	_to_system: int,
+	to_name: Variant
+) -> void:
 	_sync_session_state()
 	if to_name != null:
-		_jump_notice         = "Entered %s system" % to_name
-		_jump_notice_timer   = 3.0
+		_jump_notice = "Entered %s system" % to_name
+		_jump_notice_timer = 3.0
 		_interaction.clear_navigation_selection()
-		## Gate / body markers refresh from the next InitialState (sent when the
-		## client reconnects to the destination node after the Redirect).
-
 func _on_connection_changed(connected: bool) -> void:
 	if not connected:
 		_clear_all_ships()
@@ -648,29 +613,18 @@ func _on_market_cancel_order(order_id: int) -> void:
 	_connection.send_market_cancel_order_command(order_id)
 
 
-func _on_market_snapshot(snapshot: Dictionary) -> void:
+func _on_market_snapshot(snapshot: MarketSnapshot) -> void:
 	_market_surface.apply_snapshot(snapshot)
-
-## InitialState received: ingest the Sector's navigation map, then spawn all
-## ship nodes in one pass. ShipSpawned events are not sent in Phase 5;
-## InitialState handles initialization.
-func _on_initial_state(state: Dictionary) -> void:
-	_clear_all_ships()  ## Reset on reconnect
+func _on_initial_state(state: InitialStatePresentation) -> void:
+	_clear_ship_nodes()
 	_hud_surface.hide_duel_result()
-	_ingest_star_map(state)
-
-	for ship_data: Variant in (state.get("ships", []) as Array):
-		_spawn_ship_from_data(ship_data as Dictionary)
-
-## Store the server-provided navigation map (system names, this Sector's gates
-## and bodies) and rebuild the gate / body markers from it. This replaces the
-## previously hard-coded JUMP_GATES / CELESTIAL_BODIES / STAR_SYSTEM_NAMES.
-func _ingest_star_map(state: Dictionary) -> void:
-	_session.ingest_navigation(state)
+	_ingest_star_map()
+	for ship_entry: Variant in state.ships:
+		_spawn_ship_from_record(
+			ship_entry as ShipPresentation,
+			(ship_entry as ShipPresentation).ship_id == _session.player_ship_id())
+func _ingest_star_map() -> void:
 	_sync_session_state()
-	## Navigation data is write-once per Sector (only this call changes it) --
-	## cached here so _process()'s per-frame proximity checks and HUD reads
-	## don't rebuild these collections from Rust state 60x/sec.
 	_gates = _session.gates()
 	_stations = _session.stations()
 	_bodies = _session.bodies()
@@ -682,9 +636,6 @@ func _ingest_star_map(state: Dictionary) -> void:
 		_server_components_to_godot,
 		Callable(_interaction, "clear_navigation_selection")
 	)
-
-## Instantiate a ship scene at an absolute server-space position.
-## WorldSession owns registry insertion; main.gd only creates the scene node.
 func _instantiate_ship(sid: int, server_pos: PackedFloat64Array) -> Node3D:
 	var ship: Node3D = SHIP_SCENE.instantiate() as Node3D
 	_ships_root.add_child(ship)
@@ -692,44 +643,35 @@ func _instantiate_ship(sid: int, server_pos: PackedFloat64Array) -> Node3D:
 	ship.name = "Ship_%d" % sid
 	return ship
 
-## Materialize one ship node from a ship-state dict. Shared by InitialState and
-## AoiEnter (ADR-0019). Skips ships already present.
-func _spawn_ship_from_data(d: Dictionary) -> void:
-	var sid: int = d.get("ship_id", 0) as int
+## Materialize one ship node from a typed presentation record. Shared by
+## InitialState and AoiEnter (ADR-0019). Skips ships already present.
+func _spawn_ship_from_record(record: ShipPresentation, became_player: bool) -> void:
+	var sid: int = record.ship_id
 	if _ships.has(sid):
 		return
-	var server_pos := _position_components_from_dict(d, "position")
+	var server_pos: PackedFloat64Array = record.position
 	var ship: Node3D = _instantiate_ship(sid, server_pos)
 	ship.call(
 		"configure_motion",
-		d.get("max_speed", 500.0) as float,
-		d.get("mass", 10_000_000.0) as float,
-		d.get("inertia_modifier", 0.3) as float,
+		record.max_speed,
+		record.mass,
+		record.inertia_modifier,
 		server_pos,
-		_velocity_from_dict(d),
+		_velocity_components_to_vec3(record.velocity),
 		_session.current_tick())
-	var became_player: bool = _session.register_ship(sid, d, _connection.ship_id)
 	_ships[sid] = ship
 	_sync_session_state()
 	if became_player:
 		_set_as_player_ship(sid, ship)
-
-## AoI: a ship entered the player's neighborhood -- materialize it (ADR-0019).
-func _handle_aoi_enter(p: Dictionary) -> void:
-	var ship: Dictionary = p.get("ship", {}) as Dictionary
-	if not ship.is_empty():
-		_spawn_ship_from_data(ship)
-
-## AoI: a ship left the player's neighborhood -- remove it locally with no death
-## effect (it is still alive elsewhere, just out of view / ADR-0019).
-func _handle_aoi_leave(p: Dictionary) -> void:
-	var sid: int = p.get("ship_id", 0) as int
-	## clear_lock=false: the ship is still alive server-side, just outside
-	## this player's AoI radius (ADR-0019) -- Lock has no distance-based
-	## expiry (lock.rs), so clearing player_lock_target here would desync
-	## from the server and strand the lock forever (see WorldSession state).
+func _handle_aoi_enter(
+	ship: ShipPresentation,
+	registered: bool,
+	became_player: bool
+) -> void:
+	if registered:
+		_spawn_ship_from_record(ship, became_player)
+func _handle_aoi_leave(sid: int, removed: bool) -> void:
 	var ship: Node3D = _ships.get(sid) as Node3D
-	var removed: bool = _session.remove_ship(sid, false)
 	_sync_session_state()
 	if not removed:
 		return
@@ -737,46 +679,16 @@ func _handle_aoi_leave(p: Dictionary) -> void:
 	_ships.erase(sid)
 	if ship != null:
 		ship.queue_free()
-
-## Sent on connect and again after every Fit/Unfit (ADR-0032), so the panel
-## and module bar always reflect the server's authoritative fitting state --
-## including a rejected Fit/Unfit attempt reverting visibly.
-func _on_player_fitting(bytes: PackedByteArray) -> void:
-	## connection.gd hands the raw postcard bytes (ADR-0042), not a parsed
-	## Dictionary: PlayerLoadout.apply_wire_bytes decodes them directly into
-	## typed Rust state, with no lossy Dictionary/JSON round-trip in between.
-	_loadout.apply_wire_bytes(bytes)
+func _on_player_fitting() -> void:
 	_apply_loadout_side_effects()
-
-## Everything `_on_player_fitting` does after the wire decode itself, split
-## out so tests can drive it via `_loadout.apply_payload()` (test/debug-only
-## JSON fixture path) without needing real postcard bytes.
 func _apply_loadout_side_effects() -> void:
-	## Disembark/SelectActiveShip/Assemble (ADR-0037) can change which ship
-	## is active independently of any command this client sent. Only follow
-	## it when it's -1 (no active ship) or a ship this client already knows
-	## about -- switching to a *different* owned ship this client has never
-	## rendered would need to spawn it first, which isn't covered here
-	## (docs/architecture/ownership.md §8). Both branches route through
-	## WorldPresentation (attach for a known ship, detach for none) instead of
-	## a bare _player_ship_id assignment -- regression (fixed twice already):
-	## a bookkeeping-only update leaves the camera/material/tactical-overlay
-	## out of sync with which ship is actually active.
-	var new_active_ship_id: int = _loadout.active_ship_id()
-	if new_active_ship_id != _player_ship_id \
-			and (new_active_ship_id < 0 or _ships.has(new_active_ship_id)):
-		_session.set_player_ship_id(new_active_ship_id)
-		if new_active_ship_id >= 0:
+	var new_active_ship_id: int = _session.player_ship_id()
+	if new_active_ship_id != _player_ship_id:
+		if new_active_ship_id >= 0 and _ships.has(new_active_ship_id):
 			_set_as_player_ship(new_active_ship_id, _ships[new_active_ship_id] as Node3D)
-		else:
+		elif new_active_ship_id < 0:
 			_player_ship_id = new_active_ship_id
 			_presentation.detach_player_ship()
-
-	_session.apply_dock_fitting(
-		_loadout.docked_station_id(),
-		_loadout.docked_station_name(),
-		_loadout.tick()
-	)
 	_sync_session_state()
 	if not _session.is_docked() and _market_surface.is_open():
 		_market_surface.set_open(false)
@@ -792,26 +704,22 @@ func _apply_loadout_side_effects() -> void:
 		modules, inventory, station_inventory, owned_ships, _buildable_ship_types)
 	_market_surface.set_cargo(inventory)
 	_recalc_weapon_range()
-
 func _recalc_weapon_range() -> void:
 	_weapon_range = _loadout.weapon_optimal_range()
 	_weapon_falloff = _loadout.weapon_falloff_range()
 	_presentation.update_tactical_overlay_ranges(_weapon_range, _weapon_falloff)
 
-func _on_module_activated(p_ship_id: int, p_module_id: int, _slot: String) -> void:
-	if p_ship_id != _player_ship_id:
-		return
-	_apply_player_module_activation(p_module_id, true, "")
-
-## reason is server-authoritative now ("cap" | "range" | "", ADR-0035), so it
-## replaces the old "were we the one who sent Deactivate" heuristic, which
-## always mislabelled a range-forced OFF as a capacitor exhaustion.
-func _on_module_deactivated(p_ship_id: int, p_module_id: int, _slot: String, reason: String) -> void:
-	if p_ship_id != _player_ship_id:
-		return
-	_apply_player_module_activation(p_module_id, false, reason)
-
-
+func _on_module_activated(p_ship_id: int, _p_module_id: int, _slot: String) -> void:
+	if p_ship_id == _player_ship_id:
+		_recalc_weapon_range()
+func _on_module_deactivated(
+	p_ship_id: int,
+	_p_module_id: int,
+	_slot: String,
+	_reason: String
+) -> void:
+	if p_ship_id == _player_ship_id:
+		_recalc_weapon_range()
 func _apply_player_module_activation(module_id: int, active: bool, forced_reason: String) -> void:
 	_loadout.apply_module_activation(module_id, active, forced_reason)
 	_recalc_weapon_range()
@@ -1049,56 +957,39 @@ func _set_as_player_ship(p_ship_id: int, ship: Node3D) -> void:
 
 # -- Domain event handlers ----------------------------------------------------
 
-func _handle_ship_spawned(p: Dictionary) -> void:
-	var ship_id: int = p.get("ship_id", 0) as int
-	if _ships.has(ship_id):
+func _handle_ship_spawned(
+	ship_id: int,
+	position: PackedFloat64Array,
+	registered: bool,
+	became_player: bool
+) -> void:
+	if not registered or _ships.has(ship_id):
 		return
-
-	var ship: Node3D = _instantiate_ship(
-		ship_id,
-		_position_components_from_dict(p, "position"))
-	var became_player: bool = _session.register_ship(ship_id, p, _connection.ship_id)
+	var ship: Node3D = _instantiate_ship(ship_id, position)
 	_ships[ship_id] = ship
 	_sync_session_state()
-
-	## If this ship matches the player_id from Welcome, set it as the player ship
 	if became_player:
 		_set_as_player_ship(ship_id, ship)
-
-func _handle_velocity_changed(p: Dictionary) -> void:
-	var ship_id : int = p.get("ship_id", 0) as int
+func _handle_velocity_changed(
+	ship_id: int,
+	velocity: PackedFloat64Array,
+	tick: int
+) -> void:
 	if not _ships.has(ship_id):
 		return
-
-	var server_vel := _velocity_from_dict(p)
-	var tick: int = p.get("tick", 0) as int
-	(_ships[ship_id] as Node3D).call("set_velocity", server_vel, tick)
-
-	## Warp arrival is corrected by the server's PositionSnap (ADR-0029), not by
-	## client-side dead-reckoning detection.
-
-	_session.advance_tick_from_event(tick, _loadout)
-	_sync_session_state()
-
-## Owner-only absolute correction for Rust client-side prediction (ADR-0043).
-## Other ships continue to use the event-driven dead-reckoning path.
-func _handle_motion_correction(p: Dictionary) -> void:
-	var ship_id: int = p.get("ship_id", 0) as int
-	if ship_id != _player_ship_id or not _ships.has(ship_id):
-		return
-	var tick: int = p.get("tick", 0) as int
-	var server_pos := _position_components_from_dict(p, "position")
 	(_ships[ship_id] as Node3D).call(
+		"set_velocity", _velocity_components_to_vec3(velocity), tick)
+	_sync_session_state()
+func _handle_motion_correction(correction: MotionCorrectionPresentation) -> void:
+	if correction.ship_id != _player_ship_id or not _ships.has(correction.ship_id):
+		return
+	(_ships[correction.ship_id] as Node3D).call(
 		"reconcile_motion",
-		server_pos,
-		_velocity_from_dict(p),
-		tick)
-
-
-func _handle_ship_despawned(p: Dictionary) -> void:
-	var ship_id: int = p.get("ship_id", 0) as int
+		correction.position,
+		_velocity_components_to_vec3(correction.velocity),
+		correction.tick)
+func _handle_ship_despawned(ship_id: int, removed: bool) -> void:
 	var ship: Node3D = _ships.get(ship_id) as Node3D
-	var removed: bool = _session.remove_ship(ship_id, true)
 	_sync_session_state()
 	if not removed:
 		return
@@ -1106,34 +997,16 @@ func _handle_ship_despawned(p: Dictionary) -> void:
 	if ship != null:
 		ship.queue_free()
 	_interaction.clear_target_if_matches(ship_id)
-
-func _handle_damage_taken(p: Dictionary) -> void:
-	var ship_id: int = p.get("ship_id", 0) as int
-	_session.apply_health_event(
-		ship_id,
-		p.get("current_shield", 0.0) as float,
-		p.get("current_armor", 0.0) as float,
-		p.get("current_hull", 0.0) as float)
+func _handle_damage_taken(ship_id: int) -> void:
 	_sync_session_state()
-	## Flash red on any ship that takes damage (visual hit feedback)
 	if _ships.has(ship_id):
 		(_ships[ship_id] as Node3D).call("flash_damage")
-
-func _handle_repair_applied(p: Dictionary) -> void:
-	var ship_id: int = p.get("ship_id", 0) as int
-	_session.apply_health_event(
-		ship_id,
-		p.get("current_shield", 0.0) as float,
-		p.get("current_armor", 0.0) as float,
-		p.get("current_hull", 0.0) as float)
+func _handle_repair_applied(ship_id: int) -> void:
 	_sync_session_state()
 	if _ships.has(ship_id):
 		(_ships[ship_id] as Node3D).call("flash_repair")
-
-func _handle_ship_destroyed(p: Dictionary) -> void:
-	var ship_id: int = p.get("ship_id", 0) as int
+func _handle_ship_destroyed(ship_id: int, outcome: DestructionOutcome) -> void:
 	var ship: Node3D = _ships.get(ship_id) as Node3D
-	var outcome: DestructionOutcome = _session.destroy_ship(ship_id)
 	_sync_session_state()
 	if not outcome.destroyed:
 		return
@@ -1141,33 +1014,19 @@ func _handle_ship_destroyed(p: Dictionary) -> void:
 	if ship == null:
 		return
 	_interaction.clear_target_if_matches(ship_id)
-	## Play destruction effect (queue_free happens inside play_destroy_effect)
 	ship.call("play_destroy_effect")
 	if outcome.destroyed_player:
-		_hud_surface.show_duel_result(false)  ## DEFEAT
+		_hud_surface.show_duel_result(false)
 	elif outcome.destroyed_opponent:
-		_hud_surface.show_duel_result(true)   ## VICTORY
-
-func _handle_target_locked(p: Dictionary) -> void:
-	var locker_id: int = p.get("locker_id", 0) as int
-	var target_id: int = p.get("target_id", 0) as int
-	## Player completed a lock
-	if _session.apply_target_locked(locker_id, target_id):
-		_sync_session_state()
-		if _ships.has(target_id):
-			(_ships[target_id] as Node3D).call("set_lock_state", "locked")
-	## Locked by another ship (no visual indicator)
-
-func _handle_lock_lost(p: Dictionary) -> void:
-	var locker_id: int = p.get("locker_id", 0) as int
-	var target_id: int = p.get("target_id", 0) as int
-	if _session.apply_lock_lost(locker_id, target_id):
-		_sync_session_state()
-		if _ships.has(target_id):
-			(_ships[target_id] as Node3D).call("set_lock_state", "none")
-
-# -- HUD ----------------------------------------------------------------------
-
+		_hud_surface.show_duel_result(true)
+func _handle_target_locked(_locker_id: int, target_id: int, changed: bool) -> void:
+	_sync_session_state()
+	if changed and _ships.has(target_id):
+		(_ships[target_id] as Node3D).call("set_lock_state", "locked")
+func _handle_lock_lost(_locker_id: int, target_id: int, changed: bool) -> void:
+	_sync_session_state()
+	if changed and _ships.has(target_id):
+		(_ships[target_id] as Node3D).call("set_lock_state", "none")
 func _update_hud() -> void:
 	var speed_str: String = "-"
 	if _player_ship_id >= 0 and _ships.has(_player_ship_id):
@@ -1288,11 +1147,15 @@ func _advance_client_cap_ticks(delta: float) -> void:
 
 # -- Internal utilities -------------------------------------------------------
 
-func _clear_all_ships() -> void:
+func _clear_ship_nodes() -> void:
 	for ship_node: Node3D in _ships.values():
 		if is_instance_valid(ship_node):
 			ship_node.queue_free()
 	_ships.clear()
+
+
+func _clear_all_ships() -> void:
+	_clear_ship_nodes()
 	_session.reset()
 	_sync_session_state()
 	## _session.reset() clears WorldSession's navigation map too -- clear the

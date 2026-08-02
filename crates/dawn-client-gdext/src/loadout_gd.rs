@@ -1,6 +1,7 @@
 use dawn_client_core::PlayerLoadoutMsg;
 use godot::prelude::*;
 
+#[cfg(test)]
 use crate::client_outcome::validate_player_loadout_godot_ranges;
 use crate::item_row_gd::ItemRow;
 use crate::module_row_gd::{parse_kind, ModuleRow};
@@ -35,7 +36,7 @@ fn wire_module_kind(kind: dawn_core::ModuleKind) -> dawn_client_core::ModuleKind
 /// types are foreign to this crate, so the orphan rule forbids it anyway,
 /// and this adapter-layer conversion is exactly what `dawn-client-gdext` is
 /// for.
-fn wire_to_loadout_msg(wire: dawn_wire::PlayerLoadoutWire) -> PlayerLoadoutMsg {
+pub(crate) fn wire_to_loadout_msg(wire: dawn_wire::PlayerLoadoutWire) -> PlayerLoadoutMsg {
     PlayerLoadoutMsg {
         tick: wire.tick,
         modules: wire.modules.into_iter().map(wire_to_module_row).collect(),
@@ -122,6 +123,16 @@ impl PlayerLoadout {
         self.loadout.as_mut()
     }
 
+    pub(crate) fn replace_wire(&mut self, wire: dawn_wire::PlayerLoadoutWire) {
+        self.loadout = Some(wire_to_loadout_msg(wire));
+    }
+
+    pub(crate) fn apply_activation(&mut self, module_id: u32, active: bool, forced_reason: String) {
+        if let Some(loadout) = &mut self.loadout {
+            loadout.apply_module_activation(module_id, active, forced_reason);
+        }
+    }
+
     #[func]
     fn reset(&mut self) {
         self.loadout = None;
@@ -129,9 +140,9 @@ impl PlayerLoadout {
 
     /// Test/debug-only convenience: builds state directly from a hand-built
     /// JSON fixture, bypassing the wire entirely. Never called by
-    /// `connection.gd` in production (that always goes through
-    /// `apply_wire_bytes`, ADR-0042) -- this exists so GdUnit4 tests can set
-    /// up a `PlayerLoadout` fixture without constructing real postcard bytes.
+    /// `connection.gd` in production (that always goes through the typed
+    /// `ServerMessageOutcome` path, ADR-0042/ADR-0046) -- this exists so
+    /// focused GdUnit4 tests can set up a `PlayerLoadout` fixture.
     #[func]
     fn apply_payload(&mut self, json: GString) -> bool {
         match serde_json::from_str::<PlayerLoadoutMsg>(&json.to_string()) {
@@ -141,36 +152,6 @@ impl PlayerLoadout {
             }
             Err(err) => {
                 godot_error!("PlayerLoadout.apply_payload: {err}");
-                false
-            }
-        }
-    }
-
-    /// Decodes a `ServerMessage::PlayerLoadout` binary WebSocket frame
-    /// (ADR-0042) directly into this crate's typed state -- bypassing the
-    /// generic `Dictionary` decode path (`ServerMessageDecoder`) entirely,
-    /// since Rust-to-Rust decode preserves exact int/float types with no
-    /// GDScript `JSON.parse_string` lossiness to work around. The decoded
-    /// values are checked against every narrower Godot/client representation
-    /// before state is replaced. Returns `false` and leaves the previous state
-    /// untouched if the frame or one of those boundary values is invalid.
-    #[func]
-    fn apply_wire_bytes(&mut self, bytes: PackedByteArray) -> bool {
-        match dawn_wire::ServerMessage::decode(bytes.as_slice()) {
-            Ok(dawn_wire::ServerMessage::PlayerLoadout(wire)) => {
-                if let Err(error) = validate_player_loadout_godot_ranges(&wire) {
-                    godot_error!("PlayerLoadout.apply_wire_bytes: {error}");
-                    return false;
-                }
-                self.loadout = Some(wire_to_loadout_msg(wire));
-                true
-            }
-            Ok(_) => {
-                godot_error!("PlayerLoadout.apply_wire_bytes: not a PlayerLoadout message");
-                false
-            }
-            Err(err) => {
-                godot_error!("PlayerLoadout.apply_wire_bytes: {err}");
                 false
             }
         }

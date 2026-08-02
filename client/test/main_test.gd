@@ -42,6 +42,24 @@ const FULL_ZERO_STAT_DELTA: Dictionary = {
 var _main: Node
 
 
+class TypedOutcomeTarget:
+	extends RefCounted
+
+	func _accept_initial_state(_state: InitialStatePresentation) -> void:
+		pass
+
+	func _accept_player_loadout() -> void:
+		pass
+
+
+func _dispatch_fixture(kind: String, connection_ship_id: int = -1) -> void:
+	var outcome: ServerMessageOutcome = ServerMessageDecoder.new().test_outcome(kind)
+	assert_object(outcome).is_not_null()
+	assert_bool(outcome.dispatch(
+		TypedOutcomeTarget.new(), _main._session, _main._loadout, connection_ship_id
+	)).is_true()
+
+
 class FakeShip:
 	extends Node3D
 
@@ -258,10 +276,8 @@ func test_player_position_snap_clears_residual_warp_motion() -> void:
 	_main._ships = {1: ship}
 	_main._player_ship_id = 1
 
-	_main._handle_position_snap({
-		"ship_id": 1,
-		"position": {"x": 1_000_000.0, "y": 0.0, "z": 0.0},
-	})
+	_main._handle_position_snap(
+		1, PackedFloat64Array([1_000_000.0, 0.0, 0.0]))
 
 	assert_vector(ship.velocity_calls.back()).is_equal(Vector3.ZERO)
 	assert_vector(ship.thrust_calls.back()).is_equal(Vector3.ZERO)
@@ -274,10 +290,8 @@ func test_observed_ship_position_snap_clears_residual_warp_motion() -> void:
 	_main._ships = {2: ship}
 	_main._player_ship_id = 1
 
-	_main._handle_position_snap({
-		"ship_id": 2,
-		"position": {"x": 100.0, "y": 20.0, "z": 300.0},
-	})
+	_main._handle_position_snap(
+		2, PackedFloat64Array([100.0, 20.0, 300.0]))
 
 	assert_array(ship.server_position_value).contains_exactly([100.0, 20.0, 300.0])
 	assert_vector(ship.velocity_calls.back()).is_equal(Vector3.ZERO)
@@ -294,11 +308,7 @@ func test_ship_docked_event_clears_residual_motion() -> void:
 		PackedFloat64Array([5.0 * AU_M + 10.0, 20.0, 300.0]), 0.0)]
 	_main._world.rebase_to_components(5.0 * AU_M, 0.0, 0.0)
 
-	_main._handle_ship_docked({
-		"ship_id": 2,
-		"station_id": 0,
-		"tick": 12,
-	})
+	_main._handle_ship_docked(2, 0, 12, true)
 
 	## FakeShip is not attached to a live SceneTree here, so `position` is the
 	## stable seam for verifying the dock snap.
@@ -316,11 +326,7 @@ func test_ship_docked_event_stops_ship_when_station_map_is_not_ready() -> void:
 	ship.server_position_value = PackedFloat64Array([9.0, 8.0, 7.0])
 	_main._ships = {2: ship}
 
-	_main._handle_ship_docked({
-		"ship_id": 2,
-		"station_id": 99,
-		"tick": 12,
-	})
+	_main._handle_ship_docked(2, 99, 12, true)
 
 	assert_int(ship.dock_calls.size()).is_equal(1)
 	assert_array(ship.dock_calls[0]["position"]).contains_exactly([9.0, 8.0, 7.0])
@@ -336,11 +342,8 @@ func test_stale_player_undock_event_does_not_leave_docked_state() -> void:
 	_main._session.set_player_ship_id(2)
 	_main._session.apply_dock_fitting(0, "Forge Station", 12)
 
-	_main._handle_ship_undocked({
-		"ship_id": 2,
-		"station_id": 0,
-		"tick": 11,
-	})
+	var accepted: bool = _main._session.apply_undock_event(2, 11)
+	_main._handle_ship_undocked(2, 0, 11, accepted)
 
 	assert_int(ship.undock_calls.size()).is_equal(0)
 	assert_int(_main._session.docked_station_id()).is_equal(0)
@@ -359,6 +362,7 @@ func test_player_loadout_refresh_preserves_docked_motion_state() -> void:
 		"docked_station_id": 0,
 		"docked_station_name": "Forge Station",
 	}))
+	_main._session.apply_dock_fitting(0, "Forge Station", 12)
 
 	_main._apply_loadout_side_effects()
 
@@ -392,12 +396,12 @@ func test_motion_correction_reconciles_the_active_ship() -> void:
 	_main._ships = {1: ship}
 	_main._player_ship_id = 1
 
-	_main._handle_motion_correction({
-		"ship_id": 1,
-		"position": {"x": 100.0, "y": 20.0, "z": 300.0},
-		"velocity": {"dx": 4.0, "dy": 5.0, "dz": -6.0},
-		"tick": 42,
-	})
+	var correction := MotionCorrectionPresentation.new()
+	correction.ship_id = 1
+	correction.position = PackedFloat64Array([100.0, 20.0, 300.0])
+	correction.velocity = PackedFloat64Array([4.0, 5.0, -6.0])
+	correction.tick = 42
+	_main._handle_motion_correction(correction)
 
 	assert_int(ship.reconcile_calls.size()).is_equal(1)
 	var motion_call: Dictionary = ship.reconcile_calls.back()
@@ -412,11 +416,8 @@ func test_velocity_changed_passes_the_authority_tick_to_the_ship() -> void:
 	_main.add_child(ship)
 	_main._ships = {1: ship}
 
-	_main._handle_velocity_changed({
-		"ship_id": 1,
-		"velocity": {"dx": 4.0, "dy": 5.0, "dz": -6.0},
-		"tick": 42,
-	})
+	_main._handle_velocity_changed(
+		1, PackedFloat64Array([4.0, 5.0, -6.0]), 42)
 
 	assert_array(ship.velocity_tick_calls).contains_exactly([42])
 	ship.free()
@@ -429,12 +430,12 @@ func test_motion_correction_preserves_small_motion_near_a_true_au_origin() -> vo
 	_main._player_ship_id = 1
 	_main._world.rebase_to_components(5.0 * 1.495978707e11, 0.0, 0.0)
 
-	_main._handle_motion_correction({
-		"ship_id": 1,
-		"position": {"x": 5.0 * 1.495978707e11 + 10.0, "y": 0.0, "z": 0.0},
-		"velocity": {"dx": 4.0, "dy": 0.0, "dz": 0.0},
-		"tick": 43,
-	})
+	var correction := MotionCorrectionPresentation.new()
+	correction.ship_id = 1
+	correction.position = PackedFloat64Array([5.0 * AU_M + 10.0, 0.0, 0.0])
+	correction.velocity = PackedFloat64Array([4.0, 0.0, 0.0])
+	correction.tick = 43
+	_main._handle_motion_correction(correction)
 
 	var motion_call: Dictionary = ship.reconcile_calls.back()
 	assert_array(motion_call["position"]).contains_exactly([
@@ -449,11 +450,8 @@ func test_player_ship_undocked_event_clears_docked_station_state() -> void:
 	_main._session.set_player_ship_id(2)
 	_main._session.apply_dock_fitting(0, "Forge Station", 12)
 
-	_main._handle_ship_undocked({
-		"ship_id": 2,
-		"station_id": 0,
-		"tick": 13,
-	})
+	var accepted: bool = _main._session.apply_undock_event(2, 13)
+	_main._handle_ship_undocked(2, 0, 13, accepted)
 
 	assert_int(_main._nearby_station_ids[0]).is_equal(0)
 	assert_int(_main._session.docked_station_id()).is_equal(-1)
@@ -471,6 +469,9 @@ func test_module_activated_marks_matching_player_module_active() -> void:
 	_main._player_ship_id = 1
 	_set_loadout_modules([_module_fixture(5, "Mid", false)])
 
+	## ServerMessageOutcome commits authoritative loadout state before the
+	## presentation callback recalculates derived ranges.
+	_main._loadout.apply_module_activation(5, true, "")
 	_main._on_module_activated(1, 5, "Mid")
 
 	var mod_dict: ModuleRow = _main._loadout.modules()[0]
@@ -565,6 +566,9 @@ func test_module_deactivated_with_no_reason_is_a_plain_off() -> void:
 	_main._player_ship_id = 1
 	_set_loadout_modules([_module_fixture(5, "High", true)])
 
+	## ServerMessageOutcome commits authoritative loadout state before the
+	## presentation callback recalculates derived ranges.
+	_main._loadout.apply_module_activation(5, false, "")
 	_main._on_module_deactivated(1, 5, "High", "")
 
 	var mod_dict: ModuleRow = _main._loadout.modules()[0]
@@ -576,6 +580,7 @@ func test_module_deactivated_with_cap_reason_flags_forced_reason() -> void:
 	_main._player_ship_id = 1
 	_set_loadout_modules([_module_fixture(5, "High", true)])
 
+	_main._loadout.apply_module_activation(5, false, "cap")
 	_main._on_module_deactivated(1, 5, "High", "cap")
 
 	var mod_dict: ModuleRow = _main._loadout.modules()[0]
@@ -586,6 +591,7 @@ func test_module_deactivated_with_range_reason_flags_forced_reason() -> void:
 	_main._player_ship_id = 1
 	_set_loadout_modules([_module_fixture(5, "High", true)])
 
+	_main._loadout.apply_module_activation(5, false, "range")
 	_main._on_module_deactivated(1, 5, "High", "range")
 
 	var mod_dict: ModuleRow = _main._loadout.modules()[0]
@@ -612,43 +618,17 @@ func test_switching_active_ship_to_a_known_ship_reattaches_the_camera() -> void:
 	add_child(ship_b)
 	ship_b.global_position = Vector3(100.0, 0.0, 0.0)
 
-	_main._ships = {1: ship_a, 2: ship_b}
-	_main._session.register_ship(1, {
-		"is_player": true,
-		"ship_type_name": "Magpie",
-		"current_shield": 80.0,
-		"current_armor": 70.0,
-		"current_hull": 60.0,
-		"max_shield": 100.0,
-		"max_armor": 90.0,
-		"max_hull": 80.0,
-		"cap_max": 55.0,
-		"cap_recharge_per_tick": 3.0,
-	}, 1)
-	_main._session.register_ship(2, {
-		"is_player": false,
-		"ship_type_name": "Venture",
-		"current_shield": 210.0,
-		"current_armor": 160.0,
-		"current_hull": 110.0,
-		"max_shield": 250.0,
-		"max_armor": 180.0,
-		"max_hull": 120.0,
-		"cap_max": 80.0,
-		"cap_recharge_per_tick": 4.0,
-	}, 1)
-	_main._session.set_player_ship_id(1)
-	## Route through the real attach path (not a bare camera.set_target())
-	## so WorldPresentation._player_ship is seeded correctly -- otherwise the
-	## "revert the old ship" assertions below would trivially pass even
-	## without the fix, since there'd be no previous ship to revert.
-	_main._set_as_player_ship(1, ship_a)
+	_main._ships = {11: ship_a, 22: ship_b}
+	_dispatch_fixture("InitialState", 11)
+	## Route through the real attach path so the presentation owns the previous
+	## player ship and can revert its visuals during the switch.
+	_main._set_as_player_ship(11, ship_a)
 
-	_main._loadout.apply_payload(JSON.stringify({"active_ship_id": 2}))
+	_dispatch_fixture("PlayerLoadoutSwitch", 11)
 	_main._apply_loadout_side_effects()
 
-	assert_int(_main._player_ship_id).is_equal(2)
-	assert_int(_main._session.player_ship_id()).is_equal(2)
+	assert_int(_main._player_ship_id).is_equal(22)
+	assert_int(_main._session.player_ship_id()).is_equal(22)
 	assert_str(_main._session.player_ship_type_name()).is_equal("Venture")
 	var health: ShipHealth = _main._session.player_health()
 	assert_float(health.shield).is_equal_approx(210.0, 0.001)
@@ -659,8 +639,6 @@ func test_switching_active_ship_to_a_known_ship_reattaches_the_camera() -> void:
 	assert_float(cap.recharge).is_equal_approx(4.0, 0.001)
 	assert_int(ship_b.set_as_player_calls).is_equal(1)
 	assert_object(camera._target_node).is_equal(ship_b)
-	## Regression: the old ship used to stay permanently player-colored
-	## (and kept drawing frozen velocity/thrust indicators) after switching.
 	assert_int(ship_a.clear_as_player_calls).is_equal(1)
 
 
@@ -678,23 +656,20 @@ func test_switching_active_ship_to_an_unknown_ship_leaves_the_camera_alone() -> 
 	var ship_a: FakeShip = auto_free(FakeShip.new())
 	add_child(ship_a)
 
-	_main._ships = {1: ship_a}
-	_main._session.set_player_ship_id(1)
-	_main._player_ship_id = 1
+	_main._ships = {11: ship_a}
+	_dispatch_fixture("InitialState", 11)
+	_main._player_ship_id = 11
 	camera.set_target(ship_a)
 
-	_main._loadout.apply_payload(JSON.stringify({"active_ship_id": 3}))
+	_dispatch_fixture("PlayerLoadoutUnknown", 11)
 	_main._apply_loadout_side_effects()
 
-	assert_int(_main._player_ship_id).is_equal(1)
+	assert_int(_main._player_ship_id).is_equal(11)
 	assert_object(camera._target_node).is_equal(ship_a)
 
 
-## Regression: Disembark (active_ship_id -> -1) used to set _player_ship_id
-## directly with no call into WorldPresentation at all, so the disembarked
-## ship kept the player material and _is_player = true forever -- the same
-## desync class as the camera bug above, just on the "no active ship" branch
-## instead of the "switch to a different ship" branch.
+## Disembarking is also applied by the typed PlayerLoadout outcome before the
+## presentation side effect runs. The old ship must lose player-only visuals.
 func test_disembarking_reverts_the_old_ships_player_material() -> void:
 	var camera: Camera3D = auto_free(load("res://scripts/camera_controller.gd").new())
 	add_child(camera)
@@ -705,20 +680,17 @@ func test_disembarking_reverts_the_old_ships_player_material() -> void:
 
 	var ship_a: FakeShip = auto_free(FakeShip.new())
 	add_child(ship_a)
+	_main._ships = {11: ship_a}
+	_dispatch_fixture("InitialState", 11)
+	_main._set_as_player_ship(11, ship_a)
 
-	_main._ships = {1: ship_a}
-	_main._session.set_player_ship_id(1)
-	_main._set_as_player_ship(1, ship_a)
-
-	_main._loadout.apply_payload(JSON.stringify({"active_ship_id": null}))
+	_dispatch_fixture("PlayerLoadoutDisembark", 11)
 	_main._apply_loadout_side_effects()
 
 	assert_int(_main._player_ship_id).is_equal(-1)
 	assert_int(_main._session.player_ship_id()).is_equal(-1)
 	assert_int(ship_a.clear_as_player_calls).is_equal(1)
 
-
-# -- Phase 9B: Disassemble/Build inventory-row buttons -------------------------
 
 func test_disassemble_row_click_sends_disassemble_command_for_the_docked_ship() -> void:
 	var connection := FakeConnection.new()

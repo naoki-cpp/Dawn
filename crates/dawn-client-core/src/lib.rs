@@ -55,6 +55,7 @@ pub use world_session::{
     default_cap_max, default_cap_recharge, default_max_armor, default_max_hull, default_max_shield,
     BuildableShipTypeInput, BuildableShipTypeRecord, CelestialBodyInput, CelestialBodyRecord,
     DestructionOutcome, GateInput, GateRecord, HealthState, NavigationInput, PositionInput,
-    ShipInput, ShipState, StationInput, StationRecord, SystemNameInput, WorldSessionState,
+    ShipInput, ShipRegistration, ShipState, StationInput, StationRecord, SystemNameInput,
+    WorldSessionEffect, WorldSessionState, WorldSessionUpdate,
 };
 pub use world_space::{WorldSpace, REBASE_THRESHOLD, WORLD_SCALE};

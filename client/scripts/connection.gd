@@ -18,24 +18,20 @@ extends Node
 
 signal event_received(outcome: ServerEventOutcome)
 ## Owner-only authoritative normal-flight state for client prediction (ADR-0043).
-signal motion_correction_received(payload: Dictionary)
+signal motion_correction_received(correction: MotionCorrectionPresentation)
 signal connection_changed(connected: bool)
 ## Welcome 受信時: player_id と ship_id を通知
 signal welcomed(player_id: int, ship_id: int)
 ## On InitialState: notifies the full payload (ships + navigation map)
-signal initial_state_received(state: Dictionary)
-## On PlayerLoadout (sent on connect and again after every Fit/Unfit,
-## ADR-0032): carries the raw postcard bytes (ADR-0042), not a parsed
-## Dictionary. `PlayerLoadout.apply_wire_bytes` (dawn-client-gdext) decodes
-## them directly into typed Rust state, with no lossy Dictionary/JSON
-## round-trip in between.
-signal player_fitting_received(bytes: PackedByteArray)
+signal initial_state_received(state: InitialStatePresentation)
+## On PlayerLoadout, after the typed Rust state has already been replaced.
+signal player_fitting_received()
 ## ModuleActivated 受信時
 signal module_activated(ship_id: int, module_id: int, slot: String)
 ## ModuleDeactivated 受信時。reason は "cap" | "range" | ""（""=プレイヤー起因、ADR-0035）。
 signal module_deactivated(ship_id: int, module_id: int, slot: String, reason: String)
 ## Current Market balance and bounded open-order snapshot.
-signal market_snapshot_received(snapshot: Dictionary)
+signal market_snapshot_received(snapshot: MarketSnapshot)
 
 # ── 設定 ─────────────────────────────────────────────────────────────────────
 
@@ -61,11 +57,18 @@ var _server_url      : String        = SERVER_URL
 ## Rust-side variant projection.
 var _cmd             : ClientCommand         = ClientCommand.new()
 var _decoder         : ServerMessageDecoder  = ServerMessageDecoder.new()
+var _world_session   : WorldSession          = null
+var _player_loadout  : PlayerLoadout         = null
 
 var player_id : int = -1
 var ship_id   : int = -1
 
 # ── ライフサイクル ────────────────────────────────────────────────────────────
+
+func bind_client_state(session: WorldSession, loadout: PlayerLoadout) -> void:
+	_world_session = session
+	_player_loadout = loadout
+
 
 func _ready() -> void:
 	_connect_to_server()
@@ -313,7 +316,10 @@ func _receive_messages() -> void:
 		if outcome == null:
 			push_warning("[Connection] failed to decode binary ServerMessage")
 			continue
-		if not outcome.dispatch(self):
+		if _world_session == null or _player_loadout == null:
+			push_warning("[Connection] typed client state is not bound")
+			continue
+		if not outcome.dispatch(self, _world_session, _player_loadout, ship_id):
 			push_warning("[Connection] failed to dispatch typed ServerMessage outcome")
 
 
@@ -325,9 +331,8 @@ func _accept_welcome(p_player_id: int, p_ship_id: int) -> void:
 	welcomed.emit(player_id, ship_id)
 
 
-func _accept_initial_state(state: Dictionary) -> void:
-	var ships: Array = state.get("ships", []) as Array
-	print("[Connection] InitialState: %d ships" % ships.size())
+func _accept_initial_state(state: InitialStatePresentation) -> void:
+	print("[Connection] InitialState: %d ships" % state.ships.size())
 	initial_state_received.emit(state)
 
 
@@ -335,9 +340,9 @@ func _accept_event(outcome: ServerEventOutcome) -> void:
 	event_received.emit(outcome)
 
 
-func _accept_player_loadout(bytes: PackedByteArray) -> void:
+func _accept_player_loadout() -> void:
 	print("[Connection] PlayerLoadout received")
-	player_fitting_received.emit(bytes)
+	player_fitting_received.emit()
 
 
 func _accept_redirect(ws_addr: String, p_player_id: int, p_ship_id: int) -> void:
@@ -369,12 +374,12 @@ func _accept_module_deactivated(
 	module_deactivated.emit(p_ship_id, p_module_id, slot, reason)
 
 
-func _accept_market_snapshot(snapshot: Dictionary) -> void:
+func _accept_market_snapshot(snapshot: MarketSnapshot) -> void:
 	market_snapshot_received.emit(snapshot)
 
 
-func _accept_motion_correction(payload: Dictionary) -> void:
-	motion_correction_received.emit(payload)
+func _accept_motion_correction(correction: MotionCorrectionPresentation) -> void:
+	motion_correction_received.emit(correction)
 
 
 func _normalize_ws_url(addr: String) -> String:
