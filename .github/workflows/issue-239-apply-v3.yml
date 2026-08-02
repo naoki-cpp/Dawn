@@ -1,0 +1,99 @@
+name: Apply issue 239 cleanup v3
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/delete-legacy-client-adapters
+          fetch-depth: 0
+
+      - name: Reconstruct verified transformation
+        shell: bash
+        run: |
+          cat .agent/issue239_apply.py.part.* > .agent/issue239_apply.py
+          echo 'fd30b4b5626235ae94dc2d5ee0b0a1af6ea667ae775ce902de7a3afd0b054c3e  .agent/issue239_apply.py' \
+            | sha256sum --check --strict
+          python -m py_compile .agent/issue239_apply.py
+
+      - name: Apply cleanup
+        id: apply
+        shell: bash
+        run: |
+          set +e
+          python .agent/issue239_apply.py > /tmp/issue239-apply.log 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Validate transformed tree
+        if: steps.apply.outputs.status == '0'
+        shell: bash
+        run: |
+          set +e
+          cargo fmt --all -- --check > /tmp/issue239-fmt.log 2>&1
+          echo $? > /tmp/issue239-fmt.status
+          cargo check -p dawn-client-gdext --all-targets > /tmp/issue239-check.log 2>&1
+          echo $? > /tmp/issue239-check.status
+          cargo test -p dawn-wire > /tmp/issue239-wire.log 2>&1
+          echo $? > /tmp/issue239-wire.status
+          cargo clippy -p dawn-client-gdext -p dawn-wire --all-targets -- -D warnings \
+            > /tmp/issue239-clippy.log 2>&1
+          echo $? > /tmp/issue239-clippy.status
+          exit 0
+
+      - name: Commit implementation or failure report
+        shell: bash
+        run: |
+          apply_status='${{ steps.apply.outputs.status }}'
+          if [ "$apply_status" != '0' ]; then
+            git reset --hard HEAD
+          else
+            cargo fmt --all
+            rm -f \
+              .agent/issue239_apply.py \
+              .agent/issue239_apply.py.part.* \
+              .agent/issue239_apply.py.gz.b64.* \
+              .agent/issue239-inventory.txt \
+              .agent/issue239-trigger-v2 \
+              .github/workflows/issue-239-apply-v3.yml
+          fi
+
+          mkdir -p .agent
+          {
+            echo '# Issue 239 validation report'
+            echo
+            echo "apply_status=$apply_status"
+            echo
+            echo '## apply'
+            tail -n 200 /tmp/issue239-apply.log 2>/dev/null || true
+            if [ "$apply_status" = '0' ]; then
+              for name in fmt check wire clippy; do
+                echo
+                echo "## $name"
+                echo "status=$(cat /tmp/issue239-$name.status 2>/dev/null || echo missing)"
+                tail -n 200 "/tmp/issue239-$name.log" 2>/dev/null || true
+              done
+            fi
+          } > .agent/issue239-report.txt
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet && exit 0
+          if [ "$apply_status" = '0' ]; then
+            git commit -m 'Delete legacy client JSON and coordinate adapters'
+          else
+            git commit -m 'Record issue 239 transformation failure v3'
+          fi
+          git push origin HEAD:agent/delete-legacy-client-adapters
