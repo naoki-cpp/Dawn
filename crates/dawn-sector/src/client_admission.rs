@@ -73,7 +73,8 @@ pub struct CommittedClientAdmission {
 }
 
 /// A successful WebSocket handshake could not be committed because the
-/// reserved Ship or admission token disappeared while the handshake was in flight.
+/// reserved Ship or admission token disappeared while the handshake was in
+/// flight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientAdmissionCommitError {
     pub player_id: PlayerId,
