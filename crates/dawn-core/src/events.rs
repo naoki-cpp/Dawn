@@ -466,9 +466,9 @@ pub struct SectorTransitRequested {
     /// Original transfer kind. `None` is a non-Gate Sector Transit and must not
     /// be inferred as a Jump after restart merely because topology has a Gate.
     pub gate_id: Option<JumpGateId>,
-    /// Resolved destination entry point persisted by the source outbox.
-    pub entry_pos: Position,
-    pub entry_pos_abs: AbsolutePosition,
+    /// Authoritative destination entry point in the destination Sector frame.
+    /// Anchor selection and local-offset derivation happen only at destination materialization.
+    pub entry_pos: AbsolutePosition,
     /// Tick local to the EventStore that appended this record.
     pub tick: Tick,
 }
@@ -633,8 +633,7 @@ mod tests {
             to: SectorId(1),
             request_tick: Tick(7),
             gate_id: None,
-            entry_pos: Position::ORIGIN,
-            entry_pos_abs: AbsolutePosition::ORIGIN,
+            entry_pos: AbsolutePosition::ORIGIN,
             tick: Tick(7),
         });
         assert_eq!(event.ship_id(), id);

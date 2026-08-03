@@ -1,9 +1,9 @@
 //! Snapshot-cadence orchestration (ADR-0017 8A-7).
 //!
 //! [`SimulationNode::checkpoint`](crate::node::SimulationNode::checkpoint) is the
-//! mechanism: snapshot -> persist -> compact. This module is the cadence adapter;
-//! Sector Transit recovery policy, including whether compaction is currently
-//! safe, lives in `transit::pipeline`.
+//! mechanism: snapshot -> atomically publish -> compact. This module is the
+//! cadence adapter; Sector Transit recovery policy, including whether compaction
+//! is currently safe, lives in `transit::pipeline`.
 
 use std::io;
 use std::path::PathBuf;
@@ -18,7 +18,7 @@ use crate::node::SimulationNode;
 pub struct CheckpointConfig {
     /// Number of logical ticks between checkpoints.
     pub interval_ticks: u64,
-    /// Path for the (overwritten) latest authoritative snapshot.
+    /// Path for the atomically replaced latest authoritative snapshot.
     pub snapshot_path: PathBuf,
     /// Path for the append-only cold archive that receives compacted prefixes.
     pub cold_path: PathBuf,
@@ -122,6 +122,40 @@ mod tests {
         assert!(dir.path().join("snapshot.bin").exists());
         assert_eq!(node.event_store().base_index(), snap.log_index);
         assert_eq!(node.event_store().records_on_disk(), 0);
+    }
+
+    #[test]
+    fn post_replacement_sync_failure_rolls_back_and_does_not_compact_the_hot_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut node = file_node(dir.path());
+        node.spawn_ship(
+            ShipTypeId(1),
+            Position::ORIGIN,
+            Velocity::new(30.0, 0.0, 0.0),
+        );
+
+        let snapshot_path = dir.path().join("snapshot.bin");
+        let cold_path = dir.path().join("cold.log");
+        let previous = node.take_snapshot();
+        previous.save(&snapshot_path).unwrap();
+        let previous_bytes = std::fs::read(&snapshot_path).unwrap();
+        node.tick();
+
+        let base_index_before = node.event_store().base_index();
+        let records_before = node.event_store().records_on_disk();
+        assert!(records_before > 0, "the test needs a non-empty hot log");
+
+        // Existing-snapshot publication syncs once after preserving the rollback
+        // copy, then again after replacing the authoritative path. Fail the
+        // second call to exercise replacement-success -> durability-failure.
+        crate::persistence::snapshot::inject_directory_sync_failure(&snapshot_path, 2);
+        let error = node.checkpoint(&snapshot_path, &cold_path).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(std::fs::read(&snapshot_path).unwrap(), previous_bytes);
+        assert_eq!(node.event_store().base_index(), base_index_before);
+        assert_eq!(node.event_store().records_on_disk(), records_before);
+        assert!(!cold_path.exists());
     }
 
     #[test]

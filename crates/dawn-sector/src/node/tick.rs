@@ -48,7 +48,6 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     // Mirrors the durable SectorTransitRequested payload at the EventStore boundary.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn append_incoming_transit_marker(
         &mut self,
         ship_id: ShipId,
@@ -56,8 +55,7 @@ impl<S: EventStore> SimulationNode<S> {
         to: dawn_core::SectorId,
         request_tick: dawn_core::Tick,
         gate_id: Option<dawn_core::JumpGateId>,
-        entry_pos: dawn_core::Position,
-        entry_pos_abs: dawn_core::AbsolutePosition,
+        entry_pos: dawn_core::AbsolutePosition,
     ) {
         self.event_store.append(DomainEvent::SectorTransitRequested(
             dawn_core::events::SectorTransitRequested {
@@ -67,7 +65,6 @@ impl<S: EventStore> SimulationNode<S> {
                 request_tick,
                 gate_id,
                 entry_pos,
-                entry_pos_abs,
                 tick: self.current_tick,
             },
         ));

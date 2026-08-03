@@ -127,7 +127,25 @@ logic, state in the PR description what was verified in the Godot editor in
 place of a test (for AI sessions that cannot run the editor, state that fact
 and the recommended manual verification steps).
 
-
 Typed client fixtures must not recreate wire JSON/Dictionary shapes. Prefer
 debug-only typed record factories for focused UI tests and
 `ServerMessageDecoder.test_outcome()` when testing the real binary inbound path.
+
+## WorldSession test boundary
+
+`WorldSession` has one server-driven mutation surface in both production and
+tests: `ServerMessageOutcome::dispatch`, which converts decoded wire values to
+`WorldSessionUpdate` before applying them to `WorldSessionState`. GdUnit tests
+must not add or use public `WorldSession` setters for health, locks, ship
+lifecycle, system, server ticks, or dock/loadout state.
+
+Use the following split:
+
+- GdUnit dispatches `ServerMessageDecoder.test_outcome()` fixtures when it must
+  verify the binary inbound wiring, then reads the same `WorldSession`
+  accessors used by production presentation code.
+- Pure ordering, validation, and transition details are tested directly on
+  `WorldSessionState` in `dawn-client-core` Rust tests.
+- The only public mutable Godot operations retained on `WorldSession` are
+  connection/session `reset()` and client-owned clock prediction through
+  `advance_client_ticks()`.

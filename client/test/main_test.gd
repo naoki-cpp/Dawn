@@ -27,6 +27,14 @@ class TypedOutcomeTarget:
 	func _accept_player_loadout() -> void:
 		pass
 
+	func _accept_event(event: ServerEventOutcome) -> void:
+		event.dispatch(self)
+
+	func _handle_ship_docked(
+		_ship_id: int, _station_id: int, _tick: int, _session_accepted: bool
+	) -> void:
+		pass
+
 
 func _dispatch_fixture(kind: String, connection_ship_id: int = -1) -> void:
 	var outcome: ServerMessageOutcome = ServerMessageDecoder.new().test_outcome(kind)
@@ -34,6 +42,14 @@ func _dispatch_fixture(kind: String, connection_ship_id: int = -1) -> void:
 	assert_bool(outcome.dispatch(
 		TypedOutcomeTarget.new(), _main._session, _main._loadout, connection_ship_id
 	)).is_true()
+
+
+func _setup_docked_session() -> void:
+	## Server-derived session state must use the same typed inbound path as
+	## production. The fixture's player ship is 11 and station is 5; tests may
+	## still use a different optimistic `_player_ship_id` for command arguments.
+	_dispatch_fixture("InitialState", 11)
+	_dispatch_fixture("ShipDocked", 11)
 
 
 class FakeShip:
@@ -305,34 +321,31 @@ func test_ship_docked_event_stops_ship_when_station_map_is_not_ready() -> void:
 	ship.free()
 
 
-func test_stale_player_undock_event_does_not_leave_docked_state() -> void:
+func test_rejected_player_undock_event_does_not_move_the_ship() -> void:
 	var ship := FakeShip.new()
 	_main.add_child(ship)
 	_main._ships = {2: ship}
 	_main._player_ship_id = 2
-	_main._session.set_player_ship_id(2)
-	_main._session.apply_dock_fitting(0, "Forge Station", 12)
 
-	var accepted: bool = _main._session.apply_undock_event(2, 11)
-	_main._handle_ship_undocked(2, 0, 11, accepted)
+	## Ordering acceptance is a WorldSessionState Rust test. This test covers
+	## only the presentation contract for a rejected typed outcome.
+	_main._handle_ship_undocked(2, 0, 11, false)
 
 	assert_int(ship.undock_calls.size()).is_equal(0)
-	assert_int(_main._session.docked_station_id()).is_equal(0)
 	ship.free()
 
 
 func test_player_loadout_refresh_preserves_docked_motion_state() -> void:
 	var ship := FakeShip.new()
 	_main.add_child(ship)
-	_main._ships = {2: ship}
-	_main._player_ship_id = 2
-	_main._session.set_player_ship_id(2)
+	_main._ships = {11: ship}
+	_main._player_ship_id = 11
+	_setup_docked_session()
 	var modules: Array[ModuleRow] = []
 	var owned_ships: Array[OwnedShipRow] = []
 	assert_bool(_main._loadout.test_fixture(
-		12, modules, 0, "Forge Station", 2, owned_ships
+		12, modules, 5, "Forge Station", 11, owned_ships
 	)).is_true()
-	_main._session.apply_dock_fitting(0, "Forge Station", 12)
 
 	_main._apply_loadout_side_effects()
 
@@ -414,18 +427,15 @@ func test_motion_correction_preserves_small_motion_near_a_true_au_origin() -> vo
 	ship.free()
 
 
-func test_player_ship_undocked_event_clears_docked_station_state() -> void:
+func test_accepted_player_undock_event_updates_presentation_state() -> void:
 	_main._player_ship_id = 2
 	_main._nearby_station_ids = [] as Array[int]
-	_main._session.set_player_ship_id(2)
-	_main._session.apply_dock_fitting(0, "Forge Station", 12)
 
-	var accepted: bool = _main._session.apply_undock_event(2, 13)
-	_main._handle_ship_undocked(2, 0, 13, accepted)
+	## Session acceptance/order is covered in Rust; the GDScript handler only
+	## consumes the typed outcome's accepted bit.
+	_main._handle_ship_undocked(2, 0, 13, true)
 
 	assert_int(_main._nearby_station_ids[0]).is_equal(0)
-	assert_int(_main._session.docked_station_id()).is_equal(-1)
-	assert_str(_main._session.docked_station_name()).is_equal("")
 
 
 # -- _on_module_deactivated (manual OFF vs system-forced OFF) -----------------------
@@ -496,8 +506,9 @@ func test_module_toggle_of_a_targeted_kind_against_a_locked_but_out_of_aoi_targe
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.set_player_ship_id(1)
-	_main._session.apply_target_locked(1, 99)
+	## This is explicitly optimistic GDScript-owned state (ADR-0046), unlike
+	## authoritative WorldSession state.
+	_main._player_lock_target = 99
 	_main._ships = {} # target 99 is not in AoI; player ship 1 isn't either.
 	_set_loadout_modules([_module_fixture(5, "High", false, "Weapon")])
 
@@ -658,14 +669,14 @@ func test_disassemble_row_click_sends_disassemble_command_for_the_docked_ship() 
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(3, "Forge Station", 12)
+	_setup_docked_session()
 
 	var row: InventoryRow = InventoryRow.for_item(null, 0, "", InventoryRow.ACTION_DISASSEMBLE)
 	_main._handle_inventory_row_click(row)
 
 	assert_int(connection.disassemble_calls.size()).is_equal(1)
 	assert_int(connection.disassemble_calls[0]["ship_id"] as int).is_equal(1)
-	assert_int(connection.disassemble_calls[0]["station_id"] as int).is_equal(3)
+	assert_int(connection.disassemble_calls[0]["station_id"] as int).is_equal(5)
 	connection.free()
 
 
@@ -673,7 +684,6 @@ func test_disassemble_row_click_is_a_no_op_when_not_docked() -> void:
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(-1, "", 0)
 
 	var row: InventoryRow = InventoryRow.for_item(null, 0, "", InventoryRow.ACTION_DISASSEMBLE)
 	_main._handle_inventory_row_click(row)
@@ -686,7 +696,7 @@ func test_build_ship_type_row_click_sends_the_picked_ship_type_not_the_hardcoded
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(3, "Forge Station", 12)
+	_setup_docked_session()
 
 	var row: InventoryRow = InventoryRow.for_item(
 		null, 0, "", InventoryRow.ACTION_BUILD_SHIP_TYPE, 42)
@@ -694,7 +704,7 @@ func test_build_ship_type_row_click_sends_the_picked_ship_type_not_the_hardcoded
 
 	assert_int(connection.build_calls.size()).is_equal(1)
 	assert_int(connection.build_calls[0]["ship_id"] as int).is_equal(1)
-	assert_int(connection.build_calls[0]["station_id"] as int).is_equal(3)
+	assert_int(connection.build_calls[0]["station_id"] as int).is_equal(5)
 	assert_int(connection.build_calls[0]["ship_type_id"] as int).is_equal(42)
 	connection.free()
 
@@ -703,7 +713,7 @@ func test_unfit_all_row_click_sends_one_unfit_command_per_fitted_module() -> voi
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(3, "Forge Station", 12)
+	_setup_docked_session()
 	_set_loadout_modules([
 		_module_fixture(1, "High", false),
 		_module_fixture(2, "Low", false),
@@ -738,7 +748,7 @@ func test_drag_from_ship_cargo_to_fitted_sends_fit_command() -> void:
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(3, "Forge Station", 12)
+	_setup_docked_session()
 
 	var row: InventoryRow = InventoryRow.for_item(
 		null, 0, "High", InventoryRow.ACTION_FIT, 0, ItemIdentity.module(5) as ItemIdentity, 1, InventoryRow.SOURCE_SHIP_CARGO)
@@ -754,7 +764,6 @@ func test_drag_from_ship_cargo_to_fitted_is_a_no_op_when_undocked() -> void:
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(-1, "", 0)
 
 	var row: InventoryRow = InventoryRow.for_item(
 		null, 0, "High", InventoryRow.ACTION_FIT, 0, ItemIdentity.module(5) as ItemIdentity, 1, InventoryRow.SOURCE_SHIP_CARGO)
@@ -768,7 +777,7 @@ func test_drag_from_fitted_to_ship_cargo_sends_unfit_command() -> void:
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(3, "Forge Station", 12)
+	_setup_docked_session()
 
 	var row: InventoryRow = InventoryRow.for_item(
 		null, 5, "High", InventoryRow.ACTION_UNFIT, 0, null, 0, InventoryRow.SOURCE_FITTED)
@@ -783,7 +792,7 @@ func test_drag_from_ship_cargo_to_station_sends_transfer_to_station_command() ->
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(3, "Forge Station", 12)
+	_setup_docked_session()
 
 	var row: InventoryRow = InventoryRow.for_item(
 		null, 0, "", InventoryRow.ACTION_NONE, 0, ItemIdentity.scrap_metal(), 4, InventoryRow.SOURCE_SHIP_CARGO)
@@ -798,14 +807,14 @@ func test_drag_from_station_to_ship_cargo_sends_transfer_from_station_command() 
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(3, "Forge Station", 12)
+	_setup_docked_session()
 
 	var row: InventoryRow = InventoryRow.for_item(
 		null, 0, "", InventoryRow.ACTION_NONE, 0, ItemIdentity.scrap_metal(), 4, InventoryRow.SOURCE_STATION)
 	_main._handle_inventory_row_drop(row, InventoryRow.SOURCE_SHIP_CARGO, Vector2.ZERO)
 
 	assert_int(connection.transfer_from_station_calls.size()).is_equal(1)
-	assert_int(connection.transfer_from_station_calls[0]["station_id"] as int).is_equal(3)
+	assert_int(connection.transfer_from_station_calls[0]["station_id"] as int).is_equal(5)
 	assert_bool((connection.transfer_from_station_calls[0]["item_id"] as ItemIdentity).is_scrap_metal()).is_true()
 	connection.free()
 
@@ -814,7 +823,7 @@ func test_drag_dropped_back_onto_its_own_column_is_a_no_op() -> void:
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(3, "Forge Station", 12)
+	_setup_docked_session()
 
 	var row: InventoryRow = InventoryRow.for_item(
 		null, 0, "", InventoryRow.ACTION_NONE, 0, ItemIdentity.scrap_metal(), 4, InventoryRow.SOURCE_SHIP_CARGO)
@@ -831,7 +840,7 @@ func test_drag_within_fitted_reorders_two_modules_of_the_same_slot_kind() -> voi
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(3, "Forge Station", 12)
+	_setup_docked_session()
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
 	_main._hud_surface.build(auto_free(Node.new()), hud, auto_free(Label.new()))
@@ -863,7 +872,7 @@ func test_drag_within_fitted_across_different_slot_kinds_is_a_no_op() -> void:
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(3, "Forge Station", 12)
+	_setup_docked_session()
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
 	_main._hud_surface.build(auto_free(Node.new()), hud, auto_free(Label.new()))
@@ -893,7 +902,7 @@ func test_release_within_threshold_of_press_is_treated_as_a_plain_click() -> voi
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(3, "Forge Station", 12)
+	_setup_docked_session()
 
 	_main._drag_row = InventoryRow.for_item(
 		null, 5, "High", InventoryRow.ACTION_UNFIT, 0, null, 0, InventoryRow.SOURCE_FITTED)
@@ -909,7 +918,7 @@ func test_release_past_threshold_is_treated_as_a_drop_not_a_click() -> void:
 	var connection := FakeConnection.new()
 	_main._connection = connection
 	_main._player_ship_id = 1
-	_main._session.apply_dock_fitting(3, "Forge Station", 12)
+	_setup_docked_session()
 	var hud: CanvasLayer = auto_free(CanvasLayer.new())
 	add_child(hud)
 	_main._hud_surface.build(auto_free(Node.new()), hud, auto_free(Label.new()))

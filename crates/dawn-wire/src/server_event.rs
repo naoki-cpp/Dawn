@@ -683,8 +683,7 @@ mod tests {
                 to: dawn_core::SectorId(1),
                 request_tick: tick,
                 gate_id: None,
-                entry_pos: dawn_core::Position::ORIGIN,
-                entry_pos_abs: dawn_core::AbsolutePosition::ORIGIN,
+                entry_pos: dawn_core::AbsolutePosition::ORIGIN,
                 tick,
             }),
             DomainEvent::SectorTransitCompleted(dawn_core::events::SectorTransitCompleted {

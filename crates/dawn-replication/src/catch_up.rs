@@ -2,9 +2,9 @@
 //!
 //! A [`CatchUpManager`] owns the complete receiver/owner handshake: bounded
 //! suffix requests, compacted-prefix detection, snapshot fallback, retry
-//! limits, and resumption from the snapshot log index. Foreign Sector state is
-//! retained only inside [`crate::ReplicaSet`]; this module never applies it to
-//! a live local world.
+//! limits, terminal-failure cooldowns, and resumption from the current replica
+//! cursor. Foreign Sector state is retained only inside [`crate::ReplicaSet`];
+//! this module never applies it to a live local world.
 
 use crate::{Ingest, LogBatch, ReplicaSet, ReplicaSnapshot, SnapshotInstall};
 use dawn_core::SectorId;
@@ -28,6 +28,8 @@ pub struct CatchUpConfig {
     pub retry_interval_ticks: u32,
     /// Retransmissions allowed after the initial send.
     pub max_retries: u32,
+    /// Tick calls before a transient terminal failure starts a fresh session.
+    pub failure_retry_interval_ticks: u32,
     /// Maximum distinct suffix/snapshot rounds in one catch-up session.
     pub max_requests_per_session: u32,
     /// Maximum opaque snapshot payload retained by a replica.
@@ -40,6 +42,7 @@ impl Default for CatchUpConfig {
             max_events: 4096,
             retry_interval_ticks: 10,
             max_retries: 5,
+            failure_retry_interval_ticks: 300,
             max_requests_per_session: 1024,
             max_snapshot_bytes: 256 * 1024 * 1024,
         }
@@ -162,6 +165,11 @@ struct CatchUpSession {
     requests_sent: u32,
 }
 
+#[derive(Debug, Clone)]
+struct CatchUpFailureState {
+    ticks_until_restart: Option<u32>,
+}
+
 /// Owns replica ingestion and all catch-up state for one local Sector node.
 #[derive(Debug)]
 pub struct CatchUpManager {
@@ -169,10 +177,7 @@ pub struct CatchUpManager {
     config: CatchUpConfig,
     replicas: ReplicaSet,
     sessions: HashMap<SectorId, CatchUpSession>,
-    /// A terminal failure blocks automatic restart at the same cursor. Any
-    /// contiguous progress clears the block, and operators may call
-    /// [`Self::reset_failure`] explicitly.
-    failed_at: HashMap<SectorId, u64>,
+    failures: HashMap<SectorId, CatchUpFailureState>,
     next_request_id: u64,
 }
 
@@ -191,6 +196,10 @@ impl CatchUpManager {
             "catch-up retry interval must be non-zero"
         );
         assert!(
+            config.failure_retry_interval_ticks > 0,
+            "catch-up failure retry interval must be non-zero"
+        );
+        assert!(
             config.max_requests_per_session > 0,
             "catch-up request budget must be non-zero"
         );
@@ -199,21 +208,13 @@ impl CatchUpManager {
             replicas: ReplicaSet::new(config.max_events),
             config,
             sessions: HashMap::new(),
-            failed_at: HashMap::new(),
+            failures: HashMap::new(),
             next_request_id: 1,
         }
     }
 
     pub fn replicas(&self) -> &ReplicaSet {
         &self.replicas
-    }
-
-    pub fn failure_cursor(&self, sector_id: SectorId) -> Option<u64> {
-        self.failed_at.get(&sector_id).copied()
-    }
-
-    pub fn reset_failure(&mut self, sector_id: SectorId) {
-        self.failed_at.remove(&sector_id);
     }
 
     /// Ingest ordinary gossip. A detected gap automatically emits one bounded
@@ -234,7 +235,7 @@ impl CatchUpManager {
                 ..
             } => {
                 if applied > 0 {
-                    self.failed_at.remove(&sector_id);
+                    self.failures.remove(&sector_id);
                     step.events.push(CatchUpEvent::Applied {
                         sector_id,
                         applied,
@@ -278,13 +279,15 @@ impl CatchUpManager {
         }
     }
 
-    /// Advance retry timers once. Retries resend the same request_id so
-    /// duplicate owner responses remain harmless.
+    /// Advance request retries and terminal-failure cooldowns once. All timing
+    /// is expressed in logical tick calls. A transient failure starts a fresh
+    /// bounded session from the replica's current cursor after its cooldown.
     pub fn tick(&mut self) -> CatchUpStep {
         let mut step = CatchUpStep::default();
-        let sectors: Vec<_> = self.sessions.keys().copied().collect();
+        let session_sectors: Vec<_> = self.sessions.keys().copied().collect();
+        let failure_sectors: Vec<_> = self.failures.keys().copied().collect();
 
-        for sector_id in sectors {
+        for sector_id in session_sectors {
             let mut retry = None;
             let mut exhausted = None;
             if let Some(session) = self.sessions.get_mut(&sector_id) {
@@ -322,15 +325,32 @@ impl CatchUpManager {
             }
         }
 
+        for sector_id in failure_sectors {
+            let restart = match self.failures.get_mut(&sector_id) {
+                Some(CatchUpFailureState {
+                    ticks_until_restart: Some(remaining),
+                }) if *remaining > 1 => {
+                    *remaining -= 1;
+                    false
+                }
+                Some(CatchUpFailureState {
+                    ticks_until_restart: Some(_),
+                }) => true,
+                _ => false,
+            };
+
+            if restart {
+                self.failures.remove(&sector_id);
+                let from_index = self.replicas.next_index(sector_id);
+                self.issue_request(sector_id, from_index, 0, &mut step);
+            }
+        }
+
         step
     }
 
     fn ensure_request(&mut self, sector_id: SectorId, from_index: u64, step: &mut CatchUpStep) {
-        let cursor = self.replicas.next_index(sector_id);
-        if self.failed_at.get(&sector_id) == Some(&cursor) {
-            return;
-        }
-        if self.sessions.contains_key(&sector_id) {
+        if self.failures.contains_key(&sector_id) || self.sessions.contains_key(&sector_id) {
             return;
         }
         self.issue_request(sector_id, from_index, 0, step);
@@ -525,7 +545,7 @@ impl CatchUpManager {
                         ..
                     } => {
                         if applied > 0 {
-                            self.failed_at.remove(&sector_id);
+                            self.failures.remove(&sector_id);
                             step.events.push(CatchUpEvent::Applied {
                                 sector_id,
                                 applied,
@@ -574,7 +594,7 @@ impl CatchUpManager {
                 let log_index = snapshot.log_index;
                 if let SnapshotInstall::Installed { .. } = self.replicas.install_snapshot(snapshot)
                 {
-                    self.failed_at.remove(&sector_id);
+                    self.failures.remove(&sector_id);
                     step.events.push(CatchUpEvent::SnapshotInstalled {
                         sector_id,
                         log_index,
@@ -592,7 +612,7 @@ impl CatchUpManager {
             CatchUpPayload::UpToDate { owner_next_index } => {
                 let next_index = self.replicas.next_index(sector_id);
                 if next_index == owner_next_index {
-                    self.failed_at.remove(&sector_id);
+                    self.failures.remove(&sector_id);
                     step.events.push(CatchUpEvent::Completed {
                         sector_id,
                         next_index,
@@ -636,7 +656,7 @@ impl CatchUpManager {
                 step,
             );
         } else if next_index == owner_next_index {
-            self.failed_at.remove(&sector_id);
+            self.failures.remove(&sector_id);
             step.events.push(CatchUpEvent::Completed {
                 sector_id,
                 next_index,
@@ -656,12 +676,28 @@ impl CatchUpManager {
         step: &mut CatchUpStep,
     ) {
         self.sessions.remove(&sector_id);
-        self.failed_at.insert(sector_id, from_index);
+        let ticks_until_restart =
+            Self::is_transient_failure(kind).then_some(self.config.failure_retry_interval_ticks);
+        self.failures.insert(
+            sector_id,
+            CatchUpFailureState {
+                ticks_until_restart,
+            },
+        );
         step.events.push(CatchUpEvent::Failed(CatchUpFailure {
             sector_id,
             from_index,
             kind,
         }));
+    }
+
+    fn is_transient_failure(kind: CatchUpFailureKind) -> bool {
+        matches!(
+            kind,
+            CatchUpFailureKind::RetryExhausted
+                | CatchUpFailureKind::Remote(CatchUpUnavailable::SnapshotUnavailable)
+                | CatchUpFailureKind::Remote(CatchUpUnavailable::RetainedSuffixUnavailable)
+        )
     }
 }
 
@@ -702,9 +738,29 @@ mod tests {
             max_events,
             retry_interval_ticks: 1,
             max_retries: 1,
+            failure_retry_interval_ticks: 2,
             max_requests_per_session: 32,
             max_snapshot_bytes: 1024,
         }
+    }
+
+    fn only_request(step: &CatchUpStep) -> CatchUpRequest {
+        match step.outbound.as_slice() {
+            [CatchUpMessage::Request(request)] => request.clone(),
+            other => panic!("expected one catch-up request, got {other:?}"),
+        }
+    }
+
+    fn unavailable_response(
+        request: &CatchUpRequest,
+        reason: CatchUpUnavailable,
+    ) -> CatchUpMessage {
+        CatchUpMessage::Response(CatchUpResponse {
+            request_id: request.request_id,
+            requester_sector_id: request.requester_sector_id,
+            owner_sector_id: request.owner_sector_id,
+            payload: CatchUpPayload::Unavailable { reason },
+        })
     }
 
     fn drive<S: EventStore>(
@@ -826,6 +882,159 @@ mod tests {
             .ingest_batch(batch(&store, sector, 8, 2))
             .outbound
             .is_empty());
+    }
+
+    #[test]
+    fn retry_exhaustion_cools_down_then_restarts_from_current_cursor() {
+        let owner_sector = SectorId(1);
+        let mut manager = CatchUpManager::new(SectorId(2), config(2));
+        let mut store = InMemoryEventStore::new();
+        fill(&mut store, 8);
+
+        manager.ingest_batch(batch(&store, owner_sector, 0, 3));
+        let gap = manager.ingest_batch(batch(&store, owner_sector, 5, 1));
+        let initial = only_request(&gap);
+        assert_eq!(initial.from_index, 3);
+
+        assert_eq!(manager.tick().outbound.len(), 1, "one retransmission");
+        let exhausted = manager.tick();
+        assert!(matches!(
+            exhausted.events.as_slice(),
+            [CatchUpEvent::Failed(CatchUpFailure {
+                kind: CatchUpFailureKind::RetryExhausted,
+                ..
+            })]
+        ));
+        assert!(manager.tick().outbound.is_empty(), "cooldown is logical");
+
+        let restarted = manager.tick();
+        let request = only_request(&restarted);
+        assert_eq!(request.from_index, 3);
+        assert_ne!(request.request_id, initial.request_id);
+        assert!(matches!(
+            restarted.events.as_slice(),
+            [CatchUpEvent::RequestIssued { attempt: 1, .. }]
+        ));
+    }
+
+    #[test]
+    fn snapshot_unavailable_cools_down_then_restarts() {
+        let owner_sector = SectorId(1);
+        let mut manager = CatchUpManager::new(SectorId(2), config(2));
+        let receiver_store = InMemoryEventStore::new();
+        let gap = manager.ingest_batch(LogBatch::new(owner_sector, 4, vec![event(4)]));
+        let request = only_request(&gap);
+
+        let failed = manager.handle_message(
+            unavailable_response(&request, CatchUpUnavailable::SnapshotUnavailable),
+            &receiver_store,
+            || None,
+        );
+        assert!(matches!(
+            failed.events.as_slice(),
+            [CatchUpEvent::Failed(CatchUpFailure {
+                kind: CatchUpFailureKind::Remote(CatchUpUnavailable::SnapshotUnavailable),
+                ..
+            })]
+        ));
+        assert!(manager.tick().outbound.is_empty());
+        assert_eq!(only_request(&manager.tick()).from_index, 0);
+    }
+
+    #[test]
+    fn retained_suffix_unavailable_cools_down_then_restarts() {
+        let owner_sector = SectorId(1);
+        let mut manager = CatchUpManager::new(SectorId(2), config(2));
+        let receiver_store = InMemoryEventStore::new();
+        let gap = manager.ingest_batch(LogBatch::new(owner_sector, 4, vec![event(4)]));
+        let request = only_request(&gap);
+
+        let failed = manager.handle_message(
+            unavailable_response(&request, CatchUpUnavailable::RetainedSuffixUnavailable),
+            &receiver_store,
+            || None,
+        );
+        assert!(matches!(
+            failed.events.as_slice(),
+            [CatchUpEvent::Failed(CatchUpFailure {
+                kind: CatchUpFailureKind::Remote(CatchUpUnavailable::RetainedSuffixUnavailable),
+                ..
+            })]
+        ));
+        assert!(manager.tick().outbound.is_empty());
+        assert_eq!(only_request(&manager.tick()).from_index, 0);
+    }
+
+    #[test]
+    fn non_transient_failure_remains_terminal() {
+        let owner_sector = SectorId(1);
+        let mut manager = CatchUpManager::new(SectorId(2), config(2));
+        let receiver_store = InMemoryEventStore::new();
+        let gap = manager.ingest_batch(LogBatch::new(owner_sector, 4, vec![event(4)]));
+        let request = only_request(&gap);
+
+        manager.handle_message(
+            unavailable_response(&request, CatchUpUnavailable::InvalidRequest),
+            &receiver_store,
+            || None,
+        );
+
+        for _ in 0..32 {
+            let step = manager.tick();
+            assert!(step.outbound.is_empty());
+            assert!(step.events.is_empty());
+        }
+        assert!(manager
+            .ingest_batch(LogBatch::new(owner_sector, 4, vec![event(4)]))
+            .outbound
+            .is_empty());
+    }
+
+    #[test]
+    fn contiguous_progress_clears_failure_cooldown() {
+        let owner_sector = SectorId(1);
+        let mut manager = CatchUpManager::new(SectorId(2), config(2));
+        let receiver_store = InMemoryEventStore::new();
+
+        manager.ingest_batch(LogBatch::new(owner_sector, 0, vec![event(0), event(1)]));
+        let gap = manager.ingest_batch(LogBatch::new(owner_sector, 4, vec![event(4)]));
+        let request = only_request(&gap);
+        manager.handle_message(
+            unavailable_response(&request, CatchUpUnavailable::SnapshotUnavailable),
+            &receiver_store,
+            || None,
+        );
+
+        let progress =
+            manager.ingest_batch(LogBatch::new(owner_sector, 2, vec![event(2), event(3)]));
+        assert!(matches!(
+            progress.events.as_slice(),
+            [CatchUpEvent::Applied {
+                applied: 2,
+                next_index: 4,
+                ..
+            }]
+        ));
+
+        for _ in 0..8 {
+            let step = manager.tick();
+            assert!(step.outbound.is_empty());
+            assert!(step.events.is_empty());
+        }
+    }
+
+    #[test]
+    fn repeated_ticks_keep_recovery_work_and_state_bounded() {
+        let owner_sector = SectorId(1);
+        let mut manager = CatchUpManager::new(SectorId(2), config(2));
+        manager.ingest_batch(LogBatch::new(owner_sector, 4, vec![event(4)]));
+
+        for _ in 0..128 {
+            let step = manager.tick();
+            assert!(step.outbound.len() <= 1);
+            assert!(step.events.len() <= 1);
+            assert!(manager.sessions.len() + manager.failures.len() <= 1);
+        }
     }
 
     #[test]

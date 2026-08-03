@@ -1,7 +1,7 @@
 use super::*;
 use crate::client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal};
 use dawn_core::fitting::FittingSnapshot;
-use dawn_core::{NodeId, SectorBounds, ShipTypeId, Velocity};
+use dawn_core::{NodeId, Position, SectorBounds, ShipTypeId, Velocity};
 use dawn_event_store::InMemoryEventStore;
 
 fn node(node_id: u8, sector_id: u8) -> SimulationNode {
@@ -117,8 +117,7 @@ fn commit_and_ack_round_trip() {
         handoff: Box::new(sample_handoff()),
         from: SectorId(0),
         to: SectorId(1),
-        entry_pos: Position::new(500.0, 0.0, 0.0),
-        entry_pos_abs: AbsolutePosition::new(500.0, 0.0, 0.0),
+        entry_pos: AbsolutePosition::new(500.0, 0.0, 0.0),
         gate_id: None,
         request_tick: Tick(12),
     };
@@ -163,7 +162,6 @@ fn destination_commit_then_source_ack_moves_ownership_without_a_zero_owner_windo
         from: SectorId(0),
         to: SectorId(1),
         entry_pos: data.entry_pos,
-        entry_pos_abs: data.entry_pos_abs,
         gate_id: None,
         request_tick,
     };
@@ -208,7 +206,6 @@ fn transit_carries_owner_binding_to_destination_and_snapshot_restore() {
                 from: SectorId(0),
                 to: SectorId(1),
                 entry_pos: data.entry_pos,
-                entry_pos_abs: data.entry_pos_abs,
                 gate_id: None,
                 request_tick: data.request_tick,
             })
@@ -275,7 +272,6 @@ fn duplicate_destination_commit_is_idempotent_and_reissues_ack() {
         from: SectorId(0),
         to: SectorId(1),
         entry_pos: data.entry_pos,
-        entry_pos_abs: data.entry_pos_abs,
         gate_id: None,
         request_tick: source.current_tick(),
     };
@@ -334,14 +330,12 @@ fn restored_requested_transit_reproposes_commit_with_the_durable_route() {
             handoff,
             gate_id,
             entry_pos,
-            entry_pos_abs,
             request_tick,
             ..
         } => {
             assert_eq!(handoff.ship_id, ship_id);
             assert_eq!(gate_id, None);
-            assert_eq!(entry_pos, Position::ORIGIN);
-            assert_eq!(entry_pos_abs, AbsolutePosition::ORIGIN);
+            assert_eq!(entry_pos, AbsolutePosition::ORIGIN);
             assert_eq!(request_tick, Tick::ZERO);
         }
         other => panic!("expected Commit, got {other:?}"),
@@ -404,8 +398,7 @@ fn destination_marker_keeps_destination_local_tick() {
             handoff: Box::new(sample_handoff()),
             from: SectorId(0),
             to: SectorId(1),
-            entry_pos: Position::ORIGIN,
-            entry_pos_abs: AbsolutePosition::ORIGIN,
+            entry_pos: AbsolutePosition::ORIGIN,
             gate_id: None,
             request_tick: Tick(99),
         }
@@ -462,7 +455,6 @@ fn duplicate_commit_after_destination_checkpoint_does_not_append_a_pending_marke
         from: SectorId(0),
         to: SectorId(1),
         entry_pos: data.entry_pos,
-        entry_pos_abs: data.entry_pos_abs,
         gate_id: None,
         request_tick: data.request_tick,
     };
@@ -509,7 +501,6 @@ fn duplicate_commit_after_checkpoint_does_not_resurrect_removed_ship() {
         from: SectorId(0),
         to: SectorId(1),
         entry_pos: data.entry_pos,
-        entry_pos_abs: data.entry_pos_abs,
         gate_id: None,
         request_tick: data.request_tick,
     };

@@ -131,7 +131,7 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.m
 
 Validation-stage rejection is expressed via `CommandRejected`, not an event (INV-006); there is no `SectorTransitRejected` event. `propose_transit` returns `Err` without emitting an event if the Ship is absent or already in Transit.
 
-The corresponding command is `TransitCommand { ship_id, to }`. Raft carries `TransitOp::Request`, `Commit`, and `Ack`: Request freezes the source and persists `request_tick`, `gate_id`, `entry_pos`, and `entry_pos_abs`; Commit materializes the destination and durably records completion using the source-local `request_tick` plus a destination-local event `tick`; Ack removes the source recovery copy. Unresolved source Requested events are retried from EventStore after restart with bounded exponential backoff, and checkpoint compaction is deferred while one is pending.
+The corresponding command is `TransitCommand { ship_id, to }`. Raft carries `TransitOp::Request`, `Commit`, and `Ack`: Request freezes the source and persists `request_tick`, `gate_id`, and one authoritative `entry_pos: AbsolutePosition`; retries reconstruct the same absolute arrival from the EventStore. Commit materializes the destination by deriving its anchor and local offset from that absolute point through the same seam used by replay, then durably records completion using the source-local `request_tick` plus a destination-local event `tick`; Ack removes the source recovery copy. Unresolved source Requested events are retried from EventStore after restart with bounded exponential backoff, and checkpoint compaction is deferred while one is pending.
 
 ### 3.7 Jump Gate Navigation (ADR-0009, complete)
 
