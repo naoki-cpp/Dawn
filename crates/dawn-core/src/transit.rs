@@ -6,7 +6,7 @@
 
 use crate::fitting::FittingSnapshot;
 use crate::item::ItemId;
-use crate::{ShipId, ShipTypeId, Velocity};
+use crate::{PlayerId, ShipId, ShipTypeId, Velocity};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -15,6 +15,9 @@ use std::collections::BTreeMap;
 #[serde(try_from = "UncheckedTransitHandoffState")]
 pub struct TransitHandoffState {
     pub ship_id: ShipId,
+    /// Durable owner binding carried across Sector boundaries. `None` is an
+    /// NPC or otherwise unowned Ship and must not create client ownership.
+    pub owner_player_id: Option<PlayerId>,
     pub ship_type_id: ShipTypeId,
     pub velocity: Velocity,
     pub current_shield: f32,
@@ -30,6 +33,7 @@ pub struct TransitHandoffState {
 #[derive(Deserialize)]
 struct UncheckedTransitHandoffState {
     ship_id: ShipId,
+    owner_player_id: Option<PlayerId>,
     ship_type_id: ShipTypeId,
     velocity: Velocity,
     current_shield: f32,
@@ -51,6 +55,7 @@ impl TryFrom<UncheckedTransitHandoffState> for TransitHandoffState {
 
         Ok(Self {
             ship_id: value.ship_id,
+            owner_player_id: value.owner_player_id,
             ship_type_id: value.ship_type_id,
             velocity: value.velocity,
             current_shield: value.current_shield,

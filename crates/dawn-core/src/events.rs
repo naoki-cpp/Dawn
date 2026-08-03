@@ -667,6 +667,7 @@ mod tests {
         let event = DomainEvent::SectorTransitCompleted(SectorTransitCompleted {
             handoff: crate::TransitHandoffState {
                 ship_id: id,
+                owner_player_id: None,
                 ship_type_id: ShipTypeId(1),
                 velocity: Velocity::new(1.0, 0.0, 0.0),
                 current_shield: 100.0,

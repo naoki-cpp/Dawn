@@ -330,6 +330,7 @@ impl<S: EventStore> SimulationNode<S> {
             .unwrap_or_default();
         Some(TransitHandoffState {
             ship_id,
+            owner_player_id: self.ships.owners.get(&ship_id).copied(),
             ship_type_id,
             velocity,
             current_shield,
@@ -488,6 +489,12 @@ impl<S: EventStore> SimulationNode<S> {
                     items: handoff.inventory.clone(),
                 },
             );
+        }
+        if let Some(player_id) = handoff.owner_player_id {
+            self.station_inventory_db
+                .record_client_ownership(handoff.ship_id, player_id)
+                .expect("transit owner binding transaction");
+            debug_assert!(self.adopt_player_ship(handoff.ship_id, player_id));
         }
     }
 
@@ -1173,8 +1180,8 @@ mod tests {
             Tick::ZERO,
         );
 
-        // Before the handoff, the destination node rejects owned commands.
-        assert!(!to_node.apply_stop_command_owned(player_id, ship_id));
+        // The durable handoff establishes ownership before any client resume.
+        assert!(to_node.apply_stop_command_owned(player_id, ship_id));
 
         assert!(to_node.adopt_player_ship(ship_id, player_id));
         assert!(to_node.apply_stop_command_owned(player_id, ship_id));
@@ -1549,6 +1556,7 @@ mod tests {
     fn sample_transit_handoff(ship_id: ShipId, velocity: Velocity) -> TransitHandoffState {
         TransitHandoffState {
             ship_id,
+            owner_player_id: None,
             ship_type_id: ShipTypeId(1),
             velocity,
             current_shield: 80.0,

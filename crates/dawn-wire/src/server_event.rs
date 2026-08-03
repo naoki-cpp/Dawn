@@ -690,6 +690,7 @@ mod tests {
             DomainEvent::SectorTransitCompleted(dawn_core::events::SectorTransitCompleted {
                 handoff: dawn_core::TransitHandoffState {
                     ship_id: ship_id(1),
+                    owner_player_id: None,
                     ship_type_id: dawn_core::ShipTypeId(1),
                     velocity: dawn_core::Velocity::ZERO,
                     current_shield: 100.0,

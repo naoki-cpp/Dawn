@@ -1,4 +1,5 @@
 use super::*;
+use crate::client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal};
 use dawn_core::fitting::FittingSnapshot;
 use dawn_core::{NodeId, SectorBounds, ShipTypeId, Velocity};
 use dawn_event_store::InMemoryEventStore;
@@ -38,6 +39,7 @@ fn decode_proposed_transit(
 fn sample_handoff() -> TransitHandoffState {
     TransitHandoffState {
         ship_id: ShipId::new(NodeId(0), 7),
+        owner_player_id: None,
         ship_type_id: ShipTypeId(1),
         velocity: Velocity::new(4.0, 5.0, 6.0),
         current_shield: 10.0,
@@ -183,6 +185,81 @@ fn destination_commit_then_source_ack_moves_ownership_without_a_zero_owner_windo
 
     assert!(source.get_ship_position(ship_id).is_none());
     assert!(destination.get_ship_position(ship_id).is_some());
+}
+
+#[test]
+fn transit_carries_owner_binding_to_destination_and_snapshot_restore() {
+    let mut source = node(0, 0);
+    let mut destination = node(1, 1);
+    let player_id = source.next_player_id();
+    let other_player = dawn_core::PlayerId(player_id.0 + 1);
+    let ship_id = source.spawn_player_ship(player_id);
+    let data = source
+        .prepare_transit_commit(ship_id, SectorId(1), None)
+        .expect("owned Ship transit");
+    assert_eq!(data.handoff.owner_player_id, Some(player_id));
+
+    let (raft, mut proposals) = raft_handle();
+    let (commit_tx, mut commit_rx) = mpsc::unbounded_channel();
+    commit_tx
+        .send(
+            (TransitOp::Commit {
+                handoff: data.handoff,
+                from: SectorId(0),
+                to: SectorId(1),
+                entry_pos: data.entry_pos,
+                entry_pos_abs: data.entry_pos_abs,
+                gate_id: None,
+                request_tick: data.request_tick,
+            })
+            .encode(),
+        )
+        .unwrap();
+    apply_committed_raft_entries(&mut destination, &raft, &mut commit_rx);
+    assert!(matches!(
+        decode_proposed_transit(&mut proposals),
+        TransitOp::Ack { .. }
+    ));
+
+    assert!(matches!(
+        destination.begin_client_admission(
+            ClientAdmissionIntent::Resume {
+                player_id: dawn_core::PlayerId(player_id.0 + 1),
+                ship_id,
+            },
+            1_000.0,
+        ),
+        Err(ClientAdmissionRefusal::ResumeIdentityConflict {
+            player_id: rejected_player,
+            ship_id: rejected_ship,
+        }) if rejected_player == other_player && rejected_ship == ship_id
+    ));
+
+    let snapshot = destination.take_snapshot();
+    let mut store = InMemoryEventStore::new();
+    for record in destination.event_store().all_records() {
+        store.append(record.event.clone());
+    }
+    let mut restored = SimulationNode::restore_from(
+        store,
+        &snapshot,
+        std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+        &[],
+        &[],
+    );
+    assert!(matches!(
+        restored.begin_client_admission(
+            ClientAdmissionIntent::Resume {
+                player_id: dawn_core::PlayerId(player_id.0 + 1),
+                ship_id,
+            },
+            1_000.0,
+        ),
+        Err(ClientAdmissionRefusal::ResumeIdentityConflict {
+            player_id: rejected_player,
+            ship_id: rejected_ship,
+        }) if rejected_player == other_player && rejected_ship == ship_id
+    ));
 }
 
 #[test]

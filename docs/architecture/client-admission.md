@@ -42,6 +42,10 @@ synchronously on the owning Sector thread.
 
 Abort releases only the live capacity reservation. The watermark remains and
 IDs are never reused (INV-004).
+An exact retry of a prepared fresh identity is still a fresh population claim:
+it rechecks and atomically claims capacity against Ships admitted while the
+original handshake was disconnected. It cannot use a stale prepared row to
+exceed the Sector cap.
 
 ## Resume admission
 

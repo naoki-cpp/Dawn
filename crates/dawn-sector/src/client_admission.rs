@@ -262,6 +262,12 @@ impl<S: EventStore> SimulationNode<S> {
                             ship_id,
                         });
                     }
+                    // A prepared identity is still a fresh population claim:
+                    // abort releases its live claim, so a later retry must
+                    // compete with ships admitted while it was disconnected.
+                    if self.at_population_cap() {
+                        return Err(ClientAdmissionRefusal::FreshAtPopulationCap);
+                    }
                     if !self.claim_prepared_fresh_admission(player_id, ship_id) {
                         return Err(ClientAdmissionRefusal::ResumeAlreadyPending {
                             player_id,
@@ -455,6 +461,45 @@ mod tests {
         assert!(!recovered.is_resumed());
         recovered.commit(&mut node).expect("recovered fresh commit");
         assert!(node.apply_stop_command_owned(player_id, ship_id));
+    }
+
+    #[test]
+    fn prepared_fresh_retry_rechecks_population_cap_after_abort() {
+        let mut node = node();
+        node.set_population_cap(1);
+
+        let first = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("first fresh admission");
+        let player_id = first.player_id();
+        let ship_id = first.ship_id();
+        first.abort(&mut node);
+
+        let other = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("a different fresh identity should claim the released capacity");
+        other
+            .commit(&mut node)
+            .expect("other fresh admission commits");
+
+        assert!(matches!(
+            node.begin_client_admission(
+                ClientAdmissionIntent::Resume { player_id, ship_id },
+                AOI_CELL_SIZE,
+            ),
+            Err(ClientAdmissionRefusal::FreshAtPopulationCap)
+        ));
+        assert_eq!(node.ship_count(), 1);
     }
 
     #[test]
