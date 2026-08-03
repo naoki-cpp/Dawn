@@ -40,6 +40,7 @@ fn sample_handoff() -> TransitHandoffState {
     TransitHandoffState {
         ship_id: ShipId::new(NodeId(0), 7),
         owner_player_id: None,
+        resume_ticket: None,
         ship_type_id: ShipTypeId(1),
         velocity: Velocity::new(4.0, 5.0, 6.0),
         current_shield: 10.0,
@@ -190,12 +191,12 @@ fn transit_carries_owner_binding_to_destination_and_snapshot_restore() {
     let mut source = node(0, 0);
     let mut destination = node(1, 1);
     let player_id = source.next_player_id();
-    let other_player = dawn_core::PlayerId(player_id.0 + 1);
     let ship_id = source.spawn_player_ship(player_id);
     let data = source
         .prepare_transit_commit(ship_id, SectorId(1), None)
         .expect("owned Ship transit");
     assert_eq!(data.handoff.owner_player_id, Some(player_id));
+    let resume_ticket = data.handoff.resume_ticket.expect("owned Ship ticket");
 
     let (raft, mut proposals) = raft_handle();
     let (commit_tx, mut commit_rx) = mpsc::unbounded_channel();
@@ -221,16 +222,17 @@ fn transit_carries_owner_binding_to_destination_and_snapshot_restore() {
     assert!(matches!(
         destination.begin_client_admission(
             ClientAdmissionIntent::Resume {
-                player_id: dawn_core::PlayerId(player_id.0 + 1),
-                ship_id,
+                resume_ticket: dawn_core::ResumeTicket::from_bytes([99; 32]),
             },
             1_000.0,
         ),
-        Err(ClientAdmissionRefusal::ResumeIdentityConflict {
-            player_id: rejected_player,
-            ship_id: rejected_ship,
-        }) if rejected_player == other_player && rejected_ship == ship_id
+        Err(ClientAdmissionRefusal::ResumeTicketInvalid)
     ));
+
+    let reconnect = destination
+        .begin_client_admission(ClientAdmissionIntent::Resume { resume_ticket }, 1_000.0)
+        .expect("transit ticket should identify the owner");
+    reconnect.abort(&mut destination);
 
     let snapshot = destination.take_snapshot();
     let mut store = InMemoryEventStore::new();
@@ -247,15 +249,11 @@ fn transit_carries_owner_binding_to_destination_and_snapshot_restore() {
     assert!(matches!(
         restored.begin_client_admission(
             ClientAdmissionIntent::Resume {
-                player_id: dawn_core::PlayerId(player_id.0 + 1),
-                ship_id,
+                resume_ticket: dawn_core::ResumeTicket::from_bytes([99; 32]),
             },
             1_000.0,
         ),
-        Err(ClientAdmissionRefusal::ResumeIdentityConflict {
-            player_id: rejected_player,
-            ship_id: rejected_ship,
-        }) if rejected_player == other_player && rejected_ship == ship_id
+        Err(ClientAdmissionRefusal::ResumeTicketInvalid)
     ));
 }
 

@@ -1,4 +1,4 @@
-use dawn_core::{NodeId, PlayerId, Position, SectorBounds, SectorId};
+use dawn_core::{NodeId, Position, SectorBounds, SectorId};
 use dawn_event_store::FileEventStore;
 use dawn_sector::{
     client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal},
@@ -61,6 +61,7 @@ fn client_visible_fresh_identity_recovers_after_restart_before_commit() {
         .expect("fresh admission");
     let player_id = attempt.player_id();
     let ship_id = attempt.ship_id();
+    let resume_ticket = attempt.resume_ticket();
     drop(attempt);
     drop(node);
 
@@ -80,7 +81,7 @@ fn client_visible_fresh_identity_recovers_after_restart_before_commit() {
 
     let retry = restored
         .begin_client_admission(
-            ClientAdmissionIntent::Resume { player_id, ship_id },
+            ClientAdmissionIntent::Resume { resume_ticket },
             AOI_CELL_SIZE,
         )
         .expect("the exact client-visible identity must reclaim its prepared admission");
@@ -120,8 +121,7 @@ fn ownership_binding_survives_checkpoint_compaction() {
             AOI_CELL_SIZE,
         )
         .expect("fresh admission");
-    let player_id = attempt.player_id();
-    let ship_id = attempt.ship_id();
+    let resume_ticket = attempt.resume_ticket();
     attempt.commit(&mut node).expect("fresh commit");
     node.checkpoint(&snapshot_path, &cold_path).unwrap();
     drop(node);
@@ -139,26 +139,21 @@ fn ownership_binding_survives_checkpoint_compaction() {
         .open_station_inventory_db(db_path.to_str().unwrap())
         .unwrap();
 
-    let attacker = PlayerId(player_id.0 + 100);
     assert_eq!(
         restored
             .begin_client_admission(
                 ClientAdmissionIntent::Resume {
-                    player_id: attacker,
-                    ship_id,
+                    resume_ticket: dawn_core::ResumeTicket::from_bytes([99; 32]),
                 },
                 AOI_CELL_SIZE,
             )
-            .expect_err("a different Player cannot claim the restored Ship"),
-        ClientAdmissionRefusal::ResumeIdentityConflict {
-            player_id: attacker,
-            ship_id,
-        }
+            .expect_err("an unknown Ticket cannot claim the restored Ship"),
+        ClientAdmissionRefusal::ResumeTicketInvalid
     );
 
     let exact = restored
         .begin_client_admission(
-            ClientAdmissionIntent::Resume { player_id, ship_id },
+            ClientAdmissionIntent::Resume { resume_ticket },
             AOI_CELL_SIZE,
         )
         .expect("the original identity reconnects after checkpoint");

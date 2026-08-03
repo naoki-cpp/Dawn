@@ -148,8 +148,7 @@ pub(crate) async fn run_phase4_server(
             };
             let intent = match request.resume {
                 Some(resume) => ClientAdmissionIntent::Resume {
-                    player_id: resume.player_id,
-                    ship_id: resume.ship_id,
+                    resume_ticket: resume,
                 },
                 None => ClientAdmissionIntent::Fresh { spawn_position },
             };
@@ -163,6 +162,7 @@ pub(crate) async fn run_phase4_server(
             };
             let player_id = attempt.player_id();
             let ship_id = attempt.ship_id();
+            let resume_ticket = attempt.resume_ticket();
             let payload = attempt.take_handoff_payload();
             let tx = completion_tx.clone();
 
@@ -171,6 +171,7 @@ pub(crate) async fn run_phase4_server(
                     .complete(
                         player_id,
                         ship_id,
+                        resume_ticket,
                         payload.initial_state,
                         payload.player_loadout,
                     )
@@ -278,11 +279,8 @@ fn log_single_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefusa
         ClientAdmissionRefusal::FreshAtPopulationCap => {
             eprintln!("[Server] connection from {addr} refused: Sector at population cap");
         }
-        ClientAdmissionRefusal::ResumeShipMissing { ship_id, .. } => {
-            eprintln!(
-                "[Server] resume from {addr} refused: ship #{} is not in this Sector",
-                ship_id.raw()
-            );
+        ClientAdmissionRefusal::ResumeTicketInvalid => {
+            eprintln!("[Server] resume from {addr} refused: invalid resume ticket");
         }
         ClientAdmissionRefusal::ResumeAlreadyPending { ship_id, .. } => {
             eprintln!(
@@ -339,7 +337,6 @@ fn finish_single_admission<S: EventStore, T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{PlayerId, ShipTypeId, Velocity};
 
     fn node() -> SimulationNode {
         SimulationNode::new(
@@ -418,11 +415,20 @@ mod tests {
     #[test]
     fn single_adapter_disconnect_does_not_remove_resumed_ship() {
         let mut node = node();
-        let player_id = PlayerId(12);
-        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let fresh = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh attempt");
+        let resume_ticket = fresh.resume_ticket();
+        let committed = fresh.commit(&mut node).expect("fresh commit");
+        let ship_id = committed.ship_id;
         let attempt = node
             .begin_client_admission(
-                ClientAdmissionIntent::Resume { player_id, ship_id },
+                ClientAdmissionIntent::Resume { resume_ticket },
                 AOI_CELL_SIZE,
             )
             .expect("resume attempt");

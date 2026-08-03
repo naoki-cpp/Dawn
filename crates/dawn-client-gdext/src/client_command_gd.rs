@@ -1,7 +1,7 @@
 use crate::item_identity_gd::ItemIdentity;
 use dawn_wire::{
     ClientCommandWire, ClientMessage, HelloMessage, ItemWire, MarketCommandWire,
-    NavigationTargetWire, PosWire, ResumeIdentity, WarpTargetWire,
+    NavigationTargetWire, PosWire, ResumeTicket, WarpTargetWire,
 };
 use godot::prelude::*;
 
@@ -273,14 +273,16 @@ impl ClientCommand {
     /// fresh connection (no resume identity); both `player_id`/`ship_id`
     /// must be non-negative to resume (following a `Redirect`).
     #[func]
-    fn hello_command(&self, player_id: i64, ship_id: i64) -> PackedByteArray {
-        let resume = if player_id >= 0 && ship_id >= 0 {
-            Some(ResumeIdentity {
-                player_id: dawn_core::PlayerId(player_id as u64),
-                ship_id: dawn_core::ShipId(dawn_core::EntityId::from_raw(ship_id as u64)),
-            })
-        } else {
-            None
+    fn hello_command(&self, resume_ticket: PackedByteArray) -> PackedByteArray {
+        let resume = match resume_ticket.to_vec().try_into() {
+            Ok(bytes) => Some(ResumeTicket::from_bytes(bytes)),
+            Err(bytes) if bytes.is_empty() => None,
+            Err(_) => {
+                godot_error!(
+                    "ClientCommand.hello_command: resume ticket must be empty or 32 bytes"
+                );
+                return PackedByteArray::new();
+            }
         };
         to_wire_bytes(&ClientMessage::Hello(HelloMessage { resume }))
     }

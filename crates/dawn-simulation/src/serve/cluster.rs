@@ -139,21 +139,17 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
         while let Ok(request) = handshake_req_rx.try_recv() {
             let (sector, intent) = match request.resume {
                 Some(resume) => {
-                    let Some(sector) = find_resume_sector(&nodes, resume.ship_id) else {
+                    let Some(sector) = find_resume_sector(&nodes, resume) else {
                         log_cluster_refusal(
                             request.peer_addr,
-                            ClientAdmissionRefusal::ResumeShipMissing {
-                                player_id: resume.player_id,
-                                ship_id: resume.ship_id,
-                            },
+                            ClientAdmissionRefusal::ResumeTicketInvalid,
                         );
                         continue;
                     };
                     (
                         sector,
                         ClientAdmissionIntent::Resume {
-                            player_id: resume.player_id,
-                            ship_id: resume.ship_id,
+                            resume_ticket: resume,
                         },
                     )
                 }
@@ -173,6 +169,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
             };
             let player_id = attempt.player_id();
             let ship_id = attempt.ship_id();
+            let resume_ticket = attempt.resume_ticket();
             let payload = attempt.take_handoff_payload();
             let tx = completion_tx.clone();
 
@@ -181,6 +178,7 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     .complete(
                         player_id,
                         ship_id,
+                        resume_ticket,
                         payload.initial_state,
                         payload.player_loadout,
                     )
@@ -300,11 +298,8 @@ fn log_cluster_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefus
         ClientAdmissionRefusal::FreshAtPopulationCap => {
             eprintln!("[Server] connection from {addr} refused: Sector 0 at population cap");
         }
-        ClientAdmissionRefusal::ResumeShipMissing { ship_id, .. } => {
-            eprintln!(
-                "[Server] clustered resume from {addr} refused: ship #{} is not present in exactly one cluster Sector",
-                ship_id.raw()
-            );
+        ClientAdmissionRefusal::ResumeTicketInvalid => {
+            eprintln!("[Server] clustered resume from {addr} refused: invalid resume ticket");
         }
         ClientAdmissionRefusal::ResumeAlreadyPending { ship_id, .. } => {
             eprintln!(
@@ -326,12 +321,12 @@ fn log_cluster_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefus
 
 fn find_resume_sector<S: EventStore>(
     nodes: &[SimulationNode<S>],
-    ship_id: ShipId,
+    resume_ticket: dawn_core::ResumeTicket,
 ) -> Option<usize> {
-    let mut sectors = nodes
-        .iter()
-        .enumerate()
-        .filter_map(|(sector, node)| node.hosts_client_resume_identity(ship_id).then_some(sector));
+    let mut sectors = nodes.iter().enumerate().filter_map(|(sector, node)| {
+        node.hosts_client_resume_ticket(resume_ticket)
+            .then_some(sector)
+    });
     let sector = sectors.next()?;
     if sectors.next().is_some() {
         None
@@ -395,7 +390,6 @@ fn finish_cluster_admission<S: EventStore, T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{ShipTypeId, Velocity};
 
     fn node_at(sector: u8) -> SimulationNode {
         SimulationNode::new(
@@ -510,12 +504,22 @@ mod tests {
     #[test]
     fn cluster_adapter_resumes_ship_in_its_current_sector() {
         let mut nodes = vec![node_at(0), node_at(1)];
-        let player_id = PlayerId(12);
-        let ship_id = nodes[1].spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-        let sector = find_resume_sector(&nodes, ship_id).expect("unique owning Sector");
+        let fresh = nodes[1]
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh attempt");
+        let resume_ticket = fresh.resume_ticket();
+        let committed = fresh.commit(&mut nodes[1]).expect("fresh commit");
+        let player_id = committed.player_id;
+        let ship_id = committed.ship_id;
+        let sector = find_resume_sector(&nodes, resume_ticket).expect("unique owning Sector");
         let attempt = nodes[sector]
             .begin_client_admission(
-                ClientAdmissionIntent::Resume { player_id, ship_id },
+                ClientAdmissionIntent::Resume { resume_ticket },
                 AOI_CELL_SIZE,
             )
             .expect("resume attempt");
@@ -551,16 +555,16 @@ mod tests {
                 AOI_CELL_SIZE,
             )
             .expect("fresh attempt");
-        let player_id = attempt.player_id();
         let ship_id = attempt.ship_id();
+        let resume_ticket = attempt.resume_ticket();
         attempt.abort(&mut nodes[1]);
         assert!(nodes[1].ship_absolute_pos(ship_id).is_none());
 
-        let sector = find_resume_sector(&nodes, ship_id).expect("prepared identity Sector");
+        let sector = find_resume_sector(&nodes, resume_ticket).expect("prepared identity Sector");
         assert_eq!(sector, 1);
         let recovered = nodes[sector]
             .begin_client_admission(
-                ClientAdmissionIntent::Resume { player_id, ship_id },
+                ClientAdmissionIntent::Resume { resume_ticket },
                 AOI_CELL_SIZE,
             )
             .expect("exact prepared identity resumes in its Sector");
@@ -571,11 +575,20 @@ mod tests {
     #[test]
     fn cluster_adapter_failed_resume_keeps_ship_and_routes_absent() {
         let mut node = node();
-        let player_id = PlayerId(12);
-        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let fresh = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh attempt");
+        let resume_ticket = fresh.resume_ticket();
+        let committed = fresh.commit(&mut node).expect("fresh commit");
+        let ship_id = committed.ship_id;
         let attempt = node
             .begin_client_admission(
-                ClientAdmissionIntent::Resume { player_id, ship_id },
+                ClientAdmissionIntent::Resume { resume_ticket },
                 AOI_CELL_SIZE,
             )
             .expect("resume attempt");

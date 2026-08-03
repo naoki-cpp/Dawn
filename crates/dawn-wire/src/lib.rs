@@ -89,7 +89,7 @@ pub use client_command::{
     client_command_from_wire, client_command_wire_json_schema, ClientCommandWire,
     NavigationTargetWire, PosWire, VelWire, WarpTargetWire,
 };
-pub use hello_resume::{HelloMessage, ResumeIdentity};
+pub use hello_resume::{HelloMessage, ResumeTicket};
 pub use initial_state::{
     AbsPosWire, BuildableShipTypeWire, CelestialBodyWire, InitialStateWire, JumpGateWire,
     ShipStateWire, StationWire, SystemWire,
@@ -112,11 +112,11 @@ pub enum ServerMessage {
     Welcome {
         player_id: u64,
         ship_id: u64,
+        resume_ticket: ResumeTicket,
     },
     Redirect {
         ws_addr: String,
-        player_id: u64,
-        ship_id: u64,
+        resume_ticket: ResumeTicket,
     },
     Event(EventWire),
     PlayerLoadout(PlayerLoadoutWire),
@@ -273,7 +273,6 @@ mod tests {
 #[cfg(test)]
 mod client_message_roundtrip_tests {
     use super::*;
-    use dawn_core::{PlayerId, ShipId};
 
     fn roundtrip(message: &ClientMessage) -> ClientMessage {
         ClientMessage::decode(&message.encode()).expect("postcard ClientMessage round trip")
@@ -367,21 +366,16 @@ mod client_message_roundtrip_tests {
     }
 
     #[test]
-    fn hello_preserves_resume_identity() {
+    fn hello_preserves_resume_ticket() {
+        let ticket = ResumeTicket::from_bytes([7; ResumeTicket::BYTE_LEN]);
         let message = ClientMessage::Hello(HelloMessage {
-            resume: Some(ResumeIdentity {
-                player_id: PlayerId(7),
-                ship_id: ShipId(dawn_core::EntityId::from_raw(42)),
-            }),
+            resume: Some(ticket),
         });
         assert!(matches!(
             roundtrip(&message),
             ClientMessage::Hello(HelloMessage {
-                resume: Some(ResumeIdentity {
-                    player_id: PlayerId(7),
-                    ship_id
-                })
-            }) if ship_id == ShipId(dawn_core::EntityId::from_raw(42))
+                resume: Some(decoded)
+            }) if decoded == ticket
         ));
     }
 }

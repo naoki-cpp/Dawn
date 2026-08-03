@@ -1,7 +1,7 @@
 use dawn_core::ItemId;
 use dawn_wire::{
     AbsPosWire, EventWire, InitialStateWire, ItemWire, MarketSnapshotWire, PlayerLoadoutWire,
-    ServerMessage, ShipStateWire, VelWire,
+    ResumeTicket, ServerMessage, ShipStateWire, VelWire,
 };
 
 /// Godot-independent result of decoding one server frame.
@@ -14,11 +14,11 @@ pub(crate) enum ClientOutcome {
     Welcome {
         player_id: u64,
         ship_id: u64,
+        resume_ticket: ResumeTicket,
     },
     Redirect {
         ws_addr: String,
-        player_id: u64,
-        ship_id: u64,
+        resume_ticket: ResumeTicket,
     },
     Event(ClientEventOutcome),
     PlayerLoadout(PlayerLoadoutWire),
@@ -61,15 +61,21 @@ impl ClientOutcome {
 
     fn from_message(message: ServerMessage) -> Self {
         match message {
-            ServerMessage::Welcome { player_id, ship_id } => Self::Welcome { player_id, ship_id },
+            ServerMessage::Welcome {
+                player_id,
+                ship_id,
+                resume_ticket,
+            } => Self::Welcome {
+                player_id,
+                ship_id,
+                resume_ticket,
+            },
             ServerMessage::Redirect {
                 ws_addr,
-                player_id,
-                ship_id,
+                resume_ticket,
             } => Self::Redirect {
                 ws_addr,
-                player_id,
-                ship_id,
+                resume_ticket,
             },
             ServerMessage::Event(EventWire::ModuleActivated {
                 ship_id,
@@ -217,13 +223,13 @@ pub(crate) fn validate_player_loadout_godot_ranges(
 
 fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
     match message {
-        ServerMessage::Welcome { player_id, ship_id }
-        | ServerMessage::Redirect {
+        ServerMessage::Welcome {
             player_id, ship_id, ..
         } => {
             ensure_godot_int(*player_id, "player_id")?;
             ensure_godot_int(*ship_id, "ship_id")?;
         }
+        ServerMessage::Redirect { .. } => {}
         ServerMessage::Event(event) => validate_event(event)?,
         ServerMessage::PlayerLoadout(loadout) => {
             validate_player_loadout_godot_ranges(loadout)?;
@@ -327,18 +333,19 @@ mod tests {
         assert!(matches!(
             decode(ServerMessage::Welcome {
                 player_id: 1,
-                ship_id: 7
+                ship_id: 7,
+                resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
             }),
             ClientOutcome::Welcome {
                 player_id: 1,
-                ship_id: 7
+                ship_id: 7,
+                ..
             }
         ));
         assert!(matches!(
             decode(ServerMessage::Redirect {
                 ws_addr: "127.0.0.1:7880".to_owned(),
-                player_id: 1,
-                ship_id: 7,
+                resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
             }),
             ClientOutcome::Redirect { .. }
         ));
@@ -444,6 +451,7 @@ mod tests {
             &ServerMessage::Welcome {
                 player_id: 1,
                 ship_id: invalid_ship_id,
+                resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
             }
             .encode(),
         )

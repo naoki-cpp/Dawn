@@ -197,10 +197,11 @@ them.
 
 - A fresh client sends `ClientMessage::Hello(HelloMessage { resume: None })`,
   postcard-encoded as a binary frame (ADR-0042).
-- A client resuming after a `Redirect` (cross-node jump) sends
-  `ClientMessage::Hello(HelloMessage { resume: Some(ResumeIdentity {
-  player_id, ship_id }) })` to resume its identity on the new node instead of
-  spawning fresh.
-- The server replies with `ServerMessage::Welcome { player_id, ship_id }`,
+- A client resuming after a `Redirect` (cross-node jump), or retrying a
+  prepared fresh admission, sends `ClientMessage::Hello(HelloMessage {
+  resume: Some(ResumeTicket) })`. The ticket is server-issued, bound to the
+  exact handoff, and consumed by the destination admission flow.
+- The server replies with `ServerMessage::Welcome { player_id, ship_id,
+  resume_ticket }`,
   then `ServerMessage::InitialState` (+ optional `ServerMessage::PlayerLoadout`),
   all binary.

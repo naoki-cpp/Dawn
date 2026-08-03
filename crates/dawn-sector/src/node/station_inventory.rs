@@ -160,6 +160,7 @@ impl<S: EventStore> SimulationNode<S> {
             .ensure_client_admission_grant(
                 event.ship_id,
                 event.player_id,
+                event.resume_ticket,
                 event.starter_station_id,
                 event.starter_item_id,
                 event.starter_item_count,
@@ -188,6 +189,7 @@ impl<S: EventStore> SimulationNode<S> {
             self.station_inventory_db.ensure_client_admission_grant(
                 event.ship_id,
                 event.player_id,
+                event.resume_ticket,
                 event.starter_station_id,
                 event.starter_item_id,
                 event.starter_item_count,

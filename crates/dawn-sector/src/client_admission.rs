@@ -5,7 +5,7 @@
 //! checks, fresh identity allocation and spawn, resume validation, observer-
 //! scoped handoff construction, commit, and abort cleanup.
 
-use dawn_core::{PlayerId, Position, ShipId};
+use dawn_core::{PlayerId, Position, ResumeTicket, ShipId};
 use dawn_event_store::store::EventStore;
 
 use crate::node::{HandoffPayload, MissingObserverShip, SimulationNode};
@@ -15,12 +15,8 @@ use crate::node::{HandoffPayload, MissingObserverShip, SimulationNode};
 pub enum ClientAdmissionIntent {
     /// Allocate a new player identity and spawn a new Ship at this position.
     Fresh { spawn_position: Position },
-    /// Resume an exact identity. Usually the Ship already exists; after a
-    /// process loss it may instead name a durable prepared fresh admission.
-    Resume {
-        player_id: PlayerId,
-        ship_id: ShipId,
-    },
+    /// Resume the identity bound to a server-issued, one-time capability.
+    Resume { resume_ticket: ResumeTicket },
 }
 
 /// Why a client admission attempt could not begin.
@@ -28,12 +24,9 @@ pub enum ClientAdmissionIntent {
 pub enum ClientAdmissionRefusal {
     /// A fresh spawn would exceed the Sector population backstop.
     FreshAtPopulationCap,
-    /// ADR-0007: a requested resume Ship is absent and has no exact prepared
-    /// fresh admission; it must not fall back to a newly allocated identity.
-    ResumeShipMissing {
-        player_id: PlayerId,
-        ship_id: ShipId,
-    },
+    /// The opaque resume capability is unknown, expired, already consumed, or
+    /// no longer points at a live Ship on this Sector.
+    ResumeTicketInvalid,
     /// Another handshake already holds the Ship/Player or prepared-fresh claim.
     ResumeAlreadyPending {
         player_id: PlayerId,
@@ -53,11 +46,7 @@ impl std::fmt::Display for ClientAdmissionRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::FreshAtPopulationCap => write!(f, "Sector is at its population cap"),
-            Self::ResumeShipMissing { player_id, ship_id } => write!(
-                f,
-                "resume refused for {player_id}: ship #{} is not present in this Sector",
-                ship_id.raw()
-            ),
+            Self::ResumeTicketInvalid => write!(f, "resume ticket is invalid"),
             Self::ResumeAlreadyPending { player_id, ship_id } => write!(
                 f,
                 "resume refused for {player_id}: ship #{} or player already has an in-flight resume",
@@ -108,7 +97,7 @@ impl std::error::Error for ClientAdmissionCommitError {}
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum AdmissionOrigin {
     Fresh { spawn_position: Position },
-    Resume,
+    Resume { presented_ticket: ResumeTicket },
 }
 
 /// One begun but not yet committed client admission.
@@ -128,6 +117,7 @@ enum AdmissionOrigin {
 pub struct ClientAdmissionAttempt {
     player_id: PlayerId,
     ship_id: ShipId,
+    resume_ticket: ResumeTicket,
     origin: AdmissionOrigin,
     handoff: Option<HandoffPayload>,
 }
@@ -141,8 +131,13 @@ impl ClientAdmissionAttempt {
         self.ship_id
     }
 
+    /// The Ticket that must be presented for the next connection attempt.
+    pub fn resume_ticket(&self) -> ResumeTicket {
+        self.resume_ticket
+    }
+
     pub fn is_resumed(&self) -> bool {
-        matches!(self.origin, AdmissionOrigin::Resume)
+        matches!(self.origin, AdmissionOrigin::Resume { .. })
     }
 
     /// Move the observer-scoped wire payload into the asynchronous socket task
@@ -163,19 +158,25 @@ impl ClientAdmissionAttempt {
         node: &mut SimulationNode<S>,
     ) -> Result<CommittedClientAdmission, ClientAdmissionCommitError> {
         let present = match self.origin {
-            AdmissionOrigin::Fresh { spawn_position } => {
-                node.commit_reserved_fresh_admission(self.player_id, self.ship_id, spawn_position)
-            }
-            AdmissionOrigin::Resume => {
-                node.commit_reserved_resume_admission(self.player_id, self.ship_id)
-            }
+            AdmissionOrigin::Fresh { spawn_position } => node.commit_reserved_fresh_admission(
+                self.player_id,
+                self.ship_id,
+                spawn_position,
+                self.resume_ticket,
+            ),
+            AdmissionOrigin::Resume { presented_ticket } => node.commit_reserved_resume_admission(
+                self.player_id,
+                self.ship_id,
+                presented_ticket,
+                self.resume_ticket,
+            ),
         };
         if !present {
             match self.origin {
                 AdmissionOrigin::Fresh { .. } => {
                     node.abort_reserved_fresh_admission(self.ship_id);
                 }
-                AdmissionOrigin::Resume => {
+                AdmissionOrigin::Resume { .. } => {
                     node.release_resume_admission(self.player_id, self.ship_id);
                 }
             }
@@ -188,7 +189,7 @@ impl ClientAdmissionAttempt {
         Ok(CommittedClientAdmission {
             player_id: self.player_id,
             ship_id: self.ship_id,
-            resumed: matches!(self.origin, AdmissionOrigin::Resume),
+            resumed: matches!(self.origin, AdmissionOrigin::Resume { .. }),
         })
     }
 
@@ -203,7 +204,7 @@ impl ClientAdmissionAttempt {
             AdmissionOrigin::Fresh { .. } => {
                 node.abort_reserved_fresh_admission(self.ship_id);
             }
-            AdmissionOrigin::Resume => {
+            AdmissionOrigin::Resume { .. } => {
                 node.release_resume_admission(self.player_id, self.ship_id);
             }
         }
@@ -228,7 +229,8 @@ impl<S: EventStore> SimulationNode<S> {
                     return Err(ClientAdmissionRefusal::FreshAtPopulationCap);
                 }
 
-                let (player_id, ship_id) = self.reserve_fresh_admission_identity(spawn_position);
+                let (player_id, ship_id, resume_ticket) =
+                    self.reserve_fresh_admission_identity(spawn_position);
                 let handoff = match self.build_fresh_admission_handoff(
                     player_id,
                     ship_id,
@@ -245,30 +247,24 @@ impl<S: EventStore> SimulationNode<S> {
                 Ok(ClientAdmissionAttempt {
                     player_id,
                     ship_id,
+                    resume_ticket,
                     origin: AdmissionOrigin::Fresh { spawn_position },
                     handoff: Some(handoff),
                 })
             }
-            ClientAdmissionIntent::Resume { player_id, ship_id } => {
+            ClientAdmissionIntent::Resume { resume_ticket } => {
                 // A successful Welcome may have outlived the process before the
                 // fresh Ship committed. Reclaim only that exact SQLite-prepared
                 // pair; this is not ADR-0007 fresh fallback and allocates no ID.
-                if let Some((prepared_player, spawn_position)) =
-                    self.prepared_fresh_admission(ship_id)
-                {
-                    if prepared_player != player_id {
-                        return Err(ClientAdmissionRefusal::ResumeIdentityConflict {
-                            player_id,
-                            ship_id,
-                        });
-                    }
+                if let Some(prepared) = self.prepared_fresh_admission(resume_ticket) {
+                    let (player_id, ship_id, spawn_position) = prepared;
                     // A prepared identity is still a fresh population claim:
                     // abort releases its live claim, so a later retry must
                     // compete with ships admitted while it was disconnected.
                     if self.at_population_cap() {
                         return Err(ClientAdmissionRefusal::FreshAtPopulationCap);
                     }
-                    if !self.claim_prepared_fresh_admission(player_id, ship_id) {
+                    if !self.claim_prepared_fresh_admission(player_id, ship_id, resume_ticket) {
                         return Err(ClientAdmissionRefusal::ResumeAlreadyPending {
                             player_id,
                             ship_id,
@@ -289,16 +285,20 @@ impl<S: EventStore> SimulationNode<S> {
                     return Ok(ClientAdmissionAttempt {
                         player_id,
                         ship_id,
+                        resume_ticket,
                         origin: AdmissionOrigin::Fresh { spawn_position },
                         handoff: Some(handoff),
                     });
                 }
 
-                // ADR-0007: validate the exact requested Ship and never fall
-                // back to a newly allocated identity. A Ship/Player reservation
-                // serializes concurrent resume handshakes until resolution.
+                let Some((player_id, ship_id)) = self.resolve_client_resume_ticket(resume_ticket)
+                else {
+                    return Err(ClientAdmissionRefusal::ResumeTicketInvalid);
+                };
+                // A Ship/Player reservation serializes concurrent resume
+                // handshakes until resolution.
                 if self.ship_absolute_pos(ship_id).is_none() {
-                    return Err(ClientAdmissionRefusal::ResumeShipMissing { player_id, ship_id });
+                    return Err(ClientAdmissionRefusal::ResumeTicketInvalid);
                 }
                 if self.resume_admission_identity_conflicts(player_id, ship_id) {
                     return Err(ClientAdmissionRefusal::ResumeIdentityConflict {
@@ -314,12 +314,9 @@ impl<S: EventStore> SimulationNode<S> {
                 }
 
                 let result = (|| {
-                    let mut handoff =
-                        self.build_handoff_payload(ship_id, aoi_cell_size)
-                            .map_err(|_| ClientAdmissionRefusal::ResumeShipMissing {
-                                player_id,
-                                ship_id,
-                            })?;
+                    let mut handoff = self
+                        .build_handoff_payload(ship_id, aoi_cell_size)
+                        .map_err(|_| ClientAdmissionRefusal::ResumeTicketInvalid)?;
 
                     if let Some(observer) = handoff
                         .initial_state
@@ -332,7 +329,7 @@ impl<S: EventStore> SimulationNode<S> {
 
                     let loadout = self
                         .build_player_loadout_json_for_admission(player_id, ship_id)
-                        .ok_or(ClientAdmissionRefusal::ResumeShipMissing { player_id, ship_id })?;
+                        .ok_or(ClientAdmissionRefusal::ResumeTicketInvalid)?;
                     handoff.player_loadout = Some(loadout);
                     Ok(handoff)
                 })();
@@ -341,7 +338,10 @@ impl<S: EventStore> SimulationNode<S> {
                     Ok(handoff) => Ok(ClientAdmissionAttempt {
                         player_id,
                         ship_id,
-                        origin: AdmissionOrigin::Resume,
+                        resume_ticket: self.issue_resume_ticket(),
+                        origin: AdmissionOrigin::Resume {
+                            presented_ticket: resume_ticket,
+                        },
                         handoff: Some(handoff),
                     }),
                     Err(refusal) => {
@@ -368,6 +368,16 @@ mod tests {
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         )
+    }
+
+    fn seeded_resume_ticket(
+        node: &mut SimulationNode,
+        player_id: PlayerId,
+        ship_id: ShipId,
+    ) -> ResumeTicket {
+        let ticket = ResumeTicket::from_bytes([ship_id.raw() as u8; ResumeTicket::BYTE_LEN]);
+        node.record_client_resume_ownership(ship_id, player_id, ticket);
+        ticket
     }
 
     #[test]
@@ -450,11 +460,12 @@ mod tests {
             .expect("fresh admission");
         let player_id = attempt.player_id();
         let ship_id = attempt.ship_id();
+        let resume_ticket = attempt.resume_ticket();
         attempt.abort(&mut node);
 
         let recovered = node
             .begin_client_admission(
-                ClientAdmissionIntent::Resume { player_id, ship_id },
+                ClientAdmissionIntent::Resume { resume_ticket },
                 AOI_CELL_SIZE,
             )
             .expect("exact prepared identity is retryable");
@@ -476,8 +487,7 @@ mod tests {
                 AOI_CELL_SIZE,
             )
             .expect("first fresh admission");
-        let player_id = first.player_id();
-        let ship_id = first.ship_id();
+        let resume_ticket = first.resume_ticket();
         first.abort(&mut node);
 
         let other = node
@@ -494,7 +504,7 @@ mod tests {
 
         assert!(matches!(
             node.begin_client_admission(
-                ClientAdmissionIntent::Resume { player_id, ship_id },
+                ClientAdmissionIntent::Resume { resume_ticket },
                 AOI_CELL_SIZE,
             ),
             Err(ClientAdmissionRefusal::FreshAtPopulationCap)
@@ -507,9 +517,10 @@ mod tests {
         let mut node = node();
         let player_id = PlayerId(12);
         let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let resume_ticket = seeded_resume_ticket(&mut node, player_id, ship_id);
         let attempt = node
             .begin_client_admission(
-                ClientAdmissionIntent::Resume { player_id, ship_id },
+                ClientAdmissionIntent::Resume { resume_ticket },
                 AOI_CELL_SIZE,
             )
             .expect("existing ship may begin resume");
@@ -527,9 +538,10 @@ mod tests {
         let mut node = node();
         let player_id = PlayerId(12);
         let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let resume_ticket = seeded_resume_ticket(&mut node, player_id, ship_id);
         let mut attempt = node
             .begin_client_admission(
-                ClientAdmissionIntent::Resume { player_id, ship_id },
+                ClientAdmissionIntent::Resume { resume_ticket },
                 AOI_CELL_SIZE,
             )
             .expect("existing ship may begin resume");
@@ -568,30 +580,24 @@ mod tests {
         let mut node = node();
         let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
         let first_player = PlayerId(12);
-        let second_player = PlayerId(13);
+        let resume_ticket = seeded_resume_ticket(&mut node, first_player, ship_id);
         let first = node
             .begin_client_admission(
-                ClientAdmissionIntent::Resume {
-                    player_id: first_player,
-                    ship_id,
-                },
+                ClientAdmissionIntent::Resume { resume_ticket },
                 AOI_CELL_SIZE,
             )
             .expect("first resume obtains the Ship lock");
 
         let second = node
             .begin_client_admission(
-                ClientAdmissionIntent::Resume {
-                    player_id: second_player,
-                    ship_id,
-                },
+                ClientAdmissionIntent::Resume { resume_ticket },
                 AOI_CELL_SIZE,
             )
             .expect_err("second concurrent resume must be refused");
         assert_eq!(
             second,
             ClientAdmissionRefusal::ResumeAlreadyPending {
-                player_id: second_player,
+                player_id: first_player,
                 ship_id,
             }
         );
@@ -599,10 +605,7 @@ mod tests {
         first.abort(&mut node);
         let retry = node
             .begin_client_admission(
-                ClientAdmissionIntent::Resume {
-                    player_id: second_player,
-                    ship_id,
-                },
+                ClientAdmissionIntent::Resume { resume_ticket },
                 AOI_CELL_SIZE,
             )
             .expect("abort releases the Ship-level resume lock");
@@ -615,11 +618,12 @@ mod tests {
         let player_id = PlayerId(12);
         let first_ship = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
         let second_ship = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let first_ticket = seeded_resume_ticket(&mut node, player_id, first_ship);
+        let second_ticket = seeded_resume_ticket(&mut node, player_id, second_ship);
         let first = node
             .begin_client_admission(
                 ClientAdmissionIntent::Resume {
-                    player_id,
-                    ship_id: first_ship,
+                    resume_ticket: first_ticket,
                 },
                 AOI_CELL_SIZE,
             )
@@ -627,8 +631,7 @@ mod tests {
         assert_eq!(
             node.begin_client_admission(
                 ClientAdmissionIntent::Resume {
-                    player_id,
-                    ship_id: second_ship,
+                    resume_ticket: second_ticket,
                 },
                 AOI_CELL_SIZE,
             )
@@ -647,10 +650,10 @@ mod tests {
         let owner = PlayerId(12);
         let attacker = PlayerId(13);
         let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let owner_ticket = seeded_resume_ticket(&mut node, owner, ship_id);
         node.begin_client_admission(
             ClientAdmissionIntent::Resume {
-                player_id: owner,
-                ship_id,
+                resume_ticket: owner_ticket,
             },
             AOI_CELL_SIZE,
         )
@@ -658,19 +661,16 @@ mod tests {
         .commit(&mut node)
         .expect("owner commit");
 
+        let _ = attacker;
         assert_eq!(
             node.begin_client_admission(
                 ClientAdmissionIntent::Resume {
-                    player_id: attacker,
-                    ship_id,
+                    resume_ticket: ResumeTicket::from_bytes([99; ResumeTicket::BYTE_LEN]),
                 },
                 AOI_CELL_SIZE,
             )
-            .expect_err("different Player cannot take an owned Ship"),
-            ClientAdmissionRefusal::ResumeIdentityConflict {
-                player_id: attacker,
-                ship_id,
-            }
+            .expect_err("unknown Ticket cannot take an owned Ship"),
+            ClientAdmissionRefusal::ResumeTicketInvalid
         );
     }
 
@@ -679,16 +679,33 @@ mod tests {
         let mut node = node();
         let player_id = PlayerId(12);
         let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let owner_ticket = seeded_resume_ticket(&mut node, player_id, ship_id);
         node.begin_client_admission(
-            ClientAdmissionIntent::Resume { player_id, ship_id },
+            ClientAdmissionIntent::Resume {
+                resume_ticket: owner_ticket,
+            },
             AOI_CELL_SIZE,
         )
         .expect("first resume")
         .commit(&mut node)
         .expect("first commit");
+        let resume_ticket = node
+            .client_resume_ticket(ship_id)
+            .expect("committed ticket");
+        assert_ne!(resume_ticket, owner_ticket);
+        assert_eq!(
+            node.begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    resume_ticket: owner_ticket,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect_err("a rotated ticket must invalidate the previous ticket"),
+            ClientAdmissionRefusal::ResumeTicketInvalid
+        );
         let reconnect = node
             .begin_client_admission(
-                ClientAdmissionIntent::Resume { player_id, ship_id },
+                ClientAdmissionIntent::Resume { resume_ticket },
                 AOI_CELL_SIZE,
             )
             .expect("same identity reconnects and replaces its runtime session");
@@ -698,20 +715,19 @@ mod tests {
     #[test]
     fn missing_resume_never_falls_back_to_fresh_spawn() {
         let mut node = node();
-        let player_id = PlayerId(12);
-        let ship_id = ShipId::new(NodeId(99), 1);
+        let _player_id = PlayerId(12);
+        let _ship_id = ShipId::new(NodeId(99), 1);
 
         let refusal = node
             .begin_client_admission(
-                ClientAdmissionIntent::Resume { player_id, ship_id },
+                ClientAdmissionIntent::Resume {
+                    resume_ticket: ResumeTicket::from_bytes([88; ResumeTicket::BYTE_LEN]),
+                },
                 AOI_CELL_SIZE,
             )
             .expect_err("missing resume must be refused");
 
-        assert_eq!(
-            refusal,
-            ClientAdmissionRefusal::ResumeShipMissing { player_id, ship_id }
-        );
+        assert_eq!(refusal, ClientAdmissionRefusal::ResumeTicketInvalid);
         assert_eq!(node.ship_count(), 0);
     }
 

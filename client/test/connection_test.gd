@@ -44,10 +44,11 @@ func test_welcome_outcome_updates_identity_and_emits_signal() -> void:
 		received.append({"player_id": player_id, "ship_id": ship_id})
 	)
 
-	connection._accept_welcome(5, 11)
+	connection._accept_welcome(5, 11, PackedByteArray([7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]))
 
 	assert_int(connection.player_id).is_equal(5)
 	assert_int(connection.ship_id).is_equal(11)
+	assert_int(connection._resume_ticket.size()).is_equal(32)
 	assert_bool(connection._welcomed).is_true()
 	assert_int(received.size()).is_equal(1)
 	connection.free()

@@ -312,6 +312,11 @@ impl<S: EventStore> SimulationNode<S> {
         Some(TransitHandoffState {
             ship_id,
             owner_player_id: self.ships.owners.get(&ship_id).copied(),
+            resume_ticket: self.ships.owners.get(&ship_id).and_then(|_| {
+                self.station_inventory_db
+                    .client_resume_ticket(ship_id)
+                    .expect("transit owner ticket query")
+            }),
             ship_type_id,
             velocity,
             current_shield,
@@ -486,9 +491,11 @@ impl<S: EventStore> SimulationNode<S> {
             );
         }
         if let Some(player_id) = handoff.owner_player_id {
-            self.station_inventory_db
-                .record_client_ownership(handoff.ship_id, player_id)
-                .expect("transit owner binding transaction");
+            if let Some(resume_ticket) = handoff.resume_ticket {
+                self.station_inventory_db
+                    .record_client_ownership(handoff.ship_id, player_id, resume_ticket)
+                    .expect("transit owner binding transaction");
+            }
             debug_assert!(self.adopt_player_ship(handoff.ship_id, player_id));
         }
         if let Some(current) = handoff.capacitor {
@@ -1461,6 +1468,7 @@ mod tests {
         TransitHandoffState {
             ship_id,
             owner_player_id: None,
+            resume_ticket: None,
             ship_type_id: ShipTypeId(1),
             velocity,
             current_shield: 80.0,

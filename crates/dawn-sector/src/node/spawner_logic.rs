@@ -171,6 +171,8 @@ impl<S: EventStore> SimulationNode<S> {
         // Record ownership before fit_module (needed for is_npc check).
         self.ships.active_ship.insert(player_id, ship_id);
         self.ships.owners.insert(ship_id, player_id);
+        let resume_ticket = self.issue_resume_ticket();
+        self.record_client_resume_ownership(ship_id, player_id, resume_ticket);
 
         // Seed the starting inventory (ADR-0032) before the default loadout
         // below: those fit_module calls are the unchecked, privileged spawn

@@ -225,6 +225,7 @@ pub struct ClientAdmissionIdentityReserved {
 pub struct ClientAdmissionCommitted {
     pub player_id: PlayerId,
     pub ship_id: ShipId,
+    pub resume_ticket: crate::ResumeTicket,
     pub sector_id: SectorId,
     pub initial_position: AbsolutePosition,
     pub ship_type_id: ShipTypeId,
@@ -667,6 +668,7 @@ mod tests {
             handoff: crate::TransitHandoffState {
                 ship_id: id,
                 owner_player_id: None,
+                resume_ticket: None,
                 ship_type_id: ShipTypeId(1),
                 velocity: Velocity::new(1.0, 0.0, 0.0),
                 current_shield: 100.0,

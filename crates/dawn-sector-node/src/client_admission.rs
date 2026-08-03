@@ -77,8 +77,7 @@ impl ClientAdmission {
         while let Ok(request) = self.handshake_req_rx.try_recv() {
             let intent = match request.resume {
                 Some(resume) => ClientAdmissionIntent::Resume {
-                    player_id: resume.player_id,
-                    ship_id: resume.ship_id,
+                    resume_ticket: resume,
                 },
                 None => ClientAdmissionIntent::Fresh {
                     spawn_position: Position::new(30_000.0, 0.0, 0.0),
@@ -87,12 +86,10 @@ impl ClientAdmission {
 
             let mut attempt = match node.begin_client_admission(intent, aoi_cell_size) {
                 Ok(attempt) => attempt,
-                Err(ClientAdmissionRefusal::ResumeShipMissing { ship_id, .. }) => {
+                Err(ClientAdmissionRefusal::ResumeTicketInvalid) => {
                     eprintln!(
-                        "[Node] resume refused from {}: ship #{} is not in Sector {}",
-                        request.peer_addr,
-                        ship_id.raw(),
-                        sector_id.0
+                        "[Node] resume refused from {}: invalid resume ticket for Sector {}",
+                        request.peer_addr, sector_id.0
                     );
                     continue;
                 }
@@ -139,6 +136,7 @@ impl ClientAdmission {
 
             let player_id = attempt.player_id();
             let ship_id = attempt.ship_id();
+            let resume_ticket = attempt.resume_ticket();
             let payload = attempt.take_handoff_payload();
             let completion_tx = self.completion_tx.clone();
 
@@ -147,6 +145,7 @@ impl ClientAdmission {
                     .complete(
                         player_id,
                         ship_id,
+                        resume_ticket,
                         payload.initial_state,
                         payload.player_loadout,
                     )
@@ -186,7 +185,8 @@ fn finish_admission<S: EventStore, T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::{NodeId, PlayerId, SectorBounds, ShipTypeId, Velocity};
+    use dawn_core::NodeId;
+    use dawn_core::SectorBounds;
 
     const AOI_CELL_SIZE: f64 = 1_000.0;
 
@@ -285,6 +285,7 @@ mod tests {
             .complete(
                 player_id,
                 ship_id,
+                attempt.resume_ticket(),
                 payload.initial_state,
                 payload.player_loadout,
             )
@@ -301,11 +302,21 @@ mod tests {
     #[test]
     fn production_adapter_failed_resume_keeps_pre_existing_ship() {
         let mut node = test_node();
-        let player_id = PlayerId(12);
-        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let fresh = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh attempt");
+        let resume_ticket = fresh.resume_ticket();
+        let committed = fresh.commit(&mut node).expect("fresh commit");
+        let player_id = committed.player_id;
+        let ship_id = committed.ship_id;
         let attempt = node
             .begin_client_admission(
-                ClientAdmissionIntent::Resume { player_id, ship_id },
+                ClientAdmissionIntent::Resume { resume_ticket },
                 AOI_CELL_SIZE,
             )
             .expect("resume attempt");
@@ -316,7 +327,7 @@ mod tests {
         );
         assert_eq!(node.ship_count(), 1);
         assert!(node.ship_absolute_pos(ship_id).is_some());
-        assert!(!node.apply_stop_command_owned(player_id, ship_id));
+        assert!(node.apply_stop_command_owned(player_id, ship_id));
     }
 
     #[test]

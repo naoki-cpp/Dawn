@@ -167,20 +167,19 @@ fn missing_resume_still_refuses_without_creating_replayable_state() {
         SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         galaxy,
     );
-    let player_id = dawn_core::PlayerId(7);
-    let ship_id = dawn_core::ShipId::new(NodeId(9), 1);
+    let _player_id = dawn_core::PlayerId(7);
+    let _ship_id = dawn_core::ShipId::new(NodeId(9), 1);
 
     let refusal = node
         .begin_client_admission(
-            ClientAdmissionIntent::Resume { player_id, ship_id },
+            ClientAdmissionIntent::Resume {
+                resume_ticket: dawn_core::ResumeTicket::from_bytes([88; 32]),
+            },
             AOI_CELL_SIZE,
         )
         .expect_err("missing resume must be refused");
 
-    assert_eq!(
-        refusal,
-        ClientAdmissionRefusal::ResumeShipMissing { player_id, ship_id }
-    );
+    assert_eq!(refusal, ClientAdmissionRefusal::ResumeTicketInvalid);
     assert_eq!(node.ship_count(), 0);
     assert!(node.event_store().all_records().is_empty());
 }

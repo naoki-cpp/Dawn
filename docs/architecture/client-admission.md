@@ -49,11 +49,16 @@ exceed the Sector cap.
 
 ## Resume admission
 
-Resume names an exact `(PlayerId, ShipId)` and never falls back to fresh spawn.
-Begin reserves both sides of the identity: no other in-flight attempt may use
-the same Ship or Player. Existing ownership is compare-and-set compatible only
-when absent after restoration or already equal to the exact reconnect identity;
-a different owner or a different active Ship is refused.
+Resume uses a server-issued `ResumeTicket`, never a client-authored
+`(PlayerId, ShipId)` pair. The ticket is bound to the exact player, ship,
+destination Sector, and Transit or fresh-admission attempt that issued it. It
+also has an expiry and one-time consumption state.
+
+The Sector admission module resolves and validates the ticket before building
+the handoff. It then reserves both sides of the resolved identity: no other
+in-flight attempt may use the same Ship or Player. A Ship's presence in the
+ECS is not evidence of player ownership, and NPC ships never have a resume
+ticket.
 
 Ownership changes only after every handshake frame has been await-sent. Abort
 releases the reservation without touching the pre-existing Ship. A successful
@@ -62,8 +67,8 @@ its routing/AoI publication, so only one command source remains live.
 
 ## Cluster routing
 
-Fresh admission starts in Sector 0. Resume locates the exact authoritative
-Sector and carries that index through asynchronous completion. `player_sector`
-and `ship_player` are replaced only after commit and are kept one-to-one with
-the published session. Admission cannot move a Ship between Sectors or bypass
-the ADR-0014 Transit pipeline.
+Fresh admission starts in Sector 0. Resume routes by the authoritative ticket
+binding, not by a client-provided ShipId. `player_sector` and `ship_player` are
+replaced only after commit and are kept one-to-one with the published session.
+Admission cannot move a Ship between Sectors or bypass the ADR-0014 Transit
+pipeline.
