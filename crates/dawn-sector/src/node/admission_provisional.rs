@@ -112,6 +112,18 @@ impl<S: EventStore> SimulationNode<S> {
             .expect("client ownership upsert");
     }
 
+    pub(crate) fn stage_client_resume_ticket(
+        &self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        presented_ticket: ResumeTicket,
+        next_ticket: ResumeTicket,
+    ) -> bool {
+        self.station_inventory_db
+            .stage_client_resume_ticket(ship_id, player_id, presented_ticket, next_ticket)
+            .expect("client ownership ticket staging")
+    }
+
     #[cfg(test)]
     pub(crate) fn client_resume_ticket(&self, ship_id: ShipId) -> Option<ResumeTicket> {
         self.station_inventory_db

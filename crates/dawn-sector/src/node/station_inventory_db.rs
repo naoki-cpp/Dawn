@@ -112,8 +112,30 @@ impl StationInventoryDb {
             "CREATE TABLE IF NOT EXISTS client_ship_ownership (
                 ship_id       TEXT PRIMARY KEY,
                 player_id     INTEGER NOT NULL,
-                resume_ticket BLOB NOT NULL UNIQUE
+                resume_ticket BLOB NOT NULL UNIQUE,
+                pending_resume_ticket BLOB UNIQUE
             )",
+            [],
+        )?;
+        let has_pending_resume_ticket: bool = conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('client_ship_ownership')
+                WHERE name = 'pending_resume_ticket'
+            )",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_pending_resume_ticket {
+            conn.execute(
+                "ALTER TABLE client_ship_ownership
+                 ADD COLUMN pending_resume_ticket BLOB",
+                [],
+            )?;
+        }
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS
+             idx_client_ship_ownership_pending_resume_ticket
+             ON client_ship_ownership(pending_resume_ticket)",
             [],
         )?;
         Ok(Self { conn })
@@ -218,7 +240,7 @@ impl StationInventoryDb {
         self.conn
             .query_row(
                 "SELECT player_id, ship_id FROM client_ship_ownership
-                 WHERE resume_ticket = ?1",
+                 WHERE resume_ticket = ?1 OR pending_resume_ticket = ?1",
                 params![resume_ticket.as_bytes().as_slice()],
                 |row| {
                     let ship_raw: String = row.get(1)?;
@@ -265,7 +287,8 @@ impl StationInventoryDb {
              VALUES (?1, ?2, ?3)
              ON CONFLICT (ship_id) DO UPDATE SET
                player_id = excluded.player_id,
-               resume_ticket = excluded.resume_ticket",
+               resume_ticket = excluded.resume_ticket,
+               pending_resume_ticket = NULL",
             params![
                 ship_id.raw().to_string(),
                 player_id.0 as i64,
@@ -273,6 +296,32 @@ impl StationInventoryDb {
             ],
         )?;
         Ok(())
+    }
+
+    /// Persist the next resume ticket before it can be exposed in Welcome.
+    /// The committed ticket remains valid until `record_client_ownership`
+    /// promotes this staged value, so a failed handshake can retry either the
+    /// previous or the advertised ticket.
+    pub(super) fn stage_client_resume_ticket(
+        &self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        presented_ticket: ResumeTicket,
+        next_ticket: ResumeTicket,
+    ) -> rusqlite::Result<bool> {
+        let changed = self.conn.execute(
+            "UPDATE client_ship_ownership
+             SET pending_resume_ticket = ?3
+             WHERE ship_id = ?1 AND player_id = ?2
+               AND (resume_ticket = ?4 OR pending_resume_ticket = ?4)",
+            params![
+                ship_id.raw().to_string(),
+                player_id.0 as i64,
+                next_ticket.as_bytes().as_slice(),
+                presented_ticket.as_bytes().as_slice(),
+            ],
+        )?;
+        Ok(changed == 1)
     }
 
     /// Every item stack this player currently owns at `station_id`.
@@ -388,7 +437,8 @@ impl StationInventoryDb {
              VALUES (?1, ?2, ?3)
              ON CONFLICT (ship_id) DO UPDATE SET
                player_id = excluded.player_id,
-               resume_ticket = excluded.resume_ticket",
+               resume_ticket = excluded.resume_ticket,
+               pending_resume_ticket = NULL",
             params![
                 ship_id.raw().to_string(),
                 player_id.0 as i64,
@@ -538,6 +588,43 @@ mod tests {
             .unwrap();
         assert_eq!(db.prepared_client_admission(ship_id).unwrap(), None);
         assert_eq!(db.client_owner(ship_id).unwrap(), Some(player_id));
+    }
+
+    #[test]
+    fn existing_ownership_schema_can_stage_and_promote_a_resume_ticket() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE client_ship_ownership (
+                ship_id TEXT PRIMARY KEY,
+                player_id INTEGER NOT NULL,
+                resume_ticket BLOB NOT NULL UNIQUE
+            )",
+            [],
+        )
+        .unwrap();
+        let db = StationInventoryDb::init(conn).unwrap();
+        let ship_id = ShipId::new(dawn_core::NodeId(2), 8);
+        let player_id = PlayerId(1);
+        let current_ticket = ResumeTicket::from_bytes([8; ResumeTicket::BYTE_LEN]);
+        let next_ticket = ResumeTicket::from_bytes([9; ResumeTicket::BYTE_LEN]);
+
+        db.record_client_ownership(ship_id, player_id, current_ticket)
+            .unwrap();
+        assert!(db
+            .stage_client_resume_ticket(ship_id, player_id, current_ticket, next_ticket)
+            .unwrap());
+        assert_eq!(
+            db.client_ownership_by_ticket(next_ticket).unwrap(),
+            Some((player_id, ship_id))
+        );
+
+        db.record_client_ownership(ship_id, player_id, next_ticket)
+            .unwrap();
+        assert_eq!(db.client_ownership_by_ticket(current_ticket).unwrap(), None);
+        assert_eq!(
+            db.client_ownership_by_ticket(next_ticket).unwrap(),
+            Some((player_id, ship_id))
+        );
     }
 
     #[test]

@@ -41,9 +41,12 @@ authoritative record is bound to:
 - a one-time consumption state.
 
 The ticket is issued only after the server has durably reserved the identity.
-It is consumed atomically with admission commit. A failed handshake releases
-the in-flight admission reservation without publishing a session, so a valid
-ticket can be retried according to the admission retry policy.
+For a resume, the next ticket is also durably staged before `Welcome` is sent.
+The committed ticket remains valid until the admission commit promotes the
+staged ticket and clears the previous one. A failed handshake releases only the
+in-flight admission reservation; the committed and one staged ticket remain
+retryable, so a client can safely retry whether or not it received `Welcome`.
+Only one staged ticket is retained per owned Ship.
 
 ### Wire contract
 

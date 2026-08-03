@@ -331,14 +331,23 @@ impl<S: EventStore> SimulationNode<S> {
                         .build_player_loadout_json_for_admission(player_id, ship_id)
                         .ok_or(ClientAdmissionRefusal::ResumeTicketInvalid)?;
                     handoff.player_loadout = Some(loadout);
-                    Ok(handoff)
+                    let next_ticket = self.issue_resume_ticket();
+                    if !self.stage_client_resume_ticket(
+                        ship_id,
+                        player_id,
+                        resume_ticket,
+                        next_ticket,
+                    ) {
+                        return Err(ClientAdmissionRefusal::ResumeTicketInvalid);
+                    }
+                    Ok((handoff, next_ticket))
                 })();
 
                 match result {
-                    Ok(handoff) => Ok(ClientAdmissionAttempt {
+                    Ok((handoff, next_ticket)) => Ok(ClientAdmissionAttempt {
                         player_id,
                         ship_id,
-                        resume_ticket: self.issue_resume_ticket(),
+                        resume_ticket: next_ticket,
                         origin: AdmissionOrigin::Resume {
                             presented_ticket: resume_ticket,
                         },
@@ -710,6 +719,35 @@ mod tests {
             )
             .expect("same identity reconnects and replaces its runtime session");
         reconnect.abort(&mut node);
+    }
+
+    #[test]
+    fn failed_resume_keeps_the_advertised_rotation_retryable() {
+        let mut node = node();
+        let player_id = PlayerId(12);
+        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let owner_ticket = seeded_resume_ticket(&mut node, player_id, ship_id);
+
+        let attempt = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    resume_ticket: owner_ticket,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("resume should begin");
+        let advertised_ticket = attempt.resume_ticket();
+        attempt.abort(&mut node);
+
+        let retry = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    resume_ticket: advertised_ticket,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("the ticket sent before the failed handshake must remain retryable");
+        retry.abort(&mut node);
     }
 
     #[test]
