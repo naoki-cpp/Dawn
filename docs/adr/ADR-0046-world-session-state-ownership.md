@@ -29,16 +29,10 @@ belongs at the same boundary.
 - typed transition outcomes for registration, removal, destruction, health, and
   docking operations.
 
-`dawn-client-gdext::WorldSession` is a thin adapter. It parses JSON only at the
-Godot boundary, delegates state transitions to `WorldSessionState`, and returns
-Godot `Dictionary` snapshots/outcomes. It must not store or accept `Node3D`
-references.
-
-`main.gd` remains responsible for Godot presentation and lifecycle: its
-`_ships` dictionary maps ship IDs to scene nodes, creates/frees those nodes,
-and applies returned state to visual components. It synchronizes scalar and
-collection state through `WorldSession.snapshot()` instead of retaining aliases
-to Rust-owned collections.
+`dawn-client-gdext::WorldSession` is a thin adapter. It must not store or accept
+`Node3D` references. `main.gd` remains responsible for Godot presentation and
+scene lifecycle: its `_ships` dictionary maps ship IDs to scene nodes and
+creates/frees those nodes.
 
 The alternative of keeping the GDScript session and adding Rust helpers was
 rejected because it would leave two state owners and preserve scene-tree
@@ -47,80 +41,67 @@ must not own Godot scene nodes or presentation lifecycle.
 
 ## 実装の変遷（2026-07-28 追記）
 
-上の「決定」節はこのADRを書いた時点の実装を具体的に描写しており、その後3点が
-事実と食い違ったまま残っていた。**決定そのもの**——`WorldSessionState`が純粋状態を
-所有し、`dawn-client-gdext::WorldSession`は薄いadapterで、`main.gd`がGodotの
-表示・ライフサイクルを持つ——は今も有効である。変わったのは実現手段だけなので、
-supersedeせずここに現状を記録する。
+決定そのもの——`WorldSessionState`が純粋状態を所有し、
+`dawn-client-gdext::WorldSession`は薄いadapterで、`main.gd`がGodotの表示・
+ライフサイクルを持つ——は今も有効である。変わったのは実現手段である。
 
-| 決定節の記述 | 現状 | 変更した経緯 |
-|---|---|---|
-| 「JSONをGodot境界でのみパースする」 | JSONパースは無い | `register_ship`が受け取っていた`JSON.stringify`済み文字列を`Dictionary`直接受け取りへ（issue #178） |
-| 「`WorldSession.snapshot()`を通じてscalar/collection状態を同期する」 | `snapshot()`は削除 | まず`main.gd`が利用時点で個別accessorを読む形へ移行し、`snapshot()`はテスト専用として残っていた（本ADR candidate 5）。テストと本番で読み取り経路が2本あるとドリフトしても本番側が気づけないため、今回削除しテストも同じaccessorを使う |
-| 「Godot `Dictionary`のsnapshot/outcomeを返す」 | 型付きクラスを返す | `Dictionary`は呼び出し側にキー文字列と型キャストを要求し、レコードの形が`main.gd`側の記憶に置かれていた。`GateRecord`/`StationRecord`/`CelestialBodyRecord`/`BuildableShipType`/`ShipHealth`/`CapacitorStatus`/`DestructionOutcome`（`session_record_gd.rs`）へ移行。既存の`ItemRow`/`ModuleRow`と同じ形 |
-
-あわせて、outcomeに対してdeletion testを適用した。`RegistrationOutcome`（3
-フィールド）・`RemovalOutcome`（4）・`HealthEventOutcome`（3）は、GDScript側にも
-Rustテスト側にも**1フィールドしか読み手がいなかった**。残りは内部状態遷移を駆動する
-ローカル変数の値を外へエコーしていただけで、報告先が無かった。「内部で計算する」ことと
-「外へ報告する」ことは別で、荷重がかかっていたのは前者だけなので、これらの構造体は
-削除し、各メソッドは実際に消費されていた1つの値を返す（`register_ship -> bool`、
-`remove_ship -> bool`、`apply_hp_event -> ()`）。`DestructionOutcome`だけは
-3フィールドとも読み手がある——`destroyed`でシーンノードを解放し、
-`destroyed_player`/`destroyed_opponent`でHUDのDEFEAT/VICTORY表示を切り替える——ため
-そのまま残る。
-
-削除対象を選ぶ際は、フィールド名でgrepして本番・テスト両方の読み手を数えること。
-この作業中に`destroyed_player`を読み手なしと誤判定して一度削除し、Godot側の
-パースエラーで気づいた（`main.gd`の撃墜時DEFEAT表示が唯一の読み手だった）。
-呼び出し直後のブロックだけを見ると、同じ関数の後半にある読み手を見落とす。
-
-`dock_status()`は逆方向の是正で、4キーの`Dictionary`を返していたが9箇所の
-呼び出しのうち8箇所は1値しか読んでいなかった。`docked_station_id()` /
-`docked_station_name()` / `latest_dock_state_tick()`（既存の`is_docked()`と揃う）
-へ分解した。
+- JSON/Dictionaryによる同型stateの往復を削除した。
+- `WorldSession.snapshot()`を削除し、本番とテストが同じread accessorを使う。
+- record-shaped outcomeは`ShipHealth`、`CapacitorStatus`、`DestructionOutcome`などの
+  型付きGDExtension classへ移した。
+- 実際に1フィールドしか読まれなかったregistration/removal/health outcomeは削除し、
+  必要なscalarだけを返す形へ縮小した。
 
 ## Typed server-outcome application（2026-08-02、issue #238）
 
-`WorldSessionState` の所有権を徹底するため、サーバー受信経路も型付きの単一経路へ
-移行した。`ServerMessageDecoder` は postcard を Rust の wire 型へ復号し、
-`ServerMessageOutcome::dispatch` が `WorldSessionUpdate` へ変換して
-`WorldSessionState::apply_update` を呼ぶ。状態更新は GDScript callback より前に完了する。
+サーバー受信経路を型付きの単一経路へ移行した。`ServerMessageDecoder`はpostcardを
+Rustのwire型へ復号し、状態更新はGDScript callbackより前に完了する。
 
 この境界では次を禁止する。
 
-- Rust の wire 型を Godot `Dictionary` に投影し、GDScript が同じ値を
-  `WorldSession` に戻して Rust 型を再構築すること。
-- `main.gd` の presentation handler が `WorldSession` の authoritative state を
-  二重に更新すること。
-- `PlayerLoadout` や Market payload を string-keyed bag として受け渡すこと。
+- Rustのwire型をGodot `Dictionary`へ投影し、GDScriptが同じ値をRustへ戻すこと。
+- presentation handlerが`WorldSession`のauthoritative stateを二重に更新すること。
+- `PlayerLoadout`やMarket payloadをstring-keyed bagとして受け渡すこと。
 
-GDScript が受け取るのは、scene/HUD 更新に必要な primitive または
-`ShipPresentation` / `InitialStatePresentation` /
-`MotionCorrectionPresentation` / `MarketSnapshot` などの型付き presentation record
-だけである。`PlayerLoadoutWire` は callback 発火前に Rust 側で `PlayerLoadout` へ
-置換される。navigation、ship lifecycle/AoI、health/lock、tick/capacitor、dock/system、
-loadout、market の state mutation はすべて Rust-owned model に集約する。
-
-これに伴い `navigation_gd.rs` / `ship_gd.rs` の Dictionary-to-core 変換、
-`WorldSession.ingest_navigation(Dictionary)`、
-`WorldSession.register_ship(..., Dictionary, ...)` を削除した。GdUnit も
-hand-built Dictionary ではなく、実際の typed outcome fixture を dispatch して
-本番と同じ state-application path を検証する。
+GDScriptが受け取るのはscene/HUD更新に必要なprimitiveまたは型付きpresentation
+recordだけである。
 
 ## Single test surface（2026-08-02、issue #255）
 
-`WorldSession` の Godot 公開面から、ship 選択、health、lock、ship removal/destruction、
-system、server tick、dock/undock、loadout dock context を直接書き換える pass-through
-method を削除した。これらは本番受信経路では使われず、GdUnit が本番では生成できない
+`WorldSession`のGodot公開面から、ship選択、health、lock、ship removal/destruction、
+system、server tick、dock/undock、loadout dock contextを直接書き換えるpass-through
+methodを削除した。これらは本番受信経路では使われず、GdUnitが本番では生成できない
 状態や順序を作るためだけに残っていた。
 
-Godot から公開する操作は、read accessor、接続切断時の `reset()`、および明示的に
-client-owned な予測時計を進める `advance_client_ticks()` に限る。server-driven state
-は production と test のどちらも `ServerMessageOutcome::dispatch` から
-`WorldSessionUpdate` を通して適用する。順序・拒否・遷移結果の細部は
-`dawn-client-core` の `WorldSessionState` テストで直接検証し、GdUnit は typed inbound
-wiring と Godot 公開 read/reset/client-clock surface を検証する。
+Godotから公開する操作はread accessor、接続切断時の`reset()`、および明示的に
+client-ownedな予測時計を進める`advance_client_ticks()`に限る。server-driven stateは
+productionとtestのどちらも`ServerMessageOutcome::dispatch`から適用する。
+順序・拒否・遷移結果の細部はpure Rust testで直接検証し、GdUnitはtyped inbound
+wiringとGodot公開read/reset/client-clock surfaceを検証する。
+
+## Server-fact policy ownership（2026-08-02、issue #251）
+
+#238後もGDExtension adapterには、despawnとAoI leaveのlock clearing差、station name解決、
+stale dock eventの適用、loadout replacementとsession reconciliationの順序、module activation、
+tick/capacitor advancementといったwire非依存policyが残っていた。
+
+これらを`dawn-client-core::ClientState`と`ClientFact`へ移した。adapterの責務は次に限定する。
+
+1. postcard frameをdecodeし、Godot整数範囲とcanonical item identityを検証する。
+2. wire値をwire非依存の`ClientFact`とpresentation値へ変換する。
+3. `ClientState::apply`でsession/loadout transactionを完了する。
+4. `WorldSessionEffect`をpresentationへ変換し、最終callbackを一度だけ呼ぶ。
+
+`ClientState`は`WorldSessionState`と`Option<PlayerLoadoutMsg>`を同時にborrowするため、
+loadout replacement、dock reconciliation、tick simulation、module activationをadapterが
+別々に並べ替えられない。despawn/AoI差は`ShipLeaveReason`として表現し、station表示名は
+core-owned navigation stateから解決する。
+
+presentation seamは`ServerMessageOutcome::dispatch`の1箇所だけである。decode結果は検証済みの
+`dawn_wire::ServerMessage`をそのまま保持し、同型の`ClientOutcome` mirrorは削除した。
+world eventはGDScriptが明示したscene ownerの最終`_handle_*` callbackへ直接dispatchする。
+Rust adapterは`get_parent()`などでscene tree構造を推測しない。以前の
+`ServerEventOutcome`生成→signal→再dispatchという二段経路と互換classは削除した。
 
 ## Implementation checklist
 
@@ -128,8 +109,10 @@ wiring と Godot 公開 read/reset/client-clock surface を検証する。
       `crates/dawn-client-core`.
 - [x] Add the `WorldSession` GDExtension adapter in
       `crates/dawn-client-gdext`.
-- [x] Keep the Godot scene-node registry in `client/scripts/main.gd` and remove
-      `client/scripts/world_session.gd`.
+- [x] Keep the Godot scene-node registry in `client/scripts/main.gd`.
 - [x] Add pure Rust and GdUnit4 coverage for navigation, ship lifecycle, HP,
       locks, ticks/capacitor, and docking state.
+- [x] Add the `ClientState` / `ClientFact` server-fact boundary.
+- [x] Remove the redundant `ClientOutcome` mirror and runtime two-stage event dispatch.
+- [x] Preserve issue #255's single public test surface.
 - [x] Update crate-boundary and architecture documentation.

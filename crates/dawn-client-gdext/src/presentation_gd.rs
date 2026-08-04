@@ -165,7 +165,7 @@ impl MarketSnapshot {
             .iter()
             .map(|order| {
                 let item_id = ItemId::try_from(order.item_id)
-                    .expect("ClientOutcome validates every Market Item identity");
+                    .expect("server message validation covers every Market Item identity");
                 Gd::from_init_fn(|_base| MarketOrder {
                     order_id: godot_i64(order.order_id),
                     item_id: ItemIdentity::wrap(item_id),
@@ -188,7 +188,7 @@ impl MarketSnapshot {
 impl MarketSnapshot {}
 
 pub(crate) fn godot_i64(value: u64) -> i64 {
-    i64::try_from(value).expect("ClientOutcome validates every Godot-facing u64")
+    i64::try_from(value).expect("server message validation covers every Godot-facing u64")
 }
 
 pub(crate) fn position_components(position: dawn_wire::AbsPosWire) -> PackedFloat64Array {

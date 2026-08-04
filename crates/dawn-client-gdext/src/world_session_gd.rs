@@ -1,4 +1,7 @@
-use dawn_client_core::{WorldSessionEffect, WorldSessionState, WorldSessionUpdate};
+use dawn_client_core::{
+    ClientFact, ClientState, ClientStateError, PlayerLoadoutMsg, WorldSessionEffect,
+    WorldSessionState,
+};
 use godot::prelude::*;
 
 type Dict = Dictionary<Variant, Variant>;
@@ -9,9 +12,6 @@ use crate::session_record_gd::{
 };
 
 /// Godot adapter for the pure `dawn-client-core::WorldSessionState` model.
-///
-/// This class owns no Node3D references. `main.gd` keeps the visual ship-node
-/// registry and uses the returned outcomes to apply scene-tree side effects.
 #[derive(Debug, GodotClass)]
 #[class(init, base=RefCounted)]
 pub struct WorldSession {
@@ -19,16 +19,12 @@ pub struct WorldSession {
 }
 
 impl WorldSession {
-    pub(crate) fn apply_update(
+    pub(crate) fn apply_fact(
         &mut self,
-        update: WorldSessionUpdate,
-        loadout: Option<&mut dawn_client_core::PlayerLoadoutMsg>,
-    ) -> WorldSessionEffect {
-        self.state.apply_update(update, loadout)
-    }
-
-    pub(crate) fn station_name(&self, station_id: i64) -> String {
-        self.state.station_name(station_id)
+        fact: ClientFact,
+        loadout: &mut Option<PlayerLoadoutMsg>,
+    ) -> Result<WorldSessionEffect, ClientStateError> {
+        ClientState::new(&mut self.state, loadout).apply(fact)
     }
 }
 
@@ -49,11 +45,6 @@ impl WorldSession {
         self.state.ship_count() as i64
     }
 
-    /// `main.gd` writes `_player_ship_id`/`_player_lock_target` optimistically
-    /// ahead of the server's confirming event, then reconciles against these
-    /// after every event -- unlike every other field WorldSession tracks,
-    /// which main.gd now reads directly at point of use instead of mirroring
-    /// (ADR-0046).
     #[func]
     fn player_ship_id(&self) -> i64 {
         self.state.player_ship_id()
@@ -64,8 +55,6 @@ impl WorldSession {
         self.state.player_lock_target()
     }
 
-    /// Advances explicitly client-owned prediction time. Server-driven tick
-    /// changes remain internal to `ServerMessageOutcome::dispatch`.
     #[func]
     fn advance_client_ticks(&mut self, ticks: i64, mut loadout: Gd<PlayerLoadout>) {
         let mut loadout = loadout.bind_mut();
@@ -77,9 +66,6 @@ impl WorldSession {
         self.state.is_docked()
     }
 
-    /// Split out of a former `dock_status()` `Dictionary`: of its nine call
-    /// sites, eight wanted exactly one of these values, so they now cost one
-    /// method call instead of building a four-key bag to read one key out of.
     #[func]
     fn docked_station_id(&self) -> i64 {
         self.state.docked_station_id()
@@ -100,10 +86,6 @@ impl WorldSession {
         self.state.player_ship_type_name().into()
     }
 
-    /// Bundles the player's shield/armor/hull current and max values --
-    /// the HUD always reads all six together, so this is one call instead of
-    /// six. Typed rather than a `Dictionary`: the HUD reads six fields off it
-    /// every frame, and key strings put the record's shape in the caller.
     #[func]
     fn player_health(&self) -> Gd<ShipHealth> {
         ShipHealth::wrap(self.state.player_ship_id(), self.state.player_health())
@@ -119,8 +101,6 @@ impl WorldSession {
         self.state.current_system_name().into()
     }
 
-    /// Bundles the capacitor's current/max/recharge values -- always read
-    /// together by the HUD, same rationale as `player_health()`.
     #[func]
     fn capacitor_status(&self) -> Gd<CapacitorStatus> {
         CapacitorStatus::wrap(
@@ -130,15 +110,6 @@ impl WorldSession {
         )
     }
 
-    // `snapshot()` is gone. It projected the whole session into one 22-key
-    // `Dictionary` for tests while production read the individual accessors,
-    // so the two read paths could drift and only the test side would notice.
-    // Tests now go through the same accessors production does (ADR-0046).
-
-    /// One ship's HP layers, or `null` if the session has no such ship.
-    ///
-    /// Deliberately per-ship rather than a whole-map `ship_hp()`: the HUD's
-    /// locked-target readout runs every frame and wants exactly one entry.
     #[func]
     fn ship_health(&self, ship_id: i64) -> Variant {
         match self.state.ship_hp().get(&ship_id) {

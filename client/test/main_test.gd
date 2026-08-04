@@ -11,6 +11,7 @@
 extends GdUnitTestSuite
 
 const __source: String = "res://scripts/main.gd"
+const MainScript = preload("res://scripts/main.gd")
 const InventoryRow = preload("res://scripts/inventory_row.gd")
 const HudManager = preload("res://scripts/hud_manager.gd")
 const AU_M: float = 1.495978707e11
@@ -27,9 +28,6 @@ class TypedOutcomeTarget:
 	func _accept_player_loadout() -> void:
 		pass
 
-	func _accept_event(event: ServerEventOutcome) -> void:
-		event.dispatch(self)
-
 	func _handle_ship_docked(
 		_ship_id: int, _station_id: int, _tick: int, _session_accepted: bool
 	) -> void:
@@ -39,8 +37,18 @@ class TypedOutcomeTarget:
 func _dispatch_fixture(kind: String, connection_ship_id: int = -1) -> void:
 	var outcome: ServerMessageOutcome = ServerMessageDecoder.new().test_outcome(kind)
 	assert_object(outcome).is_not_null()
+	var target := TypedOutcomeTarget.new()
 	assert_bool(outcome.dispatch(
-		TypedOutcomeTarget.new(), _main._session, _main._loadout, connection_ship_id
+		target, target, _main._session, _main._loadout, connection_ship_id
+	)).is_true()
+
+
+func _dispatch_to_main(kind: String, connection_ship_id: int = -1) -> void:
+	var outcome: ServerMessageOutcome = ServerMessageDecoder.new().test_outcome(kind)
+	assert_object(outcome).is_not_null()
+	var connection_target := TypedOutcomeTarget.new()
+	assert_bool(outcome.dispatch(
+		connection_target, _main, _main._session, _main._loadout, connection_ship_id
 	)).is_true()
 
 
@@ -64,6 +72,17 @@ class FakeShip:
 	var dock_calls: Array[Dictionary] = []
 	var undock_calls: Array[Dictionary] = []
 	var server_position_value := PackedFloat64Array([0.0, 0.0, 0.0])
+
+	func configure_motion(
+		_max_speed: float,
+		_mass: float,
+		_inertia_modifier: float,
+		p: PackedFloat64Array,
+		v: Vector3,
+		_tick: int = 0
+	) -> void:
+		server_position_value = p
+		velocity_calls.append(v)
 
 	func set_velocity(v: Vector3, tick: int = 0) -> bool:
 		velocity_calls.append(v)
@@ -116,6 +135,40 @@ class FakeShip:
 
 	func get_speed_server() -> float:
 		return 0.0
+
+
+class FakeWorldPresentation:
+	extends WorldPresentation
+
+	func attach_player_ship(ship: Node3D, _weapon_range: float, _weapon_falloff: float) -> void:
+		if ship == null:
+			return
+		if _player_ship != ship:
+			detach_player_ship()
+		_player_ship = ship
+		ship.call("set_as_player")
+
+	func detach_player_ship() -> void:
+		if _player_ship != null and is_instance_valid(_player_ship):
+			_player_ship.call("clear_as_player")
+		_player_ship = null
+
+	func update_tactical_overlay_ranges(_weapon_range: float, _weapon_falloff: float) -> void:
+		pass
+
+
+class TestableMain:
+	extends MainScript
+
+	var instantiated_ships: Array[Node3D] = []
+
+	func _instantiate_ship(sid: int, server_pos: PackedFloat64Array) -> Node3D:
+		var ship := FakeShip.new()
+		ship.name = "Ship_%d" % sid
+		ship.server_position_value = server_pos
+		add_child(ship)
+		instantiated_ships.append(ship)
+		return ship
 
 
 class FakeConnection:
@@ -192,13 +245,29 @@ func before_test() -> void:
 	_main = load(__source).new()
 	## _ready() normally injects WorldSpace through WorldPresentation.build().
 	## This fixture skips _ready(), so establish the same production dependency.
+	_initialize_main_dependencies()
+
+
+func _initialize_main_dependencies() -> void:
 	_main._presentation._world = _main._world
 	_main._interaction = load("res://scripts/world_interaction.gd").new()
 	_main._loadout = PlayerLoadout.new()
 
 
-func after_test() -> void:
+func _replace_with_testable_main() -> void:
 	_main.free()
+	## The replacement root is intentionally outside the scene tree so its
+	## _ready() hook does not run. Register it with GdUnit4 nevertheless, so
+	## its child test ships are released even if a test exits before cleanup.
+	_main = auto_free(TestableMain.new())
+	_main._presentation = FakeWorldPresentation.new()
+	_initialize_main_dependencies()
+
+
+func after_test() -> void:
+	if is_instance_valid(_main):
+		_main.free()
+	_main = null
 
 
 func _module_fixture(
@@ -220,6 +289,20 @@ func _set_loadout_modules(modules: Array[ModuleRow]) -> void:
 	)).is_true()
 
 
+func _setup_pending_docked_switch() -> FakeShip:
+	_replace_with_testable_main()
+	var old_ship := FakeShip.new()
+	_main.add_child(old_ship)
+	_main._ships = {11: old_ship}
+	_dispatch_fixture("InitialState", 11)
+	_main._set_as_player_ship(11, old_ship)
+	_dispatch_fixture("ShipDocked", 11)
+	_dispatch_fixture("PlayerLoadoutUnknownDocked", 11)
+	_main._apply_current_dock_state_to_player_ship(old_ship)
+	assert_int(_main._session.player_ship_id()).is_equal(11)
+	assert_bool(_main._session.is_docked()).is_true()
+	assert_int(old_ship.dock_calls.size()).is_equal(1)
+	return old_ship
 
 
 func test_warp_hud_guidance_uses_shared_minimum_distance_boundary() -> void:
@@ -639,6 +722,38 @@ func test_switching_active_ship_to_an_unknown_ship_leaves_the_camera_alone() -> 
 
 	assert_int(_main._player_ship_id).is_equal(11)
 	assert_object(camera._target_node).is_equal(ship_a)
+
+
+func test_pending_docked_switch_reapplies_dock_after_aoi_enter() -> void:
+	var old_ship := _setup_pending_docked_switch()
+
+	_dispatch_to_main("AoiEnterPending", 11)
+
+	assert_int(_main._session.player_ship_id()).is_equal(33)
+	assert_int(_main._player_ship_id).is_equal(33)
+	assert_bool(_main._session.is_docked()).is_true()
+	assert_bool(_main._ships.has(33)).is_true()
+	var new_ship := _main._ships[33] as FakeShip
+	assert_int(new_ship.set_as_player_calls).is_equal(1)
+	assert_int(new_ship.dock_calls.size()).is_equal(1)
+	assert_int(new_ship.dock_calls[0]["tick"] as int).is_equal(13)
+	assert_int(old_ship.clear_as_player_calls).is_equal(1)
+
+
+func test_pending_docked_switch_reapplies_dock_after_ship_spawned() -> void:
+	var old_ship := _setup_pending_docked_switch()
+
+	_dispatch_to_main("ShipSpawnedPending", 11)
+
+	assert_int(_main._session.player_ship_id()).is_equal(33)
+	assert_int(_main._player_ship_id).is_equal(33)
+	assert_bool(_main._session.is_docked()).is_true()
+	assert_bool(_main._ships.has(33)).is_true()
+	var new_ship := _main._ships[33] as FakeShip
+	assert_int(new_ship.set_as_player_calls).is_equal(1)
+	assert_int(new_ship.dock_calls.size()).is_equal(1)
+	assert_int(new_ship.dock_calls[0]["tick"] as int).is_equal(13)
+	assert_int(old_ship.clear_as_player_calls).is_equal(1)
 
 
 ## Disembarking is also applied by the typed PlayerLoadout outcome before the

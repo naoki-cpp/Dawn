@@ -30,7 +30,7 @@ func test_initial_state_planet_is_rendered_near_the_player_at_true_au_scale() ->
 	var outcome: ServerMessageOutcome = ServerMessageDecoder.new().test_outcome("InitialState")
 	assert_object(outcome).is_not_null()
 	assert_bool(outcome.dispatch(
-		connection, _main._session, _main._loadout, connection.ship_id
+		connection, _main, _main._session, _main._loadout, connection.ship_id
 	)).is_true()
 	await get_tree().process_frame
 

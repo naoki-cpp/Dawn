@@ -16,7 +16,6 @@ extends Node
 
 # ── シグナル ──────────────────────────────────────────────────────────────────
 
-signal event_received(outcome: ServerEventOutcome)
 ## Owner-only authoritative normal-flight state for client prediction (ADR-0043).
 signal motion_correction_received(correction: MotionCorrectionPresentation)
 signal connection_changed(connected: bool)
@@ -61,15 +60,19 @@ var _cmd             : ClientCommand         = ClientCommand.new()
 var _decoder         : ServerMessageDecoder  = ServerMessageDecoder.new()
 var _world_session   : WorldSession          = null
 var _player_loadout  : PlayerLoadout         = null
+var _world_target    : Object                = null
 
 var player_id : int = -1
 var ship_id   : int = -1
 
 # ── ライフサイクル ────────────────────────────────────────────────────────────
 
-func bind_client_state(session: WorldSession, loadout: PlayerLoadout) -> void:
+func bind_client_state(
+	session: WorldSession, loadout: PlayerLoadout, world_target: Object
+) -> void:
 	_world_session = session
 	_player_loadout = loadout
+	_world_target = world_target
 
 
 func _ready() -> void:
@@ -318,10 +321,12 @@ func _receive_messages() -> void:
 		if outcome == null:
 			push_warning("[Connection] failed to decode binary ServerMessage")
 			continue
-		if _world_session == null or _player_loadout == null:
-			push_warning("[Connection] typed client state is not bound")
+		if _world_session == null or _player_loadout == null or _world_target == null:
+			push_warning("[Connection] typed client state or world target is not bound")
 			continue
-		if not outcome.dispatch(self, _world_session, _player_loadout, ship_id):
+		if not outcome.dispatch(
+			self, _world_target, _world_session, _player_loadout, ship_id
+		):
 			push_warning("[Connection] failed to dispatch typed ServerMessage outcome")
 
 
@@ -341,10 +346,6 @@ func _accept_welcome(
 func _accept_initial_state(state: InitialStatePresentation) -> void:
 	print("[Connection] InitialState: %d ships" % state.ships.size())
 	initial_state_received.emit(state)
-
-
-func _accept_event(outcome: ServerEventOutcome) -> void:
-	event_received.emit(outcome)
 
 
 func _accept_player_loadout() -> void:

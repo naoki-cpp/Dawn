@@ -1,128 +1,12 @@
 use dawn_core::ItemId;
-use dawn_wire::{
-    AbsPosWire, EventWire, InitialStateWire, ItemWire, MarketSnapshotWire, PlayerLoadoutWire,
-    ResumeTicket, ServerMessage, ShipStateWire, VelWire,
-};
+use dawn_wire::{EventWire, ItemWire, PlayerLoadoutWire, ServerMessage};
 
-/// Godot-independent result of decoding one server frame.
-///
-/// This is the single projection seam between the wire schema and client
-/// behavior. GDScript receives one of the typed Godot wrappers around these
-/// outcomes; it never reconstructs `ServerMessage` from Dictionary tags.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ClientOutcome {
-    Welcome {
-        player_id: u64,
-        ship_id: u64,
-        resume_ticket: ResumeTicket,
-    },
-    Redirect {
-        ws_addr: String,
-        resume_ticket: ResumeTicket,
-    },
-    Event(ClientEventOutcome),
-    PlayerLoadout(PlayerLoadoutWire),
-    InitialState(InitialStateWire),
-    ModuleActivated {
-        ship_id: u64,
-        module_id: u32,
-        slot: String,
-    },
-    ModuleDeactivated {
-        ship_id: u64,
-        module_id: u32,
-        slot: String,
-        reason: Option<String>,
-    },
-    MotionCorrection {
-        ship_id: u64,
-        position: AbsPosWire,
-        velocity: VelWire,
-        tick: u64,
-    },
-    MarketSnapshot(MarketSnapshotWire),
-}
-
-/// World-facing event outcome dispatched by `main.gd`.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ClientEventOutcome {
-    Domain(EventWire),
-    AoiEnter(ShipStateWire),
-    AoiLeave { ship_id: u64 },
-    PositionSnap { ship_id: u64, position: AbsPosWire },
-}
-
-impl ClientOutcome {
-    pub(crate) fn decode(bytes: &[u8]) -> Result<Self, String> {
-        let message = ServerMessage::decode(bytes).map_err(|error| error.to_string())?;
-        validate_godot_integer_range(&message)?;
-        Ok(Self::from_message(message))
-    }
-
-    fn from_message(message: ServerMessage) -> Self {
-        match message {
-            ServerMessage::Welcome {
-                player_id,
-                ship_id,
-                resume_ticket,
-            } => Self::Welcome {
-                player_id,
-                ship_id,
-                resume_ticket,
-            },
-            ServerMessage::Redirect {
-                ws_addr,
-                resume_ticket,
-            } => Self::Redirect {
-                ws_addr,
-                resume_ticket,
-            },
-            ServerMessage::Event(EventWire::ModuleActivated {
-                ship_id,
-                module_id,
-                slot,
-                ..
-            }) => Self::ModuleActivated {
-                ship_id,
-                module_id,
-                slot,
-            },
-            ServerMessage::Event(EventWire::ModuleDeactivated {
-                ship_id,
-                module_id,
-                slot,
-                reason,
-                ..
-            }) => Self::ModuleDeactivated {
-                ship_id,
-                module_id,
-                slot,
-                reason,
-            },
-            ServerMessage::Event(event) => Self::Event(ClientEventOutcome::Domain(event)),
-            ServerMessage::PlayerLoadout(loadout) => Self::PlayerLoadout(loadout),
-            ServerMessage::InitialState(state) => Self::InitialState(state),
-            ServerMessage::AoiEnter(ship) => Self::Event(ClientEventOutcome::AoiEnter(ship)),
-            ServerMessage::AoiLeave { ship_id } => {
-                Self::Event(ClientEventOutcome::AoiLeave { ship_id })
-            }
-            ServerMessage::PositionSnap { ship_id, position } => {
-                Self::Event(ClientEventOutcome::PositionSnap { ship_id, position })
-            }
-            ServerMessage::MotionCorrection {
-                ship_id,
-                position,
-                velocity,
-                tick,
-            } => Self::MotionCorrection {
-                ship_id,
-                position,
-                velocity,
-                tick,
-            },
-            ServerMessage::MarketSnapshot(snapshot) => Self::MarketSnapshot(snapshot),
-        }
-    }
+/// Decode one postcard frame and reject values that cannot cross the Godot
+/// boundary without narrowing or losing canonical item identity.
+pub(crate) fn decode_server_message(bytes: &[u8]) -> Result<ServerMessage, String> {
+    let message = ServerMessage::decode(bytes).map_err(|error| error.to_string())?;
+    validate_godot_integer_range(&message)?;
+    Ok(message)
 }
 
 fn ensure_godot_int(value: u64, field: &str) -> Result<(), String> {
@@ -231,9 +115,7 @@ fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
         }
         ServerMessage::Redirect { .. } => {}
         ServerMessage::Event(event) => validate_event(event)?,
-        ServerMessage::PlayerLoadout(loadout) => {
-            validate_player_loadout_godot_ranges(loadout)?;
-        }
+        ServerMessage::PlayerLoadout(loadout) => validate_player_loadout_godot_ranges(loadout)?,
         ServerMessage::InitialState(state) => {
             for ship in &state.ships {
                 ensure_godot_int(ship.ship_id, "initial_state.ship_id")?;
@@ -266,11 +148,11 @@ fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
 mod tests {
     use super::*;
     use dawn_core::{ModuleKind, StatDelta};
-    use dawn_wire::{ItemRowWire, ItemWire, ModuleRowWire, PlayerLoadoutWire, SlotCapacityWire};
-
-    fn decode(message: ServerMessage) -> ClientOutcome {
-        ClientOutcome::decode(&message.encode()).expect("valid raw ServerMessage frame")
-    }
+    use dawn_wire::{
+        AbsPosWire, InitialStateWire, ItemRowWire, ItemWire, MarketOrderWire, MarketSnapshotWire,
+        ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, ShipStateWire, SlotCapacityWire,
+        VelWire,
+    };
 
     fn position() -> AbsPosWire {
         AbsPosWire {
@@ -329,42 +211,23 @@ mod tests {
     }
 
     #[test]
-    fn raw_frames_project_every_server_message_family() {
-        assert!(matches!(
-            decode(ServerMessage::Welcome {
+    fn raw_frames_decode_every_server_message_family_without_a_second_mirror() {
+        let messages = vec![
+            ServerMessage::Welcome {
                 player_id: 1,
                 ship_id: 7,
                 resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
-            }),
-            ClientOutcome::Welcome {
-                player_id: 1,
-                ship_id: 7,
-                ..
-            }
-        ));
-        assert!(matches!(
-            decode(ServerMessage::Redirect {
+            },
+            ServerMessage::Redirect {
                 ws_addr: "127.0.0.1:7880".to_owned(),
                 resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
+            },
+            ServerMessage::Event(EventWire::ShipDespawned {
+                ship_id: 7,
+                tick: 2,
             }),
-            ClientOutcome::Redirect { .. }
-        ));
-        assert!(matches!(
-            decode(ServerMessage::Event(EventWire::ShipDespawned {
-                ship_id: 7,
-                tick: 2
-            })),
-            ClientOutcome::Event(ClientEventOutcome::Domain(EventWire::ShipDespawned {
-                ship_id: 7,
-                tick: 2
-            }))
-        ));
-        assert!(matches!(
-            decode(ServerMessage::PlayerLoadout(loadout())),
-            ClientOutcome::PlayerLoadout(_)
-        ));
-        assert!(matches!(
-            decode(ServerMessage::InitialState(InitialStateWire {
+            ServerMessage::PlayerLoadout(loadout()),
+            ServerMessage::InitialState(InitialStateWire {
                 ships: vec![ship()],
                 system_name: "Alpha".to_owned(),
                 systems: Vec::new(),
@@ -372,90 +235,64 @@ mod tests {
                 stations: Vec::new(),
                 celestial_bodies: Vec::new(),
                 buildable_ship_types: Vec::new(),
-            })),
-            ClientOutcome::InitialState(_)
-        ));
-        assert!(matches!(
-            decode(ServerMessage::AoiEnter(ship())),
-            ClientOutcome::Event(ClientEventOutcome::AoiEnter(_))
-        ));
-        assert!(matches!(
-            decode(ServerMessage::AoiLeave { ship_id: 7 }),
-            ClientOutcome::Event(ClientEventOutcome::AoiLeave { ship_id: 7 })
-        ));
-        assert!(matches!(
-            decode(ServerMessage::PositionSnap {
-                ship_id: 7,
-                position: position()
             }),
-            ClientOutcome::Event(ClientEventOutcome::PositionSnap { ship_id: 7, .. })
-        ));
-        assert!(matches!(
-            decode(ServerMessage::MotionCorrection {
+            ServerMessage::AoiEnter(ship()),
+            ServerMessage::AoiLeave { ship_id: 7 },
+            ServerMessage::PositionSnap {
+                ship_id: 7,
+                position: position(),
+            },
+            ServerMessage::MotionCorrection {
                 ship_id: 7,
                 position: position(),
                 velocity: velocity(),
                 tick: 3,
-            }),
-            ClientOutcome::MotionCorrection {
-                ship_id: 7,
-                tick: 3,
-                ..
-            }
-        ));
-        assert!(matches!(
-            decode(ServerMessage::MarketSnapshot(MarketSnapshotWire {
+            },
+            ServerMessage::MarketSnapshot(MarketSnapshotWire {
                 balance: 100,
                 orders: Vec::new(),
                 notice: "Ready".to_owned(),
-            })),
-            ClientOutcome::MarketSnapshot(_)
-        ));
+            }),
+        ];
+
+        for message in messages {
+            assert!(decode_server_message(&message.encode()).is_ok());
+        }
     }
 
     #[test]
-    fn module_events_project_to_dedicated_connection_outcomes() {
-        assert!(matches!(
-            decode(ServerMessage::Event(EventWire::ModuleActivated {
-                ship_id: 7,
-                module_id: 3,
-                slot: "High".to_owned(),
-                target_ship_id: Some(9),
-                tick: 4,
-            })),
-            ClientOutcome::ModuleActivated {
-                ship_id: 7,
-                module_id: 3,
-                ..
-            }
-        ));
-        assert!(matches!(
-            decode(ServerMessage::Event(EventWire::ModuleDeactivated {
-                ship_id: 7,
-                module_id: 3,
-                slot: "High".to_owned(),
-                reason: Some("range".to_owned()),
-                tick: 5,
-            })),
-            ClientOutcome::ModuleDeactivated {
-                reason: Some(reason),
-                ..
-            } if reason == "range"
-        ));
+    fn module_events_decode_with_their_ship_identity() {
+        let activated = ServerMessage::Event(EventWire::ModuleActivated {
+            ship_id: 7,
+            module_id: 3,
+            slot: "High".to_owned(),
+            target_ship_id: Some(9),
+            tick: 4,
+        });
+        assert!(decode_server_message(&activated.encode()).is_ok());
+
+        let deactivated = ServerMessage::Event(EventWire::ModuleDeactivated {
+            ship_id: 7,
+            module_id: 3,
+            slot: "High".to_owned(),
+            reason: Some("range".to_owned()),
+            tick: 5,
+        });
+        assert!(decode_server_message(&deactivated.encode()).is_ok());
     }
 
     #[test]
     fn unsigned_ids_outside_godot_int_range_are_rejected() {
-        let invalid_ship_id = (i64::MAX as u64) + 1;
-        let error = ClientOutcome::decode(
+        let invalid = (i64::MAX as u64) + 1;
+        let error = decode_server_message(
             &ServerMessage::Welcome {
                 player_id: 1,
-                ship_id: invalid_ship_id,
+                ship_id: invalid,
                 resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
             }
             .encode(),
         )
-        .expect_err("out-of-range ids must not be saturated");
+        .unwrap_err();
         assert!(error.contains("ship_id"));
     }
 
@@ -465,15 +302,28 @@ mod tests {
 
         let mut invalid_tick = loadout();
         invalid_tick.tick = invalid_godot_int;
-        let error = ClientOutcome::decode(&ServerMessage::PlayerLoadout(invalid_tick).encode())
-            .expect_err("loadout tick must fit Godot int");
+        let error = decode_server_message(&ServerMessage::PlayerLoadout(invalid_tick).encode())
+            .unwrap_err();
         assert!(error.contains("player_loadout.tick"));
 
         let mut invalid_ship = loadout();
         invalid_ship.active_ship_id = Some(invalid_godot_int);
-        let error = ClientOutcome::decode(&ServerMessage::PlayerLoadout(invalid_ship).encode())
-            .expect_err("active ship ID must fit Godot int");
+        let error = decode_server_message(&ServerMessage::PlayerLoadout(invalid_ship).encode())
+            .unwrap_err();
         assert!(error.contains("player_loadout.active_ship_id"));
+
+        let mut invalid_owned_ship = loadout();
+        invalid_owned_ship.owned_ships.push(OwnedShipRowWire {
+            ship_id: invalid_godot_int,
+            ship_type_id: None,
+            ship_type_name: None,
+            docked_station_id: None,
+            is_active: false,
+        });
+        let error =
+            decode_server_message(&ServerMessage::PlayerLoadout(invalid_owned_ship).encode())
+                .unwrap_err();
+        assert!(error.contains("player_loadout.owned_ships.ship_id"));
 
         let mut invalid_count = loadout();
         invalid_count.inventory.push(ItemRowWire {
@@ -483,8 +333,8 @@ mod tests {
             slot: String::new(),
             count: invalid_godot_int,
         });
-        let error = ClientOutcome::decode(&ServerMessage::PlayerLoadout(invalid_count).encode())
-            .expect_err("inventory count must fit Godot int");
+        let error = decode_server_message(&ServerMessage::PlayerLoadout(invalid_count).encode())
+            .unwrap_err();
         assert!(error.contains("player_loadout.inventory.count"));
 
         let mut invalid_cycle = loadout();
@@ -500,8 +350,8 @@ mod tests {
             cycle_time_ticks: (u32::MAX as u64) + 1,
             stat_delta: StatDelta::ZERO,
         });
-        let error = ClientOutcome::decode(&ServerMessage::PlayerLoadout(invalid_cycle).encode())
-            .expect_err("module cycle length must fit client u32");
+        let error = decode_server_message(&ServerMessage::PlayerLoadout(invalid_cycle).encode())
+            .unwrap_err();
         assert!(error.contains("player_loadout.modules.cycle_time_ticks"));
     }
 
@@ -515,14 +365,14 @@ mod tests {
             slot: String::new(),
             count: 1,
         });
-        let error = ClientOutcome::decode(&ServerMessage::PlayerLoadout(invalid_loadout).encode())
-            .expect_err("zero module IDs must not reach Godot");
+        let error = decode_server_message(&ServerMessage::PlayerLoadout(invalid_loadout).encode())
+            .unwrap_err();
         assert!(error.contains("player_loadout.inventory.item_id"));
 
-        let error = ClientOutcome::decode(
+        let error = decode_server_message(
             &ServerMessage::MarketSnapshot(MarketSnapshotWire {
                 balance: 0,
-                orders: vec![dawn_wire::MarketOrderWire {
+                orders: vec![MarketOrderWire {
                     order_id: 1,
                     item_id: ItemWire::PackagedShip { ship_type_id: 0 },
                     side: "Bid".to_owned(),
@@ -534,12 +384,12 @@ mod tests {
             })
             .encode(),
         )
-        .expect_err("zero ship type IDs must not reach Godot");
+        .unwrap_err();
         assert!(error.contains("market.item_id"));
     }
 
     #[test]
     fn corrupted_raw_frame_is_rejected_before_projection() {
-        assert!(ClientOutcome::decode(&[0xff, 0x01, 0x02]).is_err());
+        assert!(decode_server_message(&[0xff, 0x01, 0x02]).is_err());
     }
 }

@@ -22,7 +22,7 @@ func test_market_surface_can_open_and_apply_a_snapshot() -> void:
 	var target := MarketOutcomeTarget.new()
 	var outcome: ServerMessageOutcome = ServerMessageDecoder.new().test_outcome("MarketSnapshot")
 	assert_bool(outcome.dispatch(
-		target, WorldSession.new(), PlayerLoadout.new(), -1
+		target, target, WorldSession.new(), PlayerLoadout.new(), -1
 	)).is_true()
 
 	assert_bool(surface.is_open()).is_false()
