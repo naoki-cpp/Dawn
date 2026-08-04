@@ -42,6 +42,8 @@ fn sample_handoff() -> TransitHandoffState {
         owner_player_id: None,
         resume_ticket: None,
         pending_resume_ticket: None,
+        resume_ticket_expires_at: None,
+        pending_resume_ticket_expires_at: None,
         ship_type_id: ShipTypeId(1),
         velocity: Velocity::new(4.0, 5.0, 6.0),
         current_shield: 10.0,
@@ -282,6 +284,8 @@ fn transit_preserves_a_pending_resume_ticket_for_the_destination() {
         .expect("owned Ship transit");
     assert_eq!(data.handoff.resume_ticket, Some(current_ticket));
     assert_eq!(data.handoff.pending_resume_ticket, Some(pending_ticket));
+    assert!(data.handoff.resume_ticket_expires_at.is_some());
+    assert!(data.handoff.pending_resume_ticket_expires_at.is_some());
 
     let (raft, mut proposals) = raft_handle();
     let (commit_tx, mut commit_rx) = mpsc::unbounded_channel();

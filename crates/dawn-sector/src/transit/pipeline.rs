@@ -428,6 +428,8 @@ mod tests {
             owner_player_id: None,
             resume_ticket: None,
             pending_resume_ticket: None,
+            resume_ticket_expires_at: None,
+            pending_resume_ticket_expires_at: None,
             ship_type_id: ShipTypeId(1),
             velocity: Velocity::ZERO,
             current_shield: 100.0,

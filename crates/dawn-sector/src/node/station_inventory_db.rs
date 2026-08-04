@@ -17,8 +17,32 @@ use dawn_core::{ItemId, PlayerId, Position, ResumeTicket, ShipId, StationId};
 #[cfg(test)]
 use dawn_core::{ModuleId, ShipTypeId};
 use rusqlite::{params, Connection, OptionalExtension};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::station::StationOperationRejection;
+
+/// Reconnect capabilities are deliberately short-lived bearer credentials.
+/// The value is a policy knob, not part of the opaque wire ticket.
+pub(super) const RESUME_TICKET_TTL_SECS: u64 = 24 * 60 * 60;
+
+pub(super) fn unix_now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock must be after Unix epoch")
+        .as_secs()
+}
+
+pub(super) fn resume_ticket_expiry(now_secs: u64) -> u64 {
+    now_secs.saturating_add(RESUME_TICKET_TTL_SECS)
+}
+
+fn expiry_to_sql(expires_at: u64) -> i64 {
+    expires_at.min(i64::MAX as u64) as i64
+}
+
+fn expiry_from_sql(value: i64) -> u64 {
+    value.max(0) as u64
+}
 
 fn item_id_to_columns(item_id: ItemId) -> (&'static str, u32, u32) {
     item_id.storage_columns().into_tuple()
@@ -34,6 +58,13 @@ pub(super) struct PreparedClientAdmission {
     pub player_id: PlayerId,
     pub spawn_position: Position,
     pub resume_ticket: ResumeTicket,
+    pub resume_ticket_expires_at: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct StoredResumeTicket {
+    pub ticket: ResumeTicket,
+    pub expires_at: u64,
 }
 
 fn ticket_from_blob(bytes: Vec<u8>) -> rusqlite::Result<ResumeTicket> {
@@ -104,7 +135,8 @@ impl StationInventoryDb {
                 spawn_x       REAL NOT NULL,
                 spawn_y       REAL NOT NULL,
                 spawn_z       REAL NOT NULL,
-                resume_ticket BLOB NOT NULL UNIQUE
+                resume_ticket BLOB NOT NULL UNIQUE,
+                resume_ticket_expires_at INTEGER NOT NULL DEFAULT 0
             )",
             [],
         )?;
@@ -113,10 +145,33 @@ impl StationInventoryDb {
                 ship_id       TEXT PRIMARY KEY,
                 player_id     INTEGER NOT NULL,
                 resume_ticket BLOB NOT NULL UNIQUE,
-                pending_resume_ticket BLOB UNIQUE
+                resume_ticket_expires_at INTEGER NOT NULL DEFAULT 0,
+                pending_resume_ticket BLOB UNIQUE,
+                pending_resume_ticket_expires_at INTEGER
             )",
             [],
         )?;
+        let has_prepared_expiry: bool = conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('client_admission_prepared')
+                WHERE name = 'resume_ticket_expires_at'
+            )",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_prepared_expiry {
+            conn.execute(
+                "ALTER TABLE client_admission_prepared
+                 ADD COLUMN resume_ticket_expires_at INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+            conn.execute(
+                "UPDATE client_admission_prepared
+                 SET resume_ticket_expires_at = ?1
+                 WHERE resume_ticket_expires_at = 0",
+                params![expiry_to_sql(resume_ticket_expiry(unix_now_secs()))],
+            )?;
+        }
         let has_pending_resume_ticket: bool = conn.query_row(
             "SELECT EXISTS(
                 SELECT 1 FROM pragma_table_info('client_ship_ownership')
@@ -129,6 +184,42 @@ impl StationInventoryDb {
             conn.execute(
                 "ALTER TABLE client_ship_ownership
                  ADD COLUMN pending_resume_ticket BLOB",
+                [],
+            )?;
+        }
+        let has_ownership_expiry: bool = conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('client_ship_ownership')
+                WHERE name = 'resume_ticket_expires_at'
+            )",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_ownership_expiry {
+            conn.execute(
+                "ALTER TABLE client_ship_ownership
+                 ADD COLUMN resume_ticket_expires_at INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+            conn.execute(
+                "UPDATE client_ship_ownership
+                 SET resume_ticket_expires_at = ?1
+                 WHERE resume_ticket_expires_at = 0",
+                params![expiry_to_sql(resume_ticket_expiry(unix_now_secs()))],
+            )?;
+        }
+        let has_pending_expiry: bool = conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('client_ship_ownership')
+                WHERE name = 'pending_resume_ticket_expires_at'
+            )",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_pending_expiry {
+            conn.execute(
+                "ALTER TABLE client_ship_ownership
+                 ADD COLUMN pending_resume_ticket_expires_at INTEGER",
                 [],
             )?;
         }
@@ -150,11 +241,13 @@ impl StationInventoryDb {
         player_id: PlayerId,
         spawn_position: Position,
         resume_ticket: ResumeTicket,
+        resume_ticket_expires_at: u64,
     ) -> rusqlite::Result<()> {
         self.conn.execute(
             "INSERT INTO client_admission_prepared
-             (ship_id, player_id, spawn_x, spawn_y, spawn_z, resume_ticket)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             (ship_id, player_id, spawn_x, spawn_y, spawn_z, resume_ticket,
+              resume_ticket_expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 ship_id.raw().to_string(),
                 player_id.0 as i64,
@@ -162,6 +255,7 @@ impl StationInventoryDb {
                 spawn_position.y,
                 spawn_position.z,
                 resume_ticket.as_bytes().as_slice(),
+                expiry_to_sql(resume_ticket_expires_at),
             ],
         )?;
         Ok(())
@@ -173,7 +267,8 @@ impl StationInventoryDb {
     ) -> rusqlite::Result<Option<PreparedClientAdmission>> {
         self.conn
             .query_row(
-                "SELECT player_id, spawn_x, spawn_y, spawn_z, resume_ticket
+                "SELECT player_id, spawn_x, spawn_y, spawn_z, resume_ticket,
+                        resume_ticket_expires_at
                  FROM client_admission_prepared WHERE ship_id = ?1",
                 params![ship_id.raw().to_string()],
                 |row| {
@@ -182,6 +277,7 @@ impl StationInventoryDb {
                         player_id: PlayerId(row.get::<_, i64>(0)? as u64),
                         spawn_position: Position::new(row.get(1)?, row.get(2)?, row.get(3)?),
                         resume_ticket: ticket_from_blob(row.get(4)?)?,
+                        resume_ticket_expires_at: expiry_from_sql(row.get(5)?),
                     })
                 },
             )
@@ -191,12 +287,15 @@ impl StationInventoryDb {
     pub(super) fn prepared_client_admission_by_ticket(
         &self,
         resume_ticket: ResumeTicket,
+        now_secs: u64,
     ) -> rusqlite::Result<Option<PreparedClientAdmission>> {
         self.conn
             .query_row(
-                "SELECT ship_id, player_id, spawn_x, spawn_y, spawn_z
-                 FROM client_admission_prepared WHERE resume_ticket = ?1",
-                params![resume_ticket.as_bytes().as_slice()],
+                "SELECT ship_id, player_id, spawn_x, spawn_y, spawn_z,
+                        resume_ticket_expires_at
+                 FROM client_admission_prepared
+                 WHERE resume_ticket = ?1 AND resume_ticket_expires_at > ?2",
+                params![resume_ticket.as_bytes().as_slice(), expiry_to_sql(now_secs)],
                 |row| {
                     let ship_raw: String = row.get(0)?;
                     let ship_id = ship_raw
@@ -217,6 +316,7 @@ impl StationInventoryDb {
                         player_id: PlayerId(row.get::<_, i64>(1)? as u64),
                         spawn_position: Position::new(row.get(2)?, row.get(3)?, row.get(4)?),
                         resume_ticket,
+                        resume_ticket_expires_at: expiry_from_sql(row.get(5)?),
                     })
                 },
             )
@@ -236,12 +336,15 @@ impl StationInventoryDb {
     pub(super) fn client_ownership_by_ticket(
         &self,
         resume_ticket: ResumeTicket,
+        now_secs: u64,
     ) -> rusqlite::Result<Option<(PlayerId, ShipId)>> {
         self.conn
             .query_row(
                 "SELECT player_id, ship_id FROM client_ship_ownership
-                 WHERE resume_ticket = ?1 OR pending_resume_ticket = ?1",
-                params![resume_ticket.as_bytes().as_slice()],
+                 WHERE (resume_ticket = ?1 AND resume_ticket_expires_at > ?2)
+                    OR (pending_resume_ticket = ?1
+                        AND pending_resume_ticket_expires_at > ?2)",
+                params![resume_ticket.as_bytes().as_slice(), expiry_to_sql(now_secs)],
                 |row| {
                     let ship_raw: String = row.get(1)?;
                     let ship_id = ship_raw
@@ -266,18 +369,28 @@ impl StationInventoryDb {
     pub(super) fn client_resume_tickets(
         &self,
         ship_id: ShipId,
-    ) -> rusqlite::Result<Option<(ResumeTicket, Option<ResumeTicket>)>> {
+    ) -> rusqlite::Result<Option<(StoredResumeTicket, Option<StoredResumeTicket>)>> {
         self.conn
             .query_row(
-                "SELECT resume_ticket, pending_resume_ticket
+                "SELECT resume_ticket, resume_ticket_expires_at,
+                        pending_resume_ticket, pending_resume_ticket_expires_at
                  FROM client_ship_ownership WHERE ship_id = ?1",
                 params![ship_id.raw().to_string()],
                 |row| {
-                    let current = ticket_from_blob(row.get(0)?)?;
-                    let pending = row
-                        .get::<_, Option<Vec<u8>>>(1)?
-                        .map(ticket_from_blob)
-                        .transpose()?;
+                    let current = StoredResumeTicket {
+                        ticket: ticket_from_blob(row.get(0)?)?,
+                        expires_at: expiry_from_sql(row.get(1)?),
+                    };
+                    let pending = match row.get::<_, Option<Vec<u8>>>(2)? {
+                        Some(bytes) => Some(StoredResumeTicket {
+                            ticket: ticket_from_blob(bytes)?,
+                            expires_at: row
+                                .get::<_, Option<i64>>(3)?
+                                .map(expiry_from_sql)
+                                .unwrap_or_default(),
+                        }),
+                        None => None,
+                    };
                     Ok((current, pending))
                 },
             )
@@ -289,18 +402,23 @@ impl StationInventoryDb {
         ship_id: ShipId,
         player_id: PlayerId,
         resume_ticket: ResumeTicket,
+        resume_ticket_expires_at: u64,
     ) -> rusqlite::Result<()> {
         self.conn.execute(
-            "INSERT INTO client_ship_ownership (ship_id, player_id, resume_ticket)
-             VALUES (?1, ?2, ?3)
+            "INSERT INTO client_ship_ownership
+             (ship_id, player_id, resume_ticket, resume_ticket_expires_at)
+             VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT (ship_id) DO UPDATE SET
                player_id = excluded.player_id,
                resume_ticket = excluded.resume_ticket,
-               pending_resume_ticket = NULL",
+               resume_ticket_expires_at = excluded.resume_ticket_expires_at,
+               pending_resume_ticket = NULL,
+               pending_resume_ticket_expires_at = NULL",
             params![
                 ship_id.raw().to_string(),
                 player_id.0 as i64,
-                resume_ticket.as_bytes().as_slice()
+                resume_ticket.as_bytes().as_slice(),
+                expiry_to_sql(resume_ticket_expires_at),
             ],
         )?;
         Ok(())
@@ -311,21 +429,27 @@ impl StationInventoryDb {
         ship_id: ShipId,
         player_id: PlayerId,
         resume_ticket: ResumeTicket,
-        pending_resume_ticket: Option<ResumeTicket>,
+        resume_ticket_expires_at: u64,
+        pending_resume_ticket: Option<StoredResumeTicket>,
     ) -> rusqlite::Result<()> {
         self.conn.execute(
             "INSERT INTO client_ship_ownership
-             (ship_id, player_id, resume_ticket, pending_resume_ticket)
-             VALUES (?1, ?2, ?3, ?4)
+             (ship_id, player_id, resume_ticket, resume_ticket_expires_at,
+              pending_resume_ticket, pending_resume_ticket_expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT (ship_id) DO UPDATE SET
                player_id = excluded.player_id,
                resume_ticket = excluded.resume_ticket,
-               pending_resume_ticket = excluded.pending_resume_ticket",
+               resume_ticket_expires_at = excluded.resume_ticket_expires_at,
+               pending_resume_ticket = excluded.pending_resume_ticket,
+               pending_resume_ticket_expires_at = excluded.pending_resume_ticket_expires_at",
             params![
                 ship_id.raw().to_string(),
                 player_id.0 as i64,
                 resume_ticket.as_bytes().as_slice(),
-                pending_resume_ticket.map(|ticket| ticket.as_bytes().to_vec()),
+                expiry_to_sql(resume_ticket_expires_at),
+                pending_resume_ticket.map(|stored| stored.ticket.as_bytes().to_vec()),
+                pending_resume_ticket.map(|stored| expiry_to_sql(stored.expires_at)),
             ],
         )?;
         Ok(())
@@ -341,17 +465,46 @@ impl StationInventoryDb {
         player_id: PlayerId,
         presented_ticket: ResumeTicket,
         next_ticket: ResumeTicket,
+        next_ticket_expires_at: u64,
     ) -> rusqlite::Result<bool> {
         let changed = self.conn.execute(
             "UPDATE client_ship_ownership
              SET pending_resume_ticket = ?3
+                 , pending_resume_ticket_expires_at = ?4
              WHERE ship_id = ?1 AND player_id = ?2
-               AND (resume_ticket = ?4 OR pending_resume_ticket = ?4)",
+               AND (resume_ticket = ?5 OR pending_resume_ticket = ?5)",
             params![
                 ship_id.raw().to_string(),
                 player_id.0 as i64,
                 next_ticket.as_bytes().as_slice(),
+                expiry_to_sql(next_ticket_expires_at),
                 presented_ticket.as_bytes().as_slice(),
+            ],
+        )?;
+        Ok(changed == 1)
+    }
+
+    pub(super) fn promote_client_resume_ticket(
+        &self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        next_ticket: ResumeTicket,
+        now_secs: u64,
+    ) -> rusqlite::Result<bool> {
+        let changed = self.conn.execute(
+            "UPDATE client_ship_ownership
+             SET resume_ticket = pending_resume_ticket,
+                 resume_ticket_expires_at = pending_resume_ticket_expires_at,
+                 pending_resume_ticket = NULL,
+                 pending_resume_ticket_expires_at = NULL
+             WHERE ship_id = ?1 AND player_id = ?2
+               AND pending_resume_ticket = ?3
+               AND pending_resume_ticket_expires_at > ?4",
+            params![
+                ship_id.raw().to_string(),
+                player_id.0 as i64,
+                next_ticket.as_bytes().as_slice(),
+                expiry_to_sql(now_secs),
             ],
         )?;
         Ok(changed == 1)
@@ -427,7 +580,7 @@ impl StationInventoryDb {
         &mut self,
         ship_id: ShipId,
         player_id: PlayerId,
-        resume_ticket: ResumeTicket,
+        resume_ticket: StoredResumeTicket,
         station_id: StationId,
         item_id: ItemId,
         count: u64,
@@ -470,13 +623,15 @@ impl StationInventoryDb {
         // Reconciliation must restore a missing ownership row without
         // overwriting the current or staged reconnect ticket.
         tx.execute(
-            "INSERT INTO client_ship_ownership (ship_id, player_id, resume_ticket)
-             VALUES (?1, ?2, ?3)
+            "INSERT INTO client_ship_ownership
+             (ship_id, player_id, resume_ticket, resume_ticket_expires_at)
+             VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT (ship_id) DO NOTHING",
             params![
                 ship_id.raw().to_string(),
                 player_id.0 as i64,
-                resume_ticket.as_bytes().as_slice()
+                resume_ticket.ticket.as_bytes().as_slice(),
+                expiry_to_sql(resume_ticket.expires_at),
             ],
         )?;
         tx.execute(
@@ -605,8 +760,14 @@ mod tests {
         let player_id = PlayerId(1);
         let spawn = Position::new(10.0, 20.0, 30.0);
         let resume_ticket = ResumeTicket::from_bytes([7; ResumeTicket::BYTE_LEN]);
-        db.reserve_client_admission(ship_id, player_id, spawn, resume_ticket)
-            .unwrap();
+        db.reserve_client_admission(
+            ship_id,
+            player_id,
+            spawn,
+            resume_ticket,
+            resume_ticket_expiry(100),
+        )
+        .unwrap();
         assert_eq!(
             db.prepared_client_admission(ship_id).unwrap(),
             Some(PreparedClientAdmission {
@@ -614,12 +775,23 @@ mod tests {
                 player_id,
                 spawn_position: spawn,
                 resume_ticket,
+                resume_ticket_expires_at: resume_ticket_expiry(100),
             })
         );
 
         let item = ItemId::PackagedShip(ShipTypeId(7));
-        db.ensure_client_admission_grant(ship_id, player_id, resume_ticket, StationId(7), item, 1)
-            .unwrap();
+        db.ensure_client_admission_grant(
+            ship_id,
+            player_id,
+            StoredResumeTicket {
+                ticket: resume_ticket,
+                expires_at: resume_ticket_expiry(100),
+            },
+            StationId(7),
+            item,
+            1,
+        )
+        .unwrap();
         assert_eq!(db.prepared_client_admission(ship_id).unwrap(), None);
         assert_eq!(db.client_owner(ship_id).unwrap(), Some(player_id));
     }
@@ -642,21 +814,35 @@ mod tests {
         let current_ticket = ResumeTicket::from_bytes([8; ResumeTicket::BYTE_LEN]);
         let next_ticket = ResumeTicket::from_bytes([9; ResumeTicket::BYTE_LEN]);
 
-        db.record_client_ownership(ship_id, player_id, current_ticket)
-            .unwrap();
+        db.record_client_ownership(
+            ship_id,
+            player_id,
+            current_ticket,
+            resume_ticket_expiry(100),
+        )
+        .unwrap();
         assert!(db
-            .stage_client_resume_ticket(ship_id, player_id, current_ticket, next_ticket)
+            .stage_client_resume_ticket(
+                ship_id,
+                player_id,
+                current_ticket,
+                next_ticket,
+                resume_ticket_expiry(100),
+            )
             .unwrap());
         assert_eq!(
-            db.client_ownership_by_ticket(next_ticket).unwrap(),
+            db.client_ownership_by_ticket(next_ticket, 100).unwrap(),
             Some((player_id, ship_id))
         );
 
-        db.record_client_ownership(ship_id, player_id, next_ticket)
+        db.record_client_ownership(ship_id, player_id, next_ticket, resume_ticket_expiry(100))
             .unwrap();
-        assert_eq!(db.client_ownership_by_ticket(current_ticket).unwrap(), None);
         assert_eq!(
-            db.client_ownership_by_ticket(next_ticket).unwrap(),
+            db.client_ownership_by_ticket(current_ticket, 100).unwrap(),
+            None
+        );
+        assert_eq!(
+            db.client_ownership_by_ticket(next_ticket, 100).unwrap(),
             Some((player_id, ship_id))
         );
     }
@@ -671,7 +857,10 @@ mod tests {
             .ensure_client_admission_grant(
                 ship_id,
                 PlayerId(1),
-                resume_ticket,
+                StoredResumeTicket {
+                    ticket: resume_ticket,
+                    expires_at: resume_ticket_expiry(100),
+                },
                 StationId(7),
                 item,
                 1,
@@ -681,7 +870,10 @@ mod tests {
             .ensure_client_admission_grant(
                 ship_id,
                 PlayerId(1),
-                resume_ticket,
+                StoredResumeTicket {
+                    ticket: resume_ticket,
+                    expires_at: resume_ticket_expiry(100),
+                },
                 StationId(7),
                 item,
                 1,
@@ -699,16 +891,30 @@ mod tests {
         let current_ticket = ResumeTicket::from_bytes([8; ResumeTicket::BYTE_LEN]);
         let pending_ticket = ResumeTicket::from_bytes([9; ResumeTicket::BYTE_LEN]);
 
-        db.record_client_ownership(ship_id, player_id, current_ticket)
-            .unwrap();
+        db.record_client_ownership(
+            ship_id,
+            player_id,
+            current_ticket,
+            resume_ticket_expiry(100),
+        )
+        .unwrap();
         assert!(db
-            .stage_client_resume_ticket(ship_id, player_id, current_ticket, pending_ticket,)
+            .stage_client_resume_ticket(
+                ship_id,
+                player_id,
+                current_ticket,
+                pending_ticket,
+                resume_ticket_expiry(100),
+            )
             .unwrap());
 
         db.ensure_client_admission_grant(
             ship_id,
             player_id,
-            original_ticket,
+            StoredResumeTicket {
+                ticket: original_ticket,
+                expires_at: resume_ticket_expiry(100),
+            },
             StationId(7),
             ItemId::PackagedShip(ShipTypeId(7)),
             1,
@@ -717,12 +923,64 @@ mod tests {
 
         assert_eq!(
             db.client_resume_tickets(ship_id).unwrap(),
-            Some((current_ticket, Some(pending_ticket)))
+            Some((
+                StoredResumeTicket {
+                    ticket: current_ticket,
+                    expires_at: resume_ticket_expiry(100),
+                },
+                Some(StoredResumeTicket {
+                    ticket: pending_ticket,
+                    expires_at: resume_ticket_expiry(100),
+                }),
+            ))
         );
         assert_eq!(
-            db.client_ownership_by_ticket(original_ticket).unwrap(),
+            db.client_ownership_by_ticket(original_ticket, 100).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn prepared_current_and_pending_tickets_expire_at_their_stored_deadline() {
+        let db = StationInventoryDb::open_in_memory().unwrap();
+        let ship_id = ShipId::new(dawn_core::NodeId(2), 10);
+        let player_id = PlayerId(1);
+        let prepared_ticket = ResumeTicket::from_bytes([10; ResumeTicket::BYTE_LEN]);
+        let current_ticket = ResumeTicket::from_bytes([11; ResumeTicket::BYTE_LEN]);
+        let pending_ticket = ResumeTicket::from_bytes([12; ResumeTicket::BYTE_LEN]);
+
+        db.reserve_client_admission(ship_id, player_id, Position::ORIGIN, prepared_ticket, 100)
+            .unwrap();
+        assert!(db
+            .prepared_client_admission_by_ticket(prepared_ticket, 99)
+            .unwrap()
+            .is_some());
+        assert!(db
+            .prepared_client_admission_by_ticket(prepared_ticket, 100)
+            .unwrap()
+            .is_none());
+
+        db.record_client_ownership(ship_id, player_id, current_ticket, 100)
+            .unwrap();
+        assert!(db
+            .stage_client_resume_ticket(ship_id, player_id, current_ticket, pending_ticket, 100)
+            .unwrap());
+        assert!(db
+            .client_ownership_by_ticket(current_ticket, 99)
+            .unwrap()
+            .is_some());
+        assert!(db
+            .client_ownership_by_ticket(pending_ticket, 99)
+            .unwrap()
+            .is_some());
+        assert!(db
+            .client_ownership_by_ticket(current_ticket, 100)
+            .unwrap()
+            .is_none());
+        assert!(db
+            .client_ownership_by_ticket(pending_ticket, 100)
+            .unwrap()
+            .is_none());
     }
 
     #[test]

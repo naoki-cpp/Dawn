@@ -48,10 +48,10 @@ in-flight admission reservation; the committed and one staged ticket remain
 retryable, so a client can safely retry whether or not it received `Welcome`.
 Only one staged ticket is retained per owned Ship.
 
-This implementation provides the opaque binding, durable staging, and rotation
-semantics above. Ticket expiry and an explicit validity window remain a planned
-production hardening step; the implementation checklist below is intentionally
-left open until that policy and its tests exist.
+This implementation provides the opaque binding, durable staging, rotation,
+and expiry semantics above. Tickets are accepted for 24 hours after issuance;
+the deadline is persisted with each current or staged binding and is carried
+through fresh-admission replay and Sector Transit.
 
 ### Wire contract
 
@@ -128,6 +128,8 @@ authentication system.
 
 ## Implementation checklist
 
+- [x] Add ticket expiry and explicit expiry-policy tests.
+
 - [x] Expose an opaque `ResumeTicket` type through `dawn-wire`.
 - [x] Replace `ResumeIdentity` in `HelloMessage` and remove raw-ID resume input.
 - [x] Carry the ticket in `Welcome` and `Redirect` where a retry is possible.
@@ -140,4 +142,3 @@ authentication system.
   failed-handshake retry, and clustered redirect recovery.
 - [x] Update ADR-0007, client-admission documentation, wire documentation, and
   generated wire schemas.
-- [ ] Add ticket expiry and explicit expiry-policy tests.

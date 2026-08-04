@@ -604,6 +604,24 @@ mod tests {
     }
 
     #[test]
+    fn expired_resume_ticket_is_rejected_before_handoff() {
+        let mut node = node();
+        let player_id = PlayerId(12);
+        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let resume_ticket = ResumeTicket::from_bytes([42; ResumeTicket::BYTE_LEN]);
+        node.record_client_resume_ownership_at(ship_id, player_id, resume_ticket, 1);
+
+        let refusal = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume { resume_ticket },
+                AOI_CELL_SIZE,
+            )
+            .expect_err("expired bearer credentials must not build a handoff");
+
+        assert_eq!(refusal, ClientAdmissionRefusal::ResumeTicketInvalid);
+    }
+
+    #[test]
     fn reopening_station_inventory_db_preserves_the_rotated_resume_ticket() {
         let db_file = tempfile::NamedTempFile::new().unwrap();
         let db_path = db_file.path().to_str().unwrap();

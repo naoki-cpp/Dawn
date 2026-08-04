@@ -310,18 +310,32 @@ impl<S: EventStore> SimulationNode<S> {
             .map(|inv| inv.items.clone())
             .unwrap_or_default();
         let owner_player_id = self.ships.owners.get(&ship_id).copied();
-        let (resume_ticket, pending_resume_ticket) = if owner_player_id.is_some() {
+        let (
+            resume_ticket,
+            pending_resume_ticket,
+            resume_ticket_expires_at,
+            pending_resume_ticket_expires_at,
+        ) = if owner_player_id.is_some() {
             self.client_resume_tickets(ship_id)
-                .map(|(current, pending)| (Some(current), pending))
-                .unwrap_or((None, None))
+                .map(|(current, pending)| {
+                    (
+                        Some(current.ticket),
+                        pending.map(|stored| stored.ticket),
+                        Some(current.expires_at),
+                        pending.map(|stored| stored.expires_at),
+                    )
+                })
+                .unwrap_or((None, None, None, None))
         } else {
-            (None, None)
+            (None, None, None, None)
         };
         Some(TransitHandoffState {
             ship_id,
             owner_player_id,
             resume_ticket,
             pending_resume_ticket,
+            resume_ticket_expires_at,
+            pending_resume_ticket_expires_at,
             ship_type_id,
             velocity,
             current_shield,
@@ -502,7 +516,19 @@ impl<S: EventStore> SimulationNode<S> {
                         handoff.ship_id,
                         player_id,
                         resume_ticket,
-                        handoff.pending_resume_ticket,
+                        handoff.resume_ticket_expires_at.unwrap_or_else(|| {
+                            super::station_inventory_db::resume_ticket_expiry(
+                                super::station_inventory_db::unix_now_secs(),
+                            )
+                        }),
+                        handoff.pending_resume_ticket_expires_at.map(|expires_at| {
+                            super::station_inventory_db::StoredResumeTicket {
+                                ticket: handoff
+                                    .pending_resume_ticket
+                                    .expect("pending resume expiry requires a pending ticket"),
+                                expires_at,
+                            }
+                        }),
                     )
                     .expect("transit owner binding transaction");
             }
@@ -1480,6 +1506,8 @@ mod tests {
             owner_player_id: None,
             resume_ticket: None,
             pending_resume_ticket: None,
+            resume_ticket_expires_at: None,
+            pending_resume_ticket_expires_at: None,
             ship_type_id: ShipTypeId(1),
             velocity,
             current_shield: 80.0,

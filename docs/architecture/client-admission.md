@@ -52,9 +52,10 @@ exceed the Sector cap.
 Resume uses a server-issued `ResumeTicket`, never a client-authored
 `(PlayerId, ShipId)` pair. The ticket is bound to the exact player, ship,
 destination Sector, and Transit or fresh-admission attempt that issued it. It
-uses durable ticket rotation for one-time consumption. Ticket expiry is not
- implemented yet and remains a production prerequisite. During a resume, the next
-ticket is staged durably before `Welcome` is sent. The committed ticket remains
+uses durable ticket rotation for one-time consumption. During a resume, the next
+ticket is staged durably before `Welcome` is sent. Every current and staged
+ticket expires 24 hours after issuance; the deadline is stored with the ticket
+binding, so restart and Transit do not extend it. The committed ticket remains
 valid until a successful admission promotes the staged ticket, so a failed
 handshake can retry without guessing whether `Welcome` was received. Transit
 copies both ticket states to its destination before the old Sector is removed.

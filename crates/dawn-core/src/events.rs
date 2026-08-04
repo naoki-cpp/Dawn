@@ -226,6 +226,10 @@ pub struct ClientAdmissionCommitted {
     pub player_id: PlayerId,
     pub ship_id: ShipId,
     pub resume_ticket: crate::ResumeTicket,
+    /// Unix timestamp, in seconds, at which the fresh-admission ticket stops
+    /// being accepted. Kept in the replay event so reconciliation cannot
+    /// extend a ticket's lifetime after a restart.
+    pub resume_ticket_expires_at: u64,
     pub sector_id: SectorId,
     pub initial_position: AbsolutePosition,
     pub ship_type_id: ShipTypeId,
@@ -670,6 +674,8 @@ mod tests {
                 owner_player_id: None,
                 resume_ticket: None,
                 pending_resume_ticket: None,
+                resume_ticket_expires_at: None,
+                pending_resume_ticket_expires_at: None,
                 ship_type_id: ShipTypeId(1),
                 velocity: Velocity::new(1.0, 0.0, 0.0),
                 current_shield: 100.0,

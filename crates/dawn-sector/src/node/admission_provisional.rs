@@ -15,7 +15,10 @@ use dawn_ecs::components::{FittedSlot, FittingComp, InventoryComp, IsNpcComp};
 use dawn_event_store::store::EventStore;
 use rand::RngCore;
 
-use super::{HandoffPayload, MissingObserverShip, SimulationNode};
+use super::{
+    station_inventory_db::{resume_ticket_expiry, unix_now_secs},
+    HandoffPayload, MissingObserverShip, SimulationNode,
+};
 
 fn generate_resume_ticket() -> ResumeTicket {
     let mut bytes = [0; ResumeTicket::BYTE_LEN];
@@ -35,6 +38,7 @@ impl<S: EventStore> SimulationNode<S> {
         let player_id = self.next_player_id();
         let ship_id = ShipId::new(self.node_id, self.id_counter);
         let resume_ticket = generate_resume_ticket();
+        let resume_ticket_expires_at = resume_ticket_expiry(unix_now_secs());
         self.id_counter += 1;
         self.event_store
             .append(DomainEvent::ClientAdmissionIdentityReserved(
@@ -45,7 +49,13 @@ impl<S: EventStore> SimulationNode<S> {
                 },
             ));
         self.station_inventory_db
-            .reserve_client_admission(ship_id, player_id, spawn_position, resume_ticket)
+            .reserve_client_admission(
+                ship_id,
+                player_id,
+                spawn_position,
+                resume_ticket,
+                resume_ticket_expires_at,
+            )
             .expect("client admission preparation transaction");
         let inserted = self.pending_fresh_admissions.insert(ship_id);
         debug_assert!(
@@ -60,7 +70,7 @@ impl<S: EventStore> SimulationNode<S> {
         resume_ticket: ResumeTicket,
     ) -> Option<(PlayerId, ShipId, Position)> {
         self.station_inventory_db
-            .prepared_client_admission_by_ticket(resume_ticket)
+            .prepared_client_admission_by_ticket(resume_ticket, unix_now_secs())
             .expect("client admission prepared query")
             .map(|prepared| {
                 (
@@ -76,12 +86,12 @@ impl<S: EventStore> SimulationNode<S> {
     /// identity whose durable prepared row survived a disconnect or restart.
     pub fn hosts_client_resume_ticket(&self, resume_ticket: ResumeTicket) -> bool {
         self.station_inventory_db
-            .prepared_client_admission_by_ticket(resume_ticket)
+            .prepared_client_admission_by_ticket(resume_ticket, unix_now_secs())
             .expect("prepared client admission query")
             .is_some()
             || self
                 .station_inventory_db
-                .client_ownership_by_ticket(resume_ticket)
+                .client_ownership_by_ticket(resume_ticket, unix_now_secs())
                 .expect("client ownership query")
                 .is_some_and(|(_, ship_id)| {
                     self.ship_absolute_pos(ship_id).is_some() && !self.is_ship_in_transit(ship_id)
@@ -93,7 +103,7 @@ impl<S: EventStore> SimulationNode<S> {
         resume_ticket: ResumeTicket,
     ) -> Option<(PlayerId, ShipId)> {
         self.station_inventory_db
-            .client_ownership_by_ticket(resume_ticket)
+            .client_ownership_by_ticket(resume_ticket, unix_now_secs())
             .expect("client ownership query")
     }
 
@@ -107,8 +117,22 @@ impl<S: EventStore> SimulationNode<S> {
         player_id: PlayerId,
         resume_ticket: ResumeTicket,
     ) {
+        let resume_ticket_expires_at = resume_ticket_expiry(unix_now_secs());
         self.station_inventory_db
-            .record_client_ownership(ship_id, player_id, resume_ticket)
+            .record_client_ownership(ship_id, player_id, resume_ticket, resume_ticket_expires_at)
+            .expect("client ownership upsert");
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_client_resume_ownership_at(
+        &self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        resume_ticket: ResumeTicket,
+        resume_ticket_expires_at: u64,
+    ) {
+        self.station_inventory_db
+            .record_client_ownership(ship_id, player_id, resume_ticket, resume_ticket_expires_at)
             .expect("client ownership upsert");
     }
 
@@ -119,8 +143,15 @@ impl<S: EventStore> SimulationNode<S> {
         presented_ticket: ResumeTicket,
         next_ticket: ResumeTicket,
     ) -> bool {
+        let next_ticket_expires_at = resume_ticket_expiry(unix_now_secs());
         self.station_inventory_db
-            .stage_client_resume_ticket(ship_id, player_id, presented_ticket, next_ticket)
+            .stage_client_resume_ticket(
+                ship_id,
+                player_id,
+                presented_ticket,
+                next_ticket,
+                next_ticket_expires_at,
+            )
             .expect("client ownership ticket staging")
     }
 
@@ -129,13 +160,16 @@ impl<S: EventStore> SimulationNode<S> {
         self.station_inventory_db
             .client_resume_tickets(ship_id)
             .expect("client ownership ticket query")
-            .map(|(current, _pending)| current)
+            .map(|(current, _pending)| current.ticket)
     }
 
-    pub(crate) fn client_resume_tickets(
+    pub(super) fn client_resume_tickets(
         &self,
         ship_id: ShipId,
-    ) -> Option<(ResumeTicket, Option<ResumeTicket>)> {
+    ) -> Option<(
+        super::station_inventory_db::StoredResumeTicket,
+        Option<super::station_inventory_db::StoredResumeTicket>,
+    )> {
         self.station_inventory_db
             .client_resume_tickets(ship_id)
             .expect("client ownership tickets query")
@@ -187,17 +221,19 @@ impl<S: EventStore> SimulationNode<S> {
         spawn_position: Position,
         resume_ticket: ResumeTicket,
     ) -> bool {
+        let Some(prepared) = self
+            .station_inventory_db
+            .prepared_client_admission(ship_id)
+            .expect("prepared client admission query")
+        else {
+            return false;
+        };
         if !self.pending_fresh_admissions.contains(&ship_id)
             || self.ships.index.contains_key(&ship_id)
-            || self
-                .station_inventory_db
-                .prepared_client_admission(ship_id)
-                .expect("prepared client admission query")
-                .is_none_or(|prepared| {
-                    prepared.player_id != player_id
-                        || prepared.spawn_position != spawn_position
-                        || prepared.resume_ticket != resume_ticket
-                })
+            || prepared.player_id != player_id
+            || prepared.spawn_position != spawn_position
+            || prepared.resume_ticket != resume_ticket
+            || prepared.resume_ticket_expires_at <= unix_now_secs()
         {
             return false;
         }
@@ -226,6 +262,7 @@ impl<S: EventStore> SimulationNode<S> {
             player_id,
             ship_id,
             resume_ticket,
+            resume_ticket_expires_at: prepared.resume_ticket_expires_at,
             sector_id: self.sector_id,
             initial_position: spawn_position.into(),
             ship_type_id: crate::ship_types::SHIP_TYPE_MAGPIE,
@@ -361,16 +398,21 @@ impl<S: EventStore> SimulationNode<S> {
         }
         if self
             .station_inventory_db
-            .client_ownership_by_ticket(presented_ticket)
+            .client_ownership_by_ticket(presented_ticket, unix_now_secs())
             .expect("client ownership query")
             != Some((player_id, ship_id))
         {
             self.release_resume_admission(player_id, ship_id);
             return false;
         }
-        self.station_inventory_db
-            .record_client_ownership(ship_id, player_id, next_ticket)
-            .expect("client ownership upsert");
+        let promoted = self
+            .station_inventory_db
+            .promote_client_resume_ticket(ship_id, player_id, next_ticket, unix_now_secs())
+            .expect("client ownership ticket promotion");
+        if !promoted {
+            self.release_resume_admission(player_id, ship_id);
+            return false;
+        }
         let committed = self.resume_player_ship(ship_id, player_id);
         self.release_resume_admission(player_id, ship_id);
         committed
