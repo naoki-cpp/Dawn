@@ -256,13 +256,18 @@ func _initialize_main_dependencies() -> void:
 
 func _replace_with_testable_main() -> void:
 	_main.free()
-	_main = TestableMain.new()
+	## The replacement root is intentionally outside the scene tree so its
+	## _ready() hook does not run. Register it with GdUnit4 nevertheless, so
+	## its child test ships are released even if a test exits before cleanup.
+	_main = auto_free(TestableMain.new())
 	_main._presentation = FakeWorldPresentation.new()
 	_initialize_main_dependencies()
 
 
 func after_test() -> void:
-	_main.free()
+	if is_instance_valid(_main):
+		_main.free()
+	_main = null
 
 
 func _module_fixture(
