@@ -14,6 +14,7 @@
 //!     -> reconstruct ECS from snapshot, replay events from log_index N onward
 //! ```
 
+mod admission_provisional;
 mod apply_event;
 mod approach;
 mod bot_ai;
@@ -54,7 +55,7 @@ use coordinates::debug_assert_missing_anchor;
 use sector_map::SectorMap;
 use ship_registry::ShipRegistry;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use dawn_core::MIN_WARP_DISTANCE;
@@ -176,6 +177,12 @@ where
     base_stats: HashMap<ShipId, ShipStatsComp>,
     /// PlayerId allocation counter.
     player_id_counter: u64,
+    /// Non-durable Ship IDs reserved by in-flight fresh admissions.
+    /// Counted against the population cap but intentionally omitted from snapshots.
+    pending_fresh_admissions: HashSet<ShipId>,
+    /// Ship-level lock held by an in-flight resume handshake.
+    /// Non-durable: authoritative ownership is still unchanged until commit.
+    pending_resume_admissions: HashMap<ShipId, PlayerId>,
     /// Lock-on commands queued by the bot AI during `process_bots()`.
     ///
     /// Bot AI runs after the LockSystem each tick.  These commands are held
@@ -280,6 +287,8 @@ impl<S: EventStore> SimulationNode<S> {
             ship_type_registry: HashMap::new(),
             base_stats: HashMap::new(),
             player_id_counter: 0,
+            pending_fresh_admissions: HashSet::new(),
+            pending_resume_admissions: HashMap::new(),
             pending_bot_lock_commands: Vec::new(),
             sector_map,
             anchor_table,
@@ -368,7 +377,9 @@ impl<S: EventStore> SimulationNode<S> {
     /// LoD (8B-3) as lowered fidelity, not in a count that pretends they are
     /// absent.
     pub fn at_population_cap(&self) -> bool {
-        self.ship_count() >= self.population_cap
+        self.ship_count()
+            .saturating_add(self.pending_fresh_admissions.len())
+            >= self.population_cap
     }
 
     /// Override the per-Sector population backstop (default [`POPULATION_CAP`]).
@@ -387,6 +398,7 @@ impl<S: EventStore> SimulationNode<S> {
         self.station_inventory_db = station_inventory_db::StationInventoryDb::open(path)?;
         self.station_inventory_cache
             .replace(station_inventory::StationInventoryCache::new());
+        self.reconcile_client_admission_grants()?;
         Ok(())
     }
 
@@ -494,19 +506,6 @@ impl<S: EventStore> SimulationNode<S> {
         self.ships.remove(ship_id, &mut self.world);
         self.base_stats.remove(&ship_id);
         self.docked_ships.remove(&ship_id);
-    }
-
-    /// Undo a fresh player-ship spawn whose handshake never completed (the
-    /// client's WebSocket send failed after `spawn_player_ship_at_pub` had
-    /// already created the ship). Narrow, deliberately-named wrapper around
-    /// `remove_ship` -- not a general "despawn any ship" API. Callers
-    /// must only use this for a ship this same connection attempt just
-    /// spawned; it must never be called for a resumed ship (one that existed
-    /// before the attempt), since that ship's ownership predates this
-    /// connection and removing it would destroy state unrelated to the
-    /// failure.
-    pub fn despawn_incomplete_handshake_spawn(&mut self, ship_id: ShipId) {
-        self.remove_ship(ship_id);
     }
 
     /// Recomputes `ShipStatsComp` from `ship_id`'s current `FittingComp`
@@ -778,17 +777,6 @@ mod tests {
         let unknown = dawn_core::ShipId::new(NodeId(99), 0);
         assert!(!node.adopt_player_ship(unknown, dawn_core::PlayerId(0)));
         assert!(!node.apply_stop_command_owned(dawn_core::PlayerId(0), unknown));
-    }
-
-    #[test]
-    fn despawn_incomplete_handshake_spawn_removes_the_ship() {
-        let mut node = mem_node();
-        let ship_id = node.spawn_player_ship_at_pub(dawn_core::PlayerId(0), Position::ORIGIN);
-        assert_eq!(node.ship_count(), 1);
-
-        node.despawn_incomplete_handshake_spawn(ship_id);
-
-        assert_eq!(node.ship_count(), 0);
     }
 
     #[test]

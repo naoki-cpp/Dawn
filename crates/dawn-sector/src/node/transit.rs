@@ -309,8 +309,19 @@ impl<S: EventStore> SimulationNode<S> {
             .get::<InventoryComp>(entity)
             .map(|inv| inv.items.clone())
             .unwrap_or_default();
+        let owner_player_id = self.ships.owners.get(&ship_id).copied();
+        let (resume_ticket, pending_resume_ticket) = if owner_player_id.is_some() {
+            self.client_resume_tickets(ship_id)
+                .map(|(current, pending)| (Some(current), pending))
+                .unwrap_or((None, None))
+        } else {
+            (None, None)
+        };
         Some(TransitHandoffState {
             ship_id,
+            owner_player_id,
+            resume_ticket,
+            pending_resume_ticket,
             ship_type_id,
             velocity,
             current_shield,
@@ -483,6 +494,19 @@ impl<S: EventStore> SimulationNode<S> {
                 handoff.current_armor,
                 handoff.current_hull,
             );
+        }
+        if let Some(player_id) = handoff.owner_player_id {
+            if let Some(resume_ticket) = handoff.resume_ticket {
+                self.station_inventory_db
+                    .record_client_ownership_with_pending(
+                        handoff.ship_id,
+                        player_id,
+                        resume_ticket,
+                        handoff.pending_resume_ticket,
+                    )
+                    .expect("transit owner binding transaction");
+            }
+            debug_assert!(self.adopt_player_ship(handoff.ship_id, player_id));
         }
         if let Some(current) = handoff.capacitor {
             let _ = self.world.insert_one(entity, CapacitorComp { current });
@@ -1098,8 +1122,8 @@ mod tests {
             Tick::ZERO,
         );
 
-        // Before the handoff, the destination node rejects owned commands.
-        assert!(!to_node.apply_stop_command_owned(player_id, ship_id));
+        // The durable handoff establishes ownership before any client resume.
+        assert!(to_node.apply_stop_command_owned(player_id, ship_id));
 
         assert!(to_node.adopt_player_ship(ship_id, player_id));
         assert!(to_node.apply_stop_command_owned(player_id, ship_id));
@@ -1453,6 +1477,9 @@ mod tests {
     fn sample_transit_handoff(ship_id: ShipId, velocity: Velocity) -> TransitHandoffState {
         TransitHandoffState {
             ship_id,
+            owner_player_id: None,
+            resume_ticket: None,
+            pending_resume_ticket: None,
             ship_type_id: ShipTypeId(1),
             velocity,
             current_shield: 80.0,

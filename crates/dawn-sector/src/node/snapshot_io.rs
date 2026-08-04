@@ -46,6 +46,10 @@ impl<S: EventStore> SimulationNode<S> {
             // Configuration, re-applied after construction by the caller
             // (`set_population_cap` / `open_station_inventory_db`).
             population_cap: _,
+            // Fresh admission reservations exist only while this process is alive.
+            pending_fresh_admissions: _,
+            // Resume locks protect only live asynchronous handshakes.
+            pending_resume_admissions: _,
             // Independently durable in SQLite (ADR-0038), plus its cache.
             station_inventory_db: _,
             station_inventory_cache: _,
@@ -116,6 +120,11 @@ impl<S: EventStore> SimulationNode<S> {
             id_counter: *id_counter,
             player_id_counter: *player_id_counter,
             ships,
+            owners: ship_registry
+                .owners
+                .iter()
+                .map(|(&ship, &player)| (ship, player))
+                .collect(),
             docked_ships: docked_ships.clone(),
             docked_players: docked_players.clone(),
             completed_incoming_transits: completed_incoming_transits.clone(),
@@ -142,6 +151,7 @@ impl<S: EventStore> SimulationNode<S> {
             player_id_counter,
             docked_ships,
             docked_players,
+            owners,
             completed_incoming_transits,
             // Consumed by `restore_from`, not here: `ships` needs the module
             // and ship-type registries in place first, and `log_index` selects
@@ -158,6 +168,10 @@ impl<S: EventStore> SimulationNode<S> {
         self.player_id_counter = *player_id_counter;
         self.docked_ships = docked_ships.clone();
         self.docked_players = docked_players.clone();
+        self.ships.owners = owners
+            .iter()
+            .map(|(&ship, &player)| (ship, player))
+            .collect();
         self.completed_incoming_transits = completed_incoming_transits.clone();
     }
 }
@@ -262,12 +276,10 @@ mod tests {
 
     /// A restarted node must not re-issue a `PlayerId` it already handed out.
     ///
-    /// Ownership is not carried in the snapshot — a returning client
-    /// re-asserts it through `adopt_player_ship` (ADR-0007 §2-A resume) — so
-    /// the allocation counter is the only thing standing between a restart and
-    /// two live sessions sharing one `PlayerId`. `next_player_id` is on the
-    /// real admission path (`dawn-sector-node`'s `client_admission`), so this
-    /// is a live ownership hazard, not a bookkeeping detail.
+    /// The snapshot carries established ownership bindings so a restarted
+    /// node cannot let a different resume identity claim a restored Ship.
+    /// The allocation counter still prevents a restart from issuing a PlayerId
+    /// already handed out on the real admission path.
     #[test]
     fn player_ids_are_not_reissued_after_a_restore() {
         let mut node = node_with_modules();
@@ -318,6 +330,7 @@ mod tests {
                 tackled_by: vec![ShipId::new(NodeId(0), 1)],
                 inventory: std::collections::BTreeMap::from([(dawn_core::ItemId::ScrapMetal, 4)]),
             }],
+            owners: std::collections::BTreeMap::new(),
             completed_incoming_transits: Vec::new(),
             docked_ships: std::collections::BTreeMap::from([(
                 ShipId::new(NodeId(0), 0),

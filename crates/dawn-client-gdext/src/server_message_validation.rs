@@ -107,13 +107,13 @@ pub(crate) fn validate_player_loadout_godot_ranges(
 
 fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
     match message {
-        ServerMessage::Welcome { player_id, ship_id }
-        | ServerMessage::Redirect {
+        ServerMessage::Welcome {
             player_id, ship_id, ..
         } => {
             ensure_godot_int(*player_id, "player_id")?;
             ensure_godot_int(*ship_id, "ship_id")?;
         }
+        ServerMessage::Redirect { .. } => {}
         ServerMessage::Event(event) => validate_event(event)?,
         ServerMessage::PlayerLoadout(loadout) => validate_player_loadout_godot_ranges(loadout)?,
         ServerMessage::InitialState(state) => {
@@ -216,11 +216,11 @@ mod tests {
             ServerMessage::Welcome {
                 player_id: 1,
                 ship_id: 7,
+                resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
             },
             ServerMessage::Redirect {
                 ws_addr: "127.0.0.1:7880".to_owned(),
-                player_id: 1,
-                ship_id: 7,
+                resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
             },
             ServerMessage::Event(EventWire::ShipDespawned {
                 ship_id: 7,
@@ -288,6 +288,7 @@ mod tests {
             &ServerMessage::Welcome {
                 player_id: 1,
                 ship_id: invalid,
+                resume_ticket: dawn_wire::ResumeTicket::from_bytes([3; 32]),
             }
             .encode(),
         )

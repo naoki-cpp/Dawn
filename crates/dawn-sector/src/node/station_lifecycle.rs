@@ -43,10 +43,10 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Re-adopt a restored ship for a resumed player and reconcile Station access.
     ///
-    /// Ownership is intentionally not persisted in `StateSnapshot`, so tail
-    /// `ShipDocked`/`ShipUndocked` events replay before the resumed player is
-    /// known. `docked_ships` is still authoritative after replay; use it here to
-    /// repair the player-facing Station context once identity is re-established.
+    /// Ship ownership is restored from the snapshot or Transit handoff before
+    /// a resume begins. `docked_ships` is still authoritative after replay; use
+    /// it here to repair the player-facing Station context once identity is
+    /// re-established.
     pub fn resume_player_ship(&mut self, ship_id: ShipId, player_id: PlayerId) -> bool {
         if !self.adopt_player_ship(ship_id, player_id) {
             return false;
@@ -306,7 +306,10 @@ mod tests {
             crate::game_data::test_catalog().ship_types(),
         );
         assert_eq!(restored.docked_station(ship_id), Some(StationId(0)));
-        assert_eq!(restored.player_docked_station(player_id), None);
+        assert_eq!(
+            restored.player_docked_station(player_id),
+            Some(StationId(0))
+        );
 
         assert!(restored.resume_player_ship(ship_id, player_id));
         assert_eq!(
@@ -341,11 +344,7 @@ mod tests {
             crate::game_data::test_catalog().ship_types(),
         );
         assert_eq!(restored.docked_station(ship_id), None);
-        assert_eq!(
-            restored.player_docked_station(player_id),
-            Some(StationId(0)),
-            "tail replay cannot identify the player before resume"
-        );
+        assert_eq!(restored.player_docked_station(player_id), None);
 
         assert!(restored.resume_player_ship(ship_id, player_id));
         assert_eq!(restored.player_docked_station(player_id), None);

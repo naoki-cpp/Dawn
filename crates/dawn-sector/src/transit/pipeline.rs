@@ -425,6 +425,9 @@ mod tests {
     fn test_handoff(ship_id: ShipId) -> TransitHandoffState {
         TransitHandoffState {
             ship_id,
+            owner_player_id: None,
+            resume_ticket: None,
+            pending_resume_ticket: None,
             ship_type_id: ShipTypeId(1),
             velocity: Velocity::ZERO,
             current_shield: 100.0,

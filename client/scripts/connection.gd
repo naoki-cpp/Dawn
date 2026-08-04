@@ -50,6 +50,8 @@ var _reconnect_timer : float         = 0.0
 var _reconnect_log_elapsed : float  = RECONNECT_LOG_INTERVAL
 var _reconnect_attempts : int       = 0
 var _server_url      : String        = SERVER_URL
+## Opaque server-issued capability used for reconnect/resume (ADR-0048).
+var _resume_ticket   : PackedByteArray = PackedByteArray()
 ## ClientCommand/ServerMessageDecoder are GDExtension classes (dawn-wire/
 ## dawn-client-gdext, ADR-0041/ADR-0042) -- globally registered, no preload
 ## needed. The decoder returns a typed ServerMessageOutcome that owns all
@@ -283,7 +285,7 @@ func _send_bytes(bytes: PackedByteArray) -> void:
 	_ws.send(bytes, WebSocketPeer.WRITE_MODE_BINARY)
 
 func _send_hello() -> void:
-	_ws.send(_cmd.hello_command(player_id, ship_id), WebSocketPeer.WRITE_MODE_BINARY)
+	_ws.send(_cmd.hello_command(_resume_ticket), WebSocketPeer.WRITE_MODE_BINARY)
 	print("[Connection] Hello sent")
 
 func _connect_to_server() -> void:
@@ -328,9 +330,14 @@ func _receive_messages() -> void:
 			push_warning("[Connection] failed to dispatch typed ServerMessage outcome")
 
 
-func _accept_welcome(p_player_id: int, p_ship_id: int) -> void:
+func _accept_welcome(
+	p_player_id: int,
+	p_ship_id: int,
+	p_resume_ticket: PackedByteArray
+) -> void:
 	player_id = p_player_id
 	ship_id = p_ship_id
+	_resume_ticket = p_resume_ticket
 	_welcomed = true
 	print("[Connection] Welcome: player_id=%d ship_id=%d" % [player_id, ship_id])
 	welcomed.emit(player_id, ship_id)
@@ -346,18 +353,16 @@ func _accept_player_loadout() -> void:
 	player_fitting_received.emit()
 
 
-func _accept_redirect(ws_addr: String, p_player_id: int, p_ship_id: int) -> void:
+func _accept_redirect(ws_addr: String, p_resume_ticket: PackedByteArray) -> void:
 	if ws_addr.is_empty():
 		push_warning("[Connection] Redirect without ws_addr")
 		return
-	player_id = p_player_id
-	ship_id = p_ship_id
+	_resume_ticket = p_resume_ticket
 	_server_url = _normalize_ws_url(ws_addr)
 	_welcomed = false
 	_connected = false
 	_reconnect_timer = RECONNECT_INTERVAL
-	print("[Connection] Redirect: reconnecting to %s as player_id=%d ship_id=%d" % [
-		_server_url, player_id, ship_id])
+	print("[Connection] Redirect: reconnecting to %s with resume ticket" % _server_url)
 	connection_changed.emit(false)
 	_ws.close()
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal};
 use dawn_core::fitting::FittingSnapshot;
 use dawn_core::{NodeId, Position, SectorBounds, ShipTypeId, Velocity};
 use dawn_event_store::InMemoryEventStore;
@@ -38,6 +39,9 @@ fn decode_proposed_transit(
 fn sample_handoff() -> TransitHandoffState {
     TransitHandoffState {
         ship_id: ShipId::new(NodeId(0), 7),
+        owner_player_id: None,
+        resume_ticket: None,
+        pending_resume_ticket: None,
         ship_type_id: ShipTypeId(1),
         velocity: Velocity::new(4.0, 5.0, 6.0),
         current_shield: 10.0,
@@ -181,6 +185,135 @@ fn destination_commit_then_source_ack_moves_ownership_without_a_zero_owner_windo
 
     assert!(source.get_ship_position(ship_id).is_none());
     assert!(destination.get_ship_position(ship_id).is_some());
+}
+
+#[test]
+fn transit_carries_owner_binding_to_destination_and_snapshot_restore() {
+    let mut source = node(0, 0);
+    let mut destination = node(1, 1);
+    let player_id = source.next_player_id();
+    let ship_id = source.spawn_player_ship(player_id);
+    let data = source
+        .prepare_transit_commit(ship_id, SectorId(1), None)
+        .expect("owned Ship transit");
+    assert_eq!(data.handoff.owner_player_id, Some(player_id));
+    let resume_ticket = data.handoff.resume_ticket.expect("owned Ship ticket");
+
+    let (raft, mut proposals) = raft_handle();
+    let (commit_tx, mut commit_rx) = mpsc::unbounded_channel();
+    commit_tx
+        .send(
+            (TransitOp::Commit {
+                handoff: data.handoff,
+                from: SectorId(0),
+                to: SectorId(1),
+                entry_pos: data.entry_pos,
+                gate_id: None,
+                request_tick: data.request_tick,
+            })
+            .encode(),
+        )
+        .unwrap();
+    apply_committed_raft_entries(&mut destination, &raft, &mut commit_rx);
+    assert!(matches!(
+        decode_proposed_transit(&mut proposals),
+        TransitOp::Ack { .. }
+    ));
+
+    assert!(matches!(
+        destination.begin_client_admission(
+            ClientAdmissionIntent::Resume {
+                resume_ticket: dawn_core::ResumeTicket::from_bytes([99; 32]),
+            },
+            1_000.0,
+        ),
+        Err(ClientAdmissionRefusal::ResumeTicketInvalid)
+    ));
+
+    let reconnect = destination
+        .begin_client_admission(ClientAdmissionIntent::Resume { resume_ticket }, 1_000.0)
+        .expect("transit ticket should identify the owner");
+    reconnect.abort(&mut destination);
+
+    let snapshot = destination.take_snapshot();
+    let mut store = InMemoryEventStore::new();
+    for record in destination.event_store().all_records() {
+        store.append(record.event.clone());
+    }
+    let mut restored = SimulationNode::restore_from(
+        store,
+        &snapshot,
+        std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
+        &[],
+        &[],
+    );
+    assert!(matches!(
+        restored.begin_client_admission(
+            ClientAdmissionIntent::Resume {
+                resume_ticket: dawn_core::ResumeTicket::from_bytes([99; 32]),
+            },
+            1_000.0,
+        ),
+        Err(ClientAdmissionRefusal::ResumeTicketInvalid)
+    ));
+}
+
+#[test]
+fn transit_preserves_a_pending_resume_ticket_for_the_destination() {
+    let mut source = node(0, 0);
+    let mut destination = node(1, 1);
+    let player_id = source.next_player_id();
+    let ship_id = source.spawn_player_ship(player_id);
+    let current_ticket = source
+        .client_resume_ticket(ship_id)
+        .expect("player Ship has a current ticket");
+    let pending_attempt = source
+        .begin_client_admission(
+            ClientAdmissionIntent::Resume {
+                resume_ticket: current_ticket,
+            },
+            1_000.0,
+        )
+        .expect("resume attempt should stage a next ticket");
+    let pending_ticket = pending_attempt.resume_ticket();
+
+    let data = source
+        .prepare_transit_commit(ship_id, SectorId(1), None)
+        .expect("owned Ship transit");
+    assert_eq!(data.handoff.resume_ticket, Some(current_ticket));
+    assert_eq!(data.handoff.pending_resume_ticket, Some(pending_ticket));
+
+    let (raft, mut proposals) = raft_handle();
+    let (commit_tx, mut commit_rx) = mpsc::unbounded_channel();
+    commit_tx
+        .send(
+            (TransitOp::Commit {
+                handoff: data.handoff,
+                from: SectorId(0),
+                to: SectorId(1),
+                entry_pos: data.entry_pos,
+                gate_id: None,
+                request_tick: data.request_tick,
+            })
+            .encode(),
+        )
+        .unwrap();
+    apply_committed_raft_entries(&mut destination, &raft, &mut commit_rx);
+    assert!(matches!(
+        decode_proposed_transit(&mut proposals),
+        TransitOp::Ack { .. }
+    ));
+
+    pending_attempt.abort(&mut source);
+    let reconnect = destination
+        .begin_client_admission(
+            ClientAdmissionIntent::Resume {
+                resume_ticket: pending_ticket,
+            },
+            1_000.0,
+        )
+        .expect("the advertised ticket must survive Transit");
+    reconnect.abort(&mut destination);
 }
 
 #[test]

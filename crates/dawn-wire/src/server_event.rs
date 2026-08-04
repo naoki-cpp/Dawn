@@ -241,6 +241,8 @@ pub fn domain_event_to_event_wire(event: &DomainEvent) -> Option<EventWire> {
         DomainEvent::AnchorRebased(_) => return None,
         DomainEvent::PackagedShipBuilt(_) => return None,
         DomainEvent::ShipDisassembled(_) => return None,
+        DomainEvent::ClientAdmissionIdentityReserved(_) => return None,
+        DomainEvent::ClientAdmissionCommitted(_) => return None,
     })
 }
 
@@ -687,6 +689,9 @@ mod tests {
             DomainEvent::SectorTransitCompleted(dawn_core::events::SectorTransitCompleted {
                 handoff: dawn_core::TransitHandoffState {
                     ship_id: ship_id(1),
+                    owner_player_id: None,
+                    resume_ticket: None,
+                    pending_resume_ticket: None,
                     ship_type_id: dawn_core::ShipTypeId(1),
                     velocity: dawn_core::Velocity::ZERO,
                     current_shield: 100.0,

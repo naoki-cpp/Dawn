@@ -32,6 +32,7 @@ pub mod movement;
 pub mod navigation;
 pub mod player;
 pub mod position;
+pub mod resume;
 pub mod sector;
 pub mod ship_type;
 pub mod tick;
@@ -64,6 +65,7 @@ pub use navigation::{
 };
 pub use player::PlayerId;
 pub use position::{AbsolutePosition, Position, Velocity};
+pub use resume::ResumeTicket;
 pub use sector::{SectorBounds, SectorId};
 pub use ship_type::{ShipBaseStats, ShipClass, ShipTypeDefinition, ShipTypeId, SlotLayout};
 pub use tick::Tick;

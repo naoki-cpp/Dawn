@@ -57,6 +57,11 @@ impl SectorNodeRuntime {
             sess.player_id,
             sess.ship_id.raw()
         );
+        self.sessions.retain(|existing| {
+            existing.player_id != sess.player_id && existing.ship_id != sess.ship_id
+        });
+        self.aoi_frame
+            .retain_players(|player_id| player_id != sess.player_id);
         seed_runtime_session(&mut self.aoi_frame, node, &sess);
         self.sessions.push(sess);
     }
@@ -271,8 +276,7 @@ impl RuntimeAoiSession for ws_server::PlayerSession {
     fn send_redirect(&mut self, ws_addr: SocketAddr) {
         self.conn.send_message(&ServerMessage::Redirect {
             ws_addr: ws_addr.to_string(),
-            player_id: self.player_id.raw(),
-            ship_id: self.ship_id.raw(),
+            resume_ticket: self.resume_ticket,
         });
     }
 
