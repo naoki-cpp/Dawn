@@ -127,8 +127,18 @@ impl<S: EventStore> SimulationNode<S> {
     #[cfg(test)]
     pub(crate) fn client_resume_ticket(&self, ship_id: ShipId) -> Option<ResumeTicket> {
         self.station_inventory_db
-            .client_resume_ticket(ship_id)
+            .client_resume_tickets(ship_id)
             .expect("client ownership ticket query")
+            .map(|(current, _pending)| current)
+    }
+
+    pub(crate) fn client_resume_tickets(
+        &self,
+        ship_id: ShipId,
+    ) -> Option<(ResumeTicket, Option<ResumeTicket>)> {
+        self.station_inventory_db
+            .client_resume_tickets(ship_id)
+            .expect("client ownership tickets query")
     }
 
     pub(crate) fn claim_prepared_fresh_admission(

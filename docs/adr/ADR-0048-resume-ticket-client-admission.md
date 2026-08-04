@@ -82,9 +82,11 @@ presence of a Ship entity, its ship type, or an ECS marker.
 
 ### Transit integration
 
-The authoritative Transit commit carries or durably references the ticket for
-the destination Sector. The destination validates the ticket against the
-committed handoff before building the client payload. Redirect delivery is a
+The authoritative Transit commit carries or durably references both the
+committed ticket and any one staged ticket for the destination Sector. The
+destination validates and restores both against the committed handoff before
+building the client payload. This preserves a ticket already exposed by a
+Welcome if Transit races the admission commit. Redirect delivery is a
 notification of that already-authorized handoff, not an authorization step.
 
 ## Alternatives considered
@@ -121,15 +123,16 @@ authentication system.
 
 ## Implementation checklist
 
-- [ ] Add an opaque `ResumeTicket` type to `dawn-wire`.
-- [ ] Replace `ResumeIdentity` in `HelloMessage` and remove raw-ID resume input.
-- [ ] Carry the ticket in `Welcome` and `Redirect` where a retry is possible.
-- [ ] Persist or replicate ticket binding through fresh admission and Transit.
-- [ ] Change `ClientAdmissionIntent::Resume` to accept only a ticket.
-- [ ] Resolve and consume tickets inside `dawn-sector::client_admission`.
-- [ ] Make production, single, and clustered adapters pass ticket intent only.
-- [ ] Store and resend the ticket in the Godot connection layer.
-- [ ] Add tests for NPC rejection, wrong destination, wrong owner, expiry,
-  replay, failed-handshake retry, and clustered redirect recovery.
-- [ ] Update ADR-0007, client-admission documentation, wire documentation, and
+- [x] Expose an opaque `ResumeTicket` type through `dawn-wire`.
+- [x] Replace `ResumeIdentity` in `HelloMessage` and remove raw-ID resume input.
+- [x] Carry the ticket in `Welcome` and `Redirect` where a retry is possible.
+- [x] Persist or replicate ticket binding through fresh admission and Transit.
+- [x] Change `ClientAdmissionIntent::Resume` to accept only a ticket.
+- [x] Resolve and rotate tickets inside `dawn-sector::client_admission`.
+- [x] Make production, single, and clustered adapters pass ticket intent only.
+- [x] Store and resend the ticket in the Godot connection layer.
+- [x] Add tests for NPC rejection, wrong destination, wrong owner, replay,
+  failed-handshake retry, and clustered redirect recovery.
+- [x] Update ADR-0007, client-admission documentation, wire documentation, and
   generated wire schemas.
+- [ ] Add ticket expiry and explicit expiry-policy tests.

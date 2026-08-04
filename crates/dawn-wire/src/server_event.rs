@@ -691,6 +691,7 @@ mod tests {
                     ship_id: ship_id(1),
                     owner_player_id: None,
                     resume_ticket: None,
+                    pending_resume_ticket: None,
                     ship_type_id: dawn_core::ShipTypeId(1),
                     velocity: dawn_core::Velocity::ZERO,
                     current_shield: 100.0,

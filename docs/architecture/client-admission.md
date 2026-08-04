@@ -55,7 +55,8 @@ destination Sector, and Transit or fresh-admission attempt that issued it. It
 also has an expiry and one-time consumption state. During a resume, the next
 ticket is staged durably before `Welcome` is sent. The committed ticket remains
 valid until a successful admission promotes the staged ticket, so a failed
-handshake can retry without guessing whether `Welcome` was received.
+handshake can retry without guessing whether `Welcome` was received. Transit
+copies both ticket states to its destination before the old Sector is removed.
 
 The Sector admission module resolves and validates the ticket before building
 the handoff. It then reserves both sides of the resolved identity: no other

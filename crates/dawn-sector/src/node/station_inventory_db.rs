@@ -263,15 +263,23 @@ impl StationInventoryDb {
             .optional()
     }
 
-    pub(super) fn client_resume_ticket(
+    pub(super) fn client_resume_tickets(
         &self,
         ship_id: ShipId,
-    ) -> rusqlite::Result<Option<ResumeTicket>> {
+    ) -> rusqlite::Result<Option<(ResumeTicket, Option<ResumeTicket>)>> {
         self.conn
             .query_row(
-                "SELECT resume_ticket FROM client_ship_ownership WHERE ship_id = ?1",
+                "SELECT resume_ticket, pending_resume_ticket
+                 FROM client_ship_ownership WHERE ship_id = ?1",
                 params![ship_id.raw().to_string()],
-                |row| ticket_from_blob(row.get(0)?),
+                |row| {
+                    let current = ticket_from_blob(row.get(0)?)?;
+                    let pending = row
+                        .get::<_, Option<Vec<u8>>>(1)?
+                        .map(ticket_from_blob)
+                        .transpose()?;
+                    Ok((current, pending))
+                },
             )
             .optional()
     }
@@ -293,6 +301,31 @@ impl StationInventoryDb {
                 ship_id.raw().to_string(),
                 player_id.0 as i64,
                 resume_ticket.as_bytes().as_slice()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(super) fn record_client_ownership_with_pending(
+        &self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        resume_ticket: ResumeTicket,
+        pending_resume_ticket: Option<ResumeTicket>,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO client_ship_ownership
+             (ship_id, player_id, resume_ticket, pending_resume_ticket)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (ship_id) DO UPDATE SET
+               player_id = excluded.player_id,
+               resume_ticket = excluded.resume_ticket,
+               pending_resume_ticket = excluded.pending_resume_ticket",
+            params![
+                ship_id.raw().to_string(),
+                player_id.0 as i64,
+                resume_ticket.as_bytes().as_slice(),
+                pending_resume_ticket.map(|ticket| ticket.as_bytes().to_vec()),
             ],
         )?;
         Ok(())

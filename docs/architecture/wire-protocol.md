@@ -200,7 +200,9 @@ them.
 - A client resuming after a `Redirect` (cross-node jump), or retrying a
   prepared fresh admission, sends `ClientMessage::Hello(HelloMessage {
   resume: Some(ResumeTicket) })`. The ticket is server-issued, bound to the
-  exact handoff, and consumed by the destination admission flow.
+  exact handoff, and resolved by the destination admission flow. A resume
+  rotation may be staged before `Welcome`; Transit carries that staged value
+  until the destination commits or replaces it.
 - The server replies with `ServerMessage::Welcome { player_id, ship_id,
   resume_ticket }`,
   then `ServerMessage::InitialState` (+ optional `ServerMessage::PlayerLoadout`),

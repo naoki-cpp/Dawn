@@ -309,14 +309,19 @@ impl<S: EventStore> SimulationNode<S> {
             .get::<InventoryComp>(entity)
             .map(|inv| inv.items.clone())
             .unwrap_or_default();
+        let owner_player_id = self.ships.owners.get(&ship_id).copied();
+        let (resume_ticket, pending_resume_ticket) = if owner_player_id.is_some() {
+            self.client_resume_tickets(ship_id)
+                .map(|(current, pending)| (Some(current), pending))
+                .unwrap_or((None, None))
+        } else {
+            (None, None)
+        };
         Some(TransitHandoffState {
             ship_id,
-            owner_player_id: self.ships.owners.get(&ship_id).copied(),
-            resume_ticket: self.ships.owners.get(&ship_id).and_then(|_| {
-                self.station_inventory_db
-                    .client_resume_ticket(ship_id)
-                    .expect("transit owner ticket query")
-            }),
+            owner_player_id,
+            resume_ticket,
+            pending_resume_ticket,
             ship_type_id,
             velocity,
             current_shield,
@@ -493,7 +498,12 @@ impl<S: EventStore> SimulationNode<S> {
         if let Some(player_id) = handoff.owner_player_id {
             if let Some(resume_ticket) = handoff.resume_ticket {
                 self.station_inventory_db
-                    .record_client_ownership(handoff.ship_id, player_id, resume_ticket)
+                    .record_client_ownership_with_pending(
+                        handoff.ship_id,
+                        player_id,
+                        resume_ticket,
+                        handoff.pending_resume_ticket,
+                    )
                     .expect("transit owner binding transaction");
             }
             debug_assert!(self.adopt_player_ship(handoff.ship_id, player_id));
@@ -1469,6 +1479,7 @@ mod tests {
             ship_id,
             owner_player_id: None,
             resume_ticket: None,
+            pending_resume_ticket: None,
             ship_type_id: ShipTypeId(1),
             velocity,
             current_shield: 80.0,
