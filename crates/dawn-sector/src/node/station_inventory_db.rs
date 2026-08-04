@@ -222,6 +222,12 @@ impl StationInventoryDb {
                  ADD COLUMN pending_resume_ticket_expires_at INTEGER",
                 [],
             )?;
+            conn.execute(
+                "UPDATE client_ship_ownership
+                 SET pending_resume_ticket_expires_at = ?1
+                 WHERE pending_resume_ticket IS NOT NULL",
+                params![expiry_to_sql(resume_ticket_expiry(unix_now_secs()))],
+            )?;
         }
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS
@@ -844,6 +850,42 @@ mod tests {
         assert_eq!(
             db.client_ownership_by_ticket(next_ticket, 100).unwrap(),
             Some((player_id, ship_id))
+        );
+    }
+
+    #[test]
+    fn existing_pending_resume_ticket_gets_a_deadline_during_schema_migration() {
+        let conn = Connection::open_in_memory().unwrap();
+        let current_ticket = ResumeTicket::from_bytes([13; ResumeTicket::BYTE_LEN]);
+        let pending_ticket = ResumeTicket::from_bytes([14; ResumeTicket::BYTE_LEN]);
+        conn.execute(
+            "CREATE TABLE client_ship_ownership (
+                ship_id TEXT PRIMARY KEY,
+                player_id INTEGER NOT NULL,
+                resume_ticket BLOB NOT NULL UNIQUE,
+                pending_resume_ticket BLOB UNIQUE
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO client_ship_ownership
+             (ship_id, player_id, resume_ticket, pending_resume_ticket)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                ShipId::new(dawn_core::NodeId(2), 13).raw().to_string(),
+                1_i64,
+                current_ticket.as_bytes().as_slice(),
+                pending_ticket.as_bytes().as_slice(),
+            ],
+        )
+        .unwrap();
+
+        let db = StationInventoryDb::init(conn).unwrap();
+
+        assert_eq!(
+            db.client_ownership_by_ticket(pending_ticket, unix_now_secs()),
+            Ok(Some((PlayerId(1), ShipId::new(dawn_core::NodeId(2), 13),)))
         );
     }
 

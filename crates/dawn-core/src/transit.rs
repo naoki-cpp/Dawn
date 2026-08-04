@@ -26,10 +26,10 @@ pub struct TransitHandoffState {
     /// concurrent Transit.
     pub pending_resume_ticket: Option<ResumeTicket>,
     /// Expiry of the committed reconnect capability, as a Unix timestamp in
-    /// seconds. The option keeps deserialization explicit for handoffs created
-    /// before expiry was carried through Transit.
+    /// seconds. This is present exactly when `resume_ticket` is present.
     pub resume_ticket_expires_at: Option<u64>,
-    /// Expiry of the staged reconnect capability, when one exists.
+    /// Expiry of the staged reconnect capability, present exactly when
+    /// `pending_resume_ticket` is present.
     pub pending_resume_ticket_expires_at: Option<u64>,
     pub ship_type_id: ShipTypeId,
     pub velocity: Velocity,
@@ -72,6 +72,18 @@ impl TryFrom<UncheckedTransitHandoffState> for TransitHandoffState {
     fn try_from(value: UncheckedTransitHandoffState) -> Result<Self, Self::Error> {
         if value.is_destroyed != (value.current_hull <= 0.0) {
             return Err("TransitHandoffState.is_destroyed must equal (current_hull <= 0.0)");
+        }
+        if value.resume_ticket.is_some() != value.resume_ticket_expires_at.is_some() {
+            return Err(
+                "TransitHandoffState.resume_ticket and resume_ticket_expires_at must be paired",
+            );
+        }
+        if value.pending_resume_ticket.is_some() != value.pending_resume_ticket_expires_at.is_some()
+        {
+            return Err("TransitHandoffState.pending_resume_ticket and its expiry must be paired");
+        }
+        if value.pending_resume_ticket.is_some() && value.resume_ticket.is_none() {
+            return Err("TransitHandoffState.pending_resume_ticket requires a current ticket");
         }
 
         Ok(Self {

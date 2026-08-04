@@ -145,3 +145,17 @@ fn transit_decode_rejects_destroyed_state_that_disagrees_with_hull_hp() {
     let destroyed = commit_with(destroyed).encode();
     assert!(TransitOp::decode(&destroyed).is_some());
 }
+
+#[test]
+fn transit_decode_rejects_resume_tickets_without_expiry_metadata() {
+    let mut current_without_expiry = sample_handoff();
+    current_without_expiry.resume_ticket = Some(dawn_core::ResumeTicket::from_bytes([21; 32]));
+    assert!(TransitOp::decode(&commit_with(current_without_expiry).encode()).is_none());
+
+    let mut pending_without_expiry = sample_handoff();
+    pending_without_expiry.resume_ticket = Some(dawn_core::ResumeTicket::from_bytes([22; 32]));
+    pending_without_expiry.resume_ticket_expires_at = Some(100);
+    pending_without_expiry.pending_resume_ticket =
+        Some(dawn_core::ResumeTicket::from_bytes([23; 32]));
+    assert!(TransitOp::decode(&commit_with(pending_without_expiry).encode()).is_none());
+}

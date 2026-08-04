@@ -511,24 +511,26 @@ impl<S: EventStore> SimulationNode<S> {
         }
         if let Some(player_id) = handoff.owner_player_id {
             if let Some(resume_ticket) = handoff.resume_ticket {
+                let resume_ticket_expires_at = handoff
+                    .resume_ticket_expires_at
+                    .expect("current resume ticket must carry an expiry");
+                let pending_resume_ticket = match (
+                    handoff.pending_resume_ticket,
+                    handoff.pending_resume_ticket_expires_at,
+                ) {
+                    (Some(ticket), Some(expires_at)) => {
+                        Some(super::station_inventory_db::StoredResumeTicket { ticket, expires_at })
+                    }
+                    (None, None) => None,
+                    _ => panic!("pending resume ticket must carry an expiry"),
+                };
                 self.station_inventory_db
                     .record_client_ownership_with_pending(
                         handoff.ship_id,
                         player_id,
                         resume_ticket,
-                        handoff.resume_ticket_expires_at.unwrap_or_else(|| {
-                            super::station_inventory_db::resume_ticket_expiry(
-                                super::station_inventory_db::unix_now_secs(),
-                            )
-                        }),
-                        handoff.pending_resume_ticket_expires_at.map(|expires_at| {
-                            super::station_inventory_db::StoredResumeTicket {
-                                ticket: handoff
-                                    .pending_resume_ticket
-                                    .expect("pending resume expiry requires a pending ticket"),
-                                expires_at,
-                            }
-                        }),
+                        resume_ticket_expires_at,
+                        pending_resume_ticket,
                     )
                     .expect("transit owner binding transaction");
             }
