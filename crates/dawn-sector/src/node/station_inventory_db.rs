@@ -465,13 +465,14 @@ impl StationInventoryDb {
                 ],
             )?;
         }
+        // The event carries the ticket issued at the original fresh commit,
+        // but a later resume may already have rotated the durable binding.
+        // Reconciliation must restore a missing ownership row without
+        // overwriting the current or staged reconnect ticket.
         tx.execute(
             "INSERT INTO client_ship_ownership (ship_id, player_id, resume_ticket)
              VALUES (?1, ?2, ?3)
-             ON CONFLICT (ship_id) DO UPDATE SET
-               player_id = excluded.player_id,
-               resume_ticket = excluded.resume_ticket,
-               pending_resume_ticket = NULL",
+             ON CONFLICT (ship_id) DO NOTHING",
             params![
                 ship_id.raw().to_string(),
                 player_id.0 as i64,
@@ -687,6 +688,41 @@ mod tests {
             )
             .unwrap());
         assert_eq!(db.get_all(PlayerId(1), StationId(7)).get(&item), Some(&1));
+    }
+
+    #[test]
+    fn admission_grant_reconciliation_preserves_rotated_resume_tickets() {
+        let mut db = StationInventoryDb::open_in_memory().unwrap();
+        let ship_id = ShipId::new(dawn_core::NodeId(2), 9);
+        let player_id = PlayerId(1);
+        let original_ticket = ResumeTicket::from_bytes([7; ResumeTicket::BYTE_LEN]);
+        let current_ticket = ResumeTicket::from_bytes([8; ResumeTicket::BYTE_LEN]);
+        let pending_ticket = ResumeTicket::from_bytes([9; ResumeTicket::BYTE_LEN]);
+
+        db.record_client_ownership(ship_id, player_id, current_ticket)
+            .unwrap();
+        assert!(db
+            .stage_client_resume_ticket(ship_id, player_id, current_ticket, pending_ticket,)
+            .unwrap());
+
+        db.ensure_client_admission_grant(
+            ship_id,
+            player_id,
+            original_ticket,
+            StationId(7),
+            ItemId::PackagedShip(ShipTypeId(7)),
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(
+            db.client_resume_tickets(ship_id).unwrap(),
+            Some((current_ticket, Some(pending_ticket)))
+        );
+        assert_eq!(
+            db.client_ownership_by_ticket(original_ticket).unwrap(),
+            None
+        );
     }
 
     #[test]

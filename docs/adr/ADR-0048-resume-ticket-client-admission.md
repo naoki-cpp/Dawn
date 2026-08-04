@@ -48,6 +48,11 @@ in-flight admission reservation; the committed and one staged ticket remain
 retryable, so a client can safely retry whether or not it received `Welcome`.
 Only one staged ticket is retained per owned Ship.
 
+This implementation provides the opaque binding, durable staging, and rotation
+semantics above. Ticket expiry and an explicit validity window remain a planned
+production hardening step; the implementation checklist below is intentionally
+left open until that policy and its tests exist.
+
 ### Wire contract
 
 - A fresh client sends `Hello { resume: None }`.

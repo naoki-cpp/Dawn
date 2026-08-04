@@ -24,8 +24,8 @@ pub enum ClientAdmissionIntent {
 pub enum ClientAdmissionRefusal {
     /// A fresh spawn would exceed the Sector population backstop.
     FreshAtPopulationCap,
-    /// The opaque resume capability is unknown, expired, already consumed, or
-    /// no longer points at a live Ship on this Sector.
+    /// The opaque resume capability is unknown, already consumed, or no longer
+    /// points at a live, non-Transit Ship on this Sector.
     ResumeTicketInvalid,
     /// Another handshake already holds the Ship/Player or prepared-fresh claim.
     ResumeAlreadyPending {
@@ -297,7 +297,7 @@ impl<S: EventStore> SimulationNode<S> {
                 };
                 // A Ship/Player reservation serializes concurrent resume
                 // handshakes until resolution.
-                if self.ship_absolute_pos(ship_id).is_none() {
+                if self.ship_absolute_pos(ship_id).is_none() || self.is_ship_in_transit(ship_id) {
                     return Err(ClientAdmissionRefusal::ResumeTicketInvalid);
                 }
                 if self.resume_admission_identity_conflicts(player_id, ship_id) {
@@ -582,6 +582,84 @@ mod tests {
             .iter()
             .any(|ship| ship.ship_id == ship_id.raw() && ship.is_active));
         assert!(node.apply_stop_command_owned(player_id, ship_id));
+    }
+
+    #[test]
+    fn resume_is_rejected_while_ship_is_in_transit() {
+        let mut node = node();
+        let player_id = PlayerId(12);
+        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let resume_ticket = seeded_resume_ticket(&mut node, player_id, ship_id);
+        node.prepare_transit_commit(ship_id, SectorId(1), None)
+            .expect("ship should enter transit");
+
+        let refusal = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume { resume_ticket },
+                AOI_CELL_SIZE,
+            )
+            .expect_err("admission must not bypass Transit ownership");
+
+        assert_eq!(refusal, ClientAdmissionRefusal::ResumeTicketInvalid);
+    }
+
+    #[test]
+    fn reopening_station_inventory_db_preserves_the_rotated_resume_ticket() {
+        let db_file = tempfile::NamedTempFile::new().unwrap();
+        let db_path = db_file.path().to_str().unwrap();
+        let mut node = node();
+        node.open_station_inventory_db(db_path).unwrap();
+
+        let fresh = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh admission should begin");
+        let original_ticket = fresh.resume_ticket();
+        let committed = fresh
+            .commit(&mut node)
+            .expect("fresh admission should commit");
+
+        let resume = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    resume_ticket: original_ticket,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("original ticket should resume once");
+        let rotated_ticket = resume.resume_ticket();
+        resume.commit(&mut node).expect("resume should commit");
+
+        node.open_station_inventory_db(db_path)
+            .expect("reopening the durable DB should reconcile grants");
+
+        let retry = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    resume_ticket: rotated_ticket,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("the rotated ticket must survive DB reconciliation");
+        retry.abort(&mut node);
+
+        let old_ticket_refusal = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    resume_ticket: original_ticket,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect_err("the consumed ticket must not be restored by reconciliation");
+        assert_eq!(
+            old_ticket_refusal,
+            ClientAdmissionRefusal::ResumeTicketInvalid
+        );
+        assert!(node.is_active_ship(committed.player_id, committed.ship_id));
     }
 
     #[test]
