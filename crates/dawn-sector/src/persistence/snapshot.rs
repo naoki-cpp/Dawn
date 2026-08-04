@@ -162,14 +162,14 @@ pub struct StateSnapshot {
     pub id_counter: u64,
     /// Next value for `SimulationNode::player_id_counter`.
     ///
-    /// Must be restored for the same reason as `id_counter`: ownership is not
-    /// carried in the snapshot (a returning client re-asserts it via
-    /// `adopt_player_ship`, ADR-0007 §2-A resume), so a counter that restarted
-    /// at zero would hand a freshly-admitted client a `PlayerId` that a
-    /// restored, still-owned ship already belongs to.
+    /// Must be restored so a freshly-admitted client cannot receive a
+    /// `PlayerId` already handed out before restart.
     pub player_id_counter: u64,
     /// State of every Ship in the Sector at the snapshot instant.
     pub ships: Vec<ShipSnapshot>,
+    /// Authoritative Ship -> Player ownership bindings, including Ships that
+    /// arrived through Transit after their original Sector log was compacted.
+    pub owners: BTreeMap<dawn_core::ShipId, dawn_core::PlayerId>,
     /// Destination-side receipts that survive checkpoint compaction.
     #[serde(default)]
     pub completed_incoming_transits: Vec<CompletedIncomingTransit>,
@@ -797,6 +797,7 @@ mod tests {
                     1,
                 )]),
             }],
+            owners: BTreeMap::new(),
             completed_incoming_transits: Vec::new(),
             docked_ships: BTreeMap::from([(ShipId::new(NodeId(0), 0), dawn_core::StationId(0))]),
             docked_players: BTreeMap::from([(dawn_core::PlayerId(9), dawn_core::StationId(0))]),

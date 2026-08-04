@@ -86,11 +86,11 @@ impl ServerMessageDecoder {
             "Welcome" => ServerMessage::Welcome {
                 player_id: 5,
                 ship_id: 11,
+                resume_ticket: dawn_wire::ResumeTicket::from_bytes([5; 32]),
             },
             "Redirect" => ServerMessage::Redirect {
                 ws_addr: "127.0.0.1:7880".to_owned(),
-                player_id: 5,
-                ship_id: 11,
+                resume_ticket: dawn_wire::ResumeTicket::from_bytes([5; 32]),
             },
             "AoiLeave" => ServerMessage::AoiLeave { ship_id: 19 },
             "InitialState" => ServerMessage::InitialState(InitialStateWire {
@@ -243,26 +243,36 @@ impl ServerMessageOutcome {
         connection_ship_id: i64,
     ) -> bool {
         match &self.outcome {
-            ClientOutcome::Welcome { player_id, ship_id } => {
+            ClientOutcome::Welcome {
+                player_id,
+                ship_id,
+                resume_ticket,
+            } => {
                 if !ensure_handler(&mut target, "_accept_welcome") {
                     return false;
                 }
                 target.call(
                     "_accept_welcome",
-                    vslice![godot_i64(*player_id), godot_i64(*ship_id)],
+                    vslice![
+                        godot_i64(*player_id),
+                        godot_i64(*ship_id),
+                        PackedByteArray::from(resume_ticket.as_bytes().as_slice()),
+                    ],
                 );
             }
             ClientOutcome::Redirect {
                 ws_addr,
-                player_id,
-                ship_id,
+                resume_ticket,
             } => {
                 if !ensure_handler(&mut target, "_accept_redirect") {
                     return false;
                 }
                 target.call(
                     "_accept_redirect",
-                    vslice![ws_addr.as_str(), godot_i64(*player_id), godot_i64(*ship_id)],
+                    vslice![
+                        ws_addr.as_str(),
+                        PackedByteArray::from(resume_ticket.as_bytes().as_slice()),
+                    ],
                 );
             }
             ClientOutcome::Event(event) => {

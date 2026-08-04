@@ -30,7 +30,7 @@ use crate::{ClientCommand, ClientConnection};
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_wire::{
     domain_event_to_event_wire, ClientMessage, InitialStateWire, MarketCommandWire,
-    PlayerLoadoutWire, ResumeIdentity, ServerMessage,
+    PlayerLoadoutWire, ResumeTicket, ServerMessage,
 };
 use futures_util::{
     stream::{SplitSink, SplitStream},
@@ -105,6 +105,7 @@ impl ClientConnection for WsClientConnection {
 pub struct PlayerSession {
     pub player_id: PlayerId,
     pub ship_id: ShipId,
+    pub resume_ticket: ResumeTicket,
     pub conn: WsClientConnection,
 }
 
@@ -115,7 +116,7 @@ type WsSource = SplitStream<WebSocketStream<TcpStream>>;
 
 pub struct HandshakeRequest {
     pub peer_addr: SocketAddr,
-    pub resume: Option<ResumeIdentity>,
+    pub resume: Option<ResumeTicket>,
     ws_sink: WsSink,
     ws_source: WsSource,
 }
@@ -134,6 +135,7 @@ impl HandshakeRequest {
         self,
         player_id: PlayerId,
         ship_id: ShipId,
+        resume_ticket: ResumeTicket,
         initial_state: InitialStateWire,
         player_loadout: Option<PlayerLoadoutWire>,
     ) -> anyhow::Result<PlayerSession> {
@@ -155,6 +157,7 @@ impl HandshakeRequest {
             .send(server_message_frame(&ServerMessage::Welcome {
                 player_id: player_id.raw(),
                 ship_id: ship_id.raw(),
+                resume_ticket,
             }))
             .await?;
         ws_sink
@@ -220,6 +223,7 @@ impl HandshakeRequest {
         Ok(PlayerSession {
             player_id,
             ship_id,
+            resume_ticket,
             conn,
         })
     }
@@ -287,12 +291,19 @@ impl WsServer {
         peer_addr: SocketAddr,
         player_id: PlayerId,
         ship_id: ShipId,
+        resume_ticket: ResumeTicket,
         initial_state: InitialStateWire,
         player_loadout: Option<PlayerLoadoutWire>,
     ) -> anyhow::Result<PlayerSession> {
         let request = Self::accept_handshake_request(stream, peer_addr).await?;
         request
-            .complete(player_id, ship_id, initial_state, player_loadout)
+            .complete(
+                player_id,
+                ship_id,
+                resume_ticket,
+                initial_state,
+                player_loadout,
+            )
             .await
     }
 

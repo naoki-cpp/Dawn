@@ -4,7 +4,7 @@ title   : マルチプレイヤー対応設計（Phase 5）
 status  : accepted
 date    : 2026-06-05
 deciders: [human, ai-agent]
-related : ADR-0005（ClientConnection）, ADR-0006（Fitting/Combat）
+related : ADR-0005（ClientConnection）, ADR-0006（Fitting/Combat）, ADR-0048（ResumeTicketによる再接続資格）
 ---
 
 # ADR-0007 — マルチプレイヤー対応設計（Phase 5）

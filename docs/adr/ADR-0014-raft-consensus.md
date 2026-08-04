@@ -79,6 +79,7 @@ Raft stateの永続化やプロセス生存を前提にしない。
 ```rust
 pub struct TransitHandoffState {
     pub ship_id: ShipId,
+    pub owner_player_id: Option<PlayerId>,
     pub ship_type_id: ShipTypeId,
     pub velocity: Velocity,
     pub current_shield: f32,
@@ -101,6 +102,10 @@ pub struct SectorTransitCompleted {
 ```
 
 同じ`TransitHandoffState`をRaft Commitと`SectorTransitCompleted`が共有する。
+`owner_player_id`もhandoff/eventの一部としてdestinationへ移送し、destinationの
+durable owner bindingとlive ownership mapを同じCommitから復元する。NPCや未所有Shipは
+`None`とする。checkpoint後にCompletedがcold archiveへ移動しても、snapshotのShip→Player
+bindingがresumeのcompare-and-setを維持する。
 `SectorTransitRequested`、retry reconstruction、Raft Commit、`SectorTransitCompleted`は
 到着事実を一つの`entry_pos: AbsolutePosition`として伝播する。destinationはこの絶対座標から
 anchorとlocal offsetをmaterialization時に導出し、live Commitとreplayは同じ実装を通る。

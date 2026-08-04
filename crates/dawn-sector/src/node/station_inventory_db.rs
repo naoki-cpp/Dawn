@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use dawn_core::{ItemId, PlayerId, StationId};
+use dawn_core::{ItemId, PlayerId, Position, ResumeTicket, ShipId, StationId};
 #[cfg(test)]
 use dawn_core::{ModuleId, ShipTypeId};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -26,6 +26,28 @@ fn item_id_to_columns(item_id: ItemId) -> (&'static str, u32, u32) {
 
 fn columns_to_item_id(item_type: &str, module_id: u32, ship_type_id: u32) -> Option<ItemId> {
     ItemId::from_storage_columns(item_type, module_id, ship_type_id).ok()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct PreparedClientAdmission {
+    pub ship_id: ShipId,
+    pub player_id: PlayerId,
+    pub spawn_position: Position,
+    pub resume_ticket: ResumeTicket,
+}
+
+fn ticket_from_blob(bytes: Vec<u8>) -> rusqlite::Result<ResumeTicket> {
+    let bytes: [u8; ResumeTicket::BYTE_LEN] = bytes.try_into().map_err(|_| {
+        rusqlite::Error::FromSqlConversionFailure(
+            0,
+            rusqlite::types::Type::Blob,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "resume ticket must contain exactly 32 bytes",
+            )),
+        )
+    })?;
+    Ok(ResumeTicket::from_bytes(bytes))
 }
 
 /// Durable Station inventory store for one Sector node. Wraps a single
@@ -63,7 +85,276 @@ impl StationInventoryDb {
             )",
             [],
         )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS client_admission_grants (
+                ship_id       TEXT PRIMARY KEY,
+                player_id     INTEGER NOT NULL,
+                station_id    INTEGER NOT NULL,
+                item_type     TEXT    NOT NULL,
+                module_id     INTEGER NOT NULL DEFAULT 0,
+                ship_type_id  INTEGER NOT NULL DEFAULT 0,
+                count         INTEGER NOT NULL
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS client_admission_prepared (
+                ship_id       TEXT PRIMARY KEY,
+                player_id     INTEGER NOT NULL UNIQUE,
+                spawn_x       REAL NOT NULL,
+                spawn_y       REAL NOT NULL,
+                spawn_z       REAL NOT NULL,
+                resume_ticket BLOB NOT NULL UNIQUE
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS client_ship_ownership (
+                ship_id       TEXT PRIMARY KEY,
+                player_id     INTEGER NOT NULL,
+                resume_ticket BLOB NOT NULL UNIQUE,
+                pending_resume_ticket BLOB UNIQUE
+            )",
+            [],
+        )?;
+        let has_pending_resume_ticket: bool = conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM pragma_table_info('client_ship_ownership')
+                WHERE name = 'pending_resume_ticket'
+            )",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_pending_resume_ticket {
+            conn.execute(
+                "ALTER TABLE client_ship_ownership
+                 ADD COLUMN pending_resume_ticket BLOB",
+                [],
+            )?;
+        }
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS
+             idx_client_ship_ownership_pending_resume_ticket
+             ON client_ship_ownership(pending_resume_ticket)",
+            [],
+        )?;
         Ok(Self { conn })
+    }
+
+    /// Persist the spawn input for a fresh identity before any handshake frame
+    /// can expose the pair to the client. The event log remains the allocation
+    /// watermark; this row makes the exact attempt retryable after restart.
+    pub(super) fn reserve_client_admission(
+        &self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        spawn_position: Position,
+        resume_ticket: ResumeTicket,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO client_admission_prepared
+             (ship_id, player_id, spawn_x, spawn_y, spawn_z, resume_ticket)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                ship_id.raw().to_string(),
+                player_id.0 as i64,
+                spawn_position.x,
+                spawn_position.y,
+                spawn_position.z,
+                resume_ticket.as_bytes().as_slice(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(super) fn prepared_client_admission(
+        &self,
+        ship_id: ShipId,
+    ) -> rusqlite::Result<Option<PreparedClientAdmission>> {
+        self.conn
+            .query_row(
+                "SELECT player_id, spawn_x, spawn_y, spawn_z, resume_ticket
+                 FROM client_admission_prepared WHERE ship_id = ?1",
+                params![ship_id.raw().to_string()],
+                |row| {
+                    Ok(PreparedClientAdmission {
+                        ship_id,
+                        player_id: PlayerId(row.get::<_, i64>(0)? as u64),
+                        spawn_position: Position::new(row.get(1)?, row.get(2)?, row.get(3)?),
+                        resume_ticket: ticket_from_blob(row.get(4)?)?,
+                    })
+                },
+            )
+            .optional()
+    }
+
+    pub(super) fn prepared_client_admission_by_ticket(
+        &self,
+        resume_ticket: ResumeTicket,
+    ) -> rusqlite::Result<Option<PreparedClientAdmission>> {
+        self.conn
+            .query_row(
+                "SELECT ship_id, player_id, spawn_x, spawn_y, spawn_z
+                 FROM client_admission_prepared WHERE resume_ticket = ?1",
+                params![resume_ticket.as_bytes().as_slice()],
+                |row| {
+                    let ship_raw: String = row.get(0)?;
+                    let ship_id = ship_raw
+                        .parse::<u64>()
+                        .map(|raw| ShipId(dawn_core::EntityId::from_raw(raw)))
+                        .map_err(|_| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                Box::new(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "invalid prepared ShipId",
+                                )),
+                            )
+                        })?;
+                    Ok(PreparedClientAdmission {
+                        ship_id,
+                        player_id: PlayerId(row.get::<_, i64>(1)? as u64),
+                        spawn_position: Position::new(row.get(2)?, row.get(3)?, row.get(4)?),
+                        resume_ticket,
+                    })
+                },
+            )
+            .optional()
+    }
+
+    pub(super) fn client_owner(&self, ship_id: ShipId) -> rusqlite::Result<Option<PlayerId>> {
+        self.conn
+            .query_row(
+                "SELECT player_id FROM client_ship_ownership WHERE ship_id = ?1",
+                params![ship_id.raw().to_string()],
+                |row| Ok(PlayerId(row.get::<_, i64>(0)? as u64)),
+            )
+            .optional()
+    }
+
+    pub(super) fn client_ownership_by_ticket(
+        &self,
+        resume_ticket: ResumeTicket,
+    ) -> rusqlite::Result<Option<(PlayerId, ShipId)>> {
+        self.conn
+            .query_row(
+                "SELECT player_id, ship_id FROM client_ship_ownership
+                 WHERE resume_ticket = ?1 OR pending_resume_ticket = ?1",
+                params![resume_ticket.as_bytes().as_slice()],
+                |row| {
+                    let ship_raw: String = row.get(1)?;
+                    let ship_id = ship_raw
+                        .parse::<u64>()
+                        .map(|raw| ShipId(dawn_core::EntityId::from_raw(raw)))
+                        .map_err(|_| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                1,
+                                rusqlite::types::Type::Text,
+                                Box::new(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    "invalid owned ShipId",
+                                )),
+                            )
+                        })?;
+                    Ok((PlayerId(row.get::<_, i64>(0)? as u64), ship_id))
+                },
+            )
+            .optional()
+    }
+
+    pub(super) fn client_resume_tickets(
+        &self,
+        ship_id: ShipId,
+    ) -> rusqlite::Result<Option<(ResumeTicket, Option<ResumeTicket>)>> {
+        self.conn
+            .query_row(
+                "SELECT resume_ticket, pending_resume_ticket
+                 FROM client_ship_ownership WHERE ship_id = ?1",
+                params![ship_id.raw().to_string()],
+                |row| {
+                    let current = ticket_from_blob(row.get(0)?)?;
+                    let pending = row
+                        .get::<_, Option<Vec<u8>>>(1)?
+                        .map(ticket_from_blob)
+                        .transpose()?;
+                    Ok((current, pending))
+                },
+            )
+            .optional()
+    }
+
+    pub(super) fn record_client_ownership(
+        &self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        resume_ticket: ResumeTicket,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO client_ship_ownership (ship_id, player_id, resume_ticket)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT (ship_id) DO UPDATE SET
+               player_id = excluded.player_id,
+               resume_ticket = excluded.resume_ticket,
+               pending_resume_ticket = NULL",
+            params![
+                ship_id.raw().to_string(),
+                player_id.0 as i64,
+                resume_ticket.as_bytes().as_slice()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(super) fn record_client_ownership_with_pending(
+        &self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        resume_ticket: ResumeTicket,
+        pending_resume_ticket: Option<ResumeTicket>,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO client_ship_ownership
+             (ship_id, player_id, resume_ticket, pending_resume_ticket)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (ship_id) DO UPDATE SET
+               player_id = excluded.player_id,
+               resume_ticket = excluded.resume_ticket,
+               pending_resume_ticket = excluded.pending_resume_ticket",
+            params![
+                ship_id.raw().to_string(),
+                player_id.0 as i64,
+                resume_ticket.as_bytes().as_slice(),
+                pending_resume_ticket.map(|ticket| ticket.as_bytes().to_vec()),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Persist the next resume ticket before it can be exposed in Welcome.
+    /// The committed ticket remains valid until `record_client_ownership`
+    /// promotes this staged value, so a failed handshake can retry either the
+    /// previous or the advertised ticket.
+    pub(super) fn stage_client_resume_ticket(
+        &self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        presented_ticket: ResumeTicket,
+        next_ticket: ResumeTicket,
+    ) -> rusqlite::Result<bool> {
+        let changed = self.conn.execute(
+            "UPDATE client_ship_ownership
+             SET pending_resume_ticket = ?3
+             WHERE ship_id = ?1 AND player_id = ?2
+               AND (resume_ticket = ?4 OR pending_resume_ticket = ?4)",
+            params![
+                ship_id.raw().to_string(),
+                player_id.0 as i64,
+                next_ticket.as_bytes().as_slice(),
+                presented_ticket.as_bytes().as_slice(),
+            ],
+        )?;
+        Ok(changed == 1)
     }
 
     /// Every item stack this player currently owns at `station_id`.
@@ -127,6 +418,73 @@ impl StationInventoryDb {
                 ],
             )
             .expect("station_inventory upsert");
+    }
+
+    /// Apply a starter grant exactly once, keyed by the committed ShipId.
+    /// The ledger marker, inventory upsert, ownership binding, and prepared-row
+    /// cleanup share one SQLite transaction.
+    pub(super) fn ensure_client_admission_grant(
+        &mut self,
+        ship_id: ShipId,
+        player_id: PlayerId,
+        resume_ticket: ResumeTicket,
+        station_id: StationId,
+        item_id: ItemId,
+        count: u64,
+    ) -> rusqlite::Result<bool> {
+        let (item_type, module_id, ship_type_id) = item_id_to_columns(item_id);
+        let tx = self.conn.transaction()?;
+        let inserted = tx.execute(
+            "INSERT OR IGNORE INTO client_admission_grants
+             (ship_id, player_id, station_id, item_type, module_id, ship_type_id, count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                ship_id.raw().to_string(),
+                player_id.0 as i64,
+                station_id.0 as i64,
+                item_type,
+                module_id,
+                ship_type_id,
+                count as i64,
+            ],
+        )?;
+        if inserted == 1 {
+            tx.execute(
+                "INSERT INTO station_inventory
+                 (player_id, station_id, item_type, module_id, ship_type_id, count)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT (player_id, station_id, item_type, module_id, ship_type_id)
+                 DO UPDATE SET count = count + excluded.count",
+                params![
+                    player_id.0 as i64,
+                    station_id.0 as i64,
+                    item_type,
+                    module_id,
+                    ship_type_id,
+                    count as i64,
+                ],
+            )?;
+        }
+        // The event carries the ticket issued at the original fresh commit,
+        // but a later resume may already have rotated the durable binding.
+        // Reconciliation must restore a missing ownership row without
+        // overwriting the current or staged reconnect ticket.
+        tx.execute(
+            "INSERT INTO client_ship_ownership (ship_id, player_id, resume_ticket)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT (ship_id) DO NOTHING",
+            params![
+                ship_id.raw().to_string(),
+                player_id.0 as i64,
+                resume_ticket.as_bytes().as_slice()
+            ],
+        )?;
+        tx.execute(
+            "DELETE FROM client_admission_prepared WHERE ship_id = ?1",
+            params![ship_id.raw().to_string()],
+        )?;
+        tx.commit()?;
+        Ok(inserted == 1)
     }
 
     /// Subtract `count` from `player_id`'s stack at `station_id`, rejecting rather than going
@@ -237,6 +595,133 @@ mod tests {
             db.get_all(PlayerId(1), StationId(7))
                 .get(&ItemId::ScrapMetal),
             Some(&5)
+        );
+    }
+
+    #[test]
+    fn prepared_admission_and_ownership_round_trip() {
+        let mut db = StationInventoryDb::open_in_memory().unwrap();
+        let ship_id = ShipId::new(dawn_core::NodeId(2), 7);
+        let player_id = PlayerId(1);
+        let spawn = Position::new(10.0, 20.0, 30.0);
+        let resume_ticket = ResumeTicket::from_bytes([7; ResumeTicket::BYTE_LEN]);
+        db.reserve_client_admission(ship_id, player_id, spawn, resume_ticket)
+            .unwrap();
+        assert_eq!(
+            db.prepared_client_admission(ship_id).unwrap(),
+            Some(PreparedClientAdmission {
+                ship_id,
+                player_id,
+                spawn_position: spawn,
+                resume_ticket,
+            })
+        );
+
+        let item = ItemId::PackagedShip(ShipTypeId(7));
+        db.ensure_client_admission_grant(ship_id, player_id, resume_ticket, StationId(7), item, 1)
+            .unwrap();
+        assert_eq!(db.prepared_client_admission(ship_id).unwrap(), None);
+        assert_eq!(db.client_owner(ship_id).unwrap(), Some(player_id));
+    }
+
+    #[test]
+    fn existing_ownership_schema_can_stage_and_promote_a_resume_ticket() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE client_ship_ownership (
+                ship_id TEXT PRIMARY KEY,
+                player_id INTEGER NOT NULL,
+                resume_ticket BLOB NOT NULL UNIQUE
+            )",
+            [],
+        )
+        .unwrap();
+        let db = StationInventoryDb::init(conn).unwrap();
+        let ship_id = ShipId::new(dawn_core::NodeId(2), 8);
+        let player_id = PlayerId(1);
+        let current_ticket = ResumeTicket::from_bytes([8; ResumeTicket::BYTE_LEN]);
+        let next_ticket = ResumeTicket::from_bytes([9; ResumeTicket::BYTE_LEN]);
+
+        db.record_client_ownership(ship_id, player_id, current_ticket)
+            .unwrap();
+        assert!(db
+            .stage_client_resume_ticket(ship_id, player_id, current_ticket, next_ticket)
+            .unwrap());
+        assert_eq!(
+            db.client_ownership_by_ticket(next_ticket).unwrap(),
+            Some((player_id, ship_id))
+        );
+
+        db.record_client_ownership(ship_id, player_id, next_ticket)
+            .unwrap();
+        assert_eq!(db.client_ownership_by_ticket(current_ticket).unwrap(), None);
+        assert_eq!(
+            db.client_ownership_by_ticket(next_ticket).unwrap(),
+            Some((player_id, ship_id))
+        );
+    }
+
+    #[test]
+    fn client_admission_grant_is_idempotent() {
+        let mut db = StationInventoryDb::open_in_memory().unwrap();
+        let ship_id = ShipId::new(dawn_core::NodeId(2), 7);
+        let item = ItemId::PackagedShip(ShipTypeId(7));
+        let resume_ticket = ResumeTicket::from_bytes([7; ResumeTicket::BYTE_LEN]);
+        assert!(db
+            .ensure_client_admission_grant(
+                ship_id,
+                PlayerId(1),
+                resume_ticket,
+                StationId(7),
+                item,
+                1,
+            )
+            .unwrap());
+        assert!(!db
+            .ensure_client_admission_grant(
+                ship_id,
+                PlayerId(1),
+                resume_ticket,
+                StationId(7),
+                item,
+                1,
+            )
+            .unwrap());
+        assert_eq!(db.get_all(PlayerId(1), StationId(7)).get(&item), Some(&1));
+    }
+
+    #[test]
+    fn admission_grant_reconciliation_preserves_rotated_resume_tickets() {
+        let mut db = StationInventoryDb::open_in_memory().unwrap();
+        let ship_id = ShipId::new(dawn_core::NodeId(2), 9);
+        let player_id = PlayerId(1);
+        let original_ticket = ResumeTicket::from_bytes([7; ResumeTicket::BYTE_LEN]);
+        let current_ticket = ResumeTicket::from_bytes([8; ResumeTicket::BYTE_LEN]);
+        let pending_ticket = ResumeTicket::from_bytes([9; ResumeTicket::BYTE_LEN]);
+
+        db.record_client_ownership(ship_id, player_id, current_ticket)
+            .unwrap();
+        assert!(db
+            .stage_client_resume_ticket(ship_id, player_id, current_ticket, pending_ticket,)
+            .unwrap());
+
+        db.ensure_client_admission_grant(
+            ship_id,
+            player_id,
+            original_ticket,
+            StationId(7),
+            ItemId::PackagedShip(ShipTypeId(7)),
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(
+            db.client_resume_tickets(ship_id).unwrap(),
+            Some((current_ticket, Some(pending_ticket)))
+        );
+        assert_eq!(
+            db.client_ownership_by_ticket(original_ticket).unwrap(),
+            None
         );
     }
 

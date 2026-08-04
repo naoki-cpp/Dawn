@@ -1,4 +1,5 @@
 //! Single-node WebSocket server (`--serve`, no Raft cluster).
+#![allow(clippy::module_name_repetitions)]
 
 use super::{
     build_serve_node, market::MarketRuntime, AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS,
@@ -6,10 +7,19 @@ use super::{
 };
 use crate::ws_server;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
+use dawn_event_store::store::EventStore;
+use dawn_sector::client_admission::{
+    ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
+};
 use dawn_sector::dilation;
-use dawn_sector::node::ClientCommandFollowup;
+use dawn_sector::node::{ClientCommandFollowup, SimulationNode};
 use dawn_wire::ServerMessage;
 use tokio::sync::mpsc;
+
+type HandshakeCompletion = (
+    ClientAdmissionAttempt,
+    Result<ws_server::PlayerSession, String>,
+);
 
 pub(crate) async fn run_phase4_server(
     ship_count: usize,
@@ -71,16 +81,24 @@ pub(crate) async fn run_phase4_server(
 
     println!("  [Server] {ship_count} NPC ships ready. Waiting for players...");
 
-    let (new_conn_tx, mut new_conn_rx) =
-        mpsc::unbounded_channel::<(tokio::net::TcpStream, std::net::SocketAddr)>();
-    let (ready_sess_tx, mut ready_sess_rx) = mpsc::unbounded_channel::<ws_server::PlayerSession>();
+    let (handshake_req_tx, mut handshake_req_rx) =
+        mpsc::unbounded_channel::<ws_server::HandshakeRequest>();
+    let (completion_tx, mut completion_rx) = mpsc::unbounded_channel::<HandshakeCompletion>();
 
     let server_arc = std::sync::Arc::new(server);
     let server_clone = server_arc.clone();
     tokio::spawn(async move {
         loop {
             if let Some((stream, addr)) = server_clone.try_accept_raw().await {
-                let _ = new_conn_tx.send((stream, addr));
+                let tx = handshake_req_tx.clone();
+                tokio::spawn(async move {
+                    match ws_server::WsServer::accept_handshake_request(stream, addr).await {
+                        Ok(request) => {
+                            let _ = tx.send(request);
+                        }
+                        Err(error) => eprintln!("[Server] handshake request failed: {error}"),
+                    }
+                });
             }
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
@@ -97,66 +115,70 @@ pub(crate) async fn run_phase4_server(
     loop {
         interval.tick().await;
 
-        while let Ok((stream, addr)) = new_conn_rx.try_recv() {
-            if node.at_population_cap() {
-                eprintln!(
-                    "[Server] connection from {addr} refused: Sector at population cap ({} ships)",
-                    node.ship_count()
-                );
-                drop(stream);
-                continue;
-            }
-            let player_id = node.next_player_id();
-            let ship_id = if duel_mode {
-                node.spawn_player_ship_at_pub(player_id, duel_player_spawn)
-            } else {
-                node.spawn_player_ship(player_id)
-            };
-            let payload = match node.build_handoff_payload(ship_id, AOI_CELL_SIZE) {
-                Ok(payload) => payload,
-                Err(error) => {
-                    eprintln!("[Server] fresh handshake from {addr} refused: {error}");
-                    node.despawn_incomplete_handshake_spawn(ship_id);
-                    drop(stream);
-                    continue;
-                }
-            };
-            let tx = ready_sess_tx.clone();
-
-            if duel_mode && player_ship_id.is_none() {
-                player_ship_id = Some(ship_id);
-                let tick = node.current_tick().value();
-                duel_metrics = Some(DuelMetrics::new(tick));
-                println!("  [Duel] metrics collection started at tick {tick}");
-            }
-
-            tokio::spawn(async move {
-                match ws_server::WsServer::handshake(
-                    stream,
-                    addr,
-                    player_id,
-                    ship_id,
-                    payload.initial_state,
-                    payload.player_loadout,
-                )
-                .await
-                {
-                    Ok(sess) => {
-                        let _ = tx.send(sess);
-                    }
-                    Err(e) => eprintln!("[Server] handshake failed: {e}"),
-                }
-            });
-        }
-
-        while let Ok(sess) = ready_sess_rx.try_recv() {
+        // Resolve socket outcomes on the tick-loop thread. A session is not
+        // visible to AoI delivery or command routing until its Sector attempt
+        // commits successfully.
+        for (sess, _committed) in drain_single_admission_completions(&mut node, &mut completion_rx)
+        {
             println!(
                 "  [Server] {} joined with ship #{}",
                 sess.player_id,
                 sess.ship_id.raw()
             );
+            sessions.retain(|existing| {
+                existing.player_id != sess.player_id && existing.ship_id != sess.ship_id
+            });
             aoi_delivery.seed_single_player(&node, sess.player_id, sess.ship_id);
+
+            if duel_mode && player_ship_id.is_none() {
+                player_ship_id = Some(sess.ship_id);
+                let tick = node.current_tick().value();
+                duel_metrics = Some(DuelMetrics::new(tick));
+                println!("  [Duel] metrics collection started at tick {tick}");
+            }
+
             sessions.push(sess);
+        }
+
+        while let Ok(request) = handshake_req_rx.try_recv() {
+            let spawn_position = if duel_mode {
+                duel_player_spawn
+            } else {
+                Position::new(30_000.0, 0.0, 0.0)
+            };
+            let intent = match request.resume {
+                Some(resume) => ClientAdmissionIntent::Resume {
+                    resume_ticket: resume,
+                },
+                None => ClientAdmissionIntent::Fresh { spawn_position },
+            };
+
+            let mut attempt = match node.begin_client_admission(intent, AOI_CELL_SIZE) {
+                Ok(attempt) => attempt,
+                Err(refusal) => {
+                    log_single_refusal(request.peer_addr, refusal);
+                    continue;
+                }
+            };
+            let player_id = attempt.player_id();
+            let ship_id = attempt.ship_id();
+            let resume_ticket = attempt.resume_ticket();
+            let payload = attempt.take_handoff_payload();
+            let tx = completion_tx.clone();
+
+            tokio::spawn(async move {
+                let result = request
+                    .complete(
+                        player_id,
+                        ship_id,
+                        resume_ticket,
+                        payload.initial_state,
+                        payload.player_loadout,
+                    )
+                    .await
+                    .map_err(|error| error.to_string());
+                let _ = tx.send((attempt, result));
+            });
         }
 
         let events_before: u64 = node.total_event_count() as u64;
@@ -249,5 +271,177 @@ pub(crate) async fn run_phase4_server(
             println!("[TiDi] dilation recovered to real-time after {prior_active} ticks (cost {} <= budget {TIDI_BUDGET:.0})",
                 node.ship_count());
         }
+    }
+}
+
+fn log_single_refusal(addr: std::net::SocketAddr, refusal: ClientAdmissionRefusal) {
+    match refusal {
+        ClientAdmissionRefusal::FreshAtPopulationCap => {
+            eprintln!("[Server] connection from {addr} refused: Sector at population cap");
+        }
+        ClientAdmissionRefusal::ResumeTicketInvalid => {
+            eprintln!("[Server] resume from {addr} refused: invalid resume ticket");
+        }
+        ClientAdmissionRefusal::ResumeAlreadyPending { ship_id, .. } => {
+            eprintln!(
+                "[Server] resume from {addr} refused: ship #{} already has an in-flight resume",
+                ship_id.raw()
+            );
+        }
+        ClientAdmissionRefusal::ResumeIdentityConflict { ship_id, .. } => {
+            eprintln!(
+                "[Server] resume from {addr} refused: ship #{} conflicts with established ownership",
+                ship_id.raw()
+            );
+        }
+        ClientAdmissionRefusal::MissingObserver(error) => {
+            eprintln!("[Server] handshake from {addr} refused: {error}");
+        }
+    }
+}
+
+fn drain_single_admission_completions<S: EventStore>(
+    node: &mut SimulationNode<S>,
+    completion_rx: &mut mpsc::UnboundedReceiver<HandshakeCompletion>,
+) -> Vec<(ws_server::PlayerSession, CommittedClientAdmission)> {
+    let mut ready = Vec::new();
+    while let Ok((attempt, result)) = completion_rx.try_recv() {
+        if let Some(completed) = finish_single_admission(node, attempt, result) {
+            ready.push(completed);
+        }
+    }
+    ready
+}
+
+fn finish_single_admission<S: EventStore, T>(
+    node: &mut SimulationNode<S>,
+    attempt: ClientAdmissionAttempt,
+    result: Result<T, String>,
+) -> Option<(T, CommittedClientAdmission)> {
+    match result {
+        Ok(value) => match attempt.commit(node) {
+            Ok(committed) => Some((value, committed)),
+            Err(error) => {
+                eprintln!("[Server] {error}");
+                None
+            }
+        },
+        Err(error) => {
+            attempt.abort(node);
+            eprintln!("[Server] handshake failed: {error}");
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node() -> SimulationNode {
+        SimulationNode::new(
+            NodeId(0),
+            SectorId(0),
+            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+            std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+        )
+    }
+
+    #[test]
+    fn single_adapter_commits_successful_attempt() {
+        let mut node = node();
+        let attempt = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh attempt");
+
+        assert_eq!(
+            finish_single_admission(&mut node, attempt, Ok::<_, String>(()))
+                .map(|(value, _)| value),
+            Some(())
+        );
+        assert_eq!(node.ship_count(), 1);
+    }
+
+    #[test]
+    fn single_adapter_disconnect_aborts_fresh_attempt() {
+        let mut node = node();
+        let attempt = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh attempt");
+
+        assert_eq!(
+            finish_single_admission::<_, ()>(
+                &mut node,
+                attempt,
+                Err("client disconnected".to_string()),
+            ),
+            None
+        );
+        assert_eq!(node.ship_count(), 0);
+    }
+
+    #[test]
+    fn single_adapter_drains_async_disconnect_completion() {
+        let mut node = node();
+        let attempt = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh attempt");
+        let (completion_tx, mut completion_rx) = mpsc::unbounded_channel::<HandshakeCompletion>();
+        completion_tx
+            .send((attempt, Err("client disconnected".to_string())))
+            .expect("completion receiver alive");
+
+        let ready = drain_single_admission_completions(&mut node, &mut completion_rx);
+
+        assert!(ready.is_empty());
+        assert_eq!(node.ship_count(), 0);
+    }
+
+    #[test]
+    fn single_adapter_disconnect_does_not_remove_resumed_ship() {
+        let mut node = node();
+        let fresh = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Fresh {
+                    spawn_position: Position::ORIGIN,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("fresh attempt");
+        let resume_ticket = fresh.resume_ticket();
+        let committed = fresh.commit(&mut node).expect("fresh commit");
+        let ship_id = committed.ship_id;
+        let attempt = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume { resume_ticket },
+                AOI_CELL_SIZE,
+            )
+            .expect("resume attempt");
+
+        assert_eq!(
+            finish_single_admission::<_, ()>(
+                &mut node,
+                attempt,
+                Err("client disconnected".to_string()),
+            ),
+            None
+        );
+        assert_eq!(node.ship_count(), 1);
+        assert!(node.ship_absolute_pos(ship_id).is_some());
     }
 }

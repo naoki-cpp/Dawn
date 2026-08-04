@@ -33,6 +33,9 @@ fn decode_proposed_transit(
 fn sample_handoff() -> TransitHandoffState {
     TransitHandoffState {
         ship_id: ShipId::new(NodeId(0), 7),
+        owner_player_id: None,
+        resume_ticket: None,
+        pending_resume_ticket: None,
         ship_type_id: ShipTypeId(1),
         velocity: Velocity::new(4.0, 5.0, 6.0),
         current_shield: 10.0,

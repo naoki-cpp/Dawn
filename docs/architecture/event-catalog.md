@@ -87,6 +87,8 @@ See [ADR-0017](../adr/ADR-0017-snapshot-compaction.md) / [AI_DEVELOPMENT_GUIDE.m
 | Event | Description | Emitter | Status |
 |---|---|---|---|
 | `ShipSpawned` | Ship appeared in the world | `SimulationNode::spawn_ship()` | ✅ implemented |
+| `ClientAdmissionIdentityReserved` | Fresh admission durably consumed a `PlayerId`/`ShipId` pair without materializing a Ship; Replay advances allocation watermarks only | `SimulationNode::reserve_fresh_admission_identity()` | ✅ implemented |
+| `ClientAdmissionCommitted` | Atomic fresh-admission starter state: Ship, fitting/cargo snapshot, ownership identity, and idempotent Station grant description; Replay restores all of them from one event | `SimulationNode::commit_reserved_fresh_admission()` | ✅ implemented |
 | `ShipDespawned` | Ship manually removed from the world | `SimulationNode` | type only (no emission site; Replay supported) |
 | `ShipDestroyed` | Ship destroyed in combat | `CombatSystem` | ✅ implemented |
 
@@ -459,7 +461,7 @@ The destination appends this event when Commit materialization succeeds, then pr
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `handoff` | `TransitHandoffState` | ✓ | Ship identity, type, velocity, HP, capacitor, fitting, and inventory |
+| `handoff` | `TransitHandoffState` | ✓ | Ship identity, durable owner identity when player-owned, type, velocity, HP, capacitor, fitting, and inventory |
 | `from` | `SectorId` | ✓ | previous active Sector |
 | `to` | `SectorId` | ✓ | new active Sector |
 | `request_tick` | `Tick` | ✓ | source-local attempt identity |
@@ -467,6 +469,10 @@ The destination appends this event when Commit materialization succeeds, then pr
 | `tick` | `Tick` | ✓ | local completion Tick |
 
 **Replay:** on `from`, remove `handoff.ship_id`. On `to`, feed `handoff` through the same direct destination-ECS mapping used by live Commit import, then redo anchor rebase from `entry_pos`. No fake `ShipSnapshot`, placeholder source anchor, or source position is reconstructed. The live `AnchorRebased` event precedes Completed and may replay before the destination Ship exists.
+For a player-owned Ship, destination replay also restores the `ShipId` to
+`PlayerId` binding before client resume admission. The binding is captured in
+the destination snapshot so checkpoint compaction cannot turn an established
+owner into an unowned Ship.
 
 ---
 
