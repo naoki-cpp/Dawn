@@ -104,6 +104,7 @@ impl std::error::Error for ClientStateError {}
 /// The session and loadout are borrowed together so adapters cannot reorder
 /// cross-state rules such as loadout replacement, tick simulation, docking,
 /// and module activation.
+#[derive(Debug)]
 pub struct ClientState<'a> {
     session: &'a mut WorldSessionState,
     loadout: &'a mut Option<PlayerLoadoutMsg>,
