@@ -134,6 +134,7 @@ impl<S: EventStore> SimulationNode<S> {
         Ok((request_tick, event))
     }
 
+    #[cfg(test)]
     fn propose_transit_with_route(
         &mut self,
         cmd: TransitCommand,

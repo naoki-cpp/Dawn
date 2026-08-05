@@ -103,19 +103,19 @@ impl TransitJournal {
                     self.completed_incoming.push(identity);
                 }
             }
-            DomainEvent::SectorTransitAborted(event) if event.from == self.sector_id => {
+            DomainEvent::SectorTransitAborted(event)
+                if event.from == self.sector_id
+                    && self
+                        .pending_outgoing
+                        .get(&event.ship_id)
+                        .is_some_and(|pending| {
+                            pending.identity.from == event.from && pending.identity.to == event.to
+                        }) =>
+            {
                 // SectorTransitAborted predates request_tick in its payload, so
                 // route identity is the strongest safe match available. Never
                 // let an old A -> B abort clear a newer A -> C request.
-                if self
-                    .pending_outgoing
-                    .get(&event.ship_id)
-                    .is_some_and(|pending| {
-                        pending.identity.from == event.from && pending.identity.to == event.to
-                    })
-                {
-                    self.pending_outgoing.remove(&event.ship_id);
-                }
+                self.pending_outgoing.remove(&event.ship_id);
             }
             _ => {}
         }
