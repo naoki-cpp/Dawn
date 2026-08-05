@@ -3,7 +3,7 @@ id      : ADR-0014
 title   : 分散コンセンサス — Raft による Sector Transit
 status  : accepted
 date    : 2026-06-12
-updated : 2026-08-02
+updated : 2026-08-05
 deciders: [human, ai-agent]
 related : ADR-0001, ADR-0002, ADR-0003, ADR-0009, ADR-0017, INV-002, INV-003, INV-006
 ---
@@ -60,6 +60,12 @@ source削除はdestinationのdurable completionより後に行う。これによ
 Shipがどちらにも存在しないwindowを作らない。Commit後Ack前は両ECSにcopyが存在するが、
 source copyは凍結された復旧用でありsimulationへ参加しない。active ownerはdestinationだけである。
 
+Request適用時は、Shipを一時的に`InTransit`へ変更してからcanonicalな
+`TransitHandoffState`を構築し、snapshot構築に成功した場合だけ
+`SectorTransitRequested`をappendする。snapshot構築に失敗した場合は`TransitState::None`へ
+戻し、durable outboxを残さない。したがって、再生成不能なCommitによってShipとcheckpointが
+永久に停止する状態を作らない。
+
 ### 3. Durable retry
 
 source側の未解決`SectorTransitRequested`をdurable outboxとして扱う。
@@ -69,6 +75,14 @@ source側の未解決`SectorTransitRequested`をdurable outboxとして扱う。
 - duplicate Commitはdestinationでmaterializeし直さずAckだけ再発行する
 - duplicate Ackはsourceでno-opになる
 - outgoing Requestが未解決の間はcheckpoint compactionを延期し、retry recordをhot logに残す
+
+`SectorTransitCompleted`は`ship_id + from + to + request_tick`の完全なattempt identityで
+pending requestを閉じる。現在の`SectorTransitAborted` payloadには`request_tick`がないため、
+Abortは`ship_id + from + to`が現在のpending routeと一致する場合だけ適用する。これにより古い
+A→B Abortが新しいA→C requestを消すことはない。同じShip・同じrouteの新旧attemptはAbort
+だけでは区別できないため、Abort emitterは同一路線の新しいRequestで置換した後に古いAbortを
+appendしてはならない。完全な区別が必要になった時点でevent schemaへ`request_tick`を追加する。
+現時点ではAbort emitter自体は未配線である。
 
 Raft stateの永続化やプロセス生存を前提にしない。
 
@@ -121,7 +135,7 @@ Sector-localなのでhandoffへ含めない。AckはShip stateを返さず、
 - `SectorTransitRequested`: sourceにShipが存在すれば`InTransit { to }`へ戻す
 - `SectorTransitCompleted` on source: Shipを削除する
 - `SectorTransitCompleted` on destination: `handoff`と絶対`entry_pos`をlive importと同じmaterialization seamへ渡し、同じanchor・offsetを導出する
-- `SectorTransitAborted`: `InTransit`を解除する
+- `SectorTransitAborted`: sourceと現在の`InTransit { to }`がeventの`from/to`に一致する場合だけ解除する
 
 live importはmaterialization seamが返す`AnchorRebased`を`SectorTransitCompleted`より先に記録する。
 destination replayは同じseamで状態だけを再構築し、既にlogにあるeventは再appendしない。
@@ -153,11 +167,13 @@ Raft timerもwall clockではなくlogical Tickで駆動する。
 
 ## 検証
 
-PR #206とPR #210は次を固定する。
+PR #206とPR #210、およびTransit handoff深掘りPRは次を固定する。
 
 - Request後Commit前の再起動でsource Shipが残り、Commitを再proposalする
+- handoff snapshot失敗時にRequest eventも`InTransit` markerも残らない
 - destination Commit後にAckが発行され、Ack後source copyが消える
 - Ack待ちの往路frozen copyが残るSectorへShipが戻っても、旧outboxを先に閉じ、遅延Ackで返送Shipを消失させない
 - duplicate Commitが1回だけmaterializeしAckを再発行する
+- 異なる古いrouteのAbortが現在のoutboxまたはreplay markerを解除しない
 - completed transitのsnapshot + tail replayでdestinationだけがactiveになる
 - InTransit中のposition・velocity・HP・capacitor・fitting・inventoryがtickで変化しない
