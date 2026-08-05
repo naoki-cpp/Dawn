@@ -31,9 +31,7 @@ pub enum ClientAdmissionResolution<T, E> {
     Aborted { error: E },
     /// Transport completed, but the reservation was stale or otherwise no
     /// longer commit-capable. The Sector has already performed cleanup.
-    CommitRejected {
-        error: ClientAdmissionCommitError,
-    },
+    CommitRejected { error: ClientAdmissionCommitError },
 }
 
 /// Resolve one transport outcome through the authoritative Sector boundary.
@@ -110,11 +108,8 @@ mod tests {
         let mut node = node();
         let attempt = fresh_attempt(&mut node);
 
-        let resolution = resolve_client_admission::<_, (), _>(
-            &mut node,
-            attempt,
-            Err("client disconnected"),
-        );
+        let resolution =
+            resolve_client_admission::<_, (), _>(&mut node, attempt, Err("client disconnected"));
 
         assert_eq!(
             resolution,
@@ -158,11 +153,8 @@ mod tests {
             )
             .expect("resume admission should begin");
         let staged_ticket = resume.resume_ticket();
-        let resolution = resolve_client_admission::<_, (), _>(
-            &mut node,
-            resume,
-            Err("handoff failed"),
-        );
+        let resolution =
+            resolve_client_admission::<_, (), _>(&mut node, resume, Err("handoff failed"));
         assert!(matches!(
             resolution,
             ClientAdmissionResolution::Aborted {
