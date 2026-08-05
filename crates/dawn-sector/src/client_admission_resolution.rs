@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn aborted_resume_keeps_current_and_staged_tickets_retryable() {
+    fn aborted_resume_keeps_the_last_client_visible_ticket_retryable() {
         let mut node = node();
         let fresh = fresh_attempt(&mut node);
         let current_ticket = fresh.resume_ticket();
@@ -173,17 +173,39 @@ mod tests {
             .expect("ticket exposed before abort remains retryable");
         assert_eq!(staged_retry.player_id(), committed.player_id);
         assert_eq!(staged_retry.ship_id(), committed.ship_id);
-        staged_retry.abort(&mut node);
+        let successor_ticket = staged_retry.resume_ticket();
+        assert!(matches!(
+            resolve_client_admission::<_, (), _>(
+                &mut node,
+                staged_retry,
+                Err("second handoff failed"),
+            ),
+            ClientAdmissionResolution::Aborted { .. }
+        ));
 
-        let current_retry = node
-            .begin_client_admission(
+        assert_eq!(
+            node.begin_client_admission(
                 ClientAdmissionIntent::Resume {
                     resume_ticket: current_ticket,
                 },
                 AOI_CELL_SIZE,
             )
-            .expect("committed ticket also remains retryable after abort");
-        current_retry.abort(&mut node);
+            .expect_err("presenting the staged ticket advances past the older current ticket"),
+            ClientAdmissionRefusal::ResumeTicketInvalid
+        );
+        let staged_again = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    resume_ticket: staged_ticket,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("the last client-visible ticket survives a repeated abort");
+        assert_eq!(staged_again.resume_ticket(), successor_ticket);
+        assert!(matches!(
+            resolve_client_admission::<_, (), _>(&mut node, staged_again, Err("cleanup")),
+            ClientAdmissionResolution::Aborted { .. }
+        ));
     }
 
     #[test]
@@ -207,7 +229,11 @@ mod tests {
         let first_visible_ticket = first.resume_ticket();
         assert_ne!(first_visible_ticket, committed_ticket);
         assert!(matches!(
-            resolve_client_admission::<_, (), _>(&mut node, first, Err("first handoff failed"),),
+            resolve_client_admission::<_, (), _>(
+                &mut node,
+                first,
+                Err("first handoff failed"),
+            ),
             ClientAdmissionResolution::Aborted { .. }
         ));
 
@@ -222,7 +248,11 @@ mod tests {
         let second_visible_ticket = second.resume_ticket();
         assert_ne!(second_visible_ticket, first_visible_ticket);
         assert!(matches!(
-            resolve_client_admission::<_, (), _>(&mut node, second, Err("second handoff failed"),),
+            resolve_client_admission::<_, (), _>(
+                &mut node,
+                second,
+                Err("second handoff failed"),
+            ),
             ClientAdmissionResolution::Aborted { .. }
         ));
 
@@ -259,7 +289,7 @@ mod tests {
             )
             .expect("the committed successor remains usable");
         assert!(matches!(
-            resolve_client_admission::<_, (), _>(&mut node, next, Err("cleanup"),),
+            resolve_client_admission::<_, (), _>(&mut node, next, Err("cleanup")),
             ClientAdmissionResolution::Aborted { .. }
         ));
     }
