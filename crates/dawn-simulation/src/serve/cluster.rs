@@ -10,6 +10,9 @@ use dawn_event_store::store::EventStore;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
+use dawn_sector::client_admission_resolution::{
+    resolve_client_admission, ClientAdmissionResolution,
+};
 use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
 use dawn_sector::transit;
 use dawn_wire::ServerMessage;
@@ -363,25 +366,22 @@ fn finish_cluster_admission<S: EventStore, T>(
     attempt: ClientAdmissionAttempt,
     result: Result<T, String>,
 ) -> Option<(T, CommittedClientAdmission)> {
-    match result {
-        Ok(value) => match attempt.commit(node) {
-            Ok(committed) => {
-                player_sector.retain(|player_id, _| *player_id != committed.player_id);
-                ship_player.retain(|ship_id, player_id| {
-                    *ship_id != committed.ship_id && *player_id != committed.player_id
-                });
-                player_sector.insert(committed.player_id, sector);
-                ship_player.insert(committed.ship_id, committed.player_id);
-                Some((value, committed))
-            }
-            Err(error) => {
-                eprintln!("[Server] {error}");
-                None
-            }
-        },
-        Err(error) => {
-            attempt.abort(node);
+    match resolve_client_admission(node, attempt, result) {
+        ClientAdmissionResolution::Committed { value, admission } => {
+            player_sector.retain(|player_id, _| *player_id != admission.player_id);
+            ship_player.retain(|ship_id, player_id| {
+                *ship_id != admission.ship_id && *player_id != admission.player_id
+            });
+            player_sector.insert(admission.player_id, sector);
+            ship_player.insert(admission.ship_id, admission.player_id);
+            Some((value, admission))
+        }
+        ClientAdmissionResolution::Aborted { error } => {
             eprintln!("[Server] handshake failed: {error}");
+            None
+        }
+        ClientAdmissionResolution::CommitRejected { error } => {
+            eprintln!("[Server] {error}");
             None
         }
     }
