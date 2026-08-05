@@ -11,6 +11,9 @@ use dawn_event_store::store::EventStore;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
+use dawn_sector::client_admission_resolution::{
+    resolve_client_admission, ClientAdmissionResolution,
+};
 use dawn_sector::dilation;
 use dawn_sector::node::{ClientCommandFollowup, SimulationNode};
 use dawn_wire::ServerMessage;
@@ -318,17 +321,14 @@ fn finish_single_admission<S: EventStore, T>(
     attempt: ClientAdmissionAttempt,
     result: Result<T, String>,
 ) -> Option<(T, CommittedClientAdmission)> {
-    match result {
-        Ok(value) => match attempt.commit(node) {
-            Ok(committed) => Some((value, committed)),
-            Err(error) => {
-                eprintln!("[Server] {error}");
-                None
-            }
-        },
-        Err(error) => {
-            attempt.abort(node);
+    match resolve_client_admission(node, attempt, result) {
+        ClientAdmissionResolution::Committed { value, admission } => Some((value, admission)),
+        ClientAdmissionResolution::Aborted { error } => {
             eprintln!("[Server] handshake failed: {error}");
+            None
+        }
+        ClientAdmissionResolution::CommitRejected { error } => {
+            eprintln!("[Server] {error}");
             None
         }
     }
