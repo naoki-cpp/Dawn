@@ -1,7 +1,7 @@
 //! Transit state mutation for `SimulationNode` (ADR-0014).
 //!
 //! This is the stateful half of the Transit deep module. The sibling
-//! `crate::transit::pipeline` decides when a Request, Commit, or Ack should be proposed; this module
+//! `crate::transit::handoff` owns Request/Commit/Ack policy, while this module
 //! owns the Ship handoff lifecycle itself: freezing and snapshotting the
 //! source, materializing and re-anchoring the destination, finalizing the
 //! source after Ack, and applying the same facts during replay.
@@ -31,13 +31,13 @@ use crate::persistence::CompletedIncomingTransit;
 
 use super::SimulationNode;
 
-/// Everything the Raft layer needs to propose a `TransitOp::Commit`, produced
-/// by [`SimulationNode::prepare_transit_commit`].
+/// Everything the Transit handoff boundary needs to propose a
+/// `TransitOp::Commit`, produced by [`SimulationNode::prepare_transit_commit`].
 #[derive(Debug)]
-pub struct TransitCommitData {
-    pub handoff: Box<TransitHandoffState>,
-    pub entry_pos: dawn_core::AbsolutePosition,
-    pub request_tick: Tick,
+pub(crate) struct TransitCommitData {
+    pub(crate) handoff: Box<TransitHandoffState>,
+    pub(crate) entry_pos: dawn_core::AbsolutePosition,
+    pub(crate) request_tick: Tick,
 }
 
 const TRANSIT_RETRY_INITIAL_TICKS: u64 = 10;
@@ -134,6 +134,7 @@ impl<S: EventStore> SimulationNode<S> {
         Ok((request_tick, event))
     }
 
+    #[cfg(test)]
     fn propose_transit_with_route(
         &mut self,
         cmd: TransitCommand,
@@ -181,18 +182,20 @@ impl<S: EventStore> SimulationNode<S> {
     /// jump straight back — ADR-0009/0029 — or the Sector origin for a
     /// non-Gate Transit), and snapshot the Ship's state for the follow-up
     /// `TransitOp::Commit` proposal. Returns `None` if the Transit can't begin
-    /// (unknown Ship, already in transit) or the Ship can't be found to
-    /// snapshot.
+    /// (unknown Ship, already in transit) or its canonical handoff snapshot
+    /// cannot be built.
+    ///
+    /// The Request mutation is atomic with snapshot construction: the Ship is
+    /// tentatively frozen first, but `SectorTransitRequested` is appended only
+    /// after `TransitHandoffState` has been built. Snapshot failure restores
+    /// `TransitState::None`, leaving neither a frozen Ship nor a durable outbox
+    /// entry that can never produce a Commit.
     ///
     /// Does **not** remove the Ship from this Sector's ECS (issue #204) --
-    /// only `propose_transit`'s `TransitState::InTransit` marker changes here,
-    /// which freezes the Ship out of Movement/Combat but keeps it durably
-    /// owned by this Sector until [`Self::complete_outgoing_transit`] runs.
-    ///
-    /// Replaces the orchestrator in `transit::apply_committed_raft_entries`
-    /// needing to know the Gate-lookup/entry-point logic itself — it now
-    /// just wraps the result into a `TransitOp::Commit`.
-    pub fn prepare_transit_commit(
+    /// only the `TransitState::InTransit` marker changes here, which freezes
+    /// the Ship out of Movement/Combat but keeps it durably owned by this
+    /// Sector until [`Self::complete_outgoing_transit`] runs.
+    pub(crate) fn prepare_transit_commit(
         &mut self,
         ship_id: ShipId,
         to: SectorId,
@@ -207,10 +210,16 @@ impl<S: EventStore> SimulationNode<S> {
             })
             .map(|gate| gate.abs_m)
             .unwrap_or(dawn_core::AbsolutePosition::ORIGIN);
-        let request_tick = self
-            .propose_transit_with_route(TransitCommand { ship_id, to }, gate_id, entry_pos)
+        let (request_tick, event) = self
+            .begin_transit_with_route(TransitCommand { ship_id, to }, gate_id, entry_pos)
             .ok()?;
-        let handoff = self.handoff_for_transit(ship_id)?;
+        let Some(handoff) = self.handoff_for_transit(ship_id) else {
+            if let Some(&entity) = self.ships.index.get(&ship_id) {
+                self.world.set_transit_state(entity, TransitState::None);
+            }
+            return None;
+        };
+        self.event_store.append(event);
         Some(TransitCommitData {
             handoff: Box::new(handoff),
             entry_pos,
@@ -391,7 +400,7 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// Idempotent: a no-op if the Ship is already gone (e.g. this Commit
     /// entry were ever observed twice).
-    pub fn complete_outgoing_transit(
+    pub(crate) fn complete_outgoing_transit(
         &mut self,
         ship_id: ShipId,
         to: SectorId,
@@ -547,7 +556,7 @@ impl<S: EventStore> SimulationNode<S> {
         ]
     }
 
-    pub fn handle_transit_commit(
+    pub(crate) fn handle_transit_commit(
         &mut self,
         handoff: &TransitHandoffState,
         from: SectorId,
@@ -585,19 +594,20 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    /// Tail replay of `SectorTransitAborted`: clears the `InTransit` marker
-    /// `SectorTransitRequested` replay set. Nothing in this codebase appends
-    /// this event yet (its doc comment reserves it for a post-commit abort
-    /// path not wired up today), but the replay side is written now rather
-    /// than left a no-op, so the event type doesn't ship with a known-wrong
-    /// replay the day something starts emitting it.
+    /// Tail replay of `SectorTransitAborted`: clears only the matching route's
+    /// `InTransit` marker. `SectorTransitAborted` currently has no
+    /// `request_tick`, so a same-route newer attempt cannot be distinguished;
+    /// emitters must not append an Abort after superseding that route.
     pub(super) fn replay_sector_transit_aborted(
         &mut self,
         e: &dawn_core::events::SectorTransitAborted,
     ) {
-        if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-            self.world
-                .set_transit_state(entity, dawn_ecs::TransitState::None);
+        if e.from == self.sector_id {
+            if let Some(&entity) = self.ships.index.get(&e.ship_id) {
+                if self.world.transit_state(entity) == (TransitState::InTransit { to: e.to }) {
+                    self.world.set_transit_state(entity, TransitState::None);
+                }
+            }
         }
         if e.tick > self.current_tick {
             self.current_tick = e.tick;
@@ -680,6 +690,27 @@ mod tests {
             }
             other => panic!("expected SectorTransitRequested, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn prepare_transit_commit_rolls_back_when_handoff_snapshot_is_incomplete() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        let _ = node.world.remove_one::<VelocityComp>(entity).unwrap();
+        let event_count = node.total_event_count();
+
+        assert!(node
+            .prepare_transit_commit(ship_id, SectorId(1), None)
+            .is_none());
+        assert_eq!(node.world.transit_state(entity), TransitState::None);
+        assert_eq!(node.total_event_count(), event_count);
+        assert!(node.can_propose_transit(ship_id));
+        assert!(!node
+            .event_store()
+            .all_records()
+            .iter()
+            .any(|record| { matches!(record.event, DomainEvent::SectorTransitRequested(_)) }));
     }
 
     #[test]
@@ -1387,6 +1418,46 @@ mod tests {
 
         let entity = *node.ships.index.get(&ship_id).unwrap();
         assert_eq!(node.world.transit_state(entity), TransitState::None);
+    }
+
+    #[test]
+    fn replaying_stale_abort_for_an_old_route_keeps_the_current_marker() {
+        let mut node = mem_node();
+        let ship_id = node.spawn_ship(ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
+        for event in [
+            DomainEvent::SectorTransitRequested(dawn_core::events::SectorTransitRequested {
+                ship_id,
+                from: SectorId(0),
+                to: SectorId(1),
+                request_tick: Tick(1),
+                gate_id: None,
+                entry_pos: dawn_core::AbsolutePosition::ORIGIN,
+                tick: Tick(1),
+            }),
+            DomainEvent::SectorTransitRequested(dawn_core::events::SectorTransitRequested {
+                ship_id,
+                from: SectorId(0),
+                to: SectorId(2),
+                request_tick: Tick(2),
+                gate_id: None,
+                entry_pos: dawn_core::AbsolutePosition::ORIGIN,
+                tick: Tick(2),
+            }),
+            DomainEvent::SectorTransitAborted(dawn_core::events::SectorTransitAborted {
+                ship_id,
+                from: SectorId(0),
+                to: SectorId(1),
+                tick: Tick(3),
+            }),
+        ] {
+            node.apply_event_pub(event);
+        }
+
+        let entity = *node.ships.index.get(&ship_id).unwrap();
+        assert_eq!(
+            node.world.transit_state(entity),
+            TransitState::InTransit { to: SectorId(2) }
+        );
     }
 
     #[test]
