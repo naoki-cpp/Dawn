@@ -7,7 +7,7 @@ use dawn_event_store::FileEventStore;
 use dawn_sector::node::SimulationNode;
 use dawn_sector::persistence::StateSnapshot;
 use dawn_sector::spawner::{generate_ships, SpawnConfig};
-use dawn_sector::{aoi, persistence, ship_types};
+use dawn_sector::{aoi, game_data::GameDataCatalog, persistence, ship_types};
 use std::time::Instant;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -21,6 +21,13 @@ pub(crate) const P2_TICKS: usize = 20;
 
 const P3_SHIPS: usize = 100;
 const P3_TICKS: usize = 10;
+
+fn benchmark_catalog() -> std::sync::Arc<GameDataCatalog> {
+    std::sync::Arc::new(
+        GameDataCatalog::load_runtime()
+            .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}")),
+    )
+}
 
 // ── Phase 7: Raft Transit demo ───────────────────────────────────────────────
 
@@ -151,6 +158,7 @@ pub(crate) fn run_phase1_benchmark() {
         SectorId(0),
         bounds,
         std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+        benchmark_catalog(),
     );
 
     let config = SpawnConfig::default_for_node(NodeId(0));
@@ -308,6 +316,7 @@ pub(crate) fn run_phase3_demo() {
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+            benchmark_catalog(),
             store,
         );
 
@@ -362,8 +371,7 @@ pub(crate) fn run_phase3_demo() {
         store2,
         &snap,
         std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
-        &[],
-        &[],
+        benchmark_catalog(),
     );
 
     // ADR-0008: these NPC ships move at a constant velocity and never emit

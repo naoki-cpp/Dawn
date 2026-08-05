@@ -30,7 +30,7 @@ use dawn_replication::{
 };
 use dawn_sector::node::SimulationNode;
 use dawn_sector::persistence::{CheckpointConfig, CheckpointScheduler, StateSnapshot};
-use dawn_sector::{galaxy::Galaxy, game_data::runtime_catalog, transit};
+use dawn_sector::{galaxy::Galaxy, game_data::GameDataCatalog, transit};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -390,8 +390,10 @@ fn build_node(
     sector_id: SectorId,
     bounds: SectorBounds,
 ) -> (SimulationNode<FileEventStore>, bool) {
-    let catalog = runtime_catalog()
-        .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}"));
+    let catalog = Arc::new(
+        GameDataCatalog::load_runtime()
+            .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}")),
+    );
     let galaxy = Arc::new(
         Galaxy::load_from_file(PRODUCTION_GALAXY_PATH)
             .unwrap_or_else(|e| panic!("failed to load production galaxy map: {e}")),
@@ -429,8 +431,7 @@ fn build_node(
                     store,
                     &snapshot,
                     Arc::clone(&galaxy),
-                    catalog.modules(),
-                    catalog.ship_types(),
+                    Arc::clone(&catalog),
                 ),
                 false,
             )
@@ -440,9 +441,14 @@ fn build_node(
                 "[Node] no snapshot at '{}', starting fresh",
                 cfg.snapshot_path
             );
-            let mut node =
-                SimulationNode::with_store(node_id, sector_id, bounds, Arc::clone(&galaxy), store);
-            catalog.register_into(&mut node);
+            let node = SimulationNode::with_store(
+                node_id,
+                sector_id,
+                bounds,
+                Arc::clone(&galaxy),
+                Arc::clone(&catalog),
+                store,
+            );
             (node, true)
         }
         Err(e) => panic!(

@@ -2,15 +2,15 @@
 //!
 //! # Generic over `S: EventStore`
 //!
-//! `SimulationNode<S>` defaults to `SimulationNode<InMemoryEventStore>` so all
-//! existing call sites continue to compile unchanged.  Pass a `FileEventStore`
-//! to persist events to disk (Phase 3).
+//! `SimulationNode<S>` defaults to `SimulationNode<InMemoryEventStore>`. Every
+//! normal construction and restore path requires a complete validated
+//! [`GameDataCatalog`].
 //!
 //! # Snapshot / Restore (INV-002)
 //!
 //! ```text
 //! node.take_snapshot()           -> StateSnapshot (ECS state at log_index N)
-//! SimulationNode::restore_from(store, &snapshot, galaxy, &modules, &ship_types)
+//! SimulationNode::restore_from(store, &snapshot, galaxy, catalog)
 //!     -> reconstruct ECS from snapshot, replay events from log_index N onward
 //! ```
 
@@ -77,6 +77,7 @@ use dawn_event_store::{store::EventStore, InMemoryEventStore};
 #[cfg(test)]
 use dawn_ecs::components::{CapacitorComp, FittingComp, HullComp};
 
+use crate::game_data::GameDataCatalog;
 use crate::persistence::{CompletedIncomingTransit, StateSnapshot};
 
 /// Per-Sector population backstop (ADR-0018 final resort). Set far above the
@@ -173,10 +174,10 @@ where
     id_counter: u64,
     /// Ship identity and ownership maps (entity index, type ids, player ownership).
     ships: ShipRegistry,
-    /// Module definition registry.
-    module_registry: HashMap<ModuleId, ModuleDefinition>,
-    /// Ship type definition registry.
-    ship_type_registry: HashMap<ShipTypeId, ShipTypeDefinition>,
+    /// Immutable module definitions shared from the validated catalog.
+    module_registry: Arc<BTreeMap<ModuleId, ModuleDefinition>>,
+    /// Immutable ship-type definitions shared from the validated catalog.
+    ship_type_registry: Arc<BTreeMap<ShipTypeId, ShipTypeDefinition>>,
     /// Bare ShipStats without fitting. Used as the base for fitting aggregation.
     base_stats: HashMap<ShipId, ShipStatsComp>,
     /// PlayerId allocation counter.
@@ -247,32 +248,84 @@ impl<S: EventStore> std::fmt::Debug for SimulationNode<S> {
 // -- Constructors ------------------------------------------------------------
 
 impl SimulationNode<InMemoryEventStore> {
-    /// Create a node backed by an in-memory event store (Phase 0 default).
+    /// Create a node backed by an in-memory event store.
+    #[cfg(not(test))]
+    pub fn new(
+        node_id: NodeId,
+        sector_id: SectorId,
+        bounds: SectorBounds,
+        galaxy: Arc<crate::galaxy::Galaxy>,
+        catalog: Arc<GameDataCatalog>,
+    ) -> Self {
+        Self::with_catalog_and_store(
+            node_id,
+            sector_id,
+            bounds,
+            galaxy,
+            catalog,
+            InMemoryEventStore::new(),
+        )
+    }
+
+    /// Crate-unit-test constructor. It injects the complete validated repository
+    /// fixture; partial or empty definition registries are never constructed.
+    #[cfg(test)]
     pub fn new(
         node_id: NodeId,
         sector_id: SectorId,
         bounds: SectorBounds,
         galaxy: Arc<crate::galaxy::Galaxy>,
     ) -> Self {
-        Self::with_store(
+        Self::with_catalog_and_store(
             node_id,
             sector_id,
             bounds,
             galaxy,
+            Arc::new(crate::game_data::test_catalog().clone()),
             InMemoryEventStore::new(),
         )
     }
 }
 
 impl<S: EventStore> SimulationNode<S> {
-    /// Create a node with a caller-supplied event store.
-    ///
-    /// Use this with `FileEventStore` for persistent operation.
+    /// Create a node with a caller-supplied event store and validated catalog.
+    #[cfg(not(test))]
     pub fn with_store(
         node_id: NodeId,
         sector_id: SectorId,
         bounds: SectorBounds,
         galaxy: Arc<crate::galaxy::Galaxy>,
+        catalog: Arc<GameDataCatalog>,
+        store: S,
+    ) -> Self {
+        Self::with_catalog_and_store(node_id, sector_id, bounds, galaxy, catalog, store)
+    }
+
+    /// Crate-unit-test store constructor using the complete repository fixture.
+    #[cfg(test)]
+    pub fn with_store(
+        node_id: NodeId,
+        sector_id: SectorId,
+        bounds: SectorBounds,
+        galaxy: Arc<crate::galaxy::Galaxy>,
+        store: S,
+    ) -> Self {
+        Self::with_catalog_and_store(
+            node_id,
+            sector_id,
+            bounds,
+            galaxy,
+            Arc::new(crate::game_data::test_catalog().clone()),
+            store,
+        )
+    }
+
+    fn with_catalog_and_store(
+        node_id: NodeId,
+        sector_id: SectorId,
+        bounds: SectorBounds,
+        galaxy: Arc<crate::galaxy::Galaxy>,
+        catalog: Arc<GameDataCatalog>,
         store: S,
     ) -> Self {
         let sector_map = SectorMap::from_galaxy(sector_id, Arc::clone(&galaxy));
@@ -287,8 +340,8 @@ impl<S: EventStore> SimulationNode<S> {
             current_tick: Tick::ZERO,
             id_counter: 0,
             ships: ShipRegistry::new(),
-            module_registry: HashMap::new(),
-            ship_type_registry: HashMap::new(),
+            module_registry: catalog.module_index(),
+            ship_type_registry: catalog.ship_type_index(),
             base_stats: HashMap::new(),
             player_id_counter: 0,
             pending_fresh_admissions: HashSet::new(),
@@ -310,15 +363,30 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    /// Restore a node from a `StateSnapshot` plus the events appended since.
-    ///
-    /// `galaxy` is the authoritative topology for the restored process.
-    /// `modules` and `ship_types` must come from the same
-    /// [`crate::game_data::GameDataCatalog`] used to configure the node, for
-    /// example `catalog.modules()` and `catalog.ship_types()`. They are needed to resolve
-    /// `FittingSnapshot` entries back into `FittedSlot`s and to recompute
-    /// `base_stats` for `apply_fitting` (INV-002: snapshot + registries +
-    /// log replay must fully reproduce the pre-shutdown ECS state).
+    /// Restore a node from a snapshot plus its event tail using the exact
+    /// validated catalog selected by the runtime.
+    #[cfg(not(test))]
+    pub fn restore_from(
+        store: S,
+        snapshot: &StateSnapshot,
+        galaxy: Arc<crate::galaxy::Galaxy>,
+        catalog: Arc<GameDataCatalog>,
+    ) -> Self {
+        let node = Self::with_catalog_and_store(
+            snapshot.node_id,
+            snapshot.sector_id,
+            snapshot.bounds,
+            galaxy,
+            catalog,
+            store,
+        );
+        Self::finish_restore(node, snapshot)
+    }
+
+    /// Crate-unit-test restore compatibility. The baseline is always the
+    /// complete validated fixture; supplied definitions are explicit overrides
+    /// used by focused tests and cannot create an empty engine.
+    #[cfg(test)]
     pub fn restore_from(
         store: S,
         snapshot: &StateSnapshot,
@@ -326,38 +394,40 @@ impl<S: EventStore> SimulationNode<S> {
         modules: &[ModuleDefinition],
         ship_types: &[ShipTypeDefinition],
     ) -> Self {
-        // Build the same way `with_store` does, then overwrite exactly the
-        // state the snapshot carries. Duplicating the constructor here is what
-        // let the two drift: every field these two functions share was
-        // copy-pasted, and `player_id_counter` sat at 0 in this copy while
-        // `id_counter` was restored.
-        let mut node = Self::with_store(
+        let mut node = Self::with_catalog_and_store(
             snapshot.node_id,
             snapshot.sector_id,
             snapshot.bounds,
             galaxy,
+            Arc::new(crate::game_data::test_catalog().clone()),
             store,
         );
+        Arc::make_mut(&mut node.module_registry).extend(
+            modules
+                .iter()
+                .cloned()
+                .map(|definition| (definition.id, definition)),
+        );
+        Arc::make_mut(&mut node.ship_type_registry).extend(
+            ship_types
+                .iter()
+                .cloned()
+                .map(|definition| (definition.id, definition)),
+        );
+        Self::finish_restore(node, snapshot)
+    }
+
+    fn finish_restore(mut node: Self, snapshot: &StateSnapshot) -> Self {
         node.apply_snapshot(snapshot);
 
-        for def in modules {
-            node.register_module(def.clone());
-        }
-        for def in ship_types {
-            node.register_ship_type(def.clone());
-        }
-
-        // Restore ECS state from snapshot.
         for ship in &snapshot.ships {
             node.restore_ship_from_snapshot(ship);
         }
 
-        // Replay events that occurred after the snapshot was taken.
-        // Collect first to avoid a simultaneous borrow of `node`.
         let post_events: Vec<DomainEvent> = node
             .event_store
             .iter_from(snapshot.log_index)
-            .map(|r| r.event.clone())
+            .map(|record| record.event.clone())
             .collect();
 
         for event in &post_events {

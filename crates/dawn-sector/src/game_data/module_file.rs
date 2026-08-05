@@ -126,7 +126,10 @@ impl From<ModuleEntry> for ModuleDefinition {
     }
 }
 
-fn validate_modules(modules: &[ModuleDefinition], path: &Path) -> Result<(), CatalogError> {
+pub(super) fn validate_modules(
+    modules: &[ModuleDefinition],
+    path: &Path,
+) -> Result<(), CatalogError> {
     if modules.is_empty() {
         return validation_error("module", path, "catalog must contain at least one module");
     }

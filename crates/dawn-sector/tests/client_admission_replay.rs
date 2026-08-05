@@ -11,23 +11,27 @@ use std::{path::Path, sync::Arc};
 
 const AOI_CELL_SIZE: f64 = 1_000.0;
 
-fn repository_catalog() -> GameDataCatalog {
+fn repository_catalog() -> Arc<GameDataCatalog> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    GameDataCatalog::load_from_paths(
-        root.join(PRODUCTION_MODULES_PATH),
-        root.join(PRODUCTION_SHIP_TYPES_PATH),
+    Arc::new(
+        GameDataCatalog::load_from_paths(
+            root.join(PRODUCTION_MODULES_PATH),
+            root.join(PRODUCTION_SHIP_TYPES_PATH),
+        )
+        .expect("repository game-data catalog"),
     )
-    .expect("repository game-data catalog")
 }
 
 #[test]
 fn in_flight_fresh_admission_keeps_only_a_durable_identity_watermark() {
     let galaxy = Arc::new(Galaxy::demo());
+    let catalog = repository_catalog();
     let mut node = SimulationNode::new(
         NodeId(0),
         SectorId(0),
         SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         Arc::clone(&galaxy),
+        Arc::clone(&catalog),
     );
     let pre_begin_snapshot = node.take_snapshot();
 
@@ -61,14 +65,8 @@ fn in_flight_fresh_admission_keeps_only_a_durable_identity_watermark() {
     }
     drop(attempt);
 
-    let catalog = repository_catalog();
-    let mut restored = SimulationNode::restore_from(
-        replay_store,
-        &pre_begin_snapshot,
-        galaxy,
-        catalog.modules(),
-        catalog.ship_types(),
-    );
+    let mut restored =
+        SimulationNode::restore_from(replay_store, &pre_begin_snapshot, galaxy, catalog);
 
     assert_eq!(restored.ship_count(), 0);
     assert!(restored.ship_absolute_pos(reserved_ship_id).is_none());
@@ -97,13 +95,8 @@ fn committed_fresh_admission_replays_complete_state_and_grants_starter_once() {
         SectorId(0),
         SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         Arc::clone(&galaxy),
+        Arc::clone(&catalog),
     );
-    for definition in catalog.modules() {
-        node.register_module(definition.clone());
-    }
-    for definition in catalog.ship_types() {
-        node.register_ship_type(definition.clone());
-    }
     let pre_commit_snapshot = node.take_snapshot();
     let attempt = node
         .begin_client_admission(
@@ -139,13 +132,8 @@ fn committed_fresh_admission_replays_complete_state_and_grants_starter_once() {
     for record in records {
         replay_store.append(record.event.clone());
     }
-    let mut restored = SimulationNode::restore_from(
-        replay_store,
-        &pre_commit_snapshot,
-        galaxy,
-        catalog.modules(),
-        catalog.ship_types(),
-    );
+    let mut restored =
+        SimulationNode::restore_from(replay_store, &pre_commit_snapshot, galaxy, catalog);
     assert_eq!(restored.ship_count(), 1);
     assert!(restored.ship_absolute_pos(ship_id).is_some());
 
@@ -168,11 +156,13 @@ fn committed_fresh_admission_replays_complete_state_and_grants_starter_once() {
 #[test]
 fn missing_resume_still_refuses_without_creating_replayable_state() {
     let galaxy = Arc::new(Galaxy::demo());
+    let catalog = repository_catalog();
     let mut node = SimulationNode::new(
         NodeId(0),
         SectorId(0),
         SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         galaxy,
+        catalog,
     );
     let _player_id = dawn_core::PlayerId(7);
     let _ship_id = dawn_core::ShipId::new(NodeId(9), 1);

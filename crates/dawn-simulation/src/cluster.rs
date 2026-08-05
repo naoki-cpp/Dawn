@@ -13,7 +13,9 @@
 //! the query is guaranteed to observe all events from all ticks.
 //! No sleep, no flush, no barrier is required.
 
-use crate::sector_simulator_actor::{NodeStats, SectorSimulatorHandle, TickSummary};
+use crate::sector_simulator_actor::{
+    NodeStats, SectorSimulatorConfig, SectorSimulatorHandle, TickSummary,
+};
 use dawn_consensus::{
     InProcessTransport, PartitionableTransport, RaftActor, RaftActorHandle, RaftState,
     RaftTransport, Role, Term,
@@ -21,6 +23,8 @@ use dawn_consensus::{
 use dawn_core::{NodeId, SectorBounds, SectorId};
 use dawn_replication::InMemoryReplicationBus;
 use dawn_replication::OutboundLogPublisher;
+#[cfg(not(test))]
+use dawn_sector::game_data::GameDataCatalog;
 use dawn_sector::spawner::{generate_ships, SpawnConfig};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -109,16 +113,26 @@ impl MultiNodeCluster {
 
         let (endpoints, partitioned) = spawn_raft_actors(&ids);
         let galaxy = Arc::new(dawn_sector::galaxy::Galaxy::demo());
+        #[cfg(test)]
+        let catalog = crate::test_catalog();
+        #[cfg(not(test))]
+        let catalog =
+            Arc::new(GameDataCatalog::load_runtime().unwrap_or_else(|error| {
+                panic!("failed to load required game-data catalog: {error}")
+            }));
 
         let nodes = ids
             .iter()
             .zip(endpoints)
             .map(|(&id, (raft, committed_rx))| {
                 SectorSimulatorHandle::spawn(
-                    id,
-                    SectorId(id.0),
-                    SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-                    Arc::clone(&galaxy),
+                    SectorSimulatorConfig {
+                        node_id: id,
+                        sector_id: SectorId(id.0),
+                        bounds: SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                        galaxy: Arc::clone(&galaxy),
+                        catalog: Arc::clone(&catalog),
+                    },
                     OutboundLogPublisher::new(bus.clone()),
                     raft,
                     committed_rx,

@@ -436,10 +436,7 @@ mod tests {
 
     #[test]
     fn initial_state_lists_only_buildable_ship_types() {
-        let mut node = mem_node();
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            node.register_ship_type(def);
-        }
+        let node = mem_node();
         let v = node.build_initial_state_json();
 
         let buildable = &v.buildable_ship_types;

@@ -253,6 +253,7 @@ mod tests {
             dawn_core::SectorId(0),
             dawn_core::SectorBounds::centered(dawn_core::SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+            crate::test_catalog(),
         );
 
         let snapshot = runtime.handle_single(

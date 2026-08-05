@@ -220,14 +220,7 @@ mod tests {
     }
 
     fn node_with_modules() -> SimulationNode {
-        let mut node = mem_node();
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            node.register_module(def);
-        }
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            node.register_ship_type(def);
-        }
-        node
+        mem_node()
     }
 
     /// Restoring a snapshot and re-capturing must reproduce it byte for byte.
@@ -652,12 +645,6 @@ mod tests {
                 std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
                 store,
             );
-            for def in crate::game_data::test_catalog().modules().to_vec() {
-                node.register_module(def);
-            }
-            for def in crate::game_data::test_catalog().ship_types().to_vec() {
-                node.register_ship_type(def);
-            }
 
             ship_id = node.spawn_ship(
                 ship_types::SHIP_TYPE_MAGPIE,

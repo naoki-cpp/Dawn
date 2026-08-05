@@ -62,14 +62,6 @@ fn commit_with(handoff: TransitHandoffState) -> TransitOp {
 #[test]
 fn retry_commit_recreates_the_complete_canonical_handoff() {
     let mut source = node(0, 0);
-    let catalog = crate::game_data::test_catalog();
-    for def in catalog.modules().to_vec() {
-        source.register_module(def);
-    }
-    for def in catalog.ship_types().to_vec() {
-        source.register_ship_type(def);
-    }
-
     let player_id = source.next_player_id();
     let ship_id = source.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
     source.apply_move_command(ship_id, Position::new(1_000.0, 250.0, -100.0));

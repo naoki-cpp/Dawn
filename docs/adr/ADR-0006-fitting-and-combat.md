@@ -155,11 +155,11 @@ let base = self.base_stats.get(&ship_id).copied().unwrap_or(ShipStatsComp::NPC);
 apply_fitting(&mut self.world, ship_id, base);
 ```
 
-#### モジュール定義カタログ（dawn-simulation）
+#### モジュール定義カタログ
 
-標準モジュール定義は `modules.rs` に集約する。
-サーバー起動時に `SimulationNode::register_module()` で登録し、
-`fit_module()` が ID → 定義を解決する。
+標準モジュール定義は `data/modules.toml` に集約する。
+起動時に完全な `GameDataCatalog` を検証し、`SimulationNode` の構築時に注入する。
+`fit_module()` は構築後に不変なカタログから ID → 定義を解決する。
 
 ```
 modules.rs に定義する標準モジュール（Phase 4）:
@@ -499,8 +499,8 @@ pub struct ShipSpawned {
 }
 ```
 
-サーバー起動時に `register_ship_type()` で登録し、
-`spawn_ship(ship_type_id, pos, vel)` で参照する。
+サーバー起動時に検証済み `GameDataCatalog` を構築し、
+`spawn_ship(ship_type_id, pos, vel)` はその不変カタログを参照する。
 
 #### base_stats の変更
 
@@ -609,7 +609,7 @@ pub max_hull_add   : f32,   // ハル HP への加算
 - [x] `dawn-ecs`: `FittingComp` コンポーネント
 - [x] `dawn-ecs`: `ShipStatsComp` に Combat フィールド + cap フィールド追加
 - [x] `dawn-ecs`: `apply_fitting()` / `apply_delta()` システム関数（cap フィールド対応済み）
-- [x] `dawn-simulation`: `SimulationNode::register_module()` / `fit_module()` メソッド
+- [x] `dawn-sector`: 検証済み `GameDataCatalog` / `fit_module()` メソッド
 - [x] `dawn-simulation`: `base_stats` パターンで二重加算を防止
 - [x] `dawn-simulation`: `modules.rs` 標準モジュール定義カタログ（11種）
 - [x] `dawn-simulation`: `data/modules.toml` TOML 外部化（リビルド不要）

@@ -1081,12 +1081,6 @@ mod tests {
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
 
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            from_node.register_module(def);
-        }
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            from_node.register_ship_type(def);
-        }
         let player_id = from_node.next_player_id();
         let ship_id = from_node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
         let before_entity = *from_node.ships.index.get(&ship_id).unwrap();

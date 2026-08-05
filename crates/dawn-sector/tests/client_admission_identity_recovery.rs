@@ -12,22 +12,15 @@ use std::{path::Path, sync::Arc};
 
 const AOI_CELL_SIZE: f64 = 1_000.0;
 
-fn repository_catalog() -> GameDataCatalog {
+fn repository_catalog() -> Arc<GameDataCatalog> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    GameDataCatalog::load_from_paths(
-        root.join(PRODUCTION_MODULES_PATH),
-        root.join(PRODUCTION_SHIP_TYPES_PATH),
+    Arc::new(
+        GameDataCatalog::load_from_paths(
+            root.join(PRODUCTION_MODULES_PATH),
+            root.join(PRODUCTION_SHIP_TYPES_PATH),
+        )
+        .expect("repository game-data catalog"),
     )
-    .expect("repository game-data catalog")
-}
-
-fn register_catalog(node: &mut SimulationNode<FileEventStore>, catalog: &GameDataCatalog) {
-    for definition in catalog.modules() {
-        node.register_module(definition.clone());
-    }
-    for definition in catalog.ship_types() {
-        node.register_ship_type(definition.clone());
-    }
 }
 
 #[test]
@@ -45,9 +38,9 @@ fn client_visible_fresh_identity_recovers_after_restart_before_commit() {
         SectorId(0),
         SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         Arc::clone(&galaxy),
+        Arc::clone(&catalog),
         store,
     );
-    register_catalog(&mut node, &catalog);
     node.open_station_inventory_db(db_path.to_str().unwrap())
         .unwrap();
     node.take_snapshot().save(&snapshot_path).unwrap();
@@ -68,13 +61,7 @@ fn client_visible_fresh_identity_recovers_after_restart_before_commit() {
 
     let snapshot = StateSnapshot::load(&snapshot_path).unwrap();
     let store = FileEventStore::open(&event_path).unwrap();
-    let mut restored = SimulationNode::restore_from(
-        store,
-        &snapshot,
-        galaxy,
-        catalog.modules(),
-        catalog.ship_types(),
-    );
+    let mut restored = SimulationNode::restore_from(store, &snapshot, galaxy, catalog);
     restored
         .open_station_inventory_db(db_path.to_str().unwrap())
         .unwrap();
@@ -111,9 +98,9 @@ fn ownership_binding_survives_checkpoint_compaction() {
         SectorId(0),
         SectorBounds::centered(SectorBounds::DEFAULT_HALF),
         Arc::clone(&galaxy),
+        Arc::clone(&catalog),
         store,
     );
-    register_catalog(&mut node, &catalog);
     node.open_station_inventory_db(db_path.to_str().unwrap())
         .unwrap();
 
@@ -135,13 +122,7 @@ fn ownership_binding_survives_checkpoint_compaction() {
 
     let snapshot = StateSnapshot::load(&snapshot_path).unwrap();
     let store = FileEventStore::open(&event_path).unwrap();
-    let mut restored = SimulationNode::restore_from(
-        store,
-        &snapshot,
-        galaxy,
-        catalog.modules(),
-        catalog.ship_types(),
-    );
+    let mut restored = SimulationNode::restore_from(store, &snapshot, galaxy, catalog);
     restored
         .open_station_inventory_db(db_path.to_str().unwrap())
         .unwrap();

@@ -5,9 +5,7 @@
 //! the named rejection type ensures changes to module policy do not require
 //! editing the cross-family command entry point.
 
-use dawn_core::{
-    DomainEvent, FitModuleCommand, ModuleDefinition, ModuleId, PlayerId, ShipId, SlotKind,
-};
+use dawn_core::{DomainEvent, FitModuleCommand, ModuleId, PlayerId, ShipId, SlotKind};
 use dawn_ecs::{
     components::{FittedSlot, FittingComp, LockComp, LockState},
     Entity,
@@ -298,10 +296,6 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     // ── Fitting ───────────────────────────────────────────────────────────────
-
-    pub fn register_module(&mut self, def: ModuleDefinition) {
-        self.module_registry.insert(def.id, def);
-    }
 
     /// Returns `true` if successful, `false` if the ship or module is unknown.
     pub fn fit_module(&mut self, cmd: FitModuleCommand) -> bool {
