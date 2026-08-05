@@ -311,7 +311,10 @@ mod tests {
             )
             .expect("fresh attempt");
         let resume_ticket = fresh.resume_ticket();
-        let committed = fresh.commit(&mut node).expect("fresh commit");
+        let committed = match resolve_client_admission(&mut node, fresh, Ok::<_, ()>(())) {
+            ClientAdmissionResolution::Committed { admission, .. } => admission,
+            other => panic!("fresh admission should commit, got {other:?}"),
+        };
         let player_id = committed.player_id;
         let ship_id = committed.ship_id;
         let attempt = node

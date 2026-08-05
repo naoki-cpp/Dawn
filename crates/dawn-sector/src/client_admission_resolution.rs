@@ -229,11 +229,7 @@ mod tests {
         let first_visible_ticket = first.resume_ticket();
         assert_ne!(first_visible_ticket, committed_ticket);
         assert!(matches!(
-            resolve_client_admission::<_, (), _>(
-                &mut node,
-                first,
-                Err("first handoff failed"),
-            ),
+            resolve_client_admission::<_, (), _>(&mut node, first, Err("first handoff failed"),),
             ClientAdmissionResolution::Aborted { .. }
         ));
 
@@ -248,11 +244,7 @@ mod tests {
         let second_visible_ticket = second.resume_ticket();
         assert_ne!(second_visible_ticket, first_visible_ticket);
         assert!(matches!(
-            resolve_client_admission::<_, (), _>(
-                &mut node,
-                second,
-                Err("second handoff failed"),
-            ),
+            resolve_client_admission::<_, (), _>(&mut node, second, Err("second handoff failed"),),
             ClientAdmissionResolution::Aborted { .. }
         ));
 

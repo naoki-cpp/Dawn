@@ -513,7 +513,10 @@ mod tests {
             )
             .expect("fresh attempt");
         let resume_ticket = fresh.resume_ticket();
-        let committed = fresh.commit(&mut nodes[1]).expect("fresh commit");
+        let committed = match resolve_client_admission(&mut nodes[1], fresh, Ok::<_, ()>(())) {
+            ClientAdmissionResolution::Committed { admission, .. } => admission,
+            other => panic!("fresh admission should commit, got {other:?}"),
+        };
         let player_id = committed.player_id;
         let ship_id = committed.ship_id;
         let sector = find_resume_sector(&nodes, resume_ticket).expect("unique owning Sector");
@@ -557,7 +560,10 @@ mod tests {
             .expect("fresh attempt");
         let ship_id = attempt.ship_id();
         let resume_ticket = attempt.resume_ticket();
-        attempt.abort(&mut nodes[1]);
+        assert!(matches!(
+            resolve_client_admission::<_, (), _>(&mut nodes[1], attempt, Err(())),
+            ClientAdmissionResolution::Aborted { .. }
+        ));
         assert!(nodes[1].ship_absolute_pos(ship_id).is_none());
 
         let sector = find_resume_sector(&nodes, resume_ticket).expect("prepared identity Sector");
@@ -569,7 +575,10 @@ mod tests {
             )
             .expect("exact prepared identity resumes in its Sector");
         assert!(!recovered.is_resumed());
-        recovered.abort(&mut nodes[sector]);
+        assert!(matches!(
+            resolve_client_admission::<_, (), _>(&mut nodes[sector], recovered, Err(())),
+            ClientAdmissionResolution::Aborted { .. }
+        ));
     }
 
     #[test]
@@ -584,7 +593,10 @@ mod tests {
             )
             .expect("fresh attempt");
         let resume_ticket = fresh.resume_ticket();
-        let committed = fresh.commit(&mut node).expect("fresh commit");
+        let committed = match resolve_client_admission(&mut node, fresh, Ok::<_, ()>(())) {
+            ClientAdmissionResolution::Committed { admission, .. } => admission,
+            other => panic!("fresh admission should commit, got {other:?}"),
+        };
         let ship_id = committed.ship_id;
         let attempt = node
             .begin_client_admission(
