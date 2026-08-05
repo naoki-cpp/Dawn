@@ -19,6 +19,7 @@ use crate::{
 ///
 /// `ClientAdmissionAttempt` is consumed by [`resolve_client_admission`], so an
 /// attempt cannot be committed, aborted, or otherwise resolved more than once.
+#[must_use = "the runtime must handle the authoritative admission resolution"]
 #[derive(Debug, PartialEq, Eq)]
 pub enum ClientAdmissionResolution<T, E> {
     /// Transport completed and the Sector committed the reserved identity.
@@ -38,9 +39,9 @@ pub enum ClientAdmissionResolution<T, E> {
 /// Resolve one transport outcome through the authoritative Sector boundary.
 ///
 /// Runtime adapters should call this exactly once after sending the handoff.
-/// They may publish the returned transport value only for [`Committed`](
-/// ClientAdmissionResolution::Committed); all commit/abort and cleanup policy
-/// remains inside `dawn-sector`.
+/// They may publish the returned transport value only for
+/// [`ClientAdmissionResolution::Committed`]; all commit/abort and cleanup
+/// policy remains inside `dawn-sector`.
 pub fn resolve_client_admission<S: EventStore, T, E>(
     node: &mut SimulationNode<S>,
     attempt: ClientAdmissionAttempt,
