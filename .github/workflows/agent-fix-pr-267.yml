@@ -49,27 +49,29 @@ jobs:
           commands = commands.replace(old, new, 1)
 
           marker = "    #[test]\n    fn followup_projection_preserves_jump_context() {\n"
-          test = '''    #[test]
-    fn attack_command_payload_reaches_the_flight_family() {
-        use dawn_core::AttackCommand;
-
-        let attacker_id = ShipId(dawn_core::EntityId::from_raw(11));
-        let target_id = ShipId(dawn_core::EntityId::from_raw(12));
-        let dispatch = ClientCommandDispatch::select(ClientCommand::Attack(AttackCommand {
-            attacker_id,
-            target_id,
-        }));
-
-        assert!(matches!(
-            dispatch,
-            ClientCommandDispatch::Flight(FlightDispatchCommand::Attack(AttackCommand {
-                attacker_id: actual_attacker,
-                target_id: actual_target,
-            })) if actual_attacker == attacker_id && actual_target == target_id
-        ));
-    }
-
-'''
+          test_lines = [
+              "    #[test]",
+              "    fn attack_command_payload_reaches_the_flight_family() {",
+              "        use dawn_core::AttackCommand;",
+              "",
+              "        let attacker_id = ShipId(dawn_core::EntityId::from_raw(11));",
+              "        let target_id = ShipId(dawn_core::EntityId::from_raw(12));",
+              "        let dispatch = ClientCommandDispatch::select(ClientCommand::Attack(AttackCommand {",
+              "            attacker_id,",
+              "            target_id,",
+              "        }));",
+              "",
+              "        assert!(matches!(",
+              "            dispatch,",
+              "            ClientCommandDispatch::Flight(FlightDispatchCommand::Attack(AttackCommand {",
+              "                attacker_id: actual_attacker,",
+              "                target_id: actual_target,",
+              "            })) if actual_attacker == attacker_id && actual_target == target_id",
+              "        ));",
+              "    }",
+              "",
+          ]
+          test = "\n".join(test_lines) + "\n"
           if commands.count(marker) != 1:
               raise SystemExit(f"expected exactly one insertion marker in {commands_path}")
           commands = commands.replace(marker, test + marker, 1)
