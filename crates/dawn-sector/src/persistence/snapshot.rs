@@ -4,7 +4,7 @@
 //!
 //! 1. Load `StateSnapshot` from disk.
 //! 2. Open the `FileEventStore` for the same Sector.
-//! 3. Call `SimulationNode::restore_from(store, &snapshot, galaxy, &modules, &ship_types)`
+//! 3. Call `SimulationNode::restore_from_test(store, &snapshot, galaxy, &modules, &ship_types)`
 //!    with the same module / ship-type definitions the node was configured with.
 //!    - The snapshot reconstructs the ECS World up to `log_index`
 //!      (position, velocity, hull layers, capacitor, fitting).

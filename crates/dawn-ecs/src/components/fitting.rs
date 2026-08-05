@@ -4,7 +4,7 @@ use dawn_core::fitting::{
     ActivationMode, FittingSnapshot, ModuleDefinition, ModuleId, SlotEntry, SlotKind, StatDelta,
 };
 use dawn_core::ShipId;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// One fitted slot (module definition + runtime activation state).
 #[derive(Debug, Clone)]
@@ -199,7 +199,7 @@ impl FittingComp {
     /// `FittingSnapshot` から `FittingComp` を復元する（Event Replay 用）。
     pub fn from_snapshot(
         snapshot: &FittingSnapshot,
-        registry: &HashMap<ModuleId, ModuleDefinition>,
+        registry: &BTreeMap<ModuleId, ModuleDefinition>,
     ) -> Self {
         let resolve = |entries: &[SlotEntry]| -> Vec<FittedSlot> {
             entries
@@ -364,7 +364,7 @@ mod tests {
 
     #[test]
     fn from_snapshot_restores_activation_state() {
-        let mut registry = HashMap::new();
+        let mut registry = BTreeMap::new();
         let weapon_def = weapon_slot(false).def;
         registry.insert(ModuleId(1), weapon_def);
 

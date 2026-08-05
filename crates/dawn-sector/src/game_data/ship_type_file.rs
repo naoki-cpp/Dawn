@@ -91,7 +91,10 @@ impl From<ShipTypeEntry> for ShipTypeDefinition {
     }
 }
 
-fn validate_ship_types(ship_types: &[ShipTypeDefinition], path: &Path) -> Result<(), CatalogError> {
+pub(super) fn validate_ship_types(
+    ship_types: &[ShipTypeDefinition],
+    path: &Path,
+) -> Result<(), CatalogError> {
     if ship_types.is_empty() {
         return validation_error(
             "ship-type",

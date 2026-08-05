@@ -262,19 +262,12 @@ mod tests {
     }
 
     fn node() -> SimulationNode<InMemoryEventStore> {
-        let mut node = SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-        );
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            node.register_module(def);
-        }
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            node.register_ship_type(def);
-        }
-        node
+        )
     }
 
     fn copied_store(node: &SimulationNode<InMemoryEventStore>) -> InMemoryEventStore {
@@ -298,7 +291,7 @@ mod tests {
             tick: Tick(1),
         }));
 
-        let mut restored = SimulationNode::restore_from(
+        let mut restored = SimulationNode::restore_from_test(
             store,
             &snapshot,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -336,7 +329,7 @@ mod tests {
             tick: Tick(2),
         }));
 
-        let mut restored = SimulationNode::restore_from(
+        let mut restored = SimulationNode::restore_from_test(
             store,
             &snapshot,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),

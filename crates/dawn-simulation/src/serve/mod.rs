@@ -13,7 +13,7 @@ pub(crate) use single::run_phase4_server;
 use aoi_delivery::AoiDelivery;
 use dawn_core::{NodeId, SectorBounds, SectorId, ShipId};
 use dawn_sector::node::SimulationNode;
-use dawn_sector::{galaxy::Galaxy, game_data::runtime_catalog};
+use dawn_sector::{galaxy::Galaxy, game_data::GameDataCatalog};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -181,26 +181,31 @@ impl DuelMetrics {
 
 /// Build a `SimulationNode` wired the way every serve loop needs it.
 /// Shared by `run_phase4_server` and `run_cluster_server`.
+pub(crate) fn load_serve_dependencies() -> (std::sync::Arc<Galaxy>, std::sync::Arc<GameDataCatalog>)
+{
+    let galaxy = std::sync::Arc::new(
+        Galaxy::load_from_file(PRODUCTION_GALAXY_PATH)
+            .unwrap_or_else(|error| panic!("failed to load production galaxy map: {error}")),
+    );
+    let catalog = std::sync::Arc::new(
+        GameDataCatalog::load_runtime()
+            .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}")),
+    );
+    (galaxy, catalog)
+}
+
+/// Build a `SimulationNode` from dependencies owned by the serve composition root.
 pub(crate) fn build_serve_node(
     id: NodeId,
     sector: SectorId,
     bounds: SectorBounds,
     pop_cap: usize,
+    galaxy: std::sync::Arc<Galaxy>,
+    catalog: std::sync::Arc<GameDataCatalog>,
 ) -> SimulationNode {
-    let galaxy = std::sync::Arc::new(
-        Galaxy::load_from_file(PRODUCTION_GALAXY_PATH)
-            .unwrap_or_else(|e| panic!("failed to load production galaxy map: {e}")),
-    );
-    let mut node = SimulationNode::new(id, sector, bounds, galaxy);
+    let mut node = SimulationNode::new(id, sector, bounds, galaxy, catalog);
     node.set_population_cap(pop_cap);
-    register_data_driven_definitions(&mut node);
     node
-}
-
-fn register_data_driven_definitions(node: &mut SimulationNode) {
-    let catalog = runtime_catalog()
-        .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}"));
-    catalog.register_into(node);
 }
 
 // ── Integration tests ─────────────────────────────────────────────────────────
@@ -221,15 +226,22 @@ mod serve_pipeline_tests {
         bounds: SectorBounds,
         pop_cap: usize,
     ) -> SimulationNode {
-        let mut node = SimulationNode::new(id, sector, bounds, std::sync::Arc::new(Galaxy::demo()));
-        node.set_population_cap(pop_cap);
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let catalog = dawn_sector::game_data::GameDataCatalog::load_from_paths(
-            root.join(dawn_sector::game_data::PRODUCTION_MODULES_PATH),
-            root.join(dawn_sector::game_data::PRODUCTION_SHIP_TYPES_PATH),
-        )
-        .expect("repository game-data catalog");
-        catalog.register_into(&mut node);
+        let catalog = std::sync::Arc::new(
+            dawn_sector::game_data::GameDataCatalog::load_from_paths(
+                root.join(dawn_sector::game_data::PRODUCTION_MODULES_PATH),
+                root.join(dawn_sector::game_data::PRODUCTION_SHIP_TYPES_PATH),
+            )
+            .expect("repository game-data catalog"),
+        );
+        let mut node = SimulationNode::new(
+            id,
+            sector,
+            bounds,
+            std::sync::Arc::new(Galaxy::demo()),
+            catalog,
+        );
+        node.set_population_cap(pop_cap);
         node
     }
 

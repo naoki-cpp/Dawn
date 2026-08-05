@@ -256,6 +256,7 @@ mod tests {
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+            crate::test_catalog(),
         )
     }
 

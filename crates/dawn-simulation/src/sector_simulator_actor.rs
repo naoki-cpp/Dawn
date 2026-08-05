@@ -21,6 +21,7 @@
 use dawn_consensus::{RaftActorHandle, Role, Term};
 use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId, Tick, Velocity};
 use dawn_replication::{InMemoryReplicationBus, OutboundLogPublisher};
+use dawn_sector::game_data::GameDataCatalog;
 use dawn_sector::node::SimulationNode;
 use dawn_sector::transit::TransitOp;
 use tokio::sync::{mpsc, oneshot};
@@ -237,6 +238,16 @@ impl SectorSimulatorActor {
 
 // ── Handle ────────────────────────────────────────────────────────────────────
 
+/// Static dependencies required to construct one Sector simulation actor.
+#[derive(Debug, Clone)]
+pub struct SectorSimulatorConfig {
+    pub(crate) node_id: NodeId,
+    pub(crate) sector_id: SectorId,
+    pub(crate) bounds: SectorBounds,
+    pub(crate) galaxy: std::sync::Arc<dawn_sector::galaxy::Galaxy>,
+    pub(crate) catalog: std::sync::Arc<GameDataCatalog>,
+}
+
 /// Cloneable handle to a running `SectorSimulatorActor`.
 #[derive(Clone)]
 pub struct SectorSimulatorHandle {
@@ -263,16 +274,19 @@ impl SectorSimulatorHandle {
     /// its peers via `RaftTransport`. `raft_committed_rx` is the matching
     /// committed-entries channel from the same `RaftActor`.
     pub fn spawn(
-        node_id: NodeId,
-        sector_id: SectorId,
-        bounds: SectorBounds,
-        galaxy: std::sync::Arc<dawn_sector::galaxy::Galaxy>,
+        config: SectorSimulatorConfig,
         replication: OutboundLogPublisher<InMemoryReplicationBus>,
         raft: RaftActorHandle,
         raft_committed_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     ) -> Self {
         let (tx, rx) = mpsc::channel(256);
-        let node = SimulationNode::new(node_id, sector_id, bounds, galaxy);
+        let node = SimulationNode::new(
+            config.node_id,
+            config.sector_id,
+            config.bounds,
+            config.galaxy,
+            config.catalog,
+        );
         tokio::spawn(
             SectorSimulatorActor::new(rx, node, replication, raft, raft_committed_rx).run(),
         );
@@ -384,10 +398,13 @@ mod tests {
         let raft = RaftActorHandle::new(raft_tx);
 
         let handle = SectorSimulatorHandle::spawn(
-            NodeId(0),
-            SectorId(0),
-            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-            std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+            SectorSimulatorConfig {
+                node_id: NodeId(0),
+                sector_id: SectorId(0),
+                bounds: SectorBounds::centered(SectorBounds::DEFAULT_HALF),
+                galaxy: std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+                catalog: crate::test_catalog(),
+            },
             OutboundLogPublisher::new(bus.clone()),
             raft,
             committed_rx,

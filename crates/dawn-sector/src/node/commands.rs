@@ -358,7 +358,7 @@ mod tests {
     }
 
     fn mem_node() -> SimulationNode {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -366,40 +366,16 @@ mod tests {
         )
     }
 
-    fn node_with_modules() -> SimulationNode {
-        let mut node = mem_node();
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            node.register_module(def);
-        }
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            node.register_ship_type(def);
-        }
-        node
+    fn node_with_catalog() -> SimulationNode {
+        mem_node()
     }
 
     #[test]
     fn fitting_same_module_twice_does_not_double_count_stats() {
-        use dawn_core::fitting::{ModuleDefinition, ModuleKind, StatDelta};
         use dawn_core::{FitModuleCommand, ModuleId, SlotKind};
 
         let mut node = mem_node();
         let ship_id = node.spawn_ship(dawn_core::ShipTypeId(1), Position::ORIGIN, Velocity::ZERO);
-
-        let railgun = ModuleDefinition {
-            id: ModuleId(1),
-            name: "Test Railgun".to_string(),
-            kind: ModuleKind::Weapon,
-            slot: SlotKind::High,
-            activation_mode: dawn_core::ActivationMode::Active,
-            cap_cost_per_cycle: 60.0,
-            cycle_time_ticks: 10,
-            stat_delta: StatDelta {
-                weapon_damage_add: 25.0,
-                weapon_range_add: 1000.0,
-                ..StatDelta::ZERO
-            },
-        };
-        node.register_module(railgun);
 
         node.fit_module(FitModuleCommand {
             ship_id,
@@ -428,7 +404,7 @@ mod tests {
     fn player_weapon_deals_damage_to_bot_after_lock_and_activation() {
         use dawn_core::{ActivateModuleCommand, LockOnCommand, ModuleId, SlotKind};
 
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
 
         let bot_pos = Position::new(500.0, 0.0, 0.0);
         let (_, bot_ship_id) = node.spawn_bot_ship(bot_pos);
@@ -481,7 +457,7 @@ mod tests {
     fn activate_module_owned_reports_the_specific_rejection_reason() {
         use crate::modules::MODULE_RAILGUN_SMALL;
 
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let owner_id = node.next_player_id();
         let ship_id = node.spawn_player_ship_at_pub(owner_id, Position::ORIGIN);
         node.fit_module(FitModuleCommand {
@@ -564,7 +540,7 @@ mod tests {
             LockOnCommand, SlotKind, StationId,
         };
 
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let station = node.station(StationId(0)).unwrap().clone();
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);
@@ -684,9 +660,6 @@ mod tests {
     fn fit_command_returns_player_loadout_refresh_followup() {
         use dawn_core::{ClientCommand, FitModuleCommand, ModuleId, SlotKind};
         let mut node = mem_node();
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            node.register_module(def);
-        }
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let mut locks = Vec::new();
         let result = node.apply_client_command(
@@ -737,7 +710,7 @@ mod tests {
             ActivateModuleCommand, DockCommand, LockOnCommand, ModuleId, SlotKind, StationId,
         };
 
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let station = node
             .station(StationId(0))
             .expect("demo station exists")
@@ -858,7 +831,7 @@ mod tests {
         use crate::modules::MODULE_AFTERBURNER;
         use dawn_core::{ActivateModuleCommand, ClientCommand, FitModuleCommand, SlotKind};
 
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         node.fit_module(FitModuleCommand {
             ship_id,
@@ -906,7 +879,7 @@ mod tests {
             SlotKind,
         };
 
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         node.fit_module(FitModuleCommand {
             ship_id,
@@ -1009,7 +982,7 @@ mod tests {
         use dawn_core::{ClientCommand, WarpCommand, WarpTarget};
         use dawn_ecs::components::WarpComp;
 
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
 
         let mut locks = Vec::new();
@@ -1092,9 +1065,6 @@ mod tests {
     fn unfit_command_dispatches_through_and_returns_refresh_fitting_followup() {
         use dawn_core::{ClientCommand, FitModuleCommand, ModuleId, SlotKind, UnfitModuleCommand};
         let mut node = mem_node();
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            node.register_module(def);
-        }
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         node.fit_module(FitModuleCommand {
             ship_id,
@@ -1125,7 +1095,7 @@ mod tests {
     #[test]
     fn undock_command_dispatches_through_and_undocks_the_active_ship() {
         use dawn_core::ClientCommand;
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let (player_id, ship_id) = docked_owned_player(&mut node);
         assert!(node.is_ship_docked(ship_id));
 
@@ -1152,7 +1122,7 @@ mod tests {
     #[test]
     fn dock_command_dispatches_through_and_docks_the_active_ship() {
         use dawn_core::{ClientCommand, DockCommand, StationId};
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let station = node.station(StationId(0)).expect("demo station exists");
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
@@ -1182,7 +1152,7 @@ mod tests {
     #[test]
     fn build_packaged_ship_command_dispatches_through_and_credits_the_station_item() {
         use dawn_core::{BuildPackagedShipCommand, ClientCommand, ItemId, StationId};
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let (player_id, ship_id) = docked_owned_player(&mut node);
         node.credit_station_item(player_id, StationId(0), ItemId::ScrapMetal, 10);
 
@@ -1218,7 +1188,7 @@ mod tests {
     #[test]
     fn select_active_ship_command_dispatches_through_and_switches_active_ship() {
         use dawn_core::{ClientCommand, SelectActiveShipCommand, StationId};
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let (player_id, first_ship_id) = docked_owned_player(&mut node);
         let station_abs = node
             .station(StationId(0))
@@ -1265,7 +1235,7 @@ mod tests {
     #[test]
     fn disembark_command_dispatches_through_and_clears_the_active_ship() {
         use dawn_core::{ClientCommand, DisembarkCommand};
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let (player_id, ship_id) = docked_owned_player(&mut node);
 
         let mut locks = Vec::new();
@@ -1293,7 +1263,7 @@ mod tests {
         use dawn_core::{
             ClientCommand, ItemId, StationId, TransferDirection, TransferToStationCommand,
         };
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let (player_id, ship_id) = docked_owned_player(&mut node);
         let entity = *node.ships.index.get(&ship_id).unwrap();
         if let Some(mut inv) = node
@@ -1332,7 +1302,7 @@ mod tests {
     #[test]
     fn jump_command_from_a_docked_ship_returns_no_followup() {
         use dawn_core::{ClientCommand, JumpCommand, JumpGateId};
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let (player_id, _ship_id) = docked_owned_player(&mut node);
         let mut locks = Vec::new();
         let result = node.apply_client_command(

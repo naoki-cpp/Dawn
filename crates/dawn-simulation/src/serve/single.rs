@@ -2,8 +2,8 @@
 #![allow(clippy::module_name_repetitions)]
 
 use super::{
-    build_serve_node, market::MarketRuntime, AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS,
-    TIDI_BUDGET,
+    build_serve_node, load_serve_dependencies, market::MarketRuntime, AoiDelivery, DuelMetrics,
+    AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
 };
 use crate::ws_server;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
@@ -53,7 +53,8 @@ pub(crate) async fn run_phase4_server(
         .expect("failed to bind WebSocket server");
 
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
-    let mut node = build_serve_node(NodeId(0), SectorId(0), bounds, pop_cap);
+    let (galaxy, catalog) = load_serve_dependencies();
+    let mut node = build_serve_node(NodeId(0), SectorId(0), bounds, pop_cap, galaxy, catalog);
     let mut market = MarketRuntime::open("data/market.sqlite")
         .expect("failed to open Market database at data/market.sqlite");
 
@@ -344,6 +345,7 @@ mod tests {
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+            crate::test_catalog(),
         )
     }
 

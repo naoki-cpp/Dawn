@@ -1,6 +1,6 @@
 use dawn_core::{
-    events::ShipSpawned, ship_type::ShipTypeDefinition, DomainEvent, FitModuleCommand, NodeId,
-    PlayerId, Position, ShipId, Velocity,
+    events::ShipSpawned, DomainEvent, FitModuleCommand, NodeId, PlayerId, Position, ShipId,
+    Velocity,
 };
 use dawn_ecs::components::{
     CapacitorComp, HullComp, IsBotComp, IsNpcComp, PositionComp, ShipStatsComp,
@@ -38,14 +38,9 @@ impl<S: EventStore> SimulationNode<S> {
     /// and is placed by `settle_ship_into_station` instead), so each caller
     /// keeps doing it their own way before calling this.
     ///
-    /// `unregistered_fallback` is the stats to fall back to if `ship_type_id`
-    /// isn't in `ship_type_registry` -- which callers hit routinely in tests
-    /// that spawn ships without registering any type. `insert_ship_entity`'s
-    /// callers (NPCs, assembled ships) pass `ShipStatsComp::NPC`;
-    /// `spawn_player_ship_at` passes `ShipStatsComp::PLAYER`, matching what it
-    /// used before this function existed -- collapsing both onto one fallback
-    /// would have quietly weakened every player ship spawned in a node that
-    /// hadn't registered `SHIP_TYPE_MAGPIE` yet.
+    /// `unregistered_fallback` is a defensive policy for an unknown dynamic
+    /// `ship_type_id` or legacy event. Required production IDs are validated
+    /// before construction, so normal player/NPC creation never takes it.
     pub(super) fn materialize_ship_stats(
         &mut self,
         ship_id: ShipId,
@@ -119,12 +114,6 @@ impl<S: EventStore> SimulationNode<S> {
             }));
 
         ship_id
-    }
-
-    // ── ShipType ──────────────────────────────────────────────────────────────
-
-    pub fn register_ship_type(&mut self, def: ShipTypeDefinition) {
-        self.ship_type_registry.insert(def.id, def);
     }
 
     // ── Phase 5: PlayerId / ownership management ─────────────────────────────
@@ -468,52 +457,33 @@ mod tests {
     use super::*;
     use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, Tick};
 
-    fn node_with_modules() -> SimulationNode {
-        let mut node = SimulationNode::new(
+    fn node_with_catalog() -> SimulationNode {
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-        );
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            node.register_module(def);
-        }
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            node.register_ship_type(def);
-        }
-        node
+        )
     }
 
-    /// `spawn_player_ship_at` must still fall back to `ShipStatsComp::PLAYER`
-    /// (not `NPC`) when `SHIP_TYPE_MAGPIE` isn't registered -- unlike
-    /// `node_with_modules()` above, this uses a bare `SimulationNode::new()`,
-    /// matching the many existing `mem_node()`-style test fixtures elsewhere
-    /// in this crate that spawn a player ship without registering any ship
-    /// type. `materialize_ship_stats`'s shared core takes this fallback as a
-    /// parameter specifically so sharing it with the NPC/replay paths (issue
-    /// #197) didn't silently swap every such player ship onto the weaker NPC
-    /// stat profile.
+    /// Player construction uses the validated catalog selected for the node.
+    /// The default Magpie is a required definition, so the old empty-registry
+    /// fallback state no longer exists.
     #[test]
-    fn player_spawn_falls_back_to_player_stats_not_npc_when_the_ship_type_is_unregistered() {
-        let mut node = SimulationNode::new(
-            NodeId(0),
-            SectorId(0),
-            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-        );
+    fn player_spawn_uses_the_validated_magpie_stats() {
+        let mut node = node_with_catalog();
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship(player_id);
 
         let stats = node
             .get_ship_stats(ship_id)
             .expect("spawned ship must have stats");
-        // max_shield distinguishes the two profiles (PLAYER 500.0 vs NPC
-        // 200.0); comparing one field since ShipStatsComp has no PartialEq.
-        assert_eq!(
-            stats.max_shield,
-            ShipStatsComp::PLAYER.max_shield,
-            "an unregistered ship type must fall back to PLAYER stats, not NPC"
-        );
+        let magpie = crate::game_data::test_catalog()
+            .ship_type(crate::ship_types::SHIP_TYPE_MAGPIE)
+            .expect("validated catalog contains the required Magpie definition");
+        assert_eq!(stats.max_shield, magpie.base_stats.max_shield);
+        assert_eq!(stats.max_speed, magpie.base_stats.max_speed);
+        assert_eq!(stats.cap_max, magpie.base_stats.cap_max);
     }
 
     #[test]
@@ -521,7 +491,7 @@ mod tests {
         // ADR-0034/0037 round trip: every new player can exercise
         // Assemble/Disembark/SelectActiveShip/Undock immediately, without
         // first Disassembling their only ship.
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let player_id = node.next_player_id();
         node.spawn_player_ship(player_id);
 
@@ -542,7 +512,7 @@ mod tests {
         // position (160,000, 0, 100,000 in compressed units) anchors on Forge
         // (id 1) with a ~zero offset, keeping the offset small (the method-B
         // invariant). Distances stay correct via the absolute accessors.
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let near_star = node.spawn_ship(
             dawn_core::ShipTypeId(1),
             Position::new(30_000.0, 0.0, 0.0),
@@ -573,7 +543,7 @@ mod tests {
     #[test]
     fn anchor_rebased_preserves_absolute_position_and_updates_anchor() {
         use dawn_core::{events::AnchorRebased, AnchorId};
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let ship = node.spawn_ship(
             dawn_core::ShipTypeId(1),
             Position::new(30_000.0, 0.0, 0.0),
@@ -607,7 +577,7 @@ mod tests {
     fn snapshot_restore_preserves_a_rebased_ships_anchor_and_absolute_position() {
         use dawn_core::{events::AnchorRebased, AnchorId};
         use dawn_event_store::InMemoryEventStore;
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         let ship = node.spawn_ship(
             dawn_core::ShipTypeId(1),
             Position::new(160_000.0, 0.0, 0.0),
@@ -640,7 +610,7 @@ mod tests {
             "snapshot must capture the rebased anchor"
         );
 
-        let node2 = SimulationNode::restore_from(
+        let node2 = SimulationNode::restore_from_test(
             InMemoryEventStore::new(),
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -663,7 +633,7 @@ mod tests {
     #[test]
     fn ship_distance_is_correct_across_different_anchors() {
         use dawn_core::{events::AnchorRebased, AnchorId};
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         // Ship a near the star (small offset under Helios), ship b near Forge
         // (small offset under its own anchor). Each is precise locally; the
         // cross-anchor distance composes both in f64 (ADR-0029 / spike B-3).
@@ -707,7 +677,7 @@ mod tests {
         // (dawn-simulation and dawn-sector-node).
         use crate::modules;
 
-        let mut node = node_with_modules();
+        let mut node = node_with_catalog();
         node.spawn_npc_frigates(3);
         assert_eq!(node.ship_count(), 3);
 

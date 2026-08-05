@@ -190,12 +190,24 @@ mod tests {
 
     const AOI_CELL_SIZE: f64 = 1_000.0;
 
+    fn test_catalog() -> std::sync::Arc<dawn_sector::game_data::GameDataCatalog> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        std::sync::Arc::new(
+            dawn_sector::game_data::GameDataCatalog::load_from_paths(
+                root.join(dawn_sector::game_data::PRODUCTION_MODULES_PATH),
+                root.join(dawn_sector::game_data::PRODUCTION_SHIP_TYPES_PATH),
+            )
+            .expect("repository game-data catalog"),
+        )
+    }
+
     fn test_node() -> SimulationNode {
         SimulationNode::new(
             NodeId(7),
             SectorId(3),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+            test_catalog(),
         )
     }
 
