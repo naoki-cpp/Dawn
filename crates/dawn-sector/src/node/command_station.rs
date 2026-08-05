@@ -69,6 +69,9 @@ impl<S: EventStore> SimulationNode<S> {
                 let Some(ship_id) = active_ship else {
                     return StationDispatchEffect::NoFollowup;
                 };
+                if self.is_ship_in_transit(ship_id) {
+                    return StationDispatchEffect::NoFollowup;
+                }
                 self.dock_owned(player_id, ship_id, cmd);
                 StationDispatchEffect::RefreshPlayerLoadout
             }
@@ -164,6 +167,33 @@ mod tests {
         );
 
         assert_eq!(effect, StationDispatchEffect::NoFollowup);
+    }
+
+    #[test]
+    fn dock_dispatch_rejects_an_active_ship_in_transit() {
+        use dawn_core::commands::TransitCommand;
+
+        let mut node = node();
+        let player_id = node.next_player_id();
+        let ship_id = node.spawn_player_ship(player_id);
+        node.propose_transit(TransitCommand {
+            ship_id,
+            to: SectorId(1),
+        })
+        .expect("transit proposal should succeed");
+        let events_before = node.total_event_count();
+
+        let effect = node.dispatch_station_command(
+            player_id,
+            Some(ship_id),
+            StationDispatchCommand::Dock(DockCommand {
+                station_id: StationId(0),
+            }),
+        );
+
+        assert_eq!(effect, StationDispatchEffect::NoFollowup);
+        assert!(!node.is_ship_docked(ship_id));
+        assert_eq!(node.total_event_count(), events_before);
     }
 
     #[test]

@@ -26,7 +26,7 @@ Transitについては、Raftの回復判断とShipの状態変更を別module�
 | 観点 | 評価 | 現在の判断 |
 |---|---|---|
 | クレート構成 | A− | `dawn-core` / `dawn-sector` / `dawn-wire` / client 2 crateのDAGは健全。共有runtime crateは不要 |
-| ファイルサイズ | B+ | 500行超のRustファイルは複数あるが、主な超過は同居テストまたは単一の状態機械。`commands.rs` / `transit.rs` はR-3でtriggerを管理 |
+| ファイルサイズ | B+ | 500行超のRustファイルは複数あるが、主な超過は同居テストまたは単一の状態機械。`commands.rs` はfamily policyを分離済み、`transit.rs` / `warp.rs` はR-3でtriggerを管理 |
 | 型設計 | A− | domain固有のResult/Outcomeを維持。dispatcher都合で共通型へ潰さない（ADR-0047） |
 | 重複 | A− | live/replayのShip materialization、Station runtime apply、SectorMap projectionを解消。Transit policy/state mutationも分離 |
 | 永続化 | A− | snapshot seamとpost-snapshot tail replayの同値性を#197で固定済み |
@@ -55,7 +55,7 @@ Open:
 | ファイル | 行数 | 判定 |
 |---|---:|---|
 | `crates/dawn-sector/src/node/transit.rs` | 1757 | 🟡 Transit state mutation・live/replay tests。実装とテストの責務は凝集しておりR-3で監視 |
-| `crates/dawn-sector/src/node/commands.rs` | 1623 | 🟡 網羅dispatcher・module command・tests。ADR-0047の明示matchを維持し、実装責務が再分化したらR-3を発火 |
+| `crates/dawn-sector/src/node/commands.rs` | 1334 | 🟢 網羅的family選択・follow-up射影・統合tests。family policyは専用moduleへ分離済み（issue #264、ADR-0047 amendment） |
 | `crates/dawn-sector/src/node/warp.rs` | 1190 | 🟢 warp state machine・geometry kernel・tests |
 | `crates/dawn-market/src/order_book.rs` | 1139 | 🟡 SQLite authority・Currency escrow・order boundary。matching policyは`matching.rs`へ分離済み |
 | `crates/dawn-sector/src/node/orbit.rs` | 950 | 🟢 Orbit / Keep-at-Range steering kernel・tests |

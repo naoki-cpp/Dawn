@@ -39,6 +39,26 @@ related : ADR-0037 (active ship / owned ship), ADR-0041/0042 (wire schema),
 
 3 と 5 のみ実装した。
 
+## 2026-08-05 amendment: family-local policy boundary (issue #264)
+
+R-3 の再評価で、`apply_client_command` の網羅 match 自体ではなく、その各 arm に
+flight / module / station / loadout-refresh の検証・適用方針が混在していることを
+分割 trigger と判断した。元の decision を破棄せず、次の形へ境界を深める。
+
+1. `ClientCommand` のワイヤ形状と、外側の網羅 match は維持する。
+2. 網羅 match は payload を private な閉じた family enum へ分類するだけにする。
+3. flight / module / loadout / station の各 module が、その family の検証・状態変更と
+   family-local effect を所有する。
+4. family effect から既存の `ClientCommandFollowup` への射影は、コマンド入口の
+   一箇所だけが所有する。
+5. active ship は従来どおり入口で一度だけ解決し、必要な family へ値として渡す。
+6. 葉の `*_owned` API、拒否理由、domain event、wire protocol は変更しない。
+
+これにより、新しい flight command の方針変更は `command_flight.rs`、module activation
+の変更は `command_module.rs` の中で閉じる。一方、`ClientCommand` に variant が追加された
+ときは、従来どおり一箇所の網羅 match がコンパイルエラーになり、どの family が所有するかを
+明示的に決めさせる。
+
 ### 3 の理由
 
 どのシップにプレイヤーのコマンドが向くか（ADR-0037 の active ship）は、
@@ -122,11 +142,11 @@ dawn-sector の結合を強める。trait 化しても `ClientCommand` から具
 
 - `ClientCommand` にバリアントを追加すると、外側 match の非網羅性でコンパイルが
   失敗する。変更検出器として機能し続ける。
-- station ディスパッチャは引き続き station コマンドだけを受け取る。
+- flight / module / loadout / station の各ディスパッチャは、自分の閉じた family enum だけを受け取る。
 - active ship はコマンド受信境界で一度だけ解決される。
 - コマンドハンドラのドメイン固有な結果型と拒否理由が維持される。
-- ディスパッチャの行数削減そのものは目的にしない。20アームは薄いルーティング表で
-  あり、境界にビジネスロジックが漏れていない限り問題としない。
+- ディスパッチャの行数削減そのものは目的にしない。外側の網羅 match は薄い family
+  分類表として残し、family policy と follow-up 射影を混在させない。
 
 ## Reconsider when
 
@@ -150,3 +170,6 @@ dawn-sector の結合を強める。trait 化しても `ClientCommand` から具
 - [x] `SelectActiveShip` の次のコマンドが新しい active ship に届くことを、
       公開 API 経由のテストで固定。
 - [x] `command_station.rs` のモジュール doc に、private enum を残す理由を記載。
+- [x] flight / module / loadout / station を private な閉じた family enum へ分類。
+- [x] family-local effect を一箇所で `ClientCommandFollowup` へ射影。
+- [x] family 選択、拒否経路、状態変更、全 follow-up variant の回帰テストを追加。

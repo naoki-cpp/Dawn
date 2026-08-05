@@ -1,27 +1,26 @@
-//! Player command dispatch for `SimulationNode`.
+//! Client command orchestration for [`SimulationNode`].
 //!
-//! # Contents
+//! The public entry point keeps one exhaustive `ClientCommand` match, as
+//! required by ADR-0047, but that match only selects a closed command family.
+//! Family-local modules own validation and application policy:
 //!
-//! ## Unified client dispatch
-//! - `apply_client_command` — single entry point for all `ClientCommand`
-//!   variants; returns `Some(ClientCommandFollowup)` for commands that need
-//!   server-side follow-up (Jump proposal to Raft, PlayerLoadout resend).
+//! - `command_flight` — movement, steering, lock-on, and Jump routing
+//! - `command_module` — module activation/deactivation
+//! - `command_loadout` — fitting mutations that require a loadout refresh
+//! - `command_station` — station and station-inventory operations
 //!
-//! ## Shared ownership accessors
-//! - `owns_ship`
-//! - `is_active_ship`
-//!
-//! Move/Stop and the shared steering helpers live in `movement_commands.rs`.
-//!
-//! ## Module commands
-//! - `activate_module` / `activate_module_owned`
-//! - `deactivate_module` / `deactivate_module_owned`
-//! - `set_module_active`
-//! - `register_module`, `fit_module`
+//! This module owns the two cross-family concerns only: resolving the caller's
+//! active ship once and projecting family effects into `ClientCommandFollowup`.
 
-use dawn_core::{
-    ClientCommand, DomainEvent, FitModuleCommand, JumpCommand, ModuleDefinition, ModuleId,
-    PlayerId, ShipId, SlotKind,
+use dawn_core::{ClientCommand, JumpCommand, PlayerId, ShipId};
+use dawn_event_store::store::EventStore;
+
+use super::{
+    command_flight::{FlightDispatchCommand, FlightDispatchEffect},
+    command_loadout::{LoadoutDispatchCommand, LoadoutDispatchEffect},
+    command_module::{ModuleDispatchCommand, ModuleDispatchEffect},
+    command_station::{StationDispatchCommand, StationDispatchEffect},
+    SimulationNode,
 };
 
 /// What `apply_client_command` hands back to the caller for commands that
@@ -60,80 +59,110 @@ impl ClientCommandFollowup {
     }
 }
 
-/// Why an Activate/Deactivate attempt was rejected (ADR-0006/0035).
-///
-/// Named so a rejection can be logged, tested, and (eventually) surfaced to
-/// the client instead of collapsing to a bare `bool` at the call boundary —
-/// diagnosing which of these fired used to require temporarily wiring in
-/// ad hoc `eprintln!` calls one per branch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModuleActivationRejection {
-    /// `player_id` does not own `ship_id`, or it isn't their active ship
-    /// (checked by the `_owned` wrappers via `resolve_flight_command`).
-    NotOwned,
-    /// `ship_id` has no entity in this Sector.
-    ShipNotFound,
-    /// `ship_id` is docked; module activation requires being undocked.
-    ShipDocked,
-    /// `ship_id` is frozen while a Sector Transit handoff is pending.
-    ShipInTransit,
-    /// No fitted slot matches `module_id`/`slot`.
-    SlotNotFound,
-    /// `ModuleKind::requires_target()` and `target.is_some()` disagree —
-    /// e.g. a Weapon activated with no target, or a self-only module
-    /// activated with one.
-    TargetRequirementMismatch,
-    /// A target was given but it is not a `Locked` entry in this ship's
-    /// `LockComp`.
-    TargetNotLocked,
-    /// The target is Locked, but beyond the module's effective range
-    /// (weapon range+falloff, tackle range, remote-repair range).
-    OutOfRange,
+/// A `ClientCommand` after the wire-level enum has been classified into the
+/// one family that owns its policy. Each payload remains strongly typed; no
+/// family receives the wider `ClientCommand` and no catch-all can silently
+/// swallow a command it does not own.
+enum ClientCommandDispatch {
+    Flight(FlightDispatchCommand),
+    Module(ModuleDispatchCommand),
+    Loadout(LoadoutDispatchCommand),
+    Station(StationDispatchCommand),
 }
 
-/// Maps a `resolve_flight_command` rejection (`ship_command.rs`) onto the
-/// `ModuleActivationRejection` reported by `activate_module_owned`/
-/// `deactivate_module_owned`. `MustBeDocked` is fitting-only and can never
-/// be produced by `resolve_flight_command`.
-fn module_activation_rejection_from_flight(
-    rejection: super::ship_command::ShipCommandRejection,
-) -> ModuleActivationRejection {
-    use super::ship_command::ShipCommandRejection;
-    match rejection {
-        ShipCommandRejection::NotOwned | ShipCommandRejection::NotActiveShip => {
-            ModuleActivationRejection::NotOwned
-        }
-        ShipCommandRejection::ShipNotFound => ModuleActivationRejection::ShipNotFound,
-        ShipCommandRejection::MustBeUndocked => ModuleActivationRejection::ShipDocked,
-        ShipCommandRejection::MustBeDocked => {
-            unreachable!("resolve_flight_command never returns MustBeDocked (fitting-command only)")
-        }
-    }
-}
-use dawn_ecs::{
-    components::{FittedSlot, FittingComp, LockComp, LockState},
-    Entity,
-};
-use dawn_event_store::store::EventStore;
-
-use super::{
-    command_station::{StationDispatchCommand, StationDispatchEffect},
-    SimulationNode,
-};
-
-impl<S: EventStore> SimulationNode<S> {
-    fn station_followup(
-        player_id: PlayerId,
-        effect: StationDispatchEffect,
-    ) -> Option<ClientCommandFollowup> {
-        match effect {
-            StationDispatchEffect::NoFollowup => None,
-            StationDispatchEffect::RefreshPlayerLoadout => {
-                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })
+impl ClientCommandDispatch {
+    /// The single exhaustive command-family selection table (ADR-0047).
+    fn select(cmd: ClientCommand) -> Self {
+        match cmd {
+            ClientCommand::Move(cmd) => Self::Flight(FlightDispatchCommand::Move(cmd)),
+            ClientCommand::LockOn(cmd) => Self::Flight(FlightDispatchCommand::LockOn(cmd)),
+            ClientCommand::Activate(cmd) => Self::Module(ModuleDispatchCommand::Activate(cmd)),
+            ClientCommand::Deactivate(cmd) => Self::Module(ModuleDispatchCommand::Deactivate(cmd)),
+            ClientCommand::Attack(_) => Self::Flight(FlightDispatchCommand::Attack),
+            ClientCommand::Stop(cmd) => Self::Flight(FlightDispatchCommand::Stop(cmd)),
+            ClientCommand::Jump(cmd) => Self::Flight(FlightDispatchCommand::Jump(cmd)),
+            ClientCommand::Approach(cmd) => Self::Flight(FlightDispatchCommand::Approach(cmd)),
+            ClientCommand::Warp(cmd) => Self::Flight(FlightDispatchCommand::Warp(cmd)),
+            ClientCommand::Orbit(cmd) => Self::Flight(FlightDispatchCommand::Orbit(cmd)),
+            ClientCommand::KeepAtRange(cmd) => {
+                Self::Flight(FlightDispatchCommand::KeepAtRange(cmd))
+            }
+            ClientCommand::Fit(cmd) => Self::Loadout(LoadoutDispatchCommand::Fit(cmd)),
+            ClientCommand::Unfit(cmd) => Self::Loadout(LoadoutDispatchCommand::Unfit(cmd)),
+            ClientCommand::ReorderFittedModule(cmd) => {
+                Self::Loadout(LoadoutDispatchCommand::ReorderFittedModule(cmd))
+            }
+            ClientCommand::Dock(cmd) => Self::Station(StationDispatchCommand::Dock(cmd)),
+            ClientCommand::Undock(cmd) => Self::Station(StationDispatchCommand::Undock(cmd)),
+            ClientCommand::BuildPackagedShip(cmd) => {
+                Self::Station(StationDispatchCommand::BuildPackagedShip(cmd))
+            }
+            ClientCommand::DisassembleShip(cmd) => {
+                Self::Station(StationDispatchCommand::DisassembleShip(cmd))
+            }
+            ClientCommand::SelectActiveShip(cmd) => {
+                Self::Station(StationDispatchCommand::SelectActiveShip(cmd))
+            }
+            ClientCommand::Assemble(cmd) => Self::Station(StationDispatchCommand::Assemble(cmd)),
+            ClientCommand::Disembark(_) => Self::Station(StationDispatchCommand::Disembark),
+            ClientCommand::TransferToStation(cmd) => {
+                Self::Station(StationDispatchCommand::TransferToStation(cmd))
             }
         }
     }
 
+    #[cfg(test)]
+    fn family(&self) -> ClientCommandFamily {
+        match self {
+            Self::Flight(_) => ClientCommandFamily::Flight,
+            Self::Module(_) => ClientCommandFamily::Module,
+            Self::Loadout(_) => ClientCommandFamily::Loadout,
+            Self::Station(_) => ClientCommandFamily::Station,
+        }
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClientCommandFamily {
+    Flight,
+    Module,
+    Loadout,
+    Station,
+}
+
+/// Family-local effects before the server-facing follow-up projection.
+///
+/// Keeping the family effect types separate prevents a station handler from
+/// producing a Jump effect, while this wrapper gives the orchestration layer
+/// one place to project every family into `ClientCommandFollowup`.
+enum ClientCommandEffect {
+    Flight(FlightDispatchEffect),
+    Module(ModuleDispatchEffect),
+    Loadout(LoadoutDispatchEffect),
+    Station(StationDispatchEffect),
+}
+
+fn project_followup(
+    player_id: PlayerId,
+    effect: ClientCommandEffect,
+) -> Option<ClientCommandFollowup> {
+    match effect {
+        ClientCommandEffect::Flight(FlightDispatchEffect::NoFollowup)
+        | ClientCommandEffect::Module(ModuleDispatchEffect::NoFollowup)
+        | ClientCommandEffect::Station(StationDispatchEffect::NoFollowup) => None,
+        ClientCommandEffect::Flight(FlightDispatchEffect::Jump { ship_id, command }) => {
+            Some(ClientCommandFollowup::Jump { ship_id, command })
+        }
+        ClientCommandEffect::Module(ModuleDispatchEffect::RefreshPlayerLoadout)
+        | ClientCommandEffect::Loadout(LoadoutDispatchEffect::RefreshPlayerLoadout)
+        | ClientCommandEffect::Station(StationDispatchEffect::RefreshPlayerLoadout) => {
+            Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })
+        }
+    }
+}
+
+impl<S: EventStore> SimulationNode<S> {
     /// Returns `true` if `player_id` owns `ship_id`.
     ///
     /// Used by station-management `_owned` variants (Fit/Unfit/Dock/
@@ -154,451 +183,33 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Apply one `ClientCommand` on behalf of `player_id`.
     ///
-    /// Most variants are dispatched to the matching `apply_*_command_owned`
-    /// method and return `None`. Two variants need server-side context that
-    /// lives outside `dawn-sector` and are handed back as a
-    /// `ClientCommandFollowup`:
-    ///
-    /// - `Jump` → caller proposes Transit to Raft (or starts warp/approach
-    ///   fallback via `apply_jump_with_fallback`).
-    /// - `Fit` / `Unfit` → caller pushes a refreshed `PlayerLoadout` JSON to
-    ///   the session, so a rejected attempt is visibly reverted client-side.
-    ///
-    /// `lock_commands` accumulates `LockOn` commands for the tick's Lock System
-    /// (the caller passes the same vec to `tick_with_lock_commands`).
+    /// The wire command is exhaustively classified into one closed family,
+    /// then delegated to that family's policy module. The caller's active ship
+    /// is resolved once here and passed to families that need it (ADR-0037,
+    /// ADR-0047). The resulting family effect is projected into the existing
+    /// `ClientCommandFollowup` seam in one place.
     pub fn apply_client_command(
         &mut self,
         player_id: PlayerId,
         cmd: ClientCommand,
         lock_commands: &mut Vec<dawn_core::LockOnCommand>,
     ) -> Option<ClientCommandFollowup> {
-        // Which ship a command routes to is decided once, here, and passed
-        // down -- including into `dispatch_station_command` (ADR-0047), so no
-        // handler re-derives it.
-        //
-        // Two groups, split by where the target comes from:
-        //
-        // - Resolved from the active ship (ADR-0037): flight/steering, module
-        //   activation, and Dock/Undock. These carry no ship_id of their own,
-        //   so there is no wire-representable way to name a ship the player
-        //   isn't currently flying.
-        // - Named explicitly by the command: Fit/Unfit/BuildPackagedShip/
-        //   DisassembleShip and the rest of the station-inventory family.
-        //   These check `owns_ship` instead, since they may target any owned
-        //   docked ship -- not just the active one.
         let active_ship = self.ships.active_ship.get(&player_id).copied();
-        match cmd {
-            ClientCommand::Move(mv) => {
-                if let Some(ship_id) = active_ship {
-                    self.apply_move_command_owned(player_id, ship_id, mv.target_position);
-                }
+        let effect = match ClientCommandDispatch::select(cmd) {
+            ClientCommandDispatch::Flight(cmd) => ClientCommandEffect::Flight(
+                self.dispatch_flight_command(player_id, active_ship, cmd, lock_commands),
+            ),
+            ClientCommandDispatch::Module(cmd) => ClientCommandEffect::Module(
+                self.dispatch_module_command(player_id, active_ship, cmd),
+            ),
+            ClientCommandDispatch::Loadout(cmd) => {
+                ClientCommandEffect::Loadout(self.dispatch_loadout_command(player_id, cmd))
             }
-            ClientCommand::LockOn(lo) => {
-                // `lo.ship_id` is not trusted here -- it is resolved fresh
-                // from the caller's active ship before the internal
-                // `LockOnCommand` (consumed by the Lock System) is built.
-                if let Some(ship_id) = active_ship {
-                    if !self.is_ship_docked(ship_id) && !self.is_ship_in_transit(ship_id) {
-                        lock_commands.push(dawn_core::LockOnCommand {
-                            ship_id,
-                            target_id: lo.target_id,
-                        });
-                    }
-                }
-            }
-            ClientCommand::Activate(c) => {
-                if let Some(ship_id) = active_ship {
-                    // The rejection reason (if any) is now a named
-                    // ModuleActivationRejection value rather than a discarded
-                    // bool -- available to a future caller that wants to log
-                    // or surface it. Today's contract stays unchanged: resync
-                    // unconditionally, since a rejected activation and an
-                    // accepted one both need the client's optimistic HUD
-                    // toggle corrected to the authoritative state (ADR-0035).
-                    let _ = self.activate_module_owned(player_id, ship_id, c);
-                    return Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id });
-                }
-            }
-            ClientCommand::Deactivate(c) => {
-                if let Some(ship_id) = active_ship {
-                    let _ = self.deactivate_module_owned(player_id, ship_id, c);
-                    return Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id });
-                }
-            }
-            // Combat is automatic (CombatSystem each tick); AttackCommand is
-            // reserved for a future manual-fire mode.
-            ClientCommand::Attack(_) => {}
-            ClientCommand::Stop(_) => {
-                if let Some(ship_id) = active_ship {
-                    self.apply_stop_command_owned(player_id, ship_id);
-                }
-            }
-            ClientCommand::Approach(a) => {
-                if let Some(ship_id) = active_ship {
-                    self.apply_approach_command_owned(player_id, ship_id, a);
-                }
-            }
-            ClientCommand::Warp(w) => {
-                if let Some(ship_id) = active_ship {
-                    self.apply_warp_command_owned(player_id, ship_id, w);
-                }
-            }
-            ClientCommand::Orbit(o) => {
-                if let Some(ship_id) = active_ship {
-                    self.apply_orbit_command_owned(player_id, ship_id, o);
-                }
-            }
-            ClientCommand::KeepAtRange(k) => {
-                if let Some(ship_id) = active_ship {
-                    self.apply_keep_at_range_command_owned(player_id, ship_id, k);
-                }
-            }
-            ClientCommand::Fit(f) => {
-                self.fit_module_owned(player_id, f);
-                return Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id });
-            }
-            ClientCommand::Unfit(u) => {
-                self.unfit_module_owned(player_id, u);
-                return Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id });
-            }
-            ClientCommand::ReorderFittedModule(r) => {
-                self.reorder_fitted_module_owned(player_id, r);
-                return Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id });
-            }
-            ClientCommand::Dock(d) => {
-                if active_ship.is_some_and(|ship_id| self.is_ship_in_transit(ship_id)) {
-                    return None;
-                }
-                return Self::station_followup(
-                    player_id,
-                    self.dispatch_station_command(
-                        player_id,
-                        active_ship,
-                        StationDispatchCommand::Dock(d),
-                    ),
-                );
-            }
-            ClientCommand::Undock(u) => {
-                return Self::station_followup(
-                    player_id,
-                    self.dispatch_station_command(
-                        player_id,
-                        active_ship,
-                        StationDispatchCommand::Undock(u),
-                    ),
-                );
-            }
-            ClientCommand::BuildPackagedShip(b) => {
-                return Self::station_followup(
-                    player_id,
-                    self.dispatch_station_command(
-                        player_id,
-                        active_ship,
-                        StationDispatchCommand::BuildPackagedShip(b),
-                    ),
-                );
-            }
-            ClientCommand::DisassembleShip(d) => {
-                return Self::station_followup(
-                    player_id,
-                    self.dispatch_station_command(
-                        player_id,
-                        active_ship,
-                        StationDispatchCommand::DisassembleShip(d),
-                    ),
-                );
-            }
-            ClientCommand::Jump(j) => {
-                if let Some(ship_id) = active_ship {
-                    if self.is_ship_docked(ship_id) {
-                        return None;
-                    }
-                    return Some(ClientCommandFollowup::Jump {
-                        ship_id,
-                        command: j,
-                    });
-                }
-            }
-            ClientCommand::SelectActiveShip(s) => {
-                return Self::station_followup(
-                    player_id,
-                    self.dispatch_station_command(
-                        player_id,
-                        active_ship,
-                        StationDispatchCommand::SelectActiveShip(s),
-                    ),
-                );
-            }
-            ClientCommand::Assemble(a) => {
-                return Self::station_followup(
-                    player_id,
-                    self.dispatch_station_command(
-                        player_id,
-                        active_ship,
-                        StationDispatchCommand::Assemble(a),
-                    ),
-                );
-            }
-            ClientCommand::Disembark(_) => {
-                return Self::station_followup(
-                    player_id,
-                    self.dispatch_station_command(
-                        player_id,
-                        active_ship,
-                        StationDispatchCommand::Disembark,
-                    ),
-                );
-            }
-            ClientCommand::TransferToStation(t) => {
-                return Self::station_followup(
-                    player_id,
-                    self.dispatch_station_command(
-                        player_id,
-                        active_ship,
-                        StationDispatchCommand::TransferToStation(t),
-                    ),
-                );
-            }
-        }
-        None
-    }
-
-    // ── Module commands ───────────────────────────────────────────────────────
-
-    pub fn activate_module(
-        &mut self,
-        ship_id: ShipId,
-        cmd: dawn_core::ActivateModuleCommand,
-    ) -> Result<(), ModuleActivationRejection> {
-        self.set_module_active(ship_id, cmd.module_id, cmd.slot, true, cmd.target_ship_id)
-    }
-
-    pub fn deactivate_module(
-        &mut self,
-        ship_id: ShipId,
-        cmd: dawn_core::DeactivateModuleCommand,
-    ) -> Result<(), ModuleActivationRejection> {
-        self.set_module_active(ship_id, cmd.module_id, cmd.slot, false, None)
-    }
-
-    /// `activate_module` wrapped with the shared flight-command seam
-    /// (active-ship + undocked, ADR-0037; `ship_command.rs`).
-    pub fn activate_module_owned(
-        &mut self,
-        player_id: PlayerId,
-        ship_id: ShipId,
-        cmd: dawn_core::ActivateModuleCommand,
-    ) -> Result<(), ModuleActivationRejection> {
-        if let Err(rejection) = self.resolve_flight_command(player_id, ship_id) {
-            return Err(module_activation_rejection_from_flight(rejection));
-        }
-        self.activate_module(ship_id, cmd)
-    }
-
-    /// `deactivate_module` wrapped with the shared flight-command seam
-    /// (active-ship + undocked, ADR-0037; `ship_command.rs`).
-    pub fn deactivate_module_owned(
-        &mut self,
-        player_id: PlayerId,
-        ship_id: ShipId,
-        cmd: dawn_core::DeactivateModuleCommand,
-    ) -> Result<(), ModuleActivationRejection> {
-        if let Err(rejection) = self.resolve_flight_command(player_id, ship_id) {
-            return Err(module_activation_rejection_from_flight(rejection));
-        }
-        self.deactivate_module(ship_id, cmd)
-    }
-
-    /// Activate/deactivate a fitted module (ADR-0006, target handling ADR-0035).
-    ///
-    /// `target` is validated against `ModuleKind::requires_target()`: kinds
-    /// that require a target (Weapon, Tackle) are rejected without one, and
-    /// kinds that don't are rejected if one is given. When required, `target`
-    /// must be a `Locked` entry in this ship's `LockComp` — activation is
-    /// rejected against an unlocked or unknown target (Q4/ADR-0035).
-    fn set_module_active(
-        &mut self,
-        ship_id: ShipId,
-        module_id: ModuleId,
-        slot: SlotKind,
-        active: bool,
-        target: Option<ShipId>,
-    ) -> Result<(), ModuleActivationRejection> {
-        use dawn_core::events::{ModuleActivated, ModuleDeactivated};
-        use ModuleActivationRejection::*;
-        let entity = match self.ships.index.get(&ship_id).copied() {
-            Some(e) => e,
-            None => return Err(ShipNotFound),
+            ClientCommandDispatch::Station(cmd) => ClientCommandEffect::Station(
+                self.dispatch_station_command(player_id, active_ship, cmd),
+            ),
         };
-        if self.world.transit_state(entity).is_in_transit() {
-            return Err(ShipInTransit);
-        }
-
-        // Snapshot the slot's current state before mutating anything.
-
-        let current = self.world.get::<FittingComp>(entity).and_then(|f| {
-            f.iter_slots()
-                .find(|s| s.def.id == module_id && s.def.slot == slot)
-                .map(|s| (s.def.kind, s.is_active, s.target_ship_id))
-        });
-        let (kind, prev_active, prev_target) = match current {
-            Some(c) => c,
-            None => return Err(SlotNotFound),
-        };
-
-        if active {
-            if kind.requires_target() != target.is_some() {
-                return Err(TargetRequirementMismatch);
-            }
-            if let Some(target_id) = target {
-                let locked = self
-                    .world
-                    .get::<LockComp>(entity)
-                    .map(|lock| {
-                        lock.entries
-                            .iter()
-                            .any(|e| e.target_id == target_id && e.state == LockState::Locked)
-                    })
-                    .unwrap_or(false);
-                if !locked {
-                    return Err(TargetNotLocked);
-                }
-            }
-        }
-
-        // Return early if the module is already in the requested state —
-        // avoids emitting duplicate ModuleActivated/Deactivated events every tick.
-        if prev_active == active && prev_target == target {
-            return Ok(());
-        }
-
-        // Tentatively apply, then range-validate against the *post-fit*
-        // stats (ADR-0035): a module's own range contribution only shows up
-        // in ShipStatsComp after apply_fitting runs, so this can't be
-        // checked beforehand. Roll back if it lands out of range — this
-        // rejects the activation outright instead of flipping ON then
-        // having the Range Gate System flip it back OFF next tick, a
-        // same-tick flicker the client can't tell apart from a real cap-out.
-        if !self.write_module_slot_state(entity, module_id, slot, active, target) {
-            return Err(SlotNotFound);
-        }
-        self.reapply_fitting(ship_id);
-
-        if active {
-            if let Some(target_id) = target {
-                if let Some(range) = self.effective_range_for_kind(entity, kind) {
-                    if !self.is_target_within_range(ship_id, target_id, range) {
-                        self.write_module_slot_state(
-                            entity,
-                            module_id,
-                            slot,
-                            prev_active,
-                            prev_target,
-                        );
-                        self.reapply_fitting(ship_id);
-                        return Err(OutOfRange);
-                    }
-                }
-            }
-        }
-
-        let event = if active {
-            DomainEvent::ModuleActivated(ModuleActivated {
-                ship_id,
-                module_id,
-                slot,
-                target_ship_id: target,
-                tick: self.current_tick,
-            })
-        } else {
-            DomainEvent::ModuleDeactivated(ModuleDeactivated {
-                ship_id,
-                module_id,
-                slot,
-                // set_module_active(active=false) is only ever reached via
-                // deactivate_module, which is only ever called for a
-                // player-issued DeactivateModuleCommand (ADR-0035) — system-
-                // forced deactivations (Capacitor/Range Gate) write to
-                // FittingComp directly and emit their own events instead.
-                forced_reason: None,
-                tick: self.current_tick,
-            })
-        };
-        self.event_store.append(event);
-        Ok(())
-    }
-
-    /// Writes `is_active`/`target_ship_id` onto one fitted slot. Returns
-    /// `false` if the slot no longer exists. Does not call `apply_fitting` —
-    /// the caller is responsible for that (ADR-0035: `set_module_active`
-    /// calls this twice, tentative-apply then possible rollback, and only
-    /// wants one `apply_fitting` per attempt).
-    fn write_module_slot_state(
-        &mut self,
-        entity: Entity,
-        module_id: ModuleId,
-        slot: SlotKind,
-        is_active: bool,
-        target: Option<ShipId>,
-    ) -> bool {
-        self.world
-            .get_mut::<FittingComp>(entity)
-            .and_then(|mut f| {
-                f.find_slot_mut(module_id, slot).map(|s| {
-                    if is_active {
-                        s.is_active = true;
-                        s.target_ship_id = target;
-                    } else {
-                        s.force_off();
-                    }
-                    true
-                })
-            })
-            .unwrap_or(false)
-    }
-
-    // ── Fitting ───────────────────────────────────────────────────────────────
-
-    pub fn register_module(&mut self, def: ModuleDefinition) {
-        self.module_registry.insert(def.id, def);
-    }
-
-    /// Returns `true` if successful, `false` if the ship or module is unknown.
-    pub fn fit_module(&mut self, cmd: FitModuleCommand) -> bool {
-        let def = match self.module_registry.get(&cmd.module_id).cloned() {
-            Some(d) => d,
-            None => return false,
-        };
-        let entity = match self.ships.index.get(&cmd.ship_id).copied() {
-            Some(e) => e,
-            None => return false,
-        };
-
-        use dawn_core::fitting::ActivationMode;
-        let is_npc = !self.ships.owners.contains_key(&cmd.ship_id);
-        let is_active = match def.activation_mode {
-            ActivationMode::Passive => true,
-            ActivationMode::Active => is_npc,
-        };
-        if let Some(mut fitting) = self.world.get_mut::<FittingComp>(entity) {
-            fitting.slot_mut(cmd.slot).push(FittedSlot {
-                def,
-                is_active,
-                cycle_remaining: 0,
-                target_ship_id: None,
-            });
-        } else {
-            return false;
-        }
-
-        self.reapply_fitting(cmd.ship_id);
-        // Inventory is absent for NPCs and for ships fit_module touches before
-        // seeding (ADR-0032) -- this privileged path doesn't consume from it,
-        // so emit_ship_fitted just mirrors whatever is currently there for
-        // replay fidelity.
-        self.emit_ship_fitted(cmd.ship_id, entity);
-
-        true
+        project_followup(player_id, effect)
     }
 }
 
@@ -606,8 +217,104 @@ impl<S: EventStore> SimulationNode<S> {
 mod tests {
     use super::*;
     use crate::node::station::StationOperationOutcome;
-    use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, Velocity};
-    use dawn_ecs::components::ThrustComp;
+    use crate::node::ModuleActivationRejection;
+    use dawn_core::{
+        DomainEvent, FitModuleCommand, ModuleId, NodeId, Position, SectorBounds, SectorId,
+        SlotKind, Velocity,
+    };
+    use dawn_ecs::components::{FittingComp, ThrustComp};
+
+    #[test]
+    fn client_commands_are_selected_into_their_closed_policy_family() {
+        use dawn_core::{ActivateModuleCommand, DockCommand, MoveCommand, StationId};
+
+        assert_eq!(
+            ClientCommandDispatch::select(ClientCommand::Move(MoveCommand::new(Position::ORIGIN,)))
+                .family(),
+            ClientCommandFamily::Flight
+        );
+        assert_eq!(
+            ClientCommandDispatch::select(ClientCommand::Activate(ActivateModuleCommand {
+                module_id: ModuleId(1),
+                slot: SlotKind::High,
+                target_ship_id: None,
+            }))
+            .family(),
+            ClientCommandFamily::Module
+        );
+        assert_eq!(
+            ClientCommandDispatch::select(ClientCommand::Fit(FitModuleCommand {
+                ship_id: ShipId(dawn_core::EntityId::from_raw(1)),
+                slot: SlotKind::High,
+                module_id: ModuleId(1),
+            }))
+            .family(),
+            ClientCommandFamily::Loadout
+        );
+        assert_eq!(
+            ClientCommandDispatch::select(ClientCommand::Dock(DockCommand {
+                station_id: StationId(0),
+            }))
+            .family(),
+            ClientCommandFamily::Station
+        );
+    }
+
+    #[test]
+    fn followup_projection_preserves_jump_context() {
+        let ship_id = ShipId(dawn_core::EntityId::from_raw(3));
+        let effect = ClientCommandEffect::Flight(FlightDispatchEffect::Jump {
+            ship_id,
+            command: JumpCommand {
+                gate_id: dawn_core::JumpGateId(4),
+            },
+        });
+
+        assert!(matches!(
+            project_followup(PlayerId(7), effect),
+            Some(ClientCommandFollowup::Jump {
+                ship_id: projected_ship,
+                command: JumpCommand { gate_id }
+            }) if projected_ship == ship_id && gate_id == dawn_core::JumpGateId(4)
+        ));
+    }
+
+    #[test]
+    fn followup_projection_maps_every_refreshing_family_to_the_caller() {
+        let player_id = PlayerId(7);
+        let effects = [
+            ClientCommandEffect::Module(ModuleDispatchEffect::RefreshPlayerLoadout),
+            ClientCommandEffect::Loadout(LoadoutDispatchEffect::RefreshPlayerLoadout),
+            ClientCommandEffect::Station(StationDispatchEffect::RefreshPlayerLoadout),
+        ];
+
+        for effect in effects {
+            assert!(matches!(
+                project_followup(player_id, effect),
+                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id: id })
+                    if id == player_id
+            ));
+        }
+    }
+
+    #[test]
+    fn followup_projection_keeps_no_followup_effects_empty() {
+        assert!(project_followup(
+            PlayerId(7),
+            ClientCommandEffect::Flight(FlightDispatchEffect::NoFollowup),
+        )
+        .is_none());
+        assert!(project_followup(
+            PlayerId(7),
+            ClientCommandEffect::Module(ModuleDispatchEffect::NoFollowup),
+        )
+        .is_none());
+        assert!(project_followup(
+            PlayerId(7),
+            ClientCommandEffect::Station(StationDispatchEffect::NoFollowup),
+        )
+        .is_none());
+    }
 
     #[test]
     fn loadout_followup_exposes_the_player_to_refresh() {
