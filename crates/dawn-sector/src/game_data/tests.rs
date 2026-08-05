@@ -190,3 +190,65 @@ fn definition_order_does_not_change_observable_catalog_order_or_lookup() {
         );
     }
 }
+
+#[test]
+fn definition_order_does_not_change_engine_visible_initial_state() {
+    let baseline = test_catalog();
+    let mut modules = baseline.modules().to_vec();
+    let mut ship_types = baseline.ship_types().to_vec();
+    modules.reverse();
+    ship_types.reverse();
+
+    let reordered = std::sync::Arc::new(
+        GameDataCatalog::from_definitions(modules, ship_types)
+            .expect("reordered definitions remain a valid complete catalog"),
+    );
+    let baseline = std::sync::Arc::new(baseline.clone());
+    let galaxy = std::sync::Arc::new(crate::galaxy::Galaxy::demo());
+    let bounds = dawn_core::SectorBounds::centered(dawn_core::SectorBounds::DEFAULT_HALF);
+
+    let mut first = crate::node::SimulationNode::new(
+        dawn_core::NodeId(0),
+        dawn_core::SectorId(0),
+        bounds,
+        std::sync::Arc::clone(&galaxy),
+        baseline,
+    );
+    let mut second = crate::node::SimulationNode::new(
+        dawn_core::NodeId(0),
+        dawn_core::SectorId(0),
+        bounds,
+        galaxy,
+        reordered,
+    );
+
+    let first_ship = first.spawn_ship(
+        crate::ship_types::SHIP_TYPE_MAGPIE,
+        dawn_core::Position::ORIGIN,
+        dawn_core::Velocity::ZERO,
+    );
+    let second_ship = second.spawn_ship(
+        crate::ship_types::SHIP_TYPE_MAGPIE,
+        dawn_core::Position::ORIGIN,
+        dawn_core::Velocity::ZERO,
+    );
+    assert_eq!(first_ship, second_ship);
+
+    let first_fitted = first.fit_module(dawn_core::FitModuleCommand {
+        ship_id: first_ship,
+        slot: dawn_core::SlotKind::High,
+        module_id: crate::modules::MODULE_RAILGUN_SMALL,
+    });
+    let second_fitted = second.fit_module(dawn_core::FitModuleCommand {
+        ship_id: second_ship,
+        slot: dawn_core::SlotKind::High,
+        module_id: crate::modules::MODULE_RAILGUN_SMALL,
+    });
+    assert!(first_fitted && second_fitted);
+
+    let mut first_state = first.build_initial_state_json();
+    let mut second_state = second.build_initial_state_json();
+    first_state.celestial_bodies.sort_by_key(|body| body.id);
+    second_state.celestial_bodies.sort_by_key(|body| body.id);
+    assert_eq!(first_state, second_state);
+}

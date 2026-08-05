@@ -249,7 +249,6 @@ impl<S: EventStore> std::fmt::Debug for SimulationNode<S> {
 
 impl SimulationNode<InMemoryEventStore> {
     /// Create a node backed by an in-memory event store.
-    #[cfg(not(test))]
     pub fn new(
         node_id: NodeId,
         sector_id: SectorId,
@@ -267,29 +266,26 @@ impl SimulationNode<InMemoryEventStore> {
         )
     }
 
-    /// Crate-unit-test constructor. It injects the complete validated repository
-    /// fixture; partial or empty definition registries are never constructed.
+    /// Test fixture constructor using the complete validated repository catalog.
     #[cfg(test)]
-    pub fn new(
+    pub(crate) fn new_test(
         node_id: NodeId,
         sector_id: SectorId,
         bounds: SectorBounds,
         galaxy: Arc<crate::galaxy::Galaxy>,
     ) -> Self {
-        Self::with_catalog_and_store(
+        Self::new(
             node_id,
             sector_id,
             bounds,
             galaxy,
-            Arc::new(crate::game_data::test_catalog().clone()),
-            InMemoryEventStore::new(),
+            crate::game_data::test_catalog_arc(),
         )
     }
 }
 
 impl<S: EventStore> SimulationNode<S> {
     /// Create a node with a caller-supplied event store and validated catalog.
-    #[cfg(not(test))]
     pub fn with_store(
         node_id: NodeId,
         sector_id: SectorId,
@@ -301,21 +297,21 @@ impl<S: EventStore> SimulationNode<S> {
         Self::with_catalog_and_store(node_id, sector_id, bounds, galaxy, catalog, store)
     }
 
-    /// Crate-unit-test store constructor using the complete repository fixture.
+    /// Test fixture constructor using the complete validated repository catalog.
     #[cfg(test)]
-    pub fn with_store(
+    pub(crate) fn with_test_store(
         node_id: NodeId,
         sector_id: SectorId,
         bounds: SectorBounds,
         galaxy: Arc<crate::galaxy::Galaxy>,
         store: S,
     ) -> Self {
-        Self::with_catalog_and_store(
+        Self::with_store(
             node_id,
             sector_id,
             bounds,
             galaxy,
-            Arc::new(crate::game_data::test_catalog().clone()),
+            crate::game_data::test_catalog_arc(),
             store,
         )
     }
@@ -365,7 +361,6 @@ impl<S: EventStore> SimulationNode<S> {
 
     /// Restore a node from a snapshot plus its event tail using the exact
     /// validated catalog selected by the runtime.
-    #[cfg(not(test))]
     pub fn restore_from(
         store: S,
         snapshot: &StateSnapshot,
@@ -383,38 +378,22 @@ impl<S: EventStore> SimulationNode<S> {
         Self::finish_restore(node, snapshot)
     }
 
-    /// Crate-unit-test restore compatibility. The baseline is always the
-    /// complete validated fixture; supplied definitions are explicit overrides
-    /// used by focused tests and cannot create an empty engine.
+    /// Test restore fixture. Overrides are folded into a complete catalog and
+    /// validated before the authoritative engine is constructed.
     #[cfg(test)]
-    pub fn restore_from(
+    pub(crate) fn restore_from_test(
         store: S,
         snapshot: &StateSnapshot,
         galaxy: Arc<crate::galaxy::Galaxy>,
         modules: &[ModuleDefinition],
         ship_types: &[ShipTypeDefinition],
     ) -> Self {
-        let mut node = Self::with_catalog_and_store(
-            snapshot.node_id,
-            snapshot.sector_id,
-            snapshot.bounds,
-            galaxy,
-            Arc::new(crate::game_data::test_catalog().clone()),
+        Self::restore_from(
             store,
-        );
-        Arc::make_mut(&mut node.module_registry).extend(
-            modules
-                .iter()
-                .cloned()
-                .map(|definition| (definition.id, definition)),
-        );
-        Arc::make_mut(&mut node.ship_type_registry).extend(
-            ship_types
-                .iter()
-                .cloned()
-                .map(|definition| (definition.id, definition)),
-        );
-        Self::finish_restore(node, snapshot)
+            snapshot,
+            galaxy,
+            crate::game_data::test_catalog_with_overrides(modules, ship_types),
+        )
     }
 
     fn finish_restore(mut node: Self, snapshot: &StateSnapshot) -> Self {
@@ -683,7 +662,7 @@ mod tests {
     use dawn_ecs::components::ThrustComp;
 
     fn mem_node() -> SimulationNode {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -760,7 +739,7 @@ mod tests {
             ],
         ));
 
-        let node = SimulationNode::new(
+        let node = SimulationNode::new_test(
             NodeId(7),
             sector_id,
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -802,7 +781,7 @@ mod tests {
         assert!(node.anchor_table.abs(dawn_core::AnchorId(0)).is_none());
 
         let snapshot = node.take_snapshot();
-        let restored = SimulationNode::restore_from(
+        let restored = SimulationNode::restore_from_test(
             InMemoryEventStore::new(),
             &snapshot,
             Arc::clone(&galaxy),

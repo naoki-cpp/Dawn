@@ -134,7 +134,7 @@ mod tests {
     use dawn_core::{NodeId, Position, SectorBounds, SectorId, ShipId};
 
     fn node_with_modules() -> SimulationNode {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -329,7 +329,7 @@ mod tests {
         let store2 = dawn_event_store::InMemoryEventStore::new();
         let modules: Vec<_> = crate::game_data::test_catalog().modules().to_vec();
         let ship_types: Vec<_> = crate::game_data::test_catalog().ship_types().to_vec();
-        let node2 = SimulationNode::restore_from(
+        let node2 = SimulationNode::restore_from_test(
             store2,
             &snapshot,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),

@@ -39,8 +39,8 @@ catalog.
 `GameDataCatalog::modules()` and `GameDataCatalog::ship_types()` always expose
 definitions in ascending stable-ID order, independent of file or caller input
 order. Indexed lookups by `ModuleId` and `ShipTypeId` resolve the same immutable
-definitions. Tests reverse the complete input vectors and verify that iteration
-order and lookup results remain identical. Sector construction reuses these
+definitions. Tests reverse the complete input vectors and verify that iteration order,
+lookup results, and engine-visible initial-state behavior remain identical. Sector construction reuses these
 prebuilt indexes; it does not rebuild an order-dependent registry per node.
 
 `GameDataCatalog` is the only interface for loading module and ship-type

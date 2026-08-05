@@ -113,7 +113,7 @@ mod tests {
     use dawn_event_store::memory::InMemoryEventStore;
 
     fn mem_node() -> SimulationNode<InMemoryEventStore> {
-        SimulationNode::with_store(
+        SimulationNode::with_test_store(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),

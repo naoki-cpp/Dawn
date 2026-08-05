@@ -157,7 +157,7 @@ mod tests {
     use super::SimulationNode;
 
     fn node_with_modules() -> SimulationNode {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),

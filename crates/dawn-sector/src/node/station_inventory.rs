@@ -299,7 +299,7 @@ mod tests {
     const TEST_STATION_ID: StationId = StationId(0);
 
     fn node() -> SimulationNode<InMemoryEventStore> {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),

@@ -181,20 +181,28 @@ impl DuelMetrics {
 
 /// Build a `SimulationNode` wired the way every serve loop needs it.
 /// Shared by `run_phase4_server` and `run_cluster_server`.
-pub(crate) fn build_serve_node(
-    id: NodeId,
-    sector: SectorId,
-    bounds: SectorBounds,
-    pop_cap: usize,
-) -> SimulationNode {
+pub(crate) fn load_serve_dependencies() -> (std::sync::Arc<Galaxy>, std::sync::Arc<GameDataCatalog>)
+{
     let galaxy = std::sync::Arc::new(
         Galaxy::load_from_file(PRODUCTION_GALAXY_PATH)
-            .unwrap_or_else(|e| panic!("failed to load production galaxy map: {e}")),
+            .unwrap_or_else(|error| panic!("failed to load production galaxy map: {error}")),
     );
     let catalog = std::sync::Arc::new(
         GameDataCatalog::load_runtime()
             .unwrap_or_else(|error| panic!("failed to load required game-data catalog: {error}")),
     );
+    (galaxy, catalog)
+}
+
+/// Build a `SimulationNode` from dependencies owned by the serve composition root.
+pub(crate) fn build_serve_node(
+    id: NodeId,
+    sector: SectorId,
+    bounds: SectorBounds,
+    pop_cap: usize,
+    galaxy: std::sync::Arc<Galaxy>,
+    catalog: std::sync::Arc<GameDataCatalog>,
+) -> SimulationNode {
     let mut node = SimulationNode::new(id, sector, bounds, galaxy, catalog);
     node.set_population_cap(pop_cap);
     node

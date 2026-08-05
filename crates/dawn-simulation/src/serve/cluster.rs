@@ -2,7 +2,8 @@
 #![allow(clippy::module_name_repetitions)]
 
 use super::{
-    build_serve_node, market::MarketRuntime, runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS,
+    build_serve_node, load_serve_dependencies, market::MarketRuntime, runtime, AoiDelivery,
+    AOI_CELL_SIZE, P4_TICK_MS,
 };
 use crate::{cluster, ws_server};
 use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
@@ -63,9 +64,19 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
     let (rafts, mut committed_rxs): (Vec<_>, Vec<_>) = endpoints.into_iter().unzip();
 
     let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
+    let (galaxy, catalog) = load_serve_dependencies();
     let mut nodes: Vec<SimulationNode> = ids
         .iter()
-        .map(|&id| build_serve_node(id, SectorId(id.0), bounds, pop_cap))
+        .map(|&id| {
+            build_serve_node(
+                id,
+                SectorId(id.0),
+                bounds,
+                pop_cap,
+                std::sync::Arc::clone(&galaxy),
+                std::sync::Arc::clone(&catalog),
+            )
+        })
         .collect();
     let mut market = MarketRuntime::open("data/market.sqlite")
         .expect("failed to open Market database at data/market.sqlite");

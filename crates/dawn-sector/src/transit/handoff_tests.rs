@@ -3,7 +3,7 @@ use dawn_core::fitting::FittingSnapshot;
 use dawn_core::{NodeId, Position, SectorBounds, ShipTypeId, Velocity};
 
 fn node(node_id: u8, sector_id: u8) -> SimulationNode {
-    SimulationNode::new(
+    SimulationNode::new_test(
         NodeId(node_id),
         SectorId(sector_id),
         SectorBounds::centered(SectorBounds::DEFAULT_HALF),

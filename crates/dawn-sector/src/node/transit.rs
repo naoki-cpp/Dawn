@@ -656,7 +656,7 @@ mod tests {
     use dawn_event_store::InMemoryEventStore;
 
     fn mem_node() -> SimulationNode {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -895,13 +895,13 @@ mod tests {
 
     #[test]
     fn import_transit_restores_ship_with_same_id_at_entry_position_and_appends_completed_event() {
-        let mut from_node = SimulationNode::new(
+        let mut from_node = SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
-        let mut to_node = SimulationNode::new(
+        let mut to_node = SimulationNode::new_test(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -953,13 +953,13 @@ mod tests {
     #[test]
     fn ship_arriving_through_a_gate_can_immediately_jump_back_through_the_return_gate() {
         let galaxy = crate::galaxy::Galaxy::demo();
-        let mut from_node = SimulationNode::new(
+        let mut from_node = SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
-        let mut to_node = SimulationNode::new(
+        let mut to_node = SimulationNode::new_test(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -1001,13 +1001,13 @@ mod tests {
     /// `transit::apply_committed_raft_entries` calls in production.
     #[test]
     fn the_consolidated_request_commit_pair_reproduces_the_same_arrival() {
-        let mut from_node = SimulationNode::new(
+        let mut from_node = SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
-        let mut to_node = SimulationNode::new(
+        let mut to_node = SimulationNode::new_test(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -1068,13 +1068,13 @@ mod tests {
 
     #[test]
     fn inventory_survives_a_cross_sector_transit() {
-        let mut from_node = SimulationNode::new(
+        let mut from_node = SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
-        let mut to_node = SimulationNode::new(
+        let mut to_node = SimulationNode::new_test(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -1118,13 +1118,13 @@ mod tests {
 
     #[test]
     fn adopted_player_ship_accepts_owned_commands_on_the_destination_node() {
-        let mut from_node = SimulationNode::new(
+        let mut from_node = SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
-        let mut to_node = SimulationNode::new(
+        let mut to_node = SimulationNode::new_test(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -1166,13 +1166,13 @@ mod tests {
         // exactly the crash-loses-the-ship window this issue closed. Now the
         // source keeps the ship (frozen out of Movement/Combat) until it
         // observes its own Commit, so the sum is always 1.
-        let mut from_node = SimulationNode::new(
+        let mut from_node = SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
-        let mut to_node = SimulationNode::new(
+        let mut to_node = SimulationNode::new_test(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -1235,7 +1235,7 @@ mod tests {
         let event_path = dir.path().join("events.log");
         let snap_path = dir.path().join("snapshot.bin");
 
-        let mut from_node = SimulationNode::new(
+        let mut from_node = SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -1257,7 +1257,7 @@ mod tests {
 
         {
             let store = FileEventStore::open(&event_path).unwrap();
-            let mut to_node = SimulationNode::with_store(
+            let mut to_node = SimulationNode::with_test_store(
                 NodeId(1),
                 SectorId(1),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -1272,7 +1272,7 @@ mod tests {
 
         let snap = StateSnapshot::load(&snap_path).unwrap();
         let store2 = FileEventStore::open(&event_path).unwrap();
-        let restored = SimulationNode::restore_from(
+        let restored = SimulationNode::restore_from_test(
             store2,
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -1298,13 +1298,13 @@ mod tests {
         let mut total = std::time::Duration::ZERO;
 
         for i in 0..ITERATIONS {
-            let mut from_node = SimulationNode::new(
+            let mut from_node = SimulationNode::new_test(
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
             );
-            let mut to_node = SimulationNode::new(
+            let mut to_node = SimulationNode::new_test(
                 NodeId(1),
                 SectorId(1),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -1363,7 +1363,7 @@ mod tests {
 
     #[test]
     fn replaying_an_incoming_request_marker_does_not_freeze_the_destination_ship() {
-        let mut node = SimulationNode::new(
+        let mut node = SimulationNode::new_test(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -1479,7 +1479,7 @@ mod tests {
 
     #[test]
     fn replaying_completed_on_the_destination_sector_materializes_the_ship() {
-        let mut node = SimulationNode::new(
+        let mut node = SimulationNode::new_test(
             NodeId(1),
             SectorId(1), // matches `to` below -- this is the destination
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -1516,7 +1516,7 @@ mod tests {
         // replayed twice (e.g. a snapshot taken mid-tail-replay in a future
         // refactor) -- mirrors the `!contains_key` guard every other
         // ship-materializing replay arm already has (ShipSpawned, etc).
-        let mut node = SimulationNode::new(
+        let mut node = SimulationNode::new_test(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -1564,13 +1564,13 @@ mod tests {
     /// import).
     #[test]
     fn a_completed_transit_survives_snapshot_plus_tail_replay_on_both_sectors() {
-        let mut from_node = SimulationNode::new(
+        let mut from_node = SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
-        let mut to_node = SimulationNode::new(
+        let mut to_node = SimulationNode::new_test(
             NodeId(1),
             SectorId(1),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -1611,7 +1611,7 @@ mod tests {
         for rec in from_node.event_store().all_records() {
             from_store2.append(rec.event.clone());
         }
-        let restored_from = SimulationNode::restore_from(
+        let restored_from = SimulationNode::restore_from_test(
             from_store2,
             &from_snapshot_before,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -1623,7 +1623,7 @@ mod tests {
         for rec in to_node.event_store().all_records() {
             to_store2.append(rec.event.clone());
         }
-        let restored_to = SimulationNode::restore_from(
+        let restored_to = SimulationNode::restore_from_test(
             to_store2,
             &to_snapshot_before,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -1693,7 +1693,7 @@ mod tests {
     /// restart.
     #[test]
     fn a_ship_survives_a_restart_between_request_commit_and_transit_commit() {
-        let mut from_node = SimulationNode::new(
+        let mut from_node = SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -1724,7 +1724,7 @@ mod tests {
         for rec in from_node.event_store().all_records() {
             store2.append(rec.event.clone());
         }
-        let restored = SimulationNode::restore_from(
+        let restored = SimulationNode::restore_from_test(
             store2,
             &snapshot_before,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),

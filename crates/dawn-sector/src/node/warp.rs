@@ -638,7 +638,7 @@ mod tests {
     use dawn_ecs::components::{ShipStatsComp, VelocityComp, WarpPhase};
 
     fn mem_node() -> SimulationNode {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -783,7 +783,7 @@ mod tests {
     #[test]
     fn warp_align_time_emerges_from_ship_agility() {
         fn ticks_to_engage(mass: f64) -> u32 {
-            let mut node = SimulationNode::new(
+            let mut node = SimulationNode::new_test(
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),

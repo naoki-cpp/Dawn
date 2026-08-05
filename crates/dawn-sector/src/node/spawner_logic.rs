@@ -458,7 +458,7 @@ mod tests {
     use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, Tick};
 
     fn node_with_catalog() -> SimulationNode {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -610,7 +610,7 @@ mod tests {
             "snapshot must capture the rebased anchor"
         );
 
-        let node2 = SimulationNode::restore_from(
+        let node2 = SimulationNode::restore_from_test(
             InMemoryEventStore::new(),
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),

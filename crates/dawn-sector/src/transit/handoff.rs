@@ -360,7 +360,7 @@ mod tests {
     use dawn_event_store::InMemoryEventStore;
 
     fn node(sector: u8) -> SimulationNode {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(sector),
             SectorId(sector),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -697,7 +697,7 @@ mod tests {
             store.append(event);
         }
 
-        let restored = SimulationNode::restore_from(
+        let restored = SimulationNode::restore_from_test(
             store,
             &snapshot_before,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -721,7 +721,7 @@ mod tests {
             );
         }
 
-        let mut compacted = SimulationNode::restore_from(
+        let mut compacted = SimulationNode::restore_from_test(
             InMemoryEventStore::new(),
             &checkpoint,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),

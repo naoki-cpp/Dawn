@@ -262,7 +262,7 @@ mod tests {
     }
 
     fn node() -> SimulationNode<InMemoryEventStore> {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -291,7 +291,7 @@ mod tests {
             tick: Tick(1),
         }));
 
-        let mut restored = SimulationNode::restore_from(
+        let mut restored = SimulationNode::restore_from_test(
             store,
             &snapshot,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -329,7 +329,7 @@ mod tests {
             tick: Tick(2),
         }));
 
-        let mut restored = SimulationNode::restore_from(
+        let mut restored = SimulationNode::restore_from_test(
             store,
             &snapshot,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
