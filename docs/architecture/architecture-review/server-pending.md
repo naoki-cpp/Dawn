@@ -30,14 +30,20 @@ date     : 2026-08-05
 live state、interaction、presentationは分離済み。残るscene lifecycle / node generation / network send / HUD assemblyは凝集している。
 **再評価:** scene-tree構成を自動検証できるようになるか、独立した変更理由が再び混在する場合。
 
-### R-3（保留）: `node/`系ファイルの再肥大
+### R-3（部分発火・継続監視）: `node/`系ファイルの再肥大
 
-2026-08-05時点で、TransitのRequest/Commit/Ack、retry/recovery、idempotency、
-cleanup判定は`transit/handoff.rs`へ集約し、`transit/pipeline.rs`はEventStore factの再構築と
-Raft effect変換だけを担当する。`node/transit.rs`はECS materializationとsnapshot mapping、
-その回帰テストを保持するため行数は大きいが、consensus policyとの変更理由は分離された。
+2026-08-05、`node/commands.rs`ではflight / module / station / loadout-refreshという
+独立した変更理由が一つの入口に混在していたためtriggerが発火した。issue #264で、外側の
+網羅的なfamily選択とfollow-up射影だけを`commands.rs`に残し、各policyを
+`command_flight.rs` / `command_module.rs` / `command_loadout.rs` / `command_station.rs`へ
+移した。wire shape、domain result、event semanticsは変更していない（ADR-0047 amendment）。
 
-`node/commands.rs`と`node/warp.rs`を含む残存ファイルは、実装責務が再び混在するまで即時分割しない。
+同日、TransitのRequest/Commit/Ack、retry/recovery、idempotency、cleanup判定は
+`transit/handoff.rs`へ集約し、`transit/pipeline.rs`はEventStore factの再構築とRaft effect
+変換だけを担当する。`node/transit.rs`はECS materializationとsnapshot mapping、その回帰
+テストを保持するが、consensus policyとの変更理由は分離された。
+
+`node/warp.rs`は引き続き監視対象とする。
 **再評価:** テストを除く実装部分が約700行を超え、かつ独立した変更理由が混在する、または
 module間のdriftが実害になる場合。行数だけでは発火させない。
 
@@ -45,7 +51,8 @@ module間のdriftが実害になる場合。行数だけでは発火させない
 
 | 項目 | 状態 |
 |---|---|
-| R-2 / R-3 | 保留・trigger付き |
+| R-2 | 保留・trigger付き |
+| R-3 | commands / transit slice 完了、warp継続監視 |
 | M-3 / M-9 | 保留・trigger付き |
 
 採らない方針: CRDT/LWW、protobuf、薄いadapterのための共有runtime crate、行数削減目的の網羅match・domain型の破壊、初回LAN検証でのTLS/認証。
