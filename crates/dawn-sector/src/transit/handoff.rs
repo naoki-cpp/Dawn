@@ -104,7 +104,18 @@ impl TransitJournal {
                 }
             }
             DomainEvent::SectorTransitAborted(event) if event.from == self.sector_id => {
-                self.pending_outgoing.remove(&event.ship_id);
+                // SectorTransitAborted predates request_tick in its payload, so
+                // route identity is the strongest safe match available. Never
+                // let an old A -> B abort clear a newer A -> C request.
+                if self
+                    .pending_outgoing
+                    .get(&event.ship_id)
+                    .is_some_and(|pending| {
+                        pending.identity.from == event.from && pending.identity.to == event.to
+                    })
+                {
+                    self.pending_outgoing.remove(&event.ship_id);
+                }
             }
             _ => {}
         }
@@ -344,7 +355,9 @@ pub(super) fn due_retries<S: EventStore>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::events::{SectorTransitCompleted, SectorTransitRequested};
+    use dawn_core::events::{
+        SectorTransitAborted, SectorTransitCompleted, SectorTransitRequested,
+    };
     use dawn_core::{NodeId, Position, SectorBounds, ShipTypeId, Velocity};
     use dawn_event_store::InMemoryEventStore;
 
@@ -629,6 +642,46 @@ mod tests {
             entry_pos: AbsolutePosition::ORIGIN,
             tick: Tick(event_tick),
         })
+    }
+
+    fn aborted(
+        ship_id: ShipId,
+        from: SectorId,
+        to: SectorId,
+        event_tick: u64,
+    ) -> DomainEvent {
+        DomainEvent::SectorTransitAborted(SectorTransitAborted {
+            ship_id,
+            from,
+            to,
+            tick: Tick(event_tick),
+        })
+    }
+
+    #[test]
+    fn stale_abort_for_an_old_route_does_not_clear_the_current_request() {
+        let ship_id = ShipId::new(NodeId(0), 7);
+        let mut current = TransitJournal::new(SectorId(0));
+
+        current.observe(&requested(ship_id, SectorId(0), SectorId(1), 10, 1));
+        current.observe(&requested(ship_id, SectorId(0), SectorId(2), 20, 2));
+        current.observe(&aborted(ship_id, SectorId(0), SectorId(1), 3));
+
+        assert!(current
+            .pending_for(ship_id, SectorId(0), SectorId(2), Tick(20))
+            .is_some());
+        assert!(current.has_pending_outgoing());
+    }
+
+    #[test]
+    fn matching_route_abort_clears_the_current_request() {
+        let ship_id = ShipId::new(NodeId(0), 7);
+        let mut current = TransitJournal::new(SectorId(0));
+
+        current.observe(&requested(ship_id, SectorId(0), SectorId(1), 10, 1));
+        current.observe(&aborted(ship_id, SectorId(0), SectorId(1), 2));
+
+        assert!(!current.has_pending_outgoing());
     }
 
     #[test]
