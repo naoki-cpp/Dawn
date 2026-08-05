@@ -78,7 +78,7 @@ impl ClientCommandDispatch {
             ClientCommand::LockOn(cmd) => Self::Flight(FlightDispatchCommand::LockOn(cmd)),
             ClientCommand::Activate(cmd) => Self::Module(ModuleDispatchCommand::Activate(cmd)),
             ClientCommand::Deactivate(cmd) => Self::Module(ModuleDispatchCommand::Deactivate(cmd)),
-            ClientCommand::Attack(_) => Self::Flight(FlightDispatchCommand::Attack),
+            ClientCommand::Attack(cmd) => Self::Flight(FlightDispatchCommand::Attack(cmd)),
             ClientCommand::Stop(cmd) => Self::Flight(FlightDispatchCommand::Stop(cmd)),
             ClientCommand::Jump(cmd) => Self::Flight(FlightDispatchCommand::Jump(cmd)),
             ClientCommand::Approach(cmd) => Self::Flight(FlightDispatchCommand::Approach(cmd)),
@@ -258,6 +258,26 @@ mod tests {
             .family(),
             ClientCommandFamily::Station
         );
+    }
+
+    #[test]
+    fn attack_command_payload_reaches_the_flight_family() {
+        use dawn_core::AttackCommand;
+
+        let attacker_id = ShipId(dawn_core::EntityId::from_raw(11));
+        let target_id = ShipId(dawn_core::EntityId::from_raw(12));
+        let dispatch = ClientCommandDispatch::select(ClientCommand::Attack(AttackCommand {
+            attacker_id,
+            target_id,
+        }));
+
+        assert!(matches!(
+            dispatch,
+            ClientCommandDispatch::Flight(FlightDispatchCommand::Attack(AttackCommand {
+                attacker_id: actual_attacker,
+                target_id: actual_target,
+            })) if actual_attacker == attacker_id && actual_target == target_id
+        ));
     }
 
     #[test]

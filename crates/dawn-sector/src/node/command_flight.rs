@@ -6,8 +6,8 @@
 //! ship once and passes it here; this module never re-reads player routing.
 
 use dawn_core::{
-    ApproachCommand, JumpCommand, KeepAtRangeCommand, LockOnCommand, MoveCommand, OrbitCommand,
-    PlayerId, ShipId, StopCommand, WarpCommand,
+    ApproachCommand, AttackCommand, JumpCommand, KeepAtRangeCommand, LockOnCommand, MoveCommand,
+    OrbitCommand, PlayerId, ShipId, StopCommand, WarpCommand,
 };
 use dawn_event_store::store::EventStore;
 
@@ -16,7 +16,7 @@ use super::SimulationNode;
 pub(super) enum FlightDispatchCommand {
     Move(MoveCommand),
     LockOn(LockOnCommand),
-    Attack,
+    Attack(AttackCommand),
     Stop(StopCommand),
     Jump(JumpCommand),
     Approach(ApproachCommand),
@@ -61,7 +61,7 @@ impl<S: EventStore> SimulationNode<S> {
             }
             // Combat is automatic (CombatSystem each tick); AttackCommand is
             // reserved for a future manual-fire mode.
-            FlightDispatchCommand::Attack => {}
+            FlightDispatchCommand::Attack(_cmd) => {}
             FlightDispatchCommand::Stop(_) => {
                 if let Some(ship_id) = active_ship {
                     self.apply_stop_command_owned(player_id, ship_id);
