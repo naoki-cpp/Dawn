@@ -65,12 +65,8 @@ impl TransitJournal {
     pub(super) fn observe(&mut self, event: &DomainEvent) {
         match event {
             DomainEvent::SectorTransitRequested(event) => {
-                let identity = TransferIdentity::new(
-                    event.ship_id,
-                    event.from,
-                    event.to,
-                    event.request_tick,
-                );
+                let identity =
+                    TransferIdentity::new(event.ship_id, event.from, event.to, event.request_tick);
                 if event.from == self.sector_id {
                     self.pending_outgoing.insert(
                         event.ship_id,
