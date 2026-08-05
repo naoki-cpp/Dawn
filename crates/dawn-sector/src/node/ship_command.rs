@@ -30,7 +30,7 @@ use super::SimulationNode;
 ///
 /// Named so a rejection is a value that can be logged, tested, and matched
 /// on, rather than collapsing to a bare `bool` at the call boundary --
-/// mirrors `ModuleActivationRejection` (`commands.rs`), the existing
+/// mirrors `ModuleActivationRejection` (`command_module.rs`), the existing
 /// precedent for this in the crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ShipCommandRejection {
