@@ -259,12 +259,11 @@ pub(super) fn apply_commit<S: EventStore>(
 
     let identity = TransferIdentity::new(handoff.ship_id, from, to, request_tick);
     if !destination_completed_transfer(node, journal, identity) {
-        if node.get_ship_position(handoff.ship_id).is_some() {
-            if !node.is_ship_in_transit(handoff.ship_id)
-                || !complete_superseded_outgoing_transit(node, journal, handoff.ship_id)
-            {
-                return None;
-            }
+        if node.get_ship_position(handoff.ship_id).is_some()
+            && (!node.is_ship_in_transit(handoff.ship_id)
+                || !complete_superseded_outgoing_transit(node, journal, handoff.ship_id))
+        {
+            return None;
         }
 
         node.append_incoming_transit_marker(
