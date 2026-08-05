@@ -30,7 +30,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
 
       - name: Apply review fixes
-        run: python .github/scripts/fix_pr285_review.py
+        run: |
+          python .github/scripts/fix_pr285_review.py
+          python .github/scripts/fix_pr285_engine_test.py
 
       - name: Validate
         run: |
@@ -45,6 +47,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           rm .github/scripts/fix_pr285_review.py
+          rm .github/scripts/fix_pr285_engine_test.py
           rm .github/workflows/agent-fix-pr285-review.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
