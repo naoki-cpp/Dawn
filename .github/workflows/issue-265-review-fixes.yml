@@ -1,0 +1,470 @@
+name: Apply issue 265 review fixes
+
+on:
+  push:
+    branches:
+      - agent/issue-265-admission-resolution
+
+permissions:
+  contents: write
+
+jobs:
+  apply-review-fixes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/issue-265-admission-resolution
+          fetch-depth: 0
+
+      - name: Apply review fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}")
+              file.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "crates/dawn-sector/src/client_admission.rs",
+              """/// One begun but not yet committed client admission.
+          ///
+          /// The attempt must be resolved exactly once after asynchronous handshake
+          /// completion:
+          ///
+          /// - [`Self::commit`] after the socket successfully receives the handoff;
+          /// - [`Self::abort`] after any handshake failure or disconnect.
+          ///
+          """,
+              """/// One begun but not yet committed client admission.
+          ///
+          /// Runtime code must resolve the attempt exactly once through
+          /// [`crate::client_admission_resolution::resolve_client_admission`]. Direct
+          /// commit and abort transitions are crate-private so adapters cannot
+          /// reconstruct lifecycle or cleanup policy.
+          ///
+          """,
+          )
+          replace_once(
+              "crates/dawn-sector/src/client_admission.rs",
+              "    pub fn commit<S: EventStore>(\n",
+              "    pub(crate) fn commit<S: EventStore>(\n",
+          )
+          replace_once(
+              "crates/dawn-sector/src/client_admission.rs",
+              "    pub fn abort<S: EventStore>(self, node: &mut SimulationNode<S>) {\n",
+              "    pub(crate) fn abort<S: EventStore>(self, node: &mut SimulationNode<S>) {\n",
+          )
+          replace_once(
+              "crates/dawn-sector/src/client_admission.rs",
+              """    /// No runtime should separately allocate identity, spawn/adopt a Ship, or
+              /// decide rollback. It should only pass socket-derived intent here, send the
+              /// returned payload, then resolve the attempt with `commit` or `abort`.
+          """,
+              """    /// No runtime should separately allocate identity, spawn/adopt a Ship, or
+              /// decide rollback. It should only pass socket-derived intent here, send the
+              /// returned payload, then pass the transport result and attempt to
+              /// [`crate::client_admission_resolution::resolve_client_admission`].
+          """,
+          )
+          replace_once(
+              "crates/dawn-sector/src/client_admission.rs",
+              """                    let next_ticket = self.issue_resume_ticket();
+                              if !self.stage_client_resume_ticket(
+                                  ship_id,
+                                  player_id,
+                                  resume_ticket,
+                                  next_ticket,
+                              ) {
+                                  return Err(ClientAdmissionRefusal::ResumeTicketInvalid);
+                              }
+                              Ok((handoff, next_ticket))
+          """,
+              """                    let proposed_next_ticket = self.issue_resume_ticket();
+                              let next_ticket = self
+                                  .stage_client_resume_ticket(
+                                      ship_id,
+                                      player_id,
+                                      resume_ticket,
+                                      proposed_next_ticket,
+                                  )
+                                  .ok_or(ClientAdmissionRefusal::ResumeTicketInvalid)?;
+                              Ok((handoff, next_ticket))
+          """,
+          )
+
+          replace_once(
+              "crates/dawn-sector/src/node/admission_provisional.rs",
+              """    pub(crate) fn stage_client_resume_ticket(
+                  &self,
+                  ship_id: ShipId,
+                  player_id: PlayerId,
+                  presented_ticket: ResumeTicket,
+                  next_ticket: ResumeTicket,
+              ) -> bool {
+                  self.station_inventory_db
+                      .stage_client_resume_ticket(ship_id, player_id, presented_ticket, next_ticket)
+                      .expect(\"client ownership ticket staging\")
+              }
+          """,
+              """    pub(crate) fn stage_client_resume_ticket(
+                  &mut self,
+                  ship_id: ShipId,
+                  player_id: PlayerId,
+                  presented_ticket: ResumeTicket,
+                  proposed_next_ticket: ResumeTicket,
+              ) -> Option<ResumeTicket> {
+                  self.station_inventory_db
+                      .stage_client_resume_ticket(
+                          ship_id,
+                          player_id,
+                          presented_ticket,
+                          proposed_next_ticket,
+                      )
+                      .expect(\"client ownership ticket staging\")
+              }
+          """,
+          )
+
+          replace_once(
+              "crates/dawn-sector/src/node/station_inventory_db.rs",
+              """    /// Persist the next resume ticket before it can be exposed in Welcome.
+              /// The committed ticket remains valid until `record_client_ownership`
+              /// promotes this staged value, so a failed handshake can retry either the
+              /// previous or the advertised ticket.
+              pub(super) fn stage_client_resume_ticket(
+                  &self,
+                  ship_id: ShipId,
+                  player_id: PlayerId,
+                  presented_ticket: ResumeTicket,
+                  next_ticket: ResumeTicket,
+              ) -> rusqlite::Result<bool> {
+                  let changed = self.conn.execute(
+                      \"UPDATE client_ship_ownership
+                       SET pending_resume_ticket = ?3
+                       WHERE ship_id = ?1 AND player_id = ?2
+                         AND (resume_ticket = ?4 OR pending_resume_ticket = ?4)\",
+                      params![
+                          ship_id.raw().to_string(),
+                          player_id.0 as i64,
+                          next_ticket.as_bytes().as_slice(),
+                          presented_ticket.as_bytes().as_slice(),
+                      ],
+                  )?;
+                  Ok(changed == 1)
+              }
+          """,
+              """    /// Persist the ticket that may be exposed in Welcome without invalidating
+              /// the ticket the client used for this attempt. Retrying the committed ticket
+              /// reuses an existing pending ticket. Retrying the pending ticket promotes it
+              /// to current before staging its successor, so an abort still leaves the
+              /// client-presented ticket valid.
+              pub(super) fn stage_client_resume_ticket(
+                  &mut self,
+                  ship_id: ShipId,
+                  player_id: PlayerId,
+                  presented_ticket: ResumeTicket,
+                  proposed_next_ticket: ResumeTicket,
+              ) -> rusqlite::Result<Option<ResumeTicket>> {
+                  let tx = self.conn.transaction()?;
+                  let stored = tx
+                      .query_row(
+                          \"SELECT player_id, resume_ticket, pending_resume_ticket
+                           FROM client_ship_ownership WHERE ship_id = ?1\",
+                          params![ship_id.raw().to_string()],
+                          |row| {
+                              let stored_player = PlayerId(row.get::<_, i64>(0)? as u64);
+                              let current_ticket = ticket_from_blob(row.get(1)?)?;
+                              let pending_ticket = row
+                                  .get::<_, Option<Vec<u8>>>(2)?
+                                  .map(ticket_from_blob)
+                                  .transpose()?;
+                              Ok((stored_player, current_ticket, pending_ticket))
+                          },
+                      )
+                      .optional()?;
+                  let Some((stored_player, current_ticket, pending_ticket)) = stored else {
+                      return Ok(None);
+                  };
+                  if stored_player != player_id {
+                      return Ok(None);
+                  }
+
+                  let (next_current, next_pending, advertised_ticket) =
+                      if presented_ticket == current_ticket {
+                          let advertised_ticket = pending_ticket.unwrap_or(proposed_next_ticket);
+                          (current_ticket, Some(advertised_ticket), advertised_ticket)
+                      } else if pending_ticket == Some(presented_ticket) {
+                          (
+                              presented_ticket,
+                              Some(proposed_next_ticket),
+                              proposed_next_ticket,
+                          )
+                      } else {
+                          return Ok(None);
+                      };
+
+                  tx.execute(
+                      \"UPDATE client_ship_ownership
+                       SET resume_ticket = ?3, pending_resume_ticket = ?4
+                       WHERE ship_id = ?1 AND player_id = ?2\",
+                      params![
+                          ship_id.raw().to_string(),
+                          player_id.0 as i64,
+                          next_current.as_bytes().as_slice(),
+                          next_pending.map(|ticket| ticket.as_bytes().to_vec()),
+                      ],
+                  )?;
+                  tx.commit()?;
+                  Ok(Some(advertised_ticket))
+              }
+          """,
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/station_inventory_db.rs",
+              "        let db = StationInventoryDb::init(conn).unwrap();\n",
+              "        let mut db = StationInventoryDb::init(conn).unwrap();\n",
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/station_inventory_db.rs",
+              """        assert!(db
+                      .stage_client_resume_ticket(ship_id, player_id, current_ticket, next_ticket)
+                      .unwrap());
+          """,
+              """        assert_eq!(
+                      db.stage_client_resume_ticket(ship_id, player_id, current_ticket, next_ticket)
+                          .unwrap(),
+                      Some(next_ticket)
+                  );
+          """,
+          )
+          replace_once(
+              "crates/dawn-sector/src/node/station_inventory_db.rs",
+              """        assert!(db
+                      .stage_client_resume_ticket(ship_id, player_id, current_ticket, pending_ticket,)
+                      .unwrap());
+          """,
+              """        assert_eq!(
+                      db.stage_client_resume_ticket(
+                          ship_id,
+                          player_id,
+                          current_ticket,
+                          pending_ticket,
+                      )
+                      .unwrap(),
+                      Some(pending_ticket)
+                  );
+          """,
+          )
+
+          replace_once(
+              "crates/dawn-sector/src/client_admission_resolution.rs",
+              "    use crate::client_admission::ClientAdmissionIntent;\n",
+              "    use crate::client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal};\n",
+          )
+          resolution_path = Path("crates/dawn-sector/src/client_admission_resolution.rs")
+          resolution = resolution_path.read_text()
+          regression = r'''
+
+              #[test]
+              fn consecutive_aborted_resumes_keep_the_last_client_visible_ticket_retryable() {
+                  let mut node = node();
+                  let fresh = fresh_attempt(&mut node);
+                  let committed_ticket = fresh.resume_ticket();
+                  assert!(matches!(
+                      resolve_client_admission(&mut node, fresh, Ok::<_, ()>(())),
+                      ClientAdmissionResolution::Committed { .. }
+                  ));
+
+                  let first = node
+                      .begin_client_admission(
+                          ClientAdmissionIntent::Resume {
+                              resume_ticket: committed_ticket,
+                          },
+                          AOI_CELL_SIZE,
+                      )
+                      .expect("committed ticket begins the first resume");
+                  let first_visible_ticket = first.resume_ticket();
+                  assert_ne!(first_visible_ticket, committed_ticket);
+                  assert!(matches!(
+                      resolve_client_admission::<_, (), _>(
+                          &mut node,
+                          first,
+                          Err("first handoff failed"),
+                      ),
+                      ClientAdmissionResolution::Aborted { .. }
+                  ));
+
+                  let second = node
+                      .begin_client_admission(
+                          ClientAdmissionIntent::Resume {
+                              resume_ticket: first_visible_ticket,
+                          },
+                          AOI_CELL_SIZE,
+                      )
+                      .expect("the first advertised ticket begins the second resume");
+                  let second_visible_ticket = second.resume_ticket();
+                  assert_ne!(second_visible_ticket, first_visible_ticket);
+                  assert!(matches!(
+                      resolve_client_admission::<_, (), _>(
+                          &mut node,
+                          second,
+                          Err("second handoff failed"),
+                      ),
+                      ClientAdmissionResolution::Aborted { .. }
+                  ));
+
+                  let retry = node
+                      .begin_client_admission(
+                          ClientAdmissionIntent::Resume {
+                              resume_ticket: first_visible_ticket,
+                          },
+                          AOI_CELL_SIZE,
+                      )
+                      .expect("the client-visible ticket must survive the second abort");
+                  assert_eq!(retry.resume_ticket(), second_visible_ticket);
+                  assert!(matches!(
+                      resolve_client_admission(&mut node, retry, Ok::<_, ()>(())),
+                      ClientAdmissionResolution::Committed { .. }
+                  ));
+
+                  assert_eq!(
+                      node.begin_client_admission(
+                          ClientAdmissionIntent::Resume {
+                              resume_ticket: first_visible_ticket,
+                          },
+                          AOI_CELL_SIZE,
+                      )
+                      .expect_err("a committed rotation consumes the presented ticket"),
+                      ClientAdmissionRefusal::ResumeTicketInvalid
+                  );
+                  let next = node
+                      .begin_client_admission(
+                          ClientAdmissionIntent::Resume {
+                              resume_ticket: second_visible_ticket,
+                          },
+                          AOI_CELL_SIZE,
+                      )
+                      .expect("the committed successor remains usable");
+                  assert!(matches!(
+                      resolve_client_admission::<_, (), _>(
+                          &mut node,
+                          next,
+                          Err("cleanup"),
+                      ),
+                      ClientAdmissionResolution::Aborted { .. }
+                  ));
+              }
+          '''
+          if regression.strip() in resolution:
+              raise SystemExit("resolver regression already present")
+          prefix, closing = resolution.rsplit("\n}\n", 1)
+          resolution_path.write_text(prefix + regression + "\n}\n" + closing)
+
+          replace_once(
+              "crates/dawn-sector/tests/client_admission_identity_recovery.rs",
+              """    client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal},
+              galaxy::Galaxy,
+          """,
+              """    client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal},
+              client_admission_resolution::{resolve_client_admission, ClientAdmissionResolution},
+              galaxy::Galaxy,
+          """,
+          )
+          replace_once(
+              "crates/dawn-sector/tests/client_admission_identity_recovery.rs",
+              "    retry.commit(&mut restored).expect(\"recovered fresh commit\");\n",
+              """    assert!(matches!(
+                  resolve_client_admission(&mut restored, retry, Ok::<_, ()>(())),
+                  ClientAdmissionResolution::Committed { .. }
+              ));
+          """,
+          )
+          replace_once(
+              "crates/dawn-sector/tests/client_admission_identity_recovery.rs",
+              "    attempt.commit(&mut node).expect(\"fresh commit\");\n",
+              """    assert!(matches!(
+                  resolve_client_admission(&mut node, attempt, Ok::<_, ()>(())),
+                  ClientAdmissionResolution::Committed { .. }
+              ));
+          """,
+          )
+          replace_once(
+              "crates/dawn-sector/tests/client_admission_identity_recovery.rs",
+              "    exact.abort(&mut restored);\n",
+              """    assert!(matches!(
+                  resolve_client_admission::<_, (), _>(&mut restored, exact, Err(())),
+                  ClientAdmissionResolution::Aborted { .. }
+              ));
+          """,
+          )
+
+          replace_once(
+              "crates/dawn-sector/tests/client_admission_replay.rs",
+              """    client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal},
+              galaxy::Galaxy,
+          """,
+              """    client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal},
+              client_admission_resolution::{resolve_client_admission, ClientAdmissionResolution},
+              galaxy::Galaxy,
+          """,
+          )
+          replace_once(
+              "crates/dawn-sector/tests/client_admission_replay.rs",
+              "    retry.abort(&mut restored);\n",
+              """    assert!(matches!(
+                  resolve_client_admission::<_, (), _>(&mut restored, retry, Err(())),
+                  ClientAdmissionResolution::Aborted { .. }
+              ));
+          """,
+          )
+          replace_once(
+              "crates/dawn-sector/tests/client_admission_replay.rs",
+              "    attempt.commit(&mut node).expect(\"fresh commit\");\n",
+              """    assert!(matches!(
+                  resolve_client_admission(&mut node, attempt, Ok::<_, ()>(())),
+                  ClientAdmissionResolution::Committed { .. }
+              ));
+          """,
+          )
+
+          replace_once(
+              "docs/adr/ADR-0048-resume-ticket-client-admission.md",
+              """route only after receiving `ClientAdmissionResolution::Committed`; it does not
+          select cleanup behavior or advance ticket state itself.
+
+          The durable player-ship ownership record remains the source of truth for
+          """,
+              """route only after receiving `ClientAdmissionResolution::Committed`; it does not
+          select cleanup behavior or advance ticket state itself.
+
+          Resume rotation uses two durable slots. Retrying the current ticket reuses
+          any already-staged successor instead of replacing a ticket that may have
+          reached the client. Retrying the staged ticket promotes it to current before
+          staging another successor. Therefore the ticket presented by the client
+          remains usable after an abort, while a successful commit still consumes it
+          and promotes the advertised successor.
+
+          The durable player-ship ownership record remains the source of truth for
+          """,
+          )
+          PY
+
+      - name: Format Rust
+        run: cargo fmt --all
+
+      - name: Commit fixes and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/issue-265-review-fixes.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(sector): preserve resume retries and seal resolution"
+          git push origin HEAD:agent/issue-265-admission-resolution
