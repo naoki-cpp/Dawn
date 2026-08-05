@@ -2,7 +2,8 @@
 //!
 //! The authoritative handoff state machine lives in the internal `handoff`
 //! module. The pipeline reconstructs durable EventStore facts, while this
-//! module owns only the wire payload and translation to Raft proposals.
+//! module owns only the wire payload and translation to Raft proposals. The
+//! low-level ECS lifecycle operations remain crate-private behind that policy.
 
 mod handoff;
 pub(crate) mod pipeline;
