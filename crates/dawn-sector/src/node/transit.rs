@@ -603,7 +603,7 @@ impl<S: EventStore> SimulationNode<S> {
     ) {
         if e.from == self.sector_id {
             if let Some(&entity) = self.ships.index.get(&e.ship_id) {
-                if self.world.transit_state(entity) == TransitState::InTransit { to: e.to } {
+                if self.world.transit_state(entity) == (TransitState::InTransit { to: e.to }) {
                     self.world.set_transit_state(entity, TransitState::None);
                 }
             }
@@ -705,9 +705,11 @@ mod tests {
         assert_eq!(node.world.transit_state(entity), TransitState::None);
         assert_eq!(node.total_event_count(), event_count);
         assert!(node.can_propose_transit(ship_id));
-        assert!(!node.event_store().all_records().iter().any(|record| {
-            matches!(record.event, DomainEvent::SectorTransitRequested(_))
-        }));
+        assert!(!node
+            .event_store()
+            .all_records()
+            .iter()
+            .any(|record| { matches!(record.event, DomainEvent::SectorTransitRequested(_)) }));
     }
 
     #[test]
@@ -961,9 +963,11 @@ mod tests {
             data.request_tick,
         );
         assert!(to_node.can_propose_jump(ship_id, return_gate.id));
-        assert!(to_node.event_store().all_records().iter().any(|r| {
-            matches!(r.event, DomainEvent::JumpGateUsed(_))
-        }));
+        assert!(to_node
+            .event_store()
+            .all_records()
+            .iter()
+            .any(|r| { matches!(r.event, DomainEvent::JumpGateUsed(_)) }));
     }
 
     #[test]
@@ -1327,16 +1331,15 @@ mod tests {
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
         );
         let ship_id = ShipId::new(NodeId(0), 7);
-        let event = DomainEvent::SectorTransitCompleted(
-            dawn_core::events::SectorTransitCompleted {
+        let event =
+            DomainEvent::SectorTransitCompleted(dawn_core::events::SectorTransitCompleted {
                 handoff: sample_transit_handoff(ship_id, Velocity::ZERO),
                 from: SectorId(0),
                 to: SectorId(1),
                 request_tick: Tick::ZERO,
                 entry_pos: dawn_core::AbsolutePosition::new(500.0, 0.0, 0.0),
                 tick: Tick(1),
-            },
-        );
+            });
         node.apply_event_pub(event.clone());
         node.apply_event_pub(event);
         assert_eq!(node.ship_count(), 1);

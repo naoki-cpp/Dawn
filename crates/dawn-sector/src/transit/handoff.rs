@@ -355,9 +355,7 @@ pub(super) fn due_retries<S: EventStore>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dawn_core::events::{
-        SectorTransitAborted, SectorTransitCompleted, SectorTransitRequested,
-    };
+    use dawn_core::events::{SectorTransitAborted, SectorTransitCompleted, SectorTransitRequested};
     use dawn_core::{NodeId, Position, SectorBounds, ShipTypeId, Velocity};
     use dawn_event_store::InMemoryEventStore;
 
@@ -644,12 +642,7 @@ mod tests {
         })
     }
 
-    fn aborted(
-        ship_id: ShipId,
-        from: SectorId,
-        to: SectorId,
-        event_tick: u64,
-    ) -> DomainEvent {
+    fn aborted(ship_id: ShipId, from: SectorId, to: SectorId, event_tick: u64) -> DomainEvent {
         DomainEvent::SectorTransitAborted(SectorTransitAborted {
             ship_id,
             from,
