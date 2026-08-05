@@ -62,7 +62,7 @@ mod tests {
     use super::*;
     use dawn_core::{NodeId, Position, SectorBounds, SectorId};
 
-    use crate::client_admission::ClientAdmissionIntent;
+    use crate::client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal};
 
     const AOI_CELL_SIZE: f64 = 1_000.0;
 
@@ -184,5 +184,83 @@ mod tests {
             )
             .expect("committed ticket also remains retryable after abort");
         current_retry.abort(&mut node);
+    }
+
+    #[test]
+    fn consecutive_aborted_resumes_keep_the_last_client_visible_ticket_retryable() {
+        let mut node = node();
+        let fresh = fresh_attempt(&mut node);
+        let committed_ticket = fresh.resume_ticket();
+        assert!(matches!(
+            resolve_client_admission(&mut node, fresh, Ok::<_, ()>(())),
+            ClientAdmissionResolution::Committed { .. }
+        ));
+
+        let first = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    resume_ticket: committed_ticket,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("committed ticket begins the first resume");
+        let first_visible_ticket = first.resume_ticket();
+        assert_ne!(first_visible_ticket, committed_ticket);
+        assert!(matches!(
+            resolve_client_admission::<_, (), _>(&mut node, first, Err("first handoff failed"),),
+            ClientAdmissionResolution::Aborted { .. }
+        ));
+
+        let second = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    resume_ticket: first_visible_ticket,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("the first advertised ticket begins the second resume");
+        let second_visible_ticket = second.resume_ticket();
+        assert_ne!(second_visible_ticket, first_visible_ticket);
+        assert!(matches!(
+            resolve_client_admission::<_, (), _>(&mut node, second, Err("second handoff failed"),),
+            ClientAdmissionResolution::Aborted { .. }
+        ));
+
+        let retry = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    resume_ticket: first_visible_ticket,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("the client-visible ticket must survive the second abort");
+        assert_eq!(retry.resume_ticket(), second_visible_ticket);
+        assert!(matches!(
+            resolve_client_admission(&mut node, retry, Ok::<_, ()>(())),
+            ClientAdmissionResolution::Committed { .. }
+        ));
+
+        assert_eq!(
+            node.begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    resume_ticket: first_visible_ticket,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect_err("a committed rotation consumes the presented ticket"),
+            ClientAdmissionRefusal::ResumeTicketInvalid
+        );
+        let next = node
+            .begin_client_admission(
+                ClientAdmissionIntent::Resume {
+                    resume_ticket: second_visible_ticket,
+                },
+                AOI_CELL_SIZE,
+            )
+            .expect("the committed successor remains usable");
+        assert!(matches!(
+            resolve_client_admission::<_, (), _>(&mut node, next, Err("cleanup"),),
+            ClientAdmissionResolution::Aborted { .. }
+        ));
     }
 }

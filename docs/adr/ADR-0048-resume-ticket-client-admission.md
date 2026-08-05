@@ -90,6 +90,13 @@ adapter-facing result classification. A runtime publishes a session or cluster
 route only after receiving `ClientAdmissionResolution::Committed`; it does not
 select cleanup behavior or advance ticket state itself.
 
+Resume rotation uses two durable slots. Retrying the current ticket reuses
+any already-staged successor instead of replacing a ticket that may have
+reached the client. Retrying the staged ticket promotes it to current before
+staging another successor. Therefore the ticket presented by the client
+remains usable after an abort, while a successful commit still consumes it
+and promotes the advertised successor.
+
 The durable player-ship ownership record remains the source of truth for
 which ships can be resumed. Admission does not infer ownership from the
 presence of a Ship entity, its ship type, or an ECS marker.

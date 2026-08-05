@@ -2,6 +2,7 @@ use dawn_core::{NodeId, Position, SectorBounds, SectorId};
 use dawn_event_store::FileEventStore;
 use dawn_sector::{
     client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal},
+    client_admission_resolution::{resolve_client_admission, ClientAdmissionResolution},
     galaxy::Galaxy,
     game_data::{GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH},
     node::SimulationNode,
@@ -86,7 +87,10 @@ fn client_visible_fresh_identity_recovers_after_restart_before_commit() {
         )
         .expect("the exact client-visible identity must reclaim its prepared admission");
     assert!(!retry.is_resumed());
-    retry.commit(&mut restored).expect("recovered fresh commit");
+    assert!(matches!(
+        resolve_client_admission(&mut restored, retry, Ok::<_, ()>(())),
+        ClientAdmissionResolution::Committed { .. }
+    ));
     assert!(restored.ship_absolute_pos(ship_id).is_some());
     assert!(restored.apply_stop_command_owned(player_id, ship_id));
 }
@@ -122,7 +126,10 @@ fn ownership_binding_survives_checkpoint_compaction() {
         )
         .expect("fresh admission");
     let resume_ticket = attempt.resume_ticket();
-    attempt.commit(&mut node).expect("fresh commit");
+    assert!(matches!(
+        resolve_client_admission(&mut node, attempt, Ok::<_, ()>(())),
+        ClientAdmissionResolution::Committed { .. }
+    ));
     node.checkpoint(&snapshot_path, &cold_path).unwrap();
     drop(node);
 
@@ -157,5 +164,8 @@ fn ownership_binding_survives_checkpoint_compaction() {
             AOI_CELL_SIZE,
         )
         .expect("the original identity reconnects after checkpoint");
-    exact.abort(&mut restored);
+    assert!(matches!(
+        resolve_client_admission::<_, (), _>(&mut restored, exact, Err(())),
+        ClientAdmissionResolution::Aborted { .. }
+    ));
 }

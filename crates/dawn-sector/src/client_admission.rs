@@ -102,11 +102,10 @@ enum AdmissionOrigin {
 
 /// One begun but not yet committed client admission.
 ///
-/// The attempt must be resolved exactly once after asynchronous handshake
-/// completion:
-///
-/// - [`Self::commit`] after the socket successfully receives the handoff;
-/// - [`Self::abort`] after any handshake failure or disconnect.
+/// Runtime code must resolve the attempt exactly once through
+/// [`crate::client_admission_resolution::resolve_client_admission`]. Direct
+/// commit and abort transitions are crate-private so adapters cannot
+/// reconstruct lifecycle or cleanup policy.
 ///
 /// Fresh attempts hold a durable allocation watermark and SQLite prepared row
 /// plus a live capacity claim. Abort releases only the live claim because a
@@ -153,7 +152,7 @@ impl ClientAdmissionAttempt {
     /// Resume ownership is established here, not at begin, so a failed resume
     /// handshake cannot leave ownership or docked-player state behind. Fresh
     /// Ship and gameplay state are materialized here from the reserved identity.
-    pub fn commit<S: EventStore>(
+    pub(crate) fn commit<S: EventStore>(
         self,
         node: &mut SimulationNode<S>,
     ) -> Result<CommittedClientAdmission, ClientAdmissionCommitError> {
@@ -199,7 +198,7 @@ impl ClientAdmissionAttempt {
     /// consumed identity and prepared row for an exact retry. A resume attempt
     /// releases only its non-authoritative Ship/Player lock. Neither path
     /// removes a committed or pre-existing Ship.
-    pub fn abort<S: EventStore>(self, node: &mut SimulationNode<S>) {
+    pub(crate) fn abort<S: EventStore>(self, node: &mut SimulationNode<S>) {
         match self.origin {
             AdmissionOrigin::Fresh { .. } => {
                 node.abort_reserved_fresh_admission(self.ship_id);
@@ -217,7 +216,8 @@ impl<S: EventStore> SimulationNode<S> {
     ///
     /// No runtime should separately allocate identity, spawn/adopt a Ship, or
     /// decide rollback. It should only pass socket-derived intent here, send the
-    /// returned payload, then resolve the attempt with `commit` or `abort`.
+    /// returned payload, then pass the transport result and attempt to
+    /// [`crate::client_admission_resolution::resolve_client_admission`].
     pub fn begin_client_admission(
         &mut self,
         intent: ClientAdmissionIntent,
@@ -331,15 +331,15 @@ impl<S: EventStore> SimulationNode<S> {
                         .build_player_loadout_json_for_admission(player_id, ship_id)
                         .ok_or(ClientAdmissionRefusal::ResumeTicketInvalid)?;
                     handoff.player_loadout = Some(loadout);
-                    let next_ticket = self.issue_resume_ticket();
-                    if !self.stage_client_resume_ticket(
-                        ship_id,
-                        player_id,
-                        resume_ticket,
-                        next_ticket,
-                    ) {
-                        return Err(ClientAdmissionRefusal::ResumeTicketInvalid);
-                    }
+                    let proposed_next_ticket = self.issue_resume_ticket();
+                    let next_ticket = self
+                        .stage_client_resume_ticket(
+                            ship_id,
+                            player_id,
+                            resume_ticket,
+                            proposed_next_ticket,
+                        )
+                        .ok_or(ClientAdmissionRefusal::ResumeTicketInvalid)?;
                     Ok((handoff, next_ticket))
                 })();
 
