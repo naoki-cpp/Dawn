@@ -1,0 +1,99 @@
+name: Migrate issue 265 adapter tests
+
+on:
+  push:
+    branches:
+      - agent/issue-265-admission-resolution
+
+permissions:
+  contents: write
+
+jobs:
+  migrate-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/issue-265-admission-resolution
+          fetch-depth: 0
+      - name: Route adapter tests through resolver
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}")
+              file.write_text(text.replace(old, new, 1))
+
+          committed_node = '''        let committed = match resolve_client_admission(
+              &mut node,
+              fresh,
+              Ok::<_, ()>(()),
+          ) {
+              ClientAdmissionResolution::Committed { admission, .. } => admission,
+              other => panic!("fresh admission should commit, got {other:?}"),
+          };
+          '''
+          replace_once(
+              "crates/dawn-sector-node/src/client_admission.rs",
+              '        let committed = fresh.commit(&mut node).expect("fresh commit");\n',
+              committed_node,
+          )
+          replace_once(
+              "crates/dawn-simulation/src/serve/single.rs",
+              '        let committed = fresh.commit(&mut node).expect("fresh commit");\n',
+              committed_node,
+          )
+          replace_once(
+              "crates/dawn-simulation/src/serve/cluster.rs",
+              '        let committed = fresh.commit(&mut node).expect("fresh commit");\n',
+              committed_node,
+          )
+
+          replace_once(
+              "crates/dawn-simulation/src/serve/cluster.rs",
+              '        let committed = fresh.commit(&mut nodes[1]).expect("fresh commit");\n',
+              '''        let committed = match resolve_client_admission(
+              &mut nodes[1],
+              fresh,
+              Ok::<_, ()>(()),
+          ) {
+              ClientAdmissionResolution::Committed { admission, .. } => admission,
+              other => panic!("fresh admission should commit, got {other:?}"),
+          };
+          ''',
+          )
+          replace_once(
+              "crates/dawn-simulation/src/serve/cluster.rs",
+              '        attempt.abort(&mut nodes[1]);\n',
+              '''        assert!(matches!(
+              resolve_client_admission::<_, (), _>(&mut nodes[1], attempt, Err(())),
+              ClientAdmissionResolution::Aborted { .. }
+          ));
+          ''',
+          )
+          replace_once(
+              "crates/dawn-simulation/src/serve/cluster.rs",
+              '        recovered.abort(&mut nodes[sector]);\n',
+              '''        assert!(matches!(
+              resolve_client_admission::<_, (), _>(&mut nodes[sector], recovered, Err(())),
+              ClientAdmissionResolution::Aborted { .. }
+          ));
+          ''',
+          )
+          PY
+          cargo fmt --all
+      - name: Commit migration and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/issue-265-migrate-adapter-tests.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "test(sector): resolve adapter attempts through sector boundary"
+          git push origin HEAD:agent/issue-265-admission-resolution
