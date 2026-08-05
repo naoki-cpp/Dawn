@@ -93,9 +93,10 @@ select cleanup behavior or advance ticket state itself.
 Resume rotation uses two durable slots. Retrying the current ticket reuses
 any already-staged successor instead of replacing a ticket that may have
 reached the client. Retrying the staged ticket promotes it to current before
-staging another successor. Therefore the ticket presented by the client
-remains usable after an abort, while a successful commit still consumes it
-and promotes the advertised successor.
+staging another successor. At that point the older current ticket is retired,
+because the client has demonstrated possession of the staged ticket. Therefore
+the ticket presented by the client remains usable after an abort, while a
+successful commit still consumes it and promotes the advertised successor.
 
 The durable player-ship ownership record remains the source of truth for
 which ships can be resumed. Admission does not infer ownership from the
