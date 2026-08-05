@@ -63,7 +63,7 @@ mod tests {
     use super::*;
     use dawn_core::{NodeId, Position, SectorBounds, SectorId};
 
-    use crate::client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal};
+    use crate::client_admission::ClientAdmissionIntent;
 
     const AOI_CELL_SIZE: f64 = 1_000.0;
 
@@ -109,7 +109,7 @@ mod tests {
         let mut node = node();
         let attempt = fresh_attempt(&mut node);
 
-        let resolution = resolve_client_admission::<_, () , _>(
+        let resolution = resolve_client_admission::<_, (), _>(
             &mut node,
             attempt,
             Err("client disconnected"),
@@ -142,16 +142,16 @@ mod tests {
     }
 
     #[test]
-    fn aborted_resume_keeps_the_staged_ticket_retryable() {
+    fn aborted_resume_keeps_current_and_staged_tickets_retryable() {
         let mut node = node();
         let fresh = fresh_attempt(&mut node);
-        let first_ticket = fresh.resume_ticket();
+        let current_ticket = fresh.resume_ticket();
         let committed = fresh.commit(&mut node).expect("fresh commit");
 
         let resume = node
             .begin_client_admission(
                 ClientAdmissionIntent::Resume {
-                    resume_ticket: first_ticket,
+                    resume_ticket: current_ticket,
                 },
                 AOI_CELL_SIZE,
             )
@@ -170,7 +170,7 @@ mod tests {
         ));
         assert_eq!(node.ship_count(), 1);
 
-        let retry = node
+        let staged_retry = node
             .begin_client_admission(
                 ClientAdmissionIntent::Resume {
                     resume_ticket: staged_ticket,
@@ -178,19 +178,18 @@ mod tests {
                 AOI_CELL_SIZE,
             )
             .expect("ticket exposed before abort remains retryable");
-        assert_eq!(retry.player_id(), committed.player_id);
-        assert_eq!(retry.ship_id(), committed.ship_id);
-        retry.abort(&mut node);
+        assert_eq!(staged_retry.player_id(), committed.player_id);
+        assert_eq!(staged_retry.ship_id(), committed.ship_id);
+        staged_retry.abort(&mut node);
 
-        assert_eq!(
-            node.begin_client_admission(
+        let current_retry = node
+            .begin_client_admission(
                 ClientAdmissionIntent::Resume {
-                    resume_ticket: first_ticket,
+                    resume_ticket: current_ticket,
                 },
                 AOI_CELL_SIZE,
             )
-            .expect_err("committed ticket is no longer current after staging"),
-            ClientAdmissionRefusal::ResumeTicketInvalid
-        );
+            .expect("committed ticket also remains retryable after abort");
+        current_retry.abort(&mut node);
     }
 }
