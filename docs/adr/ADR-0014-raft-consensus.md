@@ -66,6 +66,9 @@ Request適用時は、Shipを一時的に`InTransit`へ変更してからcanonic
 戻し、durable outboxを残さない。したがって、再生成不能なCommitによってShipとcheckpointが
 永久に停止する状態を作らない。
 
+Request準備、destination materialization、source cleanupの低水準操作はcrate-privateとし、
+外部crateは`transit/handoff.rs`のidentity検証・冪等性・cleanup判定を迂回できない。
+
 ### 3. Durable retry
 
 source側の未解決`SectorTransitRequested`をdurable outboxとして扱う。
