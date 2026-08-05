@@ -81,6 +81,23 @@ client-provided ship, adopt arbitrary ships, or publish routing state. NPCs
 never receive resume tickets and therefore cannot enter the player admission
 path.
 
+One `ClientAdmissionAttempt` owns the prepared identity, in-flight locks,
+staged ticket transition, and handoff payload from begin until resolution. The
+runtime may move the handoff into its socket task, but it reports only the
+transport result back to `dawn-sector`. `resolve_client_admission` consumes the
+attempt exactly once and performs commit, abort, stale-attempt cleanup, and
+adapter-facing result classification. A runtime publishes a session or cluster
+route only after receiving `ClientAdmissionResolution::Committed`; it does not
+select cleanup behavior or advance ticket state itself.
+
+Resume rotation uses two durable slots. Retrying the current ticket reuses
+any already-staged successor instead of replacing a ticket that may have
+reached the client. Retrying the staged ticket promotes it to current before
+staging another successor. At that point the older current ticket is retired,
+because the client has demonstrated possession of the staged ticket. Therefore
+the ticket presented by the client remains usable after an abort, while a
+successful commit still consumes it and promotes the advertised successor.
+
 The durable player-ship ownership record remains the source of truth for
 which ships can be resumed. Admission does not infer ownership from the
 presence of a Ship entity, its ship type, or an ECS marker.
@@ -140,4 +157,5 @@ authentication system.
   failed-handshake retry, and clustered redirect recovery.
 - [x] Update ADR-0007, client-admission documentation, wire documentation, and
   generated wire schemas.
+- [x] Resolve transport outcomes through one Sector-owned commit/abort boundary.
 - [ ] Add ticket expiry and explicit expiry-policy tests.

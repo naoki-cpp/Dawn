@@ -2,6 +2,7 @@ use dawn_core::{NodeId, Position, SectorBounds, SectorId};
 use dawn_event_store::{store::EventStore, InMemoryEventStore};
 use dawn_sector::{
     client_admission::{ClientAdmissionIntent, ClientAdmissionRefusal},
+    client_admission_resolution::{resolve_client_admission, ClientAdmissionResolution},
     galaxy::Galaxy,
     game_data::{GameDataCatalog, PRODUCTION_MODULES_PATH, PRODUCTION_SHIP_TYPES_PATH},
     node::SimulationNode,
@@ -81,7 +82,10 @@ fn in_flight_fresh_admission_keeps_only_a_durable_identity_watermark() {
         .expect("restored node may admit a new client");
     assert_ne!(retry.player_id(), reserved_player_id);
     assert_ne!(retry.ship_id(), reserved_ship_id);
-    retry.abort(&mut restored);
+    assert!(matches!(
+        resolve_client_admission::<_, (), _>(&mut restored, retry, Err(())),
+        ClientAdmissionResolution::Aborted { .. }
+    ));
 }
 
 #[test]
@@ -111,7 +115,10 @@ fn committed_fresh_admission_replays_complete_state_and_grants_starter_once() {
         .expect("fresh admission");
     let player_id = attempt.player_id();
     let ship_id = attempt.ship_id();
-    attempt.commit(&mut node).expect("fresh commit");
+    assert!(matches!(
+        resolve_client_admission(&mut node, attempt, Ok::<_, ()>(())),
+        ClientAdmissionResolution::Committed { .. }
+    ));
 
     let records = node.event_store().all_records();
     assert_eq!(records.len(), 2);

@@ -331,30 +331,69 @@ impl StationInventoryDb {
         Ok(())
     }
 
-    /// Persist the next resume ticket before it can be exposed in Welcome.
-    /// The committed ticket remains valid until `record_client_ownership`
-    /// promotes this staged value, so a failed handshake can retry either the
-    /// previous or the advertised ticket.
+    /// Persist the ticket that may be exposed in Welcome without invalidating
+    /// the ticket the client used for this attempt. Retrying the committed ticket
+    /// reuses an existing pending ticket. Retrying the pending ticket promotes it
+    /// to current before staging its successor, so an abort still leaves the
+    /// client-presented ticket valid.
     pub(super) fn stage_client_resume_ticket(
-        &self,
+        &mut self,
         ship_id: ShipId,
         player_id: PlayerId,
         presented_ticket: ResumeTicket,
-        next_ticket: ResumeTicket,
-    ) -> rusqlite::Result<bool> {
-        let changed = self.conn.execute(
+        proposed_next_ticket: ResumeTicket,
+    ) -> rusqlite::Result<Option<ResumeTicket>> {
+        let tx = self.conn.transaction()?;
+        let stored = tx
+            .query_row(
+                "SELECT player_id, resume_ticket, pending_resume_ticket
+                 FROM client_ship_ownership WHERE ship_id = ?1",
+                params![ship_id.raw().to_string()],
+                |row| {
+                    let stored_player = PlayerId(row.get::<_, i64>(0)? as u64);
+                    let current_ticket = ticket_from_blob(row.get(1)?)?;
+                    let pending_ticket = row
+                        .get::<_, Option<Vec<u8>>>(2)?
+                        .map(ticket_from_blob)
+                        .transpose()?;
+                    Ok((stored_player, current_ticket, pending_ticket))
+                },
+            )
+            .optional()?;
+        let Some((stored_player, current_ticket, pending_ticket)) = stored else {
+            return Ok(None);
+        };
+        if stored_player != player_id {
+            return Ok(None);
+        }
+
+        let (next_current, next_pending, advertised_ticket) = if presented_ticket == current_ticket
+        {
+            let advertised_ticket = pending_ticket.unwrap_or(proposed_next_ticket);
+            (current_ticket, Some(advertised_ticket), advertised_ticket)
+        } else if pending_ticket == Some(presented_ticket) {
+            (
+                presented_ticket,
+                Some(proposed_next_ticket),
+                proposed_next_ticket,
+            )
+        } else {
+            return Ok(None);
+        };
+
+        tx.execute(
             "UPDATE client_ship_ownership
-             SET pending_resume_ticket = ?3
-             WHERE ship_id = ?1 AND player_id = ?2
-               AND (resume_ticket = ?4 OR pending_resume_ticket = ?4)",
+             SET resume_ticket = ?3, pending_resume_ticket = ?4
+             WHERE ship_id = ?1 AND player_id = ?2",
             params![
                 ship_id.raw().to_string(),
                 player_id.0 as i64,
-                next_ticket.as_bytes().as_slice(),
-                presented_ticket.as_bytes().as_slice(),
+                next_current.as_bytes().as_slice(),
+                next_pending.map(|ticket| ticket.as_bytes().to_vec()),
             ],
         )?;
-        Ok(changed == 1)
+        tx.commit()?;
+        Ok(Some(advertised_ticket))
     }
 
     /// Every item stack this player currently owns at `station_id`.
@@ -636,7 +675,7 @@ mod tests {
             [],
         )
         .unwrap();
-        let db = StationInventoryDb::init(conn).unwrap();
+        let mut db = StationInventoryDb::init(conn).unwrap();
         let ship_id = ShipId::new(dawn_core::NodeId(2), 8);
         let player_id = PlayerId(1);
         let current_ticket = ResumeTicket::from_bytes([8; ResumeTicket::BYTE_LEN]);
@@ -644,9 +683,11 @@ mod tests {
 
         db.record_client_ownership(ship_id, player_id, current_ticket)
             .unwrap();
-        assert!(db
-            .stage_client_resume_ticket(ship_id, player_id, current_ticket, next_ticket)
-            .unwrap());
+        assert_eq!(
+            db.stage_client_resume_ticket(ship_id, player_id, current_ticket, next_ticket)
+                .unwrap(),
+            Some(next_ticket)
+        );
         assert_eq!(
             db.client_ownership_by_ticket(next_ticket).unwrap(),
             Some((player_id, ship_id))
@@ -701,9 +742,11 @@ mod tests {
 
         db.record_client_ownership(ship_id, player_id, current_ticket)
             .unwrap();
-        assert!(db
-            .stage_client_resume_ticket(ship_id, player_id, current_ticket, pending_ticket,)
-            .unwrap());
+        assert_eq!(
+            db.stage_client_resume_ticket(ship_id, player_id, current_ticket, pending_ticket,)
+                .unwrap(),
+            Some(pending_ticket)
+        );
 
         db.ensure_client_admission_grant(
             ship_id,

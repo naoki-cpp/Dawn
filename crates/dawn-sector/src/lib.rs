@@ -31,6 +31,7 @@ pub mod anchor;
 pub mod aoi;
 pub mod aoi_frame;
 pub mod client_admission;
+pub mod client_admission_resolution;
 pub mod dilation;
 pub mod galaxy;
 pub mod game_data;

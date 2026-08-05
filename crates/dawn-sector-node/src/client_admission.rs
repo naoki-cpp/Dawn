@@ -10,6 +10,9 @@ use dawn_event_store::store::EventStore;
 use dawn_sector::client_admission::{
     ClientAdmissionAttempt, ClientAdmissionIntent, ClientAdmissionRefusal, CommittedClientAdmission,
 };
+use dawn_sector::client_admission_resolution::{
+    resolve_client_admission, ClientAdmissionResolution,
+};
 use dawn_sector::node::SimulationNode;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -166,17 +169,14 @@ fn finish_admission<S: EventStore, T>(
     attempt: ClientAdmissionAttempt,
     result: Result<T, String>,
 ) -> Option<(T, CommittedClientAdmission)> {
-    match result {
-        Ok(value) => match attempt.commit(node) {
-            Ok(committed) => Some((value, committed)),
-            Err(error) => {
-                eprintln!("[Node] {error}");
-                None
-            }
-        },
-        Err(error) => {
-            attempt.abort(node);
+    match resolve_client_admission(node, attempt, result) {
+        ClientAdmissionResolution::Committed { value, admission } => Some((value, admission)),
+        ClientAdmissionResolution::Aborted { error } => {
             eprintln!("[Node] handshake failed: {error}");
+            None
+        }
+        ClientAdmissionResolution::CommitRejected { error } => {
+            eprintln!("[Node] {error}");
             None
         }
     }
@@ -311,7 +311,10 @@ mod tests {
             )
             .expect("fresh attempt");
         let resume_ticket = fresh.resume_ticket();
-        let committed = fresh.commit(&mut node).expect("fresh commit");
+        let committed = match resolve_client_admission(&mut node, fresh, Ok::<_, ()>(())) {
+            ClientAdmissionResolution::Committed { admission, .. } => admission,
+            other => panic!("fresh admission should commit, got {other:?}"),
+        };
         let player_id = committed.player_id;
         let ship_id = committed.ship_id;
         let attempt = node
