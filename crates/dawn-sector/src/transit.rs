@@ -1,9 +1,10 @@
 //! Sector Transit Raft adapter (ADR-0014).
 //!
-//! The durable recovery and idempotency policy lives in the internal pipeline
-//! module. This module owns only the wire payload and the translation between
-//! committed Raft entries and pipeline proposals.
+//! The authoritative handoff state machine lives in the internal `handoff`
+//! module. The pipeline reconstructs durable EventStore facts, while this
+//! module owns only the wire payload and translation to Raft proposals.
 
+mod handoff;
 pub(crate) mod pipeline;
 
 use crate::node::SimulationNode;
