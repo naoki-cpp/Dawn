@@ -20,6 +20,18 @@ mod serve;
 // crate scope so existing `crate::ws_server` paths keep resolving.
 use dawn_actor::ws_server;
 
+#[cfg(test)]
+fn test_catalog() -> std::sync::Arc<dawn_sector::game_data::GameDataCatalog> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    std::sync::Arc::new(
+        dawn_sector::game_data::GameDataCatalog::load_from_paths(
+            root.join(dawn_sector::game_data::PRODUCTION_MODULES_PATH),
+            root.join(dawn_sector::game_data::PRODUCTION_SHIP_TYPES_PATH),
+        )
+        .expect("repository game-data catalog"),
+    )
+}
+
 #[tokio::main]
 async fn main() {
     // Phase 4 mode: with --serve, start the Godot-facing WebSocket server

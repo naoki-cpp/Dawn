@@ -371,7 +371,7 @@ mod tests {
     const AOI_CELL_SIZE: f64 = 1_000.0;
 
     fn node() -> SimulationNode {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(7),
             SectorId(3),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),

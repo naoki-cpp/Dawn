@@ -356,20 +356,21 @@ mod tests {
     use dawn_sector::node::SimulationNode;
 
     fn test_node() -> SimulationNode {
-        let mut node = SimulationNode::new(
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let catalog = std::sync::Arc::new(
+            dawn_sector::game_data::GameDataCatalog::load_from_paths(
+                root.join(dawn_sector::game_data::PRODUCTION_MODULES_PATH),
+                root.join(dawn_sector::game_data::PRODUCTION_SHIP_TYPES_PATH),
+            )
+            .expect("repository game-data catalog"),
+        );
+        SimulationNode::new(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
-        );
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let catalog = dawn_sector::game_data::GameDataCatalog::load_from_paths(
-            root.join(dawn_sector::game_data::PRODUCTION_MODULES_PATH),
-            root.join(dawn_sector::game_data::PRODUCTION_SHIP_TYPES_PATH),
+            catalog,
         )
-        .expect("repository game-data catalog");
-        catalog.register_into(&mut node);
-        node
     }
 
     #[test]

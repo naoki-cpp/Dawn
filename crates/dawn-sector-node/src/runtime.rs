@@ -320,6 +320,17 @@ mod tests {
     const CELL_SIZE: f64 = 100.0;
     const PLAYER: PlayerId = PlayerId(1);
 
+    fn test_catalog() -> std::sync::Arc<dawn_sector::game_data::GameDataCatalog> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        std::sync::Arc::new(
+            dawn_sector::game_data::GameDataCatalog::load_from_paths(
+                root.join(dawn_sector::game_data::PRODUCTION_MODULES_PATH),
+                root.join(dawn_sector::game_data::PRODUCTION_SHIP_TYPES_PATH),
+            )
+            .expect("repository game-data catalog"),
+        )
+    }
+
     #[derive(Debug, PartialEq, Eq)]
     enum Sent {
         Enter(u64),
@@ -394,6 +405,7 @@ mod tests {
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+            test_catalog(),
         );
         let own = node.spawn_ship(SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
         let leaving = node.spawn_ship(
@@ -410,6 +422,7 @@ mod tests {
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
             std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+            test_catalog(),
         );
         let own = node.spawn_ship(SHIP_TYPE_NPC_FRIGATE, Position::ORIGIN, Velocity::ZERO);
         let leaving = node.spawn_ship(

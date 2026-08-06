@@ -269,7 +269,7 @@ mod tests {
     };
 
     fn mem_node() -> SimulationNode {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -280,12 +280,6 @@ mod tests {
     #[test]
     fn player_loadout_json_includes_scrap_metal_inventory_rows() {
         let mut node = mem_node();
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            node.register_module(def);
-        }
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            node.register_ship_type(def);
-        }
 
         let player_id = node.next_player_id();
         let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
@@ -311,12 +305,6 @@ mod tests {
     #[test]
     fn every_item_id_variant_produces_a_row_in_the_loadout_payload() {
         let mut node = mem_node();
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            node.register_module(def);
-        }
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            node.register_ship_type(def);
-        }
 
         let player_id = node.next_player_id();
         let station = node.station(StationId(0)).unwrap().clone();
@@ -361,13 +349,7 @@ mod tests {
 
     #[test]
     fn item_id_to_row_json_carries_the_count_for_every_item_id_variant() {
-        let mut node = mem_node();
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            node.register_module(def);
-        }
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            node.register_ship_type(def);
-        }
+        let node = mem_node();
 
         let module_id = crate::modules::MODULE_RAILGUN_SMALL;
         let ship_type_id = crate::ship_types::SHIP_TYPE_MAGPIE;
@@ -395,12 +377,6 @@ mod tests {
     #[test]
     fn player_loadout_json_carries_docked_station_context_and_station_inventory() {
         let mut node = mem_node();
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            node.register_module(def);
-        }
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            node.register_ship_type(def);
-        }
 
         let player_id = node.next_player_id();
         let station = node.station(StationId(0)).unwrap().clone();
@@ -507,9 +483,6 @@ mod tests {
     #[test]
     fn player_loadout_json_lists_every_owned_ship_with_active_and_docked_flags() {
         let mut node = mem_node();
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            node.register_ship_type(def);
-        }
         let player_id = node.next_player_id();
         let station = node.station(StationId(0)).unwrap().clone();
         let ship_id = node.spawn_player_ship_at_pub(player_id, station.position);

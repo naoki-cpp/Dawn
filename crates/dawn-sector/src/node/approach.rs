@@ -243,7 +243,7 @@ mod tests {
     use dawn_ecs::components::ThrustComp;
 
     fn mem_node() -> SimulationNode {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),

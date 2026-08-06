@@ -133,26 +133,122 @@ fn missing_runtime_directory_does_not_fallback_to_repository_data() {
 fn repository_test_fixture_loads_and_preserves_known_values() {
     let catalog = test_catalog();
     assert_eq!(
-        catalog.modules.len(),
+        catalog.modules().len(),
         crate::modules::REQUIRED_MODULE_IDS.len()
     );
     assert_eq!(
-        catalog.ship_types.len(),
+        catalog.ship_types().len(),
         crate::ship_types::REQUIRED_SHIP_TYPE_IDS.len()
     );
 
     let magpie = catalog
-        .ship_types
-        .iter()
-        .find(|definition| definition.id == crate::ship_types::SHIP_TYPE_MAGPIE)
+        .ship_type(crate::ship_types::SHIP_TYPE_MAGPIE)
         .expect("Magpie");
     assert!(magpie.buildable);
     assert_eq!(magpie.base_stats.mass, 12_000_000.0);
 
     let railgun = catalog
-        .modules
-        .iter()
-        .find(|definition| definition.id == crate::modules::MODULE_RAILGUN_SMALL)
+        .module(crate::modules::MODULE_RAILGUN_SMALL)
         .expect("Small Railgun");
     assert_eq!(railgun.stat_delta.weapon_damage_add, 25.0);
+}
+
+#[test]
+fn definition_order_does_not_change_observable_catalog_order_or_lookup() {
+    let baseline = test_catalog();
+    let mut modules = baseline.modules().to_vec();
+    let mut ship_types = baseline.ship_types().to_vec();
+    modules.reverse();
+    ship_types.reverse();
+
+    let reordered = GameDataCatalog::from_definitions(modules, ship_types)
+        .expect("reordered complete definitions remain valid");
+
+    let baseline_module_ids: Vec<_> = baseline.modules().iter().map(|item| item.id).collect();
+    let reordered_module_ids: Vec<_> = reordered.modules().iter().map(|item| item.id).collect();
+    assert_eq!(reordered_module_ids, baseline_module_ids);
+
+    let baseline_ship_type_ids: Vec<_> = baseline.ship_types().iter().map(|item| item.id).collect();
+    let reordered_ship_type_ids: Vec<_> =
+        reordered.ship_types().iter().map(|item| item.id).collect();
+    assert_eq!(reordered_ship_type_ids, baseline_ship_type_ids);
+
+    for definition in baseline.modules() {
+        assert_eq!(
+            reordered
+                .module(definition.id)
+                .map(|item| item.name.as_str()),
+            Some(definition.name.as_str())
+        );
+    }
+    for definition in baseline.ship_types() {
+        assert_eq!(
+            reordered
+                .ship_type(definition.id)
+                .map(|item| item.name.as_str()),
+            Some(definition.name.as_str())
+        );
+    }
+}
+
+#[test]
+fn definition_order_does_not_change_engine_visible_initial_state() {
+    let baseline = test_catalog();
+    let mut modules = baseline.modules().to_vec();
+    let mut ship_types = baseline.ship_types().to_vec();
+    modules.reverse();
+    ship_types.reverse();
+
+    let reordered = std::sync::Arc::new(
+        GameDataCatalog::from_definitions(modules, ship_types)
+            .expect("reordered definitions remain a valid complete catalog"),
+    );
+    let baseline = std::sync::Arc::new(baseline.clone());
+    let galaxy = std::sync::Arc::new(crate::galaxy::Galaxy::demo());
+    let bounds = dawn_core::SectorBounds::centered(dawn_core::SectorBounds::DEFAULT_HALF);
+
+    let mut first = crate::node::SimulationNode::new(
+        dawn_core::NodeId(0),
+        dawn_core::SectorId(0),
+        bounds,
+        std::sync::Arc::clone(&galaxy),
+        baseline,
+    );
+    let mut second = crate::node::SimulationNode::new(
+        dawn_core::NodeId(0),
+        dawn_core::SectorId(0),
+        bounds,
+        galaxy,
+        reordered,
+    );
+
+    let first_ship = first.spawn_ship(
+        crate::ship_types::SHIP_TYPE_MAGPIE,
+        dawn_core::Position::ORIGIN,
+        dawn_core::Velocity::ZERO,
+    );
+    let second_ship = second.spawn_ship(
+        crate::ship_types::SHIP_TYPE_MAGPIE,
+        dawn_core::Position::ORIGIN,
+        dawn_core::Velocity::ZERO,
+    );
+    assert_eq!(first_ship, second_ship);
+
+    let first_fitted = first.fit_module(dawn_core::FitModuleCommand {
+        ship_id: first_ship,
+        slot: dawn_core::SlotKind::High,
+        module_id: crate::modules::MODULE_RAILGUN_SMALL,
+    });
+    let second_fitted = second.fit_module(dawn_core::FitModuleCommand {
+        ship_id: second_ship,
+        slot: dawn_core::SlotKind::High,
+        module_id: crate::modules::MODULE_RAILGUN_SMALL,
+    });
+    assert!(first_fitted && second_fitted);
+
+    let mut first_state = first.build_initial_state_json();
+    let mut second_state = second.build_initial_state_json();
+    first_state.celestial_bodies.sort_by_key(|body| body.id);
+    second_state.celestial_bodies.sort_by_key(|body| body.id);
+    assert_eq!(first_state, second_state);
 }

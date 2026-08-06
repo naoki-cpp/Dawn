@@ -211,7 +211,7 @@ mod tests {
     use dawn_event_store::{FileEventStore, InMemoryEventStore};
 
     fn mem_node() -> SimulationNode {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -220,14 +220,7 @@ mod tests {
     }
 
     fn node_with_modules() -> SimulationNode {
-        let mut node = mem_node();
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            node.register_module(def);
-        }
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            node.register_ship_type(def);
-        }
-        node
+        mem_node()
     }
 
     /// Restoring a snapshot and re-capturing must reproduce it byte for byte.
@@ -259,7 +252,7 @@ mod tests {
         }
 
         let original = snapshot_fixture(store.len() as u64);
-        let node = SimulationNode::restore_from(
+        let node = SimulationNode::restore_from_test(
             store,
             &original,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -287,7 +280,7 @@ mod tests {
         let second = node.next_player_id();
         let snapshot = node.take_snapshot();
 
-        let mut restored = SimulationNode::restore_from(
+        let mut restored = SimulationNode::restore_from_test(
             InMemoryEventStore::new(),
             &snapshot,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -375,7 +368,7 @@ mod tests {
         let final_positions: Vec<Position>;
         {
             let store = FileEventStore::open(&event_path).unwrap();
-            let mut node = SimulationNode::with_store(
+            let mut node = SimulationNode::with_test_store(
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -423,7 +416,7 @@ mod tests {
         // then we re-run the remaining ticks to reach the exact final position.
         let snap = StateSnapshot::load(&snapshot_path).unwrap();
         let store2 = FileEventStore::open(&event_path).unwrap();
-        let mut node2 = SimulationNode::restore_from(
+        let mut node2 = SimulationNode::restore_from_test(
             store2,
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -483,7 +476,7 @@ mod tests {
         for rec in node.event_store().all_records() {
             store2.append(rec.event.clone());
         }
-        let node2 = SimulationNode::restore_from(
+        let node2 = SimulationNode::restore_from_test(
             store2,
             &snap1,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -538,7 +531,7 @@ mod tests {
         for e in events_up_to_snapshot {
             store2.append(e);
         }
-        let mut restored = SimulationNode::restore_from(
+        let mut restored = SimulationNode::restore_from_test(
             store2,
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -570,7 +563,7 @@ mod tests {
         let live_final;
         {
             let store = FileEventStore::open(&hot).unwrap();
-            let mut node = SimulationNode::with_store(
+            let mut node = SimulationNode::with_test_store(
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -611,7 +604,7 @@ mod tests {
             snap.log_index,
             "hot log holds no genesis events"
         );
-        let mut restored = SimulationNode::restore_from(
+        let mut restored = SimulationNode::restore_from_test(
             store2,
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -645,19 +638,13 @@ mod tests {
         let ship_id: ShipId;
         {
             let store = FileEventStore::open(&event_path).unwrap();
-            let mut node = SimulationNode::with_store(
+            let mut node = SimulationNode::with_test_store(
                 NodeId(0),
                 SectorId(0),
                 SectorBounds::centered(SectorBounds::DEFAULT_HALF),
                 std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
                 store,
             );
-            for def in crate::game_data::test_catalog().modules().to_vec() {
-                node.register_module(def);
-            }
-            for def in crate::game_data::test_catalog().ship_types().to_vec() {
-                node.register_ship_type(def);
-            }
 
             ship_id = node.spawn_ship(
                 ship_types::SHIP_TYPE_MAGPIE,
@@ -695,7 +682,7 @@ mod tests {
 
         let snap = StateSnapshot::load(&snapshot_path).unwrap();
         let store2 = FileEventStore::open(&event_path).unwrap();
-        let node2 = SimulationNode::restore_from(
+        let node2 = SimulationNode::restore_from_test(
             store2,
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -774,7 +761,7 @@ mod tests {
         for rec in node.event_store().all_records() {
             store2.append(rec.event.clone());
         }
-        let node2 = SimulationNode::restore_from(
+        let node2 = SimulationNode::restore_from_test(
             store2,
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -826,7 +813,7 @@ mod tests {
         for rec in node.event_store().all_records() {
             store2.append(rec.event.clone());
         }
-        let mut node2 = SimulationNode::restore_from(
+        let mut node2 = SimulationNode::restore_from_test(
             store2,
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -881,7 +868,7 @@ mod tests {
         for rec in node.event_store().all_records() {
             store2.append(rec.event.clone());
         }
-        let node2 = SimulationNode::restore_from(
+        let node2 = SimulationNode::restore_from_test(
             store2,
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -925,7 +912,7 @@ mod tests {
         for rec in node.event_store().all_records() {
             store2.append(rec.event.clone());
         }
-        let restored = SimulationNode::restore_from(
+        let restored = SimulationNode::restore_from_test(
             store2,
             &snapshot_before,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),

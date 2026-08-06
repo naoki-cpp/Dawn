@@ -68,7 +68,7 @@ mod tests {
 
     fn file_node(dir: &std::path::Path) -> SimulationNode<FileEventStore> {
         let store = FileEventStore::open(dir.join("events.log")).unwrap();
-        SimulationNode::with_store(
+        SimulationNode::with_test_store(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -184,7 +184,7 @@ mod tests {
             store.base_index() > 0,
             "hot log was compacted behind the snapshot"
         );
-        let mut restored = SimulationNode::restore_from(
+        let mut restored = SimulationNode::restore_from_test(
             store,
             &snap,
             std::sync::Arc::new(crate::galaxy::Galaxy::demo()),

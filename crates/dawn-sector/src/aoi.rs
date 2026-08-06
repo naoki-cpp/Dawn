@@ -520,7 +520,7 @@ mod tests {
 
     fn mem_node() -> SimulationNode {
         use dawn_core::{SectorBounds, SectorId};
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),

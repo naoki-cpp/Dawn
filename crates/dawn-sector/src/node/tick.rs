@@ -296,7 +296,7 @@ mod tests {
     use dawn_ecs::components::{LockEntry, LockState};
 
     fn mem_node() -> SimulationNode {
-        SimulationNode::new(
+        SimulationNode::new_test(
             NodeId(0),
             SectorId(0),
             SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -344,12 +344,6 @@ mod tests {
     #[test]
     fn in_transit_ship_keeps_snapshot_state_across_ticks() {
         let mut node = mem_node();
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            node.register_module(def);
-        }
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            node.register_ship_type(def);
-        }
         let ship_id = node.spawn_ship(
             dawn_core::ShipTypeId(1),
             Position::new(100.0, 0.0, 0.0),
@@ -460,12 +454,6 @@ mod tests {
     #[test]
     fn ship_destroyed_immediately_credits_scrap_metal_to_the_killer_inventory() {
         let mut node = mem_node();
-        for def in crate::game_data::test_catalog().modules().to_vec() {
-            node.register_module(def);
-        }
-        for def in crate::game_data::test_catalog().ship_types().to_vec() {
-            node.register_ship_type(def);
-        }
 
         let killer_player = node.next_player_id();
         let killer = node.spawn_player_ship_at_pub(killer_player, Position::ORIGIN);

@@ -5,7 +5,7 @@ use dawn_core::{NodeId, Position, SectorBounds, ShipTypeId, Velocity};
 use dawn_event_store::InMemoryEventStore;
 
 fn node(node_id: u8, sector_id: u8) -> SimulationNode {
-    SimulationNode::new(
+    SimulationNode::new_test(
         NodeId(node_id),
         SectorId(sector_id),
         SectorBounds::centered(SectorBounds::DEFAULT_HALF),
@@ -240,7 +240,7 @@ fn transit_carries_owner_binding_to_destination_and_snapshot_restore() {
     for record in destination.event_store().all_records() {
         store.append(record.event.clone());
     }
-    let mut restored = SimulationNode::restore_from(
+    let mut restored = SimulationNode::restore_from_test(
         store,
         &snapshot,
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -371,7 +371,7 @@ fn restored_requested_transit_reproposes_commit_with_the_durable_route() {
     for record in source.event_store().iter_from(0) {
         store.append(record.event.clone());
     }
-    let mut restored = SimulationNode::restore_from(
+    let mut restored = SimulationNode::restore_from_test(
         store,
         &snapshot_before,
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -522,7 +522,7 @@ fn duplicate_commit_after_destination_checkpoint_does_not_append_a_pending_marke
     apply_committed_raft_entries(&mut destination, &raft, &mut rx);
 
     let checkpoint = destination.take_snapshot();
-    let mut restored = SimulationNode::restore_from(
+    let mut restored = SimulationNode::restore_from_test(
         InMemoryEventStore::new(),
         &checkpoint,
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
@@ -573,7 +573,7 @@ fn duplicate_commit_after_checkpoint_does_not_resurrect_removed_ship() {
 
     let mut checkpoint = destination.take_snapshot();
     checkpoint.ships.retain(|ship| ship.ship_id != ship_id);
-    let mut restored = SimulationNode::restore_from(
+    let mut restored = SimulationNode::restore_from_test(
         InMemoryEventStore::new(),
         &checkpoint,
         std::sync::Arc::new(crate::galaxy::Galaxy::demo()),

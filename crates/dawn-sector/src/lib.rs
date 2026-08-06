@@ -7,15 +7,21 @@
 //!
 //! ## Example
 //!
-//! ```
+//! ```no_run
 //! use dawn_core::{SectorBounds, SectorId};
+//! use dawn_sector::game_data::GameDataCatalog;
 //! use dawn_sector::node::SimulationNode;
+//! use std::sync::Arc;
 //!
+//! let catalog = Arc::new(
+//!     GameDataCatalog::load_runtime().expect("validated game-data catalog"),
+//! );
 //! let node = SimulationNode::new(
 //!     dawn_core::NodeId(0),
 //!     SectorId(0),
 //!     SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-//!     std::sync::Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+//!     Arc::new(dawn_sector::galaxy::Galaxy::demo()),
+//!     catalog,
 //! );
 //! assert_eq!(node.sector_id(), SectorId(0));
 //! ```
