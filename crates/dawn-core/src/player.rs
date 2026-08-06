@@ -4,7 +4,7 @@
 //!
 //! - PlayerId は接続時にサーバーが採番する。
 //! - セッション切断後も同じ ID は再利用しない（INV-004 と同原則）。
-//! - ClientCommand には含まれない。WsServer が接続 ↔ PlayerId の対応を管理する。
+//! - ClientRequest には含まれない。WsServer が接続 ↔ PlayerId の対応を管理する。
 
 use serde::{Deserialize, Serialize};
 

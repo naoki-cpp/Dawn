@@ -1,5 +1,7 @@
 //! Spatial value types.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // ── AbsolutePosition --------------------------------------------------------
@@ -68,6 +70,7 @@ impl std::ops::Index<usize> for AbsolutePosition {
 /// Components are `f64` so anchor-relative motion does not reintroduce the
 /// precision loss that absolute coordinates were moved to `AbsolutePosition`
 /// to avoid (ADR-0044).
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Position {
     pub x: f64,
@@ -84,6 +87,11 @@ impl Position {
 
     pub const fn new(x: f64, y: f64, z: f64) -> Self {
         Self { x, y, z }
+    }
+
+    /// Whether every coordinate is finite and therefore safe for simulation math.
+    pub fn is_finite(self) -> bool {
+        self.x.is_finite() && self.y.is_finite() && self.z.is_finite()
     }
 
     pub fn distance_squared(self, other: Self) -> f64 {

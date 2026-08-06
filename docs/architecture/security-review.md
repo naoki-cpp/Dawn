@@ -35,10 +35,10 @@ queue/snapshot上限は健全。既存のSEC-1/SEC-2保留findingは変更なし
 | 経路 | ファイル | 内容 |
 |---|---|---|
 | WebSocketフレーム受信 | `crates/dawn-actor/src/ws_server.rs` | postcardバイナリフレーム（ADR-0042） |
-| コマンドデコード | `crates/dawn-wire/src/client_command.rs` | `ClientCommandWire` |
+| コマンドデコード | `crates/dawn-wire/src/client_request.rs` + `dawn-core/src/commands.rs` | typed `ClientRequest` |
 | Marketデコード | `crates/dawn-wire/src/market.rs` | `MarketCommandWire`（Sector commandとは別queue） |
 | Hello/resumeハンドシェイク | `crates/dawn-wire/src/hello_resume.rs` | セッション識別（resume identity） |
-| コマンドディスパッチ | `crates/dawn-sector/src/node/commands.rs` + `command_station.rs` | 型付き`ClientCommand`適用 |
+| コマンドディスパッチ | `crates/dawn-sector/src/node/commands.rs` | one exhaustive typed `ClientRequest` admission seam calling family-local policy directly |
 | Market bridge | `crates/dawn-simulation/src/serve/market.rs` | 入力検証、所有船へのRemove/Return/Credit適用 |
 | Market SQL | `crates/dawn-market/src/order_book.rs` | `MarketDb`の注文帳/Currency台帳、全値をparameter binding |
 | ノード間トランスポート | `crates/dawn-consensus/src/tcp_transport.rs`（Raft）, `crates/dawn-replication/src/tcp.rs`/`snapshot.rs`（レプリケーション） | フレーム長上限あり、無認証（LAN方針内） |
@@ -74,7 +74,7 @@ single/clusterともCreditの宛先は`owns_ship`で検索したノードに限�
 
 ### A04 コマンド層のアロケーション
 
-`ClientCommandWire`はスカラーのみ。クライアント供給カウントが駆動する無制限ループ/アロケーションなし。
+`ClientRequest`はtyped IDs/enumsと固定形payloadのみ。クライアント供給カウントが駆動する無制限ループ/アロケーションはなく、非有限座標・半径はqueue投入前に構造化拒否される。
 
 `MarketCommandWire`もscalar-onlyで、per-sessionのMarket queueは既存command queueと同じ
 256件のbounded channel。`MarketSnapshot`は最大200注文で、DBの`open_orders_for`にも同じ

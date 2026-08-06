@@ -1,56 +1,35 @@
-//! Client command orchestration for [`SimulationNode`].
+//! Typed client-request admission and command-family orchestration for [`SimulationNode`].
 //!
-//! The public entry point keeps one exhaustive `ClientCommand` match, as
-//! required by ADR-0047, but that match only selects a closed command family.
-//! Family-local modules own validation and application policy:
-//!
-//! - `command_flight` — movement, steering, lock-on, and Jump routing
-//! - `command_module` — module activation/deactivation
-//! - `command_loadout` — fitting mutations that require a loadout refresh
-//! - `command_station` — station and station-inventory operations
-//!
-//! This module owns the two cross-family concerns only: resolving the caller's
-//! active ship once and projecting family effects into `ClientCommandFollowup`.
+//! [`ClientRequest`] is the single external request catalog. This module owns
+//! the one exhaustive admission seam: it validates untrusted values, injects
+//! session-derived active-ship authority in the arm that needs it, and invokes
+//! the family-local command/policy method directly. No second dispatch enum or
+//! parallel request catalog exists below this match.
 
-use dawn_core::{ClientCommand, JumpCommand, PlayerId, ShipId};
+use dawn_core::{
+    ActivateModuleCommand, ApproachCommand, BuildPackagedShipCommand, ClientRequest,
+    ClientRequestValidationError, DeactivateModuleCommand, DisassembleShipCommand, DockCommand,
+    FitModuleCommand, JumpCommand, KeepAtRangeCommand, LockOnCommand, OrbitCommand, PlayerId,
+    ReorderFittedModuleCommand, SelectActiveShipCommand, ShipId, TransferToStationCommand,
+    UnfitModuleCommand, WarpCommand,
+};
 use dawn_event_store::store::EventStore;
 
-use super::{
-    command_flight::{FlightDispatchCommand, FlightDispatchEffect},
-    command_loadout::{LoadoutDispatchCommand, LoadoutDispatchEffect},
-    command_module::{ModuleDispatchCommand, ModuleDispatchEffect},
-    command_station::{StationDispatchCommand, StationDispatchEffect},
-    SimulationNode,
-};
+use super::SimulationNode;
 
-/// What `apply_client_command` hands back to the caller for commands that
-/// require server-side context it does not have (Raft handles, session refs).
+/// What request application hands back to a serving adapter.
 #[derive(Debug, Clone)]
 pub enum ClientCommandFollowup {
-    /// Forward to Jump routing (propose Transit to Raft if in range, or let
-    /// `apply_jump_with_fallback` start a warp/approach fallback). Carries
-    /// the caller's active ship explicitly, since `JumpCommand` itself no
-    /// longer does (ADR-0037).
     Jump {
         ship_id: ShipId,
         command: JumpCommand,
     },
-    /// The player's fitting/station-inventory changed (or the attempt was
-    /// rejected) — push a refreshed `PlayerLoadout` JSON to this player's
-    /// session so the client's UI reflects the authoritative state. Carries
-    /// `PlayerId` rather than `ShipId`: some triggers (Disassemble, or
-    /// Assemble from a shipless state) leave the caller with no active ship
-    /// at all, so a ship_id can't always be resolved back to a player, but a
-    /// player_id always identifies the right session
-    /// (`docs/architecture/ownership.md` §8).
-    RefreshPlayerLoadout { player_id: PlayerId },
+    RefreshPlayerLoadout {
+        player_id: PlayerId,
+    },
 }
 
 impl ClientCommandFollowup {
-    /// Returns the player whose authoritative loadout should be resent.
-    ///
-    /// Serving adapters use this to handle the common loadout-refresh path
-    /// while retaining their own Jump routing policy.
     pub fn loadout_player_id(&self) -> Option<PlayerId> {
         match self {
             Self::RefreshPlayerLoadout { player_id } => Some(*player_id),
@@ -59,157 +38,268 @@ impl ClientCommandFollowup {
     }
 }
 
-/// A `ClientCommand` after the wire-level enum has been classified into the
-/// one family that owns its policy. Each payload remains strongly typed; no
-/// family receives the wider `ClientCommand` and no catch-all can silently
-/// swallow a command it does not own.
-enum ClientCommandDispatch {
-    Flight(FlightDispatchCommand),
-    Module(ModuleDispatchCommand),
-    Loadout(LoadoutDispatchCommand),
-    Station(StationDispatchCommand),
+/// Structured failures before a request reaches gameplay policy.
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+pub enum ClientRequestAdmissionError {
+    #[error(transparent)]
+    Validation(#[from] ClientRequestValidationError),
+    #[error("request requires an admitted active ship")]
+    NoActiveShip,
+    #[error("{request} is not currently supported")]
+    UnsupportedRequest { request: &'static str },
 }
 
-impl ClientCommandDispatch {
-    /// The single exhaustive command-family selection table (ADR-0047).
-    fn select(cmd: ClientCommand) -> Self {
-        match cmd {
-            ClientCommand::Move(cmd) => Self::Flight(FlightDispatchCommand::Move(cmd)),
-            ClientCommand::LockOn(cmd) => Self::Flight(FlightDispatchCommand::LockOn(cmd)),
-            ClientCommand::Activate(cmd) => Self::Module(ModuleDispatchCommand::Activate(cmd)),
-            ClientCommand::Deactivate(cmd) => Self::Module(ModuleDispatchCommand::Deactivate(cmd)),
-            ClientCommand::Attack(cmd) => Self::Flight(FlightDispatchCommand::Attack(cmd)),
-            ClientCommand::Stop(cmd) => Self::Flight(FlightDispatchCommand::Stop(cmd)),
-            ClientCommand::Jump(cmd) => Self::Flight(FlightDispatchCommand::Jump(cmd)),
-            ClientCommand::Approach(cmd) => Self::Flight(FlightDispatchCommand::Approach(cmd)),
-            ClientCommand::Warp(cmd) => Self::Flight(FlightDispatchCommand::Warp(cmd)),
-            ClientCommand::Orbit(cmd) => Self::Flight(FlightDispatchCommand::Orbit(cmd)),
-            ClientCommand::KeepAtRange(cmd) => {
-                Self::Flight(FlightDispatchCommand::KeepAtRange(cmd))
-            }
-            ClientCommand::Fit(cmd) => Self::Loadout(LoadoutDispatchCommand::Fit(cmd)),
-            ClientCommand::Unfit(cmd) => Self::Loadout(LoadoutDispatchCommand::Unfit(cmd)),
-            ClientCommand::ReorderFittedModule(cmd) => {
-                Self::Loadout(LoadoutDispatchCommand::ReorderFittedModule(cmd))
-            }
-            ClientCommand::Dock(cmd) => Self::Station(StationDispatchCommand::Dock(cmd)),
-            ClientCommand::Undock(cmd) => Self::Station(StationDispatchCommand::Undock(cmd)),
-            ClientCommand::BuildPackagedShip(cmd) => {
-                Self::Station(StationDispatchCommand::BuildPackagedShip(cmd))
-            }
-            ClientCommand::DisassembleShip(cmd) => {
-                Self::Station(StationDispatchCommand::DisassembleShip(cmd))
-            }
-            ClientCommand::SelectActiveShip(cmd) => {
-                Self::Station(StationDispatchCommand::SelectActiveShip(cmd))
-            }
-            ClientCommand::Assemble(cmd) => Self::Station(StationDispatchCommand::Assemble(cmd)),
-            ClientCommand::Disembark(_) => Self::Station(StationDispatchCommand::Disembark),
-            ClientCommand::TransferToStation(cmd) => {
-                Self::Station(StationDispatchCommand::TransferToStation(cmd))
-            }
-        }
-    }
-
-    #[cfg(test)]
-    fn family(&self) -> ClientCommandFamily {
-        match self {
-            Self::Flight(_) => ClientCommandFamily::Flight,
-            Self::Module(_) => ClientCommandFamily::Module,
-            Self::Loadout(_) => ClientCommandFamily::Loadout,
-            Self::Station(_) => ClientCommandFamily::Station,
-        }
-    }
+fn require_active_ship(active_ship: Option<ShipId>) -> Result<ShipId, ClientRequestAdmissionError> {
+    active_ship.ok_or(ClientRequestAdmissionError::NoActiveShip)
 }
 
-#[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ClientCommandFamily {
-    Flight,
-    Module,
-    Loadout,
-    Station,
-}
-
-/// Family-local effects before the server-facing follow-up projection.
-///
-/// Keeping the family effect types separate prevents a station handler from
-/// producing a Jump effect, while this wrapper gives the orchestration layer
-/// one place to project every family into `ClientCommandFollowup`.
-enum ClientCommandEffect {
-    Flight(FlightDispatchEffect),
-    Module(ModuleDispatchEffect),
-    Loadout(LoadoutDispatchEffect),
-    Station(StationDispatchEffect),
-}
-
-fn project_followup(
-    player_id: PlayerId,
-    effect: ClientCommandEffect,
-) -> Option<ClientCommandFollowup> {
-    match effect {
-        ClientCommandEffect::Flight(FlightDispatchEffect::NoFollowup)
-        | ClientCommandEffect::Module(ModuleDispatchEffect::NoFollowup)
-        | ClientCommandEffect::Station(StationDispatchEffect::NoFollowup) => None,
-        ClientCommandEffect::Flight(FlightDispatchEffect::Jump { ship_id, command }) => {
-            Some(ClientCommandFollowup::Jump { ship_id, command })
-        }
-        ClientCommandEffect::Module(ModuleDispatchEffect::RefreshPlayerLoadout)
-        | ClientCommandEffect::Loadout(LoadoutDispatchEffect::RefreshPlayerLoadout)
-        | ClientCommandEffect::Station(StationDispatchEffect::RefreshPlayerLoadout) => {
-            Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })
-        }
-    }
+fn refresh_loadout(player_id: PlayerId) -> Option<ClientCommandFollowup> {
+    Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id })
 }
 
 impl<S: EventStore> SimulationNode<S> {
-    /// Returns `true` if `player_id` owns `ship_id`.
-    ///
-    /// Used by station-management `_owned` variants (Fit/Unfit/Dock/
-    /// BuildPackagedShip/DisassembleShip), which operate on any owned ship,
-    /// not just the active one (ADR-0037; docs/architecture/ownership.md §7).
     pub fn owns_ship(&self, player_id: PlayerId, ship_id: ShipId) -> bool {
         self.ships.owners.get(&ship_id) == Some(&player_id)
     }
 
-    /// Returns `true` if `ship_id` is `player_id`'s active ship (ADR-0037).
-    ///
-    /// Implies `owns_ship` (active ⊆ owned) — used by flight/steering/module
-    /// `_owned` variants, which may only ever target the one ship a player is
-    /// currently flying, never another owned-but-inactive ship.
     pub fn is_active_ship(&self, player_id: PlayerId, ship_id: ShipId) -> bool {
         self.ships.active_ship.get(&player_id) == Some(&ship_id)
     }
 
-    /// Apply one `ClientCommand` on behalf of `player_id`.
-    ///
-    /// The wire command is exhaustively classified into one closed family,
-    /// then delegated to that family's policy module. The caller's active ship
-    /// is resolved once here and passed to families that need it (ADR-0037,
-    /// ADR-0047). The resulting family effect is projected into the existing
-    /// `ClientCommandFollowup` seam in one place.
-    pub fn apply_client_command(
+    /// Validate and admit one external request on behalf of the authenticated
+    /// session. This exhaustive match is the only protocol-to-application
+    /// conversion table; each arm calls its family-local policy directly.
+    pub fn apply_client_request(
         &mut self,
         player_id: PlayerId,
-        cmd: ClientCommand,
-        lock_commands: &mut Vec<dawn_core::LockOnCommand>,
-    ) -> Option<ClientCommandFollowup> {
+        request: ClientRequest,
+        lock_commands: &mut Vec<LockOnCommand>,
+    ) -> Result<Option<ClientCommandFollowup>, ClientRequestAdmissionError> {
+        request.validate()?;
         let active_ship = self.ships.active_ship.get(&player_id).copied();
-        let effect = match ClientCommandDispatch::select(cmd) {
-            ClientCommandDispatch::Flight(cmd) => ClientCommandEffect::Flight(
-                self.dispatch_flight_command(player_id, active_ship, cmd, lock_commands),
-            ),
-            ClientCommandDispatch::Module(cmd) => ClientCommandEffect::Module(
-                self.dispatch_module_command(player_id, active_ship, cmd),
-            ),
-            ClientCommandDispatch::Loadout(cmd) => {
-                ClientCommandEffect::Loadout(self.dispatch_loadout_command(player_id, cmd))
+
+        let followup = match request {
+            ClientRequest::Move { target } => {
+                let ship_id = require_active_ship(active_ship)?;
+                self.apply_move_command_owned(player_id, ship_id, target);
+                None
             }
-            ClientCommandDispatch::Station(cmd) => ClientCommandEffect::Station(
-                self.dispatch_station_command(player_id, active_ship, cmd),
-            ),
+            ClientRequest::LockOn { target } => {
+                let ship_id = require_active_ship(active_ship)?;
+                if !self.is_ship_docked(ship_id) && !self.is_ship_in_transit(ship_id) {
+                    lock_commands.push(LockOnCommand {
+                        ship_id,
+                        target_id: target,
+                    });
+                }
+                None
+            }
+            ClientRequest::ActivateModule {
+                module,
+                slot,
+                target,
+            } => {
+                let ship_id = require_active_ship(active_ship)?;
+                let _ = self.activate_module_owned(
+                    player_id,
+                    ship_id,
+                    ActivateModuleCommand {
+                        module_id: module,
+                        slot,
+                        target_ship_id: target,
+                    },
+                );
+                refresh_loadout(player_id)
+            }
+            ClientRequest::DeactivateModule { module, slot } => {
+                let ship_id = require_active_ship(active_ship)?;
+                let _ = self.deactivate_module_owned(
+                    player_id,
+                    ship_id,
+                    DeactivateModuleCommand {
+                        module_id: module,
+                        slot,
+                    },
+                );
+                refresh_loadout(player_id)
+            }
+            ClientRequest::Attack { .. } => {
+                return Err(ClientRequestAdmissionError::UnsupportedRequest { request: "Attack" });
+            }
+            ClientRequest::Stop => {
+                let ship_id = require_active_ship(active_ship)?;
+                self.apply_stop_command_owned(player_id, ship_id);
+                None
+            }
+            ClientRequest::Jump { gate } => {
+                let ship_id = require_active_ship(active_ship)?;
+                if self.is_ship_docked(ship_id) {
+                    None
+                } else {
+                    Some(ClientCommandFollowup::Jump {
+                        ship_id,
+                        command: JumpCommand { gate_id: gate },
+                    })
+                }
+            }
+            ClientRequest::Approach { target } => {
+                let ship_id = require_active_ship(active_ship)?;
+                self.apply_approach_command_owned(player_id, ship_id, ApproachCommand { target });
+                None
+            }
+            ClientRequest::Warp { target } => {
+                let ship_id = require_active_ship(active_ship)?;
+                self.apply_warp_command_owned(player_id, ship_id, WarpCommand { target });
+                None
+            }
+            ClientRequest::Orbit { target, radius } => {
+                let ship_id = require_active_ship(active_ship)?;
+                self.apply_orbit_command_owned(player_id, ship_id, OrbitCommand { target, radius });
+                None
+            }
+            ClientRequest::KeepAtRange { target, range } => {
+                let ship_id = require_active_ship(active_ship)?;
+                self.apply_keep_at_range_command_owned(
+                    player_id,
+                    ship_id,
+                    KeepAtRangeCommand { target, range },
+                );
+                None
+            }
+            ClientRequest::FitModule { ship, module, slot } => {
+                self.fit_module_owned(
+                    player_id,
+                    FitModuleCommand {
+                        ship_id: ship,
+                        module_id: module,
+                        slot,
+                    },
+                );
+                refresh_loadout(player_id)
+            }
+            ClientRequest::UnfitModule { ship, module, slot } => {
+                self.unfit_module_owned(
+                    player_id,
+                    UnfitModuleCommand {
+                        ship_id: ship,
+                        module_id: module,
+                        slot,
+                    },
+                );
+                refresh_loadout(player_id)
+            }
+            ClientRequest::ReorderFittedModule {
+                ship,
+                slot,
+                from_index,
+                to_index,
+            } => {
+                self.reorder_fitted_module_owned(
+                    player_id,
+                    ReorderFittedModuleCommand {
+                        ship_id: ship,
+                        slot,
+                        from_index,
+                        to_index,
+                    },
+                );
+                refresh_loadout(player_id)
+            }
+            ClientRequest::Dock { station } => {
+                let ship_id = require_active_ship(active_ship)?;
+                if self.is_ship_in_transit(ship_id) {
+                    None
+                } else {
+                    self.dock_owned(
+                        player_id,
+                        ship_id,
+                        DockCommand {
+                            station_id: station,
+                        },
+                    );
+                    refresh_loadout(player_id)
+                }
+            }
+            ClientRequest::Undock => {
+                let ship_id = require_active_ship(active_ship)?;
+                self.undock_owned(player_id, ship_id);
+                refresh_loadout(player_id)
+            }
+            ClientRequest::BuildPackagedShip {
+                ship,
+                station,
+                ship_type,
+            } => {
+                self.build_packaged_ship_owned(
+                    player_id,
+                    BuildPackagedShipCommand {
+                        ship_id: ship,
+                        station_id: station,
+                        ship_type_id: ship_type,
+                    },
+                );
+                refresh_loadout(player_id)
+            }
+            ClientRequest::DisassembleShip { ship, station } => {
+                self.disassemble_ship_owned(
+                    player_id,
+                    DisassembleShipCommand {
+                        ship_id: ship,
+                        station_id: station,
+                    },
+                );
+                refresh_loadout(player_id)
+            }
+            ClientRequest::SelectActiveShip { ship } => {
+                self.select_active_ship_owned(player_id, SelectActiveShipCommand { ship_id: ship });
+                refresh_loadout(player_id)
+            }
+            ClientRequest::Assemble { station, ship_type } => {
+                let _ = self.assemble_ship_owned(
+                    player_id,
+                    dawn_core::AssembleCommand {
+                        station_id: station,
+                        ship_type_id: ship_type,
+                    },
+                );
+                refresh_loadout(player_id)
+            }
+            ClientRequest::Disembark => {
+                let _ship_id = require_active_ship(active_ship)?;
+                let _ = self.disembark_owned(player_id);
+                refresh_loadout(player_id)
+            }
+            ClientRequest::TransferCargo {
+                ship,
+                station,
+                item,
+                direction,
+            } => {
+                self.transfer_to_station_owned(
+                    player_id,
+                    TransferToStationCommand {
+                        ship_id: ship,
+                        station_id: station,
+                        item_id: item,
+                        direction,
+                    },
+                );
+                refresh_loadout(player_id)
+            }
         };
-        project_followup(player_id, effect)
+
+        Ok(followup)
+    }
+
+    #[cfg(test)]
+    fn apply_client_request_unchecked(
+        &mut self,
+        player_id: PlayerId,
+        request: ClientRequest,
+        lock_commands: &mut Vec<LockOnCommand>,
+    ) -> Option<ClientCommandFollowup> {
+        self.apply_client_request(player_id, request, lock_commands)
+            .expect("test request must pass admission")
     }
 }
 
@@ -224,139 +314,6 @@ mod tests {
     };
     use dawn_ecs::components::{FittingComp, ThrustComp};
 
-    #[test]
-    fn client_commands_are_selected_into_their_closed_policy_family() {
-        use dawn_core::{ActivateModuleCommand, DockCommand, MoveCommand, StationId};
-
-        assert_eq!(
-            ClientCommandDispatch::select(ClientCommand::Move(MoveCommand::new(Position::ORIGIN,)))
-                .family(),
-            ClientCommandFamily::Flight
-        );
-        assert_eq!(
-            ClientCommandDispatch::select(ClientCommand::Activate(ActivateModuleCommand {
-                module_id: ModuleId(1),
-                slot: SlotKind::High,
-                target_ship_id: None,
-            }))
-            .family(),
-            ClientCommandFamily::Module
-        );
-        assert_eq!(
-            ClientCommandDispatch::select(ClientCommand::Fit(FitModuleCommand {
-                ship_id: ShipId(dawn_core::EntityId::from_raw(1)),
-                slot: SlotKind::High,
-                module_id: ModuleId(1),
-            }))
-            .family(),
-            ClientCommandFamily::Loadout
-        );
-        assert_eq!(
-            ClientCommandDispatch::select(ClientCommand::Dock(DockCommand {
-                station_id: StationId(0),
-            }))
-            .family(),
-            ClientCommandFamily::Station
-        );
-    }
-
-    #[test]
-    fn attack_command_payload_reaches_the_flight_family() {
-        use dawn_core::AttackCommand;
-
-        let attacker_id = ShipId(dawn_core::EntityId::from_raw(11));
-        let target_id = ShipId(dawn_core::EntityId::from_raw(12));
-        let dispatch = ClientCommandDispatch::select(ClientCommand::Attack(AttackCommand {
-            attacker_id,
-            target_id,
-        }));
-
-        assert!(matches!(
-            dispatch,
-            ClientCommandDispatch::Flight(FlightDispatchCommand::Attack(AttackCommand {
-                attacker_id: actual_attacker,
-                target_id: actual_target,
-            })) if actual_attacker == attacker_id && actual_target == target_id
-        ));
-    }
-
-    #[test]
-    fn followup_projection_preserves_jump_context() {
-        let ship_id = ShipId(dawn_core::EntityId::from_raw(3));
-        let effect = ClientCommandEffect::Flight(FlightDispatchEffect::Jump {
-            ship_id,
-            command: JumpCommand {
-                gate_id: dawn_core::JumpGateId(4),
-            },
-        });
-
-        assert!(matches!(
-            project_followup(PlayerId(7), effect),
-            Some(ClientCommandFollowup::Jump {
-                ship_id: projected_ship,
-                command: JumpCommand { gate_id }
-            }) if projected_ship == ship_id && gate_id == dawn_core::JumpGateId(4)
-        ));
-    }
-
-    #[test]
-    fn followup_projection_maps_every_refreshing_family_to_the_caller() {
-        let player_id = PlayerId(7);
-        let effects = [
-            ClientCommandEffect::Module(ModuleDispatchEffect::RefreshPlayerLoadout),
-            ClientCommandEffect::Loadout(LoadoutDispatchEffect::RefreshPlayerLoadout),
-            ClientCommandEffect::Station(StationDispatchEffect::RefreshPlayerLoadout),
-        ];
-
-        for effect in effects {
-            assert!(matches!(
-                project_followup(player_id, effect),
-                Some(ClientCommandFollowup::RefreshPlayerLoadout { player_id: id })
-                    if id == player_id
-            ));
-        }
-    }
-
-    #[test]
-    fn followup_projection_keeps_no_followup_effects_empty() {
-        assert!(project_followup(
-            PlayerId(7),
-            ClientCommandEffect::Flight(FlightDispatchEffect::NoFollowup),
-        )
-        .is_none());
-        assert!(project_followup(
-            PlayerId(7),
-            ClientCommandEffect::Module(ModuleDispatchEffect::NoFollowup),
-        )
-        .is_none());
-        assert!(project_followup(
-            PlayerId(7),
-            ClientCommandEffect::Station(StationDispatchEffect::NoFollowup),
-        )
-        .is_none());
-    }
-
-    #[test]
-    fn loadout_followup_exposes_the_player_to_refresh() {
-        let followup = ClientCommandFollowup::RefreshPlayerLoadout {
-            player_id: PlayerId(7),
-        };
-
-        assert_eq!(followup.loadout_player_id(), Some(PlayerId(7)));
-    }
-
-    #[test]
-    fn jump_followup_does_not_request_a_loadout_refresh() {
-        let followup = ClientCommandFollowup::Jump {
-            ship_id: ShipId(dawn_core::EntityId::from_raw(3)),
-            command: JumpCommand {
-                gate_id: dawn_core::JumpGateId(0),
-            },
-        };
-
-        assert_eq!(followup.loadout_player_id(), None);
-    }
-
     fn mem_node() -> SimulationNode {
         SimulationNode::new_test(
             NodeId(0),
@@ -368,6 +325,26 @@ mod tests {
 
     fn node_with_catalog() -> SimulationNode {
         mem_node()
+    }
+
+    #[test]
+    fn unsupported_attack_request_returns_structured_admission_error() {
+        let mut node = mem_node();
+        let player_id = node.next_player_id();
+        let mut locks = Vec::new();
+        let result = node.apply_client_request(
+            player_id,
+            ClientRequest::Attack {
+                target: dawn_core::ShipId(dawn_core::EntityId::from_raw(42)),
+            },
+            &mut locks,
+        );
+
+        assert!(matches!(
+            result,
+            Err(ClientRequestAdmissionError::UnsupportedRequest { request: "Attack" })
+        ));
+        assert!(locks.is_empty());
     }
 
     #[test]
@@ -536,8 +513,7 @@ mod tests {
         use crate::modules::MODULE_AFTERBURNER;
         use dawn_core::commands::TransitCommand;
         use dawn_core::{
-            ActivateModuleCommand, ClientCommand, DeactivateModuleCommand, DockCommand,
-            LockOnCommand, SlotKind, StationId,
+            ActivateModuleCommand, ClientRequest, DeactivateModuleCommand, SlotKind, StationId,
         };
 
         let mut node = node_with_catalog();
@@ -583,27 +559,24 @@ mod tests {
         );
 
         let mut locks = Vec::new();
-        node.apply_client_command(
+        node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::LockOn(LockOnCommand {
-                ship_id,
-                target_id: target,
-            }),
+            ClientRequest::LockOn { target },
             &mut locks,
         );
         assert!(locks.is_empty());
-        node.apply_client_command(
+        node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::Dock(DockCommand {
-                station_id: StationId(0),
-            }),
+            ClientRequest::Dock {
+                station: StationId(0),
+            },
             &mut locks,
         );
         assert!(!node.is_ship_docked(ship_id));
         assert_eq!(node.total_event_count(), events_before);
     }
 
-    // ── apply_client_command ─────────────────────────────────────────────────
+    // ── apply_client_request ─────────────────────────────────────────────────
 
     fn spawn_owned_player_at(node: &mut SimulationNode, pos: Position) -> (PlayerId, ShipId) {
         let player_id = node.next_player_id();
@@ -613,62 +586,53 @@ mod tests {
 
     #[test]
     fn owned_move_command_is_applied_and_returns_no_followup() {
-        use dawn_core::{ClientCommand, MoveCommand};
+        use dawn_core::ClientRequest;
         let mut node = mem_node();
         let (player_id, _ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::Move(MoveCommand {
-                target_position: Position::new(1_000.0, 0.0, 0.0),
-            }),
+            ClientRequest::Move {
+                target: Position::new(1_000.0, 0.0, 0.0),
+            },
             &mut locks,
         );
         assert!(result.is_none(), "Move must not produce a followup");
     }
 
     #[test]
-    fn move_command_with_no_active_ship_is_silently_ignored_and_returns_no_followup() {
-        // ADR-0037: MoveCommand no longer names a ship at all -- there is no
-        // longer a wire-representable way to send a Move for a ship the
-        // caller doesn't fly. The only remaining rejection path is a player
-        // with no active ship at all (e.g. their only ship was destroyed).
-        use dawn_core::{ClientCommand, MoveCommand};
+    fn move_request_with_no_active_ship_returns_structured_admission_error() {
         let mut node = mem_node();
         let player_id = node.next_player_id();
         let before = node.total_event_count();
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request(
             player_id,
-            ClientCommand::Move(MoveCommand {
-                target_position: Position::new(1_000.0, 0.0, 0.0),
-            }),
+            ClientRequest::Move {
+                target: Position::new(1_000.0, 0.0, 0.0),
+            },
             &mut locks,
         );
-        assert!(
-            result.is_none(),
-            "Move with no active ship must not produce a followup"
-        );
-        assert_eq!(
-            node.total_event_count(),
-            before,
-            "Move with no active ship must not append events"
-        );
+        assert!(matches!(
+            result,
+            Err(ClientRequestAdmissionError::NoActiveShip)
+        ));
+        assert_eq!(node.total_event_count(), before);
     }
 
     #[test]
     fn fit_command_returns_player_loadout_refresh_followup() {
-        use dawn_core::{ClientCommand, FitModuleCommand, ModuleId, SlotKind};
+        use dawn_core::{ClientRequest, ModuleId, SlotKind};
         let mut node = mem_node();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::Fit(FitModuleCommand {
-                ship_id,
-                module_id: ModuleId(1),
+            ClientRequest::FitModule {
+                ship: ship_id,
+                module: ModuleId(1),
                 slot: SlotKind::High,
-            }),
+            },
             &mut locks,
         );
         assert!(
@@ -683,15 +647,15 @@ mod tests {
 
     #[test]
     fn jump_command_is_handed_back_as_followup() {
-        use dawn_core::{ClientCommand, JumpCommand, JumpGateId};
+        use dawn_core::{ClientRequest, JumpGateId};
         let mut node = mem_node();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::Jump(JumpCommand {
-                gate_id: JumpGateId(0),
-            }),
+            ClientRequest::Jump {
+                gate: JumpGateId(0),
+            },
             &mut locks,
         );
         assert!(
@@ -800,7 +764,7 @@ mod tests {
 
     #[test]
     fn lock_on_command_dispatches_a_lock_command_for_the_active_ship() {
-        use dawn_core::{ClientCommand, LockOnCommand};
+        use dawn_core::ClientRequest;
         let mut node = mem_node();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let target_ship_id = node.spawn_ship(
@@ -809,12 +773,11 @@ mod tests {
             Velocity::ZERO,
         );
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::LockOn(LockOnCommand {
-                ship_id: target_ship_id,
-                target_id: target_ship_id,
-            }),
+            ClientRequest::LockOn {
+                target: target_ship_id,
+            },
             &mut locks,
         );
         assert!(result.is_none(), "LockOn must not produce a followup");
@@ -829,7 +792,7 @@ mod tests {
     #[test]
     fn activate_command_dispatches_through_and_activates_the_fitted_module() {
         use crate::modules::MODULE_AFTERBURNER;
-        use dawn_core::{ActivateModuleCommand, ClientCommand, FitModuleCommand, SlotKind};
+        use dawn_core::{ClientRequest, FitModuleCommand, SlotKind};
 
         let mut node = node_with_catalog();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
@@ -839,13 +802,13 @@ mod tests {
             module_id: MODULE_AFTERBURNER,
         });
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::Activate(ActivateModuleCommand {
-                module_id: MODULE_AFTERBURNER,
+            ClientRequest::ActivateModule {
+                module: MODULE_AFTERBURNER,
                 slot: SlotKind::Mid,
-                target_ship_id: None,
-            }),
+                target: None,
+            },
             &mut locks,
         );
         assert!(
@@ -874,10 +837,7 @@ mod tests {
     #[test]
     fn deactivate_command_dispatches_through_and_deactivates_the_fitted_module() {
         use crate::modules::MODULE_AFTERBURNER;
-        use dawn_core::{
-            ActivateModuleCommand, ClientCommand, DeactivateModuleCommand, FitModuleCommand,
-            SlotKind,
-        };
+        use dawn_core::{ActivateModuleCommand, ClientRequest, FitModuleCommand, SlotKind};
 
         let mut node = node_with_catalog();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
@@ -898,12 +858,12 @@ mod tests {
         .unwrap();
 
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::Deactivate(DeactivateModuleCommand {
-                module_id: MODULE_AFTERBURNER,
+            ClientRequest::DeactivateModule {
+                module: MODULE_AFTERBURNER,
                 slot: SlotKind::Mid,
-            }),
+            },
             &mut locks,
         );
         assert!(
@@ -931,7 +891,7 @@ mod tests {
 
     #[test]
     fn stop_command_dispatches_through_and_brakes_the_ship() {
-        use dawn_core::{ClientCommand, StopCommand};
+        use dawn_core::ClientRequest;
         let mut node = mem_node();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let entity = *node.ships.index.get(&ship_id).unwrap();
@@ -939,7 +899,7 @@ mod tests {
 
         let mut locks = Vec::new();
         let result =
-            node.apply_client_command(player_id, ClientCommand::Stop(StopCommand), &mut locks);
+            node.apply_client_request_unchecked(player_id, ClientRequest::Stop, &mut locks);
         assert!(result.is_none(), "Stop must not produce a followup");
         let thrust = node.world.get::<ThrustComp>(entity).unwrap();
         assert!(
@@ -950,7 +910,7 @@ mod tests {
 
     #[test]
     fn approach_command_dispatches_through_and_attaches_approach_comp() {
-        use dawn_core::{ApproachCommand, ApproachTarget, ClientCommand};
+        use dawn_core::{ApproachTarget, ClientRequest};
         use dawn_ecs::components::ApproachComp;
 
         let mut node = mem_node();
@@ -962,11 +922,11 @@ mod tests {
         );
 
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::Approach(ApproachCommand {
+            ClientRequest::Approach {
                 target: ApproachTarget::Ship(target_ship_id),
-            }),
+            },
             &mut locks,
         );
         assert!(result.is_none(), "Approach must not produce a followup");
@@ -979,18 +939,18 @@ mod tests {
 
     #[test]
     fn warp_command_dispatches_through_and_attaches_warp_comp() {
-        use dawn_core::{ClientCommand, WarpCommand, WarpTarget};
+        use dawn_core::{ClientRequest, WarpTarget};
         use dawn_ecs::components::WarpComp;
 
         let mut node = node_with_catalog();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
 
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::Warp(WarpCommand {
+            ClientRequest::Warp {
                 target: WarpTarget::Body(dawn_core::CelestialBodyId(1)),
-            }),
+            },
             &mut locks,
         );
         assert!(result.is_none(), "Warp must not produce a followup");
@@ -1003,7 +963,7 @@ mod tests {
 
     #[test]
     fn orbit_command_dispatches_through_and_attaches_orbit_comp() {
-        use dawn_core::{ApproachTarget, ClientCommand, OrbitCommand};
+        use dawn_core::{ApproachTarget, ClientRequest};
         use dawn_ecs::components::OrbitComp;
 
         let mut node = mem_node();
@@ -1015,12 +975,12 @@ mod tests {
         );
 
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::Orbit(OrbitCommand {
+            ClientRequest::Orbit {
                 target: ApproachTarget::Ship(target_ship_id),
                 radius: Some(750.0),
-            }),
+            },
             &mut locks,
         );
         assert!(result.is_none(), "Orbit must not produce a followup");
@@ -1033,7 +993,7 @@ mod tests {
 
     #[test]
     fn keep_at_range_command_dispatches_through_and_attaches_keep_at_range_comp() {
-        use dawn_core::{ApproachTarget, ClientCommand, KeepAtRangeCommand};
+        use dawn_core::{ApproachTarget, ClientRequest};
         use dawn_ecs::components::KeepAtRangeComp;
 
         let mut node = mem_node();
@@ -1045,12 +1005,12 @@ mod tests {
         );
 
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::KeepAtRange(KeepAtRangeCommand {
+            ClientRequest::KeepAtRange {
                 target: ApproachTarget::Ship(target_ship_id),
                 range: Some(1_500.0),
-            }),
+            },
             &mut locks,
         );
         assert!(result.is_none(), "KeepAtRange must not produce a followup");
@@ -1063,7 +1023,7 @@ mod tests {
 
     #[test]
     fn unfit_command_dispatches_through_and_returns_refresh_fitting_followup() {
-        use dawn_core::{ClientCommand, FitModuleCommand, ModuleId, SlotKind, UnfitModuleCommand};
+        use dawn_core::{ClientRequest, FitModuleCommand, ModuleId, SlotKind};
         let mut node = mem_node();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         node.fit_module(FitModuleCommand {
@@ -1073,13 +1033,13 @@ mod tests {
         });
 
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::Unfit(UnfitModuleCommand {
-                ship_id,
+            ClientRequest::UnfitModule {
+                ship: ship_id,
                 slot: SlotKind::High,
-                module_id: ModuleId(1),
-            }),
+                module: ModuleId(1),
+            },
             &mut locks,
         );
         assert!(
@@ -1094,17 +1054,14 @@ mod tests {
 
     #[test]
     fn undock_command_dispatches_through_and_undocks_the_active_ship() {
-        use dawn_core::ClientCommand;
+        use dawn_core::ClientRequest;
         let mut node = node_with_catalog();
         let (player_id, ship_id) = docked_owned_player(&mut node);
         assert!(node.is_ship_docked(ship_id));
 
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
-            player_id,
-            ClientCommand::Undock(dawn_core::UndockCommand),
-            &mut locks,
-        );
+        let result =
+            node.apply_client_request_unchecked(player_id, ClientRequest::Undock, &mut locks);
         assert!(
             matches!(
                 result,
@@ -1121,18 +1078,18 @@ mod tests {
 
     #[test]
     fn dock_command_dispatches_through_and_docks_the_active_ship() {
-        use dawn_core::{ClientCommand, DockCommand, StationId};
+        use dawn_core::{ClientRequest, StationId};
         let mut node = node_with_catalog();
         let (player_id, ship_id) = spawn_owned_player_at(&mut node, Position::ORIGIN);
         let station = node.station(StationId(0)).expect("demo station exists");
         node.set_spawn_anchor_abs(ship_id, station.abs_m);
 
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::Dock(DockCommand {
-                station_id: StationId(0),
-            }),
+            ClientRequest::Dock {
+                station: StationId(0),
+            },
             &mut locks,
         );
         assert!(
@@ -1151,19 +1108,19 @@ mod tests {
 
     #[test]
     fn build_packaged_ship_command_dispatches_through_and_credits_the_station_item() {
-        use dawn_core::{BuildPackagedShipCommand, ClientCommand, ItemId, StationId};
+        use dawn_core::{ClientRequest, ItemId, StationId};
         let mut node = node_with_catalog();
         let (player_id, ship_id) = docked_owned_player(&mut node);
         node.credit_station_item(player_id, StationId(0), ItemId::ScrapMetal, 10);
 
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::BuildPackagedShip(BuildPackagedShipCommand {
-                ship_id,
-                station_id: StationId(0),
-                ship_type_id: dawn_core::ShipTypeId(1),
-            }),
+            ClientRequest::BuildPackagedShip {
+                ship: ship_id,
+                station: StationId(0),
+                ship_type: dawn_core::ShipTypeId(1),
+            },
             &mut locks,
         );
         assert!(
@@ -1187,7 +1144,7 @@ mod tests {
 
     #[test]
     fn select_active_ship_command_dispatches_through_and_switches_active_ship() {
-        use dawn_core::{ClientCommand, SelectActiveShipCommand, StationId};
+        use dawn_core::{ClientRequest, StationId};
         let mut node = node_with_catalog();
         let (player_id, first_ship_id) = docked_owned_player(&mut node);
         let station_abs = node
@@ -1214,11 +1171,11 @@ mod tests {
         node.ships.active_ship.insert(player_id, first_ship_id);
 
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::SelectActiveShip(SelectActiveShipCommand {
-                ship_id: second_ship_id,
-            }),
+            ClientRequest::SelectActiveShip {
+                ship: second_ship_id,
+            },
             &mut locks,
         );
         assert!(
@@ -1234,16 +1191,13 @@ mod tests {
 
     #[test]
     fn disembark_command_dispatches_through_and_clears_the_active_ship() {
-        use dawn_core::{ClientCommand, DisembarkCommand};
+        use dawn_core::ClientRequest;
         let mut node = node_with_catalog();
         let (player_id, ship_id) = docked_owned_player(&mut node);
 
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
-            player_id,
-            ClientCommand::Disembark(DisembarkCommand),
-            &mut locks,
-        );
+        let result =
+            node.apply_client_request_unchecked(player_id, ClientRequest::Disembark, &mut locks);
         assert!(
             matches!(
                 result,
@@ -1260,9 +1214,7 @@ mod tests {
 
     #[test]
     fn transfer_to_station_command_dispatches_through() {
-        use dawn_core::{
-            ClientCommand, ItemId, StationId, TransferDirection, TransferToStationCommand,
-        };
+        use dawn_core::{ClientRequest, ItemId, StationId, TransferDirection};
         let mut node = node_with_catalog();
         let (player_id, ship_id) = docked_owned_player(&mut node);
         let entity = *node.ships.index.get(&ship_id).unwrap();
@@ -1274,14 +1226,14 @@ mod tests {
         }
 
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::TransferToStation(TransferToStationCommand {
-                ship_id,
-                station_id: StationId(0),
-                item_id: ItemId::ScrapMetal,
+            ClientRequest::TransferCargo {
+                ship: ship_id,
+                station: StationId(0),
+                item: ItemId::ScrapMetal,
                 direction: TransferDirection::ToStation,
-            }),
+            },
             &mut locks,
         );
         assert!(
@@ -1301,15 +1253,15 @@ mod tests {
 
     #[test]
     fn jump_command_from_a_docked_ship_returns_no_followup() {
-        use dawn_core::{ClientCommand, JumpCommand, JumpGateId};
+        use dawn_core::{ClientRequest, JumpGateId};
         let mut node = node_with_catalog();
         let (player_id, _ship_id) = docked_owned_player(&mut node);
         let mut locks = Vec::new();
-        let result = node.apply_client_command(
+        let result = node.apply_client_request_unchecked(
             player_id,
-            ClientCommand::Jump(JumpCommand {
-                gate_id: JumpGateId(0),
-            }),
+            ClientRequest::Jump {
+                gate: JumpGateId(0),
+            },
             &mut locks,
         );
         assert!(

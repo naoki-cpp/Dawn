@@ -2,8 +2,8 @@
 #![allow(clippy::module_name_repetitions)]
 
 use super::{
-    build_serve_node, load_serve_dependencies, market::MarketRuntime, AoiDelivery, DuelMetrics,
-    AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
+    build_serve_node, client_request_rejection, load_serve_dependencies, market::MarketRuntime,
+    AoiDelivery, DuelMetrics, AOI_CELL_SIZE, P4_TICK_MS, TIDI_BUDGET,
 };
 use crate::ws_server;
 use dawn_core::{DomainEvent, NodeId, Position, SectorBounds, SectorId, ShipId};
@@ -193,9 +193,9 @@ pub(crate) async fn run_phase4_server(
                 let snapshot = market.handle_single(sess.player_id, market_command, &mut node);
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
-            while let Some(cmd) = sess.try_recv_command() {
-                match node.apply_client_command(sess.player_id, cmd, &mut lock_commands) {
-                    Some(ClientCommandFollowup::Jump { ship_id, command }) => {
+            while let Some(request) = sess.try_recv_request() {
+                match node.apply_client_request(sess.player_id, request, &mut lock_commands) {
+                    Ok(Some(ClientCommandFollowup::Jump { ship_id, command })) => {
                         eprintln!(
                             "[Server] JumpCommand ignored (ship #{} gate #{}): \
                              --serve runs a single-sector node without Raft",
@@ -203,7 +203,7 @@ pub(crate) async fn run_phase4_server(
                             command.gate_id.0
                         );
                     }
-                    Some(followup @ ClientCommandFollowup::RefreshPlayerLoadout { .. }) => {
+                    Ok(Some(followup @ ClientCommandFollowup::RefreshPlayerLoadout { .. })) => {
                         if let Some(player_id) = followup.loadout_player_id() {
                             if let Some(loadout) =
                                 node.build_player_loadout_json_for_player(player_id)
@@ -212,7 +212,12 @@ pub(crate) async fn run_phase4_server(
                             }
                         }
                     }
-                    None => {}
+                    Ok(None) => {}
+                    Err(error) => {
+                        sess.send_message(&ServerMessage::ClientRequestRejected(
+                            client_request_rejection(error),
+                        ));
+                    }
                 }
             }
         }

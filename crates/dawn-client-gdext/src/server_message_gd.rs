@@ -394,6 +394,11 @@ impl ServerMessageOutcome {
                 "_accept_market_snapshot",
                 vslice![MarketSnapshot::wrap(snapshot)],
             ),
+            ServerMessage::ClientRequestRejected(rejection) => call_connection(
+                &mut connection_target,
+                "_accept_client_request_rejected",
+                vslice![format!("{:?}", rejection.code), rejection.message.as_str()],
+            ),
         }
     }
 }

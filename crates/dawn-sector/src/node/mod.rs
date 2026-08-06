@@ -18,10 +18,7 @@ mod admission_provisional;
 mod apply_event;
 mod approach;
 mod bot_ai;
-mod command_flight;
-mod command_loadout;
 mod command_module;
-mod command_station;
 mod commands;
 mod coordinates;
 mod inventory;
@@ -50,7 +47,7 @@ mod transit;
 mod warp;
 
 pub use command_module::ModuleActivationRejection;
-pub use commands::ClientCommandFollowup;
+pub use commands::{ClientCommandFollowup, ClientRequestAdmissionError};
 pub use jump::JumpOutcome;
 pub use serialization::{HandoffPayload, MissingObserverShip};
 

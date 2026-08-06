@@ -7,7 +7,7 @@
 //!
 //! Flight/steering/module/Undock commands do not carry a `ship_id` — the
 //! server always resolves them against the caller's *active* ship
-//! (`SimulationNode::apply_client_command`), so there is no wire-representable
+//! (`SimulationNode::apply_client_request`), so there is no wire-representable
 //! way for a client to name a ship it does not currently control. Station
 //! inventory-management commands (Fit/Unfit/Dock/BuildPackagedShip/
 //! DisassembleShip) still carry an explicit `ship_id`, because they operate
@@ -17,6 +17,8 @@
 use crate::fitting::{ModuleId, SlotKind};
 use crate::navigation::{JumpGateId, StationId, WarpTarget};
 use crate::{ItemId, PlayerId, Position, SectorId, ShipId, ShipTypeId};
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Request to move the caller's active ship to `target_position` within its
@@ -160,7 +162,7 @@ pub struct TransferToStationCommand {
 /// Request to remove an Item from a player's ship cargo for a Market listing
 /// (ADR-0034 §4, roadmap 9D-4).
 ///
-/// This is an internal bridge command, not a client-facing `ClientCommand`.
+/// This is an internal bridge command, not a client-facing `ClientRequest`.
 /// The caller routes it to the Sector that owns `ship_id` and applies the
 /// normal ownership and inventory validation there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,6 +194,7 @@ pub struct CreditItemCommand {
 }
 
 /// Which way `TransferToStationCommand` moves the stack.
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransferDirection {
     /// Ship cargo -> station inventory (the original, one-way behavior).
@@ -251,6 +254,7 @@ pub struct SelectActiveShipCommand {
 /// A `Ship` target is dynamic (its position is read from the ECS each tick);
 /// a `Gate` target is a static Jump Gate position, letting players fly back
 /// into a gate's `activation_radius` to jump.
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum ApproachTarget {
     Ship(ShipId),
@@ -413,62 +417,157 @@ pub struct KeepAtRangeCommand {
     pub range: Option<f64>,
 }
 
-/// All commands a client may send to the server.
+/// The single authoritative catalog of requests an external Sector client may send.
 ///
-/// Variants map directly to the concrete command structs above. To add a
-/// command: add a variant here, update `dawn-actor/protocol.rs` (wire parse),
-/// and add a branch to `SimulationNode::apply_client_command` (dawn-sector).
-#[derive(Debug, Clone)]
-pub enum ClientCommand {
-    /// Set thrust direction.
-    Move(MoveCommand),
-    /// Begin locking a target.
-    LockOn(LockOnCommand),
-    /// Turn an active module on.
-    Activate(ActivateModuleCommand),
-    /// Turn an active module off.
-    Deactivate(DeactivateModuleCommand),
-    /// Attack a target (reserved for future manual-fire mode; combat is
-    /// currently automatic each tick).
-    Attack(AttackCommand),
-    /// Decelerate to a stop (applies reverse thrust until velocity is zero).
-    Stop(StopCommand),
-    /// Cross a Sector boundary via a Jump Gate (ADR-0009).
-    Jump(JumpCommand),
-    /// Semi-automatic piloting: approach a selected ship/gate (ADR-0015).
-    Approach(ApproachCommand),
-    /// Intra-Sector warp toward a Jump Gate (short-range Fold, ADR-0022).
-    Warp(WarpCommand),
-    /// Sweep around a selected ship/gate at a chosen radius (ADR-0031).
-    Orbit(OrbitCommand),
-    /// Hold at least a chosen range from a selected ship/gate (ADR-0031).
-    KeepAtRange(KeepAtRangeCommand),
-    /// Move a module from inventory into a fitting slot (ADR-0032).
-    Fit(FitModuleCommand),
-    /// Move a fitted module back into inventory (ADR-0032).
-    Unfit(UnfitModuleCommand),
-    /// Reorder two fitted modules within the same slot kind (drag-and-drop
-    /// reorder in the FITTED column).
-    ReorderFittedModule(ReorderFittedModuleCommand),
-    /// Dock at an NPC station.
-    Dock(DockCommand),
-    /// Leave a previously-docked NPC station.
-    Undock(UndockCommand),
-    /// Consume Scrap Metal in the docked station and create a Packaged Ship.
-    BuildPackagedShip(BuildPackagedShipCommand),
-    /// Convert a docked, unfitted, undamaged ship into a Packaged Ship.
-    DisassembleShip(DisassembleShipCommand),
-    /// Switch which owned, docked ship is the caller's active ship (ADR-0037).
-    SelectActiveShip(SelectActiveShipCommand),
-    /// Convert a station-inventory Packaged Ship item into a new live docked
-    /// ship, owned by the caller (ADR-0034 9B, ADR-0037).
-    Assemble(AssembleCommand),
-    /// Clear the caller's active ship while docked, without disassembling it
-    /// (ADR-0037).
-    Disembark(DisembarkCommand),
-    /// Move an item from a docked ship's own cargo into the caller's station
-    /// inventory (ADR-0034 9B).
-    TransferToStation(TransferToStationCommand),
+/// This serialization-ready enum is shared by the client encoder, WebSocket decoder,
+/// and the application admission seam. Family-local command structs above remain
+/// internal policy inputs; there is no second mirrored full request enum. Acting
+/// identities for active-ship operations are intentionally absent and are supplied
+/// by the admitted server session.
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ClientRequest {
+    Move {
+        target: Position,
+    },
+    LockOn {
+        target: ShipId,
+    },
+    ActivateModule {
+        module: ModuleId,
+        slot: SlotKind,
+        target: Option<ShipId>,
+    },
+    DeactivateModule {
+        module: ModuleId,
+        slot: SlotKind,
+    },
+    Attack {
+        target: ShipId,
+    },
+    Stop,
+    Jump {
+        gate: JumpGateId,
+    },
+    Approach {
+        target: ApproachTarget,
+    },
+    Warp {
+        target: WarpTarget,
+    },
+    Orbit {
+        target: ApproachTarget,
+        radius: Option<f64>,
+    },
+    KeepAtRange {
+        target: ApproachTarget,
+        range: Option<f64>,
+    },
+    FitModule {
+        ship: ShipId,
+        module: ModuleId,
+        slot: SlotKind,
+    },
+    UnfitModule {
+        ship: ShipId,
+        module: ModuleId,
+        slot: SlotKind,
+    },
+    ReorderFittedModule {
+        ship: ShipId,
+        slot: SlotKind,
+        from_index: u32,
+        to_index: u32,
+    },
+    Dock {
+        station: StationId,
+    },
+    Undock,
+    BuildPackagedShip {
+        ship: ShipId,
+        station: StationId,
+        ship_type: ShipTypeId,
+    },
+    DisassembleShip {
+        ship: ShipId,
+        station: StationId,
+    },
+    SelectActiveShip {
+        ship: ShipId,
+    },
+    Assemble {
+        station: StationId,
+        ship_type: ShipTypeId,
+    },
+    Disembark,
+    TransferCargo {
+        ship: ShipId,
+        station: StationId,
+        item: ItemId,
+        direction: TransferDirection,
+    },
+}
+
+/// Structured validation failures at the protocol-to-application boundary.
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+pub enum ClientRequestValidationError {
+    #[error("Move.target contains a non-finite coordinate")]
+    NonFinitePosition,
+    #[error("Orbit.radius must be finite and positive, got {value}")]
+    InvalidOrbitRadius { value: f64 },
+    #[error("KeepAtRange.range must be finite and positive, got {value}")]
+    InvalidKeepAtRange { value: f64 },
+    #[error("{field} must be a non-zero module ID")]
+    ZeroModuleId { field: &'static str },
+    #[error("{field} must be a non-zero ship-type ID")]
+    ZeroShipTypeId { field: &'static str },
+}
+
+impl ClientRequest {
+    /// Validate untrusted numeric values before request admission or domain policy.
+    pub fn validate(&self) -> Result<(), ClientRequestValidationError> {
+        match self {
+            Self::Move { target } if !target.is_finite() => {
+                Err(ClientRequestValidationError::NonFinitePosition)
+            }
+            Self::Orbit {
+                radius: Some(value),
+                ..
+            } if !value.is_finite() || *value <= 0.0 => {
+                Err(ClientRequestValidationError::InvalidOrbitRadius { value: *value })
+            }
+            Self::KeepAtRange {
+                range: Some(value), ..
+            } if !value.is_finite() || *value <= 0.0 => {
+                Err(ClientRequestValidationError::InvalidKeepAtRange { value: *value })
+            }
+            Self::ActivateModule {
+                module: ModuleId(0),
+                ..
+            }
+            | Self::DeactivateModule {
+                module: ModuleId(0),
+                ..
+            }
+            | Self::FitModule {
+                module: ModuleId(0),
+                ..
+            }
+            | Self::UnfitModule {
+                module: ModuleId(0),
+                ..
+            } => Err(ClientRequestValidationError::ZeroModuleId { field: "module" }),
+            Self::BuildPackagedShip {
+                ship_type: ShipTypeId(0),
+                ..
+            }
+            | Self::Assemble {
+                ship_type: ShipTypeId(0),
+                ..
+            } => Err(ClientRequestValidationError::ZeroShipTypeId { field: "ship_type" }),
+            _ => Ok(()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -637,8 +736,27 @@ mod tests {
     }
 
     #[test]
-    fn disembark_command_wraps_into_client_command() {
-        let cmd = ClientCommand::Disembark(DisembarkCommand);
-        assert!(matches!(cmd, ClientCommand::Disembark(DisembarkCommand)));
+    fn disembark_is_a_unit_client_request() {
+        let request = ClientRequest::Disembark;
+        assert!(matches!(request, ClientRequest::Disembark));
+    }
+
+    #[test]
+    fn client_request_validation_rejects_non_finite_and_non_positive_values() {
+        assert_eq!(
+            ClientRequest::Move {
+                target: Position::new(f64::INFINITY, 0.0, 0.0),
+            }
+            .validate(),
+            Err(ClientRequestValidationError::NonFinitePosition)
+        );
+        assert!(matches!(
+            ClientRequest::Orbit {
+                target: ApproachTarget::Ship(ship_id(1)),
+                radius: Some(0.0),
+            }
+            .validate(),
+            Err(ClientRequestValidationError::InvalidOrbitRadius { value: 0.0 })
+        ));
     }
 }

@@ -1,5 +1,7 @@
 use crate::fitting::ModuleId;
 use crate::ship_type::ShipTypeId;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// Canonical identity for every inventory and Market item (ADR-0034).
@@ -7,6 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 /// The variant owns the only identifier that is valid for that item kind, so
 /// impossible combinations such as a Module carrying a ShipTypeId cannot be
 /// represented in domain code.
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum ItemId {
     Module(ModuleId),

@@ -140,6 +140,7 @@ fn validate_godot_integer_range(message: &ServerMessage) -> Result<(), String> {
                 ensure_godot_int(order.quantity, "market.quantity")?;
             }
         }
+        ServerMessage::ClientRequestRejected(_) => {}
     }
     Ok(())
 }

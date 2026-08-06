@@ -13,8 +13,9 @@ publish.workspace     = true
 # GDExtension cdylib) depends on this crate directly and must not inherit a
 # server-side WebSocket stack it never uses (ADR-0041).
 [dependencies]
-dawn-core  = { path = "../dawn-core" }
+dawn-core  = { path = "../dawn-core", features = ["schema"] }
 serde      = { workspace = true }
 serde_json = "1"
 schemars   = "1.2"
 postcard   = { workspace = true }
+thiserror  = { workspace = true }

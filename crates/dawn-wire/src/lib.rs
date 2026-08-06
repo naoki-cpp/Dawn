@@ -1,94 +1,37 @@
 //! Client <-> server wire schema for Dawn (ADR-0041, ADR-0042).
 //!
-//! [`ClientCommandWire`]/[`EventWire`] are the schema-of-record for every
-//! message a client can send/receive over the WebSocket connection. They
-//! live in their own leaf crate (dawn-core + serde + postcard only, no
-//! transport/runtime dependency) so that both sides of the wire can depend
-//! on the *same* types instead of maintaining parallel copies that can
-//! drift:
-//!
-//! - `dawn-actor` (server) decodes [`ClientMessage`] from the bytes a
-//!   client sent via `postcard::from_bytes` (the binary envelope) and
-//!   serializes [`ServerMessage`] back out.
-//! - `dawn-client-gdext` (Godot client) constructs [`ClientMessage`] directly
-//!   and serializes it out, and decodes a received [`ServerMessage`] back
-//!   into Godot-facing data -- replacing the old pattern of hand-building a
-//!   GDScript `Dictionary` that had to be kept in sync with this schema by
-//!   eye.
+//! [`dawn_core::ClientRequest`] is the single schema-of-record for every
+//! Sector request a client can send. The same typed value is constructed by
+//! the Godot binding, postcard-encoded in [`ClientMessage`], decoded and
+//! validated by the server, and admitted into family-local Sector policy.
+//! Market requests remain a separate stream by design.
 //!
 //! ```
-//! use dawn_wire::{ClientCommandWire, PosWire};
+//! use dawn_core::{ClientRequest, Position};
+//! use dawn_wire::ClientMessage;
 //!
-//! let cmd = ClientCommandWire::MoveCommand {
-//!     target: PosWire { x: 10.0, y: 0.0, z: -5.0 },
-//! };
-//! let json = serde_json::to_string(&cmd).unwrap();
-//! assert!(json.contains("\"MoveCommand\""));
+//! let message = ClientMessage::Command(ClientRequest::Move {
+//!     target: Position::new(10.0, 0.0, -5.0),
+//! });
+//! let decoded = ClientMessage::decode(&message.encode()).unwrap();
+//! assert!(matches!(decoded, ClientMessage::Command(ClientRequest::Move { .. })));
 //! ```
 //!
-//! # Binary envelope (ADR-0042)
-//!
-//! postcard has no self-describing type tag -- it can't deserialize an
-//! internally tagged enum at all (no `deserialize_any`), so
-//! `ClientCommandWire`/`EventWire` are externally tagged
-//! (`{"VariantName": {...}}`, serde's default) rather than
-//! `#[serde(tag = "type")]`. The wire also needs one outer enum per
-//! direction that the receiver can decode without knowing the message kind
-//! up front:
-//!
-//! ```
-//! use dawn_wire::{ClientMessage, HelloMessage};
-//!
-//! let msg = ClientMessage::Hello(HelloMessage { resume: None });
-//! let bytes = msg.encode();
-//! let decoded = ClientMessage::decode(&bytes).unwrap();
-//! assert!(matches!(decoded, ClientMessage::Hello(HelloMessage { resume: None })));
-//! ```
-//!
-//! The server -> client direction round-trips the same way through
-//! [`ServerMessage::Event`]:
-//!
-//! ```
-//! use dawn_wire::{EventWire, ServerMessage};
-//!
-//! let msg = ServerMessage::Event(EventWire::ShipDespawned { ship_id: 7, tick: 1 });
-//! let bytes = msg.encode();
-//! let decoded = ServerMessage::decode(&bytes).unwrap();
-//! assert!(matches!(
-//!     decoded,
-//!     ServerMessage::Event(EventWire::ShipDespawned { ship_id: 7, tick: 1 })
-//! ));
-//! ```
-//!
-//! Stage 1 covered the messages that already had a fixed Rust type:
-//! `Welcome`/`Redirect`/`Event` (server -> client) and `Hello`/`Command`
-//! (client -> server). Stage 2 folds in the remaining ad-hoc
-//! `serde_json::Value` messages one at a time; 2a ([`PlayerLoadoutWire`]),
-//! 2b ([`InitialStateWire`]), and 2c (`AoiEnter`/`AoiLeave`/`PositionSnap`)
-//! are done. Every server -> client message now travels through the binary
-//! envelope; there is no more ad-hoc JSON text path.
-//!
-//! # Naming convention
-//!
-//! Wire schema types use a `*Wire` suffix (`EventWire`, `ClientCommandWire`,
-//! `PosWire`, ...), not `*Json` -- ADR-0042 moved every message onto the
-//! postcard binary envelope, so a `Json` suffix would misdescribe what these
-//! types actually carry on the wire today. Real JSON-producing helpers (the
-//! `*_wire_json_schema()` doc-generation functions, which really do render a
-//! JSON Schema document) keep `json` in their names since that's accurate.
+//! Sector commands are encoded in a versioned envelope. The legacy command
+//! variant index is permanently reserved, so pre-#273 postcard payloads cannot
+//! be reinterpreted as the new typed request catalog.
 
-mod client_command;
+mod client_request;
 mod hello_resume;
 mod initial_state;
 mod item;
 mod market;
+mod motion;
 mod player_loadout;
 mod server_event;
 
-pub use client_command::{
-    client_command_from_wire, client_command_wire_json_schema, ClientCommandWire,
-    NavigationTargetWire, PosWire, VelWire, WarpTargetWire,
-};
+pub use client_request::client_request_json_schema;
+pub use dawn_core::ClientRequest;
 pub use hello_resume::{HelloMessage, ResumeTicket};
 pub use initial_state::{
     AbsPosWire, BuildableShipTypeWire, CelestialBodyWire, InitialStateWire, JumpGateWire,
@@ -98,15 +41,94 @@ pub use item::{ItemWire, ItemWireError};
 pub use market::{
     market_command_wire_json_schema, MarketCommandWire, MarketOrderWire, MarketSnapshotWire,
 };
+pub use motion::VelWire;
 pub use player_loadout::{
     ItemRowWire, ModuleRowWire, OwnedShipRowWire, PlayerLoadoutWire, SlotCapacityWire,
 };
 pub use server_event::{domain_event_to_event_wire, event_wire_json_schema, EventWire};
 
+use dawn_core::ClientRequestValidationError;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Every message the server sends over the binary WebSocket envelope
-/// (ADR-0042).
+/// Stable machine-readable reason for rejecting a client request before
+/// gameplay policy is evaluated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum ClientRequestRejectionCode {
+    InvalidEncoding,
+    UnsupportedProtocol,
+    UnsupportedRequest,
+    NonFinitePosition,
+    InvalidOrbitRadius,
+    InvalidKeepAtRange,
+    ZeroModuleId,
+    ZeroShipTypeId,
+    NoActiveShip,
+}
+
+/// Structured rejection sent back to the client for decode, validation, or
+/// application-admission failures.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ClientRequestRejectionWire {
+    pub code: ClientRequestRejectionCode,
+    pub message: String,
+}
+
+impl ClientRequestRejectionWire {
+    pub fn invalid_encoding(error: impl std::fmt::Display) -> Self {
+        Self {
+            code: ClientRequestRejectionCode::InvalidEncoding,
+            message: error.to_string(),
+        }
+    }
+
+    pub fn unsupported_protocol(message: impl Into<String>) -> Self {
+        Self {
+            code: ClientRequestRejectionCode::UnsupportedProtocol,
+            message: message.into(),
+        }
+    }
+
+    pub fn unsupported_request(request: &str) -> Self {
+        Self {
+            code: ClientRequestRejectionCode::UnsupportedRequest,
+            message: format!("{request} is not currently supported"),
+        }
+    }
+
+    pub fn validation(error: ClientRequestValidationError) -> Self {
+        let code = match error {
+            ClientRequestValidationError::NonFinitePosition => {
+                ClientRequestRejectionCode::NonFinitePosition
+            }
+            ClientRequestValidationError::InvalidOrbitRadius { .. } => {
+                ClientRequestRejectionCode::InvalidOrbitRadius
+            }
+            ClientRequestValidationError::InvalidKeepAtRange { .. } => {
+                ClientRequestRejectionCode::InvalidKeepAtRange
+            }
+            ClientRequestValidationError::ZeroModuleId { .. } => {
+                ClientRequestRejectionCode::ZeroModuleId
+            }
+            ClientRequestValidationError::ZeroShipTypeId { .. } => {
+                ClientRequestRejectionCode::ZeroShipTypeId
+            }
+        };
+        Self {
+            code,
+            message: error.to_string(),
+        }
+    }
+
+    pub fn no_active_ship() -> Self {
+        Self {
+            code: ClientRequestRejectionCode::NoActiveShip,
+            message: "request requires an admitted active ship".to_owned(),
+        }
+    }
+}
+
+/// Every message the server sends over the binary WebSocket envelope.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
     Welcome {
@@ -121,24 +143,14 @@ pub enum ServerMessage {
     Event(EventWire),
     PlayerLoadout(PlayerLoadoutWire),
     InitialState(InitialStateWire),
-    /// A ship just entered an observer's Area-of-Interest neighborhood
-    /// (ADR-0019/ADR-0042 stage 2c).
     AoiEnter(ShipStateWire),
-    /// A ship left an observer's Area-of-Interest neighborhood (ADR-0019/
-    /// ADR-0042 stage 2c). Carries only the id -- the client already knows
-    /// everything else about a ship it previously saw.
     AoiLeave {
         ship_id: u64,
     },
-    /// Authoritative absolute position for a ship, sent on warp arrival
-    /// (ADR-0029) to correct the client's capped warp-visual dead-reckoning.
     PositionSnap {
         ship_id: u64,
         position: AbsPosWire,
     },
-    /// Owner-only normal-flight correction for client-side prediction
-    /// (Phase 10 / ADR-0043). Warp and docking discontinuities use
-    /// `PositionSnap` or domain events instead.
     MotionCorrection {
         ship_id: u64,
         position: AbsPosWire,
@@ -146,49 +158,236 @@ pub enum ServerMessage {
         tick: u64,
     },
     MarketSnapshot(MarketSnapshotWire),
+    ClientRequestRejected(ClientRequestRejectionWire),
 }
 
 impl ServerMessage {
-    /// Postcard-encode this message into the bytes a binary WebSocket frame
-    /// carries (ADR-0042). The single call site for this crate's `postcard`
-    /// dependency on the server -> client side, so callers (`dawn-actor`,
-    /// `dawn-client-gdext`) never invoke `postcard` directly.
     pub fn encode(&self) -> Vec<u8> {
-        postcard::to_stdvec(self).unwrap_or_default()
+        postcard::to_stdvec(self).expect("typed wire message serialization")
     }
 
-    /// Decode a binary WebSocket frame back into a [`ServerMessage`].
     pub fn decode(bytes: &[u8]) -> Result<Self, postcard::Error> {
         postcard::from_bytes(bytes)
     }
 }
 
-/// Every message a client sends over the binary WebSocket envelope
-/// (ADR-0042 stage 1).
-#[derive(Debug, Serialize, Deserialize)]
+/// Magic and version for the post-#273 typed Sector request envelope.
+const CLIENT_REQUEST_PROTOCOL_MAGIC: u32 = 0x4441_574E; // "DAWN"
+const CLIENT_REQUEST_PROTOCOL_VERSION: u16 = 1;
+
+/// Versioned payload carried by the new Sector-command wire variant.
+///
+/// Keeping this framing separate from [`ClientRequest`] lets the request enum
+/// remain the single intent catalog while giving postcard a hard compatibility
+/// boundary. The legacy command occupied outer enum index 1; that index remains
+/// reserved in the private wire enum below.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct ClientRequestEnvelope {
+    protocol_magic: u32,
+    protocol_version: u16,
+    request: ClientRequest,
+}
+
+impl ClientRequestEnvelope {
+    fn validate(&self) -> Result<(), ClientMessageDecodeError> {
+        if self.protocol_magic != CLIENT_REQUEST_PROTOCOL_MAGIC
+            || self.protocol_version != CLIENT_REQUEST_PROTOCOL_VERSION
+        {
+            return Err(ClientMessageDecodeError::UnsupportedProtocol {
+                magic: self.protocol_magic,
+                version: self.protocol_version,
+            });
+        }
+        self.request.validate()?;
+        Ok(())
+    }
+}
+
+#[derive(Serialize)]
+struct ClientRequestEnvelopeRef<'a> {
+    protocol_magic: u32,
+    protocol_version: u16,
+    request: &'a ClientRequest,
+}
+
+impl<'a> ClientRequestEnvelopeRef<'a> {
+    fn new(request: &'a ClientRequest) -> Self {
+        Self {
+            protocol_magic: CLIENT_REQUEST_PROTOCOL_MAGIC,
+            protocol_version: CLIENT_REQUEST_PROTOCOL_VERSION,
+            request,
+        }
+    }
+}
+
+/// Public client-message API. Its Sector command variant carries the one typed
+/// request authority; version framing is an implementation detail of encode/decode.
+#[derive(Debug)]
 pub enum ClientMessage {
     Hello(HelloMessage),
-    Command(ClientCommandWire),
+    Command(ClientRequest),
     Market(MarketCommandWire),
 }
 
+/// Actual postcard layout. Variant index 1 is deliberately never reused:
+/// legacy `ClientCommandWire` messages used that index, while the new versioned
+/// command is index 3.
+#[derive(Serialize, Deserialize)]
+enum ClientMessageWire {
+    Hello(HelloMessage),
+    #[allow(dead_code)]
+    LegacyCommand,
+    Market(MarketCommandWire),
+    Command(ClientRequestEnvelope),
+}
+
+#[derive(Serialize)]
+enum ClientMessageWireRef<'a> {
+    Hello(&'a HelloMessage),
+    #[allow(dead_code)]
+    LegacyCommand,
+    Market(&'a MarketCommandWire),
+    Command(ClientRequestEnvelopeRef<'a>),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ClientMessageDecodeError {
+    #[error("invalid postcard client message: {0}")]
+    Postcard(#[from] postcard::Error),
+    #[error("legacy Sector command protocol is unsupported")]
+    LegacyCommandProtocol,
+    #[error("unsupported Sector command protocol magic=0x{magic:08X} version={version}")]
+    UnsupportedProtocol { magic: u32, version: u16 },
+    #[error("client message has {remaining} trailing byte(s)")]
+    TrailingBytes { remaining: usize },
+    #[error("invalid client request: {0}")]
+    RequestValidation(#[from] ClientRequestValidationError),
+}
+
+impl ClientMessageDecodeError {
+    pub fn rejection(&self) -> ClientRequestRejectionWire {
+        match self {
+            Self::Postcard(error) => ClientRequestRejectionWire::invalid_encoding(error),
+            Self::LegacyCommandProtocol | Self::UnsupportedProtocol { .. } => {
+                ClientRequestRejectionWire::unsupported_protocol(self.to_string())
+            }
+            Self::TrailingBytes { .. } => ClientRequestRejectionWire::invalid_encoding(self),
+            Self::RequestValidation(error) => ClientRequestRejectionWire::validation(*error),
+        }
+    }
+}
+
 impl ClientMessage {
-    /// Postcard-encode this message into the bytes a binary WebSocket frame
-    /// carries (ADR-0042). The single call site for this crate's `postcard`
-    /// dependency on the client -> server side.
     pub fn encode(&self) -> Vec<u8> {
-        postcard::to_stdvec(self).unwrap_or_default()
+        let wire = match self {
+            Self::Hello(hello) => ClientMessageWireRef::Hello(hello),
+            Self::Command(request) => {
+                ClientMessageWireRef::Command(ClientRequestEnvelopeRef::new(request))
+            }
+            Self::Market(command) => ClientMessageWireRef::Market(command),
+        };
+        postcard::to_stdvec(&wire).expect("typed wire message serialization")
     }
 
-    /// Decode a binary WebSocket frame back into a [`ClientMessage`].
-    pub fn decode(bytes: &[u8]) -> Result<Self, postcard::Error> {
-        postcard::from_bytes(bytes)
+    /// Decode and validate an untrusted client frame before queueing it for
+    /// application admission.
+    pub fn decode(bytes: &[u8]) -> Result<Self, ClientMessageDecodeError> {
+        let (wire, remaining) = postcard::take_from_bytes::<ClientMessageWire>(bytes)?;
+        if matches!(&wire, ClientMessageWire::LegacyCommand) {
+            return Err(ClientMessageDecodeError::LegacyCommandProtocol);
+        }
+        if !remaining.is_empty() {
+            return Err(ClientMessageDecodeError::TrailingBytes {
+                remaining: remaining.len(),
+            });
+        }
+
+        match wire {
+            ClientMessageWire::Hello(hello) => Ok(Self::Hello(hello)),
+            ClientMessageWire::LegacyCommand => unreachable!("handled above"),
+            ClientMessageWire::Market(command) => Ok(Self::Market(command)),
+            ClientMessageWire::Command(envelope) => {
+                envelope.validate()?;
+                Ok(Self::Command(envelope.request))
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dawn_core::{ApproachTarget, EntityId, ModuleId, NodeId, Position, ShipId, SlotKind};
+
+    fn ship_id(counter: u64) -> ShipId {
+        ShipId(EntityId::new(NodeId(0), counter))
+    }
+
+    fn roundtrip(message: &ClientMessage) -> ClientMessage {
+        ClientMessage::decode(&message.encode()).expect("postcard ClientMessage round trip")
+    }
+
+    #[allow(dead_code)]
+    #[derive(Serialize)]
+    enum LegacyClientMessage {
+        Hello(HelloMessage),
+        Command(LegacyClientCommand),
+        Market(MarketCommandWire),
+    }
+
+    #[derive(Serialize)]
+    enum LegacyClientCommand {
+        MoveCommand { target: LegacyPosition },
+    }
+
+    #[derive(Serialize)]
+    struct LegacyPosition {
+        x: f64,
+        y: f64,
+        z: f64,
+    }
+
+    #[test]
+    fn legacy_command_variant_is_rejected_before_payload_reinterpretation() {
+        let legacy = LegacyClientMessage::Command(LegacyClientCommand::MoveCommand {
+            target: LegacyPosition {
+                x: 10.0,
+                y: 0.0,
+                z: -5.0,
+            },
+        });
+        let bytes = postcard::to_stdvec(&legacy).expect("encode legacy command");
+        let error = ClientMessage::decode(&bytes).expect_err("legacy command must be rejected");
+
+        assert!(matches!(
+            &error,
+            ClientMessageDecodeError::LegacyCommandProtocol
+        ));
+        assert_eq!(
+            error.rejection().code,
+            ClientRequestRejectionCode::UnsupportedProtocol
+        );
+    }
+
+    #[test]
+    fn wrong_command_envelope_version_is_rejected_structurally() {
+        let wire = ClientMessageWire::Command(ClientRequestEnvelope {
+            protocol_magic: CLIENT_REQUEST_PROTOCOL_MAGIC,
+            protocol_version: CLIENT_REQUEST_PROTOCOL_VERSION + 1,
+            request: ClientRequest::Stop,
+        });
+        let bytes = postcard::to_stdvec(&wire).expect("encode versioned command");
+        let error = ClientMessage::decode(&bytes).expect_err("unknown version must be rejected");
+
+        assert!(matches!(
+            &error,
+            ClientMessageDecodeError::UnsupportedProtocol { .. }
+        ));
+        assert_eq!(
+            error.rejection().code,
+            ClientRequestRejectionCode::UnsupportedProtocol
+        );
+    }
 
     #[test]
     fn motion_correction_round_trips_through_the_binary_envelope() {
@@ -206,7 +405,6 @@ mod tests {
             },
             tick: 42,
         };
-
         let decoded = ServerMessage::decode(&message.encode()).expect("valid postcard message");
         assert!(matches!(
             decoded,
@@ -215,6 +413,87 @@ mod tests {
                 tick: 42,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn typed_client_request_round_trips_without_conversion_catalog() {
+        let message = ClientMessage::Command(ClientRequest::ActivateModule {
+            module: ModuleId(3),
+            slot: SlotKind::High,
+            target: Some(ship_id(9)),
+        });
+        assert!(matches!(
+            roundtrip(&message),
+            ClientMessage::Command(ClientRequest::ActivateModule {
+                module: ModuleId(3),
+                slot: SlotKind::High,
+                target: Some(target),
+            }) if target == ship_id(9)
+        ));
+    }
+
+    #[test]
+    fn navigation_target_round_trips_as_domain_typed_value() {
+        let message = ClientMessage::Command(ClientRequest::Approach {
+            target: ApproachTarget::Ship(ship_id(7)),
+        });
+        assert!(matches!(
+            roundtrip(&message),
+            ClientMessage::Command(ClientRequest::Approach {
+                target: ApproachTarget::Ship(target),
+            }) if target == ship_id(7)
+        ));
+    }
+
+    #[test]
+    fn non_finite_request_is_rejected_during_decode() {
+        let message = ClientMessage::Command(ClientRequest::Move {
+            target: Position::new(f64::NAN, 0.0, 0.0),
+        });
+        let error = ClientMessage::decode(&message.encode()).expect_err("NaN must be rejected");
+        assert!(matches!(
+            error,
+            ClientMessageDecodeError::RequestValidation(
+                ClientRequestValidationError::NonFinitePosition
+            )
+        ));
+        assert_eq!(
+            error.rejection().code,
+            ClientRequestRejectionCode::NonFinitePosition
+        );
+    }
+
+    #[test]
+    fn market_command_preserves_typed_item_identity() {
+        let message = ClientMessage::Market(MarketCommandWire::PlaceMarketOrderCommand {
+            ship_id: 42,
+            item_id: ItemWire::Module { module_id: 5 },
+            side: "Ask".to_owned(),
+            price: 100,
+            quantity: 3,
+        });
+        assert!(matches!(
+            roundtrip(&message),
+            ClientMessage::Market(MarketCommandWire::PlaceMarketOrderCommand {
+                ship_id: 42,
+                item_id: ItemWire::Module { module_id: 5 },
+                side,
+                price: 100,
+                quantity: 3,
+            }) if side == "Ask"
+        ));
+    }
+
+    #[test]
+    fn hello_preserves_resume_ticket() {
+        let ticket = ResumeTicket::from_bytes([7; ResumeTicket::BYTE_LEN]);
+        let message = ClientMessage::Hello(HelloMessage {
+            resume: Some(ticket),
+        });
+        assert!(matches!(
+            roundtrip(&message),
+            ClientMessage::Hello(HelloMessage { resume: Some(decoded) }) if decoded == ticket
         ));
     }
 
@@ -228,7 +507,7 @@ mod tests {
             ),
         );
         assert_schema_file_matches(
-            &client_command_wire_json_schema(),
+            &client_request_json_schema(),
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../docs/architecture/wire-protocol-commands.schema.json"
@@ -243,139 +522,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn schema_comparison_accepts_windows_line_endings() {
-        assert_eq!(
-            normalize_line_endings("{\r\n  \"ok\": true\r\n}\r\n"),
-            "{\n  \"ok\": true\n}\n"
-        );
-    }
-
     fn assert_schema_file_matches(schema: &schemars::Schema, path: &str) {
         let current = serde_json::to_string_pretty(schema).unwrap() + "\n";
-        // Git may materialize checked-in JSON with CRLF on Windows, while
-        // serde_json and the generator intentionally produce LF.
-        let checked_in = normalize_line_endings(
-            &std::fs::read_to_string(path).unwrap_or_else(|_| panic!("{path} must exist")),
-        );
+        let checked_in = std::fs::read_to_string(path)
+            .unwrap_or_else(|_| panic!("{path} must exist"))
+            .replace("\r\n", "\n");
         assert_eq!(
             current, checked_in,
-            "{path} is stale -- regenerate with \
-             `cargo run -p dawn-actor --example gen_wire_schema`"
+            "{path} is stale -- regenerate with `cargo run -p dawn-actor --example gen_wire_schema`"
         );
-    }
-
-    fn normalize_line_endings(text: &str) -> String {
-        text.replace("\r\n", "\n")
-    }
-}
-
-#[cfg(test)]
-mod client_message_roundtrip_tests {
-    use super::*;
-
-    fn roundtrip(message: &ClientMessage) -> ClientMessage {
-        ClientMessage::decode(&message.encode()).expect("postcard ClientMessage round trip")
-    }
-
-    #[test]
-    fn move_command_preserves_f64_target_components() {
-        let message = ClientMessage::Command(ClientCommandWire::MoveCommand {
-            target: PosWire {
-                x: 10.0,
-                y: 0.0,
-                z: -5.0,
-            },
-        });
-        assert!(matches!(
-            roundtrip(&message),
-            ClientMessage::Command(ClientCommandWire::MoveCommand {
-                target: PosWire {
-                    x: 10.0,
-                    y: 0.0,
-                    z: -5.0
-                }
-            })
-        ));
-    }
-
-    #[test]
-    fn module_activation_preserves_optional_target() {
-        for target_ship_id in [None, Some(9)] {
-            let message = ClientMessage::Command(ClientCommandWire::ActivateModuleCommand {
-                module_id: 3,
-                slot: "High".to_owned(),
-                target_ship_id,
-            });
-            match roundtrip(&message) {
-                ClientMessage::Command(ClientCommandWire::ActivateModuleCommand {
-                    module_id,
-                    slot,
-                    target_ship_id: decoded_target,
-                }) => {
-                    assert_eq!(module_id, 3);
-                    assert_eq!(slot, "High");
-                    assert_eq!(decoded_target, target_ship_id);
-                }
-                _ => panic!("unexpected decoded message"),
-            }
-        }
-    }
-
-    #[test]
-    fn navigation_targets_keep_their_wire_variants() {
-        let approach = ClientMessage::Command(ClientCommandWire::ApproachCommand {
-            target: NavigationTargetWire::Ship(7),
-        });
-        assert!(matches!(
-            roundtrip(&approach),
-            ClientMessage::Command(ClientCommandWire::ApproachCommand {
-                target: NavigationTargetWire::Ship(7)
-            })
-        ));
-
-        let warp = ClientMessage::Command(ClientCommandWire::WarpCommand {
-            target: WarpTargetWire::Body(5),
-        });
-        assert!(matches!(
-            roundtrip(&warp),
-            ClientMessage::Command(ClientCommandWire::WarpCommand {
-                target: WarpTargetWire::Body(5)
-            })
-        ));
-    }
-
-    #[test]
-    fn market_command_preserves_typed_item_identity() {
-        let message = ClientMessage::Market(MarketCommandWire::PlaceMarketOrderCommand {
-            ship_id: 42,
-            item_id: ItemWire::Module { module_id: 5 },
-            side: "Ask".to_owned(),
-            price: 100,
-            quantity: 3,
-        });
-        assert!(matches!(
-            roundtrip(&message),
-            ClientMessage::Market(MarketCommandWire::PlaceMarketOrderCommand {                ship_id: 42,
-                item_id: ItemWire::Module { module_id: 5 },
-                side,
-                price: 100,
-                quantity: 3
-            }) if side == "Ask"
-        ));
-    }
-
-    #[test]
-    fn hello_preserves_resume_ticket() {
-        let ticket = ResumeTicket::from_bytes([7; ResumeTicket::BYTE_LEN]);
-        let message = ClientMessage::Hello(HelloMessage {
-            resume: Some(ticket),
-        });
-        assert!(matches!(
-            roundtrip(&message),
-            ClientMessage::Hello(HelloMessage {
-                resume: Some(decoded)
-            }) if decoded == ticket
-        ));
     }
 }

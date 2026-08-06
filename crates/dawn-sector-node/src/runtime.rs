@@ -12,12 +12,30 @@ use dawn_event_store::store::EventStore;
 use dawn_replication::{OutboundLogPublisher, TcpReplicationTransport};
 use dawn_sector::aoi::{AoiSink, Observer};
 use dawn_sector::aoi_frame::AoiFrame;
-use dawn_sector::node::{ClientCommandFollowup, JumpOutcome, SimulationNode};
+use dawn_sector::node::{
+    ClientCommandFollowup, ClientRequestAdmissionError, JumpOutcome, SimulationNode,
+};
 use dawn_sector::transit;
 use dawn_wire::ServerMessage;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use tokio::sync::mpsc;
+
+fn client_request_rejection(
+    error: ClientRequestAdmissionError,
+) -> dawn_wire::ClientRequestRejectionWire {
+    match error {
+        ClientRequestAdmissionError::Validation(error) => {
+            dawn_wire::ClientRequestRejectionWire::validation(error)
+        }
+        ClientRequestAdmissionError::NoActiveShip => {
+            dawn_wire::ClientRequestRejectionWire::no_active_ship()
+        }
+        ClientRequestAdmissionError::UnsupportedRequest { request } => {
+            dawn_wire::ClientRequestRejectionWire::unsupported_request(request)
+        }
+    }
+}
 
 pub(crate) struct SectorNodeRuntime {
     sector_id: SectorId,
@@ -98,13 +116,13 @@ impl SectorNodeRuntime {
         let mut pending_jumps = Vec::new();
 
         for (i, sess) in self.sessions.iter_mut().enumerate() {
-            while let Some(cmd) = sess.try_recv_command() {
-                match node.apply_client_command(sess.player_id, cmd, &mut lock_commands) {
-                    Some(ClientCommandFollowup::Jump { ship_id, command }) => {
+            while let Some(request) = sess.try_recv_request() {
+                match node.apply_client_request(sess.player_id, request, &mut lock_commands) {
+                    Ok(Some(ClientCommandFollowup::Jump { ship_id, command })) => {
                         pending_jumps.push((i, ship_id, command));
                         break;
                     }
-                    Some(followup @ ClientCommandFollowup::RefreshPlayerLoadout { .. }) => {
+                    Ok(Some(followup @ ClientCommandFollowup::RefreshPlayerLoadout { .. })) => {
                         if let Some(player_id) = followup.loadout_player_id() {
                             if let Some(loadout) =
                                 node.build_player_loadout_json_for_player(player_id)
@@ -113,7 +131,12 @@ impl SectorNodeRuntime {
                             }
                         }
                     }
-                    None => {}
+                    Ok(None) => {}
+                    Err(error) => {
+                        sess.send_message(&ServerMessage::ClientRequestRejected(
+                            client_request_rejection(error),
+                        ));
+                    }
                 }
             }
         }

@@ -1,634 +1,38 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "ClientCommandWire",
-  "description": "Every message a client can send to the server, as the postcard-encoded\nbinary `ClientMessage::Command` envelope (ADR-0042).\n\nThis enum is the schema-of-record for the client -> server half of the\nwire protocol (see [`crate::EventWire`] for the server -> client half).\nNavigation commands use required tagged target enums, so invalid states\nsuch as a missing target or simultaneous Ship/Gate targets cannot be\nrepresented after successful decoding.\n\nFlight/steering/module/Undock variants carry no `ship_id` (ADR-0037): the\nserver always resolves them against the caller's active ship, so there is\nno wire-representable way to name a ship the player isn't currently\nflying. Station inventory-management variants (Fit/Unfit/Dock/\nBuildPackagedShip/DisassembleShip) still carry an explicit `ship_id`,\nsince they may target any owned docked ship, not just the active one.\n\nDerives both `Serialize` and `Deserialize` (ADR-0041): the server\ndecodes a postcard-received `ClientMessage::Command` into this enum\n([`client_command_from_wire`]); the Godot client (`dawn-client-gdext`)\nconstructs a variant directly from typed arguments and encodes it back\nout, replacing the old GDScript pattern of hand-building a `Dictionary`\nthat had to match this schema by eye.\n\nExternally tagged (serde's default enum representation, `{\"VariantName\":\n{...fields}}`), not `#[serde(tag = \"type\")]` -- `postcard` (the binary\nwire format since ADR-0042) cannot deserialize an internally tagged enum\nat all (it has no `deserialize_any`, which internal tagging requires).\nJSON-text serialization of this type is not the runtime wire format (see\n[`postcard::to_stdvec`]/[`postcard::from_bytes`] via the `ClientMessage`\nenvelope); `serde_json` is used only by [`client_command_wire_json_schema`]\n(doc generation) and this crate's own unit tests.",
-  "oneOf": [
-    {
-      "type": "object",
-      "properties": {
-        "MoveCommand": {
-          "type": "object",
-          "properties": {
-            "target": {
-              "$ref": "#/$defs/PosWire"
-            }
-          },
-          "required": [
-            "target"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "MoveCommand"
-      ]
+  "title": "ClientRequestEnvelope",
+  "description": "Versioned payload carried by the new Sector-command wire variant.\n\nKeeping this framing separate from [`ClientRequest`] lets the request enum\nremain the single intent catalog while giving postcard a hard compatibility\nboundary. The legacy command occupied outer enum index 1; that index remains\nreserved in the private wire enum below.",
+  "type": "object",
+  "properties": {
+    "protocol_magic": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
     },
-    {
-      "type": "object",
-      "properties": {
-        "LockOnCommand": {
-          "type": "object",
-          "properties": {
-            "target_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          "required": [
-            "target_id"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "LockOnCommand"
-      ]
+    "protocol_version": {
+      "type": "integer",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0
     },
-    {
-      "type": "object",
-      "properties": {
-        "ActivateModuleCommand": {
-          "type": "object",
-          "properties": {
-            "module_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "slot": {
-              "type": "string"
-            },
-            "target_ship_id": {
-              "description": "Target of a targeted module (Weapon/Tackle), per ADR-0035.\nRequired only for targeted module kinds; validated server-side.",
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          "required": [
-            "module_id",
-            "slot"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "ActivateModuleCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "DeactivateModuleCommand": {
-          "type": "object",
-          "properties": {
-            "module_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "slot": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "module_id",
-            "slot"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "DeactivateModuleCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "AttackCommand": {
-          "type": "object",
-          "properties": {
-            "attacker_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            },
-            "target_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          "required": [
-            "attacker_id",
-            "target_id"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "AttackCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "StopCommand": {
-          "type": "object"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "StopCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "JumpCommand": {
-          "type": "object",
-          "properties": {
-            "gate_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          "required": [
-            "gate_id"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "JumpCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "ApproachCommand": {
-          "type": "object",
-          "properties": {
-            "target": {
-              "$ref": "#/$defs/NavigationTargetWire"
-            }
-          },
-          "required": [
-            "target"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "ApproachCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "WarpCommand": {
-          "type": "object",
-          "properties": {
-            "target": {
-              "$ref": "#/$defs/WarpTargetWire"
-            }
-          },
-          "required": [
-            "target"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "WarpCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "OrbitCommand": {
-          "type": "object",
-          "properties": {
-            "radius": {
-              "type": [
-                "number",
-                "null"
-              ],
-              "format": "double"
-            },
-            "target": {
-              "$ref": "#/$defs/NavigationTargetWire"
-            }
-          },
-          "required": [
-            "target"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "OrbitCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "KeepAtRangeCommand": {
-          "type": "object",
-          "properties": {
-            "range": {
-              "type": [
-                "number",
-                "null"
-              ],
-              "format": "double"
-            },
-            "target": {
-              "$ref": "#/$defs/NavigationTargetWire"
-            }
-          },
-          "required": [
-            "target"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "KeepAtRangeCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "FitModuleCommand": {
-          "type": "object",
-          "properties": {
-            "module_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "ship_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            },
-            "slot": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "ship_id",
-            "module_id",
-            "slot"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "FitModuleCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "UnfitModuleCommand": {
-          "type": "object",
-          "properties": {
-            "module_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "ship_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            },
-            "slot": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "ship_id",
-            "module_id",
-            "slot"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "UnfitModuleCommand"
-      ]
-    },
-    {
-      "description": "Reorder two fitted modules within the same slot kind (drag-and-drop\nreorder in the FITTED column).",
-      "type": "object",
-      "properties": {
-        "ReorderFittedModuleCommand": {
-          "type": "object",
-          "properties": {
-            "from_index": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "ship_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            },
-            "slot": {
-              "type": "string"
-            },
-            "to_index": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          "required": [
-            "ship_id",
-            "slot",
-            "from_index",
-            "to_index"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "ReorderFittedModuleCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "DockCommand": {
-          "type": "object",
-          "properties": {
-            "station_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          "required": [
-            "station_id"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "DockCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "UndockCommand": {
-          "type": "object"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "UndockCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "BuildPackagedShipCommand": {
-          "type": "object",
-          "properties": {
-            "ship_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            },
-            "ship_type_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "station_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          "required": [
-            "ship_id",
-            "station_id",
-            "ship_type_id"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "BuildPackagedShipCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "DisassembleShipCommand": {
-          "type": "object",
-          "properties": {
-            "ship_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            },
-            "station_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          "required": [
-            "ship_id",
-            "station_id"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "DisassembleShipCommand"
-      ]
-    },
-    {
-      "type": "object",
-      "properties": {
-        "SelectActiveShipCommand": {
-          "type": "object",
-          "properties": {
-            "ship_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          "required": [
-            "ship_id"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "SelectActiveShipCommand"
-      ]
-    },
-    {
-      "description": "Convert a station-inventory Packaged Ship item into a new live docked\nship (ADR-0034 9B, ADR-0037). No `ship_id` -- the ship doesn't exist\nyet; its ID is reported via the resulting `ShipAssembled` event.",
-      "type": "object",
-      "properties": {
-        "AssembleCommand": {
-          "type": "object",
-          "properties": {
-            "ship_type_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            },
-            "station_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          "required": [
-            "station_id",
-            "ship_type_id"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "AssembleCommand"
-      ]
-    },
-    {
-      "description": "Clear the caller's active ship while docked, without disassembling it\n(ADR-0037). No `ship_id` -- always targets the caller's own active\nship, like `UndockCommand`.",
-      "type": "object",
-      "properties": {
-        "DisembarkCommand": {
-          "type": "object"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "DisembarkCommand"
-      ]
-    },
-    {
-      "description": "Move the entire stack of an item between a docked ship's own cargo\nand the caller's station inventory (ADR-0034 9B). `item_id` is a\nvariant-preserving identity, so unrelated ID combinations cannot be\nrepresented on the wire.",
-      "type": "object",
-      "properties": {
-        "TransferToStationCommand": {
-          "type": "object",
-          "properties": {
-            "direction": {
-              "type": "string"
-            },
-            "item_id": {
-              "$ref": "#/$defs/ItemWire"
-            },
-            "ship_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            },
-            "station_id": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          "required": [
-            "ship_id",
-            "station_id",
-            "item_id",
-            "direction"
-          ]
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "TransferToStationCommand"
-      ]
+    "request": {
+      "$ref": "#/$defs/ClientRequest"
     }
+  },
+  "required": [
+    "protocol_magic",
+    "protocol_version",
+    "request"
   ],
   "$defs": {
-    "ItemWire": {
-      "description": "Variant-preserving Item identity used by every client/server wire surface.\n\nThe externally tagged representation is postcard-compatible and carries\nonly the identifier owned by the selected variant:\n`{\"Module\":{\"module_id\":3}}`,\n`{\"PackagedShip\":{\"ship_type_id\":7}}`, or `\"ScrapMetal\"` in JSON.",
-      "oneOf": [
-        {
-          "type": "string",
-          "enum": [
-            "ScrapMetal"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "Module": {
-              "type": "object",
-              "properties": {
-                "module_id": {
-                  "type": "integer",
-                  "format": "uint32",
-                  "minimum": 0
-                }
-              },
-              "required": [
-                "module_id"
-              ]
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "Module"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "PackagedShip": {
-              "type": "object",
-              "properties": {
-                "ship_type_id": {
-                  "type": "integer",
-                  "format": "uint32",
-                  "minimum": 0
-                }
-              },
-              "required": [
-                "ship_type_id"
-              ]
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "PackagedShip"
-          ]
-        }
-      ]
-    },
-    "NavigationTargetWire": {
-      "description": "A `{\"Ship\": N}` or `{\"Gate\": N}` navigation target for Approach,\nOrbit, and KeepAtRange (externally tagged: the variant name is the JSON\nobject's only key).",
+    "ApproachTarget": {
+      "description": "What an approaching Ship is steering toward (ADR-0015).\n\nA `Ship` target is dynamic (its position is read from the ECS each tick);\na `Gate` target is a static Jump Gate position, letting players fly back\ninto a gate's `activation_radius` to jump.",
       "oneOf": [
         {
           "type": "object",
           "properties": {
             "Ship": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
+              "$ref": "#/$defs/ShipId"
             }
           },
           "additionalProperties": false,
@@ -640,9 +44,7 @@
           "type": "object",
           "properties": {
             "Gate": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
+              "$ref": "#/$defs/JumpGateId"
             }
           },
           "additionalProperties": false,
@@ -652,7 +54,552 @@
         }
       ]
     },
-    "PosWire": {
+    "CelestialBodyId": {
+      "description": "Identifies a star, planet, or other celestial body within a Sector (ADR-0025).\nValues are globally unique across all Sectors.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "ClientRequest": {
+      "description": "The single authoritative catalog of requests an external Sector client may send.\n\nThis serialization-ready enum is shared by the client encoder, WebSocket decoder,\nand the application admission seam. Family-local command structs above remain\ninternal policy inputs; there is no second mirrored full request enum. Acting\nidentities for active-ship operations are intentionally absent and are supplied\nby the admitted server session.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "Stop",
+            "Undock",
+            "Disembark"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Move": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "$ref": "#/$defs/Position"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Move"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "LockOn": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "$ref": "#/$defs/ShipId"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "LockOn"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ActivateModule": {
+              "type": "object",
+              "properties": {
+                "module": {
+                  "$ref": "#/$defs/ModuleId"
+                },
+                "slot": {
+                  "$ref": "#/$defs/SlotKind"
+                },
+                "target": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ShipId"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "module",
+                "slot"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "ActivateModule"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "DeactivateModule": {
+              "type": "object",
+              "properties": {
+                "module": {
+                  "$ref": "#/$defs/ModuleId"
+                },
+                "slot": {
+                  "$ref": "#/$defs/SlotKind"
+                }
+              },
+              "required": [
+                "module",
+                "slot"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "DeactivateModule"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Attack": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "$ref": "#/$defs/ShipId"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Attack"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Jump": {
+              "type": "object",
+              "properties": {
+                "gate": {
+                  "$ref": "#/$defs/JumpGateId"
+                }
+              },
+              "required": [
+                "gate"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Jump"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Approach": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "$ref": "#/$defs/ApproachTarget"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Approach"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Warp": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "$ref": "#/$defs/WarpTarget"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Warp"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Orbit": {
+              "type": "object",
+              "properties": {
+                "radius": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "format": "double"
+                },
+                "target": {
+                  "$ref": "#/$defs/ApproachTarget"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Orbit"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "KeepAtRange": {
+              "type": "object",
+              "properties": {
+                "range": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "format": "double"
+                },
+                "target": {
+                  "$ref": "#/$defs/ApproachTarget"
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "KeepAtRange"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "FitModule": {
+              "type": "object",
+              "properties": {
+                "module": {
+                  "$ref": "#/$defs/ModuleId"
+                },
+                "ship": {
+                  "$ref": "#/$defs/ShipId"
+                },
+                "slot": {
+                  "$ref": "#/$defs/SlotKind"
+                }
+              },
+              "required": [
+                "ship",
+                "module",
+                "slot"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "FitModule"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "UnfitModule": {
+              "type": "object",
+              "properties": {
+                "module": {
+                  "$ref": "#/$defs/ModuleId"
+                },
+                "ship": {
+                  "$ref": "#/$defs/ShipId"
+                },
+                "slot": {
+                  "$ref": "#/$defs/SlotKind"
+                }
+              },
+              "required": [
+                "ship",
+                "module",
+                "slot"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "UnfitModule"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ReorderFittedModule": {
+              "type": "object",
+              "properties": {
+                "from_index": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "ship": {
+                  "$ref": "#/$defs/ShipId"
+                },
+                "slot": {
+                  "$ref": "#/$defs/SlotKind"
+                },
+                "to_index": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "ship",
+                "slot",
+                "from_index",
+                "to_index"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "ReorderFittedModule"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Dock": {
+              "type": "object",
+              "properties": {
+                "station": {
+                  "$ref": "#/$defs/StationId"
+                }
+              },
+              "required": [
+                "station"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Dock"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "BuildPackagedShip": {
+              "type": "object",
+              "properties": {
+                "ship": {
+                  "$ref": "#/$defs/ShipId"
+                },
+                "ship_type": {
+                  "$ref": "#/$defs/ShipTypeId"
+                },
+                "station": {
+                  "$ref": "#/$defs/StationId"
+                }
+              },
+              "required": [
+                "ship",
+                "station",
+                "ship_type"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "BuildPackagedShip"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "DisassembleShip": {
+              "type": "object",
+              "properties": {
+                "ship": {
+                  "$ref": "#/$defs/ShipId"
+                },
+                "station": {
+                  "$ref": "#/$defs/StationId"
+                }
+              },
+              "required": [
+                "ship",
+                "station"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "DisassembleShip"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "SelectActiveShip": {
+              "type": "object",
+              "properties": {
+                "ship": {
+                  "$ref": "#/$defs/ShipId"
+                }
+              },
+              "required": [
+                "ship"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "SelectActiveShip"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Assemble": {
+              "type": "object",
+              "properties": {
+                "ship_type": {
+                  "$ref": "#/$defs/ShipTypeId"
+                },
+                "station": {
+                  "$ref": "#/$defs/StationId"
+                }
+              },
+              "required": [
+                "station",
+                "ship_type"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Assemble"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "TransferCargo": {
+              "type": "object",
+              "properties": {
+                "direction": {
+                  "$ref": "#/$defs/TransferDirection"
+                },
+                "item": {
+                  "$ref": "#/$defs/ItemId"
+                },
+                "ship": {
+                  "$ref": "#/$defs/ShipId"
+                },
+                "station": {
+                  "$ref": "#/$defs/StationId"
+                }
+              },
+              "required": [
+                "ship",
+                "station",
+                "item",
+                "direction"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "TransferCargo"
+          ]
+        }
+      ]
+    },
+    "EntityId": {
+      "description": "Globally unique, non-reusable identifier for any entity in the world.\n\nLayout: `[node_id: 8 bits | counter: 56 bits]`\n\n`Ord` is the canonical id order: because `node_id` occupies the high bits,\ncomparing the packed `u64` orders by `node_id` first, then `counter`. Use it\nfor any determinism need (e.g. byte-stable snapshots, INV-002).",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "ItemId": {
+      "description": "Canonical identity for every inventory and Market item (ADR-0034).\n\nThe variant owns the only identifier that is valid for that item kind, so\nimpossible combinations such as a Module carrying a ShipTypeId cannot be\nrepresented in domain code.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "ScrapMetal"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Module": {
+              "$ref": "#/$defs/ModuleId"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "Module"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "PackagedShip": {
+              "$ref": "#/$defs/ShipTypeId"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "PackagedShip"
+          ]
+        }
+      ]
+    },
+    "JumpGateId": {
+      "description": "Identifies a Jump Gate (a fixed navigation point within a Sector).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "ModuleId": {
+      "description": "ID identifying a module's kind.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "Position": {
+      "description": "3-D coordinates of an entity in its current simulation frame.\n\nComponents are `f64` so anchor-relative motion does not reintroduce the\nprecision loss that absolute coordinates were moved to `AbsolutePosition`\nto avoid (ADR-0044).",
       "type": "object",
       "properties": {
         "x": {
@@ -674,16 +621,54 @@
         "z"
       ]
     },
-    "WarpTargetWire": {
-      "description": "A `{\"Gate\": N}` or `{\"Body\": N}` warp destination, as sent by\n`WarpCommand` (externally tagged: the variant name is the JSON object's\nonly key).",
+    "ShipId": {
+      "description": "Typed wrapper that distinguishes a Ship entity from any future entity type.",
+      "$ref": "#/$defs/EntityId"
+    },
+    "ShipTypeId": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "SlotKind": {
+      "description": "The kind of an equipment slot.",
+      "type": "string",
+      "enum": [
+        "High",
+        "Mid",
+        "Low",
+        "Rig"
+      ]
+    },
+    "StationId": {
+      "description": "Identifies an NPC-provided station within a Sector (ADR-0034 9B foundation).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "TransferDirection": {
+      "description": "Which way `TransferToStationCommand` moves the stack.",
+      "oneOf": [
+        {
+          "description": "Ship cargo -> station inventory (the original, one-way behavior).",
+          "type": "string",
+          "const": "ToStation"
+        },
+        {
+          "description": "Station inventory -> ship cargo.",
+          "type": "string",
+          "const": "ToShip"
+        }
+      ]
+    },
+    "WarpTarget": {
+      "description": "The destination of a `WarpCommand` (ADR-0025).",
       "oneOf": [
         {
           "type": "object",
           "properties": {
             "Gate": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
+              "$ref": "#/$defs/JumpGateId"
             }
           },
           "additionalProperties": false,
@@ -695,9 +680,7 @@
           "type": "object",
           "properties": {
             "Body": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
+              "$ref": "#/$defs/CelestialBodyId"
             }
           },
           "additionalProperties": false,

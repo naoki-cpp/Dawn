@@ -19,7 +19,7 @@
 //! production WebSocket transport, shared by both binaries (previously
 //! duplicated). Every message travels as a postcard-encoded binary frame
 //! (ADR-0042), using the `dawn-wire` schema (`ClientMessage`/`ServerMessage`,
-//! `domain_event_to_event_wire`, `client_command_from_wire`) directly --
+//! `domain_event_to_event_wire`, `ClientRequest`) directly --
 //! this crate no longer re-exports it under its own `protocol` module
 //! (deleted: it was 28 lines of `pub use` and 900 lines of tests that
 //! belonged in `dawn-wire`, where they now live).
@@ -43,5 +43,5 @@ pub mod client_connection;
 pub mod ws_server;
 
 pub use client_connection::{
-    ClientCommand, ClientConnection, ConnectionError, InProcessClientEndpoint, InProcessConnection,
+    ClientConnection, ClientRequest, ConnectionError, InProcessClientEndpoint, InProcessConnection,
 };

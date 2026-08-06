@@ -12,8 +12,24 @@ pub(crate) use single::run_phase4_server;
 
 use aoi_delivery::AoiDelivery;
 use dawn_core::{NodeId, SectorBounds, SectorId, ShipId};
-use dawn_sector::node::SimulationNode;
+use dawn_sector::node::{ClientRequestAdmissionError, SimulationNode};
 use dawn_sector::{galaxy::Galaxy, game_data::GameDataCatalog};
+
+pub(crate) fn client_request_rejection(
+    error: ClientRequestAdmissionError,
+) -> dawn_wire::ClientRequestRejectionWire {
+    match error {
+        ClientRequestAdmissionError::Validation(error) => {
+            dawn_wire::ClientRequestRejectionWire::validation(error)
+        }
+        ClientRequestAdmissionError::NoActiveShip => {
+            dawn_wire::ClientRequestRejectionWire::no_active_ship()
+        }
+        ClientRequestAdmissionError::UnsupportedRequest { request } => {
+            dawn_wire::ClientRequestRejectionWire::unsupported_request(request)
+        }
+    }
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -214,9 +230,7 @@ pub(crate) fn build_serve_node(
 mod serve_pipeline_tests {
     use super::*;
     use dawn_actor::{ClientConnection, InProcessConnection};
-    use dawn_core::{
-        ClientCommand, DomainEvent, MoveCommand, NodeId, Position, SectorBounds, SectorId,
-    };
+    use dawn_core::{ClientRequest, DomainEvent, NodeId, Position, SectorBounds, SectorId};
     use dawn_event_store::store::EventStore as _;
     use dawn_sector::node;
 
@@ -260,17 +274,18 @@ mod serve_pipeline_tests {
         let (mut server, client) = InProcessConnection::pair();
 
         client
-            .command_tx
-            .send(ClientCommand::Move(MoveCommand {
-                target_position: Position::new(1_000.0, 0.0, 0.0),
-            }))
+            .request_tx
+            .send(ClientRequest::Move {
+                target: Position::new(1_000.0, 0.0, 0.0),
+            })
             .expect("server connection is alive");
 
         let conn: &mut dyn ClientConnection = &mut server;
         let mut lock_commands = Vec::new();
         let before = node.total_event_count() as u64;
-        while let Some(cmd) = conn.try_recv_command() {
-            node.apply_client_command(player_id, cmd, &mut lock_commands);
+        while let Some(request) = conn.try_recv_request() {
+            node.apply_client_request(player_id, request, &mut lock_commands)
+                .expect("request admitted");
         }
 
         node.tick_with_lock_commands(&lock_commands);
@@ -301,7 +316,7 @@ mod serve_pipeline_tests {
     /// A player with no active ship (ADR-0037: MoveCommand no longer names a
     /// ship, so there is no longer a wire-representable way to move a ship
     /// the caller doesn't fly) gets no `VelocityChanged` back: the command is
-    /// silently dropped by `apply_client_command`.
+    /// rejected by the structured admission seam.
     #[test]
     fn move_with_no_active_ship_produces_no_event_over_connection() {
         let bounds = SectorBounds::centered(SectorBounds::DEFAULT_HALF);
@@ -313,17 +328,20 @@ mod serve_pipeline_tests {
 
         let (mut server, client) = InProcessConnection::pair();
         client
-            .command_tx
-            .send(ClientCommand::Move(MoveCommand {
-                target_position: Position::new(1_000.0, 0.0, 0.0),
-            }))
+            .request_tx
+            .send(ClientRequest::Move {
+                target: Position::new(1_000.0, 0.0, 0.0),
+            })
             .expect("server connection is alive");
 
         let conn: &mut dyn ClientConnection = &mut server;
         let mut lock_commands = Vec::new();
         let before = node.total_event_count() as u64;
-        while let Some(cmd) = conn.try_recv_command() {
-            node.apply_client_command(player_id, cmd, &mut lock_commands);
+        while let Some(request) = conn.try_recv_request() {
+            assert!(matches!(
+                node.apply_client_request(player_id, request, &mut lock_commands),
+                Err(dawn_sector::node::ClientRequestAdmissionError::NoActiveShip)
+            ));
         }
         node.tick_with_lock_commands(&lock_commands);
 

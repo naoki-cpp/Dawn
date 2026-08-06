@@ -595,7 +595,7 @@
   ],
   "$defs": {
     "AbsPosWire": {
-      "description": "Absolute (Sector-frame, f64) position (ADR-0029). Distinct from\n[`crate::PosWire`] (f64), which carries client-authored command targets\nrather than server-authoritative absolute coordinates.",
+      "description": "Absolute (Sector-frame, f64) position (ADR-0029). Distinct from\n[`dawn_core::Position`] (f64), which carries client-authored command targets\nrather than server-authoritative absolute coordinates.",
       "type": "object",
       "properties": {
         "x": {
@@ -618,6 +618,7 @@
       ]
     },
     "VelWire": {
+      "description": "Velocity components carried by server-authoritative wire messages.",
       "type": "object",
       "properties": {
         "dx": {

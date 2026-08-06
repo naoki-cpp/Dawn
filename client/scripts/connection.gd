@@ -111,86 +111,78 @@ func _process(delta: float) -> void:
 ## ADR-0037: flight/steering/module/Undock commands carry no ship_id — the
 ## server always resolves them against the caller's active ship, so there is
 ## no wire-representable way to name a ship the player isn't currently
-## flying. Station inventory-management commands (Fit/Unfit/Dock/
-## BuildPackagedShip/DisassembleShip) still carry an explicit ship_id.
+## flying. Owned-docked-ship commands (Fit/Unfit/Reorder/BuildPackagedShip/
+## DisassembleShip/TransferCargo) still carry an explicit ship_id.
 ##
-## ADR-0041/ADR-0042: every send_* function below builds its wire message
-## via `ClientCommand` (a `dawn-wire`-backed GDExtension class, globally
-## registered like `PlayerLoadout`/`ModuleRow`/`ItemRow`/`ItemIdentity` -- no
-## preload needed), instead of hand-building a matching Dictionary +
-## JSON.stringify. Commands with sentinel/tagged-target semantics
-## (ADR-0031/ADR-0035) call a dedicated `_cmd.*_command()` method; everything
-## else goes through `_cmd.build(type_tag, fields)`, which validates the field
-## Dictionary by deserializing it into `ClientCommandWire` itself. Every method
-## returns postcard-encoded bytes already wrapped in the
-## `ClientMessage::Command` envelope (ADR-0042); `_send_bytes` only applies the
-## welcomed guard.
+## ADR-0041/ADR-0042/#273: every Sector send_* function constructs the one
+## typed Rust `ClientRequest` authority through a dedicated GDExtension method.
+## No Sector request is assembled through a Dictionary/JSON round-trip, and
+## acting active-ship identity is supplied only by the admitted server session.
+## Market remains a separate schema-driven request envelope.
 func send_move_command(target: Vector3) -> void:
-	_send_bytes(_cmd.move_command(target.x, target.y, target.z))
+	_send_request(_cmd.move_command(target.x, target.y, target.z))
 
 func send_lock_on_command(target_id: int) -> void:
-	_send_bytes(_cmd.build("LockOnCommand", {"target_id": target_id}))
+	_send_request(_cmd.lock_on_command(target_id))
 
 ## Active モジュールをオンにする。p_target_ship_id は Weapon/Tackle など
 ## ターゲットを要求する種別のときだけ指定する（-1 = 指定なし、ADR-0035）。
 func send_activate_module(p_module_id: int, p_slot: String, p_target_ship_id: int = -1) -> void:
-	_send_bytes(_cmd.activate_module_command(p_module_id, p_slot, p_target_ship_id))
+	_send_request(_cmd.activate_module_command(p_module_id, p_slot, p_target_ship_id))
 
 ## Active モジュールをオフにする。
 func send_deactivate_module(p_module_id: int, p_slot: String) -> void:
-	_send_bytes(_cmd.build("DeactivateModuleCommand", {"module_id": p_module_id, "slot": p_slot}))
+	_send_request(_cmd.deactivate_module_command(p_module_id, p_slot))
 
 ## [S キー] 減速停止コマンド。サーバーが thrust を逆方向に掛けて速度ゼロまで減速する。
 func send_stop_command() -> void:
-	_send_bytes(_cmd.build("StopCommand", {}))
+	_send_request(_cmd.stop_command())
 
 ## ジャンプゲート経由の Sector 移動を要求する（ADR-0009）。
 func send_jump_command(p_gate_id: int) -> void:
-	_send_bytes(_cmd.build("JumpCommand", {"gate_id": p_gate_id}))
+	_send_request(_cmd.jump_command(p_gate_id))
 
 ## [A キー] アプローチ（半自動操船）。選択した船へ自動接近する（ADR-0015）。
 func send_approach_command(p_target_id: int) -> void:
-	_send_bytes(_cmd.approach_command(p_target_id))
+	_send_request(_cmd.approach_command(p_target_id))
 
 ## [A キー] ジャンプゲートへアプローチ（半自動操船）。射程内まで自動接近する（ADR-0015）。
 func send_approach_gate_command(p_gate_id: int) -> void:
-	_send_bytes(_cmd.approach_gate_command(p_gate_id))
+	_send_request(_cmd.approach_gate_command(p_gate_id))
 
 ## [W key] Warp (short-range Fold) to a Jump Gate (ADR-0022/ADR-0025).
 func send_warp_command(p_gate_id: int) -> void:
-	_send_bytes(_cmd.warp_command(p_gate_id))
+	_send_request(_cmd.warp_command(p_gate_id))
 
 ## [W key] Warp (short-range Fold) to a celestial body (ADR-0025).
 func send_warp_to_body_command(p_body_id: int) -> void:
-	_send_bytes(_cmd.warp_to_body_command(p_body_id))
+	_send_request(_cmd.warp_to_body_command(p_body_id))
 
 ## [O key] Orbit a selected ship at its weapon range (server-side default, ADR-0031).
 func send_orbit_command(p_target_id: int) -> void:
-	_send_bytes(_cmd.orbit_command(p_target_id, -1.0))
+	_send_request(_cmd.orbit_command(p_target_id, -1.0))
 
 ## [O key] Orbit a selected Jump Gate at its weapon range (server-side default, ADR-0031).
 func send_orbit_gate_command(p_gate_id: int) -> void:
-	_send_bytes(_cmd.orbit_gate_command(p_gate_id, -1.0))
+	_send_request(_cmd.orbit_gate_command(p_gate_id, -1.0))
 
 ## [K key] Hold at least p_range_m metres from a selected ship; p_range_m <= 0
 ## falls back to the server-side default (weapon range, ADR-0031).
 func send_keep_at_range_command(p_target_id: int, p_range_m: float = -1.0) -> void:
-	_send_bytes(_cmd.keep_at_range_command(p_target_id, p_range_m))
+	_send_request(_cmd.keep_at_range_command(p_target_id, p_range_m))
 
 ## [K key] Hold at least p_range_m metres from a selected Jump Gate; p_range_m
 ## <= 0 falls back to the server-side default (weapon range, ADR-0031).
 func send_keep_at_range_gate_command(p_gate_id: int, p_range_m: float = -1.0) -> void:
-	_send_bytes(_cmd.keep_at_range_gate_command(p_gate_id, p_range_m))
+	_send_request(_cmd.keep_at_range_gate_command(p_gate_id, p_range_m))
 
 ## [Inventory panel] Move a module from inventory into a fitting slot (ADR-0032).
 func send_fit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
-	_send_bytes(_cmd.build("FitModuleCommand", {
-		"ship_id": p_ship_id, "module_id": p_module_id, "slot": p_slot}))
+	_send_request(_cmd.fit_module_command(p_ship_id, p_module_id, p_slot))
 
 ## [Inventory panel] Move a fitted module back into inventory (ADR-0032).
 func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String) -> void:
-	_send_bytes(_cmd.build("UnfitModuleCommand", {
-		"ship_id": p_ship_id, "module_id": p_module_id, "slot": p_slot}))
+	_send_request(_cmd.unfit_module_command(p_ship_id, p_module_id, p_slot))
 
 ## [Inventory panel] Reorder two fitted modules within the same slot kind
 ## (drag-and-drop reorder in the FITTED column). Persisted server-side since
@@ -199,38 +191,34 @@ func send_unfit_module_command(p_ship_id: int, p_module_id: int, p_slot: String)
 func send_reorder_fitted_module_command(
 	p_ship_id: int, p_slot: String, p_from_index: int, p_to_index: int
 ) -> void:
-	_send_bytes(_cmd.build("ReorderFittedModuleCommand", {
-		"ship_id": p_ship_id, "slot": p_slot,
-		"from_index": p_from_index, "to_index": p_to_index}))
+	_send_request(_cmd.reorder_fitted_module_command(
+		p_ship_id, p_slot, p_from_index, p_to_index))
 
 func send_dock_command(p_station_id: int) -> void:
-	_send_bytes(_cmd.build("DockCommand", {"station_id": p_station_id}))
+	_send_request(_cmd.dock_command(p_station_id))
 
 func send_undock_command() -> void:
-	_send_bytes(_cmd.build("UndockCommand", {}))
+	_send_request(_cmd.undock_command())
 
 func send_build_packaged_ship_command(p_ship_id: int, p_station_id: int, p_ship_type_id: int) -> void:
-	_send_bytes(_cmd.build("BuildPackagedShipCommand", {
-		"ship_id": p_ship_id, "station_id": p_station_id, "ship_type_id": p_ship_type_id}))
+	_send_request(_cmd.build_packaged_ship_command(p_ship_id, p_station_id, p_ship_type_id))
 
 func send_disassemble_ship_command(p_ship_id: int, p_station_id: int) -> void:
-	_send_bytes(_cmd.build("DisassembleShipCommand", {
-		"ship_id": p_ship_id, "station_id": p_station_id}))
+	_send_request(_cmd.disassemble_ship_command(p_ship_id, p_station_id))
 
 ## Convert a station-inventory Packaged Ship item into a new live docked ship
 ## (ADR-0034 9B, ADR-0037). No ship_id -- the ship doesn't exist yet.
 func send_assemble_command(p_station_id: int, p_ship_type_id: int) -> void:
-	_send_bytes(_cmd.build("AssembleCommand", {
-		"station_id": p_station_id, "ship_type_id": p_ship_type_id}))
+	_send_request(_cmd.assemble_command(p_station_id, p_ship_type_id))
 
 ## Leave the active ship while docked, without disassembling it (ADR-0037).
 func send_disembark_command() -> void:
-	_send_bytes(_cmd.build("DisembarkCommand", {}))
+	_send_request(_cmd.disembark_command())
 
 ## Make an owned, docked ship the caller's active ship (ADR-0037). This is
 ## how a player re-boards after Disembark, or switches between owned ships.
 func send_select_active_ship_command(p_ship_id: int) -> void:
-	_send_bytes(_cmd.build("SelectActiveShipCommand", {"ship_id": p_ship_id}))
+	_send_request(_cmd.select_active_ship_command(p_ship_id))
 
 ## Move the entire stack of one canonical Item identity out of a docked ship's
 ## cargo into the caller's station inventory (ADR-0034 9B).
@@ -239,7 +227,7 @@ func send_transfer_to_station_command(
 	p_station_id: int,
 	p_item_id: ItemIdentity
 ) -> void:
-	_send_bytes(_cmd.transfer_to_station_command(p_ship_id, p_station_id, p_item_id))
+	_send_request(_cmd.transfer_to_station_command(p_ship_id, p_station_id, p_item_id))
 
 ## The reverse of send_transfer_to_station_command: move the entire stack from
 ## station inventory back into the docked ship's cargo.
@@ -248,7 +236,7 @@ func send_transfer_from_station_command(
 	p_station_id: int,
 	p_item_id: ItemIdentity
 ) -> void:
-	_send_bytes(_cmd.transfer_from_station_command(p_ship_id, p_station_id, p_item_id))
+	_send_request(_cmd.transfer_from_station_command(p_ship_id, p_station_id, p_item_id))
 
 ## Market requests use a separate wire envelope from Sector commands
 ## (ADR-0034). The server answers each request with MarketSnapshot.
@@ -270,15 +258,27 @@ func send_market_cancel_order_command(p_order_id: int) -> void:
 		"order_id": p_order_id,
 	}))
 
+
+func _accept_client_request_rejected(code: String, message: String) -> void:
+	push_warning("[Connection] client request rejected [%s]: %s" % [code, message])
+
 func is_connected_to_server() -> bool:
 	return _connected and _welcomed
 
 # ── 内部処理 ──────────────────────────────────────────────────────────────────
 
 ## welcomed ガードを一元化する send_* 系の共通ヘルパー。bytes は
-## _cmd.*_command()/_cmd.build() が返す、すでに `ClientMessage::Command`
+## _cmd.*_command() が返す、すでに `ClientMessage::Command`
 ## envelope 済みの postcard バイト列（ADR-0042）。Hello（welcomed 前に送る
 ## 必要がある）はこのガードの対象外なので _send_hello は使わない。
+func _send_request(result: Dictionary) -> void:
+	if not bool(result.get("ok", false)):
+		var code := str(result.get("error_code", "request_build_failed"))
+		var message := str(result.get("error_message", "unable to build client request"))
+		_accept_client_request_rejected(code, message)
+		return
+	_send_bytes(result.get("bytes", PackedByteArray()))
+
 func _send_bytes(bytes: PackedByteArray) -> void:
 	if not _welcomed or bytes.is_empty():
 		return

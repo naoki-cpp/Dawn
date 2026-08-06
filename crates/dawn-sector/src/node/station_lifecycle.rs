@@ -79,7 +79,7 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// Dock the caller's active ship (ADR-0037: `ship_id` is always the
-    /// caller's resolved active ship — `apply_client_command` never calls
+    /// caller's resolved active ship — `apply_client_request` never calls
     /// this without one).
     pub(super) fn dock_owned(
         &mut self,

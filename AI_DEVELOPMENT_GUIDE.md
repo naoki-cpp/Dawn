@@ -152,17 +152,17 @@ when deleting a deprecated one — they cover every pipeline touchpoint.
 
 ### Wire protocol (client<->server)
 
-`EventWire` and `ClientCommandWire` in `crates/dawn-wire/src/` (re-exported
-from `dawn_actor::protocol`) are the schema-of-record for the wire format and
+`EventWire` and the re-exported `ClientRequest` authority in
+`crates/dawn-wire/src/` are the schema-of-record for the wire format and
 are generated into `docs/architecture/wire-protocol.schema.json` /
 `wire-protocol-commands.schema.json` (see `docs/architecture/wire-protocol.md`).
 After changing either enum (or a type either references), regenerate with
 `cargo run -p dawn-actor --example gen_wire_schema` and commit both updated
 `.schema.json` files in the same PR — `cargo test -p dawn-wire`
 (`wire_schema_doc_is_up_to_date`) fails
-otherwise (`wire_schema_doc_is_up_to_date`). Never hand-edit the `.schema.json`
-files; never add a new domain type to `dawn-core` just to reuse it here
-(FBD-002 keeps `dawn-core` free of the `schemars` dependency).
+otherwise (`wire_schema_doc_is_up_to_date`). Never hand-edit the `.schema.json` files. `dawn-core` keeps `schemars`
+optional behind its `schema` feature; `dawn-wire` enables that feature only to
+generate the versioned Sector envelope schema containing the shared `ClientRequest` authority.
 
 Since ADR-0042, the actual runtime transport for `Welcome`/`Redirect`/
 `Event`/`Hello`/`Command`/`InitialState`/`PlayerLoadout`/`AoiEnter`/
@@ -183,7 +183,7 @@ workspace DAG and relevant ADR first.
   ADR-0046).
 - `dawn-client-gdext`: GDExtension binding (cdylib) exposing `dawn-client-core`
   to the Godot client. Thin type-conversion adapter only (ADR-0040, ADR-0046).
-- `dawn-wire`: client<->server wire schema (`ClientCommandWire`/`EventWire`,
+- `dawn-wire`: client<->server wire schema (`ClientRequest`/`EventWire`,
   the `ServerMessage`/`ClientMessage` binary envelope). Depends only on
   `dawn-core` + serde + postcard -- no transport/runtime dependency, so
   `dawn-client-gdext` can depend on it directly (ADR-0041, ADR-0042).

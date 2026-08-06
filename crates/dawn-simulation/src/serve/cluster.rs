@@ -2,8 +2,8 @@
 #![allow(clippy::module_name_repetitions)]
 
 use super::{
-    build_serve_node, load_serve_dependencies, market::MarketRuntime, runtime, AoiDelivery,
-    AOI_CELL_SIZE, P4_TICK_MS,
+    build_serve_node, client_request_rejection, load_serve_dependencies, market::MarketRuntime,
+    runtime, AoiDelivery, AOI_CELL_SIZE, P4_TICK_MS,
 };
 use crate::{cluster, ws_server};
 use dawn_core::{DomainEvent, NodeId, PlayerId, Position, SectorBounds, SectorId, ShipId};
@@ -211,15 +211,17 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                     market.handle_cluster(sess.player_id, market_command, sector, &mut nodes);
                 sess.send_message(&ServerMessage::MarketSnapshot(snapshot));
             }
-            while let Some(cmd) = sess.try_recv_command() {
-                let followup = nodes[sector].apply_client_command(
+            while let Some(request) = sess.try_recv_request() {
+                let followup = nodes[sector].apply_client_request(
                     sess.player_id,
-                    cmd,
+                    request,
                     &mut lock_commands[sector],
                 );
                 let (ship_id, j) = match followup {
-                    Some(ClientCommandFollowup::Jump { ship_id, command }) => (ship_id, command),
-                    Some(followup @ ClientCommandFollowup::RefreshPlayerLoadout { .. }) => {
+                    Ok(Some(ClientCommandFollowup::Jump { ship_id, command })) => {
+                        (ship_id, command)
+                    }
+                    Ok(Some(followup @ ClientCommandFollowup::RefreshPlayerLoadout { .. })) => {
                         if let Some(player_id) = followup.loadout_player_id() {
                             if let Some(loadout) =
                                 nodes[sector].build_player_loadout_json_for_player(player_id)
@@ -229,7 +231,13 @@ pub(crate) async fn run_cluster_server(ship_count: usize, pop_cap: usize) {
                         }
                         continue;
                     }
-                    None => continue,
+                    Ok(None) => continue,
+                    Err(error) => {
+                        sess.send_message(&ServerMessage::ClientRequestRejected(
+                            client_request_rejection(error),
+                        ));
+                        continue;
+                    }
                 };
                 if ship_id != sess.ship_id {
                     continue;

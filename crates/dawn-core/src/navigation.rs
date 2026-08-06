@@ -6,6 +6,8 @@
 
 use crate::position::{AbsolutePosition, Position};
 use crate::sector::SectorId;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // -- Shared navigation rules -----------------------------------------------
@@ -18,6 +20,7 @@ pub const MIN_WARP_DISTANCE: f64 = 3_000.0;
 
 /// Identifies a star, planet, or other celestial body within a Sector (ADR-0025).
 /// Values are globally unique across all Sectors.
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CelestialBodyId(pub u32);
 
@@ -67,6 +70,7 @@ impl From<CelestialBodyId> for AnchorId {
 // -- WarpTarget --------------------------------------------------------------
 
 /// The destination of a `WarpCommand` (ADR-0025).
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WarpTarget {
     Gate(JumpGateId),
@@ -90,6 +94,7 @@ pub struct StarSystemDef {
 // -- JumpGateId --------------------------------------------------------------
 
 /// Identifies a Jump Gate (a fixed navigation point within a Sector).
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct JumpGateId(pub u32);
 
@@ -138,6 +143,7 @@ impl JumpGateDef {
 // -- StationId ---------------------------------------------------------------
 
 /// Identifies an NPC-provided station within a Sector (ADR-0034 9B foundation).
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StationId(pub u32);
 

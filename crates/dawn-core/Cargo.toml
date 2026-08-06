@@ -8,6 +8,11 @@ publish.workspace     = true
 
 # dawn-core must depend on nothing except serialization utilities.
 # Any addition here requires an ADR. See CLAUDE.md FBD-002.
+[features]
+default = []
+schema = ["dep:schemars"]
+
 [dependencies]
 serde     = { workspace = true }
 thiserror = { workspace = true }
+schemars  = { workspace = true, optional = true }

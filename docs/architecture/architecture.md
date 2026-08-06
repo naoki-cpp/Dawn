@@ -79,7 +79,7 @@ See [ADR-0003](../adr/ADR-0003-local-first-development.md) / [ADR-0027](../adr/A
 | `dawn-core` | library | Pure domain model and stateless simulation policies (including the shared one-tick movement policy). Zero network/I/O dependencies |
 | `dawn-client-core` | library | Godot-independent client-side domain model (loadout, wire row types, pure WorldSession state, shared ship-motion prediction/dead-reckoning track). Depends only on `dawn-core` (ADR-0039, ADR-0043, ADR-0045, ADR-0046) |
 | `dawn-client-gdext` | library (cdylib) | GDExtension binding exposing `dawn-client-core` to the Godot client. Thin type-conversion adapter only (ADR-0040, ADR-0046) |
-| `dawn-wire` | library | Client<->server wire schema (`ClientCommandWire`/`EventWire`, `ServerMessage`/`ClientMessage` binary envelope). Depends only on `dawn-core` + serde + postcard -- no transport/runtime dependency (ADR-0041, ADR-0042) |
+| `dawn-wire` | library | Client<->server wire schema (`ClientRequest`/`EventWire`, `ServerMessage`/`ClientMessage` binary envelope). `ClientRequest` is the single typed Sector request authority re-exported from `dawn-core`; depends only on `dawn-core` + serde + postcard -- no transport/runtime dependency (ADR-0041, ADR-0042) |
 | `dawn-ecs` | library | ECS World wrapper. Component / System definitions |
 | `dawn-event-store` | library | Persistence/compaction of the two-tier Event Log (hot log + cold archive) (ADR-0017) |
 | `dawn-consensus` | library | Raft implementation (leader election, log replication, RaftActor; ADR-0014) |

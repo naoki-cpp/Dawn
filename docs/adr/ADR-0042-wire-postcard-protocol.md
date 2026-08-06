@@ -299,6 +299,24 @@ ADR-0042のワイヤ移行はこれで完了：クライアント↔サーバー
 postcardバイナリの`ServerMessage`/`ClientMessage`エンベロープ経由になり、
 ad-hoc JSON textフレーム経路（`send_raw`）は撤去された。
 
+### 2026-08-06 amendment: typed ClientRequest authority (issue #273)
+
+The public API now carries `ClientMessage::Command(ClientRequest)`, while the
+postcard representation wraps Sector requests in a versioned envelope. Outer
+enum index 1, formerly used by `ClientCommandWire`, is permanently reserved;
+the new command uses a different index and includes the `DAWN` protocol magic
+plus Sector request version 1. This prevents old positional postcard payloads
+from being accepted merely because variant ordinals or fields happen to align.
+Legacy or unknown versions receive a structured `UnsupportedProtocol`
+rejection.
+
+`ClientCommandWire`, `client_command_from_wire`, the parallel full
+`ClientCommand` catalog, and the later family dispatch mirrors were removed.
+JSON Schema is generated from the versioned envelope containing the same typed
+`ClientRequest` authority. Decode/value validation and admitted-session identity
+resolution report structured rejection reasons before family-local gameplay
+policy is called.
+
 ### 命名規則の是正・死んだJSON経路の削除（2026-07-11 完了）
 
 段階2c完了直後の`/architecture-review`スキルで、`dawn-wire`のスキーマ型が
