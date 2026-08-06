@@ -14,17 +14,21 @@
 //! - Including `FittingSnapshot` in an Event allows full restoration on Event Replay (INV-002).
 
 use crate::events::RepairLayer;
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // ── ID ────────────────────────────────────────────────────────────────────────
 
 /// ID identifying a module's kind.
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ModuleId(pub u32);
 
 // ── Slot ──────────────────────────────────────────────────────────────────────
 
 /// The kind of an equipment slot.
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SlotKind {
     High,

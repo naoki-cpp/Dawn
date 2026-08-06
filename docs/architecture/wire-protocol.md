@@ -1,209 +1,166 @@
 ---
 scope    : Client<->server wire format over the WebSocket connection. What an
-           external (non-Godot) client would need to talk to a Dawn server.
+           external (non-Godot) client needs to talk to a Dawn server.
 audience : AI Agent / Human Developer
-update   : Both halves are generated from the types; see "Keeping this in sync".
+update   : Schema files are generated from Rust types; see "Keeping this in sync".
 related  : ADR-0005 (ClientConnection), ADR-0041 (dawn-wire), ADR-0042
-           (postcard binary envelope), docs/architecture/event-catalog.md,
-           crates/dawn-wire/src/lib.rs
+           (postcard binary envelope), issue #273,
+           docs/architecture/event-catalog.md, crates/dawn-wire/src/lib.rs
 ---
 
 # Wire Protocol
 
-Transport is a single WebSocket connection per client. Since ADR-0042 (all
-stages complete), every message -- `Hello`/`Welcome`/`Redirect`/`DomainEvent`/
-`ClientCommand`/`InitialState`/`PlayerLoadout`/`AoiEnter`/`AoiLeave`/
-`PositionSnap`/`MotionCorrection` -- travels as a **binary** frame, postcard-encoded via the
-`ClientMessage`/`ServerMessage` envelope in `dawn-wire` (one WebSocket frame
-always carries exactly one message; no length-prefix framing is needed on
-top). There is no more ad-hoc JSON text frame path.
+Dawn uses one WebSocket connection per client. Every message is one binary
+WebSocket frame containing one postcard-encoded `ClientMessage` or
+`ServerMessage`; WebSocket framing provides message boundaries, so there is no
+additional length prefix and no JSON text transport path.
 
-Market requests and snapshots use the same binary envelope but remain a
-separate message family: `ClientMessage::Market(MarketCommandWire)` and
-`ServerMessage::MarketSnapshot(MarketSnapshotWire)`. They do not enter the
-Sector `ClientCommandWire` stream. This preserves the ADR-0034 boundary where
-the Market owns order matching and Currency, while `dawn-simulation` applies
-only the one-sided cargo bridge commands to the owning `SimulationNode`.
+```text
+Client -> server
+  ClientMessage::Hello(HelloMessage)
+  ClientMessage::Command(ClientRequest)  # encoded as versioned Sector envelope
+  ClientMessage::Market(MarketCommandWire)
 
-`ServerMessage::MotionCorrection` (ADR-0043) is owner-only normal-flight
-authority for the local Rust predictor. It carries the ship's absolute
-position, current velocity, and server tick. Warp arrival continues to use
-`PositionSnap`; remote ships do not receive this owner-only correction.
+Server -> client
+  ServerMessage::{Welcome, Redirect, Event, InitialState, PlayerLoadout,
+                  AoiEnter, AoiLeave, PositionSnap, MotionCorrection,
+                  MarketSnapshot, ClientRequestRejected}
+```
 
-The field-level shape of `EventWire`/`ClientCommandWire` below is still
-generated from the Rust types and still useful as the schema-of-record for
-what a message's fields mean -- but the **outer JSON shape shown in this
-doc's schema files no longer matches literally what's on the wire** for
-these two types: postcard cannot deserialize an internally tagged enum, so
-`EventWire`/`ClientCommandWire` are externally tagged (`{"VariantName":
-{...fields}}`), not `{"type": "VariantName", ...}`. An external
-(non-Godot) client talking to a Dawn server needs to speak postcard, not
-raw JSON, for the messages listed above.
+Market requests remain a separate family. They do not enter the Sector request
+stream; the Market owns matching and Currency, while the runtime applies only
+one-sided inventory bridge operations to the owning Sector.
 
-## Server -> client: generated from `EventWire`
+JSON Schema files describe the field-level type contract and are generated from
+the same Rust types. The runtime transport is postcard, not JSON. Serde's
+externally tagged enum representation determines the postcard variant layout.
 
-The full, authoritative list of messages the server can send, with every
-field and its JSON type, is generated straight from the Rust source and
-checked in at
-[`wire-protocol.schema.json`](./wire-protocol.schema.json) (JSON Schema,
-draft-07). It is produced by `dawn_wire::event_wire_json_schema()`,
-which reflects the `EventWire` enum in
-[`crates/dawn-wire/src/server_event.rs`](../../crates/dawn-wire/src/server_event.rs)
-(ADR-0041/ADR-0042).
+## Server -> client: `EventWire`
 
-Read `wire-protocol.schema.json` for the exact contract. In summary, the
-variant names are: `ShipSpawned`, `VelocityChanged`, `ShipDespawned`,
-`ShipDocked`, `ShipUndocked`, `ShipAssembled`, `DamageTaken`, `RepairApplied`,
-`ShipDestroyed`, `TargetLocked`, `LockLost`, `ModuleActivated`,
-`ModuleDeactivated`, `JumpGateUsed`, `StarSystemChanged`. (A server-initiated
-reconnect to a different node on cross-node jump is `ServerMessage::Redirect`,
-a struct variant of the outer envelope, not an `EventWire` variant --
-see ADR-0026 / multi-node clusters.)
+[`wire-protocol.schema.json`](./wire-protocol.schema.json) is generated by
+`dawn_wire::event_wire_json_schema()` from `EventWire` in
+`crates/dawn-wire/src/server_event.rs`.
 
-`ShipAssembled` (Phase 9B-5, ADR-0034/ADR-0037) reports a new live docked
-ship created from a station-inventory `PackagedShip` item: `ship_id`,
-`station_id`, `ship_type_id`, `tick`. It does not imply the ship became the
-caller's `active_ship` -- send `SelectActiveShipCommand` to fly it.
+The client-visible domain-event variants are `ShipSpawned`,
+`VelocityChanged`, `ShipDespawned`, `ShipDocked`, `ShipUndocked`,
+`ShipAssembled`, `DamageTaken`, `RepairApplied`, `ShipDestroyed`,
+`TargetLocked`, `LockLost`, `ModuleActivated`, `ModuleDeactivated`,
+`JumpGateUsed`, and `StarSystemChanged`. Every variant carries `tick: u64`.
 
-Every `EventWire` variant carries `tick: u64`.
+`DomainEvent` variants used only for server bookkeeping are intentionally not
+projected to `EventWire`; see `event-catalog.md` for that distinction.
 
-`JumpGateUsed.entry_pos` is an absolute destination-Sector coordinate with
-f64 components. It uses the same `AbsPosWire` shape as `InitialState` and
-`PositionSnap`, not the `PosWire` used for client-authored command targets. Both
-position and velocity command/event components are encoded as f64; only the Godot
-rendering boundary narrows to `Vector3`.
-`ShipSpawned.position` is also an `AbsPosWire` absolute Sector-frame coordinate.
+Absolute positions sent by the server use `AbsPosWire` with `f64` components.
+`MotionCorrection` additionally carries `VelWire` and the authoritative server
+tick. Godot narrows coordinates only at its rendering boundary.
 
-Not every `DomainEvent` reaches the wire -- `domain_event_to_event_wire()`
-returns `None` for internal bookkeeping events (`ShipFitted`, `WeaponFired`,
-`TackleApplied`, `TackleReleased`, the `SectorTransit*` family,
-`AnchorRebased`, `PackagedShipBuilt`, `ShipDisassembled`). See
-`docs/architecture/event-catalog.md` for what those events mean server-side.
+## Client -> server: one typed `ClientRequest`
 
-## Client -> server: generated from `ClientCommandWire`
+[`wire-protocol-commands.schema.json`](./wire-protocol-commands.schema.json) is
+generated by `dawn_wire::client_request_json_schema()` from the versioned
+Sector request envelope whose `request` field is the single
+`dawn_core::ClientRequest` enum. `dawn-wire` re-exports that request type; there
+is no parallel `ClientCommandWire`, mirrored full command enum, or per-variant
+wire conversion catalog.
 
-The full list of messages a client can send, with every field and its JSON
-type, is generated the same way and checked in at
-[`wire-protocol-commands.schema.json`](./wire-protocol-commands.schema.json).
-It is produced by `dawn_wire::client_command_wire_json_schema()`,
-which reflects the `ClientCommandWire` enum in `crates/dawn-wire/src/client_command.rs`.
+The postcard layout permanently reserves the former outer command variant
+(index 1) and emits the new versioned command at a different index. The envelope
+also carries the `DAWN` protocol magic and Sector request protocol version 1.
+Consequently, pre-#273 command bytes are rejected as an unsupported protocol
+rather than being reinterpreted according to coincidentally compatible enum
+ordinals or field layouts. Market and Hello retain their existing outer slots.
 
-The variant names are: `MoveCommand`, `LockOnCommand`,
-`ActivateModuleCommand`, `DeactivateModuleCommand`, `AttackCommand`,
-`StopCommand`, `JumpCommand`, `ApproachCommand`, `WarpCommand`,
-`OrbitCommand`, `KeepAtRangeCommand`, `FitModuleCommand`,
-`UnfitModuleCommand`, `ReorderFittedModuleCommand`, `DockCommand`,
-`UndockCommand`, `BuildPackagedShipCommand`, `DisassembleShipCommand`,
-`SelectActiveShipCommand`, `AssembleCommand`, `DisembarkCommand`,
-`TransferToStationCommand`.
+The externally supported Sector variants are:
 
-`AssembleCommand { station_id, ship_type_id }` (Phase 9B-5) carries no
-`ship_id` -- the ship doesn't exist yet; its ID is reported back via the
-resulting `ShipAssembled` event. Rejected if the caller isn't docked at
-`station_id`, `ship_type_id` is unknown, or the station inventory has no
-matching `PackagedShip`.
+- Flight: `Move`, `LockOn`, `Attack`, `Stop`, `Jump`, `Approach`, `Warp`,
+  `Orbit`, `KeepAtRange`
+- Modules: `ActivateModule`, `DeactivateModule`
+- Loadout: `FitModule`, `UnfitModule`, `ReorderFittedModule`
+- Station: `Dock`, `Undock`, `BuildPackagedShip`, `DisassembleShip`,
+  `SelectActiveShip`, `Assemble`, `Disembark`, `TransferCargo`
 
-`DisembarkCommand {}` (ADR-0037) clears the caller's active ship while
-docked, without disassembling it or changing ownership -- the ship stays
-owned and docked, only which ship the caller's commands route to changes.
-Session-local, not event-sourced (same tier as `SelectActiveShipCommand`), so
-there is no resulting domain event on the wire. Rejected if the caller has no
-active ship, or the active ship isn't currently docked. See
-`docs/architecture/ownership.md` §8.
+Payload identities and enums are typed: `ShipId`, `ModuleId`, `ShipTypeId`,
+`StationId`, `JumpGateId`, `ItemId`, `SlotKind`, `TransferDirection`,
+`ApproachTarget`, and `WarpTarget`. The client no longer sends arbitrary slot
+or direction strings for the server to parse.
 
-`TransferToStationCommand { ship_id, station_id, item_type, module_id,
-ship_type_id, direction }` (ADR-0034 9B) moves the entire stack of one item
-between a docked ship's own cargo (`InventoryComp`) and the caller's station
-inventory -- whole-stack only, no partial-count transfer. `direction` is
-`"ToStation"` or `"ToShip"`. `item_type` is one of `"Module"`,
-`"PackagedShip"`, `"ScrapMetal"` (same wire shape as `ItemRow`);
-`module_id`/`ship_type_id` are populated only for the matching variant (`0`
-otherwise). Carries an explicit `ship_id` like `FitModuleCommand` (it may
-target any owned docked ship, not just the active one). Rejected if the
-caller doesn't own `ship_id`, isn't docked at `station_id`, or the source
-side has none of the named item. No resulting domain event -- silent
-station-inventory credit/debit, same tier as
-`BuildPackagedShipCommand`/`DisassembleShipCommand`.
+Navigation targets are closed enums:
 
-`ReorderFittedModuleCommand { ship_id, slot, from_index, to_index }`
-(ADR-0032's 2026-07-08 amendment) reorders two fitted modules within the
-same slot kind -- persisted, not cosmetic, since iteration order assigns
-weapon hotkey F-numbers. Rejected if the caller doesn't own `ship_id`, the
-ship isn't docked, or either index is out of bounds for `slot`'s current
-module count. Reuses `ShipFitted` (no new event type).
+- `Approach`, `Orbit`, and `KeepAtRange`: `ApproachTarget::{Ship, Gate}`
+- `Warp`: `WarpTarget::{Gate, Body}`
 
-**ADR-0037 (owned ship / active ship split):** `MoveCommand`, `LockOnCommand`,
-`ActivateModuleCommand`, `DeactivateModuleCommand`, `StopCommand`,
-`JumpCommand`, `ApproachCommand`, `WarpCommand`, `OrbitCommand`,
-`KeepAtRangeCommand`, `DockCommand`, `UndockCommand`, and `DisembarkCommand`
-carry no `ship_id` field at all -- the server always resolves them against
-the caller's active ship, so there is no wire-representable way to name a
-ship the player isn't currently flying. `FitModuleCommand`,
-`UnfitModuleCommand`, `ReorderFittedModuleCommand`, `BuildPackagedShipCommand`,
-and `DisassembleShipCommand` still carry an explicit `ship_id`, since they
-may target any owned docked ship, not just the active one.
-`SelectActiveShipCommand { ship_id }` is the only way to change which owned
-ship is active (station-local switch only for now). See
-`docs/architecture/ownership.md` §7.
+`TransferCargo` carries one canonical `ItemId` and a typed
+`TransferDirection::{ToStation, ToShip}`. ID-bearing `ItemId` variants reject
+zero IDs while decoding.
 
-Navigation commands use one required tagged target representation:
+### Acting identity and admission
 
-- `ApproachCommand`, `OrbitCommand`, and `KeepAtRangeCommand` carry
-  `target: {"Ship": N}` or `target: {"Gate": N}`.
-- `WarpCommand` carries `target: {"Gate": N}` or `target: {"Body": N}`.
+Active-ship requests do not contain an acting `ship_id` or `attacker_id`.
+After postcard decoding and request-value validation, the server resolves the
+active ship from the admitted session and applies one exhaustive admission
+match in `SimulationNode::apply_client_request`. Each arm obtains active-ship
+authority when required and calls its family-local policy directly; there is no
+second family dispatch catalog or independent active-ship classification table.
+Explicit ship IDs remain only on
+operations that may target any owned docked ship, such as Fit/Unfit/Reorder,
+Build/Disassemble, SelectActiveShip, and TransferCargo.
 
-After successful wire decoding, exactly one target is present. The legacy
-`gate_id`/`target_id` field pairs and Warp's legacy `gate_id` fallback are no
-longer part of the protocol.
+The boundary is:
 
-`ActivateModuleCommand`'s `target_ship_id` is only required for targeted
-module kinds (Weapon/Tackle, ADR-0035); the server validates that
-requirement, not the wire schema.
+```text
+untrusted postcard bytes
+  -> reserved legacy-slot check + versioned Sector envelope
+  -> ClientMessage::Command(ClientRequest)
+  -> decode/value validation
+  -> admitted session + active-ship resolution
+  -> one exhaustive family admission match
+  -> family-local gameplay policy
+```
+
+### Numeric validation and rejection
+
+Non-finite move coordinates, orbit radii, and keep-at-range values cannot be
+queued for application policy. Invalid encoding, invalid values, and missing
+active-ship authority produce `ServerMessage::ClientRequestRejected` with a
+stable `ClientRequestRejectionCode` and a diagnostic message. Gameplay-policy
+rejections remain distinct from this decode/admission layer.
+
+The Godot `ClientCommand` GDExtension methods construct `ClientRequest`
+directly. Sector methods return a structured build result containing `ok`,
+`bytes`, `error_code`, and `error_message`; they do not use a Dictionary/JSON
+round trip or an empty-byte failure sentinel.
 
 ## Market requests and snapshots
 
-The Market request schema is generated separately at
-[`wire-protocol-market.schema.json`](./wire-protocol-market.schema.json) by
-`dawn_wire::market_command_wire_json_schema()`. It contains
-`RefreshMarketCommand`, `PlaceMarketOrderCommand`, and
-`CancelMarketOrderCommand`. `PlaceMarketOrderCommand` carries an explicit
-`ship_id` because an Ask removes cargo from that owned ship and a Bid names the
-ship that receives a filled item. `price` and `quantity` must be positive and
-their product must fit in `u64`; the runtime rejects invalid input before
-calling `dawn-market`.
+[`wire-protocol-market.schema.json`](./wire-protocol-market.schema.json) is
+generated by `dawn_wire::market_command_wire_json_schema()` from
+`MarketCommandWire`. Its variants are `RefreshMarketCommand`,
+`PlaceMarketOrderCommand`, and `CancelMarketOrderCommand`.
 
-`MarketSnapshotWire` contains the caller's Currency `balance`, a bounded list
-of open orders (maximum 200), and a short server `notice`. Each order includes
-`is_own`, which is calculated server-side and must not be trusted from client
-input. A client may submit an order or cancel only through the Market family;
-Sector does not parse these variants.
+`PlaceMarketOrderCommand` carries an explicit ship ID because an Ask removes
+cargo from that owned ship and a Bid names the receiving ship. Market-side
+price, quantity, ownership, and balance checks remain outside the Sector
+request catalog.
+
+## Connection handshake
+
+- Fresh connection: `ClientMessage::Hello(HelloMessage { resume: None })`
+- Resume/redirect: `ClientMessage::Hello(HelloMessage { resume: Some(ticket) })`
+- Accepted session: `ServerMessage::Welcome`, then `InitialState` and optional
+  `PlayerLoadout`
+
+The resume ticket is opaque, server-issued, and bound to the admission or
+handoff flow.
 
 ## Keeping this in sync
 
-`wire_schema_doc_is_up_to_date` (a test in `dawn-wire/src/lib.rs`) fails the build if
-any checked-in schema file drifts from what `EventWire`, `ClientCommandWire`,
-or `MarketCommandWire` currently produce. After changing any of those enums
-(or a type they reference), regenerate with:
+Schema drift tests fail when checked-in JSON Schema differs from the Rust
+source. After changing `EventWire`, `ClientRequest`, `MarketCommandWire`, or a
+referenced type, run:
 
 ```bash
 cargo run -p dawn-actor --example gen_wire_schema
 ```
 
-and commit the updated `.schema.json` files alongside the code change.
-These files are documentation, generated from the types -- never hand-edit
-them.
-
-## Connection handshake
-
-- A fresh client sends `ClientMessage::Hello(HelloMessage { resume: None })`,
-  postcard-encoded as a binary frame (ADR-0042).
-- A client resuming after a `Redirect` (cross-node jump), or retrying a
-  prepared fresh admission, sends `ClientMessage::Hello(HelloMessage {
-  resume: Some(ResumeTicket) })`. The ticket is server-issued, bound to the
-  exact handoff, and resolved by the destination admission flow. A resume
-  rotation may be staged before `Welcome`; Transit carries that staged value
-  until the destination commits or replaces it.
-- The server replies with `ServerMessage::Welcome { player_id, ship_id,
-  resume_ticket }`,
-  then `ServerMessage::InitialState` (+ optional `ServerMessage::PlayerLoadout`),
-  all binary.
+Commit the regenerated `.schema.json` files with the code change. Do not edit
+generated schema files by hand.

@@ -12,7 +12,7 @@
 //!     │  send_events()                ↑  recv_event()
 //!     │                              │
 //!     └─── ClientConnection ─────────┘
-//!              │  try_recv_command() → ClientCommand (Sector)
+//!              │  try_recv_request() → ClientRequest (Sector)
 //!              └── try_recv_market_command() → MarketCommandWire
 //! ```
 //!
@@ -24,12 +24,11 @@
 //!
 //! ## Extending client input
 //!
-//! Commands the client may send are variants of the `ClientCommand` enum
-//! Sector commands remain variants of `dawn_core::ClientCommand`; Market
+//! Sector requests use the single `dawn_core::ClientRequest` protocol authority; Market
 //! requests remain `dawn_wire::MarketCommandWire` and never enter
-//! `SimulationNode::apply_client_command`.
+//! `SimulationNode::apply_client_request`.
 
-pub use dawn_core::ClientCommand;
+pub use dawn_core::ClientRequest;
 use dawn_core::DomainEvent;
 use dawn_wire::MarketCommandWire;
 use tokio::sync::mpsc;
@@ -53,14 +52,14 @@ pub enum ConnectionError {
 ///
 /// - `send_events` must complete without blocking (`Err` signals back-pressure
 ///   / disconnection).
-/// - `try_recv_command` must be non-blocking (`None` when no command is ready).
+/// - `try_recv_request` must be non-blocking (`None` when no command is ready).
 /// - Implementations must be `Send + 'static` (they move across actor threads).
 pub trait ClientConnection: Send + 'static {
     /// Send events from the server to the client.
     fn send_events(&self, events: &[DomainEvent]) -> Result<(), ConnectionError>;
 
     /// Take one pending command from the client, non-blocking.
-    fn try_recv_command(&mut self) -> Option<ClientCommand>;
+    fn try_recv_request(&mut self) -> Option<ClientRequest>;
 
     /// Take one pending Market request from the client, non-blocking.
     fn try_recv_market_command(&mut self) -> Option<MarketCommandWire>;
@@ -85,7 +84,7 @@ pub trait ClientConnection: Send + 'static {
 #[derive(Debug)]
 pub struct InProcessConnection {
     event_tx: mpsc::UnboundedSender<DomainEvent>,
-    command_rx: mpsc::UnboundedReceiver<ClientCommand>,
+    request_rx: mpsc::UnboundedReceiver<ClientRequest>,
     market_command_rx: mpsc::UnboundedReceiver<MarketCommandWire>,
 }
 
@@ -93,24 +92,24 @@ pub struct InProcessConnection {
 #[derive(Debug)]
 pub struct InProcessClientEndpoint {
     pub event_rx: mpsc::UnboundedReceiver<DomainEvent>,
-    pub command_tx: mpsc::UnboundedSender<ClientCommand>,
+    pub request_tx: mpsc::UnboundedSender<ClientRequest>,
     pub market_command_tx: mpsc::UnboundedSender<MarketCommandWire>,
 }
 
 impl InProcessConnection {
     pub fn pair() -> (Self, InProcessClientEndpoint) {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
         let (market_command_tx, market_command_rx) = mpsc::unbounded_channel();
         (
             InProcessConnection {
                 event_tx,
-                command_rx,
+                request_rx,
                 market_command_rx,
             },
             InProcessClientEndpoint {
                 event_rx,
-                command_tx,
+                request_tx,
                 market_command_tx,
             },
         )
@@ -127,8 +126,8 @@ impl ClientConnection for InProcessConnection {
         Ok(())
     }
 
-    fn try_recv_command(&mut self) -> Option<ClientCommand> {
-        self.command_rx.try_recv().ok()
+    fn try_recv_request(&mut self) -> Option<ClientRequest> {
+        self.request_rx.try_recv().ok()
     }
 
     fn try_recv_market_command(&mut self) -> Option<MarketCommandWire> {
@@ -143,8 +142,7 @@ mod tests {
     use super::*;
     use dawn_core::events::ShipSpawned;
     use dawn_core::{
-        AbsolutePosition, DomainEvent, EntityId, LockOnCommand, MoveCommand, NodeId, Position,
-        SectorId, ShipId, Tick,
+        AbsolutePosition, DomainEvent, EntityId, NodeId, Position, SectorId, ShipId, Tick,
     };
 
     fn make_ship_spawned() -> DomainEvent {
@@ -157,21 +155,20 @@ mod tests {
         })
     }
 
-    fn make_move_command() -> ClientCommand {
-        ClientCommand::Move(MoveCommand {
-            target_position: Position {
+    fn make_move_command() -> ClientRequest {
+        ClientRequest::Move {
+            target: Position {
                 x: 10.0,
                 y: 0.0,
                 z: 0.0,
             },
-        })
+        }
     }
 
-    fn make_lock_on_command() -> ClientCommand {
-        ClientCommand::LockOn(LockOnCommand {
-            ship_id: ShipId(EntityId::new(NodeId(0), 1)),
-            target_id: ShipId(EntityId::new(NodeId(0), 2)),
-        })
+    fn make_lock_on_command() -> ClientRequest {
+        ClientRequest::LockOn {
+            target: ShipId(EntityId::new(NodeId(0), 2)),
+        }
     }
 
     #[test]
@@ -189,35 +186,35 @@ mod tests {
     #[test]
     fn move_command_is_received_by_server_connection() {
         let (mut server, client) = InProcessConnection::pair();
-        client.command_tx.send(make_move_command()).unwrap();
+        client.request_tx.send(make_move_command()).unwrap();
         let cmd = server
-            .try_recv_command()
+            .try_recv_request()
             .expect("command should be available");
-        assert!(matches!(cmd, ClientCommand::Move(_)));
+        assert!(matches!(cmd, ClientRequest::Move { .. }));
     }
 
     #[test]
     fn lock_on_command_is_received_by_server_connection() {
         let (mut server, client) = InProcessConnection::pair();
-        client.command_tx.send(make_lock_on_command()).unwrap();
+        client.request_tx.send(make_lock_on_command()).unwrap();
         let cmd = server
-            .try_recv_command()
+            .try_recv_request()
             .expect("command should be available");
-        assert!(matches!(cmd, ClientCommand::LockOn(_)));
+        assert!(matches!(cmd, ClientRequest::LockOn { .. }));
     }
 
     #[test]
     fn commands_are_delivered_in_order() {
         let (mut server, client) = InProcessConnection::pair();
-        client.command_tx.send(make_move_command()).unwrap();
-        client.command_tx.send(make_lock_on_command()).unwrap();
+        client.request_tx.send(make_move_command()).unwrap();
+        client.request_tx.send(make_lock_on_command()).unwrap();
         assert!(matches!(
-            server.try_recv_command().unwrap(),
-            ClientCommand::Move(_)
+            server.try_recv_request().unwrap(),
+            ClientRequest::Move { .. }
         ));
         assert!(matches!(
-            server.try_recv_command().unwrap(),
-            ClientCommand::LockOn(_)
+            server.try_recv_request().unwrap(),
+            ClientRequest::LockOn { .. }
         ));
     }
 
@@ -225,21 +222,21 @@ mod tests {
     fn jump_command_is_received_by_server_connection() {
         let (mut server, client) = InProcessConnection::pair();
         client
-            .command_tx
-            .send(ClientCommand::Jump(dawn_core::JumpCommand {
-                gate_id: dawn_core::JumpGateId(0),
-            }))
+            .request_tx
+            .send(ClientRequest::Jump {
+                gate: dawn_core::JumpGateId(0),
+            })
             .unwrap();
         let cmd = server
-            .try_recv_command()
+            .try_recv_request()
             .expect("command should be available");
-        assert!(matches!(cmd, ClientCommand::Jump(_)));
+        assert!(matches!(cmd, ClientRequest::Jump { .. }));
     }
 
     #[test]
-    fn try_recv_command_returns_none_when_no_command_pending() {
+    fn try_recv_request_returns_none_when_no_command_pending() {
         let (mut server, _client) = InProcessConnection::pair();
-        assert!(server.try_recv_command().is_none());
+        assert!(server.try_recv_request().is_none());
     }
 
     #[test]

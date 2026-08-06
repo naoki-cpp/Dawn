@@ -15,6 +15,8 @@
 //!
 //! IDs are **never reused**. See CLAUDE.md INV-004 and FBD-005.
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Largest node ID whose packed [`EntityId`] always fits Godot's signed
@@ -30,6 +32,7 @@ pub const MAX_GODOT_COMPATIBLE_NODE_ID: u8 = i8::MAX as u8;
 /// `Ord` is the canonical id order: because `node_id` occupies the high bits,
 /// comparing the packed `u64` orders by `node_id` first, then `counter`. Use it
 /// for any determinism need (e.g. byte-stable snapshots, INV-002).
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct EntityId(u64);
 
@@ -71,6 +74,7 @@ impl std::fmt::Display for EntityId {
 // ── ShipId ───────────────────────────────────────────────────────────────────
 
 /// Typed wrapper that distinguishes a Ship entity from any future entity type.
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ShipId(pub EntityId);
 

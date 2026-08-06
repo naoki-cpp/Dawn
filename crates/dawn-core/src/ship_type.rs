@@ -8,10 +8,13 @@
 //! ShipTypeDefinition は「どの具体的な船種か」（Merlin / Rifter など）。
 //! 同じクラスでも ShipTypeDefinition が異なれば base_stats が異なる。
 
+#[cfg(feature = "schema")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 // ── ID ────────────────────────────────────────────────────────────────────────
 
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ShipTypeId(pub u32);
 

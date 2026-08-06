@@ -184,8 +184,8 @@ base_stats  : ShipBaseStats            velocity      : Velocity
 Do not introduce new code that treats `Position` as both an absolute Sector coordinate and an
 anchor-relative offset. `PositionComp` is the local f64 representation governed by
 ADR-0029. New authoritative coordinates use `AbsolutePosition`; conversion is performed only
-at the anchor boundary. Client-authored command targets use the separate f64
-`PosWire` type.
+at the anchor boundary. Client-authored movement targets use the typed f64 `Position` inside
+`ClientRequest`; the wire layer does not maintain a parallel position wrapper.
 
 ---
 

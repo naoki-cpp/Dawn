@@ -1,9 +1,8 @@
 //! Module activation and registry command policy for [`SimulationNode`].
 //!
-//! This module owns both the module-family client dispatch boundary and the
-//! underlying activation/deactivation validation. Keeping the dispatch next to
-//! the named rejection type ensures changes to module policy do not require
-//! editing the cross-family command entry point.
+//! This module owns activation/deactivation policy. The exhaustive external
+//! request match lives in `node::commands` and calls these family-local methods
+//! directly, so this module does not maintain a parallel dispatch catalog.
 
 use dawn_core::{DomainEvent, FitModuleCommand, ModuleId, PlayerId, ShipId, SlotKind};
 use dawn_ecs::{
@@ -13,16 +12,6 @@ use dawn_ecs::{
 use dawn_event_store::store::EventStore;
 
 use super::SimulationNode;
-
-pub(super) enum ModuleDispatchCommand {
-    Activate(dawn_core::ActivateModuleCommand),
-    Deactivate(dawn_core::DeactivateModuleCommand),
-}
-
-pub(super) enum ModuleDispatchEffect {
-    NoFollowup,
-    RefreshPlayerLoadout,
-}
 
 /// Why an Activate/Deactivate attempt was rejected (ADR-0006/0035).
 ///
@@ -72,31 +61,6 @@ fn module_activation_rejection_from_flight(
         ShipCommandRejection::MustBeDocked => {
             unreachable!("resolve_flight_command never returns MustBeDocked (fitting-command only)")
         }
-    }
-}
-
-impl<S: EventStore> SimulationNode<S> {
-    pub(super) fn dispatch_module_command(
-        &mut self,
-        player_id: PlayerId,
-        active_ship: Option<ShipId>,
-        cmd: ModuleDispatchCommand,
-    ) -> ModuleDispatchEffect {
-        let Some(ship_id) = active_ship else {
-            return ModuleDispatchEffect::NoFollowup;
-        };
-
-        match cmd {
-            ModuleDispatchCommand::Activate(cmd) => {
-                // Both accepted and rejected optimistic HUD changes require
-                // correction from the authoritative loadout (ADR-0035).
-                let _ = self.activate_module_owned(player_id, ship_id, cmd);
-            }
-            ModuleDispatchCommand::Deactivate(cmd) => {
-                let _ = self.deactivate_module_owned(player_id, ship_id, cmd);
-            }
-        }
-        ModuleDispatchEffect::RefreshPlayerLoadout
     }
 }
 
@@ -333,60 +297,5 @@ impl<S: EventStore> SimulationNode<S> {
         self.emit_ship_fitted(cmd.ship_id, entity);
 
         true
-    }
-}
-#[cfg(test)]
-mod dispatch_tests {
-    use dawn_core::{
-        ActivateModuleCommand, ModuleId, NodeId, PlayerId, Position, SectorBounds, SectorId,
-        SlotKind,
-    };
-
-    use super::*;
-
-    fn node() -> SimulationNode {
-        SimulationNode::new_test(
-            NodeId(0),
-            SectorId(0),
-            SectorBounds::centered(SectorBounds::DEFAULT_HALF),
-            std::sync::Arc::new(crate::galaxy::Galaxy::demo()),
-        )
-    }
-
-    #[test]
-    fn module_dispatch_without_an_active_ship_does_not_request_refresh() {
-        let mut node = node();
-        let effect = node.dispatch_module_command(
-            PlayerId(7),
-            None,
-            ModuleDispatchCommand::Activate(ActivateModuleCommand {
-                module_id: ModuleId(1),
-                slot: SlotKind::High,
-                target_ship_id: None,
-            }),
-        );
-
-        assert!(matches!(effect, ModuleDispatchEffect::NoFollowup));
-    }
-
-    #[test]
-    fn rejected_module_activation_still_requests_authoritative_refresh() {
-        let mut node = node();
-        let player_id = node.next_player_id();
-        let ship_id = node.spawn_player_ship_at_pub(player_id, Position::ORIGIN);
-        let events_before = node.total_event_count();
-
-        let effect = node.dispatch_module_command(
-            player_id,
-            Some(ship_id),
-            ModuleDispatchCommand::Activate(ActivateModuleCommand {
-                module_id: ModuleId(9999),
-                slot: SlotKind::High,
-                target_ship_id: None,
-            }),
-        );
-
-        assert!(matches!(effect, ModuleDispatchEffect::RefreshPlayerLoadout));
-        assert_eq!(node.total_event_count(), events_before);
     }
 }

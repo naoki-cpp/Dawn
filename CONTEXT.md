@@ -100,13 +100,13 @@ Use these names consistently:
 - Use "Warp" for intra-sector fast movement.
 - Use "Tackle" for escape denial.
 - Use "TiDi" only for real-time pacing, not for changing logical tick order.
-- Use a `*Wire` suffix for `dawn-wire` schema types (`EventWire`,
-  `ClientCommandWire`, `PosWire`, ...), not `*Json` -- ADR-0042 moved every
-  client<->server message onto the postcard binary envelope, so a `Json`
-  suffix would misdescribe what these types carry on the wire. Functions that
+- Use a `*Wire` suffix for adapter-only `dawn-wire` schema types
+  (`EventWire`, `AbsPosWire`, `VelWire`, ...), not `*Json` -- ADR-0042 moved
+  every client<->server message onto the postcard binary envelope. The Sector
+  request exception is the shared typed `ClientRequest` authority, re-exported
+  by `dawn-wire` rather than duplicated as a `*Wire` mirror. Functions that
   genuinely produce a JSON Schema document (`event_wire_json_schema()`,
-  `client_command_wire_json_schema()`) keep `json` in their names since
-  that's accurate.
+  `client_request_json_schema()`) keep `json` in their names.
 
 ## Non-Goals
 

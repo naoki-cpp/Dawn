@@ -150,3 +150,11 @@ Warp の legacy `gate_id` fallback は削除され、必須のタグ付き targe
 
 GdUnit4: 既存の個別テストは維持しつつ、`build()`自体の契約（正常系・フィールド名
 typo・必須フィールド欠落の3パターン）を検証する新規テストを追加。200/200 pass。
+
+## 2026-08-06 amendment: direct typed Sector request builders (issue #273)
+
+Sector command builders no longer construct a Dictionary/JSON shape. Each
+GDExtension method constructs the single typed `ClientRequest` and postcard
+encodes `ClientMessage::Command` directly. Builder failure is returned as a
+structured dictionary (`ok`, `bytes`, `error_code`, `error_message`) instead of
+an empty-byte sentinel. The generic schema-driven builder remains Market-only.

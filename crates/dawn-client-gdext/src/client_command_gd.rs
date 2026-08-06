@@ -1,32 +1,90 @@
 use crate::item_identity_gd::ItemIdentity;
-use dawn_wire::{
-    ClientCommandWire, ClientMessage, HelloMessage, ItemWire, MarketCommandWire,
-    NavigationTargetWire, PosWire, ResumeTicket, WarpTargetWire,
+use dawn_core::{
+    ApproachTarget, CelestialBodyId, ClientRequest, EntityId, ItemId, JumpGateId, ModuleId,
+    Position, ShipId, ShipTypeId, SlotKind, StationId, TransferDirection, WarpTarget,
 };
+use dawn_wire::{ClientMessage, HelloMessage, ItemWire, MarketCommandWire, ResumeTicket};
 use godot::prelude::*;
 
+// Godot-facing result for Sector request construction:
+// { ok: bool, bytes: PackedByteArray, error_code: String, error_message: String }.
 type Dict = Dictionary<Variant, Variant>;
 
-/// Postcard-encode a [`ClientMessage`] into the bytes `connection.gd` sends
-/// as a binary WebSocket frame (ADR-0042).
-fn to_wire_bytes(msg: &ClientMessage) -> PackedByteArray {
-    PackedByteArray::from(msg.encode().as_slice())
+#[derive(Debug)]
+struct RequestBuildError {
+    code: &'static str,
+    message: String,
 }
 
-fn command_wire_bytes(cmd: ClientCommandWire) -> PackedByteArray {
-    to_wire_bytes(&ClientMessage::Command(cmd))
+impl RequestBuildError {
+    fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
 }
 
-fn market_command_wire_bytes(cmd: MarketCommandWire) -> PackedByteArray {
-    to_wire_bytes(&ClientMessage::Market(cmd))
+fn to_wire_bytes(message: &ClientMessage) -> Vec<u8> {
+    message.encode()
 }
 
-/// Converts a flat GDScript `Dictionary` (scalar values only -- `int`/
-/// `float`/`String`/`bool`) into a `serde_json::Value` object, for
-/// [`ClientCommand::build`]. Nested `Dictionary`/`Array` values are rejected
-/// (`None`) rather than silently dropped: none of today's schema-driven
-/// commands need them, so support is added only when a real command does
-/// (see the design discussion in ADR-0041's follow-up note).
+#[derive(Debug, PartialEq, Eq)]
+struct RequestBuildResult {
+    ok: bool,
+    bytes: Vec<u8>,
+    error_code: String,
+    error_message: String,
+}
+
+fn request_build_result(request: Result<ClientRequest, RequestBuildError>) -> RequestBuildResult {
+    match request {
+        Ok(request) => match request.validate() {
+            Ok(()) => RequestBuildResult {
+                ok: true,
+                bytes: to_wire_bytes(&ClientMessage::Command(request)),
+                error_code: String::new(),
+                error_message: String::new(),
+            },
+            Err(error) => RequestBuildResult {
+                ok: false,
+                bytes: Vec::new(),
+                error_code: "request_validation".to_owned(),
+                error_message: error.to_string(),
+            },
+        },
+        Err(error) => RequestBuildResult {
+            ok: false,
+            bytes: Vec::new(),
+            error_code: error.code.to_owned(),
+            error_message: error.message,
+        },
+    }
+}
+
+fn request_result(request: Result<ClientRequest, RequestBuildError>) -> Dict {
+    let result = request_build_result(request);
+    build_result(
+        result.ok,
+        PackedByteArray::from(result.bytes.as_slice()),
+        &result.error_code,
+        &result.error_message,
+    )
+}
+
+fn build_result(ok: bool, bytes: PackedByteArray, error_code: &str, error_message: &str) -> Dict {
+    let mut result = Dict::new();
+    result.set("ok", ok);
+    result.set("bytes", &bytes.to_variant());
+    result.set("error_code", &GString::from(error_code).to_variant());
+    result.set("error_message", &GString::from(error_message).to_variant());
+    result
+}
+
+fn market_command_bytes(command: MarketCommandWire) -> PackedByteArray {
+    PackedByteArray::from(to_wire_bytes(&ClientMessage::Market(command)).as_slice())
+}
+
 fn scalar_dict_to_json_object(fields: &Dict) -> Option<serde_json::Map<String, serde_json::Value>> {
     let mut map = serde_json::Map::with_capacity(fields.len());
     for (key, value) in fields.iter_shared() {
@@ -40,7 +98,7 @@ fn scalar_dict_to_json_object(fields: &Dict) -> Option<serde_json::Map<String, s
             VariantType::BOOL => serde_json::Value::from(value.to::<bool>()),
             _ => {
                 godot_error!(
-                    "ClientCommand.build: field '{key}' has unsupported type {:?} (scalars only)",
+                    "ClientCommand.market_build: field '{key}' has unsupported type {:?}",
                     value.get_type()
                 );
                 return None;
@@ -51,25 +109,52 @@ fn scalar_dict_to_json_object(fields: &Dict) -> Option<serde_json::Map<String, s
     Some(map)
 }
 
-/// Range/radius sentinel used throughout `connection.gd`'s public API:
-/// `<= 0.0` means "no override, let the server pick its default"
-/// (ADR-0031). Kept as a free function so every `*_command` below applies
-/// the same rule instead of repeating the comparison.
-fn positive_or_none(value: f64) -> Option<f64> {
-    if value > 0.0 {
-        Some(value)
+fn optional_positive(value: f64, field: &str) -> Result<Option<f64>, RequestBuildError> {
+    if !value.is_finite() {
+        Err(RequestBuildError::new(
+            "non_finite_number",
+            format!("{field} must be finite"),
+        ))
+    } else if value > 0.0 {
+        Ok(Some(value))
     } else {
-        None
+        Ok(None)
     }
 }
 
-/// Ship-id sentinel used by `ActivateModuleCommand`'s optional target:
-/// `< 0` means "no target" (ADR-0035).
-fn non_negative_or_none(value: i64) -> Option<u64> {
-    if value >= 0 {
-        Some(value as u64)
+fn ship_id(value: i64, field: &str) -> Result<ShipId, RequestBuildError> {
+    u64::try_from(value)
+        .map(|value| ShipId(EntityId::from_raw(value)))
+        .map_err(|_| RequestBuildError::new("invalid_id", format!("{field} must be non-negative")))
+}
+
+fn u32_id(value: i64, field: &str) -> Result<u32, RequestBuildError> {
+    u32::try_from(value)
+        .map_err(|_| RequestBuildError::new("invalid_id", format!("{field} must fit u32")))
+}
+
+fn nonzero_u32_id(value: i64, field: &str) -> Result<u32, RequestBuildError> {
+    let value = u32_id(value, field)?;
+    if value == 0 {
+        Err(RequestBuildError::new(
+            "zero_id",
+            format!("{field} must be non-zero"),
+        ))
     } else {
-        None
+        Ok(value)
+    }
+}
+
+fn slot_kind(value: &GString) -> Result<SlotKind, RequestBuildError> {
+    match value.to_string().as_str() {
+        "High" => Ok(SlotKind::High),
+        "Mid" => Ok(SlotKind::Mid),
+        "Low" => Ok(SlotKind::Low),
+        "Rig" => Ok(SlotKind::Rig),
+        other => Err(RequestBuildError::new(
+            "invalid_slot_kind",
+            format!("unknown slot kind '{other}'"),
+        )),
     }
 }
 
@@ -77,16 +162,12 @@ fn item_wire(item_id: &Gd<ItemIdentity>) -> ItemWire {
     item_id.bind().get().into()
 }
 
-/// Builds the client -> server wire message for every command the Godot
-/// client can send (ADR-0041), postcard-encoded as a `ClientMessage::Command`
-/// envelope (ADR-0042). Each method returns the exact bytes `connection.gd`
-/// should hand to `WebSocketPeer.send` with `WRITE_MODE_BINARY`.
+/// Typed builder for client -> server postcard messages.
 ///
-/// Commands whose wire shape carries sentinel values (e.g. `<= 0.0` meaning
-/// "server default", ADR-0031) or a tagged navigation target get a dedicated
-/// method, since that logic is domain semantics, not just field copying.
-/// Everything else -- a flat struct of scalar fields with no such semantics --
-/// goes through the schema-driven `build` method instead.
+/// Sector methods construct [`ClientRequest`] directly and return a structured
+/// build result. There is no JSON builder, mirrored wire enum, or empty-byte
+/// sentinel for Sector requests. Market remains a separate envelope and
+/// retains its schema-driven helper.
 #[derive(GodotClass)]
 #[class(init, base=RefCounted)]
 pub struct ClientCommand {}
@@ -94,114 +175,277 @@ pub struct ClientCommand {}
 #[godot_api]
 impl ClientCommand {
     #[func]
-    fn move_command(&self, x: f64, y: f64, z: f64) -> PackedByteArray {
-        command_wire_bytes(ClientCommandWire::MoveCommand {
-            target: PosWire { x, y, z },
-        })
+    fn move_command(&self, x: f64, y: f64, z: f64) -> Dict {
+        request_result(Ok(ClientRequest::Move {
+            target: Position::new(x, y, z),
+        }))
     }
 
-    /// `target_ship_id < 0` means no target (ADR-0035) -- required only for
-    /// targeted module kinds (Weapon/Tackle), validated server-side.
     #[func]
-    fn activate_module_command(
+    fn lock_on_command(&self, target_id: i64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::LockOn {
+                target: ship_id(target_id, "target_id")?,
+            })
+        })())
+    }
+
+    #[func]
+    fn attack_command(&self, target_id: i64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::Attack {
+                target: ship_id(target_id, "target_id")?,
+            })
+        })())
+    }
+
+    #[func]
+    fn activate_module_command(&self, module_id: i64, slot: GString, target_ship_id: i64) -> Dict {
+        request_result((|| {
+            let target = if target_ship_id < 0 {
+                None
+            } else {
+                Some(ship_id(target_ship_id, "target_ship_id")?)
+            };
+            Ok(ClientRequest::ActivateModule {
+                module: ModuleId(nonzero_u32_id(module_id, "module_id")?),
+                slot: slot_kind(&slot)?,
+                target,
+            })
+        })())
+    }
+
+    #[func]
+    fn deactivate_module_command(&self, module_id: i64, slot: GString) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::DeactivateModule {
+                module: ModuleId(nonzero_u32_id(module_id, "module_id")?),
+                slot: slot_kind(&slot)?,
+            })
+        })())
+    }
+
+    #[func]
+    fn stop_command(&self) -> Dict {
+        request_result(Ok(ClientRequest::Stop))
+    }
+
+    #[func]
+    fn jump_command(&self, gate_id: i64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::Jump {
+                gate: JumpGateId(u32_id(gate_id, "gate_id")?),
+            })
+        })())
+    }
+
+    #[func]
+    fn approach_command(&self, target_id: i64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::Approach {
+                target: ApproachTarget::Ship(ship_id(target_id, "target_id")?),
+            })
+        })())
+    }
+
+    #[func]
+    fn approach_gate_command(&self, gate_id: i64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::Approach {
+                target: ApproachTarget::Gate(JumpGateId(u32_id(gate_id, "gate_id")?)),
+            })
+        })())
+    }
+
+    #[func]
+    fn warp_command(&self, gate_id: i64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::Warp {
+                target: WarpTarget::Gate(JumpGateId(u32_id(gate_id, "gate_id")?)),
+            })
+        })())
+    }
+
+    #[func]
+    fn warp_to_body_command(&self, body_id: i64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::Warp {
+                target: WarpTarget::Body(CelestialBodyId(u32_id(body_id, "body_id")?)),
+            })
+        })())
+    }
+
+    #[func]
+    fn orbit_command(&self, target_id: i64, radius: f64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::Orbit {
+                target: ApproachTarget::Ship(ship_id(target_id, "target_id")?),
+                radius: optional_positive(radius, "radius")?,
+            })
+        })())
+    }
+
+    #[func]
+    fn orbit_gate_command(&self, gate_id: i64, radius: f64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::Orbit {
+                target: ApproachTarget::Gate(JumpGateId(u32_id(gate_id, "gate_id")?)),
+                radius: optional_positive(radius, "radius")?,
+            })
+        })())
+    }
+
+    #[func]
+    fn keep_at_range_command(&self, target_id: i64, range: f64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::KeepAtRange {
+                target: ApproachTarget::Ship(ship_id(target_id, "target_id")?),
+                range: optional_positive(range, "range")?,
+            })
+        })())
+    }
+
+    #[func]
+    fn keep_at_range_gate_command(&self, gate_id: i64, range: f64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::KeepAtRange {
+                target: ApproachTarget::Gate(JumpGateId(u32_id(gate_id, "gate_id")?)),
+                range: optional_positive(range, "range")?,
+            })
+        })())
+    }
+
+    #[func]
+    fn fit_module_command(&self, ship: i64, module: i64, slot: GString) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::FitModule {
+                ship: ship_id(ship, "ship_id")?,
+                module: ModuleId(nonzero_u32_id(module, "module_id")?),
+                slot: slot_kind(&slot)?,
+            })
+        })())
+    }
+
+    #[func]
+    fn unfit_module_command(&self, ship: i64, module: i64, slot: GString) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::UnfitModule {
+                ship: ship_id(ship, "ship_id")?,
+                module: ModuleId(nonzero_u32_id(module, "module_id")?),
+                slot: slot_kind(&slot)?,
+            })
+        })())
+    }
+
+    #[func]
+    fn reorder_fitted_module_command(
         &self,
-        module_id: i64,
+        ship: i64,
         slot: GString,
-        target_ship_id: i64,
-    ) -> PackedByteArray {
-        command_wire_bytes(ClientCommandWire::ActivateModuleCommand {
-            module_id: module_id as u32,
-            slot: slot.to_string(),
-            target_ship_id: non_negative_or_none(target_ship_id),
-        })
+        from_index: i64,
+        to_index: i64,
+    ) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::ReorderFittedModule {
+                ship: ship_id(ship, "ship_id")?,
+                slot: slot_kind(&slot)?,
+                from_index: u32_id(from_index, "from_index")?,
+                to_index: u32_id(to_index, "to_index")?,
+            })
+        })())
     }
 
     #[func]
-    fn approach_command(&self, target_id: i64) -> PackedByteArray {
-        command_wire_bytes(ClientCommandWire::ApproachCommand {
-            target: NavigationTargetWire::Ship(target_id as u64),
-        })
+    fn dock_command(&self, station: i64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::Dock {
+                station: StationId(u32_id(station, "station_id")?),
+            })
+        })())
     }
 
     #[func]
-    fn approach_gate_command(&self, gate_id: i64) -> PackedByteArray {
-        command_wire_bytes(ClientCommandWire::ApproachCommand {
-            target: NavigationTargetWire::Gate(gate_id as u32),
-        })
+    fn undock_command(&self) -> Dict {
+        request_result(Ok(ClientRequest::Undock))
     }
 
     #[func]
-    fn warp_command(&self, gate_id: i64) -> PackedByteArray {
-        command_wire_bytes(ClientCommandWire::WarpCommand {
-            target: WarpTargetWire::Gate(gate_id as u32),
-        })
+    fn build_packaged_ship_command(&self, ship: i64, station: i64, ship_type: i64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::BuildPackagedShip {
+                ship: ship_id(ship, "ship_id")?,
+                station: StationId(u32_id(station, "station_id")?),
+                ship_type: ShipTypeId(nonzero_u32_id(ship_type, "ship_type_id")?),
+            })
+        })())
     }
 
     #[func]
-    fn warp_to_body_command(&self, body_id: i64) -> PackedByteArray {
-        command_wire_bytes(ClientCommandWire::WarpCommand {
-            target: WarpTargetWire::Body(body_id as u32),
-        })
-    }
-
-    /// `range_m <= 0.0` falls back to the server-side default (weapon
-    /// range, ADR-0031).
-    #[func]
-    fn orbit_command(&self, target_id: i64, range_m: f64) -> PackedByteArray {
-        command_wire_bytes(ClientCommandWire::OrbitCommand {
-            target: NavigationTargetWire::Ship(target_id as u64),
-            radius: positive_or_none(range_m),
-        })
+    fn disassemble_ship_command(&self, ship: i64, station: i64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::DisassembleShip {
+                ship: ship_id(ship, "ship_id")?,
+                station: StationId(u32_id(station, "station_id")?),
+            })
+        })())
     }
 
     #[func]
-    fn orbit_gate_command(&self, gate_id: i64, range_m: f64) -> PackedByteArray {
-        command_wire_bytes(ClientCommandWire::OrbitCommand {
-            target: NavigationTargetWire::Gate(gate_id as u32),
-            radius: positive_or_none(range_m),
-        })
+    fn select_active_ship_command(&self, ship: i64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::SelectActiveShip {
+                ship: ship_id(ship, "ship_id")?,
+            })
+        })())
     }
 
     #[func]
-    fn keep_at_range_command(&self, target_id: i64, range_m: f64) -> PackedByteArray {
-        command_wire_bytes(ClientCommandWire::KeepAtRangeCommand {
-            target: NavigationTargetWire::Ship(target_id as u64),
-            range: positive_or_none(range_m),
-        })
+    fn assemble_command(&self, station: i64, ship_type: i64) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::Assemble {
+                station: StationId(u32_id(station, "station_id")?),
+                ship_type: ShipTypeId(nonzero_u32_id(ship_type, "ship_type_id")?),
+            })
+        })())
     }
 
     #[func]
-    fn keep_at_range_gate_command(&self, gate_id: i64, range_m: f64) -> PackedByteArray {
-        command_wire_bytes(ClientCommandWire::KeepAtRangeCommand {
-            target: NavigationTargetWire::Gate(gate_id as u32),
-            range: positive_or_none(range_m),
-        })
+    fn disembark_command(&self) -> Dict {
+        request_result(Ok(ClientRequest::Disembark))
     }
 
-    /// Schema-driven builder for commands whose wire shape is a flat
-    /// scalar-fields-only struct (no sentinel/tagged-target semantics --
-    /// see the dedicated methods above and below for those). `kind` is the
-    /// `ClientCommandWire` variant name (e.g. `"DockCommand"`); `fields`
-    /// supplies that variant's fields by name.
     #[func]
-    fn build(&self, kind: GString, fields: Dict) -> PackedByteArray {
-        let Some(fields) = scalar_dict_to_json_object(&fields) else {
-            return PackedByteArray::new();
-        };
-        let mut wrapper = serde_json::Map::with_capacity(1);
-        wrapper.insert(kind.to_string(), serde_json::Value::Object(fields));
-        match serde_json::from_value::<ClientCommandWire>(serde_json::Value::Object(wrapper)) {
-            Ok(cmd) => command_wire_bytes(cmd),
-            Err(err) => {
-                godot_error!("ClientCommand.build({kind}): {err}");
-                PackedByteArray::new()
-            }
-        }
+    fn transfer_to_station_command(
+        &self,
+        ship: i64,
+        station: i64,
+        item_id: Gd<ItemIdentity>,
+    ) -> Dict {
+        self.transfer_command(
+            ship,
+            station,
+            item_id.bind().get(),
+            TransferDirection::ToStation,
+        )
     }
 
-    /// Schema-driven builder for the Market-only request envelope. Market
-    /// requests intentionally do not enter `ClientCommandWire` or the Sector
-    /// command stream (ADR-0034).
+    #[func]
+    fn transfer_from_station_command(
+        &self,
+        ship: i64,
+        station: i64,
+        item_id: Gd<ItemIdentity>,
+    ) -> Dict {
+        self.transfer_command(
+            ship,
+            station,
+            item_id.bind().get(),
+            TransferDirection::ToShip,
+        )
+    }
+
+    /// Schema-driven builder for the Market-only request envelope. Sector
+    /// requests intentionally have no equivalent JSON builder.
     #[func]
     fn market_build(&self, kind: GString, fields: Dict) -> PackedByteArray {
         let Some(fields) = scalar_dict_to_json_object(&fields) else {
@@ -210,34 +454,12 @@ impl ClientCommand {
         let mut wrapper = serde_json::Map::with_capacity(1);
         wrapper.insert(kind.to_string(), serde_json::Value::Object(fields));
         match serde_json::from_value::<MarketCommandWire>(serde_json::Value::Object(wrapper)) {
-            Ok(command) => market_command_wire_bytes(command),
-            Err(err) => {
-                godot_error!("ClientCommand.market_build({kind}): {err}");
+            Ok(command) => market_command_bytes(command),
+            Err(error) => {
+                godot_error!("ClientCommand.market_build({kind}): {error}");
                 PackedByteArray::new()
             }
         }
-    }
-
-    #[func]
-    fn transfer_to_station_command(
-        &self,
-        ship_id: i64,
-        station_id: i64,
-        item_id: Gd<ItemIdentity>,
-    ) -> PackedByteArray {
-        self.transfer_command(ship_id, station_id, item_id, "ToStation")
-    }
-
-    /// The reverse of `transfer_to_station_command`: move the entire stack
-    /// back into the docked ship's own cargo.
-    #[func]
-    fn transfer_from_station_command(
-        &self,
-        ship_id: i64,
-        station_id: i64,
-        item_id: Gd<ItemIdentity>,
-    ) -> PackedByteArray {
-        self.transfer_command(ship_id, station_id, item_id, "ToShip")
     }
 
     #[func]
@@ -259,7 +481,7 @@ impl ClientCommand {
             );
             return PackedByteArray::new();
         };
-        market_command_wire_bytes(MarketCommandWire::PlaceMarketOrderCommand {
+        market_command_bytes(MarketCommandWire::PlaceMarketOrderCommand {
             ship_id,
             item_id: item_wire(&item_id),
             side: side.to_string(),
@@ -268,10 +490,6 @@ impl ClientCommand {
         })
     }
 
-    /// Build the `ClientMessage::Hello` binary frame `connection.gd` sends
-    /// on connect/reconnect (ADR-0007 §2, ADR-0042). `player_id < 0` means a
-    /// fresh connection (no resume identity); both `player_id`/`ship_id`
-    /// must be non-negative to resume (following a `Redirect`).
     #[func]
     fn hello_command(&self, resume_ticket: PackedByteArray) -> PackedByteArray {
         let resume = match resume_ticket.to_vec().try_into() {
@@ -284,28 +502,50 @@ impl ClientCommand {
                 return PackedByteArray::new();
             }
         };
-        to_wire_bytes(&ClientMessage::Hello(HelloMessage { resume }))
+        to_wire_bytes(&ClientMessage::Hello(HelloMessage { resume })).into()
     }
 }
 
 impl ClientCommand {
     fn transfer_command(
         &self,
-        ship_id: i64,
-        station_id: i64,
-        item_id: Gd<ItemIdentity>,
-        direction: &str,
-    ) -> PackedByteArray {
-        let (Ok(ship_id), Ok(station_id)) = (u64::try_from(ship_id), u32::try_from(station_id))
-        else {
-            godot_error!("ClientCommand.transfer_command: invalid ship or station ID");
-            return PackedByteArray::new();
-        };
-        command_wire_bytes(ClientCommandWire::TransferToStationCommand {
-            ship_id,
-            station_id,
-            item_id: item_wire(&item_id),
-            direction: direction.to_string(),
-        })
+        ship: i64,
+        station: i64,
+        item: ItemId,
+        direction: TransferDirection,
+    ) -> Dict {
+        request_result((|| {
+            Ok(ClientRequest::TransferCargo {
+                ship: ship_id(ship, "ship_id")?,
+                station: StationId(u32_id(station, "station_id")?),
+                item,
+                direction,
+            })
+        })())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_sector_builder_returns_structured_error_not_empty_bytes() {
+        let result = request_build_result(
+            ship_id(-1, "ship_id").map(|ship| ClientRequest::SelectActiveShip { ship }),
+        );
+        assert!(!result.ok);
+        assert_eq!(result.error_code, "invalid_id");
+        assert!(result.bytes.is_empty());
+        assert!(!result.error_message.is_empty());
+    }
+
+    #[test]
+    fn valid_sector_builder_returns_postcard_bytes() {
+        let result = request_build_result(Ok(ClientRequest::Stop));
+        assert!(result.ok);
+        assert!(!result.bytes.is_empty());
+        assert!(result.error_code.is_empty());
+        assert!(result.error_message.is_empty());
     }
 }

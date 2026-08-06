@@ -2,7 +2,7 @@
 //!
 //! Sent once per connection (fresh spawn, resume, or jump handoff) to give the
 //! client the navigation map plus every ship it can currently see. Absolute
-//! positions here are f64 (ADR-0029) -- [`PosWire`](crate::PosWire) is also f64
+//! positions here are f64 (ADR-0029) -- [`dawn_core::Position`] is also f64
 //! is used only for client command targets, so this module has its own
 //! `AbsPosWire`.
 
@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::VelWire;
 
 /// Absolute (Sector-frame, f64) position (ADR-0029). Distinct from
-/// [`crate::PosWire`] (f64), which carries client-authored command targets
+/// [`dawn_core::Position`] (f64), which carries client-authored command targets
 /// rather than server-authoritative absolute coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AbsPosWire {

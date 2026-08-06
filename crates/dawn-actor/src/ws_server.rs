@@ -10,7 +10,7 @@
 //! ## Protocol (ADR-0042)
 //!
 //! Every server -> client message (Hello/Welcome/Redirect/DomainEvent/
-//! ClientCommand/Market/InitialState/PlayerLoadout/AoiEnter/AoiLeave/
+//! ClientRequest/Market/InitialState/PlayerLoadout/AoiEnter/AoiLeave/
 //! PositionSnap) travels as a binary WebSocket frame, postcard-encoded via the
 //! [`ClientMessage`]/[`ServerMessage`] envelope in `dawn-wire` (ADR-0042
 //! stages 1-2c). There is no more ad-hoc JSON text path. One WebSocket frame
@@ -26,7 +26,7 @@
 //! Client → Server:  ClientMessage::Market(..)      (binary, postcard)
 //! ```
 
-use crate::{ClientCommand, ClientConnection};
+use crate::{ClientConnection, ClientRequest};
 use dawn_core::{DomainEvent, PlayerId, ShipId};
 use dawn_wire::{
     domain_event_to_event_wire, ClientMessage, InitialStateWire, MarketCommandWire,
@@ -64,7 +64,7 @@ const COMMAND_QUEUE_CAP: usize = 256;
 #[derive(Debug)]
 pub struct WsClientConnection {
     event_tx: mpsc::UnboundedSender<Message>,
-    command_rx: mpsc::Receiver<ClientCommand>,
+    request_rx: mpsc::Receiver<ClientRequest>,
     market_command_rx: mpsc::Receiver<MarketCommandWire>,
 }
 
@@ -89,8 +89,8 @@ impl ClientConnection for WsClientConnection {
         Ok(())
     }
 
-    fn try_recv_command(&mut self) -> Option<ClientCommand> {
-        self.command_rx.try_recv().ok()
+    fn try_recv_request(&mut self) -> Option<ClientRequest> {
+        self.request_rx.try_recv().ok()
     }
 
     fn try_recv_market_command(&mut self) -> Option<MarketCommandWire> {
@@ -147,7 +147,7 @@ impl HandshakeRequest {
         } = self;
 
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Message>();
-        let (command_tx, command_rx) = mpsc::channel::<ClientCommand>(COMMAND_QUEUE_CAP);
+        let (request_tx, request_rx) = mpsc::channel::<ClientRequest>(COMMAND_QUEUE_CAP);
         let (market_command_tx, market_command_rx) =
             mpsc::channel::<MarketCommandWire>(COMMAND_QUEUE_CAP);
 
@@ -182,28 +182,34 @@ impl HandshakeRequest {
             let _ = ws_sink.close().await;
         });
 
-        // Command-receive task.
+        // Request-receive task.
+        let rejection_tx = event_tx.clone();
         tokio::spawn(async move {
             while let Some(Ok(msg)) = ws_source.next().await {
                 if let Message::Binary(bytes) = msg {
-                    if let Ok(message) = ClientMessage::decode(&bytes) {
-                        match message {
-                            ClientMessage::Command(cmd_wire) => {
-                                if let Some(cmd) = dawn_wire::client_command_from_wire(cmd_wire) {
-                                    // Bounded send: blocks (backpressures the socket
-                                    // read) once COMMAND_QUEUE_CAP is reached instead
-                                    // of growing memory without limit.
-                                    if command_tx.send(cmd).await.is_err() {
-                                        return;
-                                    }
-                                }
+                    match ClientMessage::decode(&bytes) {
+                        Ok(ClientMessage::Command(request)) => {
+                            // Bounded send backpressures the socket reader once the
+                            // application queue reaches COMMAND_QUEUE_CAP.
+                            if request_tx.send(request).await.is_err() {
+                                return;
                             }
-                            ClientMessage::Market(market_command) => {
-                                if market_command_tx.send(market_command).await.is_err() {
-                                    return;
-                                }
+                        }
+                        Ok(ClientMessage::Market(market_command)) => {
+                            if market_command_tx.send(market_command).await.is_err() {
+                                return;
                             }
-                            ClientMessage::Hello(_) => {}
+                        }
+                        Ok(ClientMessage::Hello(_)) => {}
+                        Err(error) => {
+                            // A malformed peer receives at most one structured
+                            // rejection before the connection is closed. Returning
+                            // here prevents untrusted input from growing the
+                            // unbounded outbound queue without limit.
+                            let rejection = ServerMessage::ClientRequestRejected(error.rejection());
+                            let _ = rejection_tx.send(server_message_frame(&rejection));
+                            let _ = rejection_tx.send(Message::Close(None));
+                            return;
                         }
                     }
                 }
@@ -213,7 +219,7 @@ impl HandshakeRequest {
 
         let conn = WsClientConnection {
             event_tx,
-            command_rx,
+            request_rx,
             market_command_rx,
         };
         println!(
@@ -235,9 +241,9 @@ impl PlayerSession {
         self.conn.send_events(events).is_ok()
     }
 
-    /// Pull one pending command, if any.
-    pub fn try_recv_command(&mut self) -> Option<ClientCommand> {
-        self.conn.try_recv_command()
+    /// Pull one pending request, if any.
+    pub fn try_recv_request(&mut self) -> Option<ClientRequest> {
+        self.conn.try_recv_request()
     }
 
     /// Pull one pending Market request, if any.
