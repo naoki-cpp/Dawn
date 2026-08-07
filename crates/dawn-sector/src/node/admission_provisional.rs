@@ -1,10 +1,31 @@
-//! Durable fresh-admission preparation and atomic commit materialization.
+//! Current fresh-admission preparation / materialization implementation.
 //!
-//! Begin records an allocation watermark in the event log and the exact spawn
-//! input in SQLite before any handshake frame can expose the identity. Commit
-//! appends one replay-complete `ClientAdmissionCommitted` event and applies its
-//! Station grant, ownership binding, and prepared-row cleanup in one idempotent
-//! SQLite transaction.
+//! # ADR-0049 / #277 migration status
+//!
+//! The code below still implements the pre-refactor persistence path: fresh
+//! allocation watermarks are appended as public `DomainEvent`s, prepared spawn
+//! input and resume-ticket state are stored in the catch-all SQLite adapter, and
+//! `ClientAdmissionCommitted` is used by the current replay/reconciliation path.
+//! Those mechanics describe the **current migration baseline**, not the final
+//! recovery authority selected by ADR-0049.
+//!
+//! The target contract separates the authorities:
+//!
+//! - #277 admission/identity repositories own durable pre-materialization
+//!   reservation and resume-ticket protocol state;
+//! - reserving a `PlayerId` / `ShipId` durably consumes it before `Welcome`, and
+//!   abort/expiry never makes that ID reusable;
+//! - once a Ship is materialized, Ship/ownership/active-routing/Station world
+//!   state is ADR-0049 `RecoveryDelta` + checkpoint authority;
+//! - repository finalization after a committed world transition is reconciled
+//!   idempotently from a stable admission identity before the affected service is
+//!   served; and
+//! - public admission events may remain useful facts, but are not the sole exact
+//!   recovery reducer or allocator authority.
+//!
+//! Until #271/#272/#277/#278 migrate this code, comments on individual methods
+//! explicitly describe current behavior without promoting it to the target
+//! persistence contract.
 
 use dawn_core::{
     events::{ClientAdmissionCommitted, ClientAdmissionIdentityReserved},
@@ -24,10 +45,17 @@ fn generate_resume_ticket() -> ResumeTicket {
 }
 
 impl<S: EventStore> SimulationNode<S> {
-    /// Reserve identities without materializing a durable Ship. The allocation
-    /// watermark is appended first; then SQLite records the spawn input. This
-    /// method returns only after both durable writes complete, so a returned
-    /// identity is safe for `Welcome` to expose.
+    /// Current implementation of a fresh identity reservation.
+    ///
+    /// Today the allocation watermark is appended to the public EventStore first
+    /// and SQLite then records the exact prepared spawn input. Returning only
+    /// after both writes is the current mechanism that makes an exposed identity
+    /// retryable after restart.
+    ///
+    /// Under ADR-0049/#277, the normative invariant is instead that the durable
+    /// Admission/Identity repository reservation also durably consumes the
+    /// `PlayerId` / `ShipId` before `Welcome`; EventStore replay is migration
+    /// baseline rather than the final allocator/recovery authority.
     pub(crate) fn reserve_fresh_admission_identity(
         &mut self,
         spawn_position: Position,
@@ -176,10 +204,17 @@ impl<S: EventStore> SimulationNode<S> {
         handoff
     }
 
-    /// Commit a fresh admission as one replay-complete event plus an idempotent
-    /// Station-inventory/identity transaction. The live claim remains held until
-    /// the event is durably appended; a crash after append is repaired by
-    /// replay/reconcile.
+    /// Current legacy commit path for a reserved fresh admission.
+    ///
+    /// It materializes live state, appends `ClientAdmissionCommitted`, then
+    /// finalizes the SQLite grant/identity rows. Current replay/reconciliation
+    /// repairs several crash cases around that ordering.
+    ///
+    /// ADR-0049/#272/#277 replaces this as the normative commit contract with a
+    /// prepared Sector transition whose `RecoveryDelta` is durable before live
+    /// apply, followed by idempotent Admission/Identity repository finalization.
+    /// The public event may remain a business fact but is not the sole
+    /// replay-complete authority.
     pub(crate) fn commit_reserved_fresh_admission(
         &mut self,
         player_id: PlayerId,
@@ -244,8 +279,13 @@ impl<S: EventStore> SimulationNode<S> {
         true
     }
 
-    /// Replay one atomic fresh-admission commit. This method is idempotent for
-    /// both ECS state and the SQLite Station/identity ledger.
+    /// Replay one fresh-admission public event through the current migration
+    /// path. This method is idempotent for current ECS state and the SQLite
+    /// Station/identity ledger.
+    ///
+    /// ADR-0049 does not make this public-event replay the final exact recovery
+    /// reducer; future world recovery uses `RecoveryDelta`, with #277 repository
+    /// reconciliation for protocol authority.
     pub(super) fn replay_client_admission_commit(&mut self, event: &ClientAdmissionCommitted) {
         if !self.ships.index.contains_key(&event.ship_id) {
             self.insert_to_world(event.ship_id, Position::ORIGIN, Velocity::ZERO);
@@ -280,9 +320,12 @@ impl<S: EventStore> SimulationNode<S> {
         self.ensure_client_admission_grant(event);
     }
 
-    /// Release only the live capacity claim. The consumed IDs remain in the
-    /// event log and the SQLite prepared row remains retryable because a partial
-    /// handshake may already have exposed the identity.
+    /// Release only the in-memory capacity/handshake claim.
+    ///
+    /// In the current implementation, EventStore/SQLite data continues to make
+    /// the exposed reservation retryable. Under ADR-0049/#277 the stronger
+    /// invariant is explicit: terminating the prepared protocol record may
+    /// release resources, but its durably consumed IDs are never reusable.
     pub(crate) fn abort_reserved_fresh_admission(&mut self, ship_id: ShipId) {
         self.pending_fresh_admissions.remove(&ship_id);
         debug_assert!(
@@ -292,9 +335,12 @@ impl<S: EventStore> SimulationNode<S> {
     }
 
     /// True when the requested resume would overwrite a different established
-    /// Player/Ship relationship. SQLite is consulted as the durable fallback
-    /// after checkpoint compaction, while the live maps retain session-local
-    /// active-Ship constraints.
+    /// Player/Ship relationship. The current path consults the catch-all SQLite
+    /// adapter as its durable fallback plus live maps for active routing.
+    ///
+    /// #277 replaces that adapter with explicit identity authority and #278
+    /// gates serving after failover until repository/world reconciliation is
+    /// current.
     pub(crate) fn resume_admission_identity_conflicts(
         &self,
         player_id: PlayerId,
@@ -342,9 +388,12 @@ impl<S: EventStore> SimulationNode<S> {
         }
     }
 
-    /// Compare-and-set the exact identity captured at begin. The durable owner
-    /// is written before the live ownership maps are exposed, closing the crash
-    /// window where a process loss could otherwise forget the binding.
+    /// Current compare-and-set resume commit path.
+    ///
+    /// It writes the SQLite ownership/ticket row before exposing the live
+    /// ownership maps, which is the current crash-window mitigation. #277/#278
+    /// replace this with the explicit identity-repository authority and
+    /// reconciliation/serving contract selected by ADR-0049.
     pub(crate) fn commit_reserved_resume_admission(
         &mut self,
         player_id: PlayerId,
