@@ -339,7 +339,7 @@ impl<S: EventStore> SimulationNode<S> {
             sector_id,
             bounds,
             galaxy,
-            crate::game_data::test_catalog_with_overrides(modules, ship_types),
+            crate::game_data::test_catalog_arc(),
             store,
         )
     }
