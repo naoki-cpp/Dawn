@@ -15,7 +15,8 @@ this repository. Keep it concise. Long-lived design detail belongs in
 ## Project North Star
 
 Dawn is building an EVE-like single-shard space game with a distributed,
-event-backed simulation. The technical work exists to support:
+event-backed simulation with append-only public facts and a separate
+authoritative recovery journal. The technical work exists to support:
 
 - large real-time battles without EVE-style global TiDi
 - player-driven territory, structures, economy, and risk

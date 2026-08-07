@@ -53,8 +53,11 @@ impl<S: EventStore> SimulationNode<S> {
             // Independently durable in SQLite (ADR-0038), plus its cache.
             station_inventory_db: _,
             station_inventory_cache: _,
-            // Per-tick transients: drained by the serve loop every tick, so
-            // there is nothing meaningful to carry across a restart.
+            // Legacy snapshot path: these queues are not persisted here.
+            // ADR-0049 classifies pending bot commands and auto-jump retry
+            // obligations as recovery authority; the RecoveryDelta/checkpoint
+            // path must carry them. Completed-warp corrections remain lossy
+            // presentation output.
             pending_bot_lock_commands: _,
             pending_auto_jumps: _,
             completed_warps: _,
@@ -492,11 +495,14 @@ mod tests {
         );
     }
 
-    /// INV-002 / ADR-0017 (8A-1) — snapshot + re-running the tail ticks reproduces
-    /// the live state, including transient derived state (capacitor) not event-sourced.
+    /// Legacy snapshot + public-event-tail regression for INV-002 / ADR-0017
+    /// (8A-1). It verifies the current implementation's ability to reproduce
+    /// capacitor state after snapshot restore and tail-tick re-execution.
+    /// ADR-0049 supersedes this path as operational recovery authority: the
+    /// future versioned RecoveryDelta/checkpoint must carry capacitor state.
     ///
-    /// Ships coast at constant velocity with no move command so there is no
-    /// thrust intent (transient, not snapshotted). Both live and restored nodes
+    /// Ships coast at constant velocity with no move command so this regression
+    /// does not depend on flight-mode recovery. Both live and restored nodes
     /// coast identically, isolating the snapshot round-trip property.
     #[test]
     fn snapshot_plus_tail_tick_reexecution_matches_live_including_capacitor() {
@@ -880,11 +886,13 @@ mod tests {
         assert_eq!(node2.player_docked_station(player_id), Some(StationId(0)));
     }
 
-    /// A ship spawned *after* the last snapshot must come back identically
-    /// through snapshot + tail-log replay (issue #197): live spawning and
-    /// `ShipSpawned` replay both go through `materialize_ship_stats` now, but
-    /// before that they diverged silently -- replay skipped the
-    /// `ships.type_ids` insertion and `CapacitorComp` init the live path did.
+    /// Legacy snapshot + public-event-tail regression: a ship spawned *after*
+    /// the last snapshot must come back identically (issue #197). Live
+    /// spawning and `ShipSpawned` replay both go through
+    /// `materialize_ship_stats` now, but before that they diverged silently --
+    /// replay skipped the `ships.type_ids` insertion and `CapacitorComp` init
+    /// the live path did. ADR-0049 supersedes this recovery path with the
+    /// versioned RecoveryDelta/checkpoint contract.
     ///
     /// Compares the *encoded* snapshot bytes rather than picking a few fields
     /// to assert on, for the same reason `restoring_a_snapshot_and_recapturing_
@@ -898,9 +906,11 @@ mod tests {
         // Spawned after the snapshot: only reachable on restore via tail-log
         // replay of its ShipSpawned event, not via restore_ship_from_snapshot.
         // Velocity::ZERO: `ShipSpawned` carries no velocity field by design
-        // (INV-MOVE -- velocity is event-sourced only via `VelocityChanged`),
-        // so a nonzero spawn velocity here would never replay and would be a
-        // mismatch unrelated to the bug this test guards.
+        // (legacy EventStore behavior: velocity is event-sourced only via
+        // `VelocityChanged`), so a nonzero spawn velocity here would never
+        // replay and would be a mismatch unrelated to the bug this test
+        // guards. ADR-0049 requires exact velocity recovery in the future
+        // RecoveryDelta/checkpoint path.
         let ship_id = node.spawn_ship(
             dawn_core::ShipTypeId(1),
             Position::new(500.0, 0.0, 0.0),
