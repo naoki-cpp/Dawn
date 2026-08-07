@@ -446,12 +446,6 @@ pub struct KeepAtRangeCommand {
 /// internal policy inputs; there is no second mirrored full request enum. Acting
 /// identities for active-ship operations are intentionally absent and are supplied
 /// by the admitted server session.
-///
-/// This enum intentionally has no generic `request_id` today. Under ADR-0049, a
-/// retry after an ambiguous disconnect is therefore not automatically the same
-/// operation; callers refresh authoritative state and submit a new request. A
-/// future transparent exactly-once retry feature must add an explicit stable
-/// request identity and durable dedup/result policy at the runtime/wire boundary.
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ClientRequest {
