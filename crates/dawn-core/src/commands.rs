@@ -1,9 +1,11 @@
 //! Commands — requests to change the world that may be rejected.
 //!
-//! A Command is *not* an Event.  It expresses intent, not fact.
-//! The system validates a Command before producing an Event.  (INV-006)
+//! A Command is *not* an Event. It expresses intent, not fact. The system
+//! validates a Command before producing committed authoritative state and, when
+//! applicable, public `DomainEvent`s (INV-006 / ADR-0049). A successful command
+//! may have a `RecoveryDelta` even when it emits no public event.
 //!
-//! # Owned ship vs. active ship (ADR-0037)
+//! # Owned ship vs. active ship (ADR-0037 / ADR-0049)
 //!
 //! Flight/steering/module/Undock commands do not carry a `ship_id` — the
 //! server always resolves them against the caller's *active* ship
@@ -13,6 +15,18 @@
 //! DisassembleShip) still carry an explicit `ship_id`, because they operate
 //! on any *owned* docked ship, not just the active one (docs/architecture/
 //! ownership.md §7).
+//!
+//! `active_ship` is authoritative Player routing state under ADR-0049 because it
+//! changes which Ship later commands mutate. It must be recovered even though
+//! `SelectActiveShip`/`Disembark` do not require public `DomainEvent`s.
+//!
+//! # Retry identity
+//!
+//! `ClientRequest` currently has no generic request/idempotency ID. A newly
+//! submitted request after an ambiguous disconnect is therefore a new request;
+//! the wire/runtime must not claim transparent exactly-once retry based only on
+//! payload equality. Protocols that need such retry use their own stable IDs
+//! (for example admission, Transit Saga, or Market settlement identities).
 
 use crate::fitting::{ModuleId, SlotKind};
 use crate::navigation::{JumpGateId, StationId, WarpTarget};
@@ -111,11 +125,14 @@ pub struct UndockCommand;
 /// Request to disembark: clear the caller's `active_ship` while docked,
 /// without disassembling or transferring ownership of it (ADR-0037). No
 /// `ship_id` -- always targets the caller's own active ship, like
-/// `UndockCommand`. Session-local, not event-sourced (same tier as
-/// `SelectActiveShipCommand`): it changes no Ship's authoritative state, only
-/// which ship the caller's commands route to. A later `SelectActiveShipCommand`
-/// re-activates a ship (this one or another owned ship docked at the same
-/// station).
+/// `UndockCommand`.
+///
+/// This command emits no required public `DomainEvent`, but ADR-0049 classifies
+/// the successful `active_ship` change as authoritative Player routing state:
+/// it changes which Ship subsequent commands target and whether Undock is legal.
+/// The routing mutation therefore belongs to checkpoint/`RecoveryDelta` recovery.
+/// A later `SelectActiveShipCommand` re-activates a ship (this one or another
+/// owned ship docked at the same station).
 ///
 /// May be rejected if:
 /// - The caller has no active ship (already disembarked, or never had one).
@@ -233,12 +250,17 @@ pub struct AssembleCommand {
     pub ship_type_id: ShipTypeId,
 }
 
-/// Request to make an owned, docked ship the caller's active ship (ADR-0037).
+/// Request to make an owned, docked ship the caller's active ship
+/// (ADR-0037, recovery classification amended by ADR-0049).
 ///
 /// Unlike Assemble (which will later add a new owned ship without switching),
 /// this is the only way an already-owned ship becomes active. Scoped to
 /// station-local switches for now: `ship_id` must be docked at the same
 /// station the caller is currently docked at.
+///
+/// The successful routing change is authoritative Player state even though no
+/// public `DomainEvent` is required; it belongs to ADR-0049 RecoveryDelta/
+/// checkpoint recovery.
 ///
 /// May be rejected if:
 /// - The caller does not own `ship_id`.
@@ -424,6 +446,12 @@ pub struct KeepAtRangeCommand {
 /// internal policy inputs; there is no second mirrored full request enum. Acting
 /// identities for active-ship operations are intentionally absent and are supplied
 /// by the admitted server session.
+///
+/// This enum intentionally has no generic `request_id` today. Under ADR-0049, a
+/// retry after an ambiguous disconnect is therefore not automatically the same
+/// operation; callers refresh authoritative state and submit a new request. A
+/// future transparent exactly-once retry feature must add an explicit stable
+/// request identity and durable dedup/result policy at the runtime/wire boundary.
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ClientRequest {
