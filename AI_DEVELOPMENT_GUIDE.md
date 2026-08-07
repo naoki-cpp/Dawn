@@ -15,7 +15,7 @@ this repository. Keep it concise. Long-lived design detail belongs in
 ## Project North Star
 
 Dawn is building an EVE-like single-shard space game with a distributed,
-event-sourced simulation. The technical work exists to support:
+event-backed simulation. The technical work exists to support:
 
 - large real-time battles without EVE-style global TiDi
 - player-driven territory, structures, economy, and risk
@@ -52,7 +52,7 @@ cargo run -p dawn-simulation --bin simulate --release -- --serve
 cargo run -p dawn-simulation --bin simulate --release -- --serve --cluster
 cargo run -p dawn-simulation --bin simulate --release -- --serve --duel
 cargo run -p dawn-simulation --bin simulate --release -- --serve --duel --enemies 2
-cargo run -p dawn-simulation --bin simulate --release -- --aoi-bench
+cargo run -p dawn-simulation --bin simulate --release --aoi-bench
 ```
 
 **Playing the Godot client against a live server**: `client/dawn_client_gdext.gdextension`
@@ -88,7 +88,7 @@ Do not violate these. Details live in `docs/architecture/`.
 - INV-001: Committed public `DomainEvent`s are append-only facts. Do not update,
   delete, truncate, or rewrite them in place. ADR-0049's authoritative recovery
   delta is a separate versioned stream with checkpoint-governed compaction.
-- INV-002: Exact Sector state is recovered from the newest complete compatible
+- INV-002: Exact Sector world state is recovered from the newest complete compatible
   checkpoint set plus every committed authoritative `RecoveryDelta` after its
   covered position. `DomainEvent`s are durable public/business facts, not the
   complete exact-state reducer. Eventless Ticks still have recovery records.
@@ -110,20 +110,33 @@ Do not violate these. Details live in `docs/architecture/`.
 - Ship ownership is sector-local. A ship must not be owned by two sectors at
   once.
 - Cross-sector transit uses the consensus path. Do not shortcut ownership moves.
-- Player ownership **and active-ship command routing** are authoritative state.
-  A successful `SelectActiveShip`/`Disembark` routing change is recoverable even
-  when it emits no public `DomainEvent`.
-- Recovery must preserve authoritative state, retained reliable outputs/retry
-  state, and required local projection watermarks through the committed recovery
-  tail.
+- Player ownership **and active-ship command routing** are authoritative Sector
+  world state. A successful `SelectActiveShip`/`Disembark` routing change is
+  recoverable even when it emits no public `DomainEvent`.
 - Station inventory authority is the Sector recovery journal; SQLite/repository
-  state is an idempotent projection/read model (ADR-0038 amended by ADR-0049).
+  Station state is an idempotent projection/read model (ADR-0038 amended by
+  ADR-0049).
+- Prepared admission and resume-ticket lifecycle state are different: they may be
+  authoritative protocol state in #277's durable admission/identity repositories
+  before a Ship is materialized. They require explicit reconciliation/catch-up,
+  not accidental treatment as Station projection rows.
+- Recovery must preserve authoritative state, retained reliable outputs/retry
+  state, and required projection/repository reconciliation state through failover.
 - A reliable post-commit action must have durable retry/idempotency state. A
   generic outbox is one implementation; #276 may represent Transit continuation
   through its durable Saga. Auto-jump cannot live only in an in-memory queue.
+- Generic `ClientRequest` currently has no stable request ID. Do not claim or
+  implement transparent exactly-once retry of arbitrary non-idempotent client
+  commands after an ambiguous disconnect. Refresh state and treat resubmission as
+  a new request unless the protocol has its own stable operation identity.
 - `ReplicatedDurable` may stage committed bytes on a durability quorum before the
   owner applies them. Staged bytes are not applied/promotable state; publication
-  and promotion require successful recovery-reducer/projection application.
+  and promotion require successful recovery-reducer/projection/repository checks.
+- #278 owns runtime selection of durability profile/replica set, quorum threshold,
+  durability-receipt aggregation, owner-epoch/fencing validation, and final ack
+  gating. #271 owns durable journal evidence and #280 owns transport.
+- Ordinary WebSocket/AoI presentation clients are not durable consumers and must
+  not hold public-event retention/compaction watermarks after disconnect.
 - Coordinate math must respect anchors/floating origins. Never compare raw
   anchor-relative offsets with sector-absolute positions.
 
@@ -161,34 +174,42 @@ Keep this ordering intact unless a later accepted ADR changes it:
    obligations together.
 3. Make the complete logical transition durable under the configured durability
    profile. If this fails, discard the prepared mutation and expose no success or
-   reliable effect. #271 owns physical framing/fsync/quorum evidence.
+   reliable effect. #271 owns journal framing/local durable evidence; #278 owns
+   runtime durability-profile/quorum/ack policy and #280 transports remote
+   durability messages.
 4. Apply the prepared mutation through the same recovery-reducer semantics used
-   by restore/replica catch-up. Apply required local projections idempotently.
-5. If post-durable live/projection application fails, fence/fail-stop the Sector;
-   do not continue from old/partial state and do not acknowledge.
+   by restore/replica catch-up. Apply required local projections and repository
+   reconciliations idempotently.
+5. If post-durable live/projection/reconciliation application fails,
+   fence/fail-stop the Sector or affected authoritative service; do not continue
+   from old/partial state and do not acknowledge.
 6. Publish public events and execute reliable effects only after successful local
    apply. Durable delivery/retry state advances only after downstream acknowledgement
    or equivalent idempotency proof; delivery is at-least-once unless the downstream
-   protocol provides stronger semantics.
+   protocol provides stronger semantics. Ephemeral WebSocket/AoI delivery does not
+   create a durable retention cursor.
 7. Acknowledge the authoritative operation only after the selected durability
-   profile and required local apply/projections are satisfied.
+   profile and required local apply/projection/reconciliation conditions are
+   satisfied.
 
 `LocalDurable` RPO 0 covers process/OS/power-loss failure with the durable medium
 intact. Claiming RPO 0 for owner machine/storage loss requires the synchronous
 durability-quorum semantics of `ReplicatedDurable`; quorum-staged bytes are not by
-themselves applied/promotable replica state. See ADR-0049.
+themselves applied/promotable replica state. Do not enable/advertise that stronger
+profile before #271/#278/#280 define and test one coherent quorum/fencing model.
 
 ### Recovery work-package ownership
 
 Do not make one sibling refactor silently redefine another's contract:
 
 - #284 / ADR-0049: recovery authority, RPO/RTO semantics, checkpoint/delta content
-- #271: journal mechanics, commit evidence, corruption/compaction implementation
+- #271: journal mechanics, durable evidence, corruption/compaction implementation
 - #272: storage-independent engine and prepare -> durable -> live-apply API
 - #275: state-owner decomposition; consumes the #284 authority inventory
 - #276: Transit Saga/attempt/receipt/retry persistence; consumes #284 semantics
-- #277: admission/identity/Station repository APIs/schema; no competing Sector authority
-- #280: peer/snapshot transport; transports the #284 representation
+- #277: Station projection plus authoritative admission/identity repository APIs/schema
+- #278: runtime durability profile/quorum/fencing/reconciliation/ack orchestration
+- #280: peer/snapshot/durability transport; carries the #284/#277 representations
 
 Do not merge command and event types. Do not invent rejection events for facts
 that never happened.
@@ -209,6 +230,11 @@ After changing either enum (or a type either references), regenerate with
 otherwise (`wire_schema_doc_is_up_to_date`). Never hand-edit the `.schema.json` files. `dawn-core` keeps `schemars`
 optional behind its `schema` feature; `dawn-wire` enables that feature only to
 generate the versioned Sector envelope schema containing the shared `ClientRequest` authority.
+
+The current `ClientRequest` envelope intentionally has no generic idempotency key.
+If a future feature adds transparent exactly-once retry, the request/wire schema and
+#278 runtime must add a stable `RequestId` (or equivalent) and durable dedup/result
+retention as one designed protocol change; never infer identity from payload equality.
 
 Since ADR-0042, the actual runtime transport for `Welcome`/`Redirect`/
 `Event`/`Hello`/`Command`/`InitialState`/`PlayerLoadout`/`AoiEnter`/
@@ -237,10 +263,12 @@ workspace DAG and relevant ADR first.
 - `dawn-event-store`: current public-event/recovery-storage substrate. #271 is
   chartered to replace its infallible EventStore-era persistence contract with
   the fallible/versioned atomic journal mechanics required by ADR-0049.
-- `dawn-consensus`: Raft and consensus transport.
+- `dawn-consensus`: Raft and consensus transport/state. Sector ownership epochs/
+  fencing input consumed by #278 must ultimately come from the authoritative
+  consensus/runtime ownership path rather than ad-hoc local counters.
 - `dawn-replication`: current sector-local replication and anti-entropy; #280
-  may change physical peer/snapshot transport while preserving #284 recovery
-  semantics.
+  may change physical peer/snapshot/durability transport while preserving #284
+  recovery semantics and #278 quorum policy.
 - `dawn-market`: Market order book (bid/ask) + `PlayerId` Currency ledger,
   its own SQLite authority independent of Sector tick determinism. The SQLite
   layer is an adapter; the private matching policy owns crossing, price-time
@@ -255,11 +283,15 @@ workspace DAG and relevant ADR first.
   owners. Depends on `dawn-wire` today to build typed wire messages it hands to
   `dawn-actor` (e.g. `PlayerLoadoutWire`).
 - `dawn-actor`: client/server protocol and connection boundary.
-- `dawn-simulation`: runnable simulation wiring and demos. Depends on
-  `dawn-market` to route Market-domain requests and bridge commands before
-  they reach the owning `SimulationNode` (ADR-0034 §4, roadmap.md §12
+- `dawn-simulation`: current runnable simulation/runtime wiring and demos. #278
+  consolidates this with production runtime orchestration so durability profile,
+  repository reconciliation, ack, retry, and effect policy have one implementation.
+  Depends on `dawn-market` to route Market-domain requests and bridge commands
+  before they reach the owning `SimulationNode` (ADR-0034 §4, roadmap.md §12
   9D-4/5).
-- `dawn-sector-node`: real hardware node binary and TOML config loading.
+- `dawn-sector-node`: real hardware node binary and TOML config loading; #278
+  reduces it toward bootstrap/adapter composition rather than a second runtime
+  policy implementation.
 
 ## Change Workflow
 
