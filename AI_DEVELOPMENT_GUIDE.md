@@ -85,34 +85,43 @@ Raspberry Pi cluster:
 
 Do not violate these. Details live in `docs/architecture/`.
 
-- INV-001: Event log is append-only. Do not update, delete, truncate, or
-  rewrite events.
-- INV-002: Events and authoritative snapshots are the source of truth. State is
-  derived, cached, or rebuilt from snapshot plus tail replay.
+- INV-001: Committed public `DomainEvent`s are append-only facts. Do not update,
+  delete, truncate, or rewrite them in place. ADR-0049's authoritative recovery
+  delta is a separate versioned stream with checkpoint-governed compaction.
+- INV-002: Exact Sector state is recovered from the newest complete compatible
+  checkpoint set plus every committed authoritative `RecoveryDelta` after its
+  covered position. `DomainEvent`s are durable public/business facts, not the
+  complete exact-state reducer. Eventless Ticks still have recovery records.
 - INV-003: Cross-sector ownership transfer must go through the consensus path.
 - INV-004: Entity IDs are unique and must not be reused.
 - INV-005: Determinism uses logical ticks and IDs, not wall-clock time.
 - INV-006: Commands are requests and may be rejected. Events are facts and must
   not be rejected.
-- INV-MOVE: Movement is replayed from velocity changes and deterministic
-  integration, not per-tick position events.
+- INV-MOVE: Public movement facts use velocity/anchor events where specified;
+  exact recovery of position/velocity/flight state uses ADR-0049 RecoveryDelta,
+  not historical Tick re-execution.
 - INV-TiDi: TiDi is local bounded pacing only; logical ticks remain
   deterministic.
-- Tick processing order is part of the design. Check
-  `docs/architecture/tick-model.md` before changing it.
+- Tick processing order and its prepare -> durable commit -> live apply boundary
+  are part of the design. Check `docs/architecture/tick-model.md` and
+  `docs/architecture/recovery-contract.md` before changing them.
 - Actor boundaries communicate through messages/mailboxes, not direct calls into
   actor internals.
 - Ship ownership is sector-local. A ship must not be owned by two sectors at
   once.
 - Cross-sector transit uses the consensus path. Do not shortcut ownership moves.
-- Snapshot restore must preserve authoritative state and catch up from the hot
-  event log.
+- Recovery must preserve authoritative state, retained reliable outputs/cursors,
+  and required local projection watermarks through the committed recovery tail.
+- Station inventory authority is the Sector recovery journal; SQLite is an
+  idempotent lazy projection (ADR-0038 as amended by ADR-0049).
+- A reliable post-commit action must have a durable outbox/idempotency contract.
+  In particular, auto-jump Raft proposals cannot live only in an in-memory queue.
 - Coordinate math must respect anchors/floating origins. Never compare raw
   anchor-relative offsets with sector-absolute positions.
 
 Forbidden change IDs are stable because docs and ADRs refer to them:
 
-- FBD-001: No destructive event-log operations.
+- FBD-001: No destructive in-place public-event-log operations.
 - FBD-002: No external dependencies in `dawn-core`.
 - FBD-003: No wall-clock time for causal order.
 - FBD-004: No direct actor-to-actor method calls.
@@ -130,25 +139,41 @@ Reference docs:
 - `docs/architecture/event-schema-evolution.md`
 - `docs/architecture/ownership.md`
 - `docs/architecture/tick-model.md`
+- `docs/architecture/recovery-contract.md`
 
-## Event Workflow
+## Authoritative Transition Workflow
 
-Keep this flow intact unless an ADR changes it:
+ADR-0049 supersedes the old "mutate live state, then append events" workflow.
+Keep this ordering intact unless a later accepted ADR changes it:
 
-1. Receive a command from a client, script, simulation, or actor message.
-2. Validate the command. Rejected commands do not emit domain events.
-3. Apply domain logic to the authoritative in-memory model.
-4. Generate domain events that describe facts that happened.
-5. Append events to the event store. If append fails, do not treat the state
-   change as committed.
-6. Replicate or gossip the append-only log through the relevant runtime path.
-7. Update projections, read models, and client snapshots from committed facts.
+1. Receive and validate a command/Tick/committed input. A rejected command
+   creates no durable transition.
+2. Prepare a bounded mutation without changing committed live authoritative
+   state. Produce `RecoveryDelta`, public `DomainEvent`s, and reliable outbox
+   intents together.
+3. Atomically make the complete logical transition envelope durable under the
+   configured durability profile. If this fails, discard the prepared mutation
+   and expose no success/effect.
+4. Apply the prepared mutation through the same recovery-reducer semantics used
+   by restore/replica catch-up. Apply required local projections idempotently.
+5. If post-append live/projection application fails, fence/fail-stop the Sector;
+   do not continue from old/partial state and do not acknowledge.
+6. Publish public events and execute reliable outbox effects only after local
+   commit. Durable consumer cursors advance only after downstream acknowledgement;
+   delivery is at-least-once unless the downstream protocol provides stronger
+   idempotency/transaction semantics.
+7. Acknowledge the authoritative operation only after the selected durability
+   profile and required local projections are satisfied.
+
+`LocalDurable` RPO 0 covers process/OS/power-loss failure with the durable medium
+intact. Claiming RPO 0 for owner machine/storage loss requires the synchronous
+replica-quorum semantics of `ReplicatedDurable`; see ADR-0049.
 
 Do not merge command and event types. Do not invent rejection events for facts
 that never happened.
 
 Use the `/add-event` skill when introducing a new event and `/remove-event`
-when deleting a deprecated one — they cover every pipeline touchpoint.
+when deleting a deprecated one — they cover every public-event pipeline touchpoint.
 
 ### Wire protocol (client<->server)
 
@@ -188,7 +213,8 @@ workspace DAG and relevant ADR first.
   `dawn-core` + serde + postcard -- no transport/runtime dependency, so
   `dawn-client-gdext` can depend on it directly (ADR-0041, ADR-0042).
 - `dawn-ecs`: components and systems. No event store or network ownership.
-- `dawn-event-store`: append-only persistence and snapshots.
+- `dawn-event-store`: append-only public-event persistence plus recovery storage
+  primitives/checkpoint support selected by ADR-0049/#271.
 - `dawn-consensus`: Raft and consensus transport.
 - `dawn-replication`: sector-local replication and anti-entropy.
 - `dawn-market`: Market order book (bid/ask) + `PlayerId` Currency ledger,
@@ -260,11 +286,12 @@ For hard bugs, follow the `diagnosing-bugs` skill:
   `/coverage-audit` skill runs the procedure end to end), not gated per PR.
   Wiring/binary files at 0% are intentional (covered by manual/hardware
   verification); the gaps worth closing are logic whose failure mode is
-  invisible to manual play — event replay (`node/apply_event.rs`, INV-002)
-  and wire conversion (`dawn-actor/src/protocol.rs`) first. New match arms
-  in those two files need direct tests in the same PR. Deliberately
-  uncovered code is named in the PR description with the reason, never
-  silently skipped. See #112 for the audit pattern.
+  invisible to manual play — recovery reducer/checkpoint-tail equivalence,
+  public-event projection (`node/apply_event.rs`), and wire conversion
+  (`dawn-actor/src/protocol.rs`) first. New match arms in public replay/wire
+  conversion need direct tests in the same PR. Deliberately uncovered code is
+  named in the PR description with the reason, never silently skipped. See
+  #112 for the audit pattern.
 
 ## Encoding Rules
 
@@ -311,6 +338,8 @@ Use this guide as the router, then read the relevant long-form doc:
 - Domain context and vocabulary: `CONTEXT.md`
 - Game vision: `docs/adr/ADR-0016-game-vision.md`
 - Architecture overview: `docs/architecture/architecture.md`
+- Recovery contract: `docs/architecture/recovery-contract.md`
+- Recovery ADR: `docs/adr/ADR-0049-sector-recovery-state-delta-wal.md`
 - Forbidden changes: `docs/architecture/forbidden-changes.md`
 - Event catalog: `docs/architecture/event-catalog.md`
 - Wire protocol (postcard binary plus the remaining JSON frames at the
@@ -342,4 +371,4 @@ this guide.
 
 ---
 
-Last updated: 2026-08-02 / Covers ADR-0001 through ADR-0047
+Last updated: 2026-08-07 / Covers ADR-0001 through ADR-0049
