@@ -1,15 +1,30 @@
-//! SQLite-backed durable storage for per-station Station inventory (ADR-0038).
+//! Current SQLite persistence seam for Station rows plus admission/identity
+//! protocol rows.
 //!
-//! Station inventory used to live entirely in a `BTreeMap` that was cloned
-//! whole into every periodic `StateSnapshot` and reloaded whole on restart
-//! (ADR-0034 9B's intentionally-simple MVP). This module is the "storage
-//! seam" ADR-0034 §2 anticipated: SQLite is now the durable authority, and
-//! `SimulationNode` only keeps a bounded in-memory cache of recently-touched
-//! players on top of it (`node/station.rs`).
+//! # ADR-0049 / #277 authority split
 //!
-//! The existing flat SQLite columns are preserved for on-disk compatibility,
-//! but their meaning is owned by `dawn_core::ItemId` rather than duplicated
-//! here.
+//! This module predates the final #277 repository split and currently stores
+//! several domains in one `rusqlite::Connection`:
+//!
+//! - `station_inventory`: **not** independent Sector-world authority under
+//!   ADR-0049. The target model is an idempotent SQLite/read-model projection of
+//!   journal-owned Station state, with a global contiguous applied-through
+//!   watermark.
+//! - `client_admission_prepared`, `client_admission_grants`, and
+//!   `client_ship_ownership`: durable admission/identity **protocol authority**
+//!   may live in #277 repositories because reservations and resume-ticket state
+//!   can exist before a Ship is materialized in Sector world state. Those rows
+//!   require explicit reconciliation/catch-up with committed Sector transitions.
+//!
+//! The current catch-all type and mutation ordering below are migration baseline,
+//! not the final repository API. #277 splits the domains and #278 owns runtime
+//! reconciliation/ack ordering. Do not infer from this file that all SQLite rows
+//! are Station authority or that the current SQLite-first paths are normative.
+//!
+//! The existing flat SQLite item columns are preserved by the current
+//! implementation, but their meaning is owned by `dawn_core::ItemId` rather than
+//! duplicated here. Pre-release storage compatibility is not required by the
+//! destructive refactor.
 
 use std::collections::BTreeMap;
 
@@ -50,9 +65,12 @@ fn ticket_from_blob(bytes: Vec<u8>) -> rusqlite::Result<ResumeTicket> {
     Ok(ResumeTicket::from_bytes(bytes))
 }
 
-/// Durable Station inventory store for one Sector node. Wraps a single
-/// `rusqlite::Connection` -- either a real file (production) or `:memory:`
-/// (tests/demos, matching `InMemoryEventStore`'s role for the event log).
+/// Current catch-all SQLite adapter for one Sector node.
+///
+/// It wraps one `rusqlite::Connection` for the legacy Station + admission +
+/// identity schema. Under ADR-0049/#277, Station rows become an idempotent
+/// projection while admission/identity rows may remain durable protocol authority
+/// behind separate repository APIs. This type is scheduled for removal by #277.
 pub(super) struct StationInventoryDb {
     conn: Connection,
 }
@@ -141,9 +159,13 @@ impl StationInventoryDb {
         Ok(Self { conn })
     }
 
-    /// Persist the spawn input for a fresh identity before any handshake frame
-    /// can expose the pair to the client. The event log remains the allocation
-    /// watermark; this row makes the exact attempt retryable after restart.
+    /// Persist a fresh admission reservation before any handshake frame exposes
+    /// its identity to the client.
+    ///
+    /// Under ADR-0049/#277 this prepared row is durable admission protocol
+    /// authority until the corresponding Ship is materialized/aborted. It is not
+    /// merely a Station projection row, and restart must reuse/reconcile the same
+    /// reservation rather than allocate a conflicting identity.
     pub(super) fn reserve_client_admission(
         &self,
         ship_id: ShipId,
