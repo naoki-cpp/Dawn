@@ -1,200 +1,224 @@
 ---
-scope    : Database selection and migration strategy for Event Store, Station inventory, and Market
+scope    : Database/storage selection and migration strategy for Sector recovery, public Event history, Station projection, and Market
 audience : AI Agent / Human Developer
 update   : When persistence ownership, deployment topology, consistency requirements, or database adapters change
-related  : architecture.md, ../adr/ADR-0003-local-first-development.md, ../adr/ADR-0017-snapshot-compaction.md, ../adr/ADR-0034-economy-foundations.md, ../adr/ADR-0038-station-inventory-sqlite.md
+related  : architecture.md, recovery-contract.md, ../adr/ADR-0003-local-first-development.md, ../adr/ADR-0017-snapshot-compaction.md, ../adr/ADR-0034-economy-foundations.md, ../adr/ADR-0038-station-inventory-sqlite.md, ../adr/ADR-0049-sector-recovery-state-delta-wal.md
 ---
 
 # Dawn Database Strategy
 
 ## 1. 結論
 
-SQLite は、現在の Dawn における **Sector-local な Station inventory** と
-**単一 `MarketRuntime` が所有する Market** には適している。今すぐ別の DB へ
-移行しない。
+SQLite は Dawn の **node-local Station projection/repository** と **単一
+`MarketRuntime` が所有する Market** に引き続き適している。今すぐ別DBへ移行する必要はない。
 
-ただし、SQLite を Dawn 全体の最終 DB とみなさない。用途ごとに次の方針を採る。
+ただし、ADR-0049により「SQLiteを使うか」と「何がSector recovery authorityか」は分離された。
+**Station inventoryのexact Sector authorityはversioned recovery journal/checkpointであり、SQLite
+はidempotent projection/read modelである。** Marketは別bounded contextであり、現時点では自身の
+SQLite transactionがMarket内部のauthorityを持つ。
 
-| 用途 | 現在の方針 | 将来の第一候補 |
+| 用途 | 現在の実装 | Normative / 将来方針 |
 |---|---|---|
-| Sector Event Log | `FileEventStore` の append-only 2層ログを継続 | 現行方式を継続。DB 化は別の必要性が生じた場合だけ再評価 |
-| Station inventory | Sector node ごとのローカル SQLite を継続 | 原則 SQLite 継続 |
-| 単一プロセスの Market | SQLite を継続 | SQLite 継続 |
-| 複数プロセスから共有する Market | 現在は対象外 | PostgreSQL |
-| 世界全体の分散トランザクション | 現在は導入しない | 実測要件を得てから別 ADR で設計 |
+| Sector exact recovery | `FileEventStore` + `StateSnapshot` に依存するlegacy path | ADR-0049 authoritative state-delta journal + versioned checkpoint。#271/#272で移行 |
+| Public `DomainEvent` history | `FileEventStore` hot/cold 2層ログ | append-only public fact/archiveとして維持。exact recoveryとは別watermark |
+| Station inventory | node-local SQLite + bounded cache | Sector recovery authorityをidempotentにproject。#277がrepository/schemaを再編 |
+| 単一プロセスMarket | SQLite | SQLite継続 |
+| 複数プロセス共有Market | 現在対象外 | PostgreSQLを第一候補として別ADR |
+| 世界全体の分散transaction | 導入しない | 実測要件が出た時点で別設計 |
 
-重要なのは「どの DB が最も高性能か」ではなく、**誰が書き込みを所有するか**、
-**ネットワーク越しに共有するか**、**どの状態を同一トランザクションに含める必要が
-あるか**である。
+重要なのはDB製品名ではなく、**authority、writer ownership、transaction/recovery boundary、failure
+domain**である。
 
-この文書は現行 ADR を置き換えない。特に Station inventory の現在の挙動は
-[ADR-0038](../adr/ADR-0038-station-inventory-sqlite.md) が権威を持つ。下記の整合性改善を
-実装する場合は、ADR-0038 と Event Workflow に影響するため、新しい ADR と人間の承認が
-必要になる。
+## 2. Sector persistence topology
 
-## 2. 現在の永続化トポロジー
+### 2.1 Exact recovery journal
 
-### 2.1 Sector Event Log
+#284 / ADR-0049 はSector exact operational recoveryを次で固定する。
 
-Sector の因果履歴は `dawn-event-store` が所有する。ホットログ、検証済み
-スナップショット、コールドアーカイブの2層構成であり、通常復旧は
-「スナップショット + ホットログ末尾」で行う（ADR-0017）。
+```text
+newest complete compatible checkpoint
+    + every contiguous committed authoritative RecoveryDelta after it
+```
 
-この用途は順次追記が中心であり、現在のバイナリ append-only log は要件に合っている。
-SQL検索や複数 writer を必要としていないため、「他の状態が SQLite だから」という理由
-だけで Event Store を RDBMS へ移さない。
+現在の `FileEventStore` API/formatはこの最終contractをまだ実装していない。#271はfallible atomic
+journal framing、commit evidence、fsync/quorum mode、index/receipt、corruption/compactionを実装する。
+#272はjournal ownershipをpure Sector engineの外へ出し、prepare -> durable -> live applyを実装する。
 
-### 2.2 Station inventory
+ここで「journal」はRDBMSを意味しない。append-oriented file journalのままでも要件を満たせる。
+DBへ移すかどうかは#271のmechanicsとは別判断である。
 
-各 `SimulationNode` は自ノードの SQLite ファイルをローカルに開く。SQLite が耐久状態を
-持ち、メモリには直近に触れた `(PlayerId, StationId)` だけを有界キャッシュする。
+### 2.2 Public Event history
 
-この構成が SQLite に適している理由:
+`DomainEvent`はappend-only public/business factであり、audit/projection用途を持つ。ADR-0017の
+hot/cold archival価値は維持するが、public Event tailをexact ECS recovery tailと呼ばない。
 
-- DB ファイルと writer が同一ホストにある
-- `SimulationNode` が単一接続を所有し、writer の競合がない
-- 読み取りはキャッシュ miss 時だけである
-- 書き込みは Build / Assemble / Disassemble / Transfer などの低頻度操作である
-- 外部 DB サーバーなしでテスト、ローカル実行、Raspberry Pi 配置を維持できる
+state-delta checkpoint coverageだけを理由に未配信/未archive public eventを捨ててはならない。
+physical retention/index mechanicsは#271が実装する。
 
-同じ SQLite ファイルをネットワークファイルシステムに置き、複数ノードから直接開いては
-ならない。SQLite のファイルロックと WAL は同一ホストでの利用を前提にする。
+### 2.3 Station inventory projection
 
-### 2.3 Market
+各Sectorは現在node-local SQLiteを使い、直近 `(PlayerId, StationId)` をbounded cacheする。この
+**製品選択は維持可能**だがauthority directionはADR-0049で変更された。
 
-`dawn-market::MarketDb` は注文帳、Currency、Bid の escrow を一つの SQLite DB に置く。
-発注とキャンセルは DB transaction 内で処理されるため、**Market DB 内部だけ**を見れば
-必要な原子性を得られている。
+Normative ordering:
 
-現在は一つの `MarketRuntime` が一つの接続を所有するので、SQLite の single-writer 特性は
-制約になっていない。Market が `dawn-simulation` 内の単一 runtime である間は、この単純さを
-維持する。現行の `orders` schemaでは `ship_id` を `NOT NULL` で保持する。9D-4以前の
-pre-release SQLiteファイルは移行対象にせず、削除してcurrent schemaで再作成する。
+```text
+prepare Sector/Station authoritative mutation
+    -> durable ADR-0049 transition
+    -> local live apply
+    -> idempotent Station SQLite/repository projection
+    -> publish / acknowledge
+```
 
-## 3. SQLite の限界と移行トリガー
+projectionは少なくとも:
 
-SQLite は同時に複数 reader を扱えるが、一つの DB ファイルに対する writer は同時に一つ
-だけである。したがってデータ量だけではなく、**writer の所有形態**を移行判断に使う。
+- Station-changing transitionのstable identityによるdedup
+- global contiguous `projection_applied_through`
+- Station item/read rows
 
-次のいずれかが現実の要件になったら、Market を PostgreSQL へ移す ADR を起票する。
+を表現できなければならない。非Station transitionもprojection workerのglobal watermark上では
+explicit no-opとして通過する。これによりpromotion pointとprojection freshnessを同じjournal
+coordinateで比較できる。
 
-- 複数の server / simulation プロセスが同じ Market へ書き込む
-- Market を独立したネットワークプロセスとして運用する
-- Market writer のフェイルオーバーまたは無停止運用が必要になる
-- writer 待ちが実測上のレイテンシまたは throughput ボトルネックになる
-- バックアップ、監視、PITR、RPO/RTO を外部 DB の運用機能で保証する必要がある
-- DB ファイルを別ホストや共有ファイルシステムへ置きたくなる
+#277は現在の`StationInventoryDb` catch-allをadmission/identity/Stationのnarrow repositoryへ分割する。
+そのschema/API/SQL transactionは#277の責任であり、SQLiteを独立Sector authorityへ戻してはならない。
 
-最後の条件では SQLite ファイル共有に進まず、client/server DB に移る。SQLite 公式も、
-ネットワーク越しの共有と多数の同時 writer には client/server DB を推奨している。
+SQLiteファイルをnetwork filesystemへ置き、複数nodeから直接openする設計は採らない。
+
+### 2.4 Transit persistence
+
+現行Transitはpublic EventStore scanとsnapshot receiptへretry/dedup authorityが分散している。
+これは#276が置換するlegacy implementationである。
+
+#276はdurable `TransitAttemptId`、outgoing attempt、incoming receipt、retry/terminal stateをdirect
+lookupできるSagaへ移行する。Sagaをgeneral recovery journalに直接含めるか、別repositoryと明示的に
+reconcileするかは#276が決める。ただしADR-0049のRPO/checkpoint/compaction/promotion contractを
+弱めてはならない。
+
+## 3. Market persistence
+
+`dawn-market::MarketDb` は注文帳、Currency、Bid escrowを一つのSQLite DBに置く。発注とキャンセルは
+DB transaction内で処理されるため、**Market DB内部**の原子性を持つ。
+
+現在は一つの`MarketRuntime`が一つのconnectionを所有し、SQLiteのsingle-writer特性は実用上の制約に
+なっていない。`dawn-market`はSector recovery journalの一部ではなく独立bounded contextである。
+
+現行`orders` schemaのpre-release互換性は要求しない。必要ならclean schemaへ破壊的に移行できる。
+
+## 4. SQLite の限界と移行トリガー
+
+SQLiteは複数readerを扱えるが、一つのDB fileに対するwriterは一つである。データ量だけではなく
+**writer ownershipとfailure model**を移行判断に使う。
+
+次のいずれかが現実要件になったらMarketをPostgreSQLへ移すADRを起票する。
+
+- 複数server/processが同じMarketへ書き込む
+- Marketを独立network processとして運用する
+- Market writer failover / HAが必要になる
+- writer待ちが実測latency/throughput bottleneckになる
+- backup/PITR/RPO/RTOをexternal DB運用機能で保証する必要がある
+- DB fileを別host/shared filesystemに置きたくなる
+
+最後のケースではSQLite file sharingへ進まずclient/server DBを評価する。
 
 - [SQLite: Appropriate Uses For SQLite](https://sqlite.org/whentouse.html)
 - [SQLite: Write-Ahead Logging](https://sqlite.org/wal.html)
 
-## 4. DB 製品より先に解くべき整合性問題
+## 5. Station と Sector journal の整合性 — ADR-0049で決定済み
 
-### 4.1 Station inventory と Event Log の二重書き込み
+以前この文書は次の2案を未決定としていた。
 
-現行の Station 操作は SQLite と `FileEventStore` という二つの耐久先に書き込む。
-ADR-0038 が記録している通り、SQLite 更新後かつ Event append 前にクラッシュすると、
-たとえば inventory にアイテムが増えた一方で、対応する Event が存在せず Ship が残る
-可能性がある。
+- Event/public logを先にdurableにしSQLiteをprojection化する
+- Sector eventとStation rowsを同一DB transactionへ統合する
 
-これは SQLite 固有の問題ではない。SQLite を PostgreSQL に置き換えても、別ファイルの
-Event Log との間に一つの transaction は作れないため、同じ不整合ウィンドウが残る。
+#284 / ADR-0049により、より正確には次が選択された。
 
-したがって DB 移行より先に、次のどちらを採るかを別 ADR で決める。
+> **Public Event-firstではなく、authoritative RecoveryDelta-first。**
+> Station mutationはSectorのlogical durable transitionに入り、SQLite/repositoryはそのauthoritative
+> transitionをidempotentにprojectする。
 
-#### 選択肢 A: Event-first の耐久 Projection
+これにより「SQLiteだけ更新済み」「public eventだけappend済み」をsuccess authorityとして許容しない。
+journal durable後のprojection failureはordinary rejectionではなくfail-stop/catch-up対象である。
 
-Event Log を真実の情報源とし、Station inventory DB を再適用可能な耐久 Projection とする。
+役割分担:
 
-1. Event を耐久 append する
-2. commit 済み Event を SQLite に適用する
-3. SQLite に `last_applied_log_index` または一意な `operation_id` を記録する
-4. 再起動時は未適用 Event だけを冪等に適用する
+- #271: journal atomicity/durability mechanics
+- #272: prepare -> durable -> live apply ordering
+- #277: projection/repository transaction/schema
+- #284: authority/RPO/promotion semantics
 
-この方式は通常の Event Workflow と整合し、全 inventory をメモリへロードせずに済む。
-一方、現在の `EventStore::append` のエラー表現、Projection 用の Event、compaction 後の
-catch-up 起点を設計し直す必要がある。
+DB製品をPostgreSQLへ変えてもこのauthority問題は自動解決しないため、製品migrationと混同しない。
 
-#### 選択肢 B: 同一 DB transaction に統合
+## 6. Market と Sector settlement
 
-Sector Event と Station inventory 更新を同じ SQLite DB の transaction に入れる。
-原子性は単純になるが、現在の2層 Event Log、コールドアーカイブ、snapshot/restore、
-replication の実装に与える影響が大きい。単に `FileEventStore` を SQLite に置き換える
-だけでは済まないため、選択肢 A より大きな変更として扱う。
+Market DB内部のorder/Currency/escrowは一transactionにできるが、MarketからSector inventoryへ送る
+`RemoveItemCommand` / `ReturnItemCommand` / `CreditItemCommand` は別authorityを跨ぐ。
+PostgreSQLへ移行してもこの跨ぎが自動的にatomicになるわけではない。
 
-現時点の推奨は **選択肢 A** である。ただし、現行 ADR を変更する実装には新しい ADR と
-人間の承認が必要であり、この文書だけでは挙動を変更しない。
+Market独立process化までに必要なdirection:
 
-### 4.2 Market と Sector settlement
+- Market transactionと同時にsettlement intentを保存するtransactional outbox
+- 各settlementへstable identityを付ける
+- Sector側でduplicate settlement適用を無害にする
+- 未配送intentを再送できるdelivery stateを持つ
 
-Market DB 内の注文・Currency・escrow は一つの transaction にできるが、Market から
-Sector inventory へ送る `RemoveItemCommand` / `ReturnItemCommand` / `CreditItemCommand` は
-別の所有領域である。PostgreSQL へ移行しても、この跨ぎは自動的に原子的にならない。
+これはSector recovery journalの一般outboxと概念的には似るが、Market bounded contextのtransaction
+ownershipを保つ。具体設計はそのwork item/ADRで行う。
 
-Market の独立プロセス化までに、次を導入する。
+## 7. PostgreSQL を将来候補とする理由
 
-- Market transaction と同時に settlement intent を保存する transactional outbox
-- 各 settlement に一意な ID を付ける
-- Sector 側で同じ settlement ID の再適用を無害にする
-- 配送済み状態を確認し、未配送 intent を再送できるようにする
+共有Marketの第一候補はPostgreSQLとする。
 
-分散 transaction を最初から導入せず、少なくとも一回配送 + 冪等適用で回復可能にする。
+- 複数client/processからの同時更新をserver側で調停できる
+- order/balance/escrow/outboxを一transactionに含められる
+- Serializable isolation + retryを使える
+- backup/monitoring/standby/replicationの運用経路がある
+- SQL/constraints/indexを維持でき、現在のMarket modelからの移行距離が短い
 
-## 5. PostgreSQL を将来候補とする理由
-
-共有 Market の第一候補は PostgreSQL とする。
-
-- 複数 client/process からの同時更新をサーバー側で調停できる
-- 注文、残高、escrow、outbox を一つの transaction に含められる
-- Serializable isolation と retry により、複雑な同時更新の不整合を防げる
-- backup、監視、standby、同期/非同期 replication の運用経路がある
-- SQL、制約、index を維持でき、現在の Market モデルからの移行距離が短い
-
-PostgreSQL も Sector Event Log との分散 transaction を提供するわけではない。
-採用理由は「すべてを原子的にするから」ではなく、**共有 Market の writer 調停と運用性を
-一つの専用サーバーへ移せるから**である。
+PostgreSQLもSector recovery journalとのdistributed transactionを自動提供するわけではない。
+採用理由は共有Market writerの調停/運用性である。
 
 - [PostgreSQL: Transactions](https://www.postgresql.org/docs/current/tutorial-transactions.html)
 - [PostgreSQL: Transaction Isolation](https://www.postgresql.org/docs/current/transaction-iso.html)
 - [PostgreSQL: High Availability, Load Balancing, and Replication](https://www.postgresql.org/docs/current/high-availability.html)
 
-## 6. その他の候補
+## 8. その他の候補
 
 | 候補 | 評価 | 現時点で採用しない理由 |
 |---|---|---|
-| RocksDB / redb / LMDB | Sector-local KV には利用可能 | Market の複合検索、制約、schema migration を自前化する。SQLiteより明確な利益がない |
-| rqlite / dqlite | SQLite 系の複製には利用可能 | Dawn 自身の Raft に加えて別の合意系が増える。Market-Sector の二重書き込みも解決しない |
-| CockroachDB / FoundationDB | 分散 transaction が必要なら再評価可能 | 現在の負荷に対して運用、障害解析、latency、設計コストが大きすぎる |
-| DuckDB | 分析・オフライン集計には利用可能 | OLTP の注文帳や inventory authority の用途ではない |
-| MySQL / MariaDB | 共有 Market を実装可能 | PostgreSQLよりDawn固有の明確な利点が現時点でない。運用標準が別途あれば再評価する |
+| RocksDB / redb / LMDB | Sector-local KVには利用可能 | recovery framing/Market複合検索/schema migrationを自前化し、明確な利益がまだない |
+| rqlite / dqlite | SQLite系replication | Dawn自身のconsensus/replicationに別合意系を追加する。#284 recovery問題の代替ではない |
+| CockroachDB / FoundationDB | distributed transactionが本当に必要なら再評価 | 現負荷に対して運用/障害解析/latency/設計コストが大きい |
+| DuckDB | 分析/オフライン集計 | OLTP authority用途ではない |
+| MySQL / MariaDB | 共有Marketを実装可能 | PostgreSQLよりDawn固有の明確な利点が現時点でない |
 
-## 7. Module seam の方針
+## 9. Module / repository seam の方針
 
-Station inventory は呼び出し側から SQLite 実装が隠れており、storage seam の内側で
-adapter を変更できる。これは維持する。
+Station inventoryは呼び出し側からSQLite実装を隠せるseamを維持する。ただし#277ではcatch-all
+`StationInventoryDb` forwarding façadeを残すのではなく、admission/identity/Station repositoryを明示的に
+分割し、repository ownershipをpure engine外へ移す。
 
-一方、現在の `MarketDb` の public interface は `rusqlite::Result` を返すため、SQLite の
-エラー型が呼び出し側へ露出している。PostgreSQL adapter を実際に追加する段階では、先に
-永続化失敗を表す Market 固有の error へ変換し、呼び出し側が DB 製品を知らない interface
-にする。
+現在の`MarketDb` public interfaceが`rusqlite::Result`を返す点は、2つ目のadapterを導入する時点で
+Market固有errorへ変換する。将来可能性だけを理由に今すぐ抽象traitを増やさない。
 
-ただし、将来の可能性だけを理由に今すぐ `MarketStore` trait を追加しない。二つ目の adapter
-を実装する時点で本物の seam として抽出し、SQLite と PostgreSQL の両 adapter を同じ
-interface-level test で検証する。
+## 10. 現在の実行方針
 
-## 8. 現在の実行方針
+移行期間は「current implementation」と「accepted target」を区別する。
 
-当面は次を維持する。
+Current implementation:
 
-- `FileEventStore` の2層 append-only log を継続する
-- Station inventory は node-local SQLite + bounded memory cache を継続する
-- Market は単一 `MarketRuntime` + SQLite を継続する
-- SQLite ファイルをネットワーク共有しない
-- PostgreSQL や分散 DB を先行導入しない
-- DB 製品の移行より、Event/Projection と Market/Sector settlement の回復可能性を優先する
+- `FileEventStore` public log + snapshot-era restore pathが存在する
+- Stationはnode-local SQLite + bounded cache
+- Marketはsingle `MarketRuntime` + SQLite
 
-再評価時はベンチマークだけでなく、writer 数、所有権、障害復旧、RPO/RTO、運用負荷を
-入力として新しい ADR を作成する。
+Accepted target / work package:
+
+- #284/ADR-0049: exact recovery = versioned checkpoint + authoritative state-delta tail
+- #271: fallible atomic durable journal
+- #272: pure engineからstorage ownershipを除去
+- #277: Station/admission/identity repositoryを明示化し、Stationはprojectionとしてcatch-up可能にする
+- #276: Transit EventStore scanをdurable Sagaへ置換
+- #280: selected recovery representationをpeer catch-up transportへ載せる
+
+SQLite fileのnetwork sharing、PostgreSQL/distributed DBの先行導入は行わない。再評価時はbenchmarkだけでなく
+writer数、authority、failure recovery、RPO/RTO、運用負荷を入力として新しいADRを作成する。
