@@ -1,15 +1,15 @@
 ---
 scope    : Complete specification of the simulation time model and the per-Tick processing order
 audience : AI Agent / Human Developer
-update   : When the Tick processing order changes / when performance targets change
-related  : event-catalog.md, ownership.md
+update   : When the Tick processing order, recovery commit boundary, or performance targets change
+related  : event-catalog.md, recovery-contract.md, ownership.md, ../adr/ADR-0049-sector-recovery-state-delta-wal.md
 ---
 
 # Tick Model
 
 ## 1. Tick Definition
 
-```
+```text
 Tick is a logical time unit, unrelated to wall-clock time.
 It is a monotonically increasing u64 newtype.
 ```
@@ -18,7 +18,7 @@ Tick counts simulation steps, not elapsed real time.
 
 ### Why wall-clock time is forbidden
 
-```
+```text
 Problem 1: clocks across Nodes always drift (NTP precision is tens of ms)
 Problem 2: NTP step correction can move time backward
 Problem 3: test and production environments can't reproduce identical results
@@ -29,7 +29,7 @@ Using wall-clock time for causal ordering produces non-deterministic results.
 
 ### Comparability range
 
-```
+```text
 Now:    comparable only within a single Node (all processing is single-process)
 Future: causal order across Sectors will use a VectorClock (not yet implemented)
 ```
@@ -44,217 +44,184 @@ The Tick loop runs as fast as possible; per-Tick time depends on hardware and en
 
 ### Server run (`--serve`): fixed interval
 
-```
+```text
 Current target  : 100 ms / Tick (10 Tick/s)
 Implementation   : async timer via tokio::time::interval (active in WsServer mode)
 Future target    : 16 ms / Tick (62.5 Tick/s) — revisit at Phase 8+
 ```
 
 Exceeding 100 ms is logged as a system anomaly. Logical Tick monotonicity and determinism
-are always preserved (no reordering, dropping, or skipping events).
-Overload is handled in this order: split → LoD → local TiDi → admission control (ADR-0018).
-Local TiDi is the last resort that only slows real-time pacing, never the logical Tick's determinism.
-See §8 for details.
+are always preserved. Overload is handled in this order: split → LoD → local TiDi →
+admission control (ADR-0018). Local TiDi only slows real-time pacing; it never changes the
+logical Tick's durable ordering or recovery semantics.
 
 ---
 
 ## 3. Per-Tick Processing Order (Normative)
 
-**This order must not change without an ADR.**
+**This order and the ADR-0049 durability boundary must not change without an ADR.**
 
-```
-Step 1: Increment the Tick counter
-         current_tick = current_tick + 1
+The simulation systems below keep their relative order, but ADR-0049 changes the mutation
+model: Steps 1–7 execute against a bounded prepared mutation/write set (overlay, reversible
+plan, copy-on-write state, or equivalent). They must not make the committed live world
+visible before the durable transition envelope commits. #272 implements this boundary.
 
-Step 2: Process the command queue
-         MoveCommand              -> updates ThrustComp.direction (is_braking = false)
-         StopCommand              -> ThrustComp.is_braking = true (reverse thrust to decelerate)
-         LockOnCommand            -> passed to LockSystem (processed in a later step)
-         ActivateModuleCommand    -> FittedSlot.is_active = true / apply_fitting()
-         DeactivateModuleCommand  -> FittedSlot.is_active = false / apply_fitting()
-         JumpCommand              -> after can_propose_jump() validation, proposes
-                                    TransitOp::Request (with gate_id) to Raft (ADR-0009)
-         ApproachCommand          -> attaches ApproachComp (semi-automatic approach to a
-                                    target Ship/Jump Gate; cleared by Move/Stop/other
-                                    flight modes; ADR-0015)
-         OrbitCommand             -> attaches OrbitComp (orbit target at a given radius,
-                                    default = weapon range; cleared by Move/Stop/other
-                                    flight modes; rejected while Warping; ADR-0031)
-         KeepAtRangeCommand       -> attaches KeepAtRangeComp (hold at least the given
-                                    distance from target, default = weapon range; cleared
-                                    by Move/Stop/other flight modes; rejected while
-                                    Warping; ADR-0031)
-         WarpCommand              -> after can_propose_warp() validation, attaches WarpComp
-                                    (intra-Sector short-range Fold = Warp, ADR-0022;
-                                    Move/Stop only clear it during align, ignored while warping)
-         Note: while a Ship is in Transit (TransitState::InTransit), Move/Stop/duplicate
-           Transit/Jump/Approach/Orbit/KeepAtRange/Warp are all rejected (ADR-0014 /
-           AI_DEVELOPMENT_GUIDE.md "Event Workflow"). Approach/Orbit/KeepAtRange are mutually exclusive —
-           a later command clears the previous flight mode (ADR-0031).
+```text
+Pre-step: Apply already-committed Raft inputs to the prepared transition input set
+          transit::apply_committed_raft_entries() is authoritative input, but any
+          resulting Sector mutation/public output must join the same recovery contract.
 
-Step 2.5: Approach System (before Movement, ADR-0015)
+Step 1: Prepare the next logical Tick
+         prepared_tick = current_tick + 1
+         The committed current_tick remains unchanged until Step 9 live apply.
+
+Step 2: Process the command queue in prepared state
+         MoveCommand              -> updates prepared ThrustComp.direction
+         StopCommand              -> prepared ThrustComp.is_braking = true
+         LockOnCommand            -> passed to LockSystem (processed later)
+         ActivateModuleCommand    -> prepared FittedSlot.is_active = true / apply_fitting()
+         DeactivateModuleCommand  -> prepared FittedSlot.is_active = false / apply_fitting()
+         JumpCommand              -> validates ownership/routing; reliable Raft proposal
+                                    is a post-commit outbox obligation when required
+         ApproachCommand          -> prepared ApproachComp
+         OrbitCommand             -> prepared OrbitComp
+         KeepAtRangeCommand       -> prepared KeepAtRangeComp
+         WarpCommand              -> prepared WarpComp
+         InTransit guards and mutual-exclusion rules are unchanged.
+
+Step 2.5: Approach System
          SimulationNode::process_approach()
-         -> Ships with ApproachComp only: steers thrust toward the target (Ship/Jump Gate);
-           once within arrival radius, sets is_braking = true to hold position.
-           If the target Ship disappears, removes ApproachComp and brakes.
-         -> No events emitted (Movement emits VelocityChanged in later Ticks)
+         -> updates prepared thrust/Approach state
+         -> may emit no DomainEvent; RecoveryDelta still records changed authority
 
-Step 2.55: Orbit System (after Approach, before Movement, ADR-0031)
+Step 2.55: Orbit System
          SimulationNode::process_orbit()
-         -> Ships with OrbitComp only: steers thrust toward a point on the orbit circle
-           (radius away from target, slightly ahead along the tangent; a fixed UP axis
-           keeps orbit direction consistent). If target disappears, removes OrbitComp and brakes.
-         -> No events emitted
+         -> updates prepared steering state
 
-Step 2.56: Keep at Range System (after Orbit, before Movement, ADR-0031)
+Step 2.56: Keep at Range System
          SimulationNode::process_keep_at_range()
-         -> Ships with KeepAtRangeComp only: if distance < range, thrusts directly away
-           from target; if distance >= range, sets is_braking = true. If target
-           disappears, removes KeepAtRangeComp and brakes.
-         -> No events emitted
+         -> updates prepared steering state
 
-Step 2.6: Warp System (after Keep at Range, before Movement, ADR-0022 / ADR-0025)
-         SimulationNode::process_warp(tick)
-         -> Ships with WarpComp only. Aligning accelerates toward the target direction;
-           once velocity along that direction reaches 75% of max_speed, transitions to
-           Warping (EVE-style; align time depends on agility; interruptible; Tackle window).
-           Warping flies straight at the target, decelerating proportionally to remaining
-           distance, stopping at:
-             Gate target: within activation_radius x 0.8 (ADR-0022)
-             Body target: within body.radius x 1.5 (ADR-0025 BODY_WARP_ARRIVAL_FACTOR)
-           If unreachable (e.g. target disappears), removes WarpComp and brakes.
-           Gate targets with auto_jump = true are pushed to pending_auto_jumps on arrival (ADR-0023).
-         -> Warping ships skip Step 3 Movement (warp speed is not clamped there).
-           Emits VelocityChanged (records warp movement; no new event type).
+Step 2.6: Warp System
+         SimulationNode::process_warp(prepared_tick)
+         -> updates prepared Warp/position/velocity/anchor state
+         -> may produce VelocityChanged public facts
+         -> if an auto_jump Warp completes, prepare an AutoJumpProposalIntent in
+            the durable outbox. `pending_auto_jumps` may be a post-commit in-memory
+            projection only; it is never the sole durable obligation.
 
-Step 3: Movement System (ECS batch processing; skips warping ships)
-         MovementSystem::run(&mut world, tick)
-         -> Emits: Vec<VelocityChanged> (only ships whose velocity changed)
+Step 3: Movement System
+         MovementSystem::run(prepared_world, prepared_tick)
+         -> prepared final positions/velocities
+         -> public VelocityChanged facts where defined
 
 Step 4: Capacitor System
-         CapacitorSystem::run(&mut world, tick)
-         -> Every Tick: recovers cap by cap_recharge_per_tick (clamped to cap_max)
-         -> At cycle start (cycle_remaining == 0): consumes cap_cost_per_cycle and
-           sets cycle_remaining = cycle_time_ticks
-         -> Otherwise: decrements cycle_remaining by 1
-         -> If cap is insufficient to start a cycle: force the module OFF
-         -> Emits: Vec<ModuleDeactivated> (forced OFF due to cap exhaustion)
-         Must run after Movement, before Lock.
+         CapacitorSystem::run(prepared_world, prepared_tick)
+         -> recharge/drain/cycle state becomes RecoveryDelta authority
+         -> public ModuleDeactivated facts when relevant
 
-Step 4.5: Tackle System (after Capacitor, before Lock, ADR-0024)
-         SimulationNode::process_tackle(tick)
-         -> Ships with an active Tackle module (ModuleKind::Tackle, cap ON) only.
-           If the locked target is within tackle_range, adds the tackler to TackledComp.
-           If out of range, lock lost, or tackler destroyed, removes the tackler and
-           emits TackleReleased.
-           Ships with TackledComp return false from can_propose_warp / can_propose_jump.
-         -> Emits: Vec<TackleApplied | TackleReleased>
+Step 4.5: Tackle System
+         SimulationNode::process_tackle(prepared_tick)
+         -> prepared TackledComp state + public facts
 
 Step 5: Lock System
-         LockSystem::run(&mut world, tick, &lock_commands)
-         -> Emits: Vec<TargetLocked | LockLost>
-         Must run after Movement (lock decisions need final positions).
+         LockSystem::run(prepared_world, prepared_tick, lock_commands)
+         -> prepared LockComp state + public TargetLocked/LockLost facts
+         Pending bot lock commands consumed here are authoritative queue input.
 
-Step 5.5: Range Gate System (ADR-0035)
-         SimulationNode::process_range_gate(tick)
-         -> For every Active, targeted slot (Weapon/Tackle, FittedSlot.target_ship_id
-           set), computes distance to target and force-deactivates the module if
-           beyond its effective range (Weapon: weapon_range + weapon_falloff;
-           Tackle: tackle_range). Mirrors capacitor.rs::deactivate_modules() —
-           clears is_active/cycle_remaining/target_ship_id and re-runs apply_fitting().
-         -> Emits: Vec<ModuleDeactivated>
-         Must run after Lock (Step 5, freshest lock state) and before Combat/Repair
-         (Step 6+, so those only ever see modules still in range).
+Step 5.5: Range Gate System
+         SimulationNode::process_range_gate(prepared_tick)
+         -> prepared fitting/cycle/target changes + public ModuleDeactivated facts
 
 Step 6: Combat System
-         CombatSystem::run(&mut world, tick, &cap.weapon_cycles_started)
-         -> Only fires for ships in weapon_cycles_started (ADR-0012)
-         -> EVE hit-chance formula: hit_chance = 0.5^((angular/(tracking*sig))^2 + (max(0,d-opt)/falloff)^2)
-         -> Emits: Vec<WeaponFired | DamageTaken | ShipDestroyed>
-         Must run after Lock (reads Locked state). Destroyed ships are removed from
-         ECS and ship_index by the caller.
+         CombatSystem::run(prepared_world, prepared_tick, cycles, anchors)
+         -> prepared hull/destruction/reward state
+         -> public WeaponFired / DamageTaken / ShipDestroyed facts
 
-Step 6.5: Repair System (ADR-0033, ADR-0036)
-         RepairSystem::run(&mut world, tick, &cap.repair_cycles_started)
-         -> Resolves ShieldBooster/ArmorRepairer (self, ADR-0033) and
-           RemoteShieldBooster/RemoteArmorRepairer (a Locked target, ADR-0036)
-           in repair_cycles_started -- each RepairCycle carries a
-           target_ship_id (self for Local Repair, the module's own target for
-           Remote Repair), resolved once by the Capacitor System; Repair
-           System itself does not distinguish self vs remote.
-         -> Shield-layer kinds restore current_shield, Armor-layer kinds
-           restore current_armor (each clamped to its layer max; Hull is not affected)
-         -> Emits: Vec<RepairApplied>
-         Must run after Combat (applies repair after this Tick's damage).
+Step 6.5: Repair System
+         RepairSystem::run(prepared_world, prepared_tick, repair_cycles)
+         -> prepared hull-layer state + public RepairApplied facts
 
-Step 7: Bot System (ships with IsBotComp only)
+Step 7: Bot System
          SimulationNode::process_bots()
-         -> Bots generate and execute commands through the same pipeline as human players
-         -> No events emitted directly (command effects appear via later systems in
-           subsequent Ticks)
-         Must run after Combat (destruction is resolved before Bot AI runs).
-         Bot commands go through the same apply_*_owned() pipeline as player commands.
+         -> bot decisions that affect a later Tick are represented in prepared
+            authoritative queue/component state. In particular the pending bot
+            lock-command queue is included in RecoveryDelta/checkpoints.
 
-Step 8: Append all events to the EventStore
-         event_store.append_batch(warp_events + move_events + cap_events + tackle_events + lock_events
-                                  + docked_lock_lost + range_gate_events + combat_events + repair_events)
+Step 8: Build one DurableTransitionBatch
+         RecoveryDelta = every authoritative final-value change from Steps 1–7
+         DomainEvents  = ordered public/business facts, possibly empty
+         Outbox        = reliable post-commit intents, including auto-jump Raft
+                         proposal when produced
 
-Step 9: Notify the Replication Actor of the delta
-         replication_tx.send(delta)
+Step 8.5: Atomically commit the complete logical transition envelope
+          The configured durability profile (ADR-0049) must be satisfied before
+          this transition can be acknowledged. A public EventStore append alone
+          is NOT the commit boundary.
 
-Step 10: Send TickElapsed to RaftActor (ADR-0014)
+Step 9: Apply the prepared mutation / RecoveryDelta to committed live state
+        and required local projections
+         -> current_tick becomes prepared_tick here
+         -> Station SQLite projection applies idempotently by transition identity
+         -> any post-append apply failure fences/fail-stops the Sector
+
+Step 10: Publish committed outputs
+         -> replication receives committed recovery ranges only
+         -> DomainEvent delivery starts from durable output records/cursors
+         -> reliable outbox workers may attempt effects
+         -> consumer cursor advances only after downstream acknowledgement
+
+Step 11: Runtime/consensus pacing after local commit
          raft.tick()
-         -> advances election-timeout / heartbeat timers by 1 Tick (INV-005 / FBD-003)
-         Actor-backed simulation, clustered serve, and the production Sector Node
-         all call `transit::run_runtime_tick`. It is the sole authoritative frame
-         pipeline: Step 7.5 apply -> node.tick -> collect the Event tail -> Step 9
-         replication hook -> raft.tick -> drain and propose auto-jumps -> drain
-         completed-warp outputs. Runtime adapters only perform command/session,
-         transport, ownership-handoff, Redirect, and AoI delivery work around that
-         common output contract.
-
-Step 7.5: Apply committed Raft entries (ADR-0014 §7)
-         transit::apply_committed_raft_entries()
-         Shared via `transit::run_runtime_tick()` for actor-backed simulation,
-         clustered serve, and the production `dawn-sector-node` runtime.
-         -> Applies committed TransitOp to ECS:
-           TransitOp::Request -> owning node: marks InTransit, appends
-             SectorTransitRequested, exports Ship state, proposes TransitOp::Commit to Raft
-           TransitOp::Commit  -> destination node: imports at entry_pos, appends
-             SectorTransitCompleted; if gate_id is Some, also appends JumpGateUsed; if
-             from/to StarSystemId differ, also appends StarSystemChanged
-             (ADR-0009 / SimulationNode::append_jump_events)
-         Runs before node.tick (Step 1). In the actor path, emitted events propagate to
-         the dawn-replication transport in the same Tick's flush.
+         -> reliable Raft proposals are executed/retried from outbox intents
+         -> completed-warp presentation outputs may be drained when classified
+            as lossy presentation-only state
+         -> authoritative operation acknowledgement is emitted only after its
+            durability profile and required local projections are satisfied
 ```
 
-### Why Step 9 must never run before Step 8
+### Commit means durable transition envelope, not public-event append
 
-Propagating to other nodes before the EventStore Append completes would let a receiver
-reference an event that doesn't exist yet. **Append completion = Commit**; pre-Commit data
-is treated as not existing.
+The old rule **"EventStore append completion = Commit" is superseded by ADR-0049**.
+A Tick may mutate authoritative position, capacitor, lock/module/queue state without emitting
+any `DomainEvent`; therefore a public-event append cannot represent the whole commit.
+
+The commit boundary is the durable visibility of the complete logical transition envelope
+(`RecoveryDelta` + public events + reliable outbox intents) under the selected durability
+profile. Replication, publication, reliable effects, and acknowledgement cannot precede it.
+
+### Auto-jump ordering
+
+A Warp arrival with `auto_jump = true` commits the Warp state and an auto-jump outbox intent
+in the same transition. The subsequent `raft.propose` may happen after local state commit.
+If the process crashes before or ambiguously during that proposal, recovery retries the intent
+using its stable transition/idempotency identity. Silent loss of the old in-memory
+`pending_auto_jumps` queue is not permitted.
 
 ---
 
 ## 4. Tick-Event Correspondence Rules
 
-### `tick` field is mandatory
+### `tick` field is mandatory on public DomainEvents
 
 Every domain event includes a `tick: Tick` field (INV-005).
 
 ```rust
-// Correct: includes tick
 VelocityChanged { ship_id, velocity, tick: Tick(42) }
-
-// Forbidden: omits tick (INV-005 violation)
-VelocityChanged { ship_id, velocity }  // design should make this a compile error
 ```
 
-Without `tick`, an Event's causal order is unknown and replay ordering can't be guaranteed.
+A missing event `tick` loses the public fact's causal position. However, exact recovery ordering
+uses the committed recovery transition position; a `DomainEvent` is not the exact-state reducer.
+
+### Eventless Tick
+
+A Tick that emits zero public events still produces a `RecoveryDelta` transition containing its
+Tick advancement and every authoritative final-value change. `events_emitted == 0` never means
+"nothing durable happened".
 
 ### Multiple moves of the same Ship within one Tick
 
-```
+```text
 Current design: a Ship moves at most once per Tick (MovementSystem applies
                 Velocity exactly once).
 
@@ -264,22 +231,19 @@ Future: when the command queue supports it, multiple Commands targeting the
 
 ### Client motion-track ordering (ADR-0043 / ADR-0045)
 
-The client passes every `VelocityChanged.tick` to
-`dawn-client-core::ShipMotion` as a `MotionCommand`. Because `VelocityChanged`
-contains velocity but no position, applying it updates the track's
-authority-tick watermark and future integration velocity without rewinding the
-already-rendered position or presentation tick. The owner then reconciles the
-authoritative position through `MotionCorrection` at the same logical tick. A
-velocity event older than the watermark is ignored.
+The client passes every `VelocityChanged.tick` to `dawn-client-core::ShipMotion` as a
+`MotionCommand`. Because `VelocityChanged` contains velocity but no position, applying it
+updates the track's authority-tick watermark and future integration velocity without rewinding
+the already-rendered position or presentation tick. The owner reconciles authoritative position
+through `MotionCorrection` at the same logical tick. A velocity event older than the watermark
+is ignored.
 
-Docked tracks reject velocity updates and remain at zero velocity until an
-authoritative undock transition. Normal-frame position application,
-`PositionSnap`, dock/undock resets, and floating-origin rebase all dispatch
-through the same `ShipMotion` surface and use the `ShipController` adapter's
-single Node3D position writer. `MotionFrame` keeps authoritative and predicted
-server positions separate; only its origin-relative render position is narrowed
-to Godot `Vector3`. `main.gd` and `WorldPresentation` do not write ship
-positions directly.
+Docked tracks reject velocity updates and remain at zero velocity until an authoritative undock
+transition. Normal-frame position application, `PositionSnap`, dock/undock resets, and
+floating-origin rebase all dispatch through the same `ShipMotion` surface and use the
+`ShipController` adapter's single Node3D position writer. `MotionFrame` keeps authoritative and
+predicted server positions separate; only its origin-relative render position is narrowed to
+Godot `Vector3`. `main.gd` and `WorldPresentation` do not write ship positions directly.
 
 ---
 
@@ -287,7 +251,7 @@ positions directly.
 
 ### Tick never goes backward
 
-```
+```text
 Guarantee: tick.next() > tick always holds
 Implementation: u64 overflow occurs after u64::MAX (~1.8 x 10^19) Ticks —
                 not reachable within any realistic operating lifetime
@@ -295,8 +259,8 @@ Implementation: u64 overflow occurs after u64::MAX (~1.8 x 10^19) Ticks —
 
 ### Tick across node restarts
 
-`StateSnapshot` retains `tick`, and `SimulationNode::restore_from` restores
-it. Tick continues across restarts.
+The versioned checkpoint retains `tick`, and recovery applies every committed RecoveryDelta
+after the checkpoint position. Tick continues from the exact last committed transition.
 
 ---
 
@@ -310,12 +274,13 @@ it. Tick continues across restarts.
 
 ### Measurement boundaries
 
-```
-Start: immediately before incrementing the Tick counter
-End:   immediately after EventStore::append_batch() completes
+The target authoritative Tick latency is measured from immediately before preparation through
+successful local apply after the durable transition commit. External replication/publication,
+downstream delivery acknowledgement, and unrelated runtime effects are excluded.
 
-Step 9 (Replication) is excluded (it's async)
-```
+Until #271/#272 implement the ADR-0049 transition envelope, the existing benchmark may still
+measure through `EventStore::append_batch()` as an implementation proxy; that legacy boundary
+must not be documented as the semantic commit point.
 
 ### Running the benchmark
 
@@ -327,12 +292,15 @@ cargo run -p dawn-simulation --bin simulate --release
 
 ## 7. Tick Loop Implementation Ownership
 
-`run_phase4_server()` (single node), `run_cluster_server()` (3-node Raft),
-and the production `dawn-sector-node` process drive their loops via a
-fixed-interval `tokio::time::interval` (100 ms/tick). Every server path enters
-`transit::run_runtime_tick()` for the authoritative frame order;
-`SimulationNode::tick_with_lock_commands()` remains synchronous and each
-process adapter controls only pacing and transport/session-specific work.
+`run_phase4_server()` (single node), `run_cluster_server()` (3-node Raft), and the production
+`dawn-sector-node` process drive their loops via a fixed-interval `tokio::time::interval`
+(100 ms/tick). Every server path enters `transit::run_runtime_tick()` for the authoritative
+frame order.
+
+During the #272 migration, `SimulationNode::tick_with_lock_commands()` still mutates live state
+before public-event append; that is **current implementation debt**, not the normative commit
+contract. #272 must replace it with prepare -> durable envelope -> live apply while preserving
+the system ordering specified above.
 
 ---
 
@@ -366,7 +334,7 @@ Each Sector has an entity-count ceiling, `population_cap`. Since ADR-0018, admis
 control is the final backstop rather than the primary tool — LoD and local TiDi are
 tried first for single dense battles.
 
-```
+```text
 population_cap : max Ships a Sector will admit
 warning threshold : population_cap x 0.8 (80%) triggers an alert
 reject threshold   : population_cap x 0.95 (95%) rejects SpawnCommand
@@ -374,7 +342,7 @@ reject threshold   : population_cap x 0.95 (95%) rejects SpawnCommand
 
 **SpawnCommand admission control:**
 
-```
+```text
 SpawnCommand received
     |
     v
@@ -386,15 +354,16 @@ check Sector's current population
                                           (includes nearby-Sector routing info)
 ```
 
-SpawnRejected is recorded as a domain event in the EventLog, preserving a history of
-why a Sector became full.
+A rejected command is not a committed `DomainEvent` under INV-006 unless the project explicitly
+models a separate durable audit fact. Rejection telemetry may be logged without treating the
+rejected request as an authoritative state transition.
 
 ### Dynamic Sector Fission
 
 Fission preparation begins once population_cap exceeds 80% — starting before the
 threshold is actually exceeded matters.
 
-```
+```text
 [Sector A: 4,000/5,000 ships]  <- 80% alert
          |
          | Sector Fission begins
@@ -414,21 +383,17 @@ section aggregates related discussion scattered across ADR-0018 / ADR-0020 /
 eve-reference §11 / ADR-0022.
 
 **Principles**:
-- Boundary crossings always go through **SectorTransit (Raft-based ownership transfer)** (INV-003). No grey areas or dual ownership at boundaries (ADR-0017 §5).
-- Cross-boundary causality is synchronized via **logical Tick**; real-time pacing differences are absorbed by the presentation layer (INV-005 / ADR-0018, "cross-boundary causality under differential TiDi").
-- Fission is only for **spatially separable load** (multiple fronts, broad economy) — **a single dense battle is never split** (everyone ends up in the same neighborhood, so splitting doesn't help; ADR-0020 background / eve-reference §11.1). So Fission boundaries are placed at **low-interaction locations**.
+- Boundary crossings always go through **SectorTransit (Raft-based ownership transfer)** (INV-003). No grey areas or dual ownership at boundaries.
+- Cross-boundary causality is synchronized via **logical Tick**; real-time pacing differences are absorbed by the presentation layer (INV-005 / ADR-0018).
+- Fission is only for **spatially separable load** — a single dense battle is never split; it uses local TiDi rather than creating a high-interaction boundary.
 
 **Per-operation handling and difficulty**:
 
 | Operation | Handling | Status |
 |---|---|---|
-| Discrete crossing (a ship crosses the boundary) | SectorTransit hands off `entry_pos` + `velocity` (ADR-0014) | Implemented |
-| In-flight Warp crossing the boundary | Each Sector computes its own segment locally via **parametric warp** (clipping entry->endpoint at the boundary). Transit carries "warp endpoint + committed"; the receiving side skips Align and continues. Position is recorded each segment via VelocityChanged (preserves INV-MOVE) | Not implemented — to be designed at Fission time ([ADR-0022](../adr/ADR-0022-intra-sector-warp.md)'s parametric-warp revision is the basis) |
-| Cross-boundary combat (interaction spans the boundary) | The hard case: requires per-Tick state sync between both Sectors every Tick. Fission is for separable load only, so this is **assumed not to occur at boundaries**. If a single dense battle exceeds node capacity, it's diverted to **local TiDi** rather than split | Fundamentally hard -> avoided by not splitting (local TiDi) (ADR-0018 / eve-reference §11.1, §11.3) |
-
-In short: **Fission boundaries sit at separable/low-interaction locations, so only crossings and warps need to cross them. Crossings are solved; warp will be designed at Fission time on top of parametric warp; dense cross-boundary combat is avoided entirely by not splitting (local TiDi).**
-
-Related: [ADR-0018](../adr/ADR-0018-tidi-graceful-degradation.md) (cross-boundary causality), [ADR-0020](../adr/ADR-0020-simulation-lod.md) (Fission doesn't help dense battles), [ADR-0022](../adr/ADR-0022-intra-sector-warp.md) (parametric warp), [roadmap.md](../process/roadmap.md) §10 (8B-2 Fission / 8B-8 cross-boundary TiDi), [eve-reference.md](../reference/eve-reference.md) §11.1/§11.3.
+| Discrete crossing | SectorTransit hands off authoritative state through consensus (ADR-0014); recovery/outbox rules follow ADR-0049 | Implemented/migrating |
+| In-flight Warp crossing | Each Sector computes its own segment locally via parametric warp; transfer representation must be integrated with RecoveryDelta when Fission is implemented | Not implemented |
+| Cross-boundary combat | Requires high-frequency cross-Sector coordination and is intentionally avoided by boundary placement; dense battle uses local TiDi | Fundamentally hard -> avoided |
 
 ### Local Time Dilation (safety net for single dense battles)
 
@@ -436,44 +401,39 @@ If an unsplittable hotspot exceeds node capacity, TiDi activates for that Sector
 subject to INV-TiDi's five conditions (local / observable / non-destructive /
 auto-recovering / after split & LoD).
 
-```
+```text
 dilation decision (real-time pacing only; logical Tick processing is unchanged):
   if sector.tick_cost > sector.budget && !sector.splittable() {
       sector.dilation = (sector.budget / sector.tick_cost).max(MIN_DILATION);
-      metrics.tidi_active.set(sector.id, sector.dilation);   // observability
+      metrics.tidi_active.set(sector.id, sector.dilation);
   } else if sector.dilation < 1.0 && sector.tick_cost <= sector.budget {
-      sector.dilation = 1.0;                                  // auto-recovery
+      sector.dilation = 1.0;
   }
 ```
 
-TiDi never breaks logical Tick determinism (orthogonal to INV-005) — it must never
-reorder, drop, or change the outcome of events; it is pure real-time pacing.
+TiDi never changes logical transition order, durable commit semantics, or authoritative outcomes;
+it is pure real-time pacing.
 
 ### Tick SLA monitoring and response hierarchy
 
-When Tick processing time exceeds target, it is logged (never silently slowed) and
-handled via the hierarchy:
-
-```
+```text
 Tick time <= 12ms : normal
-Tick time <= 32ms : warning (warn! log)
-Tick time > 32ms  : logged (error! log + metrics), then in order:
-                    1. Splittable?           -> dynamic split (zero degradation)
-                    2. Single dense battle?  -> LoD -> local TiDi (activated observably)
-                    3. Still beyond tolerance -> admission control (final backstop)
+Tick time <= 32ms : warning
+Tick time > 32ms  : logged + metrics, then in order:
+                    1. Splittable?            -> dynamic split
+                    2. Single dense battle?   -> LoD -> local TiDi
+                    3. Still beyond tolerance -> admission control
 ```
 
 Silently slowing the Tick is forbidden — dilation must always be observable.
-This is what distinguishes dawn's local/observable/auto-recovering TiDi from EVE's
-global TiDi.
 
 ### Design invariant (INV-TiDi revision, ADR-0018)
 
-```
+```text
 INV-TiDi: logical Tick rate is normally constant.
           Time Dilation is permitted only when an unsplittable single hotspot
           exceeds capacity, and only as a bounded last resort satisfying
           (a) local (b) observable (c) non-destructive (d) auto-recovering
           (e) after split/LoD.
-          (Canonical definition: AI_DEVELOPMENT_GUIDE.md "Architecture Invariants", INV-TiDi)
+          Durable transition ordering is unchanged by real-time dilation.
 ```
